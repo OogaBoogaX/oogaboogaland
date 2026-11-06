@@ -73,12 +73,16 @@
       validate(result); return result;
     };
     const axes = ["x", "y", "z"];
-    const apply = (snapshot, item = null) => {
+    const validateRig = (snapshot, item = null) => {
       validate(snapshot);
       const list = current(item);
       if (snapshot.world !== world || snapshot.held !== item || snapshot.nodes.length !== list.length
         || snapshot.profile.some((v, i) => v !== profile[i])
         || snapshot.nodes.some((r, i) => r[0] !== (i === 0 ? -1 : list.indexOf(list[i].parent)))) bad();
+      return list;
+    };
+    const apply = (snapshot, item = null) => {
+      const list = validateRig(snapshot, item);
       // All input and rig compatibility checks precede mutation. The adapter
       // only selects existing geometry; it must not allocate/reparent world items.
       setAppearance(snapshot.appearance);
@@ -95,7 +99,7 @@
       }
       return true;
     };
-    return { capture, apply };
+    return { capture, apply, validate: validateRig };
   };
   BL.clankerPose = { VERSION, MAX_NODES, MAX_BYTES, WIDTH, validate, immutable, create };
 })();

@@ -10,7 +10,8 @@
 // its palette inside the Matrix.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { makeVox, voxelGeometry: buildVoxel, cached, characterGeometry } = BL.models;
   // Mark both palettes and clipped clothing before any visit chooses a form.
   const voxelGeometry = (voxels, options) => characterGeometry(buildVoxel(voxels, options));
@@ -33,7 +34,7 @@
   // Per gait: chest lean, limb swing, then a roaming and a driven pair of ground
   // speed (m/s) and stride per cycle (m). Driven it keeps up with an Ooga
   // (pilot.WALK.speed) and the gallop outruns one; roaming it ambles.
-  const WALK_SPEED = BL.pilot.WALK.speed;
+  const WALK_SPEED = (BL.walkRules || BL.pilot.WALK).speed;
   const GAITS = {
     idle: { pitch: QUAD, speed: 0, stride: 1, drive: 0, driveStride: 1, legs: 0, arms: 0 },
     knuckle: { pitch: QUAD, speed: 0.9, stride: 0.9, drive: WALK_SPEED, driveStride: 2.4, legs: 0.45, arms: 0.4 },
@@ -498,7 +499,7 @@
   // cliff edges stop the Agent instead of lifting it or dropping it off the island.
   // BODY is what it needs overhead, so it is barred by the same rock and props an Ooga is.
   const STEP_UP = 0.6, STEP_DOWN = 1.2, BODY = 13 * U;
-  const GRAVITY = BL.pilot.WALK.gravity, JUMP_SPEED = BL.crew.JUMP_SPEED * Math.sqrt(1.5), REVEAL_TIME = 9;
+  const GRAVITY = (BL.walkRules || BL.pilot.WALK).gravity, JUMP_SPEED = BL.crew.JUMP_SPEED * Math.sqrt(1.5), REVEAL_TIME = 9;
   // A click this soon after taking the Agent was the third of a triple: a look, not a drive.
   const TRIPLE_MS = 500;
   // groundAt(x, z) is the walking surface; walkable(fromX, fromZ, toX, toZ, y, height),
@@ -1730,7 +1731,7 @@
           state.lab = !!values[1]; state.coatSplit = !!values[2]; state.suit = !!values[3]; state.suitSplit = !!values[4]; state.seatLegs = !!values[5];
           setForm(values[0], true);
         } });
-      return { capture: projection.capture, apply(snapshot, item = null) {
+      return { capture: projection.capture, validate: projection.validate, apply(snapshot, item = null) {
         projection.apply(snapshot, item);
         for (const node of previewNodes) updateLocal(node);
         refreshGeometry(); measureBody(false); return true;

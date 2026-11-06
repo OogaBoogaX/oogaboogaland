@@ -7,7 +7,7 @@
 // the body stays frozen at its last accepted position with zero momentum. Strictly before the deadline the account
 // reclaims it; at or after, the
 // record becomes a `depart` intent keyed by its generation that carries the body as it was. The host applies the intent
-// (`markApplied`, in the same atomic commit as its simulation handback) and it then stays as a tombstone until its visual
+// (`markApplied`, without changing any NPC track) and it then stays as a tombstone until its visual
 // delivery is acknowledged. Sessions and departures share MAX_SESSIONS slots. The parent checkpoints after a mutation and
 // before publishing its effects.
 export const CHECKPOINT_VERSION = 5, MAX_SESSIONS = 64, GRACE_MS = 60000, HANDOFF_MS = 1000;
@@ -410,7 +410,7 @@ export class SessionRegistry {
 
   pending() { return this.#pending.map((p) => structuredClone(p)); }
 
-  // The host has applied this departure to its world (in the same atomic commit as its handback); idempotent.
+  // The host durably recorded this player departure; NPC tracks are untouched.
   markApplied(id) {
     if (!this.#ready) throw new Error("host-sessions: recover() first");
     const p = this.#pending.find((q) => q.id === id);
@@ -508,41 +508,34 @@ export class SessionRegistry {
 
   #leave(r, reason, t) {
     if (r.state === "starting" && t < Math.min(r.stepAt + HANDOFF_MS, r.deadline)) return refuse("handoff");
-    const handback = this.#handback(r.bodyId), effects = [];
+    const effects = [];
     this.#clock = t;
-    this.#depart(r, reason, t, handback, effects);
+    this.#depart(r, reason, t, effects);
     return { ok: true, effects };
   }
 
-  #depart(r, reason, at, handback, effects) {
+  #depart(r, reason, at, effects) {
     this.#vacate(r, effects);
     this.#sessions.delete(r.accountId);
     const intent = { id: `depart:${r.generation}`, type: "depart", glyph: "green", accountId: r.accountId, bodyId: r.bodyId,
-      generation: r.generation, reason, at, handback, zone: r.zone,
+      // Reserved legacy field for stored/wire compatibility, never an NPC
+      // control transfer. The independently simulated counterpart stays put.
+      generation: r.generation, reason, at, handback: null, zone: r.zone,
       body: { kind: r.kind, motion: { ...r.motion }, equipment: copyEquipment(r.equipment) }, applied: false };
     this.#pending.push(intent);
     effects.push(structuredClone(intent));
   }
 
-  #handback(bodyId) {
-    const find = this.adapter.npcFor;
-    const npc = typeof find === "function" ? find(bodyId) : null;
-    if (npc === null || npc === undefined) return null;
-    if (!isId(npc)) throw new TypeError("host-sessions: npcFor returned an invalid NPC id");
-    return { npc };
-  }
-
-  // Resolve every handback before mutating. A failed world lookup leaves the
-  // registry unchanged. Work is bounded by session capacity, not elapsed time.
+  // Expiry retires only the player body. NPC tracks never consult this sweep.
   #sweep(t, effects) {
     const due = [], expiredLeases = [];
     for (const r of this.#sessions.values()) {
       if (r.state === "live") continue;
-      if (t >= r.deadline) due.push([r, this.#handback(r.bodyId)]);
+      if (t >= r.deadline) due.push(r);
       else if (r.state === "starting" && t >= Math.min(r.stepAt + HANDOFF_MS, r.deadline)) expiredLeases.push(r);
     }
     for (const r of expiredLeases) r.state = "grace";
-    for (const [r, handback] of due) this.#depart(r, "expired", r.deadline, handback, effects);
+    for (const r of due) this.#depart(r, "expired", r.deadline, effects);
   }
 
   #token() {

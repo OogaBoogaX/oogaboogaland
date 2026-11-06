@@ -10,7 +10,7 @@ const fail = message => { throw Error(message); };
 
 export async function openHostWorldRunner({ host, room, ticket, format, clock = Date.now, waitUntil }) {
   if (typeof waitUntil !== 'function' || typeof clock !== 'function'
-    || format !== undefined && format !== 'mixed-1') fail('explicit world runner adapters required');
+    || format !== undefined && !['mixed-1', 'mixed-2', 'mixed-3'].includes(format)) fail('explicit world runner adapters required');
   const owner = { ...ticket }, now = clock();
   const snapshot = await host.worldRunState(owner);
   if (!snapshot || snapshot.publicationProtocol !== 1 || snapshot.status !== 'running' || snapshot.canPublish !== true
@@ -19,7 +19,7 @@ export async function openHostWorldRunner({ host, room, ticket, format, clock = 
     || snapshot.runUntil - now > HOST.maxRunMs) fail('acquired finite world required');
   const status = await room.npcAuthorityStatus(), authority = status?.authority;
   if (!authority || authority.mode !== 'server' || authority.world !== owner.world
-    || authority.epoch !== owner.fence || authority.v !== (format ? 2 : 1) || authority.format !== format)
+    || authority.epoch !== owner.fence || authority.v !== (format === 'mixed-3' ? 4 : format === 'mixed-2' ? 3 : format ? 2 : 1) || authority.format !== format)
     fail('world runner Room mapping mismatch');
   const roomTicket = { ...authority, owner: owner.owner };
   const checked = await room.npcAuthorityStatus(roomTicket);

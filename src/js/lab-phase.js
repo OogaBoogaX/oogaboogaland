@@ -52,12 +52,7 @@
     };
     const pause = (on) => { paused = !!on; body.pause(paused); };
     const update = (dt, time) => { if (!paused) ripples.update(dt, time); };
-    const inside = (x, y, z) => {
-      const dx = x - mouth.x, dz = z - mouth.z, across = dx * cr - dz * sr, along = dx * sr + dz * cr;
-      const room = mouth.room, half = along < -room.from ? room.w / 2 : 2.5;
-      return y >= mouth.floorY - 0.12 && y < mouth.floorY + room.h - 0.1
-        && along <= plane && along >= -room.to && Math.abs(across) <= half;
-    };
+    const inside = BL.hubWorkInteriors.inside(mouth, plane);
     return { node, ripples, body, clipTarget, absorb, update, inside, pause,
       get paused() { return paused; },
       liveGeometry(set) { set.add(geometry); },

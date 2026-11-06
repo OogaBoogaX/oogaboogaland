@@ -2,7 +2,8 @@
 // this bounded planner owns no player input, damage, animation or network state.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const HITS = 42, WINDOW = 60, DURATION = 60, SERIALS = 128, DEBUG_RANGE = 35;
   const THROW_CHARGE_TIME = 1, WARP_HOLD_TIME = 0.4, EDGE_NEAR = 2.4;
   const GRIP_WAIT = 0.75, BACKOFF_TIME = 1.25, BACKOFF_DISTANCE = 2.5;
@@ -41,7 +42,7 @@
     const approach = { x: 0, y: 0, z: 0, heading: 0 };
     let owner = null, size = 0, cursor = -1, neighbor = 0, budget = 0, next = 0, now = 0;
     let originX = 0, originZ = 0, started = 0;
-    const eligible = (e, debug = e.rage.debug) => signedOut() && e.active && !e.controlled && e.health.value > 0
+    const eligible = (e, debug = e.rage.debug) => !e.nonInteractive && signedOut() && e.active && !e.controlled && e.health.value > 0
       && (debug ? ctx.debugRage === true && (e.mode === "working" || e.mode === "chilling")
         && (crew.stateOf(e.owner) === "working" || crew.stateOf(e.owner) === "chilling")
         : e.mode === "chilling" && crew.stateOf(e.owner) === "chilling");

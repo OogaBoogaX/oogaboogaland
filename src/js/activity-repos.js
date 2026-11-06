@@ -1,7 +1,8 @@
 // Repository identities shared by the activity board, contributor routing and snapshot bake.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const FOUNDRY = "oogaboogax/lightningfoundry";
   const foundryName = /^lightning[-_]?(?:factory|foundry)$/;
   const nameOf = (name) => {

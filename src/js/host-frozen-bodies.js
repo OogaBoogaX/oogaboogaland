@@ -124,14 +124,21 @@
               if (entry) drop(entry);
               throw Error("invalid frozen body replica");
             }
-            row = { view: v, key, entry }; rows.set(v.bodyId, row);
+            row = { view: v, key, entry, departing: !!item.departure }; rows.set(v.bodyId, row);
             if (!bindings) bindings = BL.hostActorBindings.create({ root, capacity: MAX });
             const occupied = arm => ["club", "gun", "snack", "chuk"].some(k => {
               const node = entry.cave.parts[k]; return node?.visible && node.parent === arm;
             }) || entry.cave.labItem?.parent === arm;
             const freeArm = ["armL", "armR"].find(k => entry.cave.parts[k] && !occupied(entry.cave.parts[k])) || null;
             bindings.bind({ bodyId: v.bodyId, kind: v.kind, generation: v.generation,
-              actor: entry.cave, npc: npcFor(v) || null, freeArm });
+              actor: entry.cave, npc: item.departure ? null : npcFor(v) || null, freeArm });
+          } else if (item.departure && !row.departing) {
+            // The player beam can linger visually, but expiry makes its NPC
+            // solid immediately at the independently simulated NPC position.
+            bindings.release(v.bodyId, v.generation);
+            bindings.bind({ bodyId: v.bodyId, kind: v.kind, generation: v.generation,
+              actor: row.entry.cave, npc: null, freeArm: null });
+            row.departing = true;
           }
           row.view = v; row.visible = row.entry.cave.root.visible;
           if (item.departure) display.departures.push(item.departure);

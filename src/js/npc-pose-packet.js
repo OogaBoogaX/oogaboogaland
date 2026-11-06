@@ -52,7 +52,8 @@
     }
     if (used !== length) bad(); return out;
   };
-  const pack = (world, ooga, clankers) => {
+  const pack = (world, ooga, clankers, lab = null, layout = null) => {
+    if (layout !== null && lab === null) bad();
     if (!id(world) || !BL.npcAuthority.poses(ooga) || !Array.isArray(clankers) || clankers.length > ACTORS
       || Object.keys(clankers).length !== clankers.length || new Uint32Array(ooga, 0, 4)[2] + clankers.length > ACTORS) bad();
     const raw = new Uint8Array(EXPANDED), view = new DataView(raw.buffer); let at = 0;
@@ -80,15 +81,25 @@
       string(p.held || ""); byte(p.nodes.length);
       for (const row of p.nodes) for (const value of row) number(value);
     }
+    if (lab !== null) {
+      BL.npcLabPose.validate(lab);
+      const bytes = new TextEncoder().encode(JSON.stringify(lab));
+      word(bytes.length); raw.set(bytes, reserve(bytes.length));
+    }
+    if (layout !== null) {
+      BL.npcWorldLayout.validate(layout);
+      const bytes = new TextEncoder().encode(JSON.stringify(layout));
+      word(bytes.length); raw.set(bytes, reserve(bytes.length));
+    }
     const content = raw.subarray(0, at), compressed = compress(content), result = new ArrayBuffer(HEADER + compressed.length), header = new DataView(result);
-    header.setUint32(0, MAGIC, true); header.setUint32(4, VERSION, true); header.setUint32(8, at, true); header.setUint32(12, hash(content), true);
+    header.setUint32(0, MAGIC, true); header.setUint32(4, layout !== null ? 3 : lab === null ? VERSION : 2, true); header.setUint32(8, at, true); header.setUint32(12, hash(content), true);
     new Uint8Array(result, HEADER).set(compressed); return result;
   };
   const unpack = (buffer, immutable = false) => {
     if (typeof immutable !== "boolean") bad();
     if (!(buffer instanceof ArrayBuffer) || buffer.byteLength <= HEADER || buffer.byteLength > MAX) bad();
     const header = new DataView(buffer);
-    if (header.getUint32(0, true) !== MAGIC || header.getUint32(4, true) !== VERSION) bad();
+    if (header.getUint32(0, true) !== MAGIC || ![VERSION, 2, 3].includes(header.getUint32(4, true))) bad();
     const raw = expand(new Uint8Array(buffer, HEADER), header.getUint32(8, true));
     if (hash(raw) !== header.getUint32(12, true)) bad();
     const view = new DataView(raw.buffer); let at = 0;
@@ -119,8 +130,24 @@
       if (immutable) BL.clankerPose.immutable(pose); else BL.clankerPose.validate(pose);
       clankers.push({ index, pose });
     }
+    let lab = null;
+    if (header.getUint32(4, true) >= 2) {
+      const length = word();
+      if (!length || length > BL.npcLabPose.MAX_BYTES) bad();
+      const offset = take(length);
+      lab = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw.subarray(offset, offset + length)));
+      BL.npcLabPose.validate(lab);
+    }
+    let layout = null;
+    if (header.getUint32(4, true) === 3) {
+      const length = word();
+      if (!length || length > BL.npcWorldLayout.MAX_BYTES) bad();
+      const offset = take(length);
+      layout = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw.subarray(offset, offset + length)));
+      BL.npcWorldLayout.validate(layout);
+    }
     if (at !== raw.length) bad();
-    return { world, ooga, clankers };
+    return { world, ooga, clankers, ...(lab === null ? {} : { lab }), ...(layout === null ? {} : { layout }) };
   };
   BL.npcPosePacket = { MAGIC, VERSION, MAX, EXPANDED, ACTORS, pack, unpack };
 })();

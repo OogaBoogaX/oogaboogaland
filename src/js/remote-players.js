@@ -343,6 +343,7 @@
 
     const update = (dt) => {
       frozen?.prepare();
+      const serverBodies = net.state.npcAuthority?.mode === "server";
       jetClock += dt;
       activePool = pool;
       if (selfIcon > 0) selfIcon = Math.max(0, selfIcon - dt);
@@ -350,7 +351,7 @@
       if (!unshot && net.subscribeShots) { unshot = net.subscribeShots(shotHeard); unswung = net.subscribeSwings(swingHeard); }
       for (const entry of bodies.values()) {
         const rec = net.remotes.get(entry.id);
-        if (!rec || rec.body !== entry.body || frozen && (!frozen.allows(rec)
+        if (!rec || rec.body !== entry.body || serverBodies && entry.legacy || frozen && (!frozen.allows(rec)
           || frozen.active && (entry.legacy || entry.hostWorld !== frozen.world || entry.hostEpoch !== frozen.epoch
             || entry.hostView?.generation !== frozen.liveView(rec)?.generation))) drop(entry);
       }
@@ -365,6 +366,9 @@
       let n = 0;
       for (const rec of net.remotes.values()) {
         if (!rec.body || frozen && !frozen.allows(rec)) continue;
+        // A movement packet does not establish presence. Wait for the server's
+        // identity/generation record; never hide or pause the NPC while waiting.
+        if (serverBodies && (!frozen?.active || !frozen.liveView(rec))) continue;
         let entry = bodies.get(rec.id);
         if (!entry) {
           if (bodies.size >= liveCapacity) continue;

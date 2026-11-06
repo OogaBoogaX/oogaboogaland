@@ -31,8 +31,9 @@
 
   const wrap = (d) => Math.atan2(Math.sin(d), Math.cos(d));
 
-  const create = ({ crew, fx, onPlan, onHit, onModelChange, animationInterval }) => {
+  const create = ({ crew, fx, onPlan, onHit, onModelChange, animationInterval, getClankers, getLab, releaseLabItem, layoutReady = () => false }) => {
     const net = BL.net;
+    const companions = BL.npcClankerSync.create({ getClankers, getLab, releaseLabItem, onModelChange });
     const list = crew.list.filter((cave) => !cave.contributor.temporary), n = list.length;
     const index = new Map(list.map((cave, i) => [cave, i]));
     const signature = fnv1a(JSON.stringify([list.map((cave) => cave.traits.name),
@@ -244,7 +245,9 @@
       const t = target, o = i * RECORD, r = cave.root, p = cave.parts, q = quats[i];
       const flags = t[o + 1];
       const distance = Math.hypot(t[o + 2] - r.position.x, t[o + 3] - r.position.y, t[o + 4] - r.position.z);
-      const far = fresh[i] || distance > SNAP;
+      // Status relocation is a beam, including short pile/chill moves. Never
+      // interpolate a status change through the terrain between destinations.
+      const far = fresh[i] || distance > SNAP || cave.nonInteractive && cave.state !== STATES[t[o + 96]];
       let k = far ? 1 : 1 - Math.exp(-EASE * dt);
       fresh[i] = 0;
       r.visible = (flags & F_VISIBLE) !== 0;
@@ -353,6 +356,7 @@
       if (next !== role || hostChanged || authorityRevision !== revision) {
         // A new host or leaving follow hands the Oogas back to their own AI where they stand.
         if (role === "follow" || role === "server") release();
+        if (server) companions.reset(true);
         role = next; hostId = st.hostId; authorityRevision = revision;
         sendIn = 0;
         sentFloats = -1;
@@ -379,11 +383,22 @@
       if (role !== "follow" && role !== "server") return;
       if (st.npcVersion !== seen) {
         seen = st.npcVersion;
-        decode(net.npcFrame);
+        if (server && ["mixed-1", "mixed-2", "mixed-3"].includes(st.npcAuthority.format)) {
+          try {
+            const packet = BL.npcPosePacket.unpack(net.npcFrame, true);
+            const header = new Uint32Array(packet.ooga, 0, HEADER);
+            const floats = new Float32Array(packet.ooga);
+            if (packet.world !== st.npcAuthority.world || header[1] !== signature || header[2] !== n
+              || Array.from({ length: n }, (_, i) => floats[HEADER + i * RECORD]).some((value, i) => value !== i))
+              throw Error("NPC cast mismatch");
+            if (packet.layout && !layoutReady()) throw Error("NPC world layout not attached");
+            if (companions.apply(packet)) decode(packet.ooga);
+          } catch { companions.reset(true); }
+        } else decode(net.npcFrame);
       }
       for (let i = 0; i < n; i++) {
         const cave = list[i];
-        if (driven(cave)) {
+        if (role !== "server" && driven(cave)) {
           cave.puppet = false;
           continue;
         }
@@ -399,13 +414,16 @@
 
     // Called before crew.update, including the first frame after negotiation.
     // Missing/stale/mismatched snapshots freeze NPCs, never release local AI.
-    // Live driven bodies retain their ordinary player/remote movement path.
+    // Server NPC tracks always follow the NPC stream. Independent player
+    // bodies are outside this roster, even when they share the same identity.
     const prepare = () => {
-      if (net.state.npcAuthority?.mode === "server") for (let i = 0; i < n; i++) list[i].puppet = !driven(list[i]);
+      companions.prepare(net.state.npcAuthority?.mode === "server");
+      if (net.state.npcAuthority?.mode === "server") for (let i = 0; i < n; i++) list[i].puppet = true;
     };
     prepare();
 
     const dispose = () => {
+      companions.dispose();
       release();
       role = "solo";
       resetEvents();

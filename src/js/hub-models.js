@@ -10,7 +10,8 @@
 // logs and thatch) dresses machines and stalls in the geometry they already draw with.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { hexToRgb, mulberry32 } = BL.math;
   const { geometry, pushVert, face, box, bevelBox, lathe, glassVessel, ring, merge, cached, variants, characterGeometry, makeVox: vox, voxelGeometry: voxGeo, voxCoords, moved, turnedX, turnedY, turnedZ, along, prism } = BL.models;
   const blob = (v, { cx, cy, cz, rx, ry, rz, chip = 0, floor = -Infinity, rand, color }) => {

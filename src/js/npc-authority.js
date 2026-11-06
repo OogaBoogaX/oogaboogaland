@@ -9,7 +9,7 @@
   // Mixed format is opt-in. Loading its codec must never upgrade an existing
   // browser before both actor families obey the server ownership fence.
   const descriptor = (a, mixed = false) => !!a
-    && (a.v === 1 && a.format === undefined || mixed && a.v === 2 && a.format === "mixed-1" && a.mode === "server")
+    && (a.v === 1 && a.format === undefined || mixed && (a.v === 2 && a.format === "mixed-1" || a.v === 3 && a.format === "mixed-2" || a.v === 4 && a.format === "mixed-3") && a.mode === "server")
     && integer(a.revision) && a.revision > 0
     && (a.mode === "browser" && a.world === null && a.epoch === 0
       || a.mode === "server" && typeof a.world === "string" && /^[A-Za-z0-9_.:-]{1,80}$/.test(a.world)
@@ -32,7 +32,11 @@
   const posesFor = (a, data, mixed = false) => {
     if (!descriptor(a, mixed) || a.mode !== "server") return false;
     if (a.v === 1) return poses(data);
-    try { return BL.npcPosePacket.unpack(data).world === a.world; } catch { return false; }
+    try {
+      const packet = BL.npcPosePacket.unpack(data);
+      return packet.world === a.world && (a.v === 4 ? !!packet.lab && !!packet.layout
+        : a.v === 3 ? !!packet.lab && packet.layout == null : packet.lab == null && packet.layout == null);
+    } catch { return false; }
   };
   const pack = (a, sequence, data, mixed = false) => {
     if (!integer(sequence) || !sequence || !posesFor(a, data, mixed)) throw new Error("invalid NPC snapshot");
@@ -50,7 +54,7 @@
         if (!descriptor(a, mixed) || current && a.revision < current.revision) return false;
         if (current && a.revision === current.revision) return a.v === current.v && a.format === current.format
           && a.mode === current.mode && a.world === current.world && a.epoch === current.epoch;
-        current = Object.freeze({ v: a.v, ...(a.v === 2 ? { format: a.format } : {}), revision: a.revision, mode: a.mode, world: a.world, epoch: a.epoch });
+        current = Object.freeze({ v: a.v, ...(a.v >= 2 ? { format: a.format } : {}), revision: a.revision, mode: a.mode, world: a.world, epoch: a.epoch });
         sequence = 0; last = null;
         return true;
       },

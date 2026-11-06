@@ -74,11 +74,11 @@
       recoveryBodyCount = recoveryOutsideCount = 0;
       for (let n = 0; n < crewList.length; n++) {
         const other = crewList[n];
-        if (other !== cave && !playerBody(other) && other.root.visible && other.state !== "away" && !other.root.quaternion && !other.camp.seat
+        if (!cave.nonInteractive && !other.nonInteractive && other !== cave && !playerBody(other) && other.root.visible && other.state !== "away" && !other.root.quaternion && !other.camp.seat
           && Math.hypot(other.root.position.x - x, other.root.position.z - z) <= distance + Math.max(SHOULDER_GAP, cave.bodyRadius + other.bodyRadius)) recoveryBodies[recoveryBodyCount++] = other;
       }
       const outside = ctx.outsideActors && ctx.outsideActors();
-      if (outside) for (let n = 0; n < outside.length; n++) {
+      if (outside && !cave.nonInteractive) for (let n = 0; n < outside.length; n++) {
         const body = outside[n];
         if (!body.player && Math.hypot(body.x - x, body.z - z) <= distance + Math.max(OUTSIDE_GAP, (body.radius || 0) + cave.bodyRadius)) recoveryOutside[recoveryOutsideCount++] = body;
       }

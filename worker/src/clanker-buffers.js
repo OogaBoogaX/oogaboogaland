@@ -35,7 +35,8 @@ const lengthOf = Object.getOwnPropertyDescriptor(typed, "length").get;
 const bufferOf = Object.getOwnPropertyDescriptor(typed, "buffer").get;
 const offsetOf = Object.getOwnPropertyDescriptor(typed, "byteOffset").get;
 
-export function createClankerBufferCheckpoint(world, ids) {
+export function createClankerBufferCheckpoint(world, ids, identity = e => e?.owner?.id) {
+  if (typeof identity !== "function") bad();
   if (!id(world) || !dense(ids, CLANKER_BUFFERS.actors) || ids.some(s => !id(s)) || new Set(ids).size !== ids.length) bad();
   ids = [...ids];
   const length = spec => spec[3] || ids.length;
@@ -50,7 +51,7 @@ export function createClankerBufferCheckpoint(world, ids) {
       const buffers = entries.map((e, i) => {
         // Active rage searches have a separate large workspace and closure
         // cursor. Refuse that unsupported profile instead of dropping it.
-        if (e?.owner?.id !== ids[i] || e.rage?.search !== null) bad();
+        if (identity(e) !== ids[i] || e.rage?.search !== null) bad();
         // One allocation mask, then sorted field/block/hex triples. Zero blocks
         // are implicit, so empty paths consume no per-field generic tree nodes.
         const row = [0];

@@ -1,6 +1,7 @@
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { clamp, lerp } = BL.math;
   const PHASES = ["dawn", "morning", "noon", "dusk", "night", "midnight"];
   const PHASE_STARTS = [5, 7, 11, 16, 19, 23];

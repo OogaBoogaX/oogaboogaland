@@ -6,6 +6,8 @@ import { bodyOperationDigest, validateBodyOperation } from "./host-body-operatio
 import { validateRoomClaim, validateRoomBinding, validateRoomClaimReceipt, validateRoomReleaseReceipt, sameRoomClaim } from "./host-room-claim.js";
 import "../../src/js/npc-authority.js";
 import "../../src/js/clanker-pose.js";
+import "../../src/js/npc-lab-pose.js";
+import "../../src/js/npc-world-layout.js";
 import "../../src/js/npc-pose-packet.js";
 export const SESSION_PROTOCOL = "host-session-v5";
 export const HOST = Object.freeze({
@@ -137,7 +139,7 @@ export class VirtualHost {
   constructor({ storage, simulation, sessionAdapter = {}, clock = Date.now }) {
     const passiveSteps = sessionAdapter.passiveSteps ?? HOST.passiveSteps, maxSteps = simulation?.maxSteps ?? HOST.maxSteps;
     if (!storage?.transaction || !id(simulation?.version)
-      || !["initial", "validate", "step", "project", "npcFor", "handoff"].every(k => typeof simulation[k] === "function")
+      || !["initial", "validate", "step", "project", "npcFor"].every(k => typeof simulation[k] === "function")
       || typeof sessionAdapter.stepPassive !== "function"
       || !Number.isSafeInteger(maxSteps) || maxSteps < 1 || maxSteps > HOST.maxSteps
       || !Number.isSafeInteger(passiveSteps) || passiveSteps < GRACE_MS / PASSIVE_STEP_MS || passiveSteps > HOST.passiveSteps
@@ -169,10 +171,11 @@ export class VirtualHost {
           if (!simulation || simulation === source || simulation.then || simulation.version !== source.version
             || simulation.checkpointBytes !== source.checkpointBytes
             || typeof source.poses === "function" && typeof simulation.poses !== "function"
-            || !["initial", "validate", "step", "project", "npcFor", "handoff", "dispose"].every(k => typeof simulation[k] === "function")) fail("invalid simulation transaction");
+            || typeof source.enqueueInput === "function" && typeof simulation.enqueueInput !== "function"
+            || !["initial", "validate", "step", "project", "npcFor", "dispose"].every(k => typeof simulation[k] === "function")) fail("invalid simulation transaction");
         }
         if (typeof sessions.forTransaction === "function") {
-          sessionAdapter = await sessions.forTransaction(tx, operation);
+          sessionAdapter = await sessions.forTransaction(tx, operation, simulation);
           if (!sessionAdapter || sessionAdapter === sessions || typeof sessionAdapter.stepPassive !== "function"
             || typeof sessionAdapter.dispose !== "function"
             || (sessionAdapter.passiveSteps ?? this.passiveSteps) !== this.passiveSteps) fail("invalid body transaction");
@@ -442,13 +445,43 @@ export class VirtualHost {
       for (let i = 0; i < steps; i++) {
         r.simulatedAt += HOST.stepMs;
         r.wallCursor += HOST.stepMs;
-        const result = this.simulation.step(r.simulation, HOST.stepMs, r.simulatedAt);
+        const result = this.simulation.step(r.simulation, HOST.stepMs, r.simulatedAt, { wallAt: r.wallCursor });
         if (result?.then) fail("simulation step must be synchronous");
       }
       r.wallAt = now; r.leaseUntil = now + HOST.leaseMs;
       await this.save(tx, r);
       const snapshot = publicSnapshot(r, this.simulation.project(r.simulation));
       return { status: r.status, lagMs: now - r.wallCursor, steps, snapshot, recovery, work: this.work(registry, now, budget) };
+    });
+  }
+
+  // Private trusted-service input. It only queues into the bounded simulation
+  // checkpoint; it never acquires authority, renews a lease or starts a run.
+  async worldInput(ticket, input) {
+    // Preserve the tiny backlog bound. Complete absolute Hub updates have a
+    // separate bounded schema; the concrete simulation validates its contents.
+    if (input?.kind === 'backlog') {
+      boundedJSON(input, 256, 8);
+      if (!exact(input, ["v", "kind", "observedAt", "vsize"]) || input.v !== 1
+        || !time(input.observedAt) || input.observedAt === 0 || !time(input.vsize)) fail("invalid world input");
+    } else {
+      boundedJSON(input, 32 * 1024, 4096);
+      if (!exact(input, ['v', 'kind', 'observedAt', 'revision', 'state', 'activity'])
+        || input.v !== 1 || input.kind !== 'hub-state' || !time(input.observedAt) || input.observedAt === 0
+        || !time(input.revision) || input.revision === 0) fail('invalid world input');
+    }
+    const value = structuredClone(input);
+    return this.transaction(async function(tx) {
+      const now = this.now(), r = await this.read(tx);
+      this.owns(r, ticket, now);
+      if (r.status !== "running" || now >= r.runUntil || value.observedAt > now
+        || now - r.wallCursor > HOST.maxLagMs || typeof this.simulation.enqueueInput !== "function")
+        fail("world input unavailable");
+      const result = this.simulation.enqueueInput(r.simulation, value,
+        { acceptedAt: now, effectiveAt: now - r.pausedMs });
+      if (!["accepted", "retained", "stale"].includes(result)) fail("invalid world input receipt");
+      if (result === "accepted") { r.wallAt = now; await this.save(tx, r); }
+      return { status: result, revision: r.revision, world: r.world, epoch: r.fence };
     });
   }
 
@@ -551,6 +584,13 @@ export class VirtualHost {
         // Recreate this derived claim on every transaction retry. Never retain
         // a speculative NPC position or mutate the committed NPC track.
         delete request.body; delete request.zone;
+        // Bind only the canonical identity already vouched for by Room, inside
+        // this storage attempt. A failed attempt cannot leave a name mapping.
+        if (typeof host.sessionAdapter.bindIdentity === 'function') {
+          const bound = host.sessionAdapter.bindIdentity({ accountId, bodyId: request.bodyId,
+            handle: source.handle, kind: source.kind });
+          if (bound !== true) fail('body identity binding failed');
+        }
         const retained = r.sessions?.sessions.find(s => s.accountId === accountId);
         if (retained) {
           if (retained.kind !== source.kind) fail('retained body kind mismatch');
@@ -558,20 +598,28 @@ export class VirtualHost {
         } else {
           if (typeof host.simulation.playerSpawn !== 'function') fail('authoritative world spawn adapter required');
           const spawn = host.simulation.playerSpawn(structuredClone(r.simulation),
-            { accountId, bodyId: request.bodyId, handle: source.handle, kind: source.kind });
+            { accountId, bodyId: request.bodyId, handle: source.handle, kind: source.kind },
+            { occupied: [...(r.sessions?.sessions || []), ...(r.sessions?.pending || [])].map(row => ({
+              bodyId: row.bodyId, kind: row.kind || row.body.kind, zone: row.zone,
+              motion: structuredClone(row.motion || row.body.motion) })) });
           boundedJSON(spawn, 2048, 128);
           if (!exact(spawn, ['npcId', 'feetOffset', 'zone', 'body']) || !id(spawn.zone) || spawn.body?.kind !== source.kind
             || !Number.isFinite(spawn.feetOffset) || spawn.feetOffset < 0 || spawn.feetOffset > 10
             || spawn.npcId !== null && !id(spawn.npcId)) fail('invalid world body spawn');
-          const npcId = host.npcLookup(r)(request.bodyId);
+          const npcId = host.npcLookup(r)(request.bodyId,
+            { accountId, bodyId: request.bodyId, handle: source.handle, kind: source.kind });
           if (spawn.npcId !== npcId) fail('world body NPC mapping mismatch');
           if (npcId !== null) {
             const projected = publicSnapshot(r, host.simulation.project(structuredClone(r.simulation)));
             const npc = projected.npcs.find(n => n.id === npcId);
             // Ooga projection may report the rig root; body continuity uses
             // feet. The source adapter supplies its authored root offset.
-            if (!npc || npc.kind !== source.kind || npc.y - spawn.feetOffset !== spawn.body.motion?.y
-              || ['x', 'z', 'yaw'].some(k => npc[k] !== spawn.body.motion?.[k])) fail('world body must start at its NPC');
+            // Away NPCs have no live position to reclaim: their hidden last
+            // sleep location must not dictate a new login. The trusted world
+            // spawn adapter supplies a checked pile arrival in that case.
+            if (!npc || npc.kind !== source.kind || npc.activity !== 'away'
+              && (npc.y - spawn.feetOffset !== spawn.body.motion?.y
+                || ['x', 'z', 'yaw'].some(k => npc[k] !== spawn.body.motion?.[k]))) fail('world body must start at its NPC');
           }
           request.zone = spawn.zone; request.body = structuredClone(spawn.body);
           if (!request.body.motion) fail('world body motion required');
@@ -956,7 +1004,7 @@ export class VirtualHost {
   // snapshots cannot substitute for it. A caller cannot publish uncommitted work.
   async poses(ticket, { format, skipPending = false } = {}) {
     if (typeof skipPending !== "boolean") fail("invalid pending publication policy");
-    if (format !== undefined && format !== "mixed-1") fail("unsupported host pose format");
+    if (format !== undefined && !["mixed-1", "mixed-2", "mixed-3"].includes(format)) fail("unsupported host pose format");
     if (typeof this.simulation.poses !== "function") fail("NPC pose adapter required");
     return this.transaction(async function(tx) {
       const r = await this.publicationRecord(tx, ticket, skipPending);
@@ -964,8 +1012,8 @@ export class VirtualHost {
       const queries = this.simulation.readQueries?.(r.simulation);
       if (queries?.then || queries && typeof queries.npcFor !== "function") fail("invalid simulation queries");
       const frame = typeof queries?.poses === "function" ? queries.poses(format) : this.simulation.poses(structuredClone(r.simulation), format);
-      const authority = { v: format ? 2 : 1, ...(format ? { format } : {}), mode: "server", world: r.world, epoch: r.fence, revision: r.revision };
-      if (!globalThis.BL.npcAuthority.posesFor(authority, frame, format === "mixed-1")) fail("invalid host poses");
+      const authority = { v: format === "mixed-3" ? 4 : format === "mixed-2" ? 3 : format ? 2 : 1, ...(format ? { format } : {}), mode: "server", world: r.world, epoch: r.fence, revision: r.revision };
+      if (!globalThis.BL.npcAuthority.posesFor(authority, frame, format !== undefined)) fail("invalid host poses");
       return { ticket: this.ticket(r), sequence: r.revision, at: r.simulatedAt, publicationProtocol: r.room ? 1 : 0,
         runUntil: r.runUntil, ...(format ? { format } : {}), frame: frame.slice(0) };
     });
@@ -1023,10 +1071,10 @@ export class VirtualHost {
   // A reader is valid only until the next simulation mutation. It is local to
   // this transaction attempt, never retained on VirtualHost or in storage.
   npcLookup(r) {
-    if (!this.simulation.readQueries) return bodyId => this.simulation.npcFor(r.simulation, bodyId);
+    if (!this.simulation.readQueries) return (bodyId, source) => this.simulation.npcFor(r.simulation, bodyId, source);
     const queries = this.simulation.readQueries(r.simulation);
     if (!queries || typeof queries.npcFor !== "function" || queries.then) fail("invalid simulation queries");
-    return bodyId => queries.npcFor(bodyId);
+    return (bodyId, source) => queries.npcFor(bodyId, source);
   }
 
   registry(r, now, liveTokens, { closes = [], create = false, priorityAccount = null, budget = { left: this.passiveSteps } } = {}) {
@@ -1043,7 +1091,6 @@ export class VirtualHost {
       },
       canStep: typeof this.sessionAdapter.canStep === "function" ? body => this.sessionAdapter.canStep(body) : undefined,
       validateOccupancy: (body, resource) => this.sessionAdapter.validateOccupancy?.(body, resource, r.simulation) === true,
-      npcFor: this.npcLookup(r),
     } };
     // Validate census/close bounds on first admission too, not only once a checkpoint exists.
     const registry = SessionRegistry.restore(r.sessions || new SessionRegistry(options).checkpoint(), options);
@@ -1052,21 +1099,13 @@ export class VirtualHost {
   }
 
   settle(r, registry) {
-    let lookup = null, changed = false;
+    // Player lifecycle and NPC simulation are independent. Legacy pending
+    // handback metadata may still be read, but never moves, resumes or spawns
+    // an NPC. The client makes the existing track solid when presence ends.
     for (const intent of registry.pending()) {
       if (intent.applied) continue;
-      if (intent.handback) {
-        if (!lookup) lookup = this.npcLookup(r);
-        if (lookup(intent.bodyId) !== intent.handback.npc) fail("handoff world changed");
-        if (this.simulation.handoff(r.simulation, intent) !== true) fail("handoff refused");
-        changed = true;
-        lookup = null; // A handoff may change another body's NPC eligibility too.
-      }
       registry.markApplied(intent.id);
     }
-    // sessions() invokes its caller after settling recovered departures. Any
-    // subsequent release must see that handoff's world, not the recovery reader.
-    if (changed) registry.adapter.npcFor = this.npcLookup(r);
     r.sessions = registry.checkpoint();
   }
 

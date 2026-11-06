@@ -67,15 +67,12 @@
   const MAGAZINE_REACH = 0.7, MAGAZINE_SCALE = 2.4;
   // Space at Ooga Arcade's mouth works from MOUTH_REACH of a point MOUTH_ACTION_Z inside its doorway.
   const MOUTH_REACH = 3.2, MOUTH_ACTION_Z = -3.6;
-  const MATRIX_GATE_HIDDEN_Y = 3.2, MATRIX_BUTTON_REACH = 3.4, MATRIX_BUTTON_USE_REACH = 2.2;
-  const MIRROR_GATE_Z = 0.28;
-  const MIRROR_GATE_CLOSED = true;
-  const PORTAL_Z = 0.5, PORTAL_MIN_X = -2.48, PORTAL_MAX_X = 2.48, PORTAL_MIN_Y = 0, PORTAL_MAX_Y = 2.98;
-  const RIM_SEAM_DROP = 0.015;
+  const MATRIX_BUTTON_REACH = 3.4, MATRIX_BUTTON_USE_REACH = 2.2;
+  const { MIRROR_GATE_CLOSED, PORTAL_Z, PORTAL_MIN_X, PORTAL_MAX_X, PORTAL_MIN_Y, PORTAL_MAX_Y,
+    RIM_SEAM_DROP } = BL.hubCavePhysics.layout;
   // The sign's back reaches 0.07 m behind its origin; the Arcade's flat wall sits behind the projecting rim.
   const CAVE_SIGN_Y = 3.5 - RIM_SEAM_DROP + hubModels.CAVE_SIGN_HEIGHT * 0.5 + 0.32;
   const CAVE_SIGN_Z = PORTAL_Z + 0.055;
-  const CAVE_LIGHT_Z = 0.52;
   // RENDER_OPTS sky, light and lamp values are resampled from the clock only when an input drifts past a
   // sun-angle budget: 6e-4 of an hour turns the sun about 0.009 degrees, under a pixel at any view. DAY_STASH
   // holds the sampled fields that weather and the Mempool shelter then shade in place later in the frame,
@@ -154,17 +151,15 @@
   const NIGHT = 0.5, FIRE_SEAT_CHANCE = 0.5;
   // Clock-face degrees to a meadow point: 0 is -z (far), 90 is +x (right).
   const polar = (deg, r) => ({ x: Math.sin(deg * DEG) * r, z: -Math.cos(deg * DEG) * r });
-  const BUILD_DEGREES = [12, 40, 66, 80, 102, 165, 195, 212, 282, 297, 312, 340];
-  const BUILD_RADIUS = 13;
-  const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
+  const BUILD_DEGREES = BL.hubLayout.buildDegrees, BUILD_RADIUS = BL.hubLayout.buildRadius;
   const PATH_GEOMETRY = new WeakMap();
   const TIMECHAIN_OUTER_PERIOD = 180;
   const DRESSED = new WeakMap();
   const DRESSING_LAMPS = BL.dressing.LIGHT_RGB.map(([r, g, b]) => ({ r, g, b, radius: 5.5, glow: 0.9, hide: false }));
   const dressingLights = [];
-  const PILE_POST_DEGREES = [315, 78, 195], pilePosts = [];
+  const PILE_POST_DEGREES = BL.hubLayout.pilePostDegrees, pilePosts = [];
   const PILE_POST_NIGHT_BOOST = 0.25, PILE_POST_NIGHT_REACH = 2;
-  const PILE_SCALE = 0.45;
+  const PILE_SCALE = BL.hubAltar.pileScale;
   // How tall a remote visitor's Ooga stands for the crew's walkers (`outsideActorHeight`).
   const REMOTE_BODY_HEIGHT = 2.2;
   const SCENERY_CLEARANCE = 0.25;
@@ -174,16 +169,7 @@
   // `floor`, `width`, `depth` and `height` shape the cut; `entry` is the short cut up from the meadow to the mouth
   // and `reach` its ground claim. A book opens in the shared board window; its link opens the site itself in a new
   // tab, since a page from elsewhere cannot be framed here.
-  const LIBRARY = (() => {
-    const bearing = 227 * Math.PI / 180, radius = 20.75;
-    // Match the side of the Headquarters bluff, parallel to its 10:15 tunnel axis, rather than aiming at the pile.
-    // The terrain cut, shelving and picks all share this frame.
-    const ry = Math.PI / 2 - 10.25 / 12 * Math.PI * 2;
-    return {
-      x: Math.sin(bearing) * radius, z: -Math.cos(bearing) * radius, ry,
-      floor: 0.25, width: 5.4, depth: 0.78, height: 3.3, entry: 1.1, reach: 3.25
-    };
-  })();
+  const LIBRARY = BL.hubLayout.library;
   const BOOKS = [
     {
       title: "Learn Me A Bitcoin", heading: ["LEARN ME", "A BITCOIN"], site: "LEARNMEABITCOIN.COM",
@@ -205,7 +191,6 @@
     }
   ];
   const MEADOW_INNER = 5, MEADOW_OUTER = MEADOW - 1.5, CLIFF_INNER = MEADOW + 1.5, CLIFF_OUTER = RADIUS - 1;
-  const LADDER_Z = -3.6, LADDER_LEAN = 0.65;
   // Two disjoint annuli keep sparse clouds around the horizon, passing below and above the bridges.
   // Nine clouds per ring leave room for the widest mesh; each ring keeps its angular spacing.
   const CLOUDS_PER_TRACK = 9;
@@ -214,7 +199,7 @@
     { radius: 40, speed: 0.56, phase: 0.6, baseY: 11, waveY: -2.25 }
   ];
   const WANDER_COUNT = 36, WANDER_INNER = 5.5;
-  const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
+  const ALTAR_HEIGHT = BL.hubAltar.height;
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
   const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", poolbridge: "Vine bridge · to the Mempool island", poolsign: "Mempool Rainforest · the way down is through the hill", poolpainting: "Wall painting · tap to read it closely", chainsign: "The chain, at a glance · tap to read it", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", jumbotron: "Oogatron · OogaBoogaX on the big screen · tap the screen for a close-up", palm: "Palm · shake it", bifrostbridge: "Bifröst · the bridge to ₿IFRÖST", bifrostgate: "₿IFRÖST · walk an Ooga through the field", heimdall: "Heimdall · keeper of the bridge", gate: null };
   const RETICLE_PROPS = new Set(["tree", "bush", "flower", "torch", "firepit", "totem", "ladder", "poolsign", "poolpainting", "chainsign", "weathersign", "poolfern", "poollog", "jaguar", "monkey", "toucan", "canopy", "jumbotron", "palm", "timechainentrance", "timechainkeypad", "bifrostgate", "heimdall"]);
@@ -256,7 +241,7 @@
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, jumbotron, positionDebug, remotes, npcSync;
+  let oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, jumbotron, positionDebug, remotes, npcSync, npcStatusBeams;
   // GAME MODE (`setGameMode`): an island event holds the island still for play while it runs.
   let gameMode = false, gameCombatOnly = false;
   let cloudHopper = null, cloudIsland = null, cloudPile = null, cloudPileSolids = null, cloudFinishFruit = null;
@@ -747,6 +732,24 @@
   const placed = [];
   const targets = [];
   const claimed = [];
+  let builtHostLayout = null, layoutBuilding = false, layoutRebuilding = false, layoutPileForHost = null;
+  const currentHostLayout = () => {
+    const a = BL.net.state.npcAuthority, value = BL.net.hostLayout;
+    return a?.mode === "server" && !a.incompatible && a.v === 4 && value?.world === a.world ? value : null;
+  };
+  const hostLayoutCompatible = () => {
+    if (BL.net.state.npcAuthority?.mode !== "server") return !builtHostLayout;
+    const value = currentHostLayout();
+    return !!value && !!builtHostLayout && value.world === builtHostLayout.world
+      && BL.npcWorldLayout.sameRecipe(value.snapshot.history, builtHostLayout.snapshot.history) && !layoutRebuilding;
+  };
+  const hostLayoutReady = () => {
+    if (!hostLayoutCompatible() || layoutBuilding) return false;
+    if (!builtHostLayout) return true;
+    const applied = builtHostLayout.snapshot, latest = currentHostLayout().snapshot;
+    return applied.pile === latest.pile && applied.count === latest.count && applied.history.ring === latest.history.ring
+      && applied.water === latest.water;
+  };
   const clouds = [];
   const lamps = [];
   // updateLamps' selection and light array are a pure function of these inputs; an exact hit reuses
@@ -1009,25 +1012,8 @@
     claimed.push(value);
     return value;
   };
-  const free = (x, z, r) => {
-    for (const c of claimed) {
-      const dx = c.x - x, dz = c.z - z, reach = c.r + r;
-      // Rejection sampling checks thousands of distant footprints. Keep the
-      // original circular predicate for nearby and boundary candidates.
-      if (Number.isFinite(reach) && reach >= 0
-        && (Math.abs(dx) > reach + 1e-12 || Math.abs(dz) > reach + 1e-12)) continue;
-      if (Math.hypot(dx, dz) < reach) return false;
-    }
-    return true;
-  };
-  const nearPath = (x, z, d) => {
-    if (island.isPath(x, z)) return true;
-    for (let i = 0; i < 16; i++) {
-      const c = Math.cos(i / 16 * Math.PI * 2), s = Math.sin(i / 16 * Math.PI * 2);
-      if (island.isPath(x + c * d, z + s * d) || island.isPath(x + c * d / 2, z + s * d / 2)) return true;
-    }
-    return false;
-  };
+  const free = (x, z, r) => BL.hubLayout.free(claimed, x, z, r);
+  const nearPath = (x, z, d) => BL.hubLayout.nearPath(island, x, z, d);
   const nearMouth = (x, z, d) => {
     for (const m of island.mouths) if (Math.hypot(m.x - x, m.z - z) < d) return true;
     return false;
@@ -1037,44 +1023,14 @@
   // WORK_CLEAR_ROWS of them clear of scenery, as the pile grows; a bigger crowd takes the next free
   // places among the props, and `entranceClear` keeps the doorway itself open. Reserving every row the whole roster
   // could fill (twelve for 46 Oogas) and a walking detour round them emptied the north of the meadow.
-  const WORK_CLEAR_ROWS = 2;
-  const workSceneryClear = (x, z, radius) => {
-    const row = Math.max(0, Math.min(WORK_CLEAR_ROWS, Math.ceil(contributors.activeRoster.length / 4)) - 1);
-    const front = 4.8 + row * 1.35 + 4.15 * 0.32, margin = radius + PLAYER_RADIUS;
-    for (let i = 0; i < workZones.length; i++) {
-      const zone = workZones[i], dx = x - zone.x, dz = z - zone.z;
-      const across = Math.abs(dx * zone.cr - dz * zone.sr), along = dx * zone.sr + dz * zone.cr;
-      if (across < 4.15 + margin && along > 2.8 - margin && along < front + margin) return false;
-    }
-    return true;
-  };
-  // Bushes stand back from every open cave's doorway, the arcade's included:
-  // ENTRANCE_HALF either side of its axis and ENTRANCE_DEPTH out from its mouth.
-  const ENTRANCE_HALF = 4, ENTRANCE_DEPTH = 7;
-  const entranceClear = (x, z, radius) => {
-    for (let i = 0; i < entranceZones.length; i++) {
-      const zone = entranceZones[i], dx = x - zone.x, dz = z - zone.z;
-      if (Math.abs(dx * zone.cr - dz * zone.sr) < ENTRANCE_HALF + radius && dx * zone.sr + dz * zone.cr < ENTRANCE_DEPTH + radius) return false;
-    }
-    return true;
-  };
+  const workSceneryClear = (x, z, radius) => BL.hubLayout.workSceneryClear(workZones,
+    builtHostLayout ? (layoutBuilding ? builtHostLayout.snapshot.history.count : builtHostLayout.snapshot.count)
+      : contributors.activeRoster.length, x, z, radius);
+  const entranceClear = (x, z, radius) => BL.hubLayout.entranceClear(entranceZones, x, z, radius);
   // Keep fixed stores and constructed equipment out of the three lamps' full travel corridors.
   // Foliage yields to their current claims when the pile grows or shrinks.
-  const pilePostCorridorClear = (x, z, radius) => {
-    for (const degrees of PILE_POST_DEGREES) {
-      const s = Math.sin(degrees * DEG), c = Math.cos(degrees * DEG);
-      if (x * s - z * c > 0 && Math.abs(x * c + z * s) < radius + 0.7) return false;
-    }
-    return true;
-  };
-  const spotAt = (deg, r, margin) => {
-    for (const off of NUDGES) {
-      const p = polar(deg + off, r);
-      if (!nearPath(p.x, p.z, margin) && island.surfaceAt(p.x, p.z) === 0
-        && pilePostCorridorClear(p.x, p.z, margin) && free(p.x, p.z, margin)) return p;
-    }
-    return null;
-  };
+  const pilePostCorridorClear = BL.hubLayout.pilePostCorridorClear;
+  const spotAt = (deg, r, margin) => BL.hubLayout.spotAt(island, claimed, deg, r, margin);
   // How many point-light slots the lamps took when last chosen (the selection is cached; the hunt's lanterns follow).
   let lampLights = 0;
   const addLamp = (node, kind, x, y, z, light = true, order = lamps.length, id = `lamp:${lamps.length}`) => {
@@ -1265,15 +1221,7 @@
     if (pickupReserved) RENDER_OPTS.lightCount += cloudHopper.pickupLights(lights, RENDER_OPTS.lightCount, pickupReserved);
   };
   const buildFire = () => {
-    let p = null;
-    for (const deg of FIRE_DEGREES) {
-      const c = polar(deg, FIRE_RADIUS);
-      if (island.surfaceAt(c.x, c.z) === 0 && free(c.x, c.z, 1.6) && !nearPath(c.x, c.z, 1.8)) {
-        p = c;
-        break;
-      }
-    }
-    if (!p) throw new Error("No clear spot for the fire pit");
+    const p = BL.npcRoutineDestinations.fireSpot(island, free, nearPath);
     const pit = place(hubModels.firepit(), p.x, p.z, 0, 0, "firepit", 1.2);
     // The island's voxel flame: a stream of glowing blocks pouring up off the pit's coals. The pit's embers are
     // the hub's own critter ember batch drawn for the fire at `firePos`, the same style as the HQ hearth's.
@@ -1289,18 +1237,11 @@
     claim(p.x, p.z, 1.4);
     // Spare concentric rings let the whole chilling roster arrive together.
     // Keep the original six seats first; ordinary strolls still use that ring.
-    for (let ring = 1; fireSeats.length < Math.max(FIRE_SEATS, contributors.activeRoster.length * 3); ring++) {
-      const count = FIRE_SEATS * ring, radius = FIRE_SEAT_RADIUS * ring;
-      for (let i = 0; i < count; i++) {
-        const a = (i + 0.5) / count * Math.PI * 2;
-        const x = p.x + Math.cos(a) * radius, z = p.z + Math.sin(a) * radius;
-        fireSeats.push({ x, z, ry: Math.atan2(p.x - x, p.z - z), sit: true });
-      }
-    }
+    BL.npcRoutineDestinations.fireSeatsAt(p, contributors.activeRoster.length, fireSeats);
     return p;
   };
   // Mouth local frame: +z leads out of the cave.
-  const sealedCaveVariant = (id) => id === "c3" ? 1 : id === "c10" ? 2 : 0;
+  const sealedCaveVariant = BL.hubCavePhysics.sealedCaveVariant;
   // Every cave wears its own facade from the shared voxel kit: two lantern posts with a banner behind each, a string over the lintel,
   // vines off the rim, and the theme's own things either side of the path (lab dice and flasks, the mirror's glyph
   // monoliths, the Lightning Factory's coil and coal, Ooga Arcade's two cabinets, hard against the left of its
@@ -1309,38 +1250,7 @@
   // so a revisit only places nodes. Pieces are [kind, x, z, quarter turns, variant, lift] in the mouth's frame.
   // A `ceiling` run is two cables into the room, [left x, right x, from z, to z, height, lamp places, lamp kind], the kind a
   // hanging lantern unless named (EntropyLab's white strip lights).
-  const THEMES = {
-    lab: { glass: 4, icon: "die", banners: [[-1, 1], [1, 1]], string: ["bulb", 4], ceiling: [[-1.6, 1.6, -1.5, -5.6, 3.0, [0.3, 0.72], "tube"]], pieces: [["flaskBench", -5.3, 1.1], ["die", -4.1, 2.8, 0, 1], ["die", -3.5, 3.6, 1, 3], ["die", -4.1, 2.8, 1, 4, 0.5], ["terminal", 5.2, 1.0], ["die", 4.3, 3.2, 1, 2]] },
-    matrix: { glass: 2, icon: "glyph", banners: [[1, 2], [-1, 2]], string: ["bulb", 2], pieces: [["monolith", -5.0, 0.9, 0, 0], ["monolith", 5.0, 0.9, 0, 1], ["runeStone", -4.2, 2.8, 0, 0], ["runeStone", 4.4, 2.9, 0, 1]] },
-    lightning: { glass: 0, icon: "bolt", banners: [[-1, 0], [1, 0]], string: ["hanging", 0, [0.3, 0.7]], boards: true, pieces: [["gauge", 5.0, 0.9], ["cart", 5.7, 2.4, 1], ["coil", 3.8, 3.4]] },
-    arcade: { glass: 3, icon: "invader", banners: [[-1, 3], [1, 3]], string: ["hanging", 3, [0.12, 0.5, 0.88]], ceiling: [[-2.35, 2.35, -1.5, -5.8, 3.0, [0.35, 0.8]]], pieces: [["cabinet", -3.6, 1.0, 0, 0], ["cabinet", -2.9, 2.2, 0, 1]] },
-    bca: { glass: 0, icon: "abacus", banners: [[-1, 4], [1, 4]], string: ["hanging", 0, [0.2, 0.5, 0.8]], ceiling: [[-1.6, 1.6, -2.2, -5.6, 3.1, [0.5]]], pieces: [["abacus", -5.0, 1.0], ["ledger", 5.0, 1.0, 2]] }
-  };
-  // Themes choose only [side, variant]. The whole standard stays behind and outside the lanterns,
-  // on its own cave's rock shoulder. These extents include the kit's crossbar and foot, not just its pole.
-  const CAVE_LANTERN_X = 4.4, CAVE_LANTERN_Z = 1.6;
-  const CAVE_BANNER_X = 5.25, CAVE_BANNER_Z = -2;
-  const BANNER_HALF_X = 9 / 16, BANNER_HALF_Z = 3 / 16, BANNER_GAP = 1 / 16;
-  const checkCaveBanner = (mouth, side) => {
-    const u = BL.dressing.U;
-    const lx = Math.round(side * CAVE_BANNER_X / u) * u, lz = Math.round(CAVE_BANNER_Z / u) * u;
-    const postX = Math.round(CAVE_LANTERN_X / u) * u, postZ = Math.round(CAVE_LANTERN_Z / u) * u;
-    if (Math.abs(side) !== 1 || Math.abs(lx) - BANNER_HALF_X < postX + 4 * u + BANNER_GAP
-      || lz + BANNER_HALF_Z > postZ - 4 * u - BANNER_GAP)
-      throw new Error(`${mouth.id}: banner must stay behind and outside the lanterns`);
-    const sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry);
-    // Squared-distance differences are affine: checking every corner covers the entire footprint.
-    // Closed mouths participate too; their future facade already owns its side of the gap.
-    for (const dx of [-BANNER_HALF_X, BANNER_HALF_X]) for (const dz of [-BANNER_HALF_Z, BANNER_HALF_Z]) {
-      const bx = lx + dx, bz = lz + dz, own = bx * bx + bz * bz;
-      const x = mouth.x + cr * bx + sr * bz, z = mouth.z - sr * bx + cr * bz;
-      for (const other of island.mouths) {
-        if (other === mouth) continue;
-        const ox = x - other.x, oz = z - other.z;
-        if (ox * ox + oz * oz <= own) throw new Error(`${mouth.id}: banner crosses into ${other.id}'s frontage`);
-      }
-    }
-  };
+  const THEMES = BL.hubMouthDressing.themes;
   const THEME_ICON = (slot) => slot.id === "c1" ? "favicon" : THEMES[slot.theme]?.icon || null;
   const trackCaveSign = (node, slot, mouth) => {
     signDetails.push({
@@ -1369,47 +1279,7 @@
     let byIsland = DRESSED.get(island);
     if (!byIsland) DRESSED.set(island, byIsland = new Map());
     let baked = byIsland.get(slot.id);
-    if (baked) return baked;
-    const theme = THEMES[slot.theme];
-    const sr = Math.sin(m.ry), cr = Math.cos(m.ry);
-    const set = BL.dressing.set(), ground = [], rig = {};
-    // Floor props stay on the apron; banners stand on the raised rock shoulders behind the lamps.
-    const stand = (kind, lx, lz, turns = 0, variant = 0, lift = 0) => {
-      const x = m.x + cr * lx + sr * lz, z = m.z - sr * lx + cr * lz;
-      if ((kind === "barrel" || kind === "bench") && island.overlapsStairs(x, z, 1.7)) return;
-      const y = island.surfaceAt(x, z) - m.floorY;
-      if (Math.abs(y) > 0.9 && kind !== "banner") return;
-      set.put(kind, lx, y + lift, lz, turns, variant);
-      // The coil and its gauge charge on a loop of their own (`coilCharge`).
-      if (kind === "coil" || kind === "gauge") rig[kind] = [lx, y + lift, lz, turns];
-      if (!lift) ground.push(lx, lz);
-    };
-    stand("lanternPost", -CAVE_LANTERN_X, CAVE_LANTERN_Z, 0, theme.glass);
-    stand("lanternPost", CAVE_LANTERN_X, CAVE_LANTERN_Z, 2, theme.glass);
-    for (const piece of theme.pieces) {
-      if (piece[0] === "banner") throw new Error(`${m.id}: use theme.banners for cave standards`);
-      stand(...piece);
-    }
-    for (const [side, variant] of theme.banners || []) {
-      checkCaveBanner(m, side);
-      stand("banner", side * CAVE_BANNER_X, CAVE_BANNER_Z, 0, variant);
-    }
-    const [lamp, variant, at] = theme.string;
-    set.cable(-3.05, 3.42, CAVE_LIGHT_Z, 3.05, 3.42, CAVE_LIGHT_Z, 0.3, at || [0.1, 0.24, 0.38, 0.5, 0.62, 0.76, 0.9], lamp, variant);
-    set.cable(-3.65, 3.18, -0.22, -3.05, 3.42, CAVE_LIGHT_Z, 0.08);
-    set.cable(3.65, 3.18, -0.22, 3.05, 3.42, CAVE_LIGHT_Z, 0.08);
-    set.put("vine", -3.0, 3.5, CAVE_LIGHT_Z, 0, 0);
-    set.put("vine", 2.6, 3.5, CAVE_LIGHT_Z, 0, 1);
-    // A dark cave's rock stands flush with the rim's face, so the planks go on in front of both.
-    if (theme.boards && slot.status === "dark") set.put("boards", 0, 0.2, 1.06);
-    // Inside the mouth the floor is the cave's own, level with the doorway.
-    for (const [kind, lx, lz, turns = 0, variant = 0, lift = 0] of theme.inside || []) set.put(kind, lx, lift, lz, turns, variant);
-    for (const [ax, bx, az, bz, y, lamps, lamp = "hanging"] of theme.ceiling || []) {
-      set.cable(ax, y, az, ax, y, bz, 0.15, lamps, lamp, theme.glass);
-      set.cable(bx, y, az, bx, y, bz, 0.15, lamps, lamp, theme.glass);
-    }
-    baked = { ...set.build(), ground, rig };
-    byIsland.set(slot.id, baked);
+    if (!baked) byIsland.set(slot.id, baked = BL.hubMouthDressing.bake(island, slot, m));
     return baked;
   };
   // A baked set's nodes under `parent`: the solid collides, the glowing layers breathe with the lamps.
@@ -1504,7 +1374,7 @@
     if (c.needle) c.needle.rotation.z = Math.PI / 2 - dial * Math.PI;
     c.level = level;
   };
-  const CHALKBOARD_X = 6.75, CHALKBOARD_Z = 2.15, CHALKBOARD_YAW = -0.57, CHALKBOARD_SCALE = 1.4;
+  const { x: CHALKBOARD_X, z: CHALKBOARD_Z, yaw: CHALKBOARD_YAW, scale: CHALKBOARD_SCALE } = BL.hubMouthDressing.chalkboard;
   // Writing on the chalkboard takes an Ooga standing in front of it, within the reach the Sphere's keypad allows
   // (timechain-models.js KEYPAD_REACH), its feet about level with the board's foot.
   const CHALKBOARD_REACH = 2.4, CHALKBOARD_RISE = 1.2;
@@ -1566,15 +1436,7 @@
     lampSelValid = false;
     // A shared radius keeps the same three angles as the ring changes. Check the actual half-metre
     // post bases against the rasterized road, not the broad NPC work-area reservations.
-    let radius = island.path.debug.ringOuterRadius + 0.8;
-    for (; radius < MEADOW - 0.7; radius += island.pathUnit) {
-      let clear = true;
-      for (const post of pilePosts) {
-        const p = polar(post.degrees, radius);
-        if (!island.isGrassAt(p.x, p.z) || island.path.overlaps(p.x, p.z, 0.36)) { clear = false; break; }
-      }
-      if (clear) break;
-    }
+    const radius = BL.hubLayout.pilePostRadius(island);
     for (const post of pilePosts) {
       const spot = polar(post.degrees, radius);
       post.node.visible = post.pick.node.visible = post.lamp.light = true;
@@ -1720,124 +1582,19 @@
   // every bedtime walk ends, and out of the south, where the totems and the Oogatron face the pile; the first frame
   // the north pass, one each side where it fits. A trunk stands PALM_PATH off every path; one the pile's ring path
   // grows to is removed.
-  const PALM_COUNT = 8, PALM_CANDIDATES = 400, PALM_GAP = 5, PALM_INNER = 6, PALM_OUTER = MEADOW_OUTER - 2.5;
-  const PALM_RUN_CLEAR = 3, PALM_STAIR_CLEAR = 6, PALM_SOUTH = 45 * DEG, PALM_PATH = 0.9;
+  const PALM_PATH = 0.9;
   // The visit's meadow palms, { owner, reservation }, for the ring to take back.
   const meadowPalms = [];
   const plantPalms = () => {
     if (renderer.kind === "canvas2d") return;
-    const rand = mulberry32(fnv1a("palms"));
-    let n = 0;
-    // Level ground off the paths and stairs, with nothing else claimed where the trunk would stand.
-    const stands = (x, z) => {
-      const y = island.surfaceAt(x, z);
-      if (nearPath(x, z, PALM_PATH) || island.overlapsStairs(x, z, 2) || !free(x, z, 1.2)) return false;
-      // Level ground only: every side within a quarter metre of the foot.
-      for (let i = 0; i < 4; i++) if (Math.abs(island.surfaceAt(x + Math.cos(i * 1.571) * 0.6, z + Math.sin(i * 1.571) * 0.6) - y) > 0.26) return false;
-      return true;
-    };
-    const plant = (x, z, yaw = null) => {
-      if (!stands(x, z)) return null;
-      const y = island.surfaceAt(x, z);
-      const variant = n++ % 3;
-      const node = createNode({ geometry: BL.dressing.palm(variant), position: { x, y, z }, rotation: { x: 0, y: yaw ?? rand() * Math.PI * 2, z: 0 }, sightHidden: true });
-      addChild(root, node);
-      placed.push(node);
-      const owner = addProp("palm", node, x, z, 1.6);
-      owner.variant = variant;
-      solids.add(node);
-      return { owner, reservation: claim(x, z, 1.2) };
-    };
-    // A grove: up to `size` palms round a centre a trunk-and-crown apart (2.9 m), each standing only where it fits.
-    const grove = (cx, cz, size, fits) => {
-      if (size === 1) return fits(cx, cz) && plant(cx, cz) ? 1 : 0;
-      let planted = 0;
-      const a0 = rand() * Math.PI * 2, r = size === 2 ? 1.45 : 1.68;
-      for (let k = 0; k < size; k++) {
-        const a = a0 + k * Math.PI * 2 / size, x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
-        if (fits(x, z) && plant(x, z)) planted++;
-      }
-      return planted;
-    };
-    const groveSize = () => {
-      const r = rand();
-      return r < 0.25 ? 1 : r < 0.65 ? 2 : 3;
-    };
-    // The gorillas' runs join every pair of work caves, from either cave's doorway step or apron (2.6 m and 5.5 m
-    // out, where clankers.js walks a gorilla out and in) to either of the other's.
-    const ends = caves.slots.filter(workCave).map((slot) => {
-      const m = island.mouths.find((entry) => entry.id === slot.id), sr = Math.sin(m.ry), cr = Math.cos(m.ry);
-      return [2.6, 5.5].map((d) => ({ x: m.x + sr * d, z: m.z + cr * d }));
-    });
-    // Where a bed trip leaves the meadow (clankerBeds' first point).
-    const foot = poolModels.SITE.approachFrom - 0.8, footX = poolModels.DIR.x * foot, footZ = poolModels.DIR.z * foot;
-    const runs = [];
-    for (let i = 0; i < ends.length; i++) for (let j = i + 1; j < ends.length; j++)
-      for (const a of ends[i]) for (const b of ends[j]) runs.push(a, b);
-    const offRuns = (x, z) => {
-      for (let i = 0; i < runs.length; i += 2) {
-        const a = runs[i], dx = runs[i + 1].x - a.x, dz = runs[i + 1].z - a.z;
-        const t = clamp(((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz), 0, 1);
-        if (Math.hypot(a.x + dx * t - x, a.z + dz * t - z) < PALM_RUN_CLEAR) return false;
-      }
-      return true;
-    };
-    // Nothing within PALM_SOUTH of due south, the meadow between the Headquarters mouths: the clearing before the
-    // totems and the Oogatron's board.
-    const meadowFits = (x, z) => island.surfaceAt(x, z) === 0 && !nearMouth(x, z, 6) && entranceClear(x, z, 1.2) && offRuns(x, z)
-      && Math.hypot(x - footX, z - footZ) >= PALM_STAIR_CLEAR && Math.atan2(Math.abs(x), z) >= PALM_SOUTH && stands(x, z);
-    // The north end: a palm either side of the pass, from the meadow's edge, the only ground there beyond the runs.
-    const northPalm = (side) => {
-      for (let deg = 14; deg >= 6; deg--) for (let r = MEADOW_OUTER; r >= MEADOW_OUTER - 1.5; r -= 0.25) {
-        const p = polar(side * deg, r);
-        if (meadowFits(p.x, p.z)) { meadowPalms.push(plant(p.x, p.z)); return; }
-      }
-    };
-    northPalm(-1);
-    northPalm(1);
-    // Best candidate: of PALM_CANDIDATES seeded spots each time, the fitting one farthest from the palms already
-    // standing, so they spread evenly at every distance from the pile, none nearer another than PALM_GAP. The radius
-    // is drawn uniformly, not by area, so the inner meadow holds its share.
-    for (let k = meadowPalms.length; k < PALM_COUNT; k++) {
-      let x = 0, z = 0, best = PALM_GAP;
-      for (let c = 0; c < PALM_CANDIDATES; c++) {
-        const p = polar(rand() * 360, lerp(PALM_INNER, PALM_OUTER, rand()));
-        let gap = Infinity;
-        for (const { owner } of meadowPalms) gap = Math.min(gap, Math.hypot(owner.x - p.x, owner.z - p.z));
-        if (gap > best && meadowFits(p.x, p.z)) { best = gap; x = p.x; z = p.z; }
-      }
-      if (best === PALM_GAP) break;
-      meadowPalms.push(plant(x, z));
-    }
-    // The palm that stood against the hill in the library's frontage steps a couple of metres out into the meadow,
-    // so the widened nook and the stone above it stand clear of its crown.
-    const axis = Math.atan2(LIBRARY.x, -LIBRARY.z);
-    for (const { owner, reservation } of meadowPalms) {
-      if (!owner) continue;
-      const r = Math.hypot(owner.x, owner.z), bearing = Math.atan2(owner.x, -owner.z);
-      if (r > 20.2 || Math.abs(bearing - axis) * r > LIBRARY.width / 2 + 1.4) continue;
-      const moved = r - 2.5, x = Math.sin(bearing) * moved, z = -Math.cos(bearing) * moved;
-      owner.node.position.x = x; owner.node.position.z = z;
-      owner.node.position.y = island.surfaceAt(x, z);
-      owner.x = x; owner.z = z;
-      reservation.x = x; reservation.z = z;
-    }
-    plantHammock(offRuns, { plant, fits: meadowFits, stands, variant: () => n % 3 });
-    // Along the cliff tops, where they break the skyline.
-    const cliffTop = (x, z) => island.surfaceAt(x, z) > 2.5 && !nearMouth(x, z, 5);
-    for (let deg = 11, placedTop = 0; deg < 360 && placedTop < 16; deg += 34) {
-      const size = groveSize();
-      for (let k = 0; k < 5; k++) {
-        const p = polar(deg + (rand() - 0.5) * 14, lerp(CLIFF_INNER, CLIFF_OUTER, rand()));
-        const planted = grove(p.x, p.z, size, cliffTop);
-        if (planted) { placedTop += planted; break; }
-      }
-    }
+    BL.hubMainlandPlanting.plantPalms({ island, root, placed, solids, addProp, claim, free,
+      nearPath, nearMouth, entranceClear, slots: caves.slots, meadowPalms, plantHammock });
   };
   // The pile's ring path widens as the pile grows: a meadow palm it comes within PALM_PATH of is removed for the
   // rest of the visit, its pick, prop, solid and claim with it. The next visit plants only where the ring leaves room.
   const clearRingPalms = () => {
-    const reach = island.path.debug.ringOuterRadius + PALM_PATH;
+    const reach = Math.max(island.path.debug.ringOuterRadius,
+      !layoutBuilding && builtHostLayout ? builtHostLayout.snapshot.history.ring : 0) + PALM_PATH;
     let removed = false;
     for (let i = meadowPalms.length - 1; i >= 0; i--) {
       const { owner, reservation } = meadowPalms[i];
@@ -1852,84 +1609,11 @@
   };
   // One resting hammock beside Ooga Arcade. Prefer existing palms in one patch; a sparse
   // meadow may receive one companion palm only after its full span and rest/exit area fit.
-  const ARCADE_PALM_REACH = 8, ARCADE_PALM_ALONG = 0.15;
   let hammock = null;
   const hammockClaims = [];
   const plantHammock = (offRuns, planting) => {
-    if (!arcadeMouth) return;
-    const H = BL.hubHammock, lines = island.path.centerlines;
-    let spoke = null, best = Infinity;
-    for (const line of lines) {
-      const end = line[line.length - 1], d = Math.hypot(end.x - arcadeMouth.x, end.z - arcadeMouth.z);
-      if (d < best) { best = d; spoke = line; }
-    }
-    // Each palm's side of the spoke, its distance from it and how far along it lies.
-    const sides = [];
-    for (const { owner } of meadowPalms) {
-      if (!owner) continue;
-      let distance = Infinity, side = 0, along = 0;
-      for (let i = 0; i + 1 < spoke.length; i++) {
-        const a = spoke[i], b = spoke[i + 1], dx = b.x - a.x, dz = b.z - a.z, len2 = dx * dx + dz * dz;
-        const t = clamp(((owner.x - a.x) * dx + (owner.z - a.z) * dz) / len2, 0, 1), px = a.x + dx * t - owner.x, pz = a.z + dz * t - owner.z;
-        const d = Math.hypot(px, pz);
-        if (d < distance) { distance = d; side = Math.sign(dx * (owner.z - a.z) - dz * (owner.x - a.x)); along = (i + t) / (spoke.length - 1); }
-      }
-      if (distance < ARCADE_PALM_REACH && along > ARCADE_PALM_ALONG && side) sides.push({ owner, side });
-    }
-    // A trunk at the rope attachment: its middle at TIE over its foot, turned by the palm's yaw.
-    const tie = (owner) => {
-      const node = owner.node, trunk = BL.dressing.palmTrunk(owner.variant, H.TIE), ry = node.rotation.y;
-      return { x: node.position.x + Math.cos(ry) * trunk.x, z: node.position.z - Math.sin(ry) * trunk.x, ground: node.position.y, r: trunk.r };
-    };
-    let chosen = null, nearest = Infinity;
-    const consider = (a, b, extra = false) => {
-      const ta = tie(a.owner), tb = tie(b.owner), mid = Math.hypot((ta.x + tb.x) / 2 - arcadeMouth.x, (ta.z + tb.z) / 2 - arcadeMouth.z);
-      if (mid >= nearest) return;
-      const skipA = meadowPalms.find((entry) => entry.owner === a.owner)?.reservation;
-      const skipB = meadowPalms.find((entry) => entry.owner === b.owner)?.reservation;
-      const pathClear = (x, z, r) => !nearPath(x, z, r) && entranceClear(x, z, r) && !island.overlapsStairs(x, z, r);
-      const clear = (x, z, r) => {
-        if (!pathClear(x, z, r) || nearMouth(x, z, 4) || !offRuns(x, z)) return false;
-        for (const c of claimed) if (c !== skipA && c !== skipB && Math.hypot(c.x - x, c.z - z) < c.r + r) return false;
-        return true;
-      };
-      const plan = H.plan({ a: ta, b: tb, clear, surfaceAt: island.surfaceAt, pathClear });
-      if (plan) { chosen = { plan, a, b, ta, tb, extra }; nearest = mid; }
-    };
-    for (let i = 0; i < sides.length; i++) for (let j = i + 1; j < sides.length; j++) {
-      if (sides[i].side === sides[j].side) consider(sides[i], sides[j]);
-    }
-    // If the sparse meadow has no pair, plant one companion palm in the same clear grass
-    // patch. The full span must fit before it becomes a prop, collision or reservation.
-    if (!chosen) for (const a of sides) for (const radius of [5, 5.75, 6.5]) for (let k = 0; k < 24; k++) {
-      const x = a.owner.x + Math.cos(k * Math.PI / 12) * radius, z = a.owner.z + Math.sin(k * Math.PI / 12) * radius;
-      if (!planting.fits(x, z)) continue;
-      const owner = { x, z, variant: planting.variant(), node: { position: { x, y: island.surfaceAt(x, z), z }, rotation: { y: 0 } } };
-      consider(a, { owner }, true);
-    }
-    if (!chosen) return;
-    // Keep the near palm; move its companion toward the Arcade, beside the berry bush.
-    // This authored spot uses actual trunk, path and stair clearance instead of the
-    // random meadow planting's broad exclusion around the clankers' bed approach.
-    const companionX = 13.5, companionZ = 4.75;
-    if (chosen.extra && planting.stands(companionX, companionZ)
-      && entranceClear(companionX, companionZ, 1.2) && offRuns(companionX, companionZ) && !nearMouth(companionX, companionZ, 6)) {
-      const x = companionX, z = companionZ;
-      const owner = { x, z, variant: planting.variant(), node: { position: { x, y: island.surfaceAt(x, z), z }, rotation: { y: 0 } } };
-      consider(chosen.a, { owner }, true);
-    }
-    if (chosen.extra) {
-      const entry = planting.plant(chosen.b.owner.x, chosen.b.owner.z, 0);
-      if (!entry) return;
-      meadowPalms.push(entry); chosen.b.owner = entry.owner;
-    }
-    const { plan } = chosen;
-    hammock = H.create({ plan, root, solids, ra: chosen.ta.r, rb: chosen.tb.r, seed: fnv1a("hammock"), anchors: [chosen.a.owner, chosen.b.owner] });
-    hammock.anchors = [chosen.a.owner, chosen.b.owner];
-    // Three circles along the bed's swing (its `envelope`), each covering a third of its length and its whole width.
-    const { half, across } = plan.envelope, cover = Math.hypot(half / 3, across);
-    for (const k of [-1, 0, 1]) hammockClaims.push(claim(plan.x + plan.ux * k * half * 2 / 3, plan.z + plan.uz * k * half * 2 / 3, cover));
-    for (const seat of hammock.seats) hammockClaims.push(claim(seat.walkAt.x, seat.walkAt.z, 0.5));
+    hammock = BL.hubMainlandPlanting.plantHammock({ island, root, solids, claimed, claim,
+      nearPath, entranceClear, nearMouth, arcadeMouth, meadowPalms, hammockClaims }, offRuns, planting) || null;
   };
   // A visitor resting in the hammock gets up first: stood beside it where there is room, else let go where it sits.
   const vacateHammock = () => {
@@ -2005,58 +1689,10 @@
     lawn = { node, version: -1 };
     layLawn();
   };
-  const registerClimbMasonry = (node, mouth) => {
-    node.climbMasonry = true;
-    const sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry), y = mouth.floorY + node.position.y;
-    const slabs = node.geometry.climbBoxes, boxes = [];
-    let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-    for (let at = 0; at < slabs.length; at += 6) {
-      const box = new Float64Array(24);
-      for (let corner = 0; corner < 8; corner++) {
-        const x = slabs[at + (corner & 1 ? 3 : 0)], z = slabs[at + (corner & 4 ? 5 : 2)] + node.position.z;
-        const wx = mouth.x + cr * x + sr * z, wy = y + slabs[at + (corner & 2 ? 4 : 1)], wz = mouth.z - sr * x + cr * z;
-        box[corner * 3] = wx; box[corner * 3 + 1] = wy; box[corner * 3 + 2] = wz;
-        minX = Math.min(minX, wx); minY = Math.min(minY, wy); minZ = Math.min(minZ, wz);
-        maxX = Math.max(maxX, wx); maxY = Math.max(maxY, wy); maxZ = Math.max(maxZ, wz);
-      }
-      boxes.push(box);
-    }
-    climbMasonry.push({
-      node, x: mouth.x, y, z: mouth.z, sr, cr, offsetZ: node.position.z,
-      boxes, minX, minY, minZ, maxX, maxY, maxZ
-    });
-  };
   const buildMouth = (slot, m) => {
     const ax = Math.sin(m.ry), az = Math.cos(m.ry);
     const caveIndex = island.mouths.indexOf(m) + 1;
-    const group = createNode({ position: { x: m.x, y: m.floorY, z: m.z }, rotation: { x: 0, y: m.ry, z: 0 } });
-    const rim = createNode({ position: { x: 0, y: slot.status === "headquarters" ? 0 : -RIM_SEAM_DROP, z: PORTAL_Z }, geometry: hubModels.caveMouthRim(slot.status === "headquarters" ? 1 : 0), sightSolid: true });
-    addChild(group, rim);
-    solids.add(rim);
-    registerClimbMasonry(rim, m);
-    if (slot.status === "headquarters") {
-      const lintel = createNode({ position: { x: 0, y: -RIM_SEAM_DROP, z: PORTAL_Z }, geometry: hubModels.caveMouthRim(2), sightSolid: true });
-      addChild(group, lintel);
-      solids.add(lintel);
-      registerClimbMasonry(lintel, m);
-      headquartersRimLintels.push(lintel);
-    }
-    if (slot.status === "dark") {
-      const geometry = hubModels.sealedCaveFace(sealedCaveVariant(slot.id));
-      const seal = createNode({ position: { x: 0, y: 0, z: 0.52 }, geometry, matrixExterior: true, sightSolid: true });
-      addChild(group, seal);
-      solids.add(seal);
-      registerClimbMasonry(seal, m);
-      sealedCaves.push({ caveIndex, mouth: m, node: seal, sr: ax, cr: az, stopZ: seal.position.z + geometry.frontZ + 0.01 });
-      closedCaveZones.push({ active: true, x: m.x, z: m.z, floor: m.floorY, sr: ax, cr: az, half: PORTAL_MAX_X + 0.25, front: seal.position.z + geometry.frontZ + 0.26 });
-    } else if (slot.status === "mirror") {
-      const opening = rim.geometry.openingBounds;
-      const geometry = { ...hubModels.matrixPrisonBars(), matrixCave: caveIndex, clipMinY: m.floorY + opening.floorY, clipMaxY: m.floorY + opening.ceilingY };
-      const bars = createNode({ position: { x: 0, y: MATRIX_GATE_HIDDEN_Y, z: 0.78 }, geometry, visible: false, matrixExterior: true });
-      addChild(group, bars);
-      const bounds = BL.scene.boundsOf(geometry);
-      matrixGates.push({ kind: "matrix-gate", caveIndex, mouth: m, node: bars, sr: ax, cr: az, open: false, localOpen: false, locked: false, raising: false, held: false, floor: opening.floorY, ceiling: opening.ceilingY, bottom: bounds.min[1], top: bounds.max[1], minX: bounds.min[0], maxX: bounds.max[0], minZ: bars.position.z + bounds.min[2], maxZ: bars.position.z + bounds.max[2] });
-    }
+    const { group, rim } = cavePhysics.buildShell(slot, m, caveIndex);
     if (slot.status === "headquarters") {
       addChild(group, createNode({ position: { x: 0, y: 0, z: 0 }, geometry: headquartersModels.entranceRamp(), depthBias: 0.25 }));
     } else if (slot.status === "open" && slot.scene === "arcade") {
@@ -2070,48 +1706,11 @@
       }
       arcadeMouth = { slot, x: m.x + ax * MOUTH_ACTION_Z, y: m.floorY + 1.1, z: m.z + az * MOUTH_ACTION_Z };
     } else if (slot.status === "open" && slot.scene === "lab") {
-      const lab = hubModels.entropyLab(m.room, m.floorY);
-      addChild(group, lab.node);
-      for (const node of lab.solids) solids.add(node);
-      for (const display of lab.displays) if (display.node.geometry.imageSurface) {
-        addTarget(display.node, { kind: "lab-link", priority: 2, weaponType: "none" });
-      }
-      const sr = Math.sin(m.ry), cr = Math.cos(m.ry);
-      const stations = lab.stations.map((station) => ({
-        ...station,
-        x: m.x + cr * station.x + sr * station.z, y: m.floorY + (station.y || 0),
-        z: m.z - sr * station.x + cr * station.z, heading: m.ry + station.heading
-      }));
-      for (const item of lab.equipment) {
-        const p = item.pickup, x = p.x, z = p.z;
-        p.x = m.x + cr * x + sr * z; p.y += m.floorY; p.z = m.z - sr * x + cr * z;
-        item.holder = null;
-      }
-      entropyLab = { ...lab, group, mouth: m, opening: rim.geometry.openingBounds, stations, phase: null };
+      entropyLab = BL.hubWorkInteriors.lab({ mouth: m, group, opening: rim.geometry.openingBounds, solids, addTarget });
     } else if (slot.status === "open" && slot.scene === "factory") {
-      // The Lightning Factory's tunnel: timber sets and lamps down to a phase shield like the lab's, set further in.
-      const tunnel = BL.factoryModels.hubTunnel();
-      addChild(group, createNode({ geometry: tunnel.timber }), createNode({ geometry: tunnel.glow, sightHidden: true }));
-      const tube = BL.factoryModels.ROOF_TUBE, sr = Math.sin(m.ry), cr = Math.cos(m.ry);
-      const tx = m.x + cr * tube.x + sr * tube.z, tz = m.z - sr * tube.x + cr * tube.z;
-      const base = island.surfaceAt(tx, tz) - 0.35;
-      const outlet = createNode({ position: { x: tube.x, y: base - m.floorY, z: tube.z }, geometry: BL.factoryModels.bananaOutlet() });
-      addChild(group, outlet);
-      solids.add(outlet);
-      if (island.roofOpening) {
-        const shaft = createNode({ position: { x: tube.x, y: base - m.floorY, z: tube.z }, geometry: BL.factoryModels.outletShaft(base - island.roofOpening.bottom) });
-        addChild(group, shaft); solids.add(shaft);
-      }
-      factoryMouth = {
-        slot, mouth: m, group, opening: rim.geometry.openingBounds, phase: null,
-        deliverySource: { x: tx, y: base + tube.height, z: tz }
-      };
+      factoryMouth = BL.hubWorkInteriors.factory({ slot, mouth: m, group, opening: rim.geometry.openingBounds, solids, island });
     } else if (slot.status === "open" && slot.place === "bca") {
-      // B.C.A.'s office behind its veil: two desks, their chairs, abacuses and screens, shelves and the firm's plaque.
-      const office = BL.bcaModels.office(m);
-      addChild(group, office.node);
-      for (const node of office.solids) solids.add(node);
-      bcaMouth = { slot, mouth: m, group, opening: rim.geometry.openingBounds, phase: null, office };
+      bcaMouth = BL.hubWorkInteriors.office({ slot, mouth: m, group, opening: rim.geometry.openingBounds, solids });
     } else if (slot.status === "open") {
       const geometry = hubModels.caveShelves(), back = -6.5 - BL.scene.boundsOf(geometry).min[2];
       for (const x of [-1.3, 1.3]) {
@@ -2164,130 +1763,14 @@
       matrixCave = { mouth: m, caveIndex, sr: ax, cr: az, portal: buildMatrixPortal(m) };
       const gate = matrixGates.find((candidate) => candidate.caveIndex === matrixCave.caveIndex);
       mirrorCave.gate = gate;
-      const gateShift = MIRROR_GATE_Z - gate.node.position.z;
-      gate.node.position.z = MIRROR_GATE_Z;
-      gate.minZ += gateShift;
-      gate.maxZ += gateShift;
-      gate.locked = MIRROR_GATE_CLOSED;
-      if (gate.locked) {
-        gate.node.position.y = gate.floor;
-        gate.node.visible = true;
-        closedCaveZones.push({ active: true, x: m.x, z: m.z, floor: m.floorY, sr: ax, cr: az, half: PORTAL_MAX_X + 0.25, front: PORTAL_Z + 0.25 });
-      }
+      cavePhysics.finishMirror(gate);
     }
     return rim;
   };
   const buildHeadquarters = () => {
-    const floor = island.headquarters.floor, basement = island.headquarters.basement;
-    const room = createNode({ position: { x: 0, y: floor, z: 0 }, geometry: headquartersModels.room() });
-    addChild(root, room);
-    placed.push(room);
-    solids.add(room);
-    const benches = [];
-    for (const x of [-2.6, 2.6]) for (const z of [-0.55, 0.55]) benches.push({ kind: "bench", x, y: floor + 0.58, z, floor, ry: Math.atan2(-x, -z), sitter: null, walkAt: { x: x - Math.sign(x) * 0.85, z } });
-    const entrances = [], lights = [], mattresses = [], roomSigns = [], rampMarkers = [], lazyBeds = [];
-    FLY.yMin = basement.floor - 1;
-    const addEntrance = (node, roomIndex, lower, ramp = false) => {
-      node.sightSolid = true;
-      addChild(root, node);
-      placed.push(node);
-      solids.add(node, true);
-      const bounds = BL.scene.boundsOf(node.geometry);
-      entrances.push({ roomIndex, node, basement: lower, ramp, sr: Math.sin(node.rotation.y), cr: Math.cos(node.rotation.y), radius: Math.hypot(Math.max(Math.abs(bounds.min[0]), Math.abs(bounds.max[0])) * node.scale.x, Math.max(Math.abs(bounds.min[2]), Math.abs(bounds.max[2]))), minY: node.position.y + bounds.min[1], maxY: node.position.y + bounds.max[1] });
-    };
-    const torchAt = (x, y, z) => {
-      const node = createNode({ position: { x, y, z }, geometry: hubModels.torch(), glow: 0.85, matrixEmissiveLiving: true });
-      addChild(root, node);
-      placed.push(node);
-      lights.push({ id: `headquarters:${lights.length}`, node, x, y: y + 1.6, z });
-    };
-    for (const level of [island.headquarters, basement]) for (const cave of level.rooms) {
-      const i = cave.index, angle = cave.angle;
-      const entrance = createNode({ position: { x: cave.entrance.x, y: cave.floor, z: cave.entrance.z }, rotation: { x: 0, y: -angle, z: 0 }, scale: { x: (cave.corridorWidth ?? cave.width - 1.3) / 3.86, y: 1, z: 1 }, geometry: headquartersModels.roomEntrance(i) });
-      addEntrance(entrance, i, level === basement);
-      const dimensions = headquartersModels.MATTRESS, across = -(cave.width / 2 - dimensions.wallInset - dimensions.width / 2), along = cave.depth / 2 - dimensions.wallInset - dimensions.depth / 2;
-      const sx = Math.sin(angle), cx = Math.cos(angle), geometry = LAZY_BEDDING ? headquartersModels.mattressPlaceholder(cave) : headquartersModels.mattress(cave);
-      const sign = createNode({ position: { x: cave.entrance.x - sx * 0.28, y: cave.floor + 3.78, z: cave.entrance.z + cx * 0.28 }, rotation: { x: 0, y: -angle, z: 0 }, geometry: headquartersModels.roomSign(cave, LAZY_BEDDING), matrixSignLiving: true });
-      addChild(root, sign);
-      placed.push(sign);
-      const hanging = { roomIndex: i, basement: level === basement, room: cave, node: sign, sr: -sx, cr: cx, velocity: 0, hits: 0, contacts: 0 };
-      roomSigns.push(hanging);
-      addTarget(sign, { kind: "room-sign", roomSign: hanging });
-      const node = createNode({ position: { x: cave.x + cx * across + sx * along, y: cave.floor, z: cave.z + sx * across - cx * along }, rotation: { x: 0, y: -angle, z: 0 }, geometry });
-      addChild(root, node);
-      placed.push(node);
-      const side = dimensions.width / 2 + 0.5;
-      mattresses.push({
-        roomIndex: i, basement: level === basement, corner: "rear-left", room: cave, node, ...geometry.mattress,
-        x: node.position.x, y: cave.floor, z: node.position.z, sr: -sx, cr: cx, sleeper: null, sleep: dimensions,
-        window: island.headquarters.windows.find((window) => window.kind === "room" && window.roomIndex === i && window.basement === (level === basement)), sightFrame: -1, sightVisible: false,
-        collisionBoxes: new Float64Array([-dimensions.width / 2, 0, -dimensions.depth / 2, dimensions.width / 2, dimensions.surface, dimensions.depth / 2,
-        -0.45, dimensions.surface, dimensions.pillowZ - 0.25, 0.45, dimensions.pillowTop, dimensions.pillowZ + 0.25]),
-        walkAt: { x: node.position.x + cx * side, y: cave.floor, z: node.position.z + sx * side }
-      });
-      if (LAZY_BEDDING) lazyBeds.push({ bed: mattresses[mattresses.length - 1], ready: false, failed: false });
-    }
-    for (const ramp of basement.ramps) {
-      const p = ramp.entrance;
-      // Scale so the model's inner opening, including the voxel edge, clears the tunnel.
-      const entrance = createNode({ position: { x: p.x, y: p.y, z: p.z }, rotation: { x: 0, y: -ramp.angle, z: 0 }, scale: { x: (ramp.width + island.unit * Math.SQRT2) / 3.86, y: 1, z: 1 }, geometry: headquartersModels.rampEntrance(ramp.index) });
-      addEntrance(entrance, ramp.index, false, true);
-    }
-    const addRampMarker = (ramp, label, floor, channel) => {
-      const first = ramp.samples[0], ahead = ramp.samples[Math.min(3, ramp.samples.length - 1)];
-      const dx = ahead.x - first.x, dz = ahead.z - first.z, length = Math.hypot(dx, dz) || 1;
-      const direction = { x: dx / length, z: dz / length };
-      const at = (distance) => {
-        let i = 1; while (i < ramp.samples.length - 1 && ramp.samples[i].s < distance) i++;
-        const from = ramp.samples[i - 1], to = ramp.samples[i], k = (distance - from.s) / (to.s - from.s);
-        return { x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k, z: from.z + (to.z - from.z) * k };
-      };
-      // Both smaller marks sit inside the opening and follow the real ramp
-      // pitch. The label comes first; its arrow continues farther downhill.
-      const fitted = (distance, geometry) => {
-        const half = Math.min(0.35, distance * 0.3), point = at(distance), from = at(distance - half), to = at(distance + half);
-        const tx = to.x - from.x, ty = to.y - from.y, tz = to.z - from.z, horizontal = Math.hypot(tx, tz) || 1;
-        return {
-          point, node: createNode({
-            position: { x: point.x, y: point.y + 0.035, z: point.z }, rotation: { x: Math.atan2(-ty, horizontal), y: Math.atan2(tx, tz), z: 0 },
-            scale: { x: 0.72, y: 0.72, z: 0.72 }, geometry, visible: false, depthBias: 0.35
-          })
-        };
-      };
-      const labelDistance = Math.min(0.85, ramp.length * 0.12), arrowDistance = Math.min(1.85, ramp.length * 0.24);
-      const labelMark = fitted(labelDistance, null);
-      const arrowMark = fitted(arrowDistance, headquartersModels.rampMarkerArrow());
-      const frame = labelMark.node, arrow = arrowMark.node, labelPoint = labelMark.point, arrowPoint = arrowMark.point;
-      const node = createNode({ geometry: headquartersModels.rampMarkerLabel(label), depthBias: 0.35 });
-      const yaw = frame.rotation.y, pitch = frame.rotation.x;
-      const across = { x: Math.cos(yaw), y: 0, z: -Math.sin(yaw) };
-      const downhill = { x: Math.sin(yaw) * Math.cos(pitch), y: -Math.sin(pitch), z: Math.cos(yaw) * Math.cos(pitch) };
-      addChild(frame, node);
-      addChild(root, frame, arrow);
-      placed.push(frame, arrow);
-      rampMarkers.push({ node, frame, arrow, label, across, downhill, channel, ramp, direction, labelDistance, arrowDistance, labelPoint, arrowPoint });
-    };
-    for (let i = 0; i < island.headquarters.ramps.length; i++) addRampMarker(island.headquarters.ramps[i], "HQ", 0, i);
-    for (let i = 0; i < basement.ramps.length; i++) addRampMarker(basement.ramps[i], "B1", floor, i + 2);
-    for (const ramp of island.headquarters.ramps) {
-      const p = ramp.samples[30], angle = Math.atan2(p.x, -p.z), radius = Math.hypot(p.x, p.z) - 1.6;
-      torchAt(Math.sin(angle) * radius, p.y + 0.6, -Math.cos(angle) * radius);
-    }
-    const firepit = createNode({ position: { x: 0, y: floor, z: 0 }, geometry: hubModels.firepit() });
-    solids.add(firepit);
-    // The island's voxel flame burns in the HQ hearth too; its embers are the hub's critter batch at the hearth.
-    const rig = BL.blaze.createVoxelRig({ scale: 1, sightHidden: true });
-    addChild(firepit, rig.root);
-    fireRigs.push(rig);
-    fireHazards.push({ node: rig.root, boxes: rig.boxes, pit: firepit, x: 0, y: floor, z: 0, avoidRadius: FIRE_AVOID_RADIUS });
-    addChild(root, firepit);
-    placed.push(firepit);
-    const hearth = { id: "headquarters:hearth", node: rig.root, rig, x: 0, y: floor + 0.6, z: 0, phase: 23 };
-    lights.push(hearth);
-    // The hearth is the only shared HQ point light.
-    // Windows and ramp torches stay physical/emissive; no camera-proximity light spills into an unclaimed room.
-    const sources = [hearth];
-    return { node: room, entrances, mattresses, roomSigns, rampMarkers, lazyBeds, benches, fireHazards, lights, sources, hearth, firepit, rooms: island.headquarters.rooms, windows: island.headquarters.windows, ramps: island.headquarters.ramps, openFloor: island.headquarters.room, basement, sleepMarksVisible };
+    FLY.yMin = island.headquarters.basement.floor - 1;
+    return BL.hubHeadquarters.create({ island, root, solids, placed, addTarget, fireRigs, fireHazards,
+      fireAvoidRadius: FIRE_AVOID_RADIUS, sleepMarksVisible, lazyBedding: LAZY_BEDDING });
   };
   // A poked animal cries out from the shared bubble pool and startles: its own brain decides what that means
   // (the jaguar bolts, the monkey makes for a tree, the toucan takes off, a sleeper wakes).
@@ -2303,8 +1786,6 @@
   // `pool-layout.js` says where everything is; the scatter is claimed off the crossing.
   const buildMempoolIsland = function* (slice) {
     const P = poolModels, S = P.SITE, DIR = P.DIR, L = BL.poolLayout;
-    // How much ground an animal keeps to itself, measured against each plant's own footprint.
-    const BEAST_CLEAR = 1.3;
     const place = P.spot(island, {});
     const site = P.build(place);
     // The group is turned by `place.ry`, so a local point reaches world through that same rotation:
@@ -2340,13 +1821,8 @@
     });
     // Centre the board across the pool on the bridge's axis, facing the crossing with trees behind it.
     // Its face and lettering stay curved around the pool's centre at this same radius.
-    const B = P.CHAIN_BOARD, boardBearing = Math.PI;
-    const boardNode = createNode({ position: { x: Math.sin(boardBearing) * B.r, y: L.LEVEL.shore, z: Math.cos(boardBearing) * B.r }, rotation: { x: 0, y: boardBearing + Math.PI, z: 0 }, geometry: P.chainBoard() });
-    const panelNode = createNode();
-    const boardLegs = createNode({ geometry: { ...P.chainBoardLegs() } });
-    addChild(boardNode, panelNode, boardLegs);
-    site.boardLegs = boardLegs;
-    addChild(site.node, boardNode);
+    const B = P.CHAIN_BOARD;
+    const { boardNode, panelNode, infoNode } = BL.poolSiteProps.boards(site);
     // The visible slate is a circular arc. Test that arc instead of its broad pick sphere, so a gorilla
     // behind the board cannot win a tap, while one standing in front of it still can.
     const boardRadius = B.r - B.d / 2 - 0.02, boardHalfTangent = Math.tan((B.w + 0.57) / (2 * B.r));
@@ -2375,13 +1851,6 @@
       const dx = bx - ax, dy = by - ay, dz = bz - az, distance = Math.hypot(dx, dy, dz);
       return distance > 0.02 && billboardRay(ax, ay, az, dx / distance, dy / distance, dz / distance, distance - 0.02) < Infinity;
     };
-    // The weather key sits to the right when entering from the bridge, just past the curved frame.
-    const infoBearing = boardBearing - (B.w / 2 + P.INFO_SIGN.w / 2 + 0.8) / B.r;
-    const infoNode = createNode({ position: { x: Math.sin(infoBearing) * B.r, y: L.LEVEL.shore, z: Math.cos(infoBearing) * B.r }, rotation: { x: 0, y: infoBearing + Math.PI, z: 0 }, geometry: P.infoSign() });
-    const infoLeg = createNode({ geometry: { ...P.infoSignLeg() } });
-    addChild(infoNode, infoLeg);
-    site.infoLeg = infoLeg;
-    addChild(site.node, infoNode);
     atNode("weathersign", infoNode, 1).priority = 2;
     {
       const canvas = document.createElement("canvas");
@@ -2449,199 +1918,9 @@
         fitting(P.roots(), point.x, point.y + L.DOOR.height - 0.05, point.z, point.bearing);
       }
     }
-    // Where an animal may stand and walk: the forest floor and the ring path, never a nest, a channel, the court,
-    // the shore or the ledge.
-    const beastGround = (x, z) => {
-      const r = Math.hypot(x, z);
-      return r < L.LAKE_R ? L.membraneY(r) : L.groundAt(x, z);
-    };
-    const beastSpot = (x, z) => {
-      if (L.groundAt(x, z) !== L.LEVEL.ground || Math.hypot(x, z) < L.RING.lowland + 0.4) return false;
-      const d = L.turn(Math.atan2(x, z), 0);
-      return !(d > L.COURT.from - 0.2 && d < L.RAMP.start + 0.2 && Math.hypot(x, z) > L.RING.path - 0.5);
-    };
-    // The animals' starting spots are claimed before the scatter, so no plant is seeded where one stands; they
-    // come alive once the forest is placed (`pool-wildlife.js`), since they walk round its trunks and climb them.
-    const beastRand = mulberry32(4343), ANIMALS = [];
-    for (const kind of ["jaguar", "jaguar", "monkey", "monkey", "toucan", "toucan"]) {
-      for (let n = 0; n < 200; n++) {
-        const a = beastRand() * Math.PI * 2, r = L.RING.lowland + 1 + beastRand() * (S.isletR - L.RING.lowland - 2), x = Math.sin(a) * r, z = Math.cos(a) * r;
-        if (!beastSpot(x, z) || L.keptClear(x, z, -0.2) && r > L.RING.path || ANIMALS.some((b) => Math.hypot(x - b[1], z - b[2]) < 6)) continue;
-        ANIMALS.push([kind, x, z, beastRand() * Math.PI * 2]);
-        break;
-      }
-    }
-    const claimed = ANIMALS.map(([, x, z]) => ({ x, z, r: BEAST_CLEAR }));
-    // What the animals keep off, in the island group's frame: the boards, then every trunk, rock and log the
-    // scatter places. The entrance name is overhead, so it does not block the gateway.
-    const obstacles = [
-      { x: boardNode.position.x, z: boardNode.position.z, r: B.w / 2 }, { x: infoNode.position.x, z: infoNode.position.z, r: 0.7 }
-    ];
-    const trees = [], logs = [];
-    // Rainforest: three canopy heights, ferns and shrubs under them, each species one shared geometry
-    // and one prop kind, so every plant answers a tap the way the home island's own scatter does.
-    // `r` is both the footprint it claims and the radius a pointer picks it by; `clear` is how far it
-    // keeps off the paths, the nests, the channels and the court, so only its crown ever reaches over them.
-    // `most` caps each kind: the crowns make the forest, and every fern and shrub is a thousand faces or two,
-    // so the undergrowth is kept to what frames the paths rather than carpeting the floor.
-    const SCATTER = [
-      { upTo: 0.36, kind: "canopy", r: 0.6, clear: 0.55, most: 44 },
-      { upTo: 0.54, kind: "bush", r: 0.55, clear: 0.35, most: 26 },
-      { upTo: 0.76, kind: "poolfern", r: 0.5, clear: 0.2, most: 38 },
-      { upTo: 0.88, kind: "flower", r: 0.6, clear: 0.3, most: 36 },
-      { upTo: 0.95, kind: "poolrock", r: 0.7, clear: 0.7, most: 14 },
-      { upTo: 2, kind: "poollog", r: 1.7, clear: 1.6, most: 8 }
-    ];
-    const grown = { canopy: 0, bush: 0, poolfern: 0, flower: 0, poolrock: 0, poollog: 0 };
-    const rand = mulberry32(4242);
-    const geometryFor = (kind) => kind === "canopy" ? P.CANOPY[(rand() * P.CANOPY.length) | 0]()
-      : kind === "bush" ? P.shrub() : kind === "poolfern" ? P.fern() : kind === "flower" ? P.flowers()
-        : kind === "poolrock" ? P.mossRock() : P.log();
-    const inner = L.RING.lowland * L.RING.lowland, outer = (S.isletR + 0.8) * (S.isletR + 0.8), trunks = [];
-    const level = (x, z, reach, ground) => L.groundAt(x + reach, z) === ground && L.groundAt(x - reach, z) === ground && L.groundAt(x, z + reach) === ground && L.groundAt(x, z - reach) === ground;
-    // Planted, not scattered: trees at the back corners of every nest and behind it, so each clearing lies under
-    // crowns of its own. A trunk stands clear of the beds; only its crown reaches over them.
-    const planted = [];
-    for (const nest of L.NESTS) for (const [across, out] of [[-L.NEST.halfT - 0.35, L.NEST.halfR - 0.3], [L.NEST.halfT + 0.35, L.NEST.halfR - 0.3], [0.3, L.NEST.halfR + 0.75], [-L.NEST.halfT - 0.5, -0.6], [L.NEST.halfT + 0.5, 0.4]]) {
-      const ux = Math.sin(nest.bearing), uz = Math.cos(nest.bearing), x = ux * (L.NEST.r + out) + uz * across, z = uz * (L.NEST.r + out) - ux * across;
-      const ground = L.groundAt(x, z), r = Math.hypot(x, z);
-      if (!(ground >= L.LEVEL.lowland) || r + 0.5 > L.edgeAt(Math.atan2(x, z)) - 0.4 || !level(x, z, 0.3, ground)) continue;
-      if (L.CHANNELS.some((channel) => r <= channel.to + 0.6 && Math.abs(L.turn(Math.atan2(x, z), channel.bearing)) * r < L.CHANNEL.low + 0.6)) continue;
-      planted.push({ x, z, ground });
-      trunks.push({ x, z, r: 0.6 });
-    }
-    // Trees rooted in the bowl's shallows, between outlets, with smaller crowns over the water.
-    for (const deg of [61.5, 97.5, 133.5, 169.5, 205.5, 241.5, 277.5, 313.5]) {
-      const bearing = deg * Math.PI / 180, r = L.LAKE_R;
-      const x = Math.sin(bearing) * r, z = Math.cos(bearing) * r;
-      planted.push({ x, z, ground: L.membraneY(r), pool: true });
-      trunks.push({ x, z, r: 0.6 });
-    }
-    yield* pause(slice);
-    for (let i = 0; i < 3600 + planted.length; i++) {
-      const fixed = i < planted.length ? planted[i] : null;
-      const a = rand() * Math.PI * 2, r = Math.sqrt(inner + rand() * (outer - inner)), roll = rand();
-      const x = fixed ? fixed.x : Math.sin(a) * r, z = fixed ? fixed.z : Math.cos(a) * r;
-      const pick = fixed ? SCATTER[0] : SCATTER.find((e) => roll < e.upTo), ground = fixed ? fixed.ground : L.groundAt(x, z);
-      if (grown[pick.kind] >= pick.most) continue;
-      if (!fixed) {
-        // Undergrowth takes the lowland's damp ground too; everything else wants the dry forest floor or the ridge.
-        const soft = pick.kind === "poolfern" || pick.kind === "bush" || pick.kind === "flower";
-        // Clear of everything that is walked, slept on or flooded, and off the rim.
-        if (!(ground >= (soft ? L.LEVEL.lowland : L.LEVEL.ground)) || Math.hypot(x, z) < L.RING.path + pick.clear || L.keptClear(x, z, soft ? Math.min(pick.clear, 0.15) : pick.clear) && !(soft && ground === L.LEVEL.lowland && Math.hypot(x, z) > L.RING.path + 0.3) || r + pick.r > L.edgeAt(a) - 0.5) continue;
-        // Level ground under the whole footprint: nothing stands half over a terrace's step.
-        if (!level(x, z, pick.r * 0.6, ground)) continue;
-        // Nothing grows through an animal, and trunks keep a body's width apart. Plants still crowd each other,
-        // which is what makes it jungle.
-        if (claimed.some((c) => Math.hypot(x - c.x, z - c.z) < c.r + pick.r)) continue;
-        if (pick.kind === "canopy" || pick.kind === "poolrock" || pick.kind === "poollog") {
-          if (trunks.some((t) => Math.hypot(x - t.x, z - t.z) < t.r + pick.r + 0.7)) continue;
-          trunks.push({ x, z, r: pick.r });
-        }
-      }
-      grown[pick.kind]++;
-      const geometry = geometryFor(pick.kind);
-      // A little scale and turn per copy: free variety, since every copy shares one cached build.
-      const k = (0.82 + rand() * 0.45) * (fixed && fixed.pool ? 0.72 : 1);
-      const node = createNode({ position: { x, y: ground, z }, rotation: { x: 0, y: rand() * Math.PI * 2, z: 0 }, scale: { x: k, y: (0.9 + rand() * 0.3) * (fixed && fixed.pool ? 0.85 : 1), z: k }, geometry });
-      // Undergrowth stays out of the outline registry, as the home scatter's bushes and flowers do.
-      if (pick.kind === "bush" || pick.kind === "poolfern" || pick.kind === "flower") node.sightHidden = true;
-      addChild(site.node, node);
-      atNode(pick.kind, node, pick.r * k);
-      const feature = { x, y: ground, z, ry: node.rotation.y, k, sy: node.scale.y, geometry };
-      if (pick.kind === "canopy") { trees.push(feature); obstacles.push({ x, z, r: 0.45 * k }); }
-      else if (pick.kind === "poolrock") obstacles.push({ x, z, r: 0.75 * k });
-      else if (pick.kind === "poollog") {
-        logs.push(feature);
-        const ax = Math.cos(feature.ry), az = -Math.sin(feature.ry);
-        for (const t of [-1.2, 0, 1.2]) obstacles.push({ x: x + ax * t * k, z: z + az * t * k, r: 0.4 * k });
-      }
-    }
-    yield* pause(slice);
-    // Broad leaves, fern fans and flowering thickets form a middle storey beneath the trees. A separate
-    // seed leaves the established trunks, animal perches and small forest scatter where they were.
-    const foliageRand = mulberry32(6417), undergrowth = P.UNDERGROWTH.map((build) => build()), thickets = [];
-    const plantThicket = (geometry, x, ground, z, width, height, turn) => {
-      const node = createNode({
-        position: { x, y: ground, z }, rotation: { x: 0, y: turn, z: 0 },
-        scale: { x: width, y: height, z: width }, geometry, sightHidden: true
-      });
-      addChild(site.node, node);
-      atNode("bush", node, geometry.plantRadius * width);
-      thickets.push({ x, y: ground, z, r: geometry.plantRadius * width, h: geometry.plantHeight * height });
-    };
-    // Five larger pockets behind the shoreline trees, on their path side in the flooded shallows.
-    // Leaves can reach back over the water; their outer edge and sway stop before the walking path.
-    let foliageIndex = 0;
-    for (const [degrees, count] of [[61.5, 2], [133.5, 3], [205.5, 2], [241.5, 3], [313.5, 2]]) {
-      for (let j = 0; j < count; j++) {
-        const geometry = undergrowth[foliageIndex++ % undergrowth.length];
-        const width = Math.min((j ? 1.04 : 1.32) + foliageRand() * 0.28, 1.78 / geometry.plantRadius);
-        const radius = geometry.plantRadius * width + 0.14;
-        const r = Math.min(L.LAKE_R + 0.6 + foliageRand() * 0.25, L.RING.lowland - 0.12 - radius);
-        const spread = Math.max(0, 18 * DEG - Math.asin((radius + L.CHANNEL.low + 0.03) / r));
-        const bearing = degrees * DEG + (j ? (j & 1 ? 1 : -1) : foliageRand() - 0.5) * spread * 0.9;
-        const x = Math.sin(bearing) * r, z = Math.cos(bearing) * r;
-        plantThicket(geometry, x, Math.max(L.LEVEL.shore, L.groundAt(x, z)), z,
-          width, (j ? 1.35 : 1.6) + foliageRand() * 0.3, bearing + (foliageRand() - 0.5) * 1.8);
-      }
-    }
-    // Start on the raised jungle's outer shoulders, then gather patches around trees and in forest gaps.
-    // Full leaf footprints keep paths, nests and channels open; only the roots need level footing.
-    const poolThickets = thickets.length, shoulders = [55, 75, 95, 115, 135, 145];
-    for (let attempt = 0; attempt < 1200 && thickets.length < poolThickets + 24; attempt++) {
-      const shoulder = attempt < shoulders.length * 12;
-      const geometry = undergrowth[(thickets.length - poolThickets) % undergrowth.length];
-      const width = Math.min(1.02 + foliageRand() * 0.3, (shoulder ? 1.42 : 1.7) / geometry.plantRadius);
-      const radius = geometry.plantRadius * width + 0.12;
-      const angle = shoulder ? (shoulders[(attempt / 12) | 0] + (foliageRand() - 0.5) * 9) * DEG : foliageRand() * Math.PI * 2;
-      const radial = shoulder ? 18.91 + foliageRand() * 0.09
-        : L.RING.path + radius + foliageRand() * (L.edgeAt(angle) - L.RING.path - 2 * radius - 0.3);
-      let x = Math.sin(angle) * radial, z = Math.cos(angle) * radial;
-      if (!shoulder && attempt % 3) {
-        const tree = trees[(foliageRand() * trees.length) | 0];
-        if (Math.hypot(tree.x, tree.z) <= L.LAKE_R + 0.1) continue;
-        const offset = 1.3 + foliageRand() * 1.8;
-        x = tree.x + Math.sin(angle) * offset; z = tree.z + Math.cos(angle) * offset;
-      }
-      const ground = L.groundAt(x, z), r = Math.hypot(x, z), bearing = Math.atan2(x, z);
-      if (ground < L.LEVEL.ground || L.keptClear(x, z, radius) || r + radius > L.edgeAt(bearing) - 0.3
-        || !level(x, z, 0.24 * width, ground)) continue;
-      let supported = true;
-      for (let j = 0; j < 8; j++) {
-        const a = j * Math.PI / 4, px = x + Math.sin(a) * radius, pz = z + Math.cos(a) * radius;
-        if (L.groundAt(px, pz) > ground + L.UNIT || !L.onIsland(px, pz, 0.25)) { supported = false; break; }
-      }
-      if (!supported) continue;
-      if (claimed.some((c) => Math.hypot(x - c.x, z - c.z) < c.r + radius)
-        || obstacles.some((c) => Math.hypot(x - c.x, z - c.z) < c.r + radius * 0.55)
-        || thickets.some((c) => Math.hypot(x - c.x, z - c.z) < (c.r + radius) * 0.62)) continue;
-      plantThicket(geometry, x, ground, z, width, 1.15 + foliageRand() * 0.4, angle);
-    }
-    // What the rain lands on above the ground: the dense middle of every crown, a dome over its cells of the
-    // layout's grid. A crown's ragged edge lets the drops through, so the forest floor still sees rain between
-    // the trees.
-    const CROWN_CORE = 0.8, crownTop = new Float32Array(L.SX * L.SZ).fill(-Infinity);
-    for (const tree of trees) {
-      const c = Math.cos(tree.ry), s = Math.sin(tree.ry);
-      for (const [cx, cy, cz, rx, ry] of tree.geometry.climb.crowns) {
-        const x = tree.x + (cx * c + cz * s) * tree.k, z = tree.z + (cz * c - cx * s) * tree.k, r = rx * tree.k;
-        const i1 = Math.min(L.SX - 1, Math.floor((x + r - L.ORIGIN.x) / L.UNIT)), k1 = Math.min(L.SZ - 1, Math.floor((z + r - L.ORIGIN.z) / L.UNIT));
-        for (let i = Math.max(0, Math.floor((x - r - L.ORIGIN.x) / L.UNIT)); i <= i1; i++) for (let k = Math.max(0, Math.floor((z - r - L.ORIGIN.z) / L.UNIT)); k <= k1; k++) {
-          const dx = L.ORIGIN.x + (i + 0.5) * L.UNIT - x, dz = L.ORIGIN.z + (k + 0.5) * L.UNIT - z, d = (dx * dx + dz * dz) / (r * r);
-          if (d < CROWN_CORE * CROWN_CORE) crownTop[i * L.SZ + k] = Math.max(crownTop[i * L.SZ + k], tree.y + (cy + ry * 0.85 * Math.sqrt(1 - d)) * tree.sy);
-        }
-      }
-    }
-    // Dense undergrowth catches rain too; use its central mass, letting drops through the ragged leaves.
-    for (const plant of thickets) {
-      const r = plant.r * 0.55;
-      const i1 = Math.min(L.SX - 1, Math.floor((plant.x + r - L.ORIGIN.x) / L.UNIT)), k1 = Math.min(L.SZ - 1, Math.floor((plant.z + r - L.ORIGIN.z) / L.UNIT));
-      for (let i = Math.max(0, Math.floor((plant.x - r - L.ORIGIN.x) / L.UNIT)); i <= i1; i++) for (let k = Math.max(0, Math.floor((plant.z - r - L.ORIGIN.z) / L.UNIT)); k <= k1; k++) {
-        const dx = L.ORIGIN.x + (i + 0.5) * L.UNIT - plant.x, dz = L.ORIGIN.z + (k + 0.5) * L.UNIT - plant.z, d = (dx * dx + dz * dz) / (r * r);
-        if (d < 1) crownTop[i * L.SZ + k] = Math.max(crownTop[i * L.SZ + k], plant.y + plant.h * (0.68 + 0.2 * Math.sqrt(1 - d)));
-      }
-    }
+    const { beastGround, beastSpot, ANIMALS, obstacles, trees, logs, crownTop } = yield* BL.poolSiteProps.forest({
+      site, boardNode, infoNode, atNode, pause: () => pause(slice)
+    });
     const WORLD_AT = (lx, lz, out) => { out.x = worldX(lx, lz); out.z = worldZ(lx, lz); return out; };
     const wildlife = BL.poolWildlife.create({
       parent: site.node, obstacles, trees, logs, baseY: place.y, toWorld: WORLD_AT, groundAt: beastGround, spotOk: beastSpot,
@@ -2695,14 +1974,8 @@
     // ground's own terraces, the water wherever it stands, and the home island under the near end of the cell.
     // Past all of those a drop has nothing to land on and falls out of sight.
     const centre = { x: place.x, y: place.y, z: place.z };
-    const groundAt = (gx, gz) => {
-      const lx = localX(gx, gz), lz = localZ(gx, gz), r = Math.hypot(lx, lz);
-      if (r < S.reach) {
-        const ground = r < L.LAKE_R ? L.membraneY(r) : L.groundAt(lx, lz);
-        if (ground > -Infinity) return place.y + Math.max(ground, water.levelAt(lx, lz));
-      }
-      return island.onLand(gx, gz) ? island.surfaceAt(gx, gz) : -Infinity;
-    };
+    const { groundAt, overAt, coveredAt, floatAt, afloat, sightClear, solidAt, rockMaterialAt, boxSolid, boxClear } =
+      BL.poolSupport.create({ island, site, place, water, step: STEP_MAX });
     // Where a raindrop lands: on a crown where one stands over the ground, else on the ground or the water.
     const rainAt = (gx, gz) => {
       const ground = groundAt(gx, gz), i = Math.floor((localX(gx, gz) - L.ORIGIN.x) / L.UNIT), k = Math.floor((localZ(gx, gz) - L.ORIGIN.z) / L.UNIT);
@@ -2710,40 +1983,6 @@
     };
     // Whether a world point is over the island, and whether rock or the lake stands over it: the tunnels, the
     // chamber and its shaft. Height decides it, so someone under the forest is not standing in the forest.
-    const overAt = (wx, wz, margin = 0) => {
-      const dx = wx - place.x, dz = wz - place.z;
-      return dx * dx + dz * dz < S.reach * S.reach && L.onIsland(localX(wx, wz), localZ(wx, wz), margin);
-    };
-    const coveredAt = (wx, wy, wz) => {
-      const dx = wx - place.x, dz = wz - place.z;
-      return dx * dx + dz * dz < S.reach * S.reach && L.covered(localX(wx, wz), wy - place.y, localZ(wx, wz));
-    };
-    // Where the water carries a body whose feet are at `y`: `draught` under the surface, wherever that is clear
-    // of the bed. Only for someone in the water itself, so a walker in the chamber under the lake stays on its
-    // floor; and never more than `rise` above standing feet in one step, so rising water lifts a body, never throws it.
-    const floatAt = (wx, wz, y, rise, draught) => {
-      const dx = wx - place.x, dz = wz - place.z;
-      if (dx * dx + dz * dz > S.reach * S.reach) return -Infinity;
-      const lx = localX(wx, wz), lz = localZ(wx, wz), level = water.levelAt(lx, lz);
-      if (level === -Infinity) return -Infinity;
-      const r = Math.hypot(lx, lz), feet = y - place.y;
-      // A shore cell whose centre lies inside the lake reports the chamber floor. That lower room is
-      // not part of the water volume: use the shore/channel bed as its minimum outside the curved bowl.
-      const bed = r < L.LAKE_R ? L.membraneY(r)
-        : Math.max(r < L.RING.shore ? L.LEVEL.shore : L.LEVEL.bed, L.groundAt(lx, lz));
-      if (feet < bed - STEP_MAX || level - draught <= bed) return -Infinity;
-      // A body standing deeper than a step under where it would float is lifted a step at a time; one falling
-      // in lands at its float.
-      const up = level - draught;
-      return place.y + (rise > 0 && up > feet + rise ? feet + rise : up);
-    };
-    // Whether a point of the water's surface is over someone: for the pose, not the footing.
-    const afloat = (wx, wz, y, draught) => {
-      const dx = wx - place.x, dz = wz - place.z;
-      if (dx * dx + dz * dz > S.reach * S.reach) return false;
-      const level = water.levelAt(localX(wx, wz), localZ(wx, wz));
-      return level > -Infinity && Math.abs(y - place.y - (level - draught)) < 0.12;
-    };
     // Previews for the maintainer, reached under debug as `__ooga.poolIsland.preview`: the lake at a backlog in
     // MvB (null hands it back to the feed), a block's bolt and cube, and an Ooga put to sleep or woken by name.
     const preview = {
@@ -2761,24 +2000,6 @@
     // What the outlines ask of this island's rock, in the world: whether nothing of it stands between two points,
     // whether a point is in it, and whether a box is all rock or all open. The layout's grid answers exactly. A
     // world box is asked as the island-frame box that holds it, so "all rock" and "all open" both stay proofs.
-    const sightClear = (ax, ay, az, bx, by, bz) => L.sightClear(localX(ax, az), ay - place.y, localZ(ax, az), localX(bx, bz), by - place.y, localZ(bx, bz));
-    const solidAt = (wx, wy, wz) => L.solidAt(localX(wx, wz), wy - place.y, localZ(wx, wz));
-    // The camera's near-plane rock fill uses the same voxels and palette as the visible island shell.
-    const rockSource = site.ground.geometry.cutawaySource;
-    const rockMaterialAt = (wx, wy, wz) => {
-      const i = Math.floor((localX(wx, wz) - L.ORIGIN.x) / L.UNIT);
-      const j = Math.floor((wy - place.y - L.ORIGIN.y) / L.UNIT);
-      const k = Math.floor((localZ(wx, wz) - L.ORIGIN.z) / L.UNIT);
-      return i < 0 || j < 0 || k < 0 || i >= L.SX || j >= L.SY || k >= L.SZ ? null
-        : rockSource.palette[rockSource.data[(i * L.SY + j) * L.SZ + k]] || null;
-    };
-    const turned = Math.abs(cos), across = Math.abs(sin);
-    const boxIn = (test) => (minX, minY, minZ, maxX, maxY, maxZ) => {
-      const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2, hx = (maxX - minX) / 2, hz = (maxZ - minZ) / 2;
-      const lx = localX(cx, cz), lz = localZ(cx, cz), rx = turned * hx + across * hz, rz = across * hx + turned * hz;
-      return test(lx - rx, minY - place.y, lz - rz, lx + rx, maxY - place.y, lz + rz);
-    };
-    const boxSolid = boxIn(L.boxSolid), boxClear = boxIn(L.boxClear);
     // What is walked on here rather than walked round: the bridge and the island's own ground in all its pieces.
     const walked = new Set([site.bridge, site.ground, site.floor, site.membrane, ...site.crossings]);
     // Sync once; later searches must not observe visitors, tree animations or this visit's visibility changes.
@@ -2824,27 +2045,9 @@
   // Where the gorillas sleep while their Oogas do: the banana-leaf beds of the Mempool island's nests, and the dry
   // way to each from the home island, as x, z pairs: up the approach stair, over the bridge, across the court,
   // west round the lake on the ring path (the way the nests lie, and never past the ridge), and in at its nest.
-  const clankerBeds = () => {
-    const M = mempoolIsland, L = M.layout, D = poolModels.DIR, ring = (L.RING.lowland + L.RING.path) / 2, ARC = 18 * DEG;
-    const slots = L.SLOTS.map((slot) => ({
-      x: M.worldX(slot.x, slot.z), y: M.place.y + slot.y, z: M.worldZ(slot.x, slot.z), heading: slot.heading + M.place.ry, nest: slot.nest, bearing: L.NESTS[slot.nest].bearing
-    }));
-    const path = (index, out) => {
-      const bed = slots[index], to = bed.bearing - Math.PI * 2;
-      let n = 0;
-      const local = (lx, lz) => { out[n * 2] = M.worldX(lx, lz); out[n * 2 + 1] = M.worldZ(lx, lz); n++; };
-      out[0] = D.x * (poolModels.SITE.approachFrom - 0.8); out[1] = D.z * (poolModels.SITE.approachFrom - 0.8);
-      out[2] = D.x * (M.place.rimRadius - 0.3); out[3] = D.z * (M.place.rimRadius - 0.3);
-      n = 2;
-      local(0, L.R - 1.6); local(0, 15.4); local(0, ring);
-      for (let b = -ARC; b > to + 0.05; b -= ARC) local(Math.sin(b) * ring, Math.cos(b) * ring);
-      local(Math.sin(to) * ring, Math.cos(to) * ring);
-      out[n * 2] = bed.x; out[n * 2 + 1] = bed.z;
-      return n + 1;
-    };
-    // A mark of sleep is the Oogas' own, shown wherever it can be seen: it belongs to no Ooga's bed.
-    return { slots, path, mark: (x, y, z) => fx.zzzAt(x, y, z, null) };
-  };
+  const clankerBeds = () => ({ ...BL.poolSiteProps.sleep(mempoolIsland),
+    mark: (x, y, z) => fx.zzzAt(x, y, z, null) });
+
   // The Timechain Sphere off the southwest rim: the ball, its bridge and its doorway, whose keypad and crossing
   // (timechain-gate.js) open its nine rooms, a scene of their own. Only the outside is the island's.
   const buildTimechainIsland = function* (slice) {
@@ -2949,170 +2152,19 @@
   };
   // The ladder on the bluff; the former Cloud Hopper dock is retired.
   const buildRim = () => {
-    let faceX = MEADOW - 1;
-    while (island.surfaceAt(faceX + island.unit / 2, LADDER_Z) < 3) faceX += island.unit;
-    const foot = faceX - LADDER_LEAN - 0.06;
-    const lean = createNode({ position: { x: foot, y: 0, z: LADDER_Z }, rotation: { x: 0, y: 0, z: -Math.asin(LADDER_LEAN / 4) } });
-    const rungs = createNode({ rotation: { x: 0, y: Math.PI / 2, z: 0 }, geometry: hubModels.ladder() });
-    addChild(lean, rungs);
-    addChild(root, lean);
-    placed.push(lean);
-    claim(foot, LADDER_Z, 1);
-    addProp("ladder", rungs, foot, LADDER_Z, 1.2).lean = lean;
-    spots.push({ x: foot - 1.1, z: LADDER_Z, ry: Math.PI / 2 });
+    const ladder = BL.npcRoutineDestinations.ladder(island);
+    addChild(root, ladder.root); placed.push(ladder.root);
+    claim(ladder.x, ladder.z, 1);
+    addProp("ladder", ladder.rungs, ladder.x, ladder.z, 1.2).lean = ladder.root;
+    spots.push(ladder.spot);
   };
   // Rejection sampling: scatter props, keeping off paths and mouths.
-  const SPREAD_CANDIDATES = 40, SPREAD_TRIES = 1500;
   const scatter = function* (slice) {
-    const rand = mulberry32(SEED);
-    const routeOverlaps = (x, z, radius) => island.path.overlaps(x, z, radius) || island.overlapsStairs(x, z, radius);
-    const treeGroundClear = (geometry, x, z, y) => {
-      // Scan every voxel column touched by the solid crown and a walking body's
-      // radius. Four corner samples miss narrow, higher steps on cave roofs.
-      const reach = geometry.treeSolidRadius + PLAYER_RADIUS, unit = island.unit, half = unit / 2;
-      if (island.overlapsStairs(x, z, reach)) return false;
-      // Reserve a full voxel above two units for the tallest helmeted head-look envelope.
-      const rootRadius = Math.hypot(0.5, 0.25), ceiling = y + geometry.treeSolidCanopyFloor - 2.25;
-      const grid = island.sightGrid, minX = Math.floor((x - reach - grid[1]) / unit), maxX = Math.floor((x + reach - grid[1]) / unit);
-      const minZ = Math.floor((z - reach - grid[3]) / unit), maxZ = Math.floor((z + reach - grid[3]) / unit);
-      for (let gx = minX; gx <= maxX; gx++) for (let gz = minZ; gz <= maxZ; gz++) {
-        const px = grid[1] + (gx + 0.5) * unit, pz = grid[3] + (gz + 0.5) * unit;
-        const distance = Math.hypot(Math.max(0, Math.abs(px - x) - half), Math.max(0, Math.abs(pz - z) - half));
-        if (distance > reach) continue;
-        const floor = island.surfaceAt(px, pz);
-        if (floor > ceiling || distance < rootRadius && floor > y) return false;
-      }
-      return true;
-    };
-    const candidateFree = (x, z, radius) => {
-      for (let i = 0; i < sceneryClaims.length; i++) {
-        const c = sceneryClaims[i];
-        if (Math.hypot(c.x - x, c.z - z) < c.r + radius) return false;
-      }
-      return true;
-    };
-    // Grass is dressing: it reflows with the rest but answers no tap or Space.
-    const addScenery = (geometry, x, z, ry, y, kind, footprint) => {
-      const reservation = claim(x, z, footprint);
-      sceneryClaims.push(reservation);
-      const quiet = kind === "grass";
-      const pickRadius = kind === "tree" ? BL.scene.boundsOf(geometry).radius : footprint + 0.3;
-      const node = place(geometry, x, z, ry, y, quiet ? null : kind, pickRadius);
-      if (quiet) node.screenCull = true;
-      if (quiet || kind === "flower" || kind === "bush") node.sightHidden = true;
-      if (MATRIX_LIVING_PROPS.has(kind)) node.matrixLiving = true;
-      const owner = quiet ? { kind: "prop", prop: kind, node, x, z, ripe: 0, pickRadius: 0, active: true } : props[props.length - 1];
-      owner.footprint = footprint;
-      owner.scenery = true;
-      owner.reservation = reservation;
-      reservation.scenery = owner;
-      scenery.push(owner);
-      return node;
-    };
-    const meadowAt = () => polar(rand() * 360, Math.sqrt(lerp(MEADOW_INNER * MEADOW_INNER, MEADOW_OUTER * MEADOW_OUTER, rand())));
-    const meadowSpot = (x, z, radius) => island.surfaceAt(x, z) <= 0 && !nearMouth(x, z, 3.5) && workSceneryClear(x, z, radius)
-      && candidateFree(x, z, radius) && free(x, z, radius) && !routeOverlaps(x, z, radius);
-    const meadowTurn = (square) => square ? Math.floor(rand() * 4) * Math.PI / 2 + (rand() - 0.5) * 0.4 : rand() * Math.PI * 2;
-    const meadow = (count, radius, kind, geometryAt, square = false) => {
-      for (let n = 0, tries = 0; n < count && tries < 1500; tries++) {
-        const { x, z } = meadowAt();
-        if (!meadowSpot(x, z, radius)) continue;
-        addScenery(geometryAt(n), x, z, meadowTurn(square), 0, kind, radius);
-        n++;
-      }
-    };
-    // Best candidate: each prop takes, of SPREAD_CANDIDATES seeded spots, the fitting one farthest from those already
-    // standing, clear of every open cave's doorway, drawing on to SPREAD_TRIES while none fits. The kinds are dealt
-    // in turn by their share, the one furthest behind next, so each spreads as evenly as the whole.
-    const spread = (kinds) => {
-      const spots = [];
-      let left = 0;
-      for (const k of kinds) { k.n = 0; left += k.count; }
-      for (; left > 0; left--) {
-        let next = null;
-        for (const k of kinds) if (k.n < k.count && (!next || (k.n + 0.5) / k.count < (next.n + 0.5) / next.count)) next = k;
-        let x = 0, z = 0, best = -1;
-        for (let c = 0; c < SPREAD_TRIES && (c < SPREAD_CANDIDATES || best < 0); c++) {
-          const p = meadowAt();
-          let gap = Infinity;
-          for (let i = 0; i < spots.length; i += 2) gap = Math.min(gap, Math.hypot(spots[i] - p.x, spots[i + 1] - p.z));
-          if (gap > best && entranceClear(p.x, p.z, next.radius) && meadowSpot(p.x, p.z, next.radius)) { best = gap; x = p.x; z = p.z; }
-        }
-        if (best >= 0) {
-          addScenery(next.geometryAt(next.n), x, z, meadowTurn(next.square), 0, next.kind, next.radius);
-          spots.push(x, z);
-        }
-        next.n++;
-      }
-    };
-    const cliff = (count, radius, minHeight, kind, geometryAt, grove = false) => {
-      // Safe root ledges are rarer than decorative bush sites (48000 tree tries vs 1200).
-      // Bounds the seeded search while retaining the full grove on the cliffs.
-      let n = 0;
-      const tryAt = (x, z) => {
-        const h = island.surfaceAt(x, z);
-        if (h < minHeight || !free(x, z, radius) || routeOverlaps(x, z, radius)) return false;
-        let clear = true;
-        for (let i = 0; i < 4 && clear; i++) {
-          const a = (i + 0.5) * Math.PI / 2;
-          if (island.surfaceAt(x + Math.cos(a) * 1.2, z + Math.sin(a) * 1.2) > h + 1.5) clear = false;
-        }
-        if (!clear || nearMouth(x, z, 4) || !candidateFree(x, z, radius)) return false;
-        let geometry = geometryAt(n);
-        if (kind === "tree" && !treeGroundClear(geometry, x, z, h)) {
-          // A narrower crown can fit a ledge that cannot clear the next variant.
-          // Try each cached shape once rather than exhaust the search on that tree.
-          let fits = false;
-          for (let variant = 0; variant < 4 && !fits; variant++) {
-            const alternate = hubModels.tree(variant);
-            if (alternate === geometry) continue;
-            if (treeGroundClear(alternate, x, z, h)) { geometry = alternate; fits = true; }
-          }
-          if (!fits) return false;
-        }
-        addScenery(geometry, x, z, rand() * Math.PI * 2, h, kind, radius);
-        n++;
-        return true;
-      };
-      for (let tries = 0; n < count && tries < (kind === "tree" ? 48000 : 1200); tries++) {
-        const { x, z } = polar(rand() * 360, lerp(CLIFF_INNER, CLIFF_OUTER, rand()));
-        if (!tryAt(x, z) || !grove) continue;
-        // Copses: most trees take one or two neighbours just over a footprint apart, so the cliffs read as
-        // groves rather than a ring of singles. A neighbour that does not fit its ledge is simply skipped.
-        const r = rand(), extra = r < 0.25 ? 0 : r < 0.65 ? 1 : 2, a0 = rand() * Math.PI * 2;
-        for (let k = 0; k < extra && n < count; k++) {
-          const a = a0 + k * 2.1 + (rand() - 0.5) * 0.5, d = radius * 2 + 0.2 + rand() * 0.6;
-          tryAt(x + Math.cos(a) * d, z + Math.sin(a) * d);
-        }
-      }
-    };
-    yield* pause(slice);
-    cliff(40, 1.4, 3, "tree", (n) => hubModels.tree(n % 4 === 3 ? 3 : n % 3), true);
-    yield* pause(slice);
-    cliff(30, 1, 0.5, "bush", (n) => hubModels.bush(n % 3));
-    spread([
-      { kind: "bush", count: 30, radius: 0.7, geometryAt: (n) => hubModels.bush(n % 3) }
-    ]);
-    meadow(50, 0.35, "flower", () => hubModels.flowerTuft());
-    meadow(18, 0.3, "grass", () => hubModels.grass());
+    yield* BL.hubMainlandPlanting.scatter({ island, claim, free, nearMouth, workSceneryClear,
+      entranceClear, sceneryClaims, scenery, place, props, pause }, slice);
   };
-  const sceneryReason = (o) => {
-    const clearance = island.path.debug.ringOuterRadius + SCENERY_CLEARANCE;
-    if (o.node.position.y < 2 && !workSceneryClear(o.x, o.z, o.footprint)) return 3;
-    if (o.prop === "bush" && chalkboardClearance) {
-      const board = chalkboardClearance, dx = o.x - board.x, dz = o.z - board.z;
-      const across = dx * board.rightX + dz * board.rightZ, front = dx * board.frontX + dz * board.frontZ;
-      // Keep the board's face and both edges clear without moving the seeded meadow scatter.
-      if (Math.abs(across) < 1.8 * CHALKBOARD_SCALE + o.footprint && front > 0 && front < 2.4 + o.footprint) return 3;
-    }
-    if (Math.hypot(o.x, o.z) - o.footprint < clearance - 1e-9) return 1;
-    if (island.path.overlaps(o.x, o.z, o.footprint) || island.overlapsStairs(o.x, o.z, o.footprint)) return 2;
-    for (let i = 0; i < claimed.length; i++) {
-      const c = claimed[i];
-      if (!c.scenery && Math.hypot(c.x - o.x, c.z - o.z) < c.r + o.footprint) return 3;
-    }
-    return 0;
-  };
+  const sceneryReason = o => BL.hubMainlandPlanting.sceneryReason({
+    island, workSceneryClear, chalkboardClearance, claimed }, o);
   // Remove the bush beside the fire after scattering, keeping every other seeded prop in place.
   const clearFireBush = (firePos) => {
     let nearest = null, distance = Infinity;
@@ -3155,6 +2207,7 @@
   };
   const isPlayerAttack = source => !!source && (source === crew.player || source.controlled && source.actionControlled);
   const weaponImpact = (source, hit, dx, dy, dz, power = 1, projectile = null) => {
+    if (source?.nonInteractive || hit.owner?.cave?.nonInteractive || hit.owner?.entry?.nonInteractive) return;
     if (hit.node === mirrorCave.node) {
       // Ordinary HUB melee reports its contact without the combat-only sweep effect.
       if (!gameMode && !projectile) mirrorCave.ripples.cross(hit.x - dx * 0.02, hit.y - dy * 0.02, hit.z - dz * 0.02,
@@ -3304,179 +2357,47 @@
       : hadMagazines ? "Spare magazines lost to the abyss" : "Loaded AK-47 ammo lost to the abyss");
     return true;
   };
-  const buildSpots = () => {
-    // Sit beside the ramp approaches, leaving the entrance and its walking lane clear.
-    for (const ramp of island.headquarters.ramps) {
-      for (let along = 4; along <= 8; along += 2) for (let side = -1; side <= 1; side += 2) for (let across = 3.25; across <= 4.75; across += 1.5) {
-        const x = ramp.from.x - ramp.axis.x * along + ramp.axis.z * side * across;
-        const z = ramp.from.z - ramp.axis.z * along - ramp.axis.x * side * across;
-        if (island.surfaceAt(x, z) !== 0 || !island.isGrassAt(x, z) || island.path.overlaps(x, z, 0.8)
-          || Math.hypot(x, z) < island.path.debug.ringOuterRadius + 1.5 || !free(x, z, 0.9)) continue;
-        chillSpots.push({ x, z, ry: Math.atan2(-x, -z), sit: true });
-      }
-    }
-    spots.push({ x: 0, z: -(MEADOW + 2.5), ry: Math.PI });
-    for (const m of island.mouths) {
-      // Empty caves are sealed rock, not places for the crew to visit.
-      const slot = caves.slots.find((slot) => slot.id === m.id);
-      if (slot.status === "dark" || slot.status === "mirror" && MIRROR_GATE_CLOSED) continue;
-      spots.push({ x: m.apron.x, z: m.apron.z, ry: Math.atan2(m.x - m.apron.x, m.z - m.apron.z) });
-    }
-    // Leave spare destinations when the roster outgrows the original meadow pool.
-    const rand = mulberry32(SEED + 5), count = Math.max(WANDER_COUNT, contributors.activeRoster.length * 2);
-    for (let n = 0, tries = 0; n < count && tries < 1500; tries++) {
-      const { x, z } = polar(rand() * 360, Math.sqrt(lerp(WANDER_INNER * WANDER_INNER, MEADOW_OUTER * MEADOW_OUTER, rand())));
-      if (island.surfaceAt(x, z) !== 0 || nearMouth(x, z, 3) || npcClosedCaveAt(x, z) || !free(x, z, 0.9)) continue;
-      spots.push({ x, z, ry: NaN });
-      n++;
-    }
-  };
-  const seatTaken = (s) => {
-    for (let caveIndex = 0; caveIndex < crew.list.length; caveIndex++) {
-      const cave = crew.list[caveIndex];
-      const a = cave.act;
-      if ((a.kind === "wander" || a.kind === "idle") && a.spot.x === s.x && a.spot.z === s.z) return true;
-    }
-    return false;
-  };
-  const freeSeat = () => {
-    const start = Math.floor(Math.random() * FIRE_SEATS);
-    for (let i = 0; i < FIRE_SEATS; i++) {
-      const s = fireSeats[(start + i) % FIRE_SEATS];
-      if (!seatTaken(s)) return s;
-    }
-    return null;
-  };
-  const npcWanderPointClear = (s, cave) => {
-    const feet = island.surfaceAt(s.x, s.z), height = cave ? cave.bodyHeight : 1.5;
-    return !npcRampRoofAt(s.x, feet, s.z) && !npcClosedCaveAt(s.x, s.z, feet, height) && !npcPileAt(s.x, feet, s.z, height) && !npcWorkZoneAt(cave, s.x, feet, s.z) && npcFireClear(s.x, feet, s.z, s.x, feet, s.z, height) && walkable(s.x, s.z, s.x, s.z, feet, height, cave);
-  };
-  const settleFireSeat = (cave) => {
-    const radius = Math.max(PLAYER_RADIUS, cave.bodyRadius), height = cave.bodyHeight;
-    const outside = remotes?.actors();
-    seats: for (const s of fireSeats) {
-      // Idle chillers leave the pile's work ring; never seat them where they must immediately move.
-      if (Math.hypot(s.x, s.z) < island.path.debug.ringOuterRadius + 1.5
-        || island.surfaceAt(s.x, s.z) !== 0 || seatTaken(s) || !npcWanderPointClear(s, cave)
-        || !physicalClearAt(s.x, 1e-5, s.z, radius, height, cave)
-        || !propSegmentClear(s.x, 1e-5, s.z, s.x, 1e-5, s.z, radius, height, cave)) continue;
-      for (const other of crew.list) {
-        if (other === cave) continue;
-        // Workers later in roster order already own their loading slots.
-        if (other.state === "away" && other.slot && crew.stateOf(other) === "working"
-          && Math.hypot(s.x - other.slot.x, s.z - other.slot.z) < radius + other.bodyRadius + 0.15) continue seats;
-        if (!other.root.visible) continue;
-        const p = other.root.position, feet = p.y - other.baseY;
-        if (feet < height && feet + other.bodyHeight > 0
-          && Math.hypot(s.x - p.x, s.z - p.z) < radius + other.bodyRadius + 0.15) continue seats;
-      }
-      if (outside) for (const p of outside) {
-        if (p.y < height && p.y + p.height > 0
-          && Math.hypot(s.x - p.x, s.z - p.z) < radius + p.radius + 0.15) continue seats;
-      }
-      return s;
-    }
-    return null;
-  };
-  const wanderSpot = (out, cave = null, settle = false) => {
-    const chilling = cave?.state === "chilling";
-    let s = settle && chilling ? settleFireSeat(cave)
-      : (chilling && Math.random() < 0.6 || RENDER_OPTS.stars > NIGHT && Math.random() < FIRE_SEAT_CHANCE) ? freeSeat() : null;
-    if (s && !npcWanderPointClear(s, cave)) s = null;
-    if (!s && chilling) {
-      const start = Math.floor(Math.random() * chillSpots.length);
-      for (let i = 0; i < chillSpots.length; i++) {
-        const candidate = chillSpots[(start + i) % chillSpots.length];
-        if (candidate.x === out.x && candidate.z === out.z || seatTaken(candidate) || !npcWanderPointClear(candidate, cave)) continue;
-        s = candidate; break;
-      }
-      if (!s) {
-        s = freeSeat();
-        if (s && !npcWanderPointClear(s, cave)) s = null;
-      }
-    }
-    if (!s) {
-      const start = Math.floor(Math.random() * spots.length);
-      for (let i = 0; i < spots.length; i++) {
-        const candidate = spots[(start + i) % spots.length];
-        if (candidate.x === out.x && candidate.z === out.z
-          || seatTaken(candidate)
-          || chilling && Math.hypot(candidate.x, candidate.z) < island.path.debug.ringOuterRadius + 1.5
-          || !npcWanderPointClear(candidate, cave)) continue;
-        s = candidate; break;
-      }
-    }
-    if (!s) return false;
-    out.x = s.x;
-    out.z = s.z;
-    out.ry = chilling && Number.isNaN(s.ry) ? Math.atan2(-s.x, -s.z) : s.ry;
-    out.sit = !!s.sit;
-    return true;
-  };
-  const npcRecoverySpot = (cave, out) => {
-    const p = cave.root.position;
-    let nearest = Infinity;
-    for (let i = 0; i < spots.length; i++) {
-      const s = spots[i], distance = (s.x - p.x) ** 2 + (s.z - p.z) ** 2;
-      if (distance >= nearest || seatTaken(s) || !npcWanderPointClear(s, cave)) continue;
-      const feet = island.surfaceAt(s.x, s.z);
-      let occupied = false;
-      for (let j = 0; j < crew.list.length; j++) {
-        const other = crew.list[j], q = other.root.position, otherFeet = q.y - other.baseY;
-        if (other !== cave && other.root.visible && feet < otherFeet + other.bodyHeight && feet + cave.bodyHeight > otherFeet
-          && Math.hypot(s.x - q.x, s.z - q.z) < cave.bodyRadius + other.bodyRadius) { occupied = true; break; }
-      }
-      if (occupied) continue;
-      nearest = distance; out.x = s.x; out.y = feet; out.z = s.z;
-    }
-    return Number.isFinite(nearest);
-  };
+  const { buildSpots, wanderSpot, npcRecoverySpot } = BL.npcRoutineDestinations.create({
+    getCrew: () => crew, getIsland: () => island, getRosterCount: () => contributors.activeRoster.length,
+    slots: caves.slots, getStars: () => RENDER_OPTS.stars, getOutside: () => remotes?.actors(), random: Math.random,
+    spots, chillSpots, fireSeats, free, nearMouth, mirrorClosed: MIRROR_GATE_CLOSED,
+    npcRampRoofAt: (...args) => npcRampRoofAt(...args), npcClosedCaveAt: (...args) => npcClosedCaveAt(...args),
+    npcPileAt: (...args) => npcPileAt(...args), npcWorkZoneAt: (...args) => npcWorkZoneAt(...args),
+    npcFireClear: (...args) => npcFireClear(...args), walkable: (...args) => walkable(...args),
+    physicalClearAt: (...args) => physicalClearAt(...args), propSegmentClear: (...args) => propSegmentClear(...args) });
   const pileRespawnSpot = (cave, out, initial = false, search = null) => {
-    const inner = Math.max(5, altar.platformRadius + 1.3), outer = inner + 3;
     const radius = Math.max(PLAYER_RADIUS, cave?.bodyRadius || 0), height = cave?.bodyHeight || 1.6;
-    const start = search ? search.angle : initial ? 0 : Math.random() * Math.PI * 2;
     const outside = remotes?.actors();
-    // Fresh random arrivals, then a bounded scan of three rings if crowded. Initial workers fill
-    // deterministic rings from the inside out, with three more rings for the whole roster.
-    // Never fall back to a cave, work slot or the Ooga's old wandering point.
-    candidates: for (let attempt = search ? search.next : 0; attempt < (initial ? 288 : 192); attempt++) {
-      const scan = initial ? attempt : attempt - 48;
-      const angle = scan < 0 ? Math.random() * Math.PI * 2 : start + (scan % 48) * Math.PI / 24;
-      const distance = scan < 0 ? Math.sqrt(lerp(inner * inner, outer * outer, Math.random()))
-        : inner + 0.5 + Math.floor(scan / 48);
-      const x = Math.sin(angle) * distance, z = Math.cos(angle) * distance;
+    return BL.hubArrival.find({ platformRadius: altar.platformRadius, allowed: (x, y, z) => {
       if (island.surfaceAt(x, z) !== 0 || !physicalClearAt(x, 1e-5, z, radius, height, null)
-        || !npcFireClear(x, 0, z, x, 0, z, height)) continue;
+        || !npcFireClear(x, 0, z, x, 0, z, height)) return false;
       for (let i = 0; i < crew.list.length; i++) {
         const other = crew.list[i], p = other.root.position, feet = p.y - other.baseY;
-        if (other !== cave && other.root.visible && feet < height && feet + other.bodyHeight > 0
-          && Math.hypot(p.x - x, p.z - z) < radius + other.bodyRadius + 0.15) continue candidates;
+        if (!cave?.nonInteractive && !other.nonInteractive && other !== cave && other.root.visible && feet < height && feet + other.bodyHeight > 0
+          && Math.hypot(p.x - x, p.z - z) < radius + other.bodyRadius + 0.15) return false;
       }
-      if (outside) for (let i = 0; i < outside.length; i++) {
+      if (outside && !cave?.nonInteractive) for (let i = 0; i < outside.length; i++) {
         const p = outside[i];
         if (p.y < height && p.y + p.height > 0
-          && Math.hypot(p.x - x, p.z - z) < radius + p.radius + 0.15) continue candidates;
+          && Math.hypot(p.x - x, p.z - z) < radius + p.radius + 0.15) return false;
       }
       // A welcome or pose can arrive before the displayed remote pool updates.
       // Reserve the room's current positions as well as the interpolated bodies.
-      if (BL.net.remotes) for (const p of BL.net.remotes.values()) {
+      if (BL.net.remotes && !cave?.nonInteractive) for (const p of BL.net.remotes.values()) {
         if (!p.body || !BL.remotePlayers.onIsland(p.zone)) continue;
         const owner = crew.cavemen.get(p.bodyName || BL.net.bodyName(p.body)), gorilla = p.bodyKind === "gorilla";
         const rig = gorilla && owner && clankers?.list[owner.index]?.gorilla;
         const peerRadius = gorilla ? Math.max(BL.clankers.WALK_RADIUS, rig ? rig.bodyRadius + 0.1 : 0) : owner?.bodyRadius || PLAYER_RADIUS;
         const peerHeight = gorilla ? Math.max(BL.clankers.WALK_HEIGHT, rig ? rig.bodyHeight : 0) : owner?.bodyHeight || REMOTE_BODY_HEIGHT;
         if (p.y < height && p.y + peerHeight > 0
-          && Math.hypot(p.x - x, p.z - z) < radius + peerRadius + 0.15) continue candidates;
+          && Math.hypot(p.x - x, p.z - z) < radius + peerRadius + 0.15) return false;
       }
-      if (clankers) for (let i = 0; i < clankers.list.length; i++) {
+      if (clankers && !cave?.nonInteractive) for (let i = 0; i < clankers.list.length; i++) {
         const entry = clankers.list[i];
-        if (entry.active && !clankerBodySegmentClear(entry, x, 1e-5, z, x, 1e-5, z, radius, height)) continue candidates;
+        if (entry.active && !clankerBodySegmentClear(entry, x, 1e-5, z, x, 1e-5, z, radius, height)) return false;
       }
-      out.x = x; out.y = 0; out.z = z;
-      if (search) search.next = attempt + 1;
       return true;
-    }
-    return false;
+    } }, out, initial, search);
   };
   // Surface caves and the headquarters can share a column below the same roof.
   const supportAt = (x, z, y = Infinity) => island.supportAt(x, z, y, STEP_MAX);
@@ -3521,29 +2442,16 @@
     return floor > -Infinity && floor > island.supportAt(x, z, y, STEP_MAX, ABYSS_FLOOR, PLAYER_RADIUS) ? floor : island.smoothSupportAt(x, z, y, STEP_MAX, PLAYER_RADIUS);
   };
   const PLAYER_RADIUS = 0.3;
+  const cavePhysics = BL.hubCavePhysics.create({ getSolids: () => solids, getMirrorMouth: () => mirrorCave?.mouth,
+    matrixGates, sealedCaves, closedCaveZones, headquartersRimLintels, climbMasonry, radius: PLAYER_RADIUS, step: STEP_MAX });
+  const { matrixGateSegmentClear, matrixGateCeilingAt, workZoneContains, workZoneSegmentClear,
+    npcClosedCaveAt, npcClosedCaveClear } = cavePhysics;
   const BODY_RADIUS = 0.38;
   const BODY_PARTS_SOLID = ["torso", "head", "armR", "armL", "legR", "legL"];
   const BODY_BOUNDS = new Float64Array(6);
   // A swept circle restricted to the time the body overlaps the solid's height.
   // Also catches a fast move across a thin post or another Ooga.
-  const cylinderSegmentClear = (x, y, z, toX, toY, toZ, radius, height, cx, cz, bottom, top, solidRadius) => {
-    const dy = toY - y;
-    let lo = 0, hi = 1;
-    if (dy) {
-      const a = (bottom - height + 1e-7 - y) / dy, b = (top - 1e-7 - y) / dy;
-      lo = Math.max(0, Math.min(a, b)); hi = Math.min(1, Math.max(a, b));
-      if (hi < lo) return true;
-    } else if (y >= top - 1e-7 || y + height <= bottom + 1e-7) return true;
-    const dx = toX - x, dz = toZ - z, length = dx * dx + dz * dz;
-    // Actors can arrive at a shared spawn or be placed by a pointer.
-    // Let an existing overlap separate, while still rejecting any move farther in.
-    const startDistance = (x - cx) ** 2 + (z - cz) ** 2, endDistance = (toX - cx) ** 2 + (toZ - cz) ** 2;
-    if (y < top - 1e-7 && y + height > bottom + 1e-7
-      && startDistance < (radius + solidRadius) ** 2 && endDistance > startDistance + 1e-9 && (x - cx) * dx + (z - cz) * dz >= 0) return true;
-    const t = length ? Math.max(lo, Math.min(hi, ((cx - x) * dx + (cz - z) * dz) / length)) : lo;
-    const ox = x + dx * t - cx, oz = z + dz * t - cz, reach = radius + solidRadius;
-    return ox * ox + oz * oz >= reach * reach - 1e-8;
-  };
+  const cylinderSegmentClear = BL.hubLocomotion.cylinderSegmentClear;
   const actorBounds = (cave) => {
     const p = cave.root.position;
     if (cave.root.quaternion && cave.solidBounds) return cave.solidBounds;
@@ -3555,7 +2463,7 @@
   const updateSleepingSolids = () => {
     for (let index = 0; index < crew.list.length; index++) {
       const cave = crew.list[index];
-      if (!cave.root.visible || !cave.root.quaternion) continue;
+      if (cave.nonInteractive || !cave.root.visible || !cave.root.quaternion) continue;
       const out = cave.solidBounds;
       out[0] = out[1] = out[2] = Infinity; out[3] = out[4] = out[5] = -Infinity;
       BL.scene.updateWorld(cave.root);
@@ -3577,7 +2485,7 @@
     const dx = Math.max(b[0] - x, 0, x - b[3]), dz = Math.max(b[2] - z, 0, z - b[5]);
     return dx * dx + dz * dz < radius * radius - 1e-8;
   };
-  const uprightCharacter = (cave) => cave.root.visible && cave.state !== "sleeping" && !cave.grabbedBy && !cave.root.quaternion && !cave.camp.seat && !cave.camp.rolling;
+  const uprightCharacter = (cave) => !cave.nonInteractive && cave.root.visible && cave.state !== "sleeping" && !cave.grabbedBy && !cave.root.quaternion && !cave.camp.seat && !cave.camp.rolling;
   const standingPassenger = (cave) => uprightCharacter(cave) && cave.hop <= 1e-7 && cave.hopV <= 0 && !cave.jet?.thrust;
   const passengerOf = (cave, support) => {
     if (!support || !cave.riding.support || !uprightCharacter(support)) return false;
@@ -3591,6 +2499,7 @@
     return false;
   };
   const characterSupportAt = (cave) => {
+    if (cave.nonInteractive) return null;
     if (!standingPassenger(cave)) return null;
     const p = cave.root.position, feet = p.y - cave.baseY;
     let support = null, distance = Infinity;
@@ -3606,7 +2515,7 @@
   };
   let clankerSupportActor = null;
   const npcYieldAhead = (cave, fx, fz) => {
-    if (!clankers || cave.humanControlled || cave.remoteControlled) return false;
+    if (!clankers || cave.nonInteractive || cave.humanControlled || cave.remoteControlled) return false;
     const p = cave.root.position, feet = p.y - cave.baseY, shape = BL.agent.torso;
     for (const entry of clankers.list) {
       if (!entry.active || !entry.root.visible || entry.controlled || entry.remoteControlled
@@ -3633,10 +2542,10 @@
       && (rage.debug || rage.agitators[crew.list.indexOf(clankerSupportActor)])
       && rageCaptureEligible(entry, clankerSupportActor)) return false;
     // A gorilla on another floor or hanging overhead is not a step below us.
-    return entry.active && entry.root.position.y <= y + STEP_MAX + 1e-7;
+    return !entry.nonInteractive && entry.active && entry.root.position.y <= y + STEP_MAX + 1e-7;
   };
   const characterClankerSupportAt = (x, z, y, rise, actor) => {
-    if (!clankerMeshes) return -Infinity;
+    if (!clankerMeshes || actor?.nonInteractive) return -Infinity;
     // Grounded Oogas walk over the live mesh without a body/side barrier.
     // Airborne Oogas still land only on surfaces below their world feet.
     const step = actor && actor.hop === 0 && actor.hopV <= 0 && !actor.ladder?.plane
@@ -3701,6 +2610,7 @@
     }
   };
   const beginClankerCapture = (entry, cave, autonomous) => {
+    if (entry?.nonInteractive || cave?.nonInteractive) return false;
     if (!gameMode) return false;
     const rec = entry.capture;
     if (!rec || rec.cave || cave.grabbedBy) return false;
@@ -4336,8 +3246,8 @@
   };
   // Tree tops are landing surfaces for the visitor, not resting floors for wandering Oogas.
   const npcTreeSupportAllowed = (node) => !node.npcTreeSupport;
-  const npcPassesPlayer = (actor, other) => actor?.contributor && !actor.humanControlled && !actor.remoteControlled
-    && (other.humanControlled || other.remoteControlled);
+  const npcPassesPlayer = (actor, other) => actor?.nonInteractive || other.nonInteractive
+    || actor?.contributor && !actor.humanControlled && !actor.remoteControlled && (other.humanControlled || other.remoteControlled);
   const propSupportAt = (x, z, y, rise, actor, ignoreClanker = false, passTraffic = false) => {
     const npc = actor?.contributor && actor !== pilot?.player;
     let floor = solids ? solids.supportAt(x, z, y, rise, PLAYER_RADIUS, null, null, passTraffic, npc ? npcTreeSupportAllowed : null, passTraffic) : -Infinity;
@@ -4366,6 +3276,7 @@
     return ceiling;
   };
   const clankerBodySegmentClear = (other, x, y, z, toX, toY, toZ, radius, height) => {
+    if (other.nonInteractive) return true;
     const shape = BL.agent.footprint, p = other.root.position;
     if (Math.min(y, toY) > p.y + other.height || Math.max(y, toY) + height < p.y) return true;
     const count = shape.count(other), size = shape.radius(other), first = shape.offset(other, 0);
@@ -4400,73 +3311,9 @@
     }
     return true;
   };
-  const bedSupportAt = (x, z, y, maxStep, radius) => {
-    let floor = -Infinity;
-    if (!headquarters) return floor;
-    for (const bed of headquarters.mattresses) {
-      if (y + maxStep < bed.y || !bed.node.visible || bed.node.parent !== root) continue;
-      const dx = x - bed.x, dz = z - bed.z, lx = dx * bed.cr - dz * bed.sr, lz = dx * bed.sr + dz * bed.cr, boxes = bed.collisionBoxes;
-      for (let i = 0; i < boxes.length; i += 6) {
-        const top = bed.y + boxes[i + 4];
-        if (top <= floor || top > y + maxStep + 1e-7) continue;
-        const ox = Math.max(boxes[i] - lx, 0, lx - boxes[i + 3]), oz = Math.max(boxes[i + 2] - lz, 0, lz - boxes[i + 5]);
-        if (radius ? ox * ox + oz * oz < radius * radius - 1e-9 : ox === 0 && oz === 0) floor = top;
-      }
-    }
-    return floor;
-  };
-  const bedCeilingAt = (x, z, y, radius) => {
-    if (cloudPlaying()) return Infinity;
-    let ceiling = Infinity;
-    if (!headquarters) return ceiling;
-    for (const bed of headquarters.mattresses) {
-      if (y >= bed.y + bed.sleep.pillowTop - 1e-7 || !bed.node.visible || bed.node.parent !== root) continue;
-      const dx = x - bed.x, dz = z - bed.z, lx = dx * bed.cr - dz * bed.sr, lz = dx * bed.sr + dz * bed.cr, boxes = bed.collisionBoxes;
-      for (let i = 0; i < boxes.length; i += 6) {
-        if (y >= bed.y + boxes[i + 4] - 1e-7) continue;
-        const ox = Math.max(boxes[i] - lx, 0, lx - boxes[i + 3]), oz = Math.max(boxes[i + 2] - lz, 0, lz - boxes[i + 5]);
-        if (radius ? ox * ox + oz * oz < radius * radius - 1e-9 : ox === 0 && oz === 0) ceiling = Math.min(ceiling, bed.y + boxes[i + 1]);
-      }
-    }
-    return ceiling;
-  };
-  const BED_SWEEP = new Float64Array(14);
-  const bedSegmentClear = (x, y, z, toX, toY, toZ, radius, height, all = false) => {
-    if (cloudPlaying()) return true;
-    if (!headquarters) return true;
-    const dx = toX - x, dy = toY - y, dz = toZ - z;
-    for (const bed of headquarters.mattresses) {
-      if (Math.min(y, toY) >= bed.y + bed.sleep.pillowTop - 1e-7 || Math.max(y, toY) + height <= bed.y
-        || !all && (!bed.node.visible || bed.node.parent !== root)) continue;
-      const lx = (x - bed.x) * bed.cr - (z - bed.z) * bed.sr, lz = (x - bed.x) * bed.sr + (z - bed.z) * bed.cr;
-      const vx = dx * bed.cr - dz * bed.sr, vz = dx * bed.sr + dz * bed.cr, boxes = bed.collisionBoxes;
-      const q = BED_SWEEP;
-      q[0] = lx; q[1] = y - bed.y; q[2] = lz; q[3] = vx; q[4] = dy; q[5] = vz; q[6] = radius; q[7] = height;
-      for (let i = 0; i < boxes.length; i += 6) {
-        for (let j = 0; j < 6; j++) q[j + 8] = boxes[i + j];
-        if (!terrain.segmentBoxQueryClear(q)) return false;
-      }
-    }
-    return true;
-  };
-  // Stone frames are rendered boxes, separate from the carved terrain.
-  // Rotate the cylinder into each fixed arch's axes; its footprint stays round.
-  const entranceCeilingAt = (x, z, y, radius) => {
-    if (cloudPlaying()) return Infinity;
-    let ceiling = Infinity;
-    for (let i = 0; i < headquarters.entrances.length; i++) {
-      const entry = headquarters.entrances[i], node = entry.node;
-      const dx = x - node.position.x, dz = z - node.position.z, reach = entry.radius + radius;
-      if (y >= entry.maxY - 1e-7 || dx * dx + dz * dz > reach * reach) continue;
-      const lx = dx * entry.cr - dz * entry.sr, lz = dx * entry.sr + dz * entry.cr, scale = node.scale.x, boxes = node.geometry.collisionBoxes;
-      for (let j = 0; j < boxes.length; j += 6) {
-        if (y >= node.position.y + boxes[j + 4] - 1e-7) continue;
-        const ox = Math.max(boxes[j] * scale - lx, 0, lx - boxes[j + 3] * scale), oz = Math.max(boxes[j + 2] - lz, 0, lz - boxes[j + 5]);
-        if (ox * ox + oz * oz < radius * radius - 1e-9) ceiling = Math.min(ceiling, node.position.y + boxes[j + 1]);
-      }
-    }
-    return ceiling;
-  };
+  const { bedSupportAt, bedCeilingAt, bedSegmentClear, entranceCeilingAt, entranceSegmentClear } =
+    BL.hubStructuralSupport.create({ getRoot: () => root, getHeadquarters: () => headquarters,
+      disabled: cloudPlaying, getDefaultRadius: () => CAMERA_RADIUS });
   const ROOM_SIGN_LIMIT = 1.35, ROOM_SIGN_HEAD_RADIUS = 0.22;
   const swingRoomSign = (sign, direction, velocity, additive = false) => {
     const impulse = direction * velocity;
@@ -4567,27 +3414,6 @@
   // margin around the entire pit: ash, logs and stone enclosure included.
   // The pit stays excluded when its flame is off, while the vertical sweep
   // still lets another storey or a safely high jump pass over it.
-  const npcFireClear = (x, y, z, toX, toY, toZ, height) => {
-    const dx = toX - x, dy = toY - y, dz = toZ - z, length = dx * dx + dz * dz;
-    for (const hazard of fireHazards) {
-      if (!hazard.pit.visible) continue;
-      const low = hazard.y + FIRE_BOTTOM - height, high = hazard.y + FIRE_TOP;
-      let enter = 0, exit = 1;
-      if (dy) {
-        const a = (low - y) / dy, b = (high - y) / dy;
-        enter = Math.max(0, Math.min(a, b)); exit = Math.min(1, Math.max(a, b));
-        if (enter >= exit) continue;
-      } else if (y <= low || y >= high) continue;
-      const ox = x - hazard.x, oz = z - hazard.z, before = ox * ox + oz * oz;
-      // A fire can light beneath a walker: let them move outward, never deeper in.
-      // A stationary point inside is still an unsafe goal.
-      if (y > low && y < high && before < hazard.avoidRadius ** 2 && length > 0
-        && ox * dx + oz * dz >= 0 && (ox + dx) ** 2 + (oz + dz) ** 2 > before) continue;
-      const t = length ? clamp(-(ox * dx + oz * dz) / length, enter, exit) : enter;
-      if ((ox + dx * t) ** 2 + (oz + dz * t) ** 2 < hazard.avoidRadius ** 2) return false;
-    }
-    return true;
-  };
   const physicalClearAt = (x, y, z, radius, height, actor = pilot?.player) => island.clearAt(x, y, z, radius, height) && y + height <= Math.min(entranceCeilingAt(x, z, y, radius), bedCeilingAt(x, z, y, radius), propCeilingAt(x, z, y, radius, actor)) + 1e-7
     && (!solids || solids.segmentClear(x, y, z, x, y, z, radius, height, null, radius, height, rageThrown(actor), false, false, rageThrown(actor)));
   const JETPACK_COLUMN = { caveIndex: 0, floor: 0, ceiling: 0 };
@@ -4612,79 +3438,10 @@
     return true;
   };
   const actionWithinReach = (x, y, z, toX, toY, toZ, reach) => Math.hypot(toX - x, toY - y, toZ - z) < reach && actionReachable(x, y, z, toX, toY, toZ);
-  const MIRROR_ACTOR_RADII = new WeakMap();
-  const mirrorPartReach = (geometry, m, x, y, z) => {
-    const b = BL.scene.boundsOf(geometry);
-    let reach = 0;
-    for (let corner = 0; corner < 8; corner++) {
-      const px = corner & 1 ? b.max[0] : b.min[0], py = corner & 2 ? b.max[1] : b.min[1], pz = corner & 4 ? b.max[2] : b.min[2];
-      reach = Math.max(reach, Math.hypot(m[0] * px + m[4] * py + m[8] * pz + m[12] - x,
-        m[1] * px + m[5] * py + m[9] * pz + m[13] - y,
-        m[2] * px + m[6] * py + m[10] * pz + m[14] - z));
-    }
-    return reach;
-  };
-  const mirrorHeadReach = (node, x, y, z) => {
-    if (!node.visible) return 0;
-    let reach = node.geometry ? mirrorPartReach(node.geometry, node.world, x, y, z) : 0;
-    for (let i = 0; i < node.children.length; i++) reach = Math.max(reach, mirrorHeadReach(node.children[i], x, y, z));
-    return reach;
-  };
-  const mirrorActorRadius = (actor) => {
-    let radius = MIRROR_ACTOR_RADII.get(actor);
-    if (radius !== undefined) return radius;
-    BL.scene.updateWorld(actor.root, actor.root.parent?.world);
-    // Away actors still need current accessory transforms when gear changes.
-    BL.scene.updateWorld(actor.parts.head, actor.root.world);
-    const head = actor.parts.head, m = head.world;
-    const reach = Math.max(mirrorHeadReach(head, m[12], m[13], m[14]), mirrorPartReach(actor.headClosed, m, m[12], m[13], m[14]));
-    // A sphere about the head pivot contains every yaw/pitch, including hats
-    // and masks. Held weapons stay outside this physical clearance envelope.
-    // The close view uses a 0.1 m near plane; reserve its oblique corners too.
-    radius = Math.max(PLAYER_RADIUS, actor.bodyRadius, Math.hypot(actor.sleepParts.headX, actor.sleepParts.headZ) + reach, CLOSE_VIEW.eyeForward + 0.2) + 0.015;
-    MIRROR_ACTOR_RADII.set(actor, radius);
-    return radius;
-  };
-  const mirrorActorSegmentClear = (x, y, z, toX, toY, toZ, height, actor, fixedRadius = 0) => {
-    if (!fixedRadius && !actor) return true;
-    const m = mirrorCave.mouth, sr = matrixCave.sr, cr = matrixCave.cr;
-    const bounds = BL.scene.boundsOf(mirrorCave.node.geometry), radius = fixedRadius || mirrorActorRadius(actor);
-    const bottom = mirrorCave.node.position.y + bounds.min[1], top = mirrorCave.node.position.y + bounds.max[1];
-    if (Math.min(y, toY) >= m.floorY + top || Math.max(y, toY) + height <= m.floorY + bottom) return true;
-    const lx = (x - m.x) * cr - (z - m.z) * sr, lz = (x - m.x) * sr + (z - m.z) * cr;
-    const dx = (toX - x) * cr - (toZ - z) * sr, dz = (toX - x) * sr + (toZ - z) * cr;
-    if (Math.min(lz, lz + dz) > PORTAL_Z + radius || Math.max(lz, lz + dz) < PORTAL_Z - radius) return true;
-    // The intact glass keeps the complete actor outside, including headwear.
-    return terrain.segmentBoxClear(lx, y - m.floorY, lz, dx, toY - y, dz, radius, height,
-      bounds.min[0], bottom, PORTAL_Z, bounds.max[0], top, PORTAL_Z);
-  };
+  const { mirrorActorSegmentClear, mirrorActorRadius, invalidate: invalidateMirrorActorRadius } = BL.hubMirrorClearance.create({
+    getMirror: () => mirrorCave, radius: PLAYER_RADIUS, eyeForward: CLOSE_VIEW.eyeForward, portalZ: PORTAL_Z });
   // The mirror gate is one barrier including the gaps between its bars; sweep the full cylinder.
   // Keep separate from camera/terrain clearance: free eyes still pass it.
-  const matrixGateSegmentClear = (x, y, z, toX, toY, toZ, radius, height, clankerPass = false, closed = false) => {
-    const dx = toX - x, dy = toY - y, dz = toZ - z;
-    for (let i = 0; i < matrixGates.length; i++) {
-      const gate = matrixGates[i], m = gate.mouth;
-      if (clankerPass && m === mirrorCave.mouth) continue;
-      const bottom = closed ? gate.floor : Math.max(gate.floor, gate.node.position.y + gate.bottom);
-      const top = closed ? gate.ceiling : Math.min(gate.ceiling, gate.node.position.y + gate.top);
-      if (bottom >= top || Math.min(y, toY) >= m.floorY + top || Math.max(y, toY) + height <= m.floorY + bottom) continue;
-      const lx = (x - m.x) * gate.cr - (z - m.z) * gate.sr, lz = (x - m.x) * gate.sr + (z - m.z) * gate.cr;
-      if (!terrain.segmentBoxClear(lx, y - m.floorY, lz, dx * gate.cr - dz * gate.sr, dy, dx * gate.sr + dz * gate.cr, radius, height, gate.minX, bottom, gate.minZ, gate.maxX, top, gate.maxZ)) return false;
-    }
-    return true;
-  };
-  const matrixGateCeilingAt = (x, z, y) => {
-    let ceiling = Infinity;
-    for (let i = 0; i < matrixGates.length; i++) {
-      const gate = matrixGates[i], m = gate.mouth;
-      const bottom = Math.max(gate.floor, gate.node.position.y + gate.bottom), top = Math.min(gate.ceiling, gate.node.position.y + gate.top);
-      if (bottom >= top || y >= m.floorY + top - 1e-7) continue;
-      const lx = (x - m.x) * gate.cr - (z - m.z) * gate.sr, lz = (x - m.x) * gate.sr + (z - m.z) * gate.cr;
-      const ox = Math.max(gate.minX - lx, 0, lx - gate.maxX), oz = Math.max(gate.minZ - lz, 0, lz - gate.maxZ);
-      if (ox * ox + oz * oz < PLAYER_RADIUS * PLAYER_RADIUS - 1e-9) ceiling = Math.min(ceiling, m.floorY + bottom);
-    }
-    return ceiling;
-  };
   const ceilingAt = (x, z, y, actor = pilot?.player, passengers = true, props = true) => {
     let ceiling = Math.min(island.ceilingAt(x, y, z, PLAYER_RADIUS), entranceCeilingAt(x, z, y, PLAYER_RADIUS), bedCeilingAt(x, z, y, PLAYER_RADIUS), matrixGateCeilingAt(x, z, y), props ? propCeilingAt(x, z, y, PLAYER_RADIUS, actor) : Infinity);
     for (let i = 0; i < CAMERA_OPENINGS.length; i++) {
@@ -4937,20 +3694,8 @@
     RENDER_OPTS.cutawayRegionCount = Math.min(CUTAWAY_REGION_CAP, RENDER_OPTS.cutawayRegionCount);
     updateCutawayWholeVisibility();
   };
-  const crossesSealedCave = (fromX, fromZ, toX, toZ, y = 0) => {
-    if (crossesGameRing(fromX, fromZ, toX, toZ, y)) return true;
-    for (let i = 0; i < sealedCaves.length; i++) {
-      const sealed = sealedCaves[i], m = sealed.mouth, sr = sealed.sr, cr = sealed.cr;
-      if (y < m.floorY - STEP_MAX || y > m.floorY + PORTAL_MAX_Y) continue;
-      const a = (fromX - m.x) * sr + (fromZ - m.z) * cr - sealed.stopZ;
-      const b = (toX - m.x) * sr + (toZ - m.z) * cr - sealed.stopZ;
-      if (a * b > 0 || a === b) continue;
-      const k = a / (a - b), x = lerp(fromX, toX, k), z = lerp(fromZ, toZ, k);
-      const across = (x - m.x) * cr - (z - m.z) * sr;
-      if (across >= PORTAL_MIN_X && across <= PORTAL_MAX_X) return true;
-    }
-    return false;
-  };
+  const crossesSealedCave = (fromX, fromZ, toX, toZ, y = 0) =>
+    crossesGameRing(fromX, fromZ, toX, toZ, y) || cavePhysics.crossesSealedCave(fromX, fromZ, toX, toZ, y);
   const playerEscapeClear = (fromX, fromZ, toX, toZ, y, height, actor, step) => {
     if (!actor || actor !== pilot.player || fromX === toX && fromZ === toZ) return false;
     // Endpoint-only head/body checks cannot free a pre-existing mesh overlap. The recovery sweep checks
@@ -4963,18 +3708,10 @@
       && matrixGateSegmentClear(fromX, y, fromZ, toX, y, toZ, PLAYER_RADIUS, height)
       && mirrorActorSegmentClear(fromX, y, fromZ, toX, y, toZ, height, actor);
   };
-  const walkable = (fromX, fromZ, toX, toZ, y, height = 1.5, actor = pilot?.player) => {
-    if (Math.hypot(toX, toZ) > worldBound() || crossesSealedCave(fromX, fromZ, toX, toZ, y)) return false;
-    const floor = playerSupportAt(toX, toZ, y, y, actor), feet = Math.max(y, floor);
-    if (floor - y > STEP_MAX && floor !== characterClankerSupportAt(toX, toZ, y, STEP_MAX, actor)) return false;
-    // Feet may mount ordinary steps, including the banana platform's low rim.
-    // Torso and head must fit across their whole footprint at the destination's actual elevation.
-    return feet + height <= ceilingAt(toX, toZ, feet, actor) + 1e-7 && physicalClearAt(toX, feet + STEP_MAX, toZ, PLAYER_RADIUS, Math.max(0, height - STEP_MAX), actor) && propSegmentClear(fromX, feet + STEP_MAX, fromZ, toX, feet + STEP_MAX, toZ, PLAYER_RADIUS, Math.max(0, height - STEP_MAX), actor) && matrixGateSegmentClear(fromX, y, fromZ, toX, feet, toZ, PLAYER_RADIUS, height) && mirrorActorSegmentClear(fromX, y, fromZ, toX, feet, toZ, height, actor)
-      || feet === y && playerEscapeClear(fromX, fromZ, toX, toZ, y, height, actor, STEP_MAX);
-  };
-  const flyable = (fromX, fromZ, toX, toZ, y = 0, height = 1.5, actor = pilot?.player) => (Math.hypot(toX, toZ) <= worldBound() || actor?.leap?.thrown) && !crossesSealedCave(fromX, fromZ, toX, toZ, y)
-    && (y + height <= ceilingAt(toX, toZ, y, actor) + 1e-7 && physicalClearAt(toX, y, toZ, PLAYER_RADIUS, height, actor) && propSegmentClear(fromX, y, fromZ, toX, y, toZ, PLAYER_RADIUS, height, actor) && bedSegmentClear(fromX, y, fromZ, toX, y, toZ, PLAYER_RADIUS, height) && matrixGateSegmentClear(fromX, y, fromZ, toX, y, toZ, PLAYER_RADIUS, height) && mirrorActorSegmentClear(fromX, y, fromZ, toX, y, toZ, height, actor)
-      || playerEscapeClear(fromX, fromZ, toX, toZ, y, height, actor, 0));
+  const { walkable, flyable } = BL.hubLocomotion.create({ worldBound, crossesSealedCave,
+    playerSupportAt, characterClankerSupportAt, ceilingAt, physicalClearAt, propSegmentClear,
+    matrixGateSegmentClear, mirrorActorSegmentClear, playerEscapeClear, bedSegmentClear,
+    getDefaultActor: () => pilot?.player, radius: PLAYER_RADIUS, step: STEP_MAX });
   const characterCarryClear = (cave, x, y, z, toX, toY, toZ) => {
     const height = cave.bodyHeight + Math.max(0, cave.viewLift), feet = y + 1e-7, toFeet = toY + 1e-7;
     return Math.hypot(toX, toZ) <= worldBound() && !crossesSealedCave(x, z, toX, toZ, Math.min(y, toY))
@@ -5013,164 +3750,14 @@
   const inBananas = (cave, x = cave.root.position.x, z = cave.root.position.z) => bananaCover.intersectsBody(x, cave.root.position.y - (cave.gorilla ? 0 : cave.baseY), z, cave.gorilla ? cave.gorilla.bodyHeight : cave.bodyHeight);
   const npcPileAt = (x, feet, z, height) => feet <= ALTAR_HEIGHT + STEP_MAX && feet + height > 0 && Math.hypot(x, z) < altar.platformRadius + PLAYER_RADIUS
     || bananaCover.intersectsBody(x, feet, z, height);
-  const workZoneTraveler = (cave) => cave && cave !== crew?.player && (cave.state !== "working" || cave.bedTravel.mode);
-  const refreshWorkZones = () => {
-    for (const zone of workZones) { zone.active = false; zone.half = 3.4; zone.front = 5.8; }
-    for (let i = 0; i < crew.list.length; i++) {
-      const cave = crew.list[i];
-      if (!cave.root.visible || cave === crew.player || cave.state !== "working" || !cave.work.phase) continue;
-      const zone = workZones[cave.work.site], p = cave.work.position;
-      if (!zone) continue;
-      zone.active = true;
-      if (cave.work.phase !== "outbound" && cave.work.phase !== "station" && cave.work.phase !== "shoot") continue;
-      const dx = p.x - zone.x, dz = p.z - zone.z;
-      zone.half = Math.max(zone.half, Math.abs(dx * zone.cr - dz * zone.sr) + 0.8);
-      zone.front = Math.max(zone.front, dx * zone.sr + dz * zone.cr + 0.8);
-    }
-  };
-  const workZoneContains = (zone, x, y, z, height) => {
-    if (!zone.active || y + height <= zone.floor || y >= zone.floor + 3.5) return false;
-    const dx = x - zone.x, dz = z - zone.z, across = dx * zone.cr - dz * zone.sr, along = dx * zone.sr + dz * zone.cr;
-    const ox = Math.max(Math.abs(across) - zone.half, 0), oz = Math.max(-7 - along, 0, along - zone.front);
-    return ox * ox + oz * oz < PLAYER_RADIUS * PLAYER_RADIUS - 1e-9;
-  };
-  const workZoneSegmentClear = (zone, x, y, z, toX, toY, toZ, height) => {
-    const dx = x - zone.x, dz = z - zone.z, vx = toX - x, vz = toZ - z;
-    return terrain.segmentBoxClear(dx * zone.cr - dz * zone.sr, y, dx * zone.sr + dz * zone.cr,
-      vx * zone.cr - vz * zone.sr, toY - y, vx * zone.sr + vz * zone.cr, PLAYER_RADIUS, height,
-      -zone.half, zone.floor, -7, zone.half, zone.floor + 3.5, zone.front);
-  };
-  const npcClosedCaveAt = (x, z, y = null, height = 1.5) => {
-    for (const zone of closedCaveZones) if (workZoneContains(zone, x, y === null ? zone.floor : y, z, height)) return true;
-    return false;
-  };
-  // Cave-mouth frames are narrow structural ledges, not NPC destinations.
-  // Recovery may otherwise jump onto the top bar and find no legal walking
-  // step back down to the apron. Only reject that exposed ceiling band:
-  // the continuous meadow above a deeply buried HQ ramp remains walkable.
-  const NPC_RAMP_ROOF_COLUMN = { floor: 0, ceiling: 0 };
-  const npcRampRoofAt = (x, y, z, radius = PLAYER_RADIUS) => {
-    for (let i = 0; i < 5; i++) {
-      const px = i === 1 ? x - radius : i === 2 ? x + radius : x;
-      const pz = i === 3 ? z - radius : i === 4 ? z + radius : z;
-      if (island.rampColumnAt(px, pz, false, NPC_RAMP_ROOF_COLUMN)
-        && Math.abs(y - NPC_RAMP_ROOF_COLUMN.ceiling) <= 0.55) return true;
-    }
-    return false;
-  };
-  const npcCaveRimAt = (x, y, z) => {
-    for (let i = 0; i < CAMERA_OPENINGS.length; i++) {
-      const entry = CAMERA_OPENINGS[i], m = entry.mouth;
-      if (y <= m.floorY + STEP_MAX) continue;
-      const dx = x - m.x, dz = z - m.z;
-      const across = dx * entry.cr - dz * entry.sr, along = dx * entry.sr + dz * entry.cr;
-      if (Math.abs(across) <= 3 + PLAYER_RADIUS && along >= -PLAYER_RADIUS && along <= 1 + PLAYER_RADIUS) return true;
-    }
-    return false;
-  };
-  const npcCaveRoofAt = (x, y, z) => {
-    if (npcRampRoofAt(x, y, z)) return true;
-    const surface = island.surfaceAt(x, z);
-    if (y < surface - 0.15 || y > surface + STEP_MAX || surface <= STEP_MAX) return false;
-    for (let i = 0; i < island.mouths.length; i++) {
-      const m = island.mouths[i], sr = Math.sin(m.ry), cr = Math.cos(m.ry);
-      const dx = x - m.x, dz = z - m.z;
-      const across = dx * cr - dz * sr, along = dx * sr + dz * cr;
-      if (Math.abs(across) <= m.room.w / 2 + PLAYER_RADIUS
-        && along >= -m.room.to - 1 && along <= 1 + PLAYER_RADIUS) return true;
-    }
-    return false;
-  };
-  const npcClosedCaveClear = (x, y, z, toX, toY, toZ, height) => {
-    for (const zone of closedCaveZones) {
-      // A released player may already be beside the boards. Keep the way out open.
-      if (workZoneContains(zone, x, y, z, height)) {
-        const dx = x - zone.x, dz = z - zone.z, tx = toX - zone.x, tz = toZ - zone.z;
-        const across = Math.abs(dx * zone.cr - dz * zone.sr), toAcross = Math.abs(tx * zone.cr - tz * zone.sr);
-        const along = dx * zone.sr + dz * zone.cr, toAlong = tx * zone.sr + tz * zone.cr;
-        if (toAlong >= along - 1e-7 || toAcross > across + 1e-7) continue;
-        return false;
-      }
-      if (!workZoneSegmentClear(zone, x, y, z, toX, toY, toZ, height)) return false;
-    }
-    return true;
-  };
-  const npcWorkZoneAt = (cave, x, y, z) => {
-    if (!workZoneTraveler(cave)) return false;
-    for (const zone of workZones) if (workZoneContains(zone, x, y, z, cave.bodyHeight)) return true;
-    return false;
-  };
-  // Where an NPC may land, for the crew and for a rider jumping off a clanker.
-  const npcLandingAllowed = (x, y, z, height, cave) => !npcRampRoofAt(x, y, z) && !npcCaveRimAt(x, y, z) && !npcClosedCaveAt(x, z, y, height) && !npcPileAt(x, y, z, height) && !npcWorkZoneAt(cave, x, y, z) && npcFireClear(x, y, z, x, y, z, height);
-  const npcWorkZoneClear = (cave, x, y, z, toX, toY, toZ) => {
-    if (!workZoneTraveler(cave)) return true;
-    const p = cave.root.position, feet = p.y - cave.baseY;
-    for (const zone of workZones) {
-      // A shift may start around someone. Their exit remains open.
-      if (!zone.active || workZoneContains(zone, p.x, feet, p.z, cave.bodyHeight)) continue;
-      if (!workZoneSegmentClear(zone, x, y, z, toX, toY, toZ, cave.bodyHeight)) return false;
-    }
-    return true;
-  };
-  const npcWorkDetour = (cave, tx, tz, targetY = cave.root.position.y - cave.baseY) => {
-    const out = cave.avoidance.detour, p = cave.root.position, feet = p.y - cave.baseY;
-    if (!workZoneTraveler(cave)) { out.site = -1; return false; }
-    if (out.goalX !== tx || out.goalZ !== tz) { out.site = -1; out.goalX = tx; out.goalZ = tz; }
-    if (out.site < 0) {
-      for (let i = 0; i < workZones.length; i++) {
-        const zone = workZones[i];
-        if (!zone.active) continue;
-        const inside = workZoneContains(zone, p.x, feet, p.z, cave.bodyHeight);
-        const path = cave.pathing;
-        if (!inside && workZoneSegmentClear(zone, p.x, feet, p.z, tx, targetY, tz, cave.bodyHeight)
-          && (path.tx !== tx || path.tz !== tz || workZoneSegmentClear(zone, p.x, feet, p.z, path.targetX, targetY, path.targetZ, cave.bodyHeight))) continue;
-        const localX = (p.x - zone.x) * zone.cr - (p.z - zone.z) * zone.sr;
-        out.site = i; out.phase = 0; out.entryX = inside ? localX : (localX < 0 ? -1 : 1) * (zone.half + 0.9);
-        out.side = (tx - zone.x) * zone.cr - (tz - zone.z) * zone.sr < 0 ? -1 : 1;
-        cave.avoidance.navigation.mode = 0; cave.avoidance.tx = NaN;
-        break;
-      }
-      if (out.site < 0) return false;
-    }
-    const zone = workZones[out.site];
-    if (!zone.active) { out.site = -1; cave.pathing.tx = NaN; return false; }
-    // Two front corners avoid both the line of fire and the occupied fan.
-    // Keep this direct detour until its original goal, so painted-path hints
-    // cannot pull the walker back toward an intermediate point inside it.
-    if (out.phase === 0) {
-      out.x = zone.x + zone.cr * out.entryX + zone.sr * (zone.front + 0.9);
-      out.z = zone.z - zone.sr * out.entryX + zone.cr * (zone.front + 0.9);
-      if (Math.hypot(out.x - p.x, out.z - p.z) < 0.12) out.phase = 1;
-    }
-    if (out.phase === 1) {
-      if (workZoneSegmentClear(zone, p.x, feet, p.z, tx, targetY, tz, cave.bodyHeight)) out.phase = 2;
-      else {
-        const x = out.side * (zone.half + 0.9), z = zone.front + 0.9;
-        out.x = zone.x + zone.cr * x + zone.sr * z; out.z = zone.z - zone.sr * x + zone.cr * z;
-        if (Math.hypot(out.x - p.x, out.z - p.z) < 0.12) out.phase = 2;
-      }
-    }
-    if (out.phase === 2) { out.x = tx; out.z = tz; }
-    cave.pathing.tx = NaN; cave.pathing.index = cave.pathing.count;
-    cave.pathing.targetX = out.x; cave.pathing.targetZ = out.z;
-    return true;
-  };
-  const npcDestinationBlocked = (cave, x, z) => {
-    // Stroll destinations are on the surface. Evaluate their own floor,
-    // not the walker's current elevation at the bottom of a staircase.
-    const onTimechain = timechainIsland && Math.hypot(x - timechainIsland.place.x, z - timechainIsland.place.z) < BL.timechainModels.SITE.radius - 1;
-    const feet = onTimechain ? playerSupportAt(x, z, Infinity, Infinity, cave) : island.surfaceAt(x, z);
-    return npcRampRoofAt(x, feet, z) || npcClosedCaveAt(x, z, feet, cave.bodyHeight) || npcPileAt(x, feet, z, cave.bodyHeight) || npcWorkZoneAt(cave, x, feet, z) || !npcFireClear(x, feet, z, x, feet, z, cave.bodyHeight) || !walkable(x, z, x, z, feet, cave.bodyHeight, cave);
-  };
-  const npcWalkable = BL.npcClearance.create({ walkable, playerSupportAt, npcRampRoofAt,
-    npcClosedCaveClear, npcWorkZoneClear, npcFireClear, npcPileAt, PLAYER_RADIUS, lerp,
-    // The island is rebuilt between visits; resolve it at query time.
-    island: {
-      clearAt: (x, y, z, radius, height) => island.clearAt(x, y, z, radius, height),
-      voxelSegmentClearAt: (x, y, z, toX, toY, toZ, radius, height) =>
-        island.voxelSegmentClearAt(x, y, z, toX, toY, toZ, radius, height),
-    },
-  });
+  const hubNpcNavigation = BL.npcHubNavigation.create({ getCrew: () => crew, getIsland: () => island,
+    workZones, openings: CAMERA_OPENINGS, cavePhysics, npcPileAt, walkable, playerSupportAt, fireHazards,
+    fireBottom: FIRE_BOTTOM, fireTop: FIRE_TOP, radius: PLAYER_RADIUS, step: STEP_MAX,
+    destinationFeet: (cave, x, z) => {
+      const onTimechain = timechainIsland && Math.hypot(x - timechainIsland.place.x, z - timechainIsland.place.z) < BL.timechainModels.SITE.radius - 1;
+      return onTimechain ? playerSupportAt(x, z, Infinity, Infinity, cave) : island.surfaceAt(x, z);
+    } });
+  const { refreshWorkZones, npcRampRoofAt, npcCaveRimAt, npcCaveRoofAt, npcWorkZoneAt, npcLandingAllowed, npcWorkZoneClear, npcWorkDetour, npcDestinationBlocked, npcWalkable, npcFireClear } = hubNpcNavigation;
   // The route graph describes connected architecture only.
   // Scenery and other walkers are avoided by the same swept steps used during the actual walk.
   const sleepRouteClear = (fromX, fromZ, toX, toZ, y, height) => {
@@ -5219,63 +3806,7 @@
     }
   };
   // The dais and its flush, one block-wide perimeter grow continuously with the pile.
-  const buildAltar = () => {
-    const node = createNode();
-    const slab = createNode({ geometry: hubModels.altarSlab(), depthBias: 0.15 });
-    const rings = [];
-    addChild(node, slab);
-    for (let i = 0; i < 3; i++) {
-      const ring = createNode({ geometry: hubModels.altarBlock(i), instanceData: new Float32Array(Math.ceil(ALTAR_MAX_BLOCKS / 3) * 20), instanceCount: 0, instanceVersion: 0, depthBias: 0.2 });
-      rings.push(ring);
-      addChild(node, ring);
-    }
-    addChild(root, node);
-    placed.push(node);
-    const result = { node, slab, rings, radius: 0, platformRadius: 0, outerRingRadius: 0, outerRingInnerRadius: 0, height: ALTAR_HEIGHT, ringCount: 1, blockCount: 0, setRadius: null };
-    result.setRadius = (radius) => {
-      result.radius = radius;
-      const halfWidth = ALTAR_BLOCK_WIDTH * 0.5;
-      const outer = radius + ALTAR_RING_GAP + halfWidth;
-      const wanted = Math.min(ALTAR_MAX_BLOCKS, Math.max(8, Math.round(outer * Math.PI * 2 / ALTAR_BLOCK_ARC)));
-      const arc = outer * Math.PI * 2 / wanted * 0.88;
-      result.blockCount = wanted;
-      result.outerRingRadius = outer;
-      result.outerRingInnerRadius = outer - halfWidth;
-      result.platformRadius = outer + halfWidth;
-      setVec(slab.scale, result.outerRingInnerRadius, ALTAR_HEIGHT, result.outerRingInnerRadius);
-      for (let i = 0; i < rings.length; i++) rings[i].instanceCount = 0;
-      for (let i = 0; i < wanted; i++) {
-        const angle = i / wanted * Math.PI * 2;
-        const cos = Math.cos(angle), sin = Math.sin(angle);
-        const ring = rings[i % rings.length];
-        const offset = ring.instanceCount++ * 20;
-        const data = ring.instanceData;
-        data[offset] = cos * ALTAR_BLOCK_WIDTH;
-        data[offset + 1] = 0;
-        data[offset + 2] = sin * ALTAR_BLOCK_WIDTH;
-        data[offset + 3] = 0;
-        data[offset + 4] = 0;
-        data[offset + 5] = ALTAR_HEIGHT;
-        data[offset + 6] = 0;
-        data[offset + 7] = 0;
-        data[offset + 8] = -sin * arc;
-        data[offset + 9] = 0;
-        data[offset + 10] = cos * arc;
-        data[offset + 11] = 0;
-        data[offset + 12] = cos * outer;
-        data[offset + 13] = 0;
-        data[offset + 14] = sin * outer;
-        data[offset + 15] = 1;
-        data[offset + 16] = 1;
-        data[offset + 17] = 0;
-        data[offset + 18] = 0;
-        data[offset + 19] = 0;
-      }
-      for (let i = 0; i < rings.length; i++) rings[i].instanceVersion++;
-    };
-    result.setRadius(PILE_SCALE);
-    return result;
-  };
+  const buildAltar = () => BL.hubAltar.create({ root, placed });
 
   const celebrate = (donation, bananas) => {
     // Island events hold the crew's cheer; the ticker has its own visibility gate.
@@ -6923,28 +5454,6 @@
   // Match the whole eye footprint at the sloping edge of an exterior window floor.
   const headquartersWindowAirAt = (x, y, z) => y < -CAMERA_RADIUS && cameraClearAt(x, y, z) && island.ceilingAt(x, y - CAMERA_RADIUS, z, CAMERA_RADIUS) < Infinity && island.supportAt(x, z, y - CAMERA_RADIUS, 0, ABYSS_FLOOR, CAMERA_RADIUS) > ABYSS_FLOOR;
   // Exact frame contacts can occur between the ordinary terrain substeps.
-  const ENTRANCE_SWEEP = new Float64Array(14);
-  const entranceSegmentClear = (x, y, z, toX, toY, toZ, radius = CAMERA_RADIUS) => {
-    if (cloudPlaying()) return true;
-    const dx = toX - x, dy = toY - y, dz = toZ - z, span2 = dx * dx + dz * dz;
-    for (let i = 0; i < headquarters.entrances.length; i++) {
-      const entry = headquarters.entrances[i], node = entry.node;
-      if (Math.min(y, toY) - radius >= entry.maxY || Math.max(y, toY) + radius <= entry.minY) continue;
-      const k = span2 ? Math.max(0, Math.min(1, ((node.position.x - x) * dx + (node.position.z - z) * dz) / span2)) : 0;
-      const ox = x + dx * k - node.position.x, oz = z + dz * k - node.position.z, reach = entry.radius + radius;
-      if (ox * ox + oz * oz > reach * reach) continue;
-      const lx = (x - node.position.x) * entry.cr - (z - node.position.z) * entry.sr, lz = (x - node.position.x) * entry.sr + (z - node.position.z) * entry.cr;
-      const vx = dx * entry.cr - dz * entry.sr, vz = dx * entry.sr + dz * entry.cr, boxes = node.geometry.collisionBoxes, scale = node.scale.x;
-      const q = ENTRANCE_SWEEP;
-      q[0] = lx; q[1] = y - node.position.y - radius; q[2] = lz; q[3] = vx; q[4] = dy; q[5] = vz; q[6] = radius; q[7] = radius * 2;
-      for (let j = 0; j < boxes.length; j += 6) {
-        q[8] = boxes[j] * scale; q[9] = boxes[j + 1]; q[10] = boxes[j + 2];
-        q[11] = boxes[j + 3] * scale; q[12] = boxes[j + 4]; q[13] = boxes[j + 5];
-        if (!terrain.segmentBoxQueryClear(q)) return false;
-      }
-    }
-    return true;
-  };
   const cameraSegmentClear = (x, y, z, toX, toY, toZ) => cameraClearAt(toX, toY, toZ) && island.voxelSegmentClearAt(x, y - CAMERA_RADIUS, z, toX, toY - CAMERA_RADIUS, toZ, CAMERA_RADIUS, CAMERA_RADIUS * 2) && entranceSegmentClear(x, y, z, toX, toY, toZ) && bedSegmentClear(x, y - CAMERA_RADIUS, z, toX, toY - CAMERA_RADIUS, toZ, CAMERA_RADIUS, CAMERA_RADIUS * 2);
   const sleepEyeFloorAt = (player) => player.bedroll.y + (player.bedroll.sleep?.pillowTop || 0) + CAMERA_RADIUS;
   const cameraHeadAt = (out, player) => {
@@ -8355,7 +6864,7 @@
   // nearest-first choice treats it like any other lamp.
   // Each stands as tall and wide as its repository's importance (`totemModels.layout`); TOTEM_ROOM past its reach
   // keeps the scattered props off its stones and name board. Fixed feet keep both pairs in their meadow clearings.
-  const TOTEM_SPOTS = [[7.8, 18.5], [-8.1, 18.6], [-4.7, 19.5], [4.1, 19.9]], TOTEM_ROOM = 2.4;
+  const TOTEM_SPOTS = BL.totemLayout.spots, TOTEM_ROOM = BL.totemLayout.room;
   const TOTEM_SLICE = 0.3, TOTEM_FLARE = 6, TOTEM_CHEER = 14;
   const totems = [];
   let totemUnsub = null;
@@ -8531,6 +7040,30 @@
     job.handle = job.idle ? requestIdleCallback(start, { timeout: 250 }) : setTimeout(start, 0);
   };
   const update = (dt, elapsed) => {
+    if (!hostLayoutCompatible()) {
+      // Replacing collision geometry is a scene transition, never an in-place
+      // teleport underneath a controlled body. Its release preserves voice.
+      BL.net.bodyReclaim.suspend(); pilot.controls.reset(); input.reset(); pilot.setActive(false);
+      for (const cave of crew.list) { cave.puppet = true; cave.root.visible = false; }
+      for (const entry of clankers.list) entry.root.visible = false;
+      if (!layoutRebuilding && (currentHostLayout() || BL.net.state.npcAuthority?.mode !== "server")) {
+        reuseHub = false;
+        if (go("hub")) layoutRebuilding = true;
+      }
+      return;
+    }
+    if (builtHostLayout) {
+      const next = currentHostLayout(), previous = builtHostLayout.snapshot;
+      mempoolIsland.water.applyHost(next.snapshot.water);
+      // Refresh collision/presentation even when distant effects are sleeping.
+      if (previous.water !== next.snapshot.water) mempoolIsland.water.update(0, poolEffectsTime);
+      builtHostLayout = next; world.level = next.snapshot.pile;
+      if (previous.pile !== next.snapshot.pile || previous.count !== next.snapshot.count
+        || previous.history.ring !== next.snapshot.history.ring) {
+        layoutPileForHost(pileMod.visualFootprintFor(world.level, PILE_SCALE));
+        clearRingPalms(); reflowScenery(); updateWorld(root); solids.sync();
+      }
+    }
     cloudHopper.preUpdate(dt);
     if (cloudPlaying()) {
       cloudMask();
@@ -8745,6 +7278,7 @@
     }
     footsteps.update(pilot.player);
     if (!cloudPlaying()) npcSync.update(dt);
+    if (!cloudPlaying()) npcStatusBeams?.update(dt);
     shareDrivenActor(dt);
     remotes.update(dt);
     if (poolEffectsActive) {
@@ -9510,7 +8044,7 @@
     if (crew) for (let i = 0; i < crew.list.length; i++) {
       const actor = crew.list[i];
       if (actor.root !== node) continue;
-      MIRROR_ACTOR_RADII.delete(actor);
+      invalidateMirrorActorRadius(actor);
       mirrorActorRadius(actor);
       break;
     }
@@ -9523,43 +8057,12 @@
   const clankerLabWorker = entry => !!entry && !entry.rage.active && !entry.controlled && entry.mode === "working"
     && (entry.route === "exit" && clankers?.sites[entry.fromSite]?.mouth === entropyLab.mouth
       || clankers?.sites[entry.site]?.mouth === entropyLab.mouth && (entry.motion.lab || entry.planningLab));
-  const clankerPassingPeer = (entry, other) => !!entry
+  const clankerPassingPeer = (entry, other) => entry?.nonInteractive || other.nonInteractive || !!entry
     && (entry === clankerPassingEntry || clankerEntering(entry) || clankerLabWorker(entry)) && other !== entry;
-  const clankerSatelliteLandAt = (x, y, z, radius) => {
-    // The rounded underside's balconies extend past the surface land mask.
-    // Admit their actual footing so a window landing can continue walking.
-    const terrainFloor = island.supportAt(x, z, y, STEP_MAX, -Infinity, radius);
-    if (Number.isFinite(terrainFloor) && Math.abs(terrainFloor - y) <= STEP_MAX) return true;
-    let admitted = false;
-    if (mempoolIsland) {
-      const p = mempoolIsland.place, s = poolModels.SITE, dx = x - p.x, dz = z - p.z;
-      const cos = mempoolIsland.cos, sin = mempoolIsland.sin;
-      const across = dx * cos - dz * sin, along = dx * sin + dz * cos;
-      const reach = radius;
-      const bridge = Math.abs(across) + reach < s.width / 2
-        && along >= p.bridgeLocalZ + s.deckStart - reach && along <= p.bridgeLocalZ + s.span + reach;
-      admitted = bridge || mempoolIsland.layout.onIsland(across, along, reach);
-    }
-    // These floors are solid-prop meshes outside the main terrain's domain.
-    // Use the queried footprint circle, not the complete body's bounding
-    // radius: its three aligned circles fit the narrow wooden crossings.
-    if (!admitted && timechainIsland) {
-      const p = timechainIsland.place, s = BL.timechainModels.SITE, dx = x - p.x, dz = z - p.z;
-      const cos = timechainIsland.cos, sin = timechainIsland.sin;
-      const across = dx * cos - dz * sin, along = dx * sin + dz * cos;
-      const bridge = Math.abs(across) + radius <= s.width / 2 + 1e-7
-        && along >= p.bridgeZ - radius && along <= p.bridgeZ + s.span + 0.5 + radius;
-      admitted = bridge || Math.hypot(dx, dz) + radius < s.radius;
-    }
-    if (!admitted && bifrostIsle) admitted = bifrostIsle.site.groundAt(x, z) > -Infinity;
-    if (!admitted) return false;
-    const support = solids.supportAt(x, z, y, STEP_MAX, radius);
-    return support > -Infinity && support <= y + STEP_MAX && support >= y - 3.5;
-  };
   const clankerPeersClear = (entry, x, y, z, toX, toY, toZ, fromHeading, toHeading, strictEnd = false) => {
-    if (!clankers || clankerEntering(entry) || clankerLabWorker(entry)) return true;
+    if (!clankers || entry.nonInteractive || clankerEntering(entry) || clankerLabWorker(entry)) return true;
     for (const other of clankers.list) {
-      if (other === entry || !other.active) continue;
+      if (other.nonInteractive || other === entry || !other.active) continue;
       const p = other.root.position, shape = BL.agent.torso;
       // A pose preview has already installed the destination trunk. Do not
       // mistake its expansion into a neighbour for escaping an old overlap.
@@ -9569,97 +8072,6 @@
         other, p.x, p.y, p.z, other.heading, 0.03)) return false;
     }
     return true;
-  };
-  const clankerCylinderClear = (x, y, z, toX, toY, toZ, radius, height, entry = null, ignore = null, climbing = false, actors = true, checkTerrain = true, toRadius = radius, toHeight = height, skipClimbMasonry = false) => {
-    const fromRadius = radius, fromHeight = height;
-    radius = Math.max(radius, toRadius); height = Math.max(height, toHeight);
-    const floor = y + 0.002, toFloor = toY + 0.002, body = height - 0.002;
-    if (!climbing && !island.onLand(toX, toZ) && !clankerSatelliteLandAt(toX, toY, toZ, radius) || crossesSealedCave(x, z, toX, toZ, y)
-      || checkTerrain && (!island.clearAt(toX, toFloor, toZ, radius, body)
-        || !island.voxelSegmentClearAt(x, floor, z, toX, toFloor, toZ, radius, body))
-      || !solids.segmentClear(x, floor, z, toX, toFloor, toZ, fromRadius, fromHeight - 0.002, ignore, toRadius, toHeight - 0.002, !!entry && !climbing, skipClimbMasonry, false, !!entry?.rage?.active)
-      || !matrixGateSegmentClear(x, floor, z, toX, toFloor, toZ, radius, body, true)) return false;
-    if ((!entry || !entry.controlled) && !npcFireClear(x, y, z, toX, toY, toZ, height)) return false;
-    if (!actors) return true;
-    if (clankers) for (let i = 0; i < clankers.list.length; i++) {
-      const other = clankers.list[i];
-      if (other !== entry && other !== ignore && other.active && !clankerPassingPeer(entry, other)
-        && !clankerBodySegmentClear(other, x, floor, z, toX, toFloor, toZ, radius, body)) return false;
-    }
-    return true;
-  };
-  const clankerFireDistance = (x, z, heading, hazard, forward, halfForward, halfSide) => {
-    const sine = Math.sin(heading), cosine = Math.cos(heading);
-    const dx = hazard.x - x - sine * forward, dz = hazard.z - z - cosine * forward;
-    const along = Math.max(0, Math.abs(dx * sine + dz * cosine) - halfForward);
-    const across = Math.max(0, Math.abs(dx * cosine - dz * sine) - halfSide);
-    return along * along + across * across;
-  };
-  const clankerFireClear = (entry, x, y, z, toX, toY, toZ, fromHeading = entry.heading, toHeading = fromHeading) => {
-    if (entry.controlled) return true;
-    // Prop-height blending can leave the rendered feet below their support
-    // position. Keep that lower body inside the pit's avoidance height band.
-    const offset = Math.min(0, entry.motion.supportOffset);
-    y += offset; toY += offset;
-    const rect = clankerRectangleAt(entry, CLANKER_RECTANGLE);
-    const forward = rect.centerForward, halfForward = rect.halfForward + 0.1, halfSide = rect.halfSide + 0.1;
-    const dx = toX - x, dz = toZ - z;
-    const turn = Math.atan2(Math.sin(toHeading - fromHeading), Math.cos(toHeading - fromHeading));
-    for (const hazard of fireHazards) {
-      if (!hazard.pit.visible || Math.max(y, toY) + entry.height <= hazard.y + FIRE_BOTTOM
-        || Math.min(y, toY) >= hazard.y + FIRE_TOP) continue;
-      const reach = hazard.avoidRadius + Math.max(Math.abs(forward) + halfForward, halfSide);
-      const hx = x - hazard.x, hz = z - hazard.z;
-      const t = dx * dx + dz * dz ? clamp(-(hx * dx + hz * dz) / (dx * dx + dz * dz), 0, 1) : 0;
-      if ((hx + dx * t) ** 2 + (hz + dz * t) ** 2 >= reach * reach) continue;
-      const radius2 = hazard.avoidRadius ** 2;
-      // A gorilla already inside the margin may walk out instead of being trapped there.
-      if (clankerFireDistance(x, z, fromHeading, hazard, forward, halfForward, halfSide) < radius2
-        && (hx + dx) ** 2 + (hz + dz) ** 2 > hx * hx + hz * hz
-        && hx * dx + hz * dz >= 0) continue;
-      const steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / 0.25), Math.ceil(Math.abs(turn) / 0.15));
-      for (let i = 0; i <= steps; i++) {
-        const a = i / steps;
-        if (clankerFireDistance(x + dx * a, z + dz * a, fromHeading + turn * a,
-          hazard, forward, halfForward, halfSide) < radius2) return false;
-      }
-    }
-    return true;
-  };
-  const CLANKER_CORE_RADIUS = 0.025;
-  const clankerCenterClear = (entry, x, y, z, toX, toY, toZ, allowOffLand = false,
-    fromHeading = entry.heading, toHeading = fromHeading) => {
-    const radius = CLANKER_CORE_RADIUS, centerY = 0.65, height = 0.12;
-    const from = y + centerY, to = toY + centerY;
-    // A center brushing a step behind it may move away; new or inward contact still blocks.
-    if (!allowOffLand && !island.onLand(toX, toZ) && !clankerSatelliteLandAt(toX, toY, toZ, radius)
-      || crossesSealedCave(x, z, toX, toZ, y)
-      || !island.clearAt(toX, to, toZ, radius, height)
-      || !island.voxelSegmentClearAt(x, from, z, toX, to, toZ, radius, height)
-      || !solids.segmentClear(x, from, z, toX, to, toZ, radius, height, null, radius, height, true, false, !entry.drive.airborne && !entry.jump.active, entry.rage.active)
-      || !matrixGateSegmentClear(x, from, z, toX, to, toZ, radius, height, true)) return false;
-    return clankerFireClear(entry, x, y, z, toX, toY, toZ, fromHeading, toHeading);
-  };
-  const CLANKER_CORE_FROM = { x: 0, y: 0, z: 0 }, CLANKER_CORE_TO = { x: 0, y: 0, z: 0 };
-  const clankerWalkCoreAt = (entry, x, y, z, heading, out) => {
-    const scale = entry.root.scale.x, hip = entry.gorilla.hips.position.y * scale;
-    let forward = (entry.parked || entry.biped ? 0.19 : 0.7) * scale, lift = 0.85 * scale, side = 0;
-    if (clankerGroundPlaneAt(x, y, z, heading, CLANKER_WALK_PLANE)) {
-      // Rotate around the rig's hip, matching its pitch and roll. An unbounded
-      // slope * forward offset puts the trunk below its feet when descending.
-      const along = CLANKER_WALK_PLANE.groundZ, norm = Math.hypot(1, along);
-      const across = CLANKER_WALK_PLANE.groundX / norm, rollNorm = Math.hypot(1, across);
-      const relative = (lift - hip) / rollNorm;
-      side = -(lift - hip) * across / rollNorm;
-      lift = hip + (relative + along * forward) / norm;
-      forward = (forward - along * relative) / norm;
-      // Downhill pitch must not put the trunk core below the lower contact
-      // ray, where a legal tread would be mistaken for a blocking wall.
-      lift = Math.max(lift, 0.65 * scale);
-    }
-    const sine = Math.sin(heading), cosine = Math.cos(heading);
-    out.x = x + sine * forward + cosine * side;
-    out.y = y + lift; out.z = z + cosine * forward - sine * side;
   };
   // Ground-plane fitting can widen a trunk after its center step was admitted.
   // Reuse the pose preview near peers, retaining the old shape for overlap escape.
@@ -9693,7 +8105,7 @@
     clankerPeerPoseChecked = true;
     const shape = BL.agent.torso, p = entry.root.position, from = CLANKER_PEER_FROM;
     for (const other of clankers.list) {
-      if (other === entry || !other.active) continue;
+      if (other.nonInteractive || other === entry || !other.active) continue;
       const q = other.root.position;
       if (shape.overlaps(entry, p.x, p.y, p.z, entry.root.rotation.y,
         other, q.x, q.y, q.z, other.heading, 0.03)
@@ -9706,6 +8118,7 @@
     return clankerPeerPoseClear = capturedPosePreview(entry);
   };
   const clankerWalkingPeersClear = (entry, dt, x, y, z) => {
+    if (entry.nonInteractive) return true;
     const p = entry.root.position, nx = p.x, ny = p.y, nz = p.z, heading = entry.root.rotation.y, nextHeading = entry.heading;
     if (!clankers || entry.controlled || entry.planningRoam || entry.drive.airborne
       || entry.fire.rolling || clankerEntering(entry) || clankerLabWorker(entry)) return true;
@@ -9726,165 +8139,9 @@
       entry.motion, clankerPeerEmptyStone, clankerPeerPoseTransition, entry, entry.speed,
       false, "", null, 0, null, null, null, entry.biped);
   };
-  const clankerWalkCoreClear = (entry, x, y, z, toX, toY, toZ, fromHeading, toHeading) => {
-    // Protect the trunk near the middle of the support rectangle, not just
-    // the pelvis point behind it. This extra core applies to island stone;
-    // props keep their existing center clearance and blended support.
-    // A planted turn remains available to face away from a contacted wall.
-    if (x === toX && z === toZ || entry.drive.airborne || entry.fire.rolling) return true;
-    const scale = entry.root.scale.x, radius = 0.34 * scale, height = 0.12 * scale;
-    const turn = Math.atan2(Math.sin(toHeading - fromHeading), Math.cos(toHeading - fromHeading));
-    const steps = Math.max(1, Math.ceil(Math.abs(turn) / 0.15));
-    const from = CLANKER_CORE_FROM, to = CLANKER_CORE_TO;
-    clankerWalkCoreAt(entry, x, y, z, fromHeading, from);
-    for (let i = 1; i <= steps; i++) {
-      const t = i / steps, heading = fromHeading + turn * t;
-      clankerWalkCoreAt(entry, x + (toX - x) * t, y + (toY - y) * t, z + (toZ - z) * t, heading, to);
-      if (!island.clearAt(to.x, to.y, to.z, radius, height)
-        || !island.voxelSegmentClearAt(from.x, from.y, from.z, to.x, to.y, to.z, radius, height)) return false;
-      from.x = to.x; from.y = to.y; from.z = to.z;
-    }
-    return true;
-  };
-  const clankerOpeningClear = (entry, x, y, z, toX, toY, toZ) => {
-    // An upright climber can swing its feet through a window before the
-    // broader walking rectangle follows. Check the actual foot path as well
-    // as the trunk core; a stone sill or a prop must remain solid.
-    const radius = 0.025, from = y + 0.08, to = toY + 0.08;
-    return clankerCenterClear(entry, x, y, z, toX, toY, toZ, true)
-      && island.clearAt(toX, to, toZ, radius, 0.12)
-      && island.voxelSegmentClearAt(x, from, z, toX, to, toZ, radius, 0.12)
-      && solids.segmentClear(x, from, z, toX, to, toZ, radius, 0.12, null, radius, 0.12, true, false, false, entry.rage.active)
-      && clankerPlayersClear(entry, x, y, z, toX, toY, toZ);
-  };
-  const clankerPlatformEntryAt = (x, y, z, out) => {
-    const hq = island.headquarters, radius = Math.hypot(x, z), angle = Math.atan2(x, -z);
-    for (let level = 0; level < 2; level++) {
-      const balconies = level ? hq.basement.balconies : hq.balconies;
-      for (let i = 0; i < balconies.length; i++) {
-        const platform = balconies[i];
-        if (angle <= platform.startAngle || angle >= platform.endAngle
-          || y < platform.floor - 0.1 || y > platform.ceiling + 2.4
-          || radius < Math.min(platform.radius, platform.openingRadius) - 4
-          || radius > Math.max(platform.radius, platform.openingRadius) + 2.5) continue;
-        // The root trails the front of the walking rectangle. Capture it
-        // before the projecting lip blocks its descent, and place its feet
-        // well inside the opening rather than at the outer floor edge.
-        const landingRadius = Math.min(platform.radius, platform.openingRadius) - 2.6;
-        out.x = x * landingRadius / radius; out.z = z * landingRadius / radius;
-        out.y = platform.floor; out.heading = Math.atan2(-x, -z);
-        out.radius = Math.max(platform.radius, platform.openingRadius) + 0.75;
-        return true;
-      }
-    }
-    return false;
-  };
-  const clankerRigClear = (x, y, z, toX, toY, toZ, radius, height, entry = null, ignore = null,
-    fromHeading = entry ? entry.heading : 0, toHeading = fromHeading) => {
-    // Only a complete companion uses its posed rig for this sweep.
-    if (!entry || ignore || radius !== entry.radius || height !== entry.height) {
-      return clankerCylinderClear(x, y, z, toX, toY, toZ, radius, height, entry, ignore);
-    }
-    // The climbing handoff places the feet on the inner floor before the
-    // quadruped body clears the window. Keep its certified center/foot sweep
-    // through the throat, then restore the ordinary walking envelope.
-    const exit = entry.climb;
-    if (exit.openingExit && !exit.active) {
-      const sx = Math.sin(exit.openingExitHeading), sz = Math.cos(exit.openingExitHeading);
-      const from = (x - exit.openingExitX) * sx + (z - exit.openingExitZ) * sz;
-      const to = (toX - exit.openingExitX) * sx + (toZ - exit.openingExitZ) * sz;
-      const side = (toX - exit.openingExitX) * sz - (toZ - exit.openingExitZ) * sx;
-      if (from >= -0.05 && to >= -0.05 && to < 2.4 && Math.abs(side) < 1.1)
-        return clankerOpeningClear(entry, x, y, z, toX, toY, toZ);
-    }
-    // Rage keeps the same quadruped and capture sweeps through cave mouths;
-    // crossing the lab threshold never reserves an upright worker pose.
-    if ((entry.rage.active || !entry.motion.lab && !entry.planningLab && !entropyLab.phase.inside(toX, toY, toZ))
-      && !entry.climb.active)
-      return clankerCenterClear(entry, x, y, z, toX, toY, toZ,
-        entry.drive.airborne && !entry.drive.passiveFall, fromHeading, toHeading)
-        && clankerWalkCoreClear(entry, x, y, z, toX, toY, toZ, fromHeading, toHeading);
-    // The outdoor footprint catches lab benches during a vertical jump;
-    // check the same upright rig that already fits between them on foot.
-    const labPose = !entry.rage.active && (entry.planningLab || entropyLab.phase.inside(toX, toY, toZ)
-      && (entry.controlled && entry.motion.lab && entry.drive.airborne
-        || !entry.gorilla.motionActive && !entry.pound && !entry.beat && !entry.climb.active));
-    if (labPose) return entry.gorilla.labPoseClear(entry.planningLab ? 2 : entry.motion.labDt || 1 / 60,
-      toX, toY, toZ, toHeading, entry.speed, entry.planningLab ? entry.planningLabWork : entry.motion.labWork,
-      entry.motion.labPhase, entry.planningLab ? entry.planningLabSide : entry.motion.labSide,
-      island.solidAt, clankerClimbTransitionClear, entry, entry.planningLab || !entry.motion.lab);
-    // Crossing the entrance changes the rig immediately. Reserve the outside
-    // quadruped before leaving, while the current upright body is still narrow.
-    if (!entry.rage.active && entry.motion.lab && !entry.gorilla.motionActive && !entry.climb.active) {
-      clankerExitBodyPending = true;
-      if (!entry.gorilla.labPoseClear(2, toX, toY, toZ, toHeading, entry.speed, "", 0, 1,
-        island.solidAt, clankerExitTransitionClear, entry, true, false)) return false;
-    }
-    // A controlled smash moves on the ordinary walking footprint. Its raised
-    // fists still animate and hit, but cannot halt travel on a terrain tread.
-    if (!(entry.controlled && entry.actionControlled) && (!entry.drive.airborne || entry.drive.passiveFall) && !entry.jump.active && !entry.climb.active
-      && (entry.planningRoam || entry.footprintMode === "walk")
-      && (clankerGroundPlaneAt(x, y, z, fromHeading, CLANKER_WALK_PLANE)
-        || clankerGroundPlaneAt(toX, toY, toZ, toHeading, CLANKER_WALK_PLANE))) {
-      const p = entry.root.position;
-      const planning = entry.planningRoam || Math.hypot(x - p.x, y - p.y, z - p.z) > 0.001;
-      entry.walkPoseChecked = true;
-      return entry.gorilla.walkPoseClear(x, y, z, toX, toY, toZ, fromHeading, toHeading,
-        entry.motion, clankerWalkSolidAt, clankerWalkTransitionClear, island.hullClearAt,
-        entry, planning ? 1 / 30 : entry.motion.labDt || 1 / 60, planning ? 0 : entry.speed, planning);
-    }
-    if (!(entry.controlled && entry.actionControlled) && (!entry.drive.airborne || entry.drive.passiveFall) && !entry.jump.active && !entry.climb.active
-      && (entry.planningRoam || entry.footprintMode === "walk")
-      && (entry.motion.supportOffset < -0.001 || clankerTerraceAt(x, y, z, fromHeading)
-        || clankerTerraceAt(toX, toY, toZ, toHeading))) {
-      const p = entry.root.position;
-      const planning = entry.planningRoam || Math.hypot(x - p.x, y - p.y, z - p.z) > 0.001;
-      entry.walkPoseChecked = true;
-      const dt = planning ? 1 / 30 : entry.motion.labDt || 1 / 60, offset = entry.motion.supportOffset;
-      const dx = toX - x, dz = toZ - z;
-      const speed = planning ? 0 : Math.hypot(dx, dz) / dt
-        * (dx * Math.sin(toHeading) + dz * Math.cos(toHeading) < 0 ? -1 : 1);
-      entry.motion.supportOffset = planning ? 0 : Math.max(-1.02, Math.min(1.02,
-        offset + (entry.drive.passiveFall ? 0 : y - toY))) * Math.exp(-12 * dt);
-      let clear;
-      try {
-        clear = entry.gorilla.walkPoseClear(x, y, z, toX, toY, toZ, fromHeading, toHeading,
-          entry.motion, clankerWalkSolidAt, clankerWalkTransitionClear, island.hullClearAt,
-          entry, dt, speed, planning);
-        if (clear) {
-          entry.motion.supportOffset = 0;
-          clear = entry.gorilla.walkPoseClear(toX, toY, toZ, toX, toY, toZ, toHeading, toHeading,
-            entry.motion, clankerWalkSolidAt, clankerWalkTransitionClear, island.hullClearAt,
-            entry, 2, 0, true);
-        }
-      } finally { entry.motion.supportOffset = offset; }
-      return clear;
-    }
-    return BL.agent.footprint.sweep(entry, x, y, z, toX, toY, toZ, radius, height,
-      fromHeading, toHeading, clankerCylinderClear, ignore);
-  };
-  const CLANKER_WALK_PLANE = { groundX: 0, groundY: 0, groundZ: 0 };
-  const clankerWalkSolidAt = (x, y, z) => !island.clearAt(x, y, z, 0, 0);
-  const clankerWalkTransitionClear = (entry, x, y, z, nx, ny, nz, radius, height,
-    actors, riders, toRadius, toHeight) => clankerCylinderClear(x, y, z, nx, ny, nz,
-      radius, height, entry, null, false, actors, false, toRadius, toHeight);
-  const CLANKER_REST_FOOTING = { lab: false, supportOffset: 0 };
-  const clankerPointFootingAt = (x, z, y, skipRageProps = false) => Math.max(
-    island.supportAt(x, z, y, 0.02, ABYSS_FLOOR), solids.supportAt(x, z, y, 0.02, 0, null, null, false, null, skipRageProps));
-  const clankerRestFootingClear = (entry, x, y, z, heading) => {
-    if (entry.rage.active || !entropyLab.phase.inside(x, y, z))
-      return clankerCenterClear(entry, x, y, z, x, y, z, false, heading, heading)
-        && Math.abs(clankerPointFootingAt(x, z, y, entry.rage.active) - y) < 0.1;
-    CLANKER_REST_FOOTING.lab = entropyLab.phase.inside(x, y, z);
-    return entry.gorilla.walkPoseClear(x, y, z, x, y, z, heading, heading,
-      CLANKER_REST_FOOTING, clankerWalkSolidAt, clankerWalkTransitionClear,
-      island.hullClearAt, entry, 2, 0, true, clankerPointFootingAt);
-  };
-  // Other players are solid to the gorilla the visitor drives, as they are to a driven Ooga (`crew.outsideSupportAt`).
-  // Its body is the cylinder their pages see (the rig's posed envelope): their bodies hold it off and their tops hold
-  // it up on that one footprint. NPC gorillas still run under players.
   const clankerPlayers = (entry) => entry && entry.controlled && remotes && !cloudPlaying() ? remotes.actors() : null;
   const clankerPlayersClear = (entry, x, y, z, toX, toY, toZ, carrier = null) => {
+    if (entry?.nonInteractive) return true;
     const bodies = clankerPlayers(entry);
     if (bodies) for (let i = 0; i < bodies.length; i++) {
       const body = bodies[i];
@@ -9896,6 +8153,7 @@
   // NPC walking deliberately passes under players. A discontinuous bed landing must still keep
   // clear of both the locally driven Ooga and every remote player's current body.
   const clankerBedPlayersClear = (entry, bed) => {
+    if (entry.nonInteractive) return true;
     const radius = entry.gorilla.bodyRadius, height = entry.gorilla.bodyHeight;
     const local = pilot.player;
     if (local && local.root.visible) {
@@ -9948,126 +8206,8 @@
     }
     if (riding) clankers.supportRemoved();
   };
-  const clankerClear = (x, y, z, toX, toY, toZ, radius, height, entry = null, ignore = null,
-    fromHeading = entry ? entry.heading : 0, toHeading = fromHeading, carrier = null) => {
-    if (entry) entry.walkPoseChecked = false;
-    const previousEntry = clankerPassingEntry;
-    // A lab crowd overlap must not trap an airborne gorilla at its current XZ.
-    // Keep peer checks on every step with horizontal travel.
-    const verticalLabJump = entry && entry.controlled && entry.motion.lab && entry.drive.airborne
-      && x === toX && z === toZ;
-    clankerPassingEntry = verticalLabJump ? entry : null;
-    try {
-      if (entry && !ignore && clankers && radius === entry.radius && height === entry.height && !entry.climb.active) {
-        clankerPassingEntry = entry;
-        // Surface NPCs sweep their trunks against peers too. The old centre
-        // check admitted torso pileups that the climbing checks could not clear.
-        // Human controls retain the permissive surface movement.
-        if (!verticalLabJump && !entry.planningLabTraffic && !entry.planningRoam && (entry.motion.lab || !entry.controlled)
-          && !clankerPeersClear(entry, x, y, z, toX, toY, toZ, fromHeading, toHeading)) return false;
-      }
-      return clankerRigClear(x, y, z, toX, toY, toZ, radius, height, entry, ignore, fromHeading, toHeading)
-        && clankerPlayersClear(entry, x, y, z, toX, toY, toZ, carrier);
-    } finally {
-      clankerPassingEntry = previousEntry;
-    }
-  };
-  const clankerClimbClear = (entry, x, y, z, nx, ny, nz, radius, height, riders = true, actors = true, peers = true, terrain = true) => {
-    const previous = clankerPassingEntry;
-    if (!peers) clankerPassingEntry = entry;
-    try {
-      return clankerCylinderClear(x, y, z, nx, ny, nz, radius, height, entry, null, true, actors, terrain,
-        radius, height, !terrain);
-    } finally { clankerPassingEntry = previous; }
-  };
-  // At a lip the bent rig fits where a tall cylinder cannot. The controller
-  // checks that exact terrain pose; scenery and other gorillas stay solid.
-  const clankerClimbTransitionClear = (entry, x, y, z, nx, ny, nz, radius, height, actors = true, riders = true, toRadius = radius, toHeight = height, peers = true, part = null, hull = null) => {
-    const previous = clankerPassingEntry;
-    if (!peers) clankerPassingEntry = entry;
-    const bench = (entry.motion.lab || entry.planningLab) && part === entry.gorilla.parts.armL ? entry.gorilla.labPickupBench : null;
-    const station = entropyLab.stations[entry.planningLabStation >= 0 ? entry.planningLabStation : entry.lab.station];
-    // Only the assigned touchscreen's working arm may contact its screen.
-    // The torso, other arm, benches and cave walls retain their full collision.
-    const screen = (entry.motion.lab || entry.planningLab) && station?.kind === "touch"
-      && part === (station.side < 0 ? entry.gorilla.parts.armR : entry.gorilla.parts.armL) ? station.contact : null;
-    const contact = bench || screen;
-    try {
-      if (clankerCylinderClear(x, y, z, nx, ny, nz, radius, height, entry, contact, true, actors, false, toRadius, toHeight)) return true;
-      if (!hull || contact) return false;
-      // Circular arm slices include empty corners beside a real masonry grip.
-      // The complete, uninset swept part box must clear every slab of one rim
-      // before that same slice may omit it; every other blocker stays checked.
-      const reach = Math.max(radius, toRadius);
-      for (let i = 0; i < climbMasonry.length; i++) {
-        const row = climbMasonry[i];
-        if (Math.max(x, nx) + reach < row.minX || Math.min(x, nx) - reach > row.maxX
-          || Math.max(z, nz) + reach < row.minZ || Math.min(z, nz) - reach > row.maxZ
-          || Math.max(y + height, ny + toHeight) < row.minY || Math.min(y, ny) > row.maxY
-          || !solids.isActive(row.node)) continue;
-        let clear = true;
-        for (let j = 0; j < row.boxes.length; j++) if (BL.convex.hullsOverlap(hull, row.boxes[j])) { clear = false; break; }
-        if (clear && clankerCylinderClear(x, y, z, nx, ny, nz, radius, height, entry, row.node, true, actors, false, toRadius, toHeight)) return true;
-      }
-      return false;
-    } finally { clankerPassingEntry = previous; }
-  };
-  clankerClimbTransitionClear.needsHull = true;
-  let clankerBedLanding = null;
-  const clankerRestTransitionClear = (entry, x, y, z, nx, ny, nz, radius, height, actors, riders, toRadius, toHeight) => {
-    const c = entry.climb;
-    // The preview has posed the whole rig at the bed, so this radius includes its lying head and feet.
-    if (clankerBedLanding && !clankerBedPlayersClear(entry, clankerBedLanding)) return false;
-    if (c.peerCheck) {
-      c.peerCheck = false;
-      const p = entry.root.position;
-      if (!clankerPeersClear(entry, c.peerX, c.peerY, c.peerZ, p.x, p.y, p.z,
-        c.peerHeading, entry.root.rotation.y, true)) return false;
-    }
-    return clankerClimbTransitionClear(entry, x, y, z, nx, ny, nz,
-      radius, height, actors, riders, toRadius, toHeight, false);
-  };
-  const clankerRestPoseClear = (entry, dt, lounge, staticPose = false,
-    x = entry.root.position.x, y = entry.root.position.y, z = entry.root.position.z, heading = entry.heading, fromLounge = null, sequenceStep = 0, bedLanding = null) => {
-    const p = entry.root.position, c = entry.climb;
-    const sx = staticPose ? x : p.x, sy = staticPose ? y : p.y, sz = staticPose ? z : p.z;
-    const fromHeading = staticPose ? heading : entry.heading;
-    if (!entry.motion.lab && !clankerCenterClear(entry, sx, sy, sz, x, y, z, false, fromHeading, heading)) return false;
-    c.peerX = sx; c.peerY = sy; c.peerZ = sz; c.peerHeading = fromHeading; c.peerCheck = true;
-    clankerBedLanding = bedLanding;
-    try {
-      return entry.gorilla.climbPoseClear(dt, x, y, z, heading, entry.motion,
-        island.solidAt, clankerRestTransitionClear, entry, 0, staticPose, lounge, fromLounge, sequenceStep);
-    } finally { c.peerCheck = false; clankerBedLanding = null; }
-  };
-  clankerRestTransitionClear.beginPose = entry => { entry.climb.peerCheck = true; };
-  let clankerExitBodyPending = false;
-  const clankerExitTransitionClear = (entry, x, y, z, nx, ny, nz, radius, height, actors, riders, toRadius, toHeight) => {
-    if (clankerExitBodyPending) {
-      clankerExitBodyPending = false;
-      const mode = entry.footprintMode, compact = entry.compact, previousRadius = entry.radius, previousHeight = entry.height, p = entry.root.position;
-      // The rig is temporarily in its real future pose here. Reserve the same
-      // walking envelope the controller will use immediately outside the lab.
-      entry.footprintMode = "pound"; entry.compact = entry.gorilla.poundCompact;
-      entry.radius = Math.max(BL.clankers.WALK_RADIUS, entry.gorilla.bodyRadius + 0.1);
-      entry.height = Math.max(BL.clankers.WALK_HEIGHT, entry.gorilla.bodyHeight + 0.04);
-      let clear = true;
-      // NPC lab departures retain their coworker passing policy while the
-      // body opens outside. A queued upright trunk cannot veto that handoff.
-      if (!clankerLabWorker(entry) && !clankerEntering(entry)) for (const other of clankers.list) {
-        if (other === entry || !other.active) continue;
-        const q = other.root.position;
-        const shape = clankerPassingPeer(entry, other) ? BL.agent.torso : BL.agent.footprint;
-        if (shape.overlaps(entry, p.x, p.y, p.z, entry.root.rotation.y,
-          other, q.x, q.y, q.z, other.heading, 0.03)) { clear = false; break; }
-      }
-      entry.footprintMode = mode; entry.compact = compact;
-      entry.radius = previousRadius; entry.height = previousHeight;
-      if (!clear) return false;
-    }
-    return clankerClimbTransitionClear(entry, x, y, z, nx, ny, nz, radius, height, actors, riders, toRadius, toHeight);
-  };
   const clankerGroomClear = (entry, partner) => {
+    if (entry.nonInteractive || partner?.nonInteractive) return false;
     const p = entry.root.position, sine = Math.sin(entry.heading), cosine = Math.cos(entry.heading), side = entry.motion.groomSide;
     const x = p.x + cosine * side * 0.7 + sine * 0.3, z = p.z - sine * side * 0.7 + cosine * 0.3;
     const nx = p.x + cosine * side * 1.55 + sine * 0.55, nz = p.z - sine * side * 1.55 + cosine * 0.55;
@@ -10171,412 +8311,35 @@
     // target. Their swept mesh supplies the hit instead of a radial damage area.
     return clankerCylinderClear(p.x, p.y, p.z, p.x, p.y, p.z, 0.8, 2.7, entry);
   };
-  const clankerRectangleAt = (entry, out, climbingTop = false) => {
-    const scale = entry.root.scale.x, upright = !climbingTop && (entry.parked || entry.biped);
-    out.halfForward = (upright ? 0.825 : 1.5) * scale;
-    out.halfSide = (upright ? 0.825 : 0.85) * scale;
-    out.centerForward = (upright ? 0.19 : 0.7) * scale;
-    return out;
-  };
-  const CLANKER_RECTANGLE = { halfForward: 0, halfSide: 0, centerForward: 0 };
-  const CLANKER_TERRAIN_RAMP = { groundX: 0, groundZ: 0, uneven: 0 };
-  const clankerSceneSupportAt = (entry, x, z, y, step, heading = entry.heading, props = true) => {
-    // Tree tops are landing surfaces for the driven gorilla, not floors for a roaming one (as for Oogas).
-    const accept = entry.controlled ? null : npcTreeSupportAllowed;
-    const padSupportAt = entry.rage.active ? clankerRagePadSupportAt : clankerPadSupportAt;
-    if (!entry.motion.lab && !entry.planningLab) {
-      const terrainStep = step >= STEP_MAX && BL.wallPanels.rampAt(island.surfaceAt, x, y, z, heading, CLANKER_TERRAIN_RAMP)
-        ? Math.min(step, BL.wallPanels.RAMP_STEP) : Math.min(step, STEP_MAX);
-      let floor = island.supportAt(x, z, y, terrainStep, ABYSS_FLOOR, 0);
-      if (props) {
-        // The supporting top must last until the same core that collides
-        // with its side has cleared it. A point support dropped the root
-        // while its trailing radius still overlapped an intact box, so both
-        // the diagonal step and the horizontal-then-down proof rejected it.
-        floor = Math.max(floor, solids.supportAt(x, z, y, step, CLANKER_CORE_RADIUS, null, null, true, accept, entry.rage.active));
-        if (mempoolIsland) floor = Math.max(floor, mempoolIsland.floatAt(x, z, y, step, GORILLA_DRAUGHT));
-        if (ALTAR_HEIGHT <= y + step + 1e-7
-          && x * x + z * z < altar.platformRadius * altar.platformRadius) floor = Math.max(floor, ALTAR_HEIGHT);
-        // Only the body's support area holds it up; reaching limbs must not
-        // keep the root suspended past a short step or platform edge.
-        floor = Math.max(floor, solids.gorillaStepAt(x, z, y, step));
-      }
-      return floor;
-    }
-    // Upright scientists stand on their feet. An arm reaching a keyboard is
-    // not a foot landing on that desk, even though it belongs to the body sweep.
-    // Keep that foot support in upright flight too: a descending arm cannot
-    // land the jumping body on a neighbouring bench before its feet get there.
-    if (entry.motion.lab && (!entry.drive.airborne && !entry.gorilla.motionActive
-      || entry.drive.airborne && !entry.drive.passiveFall)) {
-      const floor = island.supportAt(x, z, y, Math.min(step, STEP_MAX), ABYSS_FLOOR, 0.45);
-      return props ? Math.max(floor, solids.supportAt(x, z, y, step, 0.45, null, null, true, accept, entry.rage.active), solids.gorillaStepAt(x, z, y, step)) : floor;
-    }
-    // Pitching a walking rig on the tunnel ramp can leave the flat-ground
-    // compact envelope. Its broad bounding circle then reaches the tunnel's
-    // side ledges, although the feet remain on the ramp. Keep the walking
-    // support footprint here; the complete posed hull still checks collision.
-    const compact = entry.compact, planning = entry.planningRoam;
-    if ((!entry.drive.airborne || entry.drive.passiveFall) && !entry.jump.active && !entry.climb.active
-      && (planning || entry.footprintMode === "walk")
-      && clankerGroundPlaneAt(x, y, z, heading, CLANKER_SUPPORT_PLANE)) {
-      entry.compact = true; entry.planningRoam = true;
-    }
-    // Terrain and tall platforms use the body footprint. Short props use the
-    // centre alone, so a reaching arm cannot force an early rise or sidestep.
-    const shape = BL.agent.footprint, radius = shape.radius(entry);
-    const sine = Math.sin(heading), cosine = Math.cos(heading);
-    const platformReach = altar.platformRadius + radius - 1e-7;
-    let floor = ABYSS_FLOOR;
-    for (let part = 0; part < shape.count(entry); part++) {
-      const offset = shape.offset(entry, part), px = x + sine * offset, pz = z + cosine * offset;
-      floor = Math.max(floor, island.supportAt(px, pz, y, Math.min(step, STEP_MAX), ABYSS_FLOOR, radius));
-      if (props) floor = Math.max(floor, solids.supportAt(px, pz, y, step, radius, null, null, true, accept, entry.rage.active));
-      // Keep the dais under a released gorilla until it has walked back off.
-      if (props && ALTAR_HEIGHT <= y + step + 1e-7
-        && px * px + pz * pz < platformReach * platformReach) floor = Math.max(floor, ALTAR_HEIGHT);
-    }
-    if (props) floor = Math.max(floor, solids.gorillaStepAt(x, z, y, step));
-    entry.compact = compact; entry.planningRoam = planning;
-    if ((!entry.drive.airborne || entry.drive.passiveFall) && !entry.jump.active && !entry.climb.active && !entry.gorilla.motionActive
-      && (planning || entry.footprintMode === "walk")
-      && !clankerGroundPlaneAt(x, y, z, heading, CLANKER_SUPPORT_PLANE)) {
-      const center = padSupportAt(x, z, y, step, props);
-      if (floor > center + 0.2) {
-        const pads = entry.gorilla.walkSupportAt(x, z, y, heading, step, props, padSupportAt);
-        if (Number.isFinite(pads) && pads < floor - 0.02) floor = pads;
-      }
-    }
-    return floor;
-  };
-  // The scene's support, and other players' tops for the gorilla the visitor drives.
-  const clankerSupportAt = (entry, x, z, y, step, heading = entry.heading, props = true) => {
-    const floor = clankerSceneSupportAt(entry, x, z, y, step, heading, props);
-    return props ? Math.max(floor, clankerPlayersSupportAt(entry, x, z, y, step)) : floor;
-  };
-  const clankerPadSupportAt = (x, z, y, step, props, skipRageProps = false) => {
-    const floor = island.supportAt(x, z, y, Math.min(step, STEP_MAX), ABYSS_FLOOR);
-    if (!props) return floor;
-    const radius = altar.platformRadius - 1e-7;
-    return Math.max(floor, solids.supportAt(x, z, y, step, 0, null, null, true, null, skipRageProps), solids.gorillaStepAt(x, z, y, step),
-      mempoolIsland ? mempoolIsland.floatAt(x, z, y, step, GORILLA_DRAUGHT) : ABYSS_FLOOR,
-      ALTAR_HEIGHT <= y + step + 1e-7 && x * x + z * z < radius * radius ? ALTAR_HEIGHT : ABYSS_FLOOR);
-  };
-  const clankerRagePadSupportAt = (x, z, y, step, props) => clankerPadSupportAt(x, z, y, step, props, true);
-  const clankerTerraceAt = (x, y, z, heading) => {
-    const sine = Math.sin(heading), cosine = Math.cos(heading);
-    for (let i = 0; i < 3; i++) {
-      const offset = i === 0 ? 0.05 : i === 1 ? 0.7 : 1.35;
-      // Detect the stone beside the whole walking body, including a riser too
-      // high to count as a legal step. This selects exact collision proof; it
-      // does not raise the controller's permitted step height.
-      if (island.supportAt(x + sine * offset, z + cosine * offset, y, BL.clankers.WALK_HEIGHT, ABYSS_FLOOR, 0.85) > y + 0.02) return true;
-    }
-    return false;
-  };
-  const CLANKER_SUPPORT_PLANE = { groundX: 0, groundY: 0, groundZ: 0 };
-  // Compare support using the same footprint so a terrain tread beneath a
-  // leading limb cannot be mistaken for standing on a raised prop.
-  const clankerTerrainSupportAt = (entry, x, z, y, step, heading = entry.heading) =>
-    clankerSupportAt(entry, x, z, y, step, heading, false);
-  const CLANKER_RAMP_COLUMN = { floor: 0, ceiling: 0 };
-  const clankerGroundPlaneAt = (x, y, z, heading, out, motion = null) => {
-    const column = CLANKER_RAMP_COLUMN, sine = Math.sin(heading), cosine = Math.cos(heading);
-    let ramp = false;
-    // Retain the dedicated HQ ramp fit; its tunnel sides are deliberately
-    // outside the terrain rectangle used on the open island.
-    for (let i = 0; i < 3 && !ramp; i++) {
-      const along = i === 0 ? 0 : i === 1 ? 2.4 : -0.9;
-      const px = x + sine * along, pz = z + cosine * along;
-      ramp = !!(island.rampColumnAt(px, pz, false, column) && y < column.ceiling
-        || island.rampColumnAt(px, pz, true, column) && y < column.ceiling);
-    }
-    const entry = motion && motion.supportEntry;
-    if (entry) { motion.groundRects.angled.steep = false; motion.groundRects.angled.walkable = false; }
-    if (!ramp && (!entry || !motion.lab)
-      && BL.wallPanels.rampAt(island.surfaceAt, x, y, z, heading, CLANKER_TERRAIN_RAMP)) {
-      const floor = island.supportAt(x, z, y, BL.wallPanels.RAMP_STEP, ABYSS_FLOOR, 0);
-      if (floor > ABYSS_FLOOR + STEP_MAX && y >= floor - 0.2 && y <= floor + 1.2) {
-        const across = CLANKER_TERRAIN_RAMP.groundX, along = CLANKER_TERRAIN_RAMP.groundZ;
-        if (entry) {
-          const flat = motion.groundRects.flat, angled = motion.groundRects.angled;
-          clankerRectangleAt(entry, flat);
-          flat.x = angled.x = x; flat.z = angled.z = z; flat.y = angled.y = floor;
-          flat.heading = angled.heading = heading;
-          angled.halfForward = flat.halfForward; angled.halfSide = flat.halfSide;
-          angled.centerForward = flat.centerForward;
-          angled.groundX = across; angled.groundZ = along;
-          angled.uneven = CLANKER_TERRAIN_RAMP.uneven;
-          angled.walkable = true; angled.steep = false;
-        }
-        out.groundX = across; out.groundZ = along; out.groundY = floor - y;
-        return true;
-      }
-    }
-    if (entry && !motion.lab && !ramp) {
-      const rects = motion.groundRects, flat = rects.flat, angled = rects.angled;
-      const rect = clankerRectangleAt(entry, flat);
-      const halfForward = rect.halfForward, halfSide = rect.halfSide, centerForward = rect.centerForward;
-      const cx = x + sine * centerForward, cz = z + cosine * centerForward;
-      const floor = clankerSupportAt(entry, x, z, y, STEP_MAX, heading);
-      flat.x = angled.x = x; flat.z = angled.z = z;
-      flat.heading = angled.heading = heading;
-      flat.halfForward = angled.halfForward = halfForward;
-      flat.halfSide = angled.halfSide = halfSide;
-      flat.centerForward = angled.centerForward = centerForward;
-      angled.y = floor; angled.walkable = false; angled.steep = false;
-      angled.uneven = Infinity;
-      if (!Number.isFinite(floor) || floor <= ABYSS_FLOOR + STEP_MAX) { flat.y = ABYSS_FLOOR; return false; }
-      const sampleY = Math.max(y, floor);
-      // Most frames have terrain alone beneath the rectangle. Only ask the
-      // prop BVH for four more samples when the live centre is on scenery.
-      flat.y = island.supportAt(x, z, y, STEP_MAX, ABYSS_FLOOR, 0);
-      const onProp = floor > flat.y + 0.02;
-      const bx = cx - sine * halfForward, bz = cz - cosine * halfForward;
-      const fx = cx + sine * halfForward, fz = cz + cosine * halfForward;
-      const lx = cx - cosine * halfSide, lz = cz + sine * halfSide;
-      const rx = cx + cosine * halfSide, rz = cz - sine * halfSide;
-      // Sample actual contact beneath each edge. Reapplying the whole blended
-      // rectangle at every edge made a small prop behave like a much wider one.
-      const back = onProp ? clankerPadSupportAt(bx, bz, sampleY, STEP_MAX, true, entry.rage.active)
-        : island.supportAt(bx, bz, sampleY, STEP_MAX, ABYSS_FLOOR, 0);
-      const front = onProp ? clankerPadSupportAt(fx, fz, sampleY, STEP_MAX, true, entry.rage.active)
-        : island.supportAt(fx, fz, sampleY, STEP_MAX, ABYSS_FLOOR, 0);
-      const left = onProp ? clankerPadSupportAt(lx, lz, sampleY, STEP_MAX, true, entry.rage.active)
-        : island.supportAt(lx, lz, sampleY, STEP_MAX, ABYSS_FLOOR, 0);
-      const right = onProp ? clankerPadSupportAt(rx, rz, sampleY, STEP_MAX, true, entry.rage.active)
-        : island.supportAt(rx, rz, sampleY, STEP_MAX, ABYSS_FLOOR, 0);
-      if (!Number.isFinite(back) || !Number.isFinite(front) || !Number.isFinite(left) || !Number.isFinite(right)
-        || Math.min(back, front, left, right) <= ABYSS_FLOOR + STEP_MAX) return false;
-      const across = (right - left) / (2 * halfSide), along = (front - back) / (2 * halfForward);
-      angled.groundX = across; angled.groundZ = along;
-      angled.uneven = Math.max(Math.abs(left + right - floor * 2), Math.abs(front + back - floor * 2));
-      angled.steep = Math.hypot(across, along) > 0.65;
-      // A blended short prop can lift the centre before both edges touch it.
-      // Its real edge heights should still pitch the walking body; unevenness
-      // remains available to reject a stationary resting pose.
-      angled.walkable = !angled.steep && (onProp || Math.abs(left + right - floor * 2) <= 0.42);
-      if (!angled.walkable || y < floor - 0.2 || y > floor + 0.9) return false;
-      out.groundX = across; out.groundZ = along; out.groundY = floor - y;
-      return Math.abs(across) + Math.abs(along) > 0.01;
-    }
-    if (!ramp) return false;
-    const floor = island.supportAt(x, z, y, STEP_MAX, ABYSS_FLOOR);
-    if (y < floor - 0.2 || y > floor + 0.9) return false;
-    const back = island.supportAt(x - sine * 0.35, z - cosine * 0.35, floor, STEP_MAX, ABYSS_FLOOR);
-    const front = island.supportAt(x + sine * 1.35, z + cosine * 1.35, floor, 0.9, ABYSS_FLOOR);
-    const left = island.supportAt(x - cosine * 0.5, z + sine * 0.5, floor, STEP_MAX, ABYSS_FLOOR);
-    const right = island.supportAt(x + cosine * 0.5, z - sine * 0.5, floor, STEP_MAX, ABYSS_FLOOR);
-    const across = right - left, along = (front - back) / 1.7;
-    if (Math.abs(left + right - floor * 2) > 0.12 || Math.hypot(across, along) > 0.65) return false;
-    if (entry) {
-      const flat = motion.groundRects.flat, angled = motion.groundRects.angled;
-      flat.x = angled.x = x; flat.z = angled.z = z;
-      flat.y = angled.y = floor; flat.heading = angled.heading = heading;
-      angled.groundX = across; angled.groundZ = along;
-      angled.uneven = Math.max(Math.abs(left + right - floor * 2), Math.abs(front + back - floor * 2));
-      angled.steep = false; angled.walkable = true;
-    }
-    out.groundX = across; out.groundZ = along; out.groundY = floor - y;
-    return true;
-  };
+  const { clankerClimbTorsoClear, clankerClimbAreaAt, clankerClimbSolidAt,
+    clankerClimbSurfaceAt, clankerPlatformEntryAt, clankerTallObstacleAhead,
+    clankerRectangleAt, clankerSupportAt, clankerTerrainSupportAt,
+    clankerGroundPlaneAt, clankerPadSupportAt, clankerRagePadSupportAt, clankerTerraceAt } =
+    BL.hubClankerSupport.create({ getIsland: () => island, getSolids: () => solids,
+      getAltar: () => altar, getMempool: () => mempoolIsland, getClimbMasonry: () => climbMasonry,
+      playersSupportAt: clankerPlayersSupportAt, step: STEP_MAX, abyss: ABYSS_FLOOR,
+      altarHeight: ALTAR_HEIGHT, draught: GORILLA_DRAUGHT });
   // Props remain live blockers throughout a climb, but never become a cached
   // wall-route endpoint. A spawned rock beneath a dismount therefore blocks or
   // reverses that route; destroying it reopens the terrain landing immediately.
   // Keep the exposed entrance lip clear, but the deeper HQ tunnel roofs can host resting gorillas.
-  const clankerRestSurfaceClear = (x, y, z, foot) => {
-    if (!npcRampRoofAt(x, y, z, foot)) return true;
-    let nearest = Infinity, along = 0;
-    for (const ramp of island.headquarters.ramps) {
-      const dx = x - ramp.from.x, dz = z - ramp.from.z, distance = dx * dx + dz * dz;
-      if (distance < nearest) { nearest = distance; along = dx * ramp.axis.x + dz * ramp.axis.z; }
-    }
-    return along >= 3.25;
-  };
-  const CLANKER_REST_SLOPE = {
-    supportEntry: null, lab: false,
-    groundRects: { flat: {}, angled: { walkable: false, uneven: Infinity, groundX: 0, groundZ: 0 } }
-  };
-  const clankerRestSiteClear = (entry, x, y, z, heading) => {
-    if (!clankerFireClear(entry, x, y, z, x, y, z, heading, heading)) return false;
-    const slope = CLANKER_REST_SLOPE, angled = slope.groundRects.angled;
-    slope.supportEntry = entry;
-    try { clankerGroundPlaneAt(x, y, z, heading, slope, slope); }
-    finally { slope.supportEntry = null; }
-    if (!angled.walkable || Math.hypot(angled.groundX, angled.groundZ) > 0.2 || angled.uneven > 0.3) return false;
-    // Walking uses centre clearance; a settled body must also leave its rear,
-    // middle and front clear of props, interactive items and other actors.
-    const sine = Math.sin(heading), cosine = Math.cos(heading);
-    for (let i = 0; i < 3; i++) {
-      const offset = i * 0.7, px = x + sine * offset, pz = z + cosine * offset;
-      if (!clankerCylinderClear(px, y, pz, px, y, pz, 0.85, 2.7, entry, null, false, false, false)) return false;
-    }
-    return true;
-  };
-  const clankerClimbTorsoClear = (vertices) => {
-    if (!island.hullClearAt(vertices)) return false;
-    let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-    for (let i = 0; i < vertices.length; i += 3) {
-      minX = Math.min(minX, vertices[i]); maxX = Math.max(maxX, vertices[i]);
-      minY = Math.min(minY, vertices[i + 1]); maxY = Math.max(maxY, vertices[i + 1]);
-      minZ = Math.min(minZ, vertices[i + 2]); maxZ = Math.max(maxZ, vertices[i + 2]);
-    }
-    for (let i = 0; i < climbMasonry.length; i++) {
-      const row = climbMasonry[i];
-      if (maxX < row.minX || minX > row.maxX || maxY < row.minY || minY > row.maxY
-        || maxZ < row.minZ || minZ > row.maxZ || !solids.isActive(row.node)) continue;
-      for (let j = 0; j < row.boxes.length; j++) if (BL.convex.hullsOverlap(vertices, row.boxes[j])) return false;
-    }
-    return true;
-  };
-  const clankerClimbAreaAt = (x, y, z) => {
-    // Climb geometry belongs to the mainland's cliff belt and underground
-    // walls. The meadow, authored stairs and satellite mesh paths are walks.
-    // This broad phase only admits a search; contact still proves a real wall.
-    const radius2 = x * x + z * z, outer = island.radius + 4, inner = island.meadowRadius - 4;
-    return radius2 <= outer * outer && (y < -0.5 || radius2 >= inner * inner) && !island.stairAt(x, y, z);
-  };
-  const clankerClimbSolidAt = (x, y, z) => {
-    if (island.solidAt(x, y, z)) return true;
-    // The cave's visible masonry projects beyond the voxel cliff. Grips and
-    // wall routes must see that same stone before ordinary props collision
-    // rejects a route through its jambs. Scenery stays on its existing mesh.
-    for (let i = 0; i < climbMasonry.length; i++) {
-      const row = climbMasonry[i], boxes = row.node.geometry.climbBoxes, ly = y - row.y;
-      if (ly < 0 || ly > 3.5 || Math.abs(x - row.x) > 4 || Math.abs(z - row.z) > 4
-        || !solids.isActive(row.node)) continue;
-      const dx = x - row.x, dz = z - row.z, lx = dx * row.cr - dz * row.sr;
-      const lz = dx * row.sr + dz * row.cr - row.offsetZ;
-      for (let at = 0; at < boxes.length; at += 6) if (lx >= boxes[at] && lx <= boxes[at + 3]
-        && ly >= boxes[at + 1] && ly <= boxes[at + 4] && lz >= boxes[at + 2] && lz <= boxes[at + 5]) return true;
-    }
-    return false;
-  };
-  const clankerClimbSurfaceAt = (x, z) => {
-    let height = island.surfaceAt(x, z);
-    // The stair/cliff probe must see the same projecting masonry as the
-    // contact probe. Walking support still comes from the live solid mesh.
-    for (let i = 0; i < climbMasonry.length; i++) {
-      const row = climbMasonry[i];
-      if (Math.abs(x - row.x) > 4 || Math.abs(z - row.z) > 4 || !solids.isActive(row.node)) continue;
-      const dx = x - row.x, dz = z - row.z, lx = dx * row.cr - dz * row.sr;
-      const lz = dx * row.sr + dz * row.cr - row.offsetZ, boxes = row.node.geometry.climbBoxes;
-      for (let at = 0; at < boxes.length; at += 6) if (lx >= boxes[at] && lx <= boxes[at + 3]
-        && lz >= boxes[at + 2] && lz <= boxes[at + 5]) height = Math.max(height, row.y + boxes[at + 4]);
-    }
-    return height;
-  };
-  const LAB_ITEM_INVERSE = math.mat4.create(), LAB_ITEM_LOCAL = math.mat4.create();
-  const placeLabDie = (item) => {
-    const n = item.node, r = item.roll;
-    BL.scene.updateLocal(n);
-    // The original die geometry has its base at zero. Rotate around its centre
-    // so tipping onto another face never drives a corner through the table.
-    const m = n.local, rx = 0.13 * (Math.abs(m[0]) + Math.abs(m[4]) + Math.abs(m[8]));
-    const ry = 0.13 * (Math.abs(m[1]) + Math.abs(m[5]) + Math.abs(m[9]));
-    const rz = 0.13 * (Math.abs(m[2]) + Math.abs(m[6]) + Math.abs(m[10]));
-    const table = item.table;
-    if (r.cx < table.minX + rx || r.cx > table.maxX - rx) { r.cx = clamp(r.cx, table.minX + rx, table.maxX - rx); r.vx *= -0.35; }
-    if (r.cz < table.minZ + rz || r.cz > table.maxZ - rz) { r.cz = clamp(r.cz, table.minZ + rz, table.maxZ - rz); r.vz *= -0.35; }
-    if (r.cy < table.y + ry + 0.001) {
-      r.cy = table.y + ry + 0.001;
-      if (r.vy < -0.2) { r.bounces++; r.vy *= -0.32; r.vx *= 0.72; r.vz *= 0.72; r.wx *= 0.58; r.wy *= 0.58; r.wz *= 0.58; }
-      else r.vy = 0;
-    }
-    setVec(n.position, r.cx - m[4] * 0.13, r.cy - m[5] * 0.13, r.cz - m[6] * 0.13);
-  };
-  const settleLabDie = (item) => {
-    const n = item.node, r = item.roll;
-    setVec(n.rotation, r.tx, r.ty, r.tz);
-    r.cy = item.table.y + 0.131; r.vx = r.vy = r.vz = 0;
-    placeLabDie(item);
-    setVec(item.home, n.position.x, n.position.y, n.position.z);
-    setVec(item.homeRotation, n.rotation.x, n.rotation.y, n.rotation.z);
-    const m = item.parent.world, y = r.cy + 0.13;
-    setVec(item.pickup, m[0] * r.cx + m[4] * y + m[8] * r.cz + m[12],
-      m[1] * r.cx + m[5] * y + m[9] * r.cz + m[13], m[2] * r.cx + m[6] * y + m[10] * r.cz + m[14]);
-    item.rolling = false;
-  };
-  const rollLabEquipment = (entry, index) => {
-    const item = entropyLab.equipment[index];
-    if (!item || item.kind !== "die" || item.holder !== entry || entry.gorilla.labItem !== item.node) return false;
-    const n = item.node, r = item.roll;
-    BL.scene.updateWorld(entry.root, entry.root.parent.world);
-    math.mat4.invert(LAB_ITEM_INVERSE, item.parent.world);
-    math.mat4.multiply(LAB_ITEM_LOCAL, LAB_ITEM_INVERSE, n.world);
-    const m = LAB_ITEM_LOCAL;
-    r.cx = m[12] + m[4] * 0.13; r.cy = m[13] + m[5] * 0.13; r.cz = m[14] + m[6] * 0.13;
-    entry.gorilla.releaseLabItem(); addChild(item.parent, n);
-    refreshMirrorObject(entry.root);
-    setVec(n.scale, 1, 1, 1);
-    setVec(n.rotation, Math.asin(clamp(-m[9], -1, 1)), Math.atan2(m[8], m[10]), Math.atan2(m[1], m[5]));
-    r.time = 0; r.bounces = 0;
-    r.vx = (entry.random() - 0.5) * 0.22; r.vy = 0.9 + entry.random() * 0.4;
-    r.vz = -0.22 - entry.random() * 0.2;
-    r.wx = 5 + entry.random() * 4; r.wy = 4 + entry.random() * 3; r.wz = 3 + entry.random() * 5;
-    // Land on one of the original die's six faces; the object stays where it
-    // settled, becoming the next pickup point instead of snapping back home.
-    const face = Math.floor(entry.random() * 6), quarter = Math.PI / 2;
-    r.tx = (face < 4 ? face : 0) * quarter; r.tz = face < 4 ? 0 : (face === 4 ? 1 : -1) * quarter;
-    r.ty = Math.floor(entry.random() * 4) * quarter;
-    item.rolling = true;
-    return true;
-  };
-  const updateLabEquipment = (dt) => {
-    let screens = 0, claims = 0;
-    for (const e of clankers.list) if (e.active && e.motion.lab && e.lab.station >= 0) {
-      claims |= 1 << e.lab.station;
-      if (e.motion.labWork === "type" || e.motion.labWork === "touch") screens |= 1 << e.lab.station;
-    }
-    entropyLab.updateScreens(dt, screens, claims);
-    for (const item of entropyLab.equipment) {
-      if (!item.rolling) continue;
-      const r = item.roll, rotation = item.node.rotation;
-      let remaining = Math.min(dt, 0.25);
-      while (remaining > 1e-8) {
-        const step = Math.min(remaining, 1 / 120); remaining -= step; r.time += step;
-        r.vy -= 7 * step; r.cx += r.vx * step; r.cy += r.vy * step; r.cz += r.vz * step;
-        if (r.time < 0.9) { rotation.x += r.wx * step; rotation.y += r.wy * step; rotation.z += r.wz * step; }
-        else {
-          const blend = 1 - Math.exp(-12 * step), drag = Math.exp(-8 * step);
-          rotation.x += Math.atan2(Math.sin(r.tx - rotation.x), Math.cos(r.tx - rotation.x)) * blend;
-          rotation.y += Math.atan2(Math.sin(r.ty - rotation.y), Math.cos(r.ty - rotation.y)) * blend;
-          rotation.z += Math.atan2(Math.sin(r.tz - rotation.z), Math.cos(r.tz - rotation.z)) * blend;
-          r.vx *= drag; r.vz *= drag;
-        }
-        placeLabDie(item);
-      }
-      if (r.time >= 1.8) settleLabDie(item);
-    }
-  };
-  const returnLabEquipment = (entry) => {
-    for (const item of entropyLab.equipment) {
-      if (item.holder !== entry) continue;
-      if (item.kind === "die" && item.node.parent === item.parent) {
-        if (item.rolling) settleLabDie(item);
-        item.holder = null;
-        return true;
-      }
-      entry.gorilla.releaseLabItem();
-      addChild(item.parent, item.node);
-      refreshMirrorObject(entry.root);
-      setVec(item.node.position, item.home.x, item.home.y, item.home.z);
-      setVec(item.node.rotation, item.homeRotation.x, item.homeRotation.y, item.homeRotation.z);
-      setVec(item.node.scale, item.homeScale.x, item.homeScale.y, item.homeScale.z);
-      item.node.quaternion = null; item.node.visible = true; item.holder = null; item.rolling = false;
-      return true;
-    }
-    return false;
-  };
-  const pickUpLabEquipment = (entry, index) => {
-    const item = entropyLab.equipment[index], p = entry.root.position;
-    if (!item || item.holder || entry.gorilla.labItem || !entry.motion.lab
-      || Math.hypot(p.x - item.pickup.x, p.z - item.pickup.z) > 2.1
-      || Math.abs(p.y - entropyLab.mouth.floorY) > 0.2) return false;
-    entry.gorilla.holdLabItem(item.node);
-    refreshMirrorObject(entry.root);
-    item.holder = entry;
-    return true;
+  const { clankerSatelliteLandAt, clankerCylinderClear, clankerFireDistance, clankerFireClear, clankerCenterClear, clankerWalkCoreAt, clankerWalkCoreClear, clankerOpeningClear, clankerRigClear, clankerWalkSolidAt, clankerWalkTransitionClear, clankerPointFootingAt, clankerRestFootingClear, clankerClear, clankerClimbClear, clankerClimbTransitionClear, clankerRestTransitionClear, clankerRestPoseClear, clankerExitTransitionClear, clankerRestSurfaceClear, clankerRestSiteClear } =
+    BL.hubClankerClearance.create({ getIsland: () => island, getSolids: () => solids,
+      getMempool: () => mempoolIsland, getTimechain: () => timechainIsland,
+      getBifrost: () => bifrostIsle, getClankers: () => clankers, getLab: () => entropyLab,
+      getClimbMasonry: () => climbMasonry, getPassingEntry: () => clankerPassingEntry,
+      setPassingEntry: value => { clankerPassingEntry = value; },
+      labInside: (x, y, z) => entropyLab.phase.inside(x, y, z),
+      crossesSealedCave, matrixGateSegmentClear, npcFireClear, npcRampRoofAt,
+      clankerPlayersClear, clankerPeersClear, clankerBedPlayersClear, clankerPassingPeer,
+      clankerLabWorker, clankerEntering, clankerBodySegmentClear,
+      clankerGroundPlaneAt, clankerRectangleAt, clankerTerraceAt,
+      fireHazards, step: STEP_MAX, abyss: ABYSS_FLOOR, fireBottom: FIRE_BOTTOM, fireTop: FIRE_TOP });
+  const labEquipmentRuntime = BL.npcLabEquipment.create({ getLab: () => entropyLab, getClankers: () => clankers, refreshMirrorObject });
+  const pickUpLabEquipment = labEquipmentRuntime.pickup, returnLabEquipment = labEquipmentRuntime.release;
+  const rollLabEquipment = labEquipmentRuntime.roll;
+  const updateLabEquipment = dt => {
+    if (BL.net.state.npcAuthority?.mode !== "server") labEquipmentRuntime.update(dt);
   };
   const clankerCameraClear = (x, y, z, toX, toY, toZ) =>
     island.voxelSegmentClearAt(x, y, z, toX, toY, toZ, 0.1, 0.15)
@@ -10988,6 +8751,7 @@
   const updateClankerEffects = (dt) => {
     for (let i = 0; i < clankers.list.length; i++) {
       const entry = clankers.list[i];
+      if (entry.nonInteractive) continue;
       BL.clankerRage.effects(entry);
       if (!entry.active) continue;
       const f = entry.fire, parts = entry.renderParts, fireFX = entry.fireFX, spread = fireFX.spread;
@@ -11089,7 +8853,7 @@
   let independentOoga = null, independentOogaGhost = null, releaseFrozenOoga = null, detachOogaPilot = null, hubBodySystems = null;
   const HUB_BODY_RECLAIM_PREVIEW = false, HUB_BODY_TERRAIN_VERSION = "hub-terrain-body-1";
   let releaseBodyQuiescer = null, releaseHubBodyAdapter = null;
-  const hubBodyIdle = () => !pilot.player && !crew.player && !clankerPlay.active && !clankers.player && !independentClanker && !independentOoga
+  const hubBodyIdle = () => hostLayoutReady() && !pilot.player && !crew.player && !clankerPlay.active && !clankers.player && !independentClanker && !independentOoga
     && !entering && !factoryDeparting && !bifrostDeparting && !timechainIsland.gate.busy && !cloudHopper?.active;
   const installHubBodyAdapter = () => {
     releaseHubBodyAdapter?.(); releaseHubBodyAdapter = null;
@@ -11129,7 +8893,7 @@
         const adapter = BL.clankerBodyTransfer.reclaimAdapter({ world: preparation.world,
           createBody() {
             return BL.clankers.createPlayerBody({ profile: "terrain-body-3", root,
-              ownerId: npc.owner.id, name: character.handle,
+              ownerId: character.handle, name: character.handle,
               groundAt: (x, z, y) => island.supportAt(x, z, y, .52), clear: clankerClear,
               terrain: { version: HUB_BODY_TERRAIN_VERSION, supportAt: clankerSupportAt,
                 terrainSupportAt: clankerTerrainSupportAt, groundPlaneAt: clankerGroundPlaneAt,
@@ -11149,6 +8913,7 @@
   };
   const detachPlayerOoga = body => {
     if (independentOoga !== body) return;
+    npcStatusBeams?.release(body.actor);
     independentOoga = null;
     // Every cleanup runs even if input/camera or a visual binding fails.
     const ghost = independentOogaGhost;
@@ -11176,6 +8941,7 @@
       detachOogaPilot = detach;
       trackMirrorObject(body.actor.root, body.actor.traits.height * 2,
         Math.max(body.actor.headOpen.verts.length, body.actor.headClosed.verts.length));
+      if (npc.state === "away") npcStatusBeams?.arrive(body.actor, "ooga");
       return true;
     } catch (error) { try { detachPlayerOoga(body); } finally { throw error; } }
   };
@@ -11186,6 +8952,7 @@
   };
   const detachPlayerClanker = entry => {
     if (!entry || independentClanker !== entry) return;
+    npcStatusBeams?.release(entry);
     independentClanker = null;
     independentClankerGhost?.dispose(); independentClankerGhost = null;
     releaseFrozenClanker?.(); releaseFrozenClanker = null;
@@ -11213,17 +8980,9 @@
       entry.netMotion = new Float64Array(6);
       registerClanker(entry, false);
       trackMirrorObject(entry.root, 3.6, 4248);
+      if (npc?.owner.state === "away") npcStatusBeams?.arrive(entry, "clanker");
       return true;
     } catch (error) { try { detachPlayerClanker(entry); } finally { throw error; } }
-  };
-  const CLANKER_TALL_OBSTACLE = {
-    node: null, minAlong: 0, maxAlong: 0, minAcross: 0, maxAcross: 0,
-    minContactAcross: 0, maxContactAcross: 0
-  };
-  const clankerTallObstacleAhead = (entry, dx, dz) => {
-    const p = entry.root.position, step = BL.clankers.PROP_STEP, aboveStep = p.y + step + 0.02;
-    return solids.shoulderAt(p.x, aboveStep, p.z, dx, dz, 0.025,
-      Math.max(0, entry.height - step), 1.4, CLANKER_TALL_OBSTACLE, aboveStep, entry.rage.active);
   };
   const poundClankerEquipment = (entry) => {
     const p = entry.root.position;
@@ -11645,6 +9404,7 @@
     clankerPlay.dispose();
     remotes.dispose();
     npcSync.dispose();
+    npcStatusBeams?.clear();
     pilot.suspend();
     input.suspend();
     crew.pause();
@@ -11770,8 +9530,7 @@
   const prepareHubSteps = function* (ctx) {
     if (heldHub || ctx.from === "hub") return null;
     preparedCharacters.clear();
-    const factory = caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
-    const options = { seed: SEED, roofHole: factory ? { id: factory.id, ...BL.factoryModels.ROOF_TUBE } : null, nook: LIBRARY };
+    const options = BL.hubLayout.terrainOptions(caves.slots);
     const slice = { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 };
     if (!terrain.hasIsland(options)) yield* terrain.islandSteps(options, slice);
     yield* poolModels.prepareSteps();
@@ -11820,7 +9579,15 @@
     const slice = { until: performance.now() + ENTER_SLICE_MS };
     prefetchAt = 0;
     reuseHub = ctx.hubPolicy === "keep";
-    if (heldHub) { resumeHub(ctx); return; }
+    if (heldHub && hostLayoutCompatible()) { resumeHub(ctx); return; }
+    if (heldHub) leave(true);
+    clankers = null;
+    builtHostLayout = currentHostLayout(); layoutRebuilding = false;
+    if (BL.net.state.npcAuthority?.mode === "server" && !builtHostLayout)
+      throw Error("Authoritative Hub layout required before construction");
+    if (builtHostLayout && ctx.renderer.kind !== "webgl2")
+      throw Error("Authoritative Hub layout requires matching mainland geometry");
+    layoutBuilding = true;
     wpEventEnter(ctx.signal);
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     poolEffectsActive = false; poolEffectsTime = 0;
@@ -11847,8 +9614,7 @@
     solids = BL.solidProps.create();
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     phase = null;
-    const factorySlot = caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
-    island = terrain.island({ seed: SEED, roofHole: factorySlot ? { id: factorySlot.id, ...BL.factoryModels.ROOF_TUBE } : null, nook: LIBRARY });
+    island = terrain.island(BL.hubLayout.terrainOptions(caves.slots));
     guideWitness[0] = -1;
     cutawayPathBounds = buildCutawayPathBounds(island.cutawayPaths);
     guideSegmentClear.boxGrid = POOL_SEAMS[0].boxGrid = POOL_SEAMS[1].boxGrid = island.sightGrid;
@@ -11923,7 +9689,8 @@
       island.path.apply(pathNode);
       if (changed) { movePilePosts(); clearRingPalms(); reflowScenery(); invalidateRageThrowMap(); }
     };
-    layoutPile(pileMod.visualFootprintFor(world.level, PILE_SCALE));
+    layoutPileForHost = layoutPile;
+    layoutPile(pileMod.visualFootprintFor(builtHostLayout ? builtHostLayout.snapshot.history.level : world.level, PILE_SCALE));
     // While ₿IFRÖST is open its arch stands over the pass in the old gate's place, at the head of Bifröst; its stone is
     // the gate, and its gold, banners, lanterns and lit name dress it off the outlines.
     const arch = BL.scenes.bifrost ? BL.bifrostGate.landmark() : null;
@@ -11998,11 +9765,11 @@
     if (archLamp) addLamp({ glow: 0, flare: 0, visible: true }, LAMP.arch, archLamp.pool.x, archLamp.pool.y, archLamp.pool.z, true, 1, "bifrost:arch");
     // The Oogatron arches gently over the path at the top of the south stairs.
     {
-      const jx = 0, jz = 28.5, jScale = 2.6;
+      const layout = BL.hubLayout.jumbotron, jx = layout.x, jz = layout.z, jScale = layout.scale;
       const jry = Math.atan2(-jx, -jz);
-      claim(jx, jz, 3.8);
+      claim(jx, jz, layout.reach);
       // Lift the cabinet clear of the path while the posts remain buried beside it.
-      const legDrop = BL.jumbotron.DROP, jSink = 0.06, jLift = 1.62;
+      const legDrop = BL.jumbotron.DROP, jSink = layout.sink, jLift = layout.lift;
       jumbotron = BL.jumbotron.create({
         data: BL.jumbotronData,
         position: { x: jx, y: island.surfaceAt(jx, jz) + (legDrop - jSink) * jScale + jLift, z: jz },
@@ -12012,7 +9779,7 @@
       });
       addChild(root, jumbotron.node);
       placed.push(jumbotron.node);
-      addProp("jumbotron", jumbotron.node, jx, jz, 3.8).pickRay = ray => jumbotron.pickRay(ray);
+      addProp("jumbotron", jumbotron.node, jx, jz, layout.reach).pickRay = ray => jumbotron.pickRay(ray);
       hud.restoreBoards(jumbotronBoard);
       // Live stats land on the board and on the roster: fresh last-seen
       // times flow through contributors -> crew.refreshStates, which wakes a
@@ -12041,6 +9808,12 @@
     timechainIsland.claimGround();
     if (bifrostIsle) bifrostIsle.claimGround();
     clearFireBush(firePos);
+    layoutBuilding = false;
+    if (builtHostLayout) {
+      world.level = builtHostLayout.snapshot.pile;
+      layoutPile(pileMod.visualFootprintFor(world.level, PILE_SCALE));
+      clearRingPalms();
+    }
     buildLawn();
     reflowScenery();
     buildSpots();
@@ -12095,7 +9868,8 @@
     footsteps = BL.footsteps.create();
     // The snapshot outlives the visit, so a re-entered hub opens in the weather it left.
     weather.apply(chain.snapshot);
-    mempoolIsland.water.apply(chain.snapshot);
+    if (builtHostLayout) mempoolIsland.water.applyHost(builtHostLayout.snapshot.water);
+    else mempoolIsland.water.apply(chain.snapshot);
     // Give the distant island its standing lake and cloud deck before its first proximity check.
     mempoolIsland.water.update(0, 0);
     weather.update(0, null);
@@ -12120,7 +9894,8 @@
     shared.npcCaveRoofAt = npcCaveRoofAt;
     shared.npcRecoverySpot = npcRecoverySpot;
     shared.respawnSpot = pileRespawnSpot;
-    shared.initialWorkSpot = (cave, out) => pileRespawnSpot(cave, out, true) || npcRecoverySpot(cave, out);
+    shared.initialWorkSpot = (cave, out) => pileRespawnSpot(cave, out, true)
+      || !cave.nonInteractive && npcRecoverySpot(cave, out);
     shared.shoulderObstacleActive = solids.isActive;
     shared.shoulderObstacle = (cave, fx, fz, reach, out) => {
       const p = cave.root.position;
@@ -12253,115 +10028,12 @@
       (x, y, z) => island.clearAt(x, y, z, 0.15, 1.5) && mempoolIsland.sleepClear(x, y, z), island);
     shared.outdoorBedrolls = headquarters.outdoorBeds = forest.beds;
     shared.moreOutdoorBedrolls = forest.more;
-    const sleepRouteFrom = { x: 0, y: 0, z: 0 };
-    // An Ooga stood up on its mattress plans from the floor under it: the planner joins a start to its graph along the
-    // island's floor both ways, and that floor never climbs back onto a bed, so a start on one would never join.
-    const planFeet = (cave) => {
-      const p = cave.root.position, feet = p.y - cave.baseY;
-      return Math.abs(bedSupportAt(p.x, p.z, feet, 1e-4, 0) - feet) < 1e-4 ? island.supportAt(p.x, p.z, feet, STEP_MAX, -120, sleepNavigation.radius) : feet;
-    };
     const forestNavigation = headquarters.outdoorNavigation = BL.headquartersSleep.outdoorNavigation({ pool: mempoolIsland, island, props: solids });
-    shared.bedPlan = function* (cave, bed, toBed) {
-      const p = cave.root.position, home = cave.slot || WALK_IN, from = { x: p.x, y: planFeet(cave), z: p.z };
-      const entry = forestNavigation.entry, outside = forestNavigation.contains(p.x, p.z);
-      // A sleeper can wake before reaching the bridge. Its former outdoor bed
-      // must not send a mainland return through the forest's attachment search.
-      if (!outside && (!bed?.outdoor || !toBed)) return yield* sleepNavigation.plan(from.x, from.y, from.z, bed, toBed, home.x, home.z, !toBed && cave.state === "chilling");
-      if (toBed && bed.outdoor) {
-        const approach = outside ? [from] : from.y < -0.1
-          ? yield* sleepNavigation.plan(from.x, from.y, from.z, null, false, entry.x, entry.z)
-          : shared.npcPaths.route(from, entry);
-        if (!approach) return null;
-        const forest = yield* forestNavigation.plan(outside ? from : entry, bed);
-        return forest ? approach.concat(forest.slice(1)) : null;
-      }
-      const forest = yield* forestNavigation.plan(from, entry);
-      if (!forest) return null;
-      if (toBed) {
-        const inside = yield* sleepNavigation.plan(entry.x, entry.y, entry.z, bed, true, home.x, home.z);
-        return inside ? forest.concat(inside.slice(1)) : null;
-      }
-      // Positive forest elevations are not the home meadow. Retain the bridge
-      // walk until its foot before handing a worker back to ordinary routing.
-      const result = cave.state === "chilling" ? forest : forest.concat(shared.npcPaths.route(entry, { x: home.x, y: island.surfaceAt(home.x, home.z), z: home.z }).slice(1));
-      result.surfaceStart = forest.length - 1;
-      return result;
-    };
-    shared.bedRoute = (cave, bed, toBed) => {
-      const plan = shared.bedPlan(cave, bed, toBed);
-      for (;;) { const step = plan.next(); if (step.done) return step.value; }
-    };
-    shared.bedRouteClear = (cave, to) => {
-      const p = cave.root.position;
-      sleepRouteFrom.x = p.x; sleepRouteFrom.y = p.y - cave.baseY; sleepRouteFrom.z = p.z;
-      return forestNavigation.contains(p.x, p.z) || forestNavigation.contains(to.x, to.z)
-        ? forestNavigation.clearSegment(sleepRouteFrom, to) : sleepNavigation.clearSegment(sleepRouteFrom, to, false, 0.3);
-    };
-    shared.workSites = caves.slots.filter(workCave).map((slot) => {
-      const mouth = island.mouths.find((entry) => entry.id === slot.id), sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry);
-
-      const aimX = mouth.x + sr * 5.8, aimZ = mouth.z + cr * 5.8, approach = { x: aimX, z: aimZ };
-      let nearest = Infinity;
-      // Rejoin the painted trail itself, rather than an off-path mouth-axis
-      // marker that makes every worker step sideways and retrace their steps.
-      for (const line of island.path.centerlines) for (let n = 1; n < line.length; n++) {
-        const a = line[n - 1], b = line[n], dx = b.x - a.x, dz = b.z - a.z, length2 = dx * dx + dz * dz;
-        const t = length2 ? clamp(((aimX - a.x) * dx + (aimZ - a.z) * dz) / length2, 0, 1) : 0;
-        const x = a.x + dx * t, z = a.z + dz * t, distance = (x - aimX) ** 2 + (z - aimZ) ** 2;
-        if (distance < nearest) { nearest = distance; approach.x = x; approach.z = z; }
-      }
-      return {
-        repo: slot.repo,
-        additionalRepo: slot.additionalRepo,
-        mouth, sr, cr,
-        mirrorRoom: slot.status === "mirror",
-        // The namesake cave adopts fresh contributors whose repo has no cave.
-        fallback: slot.id === "c1",
-        route: [approach],
-        approachDistance: 2.5,
-        target: (cave, out) => setVec(out, mouth.x, mouth.floorY + 1.5, mouth.z),
-        position: (cave, out, retry = false) => {
-          // Reserve the first free place in the fan. Leave the central path
-          // open for reload traffic and stagger each extra row behind it.
-          const count = crew.cavemen.size * 4 + 16;
-          for (let attempt = 0; attempt < count; attempt++) {
-            const place = (attempt + (retry ? cave.work.place + 1 : 0)) % count;
-            const row = Math.floor(place / 4), side = place & 1 ? 1 : -1;
-            // Leave a full-arm companion lane between the inner shooters.
-            const x = side * (2.2 + Math.floor(place % 4 / 2) * 1.35 + (row & 1) * 0.6);
-            // A wide fan too close to the rim fires diagonally into its stone
-            // jambs. Back each row away enough to see across the opening.
-            const z = 4.8 + row * 1.35 + Math.abs(x) * 0.32;
-            const px = mouth.x + cr * x + sr * z, pz = mouth.z - sr * x + cr * z;
-            let occupied = crew.spotOccupied(cave, px, mouth.floorY, pz);
-            for (let i = 0; !occupied && i < crew.list.length; i++) {
-              const other = crew.list[i];
-              if (other === cave) continue;
-              if (other === crew.player || other.state !== "working"
-                || other.work.phase !== "outbound" && other.work.phase !== "station" && other.work.phase !== "shoot"
-                || shared.workSites[other.work.site]?.repo !== slot.repo) continue;
-              if (Math.hypot(other.work.position.x - px, other.work.position.z - pz) < 0.9) { occupied = true; break; }
-            }
-            if (occupied || Math.abs(island.supportAt(px, pz, mouth.floorY, 0.05, ABYSS_FLOOR, PLAYER_RADIUS) - mouth.floorY) > 0.05
-              || !island.clearAt(px, mouth.floorY + 0.03, pz, PLAYER_RADIUS, cave.traits.height)
-              || !solids.segmentClear(px, mouth.floorY + 0.03, pz, px, mouth.floorY + 0.03, pz, PLAYER_RADIUS, cave.traits.height)) continue;
-            let clear = true;
-            // Cover either gun shoulder and both sides of the usable doorway,
-            // not just a center-to-center ray that misses an obstructed muzzle.
-            for (let shoulder = -1; shoulder <= 1 && clear; shoulder += 2) for (let edge = -1; edge <= 1; edge++) {
-              const ax = px + cr * shoulder * 0.65 - sr, az = pz - sr * shoulder * 0.65 - cr;
-              const bx = mouth.x + cr * edge * 1.65 + sr * 0.5, bz = mouth.z - sr * edge * 1.65 + cr * 0.5;
-              if (!shared.workShotClear(ax, mouth.floorY + 1.25, az, bx, mouth.floorY + 1.5, bz)) { clear = false; break; }
-            }
-            if (!clear) continue;
-            out.x = px; out.y = mouth.floorY; out.z = pz;
-            cave.work.place = place;
-            return true;
-          }
-          return false;
-        }
-      };
-    });
+    Object.assign(shared, BL.npcBedRouting.create({ island, paths: shared.npcPaths,
+      sleepNavigation, forestNavigation, bedSupportAt, walkIn: WALK_IN, stepMax: STEP_MAX }));
+    shared.workSites = BL.npcWorkSites.create({ slots: caves.slots.filter(workCave), island, solids,
+      getCrew: () => crew, shotClear: (ax, ay, az, bx, by, bz) => shared.workShotClear(ax, ay, az, bx, by, bz),
+      radius: PLAYER_RADIUS, abyssFloor: ABYSS_FLOOR });
     shared.workTarget = (cave, out, sample) => clankers && clankers.target(cave, out, sample);
     shared.workCompanionTarget = (cave, out) => clankers && clankers.companionTarget(cave, out);
     shared.workHit = (cave) => clankers && clankers.hit(cave);
@@ -12375,6 +10047,8 @@
     shared.outsideActorHeight = REMOTE_BODY_HEIGHT;
     shared.characterModel = takePreparedCharacter;
     yield* pause(slice);
+    shared.npcPassive = true;
+    shared.npcAuthoredAppearance = () => BL.net.state.npcAuthority?.mode === "server";
     crew = shared.crew = crewMod.create(shared);
     remotes = BL.remotePlayers.create({
       root, crew, fx, player: controlledGuideActor, visible: remoteShown,
@@ -12403,7 +10077,9 @@
     // crew's effects, shots and work hooks pass through the sync, which notes them while this page hosts;
     // a following page replays them into the same effects and gorillas.
     npcSync = BL.npcSync.create({
-      crew, fx, animationInterval,
+      crew, fx, animationInterval, getClankers: () => clankers, getLab: () => entropyLab,
+      layoutReady: hostLayoutReady,
+      releaseLabItem: returnLabEquipment,
       onPlan: (cave, site) => clankers && clankers.plan(cave, site),
       onHit: (cave) => clankers && clankers.hit(cave),
       onModelChange: (cave) => {
@@ -12468,51 +10144,12 @@
     clankerMeshes = BL.solidProps.create();
     clankerPartOwners = new WeakMap();
     headquarters.solids.companions = clankerMeshes;
-    const loungeRoofs = [], loungeAreas = [], climbRoofs = [], chillZones = [], descentWalls = [];
-    for (const mouth of island.mouths) {
-      const slot = caves.slots.find(slot => slot.id === mouth.id);
-      const site = shared.workSites.find(site => site.mouth === mouth), room = site?.room || mouth.room;
-      const sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry);
-      // Reserve cave interiors at every lower level, leaving the roof above
-      // the room ceiling available. Working and controlled gorillas bypass it.
-      chillZones.push({
-        x: mouth.x, z: mouth.z, sr, cr, half: room.w / 2 + 0.6,
-        from: -room.to - 0.6, to: 0.5, top: mouth.floorY + room.h - 0.1
-      });
-      if (slot.status !== "dark") chillZones.push({
-        x: mouth.x, z: mouth.z, sr, cr,
-        half: 3.5, from: -0.5, to: 6.5, top: mouth.floorY + 2.6
-      });
-      const x = mouth.x - Math.sin(mouth.ry) * 4.8, z = mouth.z - Math.cos(mouth.ry) * 4.8;
-      const y = island.surfaceAt(x, z);
-      if (!Number.isFinite(y)) continue;
-      const roof = { x, y, z, angle: mouth.ry };
-      climbRoofs.push(roof);
-      if (slot.status === "open" || slot.status === "mirror") descentWalls.push({
-        x: mouth.x, z: mouth.z, sr, cr, half: room.w / 2 + 2,
-        floor: mouth.floorY, middle: (y + mouth.floorY) * 0.5
-      });
-      if (slot.status === "dark" || slot.status === "headquarters") loungeRoofs.push(roof);
-      if (slot.status === "dark") {
-        loungeAreas.push({ x: mouth.x + sr * 6, z: mouth.z + cr * 6, radius: 9 });
-      }
-    }
-    // The dressed gaps between neighbouring active caves are working space,
-    // not chill routes. The same swept zones allow a former worker to leave.
-    for (let i = 0; i < island.mouths.length; i++) {
-      const a = island.mouths[i], b = island.mouths[(i + 1) % island.mouths.length];
-      const active = m => { const status = caves.slots.find(slot => slot.id === m.id).status; return status === "open" || status === "mirror"; };
-      const distance = Math.hypot(a.x - b.x, a.z - b.z);
-      if (!active(a) || !active(b) || distance > 16) continue;
-      const x = (a.x + b.x) * 0.5, z = (a.z + b.z) * 0.5, radius = Math.hypot(x, z);
-      chillZones.push({
-        x, z, sr: -x / radius, cr: -z / radius,
-        half: distance * 0.5 + 1.5, from: -2, to: 9, top: Infinity
-      });
-    }
+    const { loungeRoofs, loungeAreas, climbRoofs, chillZones, descentWalls } =
+      BL.npcClankerLayout.create(island, caves.slots, shared.workSites);
     const labSiteIndex = shared.workSites.findIndex(site => site.mouth === entropyLab.mouth);
     yield* pause(slice);
     clankers = BL.clankers.create({
+      presentationOnly: () => BL.net.state.npcAuthority?.mode === "server",
       root, crew, animationInterval, sites: shared.workSites, loungeRoofs, loungeAreas, climbRoofs, chillZones, descentWalls,
       rageLandAt, rageEdgeAt, rageEdgeHeading, rageEdgeGoal, rageApproach, rageWarpRequired, rageWarpTarget, rageWarpPose, rageWarpHome, rageGrab, rageCaptive, rageRelease, rageThrow, rageDragClear, rageCarryClear, rageCaptureEligible, rageJumpPoseClear,
       rageHuntRange: entry => entry.radius + BODY_RADIUS + 0.35,
@@ -12540,6 +10177,7 @@
       track: (entry) => trackMirrorObject(entry.root, 3.6, 4248), untrack: (entry) => untrackMirrorObject(entry.root)
     });
     yield* pause(slice);
+    npcStatusBeams = BL.npcStatusBeams.create({ root, crew, clankers });
     shared.fireThreats = () => clankers.list;
     for (const entry of clankers.list) {
       entry.netBody = BL.net.gorillaBody(entry.owner.traits.name);
@@ -12921,13 +10559,14 @@
   // The scene a departure was heading for could not be prepared (its deferred code did not arrive): the visitor stays on
   // the island, driving again, and nothing is photographed for a crossing that did not happen.
   const stay = () => {
+    layoutRebuilding = false;
     factoryHeld = factoryDeparting;
     entering = factoryDeparting = bifrostDeparting = false;
     factoryWalk.phase = 0; factoryWalk.seen = factoryWalk.through = factoryWalk.grab = false; factoryWalk.still = factoryWalk.hold = 0;
     world.factoryCrossing = world.islandKeep = null;
     if (factoryMouth) factoryMouth.snap = false;
     if (bifrostIsle) bifrostIsle.snap = false;
-    pilot.controls.reset(); input.reset(); pilot.setActive(true);
+    pilot.controls.reset(); input.reset(); pilot.setActive(hostLayoutReady());
   };
   const leave = (destroy = false) => {
     releaseHubBodyAdapter?.(); releaseHubBodyAdapter = null;
@@ -12937,6 +10576,7 @@
     rememberCharacterLocations();
     stopLazyBedding();
     if (reuseHub && !destroy) return suspendHub();
+    builtHostLayout = null; layoutBuilding = layoutRebuilding = false; layoutPileForHost = null;
     if (hammock) removeHammock();
     // Restore the lens before dropping a fly-back; a retained hub does the same in suspendHub.
     if (wpReturn >= 0) camera.fov = WP_FROM.toFov;
@@ -13026,6 +10666,7 @@
     remotes.dispose();
     crates.dispose();
     pile.dispose();
+    npcStatusBeams?.dispose(); npcStatusBeams = null;
     for (const entry of clankers.list) returnLabEquipment(entry);
     clankers.dispose();
     clankerMeshes.dispose();
@@ -13168,6 +10809,7 @@
     mempoolIsland.water.liveGeometry(set);
     pile.liveGeometry(set);
     clankers.liveGeometry(set);
+    npcStatusBeams?.liveGeometry(set);
     entropyLab.phase.liveGeometry(set);
     for (const veil of caveVeils) veil.phase.liveGeometry(set);
     if (factoryMouth) factoryMouth.phase.liveGeometry(set);
@@ -13194,7 +10836,7 @@
     voiceZone: "none",
     micKey: true,
     get cabinetMenu() { return cloudHopper && cloudHopper.phase === "intro"; },
-    id: "hub", enter, enterSteps, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, cachedGeometry, islandGeometry, libraryNook: LIBRARY,
+    id: "hub", prepare: (_, ctx) => BL.net.waitHostLayout(ctx.signal).then(() => null), enter, enterSteps, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, cachedGeometry, islandGeometry, libraryNook: LIBRARY,
     get retained() { return heldHub; }, get elapsed() { return now; },
     get retainedRoot() { return heldHub ? root : null; },
     // The Lightning Factory's builders stay warm while the island runs, since its shield walks straight in.

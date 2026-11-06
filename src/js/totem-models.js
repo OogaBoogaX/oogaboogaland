@@ -20,7 +20,8 @@
 // it cuts, and is reached by the hub at run time only.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { models, hubModels, bifrostGate } = BL, { hexToRgb, mulberry32 } = BL.math;
   const { variants, box, prism, merge, moved, turnedX, turnedY, turnedZ, turn, shaded, along, noShadow, torus } = models;
   const { log, puff, postSign, flatInto } = hubModels;
@@ -65,7 +66,7 @@
   // each face's centre, the cap, the collision boxes [half x, y0, y1, half z] stacked without overlap, and the
   // eye sockets, all in metres once scaled.
   const layout = variants((i) => {
-    const repo = BL.totemFeed.REPOS[i], d = DESIGNS[repo.word];
+    const repo = BL.totemLayout.repos[i], d = DESIGNS[repo.word];
     let y = FOOT;
     const faces = d.faces.map((kind) => {
       const k = KINDS[kind], f = { kind, zc: 0.22, ...k, y: y + k.h / 2 };
@@ -332,7 +333,7 @@
     geo.featureHighlights = highlights;
     for (const e of c.eyes) { e[0] *= L.s; e[1] *= L.s; e[2] *= L.s; e[3] *= L.s; }
     // The name board, standing on its pegs in front of the stones.
-    flatInto(geo, moved(merge(postSign(BL.totemFeed.REPOS[i].word, 0.32, 0.18)), 0, 0, 0.15 + 0.85 * L.s));
+    flatInto(geo, moved(merge(postSign(BL.totemLayout.repos[i].word, 0.32, 0.18)), 0, 0, 0.15 + 0.85 * L.s));
     // The ring of rough stones the pole is set in.
     const rand = mulberry32(5150 + i), s = L.s;
     for (let k = 0; k < 8; k++) {
@@ -346,7 +347,7 @@
   const featureHighlights = (i) => body(i).featureHighlights;
 
   const glyphs = variants((i) => {
-    const L = layout(i), runes = [...BL.totemFeed.REPOS[i].word], parts = [];
+    const L = layout(i), runes = [...BL.totemLayout.repos[i].word], parts = [];
     const from = 0.8, to = L.top - 0.95, height = L.faces.length > 3 ? 0.34 : 0.28;
     const step = Math.min(height * 1.35, (to - from) / runes.length), h = Math.min(height, step / 1.25);
     const first = (from + to) / 2 + step * (runes.length - 1) / 2;

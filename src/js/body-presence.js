@@ -66,7 +66,7 @@
     if (encoder.encode(JSON.stringify(frame)).length > MAX_BYTES) fail();
     return frame;
   };
-  const descriptor = a => exact(a, ["v", ...(a?.v === 2 ? ["format"] : []), "revision", "mode", "world", "epoch"])
+  const descriptor = a => exact(a, ["v", ...(a?.v >= 2 ? ["format"] : []), "revision", "mode", "world", "epoch"])
     && BL.npcAuthority.descriptor(a, true);
   const create = ({ send, monotonic, wall }) => {
     if (![send, monotonic, wall].every(fn => typeof fn === "function")) fail();

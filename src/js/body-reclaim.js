@@ -216,12 +216,12 @@
         return () => { if (quiescer === fn) { quiescer = null; quiescence = null; } };
       },
       quiesce(m, authority) {
-        const a = m?.authority, keys = a?.v === 2 ? 'epoch,format,mode,revision,v,world' : 'epoch,mode,revision,v,world';
+        const a = m?.authority, keys = a?.v >= 2 ? 'epoch,format,mode,revision,v,world' : 'epoch,mode,revision,v,world';
         if (current || pending || resource !== null || disposalFailed || checkingQuiescence || typeof quiescer !== "function"
           || !connection || !m || Object.keys(m).sort().join(',') !== 'accountId,authority,connection,request,t,v'
           || m.t !== "body-quiesce" || m.v !== 1 || m.accountId !== account || m.connection !== connection || !nonce(m.request)
           || !a || Object.keys(a).sort().join(',') !== keys || a.mode !== "server"
-          || !(a.v === 1 || a.v === 2 && a.format === "mixed-1") || !positive(a.revision) || !positive(a.epoch)
+          || !(a.v === 1 || a.v === 2 && a.format === "mixed-1" || a.v === 3 && a.format === "mixed-2" || a.v === 4 && a.format === "mixed-3") || !positive(a.revision) || !positive(a.epoch)
           || typeof a.world !== "string" || !/^[A-Za-z0-9_.:-]{1,80}$/.test(a.world)
           || !authority || Object.keys(authority).sort().join(',') !== keys || Object.keys(a).some(k => a[k] !== authority[k])) return false;
         required = quiescing = true;

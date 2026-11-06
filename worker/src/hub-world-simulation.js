@@ -1,0 +1,131 @@
+// VirtualHost's synchronous simulation contract over the real Hub factory.
+// Each storage attempt owns one private world; failed attempts discard it.
+// This module is deliberately not installed in a deployed Worker binding.
+import { HOST, boundedJSON } from './virtual-host.js';
+import { buildHubWorld } from './hub-world.js';
+import { hubNpcFor } from './hub-world-identity.js';
+import { createHubWorldState } from './hub-world-state.js';
+import { createContributorRoster, hubCharacters, hubSlots, hubRepositoryOf, normalizeHubStats } from './ooga-crew.js';
+
+const fail = () => { throw Error('closed or invalid Hub simulation scope'); };
+const freeze = value => {
+  if (value && typeof value === 'object') {
+    for (const child of Object.values(value)) freeze(child);
+    Object.freeze(value);
+  }
+  return value;
+};
+
+export function createHubWorldSimulation(configuration) {
+  boundedJSON(configuration, 32 * 1024, 4096);
+  const copy = structuredClone(configuration);
+  if (copy?.state && typeof copy.state === 'object' && !Array.isArray(copy.state)) {
+    if (!Object.hasOwn(copy.state, 'inventory')) copy.state.inventory = [];
+    if (!Object.hasOwn(copy.state, 'assignments')) copy.state.assignments = [];
+  }
+  const config = freeze(copy);
+  if (!config || Object.keys(config).sort().join() !== 'activity,checkpointBytes,seed,source,state,version'
+    || !Number.isInteger(config.seed) || config.seed < 0 || config.seed > 0xffffffff
+    || !config.source || Object.keys(config.source).sort().join() !== 'observedAt,revision'
+    || !Number.isSafeInteger(config.source.revision) || config.source.revision < 1
+    || !Number.isSafeInteger(config.source.observedAt) || config.source.observedAt < 1
+    || !/^[A-Za-z0-9_.:-]{1,64}$/.test(config.version)
+    || !Number.isSafeInteger(config.checkpointBytes) || config.checkpointBytes < 256
+    || config.checkpointBytes > HOST.checkpointBytes - HOST.metadataBytes - HOST.sessionSlotBytes) fail();
+  // Validate trusted configuration before it can be durably installed; this
+  // constructs no terrain, rig, timer or network subscription.
+  const bootstrapState = createHubWorldState(config.state);
+  if (config.state.elapsed !== 0 || config.state.at !== config.source.observedAt) fail();
+  const bootstrapRoster = createContributorRoster({ registry: hubCharacters, clock: bootstrapState.clock,
+    repositoryOf: hubRepositoryOf, normalizeStats: normalizeHubStats, slots: hubSlots, authoritative: true });
+  bootstrapRoster.validateCheckpoint(config.activity);
+  if (config.activity.rows.some(row => row[1] > config.source.observedAt || row[2] > config.source.observedAt)) fail();
+  const construct = (saved, now) => {
+    const construction = buildHubWorld(config, saved, now);
+    try {
+      let next = construction.next();
+      while (!next.done) next = construction.next();
+      return next.value;
+    } finally { construction.return(); }
+  };
+  const forTransaction = () => {
+    let active = true, runtime = null, previous = null, keys = [], refs = [];
+    const alive = () => { if (!active) fail(); };
+    const discard = () => {
+      try { runtime?.dispose(); } finally { runtime = previous = null; keys = refs = []; }
+    };
+    const matches = saved => saved === previous && saved !== null
+      && (Object.getPrototypeOf(saved) === Object.prototype || Object.getPrototypeOf(saved) === null)
+      && Reflect.ownKeys(saved).length === keys.length && keys.every((key, i) => {
+        const field = Object.getOwnPropertyDescriptor(saved, key);
+        return field && field.enumerable && 'value' in field && Object.is(field.value, refs[i]);
+      });
+    const remember = saved => {
+      keys = Object.keys(saved); refs = keys.map(key => saved[key]);
+      for (const value of refs) freeze(value);
+      previous = saved;
+    };
+    const use = (saved, run) => {
+      alive();
+      try {
+        if (!runtime || !matches(saved)) {
+          discard(); runtime = construct(saved); remember(saved);
+        }
+        return run(runtime);
+      } catch (error) { active = false; discard(); throw error; }
+    };
+    const persist = (saved, run) => use(saved, world => {
+      const result = run(world);
+      if (result === false) return result;
+      // No partly captured world may replace the last committed DTO.
+      const next = world.capture();
+      for (const key of Object.keys(saved)) delete saved[key];
+      Object.assign(saved, next); remember(saved);
+      return result;
+    });
+    const scope = {
+      version: config.version, checkpointBytes: config.checkpointBytes,
+      initial(now) {
+        alive(); discard();
+        try {
+          runtime = construct(null, now);
+          const saved = runtime.capture(); remember(saved); return saved;
+        } catch (error) { active = false; discard(); throw error; }
+      },
+      validate: saved => use(saved, world => world.validate()),
+      step: (saved, ms, now, timing) => persist(saved, world => world.step(ms, now, timing)),
+      project: saved => use(saved, world => world.project()),
+      poses: (saved, format) => use(saved, world => world.poses(format)),
+      bodyPlacement: (saved, ...args) => use(saved, world => world.bodyPlacement(...args)),
+      playerSpawn: (saved, who, context) => use(saved, world => world.playerSpawn(who, context)),
+      npcFor: (saved, bodyId, source) => use(saved, () => hubNpcFor(bodyId, source)),
+      enqueueInput(saved, value, timing) {
+        let result;
+        persist(saved, world => { result = world.enqueueInput(value, timing); return result === 'accepted'; });
+        return result;
+      },
+      readQueries(saved) {
+        scope.validate(saved);
+        const savedRefs = [...refs];
+        const check = () => {
+          alive();
+          if (!matches(saved) || savedRefs.some((value, i) => !Object.is(value, refs[i]))) fail();
+        };
+        return {
+          npcFor(bodyId, source) { check(); return hubNpcFor(bodyId, source); },
+          poses(format) { check(); return scope.poses(saved, format); },
+        };
+      },
+      dispose() { active = false; discard(); },
+    };
+    return scope;
+  };
+  const adapter = { version: config.version, checkpointBytes: config.checkpointBytes, forTransaction };
+  for (const method of ['initial', 'validate', 'step', 'project', 'poses', 'playerSpawn', 'npcFor', 'enqueueInput', 'bodyPlacement']) {
+    adapter[method] = (...args) => {
+      const scope = forTransaction();
+      try { return scope[method](...args); } finally { scope.dispose(); }
+    };
+  }
+  return adapter;
+}

@@ -6,7 +6,8 @@
 // crossing (timechain-gate.js) lifts it, for its own traveler.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { cached, box, bevelBox, lathe, merge, makeVox, voxelGeometry } = BL.models;
   const { limb, padNormals, flatInto } = BL.hubModels;
   const { createNode, addChild } = BL.scene;

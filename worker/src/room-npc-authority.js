@@ -3,6 +3,8 @@
 // committed ticket. Room fencing cannot make two separate DO commits atomic.
 import "../../src/js/npc-authority.js";
 import "../../src/js/clanker-pose.js";
+import "../../src/js/npc-lab-pose.js";
+import "../../src/js/npc-world-layout.js";
 import "../../src/js/npc-pose-packet.js";
 import { ROLLING_CADENCE, BURST_CADENCE, cadenceName, emptyCadence, validateCadence, nextCadenceAt, advanceCadence } from "./host-cadence.js";
 import { validateRoomClaim } from "./host-room-claim.js";
@@ -11,12 +13,12 @@ export const ROOM_NPC = Object.freeze({ key: "npc-authority-v1", leaseMs: 10000,
 const integer = n => Number.isSafeInteger(n) && n >= 0;
 const id = s => typeof s === "string" && /^[A-Za-z0-9_.:-]{1,80}$/.test(s);
 const fail = () => { throw new Error("NPC authority fenced or invalid"); };
-export const npcAuthorityView = r => r ? { v: r.v, ...(r.v === 2 ? { format: r.format } : {}), revision: r.revision, mode: r.mode, world: r.world, epoch: r.epoch } : null;
-export const npcProtocolSupports = (protocol, r) => (protocol === 1 || protocol === 2) && (r.v === 1 || r.v === 2 && protocol === 2);
+export const npcAuthorityView = r => r ? { v: r.v, ...(r.v >= 2 ? { format: r.format } : {}), revision: r.revision, mode: r.mode, world: r.world, epoch: r.epoch } : null;
+export const npcProtocolSupports = (protocol, r) => [1, 2, 3, 4].includes(protocol) && [1, 2, 3, 4].includes(r.v) && protocol >= r.v;
 export const npcNextPublicationAt = r => Math.max(r?.gateAt || 0, r?.cadence ? nextCadenceAt(r.cadence) : r?.sequence ? r.at + ROOM_NPC.deliveryMs : 0);
 export const npcCadenceName = r => cadenceName(r?.cadence);
 function validateRecord(r, checkFrame) {
-  const baseKeys = r?.v === 2 ? "at,epoch,format,frame,leaseUntil,mode,owner,revision,runUntil,sequence,v,world" : "at,epoch,frame,leaseUntil,mode,owner,revision,runUntil,sequence,v,world";
+  const baseKeys = r?.v >= 2 ? "at,epoch,format,frame,leaseUntil,mode,owner,revision,runUntil,sequence,v,world" : "at,epoch,frame,leaseUntil,mode,owner,revision,runUntil,sequence,v,world";
   let keys = Object.hasOwn(r || {}, 'cadence') ? baseKeys.replace('at,', 'at,cadence,') : baseKeys;
   if (Object.hasOwn(r || {}, 'fencePending')) keys = keys.replace('epoch,', 'epoch,fencePending,');
   if (Object.hasOwn(r || {}, 'gateAt')) keys = keys.replace('frame,', 'frame,gateAt,');
@@ -76,11 +78,11 @@ export class RoomNpcAuthority {
         // Migration cannot reset a recent rate budget. A different cadence
         // needs a quiet second; the same cadence retains its last four stamps.
         if (r && npcCadenceName(r) !== next.cadence && now - r.at < 1000) fail();
-        if (next.format !== undefined && next.format !== "mixed-1") fail();
+        if (next.format !== undefined && !["mixed-1", "mixed-2", "mixed-3"].includes(next.format)) fail();
         if (!id(next.world) || !id(next.owner) || !integer(next.epoch) || !next.epoch || !integer(next.runUntil)
           || next.runUntil <= now || next.runUntil - now > ROOM_NPC.runMs
           || r?.mode === "server" && (now < r.leaseUntil || next.world === r.world && next.epoch <= r.epoch)) fail();
-        result = { ...base, ...(next.format === "mixed-1" ? { v: 2, format: next.format } : {}), mode: "server", world: next.world, epoch: next.epoch, owner: next.owner,
+        result = { ...base, ...(next.format ? { v: next.format === "mixed-3" ? 4 : next.format === "mixed-2" ? 3 : 2, format: next.format } : {}), mode: "server", world: next.world, epoch: next.epoch, owner: next.owner,
           runUntil: next.runUntil, leaseUntil: Math.min(next.runUntil, now + ROOM_NPC.leaseMs),
           ...(next.cadence ? { cadence: npcCadenceName(r) === next.cadence ? r.cadence : emptyCadence(next.cadence) } : {}) };
       } else if (next?.mode === "browser") {
@@ -98,13 +100,13 @@ export class RoomNpcAuthority {
   // deadline, even when only expired-body cleanup remains; never restart a run.
   async reacquire(expected, intent, format) {
     const claim = structuredClone(validateRoomClaim(intent));
-    if (claim.v !== 1 || !["legacy-1", "mixed-1"].includes(format)) fail();
+    if (claim.v !== 1 || !["legacy-1", "mixed-1", "mixed-2", "mixed-3"].includes(format)) fail();
     return this.storage.transaction(async tx => {
       const r = await this.read(tx), now = this.clock();
       if (!r || r.mode !== "browser" || r.revision !== expected || !integer(expected)
         || expected >= Number.MAX_SAFE_INTEGER || !integer(now) || now < r.at
         || claim.runUntil - now > ROOM_NPC.runMs) fail();
-      const result = { v: format === "mixed-1" ? 2 : 1, ...(format === "mixed-1" ? { format } : {}),
+      const result = { v: format === "mixed-3" ? 4 : format === "mixed-2" ? 3 : format === "mixed-1" ? 2 : 1, ...(format !== "legacy-1" ? { format } : {}),
         revision: expected + 1, mode: "server", world: claim.world, epoch: claim.epoch, owner: claim.owner,
         sequence: 0, frame: null, fencePending: true, gateAt: npcNextPublicationAt(r), at: now,
         runUntil: claim.runUntil, leaseUntil: Math.min(claim.runUntil, now + ROOM_NPC.leaseMs),

@@ -6,12 +6,12 @@ import { validateRoomClaim, validateRoomClaimReceipt, validateRoomReleaseReceipt
 import { HOST } from "./virtual-host.js";
 const fail = message => { throw new Error(message); };
 const same = (a, t) => a?.mode === "server" && a.world === t.world && a.epoch === t.fence;
-const compatible = (a, format) => a?.v === (format ? 2 : 1) && a.format === format;
+const compatible = (a, format) => a?.v === (format === "mixed-3" ? 4 : format === "mixed-2" ? 3 : format ? 2 : 1) && a.format === format;
 
 export async function publishHostPoses(host, room, ticket, { acquire = false, format, cadence, roomState,
   notBefore, waitUntil, clock = Date.now } = {}) {
   if (cadence !== undefined && ![ROLLING_CADENCE, BURST_CADENCE].includes(cadence)) fail("unsupported publication cadence");
-  if (format !== undefined && format !== "mixed-1") fail("unsupported host pose format");
+  if (format !== undefined && !["mixed-1", "mixed-2", "mixed-3"].includes(format)) fail("unsupported host pose format");
   if (typeof host.confirmPoses !== "function") fail("host revision confirmation required");
   // The finite publication runner may prepare a frame during the remaining
   // commit interval. Wait is explicit and bounded; final host confirmation
@@ -140,7 +140,7 @@ export async function claimHostRoom(host, room, owner, { intent: resume } = {}) 
 // browser fallback. Retain bodies, pending departures and the original run end.
 // The caller must choose a supported format and serialize this lifecycle action.
 export async function recoverReleasedHostRoom(host, room, owner, { format, intent: resume } = {}) {
-  if (!["legacy-1", "mixed-1"].includes(format) || typeof host.prepareRoomClaim !== "function"
+  if (!["legacy-1", "mixed-1", "mixed-2", "mixed-3"].includes(format) || typeof host.prepareRoomClaim !== "function"
     || typeof host.completeRoomClaim !== "function" || typeof room.reacquireNpcAuthority !== "function"
     || typeof room.npcAuthorityStatus !== "function" || resume !== undefined && typeof host.resumeRoomClaim !== "function")
     fail("explicit released Room recovery required");
@@ -157,7 +157,7 @@ export async function recoverReleasedHostRoom(host, room, owner, { format, inten
       authority = after.authority;
     }
   }
-  if (!compatible(authority, format === "mixed-1" ? format : undefined)) fail("Room recovery format mismatch");
+  if (!compatible(authority, format !== "legacy-1" ? format : undefined)) fail("Room recovery format mismatch");
   const receipt = await room.npcAuthorityStatus({ ...authority, owner });
   const confirmed = validateRoomClaimReceipt(intent, { ...receipt, owner }, authority);
   return host.completeRoomClaim(intent, confirmed);

@@ -376,7 +376,7 @@ export class Room extends DurableObject {
     if (!who || !ownedBody(CAST, who.login, who.contributor, who.id)) return new Response("Contributors with an Ooga only", { status: 403 });
 
     const requestedProtocol = new URL(request.url).searchParams.get("npc-authority");
-    const npcProtocol = requestedProtocol === "2" ? 2 : requestedProtocol === "1" ? 1 : 0;
+    const npcProtocol = requestedProtocol === "4" ? 4 : requestedProtocol === "3" ? 3 : requestedProtocol === "2" ? 2 : requestedProtocol === "1" ? 1 : 0;
     const bodyMotionProtocol = new URL(request.url).searchParams.get("body-motion") === "1" ? 1 : 0;
     const oogaMotionProtocol = new URL(request.url).searchParams.get("ooga-motion") === "1" ? 1 : 0;
     const bodyProtocol = new URL(request.url).searchParams.get("body-reclaim") === "2" ? 2 : 0;
@@ -1127,6 +1127,29 @@ export class Room extends DurableObject {
     });
   }
 
+  // Private finite-run retirement. No live grants, voice teardown or new
+  // admission. Retry reads the retained closed rows and original run deadline.
+  bodyRetirementWork(ticket) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.checkBodyCleanup(ticket);
+      const status = this.npcAuthorityStatus(ticket), now = Date.now();
+      if (!Number.isSafeInteger(status.runUntil) || now < status.runUntil)
+        throw Error('world run has not ended');
+      const box = this.bodyHandoffController(), rows = await box.records();
+      if (rows.length > 32) throw Error('body retirement capacity');
+      const identities = [];
+      for (const row of rows.slice(0, 4)) {
+        const identity = { accountId: row.accountId, connection: row.connection };
+        if (row.phase !== 'closed') {
+          await box.close(identity, status.runUntil);
+          await this.syncCommittedBodyParticipant(identity);
+        }
+        identities.push(identity);
+      }
+      return { identities, more: rows.length > identities.length };
+    });
+  }
+
   completeClosedBodyRecovery(ticket, identity, revision, answer) {
     return this.ctx.blockConcurrencyWhile(async () => {
       this.checkBodyCleanup(ticket);
@@ -1281,8 +1304,8 @@ export class Room extends DurableObject {
       if (this.bodyPresenceRequired && next?.mode === "browser") throw new Error("body presence drain required before authority release");
       // Check occupants while joins are blocked, not before entering the gate.
       // No deployed config or browser advertises the unfinished mixed format.
-      if (next?.mode === "server" && next.format === "mixed-1" && this.env.VIRTUAL_HOST_MIXED_PREVIEW !== "1") throw new Error("NPC mixed preview disabled");
-      const requested = { v: next?.format === "mixed-1" ? 2 : 1 };
+      if (next?.mode === "server" && ["mixed-1", "mixed-2", "mixed-3"].includes(next.format) && this.env.VIRTUAL_HOST_MIXED_PREVIEW !== "1") throw new Error("NPC mixed preview disabled");
+      const requested = { v: next?.format === "mixed-3" ? 4 : next?.format === "mixed-2" ? 3 : next?.format === "mixed-1" ? 2 : 1 };
       if (next?.mode === "server" && (this.players.size > 32 || [...this.players.values()].some(p => !npcProtocolSupports(p.npcProtocol, requested)))) {
         throw new Error("NPC authority incompatible occupants");
       }
@@ -1295,7 +1318,7 @@ export class Room extends DurableObject {
   async publishNpcSnapshot(ticket, sequence, frame) {
     if (this.env.VIRTUAL_HOST_PREVIEW !== "1") throw new Error("NPC authority preview disabled");
     return this.ctx.blockConcurrencyWhile(async () => {
-      if (this.npcAuthority?.v === 2 && this.env.VIRTUAL_HOST_MIXED_PREVIEW !== "1") throw new Error("NPC mixed preview disabled");
+      if (this.npcAuthority?.v >= 2 && this.env.VIRTUAL_HOST_MIXED_PREVIEW !== "1") throw new Error("NPC mixed preview disabled");
       if (this.npcAuthority?.cadence && this.env[npcCadenceName(this.npcAuthority) === "rate-4-burst-2-v1"
         ? "VIRTUAL_HOST_BURST_PREVIEW" : "VIRTUAL_HOST_ROLLING_PREVIEW"] !== "1") throw new Error("NPC cadence preview disabled");
       const { record, duplicate } = await new RoomNpcAuthority(this.ctx.storage, () => Date.now()).publish(ticket, sequence, frame);
@@ -1321,14 +1344,14 @@ export class Room extends DurableObject {
   async reacquireNpcAuthority(expectedRevision, intent, format) {
     if (this.env.VIRTUAL_HOST_PREVIEW !== "1") throw Error("NPC authority preview disabled");
     return this.ctx.blockConcurrencyWhile(async () => {
-      if (!["legacy-1", "mixed-1"].includes(format)
-        || format === "mixed-1" && this.env.VIRTUAL_HOST_MIXED_PREVIEW !== "1") throw Error("NPC recovery format disabled");
+      if (!["legacy-1", "mixed-1", "mixed-2", "mixed-3"].includes(format)
+        || format !== "legacy-1" && this.env.VIRTUAL_HOST_MIXED_PREVIEW !== "1") throw Error("NPC recovery format disabled");
       const cadence = npcCadenceName(this.npcAuthority);
       if (cadence && this.env[cadence === "rate-4-burst-2-v1"
         ? "VIRTUAL_HOST_BURST_PREVIEW" : "VIRTUAL_HOST_ROLLING_PREVIEW"] !== "1") throw Error("NPC cadence preview disabled");
       if ((this.bodyHandoffRequired || this.bodyPresenceRequired) && this.env.VIRTUAL_HOST_BODY_PREVIEW !== "1")
         throw Error("body recovery preview disabled");
-      const requested = { v: format === "mixed-1" ? 2 : 1 };
+      const requested = { v: format === "mixed-3" ? 4 : format === "mixed-2" ? 3 : format === "mixed-1" ? 2 : 1 };
       if (this.players.size > 32 || [...this.players.values()].some(p => !npcProtocolSupports(p.npcProtocol, requested)
         || this.bodyHandoffRequired && p.bodyProtocol !== 2 || this.bodyPresenceRequired && p.bodyPresenceProtocol !== 1))
         throw Error("NPC recovery incompatible occupants");

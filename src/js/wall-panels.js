@@ -2,7 +2,8 @@
 // or the normal of one decorative voxel. Windows still need real stone grips.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const RAMP_STEP = 1.16, RAMP_SLOPE = 2;
   const rampAt = (surfaceAt, x, y, z, heading, out) => {
     const sx = Math.sin(heading), sz = Math.cos(heading), center = surfaceAt(x, z);

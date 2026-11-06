@@ -4,7 +4,8 @@
 // light with the flame. Nothing here allocates per frame; a rig's blocks and ember pool are built once.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { box, turn, shaded, moved, turnedY, turnedZ, noShadow, cached, variants } = BL.models;
   const { createNode, addChild } = BL.scene;
   const { mulberry32 } = BL.math;

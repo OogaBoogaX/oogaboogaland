@@ -17,6 +17,13 @@ export function createClankerRoamingCheckpoint(sim, world, rigCodec) {
   return createCheckpoint(sim, world, rigCodec, sim.roamingCheckpoint, 64 * 1024);
 }
 
+// Full job/controller records with source-owned reservations, but fresh rig
+// animation. The combined Hub restore must restore lab items and world state,
+// then call finishRecovery before the controller may step or capture again.
+export function createClankerLogicalCheckpoint(sim, world) {
+  return createCheckpoint(sim, world, null, sim.logicalCheckpoint, 64 * 1024, true);
+}
+
 // Created from a trusted boot's source rules/baseline/owner, not stored data.
 // Its closure has no simulation or rig, so a world may retain these small codecs
 // after disposing its bootstrap controller. It changes no position or time.
@@ -93,12 +100,16 @@ export function createClankerBodyCheckpoint(sim, world) {
   };
 }
 
-function createCheckpoint(sim, world, rigCodec, bridge, budget) {
+function createCheckpoint(sim, world, rigCodec, bridge, budget, logical = false) {
   const entries = sim.list;
-  if (!bridge || bridge.capture()[0] !== 0 || !rigCodec?.packRoster || !rigCodec?.unpackRoster) bad();
-  const ids = entries.map(e => e.owner.id), references = new Map(entries.map((e, i) => [e, i]));
-  const buffers = createClankerBufferCheckpoint(world, ids), pack = createCheckpointPack(budget, { intern: true });
-  const rigs = entries.map(e => e.gorilla.createManagedCheckpoint(world));
+  if (!bridge || bridge.capture()[0] !== 0 || !logical && (!rigCodec?.packRoster || !rigCodec?.unpackRoster)) bad();
+  const identity = logical ? e => e.owner.traits.name : e => e.owner.id;
+  const ids = entries.map(identity), referenced = [...entries, ...(logical ? bridge.references() : [])];
+  if (new Set(referenced).size !== referenced.length || referenced.length > entries.length + 256) bad();
+  const references = new Map(referenced.map((e, i) => [e, i]));
+  const omitted = logical ? new Set([...excluded, "animation", "fireFX"]) : excluded;
+  const buffers = createClankerBufferCheckpoint(world, ids, identity), pack = createCheckpointPack(budget, { intern: true });
+  const rigs = logical ? null : entries.map(e => e.gorilla.createManagedCheckpoint(world));
   const token = value => {
     if (value === missing) return [-6];
     if (value === undefined) return [-5];
@@ -119,8 +130,8 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget) {
     if (!dense(value)) bad();
     if (value.length === 1 && Number.isInteger(value[0]) && value[0] <= -1 && value[0] >= -6)
       return [NaN, Infinity, -Infinity, -0, undefined, missing][-value[0] - 1];
-    if (value.length === 2 && value[0] === 0 && Number.isInteger(value[1]) && value[1] >= 0 && value[1] < entries.length)
-      return entries[value[1]];
+    if (value.length === 2 && value[0] === 0 && Number.isInteger(value[1]) && value[1] >= 0 && value[1] < referenced.length)
+      return referenced[value[1]];
     bad();
   };
   const fields = [];
@@ -135,7 +146,7 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget) {
       const index = fields.length; fields.push(field); return { index };
     }
     if (!value || Array.isArray(value) || ArrayBuffer.isView(value) || path.length > 6) bad();
-    const keys = Object.keys(value).filter(k => path.length || !excluded.has(k));
+    const keys = Object.keys(value).filter(k => path.length || !omitted.has(k));
     if (name === "motion" && !keys.includes("walkGait")) keys.push("walkGait");
     if (keys.length > 128 || keys.some(k => ["__proto__", "prototype", "constructor"].includes(k))) bad();
     return { keys, children: keys.map(k => compile(Object.hasOwn(value, k) ? value[k] : missing, [...path, k])) };
@@ -151,7 +162,7 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget) {
         if (!compatible(fields[node.index], value)) bad(); out[node.index] = token(value); return;
       }
       if (!value || typeof value !== "object") bad();
-      const keys = Object.keys(value).filter(k => !root || !excluded.has(k));
+      const keys = Object.keys(value).filter(k => !root || !omitted.has(k));
       if (keys.some(k => !node.keys.includes(k))) bad();
       for (let i = 0; i < node.keys.length; i++) {
         const k = node.keys[i]; walk(Object.hasOwn(value, k) ? value[k] : missing, node.children[i]);
@@ -169,11 +180,11 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget) {
     h2 = Math.imul(h2 ^ baselineText.charCodeAt(i), 16777619);
   }
   const baseline = `${h1 >>> 0}:${h2 >>> 0}`;
-  let invalid = false, restored = false;
+  let invalid = false, restored = false, pendingRebuild = false;
   const ready = () => { if (invalid) bad(); };
   return {
     capture() {
-      ready();
+      ready(); if (pendingRebuild) bad();
       const clocks = Array.from(bridge.capture());
       if (!equal(staticState, Array.from(bridge.baseline()))) bad();
       const actors = entries.map((e, i) => {
@@ -183,8 +194,9 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget) {
         for (let j = 0; j < fields.length; j++) if (!equal(current[j], defaults[i][j])) row.push(j, current[j]);
         return row;
       });
-      return pack.pack({ v: 1, world, baseline, clocks, actors, buffers: buffers.capture(entries),
-        rigs: structuredClone(rigCodec.packRoster(world, rigs.map((rig, index) => ({ index, snapshot: rig.capture() })), true)) });
+      return pack.pack({ v: logical ? 2 : 1, world, baseline, clocks, actors, buffers: buffers.capture(entries),
+        rigs: logical ? entries.map(e => [e.root.position.x, e.root.position.y, e.root.position.z, e.root.visible])
+          : structuredClone(rigCodec.packRoster(world, rigs.map((rig, index) => ({ index, snapshot: rig.capture() })), true)) });
     },
     restore(saved) {
       ready();
@@ -192,7 +204,7 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget) {
       // step. If application fails, poison this adapter; discard the controller.
       if (restored || bridge.capture()[0] !== 0) bad();
       const state = pack.unpack(saved);
-      if (Object.keys(state).sort().join() !== "actors,baseline,buffers,clocks,rigs,v,world" || state.v !== 1
+      if (Object.keys(state).sort().join() !== "actors,baseline,buffers,clocks,rigs,v,world" || state.v !== (logical ? 2 : 1)
         || state.world !== world || state.baseline !== baseline || !dense(state.actors) || state.actors.length !== entries.length) bad();
       const decoded = state.actors.map((row, i) => {
         if (!dense(row) || row.length % 2 !== 1 || row.length > fields.length * 2 + 1) bad();
@@ -206,8 +218,10 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget) {
         }
         return { random, result };
       });
-      const arrays = buffers.restore(state.buffers), poses = rigCodec.unpackRoster(state.rigs);
-      if (poses.length !== entries.length || poses.some((p, i) => p.index !== i)) bad();
+      const arrays = buffers.restore(state.buffers), poses = logical ? state.rigs : rigCodec.unpackRoster(state.rigs);
+      if (!dense(poses) || poses.length !== entries.length || (logical
+        ? poses.some(p => !dense(p) || p.length !== 4 || p.slice(0, 3).some(n => !Number.isFinite(n) || Math.abs(n) >= 10000) || typeof p[3] !== "boolean")
+        : poses.some((p, i) => p.index !== i))) bad();
       invalid = true;
       bridge.restore(state.clocks);
       for (let i = 0; i < entries.length; i++) {
@@ -220,11 +234,18 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget) {
         }
         for (const [group, members] of Object.entries(arrays[i])) Object.assign(e[group], members);
         e.random = decoded[i].random;
-        rigs[i].restore(poses[i].snapshot);
+        if (logical) {
+          const p = e.root.position; [p.x, p.y, p.z, e.root.visible] = poses[i];
+        } else rigs[i].restore(poses[i].snapshot);
       }
       bridge.capture(); // Refuse a saved state outside this limited profile.
-      restored = true; invalid = false;
+      restored = true; invalid = false; pendingRebuild = logical;
       return true;
     },
+    ...(logical ? { finishRecovery() {
+      ready(); if (!restored || !pendingRebuild) bad();
+      invalid = true; bridge.rebuild(); bridge.capture();
+      pendingRebuild = false; invalid = false;
+    } } : {}),
   };
 }

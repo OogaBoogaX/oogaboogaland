@@ -10,9 +10,9 @@ const id = s => typeof s === "string" && /^[A-Za-z0-9_.:-]{1,80}$/.test(s);
 const exact = (o, keys) => o && typeof o === "object" && !Array.isArray(o)
   && Object.keys(o).length === keys.length && keys.every(k => Object.hasOwn(o, k));
 const fail = () => { throw Error("invalid or fenced Room body presence"); };
-const authorityKeys = a => ["v", ...(a?.v === 2 ? ["format"] : []), "revision", "mode", "world", "epoch", "owner"];
+const authorityKeys = a => ["v", ...(a?.v >= 2 ? ["format"] : []), "revision", "mode", "world", "epoch", "owner"];
 function authority(a) {
-  if (!exact(a, authorityKeys(a)) || ![1, 2].includes(a.v) || a.v === 2 && a.format !== "mixed-1"
+  if (!exact(a, authorityKeys(a)) || ![1, 2, 3, 4].includes(a.v) || a.v === 2 && a.format !== "mixed-1" || a.v === 3 && a.format !== "mixed-2" || a.v === 4 && a.format !== "mixed-3"
     || a.mode !== "server" || !id(a.world) || !id(a.owner)
     || !time(a.revision) || !a.revision || !time(a.epoch) || !a.epoch) fail();
   return a;

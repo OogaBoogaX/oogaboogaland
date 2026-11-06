@@ -177,8 +177,40 @@
     room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, ghostHostId: 0, ghostFollowers: 0, npcVersion: 0, npcAuthority: null, doorway: false, pokerVoice: null,
     self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, chalk: null, blendTo: null, blendT: 0 };
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, hiddenTimer = 0, stopped = false;
-  const npcAuthority = BL.npcAuthority.create();
+  const NPC_MIXED_PREVIEW = false;
+  const npcAuthority = BL.npcAuthority.create({ mixed: NPC_MIXED_PREVIEW });
   let npcFrame = null, inHub = false, hubSent = null, visibleSent = null;
+  const layoutListeners = new Set();
+  let hostLayout = null, lastHostLayout = null, hubInterestRevision = 0;
+  const layoutChanged = () => { for (const fn of layoutListeners) fn(); };
+  const waitHostLayout = signal => {
+    if (state.npcAuthority?.mode !== "server") return Promise.resolve(null);
+    return new Promise((resolve, reject) => {
+      let timer, done = false;
+      const wasInHub = inHub;
+      // Room sends snapshots only to Hub viewers. This is presentation interest,
+      // not a body claim; construction cannot wait for its own later setHub.
+      setHub(true);
+      const interestRevision = hubInterestRevision;
+      const finish = (error, value) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer); layoutListeners.delete(check); signal?.removeEventListener("abort", abort);
+        if (error && !wasInHub && hubInterestRevision === interestRevision) setHub(false);
+        if (error) reject(error); else resolve(value);
+      };
+      const abort = () => finish(signal.reason || new DOMException("Layout cancelled", "AbortError"));
+      const check = () => {
+        const a = state.npcAuthority;
+        if (a?.mode !== "server") finish(null, null);
+        else if (a.incompatible || a.v !== 4) finish(Error("World layout protocol unavailable"));
+        else if (hostLayout?.world === a.world) finish(null, hostLayout);
+      };
+      timer = setTimeout(() => finish(Error("World layout snapshot unavailable")), 5000);
+      layoutListeners.add(check); signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) abort(); else check();
+    });
+  };
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
   const gSent = new Float64Array(6);
   let gKnown = false, poseHasG = false, jetSent = 0, weaponSent = 0, visualKnown = false;
@@ -378,12 +410,13 @@
       if (!state.npcAuthority || revision > state.npcAuthority.revision) {
         state.npcAuthority = { mode: "server", revision, incompatible: true };
         npcFrame = null; state.npcVersion++;
+        hostLayout = null; layoutChanged();
       }
       return false;
     }
     bodyPresence.setAuthority(value);
     state.npcAuthority = npcAuthority.current;
-    if (before !== npcAuthority.current) { npcFrame = null; state.npcVersion++; }
+    if (before !== npcAuthority.current) { npcFrame = null; state.npcVersion++; hostLayout = null; layoutChanged(); }
     return true;
   };
 
@@ -394,6 +427,18 @@
         if (state.npcAuthority.incompatible) return;
         const frame = npcAuthority.frame(e.data);
         if (!frame) return;
+        if (state.npcAuthority.v === 4) {
+          try {
+            const packet = BL.npcPosePacket.unpack(frame, true), layout = packet.layout;
+            if (!layout || lastHostLayout?.world === packet.world
+              && (!BL.npcWorldLayout.sameRecipe(lastHostLayout.snapshot.history, layout.history)
+                || layout.history.ring < lastHostLayout.snapshot.history.ring
+                || layout.water.values[12] < lastHostLayout.snapshot.water.values[12])) throw Error("World layout regression");
+            Object.freeze(layout.history); Object.freeze(layout.water.values); Object.freeze(layout.water); Object.freeze(layout);
+            hostLayout = lastHostLayout = Object.freeze({ world: packet.world, snapshot: layout });
+            layoutChanged();
+          } catch { hostLayout = null; layoutChanged(); return; }
+        }
         npcFrame = frame;
         const header = new DataView(e.data);
         send(JSON.stringify({ t: "npc-ack", revision: header.getFloat64(8, true), sequence: header.getFloat64(24, true) }));
@@ -724,6 +769,7 @@
     else if (state.chalk) { state.chalk = null; chalkEmit("board"); }
     state.doorway = false;
     npcFrame = null;
+    hostLayout = null; layoutChanged();
     hubSent = null;
     // Out of the room for good (signed out, another tab, full): voice goes with it.
     if (room !== "connecting") BL.voice.stop();
@@ -742,7 +788,7 @@
     retryTimer = 0;
     if (stopped || ws || !state.me) return;
     setRoom("connecting");
-    ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room?npc-authority=1${BODY_PRESENCE_PREVIEW ? "&body-presence=1" : ""}${BODY_MIGRATION_PREVIEW ? "&body-migration=1" : ""}${BODY_MOVEMENT_PREVIEW ? "&body-reclaim=2&body-motion=1&ooga-motion=1" : ""}`);
+    ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room?npc-authority=${NPC_MIXED_PREVIEW ? 4 : 1}${BODY_PRESENCE_PREVIEW ? "&body-presence=1" : ""}${BODY_MIGRATION_PREVIEW ? "&body-migration=1" : ""}${BODY_MOVEMENT_PREVIEW ? "&body-reclaim=2&body-motion=1&ooga-motion=1" : ""}`);
     ws.binaryType = "arraybuffer";
     ws.onmessage = onMessage;
     ws.onopen = () => {
@@ -891,6 +937,7 @@
 
   // The hub says when it shows the island; a hidden tab stops counting until it is looked at again.
   const setHub = (on) => {
+    hubInterestRevision++;
     inHub = on;
     sendHub();
   };
@@ -1323,5 +1370,5 @@
     close("off");
   };
 
-  BL.net = { bodyPresence, bodyReclaim, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendThump, subscribeThump, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, hostCharacter, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { get hostLayout() { return hostLayout; }, waitHostLayout, bodyPresence, bodyReclaim, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendThump, subscribeThump, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, hostCharacter, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

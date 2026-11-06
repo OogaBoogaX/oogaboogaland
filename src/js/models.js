@@ -8,7 +8,8 @@
 // draws from `k.rand`, so no character's existing draws move.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { hexToRgb, damp } = BL.math;
   const { createNode, addChild } = BL.scene;
   const geometry = () => ({ verts: [], faces: [], lines: [] });

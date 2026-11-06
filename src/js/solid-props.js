@@ -79,7 +79,7 @@
       if (!state) { state = transformState(); transforms.set(node, state); }
       if (state.stamp === generation) return state.active;
       state.stamp = generation;
-      const active = node.visible && (!node.parent || refreshWorld(node.parent));
+      const active = node.visible && !node.collisionDisabled && (!node.parent || refreshWorld(node.parent));
       state.active = active;
       if (!active) return false;
       const values = state.values, p = node.position, r = node.rotation, s = node.scale, q = node.quaternion;

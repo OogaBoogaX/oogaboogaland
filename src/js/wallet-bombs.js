@@ -484,7 +484,7 @@
       // Oogas in reach are knocked back with a hop, but for one sitting, who stays in its seat; the one holding it is
       // also blackened with soot. Nobody is hurt.
       for (const cave of crew.list) {
-        if (!cave.root.visible || cave.health.stunned) continue;
+        if (cave.nonInteractive || !cave.root.visible || cave.health.stunned) continue;
         const p = cave.root.position, dx = p.x - x, dz = p.z - z, d = Math.hypot(dx, dz);
         if (d > radius && cave !== victim) continue;
         const k = cave === victim ? 1 : 1 - d / radius, away = d > 0.01 ? 1 / d : 0;

@@ -20,7 +20,8 @@
 // `body()` fills the grid once for the page and keeps it: `groundAt`, `solidAt` and `covered` read it back.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   // Construction checkpoints (see build-tasks.js). They reach it only when sliced, so an unsliced build runs without it.
   const pause = function* (slice) { if (slice) yield* BL.buildTasks.pause(slice); };
   const { clamp } = BL.math;

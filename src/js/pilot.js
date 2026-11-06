@@ -59,7 +59,7 @@
   // feet, but never back through its pillow or the ground beneath its face.
   const LYING_YAW_LIMIT = 80 * Math.PI / 180, LYING_PITCH_LIMIT = 70 * Math.PI / 180;
   const CLOSE_GROUND_RATE = 9, CLOSE_TELEPORT = 0.8;
-  const WALK = { speed: 7.75, run: 1.5, gravity: 9.8, step: 0.6, ledgeRise: 2.4, ledgeSpeed: 3, ledgeDrag: 1.5 };
+  const WALK = BL.walkRules;
   const ACT_DO = "JUMP!", ACT_FLY = "Blast off!";
   // Compare the displayed eye with the actor's normal carry focus. A view at
   // exactly 45 degrees, or below the actor, enters shoulder combat.

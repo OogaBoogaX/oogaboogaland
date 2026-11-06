@@ -2,7 +2,8 @@
 // Query source SHA256: f7f958ea9b3ef1b8ee4e09369c5ce36b8072db1d86c94e806328c37b6e64f497
 (() => {
   "use strict";
-  const BL = window.BL;
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL;
   const { clamp } = BL.math;
   const validate = state => {
     const c = state?.constants;

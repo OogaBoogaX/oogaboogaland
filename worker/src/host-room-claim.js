@@ -21,7 +21,7 @@ export function validateRoomReleaseReceipt(receipt) {
   return receipt;
 }
 export function validateRoomClaimReceipt(claim, receipt, expected = receipt?.authority) {
-  const a = receipt?.authority, names = a?.v === 2 ? "epoch,format,mode,revision,v,world" : "epoch,mode,revision,v,world";
+  const a = receipt?.authority, names = a?.v >= 2 ? "epoch,format,mode,revision,v,world" : "epoch,mode,revision,v,world";
   if (claim.v !== 1 || receipt?.owns !== true || receipt.owner !== claim.owner || receipt.runUntil !== claim.runUntil
     || !globalThis.BL.npcAuthority.descriptor(a, true) || Object.keys(a).sort().join(",") !== names
     || a.mode !== "server" || a.world !== claim.world || a.epoch !== claim.epoch

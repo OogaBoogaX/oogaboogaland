@@ -13,7 +13,8 @@
 // The chairs turn by each desk's `chairYaw`, which the gorillas set, in `update`.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { box, bevelBox, merge, cached, variants, turnedY, turnedZ, moved } = BL.models;
   const { createNode, addChild } = BL.scene;
   const GLYPHS = BL.hubModels.SIGN_GLYPHS;
@@ -197,7 +198,7 @@
   const office = (mouth) => {
     const L = LAYOUT, sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry);
     const wx = (x, z) => mouth.x + cr * x + sr * z, wz = (x, z) => mouth.z - sr * x + cr * z;
-    const node = createNode(), solids = [], chairs = [], stations = [];
+    const node = createNode(), solids = [], chairs = [], stations = [], ledgers = [];
     const plaqueNode = createNode({ geometry: plaque() });
     addChild(node, plaqueNode);
     for (let v = 0; v < 2; v++) {
@@ -274,13 +275,39 @@
           if (face.geometry !== next) face.geometry = next;
         }
       };
+      // Keep committed arithmetic separate from the transient hand/bead stroke.
+      // A restart reconstructs the beads from the digits without committing a move.
+      ledgers.push({
+        capture: () => [station.count, station.carry, Array.from(digits)],
+        restore(row) {
+          station.count = row[0]; station.carry = row[1]; digits.set(row[2]);
+          for (let r = 0; r < digits.length; r++) for (let j = 0; j < A.beads; j++) {
+            const at = r * A.beads + j;
+            x[at] = j < digits[r] ? counted(j) : resting(j);
+            beads[at].position.x = ax + x[at];
+          }
+          face.geometry = screenFace(Math.floor(station.count / 3) % SCREEN_FACES);
+        }
+      });
       stations.push(station);
     }
     const waits = L.waits.map(([x, z]) => ({ x: wx(x, z), z: wz(x, z), heading: mouth.ry + Math.PI }));
     const update = () => {
       for (let i = 0; i < chairs.length; i++) chairs[i].rotation.y = stations[i].chairYaw;
     };
-    return { node, solids, stations, waits, entry: { x: wx(0, L.entry), z: wz(0, L.entry) }, entryAlong: L.entry,
+    const dense = (row, length) => Array.isArray(row) && row.length === length && Object.keys(row).length === length;
+    const validate = saved => {
+      if (!saved || Object.keys(saved).sort().join() !== "rows,v" || saved.v !== 1 || !dense(saved.rows, ledgers.length)
+        || saved.rows.some(row => !dense(row, 3) || !Number.isSafeInteger(row[0]) || row[0] < 0
+          || !Number.isInteger(row[1]) || row[1] < 0 || row[1] >= A.rods.length
+          || !dense(row[2], A.rods.length) || row[2].some(n => !Number.isInteger(n) || n < 0 || n > A.beads)))
+        throw Error("invalid BCA ledger recovery");
+    };
+    const checkpoint = {
+      capture() { const saved = { v: 1, rows: ledgers.map(ledger => ledger.capture()) }; validate(saved); return saved; },
+      restore(saved) { validate(saved); for (let i = 0; i < ledgers.length; i++) ledgers[i].restore(saved.rows[i]); }
+    };
+    return { node, solids, stations, waits, checkpoint, entry: { x: wx(0, L.entry), z: wz(0, L.entry) }, entryAlong: L.entry,
       aisleHalf: L.aisleHalf, walkway: L.seatZ, update };
   };
   const clamp01 = (t) => t < 0 ? 0 : t > 1 ? 1 : t;

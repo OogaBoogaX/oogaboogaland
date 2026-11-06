@@ -19,7 +19,8 @@
 // Only `solid` collides.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { voxelFaces, noShadow, merge } = BL.models;
   const { mulberry32, hexToRgb } = BL.math;
   const BANANA_ART = BL.hubModels.AMMO_BANANA;
