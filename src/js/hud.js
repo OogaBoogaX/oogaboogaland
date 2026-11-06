@@ -475,7 +475,7 @@
     }
     let hintTimer = 0, hintHideTimer = 0, copyTimer = 0;
     const rosterRows = new Map();
-    let showAway = false, awayCount = 0, awayShownCount = -1, awayShownShow = null, onlineCount = 0, onlineShown = -1;
+    let showAway = false, awayCount = 0, awayShownCount = -1, awayShownShow = null;
     if (!rosterAway) {
       const li = document.createElement("li"), button = document.createElement("button");
       li.className = "roster-away"; button.type = "button"; li.append(button);
@@ -487,13 +487,8 @@
     const names = new Set(roster.map(contributor => contributor.name));
     for (const [name, row] of rosterNodes) if (!names.has(name)) { row.li.remove(); rosterNodes.delete(name); }
     // countAway rescans on every roster state flip and online toggle; skip the writes until they change.
-    // The title's chip counts the players online, or the cast while nobody is.
+    el.rosterCount.textContent = `${roster.length} Oogas`;
     const updateAwayButton = () => {
-      if (onlineCount !== onlineShown) {
-        onlineShown = onlineCount;
-        el.rosterCount.textContent = onlineCount ? `${onlineCount} online` : `${roster.length} Oogas`;
-        el.rosterCount.dataset.tone = onlineCount ? "live" : "idle";
-      }
       if (awayCount === awayShownCount && showAway === awayShownShow) return;
       awayShownCount = awayCount;
       awayShownShow = showAway;
@@ -572,11 +567,8 @@
     // Activity and its timestamp order the roster; online presence never changes a row's rank.
     const rankOf = (row) => ROSTER_ORDER[row.state.dataset.state];
     const countAway = () => {
-      awayCount = onlineCount = 0;
-      for (const row of rosterRows.values()) {
-        if (row.online) onlineCount++;
-        else if (row.state.dataset.state === "away") awayCount++;
-      }
+      awayCount = 0;
+      for (const row of rosterRows.values()) if (!row.online && row.state.dataset.state === "away") awayCount++;
       updateAwayButton();
     };
     const placeRosterRow = (row) => {
@@ -2018,12 +2010,18 @@
         tipLeft = left; tipTop = top;
         element.style.transform = `translate(${left}px, ${top}px)`;
       };
+      let tipBaseText = "";
+      const shownName = () => !tipNoStatusDot && tipCave?.humanControlled ? BL.net.state.me?.display || tipBaseText : tipBaseText;
       const tooltip = {
         show: (text, x, y, cave = null, noStatusDot = false, above = false) => {
           if (cave !== tipCave) tipSpeechBottom = -Infinity;
           tipCave = cave;
           const name = !!cave;
-          const changed = text !== tipText || name !== tipName || element.classList.contains("tooltip--no-status-dot") !== noStatusDot;
+          tipBaseText = text;
+          const changedDot = tipNoStatusDot !== noStatusDot;
+          tipNoStatusDot = noStatusDot;
+          text = shownName();
+          const changed = text !== tipText || name !== tipName || changedDot;
           element.classList.toggle("tooltip--no-status-dot", noStatusDot);
           if (name !== tipName) {
             tipName = name;
@@ -2041,7 +2039,6 @@
             tipText = text;
             tipState = "";
             textElement.textContent = text;
-            tipNoStatusDot = noStatusDot;
             measureTooltip();
           }
           if (cave) {
@@ -2064,6 +2061,12 @@
         },
         update: (place = true) => {
           if (!tipCave) return;
+          const text = shownName();
+          if (text !== tipText) {
+            textElement.textContent = tipText = text;
+            tipState = "";
+            measureTooltip();
+          }
           const state = statusFor(tipCave);
           let healthChanged = false;
           if (showHealth) {
@@ -2347,44 +2350,45 @@
       },
       el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, whitepaperNav, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
   };
-  // The roster panel owns the page-level account controls, shown only when a backend answered, and
-  // the director hands every change of `BL.net.state` here, whichever scene is active.
+  // Detached panels can be visible together. Each has a view of the same account and voice state.
   const ROOM_WORDS = { replaced: "open in another tab", full: "island full" };
-  // Net and voice emits re-run this several times a second with the same outcome; last-written
-  // records keep an unchanged textContent from re-invalidating the line.
-  let accountBackend = null, accountMe = null, accountName = null, accountWords = null, accountWordsHidden = null;
-  let accountLive = null, accountRejoinHidden = null, accountVoiceHidden = null, accountVoiceWords = null, accountVoicePressed = null, accountLeaveHidden = null;
-  const showAccount = ({ backend, me, room, online }) => {
-    const hasMe = !!me;
-    if (!!backend !== accountBackend) { accountBackend = !!backend; $("account").hidden = !backend; }
-    const name = me ? me.display : "";
-    if (name !== accountName) { accountName = name; $("account-name").textContent = name; }
-    if (hasMe !== accountMe) {
-      accountMe = hasMe;
-      $("account-name").hidden = !me;
-      $("account-login").hidden = !!me;
-      $("account-logout").hidden = !me;
+  const accountPrefixes = [""];
+  for (const slot of document.querySelectorAll("[data-account-copy]")) {
+    const prefix = slot.dataset.accountCopy + "-";
+    const copy = $("account").cloneNode(true);
+    copy.id = prefix + copy.id;
+    for (const child of copy.querySelectorAll("[id]")) child.id = prefix + child.id;
+    slot.replaceWith(copy);
+    accountPrefixes.push(prefix);
+  }
+  const accountFields = new Map();
+  const fieldsFor = (id) => {
+    if (!accountFields.has(id)) accountFields.set(id, accountPrefixes.map((prefix) => $(prefix + id)));
+    return accountFields.get(id);
+  };
+  const writeAccount = (id, key, value) => {
+    for (const el of fieldsFor(id)) {
+      if (el[key] !== value) el[key] = value;
     }
-    // The account green dot shows only while the room is live.
-    const live = String(!!me && room === "live");
-    if (live !== accountLive) { accountLive = live; $("account").dataset.live = live; }
-    const words = room === "live" ? `${online} online` : ROOM_WORDS[room] || "";
-    if (words !== accountWords) { accountWords = words; $("account-room").textContent = words; }
-    const wordsHidden = !me || !words;
-    if (wordsHidden !== accountWordsHidden) { accountWordsHidden = wordsHidden; $("account-room").hidden = wordsHidden; }
-    const rejoinHidden = !me || !ROOM_WORDS[room];
-    if (rejoinHidden !== accountRejoinHidden) { accountRejoinHidden = rejoinHidden; $("account-rejoin").hidden = rejoinHidden; }
-    // Voice: join, then mute and unmute beside Leave voice, which hangs up and releases the microphone without
-    // signing out; a failure says why on the button until the next try. Leave waits out a join in progress.
-    const voice = BL.voice.stats, voiceButton = $("account-voice");
-    const voiceHidden = room !== "live";
-    if (voiceHidden !== accountVoiceHidden) { accountVoiceHidden = voiceHidden; voiceButton.hidden = voiceHidden; }
+  };
+  const showAccount = ({ backend, me, room, online }) => {
+    const live = !!me && room === "live", words = live ? `${online} online` : ROOM_WORDS[room] || "";
+    writeAccount("account", "hidden", !backend);
+    writeAccount("account-name", "textContent", me ? me.display : "");
+    writeAccount("account-name", "hidden", !me);
+    writeAccount("account-login", "hidden", !!me);
+    writeAccount("account-logout", "hidden", !me);
+    writeAccount("account-room", "textContent", words);
+    writeAccount("account-room", "hidden", !me || !words);
+    writeAccount("account-rejoin", "hidden", !me || !ROOM_WORDS[room]);
+    const voice = BL.voice.stats;
     const voiceWords = voice.joining ? "Joining voice" : (voice.error || voice.micError) && !voice.enabled ? `Voice: ${voice.error || voice.micError}` : !voice.enabled ? "Join voice" : voice.muted ? "Unmute" : "Mute";
-    if (voiceWords !== accountVoiceWords) { accountVoiceWords = voiceWords; voiceButton.textContent = voiceWords; }
-    const pressed = String(voice.enabled && !voice.muted);
-    if (pressed !== accountVoicePressed) { accountVoicePressed = pressed; voiceButton.setAttribute("aria-pressed", pressed); }
-    const leaveHidden = voiceHidden || !voice.enabled;
-    if (leaveHidden !== accountLeaveHidden) { accountLeaveHidden = leaveHidden; $("account-voice-leave").hidden = leaveHidden; }
+    writeAccount("account-voice", "hidden", !live);
+    writeAccount("account-voice", "textContent", voiceWords);
+    writeAccount("account-voice-leave", "hidden", !live || !voice.enabled);
+    const pressed = String(voice.enabled && !voice.muted), onlineDot = String(live);
+    for (const row of fieldsFor("account")) if (row.dataset.live !== onlineDot) row.dataset.live = onlineDot;
+    for (const button of fieldsFor("account-voice")) if (button.getAttribute("aria-pressed") !== pressed) button.setAttribute("aria-pressed", pressed);
   };
   // The microphone's note (#181), page-level as the account line is: muted in voice, it stays until unmuted;
   // alone in voice (nobody here to hear, so the microphone is held off), it says so until someone comes;

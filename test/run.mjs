@@ -21784,9 +21784,16 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
     W.join = (id, display) => W.room({ t: "join", p: { id, login: "p" + id, display, zone: "outside" } });
     W.line = (id, login) => W.room({ t: "chat", id, at: 0, login, name: login, text: "hi" });
     W.welcome = () => W.room({ t: "welcome", you: { id: 71 }, now: Date.now(), features: ["chat-unicode-v1"], players: [{ id: 2, login: "anna", display: "Anna", zone: "outside" }] });
-    W.read = () => { const badge = (n) => { const e = document.querySelector("#" + n + "-tab .tab-count"); return e.hidden ? "" : e.textContent; }, toast = document.getElementById("toast");
-      return { players: badge("players"), chat: badge("chat"), label: document.getElementById("players-tab").getAttribute("aria-label"), toast: toast.hidden ? "" : toast.textContent, toastTags: toast.children.length,
-        shown: BL.sheet.visible(document.getElementById("players-panel")), said: W.said.slice() }; };
+    W.read = () => {
+      const bell = document.querySelector(".panel:not([hidden]) .sheet-bell"), detail = bell?.nextElementSibling;
+      const [players, chat] = detail ? detail.textContent.match(/[0-9]+[+]?(?= new)/g) : ["0", "0"];
+      const total = bell?.querySelector(".tab-count"), toast = document.getElementById("toast");
+      const tab = document.querySelector("#players-tab .tab-count");
+      return { players: players === "0" ? "" : players, chat: chat === "0" ? "" : chat, tabBadge: tab.hidden ? "" : tab.textContent,
+        total: !total || total.hidden ? "" : total.textContent, breakdown: !!detail && !detail.hidden, bell: bell?.getAttribute("aria-label"),
+        toast: toast.hidden ? "" : toast.textContent, toastTags: toast.children.length,
+        shown: BL.sheet.visible(document.getElementById("players-panel")), said: W.said.slice() };
+    };
     W.welcome();
     W.room({ t: "chat-history", messages: [{ id: 10, at: 0, login: "anna", name: "Anna", text: "earlier" }] });
   })()`);
@@ -21796,9 +21803,9 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
     W.join(3, "<b>Bea</b>"); W.room({ t: "leave", id: 3 }); W.join(3, "<b>Bea</b>"); out.again = W.read();
     W.join(4, "Cy"); out.two = W.read();
     return out; })()`);
-  record("join alerts: a join after arrival is named on screen as plain text and counted on the Players tab, though its panel shows; those already there, a repeat and a quick rejoin are not, and close joins share one message",
-    arrived.players === "" && arrived.chat === "" && arrived.shown && !arrived.toast.includes("online") && joins.one.toast === "<b>Bea</b> is online" && joins.one.toastTags === 0
-      && joins.one.players === "1" && joins.one.label === "Online Oogas, 1 new" && joins.again.players === "1" && joins.two.players === "2" && joins.two.toast === "<b>Bea</b> and Cy are online",
+  record("join alerts: a join after arrival is named on screen as plain text and counted on the bell while the panel shows; those already there, a repeat and a quick rejoin are not, and close joins share one message",
+    arrived.players === "" && arrived.chat === "" && arrived.shown && arrived.bell === "Notifications" && arrived.total === "" && !arrived.toast.includes("online") && joins.one.toast === "<b>Bea</b> is online" && joins.one.toastTags === 0
+      && joins.one.players === "1" && joins.one.total === "1" && joins.one.tabBadge === "" && joins.again.players === "1" && joins.two.players === "2" && joins.two.toast === "<b>Bea</b> and Cy are online",
     JSON.stringify({ arrived, joins }));
   const lines = await b.evaluate(`(() => { const W = __joins, out = {};
     W.line(11, "anna"); W.line(12, "Tester"); out.live = W.read();
@@ -21808,7 +21815,29 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
   await tourGo(b, "hub");
   const back = await b.evaluate(`__joins.read()`);
   record("join alerts: chat lines from others count on the Ooga Chat tab, the visitor's own and a rejoin's lines already had do not, and both counts survive a rejoin and a trip to another scene",
-    lines.live.chat === "1" && lines.rejoin.chat === "2" && lines.rejoin.players === "2" && back.players === "2" && back.chat === "2" && back.shown, JSON.stringify({ lines, back }));
+    lines.live.chat === "1" && lines.rejoin.chat === "2" && lines.rejoin.players === "2" && back.players === "2" && back.chat === "2" && back.shown && back.total === "4" && back.tabBadge === "", JSON.stringify({ lines, back }));
+  const notifications = await b.evaluate(`(() => {
+    const W = __joins, bell = document.querySelector("#players-panel .sheet-bell");
+    bell.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" }));
+    const hovered = W.read();
+    bell.dispatchEvent(new PointerEvent("pointerleave", { pointerType: "mouse" }));
+    const restored = W.read();
+    bell.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "touch" }));
+    bell.click(); const tapped = W.read();
+    bell.click();
+    document.getElementById("players-tab").click();
+    const closed = W.read();
+    document.getElementById("players-tab").click();
+    const reopened = W.read();
+    return { hovered, restored, tapped, closed, reopened };
+  })()`);
+  const { hovered, restored, tapped, closed, reopened } = notifications;
+  record("join alerts: hover and tap reveal both unread counts without acknowledgement, and closing restores the tab badge",
+    hovered.breakdown && hovered.players === "2" && hovered.chat === "2" && hovered.total === ""
+      && !restored.breakdown && restored.total === "4" && tapped.breakdown && tapped.total === ""
+      && closed.tabBadge === "2" && reopened.players === "" && reopened.chat === "2" && reopened.total === "2",
+    JSON.stringify(notifications));
+  await b.evaluate(`__joins.join(26, "Flo"); __joins.join(27, "Gus")`);
   const tab = (name) => b.evaluate(`(() => { const r = document.getElementById("${name}-tab").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
   await b.focus(true);
   let viewed;
@@ -21857,9 +21886,10 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
   })()`);
   await b.focus(true);
   const out = await b.evaluate(`(async () => {
-    const W = __joins; document.getElementById("players-speak-input").focus(); W.join(24, "Pat"); W.join(25, "Quin");
+    const W = __joins, unread = W.read().players;
+    document.getElementById("players-speak-input").focus(); W.join(24, "Pat"); W.join(25, "Quin");
     const before = W.read(), stale = W.lines.at(-1), count = W.said.length; await BL.net.logout();
-    if (stale.onend) stale.onend(); const r = { ...W.read(), stoppedWithoutBadge: before.players === "" && W.cancelled === 2 && W.said.length === count };
+    if (stale.onend) stale.onend(); const r = { ...W.read(), stoppedWithoutNewBadge: before.players === unread && W.cancelled === 2 && W.said.length === count };
     delete speechSynthesis.speak; delete speechSynthesis.cancel; window.fetch = W.fetch; window.WebSocket = W.WebSocket;
     Object.assign(BL.net.state, { backend: false, started: false, resolved: true }); BL.hud.showAccount(BL.net.state); delete window.__joins; return r;
   })()`);
@@ -21867,7 +21897,7 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
   record("join alerts: enabled speech continues and queues across environmental mute; disabling cancels current and waiting joins, stale callbacks cannot revive them, and signing out clears both counts",
     collapsed && settings.closed && settings.grouped && settings.step === "1" && settings.min === "1" && settings.max === "61" && box.shown && box.said === 0 && spoken.saved === "on" && spoken.queuedWhileMuted && spoken.disabled && spoken.cancelledQueue && spoken.staleIgnored
       && spoken.said.join("|") === "Joins will be read aloud|Eve is online|Fay and Gus are online|Hal is online|Ivy is online|Joins will be read aloud|Lou is online"
-      && spoken.muted.toast === "Dee, Eve, Fay and 3 others are online" && out.players === "" && out.chat === "" && out.stoppedWithoutBadge, JSON.stringify({ box, spoken, out }));
+      && spoken.muted.toast === "Dee, Eve, Fay and 3 others are online" && out.players === "" && out.chat === "" && out.stoppedWithoutNewBadge, JSON.stringify({ box, spoken, out }));
   await b.open(hubPage(src, "pos=0")); await untilReady(b);
   record("join alerts: the enabled reading choice survives reload", await b.evaluate('BL.players.stats.speakOn&&document.getElementById("players-speak-input").checked'));
 
@@ -24910,7 +24940,7 @@ const sheetRailChecks = async () => {
   const make = tab => ({ tab, rect: {}, open: false, tabs: names.map(name => ({ dataset: { tab: name }, setAttribute() {}, style: { setProperty() {} } })),
     node: { dataset: { dock: "right" } }, body: { setAttribute() {} }, nav: { setAttribute() {} } });
   const main = make("roster"), detached = make("players"), windows = [main, detached];
-  const context = { panels: [], windows, main, folded: false, hidden: false, signedIn: true, phone: { matches: false },
+  const context = { panels: [], notificationViews: [], windows, main, folded: false, hidden: false, signedIn: true, phone: { matches: false },
     available: name => name !== "players" && name !== "chat" || context.signedIn, ownerOf: name => windows.find(w => w.tab === name),
     isOpen: w => !context.folded && w.open, fit() {}, showCounts() {}, showExpand() {}, notify() {} };
   runInNewContext(refresh + ";this.refresh = refresh;", context);
