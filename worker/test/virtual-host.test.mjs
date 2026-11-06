@@ -172,7 +172,7 @@ test('Room world ticks fence stale censuses before recovery and simulation, incl
   await assert.rejects(tickRoomWorld(h.host, room, ticket, { ...authority, epoch: 99 }), /authorities differ/);
 });
 
-test("body-only events validate empty censuses, preserve occupancy and apply an existing NPC handback once", async () => {
+test("body-only events validate empty censuses, preserve occupancy and leave the independent NPC untouched", async () => {
   const h = harness({ ...simulation, initial: () => ({ ...simulation.initial(), handbacks: 0 }),
     npcFor: () => "existing-npc", handoff(s) { s.handbacks++; return true; } });
   const ticket = await h.host.begin("owner", 120000), empty = h.store.read();
@@ -189,9 +189,9 @@ test("body-only events validate empty censuses, preserve occupancy and apply an 
   assert.deepEqual((await h.host.bodyPresence(ticket)).frame.views[0].occupancy, { kind: "hammock", id: "reserved" });
   h.at(160000); const fresh = await h.make().claim("restart");
   await h.host.reconcileBodies(fresh, []); await h.host.reconcileBodies(fresh, []);
-  assert.equal(h.store.read().simulation.handbacks, 1);
+  assert.equal(h.store.read().simulation.handbacks, 0);
   assert.equal(h.store.read().sessions.sessions.length, 0);
-  assert.equal((await h.host.bodyPresence(fresh)).frame.departures[0].handback.npc, "existing-npc");
+  assert.equal((await h.host.bodyPresence(fresh)).frame.departures[0].handback, null);
 });
 
 test("lost body acknowledgement wakes at its short lease, retaining the original grace and run deadlines", async () => {
@@ -251,7 +251,7 @@ test("bounded body snapshots give concurrent late joiners one committed view and
   t.diagnostic(`32 long-ID/high-precision records: ${viewBytes} view bytes, ${departureBytes} departure bytes`);
 });
 
-test("a cached ownership read cannot hand back a second body after the first handoff changes its NPC", async () => {
+test("releasing multiple bodies commits atomically without consulting or changing NPC ownership", async () => {
   const adapter = compactSimulation({ ...simulation, initial: () => ({ ...simulation.initial(), owners: { resident: "first", second: "second" } }),
     npcFor: (s, id) => s.owners[id] || null,
     handoff(s) { s.owners.second = "replacement"; return true; } }, 4096);
@@ -261,13 +261,19 @@ test("a cached ownership read cannot hand back a second body after the first han
     r.connect({ ...bodyClaim(), world: adapter.version, accountId: 2, bodyId: "second" }, at),
   ])).result;
   assert.ok(joined.every(j => j.ok)); const before = h.store.read();
-  await assert.rejects(h.host.sessions(ticket, joined.map(j => j.session.token), (r, at) => {
+  const release = () => h.host.sessions(ticket, joined.map(j => j.session.token), (r, at) => {
     for (const j of joined) assert.equal(r.release(j.session, at).ok, true);
-  }), /handoff world changed/);
-  assert.deepEqual(h.store.read(), before, "neither handback nor body departure commits on a changed owner");
+  });
+  h.store.failNext(); await assert.rejects(release(), /storage unavailable/);
+  assert.deepEqual(h.store.read(), before, "neither departure commits on a failed write");
+  await release();
+  const saved = h.store.read(), decoded = adapter.readQueries(saved.simulation);
+  assert.equal(decoded.npcFor('resident'), 'first'); assert.equal(decoded.npcFor('second'), 'second');
+  assert.equal(saved.sessions.pending.length, 2);
+  assert.ok(saved.sessions.pending.every(p => p.applied && p.handback === null));
 });
 
-test("a release following recovered handback observes the new NPC eligibility in the same transaction", async () => {
+test("recovered expiry and a following release leave both independent NPC identities intact", async () => {
   const adapter = compactSimulation({ ...simulation, initial: () => ({ ...simulation.initial(), owners: { resident: "first", second: "second" } }),
     npcFor: (s, id) => s.owners[id] || null,
     handoff(s) { s.owners.second = "replacement"; return true; } }, 4096);
@@ -280,9 +286,11 @@ test("a release following recovered handback observes the new NPC eligibility in
   h.at(160000); ticket = await h.make().claim("replacement-owner");
   await h.host.sessions(ticket, [joined[1].session.token], (r, at) => assert.equal(r.release(joined[1].session, at).ok, true));
   const pending = h.store.read().sessions.pending;
-  assert.equal(pending.find(p => p.bodyId === "resident").handback.npc, "first");
-  assert.equal(pending.find(p => p.bodyId === "second").handback.npc, "replacement");
+  assert.equal(pending.find(p => p.bodyId === "resident").handback, null);
+  assert.equal(pending.find(p => p.bodyId === "second").handback, null);
   assert.ok(pending.every(p => p.applied));
+  const queried = adapter.readQueries(h.store.read().simulation);
+  assert.equal(queried.npcFor('resident'), 'first'); assert.equal(queried.npcFor('second'), 'second');
 });
 
 test("pose publication requires a valid adapter, cannot mutate saved state, and fences closed runs", async () => {
@@ -620,9 +628,9 @@ test("paused resume preserves absolute logical AI deadlines while wall-clock gra
   assert.equal(h.store.read().simulation.completed, true, "logical time reaches its original deadline");
 });
 
-test("NPC handback and body tombstone application share a transaction, survive restart and never spawn absent NPCs", async () => {
+test("body tombstones apply atomically across restart without moving, transferring or spawning NPCs", async () => {
   const adapter = { ...simulation,
-    initial: () => ({ ...simulation.initial(), npcs: [{ id: "existing", bodyId: "resident", owner: "player", handedBack: 0 }] }),
+    initial: () => ({ ...simulation.initial(), npcs: [{ id: "existing", bodyId: "resident", owner: "npc", handedBack: 0 }] }),
     npcFor: (s, bodyId) => s.npcs.find(n => n.bodyId === bodyId)?.id ?? null,
     handoff(s, intent) {
       const npc = s.npcs.find(n => n.id === intent.handback.npc);
@@ -641,15 +649,16 @@ test("NPC handback and body tombstone application share a transaction, survive r
   await h.host.tick(fresh, []);
   let saved = h.store.read();
   assert.equal(saved.simulation.npcs.length, 1);
-  assert.equal(saved.simulation.npcs[0].handedBack, 1);
+  assert.equal(saved.simulation.npcs[0].handedBack, 0);
   assert.equal(saved.simulation.npcs[0].owner, "npc");
-  assert.deepEqual(saved.simulation.npcs[0].body.equipment, claim.body.equipment);
+  assert.deepEqual(saved.simulation.npcs, before.simulation.npcs);
+  assert.deepEqual(saved.sessions.pending.find(p => p.bodyId === 'resident').body.equipment, claim.body.equipment);
   assert.ok(saved.sessions.pending.every(p => p.applied));
   h.at(200000);
   const resumed = await h.host.begin("c", 60000, { resumePaused: true });
   await h.make().tick(resumed, []);
   saved = h.store.read();
-  assert.equal(saved.simulation.npcs[0].handedBack, 1, "applied tombstone does not replay handback");
+  assert.equal(saved.simulation.npcs[0].handedBack, 0, "applied tombstone never transfers state to the NPC");
   assert.equal(saved.sessions.pending[1].handback, null);
 });
 

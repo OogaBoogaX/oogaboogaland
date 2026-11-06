@@ -14,8 +14,8 @@ const baseline = hooks => runInNewContext(original.constants + original.source
 test("shared walker packaging matches original decisions across authored work trips and traffic", async () => {
   assert.equal(typeof window, "undefined");
   assert.equal(createHash("sha256").update(original.source).digest("hex"), original.sha256);
-  const shared = readFileSync(new URL("../../src/js/npc-walker.js", import.meta.url), "utf8");
-  assert.equal(shared.slice(shared.indexOf("    const recoverWalker = ("), shared.indexOf("    return { recoverWalker,")), original.source);
+  // Behavior below remains the oracle: hosted passive NPCs intentionally add
+  // a fixed-path policy, so the shared source is no longer byte-identical.
   const f = await prepare(), states = [f.initial(), f.initial()], runs = [f.runtime(states[0], baseline), f.runtime(states[1])];
   const phases = new Set();
   for (let frame = 0; frame < 500; frame++) {
@@ -31,6 +31,16 @@ test("shared walker packaging matches original decisions across authored work tr
   assert.ok(phases.has("outbound") && phases.has("station") && phases.has("shoot") && phases.has("return") && phases.has("reload"));
   assert.ok(states[1].actor.pathing.plans > 0, "work trips actually use the existing route planner");
   assert.ok(states[1].events.shots > 0, "actual movement reaches a station; weapon effects remain fixture-owned");
+  const passive = f.initial(); passive.actor.nonInteractive = true; passive.actor.pathing = null;
+  const hooks = f.runtime(passive).hooks;
+  hooks.ctx.npcFixedPaths = true; hooks.walkerClear = () => false;
+  const fixed = createNpcWalker(hooks), before = { ...passive.actor.root.position };
+  for (let i = 0; i < 20; i++) fixed.recoverWalker(passive.actor, 0, 4, .1);
+  assert.equal(passive.actor.avoidance.navigation.mode, 0, 'fixed paths never launch dynamic searches');
+  assert.equal(fixed.walkToward(passive.actor, 0, 4, .125), 0);
+  assert.deepEqual(passive.actor.root.position, before, 'blocked fixed movement waits without a detour or jump');
+  hooks.walkerClear = () => true;
+  assert.ok(createNpcWalker(hooks).walkToward(passive.actor, 0, 4, .125) > 0, 'clear authored movement still advances');
 });
 
 test("incremental recovery search and route traversal survive every-frame reconstruction", async t => {

@@ -201,7 +201,8 @@ test('mixed Room preview gates occupants and persists exact 106-actor snapshots 
   const watchers=[a,b];for(let id=3;id<=32;id++){const ws=(await h.join(r,id,2)).ws;watchers.push(ws);h.send(r,ws,{t:'hub',on:true});}
   assert.equal((await h.join(r,33,2)).response.status,409,'fanout cap is retained');
   assert.equal((await h.join(r,1,1)).response.status,409);assert.equal(r.players.get(1).ws,a,'incompatible duplicate cannot evict owner');
-  assert.equal((await h.join(r,3,3)).response.status,409);
+  assert.equal((await h.join(r,3,5)).response.status,409);
+  assert.equal(r.players.get(3).ws,watchers[2],'unknown protocol cannot evict a compatible owner');
   const f=managedRigs(),rigs=Array.from({length:53},f.make),encode=createNpcPose(123,53);
   const make=n=>{
     const ooga=encode(rigs.map((_,index)=>{const actor=rig();actor.root.position.x=index/7+n;return {index,actor};}));
@@ -333,21 +334,24 @@ test('actual net negotiates Ooga capture, retries one sample until host ACK and 
 test('actual net gates old pose replay until body apply and matching activation, without changing voice', async () => {
   // Other networking fixtures advance 200ms on every clock read. This exchange
   // uses elapsed time, so clock reads themselves must not consume its budget.
-  const c=client({manual:true}); await c.net.start(); const ws=c.sockets[0], send=m=>ws.onmessage({data:JSON.stringify(m)});
+  const c=client({manual:true,bodyMovementPreview:true}); await c.net.start(); const ws=c.sockets[0], send=m=>ws.onmessage({data:JSON.stringify(m)});
   const welcome=features=>send({t:'welcome',you:{id:1},players:[],features,host:1,now:1000,connectionToken:'fixture-connection'});
   const visual=[0,0,0,7,0,0,0,0,0,0,0,0,0,0,0,31,31], rest=[0,2,255,0,0,0];
   welcome([]); c.net.setBody('a'); c.net.sendPose(51,0,0,0); assert.equal(c.sent.at(-1).t,'pose');
-  c.sent.length=0; welcome([globalThis.BL.bodyReclaim.FEATURE]);
+  c.sent.length=0; welcome([globalThis.BL.bodyReclaim.FEATURE,globalThis.BL.bodyMotion.FEATURE,globalThis.BL.oogaMotion.FEATURE]);
   assert.equal(c.sent.some(m=>m.t==='body'||m.t==='pose'),false,'welcome cannot replay cached body or pose');
   c.net.setMuted(true); assert.equal(c.sent.at(-1).t,'mute');
-  let applied=0, enabled=0, released=0;
-  c.net.bodyReclaim.setAdapter({prepare:async()=>({}),preflight:()=>true,apply(){applied++;return true;},activate(){enabled++;return true;},release(){released++;}});
+  let applied=0, enabled=0, released=0, captured=0;
+  const checkpoint=globalThis.BL.oogaBody.codec({world:'world-1',profile:'standing-1',name:'a'}).encode(
+    {x:51,y:0,z:0,yaw:0},{weapon:'gun',mode:'combat',primaryOwned:true,secondaryOwned:true,
+      selectedSlot:2,unlimited:false,jetpack:true,jetpackOwned:true});
+  c.net.bodyReclaim.setAdapter({prepare:async()=>({}),preflight:()=>true,apply(){applied++;return true;},activate(){enabled++;return true;},release(){released++;},capture(){captured++;return checkpoint;}});
   const now=Math.ceil(c.net.serverNow()), request='c'.repeat(32);
   send({t:'body-prepare',v:2,request,accountId:1,bodyId:'a',kind:'ooga',world:'world-1',epoch:3,expiresAt:now+5000});
   for(let i=0;i<8;i++)await Promise.resolve();
   assert.equal(c.sent.at(-1).t,'body-ready');
   const transfer={v:1,protocol:'host-session-v5',world:'world-1',epoch:3,revision:17,at:now,expiresAt:now+5000,
-    resetResources:'defaults',view:{accountId:1,bodyId:'a',kind:'ooga',generation:8,state:'offered',deadline:now+60000},checkpoint:{fixture:true}};
+    resetResources:'defaults',view:{accountId:1,bodyId:'a',kind:'ooga',generation:8,state:'offered',deadline:now+60000},checkpoint};
   send({t:'body-grant',request,transfer}); assert.equal(c.sent.at(-1).t,'body-applied'); assert.equal(applied,0);
   const count=c.sent.length; c.net.sendPose(51,0,0,0,null,1,2,visual,rest); assert.equal(c.sent.length,count);
   const final={...transfer,revision:18,expiresAt:now+1000,view:{...transfer.view,state:'starting'}};
@@ -355,8 +359,10 @@ test('actual net gates old pose replay until body apply and matching activation,
   c.net.sendPose(51,0,0,0); assert.equal(c.sent.at(-1).t,'body-started');
   send({t:'body-live',request,epoch:3,generation:7,revision:18}); assert.equal(enabled,0);
   send({t:'body-live',request,epoch:3,generation:8,revision:18}); assert.equal(enabled,1);
-  c.net.sendPose(51,0,0,0,null,1,2,visual,rest); assert.equal(c.sent.at(-1).t,'pose','restored-controller report is not suppressed by old cache');
-  assert.deepEqual(c.sent.at(-1).v,visual); assert.deepEqual(c.sent.at(-1).r,rest);
+  c.net.sendPose(51,0,0,0,null,1,2,visual,rest); assert.equal(c.sent.at(-1).t,globalThis.BL.oogaMotion.TYPE,'fresh authenticated capture is not suppressed by old cache');
+  assert.equal(captured,1); assert.equal(c.sent.at(-1).request,request); assert.equal(c.sent.at(-1).sequence,1);
+  assert.deepEqual(globalThis.BL.oogaMotion.unpack(c.sent.at(-1).data,checkpoint),checkpoint);
+  assert.equal(c.sent.some(m=>m.t==='pose'),false,'reclaim never downgrades to legacy pose');
   const activeCount=c.sent.length; c.net.setBody('other'); c.net.sendPose(0,0,0,0); assert.equal(c.sent.length,activeCount);
   ws.onclose(); assert.equal(released,1); c.reconnect();
   c.sockets.at(-1).onmessage({data:JSON.stringify({t:'welcome',you:{id:1},players:[],features:[],now:1100,connectionToken:'older-room'})});
@@ -385,13 +391,18 @@ test('actual npc-sync freezes before crew update, including no frame, mismatched
   const BL={...globalThis.BL,math:{quat:{create:()=>new Float32Array([0,0,0,1])},fnv1a:()=>123},scene:{addChild(){},removeChild(){}},
     net:{state:{room:'live',selfId:1,hostId:1,followers:1,npcVersion:0,npcAuthority:{mode:'server',revision:1}},npcFrame:null,sendNpc(){throw Error('browser must not publish');}}};
   const cave=()=>({contributor:{},traits:{name:'a'},parts:{armL:{},armR:{}},root:{},sleepWeapons:{},puppet:false});
-  const a=cave(),b=cave(),crew={list:[a,b],player:b,workSites:[]};
-  runInNewContext(readFileSync(new URL('../../src/js/npc-sync.js',import.meta.url),'utf8'),{window:{BL},TextEncoder,TextDecoder,ArrayBuffer,Uint32Array,Float32Array,Uint8Array,Int32Array});
+  const a=cave(),b=cave(),player=cave(),crew={list:[a,b],player,workSites:[]};
+  for (const name of ['npc-lab-pose', 'npc-clanker-sync', 'npc-sync'])
+    runInNewContext(readFileSync(new URL(`../../src/js/${name}.js`,import.meta.url),'utf8'),{window:{BL},TextEncoder,TextDecoder,ArrayBuffer,Uint32Array,Float32Array,Uint8Array,Int32Array});
   const sync=BL.npcSync.create({crew,fx:{},onPlan(){},onHit(){},onModelChange(){}});
-  assert.equal(a.puppet,true);assert.equal(b.puppet,false);sync.update(.05);assert.equal(sync.role,'server');
-  BL.net.state.room='connecting';BL.net.state.hostId=0;a.puppet=false;sync.prepare();assert.equal(a.puppet,true);
-  BL.net.npcFrame=frame(1,999);BL.net.state.npcVersion++;sync.update(.05);assert.equal(a.puppet,true,'incompatible roster cannot enable local AI');
-  BL.net.state.npcAuthority={mode:'browser',revision:2};sync.prepare();sync.update(.05);assert.equal(a.puppet,false);
+  assert.equal(a.puppet,true);assert.equal(b.puppet,true);assert.equal(player.puppet,false);
+  sync.update(.05);assert.equal(sync.role,'server');
+  BL.net.state.room='connecting';BL.net.state.hostId=0;a.puppet=b.puppet=false;sync.prepare();
+  assert.equal(a.puppet,true);assert.equal(b.puppet,true);assert.equal(player.puppet,false);
+  BL.net.npcFrame=frame(1,999);BL.net.state.npcVersion++;sync.update(.05);
+  assert.equal(a.puppet,true,'incompatible roster cannot enable local AI');assert.equal(b.puppet,true);assert.equal(player.puppet,false);
+  BL.net.state.npcAuthority={mode:'browser',revision:2};sync.prepare();sync.update(.05);
+  assert.equal(a.puppet,false);assert.equal(b.puppet,false);assert.equal(player.puppet,false);
   sync.dispose();
 });
 
@@ -1373,20 +1384,21 @@ test('actual net quiescence blocks ordinary possession, keeps voice and requires
 });
 
 test('canonical Clanker live receipt sets local form without a legacy body claim or replaying cached movement', async () => {
-  const c = client({ manual: true, bodyMigrationPreview: true }); c.BL.characters.get = name => name === 'a' ? { handle: 'a' } : null;
+  const c = client({ manual: true, bodyMigrationPreview: true, bodyMovementPreview: true }); c.BL.characters.get = name => name === 'a' ? { handle: 'a' } : null;
   await c.net.start(); const ws = c.sockets[0], send = m => ws.onmessage({ data: JSON.stringify(m) });
   assert.ok(ws.url.includes('body-migration=1'));
-  send({ t: 'welcome', you: { id: 1 }, players: [], features: [globalThis.BL.bodyReclaim.FEATURE],
+  send({ t: 'welcome', you: { id: 1 }, players: [], features: [globalThis.BL.bodyReclaim.FEATURE, globalThis.BL.bodyMotion.FEATURE],
     host: 0, now: 1000, connectionToken: 'fixture-connection' });
-  let released = 0;
-  c.net.bodyReclaim.setAdapter({ prepare: () => ({}), preflight: () => true, apply: () => true, activate: () => true, release() { released++; } });
+  let released = 0, captured = 0;
+  const checkpoint = {body:['a',2,8,3,.7,0,0,0,0,1]};
+  c.net.bodyReclaim.setAdapter({ prepare: () => ({}), preflight: () => true, apply: () => true, activate: () => true, release() { released++; }, capture() { captured++; return checkpoint; } });
   const request = '8'.repeat(32), now = Math.ceil(c.net.serverNow());
   send({ t: 'body-prepare', v: 2, request, accountId: 1, bodyId: 'player:1', kind: 'clanker',
     world: 'world-1', epoch: 1, expiresAt: now + 10000 });
   for (let i = 0; i < 8; i++) await Promise.resolve();
   const transfer = { v: 1, protocol: 'host-session-v5', world: 'world-1', epoch: 1, revision: 1,
     at: now, expiresAt: now + 10000, resetResources: 'defaults',
-    view: { accountId: 1, bodyId: 'player:1', kind: 'clanker', generation: 1, state: 'offered', deadline: now + 60000 }, checkpoint: {} };
+    view: { accountId: 1, bodyId: 'player:1', kind: 'clanker', generation: 1, state: 'offered', deadline: now + 60000 }, checkpoint };
   send({ t: 'body-grant', request, transfer });
   send({ t: 'body-active', request, transfer: { ...transfer, revision: 2, expiresAt: now + 1000,
     view: { ...transfer.view, state: 'starting' } } });
@@ -1395,7 +1407,10 @@ test('canonical Clanker live receipt sets local form without a legacy body claim
   assert.equal(c.net.state.body, 'player:1'); assert.equal(c.net.state.bodyKind, 'gorilla'); assert.equal(c.net.state.bodyName, 'a');
   assert.equal(c.sent.some(m => m.t === 'body' || m.t === 'pose'), false);
   const g = [2, 0, 0, 0, 0, 0]; c.net.sendPose(2, 8, 3, .7, g);
-  assert.equal(c.sent.at(-1).t, 'pose'); assert.deepEqual(c.sent.at(-1).g, g);
+  assert.equal(c.sent.at(-1).t, globalThis.BL.bodyMotion.TYPE); assert.equal(captured, 1);
+  assert.equal(c.sent.at(-1).request, request); assert.equal(c.sent.at(-1).sequence, 1);
+  assert.deepEqual(globalThis.BL.bodyMotion.unpack(c.sent.at(-1).data, 'a'), checkpoint.body);
+  assert.equal(c.sent.some(m => m.t === 'body' || m.t === 'pose'), false);
   const migratedRequest = '9'.repeat(32);
   send({ t: 'body-prepare', v: 2, request: migratedRequest, accountId: 1, bodyId: 'player:1', kind: 'ooga',
     world: 'world-1', epoch: 2, expiresAt: now + 10000 });

@@ -55,7 +55,7 @@ test("admission reserves world growth and every retained body's occupancy, grace
   let result, count = 0;
   do { result = await h.make().tick(restart, []); assert.ok(++count <= 19); } while (result.status === "draining");
   assert.equal(h.read().sessions.pending.length, 64);
-  assert.ok(h.read().sessions.pending.every(p => p.applied && p.at === 160250 && p.handback.npc === "n".repeat(64)));
+  assert.ok(h.read().sessions.pending.every(p => p.applied && p.at === 160250 && p.handback === null));
   for (const p of h.read().sessions.pending) boundedJSON(envelope(p), HOST.sessionSlotBytes - 1, HOST.sessionSlotNodes);
   assert.ok(Buffer.byteLength(JSON.stringify(h.read())) <= HOST.checkpointBytes);
 });

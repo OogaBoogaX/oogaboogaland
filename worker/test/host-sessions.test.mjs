@@ -350,7 +350,7 @@ test("a departure keeps the actual body, zone and kind, and its applied tombston
   assert.equal(next.connect(claim(2, "gorilla-a"), T0 + 5 * GRACE_MS).ok, true);
 });
 
-test("expiry hands back only an NPC the host reports, never spawns one, and keeps a stable id across restarts", () => {
+test("expiry leaves independent NPC tracks untouched and keeps stable departure IDs across restarts", () => {
   const npcs = new Map([["ooga-a", "npc-7"]]);
   const adapter = { npcFor: (body) => npcs.get(body) ?? null };
   const reg = registry(adapter);
@@ -362,7 +362,7 @@ test("expiry hands back only an NPC the host reports, never spawns one, and keep
   const { effects } = reg.advance(T0 + GRACE_MS);
   const left = { kind: "ooga", motion: motion({ vx: 0, vy: 0, vz: 0 }), equipment: equipment() };
   assert.deepEqual(effects, [
-    { id: `depart:${a.generation}`, type: "depart", glyph: "green", accountId: 1, bodyId: "ooga-a", generation: a.generation, reason: "expired", at: T0 + GRACE_MS, handback: { npc: "npc-7" }, zone: "outside", body: left, applied: false },
+    { id: `depart:${a.generation}`, type: "depart", glyph: "green", accountId: 1, bodyId: "ooga-a", generation: a.generation, reason: "expired", at: T0 + GRACE_MS, handback: null, zone: "outside", body: left, applied: false },
     { id: `depart:${b.generation}`, type: "depart", glyph: "green", accountId: 2, bodyId: "ooga-b", generation: b.generation, reason: "expired", at: T0 + GRACE_MS, handback: null, zone: "outside", body: left, applied: false },
   ]);
   assert.deepEqual(reg.advance(T0 + 2 * GRACE_MS).effects, [], "an expiry happens once");
@@ -378,12 +378,13 @@ test("expiry hands back only an NPC the host reports, never spawns one, and keep
   assert.equal(kept.acknowledge(effects[0].id), true);
   assert.deepEqual(kept.pending().map((p) => p.id), [effects[1].id]);
 
-  const liar = registry({ npcFor: () => ({ spawn: true }) });
+  let queries = 0;
+  const liar = registry({ npcFor: () => { queries++; throw Error('departure must not query NPC ownership'); } });
   const c = liar.connect(claim(1, "ooga-a"), T0).session;
   liar.disconnect(ref(c), T0);
-  const cp = liar.checkpoint();
-  assert.throws(() => liar.advance(T0 + GRACE_MS), /NPC id/);
-  assert.deepEqual(liar.checkpoint(), cp);
+  assert.equal(liar.advance(T0 + GRACE_MS).effects[0].handback, null);
+  assert.equal(queries, 0, 'departure never resolves, creates or transfers an NPC');
+  assert.deepEqual([...npcs], [['ooga-a', 'npc-7']]);
 });
 
 test("claims outside the limits are refused, and malformed checkpoints never restore", () => {

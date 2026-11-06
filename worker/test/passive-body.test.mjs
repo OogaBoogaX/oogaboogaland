@@ -43,7 +43,7 @@ test('restart after the deadline beams from the frozen position without passive 
   const original=live.checkpoint(),restarted=SessionRegistry.restore(structuredClone(original),options);
   restarted.recover(200000,[]);const gone=restarted.pending()[0];
   assert.equal(gone.at,100000+GRACE_MS);assert.equal(gone.body.motion.y,4);assert.equal(gone.body.motion.grounded,false);
-  assert.equal(gone.glyph,'green');assert.equal(gone.handback.npc,'resident-npc');assert.deepEqual(gone.body.equipment,equipment());
+  assert.equal(gone.glyph,'green');assert.equal(gone.handback,null);assert.deepEqual(gone.body.equipment,equipment());
   assert.equal(p.calls,0,'no disconnected-body physics work regardless of elapsed duration');
   const baseline=new SessionRegistry(options),t=baseline.connect(claim(),100000).session;baseline.disconnect(t,100000);
   for(let at=100250;at<160000;at+=250)baseline.advance(at);
@@ -76,7 +76,7 @@ test('invalid physics refuses input while frozen expiry never invokes it',()=>{
   reg.advance(160000);assert.equal(calls,0);assert.deepEqual(reg.pending()[0].body.motion,cp.sessions[0].motion);
 });
 
-test('VirtualHost commits frozen departure with handback and rolls both back on a failed write',async()=>{
+test('VirtualHost atomically commits frozen departure without changing the independent NPC',async()=>{
   const {VirtualHost,HOST,SESSION_PROTOCOL}=await import('../src/virtual-host.js'),p=await physics();
   let data=new Map(),now=100000,fail=false;
   const storage={async transaction(fn){const draft=structuredClone(data);const result=await fn({get:async k=>structuredClone(draft.get(k)),put:async(k,v)=>{if(fail){fail=false;throw Error('storage unavailable');}draft.set(k,structuredClone(v));}});data=draft;return result;}};
@@ -90,10 +90,11 @@ test('VirtualHost commits frozen departure with handback and rolls both back on 
   now=160000;const restarted=create(),fresh=await restarted.claim('runner-b'),before=structuredClone(data.get(HOST.key));
   fail=true;await assert.rejects(restarted.tick(fresh,[]),/storage unavailable/);assert.deepEqual(data.get(HOST.key),before);
   await restarted.tick(fresh,[]);const saved=data.get(HOST.key);
-  assert.equal(saved.simulation.handbacks,1);assert.equal(saved.simulation.body.motion.y,4);assert.deepEqual(saved.simulation.body.equipment,equipment());
+  assert.equal(saved.simulation.handbacks,0);assert.equal(saved.simulation.body,null);
+  assert.equal(saved.sessions.pending[0].body.motion.y,4);assert.deepEqual(saved.sessions.pending[0].body.equipment,equipment());
   assert.equal(saved.sessions.pending[0].applied,true);assert.equal(saved.sessions.pending[0].at,160000);
   now=200000;const again=await create().begin('runner-c',60000,{resumePaused:true});await create().tick(again,[]);
-  assert.equal(data.get(HOST.key).simulation.handbacks,1,'committed handback never replays after restart');
+  assert.equal(data.get(HOST.key).simulation.handbacks,0,'restart never transfers player state into an NPC');
 });
 
 test('grace and pending handoff views keep the free arm and red indicator until acknowledged reclaim',()=>{

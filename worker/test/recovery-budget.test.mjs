@@ -52,11 +52,11 @@ test("maximum simultaneous expiry needs zero body physics across rollback and tr
   assert.ok(saved.sessions.pending.every(p => p.applied && p.at === 160000 && p.body.motion.y === 9000
     && !p.body.motion.grounded && p.body.motion.vx === 0 && p.body.motion.vy === 0 && p.body.motion.vz === 0));
   assert.ok(saved.sessions.pending.every(p => JSON.stringify(p.body.equipment) === JSON.stringify(equipment)));
-  assert.equal(saved.simulation.handbacks.length, 1); assert.equal(saved.sessions.pending.filter(p => p.handback).length, 1);
+  assert.equal(saved.simulation.handbacks.length, 0); assert.equal(saved.sessions.pending.filter(p => p.handback).length, 0);
   h.at(170000); const replacement = h.make(), fresh = await replacement.begin("replacement", 60000, { resumePaused: true });
   await assert.rejects(runner.tick(ticket, []), /fenced/);
   await replacement.tick(fresh, []);
-  assert.equal(h.read().simulation.handbacks.length, 1);
+  assert.equal(h.read().simulation.handbacks.length, 0);
   t.diagnostic(JSON.stringify({ frozenBodies: MAX_SESSIONS, physicsSteps: h.calls(), expiryCommits: 1 }));
 });
 

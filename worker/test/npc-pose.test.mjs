@@ -91,7 +91,8 @@ test("actual browser host and worker use the same pose record and preserve the d
   const a = rig("a"), b = rig("b"), sent = [];
   const BL = { npcPose: pose, math: { quat: { create: () => new Float32Array([0, 0, 0, 1]) }, fnv1a: () => 123 },
     scene: { addChild() {}, removeChild() {} }, net: { state: { room: "live", selfId: 1, hostId: 1, followers: 1 }, sendNpc: bytes => sent.push(bytes.slice().buffer) } };
-  runInNewContext(readFileSync(new URL("../../src/js/npc-sync.js", import.meta.url), "utf8"), { window: { BL }, TextEncoder, TextDecoder });
+  for (const name of ['npc-lab-pose', 'npc-clanker-sync', 'npc-sync'])
+    runInNewContext(readFileSync(new URL(`../../src/js/${name}.js`, import.meta.url), 'utf8'), { window: { BL }, TextEncoder, TextDecoder });
   const sync = BL.npcSync.create({ crew: { list: [a, b], player: b }, fx: {} });
   sync.update(.25);
   assert.equal(sent.length, 1);
