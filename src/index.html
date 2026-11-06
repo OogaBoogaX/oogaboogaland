@@ -473,7 +473,9 @@
             <dl class="banana-totals">
               <div><dt>Donations</dt><dd id="stat-donations">0</dd></div>
               <div><dt>Sats donated</dt><dd id="stat-sats">0</dd></div>
+              <div><dt>Pile now</dt><dd id="stat-pile" title="Bananas left in the pile, apart from all donations ever made">—</dd></div>
             </dl>
+            <p class="banana-pile-note" id="banana-pile-note" hidden></p>
             <dl class="banana-rates" aria-label="Current Bitcoin and banana exchange rates">
               <dt class="banana-rate-label" id="banana-rate-label" data-tone="wait">BTCUSD</dt>
               <dd id="banana-btc-price">—</dd>
@@ -501,6 +503,15 @@
             <label class="banana-recent-filter"><input type="checkbox" id="banana-recent-bar"> <span id="banana-recent-bar-label">1,000 sats and up only</span></label>
             <ol class="banana-recent-list" id="banana-recent-list" aria-label="Most recent donations"></ol>
             <p class="banana-empty" id="banana-recent-empty">New donations will appear here.</p>
+          </section>
+          <section class="banana-history" id="banana-history" aria-labelledby="banana-history-title" hidden>
+            <h3 class="slab-head" id="banana-history-title"><span data-sign>Your donations</span></h3>
+            <ol class="banana-recent-list" id="banana-history-list" aria-label="Your donations"></ol>
+            <p class="banana-empty" id="banana-history-note"></p>
+            <div class="banana-history-pages">
+              <button type="button" class="link" id="banana-history-newest" hidden>Newest</button>
+              <button type="button" class="link" id="banana-history-older" hidden>Older</button>
+            </div>
           </section>
           <p class="banana-board-note" id="banana-board-note">Demo donations saved in this browser.</p>
         </div>

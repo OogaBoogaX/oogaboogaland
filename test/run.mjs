@@ -4202,13 +4202,15 @@ const orbitFlow = async (b) => {
 const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
-for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
+for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "donations-unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
 const ONLY = process.env.ONLY || ""; // Optional comma-separated substrings within the requested scenes.
 const onlyMatches = value => ONLY.split(",").some(part => value.includes(part));
 const FULL = ARGS.includes("full");
 const PICKED = FULL ? SCENES : SCENES.filter((s) => ARGS.includes(s));
 const PERF = FULL || ARGS.includes("perf");
-const UNIT = !(ARGS.length === 1 && ["perf", "poker-protocol", "cloud-hopper-record", "cloud-hopper-arcade"].includes(ARGS[0]));
+// `donations-unit` runs the donation client, receipt accounting and shared contract-vector checks alone, in Node VM
+// contexts: no Chrome, no build and none of the global tier's other checks.
+const UNIT = !(ARGS.length === 1 && ["perf", "poker-protocol", "cloud-hopper-record", "cloud-hopper-arcade", "donations-unit"].includes(ARGS[0]));
 const PROTOCOL = FULL || ARGS.includes("poker-protocol");
 // What keeps the cruft out: every step says why it exists, or the run does not start.
 const WHY = /^(regression|playthrough|rule|contract): \S/;
@@ -8227,10 +8229,14 @@ const donationClientChecks = async () => {
   elements.get("donation-close").listeners.get("click")();
   record("donation popup: a typed prefix survives Tab, a preview completes with Tab or Enter, Escape cancels a preview, and a tip under the message bar has no message field or carried text",
     completed && previewCanceled && previewMoved && previewSaved && nameDone, JSON.stringify({ suggested, preserved, completed, previewCanceled, previewMoved, previewSaved, smallInvoice, nameAlone, nameDone }));
+  // Resizing a canvas clears it: count the popup screen's resizes to see closing wipe what it showed.
+  let screenCleared = 0;
+  Object.defineProperty(elements.get("donation-screen"), "width", { configurable: true, get: () => 400, set: () => { screenCleared++; } });
   popup.open(); popupFlow.key({ key: "1" }); popupFlow.key({ key: "Enter" });
   popup.dispose(); await Promise.resolve();
-  const disposed = popupFlow.state === "idle" && !dialog.open && frames.size === 0 && detailTimers.size === 0 && [...elements.values()].every(e => e.listeners.size === 0);
-  record("donation popup: signed-out visitors can quote a payment, edits on the details screen save automatically on the same invoice, Tab goes between its fields, a failed save keeps the screen with its error until it is tried again or given up on for the details the invoice holds, and a saved one goes back to the quote with the keys on the popup's screen, Lightning returns to its quote without replacing the invoice, unrelated donations keep its invoice open, its settlement reveals the scene immediately, an on-chain payment can be left waiting, and disposal cancels frames, timers, listeners and late replies",
+  const disposed = popupFlow.state === "idle" && !dialog.open && frames.size === 0 && detailTimers.size === 0 && [...elements.values()].every(e => e.listeners.size === 0)
+    && screenCleared > 0 && popupFlow.sats === 0 && popupFlow.digits === "" && popupFlow.savedDetails === null;
+  record("donation popup: signed-out visitors can quote a payment, edits on the details screen save automatically on the same invoice, Tab goes between its fields, a failed save keeps the screen with its error until it is tried again or given up on for the details the invoice holds, and a saved one goes back to the quote with the keys on the popup's screen, Lightning returns to its quote without replacing the invoice, unrelated donations keep its invoice open, its settlement reveals the scene immediately, an on-chain payment can be left waiting, and disposal cancels frames, timers, listeners and late replies, and closing clears its screen and the donation's details",
     anonymous && signedIn && edited && detailsDone && keptSaved && invoiceEdited && lightningBack && sameLightning && other && settled && popupSeen && leftWaiting && disposed, JSON.stringify({ anonymous, signedIn, edited, detailsDone, keptSaved, invoiceEdited, lightningBack, sameLightning, other, settled, popupSeen, leftWaiting, disposed }));
 
   const routeLocation = { protocol: "https:", pathname: "/donate", search: "", hash: "" }, routeDocument = { title: "" };
@@ -8268,6 +8274,1386 @@ const donationClientChecks = async () => {
     popRouter.settled();
     record("router: Back or Forward pressed while a trip builds is queued and taken once the director settles, once", refused && early && taken && trips.length === 3, JSON.stringify(trips));
   }
+};
+// Receipt accounting v1 on the page (docs/receipt-accounting.md): synthetic frames and private replies only, no network
+// or wallet. The donation module, the kiosk and the HUD's pile text each run in a VM context of their own.
+const donationReceiptChecks = async () => {
+  const sockets = [], timers = [], requests = [], received = [], piles = [], replies = new Map(), defaults = new Map();
+  const queue = (path, ...items) => { if (!replies.has(path)) replies.set(path, []); replies.get(path).push(...items); };
+  const context = { window: { setTimeout: (fn, ms) => { const t = { fn, ms }; timers.push(t); return t; }, clearTimeout: (t) => { if (t) t.cleared = true; } },
+    location: { protocol: "https:", origin: "https://site.test" },
+    fetch: async (path, options) => {
+      const body = JSON.parse(options.body), next = replies.get(path)?.shift() || defaults.get(path);
+      requests.push({ path, body });
+      const r = typeof next === "function" ? await next(body) : next || { error: "closed", status: 503 };
+      const { status = r.error ? 400 : 200, ...data } = r;
+      return { status, ok: status < 300, json: async () => data };
+    },
+    WebSocket: class { constructor(url) { this.url = url; sockets.push(this); } close() { this.closed = true; } } };
+  runInNewContext(await readFile(new URL("../src/js/donations.js", import.meta.url), "utf8"), context);
+  const D = context.window.BL.donations, settle = () => new Promise(setImmediate);
+  const frame = data => sockets.at(-1).onmessage({ data: JSON.stringify(data) });
+  const reads = () => requests.filter(r => r.path === "/donations/status").length;
+  const reconnect = () => { sockets.at(-1).onclose(); timers.at(-1).fn(); sockets.at(-1).onopen(); };
+  const ACCOUNTING = { version: 1, issuance: true, receipts: true, history: true, coverage: "invoice", spends: false, reconciliation: "current" };
+  const ADDR = "tb1qreceiptaddress0000", ROTATED = "tb1qrotatedaddress0000", OLDER = "tb1qolderaddress000000";
+  const PRICE = { usdPerBtc: 100000, satsPerBanana: 1000, at: 900, stale: false };
+  // A credited receipt of `sats` (400 unless given), received at 900, its own frozen bananas a thousandth of its sats.
+  const receipt = (id, o = {}) => ({ id, invoice: "inv1", method: "onchain", sats: 400, credit: o.sats || 400, state: "credited", revision: 1, at: 1000,
+    firstCreditedSeq: 1, handle: "donor", message: "", verified: false, pricing: { receivedAt: 900, rate: PRICE, bananas: { exact: (o.sats || 400) / 1000, rounded: 0 } }, ...o });
+  const totals = (o = {}) => ({ id: "inv1", due: 10000, received: 400, credited: 400, review: 0, left: 9700, state: "partial", revision: 1, ...o });
+  const statusReply = (t = {}, extra = {}) => ({ invoice: { ...totals(t), accounting: "receipt-v1", expires: Math.floor(Date.now() / 1000) + 600, lightning: "unavailable", bolt11: null },
+    addresses: [{ address: ADDR, issuedAt: 1 }], payableAddress: ADDR, receipts: [], next: null, nextAddress: null, ...extra });
+  const historyRow = (id, o = {}) => ({ ...totals({ id, ...o }), accounting: "receipt-v1", createdAt: 1, handle: "donor", expires: 2 });
+
+  // Issuance: opted into only while advertised, and never downgraded.
+  D.useOrigin();
+  const stop = D.subscribe((d, bananas, r) => received.push({ d, bananas, r }), { onPile: p => piles.push(p) });
+  sockets[0].onopen();
+  const firstUrl = sockets[0].url === "wss://site.test/donations/socket";
+  frame({ type: "status", open: true, network: "signet", accounting: { ...ACCOUNTING, issuance: false } });
+  queue("/donations/invoice", { request: "req0", invoice: { id: "legacy0", bolt11: "lntbs1", expires: 1 }, bananas: null, rate: null });
+  const legacy = await D.invoice({ sats: 1000 });
+  const optOut = !Object.hasOwn(requests.at(-1).body, "accounting") && legacy.invoice.accounting === "legacy" && D.view("legacy0") === null;
+  frame({ type: "status", open: true, network: "signet", accounting: ACCOUNTING });
+  queue("/donations/invoice", { request: "req9", invoice: { id: "down1", bolt11: null, expires: 1, accounting: "legacy" }, bananas: null, rate: null }, { error: "closed", status: 503 });
+  const downgraded = await D.invoice({ sats: 1000 }), before = requests.length, closed = await D.invoice({ sats: 1000 });
+  const neverDowngraded = downgraded.error === "invalid" && requests.at(-2).body.accounting === 1 && closed.error === "closed"
+    && requests.length === before + 1 && requests.at(-1).body.accounting === 1 && D.view("down1") === null;
+  queue("/donations/invoice", { request: "req1", invoice: { id: "inv1", bolt11: null, expires: Math.floor(Date.now() / 1000) + 600, accounting: "receipt-v1" },
+    bananas: { exact: 10, rounded: 10 }, rate: PRICE, pricing: "receipt" });
+  const made = await D.invoice({ sats: 10000 }), v = D.view("inv1");
+  const tracked = made.invoice.accounting === "receipt-v1" && !!v && v.request === "req1" && v.revision === -1;
+  // The kiosk shows it, which reads it once now; only invoices a screen shows are read again on a catch-up or a move.
+  queue("/donations/status", statusReply());
+  D.showing(v, true); await settle();
+  const shownRead = v.read && !v.fresh && requests.at(-1).body.request === "req1";
+  frame({ type: "status", open: true, accounting: { ...ACCOUNTING, version: 2 } });
+  const unknownVersion = D.state.accounting === null;
+  frame({ type: "status", open: true, network: "signet", accounting: ACCOUNTING });
+  record("receipts: invoices ask for receipt mode only while issuance is advertised, keep the mode the API saved, and a downgrade or a closed receipt mode is refused, never retried as legacy",
+    firstUrl && optOut && neverDowngraded && tracked && shownRead && unknownVersion, JSON.stringify({ firstUrl, optOut, neverDowngraded, tracked, shownRead, unknownVersion }));
+
+  // The snapshot and the marker: neither animates, the marker is the cursor from then on, and a tracked invoice is read
+  // again before anything about it counts as current.
+  frame({ type: "recentReceipts", entries: [receipt("seen0", { invoice: "other", revision: 2, firstCreditedSeq: 3 })] });
+  queue("/donations/status", statusReply());
+  const beforeMarker = reads();
+  frame({ type: "replay", after: null, through: 5, complete: true });
+  const markerReads = reads() === beforeMarker + 1 && !v.fresh && D.payableSats(v, ADDR) === 0;
+  await settle();
+  frame({ type: "receipt", seq: 3, replay: false, receipt: receipt("seen0", { invoice: "other", revision: 2, firstCreditedSeq: 3 }), invoice: totals({ id: "other", revision: 2 }) });
+  const caughtUp = D.state.receiptCursor === 5 && D.state.caughtUp && D.state.recentReceipts.length === 1 && received.length === 0;
+  const firstRead = requests.at(-1).body.request === "req1" && !Object.hasOwn(requests.at(-1).body, "cursor") && v.read && v.fresh && v.payableRevision === 1;
+  const payableRule = D.payableSats(v, ADDR) === 9700 && D.payableSats(v, ROTATED) === 0 && D.payableSats(v, "") === 0;
+
+  // A partial first credit animates once with its own bananas at its own time; the moved totals hold the amount back
+  // until read again.
+  const r1 = receipt("r1", { revision: 2, firstCreditedSeq: 6 }), t2 = totals({ revision: 2, received: 800, credited: 800, left: 9300 });
+  queue("/donations/status", statusReply(t2, { receipts: [r1] }));
+  frame({ type: "receipt", seq: 6, replay: false, receipt: r1, invoice: t2 });
+  const animated = received.length === 1 && received[0].d.id === "r1" && received[0].r.invoice === "inv1" && received[0].bananas.exact === 0.4 && received[0].d.at === 900;
+  const evidenceHeld = v.revision === 2 && D.payableSats(v, ADDR) === 0;
+  await settle();
+  const evidenceFresh = D.payableSats(v, ADDR) === 9300 && v.payableRevision === 2;
+  frame({ type: "receipt", seq: 6, replay: false, receipt: r1, invoice: t2 });
+  frame({ type: "receipt", seq: 7, replay: false, receipt: { ...r1, revision: 1, state: "confirming", credit: 0, firstCreditedSeq: null }, invoice: totals({ revision: 1 }) });
+  const deduped = received.length === 1 && v.receipts.find(r => r.id === "r1")?.revision === 2 && v.revision === 2;
+  // Review and reconfirmation keep the first credit; a status reply older than the totals is dropped whole and read again.
+  const statusBefore = reads();
+  queue("/donations/status", statusReply({ ...t2, revision: 3, state: "review", review: 400 }, { payableAddress: ROTATED }), statusReply({ ...t2, revision: 4 }, { receipts: [{ ...r1, revision: 4 }] }));
+  frame({ type: "receipt", seq: 8, replay: false, receipt: { ...r1, revision: 3, state: "review" }, invoice: { ...t2, revision: 3, state: "review", review: 400 } });
+  frame({ type: "receipt", seq: 9, replay: false, receipt: { ...r1, revision: 4 }, invoice: { ...t2, revision: 4 } });
+  await settle();
+  const reconfirmed = received.length === 1 && v.state === "partial" && v.revision === 4 && v.payableAddress === ADDR && v.payableRevision === 4 && reads() === statusBefore + 2;
+  // Past both bounded rings, an old frame still can't animate or regress anything: the cursor has passed it.
+  for (let i = 0; i < 600; i++) frame({ type: "receipt", seq: 100 + i, replay: false, receipt: receipt(`bulk${i}`, { invoice: "bulk", firstCreditedSeq: 100 + i }), invoice: totals({ id: "bulk", revision: i + 1 }) });
+  const bulk = received.length === 601;
+  frame({ type: "receipt", seq: 6, replay: false, receipt: r1, invoice: t2 });
+  const ringsForgotten = received.length === 601 && v.receipts.find(r => r.id === "r1")?.revision === 4 && !D.state.recentReceipts.some(row => row.id === "r1" && row.revision === 2);
+  record("receipts: a live first credit animates once with its own bananas; reconnect reads, duplicates, delayed revisions, review and reconfirmation, and frames older than the cursor never animate again, even past the bounded rings",
+    markerReads && caughtUp && firstRead && payableRule && animated && evidenceHeld && evidenceFresh && deduped && reconfirmed && bulk && ringsForgotten,
+    JSON.stringify({ markerReads, caughtUp, firstRead, payableRule, animated, evidenceHeld, evidenceFresh, deduped, reconfirmed, bulk, ringsForgotten, revision: v.revision }));
+
+  // Split, excess, two outputs of one transaction, mixed methods and a tiny receipt: each credited once at its own price,
+  // listed by when it was received, a later correction leaving it where it was.
+  let latest = totals({ revision: 5, received: 10200, credited: 10200, left: 0, state: "paid" }), shown = [r1];
+  defaults.set("/donations/status", () => statusReply(latest, { receipts: shown }));
+  const r2 = receipt("r2", { sats: 9800, revision: 2, firstCreditedSeq: 800, pricing: { receivedAt: 1100, rate: { ...PRICE, usdPerBtc: 50000 }, bananas: { exact: 4.9, rounded: 5 } } });
+  shown = [r2, r1];
+  frame({ type: "receipt", seq: 800, replay: false, receipt: r2, invoice: latest });
+  latest = totals({ revision: 6, received: 10605, credited: 10605, left: 0, state: "paid" });
+  const r3 = receipt("r3", { sats: 200, firstCreditedSeq: 801 });
+  for (const [seq, r] of [[801, r3], [802, receipt("r4", { sats: 200, firstCreditedSeq: 802 })],
+    [803, receipt("r5", { sats: 5, method: "lightning", firstCreditedSeq: 803 })]]) frame({ type: "receipt", seq, replay: false, receipt: r, invoice: latest });
+  await settle();
+  const each = received.slice(-4).map(x => `${x.d.id}:${x.d.sats}:${x.bananas.exact}`).join();
+  frame({ type: "receipt", seq: 804, replay: false, receipt: { ...r3, revision: 2, at: 99999 }, invoice: latest });
+  const order = D.state.recentReceipts.slice(0, 4).map(row => row.id).join();
+  const split = each === "r2:9800:4.9,r3:200:0.2,r4:200:0.2,r5:5:0.005" && order === "r2,r5,r4,r3" && v.state === "paid" && v.credited === 10605 && D.payableSats(v, ADDR) === 0;
+  // A fee change without a receipt: newer totals replace, an older status never does, nothing animates, and the address is read again.
+  const count = received.length, readsBefore = reads();
+  latest = { ...latest, revision: 7, left: 25, state: "partial" };
+  frame({ type: "invoiceStatus", seq: 900, replay: false, invoice: latest });
+  const statusFrame = v.left === 25 && D.payableSats(v, ADDR) === 0 && received.length === count && D.state.receiptCursor === 900;
+  await settle();
+  frame({ type: "invoiceStatus", seq: 901, replay: false, invoice: { ...latest, revision: 6, left: 9999 } });
+  const statusReread = reads() === readsBefore + 1 && v.left === 25 && D.payableSats(v, ADDR) === 25;
+  // Once anything has come, the full-amount Lightning code is gone, whatever a reply still holds.
+  const lit = statusReply(latest);
+  lit.invoice.bolt11 = "lntbs1fulltarget";
+  lit.invoice.lightning = "available";
+  queue("/donations/status", lit);
+  await D.refresh("inv1"); await settle();
+  const noFullLightning = v.bolt11 === null && v.lightning === "available";
+  record("receipts: split, excess, two outputs of one transaction, mixed methods and a tiny receipt each credit once at their own frozen price in received order, an invoiceStatus frame replaces only newer totals and reads the payable address again, and a part-paid invoice keeps no full-amount Lightning code",
+    split && statusFrame && statusReread && noFullLightning, JSON.stringify({ each, order, split, statusFrame, statusReread, noFullLightning, state: v.state, left: v.left }));
+
+  // Paging: one server page a list, never cut; the other list stays put; a stale or refused cursor restarts at the newest.
+  // A failed read leaves nothing current until a later one succeeds.
+  const rA = receipt("rA"), rB = receipt("rB"), rC = receipt("rC");
+  queue("/donations/status", statusReply(latest, { receipts: [rA, rB], next: "c1", addresses: [{ address: ADDR, issuedAt: 3 }], nextAddress: "a1" }));
+  await D.more("inv1", "newest"); await settle();
+  queue("/donations/status", statusReply(latest, { receipts: [rC], next: null, addresses: [{ address: OLDER, issuedAt: 0 }], nextAddress: "a9" }));
+  await D.more("inv1", "receipts"); await settle();
+  const receiptsPage = requests.at(-1).body.cursor === "c1" && !Object.hasOwn(requests.at(-1).body, "addressCursor") && v.receipts.map(r => r.id).join() === "rC"
+    && v.receiptsFrom === "c1" && v.next === null && v.addresses[0].address === ADDR && v.nextAddress === "a1";
+  queue("/donations/status", statusReply(latest, { receipts: [rA], next: "zz", addresses: [{ address: OLDER, issuedAt: 0 }], nextAddress: null }));
+  await D.more("inv1", "addresses"); await settle();
+  const addressPage = requests.at(-1).body.addressCursor === "a1" && !Object.hasOwn(requests.at(-1).body, "cursor") && v.addresses[0].address === OLDER
+    && v.addressesFrom === "a1" && v.nextAddress === null && v.receipts[0].id === "rC";
+  queue("/donations/status", statusReply(latest, { receipts: [rA, rB], next: "c1" }));
+  await D.more("inv1", "newest"); await settle();
+  queue("/donations/status", { error: "resync", status: 409 }, statusReply(latest, { receipts: [rA, rB], next: "c1" }));
+  await D.more("inv1", "receipts"); await settle();
+  const resynced = requests.at(-2).body.cursor === "c1" && !Object.hasOwn(requests.at(-1).body, "cursor") && v.receiptsFrom === null && v.receipts.length === 2;
+  queue("/donations/status", { error: "cursor", status: 400 }, statusReply(latest, { receipts: [rA, rB], next: "c1" }));
+  await D.more("inv1", "receipts"); await settle();
+  const refusedCursor = requests.at(-2).body.cursor === "c1" && !Object.hasOwn(requests.at(-1).body, "cursor") && v.receiptsFrom === null;
+  queue("/donations/status", statusReply(latest, { receipts: Array.from({ length: 101 }, (_, i) => receipt(`big${i}`)), next: "c2" }));
+  await D.refresh("inv1"); await settle();
+  const oversized = v.error === "invalid" && v.receipts.length === 2 && v.next === "c1" && !v.fresh && v.payableRevision === -1 && D.payableSats(v, ADDR) === 0;
+  queue("/donations/status", { error: "busy", status: 429 });
+  await D.refresh("inv1"); await settle();
+  const failed = v.error === "busy" && !v.fresh && D.payableSats(v, ADDR) === 0;
+  await D.refresh("inv1"); await settle();
+  const recovered = v.error === "" && v.fresh && D.payableSats(v, ADDR) === 25;
+  record("receipts: private status pages receipts and addresses one server page at a time with separate cursors, never cuts a page, restarts at the newest after a stale or refused cursor, and a failed or refused read leaves nothing current until a later read succeeds",
+    receiptsPage && addressPage && resynced && refusedCursor && oversized && failed && recovered, JSON.stringify({ receiptsPage, addressPage, resynced, refusedCursor, oversized, failed, recovered }));
+
+  // A shown invoice's read the API answers `busy` is tried again by itself, a bounded number of times with growing
+  // delays (one timer at a time), and current again once a retry succeeds; a view no screen shows gets no retry and is
+  // read once a screen shows it again. Nothing here is a new queue: one timer a shown view, at most.
+  const busy = { error: "busy", status: 429 }, retryTimers = () => timers.filter((t) => t.ms >= 2000 && t.ms <= 16000 && !t.cleared && !t.fired);
+  const fire = (t) => { t.fired = true; t.fn(); };
+  const sentBusy = reads();
+  queue("/donations/status", busy);
+  await D.refresh("inv1"); await settle();
+  const firstRetry = v.error === "busy" && !v.fresh && D.payableSats(v, ADDR) === 0 && retryTimers().length === 1 && retryTimers()[0].ms === 2000;
+  const delays = [];
+  for (let i = 0; i < 4; i++) {
+    const t = retryTimers()[0];
+    if (!t) break;
+    delays.push(t.ms);
+    queue("/donations/status", busy);
+    fire(t); await settle();
+  }
+  const bounded = delays.join() === "2000,4000,8000,16000" && retryTimers().length === 0 && reads() === sentBusy + 5 && v.error === "busy";
+  await D.refresh("inv1"); await settle();
+  const manualRecovers = v.error === "" && v.fresh && D.payableSats(v, ADDR) === 25;
+  queue("/donations/status", busy);
+  await D.refresh("inv1"); await settle();
+  const retryAgain = retryTimers().length === 1 && retryTimers()[0].ms === 2000;
+  fire(retryTimers()[0]); await settle();
+  const retrySucceeds = v.error === "" && v.fresh && D.payableSats(v, ADDR) === 25 && retryTimers().length === 0;
+  D.showing(v, false);
+  queue("/donations/status", busy);
+  await D.refresh("inv1"); await settle();
+  const unshownNoRetry = v.error === "busy" && retryTimers().length === 0;
+  const beforeShow = reads();
+  D.showing(v, true); await settle();
+  const shownReads = reads() === beforeShow + 1 && v.fresh && v.error === "";
+  // A retry pending when the account changes reads nothing for the old account (its own donations instance, signed in).
+  const cTimers = [], cRequests = [];
+  const cContext = { window: { setTimeout: (fn, ms) => { const t = { fn, ms }; cTimers.push(t); return t; }, clearTimeout: (t) => { if (t) t.cleared = true; } },
+    location: { protocol: "https:", origin: "https://site.test" },
+    fetch: async (path, options) => { cRequests.push(path); return { status: 429, ok: false, json: async () => ({ error: "busy" }) }; },
+    WebSocket: class { close() {} } };
+  runInNewContext(await readFile(new URL("../src/js/donations.js", import.meta.url), "utf8"), cContext);
+  const DC = cContext.window.BL.donations;
+  DC.setAccount(1);
+  DC.showing(DC.reopen("cinv"), true); await settle();
+  const cPending = cTimers.filter((t) => t.ms === 2000);
+  const cBefore = cRequests.filter((path) => path === "/donations/status").length;
+  DC.setAccount(2);
+  for (const t of cPending) t.fn();
+  await settle();
+  const cancelled = cPending.length === 1 && cPending[0].cleared === true && cRequests.filter((path) => path === "/donations/status").length === cBefore && DC.view("cinv") === null;
+  record("receipts busy retry: a shown invoice's busy read is retried by itself after 2, 4, 8 and 16 seconds and no more, one timer at a time, a manual or retried read makes it current again, a view no screen shows gets no retry but is read once shown, and an account change cancels a pending retry",
+    firstRetry && bounded && manualRecovers && retryAgain && retrySucceeds && unshownNoRetry && shownReads && cancelled,
+    JSON.stringify({ firstRetry, bounded, delays, manualRecovers, retryAgain, retrySucceeds, unshownNoRetry, shownReads, cancelled, error: v.error }));
+
+  // Reconnect and gap: separate cursors, nothing fresh until caught up and read again, a gap reads every tracked invoice.
+  frame({ type: "donation", donation: { id: "legacyPaid", sats: 1000, handle: "", message: "", at: Date.now() }, bananas: { exact: 1, rounded: 1 } });
+  const legacyEvent = received.at(-1).d.id === "legacyPaid" && received.at(-1).r === undefined;
+  const cursor = D.state.receiptCursor;
+  sockets.at(-1).onclose(); timers.at(-1).fn();
+  const cursorUrl = sockets.at(-1).url.endsWith(`?after=legacyPaid&receipts=${cursor}`);
+  const staleClosed = !v.fresh && D.payableSats(v, ADDR) === 0;
+  sockets.at(-1).onopen();
+  const gapReads = reads();
+  frame({ type: "replay", after: cursor, through: 5000, complete: false });
+  await settle();
+  const gap = D.state.resyncs === 1 && D.state.receiptCursor === 5000 && reads() === gapReads + 1 && v.fresh && D.payableSats(v, ADDR) === 25;
+  frame({ type: "receipt", seq: 4000, replay: false, receipt: receipt("lost", { invoice: "inv8", firstCreditedSeq: 4000 }), invoice: totals({ id: "inv8" }) });
+  const belowMark = received.at(-1).d.id === "legacyPaid";
+  // Reversed before the snapshot arrives: the snapshot's older credited row stays out.
+  frame({ type: "receipt", seq: 5001, replay: false, receipt: receipt("snap1", { invoice: "inv9", revision: 3, state: "reversed", credit: 0, firstCreditedSeq: 4990 }), invoice: totals({ id: "inv9", revision: 3, received: 0, credited: 0, left: null, state: "unpaid" }) });
+  frame({ type: "recentReceipts", entries: [receipt("snap1", { invoice: "inv9", revision: 2, firstCreditedSeq: 4990 })] });
+  const snapshotKeepsCorrection = !D.state.recentReceipts.some(row => row.id === "snap1");
+  // A complete catch-up still reads every tracked invoice again before its amount is offered.
+  reconnect();
+  const completeReads = reads();
+  frame({ type: "replay", after: 5001, through: 5001, complete: true });
+  const heldBack = !v.fresh && D.payableSats(v, ADDR) === 0 && reads() === completeReads + 1;
+  await settle();
+  const completeFresh = v.fresh && D.payableSats(v, ADDR) === 25 && D.state.resyncs === 1;
+  // A read begun before a reconnect that succeeds late is dropped whole, newer revision and all; the read the catch-up
+  // asked for runs, and when it fails nothing is current.
+  let releaseOld;
+  queue("/donations/status", () => new Promise(r => { releaseOld = r; }));
+  D.refresh("inv1");
+  reconnect();
+  queue("/donations/status", { error: "closed", status: 503 });
+  frame({ type: "replay", after: D.state.receiptCursor, through: D.state.receiptCursor, complete: true });
+  releaseOld(statusReply({ ...latest, revision: latest.revision + 1, left: 777 }, { payableAddress: ROTATED })); await settle();
+  const oldDropped = v.revision === latest.revision && v.left === 25 && v.payableAddress === ADDR && !v.fresh && v.error === "closed" && D.payableSats(v, ADDR) === 0;
+  await D.refresh("inv1"); await settle();
+  const freshAgain = v.fresh && D.payableSats(v, ADDR) === 25;
+  record("receipts: legacy and receipt cursors travel separately, nothing is fresh while the socket is down or until each tracked invoice is read again after any catch-up, a read begun before it never counts, a gap counts as one, and a snapshot never undoes a newer correction",
+    legacyEvent && cursorUrl && staleClosed && gap && belowMark && snapshotKeepsCorrection && heldBack && completeFresh && oldDropped && freshAgain,
+    JSON.stringify({ legacyEvent, cursorUrl, url: sockets.at(-1).url, staleClosed, gap, belowMark, snapshotKeepsCorrection, heldBack, completeFresh, oldDropped, freshAgain }));
+
+  // Prices: no credit before a frozen price, pending stays pending, and permanently unpriced is zero.
+  const beforePricing = received.length, cursorBefore = D.state.receiptCursor;
+  frame({ type: "receipt", seq: 6000, replay: false, receipt: receipt("pricing1", { invoice: "inv2", pricing: null, firstCreditedSeq: 6000 }), invoice: totals({ id: "inv2" }) });
+  const refusedUnfrozen = received.length === beforePricing && D.state.receiptCursor === cursorBefore;
+  frame({ type: "receipt", seq: 6001, replay: false, receipt: receipt("pricing2", { invoice: "inv2", pricing: null, credit: 0, state: "review", firstCreditedSeq: null }), invoice: totals({ id: "inv2", revision: 2, credited: 0, review: 400, state: "review" }) });
+  const pendingRow = D.state.recentReceipts.find(row => row.id === "pricing2")?.bananas === null;
+  frame({ type: "receipt", seq: 6002, replay: false, receipt: receipt("pricing2", { invoice: "inv2", revision: 2, credit: 0, state: "review", firstCreditedSeq: null }), invoice: totals({ id: "inv2", revision: 3, credited: 0, review: 400, state: "review" }) });
+  const frozenRow = D.state.recentReceipts.find(row => row.id === "pricing2")?.bananas === 0.4;
+  frame({ type: "receipt", seq: 6003, replay: false, receipt: receipt("unpriced", { invoice: "inv2", firstCreditedSeq: 6003, pricing: { receivedAt: 1, rate: null, bananas: null } }), invoice: totals({ id: "inv2", revision: 4 }) });
+  const unpriced = received.at(-1).d.id === "unpriced" && received.at(-1).bananas.exact === 0 && D.state.recentReceipts.find(row => row.id === "unpriced")?.bananas === 0;
+  record("receipts: a receipt claiming credit before its price froze is refused, a pending price stays pending until a frozen revision, and a permanently unpriced credit counts zero bananas",
+    refusedUnfrozen && pendingRow && frozenRow && unpriced, JSON.stringify({ refusedUnfrozen, pendingRow, frozenRow, unpriced }));
+
+  // A receipt's message was approved under its own invoice's saved bar: a later, higher bar never erases it.
+  frame({ type: "receipt", seq: 6004, replay: false, receipt: receipt("spoken", { invoice: "inv2", sats: 500, message: "for the cave", firstCreditedSeq: 6004 }), invoice: totals({ id: "inv2", revision: 5 }) });
+  const spokenLive = received.at(-1).d.id === "spoken" && received.at(-1).d.message === "for the cave";
+  frame({ type: "status", open: true, network: "signet", accounting: ACCOUNTING, limits: { minSats: 1, maxSats: 2000000, lightningMaxSats: 1000, messageMinSats: 5000 } });
+  const kept = D.state.recentReceipts.find(row => row.id === "spoken")?.message === "for the cave" && D.messageMinSats === 5000;
+  record("receipts: a receipt's message stands as recorded under its invoice's own bar, live and in the recent list, even after the advertised bar rises",
+    spokenLive && kept, JSON.stringify({ spokenLive, kept }));
+
+  // Lightning: once any receipt has been seen for an invoice, its full-target code never comes back, even after a
+  // reversal brings every total to zero and a reply offers the code again.
+  queue("/donations/invoice", { request: "req10", invoice: { id: "inv10", bolt11: "lntbs1inv10", expires: Math.floor(Date.now() / 1000) + 600, accounting: "receipt-v1" }, bananas: null, rate: null });
+  await D.invoice({ sats: 10000 });
+  const v10 = D.view("inv10"), r10 = receipt("r10", { invoice: "inv10", firstCreditedSeq: 6010 });
+  queue("/donations/status", statusReply({ id: "inv10", revision: 0, received: 0, credited: 0, left: 10000, state: "unpaid" }));
+  D.showing(v10, true); await settle();
+  const zero = statusReply({ id: "inv10", revision: 3, received: 0, credited: 0, review: 0, left: 10000, state: "unpaid" });
+  zero.invoice.bolt11 = "lntbs1inv10";
+  zero.invoice.lightning = "available";
+  queue("/donations/status", statusReply({ id: "inv10", revision: 1 }, { receipts: [r10] }), zero);
+  frame({ type: "receipt", seq: 6010, replay: false, receipt: r10, invoice: totals({ id: "inv10" }) });
+  frame({ type: "receipt", seq: 6011, replay: false, receipt: { ...r10, revision: 2, state: "reversed", credit: 0 }, invoice: totals({ id: "inv10", revision: 3, received: 0, credited: 0, left: 10000, state: "unpaid" }) });
+  await settle();
+  const latched = v10.observed && v10.bolt11 === null && v10.received === 0 && v10.revision === 3 && v10.lightning === "available";
+  record("receipts: an invoice that has ever had a receipt never offers its full-target Lightning code again, even reversed back to zero with the code on offer",
+    latched, JSON.stringify({ observed: v10.observed, bolt11: v10.bolt11, received: v10.received, revision: v10.revision }));
+
+  // Expiry: a receipt-mode invoice's original expiry is a positive safe integer of seconds, never null, zero or a guess.
+  // An issuance without one is refused; a status reply without one is refused whole, and the API's 503 `closed` for a
+  // page it can't state one for keeps every record held while withdrawing freshness and the amount. Legacy keeps its own.
+  const soon = Math.floor(Date.now() / 1000) + 600, BAD_EXPIRY = [0, -600, 1.5, null, "600", undefined];
+  const issueWith = async (expires, id) => {
+    const inv = { id, bolt11: null, accounting: "receipt-v1" };
+    if (expires !== undefined) inv.expires = expires;
+    queue("/donations/invoice", { request: `req-${id}`, invoice: inv, bananas: null, rate: null });
+    return D.invoice({ sats: 10000 });
+  };
+  let issuanceRefused = true;
+  for (let i = 0; i < BAD_EXPIRY.length; i++) {
+    const r = await issueWith(BAD_EXPIRY[i], `noexp${i}`);
+    issuanceRefused &&= r.error === "invalid" && D.view(`noexp${i}`) === null;
+  }
+  const issuedGood = (await issueWith(soon, "goodexp")).invoice?.expires === soon && D.view("goodexp") !== null;
+  frame({ type: "status", open: true, network: "signet", accounting: { ...ACCOUNTING, issuance: false } });
+  queue("/donations/invoice", { request: "reqLegacyExp", invoice: { id: "legacyExp", bolt11: "lntbs1", expires: Date.now() / 1000 + 600.5 }, bananas: null, rate: null });
+  const legacyKept = (await D.invoice({ sats: 1000 })).invoice?.accounting === "legacy";
+  frame({ type: "status", open: true, network: "signet", accounting: ACCOUNTING });
+  await D.refresh("inv1"); await settle();
+  const heldExpiry = v.expires, heldReceipts = v.receipts.map(r => r.id).join(), heldAddresses = v.addresses.map(a => a.address).join();
+  const goodBefore = v.fresh && D.payableSats(v, ADDR) === 25;
+  const keptAll = () => v.expires === heldExpiry && v.receipts.map(r => r.id).join() === heldReceipts && v.addresses.map(a => a.address).join() === heldAddresses
+    && v.revision === latest.revision && v.left === 25 && v.payableAddress === ADDR && !v.fresh && v.payableRevision === -1 && D.payableSats(v, ADDR) === 0;
+  let statusRefused = true;
+  for (const expires of BAD_EXPIRY) {
+    const reply = statusReply(latest, { receipts: shown });
+    if (expires === undefined) delete reply.invoice.expires; else reply.invoice.expires = expires;
+    queue("/donations/status", reply);
+    await D.refresh("inv1"); await settle();
+    statusRefused &&= v.error === "invalid" && keptAll();
+    await D.refresh("inv1"); await settle();
+    statusRefused &&= v.fresh && D.payableSats(v, ADDR) === 25;
+  }
+  queue("/donations/status", { error: "closed", status: 503 });
+  await D.refresh("inv1"); await settle();
+  const closedKept = v.error === "closed" && keptAll();
+  await D.refresh("inv1"); await settle();
+  const closedRecovered = v.fresh && v.error === "" && D.payableSats(v, ADDR) === 25;
+  // A known expiry that has passed offers no amount; a view with none at all offers none either, however fresh.
+  const passed = statusReply(latest, { receipts: shown });
+  passed.invoice.expires = Math.floor(Date.now() / 1000) - 1;
+  queue("/donations/status", passed);
+  await D.refresh("inv1"); await settle();
+  const pastExpiry = v.fresh && D.payableSats(v, ADDR) === 0;
+  await D.refresh("inv1"); await settle();
+  const unknownExpiry = D.payableSats({ ...v, expires: 0 }, ADDR) === 0 && D.payableSats({ ...v, expires: null }, ADDR) === 0 && D.payableSats(v, ADDR) === 25;
+  record("receipts expiry: a receipt-mode invoice's expiry must be a positive whole second count at issuance and in every status reply, a missing, zero, negative, fractional or textual one refused whole, 503 closed keeps every record but nothing current, a passed or unknown expiry offers no amount, and legacy invoices keep their own rule",
+    issuanceRefused && issuedGood && legacyKept && goodBefore && statusRefused && closedKept && closedRecovered && pastExpiry && unknownExpiry,
+    JSON.stringify({ issuanceRefused, issuedGood, legacyKept, goodBefore, statusRefused, closedKept, closedRecovered, pastExpiry, unknownExpiry, error: v.error }));
+
+  // The paying address: named only from a current view. A closed read or a disconnect leaves the address as history until
+  // a read after catching up succeeds.
+  const payingNow = D.payingAddress(v) === ADDR;
+  queue("/donations/status", { error: "closed", status: 503 });
+  await D.refresh("inv1"); await settle();
+  const closedNotPaying = D.payingAddress(v) === null && v.payableAddress === ADDR && v.addresses[0].address === ADDR;
+  await D.refresh("inv1"); await settle();
+  const backPaying = D.payingAddress(v) === ADDR;
+  sockets.at(-1).onclose();
+  const offlineNotPaying = D.payingAddress(v) === null && D.payableSats(v, ADDR) === 0 && v.addresses[0].address === ADDR;
+  timers.at(-1).fn(); sockets.at(-1).onopen();
+  frame({ type: "replay", after: D.state.receiptCursor, through: D.state.receiptCursor, complete: true }); await settle();
+  const caughtUpPaying = D.payingAddress(v) === ADDR && D.payableSats(v, ADDR) === 25;
+  // NEWEST on one list brings back only that list, even with a page of the other on its way.
+  const twoLists = (o = {}) => statusReply(latest, { receipts: [rA, rB], next: "c1", addresses: [{ address: ADDR, issuedAt: 3 }], nextAddress: "a1", ...o });
+  queue("/donations/status", twoLists());
+  await D.more("inv1", "newest");
+  queue("/donations/status", twoLists({ receipts: [rC], next: null }));
+  await D.more("inv1", "receipts");
+  queue("/donations/status", twoLists({ addresses: [{ address: OLDER, issuedAt: 0 }], nextAddress: null }));
+  await D.more("inv1", "addresses");
+  const bothOlder = v.receiptsFrom === "c1" && v.addressesFrom === "a1";
+  queue("/donations/status", twoLists());
+  await D.more("inv1", "newest", "addresses");
+  const addressesOnly = v.addressesFrom === null && v.addresses[0].address === ADDR && v.receiptsFrom === "c1" && v.receipts.map(r => r.id).join() === "rC";
+  queue("/donations/status", twoLists({ addresses: [{ address: OLDER, issuedAt: 0 }], nextAddress: null }));
+  await D.more("inv1", "addresses");
+  queue("/donations/status", twoLists());
+  await D.more("inv1", "newest", "receipts");
+  const receiptsOnly = v.receiptsFrom === null && v.receipts.map(r => r.id).join() === "rA,rB" && v.addressesFrom === "a1" && v.addresses[0].address === OLDER;
+  let releasePage;
+  queue("/donations/status", () => new Promise(r => { releasePage = r; }), twoLists({ receipts: [rA] }));
+  const paging = D.more("inv1", "receipts");
+  D.more("inv1", "newest", "addresses");
+  releasePage(twoLists({ receipts: [rC], next: null, addresses: [{ address: OLDER, issuedAt: 0 }], nextAddress: null }));
+  await paging; await settle();
+  const pageThenNewest = v.receiptsFrom === "c1" && v.receipts.map(r => r.id).join() === "rC" && v.addressesFrom === null && v.addresses[0].address === ADDR
+    && !Object.hasOwn(requests.at(-1).body, "cursor") && !Object.hasOwn(requests.at(-1).body, "addressCursor");
+  // Past the cap a held view goes untracked for good: no read on its way, catch-up or frame makes it current or payable
+  // again, and it keeps its records as history.
+  let releaseEvicted;
+  queue("/donations/status", () => new Promise(r => { releaseEvicted = r; }));
+  D.refresh("inv1");
+  for (let i = 0; i < 32; i++) {
+    queue("/donations/invoice", { request: `fill-req${i}`, invoice: { id: `fill${i}`, bolt11: null, expires: soon, accounting: "receipt-v1" }, bananas: null, rate: null });
+    await D.invoice({ sats: 10000 });
+  }
+  const evicted = D.view("inv1") === null && v.retired && !v.fresh && D.payingAddress(v) === null && D.payableSats(v, ADDR) === 0
+    && v.payableAddress === ADDR && v.addresses[0].address === ADDR && v.receipts.length === 1 && D.view("fill31") !== null;
+  releaseEvicted(statusReply(latest, { receipts: shown })); await settle();
+  const lateReplyIgnored = !v.fresh && D.payingAddress(v) === null && v.receipts.map(r => r.id).join() === "rC";
+  reconnect();
+  frame({ type: "replay", after: D.state.receiptCursor, through: D.state.receiptCursor, complete: true }); await settle();
+  frame({ type: "invoiceStatus", seq: D.state.receiptCursor + 1, replay: false, invoice: { ...latest, revision: latest.revision + 1 } });
+  const staysRetired = !v.fresh && D.payingAddress(v) === null && v.revision === latest.revision && (await D.refresh("inv1")).error === "unknown";
+  record("receipts paying address: named only from a current, tracked view; a closed read or a disconnect leaves every address history until a read after catching up; NEWEST brings back only its own list, a page of the other on its way included; and a view dropped past the cap keeps its records but is never current or payable again, whatever arrives late",
+    payingNow && closedNotPaying && backPaying && offlineNotPaying && caughtUpPaying && bothOlder && addressesOnly && receiptsOnly && pageThenNewest && evicted && lateReplyIgnored && staysRetired,
+    JSON.stringify({ payingNow, closedNotPaying, backPaying, offlineNotPaying, caughtUpPaying, bothOlder, addressesOnly, receiptsOnly, pageThenNewest, evicted, lateReplyIgnored, staysRetired }));
+
+  // A snapshot marks animated only what it shows already credited once: a receipt it lists before any credit (none is
+  // listed so today; this is defensive) still animates its live first credit, and a credited one never does.
+  const snapCursor = D.state.receiptCursor, beforeSnapshots = received.length;
+  const uncredited = receipt("precredit", { invoice: "inv20", credit: 0, state: "review", firstCreditedSeq: null });
+  frame({ type: "recentReceipts", entries: [uncredited] });
+  frame({ type: "receipt", seq: snapCursor + 1, replay: false, receipt: { ...uncredited, credit: 400, state: "credited", revision: 2, firstCreditedSeq: snapCursor + 1 },
+    invoice: totals({ id: "inv20", revision: 2 }) });
+  const liveFirstCredit = received.length === beforeSnapshots + 1 && received.at(-1).d.id === "precredit";
+  const listedCredited = receipt("snapcredited", { invoice: "inv21", firstCreditedSeq: snapCursor + 2 });
+  frame({ type: "recentReceipts", entries: [listedCredited] });
+  frame({ type: "receipt", seq: snapCursor + 2, replay: false, receipt: { ...listedCredited, revision: 2 }, invoice: totals({ id: "inv21", revision: 2 }) });
+  const creditedQuiet = received.length === beforeSnapshots + 1;
+  record("receipts snapshot: a receipt listed before any credit still animates its live first credit, and one listed already credited never animates",
+    liveFirstCredit && creditedQuiet, JSON.stringify({ liveFirstCredit, creditedQuiet, received: received.length - beforeSnapshots }));
+
+  // The pile: decay ignored, a legacy pile only from a legacy API, pending stays unknown, and revisions only ever move
+  // forward, across reconnects too.
+  frame({ type: "status", open: true, network: "signet" });
+  frame({ type: "pile", bananas: 20.75, eatPerHour: 60 });
+  const legacyPile = piles.at(-1).bananas === 20.75 && !Object.hasOwn(piles.at(-1), "eatPerHour") && D.state.pile.revision === null && D.state.pileLive;
+  frame({ type: "status", open: true, network: "signet", accounting: ACCOUNTING });
+  frame({ type: "pile", bananas: 30, eatPerHour: 0 });
+  const legacyRefused = D.state.pile.bananas === 20.75;
+  const pileFrame = (o) => frame({ type: "pile", at: 1, eatPerHour: 0, basis: "credits", cutover: "done", reconciliation: "current", uncertain: { sats: 0, bananas: 0 }, ...o });
+  pileFrame({ bananas: null, at: null, revision: 3, cutover: "pending", reconciliation: "review", uncertain: null });
+  const pending = D.state.pile.bananas === null && D.state.pile.cutover === "pending" && piles.at(-1).bananas === null;
+  pileFrame({ bananas: 5, revision: 2 });
+  const olderIgnored = D.state.pile.bananas === null;
+  pileFrame({ bananas: 980.5, revision: 7, uncertain: { sats: 400, bananas: 0.4 } });
+  const anchored = D.state.pile.bananas === 980.5 && D.state.pile.uncertain.sats === 400 && D.state.pile.basis === "credits";
+  sockets.at(-1).onclose();
+  const offline = !D.state.pileLive && !D.state.connected;
+  timers.at(-1).fn(); sockets.at(-1).onopen();
+  const pilesBefore = piles.length;
+  pileFrame({ bananas: 900, revision: 1 });
+  const lowerRefused = D.state.pile.bananas === 980.5 && !D.state.pileLive && piles.length === pilesBefore;
+  pileFrame({ bananas: 980.5, revision: 7, uncertain: { sats: 400, bananas: 0.4 } });
+  const confirmed = D.state.pileLive && D.state.pile.bananas === 980.5 && piles.length === pilesBefore;
+  // After the anchor too, a negative correction or unsafe totals can leave no count: unavailable, never zero, its
+  // revision kept, so an older count can't come back and an equal one confirms it.
+  pileFrame({ bananas: null, at: null, revision: 8, cutover: "done", reconciliation: "review", uncertain: null });
+  const anchoredNull = D.state.pile.bananas === null && D.state.pile.cutover === "done" && D.state.pile.revision === 8 && piles.at(-1).bananas === null;
+  pileFrame({ bananas: 980.5, revision: 7 });
+  const notRestored = D.state.pile.bananas === null && D.state.pile.revision === 8;
+  pileFrame({ bananas: null, at: null, revision: 8, cutover: "done", reconciliation: "review", uncertain: null });
+  const nullConfirmed = D.state.pileLive && D.state.pile.bananas === null && D.state.pile.revision === 8;
+  // Every scene too, not only the director, the crew and the pile: none may bring decay or the API's eating rate back.
+  const decayFiles = ["director", "crew", "pile", "game"].map(name => `${name}.js`)
+    .concat(readdirSync(new URL("../src/js/", import.meta.url)).filter(name => /^scene-.*\.js$/.test(name)));
+  const sources = await Promise.all(decayFiles.map(name => readFile(new URL(`../src/js/${name}`, import.meta.url), "utf8")));
+  // Covered means every scene script the page loads is among them, so a scene added later is checked too.
+  const pageScenes = [...(await readFile(new URL("../src/index.html", import.meta.url), "utf8")).matchAll(/src="js\/(scene-[^"]+\.js)"/g)].map(m => m[1]);
+  const scenesCovered = pageScenes.length > 0 && pageScenes.every(name => decayFiles.includes(name));
+  const noDecay = scenesCovered && sources.every(source => !/eatPerHour|EAT_RATE/.test(source));
+  record("receipts pile: decay is ignored and gone from the page, a legacy pile counts only from a legacy API, a pile without a count stays unknown before or after its anchor, and revisions move only forward across reconnects, an equal one confirming the pile held",
+    legacyPile && legacyRefused && pending && olderIgnored && anchored && offline && lowerRefused && confirmed && anchoredNull && notRestored && nullConfirmed && noDecay,
+    JSON.stringify({ legacyPile, legacyRefused, pending, olderIgnored, anchored, offline, lowerRefused, confirmed, anchoredNull, notRestored, nullConfirmed, noDecay, scenes: pageScenes.length }));
+
+  // Accounts: history pages, merges and restarts, and every private thing of the last account goes with it, replies too.
+  queue("/donations/history", { revision: 3, invoices: [historyRow("inv1"), historyRow("inv3")], next: "h1" });
+  D.setAccount(42); await settle();
+  const dropped = D.view("inv1") === null && (await D.refresh("inv1")).error === "unknown";
+  const firstPage = D.state.history.invoices.length === 2 && D.state.history.next === "h1" && D.state.history.from === null;
+  let releaseHistory, release, releaseStatus;
+  queue("/donations/history", () => new Promise(r => { releaseHistory = r; }));
+  D.historyPage("newest");
+  frame({ type: "invoiceStatus", seq: 7000, replay: false, invoice: totals({ id: "inv3", revision: 9, received: 900, credited: 900, review: 100, left: null, state: "review" }) });
+  releaseHistory({ revision: 3, invoices: [historyRow("inv1"), historyRow("inv3", { revision: 2 })], next: "h1" }); await settle();
+  const inv3 = D.state.history.invoices.find(row => row.id === "inv3");
+  const merged = inv3.revision === 9 && inv3.review === 100 && inv3.left === null && inv3.state === "review" && D.state.history.invoices[0].id === "inv1";
+  queue("/donations/history", { revision: 3, invoices: [historyRow("inv4")], next: null });
+  await D.historyPage("older");
+  const olderPage = requests.at(-1).body.cursor === "h1" && D.state.history.from === "h1" && D.state.history.invoices[0].id === "inv4" && !D.state.history.next;
+  queue("/donations/history", { revision: 4, invoices: [historyRow("inv5")], next: "h2" });
+  await D.historyPage("newest");
+  queue("/donations/history", { error: "resync", status: 409 }, { revision: 5, invoices: [historyRow("inv6")], next: null });
+  await D.historyPage("older");
+  const restarted = D.state.history.restarted && D.state.history.from === null && D.state.history.invoices[0].id === "inv6";
+  queue("/donations/history", () => new Promise(r => { release = r; }), { revision: 1, invoices: [historyRow("inv7")], next: null });
+  D.historyPage("newest");
+  D.setAccount(7); await settle();
+  release({ revision: 9, invoices: [historyRow("old-account")], next: null }); await settle();
+  const historyFenced = D.state.history.invoices[0].id === "inv7";
+  queue("/donations/status", () => new Promise(r => { releaseStatus = r; }));
+  const reopened = D.reopen("inv7");
+  const byInvoice = requests.at(-1).body.invoice === "inv7" && !Object.hasOwn(requests.at(-1).body, "request");
+  queue("/donations/history", { revision: 1, invoices: [], next: null });
+  D.setAccount(8);
+  releaseStatus(statusReply({ id: "inv7" })); await settle();
+  const statusFenced = D.view("inv7") === null && !reopened.read && reopened.payableAddress === null && reopened.retired && D.payingAddress(reopened) === null;
+  D.setAccount(null); await settle();
+  const signedOut = D.state.history === null && D.reopen("inv1") === null;
+  record("receipts: signed-in history pages, keeps totals the stream moved past while a page was on its way, restarts after a resync, reopens by invoice without a token, and an account change drops tokens, views and history and ignores replies already on their way",
+    dropped && firstPage && merged && olderPage && restarted && historyFenced && byInvoice && statusFenced && signedOut,
+    JSON.stringify({ dropped, firstPage, merged, olderPage, restarted, historyFenced, byInvoice, statusFenced, signedOut }));
+
+  // History expiry: a page with any row lacking a positive whole expiry is refused whole, and 503 closed for a page keeps
+  // the rows shown; a reopened invoice whose status can't state one stays unread, with no address or amount assumed.
+  queue("/donations/history", { revision: 2, invoices: [historyRow("hx1"), historyRow("hx2")], next: "hn" });
+  D.setAccount(99); await settle();
+  const shownRows = () => D.state.history.invoices.map(row => row.id).join();
+  const historyHeld = shownRows() === "hx1,hx2";
+  let historyRefused = true;
+  for (const expires of BAD_EXPIRY) {
+    const bad = historyRow("hx3");
+    if (expires === undefined) delete bad.expires; else bad.expires = expires;
+    queue("/donations/history", { revision: 2, invoices: [historyRow("hx4"), bad], next: null });
+    await D.historyPage("newest");
+    historyRefused &&= D.state.history.error === "invalid" && shownRows() === "hx1,hx2" && D.state.history.next === "hn";
+  }
+  queue("/donations/history", { error: "closed", status: 503 });
+  await D.historyPage("older");
+  const historyClosed = requests.at(-1).body.cursor === "hn" && D.state.history.error === "closed" && shownRows() === "hx1,hx2" && D.state.history.next === "hn" && !D.state.history.loading;
+  const reopenedBad = statusReply({ id: "hx1" });
+  reopenedBad.invoice.expires = 0;
+  queue("/donations/status", reopenedBad);
+  const hx = D.reopen("hx1"); await settle();
+  const reopenRefused = hx.error === "invalid" && !hx.read && !hx.fresh && hx.payableAddress === null && hx.addresses.length === 0 && D.payableSats(hx, ADDR) === 0;
+  queue("/donations/status", { error: "closed", status: 503 });
+  const hy = D.reopen("hx2"); await settle();
+  const reopenClosed = hy.error === "closed" && !hy.read && hy.payableAddress === null && D.payableSats(hy, ADDR) === 0;
+  D.setAccount(null); await settle();
+  stop();
+  record("receipts history expiry: a history page with a missing, zero, negative, fractional or textual expiry is refused whole, 503 closed keeps the page shown, and a reopened invoice whose status lacks an expiry or is closed stays unread with nothing payable",
+    historyHeld && historyRefused && historyClosed && reopenRefused && reopenClosed,
+    JSON.stringify({ historyHeld, historyRefused, historyClosed, reopenRefused, reopenClosed, history: D.state.history }));
+
+  // The kiosk on a receipt-mode invoice: its view decides every screen and QR. It paints onto a canvas that draws nothing.
+  const encoded = [], copied = [], paged = [], drawn = [];
+  let now = Date.now(), gen = 0, closes = 0, kioskLive = true;
+  const quiet = new Proxy({}, { get: () => () => {} });
+  const kioskContext = { window: { BL: { jumbotron: { text: { GLYPH_W: 5, GLYPH_H: 7, TRACKING: 1, glyphOf: ch => { drawn.push(ch); return [0, 0, 0, 0, 0, 0, 0]; } } }, bananaIcon: { paint() {} },
+    qr: { encode: text => { encoded.push(text); return { size: 1, modules: [1] }; } }, donations: D } },
+  document: { createElement: () => {
+    const canvas = { cleared: 0, getContext: () => quiet };
+    Object.defineProperty(canvas, "width", { get: () => 400, set: () => { canvas.cleared++; } });
+    return canvas;
+  } }, Date: class extends Date { static now() { return now; } } };
+  for (const name of ["factory-kiosk-core", "factory-kiosk"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), kioskContext);
+  const viewOf = (o) => ({ id: "kinv", request: "kreq", due: 10000, received: 0, credited: 0, review: 0, left: null, state: "unpaid", revision: -1, expires: Math.floor(now / 1000) + 600,
+    payableAddress: null, payableRevision: -1, receipts: [], receiptsFrom: null, next: null, addresses: [], addressesFrom: null, nextAddress: null, fresh: false, read: false, error: "", version: 0, ...o });
+  const kview = viewOf({});
+  const kioskOf = (view, bolt11, invoice) => kioskContext.window.BL.factoryKiosk.create({ real: true, link: () => "/lightning", bananasFor: () => 1,
+    invoice: invoice || (async () => ({ request: "kreq", invoice: { id: view.id, bolt11, expires: view.expires, accounting: "receipt-v1" }, bananas: { exact: 10, rounded: 10 }, rate: null, pricing: "receipt", lightning: bolt11 ? "available" : "unavailable" })),
+    onchain: async () => ({ address: ADDR, sats: 10300 }), waitFor() {}, ledger: () => view, paying: D.payingAddress, lightning: D.lightningCode, live: () => kioskLive, payable: D.payableSats, more: (id, page, list) => paged.push(list ? `${page}:${list}` : page), refresh() {},
+    generation: () => gen, open: () => true, testNetwork: () => "", release() {}, watch() {}, close: () => closes++, copy: text => copied.push(text) });
+  const K = kioskOf(kview, null);
+  const bump = (o, flow = K, view = kview) => { Object.assign(view, o); view.version++; flow.update(0.1); };
+  // What a screen says, in the capitals and digits it draws (commas and lower case aside).
+  const painted = (flow = K) => { drawn.length = 0; flow.paint(); return drawn.join(""); };
+  K.start(); for (const key of ["Enter", "1", "0", "0", "0", "0", "Enter"]) K.key({ key }); await settle();
+  K.key({ key: "Enter" }); await settle();
+  const issuanceIgnored = K.state === "chain" && encoded.at(-1) === `bitcoin:${ADDR}` && !encoded.some(text => text.includes("amount=0.000103"));
+  bump({ revision: 1, read: true, fresh: true, received: 400, credited: 400, left: 9700, state: "partial", payableAddress: ADDR, payableRevision: 1, receipts: [receipt("k1", { invoice: "kinv" })] });
+  const amountQr = encoded.at(-1) === `bitcoin:${ADDR}?amount=0.000097` && K.state === "chain";
+  const partialNotPaid = K.state !== "paid" && !K.receive("kinv", { exact: 10, rounded: 10 }, "donor", 10000) && !K.seen("kinv", 10000, 10000, 0) && K.state === "chain";
+  bump({ left: null });
+  const nullLeft = encoded.at(-1) === `bitcoin:${ADDR}` && K.ledgerAmount === 0;
+  bump({ left: 9700, fresh: false });
+  const staleText = painted();
+  const staleView = K.ledgerAmount === 0 && staleText.includes("NOT CURRENT") && !staleText.includes("9700");
+  bump({ fresh: true, revision: 2 });
+  const evidenceBehind = K.ledgerAmount === 0;
+  bump({ payableAddress: null, payableRevision: 2, addresses: [{ address: ROTATED, issuedAt: 2 }, { address: ADDR, issuedAt: 1 }], nextAddress: "more" });
+  const unknownPayable = K.ledgerAddress === ADDR && K.ledgerAmount === 0 && !K.ledgerHistorical;
+  bump({ payableAddress: ROTATED });
+  const rotated = K.ledgerAddress === ROTATED && encoded.at(-1) === `bitcoin:${ROTATED}?amount=0.000097`;
+  // The visitor pages through the invoice's addresses: an earlier one is text alone, and the server's next page is asked for.
+  K.key({ key: "Enter" }); K.paint();
+  K.tap(330, 240);
+  const earlier = K.state === "confirming" && K.ledgerAddress === ADDR && K.ledgerHistorical && K.ledgerQr === null && K.ledgerAmount === 0;
+  K.key({ key: "c" });
+  const copiedEarlier = copied.at(-1) === ADDR;
+  K.paint(); K.tap(330, 240);
+  const nextPage = paged.at(-1) === "addresses" && K.addressIndex === 0;
+  K.paint(); K.tap(260, 240);
+  const backToPayable = K.addressIndex === -1 && K.ledgerAddress === ROTATED && K.ledgerAmount === 9700 && !K.ledgerHistorical;
+  const k2 = receipt("k2", { invoice: "kinv", sats: 9800, firstCreditedSeq: 2, pricing: { receivedAt: 2, rate: { ...PRICE, usdPerBtc: 50000 }, bananas: { exact: 4.9, rounded: 5 } } });
+  bump({ revision: 3, payableRevision: 3, state: "paid", left: 0, received: 10200, credited: 10200, receipts: [k2, kview.receipts[0]], next: "more" });
+  const partialPage = K.state === "paid" && K.ledgerBananas === null && K.ledgerAmount === 0 && K.ledgerQr === null;
+  bump({ next: null });
+  const ownValues = K.ledgerBananas === 5.3 && K.ledgerAddress === ROTATED;
+  bump({ revision: 4, state: "review", review: 9800 });
+  const reviewed = K.state === "confirming";
+  bump({ fresh: false });
+  const staleLedger = painted();
+  bump({ fresh: true });
+  const ledgerStale = staleLedger.includes("CHECKING FOR CURRENT FIGURES") && staleLedger.includes("NOT CURRENT");
+  K.key({ key: "c" });
+  const copiedAddress = copied.at(-1) === ROTATED;
+  bump({ state: "partial", review: 0, revision: 5, payableRevision: 5, left: 100 });
+  K.key({ key: "Backspace" });
+  const backToAddress = K.state === "chain" && K.ledgerAmount === 100;
+  now = (kview.expires + 1) * 1000; K.update(0.1);
+  const expired = K.state === "expired" && K.ledgerAddress === ROTATED && K.ledgerAmount === 0;
+  const clearsBefore = K.canvas.cleared;
+  gen++; K.update(0.1);
+  const accountClosed = closes === 1 && K.state === "idle" && K.view === null && K.canvas.cleared === clearsBefore + 1
+    && K.ledgerAddress === "" && K.ledgerAmount === 0 && K.ledgerBananas === null && K.sats === 0 && K.bananas === 0 && K.who === "" && K.savedDetails === null;
+  now = Date.now();
+  const rview = viewOf({ id: "rinv", request: null, state: "partial", revision: 1, payableRevision: 1, payableAddress: ADDR, left: 300, fresh: true, read: true,
+    received: 9700, credited: 9700, addresses: [{ address: ADDR, issuedAt: 1 }] });
+  K.reopen(rview);
+  const reopenLedger = K.state === "confirming" && K.reopened && K.invoice.accounting === "receipt-v1" && K.reply.request === null && K.invoice.bolt === null;
+  K.key({ key: "Escape" });
+  const toAddress = K.state === "chain" && encoded.at(-1) === `bitcoin:${ADDR}?amount=0.000003`;
+  K.key({ key: "Escape" });
+  const backToLedger = K.state === "confirming";
+  K.stop();
+  // Lightning in receipt mode: the code the issuance reply carried is never offered on its own. Only a fresh status at
+  // the current revision that says the provider takes it (`available`, with its code) offers it, and the moment the view
+  // stops being current (the socket gone, the status saying otherwise, totals moved past the read, the expiry passed) it
+  // goes, back to the quote. A Lightning invoice that receives anything loses its full-amount code for good.
+  const lview = viewOf({ id: "linv", expires: Math.floor(now / 1000) + 600 }), L = kioskOf(lview, "lntbs1fulltarget");
+  L.start(); for (const key of ["Enter", "1", "0", "0", "0", "0", "Enter"]) L.key({ key }); await settle();
+  const issuanceGap = L.state === "quote" && L.invoice.bolt === null && L.invoice.code === null && !encoded.some((text) => text.includes("LNTBS1FULLTARGET"));
+  bump({ revision: 1, payableRevision: 1, read: true, fresh: true, lightning: "available", bolt11: "lntbs1verified", left: 10000, state: "unpaid" }, L, lview);
+  const verifiedOffered = L.invoice.bolt === "lntbs1verified" && !!L.invoice.code;
+  L.key({ key: "Enter" });
+  const onLightning = L.state === "invoice" && L.invoice.bolt === "lntbs1verified";
+  bump({ fresh: false }, L, lview);
+  const staleWithdrawn = L.state === "quote" && L.invoice.bolt === null && L.invoice.code === null;
+  bump({ fresh: true }, L, lview);
+  const currentAgain = L.invoice.bolt === "lntbs1verified";
+  bump({ lightning: "unavailable" }, L, lview);
+  const unavailableWithdrawn = L.invoice.bolt === null;
+  bump({ lightning: "available", revision: 2 }, L, lview);
+  const movedWithdrawn = L.invoice.bolt === null;
+  bump({ payableRevision: 2 }, L, lview);
+  const readAgain = L.invoice.bolt === "lntbs1verified";
+  // The expiry passing, on a kiosk of its own (it ends that invoice's screens): the code goes with it, no event needed.
+  const xview = viewOf({ id: "xinv", expires: Math.floor(now / 1000) + 600 }), X = kioskOf(xview, "lntbs1fulltarget");
+  X.start(); for (const key of ["Enter", "1", "0", "0", "0", "0", "Enter"]) X.key({ key }); await settle();
+  bump({ revision: 1, payableRevision: 1, read: true, fresh: true, lightning: "available", bolt11: "lntbs1verified", left: 10000, state: "unpaid" }, X, xview);
+  X.key({ key: "Enter" });
+  const lightningNow = now, xOffered = X.state === "invoice" && X.invoice.bolt === "lntbs1verified";
+  now = (xview.expires + 1) * 1000; X.update(0.1);
+  const expiryWithdrawn = xOffered && X.state === "expired" && X.invoice.bolt === null && X.invoice.code === null;
+  now = lightningNow; X.stop();
+  L.key({ key: "Enter" });
+  const lightningFirst = issuanceGap && verifiedOffered && onLightning && staleWithdrawn && currentAgain && unavailableWithdrawn && movedWithdrawn && readAgain
+    && expiryWithdrawn && L.state === "invoice" && L.invoice.bolt === "lntbs1verified";
+  // A partial payment lands while the Lightning code shows: gone at once, and never back while a status still offers it.
+  bump({ revision: 3, payableRevision: 3, received: 400, credited: 0, left: 9700, state: "partial", payableAddress: ADDR, observed: true,
+    addresses: [{ address: ADDR, issuedAt: 1 }] }, L, lview);
+  const lightningGone = L.state === "confirming" && L.invoice.bolt === null && L.invoice.code === null;
+  // Reversed back to zero, it still never offers the full-target code: not on Back to the quote, not reopened.
+  bump({ revision: 4, payableRevision: 4, received: 0, credited: 0, review: 0, state: "unpaid", observed: true }, L, lview);
+  const reversedZero = L.invoice.bolt === null && L.state === "confirming";
+  L.key({ key: "Escape" }); L.key({ key: "Escape" });
+  const atQuote = L.state === "quote";
+  L.key({ key: "Enter" }); await settle();
+  const onchainOnly = L.state === "chain" && L.invoice.bolt === null;
+  L.stop();
+  L.reopen(lview);
+  const reopenedLatched = L.state === "confirming" && L.invoice.bolt === null && L.invoice.code === null;
+  L.stop();
+  // A read that failed or was refused, or a view no longer tracked: its address stays to see and copy, but is never
+  // called the paying one, carries no QR or amount, and the ledger offers no way back to paying it.
+  const mview = viewOf({ id: "minv", request: null, state: "partial", revision: 1, payableRevision: 1, payableAddress: ADDR, left: 300, fresh: true, read: true,
+    received: 9700, credited: 9700, addresses: [{ address: ADDR, issuedAt: 1 }] }), M = kioskOf(mview, null);
+  M.reopen(mview);
+  const payingLabel = painted(M).includes("PAYING ADDRESS") && M.ledgerPaying && M.ledgerCurrent;
+  bump({ error: "closed", fresh: false, payableRevision: -1 }, M, mview);
+  const closedText = painted(M);
+  const closedHistory = !M.ledgerPaying && !M.ledgerCurrent && M.ledgerAddress === ADDR && M.ledgerAmount === 0 && !closedText.includes("PAYING ADDRESS")
+    && closedText.includes("ADDRESS") && closedText.includes("CHECK AGAIN");
+  bump({ error: "", fresh: true, payableRevision: 1 }, M, mview);
+  const payingAgain = M.ledgerPaying && M.ledgerAmount === 300;
+  // The expiry passes while the ledger shows, with no revision or socket event: the paying label, amount and QR go on
+  // the next update; the rows and the address stay as history.
+  const versionHeld = mview.version, beforeExpiry = now;
+  now = (mview.expires + 1) * 1000; M.update(0.1);
+  const passiveText = painted(M);
+  const passiveExpiry = M.state === "confirming" && mview.version === versionHeld && !M.ledgerPaying && !M.ledgerCurrent && M.ledgerAmount === 0
+    && M.ledgerQr === null && M.ledgerAddress === ADDR && !passiveText.includes("PAYING ADDRESS") && passiveText.includes("LEFT TO SENDEXPIRED")
+    && mview.addresses.length === 1 && M.ledgerUntil === 0;
+  now = beforeExpiry; bump({}, M, mview);
+  const payingRestored = M.ledgerPaying;
+  bump({ retired: true, fresh: false, payableRevision: -1 }, M, mview);
+  const retiredHistory = !M.ledgerPaying && !M.ledgerCurrent && M.ledgerAmount === 0 && M.ledgerAddress === ADDR && !painted(M).includes("PAYING ADDRESS");
+  bump({ retired: false, fresh: true, payableRevision: 1, addressesFrom: "older" }, M, mview);
+  M.paint(); M.tap(260, 240);
+  const newestAddressesOnly = paged.at(-1) === "newest:addresses";
+  M.stop();
+  // The address issued on this visit carries its QR only until the invoice's first read; a first read that fails takes it.
+  const nview = viewOf({ id: "ninv" }), N = kioskOf(nview, null);
+  N.start(); for (const key of ["Enter", "1", "0", "0", "0", "0", "Enter"]) N.key({ key }); await settle();
+  N.key({ key: "Enter" }); await settle();
+  const issuedQr = N.state === "chain" && N.ledgerCurrent && !!N.ledgerQr && encoded.at(-1) === `bitcoin:${ADDR}`;
+  // Before that first read the issued address is current only while the stream is caught up and the invoice's issued
+  // expiry is ahead, and never carries the issuance amount.
+  const issuedNoAmount = N.ledgerAmount === 0 && !encoded.some((text) => text.includes("amount=0.000103"));
+  kioskLive = false; bump({}, N, nview);
+  const issuedOffline = !N.ledgerCurrent && N.ledgerQr === null && N.ledgerAddress === ADDR;
+  kioskLive = true; bump({}, N, nview);
+  const issuedBack = N.ledgerCurrent && !!N.ledgerQr;
+  bump({ error: "closed" }, N, nview);
+  const issuedFailed = !N.ledgerCurrent && N.ledgerQr === null && N.ledgerAddress === ADDR && painted(N).includes("NOT CONFIRMED AS");
+  bump({ error: "" }, N, nview);
+  const nowBefore = now;
+  now = (N.invoice.expires + 1) * 1000; N.update(0.1);
+  const issuedExpired = N.state === "expired" && !N.ledgerCurrent && N.ledgerQr === null && N.ledgerAmount === 0;
+  now = nowBefore;
+  const issuedWithdrawn = issuedNoAmount && issuedOffline && issuedBack && issuedFailed && issuedExpired;
+  N.stop();
+  // The account an invoice is made under is the one at the moment it is asked for: a change while it is on its way resets
+  // the kiosk without showing it; a change before it was asked for leaves the new account's invoice standing.
+  let releaseInvoice;
+  const gview = viewOf({ id: "ginv2" }), G = kioskOf(gview, null, () => new Promise(r => { releaseInvoice = r; }));
+  const gReply = { request: "greq2", invoice: { id: "ginv2", bolt11: null, expires: gview.expires, accounting: "receipt-v1" }, bananas: { exact: 10, rounded: 10 }, rate: null, pricing: "receipt", lightning: "unavailable" };
+  G.start(); for (const key of ["Enter", "1", "0", "0", "0", "0", "Enter"]) G.key({ key }); await settle();
+  const closesG = closes, asked = G.state === "quoting";
+  gen++;
+  releaseInvoice(gReply); await settle();
+  const inFlightReset = asked && closes === closesG + 1 && G.state === "idle" && G.invoice === null && G.view === null && G.sats === 0;
+  G.start(); gen++;
+  for (const key of ["Enter", "1", "0", "0", "0", "0", "Enter"]) G.key({ key }); await settle();
+  releaseInvoice(gReply); await settle();
+  G.update(0.1);
+  const madeUnderNew = G.state === "quote" && G.invoice?.id === "ginv2" && G.generation === gen && closes === closesG + 1;
+  G.stop();
+  // A legacy-mode invoice made under one account goes too when the account changes.
+  const legacyFlow = kioskContext.window.BL.factoryKiosk.create({ real: true, link: () => "/lightning", bananasFor: () => 1,
+    invoice: async () => ({ request: "greq", invoice: { id: "ginv", bolt11: "lntbs1legacy", expires: Math.floor(now / 1000) + 600 }, bananas: null, rate: null }),
+    waitFor() {}, generation: () => gen, open: () => true, testNetwork: () => "", release() {}, watch() {}, close: () => closes++ });
+  legacyFlow.start(); for (const key of ["Enter", "1", "0", "0", "0", "Enter"]) legacyFlow.key({ key }); await settle();
+  const legacyQuoted = legacyFlow.state === "quote" && legacyFlow.invoice.accounting === "legacy";
+  const closesBefore = closes;
+  gen++; legacyFlow.update(0.1);
+  const legacyClosed = legacyQuoted && closes === closesBefore + 1 && legacyFlow.state === "idle" && legacyFlow.invoice === null && legacyFlow.sats === 0;
+  record("receipts kiosk: the QR carries an amount only at the payable address with a fresh left at its revision, never the issuance amount or an earlier address the visitor pages to; a stale view shows no remainder; a partial credit never completes; bananas are each receipt's own; the address stays through completion, review and expiry; a receipt ever seen drops the full Lightning code for good; an account change closes it, legacy or receipt mode, and clears its details and screen; history reopens to the ledger",
+    issuanceIgnored && amountQr && partialNotPaid && nullLeft && staleView && evidenceBehind && unknownPayable && rotated && earlier && copiedEarlier && nextPage && backToPayable && partialPage && ownValues
+      && reviewed && ledgerStale && copiedAddress && backToAddress && expired && accountClosed && reopenLedger && toAddress && backToLedger && lightningFirst && lightningGone && reversedZero && atQuote && onchainOnly && reopenedLatched && legacyClosed,
+    JSON.stringify({ issuanceIgnored, amountQr, partialNotPaid, nullLeft, staleView, evidenceBehind, unknownPayable, rotated, earlier, copiedEarlier, nextPage, backToPayable, partialPage, ownValues,
+      reviewed, ledgerStale, copiedAddress, backToAddress, expired, accountClosed, reopenLedger, toAddress, backToLedger, lightningFirst, lightningGone, reversedZero, atQuote, onchainOnly, reopenedLatched, legacyClosed, lightningSteps: { issuanceGap, verifiedOffered, onLightning, staleWithdrawn, currentAgain, unavailableWithdrawn, movedWithdrawn, readAgain, expiryWithdrawn, lstate: L.state }, state: K.state, last: encoded.at(-1) }));
+  record("receipts kiosk evidence: a failed or refused read, a failed first read, a dropped stream, an expiry (passing silently on the ledger too) or an untracked view leaves the address as history with no paying label, QR or amount (the issued address never carries the issuance amount), NEWEST pages only the addresses, and an account change while an invoice is on its way resets the kiosk while one made after a change stands",
+    payingLabel && closedHistory && payingAgain && passiveExpiry && payingRestored && retiredHistory && newestAddressesOnly && issuedQr && issuedWithdrawn && inFlightReset && madeUnderNew,
+    JSON.stringify({ payingLabel, closedHistory, payingAgain, passiveExpiry, payingRestored, retiredHistory, newestAddressesOnly, issuedQr, issuedNoAmount, issuedOffline, issuedBack, issuedFailed, issuedExpired, inFlightReset, madeUnderNew }));
+
+  // An account change never puts the last account's invoice back on the waiting list. A real kiosk flow on a real
+  // donations instance: account A shows an on-chain address, then B signs in; the flow's stop for that change, and an
+  // invoice asked for after it, wait on nothing of A's, so A's payment, later seen or confirmed, toasts nothing into B's
+  // page. Moving on from B's own address, with no change, still waits on it.
+  const wReplies = [], wSockets = [], waitCalls = [];
+  const wContext = { window: { setTimeout: () => 0, clearTimeout: () => {} }, location: { protocol: "https:", origin: "https://site.test" },
+    fetch: async (path, options) => { const reply = wReplies.shift(); return { status: 200, ok: true, json: async () => reply }; },
+    WebSocket: class { constructor(url) { this.url = url; wSockets.push(this); } close() {} } };
+  runInNewContext(await readFile(new URL("../src/js/donations.js", import.meta.url), "utf8"), wContext);
+  const W = wContext.window.BL.donations;
+  W.useOrigin();
+  const stopW = W.subscribe(() => {}, {});
+  wSockets[0].onopen();
+  wSockets[0].onmessage({ data: JSON.stringify({ type: "status", open: true, network: "signet" }) });
+  W.setAccount(1);
+  const wFlow = () => kioskContext.window.BL.factoryKiosk.create({ real: true, link: () => "/lightning", bananasFor: () => 1,
+    invoice: (sats, value) => W.invoice({ sats, ...value }), onchain: (request) => W.onchain(request), waitFor: (id) => { waitCalls.push(id); W.waitFor(id); },
+    generation: () => W.generation, open: () => true, testNetwork: () => "", release() {}, watch() {}, close() {} });
+  const issueOnchain = async (flowW, id) => {
+    wReplies.push({ request: `req-${id}`, invoice: { id, bolt11: null, expires: Math.floor(now / 1000) + 600 }, bananas: null, rate: null });
+    flowW.start(); for (const key of ["Enter", "1", "0", "0", "0", "0", "Enter"]) flowW.key({ key }); await settle();
+    wReplies.push({ address: ADDR, sats: 10300 });
+    flowW.key({ key: "Enter" }); await settle();
+    return flowW.state === "chain";
+  };
+  const FA = wFlow();
+  const aShown = await issueOnchain(FA, "wa1");
+  W.setAccount(2); FA.update(0.1);
+  const aStopped = FA.state === "idle" && FA.invoice === null && !waitCalls.includes("wa1") && !W.waitingOn("wa1");
+  // A's payment arrives later in B's page: nothing says it was B's.
+  const aLate = !W.waited("wa1") && !W.receivedOwnInvoice("wa1");
+  // B's own address, moved on from without a change: waited on.
+  const FB = wFlow();
+  const bShown = await issueOnchain(FB, "wb1");
+  FB.stop();
+  const bWaits = waitCalls.includes("wb1") && W.waitingOn("wb1");
+  // An invoice B asks for after the account changes again, with B's address still the flow's: the new one is C's, and
+  // B's address is not put back on C's list. (The flow is let expire first, so no frame closes it before the ask.)
+  const FC = wFlow();
+  const cShown = await issueOnchain(FC, "wb2");
+  const waitNow = now;
+  now = (Math.floor(waitNow / 1000) + 601) * 1000; FC.update(0.1);
+  const expiredFirst = FC.state === "expired";
+  W.setAccount(3);
+  wReplies.push({ request: "req-wc1", invoice: { id: "wc1", bolt11: null, expires: Math.floor(now / 1000) + 600 }, bananas: null, rate: null });
+  FC.key({ key: "Enter" }); await settle();
+  now = waitNow;
+  const askPath = expiredFirst && FC.invoice && FC.invoice.id === "wc1" && !waitCalls.includes("wb2") && !W.waitingOn("wb2");
+  FA.stop(); FB.stop(); FC.stop(); stopW();
+  record("receipts waiting list: an account change, whether it stops the kiosk or comes before the next invoice it asks for, never puts the last account's invoice on the waiting list, so a later payment for it says nothing in the new account's page; moving on with no change still waits",
+    aShown && aStopped && aLate && bShown && bWaits && cShown && askPath, JSON.stringify({ aShown, aStopped, aLate, bShown, bWaits, cShown, askPath, waitCalls }));
+
+  // Paging to the next address page shows nothing until that page arrives: the page held, paying address and its QR
+  // included, never flashes while the request is out.
+  const pview = viewOf({ id: "pinv", request: null, state: "partial", revision: 1, payableRevision: 1, payableAddress: ADDR, left: 300, fresh: true, read: true,
+    received: 9700, credited: 9700, addresses: [{ address: ADDR, issuedAt: 2 }], nextAddress: "older", addressesFrom: null }), P = kioskOf(pview, null);
+  P.reopen(pview);
+  const pagingBefore = P.ledgerPaying && P.ledgerAddress === ADDR;
+  P.paint(); pview.loading = true; P.tap(330, 240);
+  const pagingWait = paged.at(-1) === "addresses" && P.ledgerAddress === "" && P.ledgerQr === null && !P.ledgerPaying && P.ledgerAmount === 0;
+  bump({ loading: false, addresses: [{ address: OLDER, issuedAt: 1 }], addressesFrom: "older", nextAddress: null }, P, pview);
+  const pagingArrived = P.ledgerAddress === OLDER && P.ledgerHistorical && P.ledgerQr === null && !P.ledgerPaying;
+  P.stop();
+  record("receipts kiosk paging: asking for the next address page shows no address, paying label, QR or amount until it arrives, then the older page's address as history",
+    pagingBefore && pagingWait && pagingArrived, JSON.stringify({ pagingBefore, pagingWait, pagingArrived, address: P.ledgerAddress }));
+
+  // Two screens on one invoice, and a read begun for a view nobody shows. Real kiosk flows on a real donations instance:
+  // the Factory booth shows an invoice and the popup reopens the same one from the history beside it (the sheet stays
+  // open at the booth). Closing the popup leaves the booth's screen counted: a catch-up still reads it and a busy read
+  // still retries; once the booth lets go too, a catch-up reads nothing. A read begun for it while shown, still out
+  // when its screen lets go and a catch-up comes, is dropped without a read of its own; a page the visitor turned to is
+  // still read again, and the invoice is read the moment a screen shows it.
+  const tReplies = [], tTimers = [], tRequests = [], tSockets = [];
+  const tContext = { window: { setTimeout: (fn, ms) => { const t = { fn, ms }; tTimers.push(t); return t; }, clearTimeout: (t) => { if (t) t.cleared = true; } },
+    location: { protocol: "https:", origin: "https://site.test" },
+    fetch: async (path, options) => {
+      tRequests.push({ path, body: JSON.parse(options.body) });
+      const next = tReplies.shift() || { error: "closed", status: 503 }, r = typeof next === "function" ? await next() : next;
+      const { status = r.error ? 400 : 200, ...data } = r;
+      return { status, ok: status < 300, json: async () => data };
+    },
+    WebSocket: class { constructor(url) { this.url = url; tSockets.push(this); } close() {} } };
+  runInNewContext(await readFile(new URL("../src/js/donations.js", import.meta.url), "utf8"), tContext);
+  const T = tContext.window.BL.donations;
+  T.useOrigin();
+  const stopT = T.subscribe(() => {}, {});
+  tSockets[0].onopen();
+  const tFrame = (data) => tSockets.at(-1).onmessage({ data: JSON.stringify(data) });
+  tFrame({ type: "status", open: true, network: "signet", accounting: ACCOUNTING });
+  T.setAccount(1);
+  let tSeq = 0;
+  const catchUp = () => { tSeq++; tFrame({ type: "replay", after: tSeq - 1, through: tSeq, complete: true }); };
+  const tReads = () => tRequests.filter((r) => r.path === "/donations/status").length;
+  const tStatus = (o = {}, extra = {}) => statusReply({ id: "tinv", ...o }, extra);
+  const tRetries = () => tTimers.filter((t) => t.ms >= 2000 && t.ms <= 16000 && !t.cleared && !t.fired);
+  const tFlow = () => kioskContext.window.BL.factoryKiosk.create({ real: true, link: () => "/lightning", bananasFor: () => 1,
+    ledger: T.view, paying: T.payingAddress, live: T.streamCurrent, lightning: T.lightningCode, showing: T.showing, payable: T.payableSats, more: T.more, refresh: T.refresh,
+    waitFor() {}, generation: () => T.generation, open: () => true, testNetwork: () => "", release() {}, watch() {}, close() {}, copy() {} });
+  catchUp(); await settle();
+  // The booth shows the invoice, then the popup reopens it from the history: one view, two screens.
+  const booth = tFlow(), popup = tFlow();
+  tReplies.push(tStatus());
+  booth.reopen(T.reopen("tinv")); await settle();
+  const tv = T.view("tinv");
+  tReplies.push(tStatus());
+  popup.reopen(T.reopen("tinv")); await settle();
+  const oneView = booth.view === tv && popup.view === tv && tv.fresh;
+  // The popup closes; the booth still shows it.
+  popup.stop();
+  let tBefore = tReads();
+  tReplies.push(tStatus());
+  catchUp(); await settle();
+  const boothStillRead = tReads() === tBefore + 1 && tv.fresh;
+  tReplies.push({ error: "busy", status: 429 });
+  T.refresh("tinv"); await settle();
+  const boothStillRetries = tv.error === "busy" && tRetries().length === 1;
+  tReplies.push(tStatus());
+  const tRetry = tRetries()[0];
+  if (tRetry) { tRetry.fired = true; tRetry.fn(); }
+  await settle();
+  const retried = !!tRetry && tv.fresh && tv.error === "";
+  // The booth lets go too: nothing reads it on a catch-up, and no retry is left.
+  booth.stop();
+  tBefore = tReads();
+  catchUp(); await settle();
+  const unshownQuiet = tReads() === tBefore && !tv.fresh && tRetries().length === 0;
+  // Shown again, it is read at once; a read begun while shown, out when its screen lets go and a catch-up comes, is
+  // dropped without a read of its own, and stays behind until a screen shows it.
+  tReplies.push(tStatus());
+  booth.reopen(tv); await settle();
+  const shownAgain = tReads() === tBefore + 1 && tv.fresh;
+  let releaseTHidden;
+  tReplies.push(() => new Promise((r) => { releaseTHidden = r; }));
+  T.refresh("tinv"); await settle();
+  booth.stop();
+  catchUp(); await settle();
+  tBefore = tReads();
+  if (releaseTHidden) releaseTHidden(tStatus({ revision: 2, left: 9000 }));
+  await settle();
+  const hiddenDropped = !!releaseTHidden && tReads() === tBefore && !tv.fresh && tv.awaiting && tv.revision === 1;
+  tReplies.push(tStatus({ revision: 2, left: 9000 }));
+  popup.reopen(tv); await settle();
+  const readOnShow = tReads() === tBefore + 1 && tv.fresh && tv.revision === 2;
+  popup.stop();
+  // A page the visitor turned to keeps its read across a catch-up, shown or not.
+  let releaseTPage;
+  tv.nextAddress = "a2";
+  tReplies.push(() => new Promise((r) => { releaseTPage = r; }));
+  T.more("tinv", "addresses"); await settle();
+  const pageAsked = tRequests.at(-1).body.addressCursor === "a2";
+  catchUp(); await settle();
+  tBefore = tReads();
+  tReplies.push(tStatus({ revision: 2, left: 9000 }));
+  if (releaseTPage) releaseTPage(tStatus({ revision: 2, left: 9000 }));
+  await settle();
+  const pageKept = !!releaseTPage && pageAsked && tReads() === tBefore + 1 && tv.read;
+  stopT();
+  record("receipts screens: the booth and the popup can show one invoice at once, and it stays shown, read on a catch-up and retried when busy, until both let go; a read begun for an invoice no screen shows by the catch-up is dropped without reading again, a page the visitor turned to is still read, and the invoice is read once a screen shows it",
+    oneView && boothStillRead && boothStillRetries && retried && unshownQuiet && shownAgain && hiddenDropped && readOnShow && pageKept,
+    JSON.stringify({ oneView, boothStillRead, boothStillRetries, retried, unshownQuiet, shownAgain, hiddenDropped, readOnShow, pageKept, reads: tReads() }));
+
+  // The panels' pile figure: the API's, or why there is none, apart from lifetime totals; simulated, the page's own.
+  const hudBL = { game: {}, scene: {}, donationRate: { current: null }, donations: { real: true, state: { pile: null } } };
+  runInNewContext(await readFile(new URL("../src/js/hud.js", import.meta.url), "utf8"), {
+    window: { BL: hudBL, matchMedia: () => ({ matches: false }) },
+    document: { querySelectorAll: () => [], createElementNS: () => ({ setAttribute() {}, append() {} }) }
+  });
+  const pileTexts = [hudBL.hud.pileLeftText()];
+  hudBL.donations.state.pile = { bananas: null, cutover: "pending" }; pileTexts.push(hudBL.hud.pileLeftText());
+  hudBL.donations.state.pile = { bananas: 980.5, cutover: "done" }; pileTexts.push(hudBL.hud.pileLeftText());
+  hudBL.donations.state.pile = { bananas: null, cutover: "done", reconciliation: "review" }; pileTexts.push(hudBL.hud.pileLeftText());
+  hudBL.donations.real = false; hudBL.hud.setPileShown(12); pileTexts.push(hudBL.hud.pileLeftText());
+  record("receipts pile text: the pile shows the API's whole bananas, says pending before its anchor and unavailable after one rather than zero, and shows the page's own pile only when simulated",
+    pileTexts.join("|") === "—|pending|980|unavailable|12", JSON.stringify(pileTexts));
+};
+// The shared receipt accounting v1 vectors bananapayserver's own emitters produce (docs/vectors/README.md says where
+// from), fed unchanged to the page's real parser. Its core part: public frames and piles as emitted, plus raw replay
+// results and raw private-status cores that are neither socket markers nor endpoint replies, and must not pass as either;
+// its endpoints part (`donationEndpointChecks`): the read endpoints' and the socket's own replies.
+const RECEIPT_VECTORS = { path: "../docs/vectors/receipt-accounting-v1.json", bytes: 81803,
+  sha256: "cbeb711339e7feb84c6526e43c5f9771e6d27be336ad8b9d9c694ec2b455baea" };
+const donationContractChecks = async () => {
+  const raw = await readFile(new URL(RECEIPT_VECTORS.path, import.meta.url));
+  const digest = createHash("sha256").update(raw).digest("hex");
+  const pinned = raw.length === RECEIPT_VECTORS.bytes && digest === RECEIPT_VECTORS.sha256;
+  const fixture = pinned ? JSON.parse(raw.toString("utf8")) : null, V = fixture ? fixture.vectors : {};
+  const ENDPOINT_ONLY = ["accounting", "expires", "lightning", "bolt11"], REPLAYS = ["replay.complete", "replay.gap", "replay.firstConnect"];
+  const CORES = ["privateStatus.core", "privateStatus.core.addressPage"];
+  const feed = pinned ? [V["receipt.pricingPending"], V["receipt.priceFrozen"], V["receipt.credited"], V.invoiceStatus, ...V["replay.complete"].frames, V["receipt.reversed"]] : [];
+  const shape = pinned && fixture.contract === "receipt-accounting-v1" && fixture.scope === "core-only"
+    && CORES.every((k) => ENDPOINT_ONLY.every((f) => !Object.hasOwn(V[k].invoice, f) && !Object.hasOwn(V[k], f)))
+    && REPLAYS.every((k) => !Object.hasOwn(V[k], "type") && Array.isArray(V[k].frames)) && feed.every((f) => f.replay === true);
+  record("receipt contract vectors: the shared core vectors are bananapayserver's pinned bytes (size and SHA-256), core-only, every feed frame replayed, and the raw replay results and private-status cores carry no socket type or endpoint fields",
+    pinned && shape, JSON.stringify({ bytes: raw.length, digest, shape }));
+  if (!pinned || !shape) return;
+
+  const sockets = [], requests = [], received = [], piles = [];
+  let statusReply = null;
+  const context = { window: { setTimeout: () => 0, clearTimeout: () => {} }, location: { protocol: "https:", origin: "https://site.test" },
+    fetch: async (path, options) => { requests.push({ path, body: JSON.parse(options.body) }); return { status: 200, ok: true, json: async () => JSON.parse(JSON.stringify(statusReply)) }; },
+    WebSocket: class { constructor(url) { this.url = url; sockets.push(this); } close() {} } };
+  runInNewContext(await readFile(new URL("../src/js/donations.js", import.meta.url), "utf8"), context);
+  const D = context.window.BL.donations, settle = () => new Promise(setImmediate);
+  D.useOrigin();
+  const stop = D.subscribe((d) => received.push(d.id), { onPile: (p) => piles.push(p) });
+  sockets[0].onopen();
+  const send = (vector) => sockets[0].onmessage({ data: JSON.stringify(vector) });
+
+  // A signed-in donor's invoice, reopened: its private reads get the raw cores, which are not endpoint replies.
+  D.setAccount(4242);
+  statusReply = V["privateStatus.core"];
+  const v = D.reopen("VectorInv001"); await settle();
+  const untouched = () => !v.read && v.payableAddress === null && v.payableRevision === -1 && v.addresses.length === 0 && v.nextAddress === null && v.receipts.length === 0;
+  const coreRefused = requests.at(-1).path === "/donations/status" && requests.at(-1).body.invoice === "VectorInv001" && v.error === "invalid" && untouched() && v.revision === -1;
+  statusReply = V["privateStatus.core.addressPage"];
+  await D.refresh("VectorInv001"); await settle();
+  const pageRefused = v.error === "invalid" && untouched() && D.payableSats(v, V["privateStatus.core"].payableAddress) === 0;
+
+  // The emitted public frames, in feed order, as supplied (replayed): revisions and totals in place, nothing animated.
+  const r = () => v.receipts[0];
+  send(V["receipt.pricingPending"]);
+  const pending = v.revision === 7 && v.received === 4000 && v.credited === 0 && v.left === 6300 && v.state === "partial"
+    && r().pricing === null && r().credit === 0 && r().firstCreditedSeq === null && r().message === "" && v.observed && v.bolt11 === null;
+  send(V["receipt.priceFrozen"]);
+  const frozen = v.revision === 8 && r().revision === 2 && r().state === "confirming" && r().credit === 0 && r().firstCreditedSeq === null
+    && r().pricing.receivedAt === 1790000000000 && r().pricing.bananas.exact === 4 && r().pricing.rate.usdPerBtc === 100000;
+  send(V["receipt.credited"]);
+  const credited = v.revision === 9 && v.credited === 4000 && r().revision === 3 && r().state === "credited" && r().credit === 4000 && r().firstCreditedSeq === 3
+    && r().handle === "ooga-dev" && r().message === "for the cave" && r().verified && r().pricing.receivedAt === 1790000000000 && received.length === 0;
+  send(V.invoiceStatus);
+  const status = v.revision === 10 && v.left === 6000 && v.credited === 4000 && v.state === "partial" && r().revision === 3 && D.state.receiptCursor === 4 && received.length === 0;
+  send(V["replay.complete"].frames[0]);
+  const review = v.revision === 11 && v.state === "review" && v.review === 4000 && v.credited === 4000 && r().state === "review" && r().credit === 4000 && r().firstCreditedSeq === 3;
+  send(V["replay.complete"].frames[1]);
+  const reversed = v.revision === 12 && v.state === "unpaid" && v.received === 0 && v.credited === 0 && v.review === 0 && v.left === 6000
+    && r().state === "reversed" && r().credit === 0 && r().firstCreditedSeq === 3 && r().message === "for the cave" && r().pricing.receivedAt === 1790000000000
+    && r().pricing.bananas.exact === 4 && D.state.receiptCursor === 6 && v.observed && v.bolt11 === null;
+  send(V["receipt.reversed"]);
+  const duplicate = v.revision === 12 && r().revision === 5 && v.receipts.length === 1 && D.state.receiptCursor === 6;
+  // Raw replay results are what the feed builds, not the socket's markers: nothing takes them for one.
+  for (const k of REPLAYS) send(V[k]);
+  const notMarkers = !D.state.caughtUp && D.state.resyncs === 0 && D.state.receiptCursor === 6 && v.revision === 12 && received.length === 0;
+  record("receipt contract vectors: the page's parser takes the emitted pending, frozen, credited, review and reversed revisions and invoiceStatus totals in order, keeps first credit, price and message, animates no replayed frame, ignores a duplicate, and refuses raw replay results as markers and raw private-status cores as endpoint replies",
+    coreRefused && pageRefused && pending && frozen && credited && status && review && reversed && duplicate && notMarkers,
+    JSON.stringify({ coreRefused, pageRefused, pending, frozen, credited, status, review, reversed, duplicate, notMarkers, revision: v.revision, cursor: D.state.receiptCursor, received }));
+
+  // The emitted piles: pending, anchored, anchored without a count; never back to an older revision.
+  const held = [];
+  send(V["pile.pending"]); held.push(D.state.pile);
+  const pilePending = D.state.pile.bananas === null && D.state.pile.cutover === "pending" && D.state.pile.revision === 0 && piles.at(-1).bananas === null;
+  send(V["pile.anchored"]); held.push(D.state.pile);
+  const pileAnchored = D.state.pile.bananas === 12.5 && D.state.pile.cutover === "done" && D.state.pile.reconciliation === "off" && D.state.pile.revision === 2 && D.state.pile.uncertain.sats === 0;
+  send(V["pile.anchoredReview"]); held.push(D.state.pile);
+  const pileNull = D.state.pile.bananas === null && D.state.pile.cutover === "done" && D.state.pile.reconciliation === "review" && D.state.pile.revision === 3;
+  const count = piles.length;
+  send(V["pile.anchored"]); send(V["pile.pending"]);
+  const pileMonotonic = D.state.pile.bananas === null && D.state.pile.revision === 3 && piles.length === count;
+  stop();
+  const hudBL = { game: {}, scene: {}, donationRate: { current: null }, donations: { real: true, state: { pile: null } } };
+  runInNewContext(await readFile(new URL("../src/js/hud.js", import.meta.url), "utf8"), {
+    window: { BL: hudBL, matchMedia: () => ({ matches: false }) },
+    document: { querySelectorAll: () => [], createElementNS: () => ({ setAttribute() {}, append() {} }) }
+  });
+  const texts = held.map((pile) => { hudBL.donations.state.pile = pile; return hudBL.hud.pileLeftText(); });
+  record("receipt contract vectors: the emitted pending, anchored and anchored-without-a-count piles parse in order, never go back to an older revision, and read pending, a whole count and unavailable, never zero",
+    pilePending && pileAnchored && pileNull && pileMonotonic && texts.join("|") === "pending|12|unavailable",
+    JSON.stringify({ pilePending, pileAnchored, pileNull, pileMonotonic, texts }));
+  await donationEndpointChecks(fixture.endpoints, fixture);
+};
+// The fixture's endpoint vectors: what bananapayserver's real front door answers to POST /donations/status, /history and
+// /invoice, and what its socket sends on a first connect, a replay from zero and a live first credit. Every reply and
+// message below is the fixture's own bytes, fed unchanged; only the requests that bring them (which invoice, which
+// cursor, which account) are this check's setup.
+const donationEndpointChecks = async (endpoints, fixture) => {
+  const E = endpoints && endpoints.scope === "read-endpoints" ? endpoints.vectors : null;
+  const KEYS = ["status.byToken", "status.receiptPage", "status.addressPage", "status.unknown", "status.cursor", "status.resync", "status.metadataClosed",
+    "history.page", "history.nextPage", "history.signedOut", "history.metadataClosed", "invoice.receiptModeClosed", "socket.firstConnect", "socket.replayFromZero", "socket.liveFirstCredit"];
+  const present = !!E && KEYS.every((k) => Object.hasOwn(E, k));
+  record("receipt endpoint vectors: the pinned fixture carries the read-endpoint replies and socket sequences the page is checked against",
+    present, JSON.stringify({ scope: endpoints?.scope, missing: E ? KEYS.filter((k) => !Object.hasOwn(E, k)) : KEYS }));
+  if (!present) return;
+  // `table` answers each queued key (the endpoints' vectors unless another section's); `clock.now`, when set, is the
+  // page's clock, a context chosen from the fixture's own timestamps.
+  const load = async (table = E, clock = null) => {
+    const sockets = [], timers = [], requests = [], received = [], replies = new Map(), defaults = new Map();
+    const queue = (path, ...keys) => { if (!replies.has(path)) replies.set(path, []); replies.get(path).push(...keys); };
+    const context = { window: { setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout: () => {} },
+      location: { protocol: "https:", origin: "https://site.test" },
+      fetch: async (path, options) => {
+        requests.push({ path, body: JSON.parse(options.body) });
+        // A queued key may be a promise of one, for a reply still on its way.
+        const key = await (replies.get(path)?.shift() || defaults.get(path)), reply = table[key];
+        return { status: reply.status, ok: reply.status < 300, json: async () => JSON.parse(JSON.stringify(reply.body)) };
+      },
+      WebSocket: class { constructor(url) { this.url = url; sockets.push(this); } close() { this.closed = true; } } };
+    if (clock) context.Date = class extends Date { constructor(...a) { if (a.length) super(...a); else super(clock.now); } static now() { return clock.now; } };
+    runInNewContext(await readFile(new URL("../src/js/donations.js", import.meta.url), "utf8"), context);
+    const D = context.window.BL.donations;
+    D.useOrigin();
+    const stop = D.subscribe((d, bananas, r) => received.push({ id: d.id, at: d.at, exact: bananas && bananas.exact, invoice: r && r.invoice }), {});
+    sockets[0].onopen();
+    const send = (message) => sockets.at(-1).onmessage({ data: JSON.stringify(message) });
+    return { D, sockets, timers, requests, received, queue, defaults, send, stop };
+  };
+  const settle = () => new Promise(setImmediate);
+  const ids = (list) => list.map((item) => item.id || item.address).join();
+  const status = (k) => E[k].body, sent = (path) => requests.filter((q) => q.path === path);
+  let requests;
+
+  // First connect: status, snapshot, marker. Nothing animates, the marker is the cursor, the history the account asked for
+  // arrives once the status says history is on.
+  const A = await load(); ({ requests } = A);
+  const { D } = A;
+  A.queue("/donations/history", "history.page");
+  D.setAccount(7);
+  const firstUrl = A.sockets[0].url === "wss://site.test/donations/socket";
+  for (const message of E["socket.firstConnect"]) A.send(message);
+  await settle();
+  const connected = firstUrl && D.state.open === false && D.state.network === "regtest" && D.state.accounting.issuance === false && D.state.accounting.history
+    && D.state.accounting.reconciliation === "behind" && D.state.limits.maxSats === 2100000000000000 && D.state.limits.messageMinSats === 1000
+    && D.state.receiptCursor === 6 && D.state.caughtUp && D.state.resyncs === 0 && A.received.length === 0
+    && ids(D.state.recentReceipts) === "r00000000000000000000000000001003,r00000000000000000000000000001002,r00000000000000000000000000001001"
+    && D.state.recentReceipts.find((row) => row.id.endsWith("1001")).message === "for the cave";
+  const historyFirst = D.state.history.revision === 16 && ids(D.state.history.invoices) === "ReceiptInv1,ReceiptInv2" && D.state.history.next === status("history.page").next
+    && D.state.history.invoices[1].left === null && D.state.history.invoices[0].expires === 1790856900 && sent("/donations/history").length === 1;
+  // History pages on by its own cursor; a refusal or a closed page keeps the rows shown and says why.
+  A.queue("/donations/history", "history.nextPage");
+  await D.historyPage("older");
+  const historyNext = sent("/donations/history").at(-1).body.cursor === status("history.page").next && ids(D.state.history.invoices) === "ReceiptInv3"
+    && D.state.history.from === status("history.page").next && D.state.history.next === null && !D.state.history.restarted;
+  A.queue("/donations/history", "history.signedOut", "history.metadataClosed", "history.page");
+  await D.historyPage("newest");
+  const historySignin = D.state.history.error === "signin" && ids(D.state.history.invoices) === "ReceiptInv3";
+  await D.historyPage("newest");
+  const historyClosed = D.state.history.error === "closed" && ids(D.state.history.invoices) === "ReceiptInv3" && !D.state.history.loading;
+  await D.historyPage("newest");
+  const historyBack = D.state.history.error === "" && ids(D.state.history.invoices) === "ReceiptInv1,ReceiptInv2";
+  record("receipt endpoint vectors: a first connect's status, snapshot and marker set the cursor and catch up without animating anything; history pages by its own cursor, and a signed-out or closed page keeps the rows shown",
+    connected && historyFirst && historyNext && historySignin && historyClosed && historyBack,
+    JSON.stringify({ connected, historyFirst, historyNext, historySignin, historyClosed, historyBack, cursor: D.state.receiptCursor, history: D.state.history && D.state.history.error }));
+
+  // The donor's invoice reopened from its history: its status pages its receipts and addresses on two cursors, each list
+  // on its own; a refused or stale cursor reads the newest again; unknown and closed replies keep what is held but
+  // nothing current; no reply here names a payable address, so none is ever offered.
+  A.defaults.set("/donations/status", "status.byToken");
+  const v = D.reopen("ReceiptInv1"); await settle();
+  const first = status("status.byToken");
+  const byInvoice = sent("/donations/status").at(-1).body.invoice === "ReceiptInv1" && Object.keys(sent("/donations/status").at(-1).body).join() === "invoice";
+  const read = byInvoice && v.read && v.fresh && v.revision === 12 && v.credited === 3000 && v.left === 7000 && v.expires === 1790856900 && v.lightning === "unavailable"
+    && v.bolt11 === null && v.payableAddress === null && ids(v.receipts) === "r00000000000000000000000000001003,r00000000000000000000000000001002"
+    && v.next === first.next && ids(v.addresses) === ids(first.addresses) && v.nextAddress === first.nextAddress
+    && D.payingAddress(v) === null && first.addresses.every((a) => D.payableSats(v, a.address) === 0);
+  A.queue("/donations/status", "status.receiptPage");
+  await D.more("ReceiptInv1", "receipts"); await settle();
+  const receiptsPaged = sent("/donations/status").at(-1).body.cursor === first.next && !Object.hasOwn(sent("/donations/status").at(-1).body, "addressCursor")
+    && ids(v.receipts) === "r00000000000000000000000000001001" && v.receiptsFrom === first.next && v.next === null
+    && ids(v.addresses) === ids(first.addresses) && v.addressesFrom === null && v.nextAddress === first.nextAddress;
+  A.queue("/donations/status", "status.addressPage");
+  await D.more("ReceiptInv1", "addresses"); await settle();
+  const addressesPaged = sent("/donations/status").at(-1).body.addressCursor === first.nextAddress && !Object.hasOwn(sent("/donations/status").at(-1).body, "cursor")
+    && ids(v.addresses) === ids(status("status.addressPage").addresses) && v.addressesFrom === first.nextAddress && v.nextAddress === null
+    && ids(v.receipts) === "r00000000000000000000000000001001" && v.receiptsFrom === first.next;
+  A.queue("/donations/status", "status.byToken");
+  await D.more("ReceiptInv1", "newest", "receipts"); await settle();
+  const receiptsNewest = ids(v.receipts) === "r00000000000000000000000000001003,r00000000000000000000000000001002" && v.receiptsFrom === null
+    && ids(v.addresses) === ids(status("status.addressPage").addresses) && v.addressesFrom === first.nextAddress;
+  A.queue("/donations/status", "status.cursor", "status.byToken");
+  await D.more("ReceiptInv1", "receipts"); await settle();
+  const cursorRestart = sent("/donations/status").at(-2).body.cursor === first.next && !Object.hasOwn(sent("/donations/status").at(-1).body, "cursor")
+    && v.receiptsFrom === null && v.addressesFrom === null && ids(v.addresses) === ids(first.addresses) && v.fresh && v.error === "";
+  A.queue("/donations/status", "status.resync", "status.byToken");
+  await D.more("ReceiptInv1", "receipts"); await settle();
+  const resyncRestart = sent("/donations/status").at(-2).body.cursor === first.next && v.receiptsFrom === null && v.fresh && v.error === "";
+  const held = () => v.revision === 12 && ids(v.receipts) === "r00000000000000000000000000001003,r00000000000000000000000000001002"
+    && ids(v.addresses) === ids(first.addresses) && v.expires === 1790856900 && !v.fresh && D.payingAddress(v) === null;
+  A.queue("/donations/status", "status.unknown");
+  await D.refresh("ReceiptInv1"); await settle();
+  const unknownHeld = v.error === "unknown" && held();
+  A.queue("/donations/status", "status.metadataClosed");
+  await D.refresh("ReceiptInv1"); await settle();
+  const closedHeld = v.error === "closed" && held();
+  await D.refresh("ReceiptInv1"); await settle();
+  const reread = v.error === "" && v.fresh;
+  record("receipt endpoint vectors: a reopened invoice's status pages receipts and addresses on separate cursors, each list on its own, restarts at the newest after a refused or stale cursor, keeps its records but nothing current on unknown and closed, and offers no amount without a payable address",
+    read && receiptsPaged && addressesPaged && receiptsNewest && cursorRestart && resyncRestart && unknownHeld && closedHeld && reread,
+    JSON.stringify({ read, receiptsPaged, addressesPaged, receiptsNewest, cursorRestart, resyncRestart, unknownHeld, closedHeld, reread, error: v.error }));
+
+  // The live broadcast: a detection, then its first credit. The credit animates once with its own bananas and time; the
+  // status the moved totals prompt is older than them and never takes them back; a duplicate, or the same frame after a
+  // reconnect, never animates again.
+  const [detected, firstCredit, pendingPile] = E["socket.liveFirstCredit"];
+  A.send(detected); await settle();
+  const quiet = A.received.length === 0 && v.revision === 14 && v.received === 4000 && D.state.receiptCursor === 7;
+  A.send(firstCredit); await settle();
+  const once = A.received.length === 1 && A.received[0].id === firstCredit.receipt.id && A.received[0].exact === 1 && A.received[0].at === firstCredit.receipt.pricing.receivedAt
+    && A.received[0].invoice === "ReceiptInv1" && D.state.receiptCursor === 8 && D.state.recentReceipts[0].id === firstCredit.receipt.id;
+  const notRegressed = v.revision === 15 && v.credited === 4000 && v.left === 6000 && !v.fresh && D.payingAddress(v) === null;
+  // The pile that follows the credit, still waiting for its anchor: no count, never a zero, and no second animation.
+  A.send(pendingPile);
+  const pilePending = D.state.pile.bananas === null && D.state.pile.cutover === "pending" && D.state.pile.revision === 4 && D.state.pileLive && A.received.length === 1;
+  A.send(firstCredit);
+  A.sockets.at(-1).onclose(); A.timers.at(-1)(); A.sockets.at(-1).onopen();
+  const resumeUrl = A.sockets.at(-1).url.endsWith("?receipts=8");
+  A.send(firstCredit); await settle();
+  const noRepeat = A.received.length === 1;
+  // Another account: every private thing of this one goes, and a reply on its way for it is ignored.
+  let release;
+  A.queue("/donations/status", new Promise((r) => { release = r; }));
+  D.refresh("ReceiptInv1");
+  A.defaults.set("/donations/history", "history.metadataClosed");
+  D.setAccount(8);
+  release("status.byToken"); await settle();
+  const owned = D.view("ReceiptInv1") === null && v.retired && !v.fresh && v.revision === 15 && D.payingAddress(v) === null && D.state.history.invoices.length === 0
+    && A.sockets.every((s) => !/ReceiptInv|request|bcrt1/.test(s.url));
+  A.queue("/donations/invoice", "invoice.receiptModeClosed");
+  const before = sent("/donations/invoice").length, closedInvoice = await D.invoice({ sats: 1000 });
+  const invoiceClosed = closedInvoice.error === "closed" && sent("/donations/invoice").length === before + 1 && !Object.hasOwn(sent("/donations/invoice").at(-1).body, "accounting");
+  A.stop();
+  record("receipt endpoint vectors: a live first credit animates once with its own bananas and time, a detection and duplicates never do, older status replies never take its totals back, a reconnect resumes past it, an account change drops the donor's private reads, and a closed invoice reply is never retried",
+    quiet && once && notRegressed && pilePending && resumeUrl && noRepeat && owned && invoiceClosed,
+    JSON.stringify({ quiet, once, notRegressed, pilePending, resumeUrl, url: A.sockets.at(-1).url, noRepeat, owned, invoiceClosed, received: A.received }));
+
+  // A replay from the start of the stream on a page holding nothing: the snapshot first, then every frame replayed in
+  // order, then the marker; nothing animates and an older revision never replaces the snapshot's newer row.
+  const B = await load(); ({ requests } = B);
+  for (const message of E["socket.replayFromZero"]) B.send(message);
+  await settle();
+  const rows = B.D.state.recentReceipts;
+  const replayed = B.received.length === 0 && B.D.state.receiptCursor === 6 && B.D.state.caughtUp && B.D.state.resyncs === 0
+    && ids(rows) === "r00000000000000000000000000001003,r00000000000000000000000000001002,r00000000000000000000000000001001"
+    && rows.every((row) => row.revision === 2 && row.bananas === 1) && rows.find((row) => row.id.endsWith("1001")).message === "for the cave";
+  B.stop();
+  record("receipt endpoint vectors: a replay from zero applies the snapshot, every replayed frame and the marker in order without animating anything or taking a row back to an older revision",
+    replayed, JSON.stringify({ replayed, cursor: B.D.state.receiptCursor, received: B.received, rows: rows && rows.map((row) => `${row.id}:${row.revision}`) }));
+
+  // The projection's publications, as an open page's socket hears them: a live first credit, a durable batch whose
+  // refresh never went out, the refresh a restart sends, the same refresh repeated, a pReversal and a reconfirmation.
+  // The tally and board each publication carries replace what the page held (they are the projection's own figure,
+  // `d1`); the page adds nothing of its own, and only a live first credit animates.
+  const P = fixture && fixture.projection && fixture.projection.scope === "projection-publication" ? fixture.projection.vectors : null;
+  const PROJECTION = ["projection.firstCredit", "projection.stoppedAfterBatch", "projection.crashRecovery", "projection.duplicateRefresh", "projection.reversal", "projection.reconfirmation"];
+  if (!P || !PROJECTION.every((k) => P[k] && Array.isArray(P[k].messages) && P[k].d1)) {
+    record("receipt projection vectors: the pinned fixture carries the projection's publications", false, JSON.stringify({ scope: fixture && fixture.projection && fixture.projection.scope }));
+    return;
+  }
+  const C = await load();
+  const pAsD1 = (k) => { const t = C.D.state.tally, d = P[k].d1; return !!t && t.count === d.count && t.sats === d.sats && Math.round(t.bananas * 1000) === d.milli && t.last === d.last; };
+  const pBoardIs = (bananas, sats) => C.D.state.board.length === 1 && C.D.state.board[0].handle === "ooga-dev" && C.D.state.board[0].bananas === bananas
+    && C.D.state.board[0].sats === sats && C.D.state.boardSats[0].sats === sats;
+  const pFeed = (k, upTo = Infinity) => { const m = P[k].messages; for (let i = 0; i < m.length && i < upTo; i++) C.send(m[i]); };
+  pFeed("projection.firstCredit", 1);
+  const pQuiet = C.received.length === 0 && C.D.state.tally === null;
+  pFeed("projection.firstCredit");
+  const pCredited = P["projection.firstCredit"].messages[1].receipt;
+  const pFirst = pQuiet && C.received.length === 1 && C.received[0].id === pCredited.id && C.received[0].exact === 1 && C.received[0].at === pCredited.pricing.receivedAt
+    && pAsD1("projection.firstCredit") && pBoardIs(1, 1000) && C.D.state.tally.hours.length === 1 && C.D.state.tally.hours[0][1] === 1000;
+  pFeed("projection.stoppedAfterBatch");
+  const pStopped = C.received.length === 2 && C.received[1].id === P["projection.stoppedAfterBatch"].messages[1].receipt.id && C.received[1].exact === 2.5
+    && C.D.state.tally.count === 1 && C.D.state.tally.sats === 1000 && !pAsD1("projection.stoppedAfterBatch") && pBoardIs(1, 1000);
+  pFeed("projection.crashRecovery");
+  const pRecovered = C.received.length === 2 && pAsD1("projection.crashRecovery") && pBoardIs(3.5, 3500);
+  const pHeldTally = C.D.state.tally;
+  pFeed("projection.duplicateRefresh");
+  const pDuplicate = C.received.length === 2 && pAsD1("projection.duplicateRefresh") && pBoardIs(3.5, 3500) && C.D.state.tally.count === pHeldTally.count && C.D.state.tally.sats === pHeldTally.sats;
+  pFeed("projection.reversal");
+  const pReversal = C.received.length === 2 && pAsD1("projection.reversal") && pBoardIs(1, 1000);
+  pFeed("projection.reconfirmation");
+  const pReconfirmed = C.received.length === 2 && pAsD1("projection.reconfirmation") && pBoardIs(3.5, 3500);
+  C.stop();
+  record("receipt projection vectors: the projection's tally and board replace what the page holds at every publication, a batch whose refresh never went out changes neither until the restart's refresh, a repeated refresh adds nothing, a reversal and a reconfirmation move them back and forth, and only the two live first credits animate, once each",
+    pFirst && pStopped && pRecovered && pDuplicate && pReversal && pReconfirmed,
+    JSON.stringify({ pFirst, pStopped, pRecovered, pDuplicate, pReversal, pReconfirmed, tally: C.D.state.tally && { count: C.D.state.tally.count, sats: C.D.state.tally.sats, bananas: C.D.state.tally.bananas }, received: C.received.map((r) => r.id.slice(-4)) }));
+
+  // The positive payable path: a verified payable address with 6,000 sats left while fresh, withdrawn live past the
+  // freshness bound, a reconnect from the page's own cursor, and the invoice past its expiry; then the reachable early
+  // gap on a separate page. Every request is matched against the producer's recorded one (`socket.requests` and each
+  // sequence's own `request`). Context set up here, not producer output: the page's clock (from the fixture's own times:
+  // created at 1790856000000, expiring at 1790856900 s) and the signed-in account.
+  const Y = fixture.payable && fixture.payable.scope === "read-endpoints-payable" ? fixture.payable.vectors : null;
+  const PAYABLE = ["socket.initialConnect", "socket.requests", "socket.payableLive", "status.payable", "history.payable", "socket.freshnessWithdrawn", "status.withdrawn",
+    "history.withdrawn", "socket.currentReconnect", "socket.expired", "status.expired", "history.expired", "socket.earlyConnect", "socket.earlyLive", "socket.earlyGap",
+    "socket.earlyCurrent", "status.atEarlyGap", "history.atEarlyGap"];
+  if (!Y || !PAYABLE.every((k) => Y[k])) {
+    record("receipt payable vectors: the pinned fixture carries the positive payable path", false, JSON.stringify({ scope: fixture.payable && fixture.payable.scope, missing: Y ? PAYABLE.filter((k) => !Y[k]) : PAYABLE }));
+    return;
+  }
+  const asked = (socket) => { const u = new URL(socket.url); return u.pathname + u.search; };
+  const yClock = { now: 1790856300000 };
+  const Q = await load(Y, yClock), DQ = Q.D, ySent = (path) => Q.requests.filter((q) => q.path === path);
+  // The producer's own first connect, for exactly its request: caught up with nothing yet (`through: null`).
+  const yFirstAsked = asked(Q.sockets[0]) === Y["socket.initialConnect"].request.path && Y["socket.requests"]["socket.initialConnect"].path === Y["socket.initialConnect"].request.path;
+  for (const m of Y["socket.initialConnect"].messages) Q.send(m);
+  await settle();
+  const yConnected = yFirstAsked && DQ.state.caughtUp && DQ.state.receiptCursor === null && DQ.state.resyncs === 0 && DQ.state.open === false
+    && DQ.state.pile.bananas === null && DQ.state.pile.revision === 0 && DQ.state.tally.count === 0 && DQ.state.recentReceipts.length === 0 && Q.received.length === 0;
+  const [yDetection, yPayCredit] = Y["socket.payableLive"];
+  Q.send(yDetection);
+  const yQuiet = Q.received.length === 0;
+  Q.send(yPayCredit); Q.send(yPayCredit); await settle();
+  const yAnimated = yConnected && yQuiet && Q.received.length === 1 && Q.received[0].id === yPayCredit.receipt.id && Q.received[0].exact === 4 && Q.received[0].invoice === "PayableInv1";
+  // The donor signs in now, so the history read the sign-in prompts is answered with the history of this moment.
+  Q.queue("/donations/history", "history.payable");
+  DQ.setAccount(9); await settle();
+  const yPaying = Y["status.payable"].body.payableAddress, yOther = Y["status.payable"].body.addresses[1].address;
+  Q.queue("/donations/status", "status.payable");
+  const w = DQ.reopen("PayableInv1"); await settle();
+  DQ.showing(w, true);
+  const yOwnRead = Object.keys(ySent("/donations/status").at(-1).body).join() === "invoice" && ySent("/donations/status").at(-1).body.invoice === "PayableInv1";
+  const yCurrent = yOwnRead && w.fresh && w.revision === 7 && w.left === 6000 && DQ.payingAddress(w) === yPaying && DQ.payableSats(w, yPaying) === 6000
+    && DQ.payableSats(w, yOther) === 0 && w.lightning === "unavailable" && w.bolt11 === null && w.receipts.length === 1
+    && DQ.state.history.invoices[0].id === "PayableInv1" && DQ.state.history.invoices[0].left === 6000;
+  yClock.now = 1790856960000;
+  const yExpiryFence = DQ.payingAddress(w) === null && DQ.payableSats(w, yPaying) === 0;
+  yClock.now = 1790856300000;
+  // Withdrawn live: the frame alone takes the amount away before any read; the read it prompts says so too.
+  Q.queue("/donations/status", new Promise((r) => setImmediate(() => r("status.withdrawn"))));
+  Q.send(Y["socket.freshnessWithdrawn"][0]);
+  const yWithdrawnLive = w.revision === 8 && w.left === null && DQ.payingAddress(w) === null && DQ.payableSats(w, yPaying) === 0
+    && DQ.state.history.invoices[0].left === null && DQ.state.history.invoices[0].revision === 8 && Q.received.length === 1;
+  await settle(); await settle();
+  Q.queue("/donations/history", "history.withdrawn");
+  await DQ.historyPage("newest");
+  const yWithdrawn = yWithdrawnLive && w.payableAddress === null && w.fresh && w.addresses.length === 2 && w.receipts.length === 1 && DQ.payingAddress(w) === null
+    && DQ.state.history.revision === 8 && DQ.state.history.invoices[0].left === null;
+  // A reconnect from this page's own cursor, 3: exactly the request the producer answered with
+  // `socket.currentReconnect`. Caught up again with no gap, and the invoice read again.
+  Q.defaults.set("/donations/status", "status.withdrawn");
+  Q.defaults.set("/donations/history", "history.withdrawn");
+  Q.sockets.at(-1).onclose();
+  const yStale = !w.fresh && DQ.payingAddress(w) === null;
+  Q.timers.at(-1)(); Q.sockets.at(-1).onopen();
+  const yCurrentUrl = asked(Q.sockets.at(-1)) === Y["socket.requests"]["socket.currentReconnect"].path && asked(Q.sockets.at(-1)) === "/donations/socket?receipts=3";
+  const yReadsBefore = ySent("/donations/status").length;
+  for (const m of Y["socket.currentReconnect"]) Q.send(m);
+  await settle(); await settle();
+  const yReconnected = yStale && yCurrentUrl && DQ.state.resyncs === 0 && DQ.state.caughtUp && DQ.state.receiptCursor === 3 && w.fresh && w.revision === 8
+    && ySent("/donations/status").length === yReadsBefore + 1 && DQ.payingAddress(w) === null && Q.received.length === 1;
+  // The reachable gap, on a separate page from the start of that world: its first connect, the live detection (seq 1),
+  // a drop; then, past the invoice's expiry, the reconnect from cursor 1, answered with the gap marker (through 4,
+  // incomplete), and the next from cursor 4, answered with the current one. Each request is exactly the producer's. The
+  // account signs in after the drop, so its reads are answered with the producer's replies of that moment
+  // (`status.atEarlyGap`, `history.atEarlyGap`). The first credit (seq 2) happened while this page was away: it never
+  // animates here, from the snapshot, the resync or the replay.
+  const eClock = { now: 1790856000000 };
+  const G = await load(Y, eClock), DG = G.D, gSent = (path) => G.requests.filter((q) => q.path === path);
+  const eFirstAsked = asked(G.sockets[0]) === Y["socket.earlyConnect"].request.path;
+  for (const m of Y["socket.earlyConnect"].messages) G.send(m);
+  await settle();
+  const eConnected = eFirstAsked && DG.state.caughtUp && DG.state.receiptCursor === null && DG.state.pile.revision === 0;
+  for (const m of Y["socket.earlyLive"]) G.send(m);
+  const eLive = DG.state.receiptCursor === 1 && G.received.length === 0;
+  G.sockets.at(-1).onclose();
+  eClock.now = 1790856960000;
+  G.defaults.set("/donations/status", "status.atEarlyGap");
+  G.defaults.set("/donations/history", "history.atEarlyGap");
+  DG.setAccount(11); await settle();
+  const g = DG.reopen("PayableInv1"); await settle();
+  DG.showing(g, true);
+  const gHeld = g.read && !g.fresh && g.revision === 9 && g.lightning === "expired" && DG.payingAddress(g) === null && DG.state.history.revision === 9;
+  G.timers.at(-1)(); G.sockets.at(-1).onopen();
+  const gGapAsked = asked(G.sockets.at(-1)) === Y["socket.earlyGap"].request.path && asked(G.sockets.at(-1)) === "/donations/socket?receipts=1";
+  const gStatusBefore = gSent("/donations/status").length, gHistoryBefore = gSent("/donations/history").length;
+  for (const m of Y["socket.earlyGap"].messages) G.send(m);
+  await settle(); await settle();
+  const yGap = eConnected && eLive && gHeld && gGapAsked && DG.state.resyncs === 1 && DG.state.caughtUp && DG.state.receiptCursor === 4
+    && gSent("/donations/status").length === gStatusBefore + 1 && gSent("/donations/history").length === gHistoryBefore + 1 && g.fresh && g.revision === 9
+    && DG.payingAddress(g) === null && G.received.length === 0 && DG.state.recentReceipts.length === 1 && DG.state.pile.revision === 1 && DG.state.tally.count === 1;
+  G.sockets.at(-1).onclose(); G.timers.at(-1)(); G.sockets.at(-1).onopen();
+  const gCurrentAsked = asked(G.sockets.at(-1)) === Y["socket.earlyCurrent"].request.path && asked(G.sockets.at(-1)) === "/donations/socket?receipts=4";
+  const gStatusAfterGap = gSent("/donations/status").length;
+  for (const m of Y["socket.earlyCurrent"].messages) G.send(m);
+  await settle(); await settle();
+  const yGapThenCurrent = gCurrentAsked && DG.state.resyncs === 1 && DG.state.caughtUp && DG.state.receiptCursor === 4 && gSent("/donations/status").length === gStatusAfterGap + 1
+    && g.fresh && G.received.length === 0;
+  G.stop();
+  // Past the invoice's expiry: Lightning reads yExpired, nothing is payable, and the history keeps the invoice.
+  yClock.now = 1790856960000;
+  Q.queue("/donations/status", "status.expired");
+  Q.send(Y["socket.expired"][0]); await settle(); await settle();
+  Q.queue("/donations/history", "history.expired");
+  await DQ.historyPage("newest");
+  const yExpired = w.revision === 9 && w.lightning === "expired" && w.payableAddress === null && w.left === null && DQ.payingAddress(w) === null
+    && w.addresses.length === 2 && w.receipts.length === 1 && DQ.state.history.invoices[0].id === "PayableInv1" && DQ.state.history.revision === 9;
+  DQ.setAccount(10); await settle();
+  const yHandedOff = DQ.view("PayableInv1") === null && w.retired && DQ.payingAddress(w) === null;
+  Q.stop();
+  record("receipt payable vectors: from the producer's own first connect, the verified payable address carries 6,000 sats only while fresh, unexpired and owned, is withdrawn by the live frame before any read, a reconnect from the page's own cursor is the producer's exact request and reads again without a gap, an early page's reconnects from cursor 1 and then 4 are the producer's exact requests, the gap resyncs once and nothing animates there, and past expiry Lightning reads expired while the history keeps the invoice",
+    yAnimated && yCurrent && yExpiryFence && yWithdrawn && yReconnected && yGap && yGapThenCurrent && yExpired && yHandedOff,
+    JSON.stringify({ yAnimated, yCurrent, yExpiryFence, yWithdrawnLive, yWithdrawn, yReconnected, yGap, yGapThenCurrent, yExpired, yHandedOff, url: Q.sockets.at(-1).url, resyncs: DQ.state.resyncs, revision: w.revision, error: w.error }));
+
+  // The anchored pile as an open page hears it: on connect; a credit read behind, then current (a new revision, the
+  // same level); the receipt in review (its credit uncertain); its reversal and reconfirmation; nothing while a second
+  // credit is bridged before a stop; the next start's recovery heard by the surviving page; and a page connecting after.
+  // The client keeps the API's figure at every revision, never adds, decays or animates anything of its own, refuses an
+  // older revision and confirms an equal one; the HUD's own text shows each whole count.
+  const L = fixture.pile && fixture.pile.scope === "anchored-pile" ? fixture.pile.vectors : null;
+  const PILE = ["pile.connect", "pile.creditBehind", "pile.creditCurrent", "pile.reviewUncertain", "pile.reversal", "pile.reconfirmation", "pile.beforeRestart", "pile.restartRecovery", "pile.reconnect"];
+  if (!L || !PILE.every((k) => Array.isArray(L[k]))) {
+    record("receipt pile vectors: the pinned fixture carries the anchored pile", false, JSON.stringify({ scope: fixture.pile && fixture.pile.scope }));
+    return;
+  }
+  const K = await load(), heard = [];
+  const stopPiles = K.D.subscribe(() => {}, { onPile: (pile) => heard.push(pile.revision) });
+  const hudBL = { game: {}, scene: {}, donationRate: { current: null }, donations: K.D };
+  runInNewContext(await readFile(new URL("../src/js/hud.js", import.meta.url), "utf8"), {
+    window: { BL: hudBL, matchMedia: () => ({ matches: false }) },
+    document: { querySelectorAll: () => [], createElementNS: () => ({ setAttribute() {}, append() {} }) }
+  });
+  const kept = [];
+  for (const k of PILE) {
+    for (const m of L[k]) K.send(m);
+    const p = K.D.state.pile;
+    kept.push({ k, bananas: p && p.bananas, revision: p && p.revision, reconciliation: p && p.reconciliation, uncertain: p && p.uncertain && p.uncertain.sats, text: hudBL.hud.pileLeftText() });
+  }
+  const at = (k) => kept.find((row) => row.k === k);
+  const last = (k) => L[k].at(-1);
+  const followsApi = PILE.filter((k) => L[k].length).every((k) => at(k).bananas === last(k).bananas && at(k).revision === last(k).revision && at(k).reconciliation === last(k).reconciliation);
+  const texts = kept.map((row) => row.text).join("|") === "10|11|11|11|10|11|11|13|13";
+  const health = at("pile.creditBehind").reconciliation === "behind" && at("pile.creditCurrent").reconciliation === "current" && at("pile.reviewUncertain").reconciliation === "review"
+    && at("pile.reviewUncertain").uncertain === 1000 && at("pile.reversal").uncertain === 0;
+  const stopped = at("pile.beforeRestart").revision === at("pile.reconfirmation").revision;
+  // The reconnect's equal revision confirms the pile held rather than handing it on again; an older one is refused.
+  const handedOn = heard.join() === "1,2,3,4,5,6,7,8,9,10";
+  for (const m of L["pile.connect"]) K.send(m);
+  const olderRefused = K.D.state.pile.revision === 10 && K.D.state.pile.bananas === 13.5 && heard.length === 10;
+  stopPiles();
+  K.stop();
+  record("receipt pile vectors: the anchored pile follows the API's figure and health at every revision (behind, current, review with its uncertain sats, reversal, reconfirmation, restart recovery), shows each whole count, never moves while nothing is published, confirms an equal revision on reconnect, refuses an older one, and animates nothing",
+    followsApi && texts && health && stopped && handedOn && olderRefused && K.received.length === 0,
+    JSON.stringify({ followsApi, texts, health, stopped, handedOn, olderRefused, received: K.received.length, kept }));
 };
 const wallPerformance = async (b) => {
   await b.send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 1080, deviceScaleFactor: 2, mobile: false });
@@ -9239,7 +10625,7 @@ const signedOutDonation = { name: "signed-out donation", why: "regression: real 
   const r = await b.evaluate(`(() => {
     const B = __ooga, D = BL.donations, wire = __donationWire, factory = B.scene === "factory";
     B.advance(0.1, 1 / 30);
-    const before = { level: B.level, donations: B.game.state.donations, landed: factory ? B.stats().cooker.out : B.stats().dropsLanded };
+    const before = { level: B.level, donations: D.state.donations, local: B.game.state.donations, landed: factory ? B.stats().cooker.out : B.stats().dropsLanded };
     const paid = { type: "donation", donation: { id: "signed-out-paid", sats: 4000, handle: "donor", message: "", at: Date.now() }, bananas: { exact: 5.25, rounded: 5 } };
     wire.message(paid); wire.message(paid);
     const immediate = B.level;
@@ -9258,12 +10644,39 @@ const signedOutDonation = { name: "signed-out donation", why: "regression: real 
     const landed = (factory ? B.stats().cooker.out : B.stats().dropsLanded) - before.landed;
     return { real: D.real, signedOut: BL.net.state.backend && BL.net.state.me === null, sockets: wire.sockets.map(s => s.url),
       before, immediate, balanceChanges, visible, falling, landed, expected: BL.game.bananasFor(4000),
-      donations: B.game.state.donations - before.donations, level: B.level, factory };
+      donations: D.state.donations - before.donations, local: B.game.state.donations - before.local, level: B.level, factory };
   })()`);
-  record(`${r.factory ? "factory" : "pile"} real donation: a signed-out viewer receives one payment, sees its bananas animate and land, and never locally credits the server balance`,
+  record(`${r.factory ? "factory" : "pile"} real donation: a signed-out viewer receives one payment, sees its bananas animate and land, and never locally credits the server balance or a local ledger`,
     r.real && r.signedOut && r.sockets.length === 1 && r.sockets[0].endsWith("/donations/socket")
       && r.before.level === 20 && r.immediate === 20 && r.balanceChanges === 0 && r.level === 26
-      && r.donations === 1 && r.landed === r.expected && (r.factory || r.visible > 0 && r.falling > 0), JSON.stringify(r));
+      && r.donations === 1 && r.local === 0 && r.landed === r.expected && (r.factory || r.visible > 0 && r.falling > 0), JSON.stringify(r));
+
+  // Receipt mode, through the director to the scene: the projection's publications from the pinned vectors,
+  // unmodified, in order. Each live first credit is shown once, with its own bananas; the detections, the refreshes, a
+  // duplicate of each credit, the reversal and the reconfirmation show nothing more; the server's pile and the page's
+  // own ledger never move.
+  const P = JSON.parse(await readFile(new URL(RECEIPT_VECTORS.path, import.meta.url), "utf8")).projection.vectors;
+  const q = await b.evaluate(`(() => {
+    const B = __ooga, D = BL.donations, wire = __donationWire, factory = B.scene === "factory", P = ${JSON.stringify(P)};
+    const landed = () => factory ? B.stats().cooker.out : B.stats().dropsLanded;
+    const run = (n) => { let moved = 0; for (let i = 0; i < n; i++) { B.advance(1 / 30, 1 / 30); if (B.level !== 26) moved++; } return moved; };
+    const frames = factory ? 450 : 150;
+    run(frames);
+    const before = { landed: landed(), local: B.game.state.donations, level: B.level };
+    let moved = 0;
+    for (const k of ["projection.firstCredit", "projection.stoppedAfterBatch"]) { for (const m of P[k].messages) wire.message(m); moved += run(frames); }
+    const shown = landed() - before.landed;
+    for (const k of ["projection.crashRecovery", "projection.duplicateRefresh"]) for (const m of P[k].messages) wire.message(m);
+    wire.message(P["projection.firstCredit"].messages[1]); wire.message(P["projection.stoppedAfterBatch"].messages[1]);
+    for (const k of ["projection.reversal", "projection.reconfirmation"]) for (const m of P[k].messages) wire.message(m);
+    moved += run(frames);
+    const t = D.state.tally, d = P["projection.reconfirmation"].d1;
+    return { factory, shown, after: landed() - before.landed, expected: BL.game.bananasFor(1000) + BL.game.bananasFor(2500), moved, level: B.level,
+      local: B.game.state.donations - before.local, tally: t && { count: t.count, sats: t.sats, milli: Math.round(t.bananas * 1000) }, d1: d };
+  })()`);
+  record(`${q.factory ? "factory" : "pile"} receipt delivery: each live first credit from the projection's publications is shown once with its own bananas, and its detection, the refreshes, a duplicate, the reversal and the reconfirmation show nothing more, while the server's pile and the page's ledger stay put and the tally ends as D1's`,
+    q.shown === q.expected && q.after === q.expected && q.moved === 0 && q.level === 26 && q.local === 0
+      && !!q.tally && q.tally.count === q.d1.count && q.tally.sats === q.d1.sats && q.tally.milli === q.d1.milli, JSON.stringify(q));
 } };
 for (const id of ["hub", "lab", "factory"]) {
   if (ONLY && !onlyMatches(signedOutDonation.name)) continue;
@@ -28344,7 +29757,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
   await cloudHopperFailureChecks(BL);
-  await deferredLoadingChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await mirrorRippleChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await hammockChecks(); await poolLayoutChecks(); await gameRulesChecks(); await highscoreClientChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
+  await deferredLoadingChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await mirrorRippleChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await hammockChecks(); await poolLayoutChecks(); await gameRulesChecks(); await highscoreClientChecks(); await ghostHuntChecks(); await donationClientChecks(); await donationReceiptChecks(); await donationContractChecks(); await poolWildlifeChecks(); await totemFeedChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
@@ -30224,6 +31637,7 @@ if (ARGS.includes("cloud-hopper-arcade")) {
   await dispose();
 }
 if (ARGS.includes("cloud-hopper-record")) { await highscoreClientChecks(); await cloudHopperRecordChecks(); }
+if (ARGS.includes("donations-unit")) { await donationClientChecks(); await donationReceiptChecks(); await donationContractChecks(); }
 // The shim installs browser globals in this process, so it runs after the browser lanes finish with Chrome.
 if (UNIT || ARGS.includes("cloud-hopper-controller")) await unitChecks();
 if (PROTOCOL) await pokerProtocolChecks();

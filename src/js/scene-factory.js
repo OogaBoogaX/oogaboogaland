@@ -772,7 +772,11 @@
   // has the view, and come back as they were.
   const boothHud = (s, held) => {
     const b = s.booth, reticle = document.getElementById("weapon-reticle"), equipment = document.getElementById("equipment-hud");
+    // The touch sticks stand aside while the booth has the screen (they lie over its buttons on a phone), and any
+    // stick held as it opens lets go; `endBooth` and the end of the walk away bring them back.
+    document.body.classList.toggle("booth-held", held);
     if (held) {
+      pilot.controls.reset();
       b.act = hud.el.act.hidden;
       b.reticle = reticle.hidden;
       b.equipment = equipment.hidden;
@@ -953,6 +957,7 @@
       note: (request, value, changedHandle) => donations.note(request, value.message, changedHandle ? value.handle : undefined),
       onchain: (request) => donations.onchain(request),
       waitFor: (id) => donations.waitFor(id),
+      ledger: donations.view, paying: donations.payingAddress, live: donations.streamCurrent, lightning: donations.lightningCode, showing: donations.showing, payable: donations.payableSats, more: donations.more, refresh: donations.refresh, generation: () => donations.generation,
       open: () => donations.state.open,
       testNetwork: () => donations.testNetwork,
       limits: () => donations.state.limits,
@@ -1284,7 +1289,9 @@
   // queued for the cooker, which turns it into those bananas before everyone's eyes.
   // In real mode `counted` is the API's `{ exact, rounded }`: the donation counts its exact bananas (the pile itself
   // follows the API's), and the cooker still cooks the game's one to twelve, a show of them.
-  const onDonation = (donation, counted = null) => {
+  // A receipt's first credit (`receipt` set) cooks like any tip: it never settles the kiosk, which its invoice's own
+  // status does, so a partial payment can't look like the whole.
+  const onDonation = (donation, counted = null, receipt = undefined) => {
     game.recordDonation(donation, counted && counted.exact);
     const bananas = gameMod.bananasFor(donation.sats), shown = counted ? counted.rounded : bananas;
     if (!donations.real) world.level = Math.min(pileMod.MAX_BANANAS, world.level + (counted ? counted.exact : bananas));
@@ -1295,10 +1302,15 @@
     // A real kiosk payment turns toward the cooker immediately, staying inside the Factory.
     // The demo keeps its paid screen so the visitor can walk through the flow at their own pace.
     const b = scene.booth;
-    if (b.flow && b.flow.receive(donation.id, counted, donation.handle, donation.sats)) {
+    if (!receipt && b.flow && b.flow.receive(donation.id, counted, donation.handle, donation.sats)) {
       b.held += bananas;
       b.heldSats += donation.sats;
       if (donations.real) watchBooth(scene);
+    } else if (receipt && b.mode === AT_KIOSK && b.flow && b.flow.view && b.flow.view.id === receipt.invoice) {
+      // A credit to the invoice on the booth's own screen waits for the visitor, as a paid tip does: WATCH (or stepping
+      // away) cooks it, once, in view rather than behind them. A receipt never settles the kiosk; its ledger does.
+      b.held += bananas;
+      b.heldSats += donation.sats;
     } else cook(scene, bananas, donation.sats);
   };
   // A tip from this visitor, in the shape the backend will push. A demo tip is the simulation's alone: in real mode it

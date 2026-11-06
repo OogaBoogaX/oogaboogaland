@@ -25,6 +25,38 @@
     donationStats = stats;
     if (liveDonors) liveDonors(true);
   };
+  // The pile the panels show, apart from all donations ever made: the API's in real mode (none before its first
+  // message, and its `bananas` null while it has no safe count: pending its cutover anchor, or after it when a negative
+  // correction or unsafe totals leave none), the page's own whole bananas when simulated (`setPileShown`, which the
+  // director calls on a change). Never a forged zero.
+  let pileShown = null, pileFor, pileShownFor, pileRealFor, pileText = "—";
+  const setPileShown = (level) => {
+    pileShown = level;
+    if (liveDonors) liveDonors();
+  };
+  const pileLeftText = () => {
+    const real = BL.donations.real, pile = BL.donations.state.pile;
+    if (pile !== pileFor || pileShown !== pileShownFor || real !== pileRealFor) {
+      pileFor = pile; pileShownFor = pileShown; pileRealFor = real;
+      pileText = !real ? pileShown === null ? "—" : BANANA_COUNT.format(pileShown)
+        : !pile ? "—" : pile.bananas === null ? pile.cutover === "pending" ? "pending" : "unavailable" : BANANA_COUNT.format(Math.floor(pile.bananas));
+    }
+    return pileText;
+  };
+  // What the pile's figure stands on, in words: offline or catching up (`live`: a pile heard on the current connection),
+  // waiting, awaiting its count, in review or behind, and what it counts. Nothing here counts time down.
+  const pileNote = (pile, accounting, live) => {
+    if (!pile) return [live ? "Waiting for the pile from the donation feed." : "Connecting to the donation feed…", ""];
+    const parts = [], health = pile.reconciliation === "review" || accounting?.reconciliation === "review" ? "review"
+      : pile.reconciliation === "behind" || accounting?.reconciliation === "behind" ? "behind" : "";
+    if (!live) parts.push("Offline or catching up: these are the last figures heard, not current ones.");
+    if (pile.bananas === null) parts.push("The pile has no count to show until it is reconciled; the donations above are unaffected.");
+    else if (health === "review") parts.push("Something is in review: the pile may change once it is resolved.");
+    else if (health === "behind") parts.push("Reconciliation is behind: the pile may be out of date.");
+    if (pile.uncertain && pile.uncertain.sats) parts.push(`${BANANA_COUNT.format(pile.uncertain.sats)} sats of it are in review.`);
+    if (pile.basis === "credits") parts.push("Counted from credited donations, not a wallet balance.");
+    return [parts.join(" "), !live || pile.bananas === null || health ? "warn" : ""];
+  };
   const currentDonationRate = () => {
     const live = BL.donationRate.current, saved = BL.donations.state.tally?.rate;
     return live && (!saved || live.at >= saved.at) ? live : saved;
@@ -270,14 +302,16 @@
   };
   // The sheet belongs to the page. Reuse attached rows across visits; only current roster names stay in this map.
   const rosterNodes = new Map();
-  let rosterAway = null, donorRows = null, donationRows = null;
+  let rosterAway = null, donorRows = null, donationRows = null, historyRows = null;
   const create = ({ roster, catalog, tierColors, renderIcon, lootEnabled = false, healthEnabled = false, signal = null, escapeHeld = null }) => {
     const lifetime = signal ? null : new AbortController();
     signal = signal || lifetime.signal;
     const el = {
       roster: $("roster"), rosterCount: $("roster-count"),
       statDonations: $("stat-donations"),
-      statSats: $("stat-sats"),
+      statSats: $("stat-sats"), statPile: $("stat-pile"), bananaPileNote: $("banana-pile-note"),
+      bananaHistory: $("banana-history"), bananaHistoryList: $("banana-history-list"), bananaHistoryNote: $("banana-history-note"),
+      bananaHistoryNewest: $("banana-history-newest"), bananaHistoryOlder: $("banana-history-older"),
       bananaTotal: $("banana-total"), bananaSource: $("banana-source"),
       bananaLeaders: $("banana-leaders"), bananaEmpty: $("banana-empty"),
       bananaRecent: $("banana-recent-list"), bananaRecentEmpty: $("banana-recent-empty"),
@@ -709,6 +743,66 @@
       li.append(rank, name, amount); li.hidden = true; el.bananaLeaders.append(li);
       return { li, name, nameText, amountText };
     };
+    // The signed-in donor's own receipt-mode invoices, one history page at a time: a row an invoice, made as a page
+    // first grows to it and kept for the page life (a page is at most donations.js's PAGE_MAX), its Show button
+    // reopening the invoice in the donation popup through one listener on the list.
+    const HISTORY_DATE = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+    const HISTORY_STATES = { unpaid: "Waiting for payment", partial: "Partly paid", confirming: "Confirming", paid: "Paid in full", review: "In review" };
+    const historyPool = historyRows || (historyRows = []);
+    const historyRow = () => {
+      const li = document.createElement("li"), name = document.createElement("span"), amount = document.createElement("strong");
+      const detail = document.createElement("p"), show = document.createElement("button");
+      li.className = "banana-history-row"; name.className = "banana-recent-name"; amount.className = "banana-amount";
+      detail.className = "banana-recent-message"; show.type = "button"; show.className = "link"; show.textContent = "Show";
+      li.append(name, amount, detail, show); li.hidden = true; el.bananaHistoryList.append(li);
+      return { li, name, amount, detail, show };
+    };
+    on(el.bananaHistoryList, "click", (e) => {
+      const button = e.target.closest && e.target.closest("button[data-invoice]");
+      if (!button) return;
+      if (BL.donationPopup.reopen) BL.donationPopup.reopen(button.dataset.invoice);
+      button.blur();
+    });
+    on(el.bananaHistoryOlder, "click", () => { BL.donations.historyPage("older"); el.bananaHistoryOlder.blur(); });
+    on(el.bananaHistoryNewest, "click", () => { BL.donations.historyPage("newest"); el.bananaHistoryNewest.blur(); });
+    const showHistory = (state, real) => {
+      const listed = real && !!state.accounting && state.accounting.receipts, h = listed ? state.history : null, rows = h ? h.invoices : [];
+      el.bananaHistory.hidden = !listed;
+      while (historyPool.length < rows.length) historyPool.push(historyRow());
+      for (let i = 0; i < historyPool.length; i++) {
+        const row = historyPool[i], entry = rows[i];
+        row.li.hidden = !entry;
+        // A row with nothing to show keeps nothing of the account it showed before: no text, no invoice, no label.
+        if (!entry) {
+          if (row.show.hasAttribute("data-invoice")) {
+            row.name.textContent = row.amount.textContent = row.detail.textContent = "";
+            row.show.removeAttribute("data-invoice");
+            row.show.removeAttribute("aria-label");
+          }
+          continue;
+        }
+        row.name.textContent = `${HISTORY_DATE.format(entry.createdAt)} · ${HISTORY_STATES[entry.state]}`;
+        row.amount.textContent = `${BANANA_COUNT.format(entry.received)} of ${BANANA_COUNT.format(entry.due)} sats`;
+        row.detail.textContent = `Credited ${BANANA_COUNT.format(entry.credited)}${entry.review ? ` · ${BANANA_COUNT.format(entry.review)} in review` : ""} · left ${entry.left === null ? "unavailable" : BANANA_COUNT.format(entry.left)}`;
+        row.show.dataset.invoice = entry.id;
+        row.show.setAttribute("aria-label", `Show the donation of ${row.name.textContent}`);
+      }
+      if (!listed) {
+        el.bananaHistoryNote.textContent = "";
+        el.bananaHistoryNewest.hidden = el.bananaHistoryOlder.hidden = true;
+        return;
+      }
+      el.bananaHistoryNote.textContent = state.account === null
+        ? "Signed out, an unfinished on-chain donation can't be reopened after a reload. Sign in before donating to keep it here."
+        : !state.accounting.history ? "Your donation history isn't available yet."
+        : h && h.error ? "Couldn't load your donations. They are still counted."
+        : !rows.length ? h && h.loading ? "Loading your donations…" : "No tracked donations yet."
+        : h.restarted ? "Your donations changed meanwhile, so this shows the newest again."
+        : h.next ? `${BANANA_COUNT.format(rows.length)} shown. Older donations are on the next page.` : "";
+      el.bananaHistoryNote.hidden = !el.bananaHistoryNote.textContent;
+      el.bananaHistoryNewest.hidden = !(h && h.from !== null);
+      el.bananaHistoryOlder.hidden = !(h && h.next);
+    };
     // The recent list's checkbox keeps it to tips at or above the message bar: on until the visitor turns it off,
     // and their choice either way remembered in this browser.
     const RECENT_BAR_KEY = "ooga-recent-bar";
@@ -721,12 +815,23 @@
       refreshDonors(true);
       el.bananaRecentBar.blur();
     });
-    let shownTally, shownBoard, shownRecent, shownReal, shownNetwork, shownOpen, shownBar;
+    let shownTally, shownBoard, shownRecent, shownReal, shownNetwork, shownOpen, shownBar, shownPile, shownReceipts, shownHistory, shownAccounting, shownAccount, shownLevel, shownLive;
     const refreshDonors = (force = false) => {
       const { real, state, testNetwork, messageMinSats: bar } = BL.donations;
       showBananaRate();
-      if (!force && shownTally === state.tally && shownBoard === state.board && shownRecent === state.recent && shownReal === real && shownNetwork === testNetwork && shownOpen === state.open && shownBar === bar) return;
+      if (!force && shownTally === state.tally && shownBoard === state.board && shownRecent === state.recent && shownReal === real && shownNetwork === testNetwork && shownOpen === state.open && shownBar === bar
+        && shownPile === state.pile && shownReceipts === state.recentReceipts && shownHistory === state.history && shownAccounting === state.accounting && shownAccount === state.account && shownLevel === pileShown
+        && shownLive === (state.connected && state.pileLive)) return;
       shownTally = state.tally; shownBoard = state.board; shownRecent = state.recent; shownReal = real; shownNetwork = testNetwork; shownOpen = state.open; shownBar = bar;
+      shownPile = state.pile; shownReceipts = state.recentReceipts; shownHistory = state.history; shownAccounting = state.accounting; shownAccount = state.account; shownLevel = pileShown;
+      shownLive = state.connected && state.pileLive;
+      // The pile left, beside (never instead of) the lifetime totals, and what its figure stands on.
+      el.statPile.textContent = pileLeftText();
+      const [note, noteTone] = real ? pileNote(state.pile, state.accounting, shownLive) : ["", ""];
+      el.bananaPileNote.textContent = note;
+      el.bananaPileNote.hidden = !note;
+      el.bananaPileNote.dataset.tone = noteTone;
+      showHistory(state, real);
       const tally = real ? state.tally : donationStats;
       // The chip says whose figures these are: this browser's demo, a test network's, the feed still loading,
       // donations closed, or the island's live feed.
@@ -760,7 +865,10 @@
         : real ? "No donations yet. Feed the first Ooga!" : "New demo donations will appear here.";
       // The recent list: the newest first, its orange check only on the API's word that the donor's GitHub login
       // matched the name, into the fixed rows.
-      const all = real ? state.recent || [] : donationStats?.recentDonations || [];
+      // Real mode lists legacy donations and receipts together, newest first: their sequences are separate, so by time.
+      const legacy = real ? state.recent || [] : donationStats?.recentDonations || [];
+      const all = real && state.recentReceipts && state.recentReceipts.length
+        ? legacy.concat(state.recentReceipts).sort((a, b) => b.at - a.at).slice(0, BL.donations.RECENT_MAX) : legacy;
       const recent = recentBarOnly ? all.filter((entry) => entry.sats >= bar) : all;
       el.bananaRecentBarLabel.textContent = `${BANANA_COUNT.format(bar)} sats and up only`;
       el.donationMessageLabel.textContent = `Banana message (up to 280 characters, with a tip of ${BANANA_COUNT.format(bar)} sats or more)`;
@@ -768,11 +876,14 @@
         const row = recentRows[i], entry = recent[i];
         row.li.hidden = !entry;
         if (!entry) continue;
-        row.label.data = entry.handle ? `@${entry.handle}` : "Anonymous";
+        row.label.data = `${entry.handle ? `@${entry.handle}` : "Anonymous"}${entry.review ? " · in review" : ""}`;
         row.name.dataset.anon = String(!entry.handle);
         row.badge.hidden = !(real && entry.verified);
-        row.amountText.data = (donorUnit === "sats" ? BANANA_COUNT : DONOR_BANANAS).format(entry[donorUnit]);
-        const message = BL.donations.carried(entry.sats, entry.message);
+        // A receipt whose price is still freezing has no bananas yet: said, never estimated.
+        row.amountText.data = entry[donorUnit] === null ? "pricing" : (donorUnit === "sats" ? BANANA_COUNT : DONOR_BANANAS).format(entry[donorUnit]);
+        // A receipt's message was weighed against its own invoice's bar when it was recorded; only legacy rows follow
+        // today's bar.
+        const message = entry.receipt ? entry.message : BL.donations.carried(entry.sats, entry.message);
         row.message.hidden = !message;
         row.messageText.data = message;
       }
@@ -2532,5 +2643,5 @@
       else b.textContent = `Back to ${place}`;
     }
   };
-  BL.hud = { create, renderIcon, renderFaceIcon, renderBodyIcon, signLettering, showAccount, showMic, showVoices, malletIcon, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor, voiceIcon, voiceWords };
+  BL.hud = { create, renderIcon, renderFaceIcon, renderBodyIcon, signLettering, showAccount, showMic, showVoices, malletIcon, setDonationStats, setPileShown, pileLeftText, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor, voiceIcon, voiceWords };
 })();

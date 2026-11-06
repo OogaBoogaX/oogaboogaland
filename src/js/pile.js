@@ -615,10 +615,11 @@
       if (additions >= 2) ctx.crew.rush();
       return additions;
     };
-    // A driven caveman eats from the logical pile; its hand animation owns the banana.
+    // A driven caveman eats from the logical pile; its hand animation owns the banana. A real pile is the API's: the
+    // banana is shown taken and the count stays its.
     const eatFromPile = (cave) => {
       if (counted < 1) return false;
-      world.level = Math.max(0, world.level - 1);
+      if (!BL.donations.real) world.level = Math.max(0, world.level - 1);
       syncPile(true);
       return true;
     };
@@ -710,9 +711,10 @@
       enqueue: deliverBananas
     };
     const stats = () => ({ slots: pileSlots.length, shown: counted, rendered: shell.instanceCount, deliveries: delivery.airborneValue, pendingDrops: delivery.pendingValue, dropsStarted: delivery.visualDropsStarted, dropsLanded: delivery.visualDropsLanded, landedBananaValue: delivery.totalLandedValue, dropPool: dropSlots.length, dropRate: DROP_RATE, spillPool: spillSlots.length, spilling: spillState.active });
+    // A debug fixture for the page's own pile; a real one is the API's.
     const setLevel = (level) => {
       clearDrops();
-      world.level = Math.max(0, Math.min(MAX_BANANAS, Number(level) || 0));
+      if (!BL.donations.real) world.level = Math.max(0, Math.min(MAX_BANANAS, Number(level) || 0));
       syncPile(true);
     };
     const liveGeometry = (set) => set.add(shellGeometry).add(distantShellGeometry);
