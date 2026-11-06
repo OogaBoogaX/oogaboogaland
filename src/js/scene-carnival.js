@@ -1371,7 +1371,8 @@
 
   const onDonation = (donation, counted = null) => {
     game.recordDonation(donation, counted && counted.exact);
-    world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats)));
+    // Simulated only: a real pile is the API's, and a delivery adds nothing to it.
+    if (!BL.donations.real) world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats)));
   };
   const SCENES = {};
   BL.scenes = BL.scenes || {};

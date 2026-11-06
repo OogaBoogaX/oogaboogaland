@@ -1,207 +1,345 @@
-# Receipt accounting (#492): plan and client contract
+# Receipt accounting (#492): the page's side of v1
 
-Status: **plan only.** Nothing here is implemented yet. This is the Ooga Booga Land side of
-[#492](https://github.com/OogaBoogaX/oogaboogaland/issues/492); the backend side lives in a
-companion bananapayserver PR. The exact wire fields are **pending agreement** with that PR, so
-every field name below is provisional and marked as such. This document does not authorize a
-deployment, a wallet transaction, a credential or API-scope change, or activation of any
-capability; each of those needs its own separate approval.
+Status: **implemented on the page, inactive.** The page handles bananapayserver's receipt
+accounting v1 whenever a Worker advertises it, and keeps today's legacy behaviour wherever it
+does not. Nothing here deploys, migrates, activates or authorizes anything: no Worker turns
+`issuance` on, no wallet is touched, no credential or API scope changes. Activation waits on the
+gates listed at the end.
+
+The contract is bananapayserver's signed
+[`docs/receipt-accounting-v1.md`](https://github.com/OogaBoogaX/bananapayserver/blob/7305bd1cea712ad27dc942cf964d60d24b4cabff/docs/receipt-accounting-v1.md)
+at `7305bd1` ([bananapayserver#31](https://github.com/OogaBoogaX/bananapayserver/pull/31)). It
+incorporates the three amendments agreed after the first proposal (`0b6b7bf`): private status
+address paging and `payableAddress`, the public `invoiceStatus` frame, and pending pricing (see
+[Amendments in 7305bd1](#amendments-in-7305bd1)). Two refinements agreed since are implemented
+here and await the next backend source (see [Refinements after 7305bd1](#refinements-after-7305bd1)).
+This document says how the page consumes it. It introduces no field, value or endpoint of its
+own; where the contract is silent or ambiguous the page's reading is listed under
+[Questions for the backend](#questions-for-the-backend).
 
 Out of scope: the virtual-host work (#467), the short-phone-drawer work (#491), the built
-`oogaboogaland.html`, and any treasury or spending policy not settled below.
+`oogaboogaland.html`, and every treasury, spending or conversion rule.
 
-## What the page does today (rock at f5b38586)
+## Principles the page keeps
 
-The page counts **one donation per invoice**, keyed by the invoice id, and trusts the
-server's pile minus a local hourly decay.
+1. **Attribution follows the invoice.** Every receipt BTCPay attaches to an invoice (partial,
+   excess, split, late, repeat, after expiry or completion) is credited to the attribution saved
+   with that invoice. The page says this is the invoice's donor, never who sent the payment.
+2. **Receipts, not invoices, deduplicate effects.** A receipt id keys animation, recent rows and
+   private history. The invoice id only associates a receipt with the kiosk or popup showing it.
+3. **Ownership is the account.** Private reads go through OBL's Worker with the session's stable
+   numeric GitHub id. A handle, a public frame or a tab that hears a frame never confers it.
+4. **The server's revisions are authoritative.** The page replaces what it holds with a newer
+   revision and never adds up frames it happened to see.
+5. **No time decay anywhere,** and gameplay never changes funds.
+6. **Lifetime is not remaining.** Lifetime figures come from `tally`, `board` and `recent`; the
+   pile is a separate, revisioned projection that may be unknown.
+7. **Coverage is `invoice`.** The page never promises permanent or complete monitoring.
 
-| Where | What it does | Why it matters for #492 |
+## Capabilities
+
+`status.accounting` is read only when it is exactly `{ version: 1, issuance, receipts, history,
+coverage, spends, reconciliation }` with booleans, `coverage: "invoice"`, `spends: false` and
+`reconciliation` one of `off`, `current`, `behind`, `review`. Anything else, or its absence,
+means legacy (`donations.state.accounting` is null). A resent `status` replaces it.
+
+- `issuance` alone decides whether a new invoice asks for receipt mode.
+- `receipts` and `history` say what can be read; once true they stay true on the server.
+- `reconciliation` is shown, never interpreted as a balance.
+
+## Invoices and their mode
+
+- `POST /donations/invoice` carries `"accounting": 1` only while `issuance` is true.
+- The reply's `invoice.accounting` is `receipt-v1` or `legacy` (absent is legacy; any other value
+  is refused as `invalid`). A reply of `legacy` to a request that asked for receipt mode is refused
+  too: the server never downgrades, so a page never silently accepts one.
+- 503 `closed` when receipt mode can't be issued is shown as closed. The page never retries
+  without `accounting`.
+- An invoice keeps its mode for good. Legacy invoices publish only `donation`; receipt-mode
+  invoices only `receipt`. Both streams are handled at once: **there is no global switch that
+  ignores legacy events**, and turning `issuance` off changes only what new invoices ask for.
+
+## The socket
+
+The legacy part is unchanged: `donation`, `recent`, `board`, `tally`, `seen` and the `after`
+cursor (the last legacy invoice id).
+
+Receipt frames (`type: "receipt"`) and invoice status frames (`type: "invoiceStatus"`) share one
+sequenced stream. Both are validated field by field and applied in place:
+
+- **Per receipt:** applied only when `receipt.revision` is newer than the one held (a bounded
+  map of revisions by receipt id).
+- **Per invoice:** the `invoice` totals (a receipt envelope's are final, committed totals) apply
+  only when `invoice.revision` is strictly newer, and only to an invoice this page already tracks
+  (created here, or read through private status). A public frame never registers an invoice and
+  never makes the viewer its owner.
+- **`invoiceStatus`** (`{ type, seq, replay, invoice: { id, due, received, credited, review, left,
+  state, revision } }`) carries fee, `left` and review changes that move no receipt. It replaces a
+  tracked invoice's totals only when strictly newer, never animates and never counts. Like any
+  move of a tracked invoice's totals, it reads private status again, the only way the page learns
+  the current `payableAddress`.
+- **Animation** happens exactly when `replay === false`, `state === "credited"`,
+  `seq === firstCreditedSeq`, the frame's `seq` is past every frame this page has processed (the
+  receipt cursor), its revision is newer than the one held, and the receipt id has not animated on
+  this page. The sequence gate holds however much the bounded revision and animation rings have
+  forgotten. Duplicates, delayed revisions, reconfirmations, reversals, `recentReceipts`, replay
+  frames and private replies never animate and never add to a local total.
+- **Recent rows:** `recentReceipts` replaces the receipt half of the recent list, except that a
+  receipt the stream has already moved past keeps its newer row (or stays out once reversed). Later
+  revisions update a row in place; a row whose receipt leaves `credited`/`review` is dropped; a row
+  is added only by a frame past the cursor. Rows are ordered by when the receipt was received (its
+  frozen price's immutable `receivedAt`, then `firstCreditedSeq`), never by `receipt.at`, which is
+  the latest revision's time, so a correction never moves an old donation to the top. Legacy rows
+  order by their own `at`, the donation's time, and the two lists merge on those times.
+- **Cursors:** the legacy cursor (`after`) and the receipt cursor (`receipts`, the highest `seq`
+  seen on either frame type) are independent. A reconnect sends `after` as today and `receipts=<cursor>` only once a
+  cursor is known.
+- **Replay marker:** `{ type: "replay", after, through, complete }`. With `complete: true` the
+  cursor moves to `through`; with `complete: false` (a gap) the cursor moves to `through` and the
+  signed-in history is read again too. After either, every tracked invoice reads its private
+  status again before it counts as fresh: what was held may predate the reconnect. Tally, pile and
+  `recent` arrive on every connect anyway. A marker with `through: null` leaves the cursor unset.
+- **Failed reads:** a status read that fails, is refused or falls behind leaves the invoice not
+  fresh and drops its payable evidence until a later read succeeds. Nothing retries by itself;
+  the next frame, reconnect or the kiosk's CHECK AGAIN reads again.
+- **Reads from before a catch-up:** every catch-up moves an epoch, and a status read begun under
+  an earlier one is dropped whole when it lands, however new its revision: freshness counts from
+  when a read began. The read the catch-up asked for runs instead, and until it succeeds nothing
+  about the invoice is current.
+- **Messages:** a receipt's `message` was weighed against its own invoice's saved bar when it
+  was captured, so the page only sanitizes it, live and in the recent list, and never blanks it
+  when the advertised `messageMinSats` later rises. Legacy donations keep today's rule.
+
+## Private status and history
+
+OBL's Worker (`worker/src/donations.js`) passes:
+
+| Page | Binding call | Donor |
 |---|---|---|
-| `src/js/donations.js:223` | A `donation` event is dropped when its `id` (the invoice id) is in the 64-entry `played` ring | A second real receipt on the same invoice would be dropped as a duplicate |
-| `src/js/donations.js:282` | The socket reconnects with `after=<last invoice id>` | The replay cursor is an invoice, not a receipt |
-| `src/js/donations.js:262` | `seen` carries cumulative `sats`, `due`, `left` for an invoice; it is neither kept nor replayed | After a reload or reconnect the page has no partial-payment state |
-| `src/js/donations.js:136` | `waitFor`/`waited`: at most 16 invoices, page life only | No history across sessions |
-| `src/js/donations.js:250`, `src/js/director.js:653`, `:844`, `:867` | The pile message carries `eatPerHour`; the director subtracts it every frame | Time-based decay, to be removed |
-| `src/js/factory-kiosk.js:633-643` | `flow.receive` moves the kiosk to `paid` on the first `donation` for its invoice id | A partial receipt would close as full success once receipts are per payment |
-| `src/js/factory-kiosk.js:648-662` | `flow.seen` replaces the QR with `bitcoin:<address>?amount=<left>` while something is left | Correct while open; after completion an amount-bearing QR invites a duplicate payment |
-| `src/js/donation-popup.js:308-312` | The mainland popup closes on its invoice's `donation` | Same closing-on-first-event problem |
-| `src/js/game.js:217` | `recordDonation` adds every event it is handed to the browser's local totals | Totals are correct only if every caller deduplicates first |
-| `src/js/crew.js:5551-5556`, `src/js/pile.js:619-621`, scene `onDonation`s | Eating, reloading and donations change `world.level` locally | In real mode the director overwrites `world.level` from the server every frame, so these are visual only; the invariant is implicit and must become explicit |
-| `worker/src/donations.js` | Passes `/donations/*` on and names the donor as `{ id, login }` from the session | The numeric GitHub id is already the stable owner; the handle is display text |
+| `POST /donations/status` | `status(request, donor, visitor)` | from OBL's session, or null |
+| `POST /donations/history` | `history(request, donor, visitor)` | from OBL's session, or null |
 
-The production note in `docs/cloudflare-setup.md` (`PILE_EAT_PER_HOUR=0`) records a past
-configuration. It is not verification of today's live setting.
+Only the body and its content type go on; cookies, headers and the browser's request never do.
+The donor is `{ id, login }` from the server-side session, exactly as for invoices, and never from
+the page's body or handle. bananapayserver decides ownership; the page cannot claim it.
 
-## Invariants (maintainer direction)
+- **Status by `request`:** the bearer token from `invoice`, kept in page memory only (never in a
+  URL, localStorage or history).
+- **Status by `invoice`:** for a signed-in owner, through the session.
+- **History:** one server page at a time, newest first (`{}`), with Older (`{ cursor }`) and
+  Newest controls, so every page stays reachable and nothing is accumulated or cut. The page keeps
+  the server's order. A page that was on its way while the stream moved one of its invoices keeps
+  the newer totals (the page holds every invoice's newest stream totals, bounded), so an older
+  reply never regresses `credited`, `review` or `left`. The panel says
+  when older donations are on a further page. 409 `resync`, a refused cursor, or a page from
+  another `revision` reads the newest page again and says the history changed. History carries no
+  address or token; reopening an invoice reads its status by `invoice`.
+- **Status pages:** the first page (no cursor) carries the totals, `payableAddress` and the
+  newest receipts and addresses. Older receipts page through `cursor`/`next`, older addresses
+  through `addressCursor`/`nextAddress` (newest-issued first, `null` at the end); the two never
+  mix and one call carries at most one of them. Each list holds exactly one server page (a
+  window): Older replaces it with the next page, Newest returns to the first, and a page larger
+  than 100 rows is refused rather than cut, so a cursor never skips rows the page didn't keep.
+  409 `resync` (stale cursor) and 400 `cursor` (malformed, expired or another scope) return both
+  lists to their newest page and read again once. One status read per invoice is in flight at a
+  time; a read asked for meanwhile runs after it, and a page reply for a navigation since
+  abandoned leaves the list alone.
+- **Whole-reply fence:** a status reply whose totals revision is older than the one held (a frame
+  overtook it) is dropped whole, its address evidence included, and read again, at most twice in a
+  row before the view says it is behind.
+- **`payableAddress`:** the address the provider currently takes payment at, or `null`, replaced
+  by every applied status reply and remembered with the totals revision it was read at. Any move
+  of the totals on the stream leaves that evidence behind until the next reply agrees with them.
+  Earlier addresses in `addresses` are history; none is payable because it is listed.
+- **Account fences:** every private call carries the page's account generation. Sign-out, a
+  revoked session or a different account bumps it, drops tracked invoices, request tokens,
+  history and statuses, and any reply from an older generation is discarded. A kiosk or popup
+  showing an invoice (either mode) from an older generation closes, and stopping a kiosk flow or
+  closing the popup clears what they held and showed: the address, amounts, bananas, donor,
+  details and the screen's canvas. A request token is the bearer of
+  its own invoice only; it never makes another invoice, or the account, the owner.
+- **Signed out after a reload:** an invoice can't be recovered, by design. The Bananas panel says
+  so and suggests signing in before donating.
 
-1. **Attribution follows the address.** Every on-chain sat actually received at an address
-   issued for an invoice (partial, excess, split, repeated, late, after expiry or after
-   completion) is attributed permanently to that invoice's original owner. This is a
-   bookkeeping **policy, not proof of who sent it**, and the page never says otherwise.
-2. **Receipt identity deduplicates.** Ownership, effects (toasts, animations, totals) and
-   history are keyed by a receipt id, never by the invoice id. One invoice can have many
-   receipts; one receipt is counted once however often it is delivered.
-3. **Ownership is the account, not the handle.** A signed-in owner is the backend's stable
-   account id. An editable handle never moves ownership, and a tab that merely receives a
-   notice never claims it.
-4. **States are distinct.** At least *observed* (seen, unconfirmed), *credited* (counted),
-   *quarantined* (discrepancy, not counted as reconciled) and *reversed* (auditable
-   correction of an earlier credit). A partial confirmed receipt never closes as a full
-   success.
-5. **No time decay anywhere.** Not in the backend's pile, not in the page's extrapolation, not
-   in defaults, docs or tests.
-6. **Gameplay never touches funds.** Eating, reloading, ammunition and delivery animations
-   may change what is drawn; they never change the authoritative pile, lifetime totals or any
-   record, and never send anything.
-7. **Lifetime is not remaining.** Lifetime donor credit (receipts, rank, history) is separate
-   from the remaining pile. Spending never reduces a donor's lifetime figures.
-8. **Deductions come only from backend records.** Future spend-based pile changes arrive as
-   backend-authoritative, traceable records. The page never computes, forges or caches a
-   balance of its own in real mode.
-9. **Honest monitoring claims.** The page never promises permanent or complete monitoring of
-   an address until the backend verifies it; it shows stale or unreconciled state as such.
-10. **Old backends keep working.** The new behaviour is gated on a capability the backend
-    advertises; without it the page keeps today's invoice-level behaviour, minus decay.
+## Kiosk and popup (receipt-mode invoices)
 
-## Client contract (semantic; field names pending)
+The Factory kiosk and the mainland popup share `factory-kiosk.js`; both read the tracked
+invoice's authoritative view every frame and apply it only when its revision moved.
 
-What the page needs from the backend, independent of spelling. The companion PR proposes
-the exact shapes; this section changes to match once agreed.
+- **States shown:** confirming, credited, in review, invalid and reversed receipts are listed
+  apart, with the invoice's `received`, net `credited`, `review` and `left`. What is left to send
+  is shown only from a current view; otherwise it reads NOT CURRENT and the ledger says it is
+  checking, so a remainder from before a reconnect or a failed read is never put forward. A receipt whose
+  `pricing` is still `null` shows its bananas as pending; a frozen price with `rate: null` and
+  `bananas: null` shows as unpriced (zero bananas). The page never converts sats itself.
+- **Success:** only invoice `state: "paid"` shows the full-payment screen. A credited partial
+  receipt stays on the address screen with what was received and what is left. A receipt
+  animating in the scene never closes or completes the kiosk; the cooker cooks each credited
+  receipt as it comes.
+- **The address shown** is the one the visitor picked from the invoice's addresses (Older and
+  Newest on the ledger page through the address pages), otherwise `payableAddress` when known,
+  otherwise the one this visit was issued, otherwise the newest listed. A listed address that is
+  not the known payable one is labelled as earlier and shown as text alone, never as a QR or with
+  an amount: being retained is not being payable.
+- **Lightning after any receipt:** once any receipt has ever been seen for an invoice (a frame for
+  it, a receipt in its status, or `received`, `credited` or `review` above zero), its original
+  Lightning code (which asks for the whole target) is cleared from the flow, the quote and a
+  reopened invoice alike, and the Lightning screen moves to the ledger. The view latches this for
+  its life: a reversal back to zero, or a reply offering the code again, never brings it back. v1 has no
+  code for the remainder, so a top-up is on-chain only; Lightning receipts that arrive anyway
+  still count as their own receipts.
+- **QR codes:** an amount-bearing `bitcoin:` QR is drawn only when the address shown equals
+  `payableAddress`, that address was read at the invoice's current totals revision, and the
+  invoice's `left` is a positive integer from a fresh authoritative view (the socket connected and
+  caught up, no gap awaiting its status read, the invoice unexpired and unpaid). The issuance amount from `/donations/onchain` is never used for a receipt-mode invoice,
+  and `left` is never applied to another address or derived from `due − received`. Otherwise the
+  QR holds the address alone and the screen says the remaining amount is unavailable (or that
+  nothing is left to send). After completion no QR is drawn at all.
+- **The address stays:** visible and copyable after a partial payment, completion, expiry and a
+  reopen, with the line "Payments to this address count for this invoice's donor once credited.
+  That is not proof of who sent them." Expiry never erases the address or the receipts.
+- **Late and repeat receipts** show as their own rows on the same invoice.
+- **Reopen:** a signed-in donor's history rows reopen the invoice in the popup on its ledger, from
+  its status (addresses, receipts, totals); its on-chain address is offered from there, its
+  Lightning code is not offered again, and no amount is ever derived from `due − received`.
+- **Bananas** on the ledger and paid screens are each credited receipt's own frozen value, summed
+  only when the receipts in view are all of the invoice's (their credit equals `credited`);
+  otherwise each receipt shows its own. The quote's estimate is never shown as a result.
+- Legacy invoices keep today's flow unchanged.
 
-**Capability.** The socket's `status` (or `/api/me`) names a receipt capability, for example
-`features: ["receipts-v2"]` *(name pending)*. The page switches modes only on that word. In
-receipt mode it ignores legacy invoice-level `donation` events for counting and animation, so
-an old notice can never double-credit a new receipt.
+## Pile and lifetime figures
 
-**Receipt** *(fields pending)*: an opaque `receiptId` stable across retries, restarts and
-reconfirmation; the `invoiceId` it is attributed to; `method` (`onchain` or `lightning`);
-actual `sats`; `state` (observed, credited, quarantined, reversed, and whatever finer
-backend states map onto these); the attribution snapshot (handle, message under the message
-bar, verified flag) taken from the invoice; the banana value and rate frozen once at
-attribution, never repriced; times; and a monotonic sequence or revision for ordering and
-replay. The public feed must not carry txids, output indexes, addresses or account ids:
-linking a handle to an on-chain output would publish the donor's wallet.
+- **Decay is gone.** `eatPerHour` is ignored wherever it appears. The director no longer
+  extrapolates the pile; the crew's chewing no longer eats from it, in real or simulated mode.
+- **Real mode:** the drawn pile follows the latest `pile` message. A receipt-era pile moves only
+  forward by `revision` for the page life, reconnects included: an equal revision confirms the
+  pile held, a lower one is refused. A pile without a revision is taken only while the API's status
+  names no `accounting`, so a legacy message can't stand in for a receipt-era one. While the socket
+  is down or no pile has been heard on the current connection, the panel says the figures are the
+  last ones heard; the warning clears only when a pile arrives on a live connection. `bananas: null`
+  (before the cutover anchor, or after it when a negative correction or unsafe totals leave no
+  count), `cutover: "pending"` or `reconciliation: "review"` show the pile as unavailable or
+  uncertain; the page never forges a zero or a live wallet balance, and a null pile keeps its
+  revision, so an older count never comes back. `basis: "credits"` is labelled as counted
+  from credits, not a wallet balance. `uncertain` is shown when it holds credit.
+- **Gameplay:** in real mode no scene (DSB Land's included), delivery animation, debug fill
+  (`pile.setLevel`, P, B), eating (the crew, the DSB rescue dogs) or reload changes the drawn level;
+  scenes add to it only in simulated mode. Before a real count arrives the drawn heap keeps its
+  starting size; no label reads it in real mode.
+- **Lifetime:** `game.recordDonation` keeps a local ledger only in simulated mode. Real totals,
+  the board and the recent list come from the server. Spending, when it exists, will never touch
+  them.
+- **Display:** the Bananas panel shows the remaining pile beside the lifetime totals, and the
+  island's pile label shows both, never one for the other.
 
-**Invoice status** *(fields pending)*: authoritative and revisioned, cumulative per invoice:
-`due`, observed `received`, `credited`, `remaining` (what is still asked for, network fee
-included), whether the invoice is complete, its receipts, the issued address(es), and a
-revision that only increases. The page replaces its view with each newer revision and never
-sums messages it happened to see. Delivered only to the invoice's owner: the in-session page
-by its `request` key, a signed-in owner by account.
+## Pricing on receipts
 
-**History** *(endpoint pending)*: a signed-in owner's invoices, addresses and receipts across
-sessions, read through OBL's Worker with the session's account id, exactly as invoice
-creation already passes `{ id, login }`. Signed-out recovery is a policy gate (below).
+`receipt.pricing` is `null` only while the first detection's pricing intent is unresolved; while
+it is, the receipt has `credit: 0` and `firstCreditedSeq: null`, and its first credit waits for the
+price to freeze (permanently unpriced included). Once frozen it is `{ receivedAt, rate, bananas }`
+and never changes; freezing publishes a newer receipt revision even when the state stays the same,
+and a reconfirmation keeps the original `firstCreditedSeq`. `rate: null` with `bananas: null`
+means permanently unpriced, zero bananas, which the page shows apart from "pending". The page
+refuses a receipt that claims credit or a first credit while its price is `null`, and keeps a
+pending receipt's bananas pending in recent rows and the ledger until a frozen revision arrives.
+Animations count the receipt's own frozen bananas (zero when unpriced), never a conversion.
 
-**Pile and totals** *(fields pending)*: the remaining pile as a value with its revision and
-its basis (reconciled as of a time, or stale/unreconciled); lifetime totals, board and tally
-as today, built from credited receipts. No `eatPerHour`. Pending activity is shown apart
-from the pile, never folded into it.
+## Privacy
 
-**Replay.** The reconnect cursor is the last receipt sequence, not an invoice id. On every
-(re)connect and page load the page asks for, or is sent, current snapshots (pile, totals,
-recent receipts, and its own invoice statuses) before applying live events.
+The public feed carries no address, request token, account id, txid, outpoint or provider
+identifier, and the page reads none from it. Addresses reach only the invoice's own page through
+private status. Request tokens stay in memory. Nothing new is written to localStorage.
 
-## Page work, in order
+## Amendments in 7305bd1
 
-Each step is small, keeps legacy behaviour without the capability, and lands with its
-Node-level checks.
+Agreed with the backend after the proposal commit `0b6b7bf`, part of the signed contract at
+`7305bd1`, and implemented here:
 
-1. **Remove decay.** `donations.js` accepts a pile message with or without `eatPerHour` and
-   ignores it; the director shows the last authoritative value, never extrapolated. Docs and
-   test fixtures that mention `eatPerHour` are updated, not weakened.
-2. **Receipt dedupe.** In receipt mode `donations.js` dedupes and replays by receipt id and
-   sequence in bounded structures; `game.recordDonation` is called once per credited receipt.
-   Legacy mode keeps the invoice-id ring.
-3. **Kiosk and popup states.** Both are driven by invoice status, not by the first event:
-   - open with nothing received: today's Lightning or on-chain QR;
-   - partially received or credited: *received X, credited Y, Z still to send*, the same
-     address, and an amount-bearing QR for Z only while the invoice is open; no success screen;
-   - complete: the success screen and the cooker, **with no amount-bearing QR**; the address
-     stays visible and copyable with a plain note that further payments to it are credited
-     to this invoice's donor after confirmation (wording reviewed; no sender claim, no
-     permanent-monitoring promise);
-   - later receipts after completion or expiry: shown as their own receipts on the same
-     invoice;
-   - quarantined or reversed: shown as such, never as credited.
-4. **Feeds and effects.** Recent list, board, tally, toasts and delivery animations take one
-   entry and one animation per credited receipt; a later receipt to the same address shows
-   the invoice's original attribution. Replays and other tabs never duplicate an effect or
-   reassign ownership.
-5. **Reload and reconnect.** Snapshots refresh state on load and on every reconnect; the
-   page-life `waiting` set gives way to backend status and history.
-6. **Remaining versus lifetime.** The Bananas panel and pile label show the remaining pile
-   separately from all-time donations, and say when the pile is stale or unreconciled.
-7. **Gameplay isolation.** In real mode the drawn pile is a view of the authoritative value;
-   scene additions, eating and reload consumption stay visual, and a check pins that they
-   never change the authoritative value or produce a request.
-8. **Docs.** `AGENTS.md`'s donation lines, `docs/cloudflare-setup.md`'s decay note and this
-   document follow the agreed contract.
+1. **Private status paging and `payableAddress`.** The status body may carry `addressCursor`
+   beside `cursor`; the reply adds `nextAddress` (distinct from `next`, `null` at the end).
+   Addresses come newest-issued first and bounded. Cursors are fenced by kind, owner, invoice and
+   revision: stale gives 409 `resync`, malformed, expired or cross-scope 400 `cursor`. The reply's
+   top-level `payableAddress` (`string | null`) is the latest fresh, verified provider destination
+   bound to the invoice, present on the first page. Historical addresses alone never imply
+   payability.
+2. **`invoiceStatus` frames** on the same sequenced receipt stream, for fee, `left` and
+   quarantine changes without a receipt transition. They replace only strictly newer status,
+   never animate or count, and prompt a private status read for an owned invoice. Receipt
+   envelopes carry final committed totals.
+3. **Pending pricing.** `receipt.pricing` is `null` only until the first detection's price
+   freezes; afterwards an object whose `rate: null, bananas: null` means permanently unpriced.
+   Freezing emits a new receipt revision.
 
-## Rollout and rollback
+## Refinements after 7305bd1
 
-- Order: the page first (it understands both modes and has no decay), then the backend's
-  migration, then the backend advertises the capability. The page never turns receipt mode on
-  by itself.
-- Rollback: the backend stops advertising the capability and the page falls back to
-  invoice-level behaviour. Records the backend keeps are its concern; the page holds no
-  balance to roll back.
-- Staging (signet) and fixtures first. Activation on either Worker is a separate, explicit
-  decision; this PR deploys nothing.
+Agreed with the backend and implemented here; they await the next backend source, so they are not
+yet in a signed contract:
 
-## Limits to state honestly
+1. **Ever-observed BOLT11.** `7305bd1` hides the original full-target `bolt11` while `received`,
+   `credited` or `review` is above zero and says a full reversal alone never brings it back. The
+   agreed refinement makes it permanent: once any receipt has ever been observed for an invoice,
+   its original code is never offered again, whatever the totals later read. The page latches this
+   for the life of an invoice's view.
+2. **A pile without a count after the cutover.** `bananas: null` can also arrive after the anchor
+   (`cutover: "done"`, `reconciliation: "review"`, `at: null`, `uncertain: null`, `eatPerHour: 0`),
+   when a negative correction or unsafe, unrepresentable totals leave no count to show. The page
+   reads it as unavailable, as before the anchor, keeps its revision, and never shows zero.
 
-- The page shows what the backend reports. It cannot verify a receipt, a confirmation or a
-  balance, and it labels reconciliation that is stale or unavailable instead of presenting a
-  live balance.
-- Address monitoring today follows BTCPay's invoice monitoring and the relay's windows (open
-  invoices checked each minute, only the last 24 hours reloaded after a restart, unpaid
-  attribution records expiring after seven days by default, per the issue). Payments outside those windows may be missed until the backend's
-  reconciliation exists and is verified on the real installation. The page makes no stronger
-  claim.
-- Historical receipts without retained evidence stay unattributed or await reviewed
-  reconciliation; the page never guesses an owner.
+## Answered by the backend
 
-## Policy gates (blocked until the maintainer decides)
+1. **Connect without a cursor.** A read-capable v1 Worker always sends `recentReceipts` and the
+   replay marker; without `receipts=` the marker is the snapshot's high-water mark and nothing
+   historical animates.
+2. **`receipt.at`** is the latest revision's time, not when the donation happened; ordering uses
+   `pricing.receivedAt` (immutable once frozen) and `firstCreditedSeq`.
+3. **Receipt-mode invoices** send no legacy `seen` or `donation`; the page also ignores `seen` for
+   any invoice it tracks as receipt-mode.
+4. **Lightning after a receipt.** Private status returns `bolt11: null` once anything has come; the
+   page clears its own cached code too (above).
 
-From the issue, unchanged and not decided here:
+## Questions for the backend
 
-1. **Treasury boundary.** Whether moves between our own wallets, cold storage, Lightning and
-   channels (opens, closes, splices, swaps, rebalances, liquidity purchases) are internal
-   transfers or spending, and how their fees are separated.
-2. **Spend-to-banana valuation.** Original recorded value, spending-time price or another
-   rule; lot allocation, rounding, missing prices, negative balances.
-3. **Starting inventory.** How existing wallet funds, the current pile, imports, unattributed
-   and already-spent funds reconcile at cutover.
-4. **Confirmation thresholds.** For crediting receipts and for deductions, and what shows
-   while pending or while reconciliation is unavailable.
-5. **Attribution presentation.** How repeat payments inherit handle and message, and what
-   signed-in and signed-out donors can recover later.
+Readings the page had to choose; each is flagged for agreement, not decided here.
 
-Raised by this plan, also undecided:
+1. **Unknown `accounting.version`.** Treated as legacy for issuance; valid receipt frames are
+   still applied.
+2. **Status `lightning` and `bolt11`.** Validated but not used: a reopened invoice offers its
+   on-chain address alone.
+3. **Edit window.** The page keeps saving details through `note` until the server refuses
+   (`unknown`), as today; the server's undecided rule governs.
+4. **`left` before the first provider read.** Under the amended QR rule a fresh receipt-mode
+   invoice shows no amount until a status reply carries `payableAddress` and a positive `left`.
+   If the backend leaves `left` null until its first reconcile, the donor sees the address alone
+   at first. Seeding `left` and `payableAddress` from the issuance read would avoid that.
 
-6. **Signed-out recovery.** Today the `request` key stays in memory only. Durable signed-out
-   history needs a decision on what, if anything, is kept in localStorage and what it may read.
-7. **After completion.** Whether the reusable address is shown as text only (the plan's
-   default) or also as a bare-address QR.
-8. **Board grouping.** The board combines matching handles across accounts and guests. That
-   is a presentation choice, separate from ownership; whether it changes is open.
-9. **Capability name and exact fields.** Pending the backend PR.
+## Activation gates (unchanged, not decided here)
 
-Until gates 1–3 are settled, no spend deduction, internal-transfer rule or conversion is
-implemented on either side.
+Treasury boundary and internal transfers; spend valuation and conversion; starting inventory and
+the pile's cutover anchor; confirmation and pending display policy; the edit window; message
+carriage on repeat receipts; account deletion, redaction and recovery after signing in again;
+the backend's unverified provider behaviour; fences; two-maintainer review of the relay line and
+deployment. Rollout order stays the backend's: this page first, then the fence-aware Worker with
+`issuance` off, the anchor, the fences, the v1 relay, staging, and production only on separate
+authorization. After the first receipt-mode invoice there is no rollback to a Worker that doesn't
+know the fences, and turning `issuance` off never reverts an invoice's mode.
 
-## Testing constraints
+## Checks
 
-The browser suite (`npm test`, `npm run test:full`, any scene or Hub session) is **not run**
-for this work under the current standing stop. Allowed: `npm run build`, `node --check` on
-touched files, and focused Node-level unit or contract checks of pure functions. No check is
-weakened or skipped; existing donation checks in `test/run.mjs` that assume invoice-level
-events or `eatPerHour` are updated to the new rule in the same change that moves the rule,
-and browser verification is left to the maintainer's play-test.
+The browser suite is not run for this work (standing stop). Coverage is `node test/run.mjs
+donations-unit`, which runs the existing donation client checks and the receipt checks in Node VM
+contexts and nothing else, plus `node --test worker/test/donations.test.mjs` for the Worker's
+proxy. They cover underpayment, excess, split and repeat receipts, late receipts after expiry,
+tiny receipts, mixed methods and several receipts in one transaction (distinct receipt ids),
+duplicate, out-of-order and replayed frames, `invoiceStatus` frames, reconnect and gap recovery,
+reload recovery for a signed-in donor, both status cursors and their 409/400 restarts, pending
+and unpriced pricing, quarantine, reversal and reconfirmation, account switches, the
+`payableAddress` QR rule, and the absence of clock decay. Visual layout of the new kiosk lines and panel rows is left to the
+maintainer's play-test.
 
-Cases the checks must cover (from the issue's acceptance list, page side): underpayment,
-excess, split payments, repeated payment after completion, late payment after expiry, mixed
-methods, a receipt below the minimum, duplicate and out-of-order delivery, reconnect and
-reload mid-invoice, quarantine and reversal, and no full-success screen on a first partial
-receipt.
+**Integrated contract validation is pending.** The page and the backend agreed on shared vectors
+(`tests/fixtures/receipt-accounting-v1.json` and `tests/receipt-contract.test.mjs` in
+bananapayserver, an emitter-equality fixture pinned at a committed SHA). That artifact does not
+exist yet, so no check here validates against what the backend actually emits: the checks above
+use synthetic frames and replies written from the contract text. When the fixture lands, a check
+reading it at its pinned SHA joins `donations-unit`; until then that check is missing, not passed
+and not skipped. The page has not run against a real receipt-accounting endpoint.

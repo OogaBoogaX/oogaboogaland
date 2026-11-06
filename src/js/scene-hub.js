@@ -5633,17 +5633,20 @@
     }
   };
   const PILE_SCREEN = { x: 0, y: 0, depth: 0 };
-  let pileHovered = false, pileTopY = 0, pileTipValue = "", pileTipText = "";
+  let pileHovered = false, pileTopY = 0, pileTipValue = "", pileTipLeft = "", pileTipText = "";
   const showPileTooltip = () => {
     if (!pile.core.visible) { hud.setPileValueVisible(false); hud.tooltip.hide(); return; }
     const top = pile.core.position.y + pile.core.scale.y * pileTopY + 0.3;
     const screen = renderer.project(0, top, 0, PILE_SCREEN);
     if (!screen) { hud.setPileValueVisible(false); hud.tooltip.hide(); return; }
     hud.setPileValueVisible(true);
-    const value = hudMod.donationValueText();
-    if (value !== pileTipValue) {
+    // The pile left and all donations' value, side by side: neither stands in for the other. Both strings are cached
+    // by the HUD, so a new label is made only when one changes.
+    const value = hudMod.donationValueText(), left = hudMod.pileLeftText();
+    if (value !== pileTipValue || left !== pileTipLeft) {
       pileTipValue = value;
-      pileTipText = `🍌 ${value}`;
+      pileTipLeft = left;
+      pileTipText = `🍌 ${left} in the pile · ${value} donated`;
     }
     hud.tooltip.show(pileTipText, screen.x, screen.y, null, false, true);
   };
@@ -11444,7 +11447,8 @@
     if (BL.controls.matches(e, "weapon") && pilot.weaponMode(Number(e.key))) return;
     if (e.key === "b" || e.key === "B") addTestBananas(testBananas);
     if (e.key === "l" || e.key === "L") demoTip(120000);
-    if (e.key === "p" || e.key === "P") {
+    // P fills the page's own pile; a real one is the API's.
+    if ((e.key === "p" || e.key === "P") && !BL.donations.real) {
       world.level = Math.max(world.level, pile.slots.length);
       pile.syncPile(true);
     }

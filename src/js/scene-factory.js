@@ -953,6 +953,7 @@
       note: (request, value, changedHandle) => donations.note(request, value.message, changedHandle ? value.handle : undefined),
       onchain: (request) => donations.onchain(request),
       waitFor: (id) => donations.waitFor(id),
+      ledger: donations.view, payable: donations.payableSats, more: donations.more, refresh: donations.refresh, generation: () => donations.generation,
       open: () => donations.state.open,
       testNetwork: () => donations.testNetwork,
       limits: () => donations.state.limits,
@@ -1284,7 +1285,9 @@
   // queued for the cooker, which turns it into those bananas before everyone's eyes.
   // In real mode `counted` is the API's `{ exact, rounded }`: the donation counts its exact bananas (the pile itself
   // follows the API's), and the cooker still cooks the game's one to twelve, a show of them.
-  const onDonation = (donation, counted = null) => {
+  // A receipt's first credit (`receipt` set) cooks like any tip: it never settles the kiosk, which its invoice's own
+  // status does, so a partial payment can't look like the whole.
+  const onDonation = (donation, counted = null, receipt = undefined) => {
     game.recordDonation(donation, counted && counted.exact);
     const bananas = gameMod.bananasFor(donation.sats), shown = counted ? counted.rounded : bananas;
     if (!donations.real) world.level = Math.min(pileMod.MAX_BANANAS, world.level + (counted ? counted.exact : bananas));
@@ -1295,7 +1298,7 @@
     // A real kiosk payment turns toward the cooker immediately, staying inside the Factory.
     // The demo keeps its paid screen so the visitor can walk through the flow at their own pace.
     const b = scene.booth;
-    if (b.flow && b.flow.receive(donation.id, counted, donation.handle, donation.sats)) {
+    if (!receipt && b.flow && b.flow.receive(donation.id, counted, donation.handle, donation.sats)) {
       b.held += bananas;
       b.heldSats += donation.sats;
       if (donations.real) watchBooth(scene);

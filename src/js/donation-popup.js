@@ -231,6 +231,8 @@
       cancelAnimationFrame(frame); frame = 0;
       if (flow) flow.stop();
       flow = null;
+      // The copy of the kiosk's screen goes too (an address, amounts, a donor's name): resizing a canvas clears it.
+      canvas.width = canvas.width;
       if (dialog.open) { dialog.close(); if (onClose) onClose(); }
     };
     const closeOutside = () => { if (simulated && dialog.open) close(); };
@@ -246,12 +248,15 @@
       flow.animate(context, clock);
       frame = requestAnimationFrame(draw);
     };
-    const open = (demo = false) => {
+    // `view`, when given, is a signed-in donor's own receipt-mode invoice reopened from their history.
+    const open = (demo = false, view = null) => {
       if (dialog.open) return;
       simulated = demo;
       // The page's own /donate address: a path where the router serves paths, a hash from disk or a named file.
       const link = BL.router && !BL.router.served ? `${location.href.split("#")[0]}#/donate` : `${location.origin}/donate`;
-      help.textContent = simulated ? "This is a local simulation. No Bitcoin is sent." : "Pay with Lightning or on-chain. Your bananas arrive from the Factory when the payment confirms.";
+      help.textContent = simulated ? "This is a local simulation. No Bitcoin is sent."
+        : view ? "Payments to this invoice's address count for its donor once credited. That is not proof of who sent them."
+        : "Pay with Lightning or on-chain. Your bananas arrive from the Factory when the payment confirms.";
       flow = BL.factoryKiosk.create({
         real: !simulated, demo: simulated, outerClose: true, link: () => link,
         startDetails: () => attachDetails(flow, defaults()), details, editDetails: focusDetails, typing: () => typed, restoreDetails, onState: () => hideHistory(),
@@ -260,6 +265,7 @@
         invoice: (sats, value) => donations.invoice({ sats, ...value }),
         note: (request, value, changedHandle) => donations.note(request, value.message, changedHandle ? value.handle : undefined),
         onchain: (request) => donations.onchain(request), waitFor: donations.waitFor,
+        ledger: donations.view, payable: donations.payableSats, more: donations.more, refresh: donations.refresh, generation: () => donations.generation,
         open: () => donations.state.open, testNetwork: () => donations.testNetwork,
         limits: () => donations.state.limits,
         messageMinSats: () => donations.messageMinSats,
@@ -278,8 +284,11 @@
         },
         close, watch: close, release: close
       });
-      flow.start();
-      flow.key({ key: "Enter" });
+      if (view) flow.reopen(view);
+      else {
+        flow.start();
+        flow.key({ key: "Enter" });
+      }
       if (document.pointerLockElement) document.exitPointerLock();
       dialog.showModal();
       canvas.focus({ preventScroll: true });
@@ -312,6 +321,14 @@
       return true;
     };
     const seen = (id, sats, due, left, pricing) => !!flow && flow.seen(id, sats, due, left, pricing);
+    // An invoice from the signed-in donor's history, read again by its id: false when there is no account or it is open.
+    const reopen = (id) => {
+      if (dialog.open || !donations.real) return false;
+      const view = donations.reopen(id);
+      if (!view) return false;
+      open(false, view);
+      return true;
+    };
     const dispose = () => {
       onClose = null;
       close();
@@ -322,7 +339,7 @@
       for (const type of ["keyup", "select", "focusin", "focusout"]) fields.removeEventListener(type, track);
       closeButton.removeEventListener("click", close); canvas.removeEventListener("click", tap);
     };
-    return { open, close, closeOutside, onClose: callback => { onClose = callback; }, receive, seen, dispose, defaults, details, typing: () => typed, restoreDetails, focusDetails, attachDetails, detachDetails, detailsState,
+    return { open, reopen, close, closeOutside, onClose: callback => { onClose = callback; }, receive, seen, dispose, defaults, details, typing: () => typed, restoreDetails, focusDetails, attachDetails, detachDetails, detailsState,
       history: () => historyOpen ? historyMatches : null, historyCount: () => game.state.recentHandles.length, toggleHistory, chooseHistory, closeHistory: hideHistory };
   };
   BL.donationPopup = { create };

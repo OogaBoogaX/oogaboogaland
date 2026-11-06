@@ -10,7 +10,8 @@
   const { math, models, contributors } = BL;
   const { clamp, lerp, damp, ease, randomInt } = math;
   const { createNode, addChild, removeChild, addTween } = BL.scene;
-  const EAT_RATE = 1 / 20;
+  // A fed Ooga chews on this cycle; chewing takes nothing from the pile, which only donations (and, in real mode, the
+  // API's own records) ever change. Nothing decays with time.
   const CHEW_PERIOD = 3.2;
   const AMMO_MAX = 30, AMMO_PER_BANANA = 3, RELOAD_PERIOD = 1.2, BURST_ROUNDS = 3, BURST_STEP = 0.09, SHOT_PERIOD = 0.44;
   const FOCUSED_AUTO_HOLD = 0.12;
@@ -5553,7 +5554,6 @@
           startBuild(cave);
           return;
         }
-        world.level = Math.max(0, world.level - EAT_RATE * dt);
         const chew = (elapsed + cave.phase) % CHEW_PERIOD / CHEW_PERIOD;
         if (chew < 0.18) parts.armL.rotation.x = lerp(-0.2, -1.05, chew / 0.18);
         else if (chew < 0.42) parts.armL.rotation.x = lerp(-1.05, -2.3, (chew - 0.18) / 0.24);
@@ -6827,5 +6827,5 @@
       }
     };
   };
-  BL.crew = { create, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, preparePresentation, poseEquipment, poseReload, captureMeleePose, thumpArm, THUMP_TIME, bodyHeightOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, BURST_STEP, MELEE_TAP_TIME, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
+  BL.crew = { create, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, preparePresentation, poseEquipment, poseReload, captureMeleePose, thumpArm, THUMP_TIME, bodyHeightOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, LAND_DUST, JET_SPARKS, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, BURST_STEP, MELEE_TAP_TIME, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
 })();

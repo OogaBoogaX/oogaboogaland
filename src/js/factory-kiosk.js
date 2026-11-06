@@ -30,7 +30,17 @@
 // An invoice the API made without its Lightning half (no bolt11, when the node couldn't make one in time) offers
 // on-chain alone.
 //
-// `create(hooks)` returns the flow: `start`, `stop`, `key(e)`, `tap(u, v)` in the canvas's pixels,
+// A receipt-mode invoice (`invoice.accounting === "receipt-v1"`, receipt accounting v1) is driven by its tracked view
+// (`hooks.ledger(id)`), re-read whenever its `version` moves: its authoritative totals and receipts, never the donation
+// events or `seen` notices, which a legacy invoice still follows. Only the invoice's own `paid` state shows the paid
+// screen; a partial payment stays on the address with what came, what is credited and what is left. The address stays
+// on screen and copyable after a partial payment, completion and expiry. Its QR carries an amount only where
+// `hooks.payable(view, address)` allows one (the fresh `left` at the payable address), otherwise the address alone,
+// and none once paid. Bananas shown for receipts are each receipt's own frozen ones, summed only when every receipt is
+// in view; the quote's estimate is never shown as a result. `reopen(view)` shows an invoice from the donor's history,
+// and an account change (`hooks.generation()`) closes the flow.
+//
+// `create(hooks)` returns the flow: `start`, `stop`, `reopen(view)`, `key(e)`, `tap(u, v)` in the canvas's pixels,
 // `receive(id, bananas, handle, paidSats)`, `seen(id, sats, due, left)`, `update(dt)`, `paint()`, which repaints only after a
 // change, and `animate(ctx, time)`,
 // which draws what moves (the wait's spinner) in the canvas's pixels over the painted screen. `state`, `sats`,
@@ -290,7 +300,10 @@
     canvas.width = W;
     canvas.height = H;
     let dirty = true, shown = -1, buttons = [], ticket = 0, detailsVisit = 0, detailsFrom = "quote", shownOpen = null, shownNet = "", saving = null, saveQueued = false, unwatchRate = null, rateAt = 0, rateStale = false;
-    const flow = { canvas, W, H, open: false, state: "idle", digits: "", sats: 0, bananas: 0, invoice: null, reply: null, error: "", left: 0, settle: 0, hold: 0, who: "", chain: null, chainNote: null, got: 0, due: 0, rest: 0, savedDetails: null, detailsDirty: false, detailsSaving: false, detailsError: "", limits: null };
+    let viewVersion = -1, codeKey = "";
+    const flow = { canvas, W, H, open: false, state: "idle", digits: "", sats: 0, bananas: 0, invoice: null, reply: null, error: "", left: 0, settle: 0, hold: 0, who: "", chain: null, chainNote: null, got: 0, due: 0, rest: 0, savedDetails: null, detailsDirty: false, detailsSaving: false, detailsError: "", limits: null,
+      view: null, reopened: false, generation: 0, ledgerQr: null, ledgerAddress: "", ledgerAmount: 0, ledgerBananas: null, receiptOffset: 0,
+      addressIndex: -1, ledgerHistorical: false };
     const bananaAmount = () => real ? BANANAS.format(flow.bananas) : sats(flow.bananas);
     flow.rate = flow.frozenPricing = null;
     const estimate = () => {
@@ -421,6 +434,109 @@
       value.message = BL.donations.carried(flow.sats, value.message, messageMin());
       return value;
     };
+    // ---- receipt mode ----
+    const receiptMode = () => real && !!flow.invoice && flow.invoice.accounting === "receipt-v1";
+    // The address shown: one the visitor picked from the invoice's addresses (`addressIndex`, on the page held), else
+    // the payable one when the view knows it, else the one issued on this visit, else the newest.
+    const autoAddress = () => {
+      const v = flow.view;
+      return v && v.payableAddress || flow.chain && flow.chain.address || v && v.addresses.length && v.addresses[0].address || "";
+    };
+    const selectedAddress = () => {
+      const v = flow.view, picked = v && flow.addressIndex >= 0 ? v.addresses[flow.addressIndex] : null;
+      return picked ? picked.address : autoAddress();
+    };
+    // Some receipt has ever been seen for the invoice (the view's latch, or its totals now): its full-amount Lightning
+    // code would ask for all of it again, so it never comes back, even after a reversal brings the totals to zero.
+    const paidSome = (v) => !!v && (v.observed || v.received > 0 || v.credited > 0 || v.review > 0);
+    // The bananas the invoice's credited receipts count, each its own frozen value (zero when unpriced): known only
+    // when the receipts in view are all of them, so the sum is never partial, scaled or estimated.
+    const ledgerBananas = (v) => {
+      if (!v || !v.read || v.receiptsFrom !== null || v.next) return null;
+      let credit = 0, bananas = 0;
+      for (const r of v.receipts) if (r.credit > 0) {
+        credit += r.credit;
+        if (r.pricing.bananas) bananas += r.pricing.bananas.exact;
+      }
+      return credit === v.credited ? Math.round(bananas * 1000) / 1000 : null;
+    };
+    // The view moved (or the clock ran out): the address and its QR, the bananas, and the screen its state calls for.
+    const syncLedger = () => {
+      const v = flow.view;
+      dirty = true;
+      if (!v) return;
+      if (flow.reopened) { flow.invoice.expires = v.expires; flow.sats = v.due; }
+      // The original Lightning code asks for the whole invoice: once anything has come it goes, from this screen and
+      // the quote alike. A top-up is on-chain only; receipts that come by Lightning anyway still count.
+      if (paidSome(v)) {
+        flow.invoice.bolt = null;
+        flow.invoice.code = null;
+        if (flow.state === "invoice") set("confirming");
+      }
+      // A listed address the provider no longer takes payment at (a payable one is known and this isn't it) shows as
+      // text alone: never a QR, never an amount. Only the payable address with a fresh `left` carries an amount.
+      const address = selectedAddress(), historical = !!address && !!v.payableAddress && address !== v.payableAddress;
+      const amount = address && !historical && hooks.payable ? hooks.payable(v, address, Date.now()) : 0;
+      const key = address && !historical && v.state !== "paid" ? `${address}|${amount}` : "";
+      if (key !== codeKey) {
+        codeKey = key;
+        flow.ledgerQr = key ? BL.qr.encode(amount ? `bitcoin:${address}?amount=${btc(amount)}` : `bitcoin:${address}`) : null;
+      }
+      flow.ledgerAddress = address;
+      flow.ledgerAmount = amount;
+      flow.ledgerHistorical = historical;
+      flow.ledgerBananas = ledgerBananas(v);
+      if (v.state === "paid" && flow.state !== "paid" && !flow.reopened) {
+        const credited = v.receipts.find((r) => r.credit > 0);
+        set("paid");
+        if (hooks.closeDetails) hooks.closeDetails();
+        flow.hold = 0;
+        flow.who = credited ? credited.handle : flow.savedDetails ? flow.savedDetails.handle : "";
+      } else if (flow.state === "paid" && v.state !== "paid") set("confirming");
+    };
+    // Shows `view`, an invoice of the signed-in donor's own from its history: its ledger first, its address from there.
+    flow.reopen = (view) => {
+      flow.start();
+      flow.reopened = true;
+      flow.view = view;
+      flow.invoice = { id: view.id, accounting: "receipt-v1", code: null, bolt: null, expires: view.expires };
+      flow.reply = { request: null, pricing: "receipt", rate: null, bananas: null, lightning: "unavailable" };
+      flow.sats = view.due;
+      set("confirming");
+      syncLedger();
+    };
+    // The receipts list: five rows at a time over the page held, then the server's next older page.
+    const RECEIPT_ROWS = 4;
+    const olderReceipts = () => {
+      const v = flow.view;
+      if (!v) return;
+      if (flow.receiptOffset + RECEIPT_ROWS < v.receipts.length) flow.receiptOffset += RECEIPT_ROWS;
+      else if (v.next && hooks.more) { flow.receiptOffset = 0; hooks.more(v.id, "receipts"); }
+      dirty = true;
+    };
+    const newestReceipts = () => {
+      const v = flow.view;
+      flow.receiptOffset = 0;
+      if (v && v.receiptsFrom !== null && hooks.more) hooks.more(v.id, "newest");
+      dirty = true;
+    };
+    // The invoice's addresses, newest issued first: the next older one on the page held, then the server's next page;
+    // NEWEST goes back to the address picked for the visitor.
+    const olderAddress = () => {
+      const v = flow.view;
+      if (!v || !v.addresses.length) return;
+      const at = flow.addressIndex >= 0 ? flow.addressIndex : v.addresses.findIndex((a) => a.address === flow.ledgerAddress);
+      if (at + 1 < v.addresses.length) flow.addressIndex = at + 1;
+      else if (v.nextAddress && hooks.more) { flow.addressIndex = 0; hooks.more(v.id, "addresses"); }
+      else return;
+      syncLedger();
+    };
+    const newestAddress = () => {
+      const v = flow.view;
+      flow.addressIndex = -1;
+      if (v && v.addressesFrom !== null && hooks.more) hooks.more(v.id, "newest");
+      syncLedger();
+    };
     const invoice = () => {
       const value = taken(), r = hooks.request(value), id = r.id.replace(/[^0-9a-z]/gi, "");
       if (hooks.details) flow.savedDetails = value;
@@ -455,7 +571,9 @@
         flow.bananas = r.bananas ? r.bananas.exact : 0;
         // No bolt11 when the API couldn't make the Lightning half in time: the quote then offers on-chain alone.
         const bolt = r.invoice.bolt11;
-        flow.invoice = { id: r.invoice.id, code: bolt ? BL.qr.encode(`lightning:${bolt.toUpperCase()}`) : null, bolt, expires: r.invoice.expires };
+        flow.invoice = { id: r.invoice.id, code: bolt ? BL.qr.encode(`lightning:${bolt.toUpperCase()}`) : null, bolt, expires: r.invoice.expires, accounting: r.invoice.accounting || "legacy" };
+        flow.view = receiptMode() && hooks.ledger ? hooks.ledger(r.invoice.id) : null;
+        viewVersion = -1; codeKey = ""; flow.ledgerQr = null; flow.receiptOffset = 0; flow.addressIndex = -1;
         flow.chain = flow.chainNote = null;
         flow.got = flow.due = flow.rest = 0;
         flow.left = r.invoice.expires - Date.now() / 1000;
@@ -487,9 +605,11 @@
           flow.chainNote = CHAIN_NOTES[r.error] || "COULDN'T GET AN ADDRESS: PAY BY LIGHTNING";
           return set("quote");
         }
-        flow.chain = { address: r.address, sats: r.sats, send: r.sats, code: BL.qr.encode(`bitcoin:${r.address}?amount=${btc(r.sats)}`) };
+        // A receipt-mode invoice never reuses the issuance amount: its QR follows the view's payable address and `left`.
+        flow.chain = { address: r.address, sats: r.sats, send: r.sats, code: receiptMode() ? null : BL.qr.encode(`bitcoin:${r.address}?amount=${btc(r.sats)}`) };
         shown = -1;
         set("chain");
+        if (receiptMode()) syncLedger();
       });
     };
     const act = (a) => {
@@ -558,6 +678,25 @@
         ticket++;
         return set("quote");
       }
+      if (receiptMode() && (s === "chain" || s === "confirming" || s === "paid" || s === "expired")) {
+        const v = flow.view, payable = !!flow.ledgerAddress && !flow.ledgerHistorical && !!v && v.state !== "paid" && flow.invoice.expires * 1000 > Date.now();
+        if (a === "copy") return flow.ledgerAddress ? hooks.copy(flow.ledgerAddress, "Address") : undefined;
+        if (a === "older") return olderReceipts();
+        if (a === "newest") return newestReceipts();
+        if (a === "addr-older") return olderAddress();
+        if (a === "addr-newest") return newestAddress();
+        // A read that failed or fell behind is tried again only when asked.
+        if (a === "recheck" && v && hooks.refresh) return hooks.refresh(v.id);
+        if (a === "receipts" || s === "chain" && a === "sent") return set("confirming");
+        if (s === "chain" && a === "back") return set(flow.reopened ? "confirming" : "quote");
+        if (s === "confirming" && a === "done") return hooks.close();
+        if (s === "confirming" && a === "back") return payable ? set("chain") : flow.reopened ? hooks.close() : undefined;
+        if (s === "paid" && (a === "watch" || a === "back")) return hooks.watch();
+        if (s === "expired" && flow.reopened && (a === "regen" || a === "back")) return hooks.close();
+        if (s === "expired" && a === "regen") return ask("invoice");
+        if (s === "expired" && a === "back") return set("amount");
+        return;
+      }
       if (s === "chain") {
         if (a === "copy") return hooks.copy(flow.chain.address, "Address");
         if (a === "sent") return set("confirming");
@@ -591,7 +730,7 @@
       if (k === "Backspace") return act("back");
       if ((s === "amount" || s === "quote") && (k === "a" || k === "A")) return act("details");
       if (s === "quote" && (k === "o" || k === "O")) return act("chain");
-      if ((s === "invoice" || s === "chain") && (k === "c" || k === "C")) return act("copy");
+      if ((s === "invoice" || s === "chain" || receiptMode() && (s === "confirming" || s === "paid" || s === "expired")) && (k === "c" || k === "C")) return act("copy");
       if (s === "expired" && (k === "r" || k === "R")) return act("regen");
     };
     // A tap at (u, v) on the canvas: the button under it, or on the attract screen anywhere.
@@ -610,6 +749,10 @@
       flow.rate = flow.frozenPricing = null;
       saving = null; saveQueued = flow.detailsDirty = flow.detailsSaving = false; flow.detailsError = "";
       flow.got = flow.due = flow.rest = 0;
+      flow.view = null; flow.reopened = false; flow.ledgerQr = null; flow.ledgerAddress = ""; flow.ledgerAmount = 0; flow.ledgerBananas = null; flow.receiptOffset = 0;
+      flow.addressIndex = -1; flow.ledgerHistorical = false;
+      viewVersion = -1; codeKey = "";
+      flow.generation = hooks.generation ? hooks.generation() : 0;
       if (hooks.startDetails) hooks.startDetails();
       if (real && hooks.watchRate) unwatchRate = hooks.watchRate();
       quote();
@@ -625,6 +768,14 @@
       saving = null; saveQueued = flow.detailsSaving = false;
       flow.invoice = flow.reply = flow.chain = flow.chainNote = null;
       flow.got = flow.due = flow.rest = 0;
+      // Nothing of the donation stays behind once the flow stops (a sign-out or another account stops it too): its
+      // address, amounts, bananas, donor, details and what its screen last showed.
+      flow.view = null; flow.reopened = false; flow.ledgerQr = null; flow.ledgerAddress = ""; flow.ledgerAmount = 0; flow.ledgerBananas = null;
+      flow.ledgerHistorical = false; flow.addressIndex = -1; flow.receiptOffset = 0;
+      flow.digits = flow.error = flow.who = flow.detailsError = ""; flow.sats = flow.bananas = flow.hold = 0;
+      flow.savedDetails = flow.rate = flow.frozenPricing = null; flow.detailsDirty = false;
+      viewVersion = -1; codeKey = "";
+      canvas.width = W;
       set("idle");
     };
     // A donation event: true when it is this invoice's payment, which the screen then thanks, naming the donor the
@@ -633,7 +784,7 @@
     const RECEIVING = ["quote", "details", "invoice", "waiting", "chaining", "chain", "confirming", "expired"];
     flow.receive = (id, bananas = null, handle = "", paidSats = null) => {
       const s = flow.state;
-      if (!flow.invoice || id !== flow.invoice.id || !RECEIVING.includes(s)) return false;
+      if (!flow.invoice || id !== flow.invoice.id || !RECEIVING.includes(s) || receiptMode()) return false;
       set("paid");
       if (hooks.closeDetails) hooks.closeDetails();
       if (bananas) flow.bananas = real ? bananas.exact : bananas.rounded;
@@ -647,7 +798,7 @@
     // on to the wait for a block, part of it back to the address, which then asks for the rest. The API may send one twice.
     flow.seen = (id, sats, due, left, pricing = null) => {
       const s = flow.state;
-      if (!flow.invoice || id !== flow.invoice.id || !flow.chain || !RECEIVING.includes(s)) return false;
+      if (!flow.invoice || id !== flow.invoice.id || !flow.chain || !RECEIVING.includes(s) || receiptMode()) return false;
       if (pricing && left === 0 && !flow.frozenPricing) { flow.frozenPricing = pricing; estimate(); }
       flow.got = sats;
       flow.due = due;
@@ -663,6 +814,12 @@
     };
     // The invoice's clock, the payment settling, and the paid screen's hold on the bananas.
     flow.update = (dt) => {
+      // Another account, or a sign-out: an invoice made or reopened under the last one goes, and with it its screen.
+      if (real && flow.invoice && hooks.generation && hooks.generation() !== flow.generation) {
+        flow.stop();
+        return hooks.close();
+      }
+      if (receiptMode() && flow.view && flow.view.version !== viewVersion) { viewVersion = flow.view.version; syncLedger(); }
       const s = flow.state;
       estimate();
       if (flow.limits !== limits()) { flow.limits = limits(); dirty = true; }
@@ -676,7 +833,11 @@
       }
       if (s === "invoice" || s === "waiting" || s === "chain" || real && (s === "quote" || s === "details" && detailsFrom === "quote")) {
         flow.left = real ? flow.invoice.expires - Date.now() / 1000 : flow.left - dt;
-        if (flow.left <= 0) return set("expired");
+        if (flow.left <= 0) {
+          set("expired");
+          if (receiptMode()) syncLedger();
+          return;
+        }
         const tick = Math.ceil(flow.left);
         if (tick !== shown) {
           shown = tick;
@@ -710,7 +871,8 @@
       const s = flow.state;
       if (s === "waiting") spin(g, 120, 142, 34, 9, time);
       else if (s === "quoting" || s === "chaining") spin(g, W / 2, 226, 30, 8, time);
-      else if (s === "confirming") spin(g, W / 2, 166, 30, 8, time);
+      else if (s === "confirming" && !receiptMode()) spin(g, W / 2, 166, 30, 8, time);
+      else if (s === "chain" && receiptMode() && !flow.ledgerQr) spin(g, 120, 142, 30, 8, time);
       else if (s === "invoice" && real) spin(g, 200, 335, 9, 4, time);
       else if (s === "details" && CARET.h && (time * 2 | 0) % 2 === 0) {
         g.fillStyle = INK.gold;
@@ -745,6 +907,144 @@
       }
       MSG_STARTS[++lines] = text.length;
       return lines;
+    };
+    // ---- receipt mode's screens ----
+    // What the address means, said wherever it shows: the invoice's donor, credited after confirmation, never the sender,
+    // and only what the provider attaches to the invoice (coverage is the invoice, not the address forever).
+    const REUSE = ["PAYMENTS TO THIS ADDRESS COUNT FOR THIS INVOICE'S DONOR", "ONCE CREDITED. THAT IS NOT PROOF OF WHO SENT THEM.", "ONLY PAYMENTS THE PROVIDER ADDS TO THIS INVOICE COUNT."];
+    const RECEIPT_WORDS = { confirming: "CONFIRMING", credited: "CREDITED", invalid: "INVALID", reversed: "REVERSED", review: "IN REVIEW" };
+    const RECEIPT_INK = { confirming: INK.amber, credited: INK.green, invalid: INK.red, reversed: INK.red, review: INK.amber };
+    const LEDGER_TITLES = { unpaid: "WAITING FOR PAYMENT", partial: "PARTLY PAID", confirming: "CONFIRMING", paid: "PAID IN FULL", review: "IN REVIEW" };
+    const notes = (y) => {
+      const net = shownNet.toUpperCase();
+      write(g, REUSE[0], W / 2, y, 1, INK.dim, "center");
+      write(g, REUSE[1], W / 2, y + 10, 1, INK.dim, "center");
+      write(g, net ? `TEST NETWORK ${net} · NOT REAL BITCOIN` : REUSE[2], W / 2, y + 20, 1, net ? INK.amber : INK.dim, "center");
+    };
+    const addressRow = (y) => {
+      const a = flow.ledgerAddress;
+      panel(g, 20, y, 316, 32);
+      write(g, a ? `${a.slice(0, 16)}...${a.slice(-8)}`.toUpperCase() : "NO ON-CHAIN ADDRESS", 30, y + 13, 1, a ? INK.white : INK.dim);
+      if (!a) return;
+      button(344, y, 36, 32, "", "", "copy");
+      g.strokeStyle = INK.white;
+      g.lineWidth = 1.5;
+      g.strokeRect(355.5, y + 7.5, 9, 11);
+      g.strokeRect(359.5, y + 10.5, 9, 11);
+    };
+    // The invoice's authoritative totals, a label and a value a row. What is left to send is shown only while the view
+    // is current (read since the socket last caught up, no failed read); otherwise it says it is not current, never a
+    // remainder held over from before.
+    const totalsRows = (x, y, w, v) => {
+      const leftShown = v.fresh && !v.error && v.left !== null;
+      const rows = [["DUE", sats(v.due)], ["RECEIVED", sats(v.received)], ["CREDITED", sats(v.credited)], ["IN REVIEW", sats(v.review)],
+        ["LEFT TO SEND", leftShown ? sats(v.left) : v.fresh && !v.error ? "UNAVAILABLE" : "NOT CURRENT"]];
+      for (let i = 0; i < rows.length; i++) {
+        write(g, rows[i][0], x, y + i * 13, 1, INK.dim);
+        writeFit(g, rows[i][1], x + w, y + i * 13, 1, i === 3 && v.review || i === 4 && !leftShown ? INK.amber : INK.white, w - 80, "right");
+      }
+    };
+    const paintLedger = (s) => {
+      const v = flow.view, read = !!v && v.revision >= 0;
+      if (s === "chain") {
+        face(g, "SEND BITCOIN ON-CHAIN", INK.gold, INK.bg, true);
+        if (flow.ledgerQr) qrBox(g, 20, 42, 200, flow.ledgerQr, false);
+        else {
+          panel(g, 20, 42, 200, 200);
+          if (flow.ledgerHistorical) {
+            write(g, "AN EARLIER ADDRESS", 120, 120, 1, INK.amber, "center");
+            write(g, "NOT THE ONE TAKING", 120, 134, 1, INK.dim, "center");
+            write(g, "PAYMENT NOW", 120, 148, 1, INK.dim, "center");
+          }
+        }
+        // Nothing left is said only from a current view; a stale one says so instead of repeating an old remainder.
+        const none = read && (v.state === "paid" || v.fresh && v.left === 0), current = read && v.fresh;
+        if (v && v.error && !flow.ledgerAmount) {
+          write(g, "COULDN'T CHECK", 232, 48, 1, INK.red);
+          write(g, "THE AMOUNT NOW", 232, 60, 1, INK.red);
+          button(232, 74, 148, 24, "CHECK AGAIN", "", "recheck", 1);
+        } else if (flow.ledgerAmount) {
+          write(g, "SEND", 232, 48, 1, INK.dim);
+          writeFit(g, `${sats(flow.ledgerAmount)} SATS`, 232, 60, 2, INK.white, 148);
+          write(g, `${btc(flow.ledgerAmount)} BTC`, 232, 82, 1, INK.white);
+        } else {
+          write(g, "AMOUNT", 232, 48, 1, INK.dim);
+          writeFit(g, none ? "NOTHING LEFT" : current ? "REMAINING" : read ? "AMOUNT NOT" : "CHECKING", 232, 60, 2, INK.amber, 148);
+          writeFit(g, none ? "TO SEND" : current ? "UNAVAILABLE" : read ? "CURRENT" : "THE AMOUNT", 232, 80, 2, INK.amber, 148);
+        }
+        write(g, "SEND BEFORE", 232, 104, 1, INK.dim);
+        write(g, clock(flow.left), 232, 116, 4, flow.left <= 60 ? INK.red : INK.gold);
+        if (read) totalsRows(232, 160, 148, v);
+        write(g, read && v.received ? `RECEIVED ${sats(v.received)} OF ${sats(v.due)} SATS` : "SCAN WITH YOUR BITCOIN WALLET", W / 2, 250, 1, read && v.received ? INK.amber : INK.white, "center");
+        addressRow(266);
+        button(20, 312, 150, 46, "< BACK", "", "back");
+        button(178, 312, 202, 46, read && v.received ? "RECEIPTS >" : "I'VE SENT IT", "primary", "sent");
+        notes(363);
+        closeButton();
+      } else if (s === "confirming") {
+        face(g, read ? LEDGER_TITLES[v.state] : "READING YOUR INVOICE", read && v.state === "review" ? INK.amber : INK.gold, INK.bg, true);
+        panel(g, 30, 38, 340, 82);
+        if (read) totalsRows(42, 48, 316, v);
+        else write(g, v && v.error ? "COULDN'T READ THIS INVOICE NOW" : "ONE MOMENT...", W / 2, 74, 1, v && v.error ? INK.red : INK.dim, "center");
+        const b = flow.ledgerBananas;
+        if (v && v.error) button(130, 121, 140, 14, "CHECK AGAIN", "", "recheck", 1);
+        else if (read && !v.fresh) write(g, "CHECKING FOR CURRENT FIGURES...", W / 2, 126, 1, INK.amber, "center");
+        else if (b !== null) write(g, `${BANANAS.format(b)} BANANA${b === 1 ? "" : "S"} CREDITED`, W / 2, 126, 1, INK.gold, "center");
+        else if (read && v.credited) write(g, "BANANAS: EACH RECEIPT'S OWN, BELOW", W / 2, 126, 1, INK.dim, "center");
+        panel(g, 30, 138, 340, 92);
+        write(g, "RECEIPTS", 42, 146, 1, INK.dim);
+        const rows = v ? v.receipts : [], at = flow.receiptOffset;
+        if (at > 0 || v && v.receiptsFrom !== null) button(234, 141, 64, 16, "NEWEST", "", "newest", 1);
+        if (at + RECEIPT_ROWS < rows.length || v && v.next) button(302, 141, 64, 16, "OLDER", "", "older", 1);
+        for (let i = 0; i < RECEIPT_ROWS && at + i < rows.length; i++) {
+          const r = rows[at + i], y = 164 + i * 16;
+          write(g, `${r.method === "lightning" ? "LIGHTNING" : "ON-CHAIN"} ${sats(r.sats)}`, 42, y, 1, INK.white);
+          write(g, r.pricing === null ? "PRICING" : r.pricing.bananas ? `${BANANAS.format(r.pricing.bananas.exact)} BAN` : "UNPRICED", 290, y, 1, INK.dim, "right");
+          write(g, RECEIPT_WORDS[r.state], 358, y, 1, RECEIPT_INK[r.state], "right");
+        }
+        if (!rows.length) write(g, read ? "NO PAYMENTS YET" : "", 42, 164, 1, INK.dim);
+        // Which of the invoice's addresses this is: the payable one, or an earlier one shown as text alone.
+        const list = v ? v.addresses : [], picked = list.findIndex((a) => a.address === flow.ledgerAddress);
+        write(g, flow.ledgerHistorical ? "EARLIER ADDRESS" : v && v.payableAddress && flow.ledgerAddress === v.payableAddress
+          ? "PAYING ADDRESS" : "ADDRESS", 30, 238, 1, flow.ledgerHistorical ? INK.amber : INK.dim);
+        if (picked >= 0 && picked + 1 < list.length || v && v.nextAddress) button(302, 233, 64, 16, "OLDER", "", "addr-older", 1);
+        if (flow.addressIndex >= 0 || v && v.addressesFrom !== null) button(234, 233, 64, 16, "NEWEST", "", "addr-newest", 1);
+        addressRow(254);
+        notes(292);
+        const payable = !!flow.ledgerAddress && !flow.ledgerHistorical && read && v.state !== "paid" && flow.invoice.expires * 1000 > Date.now();
+        button(30, 326, 120, 52, "< ADDRESS", payable ? "" : "off", "back");
+        button(160, 326, 210, 52, "DONE", "primary", "done");
+        closeButton();
+      } else if (s === "paid") {
+        const b = flow.ledgerBananas;
+        face(g, "PAYMENT RECEIVED!", INK.gold, INK.paid);
+        banana(g, W / 2, 92, 34);
+        write(g, `${sats(v.credited)} SATS CREDITED`, W / 2, 124, 2, INK.white, "center");
+        if (b !== null) writeFit(g, `${BANANAS.format(b)} BANANA${b === 1 ? "" : "S"}`, W / 2, 146, 4, INK.gold, 340, "center");
+        else write(g, "BANANAS: EACH RECEIPT'S OWN", W / 2, 152, 2, INK.gold, "center");
+        write(g, flow.who ? `THANK YOU @${flow.who}!` : "THANK YOU!", W / 2, 184, 1, INK.white, "center");
+        if (flow.ledgerAddress) {
+          addressRow(198);
+          notes(236);
+        }
+        panel(g, 30, 270, 340, 32, INK.green);
+        write(g, "THE COOKER IS BEHIND YOU. WATCH IT COOK!", W / 2, 283, 1, INK.green, "center");
+        button(30, 312, 120, 56, "RECEIPTS", "", "receipts");
+        button(160, 312, 210, 56, "WATCH IT COOK >", "primary", "watch");
+      } else {
+        face(g, "INVOICE EXPIRED", INK.red);
+        if (read && v.received) write(g, `RECEIVED ${sats(v.received)} · CREDITED ${sats(v.credited)} SATS`, W / 2, 64, 1, INK.white, "center");
+        else write(g, "THIS INVOICE TIMED OUT.", W / 2, 60, 2, INK.white, "center");
+        write(g, "LATE PAYMENTS THE PROVIDER ADDS TO THIS INVOICE", W / 2, 96, 1, INK.gold, "center");
+        write(g, "STILL COUNT FOR ITS DONOR ONCE CREDITED.", W / 2, 106, 1, INK.gold, "center");
+        if (flow.ledgerAddress) {
+          addressRow(130);
+          notes(172);
+        }
+        button(30, 326, 120, 52, "RECEIPTS", "", "receipts");
+        button(160, 326, 210, 52, flow.reopened ? "DONE" : "NEW INVOICE", "primary", "regen");
+        closeButton();
+      }
     };
     // Repaints after a change only.
     flow.paint = () => {
@@ -822,7 +1122,7 @@
         } else write(g, "COUNTED WHEN PAID", 42, 214, 2, INK.gold);
         if (flow.chainNote) write(g, flow.chainNote, W / 2, 276, 1, INK.red, "center");
         else if (flow.reply.lightning === "limit" || overLightning()) write(g, "OVER LIGHTNING LIMIT · PAY ON-CHAIN", W / 2, 276, 1, INK.amber, "center");
-        else if (!v.bolt) write(g, "LIGHTNING IS UNAVAILABLE NOW: PAY ON-CHAIN", W / 2, 276, 1, INK.red, "center");
+        else if (!v.bolt) write(g, receiptMode() && paidSome(flow.view) ? "PART PAID: TOP UP ON-CHAIN ONLY" : "LIGHTNING IS UNAVAILABLE NOW: PAY ON-CHAIN", W / 2, 276, 1, receiptMode() && paidSome(flow.view) ? INK.amber : INK.red, "center");
         else if (!rate) write(g, "NO PRICE YET: THE BANANAS ARE COUNTED LATER", W / 2, 276, 1, INK.red, "center");
         else if (rate.stale) {
           const at = new Date(rate.at);
@@ -937,7 +1237,8 @@
           write(g, "YOUR DONATION WILL TRIGGER THE BANANA COOKER WHEN PAID.", 48, 283, 1, INK.white);
           button(130, 320, 140, 48, "X CANCEL", "", "cancel");
         } else {
-          write(g, hooks.demo ? "SHARE THIS DEMO LINK" : "SCAN WITH YOUR WALLET", 120, 250, 1, INK.white, "center");
+          const got = receiptMode() && flow.view && flow.view.received;
+          write(g, hooks.demo ? "SHARE THIS DEMO LINK" : got ? `RECEIVED ${sats(got)} OF ${sats(flow.view.due)} SATS` : "SCAN WITH YOUR WALLET", 120, 250, 1, got ? INK.amber : INK.white, "center");
           panel(g, 20, 266, 316, 32);
           write(g, hooks.demo ? "THIS PAGE'S /DONATE LINK" : `${v.bolt.slice(0, 18)}...${v.bolt.slice(-5)}`.toUpperCase(), 30, 279, 1, INK.white);
           button(344, 266, 36, 32, "", "", "copy");
@@ -954,6 +1255,8 @@
         }
         const net = shownNet.toUpperCase();
         write(g, hooks.demo ? "DEMO ONLY · NO BITCOIN WILL BE SENT" : !real ? "PAYMENTS ARE SIMULATED IN THIS BUILD" : net ? `TEST INVOICE ON ${net} · PAY WITH A ${net} WALLET` : "PAY WITH ANY LIGHTNING WALLET", W / 2, 378, 1, net ? INK.amber : INK.dim, "center");
+      } else if (receiptMode() && (s === "chain" || s === "confirming" || s === "paid" || s === "expired")) {
+        paintLedger(s);
       } else if (s === "chaining") {
         face(g, "PAY ON-CHAIN", INK.gold, INK.bg, true);
         write(g, `${sats(flow.sats)} SATS`, W / 2, 110, 4, INK.gold, "center");
