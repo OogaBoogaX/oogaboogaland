@@ -1,7 +1,17 @@
 {
   "version": 1,
   "lane": "manual",
-  "openedOn": "2026-11-03",
+  "openedOn": "2026-11-06",
   "round": "6d183631f9193c413118eb4608b46de17ead3ec9",
-  "entries": []
+  "entries": [
+    {
+      "pr": 483,
+      "head": "baf2b805b3b7720ceb013275028cecaf1ef30cb9",
+      "author": "natalievarty",
+      "path": "src/characters/natalievarty.js",
+      "base": null,
+      "hash": "57bf5ee8bee431a194d849cc80fa39425a3941d342c7e7db02c5ce24b4268a5b",
+      "lane": "manual"
+    }
+  ]
 }
