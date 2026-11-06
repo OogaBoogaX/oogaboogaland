@@ -96,8 +96,19 @@ sequenced stream. Both are validated field by field and applied in place:
   cursor is known.
 - **Replay marker:** `{ type: "replay", after, through, complete }`. With `complete: true` the
   cursor moves to `through`; with `complete: false` (a gap) the cursor moves to `through` and the
-  signed-in history is read again too. After either, every tracked invoice reads its private
-  status again before it counts as fresh: what was held may predate the reconnect. Tally, pile and
+  signed-in history is read again too. After either, no tracked invoice counts as fresh until it
+  reads its private status again (what was held may predate the reconnect). Only the invoices a
+  screen shows (`showing`: the booth's or the popup's kiosk) are read at once; any other is read
+  when a screen shows it, so a reconnect sends no read for every invoice the visitor ever tried.
+  Both screens can show one invoice at once (a history row reopened beside the booth), so each
+  counts and it stays shown until both let go. A read begun before the catch-up is dropped; it is
+  read again for a screen that shows it, for a read asked for meanwhile or for a page the visitor
+  turned to, and otherwise left behind until a screen shows it. The
+  same holds when a frame moves an invoice's totals: one a screen shows reads again, any other is
+  marked behind. A shown invoice's read answered `busy` is retried by itself after 2, 4, 8 and 16
+  seconds, one timer at a time, then left to CHECK AGAIN; the retry is cancelled when no screen shows
+  the invoice, when it is dropped and on an account change, and starts over after a catch-up. These
+  reads share the API's per-address budget; the page assumes no separate read budget. Tally, pile and
   `recent` arrive on every connect anyway. A marker with `through: null` leaves the cursor unset.
 - **Failed reads:** a status read that fails, is refused or falls behind leaves the invoice not
   fresh and drops its payable evidence until a later read succeeds. Nothing retries by itself;
@@ -174,13 +185,22 @@ invoice's authoritative view every frame and apply it only when its revision mov
   `bananas: null` shows as unpriced (zero bananas). The page never converts sats itself.
 - **Success:** only invoice `state: "paid"` shows the full-payment screen. A credited partial
   receipt stays on the address screen with what was received and what is left. A receipt
-  animating in the scene never closes or completes the kiosk; the cooker cooks each credited
-  receipt as it comes.
+  animating in the scene never closes or completes the kiosk. A credited receipt for the invoice on
+  the Factory booth's own screen, while the visitor stands at it, waits as a paid tip does: WATCH, or
+  stepping away, cooks it once, in view. Any other credited receipt is cooked as it comes.
 - **The address shown** is the one the visitor picked from the invoice's addresses (Older and
   Newest on the ledger page through the address pages), otherwise `payableAddress` when known,
   otherwise the one this visit was issued, otherwise the newest listed. A listed address that is
   not the known payable one is labelled as earlier and shown as text alone, never as a QR or with
   an amount: being retained is not being payable.
+- **Lightning only from a verified, current status** (`lightningCode`): a receipt-mode invoice's
+  Lightning code is offered only as a fresh status read at the current totals revision gives it,
+  with `lightning: "available"` and its `bolt11`, while the invoice is unpaid, unexpired and has
+  never had a receipt and the stream is caught up. The code the issuance reply carried is never
+  offered on its own, before the first read included: nothing from issuance says it is still
+  usable. The moment the view stops being current (the socket gone, the status saying otherwise,
+  totals moved past the read, the expiry passed) the code goes and the Lightning screen returns to
+  the quote. Legacy invoices keep their issuance code as before.
 - **Lightning after any receipt:** once any receipt has ever been seen for an invoice (a frame for
   it, a receipt in its status, or `received`, `credited` or `review` above zero), its original
   Lightning code (which asks for the whole target) is cleared from the flow, the quote and a
@@ -215,10 +235,15 @@ invoice's authoritative view every frame and apply it only when its revision mov
   an account change) is retired for good: a screen still holding it keeps its records as history,
   and no late reply, catch-up or frame makes it current again.
 - **Paging lists:** NEWEST on the receipts or the addresses brings back that list alone; the other
-  stays on its page, even with a page of it on its way.
+  stays on its page, even with a page of it on its way. While an address page is on its way the
+  ledger shows no address, paying label, QR or amount, so the page held never flashes in its place.
 - **Account at issuance:** the kiosk fixes the account generation when an invoice is asked for. A
   change while it is on its way resets the kiosk without showing it; an invoice asked for after a
-  change belongs to the new account.
+  change belongs to the new account. An invoice left with its address shown is waited on (so its
+  payment can say it was the visitor's) only while the account that made it is still the page's:
+  neither the stop an account change causes nor the next invoice asked for after it puts the last
+  account's invoice on the waiting list, and `waitFor` takes only this page's own invoices, which an
+  account change clears.
 - **Snapshot animation (defensive):** `recentReceipts` marks animated only receipts it shows with a
   `firstCreditedSeq`. bananapayserver lists only ever-credited receipts today; the contract does not
   promise that, so one listed before any credit still animates its live first credit.
@@ -649,7 +674,8 @@ mode, and the director holds the API's pile. In real mode the existing signed-ou
 these through the running app: the pile stays the API's (no frame moves it), a duplicate counts once,
 and the page's ledger stays put; the receipt extension above adds the same for receipt frames. Not
 covered by a suite check: the crew not eating from a simulated pile. The real-mode check can't show it
-(the director rewrites the level every frame), the only suite check is the source-text `noDecay` one,
+(the director rewrites the level every frame), the only suite check is the source-text `noDecay` one
+(over the director, crew, pile, `game.js` and every `scene-*.js`),
 and a hub check that waits on an eating Ooga would lean on arrival behaviour that fails before this PR
 too. The probe recorded it instead: the simulated pile held at 50 over 30 s with an eating Ooga in
 every frame.

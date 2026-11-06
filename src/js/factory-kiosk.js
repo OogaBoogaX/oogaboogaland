@@ -436,6 +436,15 @@
     };
     // ---- receipt mode ----
     const receiptMode = () => real && !!flow.invoice && flow.invoice.accounting === "receipt-v1";
+    // The invoice this screen shows, reported to the ledger (`hooks.showing`) so it is the one read again on a catch-up or
+    // a move; the address page asked for (`addressWait`, the page held when it was asked) shows nothing until it arrives.
+    let heldView = null, addressWait = null;
+    const setView = (view) => {
+      if (heldView && hooks.showing) hooks.showing(heldView, false);
+      flow.view = heldView = view;
+      addressWait = null;
+      if (view && hooks.showing) hooks.showing(view, true);
+    };
     // The address shown: one the visitor picked from the invoice's addresses (`addressIndex`, on the page held), else
     // the payable one when the view knows it, else the one issued on this visit, else the newest.
     const autoAddress = () => {
@@ -466,13 +475,18 @@
       dirty = true;
       if (!v) return;
       if (flow.reopened) { flow.invoice.expires = v.expires; flow.sats = v.due; }
-      // The original Lightning code asks for the whole invoice: once anything has come it goes, from this screen and
-      // the quote alike. A top-up is on-chain only; receipts that come by Lightning anyway still count.
-      if (paidSome(v)) {
-        flow.invoice.bolt = null;
-        flow.invoice.code = null;
-        if (flow.state === "invoice") set("confirming");
+      const now = Date.now();
+      // Lightning in receipt mode is only the code a fresh status says the provider still takes (`hooks.lightning`):
+      // never the issuance reply's on its own, never once anything has come (it asks for the whole invoice; a top-up is
+      // on-chain only, though receipts that come by Lightning anyway still count), and gone the moment the view stops
+      // being current, from this screen and the quote alike.
+      const live = paidSome(v) || !hooks.lightning ? null : hooks.lightning(v, now);
+      if (live !== flow.invoice.bolt) {
+        flow.invoice.bolt = live;
+        flow.invoice.code = live ? BL.qr.encode(`lightning:${live.toUpperCase()}`) : null;
       }
+      if (!live && flow.state === "invoice") set(paidSome(v) ? "confirming" : "quote");
+      if (addressWait && (v.addressesFrom !== addressWait.from || !v.loading)) addressWait = null;
       // A listed address the provider no longer takes payment at (a payable one is known and this isn't it) shows as
       // text alone: never a QR, never an amount. A QR is drawn only for the address taking payment now (`paying`, from a
       // current view), or for the one just issued on this visit before the invoice's first read, and that only while the
@@ -480,8 +494,8 @@
       // or fallen behind, the socket has gone, the invoice has expired or the view is no longer tracked, every address is
       // history: text to see and copy, never "paying". Only the paying address with a fresh `left` carries an amount; the
       // issued address never does (no issuance amount is ever reused).
-      const now = Date.now(), paying = hooks.paying ? hooks.paying(v, now) : null;
-      const address = selectedAddress(), historical = !!address && !!v.payableAddress && address !== v.payableAddress;
+      const paying = hooks.paying ? hooks.paying(v, now) : null;
+      const address = addressWait ? "" : selectedAddress(), historical = !!address && !!v.payableAddress && address !== v.payableAddress;
       const issued = !v.read && !v.error && !v.retired && !!flow.chain && address === flow.chain.address
         && !!hooks.live && hooks.live() && Number.isSafeInteger(flow.invoice.expires) && flow.invoice.expires * 1000 > now;
       const current = !!address && !historical && (address === paying || issued);
@@ -513,7 +527,7 @@
     flow.reopen = (view) => {
       flow.start();
       flow.reopened = true;
-      flow.view = view;
+      setView(view);
       flow.invoice = { id: view.id, accounting: "receipt-v1", code: null, bolt: null, expires: view.expires };
       flow.reply = { request: null, pricing: "receipt", rate: null, bananas: null, lightning: "unavailable" };
       flow.sats = view.due;
@@ -542,14 +556,14 @@
       if (!v || !v.addresses.length) return;
       const at = flow.addressIndex >= 0 ? flow.addressIndex : v.addresses.findIndex((a) => a.address === flow.ledgerAddress);
       if (at + 1 < v.addresses.length) flow.addressIndex = at + 1;
-      else if (v.nextAddress && hooks.more) { flow.addressIndex = 0; hooks.more(v.id, "addresses"); }
+      else if (v.nextAddress && hooks.more) { flow.addressIndex = 0; addressWait = { from: v.addressesFrom }; hooks.more(v.id, "addresses"); }
       else return;
       syncLedger();
     };
     const newestAddress = () => {
       const v = flow.view;
       flow.addressIndex = -1;
-      if (v && v.addressesFrom !== null && hooks.more) hooks.more(v.id, "newest", "addresses");
+      if (v && v.addressesFrom !== null && hooks.more) { addressWait = { from: v.addressesFrom }; hooks.more(v.id, "newest", "addresses"); }
       syncLedger();
     };
     const invoice = () => {
@@ -562,9 +576,10 @@
       if (hooks.details) flow.detailsChanged();
     };
     // Moving on from an invoice whose on-chain address was shown, with nothing received for it: the page waits on it, so
-    // its donation can tell the visitor it was theirs whenever it confirms.
+    // its donation can tell the visitor it was theirs whenever it confirms. Only while the account that made it is still
+    // the page's: a stop the account's change causes never puts the last account's invoice back on the list.
     const letGo = () => {
-      if (flow.chain && flow.state !== "paid") hooks.waitFor(flow.invoice.id);
+      if (flow.chain && flow.state !== "paid" && (!hooks.generation || hooks.generation() === flow.generation)) hooks.waitFor(flow.invoice.id);
     };
     // Real mode: the API's invoice for this amount, then `next`. A reply that finds the visitor gone on is dropped.
     const ask = (next) => {
@@ -591,10 +606,11 @@
         flow.frozenPricing = null;
         flow.savedDetails = value;
         flow.bananas = r.bananas ? r.bananas.exact : 0;
-        // No bolt11 when the API couldn't make the Lightning half in time: the quote then offers on-chain alone.
-        const bolt = r.invoice.bolt11;
-        flow.invoice = { id: r.invoice.id, code: bolt ? BL.qr.encode(`lightning:${bolt.toUpperCase()}`) : null, bolt, expires: r.invoice.expires, accounting: r.invoice.accounting || "legacy" };
-        flow.view = receiptMode() && hooks.ledger ? hooks.ledger(r.invoice.id) : null;
+        // No bolt11 when the API couldn't make the Lightning half in time: the quote then offers on-chain alone. A
+        // receipt-mode invoice offers none from issuance at all: its ledger offers the code once a fresh status verifies it.
+        const accounting = r.invoice.accounting || "legacy", bolt = accounting === "receipt-v1" ? null : r.invoice.bolt11;
+        flow.invoice = { id: r.invoice.id, code: bolt ? BL.qr.encode(`lightning:${bolt.toUpperCase()}`) : null, bolt, expires: r.invoice.expires, accounting };
+        setView(receiptMode() && hooks.ledger ? hooks.ledger(r.invoice.id) : null);
         viewVersion = -1; codeKey = ""; flow.ledgerQr = null; flow.receiptOffset = 0; flow.addressIndex = -1;
         flow.chain = flow.chainNote = null;
         flow.got = flow.due = flow.rest = 0;
@@ -771,7 +787,7 @@
       flow.rate = flow.frozenPricing = null;
       saving = null; saveQueued = flow.detailsDirty = flow.detailsSaving = false; flow.detailsError = "";
       flow.got = flow.due = flow.rest = 0;
-      flow.view = null; flow.reopened = false; flow.ledgerQr = null; flow.ledgerAddress = ""; flow.ledgerAmount = 0; flow.ledgerBananas = null; flow.receiptOffset = 0;
+      setView(null); flow.reopened = false; flow.ledgerQr = null; flow.ledgerAddress = ""; flow.ledgerAmount = 0; flow.ledgerBananas = null; flow.receiptOffset = 0;
       flow.addressIndex = -1; flow.ledgerHistorical = flow.ledgerCurrent = flow.ledgerPaying = false; flow.ledgerUntil = 0;
       viewVersion = -1; codeKey = "";
       flow.generation = hooks.generation ? hooks.generation() : 0;
@@ -792,7 +808,7 @@
       flow.got = flow.due = flow.rest = 0;
       // Nothing of the donation stays behind once the flow stops (a sign-out or another account stops it too): its
       // address, amounts, bananas, donor, details and what its screen last showed.
-      flow.view = null; flow.reopened = false; flow.ledgerQr = null; flow.ledgerAddress = ""; flow.ledgerAmount = 0; flow.ledgerBananas = null;
+      setView(null); flow.reopened = false; flow.ledgerQr = null; flow.ledgerAddress = ""; flow.ledgerAmount = 0; flow.ledgerBananas = null;
       flow.ledgerHistorical = flow.ledgerCurrent = flow.ledgerPaying = false; flow.ledgerUntil = 0; flow.addressIndex = -1; flow.receiptOffset = 0;
       flow.digits = flow.error = flow.who = flow.detailsError = ""; flow.sats = flow.bananas = flow.hold = 0;
       flow.savedDetails = flow.rate = flow.frozenPricing = null; flow.detailsDirty = false;

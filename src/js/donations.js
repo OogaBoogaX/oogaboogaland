@@ -154,7 +154,10 @@
   // page life so the payment, when it is seen and when it confirms, can say it was theirs: `waitFor(id)`,
   // `waitingOn(id)`, and `waited(id)`, true once when that invoice's donation comes. Past WAIT_MAX the oldest is dropped.
   const WAIT_MAX = 16, waiting = new Set();
+  // Only an invoice this page asked for under the current account: an account change clears `ownInvoices`, so a stop
+  // caused by it can't put the last account's invoice back.
   const waitFor = (id) => {
+    if (!ownInvoices.has(id)) return;
     waiting.add(id);
     if (waiting.size > WAIT_MAX) waiting.delete(waiting.values().next().value);
   };
@@ -319,7 +322,7 @@
         expires: 0, lightning: null, bolt11: null, payableAddress: null, payableRevision: -1,
         receipts: [], receiptsFrom: null, next: null, addresses: [], addressesFrom: null, nextAddress: null, observed: false,
         fresh: false, awaiting: false, loading: false, again: null, navReceipts: 0, navAddresses: 0, newestReceipts: false, newestAddresses: false,
-        staleReads: 0, pending: null, read: false, retired: false, error: "", version: 0 };
+        staleReads: 0, pending: null, read: false, retired: false, retries: 0, retryTimer: 0, error: "", version: 0 };
       views.set(id, v);
       // Past the cap the oldest goes untracked, but a screen may still hold it: it keeps its records as history and loses,
       // for good, every claim to being current.
@@ -340,6 +343,30 @@
     v.awaiting = true;
     v.payableRevision = -1;
     v.version++;
+    shown.delete(v);
+    cancelRetry(v);
+  };
+  // The invoices a screen shows (the Factory booth's or the popup's kiosk, `showing`), only ever tracked ones, each with
+  // how many screens show it: the booth and the popup can both hold one (a history row reopened beside the booth), and
+  // it stays shown until both let go. They are the ones read again after a catch-up and when their totals move; any
+  // other tracked view is only marked behind, and read once a screen shows it, so a reconnect never sends a read for
+  // every invoice the visitor ever tried. Keyed by the view itself, so a screen letting go of a view since dropped never
+  // counts against a newer view of the same invoice.
+  const shown = new Map();
+  // A shown invoice's read the API answered `busy` is tried again by itself after these delays, then left to CHECK AGAIN:
+  // one timer a shown view at most, cancelled when no screen shows it, when it is dropped and on an account change.
+  const RETRY_MS = [2000, 4000, 8000, 16000];
+  const cancelRetry = (v) => {
+    if (v.retryTimer) window.clearTimeout(v.retryTimer);
+    v.retryTimer = 0;
+  };
+  const retryBusy = (v) => {
+    if (v.retryTimer || v.retries >= RETRY_MS.length || !shown.has(v)) return;
+    const gen = generation;
+    v.retryTimer = window.setTimeout(() => {
+      v.retryTimer = 0;
+      if (gen === generation && views.get(v.id) === v && shown.has(v)) readStatus(v);
+    }, RETRY_MS[v.retries++]);
   };
   // The stream is up and caught up (exported as `streamCurrent`: the address issued on a visit carries a QR before its
   // invoice's first read only while this holds).
@@ -375,6 +402,12 @@
   // behind read, a disconnect, an expiry or an untracked view leaves every address history, never "paying".
   const payingAddress = (v, now = Date.now()) => v && !v.retired && v.fresh && v.payableAddress && v.payableRevision === v.revision
     && v.state !== "paid" && isExpiry(v.expires) && v.expires * 1000 > now ? v.payableAddress : null;
+  // A receipt-mode invoice's Lightning code, only as a fresh status read at the current totals revision gives it: the
+  // provider says `available` with its code, the invoice is unpaid, unexpired and has never had a receipt, and the view is
+  // tracked and caught up. Otherwise null. The code the issuance reply carried is never offered on its own: nothing from
+  // issuance says it is still usable.
+  const lightningCode = (v, now = Date.now()) => v && !v.retired && v.fresh && v.read && v.lightning === "available" && typeof v.bolt11 === "string" && v.bolt11
+    && !v.observed && v.payableRevision === v.revision && v.state !== "paid" && isExpiry(v.expires) && v.expires * 1000 > now ? v.bolt11 : null;
   // The amount an amount-bearing QR may ask for at `address`: the fresh remainder, only at the paying address. Otherwise
   // 0, and the page shows the address alone.
   const payableSats = (v, address, now = Date.now()) => address && payingAddress(v, now) === address && Number.isSafeInteger(v.left) && v.left > 0 ? v.left : 0;
@@ -430,12 +463,15 @@
     v.pending = call("/donations/status", body).then((r) => {
       if (gen !== generation || views.get(v.id) !== v) return { error: "stale" };
       v.loading = false;
-      // Begun before the latest catch-up: freshness counts from when a read began, so the whole reply is dropped and
-      // the read the catch-up asked for runs instead.
+      // Begun before the latest catch-up: freshness counts from when a read began, so the whole reply is dropped. It
+      // is read again when a screen shows it (the catch-up's own read for it waits as `again`), when a read was asked
+      // for meanwhile, or when it was a page the visitor turned to; any other stays behind, as the catch-up left it,
+      // until a screen shows it, so a read begun for a view nobody shows now never runs beside the catch-up's.
       if (began !== epoch) {
-        const next = v.again || "first";
+        const next = v.again;
         v.again = null;
-        return readStatus(v, next);
+        if (!next && page === "first" && !shown.has(v)) return { error: "awaiting" };
+        return readStatus(v, next || "first");
       }
       if ((r.error === "resync" || r.error === "cursor") && !restarted) {
         v.receiptsFrom = v.addressesFrom = null;
@@ -444,7 +480,9 @@
       const s = r.error ? null : statusOf(r);
       if (!s || s.totals.id !== v.id) {
         unread(v, r.error || "invalid");
-        // A read someone asked for meanwhile still runs; nothing here retries by itself.
+        // A busy API: a shown view tries again by itself on the bounded schedule (`retryBusy`); any other failure waits
+        // for CHECK AGAIN or the next catch-up. A read someone asked for meanwhile still runs.
+        if (r.error === "busy") retryBusy(v);
         const next = v.again;
         v.again = null;
         return next ? readStatus(v, next) : { error: v.error };
@@ -460,6 +498,8 @@
         return readStatus(v, next, restarted);
       }
       v.staleReads = 0;
+      v.retries = 0;
+      cancelRetry(v);
       v.error = "";
       applyTotals(v, s.totals, true);
       v.expires = s.expires; v.lightning = s.lightning;
@@ -562,13 +602,14 @@
     generation++;
     state.account = next;
     for (const v of views.values()) retire(v);
-    views.clear(); ownInvoices.clear(); ownRequestSats.clear(); waiting.clear(); remembered.clear();
+    views.clear(); shown.clear(); ownInvoices.clear(); ownRequestSats.clear(); waiting.clear(); remembered.clear();
     state.history = null;
     notify();
     historyPage();
   };
-  // A connection caught up: every tracked invoice is read again before it counts as fresh (what was held may be from
-  // before the socket went), and after a gap in the stream the history is too.
+  // A connection caught up: no tracked invoice counts as fresh until it is read again (what was held may be from before
+  // the socket went). The ones a screen shows are read now, their retries starting over; the rest when one is shown.
+  // After a gap in the stream the history is read again too.
   const resync = (gap) => {
     epoch++;
     if (gap) state.resyncs++;
@@ -576,7 +617,11 @@
       v.awaiting = true;
       v.fresh = false;
       v.version++;
-      readStatus(v);
+      if (shown.has(v)) {
+        v.retries = 0;
+        cancelRetry(v);
+        readStatus(v);
+      }
     }
     if (gap) historyPage();
   };
@@ -587,12 +632,14 @@
     notify();
   };
   const seqOk = (data) => isCount(data.seq) && typeof data.replay === "boolean";
-  // Totals that moved on the stream: a tracked invoice's payable address no longer matches them, so it reads again.
+  // Totals that moved on the stream: a tracked invoice's payable address no longer matches them, so one a screen shows
+  // reads again; any other is marked behind and reads when a screen shows it.
   const moved = (v, t) => {
     if (!v || !applyTotals(v, t)) return;
+    if (!shown.has(v)) v.awaiting = true;
     v.fresh = freshNow() && !v.awaiting;
     touch(v);
-    readStatus(v);
+    if (shown.has(v)) readStatus(v);
   };
   const onReceipt = (data) => {
     const r = receiptOf(data.receipt), t = totalsOf(data.invoice);
@@ -879,11 +926,29 @@
   // `view(id)` is a tracked receipt-mode invoice (null for others); `refresh(id)` reads its private status again, and
   // `more(id, page, list)` pages it: "receipts" or "addresses" to the next older page, "newest" back to that `list`'s
   // newest page ("receipts" or "addresses"; both when none is named), the other list left where it is.
-  // `payingAddress(view)` is the address taking payment now, or null, and `payableSats(view, address)` what an
-  // amount-bearing QR may ask for there (0: the address alone), `reopen(id)`
+  // `showing(view, on)` says a screen starts or stops showing a tracked invoice's view, each start matched by one stop
+  // (only shown views are read again on a catch-up or a move),
+  // `payingAddress(view)` is the address taking payment now, or null, `lightningCode(view)` the verified Lightning code
+  // a QR may carry, or null, and `payableSats(view, address)` what an amount-bearing QR may ask for there (0: the
+  // address alone), `reopen(id)`
   // tracks a signed-in donor's own invoice from its history, `historyPage("newest" | "older")` pages that history, and
   // `setAccount(id)` follows sign-in.
   const view = (id) => views.get(id) || null;
+  // A screen starts or stops showing a tracked invoice's view (`view(id)`, `reopen`): each start is matched by one
+  // stop. Shown, it is read now if it isn't current; once no screen shows it, any retry of its read is cancelled. A
+  // view dropped or from before an account change is never shown, and letting go of one does nothing.
+  const showing = (v, on) => {
+    if (!v) return;
+    const n = shown.get(v) || 0;
+    if (!on) {
+      if (n > 1) shown.set(v, n - 1);
+      else if (n) { shown.delete(v); cancelRetry(v); }
+      return;
+    }
+    if (v.retired || views.get(v.id) !== v) return;
+    shown.set(v, n + 1);
+    if ((!v.read || v.awaiting) && !v.loading) readStatus(v);
+  };
   const refresh = (id) => views.has(id) ? readStatus(views.get(id)) : Promise.resolve({ error: "unknown" });
   const more = (id, page, list) => {
     const v = views.get(id);
@@ -899,5 +964,5 @@
   };
   BL.donations = { config, get real() { return real; }, get testNetwork() { return testNetwork(); }, get messageMinSats() { return messageMinSats(); }, get generation() { return generation; },
     state, useOrigin, createRequest, invoice, note, onchain, waitFor, waitingOn, waited, receivedOwnInvoice, ownReceipt, subscribe, subscribeState,
-    view, refresh, more, reopen, historyPage, setAccount, streamCurrent: freshNow, payingAddress, payableSats, sanitize, carried, HANDLE_MAX, MESSAGE_MAX, MESSAGE_MIN_SATS, RECENT_MAX };
+    view, refresh, more, reopen, historyPage, setAccount, showing, streamCurrent: freshNow, payingAddress, lightningCode, payableSats, sanitize, carried, HANDLE_MAX, MESSAGE_MAX, MESSAGE_MIN_SATS, RECENT_MAX };
 })();

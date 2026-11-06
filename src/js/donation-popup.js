@@ -265,7 +265,7 @@
         invoice: (sats, value) => donations.invoice({ sats, ...value }),
         note: (request, value, changedHandle) => donations.note(request, value.message, changedHandle ? value.handle : undefined),
         onchain: (request) => donations.onchain(request), waitFor: donations.waitFor,
-        ledger: donations.view, paying: donations.payingAddress, live: donations.streamCurrent, payable: donations.payableSats, more: donations.more, refresh: donations.refresh, generation: () => donations.generation,
+        ledger: donations.view, paying: donations.payingAddress, live: donations.streamCurrent, lightning: donations.lightningCode, showing: donations.showing, payable: donations.payableSats, more: donations.more, refresh: donations.refresh, generation: () => donations.generation,
         open: () => donations.state.open, testNetwork: () => donations.testNetwork,
         limits: () => donations.state.limits,
         messageMinSats: () => donations.messageMinSats,

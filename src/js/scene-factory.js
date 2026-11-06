@@ -957,7 +957,7 @@
       note: (request, value, changedHandle) => donations.note(request, value.message, changedHandle ? value.handle : undefined),
       onchain: (request) => donations.onchain(request),
       waitFor: (id) => donations.waitFor(id),
-      ledger: donations.view, paying: donations.payingAddress, live: donations.streamCurrent, payable: donations.payableSats, more: donations.more, refresh: donations.refresh, generation: () => donations.generation,
+      ledger: donations.view, paying: donations.payingAddress, live: donations.streamCurrent, lightning: donations.lightningCode, showing: donations.showing, payable: donations.payableSats, more: donations.more, refresh: donations.refresh, generation: () => donations.generation,
       open: () => donations.state.open,
       testNetwork: () => donations.testNetwork,
       limits: () => donations.state.limits,
@@ -1306,6 +1306,11 @@
       b.held += bananas;
       b.heldSats += donation.sats;
       if (donations.real) watchBooth(scene);
+    } else if (receipt && b.mode === AT_KIOSK && b.flow && b.flow.view && b.flow.view.id === receipt.invoice) {
+      // A credit to the invoice on the booth's own screen waits for the visitor, as a paid tip does: WATCH (or stepping
+      // away) cooks it, once, in view rather than behind them. A receipt never settles the kiosk; its ledger does.
+      b.held += bananas;
+      b.heldSats += donation.sats;
     } else cook(scene, bananas, donation.sats);
   };
   // A tip from this visitor, in the shape the backend will push. A demo tip is the simulation's alone: in real mode it
