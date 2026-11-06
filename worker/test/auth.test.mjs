@@ -162,6 +162,22 @@ test("old nonowner sessions receive no identity and cannot reach account, room o
   }
 });
 
+test("TURN capability and the dedicated mint limit apply only to eligible sessions", async () => {
+  const { worker } = routeFixture({ cast: CAST });
+  const keys = [];
+  const env = { SITE_ORIGIN: SITE, DB: database("real-owner"), REALTIME_APP_ID: "app", REALTIME_SECRET: "fixture",
+    REALTIME_TURN_KEY_ID: "key", REALTIME_TURN_TOKEN: "fixture",
+    VOICE_LIMITER: { limit: () => { throw new Error("Used the signalling limiter"); } },
+    VOICE_ICE_LIMITER: { limit: async ({ key }) => { keys.push(key); return { success: false }; } },
+    ROOM: { getByName: () => { throw new Error("A limited request reached the room"); } } };
+  const me = async (current) => (await worker.fetch(requestFor("/api/me"), current)).json();
+  assert.equal((await me(env)).voiceTurn, true);
+  assert.equal((await me({ ...env, REALTIME_TURN_TOKEN: "" })).voiceTurn, undefined);
+  assert.equal((await me({ ...env, DB: database("visitor") })).voiceTurn, undefined);
+  assert.equal((await worker.fetch(requestFor("/api/voice/ice", "POST"), env)).status, 429);
+  assert.deepEqual(keys, ["123"]);
+});
+
 test("eligible sessions share one character check with the API and strip forged room identity headers", async () => {
   let lookups = 0, forwarded = null;
   const row = { handle: "new-ooga", joined: 1, lastCommit: 2 };
