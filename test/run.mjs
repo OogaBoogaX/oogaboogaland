@@ -6208,7 +6208,7 @@ const poolLayoutChecks = async () => {
     JSON.stringify({ graded, open, roofed, linked, beds, apart, lake, slots: L.SLOTS.length, along, hidden, doorways, mouths, chamber, fallLedges, boxes }));
   // The water over that layout, through its own module: what the backlog floods and what it never reaches.
   Object.assign(context, { document: { createElement: () => ({ getContext: () => null }) }, performance, console });
-  for (const file of ["scene", "models", "convex", "terrain", "hub-models", "pool-models", "pool-water"]) runInNewContext(await readFile(new URL(`../src/js/${file}.js`, import.meta.url), "utf8"), context);
+  for (const file of ["scene", "models", "convex", "terrain", "hub-models", "pool-models", "pool-hydrology", "pool-water"]) runInNewContext(await readFile(new URL(`../src/js/${file}.js`, import.meta.url), "utf8"), context);
   const { poolWater: W, scene: S } = context.window.BL, H = W.HYDRO;
   let rising = true, last = -Infinity;
   for (let mvb = 0; mvb <= 400; mvb += 0.5) { const level = W.levelFor(mvb * 1e6); rising &&= level >= last; last = level; }
