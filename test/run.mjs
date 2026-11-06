@@ -8913,10 +8913,11 @@ const BANANA_LISTS = `(() => {
     const last = items.at(-1).getBoundingClientRect(), ok = inside(last, list.getBoundingClientRect()) && inside(last, slab.getBoundingClientRect()) && footed();
     list.scrollTop = 0; slab.scrollTop = 0; return ok;
   };
-  // Feed the Oogas whole inside the panel and the drawer, with the slab ending above it.
+  // Feed the Oogas whole at the foot of the panel and inside the drawer, at its full touch height, the slab ending
+  // above it.
   const footed = () => {
     const f = feed.getBoundingClientRect(), p = panel.getBoundingClientRect(), d = body.getBoundingClientRect();
-    return !!feed.getClientRects().length && f.height > 0 && inside(f, p) && inside(f, d) && slab.getBoundingClientRect().bottom <= f.top + 0.5;
+    return !!feed.getClientRects().length && f.height >= 44 && inside(f, p) && inside(f, d) && p.bottom - f.bottom <= 16 && slab.getBoundingClientRect().bottom <= f.top + 0.5;
   };
   panel.scrollTop = 0; body.scrollTop = 0; slab.scrollTop = 0;
   const out = { visible: BL.sheet.visible(panel), donors: __ooga.game.state.donors.length, rows: rows.length,
@@ -8924,7 +8925,8 @@ const BANANA_LISTS = `(() => {
     ordered: amounts.every((a, i) => !i || a <= amounts[i - 1]), latest: latest.length, retained: __ooga.game.state.recentDonations.length,
     window: leaders.clientHeight, fifth, sixth, recentWindow: recent.clientHeight, scrolls: leaders.scrollHeight > leaders.clientHeight && recent.scrollHeight > recent.clientHeight,
     feedFirst: footed(), lastDonor: rows.length ? reach(leaders, rows) : false, lastTip: latest.length ? reach(recent, latest) : false,
-    slabScrolls: slab.scrollHeight > slab.clientHeight + 1, panelScrolls: panel.scrollHeight > panel.clientHeight + 1 };
+    slabScrolls: slab.scrollHeight > slab.clientHeight + 1, slabRoom: slab.clientHeight, panelScrolls: panel.scrollHeight > panel.clientHeight + 1,
+    sheetHeight: Math.round(panel.closest(".sheet").getBoundingClientRect().height) };
   slab.scrollTop = slab.scrollHeight;
   out.feedScrolled = footed(); out.noteReached = inside(note.getBoundingClientRect(), slab.getBoundingClientRect());
   slab.scrollTop = 0;
@@ -8935,7 +8937,14 @@ const BANANA_LISTS = `(() => {
 // at the panel's foot without the panel scrolling, the slab's foot reachable over it and never under it.
 // However few entries either list holds, even none, both keep the same window, the one five donor rows fill.
 const bananaWindowsMatch = (short, full) => short.visible && short.window > 0 && Math.abs(short.window - full.window) <= 0.5 && Math.abs(short.recentWindow - full.window) <= 0.5;
-const bananaFeedFooted = (s) => s.visible && s.feedFirst && s.feedScrolled && s.noteReached && !s.panelScrolls;
+// A signed-in contributor's sheet, whose notification bell (40px on a touch screen) makes every panel's title as tall:
+// the account the sheet reads its bell and tabs from, laid out again through its own resize path, and put back after.
+const BANANA_SIGN_IN = `window.__bananaAccount = BL.net.state.me; BL.net.state.me = { id: 5, login: "footer", display: "Footer" }; window.dispatchEvent(new Event("resize"))`;
+const BANANA_SIGN_OUT = `BL.net.state.me = window.__bananaAccount; delete window.__bananaAccount; window.dispatchEvent(new Event("resize"))`;
+const BANANA_BELL = `(() => { const bell = document.querySelector("#bananas-panel .sheet-bell"), r = bell.getBoundingClientRect(), t = document.querySelector("#bananas-panel > .panel-title").getBoundingClientRect();
+  return { bell: !bell.closest("[hidden]") && bell.checkVisibility({ visibilityProperty: true, opacityProperty: true }), bellSize: Math.round(r.width) + "x" + Math.round(r.height), title: Math.round(t.height) }; })()`;
+const bananaBelled = (s) => s.bell && s.bellSize === "40x40" && s.title >= 40;
+const bananaFeedFooted = (s) => s.visible && s.feedFirst && s.feedScrolled && s.noteReached && !s.panelScrolls && s.slabRoom > 0;
 const bananaListsHold = (s) => s.visible && s.rows === s.donors && s.rows > 5 && s.names && s.ordered && s.latest === s.retained && s.latest > 5
   && Math.abs(s.fifth - s.window) <= 1 && s.sixth >= s.window - 1 && Math.abs(s.recentWindow - s.window) <= 0.5 && s.scrolls && s.lastDonor && s.lastTip && bananaFeedFooted(s);
 // A panel's last control, read with the panel scrolled to its end: the space above it to the control before it, and
@@ -9006,10 +9015,11 @@ const hudVisit = { name: "hub HUD lifetime", why: "regression: scene visits recr
     const short = await b.evaluate(BANANA_LISTS);
     await b.evaluate(SEED_DONORS(12, "lister"));
     const lists = await b.evaluate(BANANA_LISTS);
-    // A short desktop drawer: the slab scrolls over Feed the Oogas, which stays whole at the foot.
+    // The shortest desktop drawer a resize allows (sheet.js's 263px): the slab scrolls over Feed the Oogas, which
+    // stays whole at the foot.
     const cramped = await b.evaluate(`(() => {
       const sheet = document.getElementById("bananas-panel").closest(".sheet"), was = sheet.style.getPropertyValue("height"), prio = sheet.style.getPropertyPriority("height");
-      sheet.style.setProperty("height", "360px", "important");
+      sheet.style.setProperty("height", "263px", "important");
       const out = ${BANANA_LISTS};
       if (was) sheet.style.setProperty("height", was, prio); else sheet.style.removeProperty("height");
       return out;
@@ -9019,7 +9029,7 @@ const hudVisit = { name: "hub HUD lifetime", why: "regression: scene visits recr
     record("HUD lifetime: the Bananas panel lists every donor in rank order inside a five-row window, the latest tips in a window of the same height however few either holds, and each scrolls to its last entry",
       short.rows < 5 && short.rows === short.donors && short.names && bananaWindowsMatch(short, lists) && bananaListsHold(lists) && lists.rows > 10, JSON.stringify({ short, lists }));
     record("HUD lifetime: in a short desktop drawer the Bananas slab scrolls above Feed the Oogas, which stays whole at the panel's foot over nothing, and both lists still reach their last entry",
-      bananaListsHold(cramped) && cramped.slabScrolls && bananaWindowsMatch(cramped, lists), JSON.stringify(cramped));
+      bananaListsHold(cramped) && cramped.slabScrolls && cramped.sheetHeight <= 264 && bananaWindowsMatch(cramped, lists), JSON.stringify(cramped));
   } finally {
     await b.evaluate(`(() => { const H = window.__hudVisit; BL.scenes.lab.enter = H.enters[0]; BL.scenes.hub.enter = H.enters[1]; BL.scenes.hub.enterSteps = H.hubSteps; delete window.__hudVisit; })()`);
   }
@@ -14542,12 +14552,65 @@ const phone = (id, { card = null, play = null, required, sheet = false }) => ({ 
     seen.empty = await b.evaluate(BANANA_LISTS);
     await b.evaluate(SEED_DONORS(12, "phone"));
     seen.lists = await b.evaluate(BANANA_LISTS);
+    // Signed in, the title carries the 40px bell, and Feed the Oogas still stands whole under the slab.
+    const signedIn = `(() => { ${BANANA_SIGN_IN}; try { __ooga.hud.selectTab("bananas"); return { ...${BANANA_BELL}, lists: ${BANANA_LISTS} }; } finally { ${BANANA_SIGN_OUT}; } })()`;
+    seen.signedIn = await b.evaluate(signedIn);
+    // The same phone on its side, 844x390, where the default drawer is 94px: the Bananas panel's drawer stands 200px
+    // tall, Feed the Oogas whole under the slab, the sticks and act button put away rather than over the topbar;
+    // another panel goes back to the default drawer with the sticks over it, clear of it.
+    if (id === "hub") {
+      await b.send("Emulation.setDeviceMetricsOverride", { width: PHONE_SIZE.h, height: PHONE_SIZE.w, deviceScaleFactor: 2, mobile: true });
+      try {
+        await b.evaluate(`window.dispatchEvent(new Event("resize"))`); await b.sleep(300);
+        const read = `(() => { const s = document.getElementById("sheet"), r = s.getBoundingClientRect(), stick = document.getElementById("joy-move"), act = document.querySelector(".bottom-hud > .act");
+          const sr = stick.getBoundingClientRect();
+          return { coarse: matchMedia("(pointer: coarse)").matches, open: s.dataset.open === "true", sized: s.dataset.sized, drawer: Math.round(r.height), top: Math.round(r.top), width: innerWidth, height: innerHeight,
+            stick: stick.getClientRects().length > 0, act: !!act && act.getClientRects().length > 0, stickClear: sr.bottom <= r.top - 39 + 0.5 && sr.top >= 0 }; })()`;
+        seen.landscape = await b.evaluate(`(() => { __ooga.hud.selectTab("bananas"); return { ...${read}, lists: ${BANANA_LISTS} }; })()`);
+        seen.landscapeIn = await b.evaluate(`(() => { ${BANANA_SIGN_IN}; try { __ooga.hud.selectTab("bananas"); return { ...${read}, ...${BANANA_BELL}, lists: ${BANANA_LISTS} }; } finally { ${BANANA_SIGN_OUT}; } })()`);
+        seen.landscapeOther = await b.evaluate(`(() => { __ooga.hud.selectTab("roster"); return ${read}; })()`);
+        // A drawer resized to its shortest (the top edge's arrow key, as a resize writes and a reload restores the
+        // saved rectangle): the Bananas panel still stands 200px tall from the screen's foot over the saved size,
+        // which the roster then gets back, unchanged in storage. A double-click on the drag bar resets the drawer.
+        seen.resized = await b.evaluate(`(() => {
+          const H = __ooga.hud, s = document.getElementById("sheet"), savedHeight = () => JSON.parse(localStorage.getItem("oogaboogaland.sheet.v1"))?.rect?.height ?? null;
+          H.selectTab("roster");
+          s.querySelector(".sheet-edge-n").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+          const before = { ...${read}, saved: savedHeight() };
+          H.selectTab("bananas");
+          const bananas = { ...${read}, sticks: s.dataset.sticks, bottom: Math.round(s.getBoundingClientRect().bottom), saved: savedHeight(), lists: ${BANANA_LISTS} };
+          let bananasIn;
+          ${BANANA_SIGN_IN};
+          try { H.selectTab("bananas"); bananasIn = { ...${read}, ...${BANANA_BELL}, sticks: s.dataset.sticks, bottom: Math.round(s.getBoundingClientRect().bottom), saved: savedHeight(), lists: ${BANANA_LISTS} }; }
+          finally { ${BANANA_SIGN_OUT}; }
+          H.selectTab("roster");
+          const after = { ...${read}, saved: savedHeight() };
+          s.querySelector(".sheet-drag").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+          return { before, bananas, bananasIn, after, reset: s.dataset.sized };
+        })()`);
+      } finally {
+        await b.send("Emulation.setDeviceMetricsOverride", { width: PHONE_SIZE.w, height: PHONE_SIZE.h, deviceScaleFactor: 2, mobile: true });
+        await b.evaluate(`window.dispatchEvent(new Event("resize"))`); await b.sleep(300);
+      }
+    }
     await b.evaluate(`__ooga.hud.selectTab("roster")`);
   }
   const ok = (!card || seen.card.touch.coarse && seen.card.touch.touchWording && seen.card.bad.length === 0 && seen.card.closed) && seen.play.length === 0 && (!sheet || seen.sheet.length === 0 && seen.actions
     && footMatches(seen.feet.login) && footMatches(seen.feet.signedIn) && footMatches(seen.feet.feed) && bananaListsHold(seen.lists) && seen.lists.slabScrolls && bananaFeedFooted(seen.empty)
+    && bananaBelled(seen.signedIn) && bananaListsHold(seen.signedIn.lists) && bananaWindowsMatch(seen.signedIn.lists, seen.lists)
+    && (id !== "hub" || bananaBelled(seen.landscapeIn) && seen.landscapeIn.drawer >= 200 && seen.landscapeIn.top >= 39 && !seen.landscapeIn.stick && !seen.landscapeIn.act && bananaListsHold(seen.landscapeIn.lists)
+      && bananaBelled(seen.resized.bananasIn) && seen.resized.bananasIn.sized === "true" && seen.resized.bananasIn.drawer >= 200 && seen.resized.bananasIn.bottom === 390
+      && seen.resized.bananasIn.sticks === "false" && !seen.resized.bananasIn.stick && seen.resized.bananasIn.saved === seen.resized.before.saved && bananaListsHold(seen.resized.bananasIn.lists))
+    && (id !== "hub" || seen.landscape.coarse && seen.landscape.open && seen.landscape.sized === "false" && seen.landscape.width === 844
+      && seen.landscape.drawer >= 200 && seen.landscape.top >= 39 && !seen.landscape.stick && !seen.landscape.act && bananaListsHold(seen.landscape.lists)
+      && seen.landscapeOther.open && seen.landscapeOther.drawer === Math.ceil(390 * 0.24) && seen.landscapeOther.stick && seen.landscapeOther.stickClear
+      && seen.resized.before.sized === "true" && seen.resized.before.drawer === Math.ceil(390 * 0.24) && Math.round(seen.resized.before.saved) === seen.resized.before.drawer
+      && seen.resized.bananas.sized === "true" && seen.resized.bananas.drawer >= 200 && seen.resized.bananas.bottom === 390 && seen.resized.bananas.top >= 39
+      && seen.resized.bananas.sticks === "false" && !seen.resized.bananas.stick && !seen.resized.bananas.act && seen.resized.bananas.saved === seen.resized.before.saved && bananaListsHold(seen.resized.bananas.lists)
+      && seen.resized.after.drawer === seen.resized.before.drawer && seen.resized.after.saved === seen.resized.before.saved && seen.resized.after.stick && seen.resized.after.stickClear
+      && seen.resized.reset === "false")
     && seen.empty.rows === seen.empty.donors && seen.empty.latest === seen.empty.retained && bananaWindowsMatch(seen.empty, seen.lists));
-  record(`${id} phone: ${card ? "the title card reads in touch words and its go button starts the game, then " : ""}nothing is clipped, wrapped by accident or off screen, and every control is under a thumb${sheet ? ", with the sheet open and the sticks still free, its footers as roomy under as over them, and the Bananas slab scrolling above Feed the Oogas, which stays whole at the panel's foot, over lists that each scroll in a five-row window" : ""}`, ok, JSON.stringify(seen));
+  record(`${id} phone: ${card ? "the title card reads in touch words and its go button starts the game, then " : ""}nothing is clipped, wrapped by accident or off screen, and every control is under a thumb${sheet ? ", with the sheet open and the sticks still free, its footers as roomy under as over them, and the Bananas slab scrolling above Feed the Oogas, which stays whole at the panel's foot signed out and signed in under the 40px bell, over lists that each scroll in a five-row window" : ""}`, ok, JSON.stringify(seen));
 } });
 
 // ---- The Lightning Factory ----
