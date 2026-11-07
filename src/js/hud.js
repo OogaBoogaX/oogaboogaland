@@ -806,26 +806,24 @@
     const DETACHED_NAMES = { pile: "Pile", lab: "Lab", mirror: "Mirror", underground: "HQ", basement: "Basement", mempool: "Mempool", factory: "LN Factory", arcade: "Ooga Arcade", bca: "B.C.A.", gate: "North gate", bifrost: "₿IFRÖST", timechain: "TC Sphere" };
     let destinationLabels = DETACHED_NAMES;
     let destinationNames = [];
-    let destinationIndex = -1;
     let detachedPreset = "pile", detachedNameShown = false, detachedSelectionShown = false, areaLabel = "";
     el.modeDestination.disabled = false;
-    el.modeDestination.title = "Map · cycle destinations";
-    el.modeDestinationLabel.textContent = "Map. Cycle destinations";
+    el.modeDestination.title = "Map · choose a destination";
+    el.modeDestinationLabel.textContent = "Map. Choose a destination";
     const setDestinations = (names, labels = DETACHED_NAMES) => {
       destinationLabels = labels;
       destinationNames = names.filter(name => destinationLabels[name]);
-      destinationIndex = destinationNames.indexOf(detachedPreset);
       if (!destinationLabels[detachedPreset] && destinationNames.length) detachedPreset = destinationNames[0];
       el.modeDestination.hidden = !modeVisible || !destinationNames.length;
     };
-    const cycleDestinations = () => {
-      if (!destinationNames.length || !actionHandler) return;
-      // A refused arrival must not trap the next press at the same place.
-      // Only a successful navigation updates the displayed destination.
-      destinationIndex = (destinationIndex + 1) % destinationNames.length;
-      actionHandler("mode-preset", destinationNames[destinationIndex]);
-      showDestinationLabel(el.modeDestinationName.textContent);
+    const mapProvider = {
+      names: () => destinationNames, label: name => destinationLabels[name], selected: () => detachedPreset,
+      controlled: () => document.body.dataset.activeScene === "hub" && !!(modeCave || gorillaEntry),
+      available: () => modeVisible && destinationNames.length > 0 && !el.modeDestination.hidden,
+      position: () => gorillaEntry ? gorillaEntry.root.position : modeCave ? modeCave.root.position : BL.scenes[document.body.dataset.activeScene].camera.target,
+      travel: name => actionHandler ? actionHandler("mode-preset", name) : false
     };
+    BL.destinationMap.connect(mapProvider);
     let destinationAnchored = false, destinationX = 0, destinationY = 0, destinationZ = 0;
     let destinationLabelTimer = 0;
     const showDestinationLabel = text => {
@@ -858,7 +856,6 @@
     const setDetachedView = (name, announce = false, position = null) => {
       if (!destinationLabels[name]) return;
       detachedPreset = name;
-      destinationIndex = destinationNames.indexOf(name);
       destinationAnchored = !!position;
       if (position) { destinationX = position.x; destinationY = position.y; destinationZ = position.z; }
       detachedSelectionShown = true;
@@ -1969,7 +1966,7 @@
       else if (b.dataset.action === "recipe-close") closeRecipe();
       else if (b.dataset.action === "recipe-copy") copyRecipe(b);
       else if (b.dataset.action === "intro-go") b.closest("[data-intro]").hidden = true;
-      else if (b === el.modeDestination) cycleDestinations();
+      else if (b === el.modeDestination) BL.destinationMap.open();
       else if (b === el.mode) pressMode();
       else if (b.dataset.action === "account-login") BL.net.login();
       else if (b.dataset.action === "account-logout") BL.net.logout();
@@ -2298,6 +2295,7 @@
     };
     // End this visit; the attached sheet rows belong to the page.
     const dispose = () => {
+      BL.destinationMap.disconnect(mapProvider);
       delete document.body.dataset.bannerOogas;
       sheet.dispose();
       finishPrimary(true);
@@ -2336,7 +2334,6 @@
       closeRecipe();
       closeBoard(true);
       destinationNames = [];
-      destinationIndex = -1;
       mainBoard.dispose();
       el.board.classList.remove("board-floating");
       el.board.removeAttribute("style");

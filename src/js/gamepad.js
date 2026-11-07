@@ -8,9 +8,11 @@
   // for fine aim. `connected` is whether the last read found a pad, for words that name its buttons.
   // `navigator.getGamepads` returns a new array on every call, so it is read only while a standard pad is plugged in
   // and a page without one (or with only a wheel or flight stick) pays nothing.
-  const BUTTON = { a: 1, b: 2, x: 4, y: 8, lb: 16, rb: 32, lt: 64, rt: 128, view: 256, menu: 512, ls: 1024, rs: 2048 };
-  const COUNT = 12, LT = 6, RT = 7, DEAD = 0.18, TRIGGER_ON = 0.5, TRIGGER_OFF = 0.3;
+  const BUTTON = { a: 1, b: 2, x: 4, y: 8, lb: 16, rb: 32, lt: 64, rt: 128, view: 256, menu: 512, ls: 1024, rs: 2048, up: 4096, down: 8192, left: 16384, right: 32768 };
+  const COUNT = 16, LT = 6, RT = 7, DEAD = 0.18, TRIGGER_ON = 0.5, TRIGGER_OFF = 0.3;
   const state = { connected: false, frame: 0, lx: 0, ly: 0, rx: 0, ry: 0, held: 0, pressed: 0, released: 0 };
+  const ui = { held: 0, pressed: 0, lx: 0, ly: 0 };
+  let blockedAxes = false;
   let plugged = 0, physicalHeld = 0, blocked = 0, holding = false;
   window.addEventListener("gamepadconnected", (e) => { if (e.gamepad.mapping === "standard") plugged++; });
   window.addEventListener("gamepaddisconnected", (e) => { if (e.gamepad.mapping === "standard") plugged = Math.max(0, plugged - 1); });
@@ -39,6 +41,8 @@
     state.connected = !!pad;
     if (!pad) {
       physicalHeld = blocked = 0;
+      // Disconnecting is not a neutral stick sample; keep the pending hold until one arrives.
+      ui.held = ui.pressed = ui.lx = ui.ly = 0;
       if (holding) { neutral(); return; }
       if (!state.held && !state.lx && !state.ly && !state.rx && !state.ry) return;
       state.lx = state.ly = state.rx = state.ry = 0;
@@ -51,17 +55,22 @@
     let held = 0;
     for (let i = 0; i < COUNT; i++) {
       const b = pad.buttons[i], bit = 1 << i;
-      if (i === LT || i === RT ? b.value > (physicalHeld & bit ? TRIGGER_OFF : TRIGGER_ON) : b.pressed) held |= bit;
+      if (b && (i === LT || i === RT ? b.value > (physicalHeld & bit ? TRIGGER_OFF : TRIGGER_ON) : b.pressed)) held |= bit;
     }
+    ui.pressed = held & ~ui.held; ui.held = held;
+    const a = pad.axes;
+    const menuScale = scale(a[0], a[1], false);
+    ui.lx = a[0] * menuScale; ui.ly = -a[1] * menuScale;
     physicalHeld = held;
     blocked &= held;
     if (holding) { blocked = held; neutral(); return; }
     held &= ~blocked;
-    const a = pad.axes;
+    if (blockedAxes && Math.hypot(a[0], a[1]) <= DEAD && Math.hypot(a[2], a[3]) <= DEAD) blockedAxes = false;
     let k = scale(a[0], a[1], false);
     state.lx = a[0] * k; state.ly = -a[1] * k;
     k = scale(a[2], a[3], true);
     state.rx = a[2] * k; state.ry = -a[3] * k;
+    if (blockedAxes) state.lx = state.ly = state.rx = state.ry = 0;
     const pressed = held & ~state.held, released = state.held & ~held;
     if (!pressed && !released && !state.pressed && !state.released) return;
     state.pressed = pressed; state.released = released; state.held = held;
@@ -69,11 +78,12 @@
   };
   // Keep reading physical buttons behind an entry hold, but never publish an action from it. A held button must be
   // released and pressed again afterwards; trigger hysteresis follows the physical state, not the muted one.
-  const hold = (on) => {
+  const hold = (on, requireNeutral = false) => {
     on = !!on;
     if (holding === on) return;
     if (!on) poll(); // Consume the current hardware state even when the hold ended between display frames.
     holding = on;
+    if (on && requireNeutral) blockedAxes = true;
     blocked |= physicalHeld;
     neutral();
   };
@@ -117,5 +127,5 @@
     if (!strength) stop();
     return strength;
   };
-  BL.gamepad = { BUTTON, state, poll, hold, rumble, stop, setStrength, get strength() { return strength; } };
+  BL.gamepad = { BUTTON, state, ui, poll, hold, rumble, stop, setStrength, get strength() { return strength; } };
 })();

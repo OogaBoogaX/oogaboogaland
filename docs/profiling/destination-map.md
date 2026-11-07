@@ -1,0 +1,68 @@
+# Direct Map and optional coaching
+
+## Controller reconnect follow-up
+
+Disconnecting a controller cleared Map's pending stick-neutral requirement. Reconnecting with deflected sticks could therefore resume movement or camera input when Map closed. The no-controller path now preserves that requirement until both sticks are sampled inside their dead zones; button release and ordinary disconnect handling stay unchanged.
+
+The existing destination gamepad regression reproduces this on `1acb75fdfcd6e990e36dc7abff91f2c00f8b6a2e`: **438/439**, with reconnect-before-close, reconnect-after-close and both-stick neutral requirements failing. With the one-line state fix, the single focused rerun passes **439/439**, including held-button suppression, fresh-button activation, ordinary disconnect/reconnect, keyboard coaching and Map controls. Command: `ONLY='destination accessible names' LANES=1 node test/run.mjs hub`. Build and syntax checks for `src/js/gamepad.js` and `test/run.mjs` pass. No Factory, performance, full-suite or stopped workload ran. Physical-controller and other manual acceptance below remain open.
+
+An additional extension explicitly closes Map while the controller is absent, then reconnects with both sticks deflected. The same focused lane passes **439/439** with this ordering, reconnect-before-close and disconnect-after-close covered together. The runtime fix is unchanged.
+
+## Keyboard replay follow-up
+
+Controls previously reserved native Enter/Space activation for Close, preventing keyboard activation of the new Learn by exploring button. Dialog buttons now retain native activation while practice keys remain isolated from gameplay. The existing destination check now exercises both keys through Chrome's native input path.
+
+Validation on head `667e3c0fdc32f4c455dca617671d2696917638e8` plus this fix: build and changed JavaScript syntax pass; `ONLY='destination accessible names' LANES=1 node test/run.mjs hub` passes **439/439**. The first fixture omitted Enter's native key metadata and reported **438/439** (`[false,true]` for Enter/Space). Correcting that event, without changing assertions, passed the single focused rerun and cleared its ledger entry. No Factory, performance, full-suite or previously stopped browser workload ran. This result does not replace the broader acceptance gaps below. Keep draft pending those gates and maintainer play-testing.
+
+## Feature behavior
+
+Map opens a labelled destination chooser instead of immediately moving through a cycle. It groups Play, Explore and Learn, identifies the current destination and describes each entrance. A driven Ooga or gorilla gets “Go to”; a free camera gets “View.” Scene-owned travel checks still decide whether the action is allowed. A refusal leaves the chooser open with feedback. DSB interiors offer one truthful action, “Return outside to CHORA,” before showing town viewpoints.
+
+The optional guide progresses from choosing an Ooga or free exploration, through actual movement, to a successful Map choice. It can be dismissed and replayed from Controls, and remembers completion locally. It coordinates with Tess so two guides do not compete. It awards no tickets, loot or artificial progress and does not bypass Arcade cabinets, ownership or entrance rules.
+
+## Controls and layout
+
+Keyboard focus starts on Close; Tab, Enter and Space use native dialog controls. Escape closes Map and restores focus. Movement stays held off until a fresh key press. Gamepad Menu opens/closes, D-pad or left stick moves through the visible order, A chooses and B closes. Sticks must return to neutral before movement resumes. The existing M mute binding stays unchanged. Touch destinations are at least 64 CSS px tall, Close is 44×44, and the sticky header keeps it reachable while scrolling. The world continues running behind the chooser.
+
+[Desktop capture](destination-map-desktop.png) · [Phone-emulation capture](destination-map-phone.png) · [Raw layout and interaction observations](destination-map.json).
+
+## Before and after
+
+Baseline `rock`: `e6d69aa4d9d93f1c90bf0a28c8899189d3f160a0`. Candidate runtime: `20daa63c` plus layout `eca32c74`. Tests use native ARM Chrome 156 on macOS 27.2 / M1 Pro. Counts below are button activations from the Pile, not user-study completion times; phone scrolling may add gestures.
+
+| User-visible metric | Before | After | Evidence / limit |
+|---|---:|---:|---|
+| Choose Arcade from Pile | 7 sequential activations | Open + choose (2) | Existing preset order versus direct selection |
+| Choose Mempool from Pile | 5 | 2 | Same travel action and guards |
+| Choose Bifrost from Pile | 10 | 2 | Same travel action and guards |
+| Open navigation without moving | Every cycle activation travels | Opening makes no trip | Accessible-name check witnesses unchanged destination |
+| Discoverable destinations at once | One current cycle label | All 12 labelled choices | Accessibility tree includes all 12 buttons |
+| Current place and entrance explanations | Current label | Current marker and descriptions | Dialog DOM / visual review |
+| Movement/Map coaching | Tess's existing island guide | Optional movement + Map guide alongside Tess | Dismiss, replay, actual movement and completion checks |
+| Held-key and held-stick leakage after closing | No Map dialog | None in focused keyboard/gamepad checks | Not a claim covering every hardware controller |
+| DSB indoor selection | Cycling a viewpoint actually exits | Explicit Return outside action | Every registered room, twice, preserves panel state |
+| 1440×813 desktop open-to-two-animation-frame proxy, ms | Not measured / different interaction | Median 27.85, max 29.10 (10 opens) | Normal vsync; not production INP |
+| 390×844 touch-emulation proxy, ms | Not measured | Median 27.15, max 28.60 (10 opens) | Native touch closes after scrolling |
+| 320×640 touch-emulation proxy, ms | Not measured | Median 27.60, max 32.10 (10 opens) | Native touch closes after scrolling |
+| 720×363 constrained viewport proxy, ms | Not measured | Median 27.80, max 29.00 (10 opens) | Layout proxy, not actual 200% browser zoom |
+| Horizontal page overflow at these sizes | Not measured | None | Layout bounds and captures |
+| Destination / Close target height | Prior cycling control | ≥64 / 44 CSS px | Measured rectangles |
+| First-use task success, time, wrong actions and help requests | Not measured | Not measured | No participant study or ≥90% success claim |
+| Real Android/iPhone, physical gamepad, screen reader, actual 200% zoom | Not measured | Not measured | Emulation and AX checks do not replace manual review |
+| Travel feedback/arrival p95 and cancellation latency | Not measured | Not measured | Existing navigation is reused; no faster-arrival claim |
+| CPU/GPU, allocations/GC, retained heap, power, network cadence | Not measured for this branch | Not measured for this branch | Companion engine measurements do not establish Map overhead |
+
+Reproduce after `npm run build` with `CHROME_ARCH=arm64 node scripts/profile-destination-map.mjs`. The driver uses normal vsync and enables motion; the published results replace the earlier uncapped layout-only timings.
+
+There is no production analytics or external telemetry. No usability percentage is inferred from action counts.
+
+## Validation and remaining gates
+
+- Build and touched JavaScript syntax pass.
+- Focused final controls: **476/476**, including native keyboard focus/Escape, held movement, raw standard-gamepad Menu/D-pad/B/neutral behavior, coaching completion/replay, actor/view-preserving travel, gorilla destinations and all DSB room exits.
+- All three implementations combined: **487/487** focused loading/controls/visibility checks. The final layout-only follow-up was built and visually inspected at the four widths above; touch closing passed and console logs were clean.
+- Full suite before the final focused fixes: **2,070/2,106**, so this is **not** full-suite green. The old gorilla-Map assertion was corrected for the intentional chooser-close behavior and then passed. Other failures include covered-wall performance, shared-panel/Rally fixtures, old Cloud Hopper camera/framing expectations, hammock bounds, crew/stand-on-player cases, Timechain/Matrix/Canvas fixtures, DSB media/TV and lifecycle fixtures. The covered-wall floor also failed on untouched upstream in a separate CPU-instrumented diagnostic; that is not a clean baseline acceptance run. The whole remaining failure list is not labelled proven baseline.
+- [Full-run failure inventory](destination-map-full-suite.json) preserves every reported failure, including duplicate desktop/phone occurrences, and identifies subsequent focused corrections.
+- The subsequent startup branch repairs the removed outdoor Cloud Hopper cabinet warm-up and passes DSB lifecycle trips, but its Factory target-count mismatch remains. Related weapon-pose/hammock PRs #476–477 are not duplicated here.
+
+Draft pending unresolved suite gates and maintainer play-testing, including real devices, actual zoom, screen reader, pointer-lock denial, controller disconnect and participant usability evidence. The broader regional-loading/scheduler plan is not implemented by this UI branch.
