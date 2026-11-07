@@ -31,8 +31,8 @@
 // "!" or a "?", and the censor's bleep over each grawlix; muttered, yelled, screamed or whispered, each line at its own
 // pitch and pace. It is placed where she stands while she talks, her yells heard across the hall. Her brother's shouts
 // through the hangar's door from next door come on the same voice, lower and muffled (`kortik`). Her boots thud
-// where she walks (`boot`), a poke boinks (`poke`), a warning light beeps (`beep`), and her hammer clangs on the Jet
-// (`clang`).
+// where she walks (`boot`), a poke boinks (`poke`), a warning light beeps (`beep`, which a door keypad's keys
+// take at their own pitches), and her hammer clangs on the Jet (`clang`).
 //
 // The film show's projector (`projector(on)`) runs where it hangs: its motor's hum and whir and the gate's clatter,
 // spinning up as it starts and running down as it stops, wavering as an old motor does, with the lamp's buzz; each
@@ -64,14 +64,16 @@
   // Kortik's Sis's ways of saying a line: her pitch, Hz; a syllable's length and the gap after it, s; how loud; how far
   // a stressed last syllable bends her pitch; how much of her is buzz and how much breath; her voice's shake, Hz either
   // way; the least she is heard at anywhere in the hall; and, for Kortik shouting through the door from next door on
-  // the same voice, his formants a man's and the wall muffling him (`formant`, `tone`, Hz). Her voice falls to half at
-  // SIS_REF metres, her boots at BOOT_REF.
+  // the same voice, his formants a man's and the wall muffling him (`formant`, `tone`, Hz), and for a gorilla of the
+  // crew who has had enough, deep and loud in the hall (`worker`). Her voice falls to half at SIS_REF metres, her boots
+  // at BOOT_REF.
   const SIS_STYLE = {
     mutter: { f0: 185, len: 0.085, gap: 0.03, level: 0.16, end: 0.85, buzz: 1, breath: 0.12, shake: 0, least: 0, formant: 1, tone: 20000 },
     yell: { f0: 300, len: 0.115, gap: 0.03, level: 0.34, end: 1.18, buzz: 1, breath: 0.22, shake: 0, least: 0.1, formant: 1, tone: 20000 },
     scream: { f0: 430, len: 0.14, gap: 0.025, level: 0.4, end: 1.3, buzz: 1, breath: 0.3, shake: 16, least: 0.14, formant: 1, tone: 20000 },
     soft: { f0: 215, len: 0.13, gap: 0.05, level: 0.16, end: 0.9, buzz: 0.1, breath: 1, shake: 0, least: 0, formant: 1, tone: 20000 },
-    kortik: { f0: 120, len: 0.12, gap: 0.035, level: 0.5, end: 1.12, buzz: 1, breath: 0.1, shake: 0, least: 0.12, formant: 0.82, tone: 700 }
+    kortik: { f0: 120, len: 0.12, gap: 0.035, level: 0.5, end: 1.12, buzz: 1, breath: 0.1, shake: 0, least: 0.12, formant: 0.82, tone: 700 },
+    worker: { f0: 105, len: 0.115, gap: 0.03, level: 0.42, end: 1.2, buzz: 1, breath: 0.28, shake: 7, least: 0.1, formant: 0.78, tone: 20000 }
   };
   const SIS_REF = 9, BOOT_REF = 5, BLEEP = 0.3;
   // How much farther apart than they stand the two engines' revs are panned, so each is heard on its own side.
@@ -1062,18 +1064,18 @@
       sis.boinkGain.gain.exponentialRampToValueAtTime(k, now + 0.012);
       sis.boinkGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.13);
     };
-    // A warning light's beep on the Jet at (x, y, z).
-    const beep = (x, y, z) => {
+    // A warning light's beep on the Jet at (x, y, z), or a door keypad's at its own pitch (Hz) and length (s).
+    const beep = (x, y, z, hz = 1900, length = 0.1) => {
       if (!ready || muted) return;
       place(x, y, z, BOOT_REF);
       const now = ctx.currentTime, k = 0.22 * AT.level;
       sis.bootPan.pan.setValueAtTime(AT.pan, now);
       sis.boink.frequency.cancelScheduledValues(now);
-      sis.boink.frequency.setValueAtTime(1900, now);
+      sis.boink.frequency.setValueAtTime(hz, now);
       sis.boinkGain.gain.cancelScheduledValues(now);
       sis.boinkGain.gain.setValueAtTime(k, now);
-      sis.boinkGain.gain.setValueAtTime(k, now + 0.09);
-      sis.boinkGain.gain.linearRampToValueAtTime(0, now + 0.1);
+      sis.boinkGain.gain.setValueAtTime(k, now + length - 0.01);
+      sis.boinkGain.gain.linearRampToValueAtTime(0, now + length);
     };
     // The forklift's button pressed at (x, y, z): its click and thunk, then the buzz that says no, twice.
     const denied = (x, y, z) => {

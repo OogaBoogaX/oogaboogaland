@@ -635,10 +635,25 @@
   // with its lights, a filing cabinet with a plant on it and binders beside, and the console, the bolt on its front, its
   // monitors turned to the one of the crew who works it from behind it, facing out over the hall (`LAYOUT.crew`'s last),
   // an office chair behind. `flat` the room, `glow` its lit parts, which the scene dims with the hall's glass, `glass`
-  // the panes, and `pictures` the screens' faces, each { geometry, x, y, z, turn }.
+  // the panes, `pictures` the screens' faces, each { geometry, x, y, z, turn }, and `keypad` where its door's keypad
+  // hangs (`keypad()`).
   const CONTROL = { z0: 6.6, z1: 13.4, glazed: 11.75, y0: 7.2, floor: 7.5, y1: 10.2, front: HALL.x0 + 2.95, back: HALL.x0 - 0.6,
     frame: "#232836", lip: "#363c4c", face: "#3a404d", inside: "#26324d", seam: "#1a2236", deep: "#1b2540", strip: "#c8ecff", pane: "#9fdcff",
     amber: "#ffb347", orange: "#e8761e", door: "#3a4152" };
+  // A door's keypad in its own frame, facing +x out of the wall its back stands on: a dark housing, a small screen over
+  // three columns of lit keys, the last row green (`body`), and its red twin (`denied`), which the scene shows while the
+  // keypad refuses a code. Each room says where its own hangs (`keypad`: its back's middle, its `turn` and the `floor`
+  // in front of it).
+  const KEYPAD = { body: "#1d2028", screen: "#1f5a3c", lit: "#7fdcff", go: "#2ecc71", red: "#ff3b30", redScreen: "#7a1c1c" };
+  const keypad = cached(() => {
+    const K = KEYPAD, make = (red) => {
+      const parts = [box({ w: 0.04, h: 0.26, d: 0.16, color: K.body, offset: { x: 0.02, y: 0, z: 0 } }),
+        box({ w: 0.01, h: 0.02, d: 0.12, color: red ? K.redScreen : K.screen, emissive: 0.9, offset: { x: 0.045, y: 0.112, z: 0 } })];
+      for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) parts.push(box({ w: 0.01, h: 0.03, d: 0.03, color: red ? K.red : r === 3 ? K.go : K.lit, emissive: 1, offset: { x: 0.045, y: 0.08 - r * 0.05, z: -0.04 + c * 0.04 } }));
+      return noShadow(merge(...parts));
+    };
+    return { body: make(false), denied: make(true) };
+  });
   // A screen's picture, `w` by `h` metres facing +z, painted on `px` pixels a metre by `paint(g, W, H)`.
   const screenPicture = (w, h, px, paint) => {
     const canvas = document.createElement("canvas");
@@ -793,9 +808,7 @@
     flat.push(box({ w: 0.05, h: 0.04, d: 0.16, color: "#c9d0d8", offset: { x: f + 0.16, y: C.floor + 1.0, z: dz - 0.3 } }));
     flat.push(box({ w: 0.12, h: 0.12, d: 0.36, color: "#24282f", offset: { x: f + 0.12, y: C.floor + dh + 0.22, z: dz } }));
     glow.push(box({ w: 0.02, h: 0.06, d: 0.3, color: C.amber, emissive: 1, offset: { x: f + 0.19, y: C.floor + dh + 0.22, z: dz } }));
-    const kpz = z1 + 0.23, kpy = C.floor + 1.15;
-    flat.push(box({ w: 0.04, h: 0.26, d: 0.16, color: "#1d2028", offset: { x: f + 0.08, y: kpy, z: kpz } }));
-    for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) glow.push(box({ w: 0.01, h: 0.03, d: 0.03, color: r === 3 ? "#2ecc71" : "#7fdcff", emissive: 1, offset: { x: f + 0.105, y: kpy + 0.08 - r * 0.05, z: kpz - 0.04 + c * 0.04 } }));
+    const keypad = { x: f + 0.06, y: C.floor + 1.15, z: z1 + 0.23, turn: 0, floor: C.floor };
     const windows = noShadow(merge(...glass));
     windows.glass = 0.16;
     // The extinguisher's bracket on the side wall by the back, its foot at `spots.bracket`.
@@ -803,7 +816,7 @@
     flat.push(box({ w: 0.2, h: 0.08, d: 0.06, color: C.frame, offset: { x: X.x, y: X.y + 0.05, z: X.z - 0.05 } }));
     flat.push(box({ w: 0.22, h: 0.03, d: 0.16, color: C.frame, offset: { x: X.x, y: X.y - 0.015, z: X.z + 0.02 } }));
     flat.push(box({ w: 0.04, h: 0.5, d: 0.03, color: C.frame, offset: { x: X.x, y: X.y + 0.25, z: X.z - 0.065 } }));
-    return { flat: merge(...flat), glow: noShadow(merge(...glow)), glass: windows, pictures, spots };
+    return { flat: merge(...flat), glow: noShadow(merge(...glow)), glass: windows, pictures, spots, keypad };
   });
 
   // The crew's rooms on the right wall (`SIDE_ROOMS`), after the concept, each built as the control room is, in that
@@ -816,8 +829,10 @@
   // along the wall from the room's middle in its frame]), a server rack in the far corner, a filing cabinet with a plant
   // by the glass, and the console its crew member works from behind, facing out over the hall, the chair behind.
   // Its extinguisher's bracket and the places a fire there plays out are the control room's too, at its far end
-  // (`spots`, turned with the room). `sideRooms()` is the rooms in the hangar's frame, each `flat`, `glow` (which the scene dims with the
-  // hall's glass), `glass`, `pictures` and `spots` as the control room's.
+  // (`spots`, turned with the room), and with them the way out through its door (`corner`, `inside`, `out`). Its door
+  // opens into the room, its leaf a node of the scene's own. `sideRooms()` is the rooms in the hangar's frame, each
+  // `flat`, `glow` (which the scene dims with the hall's glass), `glass`, `pictures`, `spots` and `keypad` as the control
+  // room's, and `door`, where its door's hinge stands and the way it turns shut.
   const SIDE_SCREENS = [
     [["blueprint", 8.95, -1], ["chart", 9.4, 0.9], ["radar", 8.7, 0.9]],
     [["chart", 9.05, -2.2], ["blueprint", 8.95, -0.4], ["radar", 9.05, 1.4]],
@@ -878,7 +893,11 @@
       fire: { x: kx, y: kt + 0.07, z: kz + 0.8 },
       bracket: { x: b + 1.3, y: C.floor + 0.42, z: z1 - 0.2, turn: Math.PI },
       take: { x: b + 1.3, z: z1 - 0.75, heading: 0 },
-      spray: { x: kx + 0.05, z: kz + 1.95 }
+      spray: { x: kx + 0.05, z: kz + 1.95 },
+      // And the way out: behind the console at the door's end, inside the door, and out of it on the catwalk.
+      corner: { x: HALL.x0 + 0.45, z: -2.7 },
+      inside: { x: f - 0.55, z: -2.7 },
+      out: { x: f + 1.05, z: -2.7 }
     };
     spots.spray.heading = Math.atan2(spots.fire.x - spots.spray.x, spots.fire.z - spots.spray.z);
     const X = spots.bracket;
@@ -898,31 +917,38 @@
     flat.push(box({ w: 0.1, h: 0.22, d: ll + 0.12, color: "#24282f", offset: { x: f + 0.17, y: top + 0.45, z: lz } }));
     glow.push(box({ w: 0.03, h: 0.12, d: ll, color: C.amber, emissive: 1, offset: { x: f + 0.23, y: top + 0.45, z: lz } }));
     flat.push(box({ w: f - wall, h: 0.35, d: z1 - z0 + 0.2, color: C.frame, offset: { x: (f + wall) / 2, y: C.y0 + 0.025 } }));
-    // The solid stretch at the door's end, in three lengths either side of the door and behind it, so the Canvas 2D sort
-    // keeps the keypad over it: the door in its frame, its amber window, its handle and the lamp over it, and the keypad
-    // beside it, toward the glass.
-    const sz = (z0 + g0) / 2, dz = sz - 0.05, dh = 2.1;
-    for (const [a, c] of [[z0, dz - 0.52], [dz - 0.52, dz + 0.52], [dz + 0.52, g0]]) flat.push(box({ w: 0.2, h: room, d: c - a, color: C.face, offset: { x: f - 0.04, y: ry, z: (a + c) / 2 } }));
-    flat.push(box({ w: 0.04, h: dh + 0.1, d: 1.04, color: C.frame, offset: { x: f + 0.07, y: C.floor + (dh + 0.1) / 2, z: dz } }));
-    flat.push(box({ w: 0.05, h: dh, d: 0.9, color: C.door, offset: { x: f + 0.1, y: C.floor + dh / 2, z: dz } }));
-    flat.push(box({ w: 0.02, h: 0.52, d: 0.38, color: C.frame, offset: { x: f + 0.13, y: C.floor + 1.55, z: dz } }));
-    glow.push(box({ w: 0.02, h: 0.44, d: 0.3, color: C.amber, emissive: 0.85, offset: { x: f + 0.14, y: C.floor + 1.55, z: dz } }));
-    flat.push(box({ w: 0.05, h: 0.04, d: 0.16, color: "#c9d0d8", offset: { x: f + 0.16, y: C.floor + 1.0, z: dz + 0.3 } }));
+    // The solid stretch at the door's end, in three lengths either side of the door and over it, so the Canvas 2D sort
+    // keeps the keypad over it: the doorway through it into the room in its frame, its door a node of the scene's own
+    // (`roomDoor()`, hung where `door` says, opening out onto the catwalk), the lamp over it, and the keypad beside it,
+    // toward the glass.
+    const sz = (z0 + g0) / 2, dz = sz - 0.05, dh = 2.1, over = C.floor + dh + 0.1;
+    for (const [a, c] of [[z0, dz - 0.52], [dz + 0.52, g0]]) flat.push(box({ w: 0.2, h: room, d: c - a, color: C.face, offset: { x: f - 0.04, y: ry, z: (a + c) / 2 } }));
+    flat.push(box({ w: 0.2, h: top - over, d: 1.04, color: C.face, offset: { x: f - 0.04, y: (top + over) / 2, z: dz } }));
+    for (const s of [-1, 1]) flat.push(box({ w: 0.24, h: dh + 0.1, d: 0.07, color: C.frame, offset: { x: f - 0.03, y: C.floor + (dh + 0.1) / 2, z: dz + s * 0.485 } }));
+    flat.push(box({ w: 0.24, h: 0.07, d: 1.04, color: C.frame, offset: { x: f - 0.03, y: over - 0.035, z: dz } }));
+    const door = { x: f + 0.1, y: C.floor, z: dz - 0.45, turn: 0 };
     flat.push(box({ w: 0.12, h: 0.12, d: 0.36, color: "#24282f", offset: { x: f + 0.12, y: C.floor + dh + 0.22, z: dz } }));
     glow.push(box({ w: 0.02, h: 0.06, d: 0.3, color: C.amber, emissive: 1, offset: { x: f + 0.19, y: C.floor + dh + 0.22, z: dz } }));
-    const kpz = g0 - 0.2, kpy = C.floor + 1.15;
-    flat.push(box({ w: 0.04, h: 0.26, d: 0.16, color: "#1d2028", offset: { x: f + 0.08, y: kpy, z: kpz } }));
-    for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) glow.push(box({ w: 0.01, h: 0.03, d: 0.03, color: r === 3 ? "#2ecc71" : "#7fdcff", emissive: 1, offset: { x: f + 0.105, y: kpy + 0.08 - r * 0.05, z: kpz - 0.04 + c * 0.04 } }));
+    const keypad = { x: f + 0.06, y: C.floor + 1.15, z: g0 - 0.2, turn: 0, floor: C.floor };
     // Turned round onto the right wall at the bay's middle.
     const onto = (g) => moved(turnedY(g, Math.PI), HALL.x0 + HALL.x1, 0, middle);
     const windows = noShadow(onto(merge(...glass)));
     windows.glass = 0.16;
-    for (const p of [...pictures, ...Object.values(spots)]) {
+    for (const p of [...pictures, ...Object.values(spots), keypad, door]) {
       p.x = HALL.x0 + HALL.x1 - p.x; p.z = middle - p.z;
       for (const key of ["turn", "heading"]) if (p[key] !== undefined) p[key] += Math.PI;
     }
-    return { flat: onto(merge(...flat)), glow: noShadow(onto(merge(...glow))), glass: windows, pictures, spots };
+    return { flat: onto(merge(...flat)), glow: noShadow(onto(merge(...glow))), glass: windows, pictures, spots, keypad, door };
   }));
+  // A crew room's door, about its hinge: the leaf reaching +z from it and facing +x, out of the room, its amber window
+  // and its handle; it opens turned toward +x.
+  const roomDoor = cached(() => {
+    const C = CONTROL, dh = 2.1;
+    return merge(box({ w: 0.05, h: dh, d: 0.9, color: C.door, offset: { x: 0, y: dh / 2, z: 0.45 } }),
+      box({ w: 0.02, h: 0.52, d: 0.38, color: C.frame, offset: { x: 0.03, y: 1.55, z: 0.45 } }),
+      box({ w: 0.02, h: 0.44, d: 0.3, color: C.amber, emissive: 0.85, offset: { x: 0.04, y: 1.55, z: 0.45 } }),
+      box({ w: 0.05, h: 0.04, d: 0.16, color: "#c9d0d8", offset: { x: 0.06, y: 1.0, z: 0.75 } }));
+  });
   // The small lit windows of the crew's lofts high on the right wall over the rooms (`SIDE_ROOMS.lofts`), after the
   // concept: each a deep dark frame standing out of the panels round a lit blue space, with a small amber lamp over it
   // (`flat` and `glow`, where they hang). In each a monitor and one of the crew in a hard hat, which the scene moves and
@@ -1835,8 +1861,15 @@
     }
     const [jx0, jy0, jx1] = T.jet, jc = (jx0 + jx1) / 2;
     if (full) glyph(S, "jet", jc, JETS.stats[0][1]);
-    write(S, "JET V2", jc, jy0 + 0.75, 0.34, GOLD, { bold: true, align: "center", max: 2.1 });
-    write(S, "COMING SOON", jc, jy0 + 0.4, 0.22, GOLD, { bold: true, align: "center", max: 2.1 });
+    // Jet 2.0 under way on its own branch: its commits, this week's and its newest's day; or, with no reading of it,
+    // coming soon.
+    const v2 = r && r.v2;
+    write(S, "JET V2", jc, jy0 + (v2 ? 0.98 : 0.75), 0.34, GOLD, { bold: true, align: "center", max: 2.1 });
+    if (v2) {
+      write(S, `${number(v2.commits)} commits`, jc, jy0 + 0.62, 0.22, GOLD, { bold: true, align: "center", max: 2.1 });
+      const last = v2.lastAt ? new Date(v2.lastAt).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : "";
+      write(S, `+${v2.week >= 100 ? "100+" : v2.week} this week${last ? ` · last ${last}` : ""}`, jc, jy0 + 0.3, 0.14, GREEN, { align: "center", max: 2.2 });
+    } else write(S, "COMING SOON", jc, jy0 + 0.4, 0.22, GOLD, { bold: true, align: "center", max: 2.1 });
     write(S, `ⓘ  ${boardNote(r)}`, 0, F.footer, 0.13, "#b4c8ee", { align: "center", max: 8.4 });
   };
 
@@ -2562,7 +2595,7 @@
     const L = LAYOUT, T = L.tunnel, rand = mulberry32(5151), parts = [], sh = shell();
     parts.push(sh.floor, sh.walls, sh.vault, sh.lattice, sh.slots);
     const run = runway(), tun = tunnel(), fix = fixtures();
-    parts.push(landing(), run.flat, run.glow, tun.stone, tun.iron, catwalks(), wallLights().wall.flat, wallLights().wall.glow, wallLights().edge.flat, wallLights().edge.glow, controlRoom().flat, controlRoom().glow, ...sideRooms().flatMap((r) => [r.flat, r.glow]), loftWindows().flat, loftWindows().glow, loftWindows().still, fix.flat, fix.detail, fix.crateDetail, fix.glow, fix.lampGlow, fix.glass, dock());
+    parts.push(landing(), run.flat, run.glow, tun.stone, tun.iron, catwalks(), wallLights().wall.flat, wallLights().wall.glow, wallLights().edge.flat, wallLights().edge.glow, controlRoom().flat, controlRoom().glow, ...sideRooms().flatMap((r) => [r.flat, r.glow, moved(turnedY(merge(roomDoor()), r.door.turn), r.door.x, r.door.y, r.door.z)]), loftWindows().flat, loftWindows().glow, loftWindows().still, fix.flat, fix.detail, fix.crateDetail, fix.glow, fix.lampGlow, fix.glass, dock());
     for (const z of tun.neonZ) parts.push(moved(merge(tun.neon), 0, 0, z));
     // The boards on their mounts, their glass and tiles, as they hang.
     const frames = boardFrames(), faces = { stats: statsFace(), timeline: timelineFace() };
@@ -2870,7 +2903,7 @@
   };
 
   BL.hangarModels = {
-    LAYOUT, STEP, TINTS, LANTERN_GLOW, shell, landing, doorBulkhead, GLOSS, glossRunway, wallLights, CONTROL, controlRoom, SIDE_ROOMS, sideRooms, LOFT, loftWindows, extinguisher, NOZZLE, CRANE, crane, laydown, craneSpot, runway, marker, floorLamp, tunnel, catwalks, fixtures, boardFrames, statsFace, timelineFace, JETS, jetStreaks, boardText, boardNote, paintBoard, dock, vest,
+    LAYOUT, STEP, TINTS, LANTERN_GLOW, shell, landing, doorBulkhead, GLOSS, glossRunway, wallLights, CONTROL, controlRoom, SIDE_ROOMS, sideRooms, roomDoor, keypad, LOFT, loftWindows, extinguisher, NOZZLE, CRANE, crane, laydown, craneSpot, runway, marker, floorLamp, tunnel, catwalks, fixtures, boardFrames, statsFace, timelineFace, JETS, jetStreaks, boardText, boardNote, paintBoard, dock, vest,
     fixedLights, KEY, doorWindow, FIRE, fireStation, fireCables, firePicture, exhaust, blast, KIOSK, DESK, projector, filmScreen, projectorBeam,
     hallGlimpse: cached(() => noShadow(merge(
       box({ w: 4.4, h: 4.6, d: 0.1, color: "#2a1a10", emissive: 0.55, offset: { y: 2.3, z: -3.25 } }),
