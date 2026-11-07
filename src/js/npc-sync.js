@@ -1,8 +1,8 @@
 // The Ooga crew kept in step for signed-in players. The room elects one page showing the island as host
 // (`net.state.hostId`): it runs the crew as always and, SEND_S apart, sends one binary frame with every
 // Ooga nobody drives. Every other signed-in page on the island follows: those Oogas become puppets
-// (`cave.puppet`, which makes crew.update skip their AI) and are eased toward the latest frame here, after
-// the crew's update. An Ooga someone drives is never in a frame and never a puppet: the driver's page
+// (`cave.puppet`, which makes crew.update skip their AI) and are played back here, after the crew's
+// update, DELAY behind the frames as they arrived (see Playback below). An Ooga someone drives is never in a frame and never a puppet: the driver's page
 // runs it and the others show it through remote-players.js. With no room, no host or when hosting, every
 // Ooga runs its own AI as before.
 //
@@ -17,6 +17,25 @@
 // Cost: the host sends only while the room reports followers (`net.state.followers`), and a frame whose
 // records match the last one sent, with no events, waits up to KEEP_S before it goes again.
 // One sync per hub visit: `create` after the crew, `update` after crew.update each frame, `dispose` in leave.
+//
+// Playback. Easing toward the latest frame made a walker surge as each frame landed and slow to a crawl
+// before the next, four times a second. A follower instead keeps the frames it receives (at most SLOTS),
+// each stamped with this page's clock when it arrived (frames carry no host time), and shows every puppet
+// as it stood DELAY before this page's present, between the two frames either side of that moment, so
+// frames arriving evenly play a steady walk at a steady pace. Because the stamps are arrival times, network
+// jitter still shows as small changes of pace between frames, and the network's own latency comes on top
+// of DELAY. DELAY is one send interval and JITTER, so a frame up to JITTER later than the last interval
+// still arrives before it is needed. Nothing is guessed past the newest frame: when the frames run dry
+// the puppet waits on it, and the next frame restamps it to the playhead, so the move carries on from
+// where the puppet stands, never back. Between two frames a puppet moves on the straight line joining
+// them, which can cut a corner the host walked round (a wall's end, a door frame) when they lie far apart.
+// Frames closer than MERGE_S are folded into one, their events kept in arrival order up to SLOT_EVENTS a
+// folded frame (the newest past that are dropped and counted in `droppedEvents`). A jump between two
+// frames (a status change, a move past SNAP, a change of visibility) is never drawn across: the puppet
+// stays on the first until the playhead reaches the second. Status, work, flags and held gear come from
+// the frame the playhead has reached, and that frame's events replay then, after its poses. The first
+// frame of a puppet is shown at once, as is the first matching frame after a host's frames of another
+// format, which discard everything kept before them. The wire format is unchanged.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -28,7 +47,8 @@
   // invents a second track. It follows again as soon as a matching frame arrives or the room elects another host.
   // A format-2 page can't do the same: following a format-3 host it falls back to its own crew, as it always did.
   const FORMAT = 3, HEADER = 4, RECORD = 112, SEND_S = 0.25, KEEP_S = 2;
-  const EASE = 8, SNAP = 4, EVENTS_MAX = 96, SAY_MAX = 120;
+  const SNAP = 4, EVENTS_MAX = 96, SAY_MAX = 120;
+  const JITTER = 0.1, DELAY = SEND_S + JITTER, SLOTS = 6, MERGE_S = SEND_S / 2, SLOT_EVENTS = 2 * EVENTS_MAX;
   const F_VISIBLE = 1, F_CLOSED = 2, F_ROOT_Q = 4, F_ARM_L_Q = 8, F_ARM_R_Q = 16, F_HEAD_Q = 32;
   const F_CLUB = 64, F_CLUB_Q = 128, F_GUN = 256, F_GUN_Q = 512, F_FLASH = 1024, F_SNACK = 2048;
   const F_STUNNED = 4096, F_FLAME = 8192, F_BED_GEAR = 16384, F_OUTDOOR_SLEEP = 32768;
@@ -48,6 +68,25 @@
     const out = new Float32Array(HEADER + n * RECORD), outHeader = new Uint32Array(out.buffer, 0, HEADER);
     const target = new Float32Array(n * RECORD), sent = new Float32Array(HEADER + n * RECORD);
     const have = new Uint8Array(n), fresh = new Uint8Array(n);
+    // Playback's frames: SLOTS of every Ooga's record, which Oogas each carries, when it arrived, its events,
+    // and the slots in use oldest first (`order`, `kept`). Each slot's events are a list reused for the page
+    // life, at most SLOT_EVENTS long; `due` holds the events the playhead reached this update, at most
+    // SLOTS * SLOT_EVENTS.
+    const ring = new Float32Array(SLOTS * n * RECORD), carries = new Uint8Array(SLOTS * n);
+    const stampOf = new Float64Array(SLOTS), playedOf = new Uint8Array(SLOTS), inUse = new Uint8Array(SLOTS);
+    const eventsOf = Array.from({ length: SLOTS }, () => []), order = new Int8Array(SLOTS), due = [];
+    let kept = 0, droppedEvents = 0;
+    const dropOldest = () => {
+      const s = order[0];
+      for (let c = 1; c < kept; c++) order[c - 1] = order[c];
+      kept--;
+      inUse[s] = 0;
+      eventsOf[s].length = 0;
+    };
+    const clearFrames = () => {
+      while (kept) dropOldest();
+      due.length = 0;
+    };
     // Each puppet's own quaternions: the crew's are never written from here.
     const quats = list.map(() => ({ root: quat.create(), armL: quat.create(), armR: quat.create(), head: quat.create(), club: quat.create(), gun: quat.create() }));
     const TQ = quat.create();
@@ -254,17 +293,37 @@
       // Another format from the elected host: hold, never run a second track (see FORMAT).
       if (header[0] !== FORMAT) {
         if (!incompatible) { incompatible = true; if (onIncompatible) onIncompatible(header[0]); }
-        pendingEvents = null;
+        // Every frame kept goes, played or not, with its events: the puppets hold where they stand, and a
+        // matching frame starts afresh rather than play poses and events from before the interruption.
+        clearFrames();
         return;
       }
+      // Back from frames of another format: the puppets were held, and nothing kept is older than this frame.
+      if (incompatible) fresh.set(have);
       incompatible = false;
       if (header[1] !== signature) { release(); return; }
       if (count > n || buffer.byteLength !== recordBytes + eventBytes) return;
       const f = new Float32Array(buffer, 0, recordBytes / 4);
+      // Where the frame goes in playback (see Playback). `update` has already dropped every frame but the
+      // newest the playhead reached, so a newest frame at or behind it is the only one: the puppets wait on it.
+      const now = elapsed, play = now - DELAY, last = kept ? order[kept - 1] : -1;
+      let s = -1;
+      if (last >= 0 && stampOf[last] <= play) stampOf[last] = play;
+      else if (last >= 0 && (kept === SLOTS || kept >= 2 && now - stampOf[last] < MERGE_S)) s = last;
+      if (s < 0) {
+        s = 0;
+        while (inUse[s]) s++;
+        inUse[s] = 1; playedOf[s] = 0; eventsOf[s].length = 0;
+        carries.fill(0, s * n, s * n + n);
+        order[kept++] = s;
+      }
+      stampOf[s] = last >= 0 && last !== s ? Math.max(now, stampOf[last] + 1e-4) : now;
+      const base = s * n * RECORD;
       for (let k = 0; k < count; k++) {
         const o = HEADER + k * RECORD, i = f[o];
         if (!(i >= 0 && i < n)) continue;
-        for (let j = 0; j < RECORD; j++) target[i * RECORD + j] = f[o + j];
+        for (let j = 0; j < RECORD; j++) target[i * RECORD + j] = ring[base + i * RECORD + j] = f[o + j];
+        carries[s * n + i] = 1;
         if (!have[i]) fresh[i] = 1;
         have[i] = 1;
       }
@@ -277,32 +336,65 @@
         return;
       }
       if (!Array.isArray(list_)) return;
-      // Poses first, then the events, so a shot leaves from where the rifle now is.
-      pendingEvents = list_;
+      // Replayed when the playhead reaches this frame, after its poses, so a shot leaves from where the rifle is.
+      // A frame gives at most EVENTS_MAX, as the host records; a folded frame keeps the first SLOT_EVENTS in
+      // arrival order, and the newest past that are dropped and counted.
+      const kept_ = eventsOf[s], take = Math.min(list_.length, EVENTS_MAX);
+      for (let e = 0; e < take; e++) {
+        const event = list_[e];
+        if (!event || typeof event !== "object") continue;
+        if (kept_.length < SLOT_EVENTS) kept_.push(event);
+        else droppedEvents++;
+      }
     };
-    let pendingEvents = null;
 
-    // A quaternion eased toward the frame's, or dropped (back to the Euler rotation) when the frame has none.
+    // The pair of frames a puppet is shown between, set by `between`: `A` at `ao` (reached, or the first there
+    // is), `B` at `bo` (next) or null, and how far from A to B the playhead stands, `w` (0 when held on A).
+    let A = target, ao = 0, B = null, bo = 0, w = 0;
+    const between = (i, play) => {
+      let a = -1, b = -1;
+      for (let c = 0; c < kept; c++) {
+        const s = order[c];
+        if (!carries[s * n + i]) continue;
+        if (stampOf[s] <= play) { a = s; continue; }
+        if (a < 0) a = s;
+        else b = s;
+        break;
+      }
+      // No frame kept carries it (one it was missing from passed): hold its newest record.
+      if (a < 0) { A = target; ao = i * RECORD; B = null; w = 0; return; }
+      A = ring; ao = (a * n + i) * RECORD; B = null; w = 0;
+      if (b < 0) return;
+      const bo_ = (b * n + i) * RECORD;
+      // A jump is never drawn across: a change of visibility or status (the clank-to-chill walk aside), or a move past SNAP.
+      const sa = STATES[ring[ao + 96]], sb = STATES[ring[bo_ + 96]];
+      if ((ring[ao + 1] & F_VISIBLE) !== (ring[bo_ + 1] & F_VISIBLE)) return;
+      if (sa !== sb && !(sa === "working" && sb === "chilling")) return;
+      if (Math.hypot(ring[bo_ + 2] - ring[ao + 2], ring[bo_ + 3] - ring[ao + 3], ring[bo_ + 4] - ring[ao + 4]) > SNAP) return;
+      B = ring; bo = bo_;
+      w = Math.min(1, Math.max(0, (play - stampOf[a]) / (stampOf[b] - stampOf[a])));
+    };
+    const mix = (j, k) => A[ao + j] + (k ? (B[bo + j] - A[ao + j]) * k : 0);
+    const mixAngle = (j, k) => A[ao + j] + (k ? wrap(B[bo + j] - A[ao + j]) * k : 0);
+    const setAngles = (rot, j, k) => {
+      rot.x = mixAngle(j, k); rot.y = mixAngle(j + 1, k); rot.z = mixAngle(j + 2, k);
+    };
+    const setXYZ = (v, j, k) => {
+      v.x = mix(j, k); v.y = mix(j + 1, k); v.z = mix(j + 2, k);
+    };
+    // A quaternion between the two frames', or dropped (back to the Euler rotation) when the reached frame has none.
     // A puppet's pose is the host's alone: a quaternion its own crew left (a local sleep's `sleepRotation`)
     // would hide the frame's Euler rotation, so it goes too. The crew's object itself is never written.
-    const poseQuat = (node, own, t, o, on, k) => {
-      if (!on) {
+    const poseQuat = (node, own, j, flag, k) => {
+      if (!(A[ao + 1] & flag)) {
         if (node.quaternion) node.quaternion = null;
         return;
       }
-      if (node.quaternion !== own) {
-        node.quaternion = own;
-        own[0] = t[o]; own[1] = t[o + 1]; own[2] = t[o + 2]; own[3] = t[o + 3];
-        return;
-      }
-      TQ[0] = t[o]; TQ[1] = t[o + 1]; TQ[2] = t[o + 2]; TQ[3] = t[o + 3];
+      if (node.quaternion !== own) node.quaternion = own;
+      own[0] = A[ao + j]; own[1] = A[ao + j + 1]; own[2] = A[ao + j + 2]; own[3] = A[ao + j + 3];
+      if (!k || !(B[bo + 1] & flag)) return;
+      TQ[0] = B[bo + j]; TQ[1] = B[bo + j + 1]; TQ[2] = B[bo + j + 2]; TQ[3] = B[bo + j + 3];
       quat.slerpTo(own, TQ, k);
-    };
-    const easeAngles = (rot, t, o, k) => {
-      rot.x += wrap(t[o] - rot.x) * k; rot.y += wrap(t[o + 1] - rot.y) * k; rot.z += wrap(t[o + 2] - rot.z) * k;
-    };
-    const easeXYZ = (v, t, o, k) => {
-      v.x += (t[o] - v.x) * k; v.y += (t[o + 1] - v.y) * k; v.z += (t[o + 2] - v.z) * k;
     };
     // Gear hangs where the host has it: a hand, the back sling (the root) or the bed's weapons.
     const holdIn = (i, node, code) => {
@@ -314,99 +406,101 @@
       return true;
     };
 
-    const apply = (i, cave, dt) => {
-      const t = target, o = i * RECORD, r = cave.root, p = cave.parts, q = quats[i];
-      const flags = t[o + 1];
-      const distance = Math.hypot(t[o + 2] - r.position.x, t[o + 3] - r.position.y, t[o + 4] - r.position.z);
-      // A status change is a passive relocation on the host (a beam): place it at
-      // once rather than easing across, however short. The exception is
-      // clanking to chilling, a walk on the host, which eases as usual.
-      const status = STATES[t[o + 96]];
+    const apply = (i, cave, dt, play) => {
+      const r = cave.root, p = cave.parts, q = quats[i], t = target, o = i * RECORD;
+      between(i, play);
+      // Everything discrete is the reached frame's; only what moves continuously runs from A toward B.
+      const flags = A[ao + 1];
+      const x = mix(2, w), y = mix(3, w), z = mix(4, w);
+      const jump = Math.hypot(x - r.position.x, y - r.position.y, z - r.position.z);
+      // A status change is a passive relocation on the host (a beam): `between` never draws across it, so the
+      // puppet lands there at once when the playhead reaches it. Clanking to chilling is a walk on the host.
+      const status = STATES[A[ao + 96]];
       const relocated = status !== undefined && status !== cave.state && !(cave.state === "working" && status === "chilling");
-      const far = fresh[i] || distance > SNAP || relocated;
-      let k = far ? 1 : 1 - Math.exp(-EASE * dt);
+      const far = fresh[i] || jump > SNAP || relocated;
       fresh[i] = 0;
       r.visible = (flags & F_VISIBLE) !== 0;
-      easeXYZ(r.position, t, o + 2, k);
-      easeAngles(r.rotation, t, o + 5, k);
-      poseQuat(r, q.root, t, o + 8, (flags & F_ROOT_Q) !== 0, k);
-      r.scale.x = t[o + 12]; r.scale.y = t[o + 13]; r.scale.z = t[o + 14];
-      // The world position and work the gorillas read always follow the host
+      r.position.x = x; r.position.y = y; r.position.z = z;
+      setAngles(r.rotation, 5, w);
+      poseQuat(r, q.root, 8, F_ROOT_Q, w);
+      r.scale.x = A[ao + 12]; r.scale.y = A[ao + 13]; r.scale.z = A[ao + 14];
+      // The world position and work the gorillas read always follow playback
       // at full rate. Only this visitor's settled limb interpolation may wait.
-      const state = STATES[t[o + 96]], phase = PHASES[t[o + 97]];
+      const state = STATES[A[ao + 96]], phase = PHASES[A[ao + 97]];
       const changed = poseFlags[i] !== flags || cave.state !== state || cave.work.phase !== phase;
       if (state !== undefined) cave.state = state;
       if (phase !== undefined) cave.work.phase = phase;
-      cave.work.site = t[o + 98];
-      cave.work.plannedSite = t[o + 99];
-      crew.setTint(cave, t[o + 100]);
+      cave.work.site = A[ao + 98];
+      cave.work.plannedSite = A[ao + 99];
+      crew.setTint(cave, A[ao + 100]);
       if (animationInterval && cave.animation) {
         const a = cave.animation;
         const resting = state === "sleeping" || state === "chilling" && !phase;
-        const still = distance < 0.001 && Math.abs(wrap(t[o + 6] - r.rotation.y)) < 0.001;
-        const holders = holderCode(i, p.club) === t[o + 52] && holderCode(i, p.gun) === t[o + 63];
+        // Still: shown where the newest frame has it, so nothing is left to play.
+        const still = Math.hypot(t[o + 2] - x, t[o + 3] - y, t[o + 4] - z) < 0.001 && Math.abs(wrap(t[o + 6] - r.rotation.y)) < 0.001;
+        const holders = holderCode(i, p.club) === A[ao + 52] && holderCode(i, p.gun) === A[ao + 63];
         const interval = resting && still && holders && !(flags & (F_STUNNED | F_FLAME | F_FLASH)) ? animationInterval(cave) : 0;
         a.pending += dt;
         a.due = far || changed || !interval || interval < a.interval || elapsed >= a.at;
         a.dt = a.due ? a.pending : 0;
         if (!a.due) return;
-        k = far || changed ? 1 : 1 - Math.exp(-EASE * a.dt);
         a.pending = 0;
         a.at = elapsed + interval * (a.interval ? 1 : 0.5 + i * 0.61803398875 % 0.5);
         a.interval = interval;
         a.updates++;
       }
       poseFlags[i] = flags;
-      p.legL.rotation.x += wrap(t[o + 15] - p.legL.rotation.x) * k; p.legL.rotation.z += wrap(t[o + 16] - p.legL.rotation.z) * k;
-      p.legR.rotation.x += wrap(t[o + 17] - p.legR.rotation.x) * k; p.legR.rotation.z += wrap(t[o + 18] - p.legR.rotation.z) * k;
-      easeAngles(p.armL.rotation, t, o + 19, k);
-      poseQuat(p.armL, q.armL, t, o + 22, (flags & F_ARM_L_Q) !== 0, k);
-      easeAngles(p.armR.rotation, t, o + 26, k);
-      poseQuat(p.armR, q.armR, t, o + 29, (flags & F_ARM_R_Q) !== 0, k);
-      easeAngles(p.head.rotation, t, o + 33, k);
-      easeXYZ(p.head.position, t, o + 36, k);
-      poseQuat(p.head, q.head, t, o + 39, (flags & F_HEAD_Q) !== 0, k);
+      p.legL.rotation.x = mixAngle(15, w); p.legL.rotation.z = mixAngle(16, w);
+      p.legR.rotation.x = mixAngle(17, w); p.legR.rotation.z = mixAngle(18, w);
+      setAngles(p.armL.rotation, 19, w);
+      poseQuat(p.armL, q.armL, 22, F_ARM_L_Q, w);
+      setAngles(p.armR.rotation, 26, w);
+      poseQuat(p.armR, q.armR, 29, F_ARM_R_Q, w);
+      setAngles(p.head.rotation, 33, w);
+      setXYZ(p.head.position, 36, w);
+      poseQuat(p.head, q.head, 39, F_HEAD_Q, w);
       const head = (flags & F_CLOSED) !== 0 ? cave.headClosed : cave.headOpen;
       if (p.head.geometry !== head) p.head.geometry = head;
-      p.torso.scale.y = t[o + 43];
-      p.torso.rotation.x += wrap(t[o + 44] - p.torso.rotation.x) * k; p.torso.rotation.z += wrap(t[o + 45] - p.torso.rotation.z) * k;
-      easeXYZ(p.armL.position, t, o + 46, k);
-      easeXYZ(p.armR.position, t, o + 49, k);
-      // Gear: a change of holder moves the node, and the mirror and outlines learn the new shape.
-      let moved = holdIn(i, p.club, t[o + 52]);
-      moved = holdIn(i, p.gun, t[o + 63]) || moved;
-      const gearK = moved ? 1 : k;
+      p.torso.scale.y = A[ao + 43];
+      p.torso.rotation.x = mixAngle(44, w); p.torso.rotation.z = mixAngle(45, w);
+      setXYZ(p.armL.position, 46, w);
+      setXYZ(p.armR.position, 49, w);
+      // Gear: a change of holder moves the node, and the mirror and outlines learn the new shape. Gear runs
+      // toward the next frame only while that frame has it in the same holder.
+      let moved = holdIn(i, p.club, A[ao + 52]);
+      moved = holdIn(i, p.gun, A[ao + 63]) || moved;
+      const clubK = w && B[bo + 52] === A[ao + 52] ? w : 0, gunK = w && B[bo + 63] === A[ao + 63] ? w : 0;
       p.club.visible = (flags & F_CLUB) !== 0;
-      easeXYZ(p.club.position, t, o + 53, gearK); easeAngles(p.club.rotation, t, o + 56, gearK);
-      poseQuat(p.club, q.club, t, o + 59, (flags & F_CLUB_Q) !== 0, gearK);
+      setXYZ(p.club.position, 53, clubK); setAngles(p.club.rotation, 56, clubK);
+      poseQuat(p.club, q.club, 59, F_CLUB_Q, clubK);
       p.gun.visible = (flags & F_GUN) !== 0;
-      easeXYZ(p.gun.position, t, o + 64, gearK); easeAngles(p.gun.rotation, t, o + 67, gearK);
-      poseQuat(p.gun, q.gun, t, o + 70, (flags & F_GUN_Q) !== 0, gearK);
-      const mask = t[o + 74];
+      setXYZ(p.gun.position, 64, gunK); setAngles(p.gun.rotation, 67, gunK);
+      poseQuat(p.gun, q.gun, 70, F_GUN_Q, gunK);
+      const mask = A[ao + 74];
       for (let b = 0; b < p.gunBananas.length; b++) p.gunBananas[b].visible = (mask & (1 << b)) !== 0;
       p.gunFlash.visible = (flags & F_FLASH) !== 0;
       p.snack.visible = (flags & F_SNACK) !== 0;
-      p.snack.scale.x = p.snack.scale.y = p.snack.scale.z = t[o + 75];
+      p.snack.scale.x = p.snack.scale.y = p.snack.scale.z = A[ao + 75];
       const bed = cave.sleepWeapons;
       bed.visible = (flags & F_BED_GEAR) !== 0;
       const outdoor = (flags & F_OUTDOOR_SLEEP) !== 0;
       if (outdoor || cave.remoteOutdoorSleep) {
-        for (const node of cave.sleepParts.equipment) node.visible = STATES[t[o + 96]] !== "sleeping";
+        for (const node of cave.sleepParts.equipment) node.visible = state !== "sleeping";
         for (const node of cave.swagNodes) node.visible = !outdoor;
         for (const model of cave.magazineModels) if (model) model.node.visible = !outdoor;
         if (cave.jet) cave.jet.node.visible = !outdoor;
       }
       cave.remoteOutdoorSleep = outdoor;
-      easeXYZ(bed.position, t, o + 76, gearK); easeAngles(bed.rotation, t, o + 79, gearK);
+      setXYZ(bed.position, 76, w); setAngles(bed.rotation, 79, w);
       for (let b = 0; b < BODY.length; b++) {
         const node = p[BODY[b]];
-        node.ember = t[o + 82 + b];
-        node.scorch = t[o + 88 + b];
+        node.ember = A[ao + 82 + b];
+        node.scorch = A[ao + 88 + b];
       }
-      if (p.chuk) p.chuk.rotation.x = t[o + 94];
+      if (p.chuk) p.chuk.rotation.x = A[ao + 94];
       if (p.jetFlame) {
         p.jetFlame.visible = (flags & F_FLAME) !== 0;
-        p.jetFlame.scale.y = t[o + 95];
+        p.jetFlame.scale.y = A[ao + 95];
       }
       cave.stunBirds.visible = crew.combatEnabled !== false && (flags & F_STUNNED) !== 0;
       if (cave.stunBirds.visible) cave.stunBirds.rotation.y += dt * 4;
@@ -419,7 +513,7 @@
       have.fill(0);
       fresh.fill(0);
       poseFlags.fill(-1);
-      pendingEvents = null;
+      clearFrames();
     };
 
     /** Once a frame, after crew.update: host sends, follower poses its puppets, solo does nothing. */
@@ -455,6 +549,18 @@
         return;
       }
       if (role !== "follow") return;
+      // Playback: the frames the playhead reached give up their events once, and only the newest of them stays.
+      // (While another format's frames hold the puppets, nothing is kept: see `decode`.)
+      const play = elapsed - DELAY;
+      due.length = 0;
+      for (let c = 0; c < kept && stampOf[order[c]] <= play; c++) {
+        const s = order[c], events = eventsOf[s];
+        if (playedOf[s]) continue;
+        playedOf[s] = 1;
+        for (let e = 0; e < events.length; e++) due.push(events[e]);
+        events.length = 0;
+      }
+      while (kept >= 2 && stampOf[order[1]] <= play) dropOldest();
       if (st.npcVersion !== seen) {
         seen = st.npcVersion;
         decode(net.npcFrame);
@@ -468,13 +574,12 @@
         // Held where it stands: the host's format can't be followed and this page must not run its own.
         if (incompatible) { cave.puppet = true; continue; }
         cave.puppet = !!have[i];
-        if (have[i]) apply(i, cave, dt);
+        if (have[i]) apply(i, cave, dt, play);
       }
-      if (pendingEvents) {
-        const replaying = pendingEvents;
-        pendingEvents = null;
-        for (let e = 0; e < Math.min(replaying.length, EVENTS_MAX); e++) if (replaying[e] && typeof replaying[e] === "object") replay(replaying[e]);
-      }
+      if (incompatible) due.length = 0;
+      // Poses first, then the events of the frames they were sent with, in arrival order.
+      for (let d = 0; d < due.length; d++) replay(due[d]);
+      due.length = 0;
     };
 
     const dispose = () => {
@@ -484,8 +589,9 @@
     };
 
     return { update, dispose, fx: recordingFx, recordShot, recordPlan, recordHit, get role() { return role; }, get frames() { return frames; },
+      get buffered() { return kept; }, get droppedEvents() { return droppedEvents; },
       get incompatible() { return incompatible; } };
   };
 
-  BL.npcSync = { create, FORMAT, RECORD };
+  BL.npcSync = { create, FORMAT, RECORD, DELAY };
 })();

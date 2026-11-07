@@ -5697,14 +5697,47 @@
     if (!screen) { hud.tooltip.hide(); return; }
     hud.tooltip.show(owner.sequence.label, screen.x, screen.y, null, false, true);
   };
+  // The nearest live remote player (remote-players.js `pick`) along a sight line, unoccluded, or Infinity. Only the
+  // remote pool's bodies are tested, never the visitor's own: hover and crosshair feedback read it, nothing else.
+  const LIVE_HIT = { node: null, owner: null, type: "none", distance: Infinity, x: 0, y: 0, z: 0 };
+  const liveClear = (x, y, z, toX, toY, toZ) => !clankerFireReachable || clankerFireReachable(x, y, z, toX, toY, toZ, null, true);
+  const liveTarget = (ox, oy, oz, dx, dy, dz, maxDistance) =>
+    remotes && remotes.pick(LIVE_HIT, ox, oy, oz, dx, dy, dz, maxDistance, liveClear) ? LIVE_HIT.distance : Infinity;
+  // An NPC ghost track (npc-ghosts.js) under the cursor shows its name and online dot, an Ooga's or a gorilla's. Its glassy
+  // twin is not in the outline registry, so its name goes by the overlay's exact test (`characterUiOccluded`), and the
+  // hover is checked again every frame, as the pool block's is: the ghost moves under a still pointer, and a live player
+  // standing in front of it (often its own driver, who has a nameplate of their own) takes the pointer from it.
+  const GHOST_POINTER = { x: 0, y: 0 }, GHOST_RAY = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
+  const GHOST_HIT = { node: null, owner: null, distance: Infinity, x: 0, y: 0, z: 0 };
+  let ghostHovered = null, ghostHoverText = "";
+  const ghostOf = (owner) => (owner.kind === "caveman" || owner.kind === "clanker") && owner.cave.ghostTrack ? owner.cave : null;
+  const showGhostTooltip = () => {
+    const actor = ghostHovered, ray = GHOST_RAY, hit = GHOST_HIT;
+    renderer.ray(GHOST_POINTER.x, GHOST_POINTER.y, camera, ray);
+    poolBlockHoverIgnore = hooks.hoverIgnore();
+    if (!actor.ghostTrack || !input.weaponTargets.ray(hit, ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz,
+      camera.far, null, poolBlockHoverTarget, true) || hit.owner.cave !== actor
+      || liveTarget(ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, hit.distance) < hit.distance
+      || !guideSegmentClear(ray.ox, ray.oy, ray.oz, hit.x, hit.y, hit.z)
+      || !mempoolIsland.sightClear(ray.ox, ray.oy, ray.oz, hit.x, hit.y, hit.z)) {
+      ghostHovered = null; ghostHoverText = ""; hud.tooltip.hide(); return;
+    }
+    hud.tooltip.show(ghostHoverText, GHOST_POINTER.x, GHOST_POINTER.y, actor, false);
+  };
   const showHoverTooltip = (hit, p) => {
     if (hit && (hit.owner.kind === "cave" || hit.owner.kind === "cave-sign")) BL.deferred.prefetchScene(hit.owner.slot.scene);
     pileHovered = hit?.owner.kind === "pile";
     if (!pileHovered) hud.setPileValueVisible(false);
     poolBlockHovered = hit?.owner.kind === "poolblock" ? hit.owner : null;
+    const ghost = hit ? ghostOf(hit.owner) : null;
+    if (ghost !== ghostHovered) ghostHoverText = ghost ? tooltipFor(hit) : "";
+    ghostHovered = ghost;
     if (poolBlockHovered) {
       POOL_BLOCK_POINTER.x = p.x; POOL_BLOCK_POINTER.y = p.y;
       showPoolBlockTooltip();
+    } else if (ghostHovered) {
+      GHOST_POINTER.x = p.x; GHOST_POINTER.y = p.y;
+      showGhostTooltip();
     } else if (pileHovered) showPileTooltip();
     else if (hit) hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.cave, hit.owner.kind === "clanker");
     else hud.tooltip.hide();
@@ -11256,6 +11289,13 @@
       bananaGuides.reserve(objectGuides.result, null);
     }
   };
+  // A separate body is a character in the outline registry for exactly as long as it exists (object-guides.js `body`):
+  // the covered view asks it whether the driven body is in sight. One made before the registry is passed to its create.
+  const guideBody = (body, on) => {
+    if (!objectGuides || !objectGuides.body(body, on) || !sightGuides) return;
+    sightGuides.reserve(objectGuides.result, null);
+    bananaGuides.reserve(objectGuides.result, null);
+  };
   let uiGuideObjects = null, uiGuidesReady = false, preparingGuideActor = null;
   const collectViewObjects = () => {
     const player = controlledGuideActor(), p = player ? player.root.position : camera.target;
@@ -11266,6 +11306,8 @@
     // A speaker the outline registry walks past (Tess, who moves every frame) is left to the overlay's own test.
     if (cave.root.sightHidden) return false;
     if (RENDER_OPTS.birdsEyeCutaway) return cave.root.position.y - cave.baseY >= cutawayHeightAt(cave.root.position.x, cave.root.position.z);
+    // So is an NPC ghost track: it is drawn in twin geometry the registry never baked, which would read as not shown.
+    if (cave.ghostTrack) return false;
     // Input-time tooltips may run before this frame's transforms are rendered.
     // Use rock certificates only during the overlay, after updating providers;
     // all other callers keep the exact visibility query.
@@ -11361,6 +11403,7 @@
       return;
     }
     if (poolBlockHovered) showPoolBlockTooltip();
+    else if (ghostHovered) showGhostTooltip();
     else if (pileHovered) showPileTooltip();
     // World-anchored sleeping marks share the guide visibility cadence; their particles still move every frame.
     advanceSleepSight(dt);
@@ -11646,7 +11689,9 @@
     CLANKER_HIT.node = CLANKER_HIT.owner = POOL_BLOCK_HIT.node = POOL_BLOCK_HIT.owner = null;
     DEBUG_MOVE_HIT.node = DEBUG_MOVE_HIT.owner = DEBUG_GORILLA_HIT.node = DEBUG_GORILLA_HIT.owner = null;
     viewPoseActor = grabSupportEntry = clankerSupportActor = clankerPassingEntry = preparingGuideActor = null;
-    poolBlockHovered = poolBlockHoverIgnore = null;
+    poolBlockHovered = poolBlockHoverIgnore = ghostHovered = null;
+    ghostHoverText = "";
+    GHOST_HIT.node = GHOST_HIT.owner = LIVE_HIT.node = LIVE_HIT.owner = null;
     glCanvas = overlayCanvas = null;
     heldDebug = hubScene.debug;
     heldHub = true;
@@ -12191,6 +12236,7 @@
       && solids.segmentClear(x, y, z, toX, toY, toZ, precise ? 1e-6 : 0.01, precise ? 2e-6 : 0.02, ignoreNode)
       && matrixGateSegmentClear(x, y, z, toX, toY, toZ, precise ? 1e-6 : 0.01, precise ? 2e-6 : 0.02);
     clankerFireReachable = shared.fireReachable;
+    shared.liveTarget = liveTarget;
     shared.workShotClear = (x, y, z, toX, toY, toZ) => actionReachable(x, y, z, toX, toY, toZ, 0.01)
       && solids.segmentClear(x, y, z, toX, toY, toZ, 0.01, 0.02)
       && matrixGateSegmentClear(x, y, z, toX, toY, toZ, 0.01, 0.02, true);
@@ -12218,7 +12264,8 @@
     mark("rockGuides");
     pile = shared.pile = pileMod.create(shared);
     pileHovered = false;
-    poolBlockHovered = poolBlockHoverIgnore = null;
+    poolBlockHovered = poolBlockHoverIgnore = ghostHovered = null;
+    ghostHoverText = "";
     POOL_BLOCK_HIT.node = POOL_BLOCK_HIT.owner = null;
     pileTipValue = "";
     pileTopY = BL.scene.boundsOf(pile.core.geometry).max[1];
@@ -12374,8 +12421,9 @@
       const height = body.traits.height * 2, verts = Math.max(body.headOpen.verts.length, body.headClosed.verts.length);
       const portals = [factoryMouth, bcaMouth, bifrostIsle];
       if (on) {
-        // Built after the outline registry, like a remote rig: its UI uses the overlay's exact visibility test, and
-        // a registry refresh never takes it for scenery.
+        // Its root is sightHidden, like a remote rig's: its UI uses the overlay's exact visibility test, and no scenery
+        // pass or registry refresh takes it for scenery. The outline registry holds it as a character instead (guideBody);
+        // the sign-in claim can build it before that registry exists, which then takes it at creation.
         body.root.sightHidden = body.sleepWeapons.sightHidden = true;
         if (body.pet) body.pet.node.sightHidden = true;
         body.root.matrixLiving = true;
@@ -12384,8 +12432,11 @@
         crew?.setJetpackOwnership(body, true, hubModels.jetpack(), hubModels.jetFlame());
         trackMirrorObject(body.root, height, verts);
         for (const place of portals) place?.phase.body.track(body.root, height, verts);
+        guideBody(body, true);
         npcGhosts?.set(body.npc, true);
       } else {
+        // Forgotten while it still stands in the scene: crew.js detaches it only after this.
+        guideBody(body, false);
         untrackMirrorObject(body.root);
         for (const place of portals) place?.phase.body.untrack(body.root);
         fx.hush(body);
@@ -12566,9 +12617,11 @@
           body.netBody = body.npc.netBody;
           body.netMotion = new Float64Array(6);
           registerClanker(body);
+          guideBody(body, true);
           npcGhosts?.set(body.npc, true);
           return;
         }
+        guideBody(body, false);
         npcGhosts?.set(body.npc, false);
         fx.hush(body);
         const at = clankerCaptures.indexOf(body.capture);
@@ -12588,7 +12641,7 @@
     }
     resetRageThrowMap(false);
     clankerPlay = BL.clankerPlay.create({
-      canvas: ctx.canvas, camera, pilot, hud, clankers, input, renderer, reticleTarget,
+      canvas: ctx.canvas, camera, pilot, hud, clankers, input, renderer, reticleTarget, liveTarget,
       grabOoga: grabClankerRider, releaseOoga: releaseClankerRider,
       mayPossess: entry => BL.net.mayDriveGorilla(entry.owner.traits.name),
       combatOnly: () => gameCombatOnly,
@@ -12796,7 +12849,9 @@
     yield* pause(slice);
     // Scenery may receive outlines, but only island rock activates the hidden character view.
     // Banana interiors keep their separate covered-view pass.
-    objectGuides = headquarters.objectGuides = BL.objectGuides.create({ roots: root.children, crew, actorRoots: clankers.list.map((entry) => entry.root), exclude: [...terrainRampRoof.geometries, pathNode.geometry, mempoolIsland.site.ground.geometry], providers: [pileGuides, platformGuides, mirrorGuides], propsBlockActor: false, perceptionThrough: (actor) => inBananas(actor) ? pile.core : null });
+    objectGuides = headquarters.objectGuides = BL.objectGuides.create({ roots: root.children, crew, actorRoots: clankers.list.map((entry) => entry.root),
+      // The sign-in claim above can already have made the driven body (onBody ran with no registry yet).
+      bodies: [crew.player, clankerPlay.player].filter((body) => body && body.npc), exclude: [...terrainRampRoof.geometries, pathNode.geometry, mempoolIsland.site.ground.geometry], providers: [pileGuides, platformGuides, mirrorGuides], propsBlockActor: false, perceptionThrough: (actor) => inBananas(actor) ? pile.core : null });
     yield* pause(slice);
     const guideOptions = { segmentClear: guideSegmentClear, objectClear: objectGuides.cameraClear, actorClear: objectGuides.perceptionClear, eyeAt: guideEyeAt, ownerBoundary: objectGuides.ownerBoundaryAt, ownerPerceived: objectGuides.perceived, ownerConcealed: objectGuides.concealed, ownerDistance: objectGuides.distance, ownerInView: objectGuides.inView, ownerClear: objectGuides.ownerClear, getProvider: objectGuides.getProvider };
     sightGuides = BL.sightGuides.create(guideOptions);
@@ -12992,8 +13047,9 @@
     if (factoryMouth && factoryMouth.snap) snapFactoryView();
     if (bifrostIsle && bifrostIsle.snap) snapBifrostView();
     glCanvas = null;
-    poolBlockHovered = poolBlockHoverIgnore = null;
-    POOL_BLOCK_HIT.node = POOL_BLOCK_HIT.owner = null;
+    poolBlockHovered = poolBlockHoverIgnore = ghostHovered = null;
+    ghostHoverText = "";
+    POOL_BLOCK_HIT.node = POOL_BLOCK_HIT.owner = GHOST_HIT.node = GHOST_HIT.owner = LIVE_HIT.node = LIVE_HIT.owner = null;
     selectDebugGorilla(null);
     islandGuide.dispose();
     islandGuide = null;

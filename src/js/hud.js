@@ -7,10 +7,11 @@
   const STATE_LABELS = { working: "clank", chilling: "chill", sleeping: "sleep", away: "away", online: "online" };
   const ROSTER_ORDER = { working: 0, chilling: 1, sleeping: 2, away: 3 };
   const stampOf = (contributor) => contributor.lastContributionAt || contributor.lastCommitAt;
-  // Local control is online only while signed in; remote presence remains independent.
+  // Local control is online only while signed in; remote presence remains independent. An NPC ghost track
+  // (npc-ghosts.js) is online too, as its roster dot is: a player drives that character as a separate body.
   const statusFor = (cave) => {
     const actor = cave.tooltipOwner || cave;
-    const online = cave.remoteControlled || actor.remoteControlled
+    const online = cave.ghostTrack || cave.remoteControlled || actor.remoteControlled
       || !!BL.net.state.me && (cave.controlled || actor.humanControlled);
     return online ? "online" : actor.state === "away" ? "chilling" : actor.state;
   };

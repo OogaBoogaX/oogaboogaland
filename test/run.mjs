@@ -1321,6 +1321,104 @@ const visibilityDemandUsersProof = async () => {
     return { rows, boundsTracked, replacementReleased, bothResolved, disposed };
   })()`, context);
 };
+// Separate bodies (#501): the driven Ooga or gorilla is a character in the outline registry for exactly as long as it
+// exists, its root still sightHidden for scenery passes: made before the registry, kept through refreshes and both head
+// states, its sightHidden effects left out, forgotten while still in the scene, and nothing left over take after take.
+const separateBodyRegistryProof = async () => {
+  const context = { window: {}, performance };
+  for (const name of ["math", "scene", "models", "object-guides"]) {
+    let source = await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8");
+    if (name === "object-guides") source = source.replace("return { collect, clear,", "return { geometryRecords: () => geometries, entryRecords: () => registered, ownerRecords: () => ownerGroups, descriptorUsers: () => descriptorUsers, collect, clear,");
+    runInNewContext(source, context);
+  }
+  return runInNewContext(`(() => {
+    const B = window.BL, S = B.scene, M = B.models, root = S.createNode();
+    const box = (w, h, d) => M.box({ w, h, d, color: "#fff" });
+    // The roster Ooga shares the bodies' skin: that descriptor must outlive every body.
+    const skin = box(0.6, 0.8, 0.4), rosterHead = S.createNode({ geometry: box(0.5, 0.5, 0.5), position: { x: 0, y: 1, z: 0 } });
+    const roster = { root: S.createNode({ position: { x: 6, y: 0, z: 8 } }), parts: { head: rosterHead }, headOpen: rosterHead.geometry, headClosed: box(0.5, 0.45, 0.5) };
+    S.addChild(roster.root, S.createNode({ geometry: skin }), rosterHead);
+    const wall = S.createNode({ geometry: box(8, 8, 0.4), position: { x: 0, y: 0.5, z: 3 }, visible: false });
+    S.addChild(root, roster.root, wall);
+    // An Ooga body has its own heads and bed gear; a gorilla body is its rig alone. Both carry a sightHidden effect.
+    const makeBody = (ooga) => {
+      const body = { root: S.createNode({ position: { x: 0, y: 0, z: 8 }, sightHidden: true }), parts: {} };
+      body.torso = S.createNode({ geometry: skin });
+      body.effect = S.createNode({ geometry: box(0.3, 0.3, 0.3), position: { x: 0, y: 1.6, z: 0 }, sightHidden: true });
+      // Held gear the body drops (detached) before it is let go.
+      body.held = S.createNode({ geometry: box(0.1, 0.1, 0.7), position: { x: 0.4, y: 0.6, z: 0 } });
+      S.addChild(body.root, body.torso, body.effect, body.held);
+      if (ooga) {
+        body.headOpen = box(0.5, 0.5, 0.5); body.headClosed = box(0.5, 0.45, 0.5);
+        body.parts.head = S.createNode({ geometry: body.headOpen, position: { x: 0, y: 1, z: 0 } });
+        S.addChild(body.root, body.parts.head);
+        body.sleepWeapons = S.createNode({ sightHidden: true });
+        body.gear = S.createNode({ geometry: box(0.2, 0.2, 1), position: { x: 1, y: 0, z: 8 } });
+        S.addChild(body.sleepWeapons, body.gear); S.addChild(root, body.sleepWeapons);
+      }
+      S.addChild(root, body.root);
+      return body;
+    };
+    const detach = (body) => { S.removeChild(root, body.root); if (body.sleepWeapons) S.removeChild(root, body.sleepWeapons); };
+    const camera = S.createCamera({ near: 0.1, far: 100 });
+    Object.assign(camera.position, { x: 0, y: 0.5, z: 0 }); Object.assign(camera.target, { x: 0, y: 0.5, z: 8 });
+    const clear = () => true;
+    const look = (q, body) => { S.updateWorld(root); q.collect(body, 0, 0.5, 8, camera, 1.6); return q.actorVisible(body, clear); };
+    const owns = (q, body) => q.ownerRecords().some(group => group.owner === body.root);
+    const entryOf = (q, node) => q.entryRecords().find(e => e.node === node);
+    // Every descriptor user is a live entry: nothing forgotten is still reachable through a pending bake.
+    const users = (q) => [...q.descriptorUsers().values()].every(set => [...set].every(e => q.entryRecords().includes(e)));
+    // The sign-in claim makes its body before the hub builds the registry.
+    const boot = makeBody(true);
+    const q = B.objectGuides.create({ roots: root.children, crew: { cavemen: new Map([["roster", roster]]) }, bodies: [boot] });
+    const booted = owns(q, boot) && !!entryOf(q, boot.torso) && !!entryOf(q, boot.parts.head) && !!entryOf(q, boot.gear)
+      && !entryOf(q, boot.effect) && boot.root.sightHidden && look(q, boot);
+    wall.visible = true; const covered = !look(q, boot); wall.visible = false;
+    const once = !q.body(boot, true) && look(q, boot);
+    // A refresh keeps the body, and its head's other state still registers when it swaps after that refresh.
+    q.refresh();
+    boot.parts.head.geometry = boot.headClosed; look(q, boot);
+    const head = entryOf(q, boot.parts.head);
+    const heads = owns(q, boot) && !!head && head.shown && head.geometry === q.geometryRecords().get(boot.headClosed)
+      && q.geometryRecords().has(boot.headOpen) && !entryOf(q, boot.effect) && look(q, boot);
+    boot.parts.head.geometry = boot.headOpen;
+    // Forgotten while it still stands in the scene, as crew.js and clankers.js let it go; an entry whose node already left
+    // the body goes too, the shared skin and the roster's heads stay, and a later refresh does not take the root back.
+    const heldWas = !!entryOf(q, boot.held);
+    S.removeChild(boot.root, boot.held);
+    const forgot = q.body(boot, false);
+    const gone = forgot && heldWas && boot.root.parent === root && !owns(q, boot) && !entryOf(q, boot.torso) && !entryOf(q, boot.parts.head) && !entryOf(q, boot.gear)
+      && !entryOf(q, boot.held) && !q.entryRecords().some(e => e.owner === boot.root) && !q.geometryRecords().has(boot.held.geometry)
+      && !q.geometryRecords().has(boot.headOpen) && !q.geometryRecords().has(boot.headClosed) && !q.geometryRecords().has(boot.gear.geometry)
+      && q.geometryRecords().has(skin) && q.geometryRecords().has(roster.headClosed) && !!entryOf(q, rosterHead) && users(q);
+    q.refresh();
+    const stays = !owns(q, boot) && !entryOf(q, boot.torso) && !q.body(boot, false);
+    detach(boot); q.refresh();
+    // Baked metrics too: every held descriptor is baked first, so a take that bakes and forgets returns them exactly.
+    for (const descriptor of q.geometryRecords().values()) void descriptor.triangleIndices;
+    const counts = () => JSON.stringify({ entries: q.entryRecords().length, owners: q.ownerRecords().length, geometries: q.geometryRecords().size, statsOwners: q.stats.owners, registered: q.stats.registered,
+      statsGeometries: q.stats.geometries, triangles: q.stats.triangles, triangleBytes: q.stats.triangleBytes, samples: q.stats.samples });
+    // The baseline is the refresh's own measure; each forget must arrive at the same numbers without one.
+    q.refresh();
+    const before = counts();
+    let repeated = true;
+    for (let take = 0; take < 3; take++) for (const ooga of [true, false]) {
+      const body = makeBody(ooga);
+      repeated &&= q.body(body, true) && owns(q, body) && look(q, body) && q.stats.owners === q.ownerRecords().length;
+      if (ooga) { q.refresh(); body.parts.head.geometry = body.headClosed; repeated &&= look(q, body) && entryOf(q, body.parts.head).shown; }
+      // Its own bakes raise the metrics, and its held gear leaves it before it is let go.
+      for (const descriptor of q.geometryRecords().values()) void descriptor.triangleIndices;
+      repeated &&= q.stats.triangles > JSON.parse(before).triangles;
+      S.removeChild(body.root, body.held);
+      repeated &&= q.body(body, false) && !owns(q, body) && !q.entryRecords().some(e => e.owner === body.root);
+      detach(body);
+      repeated &&= counts() === before && users(q);
+    }
+    const last = makeBody(true); q.body(last, true); q.dispose();
+    const disposed = q.entryRecords().length === 0 && q.ownerRecords().length === 0 && q.geometryRecords().size === 0 && !q.body(last, false);
+    return { booted, covered, once, heads, gone, stays, repeated, users: users(q), disposed };
+  })()`, context);
+};
 // ---- solid-props.mjs ----
 const { solidPropsProbe } = (() => {
   // Exercise the same transformed mesh queries used by hub movement.
@@ -6129,7 +6227,9 @@ const hammockChecks = async () => {
     return { ok: parts.length >= 2 && flat && inside && !overlaps, flat, inside, overlaps, along, across };
   };
   const gearRows = [];
-  for (const handle of ["hammock-club", "w-s-bitcoin", "MrHodlX", "2140data"]) {
+  // One Ooga with its club, rifle and pack, built the same way every call, so a second copy stands for the same
+  // character on another page.
+  const makeOoga = (handle) => {
     const definition = R.characters.get(handle), look = definition?.look || {};
     const cave = R.models.caveman({ ...look, name: handle, height: 1.1, belly: 1,
       skin: look.skin || "#c98a5b", hair: look.hair || "#2b1b10", fur: look.fur || "#d98a2e",
@@ -6153,6 +6253,18 @@ const hammockChecks = async () => {
     cave.camp ||= { seat: null };
     cave.root.position.x = seat.restX; cave.root.position.z = seat.restZ;
     R.scene.addChild(root, cave.root);
+    return { cave, parts, pack, flame, trailsStarted };
+  };
+  // A holder and its parts as the world draws them, to a micrometre (a -0 rounds to 0).
+  const worlds = (holder, nodes) => {
+    R.scene.updateWorld(root);
+    return [holder, ...nodes].map(n => Array.from(n.world, v => (Math.round(v * 1e6) + 0) / 1e6).join()).join("|");
+  };
+  // Scale every magazine banana by k, as a reload's pop draws it partway in.
+  const popBananas = (parts, k) => { for (const b of parts.gunBananas) { b.scale.x *= k; b.scale.y *= k; b.scale.z *= k; } };
+  const bananaSizes = (parts) => parts.gunBananas.map(b => [b.scale.x, b.scale.y, b.scale.z].join()).join("|");
+  for (const handle of ["hammock-club", "w-s-bitcoin", "MrHodlX", "2140data"]) {
+    const { cave, parts, pack, flame, trailsStarted } = makeOoga(handle);
     const nodes = [parts.club, parts.gun, pack], originalGeometry = nodes.map(n => n.geometry);
     const original = nodes.map(n => ({ parent: n.parent, position: { ...n.position }, rotation: { ...n.rotation }, quaternion: n.quaternion }));
     const id = 300 + gearRows.length, peer = { id, rest: [0, 2, 255, 0, 0, 0] };
@@ -6161,6 +6273,8 @@ const hammockChecks = async () => {
     const actual = rested && !!holder && holder.parent === root && nodes.every((n, i) =>
       n.parent === holder && n.geometry === originalGeometry[i] && n.visible) && cave.weapon.ammo === 7;
     const laid = gearUnderCloth(holder, nodes).ok;
+    const layout = () => nodes.map(n => ["x", "y", "z"].map(axis => n.position[axis].toFixed(9) + "/" + n.rotation[axis].toFixed(9)).join()).join("|");
+    const firstLayout = layout(), firstWorld = worlds(holder, nodes);
     if (parts.chukTrail) R.crew.poseEquipment(cave, true, 1.1);
     const trailsHidden = !parts.chukTrail || parts.chukTrail.every(n => !n.visible);
     const lookPeer = { ...peer, visual: new Int16Array(17) };
@@ -6189,14 +6303,48 @@ const hammockChecks = async () => {
       && ["x", "y", "z"].every(axis => n.position[axis] === original[i].position[axis] && n.rotation[axis] === original[i].rotation[axis]));
     if (parts.chukTrail) R.crew.poseEquipment(cave, true, 2);
     const trailsResumed = !parts.chukTrail || parts.chukTrail.every(n => n.visible && n.parent === parts.armL);
+    // Regression: the gear was laid by each part's passing state when it parked (the rounds showing on the rifle, a
+    // flash or flame, a reload's pop shrinking the rounds, a nunchaku still out), so the page lying in the hammock and a
+    // page that parked it at another moment laid it differently. Parked again with an empty rifle, its rounds popped
+    // half in, its flash and flame lit and its nunchaku out, the same Ooga's gear lies exactly as before, the nunchaku
+    // folded and the rounds (shown and sized) and flames as they really are.
+    for (const banana of parts.gunBananas) banana.visible = false;
+    popBananas(parts, 0.5);
+    const poppedSizes = bananaSizes(parts);
+    if (parts.gunFlash) parts.gunFlash.visible = true;
+    flame.visible = true;
+    if (parts.chuk) parts.chuk.rotation.x = cave.chukAngle = 0;
+    ham.poseRemote(cave, feet, peer, true);
+    const steadyLayout = layout() === firstLayout && worlds(cave.restEquipment.holder, nodes) === firstWorld
+      && parts.gunBananas.every(b => !b.visible) && bananaSizes(parts) === poppedSizes && (!parts.gunFlash || !parts.gunFlash.visible)
+      && !flame.visible && (!parts.chuk || parts.chuk.rotation.x === R.crew.CHUK_FOLD && cave.chukAngle === R.crew.CHUK_FOLD);
+    ham.poseRemote(cave, feet, { id, rest: 0 }, true);
+    // Regression: the page lying in the hammock (its own body, or a guest's roster Ooga, seated through `enter` and
+    // posed by `update`) must lay the same Ooga's gear exactly where another page's remote copy lays it in the world,
+    // whatever rounds, pop and nunchaku state that page seats it in; leaving the seat releases it as before.
+    const guest = makeOoga(handle), gp = guest.parts, guestNodes = [gp.club, gp.gun, guest.pack];
+    gp.gunBananas.forEach((b, i) => { b.visible = i < 2; });
+    popBananas(gp, 0.6);
+    if (gp.chuk) gp.chuk.rotation.x = guest.cave.chukAngle = 0;
+    seat.remote = 0;
+    const entered = ham.enter(guest.cave, seat, (s) => { s.sitter = guest.cave; guest.cave.camp.seat = s; return true; });
+    ham.update(1, 11, false);
+    const guestHolder = guest.cave.restEquipment?.holder;
+    const localMatchesRemote = entered && !!guestHolder && guestNodes.every(n => n.parent === guestHolder)
+      && worlds(guestHolder, guestNodes) === firstWorld;
+    seat.sitter = null; guest.cave.camp.seat = null;
+    ham.update(0, 11, false);
+    const localReleased = !!guestHolder && !guest.cave.restEquipment && !guestHolder.parent;
+    R.scene.removeChild(root, guest.cave.root);
+    seat.remote = id;
     ham.poseRemote(cave, feet, peer, true);
     const droppedHolder = cave.restEquipment.holder;
     R.scene.removeChild(root, cave.root);
     ham.update(0, 10, false);
     const dropped = !cave.restEquipment && !droppedHolder.parent && !cave.hammockRest;
-    gearRows.push({ handle, actual, laid, hidden, absent, entering, exiting, restored, dropped, trailsStarted, trailsHidden, trailsResumed, lookedUp, lookedDown, legacyNeutral });
+    gearRows.push({ handle, actual, laid, steadyLayout, localMatchesRemote, localReleased, hidden, absent, entering, exiting, restored, dropped, trailsStarted, trailsHidden, trailsResumed, lookedUp, lookedDown, legacyNeutral });
   }
-  record("hub hammock: the actual club, authored axe or hockey stick, rifle and owned pack stay together under rest, laid flat under the cloth, including late entry/exit poses; absent gear and active twirl afterimages stay hidden, and get-up or removal restores attachments and the current twirl without changing ammo; modern rest/exit retains shared up/down head look while legacy peers remain neutral",
+  record("hub hammock: the actual club, authored axe or hockey stick, rifle and owned pack stay together under rest, laid flat under the cloth the same way in the world whatever rounds, reload pop, flash, flame or nunchaku state each page parks them in, by the page lying in it and another page's remote copy alike, including late entry/exit poses; absent gear and active twirl afterimages stay hidden, and get-up or removal restores attachments and the current twirl without changing ammo; modern rest/exit retains shared up/down head look while legacy peers remain neutral",
     gearRows.every(row => Object.entries(row).every(([key, value]) => key === "handle" || value)), JSON.stringify(gearRows));
   // Every Ooga on the roster as the live crew builds it (its hashed or authored traits, so its own height scales its
   // club, rifle and jetpack), its own pack or the hub's put on as the crew puts it on, stowed by a resting peer's pose.
@@ -8302,9 +8450,11 @@ const wallPerformance = async (b) => {
   await b.focus(true);
   for (const covered of [false, true]) {
     const r = await b.evaluate(`(async () => {
-      const B = window.__ooga, actor = B.cavemen.get("portlandhodl");
+      const B = window.__ooga, npc = B.cavemen.get("portlandhodl");
       B.renderer.setQuality("high");
-      if (B.crew.player !== actor) B.pilot.possess(actor);
+      // Driving builds a separate body (crew.js \`separateBodies\`): walk, view and measure that body, never its NPC's track.
+      if (B.crew.player?.npc !== npc) B.pilot.possess(npc);
+      const actor = B.crew.player;
       B.pilot.navigate({ position: { x: 10, y: B.island.surfaceAt(10, 0), z: 0 }, yaw: 0, pitch: 0.4, dist: ${covered ? 55 : 10} });
       let start = null, first = 0;
       const p = actor.root.position, originX = p.x, originZ = p.z, frames = [];
@@ -8752,8 +8902,64 @@ const hubSeparateBodies = { name: "hub separate bodies", why: "rule: a driven Oo
         lifecycle = { driving, signedOut, signedIn, roomLost, reconnected, out, lost };
         pilot.release(true);
       }
-      return { oogas, gorilla, login, lifecycle };
+      // #501: the covered view asks the outline registry whether the driven body is in sight. Through the hub's own frames
+      // and the wall-movement fixture's two views, an Ooga or gorilla body in the open draws no outline or wall fill and
+      // behind island rock is covered; a registry refresh and a head swap keep it; letting go leaves the registry as it was.
+      const H = B.headquarters, registry = H.objectGuides, scene = BL.scenes.hub;
+      const counts = () => ({ owners: registry.stats.owners, registered: registry.stats.registered, geometries: registry.stats.geometries });
+      const same = (a, b) => a.owners === b.owners && a.registered === b.registered && a.geometries === b.geometries;
+      let held = null;
+      saved.update = scene.update;
+      scene.update = function (...args) {
+        const result = saved.update.apply(this, args);
+        if (held) { const p = held.body.root.position; Object.assign(B.camera.position, held.eye); Object.assign(B.camera.target, { x: p.x, y: p.y + 0.7, z: p.z }); }
+        return result;
+      };
+      const view = (body, eye = null) => { held = eye ? { body, eye } : null; step(0.5); held = null;
+        return { enabled: !!H.sightGuides.objectsEnabled, outlined: !!H.cameraCover.outlined }; };
+      const ROCK_EYE = { x: 0, y: 0, z: 10 }, meadowY = B.island.surfaceAt(10, 0);
+      // A segment down into the head's own centre is blocked only while that head is registered in its current state.
+      const headHeld = (body) => {
+        const head = body.parts.head, c = BL.scene.boundsOf(head.geometry).center, m = head.world;
+        const x = m[0] * c[0] + m[4] * c[1] + m[8] * c[2] + m[12], y = m[1] * c[0] + m[5] * c[1] + m[9] * c[2] + m[13], z = m[2] * c[0] + m[6] * c[1] + m[10] * c[2] + m[14];
+        return !registry.ownerClear(body.root, x, y + 2, z, x, y, z);
+      };
+      let sight = { missing: true };
+      const driver = pick(c => c.state === "chilling" || c.state === "working"), companion = clankers.list.find(e => e.active && e.root.visible && !e.remoteControlled && !e.ghostTrack);
+      if (driver && companion) {
+        const base = counts();
+        let open = null, ooga = { refused: true }, ape = { refused: true }, repeated = true;
+        if (pilot.possess(driver) && pilot.player?.npc === driver) {
+          const body = pilot.player, owners = registry.stats.owners;
+          pilot.navigate({ position: { x: 10, y: meadowY, z: 0 }, yaw: 0, pitch: 0.4, dist: 10 });
+          const clear = view(body); open = { ...B.camera.position };
+          const covered = view(body, ROCK_EYE);
+          registry.refresh(); body.parts.head.geometry = body.headClosed; view(body);
+          const closedHead = headHeld(body), refreshed = view(body);
+          body.parts.head.geometry = body.headOpen;
+          ooga = { clear, covered, refreshed, closedHead, registered: owners === base.owners + 1 };
+          pilot.release(true); step(0.2);
+        }
+        if (open && play.possess(companion) && play.player?.npc === companion) {
+          const body = play.player;
+          Object.assign(body.root.position, { x: 10, y: meadowY, z: 0 });
+          ape = { clear: view(body, open), covered: view(body, ROCK_EYE) };
+          play.release(); step(0.2);
+        }
+        const released = same(counts(), base);
+        // Repeated takes of both kinds leave nothing registered.
+        for (let take = 0; take < 3; take++) {
+          repeated &&= pilot.possess(driver) && registry.stats.owners === base.owners + 1;
+          step(0.1); pilot.release(true); step(0.1);
+          repeated &&= play.possess(companion) && registry.stats.owners === base.owners + 1;
+          step(0.1); play.release(); step(0.1);
+          repeated &&= same(counts(), base);
+        }
+        sight = { ooga, gorilla: ape, released, repeated, base, after: counts() };
+      }
+      return { oogas, gorilla, login, lifecycle, sight };
     } finally {
+      if (saved.update) BL.scenes.hub.update = saved.update;
       if (saved.restoreAccount) saved.restoreAccount();
       net.mayDrive = saved.mayDrive; net.mayDriveGorilla = saved.mayDriveGorilla; net.ownCharacter = saved.ownCharacter;
       pilot.release(true); play.release();
@@ -8775,6 +8981,10 @@ const hubSeparateBodies = { name: "hub separate bodies", why: "rule: a driven Oo
   const L = state.lifecycle || { missing: true };
   record("separate bodies: signing out or losing a live room lets the body go at once, leaving the NPC solid where it is with nothing claimed, and signing back in or reconnecting claims a fresh body beside it",
     !L.missing && L.driving && L.signedOut && L.signedIn && L.roomLost && L.reconnected, JSON.stringify(L));
+  const V = state.sight || { missing: true }, seen = (v) => !!v && !v.enabled && !v.outlined, covered = (v) => !!v && v.enabled;
+  record("separate bodies (#501): a driven Ooga or gorilla body in the open draws no outline or wall fill and behind island rock takes the covered view; a registry refresh and a head swap keep it, and letting go, take after take, leaves the outline registry as it was",
+    !V.missing && seen(V.ooga.clear) && covered(V.ooga.covered) && seen(V.ooga.refreshed) && V.ooga.closedHead && V.ooga.registered
+      && seen(V.gorilla.clear) && covered(V.gorilla.covered) && V.released && V.repeated, JSON.stringify(V));
 } };
 const outdoorTravelProof = () => {
 const B=__ooga,ctx=__outdoorTravelContext,crew=B.crew,P=B.poolIsland,scene=BL.scenes.hub;
@@ -25702,7 +25912,7 @@ const integrationChecks = async BL => {
   // when the driver switches body, and ends solid in place on leave with its twins released.
   {
     const netBefore=BL.net,ghostRecords=new Map(),ghostRoot=BL.scene.createNode(),ghostCavemen=new Map(),releasedGeometry=[];
-    BL.net={serverNow:()=>Date.now(),sendSwing:()=>true,remotes:ghostRecords,subscribeShots:()=>()=>{},subscribeSwings:()=>()=>{}};
+    BL.net={serverNow:()=>Date.now(),sendSwing:()=>true,remotes:ghostRecords,subscribeShots:()=>()=>{},subscribeSwings:()=>()=>{},state:{me:null}};
     const npc=BL.models.caveman(BL.contributors.traitsFor("w-s-bitcoin")),seat={sitter:null};
     Object.assign(npc,{override:null,remoteControlled:false,humanControlled:false,state:"chilling",camp:{seat}});seat.sitter=npc;
     BL.scene.addChild(ghostRoot,npc.root);ghostCavemen.set("w-s-bitcoin",npc);
@@ -25722,13 +25932,58 @@ const integrationChecks = async BL => {
     const swappedBack=head.geometry===npc.headClosed;head.geometry=source;
     const banana=BL.models.bananaGeometry(),round=looks.shotLook(npc,banana),tinted=!!round&&round!==banana&&round.glass===.3&&looks.shotLook(companion,banana)===null;
     const kept=npc.override===null&&!npc.remoteControlled&&!npc.humanControlled&&npc.state==="chilling"&&npc.camp.seat===seat&&seat.sitter===npc&&npc.root.parent===ghostRoot;
+    // Regression: hovering a ghost showed neither its name nor its status, and the crosshair never knew a live player.
+    // The live body is found along a sight line through the pool's own target list (never a weapon target), its ghost
+    // NPC never is, a blocked line or the visitor's own name finds nothing, and a ghost's tooltip status is online.
+    BL.scene.updateWorld(ghostRoot);
+    const live=ghostPool.body(73),liveHit={node:null,owner:null,type:"none",distance:Infinity,x:0,y:0,z:0};
+    const aimAt=rig=>{const c=BL.scene.boundsOf(rig.parts.head.geometry).center,m=rig.parts.head.world;
+      return [m[0]*c[0]+m[4]*c[1]+m[8]*c[2]+m[12],m[1]*c[0]+m[5]*c[1]+m[9]*c[2]+m[13],m[2]*c[0]+m[6]*c[1]+m[10]*c[2]+m[14]];};
+    const along=(p,clear=null)=>ghostPool.pick(liveHit,p[0],p[1],p[2]-6,0,0,1,12,clear);
+    const livePoint=aimAt(live),ghostPoint=aimAt(npc);
+    const picked=along(livePoint)&&liveHit.owner.kind==="player"&&liveHit.owner.id===73&&liveHit.owner.cave===live
+      &&liveHit.owner.weaponType==="none"&&liveHit.type==="none"&&liveHit.distance>0&&liveHit.distance<6;
+    const cleared=()=>liveHit.node===null&&liveHit.owner===null&&liveHit.type==="none"&&liveHit.distance===Infinity;
+    const ghostSkipped=!along(ghostPoint)&&cleared(),blocked=!along(livePoint,()=>false)&&cleared();
+    // Regression: only the meshes a body was built with were found, so gear put on later (a jetpack, a gun, anything
+    // nested under them) never turned the dot. Gear nested a level down, added after the build and standing clear of
+    // the body, is found as that player; hidden (or camera-hidden), behind cover, replaced, moved off the body or taken
+    // off it, it no longer is. A solid box centred on its node's origin, so the line through that origin meets it.
+    const gear=BL.scene.createNode(),item=BL.scene.createNode({geometry:BL.models.box({w:.3,h:.3,d:.3,color:"#fff"})});
+    gear.position.x=3;BL.scene.addChild(gear,item);BL.scene.addChild(live.root,gear);BL.scene.updateWorld(ghostRoot);
+    const gearPoint=[item.world[12],item.world[13],item.world[14]];
+    const gearFound=along(gearPoint)&&liveHit.node===item&&liveHit.owner.cave===live&&liveHit.owner.id===73;
+    gear.visible=false;const gearHidden=!along(gearPoint)&&cleared();gear.visible=true;
+    item.cameraHidden=true;const gearCameraHidden=!along(gearPoint)&&cleared();item.cameraHidden=false;
+    const gearBlocked=!along(gearPoint,()=>false)&&cleared()&&along(gearPoint,()=>true)&&liveHit.node===item;
+    const swap=BL.scene.createNode({geometry:item.geometry});BL.scene.removeChild(gear,item);BL.scene.addChild(gear,swap);
+    const gearReplaced=along(gearPoint)&&liveHit.node===swap;
+    // Moved under the scene itself, where it still stands on the same line, it is scenery and no longer the player.
+    BL.scene.removeChild(gear,swap);swap.position.x=gear.world[12];swap.position.y=gear.world[13];swap.position.z=gear.world[14];
+    BL.scene.addChild(ghostRoot,swap);BL.scene.updateWorld(ghostRoot);
+    const gearMoved=!along(gearPoint)&&cleared();BL.scene.removeChild(ghostRoot,swap);
+    BL.scene.addChild(gear,item);const gearBack=along(gearPoint)&&liveHit.node===item;
+    BL.scene.removeChild(live.root,gear);const gearOff=!along(gearPoint)&&cleared()&&along(livePoint)&&liveHit.owner.cave===live;
+    const lateGear=gearFound&&gearHidden&&gearCameraHidden&&gearBlocked&&gearReplaced&&gearMoved&&gearBack&&gearOff;
+    // A body taken out of the scene keeps its visible, parentless meshes, which must not be found as the player.
+    BL.scene.removeChild(ghostRoot,live.root);const detached=!along(livePoint)&&cleared();BL.scene.addChild(ghostRoot,live.root);
+    ghostCrew.player={traits:{name:"w-s-bitcoin"}};ghostPool.update(.1);
+    const ownSkipped=!along(livePoint)&&cleared();
+    ghostCrew.player=null;ghostPool.update(.1);
+    const ghostOnline=npc.ghostTrack&&BL.hud.statusFor(npc)==="online"&&along(livePoint);
     tab.body="gorilla:w-s-bitcoin";tab.bodyKind="gorilla";ghostPool.update(.1);
     const switched=!npc.ghostTrack&&head.geometry===source&&companion.ghostTrack===true;
+    const companionOnline=BL.hud.statusFor(companion)==="online";
     ghostRecords.clear();ghostPool.update(.1);
     const left=!companion.ghostTrack&&looks.stats().ghosts===0&&head.geometry===source&&npc.root.parent===ghostRoot;
+    // Hit the live body once more so the empty pool's miss below must clear a stale result.
+    liveHit.node=live.root;liveHit.owner={kind:"player"};liveHit.type="friendly";liveHit.distance=1;
+    const solidAgain=BL.hud.statusFor(npc)==="chilling"&&!along(livePoint)&&cleared();
     looks.paint(.6);looks.paint(.6);const dropped=looks.stats().twins===0&&releasedGeometry.includes(round);
     ghostPool.dispose();looks.dispose();BL.scene.removeChild(ghostRoot,npc.root);BL.net=netBefore;
     record("integration npc ghosts: a remote driver's NPC keeps its own track and seat as a ghost, turns solid in place on switch or leave, and releases its look",heldHere&&painted&&restored&&swapped&&swappedBack&&tinted&&kept&&switched&&left&&dropped,JSON.stringify({heldHere,painted,restored,swapped,swappedBack,tinted,kept,switched,left,dropped}));
+    record("integration npc ghosts: a ghost Ooga or gorilla reads online under the cursor, and only a shown live body in plain sight with whatever gear it shows now, never its ghost, the visitor's own name, one behind cover or gear hidden, replaced or taken off it, is found along a sight line; none once it leaves",
+      picked&&ghostSkipped&&blocked&&lateGear&&detached&&ownSkipped&&ghostOnline&&companionOnline&&solidAgain,JSON.stringify({picked,ghostSkipped,blocked,lateGear:{gearFound,gearHidden,gearCameraHidden,gearBlocked,gearReplaced,gearMoved,gearBack,gearOff},detached,ownSkipped,ghostOnline,companionOnline,solidAgain,distance:liveHit.distance}));
   }
 };
 
@@ -26796,32 +27051,84 @@ const fixedRoutineProof = async () => {
   const slotWalkRetargets = !!ownLeg.grewAt && ownLeg.meal && !ownLeg.walking && same([ownLeg.end.x, ownLeg.end.z], { x: 0, z: -7 })
     && !ownLeg.objectFloorCalls;
   const authoredRouteKept = !!authoredLeg.grewAt && authoredLeg.legsKept && !authoredLeg.walking && same([authoredLeg.end.x, authoredLeg.end.z], { x: 0, z: -5 });
-  // The real passive companion stepper: a planned meadow leg from the pile to a
-  // cave's apron follows the ring and one spoke, never crossing the pile, on
-  // terrain; only the wall clearance is consulted. A wall step hands over to
-  // the ordinary controller (wall climbs).
+  // The real passive companion stepper, with the real choice of route (`passivePlanned`): the walk from a cave to the
+  // pile follows the ring and one spoke, never crossing the pile, on terrain; only the wall clearance is consulted.
+  // Regression: a working gorilla's walk to a work cave was routed along the spokes and ring; it walks the straight
+  // line to that cave's apron, on terrain, passing through everything but walls, whether it set out from another cave
+  // or the meadow, and stays straight when its origin is reset mid-walk (a retarget or a blocked retry). A wall step
+  // hands over to the ordinary controller (wall climbs) on either route.
   const clankerSource = await readFile(join(root, "src/js/clankers.js"), "utf8");
   const stepperCode = clankerSource.slice(clankerSource.indexOf("    const PASSIVE_WALKER ="), clankerSource.indexOf("    const move = (e, dt, speed) => {"));
-  const gorillaLeg = (wall) => {
-    let wallChecks = 0, moves = 0, inside = 0;
+  const WORK_TRIP = { phase: "travel", mode: "working", route: "apron", fromSite: -1, site: 2 };
+  const PILE_TRIP = { phase: "leave", mode: "chilling", route: "pile", fromSite: 1, site: 1 };
+  // `resets`: the origin cave this walk is given at a frame, as `beginTravel` and the blocked retry rewrite it.
+  const gorillaLeg = (wall, trip, resets = []) => {
+    let wallChecks = 0, moves = 0, inside = 0, offLine = 0, plannedSteps = 0;
     const gorilla = { nonInteractive: true, heading: Math.PI, speed: 0, blocked: 0, stuckTime: 0, goalX: 30, goalY: 0, goalZ: 1,
-      root: { position: { x: 0, y: 0, z: -4 } } };
+      ...trip, root: { position: { x: 0, y: 0, z: -4 } } };
     const c = { clamp: (v, a, b) => Math.max(a, Math.min(b, v)), PROP_STEP: 1.16, ctx: { npcFixedPaths: fixed, npcPathState: () => P.create({ island }).createState() },
       support: (_e, x) => 0.02 * x, groundStepClear: () => (wallChecks++, !wall),
       setSupportY: (e, y) => { e.root.position.y = y; }, move: () => { moves++; }, e: gorilla };
-    runInNewContext(`${stepperCode} this.step = () => movePassive(e, 1 / 30, 2.7, true);`, c);
-    const p = gorilla.root.position;
+    runInNewContext(`${stepperCode} this.step = () => { const planned = passivePlanned(e); movePassive(e, 1 / 30, 2.7, planned); return planned; };`, c);
+    const p = gorilla.root.position, length = Math.hypot(30, 5);
     let onTerrain = true, frames = 0;
     for (; frames < 2000 && Math.hypot(p.x - 30, p.z - 1) > 0.02 && !moves; frames++) {
-      c.step();
+      for (const [at, fromSite] of resets) if (frames === at) gorilla.fromSite = fromSite;
+      if (c.step()) plannedSteps++;
       onTerrain &&= Math.abs(p.y - 0.02 * p.x) < 1e-9;
       if (frames > 30 && Math.hypot(p.x, p.z) < 4.9) inside++;
+      // Distance from the straight line from its start (0, -4) to its goal (30, 1), as measured.
+      offLine = Math.max(offLine, Math.abs(p.x * 5 - (p.z + 4) * 30) / length);
     }
-    return { arrived: Math.hypot(p.x - 30, p.z - 1) <= 0.02, onTerrain, wallChecks, moves, inside, frames };
+    return { plannedSteps, arrived: Math.hypot(p.x - 30, p.z - 1) <= 0.02, onTerrain, wallChecks, moves, inside, offLine, frames };
   };
-  const gorillaTrip = gorillaLeg(false), gorillaWall = gorillaLeg(true);
-  const gorillaPlanned = gorillaTrip.arrived && gorillaTrip.onTerrain && !gorillaTrip.moves && !gorillaTrip.inside && gorillaTrip.wallChecks > 0;
-  const gorillaClimbsWalls = gorillaWall.moves === 1 && !gorillaWall.arrived;
+  const straightFrames = Math.ceil(Math.hypot(30, 5) / 2.7 * 30) + 1;
+  const gorillaToPile = gorillaLeg(false, PILE_TRIP), gorillaWall = gorillaLeg(true, PILE_TRIP);
+  const gorillaFromMeadow = gorillaLeg(false, WORK_TRIP);
+  const gorillaFromCave = gorillaLeg(false, { ...WORK_TRIP, fromSite: 1 });
+  const gorillaReset = gorillaLeg(false, { ...WORK_TRIP, fromSite: 1 }, [[60, -1], [120, 3], [180, -1]]);
+  const gorillaWorkWall = gorillaLeg(true, WORK_TRIP);
+  const gorillaPlanned = gorillaToPile.plannedSteps === gorillaToPile.frames && gorillaToPile.arrived && gorillaToPile.onTerrain
+    && !gorillaToPile.moves && !gorillaToPile.inside && gorillaToPile.wallChecks > 0;
+  const gorillaDirect = [gorillaFromMeadow, gorillaFromCave, gorillaReset].every(t => !t.plannedSteps && t.arrived && t.onTerrain && !t.moves
+    && t.offLine < 1e-6 && t.wallChecks > 0 && t.frames <= straightFrames) && gorillaReset.frames > 180;
+  const gorillaClimbsWalls = [gorillaWall, gorillaWorkWall].every(t => t.moves === 1 && !t.arrived);
+  // Regression: the fixed planner keeps a walker's lane until its goal or the map changes, and a straight work leg
+  // never touched it, so a gorilla's next walk to the same pile slot took up its old lane (consumed, or cut short)
+  // from wherever the work trip had left it. One gorilla walks to the pile (all the way, or only partway), walks
+  // straight to work, then walks to the same slot again: that third walk plans afresh from where it now stands,
+  // exactly the lane a gorilla first setting out from there gets, in the same state and buffers, and arrives.
+  const passiveWalker = (x, z) => {
+    const gorilla = { nonInteractive: true, heading: Math.PI, speed: 0, blocked: 0, stuckTime: 0, goalX: 30, goalY: 0, goalZ: 1,
+      ...PILE_TRIP, root: { position: { x, y: 0.02 * x, z } } };
+    const c = { clamp: (v, a, b) => Math.max(a, Math.min(b, v)), PROP_STEP: 1.16, ctx: { npcFixedPaths: fixed, npcPathState: () => P.create({ island }).createState() },
+      support: (_e, sx) => 0.02 * sx, groundStepClear: () => true, setSupportY: (e, y) => { e.root.position.y = y; }, move: () => {}, e: gorilla };
+    runInNewContext(`${stepperCode} this.step = () => movePassive(e, 1 / 30, 2.7, passivePlanned(e));`, c);
+    const at = (gx, gz) => Math.hypot(gorilla.root.position.x - gx, gorilla.root.position.z - gz);
+    const walk = (frames) => { for (let i = 0; i < frames && at(gorilla.goalX, gorilla.goalZ) > 0.02; i++) c.step(); };
+    return { gorilla, step: c.step, walk, at };
+  };
+  const laneOf = s => Array.from(s.laneX.subarray(0, s.count), (v, i) => [v, s.laneZ[i]].join()).join("|");
+  const pileAgain = (firstFrames) => {
+    const w = passiveWalker(0, -4), g = w.gorilla;
+    w.walk(firstFrames);
+    const s = g.pathing, buffers = [s.laneX, s.laneZ], plans = s.plans, version = s.version;
+    Object.assign(g, WORK_TRIP, { goalX: -20, goalZ: 12 });
+    w.walk(150);
+    const leftAlone = s.plans === plans && Number.isNaN(s.tx);
+    Object.assign(g, PILE_TRIP, { goalX: 30, goalZ: 1 });
+    const from = { x: g.root.position.x, z: g.root.position.z };
+    w.step();
+    const fresh = passiveWalker(from.x, from.z);
+    fresh.step();
+    const replanned = s.plans === plans + 1 && s.version === version && s.tx === 30 && s.tz === 1;
+    const sameLane = laneOf(s) === laneOf(fresh.gorilla.pathing) && s.index === fresh.gorilla.pathing.index;
+    const reused = g.pathing === s && s.laneX === buffers[0] && s.laneZ === buffers[1];
+    w.walk(2000);
+    return { leftAlone, replanned, sameLane, reused, arrived: w.at(30, 1) <= 0.02, moved: Math.hypot(from.x, from.z + 4) > 1 };
+  };
+  const pileConsumed = pileAgain(2000), pileInterrupted = pileAgain(60);
+  const gorillaReplans = [pileConsumed, pileInterrupted].every(t => Object.values(t).every(v => v === true));
   // The real doorway claim: a passive companion passes a held portal without
   // scanning or taking it (the holder keeps its claim), drops a stale claim of
   // its own, and a driven gorilla still waits its turn.
@@ -26844,7 +27151,8 @@ const fixedRoutineProof = async () => {
   const passivePortal = passedHeld && droppedStale && drivenWaits;
   island.path.centerlines = [];
   return { outside, ring, arrives, stamped, replansGraphLane, midOutboundChill, returningChill, slotlessChill, restsAtPile,
-    slotWalkRetargets, authoredRouteKept, slotWalks: [ownLeg, authoredLeg], gorillaPlanned, gorillaClimbsWalls, passivePortal, gorillaTrip, gorillaWall,
+    slotWalkRetargets, authoredRouteKept, slotWalks: [ownLeg, authoredLeg], gorillaPlanned, gorillaDirect, gorillaClimbsWalls, gorillaReplans, passivePortal,
+    gorillaToPile, gorillaWall, gorillaFromMeadow, gorillaFromCave, gorillaReset, gorillaWorkWall, pileConsumed, pileInterrupted,
     portal: { passedHeld, droppedStale, drivenWaits, caveScans },
     unsupported: P.fixed(island) === null,
     trips: [outboundTrip, returnTrip, slotlessTrip, restTrip].map(({ steps, ...trip }) => ({ ...trip, steps: steps.length })) };
@@ -27345,7 +27653,7 @@ const unitChecks = async () => {
   record("passive status beams: clanking to chilling in view walks without glyphs at 20 Hz steps, while a relocation to bed still beams",
     Object.values(statusBeams).every(Boolean), JSON.stringify(statusBeams));
   const fixedRoutine = await fixedRoutineProof();
-  record("passive work legs: the authored fixed planner circles the real pile ring, follows one spoke out to the target, never crosses the pile, and replans rather than reuse a graph lane; clanking to chilling from mid-outbound or mid-return walks back along the cave route to the pile slot, then to the chill spot, on terrain and ignoring objects",
+  record("passive work legs: the authored fixed planner circles the real pile ring, follows one spoke out to the target, never crosses the pile, and replans rather than reuse a graph lane; clanking to chilling from mid-outbound or mid-return walks back along the cave route to the pile slot, then to the chill spot, on terrain and ignoring objects; a passive gorilla's walk to the pile keeps the spokes and ring while its work travel to a cave walks straight from another cave or the meadow, even when its origin is reset mid-walk, on terrain, still handing wall steps to the climber",
     Object.values(fixedRoutine).every(Boolean), JSON.stringify(fixedRoutine));
   const passiveWeapons = await passiveWeaponTargetProof();
   record("passive weapon targets: a shot passes through a passive NPC to the body behind it, hover and carry picks still find the NPC, and a non-passive body takes the hit",
@@ -27392,6 +27700,9 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   record("visibility lifecycle: shared bakes survive removal and replacement; hidden transforms, clips and geometry restore exact queries", storage.lifecycle, JSON.stringify(storage));
   const demandUsers = await visibilityDemandUsersProof();
   record("visibility demand: first demand visits only descriptor users and releases replaced, removed and disposed entries", demandUsers.rows.every(row => row.visits === row.count && row.released && row.resolved) && demandUsers.boundsTracked && demandUsers.replacementReleased && demandUsers.bothResolved && demandUsers.disposed, JSON.stringify(demandUsers));
+  const separateBodies = await separateBodyRegistryProof();
+  record("visibility separate bodies (#501): a driven Ooga or gorilla body is a registry character from before the registry exists, reads in sight in the open and covered behind a blocker, keeps both head states through refreshes with its sightHidden effects left out, and is forgotten before it is detached with nothing left take after take",
+    Object.values(separateBodies).every(Boolean), JSON.stringify(separateBodies));
   await distributionAudioChecks();
   const canvasStub = () => ({
     width: 0, height: 0,
@@ -28174,17 +28485,21 @@ record("character visibility source bakes: ownership wrappers share exact immuta
         sync.dispose();
         BL.net.npcFrame = matchingFrame;
         BL.net.state.selfId = "follower"; BL.net.state.npcVersion++;
-        sync = BL.npcSync.create(options); sync.update(0.3);
+        // A follower plays frames back DELAY behind their arrival; a frame's events replay once playback reaches it.
+        const reach = () => sync.update(BL.npcSync.DELAY + 0.05);
+        sync = BL.npcSync.create(options); sync.update(0.3); reach();
         const rejected = sync.frames === 0 && plans === 0 && crew.list.every(c => !c.puppet);
         sync.dispose();
         crew.workSites = [{ mouth: { id: "c11" } }, { mouth: { id: "c10" } }];
         sync = BL.npcSync.create(options); sync.update(0.3);
-        const accepted = sync.frames === 1 && plans === 1 && oldest.puppet;
+        const waiting = plans === 0 && oldest.puppet;
+        reach();
+        const accepted = waiting && sync.frames === 1 && plans === 1 && oldest.puppet;
         BL.net.npcFrame = mismatchedFrame; BL.net.state.npcVersion++;
         sync.update(0.3);
         const cleared = sync.frames === 1 && plans === 1 && crew.list.every(c => !c.puppet);
         BL.net.npcFrame = matchingFrame; BL.net.state.npcVersion++;
-        sync.update(0.3);
+        sync.update(0.3); reach();
         const resumed = sync.frames === 2 && plans === 2 && oldest.puppet;
         // A host message leaves the old binary frame cached; it must not reclaim the crew.
         BL.net.state.hostId = "other"; sync.update(0.3);
@@ -28227,7 +28542,8 @@ record("character visibility source bakes: ownership wrappers share exact immuta
         sync.dispose();
         sleeper.state = sleeperSaved.state; Object.assign(sr.position, sleeperSaved.position); Object.assign(sr.rotation, sleeperSaved.rotation); sr.quaternion = sleepQ;
         BL.net.state.selfId = "follower";
-        const followSleeper = (frame) => { BL.net.npcFrame = frame; BL.net.state.npcVersion++; sync.update(0.05); };
+        // Each frame is followed until playback has reached it (the first is shown at once).
+        const followSleeper = (frame) => { BL.net.npcFrame = frame; BL.net.state.npcVersion++; for (let s = 0; s * 0.05 < BL.npcSync.DELAY + 0.1; s++) sync.update(0.05); };
         const near = (q, w) => !!q && Math.abs(Math.abs(q[0] * w[0] + q[1] * w[1] + q[2] * w[2] + q[3] * w[3]) - 1) < 1e-4;
         sync = BL.npcSync.create(options);
         followSleeper(uprightFrame);
@@ -28243,9 +28559,10 @@ record("character visibility source bakes: ownership wrappers share exact immuta
         record("NPC sync: a local sleep quaternion yields to an upright host frame; host sleep poses lie down and wake",
           stood.puppet && stood.quaternion && stood.yaw && stood.state === "chilling" && laid.owned && laid.pose && laid.state === "sleeping"
             && woke.quaternion && woke.state === "chilling" && untouched, JSON.stringify(sideways));
-        // Real host frames, applied by a real follower: a same-status move under
-        // SNAP still eases, while a status change under SNAP (a passive beam on
-        // the host) places the puppet at once.
+        // Real host frames, applied by a real follower at the host's 4 Hz: a
+        // same-status move under SNAP plays across, while a status change under
+        // SNAP (a passive beam on the host) places the puppet at once, its pose
+        // and status landing together when playback reaches that frame.
         const mover = crew.list.find(c => c !== oldest && c !== next && c !== newest);
         const moverSaved = { state: mover.state, position: { ...mover.root.position }, quaternion: mover.root.quaternion, visible: mover.root.visible };
         const p = mover.root.position, baseY = mover.baseY, hostFrames = [];
@@ -28259,18 +28576,26 @@ record("character visibility source bakes: ownership wrappers share exact immuta
         sync.dispose();
         Object.assign(p, { x: 1, y: baseY, z: 1 }); mover.state = "chilling";
         BL.net.state.selfId = "follower";
-        const follow = (frame) => { BL.net.npcFrame = frame; BL.net.state.npcVersion++; sync.update(0.05); return { x: p.x, z: p.z, state: mover.state }; };
+        const trail = [];
+        const watch = (steps) => { for (let s = 0; s < steps; s++) { sync.update(0.05); trail.push({ x: p.x, z: p.z, state: mover.state }); } };
+        const follow = (frame) => { BL.net.npcFrame = frame; BL.net.state.npcVersion++; const from = trail.length; watch(5); return trail.slice(from); };
         sync = BL.npcSync.create(options);
-        const start = follow(hostFrames[0]), eased = follow(hostFrames[1]), beamed = follow(hostFrames[2]);
+        const start = follow(hostFrames[0]);
+        follow(hostFrames[1]); follow(hostFrames[2]); watch(10);
         sync.dispose();
+        const last = trail.at(-1);
         const statusSnap = {
           frames: hostFrames.length === 3 && hostFrames.every(Boolean) && new Set(hostFrames).size === 3,
-          puppet: start.x === 1 && start.z === 1 && start.state === "chilling",
-          // 2 m apart, same status: partway toward the host's pose this update.
-          eased: eased.state === "chilling" && eased.x > 1 + 1e-6 && eased.x < 3 - 1e-6 && Math.abs(eased.z - 1) < 1e-6,
-          // 2 m apart, new status: exactly at the host's pose.
-          snapped: beamed.state === "working" && Math.abs(beamed.x - 3) < 1e-6 && Math.abs(beamed.z - 3) < 1e-6
+          // The first frame is shown at once and held until the next is due.
+          puppet: start.every(e => e.x === 1 && e.z === 1 && e.state === "chilling"),
+          // 2 m apart, same status: shown partway between the two frames, never past the second.
+          eased: trail.some(e => e.state === "chilling" && e.x > 1 + 1e-6 && e.x < 3 - 1e-6 && Math.abs(e.z - 1) < 1e-6)
+            && trail.every((e, j) => e.x <= 3 + 1e-6 && (!j || e.x >= trail[j - 1].x - 1e-9)),
+          // 2 m apart, new status: never drawn across, and status and pose land in the same update.
+          snapped: trail.every(e => (e.z === 1 || e.z === 3) && (e.state === "working") === (e.z === 3) && (e.z === 1 || e.x === 3))
+            && last.state === "working" && last.x === 3 && last.z === 3
         };
+        const eased = trail.find(e => e.x > 1 && e.x < 3), beamed = last;
         mover.state = moverSaved.state; Object.assign(p, moverSaved.position);
         mover.root.quaternion = moverSaved.quaternion; mover.root.visible = moverSaved.visible;
         record("NPC sync: a follower eases a same-status move under the snap distance, but places a puppet at once when its streamed status changes",
@@ -28296,6 +28621,166 @@ record("character visibility source bakes: ownership wrappers share exact immuta
           mover.root.quaternion = moverSaved.quaternion; mover.root.visible = moverSaved.visible;
           record("NPC sync: a follower whose host sends another frame format holds every NPC in place, reports it once and runs no crew AI of its own, then follows a matching frame",
             holding && resumedFormat && freed, JSON.stringify({ holding, resumedFormat, freed, told, incompatible: sync.incompatible }));
+        }
+        // Regression: easing toward each 4 Hz frame made a walking puppet surge as a frame landed and crawl before
+        // the next. A real host's frames of a steady walk, followed at 60 fps, must play at the walk's own pace,
+        // never past the newest frame, and stop where it stopped; a frame's events replay with the pose it was
+        // sent with; late frames, an idle host's skipped frames and a new host never make the puppet jump.
+        {
+          const SEND = 0.25, STEP = 1 / 60, SPEED = 2, PER = Math.round(SEND / STEP), pace = SPEED * STEP;
+          const plansAt = [], travel = { ...options, onPlan: (cave) => { if (cave === mover) plansAt.push(p.x); } };
+          // The host walks 3 s along x, stands 3 s (its unchanged frames skipped but for KEEP_S's), then walks 2 s along z.
+          BL.net.state.hostId = BL.net.state.selfId = "host";
+          sync = BL.npcSync.create(travel);
+          const turnSaved = { ...mover.root.rotation };
+          mover.state = "chilling"; mover.root.visible = true; mover.root.quaternion = null; mover.root.rotation.y = 0;
+          const sent = [];
+          let lastFrame = BL.net.npcFrame;
+          for (let tick = 0; tick < 33; tick++) {
+            Object.assign(p, { x: 1 + Math.min(tick, 11) * SEND * SPEED, y: baseY, z: 1 + Math.max(0, tick - 24) * SEND * SPEED });
+            if (tick === 6) sync.recordPlan(mover, 1);
+            sync.update(SEND);
+            if (BL.net.npcFrame !== lastFrame) { lastFrame = BL.net.npcFrame; sent.push({ step: tick * PER, tick, frame: lastFrame }); }
+          }
+          sync.dispose();
+          // A follower at 60 fps from the update the first frame lands in; frame k lands `latency(k)` updates after the
+          // host sent it. `path[j]` is the update `latency(0) + j` steps after the host's first frame.
+          BL.net.state.selfId = "follower";
+          const playback = (latency) => {
+            sync = BL.npcSync.create(travel);
+            plansAt.length = 0;
+            const path = [];
+            for (let step = latency(0), next = 0; step <= sent.at(-1).step + 3 * PER; step++) {
+              let frame = null;
+              while (next < sent.length && sent[next].step + latency(next) <= step) frame = sent[next++].frame;
+              if (frame) { BL.net.npcFrame = frame; BL.net.state.npcVersion++; }
+              sync.update(STEP);
+              path.push({ x: p.x, z: p.z, puppet: mover.puppet });
+            }
+            sync.dispose();
+            return path;
+          };
+          // Steps along one axis over a stretch of the path; `moving` drops the stretch's first and last moving steps,
+          // which start and end between two updates.
+          const walkOf = (path, axis, from, to) => {
+            const steps = [];
+            for (let j = from + 1; j < to; j++) steps.push(path[j][axis] - path[j - 1][axis]);
+            const first = steps.findIndex(d => d > 1e-9), last = steps.findLastIndex(d => d > 1e-9);
+            return { steps, moving: first < 0 ? [] : steps.slice(first + 1, last) };
+          };
+          // Where the walks part: the idle host's first moving frame, a little before it lands.
+          const turn = sent.find(s => s.tick > 24).step;
+          const judge = (path) => {
+            const x = walkOf(path, "x", 0, turn), z = walkOf(path, "z", turn, path.length);
+            return {
+              x, z,
+              puppet: path.every(e => e.puppet),
+              // Never behind or past the host's walk, and still where it stopped.
+              bounded: path.every(e => e.x >= 1 && e.x <= 6.5 + 1e-6 && e.z >= 1 && e.z <= 5 + 1e-6)
+                && x.steps.every(d => d >= -1e-9) && z.steps.every(d => d >= -1e-9)
+                && path.slice(turn - PER).every(e => Math.abs(e.x - 6.5) < 1e-6) && path.at(-1).z === 5,
+              // No stall while it walks, and no step longer than two of the walk's own.
+              continuous: x.moving.length > 100 && z.moving.length > 60 && [...x.moving, ...z.moving].every(d => d > 1e-6 && d < 2 * pace)
+            };
+          };
+          const steady = judge(playback(() => 3));
+          const steadyPlan = plansAt.slice();
+          // Late by up to 4 updates (still inside JITTER), in a fixed uneven order.
+          const late = [0, 4, 1, 3, 0, 2, 4, 1, 3, 0, 4, 2];
+          const jittered = judge(playback(k => 3 + late[k % late.length]));
+          const sameSteps = (list) => list.every(d => Math.abs(d - pace) < pace * 1e-4);
+          const travelChecks = {
+            frames: sent.length >= 20 && sent.length < 33,
+            steady: steady.puppet && steady.bounded && steady.continuous,
+            // The pulse: a steady walk plays at exactly its own pace through every frame it crosses.
+            pace: sameSteps(steady.x.moving) && sameSteps(steady.z.moving.slice(-PER)),
+            // The idle host's first frame of a new walk starts from where the puppet stands, no faster than the walk.
+            restart: steady.z.moving.every(d => d <= pace * (1 + 1e-4)),
+            jittered: jittered.puppet && jittered.bounded && jittered.continuous,
+            // The plan the host made at x = 4 reaches the gorillas once, as the puppet passes x = 4.
+            plan: steadyPlan.length === 1 && steadyPlan[0] >= 4 - 1e-6 && steadyPlan[0] < 4 + pace + 1e-6
+          };
+          // A new host: the puppets are handed back, and the new host's first frame is shown at once, nothing kept from the old.
+          sync = BL.npcSync.create(travel);
+          BL.net.npcFrame = sent.at(-1).frame; BL.net.state.npcVersion++;
+          for (let s = 0; s < 30; s++) sync.update(STEP);
+          const before = { x: p.x, z: p.z, puppet: mover.puppet };
+          BL.net.state.hostId = "other"; sync.update(STEP);
+          const handedBack = !mover.puppet;
+          BL.net.npcFrame = sent[0].frame; BL.net.state.npcVersion++; sync.update(STEP);
+          travelChecks.handoff = before.puppet && before.x === 6.5 && before.z === 5 && handedBack && mover.puppet && p.x === 1 && p.z === 1;
+          sync.dispose();
+          BL.net.state.hostId = "host";
+          mover.state = moverSaved.state; Object.assign(p, moverSaved.position); Object.assign(mover.root.rotation, turnSaved);
+          mover.root.quaternion = moverSaved.quaternion; mover.root.visible = moverSaved.visible;
+          record("NPC sync: a follower plays a real host's 4 Hz walk at the walk's own pace, without a pulse per frame, a guess past the newest frame, a stall on late frames, a jump after the host idles or keeps a new host's old frames, and replays a frame's events with its pose",
+            Object.values(travelChecks).every(Boolean),
+            JSON.stringify({ travelChecks, sent: sent.length, steadyX: steady.x.moving.slice(0, 20), steadyZ: steady.z.moving.slice(0, 30), jitterX: jittered.x.moving.slice(0, 20), steadyPlan }));
+        }
+        // Regression: frames landing close together are folded into one, and every event they carried replays once, in
+        // arrival order, when playback reaches them; past SLOT_EVENTS (two frames' worth) the newest are dropped and counted.
+        {
+          const heard = [], listening = { ...options, onPlan: (cave, site) => { if (cave === mover) heard.push(site); } };
+          BL.net.state.hostId = BL.net.state.selfId = "host";
+          sync = BL.npcSync.create(listening);
+          sync.update(0.25);
+          const eventFrames = [];
+          for (const [base, count] of [[0, 1], [100, 64], [200, 64], [300, 96]]) {
+            for (let k = 0; k < count; k++) sync.recordPlan(mover, base + k);
+            sync.update(0.25); eventFrames.push(BL.net.npcFrame);
+          }
+          sync.dispose();
+          BL.net.state.selfId = "follower";
+          sync = BL.npcSync.create(listening);
+          const land = (frame) => { BL.net.npcFrame = frame; BL.net.state.npcVersion++; sync.update(1 / 60); };
+          land(eventFrames[0]);
+          for (let s = 0; s < 14; s++) sync.update(1 / 60);
+          land(eventFrames[1]); land(eventFrames[2]);
+          const folded = sync.buffered === 2;
+          land(eventFrames[3]);
+          const stillFolded = sync.buffered === 2, early = heard.length;
+          for (let s = 0; s < 40; s++) sync.update(1 / 60);
+          const want = [0];
+          for (const base of [100, 200, 300]) for (let k = 0; k < 64; k++) want.push(base + k);
+          const eventFold = { frames: eventFrames.length === 4 && new Set(eventFrames).size === 4, folded, stillFolded, early: early === 0,
+            replayed: heard.length === want.length && heard.every((site, j) => site === want[j]), dropped: sync.droppedEvents === 32 };
+          sync.dispose();
+          mover.state = moverSaved.state; Object.assign(p, moverSaved.position);
+          mover.root.quaternion = moverSaved.quaternion; mover.root.visible = moverSaved.visible;
+          record("NPC sync: events of frames folded together replay once each, in arrival order, after their poses; past the fold's budget the newest are dropped and counted",
+            Object.values(eventFold).every(Boolean), JSON.stringify({ eventFold, heard: heard.length, dropped: sync.droppedEvents }));
+        }
+        // Regression: a host on another frame format interrupts playback; the first matching frame afterwards is shown at
+        // once, and nothing buffered but unshown before the interruption is ever played.
+        {
+          const older = hostFrames[0].slice(0);
+          new Uint32Array(older, 0, 4)[0] = BL.npcSync.FORMAT - 1;
+          BL.net.state.hostId = "host"; BL.net.state.selfId = "follower";
+          sync = BL.npcSync.create(options);
+          const seen = [];
+          const land = (frame) => {
+            if (frame) { BL.net.npcFrame = frame; BL.net.state.npcVersion++; }
+            sync.update(0.05); seen.push({ x: p.x, z: p.z, state: mover.state });
+          };
+          land(hostFrames[0]); land(hostFrames[1]);
+          const waiting = sync.buffered === 2;
+          land(older);
+          const cleared = sync.incompatible && sync.buffered === 0;
+          for (let s = 0; s < 10; s++) land(null);
+          land(hostFrames[2]);
+          const resumed = seen.at(-1);
+          for (let s = 0; s < 12; s++) land(null);
+          const staleResume = {
+            waiting, cleared,
+            held: seen.slice(0, 13).every(e => e.x === 1 && e.z === 1),
+            resumedAtOnce: !sync.incompatible && resumed.x === 3 && resumed.z === 3 && resumed.state === "working",
+            neverStale: seen.every(e => (e.x === 1 && e.z === 1) || (e.x === 3 && e.z === 3))
+          };
+          sync.dispose();
+          mover.state = moverSaved.state; Object.assign(p, moverSaved.position);
+          mover.root.quaternion = moverSaved.quaternion; mover.root.visible = moverSaved.visible;
+          record("NPC sync: after a host's frames of another format, the first matching frame is shown at once and no pose buffered before them is played",
+            Object.values(staleResume).every(Boolean), JSON.stringify({ staleResume, seen }));
         }
       } finally { if (sync) sync.dispose(); crew.workSites = savedSites; BL.net = savedNet; }
       newest.contributor.lastContributionAt = now;
