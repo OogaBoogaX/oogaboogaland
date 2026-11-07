@@ -152,7 +152,7 @@
   // what it missed after the last donation it played; a donation already played is skipped. `state.open` is the
   // API's last word on whether donations are open, and `state.network` the network it takes payments on, each null
   // before it has said. `state.tally` is its latest tally, null before the first.
-  const SOCKET_MIN = 1000, SOCKET_MAX = 60000, PLAYED = 64, RECENT_MAX = 10;
+  const SOCKET_MIN = 1000, SOCKET_MAX = 60000, PLAYED = 64, RECENT_MAX = 20, RECENT_KEEP = 2 * RECENT_MAX;
   const state = { open: null, network: null, connected: false, attempts: 0, donations: 0, tally: null, board: null, boardSats: null, recent: null, limits: null };
   const limitsOf = (v) => v && Number.isSafeInteger(v.minSats) && v.minSats > 0
     && Number.isSafeInteger(v.maxSats) && v.maxSats >= v.minSats
@@ -177,13 +177,27 @@
     return { ...donation, bananas: d.bananas, verified: d.verified === true,
       seq: Number.isSafeInteger(d.seq) && d.seq > 0 ? d.seq : 0 };
   };
+  // The recent list shows `RECENT_MAX` rows, newest first. A list keeps the newest that many of every amount and the
+  // newest that many at or above the message bar, so it fills whichever way its checkbox is set: `RECENT_KEEP` at most.
+  // The API's and the demo's lists alike, trimmed in place.
+  const keepRecent = (list) => {
+    const bar = messageMinSats();
+    let every = 0, over = 0, kept = 0;
+    for (const item of list) {
+      const big = item.sats >= bar;
+      if (every < RECENT_MAX || big && over < RECENT_MAX) list[kept++] = item;
+      every++;
+      if (big) over++;
+    }
+    list.length = kept;
+  };
   const insertRecent = (list, entry) => {
     const old = list.findIndex((item) => item.id === entry.id);
     if (old >= 0) list.splice(old, 1);
     let at = 0;
     while (at < list.length && (entry.seq && list[at].seq ? list[at].seq > entry.seq : list[at].at > entry.at)) at++;
     list.splice(at, 0, entry);
-    if (list.length > RECENT_MAX) list.length = RECENT_MAX;
+    keepRecent(list);
   };
   const boardOf = (entries) => entries.slice(0, 256)
     .filter((e) => e && typeof e.handle === "string" && isNumber(e.bananas) && e.bananas >= 0)
@@ -234,7 +248,7 @@
       notify();
     } else if (data.type === "recent" && Array.isArray(data.entries)) {
       const recent = [];
-      for (const raw of data.entries.slice(0, RECENT_MAX)) {
+      for (const raw of data.entries.slice(0, RECENT_KEEP)) {
         const entry = recentOf(raw);
         if (entry) insertRecent(recent, entry);
       }
@@ -368,5 +382,5 @@
   // The test network real donations are paid on (signet on staging), or "" for mainnet, before the API has said, and
   // when simulated.
   const testNetwork = () => real && state.network && state.network !== "mainnet" ? state.network : "";
-  BL.donations = { config, get real() { return real; }, get testNetwork() { return testNetwork(); }, get messageMinSats() { return messageMinSats(); }, state, useOrigin, createRequest, invoice, note, onchain, waitFor, waitingOn, waited, receivedOwnInvoice, subscribe, subscribeState, sanitize, carried, HANDLE_MAX, MESSAGE_MAX, MESSAGE_MIN_SATS, RECENT_MAX };
+  BL.donations = { config, get real() { return real; }, get testNetwork() { return testNetwork(); }, get messageMinSats() { return messageMinSats(); }, state, useOrigin, createRequest, invoice, note, onchain, waitFor, waitingOn, waited, receivedOwnInvoice, subscribe, subscribeState, sanitize, carried, keepRecent, HANDLE_MAX, MESSAGE_MAX, MESSAGE_MIN_SATS, RECENT_MAX, RECENT_KEEP };
 })();

@@ -7860,6 +7860,12 @@ const donationClientChecks = async () => {
   const quiet = received.at(-1).d.message === "" && D.state.recent.length === 4 && D.state.recent.some((e) => e.id === "quiet");
   message({ type: "status", open: true, limits: { minSats: 69, maxSats: 4000, lightningMaxSats: 1000, messageMinSats: 3500 } });
   const raisedLater = D.state.recent.every((e) => !e.message);
+  // A long snapshot (only its first forty read) keeps the newest twenty of every amount and the newest twenty at the
+  // bar, 3,500 by now, so the recent list fills twenty rows whichever way its checkbox is set.
+  message({ type: "recent", entries: Array.from({ length: 45 }, (_, i) => ({ id: `long-${i}`, sats: i < 30 ? 100 : 4000, handle: "Long", message: "", at: Date.now(), bananas: 0, seq: 200 - i })) });
+  const long = D.state.recent;
+  const keptBoth = long.length === 30 && long.slice(0, 20).every((e) => e.sats === 100) && long.slice(20).every((e) => e.sats === 4000)
+    && long[19].id === "long-19" && long[20].id === "long-30" && long.at(-1).id === "long-39";
   message({ type: "seen", id: "chain", sats: 400, due: 1000, left: 615 });
   message({ type: "seen", id: "chain", sats: 400, due: 1000 });
   const heard = seen.length === 1 && seen[0].slice(0, 4).join() === "chain,400,1000,615" && seen[0][4] === null;
@@ -7874,9 +7880,9 @@ const donationClientChecks = async () => {
   const overBarRequest = requests.at(-2).body.message === "allowed" && requests.at(-1).body.message === "edited above bar";
   const owned = D.receivedOwnInvoice("invoice") && !D.receivedOwnInvoice("invoice") && !D.receivedOwnInvoice("other");
   stop();
-  record("donation socket: snapshots replace stale rows and correct same-id details, a raised message bar silences live and held entries, invoice and note requests obey the bar, and replay, tally, board, on-chain and unsubscribe contracts hold",
-    advertisedLimits && validatedLimits && empty && tally && boards && legacyBoard && replay && raisedBar && snapshot && quiet && raisedLater && subBarRequest && overBarRequest && owned && heard && unlit && received.length === 4 && received[0].bananas.exact === 0.25 && received[1].bananas.exact === 0 && received[1].bananas.rounded === 0 && sockets[1].closed && !D.state.connected,
-    JSON.stringify({ advertisedLimits, validatedLimits, empty, tally, boards, legacyBoard, replay, raisedBar, snapshot, quiet, raisedLater, subBarRequest, overBarRequest, owned, heard, unlit, received }));
+  record("donation socket: snapshots replace stale rows and correct same-id details, a raised message bar silences live and held entries, the recent rows keep twenty of every amount and twenty at the bar, invoice and note requests obey the bar, and replay, tally, board, on-chain and unsubscribe contracts hold",
+    advertisedLimits && validatedLimits && empty && tally && boards && legacyBoard && replay && raisedBar && snapshot && quiet && raisedLater && keptBoth && subBarRequest && overBarRequest && owned && heard && unlit && received.length === 4 && received[0].bananas.exact === 0.25 && received[1].bananas.exact === 0 && received[1].bananas.rounded === 0 && sockets[1].closed && !D.state.connected,
+    JSON.stringify({ advertisedLimits, validatedLimits, empty, tally, boards, legacyBoard, replay, raisedBar, snapshot, quiet, raisedLater, keptBoth, subBarRequest, overBarRequest, owned, heard, unlit, received }));
 
   let now = Date.now(), detailsOpen = false;
   const kioskContext = { window: { BL: { jumbotron: { text: { GLYPH_W: 5, GLYPH_H: 7, TRACKING: 1 } }, qr: { encode: () => ({ size: 1, modules: [1] }) }, donations: D } },
@@ -9132,12 +9138,15 @@ const hubHammockExit = { name: "hub hammock exit", why: "rule: an Ooga resting i
 const SEED_DONORS = (count, prefix) => `(() => { const B = __ooga;
   for (let i = 0; i < ${count}; i++) B.game.recordDonation({ id: "${prefix}-" + i, sats: 1000 + i * 137, handle: "${prefix}" + String(i).padStart(2, "0"), message: "", at: Date.now() + i });
   BL.hud.setDonationStats(B.game.state); })()`;
-// The Bananas panel as rendered, with the panel open: every ranked donor's row in order, each list's window (exactly
-// five donor rows tall for both), what scrolling each list into the slab's view brings into view, and whether Feed the
-// Oogas stands whole at the panel's foot, under the slab and never over it, before and after the slab scrolls.
+// The Bananas panel as rendered, with the panel open: every ranked donor's row in order, each list's window (the
+// donors' exactly five donor rows tall, the latest tips' at least that), whether the latest tips' window takes the
+// slab's spare room (nothing left between it and the note), what scrolling each list into the slab's view brings into
+// view, and whether Feed the Oogas stands whole at the panel's foot, under the slab and never over it, before and after
+// the slab scrolls.
 const BANANA_LISTS = `(() => {
   const panel = document.getElementById("bananas-panel"), slab = panel.querySelector(".banana-slab"), feed = panel.querySelector('[data-action="feed"]');
   const leaders = document.getElementById("banana-leaders"), recent = document.getElementById("banana-recent-list"), note = document.getElementById("banana-board-note");
+  const section = recent.closest(".banana-recent"), sectionBottom = section.getBoundingClientRect().bottom;
   const body = panel.closest(".sheet-body") || panel;
   const shown = (list) => [...list.children].filter(n => !n.hidden), top = (list) => list.getBoundingClientRect().top + list.clientTop;
   const rows = shown(leaders), latest = shown(recent), amounts = rows.map(n => parseFloat(n.querySelector(".banana-amount").textContent.replace(/,/g, "")));
@@ -9162,6 +9171,7 @@ const BANANA_LISTS = `(() => {
     names: rows.map(n => n.querySelector(".banana-donor").textContent).sort().join() === __ooga.game.state.donors.map(d => d.handle ? "@" + d.handle : "Anonymous").sort().join(),
     ordered: amounts.every((a, i) => !i || a <= amounts[i - 1]), latest: latest.length, retained: __ooga.game.state.recentDonations.length,
     window: leaders.clientHeight, fifth, sixth, recentWindow: recent.clientHeight, scrolls: leaders.scrollHeight > leaders.clientHeight && recent.scrollHeight > recent.clientHeight,
+    fills: note.getBoundingClientRect().top - sectionBottom <= 1 && sectionBottom - recent.getBoundingClientRect().bottom <= 1,
     feedFirst: footed(), lastDonor: rows.length ? reach(leaders, rows) : false, lastTip: latest.length ? reach(recent, latest) : false,
     slabScrolls: slab.scrollHeight > slab.clientHeight + 1, slabRoom: slab.clientHeight, panelScrolls: panel.scrollHeight > panel.clientHeight + 1,
     sheetHeight: Math.round(panel.closest(".sheet").getBoundingClientRect().height) };
@@ -9170,11 +9180,12 @@ const BANANA_LISTS = `(() => {
   slab.scrollTop = 0;
   return out;
 })()`;
-// Five donor rows fill the donors' window exactly and the latest tips' window is the same height; both scroll to
-// their last entry, every donor is listed in rank order, and the slab scrolls above Feed the Oogas, which stays whole
-// at the panel's foot without the panel scrolling, the slab's foot reachable over it and never under it.
-// However few entries either list holds, even none, both keep the same window, the one five donor rows fill.
-const bananaWindowsMatch = (short, full) => short.visible && short.window > 0 && Math.abs(short.window - full.window) <= 0.5 && Math.abs(short.recentWindow - full.window) <= 0.5;
+// Five donor rows fill the donors' window exactly and the latest tips' window is never shorter, taking the slab's spare
+// room; both scroll to their last entry, every donor is listed in rank order, and the slab scrolls above Feed the
+// Oogas, which stays whole at the panel's foot without the panel scrolling, the slab's foot reachable over it and never
+// under it. However few entries either list holds, even none, the donors keep the window five donor rows fill and the
+// latest tips one at least as tall.
+const bananaWindowsMatch = (short, full) => short.visible && short.window > 0 && Math.abs(short.window - full.window) <= 0.5 && short.recentWindow >= full.window - 0.5;
 // A signed-in contributor's sheet, whose notification bell (40px on a touch screen) makes every panel's title as tall:
 // the account the sheet reads its bell and tabs from, laid out again through its own resize path, and put back after.
 const BANANA_SIGN_IN = `window.__bananaAccount = BL.net.state.me; BL.net.state.me = { id: 5, login: "footer", display: "Footer" }; window.dispatchEvent(new Event("resize"))`;
@@ -9184,7 +9195,7 @@ const BANANA_BELL = `(() => { const bell = document.querySelector("#bananas-pane
 const bananaBelled = (s) => s.bell && s.bellSize === "40x40" && s.title >= 40;
 const bananaFeedFooted = (s) => s.visible && s.feedFirst && s.feedScrolled && s.noteReached && !s.panelScrolls && s.slabRoom > 0;
 const bananaListsHold = (s) => s.visible && s.rows === s.donors && s.rows > 5 && s.names && s.ordered && s.latest === s.retained && s.latest > 5
-  && Math.abs(s.fifth - s.window) <= 1 && s.sixth >= s.window - 1 && Math.abs(s.recentWindow - s.window) <= 0.5 && s.scrolls && s.lastDonor && s.lastTip && bananaFeedFooted(s);
+  && Math.abs(s.fifth - s.window) <= 1 && s.sixth >= s.window - 1 && s.recentWindow >= s.window - 0.5 && s.fills && s.scrolls && s.lastDonor && s.lastTip && bananaFeedFooted(s);
 // A panel's last control, read with the panel scrolled to its end: the space above it to the control before it, and
 // below it to the inside of the panel's border, which may be larger only by the room a button's drop shadow takes.
 const FOOT_SPACE = (selector) => `(() => {
@@ -9262,10 +9273,20 @@ const hudVisit = { name: "hub HUD lifetime", why: "regression: scene visits recr
       if (was) sheet.style.setProperty("height", was, prio); else sheet.style.removeProperty("height");
       return out;
     })()`);
+    // A drawer taller than the slab needs, past the window's own limit for a moment: the latest tips' window takes the
+    // room the slab has left, and the donors' keeps its five rows.
+    const tall = await b.evaluate(`(() => {
+      const sheet = document.getElementById("bananas-panel").closest(".sheet"), kept = ["height", "max-height"].map(k => [k, sheet.style.getPropertyValue(k), sheet.style.getPropertyPriority(k)]);
+      sheet.style.setProperty("max-height", "none", "important"); sheet.style.setProperty("height", "1200px", "important");
+      const out = ${BANANA_LISTS};
+      for (const [k, v, prio] of kept) if (v) sheet.style.setProperty(k, v, prio); else sheet.style.removeProperty(k);
+      return out;
+    })()`);
     // The later steps on this page find the panel as it was.
     await b.evaluate(was ? `__ooga.hud.selectTab(${JSON.stringify(was)})` : `document.getElementById("sheet-bananas").click()`);
-    record("HUD lifetime: the Bananas panel lists every donor in rank order inside a five-row window, the latest tips in a window of the same height however few either holds, and each scrolls to its last entry",
-      short.rows < 5 && short.rows === short.donors && short.names && bananaWindowsMatch(short, lists) && bananaListsHold(lists) && lists.rows > 10, JSON.stringify({ short, lists }));
+    record("HUD lifetime: the Bananas panel lists every donor in rank order inside a five-row window, the latest tips in a window at least as tall that takes the slab's spare room however few either holds, and each scrolls to its last entry",
+      short.rows < 5 && short.rows === short.donors && short.names && bananaWindowsMatch(short, lists) && bananaListsHold(lists) && lists.rows > 10
+      && tall.visible && !tall.slabScrolls && tall.fills && Math.abs(tall.window - lists.window) <= 0.5 && tall.recentWindow > tall.window + 100 && bananaFeedFooted(tall), JSON.stringify({ short, lists, tall }));
     record("HUD lifetime: in a short desktop drawer the Bananas slab scrolls above Feed the Oogas, which stays whole at the panel's foot over nothing, and both lists still reach their last entry",
       bananaListsHold(cramped) && cramped.slabScrolls && cramped.sheetHeight <= 264 && bananaWindowsMatch(cramped, lists), JSON.stringify(cramped));
   } finally {
