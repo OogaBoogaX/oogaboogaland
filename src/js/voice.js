@@ -54,7 +54,8 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const ICE = { iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }], bundlePolicy: "max-bundle" };
-  const ICE_GATHER_MS = 1500, CONNECT_MS = 10000, RETRY_MS = 2000;
+  const TURN_TLS = "turns:turn.cloudflare.com:443?transport=tcp";
+  const ICE_GATHER_MS = 1500, RELAY_GATHER_MS = 3500, CONNECT_MS = 10000, RETRY_MS = 2000;
   // A connection that drops after it was up gets this long to come back on its own before voice starts over.
   const DROP_GRACE_MS = 5000;
   // Speaking: RMS over SPEAK_ON starts it at once; SPEAK_HOLD quiet reads in a row end it, so words do not flicker.
@@ -137,7 +138,7 @@
     for (const fn of subscribers) fn(stats);
   };
 
-  const gathered = (pc) => new Promise((resolve) => {
+  const gathered = (pc, relay = false) => new Promise((resolve) => {
     if (pc.iceGatheringState === "complete") return resolve();
     const done = () => {
       window.clearTimeout(timer);
@@ -147,7 +148,7 @@
     const onChange = () => {
       if (pc.iceGatheringState === "complete") done();
     };
-    const timer = window.setTimeout(done, ICE_GATHER_MS);
+    const timer = window.setTimeout(done, relay ? RELAY_GATHER_MS : ICE_GATHER_MS);
     pc.addEventListener("icegatheringstatechange", onChange);
   });
 
@@ -331,6 +332,39 @@
     } finally { window.clearTimeout(timeout); requests.delete(controller); }
   };
 
+  // Keep the direct candidates. A configured Worker can add a short-lived TLS relay to both peers.
+  let relayConfig = ICE, relayRequest = null, relayTimer = 0;
+  const clearRelay = () => {
+    window.clearTimeout(relayTimer);
+    relayTimer = 0; relayRequest = null; relayConfig = ICE;
+  };
+  const renewRelay = (token) => {
+    if (token !== lifecycle) return;
+    const refresh = async () => {
+      const data = await api("ice", null, token).catch(() => null);
+      current(token);
+      if (relayRequest !== pending) return ICE;
+      const server = data?.iceServers?.[0], ttl = data?.ttl;
+      if (!server || server.urls !== TURN_TLS || !server.username || !server.credential || !Number.isInteger(ttl) || ttl < 120 || ttl > 172800) {
+        if (relayConfig !== ICE) relayTimer = window.setTimeout(() => renewRelay(token), 60000);
+        return relayConfig;
+      }
+      relayConfig = { ...ICE, iceServers: [...ICE.iceServers, server] };
+      relayTimer = window.setTimeout(() => renewRelay(token), (ttl - 60) * 1000);
+      for (const pc of [pubPc, subPc]) if (pc) {
+        try { pc.setConfiguration(relayConfig); } catch { /* The next connection uses the fresh configuration. */ }
+      }
+      return relayConfig;
+    };
+    const pending = refresh().catch(() => ICE);
+    relayRequest = pending;
+  };
+  const iceFor = (token) => {
+    if (!BL.net.state.voiceTurn) return ICE;
+    if (!relayRequest) renewRelay(token);
+    return relayRequest;
+  };
+
   // Either connection failing, or staying disconnected past DROP_GRACE_MS, after it was up: start voice over, which
   // publishes the microphone again (a new count, so every listener pulls it anew) and pulls every voice again.
   const watch = (pc) => {
@@ -354,14 +388,15 @@
     const valid = () => { current(token); if (!microphoneWanted || generation !== micGeneration) throw new Error("microphone cancelled"); };
     for (let attempt = 0; ; attempt++) {
       valid();
+      const config = await iceFor(token); valid();
       await api("session", { kind: "pub" }, token); valid();
-      const pc = new RTCPeerConnection(ICE);
+      const pc = new RTCPeerConnection(config);
       pubPc = pc;
       try {
         const tx = pc.addTransceiver(mic.getAudioTracks()[0], { direction: "sendonly" });
         const offer = await pc.createOffer(); valid();
         await pc.setLocalDescription(offer); valid();
-        await gathered(pc); valid();
+        await gathered(pc, config !== ICE); valid();
         const pub = await api("publish", { sdp: pc.localDescription.sdp, mid: tx.mid }, token); valid();
         await pc.setRemoteDescription(pub.sessionDescription); valid();
         await connected(pc); valid();
@@ -377,6 +412,7 @@
   };
 
   const teardown = () => {
+    clearRelay();
     window.clearTimeout(retryTimer);
     retried = false;
     for (const timer of dropTimers.values()) window.clearTimeout(timer);
@@ -511,7 +547,7 @@
     stats.joining = true; stats.micError = ""; microphoneWanted = stats.micWanted = true; stats.permission = "requesting"; stats.preflight = false; stats.preflightPending = false;
     if (!preserveMute) stats.muted = false;
     emit();
-    let openingReceiver = false;
+    let openingReceiver = false, openingPublisher = false;
     try {
       const stream = mic || await navigator.mediaDevices.getUserMedia(micConstraints());
       if (token !== lifecycle || generation !== micGeneration || !microphoneWanted) { for (const track of stream.getTracks()) track.stop(); return; }
@@ -519,7 +555,9 @@
       for (const track of mic.getAudioTracks()) track.enabled = !stats.muted;
       micMeter = micMeter || meter(mic);
       gate();
+      openingPublisher = true;
       await publish(token, generation);
+      openingPublisher = false;
       if (token !== lifecycle || generation !== micGeneration || !microphoneWanted) return;
       stats.publishing = true;
       if (!subPc) { openingReceiver = true; await openReceiver(token); }
@@ -531,9 +569,11 @@
       schedule();
     } catch (err) {
       if (token === lifecycle && generation === micGeneration) {
-        stats.permission = err.name === "NotAllowedError" ? "denied" : "unknown";
-        if (openingReceiver) stats.error = "voice unavailable";
-        else stats.micError = err.name === "NotAllowedError" ? "microphone blocked" : "microphone unavailable or not permitted";
+        if (openingReceiver || openingPublisher) stats.error = "voice connection unavailable";
+        else {
+          stats.permission = err.name === "NotAllowedError" ? "denied" : "unknown";
+          stats.micError = err.name === "NotAllowedError" ? "microphone blocked" : "microphone unavailable or not permitted";
+        }
         dropMic();
       }
     } finally {
@@ -559,9 +599,10 @@
     subs.clear();
     if (subPc) subPc.close();
     subPc = null;
+    const config = await iceFor(token); current(token);
     await api("session", { kind: "sub" }, token);
     current(token);
-    const pc = new RTCPeerConnection(ICE);
+    const pc = new RTCPeerConnection(config);
     subPc = pc; stats.receiveState = "idle";
     watch(pc);
     pc.addEventListener("track", (e) => {
@@ -626,6 +667,7 @@
   // Revocation releases hardware while keeping receive-only audio available.
   const dropMic = () => {
     micGeneration++; microphoneWanted = stats.micWanted = false; stats.joining = false;
+    if (!stats.enabled) clearRelay();
     if (mic) for (const track of mic.getTracks()) track.stop();
     mic = null; stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
@@ -730,7 +772,7 @@
         await pc.setRemoteDescription(res.sessionDescription); valid();
         const answer = await pc.createAnswer(); valid();
         await pc.setLocalDescription(answer); valid();
-        await gathered(pc); valid();
+        await gathered(pc, relayConfig !== ICE); valid();
         await api("renegotiate", { sdp: pc.localDescription.sdp }, token); valid();
       }
       for (const id of add) if (!subs.has(id) && want.has(id)) throw new Error("voice pull incomplete");

@@ -7,13 +7,15 @@
 import { cookieNames, isSecureOrigin, serializeCookie } from "./cookies.js";
 import { deletePlayer, getPlayer, publicPlayer, sanitizeDisplay, updateDisplay } from "./db.js";
 import { fromSite, getSessionForRemoval, getSessionFromRequest, json, text } from "./http.js";
+import { turnConfigured } from "./sfu.js";
 
 const BODY_MAX = 1024;
 
 const me = async (request, env) => {
   const found = await (request.method === "DELETE" ? getSessionForRemoval : getSessionFromRequest)(request, env);
   if (request.method === "GET") return json({ player: found ? publicPlayer(found.player) : null,
-    character: found ? found.character : null, donations: !!env.DONATIONS, tess: !!env.ANTHROPIC_API_KEY, highscores: !!env.DB, highscoreSnapshots: !!env.DB });
+    character: found ? found.character : null, donations: !!env.DONATIONS, tess: !!env.ANTHROPIC_API_KEY, highscores: !!env.DB, highscoreSnapshots: !!env.DB,
+    ...(found && turnConfigured(env) ? { voiceTurn: true } : {}) });
   if (!fromSite(request, env.SITE_ORIGIN)) return json({ error: "forbidden" }, 403);
   if (!found) return json({ error: "unauthenticated" }, 401);
 
