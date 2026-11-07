@@ -2,7 +2,7 @@
 //
 // The registry behind every object outline. Camera silhouettes are baked once per vertex array and never
 // written again; the queries are exact local-space visibility, proximity, occlusion and actor tests:
-// `register`, `collect`, `refresh`, `cameraClear`, `perceptionClear`, `perceived`, `concealed`, `distance`,
+// `register`, `body`, `collect`, `refresh`, `cameraClear`, `perceptionClear`, `perceived`, `concealed`, `distance`,
 // `inView`, `actorVisible`, `ownerBoundaryAt`. Providers (the pile, the platform, the mirror) join the same
 // registry through `create({ providers })`. Faces tagged `visibility: false`
 // are render-only decoration, omitted from all registry queries. sight-guides.js draws the result.
@@ -16,7 +16,7 @@
   // Scene coordinates and transforms are bounded. The fixed-arity norm avoids
   // the temporary numeric arguments in Chrome's variadic hypot hot path.
   const length3 = (x, y, z) => Math.sqrt(x * x + y * y + z * z);
-  const create = ({ roots, crew, actorRoots = [], exclude = [], providers = [], propsBlockActor = true, perceptionThrough = null }) => {
+  const create = ({ roots, crew, actorRoots = [], bodies: initialBodies = [], exclude = [], providers = [], propsBlockActor = true, perceptionThrough = null }) => {
     const excluded = new Set(exclude), geometries = new Map(), registered = [], seen = new Set(), entries = new Map(), ownerEntries = new Map(), ownerGroups = [];
     const aliases = new Map(), providerOwners = new Map(), descriptorUsers = new Map();
     for (const provider of providers) {
@@ -387,8 +387,9 @@
       }
       return group;
     };
-    const registerNode = (node, owner = node, character = -1) => {
-      if (node.sightHidden) return;
+    // `force` takes a separate body's own sightHidden root (and bed gear); its sightHidden effects below stay out.
+    const registerNode = (node, owner = node, character = -1, force = false) => {
+      if (node.sightHidden && !force) return;
       seen.add(node);
       if (aliases.has(node)) owner = aliases.get(node);
       if (character < 0 && characterRoots.has(owner)) character = characterRoots.get(owner);
@@ -489,10 +490,73 @@
       if (!characterRoots.has(node)) characterRoots.set(node, characterIndex++);
       registerNode(node, node, characterRoots.get(node));
     }
+    // Separate bodies (crew.js/clankers.js `separateBodies`): the driven Ooga or gorilla, a character as a roster one
+    // is, though never in the roster. Its root stays sightHidden so no scenery pass takes it; `body` registers it while
+    // it exists and forgets it before it is detached. A body made before this registry is passed in as `bodies`.
+    const bodies = new Set();
+    const registerBody = (body) => {
+      const root = body.root, character = characterRoots.get(root);
+      if (body.sleepWeapons) registerNode(body.sleepWeapons, root, character, true);
+      registerNode(root, root, character, true);
+      if (body.headOpen) reserveHead(body);
+    };
+    const addBody = (body) => {
+      if (!body || !body.root || bodies.has(body)) return false;
+      bodies.add(body);
+      if (!characterRoots.has(body.root)) characterRoots.set(body.root, characterIndex++);
+      registerBody(body);
+      return true;
+    };
+    for (const body of initialBodies) addBody(body);
     for (const node of roots) registerNode(node);
     for (const cave of crew.cavemen.values()) reserveHead(cave);
     resize();
     const register = (node, owner = node, character = -1) => { registerNode(node, owner, character); resize(); };
+    // Bakes count as they are made; after descriptors are pruned the metrics are taken again from those still held.
+    const measureBakes = () => {
+      stats.geometries = geometries.size; stats.triangles = stats.triangleBytes = stats.samples = 0;
+      for (const geometry of geometries.values()) if (geometry.ready) { stats.triangles += geometry.triangleIndices.length / 3; stats.triangleBytes += geometry.triangleIndices.byteLength; stats.samples += geometry.samples.length / 3; }
+    };
+    // Every entry the body's root owns goes, including one whose node left the body before this (only a refresh drops
+    // those otherwise). A descriptor stays while another entry or head still holds it, by identity: a ghost track's
+    // nodes wear their painted copies between frames, so their current geometry proves nothing.
+    const forgetBody = (body) => {
+      const root = body.root, dropped = new Set();
+      const unsee = (node) => { seen.delete(node); for (const child of node.children) unsee(child); };
+      unsee(root);
+      if (body.sleepWeapons) unsee(body.sleepWeapons);
+      if (body.headOpen) { dropped.add(geometries.get(body.headOpen)); dropped.add(geometries.get(body.headClosed)); }
+      let kept = 0;
+      for (let i = 0; i < registered.length; i++) {
+        const entry = registered[i];
+        if (entry.owner === root) {
+          dropped.add(entry.geometry); dropped.add(entry.boundsGeometry);
+          setEntryGeometry(entry, "geometry", null); setEntryGeometry(entry, "boundsGeometry", null);
+          entries.delete(entry.node); seen.delete(entry.node);
+        } else registered[kept++] = entry;
+      }
+      registered.length = kept;
+      for (let i = 0; i < kept; i++) { dropped.delete(registered[i].geometry); dropped.delete(registered[i].boundsGeometry); }
+      const keepHeads = (cave) => { dropped.delete(geometries.get(cave.headOpen)); dropped.delete(geometries.get(cave.headClosed)); };
+      for (const cave of crew.cavemen.values()) keepHeads(cave);
+      for (const other of bodies) if (other.headOpen) keepHeads(other);
+      for (const [geometry, descriptor] of geometries) if (dropped.has(descriptor)) {
+        descriptorUsers.get(descriptor)?.clear(); descriptorUsers.delete(descriptor); geometries.delete(geometry);
+      }
+      measureBakes();
+      const group = ownerEntries.get(root);
+      if (group) { ownerEntries.delete(root); ownerGroups.splice(ownerGroups.indexOf(group), 1); }
+      characterRoots.delete(root);
+      contoursPending = false; contourActor = contourRetained = null; contourRetainedCount = 0;
+      cameraPropEntry = cameraPropSource = null; cameraPropFace = cameraPropStamp = -1; cameraPropCount = 0;
+      emissionMembership.fill(null); emissionActor = null;
+    };
+    const body = (actor, on) => {
+      if (on ? !addBody(actor) : !actor || !bodies.delete(actor)) return false;
+      if (!on) forgetBody(actor);
+      resize();
+      return true;
+    };
     const visible = (node) => {
       if (!node.parent) return false;
       for (let p = node; p; p = p.parent) { if (!p.visible) return false; if (p === sceneRoot) return true; }
@@ -1760,6 +1824,10 @@
         visit(cave.root);
         if (cave.sleepWeapons) visit(cave.sleepWeapons);
       }
+      for (const body of bodies) {
+        visit(body.root);
+        if (body.sleepWeapons) visit(body.sleepWeapons);
+      }
       for (let i = registered.length - 1; i >= 0; i--) if (!live.has(registered[i].node)) {
         const entry = registered[i];
         setEntryGeometry(entry, "geometry", null); setEntryGeometry(entry, "boundsGeometry", null);
@@ -1776,14 +1844,18 @@
         registerNode(cave.root, cave.root, characterRoots.get(cave.root));
         wanted.add(cave.headOpen); wanted.add(cave.headClosed);
       }
+      // A body's head keeps both its open and closed descriptors, as a roster head does.
+      for (const body of bodies) {
+        registerBody(body);
+        if (body.headOpen) { wanted.add(body.headOpen); wanted.add(body.headClosed); }
+      }
       for (const node of roots) registerNode(node);
       for (const cave of crew.cavemen.values()) reserveHead(cave);
       for (const geometry of geometries.keys()) if (!wanted.has(geometry)) {
         const descriptor = geometries.get(geometry);
         descriptorUsers.get(descriptor)?.clear(); descriptorUsers.delete(descriptor); geometries.delete(geometry);
       }
-      stats.geometries = geometries.size; stats.triangles = stats.triangleBytes = stats.samples = 0;
-      for (const geometry of geometries.values()) if (geometry.ready) { stats.triangles += geometry.triangleIndices.length / 3; stats.triangleBytes += geometry.triangleIndices.byteLength; stats.samples += geometry.samples.length / 3; }
+      measureBakes();
       resize();
       stats.candidates = stats.occluders = stats.cameraOccluders = stats.nearOwners = 0;
     };
@@ -1791,7 +1863,7 @@
       contoursPending = false; contourActor = contourRetained = null; contourRetainedCount = 0;
       for (const users of descriptorUsers.values()) users.clear();
       descriptorUsers.clear();
-      registered.length = ownerGroups.length = 0; seen.clear(); entries.clear(); ownerEntries.clear(); aliases.clear(); providerOwners.clear(); geometries.clear(); characterRoots.clear();
+      registered.length = ownerGroups.length = 0; seen.clear(); entries.clear(); ownerEntries.clear(); aliases.clear(); providerOwners.clear(); geometries.clear(); characterRoots.clear(); bodies.clear();
       cameraCoverEntry = cameraCoverSource = null; cameraCoverFace = -1;
       cameraPropEntry = cameraPropSource = null; cameraPropFace = cameraPropStamp = -1; cameraPropCount = 0;
       ignoredPerceptionOwner = null;
@@ -1802,7 +1874,7 @@
       stats.geometries = stats.registered = stats.candidates = stats.occluders = stats.cameraOccluders = stats.triangles = stats.triangleBytes = stats.samples = stats.owners = stats.nearOwners = 0;
       stats.boundaryGridBytes = stats.boundaryGridReferences = 0;
     };
-    return { collect, clear, perceptionClear, cameraClear, cameraBoundsState, perceived, concealed, distance, inView, getProvider, ownerClear, actorVisible, actorFullyVisible, ownerBoundaryAt, register, refresh, dispose, stats, result };
+    return { collect, clear, perceptionClear, cameraClear, cameraBoundsState, perceived, concealed, distance, inView, getProvider, ownerClear, actorVisible, actorFullyVisible, ownerBoundaryAt, register, body, refresh, dispose, stats, result };
   };
   BL.objectGuides = { create };
 })();

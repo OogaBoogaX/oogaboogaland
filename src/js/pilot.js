@@ -232,7 +232,7 @@
     const firstOnly = !!(close && close.only);
     const handoff = cameraHandoff(camera, renderer);
     let solvingHandoff = false;
-    let crew = null, fx = null, input = null, reticleTarget = null, active = true;
+    let crew = null, fx = null, input = null, reticleTarget = null, liveTarget = null, active = true;
     let ownAccount = null, ownCrew = null, ownOoga = null;
     const syncOwnOoga = () => {
       const account = BL.net.state.me;
@@ -291,6 +291,7 @@
       crew = systems.crew;
       input = systems.input;
       reticleTarget = systems.reticleTarget || null;
+      liveTarget = systems.liveTarget || null;
       sightClear = systems.fireReachable || null;
       cursorClear = systems.cursorReachable || sightClear;
       aimSurface = systems.aimSurface || null;
@@ -334,7 +335,7 @@
     const assistedTargetScreen = { x: 0, y: 0 }, aimProjection = new Float64Array(3), aimCenter = new Float64Array(3);
     const targetOrigin = { x: 0, y: 0, z: 0 };
     let targetWait = 0, targetPrimary = false, targetActive = false, hitRemaining = 0, hitStrength = 0;
-    let combatTooltipCave = null, combatTooltipText = "";
+    let combatTooltipCave = null, combatTooltipText = "", combatTooltipNoDot = false;
     let assistedTargetActive = false, assistedTargetInRange = false, assistedTargetClose = false, assistedTargetDistance = Infinity, assistedTargetWait = 0, assistedReticleX = NaN, assistedReticleY = NaN;
     const targetFeedback = (type) => {
       if (reticle.dataset.target !== type) reticle.dataset.target = type;
@@ -342,6 +343,8 @@
     const feedbackType = (hit) => {
       if (!hit || !hit.owner) return "none";
       const kind = hit.owner.kind;
+      // An NPC ghost track (npc-ghosts.js) is a roster NPC drawn while its player drives a separate body: never a target.
+      if ((kind === "clanker" || kind === "caveman") && hit.owner.cave.ghostTrack) return "none";
       if (kind === "clanker" || kind === "agent") return "friendly";
       if (kind === "caveman") return hit.type;
       if (kind === "crate") return "object";
@@ -352,11 +355,26 @@
     const setCombatTooltip = (hit) => {
       const owner = hit && hit.owner, gorilla = owner && owner.kind === "clanker";
       const cave = owner && (gorilla || owner.kind === "caveman") ? owner.cave : null;
+      // A ghost gorilla shows its online dot, as a ghost Ooga does; a gorilla turning ghost or solid under the
+      // crosshair changes the dot without the target changing.
+      const noDot = !!gorilla && !cave.ghostTrack;
       if (cave !== combatTooltipCave) combatTooltipText = cave ? gorilla ? `🦍 ${owner.entry.owner.traits.display}` : cave.traits.display : "";
-      else if (!cave || !hud.el.tooltip.hidden && hud.el.tooltipText.textContent === combatTooltipText) return;
+      else if (!cave || noDot === combatTooltipNoDot && !hud.el.tooltip.hidden && hud.el.tooltipText.textContent === combatTooltipText) return;
       combatTooltipCave = cave;
-      if (cave) hud.tooltip.show(combatTooltipText, 0, 0, cave, !!gorilla);
+      combatTooltipNoDot = noDot;
+      if (cave) hud.tooltip.show(combatTooltipText, 0, 0, cave, noDot);
       else hud.tooltip.hide();
+    };
+    // A live remote player in front of what the crosshair found, or anywhere along it when it found nothing (the scene's
+    // `liveTarget`, which never tests the visitor's own body): the dot turns friendly and the name behind it goes.
+    const liveInFront = (ox, oy, oz, dx, dy, dz) => {
+      if (!liveTarget) return false;
+      const limit = targetActive ? targetHit.distance : 60, live = liveTarget(ox, oy, oz, dx, dy, dz, limit);
+      if (targetActive ? !(live < limit) : live === Infinity) return false;
+      targetActive = false;
+      targetFeedback("friendly");
+      setCombatTooltip(null);
+      return true;
     };
     const clearFeedback = () => {
       targetWait = hitRemaining = hitStrength = 0;
@@ -988,11 +1006,14 @@
             cursorRay.ox + (targetHit.x - cursorRay.ox) * near, cursorRay.oy + (targetHit.y - cursorRay.oy) * near,
             cursorRay.oz + (targetHit.z - cursorRay.oz) * near, targetHit.node, true)) targetActive = false;
         }
+        if (liveInFront(cursorRay.ox, cursorRay.oy, cursorRay.oz, cursorRay.dx, cursorRay.dy, cursorRay.dz)) return;
         targetFeedback(targetActive ? feedbackType(targetHit) : "none");
         setCombatTooltip(targetActive ? targetHit : null);
         return;
       }
       targetActive = resolveReticleTarget(targetHit, cave, primary, true);
+      const eye = camera.position;
+      if (cameraTargets() && liveInFront(eye.x, eye.y, eye.z, camera.target.x - eye.x, camera.target.y - eye.y, camera.target.z - eye.z)) return;
       targetFeedback(targetActive ? feedbackType(targetHit) : "none");
       setCombatTooltip(targetActive ? targetHit : null);
     };

@@ -21,6 +21,10 @@
 // every mallet and tap at once when the visitor's voice group changes: the visitor's own club tap (`crew.cancelThump`)
 // and a chest beat only while a thump started it (`beatOwned`), through the rig's own interrupt (`motion.workExit`).
 // A beat begun by anything else is left alone.
+// `pick` finds the nearest live body along a sight line, mesh by mesh, through a weapon-target list of the pool's own
+// (never the scene's input targets, so a live player is seen by a view's crosshair without being tapped, possessed,
+// struck or shot); a body that is not shown (another zone, the visitor's own name) is never found, and the scene's
+// optional `clear` refuses one behind its rock.
 // One pool per scene visit: `create` in enter, `dispose` in leave, before the crew's.
 (() => {
   "use strict";
@@ -53,6 +57,10 @@
   const BAR_FILL = "#d8892b", BAR_KO = "#e5533d", ICON_IDLE = "#a6a6a2", ICON_SPEAKING = "#22c55e", ICON_MUTED = "#e5533d";
   // A chat line stays up this long once said through.
   const CHAT_SAY = 4;
+  // A sight test stops this short of a picked body's surface, so the body itself never blocks it.
+  const PICK_MARGIN = 0.035;
+  // An unused pick slot: no geometry, so the picker passes it over before reading anything else.
+  const IDLE_PICK = { geometry: null, visible: false }, IDLE_OWNER = { kind: "none", weaponType: "none" };
   // x, y, w, h runs on the speaker's 9x9 grid, as the roster's voice mark draws it.
   const SPEAKER = [0, 3, 2, 3, 2, 2, 1, 5, 3, 1, 1, 7];
   const WAVES = [5, 3, 1, 3, 7, 2, 1, 5];
@@ -82,6 +90,31 @@
     // `dx`, `dz` and `dy` are what the body's feet and top did in the last update, which a player on its head rides.
     const actorPool = Array.from({ length: MAX }, () => ({ id: null, player: true, x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0, radius: BODY_RADIUS, height: BODY_HEIGHT }));
     const actorList = [];
+    // Every shown mesh under each body, for `pick` alone, gathered afresh from the bodies' graphs at each pick: gear put
+    // on after a body was built (a jetpack, a gun, a magazine, anything nested under them) counts at once, and a part
+    // taken off, moved under another node or replaced drops out, since only what hangs under a body standing in this
+    // scene is gathered. Slots are reused in place; every slot past the last gathered holds `IDLE_PICK`, so the list
+    // keeps no old part alive and never shrinks or reallocates once it has grown to the most meshes the bodies have shown.
+    const pickTargets = [], picker = BL.weaponTargets.create(pickTargets);
+    let pickCount = 0;
+    const gatherPicks = (node, owner) => {
+      if (!node.visible) return;
+      // Instanced batches (breath puffs) are effects, not the body.
+      if (node.geometry && !node.instanceData) {
+        if (pickCount === pickTargets.length) pickTargets.push({ node, owner, radius: 0 });
+        else { const slot = pickTargets[pickCount]; slot.node = node; slot.owner = owner; }
+        pickCount++;
+      }
+      for (const child of node.children) gatherPicks(child, owner);
+    };
+    const idlePicks = (from) => {
+      for (let i = from; i < pickTargets.length; i++) { const slot = pickTargets[i]; slot.node = IDLE_PICK; slot.owner = IDLE_OWNER; }
+    };
+    const syncPicks = () => {
+      pickCount = 0;
+      for (const entry of bodies.values()) if (entry.cave.root.parent === root) gatherPicks(entry.cave.root, entry.pickOwner);
+      idlePicks(pickCount);
+    };
 
     // The crew's Ooga of this name goes away while a remote drives it; its own override comes back after.
     const hideLocal = (entry) => {
@@ -147,7 +180,7 @@
       addChild(root, cave.root);
       const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0, workExit: false } : null;
       const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, jetNode: null, jetFlame: null, swing: 0, shotAt: -Infinity, lastHeld: 0, lastMode: 0, lastMelee: 0, sampleAt: 0, sampleMelee: 0, sampleFlags: 0, sampleSwap: 0, sampleSwapIndex: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, ghosted: null, label: "", labelW: 0,
-        still: false, thumpT: 0, icon: 0, screenX: NaN, beatOwned: false };
+        still: false, thumpT: 0, icon: 0, screenX: NaN, beatOwned: false, pickOwner: { kind: "player", id: rec.id, cave, weaponType: "none" } };
       bodies.set(rec.id, entry);
       hideLocal(entry);
       return entry;
@@ -155,6 +188,9 @@
 
     const drop = (entry) => {
       if (entry.cave.restEquipment) entry.cave.restEquipment.release(entry.cave);
+      // Its slots let go of its parts now, not at the next pick.
+      idlePicks(0);
+      pickCount = 0;
       if (fx) fx.hush(entry.cave);
       if (entry.gorilla) entry.cave.dispose();
       else removeChild(root, entry.cave.root);
@@ -380,6 +416,24 @@
 
     const actors = () => actorList;
 
+    // The nearest shown live body along the ray within `maxDistance` (`out` as a weapon-target hit, its owner's `kind`
+    // "player", `id` and `cave`), or false. With `clear(x, y, z, toX, toY, toZ)` a body is found only when the line to
+    // just short of its surface is clear.
+    // A miss leaves nothing behind in `out`: no node or body to outlive the pool.
+    const missed = (out) => {
+      out.node = out.owner = null; out.type = "none"; out.distance = Infinity;
+      return false;
+    };
+    const pick = (out, ox, oy, oz, dx, dy, dz, maxDistance, clear = null) => {
+      syncPicks();
+      if (!pickCount || !picker.ray(out, ox, oy, oz, dx, dy, dz, maxDistance, null, null, true)) return missed(out);
+      if (clear) {
+        const near = Math.max(0, out.distance - PICK_MARGIN) / Math.hypot(dx, dy, dz);
+        if (!clear(ox, oy, oz, ox + dx * near, oy + dy * near, oz + dz * near)) return missed(out);
+      }
+      return true;
+    };
+
     // The head's top on screen and its middle across, from the corners of every visible mesh under the head as the
     // last frame drew them; false when none projects.
     let headMinX = Infinity, headMaxX = -Infinity, headTop = Infinity;
@@ -542,7 +596,7 @@
       return false;
     };
 
-    const pool = { update, actors, drawNames, liveGeometry, stats, setUnderlying, thumped, clearThumps, dispose, body: id => bodies.get(id)?.cave || null };
+    const pool = { update, actors, pick, drawNames, liveGeometry, stats, setUnderlying, thumped, clearThumps, dispose, body: id => bodies.get(id)?.cave || null };
     return pool;
   };
   const thumped = (id) => activePool ? activePool.thumped(id) : null;
