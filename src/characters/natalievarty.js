@@ -140,7 +140,8 @@
       crown(k, v) {
         const H = k.P.hair, D = k.P.hairDk;
         // Up off the neck: trim the long back and sides to the jaw.
-        for (let x = -1; x <= 7; x++) for (let y = -5; y <= 0; y++) for (let z = -2; z <= 4; z++) v.del(x, y, z);
+        // Hair only: the head block's own bottom layer (x 0..6, z 0..5 at y 0) stays, so the jaw stays closed.
+        for (let x = -1; x <= 7; x++) for (let y = -5; y <= 0; y++) for (let z = -2; z <= 4; z++) if (y < 0 || x < 0 || x > 6 || z < 0) v.del(x, y, z);
         // A round bun high on the back of the head.
         v.fill(1, 5, 5, 8, -4, -3, H);
         v.fill(2, 4, 6, 7, -5, -5, D);

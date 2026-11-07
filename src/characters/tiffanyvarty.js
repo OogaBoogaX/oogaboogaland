@@ -97,14 +97,16 @@
         const u = k.u, boot = "#141416", sole = "#2a2a2e";
         // Short black boots with a pink bow on each toe.
         const bow = "#ff6fa8", knot = "#e23a72";
+        // The stock foot under it runs from the heel at z -2.5u to the toes' front at 4.5u: the boot reaches 0.2u past
+        // both (-2.7u to 4.7u), so no skin pokes through and no face of it lies flush with the boot's.
         const bootGeo = merge(
-          box({ w: 4.3 * u, h: 2.2 * u, d: 6.6 * u, color: boot, offset: { y: -3.9 * u, z: 0.8 * u } }),
-          box({ w: 4.4 * u, h: 0.4 * u, d: 6.7 * u, color: sole, offset: { y: -4.9 * u, z: 0.8 * u } }),
-          box({ w: 1.3 * u, h: 1.1 * u, d: 0.4 * u, color: bow, offset: { x: -0.85 * u, y: -3.2 * u, z: 4.25 * u } }),
-          box({ w: 1.3 * u, h: 1.1 * u, d: 0.4 * u, color: bow, offset: { x: 0.85 * u, y: -3.2 * u, z: 4.25 * u } }),
-          box({ w: 0.6 * u, h: 0.6 * u, d: 0.55 * u, color: knot, offset: { y: -3.2 * u, z: 4.3 * u } }),
-          box({ w: 0.35 * u, h: 0.8 * u, d: 0.35 * u, color: bow, offset: { x: -0.4 * u, y: -3.85 * u, z: 4.3 * u } }),
-          box({ w: 0.35 * u, h: 0.8 * u, d: 0.35 * u, color: bow, offset: { x: 0.4 * u, y: -3.85 * u, z: 4.3 * u } })
+          box({ w: 4.3 * u, h: 2.2 * u, d: 7.4 * u, color: boot, offset: { y: -3.9 * u, z: 1 * u } }),
+          box({ w: 4.4 * u, h: 0.4 * u, d: 7.5 * u, color: sole, offset: { y: -4.9 * u, z: 1 * u } }),
+          box({ w: 1.3 * u, h: 1.1 * u, d: 0.4 * u, color: bow, offset: { x: -0.85 * u, y: -3.2 * u, z: 4.85 * u } }),
+          box({ w: 1.3 * u, h: 1.1 * u, d: 0.4 * u, color: bow, offset: { x: 0.85 * u, y: -3.2 * u, z: 4.85 * u } }),
+          box({ w: 0.6 * u, h: 0.6 * u, d: 0.55 * u, color: knot, offset: { y: -3.2 * u, z: 4.9 * u } }),
+          box({ w: 0.35 * u, h: 0.8 * u, d: 0.35 * u, color: bow, offset: { x: -0.4 * u, y: -3.85 * u, z: 4.9 * u } }),
+          box({ w: 0.35 * u, h: 0.8 * u, d: 0.35 * u, color: bow, offset: { x: 0.4 * u, y: -3.85 * u, z: 4.9 * u } })
         );
         addChild(k.parts.legR, createNode({ geometry: bootGeo }));
         addChild(k.parts.legL, createNode({ geometry: bootGeo }));
