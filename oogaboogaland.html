@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-0zVDse6HZ+VfZ6Y1Y093ooI2S35XdnMFklKJ8Vf8Ukw=' 'sha256-sanX5MbaJsCDbCwTY/of/YGafQiCdZL/L7L3rJ+Xr9w='; style-src 'sha256-FRykhZSOS+qUT6IMmPIQgDkSNAW7pzIyPb7FY5uWmOo='; img-src 'self' data:; media-src 'self' https://stream.noderunnersradio.com; connect-src 'self' https: wss:; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-8Z4XU55AXyxUwChH6q6ow6niRCt5eemb/HvRZdsyU3o=' 'sha256-sanX5MbaJsCDbCwTY/of/YGafQiCdZL/L7L3rJ+Xr9w='; style-src 'sha256-FRykhZSOS+qUT6IMmPIQgDkSNAW7pzIyPb7FY5uWmOo='; img-src 'self' data:; media-src 'self' https://stream.noderunnersradio.com; connect-src 'self' https: wss:; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -76183,7 +76183,7 @@ void main() {
   const BL = window.BL = window.BL || {};
   const TIMEOUT_MS = 20000;
   // How each group shows it has arrived: the module that runs last in it.
-  const PRESENT = { "terrain-cache": () => !!BL.terrainCache, "lab-wallpaper": () => !!BL.labWallpaper?.src, canvas: () => !!BL.canvasRenderer, timechain: () => !!BL.timechainInterior, dsb: () => !!BL.dsbCollision, arcade: () => !!BL.carnivalAudio, poker: () => !!BL.pokerHud, drop: () => !!BL.dropAudio,
+  const PRESENT = { "cloud-hopper": () => !!BL.cloudHopper, "terrain-cache": () => !!BL.terrainCache, "lab-wallpaper": () => !!BL.labWallpaper?.src, canvas: () => !!BL.canvasRenderer, timechain: () => !!BL.timechainInterior, dsb: () => !!BL.dsbCollision, arcade: () => !!BL.carnivalAudio, poker: () => !!BL.pokerHud, drop: () => !!BL.dropAudio,
     race: () => !!BL.raceAudio, mine: () => !!BL.mineCrew, orbit: () => !!BL.rocketAudio, whitepaper: () => !!(BL.whitepaperPoster && BL.whitepaperPages),
     // HALLOWEEN: the arcade's ghost hunt, and each track of its playlist.
     halloween: () => !!BL.halloween, ...Object.fromEntries(["boss", "colt", "martial", "nightmare", "synthed", "nr"].map((k) => [`halloween-track-${k}`, () => !!(BL.ghostMusic && BL.ghostMusic[k])])) };
@@ -76262,7 +76262,7 @@ void main() {
   // Hover/proximity can recur every frame. Attach just one completion handler, and back off optional failures;
   // a deliberate prepare still retries immediately through load().
   const prefetch = (group) => {
-    if (typeof PRESENT[group] !== "function" || document.hidden || PRESENT[group]() || prefetching.has(group) || Date.now() < (retryAt.get(group) || 0)) return;
+    if (typeof PRESENT[group] !== "function" || globalThis.navigator?.connection?.saveData || document.hidden || PRESENT[group]() || prefetching.has(group) || Date.now() < (retryAt.get(group) || 0)) return;
     prefetching.add(group);
     const loading = load(group);
     if (loading) loading.then(() => { prefetching.delete(group); retryAt.delete(group); }, () => {
@@ -94280,6 +94280,30 @@ void main() {
   BL.hockeyPlayers = { create };
 })();
 
+// ---- js/ghost-style.js ----
+// Shared ghost geometry for island NPC tracks and deferred Cloud Hopper replays.
+// Kept eager so island ghosts do not depend on downloading the optional game.
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const style = (source) => {
+    const geometry = BL.models.merge(source);
+    for (const face of geometry.faces) {
+      const light = (face.color[0] + face.color[1] + face.color[2]) / 765;
+      face.color = [105 + light * 50, 190 + light * 45, 225 + light * 30];
+      face.emissive = 0.35;
+    }
+    for (const line of geometry.lines) line.color = [150, 225, 255];
+    geometry.smooth = source.smooth;
+    if (source.normals) geometry.normals = source.normals;
+    geometry.glass = 0.3;
+    geometry.castShadow = false;
+    geometry.characterPart = true;
+    return geometry;
+  };
+  BL.ghostStyle = style;
+})();
+
 // ---- js/cloud-hopper-course.js ----
 // Cloud Hopper's seeded course and falling pickups; no scene or render state.
 (() => {
@@ -95908,7 +95932,10 @@ void main() {
       if (!panel.open) return;
       panel.close();
       panel.hidden = true;
-      if (previousFocus?.isConnected && typeof previousFocus.focus === "function") previousFocus.focus({ preventScroll: true });
+      // Starting a run hands the keyboard to the world. Restoring a sheet control here makes
+      // controls.uiKey consume Escape and movement throughout the ascent.
+      const focus = (phase === "lifting" || phase === "ready" || phase === "running" ? document.getElementById("scene") : null) || previousFocus;
+      if (focus?.isConnected && typeof focus.focus === "function") focus.focus({ preventScroll: true });
       previousFocus = null;
     };
     let sharedScores = null, submissions = [], sharedStatus = "loading", localScores = [], localLatest = null;
@@ -96273,21 +96300,7 @@ void main() {
   const NODE_STRIDE = 14, STRIDE = 1 + PARTS.length * NODE_STRIDE, SAMPLE_SECONDS = 0.05, MAX_SAMPLES = 12001;
   // The replay ghost's look, shared with the island's NPC ghost tracks (npc-ghosts.js): a fresh cyan, glassy,
   // shadowless copy of one geometry with its normals kept. The source is never changed; the caller owns the copy.
-  const style = (source) => {
-    const geometry = BL.models.merge(source);
-    for (const face of geometry.faces) {
-      const light = (face.color[0] + face.color[1] + face.color[2]) / 765;
-      face.color = [105 + light * 50, 190 + light * 45, 225 + light * 30];
-      face.emissive = 0.35;
-    }
-    for (const line of geometry.lines) line.color = [150, 225, 255];
-    geometry.smooth = source.smooth;
-    if (source.normals) geometry.normals = source.normals;
-    geometry.glass = 0.3;
-    geometry.castShadow = false;
-    geometry.characterPart = true;
-    return geometry;
-  };
+  const style = BL.ghostStyle;
   const create = ({ root, renderer }) => {
     const rotation = quat.create(), nextRotation = quat.create(), sourceNodes = new Array(PARTS.length);
     const readyRotation = quat.create(), readyPosition = { x: 0, y: 0, z: 0 }, screen = { x: 0, y: 0 };
@@ -100343,7 +100356,7 @@ void main() {
 // own, crew.js/clankers.js `separateBodies`, or another page's, shown by remote-players.js), the roster NPC of that
 // name stays the same object on its own track: its route, fire seat, bed, work and status beams go on as before,
 // an Ooga through the room's one NPC host, a gorilla companion on each page from that host's Ooga states and plan/hit
-// events (npc-sync.js carries no companion poses). It is only drawn as a Cloud Hopper replay ghost (`cloudHopperGhost.style`: cyan,
+// events (npc-sync.js carries no companion poses). It is only drawn as a Cloud Hopper replay ghost (`ghostStyle`: cyan,
 // glassy, shadowless), and its harmless work rounds fly in the same colour (`shotLook`). Nothing here moves an
 // actor, reserves or frees a seat or bed, changes collision or authority, or sets `humanControlled`/`remoteControlled`;
 // the one mark is `ghostTrack`, which the roster dot, possession refusals and the work-round presentation read.
@@ -100365,7 +100378,7 @@ void main() {
     const twin = (source) => {
       let geometry = twins.get(source);
       if (!geometry) {
-        geometry = BL.cloudHopperGhost.style(source);
+        geometry = BL.ghostStyle(source);
         // HALLOWEEN: a straight round keeps pointing along its line.
         if (source.straight) geometry.straight = true;
         twins.set(source, geometry); sources.set(geometry, source);
@@ -109044,7 +109057,7 @@ void main() {
   const update = (dt, elapsed) => {
     // Every system reads the real models; the ghosts are painted back once the frame's poses are final.
     npcGhosts.restore();
-    cloudHopper.preUpdate(dt);
+    cloudHopper?.preUpdate(dt);
     if (cloudPlaying()) {
       cloudMask();
       Object.assign(cloudPile.position, pile.core.position);
@@ -109242,8 +109255,8 @@ void main() {
       // The doorway's walks steer the Ooga before the crew moves it.
       if (!cloudPlaying()) timechainIsland.gate.update(dt);
     }
-    if (!cloudHopper.held) crew.update(dt, elapsed);
-    cloudHopper.postUpdate();
+    if (!cloudHopper?.held) crew.update(dt, elapsed);
+    cloudHopper?.postUpdate();
     if (hammock) {
       hammock.settle(BL.net.remotes, BL.net.state.selfId, remoteShown, moveHammockSeat, leaveFullHammock);
       // Sample once so the CPU suspension ends and GPU palm/wrap sway share a clock.
@@ -109281,13 +109294,13 @@ void main() {
     updateLazyBedding();
     pile.update(dt);
     const player = pilot.player;
-    if (player && !cloudHopper.active && !pilot.poseHeld && player.root.position.y - player.baseY < ABYSS_RESPAWN_Y && abyssAt(player.root.position.x, player.root.position.z, player.root.position.y - player.baseY)) {
+    if (player && !cloudHopper?.active && !pilot.poseHeld && player.root.position.y - player.baseY < ABYSS_RESPAWN_Y && abyssAt(player.root.position.x, player.root.position.z, player.root.position.y - player.baseY)) {
       loseAbyssAmmo(player);
       respawnAtPile();
     }
     else if (!player && !pilot.poseHeld && pilot.freeFalling && camera.position.y - CLOSE_VIEW.eyeHeight < ABYSS_RESPAWN_Y && abyssAt(camera.position.x, camera.position.z, camera.position.y - CLOSE_VIEW.eyeHeight)) respawnAtPile();
     updatePlayerCave(player);
-    if (player && player.jet && !cloudHopper.held && !jetpackAllowed(player)) {
+    if (player && player.jet && !cloudHopper?.held && !jetpackAllowed(player)) {
       crew.removeJetpack(player);
       pilot.showAct();
       hud.toast("No jetpacks under ground");
@@ -109326,13 +109339,13 @@ void main() {
     if (chalkboard.waiting && chalkboardRefusal()) chalkboard.close();
     if (chalkboard.openNow) { if (chalkboardRefusal()) chalkboard.close(); }
     else if (clankerPlay.active) clankerPlay.update(dt);
-    else if (!cloudHopper.fallView()) pilot.update(dt);
+    else if (!cloudHopper?.fallView()) pilot.update(dt);
     // Whitepaper events wait while Cloud Hopper owns the camera.
-    if (!cloudHopper.active) wpUpdate(dt);
+    if (!cloudHopper?.active) wpUpdate(dt);
     // The doorway's views (the keypad's, the swoop into the eyes and back out) take over from the pilot's.
     if (!cloudPlaying()) timechainIsland.gate.view(dt);
     // Tess moves after the view is set, so a tour's glide has the last word on it.
-    if (!cloudHopper.active) islandGuide.update(dt, elapsed);
+    if (!cloudHopper?.active) islandGuide.update(dt, elapsed);
     shareDrivenPose();
     timechainIsland.site.view(camera.position);
     for (let i = 0; i < signDetails.length; i++) {
@@ -112191,7 +112204,7 @@ void main() {
       updatePositionDebug(true);
     }
     updatePoolEffectsActivity();
-    if (ctx.from === "arcade" && ctx.place === "cloud-hopper") cloudHopper.launch(true);
+    if (ctx.from === "arcade" && ctx.place === "cloud-hopper") ensureCloudHopper(ctx).launch(true);
   };
   // Prepare only raw character rigs: the published crew, its stable roster order, input, health and NPC/remote
   // registration are still created together by enter. No partly populated actor registry reaches a live scene.
@@ -113372,6 +113385,31 @@ void main() {
     yield* pause(slice);
     cloudRememberNodes(cloudNodeStart);
     createGoldbug();
+    Object.defineProperty(hubScene.debug, "cloudHopper", { enumerable: true, get: () => cloudHopper });
+    // Explicit setup for the portable engine fixtures; observation never builds a game.
+    hubScene.debug.prepareCloudHopper = () => models.withScope("hub", () => ensureCloudHopper(ctx));
+    hubScene.debug.tess = islandGuide;
+    // Tess wears every tier of her detail in her first frames, so each is on the GPU before she comes close: build
+    // them here, a mesh a slice, rather than in her first frame.
+    const tessTiers = new Set();
+    islandGuide.liveGeometry(tessTiers);
+    for (const geometry of tessTiers) { renderer.prepareGeometry(geometry); yield* pause(slice); }
+    mark("visibility-start");
+    fx.warmVisibility(crew);
+    fx.warmBlockers();
+    mark("visibility");
+    mark("covered-view-start");
+    yield* prepareCoveredView(ctx.overlay, slice);
+    mark("covered-view");
+    totemUnsub = BL.totemFeed.subscribe(onTotem);
+    if (ctx.from === "arcade" && ctx.place === "cloud-hopper") ensureCloudHopper(ctx).launch(true);
+    if (DEBUG_GORILLA_MOVE) hud.toast("Gorilla movement debug · click a gorilla, then a destination");
+  };
+  // The cabinet is Cloud Hopper's only entrance. Its dormant game graphs, HUD,
+  // weather and sound belong to the hub visit, but are installed only on demand.
+  const ensureCloudHopper = ctx => {
+    if (cloudHopper) return cloudHopper;
+    mark("cloud-hopper-start");
     cloudIsland = BL.cloudHopperIsland.create({ root, island, solids });
     cloudPile = createNode({ geometry: pile.core.geometry });
     cloudPileSolids = BL.solidProps.create(); cloudPileSolids.add(cloudPile);
@@ -113396,23 +113434,8 @@ void main() {
       refusal: () => gameMode ? "Finish the island event before playing Cloud Hopper"
         : wpTime >= 0 || wpRead || wpReturn >= 0 || islandGuide.holding || entering || factoryHeld || factoryDeparting || bifrostDeparting
           ? "Finish the current tour before playing Cloud Hopper" : clankerPlay.active ? "Choose an Ooga to play Cloud Hopper" : null });
-    hubScene.debug.cloudHopper = cloudHopper;
-    hubScene.debug.tess = islandGuide;
-    // Tess wears every tier of her detail in her first frames, so each is on the GPU before she comes close: build
-    // them here, a mesh a slice, rather than in her first frame.
-    const tessTiers = new Set();
-    islandGuide.liveGeometry(tessTiers);
-    for (const geometry of tessTiers) { renderer.prepareGeometry(geometry); yield* pause(slice); }
-    mark("visibility-start");
-    fx.warmVisibility(crew);
-    fx.warmBlockers();
-    mark("visibility");
-    mark("covered-view-start");
-    yield* prepareCoveredView(ctx.overlay, slice);
-    mark("covered-view");
-    totemUnsub = BL.totemFeed.subscribe(onTotem);
-    if (ctx.from === "arcade" && ctx.place === "cloud-hopper") cloudHopper.launch(true);
-    if (DEBUG_GORILLA_MOVE) hud.toast("Gorilla movement debug · click a gorilla, then a destination");
+    mark("cloud-hopper-ready");
+    return cloudHopper;
   };
   const enter = (ctx) => { const steps = enterSteps(ctx); while (!steps.next().done); };
   // The scene a departure was heading for could not be prepared (its deferred code did not arrive): the visitor stays on
@@ -113718,6 +113741,7 @@ void main() {
     }
   };
   BL.scenes = BL.scenes || {};
+  hubScene.prepare = place => place === "cloud-hopper" ? BL.deferred.load("cloud-hopper") : null;
   hubScene.buildSteps = prepareHubSteps;
   hubScene.controlsHelp = touch => {
     const H = BL.controlsHelp;
@@ -152195,7 +152219,7 @@ void main() {
       // Nothing through a wall or a floor: no tooltip, and no game started by a tap.
       onHover: (hit, p) => {
         if (hit && !inView(hit)) hit = null;
-        if (hit?.owner.kind === "cabinet" && GAMES[hit.owner.game] && !GAMES[hit.owner.game].unavailable && GAMES[hit.owner.game].id !== "cloud-hopper") BL.deferred.prefetchScene(GAMES[hit.owner.game].id);
+        if (hit?.owner.kind === "cabinet" && GAMES[hit.owner.game] && !GAMES[hit.owner.game].unavailable) BL.deferred.prefetchScene(GAMES[hit.owner.game].id);
         if (hit) hud.tooltip.show(tipFor(hit), p.x, p.y);
         else hud.tooltip.hide();
       },
@@ -152385,7 +152409,7 @@ void main() {
       const p = pilot.player ? pilot.player.root.position : camera.position;
       for (let i = 0; i < live.length; i++) {
         const c = live[i], dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
-        if (GAMES[c.game] && !GAMES[c.game].unavailable && GAMES[c.game].id !== "cloud-hopper" && dx * dx + dy * dy + dz * dz <= 225) BL.deferred.prefetchScene(GAMES[c.game].id);
+        if (GAMES[c.game] && !GAMES[c.game].unavailable && dx * dx + dy * dy + dz * dz <= 225) BL.deferred.prefetchScene(GAMES[c.game].id);
       }
     }
     if (!leaving) pilot.readInput(dt);
@@ -197291,7 +197315,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   const UNFOCUSED_INTERVAL = 1000 / 30;
   let lastRender = 0;
   let renderedFrames = 0;
-  let firstDraw = false;
+  let firstDraw = false, firstPlayable = false;
   // A first visit opens the Bananas panel a beat after the curtain (0.9 s) has parted on the world (`sheet.welcome`),
   // unless the visitor chose a panel, left the scene or began a game meanwhile. Quiet `nosim` pages (the suite, the
   // cards) opt out unless `welcome=1` asks; `welcome=0` turns it off anywhere.
@@ -197334,6 +197358,10 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     if (!helpHeld) agentPlay.update(sceneDt);
     updateWorldClock(now);
     const drawn = renderer.render(active.root, active.camera, active.renderOpts, activeMeshRigs);
+    if (drawn && !firstPlayable && !curtain.isConnected && !inputHeld && !transition) {
+      firstPlayable = true;
+      mark("first-playable");
+    }
     if (drawn && !firstDraw) {
       firstDraw = true;
       mark("drawn");
@@ -197684,6 +197712,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
         bootFailed(error); return;
       }
     } else window.BL.buildTasks.measure(() => { enter(first, place); finishBootDonations(); });
+    mark("core-ready");
     mark("ready");
     // A restored island counts as the build it replaced, so the cache never starts a device a tier higher.
     tierFromBoot(window.BL.buildTasks.cpu - constructionCPU - uploadCPU + (window.BL.terrainCache?.stats.credit || 0));

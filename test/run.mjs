@@ -4455,6 +4455,16 @@ const deferredLoadingChecks = async () => {
     return { BL, shell, scripts, links, base, baseGroup, baseFile, timeout, timers, probes, context };
   };
   const rejected = promise => promise.then(() => false, () => true);
+  {
+    const f = fixture();
+    f.context.navigator = { connection: { saveData: true } };
+    f.BL.deferred.prefetchScene("drop");
+    const quiet = !f.scripts().length && !f.links().length;
+    const pending = f.BL.deferred.load("drop");
+    const deliberate = f.scripts().length === 1;
+    f.base(); await pending;
+    rows.push({ path: "Save-Data suppresses speculation but permits deliberate play", ok: quiet && deliberate && f.BL.deferred.present("drop") });
+  }
   // A failed prerequisite never starts its scene; repeated retries must not grow the DOM. Only an error moves the
   // address on: a timed-out copy may still arrive, and the retry must not fetch a second one under a new address.
   {
@@ -9534,6 +9544,36 @@ const factoryHostedShield = { name: "factory hosted shield", refuse: "/js/factor
   const entered = await untilPage(b, 'B.scene === "factory" && !B.transitioning', 15000);
   record("factory hosted: a refused factory download sends the Ooga back once, driving, until it steps out of the shield, and walking back in opens the hall", notified && refused.asked >= 1 && refused.asked <= 2 && refused.scene === "hub" && !refused.transitioning && refused.driving && entered && asked() > refused.asked, JSON.stringify({ notified, refused, entered, fetched: site.fetched }));
 } };
+// The hub reaches first play without constructing an unrelated cabinet game.
+const hubHostedOptionalGame = { name: "hub hosted optional game", refuse: "/js/cloud-hopper-", why: "rule: an island visit leaves Cloud Hopper unloaded, and its real cabinet can recover from a refused download without losing its actor", run: async (b, site) => {
+  const cold = await b.evaluate(`({ absent: !BL.cloudHopper && !document.querySelector(".cloud-hopper-panel"), scene: __ooga.scene, frames: __ooga.renderedFrames })`);
+  await b.evaluate(`(() => { const B=__ooga,a=B.cavemen.get("portlandhodl"),slot=BL.caves.slots.find(s=>s.scene==="arcade"),m=B.mouths.find(m=>m.id===slot.id);
+    if(B.crew.player!==a)B.pilot.possess(a); B.pilot.navigate({position:{x:m.x-Math.sin(m.ry)*1.2,y:m.floorY,z:m.z-Math.cos(m.ry)*1.2},yaw:m.ry,pitch:.4,dist:10}); B.advance(.5,1/60); })()`);
+  await b.key(" ");
+  if (!await untilPage(b, 'B.scene === "arcade" && !B.transitioning', 30000)) throw Error("Arcade did not open: " + JSON.stringify(await b.evaluate('({scene:__ooga.scene,transitioning:__ooga.transitioning,notice:document.getElementById("toast").textContent})')));
+  const approach = `(() => { const B=__ooga,a=B.pilot.player,s=BL.arcadeModels.CABINETS[0].play;
+    if(a.weapon.aiming)B.pilot.modeAction("mode-toggle"); B.pilot.freeCursor();
+    B.pilot.navigate({position:{x:s.x,y:BL.arcadeModels.STAGE.high,z:s.z},yaw:0,pitch:.2,dist:5}); B.advance(.2,1/60); })()`;
+  await b.evaluate(approach); await b.key(" ");
+  const asked = () => site.fetched.filter(chunkOf("cloud-hopper")).length;
+  for (let i=0; i<300 && !asked(); i++) await b.sleep(50);
+  const refused = await untilPage(b, 'B.scene === "arcade" && !B.transitioning && B.cabinet.phase === "idle"', 30000);
+  const kept = await b.evaluate(`__ooga.pilot.player?.traits.name === "portlandhodl"`);
+  site.refused.length=0; dropRefusals(b);
+  await b.evaluate(approach); await b.key(" ");
+  const opened = await untilPage(b, 'B.scene === "hub" && !B.transitioning && BL.scenes.hub.debug.cloudHopper?.phase === "intro"', 30000);
+  const actor = await b.evaluate(`__ooga.pilot.player?.traits.name`);
+  const interrupted = await b.evaluate(`(() => {
+    document.querySelector(".cloud-hopper-panel .game-intro-go:not([hidden])").click();
+    __ooga.advance(0.25, 1 / 60);
+    return { phase: BL.scenes.hub.debug.cloudHopper.phase, focus: document.activeElement.id, cabinet: __ooga.cabinet.phase };
+  })()`);
+  await b.key("Escape");
+  const returned = await untilPage(b, 'B.scene === "arcade" && !B.transitioning', 30000);
+  const returnedActor = await b.evaluate('__ooga.pilot.player?.traits.name');
+  record("hub hosted: first play excludes Cloud Hopper, its failed cabinet load retains control and retry opens the same Ooga then returns safely", cold.absent && cold.scene === "hub" && cold.frames > 2 && refused && kept && opened && actor === "portlandhodl" && interrupted.phase === "lifting" && interrupted.focus === "scene" && returned && returnedActor === actor && asked() >= 2,
+    JSON.stringify({cold,refused,kept,opened,actor,interrupted,returned,returnedActor,asked:asked()}));
+} };
 // After a deploy the tab's chunks are gone: the page says so once and offers a reload, never "try again".
 const orbitHostedDeploy = { name: "orbit hosted deploy", gone: "/js/drop", why: "regression: after a deploy replaced the chunks, an open tab asked again and again for its old chunk and said try again, which could never work", run: async (b, site) => {
   await b.evaluate(`__ooga.go("drop")`);
@@ -9550,7 +9590,7 @@ const orbitHostedDeploy = { name: "orbit hosted deploy", gone: "/js/drop", why: 
       && payment.text === "Your on-chain tip confirmed · 1,000 sats" && payment.shown && payment.separate && heads >= 1 && heads <= 2 && probes >= 1,
     JSON.stringify({ offered, toast, payment, heads, probes, fetched: site.fetched }));
 } };
-for (const [id, step, path] of [["orbit", orbitHosted, "/oogaorbit"], ["orbit", orbitHostedDeploy, "/oogaorbit"], ["arcade", arcadeHostedDrop, "/oogaarcade"], ["factory", factoryHostedShield, "/"]]) {
+for (const [id, step, path] of [["hub", hubHostedOptionalGame, "/"], ["orbit", orbitHosted, "/oogaorbit"], ["orbit", orbitHostedDeploy, "/oogaorbit"], ["arcade", arcadeHostedDrop, "/oogaarcade"], ["factory", factoryHostedShield, "/"]]) {
   if (ONLY && !onlyMatches(step.name)) continue;
   tasks.push({ name: `${id} hosted${step.gone ? " deploy" : ""}`, scene: id, perf: false, run: async () => {
     const site = await hostedSite();
@@ -11500,7 +11540,7 @@ const hubPlayerStacking = { name: "players stand on players", why: "regression: 
 } };
 const hubCloudCamera ={ name: "cloud hopper fixed camera", why: "regression: scenery, rock and downhill movement changed the racing camera's angle and distance", run: async (b) => {
   const r = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, H = BL.scenes.hub.debug.cloudHopper, S = BL.scene, solids = B.headquarters.solids.props;
+    const B = __ooga, P = B.pilot, H = BL.scenes.hub.debug.prepareCloudHopper(), S = BL.scene, solids = B.headquarters.solids.props;
     const actor = B.cavemen.get("portlandhodl"), rows = [], movementRows = [], rockRows = [], nodes = [];
     const pose = Object.fromEntries(["position", "target", "up", "orbit", "headOffset", "actor", "body", "head", "bodyQuaternion", "headQuaternion", "magazines"].map(key => [key, []]));
     const ghost = BL.cloudHopperGhost.create({ root: BL.scenes.hub.root, renderer: B.renderer });
@@ -11525,15 +11565,17 @@ const hubCloudCamera ={ name: "cloud hopper fixed camera", why: "regression: sce
     const rockClear = (a, e) => B.island.voxelSegmentClearAt(a.x, a.y - 0.3, a.z, e.x, e.y - 0.3, e.z, 0.3, 0.6);
     P.possess(actor); if (B.crew.sleeping) B.crew.wakePlayer();
     P.navigate({ position: H.platform.position, yaw: 0, pitch: 0.5, dist: 12 });
-    const opened = H.launch();
-    document.querySelector(".cloud-hopper-panel .game-intro-go").click();
+    const opened = H.launch(true);
+    document.querySelector(".cloud-hopper-panel .game-intro-go:not([hidden])").click();
     B.advance(BL.cloudHopper.LIFT_SECONDS + 0.1, 1 / 60);
-    if (H.phase === "briefing") document.querySelector(".cloud-hopper-guide .actions button:last-child").click();
+    if (H.phase === "briefing") document.querySelector(".cloud-hopper-panel .actions [data-role=leave]").click();
+    B.advance(1, 1 / 60);
     const ready = H.phase === "ready";
+    // Cloud Hopper now races in shoulder/first person; carry and overhead are not game views.
     actor.hop = 0.1; actor.hopV = 1; H.postUpdate();
     ghost.begin(actor); const recording = ghost.finish(0.1, actor);
     try {
-      for (const dt of [1 / 30, 1 / 60]) for (const mode of ["orbit", "shoulder", "first-person", "birds-eye"]) {
+      for (const dt of [1 / 30, 1 / 60]) for (const mode of ["shoulder", "first-person"]) {
         setMode(mode);
         P.navigate({ position: { x: 100, y: 100, z: 100 }, yaw: 0, pitch: 0.55, dist: 12 });
         actor.hop = 100;
@@ -11574,7 +11616,7 @@ const hubCloudCamera ={ name: "cloud hopper fixed camera", why: "regression: sce
         if (rockClear(a, a) && !rockClear(a, e)) shore = { nx, nz, x: a.x, z: a.z };
       }
       if (shore) for (const dt of [1 / 30, 1 / 60]) {
-        setMode("orbit");
+        setMode("shoulder");
         const yaw = Math.atan2(-shore.nx, -shore.nz), far = { x: shore.nx * (B.island.radius + 30), y: -4, z: shore.nz * (B.island.radius + 30) };
         P.navigate({ position: far, yaw, pitch: 0.1, dist: 12 }); actor.hop = 100;
         for (let i = 0; i < Math.round(3 / dt); i++) P.update(dt);
@@ -11587,20 +11629,20 @@ const hubCloudCamera ={ name: "cloud hopper fixed camera", why: "regression: sce
         rockRows.push({ dt, obstructed, firstChange, heldChange, clearedChange: changed(initial, relativePose()) });
       }
       return { opened, ready, rows, movementRows, rockRows, shore: !!shore };
-    } finally { clearProps(); ghost.dispose(); H.exit(); P.release(true); P.goPreset("pile"); }
+    } finally { clearProps(); ghost.dispose(); H.cancel(); P.release(true); P.goPreset("pile"); }
   })()`);
   record("Cloud Hopper camera: nearby props, overhead scenery and a ghost never redirect or compress the racing view",
-    r.opened && r.ready && r.rows.length === 8 && r.rows.every(row => row.actualMode === row.mode && row.obstructed
+    r.opened && r.ready && r.rows.length === 4 && r.rows.every(row => row.actualMode === row.mode && row.obstructed
       && row.firstChange < 0.001 && row.heldChange < 0.001 && row.clearedChange < 0.001), JSON.stringify(r.rows));
   record("Cloud Hopper camera: downhill steps and airborne movement retain the exact actor-relative eye, target and up in every view at 30/60 Hz",
-    r.movementRows.length === 16 && r.movementRows.every(row => row.actualMode === row.mode && row.maxChange < 0.001), JSON.stringify(r.movementRows));
+    r.movementRows.length === 8 && r.movementRows.every(row => row.actualMode === row.mode && row.maxChange < 0.001), JSON.stringify(r.movementRows));
   record("Cloud Hopper camera: real island rock cannot shorten or pivot the camera, including the first crossing frame at 30/60 Hz",
     r.shore && r.rockRows.length === 2 && r.rockRows.every(row => row.obstructed
       && row.firstChange < 0.001 && row.heldChange < 0.001 && row.clearedChange < 0.001), JSON.stringify(r.rockRows));
 } };
 const hubCloudFraming = { name: "cloud hopper island framing", why: "regression: the starting cloud hid the island, replay changed the selected view, and held gameplay keys could activate the result panel", run: async (b) => {
   const r = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, H = BL.scenes.hub.debug.cloudHopper, actor = B.cavemen.get("portlandhodl");
+    const B = __ooga, P = B.pilot, H = BL.scenes.hub.debug.prepareCloudHopper(), actor = B.cavemen.get("portlandhodl");
     const pose = Object.fromEntries(["position", "target", "up", "orbit", "headOffset", "actor", "body", "head", "bodyQuaternion", "headQuaternion", "magazines"].map(key => [key, []]));
     const view = BL.math.mat4.create(), projection = BL.math.mat4.create(), island = new Float64Array(3), rows = [], keys = [];
     const clearCloud = () => {
@@ -11653,20 +11695,21 @@ const hubCloudFraming = { name: "cloud hopper island framing", why: "regression:
     };
     P.possess(actor); if (B.crew.sleeping) B.crew.wakePlayer();
     mode("shoulder");
-    const opened = H.launch();
+    const opened = H.launch(true);
     try {
-      document.querySelector(".cloud-hopper-panel .game-intro-go").click();
+      document.querySelector(".cloud-hopper-panel .game-intro-go:not([hidden])").click();
       B.advance(BL.cloudHopper.LIFT_SECONDS + 0.1, 1 / 60);
-      if (H.phase === "briefing") document.querySelector(".cloud-hopper-guide .actions button:last-child").click();
+      if (H.phase === "briefing") document.querySelector(".cloud-hopper-panel .actions [data-role=leave]").click();
+      B.advance(1, 1 / 60);
       const ascent = project(); B.advance(0.25, 1 / 60); const settled = project();
-      for (const name of ["orbit", "shoulder", "first-person", "birds-eye"]) {
+      for (const name of ["shoulder", "first-person"]) {
         mode(name);
         // Finish from a deliberately unrelated heading, including a held DQ
         // view, before clicking the real replay button at the top cloud.
         actor.hop = 0.1; actor.hopV = 1; H.postUpdate();
         actor.root.position.x = 1000; actor.root.position.y = -1000; actor.hopV = -20; H.postUpdate();
         H.fallView(); const dq = H.phase === "dq";
-        const replay = document.querySelector(".cloud-hopper-panel .game-intro-go");
+        const replay = document.querySelector(".cloud-hopper-panel .game-intro-go:not([hidden])");
         if (!keys.length) {
           // Synthetic keyboard events do not perform native button clicks:
           // assert their default-action gate, then explicitly click to replay.
@@ -11694,6 +11737,8 @@ const hubCloudFraming = { name: "cloud hopper island framing", why: "regression:
           }
         }
         replay.click();
+        // Every Arcade replay rides up again before returning the selected combat view.
+        B.advance(BL.cloudHopper.LIFT_SECONDS + 1, 1 / 60);
         const instant = project(); B.advance(0.25, 1 / 60); const later = project();
         rows.push({ name, dq, instant, later });
       }
@@ -11701,16 +11746,16 @@ const hubCloudFraming = { name: "cloud hopper island framing", why: "regression:
       P.orbit.yaw = P.orbit.tYaw += 0.4; B.advance(0.1, 1 / 60);
       const manual = project();
       return { opened, ascent, settled, rows, keys, manual };
-    } finally { H.exit(); P.release(true); P.goPreset("pile"); }
+    } finally { H.cancel(); P.release(true); P.goPreset("pile"); }
   })()`);
   const aligned = (p, mode) => p.front && p.centreError < 3 && p.gap > 12 && p.y < 0.9 && p.phase === "ready" && p.mode === mode
     && (mode !== "orbit" || p.cloudClear) && (mode === "first-person" || p.actorVisible);
   const steady = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) < 0.005;
   record("Cloud Hopper framing: results reject held keys, deliberate replay retains the selected view and island framing, and racing releases the camera",
-    r.opened && aligned(r.ascent, "shoulder") && aligned(r.settled, "shoulder") && steady(r.ascent, r.settled) && r.rows.length === 4
+    r.opened && aligned(r.ascent, "shoulder") && aligned(r.settled, "shoulder") && steady(r.ascent, r.settled) && r.rows.length === 2
       && r.keys.length === 15 && r.keys.every(key => key.passed)
-      && r.rows.every(row => row.dq && aligned(row.instant, row.name === "birds-eye" ? "orbit" : row.name)
-        && aligned(row.later, row.name === "birds-eye" ? "orbit" : row.name) && steady(row.instant, row.later))
+      && r.rows.every(row => row.dq && aligned(row.instant, row.name)
+        && aligned(row.later, row.name) && steady(row.instant, row.later))
       && r.manual.phase === "running" && Math.abs(r.manual.x - 0.5) > 0.08, JSON.stringify(r));
 } };
 const hubGrounding = { name: "hub grounding", why: "regression: a roaming gorilla read a tree crown as a floor", run: async (b) => {
@@ -21990,13 +22035,6 @@ const gpuGeometrySnapshot = (renderer, scenes, activeId, state) => {
   for (const [id, scene] of Object.entries(scenes)) visit(scene.root, id, "root", id === activeId);
   // cachedGeometry/liveGeometry can touch tracked cache readers; observing them can change ownership.
   visit(scenes.hub?.retainedRoot, "hub", "retained", false);
-  // The cabinet swaps these existing finite frames; an off-screen frame still belongs to the hub.
-  const cloudFrames = scenes.hub?.debug?.cloudHopper?.cabinet.frames || [];
-  for (let i = 0; i < cloudFrames.length; i++) {
-    observe(cloudFrames[i], true);
-    const row = resident.get(cloudFrames[i]);
-    if (row && !row.references) row.owners.push({ scene: "hub", path: `cloud-hopper/frame[${i}]`, graphVisible: false });
-  }
   // This getter only exposes the existing Set; it neither warms nor registers a model-cache read.
   const factoryKeep = scenes.factory?.retainedGeometry;
   if (factoryKeep) for (const geometry of factoryKeep) observe(geometry, true);
@@ -22308,10 +22346,10 @@ const dsbSoak = async (b, { geometry = false, factory = false } = {}) => {
   const rendered = (frames, ms = 6000) => b.evaluate(`new Promise((resolve) => { const B = window.__ooga; const start = B.renderedFrames; const t0 = performance.now(); const tick = () => { if (B.renderedFrames >= start + ${frames} || performance.now() - t0 > ${ms}) resolve(B.renderedFrames - start); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); })`);
   const settled = (ms = 4000) => until("window.BL.scene.tweenCount() === 0", ms);
   // Later visits can expose a different attract frame or an Ooga that was behind scenery at baseline.
-  // Upload only the retained hub's existing finite frames and character meshes, without building new models,
+  // Upload only the retained hub's existing character meshes, without building new models,
   // changing visibility or replacing any resource. Subsequent growth is still measured by the same bounds.
   const warmHubGeometry = () => b.evaluate(`(() => {
-    const B = __ooga, H = BL.scenes.hub, characters = new Set(), frames = H.debug.cloudHopper.cabinet.frames;
+    const B = __ooga, H = BL.scenes.hub, characters = new Set();
     const visit = node => {
       if (node.geometry?.characterPart) characters.add(node.geometry);
       for (const child of node.children) visit(child);
@@ -22321,11 +22359,11 @@ const dsbSoak = async (b, { geometry = false, factory = false } = {}) => {
       if (cave.headOpen) characters.add(cave.headOpen);
       if (cave.headClosed) characters.add(cave.headClosed);
     }
-    const geometries = new Set([...frames, ...characters]);
+    const geometries = characters;
     let prepared = true;
     for (const geometry of geometries) prepared = B.renderer.prepareGeometry(geometry) && prepared;
     const resident = new Set(B.renderer.geometryRecords());
-    return { frames: frames.length, characters: characters.size,
+    return { characters: characters.size,
       prepared: prepared && [...geometries].every(geometry => resident.has(geometry)) };
   })()`);
   const heap = async () => {
@@ -22402,7 +22440,7 @@ scene("dsb", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{
   const after = await snapshot();
   const same = (key) => before.stats[key] === after.stats[key];
   record("soak: dsb cycles: six round trips retain node, target, tween and DOM counts", same("allNodes") && same("targets") && same("tweens") && same("dom") && after.stats.tweens === 0, JSON.stringify({ before: before.stats, after: after.stats }));
-  const bounded = hubWarm.frames === 16 && hubWarm.characters > 0 && hubWarm.prepared
+  const bounded = hubWarm.characters > 0 && hubWarm.prepared
     && Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1);
   record("soak: dsb cycles: GPU records, listeners and heap remain bounded", bounded, heapDetail(before, after)
     + `, GPU ${before.stats.gl.records} -> ${after.stats.gl.records}, DOM ${before.nodes} -> ${after.nodes}, listeners ${before.listeners} -> ${after.listeners}`
@@ -22490,7 +22528,7 @@ scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps
   // Hall pool uploads vary with the show. Check the exact bounded owner generation separately,
   // keep the same ±3 limit outside it, and reject retired records on every measured departure.
   const residency = factoryGeometryBound(before, previous, after, { sameVisit: true });
-  const bounded = hubWarm.frames === 16 && hubWarm.characters > 0 && hubWarm.prepared
+  const bounded = hubWarm.characters > 0 && hubWarm.prepared
     && residency.ok && visits.every(v => v.geometry.ok) && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1);
   record("soak: factory cycles: GPU records, listeners and retained heap remain bounded", bounded, heapDetail(before, after) + `, GPU ${before.stats.gl.records} -> ${after.stats.gl.records}, DOM ${before.nodes} -> ${after.nodes}, listeners ${before.listeners} -> ${after.listeners}`
     + (bounded ? "" : `, hub warmup ${JSON.stringify(hubWarm)}, ownership ${JSON.stringify(residency)}, failed visits ${JSON.stringify(visits.flatMap((v, i) => v.geometry.ok ? [] : [{ visit: i + 1, ...v.geometry }]))}, geometry ${JSON.stringify(gpuGeometryDelta(before.geometry, after.geometry))}`));
