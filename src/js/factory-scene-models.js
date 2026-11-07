@@ -1976,8 +1976,9 @@
   // keystone, its neon strip and studs in the hall's cyan, inside a timber frame whose header carries the hangar's sign
   // on a timber board between two lit bolts. Behind it a walled and roofed passage floored in planks from the walkway's
   // edge, and through it, until the hangar itself shows there, a glimpse of it: its runway's blue lamps running away to
-  // the launch tunnel's glow, lanterns either side (`glimpse`). In the door's frame, +z out into the hall and the sill
-  // at y 0.
+  // the launch tunnel's glow, lanterns either side (`glimpse`). `arch` is the same less its timber frame, header and
+  // sign board, for the hangar, which sets the arch in a frame of its own. In the door's frame, +z out into the hall and
+  // the sill at y 0.
   const hangarDoor = cached(() => {
     const geos = [], lit = [], far = [], cy = 2.6, D = HANGAR_DOOR;
     for (const [r, n, depth, z] of [[2.5, 12, 1.4, 0], [3.2, 16, 1.1, -0.15]]) for (let k = 0; k <= n; k++) {
@@ -2003,6 +2004,7 @@
     };
     lit.push(tube({ path: neon, radius: () => 0.075, rings: 60, segments: 8, colorFn: () => CYAN, emissive: 1 }));
     // The timber frame, its header, and the sign's board over it with a lit bolt either side.
+    const frameFrom = geos.length;
     for (const s of [-1, 1]) {
       geos.push(bevelBox({ w: 0.44, h: 6.2, d: 0.46, color: TIMBER_DK, bevel: 0.06, offset: { x: s * D.post, y: 3.1, z: 0.35 } }));
       for (const y of [1.2, 3.4, 5.6]) geos.push(bevelBox({ w: 0.52, h: 0.1, d: 0.54, color: IRON_DK, bevel: 0.02, offset: { x: s * D.post, y, z: 0.35 } }));
@@ -2011,6 +2013,7 @@
     geos.push(bevelBox({ w: 8.6, h: 0.52, d: 0.52, color: TIMBER, bevel: 0.07, offset: { y: 6.15, z: 0.35 } }));
     geos.push(bevelBox({ w: 5.6, h: 1.9, d: 0.14, color: TIMBER_DK, bevel: 0.05, offset: { y: D.sign[1], z: D.sign[2] - 0.14 } }));
     for (const s of [-1, 1]) for (const t of [-1, 1]) geos.push(bevelBox({ w: 0.24, h: 0.24, d: 0.05, color: IRON_DK, bevel: 0.015, offset: { x: s * 2.62, y: D.sign[1] + t * 0.77, z: D.sign[2] - 0.05 } }));
+    const frameTo = geos.length;
     // The passage behind the arch, walled and roofed, floored in planks on a stone sill from the walkway's edge, and the
     // rock the wall is cut back to round it.
     for (const x of [-2.75, 2.75]) geos.push(bevelBox({ w: 0.5, h: 5.3, d: 2.8, color: STONE[2], bevel: 0.1, offset: { x, y: 2.65, z: -1.9 } }));
@@ -2032,7 +2035,7 @@
     }
     for (const s of [-1, 1]) for (let k = 0; k < 3; k++) far.push(box({ w: 0.12, h: 0.15, d: 0.05, color: "#ffc86a", emissive: 1, offset: { x: s * (1.55 - k * 0.38), y: 3.4 - k * 0.32, z: -3.18 } }));
     // The glimpse is its own mesh, so the hangar can stand the same door in its own wall without it.
-    return { stone: merge(...geos), glow: noShadow(shaded(lit)), glimpse: noShadow(merge(...far)) };
+    return { stone: merge(...geos), arch: merge(...geos.slice(0, frameFrom), ...geos.slice(frameTo)), glow: noShadow(shaded(lit)), glimpse: noShadow(merge(...far)) };
   });
 
   // A gallery station: a smaller pair of capacitors on a stand, for the lines past the featured four.

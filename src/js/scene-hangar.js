@@ -22,13 +22,23 @@
   const FM = BL.factoryModels, HM = BL.hangarModels, JM = BL.jetModels;
   const { clamp } = math;
   const { createNode, addChild, removeChild, createCamera, stepTweens, tweenCount, traverseVisible } = BL.scene;
-  const { LAYOUT } = HM, { HALL } = LAYOUT, DOOR = LAYOUT.door, TUN = LAYOUT.tunnel;
+  const { LAYOUT } = HM, { HALL } = LAYOUT, DOOR = LAYOUT.door, TUN = LAYOUT.tunnel, SHELL = LAYOUT.shell;
 
   const params = new URLSearchParams(location.search), DEBUG = params.has("debug");
   // The Jet's construction stage: the one it has reached, or under debug the one `jetstage=` asks for.
   const JET_STAGE = DEBUG && JM.STAGES[params.get("jetstage")] ? Number(params.get("jetstage")) : JM.STAGE;
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
   const PITCH = [-0.2, 1.3], DIST = [3, 30];
+  // How near the view comes to the walls' faces, m.
+  const WALL_GAP = 0.6;
+  // The Canvas 2D renderer paints faces far to near by their middles, and the shell's panels are big: one a few metres
+  // nearer than a board's middle would paint over it, and a floor tile's over a crate standing on it. So there the shell,
+  // its floor too, is sorted as if this much farther (`depthBias`, m), behind everything standing in the hall, the roof's
+  // deck farther, behind the lattice under it, and its backing farther still, behind the shell from any end of it.
+  const SHELL_BIAS = 8, DECK_BIAS = 12, BACKING_BIAS = 48;
+  // And the lamps on its walls, sorted with the wall but this much nearer than its panels, so a panel never paints over
+  // a lamp on it.
+  const WALL_LAMP_BIAS = 6;
   const FOLLOW = { y: 0.9, min: 3, max: 7, pitch: [0.25, 0.8] };
   const FLY = { speed: 6, perDist: 0.4, climb: 4, yMax: HALL.h - 3 };
   // The door's shield, as wide as its arch, in the hall's cyan; and the launch shield across the tunnel's end, in a
@@ -46,8 +56,13 @@
     boards: view(HALL.x0 + 5.5, 4.3, 7, Math.PI / 2 - 0.35, 0.05, 17),
     door: view(0, 3.2, DOOR.z - 4, Math.PI, 0.12, 11)
   };
-  // In from the hall: on the landing a step in from the door, facing down the runway, the view in the doorway behind it.
-  const ARRIVAL = { position: { x: 0, y: DOOR.y, z: DOOR.z - 3.4 }, target: { x: 0, y: DOOR.y + 1, z: DOOR.z - 3.4 }, yaw: 0, pitch: 0.12, dist: 2.8 };
+  // In from the hall: at the landing's front edge, facing down the runway, the view behind it turned a little left, so a
+  // wide screen takes in the timeline, the stats board's far end, the Jet and the launch shield; on a tall screen, where
+  // the Jet and the shield cannot share the frame, the view turns to the Jet instead and flatter (`ARRIVAL_TALL`), the
+  // Jet over the Ooga. `arrival()` is the one for the screen as it stands.
+  const ARRIVAL = { position: { x: 0, y: DOOR.y, z: DOOR.z - 4.6 }, target: { x: 0, y: DOOR.y + 1, z: DOOR.z - 4.6 }, yaw: 0.12, pitch: 0.3, dist: 4.2 };
+  const ARRIVAL_TALL = { ...ARRIVAL, yaw: -0.45, pitch: 0.04 };
+  const arrival = () => renderer.size.width < renderer.size.height ? ARRIVAL_TALL : ARRIVAL;
   // The walk through the door's shield either way, as the Factory's gate walks it (`factoryWindow.GLIDE`): the door as
   // the walk takes it (its middle, the way out through it, its shield), how far in from it an arrival stands, how near
   // the door a step back from there may come before it walks out (OUT_SLACK), and the view's reach as an Ooga comes in
@@ -60,19 +75,24 @@
   const walk = { phase: 0, t: 0, x: 0, z: 0, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false };
   // The hall's own light, warm, and past the launch shield space, as ₿IFRÖST's night shows it: the sky pass paints its
   // deep gradient, its twinkling stars and a moon low in the tunnel's end; `sun` is the sun's colour, which the night
-  // hides.
+  // hides. A cool haze hangs in the hall, deepening down the runway, so the far end and the tunnel's frames sink back
+  // and the Jet stands out in front of them.
   const RENDER_OPTS = {
     clear: [0.01, 0.012, 0.035], sky: [0.54, 0.38, 0.26], ground: [0.24, 0.16, 0.1],
     direct: [0.7, 0.52, 0.36], directStrength: 0.36, ambientFloor: 0.4, light: { x: 0.25, y: 0.9, z: 0.35 },
     horizon: [0.07, 0.06, 0.18], zenith: [0.006, 0.008, 0.03], sun: [0.05, 0.05, 0.08], stars: 1,
     moon: { x: 0.2, y: 0.13, z: -0.97 }, starMatrix: new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]),
-    shadowCenter: { x: 2.5, y: 6, z: -2 }, shadowExtent: 42,
+    shadowCenter: { x: 2.5, y: 6, z: -2 }, shadowExtent: 42, spotLight: new Float32Array(24),
+    fog: [0.045, 0.06, 0.095], fogNear: 14, fogFar: 120,
     lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 0, bloomStrength: 1
   };
-  // The hall's own light at full, which an anomaly dims (its `ambient`).
+  // The hall's own light at full, which an anomaly dims (its `ambient`), and its haze, which dims with it.
   // Where the Jet's nose gear stands along it, m from its middle, which the lowrider's bang comes from.
   const NOSE_GEAR = -9.3;
   const SKY = RENDER_OPTS.sky.slice(), GROUND = RENDER_OPTS.ground.slice(), DIRECT = RENDER_OPTS.directStrength, FLOOR = RENDER_OPTS.ambientFloor;
+  const HAZE = RENDER_OPTS.fog.slice();
+  // The Jet's key light, the scene's spot (`lightUp`, `HM.KEY`); an anomaly dims it with the hall's lights.
+  const KEY = HM.KEY;
   // The space past the shield, from ₿IFRÖST's dome (`bifrostModels.sky`): its stars, the twinkling ones in their halos,
   // the galaxy's band and its shooting stars on a dome tipped so its zenith looks back down the tunnel and turned so
   // the band crosses the tunnel's end; and its ringed giant and its red world, turning with their moons going round,
@@ -87,10 +107,10 @@
   // back in.
   const JET_FLY = { first: [8, 14], every: [25, 45], wake: 1.1, go: 1.6, away: 5, back: 0.8, trail: 14, puff: 0.04, life: 0.6 };
   const JET_STYLE = { stats: { spot: 0, kind: "dash", ink: "#ffb02e" }, timeline: { spot: 0, kind: "loop", ink: "#5fe3ff" } };
-  // The tunnel's neon burns past full (`NEON_GLOW`), each frame's strip shimmering at its own pace, and every
+  // The tunnel's neon burns steadily (`NEON_GLOW`), each frame's strip shimmering a little at its own pace, and every
   // `NEON_STUTTER` seconds one stutters, dipping twice as a tired tube does; the light at the tunnel's mouth follows
-  // its first strip (`MOUTH_LIGHT`).
-  const NEON_GLOW = 1.7, NEON_STUTTER = [2.5, 7], MOUTH_LIGHT = HM.TINTS.mouth, MOUTH_SLOT = 6;
+  // its first strip (`MOUTH_LIGHT`), at `MOUTH_LEVEL` of the tint.
+  const NEON_GLOW = 0.8, NEON_STUTTER = [6, 14], MOUTH_LIGHT = HM.TINTS.mouth, MOUTH_LEVEL = 0.7, MOUTH_SLOT = 6;
   // The floor lamps breathe a little, each at its own pace, and every `LAMP_STUTTER` seconds one stutters, failing four
   // times in half a second (`LAMP_FAILS`, from and to, s, at `LAMP_DIM` of its light); and every `RABBIT` seconds a
   // pulse runs down the runway's marker lamps toward the launch tunnel at `RABBIT_SPEED` m/s, each brightening by up to
@@ -102,6 +122,15 @@
   const DOOR_NEAR = 0, DOOR_FAR = 12, DOOR_EASE = 5, DOOR_BRIGHTEN = 3.2, DOOR_POWER = 1.4, DOOR_REACH = 4, DOOR_LIGHT = HM.fixedLights()[0];
   const LAMP_STUTTER = [3, 9], LAMP_FAILS = [0, 0.05, 0.12, 0.2, 0.3, 0.34, 0.46, 0.5], LAMP_DIM = 0.15;
   const RABBIT = [8, 14], RABBIT_SPEED = 28, RABBIT_GLOW = 2.2, RABBIT_WIDTH = 2.5;
+  // The lofts' windows high on the right wall come alive (`loftLife`): the one of the crew in each works at its window,
+  // breathing, its head turned `look` toward its monitor, and every `work` seconds or so glances out over the hall for
+  // `glance` seconds, moves to another spot within `spot` of the window's middle, or walks out past its frame (gone
+  // where its window clips it) and comes back from either side `away` seconds later, walking at `walk` m/s turned
+  // `stride` toward the way it goes, its body and head turning at most `turn` a second; its monitor flickers and every
+  // `picture` seconds changes colour with a blink; and every `dark` seconds one loft's light goes out for `out` seconds
+  // (to `dim` of itself) and stutters back on.
+  const LOFT_LIFE = { work: [4, 10], glance: [1.2, 2.6], spot: 0.85, walk: 0.7, stride: 0.7, away: [4, 10], turn: 3, look: 0.9, picture: [8, 20], dark: [18, 40], out: [3, 7], dim: 0.12 };
+  const between = (r) => r[0] + Math.random() * (r[1] - r[0]);
   const TIPS = {
     exit: ["Lightning Factory · the way back", "Back to the hall, onto the walkway to the balcony."],
     sign: ["Lightning Jet Hangar", "Where Lightning Jet v2 is being built, and where it will launch from."],
@@ -154,9 +183,23 @@
   const DRIVE = { forward: 3.2, reverse: 1.6, accel: 2.2, brake: 5, coast: 1.8, tip: 0.25 };
   // Forklift power-up animation and control reach.
   const POWER = { lit: [0.12, 1], dome: [0.2, 0.7], flash: 2.6, sharp: 8, rate: 9, turn: 9, needle: 2.4, speedo: 8, crank: 0.75, ready: 0.9, reach: 1.1, radius: 7, color: [1.6, 0.95, 0.22] };
+  // How many times the forklift's size the ceiling cranes' beacons are, and how much nearer the crane's spot sorts on
+  // Canvas 2D (m), so the floor's big tiles nearer the view don't paint over it.
+  const BEACON_SIZE = 1.8, SPOT_BIAS = -4;
+  // The crane's safety spot as the renderer's second spot light (`spotLight` from 12): shining straight down from under
+  // the hook, `y` up or, lower, just under the crate while it hangs on the hook (`gap` below), so its light falls on the
+  // floor and on whatever stands there, never on the crate over it; its cone always full within `inner` and gone past `outer` m round
+  // on the floor, reaching `range` times its height, so the ring is as big and as bright however low it shines from, in
+  // `color` at full.
+  const CRANE_BEAM = { y: 4.5, gap: 0.1, low: 0.25, inner: 1.25, outer: 1.5, range: 1.8, color: [2.2, 4.6, 11] };
+  // How much nearer the fixtures' small parts (the desks' drawers, pulls, trims and what stands on them) sort on Canvas
+  // 2D (m), so the big faces they sit on don't paint over them.
+  const DETAIL_BIAS = -0.5;
+  // And the crates' rivets, bolts and seams, only as much nearer as keeps those on a crate's back behind its lid.
+  const CRATE_BIAS = -0.15;
   // How near the hold-short bar the launch shield answers whoever walks up to it, and how far back they must step before
-  // it answers again.
-  const SHIELD_NEAR = 0.6, SHIELD_REARM = 3;
+  // it answers again; and how much of the hall's haze its shimmer cuts through.
+  const SHIELD_NEAR = 0.6, SHIELD_REARM = 3, SHIELD_PIERCE = 0.7;
 
   let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
   let canvas = null, people = null, avatar = null, playerWorld = null, scene = null, leaving = false, dust = null, unsubscribeAccount = null, remotes = null, footsteps = null, node = null;
@@ -203,6 +246,18 @@
     nearTest = null;
     return nearHit;
   };
+  // Whether anything that walks the hall (as `nearJet` counts them) stands within `reach` of the line from (ax, az) to
+  // (bx, bz) with its feet lower than `bottom`, for the crane, which holds its load while anyone is under it; `UNDER` is
+  // the line, set a call at a time.
+  const UNDER = { ax: 0, az: 0, dx: 0, dz: 0, reach: 0, bottom: 0 };
+  const underLine = (x, z, feet, height, radius) => {
+    const L = UNDER, len = L.dx * L.dx + L.dz * L.dz, k = len > 0 ? clamp(((x - L.ax) * L.dx + (z - L.az) * L.dz) / len, 0, 1) : 0;
+    return feet < L.bottom && Math.hypot(x - L.ax - L.dx * k, z - L.az - L.dz * k) < L.reach + radius;
+  };
+  const underLoad = (ax, az, bx, bz, reach, bottom) => {
+    UNDER.ax = ax; UNDER.az = az; UNDER.dx = bx - ax; UNDER.dz = bz - az; UNDER.reach = reach; UNDER.bottom = bottom;
+    return nearJet(underLine);
+  };
   const accountChanged = () => {
     if (!avatar) return;
     const released = BL.net.state.released;
@@ -242,9 +297,9 @@
     Object.assign(walk, { phase: WALK_ON, t: 0, x: p.x, z: p.z, through: false });
   };
   // The walk, a frame at a time, after the pilot has read the visitor's input and before the crew moves, as the
-  // Factory's gate walks it: down the door's middle at an even pace, the view swinging round behind; out through the
-  // shield it stands a beat, then the hall takes over without a fade. Anything else moving the Ooga, or a walk that runs
-  // long, lets go; so does reaching where an arrival stands.
+  // Factory's gate walks it: down the door's middle at an even pace, the view swinging round behind (coming in, turned as
+  // an arrival's is, `arrival`); out through the shield it stands a beat, then the hall takes over without a fade.
+  // Anything else moving the Ooga, or a walk that runs long, lets go; so does reaching where an arrival stands.
   const doorStep = (dt) => {
     const w = walk, G = BL.factoryWindow.GLIDE, d = DOOR_WAY, p = avatar.root.position, o = pilot.orbit, off = w.phase === WALK_OFF;
     const dx = p.x - d.x, dz = p.z - d.z, past = dx * d.ox + dz * d.oz + d.plane, side = dz * d.ox - dx * d.oz;
@@ -260,7 +315,7 @@
     w.x = p.x; w.z = p.z;
     const k = off ? G.ahead : -G.ahead, wx = d.ox * k + d.oz * side * 0.6, wz = d.oz * k - d.ox * side * 0.6, l = Math.hypot(wx, wz);
     people.steer(wx / l, wz / l, 0, 1, 0, G.speed);
-    const behind = off ? Math.atan2(-d.ox, -d.oz) : Math.atan2(d.ox, d.oz);
+    const behind = off ? Math.atan2(-d.ox, -d.oz) : Math.atan2(d.ox, d.oz) + arrival().yaw;
     o.tYaw = o.yaw + Math.atan2(Math.sin(behind - o.yaw), Math.cos(behind - o.yaw));
     if (!off) return;
     if (!w.through && past >= 0) {
@@ -670,6 +725,9 @@
       }
       addChild(space, planet);
     });
+    // Space lies past the hall's haze: its pieces, shared with ₿IFRÖST's chamber, which has none, take none of it.
+    const clear = (node) => { if (node.geometry) node.geometry.fogPierce = 1; for (const child of node.children) clear(child); };
+    clear(space);
     addChild(root, space);
   };
   // The neon's flicker, and the mouth's light with it, as dim as an anomaly has the hall's lights (`dim`).
@@ -682,11 +740,11 @@
     }
     const since = elapsed - s.stutterAt;
     for (let i = 0; i < s.neon.length; i++) {
-      let k = NEON_GLOW * (0.93 + 0.05 * Math.sin(elapsed * (7.3 + i * 1.7) + i * 2.3) + 0.03 * Math.sin(elapsed * (19.1 + i * 3.1) + i));
+      let k = NEON_GLOW * (0.96 + 0.025 * Math.sin(elapsed * (7.3 + i * 1.7) + i * 2.3) + 0.015 * Math.sin(elapsed * (19.1 + i * 3.1) + i));
       if (i === s.stutter && (since < 0.06 || since > 0.14 && since < 0.21)) k *= 0.22;
       s.neon[i].glow = k * dim;
     }
-    const f = s.neon[0].glow / NEON_GLOW, o = MOUTH_SLOT * 8, Lt = RENDER_OPTS.lights;
+    const f = MOUTH_LEVEL * s.neon[0].glow / NEON_GLOW, o = MOUTH_SLOT * 8, Lt = RENDER_OPTS.lights;
     Lt[o + 4] = MOUTH_LIGHT[0] * f; Lt[o + 5] = MOUTH_LIGHT[1] * f; Lt[o + 6] = MOUTH_LIGHT[2] * f;
   };
   // The boards' Jets: resting at their spots, then now and then waking (engines lit, a shudder), leaving their board each
@@ -789,6 +847,61 @@
       s.markers[i].glow = (1 + RABBIT_GLOW * Math.exp(-d * d)) * dim;
     }
   };
+  // The lofts' life (`LOFT_LIFE`): what each one's crew member does next, where it stands and which way it and its head
+  // face, its monitor's flicker and colour, and its light.
+  const loftLife = (s, dt, elapsed, dim) => {
+    const F = LOFT_LIFE, far = HM.LOFT.w / 2 + 0.4, step = F.turn * dt;
+    if ((s.loftDark -= dt) <= 0) {
+      s.loftDark = between(F.dark);
+      s.lofts[Math.floor(Math.random() * s.lofts.length)].out = between(F.out);
+    }
+    for (let i = 0; i < s.lofts.length; i++) {
+      const l = s.lofts[i];
+      if (l.mode === "walk") {
+        const d = l.to - l.x, stride = F.walk * dt;
+        if (Math.abs(d) > stride) l.x += Math.sign(d) * stride;
+        else {
+          l.x = l.to;
+          l.mode = l.leave ? "away" : "work";
+          l.wait = between(l.leave ? F.away : F.work);
+          l.body.visible = !l.leave;
+        }
+      } else if ((l.wait -= dt) <= 0) {
+        if (l.mode === "away") {
+          l.x = (Math.random() < 0.5 ? -1 : 1) * far;
+          l.to = (Math.random() * 2 - 1) * F.spot;
+          l.mode = "walk"; l.leave = false; l.body.visible = true;
+          l.heading = -Math.PI / 2 + Math.sign(l.to - l.x) * F.stride;
+        } else if (l.mode === "glance") {
+          l.mode = "work"; l.wait = between(F.work);
+        } else {
+          const r = Math.random();
+          if (r < 0.3) { l.mode = "glance"; l.wait = between(F.glance); } else {
+            l.mode = "walk"; l.leave = r > 0.78;
+            l.to = l.leave ? (l.x < 0 ? -far : far) : clamp(l.x + (Math.random() < 0.5 ? -1 : 1) * (0.35 + Math.random() * 0.6), -F.spot, F.spot);
+          }
+        }
+      }
+      const walking = l.mode === "walk", face = walking ? -Math.PI / 2 + Math.sign(l.to - l.x) * F.stride : -Math.PI / 2;
+      const gaze = l.mode === "work" ? (HM.LOFT.screen < l.x ? -F.look : F.look) : 0, p = l.body.position;
+      l.heading += clamp(face - l.heading, -step, step);
+      l.look += clamp(gaze - l.look, -step, step);
+      p.z = l.z + l.x;
+      p.y = l.y + (walking ? 0.025 * Math.abs(Math.sin(l.x * Math.PI / 0.32)) : 0.006 * Math.sin(elapsed * 1.7 + i * 2.3));
+      l.body.rotation.y = l.heading;
+      l.head.rotation.y = l.look;
+      if ((l.change -= dt) <= 0) {
+        l.change = between(F.picture);
+        l.picture = (l.picture + 1) % s.loftScreens.length;
+        l.screen.geometry = s.loftScreens[l.picture];
+        l.blink = 0.15;
+      }
+      l.blink -= dt;
+      l.screen.glow = (l.blink > 0 ? 0.25 : 0.9 + 0.1 * Math.sin(elapsed * 11 + i * 3.1) * Math.sin(elapsed * 2.9 + i)) * dim;
+      l.out -= dt;
+      l.back.glow = l.glass.glow = (l.out > 0.5 ? F.dim : l.out > 0 ? (Math.floor(l.out * 14) % 2 ? 1 : F.dim) : 1) * dim;
+    }
+  };
   // Space's life: stars twinkle a group at a time with their halos, the planets and their rings spin, moons go round
   // their planets, and now and then a shooting star streaks down its way and fades.
   const heavens = (s, dt, elapsed) => {
@@ -822,15 +935,15 @@
   // The hangar for a visit: the hall and everything standing in it from the cached builds, the signs, the boards, the
   // Jet at its dock, the door back to the hall with its shield, the launch shield and space past it.
   const build = () => {
-    const L = LAYOUT, s = { crew: [], dimmed: 1, ambient: 1 }, shell = HM.shell(), runway = HM.runway(), tunnel = HM.tunnel(), dressed = HM.dressing(), fixtures = HM.fixtures(), frames = HM.boardFrames();
-    // The lanterns' and the fixtures' glass, which an anomaly dims with the hall's lights.
-    s.glass = [createNode({ geometry: dressed.glass, sightHidden: true }), createNode({ geometry: fixtures.glow, sightHidden: true }), createNode({ geometry: fixtures.glass, sightHidden: true })];
-    addChild(root, createNode({ geometry: shell.rock }), createNode({ geometry: shell.vault }), createNode({ geometry: shell.backing }),
+    const L = LAYOUT, s = { crew: [], dimmed: 1, ambient: 1 }, shell = HM.shell(), runway = HM.runway(), tunnel = HM.tunnel(), fixtures = HM.fixtures(), frames = HM.boardFrames();
+    // The fixtures' glass and the vault's light slots, which an anomaly dims with the hall's lights.
+    s.glass = [createNode({ geometry: fixtures.glow, sightHidden: true }), createNode({ geometry: fixtures.glass, sightHidden: true }), createNode({ geometry: shell.slots, sightHidden: true })];
+    addChild(root, createNode({ geometry: shell.floor, depthBias: SHELL_BIAS }), createNode({ geometry: shell.walls, depthBias: SHELL_BIAS }), createNode({ geometry: shell.front, depthBias: SHELL_BIAS }),
+      createNode({ geometry: shell.vault, depthBias: DECK_BIAS }), createNode({ geometry: shell.lattice, depthBias: SHELL_BIAS }), s.glass[2], createNode({ geometry: shell.backing, depthBias: BACKING_BIAS }),
       createNode({ geometry: HM.landing() }), createNode({ geometry: runway.flat }),
       createNode({ geometry: tunnel.stone }),
-      createNode({ geometry: HM.catwalks() }), createNode({ geometry: dressed.iron }), createNode({ geometry: dressed.banners }),
-      createNode({ geometry: dressed.frame }), s.glass[0], s.glass[1],
-      createNode({ geometry: fixtures.frame }), s.glass[2], createNode({ geometry: HM.dock() }));
+      createNode({ geometry: HM.catwalks() }), s.glass[0],
+      createNode({ geometry: fixtures.frame }), s.glass[1], createNode({ geometry: HM.dock() }));
     s.mouth = createNode({ geometry: tunnel.iron });
     // The tunnel's neon, a strip on every frame, each flickering on its own (`neonLife`).
     s.neon = tunnel.neonZ.map((z) => createNode({ position: { x: 0, y: 0, z }, geometry: tunnel.neon, sightHidden: true }));
@@ -838,7 +951,54 @@
     s.stutter = -1;
     s.stutterAt = 0;
     s.stutterWait = NEON_STUTTER[0];
+    // The polished runway (`HM.glossRunway`), on WebGL a glossy reflector laid face up over it.
+    if (renderer.kind === "webgl2") {
+      const gloss = HM.glossRunway();
+      addChild(root, createNode({ position: gloss.at, rotation: { x: -Math.PI / 2, y: 0, z: 0 }, geometry: gloss, sightHidden: true }));
+    }
+    // The side walls' strip lamps and box lamps and the catwalks' amber and blue strips (`HM.wallLights`), their lenses
+    // dimmed with the glass; on Canvas 2D the walls' sort with the wall, a little nearer than its panels.
+    const wallLit = HM.wallLights();
+    for (const [part, depthBias] of [[wallLit.wall, WALL_LAMP_BIAS], [wallLit.edge, 0]]) {
+      const lenses = createNode({ geometry: part.glow, sightHidden: true, depthBias });
+      addChild(root, createNode({ geometry: part.flat, depthBias }), lenses);
+      s.glass.push(lenses);
+    }
+    // The control room set into the left wall on the catwalks' level (`HM.controlRoom`), its glow dimmed with the glass,
+    // and its screens' painted faces, sorted a metre nearer on Canvas 2D so the wall they hang on never paints over them.
+    const room = HM.controlRoom(), roomGlow = createNode({ geometry: room.glow, sightHidden: true });
+    addChild(root, createNode({ geometry: room.flat }), roomGlow, createNode({ geometry: room.glass, sightHidden: true }));
+    for (const p of room.pictures) addChild(root, createNode({ position: { x: p.x, y: p.y, z: p.z }, rotation: { x: 0, y: p.turn, z: 0 }, geometry: p.geometry, sightHidden: true, depthBias: -1 }));
+    s.glass.push(roomGlow);
+    // The crew's rooms on the right wall, as the control room.
+    for (const r of HM.sideRooms()) {
+      const lit = createNode({ geometry: r.glow, sightHidden: true });
+      addChild(root, createNode({ geometry: r.flat }), lit, createNode({ geometry: r.glass, sightHidden: true }));
+      for (const p of r.pictures) addChild(root, createNode({ position: { x: p.x, y: p.y, z: p.z }, rotation: { x: 0, y: p.turn, z: 0 }, geometry: p.geometry, sightHidden: true, depthBias: -1 }));
+      s.glass.push(lit);
+    }
+    // The lofts' small windows over them, their lamps dimmed with the glass, and in each its lit back, its monitor, its
+    // glass and one of the crew, on nodes of their own for `loftLife`.
+    const loft = HM.loftWindows(), loftGlow = createNode({ geometry: loft.glow, sightHidden: true });
+    addChild(root, createNode({ geometry: loft.flat }), loftGlow);
+    s.glass.push(loftGlow);
+    s.loftScreens = loft.screens;
+    s.loftDark = between(LOFT_LIFE.dark);
+    s.lofts = loft.windows.map((w) => {
+      const back = createNode({ position: { ...w.back }, geometry: loft.back, sightHidden: true, depthBias: 1 });
+      const screen = createNode({ position: { ...w.screen }, geometry: loft.screens[0], sightHidden: true, depthBias: 0.5 });
+      const head = createNode({ position: { x: 0, y: HM.LOFT.neck, z: 0 }, geometry: w.head, sightHidden: true });
+      const body = createNode({ position: { ...w.crew }, rotation: { x: 0, y: -Math.PI / 2, z: 0 }, geometry: w.body, sightHidden: true });
+      const glass = createNode({ geometry: w.glass, sightHidden: true });
+      addChild(body, head);
+      addChild(root, back, screen, body, glass);
+      return {
+        back, screen, glass, body, head, z: w.crew.z, y: w.crew.y, mode: "work", wait: between(LOFT_LIFE.work), x: (Math.random() * 2 - 1) * LOFT_LIFE.spot, to: 0, leave: false,
+        heading: -Math.PI / 2, look: 0, picture: 0, change: between(LOFT_LIFE.picture), blink: 0, out: 0
+      };
+    });
     s.fixtures = createNode({ geometry: fixtures.flat });
+    addChild(s.fixtures, createNode({ geometry: fixtures.detail, depthBias: DETAIL_BIAS }), createNode({ geometry: fixtures.crateDetail, depthBias: CRATE_BIAS }));
     addChild(root, s.mouth, s.fixtures);
     // The runway's marker lamps and the floor lamps, each a node of its own, so they come alive one at a time
     // (`lampLife`).
@@ -855,6 +1015,45 @@
     // The Jet at its dock, nose to the tunnel, as far built as its stage.
     s.jet = jetNode({ position: { x: L.jet.x, y: 0, z: L.jet.z } });
     addChild(root, s.jet);
+    // The ceiling cranes (`HM.CRANE`) on their runways, each a bridge, a trolley on it and, from a pivot under it the load
+    // swings from, the ropes and the hook block, and the forklift's beacon on each end of the bridge, a node each: LJ-02
+    // at work (`hangar-crane.js`), its crate, the laydown stands it moves it between and the safety spot it throws on the
+    // floor, LJ-01 parked at the far end, its beacons dark; all but the beacons and the spot dims with the hall's glass.
+    // LJ-02 stops while an anomaly has the hall's power off (`powered`), and holds its load while anything that walks the
+    // hall stands under it (`underLoad`).
+    {
+      const C = HM.CRANE, g = HM.crane();
+      const crane = (at, parts) => {
+        const bridge = createNode({ position: { x: C.cx, y: C.railY, z: at.z }, geometry: g.bridge });
+        const trolley = createNode({ position: { x: at.x - C.cx, y: 0, z: 0 }, geometry: parts.body });
+        const pivot = createNode({ position: { x: 0, y: C.ropeTop, z: 0 } });
+        const ropes = createNode({ scale: { x: 1, y: C.rope, z: 1 }, geometry: g.rope });
+        const hook = createNode({ position: { x: 0, y: -C.rope, z: 0 }, geometry: g.hook });
+        const lamps = createNode({ geometry: g.glow, sightHidden: true, depthBias: -0.25 }), bolts = createNode({ geometry: g.trolleyGlow, sightHidden: true });
+        addChild(pivot, ropes, hook);
+        addChild(trolley, createNode({ geometry: parts.trim, depthBias: -0.3 }), pivot, bolts);
+        const beacons = g.beacons.map((b) => createNode({ position: { x: b.x, y: b.y, z: b.z }, scale: { x: BEACON_SIZE, y: BEACON_SIZE, z: BEACON_SIZE }, geometry: BL.forkliftModels.beacon(), sightHidden: true }));
+        for (const b of beacons) b.glow = POWER.dome[0];
+        addChild(bridge, lamps, trolley, ...beacons);
+        addChild(root, bridge);
+        s.glass.push(lamps, bolts, bridge, trolley, hook);
+        return { bridge, trolley, pivot, ropes, hook, beacons };
+      };
+      addChild(root, createNode({ geometry: g.runways }), createNode({ geometry: HM.laydown() }));
+      const work = crane(C.park, g.trolley);
+      work.sling = createNode({ geometry: g.sling });
+      work.crate = createNode({ geometry: g.load });
+      const crateTrim = createNode({ geometry: g.loadTrim, depthBias: -0.5 });
+      work.slack = createNode({ geometry: g.slack });
+      // Its blue spot is the renderer's second spot light (`craneBeam`); Canvas 2D, which lights a face at a time, lays
+      // the picture of it on the floor instead.
+      if (renderer.kind === "canvas2d") work.spot = createNode({ rotation: { x: -Math.PI / 2, y: 0, z: 0 }, geometry: HM.craneSpot(), sightHidden: true, depthBias: SPOT_BIAS });
+      addChild(work.crate, crateTrim, work.sling, work.slack);
+      if (work.spot) addChild(root, work.spot);
+      s.glass.push(work.crate, crateTrim);
+      s.crane = BL.hangarCrane.create({ C, nodes: work, root, powered: () => s.anomaly.powered, under: underLoad, cue: (name, x, y, z) => audio && audio.craneCue(name, x, y, z) });
+      s.farCrane = crane(C.far, g.farTrolley);
+    }
     // The forklift, parked on the runway by the steps.
     s.forklift = forklift(L.forklift);
     addChild(root, s.forklift.root);
@@ -885,19 +1084,20 @@
     s.statsStars = createNode({ geometry: faces.stats.stars, sightHidden: true });
     s.statsFlag = createNode({ geometry: faces.stats.flag, sightHidden: true, visible: false });
     addChild(s.boards.stats, s.statsStars, s.statsFlag);
-    // The hangar's sign over the runway between two lit bolts, hung from the last gantry on two rods.
+    // The hangar's sign over the runway between two lit bolts, hung from the last roof rib on two rods.
     const [hx, hy, hz] = L.signs.hangar, hangarSign = FM.label("LIGHTNING JET\nHANGAR", "", { height: 1.7 });
     s.sign = sign(root, hangarSign, hx, hy, hz);
     for (const side of [-1, 1]) {
       addChild(root, createNode({ position: { x: hx + side * (hangarSign.width / 2 + 0.6), y: hy, z: hz + 0.05 }, geometry: FM.smoothBolt(1.2, 0.1, "#ffd23a", 1), sightHidden: true }));
-      addChild(root, createNode({ position: { x: hx + side * (hangarSign.width / 2 - 0.3), y: (hy + L.gantryY) / 2 + 0.4, z: hz - 0.05 }, geometry: models.box({ w: 0.06, h: L.gantryY - hy - 1.2, d: 0.06, color: "#2c2e33" }) }));
+      addChild(root, createNode({ position: { x: hx + side * (hangarSign.width / 2 - 0.3), y: (hy + 1 + L.roofY) / 2, z: hz - 0.05 }, geometry: models.box({ w: 0.06, h: L.roofY - hy - 1, d: 0.06, color: "#2c2e33" }) }));
     }
-    // The door, the Factory's own turned to face in, with the hall's warm dark through it and its sign the way back.
+    // The door, the Factory's own stone arch turned to face in and set in the hangar's steel bulkhead, with the hall's
+    // warm dark through it and its sign the way back.
     const door = FM.hangarDoor(), D = FM.HANGAR_DOOR;
     s.door = createNode({ position: { x: DOOR.x, y: DOOR.y, z: DOOR.z }, rotation: { x: 0, y: DOOR.turn, z: 0 } });
-    s.doorStone = createNode({ geometry: door.stone });
+    s.doorStone = createNode({ geometry: door.arch });
     s.doorGlow = createNode({ geometry: door.glow, sightHidden: true });
-    addChild(s.door, s.doorStone, s.doorGlow, createNode({ geometry: HM.hallGlimpse(), sightHidden: true }));
+    addChild(s.door, s.doorStone, createNode({ geometry: HM.doorBulkhead() }), s.doorGlow, createNode({ geometry: HM.hallGlimpse(), sightHidden: true }));
     // Through the shield, the Factory's hall as it stands, from the hall's own stand-in (`hangar-window.js`; WebGL only,
     // the glimpse staying behind it and in its place on Canvas 2D).
     if (renderer.kind !== "canvas2d") {
@@ -911,6 +1111,8 @@
     const launch = createNode({ position: { x: 0, y: 0, z: TUN.z1 } });
     addChild(root, launch);
     s.launch = { hum: 0, armed: true, phase: BL.labPhase.create(launch, { x: 0, z: TUN.z1, ry: 0, floorY: 0, room: { w: 2 * TUN.r, h: LAUNCH.ceilingY, from: 0, to: 1 } }, LAUNCH, 0, LAUNCH_TINT) };
+    // The haze deepens down the runway, but the shield's shimmer still reads at the tunnel's end (`SHIELD_PIERCE`).
+    for (const node of launch.children) node.geometry.fogPierce = SHIELD_PIERCE;
     const target = (n, kind, preset, radius) => {
       input.add(n, { kind, preset }, { radius });
       targets.push(n);
@@ -1005,22 +1207,31 @@
     s.statsFlag.visible = milestone;
   };
 
-  // Point lights, most important first so the lowest tier keeps them: the door's cyan, the landing, the dock's two work
-  // lamps, the boards' blue, the tunnel mouth's and the launch shield's, and two warm ones over the crew's floor
-  // (`HM.fixedLights`); the
-  // lanterns share what is left, the vault's and the floor's, the nearest the view first, each reaching as far as
-  // `hangar-models.js` says and flickering like a flame, as the Factory shares its own.
+  // Point lights, most important first so the lowest tier keeps them: the door's cyan, the hall's cool fill, the Jet's
+  // two rims, the boards' blue, the tunnel mouth's and the launch shield's, and warm pools at the booth and over the
+  // crew's desks (`HM.fixedLights`); the lanterns on the crates share what is left, the nearest the view first, each
+  // reaching as far as `hangar-models.js` says and flickering like a flame, as the Factory shares its own.
   const LANTERN_GLOW = HM.LANTERN_GLOW, FIXED = 10;
-  const lanternPool = models.cached(() => new Float32Array([...HM.dressing().lights, ...HM.fixtures().lights]));
+  const lanternPool = models.cached(() => new Float32Array(HM.fixtures().lights));
   const lamp = (i, x, y, z, radius, r, g, b) => {
     const o = i * 8, l = RENDER_OPTS.lights;
     l[o] = x; l[o + 1] = y; l[o + 2] = z; l[o + 3] = radius; l[o + 4] = r; l[o + 5] = g; l[o + 6] = b; l[o + 7] = 0;
   };
   const lightUp = () => {
     HM.fixedLights().forEach((l, i) => lamp(i, ...l));
-    for (let i = 0; i < 3; i++) { RENDER_OPTS.sky[i] = SKY[i]; RENDER_OPTS.ground[i] = GROUND[i]; }
+    const spot = RENDER_OPTS.spotLight, [x, y, z] = KEY.at, dx = KEY.aim[0] - x, dy = KEY.aim[1] - y, dz = KEY.aim[2] - z, d = Math.hypot(dx, dy, dz);
+    spot[0] = x; spot[1] = y; spot[2] = z; spot[3] = KEY.reach; spot[4] = dx / d; spot[5] = dy / d; spot[6] = dz / d;
+    spot[7] = Math.cos(KEY.outer); spot[8] = KEY.color[0]; spot[9] = KEY.color[1]; spot[10] = KEY.color[2]; spot[11] = Math.cos(KEY.inner);
+    for (let i = 0; i < 3; i++) { RENDER_OPTS.sky[i] = SKY[i]; RENDER_OPTS.ground[i] = GROUND[i]; RENDER_OPTS.fog[i] = HAZE[i]; }
     RENDER_OPTS.directStrength = DIRECT; RENDER_OPTS.ambientFloor = FLOOR;
     RENDER_OPTS.lightCount = Math.min(BL.glRenderer.POINT_LIGHT_CAPACITY, FIXED + lanternPool().length / 4);
+  };
+  // The crane's spot into the second spot light, as bright as its `level`; off at 0.
+  const craneBeam = (b) => {
+    const s = RENDER_OPTS.spotLight, B = CRANE_BEAM, h = clamp(b.y - B.gap, B.low, B.y);
+    s[12] = b.x; s[13] = h; s[14] = b.z; s[15] = b.level > 0 ? h * B.range : 0;
+    s[16] = 0; s[17] = -1; s[18] = 0; s[19] = h / Math.hypot(h, B.outer);
+    s[20] = B.color[0] * b.level; s[21] = B.color[1] * b.level; s[22] = B.color[2] * b.level; s[23] = h / Math.hypot(h, B.inner);
   };
   let poolScore = null;
   // The shared slots go to the lanterns nearest the view, nearest first, by repeated minimum: no sort, no list; as dim
@@ -1174,20 +1385,19 @@
       p.x = clamp(p.x, HALL.x0 + 3, HALL.x1 - 3);
       p.z = Math.min(p.z, HALL.front - 2);
     };
-    // Inside the walls, which lean in as they rise; the door's passage lets the eye nearer the front, and the launch
-    // tunnel lets it on down the runway, inside its frames and short of the shield.
+    // Inside the walls, clear of the ribs that stand out of the side walls (`WALL_GAP`); the door's passage lets the eye
+    // nearer the front, and the launch tunnel lets it on down the runway, inside its frames and short of the shield.
     const clampCamera = (p) => {
       p.y = clamp(p.y, 0.6, HALL.h - 1.5);
       if (inDoorway(p)) { p.z = Math.min(p.z, DOOR.z + 3); return; }
-      const lean = p.y / HALL.h * 2.6;
-      if (p.z < HALL.back + 1.6 + lean) {
+      if (p.z < HALL.back + SHELL.face + WALL_GAP) {
         p.x = clamp(p.x, -TUN.r + 1.5, TUN.r - 1.5);
         p.y = Math.min(p.y, TUN.y + TUN.r - 1.8);
         p.z = Math.max(p.z, TUN.z1 + 1.5);
         return;
       }
-      p.x = clamp(p.x, HALL.x0 + 1.6 + lean, HALL.x1 - 1.6 - lean);
-      p.z = Math.min(p.z, HALL.front - 1.6 - lean);
+      p.x = clamp(p.x, HALL.x0 + SHELL.face + SHELL.rib + WALL_GAP, HALL.x1 - SHELL.face - SHELL.rib - WALL_GAP);
+      p.z = Math.min(p.z, HALL.front - SHELL.face - WALL_GAP);
     };
     pilot = pilotMod.create({
       // The visitor's view, combat and weapon come in from the last scene and go on to the next (pilot.js `carried`).
@@ -1252,6 +1462,7 @@
     audio = BL.hangarAudio.create({ door: { x: DOOR.x, y: DOOR.y + 2, z: DOOR.z }, launch: { x: 0, y: TUN.y, z: TUN.z1 }, tunnel: { y: TUN.y, z0: TUN.z0, z1: TUN.z1 },
       booth: { x: F.x, y: 2, z: F.z }, engines: { x: LAYOUT.jet.x, y: exits[0].y, z: LAYOUT.jet.z + exits[0].z + 2, gap: Math.abs(exits[0].x) }, gear: { x: LAYOUT.jet.x, y: 0.5, z: LAYOUT.jet.z + NOSE_GEAR }, projector: HM.projector().lens, screen: HM.filmScreen().picture,
       forklift: { x: LAYOUT.forklift.x, y: 1.6, z: LAYOUT.forklift.z } });
+    audio.watchCrane(scene.crane.sound);
     // The engine static fire test's booth beside the runway (`hangar-fire.js`), and its settings: the Sound
     // button opens the hangar's sound panel, its level and the pad's vibration.
     scene.fire = BL.hangarFire.create({ root, jet: scene.jet, nozzles: scene.jet.children[0] || null, fx, audio, hold: (on) => {
@@ -1271,7 +1482,12 @@
     // under debug also sets the wait between them, s. It asks whether any Ooga stands on the Jet (`jetRidden`), and
     // whether anything that walks the hall comes near it (`nearJet`).
     const every = DEBUG ? Number(params.get("anomaly")) : NaN;
-    scene.anomaly = BL.hangarAnomaly.create({ root, fire: scene.fire, sis: scene.sis, fx, audio, jet: scene.jet, stage: JET_STAGE, auto: !params.has("nosim") || every > 0, gap: every > 0 ? every : null, riders: () => jetRidden(), near: (test) => nearJet(test) });
+    // A fire in one of the rooms on the catwalks' level and its operator putting it out (`hangar-room-fire.js`), which
+    // the lightning lights now and then: the control room, whose operator is the crew's last post, and the crew's rooms
+    // on the right wall, whose operators' posts come just before it.
+    const side = HM.sideRooms(), first = LAYOUT.crew.length - 1 - side.length;
+    scene.roomFire = BL.hangarRoomFire.create({ root, fx, audio, rooms: [{ spots: HM.controlRoom().spots, gorilla: scene.crew[LAYOUT.crew.length - 1] }, ...side.map((r, i) => ({ spots: r.spots, gorilla: scene.crew[first + i] }))] });
+    scene.anomaly = BL.hangarAnomaly.create({ root, fire: scene.fire, sis: scene.sis, fx, audio, jet: scene.jet, stage: JET_STAGE, room: scene.roomFire, auto: !params.has("nosim") || every > 0, gap: every > 0 ? every : null, riders: () => jetRidden(), near: (test) => nearJet(test) });
     // The terminals by the runway and the film show they start (`hangar-terminals.js`), its mood page reading hers.
     scene.terminals = BL.hangarTerminals.create({ root, audio, mood: () => scene.sis.mood, toast: hud.toast });
     for (const n of scene.terminals.nodes) {
@@ -1332,7 +1548,7 @@
       if (!pilot.arrive(avatar)) people.selectWeapon(avatar.weapon.selectedSlot, avatar);
       if (!pilot.loginViewRestored) {
         if (crossing) walkIn(crossing);
-        else pilot.navigate(ARRIVAL);
+        else pilot.navigate(arrival());
       }
       const heads = Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length);
       scene.gate.phase.body.track(avatar.root, avatar.traits.height * 2, heads);
@@ -1353,7 +1569,7 @@
     hangarScene.input = input;
     hangarScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
-      hangar: { layout: LAYOUT, feed: BL.jetFeed, get scene() { return scene; }, get avatar() { return avatar; }, get audio() { return audio; }, get fire() { return scene && scene.fire; }, get sis() { return scene && scene.sis && scene.sis.debug; }, get anomaly() { return scene && scene.anomaly && scene.anomaly.debug; }, get terminals() { return scene && scene.terminals && scene.terminals.debug; }, get guide() { return scene && scene.guide; } }
+      hangar: { layout: LAYOUT, feed: BL.jetFeed, get scene() { return scene; }, get avatar() { return avatar; }, get audio() { return audio; }, get fire() { return scene && scene.fire; }, get sis() { return scene && scene.sis && scene.sis.debug; }, get anomaly() { return scene && scene.anomaly && scene.anomaly.debug; }, get roomFire() { return scene && scene.roomFire && scene.roomFire.debug; }, get terminals() { return scene && scene.terminals && scene.terminals.debug; }, get crane() { return scene && scene.crane && scene.crane.debug; }, get guide() { return scene && scene.guide; } }
     };
   };
   const feetOf = () => avatar ? avatar.root.position.y - avatar.baseY : 0;
@@ -1443,6 +1659,7 @@
     // The Jet acting up on its own, driving the engines before the static fire test burns them; then the test, after
     // the crew has moved, so a presser it knocks down lies where the crew left them.
     s.anomaly.update(dt);
+    s.roomFire.update(dt);
     s.fire.update(dt, drivenHere);
     pressLife(s.forklift, dt);
     powerLife(s.forklift, dt);
@@ -1496,7 +1713,8 @@
       s.dimmed = dim; s.ambient = amb;
       const F = HM.fixedLights();
       for (let i = 1; i < FIXED; i++) if (i !== MOUTH_SLOT) { const l = F[i], o = i * 8; Lt[o + 4] = l[4] * dim; Lt[o + 5] = l[5] * dim; Lt[o + 6] = l[6] * dim; }
-      for (let i = 0; i < 3; i++) { RENDER_OPTS.sky[i] = SKY[i] * amb; RENDER_OPTS.ground[i] = GROUND[i] * amb; }
+      for (let i = 0; i < 3; i++) RENDER_OPTS.spotLight[8 + i] = KEY.color[i] * dim;
+      for (let i = 0; i < 3; i++) { RENDER_OPTS.sky[i] = SKY[i] * amb; RENDER_OPTS.ground[i] = GROUND[i] * amb; RENDER_OPTS.fog[i] = HAZE[i] * amb; }
       RENDER_OPTS.directStrength = DIRECT * amb; RENDER_OPTS.ambientFloor = FLOOR * amb;
       for (const g of s.glass) g.glow = dim;
     }
@@ -1512,21 +1730,26 @@
         hud.toast("Launch shield · sealed. The runway opens when Jet v2 is ready.");
       } else if (z > TUN.holdShort + SHIELD_REARM) s.launch.armed = true;
     }
-    // The fire test's lights (the booth's as dim as an anomaly has the hall's), an anomaly's, the film's, the forklift's
-    // beacon's and Tess's own, then the lanterns'.
+    // The fire test's lights (the booth's as dim as an anomaly has the hall's), an anomaly's, the control room's fire's,
+    // the film's, the forklift's beacon's and Tess's own, then the lanterns'.
     const fired = FIXED + s.fire.lights(RENDER_OPTS.lights, FIXED), odd = fired + s.anomaly.lights(RENDER_OPTS.lights, fired);
     for (let i = FIXED; i < fired; i++) { const o = i * 8; Lt[o + 4] *= dim; Lt[o + 5] *= dim; Lt[o + 6] *= dim; }
-    const shown = odd + s.terminals.lights(RENDER_OPTS.lights, odd);
+    const burnt = odd + s.roomFire.lights(RENDER_OPTS.lights, odd);
+    const shown = burnt + s.terminals.lights(RENDER_OPTS.lights, burnt);
     const beamed = shown + beaconLight(s.forklift, RENDER_OPTS.lights, shown);
     s.guide.light(RENDER_OPTS.lights, beamed * 8);
     glowNear(elapsed, beamed + 1, dim);
     heavens(s, dt, elapsed);
     neonLife(s, dt, elapsed, dim);
     lampLife(s, dt, elapsed, dim);
+    loftLife(s, dt, elapsed, dim);
     boardJets(s, dt);
+    s.crane.update(dt, camera.position);
+    craneBeam(s.crane.beam);
     dust.update(elapsed, pilot.orbit.target.x, pilot.orbit.target.z);
     for (let i = 0; i < s.crew.length; i++) {
-      s.crew[i].update(dt);
+      // The control room's fire holds its operator while it burns.
+      if (s.roomFire.holding !== s.crew[i]) s.crew[i].update(dt);
       const p = s.crew[i].root.position, a = s.crewActors[i];
       a.x = p.x; a.z = p.z;
     }
@@ -1584,6 +1807,7 @@
     scene.launch.phase.dispose();
     if (scene.window) scene.window.dispose();
     scene.anomaly.dispose();
+    scene.roomFire.dispose();
     scene.fire.dispose();
     scene.guide.dispose();
     soundPanel.dispose();
@@ -1616,6 +1840,7 @@
       scene.terminals.liveGeometry(set);
       scene.guide.liveGeometry(set);
       for (const a of scene.crew) a.liveGeometry(set);
+      for (const g of scene.loftScreens) set.add(g);
     }
     if (avatar) set.add(avatar.headOpen).add(avatar.headClosed);
     if (remotes) remotes.liveGeometry(set);
