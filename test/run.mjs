@@ -7277,6 +7277,42 @@ const gameRulesChecks = async () => {
     record("arcade scores: every carnival and retro machine carries its own permanent registered ID, including duplicates; excluded worlds have no score contract",
       Object.keys(machines).length === 16 && ids.length === 26 && new Set(ids).size === 26 && registered
         && L.frames.hockey.length === 3 && ["ghost", "poker", "dsb", "hockey"].every(id => BL.highscoreRules.get(id) === null), JSON.stringify({ registered, machines: ids }));
+    {
+      // The handrail slide: Space offers it only at a stair's head, inside the stair beside its hall-side handrail and
+      // facing down it, never anywhere along the deck's rail between the stairs' heads; a slide runs the cane from
+      // its head to its foot, 1.04 m over the treads' line and just outside the stair's edge, and no further; and it
+      // hops off onto the floor clear of both stairs.
+      const { HANDRAIL: H, HANDRAILS: R, handrailAt, slideAt, MEZZ: M } = A, deckEnd = M.stairs[1][0] - M.stairW / 2;
+      let offered = 0, strays = 0, deckRail = 0;
+      for (let x = -A.HALL.halfW; x <= A.HALL.halfW; x += 0.1) for (let z = A.HALL.back; z <= -10; z += 0.1) for (const yaw of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) for (const feet of [0, M.y]) {
+        const r = handrailAt(x, z, feet, yaw);
+        if (!r) continue;
+        offered++;
+        const [fx, , , hz] = M.stairs[r.index];
+        if (Math.sign(x) !== Math.sign(fx) || Math.abs(x) > Math.abs(fx) || Math.abs(x - fx) > M.stairW / 2 || z < hz - 1 || z > hz + 1.5 || yaw !== 0 || feet !== M.y) strays++;
+        if (Math.abs(x) <= deckEnd) deckRail++;
+      }
+      const heads = R.map(r => handrailAt(r.x0 + r.nx * 0.5, r.z0 + 0.3, M.y, r.ry) === r && !handrailAt(r.x0 + r.nx * 0.5, r.z0 + 0.3, M.y, r.ry + Math.PI));
+      record("handrail slide offer: Space offers a slide only at each stair's head beside its hall-side handrail facing down it, never along the deck's rail",
+        R.length === 2 && heads.every(Boolean) && offered > 0 && strays === 0 && deckRail === 0, JSON.stringify({ offered, strays, deckRail, heads }));
+      const out = { x: 0, y: 0, z: 0, wx: 0, wz: 0, floor: 0 }, runs = [];
+      for (const r of R) {
+        const [fx, fz, , hz] = M.stairs[r.index];
+        let off = 0, same = true, back = 0, last = -Infinity;
+        for (let i = 0; i <= 200; i++) {
+          const p = slideAt(r, r.len * i / 200, out), over = p.y - H.TOP - M.y * (fz - p.z) / (fz - hz);
+          same = same && p === out;
+          off = Math.max(off, Math.abs(over - H.H), Math.abs(Math.abs(fx - p.x) - (M.stairW / 2 + 0.05)), Math.abs(p.floor - M.y * (fz - p.z) / (fz - hz)));
+          if (p.z < last) back++;
+          last = p.z;
+        }
+        const head = { ...slideAt(r, 0, out) }, foot = { ...slideAt(r, r.len, out) }, past = { ...slideAt(r, r.len + 5, out) };
+        const clear = M.stairs.every(([sx, sfz, , shz]) => Math.abs(r.land.x - sx) > M.stairW / 2 + 0.3 || r.land.z > sfz + 0.3 || r.land.z < shz - 0.3);
+        runs.push({ off, same, back, head: Math.abs(head.z - hz) < 1e-9, foot: Math.abs(foot.z - fz) < 1e-9 && past.z === foot.z, land: r.land, clear, inside: Math.abs(r.land.x) < A.HALL.halfW - 1 && r.land.z > fz });
+      }
+      record("handrail slide path: a slide runs each hall-side cane from the deck to the floor and no further, and lands on the floor clear of both stairs",
+        runs.every(r => r.off < 1e-6 && r.same && r.back === 0 && r.head && r.foot && r.clear && r.inside), JSON.stringify(runs));
+    }
     const { WHEEL_VALUES: V, WHEEL_COST: cost, wheelAt, wheelStop } = BL.arcadeModels;
     const ev = V.reduce((s, v) => s + v, 0) / V.length, jackpot = Math.max(...V), missed = [];
     for (const from of [0, -0.3, -1234.567]) for (let k = 0; k < V.length; k++) for (const at of [0.2, 0.5, 0.8]) {
@@ -17053,6 +17089,45 @@ const arcadeMaintenance = { name: "arcade maintenance", why: "regression: simula
     r.upright.length === 6 && r.bent.length === 0 && r.crowd === 0 && r.walkers === 0 && r.bots === 0 && r.staff === 6 && !r.playing
     && r.rows.every(g => g.phase !== "greet" && g.phase !== "chat") && r.jobs.some(g => g.done > 0 || g.walked > 0), JSON.stringify(r));
 } };
+const arcadeHandrail = { name: "arcade handrail slide", why: "playthrough: Space at a stair's head slides the visitor's Ooga sitting down its hall-side handrail, where others see it sit, and hops it off onto the floor clear of the stair; Space on the way hops off onto the treads; the deck's rail never offers it", run: async (b) => {
+  const place = (x, z, yaw) => b.evaluate(`(() => { const B = __ooga, a = B.pilot.player, p = a.root.position; p.x = ${x}; p.z = ${z}; p.y = BL.arcadeModels.MEZZ.y + a.baseY; a.root.rotation.y = ${yaw}; a.hop = a.hopV = 0; B.advance(0.1, 1 / 20); })()`);
+  const read = (i) => b.evaluate(`(() => {
+    const B = __ooga, A = B.arcade, a = B.pilot.player, p = a.root.position, r = BL.arcadeModels.HANDRAILS[${i}], s = BL.net.state.self, h = document.getElementById("hint");
+    return { hint: h.classList.contains("show") ? h.textContent : "", sliding: !!A.slide.rail, seated: !!a.camp.seat, x: p.x, z: p.z, feet: p.y - a.baseY,
+      ground: A.supportAt(p.x, p.z, p.y - a.baseY), walkable: A.walkable(p.x, p.z, p.x, p.z, p.y - a.baseY, a.bodyHeight, a),
+      onRail: Math.abs(s.x - r.x0) < 0.02 && s.z > r.z0 && s.z < r.z1, sat: A.railSitter(a), legs: a.parts.legL.rotation.x };
+  })()`);
+  const step = (s) => b.evaluate(`__ooga.advance(${s}, 1 / 20)`);
+  const rails = await b.evaluate(`BL.arcadeModels.HANDRAILS.map(r => ({ x: r.x0 + r.nx * 0.5, z: r.z0 - 0.3, ry: r.ry, z1: r.z1 }))`), rows = [];
+  for (let i = 0; i < rails.length; i++) {
+    const r = rails[i];
+    await place(r.x, r.z, r.ry);
+    const offer = await read(i);
+    await b.key(" "); await step(0.5);
+    const mid = await read(i);
+    await step(1.5);
+    const end = await read(i);
+    rows.push({ offer: offer.hint, mid, end: { ...end, past: end.z - r.z1 } });
+  }
+  // Space on the way down hops off sideways onto the treads.
+  await place(rails[0].x, rails[0].z, rails[0].ry);
+  await b.key(" "); await step(0.4); await b.key(" "); await step(0.3);
+  const off = await read(0);
+  // Facing away up the deck, or at the deck rail's end beside the handrail, nothing is offered and Space only jumps.
+  const deck = [];
+  for (const [x, z, yaw] of [[rails[0].x, rails[0].z, Math.PI], [14.5, -18.5, 0]]) {
+    await place(x, z, yaw);
+    const before = await read(0);
+    await b.key(" "); await step(0.6);
+    const after = await read(0);
+    deck.push({ hint: before.hint, seated: after.seated || after.sliding });
+  }
+  record("arcade handrail slide: Space at either stair's head sits the Ooga on its hall-side handrail down to the floor clear of the stair, seen sitting on the cane; Space on the way hops off onto the treads; the deck's rail never offers it",
+    rows.every(r => r.offer.includes("slide") && r.mid.sliding && r.mid.seated && r.mid.onRail && r.mid.sat && Math.abs(r.mid.legs + Math.PI / 2) < 1e-6
+      && !r.end.sliding && !r.end.seated && Math.abs(r.end.feet) < 0.01 && r.end.ground === 0 && r.end.walkable && r.end.past > 0.5 && !r.end.sat)
+      && !off.seated && !off.sliding && off.feet > 0.5 && Math.abs(off.feet - off.ground) < 0.01 && off.walkable
+      && deck.every(d => !d.hint.includes("slide") && !d.seated), JSON.stringify({ rows, off, deck }));
+} };
 const arcadeStage = { name: "arcade stage approaches", why: "regression: oversized decorative root collision boxes blocked walking onto the central stage from its sides and back", run: async (b) => {
   const r = await b.evaluate(`(() => {
     const B = __ooga, A = B.arcade, S = BL.arcadeModels.STAGE, a = B.pilot.player, rows = [];
@@ -21689,7 +21764,7 @@ scene("arcade", { label: "cabinet public route", opts: { motion: true }, steps: 
   const cancelled = await wait(`document.body.dataset.cabinetPhase === 'idle' && document.body.dataset.activeScene === 'arcade'`);
   record("cabinet public route: direct arrival and a link from the hall both visit the cabinet, play and cancel cleanly", menu && full && returned && linked && cancelled, JSON.stringify({menu,full,returned,linked,cancelled}));
 } }] });
-scene("arcade", { query: "character=portlandhodl", exclusive: true, steps: [arcadeWalking, arcadeMachine, arcadeHall, arcadeCarry, arcadeMaintenance, arcadeStage, arcadePlay, trip("arcade")] });
+scene("arcade", { query: "character=portlandhodl", exclusive: true, steps: [arcadeWalking, arcadeMachine, arcadeHall, arcadeCarry, arcadeMaintenance, arcadeStage, arcadeHandrail, arcadePlay, trip("arcade")] });
 scene("arcade", { query: "character=portlandhodl", steps: [arcadeSpectatorAmmo] });
 scene("arcade", { label: "ghost spectate follows", query: "character=portlandhodl", steps: [arcadeSpectateFollow] });
 scene("arcade", { query: "character=portlandhodl", steps: [arcadeRemoteWeapons] });
