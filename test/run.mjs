@@ -28176,6 +28176,39 @@ record("character visibility source bakes: ownership wrappers share exact immuta
         record("NPC sync: matching site order accepts poses and events; incompatible catalogs and host changes release stale poses",
           accepted && rejected && cleared && resumed && releasedHost && rejectedHost && owned && remote,
           JSON.stringify({ accepted, rejected, cleared, resumed, releasedHost, rejectedHost, owned, remote }));
+        // Regression (#498): an Ooga asleep on this page carries its crew's sleepRotation on the root. An upright
+        // host frame must stand it up, not ease the hidden Euler under that quaternion and slide it along on its
+        // side; a host's own sleep quaternion still lies it down and wakes it, and the crew's object is never written.
+        const sleeper = crew.list.find(c => c.state === "sleeping" && c.bedTravel.mode === "rest");
+        sleeper.root.quaternion = sleeper.sleepRotation;
+        const sr = sleeper.root, sleepQ = sleeper.sleepRotation, localQ = Array.from(sleepQ);
+        const sleeperSaved = { state: sleeper.state, position: { ...sr.position }, rotation: { ...sr.rotation } };
+        const lying = BL.math.quat.create(); BL.math.quat.fromEuler(lying, -Math.PI / 2, 0.3, 0);
+        BL.net.state.hostId = BL.net.state.selfId = "host";
+        sync = BL.npcSync.create(options);
+        sleeper.state = "chilling"; sr.quaternion = null; Object.assign(sr.position, { x: 2, y: sleeper.baseY, z: 5 }); Object.assign(sr.rotation, { x: 0, y: 0.5, z: 0 });
+        sync.update(0.3); const uprightFrame = BL.net.npcFrame;
+        sleeper.state = "sleeping"; sr.quaternion = lying;
+        sync.update(0.3); const lyingFrame = BL.net.npcFrame;
+        sync.dispose();
+        sleeper.state = sleeperSaved.state; Object.assign(sr.position, sleeperSaved.position); Object.assign(sr.rotation, sleeperSaved.rotation); sr.quaternion = sleepQ;
+        BL.net.state.selfId = "follower";
+        const followSleeper = (frame) => { BL.net.npcFrame = frame; BL.net.state.npcVersion++; sync.update(0.05); };
+        const near = (q, w) => !!q && Math.abs(Math.abs(q[0] * w[0] + q[1] * w[1] + q[2] * w[2] + q[3] * w[3]) - 1) < 1e-4;
+        sync = BL.npcSync.create(options);
+        followSleeper(uprightFrame);
+        const stood = { puppet: sleeper.puppet, quaternion: sr.quaternion === null, yaw: Math.abs(sr.rotation.y - 0.5) < 1e-6 && sr.rotation.x === 0 && sr.rotation.z === 0, state: sleeper.state };
+        followSleeper(lyingFrame);
+        const laid = { owned: !!sr.quaternion && sr.quaternion !== sleepQ, pose: near(sr.quaternion, Array.from(lying)), state: sleeper.state };
+        followSleeper(uprightFrame);
+        const woke = { quaternion: sr.quaternion === null, state: sleeper.state };
+        const untouched = Array.from(sleepQ).every((v, j) => v === localQ[j]);
+        sync.dispose();
+        sleeper.state = sleeperSaved.state; Object.assign(sr.position, sleeperSaved.position); Object.assign(sr.rotation, sleeperSaved.rotation); sr.quaternion = sleepQ;
+        const sideways = { stood, laid, woke, untouched };
+        record("NPC sync: a local sleep quaternion yields to an upright host frame; host sleep poses lie down and wake",
+          stood.puppet && stood.quaternion && stood.yaw && stood.state === "chilling" && laid.owned && laid.pose && laid.state === "sleeping"
+            && woke.quaternion && woke.state === "chilling" && untouched, JSON.stringify(sideways));
         // Real host frames, applied by a real follower: a same-status move under
         // SNAP still eases, while a status change under SNAP (a passive beam on
         // the host) places the puppet at once.
