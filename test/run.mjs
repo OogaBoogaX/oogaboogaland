@@ -6087,7 +6087,9 @@ const hammockChecks = async () => {
   const at = new Float64Array(3), target = new Float64Array(3);
   let peak = 0, ropeError = 0, outside = 0;
   for (let i = 0; i < 300; i++) {
-    ham.kick(); ham.update(1 / 60, i / 60, false); R.scene.updateWorld(root);
+    // Shaken palms, bananas and fast walk-ins (three bodies taking turns) all pile onto the swing, which must still hold.
+    ham.kick(); ham.kick(0.02); ham.bump(i % 3, fit.x, 0, fit.z - fit.swing.across - 0.1, 0, 11);
+    ham.update(1 / 60, i / 60, false); R.scene.updateWorld(root);
     peak = Math.max(peak, Math.abs(ham.angle));
     for (const rope of ham.ropes) {
       R.math.mat4.transformPoint(at, rope.node.world, 0, 1, 0);
@@ -6098,15 +6100,241 @@ const hammockChecks = async () => {
     for (let k = 0; k < v.length; k += 3) {
       R.math.mat4.transformPoint(at, ham.bedNode.world, v[k], v[k + 1], v[k + 2]);
       const dx = at[0] - fit.x, dz = at[2] - fit.z, along = dx * fit.ux + dz * fit.uz, side = dx * fit.nx + dz * fit.nz;
-      fit.envelope.nearest(along, side, target);
+      fit.swing.nearest(along, side, target);
       outside = Math.max(outside, Math.hypot(along - target[0], side - target[1]));
     }
   }
   ham.update(0, 0, true); R.scene.updateWorld(root); props.sync();
   const floor = props.supportAt(fit.x, fit.z, 4, 0, 0.3);
-  record("hub hammock: direct ropes remain joined at both ends through bounded sway, the cloth stays within its planned swing, and there is no floor at tree-tie height",
+  record("hub hammock: direct ropes remain joined at both ends through bounded sway, the cloth stays within its swing, and there is no floor at tree-tie height",
     ham.ropes.length === 2 && ropeError < 1e-5 && outside < 1e-6 && peak <= H.SWAY_MAX && floor > 0.3 && floor < 0.7,
     JSON.stringify({ ropeError, outside, peak, floor }));
+  // Rocking it by walking into it or shooting it: the real module on the same plan (pivot at x 0, z 4, along +x, across +z).
+  const fresh = () => H.create({ plan: fit, root: R.scene.createNode(), solids: R.solidProps.create(), ra: 0.15, rb: 0.15, seed: 1 });
+  const sideZ = fit.z - (fit.swing.across + 0.1);
+  // The amplitude one body at the bed's side adds going across it at `speed`, a fresh hammock each time.
+  const walkIn = (speed, x = fit.x, z = sideZ, feet = 0, vx = 0) => { const h = fresh(), before = h.amp; h.bump(1, x, feet, z, vx, speed); return h.amp - before; };
+  const fast = walkIn(11), slow = walkIn(2), crawl = walkIn(0.7);
+  const pressed = fresh(); for (let i = 0; i < 100; i++) pressed.bump(1, fit.x, 0, sideZ + 0.15, 0, 0.3);
+  // One contact is one push: pushing again in the same contact adds nothing, and a body that steps clear (0.8 m off the outline) can push again.
+  const cool = fresh(), c0 = cool.amp; cool.bump(1, fit.x, 0, sideZ, 0, 11); const c1 = cool.amp; cool.bump(1, fit.x, 0, sideZ, 0, 11); const c2 = cool.amp;
+  cool.bump(1, fit.x, 0, sideZ - 1.5, 0, 0); cool.bump(1, fit.x, 0, sideZ, 0, 11); const c3 = cool.amp; const other = fresh(); other.bump(1, fit.x, 0, sideZ, 0, 11); const o1 = other.amp; other.bump(2, fit.x, 0, sideZ, 0, 11);
+  record("hub hammock walk-in: a fast run into the side rocks it more than a walk, a walk more than a crawl; standing, leaning, walking along it, arriving, and being clear of it add nothing; each contact counts once until the body steps clear",
+    fast > slow && slow > crawl && crawl > 0 && crawl < fast / 5 && fast <= H.SWAY_MAX
+      && walkIn(0) === 0 && walkIn(0.3) === 0 && pressed.amp === c0 && walkIn(0, fit.x, sideZ, 0, 11) === 0
+      && walkIn(75) === 0 && walkIn(11, fit.x, fit.z - fit.swing.across - 1) === 0 && walkIn(11, fit.x, sideZ, 2) === 0
+      && c1 > c0 && c2 === c1 && c3 > c2 && other.amp > o1 && other.amp <= H.SWAY_MAX,
+    JSON.stringify({ fast, slow, crawl, pressed: pressed.amp - c0, c: [c0, c1, c2, c3], other: [o1, other.amp] }));
+  const through = (a, b) => fresh().crosses(...a, ...b);
+  const shot = fresh(), shotBefore = shot.amp; shot.hit(fit.x, fit.z + 6, fit.x, fit.z - 6);
+  record("hub hammock banana: a round through the bed's swing rocks it, one over it, short of it, past its end or degenerate does not, and the first round of a burst is a whole hit, as a run is",
+    through([0, 0.6, 0], [0, 0.6, 8]) && through([0, 2.056, 0], [0, -0.856, 8]) && through([-5, 0.6, 4], [5, 0.6, 4])
+      && !through([0, 2.2, 0], [0, 2.2, 8]) && !through([0, 0.6, 0], [0, 0.6, 2.4]) && !through([2.2, 0.6, 0], [2.2, 0.6, 8])
+      && !through([1, 1, 1], [1, 1, 1]) && !through([NaN, 1, 1], [0, 1, 2]) && shot.amp > shotBefore && Math.abs(shot.amp - shotBefore - fast) < 0.016,
+    JSON.stringify({ fast }));
+  const settle = (h, seconds, onStep) => { for (let i = 0; i < seconds * 60; i++) { h.update(1 / 60, i / 60, false); onStep(h.amp); } };
+  const empty = fresh(), held = fresh(); held.seats[0].remote = 1;
+  empty.bump(1, fit.x, 0, sideZ, 0, 11); held.bump(1, fit.x, 0, sideZ, 0, 11);
+  const rocked = empty.amp; let last = rocked, rose = false, at2 = 0;
+  settle(empty, 2, (a) => { if (a > last) rose = true; last = a; }); at2 = empty.amp; settle(held, 2, () => {});
+  settle(empty, 38, (a) => { if (a > last) rose = true; last = a; }); settle(held, 38, () => {});
+  record("hub hammock settling: a rocked bed only ever eases back, is still swinging after 2 s, is at rest after 20 s, and rests wider with someone in it",
+    !rose && at2 > 0.012 + 0.01 && empty.amp - 0.012 < 1e-3 && held.amp > empty.amp + 0.01,
+    JSON.stringify({ rose, at2, empty: empty.amp, held: held.amp }));
+  // The seat's sideways travel (what the Ooga lying in it feels) over one swing period and a bit, with and without a hard walk-in.
+  const sway = (rock) => { const h = fresh(), s = h.seats[0]; if (rock) h.bump(1, fit.x, 0, sideZ, 0, 11); let m = 0;
+    for (let i = 0; i < 200; i++) { h.update(1 / 60, i / 60, false); m = Math.max(m, Math.abs((s.x - fit.x) * fit.nx + (s.z - fit.z) * fit.nz)); } return m; };
+  const rockedSway = sway(true), calmSway = sway(false);
+  record("hub hammock lying in it: the Ooga on the seat swings further after a hard walk-in, and the same events give the same swing twice",
+    rockedSway > calmSway && sway(true) === rockedSway, JSON.stringify({ rockedSway, calmSway }));
+  // Pushing and firing until the Ooga in it falls out. Hits add to one count shared by everyone: a hard run or walk into the side is one, a burst
+  // of fire is one however short (rounds with no gap over 0.4 s), and each further round of a held trigger adds a little more, so about 20
+  // rounds tip one out alone; four hits tip one out, and the count is forgotten after a minute without a hit. The rifle's cadence is read from
+  // crew.js (3-round bursts 0.09 s apart, 0.44 s between them, a magazine of 30). Someone lying in it is `seats[0].remote = 1` at the occupied
+  // rest, which is what `enter` leaves. `run` plays events (`t` seconds, `slot` the body, `speed` m/s; rounds are fired from the +n side across the
+  // bed) and returns the number of the group (run or burst) at which `spilling` first showed, or null.
+  const settled = () => { const h = fresh(); h.seats[0].remote = 1; h.kick(0.035 - 0.012); h.update(1 / 60, 0, false); return h; };
+  const [, AMMO_MAX, BURST_ROUNDS, BURST_STEP, SHOT_PERIOD] = /AMMO_MAX = (\d+),.*BURST_ROUNDS = (\d+), BURST_STEP = ([\d.]+), SHOT_PERIOD = ([\d.]+)/.exec(await readFile(new URL("../src/js/crew.js", import.meta.url), "utf8")).map(Number);
+  const heldAt = (k) => Math.floor(k / BURST_ROUNDS) * SHOT_PERIOD + (k % BURST_ROUNDS) * BURST_STEP;
+  const shotFrom = [fit.x + fit.nx * 6, fit.z + fit.nz * 6], shotTo = [fit.x - fit.nx * 6, fit.z - fit.nz * 6];
+  const shoot = (h, from = shotFrom, to = shotTo) => h.hit(from[0], from[1], to[0], to[1]);
+  const pushes = (times, speed = 11.6, slots = [1], stay = false) => times.map((t, k) => ({ t, group: k + 1, speed, slot: slots[k % slots.length], stay }));
+  const evenly = (n, gap, speed, slots) => pushes(Array.from({ length: n }, (_, k) => k * gap), speed, slots);
+  const bursts = (n, period, rounds = 1) => Array.from({ length: n * rounds }, (_, k) => ({ t: Math.floor(k / rounds) * period + heldAt(k % rounds), round: true, group: Math.floor(k / rounds) + 1 }));
+  const mix = (a, b, gap) => [...evenly(a, gap), ...bursts(b, gap).map((e) => ({ ...e, t: e.t + a * gap, group: e.group + a }))].sort((x, y) => x.t - y.t);
+  const run = (h, plan, onGroup) => {
+    let t = 0, tipAt = null;
+    const advance = (to) => { while (t < to - 1e-9) { const dt = Math.min(0.25, to - t); h.update(dt, t, false); t += dt; } };
+    for (let i = 0; i < plan.length; i++) {
+      const e = plan[i]; advance(e.t);
+      if (e.round) shoot(h); else { if (!e.stay) h.bump(e.slot, fit.x, 0, sideZ - 1.5, 0, 0); h.bump(e.slot, fit.x, 0, sideZ, 0, e.speed); }
+      if (h.spilling && tipAt === null) tipAt = e.group;
+      if (onGroup && (i === plan.length - 1 || plan[i + 1].group !== e.group)) onGroup(e.group, h.amp);
+    }
+    advance(plan[plan.length - 1].t + 1);
+    return tipAt;
+  };
+  const tipsAt = (plan) => run(settled(), plan);
+  const peaksOf = (plan) => { const out = []; run(settled(), plan, (g, amp) => out.push(amp)); return out; };
+  const gaps = [1, 3, 10, 30, 50, 59], periods = [1.25, 3, 10, 50];
+  const pushTips = gaps.map((g) => tipsAt(evenly(8, g))), burstTips = periods.map((q) => tipsAt(bursts(8, q, 2)));
+  record("hub hammock fall-out: the fourth hard run tips the Ooga out and the first three never do, however long between them up to a minute, and so with separate bursts of fire, even of two rounds, and so with separate bursts of fire, even of two rounds",
+    pushTips.every((n) => n === 4) && burstTips.every((n) => n === 4), JSON.stringify({ gaps, pushTips, periods, burstTips }));
+  // The count forgets: three hits, a gap of more than a minute, then one more is the first again, so three more are needed.
+  const forget = tipsAt(pushes([0, 2, 4, 65, 67, 69, 71])), nearly = tipsAt(pushes([0, 2, 4, 63]));
+  record("hub hammock fall-out: after a minute without a hit the count starts again: three, a gap of 61 s, then one does not tip, and three more are needed",
+    forget === 7 && nearly === 4 && tipsAt(pushes([0, 2, 4, 66])) === null, JSON.stringify({ forget, withinAMinute: nearly }));
+  // A staircase: every hit takes the swing clearly higher than the last (at least 0.06 rad, 3.4 degrees, even when one was timed with
+  // the swing and the next was not), the first already a real swing (over 7 degrees), however long the gaps between them.
+  const stairs = [...[1, 3, 40].map((g) => peaksOf(evenly(4, g))), ...[1.25, 3, 40].map((q) => peaksOf(bursts(4, q)))];
+  record("hub hammock fall-out: each hit, run or burst, raises the swing at least 3.4 degrees above the last, the first to over 7 degrees, after gaps of 1 s, 3 s or 40 s alike",
+    stairs.every((pk) => pk.length === 4 && pk.every((v, k) => k === 0 || v - pk[k - 1] >= 0.06) && pk[0] >= 0.125 - 1e-9 && pk[3] <= H.SWAY_MAX), JSON.stringify({ stairs }));
+  // The count is shared by everyone: two bodies' hits add up, in any order, at the same moment or apart; one body still counts once for
+  // one contact (the per-body cooldown); and a hit three-quarters of a minute after another still counts with them.
+  const twoBodies = tipsAt(evenly(4, 20, 11.6, [1, 2])), together = tipsAt(pushes([0, 0, 2, 2], 11.6, [1, 2, 1, 2])), onceEach = tipsAt(pushes([0, 0.2, 2, 4], 11.6, [1], true));
+  record("hub hammock fall-out: hits from different bodies share one count: two and two within a minute tip, together or apart; one body's contact counts once however long it is held; three mixed, a gap of 61 s, then one does not",
+    twoBodies === 4 && together === 4 && onceEach === null && tipsAt(pushes([0, 20, 40, 101], 11.6, [1, 2, 3, 1])) === null, JSON.stringify({ twoBodies, together, onceEach }));
+  // Runs and bursts add up together: any four hits tip on the fourth, any three never tip.
+  const fours = [0, 1, 2, 3, 4].map((a) => tipsAt(mix(a, 4 - a, 2)));
+  record("hub hammock fall-out: runs and bursts add up together: any four tip on the fourth, any three never tip",
+    fours.every((n) => n === 4) && [0, 1, 2, 3].every((a) => tipsAt(mix(a, 3 - a, 2)) === null), JSON.stringify({ fours }));
+  // A held trigger tips an occupant out by itself, at about 20 rounds of the magazine of 30, and every round takes the swing higher. A push and a
+  // held trigger together tip sooner; rounds a burst-gap apart are separate bursts, closer ones are one.
+  const hold = (h, n, t0 = 0) => { const amps = []; let t = t0, tip = null;
+    for (let k = 0; k < n; k++) { const at = t0 + heldAt(k); while (t < at - 1e-9) { const dt = Math.min(0.05, at - t); h.update(dt, t, false); t += dt; } shoot(h); amps.push(h.amp); if (tip === null && h.spilling) tip = k + 1; }
+    return { tip, amps }; };
+  const full = hold(settled(), AMMO_MAX), short = hold(settled(), 19), withPush = settled(); withPush.bump(1, fit.x, 0, sideZ, 0, 11.6); const pushPlusHold = hold(withPush, AMMO_MAX, 2);
+  const pairs = (gap) => run(settled(), Array.from({ length: 8 }, (_, k) => ({ t: Math.floor(k / 2) * 5 + (k % 2) * gap, round: true, group: k + 1 })));
+  record("hub hammock fall-out: a held trigger tips an occupant out by itself at about 20 rounds of a magazine of 30, rising with every round; a push and a held trigger tip sooner; rounds under 0.4 s apart are one burst",
+    full.tip === 20 && short.tip === null && AMMO_MAX >= 20 && full.amps.slice(0, 20).every((v, k) => k === 0 || v > full.amps[k - 1]) && full.amps[19] - full.amps[0] >= 0.1
+      && pushPlusHold.tip >= 12 && pushPlusHold.tip <= 16 && pairs(0.5) === 4 && pairs(0.3) === 7,
+    JSON.stringify({ magazine: AMMO_MAX, tipAtRound: full.tip, nineteen: short.tip, climb: [full.amps[0], full.amps[9], full.amps[19]], pushPlusHold: pushPlusHold.tip, apartHalf: pairs(0.5), apartThird: pairs(0.3) }));
+  // A hit knocks the bed away from where it came from: a shot from the +n side moves the cloth toward -n on the next frames, from the -n side
+  // toward +n, whatever the phase of the swing, and so does a push (a body on the +n side sends it toward -n).
+  const acrossOf = (h) => (h.seats[0].x - fit.x) * fit.nx + (h.seats[0].z - fit.z) * fit.nz, awayChecks = [];
+  for (const sgn of [1, -1]) for (let k = 0; k < 8; k++) {
+    const h = settled(), frames = Math.round((k * Math.PI / 4) / (2.1 / 60)); let t = 0; for (let i = 0; i < frames; i++) { h.update(1 / 60, t, false); t += 1 / 60; }
+    const before = acrossOf(h); shoot(h, [fit.x + fit.nx * 6 * sgn, fit.z + fit.nz * 6 * sgn], [fit.x - fit.nx * 6 * sgn, fit.z - fit.nz * 6 * sgn]);
+    h.update(1 / 60, t, false); t += 1 / 60; const first = (acrossOf(h) - before) * -sgn;
+    for (let i = 0; i < 14; i++) { h.update(1 / 60, t, false); t += 1 / 60; }
+    awayChecks.push({ sgn, k, first, later: (acrossOf(h) - before) * -sgn });
+  }
+  const pushAway = [1, -1].map((sgn) => { const h = settled(), before = acrossOf(h); h.bump(1, fit.x, 0, fit.z + (fit.swing.across + 0.1) * sgn, 0, 11.6 * -sgn * fit.nz / Math.abs(fit.nz || 1)); h.update(1 / 60, 0, false); return (acrossOf(h) - before) * -sgn; });
+  record("hub hammock fall-out: a round fired from one side knocks the bed away from the shooter on the very next frame and the quarter second after, from either side and at every phase of the swing",
+    awayChecks.every((r) => r.first >= 0.002 && r.later >= 0.02), JSON.stringify({ worstFirst: Math.min(...awayChecks.map((r) => r.first)), worstLater: Math.min(...awayChecks.map((r) => r.later)), pushAway }));
+  // Tipped out, the Ooga rolls out over the edge on the side the bed was knocked toward, away from the shots, lies there and gets up on the spot:
+  // upright exactly at the landing spot within 1.2 to 1.8 s. While it rolls, other pages are told it no longer rests, getting up is ignored, and
+  // the bed does not report a fall again. (A stub body: the roll touches only the root, limbs and head; the gear stays parked.)
+  const stubCave = () => { const part = () => ({ rotation: { x: 0, y: 0, z: 0 }, quaternion: null, position: { x: 0, y: 0.5, z: 0 } });
+    return { root: { position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, quaternion: null, visible: true }, parts: { legL: part(), legR: part(), armL: part(), armR: part(), head: part() }, traits: { height: 1.4 }, camp: { seat: null }, baseY: 0.6 }; };
+  const upOf = new Float64Array(3), rolls = [-1, 1].map((sgn) => {
+    const h = settled(), seat = h.seats[0], cave = stubCave(); seat.remote = 0; seat.sitter = cave; cave.camp.seat = seat; h.update(1 / 60, 0, false);
+    cave.root.position.x = seat.x; cave.root.position.y = seat.y + 0.25; cave.root.position.z = seat.z;
+    for (let k = 0; k < 4; k++) { h.update(1, k, false); shoot(h, [fit.x + fit.nx * 6 * sgn, fit.z + fit.nz * 6 * sgn], [fit.x - fit.nx * 6 * sgn, fit.z - fit.nz * 6 * sgn]); }
+    const spilled = h.spilling, side = h.fallSide, out = fit.swing.across + H.STAND + 1.2;
+    const target = { x: fit.x + fit.nx * side * out, z: fit.z + fit.nz * side * out, floor: 0, y: 0.6, ry: Math.atan2(fit.nx * side, fit.nz * side), side };
+    let done = null, t = 0; const startAcross = (cave.root.position.x - fit.x) * fit.nx + (cave.root.position.z - fit.z) * fit.nz;
+    const began = h.tip(cave, target, () => { done = t; seat.sitter = null; cave.camp.seat = null; });
+    // The body's own direction that points straight up as the roll begins (its chest, lying face-up): it should tip over toward the landing side.
+    const q0 = cave.root.quaternion, chest = new Float64Array(3); R.math.quat.rotateVec(chest, [-q0[0], -q0[1], -q0[2], q0[3]], 0, 1, 0);
+    const quiet = h.stateFor(cave) === 0 && !h.spilling && h.leave === undefined && seat.leave(cave, { x: 0, y: 0, z: 0, ry: 0 }, () => {}) && !seat.exit;
+    let rolledToward = 0, tilted = 0, last = null;
+    while (done === null && t < 3) { h.update(1 / 60, t, false); t += 1 / 60;
+      if (Math.abs(t - 0.3) < 1 / 120) { rolledToward = ((cave.root.position.x - fit.x) * fit.nx + (cave.root.position.z - fit.z) * fit.nz - startAcross) * side; R.math.quat.rotateVec(upOf, cave.root.quaternion, chest[0], chest[1], chest[2]); tilted = (upOf[0] * fit.nx + upOf[2] * fit.nz) * side; }
+      if (done === null) { R.math.quat.rotateVec(upOf, cave.root.quaternion, 0, 1, 0); last = { x: cave.root.position.x, y: cave.root.position.y, z: cave.root.position.z, up: upOf[1] }; } }
+    return { sgn, spilled, side, began, quiet, rolledToward, tilted, done, atLanding: Math.hypot(last.x - target.x, last.z - target.z), standY: last.y - target.y, upright: last.up };
+  });
+  record("hub hammock fall-out: the tipped Ooga rolls out over the edge away from the gunfire, lies, and gets up upright at the landing spot in 1.2 to 1.8 s; meanwhile it no longer rests, ignores getting up and is not tipped again",
+    rolls.every((r) => r.spilled && r.side === -r.sgn && r.began && r.quiet && r.rolledToward > 0.3 && r.tilted > 0.3 && r.done >= 1.2 && r.done <= 1.8
+      && r.atLanding < 1e-6 && Math.abs(r.standY) < 1e-6 && r.upright > 0.999), JSON.stringify({ rolls }));
+  // Lying in it, A and D rock the bed: a key held with the swing for a third of a second is a good pump that lifts the swing a step, every
+  // good pump visibly higher than the last (at least 1.5 degrees); a key held against the swing damps it, and brief taps get nowhere.
+  // Well-timed pumping from rest tips the Ooga out on the eighth to twelfth half-swing (its own swing past FALL, the count untouched: four
+  // pushes are still needed after pumping a while), mistimed pumping never does, and pumping an empty bed tips nobody.
+  const pumpDrive = (h, seconds, mode, tapLen = Infinity, onFrame = null) => { let t = 0, last = acrossOf(h), prevKey = 0, held = 0, tipT = null, peak = 0;
+    for (let f = 0; f < seconds * 60; f++) { h.update(1 / 60, t, false); t += 1 / 60; const a = acrossOf(h), v = a - last; last = a;
+      let key = v > 0 ? 1 : v < 0 ? -1 : 0; if (mode === "against") key = -key; if (key !== prevKey) { held = 0; prevKey = key; } held += 1 / 60; if (held > tapLen) key = 0;
+      h.pump(key, 1 / 60); peak = Math.max(peak, h.amp); if (tipT === null && h.spilling) tipT = t; if (onFrame) onFrame(h, t); }
+    return { tipT, halfSwings: tipT === null ? null : Math.floor(tipT * 2.1 / Math.PI) + 1, peak }; };
+  const pumped = () => { const h = settled(), cave = stubCave(); h.seats[0].remote = 0; h.seats[0].sitter = cave; cave.camp.seat = h.seats[0]; return h; };
+  const rockWith = pumpDrive(pumped(), 40, "with"), rockAgainst = pumpDrive(pumped(), 40, "against"), taps = pumpDrive(pumped(), 40, "with", 0.2);
+  const steps = []; let lastHalf = -1; pumpDrive(pumped(), 12, "with", Infinity, (h, t) => { const half = Math.floor(t * 2.1 / Math.PI); if (half !== lastHalf) { if (lastHalf >= 0) steps.push(h.amp); lastHalf = half; } });
+  const grown = pumpDrive(pumped(), 6, "with"), partly = pumped(); pumpDrive(partly, 6, "with"); const stillFour = run(partly, evenly(5, 2)), unmanned = pumpDrive(settled(), 40, "with");
+  record("hub hammock rocking: every good pump lifts the swing a visible step and the eighth to twelfth tips the Ooga out, against the swing it never grows, brief taps get nowhere, the count is untouched, and an empty bed tips nobody",
+    rockWith.halfSwings >= 8 && rockWith.halfSwings <= 12 && steps.length >= 6 && steps.every((v, k) => k === 0 || v - steps[k - 1] >= 0.026) && grown.peak > 0.15 && rockAgainst.tipT === null && rockAgainst.peak < 0.05 && taps.tipT === null && taps.peak < 0.08
+      && stillFour === 4 && unmanned.tipT === null && unmanned.peak > 0.2,
+    JSON.stringify({ steps, rockWith, rockAgainst, taps, grownIn6s: grown.peak, pushesAfterPumping: stillFour, emptyBed: unmanned }));
+  // A plain walk (7.75 m/s) is a full hit; slower pushes count in proportion (5 m/s is 0.71 of one, so six tip) and a gentle one, under half
+  // a hit, only eases the swing up and never counts, however many there are.
+  const walk = tipsAt(evenly(8, 2, 7.75)), brisk = tipsAt(evenly(10, 2, 5)), gentle = tipsAt(evenly(60, 2, 2));
+  record("hub hammock fall-out: a plain walk into the side counts as a full hit, a brisk one in proportion, and gentle pushes never count",
+    walk === 4 && brisk === 6 && gentle === null, JSON.stringify({ walk, brisk, gentle }));
+  // Holding forward against it is one push, however long: thirty seconds of contact counts once, and three separate pushes after it make the
+  // fourth. An occupied bed is a wall (an empty one is stepped onto): a walker may not step into its footprint from outside, may leave it from
+  // inside, and may go over it in a jump.
+  const holder = settled(); let heldTip = false; for (let k = 0; k <= 60; k++) { holder.bump(1, fit.x, 0, sideZ, 0, 11.6); holder.update(0.5, k * 0.5, false); heldTip ||= holder.spilling; }
+  const afterHold = []; for (let k = 0; k < 3; k++) { holder.bump(1, fit.x, 0, sideZ - 1.5, 0, 0); holder.bump(1, fit.x, 0, sideZ, 0, 11.6); afterHold.push(holder.spilling); }
+  const wall = settled(), open = fresh(), halfAcross = 0.475 + 0.1;
+  record("hub hammock fall-out: holding forward against the bed for 30 s is one push and never tips anyone out; three more separate pushes then do; an occupied bed is a wall to walk into, an empty one is not",
+    !heldTip && afterHold[0] === false && afterHold[1] === false && afterHold[2] === true
+      && wall.blocks(fit.x, 0, fit.z, 0.3) && wall.blocks(fit.x, 0, fit.z - halfAcross - 0.2, 0.3) && !wall.blocks(fit.x, 0, fit.z - halfAcross - 0.4, 0.3)
+      && !wall.blocks(fit.x, 1.5, fit.z, 0.3) && !open.blocks(fit.x, 0, fit.z, 0.3),
+    JSON.stringify({ heldTip, afterHold }));
+  // Only a body coming at the bed pushes. An Ooga that has just rolled out of it (first seen in the bed, then going away from it at a roll's
+  // pace) and turns back before it is clear pushes nothing, nor does a body going away from the side it touches; once clear, a walk in pushes.
+  const rolled = settled(), rollPush = [];
+  for (let k = 0; k < 3; k++) { rolled.bump(1, fit.x, 0, sideZ - 1.5, 0, 0); rollPush.push(rolled.bump(1, fit.x, 0, sideZ, 0, 7.75)); }
+  rollPush.push(rolled.bump(2, fit.x, 0, fit.z, 0, 0));
+  for (let k = 1; k <= 6; k++) rollPush.push(rolled.bump(2, fit.x, 0, fit.z - 0.2 * k, 0, -2.5));
+  rollPush.push(rolled.bump(2, fit.x, 0, sideZ, 0, 7.75), rolled.bump(3, fit.x, 0, sideZ, 0, -7.75), rolled.bump(3, fit.x, 0, sideZ + 0.1, 0, 7.75));
+  const rollTip = rolled.spilling; rolled.bump(2, fit.x, 0, sideZ - 1.5, 0, 0); const clearPush = rolled.bump(2, fit.x, 0, sideZ, 0, 7.75);
+  record("hub hammock fall-out: an Ooga just tipped out of the bed, rolling away from it, pushes nothing until it is clear, nor does a body going away from it; then a walk in is a push",
+    rollPush.slice(0, 3).every((w) => w === 1) && rollPush.slice(3).every((w) => w === 0) && !rollTip && clearPush === 1 && rolled.spilling,
+    JSON.stringify({ rollPush, rollTip, clearPush }));
+  // It answers at once and as one connected push: whatever the swing was doing, the very next frame after a run into it has the cloth moving
+  // away from the pusher, within 0.15 s it has been shoved at least 14 degrees (a walk at least 9) with no frame jolting it more than 6 degrees,
+  // and the shove then relaxes as the swing carries on, where a hit on the free-running swing could leave it still, or send it back at them.
+  // One timed with the swing away from them adds height (up to 0.015 rad), one timed as it comes back does not, and neither changes the count.
+  const away = -fit.side, answers = [];
+  for (let k = 0; k < 8; k++) {
+    const h = settled(), frames = Math.round((k * Math.PI / 4) / (2.1 / 60)); let t = 0;
+    for (let i = 0; i < frames; i++) { h.update(1 / 60, t, false); t += 1 / 60; }
+    const before = h.angle, going = Math.cos(k * Math.PI / 4) * away; h.bump(1, fit.x, 0, sideZ, 0, 11.6); const lifted = h.amp;
+    let next = 0, first = -1, jolt = 0, last = h.angle;
+    for (let i = 0; i < 15; i++) {
+      h.update(1 / 60, t, false); t += 1 / 60; jolt = Math.max(jolt, Math.abs(h.angle - last)); last = h.angle;
+      if (i === 0) next = (h.angle - before) * away;
+      if (i < 9) first = Math.max(first, (h.angle - before) * away);
+    }
+    answers.push({ k, next, first, jolt, later: (h.angle - before) * away, lifted, going });
+  }
+  const withIt = answers.filter((r) => r.going > 0.7).map((r) => r.lifted), against = answers.filter((r) => r.going < -0.7).map((r) => r.lifted);
+  record("hub hammock fall-out: a run into the bed sends it away from the pusher from the very next frame at any phase of the swing, eased in as one connected shove (a walk less), and one timed with the swing lifts it higher than one timed against it",
+    answers.every((r) => r.next > 0 && r.first >= 0.25 && r.jolt <= 0.105 && r.later >= 0.03) && Math.min(...withIt) - Math.max(...against) >= 0.02 && Math.max(...answers.map((r) => r.lifted)) <= 0.125 + 0.03 + 1e-9
+      && (() => { const h = settled(), a0 = h.angle; h.bump(1, fit.x, 0, sideZ, 0, 7.75); let walk = 0; for (let i = 0; i < 9; i++) { h.update(1 / 60, i / 60, false); walk = Math.max(walk, Math.abs(h.angle - a0)); } return walk >= 0.17 && walk < 0.25; })(),
+    JSON.stringify({ worstNext: Math.min(...answers.map((r) => r.next)), worstFirst: Math.min(...answers.map((r) => r.first)), worstJolt: Math.max(...answers.map((r) => r.jolt)), worstLater: Math.min(...answers.map((r) => r.later)), withIt, against }));
+  // An empty bed is rocked as hard as it will go and never reports a fall; a bed someone is tipped out of settles back to rest, forgets the
+  // count so the next occupant is not tipped at once, and is free to take: its seat is offered to whoever stands where the Ooga is stood up.
+  const lonely = fresh(); let lonelyTop = 0, lonelySpill = false;
+  for (let k = 0, t = 1; k < 10; k++) { lonely.bump(1, fit.x, 0, sideZ - 1.5, 0, 0); lonely.bump(1, fit.x, 0, sideZ, 0, 11.6); for (let i = 0; i < 120; i++) { lonely.update(1 / 60, t, false); t += 1 / 60; lonelySpill ||= lonely.spilling; lonelyTop = Math.max(lonelyTop, lonely.amp); } }
+  lonely.seats[0].remote = 1; lonely.update(1 / 60, 0, false); const arrived = lonely.spilling;
+  const tipped = settled(); run(tipped, evenly(4, 2)); const wasSpilling = tipped.spilling; tipped.seats[0].remote = 0; tipped.update(1 / 60, 0, false); tipped.seats[0].remote = 1; tipped.update(1 / 60, 0, false);
+  const nextOccupant = tipped.spilling; tipped.seats[0].remote = 0;
+  const standX = fit.seats[0].walkAt.x, standZ = fit.seats[0].walkAt.z;
+  const offered = tipped.free({ x: standX, z: standZ }) === tipped.seats[0], reached = tipped.reachable(standX, 0, standZ, 1.25);
+  let calmAt8 = 1; for (let i = 0; i < 40 * 60; i++) { tipped.update(1 / 60, i / 60, false); if (i === 8 * 60) calmAt8 = tipped.amp; }
+  record("hub hammock fall-out: an empty bed never reports a fall however hard it is rocked, and whoever lies down in it afterwards starts from nothing; after a fall the seat is free at once for anyone to take, the next occupant starts from nothing, and the bed settles back to rest",
+    !lonelySpill && lonelyTop > 0.3 && !arrived && wasSpilling && !nextOccupant && offered && reached && calmAt8 < 0.1 && tipped.amp - 0.012 < 1e-3,
+    JSON.stringify({ lonelySpill, lonelyTop, arrived, wasSpilling, nextOccupant, offered, reached, calmAt8, rest: tipped.amp }));
+  // The bigger swing never moves the hammock: it is planned, and its stand-up spot chosen, with the original swing (0.11 rad), whatever
+  // SWAY_MAX the pushes reach; that whole swing (`swing`) keeps its lowest cloth 0.3 m over the ground. Something standing just beyond the
+  // planned swing leaves the bed hanging in the same place.
+  const lowest = fit.y + fit.swing.lo - fit.ground, beyond = Math.hypot(standX - fit.x, standZ - fit.z);
+  const tight = plan({ x: -3, z: 4 }, { x: 3, z: 4 }, (x, z, r) => clear(x, z, r) && z > 3.3 - r);
+  record("hub hammock fall-out: the bigger swing never moves the bed: it hangs and is stood up from where the original swing fits, its whole swing's lowest cloth clears the ground by 0.3 m, and the stand-up spot is clear",
+    !!fit && fit.envelope.sway === 0.11 && fit.swing.sway === H.SWAY_MAX && lowest >= 0.3 && clear(standX, standZ, 0.35) && beyond >= fit.envelope.across + 0.5
+      && !!tight && Math.hypot(tight.x - fit.x, tight.z - fit.z) < 1e-9 && tight.side === fit.side && tight.envelope.across === fit.envelope.across,
+    JSON.stringify({ lowest, planned: fit.envelope.across, swing: fit.swing.across, beyond, tight: tight && { x: tight.x, z: tight.z, side: tight.side } }));
   // A walker (the hub's 0.3 m radius, the pilot's step) heading straight at the bed from 2 m out, a centimetre at a time,
   // through the real collision shell: its support, then its body above the step, as the hub's `walkable` asks.
   const STEP = Number(/WALK = \{[^}]*step: ([\d.]+)/.exec(await readFile(new URL("../src/js/pilot.js", import.meta.url), "utf8"))[1]);
@@ -9069,9 +9297,24 @@ const hubHammock = { name: "hub hammock", why: "rule: one face-up Ooga rests off
     B.pilot.navigate({ position: { x: s.walkAt.x, y: s.floor, z: s.walkAt.z }, yaw: s.ry, pitch: 0.5, dist: 6 }); B.advance(0.5, 1 / 60);
     let crossings = 0;
     for (let i = 0; i <= 100; i++) { const t = i / 100; if (B.island.isPath(p.ax + (p.bx - p.ax) * t, p.az + (p.bz - p.az) * t)) crossings++; }
-    return { hammock: true, crossings, seats: H.seats.length, act: document.getElementById("act").textContent };
+    // Where it hangs, and where a tipped Ooga may land (scene-hub.js \`tipOutOfHammock\`: past the whole swing, either side).
+    const out = p.swing.across + BL.hubHammock.STAND, lands = [];
+    for (const side of [1, -1]) for (const land of [1.2, 0.8]) {
+      const x = p.x + p.nx * side * (out + land), z = p.z + p.nz * side * (out + land);
+      lands.push({ level: Math.abs(p.surfaceAt(x, z) - p.ground), path: B.island.isPath(x, z), palm: Math.min(...H.anchors.map((o) => Math.hypot(o.x - x, o.z - z))) });
+    }
+    const placed = { pivot: [p.x, p.z], side: p.side, palms: H.anchors.map((o) => [o.x, o.z]), walkAt: [s.walkAt.x, s.walkAt.z], cap: BL.hubHammock.SWAY_MAX, swingSway: p.swing.sway, low: p.y + p.swing.lo - p.ground, lands };
+    return { hammock: true, crossings, seats: H.seats.length, act: document.getElementById("act").textContent, placed };
   })()`);
   record("hub hammock: both palms share a grass patch with no path crossing and one REST place", setup.hammock && setup.crossings === 0 && setup.seats === 1 && setup.act === "REST", JSON.stringify(setup));
+  // The rocking hammock (#499) hangs exactly where upstream rock hung it before #499, the same two palms, pivot, side and stand-up spot;
+  // its whole swing (SWAY_MAX) keeps the lowest cloth 0.3 m over the ground, and every landing spot a tipped Ooga may be rolled to is level
+  // grass off the path, clear of both palms.
+  const near = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) <= 0.01, placed = setup.placed;
+  record("hub hammock: it hangs where it always has (pivot, palms, side and stand-up spot within 1 cm), its whole swing clears the ground, and every landing spot is level grass off the path, clear of the palms",
+    !!placed && near(placed.pivot, [9.3683, 4.5253]) && placed.side === -1 && near(placed.palms[0], [5.2365, 4.2842]) && near(placed.palms[1], [13.5, 4.75]) && near(placed.walkAt, [9.4379, 3.0707])
+      && placed.swingSway === placed.cap && placed.low >= 0.3 && placed.lands.every((l) => l.level < 0.25 && !l.path && l.palm > 1.5),
+    JSON.stringify(placed));
   if (!setup.hammock) return;
   await b.key(" ");
   const rest = await b.evaluate(`(() => {

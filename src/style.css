@@ -2790,6 +2790,47 @@ body[data-active-scene="hub"] .home-link {
   transform: translate(-50%, 0);
 }
 
+/* Lying in the hub hammock: the brief arrow for a rock to the left or right (hud.js `rockCue`): low on the screen, clear above the
+   bottom bar, or on a touch screen a third of the way down, between the top bars and the sticks. */
+.rock-cue {
+  position: fixed;
+  top: min(85%, calc(100% - 116px));
+  left: 50%;
+  margin-left: -26px;
+  width: 52px;
+  text-align: center;
+  font-size: 46px;
+  line-height: 1;
+  color: var(--paper);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (pointer: coarse) {
+  .rock-cue { top: 32%; }
+}
+
+.rock-cue[data-side="left"] { transform: translateX(-90px); }
+.rock-cue[data-side="right"] { transform: translateX(90px); }
+.rock-cue.show[data-side="left"] { animation: rock-cue-left 0.4s ease-out both; }
+.rock-cue.show[data-side="right"] { animation: rock-cue-right 0.4s ease-out both; }
+
+@keyframes rock-cue-left {
+  from { opacity: 1; transform: translateX(-70px); }
+  to { opacity: 0; transform: translateX(-110px); }
+}
+
+@keyframes rock-cue-right {
+  from { opacity: 1; transform: translateX(70px); }
+  to { opacity: 0; transform: translateX(110px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rock-cue.show[data-side] { animation: rock-cue-fade 0.4s ease-out both; }
+  @keyframes rock-cue-fade { from { opacity: 1; } to { opacity: 0; } }
+}
+
 /* Reading the whitepaper's poster: the help line at the foot of the screen, and, on a touch screen, the one button
    that steps through it. */
 .wp-nav {
