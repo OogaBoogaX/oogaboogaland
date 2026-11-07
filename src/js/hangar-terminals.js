@@ -14,7 +14,7 @@
 // log beside the chief engineer's orders.
 //
 // Space beside a terminal (the act button reads DISPLAY), or a tap on it from there, starts the show: the screen hung
-// from a gantry far down the runway unrolls, the old projector hung from a gantry over it nearer the door strikes its lamp
+// from the roof far down the runway unrolls, the old projector hung from the roof over it nearer the door strikes its lamp
 // and its reels turn, and down its beam through the hall's dust comes the film, from the repository's reading
 // (`jetFeed.reading()`): the countdown leader, the title card, the plebnet era before Jet, the month the repository
 // began, then a card for each year and that year's releases, oldest first, each with its date and a picture of what
@@ -799,7 +799,7 @@
     const cradle = createNode({ geometry: P.cradle });
     const beam = createNode({ position: { ...B.position }, rotation: { ...B.rotation }, geometry: B.geometry, sightHidden: true, visible: false });
     const SC = L.show.screen, frame = createNode({ position: { x: SC.x, y: SC.stow, z: SC.z }, geometry: S.frame });
-    const rods = createNode({ position: { x: SC.x, y: S.chord, z: SC.z }, scale: { x: 1, y: S.chord - SC.stow - 0.15, z: 1 }, geometry: S.rods });
+    const rods = createNode({ position: { x: SC.x, y: S.roof, z: SC.z }, scale: { x: 1, y: S.roof - SC.stow - 0.15, z: 1 }, geometry: S.rods });
     const cloth = createNode({ position: { x: SC.x, y: SC.stow - S.under, z: SC.z }, geometry: S.cloth, visible: false });
     const batten = createNode({ position: { x: SC.x, y: SC.stow - S.under, z: SC.z }, geometry: S.batten });
     const slide = createNode({ position: { x: pic.x, y: pic.y, z: pic.z }, geometry: X.light, sightHidden: true, visible: false });
@@ -908,11 +908,11 @@
       for (let i = 0; i < reels.length; i++) reels[i].rotation.x -= SHOW.reel * motor * dt;
       glow.glow = 0.25 + 1.4 * lamp;
       beam.visible = lamp > 0.3 && unroll > 0.99;
-      // The screen: its case as far down as it is let, on its rods from the gantry, the cloth stretched under it as far
+      // The screen: its case as far down as it is let, on its rods from the roof, the cloth stretched under it as far
       // as it has unrolled, the batten at its foot.
       const caseY = SC.stow + (SC.y - SC.stow) * hoist, drop = SC.drop * unroll;
       frame.position.y = caseY;
-      rods.scale.y = S.chord - caseY - 0.15;
+      rods.scale.y = S.roof - caseY - 0.15;
       cloth.position.y = caseY - S.under;
       cloth.visible = drop > 0.02;
       cloth.scale.y = Math.max(0.001, drop);

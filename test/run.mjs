@@ -20646,9 +20646,11 @@ const hangarFire = { name: "hangar static fire", why: "playthrough: the static f
 scene("factory", { query: "character=portlandhodl", steps: [factoryWalking, factoryGreeter, factoryLadders, factoryRailingJump, factoryWeapons, factoryForward, factoryForge, factoryShields, factoryKortik, trip("factory")] });
 scene("factory", { label: "cooker", query: "character=portlandhodl", steps: [donation("factory", { stat: "cooker.out", seconds: 14, where: "the cooker sends its bananas up through the ceiling tube" }), donationDetails, factoryCooker, trip("factory")] });
 scene("factory", { label: "entrance", url: hubPage(src, "character=portlandhodl"), steps: [factoryFloor, factoryEntrance] });
-const hangarAnomalies = { name: "hangar anomalies", why: "rule: each of the Jet's engine anomalies plays through on its own without touching the visitor's controls, refuses the static fire's button meanwhile, spooks Kortik's Sis, and leaves the engines cold, the Jet exactly at rest and the hall's lights full", run: async (b) => {
+const hangarAnomalies = { name: "hangar anomalies", why: "rule: each of the Jet's engine anomalies plays through on its own without touching the visitor's controls, refuses the static fire's button meanwhile, spooks Kortik's Sis, and leaves the engines cold, the Jet exactly at rest and the hall's lights full; the lightning's jump sets a room on fire that its operator puts out, and the blackout takes every lamp, light strip and room in the hall and the crane's power with it", run: async (b) => {
   const r = await b.evaluate(`(() => {
-    const B = window.__ooga, a = B.cavemen.get("portlandhodl"), A = B.hangar.anomaly, F = B.hangar.fire, S = B.hangar.sis, sc = B.hangar.scene, jet = sc.jet, J = jet.position, L = B.hangar.layout.jet;
+    const B = window.__ooga, a = B.cavemen.get("portlandhodl"), A = B.hangar.anomaly, F = B.hangar.fire, S = B.hangar.sis, sc = B.hangar.scene, jet = sc.jet, J = jet.position, L = B.hangar.layout.jet, RF = B.hangar.roomFire;
+    // Every light the hall dims: its glass, and the lofts' backs, screens and glass, which dim with it on their own.
+    const lights = [...sc.glass, ...sc.lofts.flatMap((l) => [l.back, l.screen, l.glass])], brightest = () => Math.max(...lights.map((n) => n.glow));
     const plain = BL.jetModels.jet(BL.jetModels.STAGE), key = (down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: "w", code: "KeyW", bubbles: true }));
     if (B.crew.player !== a) B.pilot.possess(a);
     const out = {};
@@ -20657,23 +20659,32 @@ const hangarAnomalies = { name: "hangar anomalies", why: "rule: each of the Jet'
       B.pilot.navigate({ position: { x: -1.5, y: 0, z: 2 }, yaw: 0, pitch: 0.3, dist: 6 });
       if (kind === "shuffle") { S.go("door"); B.advance(6, 1 / 30); } else B.advance(0.5, 1 / 30);
       let played = false;
-      for (let n = 0; n < 8 && !played; n++) { A.play(kind); B.advance(1 / 60, 1 / 60); played = A.kind === kind; if (!played) B.advance(2, 1 / 30); }
-      const peak = { heat: 0, dim: 1, glow: 1, rx: 0, rz: 0, along: 0, spooked: false };
-      const run = (seconds) => { for (let i = 0; i < Math.round(seconds * 30); i++) { B.advance(1 / 30, 1 / 30); peak.heat = Math.max(peak.heat, A.heat); peak.dim = Math.min(peak.dim, A.dim); peak.glow = Math.max(peak.glow, jet.geometry === plain ? 0 : jet.glow); peak.rx = Math.max(peak.rx, Math.abs(jet.rotation.x)); peak.rz = Math.max(peak.rz, Math.abs(jet.rotation.z)); peak.along = Math.max(peak.along, Math.abs(J.z - L.z)); peak.spooked = peak.spooked || S.fit > 0 || !!S.scare; } };
+      // The lightning always jumps here, into the middle one of the crew's rooms on the right wall.
+      for (let n = 0; n < 8 && !played; n++) { A.play(kind, kind === "lightning" || undefined, 2); B.advance(1 / 60, 1 / 60); played = A.kind === kind; if (!played) B.advance(2, 1 / 30); }
+      const peak = { heat: 0, dim: 1, glow: 1, rx: 0, rz: 0, along: 0, spooked: false, lit: 1, crane: true, fire: 0 };
+      const run = (seconds) => { for (let i = 0; i < Math.round(seconds * 30); i++) { B.advance(1 / 30, 1 / 30); peak.heat = Math.max(peak.heat, A.heat); if (A.dim < peak.dim) { peak.dim = A.dim; peak.lit = brightest(); peak.crane = B.hangar.crane.live; } peak.glow = Math.max(peak.glow, jet.geometry === plain ? 0 : jet.glow); peak.rx = Math.max(peak.rx, Math.abs(jet.rotation.x)); peak.rz = Math.max(peak.rz, Math.abs(jet.rotation.z)); peak.along = Math.max(peak.along, Math.abs(J.z - L.z)); peak.spooked = peak.spooked || S.fit > 0 || !!S.scare; peak.fire = Math.max(peak.fire, RF.level); } };
       run(1.5);
       const p = a.root.position, x = p.x, z = p.z;
       key(true); run(0.5); key(false);
       const free = +Math.hypot(p.x - x, p.z - z).toFixed(2), pressed = F.press(), refused = F.t < 0;
       run(BL.hangarAnomaly[{ misfire: "MISFIRE", phantom: "REVS", lightning: "ZAP", blackout: "BLACKOUT", lowrider: "LOWRIDER", shuffle: "SHUFFLE" }[kind]].end);
       out[kind] = { played, free, pressed, refused, spooked: peak.spooked, heat: +peak.heat.toFixed(2), dim: +peak.dim.toFixed(2), glow: +peak.glow.toFixed(2), rx: +peak.rx.toFixed(4), rz: +peak.rz.toFixed(4), along: +peak.along.toFixed(3),
-        over: A.kind === null && A.heat === 0 && A.dim === 1 && sc.anomaly.ambient === 1, rest: J.x === L.x && J.y === 0 && J.z === L.z && jet.rotation.x === 0 && jet.rotation.z === 0 && jet.geometry === plain && jet.glow === 1, booth: F.phase };
+        lit: +peak.lit.toFixed(2), crane: peak.crane,
+        over: A.kind === null && A.heat === 0 && A.dim === 1 && sc.anomaly.ambient === 1 && sc.glass.every((n) => n.glow === 1), rest: J.x === L.x && J.y === 0 && J.z === L.z && jet.rotation.x === 0 && jet.rotation.z === 0 && jet.geometry === plain && jet.glow === 1, booth: F.phase };
+      // The room the bolt jumped into: its fire burned and was put out, and its operator is back at his post.
+      if (kind === "lightning") {
+        run(BL.hangarRoomFire.AT.done + 1);
+        const op = sc.crew[B.hangar.layout.crew.length - 1 - BL.hangarModels.SIDE_ROOMS.bays.length + 1].root.position, post = BL.hangarModels.sideRooms()[1].spots.post;
+        out.fire = { room: RF.room, burned: +peak.fire.toFixed(2), out: !RF.active && RF.level === 0, back: +Math.hypot(op.x - post.x, op.z - post.z).toFixed(3) };
+      }
     }
     return out;
   })()`);
   const done = (k) => r[k] && r[k].played && r[k].free > 1 && r[k].pressed && r[k].refused && r[k].spooked && r[k].over && r[k].rest && r[k].booth === "ready";
-  const seen = { misfire: r.misfire.heat > 0.5 && r.misfire.dim < 0.7, phantom: r.phantom.heat > 0.3 && r.phantom.dim === 1, lightning: r.lightning.dim < 0.6 && r.lightning.glow > 0.9,
-    blackout: r.blackout.dim < 0.1, lowrider: r.lowrider.rx > 0.03, shuffle: r.shuffle.along > 0.15 && r.shuffle.rz > 0.009 && r.shuffle.along <= 0.2 && r.shuffle.rz <= 0.0105 };
-  record("hangar anomalies: the failed start, phantom revs, lightning, blackout, lowrider and shuffle each play through with the visitor's W still walking, the static fire's button only buzzing and Kortik's Sis reacting, each doing its own thing, and each ends with the engines cold, the Jet exactly at rest and the lights full",
+  const seen = { misfire: r.misfire.heat > 0.5 && r.misfire.dim < 0.7, phantom: r.phantom.heat > 0.3 && r.phantom.dim === 1,
+    lightning: r.lightning.dim < 0.6 && r.lightning.glow > 0.9 && r.fire.room === 2 && r.fire.burned > 0.9 && r.fire.out && r.fire.back < 0.01,
+    blackout: r.blackout.dim < 0.1 && r.blackout.lit <= r.blackout.dim + 0.001 && r.blackout.crane === false, lowrider: r.lowrider.rx > 0.03, shuffle: r.shuffle.along > 0.15 && r.shuffle.rz > 0.009 && r.shuffle.along <= 0.2 && r.shuffle.rz <= 0.0105 };
+  record("hangar anomalies: the failed start, phantom revs, lightning, blackout, lowrider and shuffle each play through with the visitor's W still walking, the static fire's button only buzzing and Kortik's Sis reacting, each doing its own thing, and each ends with the engines cold, the Jet exactly at rest and the lights full; the lightning's bolt sets the room it jumps into on fire and its operator puts it out and goes back to his post, and the blackout takes every lamp, strip and room light down with the hall and stops the crane",
     Object.keys(seen).every((k) => done(k) && seen[k]), JSON.stringify(r));
 } };
 const hangarShuffleSafety = { name: "hangar shuffle safety", why: "rule: the Jet only moves with nobody in its way: the shuffle stops that frame at its exact rest pose when an Ooga steps up beside it, a frame stalls or a late room update puts another player there, and neither it nor the lowrider starts with someone in the way or on the Jet", run: async (b) => {
@@ -25918,7 +25929,9 @@ const raceRigChecks = async () => {
     // Cloud Hopper's Thunderhead adds uFogPierce, a geometry's opt-in share of the fog taken off so its tornadoes and
     // lightning show through the haze, in the plain variant as in the full one (to b1c48c15); it is zero for every
     // other geometry.
-    "b1c48c156419060fb92624a8a81804196b91c6100821b4b7b176eddb6f7b3a61",
+    // The Lightning Jet Hangar's crane adds a second cone light for its safety spot: `uSpotLight` holds two and the
+    // shader loops over them (to 4678b5f4); the second is zero in every other scene.
+    "4678b5f4813a79fe30f90883c3221caff2d31a914d4b9a4602fb459a5e065bb1",
     "37030f053de422aa157f017ceedef0812ed57a17c9e1b2af4aab017c0b645364"
   ];
   record("race rig strategy: ordinary mesh, fragment and shadow shader bytes retain the pre-rig fast path", ordinaryHashes.every((hash, i) => hash === expectedOrdinaryHashes[i]), JSON.stringify(ordinaryHashes));
