@@ -370,6 +370,7 @@
       jetpackCompactFuel: $("jetpack-fuel-compact"),
       jetpackCompactFill: $("jetpack-fuel-compact-fill"),
       messageStack: $("message-stack"),
+      rockCue: $("rock-cue"),
       toast: $("toast"),
       tooltip: $("tooltip"),
       tooltipText: $("tooltip-text"),
@@ -505,7 +506,7 @@
       });
       scheduleBanner();
     }
-    let hintTimer = 0, hintHideTimer = 0, copyTimer = 0;
+    let hintTimer = 0, hintHideTimer = 0, copyTimer = 0, rockCueTimer = 0;
     const rosterRows = new Map();
     let showAway = false, awayCount = 0, awayShownCount = -1, awayShownShow = null;
     if (!rosterAway) {
@@ -2199,6 +2200,21 @@
       }, ms);
     };
     // Takes the hint down now: a scene whose state moved on (a race starting) does not leave garage advice up.
+    // Lying in the hub hammock, a rock to the left (dir < 0) or right: a large arrow on that side of the screen that fades over
+    // ROCK_CUE_MS. One element, restarted on each press; a new press replaces the last.
+    const ROCK_CUE_MS = 400;
+    const hideRockCue = () => { el.rockCue.classList.remove("show"); el.rockCue.hidden = true; };
+    const rockCue = (dir) => {
+      const box = el.rockCue;
+      window.clearTimeout(rockCueTimer);
+      box.textContent = dir < 0 ? "\u25c0" : "\u25b6";
+      box.dataset.side = dir < 0 ? "left" : "right";
+      box.hidden = false;
+      box.classList.remove("show");
+      void box.offsetWidth;
+      box.classList.add("show");
+      rockCueTimer = window.setTimeout(hideRockCue, ROCK_CUE_MS);
+    };
     const hideHint = () => {
       window.clearTimeout(hintTimer);
       window.clearTimeout(hintHideTimer);
@@ -2416,7 +2432,7 @@
         Object.defineProperties(this, Object.getOwnPropertyDescriptors(next));
         return this;
       },
-      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, whitepaperNav, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
+      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, rockCue, whitepaperNav, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
   };
   // Detached panels can be visible together. Each has a view of the same account and voice state.
   const ROOM_WORDS = { replaced: "open in another tab", full: "island full" };
