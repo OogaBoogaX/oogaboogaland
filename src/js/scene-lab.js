@@ -14,7 +14,6 @@
   const ROOM_HALF = 10;
   const PITCH = [0.12, 1.1], DIST = [4.5, 9.2];
   const FOLLOW = { y: 0.9, min: 3, max: 7, pitch: [0.25, 0.8] };
-  const FLY = { speed: 4, perDist: 0.4, climb: 3, yMax: 3.5 };
   const WALL = ROOM_HALF - 0.6;
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
   const yawParam = parseFloat(params.get("yaw"));
@@ -383,7 +382,7 @@
     hud.setAreaLabel("LAB");
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
-    pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets: PRESETS, landing: "pile", pitch: PITCH, dist: DIST, follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => 4.3, coarse: COARSE, mayPossess: (cave) => cave.contributor ? BL.net.mayDrive(cave.traits.name) : null, close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: () => 0 } });
+    pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets: PRESETS, landing: "pile", pitch: PITCH, dist: DIST, follow: FOLLOW, clampTarget, clampCamera, ceilingAt: () => 4.3, coarse: COARSE, mayPossess: (cave) => cave.contributor ? BL.net.mayDrive(cave.traits.name) : null, close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: () => 0 } });
     const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: BUILD_SPOTS.slice(), walkIn: WALK_IN, clampDrag, viewYaw: PRESETS.pile.yaw, bedrolls: lab.bedrolls, pileScale: 0.45, weaponsEnabled: true, onShown: (shown) => { lab.equipment.abacus.setValue(shown); }, walkable, reticleTarget: () => "object" };
     shared.onWeaponImpact = (source, hit, dx, dy, dz, power) => {
       if (hit.owner.kind === "caveman") crew.damage(hit.owner.cave, power, source === crew.player);
@@ -480,11 +479,7 @@
     pulseNodes = [lab.equipment.monitor, lab.equipment.tower, lab.equipment.abacus.node.children[0]];
     crew.refreshStates(true);
     syncRackLeds();
-    const returningOwn = pilot.loginViewRestored && BL.net.ownCharacter();
-    if (returningOwn) {
-      const cave = crew.cavemen.get(returningOwn.handle);
-      if (cave) pilot.possess(cave);
-    } else if (ctx.from === null && preloadedEquipment) {
+    if (ctx.from === null && preloadedEquipment) {
       const name = params.get("character")?.trim().toLowerCase();
       const contributor = params.has("character") ? contributors.activeRoster.find(entry => entry.name.toLowerCase() === name)
         : contributors.activeRoster.find(entry => crew.stateOf(crew.cavemen.get(entry.name)) === "working") || contributors.activeRoster[0];
@@ -495,6 +490,12 @@
         crew.configureWeapon(cave, preloadedWeapon, preloadedAmmo);
       }
     }
+    // Otherwise the Ooga walked in with, else the visitor's own or assigned one: there is no view without one.
+    if (!pilot.player) {
+      const name = world.pilot || BL.net.preferredCharacter()?.handle, cave = name && crew.cavemen.get(name);
+      if (cave) pilot.possess(cave);
+    }
+    world.pilot = null;
     unsubscribeActivity = contributors.subscribe(() => { crew.refreshStates(); syncRackLeds(); });
     stateTimer = window.setInterval(() => {
       crew.refreshStates();
@@ -527,7 +528,6 @@
     mark("visibility");
   };
   const leave = () => {
-    world.pilotDetached = !pilot.player;
     world.pilot = pilot.player ? pilot.player.traits.name : null;
     BL.net.setBody(null);
     window.clearInterval(stateTimer);

@@ -1445,6 +1445,9 @@
         state: "away",
         humanControlled: false,
         contributor,
+        // A guest's own likeness (contributors.js `addLocal`) is the visitor's avatar alone: it has no NPC track and is
+        // in the world only while driven.
+        avatar: contributor.local === true,
         zzzTimer: 0,
         build: null,
         walk: null,
@@ -1556,6 +1559,8 @@
     // Everything the frame steps: the roster, then a driven separate body.
     const members = crewList.slice();
     const stateOf = (cave) => {
+      // An avatar nobody drives is out of the world: no routine, seat, bed or work of its own.
+      if (cave.avatar && cave !== player && !ctx.playerName) return "away";
       const activity = contributors.stateFor(cave.contributor);
       // A signed-in owner can arrive even after their activity expired; other away NPCs stay away.
       return activity === "away" && !ctx.playerName && !(cave.override && (cave === player || BL.net?.ownCharacter?.()?.handle === cave.traits.name))
@@ -6213,6 +6218,15 @@
       if (npc) refreshRosterRow(npc);
     };
     const control = (cave) => {
+      // An avatar is its own body: taken out of the world's away, it stands where it was last let go, and the scene
+      // places an arrival (the hub at the pile when it has no place).
+      if (cave && cave.avatar && !ctx.playerName) {
+        if (cave === player) return true;
+        if (cave.state === "away") { cave.override = null; cave.state = "chilling"; cave.root.visible = true; }
+        if (controlCave(cave)) return true;
+        applyState(cave, "away");
+        return false;
+      }
       if (separateBodies && cave && !cave.npc && cavemen.get(cave.traits.name) === cave) {
         if (player && player.npc === cave) return true;
         // Someone else's driven Ooga (a ghost track) is never taken over; a fresh body otherwise.

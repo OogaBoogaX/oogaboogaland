@@ -89,7 +89,8 @@
   const create = ({ move = null, look = null, boost = null, chord = null, onAction = null, pressActions = false, tabNavigation = false, shooter = () => false, canDescend = () => true } = {}) => {
     const held = { forward: 0, back: 0, left: 0, right: 0, yawLeft: 0, yawRight: 0, pitchDown: 0, pitchUp: 0, up: 0, space: 0, down: 0, boost: 0, chord: 0, sprint: 0, peek: 0 };
     const axes = { x: 0, y: 0, up: 0, yaw: 0, pitch: 0, keyPitch: 0, orbitYaw: 0, sprint: 0, peek: 0, shiftTap: 0 };
-    let pitchBorrowed = false;
+    // `moveTap`: a movement key pressed since the last `read`, so a tap between frames still counts for `moving`.
+    let pitchBorrowed = false, settled = false, moveTap = false;
     let spaceDown = false, boostPointer = null, boostClick = false, boostLift = 0, shiftAt = 0, shiftUsed = false, shiftTap = 0;
     let padFrame = -1, padUp = 0, padSprint = 0;
     const downKeys = new Set(), blockedKeys = new Set();
@@ -145,6 +146,8 @@
       const name = pressActions && e.key === " " ? "space" : keyName(e);
       if (!name) return;
       if (e.key === " " || e.key.startsWith("Arrow")) e.preventDefault();
+      if (settled && e.repeat && !held[name]) return;
+      if (!e.repeat && (name === "forward" || name === "back" || name === "left" || name === "right")) moveTap = true;
       if (name === "peek" && !held.peek) {
         shiftAt = e.timeStamp;
         shiftUsed = !!(held.left || held.right);
@@ -245,6 +248,7 @@
     };
     // Sign convention: yaw positive is left, pitch positive is down.
     const read = () => {
+      moveTap = false;
       readPad();
       axes.x = clamp(held.right - held.left + (moveStick ? moveStick.x : 0) + pad.lx, -1, 1);
       axes.y = clamp(held.forward - held.back + (shooter() ? 0 : held.chord) + (moveStick ? moveStick.y : 0) + pad.ly, -1, 1);
@@ -261,6 +265,10 @@
       shiftTap = 0;
       return axes;
     };
+    // Whether any movement is held now (keys, the move stick, the pad's stick or A, the mouse chord, climb or jump),
+    // read without consuming a tap or a pad edge: what ends a look or a tour and goes to the Ooga instead.
+    const moving = () => !!(moveTap || held.forward || held.back || held.left || held.right || held.up || held.space
+      || held.chord || moveStick && (moveStick.x || moveStick.y) || pad.lx || pad.ly || pad.held & PAD.a);
     let listening = true;
     const dispose = () => {
       resets.delete(reset);
@@ -296,7 +304,9 @@
       held.chord = held.boost = 0;
       boostPointer = null;
     };
-    const reset = () => { onBlur(); if (moveStick) moveStick.reset(); if (lookStick) lookStick.reset(); };
+    // `settle` also drops the auto-repeats of keys held through the reset, so only a fresh press moves again (a tour
+    // that a movement ends must not end on the key that was held as it began).
+    const reset = (settle = false) => { onBlur(); settled = settle; moveTap = false; if (moveStick) moveStick.reset(); if (lookStick) lookStick.reset(); };
     resets.add(reset);
     const borrowPitch = (on) => { pitchBorrowed = !!on; };
     const resume = () => {
@@ -328,7 +338,7 @@
       if (moveStick) moveStick.resume();
       if (lookStick) lookStick.resume();
     };
-    return { read, axes, clearPointer, reset, consumeTab, resume, borrowPitch, dispose, get rightShift() { return !!held.peek; } };
+    return { read, moving, axes, clearPointer, reset, consumeTab, resume, borrowPitch, dispose, get rightShift() { return !!held.peek; } };
   };
   BL.controls = { create, uiKey, keysFor, shortcutKeys, matches, resetAll };
 })();

@@ -45,7 +45,6 @@
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
   const PITCH = [-0.2, 1.3], DIST = [4, 30];
   const FOLLOW = { y: 0.9, min: 3, max: 7, pitch: [0.25, 0.8] };
-  const FLY = { speed: 6, perDist: 0.4, climb: 4, yMax: HALL.h - 3 };
   // The shield across the way out, as wide as the mouth's opening, as on the hub's side; and how far past where the
   // hub took its picture of the island the picture hangs.
   const GATE_OPENING = { minX: -2.5, maxX: 2.5, floorY: 0, ceilingY: 3 }, OUTSIDE_DISTANCE = 34;
@@ -241,9 +240,11 @@
     const released = BL.net.state.released;
     const denied = mayPossess(avatar) || (released && released.name === avatar.traits.name ? "That Ooga is no longer yours to drive" : null);
     BL.net.state.released = null;
+    // Nobody walks the hall without an Ooga: one no longer theirs goes back to the island, which hands them their own.
     if (denied && people.player === avatar) {
       pilot.release(true);
       hud.toast(denied);
+      leaveCave();
     }
   };
   const targets = [];
@@ -1123,7 +1124,7 @@
     pilot.controls.reset(); input.reset(); pilot.setActive(false); hud.tooltip.hide();
   };
   // Whether (p) has come through the hangar door's shield, inside its opening: an Ooga whose feet stand `baseY` under
-  // p, walked past the plane, or the free view flown to within `margin` of it.
+  // p, walked past the plane (or within `margin` of it).
   const throughHangar = (s, p, baseY, margin = 0) => {
     if (!s.hangar) return false;
     const h = LAYOUT.hangar, dx = p.x - h.x, dz = p.z - h.z, c = Math.cos(h.turn), sn = Math.sin(h.turn);
@@ -1823,7 +1824,7 @@
       // The visitor's view, combat and weapon come in from the last scene and go on to the next (pilot.js `carried`).
       carry: true,
       renderer, canvas: ctx.canvas, camera, hud, presets: PRESETS, landing: "entrance", pitch: PITCH, dist: DIST,
-      follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => HALL.h - 2, coarse: COARSE, mayPossess,
+      follow: FOLLOW, clampTarget, clampCamera, ceilingAt: () => HALL.h - 2, coarse: COARSE, mayPossess,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: (x, z) => FM.supportAt(x, z, feetOf()) }
     });
     const tipFor = (hit) => {
@@ -1910,8 +1911,8 @@
     showMode(scene);
     hireCrew(scene);
     // Whoever walked in stays themselves: their Ooga stands on the balcony facing the core, under the visitor's
-    // control. A page that opens here takes `character=` instead, as the island does. With nobody, the view stays
-    // free.
+    // control. A page that opens here takes `character=` instead, as the island does, and otherwise the visitor's own
+    // or assigned Ooga (`preferredCharacter`): there is no view without one.
     const asked = ctx.from === null ? new URLSearchParams(location.search).get("character")?.trim().toLowerCase() : null;
     // Walked in through the island's shield, or the hangar door's from the hangar, the hall comes on under the last
     // frame of the place left, which dissolves away.
@@ -1920,9 +1921,9 @@
     Object.assign(walk, { phase: 0, through: false, beat: 0, grab: false, still: crossing || fromHangar ? 1 : 0, hold: crossing || fromHangar ? BL.factoryWindow.GLIDE.still : 0, settle: false });
     canvas = ctx.canvas;
     const named = asked ? contributors.roster.find((c) => c.name.toLowerCase() === asked) : null;
-    const returningOwn = pilot.loginViewRestored && BL.net.ownCharacter();
-    const picked = returningOwn ? contributors.roster.find(c => c.name === returningOwn.handle)
-      : named || world.pilot && contributors.roster.find((c) => c.name === world.pilot) || null;
+    const assigned = BL.net.preferredCharacter();
+    const picked = named || world.pilot && contributors.roster.find((c) => c.name === world.pilot)
+      || assigned && contributors.roster.find((c) => c.name === assigned.handle) || null;
     const playerName = picked && !BL.net.mayDrive(picked.name) ? picked.name : null;
     world.pilot = null;
     if (playerName) {
@@ -1949,20 +1950,14 @@
       avatar = people.cavemen.get(playerName);
       // Back out of the hangar it stands on the walkway at the door; in from the island, a step inside the gate.
       const arrival = ctx.from === "hangar" && scene.hangar ? HANGAR_ARRIVAL : ARRIVAL;
-      if (pilot.loginViewRestored) {
-        Object.assign(avatar.root.position, { x: arrival.position.x, y: arrival.position.y + avatar.baseY, z: arrival.position.z });
-        avatar.root.rotation.y = arrival.yaw + Math.PI;
-      }
       // In as it left the last scene (pilot.js `arrive`); with nothing carried, armed, as before.
       if (!pilot.arrive(avatar)) people.selectWeapon(avatar.weapon.selectedSlot, avatar);
       // An arrival, as on the island: the Ooga stands a step inside the gate facing the core and the view starts
       // settled over its shoulder, never sweeping in from wherever the new camera began. Walked in through the island's
       // shield, it comes on through the gate's in its light instead, and walks on to that step.
-      if (!pilot.loginViewRestored) {
-        if (crossing) walkIn(crossing);
-        else if (fromHangar && scene.hangar) walkInHangar(fromHangar);
-        else pilot.navigate(arrival);
-      }
+      if (crossing) walkIn(crossing);
+      else if (fromHangar && scene.hangar) walkInHangar(fromHangar);
+      else pilot.navigate(arrival);
       scene.gate.phase.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
       for (const t of scene.tunnels) t.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
       if (scene.hangar) scene.hangar.phase.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
@@ -2009,7 +2004,7 @@
     // With no Ooga the visitor cannot talk to the guide: a hint points them to the island to pick one.
     if (!avatar) hud.hint(`${BL.factoryGreeter.NAME} the guide gives tours here — pick an Ooga on the island first`);
     // Sent from the island's dialog to tip: on to the kiosk's glass at the first frame, once the pilot has placed the view.
-    scene.toKiosk = !pilot.loginViewRestored && ctx.place === "kiosk" && scene.corner;
+    scene.toKiosk = ctx.place === "kiosk" && scene.corner;
 
     factoryScene.root = root;
     factoryScene.camera = camera;
@@ -2273,30 +2268,25 @@
     shared.tick(dt);
     dust.update(elapsed, pilot.orbit.target.x, pilot.orbit.target.z);
     for (let i = 0; i < s.crew.length; i++) s.crew[i].agent.update(dt);
-    // Out through the gate, or into the hangar through its door: walked into, or flown into with the free view.
-    if (!leaving) {
-      const driven = pilot.player, p = driven ? driven.root.position : camera.position, y = p.y - (driven ? driven.baseY : 0) - LAYOUT.entrance.y;
+    // Out through the gate, or into the hangar through its door, walked into.
+    const driven = pilot.player;
+    if (!leaving && driven) {
+      const p = driven.root.position, y = p.y - driven.baseY - LAYOUT.entrance.y;
       const inOpening = p.x >= GATE_OPENING.minX && p.x <= GATE_OPENING.maxX && y >= GATE_OPENING.floorY - 0.12 && y < GATE_OPENING.ceilingY;
       if (exitHeld && !(inOpening && p.z > HALL.front - 2.2)) exitHeld = false;
-      if (hangarHeld && !throughHangar(s, p, driven ? driven.baseY : 0, driven ? 0 : 0.9)) hangarHeld = false;
-      if (driven) {
-        // The walk has the Ooga; on foot heading out over the balcony's last stretch, it takes it through the gate's
-        // shield. Anything else in the doorway (an Ooga in the air, say) goes out as it always has.
-        if (walk.phase) { /* walking itself */ }
-        else if (!exitHeld && driven === avatar && walkingOut(p, previousZ, dt)) {
-          Object.assign(walk, { phase: WALK_OFF, t: 0, x: p.x, z: p.z, through: false });
-          pilot.controls.reset(); input.reset(); hud.tooltip.hide();
-        } else if (!hangarHeld && driven === avatar && walkingToHangar(s, p, previousX, previousZ, dt)) {
-          Object.assign(walk, { phase: HANGAR_OFF, t: 0, x: p.x, z: p.z, through: false });
-          pilot.controls.reset(); input.reset(); hud.tooltip.hide();
-        } else if (!exitHeld && inOpening && p.z > HALL.front - 1.3) leaveCave();
-        else if (!hangarHeld && throughHangar(s, p, driven.baseY)) enterHangar();
-        else peerPortal(s, previousX, previousY, previousZ);
-      } else if (!avatar) {
-        const a = pilot.controls.read(), moving = Math.hypot(a.x, a.y) > 0.05;
-        if (!exitHeld && inOpening && moving && p.z > HALL.front - 2.2) leaveCave();
-        else if (!hangarHeld && moving && throughHangar(s, p, 0, 0.9)) enterHangar();
-      }
+      if (hangarHeld && !throughHangar(s, p, driven.baseY)) hangarHeld = false;
+      // The walk has the Ooga; on foot heading out over the balcony's last stretch, it takes it through the gate's
+      // shield. Anything else in the doorway (an Ooga in the air, say) goes out as it always has.
+      if (walk.phase) { /* walking itself */ }
+      else if (!exitHeld && driven === avatar && walkingOut(p, previousZ, dt)) {
+        Object.assign(walk, { phase: WALK_OFF, t: 0, x: p.x, z: p.z, through: false });
+        pilot.controls.reset(); input.reset(); hud.tooltip.hide();
+      } else if (!hangarHeld && driven === avatar && walkingToHangar(s, p, previousX, previousZ, dt)) {
+        Object.assign(walk, { phase: HANGAR_OFF, t: 0, x: p.x, z: p.z, through: false });
+        pilot.controls.reset(); input.reset(); hud.tooltip.hide();
+      } else if (!exitHeld && inOpening && p.z > HALL.front - 1.3) leaveCave();
+      else if (!hangarHeld && throughHangar(s, p, driven.baseY)) enterHangar();
+      else peerPortal(s, previousX, previousY, previousZ);
     }
     const node = feed.reading.node, signal = feed.signal, running = node === "ready" || node === "starting";
     // The core: eased toward lit while the node runs, flickering as it starts, dark when it has stopped.
@@ -2484,7 +2474,6 @@
     // A visitor at the kiosk steps away first, and a tip of theirs still on its screen goes into the cooker.
     endBooth(scene);
     // Whoever walked in walks back out as themselves: the island takes the same Ooga back at this mouth.
-    world.pilotDetached = !pilot.player;
     world.pilot = pilot.player ? pilot.player.traits.name : null;
     greeter.dispose();
     greeter = null;

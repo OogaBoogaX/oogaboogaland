@@ -230,7 +230,7 @@
     const view = { yaw: 0, pitch: 0.05, dist: 4, target: { x: L.arrival.x, y: 1.6, z: L.arrival.z } };
     const pilot = pilotMod.create({
       renderer, canvas, camera, hud, presets: { entrance: view }, landing: "entrance", pitch: [-0.2, 1.2], dist: [3, 8],
-      follow: { y: 0.9, min: 3, max: 6, pitch: [0.2, 0.7] }, fly: { speed: 4, perDist: 0.4, climb: 2, yMax: L.wall - 1 },
+      follow: { y: 0.9, min: 3, max: 6, pitch: [0.2, 0.7] },
       clampTarget, clampCamera, observeOrbit: keepCameraInside, ceilingAt: (x, z) => roof(x, z, 0), coarse: COARSE, mayPossess: (cave) => BL.net.mayDrive(cave.traits.name),
       jetpackStatus: () => NO_JETPACK,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt }
@@ -328,10 +328,10 @@
     const NO_ACTORS = [], actors = [];
 
     // The visitor's Ooga: the one handed over, else the visit's, else `character=` on a page that opens here, else
-    // their own (signed in) or the roster's first they may drive.
+    // their own or assigned one (`preferredCharacter`), else the roster's first they may drive.
     const mayPick = (entry) => !BL.net.mayDrive(entry.name);
     const asked = ctx.from === null ? new URLSearchParams(location.search).get("character")?.trim().toLowerCase() : null;
-    const own = BL.net.ownCharacter();
+    const own = BL.net.preferredCharacter();
     const wanted = [visit.character, world.pilot, asked && contributors.roster.find((c) => c.name.toLowerCase() === asked)?.name, own && own.handle];
     let playerName = null;
     for (const name of wanted) {
@@ -455,7 +455,6 @@
       if (leaving) return;
       world.sphereExit = { ...exitNote(signedOut), pose };
       world.pilot = avatar ? avatar.traits.name : null;
-      world.pilotDetached = !avatar;
       BL.net.setBody(null);
       BL.net.setZone("none");
       leaving = go("hub", "timechain", !!pose && ctx.hubPolicy === "keep");
@@ -722,7 +721,6 @@
     const leave = () => {
       // Left by Back or Forward rather than the doors, the Ooga still goes out by the passage if the island is next.
       if (!leaving) {
-        world.pilotDetached = !avatar;
         world.pilot = avatar ? avatar.traits.name : null;
         world.sphereExit = exitNote(!BL.net.state.me);
       }

@@ -1,6 +1,6 @@
 # Cursor and view controls audit
 
-Status: source audit complete; native carry cursor, Escape order, gorilla multiplayer presence, T switching, camera gestures that preserve carry/combat, signed-in-only local green markers, contributor-only sign-in, shared selection and last-actor retake, independent scroll stops, destination travel, camera-only reset, combat-only island cutaways with clear-camera restoration, right-click return to shoulder, right-click recapture/sleep/gesture parity, shared Tab release/navigation and carry-orbit right-click targeting are implemented. Remaining touch and exceptional-controller details are still open.
+Status: source audit complete; native carry cursor, Escape order, gorilla multiplayer presence, T switching, camera gestures that preserve carry/combat, signed-in-only local green markers, contributor-only sign-in, shared selection, independent scroll stops, destination travel, camera-only reset, combat-only island cutaways with clear-camera restoration, right-click return to shoulder, right-click recapture/sleep/gesture parity, shared Tab release/navigation and carry-orbit right-click targeting are implemented. The detached camera and last-actor retake recorded in earlier checkpoints have since been removed: the visitor always drives an Ooga, and place views are temporary looks (see [Agreed change: always an Ooga](#agreed-change-always-an-ooga)). Remaining touch and exceptional-controller details are still open.
 
 Baseline: `origin/rock` at `4113d59b69cbcd0f85207902ce4e36bbec8dfca4`, fetched on 2026-10-18. Work proceeds on `codex/controls-audit` in a separate worktree; existing uncommitted work in the original checkout is outside this PR.
 
@@ -186,28 +186,27 @@ Found for play-test: toggle combat/carry in all three camera distances; drag, wh
 
 ## Agreed change: Escape order
 
-The maintainer approved **close active UI → free captured mouse look → detach actor → leave interior**, one step per press, for both actor types and either sign-in state. Inapplicable steps are skipped; detached on the hub does not leave.
+The maintainer approved **close active UI → free captured mouse look → leave interior**, one step per press, for both actor types and either sign-in state. Inapplicable steps are skipped; the hub does not leave. (This checkpoint originally included a detach step between freeing the cursor and leaving; it was removed with the detached camera, and ending a look now comes before freeing the cursor.)
 
 - The HUD handles visible floating panels and the open sheet before controller handlers. Nested dialog actions and Chat's editor blur remain their own first step; IME composition is left alone. Holding Escape does not cascade through multiple steps.
-- Shared `pilot.escape()` and `clankerPlay.escape()` release soft focus, pending/acquired capture, or the browser's just-released capture before releasing possession. The next explicit press can detach immediately.
-- Lab, Factory, Arcade, Bifrost and the Ember Den use the shared order after their local menus/seating actions. DSB closes venue UI, frees capture, detaches, leaves the venue, then leaves DSB from its detached exterior. Arcade retains its existing carry restriction.
-- An explicit detached interior handoff uses `world.pilotDetached`, so the hub's signed-in arrival claim does not reattach the player. Initial signed-in arrival still claims the owner's Ooga.
+- Shared `pilot.escape()` and `clankerPlay.escape()` end a look and release soft focus, pending/acquired capture, or the browser's just-released capture. Neither lets go of the actor.
+- Lab, Factory, Arcade, Bifrost and the Ember Den use the shared order after their local menus/seating actions. DSB closes venue UI and frees capture before its own venue exits. Arcade retains its existing carry restriction.
 - Gorilla shortcuts now respect keyboard focus inside the sheet, matching the Ooga's guard. The legacy lab Agent still has its own controller and no captured mouse look; the shared HUD closes UI before that controller detaches.
 
 ## Agreed change: multiplayer companions and T switching
 
 The maintainer requested multiplayer gorilla tracking and a key to cycle their own pair. After reviewing the G conflict, they chose **T**. **G remains grab/throw for gorillas and weapon switch for Oogas.**
 
-- On the hub, T changes from the owned Ooga to its active companion, or from a companion/detached view to the owned Ooga. It changes control at the actor's existing position. Repeat and modified key presses do not cycle; input fields and focused sheet controls retain their keys. Combat selection requests mouse look; carry keeps the native cursor.
+- On the hub, T changes from the owned Ooga to its active companion, or from the companion to the owned Ooga. It changes control at the actor's existing position. Repeat and modified key presses do not cycle; input fields and focused sheet controls retain their keys. Combat selection requests mouse look; carry keeps the native cursor.
 - This operates wherever the hub's companions already exist, including its connected islands and carved caves. Separate interior scenes do not contain those companions; this work does not create gorillas in those scenes. DSB's seated T/tomato action remains local to that venue.
 - Signed-in contributors can claim only their own companion (including registered GitHub aliases and server-vouched temporary contributors). The page and room both enforce this. Signed-out/static companion play remains local and uses the same Escape/cursor flow.
-- The room body is an Ooga handle, `gorilla:<handle>`, or null when detached. Existing position snapshots retain their stride; optional bounded gorilla locomotion carries airborne/biped/climb/run/lab/office state, speed, climbing stride/direction/side and swim amount.
+- The room body is an Ooga handle, `gorilla:<handle>`, or null while a scene is between visits. Existing position snapshots retain their stride; optional bounded gorilla locomotion carries airborne/biped/climb/run/lab/office state, speed, climbing stride/direction/side and swim amount.
 - Remote gorillas use the managed gorilla rig with eased position/heading, owner name, normalized health and voice indicator. Their local AI copy releases its reservations and hides until the remote lets go. Their Ooga remains a separate crew member. Voice follows the driven actor's zone.
 - This is player presence and locomotion. Gorilla attacks, held Oogas, throws, damage authority and general NPC gorilla pose synchronization are not newly replicated. Older open pages must refresh to recognize a gorilla body; old Ooga position messages remain compatible.
 
 ## Agreed change: camera gestures preserve carry/combat
 
-The maintainer approved **zoom and right-click preserve carry/combat; X switches modes**, for either actor and either sign-in state. The portrait remains the equivalent button action. Detached flight retains its existing movement keys; it has no carry/combat state.
+The maintainer approved **zoom and right-click preserve carry/combat; X switches modes**, for either actor and either sign-in state. The portrait remains the equivalent button action.
 
 | Starting state | Zoom/right-click result | Mode |
 |---|---|---|
@@ -277,21 +276,18 @@ That checkpoint did not change successful selection's camera/mode defaults or ad
 
 ## Agreed change: selection, retake and detached camera
 
-The maintainer approved the shared selection flow and last-actor portrait, retaining T's existing meaning. Their camera clarification replaces the proposed high/close split: **every manual acquisition from detached view keeps the camera eye exactly where it is, recenters its look on the chosen actor, and enters carry/orbit with the native cursor**. This applies to world double-click/tap, the retake portrait and T. Direct switches between controlled actors preserve carry/combat and the view family. Automatic sign-in instead places the owned Ooga awake beside the hub's banana pile.
+The maintainer approved the shared selection flow, retaining T's existing meaning. Direct switches between controlled actors preserve carry/combat and the view family. Automatic sign-in places the owned Ooga awake beside the hub's banana pile. This checkpoint also introduced a fixed-eye acquisition from detached view and a last-actor retake portrait; both were removed with the detached camera (see [Agreed change: always an Ooga](#agreed-change-always-an-ooga)).
 
 | Situation | Current agreed flow |
 |---|---|
-| Detached, either sign-in state | Double-click/tap an available actor or use the last-actor portrait. Eye position stays fixed; look smoothly recenters; carry/orbit starts without capture. The actor stays at its existing position. |
-| Controlling an actor | Selecting the same actor does nothing. Selecting another permitted actor smoothly moves the camera to that actor, carrying mode and view family across. Escape and portrait hold remain the explicit detach actions. |
-| Last-actor portrait | Shown only while detached after a successful selection in this scene. It shows the last Ooga or gorilla and its health, signed in or out. Unavailable or forbidden retakes explain the refusal and preserve the detached view. |
-| Signed-in contributor | Only the owned pair is selectable. T switches that pair; from detached it selects the own Ooga, independently of which actor the portrait remembers. |
-| Signed out or static | Available bundled Oogas and companions are local choices, including working Oogas. T does not switch. Local control does not show a green online marker. |
+| Controlling an actor | Selecting the same actor does nothing. Selecting another permitted actor smoothly moves the camera to that actor, carrying mode and view family across. |
+| Signed-in contributor | Only the owned pair is selectable. T switches that pair. |
+| Signed out or static | The visitor's own local likeness and its companion. T does not switch. Local control does not show a green online marker. |
 | Settled sleeping actor | Selection retains sleep. Space or WAKE UP consumes a wake action; movement and attacks wait. An actor still walking to bed is awake and remains ordinarily controllable. |
-| Logout | Eligible bundled control remains local; a temporary actor requires sign-in and is released. Retake always rechecks the current account and target availability. |
+| Account change | If the driven Ooga is no longer the visitor's, the hub hands them their own (`claimOwnOoga`); interior scenes toast and leave toward the island. |
 
-- The fixed eye is held while the actor and camera input remain still, including viewpoints above or below the ordinary orbit limits. The first wheel gesture approaches the normal range proportionally. Deliberate movement/look/zoom resumes normal camera following and constraints.
-- Selection and T handoffs start at the exact displayed view and ease to the incoming actor's current framing over 0.4 seconds. Position, look direction, camera up and projection stay continuous. Repeating T or selecting another actor during the move starts from the view currently on screen; selecting the same actor neither jumps nor restarts it. Detached acquisition keeps its eye throughout the turn toward the actor.
-- Both controllers share the camera handoff. Their camera constraints solve the incoming endpoint separately from the displayed interpolation, so a previous actor's camera cannot feed back into the new actor's first-person collision checks. Underground combat handoffs retain the cutaway until the displayed camera has a clear view; carry and detached keep the intact island.
+- Selection and T handoffs start at the exact displayed view and ease to the incoming actor's current framing over 0.4 seconds. Position, look direction, camera up and projection stay continuous. Repeating T or selecting another actor during the move starts from the view currently on screen; selecting the same actor neither jumps nor restarts it.
+- Both controllers share the camera handoff. Their camera constraints solve the incoming endpoint separately from the displayed interpolation, so a previous actor's camera cannot feed back into the new actor's first-person collision checks. Underground combat handoffs retain the cutaway until the displayed camera has a clear view; carry keeps the intact island.
 - GitHub sign-in navigates away from any scene and returns to `/`. The owned Ooga arrives awake at a clear surface position beside the banana pile, regardless of activity, with the hub's arrival camera. The previous scene and camera are not saved for that round trip. Already signed-in direct links and ordinary interior exits keep their existing destinations.
 - Auto-claim preserves the owner's underlying activity for release, including away activity. Manual selection of a settled Ooga or gorilla retains sleep until explicitly woken. The gorilla room payload adds a sleeping bit and resting pose within its existing six-number locomotion record so other players see the controlled sleeper correctly.
 - Existing selection, camera, ownership, remote-rig and protocol checks are extended. Runtime results remain pending under **wait**; actual OAuth navigation, touch and multiplayer should be included in maintainer play-testing.
@@ -336,19 +332,18 @@ The maintainer requested a fresh scroll to cross shoulder view in either directi
 
 ## Agreed change: destination travel and camera reset
 
-The maintainer approved destination travel plus a separate camera-only reset, shared by Oogas, gorillas and detached view in either sign-in state. After local play-testing, the Map control returns to one-click cycling and the Reset camera button is removed; the **0** shortcut remains.
+The maintainer approved destination travel plus a separate camera-only reset, shared by Oogas and gorillas in either sign-in state. After local play-testing, the Map control returns to one-click cycling and the Reset camera button is removed; the **0** shortcut remains.
 
-| Control | Controlling an Ooga or gorilla | Detached |
-|---|---|---|
-| Map | Each click tries the next destination and frees the cursor. A valid arrival translates the actor and camera together, retaining heading, relative framing, carry/combat and view family. | Each click moves only the camera to the next destination using its destination framing. |
-| 0 | Restores comfortable framing for the current view family around the same actor, without moving, detaching, waking or switching mode. Existing cursor focus is preserved. | Remains detached; orbit reframes around the current focal point and eye-level view levels its look at the same eye position. |
-| Last-actor portrait | Not shown while controlling an actor. | Retakes the remembered actor using the agreed fixed-eye carry/orbit acquisition. |
+| Control | Controlling an Ooga or gorilla |
+|---|---|
+| Map | Each click tries the next destination and frees the cursor. A valid arrival translates the actor and camera together, retaining heading, relative framing, carry/combat and view family. |
+| 0 | Restores comfortable framing for the current view family around the same actor, without moving, waking or switching mode. Existing cursor focus is preserved. |
 
 - The island Map cycles through Pile, Lab, Mirror, HQ, Basement, Mempool, LN Factory, Ooga Arcade, B.C.A., North gate, ₿IFRÖST and TC Sphere, then wraps to Pile. Travelling does not recapture combat look. Click the canvas to resume aiming.
 - Arrival checks include support, the controlled actor's body size, other local/remote actors and the translated camera eye. A refusal keeps actor and camera in place and shows an explanation; the next Map click tries the following destination. A viewpoint too large for a room can be refused rather than silently replacing its framing. Successful direct navigation synchronizes the cycle to that destination.
 - Sleeping, seated, held, climbing, airborne or busy actors must finish that state before travel. Travel has its own guarded relocation path; it does not reuse respawn healing/recovery or silently wake a sleeper. Existing respawn and authored scene-arrival behavior remain separate.
-- The **0** reset shortcut is available in the hub and the six walking interiors: Lab, Factory, Arcade, Bifrost, DSB and Poker. There is no Reset camera button. Scene interactions and transition guards still apply. Unsupported interior Map buttons are hidden. Existing camera tabs and DSB's Island overview explicitly identify themselves as camera viewpoints that release control.
-- DSB no longer uses a Walk/reset action to acquire an actor or overwrite detached acquisition framing. Its last-actor portrait supplies retake, and its ordinary scene arrival remains unchanged.
+- The **0** reset shortcut is available in the hub and the six walking interiors: Lab, Factory, Arcade, Bifrost, DSB and Poker. There is no Reset camera button. Scene interactions and transition guards still apply. Unsupported interior Map buttons are hidden. Existing camera tabs and DSB's Island overview are temporary looks that keep the visitor in control (see [Agreed change: always an Ooga](#agreed-change-always-an-ooga)).
+- DSB no longer uses a Walk/reset action to acquire an actor. Its ordinary scene arrival remains unchanged.
 - Existing map, camera, accessibility, remote-actor and DSB regressions are extended for the new flow. These are authored coverage, not runtime results; play-testing remains pending under **wait**.
 
 ## Agreed change: combat-only lower-level cutaways
@@ -358,7 +353,7 @@ The maintainer requested consistent island slicing for Oogas and clankers: revea
 Source inspection found that cutaway activation used the remaining projection blend without checking combat intent. Below ground, it also retained slicing whenever the camera was high enough, with an extra Ooga-only exception for orbit or an unfinished shoulder entry. Thus carry could continue slicing even after its projection settled. Detached view retained the previous cut during a short restoration scan.
 
 - One shared combat requirement now applies to both actors, regardless of sign-in. Combat bird's-eye reveals the current floor and ramps using the existing height and head-clearance rules.
-- Switching to carry or detaching clears the cut, local regions, ramp openings, section caps and ramp markers on the next scene update, even while the camera's projection continues blending. Props and actors hidden as whole units by slicing are restored too. Detached acquisition/retake stays in intact carry/orbit.
+- Switching to carry clears the cut, local regions, ramp openings, section caps and ramp markers on the next scene update, even while the camera's projection continues blending. Props and actors hidden as whole units by slicing are restored too.
 - The initial checkpoint retained combat slicing while projection blended or the eye remained above the actor's cut plane. The maintainer clarified that shoulder and first-person must restore the intact island once the camera is in view. Source inspection found that the old height test could retain a slice indefinitely in a settled shoulder view, including when its eye was already in the room.
 - A bird's-eye exit now retains its cut until the displayed close camera has a clear volume and connection to the actor through the intact terrain, ramp slopes, entrance frames, beds and solid props. This includes the Mempool roof. Residual projection alone does not postpone restoration underground. Once restored, ordinary close-view obstructions do not reopen the slice.
 - Underground combat close cameras shorten their boom toward clear air near the actor, blended through the existing entry motion. The Ooga then resolves its selected aim point from the corrected eye. A clear gorilla shoulder target keeps the original aim ray while its boom shortens; if that target is blocked, its saved 10m world point guides the corrected view until deliberate input changes it. First-person correction keeps its look direction. Pinned climbing handoffs complete their projection and pending cutaway recovery. Carry/orbit remains unrestricted.
@@ -418,7 +413,7 @@ Evidence: [Ooga Tab and UI guard](https://github.com/OogaBoogaX/oogaboogaland/bl
 - In combat with captured, soft-focused or pending mouse look, the first Tab or Shift+Tab frees the cursor and cancels held movement, sprint/jump, aiming and pending actions. It keeps the controlled actor, mode and view. The held-W continuation and delayed Right Shift shoulder swap are explicitly removed by this cleanup.
 - Consume that Tab hold through its key release, including repeats, so one hold cannot both release mouse look and start navigating UI. A subsequent Tab/Shift+Tab uses native forward/backward focus navigation. There is no promise of a particular first focus target.
 - Interrupted keys and mouse chords stay inactive until release. An ordinary mouse move with a button still held cannot restart walking, charging or combat capture; a cancelled Shift cannot modify a new gameplay shortcut before it is released.
-- With the cursor already free, Tab navigates immediately. Carry, detached view and sleeping actors also use native Tab navigation immediately; Tab does not wake, acquire or switch an actor.
+- With the cursor already free, Tab navigates immediately. Carry and sleeping actors also use native Tab navigation immediately; Tab does not wake, acquire or switch an actor.
 - Focused UI controls own Tab, including buttons, links, selects, text fields, contenteditable, the sheet and dialogs. Ctrl/Meta/Alt browser shortcuts remain untouched.
 - The same policy applies to Oogas and gorillas, all their view families and either sign-in state. T remains the signed-in owned-pair switch. An explicit world click resumes combat mouse look under the existing capture-only rules.
 
@@ -443,7 +438,7 @@ Both actors retained carry/native cursor, used left-drag for camera look and ign
 - Both actors use the same visible-world target picker in carry/orbit. A short right-click enters shoulder facing the chosen location, smoothly turning the actor and camera while keeping carry and the native cursor. It does not attack, move the actor to the target or select a different actor.
 - Empty sky uses the clicked viewing direction rather than a finite camera-relative target. A target too close to the actor or a foreground obstruction hiding them preserves their facing. The controlled actor is excluded from picking.
 - Entry waits for the right-button release (at most 350ms held and 8px travel). Dragging, another mouse button in either press order, cancellation or interrupted input discards the candidate. Two-button walking/turning therefore never also changes the carry view. The entry click does not seed the close-view double-click return.
-- Detached right-click remains inactive. Left-drag remains camera look. Carry shoulder/first-person single and double-right-click behavior and sleeping suppression remain unchanged, with the same behavior signed in and out.
+- Left-drag remains camera look. Carry shoulder/first-person single and double-right-click behavior and sleeping suppression remain unchanged, with the same behavior signed in and out.
 - Combat targeting remains separate: Ooga bird's-eye retains its aimed point, gorilla bird's-eye retains ground 10m ahead, and close-view recapture and Ooga precision aiming keep their agreed flow.
 
 Existing actor/auth camera scenarios are extended for target selection, empty sky, release classification and cancelled/chord gestures. Execution remains pending under **wait**.
@@ -452,7 +447,7 @@ Existing actor/auth camera scenarios are extended for target selection, empty sk
 
 Source inspection after `189b8d0` found that the hub's occlusion overlay selected only the controlled Ooga and used its camera state, treating a controlled gorilla as detached. Both actors should use the same silhouette and nearby object/rock guides when scenery blocks them, with their own body dimensions and close-view state. First-person, combat bird's-eye, cutaway and Mempool-specific visibility rules still apply; sign-in does not change them.
 
-The mirror is now unbreakable, with no damage or per-panel HP. Its glyph room, island-wide wave and lever are retired to save resources. Detached and following cameras keep the ordinary scene and overlay rendering over and inside the OBL cave behind the mirror; its fullscreen blackout has been removed. Reflection, contact ripples and the locked gate remain.
+The mirror is now unbreakable, with no damage or per-panel HP. Its glyph room, island-wide wave and lever are retired to save resources. Cameras keep the ordinary scene and overlay rendering over and inside the OBL cave behind the mirror; its fullscreen blackout has been removed. Reflection, contact ripples and the locked gate remain.
 
 ## Combat entry from the orbit angle
 
@@ -464,6 +459,24 @@ X and the mode portrait share this rule, signed in or out. Entry starts at the d
 
 Throws previously used the camera ray in every mode and view. Carry mode (including its close views) and combat bird's-eye now throw along the gorilla's facing at 45° above horizontal. Running momentum does not alter that fixed launch angle; charge still controls launch speed. Only combat first-person and shoulder views retain crosshair aiming and their existing inherited movement. The rule is chosen when the charged throw is released and retained through the arm swing, signed in or out. G still grabs/drops, and interrupted inputs and autonomous rage retain their existing handling.
 
+## Agreed change: always an Ooga
+
+Free roaming without a character is removed in every walking scene (hub, lab, Lightning Factory, hangar, ₿IFRÖST, poker, DSB Land, Ooga Arcade, Timechain rooms) and in Cloud Hopper. The visitor always drives an Ooga or, on the hub, its gorilla. This supersedes every detached, retake and portrait-hold entry above, which remain as history of the review.
+
+| Control | Behavior |
+|---|---|
+| Escape | Closes active UI, ends a look, frees captured mouse look, then (in scenes that leave on Escape) leaves. It never lets go of the Ooga or a driven gorilla. |
+| Mode portrait | Tap toggles carry/combat. There is no hold-to-detach, and no last-actor retake portrait (`#own-ooga-hud` is gone). |
+| View tabs and place buttons | Temporary looks (`pilot.look`, `pilot.endLook`, `pilot.looking`): the camera goes to the place while the Ooga stands where it is, still controlled. The Ooga's own camera (view and carry/combat state) is saved once when the first look begins; looking from one place to another keeps that first save. |
+| Ending a look | Any movement input (keys, touch stick, gamepad stick or A, the mouse chord), any camera input, toggling carry/combat, or Escape restores that exact camera, and the movement goes on to the Ooga in the same step. |
+| Tess's tours (hub, Lightning Jet Hangar) | A movement during a tour ends it at once; the view returns to the Ooga's own camera, the movement goes on to the Ooga (`pilot.setActive(true, keepInput)`), and Tess goes back to work. |
+| Arrival | Each scene possesses the Ooga carried from the last scene, else `character=`, else the visitor's own or assigned one (`BL.net.preferredCharacter()`), always gated by `net.mayDrive`. |
+| Account change | If the driven Ooga is no longer the visitor's, the hub hands them their own again (`claimOwnOoga`); the Factory, hangar, ₿IFRÖST, Arcade and poker room toast and leave toward the island. |
+
+- A signed-out guest drives their local likeness (`contributors.addLocal`: the default Ooga or a remembered login's). It has no NPC copy on the island and no ghost; when nobody drives it, it is away. A contributor's Ooga driven by anyone still leaves its NPC track behind as a cyan ghost (`npc-ghosts.js`).
+- Game cameras keep their own rules: the ghost hunt's spectator views and grave hold, Cloud Hopper's run camera, Ooga Mine's camera-only pilot (which still flies, pans and uses Space as WORK), the Factory kiosk glide, the cabinet zoom and the whitepaper reader.
+- A `?debug=1` page that names no character still starts with no Ooga, as a stationary fixture for checks; it is not a visitor feature. The sign-in view snapshot (`saveLoginView`), which kept only a view with no Ooga, is removed: sign-in returns to the pile with the visitor's own Ooga.
+
 ## Validation and play-test queue
 
 The pile hover label and Bananas panel now display the same current donation value to two decimals. Previously the pile label rounded the remaining gameplay stock, while the panel converted all donated sats at the latest BTCUSD price; the screenshot's 79 versus 77.97 came from those different sources. Both labels now share the panel's calculation and missing-price behavior. Hovering the visible pile also watches the existing shared price feed, released when neither the pile label nor panel is visible. Gameplay stock and donor receipt values retain their existing meanings.
@@ -472,7 +485,7 @@ Earlier checkpoints used **wait** and left runtime verification pending. For the
 
 Existing checks to extend if implementation and runtime testing are requested: `hubBirdsEye` (selection, view gestures and cursor handoffs), `hubWalking`/`labWalking` (movement), `hubChat` (focus), and relevant scene walking/exit checks in `test/run.mjs`. Their presence is not evidence they passed on this branch. Keep the existing value/STOP rules; do not add parallel duplicate checks.
 
-For the maintainer's play-test, exercise each agreed flow with:
+For the maintainer's play-test, exercise each agreed flow with (parts that mention detached view, detaching or retakes predate [Agreed change: always an Ooga](#agreed-change-always-an-ooga) and no longer apply; test looks and their end on movement instead):
 
 1. No backend, Worker signed out, signed-in own Ooga (bundled/temporary), and refused noncontributor sign-in/old guest sessions. Include canonical login aliases and contributor-feed failure. Use manual and automatic arrival separately; `nosim` disables accounts and cannot validate the signed-in rows.
 2. Ooga/gorilla/detached; carry/combat; shoulder/first-person/orbit/overhead; native cursor, successful lock, denied/lost lock, and blur/resume.

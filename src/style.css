@@ -1225,8 +1225,8 @@ body[data-active-scene="hub"] .home-link {
 .banana-verified {
   display: inline-flex;
   flex: none;
-  width: 16px;
-  height: 16px;
+  width: 13px;
+  height: 13px;
   margin-left: 5px;
 }
 .banana-verified svg { width: 100%; height: 100%; }
@@ -1823,8 +1823,7 @@ body[data-active-scene="hub"] .home-link {
   .roster-away button { min-height: 44px; }
 }
 
-/* The online dot, and centred under it the host's black dot, which hangs below the row's line so every row's online
-   dot stays level with its name, hosting or not. */
+/* The host's outlined black dot sits behind the online dot, sharing its centre without moving the row's name. */
 .roster-dots {
   position: relative;
   display: flex;
@@ -1833,12 +1832,14 @@ body[data-active-scene="hub"] .home-link {
 
 .roster-dots .roster-host {
   position: absolute;
-  top: calc(100% + 2px);
+  top: 50%;
   left: 50%;
-  margin-left: -3.5px;
+  transform: translate(-50%, -50%);
 }
 
 .roster-presence {
+  position: relative;
+  z-index: 1;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -1969,8 +1970,8 @@ body[data-active-scene="hub"] .home-link {
 
 .roster-host {
   flex: none;
-  width: 7px;
-  height: 7px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: #000;
   box-shadow: 0 0 0 1px var(--paper);
@@ -3424,8 +3425,8 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   border-color: #b07a45;
 }
 
-/* The hunt's spectator menu, bottom centre while the visitor is down (above the thumb sticks on a touch screen): the
-   three views to watch from, and the hunter watched with a step on to the next. */
+/* The hunt's spectator bar, bottom centre while the visitor is down (above the thumb sticks on a touch screen): the
+   hunter followed, with a step on to the next. */
 .ghost-spectate {
   position: absolute;
   left: 50%;
@@ -3447,7 +3448,7 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 }
 
 .ghost-spectate[hidden],
-.ghost-spectate-watch[hidden] {
+.ghost-spectate-next[hidden] {
   display: none;
 }
 
@@ -3460,14 +3461,12 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   color: var(--accent-text);
 }
 
-.ghost-spectate-modes,
 .ghost-spectate-watch {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.ghost-spectate-modes button,
 .ghost-spectate-next {
   flex: none;
   padding: 5px 10px;
@@ -3482,11 +3481,6 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   cursor: pointer;
 }
 
-.ghost-spectate-modes button[aria-pressed="true"] {
-  background: linear-gradient(#f0b05a, var(--accent));
-  color: var(--ink);
-}
-
 .ghost-spectate-name {
   font-size: 10px;
   line-height: 1.25;
@@ -3498,7 +3492,6 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
     bottom: calc(216px + var(--safe-bottom, 0px));
   }
 
-  .ghost-spectate-modes button,
   .ghost-spectate-next {
     min-height: 32px;
   }
@@ -3967,12 +3960,10 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   overflow: visible;
 }
 
-.mode-hud[data-holding="true"],
 .rescue-hud[data-holding="true"] {
   background: linear-gradient(160deg, #615645, #50483c 55%, #3e3932);
 }
 
-.mode-hud::after,
 .rescue-hud::after {
   content: "";
   position: absolute;
@@ -3988,7 +3979,6 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   pointer-events: none;
 }
 
-.mode-hud[data-selected="true"][data-holding="true"]::after,
 .rescue-hud[data-holding="true"]::after {
   opacity: 1;
   animation: mode-release-progress 650ms linear forwards;
@@ -4758,10 +4748,22 @@ body.dsb-menu-open .rescue-equipment { visibility: hidden; pointer-events: none;
   pointer-events: none;
 }
 
-/* While her tour holds the view the touch sticks do nothing, so they step aside for her panel. */
-body.tess-touring #joy-move,
+/* While her tour holds the view the look stick does nothing and steps aside; the move stick stays, since moving ends
+   the tour and walks the Ooga, and on a touch screen her panel rises clear of the sticks. */
 body.tess-touring #joy-look {
   visibility: hidden;
+}
+
+@media (pointer: coarse) {
+  body.tess-touring .greeter-menu.greeter-tour {
+    bottom: calc(max(48px, var(--stick-inset) - var(--home-chrome)) + var(--stick-size) + 12px + var(--safe-bottom));
+  }
+
+  /* With the bottom drawer open the sticks ride up on it (`--drawer-lift`), and the panel rises over them. The panel
+     stands on the stage, so a resized drawer's --drawer-height, which sheet.js writes there, reaches it too. */
+  body.tess-touring:has(.sheet[data-dock="bottom"][data-sticks="true"][data-open="true"]:not([hidden])) .greeter-menu.greeter-tour {
+    bottom: calc(var(--drawer-height) + var(--drawer-clear) + var(--stick-size) + 12px);
+  }
 }
 
 /* On tour the heading is two lines on purpose: where in the tour, then the stop's name. */
@@ -10779,7 +10781,6 @@ body[data-active-scene="arcade"] #destination-hud:not([hidden]) { display: flex;
 }
 
 body.cloud-hopper-active #destination-hud,
-body.cloud-hopper-active #own-ooga-hud,
 body.cloud-hopper-active #mode-hud { display: none; }
 
 /* Controls reference: a quiet native modal, with real, independently lit keycaps. */

@@ -8,11 +8,12 @@
   const ROSTER_ORDER = { working: 0, chilling: 1, sleeping: 2, away: 3 };
   const stampOf = (contributor) => contributor.lastContributionAt || contributor.lastCommitAt;
   // Local control is online only while signed in; remote presence remains independent. An NPC ghost track
-  // (npc-ghosts.js) is online too, as its roster dot is: a player drives that character as a separate body.
+  // (npc-ghosts.js) shows its own activity (a gorilla its Ooga's), never online: the player driving that character
+  // is a separate body, which carries the online dot itself.
   const statusFor = (cave) => {
     const actor = cave.tooltipOwner || cave;
-    const online = cave.ghostTrack || cave.remoteControlled || actor.remoteControlled
-      || !!BL.net.state.me && (cave.controlled || actor.humanControlled);
+    const online = !cave.ghostTrack && (cave.remoteControlled || actor.remoteControlled
+      || !!BL.net.state.me && (cave.controlled || actor.humanControlled));
     return online ? "online" : actor.state === "away" ? "chilling" : actor.state;
   };
   const $ = (id) => document.getElementById(id);
@@ -194,13 +195,13 @@
     use.setAttribute("href", "#banana-panel-glyph");
     amountBanana.append(use);
   }
-  // The recent list's orange check: a seal whose rim rises and falls in sixteen rounded ridges, a ridge at the top,
+  // The recent list's orange check: a seal whose rim rises and falls in eight rounded ridges, a ridge at the top,
   // with the tick over it. Every row clones it.
   const verifiedSeal = document.createElementNS(SIGN_NS, "svg");
   verifiedSeal.setAttribute("viewBox", "0 0 24 24");
   verifiedSeal.setAttribute("aria-hidden", "true");
   {
-    const RIDGES = 16, STEPS = RIDGES * 8;
+    const RIDGES = 8, STEPS = RIDGES * 8;
     let d = "";
     for (let i = 0; i < STEPS; i++) {
       const a = i / STEPS * Math.PI * 2, r = 11 + 0.9 * Math.cos(RIDGES * a);
@@ -339,10 +340,6 @@
       modeFace: $("mode-face-icon"),
       modeHealth: $("mode-health"),
       modeHealthFill: $("mode-health-fill"),
-      ownOoga: $("own-ooga-hud"),
-      ownOogaFace: $("own-ooga-face-icon"),
-      ownOogaHealth: $("own-ooga-health"),
-      ownOogaHealthFill: $("own-ooga-health-fill"),
       modeDestinationName: $("detached-destination-name"),
       primary: $("primary-hud"),
       primaryIcon: $("primary-icon"),
@@ -409,10 +406,8 @@
     el.primary.hidden = true;
     el.gorillaSmash.hidden = true;
     el.mode.hidden = true;
-    el.ownOoga.hidden = true;
-    el.mode.dataset.health = el.ownOoga.dataset.health = String(healthEnabled);
+    el.mode.dataset.health = String(healthEnabled);
     el.modeHealth.hidden = true;
-    el.ownOogaHealth.hidden = !healthEnabled;
     el.weapon.hidden = true;
     el.magazine.hidden = true;
     el.jetpack.hidden = true;
@@ -537,7 +532,7 @@
       if (!nodes) {
         const li = document.createElement("li"), dots = document.createElement("span"), presence = document.createElement("span"), name = document.createElement("button");
         li.dataset.name = contributor.name;
-        // The online dot, with the host's dot under it.
+        // The online dot, with the host's outlined dot centred behind it.
         dots.className = "roster-dots";
         presence.className = "roster-presence"; presence.setAttribute("role", "img");
         const label = document.createElement("span"), host = document.createElement("span");
@@ -932,56 +927,16 @@
     };
     let gorillaEntry = null, gorillaView = "orbit", gorillaCombat = false, gorillaCombatEnabled = true;
     let modeName = "", modeGeometry = null, modeSelected = false, modeCombat = false, modeView = "", modeHealth = -1, modeHealthMax = 0, modeGorilla = false;
-    let modeCave = null, modeVisible = true, retakePortraitActor = null, retakeGeometry = null, retakePortraitGeometry = null, retakeHealth = -1, retakeHealthMax = 0;
-    const retake = { actor: null, gorilla: false };
-    const syncRetakeActor = () => {
-      const actor = retake.actor;
-      const shown = modeVisible && !!actor && !modeCave && !gorillaEntry;
-      if (el.ownOoga.hidden === shown) el.ownOoga.hidden = !shown;
-      if (!shown) return;
-      const cave = retake.gorilla ? actor.owner : actor, gorilla = retake.gorilla ? actor.gorilla : null;
-      const geometry = gorilla ? gorilla.parts.head.geometry : cave.parts.head.geometry;
-      const portraitGeometry = gorilla ? geometry : cave.portraitHead;
-      if (actor !== retakePortraitActor || geometry !== retakeGeometry || portraitGeometry !== retakePortraitGeometry) {
-        renderFaceIcon(el.ownOogaFace, cave, gorilla);
-        el.ownOoga.dataset.portrait = "face-crop";
-        if (actor !== retakePortraitActor) {
-          const name = cave.traits.display;
-          const label = gorilla ? `Return to ${name}'s gorilla` : `Return to ${name}, Ooga`;
-          el.ownOoga.setAttribute("aria-label", label);
-          el.ownOoga.title = label;
-          el.ownOoga.dataset.gorilla = String(!!gorilla);
-          if (healthEnabled) el.ownOogaHealth.setAttribute("aria-label", `${gorilla ? "Gorilla" : "Ooga"} health: ${name}`);
-        }
-        retakePortraitActor = actor;
-        retakeGeometry = geometry;
-        retakePortraitGeometry = portraitGeometry;
-      }
-      if (!healthEnabled) return;
-      const source = actor.health, max = source ? source.max : BL.crew.HEALTH_MAX;
-      const health = source ? Math.max(0, Math.min(max, source.value)) : max;
-      if (health !== retakeHealth || max !== retakeHealthMax) {
-        retakeHealth = health; retakeHealthMax = max;
-        el.ownOogaHealthFill.style.transform = `scaleY(${health / max})`;
-        el.ownOogaHealth.setAttribute("aria-valuemax", String(max));
-        el.ownOogaHealth.setAttribute("aria-valuenow", String(Math.ceil(health)));
-      }
-    };
-    // Legacy account updates never replace the last actor successfully controlled.
-    const setOwnOoga = () => syncRetakeActor();
-    let modeCombatEnabled = true;
+    let modeCombatEnabled = true, modeVisible = true;
     const setMode = (cave, combat = false, view = cave ? "orbit" : "detached", visible = true, combatEnabled = true) => {
       const gorilla = gorillaEntry ? gorillaEntry.gorilla : null;
-      modeCave = gorilla ? null : cave;
       modeVisible = visible;
-      if (gorillaEntry || cave) { retake.actor = gorillaEntry || cave; retake.gorilla = !!gorillaEntry; }
-      syncRetakeActor();
       if (gorilla) { cave = gorillaEntry.owner; combat = gorillaCombat; view = gorillaView; visible = true; combatEnabled = gorillaCombatEnabled; }
       const selected = !!cave, name = selected ? cave.traits.name : "", shown = selected ? cave.traits.display : "";
       if (!visible) fadeDetachedName(true);
       const identityChanged = selected !== modeSelected || selected && name !== modeName || !!gorilla !== modeGorilla;
       const stateChanged = combat !== modeCombat || view !== modeView || combatEnabled !== modeCombatEnabled;
-      const showMode = visible && (selected || !retake.actor);
+      const showMode = visible;
       if (el.mode.hidden === showMode) el.mode.hidden = !showMode;
       const showDestinations = visible && destinationNames.length > 0;
       if (el.modeDestination.hidden === showDestinations) el.modeDestination.hidden = !showDestinations;
@@ -1021,11 +976,11 @@
         const look = combatEnabled || gorilla ? combat ? "combat" : "carry" : combat ? "cursor look" : "drag to look";
         const change = combatEnabled || gorilla ? "combat or carry mode" : "cursor look or click-and-drag look";
         el.mode.setAttribute("aria-label", gorilla
-          ? `${shown}'s gorilla; ${view} view; ${look}. Press to switch ${change}; hold to detach`
+          ? `${shown}'s gorilla; ${view} view; ${look}. Press to switch ${change}`
           : selected
-          ? `${shown}; ${view} view; ${look}. Press to switch ${change}; hold to detach`
+          ? `${shown}; ${view} view; ${look}. Press to switch ${change}`
           : "Choose an Ooga. Open the Oogas panel");
-        el.mode.title = gorilla ? `${shown}'s gorilla · ${view} · ${look} · hold to detach` : selected ? `${shown} · ${view} · ${look} · hold to detach` : "Choose an Ooga";
+        el.mode.title = gorilla ? `${shown}'s gorilla · ${view} · ${look}` : selected ? `${shown} · ${view} · ${look}` : "Choose an Ooga";
       }
     };
     setDetachedView(detachedPreset);
@@ -1240,7 +1195,7 @@
       el.jetpackCompactFuel.setAttribute("aria-valuenow", String(percent));
     };
     const setGorilla = (entry, view = "orbit", combat = false, combatEnabled = true) => {
-      if (entry === gorillaEntry && view === gorillaView && combat === gorillaCombat && combatEnabled === gorillaCombatEnabled) { syncRetakeActor(); return; }
+      if (entry === gorillaEntry && view === gorillaView && combat === gorillaCombat && combatEnabled === gorillaCombatEnabled) return;
       if (entry !== gorillaEntry) finishPrimary(true);
       gorillaEntry = entry;
       gorillaView = view;
@@ -1986,37 +1941,19 @@
         sheet.selectTab("roster");
       }
     };
-    const MODE_HOLD_MS = 650;
-    let modePointer = -1, modeHoldTimer = 0, modeLong = false;
-    const clearModeHold = () => {
-      window.clearTimeout(modeHoldTimer);
-      modeHoldTimer = 0;
-      el.mode.dataset.holding = "false";
-    };
+    let modePointer = -1;
     on(el.mode, "pointerdown", (e) => {
       if (e.button !== 0 || modePointer >= 0) return;
       e.preventDefault(); e.stopPropagation();
       modePointer = e.pointerId;
-      modeLong = false;
-      el.mode.dataset.holding = String(modeSelected);
       if (e.isTrusted) el.mode.setPointerCapture(e.pointerId);
-      if (modeSelected) {
-        modeHoldTimer = window.setTimeout(() => {
-          modeHoldTimer = 0;
-          modeLong = true;
-          el.mode.dataset.holding = "false";
-          if (actionHandler) actionHandler("mode-release");
-        }, MODE_HOLD_MS);
-      }
     });
     const finishModePress = (e, cancel = false) => {
       if (e.pointerId !== modePointer) return;
       e.preventDefault(); e.stopPropagation();
       modePointer = -1;
       if (el.mode.hasPointerCapture(e.pointerId)) el.mode.releasePointerCapture(e.pointerId);
-      clearModeHold();
-      if (!cancel && !modeLong) pressMode();
-      modeLong = false;
+      if (!cancel) pressMode();
       el.mode.blur();
     };
     on(el.mode, "pointerup", (e) => finishModePress(e));
@@ -2398,12 +2335,7 @@
       el.hint.hidden = true;
       el.wpNav.hidden = true;
       tooltip.hide();
-      clearModeHold();
       modePointer = -1;
-      retake.actor = null; retake.gorilla = false;
-      retakePortraitActor = retakeGeometry = retakePortraitGeometry = null;
-      retakeHealth = -1; retakeHealthMax = 0;
-      el.ownOogaFace.width = ICON_PX;
       setGorilla(null);
       setMode(null, false, "detached", false);
       setPrimary(false, false, null);
@@ -2432,7 +2364,7 @@
         Object.defineProperties(this, Object.getOwnPropertyDescriptors(next));
         return this;
       },
-      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, rockCue, whitepaperNav, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
+      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setDestinations, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, rockCue, whitepaperNav, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
   };
   // Detached panels can be visible together. Each has a view of the same account and voice state.
   const ROOM_WORDS = { replaced: "open in another tab", full: "island full" };
