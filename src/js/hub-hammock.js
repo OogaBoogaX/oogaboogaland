@@ -421,6 +421,46 @@
       return { way, w: o.w, h: o.h, i0: flipI ? -(o.i0 + o.w) : o.i0, j0: flipJ ? -(o.j0 + o.h) : o.j0,
         bottom: faces ? -o.top : o.bottom, top: faces ? -o.bottom : o.top, cells };
     };
+    // A part is laid by its outline at rest, never by a passing state that differs between this page, other pages and
+    // a guest's own copy at the moment each parks it: every magazine banana shown (a full rifle, as every Ooga starts)
+    // whatever the rounds and at its resting size (`models.GUN_BANANA_SCALE`, as the crew sets it once a reload's pop has
+    // settled), no muzzle flash or flame, and a nunchaku folded, where the crew and the remote pool both settle it
+    // while parked (folded at once here, so every page also draws it so from the start). Shown states and the
+    // bananas' drawn sizes are put back once measured.
+    const steadied = [], steadiedShown = [], bananaScales = [];
+    let steadiedBananas = null;
+    const steady = (node, shown) => {
+      if (!node) return;
+      steadied.push(node); steadiedShown.push(node.visible); node.visible = shown;
+    };
+    const steadyPart = (gear, node, index) => {
+      const cave = gear.cave, parts = cave.parts;
+      steadied.length = steadiedShown.length = bananaScales.length = 0;
+      steadiedBananas = null;
+      if (index === 0 && parts.chuk) cave.chukAngle = parts.chuk.rotation.x = BL.crew.CHUK_FOLD;
+      if (index === 1) {
+        const rest = BL.models.GUN_BANANA_SCALE, h = cave.traits.height;
+        steadiedBananas = parts.gunBananas;
+        for (const banana of parts.gunBananas) {
+          steady(banana, true);
+          const s = banana.scale;
+          bananaScales.push(s.x, s.y, s.z);
+          s.x = rest.x * h; s.y = rest.y * h; s.z = rest.z * h;
+        }
+        steady(parts.gunFlash, false);
+      }
+      // A built-in pack's flame is its own part; the hub's pack (`crew.jetpackNode`) has its flame as its one child.
+      if (index === 2) steady(node === parts.jetpack ? parts.jetFlame : node.children[0], false);
+    };
+    const unsteady = () => {
+      for (let i = 0; i < steadied.length; i++) steadied[i].visible = steadiedShown[i];
+      if (steadiedBananas) for (let i = 0; i < steadiedBananas.length; i++) {
+        const s = steadiedBananas[i].scale;
+        s.x = bananaScales[i * 3]; s.y = bananaScales[i * 3 + 1]; s.z = bananaScales[i * 3 + 2];
+      }
+      steadied.length = steadiedShown.length = bananaScales.length = 0;
+      steadiedBananas = null;
+    };
     const parkPart = (gear, node, index, temporary = false) => {
       if (!node) return;
       const saved = { node, index, parent: node.parent, position: { ...node.position }, rotation: { ...node.rotation },
@@ -437,6 +477,7 @@
       node.poseYaw = node.poseLean = 0;
       node.cameraHidden = false;
       node.visible = true;
+      steadyPart(gear, node, index);
       // Roll it about that long axis onto its broad face: the club's and pack's roll is x (after z), the rifle's z
       // (before its turn), so the heading along the bed stays as it was.
       if (measurePart(node) && maxY - minY > maxZ - minZ) {
@@ -447,6 +488,7 @@
       // the vertical) and either face down (half a turn about its long axis), and their outlines.
       const base = outline(node);
       saved.ways = [0, 1, 2, 3].map(way => turned(base, way));
+      unsteady();
       layoutGear(gear);
     };
     const setWay = (saved, way) => {

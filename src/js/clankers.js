@@ -4640,11 +4640,16 @@
       e.speed = step / dt; e.blocked = 0;
     };
     // A passive companion's travel steps straight at its authored goal (exit,
-    // apron, entry, slot or pile); on the meadow legs it follows the authored
-    // spokes and pile ring instead (`ctx.npcFixedPaths`). Support and clearance
-    // are terrain and cave walls only. A step a wall refuses goes to the
-    // ordinary controller, which owns wall climbs and roof descents.
+    // apron, entry, slot or pile). A working gorilla heading for a work cave
+    // walks straight to its apron wherever it set out from (another cave or the
+    // meadow), retargets and retries included. Only the walk to the pile, and
+    // an apron leg outside work travel, follow the authored spokes and pile
+    // ring (`ctx.npcFixedPaths`, `passivePlanned`). Support and clearance are
+    // terrain and cave walls only. A step a wall refuses goes to the ordinary
+    // controller, which owns wall climbs and roof descents.
     const PASSIVE_WALKER = { pathing: null, root: null };
+    const passivePlanned = (e) => e.route === "pile"
+      || e.route === "apron" && !(e.phase === "travel" && e.mode === "working");
     const movePassive = (e, dt, speed, planned) => {
       const p = e.root.position;
       let tx = e.goalX, tz = e.goalZ;
@@ -4653,6 +4658,11 @@
         PASSIVE_WALKER.pathing = e.pathing; PASSIVE_WALKER.root = e.root;
         ctx.npcFixedPaths.target(PASSIVE_WALKER, e.goalX, e.goalZ);
         tx = e.pathing.targetX; tz = e.pathing.targetZ;
+      } else if (e.pathing) {
+        // A straight leg leaves the planned lane behind: the next planned leg plans afresh from wherever the
+        // gorilla then stands, even to the same goal (`fixed.target` replans only on a new goal or map), in
+        // the same state and buffers.
+        e.pathing.tx = NaN;
       }
       const dx = tx - p.x, dz = tz - p.z, distance = Math.hypot(dx, dz);
       if (distance < 0.02) { e.speed = 0; return; }
@@ -7298,7 +7308,7 @@
             // A short prop can lift the feet above the ground-level goal too.
             // Keep its supported exit on the ordinary steered walker.
             if (e.nonInteractive && !e.climb.active && !e.drive.airborne)
-              movePassive(e, dt, e.mode === "chilling" ? CHILL_SPEED : SPEED, e.route === "apron" || e.route === "pile");
+              movePassive(e, dt, e.mode === "chilling" ? CHILL_SPEED : SPEED, passivePlanned(e));
             else if (e.route === "apron" && p.y > e.goalY + 0.8 && !raisedSupport(e) && caveAt(p.x, p.y, p.z) < 0)
               runDownhill(e, dt, Math.atan2(e.goalX - p.x, e.goalZ - p.z));
             else if (enteringAisle(e)) moveEntryAisle(e, dt);
