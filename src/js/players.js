@@ -21,6 +21,7 @@
 // another place of the group, which shows no distance, is silenced by a range without a mark here. The slider is offered
 // before any audio is active; Web Audio supplies quieting and boost once the listener joins.
 // Hearing range and join-reading live together under the panel's Advanced settings disclosure.
+// A raised hand (reactions.js, `rec.hand` and `net.state.hand`) shows after the player's name, in their skin tone.
 // Joins (#430, `net.subscribePresence`): a player who comes online while the visitor is in the room is named on screen
 // (`hud.toast`, read out by assistive technology) and counted on the tab until the visitor looks at it
 // (`sheet.watchViews`), unless they are in the panel as it happens. Those already there when the visitor (re)joins are
@@ -84,7 +85,9 @@
     name.className = "players-name"; label.className = "roster-label"; label.id = id;
     host.className = "roster-host"; host.hidden = true; host.setAttribute("role", "img");
     host.setAttribute("aria-label", "Host: runs the Oogas for everyone"); host.title = "Host: runs the Oogas for everyone";
-    toggle.append(label); name.append(toggle); dots.append(presence, host);
+    const hand = document.createElement("span");
+    hand.className = "players-hand"; hand.hidden = true; hand.setAttribute("role", "img"); hand.setAttribute("aria-label", "Hand raised"); hand.title = "Hand raised";
+    toggle.append(label); name.append(toggle, hand); dots.append(presence, host);
     marks.className = "roster-marks";
     voice.className = "roster-voice"; voice.type = "button"; voice.hidden = true; voice.setAttribute("aria-describedby", id); voice.append(BL.hud.voiceIcon.cloneNode(true));
     // A private conversation (#188), offered where the room relays them; never on the visitor's own row.
@@ -98,7 +101,7 @@
     note.className = "players-note"; note.textContent = ", last known location"; note.hidden = true;
     distance.append(note);
     li.append(dots, name, marks, thump, look, distance, volume);
-    return { li, label, toggle, volume, slider, value, host, voice, priv, privName: null, thump, pulse: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
+    return { li, label, toggle, volume, slider, value, host, voice, priv, hand, handShown: "", privName: null, thump, pulse: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
       aim: "", voiceLook: "", voiceLogin: "", voiceSelf: false, blocked: false, hostOn: false, metres: -1, lastKnown: false, far: false };
   };
   const selfRow = makeRow();
@@ -132,12 +135,12 @@
   const paintMarks = () => {
     if (!showing || stale) return;
     const s = net.state, voice = BL.voice.stats;
-    paintMark(selfRow, voice.enabled ? voice.muted ? "muted" : voice.speaking ? "speaking" : "on" : "", "", voice.enabled, s.hostId === s.selfId);
+    paintMark(selfRow, voice.enabled ? voice.muted ? "muted" : voice.speaking ? "speaking" : "on" : "", "", voice.enabled, s.hostId === s.selfId, s.hand ? BL.reactionPolicy.HANDS[s.handTone] : "");
     for (const row of rows.values()) {
       const rec = net.remotes.get(row.id);
       if (!rec) continue;
       const look = rec.voice ? rec.muted ? "muted" : BL.voice.speaking(rec.id) ? "speaking" : "on" : "";
-      paintMark(row, look || "off", rec.login, false, rec.id === s.hostId);
+      paintMark(row, look || "off", rec.login, false, rec.id === s.hostId, rec.hand ? BL.reactionPolicy.HANDS[rec.handTone] : "");
       const name = BL.privateChat && BL.privateChat.available() ? rec.display : "";
       if (row.privName !== name) {
         row.privName = name; row.priv.hidden = !name;
@@ -150,7 +153,8 @@
       row.slider.setAttribute("aria-valuetext", words);
     }
   };
-  const paintMark = (row, look, login, self, host) => {
+  const paintMark = (row, look, login, self, host, hand = "") => {
+    if (row.handShown !== hand) { row.handShown = hand; row.hand.textContent = hand; row.hand.hidden = !hand; }
     const blocked = !!login && BL.voice.mutedLocally(row.id);
     if (row.voiceLook !== look || row.voiceLogin !== login || row.voiceSelf !== self || row.blocked !== blocked) {
       row.voiceLook = look; row.voiceLogin = login; row.voiceSelf = self; row.blocked = blocked;
