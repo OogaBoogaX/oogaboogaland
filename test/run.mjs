@@ -25491,7 +25491,7 @@ const thumpChecks = async BL => {
   const columnOf = (selector) => +((ruleOf(selector).match(/grid-column:\s*(\d+);/) || [, NaN])[1]);
   const columns = { marks: +((css.match(/\.players-rows \.roster-marks \{ grid-column: (\d+); \}/) || [, NaN])[1]), thump: columnOf(".players-thump"), look: columnOf(".players-look"), distance: columnOf(".players-distance") };
   const thumpRule = ruleOf(".players-thump");
-  const shapeOk = cell.rows === 3 && cell.before.every((s) => s === "roster-presence players-name roster-marks players-thump players-look players-distance players-volume");
+  const shapeOk = cell.rows === 3 && cell.before.every((s) => s === "roster-dots players-name roster-marks players-thump players-look players-distance players-volume");
   record("ooga thump Online Oogas: every row holds the mallet's cell from the start between the voice mark and the crosshair, with a fixed column of its own that hides by visibility and takes no pointer; a pulse and its end change only that cell's state, never a row's cells, their order or anything hidden",
     shapeOk && cell.pulsed.join() === "true,true" && cell.pulses === 2 && cell.during.every((d) => d.same && d.hidden === false) && cell.during.filter((d) => d.on === "true").length === 2
       && cell.during.filter((d) => d.on === "true").every((d) => d.label === "Thumped" && d.ariaHidden === null) && cell.during.filter((d) => d.on === "false").every((d) => d.ariaHidden === "true")

@@ -194,6 +194,25 @@
     use.setAttribute("href", "#banana-panel-glyph");
     amountBanana.append(use);
   }
+  // The recent list's orange check: a seal whose rim rises and falls in sixteen rounded ridges, a ridge at the top,
+  // with the tick over it. Every row clones it.
+  const verifiedSeal = document.createElementNS(SIGN_NS, "svg");
+  verifiedSeal.setAttribute("viewBox", "0 0 24 24");
+  verifiedSeal.setAttribute("aria-hidden", "true");
+  {
+    const RIDGES = 16, STEPS = RIDGES * 8;
+    let d = "";
+    for (let i = 0; i < STEPS; i++) {
+      const a = i / STEPS * Math.PI * 2, r = 11 + 0.9 * Math.cos(RIDGES * a);
+      d += `${i ? "L" : "M"}${(12 + r * Math.sin(a)).toFixed(2)} ${(12 - r * Math.cos(a)).toFixed(2)}`;
+    }
+    const seal = document.createElementNS(SIGN_NS, "path"), tick = document.createElementNS(SIGN_NS, "path");
+    seal.setAttribute("class", "banana-verified-seal");
+    seal.setAttribute("d", `${d}Z`);
+    tick.setAttribute("class", "banana-verified-tick");
+    tick.setAttribute("d", "M7.6 12.4L10.9 17.1L16.9 8.3");
+    verifiedSeal.append(seal, tick);
+  }
   // Icons are rasterized once into an offscreen canvas.
   const ICON_PX = 48;
   const renderIcon = (item) => {
@@ -298,7 +317,7 @@
       donationMessageLabel: $("donation-message-label"),
       bananaBoardUnit: $("banana-board-unit"), bananaBoardNote: $("banana-board-note"),
       bananaPanel: $("bananas-panel"), bananaBtcRate: $("banana-btc-rate"),
-      bananaBtcPrice: $("banana-btc-price"), bananaExchange: $("banana-exchange"),
+      bananaBtcSats: $("banana-btc-sats"), bananaBtcPrice: $("banana-btc-price"), bananaExchange: $("banana-exchange"),
       donorUnits: [...document.querySelectorAll("[data-donor-unit]")],
       lootTab: $("loot-tab"),
       worldLootHint: $("world-loot-hint"),
@@ -515,16 +534,19 @@
       const contributor = orderedRoster[rosterIndex];
       let nodes = rosterNodes.get(contributor.name);
       if (!nodes) {
-        const li = document.createElement("li"), presence = document.createElement("span"), name = document.createElement("button");
+        const li = document.createElement("li"), dots = document.createElement("span"), presence = document.createElement("span"), name = document.createElement("button");
         li.dataset.name = contributor.name;
+        // The online dot, with the host's dot under it.
+        dots.className = "roster-dots";
         presence.className = "roster-presence"; presence.setAttribute("role", "img");
-        // The name, with the host's dot right of it, opens a signed-in player's row onto where they are.
         const label = document.createElement("span"), host = document.createElement("span");
-        name.className = "roster-name"; name.type = "button"; label.className = "roster-label";
         host.className = "roster-host";
         host.setAttribute("role", "img"); host.setAttribute("aria-label", "Host: runs the Oogas for everyone");
         host.title = "Host: runs the Oogas for everyone";
-        name.append(label, host);
+        dots.append(presence, host);
+        // The name, on one line and cut short with an ellipsis, opens a signed-in player's row onto where they are.
+        name.className = "roster-name"; name.type = "button"; label.className = "roster-label";
+        name.append(label);
         const marks = document.createElement("span"), voice = document.createElement("button");
         marks.className = "roster-marks";
         voice.className = "roster-voice"; voice.type = "button"; voice.append(voiceIcon.cloneNode(true));
@@ -535,12 +557,12 @@
         where.className = "roster-where"; whereLabel.className = "roster-where-label"; whereLabel.textContent = "Land";
         whereValue.className = "roster-where-value";
         where.append(whereLabel, whereValue);
-        li.append(presence, name, marks, age, state, where);
+        li.append(dots, name, marks, age, state, where);
         nodes = { li, presence, name, label, host, voice, age, state, where, whereValue };
         rosterNodes.set(contributor.name, nodes);
       }
       const { li, presence, name, label, host, voice, age, state, where, whereValue } = nodes;
-      if (label.textContent !== contributor.display) label.textContent = contributor.display;
+      if (label.textContent !== contributor.display) { label.textContent = contributor.display; label.title = contributor.display; }
       presence.dataset.online = "false"; presence.setAttribute("aria-label", "Offline"); presence.title = "Offline";
       host.hidden = voice.hidden = where.hidden = true; voice.disabled = false;
       name.disabled = true; name.removeAttribute("aria-expanded"); whereValue.textContent = "";
@@ -664,7 +686,29 @@
       if (el.bananaBtcPrice.textContent !== price) el.bananaBtcPrice.textContent = price;
       if (el.bananaExchange.textContent !== exchange) el.bananaExchange.textContent = exchange;
       if (el.bananaTotal.textContent !== total) el.bananaTotal.textContent = total;
+      if (price.length !== fitPriceLength) fitBtcRate();
     };
+    // The bitcoin line keeps to one line: "100,000,000 sats" while it fits, "100M sats" once a narrow panel or a long
+    // price would wrap it, and only past that does it wrap. Fitted again when the price's length or the line's width
+    // changes; digits are tabular, so the same length takes the same room.
+    let fitPriceLength = -1, fitWidth = 0;
+    const fitBtcRate = () => {
+      const line = el.bananaBtcRate;
+      fitPriceLength = el.bananaBtcPrice.textContent.length;
+      if (!fitWidth) return;
+      line.dataset.fit = "line";
+      el.bananaBtcSats.textContent = "100,000,000";
+      if (line.scrollWidth <= line.clientWidth) return;
+      el.bananaBtcSats.textContent = "100M";
+      if (line.scrollWidth > line.clientWidth) line.dataset.fit = "wrap";
+    };
+    const btcRateObserver = new ResizeObserver((entries) => {
+      const width = Math.round(entries[entries.length - 1].contentRect.width);
+      if (width === fitWidth) return;
+      fitWidth = width;
+      fitBtcRate();
+    });
+    btcRateObserver.observe(el.bananaBtcRate);
     let stopBananaRate = null, pileValueVisible = false;
     const watchBananaRate = () => {
       const visible = !document.hidden && (pileValueVisible || BL.sheet.visible(el.bananaPanel));
@@ -684,18 +728,21 @@
     on(document, "sheetchange", watchBananaRate);
     listeners.push(() => {
       bananaRateObserver.disconnect();
+      btcRateObserver.disconnect();
       if (stopBananaRate) stopBananaRate();
     });
     watchBananaRate();
     // A fixed pool, so the DOM never grows with donations.
     const recentRows = donationRows || (donationRows = Array.from({ length: BL.donations.RECENT_MAX }, () => {
-      const li = document.createElement("li"), name = document.createElement("span"), label = document.createTextNode("");
+      const li = document.createElement("li"), name = document.createElement("span"), labelBox = document.createElement("span"), label = document.createTextNode("");
       const badge = document.createElement("span"), amount = document.createElement("strong"), message = document.createElement("p");
       // Every text node exists from the start, so filling a row later adds nothing to the DOM.
       const amountText = document.createTextNode(""), messageText = document.createTextNode("");
       name.className = "banana-recent-name";
+      labelBox.className = "banana-recent-label";
+      labelBox.append(label);
       badge.className = "banana-verified";
-      badge.textContent = "✓";
+      badge.append(verifiedSeal.cloneNode(true));
       badge.title = "Signed in with GitHub using this donor name";
       badge.setAttribute("role", "img");
       badge.setAttribute("aria-label", "GitHub name confirmed");
@@ -703,13 +750,13 @@
       amount.className = "banana-amount";
       message.className = "banana-recent-message";
       message.hidden = true;
-      name.append(label, badge);
+      name.append(labelBox, badge);
       amount.append(amountBanana.cloneNode(true), amountText);
       message.append(messageText);
       li.append(name, amount, message);
       li.hidden = true;
       el.bananaRecent.append(li);
-      return { li, name, label, badge, amountText, message, messageText };
+      return { li, name, labelBox, label, badge, amountText, message, messageText };
     }));
     // One row a ranked donor, made as the board first grows to it and kept for the page life: the board scrolls inside
     // its five-row window, and both boards it shows hold at most 256 (the API's and the game's demo donors).
@@ -764,7 +811,7 @@
         if (!entry) continue;
         const name = entry.handle ? `@${entry.handle}` : "Anonymous";
         const amount = (donorUnit === "sats" ? BANANA_COUNT : DONOR_BANANAS).format(entry[donorUnit]);
-        if (row.nameText.data !== name) row.nameText.data = name;
+        if (row.nameText.data !== name) { row.nameText.data = name; row.name.title = name; }
         if (row.amountText.data !== amount) row.amountText.data = amount;
         row.name.dataset.anon = String(!entry.handle);
       }
@@ -783,6 +830,7 @@
         row.li.hidden = !entry;
         if (!entry) continue;
         row.label.data = entry.handle ? `@${entry.handle}` : "Anonymous";
+        if (row.labelBox.title !== row.label.data) row.labelBox.title = row.label.data;
         row.name.dataset.anon = String(!entry.handle);
         row.badge.hidden = !(real && entry.verified);
         row.amountText.data = (donorUnit === "sats" ? BANANA_COUNT : DONOR_BANANAS).format(entry[donorUnit]);
