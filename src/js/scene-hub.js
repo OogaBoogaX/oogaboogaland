@@ -12417,6 +12417,11 @@
     // Driving an Ooga builds the visitor a separate body (crew.js); its NPC stays on its track, drawn as a ghost.
     // The body takes part in the mirror and every portal as a roster Ooga does, for exactly as long as it exists.
     shared.separateBodies = true;
+    // Only a contributor's Ooga, and its companion, is drawn as a ghost while driven, signed in or out. A guest's local
+    // likeness (the default Ooga, or a remembered unbundled login's: contributors.js `addLocal`) is the visitor's alone,
+    // so its NPC is not drawn at all while the body stands for it (npc-ghosts.js `hide`). The roster record decides,
+    // never the account.
+    const guestLikeness = (cave) => cave.contributor.local === true;
     shared.onBody = (body, on) => {
       const height = body.traits.height * 2, verts = Math.max(body.headOpen.verts.length, body.headClosed.verts.length);
       const portals = [factoryMouth, bcaMouth, bifrostIsle];
@@ -12433,7 +12438,7 @@
         trackMirrorObject(body.root, height, verts);
         for (const place of portals) place?.phase.body.track(body.root, height, verts);
         guideBody(body, true);
-        npcGhosts?.set(body.npc, true);
+        npcGhosts?.set(body.npc, true, guestLikeness(body.npc));
       } else {
         // Forgotten while it still stands in the scene: crew.js detaches it only after this.
         guideBody(body, false);
@@ -12618,7 +12623,7 @@
           body.netMotion = new Float64Array(6);
           registerClanker(body);
           guideBody(body, true);
-          npcGhosts?.set(body.npc, true);
+          npcGhosts?.set(body.npc, true, guestLikeness(body.npc.owner));
           return;
         }
         guideBody(body, false);

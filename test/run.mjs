@@ -8986,6 +8986,145 @@ const hubSeparateBodies = { name: "hub separate bodies", why: "rule: a driven Oo
     !V.missing && seen(V.ooga.clear) && covered(V.ooga.covered) && seen(V.ooga.refreshed) && V.ooga.closedHead && V.ooga.registered
       && seen(V.gorilla.clear) && covered(V.gorilla.covered) && V.released && V.repeated, JSON.stringify(V));
 } };
+// A real arrival adds the default local Ooga (contributors.js `addLocal`, through net.js `prepareLocalCharacter`) and a
+// server-vouched contributor outside the bundle (`addTemporary`, from /api/me) before the crew is built; a debug page adds
+// neither, so this session's page adds both at that moment, beside the bundled cast.
+const GUEST_LIKENESS_INIT = `window.BL={};let guestCast;Object.defineProperty(BL,"contributors",{configurable:true,get:()=>guestCast,set:value=>{guestCast=value;value.addLocal("Ooga");const at=Math.floor(Date.now()/1000)-7200;value.addTemporary({handle:"fixture-temp",joined:at,lastCommit:at},"fixture-temp");}});`;
+// Through the real hub wiring: only a contributor's Ooga or companion keeps a ghost track while a separate body stands for
+// it, whoever drives it and whether or not they are signed in; a guest's local likeness is the visitor's alone.
+const hubGuestLikeness = { name: "hub guest likeness", why: "regression: a guest driving the default Ooga saw that Ooga's NPC beside them as a contributor's cyan ghost; only a contributor's Ooga or companion keeps a ghost track, signed in or out", run: async b => {
+  const state = await b.evaluate(`(() => {
+    const B = __ooga, D = BL.scenes.hub.debug, crew = B.crew, pilot = B.pilot, clankers = B.clankers, play = B.clankerPlay, ghosts = D.npcGhosts, net = BL.net;
+    const saved = { mayDrive: net.mayDrive, ownCharacter: net.ownCharacter, me: net.state.me, room: net.state.room };
+    const step = (seconds) => { for (let t = 0; t < seconds; t += 1 / 30) B.advance(1 / 30, 1 / 30); };
+    const companionOf = (cave) => clankers.list.find(e => e.owner === cave) || null;
+    // As a frame leaves an NPC for the renderer, picking and the overlay while a body stands for it.
+    const drawn = (npc) => ({ shown: npc.root.visible, ghost: !!npc.ghostTrack, held: ghosts.has(npc), hidden: ghosts.hides(npc) });
+    const settled = (npc) => { const d = drawn(npc); return d.shown && !d.ghost && !d.held && !d.hidden; };
+    const ghostly = (d) => d.shown && d.ghost && d.held && !d.hidden;
+    const unseen = (d) => !d.shown && !d.ghost && d.held && d.hidden;
+    // The NPC's own track, which a body standing for it never touches.
+    const track = (npc) => ({ state: npc.state, override: npc.override || null, human: !!npc.humanControlled, remote: !!npc.remoteControlled });
+    const sameTrack = (a, b) => a.state === b.state && a.override === b.override && !a.human && !b.human && !a.remote && !b.remote;
+    const guest = crew.cavemen.get("Ooga"), temp = crew.cavemen.get("fixture-temp");
+    const contributor = crew.list.find(c => !c.contributor.temporary && c.root.visible && !c.ghostTrack && !c.remoteControlled
+      && (c.state === "chilling" || c.state === "working") && c.traits.name !== "SaniExp");
+    try {
+      pilot.release(true); play.release(); step(0.2);
+      if (!guest || !temp || !contributor) return { missing: { guest: !!guest, temp: !!temp, contributor: !!contributor } };
+      const records = { guest: guest.contributor.local === true && guest.contributor.temporary === true, temp: temp.contributor.temporary === true && !temp.contributor.local };
+      // Signed out, the default Ooga: no NPC of it is drawn while its body is driven, and it is solid the moment the body goes.
+      const ooga = (() => {
+        const before = track(guest), companion = companionOf(guest), companionBefore = !!companion && companion.active && companion.root.visible;
+        if (!pilot.possess(guest) || pilot.player?.npc !== guest) { pilot.release(true); return { refused: true }; }
+        const body = pilot.player;
+        step(0.5);
+        const during = drawn(guest), bodyShown = body.root.visible && !body.ghostTrack, twins = ghosts.stats().twins, kept = sameTrack(before, track(guest));
+        // Drawn as nothing, yet every system reads the real NPC between the scene's restore and paint.
+        ghosts.restore(); const real = guest.root.visible; ghosts.paint(0);
+        // Its companion goes on as before: the Ooga's track is not sent away to hide it.
+        const companionOut = companionBefore && companion.active && companion.root.visible && !ghosts.has(companion);
+        const reused = pilot.possess(guest) && pilot.player === body;
+        pilot.release(true);
+        const released = settled(guest) && !guest.localBody && !body.root.parent && !pilot.player;
+        step(0.3);
+        const after = settled(guest) && sameTrack(before, track(guest)) && ghosts.stats().concealed === 0;
+        // A second take builds a fresh body and hides the NPC again, until that body goes too.
+        const again = pilot.possess(guest) && !!pilot.player && pilot.player !== body && pilot.player.npc === guest;
+        const second = pilot.player;
+        step(0.2);
+        const hiddenAgain = unseen(drawn(guest));
+        pilot.release(true); step(0.2);
+        return { during, bodyShown, twins, real, kept, companionOut, reused, released, after,
+          twice: again && hiddenAgain && !second.root.parent && settled(guest) };
+      })();
+      // The default Ooga's companion, driven: no ghost of it either, and its Ooga stays solid.
+      const entry = companionOf(guest);
+      const gorilla = (() => {
+        if (!entry || !entry.active || !entry.root.visible) return { missing: true };
+        if (!play.possess(entry) || play.player?.npc !== entry) { play.release(); return { refused: true }; }
+        const body = play.player;
+        step(0.5);
+        const during = drawn(entry), bodyShown = body.root.visible, oogaSolid = settled(guest);
+        play.release();
+        const released = settled(entry) && !entry.localBody && !body.root.parent && !play.player;
+        step(0.3);
+        return { during, bodyShown, oogaSolid, released, after: settled(entry) && ghosts.stats().concealed === 0 };
+      })();
+      // A bundled contributor's Ooga driven signed out (a remembered contributor's arrival) keeps its ghost track.
+      const signedOut = (() => {
+        if (net.state.me) return { signedIn: true };
+        if (!pilot.possess(contributor) || pilot.player?.npc !== contributor) { pilot.release(true); return { refused: true }; }
+        const body = pilot.player;
+        step(0.5);
+        const during = drawn(contributor), twins = ghosts.stats().twins;
+        pilot.release(true); step(0.3);
+        return { during, twins, released: settled(contributor) && !body.root.parent };
+      })();
+      // A server-vouched contributor outside the bundle, signed in through the real claim: a ghost, solid again on sign-out.
+      net.ownCharacter = () => ({ handle: temp.traits.name }); net.mayDrive = () => null;
+      net.state.me = { id: 990003, login: temp.traits.name, display: "Fixture" }; net.state.room = "live"; D.accountChanged();
+      const claimed = D.claimOwnOoga() && pilot.player?.npc === temp;
+      step(0.5);
+      const signedIn = { claimed, during: drawn(temp) };
+      net.state.me = null; net.state.room = "off"; D.accountChanged();
+      step(0.3);
+      signedIn.released = settled(temp) && !temp.localBody && !pilot.player;
+      net.ownCharacter = saved.ownCharacter; net.mayDrive = saved.mayDrive;
+      net.state.me = saved.me; net.state.room = saved.room; D.accountChanged();
+      // Signed in is not a contributor: an account with no character of its own drives no Ooga or companion, and so
+      // leaves nothing drawn as a ghost, its local likeness included.
+      net.state.me = { id: 990004, login: "guest-fixture", display: "Guest" }; net.state.room = "live";
+      const noncontributor = { claimed: D.claimOwnOoga(), ooga: pilot.possess(guest), gorilla: !!entry && play.possess(entry), contributor: pilot.possess(contributor) };
+      step(0.3);
+      noncontributor.driven = !!pilot.player || !!play.player;
+      noncontributor.untouched = [guest, entry, contributor].every(a => !!a && !a.ghostTrack && !ghosts.has(a)) && guest.root.visible;
+      net.state.me = saved.me; net.state.room = saved.room;
+      return { records, ooga, gorilla, signedOut, signedIn, noncontributor, stats: ghosts.stats() };
+    } finally {
+      net.ownCharacter = saved.ownCharacter; net.mayDrive = saved.mayDrive;
+      net.state.me = saved.me; net.state.room = saved.room;
+      pilot.release(true); play.release();
+    }
+  })()`);
+  // Leaving the island with the default Ooga driven, and coming back: nothing of its hidden presentation outlives the
+  // body, and a retake after the return hides it again.
+  const left = await b.evaluate(`(() => {
+    const B = __ooga, guest = B.crew.cavemen.get("Ooga"), ghosts = BL.scenes.hub.debug.npcGhosts;
+    const taken = !!guest && B.pilot.possess(guest) && B.pilot.player?.npc === guest;
+    B.advance(0.3, 1 / 30);
+    return { taken, hidden: taken && ghosts.hides(guest) && !guest.root.visible };
+  })()`);
+  await tourGo(b, "lab");
+  const lap = await tourGo(b, "hub");
+  const back = await b.evaluate(`(() => {
+    const B = __ooga, guest = B.crew.cavemen.get("Ooga"), ghosts = BL.scenes.hub.debug.npcGhosts;
+    B.pilot.release(true); B.clankerPlay.release(); B.advance(0.3, 1 / 30);
+    const out = { shown: guest.root.visible, held: ghosts.has(guest), ghost: !!guest.ghostTrack, body: !!guest.localBody, stats: ghosts.stats() };
+    const again = B.pilot.possess(guest) && B.pilot.player?.npc === guest;
+    B.advance(0.3, 1 / 30);
+    out.again = again && ghosts.hides(guest) && !guest.root.visible && !guest.ghostTrack;
+    B.pilot.release(true); B.advance(0.3, 1 / 30);
+    out.released = guest.root.visible && !ghosts.has(guest) && ghosts.stats().concealed === 0 && ghosts.stats().hidden === 0;
+    return out;
+  })()`);
+  const S = state, O = S.ooga || {}, G = S.gorilla || {};
+  const hiddenDraw = (d) => !!d && !d.shown && !d.ghost && d.held && d.hidden, ghostDraw = (d) => !!d && d.shown && d.ghost && d.held && !d.hidden;
+  record("guest likeness: a signed-out guest driving the default Ooga sees no NPC of it, ghost or solid, while its body is driven; the NPC keeps its track and its companion stays out, and it is solid again the moment the body goes, take after take",
+    !S.missing && S.records.guest && hiddenDraw(O.during) && O.bodyShown && O.twins === 0 && O.real && O.kept && O.companionOut && O.reused && O.released && O.after && O.twice,
+    JSON.stringify({ records: S.records, missing: S.missing, ooga: O }));
+  record("guest likeness: driving the default Ooga's companion draws no ghost of it either, its Ooga stays solid, and letting go leaves it solid",
+    !S.missing && !G.missing && hiddenDraw(G.during) && G.bodyShown && G.oogaSolid && G.released && G.after, JSON.stringify(G));
+  record("guest likeness: a contributor's Ooga keeps its ghost track whether driven signed out or claimed signed in by a server-vouched contributor, solid again on release or sign-out; a signed-in account with no character drives nothing and leaves no ghost",
+    !S.missing && S.records.temp && ghostDraw(S.signedOut.during) && S.signedOut.twins > 0 && S.signedOut.released
+      && S.signedIn.claimed && ghostDraw(S.signedIn.during) && S.signedIn.released
+      && !S.noncontributor.claimed && !S.noncontributor.ooga && !S.noncontributor.gorilla && !S.noncontributor.contributor
+      && !S.noncontributor.driven && S.noncontributor.untouched,
+    JSON.stringify({ signedOut: S.signedOut, signedIn: S.signedIn, noncontributor: S.noncontributor, stats: S.stats }));
+  record("guest likeness: leaving the island with the default Ooga driven and coming back leaves its NPC solid and unheld, and a retake hides it again until release",
+    left.taken && left.hidden && lap.scene === "hub" && back.shown && !back.held && !back.ghost && !back.body && back.stats.hidden === 0 && back.stats.concealed === 0
+      && back.again && back.released, JSON.stringify({ left, lap: lap.scene, back }));
+} };
 const outdoorTravelProof = () => {
 const B=__ooga,ctx=__outdoorTravelContext,crew=B.crew,P=B.poolIsland,scene=BL.scenes.hub;
 B.pilot.release(true); B.clankerPlay.release();
@@ -17127,6 +17266,9 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
       && animation.host.ooga >= 58 && animation.host.gorilla >= 58 && animation.network && animation.controlled >= 58, JSON.stringify(animation));
 } };
 scene("hub", { label: "distant effects", query: "pos=0", steps: [hubDistantEffects] });
+// No other session's cast holds the default local Ooga or a server-vouched contributor: both join the roster before
+// the crew is built, as on a real arrival.
+scene("hub", { label: "guest likeness", query: "pos=0", opts: { initScript: GUEST_LIKENESS_INIT }, steps: [hubGuestLikeness] });
 scene("hub", { label: "outdoor travel", opts: { initScript: `window.BL={};let outdoorCrew;Object.defineProperty(BL,"crew",{configurable:true,get:()=>outdoorCrew,set:value=>{outdoorCrew=value;const create=value.create;value.create=ctx=>{window.__outdoorTravelContext=ctx;return create(ctx);};}});` }, steps: [hubOutdoorTravel] });
 scene("hub", { opts: !ONLY || onlyMatches(hubArrival.name) ? { initScript: `(${hubSleepWire.toString()})()` } : {}, steps: [hubArrival, { name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hudVisit, hubKeptDelivery, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, hubCloudCamera, hubCloudFraming, hubKeypadRedirect, trip("hub"), factoryActivityRouting, hubLiveWake, hubSeparateBodies] });
 // The same ownership contract exercises complete destruction on memory-limited devices.
