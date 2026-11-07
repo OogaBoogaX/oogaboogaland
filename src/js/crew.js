@@ -26,6 +26,13 @@
   const THUMP_TIME = 0.5;
   const thumpArm = (k) => k < 0.4 ? -0.2 - 1.5 * Math.sin(k / 0.4 * Math.PI / 2)
     : k < 0.6 ? -1.7 + 1.95 * ((k - 0.4) / 0.2) ** 2 : 0.25 - 0.45 * Math.sin((k - 0.6) / 0.4 * Math.PI / 2);
+  // A push into the hammock (hub-hammock.js `bump`), k from 0 to 1 over PUSH_TIME: how far both arms are taken from whatever the walk
+  // or stand pose has them doing to PUSH_REACH (just past level, as pushing someone on a swing). They ease out with the bed's own shove
+  // (hub-hammock.js `LEAN_RISE`), follow it through a little further, and ease back, smooth at both ends so the pose never snaps.
+  const PUSH_TIME = 0.55, PUSH_OUT = 0.25, PUSH_HOLD = 0.45, PUSH_REACH = -1.8, PUSH_FOLLOW = -0.12;
+  const easeInOut = (x) => x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x);
+  const pushWeight = (k) => k < PUSH_OUT ? easeInOut(k / PUSH_OUT) : k < PUSH_HOLD ? 1 : 1 - easeInOut((k - PUSH_HOLD) / (1 - PUSH_HOLD));
+  const pushReach = (k) => PUSH_REACH + PUSH_FOLLOW * Math.sin(Math.min(1, k / PUSH_HOLD) * Math.PI);
   const SHOT_POWER = 0.5, HEADSHOT_MULTIPLIER = 2.5;
   // A shot cut short at a gorilla still reaches this far past it on its last
   // step, so a body that bobbed or turned during the flight takes the hit.
@@ -1117,7 +1124,7 @@
         bashTime: 0, bashOffset: 0, axeIdle: 0, carry: "hidden" },
       health: { stunned: false }, camp: { seat: null, burning: false, rolling: false, panic: { active: false } },
       bedTravel: { mode: "" }, sleepWeapons: { visible: false }, state: "chilling", build: null,
-      work: { phase: "" }, viewLift: 0, catchT: 0, yawn: 0, cheer: 0, phase: 0,
+      work: { phase: "" }, viewLift: 0, catchT: 0, pushT: 0, yawn: 0, cheer: 0, phase: 0,
       twirlUntil: 0, twirlHand: 0, meleeOut: false, chukAngle: CHUK_FOLD,
       axeRotation: math.quat.create(), gunHandRotation: math.quat.create(), gunSupportRotation: math.quat.create(),
       gunSightArmOffset: { x: 0, y: 0, z: 0 }, clubSlingProfile: clubSlingProfile(cave.parts.club.geometry),
@@ -1479,6 +1486,7 @@
         cheer: 0,
         catchT: 0,
         thumpT: 0,
+        pushT: 0,
         yawn: 0,
         yawnAt: 12 + i * 4.3 + Math.random() * 20,
         leap: { vx: 0, vz: 0, land: 0, thrown: false, rageThrown: false },
@@ -2776,6 +2784,13 @@
       cave.thumpT = THUMP_TIME;
       return true;
     };
+    // The driven Ooga's push into the hammock registered: both arms ease out and back over PUSH_TIME, run by `runPlayer` with the other arm
+    // overrides. Only this page draws it (the room's pose carries no push flag).
+    const pushPose = (cave = player) => {
+      if (!cave || cave.camp.seat || cave.state === "sleeping") return false;
+      cave.pushT = PUSH_TIME;
+      return true;
+    };
     // The visitor's voice group changed (thump.js, through remotePlayers.clearThumps): a tap still running ends now and
     // the stand pose has the arm back on the next frame. Only the tap's own timer changes, never movement or a tool.
     const cancelThump = (cave = player) => {
@@ -3503,7 +3518,8 @@
         }
       }
       if (c.seat) {
-        if (cave === player && !c.seat.lockMovement && Math.hypot(steer.x, steer.z) > 0.05 && standPlayer(cave, true) && !c.seat) return false;
+        // A seat that `pumps` (the hammock) keeps A and D for rocking; forward or back still gets up.
+        if (cave === player && !c.seat.lockMovement && (c.seat.pumps ? Math.abs(steer.forward) : Math.hypot(steer.x, steer.z)) > 0.05 && standPlayer(cave, true) && !c.seat) return false;
         standPose(cave);
         parts.legR.rotation.x = parts.legL.rotation.x = -Math.PI / 2;
         parts.armR.rotation.x = parts.armL.rotation.x = -0.75;
@@ -5523,6 +5539,12 @@
           cave.parts.armR.rotation.x = thumpArm(1 - cave.thumpT / THUMP_TIME);
         }
       }
+      if (cave.pushT > 0) {
+        cave.pushT = Math.max(0, cave.pushT - dt);
+        const k = 1 - cave.pushT / PUSH_TIME, w = pushWeight(k), to = pushReach(k), arms = cave.parts;
+        arms.armR.rotation.x += (to - arms.armR.rotation.x) * w;
+        arms.armL.rotation.x += (to - arms.armL.rotation.x) * w;
+      }
     };
     const runRoofEscape = (cave, dt) => {
       if (!ctx.npcCaveRoofAt || cave.humanControlled || cave.health.stunned || cave.jet) return false;
@@ -7184,7 +7206,7 @@
       get weaponsEnabled() { return weaponsEnabled; },
       cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, refreshStates, refreshRosterRow, updateFan, rush, applyAllSwag, wornBy, renderLocker, pokeCave, idleSay, drawDrops,
       throwTomato, clearProjectiles, control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, clearHeadLook, prepareDragged, recoverDragged, ignite, soot, dropRoll, damage, fireView, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, setJetpackOwnership, cutJet, thrust, holdRocketJump, update, pause, dispose, stats,
-      actorClear, outsideSupportAt, builtInJetpack, toggleTint, twirl, thump, cancelThump, toggleWeapon, selectWeapon, configureWeapon, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
+      actorClear, outsideSupportAt, builtInJetpack, toggleTint, twirl, thump, cancelThump, pushPose, toggleWeapon, selectWeapon, configureWeapon, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
       get sleeping() { return !!(player && player.bedTravel.manual && player.state === "sleeping"); },
       get player() {
         return player;

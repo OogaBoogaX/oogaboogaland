@@ -1926,7 +1926,7 @@
       meadowPalms.push(entry); chosen.b.owner = entry.owner;
     }
     const { plan } = chosen;
-    hammock = H.create({ plan, root, solids, ra: chosen.ta.r, rb: chosen.tb.r, seed: fnv1a("hammock"), anchors: [chosen.a.owner, chosen.b.owner] });
+    hammock = H.create({ plan, root, solids, ra: chosen.ta.r, rb: chosen.tb.r, seed: fnv1a("hammock"), anchors: [chosen.a.owner, chosen.b.owner], bumpSlots: HAMMOCK_SLOTS });
     hammock.anchors = [chosen.a.owner, chosen.b.owner];
     // Three circles along the bed's swing (its `envelope`), each covering a third of its length and its whole width.
     const { half, across } = plan.envelope, cover = Math.hypot(half / 3, across);
@@ -1971,6 +1971,92 @@
     if (crew.standPlayer(cave)) hud.toast("Someone got there first, and the hammock is full");
     return true;
   };
+  // Walking into the hammock rocks it (hub-hammock.js `bump`), and so does a banana through it. A walker's speed comes from
+  // successive positions: the visitor's own every frame, each other player's whenever their synced pose changes (the room
+  // sends 15 a second). Slot 0 is the visitor; the rest are fixed tables over the room's players, so nothing allocates.
+  // A burst of the rifle is a hit however short (hub-hammock.js `hit`; a held trigger tips by itself at about 20 rounds), and the fourth
+  // hit from anyone within a minute of the last tips out whoever is lying in it. A fallen Ooga lands HAMMOCK_LAND metres beyond the stand-up spot (the
+  // first clear one), off the way in.
+  const HAMMOCK_LAND = [1.2, 0.8], HAMMOCK_SLOTS = 1 + BL.remotePlayers.MAX;
+  const hamRemoteId = new Float64Array(HAMMOCK_SLOTS), hamRemoteSeen = new Int32Array(HAMMOCK_SLOTS);
+  const hamRemoteX = new Float64Array(HAMMOCK_SLOTS), hamRemoteZ = new Float64Array(HAMMOCK_SLOTS), hamRemoteT = new Float64Array(HAMMOCK_SLOTS);
+  let hamLocalHave = false, hamLocalX = 0, hamLocalZ = 0, hamFrame = 0, hamCueDir = 0, unshotHammock = null;
+  const hamRemote = (rec) => {
+    if (!rec.body || rec.bodyKind === "gorilla" || rec.rest || !remoteShown(rec)) return;
+    let slot = -1, free = -1;
+    for (let i = 1; i < HAMMOCK_SLOTS; i++) {
+      if (hamRemoteId[i] === rec.id) { slot = i; break; }
+      if (free < 0 && !hamRemoteId[i]) free = i;
+    }
+    const fresh = slot < 0;
+    if (fresh) { if (free < 0) return; slot = free; hamRemoteId[slot] = rec.id; }
+    hamRemoteSeen[slot] = hamFrame;
+    // First seen (or just up from the hammock), standing still: one already against the bed has to step clear before it can push.
+    if (fresh) hammock.bump(slot, rec.x, rec.y, rec.z, 0, 0);
+    else if (rec.x !== hamRemoteX[slot] || rec.z !== hamRemoteZ[slot]) {
+      const dt = now - hamRemoteT[slot];
+      if (dt > 0 && dt < 0.5) hammock.bump(slot, rec.x, rec.y, rec.z, (rec.x - hamRemoteX[slot]) / dt, (rec.z - hamRemoteZ[slot]) / dt);
+    } else return;
+    hamRemoteX[slot] = rec.x; hamRemoteZ[slot] = rec.z; hamRemoteT[slot] = now;
+  };
+  const rockHammock = (dt) => {
+    const player = pilot.player;
+    if (gameMode) { hamLocalHave = false; return; }
+    if (player && !player.camp.seat && player.root.visible && dt > 0) {
+      const p = player.root.position;
+      if (hamLocalHave && hammock.bump(0, p.x, p.y - player.baseY, p.z, (p.x - hamLocalX) / dt, (p.z - hamLocalZ) / dt) > 0) crew.pushPose(player);
+      hamLocalX = p.x; hamLocalZ = p.z; hamLocalHave = true;
+    } else hamLocalHave = false;
+    hamFrame = (hamFrame + 1) | 0;
+    BL.net.remotes.forEach(hamRemote);
+    for (let i = 1; i < HAMMOCK_SLOTS; i++) if (hamRemoteId[i] && hamRemoteSeen[i] !== hamFrame) hamRemoteId[i] = 0;
+    // Lying in it, the visitor rocks it with A and D (hub-hammock.js `pump`), while nothing else is going on with the seat.
+    const seat = hammock.seats[0];
+    if (player && seat.sitter === player && !seat.entry && !seat.exit && !seat.fall && dt > 0) {
+      const rock = pilot.controls.axes.x, dir = rock > 0.5 ? 1 : rock < -0.5 ? -1 : rock > -0.2 && rock < 0.2 ? 0 : hamCueDir;
+      hammock.pump(rock, dt);
+      // A fresh press of A or D (or the stick pushed sideways) shows its arrow, so the rock is seen to register.
+      if (dir !== hamCueDir && dir !== 0) hud.rockCue(dir);
+      hamCueDir = dir;
+    } else hamCueDir = 0;
+    if (hammock.spilling) tipOutOfHammock();
+  };
+  // Swung hard enough, the bed tips its occupant out: only the visitor's own Ooga on this page. It rolls out over the edge on the side the bed
+  // was last knocked toward (hub-hammock.js `tip`, `fallSide`), away from the push or the gunfire, lies a moment and gets up there: past the
+  // bed's whole swing on that side (`plan.swing`, HAMMOCK_LAND metres past the stand-up distance from it, the first clear, level one), else on the other side,
+  // else it is stood up at once as before. Other pages see it leave the seat at once and follow its body through the ordinary pose sync; a bed
+  // held by another page's pose is never emptied from here.
+  const tipOutOfHammock = () => {
+    const seat = hammock.seats[0], cave = seat.sitter;
+    if (!cave || cave !== pilot.player || seat.fall) return;
+    const plan = hammock.plan, first = hammock.fallSide || plan.side, out = plan.swing.across + BL.hubHammock.STAND;
+    for (let s = first, tries = 0; tries < 2; s = -s, tries++) for (let i = 0; i < HAMMOCK_LAND.length; i++) {
+      const x = plan.x + plan.nx * s * (out + HAMMOCK_LAND[i]), z = plan.z + plan.nz * s * (out + HAMMOCK_LAND[i]), floor = plan.surfaceAt(x, z);
+      if (Math.abs(floor - plan.ground) > 0.25 || !walkable(x, z, x, z, floor, cave.bodyHeight, cave)) continue;
+      const target = { x, z, floor, y: floor + cave.baseY, ry: Math.atan2(plan.nx * s, plan.nz * s), side: s };
+      if (!hammock.tip(cave, target, () => landTipped(cave, target))) return;
+      fx.say(cave, "WHOA!", 1.5);
+      hud.toast("Tipped out of the hammock!");
+      return;
+    }
+    vacateHammock();
+    if (cave.camp.seat) return;
+    fx.say(cave, "WHOA!", 1.5);
+    hud.toast("Tipped out of the hammock!");
+  };
+  // The roll is over: up on its feet where it landed, the seat released through the crew's usual stand-up (or let go, as `vacateHammock` does).
+  const landTipped = (cave, target) => {
+    if (cave.camp.seat && !crew.standPlayer(cave)) vacateHammock();
+    const p = cave.root.position;
+    p.x = target.x; p.y = target.y; p.z = target.z;
+    cave.root.rotation.y = target.ry;
+  };
+  // Another player's banana, from the room's shot relay: drawn elsewhere, and here it rocks the hammock if it crosses it.
+  const hammockShotHeard = (id, a) => {
+    if (hammock && !gameMode && hammock.crosses(a[0], a[1], a[2], a[3], a[4], a[5])) hammock.hit(a[0], a[2], a[3], a[5]);
+  };
+  const listenHammockShots = () => { if (!unshotHammock) unshotHammock = BL.net.subscribeShots(hammockShotHeard); };
+  const muteHammockShots = () => { if (unshotHammock) { unshotHammock(); unshotHammock = null; } };
   // The sea far below and the islands on it, standing well out past the clouds.
   const SEA_Y = -70;
   const raiseIslets = () => {
@@ -4980,6 +5066,8 @@
       && mirrorActorSegmentClear(fromX, y, fromZ, toX, y, toZ, height, actor);
   };
   const walkable = (fromX, fromZ, toX, toZ, y, height = 1.5, actor = pilot?.player) => {
+    // An occupied hammock is a wall to walk into, not a cloth to cross (an empty one is stepped onto): whoever is inside it already may leave.
+    if (hammock && hammock.blocks(toX, y, toZ, PLAYER_RADIUS) && !hammock.blocks(fromX, y, fromZ, PLAYER_RADIUS)) return false;
     if (Math.hypot(toX, toZ) > worldBound() || crossesSealedCave(fromX, fromZ, toX, toZ, y)) return false;
     const floor = playerSupportAt(toX, toZ, y, y, actor), feet = Math.max(y, floor);
     if (floor - y > STEP_MAX && floor !== characterClankerSupportAt(toX, toZ, y, STEP_MAX, actor)) return false;
@@ -6579,7 +6667,9 @@
         hud.hint(COARSE ? "Tap DROP & ROLL! to put the fire out" : "Press Space to drop and roll until the fire goes out");
         hud.setAct("DROP & ROLL!");
       } else if (action === STAND_ACTION) {
-        hud.hint(COARSE ? "Move or tap STAND UP! to get up" : "Move or press Space to stand up");
+        const inHammock = pilot.player?.camp.seat?.kind === "hammock";
+        hud.hint(inHammock ? (COARSE ? "Stick sideways rocks the hammock · forward, back or STAND UP! to get up" : "A and D rock the hammock · W, S or Space to get up")
+          : COARSE ? "Move or tap STAND UP! to get up" : "Move or press Space to stand up");
         hud.setAct("STAND UP!");
       } else if (action.kind === "bench") {
         hud.hint(COARSE ? "Tap SIT to sit facing the fire" : "Press Space to sit facing the fire");
@@ -8824,6 +8914,7 @@
       hammock.settle(BL.net.remotes, BL.net.state.selfId, remoteShown, moveHammockSeat, leaveFullHammock);
       // Sample once so the CPU suspension ends and GPU palm/wrap sway share a clock.
       if (!gameMode) RENDER_OPTS.windTime = performance.now() * 0.001 % 3600;
+      rockHammock(dt);
       hammock.update(dt, elapsed, gameMode, null);
     } else if (!gameMode) RENDER_OPTS.windTime = NaN;
     for (let i = 0; i < crew.list.length; i++) {
@@ -11672,6 +11763,7 @@
     if (wpGroup) { wpGroup.visible = false; wpGroup.position.y = wpGround - WP.sink; }
     clankerPlay.dispose();
     remotes.dispose();
+    muteHammockShots();
     npcSync.dispose();
     npcStatusBeams?.clear();
     pilot.suspend();
@@ -11704,6 +11796,7 @@
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     glCanvas = ctx.canvas; overlayCanvas = ctx.overlay;
     heldHub = false;
+    listenHammockShots();
     factoryDeparting = bifrostDeparting = factoryHeld = entering = false;
     Object.assign(factoryWalk, { phase: 0, cave: null, seen: false, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false });
     world.islandKeep = null;
@@ -12491,7 +12584,12 @@
       npcSync.recordHit(cave);
       return workHit(cave);
     };
-    shared.onShot = (cave, from, to) => npcSync.recordShot(cave, from, to);
+    shared.onShot = (cave, from, to) => {
+      npcSync.recordShot(cave, from, to);
+      // The visitor's own banana through the hammock rocks it; the crew's and work shots never do.
+      if (hammock && !gameMode && cave === pilot.player && hammock.crosses(from.x, from.y, from.z, to.x, to.y, to.z)) hammock.hit(from.x, from.z, to.x, to.z);
+    };
+    listenHammockShots();
     BL.net.setHub(true);
     for (const cave of crew.list) crew.setJetpackOwnership(cave, true, hubModels.jetpack(), hubModels.jetFlame());
     mirrorCave.body = BL.mirrorBody.create(mirrorCave.node, crew.cavemen);
@@ -13119,6 +13217,7 @@
     clankerCaptures.length = 0;
     clankerPlay.dispose();
     remotes.dispose();
+    muteHammockShots();
     crates.dispose();
     pile.dispose();
     npcStatusBeams?.dispose(); npcStatusBeams = null;
@@ -13334,6 +13433,7 @@
       if (!gorilla && player) {
         if (!pilot.birdsEye && player.traits.nunchaku && player.state !== "sleeping" && !player.camp.burning && !player.camp.rolling) help.rows.push(H.row(BL.controls.shortcutKeys("twirl"), "Twirl nunchaku"));
         if (player.tint) help.rows.push(H.row(BL.controls.shortcutKeys("tint"), "Change colourway"));
+        if (player.camp.seat?.kind === "hammock") help.rows.push(H.row(["a", "d"], "Rock the hammock (in time with the swing)"));
       }
     }
     if (!gorilla) help.title = "Island · " + help.title; return help;

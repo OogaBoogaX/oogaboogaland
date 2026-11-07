@@ -48,7 +48,7 @@
 // (`crew.weaponFlags`: the one in hand, aiming, the gun's rounds), the same way; remote records carry it as `weapon`.
 // `sendShot` and `sendSwing` report the visitor's own Ooga firing a banana (from and to) and striking, which the
 // room relays to players in the same zone (from the ghost arena, to the arena and its hallway, #422); `subscribeShots`
-// hears theirs as `fn(id, a)` and `subscribeSwings` as `fn(id)`, for drawing and the hunt's shot sound only.
+// hears theirs as `fn(id, a)` and `subscribeSwings` as `fn(id)`, for drawing and the hunt's shot sound only, and, in the hub, shots rock the hammock.
 // Ooga Chat: `sendChat` sends a line (validated by chat-policy.js, CHAT_MAX UTF-16 units at most) while the
 // room is live; `subscribeChat` hears the room's lines as `fn(lines, joined, receipt)`: one new line, or on every
 // (re)join the lines the room still holds, which chat.js merges; a rejection keeps the draft. The room names each line's
