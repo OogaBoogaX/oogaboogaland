@@ -8,6 +8,8 @@ import "../../src/js/chat-policy.js";
 import "../../src/js/contributor-identities.js";
 import "../../src/js/chalk-board.js";
 import "../../src/js/voice-blend.js";
+import "../../src/js/emoji-data.js";
+import "../../src/js/reaction-policy.js";
 // The room's wire format and the limits it enforces, as pure functions the tests can reach.
 //
 // Client → room:  { t: "pose", x, y, z, yaw }   the driven body's feet and heading, at most MOVE_HZ
@@ -35,6 +37,8 @@ import "../../src/js/voice-blend.js";
 //                 { t: "ghost", k, g?, d?, h? }  HALLOWEEN: the ghost hunt's `start`, `ready`, `pause` or `leave`, or `hits` h, for its
 //                                host, from a page in the arcade's ghost arena
 //                 { t: "thump" }                 a voice participant's Ooga thump (see Thumps below); no other field
+//                 { t: "react", e }              an emoji over the driven body for a moment (see Reactions below)
+//                 { t: "hand", on, tone? }       the raised hand up or down, in skin tone 0 (none) to 5
 //                 { t: "chalk", k, ... }        the EntropyLab chalkboard: `take` or `drop` the board, or an edit by
 //                                                whoever holds it (chalk-board.js; see CHALK_HZ below)
 //                 { t: "wallet", k, u, ... }   DSB Land: one of the driven Ooga's free hardware wallets taken, set
@@ -83,6 +87,9 @@ import "../../src/js/voice-blend.js";
 //                                            frames led by GHOST_MAGIC from it, to pages in the arena
 //                 thump { id, a? }           player `id` thumped: sent only to those voice places them with, never the
 //                                            sender; `a: 1` when this recipient would hear the sender's voice
+//                 react { id, e }            player `id` reacted with emoji `e`, to the players in their zone
+//                 hand { id, on, tone }      player `id` raised or lowered their hand; welcome and join carry `hand`
+//                                            and `handTone`. To the sender alone, its own id: a change it was refused
 // Zones: `<group>` or `<group>.<place>`. Voice is shared within a group; who is shown is matched on the whole
 // name, since a place inside a group can have coordinates of its own (the Factory's tunnel on the island and
 // its hall). `none` is nowhere: off the island's edge, or between scenes; it shares voice with nobody.
@@ -110,6 +117,13 @@ import "../../src/js/voice-blend.js";
 // (`takeToken`); buckets live in memory alone, at most THUMP_BUCKET_KEEP, and an absent account's full bucket is
 // dropped when the next one is made (`thumpBucketFor`). No timer, alarm, storage, reply or history: a dropped thump is
 // simply not relayed. The page draws everything.
+// Reactions: a room that takes them lists REACT_FEATURE in welcome's `features`. A reaction is one emoji the shared
+// policy accepts (reaction-policy.js over emoji-data.js: plain or in a skin tone, never text), taken from a player
+// driving a body and relayed as `react { id, e }` to the other players in its zone, never kept. The raised hand is a
+// flag on the player's record, in its attachment and every view, sent to everyone on a change only. Both spend one
+// per-record bucket of REACT_HZ a second bursting to REACT_BURST (the page mirrors it, a little short); over it a
+// reaction is dropped without a word, and a hand change is refused with the sender's own `hand { id, on, tone }` as
+// the room holds it, so the sender's page puts it back.
 // "ping" answers "pong" without waking the room (setWebSocketAutoResponse).
 
 export const TICK_HZ = 15;
@@ -155,6 +169,9 @@ export const CHAT_BURST = 3;
 // Active accounts plus bounded reconnect debt, held only while the room is awake.
 export const CHAT_BUCKET_KEEP = MAX_PLAYERS * 2;
 // Thumps: about two a second per player, three in a burst; active accounts plus bounded reconnect debt.
+export const REACT_FEATURE = "react-v1";
+export const REACT_HZ = 3;
+export const REACT_BURST = 6;
 export const THUMP_HZ = 2;
 export const THUMP_BURST = 3;
 export const THUMP_BUCKET_KEEP = MAX_PLAYERS * 2;
@@ -382,6 +399,11 @@ export const parseClientMessage = (text) => {
     return msg.k === "hit" && ghostHit(msg.g, msg.d) ? { t: "ghost", k: "hit", g: msg.g, d: msg.d } : null;
   }
   if (msg.t === "thump") return Object.keys(msg).length === 1 ? { t: "thump" } : null;
+  if (msg.t === "react") return globalThis.BL.reactionPolicy.valid(msg.e) ? { t: "react", e: msg.e } : null;
+  if (msg.t === "hand") {
+    const tone = msg.tone === undefined ? 0 : msg.tone;
+    return typeof msg.on === "boolean" && globalThis.BL.reactionPolicy.tone(tone) ? { t: "hand", on: msg.on, tone } : null;
+  }
   if (msg.t === "shot") {
     const a = msg.a;
     if (!Array.isArray(a) || a.length !== 6 || !a.every(finite)) return null;

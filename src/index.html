@@ -449,6 +449,7 @@
           </div>
         </details>
         <div class="players slab" id="players-list"></div>
+        <div class="reactions" id="players-reactions" hidden></div>
         <p class="help players-status" id="players-status" hidden></p>
         <div data-account-copy="players"></div>
       </section>
@@ -474,8 +475,8 @@
               <div><dt>Sats donated</dt><dd id="stat-sats">0</dd></div>
             </dl>
             <div class="banana-rates" role="group" aria-label="Current Bitcoin and banana exchange rates">
+              <p class="banana-rate"><svg class="banana-rate-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" role="img" aria-label="Banana"><use href="#banana-panel-glyph" /></svg>1 = $1 <span id="banana-exchange">— sats</span></p>
               <p class="banana-rate" id="banana-btc-rate" data-tone="wait"><span id="banana-btc-sats">100,000,000</span> sats = <svg class="banana-rate-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" role="img" aria-label="bananas"><use href="#banana-panel-glyph" /></svg><span id="banana-btc-price">—</span></p>
-              <p class="banana-rate"><svg class="banana-rate-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" role="img" aria-label="Banana"><use href="#banana-panel-glyph" /></svg>1 <span id="banana-exchange">— sats</span></p>
             </div>
           </section>
           <section class="banana-board" aria-labelledby="banana-board-title">
@@ -576,6 +577,7 @@
           </span>
           <button type="submit" class="chat-send" id="chat-send" disabled>Send</button>
         </form>
+        <div class="reactions" id="chat-reactions" hidden></div>
         <div data-account-copy="chat"></div>
       </section>
       </div>
@@ -1956,6 +1958,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/zone-map.js"></script>
   <script src="js/hud.js"></script>
   <script src="js/chat-policy.js"></script>
+  <script src="js/emoji-data.js"></script>
+  <script src="js/reaction-policy.js"></script>
   <script src="js/voice-blend.js"></script>
   <script src="js/hockey-wire.js"></script>
   <script src="js/arcade-cabinets.js"></script>
@@ -1969,6 +1973,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/one-time-pad.js"></script>
   <script src="js/private-chat.js"></script>
   <script src="js/players.js"></script>
+  <script src="js/reactions.js"></script>
   <script src="js/thump.js"></script>
   <script src="js/fx.js"></script>
   <script src="js/camera-cover.js"></script>
