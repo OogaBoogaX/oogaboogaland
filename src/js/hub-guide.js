@@ -346,7 +346,10 @@
       chips.append(chip);
     }
     panel.append(heading, row, form, chips, help);
-    document.body.append(panel);
+    // On the stage beside the sheet and the sticks, so it inherits the drawer's live --drawer-height that sheet.js
+    // writes there for a resized drawer, and rides over the sticks that height lifts.
+    const stage = document.getElementById("stage");
+    stage.append(panel);
     // A question out with the Worker: Ask and the suggestions wait until her answer is in.
     const pending = (ask) => {
       state.ask = ask; send.disabled = !!ask;
@@ -377,11 +380,11 @@
       } else if (phase === "tour" && state.kind === "trip") {
         heading.textContent = `${NAME} · ${state.legs[state.stop].title}`;
         label(); skip.textContent = "Back";
-        help.textContent = coarse ? "Tap to go on" : "Enter or → goes on · Esc goes back";
+        help.textContent = coarse ? "Tap to go on · move to stop" : "Enter goes on · Esc goes back · move to stop";
       } else if (phase === "tour") {
         heading.textContent = `${news ? "What's new" : G.tour} · ${state.stop + 1} / ${state.legs.length}\n${state.legs[state.stop].title}`;
         label(); skip.textContent = "End tour";
-        help.textContent = coarse ? "Tap to go on" : "Enter or → goes on · Esc ends";
+        help.textContent = coarse ? "Tap to go on · move to stop" : "Enter goes on · Esc ends · move to stop";
       }
     };
     // Next goes on through what she says at a stop before it moves on: Finish only on the last stop's last bubble.
@@ -517,16 +520,30 @@
     // and stops the driven Ooga's steering, fire and swing, so nothing walks on through the tour. Both come back, with
     // fresh controls, once the view is home.
     const hold = () => {
-      pilot.setActive(false); pilot.controls.reset(); input.reset();
+      pilot.setActive(false); pilot.controls.reset(true); input.reset();
       pilot.setExternalControl(true);
       state.holding = true;
       document.body.classList.add("tess-touring");
     };
-    const release = () => {
+    const release = (keepInput = false) => {
       pilot.setExternalControl(false);
-      pilot.setActive(true); pilot.controls.reset(); input.reset();
+      pilot.setActive(true, keepInput);
+      if (!keepInput) { pilot.controls.reset(); input.reset(); }
       state.holding = false;
       document.body.classList.remove("tess-touring");
+    };
+    // The visitor never stops driving their Ooga: a movement (keys, a stick, a pad) while she shows them round ends the
+    // tour where it is, the view is the Ooga's own again as it was, and the movement goes on to the Ooga.
+    const interrupt = () => {
+      stopRequest++; waitingForStop = false;
+      rig.hush();
+      release(true);
+      toWork();
+    };
+    // Called by the scene before the pilot reads its input, so the movement that ends a tour moves the Ooga that frame
+    // with its own camera back; `update` asks again for a scene that does not.
+    const yieldToMovement = () => {
+      if (state.holding && !lender && pilot.controls.moving()) interrupt();
     };
     // The tour keeps where the view was, to give it back.
     const startTour = () => {
@@ -636,7 +653,8 @@
     };
     const captureKey = (e) => {
       if (state.phase !== "offer" && state.phase !== "tour" || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key !== "Enter" && e.key !== "ArrowRight") return;
+      // Enter alone: the arrows are movement, which reaches the Ooga and ends a tour (`interrupt`).
+      if (e.key !== "Enter") return;
       const target = e.target;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable || target.closest && target.closest("dialog"))) return;
       // Enter on one of her own buttons (Ask, a suggestion, Show me, Not now) presses that button.
@@ -664,6 +682,7 @@
     };
     const update = (dt, elapsed) => {
       if (lender) { lender(rig, dt); rig.update(dt, elapsed); return; }
+      yieldToMovement();
       const actor = visitor();
       if (state.still && (state.phase === "work" || state.phase === "notice" || state.phase === "approach")) watchStill(dt);
       // A greeting she started is dropped, without a word, when the visitor gets going first; one they asked for by a
@@ -767,11 +786,11 @@
     const resume = () => {
       if (!suspended) return;
       suspended = false;
-      document.body.append(panel);
+      stage.append(panel);
       window.addEventListener("keydown", captureKey, true);
     };
     const dispose = () => { suspend(); rig.dispose(); };
-    return { root: rig.root, state, update, escape, tap, suspend, resume, dispose, liveGeometry: rig.liveGeometry, light: rig.light, lend, get holding() { return state.holding; }, get lent() { return !!lender; }, get speech() { return rig.speech; } };
+    return { root: rig.root, state, update, yieldToMovement, escape, tap, suspend, resume, dispose, liveGeometry: rig.liveGeometry, light: rig.light, lend, get holding() { return state.holding; }, get lent() { return !!lender; }, get speech() { return rig.speech; } };
   };
   BL.hubGuide = { create, NAME, LINES, STOPS, NEWS, freshAfter, legsOf, answer, SUGGESTIONS, fold, has };
 })();

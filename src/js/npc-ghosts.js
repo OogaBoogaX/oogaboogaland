@@ -1,11 +1,12 @@
-// The island's NPC ghost tracks. While a signed-in player drives an Ooga or gorilla as a separate body (this page's
-// own, crew.js/clankers.js `separateBodies`, or another page's, shown by remote-players.js), the roster NPC of that
+// The island's NPC ghost tracks. While a player drives a contributor's Ooga or gorilla as a separate body (this page's
+// own, signed in or out, crew.js/clankers.js `separateBodies`, or another page's, shown by remote-players.js), the roster NPC of that
 // name stays the same object on its own track: its route, fire seat, bed, work and status beams go on as before,
 // an Ooga through the room's one NPC host, a gorilla companion on each page from that host's Ooga states and plan/hit
 // events (npc-sync.js carries no companion poses). It is only drawn as a Cloud Hopper replay ghost (`cloudHopperGhost.style`: cyan,
 // glassy, shadowless), and its harmless work rounds fly in the same colour (`shotLook`). Nothing here moves an
 // actor, reserves or frees a seat or bed, changes collision or authority, or sets `humanControlled`/`remoteControlled`;
 // the one mark is `ghostTrack`, which the roster dot, possession refusals and the work-round presentation read.
+// A guest's own likeness has no NPC track at all (crew.js `avatar`), so it never comes here.
 // Frame order: the scene calls `restore` before anything simulates, so every system reads the real models (head
 // swaps, colourways, gear), and `paint(dt)` once the frame's poses are final. Restoring walks the nodes painted, not
 // the ghosts' trees, so a part moved off a ghost meanwhile gets its own model back too.

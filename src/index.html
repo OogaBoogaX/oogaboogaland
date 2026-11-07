@@ -643,11 +643,6 @@
         <span class="detached-destination-name" id="detached-destination-name" aria-live="polite"></span>
         <span id="destination-hud-label" hidden>Map. Cycle destinations</span>
       </button>
-      <button type="button" class="mode-hud" id="own-ooga-hud" data-action="mode-retake" data-selected="true"
-        aria-label="Return to your last character" title="Return to your last character" hidden>
-        <canvas class="mode-face-icon" id="own-ooga-face-icon" width="48" height="48" aria-hidden="true"></canvas>
-        <span class="mode-health" id="own-ooga-health" role="progressbar" aria-label="Last character's health" aria-valuemin="0" aria-valuemax="25" aria-valuenow="25" hidden><span id="own-ooga-health-fill"></span></span>
-      </button>
       <button type="button" class="mode-hud" id="mode-hud" data-action="mode-toggle" data-selected="false" data-shooter="false"
         aria-label="Character controls" title="Character controls" hidden>
         <svg class="mode-roster-icon" viewBox="0 0 7 9" shape-rendering="crispEdges" aria-hidden="true">
@@ -1830,13 +1825,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
     </section>
     <canvas class="ghost-minimap" id="ghost-minimap" aria-hidden="true" hidden></canvas>
     <div class="ghost-spectate" id="ghost-spectate" role="group" aria-label="Watch while you're down" hidden>
-      <span class="ghost-spectate-head">You're down · watch from</span>
-      <div class="ghost-spectate-modes">
-        <button type="button" data-spec="grave" aria-pressed="true">My view</button>
-        <button type="button" data-spec="free" aria-pressed="false">Free camera</button>
-        <button type="button" data-spec="players" aria-pressed="false">Players</button>
-      </div>
-      <div class="ghost-spectate-watch" id="ghost-spectate-watch" hidden>
+      <span class="ghost-spectate-head">You're down · watching</span>
+      <div class="ghost-spectate-watch" id="ghost-spectate-watch">
         <span class="ghost-spectate-name" id="ghost-spectate-name"></span>
         <button type="button" class="ghost-spectate-next" id="ghost-spectate-next" aria-label="Next player">Next ▶</button>
       </div>

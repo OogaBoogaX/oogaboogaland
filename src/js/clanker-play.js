@@ -391,7 +391,6 @@
           updateSmashGauge();
         }
       } else if (name === "gorilla-beat") clankers.chestBeat();
-      else if (name === "mode-release") release();
       else if (name === "mode-toggle") {
         const required = !!combatOnly?.();
         if (required && combat) return true;
@@ -433,14 +432,15 @@
       else return false;
       return true;
     };
-    // Called after the scene and HUD have had a chance to close their UI.
+    // Called after the scene and HUD have had a chance to close their UI. It frees the cursor; it never lets go of the
+    // gorilla (T goes back to its Ooga).
     const escape = () => {
       if (!player) return false;
       if (focused || lockPending || document.pointerLockElement === canvas || performance.now() - unlockedAt < 100) {
         blurCombat();
         return true;
       }
-      return release();
+      return false;
     };
     const onKeyDown = (event) => {
       if (!player || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -1114,7 +1114,7 @@
       }
       if (!touch) {
         if (isCombat()) rows.push(H.row(["tab"], "Release mouse cursor"));
-        rows.push(H.row(BL.controls.shortcutKeys("escape"), "Release cursor / let go"));
+        rows.push(H.row(BL.controls.shortcutKeys("escape"), "Release cursor"));
       }
       return { title: "Island · Controlling a gorilla", rows };
     };

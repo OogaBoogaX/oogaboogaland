@@ -40,7 +40,6 @@
   // a lamp on it.
   const WALL_LAMP_BIAS = 6;
   const FOLLOW = { y: 0.9, min: 3, max: 7, pitch: [0.25, 0.8] };
-  const FLY = { speed: 6, perDist: 0.4, climb: 4, yMax: HALL.h - 3 };
   // The door's shield, as wide as its arch, in the hall's cyan; and the launch shield across the tunnel's end, in a
   // paler blue.
   const OPENING = { minX: -DOOR.half, maxX: DOOR.half, floorY: 0, ceilingY: DOOR.top }, TINT = BL.factoryWindow.TINT;
@@ -263,9 +262,11 @@
     const released = BL.net.state.released;
     const denied = mayPossess(avatar) || (released && released.name === avatar.traits.name ? "That Ooga is no longer yours to drive" : null);
     BL.net.state.released = null;
+    // Nobody walks the hangar without an Ooga: one no longer theirs goes back to the hall, which hands them their own.
     if (denied && people.player === avatar) {
       pilot.release(true);
       hud.toast(denied);
+      leaveHangar();
     }
   };
   const targets = [];
@@ -273,7 +274,6 @@
   // Back to the hall as the same Ooga, onto the walkway at the door, nothing held or hovered here carried out.
   const leaveHangar = (instant = false) => {
     if (leaving) return;
-    world.pilotDetached = !pilot.player;
     world.pilot = pilot.player ? pilot.player.traits.name : null;
     if (!go("factory", null, instant)) return;
     leaving = true;
@@ -1403,7 +1403,7 @@
       // The visitor's view, combat and weapon come in from the last scene and go on to the next (pilot.js `carried`).
       carry: true,
       renderer, canvas: ctx.canvas, camera, hud, presets: PRESETS, landing: "entrance", pitch: PITCH, dist: DIST,
-      follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => HALL.h - 1.5, coarse: COARSE, mayPossess,
+      follow: FOLLOW, clampTarget, clampCamera, ceilingAt: () => HALL.h - 1.5, coarse: COARSE, mayPossess,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: (x, z) => HM.supportAt(x, z, feetOf()) }
     });
     const tipFor = (hit) => TIPS[hit.owner.kind] ? TIPS[hit.owner.kind][0] : "";
@@ -1512,7 +1512,8 @@
     if (!params.has("nosim") && params.get("jet") !== "0") BL.jetFeed.load();
     paintBoards(scene);
     boardsDirty = false;
-    // The visitor's Ooga: `character=` on a page that opens here, else the one the hall handed over, else a free view.
+    // The visitor's Ooga: `character=` on a page that opens here, else the one the hall handed over, else their own or
+    // assigned one (`preferredCharacter`): there is no view without one.
     const asked = ctx.from === null ? new URLSearchParams(location.search).get("character")?.trim().toLowerCase() : null;
     // Walked in through the hall's side of the door, the hangar comes on under the hall's last frame, which dissolves away.
     const crossing = ctx.from === "factory" ? world.hangarCrossing : null;
@@ -1520,9 +1521,9 @@
     Object.assign(walk, { phase: 0, through: false, beat: 0, grab: false, still: crossing ? 1 : 0, hold: crossing ? BL.factoryWindow.GLIDE.still : 0, settle: false });
     canvas = ctx.canvas;
     const named = asked ? contributors.roster.find((c) => c.name.toLowerCase() === asked) : null;
-    const returningOwn = pilot.loginViewRestored && BL.net.ownCharacter();
-    const picked = returningOwn ? contributors.roster.find(c => c.name === returningOwn.handle)
-      : named || world.pilot && contributors.roster.find((c) => c.name === world.pilot) || null;
+    const assigned = BL.net.preferredCharacter();
+    const picked = named || world.pilot && contributors.roster.find((c) => c.name === world.pilot)
+      || assigned && contributors.roster.find((c) => c.name === assigned.handle) || null;
     const playerName = picked && !BL.net.mayDrive(picked.name) ? picked.name : null;
     world.pilot = null;
     if (playerName) {
@@ -1540,16 +1541,10 @@
       world.magazine = playerWorld.magazine;
       pilot.bind(shared);
       avatar = people.cavemen.get(playerName);
-      if (pilot.loginViewRestored) {
-        Object.assign(avatar.root.position, { x: ARRIVAL.position.x, y: ARRIVAL.position.y + avatar.baseY, z: ARRIVAL.position.z });
-        avatar.root.rotation.y = ARRIVAL.yaw + Math.PI;
-      }
       // In as it left the last scene (pilot.js `arrive`); with nothing carried, armed, as before.
       if (!pilot.arrive(avatar)) people.selectWeapon(avatar.weapon.selectedSlot, avatar);
-      if (!pilot.loginViewRestored) {
-        if (crossing) walkIn(crossing);
-        else pilot.navigate(arrival());
-      }
+      if (crossing) walkIn(crossing);
+      else pilot.navigate(arrival());
       const heads = Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length);
       scene.gate.phase.body.track(avatar.root, avatar.traits.height * 2, heads);
       scene.launch.phase.body.track(avatar.root, avatar.traits.height * 2, heads);
@@ -1644,6 +1639,8 @@
     // The hall's last frame dissolves away once the hangar has taken over.
     if (walk.still > 0 && (walk.hold -= dt) <= 0) walk.still = Math.max(0, walk.still - dt / BL.factoryWindow.GLIDE.dissolve);
     s.fire.unshake(camera);
+    // A movement ends Tess's tour before the pilot reads it, so it moves the Ooga this frame (hub-guide.js).
+    s.guide.yieldToMovement();
     pilot.readInput(dt);
     // The door's walk has the Ooga; once it is done the Ooga stands until the visitor lets go of moving, since the view
     // has turned round behind it and a key still held may now mean the other way.
@@ -1758,7 +1755,7 @@
       paintBoards(s);
     }
     hud.updateBoard(elapsed);
-    // Back out through the door: walked past its shield, or flown up to it with the free view.
+    // Back out through the door: walked past its shield.
     if (!leaving) {
       const through = (p, feet, margin) => Math.abs(p.x - DOOR.x) <= DOOR.half && DOOR.z - p.z <= DOOR.plane + margin && feet > DOOR.y - 0.3 && feet < DOOR.y + DOOR.top;
       if (pilot.player) {
@@ -1770,9 +1767,6 @@
           Object.assign(walk, { phase: WALK_OFF, t: 0, x: p.x, z: p.z, through: false });
           pilot.controls.reset(); input.reset(); hud.tooltip.hide();
         } else if (through(p, p.y - pilot.player.baseY, 0)) leaveHangar();
-      } else if (!avatar) {
-        const a = pilot.controls.read();
-        if (Math.hypot(a.x, a.y) > 0.05 && through(camera.position, camera.position.y, 0.9)) leaveHangar();
       }
     }
     stepTweens(dt);
@@ -1794,10 +1788,7 @@
     SEAT_VIEW.mode = null;
     // Left by Back or Forward rather than by its door, the hangar hands the Ooga on, so the next scene plays the same
     // one; the door and Escape have handed theirs over already.
-    if (!leaving) {
-      world.pilotDetached = !pilot.player;
-      world.pilot = pilot.player ? pilot.player.traits.name : null;
-    }
+    if (!leaving) world.pilot = pilot.player ? pilot.player.traits.name : null;
     unsubscribeAccount();
     unsubscribeAccount = null;
     unsubscribeFeed();
@@ -1863,7 +1854,7 @@
         if (f.on && f.startT < 0) rows.push(touch ? H.row([], "Drive / steer", "Left stick") : H.movement("W/S drive · A/D steer"), H.row(touch ? [] : BL.controls.keysFor("pitchDown", "pitchUp"), "Raise / lower forks", touch ? "Tap fork stick" : ""));
         if (f.on) rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("horn"), "Honk horn", touch ? "Tap steering wheel" : ""));
         rows.push(H.row(touch ? [] : [" "], "Get out", touch ? "Action button" : ""), H.row([], "Look around", touch ? "Drag / pinch" : "Drag / scroll"));
-        if (!touch) rows.push(H.row(BL.controls.shortcutKeys("resetView"), "Reset camera"), H.row(BL.controls.shortcutKeys("escape"), "Release cursor / let go"));
+        if (!touch) rows.push(H.row(BL.controls.shortcutKeys("resetView"), "Reset camera"), H.row(BL.controls.shortcutKeys("escape"), "Release cursor · leave"));
         return { title: "Lightning Jet Hangar · Forklift", rows };
       }
       const help = pilot.controlsHelp(touch); help.title = "Lightning Jet Hangar · " + help.title; return help;
