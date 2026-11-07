@@ -105,7 +105,7 @@
       if (Array.isArray(parsed.recentHandles)) {
         for (const handle of parsed.recentHandles.slice(0, RECENT_HANDLES).reverse()) if (isString(handle, HANDLE_MAX)) addRecentHandle(state.recentHandles, handle);
       } else for (const donor of state.donors.slice(-RECENT_HANDLES)) addRecentHandle(state.recentHandles, donor.handle);
-      if (Array.isArray(parsed.recentDonations)) for (const d of parsed.recentDonations.slice(0, BL.donations.RECENT_MAX)) {
+      if (Array.isArray(parsed.recentDonations)) for (const d of parsed.recentDonations.slice(0, BL.donations.RECENT_KEEP)) {
         if (!d || !isString(d.id, 64) || !d.id || !Number.isSafeInteger(d.sats) || !isString(d.handle, HANDLE_MAX)
           || !isString(d.message, MESSAGE_MAX) || !Number.isFinite(d.at) || d.at < 0 || !Number.isFinite(d.bananas) || d.bananas < 0) continue;
         state.recentDonations.push({ id: d.id, sats: d.sats, handle: BL.donations.sanitize(d.handle, HANDLE_MAX),
@@ -226,7 +226,7 @@
         // A message rides only a tip at or above the bar, whichever path handed the tip in.
         state.recentDonations.unshift({ id: donation.id, sats: donation.sats, handle: BL.donations.sanitize(donation.handle, HANDLE_MAX),
           message: BL.donations.carried(donation.sats, donation.message), at: donation.at, bananas });
-        if (state.recentDonations.length > BL.donations.RECENT_MAX) state.recentDonations.length = BL.donations.RECENT_MAX;
+        BL.donations.keepRecent(state.recentDonations);
         const handle = BL.donations.sanitize(donation.handle, HANDLE_MAX);
         let donor = state.donors.find((entry) => entry.handle.toLowerCase() === handle.toLowerCase());
         if (!donor && state.donors.length < DONOR_MAX) {

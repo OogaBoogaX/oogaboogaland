@@ -283,5 +283,76 @@
     };
     return { createState, target, route, xAt, zAt, capacity: size, get nodes() { return count; }, buffers: xs.byteLength + zs.byteLength + centerX.byteLength + centerZ.byteLength + groups.byteLength + heads.byteLength + edges.byteLength + next.byteLength + costs.byteLength + parents.byteLength + distances.byteLength + heap.byteLength + heapIndex.byteLength + routeState.route.byteLength };
   };
-  BL.npcPaths = { create };
+  // Passive Hub work trips use only the authored mainland spokes and the pile
+  // ring: no graph, obstacle search, bed route or satellite crossing. Adapted
+  // from the virtual host's routine paths (697964fe). It shares `create`'s
+  // walker state; its own version stamp keeps either planner from reusing the
+  // other's lane. Null when the island's authored routes are unsupported.
+  const fixed = (island) => {
+    const path = island.path;
+    const lines = path.centerlines.filter(points => points.length > 1
+      && Math.hypot(points[0].x, points[0].z) < island.meadowRadius
+      && Math.hypot(points[points.length - 1].x, points[points.length - 1].z) <= island.meadowRadius + 0.01);
+    if (!lines.length || lines.length > 32 || lines.some(line => line.length > 256)) return null;
+    const stamp = () => -2 - path.version;
+    const nearest = (x, z, radius) => {
+      let result = null, distance = Infinity;
+      for (const line of lines) for (let i = 0; i < line.length; i++) {
+        const p = line[i];
+        if (Math.hypot(p.x, p.z) < radius) continue;
+        const d = Math.hypot(p.x - x, p.z - z);
+        if (d < distance) { distance = d; result = { line, i }; }
+      }
+      return result;
+    };
+    const append = (s, x, z) => {
+      if (s.count && Math.hypot(s.laneX[s.count - 1] - x, s.laneZ[s.count - 1] - z) < 0.01) return;
+      if (s.count === s.laneX.length) throw new Error("authored mainland route capacity");
+      s.laneX[s.count] = x; s.laneZ[s.count++] = z;
+    };
+    const prepare = (s, p, tx, tz) => {
+      s.tx = tx; s.tz = tz; s.version = stamp(); s.count = s.index = 0; s.plans++;
+      const radius = path.debug.ringTrafficRadius ?? path.debug.ringCenterRadius;
+      const from = Math.hypot(p.x, p.z) > radius + 0.5 ? nearest(p.x, p.z, radius) : null;
+      const to = Math.hypot(tx, tz) > radius + 0.5 ? nearest(tx, tz, radius) : null;
+      // Same-spoke travel follows its existing samples directly in either direction.
+      if (from && to && from.line === to.line) {
+        const step = from.i <= to.i ? 1 : -1;
+        for (let i = from.i; ; i += step) {
+          append(s, from.line[i].x, from.line[i].z);
+          if (i === to.i) break;
+        }
+      } else {
+        let x = p.x, z = p.z;
+        if (from) for (let i = from.i; i >= 0; i--) {
+          const q = from.line[i];
+          if (Math.hypot(q.x, q.z) < radius) break;
+          append(s, q.x, q.z); x = q.x; z = q.z;
+        }
+        let first = to ? to.i : 0;
+        while (to && first > 0 && Math.hypot(to.line[first - 1].x, to.line[first - 1].z) >= radius) first--;
+        const end = to ? to.line[first] : { x: tx, z: tz };
+        // Around the pile on the real ring, never across it.
+        const start = Math.atan2(x, z), finish = Math.atan2(end.x, end.z);
+        const angle = Math.atan2(Math.sin(finish - start), Math.cos(finish - start));
+        const steps = Math.max(1, Math.ceil(Math.abs(angle) * radius / 0.5));
+        for (let i = 0; i <= steps; i++) {
+          const a = start + angle * i / steps;
+          append(s, Math.sin(a) * radius, Math.cos(a) * radius);
+        }
+        if (to) for (let i = first; i <= to.i; i++) append(s, to.line[i].x, to.line[i].z);
+      }
+      append(s, tx, tz);
+    };
+    const target = (cave, tx, tz) => {
+      const s = cave.pathing, p = cave.root.position;
+      if (!Number.isFinite(tx) || !Number.isFinite(tz)) { s.tx = NaN; s.targetX = p.x; s.targetZ = p.z; return; }
+      if (s.tx !== tx || s.tz !== tz || s.version !== stamp()) prepare(s, p, tx, tz);
+      while (s.index < s.count && Math.hypot(s.laneX[s.index] - p.x, s.laneZ[s.index] - p.z) < 0.08) s.index++;
+      s.targetX = s.index < s.count ? s.laneX[s.index] : tx;
+      s.targetZ = s.index < s.count ? s.laneZ[s.index] : tz;
+    };
+    return { target, lines: lines.length };
+  };
+  BL.npcPaths = { create, fixed };
 })();

@@ -17,12 +17,16 @@
 // Lightning through the Jet (`lightning`): blue arcs gather at its nose and crawl over it to the tail, the hall browning
 // out and the runway's marker lamps running the wrong way (`rabbit`), its gold trim and canopy lighting up as they go
 // (the Jet's lit mesh, `jetModels.jet(stage, true)`, swapped in for it); then one crack and a flash, and it's over,
-// Kortik's Sis zapped if she stands near it (`sis.zap`). Its sound is `hangarAudio.zap`.
+// Kortik's Sis zapped if she stands near it (`sis.zap`). Its sound is `hangarAudio.zap`. Now and then (`ZAP.room`,
+// or when `debug.play` asks) the crack doesn't end on the Jet: a bolt leaps off its back across the hall to a room's
+// console, the room picked at random at the crack (`room.pick`, the control room or one of the crew's rooms on the
+// right wall) (`JUMP`), and the room catches fire there (`room.ignite`, `hangar-room-fire.js`), never while one
+// already burns.
 //
 // The blackout (`blackout`): a flicker and every light dies, the hall's own light nearly gone; only the two nozzles glow
 // in the dark like eyes, breathing, and blink once; Kortik's Sis's eyes glow too (`sis.dark`); then the banks clunk
 // back on one by one. Its sound is `hangarAudio.blackout`, the hall's electrical hum following its power
-// (`hangarAudio.power`).
+// (`hangarAudio.power`). The overhead crane stops while the power is off (`powered`), until the last bank is back.
 //
 // The lowrider (`lowrider`): the Jet bouncing to a beat, its nose lifting on each about its main gear, which stays on the
 // floor, and its nose gear banging back down with a bounce, harder and softer by turns, then settling. Kortik's
@@ -71,7 +75,11 @@
   // and the end. How far the hall browns out, over `fade`, and comes back, over `back`; how fast the runway's marker
   // lamps' pulse runs the wrong way, m/s, from `rabbit[0]`; how bright the gold trim burns (the lit mesh's glow, from the
   // plain mesh's glass to full); and the crack's flash, how long it lasts and its light.
-  const ZAP = { start: 0.6, crawl: 4, crack: 5.6, end: 7.2, arcs: 16, life: 0.14, size: 1.7, spread: 1.6, dim: 0.5, fade: 0.8, back: 0.6, rabbit: [0.5, 45], glow: [0.22, 1], flash: 0.25, light: [2.4, 2.8, 3.6] };
+  // How often a lightning ends in the jump to the control room instead (0 to 1).
+  const ZAP = { start: 0.6, crawl: 4, crack: 5.6, end: 7.2, arcs: 16, life: 0.14, size: 1.7, spread: 1.6, dim: 0.5, fade: 0.8, back: 0.6, rabbit: [0.5, 45], glow: [0.22, 1], flash: 0.25, light: [2.4, 2.8, 3.6], room: 0.35 };
+  // The jump: how long the bolt takes to reach the room from the crack, s, and how long each of its lengths burns; how
+  // far its lengths kink off the straight line, m, and how thick it is against a nozzle's arc.
+  const JUMP = { time: 0.3, life: 0.4, kink: 0.7, thick: 2.2 };
   // The blackout, s from its start: one flicker (`flicker`, [from, to], down to `low`), the power killed at `kill`; how
   // dark the lights go and the hall's own light; the nozzles glowing in the dark like eyes from `wake` after the kill,
   // how bright and how they breathe, and their blink at `blink` for `blinkLen`; the banks coming back on, and the end.
@@ -125,7 +133,8 @@
   // on a test page, where only `debug.play` starts one); `gap`, a fixed wait between them instead of GAP's, s; `riders()`,
   // whether any Ooga stands on the Jet (`standsOn` says for one); `near(test)`, whether `test(x, z, feet, height,
   // radius)` holds for anything that walks the hall.
-  const create = ({ root, fire, sis, fx, audio, jet, stage, auto = true, gap = null, riders = () => false, near = () => false }) => {
+  // `room`: the rooms' fire (`hangar-room-fire.js`: `pick(i)`, where the bolt lands, `ignite()` and `burning`).
+  const create = ({ root, fire, sis, fx, audio, jet, stage, room, auto = true, gap = null, riders = () => false, near = () => false }) => {
     const SPARK = HM.blast().spark, BLUE = BL.models.particleGeometry("#a8ecff", 0.05, 1), J = jet.position;
     const exits = JM.EXHAUST.map((e) => ({ x: J.x + e.x, y: e.y, z: J.z + e.z, r: e.r }));
     // Where Kortik's Sis turns to: between the engines. How the Jet stands at rest. Each throat's glow, in the nozzles'
@@ -136,7 +145,11 @@
     const plain = jet.geometry, lit = JM.jet(stage, true), C = JM.columns(stage), nose = J.z + C.k0 * C.U, tail = J.z + (C.k0 + C.nk) * C.U, RUNWAY = HM.LAYOUT.runway;
     // Where the trestles stand across the Jet, m from its middle.
     const PAD_X = Math.abs(HM.LAYOUT.trestles[0][0] - J.x);
-    const arcs = Array.from({ length: ARCS }, (_, i) => ({ node: createNode({ geometry: bolts()[i % 3], visible: false, sightHidden: true }), life: 0, len: ARC_LIFE }));
+    const arcs = Array.from({ length: ARCS }, (_, i) => ({ node: createNode({ geometry: bolts()[i % 3], visible: false, sightHidden: true }), life: 0, len: ARC_LIFE, turn: new Float32Array(4) }));
+    // The jump's path: its points off the Jet to the room, ARCS lengths of it, and whether this lightning jumps and
+    // whether it has landed.
+    const path = new Float32Array((ARCS + 1) * 3);
+    let jumping = false, landed = false, into;
     addChild(root, ...arcs.map((a) => a.node));
     // The kinds in their turn: a bag shuffled in place each time it runs out.
     const bag = Object.keys(LENGTH);
@@ -164,10 +177,35 @@
       const n = a.node;
       n.position.x = x; n.position.y = y; n.position.z = z;
       n.scale.x = n.scale.y = n.scale.z = size;
+      n.quaternion = null;
       n.rotation.x = Math.random() * Math.PI * 2; n.rotation.y = Math.random() * Math.PI * 2; n.rotation.z = Math.random() * Math.PI * 2;
       n.visible = true;
       a.life = a.len = life;
       for (let i = 0; i < 3; i++) fx.spawnParticle(BLUE, x, y, z, (Math.random() - 0.5) * 3, Math.random() * 2, (Math.random() - 0.5) * 3, 0.3 + Math.random() * 0.3, 10, 6);
+    };
+    // The jump's path, from the Jet's back to where the bolt lands in the room, kinked at random between its ends.
+    const lay = () => {
+      const top = onJet(J.x, (nose + tail) / 2), sx = top ? SURF.x : J.x, sy = top ? SURF.y : 6, sz = top ? SURF.z : J.z;
+      for (let k = 0; k <= ARCS; k++) {
+        const u = k / ARCS, kink = k === 0 || k === ARCS ? 0 : JUMP.kink;
+        path[k * 3] = sx + (room.at.x - sx) * u + (Math.random() - 0.5) * 2 * kink;
+        path[k * 3 + 1] = sy + (room.at.y - sy) * u + Math.sin(u * Math.PI) * 2.5 + (Math.random() - 0.5) * 2 * kink;
+        path[k * 3 + 2] = sz + (room.at.z - sz) * u + (Math.random() - 0.5) * 2 * kink;
+      }
+    };
+    // The jump's `k`th length, burning: a bolt laid from its point to the next, turned along it (the bolt's x).
+    const length = (k) => {
+      const a = arcs[k], n = a.node, o = k * 3, dx = path[o + 3] - path[o], dy = path[o + 4] - path[o + 1], dz = path[o + 5] - path[o + 2];
+      // The bolt is the same end for end, so its way is taken toward +x, where the turn below is well defined.
+      const d = Math.hypot(dx, dy, dz) || 1, s = dx < 0 ? -1 : 1, x = s * dx / d, y = s * dy / d, z = s * dz / d, q = a.turn;
+      // The turn taking +x onto the length's way: about x × way, by the angle between them.
+      const w = 1 + x, ql = Math.hypot(w, z, y);
+      q[0] = 0; q[1] = -z / ql; q[2] = y / ql; q[3] = w / ql;
+      n.quaternion = q;
+      n.position.x = path[o] + dx / 2; n.position.y = path[o + 1] + dy / 2; n.position.z = path[o + 2] + dz / 2;
+      n.scale.x = d; n.scale.y = n.scale.z = JUMP.thick;
+      n.visible = true;
+      a.life = a.len = JUMP.life;
     };
     // An arc round a nozzle's rim.
     const strike = () => {
@@ -283,6 +321,17 @@
         sis.zap(J.x, nose, tail);
         sis.settle();
         BL.gamepad.rumble(0.4, 0.6, 200);
+        if (jumping) { room.pick(into); lay(); }
+      }
+      // The jump: the bolt running a length at a time from the Jet to the room, and the room catching fire as it lands.
+      if (jumping && t >= Z.crack) {
+        const u = (t - Z.crack) / JUMP.time;
+        for (let k = Math.floor((t - dt - Z.crack) / JUMP.time * ARCS) + 1; k <= Math.min(ARCS - 1, Math.floor(u * ARCS)); k++) if (k >= 0) length(k);
+        if (!landed && u >= 1) {
+          landed = true;
+          room.ignite();
+          for (let i = 0; i < 6; i++) fx.spawnParticle(BLUE, room.at.x, room.at.y, room.at.z, (Math.random() - 0.5) * 3, Math.random() * 2.5, (Math.random() - 0.5) * 3, 0.4 + Math.random() * 0.3, 10, 6);
+        }
       }
       flash = t >= Z.crack ? Math.max(0, 1 - (t - Z.crack) / Z.flash) : 0;
       // Kortik's Sis, as it starts.
@@ -384,11 +433,16 @@
       if (!spooked && t >= S.brake) { spooked = true; sis.spook(engines.x, engines.z, "stay"); }
     };
 
-    const begin = (k) => {
+    // `jump`, for a lightning: whether it ends in the jump to a room (left to chance when not said), and `to`, which room
+    // (one at random when not said).
+    const begin = (k, jump, to) => {
       kind = k; t = 0; arcAt = 0; spooked = false;
       if (k === "misfire") audio.misfire(MISFIRE);
       else if (k === "phantom") audio.revs(REVS.script);
       else if (k === "lightning") {
+        jumping = !room.burning && (jump === undefined ? Math.random() < ZAP.room : jump);
+        into = to;
+        landed = false;
         jet.geometry = lit;
         jet.glow = ZAP.glow[0];
         audio.zap(ZAP, { x: J.x, y: 5, z: nose }, { x: J.x, y: 5, z: tail });
@@ -454,15 +508,16 @@
 
     // For debugging: play one now (unless one plays or the static fire holds them off), and where things stand.
     const debug = {
-      play: (k = "misfire") => { if (kind || held() || !LENGTH[k]) return false; begin(k); return true; },
-      get kind() { return kind; }, get t() { return t; }, get wait() { return wait; }, get dim() { return dim; }, get heat() { return heat; }
+      play: (k = "misfire", jump, to) => { if (kind || held() || !LENGTH[k]) return false; begin(k, jump, to); return true; },
+      get kind() { return kind; }, get t() { return t; }, get wait() { return wait; }, get dim() { return dim; }, get heat() { return heat; }, get jumping() { return jumping; }
     };
     // Leaving mid-anomaly: the engines cold, the Jet plain and at rest, and the lights full; the arcs go with the scene's
     // root.
     const dispose = () => { if (kind) end(); };
     // The Jet's lit mesh, kept on the GPU off the graph, so the lightning swaps it in without a hitch.
     const liveGeometry = (set) => { set.add(lit); };
-    return { update, lights, liveGeometry, dispose, debug, standsOn, keepsOut, get playing() { return !!kind; }, get dim() { return dim; }, get ambient() { return ambient; }, get rabbit() { return rabbit; } };
+    return { update, lights, liveGeometry, dispose, debug, standsOn, keepsOut, get playing() { return !!kind; }, get dim() { return dim; }, get ambient() { return ambient; }, get rabbit() { return rabbit; },
+      get powered() { return kind !== "blackout" || t < BLACKOUT.kill || t >= BLACKOUT.banks[BLACKOUT.banks.length - 1]; } };
   };
 
   BL.hangarAnomaly = { create, MISFIRE, REVS, ZAP, BLACKOUT, LOWRIDER, SHUFFLE };

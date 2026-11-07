@@ -17,11 +17,51 @@
   // The one resting place is centred on the cloth; the crew seat contract owns occupancy and standing up.
   const SEAT_AT = [0], SEAT_LIFT = 0.04, SLOTS = SEAT_AT.length;
   const ENTRY_SECONDS = 0.9, ENTRY_PARTS = ["legL", "legR", "armL", "armR", "head"], AXES = ["x", "y", "z"];
+  // Tipped out (`tip`): FALL_SECONDS in all, rolling over the cloth's edge onto the ground (to FALL_ROLL of the way), lying there (to FALL_LIE),
+  // then getting up where it landed; the roll turns the body FALL_TURN about the bed's long axis, toward the side it falls to, and it lies
+  // FALL_LIE_Y of its height over the ground.
+  const FALL_SECONDS = 1.5, FALL_ROLL = 0.4, FALL_LIE = 0.62, FALL_TURN = Math.PI * 0.9, FALL_LIE_Y = 0.14;
   // Where an Ooga stands up: STAND past the bed's swing (`envelope`'s `across`), room for the widest Ooga.
   const STAND = 0.6;
-  // The swing: the bed's angle about the virtual swing axis is `amp` sin(OMEGA t), `amp` easing toward REST (or REST_HELD with
-  // anyone in it) at DECAY a second and never past SWAY_MAX; a sitter's landing and a shaken palm add KICK.
-  const OMEGA = 2.1, REST = 0.012, REST_HELD = 0.035, DECAY = 0.35, KICK = 0.06, SWAY_MAX = 0.11;
+  // The swing: the bed's angle about the virtual swing axis is `amp` sin(phase), the phase turning at OMEGA, `amp` easing toward
+  // REST (or REST_HELD with anyone in it) at DECAY a second and never past SWAY_MAX; a sitter's landing and a shaken palm add KICK.
+  // Pushes and bananas climb it in steps that the bed remembers: every hit adds to one `count` shared by everyone (a run or a
+  // plain walk into the bed is 1; fire is by the burst: the first round of a burst, rounds with no gap longer than BURST_GAP,
+  // is 1 however short the burst, and each later round in it (TIP_COUNT - 1) / (BURST_N - 1), so a held trigger
+  // reaches TIP_COUNT by itself at the BURST_N-th round), the count forgets itself after RESET_S seconds without a hit or when
+  // the bed is taken or left, and each hit lifts the swing to base + count STEP (base the rest the bed has with or without an
+  // occupant), however far it has eased down since, so the staircase is as clear after a long gap as after a short one, and
+  // each round of a held trigger takes it a little higher. The count reaching TIP_COUNT (four) while the bed is held is
+  // `spilling`: the occupant's own page then rolls them out. A hit also sets the phase so the bed sets off away from the pusher
+  // or shooter that instant, without jumping, and a push timed as it swings away from them adds up to MOMENTUM more height
+  // (never to the count). Climbing in settles the bed to REST_HELD with the count at zero. The hammock hangs where its original
+  // planned swing PLAN_SWAY fits (`plan`, `envelope`: the claim on the ground and the stand-up spot), so it hangs where it always has;
+  // the pushes swing it further, up to SWAY_MAX (about 23 degrees: a push is meant to be felt), and `swing` is that outline.
+  const OMEGA = 2.1, REST = 0.012, REST_HELD = 0.035, DECAY = 0.35, KICK = 0.06, PLAN_SWAY = 0.11, SWAY_MAX = 0.4, TAU = Math.PI * 2;
+  // The rifle fires 3-round bursts 0.09 s apart, 0.44 s between them while the trigger is held (crew.js `BURST_ROUNDS`, `BURST_STEP`,
+  // `SHOT_PERIOD`; magazine `AMMO_MAX` 30), so no gap in a held trigger is over 0.26 s: BURST_GAP of 0.4 s keeps a hold one burst and
+  // parts separate bursts. A held trigger of BURST_N rounds (a magazine is 30) tips an occupant out by itself.
+  const STEP = 0.09, RESET_S = 60, TIP_COUNT = 4, BURST_GAP = 0.4, BURST_N = 20, MOMENTUM = 0.03;
+  // Lying in it, the visitor rocks it with A and D (`pump`): a key held with the swing for PUMP_HOLD seconds is one good pump, which
+  // lifts the swing a step of PUMP_STEP (the ease-back waiting while the key is held with the swing, so each step is kept), a key held
+  // against the swing damps it PUMP_DAMP a second, and a tap shorter than PUMP_HOLD does nothing. It never touches the count, but the
+  // swing itself passing FALL tips them out, so ten good pumps from rest (one each half-swing, about fifteen seconds of good timing) roll
+  // them out of their own hammock, each visibly higher than the last; holding one key, or casual taps, come nowhere near.
+  const PUMP_STEP = 0.036, PUMP_HOLD = 0.3, PUMP_DAMP = 0.04;
+  // The swing the fourth hit lifts the bed to: a swing this high with the visitor's own Ooga lying in it tips them out however it got there.
+  const FALL = REST_HELD + TIP_COUNT * STEP;
+  // A body walking into the bed (`bump`): its footprint BUMP_RADIUS across (the hub's walker) touching the swing's
+  // outline (`swing`), from the ground up to the shell plus a walker's step (BUMP_RISE), is a push of its speed across the bed times
+  // BUMP_GAIN, a full step from 7 m/s (a walk is 7.75, a run 11.6). One contact is one push, however long it is held: a body
+  // pushes again only after it has stepped BUMP_REARM from the outline (half a metre clear of the touching distance), whoever it
+  // is; a push of half a step or more counts, a gentler one (under 3.5 m/s) only eases the swing up; slower than BUMP_MIN is a
+  // lean, not a push, and faster than BUMP_TELEPORT (twice a run, pilot.js `WALK`) is an arrival, not a walk. Neither adds
+  // anything. A counted push also shoves the bed along, LEAN (about 11 degrees) at a walk and up to SHOVE_RUN times that at a run: the
+  // bed is moving away from the pusher from the very next frame, the shove eases in over LEAN_RISE seconds (one connected push, not a
+  // one-frame jolt) and then relaxes over LEAN_TAU seconds while the swing it lifted carries on.
+  const BUMP_RADIUS = 0.3, BUMP_REARM = BUMP_RADIUS + 0.5, BUMP_RISE = 0.6, BUMP_GAIN = STEP / 7, BUMP_MIN = 0.5, BUMP_TELEPORT = 2 * 7.75 * 1.5;
+  const LEAN = 0.2, LEAN_TAU = 0.45, LEAN_RISE = 0.12, SHOVE_RUN = 1.5;
+  const easeInOut = (x) => x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x);
   // The cloth grid and radii of its spreaders, edge cords and suspension rings.
   const BED_NX = 14, BED_NZ = 4, SPREADER_R = 0.035, SPREADER_KNUCKLE = 1.14, EDGE_R = 0.016, CORD_R = 0.011, DROP_R = 0.022;
   const CORD_Z = [-BED_W / 2 - 0.06, -BED_W / 4, BED_W / 4, BED_W / 2 + 0.06];
@@ -46,18 +86,18 @@
   const clothY = (p, x, z) => p.endY - Math.sin(Math.PI * (x / BED_LEN + 0.5)) * BED_SAG - Math.cos(Math.PI * z / BED_W) * CRADLE;
 
   // How far the bed reaches as it swings, in the pivot's frame (x along the virtual swing axis, y up from it, z across): every
-  // point `bedGeometry` draws through, with the thickness of the part there, turned through +-SWAY_MAX about the
+  // point `bedGeometry` draws through, with the thickness of the part there, turned through +-`sway` about the
   // virtual axis. Seen from above it is an octagon: the `body` (the cloth, its edge cords and the spreaders) `half` along
   // and `across` either side, and past it the `tip` (each suspension ring), the cords
   // between the two inside the outline; `lo` and `hi` under and over the pivot, `top` the body's highest. `plan`
   // keeps the ground under the octagon clear; the collision shell (`shell`) is the resting cloth, inside it.
-  const envelope = (p) => {
-    const body = { half: 0, across: 0 }, tip = { half: 0, across: 0 }, e = { body, tip, lo: Infinity, hi: -Infinity, top: -Infinity };
-    const c = Math.cos(SWAY_MAX), s = Math.sin(SWAY_MAX);
+  const envelope = (p, sway = PLAN_SWAY) => {
+    const body = { half: 0, across: 0 }, tip = { half: 0, across: 0 }, e = { body, tip, lo: Infinity, hi: -Infinity, top: -Infinity, sway };
+    const c = Math.cos(sway), s = Math.sin(sway);
     // A cos a + B sin a over the swing: its ends, and where its slope is zero when that falls inside.
     const swung = (A, B) => {
       const out = [A * c - B * s, A * c + B * s], a = A ? Math.atan(B / A) : Infinity;
-      if (Math.abs(a) < SWAY_MAX) out.push(A * Math.cos(a) + B * Math.sin(a));
+      if (Math.abs(a) < sway) out.push(A * Math.cos(a) + B * Math.sin(a));
       return out;
     };
     // Turned by a, a point lies y sin a + z cos a across and y cos a - z sin a high.
@@ -193,6 +233,8 @@
       const wx = p.x + ux * at + nx * side * out, wz = p.z + uz * at + nz * side * out;
       return { at, y: clothY(p, at, 0) + SEAT_LIFT, walkAt: { x: wx, z: wz }, floor: surfaceAt(wx, wz) };
     });
+    // The whole swing the pushes give it (SWAY_MAX), which pushes, rounds and a tipped Ooga's landing spot go by.
+    p.swing = envelope(p, SWAY_MAX);
     // Where stowed gear finds the ground under the bed.
     p.surfaceAt = surfaceAt;
     p.shell = shell(p);
@@ -267,8 +309,9 @@
     return { geo, x: mx, y: my, z: mz };
   };
 
-  // The hammock in `root` from a plan: `ra`, `rb` the trunks' radii at the tie, `seed` its leaves'.
-  const create = ({ plan: p, root, solids, ra, rb, seed, anchors = null }) => {
+  // The hammock in `root` from a plan: `ra`, `rb` the trunks' radii at the tie, `seed` its leaves', `bumpSlots` how
+  // many bodies `bump` tells apart (the visitor's own Ooga and the room's players).
+  const create = ({ plan: p, root, solids, ra, rb, seed, anchors = null, bumpSlots = 64 }) => {
     const { createNode, addChild, removeChild } = BL.scene;
     const ridge = ridgeGeometry(p);
     const ridgeNode = createNode({ geometry: ridge.geo, position: { x: ridge.x, y: ridge.y, z: ridge.z }, sightHidden: true });
@@ -320,8 +363,10 @@
     const bedRotation = quat.create(), restRotation = quat.create(), bodyRotation = quat.create(), limbTarget = quat.create();
     // A bed sleeper lies on their back. Turn their long axis along the hammock's +x.
     quat.fromEuler(restRotation, -Math.PI / 2, -Math.PI / 2, 0);
-    const seats = p.seats.map((s, index) => ({ kind: "hammock", lying: true, keepEquipment: true, index, x: 0, y: 0, z: 0, ry: p.seatRy, floor: s.floor, walkAt: { x: s.walkAt.x, z: s.walkAt.z }, sitter: null, remote: 0, restX: 0, restY: 0, restZ: 0, wire: new Int16Array(6) }));
-    let amp = REST, angle = 0;
+    const seats = p.seats.map((s, index) => ({ kind: "hammock", lying: true, keepEquipment: true, pumps: true, index, x: 0, y: 0, z: 0, ry: p.seatRy, floor: s.floor, walkAt: { x: s.walkAt.x, z: s.walkAt.z }, sitter: null, remote: 0, restX: 0, restY: 0, restZ: 0, wire: new Int16Array(6) }));
+    let amp = REST, angle = 0, phase = 0, lean = 0, leanIn = 0, leanInT = LEAN_RISE, count = 0, sinceHit = 0, sinceRound = 1e9, wasHeld = false, fallSide = 0, pumping = false, pumpHeld = 0, pumpStepped = 0;
+    const bodyRight = new Float64Array(3);
+    const occupied = () => { for (const seat of seats) if (seat.sitter || seat.remote) return true; return false; };
     // A seat's place for an angle of swing: the bed turns about the virtual swing axis (+x in its frame), so a point `drop`
     // under it moves `drop` sin(angle) across and rises by drop (1 - cos(angle)).
     const place = (seat, a) => {
@@ -421,6 +466,46 @@
       return { way, w: o.w, h: o.h, i0: flipI ? -(o.i0 + o.w) : o.i0, j0: flipJ ? -(o.j0 + o.h) : o.j0,
         bottom: faces ? -o.top : o.bottom, top: faces ? -o.bottom : o.top, cells };
     };
+    // A part is laid by its outline at rest, never by a passing state that differs between this page, other pages and
+    // a guest's own copy at the moment each parks it: every magazine banana shown (a full rifle, as every Ooga starts)
+    // whatever the rounds and at its resting size (`models.GUN_BANANA_SCALE`, as the crew sets it once a reload's pop has
+    // settled), no muzzle flash or flame, and a nunchaku folded, where the crew and the remote pool both settle it
+    // while parked (folded at once here, so every page also draws it so from the start). Shown states and the
+    // bananas' drawn sizes are put back once measured.
+    const steadied = [], steadiedShown = [], bananaScales = [];
+    let steadiedBananas = null;
+    const steady = (node, shown) => {
+      if (!node) return;
+      steadied.push(node); steadiedShown.push(node.visible); node.visible = shown;
+    };
+    const steadyPart = (gear, node, index) => {
+      const cave = gear.cave, parts = cave.parts;
+      steadied.length = steadiedShown.length = bananaScales.length = 0;
+      steadiedBananas = null;
+      if (index === 0 && parts.chuk) cave.chukAngle = parts.chuk.rotation.x = BL.crew.CHUK_FOLD;
+      if (index === 1) {
+        const rest = BL.models.GUN_BANANA_SCALE, h = cave.traits.height;
+        steadiedBananas = parts.gunBananas;
+        for (const banana of parts.gunBananas) {
+          steady(banana, true);
+          const s = banana.scale;
+          bananaScales.push(s.x, s.y, s.z);
+          s.x = rest.x * h; s.y = rest.y * h; s.z = rest.z * h;
+        }
+        steady(parts.gunFlash, false);
+      }
+      // A built-in pack's flame is its own part; the hub's pack (`crew.jetpackNode`) has its flame as its one child.
+      if (index === 2) steady(node === parts.jetpack ? parts.jetFlame : node.children[0], false);
+    };
+    const unsteady = () => {
+      for (let i = 0; i < steadied.length; i++) steadied[i].visible = steadiedShown[i];
+      if (steadiedBananas) for (let i = 0; i < steadiedBananas.length; i++) {
+        const s = steadiedBananas[i].scale;
+        s.x = bananaScales[i * 3]; s.y = bananaScales[i * 3 + 1]; s.z = bananaScales[i * 3 + 2];
+      }
+      steadied.length = steadiedShown.length = bananaScales.length = 0;
+      steadiedBananas = null;
+    };
     const parkPart = (gear, node, index, temporary = false) => {
       if (!node) return;
       const saved = { node, index, parent: node.parent, position: { ...node.position }, rotation: { ...node.rotation },
@@ -437,6 +522,7 @@
       node.poseYaw = node.poseLean = 0;
       node.cameraHidden = false;
       node.visible = true;
+      steadyPart(gear, node, index);
       // Roll it about that long axis onto its broad face: the club's and pack's roll is x (after z), the rifle's z
       // (before its turn), so the heading along the bed stays as it was.
       if (measurePart(node) && maxY - minY > maxZ - minZ) {
@@ -447,6 +533,7 @@
       // the vertical) and either face down (half a turn about its long axis), and their outlines.
       const base = outline(node);
       saved.ways = [0, 1, 2, 3].map(way => turned(base, way));
+      unsteady();
       layoutGear(gear);
     };
     const setWay = (saved, way) => {
@@ -574,7 +661,7 @@
     // so its locally animated sway adds no traffic. A late observer can draw any current phase.
     const stateFor = (cave) => {
       const seat = cave?.camp?.seat;
-      if (!seat || !seats.includes(seat)) return 0;
+      if (!seat || !seats.includes(seat) || seat.fall) return 0;
       const transition = seat.exit || seat.entry, out = seat.wire, q = cave.root.quaternion;
       out[0] = seat.index; out[1] = seat.exit ? 3 : seat.entry ? 1 : 2;
       out[2] = transition ? Math.round(Math.min(1, transition.time / ENTRY_SECONDS) * 255) : 255;
@@ -634,7 +721,8 @@
       if (!occupy(seat)) return false;
       seat.entry = entry;
       posed(cave, seat, entry);
-      kick();
+      // Climbing in settles the bed to where an occupied one rests (the bed is theirs now, and can be taken back by pushing).
+      amp = REST_HELD; count = 0; sinceHit = 0; wasHeld = true;
       return true;
     };
     const capturePose = (cave) => {
@@ -649,9 +737,10 @@
       return transition;
     };
     const uprightRotation = quat.create();
+    const fallRoll = quat.create(), fallLying = quat.create();
     for (const seat of seats) seat.leave = (cave, target, finish) => {
       if (seat.sitter !== cave || cave.camp.seat !== seat) return false;
-      if (seat.exit) return true;
+      if (seat.exit || seat.fall) return true;
       seat.exit = { ...capturePose(cave), target, finish };
       seat.entry = null;
       return true;
@@ -670,6 +759,48 @@
       blendPose(cave, exit, uprightRotation);
       updateHead(cave);
       parkEquipment(cave, seat, cave.root.visible);
+    };
+    // Tipped out: from the pose it lay in, roll over the edge toward `fall.side` and down onto the ground at the landing spot, lie there, then
+    // get up on the spot. The gear stays parked under the bed until the stand-up releases it.
+    const poseFall = (cave, seat) => {
+      const fall = seat.fall, target = fall.target, r = cave.root, parts = cave.parts, t = Math.min(1, fall.time / FALL_SECONDS);
+      const k = Math.min(1, t / FALL_ROLL), roll = k * k * (3 - 2 * k), lieY = target.floor + cave.traits.height * FALL_LIE_Y;
+      r.quaternion = cave.sleepRotation || (cave.hammockRotation ||= quat.create());
+      r.rotation.y = target.ry;
+      quat.fromAxisAngle(fallRoll, p.ux, 0, p.uz, fall.side * FALL_TURN * roll);
+      quat.multiply(fallLying, fallRoll, fall.rotation);
+      if (t < FALL_LIE) {
+        quat.copy(r.quaternion, fallLying);
+        r.position.x = fall.position.x + (target.x - fall.position.x) * roll;
+        r.position.z = fall.position.z + (target.z - fall.position.z) * roll;
+        r.position.y = fall.position.y + (lieY - fall.position.y) * k * k + Math.sin(Math.PI * k) * 0.12;
+        const flail = Math.sin(Math.PI * k);
+        parts.armL.rotation.x = parts.armR.rotation.x = -0.2 - 2 * flail;
+        parts.legL.rotation.x = 0.5 * flail; parts.legR.rotation.x = -0.5 * flail;
+      } else {
+        const g = (t - FALL_LIE) / (1 - FALL_LIE), up = g * g * (3 - 2 * g);
+        quat.fromEuler(uprightRotation, 0, target.ry, 0);
+        quat.copy(r.quaternion, fallLying);
+        quat.slerpTo(r.quaternion, uprightRotation, up);
+        r.position.x = target.x; r.position.z = target.z;
+        r.position.y = lieY + (target.y - lieY) * up;
+        parts.armL.rotation.x = parts.armR.rotation.x = -0.2 - 0.9 * Math.sin(Math.PI * up);
+        parts.legL.rotation.x = parts.legR.rotation.x = 0;
+      }
+      parts.legL.rotation.z = parts.legR.rotation.z = 0;
+      parts.head.rotation.x = parts.head.rotation.y = 0;
+      parts.head.quaternion = null;
+      updateHead(cave);
+    };
+    // The occupant `cave` is tipped out: it rolls out to `target` ({ x, z, y its standing root height, floor, ry, side }) over FALL_SECONDS
+    // and `finish` is called there, to stand it up. Other pages see it leave the seat at once (`stateFor`).
+    const tip = (cave, target, finish) => {
+      const seat = cave?.camp?.seat;
+      if (!seat || !seats.includes(seat) || seat.sitter !== cave || seat.fall) return false;
+      seat.fall = capturePose(cave);
+      seat.fall.target = target; seat.fall.side = target.side; seat.fall.finish = finish;
+      seat.entry = seat.exit = null;
+      return true;
     };
     const aimCord = (node, x, y, z) => {
       const dx = x - node.position.x, dy = y - node.position.y, dz = z - node.position.z;
@@ -712,11 +843,19 @@
         if (!cave.root.parent || !cave.hammockRest && cave.camp?.seat !== gear.seat) releaseEquipment(cave);
       }
       for (let i = tipped.length - 1; i >= 0; i--) if (!tipped[i].root.parent) upright(tipped[i]);
-      let held = false;
-      for (const seat of seats) if (seat.sitter || seat.remote) held = true;
-      const rest = held ? REST_HELD : REST;
-      amp += (rest - amp) * Math.min(1, DECAY * dt);
-      if (!still) angle = amp * Math.sin(OMEGA * time);
+      const held = occupied(), rest = held ? REST_HELD : REST;
+      if (!pumping) amp += (rest - amp) * Math.min(1, DECAY * dt);
+      pumping = false;
+      sinceHit += dt; sinceRound += dt;
+      if (wasHeld !== held || sinceHit > RESET_S) count = 0;
+      wasHeld = held;
+      lean = Math.abs(lean) < 1e-5 ? 0 : lean * Math.exp(-dt / LEAN_TAU);
+      // The shove still easing in (`push`): this frame's share of it.
+      if (leanInT < LEAN_RISE) {
+        const from = easeInOut(leanInT / LEAN_RISE); leanInT = Math.min(LEAN_RISE, leanInT + dt);
+        lean = Math.max(-SWAY_MAX, Math.min(SWAY_MAX, lean + leanIn * (easeInOut(leanInT / LEAN_RISE) - from)));
+      }
+      if (!still) { phase = (phase + OMEGA * dt) % TAU; angle = Math.max(-SWAY_MAX, Math.min(SWAY_MAX, amp * Math.sin(phase) + lean)); }
       bedNode.rotation.x = angle * p.side;
       quat.fromEuler(bedRotation, bedNode.rotation.x, p.yaw, 0);
       quat.multiply(bodyRotation, bedRotation, restRotation);
@@ -725,7 +864,12 @@
         place(seat, angle);
         if (seat.entry && (seat.entry.cave !== seat.sitter || seat.entry.cave.camp.seat !== seat)) seat.entry = null;
         if (seat.exit && (seat.exit.cave !== seat.sitter || seat.exit.cave.camp.seat !== seat)) seat.exit = null;
-        if (seat.sitter && seat.sitter.camp.seat === seat && seat.exit) {
+        if (seat.fall && (seat.fall.cave !== seat.sitter || seat.fall.cave.camp.seat !== seat)) seat.fall = null;
+        if (seat.fall) {
+          seat.fall.time += dt;
+          poseFall(seat.sitter, seat);
+          if (seat.fall.time >= FALL_SECONDS) { const finish = seat.fall.finish; seat.fall = null; finish(); }
+        } else if (seat.sitter && seat.sitter.camp.seat === seat && seat.exit) {
           seat.exit.time += dt;
           poseExit(seat.sitter, seat);
           // Keep occupancy and camera ownership until the exact landing is safe.
@@ -737,7 +881,98 @@
         }
       }
     };
-    const kick = () => { amp = Math.min(SWAY_MAX, amp + KICK); };
+    const kick = (strength = KICK) => { amp = Math.min(SWAY_MAX, amp + strength); };
+    // A hit of `weight` steps on the shared count; `dir` (+1 or -1 along the swing's own sign, 0 to carry on as it goes) is where it
+    // sends the bed. The swing is lifted to the count's height (plus the momentum of one timed with the swing away from them) with
+    // the angle left where it is: the phase is set to the one that holds the angle on the way out, so the bed is moving along `dir` in
+    // the very next frame, whatever it was doing.
+    const push = (weight, dir, shove = 0) => {
+      count = Math.min(TIP_COUNT, count + weight); sinceHit = 0;
+      const c = Math.cos(phase), base = occupied() ? REST_HELD : REST;
+      // Momentum is for a body's push (`shove`): rounds of fire climb the count's own steps, so a held trigger rises with every round.
+      const to = Math.min(SWAY_MAX, Math.max(amp, base + count * STEP) + (shove > 0 && dir !== 0 ? MOMENTUM * Math.max(0, dir * c) : 0));
+      let ph = Math.asin(Math.max(-1, Math.min(1, amp * Math.sin(phase) / to)));
+      if (Math.cos(ph) * (dir === 0 ? (c >= 0 ? 1 : -1) : dir) < 0) ph = Math.PI - ph;
+      phase = ph < 0 ? ph + TAU : ph; amp = to;
+      // The side (+1 or -1 along the plan's n) the cloth was last knocked toward: where a tipped occupant rolls out.
+      if (dir !== 0) fallSide = -dir * p.side;
+      // The shove eases in over LEAN_RISE (`update`), with what was left of an earlier one carried into it.
+      if (dir !== 0 && shove > 0) { leanIn = leanIn * (1 - easeInOut(leanInT / LEAN_RISE)) + dir * LEAN * shove; leanInT = 0; }
+    };
+    // One round of the rifle through the bed, fired from (fx, fz) toward (tx, tz): the bed is knocked away from the shooter, along the
+    // shot's direction across the bed (a shot nearly along it, or with no direction, just carries the swing on). The first round of a
+    // burst is a whole hit, each later one a share of what is left to TIP_COUNT.
+    const hit = (fx, fz, tx, tz) => {
+      const dx = tx - fx, dz = tz - fz, along = dx * p.nx + dz * p.nz, first = sinceRound > BURST_GAP;
+      sinceRound = 0;
+      push(first ? 1 : (TIP_COUNT - 1) / (BURST_N - 1), Math.abs(along) > 0.15 * Math.hypot(dx, dz) ? (along > 0 ? -p.side : p.side) : 0);
+    };
+    // A body at (x, feet, z) moving (vx, vz) walked into the bed: the weight of the hit it counted (1 for a full step), or 0.
+    // `slot` names the body (`bumpSlots`); each body has one contact at a time, and is ready again once it is clear of the bed. Only a
+    // body coming at the bed pushes: one that meets it standing, going along or away from it (an Ooga rolling out of it) has used up
+    // that contact without a push.
+    const bumpIn = new Uint8Array(bumpSlots), bumpAt = new Float64Array(2);
+    const bump = (slot, x, feet, z, vx, vz) => {
+      if (slot < 0 || slot >= bumpSlots) return 0;
+      const dx = x - p.x, dz = z - p.z, along = dx * p.ux + dz * p.uz, across = dx * p.nx + dz * p.nz, e = p.swing;
+      if (Math.abs(along) > e.half + BUMP_REARM || Math.abs(across) > e.across + BUMP_REARM
+        || feet < p.ground - 0.15 || feet > p.y + p.shell.high + BUMP_RISE) { bumpIn[slot] = 0; return 0; }
+      e.nearest(along, across, bumpAt);
+      const gap = Math.hypot(along - bumpAt[0], across - bumpAt[1]);
+      if (gap > BUMP_REARM) { bumpIn[slot] = 0; return 0; }
+      if (bumpIn[slot] || gap > BUMP_RADIUS) return 0;
+      bumpIn[slot] = 1;
+      const speed = (vx * p.nx + vz * p.nz) * (across < 0 ? 1 : -1);
+      if (speed < BUMP_MIN || Math.hypot(vx, vz) > BUMP_TELEPORT) return 0;
+      const strength = Math.min(STEP, speed * BUMP_GAIN);
+      if (strength < STEP / 2) { amp = Math.min(SWAY_MAX, amp + strength); return 0; }
+      push(strength / STEP, across < 0 ? -p.side : p.side, Math.min(SHOVE_RUN, speed / 7));
+      return strength / STEP;
+    };
+    // The occupant rocks the bed: `axis` is A (-1) to D (+1), held for `dt` seconds. D pushes toward the lying body's right (its own +x,
+    // through `bodyRotation`, across the bed), A toward its left; pressed while the bed swings that way the swing grows, pressed against
+    // it the swing is damped. The count is untouched; `fallSide` follows the push, as a hit's would.
+    const pump = (axis, dt) => {
+      if (!(axis > 0.05 || axis < -0.05) || !(dt > 0)) { pumpHeld = 0; return; }
+      quat.rotateVec(bodyRight, bodyRotation, 1, 0, 0);
+      const across = bodyRight[0] * p.nx + bodyRight[2] * p.nz;
+      if (Math.abs(across) < 1e-3) return;
+      // The bed's motion across, in the plan's n: angle grows toward the seats' side (`place`: across = -sin(angle) drop side).
+      const motion = -Math.cos(phase) * p.side, want = (axis > 0 ? 1 : -1) * (across > 0 ? 1 : -1), swing = motion > 0 ? 1 : -1;
+      if (motion * want > 0) {
+        pumping = true; pumpHeld += dt;
+        // One step a half-swing (`pumpStepped` is the swing it was earned on), however the key is worked.
+        if (pumpStepped !== swing && pumpHeld >= PUMP_HOLD) { amp = Math.min(SWAY_MAX, amp + PUMP_STEP); pumpStepped = swing; fallSide = want; }
+      } else { amp = Math.max(occupied() ? REST_HELD : REST, amp - PUMP_DAMP * dt); pumpHeld = 0; }
+    };
+    // Whether a walker of radius `r` with its feet at `feet` is within the occupied bed's footprint, which it cannot walk into: the
+    // cloth is stepped onto when empty, never through the Ooga lying on it. Above the shell (a jump) is clear.
+    const blocks = (x, feet, z, r) => {
+      if (!occupied()) return false;
+      const dx = x - p.x, dz = z - p.z;
+      return Math.abs(dx * p.ux + dz * p.uz) <= p.swing.body.half + r && Math.abs(dx * p.nx + dz * p.nz) <= BED_W / 2 + 0.1 + r
+        && feet < p.y + p.shell.high + 0.1;
+    };
+    // Whether the segment from (fx, fy, fz) to (tx, ty, tz), a banana's flight, passes through the bed's swing: the
+    // `swing` outline as a box in the pivot's frame, which reaches the spreaders' height, not the cloth alone.
+    // False for a zero-length or non-finite segment.
+    const crosses = (fx, fy, fz, tx, ty, tz) => {
+      if (!Number.isFinite(fx + fy + fz + tx + ty + tz)) return false;
+      const e = p.swing, ax = fx - p.x, az = fz - p.z, bx = tx - p.x, bz = tz - p.z;
+      const a0 = ax * p.ux + az * p.uz, a1 = fy - p.y, a2 = ax * p.nx + az * p.nz;
+      const d0 = bx * p.ux + bz * p.uz - a0, d1 = ty - fy, d2 = bx * p.nx + bz * p.nz - a2;
+      if (d0 === 0 && d1 === 0 && d2 === 0) return false;
+      let enter = 0, leave = 1;
+      for (let axis = 0; axis < 3; axis++) {
+        const o = axis === 0 ? a0 : axis === 1 ? a1 : a2, d = axis === 0 ? d0 : axis === 1 ? d1 : d2;
+        const lo = axis === 0 ? -e.body.half : axis === 1 ? e.lo : -e.across, hi = axis === 0 ? e.body.half : axis === 1 ? e.top : e.across;
+        if (d === 0) { if (o < lo || o > hi) return false; continue; }
+        const t0 = (lo - o) / d, t1 = (hi - o) / d;
+        enter = Math.max(enter, Math.min(t0, t1)); leave = Math.min(leave, Math.max(t0, t1));
+        if (enter > leave) return false;
+      }
+      return true;
+    };
     // The seat a body with its feet at (x, feet, z) rests on, judged against the still bed; -1 for none.
     const restingAt = (x, feet, z) => {
       if (feet - p.ground < REST_LOW || feet - p.ground > REST_HIGH) return -1;
@@ -832,7 +1067,7 @@
       return true;
     };
     const dispose = () => {
-      for (const seat of seats) { seat.sitter = null; seat.entry = seat.exit = null; }
+      for (const seat of seats) { seat.sitter = null; seat.entry = seat.exit = seat.fall = null; }
       while (tipped.length) upright(tipped[0]);
       while (parked.length) releaseEquipment(parked[0].cave);
       solids.remove(ridgeNode);
@@ -840,7 +1075,18 @@
       for (const rope of ropes) { removeChild(root, rope.node); removeChild(rope.wrap.parent, rope.wrap); }
     };
     update(0, 0, false);
-    return { plan: p, seats, ridgeNode, bedNode, ropes, update, syncRopes, kick, enter, restingAt, settle, free, near, reachable, poseRemote, stateFor, releaseEquipment, dispose, get angle() { return angle; }, get amp() { return amp; } };
+    // Whether the bed has taken enough hits to tip out whoever lies in it. Only the occupant's own page acts on it (a bed held
+    // only by another page's remote pose never reports it to anyone who could stand them up).
+    // ... or, for the visitor's own Ooga lying in it, the swing itself past FALL (rocked there by them, or by others' hits with their
+    // pumping on top); a bed another page's Ooga lies in is never judged by this page's swing.
+    const spilling = () => {
+      for (const seat of seats) if (seat.fall) return false;
+      if (count >= TIP_COUNT - 1e-9) return occupied();
+      if (amp < FALL) return false;
+      for (const seat of seats) if (seat.sitter) return true;
+      return false;
+    };
+    return { plan: p, seats, ridgeNode, bedNode, ropes, update, syncRopes, kick, bump, hit, pump, blocks, crosses, tip, enter, restingAt, settle, free, near, reachable, poseRemote, stateFor, releaseEquipment, dispose, get angle() { return angle; }, get amp() { return amp; }, get spilling() { return spilling(); }, get fallSide() { return fallSide; } };
   };
 
   BL.hubHammock = { SLOTS, TIE, SPAN_MIN, SPAN_MAX, SWAY_MAX, STAND, plan, create, ridgeY };

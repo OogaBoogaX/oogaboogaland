@@ -991,9 +991,10 @@ body[data-active-scene="hub"] .home-link {
 
 /* Bananas: the all-time total on top, its count and sats beneath, then the donors and the latest tips in the same
    slab. Like every panel's slab it scrolls above the panel's action, so Feed the Oogas stays at the foot as
-   Contributor sign-in does; its sections never shrink, and each list scrolls inside a window five donor rows tall
-   (`--banana-five`), both lists the same height. The slab may shrink to nothing, so even a phone's short drawer
-   keeps the action whole; only a drawer shorter than the title and the action scrolls the panel. */
+   Contributor sign-in does; its sections never shrink, and each list scrolls inside its own window: the donors' five
+   donor rows tall (`--banana-five`), the latest tips' at least as tall and taking whatever room the slab has left. The
+   slab may shrink to nothing, so even a phone's short drawer keeps the action whole; only a drawer shorter than the
+   title and the action scrolls the panel. */
 .panel > .banana-slab {
   --banana-five: calc(5 * (17px + 12px + 1px));
   display: flex;
@@ -1002,6 +1003,7 @@ body[data-active-scene="hub"] .home-link {
   padding: 12px 12px 10px;
 }
 .banana-slab > section { flex: none; }
+.banana-slab > .banana-recent { flex: 1 0 auto; display: flex; flex-direction: column; }
 /* A phone on its side leaves the default drawer under 100px: too short to stack the title, a row of the slab and a
    44px Feed the Oogas. While the Bananas panel shows there, its untouched drawer stands at least 200px tall
    (sheet.js's BANANA_DRAWER, which also holds a resized or saved drawer to it and, that drawer too tall to leave the
@@ -1013,28 +1015,25 @@ body[data-active-scene="hub"] .home-link {
 }
 .banana-leaders,
 .banana-recent-list {
-  /* One height for both, however few entries either holds. */
-  height: var(--banana-five);
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.45) transparent;
 }
+/* The donors' window holds five rows however few entries it has. The latest tips' is never shorter and grows into the
+   slab's spare room, unless it holds nothing: then it keeps the donors' height with its note under it. */
+.banana-leaders { height: var(--banana-five); }
+.banana-recent-list { flex: 1 0 var(--banana-five); min-height: var(--banana-five); }
+.banana-recent:has(> .banana-empty:not([hidden])) > .banana-recent-list { flex-grow: 0; }
 
+/* The total's title over it, and the total with the banana beside it as tall as its figures, both flush left. */
 .banana-hero {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  column-gap: 10px;
-  align-items: center;
+  row-gap: 4px;
+  text-align: left;
 }
 
-.banana-hero-icon {
-  grid-row: span 2;
-  width: 34px;
-  height: 34px;
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
-}
-
-.banana-hero > strong {
+.banana-hero-value {
+  margin: 0;
   color: var(--accent-text);
   font-size: clamp(26px, 7vw, 34px);
   font-weight: 700;
@@ -1042,6 +1041,17 @@ body[data-active-scene="hub"] .home-link {
   font-variant-numeric: tabular-nums;
   text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
   overflow-wrap: anywhere;
+}
+
+/* On the figures' baseline and a cap height tall (the em fallback is about a cap). */
+.banana-hero-icon {
+  width: 0.72em;
+  height: 0.72em;
+  width: 1cap;
+  height: 1cap;
+  margin-right: 0.2em;
+  vertical-align: baseline;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
 }
 
 .banana-hero-label,
@@ -1059,6 +1069,7 @@ body[data-active-scene="hub"] .home-link {
   gap: 10px;
   margin: 12px 0 0;
   padding-top: 10px;
+  text-align: left;
 }
 
 .banana-totals,
@@ -1079,51 +1090,41 @@ body[data-active-scene="hub"] .home-link {
   overflow-wrap: anywhere;
 }
 
+/* A bitcoin's price in bananas and a banana's in sats, a line each, flush left. A stale price dims; the line says so
+   on hover. */
 .banana-rates {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
-  align-items: baseline;
-  gap: 6px 12px;
+  gap: 6px;
   margin: 12px 0 0;
   padding-top: 10px;
+  text-align: left;
 }
 
-.banana-rate-label {
-  position: relative;
-  padding-left: 11px;
-  color: rgba(243, 239, 228, 0.58);
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.banana-rates > dt:nth-of-type(2) { align-self: center; }
-
-.banana-rate-label[data-tone="live"]::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #22c55e;
-}
-
-.banana-rates dd {
+.banana-rate {
+  min-width: 0;
   margin: 0;
   color: var(--paper);
   font-size: 14px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  text-align: right;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
-.banana-exchange { position: relative; padding-left: 19px; }
-.banana-exchange-icon { position: absolute; left: 0; top: 50%; width: 14px; height: 14px; transform: translateY(-50%); }
-.banana-exchange > span + span { margin-left: 5px; }
+.banana-rate[data-tone="stale"] { color: rgba(243, 239, 228, 0.6); }
+/* The bitcoin line is measured on one line (hud.js `fitBtcRate`) and wraps only when even "100M sats" will not fit. */
+.banana-rate[data-fit="line"] { white-space: nowrap; }
+
+/* The banana before an amount, as a currency's sign: an em square centred on the figures after it. */
+.banana-rate-icon,
+.banana-amount-icon {
+  width: 1em;
+  height: 1em;
+  margin-right: 0.15em;
+  vertical-align: -0.15em;
+  vertical-align: calc((1cap - 1em) / 2);
+}
+
+#bananas-panel[data-unit="sats"] .banana-amount-icon { display: none; }
 
 .banana-board { margin-top: 12px; padding-top: 12px; }
 
@@ -1196,7 +1197,8 @@ body[data-active-scene="hub"] .home-link {
 
 .banana-rank { color: rgba(243, 239, 228, 0.5); font-size: 10px; font-variant-numeric: tabular-nums; }
 .banana-leaders li:nth-child(-n + 3) .banana-rank { color: var(--accent-text); }
-.banana-donor { min-width: 0; color: var(--paper); overflow-wrap: anywhere; }
+/* A donor's name keeps to one line and ends in an ellipsis where it would not fit; hovering shows it whole. */
+.banana-donor { min-width: 0; overflow: hidden; color: var(--paper); text-overflow: ellipsis; white-space: nowrap; }
 .banana-donor[data-anon="true"] { color: rgba(243, 239, 228, 0.55); font-style: italic; }
 .banana-amount { color: var(--paper); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 .banana-leaders li:first-child .banana-amount { color: var(--accent-text); }
@@ -1214,23 +1216,22 @@ body[data-active-scene="hub"] .home-link {
   border-top: 1px solid rgba(0, 0, 0, 0.35);
   font-size: 12px;
 }
-.banana-recent-name { min-width: 0; color: var(--paper); overflow-wrap: anywhere; }
+/* The name and its check share one line, the check centred on the name's line rather than on its x-height; a name too
+   long for it ends in an ellipsis before the check, and hovering shows it whole. */
+.banana-recent-name { display: flex; align-items: center; min-width: 0; color: var(--paper); }
 .banana-recent-name[data-anon="true"] { color: rgba(243, 239, 228, 0.55); font-style: italic; }
+.banana-recent-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The orange check is a seal with a ridged rim (hud.js `verifiedSeal`). */
 .banana-verified {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
+  flex: none;
+  width: 16px;
+  height: 16px;
   margin-left: 5px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: #211b14;
-  font-size: 11px;
-  font-style: normal;
-  font-weight: 900;
-  vertical-align: middle;
 }
+.banana-verified svg { width: 100%; height: 100%; }
+.banana-verified-seal { fill: var(--accent); }
+.banana-verified-tick { fill: none; stroke: #211b14; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .banana-recent-message { grid-column: 1 / -1; margin: 0; color: rgba(243, 239, 228, 0.7); overflow-wrap: anywhere; line-height: 1.4; }
 .banana-recent-list li[hidden], .banana-verified[hidden], .banana-recent-message[hidden] { display: none; }
 
@@ -1766,7 +1767,7 @@ body[data-active-scene="hub"] .home-link {
 }
 
 /* One row an Ooga: presence, name, the player's marks, activity age and state, each in a column of its own
-   so a long name wraps inside its cell and a mark or state coming and going never moves the others. */
+   so a long name ends in an ellipsis inside its cell and a mark or state coming and going never moves the others. */
 .roster {
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr) 26px max-content 6.5ch;
@@ -1822,6 +1823,21 @@ body[data-active-scene="hub"] .home-link {
   .roster-away button { min-height: 44px; }
 }
 
+/* The online dot, and centred under it the host's black dot, which hangs below the row's line so every row's online
+   dot stays level with its name, hosting or not. */
+.roster-dots {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.roster-dots .roster-host {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 50%;
+  margin-left: -3.5px;
+}
+
 .roster-presence {
   width: 8px;
   height: 8px;
@@ -1835,15 +1851,15 @@ body[data-active-scene="hub"] .home-link {
   box-shadow: 0 0 5px rgba(34, 197, 94, 0.55);
 }
 
-/* The name, with the host's black dot right after it. A signed-in player's name is a button with a caret that
-   opens their row onto the land they are in, a darker strip under the row. */
+/* The name, on one line and cut short with an ellipsis where it would not fit, filling its cell. A signed-in player's
+   name is a button with a caret at the cell's right end, by the time, that opens their row onto the land they are in,
+   a darker strip under the row. */
 .roster-name {
   display: inline-flex;
   align-items: center;
-  justify-self: start;
   gap: 6px;
+  width: 100%;
   min-width: 0;
-  max-width: 100%;
   padding: 0;
   border: 0;
   background: none;
@@ -1858,7 +1874,9 @@ body[data-active-scene="hub"] .home-link {
 
 .roster-label {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .roster-name:not(:disabled) {
@@ -1868,6 +1886,7 @@ body[data-active-scene="hub"] .home-link {
 .roster-name:not(:disabled)::after {
   content: "";
   flex: none;
+  margin-left: auto;
   border-top: 4px solid currentColor;
   border-right: 3.5px solid transparent;
   border-left: 3.5px solid transparent;
@@ -2068,7 +2087,7 @@ body[data-active-scene="hub"] .home-link {
   box-shadow: none;
 }
 
-.players-rows .roster-presence { grid-column: 1; }
+.players-rows .roster-dots { grid-column: 1; }
 .players-rows .roster-marks { grid-column: 3; }
 
 .players-thump {
@@ -2769,6 +2788,47 @@ body[data-active-scene="hub"] .home-link {
 .hint.show {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+
+/* Lying in the hub hammock: the brief arrow for a rock to the left or right (hud.js `rockCue`): low on the screen, clear above the
+   bottom bar, or on a touch screen a third of the way down, between the top bars and the sticks. */
+.rock-cue {
+  position: fixed;
+  top: min(85%, calc(100% - 116px));
+  left: 50%;
+  margin-left: -26px;
+  width: 52px;
+  text-align: center;
+  font-size: 46px;
+  line-height: 1;
+  color: var(--paper);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (pointer: coarse) {
+  .rock-cue { top: 32%; }
+}
+
+.rock-cue[data-side="left"] { transform: translateX(-90px); }
+.rock-cue[data-side="right"] { transform: translateX(90px); }
+.rock-cue.show[data-side="left"] { animation: rock-cue-left 0.4s ease-out both; }
+.rock-cue.show[data-side="right"] { animation: rock-cue-right 0.4s ease-out both; }
+
+@keyframes rock-cue-left {
+  from { opacity: 1; transform: translateX(-70px); }
+  to { opacity: 0; transform: translateX(-110px); }
+}
+
+@keyframes rock-cue-right {
+  from { opacity: 1; transform: translateX(70px); }
+  to { opacity: 0; transform: translateX(110px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rock-cue.show[data-side] { animation: rock-cue-fade 0.4s ease-out both; }
+  @keyframes rock-cue-fade { from { opacity: 1; } to { opacity: 0; } }
 }
 
 /* Reading the whitepaper's poster: the help line at the foot of the screen, and, on a touch screen, the one button

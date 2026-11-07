@@ -31,7 +31,16 @@
   const INSTANCE_FLOATS = 20;
   const NO_OBJECT_CLIP = new Float32Array([0, 0, 0, -1]);
   const NO_OBJECT_SLAB = new Float32Array(4);
-  const NO_SPOT_LIGHT = new Float32Array(12);
+  // A glossy reflector's capture: its size against the tier's mirror size, and how many frames apart it refreshes.
+  const GLOSS_CAPTURE = { size: 0.5, every: 2 };
+  // Up to two cone lights (`renderOpts.spotLight`, 12 floats each); a scene that passes one has the second zeroed.
+  const NO_SPOT_LIGHT = new Float32Array(24), SPOT_SCRATCH = new Float32Array(24);
+  const spotUniform = (spot) => {
+    if (spot.length >= 24) return spot;
+    SPOT_SCRATCH.fill(0);
+    SPOT_SCRATCH.set(spot);
+    return SPOT_SCRATCH;
+  };
   // MAX_PIXELS caps the pixel ratio to bound buffer memory.
   const MAX_PIXELS = 2.6e6;
   const DEFAULT_LIGHT = { x: 0.45, y: 0.85, z: 0.3 };
@@ -430,7 +439,7 @@ uniform sampler2DShadow uShadow;
 uniform float uShadowTexel;
 uniform vec4 uLights[64];
 uniform int uLightCount;
-uniform vec4 uSpotLight[3];
+uniform vec4 uSpotLight[6];
 ${VIEW_DIRECTION_GLSL}
 uniform vec3 uFog;
 uniform vec2 uFogRange;
@@ -641,15 +650,16 @@ vec3 lightFactorAt(vec3 n) {
     else a *= a;
     factor += uLights[i * 2 + 1].rgb * a * max(dot(n, ld), 0.0) / max(dist, 0.0001);
   }
-  if (uSpotLight[0].w > 0.0) {
-    vec3 toSurface = vWorld - uSpotLight[0].xyz;
+  for (int s = 0; s < 6; s += 3) {
+    if (uSpotLight[s].w <= 0.0) continue;
+    vec3 toSurface = vWorld - uSpotLight[s].xyz;
     float dist = length(toSurface);
-    if (dist > 0.0001 && dist < uSpotLight[0].w) {
+    if (dist > 0.0001 && dist < uSpotLight[s].w) {
       vec3 direction = toSurface / dist;
-      float cone = smoothstep(uSpotLight[1].w, uSpotLight[2].w, dot(direction, uSpotLight[1].xyz));
-      float fade = 1.0 - dist / uSpotLight[0].w;
+      float cone = smoothstep(uSpotLight[s + 1].w, uSpotLight[s + 2].w, dot(direction, uSpotLight[s + 1].xyz));
+      float fade = 1.0 - dist / uSpotLight[s].w;
       float energy = cone * fade * fade / (1.0 + 0.005 * dist * dist);
-      factor += uSpotLight[2].rgb * energy * max(dot(n, -direction), 0.0);
+      factor += uSpotLight[s + 2].rgb * energy * max(dot(n, -direction), 0.0);
     }
   }
   return factor;
@@ -1306,6 +1316,8 @@ uniform sampler2D uReflection;
 uniform vec2 uReflectionScale;
 uniform sampler2D uMatrixGlyphTex;
 uniform vec3 uTint;
+// A glossy reflector (a polished floor): the eye's position and how strong its reflection is; w 0 for a mirror.
+uniform vec4 uGloss;
 uniform float uPortal;
 uniform float uReveal;
 uniform float uRippleOnly;
@@ -1342,7 +1354,9 @@ void main() {
   // The ratio cancels perspective interpolation, recovering the original
   // planar depth. Glass inside the near plane still closes the cave entrance.
   gl_FragDepth = clamp(0.5 * vClipDepth.x / vClipDepth.y + 0.5, 0.0, 1.0);
-  if (uRippleOnly < 0.5 && vPortalUv.y > 1.0 - uReveal) discard;
+  // The mirror's reveal drains its pane from the top; a glossy floor has no pane to drain, and its own axis runs far
+  // past the pane's height.
+  if (uGloss.w <= 0.0 && uRippleOnly < 0.5 && vPortalUv.y > 1.0 - uReveal) discard;
   if (vOpacity < 1.0) {
     ivec2 pixel = ivec2(gl_FragCoord.xy) & 3;
     int rank = ((pixel.x & 1) ^ (pixel.y & 1)) * 8 + (pixel.y & 1) * 4
@@ -1407,6 +1421,17 @@ void main() {
     vec2 projectedUv = (rippled.xy / rippled.w * 0.5 + 0.5) * uReflectionScale;
     vec2 uv = mix(projectedUv, vPortalUv, uPortal);
     vec3 reflected = texture(uReflection, uv).rgb;
+    if (uGloss.w > 0.0) {
+      // A polished surface: its own shading stays (this pass adds), with the reflection softened over a few texels
+      // and stronger the more grazing the view (Schlick's falloff from the floor's own share, uGloss.w).
+      vec2 texel = 1.5 / vec2(textureSize(uReflection, 0));
+      vec3 soft = (reflected * 2.0 + texture(uReflection, uv + vec2(texel.x, 0.0)).rgb + texture(uReflection, uv - vec2(texel.x, 0.0)).rgb
+        + texture(uReflection, uv + vec2(0.0, texel.y)).rgb + texture(uReflection, uv - vec2(0.0, texel.y)).rgb) / 6.0;
+      float facing = clamp(dot(normalize(uGloss.xyz - vWorld), vMirrorNormal), 0.0, 1.0);
+      oColor = vec4(soft * uGloss.w * (0.45 + 0.55 * pow(1.0 - facing, 4.0)), 1.0);
+      oBright = vec4(0.0);
+      return;
+    }
     float sheen = pow(max(0.0, 1.0 - abs(fract((vWorld.x + vWorld.y) * 0.22) - 0.5) * 7.0), 5.0) * 0.08;
     color = mix(reflected, uTint, 0.1) + sheen + ringLight;
   }
@@ -1862,7 +1887,7 @@ void main() {
     // Stable records keep their own buffer, so a stationary prop never joins the per-frame copy.
     const instanceStream = { buffer: null, data: null, capacity: 0, slot: 0, trimFrame: -1, trimSince: -1 };
     const reflectorNodes = [], reflectorTargets = new Map();
-    let reflectorTurn = 0, reflectorPass = null, reflectorFrame = 0;
+    let reflectorTurn = 0, reflectorPass = null, reflectorFrame = 0, glossFrame = 0;
     let reducedCapture = false;
     // Glass (`geometry.glass`, its see-through alpha) draws after everything opaque and the sky, blended and leaving
     // the depth alone, back faces first so a tube shows its far wall through its near one. `glassPass` is set while it
@@ -1933,7 +1958,7 @@ void main() {
     };
     const ensureMirrorProgram = () => {
       if (!mirror.program) {
-        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uMirrorWorld", "uShard", "uReflection", "uReflectionScale", "uTint", "uPortal", "uReveal", "uRippleOnly", "uCrestTint", "uMatrixGlyphTex", "uRippleActive", "uRippleTime", "uRipples", "uBodyField", "uBodyBounds", "uBodyTexel", "uBodyContacts", "uBodyActive", "uBodyWaves", "uClipMaxY"]);
+        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uMirrorWorld", "uShard", "uReflection", "uReflectionScale", "uTint", "uPortal", "uReveal", "uRippleOnly", "uCrestTint", "uMatrixGlyphTex", "uRippleActive", "uRippleTime", "uRipples", "uBodyField", "uBodyBounds", "uBodyTexel", "uBodyContacts", "uBodyActive", "uBodyWaves", "uClipMaxY", "uGloss"]);
         mirrorDebug.resources++;
       }
       if (mirror.programReady) return true;
@@ -3164,8 +3189,10 @@ void main() {
       const cropX = (left + right) * 0.5, cropY = (bottom + top) * 0.5;
       const halfX = (right - left) * 0.5, halfY = (top - bottom) * 0.5;
       const screenWidth = Math.max(1, halfX * width), screenHeight = Math.max(1, halfY * height);
-      const targetWidth = target.renderWidth = Math.max(1, Math.min(settings.mirror, Math.ceil(screenWidth * dpr)));
-      const targetHeight = target.renderHeight = Math.max(1, Math.min(settings.mirror, Math.ceil(screenHeight * dpr)));
+      // A glossy reflector's capture is softened anyway, so it takes half the tier's size.
+      const cap = node.geometry.gloss ? Math.ceil(settings.mirror * GLOSS_CAPTURE.size) : settings.mirror;
+      const targetWidth = target.renderWidth = Math.max(1, Math.min(cap, Math.ceil(screenWidth * dpr)));
+      const targetHeight = target.renderHeight = Math.max(1, Math.min(cap, Math.ceil(screenHeight * dpr)));
       if (own) {
         mirrorDebug.width = targetWidth;
         mirrorDebug.height = targetHeight;
@@ -3591,6 +3618,8 @@ void main() {
         // Only the camera pass (the culled one) shows the authored face; a capture never sees the mirror itself.
         if (excludeMirror && (rec === mirror.record && (!cull || mirror.portal || mirrorPaneReady()) || g.mirrorSource && (!cull || environment.ready && environment.tex))) continue;
         // Tiny first-use shards keep their authored material until a readable shard initializes the shared cube.
+        // A glossy reflector has no face of its own: it only adds its reflection (`drawReflectors`).
+        if (g.reflector && g.gloss) continue;
         if (g.reflector && (reflectorPass === null || rec === reflectorPass)) {
           // An uncaptured pane keeps its authored face until its first reflection arrives.
           const fallback = reflectorPass === null && qualityName !== "high" && !reflectorTargets.get(g)?.valid;
@@ -3858,7 +3887,7 @@ void main() {
       // The shader breaks on uLightCount, so lights past it are dead traffic.
       if (lightCount) gl.uniform4fv(pg.mesh.u.uLights, lights, 0, lightCount * 8);
       gl.uniform1i(pg.mesh.u.uLightCount, lightCount);
-      gl.uniform4fv(pg.mesh.u.uSpotLight, spotLight);
+      gl.uniform4fv(pg.mesh.u.uSpotLight, spotUniform(spotLight));
       gl.uniform3fv(pg.mesh.u.uFog, fog);
       gl.uniform2f(pg.mesh.u.uFogRange, fogNear, fogFar);
       gl.uniform4f(pg.mesh.u.uBlacklight, blacklight ? blacklight[0] : 0, blacklight ? blacklight[1] : 0, blacklight ? blacklight[2] : 0, blacklight ? blacklight[3] : 0);
@@ -3953,6 +3982,7 @@ void main() {
         gl.uniform1f(pg.u.uPortal, mirror.portal ? 1 : 0);
         gl.uniform1f(pg.u.uReveal, mirror.reveal);
         gl.uniform1f(pg.u.uRippleOnly, 0);
+        gl.uniform4f(pg.u.uGloss, 0, 0, 0, 0);
         const tint = mirror.node.rippleTint;
         gl.uniform3f(pg.u.uCrestTint, tint ? tint[0] : -1, tint ? tint[1] : 0, tint ? tint[2] : 0);
         const ripples = mirror.node.mirrorRipples, body = mirror.node.mirrorBody;
@@ -4056,6 +4086,10 @@ void main() {
         applyCutaway(pg, rec.geometry);
         gl.uniformMatrix4fv(pg.u.uReflectionViewProj, false, t.viewProj);
         gl.uniformMatrix4fv(pg.u.uMirrorWorld, false, w);
+        // A glossy one adds its reflection over what is already drawn there, writing no depth.
+        const gloss = rec.geometry.gloss || 0;
+        gl.uniform4f(pg.u.uGloss, camera.position.x, camera.position.y, camera.position.z, gloss);
+        if (gloss) { gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE); gl.depthMask(false); }
         gl.uniform2f(pg.u.uReflectionScale, t.renderWidth / t.size, t.renderHeight / t.size);
         const tint = node.rippleTint, ripples = node.mirrorRipples, body = node.mirrorBody;
         const bodyActive = body && (body.contacts || body.active);
@@ -4085,6 +4119,7 @@ void main() {
         gl.bindTexture(gl.TEXTURE_2D, t.tex);
         gl.bindVertexArray(rec.mesh.vao);
         drawPart(rec.mesh, 0, rec.mesh.count, rec.count);
+        if (gloss) { gl.disable(gl.BLEND); gl.depthMask(true); }
       }
       // The passes after this one bind their inputs to unit 0.
       gl.activeTexture(gl.TEXTURE0);
@@ -4109,6 +4144,7 @@ void main() {
           gl.uniform1f(pg.u.uPortal, 0);
           gl.uniform1f(pg.u.uReveal, 0);
           gl.uniform1f(pg.u.uRippleOnly, 1);
+          gl.uniform4f(pg.u.uGloss, 0, 0, 0, 0);
           bindMatrixTexture(pg);
           // The shared program's inactive samplers still need complete
           // bindings; this does not allocate or capture any reflection.
@@ -4427,15 +4463,20 @@ void main() {
         const due = qualityName === "high" || reflectorFrame++ % settings.mirrorCadence === 0;
         if (!due && best >= 0 && reflectorTargets.get(reflectorNodes[best].geometry).valid
           && (qualityName === "low" || bestArea * 25 < width * height)) best = -1;
+        // A glossy one, once it has a reflection, refreshes no more often than every `GLOSS_CAPTURE.every` frames on any
+        // tier, nor takes the other pass's turn meanwhile (`resting`).
+        let resting = -1;
+        if (best >= 0 && reflectorNodes[best].geometry.gloss && reflectorTargets.get(reflectorNodes[best].geometry).valid
+          && glossFrame++ % GLOSS_CAPTURE.every) { resting = best; best = -1; }
         // One just come into view with nothing captured yet goes first.
         let turn = -1;
         for (let i = 0; due && i < n && turn < 0; i++) {
           const t = reflectorTargets.get(reflectorNodes[i].geometry);
-          if (i !== best && t.area > 0 && !t.valid) turn = i;
+          if (i !== best && i !== resting && t.area > 0 && !t.valid) turn = i;
         }
         for (let k = 0; due && k < n && turn < 0; k++) {
           const i = (reflectorTurn + k) % n;
-          if (i !== best && reflectorTargets.get(reflectorNodes[i].geometry).area > 0) turn = i;
+          if (i !== best && i !== resting && reflectorTargets.get(reflectorNodes[i].geometry).area > 0) turn = i;
         }
         if (turn >= 0) reflectorTurn = turn + 1;
         for (let pass = 0; pass < 2; pass++) {
@@ -4504,7 +4545,7 @@ void main() {
         bindMatrixTexture(mp);
         if (nLights) gl.uniform4fv(mp.u.uLights, lights, 0, nLights * 8);
         gl.uniform1i(mp.u.uLightCount, nLights);
-        gl.uniform4fv(mp.u.uSpotLight, spotLight);
+        gl.uniform4fv(mp.u.uSpotLight, spotUniform(spotLight));
         gl.uniform3fv(mp.u.uFog, fogColor);
         gl.uniform2f(mp.u.uFogRange, fogA, fogB);
         gl.uniform4f(mp.u.uBlacklight, blacklight ? blacklight[0] : 0, blacklight ? blacklight[1] : 0, blacklight ? blacklight[2] : 0, blacklight ? blacklight[3] : 0);
