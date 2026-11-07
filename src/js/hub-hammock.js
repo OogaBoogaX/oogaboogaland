@@ -72,8 +72,10 @@
   // travel of the occupied swing (REST_HELD), so a visitor standing beside it is not swept through; a kick's brief
   // larger swing is visual only.
   const SHELL_TOP = 0.028, SHELL_UNDER = 0.03;
-  // Stowed gear lies flat under the cloth, its outline packed on a grid of GEAR_CELL cells, GEAR_LIFT over the ground.
-  const GEAR_CELL = 0.025, GEAR_LIFT = 0.01;
+  // Stowed gear lies flat under the cloth, its outline packed on a grid of GEAR_CELL cells, GEAR_LIFT over the ground,
+  // at most GEAR_TOP high, and GEAR_CLEAR under the cloth over each of its cells through the occupied bed's resting sway
+  // (REST_HELD; a pushed or pumped swing past it is not part of that bound).
+  const GEAR_CELL = 0.025, GEAR_LIFT = 0.01, GEAR_TOP = 0.5, GEAR_CLEAR = 0.01;
   // A resting Ooga as another page sends it: within REST_NEAR of a seat across, its feet REST_LOW to REST_HIGH over
   // the ground. Current pages send their rest state explicitly; this inference is only for pages that omit it.
   const REST_NEAR = 0.4, REST_LOW = 0.05, REST_HIGH = 0.9;
@@ -418,10 +420,13 @@
       }
       return true;
     };
+    // Each marked cell also keeps how low and high the triangles meeting it reach (`lo`, `hi`, in the cells' order), so a
+    // part can be laid where the cloth above each of its cells clears it.
     const outline = (node) => {
-      if (!measurePart(node)) return { i0: 0, j0: 0, w: 0, h: 0, bottom: 0, top: 0, cells: new Int32Array(0) };
+      if (!measurePart(node)) return { i0: 0, j0: 0, w: 0, h: 0, bottom: 0, top: 0, cells: new Int32Array(0), lo: new Float64Array(0), hi: new Float64Array(0) };
       const i0 = Math.floor(minX / GEAR_CELL), j0 = Math.floor(minZ / GEAR_CELL), w = Math.floor(maxX / GEAR_CELL) - i0 + 1, h = Math.floor(maxZ / GEAR_CELL) - j0 + 1;
-      const grid = new Uint8Array(w * h), o = { i0, j0, w, h, bottom: minY, top: maxY, cells: null };
+      const grid = new Uint8Array(w * h), cellLo = new Float64Array(w * h).fill(Infinity), cellHi = new Float64Array(w * h).fill(-Infinity);
+      const o = { i0, j0, w, h, bottom: minY, top: maxY, cells: null, lo: null, hi: null };
       let count = 0;
       const visit = (part) => {
         if (!part.visible) return;
@@ -431,17 +436,22 @@
           for (let f = 0; f < g.faces.length; f++) {
             const ids = (cursor ? BL.compactGeometry.readFace(g, f, cursor) : g.faces[f]).i;
             for (let k = 1; k + 1 < ids.length; k++) {
-              let lo0 = Infinity, lo1 = Infinity, hi0 = -Infinity, hi1 = -Infinity;
+              let lo0 = Infinity, lo1 = Infinity, hi0 = -Infinity, hi1 = -Infinity, loY = Infinity, hiY = -Infinity;
               for (let c = 0; c < 3; c++) {
                 const at = (c ? ids[k + c - 1] : ids[0]) * 3, x = v[at], y = v[at + 1], z = v[at + 2];
                 const px = tri[c * 2] = m[0] * x + m[4] * y + m[8] * z + m[12], pz = tri[c * 2 + 1] = m[2] * x + m[6] * y + m[10] * z + m[14];
+                const py = m[1] * x + m[5] * y + m[9] * z + m[13];
                 lo0 = Math.min(lo0, px); hi0 = Math.max(hi0, px); lo1 = Math.min(lo1, pz); hi1 = Math.max(hi1, pz);
+                loY = Math.min(loY, py); hiY = Math.max(hiY, py);
               }
               const ia = Math.max(i0, Math.floor(lo0 / GEAR_CELL)), ib = Math.min(i0 + w - 1, Math.floor(hi0 / GEAR_CELL));
               const ja = Math.max(j0, Math.floor(lo1 / GEAR_CELL)), jb = Math.min(j0 + h - 1, Math.floor(hi1 / GEAR_CELL));
               for (let i = ia; i <= ib; i++) for (let j = ja; j <= jb; j++) {
                 const cell = (i - i0) * h + j - j0;
-                if (!grid[cell] && (ia === ib && ja === jb || triangleMeetsCell(i * GEAR_CELL, j * GEAR_CELL))) { grid[cell] = 1; count++; }
+                if (grid[cell] && hiY <= cellHi[cell] && loY >= cellLo[cell]) continue;
+                if (!(ia === ib && ja === jb || triangleMeetsCell(i * GEAR_CELL, j * GEAR_CELL))) continue;
+                if (!grid[cell]) { grid[cell] = 1; count++; }
+                cellLo[cell] = Math.min(cellLo[cell], loY); cellHi[cell] = Math.max(cellHi[cell], hiY);
               }
             }
           }
@@ -449,22 +459,27 @@
         for (const child of part.children) visit(child);
       };
       visit(node);
-      o.cells = new Int32Array(count * 2);
-      for (let cell = 0, n = 0; cell < grid.length; cell++) if (grid[cell]) { o.cells[n++] = Math.floor(cell / h); o.cells[n++] = cell % h; }
+      o.cells = new Int32Array(count * 2); o.lo = new Float64Array(count); o.hi = new Float64Array(count);
+      for (let cell = 0, n = 0; cell < grid.length; cell++) if (grid[cell]) {
+        o.lo[n >> 1] = cellLo[cell]; o.hi[n >> 1] = cellHi[cell];
+        o.cells[n++] = Math.floor(cell / h); o.cells[n++] = cell % h;
+      }
       return o;
     };
     // The outline after half a turn about the vertical through the part's origin (`ends`) and about its long axis, the
     // holder's x through that origin (`faces`): each mirrors the cells (cell k becomes -k - 1); a face turn also turns
     // its heights over.
     const turned = (o, way) => {
-      const ends = way & 1, faces = way & 2, cells = new Int32Array(o.cells.length);
+      const ends = way & 1, faces = way & 2, cells = new Int32Array(o.cells.length), rise = new Float64Array(o.hi.length);
       const flipI = ends, flipJ = !ends !== !faces;
       for (let c = 0; c < cells.length; c += 2) {
         cells[c] = flipI ? o.w - 1 - o.cells[c] : o.cells[c];
         cells[c + 1] = flipJ ? o.h - 1 - o.cells[c + 1] : o.cells[c + 1];
+        // How high the part reaches over that cell once laid, above its own lowest point.
+        rise[c >> 1] = faces ? o.top - o.lo[c >> 1] : o.hi[c >> 1] - o.bottom;
       }
       return { way, w: o.w, h: o.h, i0: flipI ? -(o.i0 + o.w) : o.i0, j0: flipJ ? -(o.j0 + o.h) : o.j0,
-        bottom: faces ? -o.top : o.bottom, top: faces ? -o.bottom : o.top, cells };
+        bottom: faces ? -o.top : o.bottom, top: faces ? -o.bottom : o.top, cells, rise };
     };
     // A part is laid by its outline at rest, never by a passing state that differs between this page, other pages and
     // a guest's own copy at the moment each parks it: every magazine banana shown (a full rifle, as every Ooga starts)
@@ -549,10 +564,38 @@
     const CELLS_ALONG = Math.round(BED_LEN / GEAR_CELL), CELLS_ACROSS = Math.round(BED_W / GEAR_CELL), FIRST_I = -CELLS_ALONG / 2, FIRST_J = -CELLS_ACROSS / 2;
     const taken = new Uint8Array(CELLS_ALONG * CELLS_ACROSS), GEAR_TRIES = 200000;
     const groundUnder = (x, z) => p.surfaceAt ? p.surfaceAt(p.x + p.ux * x + p.nx * z, p.z + p.uz * x + p.nz * z) - p.ground : 0;
+    // A lower bound on the cloth's underside over the cell starting x along the bed (from the pivot) and z across, above
+    // the ground, at every angle of the occupied swing (|a| <= REST_HELD). Swung by a, the cloth's point at drop y (<= 0)
+    // under the pivot and c across stands y cos a - c sin a high (never under y - |c| sin REST_HELD) and y sin a + c cos a
+    // across, so what stands over the cell comes from c within the cell widened by the deepest drop there times
+    // sin REST_HELD, and |c| at most (the cell's farthest |z| + that) / cos REST_HELD. The cloth falls toward the bed's
+    // middle (clothY is a convex bowl, and its drawn faces lie on or over it), so its lowest point in that wider cell is
+    // the one nearest the middle.
+    const clothOver = (x, z) => {
+      const s = Math.sin(REST_HELD), nx = Math.min(Math.max(0, x), x + GEAR_CELL), shift = -clothY(p, nx, 0) * s;
+      const nz = Math.min(Math.max(0, z - shift), z + GEAR_CELL + shift), far = (Math.max(Math.abs(z), Math.abs(z + GEAR_CELL)) + shift) / Math.cos(REST_HELD);
+      return p.y - p.ground + clothY(p, nx, nz) - far * s;
+    };
+    // A laid outline's ground (the highest under its corners) with its first cell on grid cell (gi, gj), and whether every
+    // one of its cells stays GEAR_CLEAR under the cloth there.
+    const groundFor = (o, gi, gj, at) => {
+      const a0 = at + (FIRST_I + gi) * GEAR_CELL, a1 = a0 + o.w * GEAR_CELL, c0 = (FIRST_J + gj) * GEAR_CELL, c1 = c0 + o.h * GEAR_CELL;
+      return Math.max(groundUnder(a0, c0), groundUnder(a1, c0), groundUnder(a0, c1), groundUnder(a1, c1));
+    };
+    const underCloth = (o, gi, gj, at) => {
+      const cells = o.cells, base = groundFor(o, gi, gj, at) + GEAR_LIFT;
+      for (let c = 0; c < cells.length; c += 2) {
+        const top = base + o.rise[c >> 1];
+        if (top > GEAR_TOP || top > clothOver(at + (FIRST_I + gi + cells[c]) * GEAR_CELL, (FIRST_J + gj + cells[c + 1]) * GEAR_CELL) - GEAR_CLEAR) return false;
+      }
+      return true;
+    };
+    // `clothAt` (the bed's along position of the holder) also keeps each part under the cloth while it is searched.
+    let clothAt = null;
     const fits = (o, oi, oj) => {
       const cells = o.cells;
       for (let c = 0; c < cells.length; c += 2) if (taken[(oi + cells[c]) * CELLS_ACROSS + oj + cells[c + 1]]) return false;
-      return true;
+      return clothAt === null || underCloth(o, oi, oj, clothAt);
     };
     // Mark (1) or clear (-1) a placed outline, grown by a cell each way so the next part keeps its distance.
     const mark = (o, oi, oj, by) => {
@@ -578,21 +621,34 @@
         }
         return false;
       };
-      // Every roster Ooga's gear fits (the unit tier lays out each one's as the crew builds it); gear that cannot is a
-      // new character's to fix, not a pile to draw.
-      if (!place(0)) throw Error(`Stowed gear of ${gear.cave.traits?.name} does not fit flat under the hammock`);
-      let i0 = CELLS_ALONG, i1 = 0, j0 = CELLS_ACROSS, j1 = 0;
-      for (const { o, oi, oj } of chosen) { i0 = Math.min(i0, oi); i1 = Math.max(i1, oi + o.w); j0 = Math.min(j0, oj); j1 = Math.max(j1, oj + o.h); }
-      const si = Math.floor((CELLS_ALONG - i1 - i0) / 2), sj = Math.floor((CELLS_ACROSS - j1 - j0) / 2);
       const at = p.seats[gear.seat.index].at;
+      // The group centred in the rectangle, if every part there stays under the cloth.
+      const centred = () => {
+        let i0 = CELLS_ALONG, i1 = 0, j0 = CELLS_ACROSS, j1 = 0;
+        for (const { o, oi, oj } of chosen) { i0 = Math.min(i0, oi); i1 = Math.max(i1, oi + o.w); j0 = Math.min(j0, oj); j1 = Math.max(j1, oj + o.h); }
+        const si = Math.floor((CELLS_ALONG - i1 - i0) / 2), sj = Math.floor((CELLS_ACROSS - j1 - j0) / 2);
+        return chosen.every(({ o, oi, oj }) => underCloth(o, oi + si, oj + sj, at)) ? [si, sj] : null;
+      };
+      // Every roster Ooga's gear fits (the unit tier lays out each one's as the crew builds it); gear that cannot is a
+      // new character's to fix, not a pile to draw. Gear too tall for the cloth over the middle, where it sags lowest,
+      // is searched again with the cloth's clearance kept for every part (the first fit is nearer an end, where it is
+      // higher), and centred only when that still clears.
+      if (!place(0)) throw Error(`Stowed gear of ${gear.cave.traits?.name} does not fit flat under the hammock`);
+      let shift = centred();
+      if (!shift) {
+        taken.fill(0); tries = 0; clothAt = at;
+        const found = place(0);
+        clothAt = null;
+        if (!found) throw Error(`Stowed gear of ${gear.cave.traits?.name} does not fit flat under the hammock's cloth`);
+        shift = centred() || [0, 0];
+      }
+      const si = shift[0], sj = shift[1];
       for (let k = 0; k < parts.length; k++) {
         const part = parts[k], { o, oi, oj } = chosen[k], node = part.node;
         setWay(part, o.way);
         // The outline's first cell lands on the grid cell (oi + si, oj + sj) of the rectangle.
         const x = (FIRST_I + oi + si - o.i0) * GEAR_CELL, z = (FIRST_J + oj + sj - o.j0) * GEAR_CELL;
-        const a0 = at + x + o.i0 * GEAR_CELL, a1 = a0 + o.w * GEAR_CELL, c0 = z + o.j0 * GEAR_CELL, c1 = c0 + o.h * GEAR_CELL;
-        const ground = Math.max(groundUnder(a0, c0), groundUnder(a1, c0), groundUnder(a0, c1), groundUnder(a1, c1));
-        node.position.x = x; node.position.y = ground + GEAR_LIFT - o.bottom; node.position.z = z;
+        node.position.x = x; node.position.y = groundFor(o, oi + si, oj + sj, at) + GEAR_LIFT - o.bottom; node.position.z = z;
       }
     };
     const releaseBody = (cave) => { if (cave.hammockRest) upright(cave); else releaseEquipment(cave); };
@@ -1089,5 +1145,5 @@
     return { plan: p, seats, ridgeNode, bedNode, ropes, update, syncRopes, kick, bump, hit, pump, blocks, crosses, tip, enter, restingAt, settle, free, near, reachable, poseRemote, stateFor, releaseEquipment, dispose, get angle() { return angle; }, get amp() { return amp; }, get spilling() { return spilling(); }, get fallSide() { return fallSide; } };
   };
 
-  BL.hubHammock = { SLOTS, TIE, SPAN_MIN, SPAN_MAX, SWAY_MAX, STAND, plan, create, ridgeY };
+  BL.hubHammock = { SLOTS, TIE, SPAN_MIN, SPAN_MAX, SWAY_MAX, REST_HELD, STAND, GEAR_TOP, GEAR_CLEAR, plan, create, ridgeY };
 })();
