@@ -283,9 +283,11 @@
     let pendingEvents = null;
 
     // A quaternion eased toward the frame's, or dropped (back to the Euler rotation) when the frame has none.
+    // A puppet's pose is the host's alone: a quaternion its own crew left (a local sleep's `sleepRotation`)
+    // would hide the frame's Euler rotation, so it goes too. The crew's object itself is never written.
     const poseQuat = (node, own, t, o, on, k) => {
       if (!on) {
-        if (node.quaternion === own) node.quaternion = null;
+        if (node.quaternion) node.quaternion = null;
         return;
       }
       if (node.quaternion !== own) {
