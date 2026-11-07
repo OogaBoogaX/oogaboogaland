@@ -16583,6 +16583,22 @@ const factoryCanvas = { name: "factory canvas2d", why: "contract: the Canvas 2D 
 } };
 
 const hubDistantEffects = { name: "hub distant effects", why: "rule: distant portals and insects resume without catching up, daylight still changes populations, and horizon birds, boats and persistent decorative clouds keep moving", run: async (b) => {
+  const marks = await b.evaluate(`(() => {
+    const canvas=document.createElement("canvas"); canvas.style.width="100px"; canvas.style.height="100px"; document.body.append(canvas);
+    const ctx=canvas.getContext("2d"), fill=ctx.fillText; let sight=0,paint=0;
+    ctx.fillText=function(text,...args){if(text==="z")paint++;return fill.call(this,text,...args);};
+    const fx=BL.fx.create({root:BL.scene.createNode(),camera:BL.scene.createCamera(),overlay:canvas,
+      renderer:{size:{width:100,height:100},project:(x,y,z,out)=>{out.x=x;out.y=y;return out;}},
+      zzzVisible:()=>{sight++;return true;}});
+    try {
+      for(const x of [-100,-20,50,140])fx.zzzAt(x,30,0);
+      fx.drawOverlay(.1,()=>{}); const first={sight,paint};
+      fx.drawOverlay(3,()=>{}); const expired=fx.stats().zzz===0 && sight===first.sight;
+      fx.zzzAt(50,30,0);fx.drawOverlay(.1,()=>{});
+      return {first,expired,fresh:sight===first.sight+1&&paint===first.paint+1};
+    } finally {fx.dispose();canvas.remove();}
+  })()`);
+  record("hub distant effects: offscreen sleep marks avoid exact sight work, edge marks stay eligible and expired marks never replay on return", marks.first.sight===2&&marks.first.paint===2&&marks.expired&&marks.fresh, JSON.stringify(marks));
   const state = await b.evaluate(`(() => {
     const B = __ooga, root = BL.scenes.hub.root, nodes = [];
     const visit = n => { nodes.push(n); for (const child of n.children) visit(child); }; visit(root);
