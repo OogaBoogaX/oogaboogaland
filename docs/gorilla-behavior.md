@@ -1,6 +1,33 @@
 # Gorilla movement and banana rage
 
-The hub's contributor companions use `clankers.js` for movement and behavior, `agent.js` for the articulated rig, and `scene-hub.js` for terrain, contacts and Ooga capture. Movement fixes apply to signed-in and signed-out play. Banana rage is restricted to signed-out, single-player play; it sends no multiplayer messages.
+The hub's contributor companions use `clankers.js` for movement and behavior, `agent.js` for the articulated rig, and `scene-hub.js` for terrain, contacts and Ooga capture. Movement fixes apply to signed-in and signed-out play. Banana rage is restricted to signed-out, single-player play; it sends no multiplayer messages. While the Hub's NPCs are passive (below), no companion is an NPC that can rage there, so the rage sections describe gorillas outside that policy.
+
+## Passive Hub NPCs
+
+The Hub opts its roster into a passive NPC policy (`shared.npcPassive`). Every other scene, Tess and Kortik keep their own interactions. The policy is a hidden `nonInteractive` getter on each roster Ooga and companion gorilla. It is true for a roster NPC, and false the moment a body is driven locally (`humanControlled`, a possessed gorilla) or remotely (`remoteControlled`), and in scenes that name their own player.
+
+- **Contact.** Passive NPC Oogas and gorillas pass through each other and through players. They do no peer spacing, shoulder passing or traffic yielding, and never stand on, ride or wait for another body. Players walk through them and are not held up by them. Passive NPCs stand on the island's terrain alone and pass through props and scenery. Passive gorillas also collide with cave walls (see Gorilla companions). Players, driven bodies and every other scene keep their ordinary terrain, floor and scenery support. Player-to-player contact and driven gorillas keep theirs.
+- **Combat and contact effects.** Passive NPCs take no melee, bullet, fire, grab, capture, rage or poke effects, and they neither take nor block weapon rays (`weapon-targets.js`). They fire and replay no projectiles, so no projectile hit drives a companion. They neither spread nor catch fire, swing no room signs, and build or dismantle no props. Hover and selection still find them, so they can still be picked and possessed. A driven body released into the policy has its combat state cleared once, at release (`clearCombatEffects`), including any flames.
+- **Routines.** Work, chill and sleep routines continue: the Oogas' screens, lab and equipment, fireplace seats and the gorillas' roof departures. A working Ooga still walks to its cave and takes its aiming pose, and its companion keeps its own independent routine. Pile consumption and the donation contracts are unchanged. Players' and remote players' shots, and every other scene, are unaffected.
+- **Status beams.** A change of status is a relocation, not a journey, with one exception: a visible passive Ooga or gorilla going from clanking to chilling walks (see Work trips and Gorilla companions). Otherwise a sleeper is placed in its assigned indoor or outdoor bed, a worker at the pile's loading ring, and a chiller at a chill spot. An away actor disappears. When the destination is full, the actor stays away and retries on the next refresh. No passive NPC walks between the meadow, HQ, basement, the rainforest bridge and its beds. `npc-status-beams.js` draws the bounded green-glyph departure and arrival from the shared `sleep-beam.js` pool, for every status change except clanking to chilling while in view, which is a walk and shows none. It never moves an actor or delays its state. On a page following the room's NPC host, `npc-sync.js` places a puppet at once whenever its streamed status changes, instead of easing it across, so followers see the same relocation and glyphs. The exception is again clanking to chilling, which eases like ordinary motion. Same-status motion still eases, and the NPC frame format is unchanged.
+- **Work trips.** A passive Ooga follows predetermined paths only.
+  - *Meadow legs* (pile to a site's first route point and back to its loading slot) follow the authored mainland spokes and the pile ring (`BL.npcPaths.fixed`).
+  - *Cave legs* (outbound, station and return inside the cave) walk the site's authored route points directly, with no path search.
+  - *Clanking to chilling:* a visible worker walks back the way it came, wherever it is (outbound, at its station or returning). It passes the route points it already walked, then follows the meadow leg to the banana pile: its loading slot, else the nearest slot, else the pile ring in its own direction. Only there does it pick a chill spot and walk on to it; with none free it rests at the pile and wanders later as any chiller does. A status change during that walk applies as usual: sleeping or away beams, and working again beams to the pile.
+  - *On all of these* there is no object, player or NPC check: the authored paths are clear, and the walker passes through anything in its way. It stands on the island's terrain alone (`npcFixedTerrainAt`: ramps and path heights included; no props, bodies, beds or water), and skips traffic snapshots, roof checks, recovery searches, escapes, replans and detours.
+  - *Local walks:* a passive Ooga's short walks (to its loading slot, and chill wanders between their chosen spots) are single direct waypoints too, on terrain, with no graph, avoidance or destination checks. Lab and screen work are unchanged.
+- **Gorilla companions.** The only things a passive gorilla collides with are cave walls: the island's terrain and the cave masonry it climbs. It queries no other solid at all.
+  - *Passes through:* props, scenery, the campfire's margin, other gorillas, Oogas and players. None of them blocks, lifts or diverts it.
+  - *Support:* terrain only, including terrain ramps and the lab floor.
+  - *Travel:* it walks straight at its authored goals (cave exit, apron, entry aisle, work slot, pile).
+    - Its meadow legs, pile to apron and cave to pile, follow the same authored spokes and pile ring as the Oogas, so it never cuts across the pile.
+    - Lab and office points are walked directly, with no lab route search.
+    - A step a wall refuses goes to the ordinary controller, so wall climbs and rooftop descents still work.
+  - *Clanking to chilling:* while in view, it walks: out by its cave's authored exit, along the meadow leg to its Ooga's pile slot, and only then to a lounge. It is never relocated. A climb, jump or fall in progress finishes first.
+  - *Interruptions:* sleeping or away during that walk still beams, and working again beams it to the pile.
+  - *Driven gorillas* keep every check, and rage keeps its own prop rules.
+
+Player-controlled Oogas and gorillas, and manual bed travel, are unchanged. The policy was extracted from the virtual-host branch's NPC work (commits 0eab9534, 96d688fe and 697964fe). That branch's host framework (authority, recovery, sessions, the Durable Object and transport) is deliberately not part of this change.
 
 ## Movement corrections
 
@@ -25,6 +52,8 @@ Walking foot-contact fitting now removes the previous frame's leg lift before bu
 Autonomous throw clearance measures the released flying limbs once per capture and uses that envelope through the flight proof, including feet below the nominal support point. This replaces the narrower walking cylinder that could miss a hand or foot clipping a hill.
 
 ## Rage contract and ownership
+
+> **Historical.** This section and the next two ("Cleanup and state priority" and "Maintainer acceptance") record autonomous banana rage, capture and throws as they ran before the passive Hub NPC policy. Every Hub companion is now a passive NPC, so none can rage, capture or be thrown there. The browser checks for this behaviour are retired, apart from rejection coverage in "hub game-only combat" and "passive gorilla contacts". The node-only rage proof (`gorillaRageProof`) still exercises the controller on its own non-passive fixture. These sections are kept for provenance and do not describe current Hub coverage.
 
 `net.state.resolved` distinguishes an account lookup in progress from a known signed-out session. Rage is allowed only when account status is resolved and `net.state.me` is absent. Standalone files, deliberately disabled networking and a confirmed missing account backend can resolve as signed out. An uncertain failed account request remains ineligible. A signed-in page never counts hits or runs autonomous rage capture, even with no other visitor online.
 

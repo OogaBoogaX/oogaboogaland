@@ -5,6 +5,14 @@
   const BL = window.BL = window.BL || {};
   const { clamp, damp, mulberry32, fnv1a } = BL.math;
   const { addChild } = BL.scene;
+  // Cached object shapes must not own a getter closure over a departed world.
+  // Keep the dynamic policy behind its receiver's weak key instead.
+  const interactionPolicies = new WeakMap();
+  const interactionProperty = { get() { return interactionPolicies.get(this)(); } };
+  const interactionGetter = (object, name, read) => {
+    interactionPolicies.set(object, read);
+    Object.defineProperty(object, name, interactionProperty);
+  };
   // The tallest shootable meadow rocks reach 1.11; a prop step must clear their real mesh.
   const SCALE = 1, SPEED = 2.7, CHILL_SPEED = 0.9, STEP = 0.52, PROP_STEP = 1.16, JUMP_BUFFER = 0.18, PLAYER_SMASH_RECOVER = 0.12;
   const RAGE_SPEED = 12, RAGE_STEP = 0.1;
@@ -50,6 +58,8 @@
   const OFFICE_WORK = { type: [5, 9], look: [1, 2], abacus: [3, 5] }, OFFICE_NEXT = { type: "look", look: "abacus", abacus: "type" };
   const create = (ctx) => {
     const { crew, sites, groundAt, clear } = ctx;
+    // The Hub opts its crew into passive NPCs; their companions follow suit.
+    const passiveNpcs = ctx.npcPassive === true || crew.passiveNpcs === true;
     let combatEnabled = ctx.combatEnabled === true;
     const footprint = BL.agent.footprint, torso = BL.agent.torso;
     const pointSupportAt = ctx.pointSupportAt || groundAt;
@@ -140,6 +150,12 @@
       e.portal = -1;
     };
     const claimPortal = (e, site) => {
+      // A passive companion passes through every doorway at once: it never takes,
+      // holds or waits on the shared portal, and drops any stale claim of its own.
+      if (e.nonInteractive && !e.controlled) {
+        releasePortal(e); e.portalWait = false;
+        return true;
+      }
       if (portals[site] === e) {
         if (e.route !== "exit" && e.route !== "enter" && !e.jump.active && caveAt(e.root.position.x, e.root.position.y, e.root.position.z) !== site
           && elapsed - e.portalSince > 18) {
@@ -340,6 +356,7 @@
     // Surface NPCs reserve their trunks against peers, leaving arms and
     // shoulders free to overlap. Player movement keeps centre clearance.
     const occupied = (e, x, y, z, destinations = true, heading = e.heading) => {
+      if (e.nonInteractive) return false;
       // Workers pass companions through the entrance and shared lab aisles.
       // Equipment claims keep their work positions distinct; scenery stays solid.
       if (enteringCave(e) || labWorker(e)) return false;
@@ -350,7 +367,7 @@
       if (!e.motion.lab && !e.planningLabTraffic && !e.climb.active) {
         for (let i = 0; i < list.length; i++) {
           const other = list[i];
-          if (other === e || !other.active) continue;
+          if (other.nonInteractive || other === e || !other.active) continue;
           const p = other.root.position, dx = x - p.x, dz = z - p.z;
           if (!e.controlled) {
             const shape = torso || footprint;
@@ -367,7 +384,7 @@
       }
       for (let i = 0; i < list.length; i++) {
         const other = list[i];
-        if (other === e || !other.active) continue;
+        if (other.nonInteractive || other === e || !other.active) continue;
         const p = e.planningLabTraffic ? labFuture(other, e.labPlanTime, labFuturePoint) : other.root.position;
         const otherHeading = e.planningLabTraffic ? p.heading : other.heading;
         const margin = e.motion.lab || other.motion.lab ? 0.03 : SPACE, radius = e.radius + other.radius + margin;
@@ -732,6 +749,13 @@
     };
     const labGoal = (e, x, y, z, heading, partial = false) => {
       const job = e.lab, p = e.root.position;
+      // A passive companion walks straight to its authored lab point: no
+      // route search around benches, equipment or coworkers.
+      if (e.nonInteractive && !e.controlled) {
+        job.pathCount = job.pathIndex = 0; job.pathFixed = false; job.targetX = x; job.targetY = y; job.targetZ = z;
+        setGoal(e, x, y, z);
+        return true;
+      }
       if (job.targetX !== x || job.targetY !== y || job.targetZ !== z) {
         job.pathCount = job.pathIndex = 0; job.pathAt = job.coordinationUntil = job.trafficWait = 0; job.pathPartial = false;
       }
@@ -876,6 +900,7 @@
       e.speed = step / dt * (dx * Math.sin(heading) + dz * Math.cos(heading) < 0 ? -1 : 1); e.blocked = 0;
     };
     const requestLabPass = (requester, tx, tz) => {
+      if (requester.nonInteractive) return false;
       if (enteringCave(requester) || labWorker(requester) || elapsed < labPassAt || labSite < 0) return false;
       // Ask for clearance along the route actually being walked. The straight
       // chord to a distant workstation may cross an unrelated occupied desk.
@@ -887,7 +912,7 @@
       let nearest = Infinity, blocker = null;
       for (let i = 0; i < list.length; i++) {
         const other = list[i], q = other.root.position;
-        if (other === requester || !other.active || other.controlled || other === labEscape || other.site !== labSite || other.phase !== "work"
+        if (other.nonInteractive || other === requester || !other.active || other.controlled || other === labEscape || other.site !== labSite || other.phase !== "work"
           || other.lab.yielding || !other.motion.lab || other.climb.active || other.fire.rolling) continue;
         // A worker already following its reservation is about to clear this
         // space. Do not cancel that plan by asking it to yield mid-crossing.
@@ -980,6 +1005,12 @@
     };
     const yieldLab = (e, dt) => {
       const job = e.lab, p = e.root.position, point = job.yieldPoint;
+      // A passive companion yields to nobody: clear any stale request, no route search.
+      if (e.nonInteractive && !e.controlled) {
+        job.yielding = 0; job.yieldFor = null; job.yieldStation = -1; job.yieldReady = false;
+        job.coordinationUntil = job.trafficWait = 0;
+        return;
+      }
       if (job.item >= 0) { workLab(e, dt); return; }
       e.motion.labWork = ""; e.motion.labReach = 0; e.motion.labSqueeze = false;
       if (!e.gorilla.labWalkCompact) { e.speed = 0; return; }
@@ -1097,7 +1128,8 @@
         // Changing jobs is optional. Keep the current desk productive until a
         // complete route is reserved; staging in its aisle would release the
         // old job before we know how to reach the new one.
-        if (moving && !planLabPath(e, destination.x, destination.y, destination.z, destination.heading)) continue;
+        // A passive companion walks lab points directly, so it needs no route proof.
+        if (moving && !(e.nonInteractive && !e.controlled) && !planLabPath(e, destination.x, destination.y, destination.z, destination.heading)) continue;
         chosen = index; chosenPickup = pickup; break;
       }
       e.radius = radius; e.height = height; e.compact = compact; e.footprintMode = mode; e.planningLab = false; e.planningLabWork = ""; e.planningLabStation = -1;
@@ -1499,6 +1531,7 @@
         || elapsed < r.wallFailedUntil && (x - r.wallFailedX) ** 2 + (z - r.wallFailedZ) ** 2 < 4;
     };
     const nearbyLounge = (e, roof, spawn, stayLevel = false) => {
+      if (e.nonInteractive) return false;
       const first = Math.floor(e.random() * Math.max(1, list.length));
       for (let i = 0; i < list.length; i++) {
         const other = list[(first + i) % list.length];
@@ -1640,6 +1673,7 @@
     };
     const spawnLounge = (e) => chooseChill(e, true);
     const groomLounge = (e, dt) => {
+      if (e.nonInteractive) { e.loungePartner = null; e.motion.groom = 0; }
       const partner = e.loungePartner, p = e.root.position;
       const seated = e.lounge === "sit" && Math.abs(e.speed) < 0.05 && !e.fire.burning;
       let near = false;
@@ -2017,6 +2051,7 @@
     };
     const activate = (e, atPosition = false) => {
       if (e.remoteControlled) return;
+      e.pileFirst = false;
       if (rage) rage.cancel(e, "respawn");
       if (ctx.rageRelease) ctx.rageRelease(e);
       clearWallSearch(e);
@@ -2173,6 +2208,8 @@
           toX: 0, toY: 0, toZ: 0, lift: 0, wall: false, caveExit: false,
           points: new Float64Array((JUMP_SAMPLES + 1) * 3) }
       };
+      // Non-enumerable, like the crew's: a driven or remote gorilla keeps normal interactions.
+      interactionGetter(entry, "nonInteractive", () => passiveNpcs && !entry.controlled && !entry.remoteControlled);
       entry.motion.supportEntry = entry;
       gorilla.root.visible = false;
       gorilla.root.matrixNative = false;
@@ -2182,9 +2219,14 @@
     }
     const sync = () => {
       if (disposed) return;
-      for (let i = 0; i < list.length; i++) if (!list[i].active && alive(list[i].owner)) activate(list[i]);
+      if (passiveNpcs && ctx.sleep) bedsToday();
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].nonInteractive) beamStatus(list[i], 0);
+        else if (!list[i].active && alive(list[i].owner)) activate(list[i]);
+      }
     };
-    sync();
+    // Passive companions are placed by their first update's status beam.
+    if (!passiveNpcs) sync();
     const startLabShuttle = (owner) => {
       const e = byOwner.get(owner);
       if (labSite < 0 || !e) return false;
@@ -2456,6 +2498,7 @@
       return CLIMB_GROUND_POINT;
     };
     const climbClaimOccupied = (e, x, y, z, heading, owner) => {
+      if (e.nonInteractive || owner.nonInteractive) return false;
       const c = owner.climb;
       if (!c.active || c.free) return false;
       const planning = owner.planningRoam, height = owner.height;
@@ -4401,9 +4444,24 @@
             setGoal(e, POINT.x, POINT.y, POINT.z);
             return true;
           }
+          // A passive walk from work visits its Ooga's pile slot before a lounge.
+          if (e.pileFirst) {
+            e.pileFirst = false; e.route = "pile";
+            // Its Ooga's loading slot; else the pile's loading ring, in its own direction.
+            const slot = e.owner.slot, angle = Math.atan2(p.x, p.z), ring = ctx.pileRingRadius ? ctx.pileRingRadius() : 6;
+            const x = slot ? slot.x : Math.sin(angle) * ring, z = slot ? slot.z : Math.cos(angle) * ring;
+            const y = groundAt(x, z, Infinity);
+            setGoal(e, x, Number.isFinite(y) ? y : p.y, z);
+            return true;
+          }
           e.phase = "chill"; e.route = ""; e.exitFootprint = true;
           return chooseChill(e, true);
         }
+      }
+      if (e.route === "pile") {
+        if (Math.hypot(e.goalX - p.x, e.goalZ - p.z) > 0.5) return true;
+        e.phase = "chill"; e.route = ""; e.exitFootprint = true;
+        return chooseChill(e, true);
       }
       if (e.route === "island") {
         if (Math.hypot(e.goalX - p.x, e.goalZ - p.z) > 0.3) return true;
@@ -4523,6 +4581,7 @@
           p.x + sx * 2, p.y, p.z + sz * 2, e.heading, heading);
     };
     const separateSurfacePeers = (e, dt) => {
+      if (e.nonInteractive) return false;
       if (enteringCave(e) || e.controlled || e.motion.lab || e.climb.active || e.jump.active || e.drive.airborne
         || e.lounge || e.loungeDepart || e.fire.burning || e.fire.rolling || e.pound || e.beat
         || e.gorilla.motionActive) return false;
@@ -4574,6 +4633,33 @@
       }
       setSupportY(e, y, x, z, heading, dt * 3); p.x = x; p.z = z; e.heading = heading;
       e.speed = step / dt; e.blocked = 0;
+    };
+    // A passive companion's travel steps straight at its authored goal (exit,
+    // apron, entry, slot or pile); on the meadow legs it follows the authored
+    // spokes and pile ring instead (`ctx.npcFixedPaths`). Support and clearance
+    // are terrain and cave walls only. A step a wall refuses goes to the
+    // ordinary controller, which owns wall climbs and roof descents.
+    const PASSIVE_WALKER = { pathing: null, root: null };
+    const movePassive = (e, dt, speed, planned) => {
+      const p = e.root.position;
+      let tx = e.goalX, tz = e.goalZ;
+      if (planned && ctx.npcFixedPaths && ctx.npcPathState) {
+        e.pathing = e.pathing || ctx.npcPathState();
+        PASSIVE_WALKER.pathing = e.pathing; PASSIVE_WALKER.root = e.root;
+        ctx.npcFixedPaths.target(PASSIVE_WALKER, e.goalX, e.goalZ);
+        tx = e.pathing.targetX; tz = e.pathing.targetZ;
+      }
+      const dx = tx - p.x, dz = tz - p.z, distance = Math.hypot(dx, dz);
+      if (distance < 0.02) { e.speed = 0; return; }
+      const desired = Math.atan2(dx, dz), turn = Math.atan2(Math.sin(desired - e.heading), Math.cos(desired - e.heading));
+      const heading = e.heading + clamp(turn, -dt * 7, dt * 7), step = Math.min(distance, speed * dt);
+      const x = p.x + dx / distance * step, z = p.z + dz / distance * step;
+      const y = support(e, x, z, p.y, PROP_STEP, heading);
+      if (!Number.isFinite(y) || Math.abs(y - p.y) > PROP_STEP || !groundStepClear(e, p.x, p.y, p.z, x, y, z, e.heading, heading)) {
+        move(e, dt, speed); return;
+      }
+      setSupportY(e, y, x, z, heading, dt * 3); p.x = x; p.z = z; e.heading = heading;
+      e.speed = step / dt; e.blocked = e.stuckTime = 0;
     };
     const move = (e, dt, speed) => {
       if (e.recover > 0) { e.speed = 0; return; }
@@ -4939,7 +5025,7 @@
       const roof = roofAt(x, y, z);
       for (const e of list) {
         const p = e.root.position, s = e.startled;
-        if (!e.active || !e.root.visible || e.controlled || e.remoteControlled || e.sleep.stage || sleeps(e.owner)
+        if (e.nonInteractive || !e.active || !e.root.visible || e.controlled || e.remoteControlled || e.sleep.stage || sleeps(e.owner)
           || e.rage.active || e.fire.burning || e.fire.rolling || e.climb.active || e.jump.active || e.drive.airborne
           || e.actionControlled || (p.x - x) ** 2 + (p.z - z) ** 2 > 12 ** 2
           || (roof >= 0 ? roofAt(p.x, p.y, p.z) !== roof : Math.abs(p.y - y) > 2)) continue;
@@ -5222,6 +5308,8 @@
     const release = () => {
       if (!player) return false;
       const e = player;
+      // Released into the passive Hub policy: nothing it carried may keep burning or raging.
+      if (passiveNpcs) clearCombatEffects(e, true);
       cancelInput(); player = null; e.controlled = false;
       if (sleeping(e)) { e.drive.resume = false; return true; }
       if (e.sleep.slot >= 0 && !sleeps(e.owner)) releaseBed(e);
@@ -5457,7 +5545,7 @@
     };
     const ignite = (value) => {
       const e = entryFor(value);
-      if (!combatEnabled || !e || !e.active || !e.root.visible || e.fire.burning || e.fire.rolling || e.fire.cooldown > 0) return false;
+      if (!combatEnabled || !e || e.nonInteractive || !e.active || !e.root.visible || e.fire.burning || e.fire.rolling || e.fire.cooldown > 0) return false;
       const f = e.fire;
       f.burning = true; f.requested = f.escaping = false; f.retry = f.escapeRetry = 0; f.age = 0; f.heat = 0.05; f.reaction = 1 + e.random() * 2;
       f.panic.active = false; fireThreatsActive = true;
@@ -6165,8 +6253,8 @@
       if (e.drive.motionEnvelope && !e.gorilla.motionActive && !e.drive.airborne
         && !e.drive.motionRecover && !e.fire.rolling && !e.fire.rollRecover) e.drive.motionEnvelope = false;
       labEnvelope(e);
-      if (combatEnabled && ctx.fireContact && ctx.fireContact(e, beforeX, beforeY, beforeZ)) ignite(e);
-      if (ctx.onMove && (beforeX !== p.x || beforeY !== p.y || beforeZ !== p.z)) ctx.onMove(e, beforeX, beforeY, beforeZ, dt);
+      if (combatEnabled && !e.nonInteractive && ctx.fireContact && ctx.fireContact(e, beforeX, beforeY, beforeZ)) ignite(e);
+      if (!e.nonInteractive && ctx.onMove && (beforeX !== p.x || beforeY !== p.y || beforeZ !== p.z)) ctx.onMove(e, beforeX, beforeY, beforeZ, dt);
     };
     const shareLabStation = (e) => {
       // A completed job releases its desk for an interior coworker. Keep the
@@ -6852,7 +6940,73 @@
         syncLab(e);
       }
     });
+    // A passive companion's status change is a relocation, never a journey:
+    // straight into its bed, out of sight while away, or onto the pile's
+    // ground for work. The scene's status beams present the move.
+    const beamStatus = (e, dt) => {
+      if (!e.nonInteractive || e.remoteControlled || e.controlled) return false;
+      const state = allAway ? "away" : e.owner.state, s = e.sleep, p = e.root.position;
+      if (state === "away") {
+        if (e.mode === "away" && !e.active && !s.stage) return true;
+        releaseBed(e); releasePortal(e); releaseLab(e); releaseOffice(e); clearWallSearch(e);
+        e.mode = "away"; e.active = e.root.visible = e.hasSlot = false;
+        e.jump.active = e.climb.active = e.drive.airborne = false;
+        e.drive.vx = e.drive.vy = e.drive.vz = e.speed = 0;
+        if (e.tracked && ctx.untrack) ctx.untrack(e);
+        e.tracked = false;
+        return true;
+      }
+      if (state === "sleeping" && s.stage === "asleep" && e.active) return false;
+      // Clanking to chilling in view is a walk, not a beam: out of its cave by the
+      // authored exit (climbs and wall descents included), to its Ooga's pile
+      // slot, then a lounge (travelGoal's "pile" route). A climb, jump or fall
+      // in progress finishes first.
+      if (state === "chilling" && e.mode === "working" && e.active && e.root.visible && !s.stage) {
+        if (e.climb.active || e.jump.active || e.drive.airborne || e.fire.rolling) return false;
+        releaseLab(e); releaseOffice(e); releasePortal(e); clearWallSearch(e);
+        e.mode = "chilling"; e.fromSite = caveAt(p.x, p.y, p.z); e.phase = "leave"; e.route = "exit";
+        e.pileFirst = true; e.hasSlot = false; e.entryTurn = false; e.pound = e.beat = e.stand = e.rest = 0;
+        return false;
+      }
+      if (state !== "sleeping" && !s.stage && e.active && e.mode === state) return false;
+      if (e.retry > 0) { e.retry = Math.max(0, e.retry - dt); return true; }
+      releasePortal(e); releaseLab(e); releaseOffice(e); clearWallSearch(e);
+      if (state === "sleeping") {
+        if (!ctx.sleep || !reserveBed(e)) { e.active = e.root.visible = false; e.retry = 1; return true; }
+        activate(e, true);
+        if (!sleepLandingClear(e)) { e.active = e.root.visible = false; e.retry = 1; return true; }
+        const bed = ctx.sleep.slots[s.slot];
+        p.x = bed.x; p.y = bed.y; p.z = bed.z;
+        s.count = s.leg = 0; s.retrying = false; s.beamWait = 0;
+        e.mode = "sleeping"; e.phase = "sleep"; e.route = ""; e.parked = e.biped = false;
+        layDown(e);
+        e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, false, e.lounge, e.motion);
+        return true;
+      }
+      releaseBed(e);
+      if (state === "chilling") { activate(e); return true; }
+      // Working starts at the pile, including an away actor returning. Use a
+      // bounded endpoint search with the actual body/terrain clearance, never
+      // a sweep across the entire island or another actor's saved position.
+      activate(e, true);
+      const slot = e.owner.slot;
+      let placed = false;
+      for (let i = 0; slot && i < 33; i++) {
+        const a = (i - 1) * Math.PI / 8 + e.index * 0.61803398875;
+        const r = i ? 0.75 + Math.floor((i - 1) / 16) * 0.75 : 0;
+        const x = slot.x + Math.sin(a) * r, z = slot.z + Math.cos(a) * r;
+        const y = groundAt(x, z, Infinity);
+        if (!Number.isFinite(y) || !landing(x, y, z) || !staticClear(e, x, y, z)) continue;
+        p.x = x; p.y = y; p.z = z; placed = true; break;
+      }
+      if (!placed) { e.active = e.root.visible = false; e.retry = 1; return true; }
+      e.phase = "chill"; e.route = ""; e.rest = 0;
+      if (sites[e.site]) beginTravel(e, e.site);
+      e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, false, "", e.motion);
+      return true;
+    };
     const updateEntry = (e, dt) => {
+      if (beamStatus(e, dt)) return;
       if ((e.sleep.stage === "beamOut" || e.sleep.stage === "beamIn")
         && (e.remoteControlled || e.controlled || allAway || !sleeps(e.owner) || e.fire.burning || e.fire.rolling
           || e.climb.active || e.jump.active || e.drive.airborne || e.rage.active)) cancelSleepBeam(e);
@@ -6860,7 +7014,7 @@
       if (e.controlled || e.rage.active || e.fire.burning || e.fire.rolling || !e.active) e.startled.active = false;
       // Expiry, health and account/activity cancellation precede regeneration
       // and every movement controller, including swimming or climbing.
-      if (combatEnabled && rage) rage.check(e, elapsed);
+      if (combatEnabled && !e.nonInteractive && rage) rage.check(e, elapsed);
       // A certified cliff warp during check starts a new local movement step;
       // its final pose must not sweep or roll back to the previous location.
       const p = e.root.position, beforeX = p.x, beforeY = p.y, beforeZ = p.z;
@@ -6909,7 +7063,7 @@
         || e.jump.active || e.drive.airborne || e.debugMove.active)) releaseOffice(e);
       if (e.sleep.stage && !sleeps(e.owner) && alive(e.owner) && !e.controlled && !e.drive.airborne && !e.fire.rolling && !e.fire.burning && !e.climb.active
         && updateWake(e, dt, beforeX, beforeY, beforeZ)) return;
-      if (combatEnabled && ctx.fireContact && ctx.fireContact(e, p.x, p.y, p.z)) ignite(e);
+      if (combatEnabled && !e.nonInteractive && ctx.fireContact && ctx.fireContact(e, p.x, p.y, p.z)) ignite(e);
       if (combatEnabled) updateFire(e, dt);
       if (rage && e.rage.active && e.fire.burning) rage.check(e, elapsed);
       if (rage && e.rage.active && e.rage.warpWaiting && !e.climb.active && !e.jump.active && !e.drive.airborne) {
@@ -6950,7 +7104,7 @@
           && liveFloor >= p.y - STEP && liveFloor <= p.y + PROP_STEP) setSupportY(e, liveFloor, p.x, p.z, e.heading, dt * 3);
       }
       if (e.fire.rolling || escapeForRoll(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
-      if (combatEnabled && fleeFire(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
+      if (combatEnabled && !e.nonInteractive && fleeFire(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
       if (rage && e.rage.active) {
         e.phase = "rage"; e.biped = false;
         let advanced = false;
@@ -7088,7 +7242,9 @@
           if (!e.jump.active) {
             // A short prop can lift the feet above the ground-level goal too.
             // Keep its supported exit on the ordinary steered walker.
-            if (e.route === "apron" && p.y > e.goalY + 0.8 && !raisedSupport(e) && caveAt(p.x, p.y, p.z) < 0)
+            if (e.nonInteractive && !e.climb.active && !e.drive.airborne)
+              movePassive(e, dt, e.mode === "chilling" ? CHILL_SPEED : SPEED, e.route === "apron" || e.route === "pile");
+            else if (e.route === "apron" && p.y > e.goalY + 0.8 && !raisedSupport(e) && caveAt(p.x, p.y, p.z) < 0)
               runDownhill(e, dt, Math.atan2(e.goalX - p.x, e.goalZ - p.z));
             else if (enteringAisle(e)) moveEntryAisle(e, dt);
             else if (e.motion.lab && !e.motion.labRunIn && (e.fromSite === labSite && e.route === "exit"
@@ -7397,41 +7553,48 @@
     };
     const hit = (cave) => {
       const e = byOwner.get(cave);
-      if (!e || !e.active) return false;
+      if (!e || !e.active || e.nonInteractive) return false;
       e.activity = Math.min(9, e.activity + 1); e.hits++;
       if (e.site !== labSite && !officeOf[e.site] && e.activity >= 3) e.rest = Math.min(e.rest, 0.7);
       return true;
     };
     const damage = (entry, power) => {
-      if (!combatEnabled || !entry || !entry.active || !(power > 0)) return false;
+      if (!combatEnabled || !entry || entry.nonInteractive || !entry.active || !(power > 0)) return false;
       entry.health.value = Math.max(0, entry.health.value - power * 4);
       entry.health.delay = BL.crew.HEALTH_REGEN_DELAY;
       if (rage && entry.health.value === 0) rage.cancel(entry, "health");
       return true;
     };
-    const bananaHit = (entry, source, serial) => combatEnabled && !!rage && !!entry && rage.bananaHit(entry, source, serial);
-    const debugRage = (entry, on = true) => !disposed && (!on || combatEnabled) && !!rage && rage.debugRage(entryFor(entry), on);
+    const bananaHit = (entry, source, serial) => combatEnabled && !!rage && !!entry && !entry.nonInteractive && rage.bananaHit(entry, source, serial);
+    const debugRage = (entry, on = true) => !disposed && !entryFor(entry)?.nonInteractive && (!on || combatEnabled) && !!rage && rage.debugRage(entryFor(entry), on);
+    // Ends rage, smash and fire at once. A passive release also drops the
+    // flame look, since the Hub no longer runs a passive gorilla's fire effects.
+    const clearCombatEffects = (e, visuals = false) => {
+      if (rage) rage.cancel(e, "game-ended");
+      if (ctx.rageRelease) ctx.rageRelease(e);
+      e.health.value = e.health.max; e.health.delay = 0;
+      if (e.actionControlled || e.motion.smash) {
+        e.pound = e.recover = 0; e.poundHit = true;
+        e.actionControlled = e.motion.smash = false;
+        e.gorilla.cancelSmash();
+      }
+      const f = e.fire, m = e.motion;
+      f.burning = f.contactBurning = f.rolling = f.requested = f.escaping = f.panic.active = false;
+      f.retry = f.escapeRetry = f.age = f.heat = f.soot = f.cooldown = f.rollRecover = 0;
+      m.poundCharge = m.throwProgress = m.roll = m.rollAngle = m.rollSide = 0;
+      m.dragging = m.rage = false;
+      if (!visuals) return;
+      if (e.renderParts) for (const part of e.renderParts) part.ember = part.scorch = 0;
+      if (e.fireFX.spread) e.fireFX.spread.fill(0);
+      e.fireFX.burning = false;
+    };
     const setCombatEnabled = (on) => {
       on = on === true;
       if (on === combatEnabled) return;
       combatEnabled = on;
       if (on) return;
       fireThreatsActive = false;
-      for (const e of list) {
-        if (rage) rage.cancel(e, "game-ended");
-        if (ctx.rageRelease) ctx.rageRelease(e);
-        e.health.value = e.health.max; e.health.delay = 0;
-        if (e.actionControlled || e.motion.smash) {
-          e.pound = e.recover = 0; e.poundHit = true;
-          e.actionControlled = e.motion.smash = false;
-          e.gorilla.cancelSmash();
-        }
-        const f = e.fire, m = e.motion;
-        f.burning = f.contactBurning = f.rolling = f.requested = f.escaping = f.panic.active = false;
-        f.retry = f.escapeRetry = f.age = f.heat = f.soot = f.cooldown = f.rollRecover = 0;
-        m.poundCharge = m.throwProgress = m.roll = m.rollAngle = m.rollSide = 0;
-        m.dragging = m.rage = false;
-      }
+      for (const e of list) clearCombatEffects(e);
     };
     const stats = () => {
       let active = 0, working = 0, chilling = 0, overflow = 0, airborne = 0, hits = 0, pounds = 0, beats = 0, stuck = 0, replans = 0, recoveries = 0;
