@@ -454,10 +454,23 @@
           : compactWidth * scale + presetSpace <= available ? "compact" : "below";
         const paddingLeft = parseFloat(topbar.paddingLeft) || 0, paddingRight = parseFloat(topbar.paddingRight) || 0;
         const topEdge = Math.min(brand.top, clock.top, block.top), bottomEdge = Math.max(brand.bottom, clock.bottom, block.bottom);
-        const top = banner === "below" ? bottomEdge + 12 : (topEdge + bottomEdge - 52 * scale) / 2;
+        // Below the title (a phone), the row sits close under the banner's text and near the screen's left edge, still
+        // inside a notch's safe area.
+        const belowLeft = Math.max(4, paddingLeft - 4);
+        const top = banner === "below" ? bottomEdge + 4 : (topEdge + bottomEdge - 52 * scale) / 2;
+        // The controls and sound buttons at the top right. With the row below the title (a phone) they take its buttons'
+        // size and margins: as tall as they are, 4px from the top and right edges and from each other, inside any safe
+        // area. Otherwise they stand in line with the row: as tall as the banner's text (28 to 36px), their tops level with
+        // the row's buttons' tops, 8px from the right edge (past any safe area) and from each other.
+        const below = banner === "below", paddingTop = parseFloat(topbar.paddingTop) || 0;
+        const side = below ? Math.round(52 * scale) : Math.round(Math.max(28, Math.min(36, bottomEdge - topEdge)));
+        bannerStyle(el.topbar, "--hub-banner-button", `${side}px`);
+        bannerStyle(el.topbar, "--hub-banner-button-top", `${below ? Math.max(4, paddingTop - 6) : Math.round(top * 10) / 10}px`);
+        bannerStyle(el.topbar, "--hub-banner-button-right", below ? `${Math.max(4, paddingRight - 4)}px` : "calc(var(--safe-right) + 8px)");
+        bannerStyle(el.topbar, "--hub-banner-button-gap", `${below ? 4 : 8}px`);
         if (el.equipment.dataset.banner !== banner) el.equipment.dataset.banner = banner;
         bannerStyle(el.equipment, "--hub-equipment-scale", String(scale));
-        bannerStyle(el.equipment, "--hub-equipment-left", `${banner === "below" ? paddingLeft : leftEdge}px`);
+        bannerStyle(el.equipment, "--hub-equipment-left", `${banner === "below" ? belowLeft : leftEdge}px`);
         bannerStyle(el.equipment, "--hub-equipment-top", `${top}px`);
         bannerStyle(el.equipment, "--hub-equipment-width", `${Math.max(0, window.innerWidth - paddingLeft - paddingRight) / scale}px`);
         const equipmentHeight = count ? el.equipmentRow.offsetHeight * scale : 0;
@@ -465,7 +478,7 @@
         if (presets && presetCount) {
           const presetTop = banner === "below" ? top + equipmentHeight + (count ? 8 : 0) : (topEdge + bottomEdge - 28) / 2;
           const equipmentWidth = (compactWidth + (banner === "full" && expanded ? 140 : 0)) * scale;
-          const presetLeft = banner === "below" ? paddingLeft : leftEdge + equipmentWidth + (count ? 12 : 0);
+          const presetLeft = banner === "below" ? belowLeft : leftEdge + equipmentWidth + (count ? 12 : 0);
           bannerStyle(presets, "--banner-presets-top", `${presetTop}px`);
           bannerStyle(presets, "--banner-presets-left", `${presetLeft}px`);
           bannerStyle(presets, "--banner-presets-width", `${Math.max(0, window.innerWidth - presetLeft - paddingRight)}px`);
@@ -498,6 +511,7 @@
         for (const property of ["--hub-equipment-scale", "--hub-equipment-left", "--hub-equipment-top", "--hub-equipment-width"]) el.equipment.style.removeProperty(property);
         el.messageStack.style.removeProperty("--hub-equipment-bottom");
         el.micNote.style.removeProperty("--hub-equipment-bottom");
+        for (const property of ["--hub-banner-button", "--hub-banner-button-top", "--hub-banner-button-right", "--hub-banner-button-gap"]) el.topbar.style.removeProperty(property);
       });
       scheduleBanner();
     }
@@ -540,7 +554,7 @@
         host.setAttribute("role", "img"); host.setAttribute("aria-label", "Host: runs the Oogas for everyone");
         host.title = "Host: runs the Oogas for everyone";
         dots.append(presence, host);
-        // The name, on one line and cut short with an ellipsis, opens a signed-in player's row onto where they are.
+        // The name, on one line and cut short with an ellipsis, opens the row onto the contributor's stats.
         name.className = "roster-name"; name.type = "button"; label.className = "roster-label";
         name.append(label);
         const marks = document.createElement("span"), voice = document.createElement("button");
@@ -549,19 +563,16 @@
         marks.append(voice);
         const age = document.createElement("span"), state = document.createElement("span");
         age.className = "roster-age"; age.append(""); state.className = "roster-state"; state.append("");
-        const where = document.createElement("div"), whereLabel = document.createElement("span"), whereValue = document.createElement("span");
-        where.className = "roster-where"; whereLabel.className = "roster-where-label"; whereLabel.textContent = "Land";
-        whereValue.className = "roster-where-value";
-        where.append(whereLabel, whereValue);
-        li.append(dots, name, marks, age, state, where);
-        nodes = { li, presence, name, label, host, voice, age, state, where, whereValue };
+        li.append(dots, name, marks, age, state);
+        nodes = { li, presence, name, label, host, voice, age, state, stats: null };
         rosterNodes.set(contributor.name, nodes);
       }
-      const { li, presence, name, label, host, voice, age, state, where, whereValue } = nodes;
+      const { li, presence, name, label, host, voice, age, state } = nodes;
       if (label.textContent !== contributor.display) { label.textContent = contributor.display; label.title = contributor.display; }
       presence.dataset.online = "false"; presence.setAttribute("aria-label", "Offline"); presence.title = "Offline";
-      host.hidden = voice.hidden = where.hidden = true; voice.disabled = false;
-      name.disabled = true; name.removeAttribute("aria-expanded"); whereValue.textContent = "";
+      host.hidden = voice.hidden = true; voice.disabled = false;
+      if (nodes.stats) nodes.stats.box.hidden = true;
+      name.setAttribute("aria-expanded", "false");
       voice.dataset.voice = voice.dataset.login = ""; voice.dataset.self = "false";
       const activity = BL.contributors.contributionStateFor(contributor), ageText = BL.contributors.contributionAgeLabel(contributor);
       if (age.firstChild.data !== ageText) age.firstChild.data = ageText;
@@ -570,7 +581,7 @@
       li.hidden = activity === "away";
       if (activity === "away") { if (!awayRow.parentElement) el.roster.append(awayRow); awayCount++; }
       el.roster.append(li);
-      rosterRows.set(contributor.name, { li, presence, state, age, contributor, rosterIndex, online: false, sceneOnline: false, remoteOnline: false, netOnline: false, nextOnline: false, placedStamp: stampOf(contributor), host, voice, look: "", login: "", hostOn: false, blocked: false, self: false, nextLook: "", nextLogin: "", nextHost: false, nextSelf: false, name, where, whereValue, zone: "", nextZone: "", open: false });
+      rosterRows.set(contributor.name, { li, presence, state, age, contributor, rosterIndex, online: false, sceneOnline: false, remoteOnline: false, netOnline: false, nextOnline: false, placedStamp: stampOf(contributor), host, voice, look: "", login: "", hostOn: false, blocked: false, self: false, nextLook: "", nextLogin: "", nextHost: false, nextSelf: false, name, nodes, open: false });
     }
     if (!awayRow.parentElement) el.roster.append(awayRow);
     updateAwayButton();
@@ -578,8 +589,8 @@
       const who = e.target.closest(".roster-name");
       if (who) {
         who.blur();
-        const row = !who.disabled && rosterRows.get(who.parentElement.dataset.name);
-        if (row) openWhere(row, !row.open);
+        const row = rosterRows.get(who.parentElement.dataset.name);
+        if (row) openStats(row, !row.open);
         return;
       }
       const button = e.target.closest(".roster-voice");
@@ -666,6 +677,12 @@
     on(document, "visibilitychange", refreshRosterActivity);
     // The page-level pass updates presence without changing contribution order.
     liveRows = rosterRows;
+    // A fresh oogatron reading refills every open stats strip.
+    listeners.push(BL.oogatronLive.subscribe((event) => {
+      if (event.type !== "stats") return;
+      liveStats = BL.activityRepos.normalizeStats(event.stats);
+      for (const row of rosterRows.values()) if (row.open) fillStats(row);
+    }));
     liveOnline = showOnline;
     showVoices();
     // Value the donated sats at the current price; donor rankings retain their receipt prices. A bitcoin's price is
@@ -2441,14 +2458,106 @@
     const character = BL.net.characterOf(login);
     return character && liveRows.get(character.handle) || body && liveRows.get(BL.net.bodyName(body)) || null;
   };
-  // The land a signed-in player's zone stands in (docs/auth-and-presence.md, Zones), for their row's drop-down.
-  const landOf = (zone) => BL.zoneMap.landOf(zone);
-  // A row opens onto the land below its name, and closes when its player is no longer in the room.
-  const openWhere = (row, open) => {
+  // A contributor's stats, a darker strip under their row that their name opens: their Ooga's face, the day of their
+  // first contribution (the character's `joined`), their contributions across the org, all five kinds, and every
+  // repository they have contributed to with their count there, from the newest oogatron reading (oogatron-live.js,
+  // kept on `liveStats`) or the baked one. Built on its first opening and filled on each, and again while open when a
+  // reading arrives; the face is drawn once a page a contributor.
+  const STAT_KINDS = [["commits", "commit", "commits"], ["prs", "PR", "PRs"], ["reviews", "review", "reviews"], ["issues", "issue", "issues"], ["comments", "comment", "comments"]];
+  // The org's .github repository holds its profile and templates, not a project, so it gets no chip.
+  const STAT_FACE_PX = 40, REPO_URL = "https://github.com/OogaBoogaX/", UNLISTED_REPOS = new Set([".github"]);
+  const SINCE = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" });
+  const faces = new Map();
+  let liveStats = null;
+  const statCount = (n) => n >= 1e4 ? BL.game.formatLarge(n) : n.toLocaleString();
+  const countIn = (board, login) => {
+    if (Array.isArray(board)) for (const entry of board) if (entry.login.toLowerCase() === login) return entry.count;
+    return 0;
+  };
+  const countFor = (boards, login) => {
+    let n = 0;
+    if (boards) for (const [kind] of STAT_KINDS) n += countIn(boards[kind], login);
+    return n;
+  };
+  const buildStats = (row) => {
+    const box = document.createElement("div"), face = document.createElement("canvas"), facts = document.createElement("dl");
+    const total = document.createElement("dd"), since = document.createElement("dd"), kinds = document.createElement("p"), repos = document.createElement("div");
+    box.className = "roster-stats"; box.id = `roster-stats-${row.rosterIndex}-${row.contributor.name}`;
+    face.className = "roster-stats-face"; face.setAttribute("role", "img"); face.setAttribute("aria-label", `${row.contributor.display}'s Ooga`);
+    facts.className = "roster-stats-facts";
+    for (const [term, value] of [["Contributions", total], ["Since", since]]) {
+      const pair = document.createElement("div"), dt = document.createElement("dt");
+      dt.textContent = term;
+      pair.append(dt, value);
+      facts.append(pair);
+    }
+    kinds.className = "roster-stats-kinds";
+    // Links in a group, not list items: the roster's own rows are its <li>s.
+    repos.className = "roster-stats-repos"; repos.setAttribute("role", "group"); repos.setAttribute("aria-label", "Repositories");
+    box.append(face, facts, kinds, repos);
+    row.nodes.stats = { box, face, total, since, kinds, repos };
+    row.li.append(box);
+    row.name.setAttribute("aria-controls", box.id);
+  };
+  const fillStats = (row) => {
+    const stats = row.nodes.stats, contributor = row.contributor, character = BL.characters.get(contributor.name);
+    const login = ((character && character.github) || contributor.name).toLowerCase();
+    if (!faces.has(contributor.name)) {
+      const canvas = document.createElement("canvas");
+      renderFaceIcon(canvas, BL.models.caveman(BL.contributors.traitsFor(contributor.name)), null, STAT_FACE_PX * 2);
+      faces.set(contributor.name, canvas);
+    }
+    const art = faces.get(contributor.name), ctx = stats.face.getContext("2d");
+    stats.face.width = stats.face.height = art.width;
+    ctx.drawImage(art, 0, 0);
+    const joined = character ? character.joined * 1e3 : contributor.lastCommitAt;
+    stats.since.textContent = joined > 0 ? SINCE.format(joined) : "—";
+    const data = liveStats || BL.jumbotronData;
+    const kinds = [];
+    let sum = 0;
+    for (const [kind, one, many] of STAT_KINDS) {
+      const n = countIn(data && data.leaderboards && data.leaderboards[kind], login);
+      sum += n;
+      if (n) kinds.push(`${statCount(n)} ${n === 1 ? one : many}`);
+    }
+    stats.total.textContent = statCount(sum);
+    // Each count stays on one line with its label (and the dot after it), so the line wraps only between them.
+    stats.kinds.replaceChildren();
+    kinds.forEach((text, i) => {
+      const item = document.createElement("span");
+      item.textContent = i < kinds.length - 1 ? `${text}\u00a0·` : text;
+      stats.kinds.append(item, i < kinds.length - 1 ? " " : "");
+    });
+    stats.kinds.hidden = !kinds.length;
+    const list = [];
+    for (const repo of data && Array.isArray(data.repos) ? data.repos : []) {
+      if (UNLISTED_REPOS.has(repo.name)) continue;
+      const listed = Array.isArray(repo.contributors) && repo.contributors.some((c) => c.login.toLowerCase() === login);
+      const n = countFor(repo.leaderboards, login);
+      if (listed || n) list.push({ name: repo.name, n });
+    }
+    list.sort((a, b) => b.n - a.n || (a.name < b.name ? -1 : 1));
+    stats.repos.replaceChildren();
+    for (const { name, n } of list) {
+      const a = document.createElement("a"), count = document.createElement("b");
+      a.href = REPO_URL + name; a.target = "_blank"; a.rel = "noopener";
+      a.title = `${name}: ${n.toLocaleString()} contribution${n === 1 ? "" : "s"}`;
+      count.textContent = statCount(n);
+      a.append(name, count);
+      stats.repos.append(a);
+    }
+    if (!list.length) {
+      const none = document.createElement("span");
+      none.className = "roster-stats-none"; none.textContent = "No repositories in the latest reading";
+      stats.repos.append(none);
+    }
+  };
+  const openStats = (row, open) => {
     row.open = open;
-    row.where.hidden = !open;
-    if (row.zone) row.name.setAttribute("aria-expanded", String(open));
-    else row.name.removeAttribute("aria-expanded");
+    if (open && !row.nodes.stats) buildStats(row);
+    if (open) fillStats(row);
+    if (row.nodes.stats) row.nodes.stats.box.hidden = !open;
+    row.name.setAttribute("aria-expanded", String(open));
   };
   const paintMarks = (row) => {
     const blocked = !!row.nextLogin && BL.voice.mutedLocally(row.nextLogin);
@@ -2472,12 +2581,6 @@
       row.hostOn = row.nextHost;
       row.host.hidden = !row.hostOn;
     }
-    if (row.zone !== row.nextZone) {
-      row.zone = row.nextZone;
-      row.name.disabled = !row.zone;
-      row.whereValue.textContent = row.zone ? landOf(row.zone) : "";
-      openWhere(row, row.open && !!row.zone);
-    }
   };
   // A signed-in player is online on their own Ooga's row and on the row of the actor's Ooga.
   const markOnline = (login, body) => {
@@ -2488,7 +2591,7 @@
   const showVoices = () => {
     if (!liveRows) return;
     for (const row of liveRows.values()) {
-      row.nextLook = row.nextLogin = row.nextZone = "";
+      row.nextLook = row.nextLogin = "";
       row.nextHost = row.nextOnline = row.nextSelf = false;
     }
     const net = BL.net.state, voice = BL.voice.stats;
@@ -2499,7 +2602,6 @@
       for (const rec of BL.net.remotes.values()) markOnline(rec.login, rec.body);
       const self = voiceRowOf(net.me.login, net.body);
       if (self) {
-        self.nextZone = net.zone;
         if (voice.enabled) {
           self.nextLook = voice.muted ? "muted" : voice.speaking ? "speaking" : "on";
           self.nextSelf = true;
@@ -2509,7 +2611,6 @@
       for (const rec of BL.net.remotes.values()) {
         const row = voiceRowOf(rec.login, rec.body);
         if (!row) continue;
-        row.nextZone = rec.zone;
         if (rec.voice) {
           row.nextLook = rec.muted ? "muted" : BL.voice.speaking(rec.id) ? "speaking" : "on";
           row.nextLogin = rec.login;

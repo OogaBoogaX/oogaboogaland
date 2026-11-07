@@ -21,6 +21,10 @@
 // every mallet and tap at once when the visitor's voice group changes: the visitor's own club tap (`crew.cancelThump`)
 // and a chest beat only while a thump started it (`beatOwned`), through the rig's own interrupt (`motion.workExit`).
 // A beat begun by anything else is left alone.
+// Reactions (reactions.js, through `net.subscribeReactions`): an emoji a player sent pops up over their nameplate, or
+// over the visitor's own head for their own (id 0), rises a little and fades over REACT_TIME, the newest replacing the
+// one before; a raised hand (`rec.hand`, `net.state.hand` for the visitor's own) stands there until it is lowered, never
+// moving: a reaction pops up in front of it and rises on over it. Under Calm a reaction only fades. Drawn on the overlay as text, nothing built or kept.
 // `pick` finds the nearest live body along a sight line, mesh by mesh, through a weapon-target list of the pool's own
 // (never the scene's input targets, so a live player is seen by a view's crosshair without being tapped, possessed,
 // struck or shot); a body that is not shown (another zone, the visitor's own name) is never found, and the scene's
@@ -49,6 +53,11 @@
   const NAME_STROKE = "rgba(20, 14, 8, 0.85)", NAME_FILL = "#f3efe4", BAR_TRACK = "rgba(0, 0, 0, 0.55)", ONLINE = "#22c55e";
   // The thump's fallback mallet, on the same 9x9 grid: x, y, w, h runs, drawn ICON_LIFT over the nameplate or head.
   const MALLET = [1, 1, 7, 3, 4, 4, 1, 5], MALLET_FILL = "#d8892b", ICON_TIME = 1.2, ICON_LIFT = 12;
+  // A reaction's emoji and the raised hand, in CSS pixels over the nameplate's baseline (or the head's top): how long a
+  // reaction shows, how far it rises (further from a raised hand, to clear it), its pop and fade.
+  const EMOJI_FONT = "26px 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif";
+  const HAND_FONT = "20px 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif";
+  const REACT_TIME = 2.6, REACT_LIFT = 16, REACT_RISE = 22, REACT_OVER = 14, REACT_POP = 0.18, REACT_FADE = 0.7;
   // Gorilla flags a chest beat must not interrupt: airborne, climbing, the lab's and the office's stances, asleep.
   const BEAT_BLOCKED = 1 | 4 | 16 | 32 | 64;
   const CALM = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -86,7 +95,7 @@
     const bodies = new Map();
     // The chat subscription, taken on the first update and again after a kept hub's suspend disposed it; the
     // shot and strike subscriptions the same way.
-    let unheard = null, unshot = null, unswung = null;
+    let unheard = null, unshot = null, unswung = null, unreacted = null;
     // `dx`, `dz` and `dy` are what the body's feet and top did in the last update, which a player on its head rides.
     const actorPool = Array.from({ length: MAX }, () => ({ id: null, player: true, x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0, radius: BODY_RADIUS, height: BODY_HEIGHT }));
     const actorList = [];
@@ -180,7 +189,7 @@
       addChild(root, cave.root);
       const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0, workExit: false } : null;
       const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, jetNode: null, jetFlame: null, swing: 0, shotAt: -Infinity, lastHeld: 0, lastMode: 0, lastMelee: 0, sampleAt: 0, sampleMelee: 0, sampleFlags: 0, sampleSwap: 0, sampleSwapIndex: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, ghosted: null, label: "", labelW: 0,
-        still: false, thumpT: 0, icon: 0, screenX: NaN, beatOwned: false, pickOwner: { kind: "player", id: rec.id, cave, weaponType: "none" } };
+        still: false, thumpT: 0, icon: 0, react: "", reactT: 0, screenX: NaN, beatOwned: false, pickOwner: { kind: "player", id: rec.id, cave, weaponType: "none" } };
       bodies.set(rec.id, entry);
       hideLocal(entry);
       return entry;
@@ -251,7 +260,7 @@
     };
 
     // The visitor's own body's fallback mallet, and the overlay last drawn on, for a thump's pan.
-    let selfIcon = 0, selfBody = null, overlay = null;
+    let selfIcon = 0, selfBody = null, overlay = null, selfReact = "", selfReactT = 0;
     // Their jetpack from the room's `jet` (net.js): the character's built-in one, or the hub's model, put on as the
     // crew puts one on (`crew.jetpackNode`) the first time it shows. The flame flickers as the crew's does.
     let jetClock = 0;
@@ -353,7 +362,9 @@
       jetClock += dt;
       activePool = pool;
       if (selfIcon > 0) selfIcon = Math.max(0, selfIcon - dt);
+      if (selfReactT > 0) selfReactT = Math.max(0, selfReactT - dt);
       if (fx && !unheard) unheard = net.subscribeChat(heard);
+      if (!unreacted && net.subscribeReactions) unreacted = net.subscribeReactions(reacted);
       if (!unshot && net.subscribeShots) { unshot = net.subscribeShots(shotHeard); unswung = net.subscribeSwings(swingHeard); }
       for (const entry of bodies.values()) {
         const rec = net.remotes.get(entry.id);
@@ -390,6 +401,7 @@
         entry.yaw += Math.atan2(Math.sin(rec.yaw - entry.yaw), Math.cos(rec.yaw - entry.yaw)) * t;
         if (far) entry.dx = entry.dz = 0;
         if (entry.icon > 0) entry.icon = Math.max(0, entry.icon - dt);
+        if (entry.reactT > 0) entry.reactT = Math.max(0, entry.reactT - dt);
         entry.cave.root.visible = visible(rec) && !(!entry.gorilla && crew && crew.player && crew.player.traits.name === entry.name);
         if (entry.gorilla) poseGorilla(entry, rec, dt);
         else {
@@ -459,15 +471,47 @@
       ctx.fillStyle = MALLET_FILL;
       runs(ctx, MALLET, x, y);
     };
+    // A reaction `emoji` `left` seconds before it goes, and the raised hand, over the point (x, y). The hand never moves;
+    // a reaction starts on it, drawn after it so in front, and rises clear of it.
+    const drawReaction = (ctx, x, y, emoji, left, hand) => {
+      ctx.textBaseline = "middle";
+      if (hand) {
+        ctx.font = HAND_FONT;
+        ctx.fillText(hand, x, y - REACT_LIFT);
+      }
+      if (left > 0) {
+        const age = REACT_TIME - left, calm = CALM.matches, k = 1 - age / REACT_TIME;
+        const pop = calm ? 1 : Math.min(1, age / REACT_POP), scale = calm ? 1 : 0.4 + 0.6 * (1 - (1 - pop) * (1 - pop)) + 0.12 * Math.sin(Math.PI * pop);
+        // From a raised hand it starts on the hand and goes further; under Calm it stands clear of the hand from the start.
+        const start = hand ? 0 : 4, reach = hand ? REACT_RISE + REACT_OVER : REACT_RISE;
+        const rise = calm ? (hand ? reach : 0) : reach * (1 - k * k);
+        ctx.globalAlpha = Math.min(1, left / REACT_FADE);
+        ctx.font = EMOJI_FONT;
+        ctx.save();
+        ctx.translate(x, y - REACT_LIFT - start - rise);
+        ctx.scale(scale, scale);
+        ctx.fillText(emoji, 0, 0);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+      ctx.textBaseline = "alphabetic";
+      ctx.font = NAME_FONT;
+    };
     const drawNames = (ctx, project, showHealth = false) => {
       overlay = ctx.canvas;
-      if (!bodies.size && selfIcon <= 0) return;
+      const ownHand = net.state && net.state.hand ? BL.reactionPolicy.HANDS[net.state.handTone] : "";
+      if (!bodies.size && selfIcon <= 0 && selfReactT <= 0 && !ownHand) return;
       ctx.save();
-      if (selfIcon > 0) {
-        const rig = selfBody && (selfBody.parts ? selfBody : selfBody.gorilla);
+      if (selfIcon > 0 || selfReactT > 0 || ownHand) {
+        const own = selfIcon > 0 ? selfBody : player ? player() : crew && crew.player;
+        const rig = own && (own.parts ? own : own.gorilla);
         headMinX = Infinity; headMaxX = -Infinity; headTop = Infinity;
         if (rig && rig.parts && rig.parts.head && rig.root.visible) projectHead(rig.parts.head, project);
-        if (headTop !== Infinity) mallet(ctx, Math.round((headMinX + headMaxX) / 2) - 4, Math.round(headTop) - ICON_LIFT - 9);
+        if (headTop !== Infinity) {
+          const x = Math.round((headMinX + headMaxX) / 2), y = Math.round(headTop);
+          if (selfIcon > 0) mallet(ctx, x - 4, y - ICON_LIFT - 9);
+          if (selfReactT > 0 || ownHand) { ctx.textAlign = "center"; drawReaction(ctx, x, y, selfReact, selfReactT, ownHand); }
+        }
       }
       ctx.font = NAME_FONT;
       ctx.textAlign = "center";
@@ -487,6 +531,7 @@
         const x = Math.round((headMinX + headMaxX) / 2), y = Math.round(headTop) - lift, half = entry.labelW / 2;
         entry.screenX = x;
         if (entry.icon > 0) mallet(ctx, x - 4, y - ICON_LIFT - 9);
+        if (entry.reactT > 0 || rec.hand) drawReaction(ctx, x, y - NAME_MID, entry.react, entry.reactT, rec.hand ? BL.reactionPolicy.HANDS[rec.handTone] : "");
         ctx.strokeStyle = NAME_STROKE;
         ctx.fillStyle = NAME_FILL;
         ctx.strokeText(rec.display, x, y);
@@ -531,6 +576,13 @@
           if (rec && rec.login === line.login) { fx.say(entry.cave, line.text, CHAT_SAY); break; }
         }
       }
+    };
+
+    // A reaction from player `id`, or 0 for the visitor's own, over that body while it shows.
+    const reacted = (id, emoji) => {
+      if (id === 0) { selfReact = emoji; selfReactT = REACT_TIME; return; }
+      const entry = bodies.get(id);
+      if (entry) { entry.react = emoji; entry.reactT = REACT_TIME; }
     };
 
     // A thump from player `id`, or 0 for the visitor's own: the body's one-off, or its mallet; the pan, or null with no body.
@@ -584,7 +636,9 @@
       selfBody = overlay = null;
       if (unheard) unheard();
       if (unshot) { unshot(); unswung(); }
-      unheard = unshot = unswung = null;
+      if (unreacted) unreacted();
+      unheard = unshot = unswung = unreacted = null;
+      selfReact = ""; selfReactT = 0;
       for (const entry of [...bodies.values()]) drop(entry);
       actorList.length = 0;
     };
