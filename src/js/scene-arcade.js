@@ -84,7 +84,7 @@
   const cabinetHidden = new Map();
   let cabinetFocus = null;
   let captureOnArrival = false;
-  let leaving = false, openingGame = false, people = null, avatar = null, playerWorld = null, screens = null, shownFrame = -1, prompt = null, promptOccupied = null;
+  let leaving = false, openingGame = false, people = null, avatar = null, playerWorld = null, screens = null, shownFrame = -1, prompt = null, promptOccupied = null, promptRail = null;
   // HALLOWEEN: the ghost arena's hunt: its herald before the hunt loads, the hunt, its channel to the room, GAME MODE,
   // the iron fence across the hallway's mouth (how far up), the totems and their lit parts, whether the visitor's Ooga carries its rifle
   // (in the arena), the voice zone it reports and the one it is turning to, which half of the hallway it is on, how far
@@ -1203,9 +1203,76 @@
   };
   const useNear = (x, z, reach) => {
     const s = nearStation(x, z, Math.max(reach, REACH), true);
-    if (!s) return false;
+    if (!s) return startSlide(people.player);
     useStation(s);
     return true;
+  };
+
+  // ---- the handrail slide ----------------------------------------------------------------------------------
+  // Space at a stair's head, inside the stair beside its hall-side handrail and facing down it (`AM.handrailAt`; never
+  // the deck's rail between the stairs' heads), sits the driven Ooga on the cane and slides it down on its bottom: a
+  // crew seat that moves, as the hangar's forklift's does, easing up to speed. Past the foot it hops off forward onto
+  // the floor clear of the stair with a puff of dust. Space on the way down hops off sideways onto the treads (the
+  // seat's `walkAt`, kept beside it). Other pages see it by the pose alone, and `railSitter` sits a body on a cane's
+  // line. One slide and one seat for the visit, reused.
+  const SLIDE_AT = { x: 0, y: 0, z: 0, wx: 0, wz: 0, floor: 0 }, SIT_AT = { x: 0, y: 0, z: 0, wx: 0, wz: 0, floor: 0 };
+  const SLIDE = { rail: null, cave: null, s: 0, v: 0, hop: -1,
+    seat: { kind: "handrail", x: 0, y: 0, z: 0, ry: 0, floor: 0, walkAt: { x: 0, z: 0 }, sitter: null, keepEquipment: true, lockMovement: true } };
+  // The handrail the Ooga standing still on its feet may slide down from where it stands, or null.
+  const railFor = (cave) => {
+    if (!cave || cave.hop > 0 || cave.hopV > 0 || cave.camp.seat) return null;
+    const p = cave.root.position, feet = p.y - cave.baseY;
+    if (Math.abs(feet - supportAt(p.x, p.z, feet)) > 0.05) return null;
+    return AM.handrailAt(p.x, p.z, feet, cave.root.rotation.y);
+  };
+  const startSlide = (cave) => {
+    const rail = railFor(cave);
+    if (!rail || SLIDE.rail) return false;
+    const seat = SLIDE.seat, p = cave.root.position;
+    AM.slideAt(rail, AM.HANDRAIL.from, SLIDE_AT);
+    seat.x = SLIDE_AT.x; seat.y = SLIDE_AT.y; seat.z = SLIDE_AT.z; seat.ry = rail.ry;
+    seat.walkAt.x = p.x; seat.walkAt.z = p.z; seat.floor = p.y - cave.baseY;
+    if (!people.sitPlayer(seat)) return false;
+    SLIDE.rail = rail; SLIDE.cave = cave; SLIDE.s = AM.HANDRAIL.from; SLIDE.v = AM.HANDRAIL.start; SLIDE.hop = -1;
+    return true;
+  };
+  // Per frame, allocation-free: down the cane, then the hop off its foot to the landing, where the Ooga stands up.
+  // A slider stood up any other way (Space, a switch of Ooga, the crew letting go) ends the slide.
+  const slideStep = (dt) => {
+    const S = SLIDE, seat = S.seat, cave = S.cave, rail = S.rail;
+    if (!rail) return;
+    if (seat.sitter !== cave || cave.camp.seat !== seat) { S.rail = S.cave = null; return; }
+    const H = AM.HANDRAIL, p = cave.root.position, rise = cave.traits.height * 0.08;
+    if (S.hop < 0) {
+      S.v = Math.min(H.top, S.v + H.accel * dt);
+      S.s = Math.min(rail.len, S.s + S.v * dt);
+      AM.slideAt(rail, S.s, SLIDE_AT);
+      p.x = seat.x = SLIDE_AT.x; seat.y = SLIDE_AT.y; p.y = SLIDE_AT.y + rise; p.z = seat.z = SLIDE_AT.z;
+      seat.walkAt.x = SLIDE_AT.wx; seat.walkAt.z = SLIDE_AT.wz; seat.floor = SLIDE_AT.floor;
+      if (S.s >= rail.len) { S.hop = 0; seat.walkAt.x = rail.land.x; seat.walkAt.z = rail.land.z; seat.floor = 0; }
+    } else {
+      S.hop = Math.min(H.hop, S.hop + dt);
+      const k = S.hop / H.hop, y0 = rail.y1 + H.TOP + rise;
+      p.x = seat.x = rail.x1 + (rail.land.x - rail.x1) * k;
+      p.z = seat.z = rail.z1 + (rail.land.z - rail.z1) * k;
+      p.y = y0 + (cave.baseY - y0) * k + 1.4 * k * (1 - k);
+      if (k === 1 && people.standPlayer(cave)) {
+        fx.burst(p.x, 0.05, p.z, 6, BL.crew.LAND_DUST, 1.2);
+        S.rail = S.cave = null;
+      }
+    }
+    cave.root.rotation.y = rail.ry;
+  };
+  // Whether another page's Ooga is on a handrail's line (its feet as a slider's sit), so seen sitting on it.
+  const railSitter = (cave) => {
+    const p = cave.root.position;
+    for (let i = 0; i < AM.HANDRAILS.length; i++) {
+      const r = AM.HANDRAILS[i], a = (p.x - r.x0) * r.dx + (p.z - r.z0) * r.dz, c = (p.x - r.x0) * r.nx + (p.z - r.z0) * r.nz;
+      if (a < 0 || a > r.run || Math.abs(c) > 0.2) continue;
+      AM.slideAt(r, a / r.run * r.len, SIT_AT);
+      if (Math.abs(p.y - SIT_AT.y - cave.traits.height * 0.08) < 0.3) return true;
+    }
+    return false;
   };
 
   // ---- the crew: the game-room gorillas at work -------------------------------------------------------------
@@ -1902,6 +1969,11 @@
         // The shared unarmed pose keeps a club outside; Arcade parks it for every visitor.
         if (cave.parts.club) cave.parts.club.visible = false;
         if (cave.parts.gun && !inArenaRing(cave.root.position.x, cave.root.position.z, feet)) cave.parts.gun.visible = false;
+        // Sliding down a handrail, sat on the cane as the crew sits a seated Ooga.
+        if (railSitter(cave)) {
+          cave.parts.legR.rotation.x = cave.parts.legL.rotation.x = -Math.PI / 2;
+          cave.parts.armR.rotation.x = cave.parts.armL.rotation.x = -0.75;
+        }
       }
     });
     // HALLOWEEN: the ghost hunt, played in the arena: its herald over the middle until a click or a shot from inside
@@ -1949,7 +2021,7 @@
     leaving = openingGame = false;
     captureOnArrival = true;
     shownFrame = -1;
-    prompt = null;
+    prompt = promptRail = null;
     orders = 0;
 
     arcadeScene.root = root;
@@ -1957,7 +2029,7 @@
     arcadeScene.input = input;
     arcadeScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
-      arcade: { screens, crowd, walkers, bots, spin, play, open, stations, carnival, nearStation, supportAt, walkable: walkableFor, flyable: flyableFor, sightClear, pointHidden, blocks, audio, staff, life, get frame() { return shownFrame; } },
+      arcade: { screens, crowd, walkers, bots, spin, play, open, stations, carnival, nearStation, supportAt, slide: SLIDE, railSitter, walkable: walkableFor, flyable: flyableFor, sightClear, pointHidden, blocks, audio, staff, life, get frame() { return shownFrame; } },
       // HALLOWEEN: the arena's hunt (its herald's until it has loaded).
       get halloween() { return ghosts ? ghosts.debug : ghostEntry && ghostEntry.debug; },
       get arena() { return { armed, zone: zoneNow, fence: fenceK, gameMode, along: hallwayAlong, hearing: huntHearing, blendTo: BL.net.state.blendTo, blendT: BL.net.state.blendT }; }
@@ -1992,6 +2064,7 @@
       }
     }
     if (!leaving) pilot.readInput(dt);
+    slideStep(dt);
     if (people) people.update(dt, elapsed);
     pilot.update(dt);
     // The Ooga driven here goes to the room with where it stands and its health; other players here are shown.
@@ -2083,10 +2156,11 @@
     if (pilot.player && !leaving) {
       const p = avatar.root.position, near = nearStation(p.x, p.z, INVITE, true);
       const cabinetId = near?.kind === "cabinet" ? GAMES[near.game].id : near?.kind === "retro" ? near.id : null;
-      const occupied = cabinetId && BL.net.cabinetSeats.get(cabinetId);
-      if (near !== prompt || occupied !== promptOccupied) {
-        prompt = near; promptOccupied = occupied;
-        if (near) {
+      const occupied = cabinetId && BL.net.cabinetSeats.get(cabinetId), rail = near ? null : railFor(pilot.player);
+      if (near !== prompt || occupied !== promptOccupied || rail !== promptRail) {
+        prompt = near; promptOccupied = occupied; promptRail = rail;
+        if (rail) { hud.hint(COARSE ? "Tap SLIDE to slide down the handrail" : "Space: slide down the handrail"); hud.setAct("SLIDE"); }
+        else if (near) {
           const verb = near.kind === "snack" ? "order at " : near.kind === "prizes" ? "shop at " : "", act = near.kind === "snack" ? "ORDER" : near.kind === "prizes" ? "PRIZES" : near.kind === "wheel" ? "SPIN" : "PLAY";
           hud.hint(occupied ? `${near.label} · ${occupied.name} is playing` : near.kind === "wheel" ? `${COARSE ? act : "Space: spin"} (${AM.WHEEL_COST} tickets)` : `${COARSE ? act : "Space"}: ${verb}${near.label}`);
           hud.setAct(act);
@@ -2179,7 +2253,8 @@
     const count = input.targetCount;
     input.dispose();
     hud.dispose();
-    hud = hooks = input = pilot = fx = agentPlay = people = avatar = playerWorld = screens = stations = blocks = carnival = staff = prompt = prizeUi = ticketBoard = crowd = spin = null;
+    SLIDE.rail = SLIDE.cave = SLIDE.seat.sitter = null;
+    hud = hooks = input = pilot = fx = agentPlay = people = avatar = playerWorld = screens = stations = blocks = carnival = staff = prompt = prizeUi = ticketBoard = crowd = spin = promptRail = null;
     audio = bots = walkers = motes = power = disco = fame = shelf = lit = life = invited = null;
     arcadeScene.input = arcadeScene.debug = null;
     return { targets: count };
