@@ -256,7 +256,7 @@
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, jumbotron, positionDebug, remotes, npcSync;
+  let oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, jumbotron, positionDebug, remotes, npcSync, npcStatusBeams;
   // GAME MODE (`setGameMode`): an island event holds the island still for play while it runs.
   let gameMode = false, gameCombatOnly = false;
   let cloudHopper = null, cloudIsland = null, cloudPile = null, cloudPileSolids = null, cloudFinishFruit = null;
@@ -3157,6 +3157,7 @@
   };
   const isPlayerAttack = source => !!source && (source === crew.player || source.controlled && source.actionControlled);
   const weaponImpact = (source, hit, dx, dy, dz, power = 1, projectile = null) => {
+    if (source?.nonInteractive || hit.owner?.cave?.nonInteractive || hit.owner?.entry?.nonInteractive) return;
     if (hit.node === mirrorCave.node) {
       // Ordinary HUB melee reports its contact without the combat-only sweep effect.
       if (!gameMode && !projectile) mirrorCave.ripples.cross(hit.x - dx * 0.02, hit.y - dy * 0.02, hit.z - dz * 0.02,
@@ -3555,7 +3556,7 @@
   const updateSleepingSolids = () => {
     for (let index = 0; index < crew.list.length; index++) {
       const cave = crew.list[index];
-      if (!cave.root.visible || !cave.root.quaternion) continue;
+      if (cave.nonInteractive || !cave.root.visible || !cave.root.quaternion) continue;
       const out = cave.solidBounds;
       out[0] = out[1] = out[2] = Infinity; out[3] = out[4] = out[5] = -Infinity;
       BL.scene.updateWorld(cave.root);
@@ -3577,7 +3578,7 @@
     const dx = Math.max(b[0] - x, 0, x - b[3]), dz = Math.max(b[2] - z, 0, z - b[5]);
     return dx * dx + dz * dz < radius * radius - 1e-8;
   };
-  const uprightCharacter = (cave) => cave.root.visible && cave.state !== "sleeping" && !cave.grabbedBy && !cave.root.quaternion && !cave.camp.seat && !cave.camp.rolling;
+  const uprightCharacter = (cave) => !cave.nonInteractive && cave.root.visible && cave.state !== "sleeping" && !cave.grabbedBy && !cave.root.quaternion && !cave.camp.seat && !cave.camp.rolling;
   const standingPassenger = (cave) => uprightCharacter(cave) && cave.hop <= 1e-7 && cave.hopV <= 0 && !cave.jet?.thrust;
   const passengerOf = (cave, support) => {
     if (!support || !cave.riding.support || !uprightCharacter(support)) return false;
@@ -3606,7 +3607,7 @@
   };
   let clankerSupportActor = null;
   const npcYieldAhead = (cave, fx, fz) => {
-    if (!clankers || cave.humanControlled || cave.remoteControlled) return false;
+    if (!clankers || cave.nonInteractive || cave.humanControlled || cave.remoteControlled) return false;
     const p = cave.root.position, feet = p.y - cave.baseY, shape = BL.agent.torso;
     for (const entry of clankers.list) {
       if (!entry.active || !entry.root.visible || entry.controlled || entry.remoteControlled
@@ -3633,10 +3634,11 @@
       && (rage.debug || rage.agitators[crew.list.indexOf(clankerSupportActor)])
       && rageCaptureEligible(entry, clankerSupportActor)) return false;
     // A gorilla on another floor or hanging overhead is not a step below us.
-    return entry.active && entry.root.position.y <= y + STEP_MAX + 1e-7;
+    // A passive NPC Clanker is never a step: players and Oogas pass through it.
+    return !entry.nonInteractive && entry.active && entry.root.position.y <= y + STEP_MAX + 1e-7;
   };
   const characterClankerSupportAt = (x, z, y, rise, actor) => {
-    if (!clankerMeshes) return -Infinity;
+    if (!clankerMeshes || actor?.nonInteractive) return -Infinity;
     // Grounded Oogas walk over the live mesh without a body/side barrier.
     // Airborne Oogas still land only on surfaces below their world feet.
     const step = actor && actor.hop === 0 && actor.hopV <= 0 && !actor.ladder?.plane
@@ -3701,6 +3703,7 @@
     }
   };
   const beginClankerCapture = (entry, cave, autonomous) => {
+    if (entry?.nonInteractive || cave?.nonInteractive) return false;
     if (!gameMode) return false;
     const rec = entry.capture;
     if (!rec || rec.cave || cave.grabbedBy) return false;
@@ -4336,8 +4339,8 @@
   };
   // Tree tops are landing surfaces for the visitor, not resting floors for wandering Oogas.
   const npcTreeSupportAllowed = (node) => !node.npcTreeSupport;
-  const npcPassesPlayer = (actor, other) => actor?.contributor && !actor.humanControlled && !actor.remoteControlled
-    && (other.humanControlled || other.remoteControlled);
+  const npcPassesPlayer = (actor, other) => actor?.nonInteractive || other.nonInteractive
+    || actor?.contributor && !actor.humanControlled && !actor.remoteControlled && (other.humanControlled || other.remoteControlled);
   const propSupportAt = (x, z, y, rise, actor, ignoreClanker = false, passTraffic = false) => {
     const npc = actor?.contributor && actor !== pilot?.player;
     let floor = solids ? solids.supportAt(x, z, y, rise, PLAYER_RADIUS, null, null, passTraffic, npc ? npcTreeSupportAllowed : null, passTraffic) : -Infinity;
@@ -4366,6 +4369,7 @@
     return ceiling;
   };
   const clankerBodySegmentClear = (other, x, y, z, toX, toY, toZ, radius, height) => {
+    if (other.nonInteractive) return true;
     const shape = BL.agent.footprint, p = other.root.position;
     if (Math.min(y, toY) > p.y + other.height || Math.max(y, toY) + height < p.y) return true;
     const count = shape.count(other), size = shape.radius(other), first = shape.offset(other, 0);
@@ -4552,6 +4556,8 @@
     else fallback();
   };
   const moveCampBody = (cave, x, y, z, dt) => {
+    // Passive NPCs swing no room signs and catch no fire; driven bodies keep both.
+    if (cave.nonInteractive) return;
     moveRoomSigns(cave, x, y, z, dt);
     if (cave.camp.burning || cave.camp.rolling || cave.camp.cooldown > 0) return;
     const p = cave.root.position, dx = p.x - x, dz = p.z - z, distance = dx * dx + dz * dz;
@@ -8778,6 +8784,7 @@
     }
     footsteps.update(crew.player);
     if (!cloudPlaying()) npcSync.update(dt);
+    if (!cloudPlaying()) npcStatusBeams?.update(dt);
     shareDrivenActor(dt);
     remotes.update(dt);
     if (poolEffectsActive) {
@@ -9552,7 +9559,7 @@
   const clankerLabWorker = entry => !!entry && !entry.rage.active && !entry.controlled && entry.mode === "working"
     && (entry.route === "exit" && clankers?.sites[entry.fromSite]?.mouth === entropyLab.mouth
       || clankers?.sites[entry.site]?.mouth === entropyLab.mouth && (entry.motion.lab || entry.planningLab));
-  const clankerPassingPeer = (entry, other) => !!entry
+  const clankerPassingPeer = (entry, other) => entry?.nonInteractive || other.nonInteractive || !!entry
     && (entry === clankerPassingEntry || clankerEntering(entry) || clankerLabWorker(entry)) && other !== entry;
   const clankerSatelliteLandAt = (x, y, z, radius) => {
     // The rounded underside's balconies extend past the surface land mask.
@@ -9586,9 +9593,9 @@
     return support > -Infinity && support <= y + STEP_MAX && support >= y - 3.5;
   };
   const clankerPeersClear = (entry, x, y, z, toX, toY, toZ, fromHeading, toHeading, strictEnd = false) => {
-    if (!clankers || clankerEntering(entry) || clankerLabWorker(entry)) return true;
+    if (!clankers || entry.nonInteractive || clankerEntering(entry) || clankerLabWorker(entry)) return true;
     for (const other of clankers.list) {
-      if (other === entry || !other.active) continue;
+      if (other.nonInteractive || other === entry || !other.active) continue;
       const p = other.root.position, shape = BL.agent.torso;
       // A pose preview has already installed the destination trunk. Do not
       // mistake its expansion into a neighbour for escaping an old overlap.
@@ -9599,6 +9606,26 @@
     }
     return true;
   };
+  // A passive NPC gorilla collides with cave walls only: island terrain and the
+  // cave masonry it climbs. No other solid is queried at all, so props, bodies
+  // and scenery never block, lift or divert it.
+  // Terrain stays with the callers' own island checks (climb poses skip it on
+  // purpose); this adds only the cave masonry, less any row a climb grips.
+  const PASSIVE_WALL_HULL = new Float64Array(24);
+  const clankerWallsOnlyClear = (x, y, z, radius, height, ignore = null) => {
+    for (let corner = 0; corner < 8; corner++) {
+      PASSIVE_WALL_HULL[corner * 3] = x + (corner & 1 ? radius : -radius);
+      PASSIVE_WALL_HULL[corner * 3 + 1] = y + (corner & 2 ? height : 0);
+      PASSIVE_WALL_HULL[corner * 3 + 2] = z + (corner & 4 ? radius : -radius);
+    }
+    for (let i = 0; i < climbMasonry.length; i++) {
+      const row = climbMasonry[i];
+      if (row.node === ignore || x + radius < row.minX || x - radius > row.maxX || y + height < row.minY || y > row.maxY
+        || z + radius < row.minZ || z - radius > row.maxZ || !solids.isActive(row.node)) continue;
+      for (let j = 0; j < row.boxes.length; j++) if (BL.convex.hullsOverlap(PASSIVE_WALL_HULL, row.boxes[j])) return false;
+    }
+    return true;
+  };
   const clankerCylinderClear = (x, y, z, toX, toY, toZ, radius, height, entry = null, ignore = null, climbing = false, actors = true, checkTerrain = true, toRadius = radius, toHeight = height, skipClimbMasonry = false) => {
     const fromRadius = radius, fromHeight = height;
     radius = Math.max(radius, toRadius); height = Math.max(height, toHeight);
@@ -9606,8 +9633,10 @@
     if (!climbing && !island.onLand(toX, toZ) && !clankerSatelliteLandAt(toX, toY, toZ, radius) || crossesSealedCave(x, z, toX, toZ, y)
       || checkTerrain && (!island.clearAt(toX, toFloor, toZ, radius, body)
         || !island.voxelSegmentClearAt(x, floor, z, toX, toFloor, toZ, radius, body))
-      || !solids.segmentClear(x, floor, z, toX, toFloor, toZ, fromRadius, fromHeight - 0.002, ignore, toRadius, toHeight - 0.002, !!entry && !climbing, skipClimbMasonry, false, !!entry?.rage?.active)
+      || (entry?.nonInteractive ? !skipClimbMasonry && !clankerWallsOnlyClear(toX, toFloor, toZ, radius, body, ignore)
+        : !solids.segmentClear(x, floor, z, toX, toFloor, toZ, fromRadius, fromHeight - 0.002, ignore, toRadius, toHeight - 0.002, !!entry && !climbing, skipClimbMasonry, false, !!entry?.rage?.active))
       || !matrixGateSegmentClear(x, floor, z, toX, toFloor, toZ, radius, body, true)) return false;
+    if (entry?.nonInteractive) return true;
     if ((!entry || !entry.controlled) && !npcFireClear(x, y, z, toX, toY, toZ, height)) return false;
     if (!actors) return true;
     if (clankers) for (let i = 0; i < clankers.list.length; i++) {
@@ -9625,7 +9654,7 @@
     return along * along + across * across;
   };
   const clankerFireClear = (entry, x, y, z, toX, toY, toZ, fromHeading = entry.heading, toHeading = fromHeading) => {
-    if (entry.controlled) return true;
+    if (entry.controlled || entry.nonInteractive) return true;
     // Prop-height blending can leave the rendered feet below their support
     // position. Keep that lower body inside the pit's avoidance height band.
     const offset = Math.min(0, entry.motion.supportOffset);
@@ -9665,7 +9694,8 @@
       || crossesSealedCave(x, z, toX, toZ, y)
       || !island.clearAt(toX, to, toZ, radius, height)
       || !island.voxelSegmentClearAt(x, from, z, toX, to, toZ, radius, height)
-      || !solids.segmentClear(x, from, z, toX, to, toZ, radius, height, null, radius, height, true, false, !entry.drive.airborne && !entry.jump.active, entry.rage.active)
+      || (entry.nonInteractive ? !clankerWallsOnlyClear(toX, to, toZ, radius, height)
+        : !solids.segmentClear(x, from, z, toX, to, toZ, radius, height, null, radius, height, true, false, !entry.drive.airborne && !entry.jump.active, entry.rage.active))
       || !matrixGateSegmentClear(x, from, z, toX, to, toZ, radius, height, true)) return false;
     return clankerFireClear(entry, x, y, z, toX, toY, toZ, fromHeading, toHeading);
   };
@@ -9722,7 +9752,7 @@
     clankerPeerPoseChecked = true;
     const shape = BL.agent.torso, p = entry.root.position, from = CLANKER_PEER_FROM;
     for (const other of clankers.list) {
-      if (other === entry || !other.active) continue;
+      if (other.nonInteractive || other === entry || !other.active) continue;
       const q = other.root.position;
       if (shape.overlaps(entry, p.x, p.y, p.z, entry.root.rotation.y,
         other, q.x, q.y, q.z, other.heading, 0.03)
@@ -9735,6 +9765,7 @@
     return clankerPeerPoseClear = capturedPosePreview(entry);
   };
   const clankerWalkingPeersClear = (entry, dt, x, y, z) => {
+    if (entry.nonInteractive) return true;
     const p = entry.root.position, nx = p.x, ny = p.y, nz = p.z, heading = entry.root.rotation.y, nextHeading = entry.heading;
     if (!clankers || entry.controlled || entry.planningRoam || entry.drive.airborne
       || entry.fire.rolling || clankerEntering(entry) || clankerLabWorker(entry)) return true;
@@ -9783,7 +9814,8 @@
     return clankerCenterClear(entry, x, y, z, toX, toY, toZ, true)
       && island.clearAt(toX, to, toZ, radius, 0.12)
       && island.voxelSegmentClearAt(x, from, z, toX, to, toZ, radius, 0.12)
-      && solids.segmentClear(x, from, z, toX, to, toZ, radius, 0.12, null, radius, 0.12, true, false, false, entry.rage.active)
+      && (entry.nonInteractive ? clankerWallsOnlyClear(toX, to, toZ, radius, 0.12)
+        : solids.segmentClear(x, from, z, toX, to, toZ, radius, 0.12, null, radius, 0.12, true, false, false, entry.rage.active))
       && clankerPlayersClear(entry, x, y, z, toX, toY, toZ);
   };
   const clankerPlatformEntryAt = (x, y, z, out) => {
@@ -9903,7 +9935,7 @@
   const clankerRestFootingClear = (entry, x, y, z, heading) => {
     if (entry.rage.active || !entropyLab.phase.inside(x, y, z))
       return clankerCenterClear(entry, x, y, z, x, y, z, false, heading, heading)
-        && Math.abs(clankerPointFootingAt(x, z, y, entry.rage.active) - y) < 0.1;
+        && Math.abs((entry.nonInteractive ? island.supportAt(x, z, y, 0.02, ABYSS_FLOOR) : clankerPointFootingAt(x, z, y, entry.rage.active)) - y) < 0.1;
     CLANKER_REST_FOOTING.lab = entropyLab.phase.inside(x, y, z);
     return entry.gorilla.walkPoseClear(x, y, z, x, y, z, heading, heading,
       CLANKER_REST_FOOTING, clankerWalkSolidAt, clankerWalkTransitionClear,
@@ -9914,6 +9946,7 @@
   // it up on that one footprint. NPC gorillas still run under players.
   const clankerPlayers = (entry) => entry && entry.controlled && remotes && !cloudPlaying() ? remotes.actors() : null;
   const clankerPlayersClear = (entry, x, y, z, toX, toY, toZ, carrier = null) => {
+    if (entry?.nonInteractive) return true;
     const bodies = clankerPlayers(entry);
     if (bodies) for (let i = 0; i < bodies.length; i++) {
       const body = bodies[i];
@@ -9925,6 +9958,7 @@
   // NPC walking deliberately passes under players. A discontinuous bed landing must still keep
   // clear of both the locally driven Ooga and every remote player's current body.
   const clankerBedPlayersClear = (entry, bed) => {
+    if (entry.nonInteractive) return true;
     const radius = entry.gorilla.bodyRadius, height = entry.gorilla.bodyHeight;
     const local = crew.player;
     if (local && local.root.visible) {
@@ -10094,6 +10128,7 @@
     return clankerClimbTransitionClear(entry, x, y, z, nx, ny, nz, radius, height, actors, riders, toRadius, toHeight);
   };
   const clankerGroomClear = (entry, partner) => {
+    if (entry.nonInteractive || partner?.nonInteractive) return false;
     const p = entry.root.position, sine = Math.sin(entry.heading), cosine = Math.cos(entry.heading), side = entry.motion.groomSide;
     const x = p.x + cosine * side * 0.7 + sine * 0.3, z = p.z - sine * side * 0.7 + cosine * 0.3;
     const nx = p.x + cosine * side * 1.55 + sine * 0.55, nz = p.z - sine * side * 1.55 + cosine * 0.55;
@@ -10168,13 +10203,14 @@
     const entries = clankers.list;
     // Snapshot the sources so a new contact cannot ignite a whole crowd in one frame.
     for (let i = 0; i < entries.length; i++) entries[i].fire.contactBurning = entries[i].fire.burning;
+    // Passive NPCs (gorillas and Oogas) neither spread nor catch fire: skip them before any contact test.
     for (let i = 0; i < entries.length; i++) {
       const source = entries[i];
-      if (!source.active || !source.root.visible || !source.fire.contactBurning) continue;
+      if (source.nonInteractive || !source.active || !source.root.visible || !source.fire.contactBurning) continue;
       const p = source.root.position;
       for (let j = 0; j < entries.length; j++) {
         const target = entries[j];
-        if (target === source || !target.active || !target.root.visible || target.fire.burning || target.fire.cooldown > 0) continue;
+        if (target === source || target.nonInteractive || !target.active || !target.root.visible || target.fire.burning || target.fire.cooldown > 0) continue;
         const q = target.root.position;
         if (!BL.agent.footprint.overlaps(source, p.x, p.y, p.z, source.heading,
           target, q.x, q.y, q.z, target.heading, 0.06)) continue;
@@ -10183,7 +10219,7 @@
       }
       for (let j = 0; j < crew.list.length; j++) {
         const cave = crew.list[j], q = cave.root.position, floor = q.y - cave.baseY;
-        if (!cave.root.visible || cave.state === "away" || cave.camp.burning || cave.camp.cooldown > 0) continue;
+        if (cave.nonInteractive || !cave.root.visible || cave.state === "away" || cave.camp.burning || cave.camp.cooldown > 0) continue;
         if (!BL.agent.footprint.circleOverlaps(source, p.x, p.y, p.z, source.heading,
           q.x, floor, q.z, 0.38, cave.bodyHeight, 0.06)) continue;
         const y = Math.max(p.y, floor) + Math.min(source.height, cave.bodyHeight) * 0.5;
@@ -10209,6 +10245,9 @@
   const clankerSceneSupportAt = (entry, x, z, y, step, heading = entry.heading, props = true) => {
     // Tree tops are landing surfaces for the driven gorilla, not floors for a roaming one (as for Oogas).
     const accept = entry.controlled ? null : npcTreeSupportAllowed;
+    // A passive gorilla stands on terrain alone: the props-off path below is
+    // island support only (ramps and the lab floor included), never a prop.
+    if (entry.nonInteractive) props = false;
     const padSupportAt = entry.rage.active ? clankerRagePadSupportAt : clankerPadSupportAt;
     if (!entry.motion.lab && !entry.planningLab) {
       const terrainStep = step >= STEP_MAX && BL.wallPanels.rampAt(island.surfaceAt, x, y, z, heading, CLANKER_TERRAIN_RAMP)
@@ -10277,6 +10316,8 @@
   };
   // The scene's support, and other players' tops for the gorilla the visitor drives.
   const clankerSupportAt = (entry, x, z, y, step, heading = entry.heading, props = true) => {
+    // Passive: terrain only, and never another player's top.
+    if (entry.nonInteractive) props = false;
     const floor = clankerSceneSupportAt(entry, x, z, y, step, heading, props);
     return props ? Math.max(floor, clankerPlayersSupportAt(entry, x, z, y, step)) : floor;
   };
@@ -11014,6 +11055,7 @@
   const updateClankerEffects = (dt) => {
     for (let i = 0; i < clankers.list.length; i++) {
       const entry = clankers.list[i];
+      if (entry.nonInteractive) continue;
       BL.clankerRage.effects(entry);
       if (!entry.active) continue;
       const f = entry.fire, parts = entry.renderParts, fireFX = entry.fireFX, spread = fireFX.spread;
@@ -11112,11 +11154,15 @@
     minContactAcross: 0, maxContactAcross: 0
   };
   const clankerTallObstacleAhead = (entry, dx, dz) => {
+    // No prop is an obstacle to a passive gorilla.
+    if (entry.nonInteractive) return false;
     const p = entry.root.position, step = BL.clankers.PROP_STEP, aboveStep = p.y + step + 0.02;
     return solids.shoulderAt(p.x, aboveStep, p.z, dx, dz, 0.025,
       Math.max(0, entry.height - step), 1.4, CLANKER_TALL_OBSTACLE, aboveStep, entry.rage.active);
   };
   const poundClankerEquipment = (entry) => {
+    // A passive NPC's pound stays an animation: it builds no generic cave prop.
+    if (entry.nonInteractive) return;
     const p = entry.root.position;
     let nearest = null, distance = Infinity;
     for (let i = 0; i < clankerEquipment.length; i++) {
@@ -11538,6 +11584,7 @@
     clankerPlay.dispose();
     remotes.dispose();
     npcSync.dispose();
+    npcStatusBeams?.clear();
     pilot.suspend();
     input.suspend();
     crew.pause();
@@ -12012,7 +12059,9 @@
     shared.npcCaveRoofAt = npcCaveRoofAt;
     shared.npcRecoverySpot = npcRecoverySpot;
     shared.respawnSpot = pileRespawnSpot;
-    shared.initialWorkSpot = (cave, out) => pileRespawnSpot(cave, out, true) || npcRecoverySpot(cave, out);
+    // A passive NPC starts work at the pile or retries from away; never elsewhere.
+    shared.initialWorkSpot = (cave, out) => pileRespawnSpot(cave, out, true)
+      || !cave.nonInteractive && npcRecoverySpot(cave, out);
     shared.shoulderObstacleActive = solids.isActive;
     shared.shoulderObstacle = (cave, fx, fz, reach, out) => {
       const p = cave.root.position;
@@ -12136,6 +12185,11 @@
       island, walkable: npcWalkable, pointAllowed: (x, z) => !npcClosedCaveAt(x, z) && !npcRampRoofAt(x, island.surfaceAt(x, z), z),
       surfaceAt: (x, z, y) => island.supportAt(x, z, y, 1e-6, null, PLAYER_RADIUS)
     });
+    // Passive NPC work trips follow only the authored spokes and pile ring.
+    shared.npcFixedPaths = BL.npcPaths.fixed(island);
+    // Those mainland legs stand on the island's own terrain only (ramps and
+    // path heights included): no props, bodies, beds or water hold them up.
+    shared.npcFixedTerrainAt = (x, z, y) => island.supportAt(x, z, y, STEP_MAX, ABYSS_FLOOR, PLAYER_RADIUS);
     yield* pause(slice);
     const sleepNavigation = headquarters.sleepNavigation = BL.headquartersSleep.create({ island, beds: bedrolls, walkable: sleepRouteClear, surfaceRoute: shared.npcPaths.route });
     yield* pause(slice);
@@ -12266,6 +12320,8 @@
     shared.outsideActors = () => cloudPlaying() ? CLOUD_NO_ACTORS : remotes.actors();
     shared.outsideActorHeight = REMOTE_BODY_HEIGHT;
     shared.characterModel = takePreparedCharacter;
+    // Hub NPCs pass through each other and players, and beam between routines.
+    shared.npcPassive = true;
     yield* pause(slice);
     crew = shared.crew = crewMod.create(shared);
     remotes = BL.remotePlayers.create({
@@ -12410,17 +12466,21 @@
       restPoseClear: clankerRestPoseClear, restFootingClear: clankerRestFootingClear,
       groomClear: clankerGroomClear, restSiteClear: clankerRestSiteClear,
       groundAt: (x, z, y) => island.supportAt(x, z, y, 0.52), groundPlaneAt: clankerGroundPlaneAt, rectangleAt: clankerRectangleAt, surfaceAt: island.surfaceAt, stairAt: island.stairAt,
-      pointSupportAt: (x, z, y, entry = null) => Math.max(island.supportAt(x, z, y, 0.02, -Infinity),
-        solids.supportAt(x, z, y, 0.02, 0, null, null, false, null, !!entry?.rage?.active)),
+      pointSupportAt: (x, z, y, entry = null) => entry?.nonInteractive ? island.supportAt(x, z, y, 0.02, -Infinity)
+        : Math.max(island.supportAt(x, z, y, 0.02, -Infinity), solids.supportAt(x, z, y, 0.02, 0, null, null, false, null, !!entry?.rage?.active)),
       isGrass: island.isGrassAt, restSurfaceClear: clankerRestSurfaceClear, onLand: island.onLand,
       roamRadius: island.radius, meadowRadius: island.meadowRadius,
       clear: clankerClear, playersClear: clankerPlayersClear, tallObstacleAhead: clankerTallObstacleAhead,
       onPound: poundClankerEquipment,
+      // Passive companions' meadow legs follow the Oogas' authored spokes and pile ring.
+      npcFixedPaths: shared.npcFixedPaths, npcPathState: () => shared.npcPaths.createState(),
+      pileRingRadius: shared.reloadSlotRadius,
       fireContact: clankerFireContact, fireReachable: shared.fireReachable, fireClear: clankerFireClear,
       canSmash: canClankerSmash, supportAt: clankerSupportAt, terrainSupportAt: clankerTerrainSupportAt,
       track: (entry) => trackMirrorObject(entry.root, 3.6, 4248), untrack: (entry) => untrackMirrorObject(entry.root)
     });
     yield* pause(slice);
+    npcStatusBeams = BL.npcStatusBeams.create({ root, crew, clankers });
     shared.fireThreats = () => clankers.list;
     for (const entry of clankers.list) {
       entry.netBody = BL.net.gorillaBody(entry.owner.traits.name);
@@ -12906,6 +12966,7 @@
     remotes.dispose();
     crates.dispose();
     pile.dispose();
+    npcStatusBeams?.dispose(); npcStatusBeams = null;
     for (const entry of clankers.list) returnLabEquipment(entry);
     clankers.dispose();
     clankerMeshes.dispose();
@@ -13048,6 +13109,7 @@
     mempoolIsland.water.liveGeometry(set);
     pile.liveGeometry(set);
     clankers.liveGeometry(set);
+    npcStatusBeams?.liveGeometry(set);
     entropyLab.phase.liveGeometry(set);
     for (const veil of caveVeils) veil.phase.liveGeometry(set);
     if (factoryMouth) factoryMouth.phase.liveGeometry(set);
