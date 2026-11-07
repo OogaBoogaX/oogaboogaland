@@ -2,7 +2,8 @@
 // body gets a caveman built from that Ooga's traits or a managed gorilla rig,
 // eased toward the room's 15 Hz poses with a walk cycle while it moves, and a nameplate. The crew's own
 // copy of that Ooga is sent `away` while someone else drives it, so no Ooga stands twice, and comes back
-// when they let go; meanwhile its roster row shows the driver online (`remoteControlled`, the green dot).
+// when they let go; meanwhile its roster row shows the driver online (`remoteControlled`, the green dot). A scene
+// passing `ghost` (the hub) keeps that copy on its own track as a ghost instead (npc-ghosts.js).
 // The crew turns its shoulders through remote players without routing around them.
 // Who is shown is the scene's `visible(rec)`: the island shows players in its own zone (`onIsland` lists the
 // island's places), every other scene those in its zone (`sameZone`). The crew is optional, for a scene that
@@ -70,7 +71,9 @@
   // swimmer's arms by it, from the position the pose transport already carries, with no simulation of its own.
   // A hub supplies its companion's style and hides its local copy through the gorilla hooks; other scenes
   // use a basic managed rig. Both bodies share the room pose, nameplate and collision actor lifecycle.
-  const create = ({ root, crew = null, fx = null, player = null, posed = null, visible = sameZone, hide = null, createGorilla = null, hideGorilla = null }) => {
+  // A scene with `ghost(cave, on)` (the hub, npc-ghosts.js) keeps the crew's copy on its own track instead: never
+  // sent away nor marked `remoteControlled`, only drawn as a ghost while the remote body stands beside it.
+  const create = ({ root, crew = null, fx = null, player = null, posed = null, visible = sameZone, hide = null, createGorilla = null, hideGorilla = null, ghost = null }) => {
     const net = BL.net;
     const bodies = new Map();
     // The chat subscription, taken on the first update and again after a kept hub's suspend disposed it; the
@@ -89,7 +92,12 @@
       if (hide) hide(entry.name, true);
       if (!crew) return;
       const cave = crew.cavemen.get(entry.name);
-      if (!cave || cave === crew.player) return;
+      if (!cave || cave === crew.player || cave.localBody) return;
+      if (ghost) {
+        entry.ghosted = cave;
+        ghost(cave, true);
+        return;
+      }
       entry.hidden = cave;
       entry.hiddenOverride = cave.override;
       cave.override = "away";
@@ -102,6 +110,13 @@
         return;
       }
       if (hide) hide(entry.name, false);
+      if (entry.ghosted) {
+        // Solid again where its track has it; nothing else about it changed.
+        const ghosted = entry.ghosted;
+        entry.ghosted = null;
+        ghost(ghosted, false);
+        return;
+      }
       const cave = entry.hidden;
       if (!cave) return;
       entry.hidden = null;
@@ -131,7 +146,7 @@
       const height = gorilla ? 0 : BL.crew.bodyHeightOf(cave);
       addChild(root, cave.root);
       const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0, workExit: false } : null;
-      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, jetNode: null, jetFlame: null, swing: 0, shotAt: -Infinity, lastHeld: 0, lastMode: 0, lastMelee: 0, sampleAt: 0, sampleMelee: 0, sampleFlags: 0, sampleSwap: 0, sampleSwapIndex: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, label: "", labelW: 0,
+      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, jetNode: null, jetFlame: null, swing: 0, shotAt: -Infinity, lastHeld: 0, lastMode: 0, lastMelee: 0, sampleAt: 0, sampleMelee: 0, sampleFlags: 0, sampleSwap: 0, sampleSwapIndex: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, ghosted: null, label: "", labelW: 0,
         still: false, thumpT: 0, icon: 0, screenX: NaN, beatOwned: false };
       bodies.set(rec.id, entry);
       hideLocal(entry);
@@ -316,6 +331,11 @@
         if (!entry) {
           if (bodies.size >= MAX) continue;
           entry = build(rec);
+        }
+        // A copy this page drove when the body arrived (another tab's takeover) becomes its ghost once let go.
+        if (ghost && crew && !entry.gorilla && !entry.ghosted) {
+          const cave = crew.cavemen.get(entry.name);
+          if (cave && cave !== crew.player && !cave.localBody) { entry.ghosted = cave; ghost(cave, true); }
         }
         const restPhase = rec.rest ? rec.rest[1] : 0;
         if (!entry.gorilla && entry.restPhase === 2 && restPhase !== 2) {

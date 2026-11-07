@@ -8604,6 +8604,172 @@ const hubLiveWake = { name: "hub live wake", why: "regression: live activity mus
     && state.reuse.bed >= 0 && state.reuse.mode === "rest" && !state.reuse.route,
     JSON.stringify(state));
 } };
+// The island's separate bodies, through the real hub wiring (crew.js/clankers.js `separateBodies`, pilot, clanker play,
+// npc-ghosts, claimOwnOoga): the NPC a visitor drives keeps its own object, track, seat, bed or desk, and is only drawn as
+// a ghost; the body starts beside it, is reused while driven, and goes completely on release.
+const hubSeparateBodies = { name: "hub separate bodies", why: "rule: a driven Ooga or gorilla is a separate body; its NPC keeps its track, seat, bed and desk, and letting go leaves nothing behind", run: async b => {
+  const state = await b.evaluate(`(() => {
+    // __ooga's allowlist carries crew, pilot, clankers and clankerPlay; the ghost pool and the claim are the hub's own debug.
+    const B = __ooga, D = BL.scenes.hub.debug, crew = B.crew, pilot = B.pilot, clankers = B.clankers, play = B.clankerPlay, ghosts = D.npcGhosts, net = BL.net;
+    const saved = { mayDrive: net.mayDrive, mayDriveGorilla: net.mayDriveGorilla, ownCharacter: net.ownCharacter };
+    // Activity this step sets to make its fixtures, put back afterwards.
+    const activity = new Map();
+    net.mayDrive = () => null; net.mayDriveGorilla = () => null;
+    try {
+      pilot.release(true); play.release();
+      const step = (seconds) => { for (let t = 0; t < seconds; t += 1 / 30) B.advance(1 / 30, 1 / 30); };
+      const at = (a) => ({ x: a.root.position.x, y: a.root.position.y, z: a.root.position.z });
+      // A chilling NPC's place by the fire is an authored fire seat it stands on, its chill spot (\`act.spot\`); \`camp.seat\`
+      // is only the player's and the hammock's manual seating. As the chilling-arrival check reads it: exactly on a seat.
+      const seatOf = (c) => B.fireSeats.findIndex(s => Math.hypot(s.x - c.root.position.x, s.z - c.root.position.z) < 1e-6);
+      const seatHeld = (c, i) => i >= 0 && seatOf(c) === i && Math.hypot(c.act.spot.x - B.fireSeats[i].x, c.act.spot.z - B.fireSeats[i].z) < 1e-6
+        && crew.list.every(o => o === c || seatOf(o) !== i);
+      const npcState = (c) => ({ state: c.state, override: c.override, seat: seatOf(c), bed: c.bedroll, mode: c.bedTravel.mode, visible: c.root.visible,
+        human: !!c.humanControlled, remote: !!c.remoteControlled, passive: c.nonInteractive, ghost: !!c.ghostTrack && ghosts.has(c) });
+      const eligible = c => c.root.visible && !c.remoteControlled && !c.ghostTrack && !c.override && c.traits.name !== "SaniExp";
+      const pick = (test) => crew.list.find(c => eligible(c) && test(c));
+      const cases = [["seated", c => c.state === "chilling" && seatHeld(c, seatOf(c))], ["sleeping", c => c.state === "sleeping" && !!c.bedroll && c.bedTravel.mode === "rest"],
+        ["working", c => c.state === "working" && !c.bedTravel.mode]];
+      // Roster activity ages with the clock: a status none of the cast holds today is made, as hubLiveWake makes its
+      // sleepers, by activity on one named actor (the first eligible one not already a fixture), settled at once.
+      const now = Date.now(), ago = { seated: 8 * 3600000, sleeping: 3 * 86400000, working: 30000 }, fixtures = new Set();
+      const establish = (kind, test) => {
+        let npc = pick(c => !fixtures.has(c) && test(c));
+        for (let tries = 0; !npc && tries < 4; tries++) {
+          const actor = crew.list.find(c => eligible(c) && !fixtures.has(c) && !activity.has(c) && !test(c));
+          if (!actor) break;
+          activity.set(actor, { commit: actor.contributor.lastCommitAt, contribution: actor.contributor.lastContributionAt });
+          actor.contributor.lastCommitAt = actor.contributor.lastContributionAt = now - ago[kind];
+          crew.refreshStates(true); step(0.5);
+          npc = pick(c => !fixtures.has(c) && test(c));
+        }
+        if (npc) fixtures.add(npc);
+        return npc;
+      };
+      const oogas = cases.map(([kind, test]) => {
+        const npc = establish(kind, test);
+        if (!npc) return { kind, missing: true };
+        const before = npcState(npc), from = at(npc), heading = npc.root.rotation.y;
+        const taken = pilot.possess(npc), body = pilot.player;
+        // A refusal (no clear ground) is a result, recorded as such: never read through a missing body.
+        if (!taken || !body || body === npc) { pilot.release(true); return { kind, name: npc.traits.name, taken, refused: true, body: body ? body.traits.name : null }; }
+        const separate = taken && !!body && body !== npc && body.npc === npc && crew.player === body && npc.localBody === body
+          && !crew.list.includes(body) && crew.cavemen.get(npc.traits.name) === npc && body.root.parent && !body.nonInteractive;
+        const placed = !!body && Math.hypot(body.root.position.x - from.x, body.root.position.z - from.z) <= 1.4 + 1e-6
+          && Math.abs(body.root.rotation.y - heading) < 1e-6;
+        // A seated NPC holds its own fire seat, as its chill spot and alone, before, while driven and after release.
+        const holds = [];
+        const hold = () => { if (kind === "seated") holds.push(seatHeld(npc, before.seat)); };
+        hold();
+        const ghosted = npcState(npc); hold();
+        step(1);
+        const kept = npcState(npc); hold();
+        const reused = pilot.possess(npc) && pilot.player === body;
+        pilot.release(true);
+        const after = npcState(npc); hold();
+        const released = !pilot.player && !crew.player && !npc.localBody && !body.root.parent && !body.sleepWeapons.parent && !ghosts.has(npc);
+        // A second take builds a fresh body, which goes again on release.
+        const again = pilot.possess(npc) && !!pilot.player && pilot.player !== body && pilot.player.npc === npc;
+        const second = pilot.player; pilot.release(true);
+        const twice = again && !second.root.parent && !npc.localBody;
+        const same = (a, b) => a.state === b.state && a.override === b.override && a.seat === b.seat && a.bed === b.bed && a.mode === b.mode
+          && a.visible === b.visible && !a.human && !b.human && !a.remote && !b.remote && a.passive && b.passive;
+        return { kind, name: npc.traits.name, separate, placed, ghost: ghosted.ghost && !before.ghost && !after.ghost,
+          untouched: same(before, ghosted) && same(before, kept) && same(before, after) && (kind !== "seated" || holds.length === 4 && holds.every(Boolean))
+            && (kind !== "sleeping" || before.bed.sleeper === npc),
+          reused, released, twice };
+      });
+      // The companion: a separate gorilla beside it; the NPC keeps its desk, lab station, bed and track.
+      const entry = clankers.list.find(e => e.active && e.root.visible && !e.remoteControlled && !e.ghostTrack);
+      let gorilla = { missing: !entry };
+      const keep = () => ({ desk: entry.office.desk, wait: entry.office.wait, station: entry.lab.station, bed: entry.sleep.slot, active: entry.active,
+        controlled: entry.controlled, passive: entry.nonInteractive });
+      const gorillaBefore = entry ? keep() : null, gorillaFrom = entry ? at(entry) : null;
+      const gorillaTaken = entry ? play.possess(entry) : false, gorillaBody = entry ? play.player : null;
+      // A refusal (no clear ground) is a result, recorded as such: never read through a missing body.
+      if (entry && (!gorillaTaken || !gorillaBody || gorillaBody === entry)) {
+        play.release(); gorilla = { taken: gorillaTaken, refused: true, name: entry.owner.traits.name };
+      } else if (entry) {
+        const before = gorillaBefore, from = gorillaFrom, taken = gorillaTaken, body = gorillaBody;
+        const separate = taken && !!body && body !== entry && body.npc === entry && clankers.player === body && !clankers.list.includes(body)
+          && !body.nonInteractive && entry.ghostTrack && ghosts.has(entry);
+        const placed = !!body && Math.hypot(body.root.position.x - from.x, body.root.position.z - from.z) <= 2 + 1e-6;
+        // Its own scheduling and claim key and its own rig: never the NPC's turn or actor.
+        const distinct = !!body && body.index !== entry.index && body.index === clankers.list.length
+          && body.gorilla !== entry.gorilla && body.root !== entry.root;
+        step(1);
+        const during = keep();
+        const reused = play.possess(entry) && play.player === body;
+        play.release();
+        const after = keep();
+        const same = (a, b) => a.desk === b.desk && a.wait === b.wait && a.station === b.station && a.bed === b.bed && a.active === b.active
+          && !a.controlled && !b.controlled && a.passive && b.passive;
+        gorilla = { separate, placed, distinct, reused, untouched: same(before, during) && same(before, after),
+          released: !play.player && !clankers.player && !entry.localBody && !body.root.parent && !entry.ghostTrack && !ghosts.has(entry) };
+      }
+      // A fresh sign-in through the real claim: the body stands where the visitor's own present NPC is, not at the pile.
+      const own = pick(c => c.state === "chilling" || c.state === "working");
+      let login = { missing: !own };
+      if (own) {
+        net.ownCharacter = () => ({ handle: own.traits.name });
+        const from = at(own), heading = own.root.rotation.y, override = own.override;
+        const claimed = D.claimOwnOoga(), body = pilot.player;
+        login = { claimed, separate: !!body && body.npc === own, override: own.override === override,
+          near: !!body && Math.hypot(body.root.position.x - from.x, body.root.position.z - from.z) <= 1.4 + 1e-6,
+          facing: !!body && Math.abs(body.root.rotation.y - heading) < 1e-6, npcStayed: Math.hypot(own.root.position.x - from.x, own.root.position.z - from.z) < 0.5 };
+        pilot.release(true);
+      }
+      // Sign-out and a lost room through the hub's own account callback (no auth or network): the body goes and the NPC
+      // stands solid where its track has it, nothing is claimed on that change, and signing back in or the room coming
+      // back live claims afresh beside the NPC.
+      let lifecycle = { missing: !own };
+      if (own) {
+        const accountWas = net.state.me, roomWas = net.state.room;
+        saved.restoreAccount = () => { net.state.me = accountWas; net.state.room = roomWas; D.accountChanged(); };
+        const account = { id: 990001, login: "lifecycle-fixture", display: "Lifecycle fixture" };
+        const solid = () => ({ driven: !!pilot.player, body: !!own.localBody, ghost: !!own.ghostTrack || ghosts.has(own), human: !!own.humanControlled });
+        const beside = () => !!pilot.player && pilot.player.npc === own
+          && Math.hypot(pilot.player.root.position.x - own.root.position.x, pilot.player.root.position.z - own.root.position.z) <= 1.4 + 1e-6;
+        net.state.me = account; net.state.room = "live"; D.accountChanged();
+        const driving = D.claimOwnOoga() && beside();
+        const body = pilot.player, from = at(own);
+        net.state.me = null; net.state.room = "off"; D.accountChanged();
+        const out = solid();
+        const signedOut = !out.driven && !out.body && !out.ghost && !out.human && !!body && !body.root.parent
+          && Math.hypot(own.root.position.x - from.x, own.root.position.z - from.z) < 0.5;
+        net.state.me = account; net.state.room = "live"; D.accountChanged();
+        const signedIn = beside() && pilot.player !== body;
+        net.state.room = "connecting"; D.accountChanged();
+        const lost = solid(), roomLost = !lost.driven && !lost.body && !lost.ghost;
+        net.state.room = "live"; D.accountChanged();
+        const reconnected = beside();
+        lifecycle = { driving, signedOut, signedIn, roomLost, reconnected, out, lost };
+        pilot.release(true);
+      }
+      return { oogas, gorilla, login, lifecycle };
+    } finally {
+      if (saved.restoreAccount) saved.restoreAccount();
+      net.mayDrive = saved.mayDrive; net.mayDriveGorilla = saved.mayDriveGorilla; net.ownCharacter = saved.ownCharacter;
+      pilot.release(true); play.release();
+      if (activity.size) {
+        for (const [actor, was] of activity) { actor.contributor.lastCommitAt = was.commit; actor.contributor.lastContributionAt = was.contribution; }
+        crew.refreshStates(true);
+      }
+    }
+  })()`);
+  const ooga = row => !row.missing && row.separate && row.placed && row.ghost && row.untouched && row.reused && row.released && row.twice;
+  record("separate bodies: driving a seated, sleeping or working Ooga builds a body beside it while the NPC keeps its object, activity, seat or bed as a ghost; it is reused while driven and fully disposed on release and on a second take",
+    state.oogas?.length === 3 && state.oogas.every(ooga), JSON.stringify(state.oogas));
+  record("separate bodies: driving a gorilla builds a separate companion beside it while the NPC keeps its desk, station, bed and passive track; release disposes it",
+    !state.gorilla.missing && state.gorilla.separate && state.gorilla.placed && state.gorilla.distinct && state.gorilla.reused && state.gorilla.untouched && state.gorilla.released,
+    JSON.stringify(state.gorilla));
+  record("separate bodies: a fresh sign-in claim stands the body beside the visitor's own present NPC, facing as it does, never teleported to the pile, with the NPC's override untouched",
+    !state.login.missing && state.login.claimed && state.login.separate && state.login.override && state.login.near && state.login.facing && state.login.npcStayed,
+    JSON.stringify(state.login));
+  const L = state.lifecycle || { missing: true };
+  record("separate bodies: signing out or losing a live room lets the body go at once, leaving the NPC solid where it is with nothing claimed, and signing back in or reconnecting claims a fresh body beside it",
+    !L.missing && L.driving && L.signedOut && L.signedIn && L.roomLost && L.reconnected, JSON.stringify(L));
+} };
 const outdoorTravelProof = () => {
 const B=__ooga,ctx=__outdoorTravelContext,crew=B.crew,P=B.poolIsland,scene=BL.scenes.hub;
 B.pilot.release(true); B.clankerPlay.release();
@@ -16731,7 +16897,7 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
 } };
 scene("hub", { label: "distant effects", query: "pos=0", steps: [hubDistantEffects] });
 scene("hub", { label: "outdoor travel", opts: { initScript: `window.BL={};let outdoorCrew;Object.defineProperty(BL,"crew",{configurable:true,get:()=>outdoorCrew,set:value=>{outdoorCrew=value;const create=value.create;value.create=ctx=>{window.__outdoorTravelContext=ctx;return create(ctx);};}});` }, steps: [hubOutdoorTravel] });
-scene("hub", { opts: !ONLY || onlyMatches(hubArrival.name) ? { initScript: `(${hubSleepWire.toString()})()` } : {}, steps: [hubArrival, { name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hudVisit, hubKeptDelivery, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, hubCloudCamera, hubCloudFraming, hubKeypadRedirect, trip("hub"), factoryActivityRouting, hubLiveWake] });
+scene("hub", { opts: !ONLY || onlyMatches(hubArrival.name) ? { initScript: `(${hubSleepWire.toString()})()` } : {}, steps: [hubArrival, { name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hudVisit, hubKeptDelivery, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, hubCloudCamera, hubCloudFraming, hubKeypadRedirect, trip("hub"), factoryActivityRouting, hubLiveWake, hubSeparateBodies] });
 // The same ownership contract exercises complete destruction on memory-limited devices.
 // A released hub's return enters in slices (`enterSteps`), one at boot or with no slicing in one go (`enter`): the same
 // statements in the same order, so the island it builds, its targets, rock guides and outline registry must be equal.
@@ -25498,6 +25664,40 @@ const integrationChecks = async BL => {
   const switchedBack=disposed===1&&!rig.root.parent&&hides.length===2&&!hides[1][1]&&sceneRoot.children.length===1&&sceneRoot.children[0]!==rig.root&&owner.override==="away"&&owner.remoteControlled&&oogaPoses===1;
   records.clear();companions.update(.1);companions.dispose();BL.net=oldNet;
   record("integration remote gorilla: switching back disposes the rig and restores the NPC companion; the new Ooga reserves and then restores its own local copy without nodes or actors left",switchedBack&&owner.override===null&&!owner.remoteControlled&&!sceneRoot.children.length&&!companions.actors().length,JSON.stringify({switchedBack,disposed,hides,nodes:sceneRoot.children.length,actors:companions.actors().length}));
+  // Rule: with the hub's `ghost` hook a remote driver's NPC keeps its own track (never away, never remote-marked, its
+  // seat untouched) and is only drawn as a ghost; a copy driven here when the body arrived becomes the ghost once let
+  // go; the look never writes shared geometry, follows head swaps, tints only a ghost's rounds, moves to the companion
+  // when the driver switches body, and ends solid in place on leave with its twins released.
+  {
+    const netBefore=BL.net,ghostRecords=new Map(),ghostRoot=BL.scene.createNode(),ghostCavemen=new Map(),releasedGeometry=[];
+    BL.net={serverNow:()=>Date.now(),sendSwing:()=>true,remotes:ghostRecords,subscribeShots:()=>()=>{},subscribeSwings:()=>()=>{}};
+    const npc=BL.models.caveman(BL.contributors.traitsFor("w-s-bitcoin")),seat={sitter:null};
+    Object.assign(npc,{override:null,remoteControlled:false,humanControlled:false,state:"chilling",camp:{seat}});seat.sitter=npc;
+    BL.scene.addChild(ghostRoot,npc.root);ghostCavemen.set("w-s-bitcoin",npc);
+    const ghostCrew={cavemen:ghostCavemen,player:npc,refreshStates(){},refreshRosterRow(){}};
+    const looks=BL.npcGhosts.create({renderer:{releaseGeometry:g=>releasedGeometry.push(g)}});
+    const companion={root:BL.scene.createNode({geometry:BL.models.bananaGeometry()})};
+    const ghostPool=BL.remotePlayers.create({root:ghostRoot,crew:ghostCrew,visible:()=>true,ghost:(cave,on)=>looks.set(cave,on),hideGorilla:(name,on)=>looks.set(companion,on)});
+    const tab={id:73,login:"tab",display:"Tab",body:"w-s-bitcoin",bodyKind:"ooga",bodyName:"w-s-bitcoin",zone:"outside",x:4,y:0,z:4,yaw:0};
+    ghostRecords.set(73,tab);ghostPool.update(.1);
+    const heldHere=!npc.ghostTrack;
+    ghostCrew.player=null;ghostPool.update(.1);
+    const head=npc.parts.head,source=head.geometry,remoteHead=ghostPool.body(73).parts.head;
+    looks.paint(1/60);
+    const painted=npc.ghostTrack&&head.geometry!==source&&head.geometry.glass===.3&&head.geometry.castShadow===false&&remoteHead.geometry===source&&source.glass!==.3;
+    looks.restore();const restored=head.geometry===source;
+    head.geometry=npc.headClosed;looks.paint(1/60);const swapped=head.geometry!==npc.headClosed&&!!head.geometry.glass;looks.restore();
+    const swappedBack=head.geometry===npc.headClosed;head.geometry=source;
+    const banana=BL.models.bananaGeometry(),round=looks.shotLook(npc,banana),tinted=!!round&&round!==banana&&round.glass===.3&&looks.shotLook(companion,banana)===null;
+    const kept=npc.override===null&&!npc.remoteControlled&&!npc.humanControlled&&npc.state==="chilling"&&npc.camp.seat===seat&&seat.sitter===npc&&npc.root.parent===ghostRoot;
+    tab.body="gorilla:w-s-bitcoin";tab.bodyKind="gorilla";ghostPool.update(.1);
+    const switched=!npc.ghostTrack&&head.geometry===source&&companion.ghostTrack===true;
+    ghostRecords.clear();ghostPool.update(.1);
+    const left=!companion.ghostTrack&&looks.stats().ghosts===0&&head.geometry===source&&npc.root.parent===ghostRoot;
+    looks.paint(.6);looks.paint(.6);const dropped=looks.stats().twins===0&&releasedGeometry.includes(round);
+    ghostPool.dispose();looks.dispose();BL.scene.removeChild(ghostRoot,npc.root);BL.net=netBefore;
+    record("integration npc ghosts: a remote driver's NPC keeps its own track and seat as a ghost, turns solid in place on switch or leave, and releases its look",heldHere&&painted&&restored&&swapped&&swappedBack&&tinted&&kept&&switched&&left&&dropped,JSON.stringify({heldHere,painted,restored,swapped,swappedBack,tinted,kept,switched,left,dropped}));
+  }
 };
 
 // Staging must preserve exact recordings and hash the final script, including literal replacement tokens.
@@ -26529,6 +26729,39 @@ const fixedRoutineProof = async () => {
   const restsAtPile = restTrip.started && restTrip.state === "chilling" && !restTrip.arrived && !restTrip.walking
     && restTrip.kind === "idle" && inOrder(restTrip.steps, [route[0], slot]) && same([restTrip.end.x, restTrip.end.z], slot)
     && !restTrip.blockCalls && !restTrip.objectFloorCalls;
+  // Regression (#496 review): the pile grows while a passive Ooga walks its own one-leg route to its loading slot.
+  // The real `updateFan` retargets through the real `walkToSlot`, and the real `runWalk`/`runRouteWalk` must arrive at
+  // the newly assigned slot, not the snapshot taken when the leg was made. An authored route keeps its legs.
+  const slotWalkCode = chillCode + slice("    const walkToSlot =", "    const refreshStates =") + slice("    const runWalk =", "    const planWorkSite =");
+  const growingWalk = (authored) => {
+    let level = 0, meal = false, objectFloorCalls = 0;
+    const slotFor = () => ({ x: 0, z: -(5 + level) });
+    const ooga = { nonInteractive: true, state: "working", baseY: 0, restLower: 0, slot: slotFor(), build: null,
+      root: { position: { x: 0, y: 0, z: -14 }, rotation: { y: 0 } }, pathing: P.create({ island }).createState(),
+      act: { spot: { x: 0, z: 0, ry: NaN }, trips: 0, kind: "rush" }, work: { site: -1, phase: "", index: 0, plannedSite: -1 },
+      avoidance: { tx: 0 }, parts: { snack: { visible: false }, head: { rotation: { x: 0, y: 0 } } }, bedTravel: { mode: "" } };
+    ooga.walk = { tx: ooga.slot.x, tz: ooga.slot.z, speed: 1.6, phase: 0, heading: 0, to: "slot" };
+    const authoredLegs = authored ? [{ x: 2, z: -9, fixed: false }, { x: 0, z: -5, fixed: false }] : null;
+    if (authored) ooga.walk.route = authoredLegs.map(leg => ({ ...leg }));
+    const ctx = { PLAYER_STEP: 0.05, WANDER_SPEED: 1, RUSH_SPEED: 2.8, fixedPaths: fixed, workSites: [], cave: ooga, elapsed: 0, chillPause: () => 10,
+      fanRadius: 5, wantedFanRadius: () => 5 + level, cavemen: new Map([["grower", ooga]]), assignFanSlots: () => {},
+      atPile: c => c.act.kind === "eat" || c.act.kind === "rush", closestSlot: slotFor,
+      fixedTrip: c => !!c.walk?.route, fixedTerrainAt: () => 0, groundAt: () => (objectFloorCalls++, 5), walkerClear: () => false,
+      startMeal: () => { meal = true; }, arriveAtSpot: () => {}, standPose: () => {}, walkPose: () => {} };
+    runInNewContext(`${slotWalkCode} this.walk = dt => runWalk(cave, dt); this.fan = () => updateFan();`, ctx);
+    let frames = 0, grewAt = null;
+    for (; frames < 2000 && ooga.walk; frames++) {
+      ctx.walk(0.05);
+      // Half way there the pile grows by two metres: its ring, and this Ooga's slot, move out.
+      if (!grewAt && ooga.root.position.z > -10) { level = 2; ctx.fan(); grewAt = { z: ooga.root.position.z, legs: ooga.walk?.route?.map(l => [l.x, l.z]) }; }
+    }
+    return { meal, grewAt, frames, objectFloorCalls, walking: !!ooga.walk, local: !authored, end: { x: ooga.root.position.x, z: ooga.root.position.z },
+      legsKept: !authored || JSON.stringify(grewAt?.legs) === JSON.stringify(authoredLegs.map(l => [l.x, l.z])) };
+  };
+  const ownLeg = growingWalk(false), authoredLeg = growingWalk(true);
+  const slotWalkRetargets = !!ownLeg.grewAt && ownLeg.meal && !ownLeg.walking && same([ownLeg.end.x, ownLeg.end.z], { x: 0, z: -7 })
+    && !ownLeg.objectFloorCalls;
+  const authoredRouteKept = !!authoredLeg.grewAt && authoredLeg.legsKept && !authoredLeg.walking && same([authoredLeg.end.x, authoredLeg.end.z], { x: 0, z: -5 });
   // The real passive companion stepper: a planned meadow leg from the pile to a
   // cave's apron follows the ring and one spoke, never crossing the pile, on
   // terrain; only the wall clearance is consulted. A wall step hands over to
@@ -26577,7 +26810,7 @@ const fixedRoutineProof = async () => {
   const passivePortal = passedHeld && droppedStale && drivenWaits;
   island.path.centerlines = [];
   return { outside, ring, arrives, stamped, replansGraphLane, midOutboundChill, returningChill, slotlessChill, restsAtPile,
-    gorillaPlanned, gorillaClimbsWalls, passivePortal, gorillaTrip, gorillaWall,
+    slotWalkRetargets, authoredRouteKept, slotWalks: [ownLeg, authoredLeg], gorillaPlanned, gorillaClimbsWalls, passivePortal, gorillaTrip, gorillaWall,
     portal: { passedHeld, droppedStale, drivenWaits, caveScans },
     unsupported: P.fixed(island) === null,
     trips: [outboundTrip, returnTrip, slotlessTrip, restTrip].map(({ steps, ...trip }) => ({ ...trip, steps: steps.length })) };
@@ -27975,6 +28208,28 @@ record("character visibility source bakes: ownership wrappers share exact immuta
         mover.root.quaternion = moverSaved.quaternion; mover.root.visible = moverSaved.visible;
         record("NPC sync: a follower eases a same-status move under the snap distance, but places a puppet at once when its streamed status changes",
           Object.values(statusSnap).every(Boolean), JSON.stringify({ statusSnap, start, eased, beamed }));
+        // Rule: an elected host on another frame format (an older page) is never followed and never replaced by this
+        // page's own AI: every NPC holds where it stands, the page is told once, and a matching frame resumes.
+        {
+          const older = hostFrames[0].slice(0), olderHeader = new Uint32Array(older, 0, 4);
+          olderHeader[0] = BL.npcSync.FORMAT - 1;
+          const told = [], held = { x: p.x, z: p.z };
+          BL.net.state.hostId = "host"; BL.net.state.selfId = "follower";
+          sync = BL.npcSync.create({ ...options, onIncompatible: format => told.push(format) });
+          BL.net.npcFrame = older; BL.net.state.npcVersion++;
+          sync.update(0.05); sync.update(0.05);
+          BL.net.npcFrame = older; BL.net.state.npcVersion++; sync.update(0.05);
+          const holding = sync.incompatible && sync.frames === 0 && told.length === 1 && told[0] === BL.npcSync.FORMAT - 1
+            && crew.list.every(c => c.puppet) && p.x === held.x && p.z === held.z && sync.role === "follow";
+          BL.net.npcFrame = hostFrames[0]; BL.net.state.npcVersion++; sync.update(0.05);
+          const resumedFormat = !sync.incompatible && sync.frames === 1 && mover.puppet;
+          sync.dispose();
+          const freed = crew.list.every(c => !c.puppet);
+          mover.state = moverSaved.state; Object.assign(p, moverSaved.position);
+          mover.root.quaternion = moverSaved.quaternion; mover.root.visible = moverSaved.visible;
+          record("NPC sync: a follower whose host sends another frame format holds every NPC in place, reports it once and runs no crew AI of its own, then follows a matching frame",
+            holding && resumedFormat && freed, JSON.stringify({ holding, resumedFormat, freed, told, incompatible: sync.incompatible }));
+        }
       } finally { if (sync) sync.dispose(); crew.workSites = savedSites; BL.net = savedNet; }
       newest.contributor.lastContributionAt = now;
       crew.refreshStates(); crew.update(1.1, 1.1);

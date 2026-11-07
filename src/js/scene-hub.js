@@ -256,7 +256,7 @@
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, jumbotron, positionDebug, remotes, npcSync, npcStatusBeams;
+  let oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, jumbotron, positionDebug, remotes, npcSync, npcStatusBeams, npcGhosts;
   // GAME MODE (`setGameMode`): an island event holds the island still for play while it runs.
   let gameMode = false, gameCombatOnly = false;
   let cloudHopper = null, cloudIsland = null, cloudPile = null, cloudPileSolids = null, cloudFinishFruit = null;
@@ -2929,6 +2929,16 @@
   const timechainResidentPose = (cave) => {
     if (!timechainIsland || cave.traits.name !== "SaniExp") return false;
     const T = timechainIsland;
+    // A separate body made where its resident NPC sits inside the ball steps out onto the bridge; the NPC stays in.
+    if (cave.npc) {
+      const p = cave.root.position;
+      if (T.residentInside && Math.hypot(p.x - T.place.x, p.z - T.place.z) < 1) {
+        const W = BL.timechainModels.SPOTS.WAIT;
+        p.x = T.worldX(W.x, W.z + 1.2); p.z = T.worldZ(W.x, W.z + 1.2); p.y = T.place.y + cave.baseY;
+        cave.root.rotation.y = T.place.ry + Math.PI;
+      }
+      return false;
+    }
     if (cave.state === "working" || cave.state === "chilling" || cave === pilot?.player || cave.remoteControlled) {
       if (T.residentInside) {
         T.residentInside = false;
@@ -8575,6 +8585,8 @@
     job.handle = job.idle ? requestIdleCallback(start, { timeout: 250 }) : setTimeout(start, 0);
   };
   const update = (dt, elapsed) => {
+    // Every system reads the real models; the ghosts are painted back once the frame's poses are final.
+    npcGhosts.restore();
     cloudHopper.preUpdate(dt);
     if (cloudPlaying()) {
       cloudMask();
@@ -8703,7 +8715,7 @@
     if (factoryMouth && !cloudPlaying()) factoryShield(dt, elapsed);
     if (bifrostIsle && !cloudPlaying()) bifrostGate(dt, elapsed);
     if (bcaMouth) bcaVeil(dt, elapsed);
-    if (factoryDeparting || bifrostDeparting) return; // The Ooga through a shield and its camera hold through the director fade.
+    if (factoryDeparting || bifrostDeparting) { npcGhosts.paint(dt); return; } // The Ooga through a shield and its camera hold through the director fade.
     if (gameMode) prepareClankerStrike();
     for (let i = 0; gameMode && i < clankerCaptures.length; i++) {
       const rec = clankerCaptures[i];
@@ -8739,8 +8751,11 @@
         finishClankerRider(entry, true, rec.charge, rec.aimed ? rec.aim : null, carryX, carryZ);
       }
     }
-    for (let i = 0; i < clankers.list.length; i++) {
-      const entry = clankers.list[i], p = entry.root.position;
+    // The roster's companions, then the visitor's separate gorilla (clankers.js), which floats and respawns the same way.
+    for (let i = 0; i <= clankers.list.length; i++) {
+      const entry = i < clankers.list.length ? clankers.list[i] : clankers.player?.npc ? clankers.player : null;
+      if (!entry) continue;
+      const p = entry.root.position;
       // Afloat in the Mempool island's water a gorilla paddles: the rig poses it, this only says so.
       entry.motion.swim = entry.active && mempoolIsland.afloat(p.x, p.z, p.y, GORILLA_DRAUGHT) ? 1 : 0;
       if (!entry.active || p.y >= ABYSS_RESPAWN_Y || island.supportAt(p.x, p.z, p.y, 0, ABYSS_FLOOR) !== ABYSS_FLOOR) continue;
@@ -8782,6 +8797,9 @@
       const cave = crew.list[i];
       if (cave.root.visible) floatPose(cave, cave.root.position.y - cave.baseY, cave.bodyHeight, cave.phase, elapsed);
     }
+    // The visitor's separate body swims as any roster Ooga does.
+    const ownBody = crew.player?.npc ? crew.player : null;
+    if (ownBody && ownBody.root.visible) floatPose(ownBody, ownBody.root.position.y - ownBody.baseY, ownBody.bodyHeight, ownBody.phase, elapsed);
     footsteps.update(crew.player);
     if (!cloudPlaying()) npcSync.update(dt);
     if (!cloudPlaying()) npcStatusBeams?.update(dt);
@@ -8899,22 +8917,25 @@
       bcaMouth.phase.body.update(dt);
       bcaMouth.phase.body.time = bcaMouth.phase.ripples.time;
     }
+    npcGhosts.paint(dt);
   };
   // Every visitor controls only their assigned Ooga and its companion.
   const mayDriveOoga = (cave) => {
-    if (cloudHopper?.active && cave !== cloudHopper.actor) return "Finish Cloud Hopper before changing Oogas";
+    if (cloudHopper?.active && cave !== cloudHopper.actor && cave !== cloudHopper.actor?.npc) return "Finish Cloud Hopper before changing Oogas";
     return BL.net.mayDrive(cave.traits.name);
   };
+  // Whether the visitor drives this roster Ooga: itself, or the separate body standing for it (crew `separateBodies`).
+  const drivesOoga = (cave) => !!cave && !!pilot.player && (pilot.player === cave || pilot.player.npc === cave);
   const actorTransition = {};
   // Validate a new Ooga before giving up the current actor or its camera.
   const selectOoga = (cave) => {
     if (!cave || crew.cavemen.get(cave.traits.name) !== cave) { hud.toast("That Ooga is not available here"); return false; }
-    if (cave === pilot.player) return true;
+    if (drivesOoga(cave)) return true;
     // The Timechain Sphere's doorway holds its Ooga from the keypad until it is through.
     if (timechainIsland.gate && timechainIsland.gate.busy) { hud.toast("Finish at the Timechain Sphere's doors first"); return false; }
     const refusal = mayDriveOoga(cave);
     if (refusal) { hud.toast(refusal); return false; }
-    if (cave.remoteControlled) { hud.toast(`Someone is already driving ${cave.traits.display}`); return false; }
+    if (cave.remoteControlled || cave.ghostTrack) { hud.toast(`Someone is already driving ${cave.traits.display}`); return false; }
     if (crew.stateOf(cave) === "away" || cave.state !== "working" && cave.state !== "chilling" && cave.state !== "sleeping") {
       hud.toast(`${cave.traits.display} is in another place`);
       return false;
@@ -8924,21 +8945,52 @@
       clankerPlay.release();
       pilot.possess(cave, actorTransition);
     } else pilot.possess(cave);
-    return pilot.player === cave;
+    return drivesOoga(cave);
   };
   const selectGorilla = (entry) => {
     if (!entry || !clankers.list.includes(entry) || !entry.active || !entry.root.visible) {
       hud.toast("That gorilla is not available here"); return false;
     }
-    if (clankerPlay.player === entry) return true;
+    if (clankerPlay.player === entry || clankerPlay.player?.npc === entry) return true;
     const refusal = BL.net.mayDriveGorilla(entry.owner.traits.name);
     if (refusal) { hud.toast(refusal); return false; }
-    if (entry.remoteControlled) { hud.toast("Someone is already driving that gorilla"); return false; }
+    if (entry.remoteControlled || entry.ghostTrack) { hud.toast("Someone is already driving that gorilla"); return false; }
     return clankerPlay.possess(entry);
   };
   const RELEASE_WORDS = { "owner-here": "Its owner arrived and took their Ooga back", taken: "Someone else is already driving that Ooga", "not-yours": "Contributors drive only their own Ooga" };
   // The account or the room changed: an Ooga driven here that is no longer this visitor's to drive is let go.
+  // The account and room this page last drove a separate body under. A sign-out, an account switch or losing a room
+  // that was live lets the body go at once (its NPC turns solid where its track has it) and claims nothing on that
+  // same change; signing in or the room coming back live after such a loss allows one fresh claim. Nothing before the
+  // room was first live counts as a loss, and signed-out (local) driving is left alone. No timer.
+  let sessionAccount = null, sessionLive = false, sessionLost = false;
+  const watchAccount = () => {
+    sessionAccount = BL.net.state.me?.id ?? null; sessionLive = BL.net.state.room === "live"; sessionLost = false;
+    return BL.net.subscribe(onAccountChange);
+  };
+  const releaseSeparateBodies = () => {
+    if (clankerPlay?.player?.npc) clankerPlay.release();
+    if (pilot.player?.npc) pilot.release(true);
+  };
+  const sessionChanged = () => {
+    const account = BL.net.state.me?.id ?? null, live = BL.net.state.room === "live";
+    const signedOut = sessionAccount !== null && account === null, switched = sessionAccount !== null && account !== null && account !== sessionAccount;
+    const lost = sessionLive && !live && account !== null;
+    const regained = sessionLost && account !== null && (live || account !== sessionAccount);
+    sessionAccount = account; sessionLive = live;
+    if (signedOut || lost) {
+      releaseSeparateBodies();
+      sessionLost = true; ownOogaClaimed = true;
+      return true;
+    }
+    // Another account: the old one's body goes, and the new one may claim its own as a fresh arrival would.
+    if (switched) { releaseSeparateBodies(); sessionLost = false; ownOogaClaimed = false; return false; }
+    if (regained) { sessionLost = false; ownOogaClaimed = false; }
+    return false;
+  };
   const onAccountChange = () => {
+    // A sign-out or a lost room ends here: the body is gone and nothing is claimed in its place.
+    if (sessionChanged()) return;
     const driven = crew.player, released = BL.net.state.released;
     const gorilla = clankerPlay && clankerPlay.player;
     if (gorilla) {
@@ -8967,31 +9019,24 @@
     const character = BL.net.ownCharacter() || (!DEBUG && BL.net.preferredCharacter());
     const cave = character && crew.cavemen.get(character.handle);
     if (!cave) return false;
-    if (pilot.player && pilot.player !== cave || clankerPlay && clankerPlay.active) {
+    if (pilot.player && !drivesOoga(cave) || clankerPlay && clankerPlay.active) {
       ownOogaClaimed = true;
       return false;
     }
-    // Another tab of this account drives it: its remote copy has sent this one away.
-    if (cave.remoteControlled || mayDriveOoga(cave)) return false;
+    // Another tab of this account drives it: its NPC here walks on as a ghost track (npc-ghosts.js).
+    if (cave.remoteControlled || cave.ghostTrack && !cave.localBody || mayDriveOoga(cave)) return false;
     // An account retry can identify the Ooga already held at the Sphere's keypad.
     // Keep that doorway interaction and its view; a fresh sign-in has no held actor.
-    if (pilot.player === cave && timechainIsland?.gate?.busy) {
+    if (drivesOoga(cave) && timechainIsland?.gate?.busy) {
       ownOogaClaimed = true;
       return true;
     }
-    const previousOverride = pilot.player === cave ? cave.controlOverride : cave.override;
-    if (crew.stateOf(cave) === "away") {
-      cave.override = "chilling";
-      crew.refreshStates(true);
-    }
-    if (!pilot.possess(cave)) {
-      cave.override = previousOverride;
-      crew.refreshStates(true);
-      return false;
-    }
-    cave.controlOverride = previousOverride;
-    // Respawn navigation also releases a sleeper's bed, clears motion and resets a saved underground eye.
-    if (navigate("pile", true, false) !== true) {
+    // The visitor's body is a separate one (crew.js `separateBodies`): the NPC keeps its own activity and override,
+    // never woken or moved for this. The body stands where the NPC is, as it faces; only an away or hidden NPC,
+    // which has no place on the island, sends it to the pile (navigation also resets a saved underground eye).
+    const placed = cave.root.visible && crew.stateOf(cave) !== "away";
+    if (!pilot.possess(cave)) return false;
+    if (!placed && navigate("pile", true, false) !== true) {
       pilot.release(true);
       return false;
     }
@@ -9139,7 +9184,7 @@
     if (!character) { hud.toast("Sign in as a contributor to switch between your Ooga and gorilla"); return; }
     const cave = crew.cavemen.get(character.handle);
     if (!cave) { hud.toast("Your Ooga is not available here"); return; }
-    if (pilot.player === cave) {
+    if (drivesOoga(cave)) {
       const gorilla = clankers.list.find(entry => entry.owner === cave);
       if (!gorilla || !gorilla.active || !gorilla.root.visible) { hud.toast("Your gorilla is not available here yet"); return; }
       selectGorilla(gorilla);
@@ -11053,9 +11098,10 @@
     out.dx = sx; out.dz = sz; return true;
   };
   const updateClankerEffects = (dt) => {
-    for (let i = 0; i < clankers.list.length; i++) {
-      const entry = clankers.list[i];
-      if (entry.nonInteractive) continue;
+    // The roster's companions, then the visitor's separate gorilla, whose game effects are a player's.
+    for (let i = 0; i <= clankers.list.length; i++) {
+      const entry = i < clankers.list.length ? clankers.list[i] : clankers.player?.npc ? clankers.player : null;
+      if (!entry || entry.nonInteractive) continue;
       BL.clankerRage.effects(entry);
       if (!entry.active) continue;
       const f = entry.fire, parts = entry.renderParts, fireFX = entry.fireFX, spread = fireFX.spread;
@@ -11648,20 +11694,19 @@
     const returningCharacter = handsBack ? world.pilot : null;
     if (handsBack) world.pilot = null;
     if (returningCharacter) {
+      // A separate body comes back (crew.js `separateBodies`); the NPC keeps its own track and override, untouched.
       const cave = crew.cavemen.get(returningCharacter);
-      if (!contributors.debugState && !contributors.debugRoster && crew.stateOf(cave) !== "working") {
-        cave.override = "working"; crew.refreshStates(true);
-      }
       // Back as it left the last scene: its view, combat and weapon (pilot.js `arrive`); out of the Sphere's doorway,
       // which keeps its own exit view. With nothing carried, back from the Factory armed, as before.
       const carried = ctx.from !== "timechain" && pilot.arrive(cave);
       if (ctx.from === "timechain") pilot.possess(cave);
-      if (!carried && ctx.from === "factory") crew.selectWeapon(cave.weapon.selectedSlot, cave);
+      const driven = pilot.player;
+      if (driven && !carried && ctx.from === "factory") crew.selectWeapon(driven.weapon.selectedSlot, driven);
     }
     ownOogaClaimed = !!world.pilotDetached || !!(returningCharacter && BL.net.state.me) || !BL.net.state.me && ctx.from !== null; world.pilotDetached = false;
     claimOwnOoga();
     unsubscribeActivity = contributors.subscribe(() => crew.refreshStates());
-    unsubscribeAccount = BL.net.subscribe(onAccountChange);
+    unsubscribeAccount = watchAccount();
     BL.players.setDoors(doorToward);
     const donate = ctx.place === "donate", routedPlace = donate ? null : ctx.place;
     const sphereExit = ctx.from === "timechain" ? world.sphereExit : null;
@@ -12322,15 +12367,49 @@
     shared.characterModel = takePreparedCharacter;
     // Hub NPCs pass through each other and players, and beam between routines.
     shared.npcPassive = true;
+    // Driving an Ooga builds the visitor a separate body (crew.js); its NPC stays on its track, drawn as a ghost.
+    // The body takes part in the mirror and every portal as a roster Ooga does, for exactly as long as it exists.
+    shared.separateBodies = true;
+    shared.onBody = (body, on) => {
+      const height = body.traits.height * 2, verts = Math.max(body.headOpen.verts.length, body.headClosed.verts.length);
+      const portals = [factoryMouth, bcaMouth, bifrostIsle];
+      if (on) {
+        // Built after the outline registry, like a remote rig: its UI uses the overlay's exact visibility test, and
+        // a registry refresh never takes it for scenery.
+        body.root.sightHidden = body.sleepWeapons.sightHidden = true;
+        if (body.pet) body.pet.node.sightHidden = true;
+        body.root.matrixLiving = true;
+        body.solidBounds = new Float64Array(6);
+        mirrorActorRadius(body);
+        crew?.setJetpackOwnership(body, true, hubModels.jetpack(), hubModels.jetFlame());
+        trackMirrorObject(body.root, height, verts);
+        for (const place of portals) place?.phase.body.track(body.root, height, verts);
+        npcGhosts?.set(body.npc, true);
+      } else {
+        untrackMirrorObject(body.root);
+        for (const place of portals) place?.phase.body.untrack(body.root);
+        fx.hush(body);
+        npcGhosts?.set(body.npc, false);
+      }
+    };
     yield* pause(slice);
     crew = shared.crew = crewMod.create(shared);
+    // A signed-in player's driven body stands apart from their NPC, which keeps its track as a ghost (npc-ghosts.js).
+    npcGhosts = BL.npcGhosts.create({ renderer });
+    shared.shotLook = npcGhosts.shotLook;
+    const ghostedGorillas = new Map();
     remotes = BL.remotePlayers.create({
       root, crew, fx, player: controlledGuideActor, visible: remoteShown,
       createGorilla: (name, rec) => clankers.createRemote(name, rec),
       hideGorilla: (name, on) => {
         if (on && clankerPlay && clankerPlay.player?.owner.traits.name === name) clankerPlay.release();
-        clankers.setRemote(name, on);
-      }, posed: (cave, feet, rec) => {
+        // The companion stays on its own track (office, beds, work) beside the remote rig, as a ghost.
+        if (!on) { npcGhosts.set(ghostedGorillas.get(name), false); ghostedGorillas.delete(name); return; }
+        const owner = crew.cavemen.get(name), entry = owner && clankers.list.find((e) => e.owner === owner);
+        if (entry && npcGhosts.set(entry, true)) ghostedGorillas.set(name, entry);
+      },
+      ghost: (cave, on) => { npcGhosts.set(cave, on); crew.refreshRosterRow(cave); },
+      posed: (cave, feet, rec) => {
         const p = cave.root.position, height = cave.bodyHeight || 1.4;
         floatPose(cave, feet, height, 0, now);
         if (hammock) hammock.poseRemote(cave, feet, rec, remoteShown(rec) && cave.root.visible);
@@ -12342,6 +12421,8 @@
     // a following page replays them into the same effects and gorillas.
     npcSync = BL.npcSync.create({
       crew, fx, animationInterval,
+      // The room's crew host runs another version: the crew holds still here rather than run a second copy.
+      onIncompatible: () => hud.toast("The island's crew host is on another version of Ooga Booga Land · the crew waits until every page reloads"),
       onPlan: (cave, site) => clankers && clankers.plan(cave, site),
       onHit: (cave) => clankers && clankers.hit(cave),
       onModelChange: (cave) => {
@@ -12477,7 +12558,25 @@
       pileRingRadius: shared.reloadSlotRadius,
       fireContact: clankerFireContact, fireReachable: shared.fireReachable, fireClear: clankerFireClear,
       canSmash: canClankerSmash, supportAt: clankerSupportAt, terrainSupportAt: clankerTerrainSupportAt,
-      track: (entry) => trackMirrorObject(entry.root, 3.6, 4248), untrack: (entry) => untrackMirrorObject(entry.root)
+      track: (entry) => trackMirrorObject(entry.root, 3.6, 4248), untrack: (entry) => untrackMirrorObject(entry.root),
+      // Driving a companion builds the visitor a separate gorilla (clankers.js); its NPC walks on as a ghost.
+      separateBodies: true, onBody: (body, on) => {
+        if (on) {
+          body.root.sightHidden = true;
+          body.netBody = body.npc.netBody;
+          body.netMotion = new Float64Array(6);
+          registerClanker(body);
+          npcGhosts?.set(body.npc, true);
+          return;
+        }
+        npcGhosts?.set(body.npc, false);
+        fx.hush(body);
+        const at = clankerCaptures.indexOf(body.capture);
+        if (at >= 0) { finishClankerRider(body, false); clankerCaptures.splice(at, 1); }
+        if (clankerMeshes) clankerMeshes.remove(body.root);
+        for (const node of body.renderParts || []) { removeTarget(node); clankerPartOwners?.delete(node); }
+        body.renderParts = body.capture = null;
+      }
     });
     yield* pause(slice);
     npcStatusBeams = BL.npcStatusBeams.create({ root, crew, clankers });
@@ -12639,19 +12738,18 @@
         crew.refreshStates(true);
       }
     } else if (initialCharacter || returningCharacter) {
+      // The driven Ooga is a separate body standing for this NPC (crew.js `separateBodies`); the NPC keeps its own
+      // track and override, untouched.
       const cave = crew.cavemen.get(returningCharacter || initialCharacter.name);
-      if (!contributors.debugState && !contributors.debugRoster && crew.stateOf(cave) !== "working") {
-        cave.override = "working";
-        crew.refreshStates(true);
-      }
       const carried = returningCharacter && ctx.from !== "timechain" ? pilot.arrive(cave) : pilot.possess(cave) && false;
-      if (!carried && returningCharacter && ctx.from === "factory") crew.selectWeapon(cave.weapon.selectedSlot, cave);
-      if (initialCharacter) crew.configureWeapon(cave, preloadedWeapon, preloadedAmmo);
+      const driven = pilot.player;
+      if (driven && !carried && returningCharacter && ctx.from === "factory") crew.selectWeapon(driven.weapon.selectedSlot, driven);
+      if (driven && initialCharacter) crew.configureWeapon(driven, preloadedWeapon, preloadedAmmo);
     }
     ownOogaClaimed = !!world.pilotDetached || !!(returningCharacter && BL.net.state.me) || !BL.net.state.me && ctx.from !== null;
     world.pilotDetached = false;
     claimOwnOoga();
-    unsubscribeAccount = BL.net.subscribe(onAccountChange);
+    unsubscribeAccount = watchAccount();
     BL.players.setDoors(doorToward);
     const initialFirstPerson = ctx.from === null && preloadedFirstPerson && !initialGorilla && !pilot.loginViewRestored;
     if (initialFirstPerson) pilot.enterClose(true);
@@ -12725,7 +12823,7 @@
         get shown() {
           return pile.shown;
         },
-        terrainSections, caveSections, cutawayPaths: CUTAWAY_PATH_STATE, terrainRampRoof, get cutawayTravelRamp() { return cutawayTravelRamp; }, get cutawayTravelChannel() { return cutawayTravelChannel; }, get cutawayTravelStation() { return cutawayTravelStation; }, island, mouths: island.mouths, labels, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, get hammock() { return hammock; }, altar, path: island.path.debug, headquarters, jumbotron, totems: { list: totems, flare: flareTotem }, get npcSync() { return npcSync; }, clankers, clankerPlay, rageThrowMap, rageEdgeGoal, rageLandAt, rageCaptureLandAt, rageMapRouteClear, rageCaptureEligible, rageApproach, rageWarpRequired, rageGrab, rageCaptive, rageRelease, rageThrow, rageDragClear,
+        terrainSections, caveSections, cutawayPaths: CUTAWAY_PATH_STATE, terrainRampRoof, get cutawayTravelRamp() { return cutawayTravelRamp; }, get cutawayTravelChannel() { return cutawayTravelChannel; }, get cutawayTravelStation() { return cutawayTravelStation; }, island, mouths: island.mouths, labels, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, get hammock() { return hammock; }, altar, path: island.path.debug, headquarters, jumbotron, totems: { list: totems, flare: flareTotem }, get npcSync() { return npcSync; }, get npcGhosts() { return npcGhosts; }, claimOwnOoga: () => { ownOogaClaimed = false; return claimOwnOoga(); }, accountChanged: () => onAccountChange(), clankers, clankerPlay, rageThrowMap, rageEdgeGoal, rageLandAt, rageCaptureLandAt, rageMapRouteClear, rageCaptureEligible, rageApproach, rageWarpRequired, rageGrab, rageCaptive, rageRelease, rageThrow, rageDragClear,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -12788,10 +12886,11 @@
     if (initialGorilla) {
       const entry = clankers.list.find(entry => entry.owner === initialGorilla);
       if (clankerPlay.possess(entry, true)) {
-        const position = positionVector("pos");
-        if (position) {
-          const p = entry.root.position, dx = position[0] - p.x, dy = position[1] - p.y, dz = position[2] - p.z;
-          clankers.respawn(entry, position[0], position[1], position[2]);
+        // A debug pose moves the visitor's separate gorilla (clankers.js), never the NPC companion.
+        const position = positionVector("pos"), driven = clankerPlay.player;
+        if (position && driven) {
+          const p = driven.root.position, dx = position[0] - p.x, dy = position[1] - p.y, dz = position[2] - p.z;
+          clankers.respawn(driven, position[0], position[1], position[2]);
           clankerPlay.respawn(dx, dy, dz);
         }
         clankerPlay.update(0);
@@ -12981,6 +13080,7 @@
     BL.net.setHub(false);
     npcSync.dispose();
     remotes = npcSync = null;
+    npcGhosts.dispose(); npcGhosts = null;
     crew.dispose();
     critters.dispose();
     fx.dispose();
@@ -13110,6 +13210,7 @@
     pile.liveGeometry(set);
     clankers.liveGeometry(set);
     npcStatusBeams?.liveGeometry(set);
+    npcGhosts?.liveGeometry(set);
     entropyLab.phase.liveGeometry(set);
     for (const veil of caveVeils) veil.phase.liveGeometry(set);
     if (factoryMouth) factoryMouth.phase.liveGeometry(set);
@@ -13172,7 +13273,7 @@
     const gorilla = clankerPlay?.active, help = gorilla ? clankerPlay.controlsHelp(touch) : pilot.controlsHelp(touch, ["weapon", "attack", "swapWeapon", "jetpack"]);
     if (!touch) {
       const own = BL.net.ownCharacter(), cave = own && crew.cavemen.get(own.handle);
-      if (cave && (pilot.player !== cave || clankers.list.some(entry => entry.owner === cave && entry.active && entry.root.visible))) help.rows.push(H.row(BL.controls.shortcutKeys("actor"), "Switch between your Ooga and gorilla"));
+      if (cave && (!drivesOoga(cave) || clankers.list.some(entry => entry.owner === cave && entry.active && entry.root.visible))) help.rows.push(H.row(BL.controls.shortcutKeys("actor"), "Switch between your Ooga and gorilla"));
       const player = pilot.player;
       if (!gorilla && player) {
         if (!pilot.birdsEye && player.traits.nunchaku && player.state !== "sleeping" && !player.camp.burning && !player.camp.rolling) help.rows.push(H.row(BL.controls.shortcutKeys("twirl"), "Twirl nunchaku"));

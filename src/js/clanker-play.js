@@ -297,13 +297,15 @@
     };
     const possess = (entry, atBoot = false, transition = null) => {
       if (disposed || !entry || !entry.active || !entry.root.visible) return false;
-      if (entry === player) { requireCombat(); return true; }
+      // A separate body (clankers.js `separateBodies`) stands for its NPC: asking for that NPC keeps it.
+      if (entry === player || player && player.npc === entry) { requireCombat(); return true; }
       const refusal = mayPossess && mayPossess(entry);
       if (refusal) { hud.toast(refusal); return false; }
       const incoming = transition || captureControl(controlState);
       if (!player) savedNear = camera.near;
       if (player) { blurCombat(); restoreHead(); }
       if (!clankers.possess(entry)) return false;
+      entry = clankers.player;
       cameraHandoff.cancel();
       pilot.release(true);
       rebasePilot();
