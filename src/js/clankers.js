@@ -2119,8 +2119,8 @@
       if (ctx.track && !e.tracked) { ctx.track(e); e.tracked = true; }
       if (e === debugShuttle) { debugShuttleAt = elapsed + 4; debugShuttleUntil = 0; }
     };
-    for (let i = 0; i < crew.list.length; i++) {
-      const owner = crew.list[i], seed = fnv1a(`office/${owner.traits.name || i}`);
+    const makeEntry = (owner, i) => {
+      const seed = fnv1a(`office/${owner.traits.name || i}`);
       const gorilla = BL.agent.create({ managed: true, groundAt, groundPlaneAt: ctx.groundPlaneAt, torsoClearAt: ctx.climbTorsoClear, scale: SCALE, coatClip,
         suitClip, suitColor: seed % BL.agent.SUIT_COLORS });
       gorilla.poseManaged(0.6, 0, 0, 0, i * 2.39996323, 0, false, false);
@@ -2209,12 +2209,17 @@
           points: new Float64Array((JUMP_SAMPLES + 1) * 3) }
       };
       // Non-enumerable, like the crew's: a driven or remote gorilla keeps normal interactions.
-      interactionGetter(entry, "nonInteractive", () => passiveNpcs && !entry.controlled && !entry.remoteControlled);
+      // A separate player body (`entry.npc`) is never a passive companion, from its first placement check on.
+      interactionGetter(entry, "nonInteractive", () => passiveNpcs && !entry.npc && !entry.controlled && !entry.remoteControlled);
       entry.motion.supportEntry = entry;
       gorilla.root.visible = false;
       gorilla.root.matrixNative = false;
       gorilla.root.matrixLiving = true;
       addChild(ctx.root, gorilla.root);
+      return entry;
+    };
+    for (let i = 0; i < crew.list.length; i++) {
+      const owner = crew.list[i], entry = makeEntry(owner, i);
       list.push(entry); byOwner.set(owner, entry);
     }
     const sync = () => {
@@ -5305,12 +5310,52 @@
       player.climb.searchPending = player.climb.searchDeferred = player.climb.claimPending = player.climb.crestPending = false;
       player.climb.claimFor = -1; player.climb.claimOwnerOrder = player.climb.claimOrder = 0;
     };
+    // Separate bodies (the hub, `ctx.separateBodies`): driving a companion builds the visitor a gorilla of its own with
+    // the same constructor, where the NPC stands and as it faces, never in the roster list. The NPC keeps its track,
+    // office desk, lab station and bed. The body goes, with everything it held, when it is let go.
+    const separateBodies = ctx.separateBodies === true;
+    const BODY_RING = [0, 1.2, 2];
+    // Null when no candidate is clear (checked as a driven gorilla is, never with the passive shortcuts): nothing is
+    // activated, tracked or announced, and the NPC is untouched.
+    const spawnBody = (npc) => {
+      // Its own scheduling and claim identity (`index`): one past the roster, never its NPC's, so neither consumes the
+      // other's wall-search, lab-route or roam turn or climb claim. The roster list itself is unchanged.
+      const body = makeEntry(npc.owner, list.length);
+      body.npc = npc;
+      const from = npc.root.position, heading = npc.heading;
+      let placed = false;
+      for (let r = 0; r < BODY_RING.length && !placed; r++) for (let k = 0; k < (r ? 8 : 1) && !placed; k++) {
+        const a = heading + k * Math.PI / 4, x = from.x + Math.sin(a) * BODY_RING[r], z = from.z + Math.cos(a) * BODY_RING[r];
+        const y = support(body, x, z, from.y + STEP, STEP, heading);
+        if (!Number.isFinite(y) || ctx.clear && !ctx.clear(x, y, z, x, y, z, WALK_RADIUS, WALK_HEIGHT, body)) continue;
+        Object.assign(body.root.position, { x, y, z }); placed = true;
+      }
+      if (!placed) { body.npc = null; body.gorilla.dispose(); return null; }
+      npc.localBody = body;
+      body.heading = heading;
+      activate(body, true);
+      if (ctx.onBody) ctx.onBody(body, true);
+      return body;
+    };
+    const disposeBody = (body) => {
+      if (rage) rage.cancel(body, "respawn");
+      if (ctx.rageRelease) ctx.rageRelease(body);
+      releasePortal(body); releaseLab(body); releaseOffice(body); releaseBed(body);
+      clearWallSearch(body);
+      if (body.tracked && ctx.untrack) ctx.untrack(body);
+      body.tracked = body.active = false;
+      if (ctx.onBody) ctx.onBody(body, false);
+      sleepBeamLook(body, false);
+      body.gorilla.dispose();
+      if (body.npc && body.npc.localBody === body) body.npc.localBody = null;
+    };
     const release = () => {
       if (!player) return false;
       const e = player;
       // Released into the passive Hub policy: nothing it carried may keep burning or raging.
       if (passiveNpcs) clearCombatEffects(e, true);
       cancelInput(); player = null; e.controlled = false;
+      if (e.npc) { disposeBody(e); return true; }
       if (sleeping(e)) { e.drive.resume = false; return true; }
       if (e.sleep.slot >= 0 && !sleeps(e.owner)) releaseBed(e);
       e.drive.resume = true;
@@ -5406,9 +5451,19 @@
       return true;
     };
     const possess = (value) => {
-      const e = entryFor(value);
+      let e = entryFor(value);
       if (!e || e.remoteControlled || !e.active || !e.root.visible) return false;
-      if (player === e) return true;
+      if (player === e || player && player.npc === e) return true;
+      if (separateBodies && !e.npc && list.includes(e)) {
+        // Someone else's driven companion (a ghost track) is never taken over.
+        if (e.ghostTrack && !e.localBody) return false;
+        const body = spawnBody(e);
+        if (!body) return false;
+        if (!body.active) { disposeBody(body); return false; }
+        // The previous driven body goes only once this one has a checked place.
+        release();
+        e = body;
+      }
       if (rage) rage.cancel(e, "possession");
       if (ctx.rageRelease) ctx.rageRelease(e);
       release(); player = e; e.controlled = true; e.drive.resume = false;
@@ -7501,12 +7556,17 @@
         list[i].climb.searchBudget = 2;
         if (!list[i].remoteControlled && !list[i].rage.warpWaiting) pendingClimbSearch(list[i]);
       }
-      for (let i = 0; i < list.length; i++) {
-        const index = (climbNext + i) % list.length, e = list[index], c = e.climb;
+      // The visitor's separate body steps as a driven roster companion would, with its own turn key (`index`).
+      const body = player && player.npc ? player : null;
+      if (body) { body.climb.searchBudget = 2; if (!body.rage.warpWaiting) pendingClimbSearch(body); }
+      // The separate body takes its place in the same rotation, after the roster, so its wall searches get their turn.
+      const turns = list.length + (body ? 1 : 0);
+      for (let i = 0; i < turns; i++) {
+        const index = (climbNext + i) % turns, e = index < list.length ? list[index] : body, c = e.climb;
         if (!e.active || e.rage.warpWaiting || c.active || !c.searchPending || c.retry > remaining || e.recover > 0 || e.jump.active || e.drive.airborne
           || e.pound || e.beat || e.parked || e.fire.rolling) continue;
         if (e.controlled ? Math.hypot(e.drive.x, e.drive.z) <= 0.05 : Math.hypot(e.goalX - e.root.position.x, e.goalZ - e.root.position.z) <= 0.18) continue;
-        climbTurn = index; climbNext = (index + 1) % list.length;
+        climbTurn = e.index; climbNext = (index + 1) % turns;
         break;
       }
       while (remaining > 1e-8) {
@@ -7526,6 +7586,10 @@
         for (let i = 0; i < list.length; i++) {
           updateEntry(list[i], step);
           if (!list[i].remoteControlled && !list[i].rage.active && !list[i].startled.active) recoverStall(list[i], step);
+        }
+        if (body && player === body) {
+          updateEntry(body, step);
+          if (!body.rage.active && !body.startled.active) recoverStall(body, step);
         }
       }
     };
@@ -7609,8 +7673,13 @@
       }
       return { capacity: list.length, active, working, chilling, overflow, airborne, hits, pounds, beats, stuck, replans, recoveries, elapsed };
     };
-    const liveGeometry = (set) => { if (sleepBeam) sleepBeam.liveGeometry(set); for (let i = 0; i < list.length; i++) if (list[i].active) list[i].gorilla.liveGeometry(set); };
+    const liveGeometry = (set) => {
+      if (sleepBeam) sleepBeam.liveGeometry(set);
+      for (let i = 0; i < list.length; i++) if (list[i].active) list[i].gorilla.liveGeometry(set);
+      if (player && player.npc) player.gorilla.liveGeometry(set);
+    };
     const dispose = () => {
+      if (player && player.npc) { const body = player; player = null; body.controlled = false; disposeBody(body); }
       if (sleepBeam) sleepBeam.dispose();
       if (rage) rage.dispose();
       disposed = true; player = null;

@@ -2217,7 +2217,8 @@
       if (cave && !cave.weapon.aiming && ctx.combatOnly?.()) modeAction("mode-toggle");
     };
     const possess = (cave, transition = null) => {
-      if (cave && cave === player()) { requireCombat(); return true; }
+      // A separate body (crew.js `separateBodies`) stands for its NPC: asking for that NPC keeps it.
+      if (cave && (cave === player() || player()?.npc === cave)) { requireCombat(); return true; }
       if (!cave || crew.cavemen.get(cave.traits.name) !== cave) { hud.toast("That Ooga is not available here"); return false; }
       // A scene may refuse an Ooga (whose it is, who is here): the refusal says why and nothing changes.
       const refusal = mayPossess && mayPossess(cave);
@@ -2225,8 +2226,10 @@
         hud.toast(refusal);
         return false;
       }
-      if (cave.remoteControlled) { hud.toast(`Someone is already driving ${cave.traits.display}`); return false; }
-      if (cave.state !== "working" && cave.state !== "chilling" && cave.state !== "sleeping") {
+      // A ghost track (npc-ghosts.js) is someone else's driven Ooga's NPC: never taken over here.
+      if (cave.remoteControlled || cave.ghostTrack) { hud.toast(`Someone is already driving ${cave.traits.display}`); return false; }
+      // With separate bodies (the hub) the NPC's activity never blocks a body of one's own: an away NPC stays away.
+      if (!crew.separateBodies && cave.state !== "working" && cave.state !== "chilling" && cave.state !== "sleeping") {
         hud.toast(`${cave.traits.display} is in another place`);
         return false;
       }
@@ -2235,7 +2238,12 @@
       const incoming = transition && typeof transition === "object" ? transition : captureControl(controlTransition);
       clearRightGesture();
       release(true);
-      if (!crew.control(cave)) return false;
+      if (!crew.control(cave)) {
+        if (crew.separateBodies) hud.toast(`No clear ground beside ${cave.traits.display} right now`);
+        return false;
+      }
+      // From here on the Ooga is the one driven: the NPC's own body where it is driven, else a separate one.
+      cave = player();
       restoredPose = null;
       centeredCarry = carrySelection = resumeSleepOverhead = false;
       const nextView = incoming.active ? incoming.view : "orbit";
@@ -2342,6 +2350,7 @@
       // Letting go of an Ooga already driven rewrites `carried`: the look the navigate keeps is copied first.
       arrivalKeep.relYaw = c.relYaw; arrivalKeep.pitch = c.pitch; arrivalKeep.distance = c.distance;
       if (!possess(cave, t)) return false;
+      cave = player();
       // A scene load may finish after its input gesture. Restore mouse-look without requesting native lock;
       // the next canvas gesture can capture it. A deliberately released cursor stays released.
       if (focused) focusAim();
