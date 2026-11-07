@@ -105,10 +105,9 @@ export const readManifest = (source, lane) => {
   return state;
 };
 
-export const checkRegistry = async (gh, rock, entries) => {
-  const rows = new Map(), owners = new Map();
-  for (const [path] of await gh.tree(rock)) if (characterPath(path)) rows.set(path, declaredIdentity((await gh.file(rock, path)).source));
-  for (const entry of entries) rows.set(entry.path, declaredIdentity(entry.source));
+// One identity per path; no handle or GitHub owner may appear in two files.
+export const checkIdentities = (rows) => {
+  const owners = new Map();
   if (rows.size > 128) reject("Character capacity exceeded.");
   for (const [path, row] of rows) for (const name of new Set([row.handle, row.github].filter(Boolean).map((key) => key.toLowerCase()))) {
     if (owners.has(name)) reject("A handle or GitHub owner already has a different character file.");
@@ -116,15 +115,20 @@ export const checkRegistry = async (gh, rock, entries) => {
   }
 };
 
+export const checkRegistry = async (gh, rock, entries) => {
+  const rows = new Map();
+  for (const [path] of await gh.tree(rock)) if (characterPath(path)) rows.set(path, declaredIdentity((await gh.file(rock, path)).source));
+  for (const entry of entries) rows.set(entry.path, declaredIdentity(entry.source));
+  checkIdentities(rows);
+};
+
 // The initial empty PRs were opened by Actions; a configured App can adopt them.
 // The current head must still be a verified commit by the configured bot.
 export const isBundle = (pr, bot) => bot && [bot, BOT].includes(pr.user.login) && pr.head.repo?.full_name === pr.base.repo.full_name
   && LANES.some((lane) => pr.head.ref.startsWith(branchPrefix(lane)));
 
-// Reserve queued identities for onboarding without executing their custom code.
-// Full merge validation stays separate: an untouched generated default on rock
-// may already conflict with a queued addition and need onboarding to remove it.
-export const queuedCharacters = async (gh, bot) => {
+// Every queued file from signed bot heads, hash-checked as text but not parsed.
+export const queuedEntries = async (gh, bot) => {
   if (!/^[A-Za-z0-9-]+\[bot\]$/.test(bot || "")) throw new Error("Missing trusted character bot login");
   const queued = [];
   for (const listed of await gh.list("pulls?state=open&base=rock")) {
@@ -140,8 +144,27 @@ export const queuedCharacters = async (gh, bot) => {
     for (const entry of readManifest(manifest.source, lane).entries) {
       const file = await gh.file(pr.head.sha, entry.path);
       if (!file || digest(file.source) !== entry.hash) throw new Error("Bundled file differs from the scanned source");
-      queued.push({ path: entry.path, base: entry.base, character: declaredIdentity(file.source) });
+      queued.push({ bundle: pr.number, lane, entry, source: file.source });
     }
+  }
+  return queued;
+};
+
+// Reserve queued identities for onboarding without executing their custom code.
+// Full merge validation stays separate: an untouched generated default on rock
+// may already conflict with a queued addition and need onboarding to remove it.
+// Given rock, an unreadable revision whose base rock has since replaced (a merged
+// maintainer override, awaiting withdrawal) reserves nothing instead of failing.
+export const queuedCharacters = async (gh, bot, rock) => {
+  const queued = [];
+  for (const { entry, source } of await queuedEntries(gh, bot)) {
+    let character;
+    try { character = declaredIdentity(source); }
+    catch (error) {
+      if (!rock || ((await gh.tree(rock)).get(entry.path)?.sha || null) === entry.base) throw error;
+      continue;
+    }
+    queued.push({ path: entry.path, base: entry.base, character });
   }
   return queued;
 };
