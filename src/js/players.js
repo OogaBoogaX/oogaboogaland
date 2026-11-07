@@ -63,7 +63,7 @@
   const rows = new Map(), groups = new Map(), order = [], door = { x: 0, y: 0, z: 0 };
   let serial = 0, pass = 0, showing = false, stale = true, doors = null, shownZone = "", shownRadius = -1;
   const makeRow = () => {
-    const li = document.createElement("li"), presence = document.createElement("span"), name = document.createElement("span");
+    const li = document.createElement("li"), dots = document.createElement("span"), presence = document.createElement("span"), name = document.createElement("span");
     const label = document.createElement("span"), host = document.createElement("span"), marks = document.createElement("span");
     const voice = document.createElement("button"), look = document.createElement("button"), distance = document.createElement("span");
     const priv = document.createElement("button");
@@ -78,12 +78,13 @@
     slider.min = "0"; slider.max = String(V.VOLUME_MAX * 100); slider.step = "5"; slider.value = "100";
     value.className = "players-volume-value"; value.htmlFor = slider.id; value.textContent = "100%";
     volume.append(volumeLabel, slider, value);
+    dots.className = "roster-dots";
     presence.className = "roster-presence"; presence.dataset.online = "true"; presence.setAttribute("role", "img");
     presence.setAttribute("aria-label", "Online"); presence.title = "Online";
     name.className = "players-name"; label.className = "roster-label"; label.id = id;
     host.className = "roster-host"; host.hidden = true; host.setAttribute("role", "img");
     host.setAttribute("aria-label", "Host: runs the Oogas for everyone"); host.title = "Host: runs the Oogas for everyone";
-    toggle.append(label); name.append(toggle, host);
+    toggle.append(label); name.append(toggle); dots.append(presence, host);
     marks.className = "roster-marks";
     voice.className = "roster-voice"; voice.type = "button"; voice.hidden = true; voice.setAttribute("aria-describedby", id); voice.append(BL.hud.voiceIcon.cloneNode(true));
     // A private conversation (#188), offered where the room relays them; never on the visitor's own row.
@@ -96,7 +97,7 @@
     distance.className = "players-distance"; distance.append("");
     note.className = "players-note"; note.textContent = ", last known location"; note.hidden = true;
     distance.append(note);
-    li.append(presence, name, marks, thump, look, distance, volume);
+    li.append(dots, name, marks, thump, look, distance, volume);
     return { li, label, toggle, volume, slider, value, host, voice, priv, privName: null, thump, pulse: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
       aim: "", voiceLook: "", voiceLogin: "", voiceSelf: false, blocked: false, hostOn: false, metres: -1, lastKnown: false, far: false };
   };
@@ -281,7 +282,7 @@
       }
       if (group.ul.children[rowIndex] !== row.li) group.ul.insertBefore(row.li, group.ul.children[rowIndex] || null);
       rowIndex++;
-      if (row.label.textContent !== row.name) row.label.textContent = row.name;
+      if (row.label.textContent !== row.name) { row.label.textContent = row.name; row.label.title = row.name; }
       if (!row.self) row.slider.setAttribute("aria-label", `Volume for ${row.name}`);
     }
     for (const [key, entry] of groups) if (entry.seen !== pass) { entry.section.remove(); groups.delete(key); }

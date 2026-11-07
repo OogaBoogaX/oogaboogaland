@@ -1101,6 +1101,7 @@ body[data-active-scene="hub"] .home-link {
 }
 
 .banana-rate {
+  min-width: 0;
   margin: 0;
   color: var(--paper);
   font-size: 14px;
@@ -1110,6 +1111,8 @@ body[data-active-scene="hub"] .home-link {
 }
 
 .banana-rate[data-tone="stale"] { color: rgba(243, 239, 228, 0.6); }
+/* The bitcoin line is measured on one line (hud.js `fitBtcRate`) and wraps only when even "100M sats" will not fit. */
+.banana-rate[data-fit="line"] { white-space: nowrap; }
 
 /* The banana before an amount, as a currency's sign: an em square centred on the figures after it. */
 .banana-rate-icon,
@@ -1194,7 +1197,8 @@ body[data-active-scene="hub"] .home-link {
 
 .banana-rank { color: rgba(243, 239, 228, 0.5); font-size: 10px; font-variant-numeric: tabular-nums; }
 .banana-leaders li:nth-child(-n + 3) .banana-rank { color: var(--accent-text); }
-.banana-donor { min-width: 0; color: var(--paper); overflow-wrap: anywhere; }
+/* A donor's name keeps to one line and ends in an ellipsis where it would not fit; hovering shows it whole. */
+.banana-donor { min-width: 0; overflow: hidden; color: var(--paper); text-overflow: ellipsis; white-space: nowrap; }
 .banana-donor[data-anon="true"] { color: rgba(243, 239, 228, 0.55); font-style: italic; }
 .banana-amount { color: var(--paper); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 .banana-leaders li:first-child .banana-amount { color: var(--accent-text); }
@@ -1212,24 +1216,22 @@ body[data-active-scene="hub"] .home-link {
   border-top: 1px solid rgba(0, 0, 0, 0.35);
   font-size: 12px;
 }
-/* The name and its check share a line, the check centred on the name's line rather than on its x-height. */
-.banana-recent-name { display: flex; align-items: center; min-width: 0; color: var(--paper); overflow-wrap: anywhere; }
+/* The name and its check share one line, the check centred on the name's line rather than on its x-height; a name too
+   long for it ends in an ellipsis before the check, and hovering shows it whole. */
+.banana-recent-name { display: flex; align-items: center; min-width: 0; color: var(--paper); }
 .banana-recent-name[data-anon="true"] { color: rgba(243, 239, 228, 0.55); font-style: italic; }
+.banana-recent-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The orange check is a seal with a ridged rim (hud.js `verifiedSeal`). */
 .banana-verified {
   display: inline-flex;
   flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   margin-left: 5px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: #211b14;
-  font-size: 11px;
-  font-style: normal;
-  font-weight: 900;
 }
+.banana-verified svg { width: 100%; height: 100%; }
+.banana-verified-seal { fill: var(--accent); }
+.banana-verified-tick { fill: none; stroke: #211b14; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .banana-recent-message { grid-column: 1 / -1; margin: 0; color: rgba(243, 239, 228, 0.7); overflow-wrap: anywhere; line-height: 1.4; }
 .banana-recent-list li[hidden], .banana-verified[hidden], .banana-recent-message[hidden] { display: none; }
 
@@ -1765,7 +1767,7 @@ body[data-active-scene="hub"] .home-link {
 }
 
 /* One row an Ooga: presence, name, the player's marks, activity age and state, each in a column of its own
-   so a long name wraps inside its cell and a mark or state coming and going never moves the others. */
+   so a long name ends in an ellipsis inside its cell and a mark or state coming and going never moves the others. */
 .roster {
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr) 26px max-content 6.5ch;
@@ -1821,6 +1823,21 @@ body[data-active-scene="hub"] .home-link {
   .roster-away button { min-height: 44px; }
 }
 
+/* The online dot, and centred under it the host's black dot, which hangs below the row's line so every row's online
+   dot stays level with its name, hosting or not. */
+.roster-dots {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.roster-dots .roster-host {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 50%;
+  margin-left: -3.5px;
+}
+
 .roster-presence {
   width: 8px;
   height: 8px;
@@ -1834,15 +1851,15 @@ body[data-active-scene="hub"] .home-link {
   box-shadow: 0 0 5px rgba(34, 197, 94, 0.55);
 }
 
-/* The name, with the host's black dot right after it. A signed-in player's name is a button with a caret that
-   opens their row onto the land they are in, a darker strip under the row. */
+/* The name, on one line and cut short with an ellipsis where it would not fit, filling its cell. A signed-in player's
+   name is a button with a caret at the cell's right end, by the time, that opens their row onto the land they are in,
+   a darker strip under the row. */
 .roster-name {
   display: inline-flex;
   align-items: center;
-  justify-self: start;
   gap: 6px;
+  width: 100%;
   min-width: 0;
-  max-width: 100%;
   padding: 0;
   border: 0;
   background: none;
@@ -1857,7 +1874,9 @@ body[data-active-scene="hub"] .home-link {
 
 .roster-label {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .roster-name:not(:disabled) {
@@ -1867,6 +1886,7 @@ body[data-active-scene="hub"] .home-link {
 .roster-name:not(:disabled)::after {
   content: "";
   flex: none;
+  margin-left: auto;
   border-top: 4px solid currentColor;
   border-right: 3.5px solid transparent;
   border-left: 3.5px solid transparent;
@@ -2067,7 +2087,7 @@ body[data-active-scene="hub"] .home-link {
   box-shadow: none;
 }
 
-.players-rows .roster-presence { grid-column: 1; }
+.players-rows .roster-dots { grid-column: 1; }
 .players-rows .roster-marks { grid-column: 3; }
 
 .players-thump {
