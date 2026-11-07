@@ -6408,9 +6408,36 @@ const hammockChecks = async () => {
     for (let k = 0; k < v.length; k += 3) if (Math.abs(v[k + 2]) < 0.3) clothLong = Math.max(clothLong, Math.abs(v[k]));
     for (let k = 0; k < v.length; k += 3) if (Math.abs(v[k]) < clothLong - 0.2) clothWide = Math.max(clothWide, Math.abs(v[k + 2])); }
   // Stowed gear as drawn, every visible triangle in the holder's frame: each part flat (no taller than it is wide),
-  // on the ground, under the cloth's underside, every drawn point inside the cloth's footprint, and no part's
-  // triangles meeting another's seen from above.
+  // on the ground, at most GEAR_TOP high and GEAR_CLEAR under the drawn cloth straight above every one of its points,
+  // at rest and at either end of the occupied swing (+-REST_HELD), every drawn point inside the cloth's footprint, and
+  // no part's triangles meeting another's seen from above.
   const inverse = R.math.mat4.create(), point = new Float64Array(3);
+  // The bed's drawn triangles in the holder's frame with the bed turned by `a`, and the lowest of their corners.
+  const clothTriangles = (a) => {
+    const turn = ham.bedNode.rotation.x;
+    ham.bedNode.rotation.x = a; R.scene.updateWorld(root);
+    const g = ham.bedNode.geometry, v = g.verts, w = [], tris = [];
+    let lowest = Infinity;
+    for (let k = 0; k < v.length; k += 3) {
+      R.math.mat4.transformPoint(point, ham.bedNode.world, v[k], v[k + 1], v[k + 2]);
+      R.math.mat4.transformPoint(point, inverse, point[0], point[1], point[2]);
+      w.push(point[0], point[1], point[2]); lowest = Math.min(lowest, point[1]);
+    }
+    eachFace(g, ids => { for (let k = 1; k + 1 < ids.length; k++) tris.push([ids[0], ids[k], ids[k + 1]].flatMap(c => [w[c * 3], w[c * 3 + 1], w[c * 3 + 2]])); });
+    ham.bedNode.rotation.x = turn; R.scene.updateWorld(root);
+    return { tris, lowest };
+  };
+  // Where a vertical line through (x, z) first meets the drawn bed from below; Infinity past its edge.
+  const undersideAt = (tris, x, z) => {
+    let low = Infinity;
+    for (const [ax, ay, az, bx, by, bz, cx, cy, cz] of tris) {
+      const d = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
+      if (Math.abs(d) < 1e-12) continue;
+      const l1 = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / d, l2 = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / d, l3 = 1 - l1 - l2;
+      if (l1 >= -1e-9 && l2 >= -1e-9 && l3 >= -1e-9) low = Math.min(low, l1 * ay + l2 * by + l3 * cy);
+    }
+    return low;
+  };
   const separated = (A, B) => {
     const axes = [1, 0, 0, 1];
     for (const P of [A, B]) for (let e = 0; e < 6; e += 2) { const dx = P[(e + 2) % 6] - P[e], dz = P[(e + 3) % 6] - P[e + 1]; axes.push(dz, -dx, dx, dz); }
@@ -6427,7 +6454,7 @@ const hammockChecks = async () => {
     R.scene.updateWorld(root);
     R.math.mat4.invert(inverse, holder.world);
     const parts = nodes.map((n) => {
-      const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], tris = [];
+      const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], tris = [], pts = [];
       const visit = (node) => {
         if (!node.visible) return;
         const g = node.geometry, v = g?.verts;
@@ -6436,7 +6463,7 @@ const hammockChecks = async () => {
           for (let k = 0; k < v.length; k += 3) {
             R.math.mat4.transformPoint(point, node.world, v[k], v[k + 1], v[k + 2]);
             R.math.mat4.transformPoint(point, inverse, point[0], point[1], point[2]);
-            at.push(point[0], point[2]);
+            at.push(point[0], point[2]); pts.push(point[0], point[1], point[2]);
             for (let axis = 0; axis < 3; axis++) { lo[axis] = Math.min(lo[axis], point[axis]); hi[axis] = Math.max(hi[axis], point[axis]); }
           }
           eachFace(g, ids => { for (let k = 1; k + 1 < ids.length; k++) tris.push([ids[0], ids[k], ids[k + 1]].flatMap(c => [at[c * 2], at[c * 2 + 1]])); });
@@ -6444,15 +6471,21 @@ const hammockChecks = async () => {
         for (const child of node.children) visit(child);
       };
       visit(n);
-      return Number.isFinite(lo[0]) ? { lo, hi, tris } : null;
+      return Number.isFinite(lo[0]) ? { lo, hi, tris, pts } : null;
     }).filter(Boolean);
     let overlaps = 0;
     for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) for (const A of parts[i].tris) for (const B of parts[j].tris) if (!separated(A, B)) overlaps++;
-    const flat = parts.every(({ lo, hi }) => hi[1] - lo[1] <= Math.min(hi[0] - lo[0], hi[2] - lo[2]) + 1e-9 && lo[1] > 0 && lo[1] < 0.02 && hi[1] < seat.restY - fit.ground - 0.05);
+    const flat = parts.every(({ lo, hi }) => hi[1] - lo[1] <= Math.min(hi[0] - lo[0], hi[2] - lo[2]) + 1e-9 && lo[1] > 0 && lo[1] < 0.02 && hi[1] <= H.GEAR_TOP);
+    // The smallest gap from any drawn point of the gear up to the drawn cloth over it, whichever way the occupied bed
+    // has swung; a point lower than the cloth's lowest corner less GEAR_CLEAR cannot come nearer than that.
+    let gap = Infinity;
+    for (const { tris, lowest } of [0, H.REST_HELD, -H.REST_HELD].map(clothTriangles)) for (const { pts } of parts)
+      for (let k = 0; k < pts.length; k += 3) if (pts[k + 1] > lowest - H.GEAR_CLEAR) gap = Math.min(gap, undersideAt(tris, pts[k], pts[k + 2]) - pts[k + 1]);
+    const cleared = gap >= H.GEAR_CLEAR - 1e-9;
     const inside = parts.every(({ lo, hi }) => -lo[0] <= clothLong + 1e-9 && hi[0] <= clothLong + 1e-9 && -lo[2] <= clothWide + 1e-9 && hi[2] <= clothWide + 1e-9);
     const along = [Math.min(...parts.map(q => q.lo[0])), Math.max(...parts.map(q => q.hi[0]))].map(x => +x.toFixed(3));
     const across = [Math.min(...parts.map(q => q.lo[2])), Math.max(...parts.map(q => q.hi[2]))].map(x => +x.toFixed(3));
-    return { ok: parts.length >= 2 && flat && inside && !overlaps, flat, inside, overlaps, along, across };
+    return { ok: parts.length >= 2 && flat && cleared && inside && !overlaps, flat, cleared, gap: +gap.toFixed(3), inside, overlaps, along, across };
   };
   const gearRows = [];
   // One Ooga with its club, rifle and pack, built the same way every call, so a second copy stands for the same
@@ -6595,7 +6628,7 @@ const hammockChecks = async () => {
     R.scene.removeChild(root, cave.root);
     return row;
   });
-  record("hub hammock: every roster Ooga's actual club, rifle and jetpack lie flat on the ground inside the drawn cloth's footprint, no drawn triangle of one meeting another's",
+  record("hub hammock: every roster Ooga's actual club, rifle and jetpack lie flat on the ground inside the drawn cloth's footprint, at most 0.5 high and clear of the drawn cloth over every point at rest and through the occupied resting sway (REST_HELD), no drawn triangle of one meeting another's",
     roster.length >= 50 && roster.every(row => row.ok), JSON.stringify({ cloth: [clothLong, clothWide].map(x => +x.toFixed(3)), failing: roster.filter(row => !row.ok), widest: roster.reduce((w, row) => Math.max(w, row.across[1] - row.across[0]), 0) }));
   seat.remote = 0;
   ham.dispose();
