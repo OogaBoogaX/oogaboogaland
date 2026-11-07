@@ -304,7 +304,12 @@
       const t = target, o = i * RECORD, r = cave.root, p = cave.parts, q = quats[i];
       const flags = t[o + 1];
       const distance = Math.hypot(t[o + 2] - r.position.x, t[o + 3] - r.position.y, t[o + 4] - r.position.z);
-      const far = fresh[i] || distance > SNAP;
+      // A status change is a passive relocation on the host (a beam): place it at
+      // once rather than easing across, however short. The exception is
+      // clanking to chilling, a walk on the host, which eases as usual.
+      const status = STATES[t[o + 96]];
+      const relocated = status !== undefined && status !== cave.state && !(cave.state === "working" && status === "chilling");
+      const far = fresh[i] || distance > SNAP || relocated;
       let k = far ? 1 : 1 - Math.exp(-EASE * dt);
       fresh[i] = 0;
       r.visible = (flags & F_VISIBLE) !== 0;
