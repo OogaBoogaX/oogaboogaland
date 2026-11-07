@@ -28,6 +28,46 @@
   // The mezzanine's deck (its top at `y`, from `z0` at the back wall to its front edge `z1`) and its two stairs up
   // the side walls, [x, z] at the foot and the head, `w` wide.
   const MEZZ = { z0: HALL.back, z1: -18, y: 3.2, stairs: [[-16.2, -12.5, -16.2, -18], [16.2, -12.5, 16.2, -18]], stairW: 2.6 };
+  // The stair handrails an Ooga slides down on its bottom: each stair's hall-side cane only (the wall-side one hugs
+  // the wall), never the deck's rail between the stairs' heads. As `mezzanine` lays it, the cane stands `OUT` beside the
+  // stair's edge line and `H` over its treads' line, `TOP` from its middle to its top, from the head down to the foot.
+  // A slide starts `from` down it, eases from `start` to `top` m/s at `accel`, and hops off `hop` seconds onto the floor
+  // at `land`, `LAND` past the foot along the stair. `zone` is where Space offers it: `back` behind the head (on the
+  // deck) to `down` below it, `near` to `far` across from the cane into the stair, feet within `feet` of the deck.
+  const HANDRAIL = { OUT: MEZZ.stairW / 2 + 0.05, H: 1.04, TOP: 0.055, LAND: 0.9, from: 0.35, start: 2, top: 6, accel: 5, hop: 0.4,
+    zone: { back: 0.8, down: 1.2, near: 0.15, far: 0.95, feet: 0.8 } };
+  const HANDRAILS = MEZZ.stairs.map(([fx, fz, hx, hz], index) => {
+    const run = Math.hypot(fx - hx, fz - hz), dx = (fx - hx) / run, dz = (fz - hz) / run, side = -Math.sign(fx);
+    // Out from the stair's middle toward the hall (`side`), as the model's `px * s`; `nx, nz` back in over the treads.
+    const ox = dz * side * HANDRAIL.OUT, oz = -dx * side * HANDRAIL.OUT;
+    const x0 = hx + ox, y0 = MEZZ.y + HANDRAIL.H, z0 = hz + oz, x1 = fx + ox, y1 = HANDRAIL.H, z1 = fz + oz;
+    const len = Math.hypot(x1 - x0, y1 - y0, z1 - z0);
+    return { index, x0, y0, z0, x1, y1, z1, len, run, dx, dz, nx: -ox / HANDRAIL.OUT, nz: -oz / HANDRAIL.OUT, ry: Math.atan2(dx, dz),
+      land: { x: x1 + dx * HANDRAIL.LAND, z: z1 + dz * HANDRAIL.LAND } };
+  });
+  // The handrail a walker at (x, z) with its feet at `feet`, facing `yaw`, may slide down: at a stair's head, inside the
+  // stair beside its hall-side cane, facing down the stair; null anywhere else. Allocation-free.
+  const handrailAt = (x, z, feet, yaw) => {
+    const Z = HANDRAIL.zone;
+    if (Math.abs(feet - MEZZ.y) > Z.feet) return null;
+    for (let i = 0; i < HANDRAILS.length; i++) {
+      const r = HANDRAILS[i], a = (x - r.x0) * r.dx + (z - r.z0) * r.dz, c = (x - r.x0) * r.nx + (z - r.z0) * r.nz;
+      if (a >= -Z.back && a <= Z.down && c >= Z.near && c <= Z.far && Math.cos(yaw - r.ry) > 0.5) return r;
+    }
+    return null;
+  };
+  // A slider `s` metres down `rail` into `out`: `x, y, z` the cane's top there, and `wx, wz, floor` the tread beside it a
+  // hop off sideways lands on. Allocation-free.
+  const slideAt = (rail, s, out) => {
+    const k = Math.min(1, Math.max(0, s / rail.len));
+    out.x = rail.x0 + (rail.x1 - rail.x0) * k;
+    out.y = rail.y0 + (rail.y1 - rail.y0) * k + HANDRAIL.TOP;
+    out.z = rail.z0 + (rail.z1 - rail.z0) * k;
+    out.wx = out.x + rail.nx * 0.75;
+    out.wz = out.z + rail.nz * 0.75;
+    out.floor = MEZZ.y * (1 - k);
+    return out;
+  };
   // The haunted hallway the ghost hunt is reached by, cut into the right wall off the deck's right end between its
   // trunk and the stair's head: a rock passage from `z0` to `z1`, its floor level with the deck and `h` high under its
   // roof, running out to `end`, where it opens into the arena; `torches` [x, side] staggered down it (-1 on the z0
@@ -1338,7 +1378,7 @@
     ride: LAYOUT.rides.map((r) => ({ ...r, play: { x: r.x + Math.sin(r.turn) * 1.4, z: r.z + Math.cos(r.turn) * 1.4, facing: r.turn + Math.PI } }))
   };
   BL.arcadeModels = {
-    HALL, STAGE, MEZZ, HAUNT, MEZZ_POSTS, GAMES, CABINETS, LAYOUT, CAB, SCREEN, FRAMES, FPS, START_FRAMES, SKEE, HOOP, SHY, METER_LEN, METER_WINDOW, SIGN_FRAME, POSTER_SCALE, MARQUEE, PRIZES, SPOTS, SPOT_Y, SPOT_FIRE, spark, CLAW, PIN, HOCKEY, WHEEL_VALUES, WHEEL_COST, blaze, MAMMOTH_AT, RETRO, RIDE_Y, RIDE_SEATS, RIDE_BEAT, POOL, POOL_COLORS, DART, FAME, PRIZE_SHELF, MAT_Y, cabinet, cabinetPanel, attractFrames, CLOUD_HOPPER, cloudHopperCabinet, cloudHopperFrames
+    HALL, STAGE, MEZZ, HANDRAIL, HANDRAILS, handrailAt, slideAt, HAUNT, MEZZ_POSTS, GAMES, CABINETS, LAYOUT, CAB, SCREEN, FRAMES, FPS, START_FRAMES, SKEE, HOOP, SHY, METER_LEN, METER_WINDOW, SIGN_FRAME, POSTER_SCALE, MARQUEE, PRIZES, SPOTS, SPOT_Y, SPOT_FIRE, spark, CLAW, PIN, HOCKEY, WHEEL_VALUES, WHEEL_COST, blaze, MAMMOTH_AT, RETRO, RIDE_Y, RIDE_SEATS, RIDE_BEAT, POOL, POOL_COLORS, DART, FAME, PRIZE_SHELF, MAT_Y, cabinet, cabinetPanel, attractFrames, CLOUD_HOPPER, cloudHopperCabinet, cloudHopperFrames
   };
   // Private lexical bindings used by the scene-only extension; read once when that group evaluates.
   BL.arcadeModelsSceneKit = { BANANA, BANANA_LEAF_TONES, BARK, BL, BONE, BONE_INK, CABINETS, CLAW, DART, DOT, EARTH_BLACK, EARTH_CHALK, EARTH_OCHRE, EARTH_RED, EMBER_GLOW, FAME, FAME_ROW, FAME_W, FRAMES, GAMES, GLASS_DK, GLYPH_H, GLYPH_W, GRID_H, GRID_W, HALL, HAUNT, HOCKEY, HOOP, LAYOUT, MAMMOTH_AT, MARK, MAT_Y, METER_LEN, METER_WINDOW, MEZZ, MEZZ_POSTS, NUTS, PALETTES, PICTOS, PIN, PIXEL, POOL, POOL_COLORS, POSTER_SCALE, PRIZES, PRIZE_SHELF, RETRO, RIDE_BEAT, RIDE_Y, ROPE, SCREEN, SHY, SIGN_FRAME, SKEE, SPOTS, SPOT_Y, STAGE, TIMBER_DK, TIMBER_LT, TRACKING, WHEEL_COST, WHEEL_VALUES, along, at, bake, bananaLeaf, band, beam, bevelBox, blaze, boneTusk, box, cached, ccw, centred, daubDot, daubHand, daubPoly, daubStroke, daubTaper, daubZigzag, dots, earth, face, facing, flame, geometry, grid, hexToRgb, hide, lathe, leafBlade, line, merge, mirror, moved, mulberry32, nut, oval, pictograph, prism, pushVert, rect, ring, scaled, shaded, sideShape, signBinding, stone, strip, text, textWidth, tikiMouth, tint, titleBones, torus, tuck, turn, turnedX, turnedY, turnedZ, unshadowed, variants, zigzag };
