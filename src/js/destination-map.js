@@ -29,16 +29,18 @@
     try { seen = localStorage.getItem(KEY) === "1"; } catch { /* Optional coaching also works without storage. */ }
     const remember = () => { seen = true; try { localStorage.setItem(KEY, "1"); } catch { /* No persistence. */ } };
     const canOpen = () => !!provider && ready() && current()?.navigationReady !== false && provider.available();
-    const finish = () => {
+    // A successful choice hands the keys back to the world, so Space acts there; closing returns to Map.
+    const finish = (travelled = false) => {
       if (!owner) return;
       const previous = owner; owner = null;
       previous.controlsHelpHold?.(false);
       BL.controls.resetAll(); BL.gamepad.hold(false);
       button.setAttribute("aria-expanded", "false");
-      if (!button.hidden) button.focus({ preventScroll: true });
+      if (travelled) $("scene").focus({ preventScroll: true });
+      else if (!button.hidden) button.focus({ preventScroll: true });
       rows = []; list.replaceChildren(); status.textContent = "";
     };
-    const close = () => { if (dialog.open) dialog.close(); finish(); };
+    const close = (travelled = false) => { if (dialog.open) dialog.close(); finish(travelled); };
     const onClose = () => { if (!dialog.open) finish(); };
     const complete = () => {
       if (coaching !== 2) return;
@@ -53,7 +55,7 @@
         status.textContent = typeof result === "string" ? result : "Travel is unavailable right now. Close the map to continue.";
         return;
       }
-      complete(); close();
+      complete(); close(true);
     };
     const open = () => {
       if (!canOpen() || dialog.open || document.querySelector("dialog[open]")) return false;
