@@ -181,6 +181,18 @@
     path.setAttribute("fill", "currentColor");
     malletIcon.append(path);
   }
+  // The Bananas panel's banana (its glyph is in the panel's markup) before each amount its two lists show: every row
+  // clones it, and the stylesheet hides it while the lists count sats.
+  const amountBanana = document.createElementNS(SIGN_NS, "svg");
+  amountBanana.setAttribute("viewBox", "0 0 9 9");
+  amountBanana.setAttribute("shape-rendering", "crispEdges");
+  amountBanana.setAttribute("aria-hidden", "true");
+  amountBanana.setAttribute("class", "banana-amount-icon");
+  {
+    const use = document.createElementNS(SIGN_NS, "use");
+    use.setAttribute("href", "#banana-panel-glyph");
+    amountBanana.append(use);
+  }
   // Icons are rasterized once into an offscreen canvas.
   const ICON_PX = 48;
   const renderIcon = (item) => {
@@ -284,7 +296,7 @@
       bananaRecentBar: $("banana-recent-bar"), bananaRecentBarLabel: $("banana-recent-bar-label"),
       donationMessageLabel: $("donation-message-label"),
       bananaBoardUnit: $("banana-board-unit"), bananaBoardNote: $("banana-board-note"),
-      bananaPanel: $("bananas-panel"), bananaRateLabel: $("banana-rate-label"),
+      bananaPanel: $("bananas-panel"), bananaBtcRate: $("banana-btc-rate"),
       bananaBtcPrice: $("banana-btc-price"), bananaExchange: $("banana-exchange"),
       donorUnits: [...document.querySelectorAll("[data-donor-unit]")],
       lootTab: $("loot-tab"),
@@ -637,16 +649,17 @@
     liveRows = rosterRows;
     liveOnline = showOnline;
     showVoices();
-    // Value the donated sats at the current price; donor rankings retain their receipt prices.
+    // Value the donated sats at the current price; donor rankings retain their receipt prices. A bitcoin's price is
+    // in bananas, since a banana is a dollar; whether that price is live or stale is said on hover alone.
     const showBananaRate = () => {
       if (document.hidden || !BL.sheet.visible(el.bananaPanel)) return;
       const rate = currentDonationRate(), total = donationValueText();
       const tone = !rate ? "wait" : rate.stale ? "stale" : rate.live ? "live" : "idle";
-      const label = tone === "live" ? "LIVE BTCUSD" : tone === "stale" ? "STALE BTCUSD" : "BTCUSD";
-      const price = rate ? `$${DONOR_BANANAS.format(rate.usdPerBtc)}` : "—";
+      const label = tone === "live" ? "Live BTCUSD price" : tone === "stale" ? "Stale BTCUSD price, the last one kept" : tone === "wait" ? "Waiting for the BTCUSD price" : "BTCUSD price";
+      const price = rate ? DONOR_BANANAS.format(rate.usdPerBtc) : "—";
       const exchange = rate ? `≈ ${DONOR_BANANAS.format(1e8 / rate.usdPerBtc)} sats` : "— sats";
-      if (el.bananaRateLabel.dataset.tone !== tone) el.bananaRateLabel.dataset.tone = tone;
-      if (el.bananaRateLabel.textContent !== label) el.bananaRateLabel.textContent = label;
+      if (el.bananaBtcRate.dataset.tone !== tone) el.bananaBtcRate.dataset.tone = tone;
+      if (el.bananaBtcRate.title !== label) el.bananaBtcRate.title = label;
       if (el.bananaBtcPrice.textContent !== price) el.bananaBtcPrice.textContent = price;
       if (el.bananaExchange.textContent !== exchange) el.bananaExchange.textContent = exchange;
       if (el.bananaTotal.textContent !== total) el.bananaTotal.textContent = total;
@@ -690,7 +703,7 @@
       message.className = "banana-recent-message";
       message.hidden = true;
       name.append(label, badge);
-      amount.append(amountText);
+      amount.append(amountBanana.cloneNode(true), amountText);
       message.append(messageText);
       li.append(name, amount, message);
       li.hidden = true;
@@ -705,7 +718,7 @@
       const nameText = document.createTextNode(""), amountText = document.createTextNode("");
       rank.className = "banana-rank"; rank.textContent = String(i + 1).padStart(2, "0");
       name.className = "banana-donor"; name.append(nameText);
-      amount.className = "banana-amount"; amount.append(amountText);
+      amount.className = "banana-amount"; amount.append(amountBanana.cloneNode(true), amountText);
       li.append(rank, name, amount); li.hidden = true; el.bananaLeaders.append(li);
       return { li, name, nameText, amountText };
     };
@@ -759,7 +772,7 @@
         : real && !entries ? "Loading the donor leaderboard…"
         : real ? "No donations yet. Feed the first Ooga!" : "New demo donations will appear here.";
       // The recent list: the newest first, its orange check only on the API's word that the donor's GitHub login
-      // matched the name, into the fixed rows.
+      // matched the name, into the fixed rows (the first `RECENT_MAX` the checkbox leaves).
       const all = real ? state.recent || [] : donationStats?.recentDonations || [];
       const recent = recentBarOnly ? all.filter((entry) => entry.sats >= bar) : all;
       el.bananaRecentBarLabel.textContent = `${BANANA_COUNT.format(bar)} sats and up only`;
@@ -783,6 +796,7 @@
         : testNetwork ? `Test donations on ${testNetwork}. Leaderboard values are recorded when paid.`
         : "Leaderboard totals use each donation's recorded value.";
       el.bananaBoardUnit.textContent = donorUnit === "sats" ? "Sats" : "Bananas";
+      el.bananaPanel.dataset.unit = donorUnit;
       el.bananaLeaders.setAttribute("aria-label", `Top donors by ${donorUnit}`);
       for (const button of el.donorUnits) button.setAttribute("aria-pressed", String(button.dataset.donorUnit === donorUnit));
     };

@@ -460,29 +460,23 @@
         <div class="slab banana-slab">
           <section class="banana-total" aria-label="Current banana value of all sats donated">
             <div class="banana-hero">
-              <svg class="banana-hero-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
+              <span class="banana-hero-label">Bananas current value</span>
+              <p class="banana-hero-value"><svg class="banana-hero-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
                 <g id="banana-panel-glyph">
                   <path fill="#211b14" d="M0 0h1v5H0zM2 0h1v2H2zM3 2h1v2H3zM4 4h1v1H4zM1 5h1v2H1zM5 5h1v1H5zM6 6h1v1H6zM2 7h2v1H2zM7 7h1v1H7zM4 8h4v1H4z" />
                   <path fill="#ffd84a" d="M1 2h2v2H1zM1 4h3v1H1zM2 5h3v1H2zM2 6h4v1H2zM4 7h3v1H4z" />
                   <path fill="#789a3b" d="M1 0h1v2H1z" />
                 </g>
-              </svg>
-              <strong id="banana-total" title="All donated sats valued at the current BTCUSD price; 1 banana = $1">—</strong>
-              <span class="banana-hero-label">bananas · current value</span>
+              </svg><strong id="banana-total" title="All donated sats valued at the current BTCUSD price; 1 banana = $1">—</strong></p>
             </div>
             <dl class="banana-totals">
               <div><dt>Donations</dt><dd id="stat-donations">0</dd></div>
               <div><dt>Sats donated</dt><dd id="stat-sats">0</dd></div>
             </dl>
-            <dl class="banana-rates" aria-label="Current Bitcoin and banana exchange rates">
-              <dt class="banana-rate-label" id="banana-rate-label" data-tone="wait">BTCUSD</dt>
-              <dd id="banana-btc-price">—</dd>
-              <dt class="banana-rate-label">1 banana = $1</dt>
-              <dd class="banana-exchange">
-                <svg class="banana-exchange-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" role="img" aria-label="Banana"><use href="#banana-panel-glyph" /></svg>
-                <span>1</span><span id="banana-exchange">— sats</span>
-              </dd>
-            </dl>
+            <div class="banana-rates" role="group" aria-label="Current Bitcoin and banana exchange rates">
+              <p class="banana-rate" id="banana-btc-rate" data-tone="wait">100,000,000 sats = <svg class="banana-rate-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" role="img" aria-label="bananas"><use href="#banana-panel-glyph" /></svg><span id="banana-btc-price">—</span></p>
+              <p class="banana-rate"><svg class="banana-rate-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" role="img" aria-label="Banana"><use href="#banana-panel-glyph" /></svg>1 <span id="banana-exchange">— sats</span></p>
+            </div>
           </section>
           <section class="banana-board" aria-labelledby="banana-board-title">
             <div class="banana-board-head">
