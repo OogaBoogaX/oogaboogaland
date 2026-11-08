@@ -2,11 +2,11 @@
 // the zone they are in (zone-map.js), the visitor's own group first with their own row at its head, then the other
 // groups by heading and everyone in a group by name. A row keeps the roster's marks (the online dot, the host's dot,
 // the voice mark, which mutes as it does there), a crosshair that turns the camera (`BL.pilot.turnToward`) and, for
-// others in the visitor's own zone, how many metres away they stand, kept up to date without moving any row.
+// others standing in the visitor's own coordinates (the whole main world, `BL.voiceBlend.sameFrame`), how many metres away they stand, kept up to date without moving any row.
 // Where people stand comes from net.js: a player's position counts in their zone only once they have moved there,
 // and one who let go of their Ooga keeps their last, shown in red as their last known location. The visitor's own is
 // their Ooga's last reported (`net.state.self`), kept after they let go; the visitor's row shows no distance.
-// The crosshair turns toward a player in the visitor's zone, or their last known spot; toward another zone, at the
+// The crosshair turns toward a player in those coordinates, or their last known spot; toward anywhere else, at the
 // door the route there takes first, as the scene the visitor is in names it (`setDoors`; the island's for now). It is
 // greyed out, saying why, where there is no spot or no door. Nothing moves but the camera. A click checks again that
 // the player is still in the room and where the row put them and that the visitor has not changed zone; if anything
@@ -222,7 +222,7 @@
       const rec = net.remotes.get(row.id);
       if (!rec) continue;
       let aim = "route", metres = -1, distance = -1, lastKnown = false;
-      if (rec.zone === mine) {
+      if (BL.voiceBlend.sameFrame(rec.zone, mine)) {
         if (rec.poseZone === rec.zone) {
           lastKnown = !rec.body;
           aim = lastKnown ? "known" : "player";
@@ -316,7 +316,7 @@
     if (s.room !== "live" || !s.me || s.zone !== shownZone) return;
     const rec = net.remotes.get(row.id);
     if (!rec || rec.zone !== row.zone) return;
-    if (rec.zone === s.zone) {
+    if (BL.voiceBlend.sameFrame(rec.zone, s.zone)) {
       if (rec.poseZone === rec.zone) BL.pilot.turnToward(rec.x, rec.y + BODY_Y, rec.z);
       return;
     }

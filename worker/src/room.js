@@ -35,7 +35,7 @@ import {
   WALLET_CAP, WALLET_HZ, WALLET_BURST,
   PM_FEATURE, PM_HZ, PM_BURST, PM_INVITE_HZ, PM_INVITE_BURST, PM_CONTROL_HZ, PM_CONTROL_BURST, PM_INVITES, PM_BLOCKS, PM_ACCOUNT_KEEP,
   chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
-  BLEND, BLEND_HZ,
+  BLEND, BLEND_HZ, seenTogether,
 } from "./protocol.js";
 import { sha256Hex } from "./crypto.js";
 import { getPlayer } from "./db.js";
@@ -441,8 +441,11 @@ export class Room extends DurableObject {
       // place being crossed into turns it round, so the same places stay heard: off a crossing's far end that is none,
       // and across the arcade hallway's midpoint (#422) the same crossing seen from its other end. Else the page reports
       // its next one after its zone.
-      const across = p.blendTo && BLEND.place(p.zone) === BLEND.place(p.blendTo) && BLEND.STEPS - p.blendK > 0;
-      p.blendTo = across ? BLEND.place(from) : null; p.blendK = across ? BLEND.STEPS - p.blendK : 0;
+      // Between two zones of the main world it stands as it is: there a crossing is a level, whatever the zone.
+      if (!BLEND.world(from) || !BLEND.world(p.zone)) {
+        const across = p.blendTo && BLEND.place(p.zone) === BLEND.place(p.blendTo) && BLEND.STEPS - p.blendK > 0;
+        p.blendTo = across ? BLEND.place(from) : null; p.blendK = across ? BLEND.STEPS - p.blendK : 0;
+      }
       this.electGhostHost();
       // A page walking into the ghost arena or its hallway catches up with its hunt (a lobby open, a hunt on) at once.
       if (watchesGhost(p) && !watched && p.id !== this.ghostHostId && this.lastGhost) this.send(p.ws, this.lastGhost);
@@ -456,8 +459,8 @@ export class Room extends DurableObject {
       this.enforceStudio(); this.updateVoice();
       this.replayDoor(p);
     } else if (msg.t === "blend") {
-      // Only toward a group adjacent to the player's own (#392); a step anywhere else is no crossing.
-      const to = msg.to && BLEND.adjacent(p.zone, msg.to) ? msg.to : null, k = to ? msg.k : 0;
+      // Only a crossing the player's zone has (#392, `BLEND.crossable`); a step anywhere else is no crossing.
+      const to = msg.to && BLEND.crossable(p.zone, msg.to) ? msg.to : null, k = to ? msg.k : 0;
       if (to === p.blendTo && k === p.blendK) return;
       if (!takeToken(p.blendBucket, BLEND_HZ, p.seenAt)) return;
       // Who may hear whom changes only when a place is gained or lost: starting or ending a crossing, or reaching an end.
@@ -489,10 +492,10 @@ export class Room extends DurableObject {
       // Saves each attachment it changes itself.
       return this.privateMessage(p, msg);
     } else if (msg.t === "react") {
-      // A reaction over a driven body, for the players in its zone to draw; nothing is kept.
+      // A reaction over a driven body, for the players who can see it to draw; nothing is kept.
       if (!p.body || !this.reactToken(p)) return;
       const out = JSON.stringify({ t: "react", id: p.id, e: msg.e });
-      for (const other of this.players.values()) if (other !== p && other.zone === p.zone) this.send(other.ws, out);
+      for (const other of this.players.values()) if (other !== p && seenTogether(other.zone, p.zone)) this.send(other.ws, out);
       return;
     } else if (msg.t === "hand") {
       if (msg.on === p.hand && (!msg.on || msg.tone === p.handTone)) return;
@@ -530,7 +533,7 @@ export class Room extends DurableObject {
       // HALLOWEEN (#422): one fired in the ghost arena also reaches its hallway's spectators (`watchesGhost`), who see and
       // hear the hunt; one from the hallway stays there.
       const arena = inGhostArena(p);
-      for (const other of this.players.values()) if (other !== p && (arena ? watchesGhost(other) : other.zone === p.zone)) this.send(other.ws, out);
+      for (const other of this.players.values()) if (other !== p && (arena ? watchesGhost(other) : seenTogether(other.zone, p.zone))) this.send(other.ws, out);
       return;
     } else if (msg.t === "body") {
       if (msg.name === p.body) return;
