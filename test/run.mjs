@@ -9620,13 +9620,14 @@ const hubHammock = { name: "hub hammock", why: "rule: one face-up Ooga rests off
     return { hammock: true, crossings, seats: H.seats.length, act: document.getElementById("act").textContent, placed };
   })()`);
   record("hub hammock: both palms share a grass patch with no path crossing and one REST place", setup.hammock && setup.crossings === 0 && setup.seats === 1 && setup.act === "REST", JSON.stringify(setup));
-  // The rocking hammock (#499) hangs exactly where upstream rock hung it before #499, the same two palms, pivot, side and stand-up spot;
+  // The rocking hammock (#499) hangs exactly where upstream rock hung it before #499, the same two palms and pivot. Its seats face the side
+  // away from the path, clear since the fire pit stopped standing there (79de69d7), which sets the side and the stand-up spot;
   // its whole swing (SWAY_MAX) keeps the lowest cloth 0.3 m over the ground, and every landing spot a tipped Ooga may be rolled to is level
   // and clear of both palms. A path may run there: the plan keeps paths off the anchor span, the swing and the stand-up spot, and a tip lands on
   // any level walkable ground (scene-hub.js tipOutOfHammock), which a path is; the meadow's later paths cross one landing spot.
   const near = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) <= 0.01, placed = setup.placed;
   record("hub hammock: it hangs where it always has (pivot, palms, side and stand-up spot within 1 cm), its whole swing clears the ground, and every landing spot is level, clear of the palms",
-    !!placed && near(placed.pivot, [9.3683, 4.5253]) && placed.side === -1 && near(placed.palms[0], [5.2365, 4.2842]) && near(placed.palms[1], [13.5, 4.75]) && near(placed.walkAt, [9.4379, 3.0707])
+    !!placed && near(placed.pivot, [9.3683, 4.5253]) && placed.side === 1 && near(placed.palms[0], [5.2365, 4.2842]) && near(placed.palms[1], [13.5, 4.75]) && near(placed.walkAt, [9.2988, 5.9799])
       && placed.swingSway === placed.cap && placed.low >= 0.3 && placed.lands.every((l) => l.level < 0.25 && l.palm > 1.5),
     JSON.stringify(placed));
   if (!setup.hammock) return;
@@ -9896,7 +9897,7 @@ const hubHammockExit = { name: "hub hammock exit", why: "rule: an Ooga resting i
     if (B.crew.player !== a) B.pilot.possess(a);
     const s = H.seats[0];
     B.pilot.navigate({ position: { x: s.walkAt.x, y: s.floor, z: s.walkAt.z }, yaw: s.ry, pitch: 0.4, dist: 6 }); B.advance(0.4, 1 / 60);
-    window.__hammockDeparture = a;
+    window.__hammockDeparture = B.crew.player;
     return { hammock: true, sat: B.crew.sitPlayer(s) };
   })()`);
   await tourGo(b, "lab");
@@ -20033,7 +20034,11 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
       && lv.chamber.to === "rainforest-under" && lv.chamber.t === 1 && lv.chamber.zone === "rainforest-under" && !lv.court.to && lv.court.zone === "rainforest" && !lv.lake.to,
     JSON.stringify(lv));
 } };
-scene("hub", { label: "player stacking", query: "solo=1&character=portlandhodl&pos=0", steps: [hubPlayerStacking, hubChalkboardReach, hubVoiceLevels, hubNameplates] });
+// Sessions that need portlandhodl awake on the surface pin it (ooga=): by itself his state comes from the real activity snapshot, and once
+// it has aged he boots asleep in the headquarters, where jetpacks are refused and his gorilla is in bed.
+scene("hub", { label: "player stacking", query: "ooga=portlandhodl:clank:lab,obl,lf&solo=1&character=portlandhodl&pos=0", steps: [hubPlayerStacking, hubChalkboardReach, hubVoiceLevels] });
+// A fresh page, as the phone run has: after the steps above, the peer tooltip this check measures can read as hidden.
+scene("hub", { label: "live nameplates", query: "ooga=portlandhodl:clank:lab,obl,lf&solo=1&character=portlandhodl&pos=0", steps: [hubNameplates] });
 scene("hub", { label: "lab flask approach", query: "solo=1&character=portlandhodl&status=clankin", steps: [{ name: "gorilla lab exit through Oogas", why: "regression: Ooga occupancy, body sweeps and head support blocked gorillas leaving the lab", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, C = B.clankers, e = C.list[0], owner = e.owner, m = B.headquarters.entropyLab.mouth;
@@ -22306,9 +22311,9 @@ scene("poker", { opts: PHONE_SIZE, steps: [phone("poker", { card: '[data-intro="
   if (process.env.POKER_SHOTS) await b.screenshot(join(process.env.POKER_SHOTS, "poker-phone.png"));
 } }] });
 scene("hub", { label: "gorilla population restoration", query: "status=clankin", exclusive: true, opts: { motion: true }, steps: [hubGorillaPopulation] });
-scene("hub", { label: "weapons", query: "character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1&gorillarage=1", steps: [hubCombatGate, ...[hubAk, hubMelee, hubJetpack].map(gameCombat)] });
+scene("hub", { label: "weapons", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1&gorillarage=1", steps: [hubCombatGate, ...[hubAk, hubMelee, hubJetpack].map(gameCombat)] });
 // Her greeting comes once a page, to a fresh landing nothing has moved, so the guide has its own page.
-scene("hub", { label: "guide", query: "character=portlandhodl&jetpack=1", steps: [hubGuide, hubAsk, hubTourInput] });
+scene("hub", { label: "guide", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubGuide, hubAsk, hubTourInput] });
 // Native pointer-lock assertions need sole focus; another browser lane can
 // steal capture and spend this long scenario's deadline waiting for it back.
 scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", exclusive: true, steps: [hubBirdsEye] });
@@ -22708,7 +22713,7 @@ const controlsHelpCheck = { name: "controls reference", why: "regression: help m
   })()`);
   record("controls reference: gorilla turning, pitch and reset follow its mode, with hold-G throw instructions only on keyboard", gorilla.possessed&&["q","e","r","f","0"].every(k=>gorilla.orbit.keys.includes(k))&&!gorilla.combat.keys.includes("r")&&!gorilla.combat.keys.includes("f")&&gorilla.combat.text.includes("release to drop")&&gorilla.combat.text.includes("charge and release")&&!/grab|throw/i.test(gorilla.touch.text)&&!gorilla.locked.keys.includes("x"), JSON.stringify(gorilla));
 } };
-scene("hub", { label: "controls reference", query: "solo=1&character=portlandhodl&pos=0", steps: [controlsHelpCheck] });
+scene("hub", { label: "controls reference", query: "ooga=portlandhodl:clank:lab,obl,lf&solo=1&character=portlandhodl&pos=0", steps: [controlsHelpCheck] });
 scene("hangar", { label: "controls reference forklift", query: "character=portlandhodl", steps: [{ name: "controls reference forklift", why: "regression: seated forklift help used walking and running labels while omitting forks, horn and touch cab controls", run: async b => {
   const r=await b.evaluate(`(() => {
     const B=__ooga, P=B.pilot, f=B.hangar.scene.forklift, a=B.cavemen.get("portlandhodl");P.possess(a);
@@ -22920,7 +22925,7 @@ const hubTourTouch = { name: "hub tour touch", why: "regression: the touch stick
       && !!resized && resized.sized.sized === "true" && resized.sized.to > resized.sized.from && Math.abs(parseFloat(resized.sized.written) - (resized.layout.sheet.bottom - resized.layout.sheet.top)) <= 1
       && resized.layout.sticks === "true" && resized.layout.stick.bottom <= resized.layout.sheet.top && resized.layout.panel.bottom <= resized.layout.stick.top, JSON.stringify(rows));
 } };
-scene("hub", { label: "live nameplates phone", query: "solo=1&character=portlandhodl&pos=0", opts: PHONE_SIZE, steps: [hubNameplates] });
+scene("hub", { label: "live nameplates phone", query: "ooga=portlandhodl:clank:lab,obl,lf&solo=1&character=portlandhodl&pos=0", opts: PHONE_SIZE, steps: [hubNameplates] });
 scene("hub", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("hub", { required: ["#joy-move", "#joy-look", "#sheet-toggle", "#sheet-bananas"], sheet: true }), hubTourTouch, { name: "hub home screen", why: "rule: an iPhone home-screen web app is named OogaBoogaLand and carries its own icon", run: async (b) => {
   const meta = await b.evaluate(`(() => {
     const title = document.querySelector('meta[name="apple-mobile-web-app-title"]')?.content;
