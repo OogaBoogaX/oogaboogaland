@@ -8915,7 +8915,7 @@ const wallPerformance = async (b) => {
 const gamepadHoldProof = async () => {
   const events = new Map();
   const buttons = Array.from({ length: 12 }, () => ({ pressed: false, value: 0 }));
-  const hardware = { mapping: "standard", connected: true, axes: [0.6, -0.7, 0.5, -0.4], buttons };
+  const hardware = { id: "Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)", mapping: "standard", connected: true, axes: [0.6, -0.7, 0.5, -0.4], buttons };
   let reads = 0, connected = true;
   const context = { window: { addEventListener: (name, fn) => events.set(name, fn) }, navigator: { getGamepads: () => { reads++; return connected ? [hardware] : []; } } };
   runInNewContext(await readFile(join(root, "src/js/gamepad.js"), "utf8"), context);
@@ -8970,6 +8970,179 @@ const gamepadHoldProof = async () => {
   const reset = new Function("pad", `let padFrame = -1, padFire = true, padAds = true, mouseAds = true, ads = true; ${pilot.match(/const resetPad = [^\n]+/)[0]} resetPad(); return { padFrame, padFire, padAds, mouseAds, ads };`)(S);
   const pilotReset = reset.padFrame === S.frame && !reset.padFire && !reset.padAds && !reset.mouseAds && !reset.ads;
   return { initiallyLive: !!initiallyLive, synchronous, heldNeutral, noReplay, fresh, idempotent, betweenFrames, afterRelease, disconnected, reconnected, controlsResume, pilotReset };
+};
+// The real gamepad and controls modules against stub pads: what a button does comes from the bindings, so a remap
+// reaches a reader and survives a reload, the pad last pressed is the one read, a game's context delivers its keys,
+// menus take the pad from play, and a learned profile reads a pad the browser doesn't map.
+// The aiming views' own turn lines, read from pilot.js and clanker-play.js: a pad's look speed past 1 turns faster
+// there, while Q and E alone still turn at 1.
+const aimTurnProof = async () => {
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const line = async (file, re) => (await readFile(join(root, `src/js/${file}`), "utf8")).match(re)[0];
+  const pilot = new Function("clamp", "a", `${await line("pilot.js", /const turnMax = Math\.max\(1, Math\.abs\(a\.yaw\)\), turn = [^;]+;/)} return turn;`);
+  const gorilla = new Function("clamp", "axes", "isCombat", `${await line("clanker-play.js", /const turnMax = Math\.max\(1, Math\.abs\(axes\.yaw\)\), turn = [^;]+;/)} return turn;`);
+  return pilot(clamp, { yaw: -2.5, orbitYaw: 0 }) === -2.5 && pilot(clamp, { yaw: 1, orbitYaw: 1 }) === 1
+    && gorilla(clamp, { yaw: 2.5, orbitYaw: 0 }, () => true) === 2.5 && gorilla(clamp, { yaw: -1, orbitYaw: -1 }, () => true) === -1;
+};
+const gamepadBindingsProof = async () => {
+  const pad = (index, id = "Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)") => ({ index, id, mapping: "standard", connected: true, axes: [0, 0, 0, 0], buttons: Array.from({ length: 18 }, () => ({ pressed: false, value: 0 })) });
+  const one = pad(0), two = pad(1);
+  let pads = [one];
+  const storage = new Map(), sent = [], verbs = [], scrolled = [];
+  let clock = 0;
+  const page = () => {
+    const events = new Map();
+    class KeyboardEvent { constructor(type, init) { Object.assign(this, init); this.type = type; } }
+    const context = { window: { addEventListener: (name, fn) => events.set(name, fn), removeEventListener: () => {} }, navigator: { getGamepads: () => pads },
+      localStorage: { getItem: (k) => storage.has(k) ? storage.get(k) : null, setItem: (k, v) => storage.set(k, String(v)) },
+      document: { body: { dispatchEvent: (e) => sent.push(`${e.type} ${e.key}${e.shiftKey ? " shift" : ""}${e.pad ? "" : " ?"}`) } }, KeyboardEvent, performance: { now: () => (clock += 16) } };
+    return { events, context };
+  };
+  const { events, context } = page();
+  for (const name of ["gamepad", "math", "controls"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
+  const G = context.window.BL.gamepad, S = G.state, A = S.actions, ACT = G.ACTION;
+  events.get("gamepadconnected")({ gamepad: one });
+  const tap = (p, i) => { p.buttons[i].pressed = true; p.buttons[i].value = 1; G.poll(); const got = A.pressed; p.buttons[i].pressed = false; p.buttons[i].value = 0; G.poll(); return got; };
+  // Today's layout is the default: A acts, B both strikes and backs out of a lobby, RT fires, d-pad down descends and
+  // d-pad up is the jetpack's key, no bit.
+  const defaults = tap(one, 0) === ACT.act && tap(one, 1) === (ACT.bash | ACT.back) && tap(one, 7) === ACT.fire && tap(one, 12) === 0
+    && tap(one, 13) === ACT.descend && G.bindings("fire").join() === "rt" && G.family === "xbox";
+  one.buttons[12].pressed = true; G.poll();
+  const dpadRead = (S.held & G.BUTTON.up) !== 0; one.buttons[12].pressed = false; G.poll();
+  // On foot the extra buttons are keys a keyboard player presses: LB is T, up is J.
+  sent.length = 0; tap(one, 4); tap(one, 12);
+  const footKeys = sent.join() === "keydown t,keyup t,keydown j,keyup j";
+  // A remap moves the action: RT stops firing and RB fires.
+  G.bind("fire", ["rb"]);
+  const remapped = tap(one, 7) === 0 && tap(one, 5) === ACT.fire && G.bindings("fire").join() === "rb";
+  // Two buttons on one action: the second press is no new press, and the action holds until both let go.
+  G.bind("act", ["a", "rb"]);
+  one.buttons[0].pressed = true; G.poll(); const firstDown = (A.pressed & ACT.act) !== 0;
+  one.buttons[5].pressed = true; G.poll(); const secondQuiet = !(A.pressed & ACT.act) && (A.pressed & ACT.fire) !== 0;
+  one.buttons[0].pressed = false; G.poll(); const stillHeld = (A.held & ACT.act) !== 0 && !(A.released & ACT.act);
+  one.buttons[5].pressed = false; G.poll(); const letGo = (A.released & ACT.act) !== 0 && !A.held;
+  const shared = firstDown && secondQuiet && stillHeld && letGo;
+  // A reader follows the table: controls' Space handler fires on whatever button `act` is bound to.
+  G.bind("act", ["x"]);
+  let acted = 0;
+  const controls = context.window.BL.controls.create({ onAction: () => { acted++; return true; } });
+  one.buttons[0].pressed = true; G.poll(); controls.read(); one.buttons[0].pressed = false; G.poll(); controls.read();
+  const ignoresOld = acted === 0;
+  one.buttons[2].pressed = true; G.poll(); controls.read(); one.buttons[2].pressed = false; G.poll(); controls.read();
+  const readerFollows = ignoresOld && acted === 1;
+  controls.dispose();
+  // Home and the touchpad are the system's, Menu always pauses, sticks swap rather than rebind; unknown names are our own bug.
+  const throws = (fn) => { try { fn(); return false; } catch { return true; } };
+  const refused = throws(() => G.bind("fire", ["home"])) && throws(() => G.bind("fire", ["touchpad"])) && throws(() => G.bind("fly", ["a"]))
+    && throws(() => G.bind("fire", ["z"])) && throws(() => G.bind("fire", ["menu"])) && throws(() => G.bind("pause", ["b"]))
+    && throws(() => G.bind("move", ["a"])) && G.bindings("fire").join() === "rb";
+  // A remap survives a reload; a PlayStation pad keeps its own layout; a corrupt save falls back to the defaults.
+  const reload = async () => { const p = page(); for (const name of ["gamepad"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), p.context); return p.context.window.BL.gamepad; };
+  const again = await reload();
+  const survives = again.bindings("fire").join() === "rb" && again.bindings("act").join() === "x";
+  const sony = pad(0, "DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)");
+  pads = [sony]; tap(sony, 0);
+  const perFamily = G.family === "playstation" && G.glyph("a") === "✕" && G.bindings("fire").join() === "rt" && tap(sony, 7) === ACT.fire;
+  pads = [one]; tap(one, 3);
+  const backToXbox = G.family === "xbox" && G.bindings("fire").join() === "rb";
+  const saved = storage.get("ooga-pad-v1");
+  storage.set("ooga-pad-v1", JSON.stringify({ v: 1, family: "cube", feel: { dead: 9, invertY: "yes", look: 2 }, bindings: { xbox: { foot: { fire: ["home"], act: ["menu"], reload: ["lb"] }, nowhere: { x: ["a"] } } }, profiles: { bad: { map: [] } } }));
+  const fixed = await reload();
+  const corrupt = fixed.bindings("fire").join() === "rt" && fixed.bindings("act").join() === "a" && fixed.bindings("reload").join() === "lb"
+    && fixed.feel.dead === 0.18 && fixed.feel.invertY === false && fixed.feel.look === 2 && fixed.familyOverride === null;
+  storage.set("ooga-pad-v1", "{not json");
+  const unreadable = (await reload()).bindings("fire").join() === "rt";
+  storage.set("ooga-pad-v1", saved);
+  G.resetBindings();
+  const reset = G.bindings("fire").join() === "rt" && G.bindings("act").join() === "a" && tap(one, 7) === ACT.fire;
+  // A game's context delivers its keys, held while the button is: RT is W down then up in Ooga Rally, and no bit.
+  G.setContext("race");
+  sent.length = 0;
+  one.buttons[7].value = 1; G.poll(); const raceDown = sent.join() === "keydown w" && !A.held;
+  one.buttons[7].value = 0; G.poll(); const raceUp = sent.join() === "keydown w,keyup w";
+  // Leaving the context lets go of a key still down.
+  one.buttons[6].value = 1; G.poll(); G.setContext("foot"); G.poll();
+  const leftUp = sent.slice(-2).join() === "keydown s,keyup s";
+  one.buttons[6].value = 0; G.poll();
+  G.setContext("mine"); sent.length = 0; tap(one, 2);
+  const shifted = sent.join() === "keydown S shift,keyup S shift";
+  // The arcade games read arrows: the left stick presses them.
+  G.setContext("arcade"); sent.length = 0;
+  one.axes[0] = 0.9; G.poll(); one.axes[0] = 0.4; G.poll(); one.axes[0] = 0; G.poll();
+  const stickArrows = sent.join() === "keydown ArrowRight,keyup ArrowRight";
+  G.setContext("foot");
+  // An open menu takes the pad from play: A selects there and acts on nothing.
+  context.window.BL.padFocus = { verb: (v) => verbs.push(v), scroll: (dy) => scrolled.push(dy) };
+  let menu = true;
+  G.setMenu(() => menu);
+  sent.length = 0;
+  const menuA = tap(one, 0) === 0 && verbs.join() === "select" && !sent.length;
+  tap(one, 1); tap(one, 5);
+  menu = false;
+  // The right stick scrolls the open layer, down for a push down.
+  menu = true; one.axes[3] = 1; G.poll(); G.poll(); G.poll(); one.axes[3] = 0; G.poll(); menu = false;
+  const menuScroll = scrolled.length >= 2 && scrolled.every(dy => dy > 0);
+  const menuVerbs = verbs.join() === "select,back,next" && tap(one, 0) === ACT.act;
+  G.setMenu(null);
+  // Feel: inverted look and swapped sticks reach the published sticks.
+  G.setFeel("invertY", true); one.axes[3] = -1; G.poll();
+  const inverted = S.ry < 0;
+  G.setFeel("invertY", false); G.setFeel("swap", true); G.poll();
+  const swapped = S.ly > 0 && S.ry === 0;
+  G.setFeel("swap", false); one.axes[3] = 0; G.poll();
+  // Look speed raises the top turn rate: a full right-stick push at 2x turns twice as fast as the clamp allowed before.
+  const looker = context.window.BL.controls.create({});
+  G.setFeel("look", 2); one.axes[2] = 1; G.poll();
+  const fast = Math.abs(looker.read().yaw) > 1.9;
+  G.setFeel("look", 1); G.poll();
+  const normal = Math.abs(looker.read().yaw) <= 1;
+  one.axes[2] = 0; G.poll(); looker.dispose();
+  const lookSpeed = fast && normal;
+  // A pad the browser doesn't map is named, not read, until a profile is learned: then a hat d-pad and triggers that
+  // rest at -1 read as the standard places, diagonals as two directions.
+  const odd = { index: 0, id: "Generic USB Joystick (Vendor: 0079 Product: 0006)", mapping: "", connected: true, axes: [0, 0, 0, 0, -1, -1, 3.2857], buttons: Array.from({ length: 12 }, () => ({ pressed: false, value: 0 })) };
+  pads = [odd];
+  odd.buttons[2].pressed = true; G.poll();
+  const named = !S.connected && S.unknown === odd.id;
+  odd.buttons[2].pressed = false;
+  const map = Array(18).fill(null);
+  map[0] = { k: "b", i: 2 }; map[6] = { k: "a", i: 4, v: 1, rest: -1 }; map[7] = { k: "a", i: 5, v: 1, rest: -1 };
+  map[12] = { k: "h", i: 6, at: -1 }; map[13] = { k: "h", i: 6, at: 1 / 7 }; map[14] = { k: "h", i: 6, at: 5 / 7 }; map[15] = { k: "h", i: 6, at: -3 / 7 };
+  G.learn(odd.id, { map, axes: [{ i: 0, v: 1 }, { i: 1, v: 1 }, { i: 2, v: 1 }, { i: 3, v: 1 }] });
+  G.poll();
+  const learnedIdle = S.connected && !S.held && !S.unknown;
+  odd.axes[6] = -5 / 7; odd.axes[5] = 1; odd.buttons[2].pressed = true; G.poll();
+  const B = G.BUTTON;
+  const learned = learnedIdle && named && S.held === (B.up | B.right | B.rt | B.a) && (A.held & (ACT.fire | ACT.act)) === (ACT.fire | ACT.act);
+  odd.axes[6] = 3.2857; odd.axes[5] = -1; odd.buttons[2].pressed = false; G.poll();
+  // A second pad (Steam's idle twin, a friend's) never steals play until a button is pressed on it.
+  pads = [one, two]; events.get("gamepadconnected")({ gamepad: two });
+  two.axes[0] = 0.9; one.axes[0] = -0.9; G.poll();
+  const firstKept = S.lx < 0;
+  const switched = tap(two, 0) === ACT.act && S.lx > 0;
+  // Buttons held on both at once (two players, or Steam's twin mirroring the real pad) never trade places every read:
+  // each fresh press may take over once, then the last one pressed keeps play.
+  let swaps = 0;
+  const offSwap = G.subscribe((what) => { if (what === "device") swaps++; });
+  one.buttons[1].pressed = true; G.poll(); two.buttons[1].pressed = true; G.poll();
+  swaps = 0;
+  for (let i = 0; i < 6; i++) G.poll();
+  const steady = swaps === 0 && S.lx > 0;
+  one.buttons[1].pressed = two.buttons[1].pressed = false; G.poll();
+  // Steam's twin repeats each press of the real pad, in the same read or the next: the pad in play keeps it.
+  for (let i = 0; i < 5; i++) G.poll();
+  swaps = 0;
+  for (let k = 0; k < 3; k++) {
+    one.buttons[0].pressed = two.buttons[0].pressed = true; G.poll();
+    one.buttons[0].pressed = two.buttons[0].pressed = false; G.poll(); G.poll(); G.poll(); G.poll();
+    two.buttons[2].pressed = true; G.poll(); one.buttons[2].pressed = true; G.poll();
+    one.buttons[2].pressed = two.buttons[2].pressed = false; G.poll(); G.poll(); G.poll(); G.poll();
+  }
+  const mirrored = swaps === 0 && S.lx > 0;
+  offSwap();
+  one.axes[0] = 0; two.axes[0] = 0;
+  return { defaults, dpadRead, footKeys, remapped, shared, readerFollows, refused, survives, perFamily, backToXbox, corrupt, unreadable, reset,
+    raceDown, raceUp, leftUp, shifted, stickArrows, menuA, menuScroll, menuVerbs, inverted, swapped, lookSpeed, aimTurn: await aimTurnProof(), learned, firstKept, switched, steady, mirrored };
 };
 
 
@@ -11829,7 +12002,7 @@ const hubTourInput = { name: "hub tour input", why: "regression: the right arrow
   const padTouring = await b.evaluate(TOUR_START);
   await b.evaluate(`(() => {
     const original = Object.getOwnPropertyDescriptor(navigator, "getGamepads");
-    const pad = { mapping: "standard", connected: true, index: 0, axes: [0.9, 0, 0, 0], buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })) };
+    const pad = { id: "Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)", mapping: "standard", connected: true, index: 0, axes: [0.9, 0, 0, 0], buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })) };
     const event = (type) => { const e = new Event(type); Object.defineProperty(e, "gamepad", { value: pad }); window.dispatchEvent(e); };
     Object.defineProperty(navigator, "getGamepads", { configurable: true, value: () => [pad] });
     event("gamepadconnected");
@@ -18433,7 +18606,7 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
     held = await b.evaluate(`(() => {
       const S = __entryHold, map = document.getElementById("destination-hud"), mode = document.getElementById("mode-hud"), canvas = document.getElementById("scene");
       const originalPads = Object.getOwnPropertyDescriptor(navigator, "getGamepads");
-      S.pad = { mapping: "standard", connected: true, axes: [0.7, -0.6, 0.4, -0.5], buttons: Array.from({ length: 12 }, () => ({ pressed: false, value: 0 })) };
+      S.pad = { id: "Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 0b13)", mapping: "standard", connected: true, axes: [0.7, -0.6, 0.4, -0.5], buttons: Array.from({ length: 12 }, () => ({ pressed: false, value: 0 })) };
       for (const i of [0, 3, 8]) S.pad.buttons[i].pressed = true;
       S.pad.buttons[7].value = 0.8; S.padReads = 0;
       Object.defineProperty(navigator, "getGamepads", { configurable: true, value: () => { S.padReads++; return [S.pad]; } });
@@ -28831,6 +29004,8 @@ const unitChecks = async () => {
   await canvasSurfaceCacheChecks();
   const heldPad = await gamepadHoldProof();
   record("gamepad entry hold: real pad polling stays neutral, preserves trigger hysteresis and requires a fresh button after release or reconnect", Object.values(heldPad).every(Boolean), JSON.stringify(heldPad));
+  const padBindings = await gamepadBindingsProof();
+  record("gamepad bindings: today's layout is the default, a remap reaches every reader and survives a reload per controller family, a corrupt save falls back, Home and Menu stay fixed, games get their keys, menus take the pad, a learned profile reads an unmapped pad and the pad last pressed drives play", Object.values(padBindings).every(Boolean), JSON.stringify(padBindings));
   const retention = await hubRetentionProof();
   record("scene keeps: Factory builders survive a hub return, ordinary departures release them and only kept hubs hand off island meshes", retention.cases === 8 && retention.failures === 0, JSON.stringify(retention));
   await gpuGeometryDiagnosticChecks();

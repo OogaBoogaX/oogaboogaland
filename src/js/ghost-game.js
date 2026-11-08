@@ -17,7 +17,7 @@
   const { clamp, ease, fnv1a } = BL.math;
   const { createNode, addChild, removeChild, createCamera } = BL.scene;
   const SIM = BL.ghostSim, ST = SIM.STATE, C = SIM.CONFIG, MODELS = BL.ghostModels, TIERS = MODELS.TIERS;
-  const { BUTTON: PAD, state: pad } = BL.gamepad;
+  const { ACTION: PAD, state: pad } = BL.gamepad, padActions = pad.actions;
   const TAU = Math.PI * 2;
   // The rising (ms): the orange beam held on the herald, its vanishing straight up, when the land starts to quake, how
   // long it shakes (`QUAKE` metres at its height), then a moment before the dusk's countdown; how it settles at dawn.
@@ -611,8 +611,8 @@
       if (lobbyShown === -1) padFrame = pad.frame;
       else if (pad.frame !== padFrame) {
         padFrame = pad.frame;
-        if (pad.pressed & PAD.a) readyUp();
-        else if (pad.pressed & PAD.b && !meReady) { decline(); return; }
+        if (padActions.pressed & PAD.act) readyUp();
+        else if (padActions.pressed & PAD.back && !meReady) { decline(); return; }
       }
       // One number for all of it: seconds, how many, which (a sum of ids by place), who is ready, and the two flags.
       const key = secs * 1e14 + count * 1e12 + (ids % 10000) * 1e8 + readyBits * 8 + (hostReady ? 4 : 0) + (meReady ? 2 : 0) + (signIn ? 1 : 0);
