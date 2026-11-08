@@ -8,9 +8,10 @@
 // Who is shown is the scene's `visible(rec)`: the island shows players in its own zone (`onIsland` lists the
 // island's places), every other scene those in its zone (`sameZone`). The crew is optional, for a scene that
 // has none until the visitor drives, and `hide(name, on)` lets a scene hide its own decor copy of an Ooga
-// someone drives. A nameplate sits a few pixels over the top of the head, whatever the Ooga's height: the green
-// online dot left of the name and, for a player in voice, the speaker right of it: green while speaking, red with a
-// cross when they muted their microphone. Games can opt into the room's `hp` bar, between the name and the head.
+// someone drives. A nameplate sits over the top of the head exactly as an NPC's name tooltip does (hud.js
+// `.tooltip--name`): the same type, box and head anchor, the green online dot left of the name and, for a player in
+// voice, the speaker right of it: green while speaking, red with a cross when they muted their microphone. Games can
+// opt into the room's `hp` bar, under the name.
 // With the scene's `fx`, a line of Ooga Chat is said in a bubble over its speaker's nameplate, the visitor's own
 // line over the actor they drive (`player`, or `crew.player` when no callback is supplied).
 // An Ooga thump (thump.js) reaches the active scene's pool through `thumped(id)` (0 for the visitor's own body): a still
@@ -41,19 +42,25 @@
   const EASE = 10;
   const SNAP = 8;
   const WALK_SPEED = 0.35;
-  const NAME_FONT = "bold 11px ui-monospace, monospace";
   // Preserve the existing Ooga footprint; an Ooga stands as tall as its own head (the crew's `bodyHeightOf`) and
   // gorillas expose their posed envelope. BODY_HEIGHT is the scenes' `outsideActorHeight` for a body without one.
   const BODY_RADIUS = 0.3, BODY_HEIGHT = 2.2;
-  // Nameplate parts, in CSS pixels: the name's baseline NAME_LIFT over the head's top, the health bar under the name,
-  // the online dot left of it and the 9-pixel speaker right of it, both centred on the name's letters (NAME_MID over
-  // the baseline). A chat bubble stands SPEECH_LIFT over the head, clear of the name.
-  const NAME_LIFT = 4, NAME_MID = 4, SPEECH_LIFT = 18, DOT_R = 3, BAR_W = 32, BAR_H = 4, BAR_GAP = 3, ICON_GAP = 4;
-  const BAR_LIFT = BAR_GAP + BAR_H + 1;
+  // Nameplate parts, in CSS pixels, the NPC name tooltip's (`.tooltip--name` in style.css, placed by hud.js): the page's
+  // monospace (--mono) at NAME_SIZE bold with NAME_SPACING, a NAME_LINE line in a box padded NAME_PAD_X by NAME_PAD_Y
+  // whose bottom stands NAME_BOTTOM over the head's top, centred across the head; the DOT_D online dot DOT_GAP left of
+  // the name, both centred on its line; the health bar under the name (HEALTH_ROW more box, as the tooltip's row); the
+  // 9-pixel speaker ICON_GAP right of the name. A chat bubble stands over the box as over an NPC's tooltip (SPEECH_GAP).
+  const NAME_SIZE = 13, NAME_LINE = NAME_SIZE * 1.3, NAME_SPACING = "0.39px", NAME_PAD_X = 5, NAME_PAD_Y = 3, NAME_BOTTOM = 2;
+  const DOT_D = 8, DOT_GAP = 6, SPEECH_GAP = 6, EDGE = 8;
+  // With health the tooltip grows a second grid row: the row gap, then the 4-pixel bar with -2 and +1 margins.
+  const BAR_W = 72, BAR_H = 4, BAR_ROW = DOT_GAP - 2, HEALTH_ROW = DOT_GAP + BAR_H - 2 + 1, ICON_GAP = 4;
+  const NAME_BOX = Math.round(NAME_PAD_Y * 2 + NAME_LINE), NAME_BOX_HEALTH = Math.round(NAME_PAD_Y * 2 + NAME_LINE + HEALTH_ROW);
+  // The font, and where its baseline falls in the name's line as the tooltip's CSS lays it out: read once.
+  let nameFont = "", nameBaseline = 0;
   const NAME_STROKE = "rgba(20, 14, 8, 0.85)", NAME_FILL = "#f3efe4", BAR_TRACK = "rgba(0, 0, 0, 0.55)", ONLINE = "#22c55e";
   // The thump's fallback mallet, on the same 9x9 grid: x, y, w, h runs, drawn ICON_LIFT over the nameplate or head.
   const MALLET = [1, 1, 7, 3, 4, 4, 1, 5], MALLET_FILL = "#d8892b", ICON_TIME = 1.2, ICON_LIFT = 12;
-  // A reaction's emoji and the raised hand, in CSS pixels over the nameplate's baseline (or the head's top): how long a
+  // A reaction's emoji and the raised hand, in CSS pixels over the nameplate's box (or the head's top): how long a
   // reaction shows, how far it rises (further from a raised hand, to clear it), its pop and fade.
   const EMOJI_FONT = "26px 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif";
   const HAND_FONT = "20px 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif";
@@ -189,7 +196,7 @@
       addChild(root, cave.root);
       const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0, workExit: false } : null;
       const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, jetNode: null, jetFlame: null, swing: 0, shotAt: -Infinity, lastHeld: 0, lastMode: 0, lastMelee: 0, sampleAt: 0, sampleMelee: 0, sampleFlags: 0, sampleSwap: 0, sampleSwapIndex: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, ghosted: null, label: "", labelW: 0,
-        still: false, thumpT: 0, icon: 0, react: "", reactT: 0, screenX: NaN, beatOwned: false, pickOwner: { kind: "player", id: rec.id, cave, weaponType: "none" } };
+        still: false, thumpT: 0, icon: 0, react: "", reactT: 0, screenX: NaN, plateLeft: NaN, plateTop: NaN, plateW: 0, plateH: 0, plateTextX: NaN, plateBaseline: NaN, plateBarLeft: NaN, plateBarTop: NaN, beatOwned: false, pickOwner: { kind: "player", id: rec.id, cave, weaponType: "none" } };
       bodies.set(rec.id, entry);
       hideLocal(entry);
       return entry;
@@ -447,7 +454,7 @@
     };
 
     // The head's top on screen and its middle across, from the corners of every visible mesh under the head as the
-    // last frame drew them; false when none projects.
+    // last frame drew them, through the scene's `project` (which may refuse a hidden point); false when none projects.
     let headMinX = Infinity, headMaxX = -Infinity, headTop = Infinity;
     const projectHead = (node, project) => {
       if (!node.visible) return;
@@ -462,6 +469,22 @@
       }
       for (const child of node.children) projectHead(child, project);
     };
+    // A shown head's nameplate stands where an NPC's name does (character-visibility.js's anchor): over the top of its
+    // own vertices, every one of every visible mesh, centred between the outermost, projected as drawn.
+    const anchorHead = (node, project) => {
+      if (!node.visible || node.cameraHidden) return;
+      const v = node.geometry && node.geometry.verts;
+      if (v) {
+        const m = node.world;
+        for (let i = 0; i + 2 < v.length; i += 3) {
+          const x = v[i], y = v[i + 1], z = v[i + 2];
+          const pos = project(m[0] * x + m[4] * y + m[8] * z + m[12], m[1] * x + m[5] * y + m[9] * z + m[13], m[2] * x + m[6] * y + m[10] * z + m[14]);
+          if (!pos) continue;
+          headMinX = Math.min(headMinX, pos.x); headMaxX = Math.max(headMaxX, pos.x); headTop = Math.min(headTop, pos.y);
+        }
+      }
+      for (const child of node.children) anchorHead(child, project);
+    };
 
     // Nameplates on the overlay, just over each head, in the order the room sent them: the online dot, the name and,
     // in voice, the speaker in one row, with the health bar under the name when the game shows it.
@@ -472,8 +495,12 @@
       runs(ctx, MALLET, x, y);
     };
     // A reaction `emoji` `left` seconds before it goes, and the raised hand, over the point (x, y). The hand never moves;
-    // a reaction starts on it, drawn after it so in front, and rises clear of it.
+    // a reaction starts on it, drawn after it so in front, and rises clear of it. Emoji stand centred with no letter
+    // spacing, in a state of their own, so a nameplate's type around them is left as it was.
     const drawReaction = (ctx, x, y, emoji, left, hand) => {
+      ctx.save();
+      ctx.letterSpacing = "0px";
+      ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       if (hand) {
         ctx.font = HAND_FONT;
@@ -487,15 +514,11 @@
         const rise = calm ? (hand ? reach : 0) : reach * (1 - k * k);
         ctx.globalAlpha = Math.min(1, left / REACT_FADE);
         ctx.font = EMOJI_FONT;
-        ctx.save();
         ctx.translate(x, y - REACT_LIFT - start - rise);
         ctx.scale(scale, scale);
         ctx.fillText(emoji, 0, 0);
-        ctx.restore();
-        ctx.globalAlpha = 1;
       }
-      ctx.textBaseline = "alphabetic";
-      ctx.font = NAME_FONT;
+      ctx.restore();
     };
     const drawNames = (ctx, project, showHealth = false) => {
       overlay = ctx.canvas;
@@ -510,41 +533,74 @@
         if (headTop !== Infinity) {
           const x = Math.round((headMinX + headMaxX) / 2), y = Math.round(headTop);
           if (selfIcon > 0) mallet(ctx, x - 4, y - ICON_LIFT - 9);
-          if (selfReactT > 0 || ownHand) { ctx.textAlign = "center"; drawReaction(ctx, x, y, selfReact, selfReactT, ownHand); }
+          if (selfReactT > 0 || ownHand) drawReaction(ctx, x, y, selfReact, selfReactT, ownHand);
         }
       }
-      ctx.font = NAME_FONT;
-      ctx.textAlign = "center";
+      if (!nameFont) {
+        const mono = getComputedStyle(document.documentElement).getPropertyValue("--mono").trim() || "ui-monospace, monospace";
+        nameFont = `bold ${NAME_SIZE}px ${mono}`;
+        // Measured on a hidden copy of the tooltip itself, once: a zero-size inline block stands on the line's baseline.
+        const box = document.createElement("div"), text = document.createElement("span"), probe = document.createElement("span");
+        box.className = "tooltip tooltip--name"; box.style.visibility = "hidden";
+        probe.style.cssText = "display:inline-block;width:0;height:0";
+        text.textContent = "Mg"; text.appendChild(probe); box.appendChild(text); document.body.appendChild(box);
+        nameBaseline = probe.getBoundingClientRect().bottom - text.getBoundingClientRect().top;
+        box.remove();
+        if (!(nameBaseline > 0 && nameBaseline < NAME_LINE)) {
+          ctx.font = nameFont;
+          const metrics = ctx.measureText("Mg");
+          nameBaseline = (NAME_LINE - metrics.fontBoundingBoxAscent - metrics.fontBoundingBoxDescent) / 2 + metrics.fontBoundingBoxAscent;
+        }
+      }
+      ctx.font = nameFont;
+      ctx.letterSpacing = NAME_SPACING;
+      ctx.textAlign = "left";
       ctx.textBaseline = "alphabetic";
       ctx.lineWidth = 3;
       ctx.lineJoin = "round";
-      const lift = NAME_LIFT + (showHealth ? BAR_LIFT : 0);
+      const boxH = showHealth ? NAME_BOX_HEALTH : NAME_BOX, exact = fx && fx.projectRaw || project, viewW = window.innerWidth;
       for (const entry of bodies.values()) {
+        // Until laid out again, a body has no plate to report.
+        entry.plateLeft = NaN;
         const rec = net.remotes.get(entry.id);
         if (!rec || !entry.cave.root.visible) continue;
         headMinX = Infinity; headMaxX = -Infinity; headTop = Infinity;
         projectHead(entry.cave.parts.head, project);
         if (headTop === Infinity) continue;
-        entry.cave.speechLift = SPEECH_LIFT + lift - NAME_LIFT;
+        headMinX = Infinity; headMaxX = -Infinity; headTop = Infinity;
+        anchorHead(entry.cave.parts.head, exact);
+        if (headTop === Infinity) continue;
+        // Over the box as over an NPC's name tooltip (hud.js speechSpace).
+        entry.cave.speechLift = boxH + SPEECH_GAP;
         // Measured once a name: measureText allocates.
         if (entry.label !== rec.display) { entry.label = rec.display; entry.labelW = ctx.measureText(rec.display).width; }
-        const x = Math.round((headMinX + headMaxX) / 2), y = Math.round(headTop) - lift, half = entry.labelW / 2;
-        entry.screenX = x;
-        if (entry.icon > 0) mallet(ctx, x - 4, y - ICON_LIFT - 9);
-        if (entry.reactT > 0 || rec.hand) drawReaction(ctx, x, y - NAME_MID, entry.react, entry.reactT, rec.hand ? BL.reactionPolicy.HANDS[rec.handTone] : "");
+        // The tooltip's box, rounded as its offset size and translate are, centred across the head and standing on it,
+        // kept EDGE inside the view's sides and top as hud.js keeps it. A health bar wider than the dot and name widens it.
+        const inner = Math.max(DOT_D + DOT_GAP + entry.labelW, showHealth ? BAR_W : 0), boxW = Math.round(NAME_PAD_X * 2 + inner);
+        const mid = (headMinX + headMaxX) / 2;
+        const left = Math.round(Math.max(EDGE, Math.min(viewW - boxW - EDGE, mid - boxW / 2)));
+        const top = Math.round(Math.max(EDGE, headTop - NAME_BOTTOM - boxH)), line = top + NAME_PAD_Y;
+        const textX = left + NAME_PAD_X + DOT_D + DOT_GAP, lineMid = line + NAME_LINE / 2;
+        entry.screenX = mid; entry.plateLeft = left; entry.plateTop = top; entry.plateW = boxW; entry.plateH = boxH;
+        entry.plateTextX = textX; entry.plateBaseline = line + nameBaseline;
+        if (entry.icon > 0) mallet(ctx, Math.round(mid) - 4, top - ICON_LIFT);
+        // A reaction and the raised hand over the plate's box, centred on it (clamped with it at the view's edge).
+        if (entry.reactT > 0 || rec.hand) drawReaction(ctx, left + boxW / 2, top, entry.react, entry.reactT, rec.hand ? BL.reactionPolicy.HANDS[rec.handTone] : "");
         ctx.strokeStyle = NAME_STROKE;
         ctx.fillStyle = NAME_FILL;
-        ctx.strokeText(rec.display, x, y);
-        ctx.fillText(rec.display, x, y);
+        ctx.strokeText(rec.display, textX, line + nameBaseline);
+        ctx.fillText(rec.display, textX, line + nameBaseline);
         ctx.beginPath();
-        ctx.arc(x - half - ICON_GAP - DOT_R, y - NAME_MID, DOT_R, 0, Math.PI * 2);
+        ctx.arc(left + NAME_PAD_X + DOT_D / 2, lineMid, DOT_D / 2, 0, Math.PI * 2);
         ctx.lineWidth = 1.5;
         ctx.stroke();
         ctx.lineWidth = 3;
         ctx.fillStyle = ONLINE;
         ctx.fill();
         if (showHealth) {
-          const left = x - BAR_W / 2, top = y + BAR_GAP;
+          // The tooltip's second row: centred under the name's row, after the row gap less the bar's top margin.
+          const left = Math.round(textX - DOT_D - DOT_GAP + (inner - BAR_W) / 2), top = Math.round(line + NAME_LINE + BAR_ROW);
+          entry.plateBarLeft = left; entry.plateBarTop = top;
           ctx.fillStyle = NAME_STROKE;
           ctx.fillRect(left - 1, top - 1, BAR_W + 2, BAR_H + 2);
           ctx.fillStyle = BAR_TRACK;
@@ -553,7 +609,7 @@
           ctx.fillRect(left, top, Math.round(BAR_W * Math.max(0, Math.min(100, rec.hp)) / 100), BAR_H);
         }
         if (!rec.voice) continue;
-        const ix = Math.round(x + half + ICON_GAP), iy = y - NAME_MID - 4;
+        const ix = Math.round(textX + entry.labelW + ICON_GAP), iy = Math.round(lineMid - 4.5);
         ctx.fillStyle = rec.muted ? ICON_MUTED : BL.voice.speaking(rec.id) ? ICON_SPEAKING : ICON_IDLE;
         runs(ctx, SPEAKER, ix, iy);
         runs(ctx, rec.muted ? CROSS : WAVES, ix, iy);
@@ -650,11 +706,20 @@
       return false;
     };
 
-    const pool = { update, actors, pick, drawNames, liveGeometry, stats, setUnderlying, thumped, clearThumps, dispose, body: id => bodies.get(id)?.cave || null };
+    // Where a body's nameplate was last laid out, in CSS pixels, and its type: for a check, never a frame.
+    const nameplate = (id) => {
+      const entry = bodies.get(id);
+      return entry && Number.isFinite(entry.plateLeft) ? { left: entry.plateLeft, top: entry.plateTop, width: entry.plateW, height: entry.plateH,
+        textX: entry.plateTextX, baseline: entry.plateBaseline, barLeft: entry.plateBarLeft, barTop: entry.plateBarTop, barWidth: BAR_W,
+        headX: entry.screenX, textWidth: entry.labelW, font: nameFont, spacing: NAME_SPACING } : null;
+    };
+    const pool = { update, actors, pick, drawNames, liveGeometry, stats, setUnderlying, thumped, clearThumps, nameplate, dispose, body: id => bodies.get(id)?.cave || null };
     return pool;
   };
   const thumped = (id) => activePool ? activePool.thumped(id) : null;
   const clearThumps = () => { if (activePool) activePool.clearThumps(); };
 
-  BL.remotePlayers = { create, thumped, clearThumps, onIsland, sameZone, MAX, BODY_HEIGHT };
+  const nameplate = (id) => activePool ? activePool.nameplate(id) : null;
+  const body = (id) => activePool ? activePool.body(id) : null;
+  BL.remotePlayers = { create, thumped, clearThumps, nameplate, body, onIsland, sameZone, MAX, BODY_HEIGHT };
 })();

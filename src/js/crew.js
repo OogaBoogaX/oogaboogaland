@@ -5164,7 +5164,9 @@
             if (!slot) { standPose(cave); return; }
             cave.slot = slot; work.reloadSlot = true; cave.pileApproach = false;
           }
-          const direct = approachPile(cave);
+          // A passive meadow leg keeps its reserved slot along the authored ring. The direct approach re-picks the
+          // nearest slot it can sweep to past props and the pile, which swings a walker on the ring to another slot.
+          const direct = !fixedTrip(cave) && approachPile(cave);
           if (walkWorkTo(cave, cave.slot, dt, !direct)) { work.phase = "reload"; work.direct = false; cave.act.kind = "reload"; }
         }
       } else if (work.phase === "reload") {

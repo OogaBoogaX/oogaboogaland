@@ -12055,6 +12055,128 @@ const hubChalkboardReach = { name: "chalkboard reach", why: "rule: only an Ooga 
       && nearTap.open && !loose.open && loose.toast.startsWith("Only an Ooga can write."),
     JSON.stringify({ spot, farTap, nearAct, spaced, carried, nearTap, loose }));
 } };
+// A live player's name, over an Ooga and over a gorilla, against the NPC name tooltip shown for that same body in the
+// same frame: hud.js lays the tooltip's real DOM box out from character-visibility.js's head anchor, the live plate is
+// drawn on the overlay. Same font (computed family, size, weight, spacing), the same box, the name painted where the
+// tooltip's text lays out (its left edge and baseline), with a health bar (game mode) where the tooltip's health row
+// sits, and both kept inside the view at its edge.
+const hubNameplates = { name: "live nameplates", why: "rule: names over live players drew in a smaller font a little higher than names over the NPCs; they now match in type, size and place", run: async (b) => {
+  // Along the ring from the visitor's Ooga and a step out, clear of it and the pile; the view stands behind the Ooga
+  // looking at the peer (navigate's yaw is the bearing from what it looks at back to the eye), turned by turn.
+  const place = (kind, turn) => b.evaluate(`(() => {
+    const B = __ooga, net = BL.net, a = B.cavemen.get("portlandhodl");
+    if (B.crew.player !== a) B.pilot.possess(a);
+    const p = a.root.position, r = Math.hypot(p.x, p.z) || 1, ox = p.x / r, oz = p.z / r;
+    const x = p.x - oz * 6 + ox * 1.5, z = p.z + ox * 6 + oz * 1.5, yaw = Math.atan2(p.x - x, p.z - z);
+    net.remotes.set(515515, { id: 515515, login: "plate-peer", display: "Plate peer", body: "${kind}" === "gorilla" ? "gorilla:NickDaGreek" : "NickDaGreek",
+      bodyKind: "${kind}", bodyName: "NickDaGreek", zone: net.state.body ? net.state.zone : "outside", x, y: B.island.surfaceAt(x, z), z, yaw: yaw + Math.PI, hp: 60 });
+    B.pilot.navigate({ position: { x: p.x, y: p.y - a.baseY, z: p.z }, yaw: yaw + ${turn}, pitch: 0.3, dist: 6 });
+    B.advance(0.6, 1 / 60);
+  })()`);
+  // The live plate once a drawn frame has laid it out (null while it is off screen or not yet built).
+  const plateAt = async () => {
+    for (let i = 0; i < 12; i++) {
+      await b.sleep(100);
+      const at = await b.evaluate(`BL.remotePlayers.nameplate(515515)?.headX ?? null`);
+      if (at !== null) return at;
+    }
+    return null;
+  };
+  // The live plate as painted last frame, and the NPC tooltip shown for the same body (its health row too when asked).
+  const measure = (label, health) => b.evaluate(`(() => {
+    const live = BL.remotePlayers.nameplate(515515), cave = BL.remotePlayers.body(515515), tip = BL.scenes.hub.debug.hud.tooltip;
+    if (!live || !cave) return { label: "${label}", live };
+    tip.show("Plate peer", 0, 0, cave);
+    const el = document.getElementById("tooltip"), bar = document.getElementById("tooltip-health"), textEl = document.getElementById("tooltip-text");
+    // With health hud.js places the taller box on the same anchor (top = anchor - 2 - its height): a box measured
+    // without the row and then shown with it stands lift pixels too low, which every vertical reading below takes back.
+    const plainH = el.offsetHeight;
+    bar.hidden = !${health};
+    const lift = el.offsetHeight - plainH;
+    // A zero-size inline block on the text's line stands on its baseline.
+    const probe = document.createElement("span"); probe.style.cssText = "display:inline-block;width:0;height:0";
+    textEl.appendChild(probe);
+    const r = el.getBoundingClientRect(), cs = getComputedStyle(el), text = textEl.getBoundingClientRect(), base = probe.getBoundingClientRect().bottom;
+    const br = bar.getBoundingClientRect();
+    probe.remove(); bar.hidden = true;
+    const npc = { hidden: el.hidden, name: el.classList.contains("tooltip--name"), left: r.left, top: r.top - lift, width: r.width, height: r.height,
+      textX: text.left, baseline: base - lift, textWidth: text.width, barLeft: ${health} ? br.left : null, barTop: ${health} ? br.top - lift : null, barWidth: ${health} ? br.width : null,
+      font: (cs.fontWeight === "700" ? "bold " : cs.fontWeight + " ") + cs.fontSize + " " + cs.fontFamily, letterSpacing: cs.letterSpacing };
+    tip.hide();
+    // How many head vertices the live plate projects a frame (every one of every visible mesh, as the NPC anchor does).
+    let verts = 0;
+    const count = node => { if (!node.visible || node.cameraHidden) return; if (node.geometry?.verts) verts += node.geometry.verts.length / 3; for (const c of node.children) count(c); };
+    count(cave.parts.head);
+    return { label: "${label}", view: innerWidth, verts, live, npc };
+  })()`);
+  const rows = [];
+  // The first navigate after the scene's arrival keeps the carried look (pilot.js arriving) instead of the yaw asked
+  // for: spend it before the readings.
+  await place("ooga", 0); await plateAt();
+  for (const kind of ["ooga", "gorilla"]) {
+    await place(kind, 0); await plateAt();
+    rows.push(await measure(kind, false));
+  }
+  // At the view's left edge both are held 8 pixels inside it: turn the view (a secant search on the head's middle)
+  // until that middle is within a plate's half width of the edge.
+  let edge = null, t0 = 0, x0 = await plateAt(), t1 = 0.12;
+  await place("ooga", t1);
+  let x1 = await plateAt();
+  for (let i = 0; i < 8 && x0 !== null && x1 !== null && x1 !== x0 && !edge; i++) {
+    if (x1 > 2 && x1 < 50) { edge = t1; break; }
+    const t = t1 + (30 - x1) * (t1 - t0) / (x1 - x0);
+    await place("ooga", t);
+    const x = await plateAt();
+    if (x === null) break;
+    t0 = t1; x0 = x1; t1 = t; x1 = x;
+  }
+  if (edge === null && x1 !== null && x1 > 2 && x1 < 50) edge = t1;
+  rows.push(edge !== null ? await measure("edge", false) : { label: "edge", live: null, at: x1 });
+  // Game mode shows the room's health under live names, as the tooltip's health row.
+  await place("ooga", 0);
+  await b.evaluate(`(() => { BL.scenes.hub.debug.setGameMode(true); __ooga.advance(0.2, 1 / 60); })()`);
+  await plateAt(); await b.sleep(200);
+  rows.push(await measure("health", true));
+  await b.evaluate(`(() => { BL.scenes.hub.debug.setGameMode(false); __ooga.advance(0.2, 1 / 60); })()`);
+  // Raised hands, the peer's and the visitor's own, as the overlay paints them over a few real frames: the peer's centred
+  // over the plate's box, both in emoji type of their own, the own one drawn first in the frame (before the names' type
+  // is set), and the name drawn after the peer's hand still in the tooltip's type, so a hand's state never leaks into it.
+  await place("ooga", 0); await plateAt();
+  const hands = await b.evaluate(`(async () => {
+    const net = BL.net, rec = net.remotes.get(515515), HANDS = BL.reactionPolicy.HANDS, was = { hand: net.state.hand, tone: net.state.handTone };
+    rec.hand = true; rec.handTone = 3; net.state.hand = true; net.state.handTone = 0;
+    const ctx = document.getElementById("overlay").getContext("2d"), calls = [], wrap = name => { const real = ctx[name];
+      ctx[name] = function (text, x, y) { if (text === "Plate peer" || HANDS.includes(text)) { const m = ctx.getTransform();
+        calls.push({ name, text, x, y, font: ctx.font, spacing: ctx.letterSpacing, align: ctx.textAlign, base: ctx.textBaseline, m: [m.a, m.b, m.c, m.d, m.e, m.f].join() }); }
+        return real.apply(this, arguments); }; return real; };
+    const fill = wrap("fillText"), stroke = wrap("strokeText");
+    await new Promise(r => setTimeout(r, 300));
+    ctx.fillText = fill; ctx.strokeText = stroke;
+    const live = BL.remotePlayers.nameplate(515515);
+    rec.hand = false; net.state.hand = was.hand; net.state.handTone = was.tone;
+    const last = text => calls.filter(c => c.text === text).pop() || null, name = calls.filter(c => c.text === "Plate peer" && c.name === "fillText").pop() || null;
+    const peerAt = calls.lastIndexOf(last(HANDS[3])), nameAt = calls.lastIndexOf(name), ownAt = calls.lastIndexOf(last(HANDS[0]));
+    return { live, peer: last(HANDS[3]), own: last(HANDS[0]), name, peerFirst: peerAt >= 0 && nameAt > peerAt, ownFirst: ownAt >= 0 && peerAt > ownAt, distinct: HANDS[3] !== HANDS[0] };
+  })()`);
+  await b.evaluate(`(() => { BL.net.remotes.delete(515515); __ooga.advance(0.2, 1 / 60); })()`);
+  // Chrome reads a context's untouched letter spacing as "" (its default, none) and keeps that when 0px is set over it.
+  const emojiType = c => c && /Apple Color Emoji/.test(c.font) && /^20px/.test(c.font) && (c.spacing === "0px" || c.spacing === "") && c.align === "center" && c.base === "middle";
+  const { live: hp, peer, own, name } = hands;
+  record("live nameplates: a raised hand stands centred over a live player's nameplate box, the visitor's own is drawn before any name, both in emoji type with no letter spacing, and the name drawn after a hand keeps the NPC tooltip's type, spacing and place",
+    hands.distinct && hp && emojiType(peer) && emojiType(own) && hands.peerFirst && hands.ownFirst && peer.m === name.m && own.m === name.m
+      && peer.x === hp.left + hp.width / 2 && peer.y === hp.top - 16 && Number.isInteger(own.x) && Number.isInteger(own.y)
+      && name.font === hp.font && name.spacing === hp.spacing && name.align === "left" && name.base === "alphabetic" && name.x === hp.textX && name.y === hp.baseline,
+    JSON.stringify(hands));
+  const near = (a, c, d = 1) => Number.isFinite(a) && Number.isFinite(c) && Math.abs(a - c) <= d;
+  const matches = row => row.live && row.npc && !row.npc.hidden && row.npc.name && row.live.font === row.npc.font && row.live.spacing === row.npc.letterSpacing
+    && near(row.live.textWidth, row.npc.textWidth, 0.5) && near(row.live.width, row.npc.width) && near(row.live.height, row.npc.height)
+    && near(row.live.left, row.npc.left) && near(row.live.top, row.npc.top) && near(row.live.textX, row.npc.textX) && near(row.live.baseline, row.npc.baseline)
+    && (row.npc.barLeft === null || near(row.live.barLeft, row.npc.barLeft) && near(row.live.barTop, row.npc.barTop) && row.live.barWidth === row.npc.barWidth);
+  const edgeRow = rows.find(row => row.label === "edge"), healthRow = rows.find(row => row.label === "health");
+  record("live nameplates: a live player's name over an Ooga and over a gorilla has the NPC name tooltip's font, size and box, its name painted on the tooltip text's left edge and baseline, its health bar where the tooltip's health row sits, and both kept inside the view at its edge",
+    rows.length === 4 && rows.every(matches) && edgeRow.live.left === 8 && edgeRow.npc.left === 8 && healthRow.live.height > rows[0].live.height,
+    JSON.stringify(rows));
+} };
 // A remote player stands near the pile as the room would place them: the roster's shortest and tallest Oogas, then a
 // gorilla. portlandhodl, the widest Ooga, drops onto each, rides the short one as it walks and rises as a jetpack
 // would, walks off it, then walks and jumps at the tall one, which no jump clears. Its gorilla, driven, then does the
@@ -13041,18 +13163,20 @@ const hubGorillaPopulation = { name: "gorilla population restoration", why: "reg
     const occupied = many.filter(e => e.sleep.slot >= 0), waiting = many.filter(e => e.sleep.slot < 0);
     const capped = occupied.length === 20 && new Set(occupied.map(e => e.sleep.slot)).size === 20
       && waiting.length === 2 && waiting.every(e => !visible(e));
-    // Space wakes a driven gorilla without releasing its bed. Its owner can
-    // wake and sleep again while it is driven; overflow must not take that bed.
-    const driven = occupied[0], drivenSlot = driven.sleep.slot;
-    const drove = C.possess(driven) && C.wake();
-    driven.owner.override = "chilling"; B.crew.refreshStates(true);
+    // Driving a sleeping companion builds the visitor a separate, awake gorilla
+    // (C.player, its npc the companion), while the companion itself sleeps on in
+    // its bed undisturbed; overflow must not take that bed, before or after release.
+    const driven = occupied[0], drivenSlot = driven.sleep.slot, drivenAt = { ...driven.root.position };
+    const drove = C.possess(driven), body = C.player;
     C.update(1 / 30); C.update(1 / 30);
-    const heldWhileDriven = drove && driven.controlled && driven.sleep.slot === drivenSlot
+    const heldWhileDriven = drove && !!body && body !== driven && body.npc === driven && body.controlled && !C.sleeping(body)
+      && !driven.controlled && C.sleeping(driven) && driven.sleep.slot === drivenSlot
+      && Math.hypot(driven.root.position.x - drivenAt.x, driven.root.position.z - drivenAt.z) < 0.001
       && waiting.every(e => e.sleep.slot < 0 && !visible(e));
-    driven.owner.override = "sleeping"; B.crew.refreshStates(true); C.release();
+    C.release();
     C.update(1 / 30);
     const reserved = many.filter(e => e.sleep.slot >= 0);
-    const uniqueAfterRelease = driven.sleep.slot === drivenSlot && reserved.length === 20
+    const uniqueAfterRelease = !C.player && !body.active && driven.sleep.slot === drivenSlot && reserved.length === 20
       && new Set(reserved.map(e => e.sleep.slot)).size === 20;
     const waking = occupied[0], held = occupied.slice(1).map(e => [e, e.sleep.slot]);
     waking.owner.override = "chilling"; B.crew.refreshStates(true);
@@ -13075,7 +13199,7 @@ const hubGorillaPopulation = { name: "gorilla population restoration", why: "reg
     // authored exit toward its Ooga's pile slot, moving continuously (no
     // relocation). A later sleep still takes it to bed or out of sight at once.
     let chillSteps = 0, chillJump = 0, chillLeft = false, chillPile = false, chillAtPile = false, chillLounge = false, chillFrames = 0;
-    let chillLast = { ...worker.root.position };
+    let chillLast = { ...worker.root.position }, chillPilePoint = null;
     worker.owner.override = "chilling"; B.crew.refreshStates(true);
     // Bounded: up to 60 s of simulation, stopping once it has reached its lounge leg.
     for (; chillFrames < 1800 && !chillLounge; chillFrames++) {
@@ -13084,12 +13208,59 @@ const hubGorillaPopulation = { name: "gorilla population restoration", why: "reg
       chillJump = Math.max(chillJump, step); if (step > 1e-4) chillSteps++;
       chillLeft ||= worker.phase === "leave" || worker.route === "pile";
       chillPile ||= worker.route === "pile";
-      chillAtPile ||= worker.route === "pile" && Math.hypot(worker.goalX - q.x, worker.goalZ - q.z) <= 0.5;
+      if (!chillAtPile && worker.route === "pile" && Math.hypot(worker.goalX - q.x, worker.goalZ - q.z) <= 0.5) {
+        chillAtPile = true; chillPilePoint = { x: worker.goalX, z: worker.goalZ };
+      }
       chillLounge = chillAtPile && worker.phase === "chill";
       chillLast = { ...q };
     }
     const chillWalk = worker.nonInteractive && worker.mode === "chilling" && worker.active && worker.root.visible
       && chillLeft && chillPile && chillAtPile && chillLounge && chillSteps > 0 && chillJump < 0.5;
+    // Regression: reaching the pile and flipping to the chill phase is not leaving it. Follow each passive gorilla,
+    // on its real rig, terrain and movement controllers, from its Ooga's clank-to-chill transition through the pile
+    // slot, out of the pile's ring and on until it settles at a lounge, walking all the way (no relocation or stall
+    // recovery). The away argument is how far from its pile slot counts as having left the pile.
+    // pile: a slot already reached (the walk above stopped there), else it is recorded on arrival.
+    const followChill = (list, frames, pile = null, away = 3) => {
+      // stall: the last state before a stall recovery first relocated it, for a blocked walk's diagnosis.
+      const snap = e => ({ phase: e.phase, route: e.route, lab: e.motion.lab, item: e.lab.item, stage: e.lab.stage, parked: e.parked,
+        fromSite: e.fromSite, site: e.site, x: +e.root.position.x.toFixed(2), y: +e.root.position.y.toFixed(2), z: +e.root.position.z.toFixed(2),
+        goalX: +e.goalX.toFixed(2), goalZ: +e.goalZ.toFixed(2), speed: +e.speed.toFixed(2), blocked: +e.blocked.toFixed(2),
+        stuck: +e.stuck.time.toFixed(2), recover: +e.recover.toFixed(2), climbing: e.climb.active, jumping: e.jump.active, footprint: e.footprintMode,
+        goalY: +e.goalY.toFixed(2), roof: e.loungeRoof, climb: e.climb.active ? { descending: e.climb.descending, free: e.climb.free, hold: e.climb.holdPose,
+          mount: e.climb.mountPending, wait: e.climb.waitRelease, handoff: e.climb.handoffDirection, claim: e.climb.claimPending, crest: e.climb.crestPending,
+          search: e.climb.searchPending, progress: +(e.climb.progress || 0).toFixed(2), length: +(e.climb.length || 0).toFixed(2), opening: e.climb.openingExit } : null });
+      const track = list.map(e => ({ e, pile, pileAt: pile ? 0 : -1, leftAt: -1, loungeAt: -1, maxStep: 0, prev: null, stall: null, trace: [],
+        last: { x: e.root.position.x, z: e.root.position.z }, recoveries: e.stuck.recoveries }));
+      let f = 0;
+      for (; f < frames && track.some(t => t.loungeAt < 0); f++) {
+        C.update(1 / 30);
+        for (const t of track) {
+          const e = t.e, q = e.root.position;
+          t.maxStep = Math.max(t.maxStep, Math.hypot(q.x - t.last.x, q.z - t.last.z)); t.last.x = q.x; t.last.z = q.z;
+          if (!t.pile && e.route === "pile" && Math.hypot(e.goalX - q.x, e.goalZ - q.z) <= 0.5) { t.pile = { x: e.goalX, z: e.goalZ }; t.pileAt = f; }
+          if (t.pile && t.leftAt < 0 && Math.hypot(q.x - t.pile.x, q.z - t.pile.z) > away) t.leftAt = f;
+          if (t.leftAt >= 0 && t.loungeAt < 0 && e.phase === "chill" && e.lounge && e.roam.arrived) t.loungeAt = f;
+          if (!t.stall && e.stuck.recoveries !== t.recoveries) t.stall = { frame: f, ...t.prev };
+          if (!t.stall) t.prev = snap(e);
+          // Until the pile, a sample every third of a second (at most 60): where a blocked walk dwells and why.
+          if (t.pileAt < 0 && !t.stall && f % 10 === 0 && t.trace.length < 60) t.trace.push([f, +q.x.toFixed(2), +q.z.toFixed(2), +e.goalX.toFixed(2),
+            +e.goalZ.toFixed(2), +e.speed.toFixed(2), +e.stuck.time.toFixed(2), e.stuck.escapeLeft > 0 ? 1 : 0, +e.blocked.toFixed(2), e.route]);
+        }
+      }
+      return track.map(t => {
+        const e = t.e, q = e.root.position;
+        return { name: e.owner.traits.name, ok: t.pileAt >= 0 && t.leftAt >= t.pileAt && t.loungeAt >= t.leftAt
+          && t.maxStep < 0.5 && e.stuck.recoveries === t.recoveries && e.mode === "chilling" && e.nonInteractive,
+          pileAt: t.pileAt, leftAt: t.leftAt, loungeAt: t.loungeAt, frames: f, maxStep: +t.maxStep.toFixed(3),
+          recoveries: e.stuck.recoveries - t.recoveries, reason: e.stuck.reason, stall: t.stall, trace: t.loungeAt < 0 ? t.trace : undefined, pile: t.pile,
+          at: { x: +q.x.toFixed(2), y: +q.y.toFixed(2), z: +q.z.toFixed(2) }, fromPile: t.pile ? +Math.hypot(q.x - t.pile.x, q.z - t.pile.z).toFixed(2) : null,
+          goal: { x: +e.goalX.toFixed(2), z: +e.goalZ.toFixed(2) }, phase: e.phase, route: e.route, lounge: e.lounge,
+          rest: +e.rest.toFixed(2), failedChoices: e.roam.failedChoices, detour: e.roam.detour, roam: [e.roam.index, e.roam.count],
+          progressTime: +e.roam.progressTime.toFixed(2), blocked: +e.blocked.toFixed(2), climbing: e.climb.active, jumping: e.jump.active };
+      });
+    };
+    const workerLounge = followChill([worker], 3600, chillPilePoint)[0];
     worker.owner.override = "sleeping"; B.crew.refreshStates(true); C.update(1 / 30);
     const chillInterrupted = worker.mode === "sleeping" && worker.sleep.slot >= 0 || !worker.root.visible;
     reset(sleepers);
@@ -13102,8 +13273,11 @@ const hubGorillaPopulation = { name: "gorilla population restoration", why: "reg
     // transfer stage resolves into the reserved bed on the next update, and
     // possession then keeps that settled sleeper in place.
     const placedDirectly = beamEntry.sleep.stage === "asleep" && heldSlot >= 0 && noBeam();
+    // Possession drives a separate awake body (C.player); the companion sleeps on, undisplaced, in its bed.
     const selected = C.possess(beamEntry); C.update(0.25);
-    const beamPossession = placedDirectly && selected && beamEntry.controlled && C.sleeping(beamEntry) && beamEntry.sleep.slot === heldSlot
+    const beamBody = C.player;
+    const beamPossession = placedDirectly && selected && !!beamBody && beamBody.npc === beamEntry && beamBody.controlled
+      && !C.sleeping(beamBody) && !beamEntry.controlled && C.sleeping(beamEntry) && beamEntry.sleep.slot === heldSlot
       && Math.hypot(beamEntry.root.position.x - before.x, beamEntry.root.position.z - before.z) < 0.001 && noBeam() && beamEntry.gorilla.form === "ape" && !beamEntry.root.matrixNative;
     C.release(); reset(sleepers);
     beamEntry.sleep.stage = "beamIn"; beamEntry.sleep.beamTime = 0.02;
@@ -13146,7 +13320,32 @@ const hubGorillaPopulation = { name: "gorilla population restoration", why: "reg
     }
     const queuedArrival = queued.every(e => e.sleep.stage === "asleep" && e.sleep.slot >= 0 && e.gorilla.form === "ape" && !e.root.matrixNative);
     const boundedRecovery = settledAtOnce && maxBeams === 0 && queuedArrival && noBeam();
+    // Run after the sleep fixtures above, which own their entries' states.
+    // The same transition for several owners at once, each first settled at work inside a real cave: a crowd sharing
+    // one cave (its Oogas' current site), then one spread one to a cave round the pile.
+    const sites = B.crew.workSites.length;
+    const crowdChill = (crowd, spread) => {
+      C.setAway(true); C.update(1 / 30);
+      for (const e of entries) e.owner.override = "away";
+      for (const e of crowd) e.owner.override = "working";
+      B.crew.refreshStates(true);
+      if (spread) crowd.forEach((e, i) => { e.owner.work.site = i % sites; });
+      C.setAway(false);
+      let settle = 0;
+      for (; settle < 2700 && !crowd.every(e => e.phase === "work"); settle++) C.update(1 / 30);
+      const atWork = crowd.filter(e => e.phase === "work");
+      for (const e of atWork) e.owner.override = "chilling";
+      B.crew.refreshStates(true);
+      return { crowd: crowd.length, atWork: atWork.length, caves: [...new Set(atWork.map(e => e.site))], settle, walks: followChill(atWork, 3600) };
+    };
+    const sharedCave = crowdChill(entries.slice(3, 9), false), spreadCaves = crowdChill(entries.slice(9, 9 + sites), true);
+    // Every gorilla of each group must have settled at work, the whole crowd in one cave and one in every cave, so a
+    // cave or gorilla that never arrives cannot quietly shrink what the walks cover.
+    const chillToLounge = workerLounge.ok && sites >= 2 && sharedCave.crowd === 6 && sharedCave.atWork === 6 && sharedCave.caves.length === 1
+      && spreadCaves.crowd === sites && spreadCaves.atWork === sites && spreadCaves.caves.length === sites
+      && sharedCave.walks.every(t => t.ok) && spreadCaves.walks.every(t => t.ok);
     return { chillWalk, chillInterrupted, chillSteps, chillJump, chillPile, chillAtPile, chillLounge, chillFrames,
+      chillToLounge, workerLounge, sharedCave, spreadCaves,
       boundedRecovery, maxBeams, heldQueue, settledAtOnce, placedDirectly, queuedArrival, beamSuspend, lateSleepers, stable, capped, reused, heldWhileDriven, uniqueAfterRelease, hidden, restored, stableExit, beamPossession, beamArrivalPossession, beamRemote, beamReset,
       population: [worker, chiller, away, ...sleepers].map(e => ({ state: e.owner.state, mode: e.mode, active: e.active, visible: e.root.visible, bed: e.sleep.slot })) };
   })()`);
@@ -13154,6 +13353,8 @@ const hubGorillaPopulation = { name: "gorilla population restoration", why: "reg
   record("gorilla population: island game mode hides companions and its exit immediately restores current working, chilling and sleeping gorillas; repeated exit keeps their beds", r.hidden && r.restored && r.stableExit, JSON.stringify(r));
   record("gorilla population: a passive working gorilla switched to chilling walks out by its authored exit, reaches its Ooga's pile slot and only then heads for a lounge, without relocating, and a later sleep still takes it at once",
     r.chillWalk && r.chillInterrupted, JSON.stringify(r));
+  record("gorilla population: after clanking to chilling, passive gorillas sharing one cave and spread over every cave leave their Ooga's pile slot and walk on to settle at a lounge, on their real rigs and terrain, with no relocation or stall recovery",
+    r.chillToLounge, JSON.stringify({ worker: r.workerLounge, sharedCave: r.sharedCave, spreadCaves: r.spreadCaves }));
   record("gorilla sleep beam: a passive companion caught in either legacy transfer stage settles straight into its reserved bed with no glyphs; possession keeps it there undisplaced, and remote takeover or population reset releases it", r.beamPossession && r.beamArrivalPossession && r.beamRemote && r.beamReset && r.beamSuspend, JSON.stringify(r));
   record("gorilla sleep recovery: ten passive sleepers stalled mid-walk on real rigs are placed into their reserved beds on the next update, with no queue and no legacy beam", r.boundedRecovery, JSON.stringify(r));
 } };
@@ -19530,7 +19731,7 @@ const hubVoiceCrossings = { name: "voice crossings", why: "rule: on each bridge 
       && lv.chamber.to === "rainforest-under" && lv.chamber.t === 1 && !lv.court.to && lv.court.zone === "rainforest" && !lv.lake.to,
     JSON.stringify(lv));
 } };
-scene("hub", { label: "player stacking", query: "solo=1&character=portlandhodl&pos=0", steps: [hubPlayerStacking, hubChalkboardReach, hubVoiceCrossings] });
+scene("hub", { label: "player stacking", query: "solo=1&character=portlandhodl&pos=0", steps: [hubPlayerStacking, hubChalkboardReach, hubVoiceCrossings, hubNameplates] });
 scene("hub", { label: "lab flask approach", query: "solo=1&character=portlandhodl&status=clankin", steps: [{ name: "gorilla lab exit through Oogas", why: "regression: Ooga occupancy, body sweeps and head support blocked gorillas leaving the lab", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, C = B.clankers, e = C.list[0], owner = e.owner, m = B.headquarters.entropyLab.mouth;
@@ -22445,6 +22646,7 @@ const hubTourTouch = { name: "hub tour touch", why: "regression: the touch stick
       && !!resized && resized.sized.sized === "true" && resized.sized.to > resized.sized.from && Math.abs(parseFloat(resized.sized.written) - (resized.layout.sheet.bottom - resized.layout.sheet.top)) <= 1
       && resized.layout.sticks === "true" && resized.layout.stick.bottom <= resized.layout.sheet.top && resized.layout.panel.bottom <= resized.layout.stick.top, JSON.stringify(rows));
 } };
+scene("hub", { label: "live nameplates phone", query: "solo=1&character=portlandhodl&pos=0", opts: PHONE_SIZE, steps: [hubNameplates] });
 scene("hub", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("hub", { required: ["#joy-move", "#joy-look", "#sheet-toggle", "#sheet-bananas"], sheet: true }), hubTourTouch, { name: "hub home screen", why: "rule: an iPhone home-screen web app is named OogaBoogaLand and carries its own icon", run: async (b) => {
   const meta = await b.evaluate(`(() => {
     const title = document.querySelector('meta[name="apple-mobile-web-app-title"]')?.content;
@@ -27661,6 +27863,32 @@ const fixedRoutineProof = async () => {
   const stamped = state.version !== island.path.version;
   const plans = state.plans; state.version = island.path.version; fixed.target(cave, 30, 1);
   const replansGraphLane = state.plans === plans + 1;
+  // Regression: a passive Ooga between two spoke samples (a return leg begun at its cave's first route point, or a
+  // replan mid-spoke when its slot or the ring changed) aimed first at the nearer sample behind it and turned round,
+  // and a goal between two samples was overshot and walked back to. Inbound to the pile, outbound to a cave and along
+  // one spoke each way, the real planner's first aim and every later lane point lie on the way to the goal, which is
+  // the last point. Short legs between two adjacent samples (each end nearest a different one) and legs whose ends
+  // share one nearest sample keep no sample behind or beyond them: a direct leg to the goal alone is a valid route,
+  // and `samples` counts the spoke samples kept, so a leg with one between its ends must still keep that one.
+  const onTheWay = (from, goal, samples = -1) => {
+    const s = P.create({ island }).createState();
+    fixed.target({ pathing: s, root: { position: { x: from.x, y: 0, z: from.z } } }, goal.x, goal.z);
+    const sign = Math.sign(goal.z - from.z);
+    let along = from.z, ahead = s.count >= 1 && (s.targetZ - from.z) * sign > 0, kept = 0;
+    for (let i = 0; i < s.count; i++) {
+      ahead &&= (s.laneZ[i] - along) * sign >= -1e-6; along = s.laneZ[i];
+      if (i < s.count - 1 && s.laneX[i] === 0 && s.laneZ[i] % 2 === 0) kept++;
+    }
+    return ahead && (samples < 0 || kept === samples)
+      && Math.abs(s.laneX[s.count - 1] - goal.x) < 1e-6 && Math.abs(s.laneZ[s.count - 1] - goal.z) < 1e-6;
+  };
+  const noTurnBack = onTheWay({ x: 0.1, z: 21.4 }, { x: 0, z: 4 }) && onTheWay({ x: 0.1, z: 4 }, { x: 0.1, z: 21.4 })
+    && onTheWay({ x: 0.1, z: 21.4 }, { x: 0.1, z: 12.6 }) && onTheWay({ x: 0.1, z: 12.6 }, { x: 0.1, z: 21.4 })
+    // Adjacent samples 10 and 12, nearest the start and the goal in turn, both drop: the goal alone.
+    && onTheWay({ x: 0, z: 10.2 }, { x: 0, z: 11.8 }, 0) && onTheWay({ x: 0.1, z: 11.8 }, { x: 0.1, z: 10.2 }, 0)
+    // One shared nearest sample (10): kept only when it lies between the ends, either way along the spoke.
+    && onTheWay({ x: 0.1, z: 9.6 }, { x: 0.1, z: 10.4 }, 1) && onTheWay({ x: 0.1, z: 10.4 }, { x: 0.1, z: 9.6 }, 1)
+    && onTheWay({ x: 0.1, z: 10.2 }, { x: 0.1, z: 10.6 }, 0) && onTheWay({ x: 0.1, z: 10.6 }, { x: 0.1, z: 10.2 }, 0);
   // Clanking to chilling, through the real crew route walk: from mid-outbound or
   // mid-return inside a cave, back along the authored route points, along the
   // planner to the pile slot, then to the chill spot. It never consults object
@@ -27711,6 +27939,29 @@ const fixedRoutineProof = async () => {
   const restsAtPile = restTrip.started && restTrip.state === "chilling" && !restTrip.arrived && !restTrip.walking
     && restTrip.kind === "idle" && inOrder(restTrip.steps, [route[0], slot]) && same([restTrip.end.x, restTrip.end.z], slot)
     && !restTrip.blockCalls && !restTrip.objectFloorCalls;
+  // Regression: the real `runWork` return leg to the pile ran the direct pile approach for a passive fixed trip too,
+  // which re-picks the nearest slot it can sweep to past props and the pile and leaves the ring planner, swinging the
+  // walker to another slot. A fixed trip keeps its reserved slot on the planned path; an ordinary walker keeps the
+  // direct approach and its switch.
+  const returnCode = slice("    const runWork =", "    const quoteFor =");
+  const pileReturn = (fixedLeg) => {
+    let approaches = 0, followed = null, walkedTo = null;
+    const reserved = { x: 0, z: -5 }, nearer = { x: 1, z: -4.9 };
+    const ooga = { fixedLeg, slot: reserved, pileApproach: false, root: { position: { x: 0.5, y: 0, z: -6 } }, weapon: { ammo: 0 },
+      work: { phase: "return", index: -1, site: 0, plannedSite: 0, reloadSlot: true, direct: false }, act: { kind: "reload-return" } };
+    const ctx = { cave: ooga, AMMO_MAX: 30, workSites: [{ route: [{ x: 20, z: 0 }] }], siteActive: () => true, planWorkSite: () => 0,
+      slotAvailable: () => true, closestSlot: () => reserved, fixedTrip: c => c.fixedLeg, standPose: () => {},
+      approachPile: c => { approaches++; c.slot = nearer; c.pileApproach = true; return true; },
+      walkWorkTo: (_c, target, _dt, followPath) => { walkedTo = target; followed = followPath; return false; } };
+    runInNewContext(`${returnCode} this.run = () => runWork(cave, 0.05);`, ctx);
+    ctx.run(); ctx.run();
+    return { approaches, followed, walkedTo, slot: ooga.slot, reserved, nearer, phase: ooga.work.phase };
+  };
+  const fixedReturn = pileReturn(true), ordinaryReturn = pileReturn(false);
+  const fixedReturnKeepsSlot = fixedReturn.approaches === 0 && fixedReturn.followed === true && fixedReturn.slot === fixedReturn.reserved
+    && fixedReturn.walkedTo === fixedReturn.reserved && fixedReturn.phase === "return"
+    && ordinaryReturn.approaches === 2 && ordinaryReturn.followed === false && ordinaryReturn.slot === ordinaryReturn.nearer
+    && ordinaryReturn.walkedTo === ordinaryReturn.nearer && ordinaryReturn.phase === "return";
   // Regression (#496 review): the pile grows while a passive Ooga walks its own one-leg route to its loading slot.
   // The real `updateFan` retargets through the real `walkToSlot`, and the real `runWalk`/`runRouteWalk` must arrive at
   // the newly assigned slot, not the snapshot taken when the leg was made. An authored route keeps its legs.
@@ -27744,8 +27995,11 @@ const fixedRoutineProof = async () => {
   const slotWalkRetargets = !!ownLeg.grewAt && ownLeg.meal && !ownLeg.walking && same([ownLeg.end.x, ownLeg.end.z], { x: 0, z: -7 })
     && !ownLeg.objectFloorCalls;
   const authoredRouteKept = !!authoredLeg.grewAt && authoredLeg.legsKept && !authoredLeg.walking && same([authoredLeg.end.x, authoredLeg.end.z], { x: 0, z: -5 });
-  // The real passive companion stepper, with the real choice of route (`passivePlanned`): the walk from a cave to the
-  // pile follows the ring and one spoke, never crossing the pile, on terrain; only the wall clearance is consulted.
+  // The real passive companion stepper, with the real choice of route (`passivePlanned`), on terrain; only the wall
+  // clearance is consulted.
+  // A gorilla leaving work for its Ooga's pile slot walks the straight line to the slot, over the pile itself: no
+  // planner lane routes it round the pile ring (while the ordinary controller, which takes any refused step, aims
+  // straight at the slot).
   // Regression: a working gorilla's walk to a work cave was routed along the spokes and ring; it walks the straight
   // line to that cave's apron, on terrain, passing through everything but walls, whether it set out from another cave
   // or the meadow, and stays straight when its origin is reset mid-walk (a retarget or a blocked retry). A wall step
@@ -27754,6 +28008,8 @@ const fixedRoutineProof = async () => {
   const stepperCode = clankerSource.slice(clankerSource.indexOf("    const PASSIVE_WALKER ="), clankerSource.indexOf("    const move = (e, dt, speed) => {"));
   const WORK_TRIP = { phase: "travel", mode: "working", route: "apron", fromSite: -1, site: 2 };
   const PILE_TRIP = { phase: "leave", mode: "chilling", route: "pile", fromSite: 1, site: 1 };
+  // The one leg still on the spokes and ring: an apron leg outside work travel.
+  const PLANNED_TRIP = { phase: "travel", mode: "chilling", route: "apron", fromSite: -1, site: 1 };
   // `resets`: the origin cave this walk is given at a frame, as `beginTravel` and the blocked retry rewrite it.
   const gorillaLeg = (wall, trip, resets = []) => {
     let wallChecks = 0, moves = 0, inside = 0, offLine = 0, plannedSteps = 0;
@@ -27781,19 +28037,20 @@ const fixedRoutineProof = async () => {
   const gorillaFromCave = gorillaLeg(false, { ...WORK_TRIP, fromSite: 1 });
   const gorillaReset = gorillaLeg(false, { ...WORK_TRIP, fromSite: 1 }, [[60, -1], [120, 3], [180, -1]]);
   const gorillaWorkWall = gorillaLeg(true, WORK_TRIP);
-  const gorillaPlanned = gorillaToPile.plannedSteps === gorillaToPile.frames && gorillaToPile.arrived && gorillaToPile.onTerrain
-    && !gorillaToPile.moves && !gorillaToPile.inside && gorillaToPile.wallChecks > 0;
+  // The straight line from its start (0, -4) to the slot (30, 1) passes 3.95 m from the centre, inside the 5 m ring.
+  const gorillaOverPile = !gorillaToPile.plannedSteps && gorillaToPile.arrived && gorillaToPile.onTerrain && !gorillaToPile.moves
+    && gorillaToPile.offLine < 1e-6 && gorillaToPile.inside > 0 && gorillaToPile.wallChecks > 0 && gorillaToPile.frames <= straightFrames;
   const gorillaDirect = [gorillaFromMeadow, gorillaFromCave, gorillaReset].every(t => !t.plannedSteps && t.arrived && t.onTerrain && !t.moves
     && t.offLine < 1e-6 && t.wallChecks > 0 && t.frames <= straightFrames) && gorillaReset.frames > 180;
   const gorillaClimbsWalls = [gorillaWall, gorillaWorkWall].every(t => t.moves === 1 && !t.arrived);
   // Regression: the fixed planner keeps a walker's lane until its goal or the map changes, and a straight work leg
-  // never touched it, so a gorilla's next walk to the same pile slot took up its old lane (consumed, or cut short)
-  // from wherever the work trip had left it. One gorilla walks to the pile (all the way, or only partway), walks
-  // straight to work, then walks to the same slot again: that third walk plans afresh from where it now stands,
+  // never touched it, so a gorilla's next planned walk to the same goal took up its old lane (consumed, or cut short)
+  // from wherever the work trip had left it. One gorilla walks a planned leg (all the way, or only partway), walks
+  // straight to work, then walks to the same goal again: that third walk plans afresh from where it now stands,
   // exactly the lane a gorilla first setting out from there gets, in the same state and buffers, and arrives.
   const passiveWalker = (x, z) => {
     const gorilla = { nonInteractive: true, heading: Math.PI, speed: 0, blocked: 0, stuckTime: 0, goalX: 30, goalY: 0, goalZ: 1,
-      ...PILE_TRIP, root: { position: { x, y: 0.02 * x, z } } };
+      ...PLANNED_TRIP, root: { position: { x, y: 0.02 * x, z } } };
     const c = { clamp: (v, a, b) => Math.max(a, Math.min(b, v)), PROP_STEP: 1.16, ctx: { npcFixedPaths: fixed, npcPathState: () => P.create({ island }).createState() },
       support: (_e, sx) => 0.02 * sx, groundStepClear: () => true, setSupportY: (e, y) => { e.root.position.y = y; }, move: () => {}, e: gorilla };
     runInNewContext(`${stepperCode} this.step = () => movePassive(e, 1 / 30, 2.7, passivePlanned(e));`, c);
@@ -27809,7 +28066,7 @@ const fixedRoutineProof = async () => {
     Object.assign(g, WORK_TRIP, { goalX: -20, goalZ: 12 });
     w.walk(150);
     const leftAlone = s.plans === plans && Number.isNaN(s.tx);
-    Object.assign(g, PILE_TRIP, { goalX: 30, goalZ: 1 });
+    Object.assign(g, PLANNED_TRIP, { goalX: 30, goalZ: 1 });
     const from = { x: g.root.position.x, z: g.root.position.z };
     w.step();
     const fresh = passiveWalker(from.x, from.z);
@@ -27843,8 +28100,8 @@ const fixedRoutineProof = async () => {
   const drivenWaits = pc.claim(driven) === false && pc.portals[0] === holder && caveScans > 0;
   const passivePortal = passedHeld && droppedStale && drivenWaits;
   island.path.centerlines = [];
-  return { outside, ring, arrives, stamped, replansGraphLane, midOutboundChill, returningChill, slotlessChill, restsAtPile,
-    slotWalkRetargets, authoredRouteKept, slotWalks: [ownLeg, authoredLeg], gorillaPlanned, gorillaDirect, gorillaClimbsWalls, gorillaReplans, passivePortal,
+  return { outside, ring, arrives, stamped, replansGraphLane, noTurnBack, fixedReturnKeepsSlot, midOutboundChill, returningChill, slotlessChill, restsAtPile,
+    slotWalkRetargets, authoredRouteKept, slotWalks: [ownLeg, authoredLeg], gorillaOverPile, gorillaDirect, gorillaClimbsWalls, gorillaReplans, passivePortal,
     gorillaToPile, gorillaWall, gorillaFromMeadow, gorillaFromCave, gorillaReset, gorillaWorkWall, pileConsumed, pileInterrupted,
     portal: { passedHeld, droppedStale, drivenWaits, caveScans },
     unsupported: P.fixed(island) === null,
@@ -28346,7 +28603,7 @@ const unitChecks = async () => {
   record("passive status beams: clanking to chilling in view walks without glyphs at 20 Hz steps, while a relocation to bed still beams",
     Object.values(statusBeams).every(Boolean), JSON.stringify(statusBeams));
   const fixedRoutine = await fixedRoutineProof();
-  record("passive work legs: the authored fixed planner circles the real pile ring, follows one spoke out to the target, never crosses the pile, and replans rather than reuse a graph lane; clanking to chilling from mid-outbound or mid-return walks back along the cave route to the pile slot, then to the chill spot, on terrain and ignoring objects; a passive gorilla's walk to the pile keeps the spokes and ring while its work travel to a cave walks straight from another cave or the meadow, even when its origin is reset mid-walk, on terrain, still handing wall steps to the climber",
+  record("passive work legs: the authored fixed planner circles the real pile ring, follows one spoke out to the target, never crosses the pile, and replans rather than reuse a graph lane; a walker between spoke samples, or a goal between them, is never sent back to a sample behind it or past the goal; a passive return leg keeps its reserved pile slot on the planned path while an ordinary one keeps the direct pile approach; clanking to chilling from mid-outbound or mid-return walks back along the cave route to the pile slot, then to the chill spot, on terrain and ignoring objects; a passive gorilla's walk to its Ooga's pile slot goes straight over the pile while its work travel to a cave walks straight from another cave or the meadow, even when its origin is reset mid-walk, on terrain, still handing wall steps to the climber",
     Object.values(fixedRoutine).every(Boolean), JSON.stringify(fixedRoutine));
   const passiveWeapons = await passiveWeaponTargetProof();
   record("passive weapon targets: a shot passes through a passive NPC to the body behind it, hover and carry picks still find the NPC, and a non-passive body takes the hit",

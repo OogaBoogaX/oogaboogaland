@@ -21,10 +21,10 @@ The Hub opts its roster into a passive NPC policy (`shared.npcPassive`). Every o
   - *Support:* terrain only, including terrain ramps and the lab floor.
   - *Travel:* it walks straight at its authored goals (cave exit, apron, entry aisle, work slot, pile).
     - Work travel walks straight: a working gorilla heading for a work cave walks directly to its apron from wherever it set out (another cave or the meadow), retargets and retries included, on terrain, passing through everything but walls.
-    - Its walk from a cave to its Ooga's pile slot follows the same authored spokes and pile ring as the Oogas, so it never cuts across the pile.
+    - Its walk from a cave to its Ooga's pile slot is straight too, over the pile itself on terrain; no planner routes it round the pile ring. Only an apron leg outside work travel follows the Oogas' authored spokes and pile ring.
     - Lab and office points are walked directly, with no lab route search.
     - A step a wall refuses goes to the ordinary controller, so wall climbs and rooftop descents still work.
-  - *Clanking to chilling:* while in view, it walks: out by its cave's authored exit, along the meadow leg to its Ooga's pile slot, and only then to a lounge. It is never relocated. A climb, jump or fall in progress finishes first.
+  - *Clanking to chilling:* while in view, it walks: out by its cave's authored exit, straight to its Ooga's pile slot, and only then to a lounge. It is never relocated. A climb, jump or fall in progress finishes first.
   - *Interruptions:* sleeping or away during that walk still beams, and working again beams it to the pile.
   - *Driven gorillas* keep every check, and rage keeps its own prop rules.
 
