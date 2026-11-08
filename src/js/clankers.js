@@ -2318,6 +2318,11 @@
       jump.active = true; jump.wall = wall; jump.caveExit = false; jump.progress = 0; jump.reverse = false; jump.blocked = 0; e.jumps++;
       return true;
     };
+    // Ground more than a terrace lower within a metre past a landing, sampled finer than the half-metre voxels.
+    const saddleAhead = (x, y, z, sx, sz) => {
+      for (let d = 0.2; d <= 1.001; d += 0.2) if (ctx.surfaceAt(x + sx * d, z + sz * d) < y - 0.3) return true;
+      return false;
+    };
     const tryRoofHop = (e, heading, destination) => {
       const p = e.root.position, previousHeading = e.heading;
       if (Math.cos(heading - previousHeading) < 0.85) return false;
@@ -2327,8 +2332,11 @@
       // bounds the gravity arc and sweeps every segment against live scenery.
       for (let distance = 2; distance <= MAX_JUMP; distance += 0.4) {
         const x = p.x + sx * distance, z = p.z + sz * distance, y = ctx.surfaceAt(x, z);
+        // A landing on the saddle's last step, lower ground just ahead, would step back down into the saddle:
+        // land past it, on the upper level.
         if (roofAt(x, y, z) !== destination
-          || Math.abs(pointSupportAt(x, z, y + 0.02, e) - y) > 0.05) continue;
+          || Math.abs(pointSupportAt(x, z, y + 0.02, e) - y) > 0.05
+          || saddleAhead(x, y, z, sx, sz)) continue;
         if (prepareJump(e, x, y, z, 0, false, true)) {
           e.roam.runUp = 0; e.motion.takeoff = 1; return true;
         }
@@ -5619,21 +5627,23 @@
       e.climb.searchPending = e.climb.searchDeferred = e.climb.claimPending = e.climb.crestPending = false;
       return true;
     };
+    const supportLost = (e) => {
+      if (!e.active || !e.root.visible || e.climb.active || e.jump.active || e.drive.airborne) return;
+      const p = e.root.position, floor = support(e, p.x, p.z, p.y, PROP_STEP);
+      if (floor >= p.y - 0.05) return;
+      const d = e.drive;
+      // A controlled walker keeps its horizontal pace while the destroyed
+      // support falls away; gravity handles the short drop separately.
+      if (!e.controlled) d.vx = d.vz = 0;
+      d.vy = 0;
+      d.airborne = d.passiveFall = true; d.grounded = d.motionEnvelope = false;
+      d.motionRecover = 0; d.resume = !e.controlled;
+      e.lounge = ""; e.motion.takeoff = 0;
+    };
     const supportRemoved = () => {
-      for (let i = 0; i < list.length; i++) {
-        const e = list[i];
-        if (!e.active || !e.root.visible || e.climb.active || e.jump.active || e.drive.airborne) continue;
-        const p = e.root.position, floor = support(e, p.x, p.z, p.y, PROP_STEP);
-        if (floor >= p.y - 0.05) continue;
-        const d = e.drive;
-        // A controlled walker keeps its horizontal pace while the destroyed
-        // support falls away; gravity handles the short drop separately.
-        if (!e.controlled) d.vx = d.vz = 0;
-        d.vy = 0;
-        d.airborne = d.passiveFall = true; d.grounded = d.motionEnvelope = false;
-        d.motionRecover = 0; d.resume = !e.controlled;
-        e.lounge = ""; e.motion.takeoff = 0;
-      }
+      for (let i = 0; i < list.length; i++) supportLost(list[i]);
+      // The visitor's separate body is no roster entry, but stands on scenery all the same.
+      if (player && player.npc) supportLost(player);
     };
     const ignite = (value) => {
       const e = entryFor(value);

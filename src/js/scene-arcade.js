@@ -1177,7 +1177,14 @@
     return true;
   };
   // A pick seen from the camera; its target's middle stands for it.
-  const inView = (hit) => { const m = hit.node.world, c = camera.position; return sightClear(c.x, c.y, c.z, m[12], m[13], m[14]); };
+  // The middle is its bounds' centre, never the node's origin: a cabinet's origin lies on the floor it stands on, which a
+  // line to the deck's cabinets would cross.
+  const inViewMiddle = new Float64Array(3);
+  const inView = (hit) => {
+    const m = hit.node.world, c = camera.position, center = boundsOf(hit.node.geometry).center;
+    BL.math.mat4.transformPoint(inViewMiddle, m, center[0], center[1], center[2]);
+    return sightClear(c.x, c.y, c.z, inViewMiddle[0], inViewMiddle[1], inViewMiddle[2]);
+  };
   // What the overlay draws at a place (an NPC's line, a player's name, the hunt's marks) shows only where it can be seen:
   // from inside the arena, nothing from outside the hallway and the arena, without a test, and otherwise along an open
   // line from the view (fx's `overlayVisible`, and `characterOccluded` for a line over a character's head).

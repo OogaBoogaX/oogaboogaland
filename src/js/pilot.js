@@ -3515,9 +3515,11 @@
         orbit.target = followTarget;
       } else {
         // No Ooga yet (a scene still arriving): the camera's own target is set there for the possession that follows.
-        freeTarget.x = destination.target.x;
-        freeTarget.y = destination.target.y;
-        freeTarget.z = destination.target.z;
+        // A destination named by its position alone looks where an Ooga standing there would be followed.
+        const target = destination.target;
+        freeTarget.x = target ? target.x : position.x;
+        freeTarget.y = target ? target.y : position.y + (follow ? follow.y : 0);
+        freeTarget.z = target ? target.z : position.z;
         orbit.target = freeTarget;
       }
       orbit.tx = orbit.target.x;

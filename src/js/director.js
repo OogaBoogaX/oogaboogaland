@@ -813,6 +813,7 @@
   });
   showBlockHeight(chain.snapshot);
   if (!params.has("nosim") && params.get("mempool") !== "0") mempool.start();
+  if (params.has("nosim") || params.get("rate") === "0") window.BL.donationRate.stop();
   // Contributor activity belongs to the page, including while the hub is suspended or absent.
   const unsubscribeOogatron = window.BL.oogatronLive.subscribe((event) => {
     if (event.type === "stats") window.BL.contributors.applySnapshot(event.stats);

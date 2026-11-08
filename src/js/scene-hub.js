@@ -11327,7 +11327,12 @@
   const refreshObjectGuides = () => {
     // Model changes also happen during scene construction, before the cache.
     if (objectGuides) {
+      // Between frames (a lazy bed's swap lands from a promise) the NPC ghost tracks wear their painted copies; the
+      // registry holds the real models, or it keeps descriptors for copies npc-ghosts.js releases a moment later.
+      const painted = !!npcGhosts && npcGhosts.stats().painted > 0;
+      if (painted) npcGhosts.restore();
       objectGuides.refresh();
+      if (painted) npcGhosts.paint(0);
       sightGuides.reserve(objectGuides.result, null);
       bananaGuides.reserve(objectGuides.result, null);
     }
