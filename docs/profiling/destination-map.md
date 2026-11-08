@@ -1,4 +1,12 @@
-# Direct Map and optional coaching
+# Destination Map and optional coaching
+
+## Current integration with rock
+
+The chooser now follows upstream's player controls: choosing a view moves the camera while the Ooga stays where it stands. Movement or Escape returns to the Ooga. Hub gorillas keep upstream's guarded travel behavior. The chooser labels these actions “View” and “Go to” respectively; coaching no longer offers a free camera or tells the visitor to retake control. DSB rooms retain the explicit Return outside action.
+
+The merge preserves upstream's separate-body Map fixtures and adapts them to choosing a destination. HUD tracking uses the actual current actor instead of the removed `modeCave` state. Close returns focus to Map, while a successful choice focuses the canvas. The existing accessibility regression now checks Close as well as Escape. Opening Map also cancels a pending DSB click-to-place wallet walk, so it cannot move or place a device behind the dialog; the existing wallet playthrough covers the interruption and fresh click.
+
+The browser results and captures below are historical evidence from the earlier behavior, not validation of this integration. No Factory or stopped checks have been rerun. The integrated browser behavior, physical gamepad, real devices, screen reader and actual zoom still need validation.
 
 ## Controller reconnect follow-up
 
@@ -16,9 +24,9 @@ Validation on head `667e3c0fdc32f4c455dca617671d2696917638e8` plus this fix: bui
 
 ## Feature behavior
 
-Map opens a labelled destination chooser instead of immediately moving through a cycle. It groups Play, Explore and Learn, identifies the current destination and describes each entrance. A driven Ooga or gorilla gets “Go to”; a free camera gets “View.” Scene-owned travel checks still decide whether the action is allowed. A refusal leaves the chooser open with feedback. DSB interiors offer one truthful action, “Return outside to CHORA,” before showing town viewpoints.
+Map opens a labelled destination chooser instead of immediately moving through a cycle. It groups Play, Explore and Learn, identifies the current destination and describes each entrance. An Ooga gets “View”; a driven hub gorilla gets “Go to.” Scene-owned look and travel actions still decide whether the choice is allowed. A refusal leaves the chooser open with feedback. DSB interiors offer one truthful action, “Return outside to CHORA,” before showing town viewpoints.
 
-The optional guide progresses from choosing an Ooga or free exploration, through actual movement, to a successful Map choice. It can be dismissed and replayed from Controls, and remembers completion locally. It coordinates with Tess so two guides do not compete. It awards no tickets, loot or artificial progress and does not bypass Arcade cabinets, ownership or entrance rules.
+The optional guide progresses from moving the controlled Ooga to a successful Map choice. It can be dismissed and replayed from Controls, and remembers completion locally. It coordinates with Tess so two guides do not compete. It awards no tickets, loot or artificial progress and does not bypass Arcade cabinets, ownership or entrance rules.
 
 ## Controls and layout
 
@@ -26,7 +34,7 @@ Keyboard focus starts on Close; Tab, Enter and Space use native dialog controls.
 
 [Desktop capture](destination-map-desktop.png) · [Phone-emulation capture](destination-map-phone.png) · [Raw layout and interaction observations](destination-map.json).
 
-## Before and after
+## Historical measurements before the player-control integration
 
 Baseline `rock`: `e6d69aa4d9d93f1c90bf0a28c8899189d3f160a0`. Candidate runtime: `20daa63c` plus layout `eca32c74`. Tests use native ARM Chrome 156 on macOS 27.2 / M1 Pro. Counts below are button activations from the Pile, not user-study completion times; phone scrolling may add gestures.
 

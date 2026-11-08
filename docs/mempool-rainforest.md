@@ -123,7 +123,7 @@ __ooga.poolIsland.preview.block()     // a block: the bolt and the cube
 __ooga.poolIsland.preview.sleep("portlandhodl", true)   // put an Ooga to sleep: its gorilla walks to bed; false wakes it
 ```
 
-`?debug=1&view=mempool` arrives in the chamber. The hub/map button also has a MEMPOOL destination for this room. Add `&poolblock=1` to trigger one cube sequence per island visit, without changing the feed or rain; turn from the first painting toward the central shaft to watch it gather, hang and fall. With the flag on, **P** triggers another block preview (bolt and cube), in detached, Ooga or gorilla mode; it takes the place of P's pile shortcut. Held keys and browser shortcuts do not retrigger it. The flag has no effect without debug.
+`?debug=1&view=mempool` arrives in the chamber. The hub/map button also has a MEMPOOL destination for this room. Add `&poolblock=1` to trigger one cube sequence per island visit, without changing the feed or rain; turn from the first painting toward the central shaft to watch it gather, hang and fall. With the flag on, **P** triggers another block preview (bolt and cube), whether driving an Ooga or a gorilla; it takes the place of P's pile shortcut. Held keys and browser shortcuts do not retrigger it. The flag has no effect without debug.
 
 ## Probe loader
 

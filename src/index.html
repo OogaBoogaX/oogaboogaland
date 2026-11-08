@@ -426,7 +426,6 @@
             <button type="button" class="foot-button foot-primary" data-action="account-rejoin" id="account-rejoin" hidden>Play here</button>
             <button type="button" class="foot-button" data-action="account-voice" id="account-voice" aria-pressed="false" hidden>Join voice</button>
             <button type="button" class="foot-button" data-action="account-voice-leave" id="account-voice-leave" hidden>Leave voice</button>
-            <button type="button" class="foot-button foot-thump" data-action="account-thump" id="account-thump" hidden title="Thump your mallet in support instead of unmuting" aria-label="Thump: support in voice without unmuting">Thump</button>
             <button type="button" class="link" data-action="account-logout" id="account-logout" hidden>Sign out</button>
           </span>
         </div>
@@ -449,6 +448,7 @@
           </div>
         </details>
         <div class="players slab" id="players-list"></div>
+        <div class="reactions" id="players-reactions" hidden></div>
         <p class="help players-status" id="players-status" hidden></p>
         <div data-account-copy="players"></div>
       </section>
@@ -474,8 +474,8 @@
               <div><dt>Sats donated</dt><dd id="stat-sats">0</dd></div>
             </dl>
             <div class="banana-rates" role="group" aria-label="Current Bitcoin and banana exchange rates">
+              <p class="banana-rate"><svg class="banana-rate-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" role="img" aria-label="Banana"><use href="#banana-panel-glyph" /></svg>1 = $1 <span id="banana-exchange">— sats</span></p>
               <p class="banana-rate" id="banana-btc-rate" data-tone="wait"><span id="banana-btc-sats">100,000,000</span> sats = <svg class="banana-rate-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" role="img" aria-label="bananas"><use href="#banana-panel-glyph" /></svg><span id="banana-btc-price">—</span></p>
-              <p class="banana-rate"><svg class="banana-rate-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" role="img" aria-label="Banana"><use href="#banana-panel-glyph" /></svg>1 <span id="banana-exchange">— sats</span></p>
             </div>
           </section>
           <section class="banana-board" aria-labelledby="banana-board-title">
@@ -519,11 +519,11 @@
         </header>
         <div class="pm-switch" id="pm-switch" role="group" aria-label="Which conversation" hidden>
           <button type="button" class="pm-switch-button" data-pm-view="island" aria-pressed="true">Island</button>
-          <button type="button" class="pm-switch-button" data-pm-view="private" aria-pressed="false"><svg class="pm-lock" viewBox="0 0 7 8" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d="M2 0h3v1H2zM1 1h1v2H1zM5 1h1v2H5zM0 3h7v5H0z" /><path fill="#2b1b10" d="M3 4h1v2H3z" /></svg><span id="pm-switch-name">Private</span><span class="tab-count pm-count" id="pm-count" hidden></span></button>
+          <button type="button" class="pm-switch-button" data-pm-view="private" aria-pressed="false"><svg class="pm-lock" viewBox="0 0 7 9" shape-rendering="crispEdges" aria-hidden="true"><path class="pm-shackle" fill="currentColor" d="M2 0h3v1H2zM1 1h1v1H1zM5 1h1v3H5z" /><path fill="currentColor" d="M0 4h7v5H0z" /><path fill="#2b1b10" d="M3 5h1v2H3z" /></svg><span id="pm-switch-name">Private</span><span class="tab-count pm-count" id="pm-count" hidden></span></button>
         </div>
         <section class="pm" id="pm" aria-labelledby="pm-title">
           <div class="pm-head">
-            <p class="pm-title"><svg class="pm-lock" viewBox="0 0 7 8" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d="M2 0h3v1H2zM1 1h1v2H1zM5 1h1v2H5zM0 3h7v5H0z" /><path fill="#2b1b10" d="M3 4h1v2H3z" /></svg><span id="pm-title">Private</span></p>
+            <p class="pm-title"><svg class="pm-lock" viewBox="0 0 7 9" shape-rendering="crispEdges" aria-hidden="true"><path class="pm-shackle" fill="currentColor" d="M2 0h3v1H2zM1 1h1v1H1zM5 1h1v3H5z" /><path fill="currentColor" d="M0 4h7v5H0z" /><path fill="#2b1b10" d="M3 5h1v2H3z" /></svg><span id="pm-title">Private</span></p>
             <button type="button" class="pm-button pm-quiet pm-end" id="pm-end" hidden>End</button>
           </div>
           <p class="help pm-note" id="pm-note" role="status" aria-live="polite"></p>
@@ -576,6 +576,7 @@
           </span>
           <button type="submit" class="chat-send" id="chat-send" disabled>Send</button>
         </form>
+        <div class="reactions" id="chat-reactions" hidden></div>
         <div data-account-copy="chat"></div>
       </section>
       </div>
@@ -643,11 +644,6 @@
         <span class="detached-destination-name" id="detached-destination-name" aria-live="polite"></span>
         <span id="destination-hud-label" hidden>Map. Choose a destination</span>
         <span class="destination-map-label" aria-hidden="true">Map</span>
-      </button>
-      <button type="button" class="mode-hud" id="own-ooga-hud" data-action="mode-retake" data-selected="true"
-        aria-label="Return to your last character" title="Return to your last character" hidden>
-        <canvas class="mode-face-icon" id="own-ooga-face-icon" width="48" height="48" aria-hidden="true"></canvas>
-        <span class="mode-health" id="own-ooga-health" role="progressbar" aria-label="Last character's health" aria-valuemin="0" aria-valuemax="25" aria-valuenow="25" hidden><span id="own-ooga-health-fill"></span></span>
       </button>
       <button type="button" class="mode-hud" id="mode-hud" data-action="mode-toggle" data-selected="false" data-shooter="false"
         aria-label="Character controls" title="Character controls" hidden>
@@ -1729,7 +1725,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
         <button type="button" class="chalk-close" id="chalk-close" aria-label="Leave chalkboard">&times;</button>
       </div>
       <div class="chalk-frame" id="chalk-frame">
-        <canvas id="chalk-canvas" width="800" height="500" aria-label="Chalkboard drawing surface"></canvas>
+        <canvas id="chalk-canvas" width="1200" height="750" aria-label="Chalkboard drawing surface"></canvas>
         <div class="chalk-pointer" id="chalk-pointer" aria-hidden="true"><span class="chalk-held"></span></div>
         <div class="chalk-caret" id="chalk-caret" aria-hidden="true" hidden></div>
         <textarea class="chalk-type-input" id="chalk-type-input" aria-label="Type on chalkboard" autocomplete="off" autocapitalize="off" spellcheck="false" tabindex="-1"></textarea>
@@ -1841,13 +1837,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
     </section>
     <canvas class="ghost-minimap" id="ghost-minimap" aria-hidden="true" hidden></canvas>
     <div class="ghost-spectate" id="ghost-spectate" role="group" aria-label="Watch while you're down" hidden>
-      <span class="ghost-spectate-head">You're down · watch from</span>
-      <div class="ghost-spectate-modes">
-        <button type="button" data-spec="grave" aria-pressed="true">My view</button>
-        <button type="button" data-spec="free" aria-pressed="false">Free camera</button>
-        <button type="button" data-spec="players" aria-pressed="false">Players</button>
-      </div>
-      <div class="ghost-spectate-watch" id="ghost-spectate-watch" hidden>
+      <span class="ghost-spectate-head">You're down · watching</span>
+      <div class="ghost-spectate-watch" id="ghost-spectate-watch">
         <span class="ghost-spectate-name" id="ghost-spectate-name"></span>
         <button type="button" class="ghost-spectate-next" id="ghost-spectate-next" aria-label="Next player">Next ▶</button>
       </div>
@@ -1977,6 +1968,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/zone-map.js"></script>
   <script src="js/hud.js"></script>
   <script src="js/chat-policy.js"></script>
+  <script src="js/emoji-data.js"></script>
+  <script src="js/reaction-policy.js"></script>
   <script src="js/voice-blend.js"></script>
   <script src="js/hockey-wire.js"></script>
   <script src="js/arcade-cabinets.js"></script>
@@ -1990,7 +1983,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/one-time-pad.js"></script>
   <script src="js/private-chat.js"></script>
   <script src="js/players.js"></script>
-  <script src="js/thump.js"></script>
+  <script src="js/reactions.js"></script>
   <script src="js/fx.js"></script>
   <script src="js/camera-cover.js"></script>
   <script src="js/crew.js"></script>

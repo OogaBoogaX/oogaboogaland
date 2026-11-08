@@ -70,12 +70,11 @@
   // come down on them; how long each takes to fade, how big round the Ooga, and the colours.
   const HEAL_GLOW_MS = 1800, GIFT_GLOW_MS = 2600, GLOW_SIZE = 1.9, HEAL_GLOW = [255, 150, 40], GIFT_GLOW = [180, 100, 255];
   const GRAVE_RISE_MS = 700, GRAVE_VIEW_BACK = 3.4, GRAVE_VIEW_UP = 1.5, GRAVE_PAN = 2.4;
-  // How fast a player who is down turns their view round their grave (radians a second at full tilt).
+  // How fast a player who is down swings their view round the hunter they follow (radians a second at full tilt).
   const GRAVE_TURN = 1.8;
-  // Watching while down (the spectator menu): the free camera's pace (m/s, twice that running), how fast it tilts, how
-  // far it stands off its point and how far from the middle that point may go; riding behind a hunter still standing,
-  // how far back and up the view stands and the height on them it looks at.
-  const FREE_SPEED = 9, FREE_TILT = 1.2, FREE_DIST = 9, FREE_R = 30, WATCH_BACK = 4.6, WATCH_UP = 2.4, WATCH_LOOK = 1.4;
+  // Watching while down: riding behind a hunter still standing, how far back and up the view stands and the height on
+  // them it looks at.
+  const WATCH_BACK = 4.6, WATCH_UP = 2.4, WATCH_LOOK = 1.4;
   // The elixirs' orange: their glow, the light round one taken and round a player brought back.
   const ELIXIR_GLOW = [255, 140, 30];
   // The lightning drop over the pile: how high over the pile's top it spins and how fast; each bolt it calls down, how
@@ -199,7 +198,7 @@
     const targetNodes = [], target = (node, owner) => { hub.addTarget(node, owner); targetNodes.push(node); };
     const audio = BL.ghostAudio.create(), hud = BL.ghostHud.create({ coarse: hub.coarse, onMusic: () => audio.toggleMusic(), onSkip: () => audio.skip(),
       onReady: () => readyUp(), onDecline: () => decline(), onLobby: hub.lobbyOpen,
-      onSpectate: (mode) => watchFrom(mode), onSpectateNext: () => { specId = nextStanding(specId); } });
+      onSpectateNext: () => { if (viewHeld) { specId = nextStanding(specId); downYaw = 0; } } });
     // A remote shot can arrive before the first update after the deferred hunt loads.
     audio.level(hub.hearing ? hub.hearing() : 1);
     // Every mesh the hunt has shown, kept on the GPU for the visit (`liveGeometry`): frames swap in and out.
@@ -2271,21 +2270,19 @@
       else if (hidMine) { hidMine.root.visible = true; hidMine = null; }
       let slot = -1;
       if (mine) for (let i = 0; i < MAX_GRAVES; i++) if (graveFor[i] === me.id) slot = i;
-      // Each time they go down they start before their own grave, the spectator menu offering the other views.
-      if (slot >= 0 && !viewHeld) { viewHeld = true; downYaw = 0; specMode = "grave"; specId = 0; hub.holdView(true); }
+      // Each time they go down they follow a hunter still standing, the first in the hunt's order.
+      if (slot >= 0 && !viewHeld) { viewHeld = true; downYaw = 0; specId = nextStanding(0); hub.holdView(true); }
       else if (slot < 0 && viewHeld) { viewHeld = false; hub.holdView(false); }
       if (slot >= 0) { watch(slot, dt); if (groundView) groundView.push(); }
-      hud.spectate(slot >= 0 ? specMode : null, specMode !== "players" ? "" : specId ? nameOf(specId) : "Nobody left standing");
+      hud.spectate(slot >= 0, specId ? nameOf(specId) : "Nobody left standing", !!specId);
     };
 
     // ---------- watching while down ----------
-    // The spectator menu's three views: "grave", before this player's own grave, the turn keys (or a stick) swinging
-    // it round to watch the hunt on every side; "free", moved about the island by hand as with no Ooga picked (W A S D
-    // or the move stick, Q E or the arrows to turn, the look stick or the arrows to tilt); "players", riding behind
-    // each hunter still standing in turn, on to the next whenever the one watched goes down (before the grave again
-    // while nobody is left).
-    let specMode = "grave", specId = 0;
-    const FREE = { x: 0, z: 0, yaw: 0, pitch: 0.5 };
+    // A player who is down only follows the others: riding behind a hunter still standing, the turn keys (or a stick)
+    // swinging the view round them and Next moving on to the next, and on by itself whenever the one watched goes down
+    // or leaves. Nothing moves the view about on its own: with nobody left standing it holds still before this
+    // player's own grave until they are back or the hunt ends.
+    let specId = 0;
     // A hunter this page can watch: someone else in the hunt, standing, and still driving an Ooga in the arena, as the
     // host counts them present (`presentRemote`); one who lets go of theirs is passed over as one who goes down is.
     const watchable = (id) => {
@@ -2305,18 +2302,6 @@
       }
       return 0;
     };
-    // A view picked from the menu: the free camera starts where the view stands now; "players" picked again moves on.
-    const watchFrom = (mode) => {
-      if (!viewHeld) return;
-      if (mode === "players") specId = specMode === "players" ? nextStanding(specId) : nextStanding(0);
-      if (mode === "free" && specMode !== "free") {
-        const p = camera.position, tg = camera.target;
-        FREE.x = tg.x; FREE.z = tg.z;
-        FREE.yaw = Math.atan2(p.x - tg.x, p.z - tg.z);
-        FREE.pitch = clamp(Math.atan2(p.y - tg.y, Math.hypot(p.x - tg.x, p.z - tg.z)), 0.15, 1.3);
-      }
-      specMode = mode;
-    };
     // Eases the view toward standing at (ex, ey, ez) looking at (lx, ly, lz).
     const ease3 = (ex, ey, ez, lx, ly, lz, k) => {
       const p = camera.position, tg = camera.target;
@@ -2324,32 +2309,19 @@
       tg.x += (lx - tg.x) * k; tg.y += (ly - tg.y) * k; tg.z += (lz - tg.z) * k;
     };
     const watch = (slot, dt) => {
-      const a = hub.heldAxes(), k = 1 - Math.exp(-GRAVE_PAN * dt);
-      if (specMode === "free") {
-        // Forward is from the view to its point, right is forward turned a quarter clockwise seen from above.
-        FREE.yaw += clamp(a.orbitYaw + a.yaw, -1, 1) * GRAVE_TURN * dt;
-        FREE.pitch = clamp(FREE.pitch + a.pitch * FREE_TILT * dt, 0.15, 1.3);
-        const step = FREE_SPEED * (a.sprint ? 2 : 1) * dt, fx = -Math.sin(FREE.yaw), fz = -Math.cos(FREE.yaw);
-        FREE.x += (fx * a.y - fz * a.x) * step;
-        FREE.z += (fz * a.y + fx * a.x) * step;
-        const r = Math.hypot(FREE.x, FREE.z);
-        if (r > FREE_R) { FREE.x *= FREE_R / r; FREE.z *= FREE_R / r; }
-        const ty = Math.max(0, island.surfaceAt(FREE.x, FREE.z)) + 1, flat = Math.cos(FREE.pitch) * FREE_DIST;
-        ease3(FREE.x + Math.sin(FREE.yaw) * flat, ty + Math.sin(FREE.pitch) * FREE_DIST, FREE.z + Math.cos(FREE.yaw) * flat, FREE.x, ty, FREE.z, 1 - Math.exp(-GRAVE_PAN * 3 * dt));
+      const k = 1 - Math.exp(-GRAVE_PAN * dt);
+      if (!watchable(specId)) { specId = nextStanding(specId); downYaw = 0; }
+      const rec = specId ? net.remotes.get(specId) : null;
+      if (rec) {
+        // Behind them as their own view stands, the turn keys swinging it round them.
+        const a = hub.heldAxes();
+        downYaw += clamp(a.orbitYaw + a.yaw - a.x, -1, 1) * GRAVE_TURN * dt;
+        const yaw = rec.yaw + Math.PI + downYaw, p = local(rec);
+        ease3(p.x + Math.sin(yaw) * WATCH_BACK, p.y + WATCH_UP, p.z + Math.cos(yaw) * WATCH_BACK, p.x, p.y + WATCH_LOOK, p.z, k);
         return;
       }
-      downYaw += clamp(a.orbitYaw + a.yaw - a.x, -1, 1) * GRAVE_TURN * dt;
-      if (specMode === "players") {
-        if (!watchable(specId)) specId = nextStanding(specId);
-        const rec = specId ? net.remotes.get(specId) : null;
-        if (rec) {
-          // Behind them as their own view stands, the turn keys swinging it round them.
-          const yaw = rec.yaw + Math.PI + downYaw, p = local(rec);
-          ease3(p.x + Math.sin(yaw) * WATCH_BACK, p.y + WATCH_UP, p.z + Math.cos(yaw) * WATCH_BACK, p.x, p.y + WATCH_LOOK, p.z, k);
-          return;
-        }
-      }
-      const o = slot * 3, yaw = graveNodes[slot].rotation.y + downYaw;
+      // Nobody to follow: still, before this player's own grave.
+      const o = slot * 3, yaw = graveNodes[slot].rotation.y;
       ease3(graveAt[o] + Math.sin(yaw) * GRAVE_VIEW_BACK, graveAt[o + 1] + GRAVE_VIEW_UP, graveAt[o + 2] + Math.cos(yaw) * GRAVE_VIEW_BACK,
         graveAt[o], graveAt[o + 1] + MODELS.GRAVE_TOP * 0.8, graveAt[o + 2], k);
     };

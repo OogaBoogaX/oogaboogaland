@@ -22,20 +22,19 @@
 // Private conversations (#188): who invited whom, who talks to whom and whom each blocked live in the attachments
 // (`pm`), so a woken room keeps them, and each account's blocks and rate limits outlive its reconnects while the room is
 // awake (`pmAccounts`); the frames pass straight through and are never kept.
-// Thumps: a voice participant's reaction, relayed to its voice place alone (`thumpPeers`, with `thumpAudible` marking the
-// copies whose recipient would hear it) within a per-account bucket; nothing is kept, timed or answered, and the
-// attachment is untouched.
+// Reactions: an emoji goes to the sender's zone and is never kept; the raised hand lives on the record and its
+// attachment, so a woken room still shows it, and goes to everyone on a change. One bucket a record limits both.
 
 import { DurableObject } from "cloudflare:workers";
 import {
   CABINETS, hockey, CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
   NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
-  DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, GHOST_HZ, GHOST_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, THUMP_HZ, THUMP_BURST,
+  DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, GHOST_HZ, GHOST_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, REACT_FEATURE, REACT_HZ, REACT_BURST,
   GHOST_MAGIC, GHOST_FRAME_MAX, GHOST_FRAME_HZ, GHOST_FRAME_BURST, inGhostArena, ghostCandidate, watchesGhost,
   CHALK, CHALK_HZ, CHALK_BURST, CHALK_IDLE_MS, CHALK_SAVE_MS, CHALK_TELL_MS, CHALK_FEATURE,
   WALLET_CAP, WALLET_HZ, WALLET_BURST,
   PM_FEATURE, PM_HZ, PM_BURST, PM_INVITE_HZ, PM_INVITE_BURST, PM_CONTROL_HZ, PM_CONTROL_BURST, PM_INVITES, PM_BLOCKS, PM_ACCOUNT_KEEP,
-  chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers, thumpPeers, thumpAudible, thumpBucketFor,
+  chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
   BLEND, BLEND_HZ,
 } from "./protocol.js";
 import { sha256Hex } from "./crypto.js";
@@ -76,7 +75,6 @@ export class Room extends DurableObject {
     this.chatAccepted = new Map();
     this.chatBuckets = new Map();
     this.pmAccounts = new Map();
-    this.thumpBuckets = new Map();
     this.doorQueue = [];
     this.doorActive = null;
     this.doorPasses = new Map();
@@ -98,7 +96,8 @@ export class Room extends DurableObject {
       this.studio.invited = this.studio.mode === "qa" ? [...new Set((Array.isArray(this.studio.invited) ? this.studio.invited : []).filter(seated))].slice(0, MAX_PLAYERS) : [];
       this.cleanupJobs = (await ctx.storage.get("voiceCleanup")) || [];
       const chalk = await ctx.storage.get("chalk"), marks = chalk && CHALK.restore(chalk.marks);
-      if (marks) this.chalk = CHALK.board(marks);
+      // A board stored before the board grew (no `v`) is widened as it loads; the next save stores it widened.
+      if (marks) this.chalk = CHALK.board(chalk.v === CHALK.VERSION ? marks : CHALK.widen(marks));
       this.chalkStored = chalk !== undefined;
       // Older versions stored the original drawing too; it can always be rebuilt locally.
       if (this.chalkStored && CHALK.preset(this.chalk) === "original") {
@@ -143,7 +142,7 @@ export class Room extends DurableObject {
   }
 
   record(ws, a) {
-    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hp: 100, ko: false, g: null, j: 0, w: 0, v: null, va: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], blendTo: null, blendK: 0, pm: { inv: [], open: 0, blocked: [] }, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, ghostBucket: { tokens: GHOST_BURST, at: Date.now() }, ghostFrameBucket: { tokens: GHOST_FRAME_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: Date.now() };
+    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hand: false, handTone: 0, hp: 100, ko: false, g: null, j: 0, w: 0, v: null, va: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], blendTo: null, blendK: 0, pm: { inv: [], open: 0, blocked: [] }, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, ghostBucket: { tokens: GHOST_BURST, at: Date.now() }, ghostFrameBucket: { tokens: GHOST_FRAME_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: Date.now() };
   }
 
   // Retain account debt across socket records, only while awake. Reclaim fully replenished
@@ -161,11 +160,11 @@ export class Room extends DurableObject {
   }
 
   attachment(p) {
-    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm };
+    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hand: p.hand, handTone: p.handTone, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm };
   }
 
   view(p) {
-    return { id: p.id, login: p.login, display: p.display, body: p.body, zone: p.zone, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: !!p.voice.track, muted: p.muted, hp: p.hp, ko: p.ko, blendTo: p.blendTo, blendK: p.blendK };
+    return { id: p.id, login: p.login, display: p.display, body: p.body, zone: p.zone, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: !!p.voice.track, muted: p.muted, hand: p.hand, handTone: p.handTone, hp: p.hp, ko: p.ko, blendTo: p.blendTo, blendK: p.blendK };
   }
 
   send(ws, msg) {
@@ -362,7 +361,7 @@ export class Room extends DurableObject {
 
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, features: [CABINETS.FEATURE, "door", CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4"] });
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, features: [CABINETS.FEATURE, "door", CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", REACT_FEATURE] });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
     this.send(server, { t: "chat-history", messages: this.chat.list() });
     this.sendCabinets(server);
@@ -489,9 +488,23 @@ export class Room extends DurableObject {
     } else if (msg.t === "pm") {
       // Saves each attachment it changes itself.
       return this.privateMessage(p, msg);
-    } else if (msg.t === "thump") {
-      // Nothing in the attachment changes.
-      return this.thump(p);
+    } else if (msg.t === "react") {
+      // A reaction over a driven body, for the players in its zone to draw; nothing is kept.
+      if (!p.body || !this.reactToken(p)) return;
+      const out = JSON.stringify({ t: "react", id: p.id, e: msg.e });
+      for (const other of this.players.values()) if (other !== p && other.zone === p.zone) this.send(other.ws, out);
+      return;
+    } else if (msg.t === "hand") {
+      if (msg.on === p.hand && (!msg.on || msg.tone === p.handTone)) return;
+      // Over the bucket the change is refused, and the sender hears the hand the room still holds, so its page never
+      // shows one nobody else sees.
+      if (!this.reactToken(p)) {
+        this.send(p.ws, { t: "hand", id: p.id, on: p.hand, tone: p.handTone });
+        return;
+      }
+      p.hand = msg.on;
+      p.handTone = msg.tone;
+      this.broadcast({ t: "hand", id: p.id, on: p.hand, tone: p.handTone }, p.ws);
     } else if (msg.t === "door") {
       return this.doorMessage(p, msg);
     } else if (msg.t === "chalk") {
@@ -729,7 +742,8 @@ export class Room extends DurableObject {
     // The rest are held to their own rate: past it, an accept is refused and the others do nothing.
     if (!takeToken(account.control, PM_CONTROL_HZ, now, PM_CONTROL_BURST)) return msg.op === "accept" ? tell(p, { op: "refused", to, reason: "rate" }) : undefined;
     if (msg.op === "accept") {
-      if (!q || !q.pm.inv.includes(p.id)) return tell(p, { op: "refused", to, reason: "withdrawn" });
+      if (!q) return tell(p, { op: "refused", to, reason: "offline" });
+      if (!q.pm.inv.includes(p.id)) return tell(p, { op: "refused", to, reason: "withdrawn" });
       if (p.pm.open || q.pm.open) return tell(p, { op: "refused", to, reason: "busy" });
       return this.privateOpen(q, p);
     }
@@ -794,30 +808,24 @@ export class Room extends DurableObject {
     this.saveAttachment(p);
   }
 
-  // A player leaving ends their conversation and every invite to or from them.
+  // A player leaving ends their conversation and every invite to or from them, each told it was a leave, not a no.
   privateLeave(p) {
     for (const q of this.players.values()) {
       if (q === p) continue;
       let changed = false;
       if (q.pm.open === p.id) { q.pm.open = 0; changed = true; this.send(q.ws, { t: "pm", op: "closed", from: p.id, reason: "left" }); }
-      if (q.pm.inv.includes(p.id)) { q.pm.inv = q.pm.inv.filter((id) => id !== p.id); changed = true; this.send(q.ws, { t: "pm", op: "declined", from: p.id }); }
-      if (p.pm.inv.includes(q.id)) this.send(q.ws, { t: "pm", op: "withdrawn", from: p.id });
+      if (q.pm.inv.includes(p.id)) { q.pm.inv = q.pm.inv.filter((id) => id !== p.id); changed = true; this.send(q.ws, { t: "pm", op: "declined", from: p.id, reason: "left" }); }
+      if (p.pm.inv.includes(q.id)) this.send(q.ws, { t: "pm", op: "withdrawn", from: p.id, reason: "left" });
       if (changed) this.saveAttachment(q);
     }
   }
 
   saveAttachment(p) { p.ws.serializeAttachment(this.attachment(p)); }
 
-  // A thump from a voice participant goes to everyone in voice in its place as one tiny frame, never back to the sender,
-  // marked `a: 1` for those who would hear the sender speak; over the bucket, or with nobody to see it, it is dropped
-  // without a word.
-  thump(p) {
-    const peers = thumpPeers(this.players.values(), p, this.studio);
-    if (!peers.length) return;
-    if (!p.thumpBucket) p.thumpBucket = thumpBucketFor(this.thumpBuckets, p.id, p.seenAt, this.players);
-    if (!p.thumpBucket || !takeToken(p.thumpBucket, THUMP_HZ, p.seenAt, THUMP_BURST)) return;
-    const seen = `{"t":"thump","id":${p.id}}`, heard = `{"t":"thump","id":${p.id},"a":1}`;
-    for (const q of peers) this.send(q.ws, thumpAudible(q, p, this.studio) ? heard : seen);
+  // One bucket a record for reactions and the hand, made full on first use.
+  reactToken(p) {
+    if (!p.reactBucket) p.reactBucket = { tokens: REACT_BURST, at: p.seenAt };
+    return takeToken(p.reactBucket, REACT_HZ, p.seenAt, REACT_BURST);
   }
 
   // Also after any page's `hub` flag changes: the host sends frames only while someone follows.
@@ -1158,7 +1166,7 @@ export class Room extends DurableObject {
       this.chalkStored = false;
     } else {
       // An empty marks array is the blank marker; absence means the original board.
-      this.background(this.ctx.storage.put("chalk", { marks: this.chalk.marks }));
+      this.background(this.ctx.storage.put("chalk", { marks: this.chalk.marks, v: CHALK.VERSION }));
       this.chalkStored = true;
     }
   }

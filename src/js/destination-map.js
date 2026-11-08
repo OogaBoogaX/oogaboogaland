@@ -1,4 +1,4 @@
-// Direct destinations reuse each scene's own safe travel action. The page owns the dialog;
+// Named destinations reuse each scene's own look or guarded travel action. The page owns the dialog;
 // a visit lends it a provider, which is forgotten before the visit leaves.
 (() => {
   "use strict";
@@ -30,17 +30,18 @@
     const remember = () => { seen = true; try { localStorage.setItem(KEY, "1"); } catch { /* No persistence. */ } };
     const canOpen = () => !!provider && ready() && current()?.navigationReady !== false && provider.available();
     // A successful choice hands the keys back to the world, so Space acts there; closing returns to Map.
-    const finish = (travelled = false) => {
+    const finish = (chosen = false) => {
       if (!owner) return;
       const previous = owner; owner = null;
       previous.controlsHelpHold?.(false);
       BL.controls.resetAll(); BL.gamepad.hold(false);
       button.setAttribute("aria-expanded", "false");
-      if (travelled) $("scene").focus({ preventScroll: true });
+      if (chosen) $("scene").focus({ preventScroll: true });
       else if (!button.hidden) button.focus({ preventScroll: true });
       rows = []; list.replaceChildren(); status.textContent = "";
     };
-    const close = (travelled = false) => { if (dialog.open) dialog.close(); finish(travelled); };
+    const close = (chosen = false) => { if (dialog.open) dialog.close(); finish(chosen); };
+    const closeFromButton = () => close();
     const onClose = () => { if (!dialog.open) finish(); };
     const complete = () => {
       if (coaching !== 2) return;
@@ -49,10 +50,10 @@
     };
     const choose = name => {
       if (!provider || !ready() || current() !== owner) { close(); return; }
-      if (!canOpen()) { status.textContent = "Travel is unavailable right now. Close the map to continue."; return; }
+      if (!canOpen()) { status.textContent = "That destination is unavailable right now. Close the map to continue."; return; }
       const result = provider.travel(name);
       if (result === false || typeof result === "string") {
-        status.textContent = typeof result === "string" ? result : "Travel is unavailable right now. Close the map to continue.";
+        status.textContent = typeof result === "string" ? result : "That destination is unavailable right now. Close the map to continue.";
         return;
       }
       complete(); close(true);
@@ -63,8 +64,8 @@
       for (const key of down) swallowed.add(key);
       BL.controls.resetAll(); owner.controlsHelpHold?.(true); BL.gamepad.hold(true, true);
       if (document.pointerLockElement) document.exitPointerLock();
-      const controlled = provider.controlled(), selected = provider.selected();
-      title.textContent = controlled ? "Where shall we go?" : "Choose a viewpoint";
+      const travels = provider.travels(), selected = provider.selected();
+      title.textContent = travels ? "Where shall we go?" : "Choose a viewpoint";
       list.replaceChildren(); rows = [];
       const groups = new Map();
       for (const name of provider.names()) {
@@ -77,9 +78,9 @@
         const entry = document.createElement("button"), label = document.createElement("strong"), description = document.createElement("span");
         entry.type = "button"; entry.dataset.destination = name;
         const outside = current().id === "dsb" && name === "outside";
-        label.textContent = outside ? provider.label(name) : `${controlled ? "Go to" : "View"} ${provider.label(name)}`;
-        description.textContent = outside ? "Leave this room to choose another town viewpoint." : place ? place[1] : "Look around here. Use the character portrait to resume exploring.";
-        if (name === selected) { entry.setAttribute("aria-current", "location"); description.textContent += " · Current destination"; }
+        label.textContent = outside ? provider.label(name) : `${travels ? "Go to" : "View"} ${provider.label(name)}`;
+        description.textContent = outside ? "Leave this room to choose another town viewpoint." : place ? place[1] : "Look around here. Move or press Escape to return to your Ooga.";
+        if (name === selected) { entry.setAttribute("aria-current", "location"); description.textContent += travels ? " · Current destination" : " · Selected view"; }
         entry.append(label, description); entry.addEventListener("click", () => choose(name));
         section.append(entry);
       }
@@ -118,8 +119,8 @@
       if (!canOpen() || current()?.id !== "hub") return;
       current().beginCoaching?.();
       coaching = 0; seen = false; anchor = null;
-      coachText.textContent = "Select an Ooga to take control, or explore with the free camera.";
-      start.textContent = "Explore freely"; coach.hidden = false; skip.hidden = false; skip.textContent = "Skip guide";
+      coachText.textContent = "Move your character to explore, then use Map to choose a place.";
+      start.textContent = "Start moving"; coach.hidden = false; skip.hidden = false; skip.textContent = "Skip guide";
     };
     const coachStart = () => {
       if (coaching < 0) { begin(); return; }
@@ -129,7 +130,7 @@
       else dismissCoach();
     };
     const replay = () => { $("controls-help-close").click(); begin(); };
-    closeButton.addEventListener("click", close); dialog.addEventListener("cancel", onCancel);
+    closeButton.addEventListener("click", closeFromButton); dialog.addEventListener("cancel", onCancel);
     dialog.addEventListener("close", onClose); dialog.addEventListener("click", onBackdrop);
     window.addEventListener("keydown", onDown, true); window.addEventListener("keyup", onUp, true); window.addEventListener("blur", onBlur);
     start.addEventListener("click", coachStart); skip.addEventListener("click", dismissCoach); learn.addEventListener("click", replay);
@@ -173,13 +174,15 @@
           const words = BL.gamepad.state.connected ? "Use the left stick to move and the right stick to look. Menu opens Map." : touch ? "Use the left stick to move and the right stick to look." : "Use W A S D or the arrows to move. Drag to look around.";
           if (coachText.textContent !== words) coachText.textContent = words;
           if ((point.x - x) ** 2 + (point.z - z) ** 2 >= 1) {
-            coaching = 2; coachText.textContent = "Choose a place on the Map. At its entrance, use the action shown on screen."; start.textContent = "Open Map";
+            coaching = 2; coachText.textContent = provider.travels()
+              ? "Choose a destination on the Map. At its entrance, use the action shown on screen."
+              : "Choose a view on the Map. Move or press Escape to return to your Ooga."; start.textContent = "Open Map";
           }
         }
       },
       dispose() {
         close(); provider = anchor = null; coach.hidden = true;
-        closeButton.removeEventListener("click", close); dialog.removeEventListener("cancel", onCancel);
+        closeButton.removeEventListener("click", closeFromButton); dialog.removeEventListener("cancel", onCancel);
         dialog.removeEventListener("close", onClose); dialog.removeEventListener("click", onBackdrop);
         window.removeEventListener("keydown", onDown, true); window.removeEventListener("keyup", onUp, true); window.removeEventListener("blur", onBlur);
         start.removeEventListener("click", coachStart); skip.removeEventListener("click", dismissCoach); learn.removeEventListener("click", replay);

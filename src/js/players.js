@@ -13,14 +13,14 @@
 // changed it does nothing, and the next event redraws the rows.
 // Cost: rows are placed only when someone joins, leaves or changes zone, body or name, and only while the panel shows;
 // distances and crosshairs are rewritten as positions arrive (`subscribeMoves`, a few times a second at most), and only
-// what changed. No timers. An Ooga thump (thump.js) shows a mallet beside its thumper's voice mark for a moment (`pulse`): every
-// row holds that mark's cell from the start, shown and hidden by visibility, so it never moves a name or a control, and its
-// animation's end hides it again; `clearPulses` hides them all at once. Exports setDoors, pulse, clearPulses and stats.
+// what changed. No timers. Exports setDoors and stats.
 // The tab always holds the visitor's hearing range (#380, `BL.voice.setRadius`), ready before joining: the slider's last
 // stop is no limit, and a distance at or past the range is dimmed, since that voice is muted for them. A voice in
 // another place of the group, which shows no distance, is silenced by a range without a mark here. The slider is offered
 // before any audio is active; Web Audio supplies quieting and boost once the listener joins.
 // Hearing range and join-reading live together under the panel's Advanced settings disclosure.
+// A raised hand (reactions.js, `rec.hand` and `net.state.hand`) shows after the player's name, in their skin tone, and
+// each reaction they send pops up there, over the hand.
 // Joins (#430, `net.subscribePresence`): a player who comes online while the visitor is in the room is named on screen
 // (`hud.toast`, read out by assistive technology) and counted on the tab until the visitor looks at it
 // (`sheet.watchViews`), unless they are in the panel as it happens. Those already there when the visitor (re)joins are
@@ -52,13 +52,19 @@
   crosshairPath.setAttribute("fill", "currentColor");
   crosshairPath.setAttribute("d", "M3 1h3v1H3zM3 7h3v1H3zM1 3h1v3H1zM7 3h1v3H7zM2 2h1v1H2zM6 2h1v1H6zM2 6h1v1H2zM6 6h1v1H6zM4 0h1v3H4zM4 6h1v3H4zM0 4h3v1H0zM6 4h3v1H6zM4 4h1v1H4z");
   crosshair.append(crosshairPath);
+  // The private conversation's lock (private-chat.js `lock`): its shackle up and grey while nothing is between the two,
+  // amber while an invite or the pad waits, shut and blue once the line is sealed, dim on every other row while the
+  // visitor asks or talks with someone.
+  const PC = BL.privateChat;
   const lockIcon = document.createElementNS(SVG, "svg");
-  lockIcon.setAttribute("viewBox", "0 0 7 8");
+  lockIcon.setAttribute("viewBox", "0 0 7 9");
   lockIcon.setAttribute("aria-hidden", "true");
-  const lockPath = document.createElementNS(SVG, "path");
-  lockPath.setAttribute("fill", "currentColor");
-  lockPath.setAttribute("d", "M2 0h3v1H2zM1 1h1v2H1zM5 1h1v2H5zM0 3h7v5H0z");
-  lockIcon.append(lockPath);
+  for (const d of [PC.SHACKLE.open, "M0 4h7v5H0z"]) {
+    const path = document.createElementNS(SVG, "path");
+    path.setAttribute("fill", "currentColor");
+    path.setAttribute("d", d);
+    lockIcon.append(path);
+  }
 
   const rows = new Map(), groups = new Map(), order = [], door = { x: 0, y: 0, z: 0 };
   let serial = 0, pass = 0, showing = false, stale = true, doors = null, shownZone = "", shownRadius = -1;
@@ -84,21 +90,23 @@
     name.className = "players-name"; label.className = "roster-label"; label.id = id;
     host.className = "roster-host"; host.hidden = true; host.setAttribute("role", "img");
     host.setAttribute("aria-label", "Host: runs the Oogas for everyone"); host.title = "Host: runs the Oogas for everyone";
-    toggle.append(label); name.append(toggle); dots.append(presence, host);
+    const mark = document.createElement("span"), hand = document.createElement("span"), react = document.createElement("span");
+    mark.className = "players-mark"; mark.hidden = true;
+    hand.className = "players-hand"; hand.hidden = true; hand.setAttribute("role", "img"); hand.setAttribute("aria-label", "Hand raised"); hand.title = "Hand raised";
+    react.className = "players-react"; react.hidden = true; react.setAttribute("aria-hidden", "true");
+    mark.append(hand, react);
+    toggle.append(label); name.append(toggle, mark); dots.append(presence, host);
     marks.className = "roster-marks";
     voice.className = "roster-voice"; voice.type = "button"; voice.hidden = true; voice.setAttribute("aria-describedby", id); voice.append(BL.hud.voiceIcon.cloneNode(true));
     // A private conversation (#188), offered where the room relays them; never on the visitor's own row.
     priv.className = "players-private"; priv.type = "button"; priv.hidden = true; priv.append(lockIcon.cloneNode(true));
     marks.append(voice, priv);
-    const thump = document.createElement("span");
-    thump.className = "players-thump"; thump.dataset.on = "false"; thump.setAttribute("aria-hidden", "true");
-    thump.append(BL.hud.malletIcon.cloneNode(true));
     look.className = "players-look"; look.type = "button"; look.setAttribute("aria-describedby", id); look.append(crosshair.cloneNode(true));
     distance.className = "players-distance"; distance.append("");
     note.className = "players-note"; note.textContent = ", last known location"; note.hidden = true;
     distance.append(note);
-    li.append(dots, name, marks, thump, look, distance, volume);
-    return { li, label, toggle, volume, slider, value, host, voice, priv, privName: null, thump, pulse: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
+    li.append(dots, name, marks, look, distance, volume);
+    return { li, label, toggle, volume, slider, value, host, voice, priv, privShackle: priv.firstChild.firstChild, privLock: "", privSerial: -1, mark, hand, handShown: "", react, reacting: null, privName: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
       aim: "", voiceLook: "", voiceLogin: "", voiceSelf: false, blocked: false, hostOn: false, metres: -1, lastKnown: false, far: false };
   };
   const selfRow = makeRow();
@@ -132,25 +140,42 @@
   const paintMarks = () => {
     if (!showing || stale) return;
     const s = net.state, voice = BL.voice.stats;
-    paintMark(selfRow, voice.enabled ? voice.muted ? "muted" : voice.speaking ? "speaking" : "on" : "", "", voice.enabled, s.hostId === s.selfId);
+    paintMark(selfRow, voice.enabled ? voice.muted ? "muted" : voice.speaking ? "speaking" : "on" : "", "", voice.enabled, s.hostId === s.selfId, s.hand ? BL.reactionPolicy.HANDS[s.handTone] : "");
     for (const row of rows.values()) {
       const rec = net.remotes.get(row.id);
       if (!rec) continue;
       const look = rec.voice ? rec.muted ? "muted" : BL.voice.speaking(rec.id) ? "speaking" : "on" : "";
-      paintMark(row, look || "off", rec.login, false, rec.id === s.hostId);
-      const name = BL.privateChat && BL.privateChat.available() ? rec.display : "";
-      if (row.privName !== name) {
-        row.privName = name; row.priv.hidden = !name;
-        const words = `Ask ${name} for a private conversation`;
-        row.priv.title = words; row.priv.setAttribute("aria-label", words);
-      }
+      paintMark(row, look || "off", rec.login, false, rec.id === s.hostId, rec.hand ? BL.reactionPolicy.HANDS[rec.handTone] : "");
+      paintLock(row, PC.available() ? rec.display : "");
       const level = V.volumeOf(row.id), words = `${Math.round(level * 100)}%`;
       if (row.slider.value !== String(level * 100)) row.slider.value = String(level * 100);
       if (row.value.textContent !== words) row.value.textContent = words;
       row.slider.setAttribute("aria-valuetext", words);
     }
   };
-  const paintMark = (row, look, login, self, host) => {
+  // A row's lock, offered where the room relays private conversations (an empty name hides it), painted again only when
+  // the conversation's state or the player's name moves.
+  const paintLock = (row, name) => {
+    if (row.privName === name && row.privSerial === PC.serial) return;
+    row.privName = name; row.privSerial = PC.serial; row.priv.hidden = !name;
+    if (!name) return;
+    const state = PC.lock(row.id), words = PC.lockWords(row.id, name);
+    if (row.privLock !== state) {
+      row.privLock = state; row.priv.dataset.lock = state;
+      row.privShackle.setAttribute("d", state === "sealed" ? PC.SHACKLE.shut : PC.SHACKLE.open);
+    }
+    row.priv.title = words; row.priv.setAttribute("aria-label", words);
+  };
+  const paintLocks = () => {
+    if (!showing || stale) return;
+    const on = PC.available();
+    for (const row of rows.values()) {
+      const rec = net.remotes.get(row.id);
+      if (rec) paintLock(row, on ? rec.display : "");
+    }
+  };
+  const paintMark = (row, look, login, self, host, hand = "") => {
+    if (row.handShown !== hand) { row.handShown = hand; row.hand.textContent = hand; row.hand.hidden = !hand; row.mark.hidden = !hand && !row.reacting; }
     const blocked = !!login && BL.voice.mutedLocally(row.id);
     if (row.voiceLook !== look || row.voiceLogin !== login || row.voiceSelf !== self || row.blocked !== blocked) {
       row.voiceLook = look; row.voiceLogin = login; row.voiceSelf = self; row.blocked = blocked;
@@ -163,34 +188,29 @@
     }
     if (row.hostOn !== host) { row.hostOn = host; row.host.hidden = !host; }
   };
-
-  // An Ooga thump's mallet beside a player's voice mark, while the tab shows (thump.js); 0 or the visitor's own id is their
-  // row. Only the cell's own state changes: its place in the row is kept either way. Under Calm it holds still.
-  const THUMP_MS = 1400, CALM = window.matchMedia("(prefers-reduced-motion: reduce)");
-  const THUMP_PULSE = [{ opacity: 0, transform: "scale(0.6)" }, { opacity: 1, transform: "scale(1.25)", offset: 0.18 }, { opacity: 1, transform: "scale(1)", offset: 0.4 }, { opacity: 0, transform: "scale(1)" }];
-  const THUMP_STILL = [{ opacity: 1 }, { opacity: 1, offset: 0.85 }, { opacity: 0 }];
-  const unmark = (row) => {
-    row.pulse = null;
-    row.thump.dataset.on = "false";
-    row.thump.removeAttribute("role"); row.thump.removeAttribute("aria-label"); row.thump.removeAttribute("title");
-    row.thump.setAttribute("aria-hidden", "true");
-  };
-  const pulse = (id) => {
-    if (!showing || stale) return false;
-    const row = id === 0 || id === net.state.selfId ? selfRow : rows.get(id);
-    if (!row || !row.li.isConnected) return false;
-    const mark = row.thump;
-    if (row.pulse) row.pulse.cancel();
-    mark.dataset.on = "true";
-    mark.removeAttribute("aria-hidden"); mark.setAttribute("role", "img");
-    mark.setAttribute("aria-label", "Thumped"); mark.title = "Thumped";
-    const run = row.pulse = mark.animate(CALM.matches ? THUMP_STILL : THUMP_PULSE, { duration: THUMP_MS, easing: "ease-out" });
-    run.onfinish = () => { if (row.pulse === run) unmark(row); };
-    return true;
-  };
-  // Every mallet still showing goes at once (thump.js, when the visitor's voice membership changes).
-  const clearPulses = () => {
-    for (const row of [selfRow, ...rows.values()]) if (row.pulse) { row.pulse.cancel(); unmark(row); }
+  // A reaction (`net.subscribeReactions`, 0 for the visitor's own) pops up on its sender's row where a raised hand stands,
+  // over the hand when one is up, rises a little and fades, as it does over their Ooga; the newest replaces the one
+  // before, and under Calm it only fades. Rows are not kept up while the panel is hidden, so then it shows nowhere.
+  const REACT_TIMING = { duration: 2600, easing: "linear" }, CALM = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const REACT_POP = [
+    { opacity: 1, transform: "translateY(0) scale(0.4)" },
+    { opacity: 1, transform: "translateY(-2px) scale(1.15)", offset: 0.07 },
+    { opacity: 1, transform: "translateY(-3px) scale(1)", offset: 0.12 },
+    { opacity: 1, transform: "translateY(-5px) scale(1)", offset: 0.73 },
+    { opacity: 0, transform: "translateY(-7px) scale(1)" },
+  ];
+  const REACT_CALM = [{ opacity: 1 }, { opacity: 1, offset: 0.73 }, { opacity: 0 }];
+  const reacted = (id, emoji) => {
+    if (!showing || stale) return;
+    const row = id === 0 ? selfRow : rows.get(id);
+    if (!row || !row.li.isConnected) return;
+    if (row.reacting) row.reacting.cancel();
+    row.react.textContent = emoji; row.react.hidden = false; row.mark.hidden = false;
+    const run = row.reacting = row.react.animate(CALM.matches ? REACT_CALM : REACT_POP, REACT_TIMING);
+    run.onfinish = () => {
+      if (row.reacting !== run) return;
+      row.reacting = null; row.react.hidden = true; row.mark.hidden = !row.handShown;
+    };
   };
 
   // Distances and crosshairs, from where everyone stands now.
@@ -428,6 +448,8 @@
   net.subscribe(render);
   net.subscribeRoster(render);
   net.subscribeMoves(measure);
+  net.subscribeReactions(reacted);
+  PC.subscribe(paintLocks);
   BL.voice.subscribe(paintMarks);
   BL.voice.subscribe(paintHearing);
   // The scene the visitor is in names its doors (`fn(from, step, out, nearX, nearZ)`, true with `out` written), or null.
@@ -435,5 +457,5 @@
     doors = fn;
     measure();
   };
-  BL.players = { setDoors, pulse, clearPulses, get stats() { return { showing, rows: rows.size, groups: groups.size, unread, speakOn }; } };
+  BL.players = { setDoors, get stats() { return { showing, rows: rows.size, groups: groups.size, unread, speakOn }; } };
 })();

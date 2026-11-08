@@ -72,9 +72,14 @@
 // zone before), and one who let go of their Ooga keeps the last. `state.self` is this page's own last reported
 // position and the zone it was in, kept after letting go. `subscribeMoves` hears positions change: the room's
 // snapshots and this page's own reports, a few times a second at most, nothing while nobody moves.
-// Ooga thumps (thump.js): `sendThump` sends `{"t":"thump"}` while the room is live (the room checks voice and rate),
-// and `subscribeThump` hears `fn(id, audible)` for a remote player's thump the room relayed, `audible` when the room says
-// this page would hear that player's voice; a sender never hears its own.
+// Reactions (reactions.js, reaction-policy.js): a room whose `features` hold REACT_FEATURE (`state.reactions`) takes
+// `sendReaction(emoji)`, an emoji shown over this page's driven body for a moment, relayed to the pages in its zone,
+// and `setHand(on, tone)`, the raised hand in a skin tone, kept by the room for everyone (`hand` and `handTone` on every
+// remote record, `state.hand` and `state.handTone` for this page, sent again after a reconnect, lowered on signing out). `subscribeReactions` hears `fn(id, emoji)` for a
+// remote player's reaction, and for this page's own as id 0, as it is sent; a hand going up or down is a roster change.
+// Both spend one bucket mirroring the room's, a little short of it, so neither is ever shown here and dropped there;
+// `setHand` refuses (false, nothing changed) when it is empty, and a hand change the room still refuses comes back as
+// this page's own `hand`, which puts `state.hand` back to what everyone else sees.
 // A crossing (#392, voice-blend.js): `setBlend(to, t)` says the driven body is `t` (0 to 1) of the way from its zone's
 // group toward the adjacent group `to` (null for none). `state.blendTo` and `state.blendT` keep it exact for this page's
 // own volumes; the room gets it in BLEND.STEPS steps, at most BLEND_MS apart, and every remote record carries the
@@ -85,7 +90,7 @@
 // `subscribePresence` hears `fn(rec, true)` for a player who joins the room while this page is in it, never for those
 // already there on this page's (re)join, and `fn(rec, false)` when one leaves (players.js names the joins, #430).
 // Exports start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
-// setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendGhostState and subscribeGhostState (HALLOWEEN), sendThump, subscribeThump, npcFrame, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
+// setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendGhostState and subscribeGhostState (HALLOWEEN), npcFrame, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
 // ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
 (() => {
   "use strict";
@@ -170,7 +175,7 @@
   const chalkSubscribers = new Set(), chalkOut = [];
   const chalkEmit = (kind, detail) => { for (const fn of chalkSubscribers) fn(kind, detail); };
   const walletSubscribers = new Set();
-  const shotSubscribers = new Set(), swingSubscribers = new Set();
+  const shotSubscribers = new Set(), swingSubscribers = new Set(), reactSubscribers = new Set();
   const presenceSubscribers = new Set();
   const remotes = new Map();
   // room: "off" (signed out or no backend), "connecting", "live", "paused" (hidden a while), or a kick that
@@ -179,7 +184,8 @@
   const state = { backend: false, me: null, donations: false, tess: false, highscores: false, highscoreSnapshots: false, logoutEpoch: 0, started: false,
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
     room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, ghostHostId: 0, ghostFollowers: 0, npcVersion: 0, doorway: false, pokerVoice: null,
-    self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, privateChat: false, chalk: null, blendTo: null, blendT: 0 };
+    self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, privateChat: false, chalk: null, blendTo: null, blendT: 0, reactions: false, hand: false, handTone: 0 };
+  const REACT_FEATURE = "react-v1";
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, hiddenTimer = 0, stopped = false;
   let npcFrame = null, inHub = false, hubSent = null, visibleSent = null;
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
@@ -315,7 +321,7 @@
 
   const upsert = (p) => {
     if (!p || !Number.isSafeInteger(p.id) || p.id === state.selfId) return;
-    const rec = remotes.get(p.id) || { id: p.id, login: "", display: "", body: null, bodyKind: null, bodyName: null, zone: "outside", voice: false, muted: false, hp: 100, ko: false, x: 0, y: 0, z: 0, yaw: 0, poseZone: null, g: null, gData: null, jet: 0, weapon: 0 };
+    const rec = remotes.get(p.id) || { id: p.id, login: "", display: "", body: null, bodyKind: null, bodyName: null, zone: "outside", voice: false, muted: false, hand: false, handTone: 0, hp: 100, ko: false, x: 0, y: 0, z: 0, yaw: 0, poseZone: null, g: null, gData: null, jet: 0, weapon: 0 };
     rec.login = String(p.login);
     rec.display = String(p.display || p.login);
     rec.body = typeof p.body === "string" ? p.body : null;
@@ -332,6 +338,8 @@
     rec.hp = Number.isFinite(p.hp) ? p.hp : 100;
     rec.ko = p.ko === true;
     rec.muted = p.muted === true;
+    rec.hand = p.hand === true;
+    rec.handTone = BL.reactionPolicy.tone(p.handTone) ? p.handTone : 0;
     rec.x = +p.x || 0; rec.y = +p.y || 0; rec.z = +p.z || 0; rec.yaw = +p.yaw || 0;
     // A pose the room holds for someone driving is where they stand now; for anyone else it may be from a zone they
     // have since left, so it is not taken (`poseZone`).
@@ -458,6 +466,7 @@
       state.doorway = Array.isArray(msg.features) && msg.features.includes("door");
       state.chatUnicode = Array.isArray(msg.features) && msg.features.includes(BL.chatPolicy.FEATURE);
       state.privateChat = Array.isArray(msg.features) && msg.features.includes("pm-v1");
+      state.reactions = Array.isArray(msg.features) && msg.features.includes(REACT_FEATURE);
       // A room that keeps the chalkboard sends it next (chalk-board); an older one leaves the page its own board.
       if (state.chalk && !(Array.isArray(msg.features) && msg.features.includes(BL.chalkBoard.FEATURE))) { state.chalk = null; chalkEmit("board"); }
       remotes.clear();
@@ -484,6 +493,8 @@
       blendSent = ""; blendAt = -Infinity; sendBlend();
       sendPokerVoice();
       if (muted) sendMute();
+      // So does the raised hand: a fresh room record has it down.
+      if (state.hand) { if (state.reactions) sendHand(); else state.hand = false; }
       // A fresh room record starts at full health; the next report sends ours if it differs.
       hpSent = 100; koSent = false; hpAt = 0;
       hubSent = visibleSent = null;
@@ -609,14 +620,27 @@
       if (Array.isArray(msg.peers)) BL.voice.setPeers(msg.peers, Array.isArray(msg.gens) ? msg.gens : null, state.zone === "dsb-studio" ? msg.listeners : undefined);
     } else if (msg.t === "ghost") {
       if (ghostHeard) ghostHeard(msg); // HALLOWEEN
-    } else if (msg.t === "thump") {
-      if (thumpHeard && remotes.has(msg.id)) thumpHeard(msg.id, msg.a === 1);
+    } else if (msg.t === "react") {
+      if (remotes.has(msg.id) && BL.reactionPolicy.valid(msg.e)) for (const fn of reactSubscribers) fn(msg.id, msg.e);
+    } else if (msg.t === "hand") {
+      // The room's word on this page's own hand, sent back when it refused a change.
+      if (msg.id === state.selfId) {
+        state.hand = msg.on === true;
+        state.handTone = BL.reactionPolicy.tone(msg.tone) ? msg.tone : 0;
+        emit();
+        return;
+      }
+      const rec = remotes.get(msg.id);
+      if (!rec) return;
+      rec.hand = msg.on === true;
+      rec.handTone = BL.reactionPolicy.tone(msg.tone) ? msg.tone : 0;
+      rosterChanged();
     } else if (msg.t === "release") {
       state.released = { name: String(msg.name), reason: String(msg.reason) };
       emit();
     } else if (msg.t === "kick") {
       // Revoked access stops reconnecting; the operator may later restore access.
-      if (msg.reason === "revoked") state.me = null;
+      if (msg.reason === "revoked") { state.me = null; state.hand = false; }
       // replaced and full stop here; stale reconnects like any drop.
       if (msg.reason !== "stale") stopped = true;
       close(msg.reason === "stale" ? "connecting" : msg.reason);
@@ -732,6 +756,7 @@
     stopped = true;
     window.clearTimeout(retryTimer);
     state.me = null;
+    state.hand = false;
     state.logoutEpoch++;
     close("off");
   };
@@ -835,17 +860,6 @@
   };
   document.addEventListener("visibilitychange", onVisibility);
 
-  // One listener, thump.js; false when the room is not live.
-  let thumpHeard = null;
-  const sendThump = () => {
-    if (state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN) return false;
-    send('{"t":"thump"}');
-    return true;
-  };
-  const subscribeThump = (fn) => {
-    thumpHeard = fn;
-    return () => { if (thumpHeard === fn) thumpHeard = null; };
-  };
   // HALLOWEEN: the ghost hunt's word to its host (ghost-sync.js): a start or a hit, relayed to the arcade's ghost
   // arena's host (`ghostHostId`) alone, from a page in the arena.
   let ghostHeard = null, ghostStateHeard = null;
@@ -922,6 +936,46 @@
     hpSent = v;
     koSent = ko;
     send(`{"t":"hp","v":${v},"ko":${ko}}`);
+  };
+
+  // The room's one bucket for reactions and the hand (worker/src/protocol.js REACT_HZ 3, REACT_BURST 6), mirrored a
+  // little short of it, since frames can reach the room closer together than they left here.
+  const REACT_HZ = 2.5, REACT_BURST = 5;
+  let reactTokens = REACT_BURST, reactAt = 0;
+  const reactToken = () => {
+    const now = performance.now();
+    reactTokens = Math.min(REACT_BURST, reactTokens + (now - reactAt) * REACT_HZ / 1000);
+    reactAt = now;
+    if (reactTokens < 1) return false;
+    reactTokens--;
+    return true;
+  };
+  // A reaction over this page's driven body; false when it was not sent (not live, an older room, not an emoji, or
+  // over the bucket).
+  const sendReaction = (emoji) => {
+    if (!state.reactions || state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN || !BL.reactionPolicy.valid(emoji)) return false;
+    if (!reactToken()) return false;
+    send(JSON.stringify({ t: "react", e: emoji }));
+    for (const fn of reactSubscribers) fn(0, emoji);
+    return true;
+  };
+  const subscribeReactions = (fn) => {
+    reactSubscribers.add(fn);
+    return () => reactSubscribers.delete(fn);
+  };
+  // The raised hand in skin tone `tone` (0 to 5), up until it is lowered; false, with nothing changed, when the room
+  // cannot take it now (not live, an older room, or over the bucket it shares with reactions).
+  const sendHand = () => send(`{"t":"hand","on":${state.hand},"tone":${state.handTone}}`);
+  const setHand = (on, tone = state.handTone) => {
+    if (on && (!state.reactions || state.room !== "live")) return false;
+    if (state.hand === on && (!on || state.handTone === tone)) return true;
+    const live = state.room === "live" && !!ws && ws.readyState === WebSocket.OPEN;
+    if (live && !reactToken()) return false;
+    state.hand = on;
+    state.handTone = BL.reactionPolicy.tone(tone) ? tone : 0;
+    if (live) sendHand();
+    emit();
+    return true;
   };
 
   // This page's own microphone muted or not, for every other page's roster.
@@ -1124,18 +1178,18 @@
   // of another kind sends it, so a line's points go a few to a frame. Each says whether it was sent, or why not.
   const takeChalk = () => {
     if (!state.chalk || state.room !== "live") return false;
-    send(`{"t":"chalk","k":"take"}`);
+    send(`{"t":"chalk","v":${BL.chalkBoard.VERSION},"k":"take"}`);
     return true;
   };
   const flushChalk = () => {
-    for (const op of chalkOut) send(JSON.stringify({ t: "chalk", ...op }));
+    for (const op of chalkOut) send(JSON.stringify({ t: "chalk", v: BL.chalkBoard.VERSION, ...op }));
     chalkOut.length = 0;
   };
   const dropChalk = () => {
     const c = state.chalk;
     if (!c || c.editor !== state.selfId) return;
     flushChalk();
-    if (state.room === "live") send(`{"t":"chalk","k":"drop"}`);
+    if (state.room === "live") send(`{"t":"chalk","v":${BL.chalkBoard.VERSION},"k":"drop"}`);
     c.editor = 0;
     c.session = BL.chalkBoard.session(c.board);
   };
@@ -1207,13 +1261,12 @@
     chatSubscribers.clear();
     chalkSubscribers.clear();
     walletSubscribers.clear();
-    shotSubscribers.clear(); swingSubscribers.clear();
+    shotSubscribers.clear(); swingSubscribers.clear(); reactSubscribers.clear();
     presenceSubscribers.clear();
     doorSubscribers.clear();
     ghostHeard = ghostStateHeard = null; // HALLOWEEN
-    thumpHeard = null;
     close("off");
   };
 
-  BL.net = { cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendThump, subscribeThump, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendReaction, subscribeReactions, setHand, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();
