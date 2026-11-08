@@ -30,7 +30,7 @@ test("on the main world's surface everyone hears everyone, whatever their zone; 
   const peers = voicePeers([...surface, ...apart]);
   for (const who of surface) assert.deepEqual(peers.get(who.id), surface.map((q) => q.id).filter((id) => id !== who.id), who.zone);
   for (const who of apart) assert.deepEqual(peers.get(who.id), [], who.zone);
-  assert.ok(BLEND.world("between") && BLEND.world("hq") && !BLEND.world("bifrost.chamber") && !BLEND.world("none") && !BLEND.world("factory.hall"));
+  assert.ok(BLEND.world("between") && BLEND.world("hq") && BLEND.world("hq-basement") && BLEND.world("rainforest-under") && !BLEND.world("bifrost.chamber") && !BLEND.world("none") && !BLEND.world("factory.hall"));
   assert.ok(BLEND.sameFrame("between", "hq") && BLEND.sameFrame("outside", "rainforest") && !BLEND.sameFrame("outside", "bifrost.chamber") && !BLEND.sameFrame("outside", "none"), "the world's zones share coordinates");
   assert.ok(protocol.seenTogether("outside", "hq") && protocol.seenTogether("between", "sphere") && protocol.seenTogether("arcade.hall", "arcade.hall") && !protocol.seenTogether("outside", "arcade.hall") && !protocol.seenTogether("arcade.hall", "arcade.haunt"), "what the room relays follows who is shown");
 });
