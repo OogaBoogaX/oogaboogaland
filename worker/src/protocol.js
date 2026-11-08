@@ -70,7 +70,8 @@ import "../../src/js/reaction-policy.js";
 //                 chat-rejected { clientId?, reason }  refused; rate retries keep the same id
 //                 chat-history { messages }  after welcome: the lines the room still holds, oldest first
 //                 pm { op, ... }            a private conversation: invite { from }, inviting { to }, open { with },
-//                                            declined { from }, withdrawn { from }, closed { from, reason },
+//                                            declined { from, reason? }, withdrawn { from, reason? } (reason "left"
+//                                            when the other page left), closed { from, reason },
 //                                            data { from, d }, and to its sender ok { n, to } or refused { to, n?, reason }
 //                 chalk-board { marks, editor }  after welcome: the chalkboard as the room holds it, and who holds it
 //                 chalk-lock { id }          who holds the chalkboard now (0 for nobody), to everyone

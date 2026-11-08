@@ -20,7 +20,13 @@
 // The pad file reads every line ever sealed with it, with the frames the room relayed, so the panel says to keep it safe
 // and delete it once the conversation is over. "Sent" is the room's word that it passed a line on, not the other side's.
 // The page's own notes carry no name, so no display name can pass for one; the other side's lines show their login.
-// Exports available, invite and stats.
+// The lock on each other player's row in Online Oogas, and on the switch, says where this page stands (`lock`,
+// `lockWords`): open (nothing between the two), waiting (an invite either way, or the pad not yet loaded and
+// acknowledged on both sides), sealed (the line is open), or busy on every other row while this page asks or talks with
+// one, since one conversation is all there is: that one ends first. `subscribe` hears it change. The room's word for a
+// step the visitor already undid never brings it back: `inviting` only confirms, and an `open` this page no longer
+// waits for (an invite or accept cancelled on its way) is ended at once.
+// Exports available, invite, lock, lockWords, subscribe, SHACKLE and stats.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -38,6 +44,13 @@
   const size = $("pm-size"), make = $("pm-make"), printLine = $("pm-print-line"), printPeer = $("pm-print-peer"), print = $("pm-print");
   const log = $("pm-log"), budget = $("pm-budget"), form = $("pm-form"), input = $("pm-input"), left = $("pm-left"), sendButton = $("pm-send"), end = $("pm-end");
   const views = [...switcher.querySelectorAll("[data-pm-view]")];
+  // The lock's shackle over a body at rows 4 to 8 (viewBox 7x9): raised with its left leg two rows clear of the body
+  // while the line is not sealed, so it reads open even at 12 pixels, and shut once it is.
+  const SHACKLE = Object.freeze({ open: "M2 0h3v1H2zM1 1h1v1H1zM5 1h1v3H5z", shut: "M2 1h3v1H2zM1 2h1v2H1zM5 2h1v2H5z" });
+  const lockBoxes = [views.find((b) => b.dataset.pmView === "private"), title.parentElement];
+  const shackles = lockBoxes.map((box) => box.querySelector(".pm-shackle"));
+  const watchers = new Set();
+  let lockKey = "", lockShown = "", serial = 0;
   const store = { get: (key) => window.localStorage.getItem(key), set: (key, value) => window.localStorage.setItem(key, value) };
   const lock = (name, fn) => navigator.locks ? navigator.locks.request(name, { mode: "exclusive" }, fn)
     : Promise.reject(Object.assign(new Error("locks"), { code: "locks" }));
@@ -78,6 +91,34 @@
   };
   const REFUSED = { offline: "isn't on the island now.", unavailable: "can't take private conversations from you.", busy: "is in another private conversation.",
     rate: "can't be asked again yet. Wait a moment.", withdrawn: "took the invite back.", closed: "isn't in this conversation any more." };
+  const GONE = "left the island or lost the connection";
+
+  const sealed = () => !!(c.session && c.session.ready && !c.stopped);
+  // A player's lock: "open", "waiting", "sealed" or "busy" (see the head of the file).
+  const lockOf = (id) => {
+    if (c.phase === "idle") return c.invites.includes(id) ? "waiting" : "open";
+    if (id !== c.peer) return "busy";
+    return c.phase === "open" && sealed() ? "sealed" : "waiting";
+  };
+  // What the visitor ends before asking anyone else.
+  const first = () => c.phase === "inviting" ? `Cancel your invite to ${c.name} first` : `End your private conversation with ${c.name} first`;
+  // The lock's label on `id`'s row, whose name is `name`.
+  const lockWords = (id, name) => {
+    const state = lockOf(id);
+    if (state === "open") return `Ask ${name} for a private conversation`;
+    if (state === "busy") return c.invites.includes(id) ? `${name} asked for a private conversation. ${first()} to answer` : `${first()} to ask ${name}`;
+    if (state === "sealed") return `Private conversation with ${name}: sealed`;
+    if (c.phase === "idle") return `${name} asks for a private conversation: accept`;
+    if (c.phase === "inviting") return `Waiting for ${name} to answer your invite`;
+    if (c.phase === "accepting") return `Opening the private conversation with ${name}`;
+    if (!c.session || c.stopped) return `Private conversation with ${name}: load or make your pad`;
+    if (c.unrecorded) return `Private conversation with ${name}: say whether the pad file is new`;
+    return `Waiting for ${name} to load the same pad`;
+  };
+  const subscribe = (fn) => {
+    watchers.add(fn);
+    return () => watchers.delete(fn);
+  };
 
   const nudge = (text) => {
     if (viewing()) return;
@@ -160,7 +201,8 @@
       } else if (r.kind === "dropped") {
         add({ note: r.error === "pad" ? `${c.name} is using a different pad file.` : "A message failed its check and was dropped. Nothing of it is shown.", at: Date.now() });
       } else if (r.kind === "stopped") return stop(r.error, true);
-      else if (r.kind !== "ready") return;
+      else if (r.kind === "ready") nudge(`Your private conversation with ${c.name} is sealed. You can talk now.`);
+      else return;
       render();
     });
   };
@@ -204,10 +246,21 @@
     return startPad(fresh);
   };
 
+  // Signed out: nothing of a conversation, its invites or its notes stays behind for the next account.
+  const forget = () => {
+    if (c.phase !== "idle" || c.notice || c.invites.length || c.unseen) { reset(); c.invites.length = 0; c.unseen = 0; }
+    render();
+  };
   const heard = (msg) => {
     if (msg.op === "lost") {
-      if (c.phase !== "idle") reset("The connection to the island dropped, which ended the private conversation. Start it again: your pad carries on where it stopped.");
+      if (!net.state.me) return forget();
       c.invites.length = 0;
+      if (c.phase !== "idle") {
+        reset(net.state.room === "replaced"
+          ? "Ooga Booga Land was opened in another tab, which ended the private conversation here. Start it again there: your pad carries on where it stopped."
+          : "The connection to the island dropped, which ended the private conversation. Start it again: your pad carries on where it stopped.");
+        nudge(c.notice);
+      }
       return render();
     }
     if (!available()) return;
@@ -215,20 +268,33 @@
     if (msg.op === "invite" && from) {
       if (!c.invites.includes(from)) c.invites.push(from);
       if (c.invites.length > INVITES) c.invites.shift();
-      nudge(`${who(from).name} asks for a private conversation. Open Ooga Chat to answer.`);
-    } else if (msg.op === "inviting" && (c.phase === "idle" || c.phase === "inviting")) {
-      begin("inviting", msg.to);
+      // Two who ask each other at once are talking: the room opens it next, with nothing to answer.
+      if (c.phase !== "inviting" || from !== c.peer) {
+        const name = who(from).name;
+        nudge(c.phase === "idle" ? `${name} asks for a private conversation. Open Ooga Chat to answer.` : `${name} asks for a private conversation. ${first()} to answer.`);
+      }
+    } else if (msg.op === "inviting") {
+      // The page began inviting when it asked; this only confirms, and one for an invite already taken back changes nothing.
+      return;
     } else if (msg.op === "open" && Number.isSafeInteger(msg.with)) {
+      if (c.phase === "open" && msg.with === c.peer) return;
+      // Only the conversation this page is asking for or accepting: one it cancelled while the room opened it is ended.
+      if ((c.phase !== "inviting" && c.phase !== "accepting") || msg.with !== c.peer) { net.sendPrivate("end", msg.with); return; }
+      const asked = c.phase === "inviting";
       begin("open", msg.with);
       c.invites = c.invites.filter((id) => id !== msg.with);
-      nudge(`Your private conversation with ${c.name} is open.`);
+      nudge(asked ? `${c.name} said yes. Load or make your pad to talk privately.` : `Your private conversation with ${c.name} is open. Load or make your pad to talk.`);
     } else if (msg.op === "declined" && c.phase === "inviting" && from === c.peer) {
-      reset(`${c.name} said no.`);
+      reset(msg.reason === "left" ? `${c.name} ${GONE}, which ended your invite.` : `${c.name} said no.`);
+      nudge(c.notice);
     } else if (msg.op === "withdrawn") {
+      // The invite being answered goes with a word, so the private view never empties without one.
+      const shown = c.phase === "idle" && c.invites[0] === from && viewing();
       c.invites = c.invites.filter((id) => id !== from);
+      if (shown) c.notice = `${who(from).name} ${msg.reason === "left" ? `${GONE}, which ended the invite.` : "took the invite back."}`;
     } else if (msg.op === "closed" && c.phase === "open" && from === c.peer) {
       const name = c.name;
-      reset(msg.reason === "left" ? `${name} left the island, which ended the private conversation.` : `${name} ended the private conversation.`);
+      reset(msg.reason === "left" ? `${name} ${GONE}, which ended the private conversation.` : `${name} ended the private conversation.`);
       nudge(c.notice);
     } else if (msg.op === "data" && c.phase === "open" && from === c.peer && typeof msg.d === "string" && msg.d.length <= DATA_MAX) {
       const frame = unb64(msg.d);
@@ -245,12 +311,14 @@
         if (c.session && msg.n === c.session.helloN) return helloLater();
         return mark(msg.n, "failed");
       }
-      const name = who(msg.to).name;
-      if ((c.phase === "inviting" || c.phase === "accepting") && msg.to === c.peer) reset(`${name} ${REFUSED[msg.reason] || "can't be asked now."}`);
+      // The one being asked may have left already, so their name is the page's own copy.
+      const words = `${msg.to === c.peer && c.phase !== "idle" ? c.name : who(msg.to).name} ${REFUSED[msg.reason] || "can't be asked now."}`;
+      if ((c.phase === "inviting" || c.phase === "accepting") && msg.to === c.peer) reset(words);
       else {
         c.invites = c.invites.filter((id) => id !== msg.to);
-        c.notice = `${name} ${REFUSED[msg.reason] || "can't be asked now."}`;
+        c.notice = words;
       }
+      nudge(words);
     } else return;
     render();
   };
@@ -303,7 +371,8 @@
   };
 
   const render = () => {
-    const on = available() && (c.phase !== "idle" || c.invites.length > 0 || !!c.notice);
+    // A notice outlives the room (a dropped connection, another tab), so the private view can still say why it ended.
+    const on = !!(net.state.me && subtle && P) && (c.phase !== "idle" || c.invites.length > 0 || !!c.notice);
     switcher.hidden = !on;
     if (!on && c.view === "private") { c.view = "island"; delete panel.dataset.view; }
     for (const b of views) b.setAttribute("aria-pressed", String(b.dataset.pmView === c.view));
@@ -338,11 +407,27 @@
     end.textContent = c.phase === "open" ? "End" : "Cancel";
     const used = policy.text(input.value).length;
     left.textContent = String(policy.MAX - used); left.dataset.over = String(used > policy.MAX);
+    // The switch's and the title's lock, as the partner's row shows it: open, waiting on an invite or the pad, or sealed.
+    const mine = c.phase === "idle" ? invite ? "waiting" : "open" : c.phase === "open" && ready ? "sealed" : "waiting";
+    if (lockShown !== mine) {
+      lockShown = mine;
+      for (const box of lockBoxes) box.dataset.lock = mine;
+      for (const path of shackles) path.setAttribute("d", mine === "sealed" ? SHACKLE.shut : SHACKLE.open);
+    }
+    // Online Oogas repaints its locks only when what they show changes.
+    const key = `${c.phase}:${c.peer}:${ready}:${!!c.session}:${c.unrecorded}:${c.invites.join()}`;
+    if (key !== lockKey) { lockKey = key; serial++; for (const fn of watchers) fn(); }
   };
 
   const invite = (id) => {
     if (!available()) return false;
-    if (c.phase !== "idle") { showPrivate(); BL.hud.toast("End your private conversation first."); return false; }
+    // One conversation at a time: the lock of the one being asked or talked with shows it, any other says what ends first.
+    if (c.phase !== "idle") {
+      showPrivate();
+      if (id === c.peer) return true;
+      BL.hud.toast(`${first()}.`);
+      return false;
+    }
     // Someone who already asked is answered.
     if (c.invites.includes(id)) {
       c.invites = c.invites.filter((i) => i !== id);
@@ -440,10 +525,10 @@
   });
 
   net.subscribePrivate(heard);
-  net.subscribe(() => render());
+  net.subscribe(() => net.state.me ? render() : forget());
   render();
 
-  BL.privateChat = { available, invite,
+  BL.privateChat = { available, invite, lock: lockOf, lockWords, subscribe, SHACKLE, get serial() { return serial; },
     stats: () => ({ phase: c.phase, peer: c.peer, view: c.view, invites: c.invites.slice(), ready: !!(c.session && c.session.ready), stopped: c.stopped,
       notice: c.notice, lines: c.lines.map((l) => l.note ? { note: l.note } : { own: l.own, text: l.text, state: l.state, late: !!l.late }), queued: c.queue.length, unseen: c.unseen,
       padLoaded: !!c.pad, started: c.started, unrecorded: c.unrecorded, remaining: c.session ? c.session.remaining : 0 }) };
