@@ -11216,6 +11216,87 @@ body[data-active-scene] #controls-help-button { display: flex; align-items: cent
   .controls-help { padding: 12px; }
   .controls-row { grid-template-columns: minmax(110px, 1fr) 1.1fr; gap: 8px; }
 }
+.controls-help-pad { margin: 0 0 4px; padding: 6px 12px; border: 2px solid var(--wood-edge); border-radius: 6px; background: var(--accent); color: #1b1006; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.controls-help-pad:hover, .controls-help-pad:focus-visible { background: #e89a3c; outline: 2px solid #ffd84a; outline-offset: 2px; }
+.controls-glyph, .pad-glyph { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0 6px; border: 1px solid #f3efe465; border-radius: 12px; background: var(--slab-dark); color: #f3efe4; font-weight: 700; font-size: 12px; white-space: nowrap; }
+.controls-glyph.round, .pad-glyph.round { width: 24px; padding: 0; }
+.controls-glyph.stick, .pad-glyph.stick { width: 24px; padding: 0; border-radius: 50%; border-style: double; border-width: 3px; font-size: 10px; }
+.g-xa { color: #5fb94a; } .g-xb { color: #e5533d; } .g-xx { color: #3d8be5; } .g-xy { color: #e8c43a; }
+.g-pcross { color: #8fb3f0; } .g-pcircle { color: #f07a7a; } .g-psquare { color: #ee97d6; } .g-ptri { color: #4fd1a8; }
+/* A pad's focus ring, the same in every dialog and card the controller walks. */
+.pad-focus, .pad-focus:focus, .pad-settings :is(button, input):focus-visible { outline: 2px solid #ffd84a; outline-offset: 2px; }
+
+/* The controller screen: the player's controller beside its actions, the feel below. One column on phones. */
+.pad-settings { width: min(1000px, calc(100vw - 24px)); padding: 14px; max-height: calc(100dvh - 24px - var(--safe-top) - var(--safe-bottom)); overflow-y: auto; overscroll-behavior: contain; }
+.pad-settings > * + * { margin-top: 12px; }
+.pad-settings .panel-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.pad-device { display: flex; align-items: center; gap: 8px; margin-left: auto; padding: 5px 10px; border-radius: 999px; background: var(--tablet); font-size: 12px; }
+.pad-device small { display: block; color: var(--muted); font-size: 10px; }
+.pad-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.pad-dot.live { background: var(--ok); box-shadow: 0 0 0 3px #22c55e33; }
+.pad-family, .pad-tabs, .pad-seg, .pad-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.pad-label { margin-right: 4px; color: var(--paper); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; opacity: .8; white-space: nowrap; }
+.pad-settings button { font: inherit; color: var(--paper); cursor: pointer; }
+.pad-family button, .pad-tabs button, .pad-seg button, .pad-buttons button, .pad-small, .pad-change { padding: 5px 10px; border: 1px solid #f3efe440; border-radius: 6px; background: var(--tablet); font-size: 12px; white-space: nowrap; }
+.pad-family button[aria-pressed="true"], .pad-tabs button[aria-selected="true"], .pad-seg button[aria-pressed="true"], .pad-buttons button.primary { border-color: transparent; background: var(--accent); color: #1b1006; font-weight: 700; }
+.pad-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.pad-picture, .pad-setup, .pad-tune, .pad-list { padding: 10px; border-radius: var(--radius); background: var(--tablet); box-shadow: var(--tablet-shadow); }
+.pad-picture svg { display: block; width: 100%; height: auto; }
+.pad-hint { min-height: 2.9em; margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.pad-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.pad-list .pad-note { margin-bottom: 4px; }
+.pad-tabs { margin-bottom: 8px; }
+.pad-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 6px 4px; border-top: 1px solid #f3efe424; border-radius: 4px; font-size: 12px; }
+.pad-row.lit { background: #ffd84a14; }
+.pad-row.capture { background: #d8892b22; outline: 1px solid var(--accent); }
+.pad-name small { display: block; color: var(--faint); font-size: 10px; }
+.pad-glyphs { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.pad-none { color: var(--faint); font-size: 10px; }
+.pad-change:disabled { opacity: .45; cursor: default; }
+.pad-prompt { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--accent-text); font-size: 12px; }
+.pad-prompt button { padding: 4px 10px; border: 0; border-radius: 6px; background: var(--accent); color: #1b1006; font-weight: 700; }
+.pad-prompt button.plain { background: var(--stone-lt); color: var(--paper); font-weight: 400; }
+.pad-tune { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 18px; }
+.pad-tune .section-head { grid-column: 1 / -1; margin: 0; }
+.pad-field { display: grid; gap: 4px; align-content: start; }
+.pad-field > label { display: flex; justify-content: space-between; gap: 8px; color: var(--paper); font-size: 12px; }
+.pad-field output { font: 12px var(--mono); font-variant-numeric: tabular-nums; }
+.pad-field input[type="range"] { width: 100%; accent-color: var(--accent); }
+.pad-small { justify-self: start; }
+.pad-check { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.pad-check input { width: 16px; height: 16px; accent-color: var(--accent); }
+.pad-setup { display: grid; gap: 8px; }
+.pad-setup .section-head { margin: 0; }
+.pad-setup-step { font-size: 14px; font-weight: 700; }
+.pad-setup-bar { height: 6px; overflow: hidden; border-radius: 3px; background: var(--stone-lt); }
+.pad-setup-bar i { display: block; width: 0; height: 100%; background: var(--accent); transition: width .2s; }
+.pad-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.pad-foot .pad-buttons { margin-left: auto; }
+.pad-toast { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; width: fit-content; max-width: 100%; margin: 12px auto 0; padding: 8px 12px; border-radius: 8px; background: var(--stone-lt); box-shadow: 0 6px 20px #0008; font-size: 12px; }
+.pad-toast button { border: 0; background: transparent; color: #ffd84a; font-weight: 700; }
+#pad-diagram .body { fill: #1f1d1b; stroke: #57524c; stroke-width: 2; }
+#pad-diagram .ctl { cursor: pointer; }
+#pad-diagram .ctl .cap { fill: #2c2a27; stroke: #6b655e; stroke-width: 1.5; transition: fill .08s; }
+#pad-diagram .ctl text { fill: var(--fg); font: 700 12px system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+#pad-diagram .ctl.small text { font-size: 9px; }
+#pad-diagram .ctl text.g-xa { fill: #5fb94a; } #pad-diagram .ctl text.g-xb { fill: #e5533d; } #pad-diagram .ctl text.g-xx { fill: #3d8be5; } #pad-diagram .ctl text.g-xy { fill: #e8c43a; }
+#pad-diagram .ctl text.g-pcross { fill: #8fb3f0; } #pad-diagram .ctl text.g-pcircle { fill: #f07a7a; } #pad-diagram .ctl text.g-psquare { fill: #ee97d6; } #pad-diagram .ctl text.g-ptri { fill: #4fd1a8; }
+#pad-diagram .ctl:hover .cap, #pad-diagram .ctl.sel .cap { stroke: #ffd84a; stroke-width: 2.5; }
+#pad-diagram .ctl.on .cap { fill: #ffd84a; }
+#pad-diagram .ctl.on text { fill: #171308; }
+#pad-diagram .ctl.target .cap { stroke: #ffd84a; stroke-width: 3; animation: pad-pulse 1s ease-in-out infinite; }
+#pad-diagram .ctl.unused .cap { stroke-dasharray: 3 3; }
+#pad-diagram .dead { fill: none; stroke: #ffd84a55; stroke-dasharray: 2 3; }
+#pad-diagram .stickdot { fill: var(--accent); }
+#pad-diagram .stickdot.rest { fill: var(--faint); }
+#pad-diagram .stick-name { fill: var(--muted); font-size: 10px; }
+@keyframes pad-pulse { 50% { stroke-opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { #pad-diagram .ctl.target .cap { animation: none; } }
+@media (max-width: 760px) {
+  .pad-main { grid-template-columns: minmax(0, 1fr); }
+  .pad-device { margin-left: 0; }
+  .pad-foot .pad-buttons { margin-left: 0; }
+}
 /* Players read shared hockey scores inside the goal half-circles. */
 #carnival[data-kind="hockey"][data-hockey-shared="true"] .carnival-scores,
 #carnival[data-kind="hockey"][data-hockey-shared="true"] .race-hud-right > .race-lap:nth-child(-n+2) { display: none; }

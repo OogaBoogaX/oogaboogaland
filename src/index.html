@@ -1689,7 +1689,63 @@
       </div>
       <p id="controls-help-context"></p>
       <p id="controls-help-note">Try the keys here. Your character stays still while this panel is open.</p>
+      <button type="button" class="controls-help-pad" id="controls-help-pad">Controller settings</button>
       <div class="controls-list" id="controls-help-list"></div>
+    </dialog>
+    <dialog class="modal pad-settings" id="pad-settings" aria-labelledby="pad-settings-title">
+      <div class="panel-head">
+        <h2 id="pad-settings-title">Controller</h2>
+        <div class="pad-device"><span class="pad-dot" id="pad-device-dot"></span><span><b id="pad-device-name">No controller yet</b> <small id="pad-device-sub">Press any button on your controller</small></span></div>
+        <button type="button" class="modal-close" id="pad-close" aria-label="Close controller settings">&times;</button>
+      </div>
+      <div class="pad-family" role="group" aria-label="Show buttons as">
+        <span class="pad-label">Buttons</span>
+        <button type="button" data-family="">Auto</button>
+        <button type="button" data-family="xbox">Xbox</button>
+        <button type="button" data-family="playstation">PlayStation</button>
+        <button type="button" data-family="nintendo">Switch</button>
+        <button type="button" data-family="stadia">Stadia</button>
+        <button type="button" data-family="generic">Other</button>
+      </div>
+      <div class="pad-setup" id="pad-setup" hidden>
+        <h3 class="section-head">Set up this controller</h3>
+        <div class="pad-setup-step" id="pad-setup-step"></div>
+        <div class="pad-setup-bar"><i id="pad-setup-bar"></i></div>
+        <p class="pad-note">Press the highlighted input. Hold nothing else. Skip anything your controller doesn't have.</p>
+        <div class="pad-buttons"><button type="button" id="pad-setup-skip">Skip this one</button><button type="button" id="pad-setup-cancel">Cancel setup</button></div>
+      </div>
+      <div class="pad-main">
+        <div class="pad-picture">
+          <svg id="pad-diagram" viewBox="0 0 400 270" role="img" aria-label="Controller diagram"></svg>
+          <p class="pad-hint" id="pad-hint" aria-live="polite"></p>
+        </div>
+        <div>
+          <div class="pad-tabs" role="tablist" id="pad-tabs" aria-label="Where the buttons apply"></div>
+          <div class="pad-list" id="pad-list"></div>
+        </div>
+      </div>
+      <div class="pad-tune">
+        <h3 class="section-head">Feel</h3>
+        <div class="pad-field"><label for="pad-dead">Stick dead zone <output id="pad-dead-out"></output></label><input type="range" id="pad-dead" min="5" max="35" step="1"><span class="pad-note">Raise it if your Ooga creeps while you aren't touching the stick. The dotted ring on the picture shows it.</span></div>
+        <div class="pad-field"><label for="pad-look">Look speed <output id="pad-look-out"></output></label><input type="range" id="pad-look" min="25" max="250" step="5"></div>
+        <div class="pad-field"><span class="pad-label">Run</span><div class="pad-seg" role="group" aria-label="Run"><button type="button" data-feel="runHold" data-value="true">Hold</button><button type="button" data-feel="runHold" data-value="false">Click until you stop</button></div></div>
+        <div class="pad-field"><span class="pad-label">Aim down sights</span><div class="pad-seg" role="group" aria-label="Aim down sights"><button type="button" data-feel="aimToggle" data-value="false">Hold</button><button type="button" data-feel="aimToggle" data-value="true">Toggle</button></div></div>
+        <div class="pad-field">
+          <label class="pad-check"><input type="checkbox" id="pad-invertY"> Invert look up and down (Y)</label>
+          <label class="pad-check"><input type="checkbox" id="pad-invertX"> Invert look left and right (X)</label>
+          <label class="pad-check"><input type="checkbox" id="pad-swap"> Swap sticks (left-handed)</label>
+        </div>
+        <div class="pad-field"><label for="pad-rumble">Vibration <output id="pad-rumble-out"></output></label><input type="range" id="pad-rumble" min="0" max="100" step="5"><button type="button" class="pad-small" id="pad-rumble-test">Feel it</button></div>
+      </div>
+      <div class="pad-foot">
+        <p class="pad-note">View and Menu together open this screen from anywhere. Your choices stay on this browser.</p>
+        <div class="pad-buttons">
+          <button type="button" id="pad-setup-open" hidden>Set up this controller</button>
+          <button type="button" id="pad-reset">Reset this tab</button>
+          <button type="button" class="primary" id="pad-done">Done</button>
+        </div>
+      </div>
+      <div class="pad-toast" id="pad-toast" role="status" hidden><span id="pad-toast-text"></span><button type="button" id="pad-toast-undo">Undo</button></div>
     </dialog>
     <dialog class="modal" id="recipe" aria-label="Add an Ooga">
       <div class="panel-head">
@@ -2210,6 +2266,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/ghost-track-synthed.js" data-defer="halloween-track-synthed"></script>
   <script src="js/ghost-track-nr.js" data-defer="halloween-track-nr"></script>
   <script src="js/controls-help.js"></script>
+  <script src="js/pad-focus.js"></script>
+  <script src="js/pad-settings.js"></script>
   <script src="js/arcade-view.js"></script>
   <script src="js/director.js"></script>
 </body>

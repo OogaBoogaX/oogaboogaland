@@ -4,7 +4,7 @@
   const { clamp, damp, mat4, quat } = BL.math;
   const { boundsOf, updateWorld } = BL.scene;
   const { create: createControls } = BL.controls;
-  const { BUTTON: PAD, state: pad } = BL.gamepad;
+  const { ACTION: PAD, state: pad } = BL.gamepad, padActions = pad.actions;
   const BASE_FOV = 48 * Math.PI / 180;
   const MAX_FOV = 64 * Math.PI / 180;
   const MIN_HFOV = 58 * Math.PI / 180;
@@ -2641,33 +2641,33 @@
     const resetPad = () => { padFrame = pad.frame; padFire = padAds = mouseAds = ads = false; };
     const readPad = () => {
       const live = active && !externalControl && !menuOpen;
-      if (padPrimary && (!live || !(pad.held & PAD.rt))) { padPrimary = false; ctx.primaryAction(false); }
-      if (padFire && (!live || !(pad.held & PAD.rt))) {
+      if (padPrimary && (!live || !(padActions.held & PAD.fire))) { padPrimary = false; ctx.primaryAction(false); }
+      if (padFire && (!live || !(padActions.held & PAD.fire))) {
         padFire = false;
         weaponAction("weapon-primary-up");
         crew.setWeaponTrigger(false);
       }
-      if (padAds && (!live || !armed() || !(pad.held & PAD.lt))) {
+      if (padAds && (!live || !armed() || !(padActions.held & PAD.aim))) {
         padAds = false;
         if (!(live && armed() && mouseAds)) ads = false;
       }
       if (pad.frame === padFrame) return;
       padFrame = pad.frame;
       const cave = player();
-      if (!live || !pad.pressed || !cave) return;
-      if (pad.pressed & PAD.view && crew.weaponsEnabled) modeAction("mode-toggle");
-      if (pad.pressed & PAD.lt && armed()) {
+      if (!live || !padActions.pressed || !cave) return;
+      if (padActions.pressed & PAD.view && crew.weaponsEnabled) modeAction("mode-toggle");
+      if (padActions.pressed & PAD.aim && armed()) {
         if (birdsEye()) shooterView(true, renderer.size.width / 2, renderer.size.height / 2);
         else padAds = ads = true;
       }
-      if (pad.pressed & PAD.rt && ctx.primaryAction?.(true)) padPrimary = true;
-      else if (pad.pressed & PAD.rt) {
+      if (padActions.pressed & PAD.fire && ctx.primaryAction?.(true)) padPrimary = true;
+      else if (padActions.pressed & PAD.fire) {
         if (!armed()) weaponAction("weapon-fire");
         else padFire = weaponAction(cave.weapon.primaryEquipped ? "weapon-primary-down" : "weapon-fire", true);
       }
-      if (pad.pressed & PAD.x && cave.weapon.equipped) weaponAction(ctx.reloadAnywhere ? "weapon-reload" : "magazine-swap");
-      if (pad.pressed & PAD.y) weaponAction("weapon-toggle");
-      if (pad.pressed & PAD.b && armed() && cave.weapon.equipped) weaponAction("weapon-bash");
+      if (padActions.pressed & PAD.reload && cave.weapon.equipped) weaponAction(ctx.reloadAnywhere ? "weapon-reload" : "magazine-swap");
+      if (padActions.pressed & PAD.swapWeapon) weaponAction("weapon-toggle");
+      if (padActions.pressed & PAD.bash && armed() && cave.weapon.equipped) weaponAction("weapon-bash");
     };
     const readInput = (dt) => {
       readPad();
@@ -2689,7 +2689,8 @@
       }
       if (aimView()) {
         // Armed, the controls keep Q/E off the look axis (birds-eye orbits with them); aiming views turn with them here.
-        const turn = clamp(a.yaw + a.orbitYaw, -1, 1);
+        // A pad's look speed lets `a.yaw` pass 1; Q and E take only the room left, as they did at 1.
+        const turnMax = Math.max(1, Math.abs(a.yaw)), turn = clamp(a.yaw + a.orbitYaw, -turnMax, turnMax);
         if (a.x || a.y || a.up || turn || a.pitch) releaseCursorAim();
         if (lying) moveLyingView(turn * YAW_RATE * dt, a.pitch * PITCH_RATE * dt);
         else if (turning && !turn && !a.pitch) {

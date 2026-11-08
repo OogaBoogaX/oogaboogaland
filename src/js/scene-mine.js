@@ -2377,7 +2377,7 @@
     },
     controlsHelpHold() { pilot.controls.reset(); },
     get cabinetMenu() { return phase === "intro"; },
-    id: "mine", enter, update, overlay, onDonation, onKey, onLootCleared: () => {}, renderOpts: RENDER_OPTS,
+    id: "mine", padContext: "mine", enter, update, overlay, onDonation, onKey, onLootCleared: () => {}, renderOpts: RENDER_OPTS,
     leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     get inMotion() {
