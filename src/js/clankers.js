@@ -1515,7 +1515,7 @@
       e.motion.sitLookTarget = e.motion.sitShiftTarget = 0;
       if (!e.loungeDepart) e.lounge = "";
       e.phase = "chill"; e.motion.groom = 0; e.roam.arrived = false; e.roam.failedChoices = 0; e.roam.pose = partner ? "sit" : pose || loungePose(e);
-      e.roam.departPending = false;
+      e.roam.departPending = false; e.roam.fromPile = false;
     };
     const loungeSeatSpace = (e, x, y, z, heading, partner = e.loungePartner) => {
       const compact = e.compact, mode = e.footprintMode, radius = e.radius, height = e.height;
@@ -1625,8 +1625,9 @@
           const distance = Math.hypot(x - p.x, z - p.z);
           if (roofTour && !pass && roof && roofAt(x, y, z) === currentRoof) continue;
           // A former worker may start on the opposite side of the island.
-          // Let it reach the inactive frontage before choosing shorter outings.
-          const tripLimit = !stayLevel && !onRoof && !roof && loungeAreas.length ? roamRadius * 2
+          // Let it reach the inactive frontage before choosing shorter outings,
+          // and from the pile any lounge: a roof's included, or none is in reach.
+          const tripLimit = e.roam.fromPile || !stayLevel && !onRoof && !roof && loungeAreas.length ? roamRadius * 2
             : roofTour && roof ? 24 : !stayLevel && roof !== onRoof ? 18 : 12;
           if (!spawn && (distance < 2 || distance > tripLimit || loungeFailed(e, x, z))) continue;
           // Filter a future walking arrival, not the current reclining body's
@@ -2068,7 +2069,8 @@
       e.climb.debugTraverse = e.climb.debugStuck = false; e.climb.debugRole = -1;
       e.debugMove.active = e.debugMove.cancelled = e.debugMove.wallPending = false; e.debugMove.status = "";
       e.climb.traverseStart = e.climb.traverseEnd = 0;
-      e.climb.retry = e.climb.airAttachAfter = e.climb.handoffDirection = d.climbAxis = d.climbSide = 0; e.roam.count = e.roam.index = 0; e.roam.departPending = e.roam.propDeparture = false;
+      e.climb.stallX = NaN; e.climb.stallTime = 0;
+      e.climb.retry = e.climb.airAttachAfter = e.climb.handoffDirection = d.climbAxis = d.climbSide = 0; e.roam.count = e.roam.index = 0; e.roam.departPending = e.roam.propDeparture = e.roam.fromPile = false;
       e.actionControlled = e.motion.smash = false; e.startled.active = false;
       releaseLab(e); e.motion.lab = false; releaseOffice(e);
       e.mode = e.owner.state; e.site = e.owner.work.plannedSite >= 0 ? e.owner.work.plannedSite : e.owner.work.site;
@@ -2155,7 +2157,7 @@
           targetX: NaN, targetY: NaN, targetZ: NaN, order: 0, waitUntil: 0, blocked: 0, obstacle: null, waitPeer: null, waitX: 0, waitZ: 0,
           plans: 0, arrived: false, pose: "", poseWait: 0, lastPose: "", transition: 0, nextChoice: 0, failedChoices: 0, runUp: 0, jumpRetry: 0,
           departPending: false, departAt: 0, departX: 0, departY: 0, departZ: 0, riseAdmitted: false,
-          wallFailedX: NaN, wallFailedZ: NaN, wallFailedUntil: 0,
+          wallFailedX: NaN, wallFailedZ: NaN, wallFailedUntil: 0, fromPile: false,
           levelOnlyUntil: 0, planAt: 0, progressTime: 0, progressX: NaN, progressZ: NaN, progressDistance: Infinity, progressTurn: Infinity, progressCursor: -1, progressClaim: 0, backoutX: NaN, backoutZ: NaN, alignTime: 0, failedX: NaN, failedZ: NaN, failedUntil: 0 },
         controlled: false, remoteControlled: false, pendingSite: -1, actionControlled: false,
         debugMove: { active: false, cancelled: false, status: "", reason: "", target: { x: 0, y: 0, z: 0 },
@@ -2185,7 +2187,7 @@
         climb: { active: false,
           panel: { x: 0, y: 0, z: 0, heading: 0, nx: 0, nz: 1, u: 0, v: 0, depth: 0 },
           autoDirection: -1, descending: false, progress: 0, length: 0, lowerY: 0, upperY: 0, climbs: 0,
-          count: 0, index: 0, heading: 0, topHeading: 0, exitHeading: 0, fromTop: false, basePrepEnd: 0, lowerGroundDistance: 0, bottomTurn: 0, mount: 0, finish: 0, retry: 0, blocked: 0, mantleStart: 0, mantleRiseEnd: 0, autoTo: -1, waitRelease: false, lowerExit: true, minimum: 0, attempts: 0, failure: "", blockX: 0, blockY: 0, blockZ: 0,
+          count: 0, index: 0, heading: 0, topHeading: 0, exitHeading: 0, fromTop: false, basePrepEnd: 0, lowerGroundDistance: 0, bottomTurn: 0, mount: 0, finish: 0, retry: 0, blocked: 0, mantleStart: 0, mantleRiseEnd: 0, autoTo: -1, stallX: NaN, stallY: NaN, stallZ: NaN, stallTime: 0, waitRelease: false, lowerExit: true, minimum: 0, attempts: 0, failure: "", blockX: 0, blockY: 0, blockZ: 0,
           searchPending: false, searchDeferred: false, searchCursor: 0, searchIndex: 0, searchBudget: 0,
           searchX: 0, searchY: 0, searchZ: 0, searchHeading: 0, searchDescending: false,
           searchGoalX: 0, searchGoalY: 0, searchGoalZ: 0,
@@ -4185,6 +4187,28 @@
       // heights/angles describe the actual footing available at a handoff.
       if (ctx.groundPlaneAt) ctx.groundPlaneAt(p.x, p.y, p.z, e.heading, m.groundRects.angled, m);
       if (c.debugStuck) { c.holdPose = true; e.speed = 0; return; }
+      // A resting gorilla's climb that makes no headway (a crest it cannot mount, a blocked or held step, either way
+      // up the wall) releases outward onto clear ground below, as a blocked descent does, rather than hanging until the
+      // stall recovery moves it. A lounge it was climbing to is given up for another; it is not caught again in the fall.
+      if (autonomousChill(e)) {
+        if (!(Math.hypot(p.x - c.stallX, p.y - c.stallY, p.z - c.stallZ) < 0.1)) {
+          c.stallX = p.x; c.stallY = p.y; c.stallZ = p.z; c.stallTime = 0;
+        } else if ((c.stallTime += dt) > 2) {
+          const sx = Math.sin(e.heading), sz = Math.cos(e.heading);
+          const x = p.x - sx * 1.5, z = p.z - sz * 1.5, floor = pointSupportAt(x, z, p.y + 0.02, e);
+          if (Number.isFinite(floor) && floor <= p.y && floor >= p.y - 12 && actorLanding(e, x, floor, z)
+            && chillCaveClear(p.x, p.y, p.z, x, floor, z, true)
+            && climbClear(e, p.x, p.y, p.z, x, p.y, z, e.heading, true, true)) {
+            const r = e.roam;
+            if (e.goalY > p.y + 0.55) { r.failedX = e.goalX; r.failedZ = e.goalZ; r.failedUntil = elapsed + 60; }
+            r.count = r.index = 0; r.detour = false;
+            c.stallTime = 0;
+            dropRectangleClimb(e, true, 4); c.airAttachAfter = Infinity; d.resume = false;
+            setGoal(e, x, floor, z); e.rest = 0;
+            return;
+          }
+        }
+      }
       if (c.free) { updateRectangleClimb(e, dt); return; }
       // An autonomous route may walk up to the wall, but the upright
       // rectangle owns travel once stone actually supports it. The old rail
@@ -4466,6 +4490,8 @@
       if (e.route === "pile") {
         if (Math.hypot(e.goalX - p.x, e.goalZ - p.z) > 0.5) return true;
         e.phase = "chill"; e.route = ""; e.exitFootprint = true;
+        // The pile is the island's middle, farther from every rooftop lounge than an ordinary outing's reach.
+        e.roam.fromPile = true;
         return chooseChill(e, true);
       }
       if (e.route === "island") {
@@ -4642,14 +4668,15 @@
     // A passive companion's travel steps straight at its authored goal (exit,
     // apron, entry, slot or pile). A working gorilla heading for a work cave
     // walks straight to its apron wherever it set out from (another cave or the
-    // meadow), retargets and retries included. Only the walk to the pile, and
-    // an apron leg outside work travel, follow the authored spokes and pile
+    // meadow), retargets and retries included, and a gorilla leaving work walks
+    // straight to its Ooga's pile slot, over the pile itself, so no lane aims it
+    // round the pile ring while the ordinary controller aims at the slot. Only
+    // an apron leg outside work travel follows the authored spokes and pile
     // ring (`ctx.npcFixedPaths`, `passivePlanned`). Support and clearance are
     // terrain and cave walls only. A step a wall refuses goes to the ordinary
     // controller, which owns wall climbs and roof descents.
     const PASSIVE_WALKER = { pathing: null, root: null };
-    const passivePlanned = (e) => e.route === "pile"
-      || e.route === "apron" && !(e.phase === "travel" && e.mode === "working");
+    const passivePlanned = (e) => e.route === "apron" && !(e.phase === "travel" && e.mode === "working");
     const movePassive = (e, dt, speed, planned) => {
       const p = e.root.position;
       let tx = e.goalX, tz = e.goalZ;
@@ -7146,6 +7173,8 @@
         } else updateClimb(e, dt);
         poseEntry(e, dt, beforeX, beforeY, beforeZ); return;
       }
+      // Off the wall the no-headway watch forgets its spot, so a later climb from the same place gets its full time.
+      e.climb.stallX = NaN;
       if (e.startled.active) {
         updateStartled(e, dt); poseEntry(e, dt, beforeX, beforeY, beforeZ); return;
       }

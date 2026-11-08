@@ -448,6 +448,8 @@
     const stats = () => ({ particles: particles.length, pool: particlePool.length, bubbles: bubbles.length, zzz: zzz.length, damageNumbers: damageCount });
     return {
       spawnParticle, burst, puff, clearParticles, say, sayAt, next, more, said, hush, speech: bubbleOf, zzzAt, damageNumber, showTicker, drawOverlay, warmVisibility, warmBlockers: visibility.warm, update: stepParticles, trimPool, reset, dispose, stats,
+      // The overlay's projection without the scene's visibility gate, into one reused point (remote-players.js nameplates).
+      projectRaw,
       get inMotion() {
         return particles.length > 0 || damageCount > 0;
       }
