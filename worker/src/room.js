@@ -22,9 +22,6 @@
 // Private conversations (#188): who invited whom, who talks to whom and whom each blocked live in the attachments
 // (`pm`), so a woken room keeps them, and each account's blocks and rate limits outlive its reconnects while the room is
 // awake (`pmAccounts`); the frames pass straight through and are never kept.
-// Thumps: a voice participant's reaction, relayed to its voice place alone (`thumpPeers`, with `thumpAudible` marking the
-// copies whose recipient would hear it) within a per-account bucket; nothing is kept, timed or answered, and the
-// attachment is untouched.
 // Reactions: an emoji goes to the sender's zone and is never kept; the raised hand lives on the record and its
 // attachment, so a woken room still shows it, and goes to everyone on a change. One bucket a record limits both.
 
@@ -32,12 +29,12 @@ import { DurableObject } from "cloudflare:workers";
 import {
   CABINETS, hockey, CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
   NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
-  DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, GHOST_HZ, GHOST_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, THUMP_HZ, THUMP_BURST, REACT_FEATURE, REACT_HZ, REACT_BURST,
+  DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, GHOST_HZ, GHOST_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, REACT_FEATURE, REACT_HZ, REACT_BURST,
   GHOST_MAGIC, GHOST_FRAME_MAX, GHOST_FRAME_HZ, GHOST_FRAME_BURST, inGhostArena, ghostCandidate, watchesGhost,
   CHALK, CHALK_HZ, CHALK_BURST, CHALK_IDLE_MS, CHALK_SAVE_MS, CHALK_TELL_MS, CHALK_FEATURE,
   WALLET_CAP, WALLET_HZ, WALLET_BURST,
   PM_FEATURE, PM_HZ, PM_BURST, PM_INVITE_HZ, PM_INVITE_BURST, PM_CONTROL_HZ, PM_CONTROL_BURST, PM_INVITES, PM_BLOCKS, PM_ACCOUNT_KEEP,
-  chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers, thumpPeers, thumpAudible, thumpBucketFor,
+  chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
   BLEND, BLEND_HZ,
 } from "./protocol.js";
 import { sha256Hex } from "./crypto.js";
@@ -78,7 +75,6 @@ export class Room extends DurableObject {
     this.chatAccepted = new Map();
     this.chatBuckets = new Map();
     this.pmAccounts = new Map();
-    this.thumpBuckets = new Map();
     this.doorQueue = [];
     this.doorActive = null;
     this.doorPasses = new Map();
@@ -491,9 +487,6 @@ export class Room extends DurableObject {
     } else if (msg.t === "pm") {
       // Saves each attachment it changes itself.
       return this.privateMessage(p, msg);
-    } else if (msg.t === "thump") {
-      // Nothing in the attachment changes.
-      return this.thump(p);
     } else if (msg.t === "react") {
       // A reaction over a driven body, for the players in its zone to draw; nothing is kept.
       if (!p.body || !this.reactToken(p)) return;
@@ -832,18 +825,6 @@ export class Room extends DurableObject {
   reactToken(p) {
     if (!p.reactBucket) p.reactBucket = { tokens: REACT_BURST, at: p.seenAt };
     return takeToken(p.reactBucket, REACT_HZ, p.seenAt, REACT_BURST);
-  }
-
-  // A thump from a voice participant goes to everyone in voice in its place as one tiny frame, never back to the sender,
-  // marked `a: 1` for those who would hear the sender speak; over the bucket, or with nobody to see it, it is dropped
-  // without a word.
-  thump(p) {
-    const peers = thumpPeers(this.players.values(), p, this.studio);
-    if (!peers.length) return;
-    if (!p.thumpBucket) p.thumpBucket = thumpBucketFor(this.thumpBuckets, p.id, p.seenAt, this.players);
-    if (!p.thumpBucket || !takeToken(p.thumpBucket, THUMP_HZ, p.seenAt, THUMP_BURST)) return;
-    const seen = `{"t":"thump","id":${p.id}}`, heard = `{"t":"thump","id":${p.id},"a":1}`;
-    for (const q of peers) this.send(q.ws, thumpAudible(q, p, this.studio) ? heard : seen);
   }
 
   // Also after any page's `hub` flag changes: the host sends frames only while someone follows.
