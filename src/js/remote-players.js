@@ -188,8 +188,11 @@
       const height = gorilla ? 0 : BL.crew.bodyHeightOf(cave);
       addChild(root, cave.root);
       const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0 } : null;
+      // An opted-in pet (`petRidesHat`) keeps its heel spot as built, to come back to off the hat.
+      const dog = !gorilla && cave.traits.petRidesHat ? cave.parts.dog : null;
       const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, jetNode: null, jetFlame: null, swing: 0, shotAt: -Infinity, lastHeld: 0, lastMode: 0, lastMelee: 0, sampleAt: 0, sampleMelee: 0, sampleFlags: 0, sampleSwap: 0, sampleSwapIndex: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, ghosted: null, label: "", labelW: 0,
-        react: "", reactT: 0, screenX: NaN, plateLeft: NaN, plateTop: NaN, plateW: 0, plateH: 0, plateTextX: NaN, plateBaseline: NaN, plateBarLeft: NaN, plateBarTop: NaN, pickOwner: { kind: "player", id: rec.id, cave, weaponType: "none" } };
+        react: "", reactT: 0, screenX: NaN, plateLeft: NaN, plateTop: NaN, plateW: 0, plateH: 0, plateTextX: NaN, plateBaseline: NaN, plateBarLeft: NaN, plateBarTop: NaN, pickOwner: { kind: "player", id: rec.id, cave, weaponType: "none" },
+        ride: dog ? BL.crew.hatRide(cave) : null, riding: false, dogHome: dog ? { x: dog.position.x, y: dog.position.y, z: dog.position.z } : null };
       bodies.set(rec.id, entry);
       hideLocal(entry);
       return entry;
@@ -269,6 +272,40 @@
       entry.jetNode.visible = (jet & 1) === 1;
       flame.visible = entry.jetNode.visible && power > 0;
       if (flame.visible) flame.scale.y = (0.7 + Math.sin(jetClock * 40 + entry.id) * 0.3) * power / 2;
+    };
+    // An opted-in pet rides the hat while this player wears a jetpack, as it does on their own page, driven here from
+    // the room's `jet` alone with the crew's loop (`crew.poseHatRide`): up when it goes on, down when it comes off. It
+    // stays a child of the body, at its heel spot when down, so nothing here checks ground. Allocates nothing.
+    const showRide = (entry, rec, dt) => {
+      const ride = entry.ride, dog = entry.cave.parts.dog, home = entry.dogHome, p = dog.position, jet = rec.jet | 0, H = BL.crew.HAT_RIDE;
+      const worn = (jet & 1) === 1;
+      if (entry.riding) {
+        if (!worn) {
+          entry.riding = false; ride.t = CALM.matches ? 1 : 0;
+          ride.sx = p.x; ride.sy = p.y; ride.sz = p.z;
+          dog.quaternion = null; dog.rotation.y = 0;
+        }
+      } else if (worn) {
+        entry.riding = true; ride.t = CALM.matches || !entry.cave.root.visible ? 1 : 0;
+        ride.angle = Math.atan2(home.x, home.z);
+      }
+      if (entry.riding) {
+        BL.scene.updateLocal(entry.cave.parts.head);
+        BL.crew.poseHatRide(ride, dog, entry.cave.parts.head.local, ride.t < 1 ? 0 : dt);
+        if (ride.t < 1) {
+          ride.t = Math.min(1, ride.t + dt / H.leap);
+          const k = BL.math.ease.inOutQuad(ride.t), arc = 4 * ride.t * (1 - ride.t) * 0.6;
+          p.x = home.x + (p.x - home.x) * k; p.y = home.y + (p.y - home.y) * k + arc; p.z = home.z + (p.z - home.z) * k;
+        }
+        return;
+      }
+      if (ride.t < 1) {
+        ride.t = Math.min(1, ride.t + dt / H.hop);
+        const k = BL.math.ease.inOutQuad(ride.t), arc = 4 * ride.t * (1 - ride.t) * 0.4;
+        p.x = ride.sx + (home.x - ride.sx) * k; p.y = ride.sy + (home.y - ride.sy) * k + arc; p.z = ride.sz + (home.z - ride.sz) * k;
+        return;
+      }
+      p.x = home.x; p.y = home.y; p.z = home.z;
     };
     // The same third-person grip, sling, recoil and reload poses as the local crew. Timers are sampled
     // state, aged on the room's clock; a late join never starts an obsolete action from its beginning.
@@ -402,6 +439,7 @@
             if (gun) gun.visible = false;
           }
           if (posed) posed(entry.cave, entry.cave.root.position.y - entry.baseY, rec, dt);
+          if (entry.ride) showRide(entry, rec, dt);
         }
         // The top's move carries a player standing on it; a snap carries nobody.
         const height = entry.gorilla ? entry.cave.bodyHeight : entry.height, top = entry.y + height;

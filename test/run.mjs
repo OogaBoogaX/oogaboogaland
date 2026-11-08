@@ -24872,13 +24872,15 @@ const exteriorEnrichmentChecks = BL => {
 
 // Rule: a pet a character builds (`parts.dog`) walks at its Ooga's heel: lifted off the body into the crew's root,
 // it trots after its Ooga to its spot, a wall the scene's `walkable` refuses stops it, and out of reach it turns up at
-// its spot; it hides with its Ooga and goes with the crew.
+// its spot; it hides with its Ooga and goes with the crew. These run without `petRidesHat`, as every other pet does.
 const petChecks = BL => {
   const noop=()=>{},S=BL.scene,root=S.createNode();let wall=false,missing=false,cliff=false,offsetWall=false,npcPaused=false;
+  const look=BL.characters.get("Bitcoin-Bill").look,rides=look.petRidesHat;delete look.petRidesHat;
   const C=BL.crew.create({root,world:{level:0},playerName:"Bitcoin-Bill",input:{add:noop,remove:noop},hud:{setRosterRow:noop},game:{state:{assignments:{},inventory:[]}},viewYaw:0,npcPaused:()=>npcPaused,
     groundAt:x=>missing?-Infinity:cliff&&x>1?-50:0,walkable:(ax,az,bx,bz)=>!(wall&&bx>1.5)&&!(offsetWall&&bx>0.3),fx:{say:noop,zzzAt:noop,burst:noop,puff:noop,spawnParticle:noop,damageNumber:noop}});
+  if(rides)look.petRidesHat=rides;
   const A=C.cavemen.get("Bitcoin-Bill"),pet=A&&A.pet,dog=A&&A.parts.dog;
-  const lifted=!!pet&&dog.parent===root&&!A.root.children.includes(dog);
+  const lifted=!!pet&&dog.parent===root&&!A.root.children.includes(dog)&&pet.ride===null;
   A.root.visible=true;Object.assign(A.root.position,{x:0,y:A.baseY,z:0});A.root.rotation.y=0;
   let t=0;const run=n=>{for(let i=0;i<n;i++){t+=1/60;C.update(1/60,t);}};
   run(2);const spot={x:dog.position.x,z:dog.position.z};
@@ -24917,7 +24919,59 @@ const petChecks = BL => {
     noGround&&safeSpawn&&noCliff&&pausedNpc&&driven,JSON.stringify({noGround,safeSpawn,noCliff,pausedNpc,driven}));
   A.root.visible=false;run(1);const hidden=!dog.visible;
   C.dispose();const gone=!root.children.includes(dog);
-  record("pets: a character's dog is lifted off its Ooga, trots after it to its spot behind, stops at a wall, turns up when out of reach, hides with it and leaves with the crew",lifted&&behind&&lag&&followed&&blocked&&snapped&&hidden&&gone,JSON.stringify({lifted,spot,behind,lag,followed,blocked,snapped,hidden,gone}));
+  record("pets: a character's dog is lifted off its Ooga, trots after it to its spot behind, stops at a wall, turns up when out of reach, hides with it and leaves with the crew",lifted&&behind&&lag&&followed&&blocked&&snapped&&hidden&&gone,JSON.stringify({lifted,spot,behind,lag,followed,blocked,snapped,hidden,gone}));  petRideChecks(BL);
+};
+
+// Rule (#520): with `petRidesHat` in its owner's look, a pet leaps onto the hat the moment a jetpack goes on, grounded
+// or flying, trots round it held to the head through turns and flight, keeps there through a landing, wears no
+// jetpack, and hops down to checked ground beside its owner (never into a wall) when the jetpack comes off; remote
+// copies do the same from the room's `jet` alone. Riding reuses its state: the same quaternion and seat every frame.
+const petRideChecks = BL => {
+  const noop=()=>{},S=BL.scene,M=BL.math.mat4,root=S.createNode();let wall=false;
+  // Character changes are queued separately; exercise the engine opt-in independently of that bundle.
+  const look=BL.characters.get("Bitcoin-Bill").look,rides=look.petRidesHat;look.petRidesHat=true;
+  const C=BL.crew.create({root,world:{level:0},playerName:"Bitcoin-Bill",input:{add:noop,remove:noop},hud:{setRosterRow:noop},game:{state:{assignments:{},inventory:[]}},viewYaw:0,
+    groundAt:()=>0,walkable:(ax,az,bx,bz)=>!(wall&&bx>0.3),fx:{say:noop,zzzAt:noop,burst:noop,puff:noop,spawnParticle:noop,damageNumber:noop}});
+  const A=C.cavemen.get("Bitcoin-Bill"),pet=A.pet,dog=pet.node,ride=pet.ride,seat=ride&&ride.seat;
+  A.root.visible=true;Object.assign(A.root.position,{x:0,y:A.baseY,z:0});A.root.rotation.y=0;
+  let t=0;const run=n=>{for(let i=0;i<n;i++){t+=1/60;C.update(1/60,t);}};
+  // Where the dog stands in the head's own frame: on the measured loop, at its height.
+  const inverse=M.create(),local=new Float32Array(3);
+  const onHat=()=>{S.updateWorld(A.root);M.invert(inverse,A.parts.head.world);M.transformPoint(local,inverse,dog.position.x,dog.position.y,dog.position.z);
+    const r=Math.hypot(local[0]-seat.cx,local[2]-seat.cz);return r<=Math.max(...seat.r)+1e-3&&r>=Math.min(...seat.r)-1e-3&&local[1]>=Math.min(...seat.y)-1e-3&&local[1]<=Math.max(...seat.y)+BL.crew.HAT_RIDE.bob+1e-3;};
+  run(30);const heel=!!ride&&pet.mode===0&&dog.quaternion==null;
+  A.jetFuel=1;A.jet={power:0,thrust:false};run(3);const leaping=pet.mode===3;
+  run(40);const grounded=pet.mode===4&&onHat()&&!pet.pack.visible&&dog.quaternion===ride.q;
+  const angle=ride.angle;run(30);const trots=ride.angle!==angle&&onHat();
+  A.jet.power=1;A.jet.thrust=true;A.root.position.y=A.baseY+4;A.hopV=1;run(30);
+  A.root.rotation.y=1.2;A.parts.head.rotation.x=0.3;run(30);const flies=pet.mode===4&&onHat()&&!pet.pack.visible&&!pet.flame.visible&&dog.quaternion===ride.q&&ride.seat===seat;
+  A.parts.head.rotation.x=0;A.root.rotation.y=0;
+  A.jet.power=0;A.jet.thrust=false;A.hopV=-2;A.root.position.y=A.baseY;run(120);const landedUp=pet.mode===4&&onHat();
+  A.jet=null;A.hopV=0;run(3);const hopping=pet.mode===5;run(150);
+  const down=pet.mode===0&&Math.abs(pet.feet)<1e-6&&dog.quaternion===null&&!dog.cameraHidden&&Math.hypot(dog.position.x,dog.position.z)>0.3;
+  A.jet={power:0,thrust:false};run(60);wall=true;A.jet=null;run(180);const walled=pet.mode===0&&dog.position.x<=0.3+1e-6&&Math.abs(pet.feet)<1e-6;
+  wall=false;A.jet={power:0,thrust:false};run(60);A.root.visible=false;run(1);const hidden=!dog.visible&&pet.mode===0&&dog.quaternion===null;
+  A.root.visible=true;run(60);const back=pet.mode===4&&onHat();
+  record("pets: with petRidesHat the dog leaps onto the hat when the jetpack goes on, trots round it through turns, tilts, flight and landing without a jetpack of its own, reuses its ride state, and hops down to checked ground clear of walls when it comes off",
+    heel&&leaping&&grounded&&trots&&flies&&landedUp&&hopping&&down&&walled&&hidden&&back,JSON.stringify({heel,leaping,grounded,trots,flies,landedUp,hopping,down,walled,hidden,back,mode:pet.mode}));
+  C.dispose();
+  // Another player's Bill: the remote copy's dog, a child of the body at its heel, rides the hat while `jet` is on.
+  const oldNet=BL.net,records=new Map(),sceneRoot=S.createNode();
+  BL.net={serverNow:()=>Date.now(),sendSwing:()=>true,remotes:records,subscribeShots:()=>noop,subscribeSwings:()=>noop};
+  const pool=BL.remotePlayers.create({root:sceneRoot,crew:{cavemen:new Map(),player:null,refreshStates(){},showShot:noop},visible:()=>true});
+  records.set(81,{id:81,login:"Bitclank-Bill",display:"Bill",body:"Bitcoin-Bill",zone:"outside",x:0,y:0,z:0,yaw:0,jet:0,weapon:0});
+  const tick=n=>{for(let i=0;i<n;i++)pool.update(1/60);};
+  tick(5);const R=pool.body(81),rdog=R.parts.dog,home={...rdog.position};
+  const atHeel=()=>rdog.parent===R.root&&rdog.quaternion==null&&rdog.position.x===home.x&&rdog.position.y===home.y&&rdog.position.z===home.z;
+  const rOnHat=()=>{S.updateLocal(R.parts.head);M.invert(inverse,R.parts.head.local);M.transformPoint(local,inverse,rdog.position.x,rdog.position.y,rdog.position.z);
+    const r=Math.hypot(local[0]-seat.cx,local[2]-seat.cz);return r<=Math.max(...seat.r)+1e-3&&local[1]>=Math.min(...seat.y)-1e-3;};
+  const remoteHeel=atHeel();records.get(81).jet=1;tick(60);const remoteUp=rdog.quaternion!=null&&rOnHat();
+  records.get(81).jet=5;records.get(81).y=4;tick(60);const remoteFlying=rOnHat();
+  records.get(81).jet=0;tick(60);const remoteDown=atHeel();
+  record("pets: another player's opted-in dog rides the hat while their jetpack is on and is back at the heel when it comes off, from the room's jet alone",
+    remoteHeel&&remoteUp&&remoteFlying&&remoteDown,JSON.stringify({remoteHeel,remoteUp,remoteFlying,remoteDown}));
+  pool.dispose();BL.net=oldNet;
+  if(rides===undefined)delete look.petRidesHat;else look.petRidesHat=rides;
 };
 
 // Rule: the authored Maxis routes and stand points must fit the real Yellow actor, not a guessed radius.
