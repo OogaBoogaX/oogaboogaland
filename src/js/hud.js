@@ -171,18 +171,6 @@
     path.setAttribute("fill", "currentColor");
     voiceIcon.append(path);
   }
-  // The Ooga thump's pixel mallet (thump.js), on the voice mark's 9x9 grid: the Thump button and the mark beside a
-  // player in Online Oogas (players.js) clone it.
-  const malletIcon = document.createElementNS(SIGN_NS, "svg");
-  malletIcon.setAttribute("viewBox", "0 0 9 9");
-  malletIcon.setAttribute("aria-hidden", "true");
-  malletIcon.setAttribute("class", "pixel-mallet");
-  {
-    const path = document.createElementNS(SIGN_NS, "path");
-    path.setAttribute("d", "M1 1h7v3H1zM4 4h1v5H4z");
-    path.setAttribute("fill", "currentColor");
-    malletIcon.append(path);
-  }
   // The Bananas panel's banana (its glyph is in the panel's markup) before each amount its two lists show: every row
   // clones it, and the stylesheet hides it while the lists count sats.
   const amountBanana = document.createElementNS(SIGN_NS, "svg");
@@ -1994,7 +1982,6 @@
       else if (b.dataset.action === "account-rejoin") BL.net.rejoin();
       else if (b.dataset.action === "account-voice") BL.voice.toggle();
       else if (b.dataset.action === "account-voice-leave") BL.voice.stop();
-      else if (b.dataset.action === "account-thump") BL.thump.press();
       else actionHandler && actionHandler(b.dataset.action);
     });
     // A game's side panels fold away and come back from a tab on the screen's edge: a `data-fold`
@@ -2467,7 +2454,22 @@
   // The org's .github repository holds its profile and templates, not a project, so it gets no chip.
   const STAT_FACE_PX = 40, REPO_URL = "https://github.com/OogaBoogaX/", UNLISTED_REPOS = new Set([".github"]);
   const SINCE = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" });
+  const shortYear = (t) => SINCE.formatToParts(t).map((p) => p.type === "year" ? `\u2019${p.value.slice(-2)}` : p.value).join("");
   const faces = new Map();
+  // The total and the first contribution stand side by side next to the face: the day with its whole year while they
+  // fit, "’26" once a narrow panel would wrap them, and only past that do they wrap. Fitted again when either changes
+  // or the strip's width does, on the bitcoin line's pattern; a hidden strip (width 0) waits until it shows.
+  const sinceFits = new Map();
+  let sinceResize = null;
+  const fitSince = (stats) => {
+    const facts = stats.facts;
+    stats.since.textContent = stats.long;
+    if (!stats.fitWidth) return;
+    facts.dataset.fit = "line";
+    if (facts.scrollWidth <= facts.clientWidth) return;
+    stats.since.textContent = stats.short;
+    if (facts.scrollWidth > facts.clientWidth) facts.dataset.fit = "wrap";
+  };
   let liveStats = null;
   const statCount = (n) => n >= 1e4 ? BL.game.formatLarge(n) : n.toLocaleString();
   const countIn = (board, login) => {
@@ -2495,8 +2497,18 @@
     // Links in a group, not list items: the roster's own rows are its <li>s.
     repos.className = "roster-stats-repos"; repos.setAttribute("role", "group"); repos.setAttribute("aria-label", "Repositories");
     box.append(face, facts, kinds, repos);
-    row.nodes.stats = { box, face, total, since, kinds, repos };
+    const stats = row.nodes.stats = { box, face, facts, total, since, kinds, repos, long: "", short: "", fitWidth: 0 };
     row.li.append(box);
+    sinceFits.set(facts, stats);
+    if (!sinceResize) sinceResize = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const fit = sinceFits.get(entry.target), width = Math.round(entry.contentRect.width);
+        if (width === fit.fitWidth) continue;
+        fit.fitWidth = width;
+        fitSince(fit);
+      }
+    });
+    sinceResize.observe(facts);
     row.name.setAttribute("aria-controls", box.id);
   };
   const fillStats = (row) => {
@@ -2511,7 +2523,8 @@
     stats.face.width = stats.face.height = art.width;
     ctx.drawImage(art, 0, 0);
     const joined = character ? character.joined * 1e3 : contributor.lastCommitAt;
-    stats.since.textContent = joined > 0 ? SINCE.format(joined) : "—";
+    stats.long = joined > 0 ? SINCE.format(joined) : "—";
+    stats.short = joined > 0 ? shortYear(joined) : "—";
     const data = liveStats || BL.jumbotronData;
     const kinds = [];
     let sum = 0;
@@ -2521,6 +2534,7 @@
       if (n) kinds.push(`${statCount(n)} ${n === 1 ? one : many}`);
     }
     stats.total.textContent = statCount(sum);
+    fitSince(stats);
     // Each count stays on one line with its label (and the dot after it), so the line wraps only between them.
     stats.kinds.replaceChildren();
     kinds.forEach((text, i) => {
@@ -2644,5 +2658,5 @@
       else b.textContent = `Back to ${place}`;
     }
   };
-  BL.hud = { create, renderIcon, renderFaceIcon, renderBodyIcon, signLettering, showAccount, showMic, showVoices, malletIcon, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor, voiceIcon, voiceWords };
+  BL.hud = { create, renderIcon, renderFaceIcon, renderBodyIcon, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor, voiceIcon, voiceWords };
 })();

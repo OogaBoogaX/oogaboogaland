@@ -36,7 +36,6 @@ import "../../src/js/reaction-policy.js";
 //                                (`parseStudioCommand` in studio-policy.js; see docs/dsb-studio-session.md)
 //                 { t: "ghost", k, g?, d?, h? }  HALLOWEEN: the ghost hunt's `start`, `ready`, `pause` or `leave`, or `hits` h, for its
 //                                host, from a page in the arcade's ghost arena
-//                 { t: "thump" }                 a voice participant's Ooga thump (see Thumps below); no other field
 //                 { t: "react", e }              an emoji over the driven body for a moment (see Reactions below)
 //                 { t: "hand", on, tone? }       the raised hand up or down, in skin tone 0 (none) to 5
 //                 { t: "chalk", k, ... }        the EntropyLab chalkboard: `take` or `drop` the board, or an edit by
@@ -86,8 +85,6 @@ import "../../src/js/reaction-policy.js";
 //                 ghost-host { id, followers }  who runs the ghost arena's hunt (0 for nobody) and how many pages in
 //                                            the arena follow it; welcome carries ghostHost and ghostFollowers; binary
 //                                            frames led by GHOST_MAGIC from it, to pages in the arena
-//                 thump { id, a? }           player `id` thumped: sent only to those voice places them with, never the
-//                                            sender; `a: 1` when this recipient would hear the sender's voice
 //                 react { id, e }            player `id` reacted with emoji `e`, to the players in their zone
 //                 hand { id, on, tone }      player `id` raised or lowered their hand; welcome and join carry `hand`
 //                                            and `handTone`. To the sender alone, its own id: a change it was refused
@@ -107,17 +104,6 @@ import "../../src/js/reaction-policy.js";
 // and the rate limits stay with the account across its reconnects while the room is awake, as chat's do. The
 // conversation ends when either page leaves. A pm frame may run to CHAT_FRAME_MAX as a chat frame does, with
 // PM_DATA_MAX characters of frame.
-// Thumps: a reaction in voice instead of unmuting to say "yes!". Taken only from a current voice participant (a receive
-// session, as `voicePeers` counts a listener: talking or listen-only) and relayed as `{"t":"thump","id":N}` to every
-// other voice participant who shares a voice place with them either way (`thumpPeers`: the zone group or a crossing's
-// share of it, and in the Ember Den the table, by the same predicates as `voicePeers`), so other tables, other places
-// and `none` never see it. Each copy also says whether its recipient would hear the sender's voice there (`a: 1`,
-// `thumpAudible`): not where the DSB Studio keeps the sender from speaking, as it does its audience. The page shows every
-// thump it is sent and sounds only those, within its own hearing range and mutes. A frame with any other field is
-// ignored. Each account spends a bucket of THUMP_HZ a second bursting to THUMP_BURST
-// (`takeToken`); buckets live in memory alone, at most THUMP_BUCKET_KEEP, and an absent account's full bucket is
-// dropped when the next one is made (`thumpBucketFor`). No timer, alarm, storage, reply or history: a dropped thump is
-// simply not relayed. The page draws everything.
 // Reactions: a room that takes them lists REACT_FEATURE in welcome's `features`. A reaction is one emoji the shared
 // policy accepts (reaction-policy.js over emoji-data.js: plain or in a skin tone, never text), taken from a player
 // driving a body and relayed as `react { id, e }` to the other players in its zone, never kept. The raised hand is a
@@ -169,13 +155,9 @@ export const CHAT_HZ = 1;
 export const CHAT_BURST = 3;
 // Active accounts plus bounded reconnect debt, held only while the room is awake.
 export const CHAT_BUCKET_KEEP = MAX_PLAYERS * 2;
-// Thumps: about two a second per player, three in a burst; active accounts plus bounded reconnect debt.
 export const REACT_FEATURE = "react-v1";
 export const REACT_HZ = 3;
 export const REACT_BURST = 6;
-export const THUMP_HZ = 2;
-export const THUMP_BURST = 3;
-export const THUMP_BUCKET_KEEP = MAX_PLAYERS * 2;
 // The page sends `{"t":"chat","text":…}` with its text already sanitized, under MESSAGE_MAX; the margin is
 // for a page that sends it raw (every character escaped as \uXXXX is six).
 export const CHAT_PREFIX = '{"t":"chat",';
@@ -399,7 +381,6 @@ export const parseClientMessage = (text) => {
     if (msg.k === "hits") return ghostHits(msg.h);
     return msg.k === "hit" && ghostHit(msg.g, msg.d) ? { t: "ghost", k: "hit", g: msg.g, d: msg.d } : null;
   }
-  if (msg.t === "thump") return Object.keys(msg).length === 1 ? { t: "thump" } : null;
   if (msg.t === "react") return globalThis.BL.reactionPolicy.valid(msg.e) ? { t: "react", e: msg.e } : null;
   if (msg.t === "hand") {
     const tone = msg.tone === undefined ? 0 : msg.tone;
@@ -436,18 +417,6 @@ export const takeToken = (bucket, rate, now, burst = rate) => {
   if (bucket.tokens < 1) return false;
   bucket.tokens -= 1;
   return true;
-};
-
-/** A thump bucket for account `id`, made full on first use and kept while the room is awake; on making one, absent
- *  accounts whose bucket has refilled are dropped (lazy expiry), and at THUMP_BUCKET_KEEP none is made (null). */
-export const thumpBucketFor = (buckets, id, now, present) => {
-  let bucket = buckets.get(id);
-  if (bucket) return bucket;
-  for (const [account, b] of buckets) if (!present.has(account) && b.tokens + (now - b.at) * THUMP_HZ / 1000 >= THUMP_BURST) buckets.delete(account);
-  if (buckets.size >= THUMP_BUCKET_KEEP) return null;
-  bucket = { tokens: THUMP_BURST, at: now };
-  buckets.set(id, bucket);
-  return bucket;
 };
 
 /** The chat's last `keep` lines in a fixed ring: `push` is constant time, `list` copies them out oldest first. */
@@ -541,7 +510,7 @@ export const zoneGroup = (zone) => {
 const sharesPlace = (p, group, q) => p.blendTo || q.blendTo
   ? BLEND.shares(p.zone, p.blendTo || null, p.blendK || 0, q.zone, q.blendTo || null, q.blendK || 0)
   : zoneGroup(q.zone) === group;
-// The three halves of who hears whom, shared by `voicePeers` and `thumpPeers`. Both restrictions hold together: a
+// The three halves of who hears whom, for `voicePeers`. Both restrictions hold together: a
 // bodiless listener counts only inside the Studio, a Studio speaker only while permitted, and Ember Den voice only
 // between players at the same poker table.
 /** Whether `p` is a voice participant who can hear anyone: a receive session, driving (or in the Studio), not `none`. */
@@ -568,20 +537,6 @@ export const voicePeers = (players, studio = null) => {
   }
   return out;
 };
-
-/** The players a thump from `sender` reaches: every other voice participant sharing a voice place with it, from either
- *  side (one may be part of the way across to the other's place). Empty unless the sender is a voice participant. */
-export const thumpPeers = (players, sender, studio = null) => {
-  const out = [];
-  if (!voiceListener(sender, studio)) return out;
-  for (const q of players) {
-    if (q !== sender && voiceListener(q, studio) && (voiceTogether(q, sender) || voiceTogether(sender, q))) out.push(q);
-  }
-  return out;
-};
-
-/** Whether recipient `q` would hear `sender`'s voice, microphone aside: the sound of its thump, not the sight. */
-export const thumpAudible = (q, sender, studio = null) => voiceListener(q, studio) && voiceAudible(sender, studio) && voiceTogether(q, sender);
 
 // NPC host: one page runs the Ooga crew (and the hub's events) for everyone and streams them; the others
 // follow. The sitting host (`incumbent`) keeps the role while it still shows the island (`inHub`: in the hub
