@@ -19522,7 +19522,7 @@ const timechainRoom = { name: "timechain room", why: "playthrough: a signed-out 
       saniState: BL.contributors.stateFor(BL.contributors.roster.find(entry => entry.name === "SaniExp")), remotes: D.remotes === null };
   })()`);
   record("timechain room: a signed-out arrival at /sphere-3 is a solo copy of Room 3 at 1× that publishes nothing, with its mode named and every screen painted",
-    painted && r.room === 3 && r.scale === 1 && r.radius === 9 && r.mode === "solo" && r.zone === "none" && r.body === null && r.chip.includes("Solo visit · not signed in") && r.subtitle === "Timechain Sphere · Room 3"
+    painted && r.room === 3 && r.scale === 1 && r.radius === 9 && r.mode === "solo" && r.zone === "none" && r.body === null && r.chip.includes("Solo visit · not signed in") && r.subtitle === "TCS · Room 3"
       && r.hash === "#/sphere-3" && r.requests === 0 && r.paused === "PAUSED" && r.sani === (r.saniState === "sleeping" || r.saniState === "away") && r.remotes, JSON.stringify(r));
   record("timechain room: scroll reaches shoulder and orbit, nothing lets go of the Ooga, and every view stays empty-handed with no jetpack",
     r.before === "first-person" && r.shoulder === "shoulder" && r.orbit === "orbit" && r.kept && r.after === "first-person"
@@ -19974,10 +19974,10 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
     a.over === null && a.dip === null && a.half.to === "hq" && Math.abs(a.half.t - 0.5) <= 0.01 && a.floor.to === "hq" && a.floor.t === 1 && a.under.to === "hq" && a.under.t === 1
       && a.down.to === "hq-basement" && Math.abs(a.down.t - 0.5) <= 0.01 && a.deep.to === "hq-basement" && a.deep.t === 1, JSON.stringify(a));
   record("voice levels: down HQ's entrance ramps, its basement's and the rainforest's descent a player hears both levels by height, each level alone on it, its rooms HQ's whatever the height, never the lake over the chamber",
-    lv.entrance.to === "hq" && Math.abs(lv.entrance.t - lv.rampShare) <= 0.05 && lv.floor.to === "hq" && lv.floor.t === 1 && lv.floor.zone === "hq" && lv.stair.to === "hq-basement" && Math.abs(lv.stair.t - 0.5) <= 0.05 && lv.stair.zone === "hq"
-      && lv.basement.to === "hq-basement" && lv.basement.t === 1 && lv.basement.zone === "hq" && lv.backUp.to === "hq" && lv.backUp.t === 1
-      && lv.descent.to === "rainforest-under" && Math.abs(lv.descent.t - lv.depth) <= 0.05 && lv.descent.zone === "rainforest"
-      && lv.chamber.to === "rainforest-under" && lv.chamber.t === 1 && !lv.court.to && lv.court.zone === "rainforest" && !lv.lake.to,
+    lv.entrance.to === "hq" && Math.abs(lv.entrance.t - lv.rampShare) <= 0.05 && lv.floor.to === "hq" && lv.floor.t === 1 && lv.floor.zone === "hq" && lv.stair.to === "hq-basement" && Math.abs(lv.stair.t - 0.5) <= 0.05 && lv.stair.zone === "hq-basement"
+      && lv.basement.to === "hq-basement" && lv.basement.t === 1 && lv.basement.zone === "hq-basement" && lv.backUp.to === "hq" && lv.backUp.t === 1 && lv.backUp.zone === "hq"
+      && lv.descent.to === "rainforest-under" && Math.abs(lv.descent.t - lv.depth) <= 0.05 && lv.descent.zone === "rainforest-under"
+      && lv.chamber.to === "rainforest-under" && lv.chamber.t === 1 && lv.chamber.zone === "rainforest-under" && !lv.court.to && lv.court.zone === "rainforest" && !lv.lake.to,
     JSON.stringify(lv));
 } };
 scene("hub", { label: "player stacking", query: "solo=1&character=portlandhodl&pos=0", steps: [hubPlayerStacking, hubChalkboardReach, hubVoiceLevels, hubNameplates] });
@@ -25810,7 +25810,6 @@ const sheetRailChecks = async () => {
 };
 const playersTabChecks = async BL => {
   const context = { window: { BL: {} } };
-  runInNewContext(readFileSync(join(root, "src/js/routes.js"), "utf8"), context);
   runInNewContext(readFileSync(join(root, "src/js/zone-map.js"), "utf8"), context);
   const Z = context.window.BL.zoneMap;
   const steps = [["outside", "rainforest", "rainforest"], ["outside", "factory.hall", "factory"], ["outside", "factory.hangar", "factory"], ["outside", "ember-den", "bifrost"],
@@ -25818,24 +25817,27 @@ const playersTabChecks = async BL => {
     ["factory", "factory.hangar", "factory.hall"], ["factory.hangar", "outside", "factory.hall"], ["factory.hangar", "arcade.hall", "factory.hall"], ["lab", "rainforest", "outside"],
     ["bifrost.chamber", "ember-den", "ember-den"], ["ember-den", "dsb-maxis", "bifrost.chamber"], ["dsb-maxis", "dsb-studio", "dsb-outside"], ["sphere-4", "sphere-7", "sphere"],
     ["between", "factory.hall", "factory"], ["between", "rainforest", "rainforest"], ["factory.hall", "between", "factory"], ["outside", "none", null], ["none", "outside", null], ["scene-transition", "lab", null], ["lab", "lab", null], ["outside", "made-up", null], ["outside", "constructor", null], ["constructor", "lab", null],
-    ["outside", "ghost-arena", "arcade"], ["arcade.hall", "arcade-hunt", "arcade.haunt"], ["arcade.haunt", "ghost-arena", "ghost-arena.haunt"], ["ghost-arena", "arcade.hall", "ghost-arena.haunt"], ["arcade-hunt", "outside", "ghost-arena"]];
+    ["outside", "ghost-arena", "arcade"], ["arcade.hall", "arcade-hunt", "arcade.haunt"], ["arcade.haunt", "ghost-arena", "ghost-arena.haunt"], ["ghost-arena", "arcade.hall", "ghost-arena.haunt"], ["arcade-hunt", "outside", "ghost-arena"], ["outside", "hq-basement", "hq"], ["outside", "rainforest-under", "rainforest"], ["hq-basement", "lab.hall", "outside"], ["rainforest-under", "factory.hall", "outside"]];
   const routed = steps.map(([from, to, want]) => ({ from, to, want, got: Z.next(from, to) })).filter(r => r.got !== r.want);
   record("players tab routes: the first step between zones goes down toward the target or up toward the island (Factory before the hangar, ₿IFRÖST before the Ember Den and DSB Land, the Arcade before its games), and nowhere has no route",
     routed.length === 0, JSON.stringify(routed));
-  const lands = { outside: "The island", "factory.hall": "Lightning Factory", factory: "Lightning Factory", "factory.hangar": "Lightning Jet Hangar", "arcade.hall": "Ooga Arcade", "bifrost.chamber": "\u20bfIFR\u00d6ST chamber",
-    "sphere-3": "Timechain Sphere \u00b7 Room 3", "dsb-maxis": "DSB Land", "cave-c9": "A cave on the island", "scene-race": "Ooga Rally", "scene-skee": "A game", none: "Between lands", between: "Between lands", "ember-den": "Ember Den",
+  const lands = { outside: "The Island", "factory.hall": "Lightning Factory", "factory.hangar": "Lightning Jet Hangar", "arcade.hall": "Ooga Arcade", "bifrost.chamber": "\u20bfIFR\u00d6ST chamber",
+    sphere: "Timechain Exterior", "sphere-3": "TCS \u00b7 Room 3", rainforest: "Mempool Rainforest", "rainforest-under": "Mempool Cave", hq: "HQ", "hq-basement": "Basement", "dsb-maxis": "DSB Land", none: "Between lands", between: "Between lands", "ember-den": "Ember Den",
     "arcade.haunt": "Ooga Arcade", "ghost-arena.haunt": "Ghost Hunter's Arena", "ghost-arena": "Ghost Hunter's Arena", "arcade-hunt": "Ghost Hunter's Arena" };
-  const headings = { outside: "The island", factory: "Lightning Factory tunnel", "factory.hall": "Lightning Factory", arcade: "Ooga Arcade entrance", "arcade.hall": "Ooga Arcade",
+  const headings = { outside: "The Island", lab: "The Island", bca: "The Island", factory: "The Island", arcade: "The Island", mirror: "The Island", "cave-c9": "The Island", "factory.hall": "Lightning Factory", "arcade.hall": "Ooga Arcade",
     "arcade.haunt": "Ooga Arcade", "ghost-arena.haunt": "Ghost Hunter's Arena", "ghost-arena": "Ghost Hunter's Arena", "arcade-hunt": "Ghost Hunter's Arena",
-    "dsb-maxis": "DSB Land \u00b7 Maxis Club", "scene-race": "Ooga Rally", "scene-skee": "Ooga Arcade games", "scene-invaders": "Ooga Arcade games", "scene-transition": "Between lands", between: "Between lands" };
+    "dsb-maxis": "DSB \u00b7 Maxis Club", "dsb-studio": "DSB \u00b7 DSB Studio", "scene-race": "Ooga Arcade", "scene-skee": "Ooga Arcade", "scene-invaders": "Ooga Arcade", "scene-transition": "Between lands", between: "Between lands" };
   const landMiss = Object.entries(lands).filter(([zone, want]) => Z.landOf(zone) !== want), headMiss = Object.entries(headings).filter(([zone, want]) => Z.heading(Z.groupOf(zone)) !== want);
-  record("players tab groups: the roster keeps its land names; the tab heads the Factory tunnel and the Arcade entrance apart from their halls, each DSB venue apart, the arcade's unrouted games together, and each half of the haunted hallway with its own land, Ooga Arcade or Ghost Hunter's Arena (#422)",
-    !landMiss.length && !headMiss.length && Z.heading("constructor") === "constructor" && Z.groupOf("scene-skee") === Z.groupOf("scene-invaders") && Z.groupOf("scene-race") !== Z.groupOf("scene-skee") && Z.groupOf("scene-transition") === "none" && Z.groupOf("between") === "none"
+  record("players tab groups: the tab names every land and level, lists every cave entrance as the island, each DSB venue apart, every game as Ooga Arcade, and each half of the haunted hallway with its own land, Ooga Arcade or Ghost Hunter's Arena (#422)",
+    !landMiss.length && !headMiss.length && Z.heading("constructor") === "constructor" && Z.groupOf("scene-skee") === Z.groupOf("arcade.hall") && Z.groupOf("scene-race") === Z.groupOf("arcade.hall") && Z.groupOf("scene-transition") === "none" && Z.groupOf("between") === "none"
       && Z.groupOf("arcade.haunt") === Z.groupOf("arcade.hall") && Z.groupOf("ghost-arena.haunt") === Z.groupOf("ghost-arena") && Z.groupOf("arcade-hunt") === Z.groupOf("ghost-arena") && Z.groupOf("ghost-arena") !== Z.groupOf("arcade.hall"),
     JSON.stringify({ landMiss, headMiss }));
+  const bannerLines = { outside: "The Island of Caves", none: "The Island of Caves", factory: "The Island of Caves", between: "Between lands", rainforest: "Mempool Rainforest", "rainforest-under": "Mempool Cave", "hq-basement": "Basement", sphere: "Timechain Exterior", "dsb-studio": "DSB \u00b7 DSB Studio", "arcade.hall": "Ooga Arcade", "ghost-arena": "Ghost Hunter's Arena" };
+  const lineMiss = Object.entries(bannerLines).filter(([zone, want]) => Z.line(zone) !== want);
+  record("banner line: the main island keeps its own line, also while no zone has been reported, and every other place reads as the tab names it", lineMiss.length === 0, JSON.stringify(lineMiss));
   const row = (id, name, zone, self = false) => ({ id, name, group: Z.groupOf(zone), self });
-  const rows = [row(5, "zed", "lab"), row(2, "Bea", "rainforest"), row(9, "amy", "lab"), row(1, "Me", "lab", true), row(4, "carl", "factory.hall"), row(3, "Al", "rainforest"), row(7, "Ánna", "factory")];
-  const ordered = Z.arrange(rows, Z.groupOf("lab")).map(r => r.name).join();
+  const rows = [row(5, "zed", "lab.hall"), row(2, "Bea", "rainforest"), row(9, "amy", "lab.hall"), row(1, "Me", "lab.hall", true), row(4, "carl", "factory.hall"), row(3, "Al", "rainforest"), row(7, "Ánna", "factory.hangar")];
+  const ordered = Z.arrange(rows, Z.groupOf("lab.hall")).map(r => r.name).join();
   record("players tab order: the visitor's zone first with their own row pinned at its head, everyone else by name; then the other zones by heading, their players by name",
     ordered === "Me,amy,zed,carl,Ánna,Al,Bea", ordered);
   const f = netFixture(BL, () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "Tester", display: "Tester" } }) }));

@@ -149,8 +149,8 @@
     tier: "high", selectedIds: new Array(LIGHT_CAPACITY).fill(null), approximatedIds: new Array(LIGHT_CAPACITY).fill(null)
   };
   const LAMP_STAGGER = 0.12, LAMP_RAMP = 0.4, LAMP_OFF = 0.12;
-  // The meadow's fire pit sits out toward the Headquarters ramp's mouth at 4:45, just clear of its path.
-  const FIRE_DEGREES = [134, 131, 128, 125, 122, 119, 116], FIRE_RADIUS = 13.5, FIRE_SEATS = 6, FIRE_SEAT_RADIUS = 1.8;
+  // The meadow's fire pit sits out toward the foot of the Mempool stairs, clear of the paths; the rest are its fallbacks.
+  const FIRE_DEGREES = [125, 122, 128, 119, 131, 116, 134], FIRE_RADIUS = 13.5, FIRE_SEATS = 6, FIRE_SEAT_RADIUS = 1.8;
   const FIRE_CONTACT_RADIUS = 0.65, FIRE_AVOID_RADIUS = 1.25, FIRE_BOTTOM = 0.12, FIRE_TOP = 0.85;
   const NIGHT = 0.5, FIRE_SEAT_CHANCE = 0.5;
   // Clock-face degrees to a meadow point: 0 is -z (far), 90 is +x (right).
@@ -7630,7 +7630,6 @@
   const setPhase = (next) => {
     const first = phase === null;
     phase = next;
-    if (first) hud.setSubtitle("an island of caves");
     if (!first) hud.toast(PHASE_TOASTS[next]);
   };
   // The plaza library's books in the shared board window: one page a book, its title, its site and what it is,
@@ -9265,15 +9264,16 @@
       selectGorilla(gorilla);
     } else selectOoga(cave);
   };
-  // Where the driven Ooga is, as the room and the panels name it (docs/auth-and-presence.md, Zones): HQ whichever
-  // entrance, a bridged land from where its bridge ends (the Timechain Sphere with its doorway, the Mempool rainforest
-  // with its chamber and tunnels, the Bifrost isle), the island itself (`outside`, its cave entrances too), or the land
-  // between (`between`): its bridges, and the air off its edge, flying or falling. All of them are the main world
-  // (voice-blend.js `WORLD`), shown to each other, whose voice goes by height (`levelOf`), never by zone.
+  // Where the driven Ooga is, as the room and the panels name it (docs/auth-and-presence.md, Zones): HQ from a metre
+  // down any of its ramps and its basement under its floor, a bridged land from where its bridge ends (the Timechain
+  // Sphere with its doorway, the Mempool rainforest and the cave of tunnels and chamber under it, the Bifrost isle), the
+  // island itself (`outside`, every cave's entrance too), or the land between (`between`): its bridges, and the air off
+  // its edge, flying or falling. All of them are the main world (voice-blend.js `WORLD`), shown to each other, whose
+  // voice goes by height (`levelOf`), never by zone; the levels listed apart are that same height's.
   // The halls' old zone names are kept for their doors alone: the crosshair's route into a hall goes by its mouth.
   const CAVE_ZONES = { c11: "lab", c10: "bca", c2: "factory", c3: "arcade", c1: "mirror" };
   const ZONE_HOLD = 0.25;
-  const caveZone = (index) => CAMERA_OPENINGS[index - 1].headquarters ? "hq" : "outside";
+  const caveZone = (index, x, feet, z) => CAMERA_OPENINGS[index - 1].headquarters && levelOf(x, feet, z, "hq", LEVEL_AT) ? LEVEL_AT.to : "outside";
   const onSphere = (x, z) => {
     if (!timechainIsland) return false;
     const p = timechainIsland.place, s = BL.timechainModels.SITE, dx = x - p.x, dz = z - p.z;
@@ -9355,8 +9355,8 @@
   };
   const doorToward = (from, step, out, nearX, nearZ) => {
     if (!island) return false;
-    // The land between is the island's own air and bridges: its routes start as the island's do.
-    if (from === "between") from = "outside";
+    // The land between is the island's own air and bridges; a level goes by the doors of the land over it.
+    from = BL.zoneMap.routeFrom(from);
     if (step === "outside") return bridgeDoor(from, false, out) || mouthDoor(from, out, nearX, nearZ);
     if (from === "outside") return bridgeDoor(step, true, out) || mouthDoor(step, out, nearX, nearZ);
     if (from === "factory" && step === "factory.hall" && factoryMouth) {
@@ -9378,18 +9378,18 @@
   };
   const zoneOf = (cave, gorilla = false) => {
     const p = cave.root.position, feet = p.y - (gorilla ? 0 : cave.baseY);
-    if (!gorilla && playerCaveIndex) return caveZone(playerCaveIndex);
+    if (!gorilla && playerCaveIndex) return caveZone(playerCaveIndex, p.x, feet, p.z);
     if (gorilla && island.cavityAt(p.x, p.z, CAMERA_COLUMN, 0, feet)
       && feet >= CAMERA_COLUMN.floor - 1e-6 && feet < CAMERA_COLUMN.ceiling) {
       const index = CAMERA_COLUMN.caveIndex;
       for (const opening of CAMERA_OPENINGS) {
         if (opening.headquarters ? index === island.headquarters.caveIndex : opening.caveIndex === index
-          && !opening.blocked && (p.x - opening.mouth.x) * opening.sr + (p.z - opening.mouth.z) * opening.cr < opening.planeZ) return caveZone(opening.caveIndex);
+          && !opening.blocked && (p.x - opening.mouth.x) * opening.sr + (p.z - opening.mouth.z) * opening.cr < opening.planeZ) return caveZone(opening.caveIndex, p.x, feet, p.z);
       }
     }
     if (onBridge(p.x, feet, p.z)) return "between";
     if (onSphere(p.x, p.z)) return "sphere";
-    if (inRainforest(p.x, feet, p.z)) return "rainforest";
+    if (inRainforest(p.x, feet, p.z)) return levelOf(p.x, feet, p.z, "rainforest", LEVEL_AT) && LEVEL_AT.to === "rainforest-under" ? LEVEL_AT.to : "rainforest";
     if (onBifrostIsle(p.x, feet, p.z)) return "bifrost";
     return island.onLand(p.x, p.z) ? "outside" : "between";
   };
@@ -9410,7 +9410,7 @@
   // Below the rainforest's lowest terrace (its channel beds, half a metre down) a body is on its way underground.
   const POOL_TERRACE = 0.75;
   const levelOf = (x, feet, z, zone, out) => {
-    if (zone === "rainforest" && mempoolIsland) {
+    if (zone.startsWith("rainforest") && mempoolIsland) {
       const M = mempoolIsland, L = BL.poolLayout, local = feet - M.place.y;
       if (local >= -POOL_TERRACE) return false;
       // Past the chamber's floor a body is under the islet in the open air, where the island's own levels go on.

@@ -1,8 +1,8 @@
 // Voice across levels and crossings (#392), shared unchanged by the classic page and the Worker.
 // The main world is every zone the island scene reports (`WORLD`: the island with its cave entrances, the land between,
-// that is its bridges and the air round it, the Mempool rainforest, the Timechain Sphere's outside, the ₿IFRÖST isle and
-// HQ), all in that scene's coordinates and all shown to each other. Its voice goes by height, not by zone: everything on
-// or over the island's plane is one place, the surface (`outside`), and below it lie its levels, HQ (`hq`) and HQ's
+// that is its bridges and the air round it, the Mempool rainforest and its cave, the Timechain Sphere's outside, the
+// ₿IFRÖST isle, and HQ and its basement), all in that scene's coordinates and all shown to each other. Its voice goes
+// by height, not by zone: everything on or over the island's plane is one place, the surface (`outside`), and below it lie its levels, HQ (`hq`) and HQ's
 // basement (`hq-basement`) under the island, and the rainforest's tunnels and chamber (`rainforest-under`) under its own
 // top. Each level hangs from the one over it (`ABOVE`), so a player in the world reports only the level below it is
 // heading toward (`to`) and how far down (`t`): between the surface and HQ, or HQ and its basement, wherever they stand,
@@ -26,7 +26,7 @@
   const scope = typeof window === "undefined" ? globalThis : window;
   const BL = scope.BL = scope.BL || {};
   const STEPS = 20;
-  const WORLD = ["outside", "between", "rainforest", "sphere", "bifrost", "hq"];
+  const WORLD = ["outside", "between", "rainforest", "rainforest-under", "sphere", "bifrost", "hq", "hq-basement"];
   const SURFACE = "outside";
   // The levels below the world's surface, each with the level over it.
   const ABOVE = Object.freeze({ hq: SURFACE, "hq-basement": "hq", "rainforest-under": SURFACE });
