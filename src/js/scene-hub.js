@@ -2057,6 +2057,8 @@
     // Registered and placed now, not at the next frame's sync, so the survey stands the bar on the step itself.
     solids.add(zipline.top); solids.add(zipline.deck); solids.sync();
     if (!zipline.survey(zipQueries)) { solids.remove(zipline.top); solids.remove(zipline.deck); zipline.dispose(); zipline = null; return; }
+    // Cloud Hopper hides the Mempool island, so the line (deck, post and cable) goes with it.
+    cloudOffMap.push(zipline.group);
     const t = zipline.top.position, b = zipline.bottom.position;
     addPieceTargets(["zipPost", 0, t.x, t.y + 1.6, t.z, 1.3, "zipStake", 0, b.x, b.y, b.z, 0.5], (x, y, z) => ({ x, y, z }));
   };
