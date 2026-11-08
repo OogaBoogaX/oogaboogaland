@@ -636,26 +636,28 @@
       box(SOLID, 5, 9, 13, 14, 1, 3, 2);
       for (let k = 0; k < 4; k++) box(GLOW, 5 + k, 5 + k, 15, 17 + (k & 1) * 2, 2, 2, COLORS[k % 3]);
     }),
+    // The terminal stands straight on the ground, its keyboard in front of it.
     terminal: () => author((put, box) => {
-      crateShell(box, 12, false, 1);
-      box(SOLID, -6, 5, 12, 23, -5, 4, (x, y) => y === 12 || y === 23 ? 5 : 6);
-      for (let y = 14; y <= 21; y++) box(y & 1 ? GLOW : SOLID, -4, 3, y, y, 5, 5, y & 1 ? 31 : 36);
-      box(SOLID, -5, 4, 12, 12, 6, 8, 5);
+      box(SOLID, -6, 5, 0, 11, -5, 4, (x, y) => y === 0 || y === 11 ? 5 : 6);
+      for (let y = 2; y <= 9; y++) box(y & 1 ? GLOW : SOLID, -4, 3, y, y, 5, 5, y & 1 ? 31 : 36);
+      box(SOLID, -5, 4, 0, 0, 6, 8, 5);
     }),
+    // The board's green, 36 by 22 cells inside its frame, is the face chalkboard.js draws on (its BOARD_W, BOARD_H
+    // and BOARD_Y); the easel behind it leans back to a pole.
     chalkboard: () => author((put, box) => {
-      for (let y = 0; y <= 29; y++) {
-        const z = Math.round(-2 - y * 3 / 29);
+      for (let y = 0; y <= 33; y++) {
+        const z = Math.round(-2 - y * 3 / 33);
         box(SOLID, -1, 0, y, y, z, z + 1, 2);
       }
-      for (const side of [-1, 1]) for (let y = 0; y <= 17; y++) {
-        const x = side < 0 ? Math.round(-1 - 8 * (1 - y / 17)) : Math.round(8 * (1 - y / 17));
-        const z = Math.round(-10 + y * 6 / 17);
+      for (const side of [-1, 1]) for (let y = 0; y <= 20; y++) {
+        const x = side < 0 ? Math.round(-1 - 12 * (1 - y / 20)) : Math.round(12 * (1 - y / 20));
+        const z = Math.round(-12 + y * 8 / 20);
         box(SOLID, x, x + 1, y, y, z, z + 1, 2);
       }
-      box(SOLID, -13, 12, 10, 26, -2, -2, (x, y) => x === -13 || x === 12 || y === 10 || y === 26 ? 2 : 34);
-      box(SOLID, -14, 13, 9, 9, -2, 2, 1);
-      box(SOLID, -10, -6, 10, 11, 1, 2, 5);
-      box(SOLID, 6, 9, 10, 10, 1, 1, 35);
+      box(SOLID, -19, 18, 7, 30, -2, -2, (x, y) => x === -19 || x === 18 || y === 7 || y === 30 ? 2 : 34);
+      box(SOLID, -20, 19, 6, 6, -2, 2, 1);
+      box(SOLID, -16, -12, 7, 8, 1, 2, 5);
+      box(SOLID, 12, 15, 7, 7, 1, 1, 35);
     }),
     // The mirror cave: black monoliths running with green glyphs, and rune stones.
     monolith: (v) => author((put, box) => {

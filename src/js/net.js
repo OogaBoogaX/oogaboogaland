@@ -1178,18 +1178,18 @@
   // of another kind sends it, so a line's points go a few to a frame. Each says whether it was sent, or why not.
   const takeChalk = () => {
     if (!state.chalk || state.room !== "live") return false;
-    send(`{"t":"chalk","k":"take"}`);
+    send(`{"t":"chalk","v":${BL.chalkBoard.VERSION},"k":"take"}`);
     return true;
   };
   const flushChalk = () => {
-    for (const op of chalkOut) send(JSON.stringify({ t: "chalk", ...op }));
+    for (const op of chalkOut) send(JSON.stringify({ t: "chalk", v: BL.chalkBoard.VERSION, ...op }));
     chalkOut.length = 0;
   };
   const dropChalk = () => {
     const c = state.chalk;
     if (!c || c.editor !== state.selfId) return;
     flushChalk();
-    if (state.room === "live") send(`{"t":"chalk","k":"drop"}`);
+    if (state.room === "live") send(`{"t":"chalk","v":${BL.chalkBoard.VERSION},"k":"drop"}`);
     c.editor = 0;
     c.session = BL.chalkBoard.session(c.board);
   };

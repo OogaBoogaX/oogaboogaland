@@ -19,7 +19,8 @@
 // another place of the group, which shows no distance, is silenced by a range without a mark here. The slider is offered
 // before any audio is active; Web Audio supplies quieting and boost once the listener joins.
 // Hearing range and join-reading live together under the panel's Advanced settings disclosure.
-// A raised hand (reactions.js, `rec.hand` and `net.state.hand`) shows after the player's name, in their skin tone.
+// A raised hand (reactions.js, `rec.hand` and `net.state.hand`) shows after the player's name, in their skin tone, and
+// each reaction they send pops up there, over the hand.
 // Joins (#430, `net.subscribePresence`): a player who comes online while the visitor is in the room is named on screen
 // (`hud.toast`, read out by assistive technology) and counted on the tab until the visitor looks at it
 // (`sheet.watchViews`), unless they are in the panel as it happens. Those already there when the visitor (re)joins are
@@ -89,9 +90,12 @@
     name.className = "players-name"; label.className = "roster-label"; label.id = id;
     host.className = "roster-host"; host.hidden = true; host.setAttribute("role", "img");
     host.setAttribute("aria-label", "Host: runs the Oogas for everyone"); host.title = "Host: runs the Oogas for everyone";
-    const hand = document.createElement("span");
+    const mark = document.createElement("span"), hand = document.createElement("span"), react = document.createElement("span");
+    mark.className = "players-mark"; mark.hidden = true;
     hand.className = "players-hand"; hand.hidden = true; hand.setAttribute("role", "img"); hand.setAttribute("aria-label", "Hand raised"); hand.title = "Hand raised";
-    toggle.append(label); name.append(toggle, hand); dots.append(presence, host);
+    react.className = "players-react"; react.hidden = true; react.setAttribute("aria-hidden", "true");
+    mark.append(hand, react);
+    toggle.append(label); name.append(toggle, mark); dots.append(presence, host);
     marks.className = "roster-marks";
     voice.className = "roster-voice"; voice.type = "button"; voice.hidden = true; voice.setAttribute("aria-describedby", id); voice.append(BL.hud.voiceIcon.cloneNode(true));
     // A private conversation (#188), offered where the room relays them; never on the visitor's own row.
@@ -102,7 +106,7 @@
     note.className = "players-note"; note.textContent = ", last known location"; note.hidden = true;
     distance.append(note);
     li.append(dots, name, marks, look, distance, volume);
-    return { li, label, toggle, volume, slider, value, host, voice, priv, privShackle: priv.firstChild.firstChild, privLock: "", privSerial: -1, hand, handShown: "", privName: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
+    return { li, label, toggle, volume, slider, value, host, voice, priv, privShackle: priv.firstChild.firstChild, privLock: "", privSerial: -1, mark, hand, handShown: "", react, reacting: null, privName: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
       aim: "", voiceLook: "", voiceLogin: "", voiceSelf: false, blocked: false, hostOn: false, metres: -1, lastKnown: false, far: false };
   };
   const selfRow = makeRow();
@@ -171,7 +175,7 @@
     }
   };
   const paintMark = (row, look, login, self, host, hand = "") => {
-    if (row.handShown !== hand) { row.handShown = hand; row.hand.textContent = hand; row.hand.hidden = !hand; }
+    if (row.handShown !== hand) { row.handShown = hand; row.hand.textContent = hand; row.hand.hidden = !hand; row.mark.hidden = !hand && !row.reacting; }
     const blocked = !!login && BL.voice.mutedLocally(row.id);
     if (row.voiceLook !== look || row.voiceLogin !== login || row.voiceSelf !== self || row.blocked !== blocked) {
       row.voiceLook = look; row.voiceLogin = login; row.voiceSelf = self; row.blocked = blocked;
@@ -183,6 +187,30 @@
       button.title = words; button.setAttribute("aria-label", words);
     }
     if (row.hostOn !== host) { row.hostOn = host; row.host.hidden = !host; }
+  };
+  // A reaction (`net.subscribeReactions`, 0 for the visitor's own) pops up on its sender's row where a raised hand stands,
+  // over the hand when one is up, rises a little and fades, as it does over their Ooga; the newest replaces the one
+  // before, and under Calm it only fades. Rows are not kept up while the panel is hidden, so then it shows nowhere.
+  const REACT_TIMING = { duration: 2600, easing: "linear" }, CALM = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const REACT_POP = [
+    { opacity: 1, transform: "translateY(0) scale(0.4)" },
+    { opacity: 1, transform: "translateY(-2px) scale(1.15)", offset: 0.07 },
+    { opacity: 1, transform: "translateY(-3px) scale(1)", offset: 0.12 },
+    { opacity: 1, transform: "translateY(-5px) scale(1)", offset: 0.73 },
+    { opacity: 0, transform: "translateY(-7px) scale(1)" },
+  ];
+  const REACT_CALM = [{ opacity: 1 }, { opacity: 1, offset: 0.73 }, { opacity: 0 }];
+  const reacted = (id, emoji) => {
+    if (!showing || stale) return;
+    const row = id === 0 ? selfRow : rows.get(id);
+    if (!row || !row.li.isConnected) return;
+    if (row.reacting) row.reacting.cancel();
+    row.react.textContent = emoji; row.react.hidden = false; row.mark.hidden = false;
+    const run = row.reacting = row.react.animate(CALM.matches ? REACT_CALM : REACT_POP, REACT_TIMING);
+    run.onfinish = () => {
+      if (row.reacting !== run) return;
+      row.reacting = null; row.react.hidden = true; row.mark.hidden = !row.handShown;
+    };
   };
 
   // Distances and crosshairs, from where everyone stands now.
@@ -420,6 +448,7 @@
   net.subscribe(render);
   net.subscribeRoster(render);
   net.subscribeMoves(measure);
+  net.subscribeReactions(reacted);
   PC.subscribe(paintLocks);
   BL.voice.subscribe(paintMarks);
   BL.voice.subscribe(paintHearing);

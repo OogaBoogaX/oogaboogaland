@@ -1523,6 +1523,8 @@ body[data-active-scene="hub"] .home-link {
 .panel[data-panel="chat"][data-view="private"] .pm { display: flex; }
 .panel[data-panel="chat"][data-view="private"] > :is(.chat-identity, .chat-log, .chat-status, .chat-form),
 .panel[data-panel="chat"][data-view="private"] > .panel-title > .chat-about { display: none; }
+/* Without the island's About button, the title itself keeps the room's chip and the bell at the right. */
+.panel[data-panel="chat"][data-view="private"] > .panel-title h2 { margin-right: auto; }
 .pm-head { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; }
 .pm-head .pm-end { min-height: 24px; }
 .pm-title { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0; color: #cfe0ff; font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
@@ -2153,7 +2155,7 @@ body[data-active-scene="hub"] .home-link {
 .players-rows {
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr) 10px 12px max-content 12px;
-  column-gap: 11px;
+  column-gap: 14px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -2186,20 +2188,34 @@ body[data-active-scene="hub"] .home-link {
 .players-name {
   display: inline-flex;
   grid-column: 2;
-  margin-left: -4px;
+  margin-left: -7px;
   align-items: center;
   gap: 6px;
   min-width: 0;
   color: var(--paper);
 }
 
-/* A raised hand after the name, never squeezing it out: the name gives way first. */
-.players-hand {
+/* A raised hand after the name, never squeezing it out: the name gives way first. A reaction (players.js) pops up in
+   the same place, over the hand when one is raised, and fades. */
+.players-mark {
+  display: inline-grid;
   flex: none;
+  place-items: center;
+}
+
+.players-mark[hidden] { display: none; }
+.players-mark > * { grid-area: 1 / 1; }
+
+.players-hand {
   font: 13px/1 "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
 }
 
-.players-hand[hidden] { display: none; }
+.players-react {
+  position: relative;
+  z-index: 1;
+  font: 16px/1 "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  pointer-events: none;
+}
 
 /* A player's own disclosure keeps volume apart from mute and camera targeting. */
 .players-volume {
@@ -2628,6 +2644,9 @@ body[data-active-scene="hub"] .home-link {
 }
 .players-settings > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .players-settings-content { display: grid; gap: 8px; padding-top: 8px; }
+/* Every word in Advanced settings is white, to read easily against the panel. */
+.players-settings > summary,
+.players-settings-content :is(.players-hearing-label, .players-hearing-value, .players-hearing-help, .players-speak) { color: #fff; }
 
 .players-hearing-label {
   color: rgba(243, 239, 228, 0.72);
@@ -5449,7 +5468,7 @@ body.tess-touring #joy-look {
 .chalk-frame canvas { display: block; width: 100%; height: auto; aspect-ratio: 8 / 5; touch-action: none; cursor: crosshair; }
 .chalk-frame.has-tool canvas { cursor: none; }
 .chalk-frame.typing canvas { cursor: text; }
-.chalk-caret { position: absolute; width: 3px; height: 12%; background: #f2f3d6; box-shadow: 0 0 5px #f2f3d6; pointer-events: none; animation: chalk-caret-blink 1s steps(1) infinite; }
+.chalk-caret { position: absolute; width: 3px; height: 8%; background: #f2f3d6; box-shadow: 0 0 5px #f2f3d6; pointer-events: none; animation: chalk-caret-blink 1s steps(1) infinite; }
 .chalk-caret[hidden] { display: none; }
 .chalk-type-input { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
 @keyframes chalk-caret-blink { 50% { opacity: 0; } }

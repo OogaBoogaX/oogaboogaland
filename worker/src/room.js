@@ -96,7 +96,8 @@ export class Room extends DurableObject {
       this.studio.invited = this.studio.mode === "qa" ? [...new Set((Array.isArray(this.studio.invited) ? this.studio.invited : []).filter(seated))].slice(0, MAX_PLAYERS) : [];
       this.cleanupJobs = (await ctx.storage.get("voiceCleanup")) || [];
       const chalk = await ctx.storage.get("chalk"), marks = chalk && CHALK.restore(chalk.marks);
-      if (marks) this.chalk = CHALK.board(marks);
+      // A board stored before the board grew (no `v`) is widened as it loads; the next save stores it widened.
+      if (marks) this.chalk = CHALK.board(chalk.v === CHALK.VERSION ? marks : CHALK.widen(marks));
       this.chalkStored = chalk !== undefined;
       // Older versions stored the original drawing too; it can always be rebuilt locally.
       if (this.chalkStored && CHALK.preset(this.chalk) === "original") {
@@ -1165,7 +1166,7 @@ export class Room extends DurableObject {
       this.chalkStored = false;
     } else {
       // An empty marks array is the blank marker; absence means the original board.
-      this.background(this.ctx.storage.put("chalk", { marks: this.chalk.marks }));
+      this.background(this.ctx.storage.put("chalk", { marks: this.chalk.marks, v: CHALK.VERSION }));
       this.chalkStored = true;
     }
   }
