@@ -13,9 +13,7 @@
 // changed it does nothing, and the next event redraws the rows.
 // Cost: rows are placed only when someone joins, leaves or changes zone, body or name, and only while the panel shows;
 // distances and crosshairs are rewritten as positions arrive (`subscribeMoves`, a few times a second at most), and only
-// what changed. No timers. An Ooga thump (thump.js) shows a mallet beside its thumper's voice mark for a moment (`pulse`): every
-// row holds that mark's cell from the start, shown and hidden by visibility, so it never moves a name or a control, and its
-// animation's end hides it again; `clearPulses` hides them all at once. Exports setDoors, pulse, clearPulses and stats.
+// what changed. No timers. Exports setDoors and stats.
 // The tab always holds the visitor's hearing range (#380, `BL.voice.setRadius`), ready before joining: the slider's last
 // stop is no limit, and a distance at or past the range is dimmed, since that voice is muted for them. A voice in
 // another place of the group, which shows no distance, is silenced by a range without a mark here. The slider is offered
@@ -99,15 +97,12 @@
     // A private conversation (#188), offered where the room relays them; never on the visitor's own row.
     priv.className = "players-private"; priv.type = "button"; priv.hidden = true; priv.append(lockIcon.cloneNode(true));
     marks.append(voice, priv);
-    const thump = document.createElement("span");
-    thump.className = "players-thump"; thump.dataset.on = "false"; thump.setAttribute("aria-hidden", "true");
-    thump.append(BL.hud.malletIcon.cloneNode(true));
     look.className = "players-look"; look.type = "button"; look.setAttribute("aria-describedby", id); look.append(crosshair.cloneNode(true));
     distance.className = "players-distance"; distance.append("");
     note.className = "players-note"; note.textContent = ", last known location"; note.hidden = true;
     distance.append(note);
-    li.append(dots, name, marks, thump, look, distance, volume);
-    return { li, label, toggle, volume, slider, value, host, voice, priv, privShackle: priv.firstChild.firstChild, privLock: "", privSerial: -1, hand, handShown: "", privName: null, thump, pulse: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
+    li.append(dots, name, marks, look, distance, volume);
+    return { li, label, toggle, volume, slider, value, host, voice, priv, privShackle: priv.firstChild.firstChild, privLock: "", privSerial: -1, hand, handShown: "", privName: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
       aim: "", voiceLook: "", voiceLogin: "", voiceSelf: false, blocked: false, hostOn: false, metres: -1, lastKnown: false, far: false };
   };
   const selfRow = makeRow();
@@ -188,35 +183,6 @@
       button.title = words; button.setAttribute("aria-label", words);
     }
     if (row.hostOn !== host) { row.hostOn = host; row.host.hidden = !host; }
-  };
-
-  // An Ooga thump's mallet beside a player's voice mark, while the tab shows (thump.js); 0 or the visitor's own id is their
-  // row. Only the cell's own state changes: its place in the row is kept either way. Under Calm it holds still.
-  const THUMP_MS = 1400, CALM = window.matchMedia("(prefers-reduced-motion: reduce)");
-  const THUMP_PULSE = [{ opacity: 0, transform: "scale(0.6)" }, { opacity: 1, transform: "scale(1.25)", offset: 0.18 }, { opacity: 1, transform: "scale(1)", offset: 0.4 }, { opacity: 0, transform: "scale(1)" }];
-  const THUMP_STILL = [{ opacity: 1 }, { opacity: 1, offset: 0.85 }, { opacity: 0 }];
-  const unmark = (row) => {
-    row.pulse = null;
-    row.thump.dataset.on = "false";
-    row.thump.removeAttribute("role"); row.thump.removeAttribute("aria-label"); row.thump.removeAttribute("title");
-    row.thump.setAttribute("aria-hidden", "true");
-  };
-  const pulse = (id) => {
-    if (!showing || stale) return false;
-    const row = id === 0 || id === net.state.selfId ? selfRow : rows.get(id);
-    if (!row || !row.li.isConnected) return false;
-    const mark = row.thump;
-    if (row.pulse) row.pulse.cancel();
-    mark.dataset.on = "true";
-    mark.removeAttribute("aria-hidden"); mark.setAttribute("role", "img");
-    mark.setAttribute("aria-label", "Thumped"); mark.title = "Thumped";
-    const run = row.pulse = mark.animate(CALM.matches ? THUMP_STILL : THUMP_PULSE, { duration: THUMP_MS, easing: "ease-out" });
-    run.onfinish = () => { if (row.pulse === run) unmark(row); };
-    return true;
-  };
-  // Every mallet still showing goes at once (thump.js, when the visitor's voice membership changes).
-  const clearPulses = () => {
-    for (const row of [selfRow, ...rows.values()]) if (row.pulse) { row.pulse.cancel(); unmark(row); }
   };
 
   // Distances and crosshairs, from where everyone stands now.
@@ -462,5 +428,5 @@
     doors = fn;
     measure();
   };
-  BL.players = { setDoors, pulse, clearPulses, get stats() { return { showing, rows: rows.size, groups: groups.size, unread, speakOn }; } };
+  BL.players = { setDoors, get stats() { return { showing, rows: rows.size, groups: groups.size, unread, speakOn }; } };
 })();

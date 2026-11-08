@@ -80,9 +80,6 @@
 // Both spend one bucket mirroring the room's, a little short of it, so neither is ever shown here and dropped there;
 // `setHand` refuses (false, nothing changed) when it is empty, and a hand change the room still refuses comes back as
 // this page's own `hand`, which puts `state.hand` back to what everyone else sees.
-// Ooga thumps (thump.js): `sendThump` sends `{"t":"thump"}` while the room is live (the room checks voice and rate),
-// and `subscribeThump` hears `fn(id, audible)` for a remote player's thump the room relayed, `audible` when the room says
-// this page would hear that player's voice; a sender never hears its own.
 // A crossing (#392, voice-blend.js): `setBlend(to, t)` says the driven body is `t` (0 to 1) of the way from its zone's
 // group toward the adjacent group `to` (null for none). `state.blendTo` and `state.blendT` keep it exact for this page's
 // own volumes; the room gets it in BLEND.STEPS steps, at most BLEND_MS apart, and every remote record carries the
@@ -93,7 +90,7 @@
 // `subscribePresence` hears `fn(rec, true)` for a player who joins the room while this page is in it, never for those
 // already there on this page's (re)join, and `fn(rec, false)` when one leaves (players.js names the joins, #430).
 // Exports start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
-// setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendGhostState and subscribeGhostState (HALLOWEEN), sendThump, subscribeThump, npcFrame, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
+// setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendGhostState and subscribeGhostState (HALLOWEEN), npcFrame, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
 // ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
 (() => {
   "use strict";
@@ -623,8 +620,6 @@
       if (Array.isArray(msg.peers)) BL.voice.setPeers(msg.peers, Array.isArray(msg.gens) ? msg.gens : null, state.zone === "dsb-studio" ? msg.listeners : undefined);
     } else if (msg.t === "ghost") {
       if (ghostHeard) ghostHeard(msg); // HALLOWEEN
-    } else if (msg.t === "thump") {
-      if (thumpHeard && remotes.has(msg.id)) thumpHeard(msg.id, msg.a === 1);
     } else if (msg.t === "react") {
       if (remotes.has(msg.id) && BL.reactionPolicy.valid(msg.e)) for (const fn of reactSubscribers) fn(msg.id, msg.e);
     } else if (msg.t === "hand") {
@@ -865,17 +860,6 @@
   };
   document.addEventListener("visibilitychange", onVisibility);
 
-  // One listener, thump.js; false when the room is not live.
-  let thumpHeard = null;
-  const sendThump = () => {
-    if (state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN) return false;
-    send('{"t":"thump"}');
-    return true;
-  };
-  const subscribeThump = (fn) => {
-    thumpHeard = fn;
-    return () => { if (thumpHeard === fn) thumpHeard = null; };
-  };
   // HALLOWEEN: the ghost hunt's word to its host (ghost-sync.js): a start or a hit, relayed to the arcade's ghost
   // arena's host (`ghostHostId`) alone, from a page in the arena.
   let ghostHeard = null, ghostStateHeard = null;
@@ -1281,9 +1265,8 @@
     presenceSubscribers.clear();
     doorSubscribers.clear();
     ghostHeard = ghostStateHeard = null; // HALLOWEEN
-    thumpHeard = null;
     close("off");
   };
 
-  BL.net = { cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendThump, subscribeThump, sendReaction, subscribeReactions, setHand, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendReaction, subscribeReactions, setHand, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();
