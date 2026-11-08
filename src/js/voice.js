@@ -32,6 +32,8 @@
 // of its own, or one not yet placed here counts as past the radius; a page with no position of its own here plays everyone.
 // Movement updates the cutoff on the speaking meter's own 150 ms read; changing the range applies it immediately.
 // No distance fade or volume ramp crosses the cutoff. A local mute still wins.
+// Voice links (net.js `voiceLink`): the room also lists a linked partner wherever they are, and that voice plays at full
+// whatever the crossing or this visitor's hearing range. `inEarshot` says whether a player can be heard where both stand.
 // Levels and crossings (#392): between two levels of the main world, or along a crossing between two places
 // (voice-blend.js), the room also lets a player hear the other, and each voice plays at its equal-power share
 // (`BL.voiceBlend.gain`, from `net.state.blendT` and the speaker's step), gated by the hearing range, so the two fade
@@ -47,8 +49,13 @@
 // count as blocked, as a refused element play does, and the next tap or key wakes it (`wake`). `fades` says whether a
 // range can be heard at all: where the element's volume is honoured, or through a gain. Without Web Audio, the
 // element remains the playback path and volume tops out at 1 rather than offering a boost it cannot play.
-// Exports enable, listen, dropMic, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setMuted, toggle, restart, stop,
-// setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, setRadius, falloff, fades,
+// Coming back: a visitor who pressed Join voice and has not pressed Leave voice since, in this browser and account
+// (`JOINED_KEY`), is put back in voice muted whenever the room lets them in (`restart(true)`), however the last session
+// ended. The microphone stays closed (`stats.returning`, a listening connection) until they unmute, which opens it inside
+// that press. Browsers hold sound until a first click or key, so that press connects them, or the room's welcome on a page
+// that has had one. DSB Studio's sound and microphone stay its own choices, there and on the way in.
+// Exports enable, listen, dropMic, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setMuted, toggle, leave, restart, stop,
+// setPeers, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, setRadius, falloff, fades,
 // RADIUS_MIN, RADIUS_MAX and stats.
 (() => {
   "use strict";
@@ -60,6 +67,7 @@
   // Speaking: RMS over SPEAK_ON starts it at once; SPEAK_HOLD quiet reads in a row end it, so words do not flicker.
   const SPEAK_MS = 150, SPEAK_ON = 0.02, SPEAK_HOLD = 4, SAMPLES = 1024;
   const PREF_KEY = "oogaboogaland.voice-players.", PREF_MAX = 512;
+  const JOINED_KEY = "oogaboogaland.voice-joined.", STUDIO_ZONE = "dsb-studio";
   // Hearing range: the radius in metres (0 is no limit), a crossing share's most change per meter read.
   const RADIUS_KEY = "oogaboogaland.voice-radius", RADIUS_MIN = 1, RADIUS_MAX = 60, NEAR_STEP = 0.15;
   // Gains support a modest +6 dB boost on desktop as well as iOS, whose elements ignore their volume.
@@ -72,7 +80,7 @@
   const subs = new Map();
   // Each wanted voice's publication count from the room: a new count is a microphone published again.
   const wantedGen = new Map();
-  const stats = { enabled: false, muted: false, alone: false, micWanted: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "", micError: "", publishing: false, blocked: false, ready: false, preflight: false, preflightPending: false, permission: "unknown", deviceId: "", receiveLevel: 1, micLevel: 0, receiveState: "off", radius: 0 };
+  const stats = { enabled: false, muted: false, alone: false, micWanted: false, returning: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "", micError: "", publishing: false, blocked: false, ready: false, preflight: false, preflightPending: false, permission: "unknown", deviceId: "", receiveLevel: 1, micLevel: 0, receiveState: "off", radius: 0 };
   const samples = new Float32Array(SAMPLES);
   const preferences = new Map();
   let preferenceOwner = 0;
@@ -80,6 +88,8 @@
   let listenerCount = null;
   let lifecycle = 0, micGeneration = 0, microphoneWanted = stats.micWanted = false;
   let cleanup = Promise.resolve(), receiverOpening = null;
+  // A returning visitor: waiting for a first press, connecting, and an Unmute pressed while that connects.
+  let armed = false, rejoining = false, unmuteAsked = false;
   const requests = new Set();
   const current = (token) => { if (token !== lifecycle) throw new Error("voice operation cancelled"); };
   const abortRequests = () => { for (const controller of requests) controller.abort(); requests.clear(); };
@@ -202,7 +212,7 @@
   const nearness = (id) => {
     const s = BL.net.state, zone = s.zone, rec = BL.net.remotes.get(id);
     let share = 1;
-    if (s.blendTo || rec && rec.blendTo) {
+    if ((s.blendTo || rec && rec.blendTo) && BL.net.voiceLink(id) !== "linked") {
       if (!rec) return 0;
       share = BL.voiceBlend.gain(zone, s.blendTo, s.blendT, rec.zone, rec.blendTo, rec.blendK / BL.voiceBlend.STEPS);
     }
@@ -210,13 +220,22 @@
   };
   // Two zones a crossing joins share coordinates, so a voice across it is measured too.
   const withinRange = (id) => {
-    if (!stats.radius) return 1;
+    if (!stats.radius || BL.net.voiceLink(id) === "linked") return 1;
     const s = BL.net.state, zone = s.zone, me = s.self, rec = BL.net.remotes.get(id);
     if (me.zone !== zone) return 1;
     const frame = BL.voiceBlend.sameFrame;
     const across = rec && (frame(rec.zone, zone) || rec.zone === s.blendTo || rec.blendTo === zone);
     if (!across || rec.poseZone !== rec.zone) return 0;
     return falloff(Math.hypot(rec.x - me.x, rec.y - me.y, rec.z - me.z), stats.radius);
+  };
+  // Whether this visitor could hear player `id` where both stand now: a voice link, or one place by the room's rule
+  // (`sharesPlace` in worker/src/protocol.js) and inside the hearing range. For the Online Oogas panel's faded mark.
+  const inEarshot = (id) => {
+    if (BL.net.voiceLink(id) === "linked") return true;
+    const s = BL.net.state, rec = BL.net.remotes.get(id), B = BL.voiceBlend;
+    if (!rec || !withinRange(id)) return false;
+    const k = s.blendTo ? Math.max(1, Math.min(B.STEPS, Math.round(s.blendT * B.STEPS))) : 0;
+    return s.blendTo || rec.blendTo || B.world(s.zone) || B.world(rec.zone) ? B.shares(s.zone, s.blendTo, k, rec.zone, rec.blendTo, rec.blendK) : B.group(s.zone) === B.group(rec.zone);
   };
   const localVolume = (id) => preferences.get(id)?.volume ?? 1;
   const playVolume = (s) => stats.receiveLevel * s.near * s.inRange * localVolume(s.id);
@@ -507,6 +526,7 @@
   const enable = async (preserveMute = false) => {
     activate();
     if (stats.joining || stats.publishing) return;
+    disarm();
     const token = lifecycle, generation = ++micGeneration;
     stats.joining = true; stats.micError = ""; microphoneWanted = stats.micWanted = true; stats.permission = "requesting"; stats.preflight = false; stats.preflightPending = false;
     if (!preserveMute) stats.muted = false;
@@ -524,7 +544,7 @@
       stats.publishing = true;
       if (!subPc) { openingReceiver = true; await openReceiver(token); }
       if (token !== lifecycle) return;
-      stats.enabled = true; stats.ready = true;
+      stats.enabled = true; stats.ready = true; stats.returning = false;
       setMuted(stats.muted);
       window.clearInterval(speakTimer);
       speakTimer = window.setInterval(poll, SPEAK_MS);
@@ -596,15 +616,76 @@
     emit();
   };
 
-  // The footer's button: join, then mute and unmute.
+  // Whether this account pressed Join voice here and has not pressed Leave voice since.
+  const joinedBefore = () => {
+    const me = BL.net.state.me;
+    try {
+      return !!me && validId(me.id) && localStorage.getItem(JOINED_KEY + me.id) === "1";
+    } catch {
+      return false;
+    }
+  };
+  const rememberJoined = (on) => {
+    const me = BL.net.state.me;
+    if (!me || !validId(me.id)) return;
+    try {
+      if (on) localStorage.setItem(JOINED_KEY + me.id, "1");
+      else localStorage.removeItem(JOINED_KEY + me.id);
+    } catch {
+      // Storage off: the next session starts out of voice.
+    }
+  };
+
+  const firstPress = (e) => {
+    if (e.isTrusted && !(navigator.userActivation && !navigator.userActivation.hasBeenActive)) rejoin();
+  };
+  const disarm = () => {
+    if (!armed) return;
+    armed = false;
+    window.removeEventListener("pointerup", firstPress, true);
+    window.removeEventListener("keydown", firstPress, true);
+  };
+  const notReturning = () => { disarm(); stats.returning = false; setMuted(false); };
+  const rejoin = async () => {
+    disarm();
+    if (BL.net.state.zone === STUDIO_ZONE) { notReturning(); return; }
+    const token = lifecycle;
+    BL.net.setMuted(true);
+    rejoining = true;
+    await listen();
+    rejoining = false;
+    if (token !== lifecycle) return;
+    const unmute = unmuteAsked;
+    unmuteAsked = false;
+    if (!stats.enabled) notReturning();
+    else if (unmute) join();
+  };
+  const resume = () => {
+    if (armed || stats.enabled || stats.joining || BL.net.state.zone === STUDIO_ZONE || !joinedBefore()) return;
+    armed = stats.returning = stats.muted = true;
+    window.addEventListener("pointerup", firstPress, true);
+    window.addEventListener("keydown", firstPress, true);
+    emit();
+    if (navigator.userActivation && navigator.userActivation.hasBeenActive) rejoin();
+  };
+
+  const join = () => enable().then(() => { if (stats.publishing) rememberJoined(true); });
+
+  // The footer's button: join, then mute and unmute. An Unmute while a returning visitor connects waits for that.
   const toggle = () => {
-    if (!stats.publishing) enable();
+    if (armed) rejoin();
+    if (rejoining) unmuteAsked = true;
+    else if (!stats.publishing) join();
     else setMuted(!stats.muted);
   };
+
+  // Leave voice, the visitor's own choice: unlike every other stop, the next session starts out of voice.
+  const leave = () => { rememberJoined(false); stop(); };
 
   // Leaving voice for good (Leave voice, sign-out, another tab took over): the microphone is released too.
   const stop = () => {
     lifecycle++; micGeneration++; abortRequests(); microphoneWanted = stats.micWanted = false;
+    disarm(); rejoining = unmuteAsked = stats.returning = false;
     const was = stats.enabled || stats.joining || !!pubPc || !!subPc;
     stats.joining = false; teardown();
     if (mic) for (const t of mic.getTracks()) t.stop();
@@ -637,8 +718,9 @@
     cleanup = api("unpublish").catch(() => {});
     emit();
   };
-  const restart = async () => {
-    if (!stats.enabled) return;
+  // `welcomed`: the room has just let this page in, which puts a visitor out of voice back in if they were.
+  const restart = async (welcomed = false) => {
+    if (!stats.enabled) { if (welcomed) resume(); return; }
     const wanted = microphoneWanted;
     const token = ++lifecycle; micGeneration++; abortRequests();
     teardown(); stats.joining = false;
@@ -802,5 +884,5 @@
   const inspect = () => ({ desired: desired.slice(), pulled: [...subs.keys()], publish: pubPc ? pubPc.connectionState : "none", receive: subPc ? subPc.connectionState : "none",
     playback: GAIN_PLAY ? "gain" : "element", context: audio ? audio.state : "none" });
 
-  BL.voice = { preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
+  BL.voice = { preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, leave, restart, stop, setPeers, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
 })();

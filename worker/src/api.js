@@ -34,6 +34,8 @@ const me = async (request, env) => {
 
   if (request.method === "DELETE") {
     await deletePlayer(env.DB, found.player.id);
+    // The room's voice links are by account; one that cannot be reached now must not undo the deletion.
+    await Promise.resolve().then(() => env.ROOM.getByName("island").forgetVoiceLinks(found.player.id)).catch(() => {});
     const clear = serializeCookie(cookieNames(env.SITE_ORIGIN).session, "", { maxAge: 0, secure: isSecureOrigin(env.SITE_ORIGIN) });
     return new Response(null, { status: 204, headers: { "set-cookie": clear, "cache-control": "no-store" } });
   }

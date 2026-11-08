@@ -73,7 +73,7 @@
       context.textContent = `${help.title} · ${touch ? "Touch" : "Keyboard & mouse"}`;
       note.textContent = touch ? "Use the controls shown on screen after closing this panel. Keyboard input switches this reference to keys."
         : "Try the keys here. Your character stays still while this panel is open.";
-      const rows = groupedRows(help.rows).concat(row(touch ? [] : ["m"], !touch && (BL.voice.stats.enabled || BL.voice.stats.joining) ? "Mute microphone" : "Mute environment sounds", touch ? "Sound button" : ""));
+      const rows = groupedRows(help.rows).concat(row(touch ? [] : ["m"], !touch && (BL.voice.stats.enabled || BL.voice.stats.joining || BL.voice.stats.returning) ? "Mute microphone" : "Mute environment sounds", touch ? "Sound button" : ""));
       for (const entry of rows) {
         const line = document.createElement("div"), keys = document.createElement("div"), text = document.createElement("span");
         line.className = "controls-row"; keys.className = "controls-keys"; text.textContent = entry.text;

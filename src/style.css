@@ -1774,6 +1774,41 @@ body[data-active-scene="hub"] .home-link {
   text-transform: uppercase;
 }
 
+/* How Contributing Oogas are ordered, over the list (hud.js). */
+.roster-sort {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.roster-sort-label {
+  color: rgba(243, 239, 228, 0.78);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.roster-sort select {
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 6px;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--paper);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.roster-sort select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+@media (pointer: coarse) {
+  .roster-sort select { min-height: 40px; }
+}
+
 /* One row an Ooga: presence, name, the player's marks, activity age and state, each in a column of its own
    so a long name ends in an ellipsis inside its cell and a mark or state coming and going never moves the others.
    The voice mark's column is the mark's own width, so the age follows it closely and the name keeps the room. */
@@ -2043,8 +2078,8 @@ body[data-active-scene="hub"] .home-link {
 
 .roster-host {
   flex: none;
-  width: 14px;
-  height: 14px;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
   background: #000;
   box-shadow: 0 0 0 1px var(--paper);
@@ -2069,9 +2104,8 @@ body[data-active-scene="hub"] .home-link {
   cursor: default;
 }
 
-/* The private conversation's lock (private-chat.js `lock`): open and grey, amber while it waits, shut and blue once
-   sealed, dim on the other rows while one is under way. */
-.players-private {
+/* A voice link (net.js `voiceLink`): grey with nothing asked, ember while this visitor's ask waits, blue once linked. */
+.players-link {
   display: inline-flex;
   padding: 0;
   border: 0;
@@ -2079,21 +2113,14 @@ body[data-active-scene="hub"] .home-link {
   color: var(--muted);
   cursor: pointer;
 }
-.players-private[hidden] { display: none; }
-.players-private svg { width: 10px; height: 12px; shape-rendering: crispEdges; }
-.players-private:hover, .players-private:focus-visible { color: var(--fg); outline: none; }
-.players-private:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
-.players-private[data-lock="waiting"] { color: var(--warn); }
-.players-private[data-lock="waiting"]:is(:hover, :focus-visible) { color: var(--accent-text); }
-.players-private[data-lock="waiting"] svg { animation: players-private-wait 2s ease-in-out infinite; }
-.players-private[data-lock="sealed"] { color: #9fbfee; }
-.players-private[data-lock="sealed"]:is(:hover, :focus-visible) { color: #cfe0ff; }
-.players-private[data-lock="busy"] { color: var(--faint); }
-.players-private[data-lock="busy"]:is(:hover, :focus-visible) { color: var(--muted); }
-@keyframes players-private-wait { 50% { opacity: 0.5; } }
-@media (prefers-reduced-motion: reduce) {
-  .players-private[data-lock="waiting"] svg { animation: none; }
-}
+.players-link[hidden] { display: none; }
+.players-link svg { width: 11px; height: 11px; shape-rendering: crispEdges; }
+.players-link:hover, .players-link:focus-visible { color: var(--fg); outline: none; }
+.players-link:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.players-link[data-link="asked"] { color: var(--warn); }
+.players-link[data-link="asked"]:is(:hover, :focus-visible) { color: var(--accent-text); }
+.players-link[data-link="linked"] { color: #9fbfee; }
+.players-link[data-link="linked"]:is(:hover, :focus-visible) { color: #cfe0ff; }
 
 .roster-voice:focus-visible {
   outline: 2px solid var(--accent);
@@ -2125,8 +2152,14 @@ body[data-active-scene="hub"] .home-link {
   opacity: 0.55;
 }
 
+/* A voice this visitor cannot hear where they stand (another zone, or past the hearing range), in Online Oogas. */
+.roster-voice[data-far="true"] {
+  opacity: 0.45;
+}
+
 @media (pointer: coarse) {
-  .roster-voice {
+  .roster-voice,
+  .players-link {
     padding: 6px;
     margin: -6px;
   }
@@ -2146,15 +2179,15 @@ body[data-active-scene="hub"] .home-link {
   display: none;
 }
 
-/* After the name: the private-conversation lock, the voice mark, the distance and the crosshair, each in a column of
+/* After the name: the voice link, the voice mark, the distance and the crosshair, each in a column of
    fixed width. Every group is a grid of its own, so no column may size to its content: the icons line up down the
-   whole tab, the visitor's own row too, whoever shows a lock, a voice mark or a distance. The distance cell is always
+   whole tab, the visitor's own row too, whoever shows a link, a voice mark or a distance. The distance cell is always
    as wide as "999 m" (`.players-distance`), so the name keeps every other pixel. The gap spaces the items after the
    name; the name takes back the extra beside its dot. Every cell sits on the row's first line; a player's volume,
    under it. */
 .players-rows {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) 10px 12px max-content 12px;
+  grid-template-columns: 8px minmax(0, 1fr) 12px 12px max-content 12px;
   column-gap: 14px;
   margin: 0;
   padding: 0;
@@ -2182,7 +2215,7 @@ body[data-active-scene="hub"] .home-link {
 .players-rows li > .players-volume { grid-row: 2; }
 .players-rows .roster-dots { grid-column: 1; }
 .players-rows .roster-marks { display: contents; }
-.players-rows .players-private { grid-column: 3; grid-row: 1; justify-self: end; }
+.players-rows .players-link { grid-column: 3; grid-row: 1; justify-self: center; }
 .players-rows .roster-voice { grid-column: 4; grid-row: 1; justify-self: center; }
 
 .players-name {
@@ -2196,14 +2229,16 @@ body[data-active-scene="hub"] .home-link {
 }
 
 /* A raised hand after the name, never squeezing it out: the name gives way first. A reaction (players.js) pops up in
-   the same place, over the hand when one is raised, and fades. */
+   the same place, over the hand when one is raised, and fades. The column is always as wide as the widest emoji, on
+   every row, with the hand centred in it, so nothing moves when a reaction comes and goes. */
 .players-mark {
   display: inline-grid;
   flex: none;
+  grid-template-columns: minmax(0, 1fr);
+  width: 22px;
   place-items: center;
 }
 
-.players-mark[hidden] { display: none; }
 .players-mark > * { grid-area: 1 / 1; }
 
 .players-hand {
