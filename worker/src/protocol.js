@@ -90,8 +90,9 @@ import "../../src/js/reaction-policy.js";
 //                 hand { id, on, tone }      player `id` raised or lowered their hand; welcome and join carry `hand`
 //                                            and `handTone`. To the sender alone, its own id: a change it was refused
 // Zones: `<group>` or `<group>.<place>`. Voice is shared within a group; who is shown is matched on the whole
-// name, since a place inside a group can have coordinates of its own (the Factory's tunnel on the island and
-// its hall). `none` is nowhere: off the island's edge, or between scenes; it shares voice with nobody.
+// name, since a place inside a group can have coordinates of its own. The exception is the main world, every zone the
+// island scene reports (`BLEND.WORLD`): its players are all shown to each other (`seenTogether`) and its voice goes by
+// height, not zone (voice-blend.js). `none` is nowhere, between scenes; it shares voice with nobody.
 // Chat: one conversation for the whole island. The room names the speaker from the session (`login`, and
 // `name`, their display name), never from the frame, keeps the last CHAT_KEEP lines in memory alone (never
 // storage: a room that sleeps, restarts or is redeployed has forgotten them) and hands them to each socket
@@ -491,10 +492,11 @@ export const claimRefusal = (index, login, body, _players, contributor = false, 
 };
 
 // Voice: who hears whom. Players driving an Ooga or gorilla hear each other at one volume in the same
-// zone group (the island, a bridged land, one cave or portal; see Zones above). A listener with a receiving
-// session hears every other player in its group with a published microphone; nobody hears anyone `none`.
-// On a crossing between two adjacent groups (#392, `BLEND.PAIRS`) a player is in both, by its step along it
-// (`blendTo`, `blendK`), and hears whoever shares a place with it (`BLEND.shares`); the page sets the volumes.
+// zone group (one hall or portal; see Zones above). A listener with a receiving session hears every other player in
+// its group with a published microphone; nobody hears anyone `none`. In the main world (`BLEND.WORLD`) groups give way
+// to levels: the surface, HQ, HQ's basement and the rainforest's underground, by height (voice-blend.js).
+// On a crossing (#392) a player is in two places, by its step along it (`blendTo`, `blendK`), and hears whoever shares
+// a place with it (`BLEND.shares`), between the world's levels or across a pair `BLEND.PAIRS` names; the page sets the volumes.
 // Ooga Arcade (`arcade`) and Ghost Hunter's Arena (`ghost-arena`) are two groups joined by the haunted hallway, each
 // a place as a whole (`BLEND.place`), so its crossing reaches nothing else. The arena is one region with or without a
 // hunt; its older names (`arcade-hunt`, `arcade.arena`) are that region (`BLEND.ALIASES`), never the Arcade's.
@@ -508,9 +510,13 @@ export const zoneGroup = (zone) => {
   return dot < 0 ? zone : zone.slice(0, dot);
 };
 
-/** Whether listener `p` (in voice group `group`) and speaker `q` share a place. With neither crossing, a group; with
- * either, a zone, so a crossing's far end never reaches into another place of its group (₿IFRÖST's chamber). */
-const sharesPlace = (p, group, q) => p.blendTo || q.blendTo
+/** Whether two zones' players are shown to each other, for what the room relays of them: the same zone, or two of the
+ *  main world, all in the island scene's coordinates. */
+export const seenTogether = (a, b) => a === b || BLEND.world(a) && BLEND.world(b);
+
+/** Whether listener `p` (in voice group `group`) and speaker `q` share a place. With neither crossing nor in the main
+ * world, a group; else by place, so a crossing's far end never reaches into another place of its group. */
+const sharesPlace = (p, group, q) => p.blendTo || q.blendTo || BLEND.world(p.zone) || BLEND.world(q.zone)
   ? BLEND.shares(p.zone, p.blendTo || null, p.blendK || 0, q.zone, q.blendTo || null, q.blendK || 0)
   : zoneGroup(q.zone) === group;
 // The three halves of who hears whom, for `voicePeers`. Both restrictions hold together: a

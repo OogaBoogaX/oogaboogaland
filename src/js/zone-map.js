@@ -8,7 +8,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const ROOT = "outside";
-  const LANDS = { outside: "The island", sphere: "Timechain Sphere", rainforest: "Mempool Island", bifrost: "₿IFRÖST", lab: "EntropyLab", bca: "B.C.A.", factory: "Lightning Factory", arcade: "Ooga Arcade", "ghost-arena": "Ghost Hunter's Arena", "arcade-hunt": "Ghost Hunter's Arena", mirror: "The Mirror cave", hq: "HQ", "ember-den": "Ember Den", none: "Between lands", "scene-transition": "Between lands" };
+  const LANDS = { outside: "The island", sphere: "Timechain Sphere", rainforest: "Mempool Island", bifrost: "₿IFRÖST", lab: "EntropyLab", bca: "B.C.A.", factory: "Lightning Factory", arcade: "Ooga Arcade", "ghost-arena": "Ghost Hunter's Arena", "arcade-hunt": "Ghost Hunter's Arena", mirror: "The Mirror cave", hq: "HQ", "ember-den": "Ember Den", between: "Between lands", none: "Between lands", "scene-transition": "Between lands" };
   // A routed game's title, or null for the arcade's other games and anything else.
   const gameTitle = (zone) => {
     const route = BL.routes.list.find((r) => r.scene === zone.slice(6) && !r.place);
@@ -32,7 +32,8 @@
   // The haunted hallway is listed with the end of it a player stands on (#422): its near half with Ooga Arcade's hall,
   // its far half with Ghost Hunter's Arena, so each land is one heading; so too the arena's names from before #422 that a
   // page loaded earlier still reports (`arcade-hunt`, `arcade.arena`).
-  const JOINED = { "arcade.haunt": "arcade.hall", "ghost-arena.haunt": "ghost-arena", "arcade-hunt": "ghost-arena", "arcade.arena": "ghost-arena" };
+  // The land between (the island's bridges and the air off its edge) is listed with anyone between scenes.
+  const JOINED = { "arcade.haunt": "arcade.hall", "ghost-arena.haunt": "ghost-arena", "arcade-hunt": "ghost-arena", "arcade.arena": "ghost-arena", between: "none" };
   const groupOf = (zone) => zone === "scene-transition" ? "none" : Object.hasOwn(JOINED, zone) ? JOINED[zone] : zone.startsWith("scene-") && !gameTitle(zone) ? GAMES : zone;
   // A heading names its own zone where one land holds several, each with coordinates of its own.
   const HEADINGS = {
@@ -43,12 +44,12 @@
     "dsb-puppy-rescue": "DSB Land · Puppy Rescue", "dsb-free-wallets": "DSB Land · Free Wallets"
   };
   const heading = (group) => Object.hasOwn(HEADINGS, group) ? HEADINGS[group] : landOf(group);
-  // Each zone's way back toward the island. A bridge belongs to the island (`zoneOf` in scene-hub.js), so a bridged land
-  // starts where its bridge ends. The games open from the arcade's hall; DSB Land and the Ember Den from the
+  // Each zone's way back toward the island. A bridge is the land between (`zoneOf` in scene-hub.js), so a bridged land
+  // starts where its bridge ends, and the land between's routes start as the island's do (`next`). The games open from the arcade's hall; DSB Land and the Ember Den from the
   // ₿IFRÖST chamber's windows; the Sphere's rooms from its doorway; Ghost Hunter's Arena down the arcade's haunted
   // hallway, half by half. Nowhere, and anything unknown, has no way.
   const PARENTS = {
-    lab: ROOT, bca: ROOT, mirror: ROOT, hq: ROOT, factory: ROOT, arcade: ROOT, sphere: ROOT, rainforest: ROOT, bifrost: ROOT,
+    between: ROOT, lab: ROOT, bca: ROOT, mirror: ROOT, hq: ROOT, factory: ROOT, arcade: ROOT, sphere: ROOT, rainforest: ROOT, bifrost: ROOT,
     "lab.hall": "lab", "factory.hall": "factory", "factory.hangar": "factory.hall", "arcade.hall": "arcade",
     "arcade.haunt": "arcade.hall", "ghost-arena.haunt": "arcade.haunt", "ghost-arena": "ghost-arena.haunt", "arcade-hunt": "ghost-arena", "arcade.arena": "ghost-arena",
     "bifrost.chamber": "bifrost", "ember-den": "bifrost.chamber", "dsb-outside": "bifrost.chamber", "dsb-transit": "bifrost.chamber"
@@ -68,6 +69,7 @@
   };
   // The zone the route from `from` to `to` enters first, or null when they are the same or either has no way.
   const next = (from, to) => {
+    if (from === "between") from = ROOT;
     if (from === to) return null;
     const a = depthOf(from);
     let b = depthOf(to);

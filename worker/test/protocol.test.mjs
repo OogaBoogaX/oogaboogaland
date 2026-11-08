@@ -162,7 +162,7 @@ test("voice: players driving an Ooga hear each other while in the same place; no
   const players = [
     p(1, "bc1gui", "outside"), p(2, "portlandhodl", "outside"), p(3, "w-s-bitcoin", "cave-lab"),
     p(4, null, "outside"), p(5, "MrHodlX", "outside", { pub: null, sub: "s", track: null }), p(6, "DrNeski", "outside", { pub: "p", sub: null, track: "mic" }),
-    p(7, "timechainb", "cave-lab"), p(8, "Tmmmemcee", "hq"),
+    p(7, "timechainb", "cave-lab"), { ...p(8, "Tmmmemcee", "hq"), blendTo: "hq", blendK: 20 },
   ];
   const peers = voicePeers(players);
   assert.deepEqual(peers.get(1), [2, 6]);
@@ -188,13 +188,14 @@ test("voice zones: a group shares voice across its places; nobody is heard from 
   const { voicePeers, parseClientMessage, zoneGroup } = await import("../src/protocol.js");
   const on = { pub: "p", sub: "s", track: "mic" };
   const p = (id, zone) => ({ id, body: `ooga-${id}`, zone, voice: on });
-  const peers = voicePeers([p(1, "factory"), p(2, "factory.hall"), p(3, "outside"), p(4, "sphere"), p(5, "none"), p(6, "none"), p(7, "bifrost"), p(8, "bifrost.chamber")]);
-  assert.deepEqual(peers.get(1), [2], "the Factory's tunnel hears its hall");
+  const peers = voicePeers([p(1, "factory.hangar"), p(2, "factory.hall"), p(3, "outside"), p(4, "sphere"), p(5, "none"), p(6, "none"), p(7, "bifrost"), p(8, "bifrost.chamber")]);
+  assert.deepEqual(peers.get(1), [2], "the Factory's hangar hears its hall");
   assert.deepEqual(peers.get(2), [1]);
-  assert.deepEqual(peers.get(3), [], "the island does not hear a bridged land");
-  assert.deepEqual(peers.get(4), []);
-  assert.deepEqual(peers.get(5), [], "off the island's edge hears nobody, not even another off it");
-  assert.deepEqual(peers.get(7), [8], "the Bifrost isle hears its chamber");
+  assert.deepEqual(peers.get(3), [4, 7], "the main world's surface is one place, whatever the zone");
+  assert.deepEqual(peers.get(4), [3, 7]);
+  assert.deepEqual(peers.get(5), [], "between scenes hears nobody, not even another between them");
+  assert.deepEqual(peers.get(7), [3, 4], "the Bifrost isle is on the surface");
+  assert.deepEqual(peers.get(8), [], "and its chamber a room of its own");
   assert.equal(zoneGroup("arcade.hall"), "arcade");
   assert.equal(zoneGroup("dsb-studio"), "dsb-studio");
   assert.deepEqual(parseClientMessage('{"t":"zone","name":"factory.hall"}'), { t: "zone", name: "factory.hall" });

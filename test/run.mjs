@@ -19920,8 +19920,8 @@ scene("hub", { label: "chilling", query: "status=chillin&pos=0",
     traffic.rows.every(row => row.waiting === 0 && row.drift > 0.5 && row.retained && row.raised < 0.3 && row.walked > 2 && !row.replans && !row.resets)
     && traffic.clear.every(row => !row.waited && row.moved), JSON.stringify(traffic));
 } }] });
-// #392: walking each bridge reports the crossing the room and the page fade voices by.
-const hubVoiceCrossings = { name: "voice crossings", why: "rule: on each bridge and down each slope between levels a player hears the two places fade into each other by how far along they stand, and back again", run: async (b) => {
+// #392: the main world's zones and levels, as the room and the page fade voices by.
+const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the bridges and the air off the edge are the land between, every zone on the surface is one voice place, and each level below fades in by height, on the island or off its edge", run: async (b) => {
   const r = await b.evaluate(`(() => {
     const B = __ooga, D = BL.scenes.hub.debug, net = BL.net.state, T = D.timechainIsland, M = __ooga.poolIsland, F = D.bifrost;
     B.pilot.possess(B.cavemen.get("portlandhodl"));
@@ -19929,8 +19929,10 @@ const hubVoiceCrossings = { name: "voice crossings", why: "rule: on each bridge 
     const at = (p, wait) => { if (!Number.isFinite(p.y)) p.y = D.island.heightAt(p.x, p.z); B.pilot.navigate({ position: p, yaw: 0, pitch: 0.4, dist: 6 }); B.advance(wait, 1 / 60); return { to: net.blendTo, t: +net.blendT.toFixed(2), zone: net.zone }; };
     // Each bridge as points from its island end (0) to where its land's zone begins (1), and a step onto the land.
     const sphereNear = T.place.bridgeZ + BL.timechainModels.SITE.span + 0.5, porch = BL.timechainModels.SPOTS.WAIT.z + 5;
-    const pool = M.place, poolNear = pool.bridgeLocalZ + BL.poolModels.SITE.span, poolFar = D.poolBridgeFar();
-    const w = F.site.walk, fifo = (along) => ({ x: w.x + w.sr * along, z: w.z + w.cr * along });
+    const pool = M.place, poolNear = pool.bridgeLocalZ + BL.poolModels.SITE.span, S = BL.poolModels.SITE;
+    let lo = pool.bridgeLocalZ + S.deckStart, hi = poolNear;
+    for (let i = 0; i < 24; i++) { const mid = (lo + hi) / 2; if (M.overAt(M.worldX(0, mid), M.worldZ(0, mid))) lo = mid; else hi = mid; }
+    const poolFar = hi, w = F.site.walk, fifo = (along) => ({ x: w.x + w.sr * along, z: w.z + w.cr * along });
     const bridges = {
       sphere: (t) => { const a = sphereNear - t * (sphereNear - porch); return { x: T.worldX(0, a), y: T.place.y, z: T.worldZ(0, a) }; },
       rainforest: (t) => { const a = poolNear - t * (poolNear - poolFar); return { x: M.worldX(0, a), y: pool.y, z: M.worldZ(0, a) }; },
@@ -19938,46 +19940,47 @@ const hubVoiceCrossings = { name: "voice crossings", why: "rule: on each bridge 
     };
     const out = {};
     for (const [land, point] of Object.entries(bridges)) {
-      const row = out[land] = {};
-      const home = (p) => ({ ...p, y: NaN });
+      const row = out[land] = {}, home = (p) => ({ ...p, y: NaN });
       row.home = at(home(point(-0.1)), 0.5);
-      for (const t of [0.1, 0.5, 0.9]) row[t] = at(point(t), 0.5);
+      row.bridge = at(point(0.5), 0.5);
       row.land = at(point(1.4), 0.5);
-      // Back onto the bridge from the land: until the island's zone holds, the island is ahead.
-      row.back = at(point(0.75), 0.05);
-      row.backHeld = at(point(0.75), 0.5);
-      row.away = at(home(point(-0.1)), 0.5);
     }
+    const lab = D.island.mouths.find((m) => m.id === "c11").inside;
+    out.mouth = at({ x: lab.x, y: 0, z: lab.z }, 0.5);
+    out.air = at({ x: 53.7, y: 8, z: -31 }, 0.5);
     return out;
   })()`);
-  const ok = Object.entries(r).every(([land, row]) => !row.home.to && row.home.zone === "outside"
-    && [0.1, 0.5, 0.9].every((t) => row[t].to === land && Math.abs(row[t].t - t) <= 0.05 && row[t].zone === "outside")
-    && !row.land.to && row.land.zone === land && row.back.to === "outside" && Math.abs(row.back.t - 0.25) <= 0.05 && row.back.zone === land
-    && row.backHeld.to === land && Math.abs(row.backHeld.t - 0.75) <= 0.05 && row.backHeld.zone === "outside" && !row.away.to && row.away.zone === "outside");
-  record("voice crossings: each bridge reports its land and how far along, the island's zone held to its far end, and walking back from the land the island ahead", ok, JSON.stringify(r));
-  // Levels: down HQ's entrance ramp, its basement's ramp and the rainforest's descent, by height, only where each slope is.
+  const lands = ["sphere", "rainforest", "bifrost"];
+  record("voice levels: the bridges and the air off the edge are the land between, the cave entrances the island, and none of them is a crossing",
+    lands.every((land) => !r[land].home.to && r[land].home.zone === "outside" && !r[land].bridge.to && r[land].bridge.zone === "between" && !r[land].land.to && r[land].land.zone === land)
+      && r.mouth.zone === "outside" && r.air.zone === "between" && !r.air.to, JSON.stringify(r));
+  // Levels: by height off the island's edge, and down HQ's ramps, its basement's and the rainforest's descent.
   const lv = await b.evaluate(`(() => {
     const B = __ooga, D = BL.scenes.hub.debug, H = D.island.headquarters, M = __ooga.poolIsland, L = BL.poolLayout, net = BL.net.state;
     const at = (x, y, z) => { B.pilot.navigate({ position: { x, y, z }, yaw: 0, pitch: 0.4, dist: 6 }); B.advance(0.6, 1 / 60); return { to: net.blendTo, t: +net.blendT.toFixed(2), zone: net.zone }; };
+    const air = (feet) => { const o = { to: "", t: 0 }; return D.levelOf(53.7, feet, -31, "between", o) ? { to: o.to, t: +o.t.toFixed(2) } : null; };
     const near = (samples, y) => samples.reduce((best, p) => Math.abs(p.y - y) < Math.abs(best.y - y) ? p : best);
     const world = (lx, ly, lz) => [M.worldX(lx, lz), M.place.y + ly, M.worldZ(lx, lz)], down = L.rampPoint(50), room = H.basement.rooms[0];
     const entrance = near(H.ramps[0].samples, H.floor / 2), stair = near(H.basement.ramps[0].samples, (H.floor + H.basement.floor) / 2);
     return {
-      entrance: at(entrance.x, entrance.y, entrance.z), floor: at(H.room.x, H.floor, H.room.z), stair: at(stair.x, stair.y, stair.z),
+      air: { over: air(10), dip: air(-0.5), half: air((-1 + H.floor) / 2), floor: air(H.floor), under: air(H.floor - 0.05), down: air((H.floor + H.basement.floor) / 2), deep: air(-40) },
+      entrance: at(entrance.x, entrance.y, entrance.z), rampShare: (-1 - entrance.y) / (-1 - H.floor), floor: at(H.room.x, H.floor, H.room.z), stair: at(stair.x, stair.y, stair.z),
       basement: at(room.x, H.basement.floor, room.z), backUp: at(H.room.x, H.floor, H.room.z),
       descent: at(...world(down.x, down.y, down.z)), chamber: at(...world(9, L.FLOOR, 0)), court: at(...world(0, 0, 20)), lake: at(...world(2, -2.5, 2)),
       depth: (-0.75 - down.y) / (-0.75 - L.FLOOR) };
   })()`);
-  // Halfway down an entrance ramp from either side: the island's zone crossing to HQ, or HQ's crossing back up.
-  const intoHq = lv.entrance.zone === "outside" && lv.entrance.to === "hq" ? lv.entrance.t : lv.entrance.zone === "hq" && lv.entrance.to === "outside" ? 1 - lv.entrance.t : NaN;
-  record("voice crossings: down HQ's entrance ramps, its basement's and the rainforest's descent a player hears both levels by height, each level alone on it, never the lake over the chamber",
-    Math.abs(intoHq - 0.5) <= 0.05 && !lv.floor.to && lv.floor.zone === "hq" && lv.stair.to === "hq-basement" && Math.abs(lv.stair.t - 0.5) <= 0.05 && lv.stair.zone === "hq"
-      && lv.basement.to === "hq-basement" && lv.basement.t === 1 && lv.basement.zone === "hq" && !lv.backUp.to
+  const a = lv.air;
+  record("voice levels: off the island's edge height alone picks the level: the surface a metre under the plane, then HQ's, then the basement's, all the way down",
+    a.over === null && a.dip === null && a.half.to === "hq" && Math.abs(a.half.t - 0.5) <= 0.01 && a.floor.to === "hq" && a.floor.t === 1 && a.under.to === "hq" && a.under.t === 1
+      && a.down.to === "hq-basement" && Math.abs(a.down.t - 0.5) <= 0.01 && a.deep.to === "hq-basement" && a.deep.t === 1, JSON.stringify(a));
+  record("voice levels: down HQ's entrance ramps, its basement's and the rainforest's descent a player hears both levels by height, each level alone on it, its rooms HQ's whatever the height, never the lake over the chamber",
+    lv.entrance.to === "hq" && Math.abs(lv.entrance.t - lv.rampShare) <= 0.05 && lv.floor.to === "hq" && lv.floor.t === 1 && lv.floor.zone === "hq" && lv.stair.to === "hq-basement" && Math.abs(lv.stair.t - 0.5) <= 0.05 && lv.stair.zone === "hq"
+      && lv.basement.to === "hq-basement" && lv.basement.t === 1 && lv.basement.zone === "hq" && lv.backUp.to === "hq" && lv.backUp.t === 1
       && lv.descent.to === "rainforest-under" && Math.abs(lv.descent.t - lv.depth) <= 0.05 && lv.descent.zone === "rainforest"
       && lv.chamber.to === "rainforest-under" && lv.chamber.t === 1 && !lv.court.to && lv.court.zone === "rainforest" && !lv.lake.to,
     JSON.stringify(lv));
 } };
-scene("hub", { label: "player stacking", query: "solo=1&character=portlandhodl&pos=0", steps: [hubPlayerStacking, hubChalkboardReach, hubVoiceCrossings, hubNameplates] });
+scene("hub", { label: "player stacking", query: "solo=1&character=portlandhodl&pos=0", steps: [hubPlayerStacking, hubChalkboardReach, hubVoiceLevels, hubNameplates] });
 scene("hub", { label: "lab flask approach", query: "solo=1&character=portlandhodl&status=clankin", steps: [{ name: "gorilla lab exit through Oogas", why: "regression: Ooga occupancy, body sweeps and head support blocked gorillas leaving the lab", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, C = B.clankers, e = C.list[0], owner = e.owner, m = B.headquarters.entropyLab.mouth;
@@ -24663,24 +24666,25 @@ const voiceHearingChecks = async () => {
   const savedPlayers={desktop:await preferences(false),ios:await preferences(true)};
   record("voice player preferences: prejoin settings request no microphone or connection, reload applies mute and real boost before the first track, volume never unmutes or bypasses range and zones, stable identities survive renames and environments, and shared-browser accounts remain separate",
     Object.values(savedPlayers).every(r=>r.prejoin&&r.reload&&r.landedOutside&&r.receiveOnly&&r.limited&&r.initial==="0,1.5,0"&&r.boost==="2,1.5,0"&&r.muteWins==="2,0,0"&&r.volumeIndependent&&r.boundary==="0"&&r.returned==="2"&&r.listenerAway==="0"&&r.listenerBack==="0.25"&&r.identity&&r.otherAccount&&r.restored&&r.signedOut&&r.localOnly&&r.legacyUntouched&&r.disposed),JSON.stringify(savedPlayers));
-  // #392: on a crossing each voice plays at its equal-power share (an islander, a forester and a second crosser halfway),
-  // on iOS through its gain as on the desktop, and the hearing range is measured across the crossing.
+  // #392: between two levels each voice plays at its equal-power share (an islander, someone on HQ's level and a second
+  // climber halfway, each in a zone of their own), on iOS through its gain as on the desktop, and the hearing range is
+  // measured across the main world.
   const crossing=async ios=>{
     const r=rig(ios),V=r.V,s=r.state,out={};
-    r.remotes.clear();r.remotes.set(2,remote("isl","outside",5,0));r.remotes.set(3,remote("for","rainforest",5,30));
-    r.remotes.set(4,{...remote("cro","outside",0,15),blendTo:"rainforest",blendK:10});
-    Object.assign(s,{zone:"outside",self:{x:0,y:0,z:0,zone:"outside"},blendTo:"rainforest",blendT:0.5});
+    r.remotes.clear();r.remotes.set(2,remote("isl","rainforest",5,0));r.remotes.set(3,{...remote("low","hq",5,30),blendTo:"hq",blendK:20});
+    r.remotes.set(4,{...remote("cro","between",0,15),blendTo:"hq",blendK:10});
+    Object.assign(s,{zone:"outside",self:{x:0,y:0,z:0,zone:"outside"},blendTo:"hq",blendT:0.5});
     await V.enable();await settle();V.setPeers([2,3,4],[1,1,1]);await settle();r.land([2,3,4]);
     r.tick(10);out.half=r.levels([2,3,4]);
     s.blendT=0.9;r.tick(10);out.near=r.levels([2,3,4]);
     s.blendT=1;r.tick(10);out.end=r.levels([2,3,4]);
-    Object.assign(s,{zone:"rainforest",blendTo:null,blendT:0});s.self.zone="rainforest";r.tick(10);out.over=r.levels([3,4]);
+    s.zone="hq";s.self.zone="hq";r.tick(10);out.over=r.levels([3,4]);
     V.setRadius(40);r.tick(10);out.radius=r.levels([3,4]);V.setRadius(30);out.cutoff=r.levels([3,4]);
     V.stop();
     return out;
   };
   const cross={desk:await crossing(false),ios:await crossing(true)};
-  record("voice crossing: along a bridge the island fades out as the land ahead fades in, equal-power, a second crosser plays by how near, the far side hears a crosser by its share, iOS sounds the same, and the hearing range reaches across",
+  record("voice levels: down from the surface it fades out as HQ's level fades in, equal-power, whatever zone each player stands in; a second climber plays by how near, the level below hears a climber by its share, iOS sounds the same, and the hearing range reaches across the main world",
     [cross.desk,cross.ios].every(c=>c.half==="0.707,0.707,1"&&c.near==="0.156,0.988,0.809"&&c.end==="0,1,0.707"&&c.over==="1,0.707"&&c.radius==="1,0.707"&&c.cutoff==="0,0.707"),JSON.stringify(cross));
   // #422: the arcade's haunted hallway, a listener halfway along with someone in the hall, someone in the arena and a
   // second walker on the arena's half: equal power from either half, the same when the zone flips at the midpoint, a
@@ -25813,20 +25817,20 @@ const playersTabChecks = async BL => {
     ["outside", "dsb-studio", "bifrost"], ["outside", "scene-race", "arcade"], ["outside", "scene-skee", "arcade"], ["outside", "sphere-4", "sphere"], ["outside", "hq", "hq"],
     ["factory", "factory.hangar", "factory.hall"], ["factory.hangar", "outside", "factory.hall"], ["factory.hangar", "arcade.hall", "factory.hall"], ["lab", "rainforest", "outside"],
     ["bifrost.chamber", "ember-den", "ember-den"], ["ember-den", "dsb-maxis", "bifrost.chamber"], ["dsb-maxis", "dsb-studio", "dsb-outside"], ["sphere-4", "sphere-7", "sphere"],
-    ["outside", "none", null], ["none", "outside", null], ["scene-transition", "lab", null], ["lab", "lab", null], ["outside", "made-up", null], ["outside", "constructor", null], ["constructor", "lab", null],
+    ["between", "factory.hall", "factory"], ["between", "rainforest", "rainforest"], ["factory.hall", "between", "factory"], ["outside", "none", null], ["none", "outside", null], ["scene-transition", "lab", null], ["lab", "lab", null], ["outside", "made-up", null], ["outside", "constructor", null], ["constructor", "lab", null],
     ["outside", "ghost-arena", "arcade"], ["arcade.hall", "arcade-hunt", "arcade.haunt"], ["arcade.haunt", "ghost-arena", "ghost-arena.haunt"], ["ghost-arena", "arcade.hall", "ghost-arena.haunt"], ["arcade-hunt", "outside", "ghost-arena"]];
   const routed = steps.map(([from, to, want]) => ({ from, to, want, got: Z.next(from, to) })).filter(r => r.got !== r.want);
   record("players tab routes: the first step between zones goes down toward the target or up toward the island (Factory before the hangar, ₿IFRÖST before the Ember Den and DSB Land, the Arcade before its games), and nowhere has no route",
     routed.length === 0, JSON.stringify(routed));
   const lands = { outside: "The island", "factory.hall": "Lightning Factory", factory: "Lightning Factory", "factory.hangar": "Lightning Jet Hangar", "arcade.hall": "Ooga Arcade", "bifrost.chamber": "\u20bfIFR\u00d6ST chamber",
-    "sphere-3": "Timechain Sphere \u00b7 Room 3", "dsb-maxis": "DSB Land", "cave-c9": "A cave on the island", "scene-race": "Ooga Rally", "scene-skee": "A game", none: "Between lands", "ember-den": "Ember Den",
+    "sphere-3": "Timechain Sphere \u00b7 Room 3", "dsb-maxis": "DSB Land", "cave-c9": "A cave on the island", "scene-race": "Ooga Rally", "scene-skee": "A game", none: "Between lands", between: "Between lands", "ember-den": "Ember Den",
     "arcade.haunt": "Ooga Arcade", "ghost-arena.haunt": "Ghost Hunter's Arena", "ghost-arena": "Ghost Hunter's Arena", "arcade-hunt": "Ghost Hunter's Arena" };
   const headings = { outside: "The island", factory: "Lightning Factory tunnel", "factory.hall": "Lightning Factory", arcade: "Ooga Arcade entrance", "arcade.hall": "Ooga Arcade",
     "arcade.haunt": "Ooga Arcade", "ghost-arena.haunt": "Ghost Hunter's Arena", "ghost-arena": "Ghost Hunter's Arena", "arcade-hunt": "Ghost Hunter's Arena",
-    "dsb-maxis": "DSB Land \u00b7 Maxis Club", "scene-race": "Ooga Rally", "scene-skee": "Ooga Arcade games", "scene-invaders": "Ooga Arcade games", "scene-transition": "Between lands" };
+    "dsb-maxis": "DSB Land \u00b7 Maxis Club", "scene-race": "Ooga Rally", "scene-skee": "Ooga Arcade games", "scene-invaders": "Ooga Arcade games", "scene-transition": "Between lands", between: "Between lands" };
   const landMiss = Object.entries(lands).filter(([zone, want]) => Z.landOf(zone) !== want), headMiss = Object.entries(headings).filter(([zone, want]) => Z.heading(Z.groupOf(zone)) !== want);
   record("players tab groups: the roster keeps its land names; the tab heads the Factory tunnel and the Arcade entrance apart from their halls, each DSB venue apart, the arcade's unrouted games together, and each half of the haunted hallway with its own land, Ooga Arcade or Ghost Hunter's Arena (#422)",
-    !landMiss.length && !headMiss.length && Z.heading("constructor") === "constructor" && Z.groupOf("scene-skee") === Z.groupOf("scene-invaders") && Z.groupOf("scene-race") !== Z.groupOf("scene-skee") && Z.groupOf("scene-transition") === "none"
+    !landMiss.length && !headMiss.length && Z.heading("constructor") === "constructor" && Z.groupOf("scene-skee") === Z.groupOf("scene-invaders") && Z.groupOf("scene-race") !== Z.groupOf("scene-skee") && Z.groupOf("scene-transition") === "none" && Z.groupOf("between") === "none"
       && Z.groupOf("arcade.haunt") === Z.groupOf("arcade.hall") && Z.groupOf("ghost-arena.haunt") === Z.groupOf("ghost-arena") && Z.groupOf("arcade-hunt") === Z.groupOf("ghost-arena") && Z.groupOf("ghost-arena") !== Z.groupOf("arcade.hall"),
     JSON.stringify({ landMiss, headMiss }));
   const row = (id, name, zone, self = false) => ({ id, name, group: Z.groupOf(zone), self });
@@ -25892,10 +25896,10 @@ const playersTabChecks = async BL => {
       && gap.to === "arcade" && gap.k === 9 && gap.share === shareBefore && settled === shareBefore && shareBefore > 0.6 && shareBefore < 0.7
       && gap.poseZone === "ghost-arena.haunt" && rec(2).poseZone === "ghost-arena.haunt" && rec(2).zone === "outside" && !rec(2).blendTo,
     JSON.stringify({ nearHalf, turned, leftHallway, shareBefore, gap, settled }));
-  // The exact local position can reach a bridge's end before the throttled wire step does. The room turns its last
+  // The exact local position can reach the hallway's end before the throttled wire step does. The room turns its last
   // step round on the zone change, so the page must explicitly clear that remainder, once, even when its own is zero.
   const exits = [];
-  for (const land of ["rainforest", "sphere", "bifrost", "hq"]) for (const [from, to] of [["outside", land], [land, "outside"]]) {
+  for (const [from, to] of [["arcade.haunt", "ghost-arena"], ["ghost-arena.haunt", "arcade"]]) {
     f.net.setBlend(null, 0); f.net.setZone(from); f.advance(1000);
     f.net.setBlend(to, 0.95); const lastStep = f.sent.at(-1);
     f.net.setBlend(to, 0.99); const throttled = f.sent.at(-1) === lastStep;
@@ -25905,8 +25909,20 @@ const playersTabChecks = async BL => {
     const clears = f.sent.slice(at).filter(m => m.t === "blend");
     exits.push({ from, to, lastStep, throttled, clears, local: f.net.state.blendTo });
   }
-  record("voice bridge exit: a zone change with wire step 19 and exact progress past the endpoint explicitly clears the room's remaining crossing once in either direction",
+  record("voice crossing exit: a zone change with wire step 19 and exact progress past the endpoint explicitly clears the room's remaining crossing once in either direction",
     exits.every(r => r.lastStep.t === "blend" && r.lastStep.k === 19 && r.throttled && r.local === null && r.clears.length === 1 && r.clears[0].to === null && r.clears[0].k === 0), JSON.stringify(exits));
+  // Between two zones of the main world a level stands and no voice is let go; a remote's too, and its position stays placed.
+  f.net.setBlend(null, 0); f.net.setZone("outside"); f.advance(1000);
+  const heldBefore = dropped.length;
+  f.net.setBlend("hq", 0.5); f.net.setZone("between");
+  const held = { to: f.net.state.blendTo, t: f.net.state.blendT, dropped: dropped.length - heldBefore };
+  f.net.setBlend(null, 0); f.net.setZone("factory.hall");
+  const left = dropped.length - heldBefore;
+  message({ t: "zone", id: 2, name: "outside" }); message({ t: "state", now: Date.now(), ps: [2, 5, 0, 5, 0] }); message({ t: "blend", id: 2, to: "hq", k: 8 });
+  message({ t: "zone", id: 2, name: "hq" });
+  const remoteHeld = { to: rec(2).blendTo, k: rec(2).blendK, poseZone: rec(2).poseZone };
+  record("voice levels across zones: walking between two zones of the main world keeps the level and every voice, a remote's level and position too, and leaving the world for a hall lets the voices go",
+    held.to === "hq" && held.t === 0.5 && held.dropped === 0 && left === 1 && remoteHeld.to === "hq" && remoteHeld.k === 8 && remoteHeld.poseZone === "hq", JSON.stringify({ held, left, remoteHeld }));
   f.net.dispose();
 };
 const rememberedCharacterChecks = async BL => {
@@ -26372,6 +26388,7 @@ const playersColumnChecks = async () => {
     const context = { window, document, MutationObserver: class { observe() {} }, localStorage: { getItem: () => null, setItem() {} } };
     runInNewContext(await readFile(join(root, "src/js/routes.js"), "utf8"), context);
     runInNewContext(await readFile(join(root, "src/js/zone-map.js"), "utf8"), context);
+    runInNewContext(await readFile(join(root, "src/js/voice-blend.js"), "utf8"), context);
     Object.assign(window.BL, {
       net: { state: { room: "live", me: { login: "me", display: "Me" }, selfId: 1, online: 3, zone: "outside", hostId: 0, self: { x: 0, y: 0, z: 0, zone: "outside" } }, remotes,
         subscribe() {}, subscribeRoster() {}, subscribeMoves() {}, subscribePresence() {}, subscribeReactions() {} },
