@@ -184,7 +184,7 @@
   // within a pet's width of the lowest there (a brim round a crown; on a bare head, its top). Under Calm it sits still.
   const HAT_RIDE = Object.freeze({ ring: 16, steps: 24, leap: 0.5, hop: 0.4, hopUp: 2.5, speed: 1.4, bob: 0.04 });
   const HAT_SEATS = new WeakMap();
-  // Read live; a context without matchMedia (the suite's bare loaders, as for the hub's goldbug) is never Calm.
+  // Read live; a context without matchMedia (the suite's bare loaders) is never Calm.
   const CALM = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
   const RIDE_HEAD = math.quat.create(), RIDE_TURN = math.quat.create(), RIDE_SPIN = math.quat.create(), RIDE_MATRIX = math.mat4.create();
   const hatSeatOf = (head, dog) => {

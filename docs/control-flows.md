@@ -474,7 +474,7 @@ Free roaming without a character is removed in every walking scene (hub, lab, Li
 | Account change | If the driven Ooga is no longer the visitor's, the hub hands them their own again (`claimOwnOoga`); the Factory, hangar, ₿IFRÖST, Arcade and poker room toast and leave toward the island. |
 
 - A signed-out guest drives their local likeness (`contributors.addLocal`: the default Ooga or a remembered login's). It has no NPC copy on the island and no ghost; when nobody drives it, it is away. A contributor's Ooga driven by anyone still leaves its NPC track behind as a cyan ghost (`npc-ghosts.js`).
-- Game cameras keep their own rules: the ghost hunt's spectator views and grave hold, Cloud Hopper's run camera, Ooga Mine's camera-only pilot (which still flies, pans and uses Space as WORK), the Factory kiosk glide, the cabinet zoom and the whitepaper reader.
+- Game cameras keep their own rules: the ghost hunt's spectator views and grave hold, Cloud Hopper's run camera, Ooga Mine's camera-only pilot (which still flies, pans and uses Space as WORK), the Factory kiosk glide and the cabinet zoom.
 - A `?debug=1` page that names no character still starts with no Ooga, as a stationary fixture for checks; it is not a visitor feature. The sign-in view snapshot (`saveLoginView`), which kept only a view with no Ooga, is removed: sign-in returns to the pile with the visitor's own Ooga.
 
 ## Validation and play-test queue
