@@ -102,6 +102,8 @@ export function stageIcons(html, out) {
   const touchPath = join(out, "apple-touch-icon.png");
   const touch = existsSync(touchPath) ? readFileSync(touchPath) : touchIcon(found.find((p) => p.size === 64).bytes, theme[1]);
   for (const file of ["apple-touch-icon.png", "apple-touch-icon-precomposed.png"]) writeFileSync(join(out, file), touch);
+  // The portable page embeds its touch icon (scripts/build.mjs); a staged page links the file written above instead.
+  html = html.replace(/(<link rel="apple-touch-icon" sizes="\d+x\d+" href=")data:image\/png;base64,[^"]+(">)/, "$1/apple-touch-icon.png$2");
   let touchLinked = /<link\b[^>]*\brel="apple-touch-icon"/.test(html);
   return html.replace(ICONS, (_, size) => {
     const link = `<link rel="icon" type="image/png" sizes="${size}x${size}" href="/favicon-${size}.png">`;

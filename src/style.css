@@ -8789,8 +8789,9 @@ body[data-active-scene="dsb"] #destination-hud:disabled { opacity: 1; cursor: de
   display: none;
   position: absolute;
   left: 50%;
-  /* Below the View, Pause and Sound row (to 62px on a phone), so it never takes their taps. */
-  top: calc(68px + var(--safe-top));
+  /* Below the banner's controls (hud.js measures where they end; a phone stacks them under the title), so it never
+     takes their taps. */
+  top: var(--banner-controls-bottom, calc(68px + var(--safe-top)));
   transform: translateX(-50%);
   gap: 10px;
   align-items: baseline;
