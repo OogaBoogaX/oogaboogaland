@@ -19,6 +19,11 @@
   let inkMenu,inkTools,inkPick=null,inkReview=false,inkMenuReview=0,inkLayoutObserver,inkLayoutPending=false;
   let svrnMenu,svrnPick=null,svrnReview=false;
   let rescue=null,exitPick=null;
+  // The zipline from the summit down into the Chora (zipline.js `DSB`), and what Space would do with it this frame.
+  const ZIP=BL.zipline.DSB;
+  let zipline=null,zipShown=null;
+  const zipLabel=a=>a===zipline.GRAB?"Ride the zipline to the Noderunner":a===zipline.LETGO?"Let go here":"Hold on";
+  const zipUse=(x,z,feet)=>{const a=zipline?.actionFor(crew.player,x,feet,z);if(!a)return false;if(!zipline.use(a,crew.player))hud.toast(zipline.hint(a,matchMedia("(pointer: coarse)").matches,""));return true;};
   let wallets=null,unheardWallets=null,walletsMenu=null,walletsPick=null,walletsReview=false,walletTools=null,walletText=null,walletLines=null,walletLine=null,walletSpace=0;
   let memeMenu,memeReview=false,contextReview=false,stackchainMenu,stackchainReview=false;
   let bigMenu,bigPick=null,bigReview=false,bigMenuReview=0;
@@ -192,7 +197,7 @@
     if(interiors.target(avatar.root.position))return false;
     if(menuZone()){openVenue();return true;}return false;
   };
-  const act=()=>{if(menuOpen())return true;if(!interiors?.transitioning&&studioAct())return true;if(nearTv()){tv.open();return true;}if(!held&&interiors?.request(avatar.root.position,avatar.root.rotation.y))return true;if(interiors?.active)return false;if(nearGate()&&!held){gate.open();return true;}return false;};
+  const act=()=>{if(menuOpen())return true;if(!interiors?.active&&avatar&&zipUse(avatar.root.position.x,avatar.root.position.z,avatar.root.position.y-avatar.baseY))return true;if(!interiors?.transitioning&&studioAct())return true;if(nearTv()){tv.open();return true;}if(!held&&interiors?.request(avatar.root.position,avatar.root.rotation.y))return true;if(interiors?.active)return false;if(nearGate()&&!held){gate.open();return true;}return false;};
   const mute=()=>{const on=weather.toggleMuted();interiors?.audio.update(on);};
   const modeAction=name=>!leaving&&!gate?.isOpen&&!interiors?.transitioning&&pilot.modeAction(name);
   const action=(name,value)=>{if(entrance?.action(name))return;if(menuOpen())return;if(modeAction(name))return;if(name==="dsb-mute")mute();else if(name==="jetpack-toggle")toggleJetpack();else if(interiors?.transitioning)return;else if(name==="mode-preset")presetView(value);else if(name==="reset-view")pilot.resetCamera();else if(name==="dsb-context")act();else if(name==="act")pilot.action();else if(name==="leave")hud.toast("Return through the Portara at the summit.");};
@@ -280,11 +285,12 @@
       onTomatoImpact:p=>{if(!seatRoom())return;for(let i=0;i<7;i++){const a=i*Math.PI*2/7;fx.spawnParticle(splatGeometry,p.x,p.y,p.z,Math.cos(a)*1.8,.8+(i%3)*.3,Math.sin(a)*1.8,.4,3,5,interiors.groundAt(p.x,p.z)+.06);}},
       outsideActors:()=>remotes?remotes.actors():[],outsideActorHeight:BL.remotePlayers.BODY_HEIGHT,
       root,input,hud,game:ctx.game,world:{level:0,weapons:ctx.world.weapons||(ctx.world.weapons=new Map()),magazine:ctx.world.magazine||(ctx.world.magazine={owned:false,count:0,ammo:0,carrier:null})},playerName:name,weaponsEnabled:true,reloadPolicy:{near:()=>false,available:()=>false},fx,viewYaw:Math.PI,groundAt,walkable,flyable,jetpackAllowed,
+      residentPose:(c,dt)=>!!zipline&&zipline.pose(c,dt),useNear:(x,z,r,feet)=>!interiors?.active&&zipUse(x,z,feet),
       ceilingAt:(x,z,y,a)=>interiors?.active?(interiors.active.room.ceilingAt?.(x,z,y,a)??Infinity):collision?.solids.ceilingAt(x,z,y,a?.bodyRadius||.4)??Infinity};
     crew=shared.crew=BL.crew.create(shared);pilot.bind(shared);avatar=crew.cavemen.get(name);
     crew.setJetpackOwnership(avatar,true,BL.hubModels.jetpack(),BL.hubModels.jetFlame());
     crew.wearJetpack(avatar,BL.hubModels.jetpack(),BL.hubModels.jetFlame());
-    remotes=BL.remotePlayers.create({root,crew,fx,unarmed:true,visible:rec=>rec.zone===voiceZone()&&(!entrance||entrance.phase==="done")});
+    remotes=BL.remotePlayers.create({root,crew,fx,unarmed:true,posed:(c,feet)=>{if(zipline)zipline.poseRemote(c,feet);},visible:rec=>rec.zone===voiceZone()&&(!entrance||entrance.phase==="done")});
     footsteps=BL.footsteps.create(); // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     document.addEventListener("focusin",sheetFocus,{signal:ctx.signal});
     Object.assign(avatar.root.position,{x:-45,y:land.heightAt(-45,-43)+avatar.baseY,z:-43});avatar.root.rotation.y=0;
@@ -329,8 +335,12 @@
     town=BL.dsbTown.create({root:exterior,land,nature,detail,enrichment});
     olympus=BL.dsbOlympus.create({root:exterior,land,nature,detail,enrichment,renderer:ctx.renderer});
     vacancies=BL.dsbVacancies.create({root:exterior,land,olympus});
+    zipline=BL.zipline.create({root:exterior,crew,speed:ZIP.speed,brake:ZIP.brake,calm:matchMedia("(prefers-reduced-motion: reduce)").matches,plan:BL.zipline.layout("chora",{x:ZIP.top.x,y:land.groundAt(ZIP.top.x,ZIP.top.z),z:ZIP.top.z},ZIP.drop.x,ZIP.drop.z,ZIP.sag,{bottomGap:ZIP.gap,bottomGround:land.groundAt})});
+    structures.push(zipline.top,zipline.bottom);
     waterInteraction=BL.dsbWaterInteraction.create({root:exterior,land,water,olympus,enrichment,renderer:ctx.renderer,camera,fx});
     collision=BL.dsbCollision.create({land,nature,detail,enrichment,town,olympus,noderunner,vacancies,structures});
+    // Surveyed on the same ground and solids the walk uses; a line that no longer fits is taken down, not ridden.
+    if(!zipline.survey(BL.zipline.dsbQueries(land,collision.solids,STEP))){collision.solids.remove(zipline.top);collision.solids.remove(zipline.bottom);zipline.dispose();zipline=null;}
     shared.shoulderObstacleActive=collision.solids.isActive;
     shared.shoulderObstacle=(cave,fx,fz,reach,out)=>{
       if(interiors?.active)return false;
@@ -422,7 +432,7 @@
     studioReview=false;maxisReview=false;shopReview=false;shopMenuReview=0;inkReview=false;inkMenuReview=0;
     bigReview=false;bigMenuReview=0;memeReview=false;contextReview=false;stackchainReview=false;svrnReview=false;walletsReview=false;
     scene.renderOpts=renderOpts;
-    Object.assign(scene,{root,camera,input,setInterior:weather.setInterior,debug:{get audio(){return entrance?.audio;},weather:weather.shared,renderOpts,daylight:clock,camera,pilot,crew,controls:pilot.controls,hud,dsb:{get presence(){return {zone:BL.net.state.zone,body:crew.player?.traits.name||null,...remotes.stats()};},land,vacancies,water,waterInteraction,weather,nature,detail,enrichment,groundAt:(x,z,feet)=>groundAt(x,z,feet,undefined,avatar),get town(){return town;},get atmosphere(){return atmosphere;},get entrance(){return entrance;},get olympus(){return olympus;},noderunner,tv,studioSession,shopMenu,inkMenu,bigMenu,memeMenu,stackchainMenu,svrnMenu,get wallets(){return wallets?.debug;},walletsMenu,takeWallet,get walletLine(){return walletLine;},get walletWalk(){return walletWalk.on?[walletWalk.x,walletWalk.z,walletWalk.slot]:null;},get rescue(){return rescue?.debug;},menuZone,openVenue,interiors,exterior,setInterior:weather.setInterior,gate,avatar,get phase(){return interiors?.active?"interior":"land";},overview:OVERVIEW}}});
+    Object.assign(scene,{root,camera,input,setInterior:weather.setInterior,debug:{get audio(){return entrance?.audio;},weather:weather.shared,renderOpts,daylight:clock,camera,pilot,crew,controls:pilot.controls,hud,dsb:{get presence(){return {zone:BL.net.state.zone,body:crew.player?.traits.name||null,...remotes.stats()};},land,vacancies,water,waterInteraction,weather,nature,detail,enrichment,groundAt:(x,z,feet)=>groundAt(x,z,feet,undefined,avatar),get town(){return town;},get atmosphere(){return atmosphere;},get entrance(){return entrance;},get olympus(){return olympus;},noderunner,tv,studioSession,shopMenu,inkMenu,bigMenu,memeMenu,stackchainMenu,svrnMenu,get wallets(){return wallets?.debug;},walletsMenu,takeWallet,get walletLine(){return walletLine;},get walletWalk(){return walletWalk.on?[walletWalk.x,walletWalk.z,walletWalk.slot]:null;},get rescue(){return rescue?.debug;},get zipline(){return zipline;},menuZone,openVenue,interiors,exterior,setInterior:weather.setInterior,gate,avatar,get phase(){return interiors?.active?"interior":"land";},overview:OVERVIEW}}});
     walk();
     unsubscribeAccount=BL.net.subscribe(accountChanged);accountChanged();
     if(ctx.from==="bifrost"||DEBUG&&params.has("entrance"))entrance=BL.dsbEntrance.create({root,camera,avatar,pilot,fx,exterior,scene,renderOpts,land,gate,hold:on=>{held=on;},muted:()=>weather.shared.state.muted,onArrive:walk,onLeave:()=>{if(leaving)return;world.pilot=avatar.traits.name;leaving=go("bifrost");}});
@@ -552,7 +562,9 @@
     detail.update(renderOpts.lampFactor);olympus.update(dt,renderOpts.lampFactor);weather.update(dt,renderOpts);waterInteraction.update(dt,time,crew.player===avatar?avatar:null,!interiors.active&&!interiors.transitioning);atmosphere.update(time,renderOpts,!interiors.active);noderunner.update(dt,avatar.root.position,weather.state,renderOpts.lampFactor);tv.update();if(!interiors.active){nature.update(dt,time);enrichment.update(time,renderOpts.lampFactor);}
     const nearDoor=interiors.target(avatar.root.position),door=interiors.target(avatar.root.position,avatar.root.rotation.y);
     const nearbySeat=seatRoom()?seatNear():null,zone=menuZone();
-    const studioLabel=avatar.camp.seat?"Stand up":nearbySeat?"Sit":nearBlacklight()?(walletsRoom().blacklightMode?"Turn blacklights off":"Turn blacklights on"):!nearDoor&&zone?zone.label:null;
+    const zipAct=!interiors.active&&zipline?zipline.actionFor(crew.player,avatar.root.position.x,avatar.root.position.y-avatar.baseY,avatar.root.position.z):null;
+    if(zipAct===zipline?.GRAB&&zipShown!==zipAct)hud.toast(zipline.hint(zipAct,matchMedia("(pointer: coarse)").matches,ZIP.to));zipShown=zipAct;
+    const studioLabel=zipAct?zipLabel(zipAct):avatar.camp.seat?"Stand up":nearbySeat?"Sit":nearBlacklight()?(walletsRoom().blacklightMode?"Turn blacklights off":"Turn blacklights on"):!nearDoor&&zone?zone.label:null;
     const label=studioLabel||(nearTv()?"Open DSB TV":door?`${interiors.active?"Exit":"Enter"} ${door.label||door.building.name}`:"Dial Portara → Bifrost");
     if(context.textContent!==label)context.textContent=label;
     context.classList.toggle("ink-context-browse",!!inkRoom()&&!!zone&&!nearbySeat&&!door);
@@ -563,6 +575,7 @@
   const leave=()=>{
     world.pilot=pilot.player?pilot.player.traits.name:null;
     unsubscribeAccount();unsubscribeAccount=null;BL.net.setBody(null);BL.net.setZone("scene-transition");
+    zipline?.dispose();zipline=zipShown=null;
     document.removeEventListener("focusin",sheetFocus);remotes.dispose();remotes=null;footsteps.dispose();footsteps=null;
     inkLayoutObserver.disconnect();inkLayoutObserver=null;window.removeEventListener("resize",requestInkLayout);
     context.classList.remove("ink-context-browse");
