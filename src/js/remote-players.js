@@ -5,7 +5,7 @@
 // when they let go; meanwhile its roster row shows the driver online (`remoteControlled`, the green dot). A scene
 // passing `ghost` (the hub) keeps that copy on its own track as a ghost instead (npc-ghosts.js).
 // The crew turns its shoulders through remote players without routing around them.
-// Who is shown is the scene's `visible(rec)`: the island shows players in its own zone (`onIsland` lists the
+// Who is shown is the scene's `visible(rec)`: the island shows everyone in the main world (`onIsland` lists the
 // island's places), every other scene those in its zone (`sameZone`). The crew is optional, for a scene that
 // has none until the visitor drives, and `hide(name, on)` lets a scene hide its own decor copy of an Ooga
 // someone drives. A nameplate sits over the top of the head exactly as an NPC's name tooltip does (hud.js
@@ -76,10 +76,11 @@
     for (let i = 0; i < cells.length; i += 4) ctx.fillRect(x + cells[i], y + cells[i + 1], cells[i + 2], cells[i + 3]);
   };
 
-  // The zones the hub itself reports, which share its coordinates: the island, its bridged lands and its caves
-  // (`cave-<id>` for a mouth with no name of its own). Never a separate scene's zone, such as the Ember Den.
-  const ISLAND_ZONES = new Set(["outside", "sphere", "rainforest", "bifrost", "lab", "bca", "factory", "arcade", "mirror", "hq"]);
-  const onIsland = (zone) => ISLAND_ZONES.has(zone) || typeof zone === "string" && zone.startsWith("cave-");
+  // The zones the hub itself reports, which share its coordinates: the main world (voice-blend.js), and the cave
+  // entrances' own names, still sent by a page loaded before they became the island's (`cave-<id>` for a mouth with no
+  // name of its own). Never a separate scene's zone, such as the Ember Den.
+  const OLD_CAVES = new Set(["lab", "bca", "factory", "arcade", "mirror"]);
+  const onIsland = (zone) => BL.voiceBlend.world(zone) || OLD_CAVES.has(zone) || typeof zone === "string" && zone.startsWith("cave-");
   const sameZone = (rec) => rec.zone === BL.net.state.zone;
 
   // `posed(cave, feetY)` lets the scene finish a body's pose once it stands where the room says: the hub sets a
