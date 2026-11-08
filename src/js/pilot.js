@@ -1562,7 +1562,11 @@
         if (document.pointerLockElement !== canvas) {
           const alreadyFocused = softAimFocused;
           lockAim();
-          if (!alreadyFocused) return;
+          if (!alreadyFocused) {
+            // The capturing click never attacks, but a scene may answer what the free cursor was on.
+            if (e.button === 0) ctx.captureClick?.(e.clientX, e.clientY);
+            return;
+          }
         }
         resumePose();
         // A scene may take the left button first (`primaryAction`, Cloud Hopper's grappling hook), and then its release.
@@ -1901,11 +1905,16 @@
       else hud.setJetpack(!!(cave && cave.jet), !!(cave && cave.jet), cave ? cave.jetFuel : 0);
     };
     const syncModeHud = () => {
-      if (hud.setMode) hud.setMode(player(), armed(), viewMode(), true, !!crew?.weaponsEnabled);
+      // With no weapon to its name the mode button only changes how the view looks around.
+      const w = player()?.weapon;
+      if (hud.setMode) hud.setMode(player(), armed(), viewMode(), true, !!crew?.weaponsEnabled && (!w || w.primaryOwned || w.secondaryOwned));
     };
     let reloadPrompt = false;
     const syncWeaponHud = () => {
       const cave = player(), weapon = cave && cave.weapon;
+      // With no weapon to aim, combat's crosshair is a single dot.
+      const unarmed = String(!!weapon && !weapon.primaryOwned && !weapon.secondaryOwned);
+      if (reticle.dataset.unarmed !== unarmed) reticle.dataset.unarmed = unarmed;
       const ready = !!crew?.weaponsEnabled && !!weapon && !cave.grabbedBy && !crew.sleeping && (!cave.camp.seat || cave.camp.seat.allowWeapons) && !cave.bedTravel.mode;
       const primaryReady = ready && weapon.primaryOwned;
       const secondaryReady = ready && weapon.secondaryOwned;
@@ -2298,7 +2307,8 @@
       c.relYaw = (overhead ? overheadYaw : orbit.yaw) - cave.root.rotation.y;
       c.pitch = overhead ? Math.PI / 2 : orbit.pitch; c.distance = overhead ? overheadHeight - cave.baseY : orbit.dist;
       c.height = overhead ? overheadHeight - feet : camera.position.y - feet; c.side = shoulderSideTarget < 0 ? -1 : 1;
-      c.held = w.equipped ? 2 : w.primaryEquipped ? 1 : 0; c.ammo = w.ammo;
+      // Parked weapons (crew.js `parkWeapons`) are still the visitor's: the next scene with weapons gets them back.
+      c.held = w.parked ? w.parked.held : w.equipped ? 2 : w.primaryEquipped ? 1 : 0; c.ammo = w.parked ? w.parked.ammo : w.ammo;
       if (!KEEP_VIEW || ctx.combatOnly?.()) return;
       chosen.view = c.view; chosen.combat = c.combat; chosen.relYaw = c.relYaw; chosen.pitch = c.pitch;
       chosen.distance = c.distance; chosen.height = c.height; chosen.side = c.side; chosen.held = c.held;

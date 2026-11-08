@@ -4493,6 +4493,31 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   width: 218px;
 }
 
+/* HALLOWEEN: the ghost hunt's gun has its own icon and no magazine to count, so it stays the small button with its
+   infinity beside it, and a hunter keeps it on screen through the hunt on every kind of pointer. */
+.weapon-icon .weapon-art-ghost,
+.weapon-hud[data-skin="ghost"] .weapon-art-ak,
+.weapon-hud[data-skin="ghost"] .weapon-readout {
+  display: none;
+}
+
+.weapon-hud[data-skin="ghost"] .weapon-art-ghost {
+  display: inline;
+}
+
+.weapon-hud[data-skin="ghost"][data-equipped="true"] {
+  width: 78px;
+}
+
+.weapon-hud[data-skin="ghost"][data-equipped="true"] .weapon-compact {
+  opacity: 1;
+  visibility: visible;
+}
+
+body.game-mode .weapon-hud[data-skin="ghost"] {
+  display: flex;
+}
+
 .rescue-hud {
   flex: none;
   padding: 0;
@@ -8096,6 +8121,17 @@ body[data-active-scene="timechain"] .weapon-reticle > svg,
 body[data-active-scene="timechain"] .weapon-reticle > span::after { display: none; }
 body[data-active-scene="timechain"] .weapon-reticle > span {
   top: 50%;
+  width: 3px;
+  height: 3px;
+  background: #fff9dc;
+  visibility: visible;
+}
+
+/* With no weapon to aim (pilot.js `syncWeaponHud`), combat's crosshair is a single dot. */
+.weapon-reticle[data-unarmed="true"] { visibility: visible; }
+.weapon-reticle[data-unarmed="true"] > svg,
+.weapon-reticle[data-unarmed="true"] > span::after { display: none; }
+.weapon-reticle[data-unarmed="true"] > span {
   width: 3px;
   height: 3px;
   background: #fff9dc;

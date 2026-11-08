@@ -18,9 +18,9 @@
 
   // How to play, on the lobby: each line its keys and what they do, for a keyboard and mouse, for touch or for a pad.
   const INTRO = {
-    keys: [[["W", "A", "S", "D"], "Move your Ooga"], [["Mouse"], "Aim, and click to fire"], [["G"], "Switch weapons"]],
+    keys: [[["W", "A", "S", "D"], "Move your Ooga"], [["Mouse"], "Aim, and click to fire"]],
     touch: [[["Left stick"], "Move your Ooga"], [["Ready"], "Start in combat mode"], [["Hold fire"], "Shoot the ghosts"]],
-    pad: [[["Left stick"], "Move your Ooga"], [["Right stick", "RT"], "Aim, and pull to fire"], [["Y"], "Switch weapons"], [["A"], "Ready"]]
+    pad: [[["Left stick"], "Move your Ooga"], [["Right stick", "RT"], "Aim, and pull to fire"], [["A"], "Ready"]]
   };
   const pad = BL.gamepad.state;
   /**

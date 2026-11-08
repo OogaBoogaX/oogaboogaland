@@ -89,7 +89,8 @@
   // use a basic managed rig. Both bodies share the room pose, nameplate and collision actor lifecycle.
   // A scene with `ghost(cave, on)` (the hub, npc-ghosts.js) keeps the crew's copy on its own track instead: never
   // sent away nor marked `remoteControlled`, only drawn as a ghost while the remote body stands beside it.
-  const create = ({ root, crew = null, fx = null, player = null, posed = null, visible = sameZone, hide = null, createGorilla = null, hideGorilla = null, ghost = null }) => {
+  // `unarmed` is a place with no weapons: however a body's last pose reads, it shows neither club nor gun there.
+  const create = ({ root, crew = null, fx = null, player = null, posed = null, visible = sameZone, hide = null, createGorilla = null, hideGorilla = null, ghost = null, unarmed = false }) => {
     const net = BL.net;
     const bodies = new Map();
     // The chat subscription, taken on the first update and again after a kept hub's suspend disposed it; the
@@ -395,6 +396,11 @@
           pose(entry, dt);
           showJet(entry, rec);
           showWeapon(entry, rec, dt);
+          if (unarmed) {
+            const { club, gun } = entry.cave.parts;
+            if (club) club.visible = false;
+            if (gun) gun.visible = false;
+          }
           if (posed) posed(entry.cave, entry.cave.root.position.y - entry.baseY, rec, dt);
         }
         // The top's move carries a player standing on it; a snap carries nobody.
