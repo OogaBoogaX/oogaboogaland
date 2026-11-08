@@ -2142,7 +2142,7 @@
     const hint = (text, ms = 4200) => {
       window.clearTimeout(hintTimer);
       window.clearTimeout(hintHideTimer);
-      el.hint.textContent = text;
+      el.hint.textContent = BL.controls.words(text);
       el.hint.hidden = false;
       el.messageStack.append(el.hint);
       el.hint.classList.add("show");

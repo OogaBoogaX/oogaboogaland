@@ -70,8 +70,29 @@
     soundButton.setAttribute("aria-pressed", String(sound.muted));
   };
   let helpHeld = false;
+  // Both panels pause the scene. A pad keeps working inside them: its Menus context reaches no scene while they show.
   const controlsHelp = BL.controlsHelp.create({ current: () => active, ready: () => !!active && !transition,
-    hold: on => { helpHeld = on; rightShift = false; gamepad.hold(on); } });
+    hold: on => { helpHeld = on; rightShift = false; } });
+  const padSettings = BL.padSettings.install(BL.padSettings.create({ current: () => active, ready: () => !!active && !transition,
+    hold: on => { helpHeld = on; rightShift = false; BL.controls.resetAll(); } }));
+  // The controller's own news: named the first time it is used, offered setup when the browser can't read it, and in
+  // a game, losing it pauses the game. View and Menu together open its screen.
+  let padNamed = "";
+  const offPad = gamepad.subscribe((what) => {
+    const hud = window.BL.hud, st = gamepad.state;
+    if (what === "settings") padSettings.open();
+    else if (what === "device" && st.connected && st.id !== padNamed) {
+      padNamed = st.id;
+      hud.toast(`${gamepad.nameOf(st.id)} ready · ${gamepad.glyph("view")} + ${gamepad.glyph("menu")} for controller settings`);
+    } else if (what === "unknown") {
+      hud.toast(`${gamepad.nameOf(st.unknown)} needs a one-time setup`);
+      padSettings.open({ setup: true });
+    } else if (what === "disconnected") {
+      const pause = gamepad.CONTEXTS[gamepad.context]?.pauseKey;
+      if (pause && active && !transition) gamepad.tap(pause);
+      hud.toast("Controller disconnected");
+    }
+  });
   const offSound = sound.subscribe(showSound);
   soundButton.addEventListener("click", sound.toggle);
   showSound();
@@ -341,6 +362,7 @@
   const arrived = (next, place, retainedTime) => {
     activeMeshRigs = next.renderOpts?.meshRigs === true;
     active = next;
+    gamepad.setContext(next.padContext || "foot");
     cabinetView.arrived(next);
     // Rasterize hidden render alternatives before the curtain lifts or the visitor can zoom out.
     renderer.prepareScene(liveGeometry());
@@ -1137,6 +1159,8 @@
     net.dispose();
     offSound(); soundButton.removeEventListener("click", sound.toggle);
     window.removeEventListener("keydown", onVoiceMuteKey, true);
+    offPad();
+    padSettings.dispose();
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", clearRightShift);
     window.removeEventListener("blur", clearRightShift);

@@ -45,8 +45,30 @@
       if (key.startsWith("arrow")) el.setAttribute("aria-label", key.replace("arrow", "Arrow "));
       caps.push(el); return el;
     };
+    const padButton = document.getElementById("controls-help-pad");
+    // Controller mode lists the context the scene plays in, each action with the buttons it is bound to.
+    const padGlyph = (text, round, stickName) => {
+      const el = document.createElement("span");
+      el.className = "controls-glyph" + (round ? " round" : "") + (stickName ? " stick" : "");
+      el.textContent = text;
+      if (stickName) el.title = stickName;
+      return el;
+    };
+    const renderPad = (title) => {
+      const pad = BL.gamepad, id = owner?.padContext || "foot", def = pad.CONTEXTS[id];
+      context.textContent = `${title} · ${BL.gamepad.state.connected ? BL.gamepad.nameOf(BL.gamepad.state.id) : "Controller"}`;
+      note.textContent = "View and Menu together, or the button below, open the controller settings. In menus the d-pad moves, A selects and B goes back.";
+      for (const entry of def.entries) {
+        const line = document.createElement("div"), keys = document.createElement("div"), text = document.createElement("span");
+        line.className = "controls-row"; keys.className = "controls-keys"; text.textContent = entry.label;
+        if (entry.stick !== undefined) keys.append(padGlyph(entry.stick ? "R" : "L", false, entry.stick ? "Right stick" : "Left stick"));
+        else for (const name of pad.bindings(entry.id, id)) keys.append(padGlyph(pad.glyph(name), pad.PLACE.indexOf(name) < 4));
+        line.append(keys, text); list.append(line);
+      }
+    };
     const render = () => {
       clear(); caps = []; list.replaceChildren();
+      if (mode === "controller") { renderPad((owner?.controlsHelp?.(false) || { title: owner?.id || "Island" }).title); return; }
       const touch = mode === "touch", help = owner?.controlsHelp?.(touch) || { title: owner?.id || "Island", rows: [] };
       context.textContent = `${help.title} · ${touch ? "Touch" : "Keyboard & mouse"}`;
       note.textContent = touch ? "Use the controls shown on screen after closing this panel. Keyboard input switches this reference to keys."
@@ -98,6 +120,8 @@
       owner = current();
       if (!owner) return;
       returnFocus = e?.detail ? document.getElementById("scene") : button;
+      if (BL.controls.usingPad()) mode = "controller";
+      else if (mode === "controller") mode = coarse.matches ? "touch" : "keyboard";
       if (returnFocus.tagName === "CANVAS") returnFocus.tabIndex = -1;
       for (const key of down) swallowed.add(key);
       BL.controls.resetAll(); owner.controlsHelpHold?.(true); hold(true);
@@ -113,7 +137,7 @@
           if (e.repeat) { e.preventDefault(); e.stopImmediatePropagation(); return; }
           swallowed.delete(physical);
         }
-        if (!e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing && !(e.target?.isContentEditable || e.target?.closest?.("input, textarea, select"))) setMode("keyboard");
+        if (!e.pad && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing && !(e.target?.isContentEditable || e.target?.closest?.("input, textarea, select"))) setMode("keyboard");
         return;
       }
       // Let the browser handle Tab, close-button activation and OS shortcuts,
@@ -121,6 +145,7 @@
       e.stopImmediatePropagation();
       if (swallowed.size < 64) swallowed.add(physical);
       if (e.key === "Escape") { e.preventDefault(); close(); return; }
+      if (e.pad) return;
       if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) { clear(); return; }
       if (e.key !== "Tab" && e.key !== "Enter" && e.key !== " ") e.preventDefault();
       if (e.key === "Tab") { clear(); return; }
@@ -149,18 +174,23 @@
       if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) { e.preventDefault(); e.stopImmediatePropagation(); close(); }
     };
     const onCancel = e => { e.preventDefault(); close(); };
+    const openPad = () => { close(); BL.padSettings.open(); };
+    const offPad = BL.gamepad.subscribe(what => {
+      if (what === "device" && BL.gamepad.state.connected && BL.controls.usingPad()) mode = "controller";
+      if (dialog.open && (what === "device" || what === "bindings" || what === "family")) render();
+    });
     const onClose = () => { if (!dialog.open) finish(); };
     const onBlur = () => { clear(); down.clear(); BL.controls.resetAll(); };
     const onVisibility = () => { if (document.hidden) onBlur(); };
     const onMedia = () => { if (!usedInput) { mode = coarse.matches ? "touch" : "keyboard"; if (dialog.open) render(); } };
-    button.addEventListener("click", open); closeButton.addEventListener("click", close);
+    button.addEventListener("click", open); closeButton.addEventListener("click", close); padButton.addEventListener("click", openPad);
     dialog.addEventListener("cancel", onCancel); dialog.addEventListener("close", onClose);
     window.addEventListener("keydown", onDown, true); window.addEventListener("keyup", onUp, true);
     window.addEventListener("pointerdown", onPointer, true); window.addEventListener("blur", onBlur);
     document.addEventListener("visibilitychange", onVisibility); coarse.addEventListener("change", onMedia);
     return { close, get open() { return dialog.open; }, dispose() {
       close();
-      button.removeEventListener("click", open); closeButton.removeEventListener("click", close);
+      button.removeEventListener("click", open); closeButton.removeEventListener("click", close); padButton.removeEventListener("click", openPad); offPad();
       dialog.removeEventListener("cancel", onCancel); dialog.removeEventListener("close", onClose);
       window.removeEventListener("keydown", onDown, true); window.removeEventListener("keyup", onUp, true);
       window.removeEventListener("pointerdown", onPointer, true); window.removeEventListener("blur", onBlur);
