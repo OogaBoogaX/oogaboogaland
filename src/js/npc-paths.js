@@ -310,28 +310,52 @@
       if (s.count === s.laneX.length) throw new Error("authored mainland route capacity");
       s.laneX[s.count] = x; s.laneZ[s.count++] = z;
     };
+    // Whether (x, z) lies past sample `q` toward its neighbour `n` along the spoke.
+    const past = (q, n, x, z) => (x - q.x) * (n.x - q.x) + (z - q.z) * (n.z - q.z) > 0;
     const prepare = (s, p, tx, tz) => {
       s.tx = tx; s.tz = tz; s.version = stamp(); s.count = s.index = 0; s.plans++;
       const radius = path.debug.ringTrafficRadius ?? path.debug.ringCenterRadius;
       const from = Math.hypot(p.x, p.z) > radius + 0.5 ? nearest(p.x, p.z, radius) : null;
       const to = Math.hypot(tx, tz) > radius + 0.5 ? nearest(tx, tz, radius) : null;
-      // Same-spoke travel follows its existing samples directly in either direction.
+      // The nearest sample to either end of a leg can lie behind the walker or beyond its goal: a walker between two
+      // samples (a leg begun from a route point, or replanned mid-spoke when its slot or the ring changes) would step
+      // back to it and turn round, and a goal between two samples would be overshot and walked back to. Start at the
+      // first sample ahead of the walker and stop at the last one short of the goal.
       if (from && to && from.line === to.line) {
-        const step = from.i <= to.i ? 1 : -1;
-        for (let i = from.i; ; i += step) {
-          append(s, from.line[i].x, from.line[i].z);
-          if (i === to.i) break;
+        // Same-spoke travel follows its existing samples directly in either direction.
+        const line = from.line, step = from.i <= to.i ? 1 : -1;
+        let i = from.i, end = to.i;
+        // Each end is trimmed against the original bounds; two adjacent samples can both drop, leaving none between.
+        if (from.i !== to.i) {
+          if (past(line[from.i], line[from.i + step], p.x, p.z)) i += step;
+          if (past(line[to.i], line[to.i - step], tx, tz)) end -= step;
+        }
+        // One shared sample is on the way only when it lies between the two ends; crossed trims leave a direct leg.
+        if (from.i === to.i ? (p.x - line[i].x) * (tx - line[i].x) + (p.z - line[i].z) * (tz - line[i].z) <= 0
+          : (end - i) * step >= 0) {
+          for (; ; i += step) {
+            append(s, line[i].x, line[i].z);
+            if (i === end) break;
+          }
         }
       } else {
         let x = p.x, z = p.z;
-        if (from) for (let i = from.i; i >= 0; i--) {
-          const q = from.line[i];
-          if (Math.hypot(q.x, q.z) < radius) break;
-          append(s, q.x, q.z); x = q.x; z = q.z;
+        if (from) {
+          let i = from.i;
+          if (i > 0 && past(from.line[i], from.line[i - 1], p.x, p.z)) i--;
+          for (; i >= 0; i--) {
+            const q = from.line[i];
+            if (Math.hypot(q.x, q.z) < radius) break;
+            append(s, q.x, q.z); x = q.x; z = q.z;
+          }
         }
         let first = to ? to.i : 0;
         while (to && first > 0 && Math.hypot(to.line[first - 1].x, to.line[first - 1].z) >= radius) first--;
-        const end = to ? to.line[first] : { x: tx, z: tz };
+        // Below `first` the spoke runs inside the ring, so a goal short of `first` keeps no sample and the ring ends
+        // at the goal's own bearing.
+        let last = to ? to.i : 0;
+        if (to && last > 0 && past(to.line[last], to.line[last - 1], tx, tz)) last--;
+        const end = to && last >= first ? to.line[first] : { x: tx, z: tz };
         // Around the pile on the real ring, never across it.
         const start = Math.atan2(x, z), finish = Math.atan2(end.x, end.z);
         const angle = Math.atan2(Math.sin(finish - start), Math.cos(finish - start));
@@ -340,7 +364,7 @@
           const a = start + angle * i / steps;
           append(s, Math.sin(a) * radius, Math.cos(a) * radius);
         }
-        if (to) for (let i = first; i <= to.i; i++) append(s, to.line[i].x, to.line[i].z);
+        if (to) for (let i = first; i <= last; i++) append(s, to.line[i].x, to.line[i].z);
       }
       append(s, tx, tz);
     };
