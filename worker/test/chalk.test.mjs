@@ -53,7 +53,8 @@ const host = () => {
 };
 // Feet `along` metres out in front of the board.
 const at = (along) => ({ x: CHALK.AT.x + CHALK.AT.frontX * along, y: CHALK.AT.y, z: CHALK.AT.z + CHALK.AT.frontZ * along, yaw: 0 });
-const send = (r, ws, msg) => r.webSocketMessage(ws, JSON.stringify(msg));
+// A page sends its board layout with every chalk message (chalk-board.js VERSION).
+const send = (r, ws, msg) => r.webSocketMessage(ws, JSON.stringify(msg.t === "chalk" ? { v: CHALK.VERSION, ...msg } : msg));
 const heard = (ws, t) => ws.sent.filter((m) => m.t === t);
 
 test("room: an Ooga at the board holds it alone; its edits reach every other page as made, and the board outlives the room", async () => {
@@ -89,7 +90,7 @@ test("room: an Ooga at the board holds it alone; its edits reach every other pag
   send(woken, c, { t: "chalk", k: "take" });
   send(woken, c, { t: "chalk", k: "wipe", to: "clean" });
   await h.settle();
-  assert.deepEqual(h.saved.get("chalk"), { marks: [] }, "clearing remembers only the blank board");
+  assert.deepEqual(h.saved.get("chalk"), { marks: [], v: CHALK.VERSION }, "clearing remembers only the blank board");
   const blank = await h.room();
   assert.equal(blank.chalk.marks.length, 0, "blank stays blank after waking");
   const writes = h.chalkWrites.length, relays = heard(a, "chalk").length;
@@ -111,10 +112,28 @@ test("room: an Ooga at the board holds it alone; its edits reach every other pag
   assert.equal(h.chalkWrites.length, resetWrites, "resetting the original and letting go do not save");
   assert.equal(heard(a, "chalk").length, resetRelays, "nor relay an unchanged reset");
   assert.equal(woken.chalkTimer, 0);
-  h.saved.set("chalk", { marks: CHALK.initial() });
+  h.saved.set("chalk", { marks: CHALK.initial(), v: CHALK.VERSION });
   const legacy = await h.room();
   assert.deepEqual(legacy.chalk.marks, CHALK.initial());
   assert.equal(h.saved.has("chalk"), false, "an older saved default is removed on load too");
+});
+
+// The board grew half again each way: what a room stored on the first, smaller board keeps its size and place in the
+// new board's middle, and is widened once, the next save storing it in the new layout.
+test("room: a board stored before the board grew loads in the middle of the new one, and is saved widened once", async () => {
+  const h = host();
+  h.saved.set("chalk", { marks: [{ t: "c", s: 2, p: [0, 0, 1, 1] }, { t: "t", ch: "x", p: [0.5, 0.25] }] });
+  const r = await h.room(), a = await h.join(r, 1, "ooga");
+  const widened = [{ t: "c", s: 2, p: [1 / 6, 1 / 6, 5 / 6, 5 / 6] }, { t: "t", ch: "x", p: [0.5, 1 / 3] }];
+  assert.deepEqual(heard(a, "chalk-board").at(-1).marks, widened, "the first board's corners lie a sixth in from the new board's");
+  assert.equal(h.chalkWrites.length, 0, "loading writes nothing");
+  send(r, a, { t: "pose", ...at(1) });
+  send(r, a, { t: "chalk", k: "line", m: "c", p: [0, 0, 1000, 1000] });
+  send(r, a, { t: "chalk", k: "drop" });
+  await h.settle();
+  assert.deepEqual(h.saved.get("chalk"), { marks: [...widened, { t: "c", s: 2, p: [0, 0, 1, 1] }], v: CHALK.VERSION }, "new edits span the whole board");
+  const woken = await h.room();
+  assert.deepEqual(woken.chalk.marks, h.saved.get("chalk").marks, "a board saved in the new layout is not widened again");
 });
 
 test("room: the board lets go when its writer walks off, changes body or zone, leaves, or sits idle while another waits", async () => {
@@ -174,7 +193,7 @@ test("room: typing at capacity keeps the writer, observers and saved board consi
   for (const [marks, characters, accepted] of [[549, 2, false], [549, 1, true], [550, 1, false], [550, 2, false], [548, 2, true]]) {
     await t.test(`${marks} marks, ${characters} characters`, async () => {
       const h = host(), initial = Array.from({ length: marks }, () => ({ t: "t", ch: "x", p: [0.1, 0.2] }));
-      h.saved.set("chalk", { marks: initial });
+      h.saved.set("chalk", { marks: initial, v: CHALK.VERSION });
       const r = await h.room(), a = await h.join(r, 1, "ooga"), b = await h.join(r, 2, "booga");
       // These copies follow the same shared contract as the writer and observer; socket payloads are detached.
       const writer = CHALK.board(structuredClone(heard(a, "chalk-board").at(-1).marks));
@@ -186,7 +205,7 @@ test("room: typing at capacity keeps the writer, observers and saved board consi
       assert.equal(r.chalkTimer, 0);
       assert.equal(h.chalkWrites.length, 0);
       const frame = { t: "chalk", k: "type", c: [["a", 300, 400], ["b", 500, 400]].slice(0, characters) };
-      assert.ok(protocol.parseClientMessage(JSON.stringify(frame)), "the frame is valid on the wire");
+      assert.ok(protocol.parseClientMessage(JSON.stringify({ ...frame, v: CHALK.VERSION })), "the frame is valid on the wire");
       const boards = heard(a, "chalk-board").length;
       const local = CHALK.apply(writer, CHALK.parse(frame), writerSession);
       // Send even if the current client refuses locally: an older or custom client can still submit this frame.

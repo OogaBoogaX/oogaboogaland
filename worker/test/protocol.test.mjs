@@ -279,8 +279,11 @@ test("NPC followers: every other page showing the island, so a lone host sends n
 });
 
 test("chalkboard edits are small integers in frames under the limit, refused whole when malformed", () => {
-  const parse = (m) => parseClientMessage(JSON.stringify({ t: "chalk", ...m }));
+  const parse = (m) => parseClientMessage(JSON.stringify({ t: "chalk", v: CHALK.VERSION, ...m }));
   assert.deepEqual(parse({ k: "take" }), { t: "chalk", k: "take" });
+  // A page on the first, smaller board sends no layout: none of its frames are taken.
+  for (const v of [undefined, 1, "2"]) assert.equal(parse({ v, k: "take" }), null, `layout ${v}`);
+  assert.equal(parseClientMessage(JSON.stringify({ t: "chalk", k: "line", m: "c", p: [1, 2, 3, 4] })), null);
   assert.deepEqual(parse({ k: "drop", extra: 1 }), { t: "chalk", k: "drop" });
   assert.deepEqual(parse({ k: "line", m: "e", p: [1, 2, 3, 4] }), { t: "chalk", k: "line", m: "e", p: [1, 2, 3, 4] });
   assert.deepEqual(parse({ k: "type", c: [["é", 10, 20], ["🍌", 1000, 0]] }), { t: "chalk", k: "type", c: [["é", 10, 20], ["🍌", 1000, 0]] });
@@ -290,8 +293,8 @@ test("chalkboard edits are small integers in frames under the limit, refused who
     { k: "type", c: [] }, { k: "wipe", to: "all" }, { k: "steal" }])
     assert.equal(parse(bad), null, JSON.stringify(bad));
   // The page's fullest frames: a line's chunk at the board's far corner, and a chunk of characters JSON escapes.
-  const line = JSON.stringify({ t: "chalk", k: "line", m: "c", p: Array(CHALK.CHUNK * 2).fill(1000) });
-  const typed = JSON.stringify({ t: "chalk", k: "type", c: Array(CHALK.TYPE_CHUNK).fill(["\\", 1000, 1000]) });
+  const line = JSON.stringify({ t: "chalk", v: CHALK.VERSION, k: "line", m: "c", p: Array(CHALK.CHUNK * 2).fill(1000) });
+  const typed = JSON.stringify({ t: "chalk", v: CHALK.VERSION, k: "type", c: Array(CHALK.TYPE_CHUNK).fill(["\\", 1000, 1000]) });
   assert.ok(line.length <= MESSAGE_MAX && typed.length <= MESSAGE_MAX, `${line.length} ${typed.length}`);
   assert.equal(parseClientMessage(line).p.length, CHALK.CHUNK * 2);
 });

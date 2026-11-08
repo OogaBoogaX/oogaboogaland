@@ -38,8 +38,9 @@ import "../../src/js/reaction-policy.js";
 //                                host, from a page in the arcade's ghost arena
 //                 { t: "react", e }              an emoji over the driven body for a moment (see Reactions below)
 //                 { t: "hand", on, tone? }       the raised hand up or down, in skin tone 0 (none) to 5
-//                 { t: "chalk", k, ... }        the EntropyLab chalkboard: `take` or `drop` the board, or an edit by
-//                                                whoever holds it (chalk-board.js; see CHALK_HZ below)
+//                 { t: "chalk", v, k, ... }     the EntropyLab chalkboard: `take` or `drop` the board, or an edit by
+//                                                whoever holds it, on board layout `v` (chalk-board.js VERSION; see
+//                                                CHALK_HZ below)
 //                 { t: "wallet", k, u, ... }   DSB Land: one of the driven Ooga's free hardware wallets taken, set
 //                                                down, picked up, thrown or blown (see WALLET_CAP below)
 //                 binary                         the NPC host's frame of every Ooga's pose, relayed as is; or,
@@ -346,6 +347,8 @@ export const parseClientMessage = (text) => {
       ? { t: "chat", text: line, clientId: msg.clientId } : null;
   }
   if (msg.t === "chalk") {
+    // A page on an older board layout sends thousandths of a smaller board: none of it is taken.
+    if (msg.v !== CHALK.VERSION) return null;
     if (msg.k === "take" || msg.k === "drop") return { t: "chalk", k: msg.k };
     const op = CHALK.parse(msg);
     return op ? { t: "chalk", ...op } : null;
