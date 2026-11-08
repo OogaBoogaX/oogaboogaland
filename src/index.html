@@ -721,7 +721,7 @@
                 <path fill="#789a3b" d="M1 0h1v2H1z" />
               </g>
             </defs>
-            <g transform="translate(16 16) scale(-1 1) rotate(-48) translate(-15.5 -12)">
+            <g class="weapon-art-ak" transform="translate(16 16) scale(-1 1) rotate(-48) translate(-15.5 -12)">
               <path fill="#a76f3b" d="M1 8h4V7h3v3H5v1H1zM18 6h6v4h-6zM10 11h3v5h-3z" />
               <path fill="#ca9657" d="M2 8h3v1H2zM5 7h3v1H5zM18 6h6v1h-6z" />
               <path fill="#81898b" d="M8 6h10v5H8z" />
@@ -730,6 +730,8 @@
               <path fill="#81898b" d="M24 8h7v2h-7zM29 7h1v1h-1z" />
               <path fill="#748080" d="M18 12h1v2h1v2h1v1h-1v-1h-1v-2h-1zM20 12h1v2h1v2h-1v-2h-1z" />
             </g>
+            <!-- HALLOWEEN: the ghost hunt gun (ghost-gear.js), shown by the weapon button data-skin. -->
+            <g class="weapon-art-ghost" transform="translate(16 16) scale(-1 1) rotate(-48) translate(-15.5 -12)"><path fill="#aeb4bb" d="M3 5h16v1H3zM2 6h1v1H2zM19 6h6v1H19zM29 6h2v1H29zM2 7h1v1H2zM25 7h4v1H25zM31 7h1v1H31zM2 8h1v1H2zM31 8h1v1H31zM2 9h1v1H2zM31 9h1v1H31zM2 10h1v1H2zM25 10h4v1H25zM31 10h1v1H31zM2 11h1v1H2zM19 11h1v1H19zM23 11h2v1H23zM29 11h2v1H29zM3 12h3v1H3zM10 12h10v1H10zM23 12h1v1H23zM5 13h1v1H5zM10 13h1v1H10zM19 13h1v1H19zM23 13h1v1H23zM5 14h1v1H5zM10 14h1v1H10zM19 14h1v1H19zM23 14h1v1H23zM4 15h1v1H4zM9 15h1v1H9zM20 15h3v1H20zM4 16h1v1H4zM9 16h1v1H9zM4 17h1v1H4zM9 17h1v1H9zM5 18h4v1H5z" /><path fill="#0b0c0e" d="M3 6h1v1H3zM11 6h2v1H11zM14 6h1v1H14zM16 6h1v1H16zM18 6h1v1H18zM3 7h10v1H3zM14 7h1v1H14zM16 7h1v1H16zM18 7h7v1H18zM29 7h2v1H29zM3 8h10v1H3zM14 8h1v1H14zM16 8h1v1H16zM18 8h13v1H18zM3 9h10v1H3zM14 9h1v1H14zM16 9h1v1H16zM18 9h13v1H18zM3 10h10v1H3zM14 10h1v1H14zM16 10h1v1H16zM18 10h7v1H18zM29 10h2v1H29zM3 11h10v1H3zM14 11h1v1H14zM16 11h1v1H16zM18 11h1v1H18zM20 11h3v1H20zM6 12h4v1H6zM20 12h3v1H20zM6 13h4v1H6zM20 13h3v1H20zM6 14h4v1H6zM20 14h3v1H20zM5 15h4v1H5zM5 16h4v1H5zM5 17h4v1H5z" /><path fill="#4b4f56" d="M4 6h7v1H4zM13 6h1v1H13zM15 6h1v1H15zM17 6h1v1H17zM13 7h1v1H13zM15 7h1v1H15zM17 7h1v1H17zM13 8h1v1H13zM15 8h1v1H15zM17 8h1v1H17zM13 9h1v1H13zM15 9h1v1H15zM17 9h1v1H17zM13 10h1v1H13zM15 10h1v1H15zM17 10h1v1H17zM13 11h1v1H13zM15 11h1v1H15zM17 11h1v1H17z" /><path fill="#050506" d="M1 9h1v1H1zM0 10h2v1H0zM1 11h1v1H1zM0 12h2v1H0zM0 13h2v1H0zM1 14h1v1H1zM0 15h2v1H0z" /><path fill="#3f4349" d="M0 11h1v1H0zM0 14h1v1H0z" /></g>
           </svg>
         </span>
         <span class="equipment-compact weapon-compact" id="weapon-ammo-compact" aria-hidden="true">0</span>
@@ -2068,6 +2070,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/hangar-guide.js" data-defer="hangar-scene"></script>
   <script src="js/hangar-audio.js" data-defer="hangar-scene"></script>
   <script src="js/scene-hangar.js" data-defer="hangar-scene"></script>
+  <script src="js/ghost-gear.js" data-defer="arcade"></script>
   <script src="js/arcade-scene-models.js" data-defer="arcade"></script>
   <script src="js/arcade-games.js" data-defer="arcade"></script>
   <script src="js/retro-games.js" data-defer="arcade"></script>

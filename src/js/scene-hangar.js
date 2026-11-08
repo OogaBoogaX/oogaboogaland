@@ -1449,7 +1449,6 @@
       else if (action === "act") pilot.action();
       else if (action === "hangar-mute") soundPanel.toggle();
       else if (!leaving && action.startsWith("mode-")) pilot.modeAction(action);
-      else if (action.startsWith("weapon-") || action === "magazine-swap") pilot.weaponAction(action);
     });
     hud.setStats(game.state);
     fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 10, z: 0 } });
@@ -1541,8 +1540,11 @@
       world.magazine = playerWorld.magazine;
       pilot.bind(shared);
       avatar = people.cavemen.get(playerName);
-      // In as it left the last scene (pilot.js `arrive`); with nothing carried, armed, as before.
+      // In as it left the last scene (pilot.js `arrive`); with nothing carried, armed for the next scene with weapons.
+      // The hangar has none, so what it came in with waits parked until it leaves.
       if (!pilot.arrive(avatar)) people.selectWeapon(avatar.weapon.selectedSlot, avatar);
+      people.parkWeapons(avatar);
+      pilot.refreshCombat();
       if (crossing) walkIn(crossing);
       else pilot.navigate(arrival());
       const heads = Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length);
@@ -1551,7 +1553,7 @@
     }
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     // Other signed-in players in the hangar, as the Oogas they drive.
-    remotes = BL.remotePlayers.create({ root, crew: people, fx });
+    remotes = BL.remotePlayers.create({ root, crew: people, fx, unarmed: true });
     // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     footsteps = BL.footsteps.create();
     // The page's one factory node goes on with the hall's show while the visitor is in here.
@@ -1810,6 +1812,7 @@
     footsteps = null;
     audio.dispose();
     audio = null;
+    if (avatar) people.unparkWeapons(avatar);
     if (people) people.dispose();
     fx.dispose();
     pilot.dispose();

@@ -1266,9 +1266,6 @@
     if (scene.booth.mode) return boothKey(scene, e);
     if (BL.controls.matches(e, "resetView") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) return pilot.resetCamera();
     if (BL.controls.matches(e, "view") && !e.repeat && pilot.modeAction("mode-toggle")) return true;
-    if (BL.controls.matches(e, "weapon") && pilot.weaponMode(Number(e.key))) return true;
-    if (BL.controls.matches(e, "swapWeapon")) return pilot.weaponAction("weapon-toggle");
-    if (BL.controls.matches(e, "attack")) return pilot.weaponAction("weapon-fire");
     if (e.key === "l" || e.key === "L") {
       demoTip(120000);
       return true;
@@ -1896,7 +1893,6 @@
       else if (action === "mode-preset") presetView(value);
       else if (action === "act") { if (!greeter || !greeter.act()) pilot.action(); }
       else if (action.startsWith("mode-")) pilot.modeAction(action);
-      else if (action.startsWith("weapon-") || action === "magazine-swap") pilot.weaponAction(action);
     });
     // The simulated kiosk's donation link, with the visitor's name and message.
     const donationRequest = donations.createRequest(game.state);
@@ -1950,8 +1946,11 @@
       avatar = people.cavemen.get(playerName);
       // Back out of the hangar it stands on the walkway at the door; in from the island, a step inside the gate.
       const arrival = ctx.from === "hangar" && scene.hangar ? HANGAR_ARRIVAL : ARRIVAL;
-      // In as it left the last scene (pilot.js `arrive`); with nothing carried, armed, as before.
+      // In as it left the last scene (pilot.js `arrive`); with nothing carried, armed for the next scene with weapons.
+      // The hall has none, so what it came in with waits parked until it leaves.
       if (!pilot.arrive(avatar)) people.selectWeapon(avatar.weapon.selectedSlot, avatar);
+      people.parkWeapons(avatar);
+      pilot.refreshCombat();
       // An arrival, as on the island: the Ooga stands a step inside the gate facing the core and the view starts
       // settled over its shoulder, never sweeping in from wherever the new camera began. Walked in through the island's
       // shield, it comes on through the gate's in its light instead, and walks on to that step.
@@ -1964,7 +1963,7 @@
     }
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     // Other signed-in players in the hall, as the Oogas they drive.
-    remotes = BL.remotePlayers.create({ root, crew: people, fx });
+    remotes = BL.remotePlayers.create({ root, crew: people, fx, unarmed: true });
     // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     footsteps = BL.footsteps.create();
     // The hall's own sound: its machines at work and every event where it happens (factory-audio.js).
@@ -2496,6 +2495,7 @@
       if (scene.hangar.window) scene.hangar.window.dispose();
     }
     for (const t of scene.tunnels) { t.ripples.dispose(); t.body.dispose(); }
+    if (avatar) people.unparkWeapons(avatar);
     // Save the carry/combat choice while the controlled actor still exists.
     pilot.dispose();
     remotes.dispose();
@@ -2559,7 +2559,7 @@
     }
   });
   BL.scenes = BL.scenes || {};
-  factoryScene.controlsHelp = touch => { const help = pilot.controlsHelp(touch, ["weapon", "attack", "swapWeapon"]); help.title = "Lightning Factory · " + help.title; return help; };
+  factoryScene.controlsHelp = touch => { const help = pilot.controlsHelp(touch); help.title = "Lightning Factory · " + help.title; return help; };
   factoryScene.controlsHelpHold = on => { pilot.controls.reset(); pilot.setMenuOpen(on, false); };
   BL.scenes.factory = factoryScene;
 })();
