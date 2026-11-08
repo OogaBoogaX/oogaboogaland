@@ -66,7 +66,7 @@
   const showSound = () => {
     const label = sound.muted ? "Unmute environment sounds" : "Mute environment sounds";
     const voice = window.BL.voice.stats;
-    soundButton.setAttribute("aria-label", label); soundButton.title = voice.enabled || voice.joining ? label : `${label} · M`;
+    soundButton.setAttribute("aria-label", label); soundButton.title = voice.enabled || voice.joining || voice.returning ? label : `${label} · M`;
     soundButton.setAttribute("aria-pressed", String(sound.muted));
   };
   let helpHeld = false;
@@ -99,11 +99,14 @@
   // Reserve M before scene capture listeners and transition holds; editable fields keep it for typing.
   const onVoiceMuteKey = (e) => {
     const voice = window.BL.voice;
-    if (e.key.toLowerCase() !== "m" || e.metaKey || e.ctrlKey || e.altKey || !voice.stats.enabled && !voice.stats.joining) return;
+    if (e.key.toLowerCase() !== "m" || e.metaKey || e.ctrlKey || e.altKey || !voice.stats.enabled && !voice.stats.joining && !voice.stats.returning) return;
     if (e.target && (e.target.isContentEditable || e.target.closest && e.target.closest("input, textarea, select"))) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    if (!e.repeat) voice.setMuted(!voice.stats.muted);
+    if (e.repeat) return;
+    // Back from an earlier session the microphone is still closed, so M opens it as Unmute does.
+    if (voice.stats.returning) voice.toggle();
+    else voice.setMuted(!voice.stats.muted);
   };
   window.addEventListener("keydown", onVoiceMuteKey, true);
   let renderer = null;
@@ -332,7 +335,7 @@
   const openIntro = () => { for (const el of intros) if (!el.hidden) return el; return null; };
   const showMic = () => {
     const voice = window.BL.voice.stats;
-    window.BL.hud.showMic(voice, voice.enabled || voice.joining);
+    window.BL.hud.showMic(voice, voice.enabled || voice.joining || voice.returning);
     showSound();
   };
   // An arrival in three parts: `arriving` before the scene's own enter, the enter, then `arrived`. A scene with

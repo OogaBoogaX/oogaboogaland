@@ -38,6 +38,7 @@ import "../../src/js/reaction-policy.js";
 //                                host, from a page in the arcade's ghost arena
 //                 { t: "react", e }              an emoji over the driven body for a moment (see Reactions below)
 //                 { t: "hand", on, tone? }       the raised hand up or down, in skin tone 0 (none) to 5
+//                 { t: "link", to, on }          ask player `to` for a voice link, or take this player's ask back (see Voice links below)
 //                 { t: "chalk", v, k, ... }     the EntropyLab chalkboard: `take` or `drop` the board, or an edit by
 //                                                whoever holds it, on board layout `v` (chalk-board.js VERSION; see
 //                                                CHALK_HZ below)
@@ -61,7 +62,9 @@ import "../../src/js/reaction-policy.js";
 //                 blend { id, to, k }        a player's crossing changed; welcome and join carry blendTo and blendK
 //                 voice { peers, gens }      whom to hear, and each one's publication count (a new count is a
 //                                            microphone published again, to be pulled again); in the Studio also
-//                                            `listeners`, the other receive sessions there
+//                                            `listeners`, the other receive sessions there and linked partners'
+//                                            anywhere; `ears` elsewhere, how many can hear this page without
+//                                            publishing, so it hears none of them
 //                 studio-state { state }     the Studio's host, mode, program anchor, seats and this page's own
 //                                            rights; studio-result { action, commandId, ok, error, revision }
 //                                            answers a command; studio-mic-revoked: drop the microphone now
@@ -89,6 +92,8 @@ import "../../src/js/reaction-policy.js";
 //                 react { id, e }            player `id` reacted with emoji `e`, to the players in their zone
 //                 hand { id, on, tone }      player `id` raised or lowered their hand; welcome and join carry `hand`
 //                                            and `handTone`. To the sender alone, its own id: a change it was refused
+//                 links { wants, linked, refused? }  this player's own asks and which of them are two-way links, after
+//                                            welcome and on every change to either; `refused: "full"` when an ask did not fit
 // Zones: `<group>` or `<group>.<place>`. Voice is shared within a group; who is shown is matched on the whole
 // name, since a place inside a group can have coordinates of its own. The exception is the main world, every zone the
 // island scene reports (`BLEND.WORLD`): its players are all shown to each other (`seenTogether`) and its voice goes by
@@ -113,6 +118,14 @@ import "../../src/js/reaction-policy.js";
 // per-record bucket of REACT_HZ a second bursting to REACT_BURST (the page mirrors it, a little short); over it a
 // reaction is dropped without a word, and a hand change is refused with the sender's own `hand { id, on, tone }` as
 // the room holds it, so the sender's page puts it back.
+// Voice links: a room that keeps them lists LINK_FEATURE in welcome's `features`. Each player holds a set of asks by
+// account id, and two who have asked for each other are linked: `voicePeers` lets them hear each other wherever they
+// are, in any zone or none, with or without a body. An ask is told only to the one who made it, so the player asked
+// sees nothing until they ask too; breaking a link takes back only the breaker's ask, so the other's still stands, and
+// they can cancel it. The asks go to the room's storage (`voiceLinks`, one value, LINK_WANTS an account and
+// LINK_ACCOUNTS accounts at most) on each change and last until taken back or the account is deleted
+// (`forgetVoiceLinks`). A Studio audience member still loses their microphone there: a link carries voices, it grants
+// no microphone.
 // "ping" answers "pong" without waking the room (setWebSocketAutoResponse).
 
 export const TICK_HZ = 15;
@@ -181,6 +194,11 @@ export const PM_INVITES = 4;
 export const PM_BLOCKS = 32;
 // Accounts whose blocks and rate limits the room keeps across their reconnects while it is awake, as chat's buckets.
 export const PM_ACCOUNT_KEEP = MAX_PLAYERS * 2;
+export const LINK_FEATURE = "vlink-v1";
+export const LINK_HZ = 2;
+export const LINK_BURST = 6;
+export const LINK_WANTS = 64;
+export const LINK_ACCOUNTS = 512;
 const PM_OPS = ["invite", "accept", "decline", "block", "end"];
 const PM_DATA = /^[A-Za-z0-9+/]+={0,2}$/;
 // The Sphere's one exterior doorway is a short, server-leased FIFO. Room door transits are independent
@@ -390,6 +408,7 @@ export const parseClientMessage = (text) => {
     const tone = msg.tone === undefined ? 0 : msg.tone;
     return typeof msg.on === "boolean" && globalThis.BL.reactionPolicy.tone(tone) ? { t: "hand", on: msg.on, tone } : null;
   }
+  if (msg.t === "link") return Number.isSafeInteger(msg.to) && msg.to > 0 && typeof msg.on === "boolean" ? { t: "link", to: msg.to, on: msg.on } : null;
   if (msg.t === "shot") {
     const a = msg.a;
     if (!Array.isArray(a) || a.length !== 6 || !a.every(finite)) return null;
@@ -504,11 +523,7 @@ export const claimRefusal = (index, login, body, _players, contributor = false, 
 export const VOICE_TRACK = "mic";
 
 /** The voice group of a zone name: its alias's (`BLEND.ALIASES`), else the part before its `.place`. */
-export const zoneGroup = (zone) => {
-  if (typeof zone === "string" && Object.hasOwn(BLEND.ALIASES, zone)) return BLEND.ALIASES[zone];
-  const dot = typeof zone === "string" ? zone.indexOf(".") : -1;
-  return dot < 0 ? zone : zone.slice(0, dot);
-};
+export const zoneGroup = BLEND.group;
 
 /** Whether two zones' players are shown to each other, for what the room relays of them: the same zone, or two of the
  *  main world, all in the island scene's coordinates. */
@@ -533,13 +548,44 @@ export const voiceTogether = (p, q) => {
   return sharesPlace(p, group, q) && (group !== "ember-den" || (p.pokerVoice ?? null) === (q.pokerVoice ?? null));
 };
 
-/** Map of player id → sorted ids that player should hear. */
-export const voicePeers = (players, studio = null) => {
+/** Whether accounts `a` and `b` have each asked for a voice link with the other. */
+export const voiceLinked = (links, a, b) => !!links && !!links.get(a)?.has(b) && !!links.get(b)?.has(a);
+
+/** In voice as every roster shows it: a live microphone, or back from an earlier session hearing others, microphone closed and muted. */
+export const inVoice = (p) => !!p.voice.track || !!p.voice.sub && p.muted === true;
+
+/** The asks as they load from storage, bounded and checked; anything malformed is dropped. */
+export const restoreLinks = (stored) => {
+  const links = new Map();
+  if (!Array.isArray(stored)) return links;
+  for (const row of stored.slice(0, LINK_ACCOUNTS)) {
+    if (!Array.isArray(row) || !Number.isSafeInteger(row[0]) || row[0] <= 0 || !Array.isArray(row[1])) continue;
+    const wants = new Set(row[1].filter((id) => Number.isSafeInteger(id) && id > 0 && id !== row[0]).slice(0, LINK_WANTS));
+    if (wants.size) links.set(row[0], wants);
+  }
+  return links;
+};
+
+/** The asks as they go to storage. */
+export const storedLinks = (links) => [...links].map(([id, wants]) => [id, [...wants]]);
+
+/** What player `id` is told: their own asks, and which of those are two-way. */
+export const linkView = (links, id) => {
+  const wants = [...(links.get(id) || [])];
+  return { wants, linked: wants.filter((other) => voiceLinked(links, id, other)) };
+};
+
+/** Map of player id → sorted ids that player should hear. A voice link needs only a receive session and a live microphone. */
+export const voicePeers = (players, studio = null, links = null) => {
   const out = new Map();
   for (const p of players) {
     const ids = [];
-    if (voiceListener(p, studio)) {
-      for (const q of players) if (q !== p && voiceAudible(q, studio) && voiceTogether(p, q) && q.voice && q.voice.track) ids.push(q.id);
+    if (p.voice && p.voice.sub) {
+      const listens = voiceListener(p, studio);
+      for (const q of players) {
+        if (q === p || !q.voice || !q.voice.track) continue;
+        if (voiceLinked(links, p.id, q.id) || listens && voiceAudible(q, studio) && voiceTogether(p, q)) ids.push(q.id);
+      }
       ids.sort((a, b) => a - b);
     }
     out.set(p.id, ids);

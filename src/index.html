@@ -414,6 +414,13 @@
           <h2><span data-sign>Contributing Oogas</span></h2>
           <span class="panel-chip" id="roster-count" data-tone="idle"></span>
         </header>
+        <div class="roster-sort">
+          <label class="roster-sort-label" for="roster-sort">Sorted by</label>
+          <select id="roster-sort">
+            <option value="recent">Most recent contributions</option>
+            <option value="most">Most contributions</option>
+          </select>
+        </div>
         <ul id="roster" class="roster slab" aria-label="Contributing Oogas"></ul>
         <p class="help roster-hint" data-scene="hub"><span id="world-loot-hint" hidden>Something is hidden out there.</span></p>
         <div class="account" id="account" hidden>
@@ -442,7 +449,7 @@
               <label class="players-hearing-label" for="players-hearing-range">Hearing range</label>
               <input type="range" id="players-hearing-range" min="1" max="61" step="1" value="61" aria-describedby="players-hearing-help" aria-valuetext="No limit">
               <output class="players-hearing-value" id="players-hearing-value" for="players-hearing-range">No limit</output>
-              <span class="players-hearing-help" id="players-hearing-help">Voices at or beyond this range are muted for you</span>
+              <span class="players-hearing-help" id="players-hearing-help">Voices at or beyond this range are automatically muted</span>
             </div>
             <label class="players-speak" id="players-speak" hidden><input type="checkbox" id="players-speak-input"> Read joins aloud</label>
           </div>
