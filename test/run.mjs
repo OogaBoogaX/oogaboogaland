@@ -26013,10 +26013,12 @@ const chalkboardClientChecks = async (BL) => {
       : id === "chalk-canvas" ? { getContext: () => ctx, getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 500 }), setPointerCapture() {}, hasPointerCapture: () => true, releasePointerCapture() {} } : {}));
     return nodes.get(id);
   } };
+  // A board this browser kept on the first, smaller board: its corners come back a sixth in from the new board's.
+  const small = [{ t: "c", s: 2, p: [0, 0, 1, 1] }];
   const C = BL.chalkBoard, f = netFixture(BL, () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "YellowBrokeIt", display: "Yellow" } }) }));
   const window = { BL: { chalkBoard: C, net: f.net } };
   runInNewContext(await readFile(join(root, "src/js/chalkboard.js"), "utf8"), { window, document, AbortController, setTimeout: fn => timers.push(fn), clearTimeout() {},
-    requestAnimationFrame: () => 1, cancelAnimationFrame() {}, localStorage: { getItem: () => null, setItem(k, v) { stored = JSON.parse(v); } } });
+    requestAnimationFrame: () => 1, cancelAnimationFrame() {}, localStorage: { getItem: k => k === "ooga-chalkboard-v2" ? JSON.stringify(small) : null, setItem(k, v) { stored = JSON.parse(v); } } });
   const board = window.BL.chalkboard.create({ renderer: {}, onOpen() {}, onClose() {}, onRefused: text => refusals.push(text) });
   const dialog = document.getElementById("chalk-modal"), canvas = document.getElementById("chalk-canvas"), input = document.getElementById("chalk-type-input");
   const pointer = (type, x, y) => canvas.handlers[type]({ isPrimary: true, button: 0, pointerId: 1, pointerType: "mouse", clientX: x, clientY: y, preventDefault() {} });
@@ -26026,7 +26028,8 @@ const chalkboardClientChecks = async (BL) => {
   board.open(null);
   stroke([100, 100], [200, 150], [300, 200]); stroke([400, 400]);
   dialog.close();
-  const own = stored?.length === C.initial().length + 2 && stored.at(-2).p.length === 6 && stored.at(-1).p.length === 4;
+  const own = stored?.length === small.length + 2 && JSON.stringify(stored[0].p) === JSON.stringify([1 / 6, 1 / 6, 5 / 6, 5 / 6])
+    && stored.at(-2).p.length === 6 && stored.at(-1).p.length === 4;
   // Shared: the room hands the board over; opening it asks to hold it first.
   await f.net.start(); const ws = f.sockets[0], room = v => ws.onmessage({ data: JSON.stringify(v) });
   room({ t: "welcome", you: { id: 71 }, players: [{ id: 72, login: "peer", display: "Peer", body: "w-s-bitcoin", zone: "outside", x: 0, y: 0, z: 0, yaw: 0 }], now: Date.now(), features: [C.FEATURE] });
@@ -26037,7 +26040,7 @@ const chalkboardClientChecks = async (BL) => {
   const granted = dialog.open;
   const before = f.sent.length;
   stroke([100, 100], [200, 200], [300, 300]);
-  const drawn = f.sent.slice(before).map(({ t, ...m }) => m);
+  const drawn = f.sent.slice(before).map(({ t, v, ...m }) => m);
   const sentLine = JSON.stringify(drawn) === JSON.stringify([{ k: "line", m: "c", p: [125, 200, 250, 400] }, { k: "more", p: [375, 600] }]);
   document.getElementById("chalk-keyboard").handlers.click();
   input.value = "hi"; input.handlers.input({ isComposing: false }); tick();
@@ -26060,7 +26063,9 @@ const chalkboardClientChecks = async (BL) => {
       && refusedBatch === "full" && f.sent.length === beforeBatch && JSON.stringify(f.net.state.chalk.board) === beforeBoard,
     JSON.stringify({ capacity, refusedBatch, sent: f.sent.length - beforeBatch }));
   document.getElementById("chalk-close").handlers.click();
-  const letGo = !dialog.open && f.sent.at(-1).k === "drop" && stored?.length === C.initial().length + 2;
+  const letGo = !dialog.open && f.sent.at(-1).k === "drop" && stored?.length === small.length + 2;
+  // Every chalk frame names the board's layout, so the room takes none from a page on the smaller board.
+  const versioned = f.sent.filter(m => m.t === "chalk").every(m => m.v === C.VERSION);
   // Another's writing arrives as it is made, and the board names them while they hold it.
   room({ t: "chalk-lock", id: 72 }); room({ t: "chalk", id: 72, k: "type", c: [["z", 10, 10]] });
   const followed = f.net.state.chalk.board.marks.at(-1).ch === "z" && board.writer === "Peer";
@@ -26072,9 +26077,9 @@ const chalkboardClientChecks = async (BL) => {
   const taken = reopened && !dialog.open && refusals.at(-1) === "Peer has the chalkboard now.";
   f.net.state.room = "paused"; board.open(null);
   const offline = !dialog.open && refusals.at(-1).startsWith("Reconnecting");
-  record("chalkboard client: alone the visitor writes on their own board; shared, the board opens once the room grants it, sends lines and text as drawn, follows another's writing and shuts with a reason when taken or refused",
-    own && asked && granted && sentLine && sentText && letGo && followed && busy && taken && offline,
-    JSON.stringify({ own, asked, granted, sentLine, drawn, sentText, letGo, followed, busy, taken, offline, refusals }));
+  record("chalkboard client: alone the visitor writes on their own board, one kept on the smaller first board coming back in the middle of the new one; shared, the board opens once the room grants it, sends lines and text as drawn on its layout, follows another's writing and shuts with a reason when taken or refused",
+    own && asked && granted && sentLine && sentText && letGo && versioned && followed && busy && taken && offline,
+    JSON.stringify({ own, stored: stored?.[0], asked, granted, sentLine, drawn, sentText, letGo, versioned, followed, busy, taken, offline, refusals }));
   board.dispose?.(); f.net.dispose();
 };
 // Ooga Chat's wire on the page: what it sends, and the lines it hands on (chat.js keeps and shows them).
@@ -26173,7 +26178,7 @@ const playersColumnChecks = async () => {
     runInNewContext(await readFile(join(root, "src/js/zone-map.js"), "utf8"), context);
     Object.assign(window.BL, {
       net: { state: { room: "live", me: { login: "me", display: "Me" }, selfId: 1, online: 3, zone: "outside", hostId: 0, self: { x: 0, y: 0, z: 0, zone: "outside" } }, remotes,
-        subscribe() {}, subscribeRoster() {}, subscribeMoves() {}, subscribePresence() {} },
+        subscribe() {}, subscribeRoster() {}, subscribeMoves() {}, subscribePresence() {}, subscribeReactions() {} },
       hud: { voiceIcon: make("svg"), voiceWords: () => "In voice", toast() {} },
       voice: { stats: { enabled: true, muted: false, speaking: false, radius: 0 }, fades: false, RADIUS_MIN: 5, RADIUS_MAX: 60, VOLUME_MAX: 2, subscribe() {}, speaking: () => false, mutedLocally: () => false, volumeOf: () => 1, setVolume() {}, setRadius() {} },
       sheet: { visible: () => true, setBadge() {}, watchViews() {}, attending: () => true }, sound: { muted: false, subscribe() {} }, pilot: { turnToward() {} },

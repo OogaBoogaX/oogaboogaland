@@ -203,6 +203,31 @@
   // change in any such scene is what the next one gets; `arrive` reads it. Scenes that restrict the view or the
   // weapons (the games, the poker room, the Timechain rooms) carry nothing, so passing through them changes nothing.
   let carried = null;
+  // The visitor's last choice of view in this browser (localStorage VIEW_KEY): carry or combat, the view, the look from
+  // the Ooga's heading, pitch, zoom, overhead height, shoulder side and the weapon in hand, never its rounds or a captured
+  // cursor. `remember` keeps it in `chosen`, but not while a game forces combat (`combatOnly`), and it is written when the
+  // page hides or closes. A page's first arrival, before anything is carried, comes back in it (`arrive`). Debug pages
+  // neither read nor write it, so fixtures and the suite always start from the default view.
+  const VIEW_KEY = "ooga-view", VIEWS = ["first-person", "shoulder", "birds-eye", "orbit"];
+  const KEEP_VIEW = !new URLSearchParams(location.search).has("debug");
+  const chosen = { view: "", combat: false, relYaw: 0, pitch: 0, distance: 0, height: 0, side: 1, held: 0 };
+  const readView = () => {
+    let v = null;
+    try { v = JSON.parse(localStorage.getItem(VIEW_KEY)); } catch { return null; }
+    if (!v || !VIEWS.includes(v.view) || typeof v.combat !== "boolean" || ![v.relYaw, v.pitch, v.distance, v.height].every(Number.isFinite)
+      || Math.abs(v.pitch) > Math.PI / 2 || !(v.distance > 0 && v.distance < 1e3) || Math.abs(v.height) > 1e3 || (v.side !== 1 && v.side !== -1) || ![0, 1, 2].includes(v.held)) return null;
+    return { name: "", view: v.view, combat: v.combat, focused: false, relYaw: v.relYaw, pitch: v.pitch, distance: v.distance, height: v.height, side: v.side, held: v.held, ammo: NaN };
+  };
+  const saved = KEEP_VIEW ? readView() : null;
+  const saveView = () => {
+    if (!chosen.view) return;
+    const relYaw = Math.atan2(Math.sin(chosen.relYaw), Math.cos(chosen.relYaw));
+    try { localStorage.setItem(VIEW_KEY, JSON.stringify({ ...chosen, relYaw })); } catch { /* Storage may be unavailable. */ }
+  };
+  if (KEEP_VIEW) {
+    window.addEventListener("pagehide", saveView);
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveView(); });
+  }
   const create = (ctx) => {
     // `fly` is a camera-only game's own view (Ooga Mine, whose operators are its game's, not an Ooga the visitor walks):
     // the movement keys move that view. Every scene where the visitor walks an Ooga passes none.
@@ -2274,15 +2299,19 @@
       c.pitch = overhead ? Math.PI / 2 : orbit.pitch; c.distance = overhead ? overheadHeight - cave.baseY : orbit.dist;
       c.height = overhead ? overheadHeight - feet : camera.position.y - feet; c.side = shoulderSideTarget < 0 ? -1 : 1;
       c.held = w.equipped ? 2 : w.primaryEquipped ? 1 : 0; c.ammo = w.ammo;
+      if (!KEEP_VIEW || ctx.combatOnly?.()) return;
+      chosen.view = c.view; chosen.combat = c.combat; chosen.relYaw = c.relYaw; chosen.pitch = c.pitch;
+      chosen.distance = c.distance; chosen.height = c.height; chosen.side = c.side; chosen.held = c.held;
     };
     // The next `navigate`, in this same tick, keeps this look, pitch and zoom from the Ooga's new heading.
     let arriving = null;
     // A scene's arrival with the visitor's own Ooga: possessed with the view and combat it last had where they carry, its
     // weapon back in hand where this scene allows (the primary when the rifle is not), and the next `navigate` keeping the
-    // look, pitch and zoom. Nothing blends in from the old scene's camera, whose coordinates mean nothing here. Whether a
+    // look, pitch and zoom. Nothing blends in from the old scene's camera, whose coordinates mean nothing here. Before
+    // anything is carried this page, the view this browser last chose stands in, for whichever Ooga arrives. Whether a
     // carried state was applied; without one it is an ordinary possess.
     const arrive = (cave) => {
-      const c = ctx.carry && carried && carried.name === cave.traits.name ? carried : null;
+      const c = !ctx.carry ? null : carried ? (carried.name === cave.traits.name ? carried : null) : saved;
       if (!c) { possess(cave); return false; }
       const t = captureControl(arrivalTransition), feet = cave.root.position.y - cave.baseY, held = c.held, ammo = c.ammo, focused = c.focused;
       t.active = true; t.view = c.view; t.combat = c.combat; t.yaw = cave.root.rotation.y + c.relYaw; t.pitch = c.pitch;

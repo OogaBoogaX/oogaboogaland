@@ -17,7 +17,8 @@
 // Reactions (reactions.js, through `net.subscribeReactions`): an emoji a player sent pops up over their nameplate, or
 // over the visitor's own head for their own (id 0), rises a little and fades over REACT_TIME, the newest replacing the
 // one before; a raised hand (`rec.hand`, `net.state.hand` for the visitor's own) stands there until it is lowered, never
-// moving: a reaction pops up in front of it and rises on over it. Under Calm a reaction only fades. Drawn on the overlay as text, nothing built or kept.
+// moving: a reaction pops up in front of it and rises on over it, and a chat bubble stands over it, never under it.
+// Under Calm a reaction only fades. Drawn on the overlay as text, nothing built or kept.
 // `pick` finds the nearest live body along a sight line, mesh by mesh, through a weapon-target list of the pool's own
 // (never the scene's input targets, so a live player is seen by a view's crosshair without being tapped, possessed,
 // struck or shot); a body that is not shown (another zone, the visitor's own name) is never found, and the scene's
@@ -55,6 +56,8 @@
   const EMOJI_FONT = "26px 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif";
   const HAND_FONT = "20px 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif";
   const REACT_TIME = 2.6, REACT_LIFT = 16, REACT_RISE = 22, REACT_OVER = 14, REACT_POP = 0.18, REACT_FADE = 0.7;
+  // A chat bubble over a raised hand stands this much higher, its tail clear over the hand.
+  const HAND_ROOM = 26;
   const CALM = window.matchMedia("(prefers-reduced-motion: reduce)");
   // The pool of the scene that updated last: only the active scene's pool updates.
   let activePool = null;
@@ -244,8 +247,8 @@
       entry.cave.poseManaged(dt, entry.x, entry.y, entry.z, entry.yaw, speed, !!(flags & 1), !!(flags & 2), lounge, motion);
     };
 
-    // The visitor's own reaction over their head.
-    let selfReact = "", selfReactT = 0;
+    // The visitor's own reaction over their head, and the body whose chat bubble their raised hand lifts.
+    let selfReact = "", selfReactT = 0, lifted = null;
     // Their jetpack from the room's `jet` (net.js): the character's built-in one, or the hub's model, put on as the
     // crew puts one on (`crew.jetpackNode`) the first time it shows. The flame flickers as the crew's does.
     let jetClock = 0;
@@ -492,10 +495,16 @@
     };
     const drawNames = (ctx, project, showHealth = false) => {
       const ownHand = net.state && net.state.hand ? BL.reactionPolicy.HANDS[net.state.handTone] : "";
+      // The visitor's own line stands over their raised hand, on whichever body they drive now.
+      const own = player ? player() : crew && crew.player, speaker = ownHand && own || null;
+      if (lifted !== speaker) {
+        if (lifted) lifted.speechLift = 0;
+        lifted = speaker;
+        if (lifted) lifted.speechLift = HAND_ROOM;
+      }
       if (!bodies.size && selfReactT <= 0 && !ownHand) return;
       ctx.save();
       if (selfReactT > 0 || ownHand) {
-        const own = player ? player() : crew && crew.player;
         const rig = own && (own.parts ? own : own.gorilla);
         headMinX = Infinity; headMaxX = -Infinity; headTop = Infinity;
         if (rig && rig.parts && rig.parts.head && rig.root.visible) projectHead(rig.parts.head, project);
@@ -538,8 +547,8 @@
         headMinX = Infinity; headMaxX = -Infinity; headTop = Infinity;
         anchorHead(entry.cave.parts.head, exact);
         if (headTop === Infinity) continue;
-        // Over the box as over an NPC's name tooltip (hud.js speechSpace).
-        entry.cave.speechLift = boxH + SPEECH_GAP;
+        // Over the box as over an NPC's name tooltip (hud.js speechSpace), and over a raised hand.
+        entry.cave.speechLift = boxH + SPEECH_GAP + (rec.hand ? HAND_ROOM : 0);
         // Measured once a name: measureText allocates.
         if (entry.label !== rec.display) { entry.label = rec.display; entry.labelW = ctx.measureText(rec.display).width; }
         // The tooltip's box, rounded as its offset size and translate are, centred across the head and standing on it,
@@ -624,6 +633,7 @@
       if (unreacted) unreacted();
       unheard = unshot = unswung = unreacted = null;
       selfReact = ""; selfReactT = 0;
+      if (lifted) { lifted.speechLift = 0; lifted = null; }
       for (const entry of [...bodies.values()]) drop(entry);
       actorList.length = 0;
     };
