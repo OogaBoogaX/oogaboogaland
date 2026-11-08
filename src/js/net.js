@@ -80,13 +80,13 @@
 // Both spend one bucket mirroring the room's, a little short of it, so neither is ever shown here and dropped there;
 // `setHand` refuses (false, nothing changed) when it is empty, and a hand change the room still refuses comes back as
 // this page's own `hand`, which puts `state.hand` back to what everyone else sees.
-// A crossing (#392, voice-blend.js): `setBlend(to, t)` says the driven body is `t` (0 to 1) of the way from its zone's
-// group toward the adjacent group `to` (null for none). `state.blendTo` and `state.blendT` keep it exact for this page's
-// own volumes; the room gets it in BLEND.STEPS steps, at most BLEND_MS apart, and every remote record carries the
-// other players' steps (`blendTo`, `blendK`), ended by their next zone unless it is the place they were crossing into,
-// which turns the crossing round here as the room does (the room's `blend` after it says the same). A zone change into
-// the place being crossed into keeps the voices this page hears, since it already plays them, and turns the crossing
-// round, as the room does.
+// A crossing (#392, voice-blend.js): `setBlend(to, t)` says the driven body is `t` (0 to 1) of the way toward `to`
+// (null for none): in the main world the level below it is heading down to, whatever its zone, elsewhere the place next
+// to its zone's. `state.blendTo` and `state.blendT` keep it exact for this page's own volumes; the room gets it in
+// BLEND.STEPS steps, at most BLEND_MS apart, and every remote record carries the other players' steps (`blendTo`,
+// `blendK`). Between two zones of the main world a crossing stands and every voice stays as it is; any other next zone
+// ends it, unless it is the place being crossed into, which turns the crossing round here as the room does (the room's
+// `blend` after it says the same) and keeps the voices this page hears, since it already plays them.
 // `subscribePresence` hears `fn(rec, true)` for a player who joins the room while this page is in it, never for those
 // already there on this page's (re)join, and `fn(rec, false)` when one leaves (players.js names the joins, #430).
 // Exports start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
@@ -546,8 +546,11 @@
         if (rec.poseZone && BLEND.sameFrame(rec.poseZone, msg.name)) rec.poseZone = msg.name;
         // Into the place it was crossing into, its crossing turns round as the room turns it (the room's `blend` after
         // this says the same), so its voice never plays a moment at the wrong share; any other zone ends it.
-        const across = !!rec.blendTo && BLEND.place(msg.name) === BLEND.place(rec.blendTo) && BLEND.STEPS - rec.blendK > 0;
-        rec.blendTo = across ? BLEND.place(rec.zone) : null; rec.blendK = across ? BLEND.STEPS - rec.blendK : 0;
+        // Between two zones of the main world it stands as it is: there a crossing is a level, whatever the zone.
+        if (!BLEND.world(rec.zone) || !BLEND.world(msg.name)) {
+          const across = !!rec.blendTo && BLEND.place(msg.name) === BLEND.place(rec.blendTo) && BLEND.STEPS - rec.blendK > 0;
+          rec.blendTo = across ? BLEND.place(rec.zone) : null; rec.blendK = across ? BLEND.STEPS - rec.blendK : 0;
+        }
         rec.zone = msg.name;
       }
       rosterChanged();
@@ -806,10 +809,12 @@
   const setZone = (name) => {
     if (cabinetAnchor) return;
     if (name === zone) return;
-    // Into the place being crossed into (voice-blend.js `place`): the crossing turns round as the room turns it, off a
-    // bridge's far end to none and across the arcade hallway's midpoint (#422) to the same crossing from its other end.
-    const across = !!state.blendTo && BLEND.place(name) === BLEND.place(state.blendTo);
-    const moved = !sameGroup(name, zone) && !across;
+    // Between two zones of the main world nothing changes for voice: a crossing there is a level, whatever the zone.
+    // Into the place being crossed into (voice-blend.js `place`): the crossing turns round as the room turns it, across
+    // the arcade hallway's midpoint (#422) to the same crossing from its other end.
+    const kept = BLEND.world(name) && BLEND.world(zone);
+    const across = !kept && !!state.blendTo && BLEND.place(name) === BLEND.place(state.blendTo);
+    const moved = !kept && !sameGroup(name, zone) && !across;
     if (across) {
       const back = (1 - state.blendT) * BLEND.STEPS >= 0.5;
       state.blendTo = back ? BLEND.place(zone) : null;

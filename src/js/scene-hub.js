@@ -9265,28 +9265,22 @@
       selectGorilla(gorilla);
     } else selectOoga(cave);
   };
-  // Where the driven Ooga is, as the room names it for voice and for who is shown (docs/auth-and-presence.md):
-  // a cave by its mouth (EntropyLab, the Factory's tunnel and the Arcade's mouth share their halls' groups, HQ
-  // is one place whichever entrance), a bridged land from where its bridge ends (the Timechain Sphere with its
-  // doorway, the Mempool rainforest with its chamber and tunnels, the Bifrost isle), the island itself (`outside`,
-  // its bridges too), or nowhere past its edge: flying or falling off it. Allocation-free; a cave is named once.
+  // Where the driven Ooga is, as the room and the panels name it (docs/auth-and-presence.md, Zones): HQ whichever
+  // entrance, a bridged land from where its bridge ends (the Timechain Sphere with its doorway, the Mempool rainforest
+  // with its chamber and tunnels, the Bifrost isle), the island itself (`outside`, its cave entrances too), or the land
+  // between (`between`): its bridges, and the air off its edge, flying or falling. All of them are the main world
+  // (voice-blend.js `WORLD`), shown to each other, whose voice goes by height (`levelOf`), never by zone.
+  // The halls' old zone names are kept for their doors alone: the crosshair's route into a hall goes by its mouth.
   const CAVE_ZONES = { c11: "lab", c10: "bca", c2: "factory", c3: "arcade", c1: "mirror" };
   const ZONE_HOLD = 0.25;
-  const zoneNames = [];
-  const zoneName = (index) => {
-    if (!zoneNames[index]) {
-      const opening = CAMERA_OPENINGS[index - 1];
-      zoneNames[index] = opening.headquarters ? "hq" : CAVE_ZONES[opening.id] || `cave-${String(opening.id).toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 27)}`;
-    }
-    return zoneNames[index];
-  };
+  const caveZone = (index) => CAMERA_OPENINGS[index - 1].headquarters ? "hq" : "outside";
   const onSphere = (x, z) => {
     if (!timechainIsland) return false;
     const p = timechainIsland.place, s = BL.timechainModels.SITE, dx = x - p.x, dz = z - p.z;
     const across = dx * timechainIsland.cos - dz * timechainIsland.sin, along = dx * timechainIsland.sin + dz * timechainIsland.cos;
     return Math.abs(across) <= s.width / 2 && along >= p.bridgeZ && along <= p.bridgeZ + s.span + 0.5 || dx * dx + dz * dz < s.radius * s.radius;
   };
-  // Over the rainforest's ground or under it; its vine bridge is the island's (`onBridge`).
+  // Over the rainforest's ground or under it; its vine bridge is the land between (`onBridge`).
   const inRainforest = (x, feet, z) => !!mempoolIsland && (mempoolIsland.overAt(x, z) || mempoolIsland.coveredAt(x, feet + 0.5, z));
   // The isle's ground is -Infinity off it; on it, a body up to 3 m under the top (on the bridge's head) counts.
   const onBifrostIsle = (x, feet, z) => {
@@ -9294,53 +9288,25 @@
     const ground = bifrostIsle.site.groundAt(x, z);
     return ground > -Infinity && feet > ground - 3;
   };
-  // A bridge belongs to the island it leaves from (#361), so the land across it starts where it ends: the vine bridge
-  // short of the rainforest's ground, ₿IFRÖST's crystal deck and its head. The Sphere keeps its porch, the doorway's
-  // keypad, queue and the walk back out (3.8 m past the waiting spot) with a metre to spare, since the room hands its
-  // doorway only to players in the Sphere's zone.
+  // The bridges are the land between (#361), so the land across one starts where it ends: the vine bridge short of the
+  // rainforest's ground, ₿IFRÖST's crystal deck and its head. The Sphere keeps its porch, the doorway's keypad, queue
+  // and the walk back out (3.8 m past the waiting spot) with a metre to spare, since the room hands its doorway only to
+  // players in the Sphere's zone.
   const SPHERE_PORCH = BL.timechainModels.SPOTS.WAIT.z + 5;
-  // Voice across a bridge (#392, voice-blend.js): on one, `out.to` is the far land's zone and `out.t` how far along the
-  // span counted the island's a body stands, 0 at the island's end and 1 where the far land's zone begins.
-  const BRIDGE_AT = { to: "", t: 0 };
-  // Where the rainforest's ground begins on the vine bridge's centreline, found once for each Mempool island built.
-  let poolFarFor = null, poolFar = 0;
-  const poolBridgeFar = () => {
-    if (poolFarFor === mempoolIsland) return poolFar;
-    const M = mempoolIsland, p = M.place, s = poolModels.SITE;
-    let lo = p.bridgeLocalZ + s.deckStart, hi = p.bridgeLocalZ + s.span;
-    for (let i = 0; i < 24; i++) {
-      const mid = (lo + hi) / 2;
-      if (M.overAt(M.worldX(0, mid), M.worldZ(0, mid))) lo = mid; else hi = mid;
-    }
-    poolFarFor = M; poolFar = hi;
-    return hi;
-  };
-  const onBridge = (x, feet, z, out = BRIDGE_AT) => {
+  const onBridge = (x, feet, z) => {
     if (timechainIsland) {
       const p = timechainIsland.place, s = BL.timechainModels.SITE, dx = x - p.x, dz = z - p.z;
       const across = dx * timechainIsland.cos - dz * timechainIsland.sin, along = dx * timechainIsland.sin + dz * timechainIsland.cos;
-      const near = p.bridgeZ + s.span + 0.5;
-      if (Math.abs(across) <= s.width / 2 && along > SPHERE_PORCH && along <= near) {
-        out.to = "sphere"; out.t = (near - along) / (near - SPHERE_PORCH);
-        return true;
-      }
+      if (Math.abs(across) <= s.width / 2 && along > SPHERE_PORCH && along <= p.bridgeZ + s.span + 0.5) return true;
     }
     if (mempoolIsland && !mempoolIsland.overAt(x, z) && !mempoolIsland.coveredAt(x, feet + 0.5, z)) {
       const p = mempoolIsland.place, s = poolModels.SITE, dx = x - p.x, dz = z - p.z;
       const across = dx * mempoolIsland.cos - dz * mempoolIsland.sin, along = dx * mempoolIsland.sin + dz * mempoolIsland.cos;
-      const near = p.bridgeLocalZ + s.span;
-      if (Math.abs(across) < s.width / 2 && along >= p.bridgeLocalZ + s.deckStart && along <= near) {
-        const far = poolBridgeFar();
-        out.to = "rainforest"; out.t = Math.min(1, Math.max(0, (near - along) / (near - far)));
-        return true;
-      }
+      if (Math.abs(across) < s.width / 2 && along >= p.bridgeLocalZ + s.deckStart && along <= p.bridgeLocalZ + s.span) return true;
     }
     if (bifrostIsle) {
       const site = bifrostIsle.site, w = site.walk, ground = site.groundAt(x, z), along = (x - w.x) * w.sr + (z - w.z) * w.cr;
-      if (ground > -Infinity && feet > ground - 3 && along >= w.from && along <= w.to) {
-        out.to = "bifrost"; out.t = (w.to - along) / (w.to - w.from);
-        return true;
-      }
+      if (ground > -Infinity && feet > ground - 3 && along >= w.from && along <= w.to) return true;
     }
     return false;
   };
@@ -9389,6 +9355,8 @@
   };
   const doorToward = (from, step, out, nearX, nearZ) => {
     if (!island) return false;
+    // The land between is the island's own air and bridges: its routes start as the island's do.
+    if (from === "between") from = "outside";
     if (step === "outside") return bridgeDoor(from, false, out) || mouthDoor(from, out, nearX, nearZ);
     if (from === "outside") return bridgeDoor(step, true, out) || mouthDoor(step, out, nearX, nearZ);
     if (from === "factory" && step === "factory.hall" && factoryMouth) {
@@ -9410,68 +9378,66 @@
   };
   const zoneOf = (cave, gorilla = false) => {
     const p = cave.root.position, feet = p.y - (gorilla ? 0 : cave.baseY);
-    if (!gorilla && playerCaveIndex) return zoneName(playerCaveIndex);
+    if (!gorilla && playerCaveIndex) return caveZone(playerCaveIndex);
     if (gorilla && island.cavityAt(p.x, p.z, CAMERA_COLUMN, 0, feet)
       && feet >= CAMERA_COLUMN.floor - 1e-6 && feet < CAMERA_COLUMN.ceiling) {
       const index = CAMERA_COLUMN.caveIndex;
       for (const opening of CAMERA_OPENINGS) {
         if (opening.headquarters ? index === island.headquarters.caveIndex : opening.caveIndex === index
-          && !opening.blocked && (p.x - opening.mouth.x) * opening.sr + (p.z - opening.mouth.z) * opening.cr < opening.planeZ) return zoneName(opening.caveIndex);
+          && !opening.blocked && (p.x - opening.mouth.x) * opening.sr + (p.z - opening.mouth.z) * opening.cr < opening.planeZ) return caveZone(opening.caveIndex);
       }
     }
-    if (onBridge(p.x, feet, p.z)) return "outside";
+    if (onBridge(p.x, feet, p.z)) return "between";
     if (onSphere(p.x, p.z)) return "sphere";
     if (inRainforest(p.x, feet, p.z)) return "rainforest";
     if (onBifrostIsle(p.x, feet, p.z)) return "bifrost";
-    return island.onLand(p.x, p.z) ? "outside" : "none";
+    return island.onLand(p.x, p.z) ? "outside" : "between";
   };
-  // A new zone holds ZONE_HOLD seconds before it is reported, so a bridge's foot does not flicker voice.
+  // A new zone holds ZONE_HOLD seconds before it is reported, so a bridge's foot does not flicker in the panels.
   let zoneHeld = null, zoneHeldFor = 0;
   // Both body kinds share position, health and zone transport. Gorilla locomotion
   // reuses six numbers so climbing, swimming and running survive the handoff.
-  // Voice between levels (#392, voice-blend.js): on a slope from one level down to the next, `out.from` is the upper
-  // place, `out.to` the lower and `out.t` how far down, 0 at the upper level's height and 1 at the lower's. Each is
-  // bounded by where its slope stands, never by height alone: HQ's entrance ramps (their carved space, from the
-  // island's surface down to HQ's floor), HQ's basement and the ramps to it (in HQ's own zone, below its floor, where
-  // nothing else is), and the rainforest's tunnels, chamber, ledge and galleries (anywhere in its zone below its lowest terrace, bar the
-  // lake's water over the chamber), down to the chamber's floor. `zone` is where the body is, as `zoneOf` has it.
-  const LEVEL_AT = { from: "", to: "", t: 0 }, LEVEL_COLUMN = { floor: 0, ceiling: 0 };
+  // Voice by height (#392, voice-blend.js): `out.to` is the level a body is heading down to and `out.t` how far, 0 at
+  // the height of the level over it and 1 at its own; false on the surface. Anywhere in the world the surface reaches a
+  // metre under the island's plane (`SURFACE_DIP`, for its lowest dips and the bridges' sag), HQ's level then fades in
+  // down to HQ's floor and the basement's down to its, over the island or off its edge on a jetpack alike. Inside HQ's
+  // rock (its zone) the height decides only on its ramps and under its floor: its rooms are HQ's level, furniture, jumps
+  // and all. Inside the rainforest's, under its lowest terrace (bar the lake's water over the chamber), its tunnels,
+  // ledge, galleries and chamber fade in down to the chamber's floor; its top is the surface. `zone` is where the body
+  // is, as `zoneOf` has it.
+  const LEVEL_AT = { to: "", t: 0 }, LEVEL_COLUMN = { floor: 0, ceiling: 0 };
+  const SURFACE_DIP = 1;
   // Below the rainforest's lowest terrace (its channel beds, half a metre down) a body is on its way underground.
   const POOL_TERRACE = 0.75;
-  const levelCrossing = (x, feet, z, zone, out) => {
-    const H = island.headquarters;
-    if (zone === "hq" || zone === "outside") {
-      const column = LEVEL_COLUMN, B = H.basement;
-      if (zone === "hq" && feet < H.floor) {
-        out.from = "hq"; out.to = "hq-basement"; out.t = clamp((H.floor - feet) / (H.floor - B.floor), 0, 1);
-        return out.t > 0;
-      }
-      if (feet > H.floor && feet < 0 && island.rampColumnAt(x, z, false, column) && feet >= column.floor - 0.25 && feet < column.ceiling) {
-        out.from = "outside"; out.to = "hq"; out.t = clamp(feet / H.floor, 0, 1);
-        return out.t > 0;
-      }
-    }
+  const levelOf = (x, feet, z, zone, out) => {
     if (zone === "rainforest" && mempoolIsland) {
-      const M = mempoolIsland, L = BL.poolLayout, local = feet - M.place.y, lx = M.localX(x, z), lz = M.localZ(x, z);
-      if (local < -POOL_TERRACE && (lx * lx + lz * lz >= L.LAKE_R * L.LAKE_R || M.coveredAt(x, feet + 0.5, z))) {
-        out.from = "rainforest"; out.to = "rainforest-under"; out.t = clamp((-POOL_TERRACE - local) / (-POOL_TERRACE - L.FLOOR), 0, 1);
+      const M = mempoolIsland, L = BL.poolLayout, local = feet - M.place.y;
+      if (local >= -POOL_TERRACE) return false;
+      // Past the chamber's floor a body is under the islet in the open air, where the island's own levels go on.
+      if (local > L.FLOOR - 1) {
+        const lx = M.localX(x, z), lz = M.localZ(x, z);
+        if (lx * lx + lz * lz < L.LAKE_R * L.LAKE_R && !M.coveredAt(x, feet + 0.5, z)) return false;
+        out.to = "rainforest-under"; out.t = clamp((-POOL_TERRACE - local) / (-POOL_TERRACE - L.FLOOR), 0, 1);
         return true;
       }
     }
-    return false;
+    if (feet >= -SURFACE_DIP) return false;
+    const H = island.headquarters;
+    if (feet > H.floor) {
+      const room = zone === "hq" && !(island.rampColumnAt(x, z, false, LEVEL_COLUMN) && feet >= LEVEL_COLUMN.floor - 0.25 && feet < LEVEL_COLUMN.ceiling);
+      out.to = "hq"; out.t = room ? 1 : (-SURFACE_DIP - feet) / (-SURFACE_DIP - H.floor);
+      return true;
+    }
+    // Under HQ's floor, by less than the half step a crossing starts at, is still HQ's level.
+    const down = clamp((H.floor - feet) / (H.floor - H.basement.floor), 0, 1), basement = down * BL.voiceBlend.STEPS >= 0.5;
+    out.to = basement ? "hq-basement" : "hq"; out.t = basement ? down : 1;
+    return true;
   };
-  // The crossing the driven body is on (#392), against the zone reported for it: from the upper place across a bridge
-  // or down a slope, back from the far place onto it, or just off its far end before the new zone has held (all the
-  // way across). A body on a level below stays in the zone above, all the way down.
+  // The level the driven body stands at, against nothing but where it is: its zone never changes what it hears.
   const shareBlend = (driven, gorilla, zone) => {
-    const p = driven.root.position, feet = p.y - (gorilla ? 0 : driven.baseY), reported = BL.net.state.zone, at = BRIDGE_AT;
-    let from = null, to = null, t = 0;
-    if ((gorilla || !playerCaveIndex) && onBridge(p.x, feet, p.z, at)) { from = "outside"; to = at.to; t = at.t; }
-    else if (levelCrossing(p.x, feet, p.z, zone, LEVEL_AT)) { from = LEVEL_AT.from; to = LEVEL_AT.to; t = LEVEL_AT.t; }
-    if (from && reported === from) return BL.net.setBlend(to, t);
-    if (from && reported === to) return BL.net.setBlend(from, 1 - t);
-    if (zone !== reported && BL.voiceBlend.adjacent(reported, zone)) return BL.net.setBlend(zone, 1);
-    BL.net.setBlend(null, 0);
+    const p = driven.root.position, feet = p.y - (gorilla ? 0 : driven.baseY);
+    if (levelOf(p.x, feet, p.z, zone, LEVEL_AT)) BL.net.setBlend(LEVEL_AT.to, LEVEL_AT.t);
+    else BL.net.setBlend(null, 0);
   };
   const shareDrivenActor = (dt) => {
     if (cloudHopper?.active) { BL.net.setBlend(null, 0); return; }
@@ -9513,14 +9479,8 @@
       BL.net.setHealth(driven.health.value, driven.health.stunned);
     }
   };
-  // Signed-in players are shown where this one is: the same zone while driving, every place on the island
-  // while looking round free (no zone, no voice).
-  const remoteShown = (rec) => {
-    if (cloudPlaying()) return false;
-    const net = BL.net.state;
-    if (net.body) return rec.zone === net.zone;
-    return BL.remotePlayers.onIsland(rec.zone);
-  };
+  // Signed-in players are shown wherever they are in the main world, whether this one is driving or looking round free.
+  const remoteShown = (rec) => !cloudPlaying() && BL.remotePlayers.onIsland(rec.zone);
   const drawExtra = (ctx2d, project) => {
     if (cloudPlaying()) return;
     crew.drawDrops(ctx2d, project);
@@ -12919,7 +12879,7 @@
         get gameMode() { return gameMode; },
         selectDebugGorilla,
         get timechainIsland() { return timechainIsland; },
-        poolBridgeFar, levelCrossing,
+        levelOf,
         get factory() { return factoryMouth && factoryMouth.hall ? factoryMouth.hall.debug : null; },
         get bifrost() { return bifrostIsle; },
         get footsteps() { return footsteps; },
