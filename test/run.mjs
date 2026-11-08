@@ -22478,7 +22478,7 @@ scene("hangar", { label: "controls reference forklift", query: "character=portla
 scene("hub", { label: "side panel", query: "pos=0", steps: [hubSheetPersistence, hubMuteKey, hubChat] });
 // Private conversations (#188) on a signed-in page: the room is a stand-in, and the other person, Anna, is the real
 // sealing code on the same pad, so what the page sends is read as Anna's page would read it.
-const hubPrivateChat = { name: "private chat", why: "rule: two players who hold the same pad talk privately from the Players tab while the room carries only sealed frames; a pad for someone else is refused by name, the talk carries on across a scene trip, and a pad made here downloads for the two of them", run: async (b) => {
+const hubPrivateChat = { name: "private chat", why: "rule: two players who hold the same pad talk privately from the Players tab while the room carries only sealed frames; a pad for someone else is refused by name, the talk carries on across a scene trip, and a pad made here downloads for the two of them. regression: the row lock always showed blue and locked, and a Cancel the room had not yet heard came back as a live invite", run: async (b) => {
   await openWithSheetState(b, hubPage(src, "pos=0"), { open: true, tab: "players" });
   await b.evaluate(`(async () => {
     const W = window.__pm = { fetch: window.fetch, WebSocket: window.WebSocket, sockets: [], out: [], wire: [], heard: [], downloads: [] };
@@ -22487,7 +22487,7 @@ const hubPrivateChat = { name: "private chat", why: "rule: two players who hold 
     BL.net.state.started = true; BL.net.state.resolved = false;
     await BL.net.recheck();
     W.room = (m) => W.sockets.at(-1).onmessage({ data: JSON.stringify(m) });
-    W.room({ t: "welcome", you: { id: 71 }, now: Date.now(), features: ["chat-unicode-v1", "pm-v1"], players: [{ id: 2, login: "anna", display: "Anna", zone: "outside" }] });
+    W.room({ t: "welcome", you: { id: 71 }, now: Date.now(), features: ["chat-unicode-v1", "pm-v1"], players: [{ id: 2, login: "anna", display: "Anna", zone: "outside" }, { id: 3, login: "cy", display: "Cy", zone: "outside" }] });
     const P = BL.oneTimePad, random = (v) => crypto.getRandomValues(v), mem = new Map();
     W.file = P.make("anna", "tester", 16384, random);
     W.wrong = P.make("anna", "cy", 16384, random);
@@ -22511,24 +22511,40 @@ const hubPrivateChat = { name: "private chat", why: "rule: two players who hold 
     W.load = (bytes) => { const dt = new DataTransfer(); dt.items.add(new File([bytes], "pad.oogapad")); const input = document.getElementById("pm-file"); input.files = dt.files; input.dispatchEvent(new Event("change")); };
     W.wait = async (test) => { for (let i = 0; i < 150 && !test(); i++) await new Promise((r) => setTimeout(r, 20)); return !!test(); };
     W.lock = () => document.querySelector('#players-panel li[data-id="2"] .players-private');
+    // A row's lock as drawn, read with the Players tab up (it repaints only while it shows): its state and its shackle.
+    W.tab = (id) => { const panel = document.getElementById(id); if (!BL.sheet.visible(panel)) BL.sheet.tabFor(panel).click(); };
+    W.locks = () => { W.tab("players-panel"); const out = {};
+      for (const id of [2, 3]) { const b = document.querySelector('#players-panel li[data-id="' + id + '"] .players-private');
+        out[id] = !b || b.hidden ? "" : b.dataset.lock + ":" + (b.firstChild.firstChild.getAttribute("d") === BL.privateChat.SHACKLE.shut ? "shut" : "up"); }
+      W.tab("chat-panel"); return out; };
     W.view = () => { const s = BL.privateChat.stats(), panel = document.getElementById("chat-panel");
       return { phase: s.phase, ready: s.ready, padLoaded: s.padLoaded, started: s.started, unrecorded: s.unrecorded, queued: s.queued, lines: s.lines, note: document.getElementById("pm-note").textContent, shown: BL.sheet.visible(panel), privateView: panel.dataset.view === "private",
         input: !document.getElementById("pm-input").disabled, switcher: !document.getElementById("pm-switch").hidden }; };
     W.say = (text) => { const input = document.getElementById("pm-input"); input.value = text; input.dispatchEvent(new Event("input")); document.getElementById("pm-form").requestSubmit(); };
   })()`);
-  const asked = await b.evaluate(`(async () => { const W = __pm; await W.wait(() => W.lock() && !W.lock().hidden); const offered = !!W.lock() && !W.lock().hidden; W.lock().click();
-    const sent = await W.flush(); W.room({ t: "pm", op: "inviting", to: 2 }); const waiting = W.view();
+  const asked = await b.evaluate(`(async () => { const W = __pm; await W.wait(() => W.lock() && !W.lock().hidden); const offered = !!W.lock() && !W.lock().hidden;
+    const before = W.locks(); W.tab("players-panel"); W.lock().click();
+    const sent = await W.flush(); W.room({ t: "pm", op: "inviting", to: 2 }); const waiting = W.view(), inviting = W.locks();
+    // One at a time: Cy's lock asks nothing while Anna is asked, and shows the conversation to cancel first.
+    W.tab("players-panel"); document.querySelector('#players-panel li[data-id="3"] .players-private').click();
+    const busy = { sent: await W.flush(), phase: BL.privateChat.stats().phase, privateView: W.view().privateView };
     W.room({ t: "pm", op: "open", with: 2 }); await W.anna.start({ fresh: true }); const open = W.view();
     W.load(W.wrong); await W.wait(() => W.view().note.includes("not you")); const wrong = W.view();
     // A file this browser has no record of waits for the visitor to say it is new.
     W.load(W.file); await W.wait(() => W.view().unrecorded); const unrecorded = { ...W.view(), confirm: !document.getElementById("pm-confirm").hidden, sent: W.out.length };
+    const loading = W.locks();
     document.getElementById("pm-fresh").click(); await W.wait(() => W.view().started); await W.flush(); await W.wait(() => W.view().ready); await W.flush();
-    return { offered, sent, waiting, open, wrong, unrecorded, ready: W.view(), annaHeard: W.heard.map((r) => r.kind), annaReady: W.anna.ready }; })()`);
+    const sealed = W.locks(), switchLock = document.querySelector('[data-pm-view="private"]').dataset.lock;
+    return { offered, sent, waiting, open, wrong, unrecorded, ready: W.view(), annaHeard: W.heard.map((r) => r.kind), annaReady: W.anna.ready, locks: { before, inviting, loading, sealed, switchLock }, busy }; })()`);
   record("private chat: the lock on another player's row asks them, the Ooga Chat panel turns to the private view, a pad made for someone else is refused by name, a file this browser never used waits for the visitor to say it is new, and the line opens once both sides acknowledge",
     asked.offered && asked.sent.length === 1 && asked.sent[0].op === "invite" && asked.sent[0].to === 2 && asked.waiting.phase === "inviting" && asked.waiting.shown && asked.waiting.privateView && asked.waiting.switcher
       && asked.open.phase === "open" && asked.open.queued === 1 && !asked.open.input && /delete every copy when you're done/.test(asked.open.note) && asked.wrong.note === "That pad is for anna and cy, not you." && !asked.wrong.padLoaded
       && asked.unrecorded.unrecorded && asked.unrecorded.confirm && !asked.unrecorded.started && asked.unrecorded.sent === 0 && /no record of this pad/.test(asked.unrecorded.note)
       && asked.ready.ready && asked.ready.input && asked.annaHeard.includes("hello") && asked.annaHeard.includes("ready") && asked.annaReady, JSON.stringify(asked));
+  record("private chat: the row lock is open and grey before an invite, amber while the invite and the pad wait, shut and blue once sealed, and every other row's lock waits its turn and asks nobody",
+    asked.locks.before[2] === "open:up" && asked.locks.before[3] === "open:up" && asked.locks.inviting[2] === "waiting:up" && asked.locks.inviting[3] === "busy:up"
+      && asked.locks.loading[2] === "waiting:up" && asked.locks.sealed[2] === "sealed:shut" && asked.locks.sealed[3] === "busy:up" && asked.locks.switchLock === "sealed"
+      && asked.busy.sent.length === 0 && asked.busy.phase === "inviting" && asked.busy.privateView, JSON.stringify({ locks: asked.locks, busy: asked.busy }));
   const talk = await b.evaluate(`(async () => { const W = __pm; W.say("hi anna, ünïcode 🦍"); await W.wait(() => W.view().lines.length === 1); await W.flush(); await W.wait(() => W.view().lines[0].state === "sent");
     await W.anna.say("hello tester"); await W.wait(() => W.view().lines.length === 2);
     const records = Object.keys(localStorage).filter((k) => k.startsWith("oogaboogaland.pad.")).map((k) => localStorage.getItem(k));
@@ -22582,7 +22598,13 @@ const hubPrivateChat = { name: "private chat", why: "rule: two players who hold 
   await tourGo(b, "lab");
   await tourGo(b, "hub");
   const after = await b.evaluate(`(async () => { const W = __pm; const kept = W.view(); await W.anna.say("still here"); await W.wait(() => W.view().lines.length === 9);
-    document.getElementById("pm-end").click(); const ended = await W.flush(); const view = W.view();
+    document.getElementById("pm-end").click(); const ended = await W.flush(); const view = W.view(), endedLocks = W.locks();
+    // Cy asked and the invite cancelled before the room heard: its late word that the invite went changes nothing, and an
+    // open for it is ended at once.
+    W.tab("players-panel"); document.querySelector('#players-panel li[data-id="3"] .players-private').click(); const cyAsked = await W.flush();
+    document.getElementById("pm-end").click(); const cancelled = await W.flush();
+    W.room({ t: "pm", op: "inviting", to: 3 }); W.room({ t: "pm", op: "open", with: 3 }); const late = { phase: BL.privateChat.stats().phase, sent: await W.flush() };
+    W.room({ t: "pm", op: "closed", from: 3, reason: "ended" }); late.after = BL.privateChat.stats().phase; late.locks = W.locks();
     // A second conversation, with a pad made here: one download for the two of them, and this page loads its own copy.
     const click = HTMLAnchorElement.prototype.click, made = URL.createObjectURL;
     HTMLAnchorElement.prototype.click = function () { W.downloads.push({ name: this.download }); };
@@ -22594,7 +22616,7 @@ const hubPrivateChat = { name: "private chat", why: "rule: two players who hold 
     await W.wait(() => W.view().padLoaded); HTMLAnchorElement.prototype.click = click; URL.createObjectURL = made;
     const pad = BL.oneTimePad.parse(new Uint8Array(await W.blob.arrayBuffer()));
     const noteRow = document.querySelector('#pm-log [data-note="true"]'), input = document.getElementById("pm-input");
-    return { kept, ended, view, invited, accepting, made: W.view(), downloads: W.downloads, logins: pad.logins, bytes: pad.bytes.length,
+    return { kept, ended, view, endedLocks, cyAsked, cancelled, late, invited, accepting, made: W.view(), downloads: W.downloads, logins: pad.logins, bytes: pad.bytes.length,
       note: !!noteRow && !noteRow.querySelector(".chat-name"), spellcheck: input.spellcheck }; })()`);
   await b.evaluate(`(() => { const W = __pm; window.fetch = W.fetch; window.WebSocket = W.WebSocket; })()`);
   record("private chat: the conversation carries on across a trip to another scene and End tells the room and clears it; an invite accepted keeps the private view until it opens, and a pad made here downloads once for the two of them and loads on this page",
@@ -22603,6 +22625,10 @@ const hubPrivateChat = { name: "private chat", why: "rule: two players who hold 
       && after.downloads.length === 1 && after.downloads[0].name === "ooga-pad-tester-anna.oogapad" && after.logins.join() === "tester,anna" && after.bytes > 262144 && after.made.padLoaded && after.made.started
       && after.note && after.spellcheck === false,
     JSON.stringify(after));
+  record("private chat: an ended conversation leaves every lock open, and an invite cancelled before the room heard stays cancelled: the room's late inviting changes nothing and its late open is ended at once",
+    after.endedLocks[2] === "open:up" && after.endedLocks[3] === "open:up" && after.cyAsked.map((m) => m.op + m.to).join() === "invite3" && after.cancelled.map((m) => m.op + m.to).join() === "end3"
+      && after.late.phase === "idle" && after.late.sent.map((m) => m.op + m.to).join() === "end3" && after.late.after === "idle" && after.late.locks[3] === "open:up",
+    JSON.stringify({ endedLocks: after.endedLocks, cyAsked: after.cyAsked, cancelled: after.cancelled, late: after.late }));
 } };
 scene("hub", { label: "join alerts", query: "pos=0", steps: [hubJoinAlerts] });
 scene("hub", { label: "private chat", query: "pos=0", steps: [hubPrivateChat] });
@@ -26347,7 +26373,9 @@ const thumpChecks = async BL => {
         subscribe() {}, subscribeRoster() {}, subscribeMoves() {}, subscribePresence() {} },
       hud: { voiceIcon: make("svg"), malletIcon: make("svg"), voiceWords: () => "In voice", toast() {} },
       voice: { stats: { enabled: true, muted: false, speaking: false, radius: 0 }, fades: false, RADIUS_MIN: 5, RADIUS_MAX: 60, VOLUME_MAX: 2, subscribe() {}, speaking: () => false, mutedLocally: () => false, volumeOf: () => 1, setVolume() {}, setRadius() {} },
-      sheet: { visible: () => true, setBadge() {}, watchViews() {}, attending: () => true }, sound: { muted: false, subscribe() {} }, pilot: { turnToward() {} } });
+      sheet: { visible: () => true, setBadge() {}, watchViews() {}, attending: () => true }, sound: { muted: false, subscribe() {} }, pilot: { turnToward() {} },
+      // private-chat.js loads first on the page; here it relays nothing, so no row offers a lock.
+      privateChat: { SHACKLE: { open: "M0 0h1v1H0z", shut: "M0 0h1v1H0z" }, serial: 0, available: () => false, subscribe() {}, lock: () => "open", lockWords: () => "" } });
     runInNewContext(await readFile(join(root, "src/js/players.js"), "utf8"), context);
     handlers.sheetchange();
     const P = window.BL.players, list = ids.get("players-list");
@@ -26377,12 +26405,12 @@ const thumpChecks = async BL => {
   const columns = { lock: cellOfRule(".players-private"), voice: cellOfRule(".roster-voice"), thump: columnOf(".players-thump"), look: columnOf(".players-look"), distance: columnOf(".players-distance") };
   const thumpRule = ruleOf(".players-thump");
   const shapeOk = cell.rows === 3 && cell.before.every((s) => s === "roster-dots players-name roster-marks players-thump players-look players-distance players-volume");
-  record("ooga thump Online Oogas: every row holds the mallet's cell from the start, drawn over the voice mark in its fixed column (lock, voice, distance, crosshair), hidden by visibility and taking no pointer; a pulse and its end change only that cell's state, never a row's cells, their order or anything hidden",
+  record("ooga thump Online Oogas: every row holds the mallet's cell from the start, drawn over the voice mark in its fixed column (lock, voice, distance as wide as 999 m, crosshair: none sized to its content, so they line up across groups), hidden by visibility and taking no pointer; a pulse and its end change only that cell's state, never a row's cells, their order or anything hidden",
     shapeOk && cell.pulsed.join() === "true,true" && cell.pulses === 2 && cell.during.every((d) => d.same && d.hidden === false) && cell.during.filter((d) => d.on === "true").length === 2
       && cell.during.filter((d) => d.on === "true").every((d) => d.label === "Thumped" && d.ariaHidden === null) && cell.during.filter((d) => d.on === "false").every((d) => d.ariaHidden === "true")
       && cell.ended.bea === "false" && cell.ended.beaHidden === "true" && cell.ended.self === "true" && cell.cleared.self === "false" && cell.cleared.cancelled
       && cell.cleared.after.join("|") === cell.initial.join("|") && !cell.moving
-      && tracks.length === 6 && tracks[columns.thump - 1] === "12px" && columns.lock === 3 && columns.voice === 4 && columns.thump === columns.voice && columns.distance === 5 && columns.look === 6
+      && tracks.length === 6 && tracks[columns.thump - 1] === "12px" && tracks[columns.lock - 1] === "10px" && tracks[columns.look - 1] === "12px" && /width:\s*5ch;/.test(ruleOf(".players-distance")) && columns.lock === 3 && columns.voice === 4 && columns.thump === columns.voice && columns.distance === 5 && columns.look === 6
       && /visibility:\s*hidden/.test(thumpRule) && /pointer-events:\s*none/.test(thumpRule) && /width:\s*12px/.test(thumpRule) && !/display:\s*none/.test(thumpRule)
       && /\.players-thump\[data-on="true"\] \{\s*visibility: visible;\s*\}/.test(css),
     JSON.stringify({ cell, tracks, columns }));

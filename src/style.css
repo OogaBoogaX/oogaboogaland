@@ -1514,6 +1514,9 @@ body[data-active-scene="hub"] .home-link {
 .pm-switch-button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; }
 .pm-switch .pm-count { position: static; margin: 0 0 0 2px; }
 .pm-lock { flex: none; width: 9px; height: 10px; }
+/* As the partner's row lock shows it (private-chat.js): amber while an invite or the pad waits, blue once sealed. */
+.pm-switch-button[data-lock="waiting"] .pm-lock, .pm-title[data-lock="waiting"] .pm-lock { color: var(--warn); }
+.pm-switch-button[data-lock="sealed"] .pm-lock { color: #9fbfee; }
 
 .pm { display: none; flex: 1 1 auto; flex-direction: column; gap: 6px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .pm [hidden] { display: none; }
@@ -2060,18 +2063,31 @@ body[data-active-scene="hub"] .home-link {
   cursor: default;
 }
 
+/* The private conversation's lock (private-chat.js `lock`): open and grey, amber while it waits, shut and blue once
+   sealed, dim on the other rows while one is under way. */
 .players-private {
   display: inline-flex;
   padding: 0;
   border: 0;
   background: none;
-  color: #9fbfee;
+  color: var(--muted);
   cursor: pointer;
 }
 .players-private[hidden] { display: none; }
-.players-private svg { width: 10px; height: 11px; shape-rendering: crispEdges; }
-.players-private:hover, .players-private:focus-visible { color: #cfe0ff; outline: none; }
+.players-private svg { width: 10px; height: 12px; shape-rendering: crispEdges; }
+.players-private:hover, .players-private:focus-visible { color: var(--fg); outline: none; }
 .players-private:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.players-private[data-lock="waiting"] { color: var(--warn); }
+.players-private[data-lock="waiting"]:is(:hover, :focus-visible) { color: var(--accent-text); }
+.players-private[data-lock="waiting"] svg { animation: players-private-wait 2s ease-in-out infinite; }
+.players-private[data-lock="sealed"] { color: #9fbfee; }
+.players-private[data-lock="sealed"]:is(:hover, :focus-visible) { color: #cfe0ff; }
+.players-private[data-lock="busy"] { color: var(--faint); }
+.players-private[data-lock="busy"]:is(:hover, :focus-visible) { color: var(--muted); }
+@keyframes players-private-wait { 50% { opacity: 0.5; } }
+@media (prefers-reduced-motion: reduce) {
+  .players-private[data-lock="waiting"] svg { animation: none; }
+}
 
 .roster-voice:focus-visible {
   outline: 2px solid var(--accent);
@@ -2127,13 +2143,15 @@ body[data-active-scene="hub"] .home-link {
 }
 
 /* After the name: the private-conversation lock, the voice mark (the thump's mallet drawn over it in the same cell),
-   the distance and the crosshair, each in a column every row shares, so the voice mark keeps its place by the distance
-   whether a row shows one or not. The distance column is as wide as the widest distance and the icons take only their
-   own width: the name keeps every other pixel. Every cell sits on the row's first line; a player's volume, under it. */
+   the distance and the crosshair, each in a column of fixed width. Every group is a grid of its own, so no column may
+   size to its content: the icons line up down the whole tab, the visitor's own row too, whoever shows a lock, a voice
+   mark or a distance. The distance cell is always as wide as "999 m" (`.players-distance`), so the name keeps every
+   other pixel. The gap spaces the items after the name; the name takes back the extra beside its dot. Every cell sits on
+   the row's first line; a player's volume, under it. */
 .players-rows {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) max-content 12px max-content 12px;
-  column-gap: 7px;
+  grid-template-columns: 8px minmax(0, 1fr) 10px 12px max-content 12px;
+  column-gap: 11px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -2189,6 +2207,7 @@ body[data-active-scene="hub"] .home-link {
 .players-name {
   display: inline-flex;
   grid-column: 2;
+  margin-left: -4px;
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -2268,9 +2287,12 @@ body[data-active-scene="hub"] .home-link {
   cursor: default;
 }
 
+/* Every row has this cell, empty or not, at the width of "999 m" in the panel's monospace face, numbers to the right so
+   their units line up: the column it makes is the same in every group. */
 .players-distance {
   grid-column: 5;
-  justify-self: start;
+  width: 5ch;
+  text-align: right;
   color: var(--paper);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
