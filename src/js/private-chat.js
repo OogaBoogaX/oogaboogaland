@@ -20,10 +20,10 @@
 // The pad file reads every line ever sealed with it, with the frames the room relayed, so the panel says to keep it safe
 // and delete it once the conversation is over. "Sent" is the room's word that it passed a line on, not the other side's.
 // The page's own notes carry no name, so no display name can pass for one; the other side's lines show their login.
-// The lock on each other player's row in Online Oogas, and on the switch, says where this page stands (`lock`,
-// `lockWords`): open (nothing between the two), waiting (an invite either way, or the pad not yet loaded and
-// acknowledged on both sides), sealed (the line is open), or busy on every other row while this page asks or talks with
-// one, since one conversation is all there is: that one ends first. `subscribe` hears it change. The room's word for a
+// The lock on the switch says where this page stands with a player (`lock`, `lockWords`): open (nothing between the
+// two), waiting (an invite either way, or the pad not yet loaded and acknowledged on both sides), sealed (the line is
+// open), or busy for everyone else while this page asks or talks with one, since one conversation is all there is:
+// that one ends first. `subscribe` hears it change. The room's word for a
 // step the visitor already undid never brings it back: `inviting` only confirms, and an `open` this page no longer
 // waits for (an invite or accept cancelled on its way) is ended at once.
 // Exports available, invite, lock, lockWords, subscribe, SHACKLE and stats.
@@ -102,7 +102,7 @@
   };
   // What the visitor ends before asking anyone else.
   const first = () => c.phase === "inviting" ? `Cancel your invite to ${c.name} first` : `End your private conversation with ${c.name} first`;
-  // The lock's label on `id`'s row, whose name is `name`.
+  // The lock's label for player `id`, whose name is `name`.
   const lockWords = (id, name) => {
     const state = lockOf(id);
     if (state === "open") return `Ask ${name} for a private conversation`;
@@ -414,7 +414,7 @@
       for (const box of lockBoxes) box.dataset.lock = mine;
       for (const path of shackles) path.setAttribute("d", mine === "sealed" ? SHACKLE.shut : SHACKLE.open);
     }
-    // Online Oogas repaints its locks only when what they show changes.
+    // Watchers hear only when what a lock would show changes.
     const key = `${c.phase}:${c.peer}:${ready}:${!!c.session}:${c.unrecorded}:${c.invites.join()}`;
     if (key !== lockKey) { lockKey = key; serial++; for (const fn of watchers) fn(); }
   };

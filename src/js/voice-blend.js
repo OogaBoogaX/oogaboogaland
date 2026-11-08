@@ -51,6 +51,13 @@
     }
     return zone;
   };
+  // A zone's voice group: its alias's, else the part before its `.place`.
+  const group = (zone) => {
+    if (typeof zone !== "string") return zone;
+    if (Object.hasOwn(ALIASES, zone)) return ALIASES[zone];
+    const dot = zone.indexOf(".");
+    return dot < 0 ? zone : zone.slice(0, dot);
+  };
   const adjacent = (a, b) => {
     a = place(a); b = place(b);
     for (const [x, y] of PAIRS) if (x === a && y === b || x === b && y === a) return true;
@@ -97,5 +104,5 @@
     const b = far(zone, to);
     return has(b, zone, to, k) && has(b, otherZone, otherTo, otherK);
   };
-  BL.voiceBlend = Object.freeze({ STEPS, WORLD, ABOVE, PAIRS, ALIASES, world, place, adjacent, crossable, near, far, sameFrame, weight, gain, shares });
+  BL.voiceBlend = Object.freeze({ STEPS, WORLD, ABOVE, PAIRS, ALIASES, world, place, group, adjacent, crossable, near, far, sameFrame, weight, gain, shares });
 })();

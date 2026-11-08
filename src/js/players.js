@@ -15,9 +15,13 @@
 // distances and crosshairs are rewritten as positions arrive (`subscribeMoves`, a few times a second at most), and only
 // what changed. No timers. Exports setDoors and stats.
 // The tab always holds the visitor's hearing range (#380, `BL.voice.setRadius`), ready before joining: the slider's last
-// stop is no limit, and a distance at or past the range is dimmed, since that voice is muted for them. A voice in
-// another place of the group, which shows no distance, is silenced by a range without a mark here. The slider is offered
-// before any audio is active; Web Audio supplies quieting and boost once the listener joins.
+// stop is no limit, and a distance at or past the range is dimmed, since that voice is muted for them. The voice mark of
+// anyone this visitor cannot hear where they stand, in another zone or past the range (`BL.voice.inEarshot`), fades and
+// never shows them speaking, kept up as the slider moves. The slider is offered before any audio is active; Web Audio
+// supplies quieting and boost once the listener joins.
+// A voice link (`net.voiceLink`, `net.toggleVoiceLink`): the link on another player's row asks them for one, in any
+// zone. Grey with nothing asked, ember while this visitor's own ask waits, blue once both have asked; the room never
+// tells the other player of an ask, so their link stays grey until they ask too. A click toggles this visitor's ask.
 // Hearing range and join-reading live together under the panel's Advanced settings disclosure.
 // A raised hand (reactions.js, `rec.hand` and `net.state.hand`) shows after the player's name, in their skin tone, and
 // each reaction they send pops up there, over the hand.
@@ -52,19 +56,19 @@
   crosshairPath.setAttribute("fill", "currentColor");
   crosshairPath.setAttribute("d", "M3 1h3v1H3zM3 7h3v1H3zM1 3h1v3H1zM7 3h1v3H7zM2 2h1v1H2zM6 2h1v1H6zM2 6h1v1H2zM6 6h1v1H6zM4 0h1v3H4zM4 6h1v3H4zM0 4h3v1H0zM6 4h3v1H6zM4 4h1v1H4z");
   crosshair.append(crosshairPath);
-  // The private conversation's lock (private-chat.js `lock`): its shackle up and grey while nothing is between the two,
-  // amber while an invite or the pad waits, shut and blue once the line is sealed, dim on every other row while the
-  // visitor asks or talks with someone.
-  const PC = BL.privateChat;
-  const lockIcon = document.createElementNS(SVG, "svg");
-  lockIcon.setAttribute("viewBox", "0 0 7 9");
-  lockIcon.setAttribute("aria-hidden", "true");
-  for (const d of [PC.SHACKLE.open, "M0 4h7v5H0z"]) {
-    const path = document.createElementNS(SVG, "path");
-    path.setAttribute("fill", "currentColor");
-    path.setAttribute("d", d);
-    lockIcon.append(path);
-  }
+  // A voice link's mark, an 11x11 pixel chain of two links.
+  const linkIcon = document.createElementNS(SVG, "svg");
+  linkIcon.setAttribute("viewBox", "0 0 11 11");
+  linkIcon.setAttribute("aria-hidden", "true");
+  const linkPath = document.createElementNS(SVG, "path");
+  linkPath.setAttribute("fill", "currentColor");
+  linkPath.setAttribute("d", "M7 0h3v1H7zM6 1h1v1H6zM9 1h2v1H9zM5 2h1v1H5zM10 2h1v1h-1zM4 3h1v1H4zM10 3h1v1h-1zM4 4h1v1H4zM9 4h1v1H9zM2 5h1v1H2zM4 5h1v1H4zM8 5h1v1H8zM1 6h1v1H1zM4 6h4v1H4zM0 7h1v1H0zM0 8h1v1H0zM5 8h1v1H5zM0 9h2v1H0zM4 9h1v1H4zM1 10h3v1H1z");
+  linkIcon.append(linkPath);
+  const LINK_WORDS = {
+    none: (name) => `Link voices with ${name}: once they link back, you hear each other in any zone`,
+    asked: (name) => `Waiting for ${name} to link back: click to cancel`,
+    linked: (name) => `Voices linked with ${name}: click to unlink`,
+  };
 
   const rows = new Map(), groups = new Map(), order = [], door = { x: 0, y: 0, z: 0 };
   let serial = 0, pass = 0, showing = false, stale = true, doors = null, shownZone = "", shownRadius = -1;
@@ -72,7 +76,7 @@
     const li = document.createElement("li"), dots = document.createElement("span"), presence = document.createElement("span"), name = document.createElement("span");
     const label = document.createElement("span"), host = document.createElement("span"), marks = document.createElement("span");
     const voice = document.createElement("button"), look = document.createElement("button"), distance = document.createElement("span");
-    const priv = document.createElement("button");
+    const link = document.createElement("button");
     const note = document.createElement("span"), id = `players-name-${++serial}`;
     const toggle = document.createElement("button"), volume = document.createElement("div"), volumeLabel = document.createElement("label");
     const slider = document.createElement("input"), value = document.createElement("output");
@@ -91,23 +95,23 @@
     host.className = "roster-host"; host.hidden = true; host.setAttribute("role", "img");
     host.setAttribute("aria-label", "Host: runs the Oogas for everyone"); host.title = "Host: runs the Oogas for everyone";
     const mark = document.createElement("span"), hand = document.createElement("span"), react = document.createElement("span");
-    mark.className = "players-mark"; mark.hidden = true;
+    mark.className = "players-mark";
     hand.className = "players-hand"; hand.hidden = true; hand.setAttribute("role", "img"); hand.setAttribute("aria-label", "Hand raised"); hand.title = "Hand raised";
     react.className = "players-react"; react.hidden = true; react.setAttribute("aria-hidden", "true");
     mark.append(hand, react);
     toggle.append(label); name.append(toggle, mark); dots.append(presence, host);
     marks.className = "roster-marks";
     voice.className = "roster-voice"; voice.type = "button"; voice.hidden = true; voice.setAttribute("aria-describedby", id); voice.append(BL.hud.voiceIcon.cloneNode(true));
-    // A private conversation (#188), offered where the room relays them; never on the visitor's own row.
-    priv.className = "players-private"; priv.type = "button"; priv.hidden = true; priv.append(lockIcon.cloneNode(true));
-    marks.append(voice, priv);
+    // A voice link, offered where the room keeps them; never on the visitor's own row.
+    link.className = "players-link"; link.type = "button"; link.hidden = true; link.append(linkIcon.cloneNode(true));
+    marks.append(voice, link);
     look.className = "players-look"; look.type = "button"; look.setAttribute("aria-describedby", id); look.append(crosshair.cloneNode(true));
     distance.className = "players-distance"; distance.append("");
     note.className = "players-note"; note.textContent = ", last known location"; note.hidden = true;
     distance.append(note);
     li.append(dots, name, marks, look, distance, volume);
-    return { li, label, toggle, volume, slider, value, host, voice, priv, privShackle: priv.firstChild.firstChild, privLock: "", privSerial: -1, mark, hand, handShown: "", react, reacting: null, privName: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
-      aim: "", voiceLook: "", voiceLogin: "", voiceSelf: false, blocked: false, hostOn: false, metres: -1, lastKnown: false, far: false };
+    return { li, label, toggle, volume, slider, value, host, voice, link, linkShown: "", linkName: "", mark, hand, handShown: "", react, reacting: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
+      aim: "", voiceLook: "", voiceLogin: "", voiceSelf: false, blocked: false, hostOn: false, metres: -1, lastKnown: false, far: false, faded: false };
   };
   const selfRow = makeRow();
   selfRow.self = true;
@@ -139,43 +143,32 @@
   // The voice and host marks, as the roster paints them.
   const paintMarks = () => {
     if (!showing || stale) return;
-    const s = net.state, voice = BL.voice.stats;
-    paintMark(selfRow, voice.enabled ? voice.muted ? "muted" : voice.speaking ? "speaking" : "on" : "", "", voice.enabled, s.hostId === s.selfId, s.hand ? BL.reactionPolicy.HANDS[s.handTone] : "");
+    const s = net.state, voice = BL.voice.stats, inVoice = voice.enabled || voice.returning;
+    paintMark(selfRow, inVoice ? voice.muted ? "muted" : voice.speaking ? "speaking" : "on" : "", "", inVoice, s.hostId === s.selfId, s.hand ? BL.reactionPolicy.HANDS[s.handTone] : "");
     for (const row of rows.values()) {
       const rec = net.remotes.get(row.id);
       if (!rec) continue;
-      const look = rec.voice ? rec.muted ? "muted" : BL.voice.speaking(rec.id) ? "speaking" : "on" : "";
+      const look = rec.voice ? rec.muted ? "muted" : !row.faded && BL.voice.speaking(rec.id) ? "speaking" : "on" : "";
       paintMark(row, look || "off", rec.login, false, rec.id === s.hostId, rec.hand ? BL.reactionPolicy.HANDS[rec.handTone] : "");
-      paintLock(row, PC.available() ? rec.display : "");
+      paintLink(row, s.voiceLinks ? net.voiceLink(rec.id) : "", rec.display);
       const level = V.volumeOf(row.id), words = `${Math.round(level * 100)}%`;
       if (row.slider.value !== String(level * 100)) row.slider.value = String(level * 100);
       if (row.value.textContent !== words) row.value.textContent = words;
       row.slider.setAttribute("aria-valuetext", words);
     }
   };
-  // A row's lock, offered where the room relays private conversations (an empty name hides it), painted again only when
-  // the conversation's state or the player's name moves.
-  const paintLock = (row, name) => {
-    if (row.privName === name && row.privSerial === PC.serial) return;
-    row.privName = name; row.privSerial = PC.serial; row.priv.hidden = !name;
-    if (!name) return;
-    const state = PC.lock(row.id), words = PC.lockWords(row.id, name);
-    if (row.privLock !== state) {
-      row.privLock = state; row.priv.dataset.lock = state;
-      row.privShackle.setAttribute("d", state === "sealed" ? PC.SHACKLE.shut : PC.SHACKLE.open);
-    }
-    row.priv.title = words; row.priv.setAttribute("aria-label", words);
-  };
-  const paintLocks = () => {
-    if (!showing || stale) return;
-    const on = PC.available();
-    for (const row of rows.values()) {
-      const rec = net.remotes.get(row.id);
-      if (rec) paintLock(row, on ? rec.display : "");
-    }
+  // A row's link, offered where the room keeps them (`state` empty hides it), painted again only when it or the name moves.
+  const paintLink = (row, state, name) => {
+    if (row.linkShown === state && row.linkName === name) return;
+    row.linkShown = state; row.linkName = name; row.link.hidden = !state;
+    if (!state) return;
+    const words = LINK_WORDS[state](name);
+    row.link.dataset.link = state;
+    row.link.setAttribute("aria-pressed", String(state !== "none"));
+    row.link.title = words; row.link.setAttribute("aria-label", words);
   };
   const paintMark = (row, look, login, self, host, hand = "") => {
-    if (row.handShown !== hand) { row.handShown = hand; row.hand.textContent = hand; row.hand.hidden = !hand; row.mark.hidden = !hand && !row.reacting; }
+    if (row.handShown !== hand) { row.handShown = hand; row.hand.textContent = hand; row.hand.hidden = !hand; }
     const blocked = !!login && BL.voice.mutedLocally(row.id);
     if (row.voiceLook !== look || row.voiceLogin !== login || row.voiceSelf !== self || row.blocked !== blocked) {
       row.voiceLook = look; row.voiceLogin = login; row.voiceSelf = self; row.blocked = blocked;
@@ -205,11 +198,11 @@
     const row = id === 0 ? selfRow : rows.get(id);
     if (!row || !row.li.isConnected) return;
     if (row.reacting) row.reacting.cancel();
-    row.react.textContent = emoji; row.react.hidden = false; row.mark.hidden = false;
+    row.react.textContent = emoji; row.react.hidden = false;
     const run = row.reacting = row.react.animate(CALM.matches ? REACT_CALM : REACT_POP, REACT_TIMING);
     run.onfinish = () => {
       if (row.reacting !== run) return;
-      row.reacting = null; row.react.hidden = true; row.mark.hidden = !row.handShown;
+      row.reacting = null; row.react.hidden = true;
     };
   };
 
@@ -218,6 +211,7 @@
     if (!showing || stale) return;
     const s = net.state, me = s.self, mine = s.zone, placed = me.zone === mine, radius = V.stats.radius;
     shownZone = mine; shownRadius = radius;
+    let faded = false;
     for (const row of rows.values()) {
       const rec = net.remotes.get(row.id);
       if (!rec) continue;
@@ -245,9 +239,13 @@
         row.distance.title = lastKnown && metres >= 0 ? "Last known location" : "";
         row.note.hidden = !(lastKnown && metres >= 0);
       }
-      const far = radius > 0 && distance >= radius;
+      const far = radius > 0 && distance >= radius && net.voiceLink(rec.id) !== "linked";
       if (row.far !== far) { row.far = far; row.distance.dataset.far = String(far); }
+      const out = !V.inEarshot(row.id);
+      if (row.faded !== out) { row.faded = out; row.voice.dataset.far = String(out); faded = true; }
     }
+    // A voice that fades stops showing as speaking at once, and shows it again on coming back.
+    if (faded) paintMarks();
   };
 
   // Hearing range is ready even alone and before voice joins; changing it never acquires a microphone.
@@ -306,8 +304,8 @@
       if (!row.self) row.slider.setAttribute("aria-label", `Volume for ${row.name}`);
     }
     for (const [key, entry] of groups) if (entry.seen !== pass) { entry.section.remove(); groups.delete(key); }
-    paintMarks();
     measure();
+    paintMarks();
   };
 
   // Turn toward the row's player, or the door on the way to them, if nothing has changed since the row was drawn.
@@ -324,10 +322,10 @@
     if (step && doors && doors(s.zone, step, door, placed ? me.x : NaN, placed ? me.z : NaN)) BL.pilot.turnToward(door.x, door.y, door.z);
   };
   list.addEventListener("click", (e) => {
-    const priv = e.target.closest(".players-private");
-    if (priv) {
-      priv.blur();
-      BL.privateChat.invite(Number(priv.closest("li").dataset.id));
+    const link = e.target.closest(".players-link");
+    if (link) {
+      link.blur();
+      net.toggleVoiceLink(Number(link.closest("li").dataset.id));
       return;
     }
     const voice = e.target.closest(".roster-voice");
@@ -449,7 +447,6 @@
   net.subscribeRoster(render);
   net.subscribeMoves(measure);
   net.subscribeReactions(reacted);
-  PC.subscribe(paintLocks);
   BL.voice.subscribe(paintMarks);
   BL.voice.subscribe(paintHearing);
   // The scene the visitor is in names its doors (`fn(from, step, out, nearX, nearZ)`, true with `out` written), or null.
