@@ -53,13 +53,19 @@
   crosshairPath.setAttribute("fill", "currentColor");
   crosshairPath.setAttribute("d", "M3 1h3v1H3zM3 7h3v1H3zM1 3h1v3H1zM7 3h1v3H7zM2 2h1v1H2zM6 2h1v1H6zM2 6h1v1H2zM6 6h1v1H6zM4 0h1v3H4zM4 6h1v3H4zM0 4h3v1H0zM6 4h3v1H6zM4 4h1v1H4z");
   crosshair.append(crosshairPath);
+  // The private conversation's lock (private-chat.js `lock`): its shackle up and grey while nothing is between the two,
+  // amber while an invite or the pad waits, shut and blue once the line is sealed, dim on every other row while the
+  // visitor asks or talks with someone.
+  const PC = BL.privateChat;
   const lockIcon = document.createElementNS(SVG, "svg");
-  lockIcon.setAttribute("viewBox", "0 0 7 8");
+  lockIcon.setAttribute("viewBox", "0 0 7 9");
   lockIcon.setAttribute("aria-hidden", "true");
-  const lockPath = document.createElementNS(SVG, "path");
-  lockPath.setAttribute("fill", "currentColor");
-  lockPath.setAttribute("d", "M2 0h3v1H2zM1 1h1v2H1zM5 1h1v2H5zM0 3h7v5H0z");
-  lockIcon.append(lockPath);
+  for (const d of [PC.SHACKLE.open, "M0 4h7v5H0z"]) {
+    const path = document.createElementNS(SVG, "path");
+    path.setAttribute("fill", "currentColor");
+    path.setAttribute("d", d);
+    lockIcon.append(path);
+  }
 
   const rows = new Map(), groups = new Map(), order = [], door = { x: 0, y: 0, z: 0 };
   let serial = 0, pass = 0, showing = false, stale = true, doors = null, shownZone = "", shownRadius = -1;
@@ -101,7 +107,7 @@
     note.className = "players-note"; note.textContent = ", last known location"; note.hidden = true;
     distance.append(note);
     li.append(dots, name, marks, thump, look, distance, volume);
-    return { li, label, toggle, volume, slider, value, host, voice, priv, hand, handShown: "", privName: null, thump, pulse: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
+    return { li, label, toggle, volume, slider, value, host, voice, priv, privShackle: priv.firstChild.firstChild, privLock: "", privSerial: -1, hand, handShown: "", privName: null, thump, pulse: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
       aim: "", voiceLook: "", voiceLogin: "", voiceSelf: false, blocked: false, hostOn: false, metres: -1, lastKnown: false, far: false };
   };
   const selfRow = makeRow();
@@ -141,16 +147,32 @@
       if (!rec) continue;
       const look = rec.voice ? rec.muted ? "muted" : BL.voice.speaking(rec.id) ? "speaking" : "on" : "";
       paintMark(row, look || "off", rec.login, false, rec.id === s.hostId, rec.hand ? BL.reactionPolicy.HANDS[rec.handTone] : "");
-      const name = BL.privateChat && BL.privateChat.available() ? rec.display : "";
-      if (row.privName !== name) {
-        row.privName = name; row.priv.hidden = !name;
-        const words = `Ask ${name} for a private conversation`;
-        row.priv.title = words; row.priv.setAttribute("aria-label", words);
-      }
+      paintLock(row, PC.available() ? rec.display : "");
       const level = V.volumeOf(row.id), words = `${Math.round(level * 100)}%`;
       if (row.slider.value !== String(level * 100)) row.slider.value = String(level * 100);
       if (row.value.textContent !== words) row.value.textContent = words;
       row.slider.setAttribute("aria-valuetext", words);
+    }
+  };
+  // A row's lock, offered where the room relays private conversations (an empty name hides it), painted again only when
+  // the conversation's state or the player's name moves.
+  const paintLock = (row, name) => {
+    if (row.privName === name && row.privSerial === PC.serial) return;
+    row.privName = name; row.privSerial = PC.serial; row.priv.hidden = !name;
+    if (!name) return;
+    const state = PC.lock(row.id), words = PC.lockWords(row.id, name);
+    if (row.privLock !== state) {
+      row.privLock = state; row.priv.dataset.lock = state;
+      row.privShackle.setAttribute("d", state === "sealed" ? PC.SHACKLE.shut : PC.SHACKLE.open);
+    }
+    row.priv.title = words; row.priv.setAttribute("aria-label", words);
+  };
+  const paintLocks = () => {
+    if (!showing || stale) return;
+    const on = PC.available();
+    for (const row of rows.values()) {
+      const rec = net.remotes.get(row.id);
+      if (rec) paintLock(row, on ? rec.display : "");
     }
   };
   const paintMark = (row, look, login, self, host, hand = "") => {
@@ -432,6 +454,7 @@
   net.subscribe(render);
   net.subscribeRoster(render);
   net.subscribeMoves(measure);
+  PC.subscribe(paintLocks);
   BL.voice.subscribe(paintMarks);
   BL.voice.subscribe(paintHearing);
   // The scene the visitor is in names its doors (`fn(from, step, out, nearX, nearZ)`, true with `out` written), or null.
