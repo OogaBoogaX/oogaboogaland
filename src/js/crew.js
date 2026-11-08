@@ -1418,7 +1418,7 @@
         meleePoints: meleeExtremes(cave.parts.club.geometry),
         clubSlingProfile: clubSlingProfile(cave.parts.club.geometry),
         clubTorsoBounds: BL.scene.boundsOf(cave.parts.torso.geometry),
-        work: { phase: "", site: 0, plannedSite: -1, targetReady: false, aimReady: false, aimSample: i, index: 0, place: -1, blocked: false, blockedTime: 0, gait: 0, timer: i * 0.137, emptyTime: 0, rest: 0, reloadSlot: false, direct: false, position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: 0 } },
+        work: { phase: "", site: 0, plannedSite: -1, targetReady: false, aimReady: false, aimSample: i, index: 0, place: -1, blocked: false, blockedTime: 0, gait: 0, timer: i * 0.137, emptyTime: 0, rest: 0, reloadSlot: false, reservedAt: Infinity, direct: false, position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: 0 } },
         slot: null,
         pileApproach: false,
         index: i,
@@ -2136,18 +2136,25 @@
         cave.slot = fanSlots[eaters.length > 1 ? Math.round(i * (count - 1) / (eaters.length - 1)) : Math.floor(count / 2)];
       });
     };
+    // Whether a passive NPC is only passing through (on a work trip or a walk), not standing anywhere.
+    const passing = (other) => other !== player && other.nonInteractive && (other.walk || other.work.phase === "outbound" || other.work.phase === "return");
     const slotAvailable = (cave, slot) => {
       const floor = groundAt(slot.x, slot.z, 0, 0, cave);
       if (ctx.npcLandingAllowed && !ctx.npcLandingAllowed(slot.x, floor, slot.z, cave.bodyHeight)) return false;
+      // A returning worker's reserved slot is kept through others passing over it (passive work trips pass through each
+      // other) and against later reservations; re-checked every frame, either swung walkers between slots mid-leg.
+      const held = cave.work.reloadSlot && cave.slot === slot && cave.state === "working" && cave.work.phase === "return";
       for (let index = 0; index < crewList.length; index++) {
         const other = crewList[index];
         if (other === cave || !other.root.visible) continue;
         const p = other.root.position, feet = p.y - other.baseY, gap = Math.max(SHOULDER_GAP, cave.bodyRadius + other.bodyRadius);
-        if (feet < floor + cave.bodyHeight && feet + other.bodyHeight > floor && Math.hypot(p.x - slot.x, p.z - slot.z) < gap) return false;
+        if (feet < floor + cave.bodyHeight && feet + other.bodyHeight > floor && Math.hypot(p.x - slot.x, p.z - slot.z) < gap
+          && !(held && passing(other))) return false;
         // Reserve approaching eaters' destinations as well as their bodies; a player can still take the place first.
         if (other !== player && other.walk?.to === "slot" && Math.hypot(other.walk.tx - slot.x, other.walk.tz - slot.z) < gap) return false;
         if (other !== player && other.state === "working" && other.work.phase === "return" && other.work.reloadSlot
-          && other.slot && Math.hypot(other.slot.x - slot.x, other.slot.z - slot.z) < gap) return false;
+          && other.slot && Math.hypot(other.slot.x - slot.x, other.slot.z - slot.z) < gap
+          && !(held && (cave.work.reservedAt < other.work.reservedAt || cave.work.reservedAt === other.work.reservedAt && cave.index < other.index))) return false;
       }
       return true;
     };
@@ -4606,6 +4613,12 @@
       if (cave.nonInteractive && (travel.mode === "walk" || travel.mode === "waiting" || travel.mode === "landing")) {
         if (travel.toBed && cave.bedroll) { startSleep(cave, true); return; }
         if (!travel.toBed) {
+          // One fallen past the abyss's respawn depth takes the scene's respawn first, as every abyss arrival does: it
+          // has priority over work slots and keeps clear of other players, which settling into the slot would not.
+          if (ctx.abyssAt && ctx.abyssAt(p.x, p.z, p.y - cave.baseY, cave) && p.y - cave.baseY < ctx.abyssRespawnY) {
+            travel.mode = ""; travel.route = null; travel.bed = null; travel.plan = null;
+            return;
+          }
           const state = cave.state;
           cave.state = "away"; applyState(cave, state, true);
           return;
@@ -4972,7 +4985,7 @@
       work.targetReady = work.aimReady = false;
       work.blocked = false; work.blockedTime = 0;
       work.rest = cave.traits.maintainer ? WORK_REST_MIN + Math.random() * WORK_REST_SPREAD : 0;
-      work.reloadSlot = work.direct = cave.pileApproach = false;
+      work.reloadSlot = work.direct = cave.pileApproach = false; work.reservedAt = Infinity;
       cave.act.kind = "work";
       cave.weapon.equipped = true;
       cave.avoidance.tx = NaN;
@@ -5136,7 +5149,7 @@
           if (!work.reloadSlot || !cave.slot || !slotAvailable(cave, cave.slot)) {
             const slot = closestSlot(cave);
             if (!slot) { standPose(cave); return; }
-            cave.slot = slot; work.reloadSlot = true; cave.pileApproach = false;
+            cave.slot = slot; work.reloadSlot = true; work.reservedAt = elapsed; cave.pileApproach = false;
           }
           // A passive meadow leg keeps its reserved slot along the authored ring. The direct approach re-picks the
           // nearest slot it can sweep to past props and the pile, which swings a walker on the ring to another slot.
@@ -6365,7 +6378,7 @@
           const slot = closestSlot(cave, true) || closestSlot(cave);
           if (slot) cave.slot = slot;
           cave.work.phase = "return"; cave.work.index = -1; cave.work.direct = true;
-          cave.work.reloadSlot = !!slot; cave.pileApproach = false;
+          cave.work.reloadSlot = !!slot; cave.work.reservedAt = slot ? elapsed : Infinity; cave.pileApproach = false;
           cave.act.kind = "reload-return";
           planWorkSite(cave);
         }

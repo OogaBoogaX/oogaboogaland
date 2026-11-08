@@ -475,6 +475,8 @@
         const bottom = `${Math.max(bottomEdge, controlsBottom) + 8}px`;
         bannerStyle(el.messageStack, "--hub-equipment-bottom", bottom);
         bannerStyle(el.micNote, "--hub-equipment-bottom", bottom);
+        // Where the banner's controls end, for a scene's own strip under them (Ooga Mine's).
+        bannerStyle(document.body, "--banner-controls-bottom", bottom);
       };
       const scheduleBanner = () => {
         if (!bannerFrame) bannerFrame = window.requestAnimationFrame(fitBanner);
@@ -499,6 +501,7 @@
         for (const property of ["--hub-equipment-scale", "--hub-equipment-left", "--hub-equipment-top", "--hub-equipment-width"]) el.equipment.style.removeProperty(property);
         el.messageStack.style.removeProperty("--hub-equipment-bottom");
         el.micNote.style.removeProperty("--hub-equipment-bottom");
+        document.body.style.removeProperty("--banner-controls-bottom");
         for (const property of ["--hub-banner-button", "--hub-banner-button-top", "--hub-banner-button-right", "--hub-banner-button-gap"]) el.topbar.style.removeProperty(property);
       });
       scheduleBanner();
