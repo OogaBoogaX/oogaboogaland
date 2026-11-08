@@ -290,6 +290,19 @@
   cabinetView = window.BL.arcadeView.create({ canvas: sceneCanvas, renderer, go });
   ctx.cabinet = cabinetView;
   const sceneSections = [...document.querySelectorAll("[data-scene]")];
+  // The banner's line under its title says where the visitor is (zone-map.js `line`) in every place that carries
+  // `data-zone-line`; a game keeps its own words. A line's own markup (the Arcade's abbreviation on a phone) stands
+  // whenever it says the same thing.
+  const zoneLines = new Map(Array.from(document.querySelectorAll("[data-zone-line]"), (el) => [el, el.cloneNode(true)]));
+  let zoneLine = null, zoneLineFor = "";
+  const showZoneLine = () => {
+    const zone = window.BL.net.state.zone;
+    if (!zoneLine || zone === zoneLineFor) return;
+    zoneLineFor = zone;
+    const text = window.BL.zoneMap.line(zone), home = zoneLines.get(zoneLine);
+    if (text === home.textContent) zoneLine.replaceChildren(...home.cloneNode(true).childNodes);
+    else zoneLine.textContent = text;
+  };
   // The title cards of the games that have no phase of their own for one: shown on every arrival,
   // closed by their button, Enter, Space or Escape, and nothing else reaches the scene while one shows.
   const intros = [...document.querySelectorAll("[data-intro]")];
@@ -310,6 +323,8 @@
     ctx.place = place;
     positionDebug.removeEventListener("click", copyPositionDebug);
     for (const el of sceneSections) el.hidden = el.classList.contains("hub-presets") || el.dataset.scene !== next.id;
+    zoneLine = sceneSections.find((el) => el.dataset.scene === next.id && zoneLines.has(el)) || null;
+    zoneLineFor = "";
     for (const el of intros) el.hidden = el.dataset.intro !== next.id;
     // Arcade games share the hall's controls and start with folded social panels.
     document.body.dataset.activeScene = next.id;
@@ -652,6 +667,7 @@
     // eaten since it arrived, in whole bananas.
     if (pileFeed.at) world.level = Math.min(pileMod.MAX_BANANAS, Math.max(0, Math.floor(pileFeed.bananas - pileFeed.eatPerHour * (performance.now() - pileFeed.at) / 36e5)));
     if (!helpHeld) active.update(sceneDt, sceneTime);
+    showZoneLine();
     cabinetView.update(dt, active, !!openIntro() || !!active.cabinetMenu, !!transition);
     if (POSITION_DEBUG && active.id !== "hub" && elapsed >= positionDebugNext) {
       positionDebugNext = elapsed + 0.1;

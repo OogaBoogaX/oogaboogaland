@@ -537,7 +537,7 @@
       else if (action.startsWith("mode-") && !guide.stage) pilot.modeAction(action);
     });
     const mode = document.getElementById("sphere-mode"), subtitle = document.getElementById("sphere-subtitle");
-    if (subtitle) subtitle.textContent = `Timechain Sphere · ${room.name}`;
+    if (subtitle) subtitle.textContent = `TCS · ${room.name}`;
     // The chip under the title: the room and its size, or that this is a solo copy; checked once a second.
     let modeWait = 0;
     const showMode = () => {
