@@ -26,14 +26,14 @@
     let hoverX = -1, hoverY = -1, hoverDirty = false, hovered = null;
     let hoverIgnored = null;
     let gesture = null;
-    let pinchDist = 0, pinchX = 0, pinchY = 0;
+    let pinchDist = 0;
     let zoomGesture = 0, wheelAt = -Infinity, wheelDirection = 0;
     let longPressTimer = 0;
     const lastTap = { at: -Infinity, node: null, owner: null, x: 0, y: 0 };
     // Every body part of one actor is the same target, so a poke hop cannot break a double
     // tap: a caveman by its cave, anything else (the Agent) by one shared owner object.
     const sameTarget = (hit) => hit ? hit.node === lastTap.node || hit.owner === lastTap.owner || (!!hit.owner.cave && !!lastTap.owner && hit.owner.cave === lastTap.owner.cave) : lastTap.node === null;
-    const call = (name, a, b, c, d, e, f) => hooks[name] ? hooks[name](a, b, c, d, e, f) : undefined;
+    const call = (name, a, b, c, d) => hooks[name] ? hooks[name](a, b, c, d) : undefined;
     const add = (node, owner, { radius = 0 } = {}) => {
       targets.push({ node, owner, radius, geometry: null, bounds: null });
       weaponTargets.register(node);
@@ -227,7 +227,6 @@
         }
         pinchSpan(PINCH);
         pinchDist = PINCH.d;
-        pinchX = PINCH.x; pinchY = PINCH.y;
         zoomGesture++;
         gesture = { mode: "pinch" };
         return;
@@ -271,10 +270,7 @@
       if (gesture.mode === "pinch" && pointers.size === 2) {
         pinchSpan(PINCH);
         const d = PINCH.d || 1;
-        call("onZoom", pinchDist / d, zoomGesture, PINCH.x, PINCH.y, false, 0);
-        // Two fingers carried together move the paper; apart or together they zoom it.
-        call("onPan", PINCH.x - pinchX, PINCH.y - pinchY);
-        pinchX = PINCH.x; pinchY = PINCH.y;
+        call("onZoom", pinchDist / d, zoomGesture, PINCH.x, PINCH.y);
         pinchDist = d;
         return;
       }
@@ -359,9 +355,7 @@
       // notch. The camera damps the resulting target distance independently.
       const delta = scroll * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? canvas.clientHeight : 1);
       const p = local(e);
-      // The factor is the same with Shift held or not; the scene decides what Shift means — the hub slides the paper
-      // with the wheel and zooms it with Shift, while elsewhere a shift-wheel zooms the camera as any wheel does.
-      call("onZoom", Math.exp(Math.max(-1200, Math.min(1200, delta)) * 2.5e-3), zoomGesture, p.x, p.y, e.shiftKey, delta);
+      call("onZoom", Math.exp(Math.max(-1200, Math.min(1200, delta)) * 2.5e-3), zoomGesture, p.x, p.y);
     };
     const onContextMenu = (e) => e.preventDefault();
     let suspended = false;

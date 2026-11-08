@@ -320,7 +320,6 @@
       boardDots: $("board-dots"), boardPrev: $("board-prev"), boardNext: $("board-next"), boardHelp: $("board-help"),
       boardHead: $("board-head"), boardPause: $("board-pause"), boardResize: $("board-resize"),
       act: $("act"),
-      wpNav: $("wp-nav"), wpNavHelp: $("wp-nav-help"),
       mode: $("mode-hud"),
       modeDestination: $("destination-hud"),
       modeDestinationLabel: $("destination-hud-label"),
@@ -2177,12 +2176,6 @@
         if (!el.hint.classList.contains("show")) el.hint.hidden = true;
       }, MESSAGE_FADE_MS);
     };
-    // Reading the whitepaper's poster: the line that says how to step through it, or, on a touch screen, the one
-    // button that does.
-    const whitepaperNav = (on, text) => {
-      el.wpNav.hidden = !on;
-      if (on) el.wpNavHelp.textContent = text;
-    };
     const selectTab = (name) => sheet.selectTab(name);
     const foldPanels = () => sheet.fold();
     // Registered before actor controls: a popup or the sheet takes one Escape
@@ -2350,7 +2343,6 @@
       el.toast.hidden = true;
       el.hint.classList.remove("show");
       el.hint.hidden = true;
-      el.wpNav.hidden = true;
       tooltip.hide();
       modePointer = -1;
       setGorilla(null);
@@ -2381,7 +2373,7 @@
         Object.defineProperties(this, Object.getOwnPropertyDescriptors(next));
         return this;
       },
-      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setWeaponSkin, setDestinations, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, rockCue, whitepaperNav, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
+      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setWeaponSkin, setDestinations, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, rockCue, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
   };
   // Detached panels can be visible together. Each has a view of the same account and voice state.
   const ROOM_WORDS = { replaced: "open in another tab", full: "island full" };

@@ -18962,143 +18962,6 @@ const tessCacheChecks = async BL => {
 };
 
 // Regression: one hub variant pinned every other index built by a later scene.
-// The Goldbug in the bushes: the loop that calls him and the coins he drops, measured through hub-goldbug.js itself.
-const goldbugChecks = BL => {
-  const G = BL.hubGoldbug, S = BL.scene;
-  // Each row is the bushes entered in turn (-1 between them: out of every bush), one a second unless timed.
-  const walk = (loop, entries, at = (i) => i) => { let fired = 0; entries.forEach((index, i) => { if (loop.step(index, at(i))) fired++; }); return fired; };
-  const out = (seq) => seq.flatMap((i) => [i, -1]);
-  const cases = {
-    forward: walk(G.loop(), out([0, 1, 2, 3, 0])) === 1,
-    backward: walk(G.loop(), out([2, 1, 0, 3, 2])) === 1,
-    anyStart: walk(G.loop(), out([3, 0, 1, 2, 3])) === 1,
-    short: walk(G.loop(), out([0, 1, 2, 3])) === 0,
-    wrongOrder: walk(G.loop(), out([0, 2, 1, 3, 0])) === 0 && walk(G.loop(), out([0, 1, 3, 2, 1, 0])) === 0,
-    // A wrong bush starts a new loop from itself; a step back reverses nothing, it restarts there.
-    restartsFromWrong: walk(G.loop(), out([0, 1, 3, 0, 1, 2, 3])) === 1,
-    reversal: walk(G.loop(), out([0, 1, 0, 3, 2, 1, 0])) === 1,
-    // Standing still in a bush, or stepping out and back into it, counts once.
-    reentry: walk(G.loop(), [0, 0, 0, -1, 0, 1, 1, -1, 1, 2, -1, 3, 3, -1, 0]) === 1,
-    timeout: walk(G.loop(), out([0, 1, 2, 3, 0]), (i) => i * 2.6) === 0,
-    withinWindow: walk(G.loop(), out([0, 1, 2, 3, 0]), (i) => i * 2.45) === 1,
-    timeoutRestarts: walk(G.loop(), out([0, 1, 2, 3, 0, 1, 2, 3, 0]), (i) => i < 9 ? i * 2.6 : 12 + i) === 1
-  };
-  {
-    // Cooldown: a second loop right after the first is ignored, the same loop after `cooldown` fires.
-    const loop = G.loop(), first = walk(loop, out([0, 1, 2, 3, 0]));
-    const soon = walk(loop, out([0, 1, 2, 3, 0]), (i) => 20 + i);
-    const later = walk(loop, out([0, 1, 2, 3, 0]), (i) => 10 + G.LOOP.cooldown + i);
-    cases.cooldown = first === 1 && soon === 0 && later === 1 && loop.fired === 2;
-    const custom = G.loop({ cooldown: 5 });
-    cases.customCooldown = walk(custom, out([0, 1, 2, 3, 0])) === 1 && walk(custom, out([0, 1, 2, 3, 0]), (i) => 9 + i) === 0 && walk(custom, out([0, 1, 2, 3, 0]), (i) => 60 + i) === 1;
-  }
-  record("goldbug loop: all four bushes in cyclic order either way round, back to the start within the window, fires once; wrong order, a short loop or a stale one never fires, and the cooldown holds", Object.values(cases).every(Boolean), JSON.stringify(cases));
-
-  const parent = S.createNode(), geometry = BL.models.particleGeometry("#f4d26a", 0.05, 0.3);
-  const pool = G.coinPool({ parent, geometry, capacity: 5, life: 1.5 });
-  const spawned = [];
-  for (let i = 0; i < 8; i++) spawned.push(!!pool.spawn(0, 0.5, 0, 0.4, 1.2, -0.3, 0.012));
-  const bounds = { nodes: parent.children.length === 5, accepted: spawned.filter(Boolean).length === 5, refused: pool.refused === 3, live: pool.live === 5 };
-  let lowest = Infinity, maxLive = 0;
-  for (let f = 0; f < 120; f++) {
-    pool.update(1 / 120);
-    for (const c of pool.coins) if (c.life > 0) lowest = Math.min(lowest, c.node.position.y);
-    maxLive = Math.max(maxLive, pool.live);
-  }
-  bounds.restsOnFloor = lowest >= 0.012 - 1e-9 && pool.coins.every((c) => c.node.position.y === 0.012 && !c.vy);
-  for (let f = 0; f < 120; f++) pool.update(1 / 120);
-  bounds.reclaimed = pool.live === 0 && pool.coins.every((c) => !c.node.visible && c.life === 0) && maxLive === 5;
-  for (let round = 0; round < 50; round++) { pool.spawn(0, 0.5, 0, 0, 1, 0, 0); pool.update(0.2); }
-  bounds.steady = parent.children.length === 5 && pool.live <= 5 && pool.live > 0;
-  pool.clear();
-  bounds.cleared = pool.live === 0 && pool.coins.every((c) => !c.node.visible);
-  record("goldbug coins: a fixed pool that refuses past capacity, lands coins on their floor, returns every one after its life and never adds nodes", Object.values(bounds).every(Boolean), JSON.stringify(bounds));
-
-  // The show through create's own update, driven by positions as a walking Ooga gives them: a loop fires it, it runs to
-  // the end within the coin pool and the scene's particle pool, and leaves the scene's children as they were.
-  // feet: the height the walker's feet stand at over the bushes (3 m is a jetpack's or a jump's).
-  const run = (calm, busyAt = Infinity, feet = 0) => {
-    const root = S.createNode(), mirrorNode = S.createNode({ position: { x: 0, y: 1.5, z: 0.5 } });
-    S.addChild(root, mirrorNode);
-    const tally = { puffs: 0, pulses: 0, rustles: 0, maxCoins: 0, phases: new Set(), frames: 0, lines: [] };
-    const bushes = [[-2, 8], [2, 8], [2, 12], [-2, 12]].map(([x, z]) => ({ x, z, footprint: 0.7, node: S.createNode({ position: { x, y: 0, z } }) }));
-    let busy = false;
-    const egg = G.create({
-      root, bushes, memory: {}, groundAt: () => 0, calm: () => calm, busy: () => busy, random: () => 0.5,
-      fx: { puff: () => { tally.puffs++; }, sayAt: (x, y, z, text) => { tally.lines.push(text); } },
-      mirror: { mouth: { x: 0, z: 0, ry: 0 }, node: mirrorNode, ripples: { pulse: () => { tally.pulses++; return true; } } },
-      rustle: () => { tally.rustles++; }
-    });
-    // Built with the visit, off the graph until a show.
-    const before = root.children.length, point = { x: 0, y: 0, z: 0 }, builtDetached = egg.debug.built && !egg.debug.attached;
-    for (const i of [0, 1, 2, 3, 0]) {
-      Object.assign(point, { x: 0, z: 10 }); egg.update(1, point, feet);
-      Object.assign(point, { x: bushes[i].x, z: bushes[i].z }); egg.update(1, point, feet);
-    }
-    const fired = egg.active;
-    for (let f = 0; f < 60 * 20 && egg.active; f++) {
-      tally.frames++;
-      if (tally.frames === busyAt) busy = true;
-      egg.update(1 / 60, point, feet);
-      tally.phases.add(egg.debug.phase);
-      tally.maxCoins = Math.max(tally.maxCoins, egg.debug.coins.live);
-    }
-    const rig = egg.debug.rig, ended = !egg.active && root.children.length === before;
-    const result = { fired, ended, phases: [...tally.phases].join(","), puffs: tally.puffs, pulses: tally.pulses, rustles: tally.rustles,
-      coins: egg.debug.coins, maxCoins: tally.maxCoins, aborted: egg.debug.aborted, golden: rig && rig.golden, seconds: +(tally.frames / 60).toFixed(2), builtDetached,
-      lines: tally.lines.join("|"), unarmed: !egg.debug.armed, heard: { ...egg.debug.heard } };
-    // A kept hub's suspend ends a show and keeps the nodes, which play again; a full leave lets them go.
-    egg.debug.fire(false); egg.update(1 / 60, point, feet);
-    egg.suspend();
-    result.suspendKeeps = !egg.active && egg.debug.built && root.children.length === before && egg.debug.fire(false) && egg.debug.attached;
-    egg.dispose();
-    result.disposed = !egg.debug.built && root.children.length === before;
-    return result;
-  };
-  const full = run(false), calm = run(true), cut = run(false, 90), flown = run(false, Infinity, 3), hopped = run(false, Infinity, G.FEET_REACH - 0.05);
-  // His suit's parts (sleeves, trousers, pockets) turn gold with his voxels and back again.
-  const suit = (() => {
-    const M = BL.goldbugModels, g = M.create(), parts = [];
-    const visit = (n) => { if (n.goldTwin) parts.push(n); n.children.forEach(visit); };
-    visit(g.root);
-    M.setGolden(g, true); const gold = parts.every((n) => n.geometry === n.goldTwin);
-    M.setGolden(g, false); const back = parts.every((n) => n.geometry === n.plainGeometry);
-    return { parts: parts.length, gold, back };
-  })();
-  const show = {
-    suit: suit.parts === 5 && suit.gold && suit.back,
-    builtOnce: full.builtDetached && full.suspendKeeps && full.disposed,
-    feetOnGround: !flown.fired && hopped.fired,
-    full: full.fired && full.ended && /run/.test(full.phases) && /look/.test(full.phases) && /melt/.test(full.phases) && /puddle/.test(full.phases)
-      && full.pulses === 1 && full.rustles === 1 && full.lines === "Wait, I'm..." && full.unarmed && full.puffs > 10
-      && full.heard.womp === 1 && full.heard.squeak === 0 && full.heard.rustle === 1 && full.heard.sizzle === 1 && full.heard.clink > 0 && full.heard.clink <= full.coins.spawned && full.coins.spawned > 0 && full.maxCoins <= G.COINS.capacity && !full.golden && full.seconds < 15,
-    calm: calm.fired && calm.ended && !/melt|run|puddle/.test(calm.phases) && /walk/.test(calm.phases) && /fade/.test(calm.phases)
-      && calm.puffs === 0 && calm.pulses === 0 && calm.lines === "" && calm.coins.spawned === 0
-      && calm.heard.squeak === 1 && calm.heard.womp === 0 && calm.heard.rustle === 1 && calm.heard.sizzle === 0 && calm.heard.clink === 0 && calm.seconds < 4,
-    busyCuts: cut.fired && cut.ended && cut.aborted === 1 && cut.seconds < 1.6
-  };
-  record("goldbug show: the loop calls him, walked with feet on the ground, never flown over; he runs unarmed in his suit (which turns gold with him), rustling out and clinking coins, starts his one line at the glass to a sad womp, double-takes, ripples the glass once and melts to nothing within the pools, sizzling; Calm only walks and fades; an island event ends him at once; his nodes are built once a visit and kept through a suspend", Object.values(show).every(Boolean), JSON.stringify({ show, suit, full, calm, cut, flown: flown.fired, hopped: hopped.fired }));
-
-  // The current island's bushes round the mirror cave's mouth (c1), as the hub's seeded scatter places them (read from the
-  // built hub once rock's ca6024d was merged in): the meadow's four in front of it, two more meadow bushes further out,
-  // and cliff bushes on ledges (y above 0), plus one hidden, one inactive and one behind the mouth. pickBushes must
-  // yield exactly the four, in loop order. Re-read it from the hub when the scatter moves.
-  const mouth = { x: 11, z: -19.052558883257653, ry: -Math.PI / 6 };
-  const bush = (x, y, z, footprint, extra = {}) => ({ prop: "bush", active: true, x, z, footprint, node: { visible: true, position: { x, y, z } }, ...extra });
-  const four = [[-1.49, -16.14], [2.68, -16.21], [4.61, -11.32], [2.15, -10.27]];
-  const scatter = [
-    bush(2.68, 0, -16.21, 0.7), bush(4.61, 0, -11.32, 0.7), bush(3.79, 2, -23.53, 0.5), bush(20.7, 6.75, -15.56, 0.5),
-    bush(2.15, 0, -10.27, 0.7), bush(-1.49, 0, -16.14, 0.7), bush(2.7, 0, -6.91, 0.7), bush(-2.48, 0, -11.03, 0.7), bush(-3.16, 2, -23.63, 0.5),
-    bush(13.39, 0, -2.21, 0.7), bush(6, 0, -14, 0.7, { active: false }), bush(5, 0, -15, 0.7, { node: { visible: false, position: { x: 5, y: 0, z: -15 } } }),
-    bush(14, 0, -24, 0.7), { prop: "flower", active: true, x: 4, z: -14, footprint: 0.35, node: { visible: true, position: { x: 4, y: 0, z: -14 } } }
-  ];
-  const picked = G.pickBushes(scatter, mouth), at = picked ? picked.map((b) => [b.x, b.z]) : [];
-  const key = (p) => p.join(","), ring = four.map(key), start = picked ? ring.indexOf(key(at[0])) : -1;
-  const forward = at.every((p, i) => key(p) === ring[(start + i) % 4]), backward = at.every((p, i) => key(p) === ring[(start - i + 8) % 4]);
-  const pick = { four: !!picked && picked.length === 4, theFour: at.every((p) => ring.includes(key(p))), loopOrder: start >= 0 && (forward || backward),
-    footprints: !!picked && picked.every((b) => b.footprint === 0.7), tooFew: G.pickBushes(scatter.slice(0, 3), mouth) === null };
-  record("goldbug bushes: the current island's scatter round the mirror cave yields exactly its four meadow bushes, in loop order, past cliff, hidden, inactive and far ones", Object.values(pick).every(Boolean), JSON.stringify({ pick, at }));
-};
 const variantCacheChecks = BL => {
   const M = BL.models, builds = new Map(), read = M.variants(i => ({ i, serial: builds.set(i, (builds.get(i) || 0) + 1).get(i) }));
   M.setScope("hub"); const hub = read();
@@ -24175,7 +24038,6 @@ const tessAnswerChecks = (BL) => {
   const H = BL.hubGuide, place = (id) => H.STOPS.findIndex((stop) => stop.id === id);
   const route = (q, last = null) => { const a = H.answer(q, last); return a === null ? "none" : a.tour ? "tour" : a.go !== null ? `trip:${H.STOPS[a.go].id}` : `say:${a.lines[0]}`; };
   const cases = [
-    ["Take me to the whitepaper", "trip:whitepaper"], ["where is the Library of Bitcoin?", "trip:whitepaper"],
     ["Take me to the games", "trip:arcade"], ["where's B.C.A.?", "trip:bca"], ["how do I get to the factory", "trip:factory"], ["hello, where is the arcade?", "trip:arcade"],
     ["What's the Mempool island?", "say:mempool"], ["tell me about ₿IFRÖST", "say:bifrost"], ["How do I donate?", "say:donate"], ["how do I move", "say:controls"],
     ["how do I sign in", "say:signIn"], ["what's new?", "say:newsIntro"], ["who are you?", "say:whoAmI"], ["hi tess", "say:hello"],
@@ -27341,10 +27203,10 @@ const distributionAudioChecks = async () => {
     runInNewContext(own, ownArt);
     const files = [...`${bundle}\n${own}`.matchAll(/\/art\/[a-z-]+-[a-f0-9]{64}\.(jpg|png|webp)/g)].map(m => m[0]);
     const expected = [...PICTURE_MODULES.filter(src => !inPage.includes(src)), ...inPage].flatMap(src => [...blocks.get(src).matchAll(/data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)/g)]);
-    record("distribution pictures: the DSB rooms', the whitepaper poster's and Cloud Hopper's data URIs leave the deferred bundles and the page's own script as exact same-origin files, both still evaluate, and the page's policy pins its rewritten script",
+    record("distribution pictures: the DSB rooms' and Cloud Hopper's data URIs leave the deferred bundles and the page's own script as exact same-origin files, both still evaluate, and the page's policy pins its rewritten script",
       pictures.length > 0 && files.length === pictures.length && files.every((url, i) => readFileSync(join(out, url)).equals(Buffer.from(expected[i][2], "base64")))
       && !/data:image\//.test(bundle) && !/data:image\//.test(own) && art.window.BL.stackchainArt["article-0"].image.startsWith("/art/")
-      && art.window.BL.whitepaperPoster.poster.startsWith("/art/") && ownArt.window.BL.cloudHopperArt.intro.startsWith("/art/") && hosted.includes(`'sha256-${hash(own)}'`)
+      && ownArt.window.BL.cloudHopperArt.intro.startsWith("/art/") && hosted.includes(`'sha256-${hash(own)}'`)
       && hosted.includes(`window.BL.terrainWorker = ${JSON.stringify(terrainWorker)};`), "staged pictures/terrain descriptor mismatch");
     // The hosted page's own script, its jumbotron snapshot and its stylesheet leave every route page as hashed files.
     const jumbo = `// ---- js/jumbotron-data.js ----\n${readFileSync(join(root, "src/js/jumbotron-data.js"), "utf8").trim()}`;
@@ -29384,7 +29246,6 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   }
   factoryChecks(BL);
   tessAnswerChecks(BL);
-  goldbugChecks(BL);
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
   await cloudHopperFailureChecks(BL);
