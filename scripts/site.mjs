@@ -7,7 +7,7 @@
 // cards/ holds the card images from `npm run cards`; a route without an `image` uses home's. Modules tagged
 // `data-defer` move out of the pages into js/<group>-<hash>.js (scripts/distribution-modules.mjs), fetched when needed.
 // `--audio-assets` and `--image-assets` write the DSB entrance recordings and the pictures in PICTURE_MODULES (the DSB
-// rooms', the whitepaper poster, Cloud Hopper's art) as same-origin files under audio/ and art/; `npm run build:site` and `npm run serve` pass both, and the portable page stays whole.
+// rooms', Cloud Hopper's art) as same-origin files under audio/ and art/; `npm run build:site` and `npm run serve` pass both, and the portable page stays whole.
 // `--page-assets`, last, moves the page's own script and stylesheet out of every route page into js/main-<hash>.js and
 // css/style-<hash>.css, with the jumbotron's snapshot, which every deploy rebakes, in its own
 // js/jumbotron-data-<hash>.js before the code (`externalizePage`), so the 23 pages share one cached copy. The favicons go out as files too (favicon-32.png,
