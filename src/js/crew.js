@@ -186,7 +186,7 @@
   const HAT_SEATS = new WeakMap();
   // Read live; a context without matchMedia (the suite's bare loaders, as for the hub's goldbug) is never Calm.
   const CALM = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
-  const RIDE_HEAD = math.quat.create(), RIDE_TURN = math.quat.create(), RIDE_MATRIX = math.mat4.create();
+  const RIDE_HEAD = math.quat.create(), RIDE_TURN = math.quat.create(), RIDE_SPIN = math.quat.create(), RIDE_MATRIX = math.mat4.create();
   const hatSeatOf = (head, dog) => {
     let seat = HAT_SEATS.get(head.geometry);
     if (seat) return seat;
@@ -246,8 +246,13 @@
   };
   // A pet's ride state for `poseHatRide`: its owner's measured seat, where on the loop it is and which way it trots,
   // and the leap's or hop's clock and ends, which the local crew and remote copies each keep.
-  const hatRide = (cave) => ({ seat: hatSeatOf(cave.parts.head, cave.parts.dog), q: math.quat.create(), angle: Math.PI, dir: 1, run: 0, step: 0,
-    t: 1, sx: 0, sy: 0, sz: 0, ex: 0, ez: 0, vy: 0 });
+  const stomachSeatOf = (cave) => {
+    const b = BL.scene.boundsOf(cave.parts.torso.geometry), dog = cave.parts.dog;
+    return { x: (b.min[0] + b.max[0]) / 2, y: (b.min[1] + b.max[1]) / 2,
+      z: b.max[2] + 0.015 - BL.scene.boundsOf(dog.geometry).min[1] * dog.scale.y };
+  };
+  const hatRide = (cave) => ({ stomach: stomachSeatOf(cave), kind: 0, yaw: 0, seat: hatSeatOf(cave.parts.head, cave.parts.dog), q: math.quat.create(), angle: Math.PI, dir: 1, run: 0, step: 0,
+    t: 1, sx: 0, sy: 0, sz: 0, ex: 0, ez: 0, vy: 0, free: false });
   // Trots the pet `dt` along its loop (not under Calm) and stands `node` there: `m` is the head's matrix in the node's
   // parent frame, so the pet keeps to the hat through every turn and tilt of the head. Writes in place; allocates nothing.
   const poseHatRide = (ride, node, m, dt) => {
@@ -261,6 +266,15 @@
     const sa = Math.sin(ride.angle), ca = Math.cos(ride.angle), r = seat.r[i] + (seat.r[j] - seat.r[i]) * t;
     const x = seat.cx + sa * r, z = seat.cz + ca * r;
     const y = seat.y[i] + (seat.y[j] - seat.y[i]) * t + (calm ? 0 : Math.abs(Math.sin(ride.step)) * HAT_RIDE.bob);
+    posePetFrame(ride, node, m, x, y, z, 0,
+      calm ? 0 : Math.atan2(ride.dir * ca, -ride.dir * sa), calm ? 0 : Math.sin(ride.step) * 0.08);
+  };
+  // A pet stands on the torso's front, facing along its length, and inherits its owner's sway.
+  const poseStomachRide = (ride, node, m) => {
+    const s = ride.stomach;
+    posePetFrame(ride, node, m, s.x, s.y, s.z, Math.PI / 2, ride.yaw, 0);
+  };
+  const posePetFrame = (ride, node, m, x, y, z, pitch, yaw, roll) => {
     node.position.x = m[0] * x + m[4] * y + m[8] * z + m[12];
     node.position.y = m[1] * x + m[5] * y + m[9] * z + m[13];
     node.position.z = m[2] * x + m[6] * y + m[10] * z + m[14];
@@ -281,10 +295,179 @@
       const s = 2 * Math.sqrt(1 + m22 - m00 - m11);
       q[3] = (m10 - m01) / s; q[0] = (m02 + m20) / s; q[1] = (m12 + m21) / s; q[2] = 0.25 * s;
     }
-    // Facing along the loop the way it trots, rolling a little with each step; sitting still it faces ahead.
-    math.quat.fromEuler(RIDE_TURN, 0, calm ? 0 : Math.atan2(ride.dir * ca, -ride.dir * sa), calm ? 0 : Math.sin(ride.step) * 0.08);
+    math.quat.fromEuler(RIDE_TURN, pitch, pitch ? 0 : yaw, roll);
+    if (pitch) {
+      math.quat.fromEuler(RIDE_SPIN, 0, yaw, 0);
+      math.quat.multiply(RIDE_TURN, RIDE_TURN, RIDE_SPIN);
+    }
     math.quat.multiply(ride.q, q, RIDE_TURN);
     node.quaternion = ride.q;
+  };
+  // Shared by the local crew and live remote rigs; each viewer simulates the pet against its own scene.
+  const createPets = (ctx, root) => {
+    const groundAt = ctx.groundAt || (() => 0), walkable = ctx.walkable || (() => true);
+    // A character's pet: the node its file builds as `parts.dog`, where it stands by its Ooga (a step behind and to one
+    // side, in the Ooga's frame), is lifted off the body into the crew's root. Each frame it trots for that spot at up
+    // to `PET_SPEED`, every step checked with the scene's `walkable` (stopped by a wall, it waits) and set on the floor
+    // under it at its own height plus a step. A jetpack owner brings it aloft through the shared DSB flight helper, or,
+    // with `petRidesHat` in the owner's look, up onto the hat (`rideHat`). Out of reach (`PET_SNAP`, a door, a
+    // relocation) it turns up at its spot. Hidden with its Ooga. Allocates nothing.
+    const PET_SPEED = 9.5, PET_SNAP = 7, PET_STEP = 0.45, PET_HEIGHT = 0.5, PET_ARRIVE = 0.15;
+    const attachPet = (cave) => {
+      const node = cave.parts.dog, p = node.position;
+      removeChild(cave.root, node);
+      addChild(root, node);
+      node.visible = false;
+      const pack = createNode({ geometry: BL.hubModels.jetpack(), rotation: { x: Math.PI / 2 }, scale: { x: 0.25, y: 0.25, z: 0.25 }, visible: false });
+      const flame = createNode({ geometry: BL.hubModels.jetFlame(), visible: false });
+      let top = 0;
+      for (let i = 1; i < node.geometry.verts.length; i += 3) top = Math.max(top, node.geometry.verts[i]);
+      pack.position.y = top; addChild(pack, flame); addChild(node, pack);
+      const pet = cave.pet = { node, pack, flame, side: p.x, back: -p.z, lift: p.y, x: 0, y: 0, z: 0, feet: 0, heading: 0, step: 0,
+        speed: 0, phase: 0, mode: 0, fall: 0, stuck: 0, warm: false, ride: cave.traits.petRidesHat ? hatRide(cave) : null };
+      pet.floorAt = (x, z, y) => groundAt(x, z, y, y, cave);
+      pet.clear = (ax, az, bx, bz, y) => (ctx.flyable || walkable)(ax, az, bx, bz, y, PET_HEIGHT, cave);
+    };
+    // A relocation may put the authored trailing spot inside a wall or off an edge.
+    // Try that spot, the owner's feet, then a bounded ring; never publish invalid ground.
+    const placePet = (cave, tx, tz, feet, heading) => {
+      const pet = cave.pet, p = cave.root.position;
+      for (let i = 0; i < 10; i++) {
+        const angle = heading + (i - 2) * Math.PI / 4;
+        const x = i === 0 ? tx : i === 1 ? p.x : p.x + Math.sin(angle) * 1.2;
+        const z = i === 0 ? tz : i === 1 ? p.z : p.z + Math.cos(angle) * 1.2;
+        const y = groundAt(x, z, feet + PET_STEP, feet + PET_STEP, cave);
+        if (!Number.isFinite(y) || y < -100 || !walkable(x, z, x, z, y, PET_HEIGHT, cave)) continue;
+        pet.x = x; pet.z = z; pet.feet = y; pet.heading = heading; pet.warm = true;
+        return true;
+      }
+      pet.warm = false;
+      return false;
+    };
+    // The hat ride's own modes, after the heel's 0 and the fall's 2 (1, flight beside the owner, is never used): 3 the
+    // leap up, 4 on the hat, 5 the hop down. The hop goes to the heel's side when the way there is clear at the hat's
+    // height (else the other side, else straight down) and hands over to the fall, which lands only on checked ground.
+    // Off a resting owner the heel's spot means nothing and the bed itself is the ground under the hop, so a scene with a
+    // bed (`ctx.petLanding`) names the checked spot beyond it to hop to, and the hop leaves the bed without asking it.
+    // True while the ride poses the pet this frame.
+    const rideHat = (cave, dt, equipped, tx, tz, resting) => {
+      const pet = cave.pet, ride = pet.ride, node = pet.node, r = cave.root, p = node.position;
+      const kind = resting ? 2 : equipped ? 1 : 0;
+      if ((pet.mode === 3 || pet.mode === 4) && !kind) {
+        const feet = p.y - cave.baseY - pet.lift, mx = 2 * r.position.x - tx, mz = 2 * r.position.z - tz;
+        const off = ride.kind === 2 && ctx.petLanding ? ctx.petLanding(p.x, p.z) : null;
+        const side = off ? 0 : pet.clear(r.position.x, r.position.z, tx, tz, feet) ? 1 : pet.clear(r.position.x, r.position.z, mx, mz, feet) ? -1 : 0;
+        ride.sx = p.x; ride.sy = p.y; ride.sz = p.z; ride.t = 0; ride.vy = HAT_RIDE.hopUp; ride.free = !!off;
+        ride.ex = off ? off.x : side > 0 ? tx : side < 0 ? mx : p.x; ride.ez = off ? off.z : side > 0 ? tz : side < 0 ? mz : p.z;
+        node.quaternion = null; node.cameraHidden = false;
+        node.rotation.x = node.rotation.z = 0; node.rotation.y = Math.atan2(ride.ex - p.x, ride.ez - p.z);
+        pet.mode = 5; ride.kind = 0;
+      } else if (kind && (pet.mode !== 3 && pet.mode !== 4 || kind !== ride.kind)) {
+        ride.sx = p.x; ride.sy = p.y; ride.sz = p.z;
+        ride.t = pet.warm && node.visible && !CALM.matches ? 0 : 1;
+        ride.angle = Math.atan2(p.x - r.position.x, p.z - r.position.z) - r.rotation.y;
+        pet.mode = 3; ride.kind = kind; ride.yaw = 0;
+      }
+      if (pet.mode === 5) {
+        if (!(dt > 0)) return true;
+        ride.t = Math.min(1, ride.t + dt / HAT_RIDE.hop);
+        const feet = p.y - cave.baseY - pet.lift, nx = ride.sx + (ride.ex - ride.sx) * ride.t, nz = ride.sz + (ride.ez - ride.sz) * ride.t;
+        if (ride.free || pet.clear(p.x, p.z, nx, nz, feet)) { p.x = nx; p.z = nz; } else { ride.sx = ride.ex = p.x; ride.sz = ride.ez = p.z; }
+        p.y += ride.vy * dt; ride.vy -= BL.pilot.WALK.gravity * dt;
+        if (ride.t < 1 && p.y - cave.baseY - pet.lift > groundAt(p.x, p.z, feet, feet, cave)) return true;
+        pet.x = p.x; pet.z = p.z; pet.feet = Math.max(p.y - cave.baseY - pet.lift, feet); pet.heading = node.rotation.y;
+        pet.fall = Math.min(0, ride.vy); pet.stuck = 0; pet.warm = true; pet.mode = 2;
+        return false;
+      }
+      if (pet.mode !== 3 && pet.mode !== 4) return false;
+      const support = resting ? cave.parts.torso : cave.parts.head;
+      BL.scene.updateLocal(r); BL.scene.updateLocal(support);
+      math.mat4.multiply(RIDE_MATRIX, r.local, support.local);
+      if (resting) poseStomachRide(ride, node, RIDE_MATRIX);
+      else poseHatRide(ride, node, RIDE_MATRIX, pet.mode === 4 ? dt : 0);
+      // The stomach companion stays visible when the owner looks down in first person.
+      node.cameraHidden = !resting && cave.parts.head.cameraHidden;
+      if (pet.mode === 3) {
+        ride.t = Math.min(1, ride.t + Math.max(0, dt) / HAT_RIDE.leap);
+        const k = ease.inOutQuad(ride.t), arc = 4 * ride.t * (1 - ride.t) * 0.6;
+        p.x = ride.sx + (p.x - ride.sx) * k; p.y = ride.sy + (p.y - ride.sy) * k + arc; p.z = ride.sz + (p.z - ride.sz) * k;
+        if (ride.t >= 1) pet.mode = 4;
+      }
+      pet.warm = true;
+      return true;
+    };
+    const updatePet = (cave, dt, resting = undefined) => {
+      const seat = cave.camp?.seat;
+      if (resting === undefined) resting = !!(seat?.kind === "hammock" && !seat.entry && !seat.exit && !seat.fall);
+      const pet = cave.pet, r = cave.root, node = pet.node;
+      node.visible = r.visible;
+      if (!r.visible) {
+        pet.warm = false; pet.mode = 0; pet.pack.visible = pet.flame.visible = false;
+        if (pet.ride) { pet.ride.kind = 0; node.quaternion = null; node.cameraHidden = false; }
+        return;
+      }
+      const h = r.rotation.y, sh = Math.sin(h), ch = Math.cos(h);
+      const tx = r.position.x - sh * pet.back + ch * pet.side, tz = r.position.z - ch * pet.back - sh * pet.side;
+      const feet = r.position.y - cave.baseY;
+      const equipped = !!cave.jet, powered = equipped && !cave.jetRecovering && cave.jetFuel > 0 && (cave.jet.thrust || cave.jet.power > 0);
+      const ownerFloor = groundAt(r.position.x, r.position.z, feet, feet, cave);
+      const airborne = equipped && feet > ownerFloor + (powered ? 0.02 : 1.2);
+      // A pet riding the hat never wears its own little jetpack.
+      pet.pack.visible = equipped && !pet.ride;
+      if (pet.ride) { if (rideHat(cave, dt, equipped, tx, tz, resting)) return; }
+      else if (airborne && (powered || cave.hopV >= -0.05)) pet.mode = 1;
+      else if (pet.mode === 1) { pet.mode = 2; pet.fall = Math.min(0, cave.hopV); }
+      if (pet.mode && !(dt > 0)) return;
+      if (pet.mode && dt > 0) {
+        if (!pet.warm) {
+          if (!pet.clear(r.position.x, r.position.z, tx, tz, feet + 0.4)) { node.visible = false; return; }
+          pet.x = tx; pet.z = tz; pet.feet = feet + 0.4; pet.warm = true;
+        }
+        if (pet.mode === 1) {
+          pet.y = pet.feet;
+          flyCompanion(pet, r.position.x + ch * (pet.side < 0 ? -1.2 : 1.2), feet + 0.4, r.position.z - sh * (pet.side < 0 ? -1.2 : 1.2), dt, pet.floorAt, pet.clear);
+          pet.feet = pet.y;
+        } else {
+          const floor = groundAt(pet.x, pet.z, pet.feet, pet.feet, cave);
+          const next = Math.max(floor, pet.feet + pet.fall * dt - 0.5 * BL.pilot.WALK.gravity * dt * dt);
+          pet.fall -= BL.pilot.WALK.gravity * dt;
+          let clear = Number.isFinite(next), y = pet.feet;
+          while (clear && y > next) { y = Math.max(next, y - 0.2); clear = pet.clear(pet.x, pet.z, pet.x, pet.z, y); }
+          if (clear && floor > -100) { pet.feet = next; pet.stuck = 0; }
+          else pet.stuck += dt;
+          if (clear && pet.feet <= floor + 0.001 && walkable(pet.x, pet.z, pet.x, pet.z, floor, PET_HEIGHT, cave)) { pet.mode = 0; pet.fall = 0; }
+          // DSB's bounded recovery: a blocked landing may relocate only to checked ground.
+          else if (pet.stuck > 1.5 && feet <= ownerFloor + PET_STEP && placePet(cave, tx, tz, feet, h)) { pet.mode = 0; pet.stuck = pet.fall = 0; }
+        }
+        pet.flame.visible = equipped && pet.mode === 1;
+        pet.flame.scale.y = 0.7 + Math.sin(pet.phase * 10) * 0.3;
+        node.position.x = pet.x; node.position.z = pet.z; node.position.y = cave.baseY + pet.feet + pet.lift;
+        node.rotation.y = pet.heading; node.rotation.z = 0;
+        return;
+      }
+      pet.flame.visible = false;
+      const dx = tx - pet.x, dz = tz - pet.z, d = Math.hypot(dx, dz);
+      let moving = false;
+      if (!pet.warm || d > PET_SNAP) {
+        if (!placePet(cave, tx, tz, feet, h)) { node.visible = false; return; }
+      } else if (d > PET_ARRIVE && dt > 0) {
+        const step = Math.min(d, PET_SPEED * dt * Math.min(1, d / 1.2 + 0.25));
+        const nx = pet.x + dx / d * step, nz = pet.z + dz / d * step;
+        const floor = groundAt(nx, nz, pet.feet + PET_STEP, pet.feet + PET_STEP, cave);
+        if (Number.isFinite(floor) && Math.abs(floor - pet.feet) <= PET_STEP
+          && walkable(pet.x, pet.z, nx, nz, pet.feet, PET_HEIGHT, cave)
+          && walkable(nx, nz, nx, nz, floor, PET_HEIGHT, cave)) {
+          pet.x = nx; pet.z = nz; pet.step += step * 9; moving = true;
+          pet.feet = floor;
+        }
+        pet.heading = Math.atan2(dx, dz);
+      } else if (d <= PET_ARRIVE) pet.heading = h;
+      node.position.x = pet.x; node.position.z = pet.z;
+      node.position.y = cave.baseY + pet.feet + pet.lift + (moving ? Math.abs(Math.sin(pet.step)) * 0.08 : 0);
+      node.rotation.y = pet.heading;
+      node.rotation.z = moving ? Math.sin(pet.step) * 0.08 : 0;
+    };
+    return { attach: attachPet, update: updatePet };
   };
   const JET_SPARKS = [models.particleGeometry("#ffb13b", 0.09, 1), models.particleGeometry("#f3efe4", 0.07, 0.6)];
   const LAND_DUST = [models.particleGeometry("#a3874f", 0.1, 0)];
@@ -1284,161 +1467,7 @@
     const groundAt = ctx.groundAt || (() => 0);
     const walkable = ctx.walkable || (() => true);
     const npcWalkable = ctx.npcWalkable || walkable;
-    // A character's pet: the node its file builds as `parts.dog`, where it stands by its Ooga (a step behind and to one
-    // side, in the Ooga's frame), is lifted off the body into the crew's root. Each frame it trots for that spot at up
-    // to `PET_SPEED`, every step checked with the scene's `walkable` (stopped by a wall, it waits) and set on the floor
-    // under it at its own height plus a step. A jetpack owner brings it aloft through the shared DSB flight helper, or,
-    // with `petRidesHat` in the owner's look, up onto the hat (`rideHat`). Out of reach (`PET_SNAP`, a door, a
-    // relocation) it turns up at its spot. Hidden with its Ooga. Allocates nothing.
-    const PET_SPEED = 9.5, PET_SNAP = 7, PET_STEP = 0.45, PET_HEIGHT = 0.5, PET_ARRIVE = 0.15;
-    const attachPet = (cave) => {
-      const node = cave.parts.dog, p = node.position;
-      removeChild(cave.root, node);
-      addChild(root, node);
-      node.visible = false;
-      const pack = createNode({ geometry: BL.hubModels.jetpack(), rotation: { x: Math.PI / 2 }, scale: { x: 0.25, y: 0.25, z: 0.25 }, visible: false });
-      const flame = createNode({ geometry: BL.hubModels.jetFlame(), visible: false });
-      let top = 0;
-      for (let i = 1; i < node.geometry.verts.length; i += 3) top = Math.max(top, node.geometry.verts[i]);
-      pack.position.y = top; addChild(pack, flame); addChild(node, pack);
-      const pet = cave.pet = { node, pack, flame, side: p.x, back: -p.z, lift: p.y, x: 0, y: 0, z: 0, feet: 0, heading: 0, step: 0,
-        speed: 0, phase: 0, mode: 0, fall: 0, stuck: 0, warm: false, ride: cave.traits.petRidesHat ? hatRide(cave) : null };
-      pet.floorAt = (x, z, y) => groundAt(x, z, y, y, cave);
-      pet.clear = (ax, az, bx, bz, y) => (ctx.flyable || walkable)(ax, az, bx, bz, y, PET_HEIGHT, cave);
-    };
-    // A relocation may put the authored trailing spot inside a wall or off an edge.
-    // Try that spot, the owner's feet, then a bounded ring; never publish invalid ground.
-    const placePet = (cave, tx, tz, feet, heading) => {
-      const pet = cave.pet, p = cave.root.position;
-      for (let i = 0; i < 10; i++) {
-        const angle = heading + (i - 2) * Math.PI / 4;
-        const x = i === 0 ? tx : i === 1 ? p.x : p.x + Math.sin(angle) * 1.2;
-        const z = i === 0 ? tz : i === 1 ? p.z : p.z + Math.cos(angle) * 1.2;
-        const y = groundAt(x, z, feet + PET_STEP, feet + PET_STEP, cave);
-        if (!Number.isFinite(y) || y < -100 || !walkable(x, z, x, z, y, PET_HEIGHT, cave)) continue;
-        pet.x = x; pet.z = z; pet.feet = y; pet.heading = heading; pet.warm = true;
-        return true;
-      }
-      pet.warm = false;
-      return false;
-    };
-    // The hat ride's own modes, after the heel's 0 and the fall's 2 (1, flight beside the owner, is never used): 3 the
-    // leap up, 4 on the hat, 5 the hop down. The hop goes to the heel's side when the way there is clear at the hat's
-    // height (else the other side, else straight down) and hands over to the fall, which lands only on checked ground.
-    // True while the ride poses the pet this frame.
-    const rideHat = (cave, dt, equipped, tx, tz) => {
-      const pet = cave.pet, ride = pet.ride, node = pet.node, r = cave.root, p = node.position;
-      if (pet.mode === 3 || pet.mode === 4) {
-        if (!equipped) {
-          const feet = p.y - cave.baseY - pet.lift, mx = 2 * r.position.x - tx, mz = 2 * r.position.z - tz;
-          const side = pet.clear(r.position.x, r.position.z, tx, tz, feet) ? 1 : pet.clear(r.position.x, r.position.z, mx, mz, feet) ? -1 : 0;
-          ride.sx = p.x; ride.sy = p.y; ride.sz = p.z; ride.t = 0; ride.vy = HAT_RIDE.hopUp;
-          ride.ex = side > 0 ? tx : side < 0 ? mx : p.x; ride.ez = side > 0 ? tz : side < 0 ? mz : p.z;
-          node.quaternion = null; node.cameraHidden = false;
-          node.rotation.x = node.rotation.z = 0; node.rotation.y = Math.atan2(ride.ex - p.x, ride.ez - p.z);
-          pet.mode = 5;
-        }
-      } else if (equipped) {
-        ride.sx = p.x; ride.sy = p.y; ride.sz = p.z;
-        ride.t = pet.warm && node.visible && !CALM.matches ? 0 : 1;
-        ride.angle = Math.atan2(p.x - r.position.x, p.z - r.position.z) - r.rotation.y;
-        pet.mode = 3;
-      }
-      if (pet.mode === 5) {
-        if (!(dt > 0)) return true;
-        ride.t = Math.min(1, ride.t + dt / HAT_RIDE.hop);
-        const feet = p.y - cave.baseY - pet.lift, nx = ride.sx + (ride.ex - ride.sx) * ride.t, nz = ride.sz + (ride.ez - ride.sz) * ride.t;
-        if (pet.clear(p.x, p.z, nx, nz, feet)) { p.x = nx; p.z = nz; } else { ride.sx = ride.ex = p.x; ride.sz = ride.ez = p.z; }
-        p.y += ride.vy * dt; ride.vy -= BL.pilot.WALK.gravity * dt;
-        if (ride.t < 1 && p.y - cave.baseY - pet.lift > groundAt(p.x, p.z, feet, feet, cave)) return true;
-        pet.x = p.x; pet.z = p.z; pet.feet = Math.max(p.y - cave.baseY - pet.lift, feet); pet.heading = node.rotation.y;
-        pet.fall = Math.min(0, ride.vy); pet.stuck = 0; pet.warm = true; pet.mode = 2;
-        return false;
-      }
-      if (pet.mode !== 3 && pet.mode !== 4) return false;
-      BL.scene.updateLocal(r); BL.scene.updateLocal(cave.parts.head);
-      math.mat4.multiply(RIDE_MATRIX, r.local, cave.parts.head.local);
-      poseHatRide(ride, node, RIDE_MATRIX, pet.mode === 4 ? dt : 0);
-      // In the owner's own first person the hat is hidden, and the pet with it.
-      node.cameraHidden = cave.parts.head.cameraHidden;
-      if (pet.mode === 3) {
-        ride.t = Math.min(1, ride.t + Math.max(0, dt) / HAT_RIDE.leap);
-        const k = ease.inOutQuad(ride.t), arc = 4 * ride.t * (1 - ride.t) * 0.6;
-        p.x = ride.sx + (p.x - ride.sx) * k; p.y = ride.sy + (p.y - ride.sy) * k + arc; p.z = ride.sz + (p.z - ride.sz) * k;
-        if (ride.t >= 1) pet.mode = 4;
-      }
-      pet.warm = true;
-      return true;
-    };
-    const updatePet = (cave, dt) => {
-      const pet = cave.pet, r = cave.root, node = pet.node;
-      node.visible = r.visible;
-      if (!r.visible) {
-        pet.warm = false; pet.mode = 0; pet.pack.visible = pet.flame.visible = false;
-        if (pet.ride) { node.quaternion = null; node.cameraHidden = false; }
-        return;
-      }
-      const h = r.rotation.y, sh = Math.sin(h), ch = Math.cos(h);
-      const tx = r.position.x - sh * pet.back + ch * pet.side, tz = r.position.z - ch * pet.back - sh * pet.side;
-      const feet = r.position.y - cave.baseY;
-      const equipped = !!cave.jet, powered = equipped && !cave.jetRecovering && cave.jetFuel > 0 && (cave.jet.thrust || cave.jet.power > 0);
-      const ownerFloor = groundAt(r.position.x, r.position.z, feet, feet, cave);
-      const airborne = equipped && feet > ownerFloor + (powered ? 0.02 : 1.2);
-      // A pet riding the hat never wears its own little jetpack.
-      pet.pack.visible = equipped && !pet.ride;
-      if (pet.ride) { if (rideHat(cave, dt, equipped, tx, tz)) return; }
-      else if (airborne && (powered || cave.hopV >= -0.05)) pet.mode = 1;
-      else if (pet.mode === 1) { pet.mode = 2; pet.fall = Math.min(0, cave.hopV); }
-      if (pet.mode && !(dt > 0)) return;
-      if (pet.mode && dt > 0) {
-        if (!pet.warm) {
-          if (!pet.clear(r.position.x, r.position.z, tx, tz, feet + 0.4)) { node.visible = false; return; }
-          pet.x = tx; pet.z = tz; pet.feet = feet + 0.4; pet.warm = true;
-        }
-        if (pet.mode === 1) {
-          pet.y = pet.feet;
-          flyCompanion(pet, r.position.x + ch * (pet.side < 0 ? -1.2 : 1.2), feet + 0.4, r.position.z - sh * (pet.side < 0 ? -1.2 : 1.2), dt, pet.floorAt, pet.clear);
-          pet.feet = pet.y;
-        } else {
-          const floor = groundAt(pet.x, pet.z, pet.feet, pet.feet, cave);
-          const next = Math.max(floor, pet.feet + pet.fall * dt - 0.5 * BL.pilot.WALK.gravity * dt * dt);
-          pet.fall -= BL.pilot.WALK.gravity * dt;
-          let clear = Number.isFinite(next), y = pet.feet;
-          while (clear && y > next) { y = Math.max(next, y - 0.2); clear = pet.clear(pet.x, pet.z, pet.x, pet.z, y); }
-          if (clear && floor > -100) { pet.feet = next; pet.stuck = 0; }
-          else pet.stuck += dt;
-          if (clear && pet.feet <= floor + 0.001 && walkable(pet.x, pet.z, pet.x, pet.z, floor, PET_HEIGHT, cave)) { pet.mode = 0; pet.fall = 0; }
-          // DSB's bounded recovery: a blocked landing may relocate only to checked ground.
-          else if (pet.stuck > 1.5 && feet <= ownerFloor + PET_STEP && placePet(cave, tx, tz, feet, h)) { pet.mode = 0; pet.stuck = pet.fall = 0; }
-        }
-        pet.flame.visible = equipped && pet.mode === 1;
-        pet.flame.scale.y = 0.7 + Math.sin(pet.phase * 10) * 0.3;
-        node.position.x = pet.x; node.position.z = pet.z; node.position.y = cave.baseY + pet.feet + pet.lift;
-        node.rotation.y = pet.heading; node.rotation.z = 0;
-        return;
-      }
-      pet.flame.visible = false;
-      const dx = tx - pet.x, dz = tz - pet.z, d = Math.hypot(dx, dz);
-      let moving = false;
-      if (!pet.warm || d > PET_SNAP) {
-        if (!placePet(cave, tx, tz, feet, h)) { node.visible = false; return; }
-      } else if (d > PET_ARRIVE && dt > 0) {
-        const step = Math.min(d, PET_SPEED * dt * Math.min(1, d / 1.2 + 0.25));
-        const nx = pet.x + dx / d * step, nz = pet.z + dz / d * step;
-        const floor = groundAt(nx, nz, pet.feet + PET_STEP, pet.feet + PET_STEP, cave);
-        if (Number.isFinite(floor) && Math.abs(floor - pet.feet) <= PET_STEP
-          && walkable(pet.x, pet.z, nx, nz, pet.feet, PET_HEIGHT, cave)
-          && walkable(nx, nz, nx, nz, floor, PET_HEIGHT, cave)) {
-          pet.x = nx; pet.z = nz; pet.step += step * 9; moving = true;
-          pet.feet = floor;
-        }
-        pet.heading = Math.atan2(dx, dz);
-      } else if (d <= PET_ARRIVE) pet.heading = h;
-      node.position.x = pet.x; node.position.z = pet.z;
-      node.position.y = cave.baseY + pet.feet + pet.lift + (moving ? Math.abs(Math.sin(pet.step)) * 0.08 : 0);
-      node.rotation.y = pet.heading;
-      node.rotation.z = moving ? Math.sin(pet.step) * 0.08 : 0;
-    };
+    const pets = createPets(ctx, root), attachPet = pets.attach, updatePet = pets.update;
     const inBananas = ctx.inBananas || (() => false);
     const npcDestinationBlocked = ctx.npcDestinationBlocked || inBananas;
     const flyable = ctx.flyable || walkable;
@@ -7383,7 +7412,7 @@
     }
     const stats = () => ({ built: builtEquipment.length, tomatoesThrown, projectiles: bulletPool.reduce((n, b) => n + (b.life > 0 ? 1 : 0), 0) });
     return {
-      passiveNpcs, separateBodies,
+      passiveNpcs, separateBodies, pets,
       showShot, setTint, spotOccupied, setCombatEnabled,
       get combatEnabled() { return combatEnabled; },
       get weaponsEnabled() { return weaponsEnabled; },
@@ -7396,5 +7425,5 @@
       }
     };
   };
-  BL.crew = { create, hatRide, poseHatRide, HAT_RIDE, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, preparePresentation, poseEquipment, poseReload, captureMeleePose, bodyHeightOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, CHUK_FOLD, BURST_STEP, MELEE_TAP_TIME, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
+  BL.crew = { create, createPets, hatRide, poseHatRide, poseStomachRide, HAT_RIDE, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, preparePresentation, poseEquipment, poseReload, captureMeleePose, bodyHeightOf, bodyRadiusOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, CHUK_FOLD, BURST_STEP, MELEE_TAP_TIME, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
 })();

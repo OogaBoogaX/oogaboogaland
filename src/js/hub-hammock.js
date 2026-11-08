@@ -1069,6 +1069,15 @@
       }
       return best;
     };
+    // The stand-up spot nearest (x, z): the ground `plan` checked clear of the bed's whole swing, where a pet leaving a body at rest lands.
+    const landing = (x, z) => {
+      let best = seats[0], distance = Infinity;
+      for (const seat of seats) {
+        const d = Math.hypot(seat.walkAt.x - x, seat.walkAt.z - z);
+        if (d < distance) { best = seat; distance = d; }
+      }
+      return best.walkAt;
+    };
     // Reach the whole cloth from either side or end, including while standing on its shell.
     const near = (x, z, reach) => {
       const dx = x - p.x, dz = z - p.z, along = dx * p.ux + dz * p.uz, across = dx * p.nx + dz * p.nz;
@@ -1142,7 +1151,7 @@
       for (const seat of seats) if (seat.sitter) return true;
       return false;
     };
-    return { plan: p, seats, ridgeNode, bedNode, ropes, update, syncRopes, kick, bump, hit, pump, blocks, crosses, tip, enter, restingAt, settle, free, near, reachable, poseRemote, stateFor, releaseEquipment, dispose, get angle() { return angle; }, get amp() { return amp; }, get spilling() { return spilling(); }, get fallSide() { return fallSide; } };
+    return { plan: p, seats, ridgeNode, bedNode, ropes, update, syncRopes, kick, bump, hit, pump, blocks, crosses, tip, enter, restingAt, settle, free, near, reachable, landing, poseRemote, stateFor, releaseEquipment, dispose, get angle() { return angle; }, get amp() { return amp; }, get spilling() { return spilling(); }, get fallSide() { return fallSide; } };
   };
 
   BL.hubHammock = { SLOTS, TIE, SPAN_MIN, SPAN_MAX, SWAY_MAX, REST_HELD, STAND, GEAR_TOP, GEAR_CLEAR, plan, create, ridgeY };
