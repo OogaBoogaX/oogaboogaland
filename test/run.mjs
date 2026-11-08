@@ -16293,7 +16293,9 @@ const factoryLadders = { name: "factory ladders", why: "rule: Oogas must climb t
   record("factory ladders: both climbs hold at rest, cross the lip continuously, descend without reversal and walk away at the bottom; Space jumps off", r.rows.every((v) => v.mounted && v.paused && v.hold < 1e-6 && v.maxStep < 0.2 && Math.abs(v.top - v.expectedTop) < 1e-6 && Math.abs(v.upperSupport - v.top) < 1e-6 && v.upperClear && v.descending && !v.rose && Math.abs(v.bottom - v.expectedBottom) < 1e-6 && v.walkedAway > 0.2 && !v.active)
     && r.jumped.attached && r.jumped.detached && r.jumped.rising && r.jumped.outward > 0.05, JSON.stringify(r));
 } };
-const factoryRailingJump = { name: "factory railing jumps", why: "regression: rifle reload checks prevented Factory jumps, and descending past railings could trap the visitor inside a lower-floor obstacle", run: async (b) => {
+// In the page: whether the Ooga named by the expression `who` has no weapon at all, in hand, on its body or on the HUD, and combat's crosshair is the single dot.
+const unarmedInPage = (who) => `(() => { const c = ${who}, w = c.weapon; return !w.primaryOwned && !w.secondaryOwned && !w.equipped && !w.primaryEquipped && !c.parts.club.visible && !c.parts.gun.visible && ["primary-hud", "weapon-hud", "magazine-hud"].every((id) => document.getElementById(id).hidden) && document.getElementById("weapon-reticle").dataset.unarmed === "true"; })()`;
+const factoryRailingJump = { name: "factory railing jumps", why: "regression: descending past railings could trap the visitor inside a lower-floor obstacle", run: async (b) => {
   const r = await b.evaluate(`(() => {
     const B = __ooga, a = B.cavemen.get("portlandhodl"), rows = [];
     if (B.crew.player !== a) B.pilot.possess(a);
@@ -16307,17 +16309,16 @@ const factoryRailingJump = { name: "factory railing jumps", why: "regression: ri
       }
       return distance;
     };
-    for (const [name, x, y, z, yaw, edge, ammo] of [
-      ["balcony", 0.8, 5, 27.5, -Math.PI / 2, 2.5, 0],
-      ["line C", -15.4, 5, -1.3, Math.PI, 0.5, 7],
-      ["gallery", -3, 15.5, -16.1, Math.PI, -14.8, 0],
-      ["watchtower", -16, 15.5, -11.9, Math.PI, -11, 7]
+    for (const [name, x, y, z, yaw, edge] of [
+      ["balcony", 0.8, 5, 27.5, -Math.PI / 2, 2.5],
+      ["line C", -15.4, 5, -1.3, Math.PI, 0.5],
+      ["gallery", -3, 15.5, -16.1, Math.PI, -14.8],
+      ["watchtower", -16, 15.5, -11.9, Math.PI, -11]
     ]) {
-      B.crew.configureWeapon(a, 2, ammo);
       B.pilot.navigate({ position: { x, y, z }, yaw, pitch: 0.3, dist: 6 });
       B.advance(0.1, 1 / 60);
       key(" ", "Space", true); B.advance(0.32, 1 / 60); key(" ", "Space", false);
-      const jumped = a.hop > 0.5 && !a.weapon.reloading;
+      const jumped = a.hop > 0.5;
       key("w", "KeyW", true);
       let crossed = false, airborne = false;
       for (let i = 0; i < 27; i++) {
@@ -16329,7 +16330,7 @@ const factoryRailingJump = { name: "factory railing jumps", why: "regression: ri
       key("w", "KeyW", false); B.advance(3, 1 / 60);
       const p = a.root.position, feet = p.y - a.baseY, floor = BL.factoryModels.supportAt(p.x, p.z, feet);
       const grounded = a.hop === 0 && Math.abs(feet - floor) < 1e-6, clear = BL.factoryModels.clearAt(p.x, p.z, feet, a.bodyRadius);
-      rows.push({ name, ammo, jumped, crossed, airborne, feet, floor, landedBelow: floor < y, grounded, clear, walked: walkAfterLanding() });
+      rows.push({ name, jumped, crossed, airborne, feet, floor, landedBelow: floor < y, grounded, clear, walked: walkAfterLanding() });
     }
     // Drop over a channel tank from above its collision layer, where airborne horizontal clearance alone
     // used to accept the position and leave every walking direction blocked after landing.
@@ -16340,42 +16341,32 @@ const factoryRailingJump = { name: "factory railing jumps", why: "regression: ri
     const tankLanding = { feet, floor, grounded: a.hop === 0 && Math.abs(feet - floor) < 1e-6, clear: F.clearAt(p.x, p.z, feet, a.bodyRadius), walked: walkAfterLanding() };
     return { scene: B.scene, rows, tankLanding };
   })()`);
-  record("factory railings: empty or partly used rifles jump off four platforms, land clear on the floor below and keep walking; falling over a channel tank also leaves movement clear", r.scene === "factory" && r.rows.length === 4 && r.rows.every(row => row.jumped && row.crossed && row.airborne && row.grounded && row.landedBelow && row.floor >= 0 && row.clear && row.walked > 0.5) && r.tankLanding.grounded && r.tankLanding.clear && r.tankLanding.walked > 0.5, JSON.stringify(r));
+  record("factory railings: Oogas jump off four platforms, land clear on the floor below and keep walking; falling over a channel tank also leaves movement clear", r.scene === "factory" && r.rows.length === 4 && r.rows.every(row => row.jumped && row.crossed && row.airborne && row.grounded && row.landedBelow && row.floor >= 0 && row.clear && row.walked > 0.5) && r.tankLanding.grounded && r.tankLanding.clear && r.tankLanding.walked > 0.5, JSON.stringify(r));
 } };
-const factoryWeapons = { name: "factory weapon selection", why: "regression: factory weapon controls remain available while damage stays off", run: async (b) => {
+const factoryWeapons = { name: "factory no weapons", why: "rule: the Lightning Factory has no weapons whatever the visitor brought, and no button or key brings one out, while both ways of looking round stay", run: async (b) => {
   const r = await b.evaluate(`(() => {
     const B = __ooga, a = B.cavemen.get("portlandhodl");
     if (B.crew.player !== a) B.pilot.possess(a);
-    B.crew.configureWeapon(a, 1); B.crew.configureWeapon(a, 2, 30);
-    // A previous scene's birdseye cursor can leave an offset on the shared HUD
-    // before this pilot has ever written (or cached) reticle coordinates.
-    const reticle = document.getElementById("weapon-reticle");
-    reticle.style.left = "83%"; reticle.style.top = "46%";
-    const key = slot => {
-      for (const type of ["keydown", "keyup"]) window.dispatchEvent(new KeyboardEvent(type, { key: String(slot), code: "Digit" + slot, bubbles: true }));
+    const press = (key, code) => {
+      for (const type of ["keydown", "keyup"]) window.dispatchEvent(new KeyboardEvent(type, { key, code, bubbles: true }));
       B.advance(0.1, 1 / 60);
     };
-    key(1); const meleeKey = a.weapon.primaryEquipped && !a.weapon.equipped;
-    key(2); const rifleKey = a.weapon.equipped && !a.weapon.primaryEquipped;
-    const primary = document.getElementById("primary-hud"), secondary = document.getElementById("weapon-hud");
-    const visible = !primary.hidden && !secondary.hidden;
-    primary.dispatchEvent(new PointerEvent("pointerdown", { button: 0, buttons: 1, pointerId: 77, bubbles: true }));
-    primary.dispatchEvent(new PointerEvent("pointerup", { button: 0, buttons: 0, pointerId: 77, bubbles: true }));
-    B.advance(0.1, 1 / 60); const meleeButton = a.weapon.primaryEquipped && !a.weapon.equipped;
-    secondary.click(); B.advance(0.1, 1 / 60);
-    return { scene: B.scene, harmless: !B.crew.combatEnabled, meleeKey, rifleKey, visible, meleeButton,
-      rifleButton: a.weapon.equipped && !a.weapon.primaryEquipped, centered: !reticle.style.left && !reticle.style.top };
+    for (const [key, code] of [["1", "Digit1"], ["2", "Digit2"], ["g", "KeyG"], ["v", "KeyV"]]) press(key, code);
+    return { scene: B.scene, unarmed: ${unarmedInPage("a")} };
   })()`);
-  record("factory weapons: 1 and 2 and both HUD buttons select melee and rifle weapons without enabling damage", r.scene === "factory" && r.harmless && r.meleeKey && r.rifleKey && r.visible && r.meleeButton && r.rifleButton, JSON.stringify(r));
-  record("factory weapons: the crosshair clears inherited birdseye coordinates and returns to the screen centre", r.centered, JSON.stringify(r));
+  record("factory weapons: the hall leaves the Ooga with no weapon in hand, on its body or as a button, and 1, 2, G and V bring none out", r.scene === "factory" && r.unarmed, JSON.stringify(r));
   const views = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, a = P.player, reticle = document.getElementById("weapon-reticle"), rows = [];
+    const B = __ooga, P = B.pilot, reticle = document.getElementById("weapon-reticle");
     const key = () => {
       for (const type of ["keydown", "keyup"]) window.dispatchEvent(new KeyboardEvent(type, { key: "x", code: "KeyX", bubbles: true }));
       B.advance(0.1, 1 / 60);
     };
     if (!P.aiming) P.modeAction("mode-toggle");
+    // A previous scene's birdseye cursor can leave an offset on the shared HUD
+    // before this pilot has ever written (or cached) reticle coordinates.
+    reticle.style.left = "83%"; reticle.style.top = "46%";
     key(); const carryKey = !P.aiming && reticle.hidden;
+    const centered = !reticle.style.left && !reticle.style.top;
     key(); const combatKey = P.aiming && !reticle.hidden;
     const mode = document.getElementById("mode-hud");
     const press = () => {
@@ -16386,24 +16377,18 @@ const factoryWeapons = { name: "factory weapon selection", why: "regression: fac
     };
     press(); const carryButton = !P.aiming && reticle.hidden;
     press(); const combatButton = P.aiming && !reticle.hidden;
-    for (const slot of [1, 2]) {
-      P.weaponMode(slot); const ammo = a.weapon.ammo;
-      P.hooks.onZoom(1.2, {}); B.advance(1.5, 1 / 60);
-      const overhead = P.mode === "birds-eye" && !reticle.hidden;
-      P.hooks.onZoom(0.001, {}); B.advance(2, 1 / 60);
-      const shoulder = P.mode === "shoulder" && !reticle.hidden && !reticle.style.left && !reticle.style.top;
-      P.hooks.onZoom(0.8, {}); B.advance(1, 1 / 60);
-      const first = P.mode === "first-person" && !reticle.style.left && !reticle.style.top;
-      P.hooks.onZoom(1.2, {}); B.advance(1, 1 / 60);
-      rows.push({ slot, overhead, shoulder, first, returned: P.mode === "shoulder",
-        held: a.weapon.selectedSlot === slot && a.weapon.equipped === (slot === 2) && a.weapon.primaryEquipped === (slot === 1),
-        ammo: a.weapon.ammo === ammo });
-    }
-    return { carryKey, combatKey, carryButton, combatButton, rows };
+    P.hooks.onZoom(1.2, {}); B.advance(1.5, 1 / 60);
+    const overhead = P.mode === "birds-eye" && !reticle.hidden;
+    P.hooks.onZoom(0.001, {}); B.advance(2, 1 / 60);
+    const shoulder = P.mode === "shoulder" && !reticle.hidden && !reticle.style.left && !reticle.style.top;
+    P.hooks.onZoom(0.8, {}); B.advance(1, 1 / 60);
+    const first = P.mode === "first-person" && !reticle.style.left && !reticle.style.top;
+    P.hooks.onZoom(1.2, {}); B.advance(1, 1 / 60);
+    return { carryKey, centered, combatKey, carryButton, combatButton, overhead, shoulder, first, returned: P.mode === "shoulder" };
   })()`);
-  record("factory views: X and the mode button share mainland cursor-look/drag-look behavior; zoom crosses birdseye, shoulder and first person without changing the held weapon or ammo, and close views center the crosshair",
-    views.carryKey && views.combatKey && views.carryButton && views.combatButton && views.rows.length === 2
-    && views.rows.every(row => row.overhead && row.shoulder && row.first && row.returned && row.held && row.ammo), JSON.stringify(views));
+  record("factory weapons: the crosshair clears inherited birdseye coordinates and returns to the screen centre", views.centered, JSON.stringify(views));
+  record("factory views: X and the mode button share mainland cursor-look/drag-look behavior; zoom crosses birdseye, shoulder and first person with nothing in hand, and close views center the crosshair",
+    views.carryKey && views.combatKey && views.carryButton && views.combatButton && views.overhead && views.shoulder && views.first && views.returned, JSON.stringify(views));
   const hits = await b.evaluate(`(() => {
     const B = __ooga, a = B.cavemen.get("portlandhodl"), s = B.factory.scene, rows = [];
     const hum = s.tunnels.map(t => t.hum), gateHum = s.gate.hum;
@@ -16806,7 +16791,7 @@ const factoryEntrance = { name: "factory entrance", why: "regression: flying abo
     return { first, on };
   })()`);
   const first = glideIn.first, on = glideIn.on;
-  const arrived = await b.evaluate(`(async () => { const B = window.__ooga, end = performance.now() + 20000; while ((B.transitioning || B.scene !== "factory") && performance.now() < end) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } B.advance(0.3, 1 / 30); const a = B.crew.player, out = { scene: B.scene, ooga: a ? a.traits.name : null, rifle: !!a && a.weapon.equipped && a.weapon.selectedSlot === 2, ammo: a && a.weapon.ammo, spares: a && a.weapon.spareAmmo.join(","), z0: +a.root.position.z.toFixed(2) }; const key = (down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: "s", code: "KeyS", bubbles: true })); key(true); B.advance(0.08, 1 / 60); key(false); B.advance(0.5, 1 / 60); out.back = { scene: B.scene, transitioning: B.transitioning, phase: B.factory.walk.phase, z: +a.root.position.z.toFixed(2) }; return out; })()`);
+  const arrived = await b.evaluate(`(async () => { const B = window.__ooga, end = performance.now() + 20000; while ((B.transitioning || B.scene !== "factory") && performance.now() < end) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } B.advance(0.3, 1 / 30); const a = B.crew.player, out = { scene: B.scene, ooga: a ? a.traits.name : null, unarmed: !!a && ${unarmedInPage("a")}, ammo: a && a.weapon.ammo, spares: a && a.weapon.parked.spareAmmo.join(","), z0: +a.root.position.z.toFixed(2) }; const key = (down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: "s", code: "KeyS", bubbles: true })); key(true); B.advance(0.08, 1 / 60); key(false); B.advance(0.5, 1 / 60); out.back = { scene: B.scene, transitioning: B.transitioning, phase: B.factory.walk.phase, z: +a.root.position.z.toFixed(2) }; return out; })()`);
   const F = await b.evaluate(`(() => { const F = window.BL.factoryModels; return { gate: F.HALL.front - 0.6, front: F.HALL.front, arrival: F.LAYOUT.entrance.z + 1, shield: F.SHIELD_Z }; })()`);
   record("factory entrance: walking in, the Ooga walks itself through the shield, with no fade, the island's last frame dissolving off the hall's first: it comes on a step past the hall's own shield with the view behind it in the exit tunnel and walks on to where an arrival stands, a key pressed on the way carries it no further until let go, and a step back from there stays in the hall",
     !!first && first.phase === 1 && first.still >= 0.9 && first.z <= F.gate && first.z >= F.gate - 0.8 && first.camZ > F.front - 1.2
@@ -16814,7 +16799,7 @@ const factoryEntrance = { name: "factory entrance", why: "regression: flying abo
       && arrived.back.scene === "factory" && !arrived.back.transitioning && arrived.back.phase === 0 && arrived.back.z > arrived.z0 + 0.2, JSON.stringify({ first, on, back: arrived.back, z0: arrived.z0, F }));
   const outside = await b.evaluate(`(() => { const B = window.__ooga, e = window.BL.factoryModels.LAYOUT.entrance, rows = []; for (const [name, x, y] of [["beside", 10, e.y], ["below", 0, 0], ["above", 0, e.y + 12]]) { if (B.scene !== "factory" || B.transitioning) break; B.pilot.navigate({ position: { x, y, z: 29 }, yaw: Math.PI, pitch: 0.2, dist: 5 }); B.advance(1 / 60, 1 / 60); rows.push({ name, scene: B.scene, transitioning: B.transitioning }); } return rows; })()`);
   record("factory entrance: positions beside, below and above the exit doorway stay in the factory", outside.length === 3 && outside.every((r) => r.scene === "factory" && !r.transitioning), JSON.stringify(outside));
-  await b.evaluate(`(() => { const B = window.__ooga, a = B.crew.player, e = window.BL.factoryModels.LAYOUT.entrance; B.pilot.navigate({ position: { x: 0, y: e.y, z: e.z + 2.2 }, yaw: 0, pitch: 0.2, dist: 5 }); B.crew.configureWeapon(a, 1, 17); if (B.pilot.aiming) B.pilot.modeAction("mode-toggle"); B.advance(0.5, 1 / 60); })()`);
+  await b.evaluate(`(() => { const B = window.__ooga, a = B.crew.player, e = window.BL.factoryModels.LAYOUT.entrance; B.pilot.navigate({ position: { x: 0, y: e.y, z: e.z + 2.2 }, yaw: 0, pitch: 0.2, dist: 5 }); if (B.pilot.aiming) B.pilot.modeAction("mode-toggle"); B.advance(0.5, 1 / 60); })()`);
   // Out through the gate's shield the same way, yielding for transition tasks only: the island has the Ooga at the
   // mouth's rim under the hall's last frame, the view behind it in the tunnel, and walks it on out of the mouth; a key
   // pressed on the way that now means back in carries it no further until it is let go.
@@ -16829,10 +16814,10 @@ const factoryEntrance = { name: "factory entrance", why: "regression: flying abo
     return { rim, walkedOut: { after, held } };
   })()`);
   const rim = glideOut.rim, walkedOut = glideOut.walkedOut || {};
-  const back = await b.evaluate(`(async () => { const B = window.__ooga, m = window.__mouth, end = performance.now() + 20000; while ((B.transitioning || B.scene !== "hub") && performance.now() < end) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } B.advance(0.3, 1 / 30); const p = B.crew.player && B.crew.player.root.position; return { scene: B.scene, ooga: B.crew.player ? B.crew.player.traits.name : null, fromMouth: p ? +Math.hypot(p.x - m.x, p.z - m.z).toFixed(1) : null, melee: !!p && B.crew.player.weapon.primaryEquipped && !B.crew.player.weapon.equipped && B.crew.player.weapon.selectedSlot === 1, ammo: p && B.crew.player.weapon.ammo, spares: p && B.crew.player.weapon.spareAmmo.join(","), carry: !B.pilot.aiming && document.getElementById("weapon-reticle").hidden }; })()`);
+  const back = await b.evaluate(`(async () => { const B = window.__ooga, m = window.__mouth, end = performance.now() + 20000; while ((B.transitioning || B.scene !== "hub") && performance.now() < end) { B.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); } B.advance(0.3, 1 / 30); const p = B.crew.player && B.crew.player.root.position; return { scene: B.scene, ooga: B.crew.player ? B.crew.player.traits.name : null, fromMouth: p ? +Math.hypot(p.x - m.x, p.z - m.z).toFixed(1) : null, rifle: !!p && B.crew.player.weapon.equipped && !B.crew.player.weapon.primaryEquipped && B.crew.player.weapon.selectedSlot === 2, ammo: p && B.crew.player.weapon.ammo, spares: p && B.crew.player.weapon.spareAmmo.join(","), carry: !B.pilot.aiming && document.getElementById("weapon-reticle").hidden }; })()`);
   record("factory entrance: walking out, the walk takes the Ooga into the hall's shield and the island has it at the mouth's rim under the hall's last frame, the view behind it in the tunnel, walking on out of the mouth, and a key pressed on the way back toward the tunnel carries it no further until let go",
     !!rim && rim.ooga > -0.6 && rim.ooga < 1.2 && rim.view < rim.ooga - 2 && rim.view > F.shield && walkedOut.after > rim.ooga + 0.8 && Math.abs(walkedOut.held - walkedOut.after) < 0.05, JSON.stringify({ rim, walkedOut }));
-  record("factory doorway: the selected rifle, rounds and spare magazines survive entry; a switch to melee and carry inside survives the return", arrived.rifle && arrived.ammo === 23 && arrived.spares === "7,11" && back.melee && back.ammo === 17 && back.spares === "7,11" && back.carry, JSON.stringify({ arrived, back }));
+  record("factory doorway: inside the hall the visitor has no weapon or weapon button while the selected rifle, rounds and spare magazines wait parked; all of them come back at the island, with carry chosen inside", arrived.unarmed && arrived.ammo === 23 && arrived.spares === "7,11" && back.rifle && back.ammo === 23 && back.spares === "7,11" && back.carry, JSON.stringify({ arrived, back }));
   await tourGo(b, "factory");
   await b.key("Escape");
   await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
@@ -17147,7 +17132,7 @@ const arcadeHall = { name: "arcade hall", why: "regression: a jump in Ooga Arcad
   const inArena = await b.evaluate(`(() => {
     const B = __ooga, H = BL.arcadeModels.HAUNT, S = BL.arcadeModels.STAGE;
     B.pilot.navigate({ position: { x: H.arena.x - 16, y: H.y, z: H.arena.z }, yaw: Math.PI / 2, pitch: 0.05, dist: 4 }); B.advance(0.5, 1 / 60);
-    return { armed: BL.scenes.arcade.debug.arena.armed, hidden: B.arcade.pointHidden(S.x, 2.2, S.z) };
+    return { inArena: BL.scenes.arcade.debug.arena.inArena, hidden: B.arcade.pointHidden(S.x, 2.2, S.z) };
   })()`);
   const through = await b.evaluate(findPick(HALL_KINDS));
   let hovered = null, tapped = null;
@@ -17158,13 +17143,13 @@ const arcadeHall = { name: "arcade hall", why: "regression: a jump in Ooga Arcad
     tapped = await b.evaluate(`(() => { const B = __ooga; B.advance(0.5, 1 / 60); return { scene: B.scene, moving: !!B.transitioning }; })()`);
   }
   record("arcade hall: from the ghost arena a hall game under the pointer takes no tooltip and no tap through the rock, and a line said over the stage does not show",
-    inArena.armed && inArena.hidden === true && !!through && hovered === true && tapped.scene === "arcade" && !tapped.moving,
+    inArena.inArena && inArena.hidden === true && !!through && hovered === true && tapped.scene === "arcade" && !tapped.moving,
     JSON.stringify({ inArena, through, hovered, tapped }));
   // Back in the hall facing the stage: a cabinet in sight shows its tooltip, and a line over the stage shows.
   const inHall = await b.evaluate(`(() => {
     const B = __ooga, S = BL.arcadeModels.STAGE;
     B.pilot.navigate({ position: { x: 0, y: 0, z: 4 }, yaw: 0, pitch: 0.12, dist: 5 }); B.advance(0.5, 1 / 60);
-    return { armed: BL.scenes.arcade.debug.arena.armed, hidden: B.arcade.pointHidden(S.x, 2.2, S.z) };
+    return { inArena: BL.scenes.arcade.debug.arena.inArena, hidden: B.arcade.pointHidden(S.x, 2.2, S.z) };
   })()`);
   const cabinet = await b.evaluate(findPick('["cabinet"]', true));
   let shown = null;
@@ -17175,9 +17160,9 @@ const arcadeHall = { name: "arcade hall", why: "regression: a jump in Ooga Arcad
   }
   await b.evaluate(`(() => { const B = __ooga, a = B.pilot.player; B.crew.selectWeapon(0, a); B.advance(0.2, 1 / 60); })()`);
   record("arcade hall: back in the hall a cabinet in sight shows its tooltip and a line over the stage shows again",
-    !inHall.armed && inHall.hidden === false && !!cabinet && typeof shown === "string" && shown.includes("to play"), JSON.stringify({ inHall, cabinet, shown }));
+    !inHall.inArena && inHall.hidden === false && !!cabinet && typeof shown === "string" && shown.includes("to play"), JSON.stringify({ inHall, cabinet, shown }));
 } };
-const arcadeRemoteWeapons = { name: "arcade remote weapons", why: "regression: the remote unarmed pose showed visitors' clubs in the weapon-free Arcade", run: async (b) => {
+const arcadeRemoteWeapons = { name: "arcade remote weapons", why: "regression: the remote unarmed pose showed visitors' clubs and rifles in the weapon-free Arcade", run: async (b) => {
   const result = await b.evaluate(`(() => {
     const B = __ooga, N = BL.net, H = BL.arcadeModels.HAUNT, A = H.arena;
     const id = 99445, previous = N.remotes.get(id), build = BL.models.caveman, rows = [], outside = [];
@@ -17222,11 +17207,79 @@ const arcadeRemoteWeapons = { name: "arcade remote weapons", why: "regression: t
       if (previous) N.remotes.set(id, previous);
     }
   })()`);
-  record("arcade remote weapons: all remote held states hide clubs and hall rifles, preserve arena rifles, and hide them again on return and rejoin",
-    result.rows.length === 15 && result.rows.every(r => r.visible && !r.club && r.gun === (r.place === "arena" && r.held === 2)) && result.removed && result.rejoined.visible && !result.rejoined.club && !result.rejoined.gun, JSON.stringify(result));
+  record("arcade remote weapons: with no hunt running every remote held state hides clubs and rifles, in the arena too, and on return and rejoin",
+    result.rows.length === 15 && result.rows.every(r => r.visible && !r.club && !r.gun) && result.removed && result.rejoined.visible && !result.rejoined.club && !result.rejoined.gun, JSON.stringify(result));
   record("arcade remote weapons: outside the hall the primary stays visible, slung while the rifle is held",
     result.outside.length === 3 && result.outside.every(r => r.visible && r.club && r.slung === (r.held === 2) && r.gun === (r.held === 2)), JSON.stringify(result.outside));
 } };
+// HALLOWEEN: nobody has a gun until a hunt starts, and then only its hunters, with the ghost blaster and its pack.
+const arcadeHuntGear = { name: "arcade hunt gear", why: "rule: no gun in the arena or its lobby, only a running hunt's hunters get the ghost blaster and pack, never a primary, and the small gun button shows for them", run: async (b) => {
+  const read = `(() => {
+    const B = __ooga, a = B.pilot.player, w = a.weapon, S = BL.scenes.arcade.debug.arena, gun = document.getElementById("weapon-hud");
+    return { armed: S.armed, inArena: S.inArena, primary: w.primaryOwned, owned: w.secondaryOwned, equipped: w.equipped, club: a.parts.club.visible, gun: a.parts.gun.visible, gear: !!a.ghostGear,
+      bananas: a.parts.gunBananas.some((n) => n.visible), skin: gun.dataset.skin || "", shown: !gun.hidden && getComputedStyle(gun).display !== "none", width: gun.offsetWidth,
+      readout: getComputedStyle(gun.querySelector(".weapon-readout")).display, infinity: gun.querySelector(".weapon-compact").textContent.trim(), infinityShown: getComputedStyle(gun.querySelector(".weapon-compact")).visibility === "visible", primaryHud: !document.getElementById("primary-hud").hidden, magazineHud: !document.getElementById("magazine-hud").hidden,
+      combat: B.pilot.aiming, crosshair: !document.getElementById("weapon-reticle").hidden, dot: document.getElementById("weapon-reticle").dataset.unarmed === "true" };
+  })()`;
+  const noGun = (r) => r.inArena && !r.armed && !r.owned && !r.equipped && !r.gun && !r.gear && !r.primary && !r.club && !r.shown && r.dot;
+  await b.evaluate(`(() => { const B = __ooga, H = BL.arcadeModels.HAUNT, A = H.arena; B.pilot.navigate({ position: { x: A.x - 7, y: H.y, z: A.z + 3 }, yaw: -Math.PI / 2, pitch: 0.15, dist: 5 }); B.advance(0.6, 1 / 60); })()`);
+  const before = await b.evaluate(read);
+  await b.evaluate(`BL.scenes.arcade.debug.halloween.start()`);
+  await untilPage(b, '!document.getElementById("ghost-lobby").hidden', 45000);
+  const lobby = await b.evaluate(read);
+  record("arcade hunt gear: the arena and its lobby hand out no gun, pack or primary", noGun(before) && noGun(lobby), JSON.stringify({ before, lobby }));
+  await b.evaluate(`[...document.querySelectorAll("#ghost-lobby button")].find((e) => /ready/i.test(e.textContent)).click()`);
+  // Whichever view it readied in, the start of the hunt puts it in combat.
+  await b.evaluate(`if (__ooga.pilot.aiming) __ooga.pilot.modeAction("mode-toggle")`);
+  await untilPage(b, 'BL.scenes.arcade.debug.arena.armed', 30000);
+  const hunting = await b.evaluate(`(() => { __ooga.advance(0.4, 1 / 60); return ${read}; })()`);
+  record("arcade hunt gear: a hunter of a started hunt gets only the blaster and pack: no primary, no magazine, and the small gun button in its skin with its infinity",
+    hunting.armed && hunting.owned && hunting.equipped && hunting.gun && hunting.gear && !hunting.bananas && !hunting.primary && !hunting.club && !hunting.primaryHud && !hunting.magazineHud
+      && hunting.skin === "ghost" && hunting.shown && hunting.width === 78 && hunting.readout === "none" && hunting.infinity === "∞" && hunting.infinityShown, JSON.stringify(hunting));
+  record("arcade hunt gear: the hunt's start puts a hunter in combat with the full crosshair", hunting.combat && hunting.crosshair && !hunting.dot, JSON.stringify(hunting));
+  const remote = await b.evaluate(`(() => {
+    const B = __ooga, N = BL.net, H = BL.arcadeModels.HAUNT, A = H.arena, sim = BL.scenes.arcade.debug.halloween.sim, build = BL.models.caveman, caves = [];
+    const peer = (id, x) => ({ id, login: "peer" + id, display: "Peer", body: "w-s-bitcoin", zone: "ghost-arena", x: A.x + x, y: H.y, z: A.z + 4, yaw: 0, weapon: 2 | 4, jet: 0 });
+    const slot = sim.players.find((p) => !p.on);
+    const was = { on: slot.on, id: slot.id, inGame: slot.inGame };
+    try {
+      BL.models.caveman = (...args) => { const c = build(...args); caves.push(c); return c; };
+      N.remotes.set(99446, peer(99446, 4)); N.remotes.set(99447, peer(99447, -4));
+      Object.assign(slot, { on: true, id: 99446, inGame: 1 });
+      B.advance(0.5, 1 / 60);
+      const [hunter, spectator] = caves;
+      return { hunter: { gear: !!hunter.ghostGear, gun: hunter.parts.gun.visible, club: hunter.parts.club.visible }, spectator: { gear: !!spectator.ghostGear, gun: spectator.parts.gun.visible, club: spectator.parts.club.visible } };
+    } finally {
+      BL.models.caveman = build;
+      Object.assign(slot, was);
+      N.remotes.delete(99446); N.remotes.delete(99447); B.advance(0.1, 1 / 60);
+    }
+  })()`);
+  record("arcade hunt gear: on another player only a hunter shows the gun and pack, never a spectator", remote.hunter.gear && remote.hunter.gun && !remote.hunter.club && !remote.spectator.gear && !remote.spectator.gun && !remote.spectator.club, JSON.stringify(remote));
+  await b.evaluate(`(() => { document.getElementById("ghost-exit").click(); __ooga.advance(0.5, 1 / 60); })()`);
+  const left = await b.evaluate(read);
+  record("arcade hunt gear: leaving the hunt takes the gun, pack and its skin away", !left.armed && !left.owned && !left.equipped && !left.gun && !left.gear && !left.skin, JSON.stringify(left));
+} };
+// HALLOWEEN: a real click on the ghost opens the hunt's lobby from either view.
+const arcadeHeraldClick = (view) => ({ name: "arcade herald click " + view, why: "rule: a player starts the ghost hunt by clicking the ghost, in carry or in combat view", run: async (b) => {
+  const size = await b.evaluate("({ w: innerWidth, h: innerHeight })"), lobby = '!document.getElementById("ghost-lobby").hidden';
+  await b.evaluate(`(() => { const B = __ooga, H = BL.arcadeModels.HAUNT, A = H.arena; B.pilot.navigate({ position: { x: A.x - 7, y: H.y, z: A.z }, yaw: -Math.PI / 2, pitch: 0.1, dist: 5 }); if (B.pilot.aiming !== ${view === "combat"}) B.pilot.modeAction("mode-toggle"); B.advance(0.6, 1 / 60); })()`);
+  // The middle of the pixels the input picks the ghost at. It drifts, so it is found again before each click.
+  const find = `(() => { const B = __ooga; let n = 0, sx = 0, sy = 0; for (let y = 8; y < innerHeight; y += 6) for (let x = 8; x < innerWidth; x += 6) { const hit = B.input.pick(x, y); if (hit && hit.owner.kind === "halloween") { n++; sx += x; sy += y; } } return n ? { x: sx / n, y: sy / n } : null; })()`;
+  let at = null;
+  for (let i = 0; i < 3 && !(await b.evaluate(lobby)); i++) {
+    at = await b.evaluate(find);
+    // In combat the click lands on the dot at the screen's centre, so the view is turned to the ghost first.
+    for (let turn = 0; view === "combat" && at && turn < 10 && Math.hypot(at.x - size.w / 2, at.y - size.h / 2) > 8; turn++) {
+      await b.evaluate(`__ooga.pilot.hooks.onOrbit(${(at.x - size.w / 2) * 0.7}, ${(at.y - size.h / 2) * 0.7}); __ooga.advance(0.2, 1 / 60)`);
+      at = await b.evaluate(find);
+    }
+    if (!at) break;
+    await b.click(view === "combat" ? size.w / 2 : at.x, view === "combat" ? size.h / 2 : at.y);
+    await untilPage(b, lobby, 6000).catch(() => {});
+  }
+  record("arcade herald click: clicking the ghost in " + view + " view opens the hunt's lobby", !!at && await b.evaluate(lobby), JSON.stringify(at));
+} });
 // #428: a hallway page receives the running hunt without becoming a hunter or borrowing arena ammunition.
 // A hunter gone down only follows the others: through the room's own snapshots from a host, with two other hunters in
 // the arena, the view rides behind one, Next moves on, one going down hands it to the other, and with nobody left it
@@ -17420,7 +17473,7 @@ const arcadeCarry = { name: "arcade carry", why: "regression: Arcade transitions
     const m = B.mouths?.find(m => m.id === BL.caves.slots.find(s => s.scene === "arcade").id), p = a.root.position;
     return { who: a.traits.name, view: t.view, combat: w.aiming, focused: t.focused, locked: document.pointerLockElement === document.getElementById("scene"), held: w.equipped ? 2 : w.primaryEquipped ? 1 : 0,
       primary: w.primaryOwned, secondary: w.secondaryOwned, gun: a.parts.gun.visible, club: a.parts.club.visible,
-      ammo: w.ammo, spare: w.spareAmmo.slice(), unlimited: w.unlimited, dist: o.dist,
+      ammo: w.ammo, spare: (w.parked || w).spareAmmo.slice(), unlimited: w.unlimited, dist: o.dist,
       along: m ? (p.x - m.x) * Math.sin(m.ry) + (p.z - m.z) * Math.cos(m.ry) : null,
       across: m ? (p.x - m.x) * Math.cos(m.ry) - (p.z - m.z) * Math.sin(m.ry) : null,
       feet: p.y - a.baseY, floor: m?.floorY };
@@ -17452,7 +17505,7 @@ const arcadeCarry = { name: "arcade carry", why: "regression: Arcade transitions
       B.pilot.navigate({ position: { x: H.arena.x - 16, y: H.y, z: H.arena.z }, yaw: Math.PI / 2, pitch: 0.1, dist: 4 });
       B.advance(0.5, 1 / 60); B.pilot.weaponAction("magazine-swap"); B.advance(2, 1 / 60);
       const w = B.pilot.player.weapon;
-      return { armed: BL.scenes.arcade.debug.arena.armed, equipped: w.equipped, unlimited: w.unlimited, ammo: w.ammo, spare: w.spareAmmo.slice() };
+      return { inArena: BL.scenes.arcade.debug.arena.inArena, armed: BL.scenes.arcade.debug.arena.armed, equipped: w.equipped, unlimited: w.unlimited };
     })()`);
     let released = null;
     if (mode === "released") {
@@ -17463,12 +17516,12 @@ const arcadeCarry = { name: "arcade carry", why: "regression: Arcade transitions
     const outside = await b.evaluate(read);
     rows.push({ mode, before, hall, blocked, mouse, arena, outside, released });
   }
-  record("arcade carry: entry captures combat mouse-look, an explicit release stays free, hall weapons cannot act, and the outside loadout returns inside the mainland overhang",
+  record("arcade carry: entry captures combat mouse-look, an explicit release stays free, hall weapons cannot act, the arena hands out none before a hunt, and the outside loadout returns inside the mainland overhang",
     rows.every(r => r.hall.who === r.before.who && r.hall.combat === r.before.combat && r.hall.focused === r.before.combat && r.hall.locked === r.before.combat
       && !r.hall.held && !r.hall.gun && !r.hall.club && !r.hall.primary && !r.hall.secondary
       && !r.blocked.held && r.blocked.ammo === 11 && r.blocked.spare[0] === 4 && !r.blocked.unlimited
       && (r.mode === "carry" ? r.mouse < 0.001 : r.mouse > 0.001) && (!r.released || !r.released.focused && !r.released.locked)
-      && (r.mode !== "focused" || r.arena.armed && r.arena.equipped && r.arena.unlimited && r.arena.ammo === 4 && r.arena.spare[0] === 11)
+      && (r.mode !== "focused" || r.arena.inArena && !r.arena.armed && !r.arena.equipped && !r.arena.unlimited)
       && r.outside.who === r.before.who && r.outside.held === r.before.held && r.outside.combat === r.before.combat
       && r.outside.focused === r.before.focused && r.outside.ammo === 11 && r.outside.spare[0] === 4
       && r.outside.primary === r.before.primary && r.outside.secondary === r.before.secondary && !r.outside.unlimited
@@ -21844,6 +21897,7 @@ scene("mine", { steps: [mineResume, trip("mine"), mineControls, mineOwn] });
 const hangarWalking = { name: "hangar walking", why: "rule: W A S D walk the visitor's Ooga their way on screen in the Lightning Jet Hangar, as they do in the Factory", run: async (b) => {
   const ooga = await walkKeys(b, "portlandhodl", -1.5, 2, [0, 2.2], 0.5);
   record("hangar walking: W A S D walk the visitor's Ooga away, left, back and right on screen on the runway from two camera angles", allWalk(ooga), JSON.stringify(ooga));
+  record("hangar walking: the hangar leaves the Ooga with no weapon in hand, on its body or as a button", await b.evaluate(unarmedInPage("__ooga.pilot.player")));
 } };
 const hangarDoor = { name: "hangar door", why: "rule: the hangar's door walks the same Ooga through, out onto the Factory's landing and back in, on to where an arrival stands each side", run: async (b) => {
   // From the hangar's landing, walked out through its door.
@@ -22159,6 +22213,8 @@ scene("arcade", { query: "character=portlandhodl", exclusive: true, steps: [arca
 scene("arcade", { query: "character=portlandhodl", steps: [arcadeSpectatorAmmo] });
 scene("arcade", { label: "ghost spectate follows", query: "character=portlandhodl", steps: [arcadeSpectateFollow] });
 scene("arcade", { query: "character=portlandhodl", steps: [arcadeRemoteWeapons] });
+scene("arcade", { query: "character=portlandhodl", steps: [arcadeHuntGear] });
+for (const view of ["carry", "combat"]) scene("arcade", { label: "herald click " + view, query: "character=portlandhodl", steps: [arcadeHeraldClick(view)] });
 scene("skee", { steps: [carnivalPlay("skee", 0.5), trip("skee")] });
 scene("hoops", { steps: [carnivalPlay("hoops", 0.2), trip("hoops")] });
 scene("shy", { steps: [carnivalPlay("shy", 0.7), trip("shy")] });
@@ -23078,6 +23134,7 @@ for (const ready of [false, true]) scene("dsb", { label: "entrance audio " + rea
     }
   } }] });
 scene("dsb", { label: "dsb feeds and audio", url: hubPage(src, "scene=dsb"), steps: [{ name: "dsb feeds and audio", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
+  record("dsb direct route: a visitor who lands straight in DSB Land has no weapon in hand, on their body or as a button", await b.evaluate(unarmedInPage("__ooga.dsb.avatar")));
   const feed = await b.evaluate(`(async () => {
     const fetchOriginal = window.fetch, originalChain = BL.chain; let sockets = 0, stopped = 0, listener;
     const socketOriginal = window.WebSocket, now = Date.now();
@@ -23162,7 +23219,8 @@ scene("dsb", { label: "dsb shared player", url: hubPage(dist), steps: [{ name: "
   await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
   if (!entered) throw Error("DSB entry failed");
   await b.evaluate(`__ooga.dsb.entrance?.skip(); __ooga.advance(0.1)`);
-  record("dsb shared player: canonical selected actor is possessed with the rounds it left the island with (#421: no door refills them)", await b.evaluate(`__ooga.dsb.phase === "land" && __ooga.pilot.player === __ooga.dsb.avatar && __ooga.pilot.player.traits.name === "rules-without-rulers" && __ooga.pilot.player.weapon.ammo === __hubAmmo.ammo && __ooga.pilot.player.weapon.spareAmmo.join() === __hubAmmo.spare && __ooga.pilot.player.headOpen === BL.models.caveman(BL.contributors.traitsFor("rules-without-rulers")).headOpen`));
+  record("dsb shared player: canonical selected actor is possessed with the rounds it left the island with (#421: no door refills them)", await b.evaluate(`__ooga.dsb.phase === "land" && __ooga.pilot.player === __ooga.dsb.avatar && __ooga.pilot.player.traits.name === "rules-without-rulers" && __ooga.pilot.player.weapon.ammo === __hubAmmo.ammo && __ooga.pilot.player.weapon.parked.spareAmmo.join() === __hubAmmo.spare && __ooga.pilot.player.headOpen === BL.models.caveman(BL.contributors.traitsFor("rules-without-rulers")).headOpen`));
+  record("dsb shared player: DSB Land leaves the Ooga with no weapon in hand, on its body or as a button", await b.evaluate(unarmedInPage("__ooga.pilot.player")));
   const move = await b.evaluate(`(() => { const c = __ooga.pilot.player, z = c.root.position.z; window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); __ooga.advance(0.3); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); return Math.abs(c.root.position.z - z); })()`);
   record("dsb shared player: shared walking moves the actor", move > 0.2, String(move));
   await b.evaluate(`document.getElementById("destination-hud").click(); __ooga.advance(0.4)`);
@@ -23181,10 +23239,11 @@ scene("dsb", { label: "dsb shared player", url: hubPage(dist), steps: [{ name: "
   record("dsb shared player: TV opens with weapons suspended", await b.evaluate('__ooga.dsb.tv.isOpen && !__ooga.dsb.avatar.weapon.triggerHeld'));
   await b.evaluate('document.getElementById("dsb-tv-close").click(); __ooga.advance(0.1)');
   await dsbExit(b);
+  record("dsb shared player: ₿IFRÖST's chamber leaves the Ooga with no weapon in hand, on its body or as a button", await b.evaluate(`__ooga.scene === "bifrost" && ${unarmedInPage("__ooga.pilot.player")}`));
   await b.evaluate(`document.querySelector('[data-scene="bifrost"] [data-action="leave"]').click()`);
   await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
-  const back = await b.evaluate(`({ name: __ooga.pilot.player?.traits.name, ammo: __ooga.pilot.player?.weapon.ammo, spare: __ooga.pilot.player?.weapon.spareAmmo.join(), original: __hubAmmo })`);
-  record("dsb shared player: return restores identity and leaves hub ammunition untouched", back.name === "rules-without-rulers" && back.ammo === back.original.ammo && back.spare === back.original.spare, JSON.stringify(back));
+  const back = await b.evaluate(`({ name: __ooga.pilot.player?.traits.name, rifle: !!__ooga.pilot.player?.weapon.equipped, ammo: __ooga.pilot.player?.weapon.ammo, spare: __ooga.pilot.player?.weapon.spareAmmo.join(), original: __hubAmmo })`);
+  record("dsb shared player: return restores identity, the rifle in hand and hub ammunition untouched", back.name === "rules-without-rulers" && back.rifle && back.ammo === back.original.ammo && back.spare === back.original.spare, JSON.stringify(back));
 } }] });
 
 scene("dsb", { label: "dsb character continuity", url: hubPage(dist), steps: [{ name: "dsb character continuity", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
@@ -30953,11 +31012,11 @@ const dsbStudioCheckpoint = {name:"dsb studio checkpoint",why:"playthrough: Stud
     await b.evaluate(`(()=>{const B=__ooga,s=B.dsb.interiors.active.room.stageSeats[${cycle%3}];B.pilot.navigate({position:{x:s.walkAt.x,y:s.floor,z:s.walkAt.z},yaw:0,pitch:.12,dist:3});})()`);await step();await tap("#dsb-context");
     const seated=await b.evaluate('({seat:!!__ooga.dsb.avatar.camp.seat,leg:__ooga.dsb.avatar.parts.legL.rotation.x,p:{...__ooga.dsb.avatar.root.position},close:__ooga.pilot.closeWanted,yaw:__ooga.dsb.avatar.root.rotation.y})');
     await b.send("Input.dispatchKeyEvent",{type:"keyDown",key:"w",code:"KeyW"});await step();await b.send("Input.dispatchKeyEvent",{type:"keyUp",key:"w",code:"KeyW"});
-    // DSB hides the shared gun HUD; use its supported venue keys while keeping real touch for the tomato.
+    // DSB Land has no weapons: 2 and V bring nothing out, and real touch still throws the tomato.
     await b.evaluate('document.activeElement.blur()');await b.key("2");await step();await b.key("v");await step();await tap(".dsb-studio-tools button");
     await b.evaluate('if(!__ooga.dsb.avatar.weapon.aiming)__ooga.pilot.modeAction("mode-toggle");__ooga.crew.look(2.7,.1,1)');await step();
     const fired=await b.evaluate('({seat:!!__ooga.dsb.avatar.camp.seat,p:{...__ooga.dsb.avatar.root.position},yaw:__ooga.dsb.avatar.root.rotation.y,shots:__ooga.dsb.avatar.weapon.shotsFired,throws:__ooga.crew.stats().tomatoesThrown,aim:__ooga.dsb.avatar.weapon.aiming,gunHud:!!document.getElementById("weapon-hud").getClientRects().length,damage:__ooga.crew.combatEnabled,audio:__ooga.dsb.interiors.audio.stats})');
-    record("Studio: seat "+cycle+" locks walking with seated pose and allows gun/throw controls",seated.seat&&seated.close&&seated.leg<-1.5&&Math.cos(seated.yaw)>.9&&fired.seat&&Math.hypot(fired.p.x-seated.p.x,fired.p.z-seated.p.z)<.001&&fired.shots>cycle&&!fired.gunHud&&!fired.damage&&fired.throws===throws0+cycle+1&&fired.aim&&fired.audio.sources===3&&!fired.audio.cues,JSON.stringify({seated,fired}));
+    record("Studio: seat "+cycle+" locks walking with seated pose and allows the tomato throw with no gun",seated.seat&&seated.close&&seated.leg<-1.5&&Math.cos(seated.yaw)>.9&&fired.seat&&Math.hypot(fired.p.x-seated.p.x,fired.p.z-seated.p.z)<.001&&!fired.shots&&!fired.gunHud&&!fired.damage&&fired.throws===throws0+cycle+1&&fired.aim&&fired.audio.sources===3&&!fired.audio.cues,JSON.stringify({seated,fired}));
     const standControls=await b.evaluate('Array.from(document.querySelectorAll("button")).filter(e=>/stand up/i.test(e.textContent)&&e.getClientRects().length&&getComputedStyle(e).visibility!=="hidden").length');
     record("Studio: seated control "+cycle+" shows one touch stand action and no desktop action or lighting button",standControls===(coarse?1:0)&&!await b.evaluate('Array.from(document.querySelectorAll("button")).some(e=>/stage lights|studio lights/i.test(e.textContent))'));
     await tap("#act");

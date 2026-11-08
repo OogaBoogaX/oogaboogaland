@@ -433,7 +433,7 @@
         for (const button of el.equipmentRow.children) {
           if (button.hidden || getComputedStyle(button).display === "none") continue;
           compactWidth += button === el.weapon ? 78 : button.offsetWidth;
-          if (button === el.weapon) expanded = button.dataset.equipped === "true";
+          if (button === el.weapon) expanded = button.dataset.equipped === "true" && button.dataset.skin !== "ghost";
           count++;
         }
         compactWidth += Math.max(0, count - 1) * (parseFloat(row.columnGap) || 0);
@@ -489,7 +489,7 @@
         bannerEquipment.observe(presets, { attributes: true, subtree: true, childList: true, characterData: true, attributeFilter: ["hidden", "disabled"] });
       }
       for (const button of el.equipmentRow.children) bannerEquipment.observe(button, {
-        attributes: true, attributeFilter: button === el.weapon ? ["hidden", "data-equipped"] : ["hidden"]
+        attributes: true, attributeFilter: button === el.weapon ? ["hidden", "data-equipped", "data-skin"] : ["hidden"]
       });
       on(window, "resize", scheduleBanner);
       listeners.push(() => {
@@ -1033,7 +1033,7 @@
     let weaponShown = false, weaponEquipped = false, weaponAmmo = -1, weaponDisplayAmmo = -1, weaponReloading = false, weaponCanReload = false, weaponUnlimited = false;
     let magazineCount = 0, magazineHigh = -1, magazineLow = -1, magazineCanSwap = false;
     let magazineHighReloading = false, magazineLowReloading = false;
-    let weaponTotal = -1, weaponLabelAmmo = -1, weaponLabelEquipped = false;
+    let weaponTotal = -1, weaponLabelAmmo = -1, weaponLabelEquipped = false, weaponName = "AK-47";
     const refreshWeaponSummary = () => {
       const total = weaponUnlimited ? Infinity : Math.max(0, weaponAmmo) + (magazineCount ? Math.max(0, magazineHigh) : 0) + (magazineCount > 1 ? Math.max(0, magazineLow) : 0);
       const shown = !gorillaEntry && weaponShown && weaponEquipped && magazineCount > 0;
@@ -1048,8 +1048,18 @@
       const labelAmmo = weaponEquipped ? weaponDisplayAmmo : total;
       if (labelAmmo !== weaponLabelAmmo || weaponEquipped !== weaponLabelEquipped) {
         weaponLabelAmmo = labelAmmo; weaponLabelEquipped = weaponEquipped;
-        el.weaponToggle.setAttribute("aria-label", weaponUnlimited ? `${weaponEquipped ? "Fire" : "Equip"} AK-47; unlimited ammunition` : weaponEquipped ? `Fire AK-47; ammo ${labelAmmo} of 30 rounds` : `Equip AK-47; ${total} rounds total`);
+        el.weaponToggle.setAttribute("aria-label", weaponUnlimited ? `${weaponEquipped ? "Fire" : "Equip"} ${weaponName}; unlimited ammunition` : weaponEquipped ? `Fire ${weaponName}; ammo ${labelAmmo} of 30 rounds` : `Equip ${weaponName}; ${total} rounds total`);
       }
+    };
+    // HALLOWEEN: the ghost hunt's gun shows its own icon and name on the one weapon button ("" is the AK's).
+    const setWeaponSkin = (skin) => {
+      const name = skin === "ghost" ? "ghost blaster" : "AK-47";
+      if (name === weaponName) return;
+      weaponName = name;
+      el.weapon.dataset.skin = skin;
+      el.weaponToggle.title = weaponEquipped ? `Fire ${name}` : `Equip ${name} (2)`;
+      weaponLabelAmmo = -1;
+      refreshWeaponSummary();
     };
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const showWeaponAmmo = (ammo) => {
@@ -1105,7 +1115,7 @@
         el.weapon.dataset.equipped = String(equipped);
         el.weaponToggle.setAttribute("aria-pressed", String(equipped));
         el.weaponToggle.setAttribute("aria-expanded", String(equipped));
-        el.weaponToggle.title = equipped ? "Fire AK-47" : "Equip AK-47 (2)";
+        el.weaponToggle.title = equipped ? `Fire ${weaponName}` : `Equip ${weaponName} (2)`;
         el.weaponReadout.setAttribute("aria-hidden", String(!equipped));
       }
       if (modeChanged || reloading !== weaponReloading || canReload !== weaponCanReload) {
@@ -2371,7 +2381,7 @@
         Object.defineProperties(this, Object.getOwnPropertyDescriptors(next));
         return this;
       },
-      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setDestinations, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, rockCue, whitepaperNav, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
+      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setWeaponSkin, setDestinations, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, rockCue, whitepaperNav, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
   };
   // Detached panels can be visible together. Each has a view of the same account and voice state.
   const ROOM_WORDS = { replaced: "open in another tab", full: "island full" };

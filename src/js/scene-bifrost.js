@@ -716,8 +716,11 @@
       avatar = people.cavemen.get(playerName);
       Object.assign(avatar.root.position, { x: 0, y: avatar.baseY, z: HALL.r - 1.6 });
       avatar.root.rotation.y = Math.PI;
-      // In as it left the last scene: view, combat and weapon (pilot.js `arrive`).
+      // In as it left the last scene: view and combat (pilot.js `arrive`). The chamber and its tunnel have no weapons, so
+      // what it came in with waits parked until it leaves.
       pilot.arrive(avatar);
+      people.parkWeapons(avatar);
+      pilot.refreshCombat();
       scene.gate.phase.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
       for (const w of scene.windows) w.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
       // Back from a world, out of its window: standing in front of it, facing the mechanism. In from the island: through
@@ -728,7 +731,7 @@
     }
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     // Other signed-in players in the chamber, as the Oogas they drive.
-    remotes = BL.remotePlayers.create({ root, crew: people, fx });
+    remotes = BL.remotePlayers.create({ root, crew: people, fx, unarmed: true });
     // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     footsteps = BL.footsteps.create();
     lightUp(scene);
@@ -1050,6 +1053,7 @@
     remotes = null;
     footsteps.dispose();
     footsteps = null;
+    if (avatar) people.unparkWeapons(avatar);
     if (people) people.dispose();
     fx.dispose();
     pilot.dispose();

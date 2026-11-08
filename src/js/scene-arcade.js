@@ -89,9 +89,8 @@
   // the iron fence across the hallway's mouth (how far up), the totems and their lit parts, whether the visitor's Ooga carries its rifle
   // (in the arena), the voice zone it reports and the one it is turning to, which half of the hallway it is on, how far
   // along the hallway it stands and how loud the hunt's music and sound play for it (#422).
-  let ghostEntry = null, ghosts = null, ghostChannel = null, tess = null, gameMode = false, fence = null, fenceK = 0, totemsAt = [], totemLife = [], lasers = [], armed = false, rifleWas = false;
+  let ghostEntry = null, ghosts = null, ghostChannel = null, tess = null, gameMode = false, fence = null, fenceK = 0, totemsAt = [], totemLife = [], lasers = [], armed = false, inArena = false, rifleWas = false;
   let zoneNow = "arcade.hall", zoneHeld = 0, exitButton = null, hallwayFar = false, hallwayAlong = 0, huntHearing = 0;
-  let outsideWeapon = null;
   let stations = null, blocks = null, carnival = null, staff = null, orders = 0, ticketBoard = null, prizeUi = null;
   let crowd = null, spin = null;
   let unwatchHockey = null, hockeyPlayers = null;
@@ -782,8 +781,6 @@
     // pick the club or the rifle, G swaps, V fires. Outside a hunt they meet nothing but the herald.
     if (!e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
       if (BL.controls.matches(e, "view") && pilot.modeAction("mode-toggle")) return true;
-      if (BL.controls.matches(e, "weapon") && pilot.weaponMode(Number(e.key))) return true;
-      if (BL.controls.matches(e, "swapWeapon")) { pilot.weaponAction("weapon-toggle"); return true; }
       if (BL.controls.matches(e, "attack")) { pilot.weaponAction("weapon-fire"); return true; }
     }
     if (BL.controls.matches(e, "resetView") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) return pilot.resetCamera();
@@ -993,7 +990,8 @@
     // The Ooga list stays up through a hunt, as it does in the hall.
     document.body.classList.toggle("game-mode", on);
   };
-  // The outside loadout is parked for this visit. The arena lends a rifle; the hall never has usable weapons.
+  // The outside loadout is parked for this visit, and nobody has a weapon in the hall or the arena. Only a hunter of a
+  // hunt that has started gets one: the ghost blaster and its pack (ghost-gear.js), never a primary.
   const putWeaponsAway = () => {
     const w = avatar.weapon;
     people.selectWeapon(0, avatar);
@@ -1007,11 +1005,11 @@
     if (on) {
       rifleWas = w.unlimited; w.unlimited = true;
       w.secondaryOwned = true;
-      // The rifle in hand, not just carried, so a shot can wake the herald (a carried rifle never fires).
+      BL.ghostGear.wear(avatar);
+      hud.setWeaponSkin("ghost");
       pilot.weaponMode(2);
-      hud.hint(COARSE ? "Rifle out · tap the ghost or shoot it to start the hunt" : "Rifle out · X to aim, then shoot the ghost (or click it) to start the hunt", 6000);
     }
-    else { w.unlimited = rifleWas; putWeaponsAway(); }
+    else { w.unlimited = rifleWas; BL.ghostGear.remove(avatar); hud.setWeaponSkin(""); putWeaponsAway(); }
     pilot.refreshCombat();
   };
   // Not in the hunt (it filled, or they never readied): walked out to the hallway before the fence rises, facing in.
@@ -1032,10 +1030,11 @@
     gameMode: setGameMode,
     lobbyOpen: (on, restore) => pilot.setMenuOpen(on, restore),
     spectate: (on) => { if (on) sendToHallway(); },
+    // The aiming view inside the press that readied up; the gun itself comes with the hunt (`arm`).
     readyGun: () => {
-      if (!armed) return;
+      if (!inArena) return;
       if (!pilot.aiming) pilot.modeAction("mode-toggle");
-      pilot.weaponMode(2);
+      if (armed) pilot.weaponMode(2);
     },
     holdView: (on) => { pilot.setActive(!on); pilot.controls.reset(); input.reset(); pilot.setExternalControl(on); },
     heldAxes: () => pilot.controls.read(),
@@ -1185,11 +1184,19 @@
     BL.math.mat4.transformPoint(inViewMiddle, m, center[0], center[1], center[2]);
     return sightClear(c.x, c.y, c.z, inViewMiddle[0], inViewMiddle[1], inViewMiddle[2]);
   };
+  // HALLOWEEN: a click at a screen point on the herald wakes it or readies up, from inside the arena and before any gun.
+  const clickHerald = (x, y) => {
+    if (armed || !inArena) return false;
+    const hit = input.pick(x, y);
+    if (!hit || hit.owner.kind !== "halloween" || !hit.owner.tap || !inView(hit)) return false;
+    hit.owner.tap();
+    return true;
+  };
   // What the overlay draws at a place (an NPC's line, a player's name, the hunt's marks) shows only where it can be seen:
   // from inside the arena, nothing from outside the hallway and the arena, without a test, and otherwise along an open
   // line from the view (fx's `overlayVisible`, and `characterOccluded` for a line over a character's head).
   const pointHidden = (x, y, z) => {
-    if (armed && !inHaunt(x, z)) return true;
+    if (inArena && !inHaunt(x, z)) return true;
     const c = camera.position;
     return !sightClear(c.x, c.y, c.z, x, y, z);
   };
@@ -1850,6 +1857,14 @@
       carry: true,
       renderer, canvas: ctx.canvas, camera, hud, presets: views, landing: "entrance", pitch: PITCH, dist: DIST,
       follow: FOLLOW, clampTarget, clampCamera, ceilingAt: () => HALL.h - 1, coarse: COARSE, mayPossess, combatOnly: () => gameMode && armed,
+      // HALLOWEEN: in combat view a click on the herald under the dot wakes it, as a click does in carry; so does the
+      // click that captures a free cursor on it.
+      primaryAction: (down) => {
+        if (!down) return false;
+        const r = document.getElementById("weapon-reticle").getBoundingClientRect();
+        return clickHerald(r.left + r.width / 2, r.top + r.height / 2);
+      },
+      captureClick: clickHerald,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: (x, z) => supportAt(x, z, feetOf()) }
     });
     const tipFor = (hit) => {
@@ -1880,7 +1895,7 @@
         if (!hit || !inView(hit)) return;
         const o = hit.owner;
         // The herald and the hunt answer a tap only from inside the arena.
-        if (o.kind === "halloween") { if (armed && o.tap) o.tap(); return; }
+        if (o.kind === "halloween") { if (inArena && o.tap) o.tap(); return; }
         if (o.kind === "repair") return hud.toast("Clanker is repairing Ooga Rally · out of order");
         if (o.kind === "cabinet") return play(o.game);
         if (o.kind === "retro") return open(AM.RETRO[o.retro].id, 0);
@@ -1961,10 +1976,8 @@
         people.selectWeapon(0, avatar);
         avatar.weapon.aiming = false;
       }
-      const w = avatar.weapon;
-      outsideWeapon = { primaryOwned: w.primaryOwned, secondaryOwned: w.secondaryOwned, selectedSlot: w.selectedSlot,
-        held: w.equipped ? 2 : w.primaryEquipped ? 1 : 0, unlimited: w.unlimited, ammo: w.ammo, spareAmmo: w.spareAmmo.slice() };
-      putWeaponsAway();
+      people.parkWeapons(avatar);
+      pilot.refreshCombat();
     } else if (from >= 0) pilot.goPreset(GAMES[from].id);
     lastPlayer = playerName;
     unsubscribeAccount = BL.net.subscribe(accountChanged);
@@ -1972,10 +1985,13 @@
     // Other signed-in players keep their real Ooga or gorilla avatars; no simulated roster crowd is created.
     remotes = BL.remotePlayers.create({ root, crew: people, fx,
       visible: (rec) => HALL_ZONES.has(rec.zone) && !(ghosts && ghosts.down(rec.id)),
-      posed: (cave, feet) => {
-        // The shared unarmed pose keeps a club outside; Arcade parks it for every visitor.
+      posed: (cave, feet, rec) => {
+        // The shared unarmed pose keeps a club outside; Arcade parks it for every visitor. A gun, and the ghost gear with
+        // it, only on a hunter of a hunt under way, never a spectator.
         if (cave.parts.club) cave.parts.club.visible = false;
-        if (cave.parts.gun && !inArenaRing(cave.root.position.x, cave.root.position.z, feet)) cave.parts.gun.visible = false;
+        const hunter = !!ghosts && gameMode && ghosts.isHunter(rec.id) && inArenaRing(cave.root.position.x, cave.root.position.z, feet);
+        if (cave.parts.gun && !hunter) cave.parts.gun.visible = false;
+        if (hunter) { BL.ghostGear.wear(cave); BL.ghostGear.pose(cave); } else BL.ghostGear.remove(cave); // HALLOWEEN
         // Sliding down a handrail, sat on the cane as the crew sits a seated Ooga.
         if (railSitter(cave)) {
           cave.parts.legR.rotation.x = cave.parts.legL.rotation.x = -Math.PI / 2;
@@ -1985,7 +2001,7 @@
     });
     // HALLOWEEN: the ghost hunt, played in the arena: its herald over the middle until a click or a shot from inside
     // wakes it and its code loads, kept in step with the others in the arena through the room (`ghostChannel`).
-    zoneNow = "arcade.hall"; zoneHeld = 0; armed = false; hallwayFar = false; hallwayAlong = 0; huntHearing = 0;
+    zoneNow = "arcade.hall"; zoneHeld = 0; armed = inArena = false; hallwayFar = false; hallwayAlong = 0; huntHearing = 0;
     exitButton = document.getElementById("ghost-exit");
     exitButton.hidden = true;
     ghostChannel = BL.ghostEntry.channel();
@@ -2039,7 +2055,7 @@
       arcade: { screens, crowd, walkers, bots, spin, play, open, stations, carnival, nearStation, supportAt, slide: SLIDE, railSitter, walkable: walkableFor, flyable: flyableFor, sightClear, pointHidden, blocks, audio, staff, life, get frame() { return shownFrame; } },
       // HALLOWEEN: the arena's hunt (its herald's until it has loaded).
       get halloween() { return ghosts ? ghosts.debug : ghostEntry && ghostEntry.debug; },
-      get arena() { return { armed, zone: zoneNow, fence: fenceK, gameMode, along: hallwayAlong, hearing: huntHearing, blendTo: BL.net.state.blendTo, blendT: BL.net.state.blendT }; }
+      get arena() { return { armed, inArena, zone: zoneNow, fence: fenceK, gameMode, along: hallwayAlong, hearing: huntHearing, blendTo: BL.net.state.blendTo, blendT: BL.net.state.blendT }; }
     };
   };
 
@@ -2084,7 +2100,10 @@
     // not), held a quarter second before it changes.
     const feet = drivenHere ? drivenHere.root.position.y - drivenHere.baseY : 0;
     const inRing = !!drivenHere && drivenHere === avatar && inArenaRing(drivenHere.root.position.x, drivenHere.root.position.z, feet);
-    if (inRing !== armed && avatar) arm(inRing);
+    if (inRing !== inArena) { inArena = inRing; if (inRing && !(ghosts && ghosts.hunting)) hud.hint(COARSE ? "Tap the ghost to start the hunt" : "Click the ghost to start the hunt", 6000); }
+    const hunting = inRing && gameMode && !!ghosts && ghosts.inHunt;
+    if (hunting !== armed && avatar) arm(hunting);
+    if (armed) BL.ghostGear.pose(avatar, pilot.mode !== "first-person");
     // Arena entry/exit changes the held weapon after the pilot's pose; publish the final loadout.
     if (drivenHere) {
       const p = drivenHere.root.position;
@@ -2215,18 +2234,10 @@
     ghostChannel.dispose();
     setGameMode(false);
     if (armed) arm(false);
-    if (avatar && outsideWeapon) {
-      const w = avatar.weapon;
-      w.primaryOwned = outsideWeapon.primaryOwned; w.secondaryOwned = outsideWeapon.secondaryOwned;
-      w.unlimited = outsideWeapon.unlimited;
-      // Arena swaps and knockout drops belong to the borrowed rifle, not the parked mainland magazines.
-      // Combat cleanup above returns the drops before these original counts are restored.
-      w.ammo = outsideWeapon.ammo;
-      w.spareAmmo.splice(0, w.spareAmmo.length, ...outsideWeapon.spareAmmo);
-      people.selectWeapon(outsideWeapon.held, avatar);
-      w.selectedSlot = outsideWeapon.selectedSlot;
-      outsideWeapon = null;
-    }
+    hud.setWeaponSkin("");
+    // Arena swaps and knockout drops belong to the borrowed rifle, not the parked mainland magazines.
+    // Combat cleanup above returns the drops before these original counts are restored.
+    if (avatar) people.unparkWeapons(avatar);
     document.body.classList.remove("game-mode");
     exitButton.hidden = true;
     ghosts = ghostEntry = ghostChannel = tess = fence = exitButton = null;
@@ -2284,6 +2295,7 @@
     if (avatar) set.add(avatar.headOpen).add(avatar.headClosed);
     if (remotes) remotes.liveGeometry(set);
     if (hockeyPlayers) hockeyPlayers.liveGeometry(set);
+    BL.ghostGear.liveGeometry(set); // HALLOWEEN
     if (ghosts) { ghosts.liveGeometry(set); tess.liveGeometry(set); }
     else if (ghostEntry) ghostEntry.liveGeometry(set);
   };
@@ -2305,7 +2317,7 @@
   });
   arcadeScene.prepare = () => { const loading = BL.deferred.load("arcade"); return loading ? loading.then(() => null) : null; };
   BL.scenes = BL.scenes || {};
-  arcadeScene.controlsHelp = touch => { const help = pilot.controlsHelp(touch, ["weapon", "attack", "swapWeapon"]); help.title = "Ooga Arcade · " + help.title; return help; };
+  arcadeScene.controlsHelp = touch => { const help = pilot.controlsHelp(touch, ["attack"]); help.title = "Ooga Arcade · " + help.title; return help; };
   arcadeScene.controlsHelpHold = on => { pilot.controls.reset(); pilot.setMenuOpen(on, false); };
   BL.scenes.arcade = arcadeScene;
 })();
