@@ -4301,7 +4301,7 @@ const orbitFlow = async (b) => {
 // perf floor; `perf` runs the perf floor alone; `unit` (or nothing) runs only the global tier.
 // Two lanes limit concurrent WebGL boot pressure; four produced long startups
 // and a GPU context loss during the full suite.
-const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
+const SCENES = ["hub", "lab", "race", "drop", "block", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
 for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
@@ -5055,7 +5055,7 @@ const cloudHopperFailureChecks = async engine => {
     document: { hidden: false, addEventListener(type, listener) { if (type === "visibilitychange") visibilityListeners.add(listener); },
       removeEventListener(type, listener) { if (type === "visibilitychange") visibilityListeners.delete(listener); } },
     localStorage: { getItem: key => key === guideKey ? "1" : null } };
-  for (const name of ["math", "scene", "cloud-hopper-course", "cloud-hopper-levels"])
+  for (const name of ["math", "scene", "grapple", "cloud-hopper-course", "cloud-hopper-levels"])
     runInNewContext(await readFile(join(root, "src/js/" + name + ".js"), "utf8"), context);
   const BL = context.window.BL, S = BL.scene, rootNode = S.createNode(), camera = S.createCamera();
   // Repeat selected draws deliberately: every start must still produce new
@@ -7169,7 +7169,7 @@ const npcPaths = (backend) => [`NPC paths ${backend}`, async (b) => {
 
 // The games' rules and saves in Node, under the same localStorage the page uses: the mine's seeded sim,
 // every game's stored best, the tickets a machine spends and the jackpot wheel's odds.
-const GAME_SOURCES = ["math", "contributor-identities", "donations", "rocket-parts", "mine-rigs", "mine-sim", "highscore-rules", "game", "cloud-hopper-levels"];
+const GAME_SOURCES = ["math", "grapple", "contributor-identities", "donations", "rocket-parts", "mine-rigs", "mine-sim", "block-sim", "highscore-rules", "game", "cloud-hopper-levels"];
 const gameRulesChecks = async () => {
   const store = new Map();
   const context = { window: {}, URLSearchParams, location: { search: "" }, localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) } };
@@ -7190,6 +7190,721 @@ const gameRulesChecks = async () => {
       && reloaded.cloudHopperBest("other", 1) === 60000 && reloaded.cloudHopperBest(claimant, 1) === 0
       && reloaded.cloudHopperPlayer({ id: 185141343, login: "Bitclank-Bill" }) === key);
     store.clear();
+  }
+  {
+    // Block Frenzy's rules, played through the sim's own calls: a pickup, a drop that can't be undone by standing still,
+    // scoring only while your own block is home, a splat that drops the carrier's block, which then stays put until its
+    // own side carries it back, a quiz trap that holds and protects until answered, a net that slows and grounds, a
+    // crate pushed by walking into it, and three captures deciding the round. Nothing here repeats a formula.
+    const S = BL.blockSim, A = S.ARENA, still = { x: 0, z: 0, sprint: 0, jump: 0 };
+    const sim = S.create({ team: "blue", seed: 7, prep: 0 });
+    for (const a of sim.actors) if (a.id) a.bot = false;
+    // Still air, so nothing drifts.
+    Object.assign(sim.weather, { left: 1e9 });
+    const me = sim.actors[0], put = (a, x, z) => { a.x = x; a.z = z; S.tick(sim, S.CONFIG.STEP, still); };
+    const theirs = A.stands.red, mine = A.stands.blue;
+    put(me, theirs.x, theirs.z);
+    const picked = me.carrying === "red" && sim.flags.red.state === "carried";
+    const dropped = S.drop(sim, 0) && sim.flags.red.state === "dropped";
+    put(me, me.x, me.z);
+    const held = sim.flags.red.state === "dropped";
+    put(me, theirs.x + 4, theirs.z);
+    put(me, sim.flags.red.x, sim.flags.red.z);
+    const regrab = me.carrying === "red";
+    sim.flags.blue.state = "carried"; sim.flags.blue.carrier = 2;
+    put(me, mine.x, mine.z);
+    const noScoreAway = sim.score.blue === 0 && me.carrying === "red";
+    sim.flags.blue.state = "home"; sim.flags.blue.carrier = null;
+    put(me, mine.x + 0.2, mine.z);
+    const scored = sim.score.blue === 1 && sim.flags.red.state === "home" && !me.carrying;
+    put(me, theirs.x, theirs.z);
+    put(me, theirs.x + 4, theirs.z + 3);
+    const rival = sim.actors[2];
+    rival.x = me.x; rival.z = me.z - 3; rival.cooldown = 0;
+    S.fire(sim, 2, 0);
+    for (let t = 0; t < 1 && me.splat <= 0; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    const splatted = me.splat > 0 && !me.carrying && sim.flags.red.state === "dropped";
+    for (let t = 0; t < 25; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    const stays = sim.flags.red.state === "dropped";
+    put(rival, sim.flags.red.x, sim.flags.red.z);
+    // A touch by its own side sends a dropped block straight home.
+    const rescued = sim.flags.red.state === "home" && !rival.carrying;
+    put(rival, theirs.x, theirs.z);
+    const returned = sim.flags.red.state === "home" && !rival.carrying;
+    for (let t = 0; t < 4; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    const [tx, tz] = A.traps[0];
+    put(me, tx, tz);
+    const trapped = me.trapped > 0, frozen = (() => { const x = me.x; S.tick(sim, 0.1, { x: 1, z: 0, sprint: 0, jump: 0 }); return me.x === x; })();
+    rival.x = me.x; rival.z = me.z - 3; rival.cooldown = 0;
+    S.fire(sim, 2, 0);
+    for (let t = 0; t < 0.6; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    const shielded = me.splat <= 0 && me.trapped > 0;
+    const freed = S.escape(sim, 0) && me.trapped === 0 && me.guard > 0;
+    for (let t = 0; t < 3; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    rival.x = me.x; rival.z = me.z - 3; rival.cooldown = 0; me.guard = 0;
+    S.fire(sim, 2, 0, 0, "net");
+    for (let t = 0; t < 0.6 && me.netted <= 0; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    const y0 = me.y; S.tick(sim, S.CONFIG.STEP, { x: 0, z: 0, jump: 1 }); S.tick(sim, S.CONFIG.STEP, still);
+    const netted = me.netted > 0 && me.splat <= 0 && me.y === y0;
+    const c = sim.crates.find((k) => k.live), cx = c.x, cz = c.z;
+    me.netted = 0; me.x = cx - 1.3; me.z = cz; me.y = 0;
+    for (let t = 0; t < 0.8; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, { x: 1, z: 0, sprint: 0, jump: 0 });
+    const pushed = c.x > cx + 0.2 && Math.abs(c.z - cz) < 1e-6;
+    // A pass: the carrier throws the block ahead and a teammate down the line catches it.
+    const mate = sim.actors[1];
+    S.reset(sim); sim.prep = 0;
+    Object.assign(sim.weather, { left: 1e9 });
+    put(me, theirs.x, theirs.z);
+    me.x = -16.5; me.z = 14; me.y = 0; mate.x = -16.5; mate.z = 24; mate.y = 0;
+    const threw = S.pass(sim, 0, 0) && sim.flags.red.state === "flying";
+    for (let t = 0; t < 2 && sim.flags.red.state === "flying"; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    const caught = threw && mate.carrying === "red";
+    // Crates: lift one, stack it on another, then throw it at a rival, who is stunned.
+    for (let t = 0; t < 1; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    mate.carrying = null; sim.flags.red.state = "dropped";
+    me.x = -16.5; me.z = 14; me.y = 0; S.tick(sim, S.CONFIG.STEP, still);
+    S.build(sim, 0, 0); S.build(sim, 0, Math.PI / 2);
+    const lifted = S.grab(sim, 0, Math.PI / 2) && me.holding;
+    const stacked = S.grab(sim, 0, 0) && sim.crates.some((k) => k.live && k.y > 1);
+    S.grab(sim, 0, 0);
+    rival.x = -16.5; rival.z = 21; rival.guard = 0; rival.splat = 0; me.cooldown = 0;
+    S.fire(sim, 0, 0, 0.05, "crate");
+    for (let t = 0; t < 1.2 && rival.splat <= 0; t += S.CONFIG.STEP) S.tick(sim, S.CONFIG.STEP, still);
+    const bonked = lifted && stacked && rival.splat > 0 && rival.bonked;
+    record("block frenzy rules: pickup, a drop held until you step out, scoring only with your own block home, a splat drops the carrier's block, which stays until its side touches it home, a quiz trap holds and shields, a net slows and grounds, a crate pushes, a pass is caught, a crate stacks and a thrown one stuns",
+      picked && dropped && held && regrab && noScoreAway && scored && splatted && stays && rescued && returned && trapped && frozen && shielded && freed && netted && pushed && caught && bonked,
+      JSON.stringify({ picked, dropped, held, regrab, noScoreAway, scored, splatted, stays, rescued, returned, trapped, frozen, shielded, freed, netted, pushed, caught, lifted, stacked, bonked }));
+    // An expert that loses its crate target must free its hands so it can rescue a block.
+    const expertFixture = () => {
+      const r = S.create({ skill: "expert", prep: 0 }), bot = r.actors[1];
+      for (const actor of r.actors) { actor.bot = false; actor.x = 18; actor.z = -35; }
+      Object.assign(bot, { x: 0, z: 20, y: 0, bot: true });
+      Object.assign(r.weather, { left: 1e9 });
+      const lifted = S.grab(r, bot.id, 0);
+      Object.assign(r.flags.blue, { state: "dropped", x: 0, z: 20, y: 0, carrier: null });
+      const advance = (seconds) => { for (let n = 0; n < Math.round(seconds / S.CONFIG.STEP); n++) S.tick(r, S.CONFIG.STEP, { ...still }); };
+      return { r, bot, lifted, advance };
+    };
+    const lost = expertFixture();
+    lost.advance(2.5);
+    const waits = lost.bot.holding;
+    lost.advance(7.5);
+    {
+      // Gorilla Jungle's trees: an Ooga coming down onto a canopy lands on its leaves' top, while one walking under it
+      // still stands on the ground; both measured through the sim's own ticks.
+      const jungle = S.create({ team: "blue", seed: 7, prep: 0, map: "jungle" });
+      for (const a of jungle.actors) if (a.id) a.bot = false;
+      Object.assign(jungle.weather, { left: 1e9 });
+      const tree = S.ARENA.decor.find((d) => d.kind === "canopy" && !d.middle), j = jungle.actors[0];
+      for (const a of jungle.actors) if (a.id) { a.x = 20; a.z = a.team === "blue" ? 34 : -34; }
+      Object.assign(j, { x: tree.x + 0.9, z: tree.z + 0.4, y: tree.y + S.LEAF_TOP + 3, vx: 0, vz: 0, vy: 0, grounded: false });
+      for (let i = 0; i < 360; i++) S.tick(jungle, S.CONFIG.STEP, still);
+      const landed = { y: +j.y.toFixed(2), grounded: j.grounded, top: +(tree.y + S.LEAF_TOP).toFixed(2) };
+      Object.assign(j, { x: tree.x + 1.6, z: tree.z + 0.4, y: 0, vx: 0, vz: 0, vy: 0 });
+      for (let i = 0; i < 60; i++) S.tick(jungle, S.CONFIG.STEP, still);
+      const under = +j.y.toFixed(2);
+      // One way: the leaves' top is no ceiling and no wall for one rising through it or flying beside it.
+      const open = !S.solidAt(tree.x + 0.9, tree.y + S.LEAF_TOP - 0.1, tree.z + 0.4) && !S.solidAt(tree.x + 0.9, tree.y + S.LEAF_TOP + 0.5, tree.z + 0.4);
+      record("block frenzy jungle: an Ooga coming down on a tree lands on its leaves' top, one under the leaves stands on the ground, and the top stops nobody rising through it",
+        landed.grounded && Math.abs(landed.y - landed.top) < 0.05 && under < 0.05 && open, JSON.stringify({ landed, under, open, tree: { x: tree.x, z: tree.z, y: tree.y, r: tree.r } }));
+    }
+    record("block frenzy expert: after losing a crate target, wait three seconds, set it down and rescue the dropped home block",
+      lost.lifted && waits && !lost.bot.holding && lost.r.flags.blue.state === "home",
+      JSON.stringify({ lifted: lost.lifted, waits, holding: lost.bot.holding, flag: lost.r.flags.blue.state }));
+    const reacquired = expertFixture();
+    reacquired.advance(2);
+    Object.assign(reacquired.r.actors[2], { x: 3, z: 20, y: 0, guard: 0 });
+    reacquired.bot.cooldown = 20; // Keep a visible target without being able to throw yet.
+    reacquired.advance(1);
+    const retained = reacquired.bot.holding;
+    Object.assign(reacquired.r.actors[2], { x: 18, z: -35 });
+    reacquired.advance(2);
+    const freshWait = reacquired.bot.holding;
+    reacquired.advance(2);
+    record("block frenzy expert: reacquiring a target resets the crate-release delay even during weapon cooldown",
+      reacquired.lifted && retained && freshWait && !reacquired.bot.holding,
+      JSON.stringify({ retained, freshWait, holding: reacquired.bot.holding }));
+    const blockedCrate = expertFixture(), stack = blockedCrate.r.crates.filter((c) => !c.live).slice(0, 3);
+    for (let i = 0; i < stack.length; i++) Object.assign(stack[i], { live: true, team: "blue", x: 0, z: 18.7, y: i * S.CONFIG.CRATE_H });
+    blockedCrate.advance(4);
+    const blockedWait = blockedCrate.bot.holding;
+    for (const c of stack) c.live = false;
+    blockedCrate.advance(1);
+    record("block frenzy expert: a blocked set-down is retried as soon as the space clears",
+      blockedCrate.lifted && blockedWait && !blockedCrate.bot.holding,
+      JSON.stringify({ blockedWait, holding: blockedCrate.bot.holding }));
+    // Piggyback: a fixture with the visitor and one bot teammate on Fort Chaos, the rivals out of the way.
+    const piggy = () => {
+      const r = S.create({ team: "blue", seed: 2, prep: 0, size: 3 });
+      for (const b of r.actors) { b.x = 18; b.z = -35; b.bot = false; }
+      Object.assign(r.weather, { left: 1e9 });
+      const run = (s, input = still) => { for (let n = 0; n < Math.round(s / S.CONFIG.STEP); n++) S.tick(r, S.CONFIG.STEP, { ...input }); };
+      return { r, me: r.actors[0], b1: r.actors[1], b2: r.actors[2], run };
+    };
+    {
+      const { r, me, b1, run } = piggy();
+      Object.assign(me, { x: 0, z: 10 }); Object.assign(b1, { x: 0.9, z: 10, bot: true });
+      const on = S.hopOn(r, 0), carried = me.ride === 2 && b1.rider === 1;
+      run(1, { x: 0, z: 0, face: 1 });
+      const along = Math.hypot(me.x - b1.x, me.z - b1.z) < 0.5 && me.y > b1.y + 0.3 && Math.abs(me.heading - 1) < 1e-6;
+      b1.splat = 2; b1.netted = 3; run(0.5, { x: 0, z: 0, face: 1 });
+      const stays = me.ride === 2;
+      b1.splat = 0; b1.netted = 0; run(0.1, { x: 0, z: 0, jump: 1 });
+      const off = !me.ride && !b1.rider;
+      record("block frenzy piggyback: H climbs on a teammate's back, the rider is carried along facing its own way, stays on through the carrier's splat and net, and a jump gets down",
+        on && carried && along && stays && off, JSON.stringify({ on, carried, along, stays, off }));
+    }
+    {
+      const { r, me, b1, run } = piggy();
+      Object.assign(me, { x: 0, z: 10 }); Object.assign(b1, { x: 0.9, z: 10 });
+      const on = S.hopOn(r, 0);
+      me.knock = me.soot = 1;
+      run(0.5);
+      const halfway = me.ride === b1.id + 1 && me.knock > 0.49 && me.knock < 0.51 && me.soot > 0.49 && me.soot < 0.51;
+      run(1.5);
+      record("block frenzy piggyback: mounted riders' knockback and soot expire without ending the ride",
+        on && halfway && me.ride === b1.id + 1 && me.knock === 0 && me.soot === 0,
+        JSON.stringify({ on, halfway, ride: me.ride, knock: me.knock, soot: me.soot }));
+    }
+    {
+      // J: a closer teammate that can't come (splatted) doesn't stop a healthy one answering.
+      const { r, me, b1, b2, run } = piggy();
+      Object.assign(me, { x: 0, z: 10 }); Object.assign(b1, { x: 2, z: 10, bot: true, splat: 1e9 }); Object.assign(b2, { x: 6, z: 14, bot: true });
+      S.callRide(r, 0); run(4);
+      const answered = me.rider === b2.id + 1 && b2.ride === 1;
+      record("block frenzy piggyback: J brings the nearest teammate that can come onto the visitor's back, past a nearer splatted one",
+        answered, JSON.stringify({ rider: me.rider, b2ride: b2.ride }));
+    }
+    {
+      // Beside a post of the centre deck, the rider sits nearer the carrier's middle rather than inside the post.
+      const { r, me, b1, run } = piggy();
+      Object.assign(b1, { x: 2.8, z: 3.2 + S.CONFIG.BODY_R + 0.02, heading: 0, bot: false });
+      Object.assign(me, { x: 2.8, z: b1.z + 1 });
+      const on = S.hopOn(r, 0); run(0.2, { x: 0, z: 0, face: 0 });
+      const R = S.CONFIG.BODY_R * 0.9, post = [2.4, 3.2, 2.4, 3.2];
+      const cx = Math.max(post[0], Math.min(me.x, post[1])), cz = Math.max(post[2], Math.min(me.z, post[3]));
+      const clear = Math.hypot(me.x - cx, me.z - cz) >= R - 1e-6;
+      record("block frenzy piggyback: a rider beside a wall or post sits clear of it, not inside it",
+        on && me.ride === 2 && clear, JSON.stringify({ on, ride: me.ride, rider: [me.x, me.z], gap: Math.hypot(me.x - cx, me.z - cz) }));
+    }
+    {
+      // The machine's picker: the device chosen is the one taken; a pick out of range falls back to a random one.
+      const pickAt = (look) => {
+        const r = S.create({ team: "blue", seed: 5 }), me = r.actors[0], v = r.vends[0];
+        r.prep = 0; Object.assign(me, { x: v.x + 0.4, z: v.z, y: 0 });
+        const ok = S.takeWallet(r, 0, look);
+        return { ok, look: ok ? r.wallets[me.wallet].look : -1 };
+      };
+      const picked = [0, 1, 2, 3, 4, 5].map(pickAt), stray = pickAt(9), none = pickAt(-1);
+      record("block frenzy wallets: the device picked at the machine is the one taken, and a pick out of range gets one of the six",
+        picked.every((p, i) => p.ok && p.look === i) && stray.ok && stray.look >= 0 && stray.look < S.WALLETS.length && none.ok && none.look >= 0 && none.look < S.WALLETS.length,
+        JSON.stringify({ picked, stray, none }));
+    }
+    const round = (seed) => { const r = S.create({ team: "red", seed }); r.actors[0].bot = "auto"; for (let t = 0; t < 900 && !r.over; t += 1 / 30) S.step(r, 1 / 30, still), r.eventCount = 0; return JSON.stringify({ over: r.over, winner: r.winner, score: r.score, time: Math.round(r.time) }); };
+    const a = round(3), b = round(3);
+    record("block frenzy rounds: a seeded round replays exactly and reaches three captures", a === b && JSON.parse(a).over && Math.max(...Object.values(JSON.parse(a).score)) === S.CONFIG.CAPTURES, JSON.stringify({ a, b }));
+    {
+      // The floating island: its edges are open, an Ooga walking off falls, and one fallen all the way is back in its
+      // own block zone; a block carried over the edge drops at the edge and goes home by itself; under the rim the
+      // island's rock holds a body out, and the jetpack brings a thrown Ooga back over the edge, the visitor's or a bot's.
+      const fresh = (map = "fort") => { const r = S.create({ seed: 5, prep: 0, map }); for (const o of r.actors) o.bot = false; Object.assign(r.weather, { left: 1e9 }); for (const g of r.gorillas) { g.state = 3; g.t = 1e9; } return r; };
+      const run = (r, secs, input = still, until = () => false) => { for (let t = 0; t < secs && !until(); t += S.CONFIG.STEP) S.tick(r, S.CONFIG.STEP, input); };
+      const rows = {};
+      for (const map of S.MAPS) {
+        let r = fresh(map);
+        const I = S.ARENA, o = r.actors[0], start = o.z;
+        o.x = I.W - 0.5; o.z = 0;
+        run(r, 0.4, { x: 1, z: 0 });
+        const over = o.x > I.W && !o.grounded;
+        let respawned = false;
+        for (let t = 0; t < 8 && !respawned; t += S.CONFIG.STEP) { S.tick(r, S.CONFIG.STEP, still); for (let i = 0; i < r.eventCount; i++) if (r.events[i].type === "respawn") respawned = true; r.eventCount = 0; }
+        const home = respawned && o.falls === 1 && o.grounded && Math.abs(o.z - start) < 2 && Math.abs(o.x) < 8;
+        r = fresh(map);
+        const c = r.actors[0], f = r.flags.red;
+        c.x = I.stands.red.x; c.z = I.stands.red.z; run(r, S.CONFIG.STEP);
+        const took = c.carrying === "red";
+        c.x = I.W - 0.5; c.z = 0; c.y = 0; run(r, S.CONFIG.STEP);
+        run(r, 1.2, { x: 1, z: 0 });
+        const atEdge = took && f.state === "dropped" && f.homeT > 0 && Math.abs(f.x) < I.W && !c.carrying;
+        run(r, S.CONFIG.EDGE_HOME_S + 0.2);
+        const wentHome = f.state === "home";
+        r = fresh(map);
+        const u = r.actors[0];
+        u.x = I.W + 0.6; u.z = 0; u.y = -3; u.grounded = false; run(r, 0.3, { x: -1, z: 0 });
+        const heldOut = u.x >= I.W;
+        r = fresh(map);
+        const j = r.actors[0], b = r.actors[1];
+        j.x = I.W + 1; j.z = 0; j.y = 0; j.vx = 10; j.vy = 9; j.knock = 0.6; j.grounded = false;
+        b.bot = true; b.x = -I.W - 1; b.z = 0; b.y = 0; b.vx = -10; b.vy = 9; b.knock = 0.6; b.grounded = false;
+        run(r, 8, { x: -1, z: 0, jet: 1 }, () => j.grounded && b.grounded);
+        const flewBack = j.grounded && S.onIsland(j.x, j.z) && j.falls === 0 && b.grounded && S.onIsland(b.x, b.z) && b.falls === 0;
+        rows[map] = { over, home, atEdge, wentHome, heldOut, flewBack };
+      }
+      record("block frenzy island: on every map an Ooga walks off the open edge and, fallen all the way, is back in its own block zone; a block carried over drops at the edge and goes home; the rock under the rim holds a body out; the jetpack brings the visitor and a bot back after a throw",
+        Object.values(rows).every((v) => Object.values(v).every(Boolean)), JSON.stringify(rows));
+    }
+    {
+      // Hub-style terrain on every map: the boxes come in turned pairs, stand clear of the buildings and every spot the
+      // game uses, and walking at ground level from the side's start reaches the forts, stands, catapults, ladders,
+      // quiz pads, power-ups and the ground-level hiding spots; the high spots are somewhere to stand.
+      const rows = {}, loose = {};
+      for (const map of S.MAPS) {
+        const r = S.create({ map, seed: 2 }), I = S.ARENA;
+        for (const c of r.crates) c.live = false;
+        S.tick(r, S.CONFIG.STEP, still);
+        for (const c of r.crates) c.live = false;
+        const rocks = [...I.rocks], key = (b) => b.slice(0, 6).map((v) => v.toFixed(2)).join();
+        const twins = new Set(rocks.map(key));
+        const mirrored = rocks.length >= 12 && rocks.every((b) => twins.has(key([-b[1], -b[0], -b[3], -b[2], b[4], b[5]])));
+        const others = I.BLOCKS.filter((b) => !I.rocks.has(b));
+        const clearOfBuildings = rocks.every((b) => others.every((o) => b[0] >= o[1] || b[1] <= o[0] || b[2] >= o[3] || b[3] <= o[2] || b[5] >= o[4] || b[4] <= o[5]));
+        const spots = [];
+        for (const list of [I.traps, I.powers, I.tramps, I.vends, I.peels, [I.fire], I.catapults.blue, I.catapults.red, I.crates.blue, I.crates.red, I.plug.blue, I.plug.red, I.alley.blue, I.alley.red, I.gorillas]) spots.push(...list);
+        for (const s of I.caches) spots.push([s[0], s[2]]);
+        for (const t of S.TEAMS) spots.push([I.stands[t].x, I.stands[t].z]);
+        const clearOfSpots = spots.every(([x, z]) => rocks.every((b) => b[5] > 0.05 || x <= b[0] - 0.4 || x >= b[1] + 0.4 || z <= b[2] - 0.4 || z >= b[3] + 0.4));
+        // A flood at ground level, cell by cell, through the sim's own collision.
+        const cell = 0.5, W = I.W, L = I.L, free = (x, z) => { if (!S.onIsland(x, z)) return false; const p = { x, z, y: 0 }; S.resolve(p, S.CONFIG.BODY_R * 0.95, 0.05); return Math.abs(p.x - x) < 1e-6 && Math.abs(p.z - z) < 1e-6; };
+        const idx = (x, z) => Math.round((x + W) / cell) * 100000 + Math.round((z + L) / cell), nx = Math.round(2 * W / cell), nz = Math.round(2 * L / cell);
+        const seen = new Set(), start = [Math.round((0.25 + W) / cell), Math.round((I.spawnZ + 0.25 + L) / cell)], stack = [start];
+        seen.add(start[0] * 100000 + start[1]);
+        while (stack.length) {
+          const [i, j] = stack.pop();
+          for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const ni = i + a, nj = j + b, k = ni * 100000 + nj;
+            if (ni < 2 || nj < 2 || ni >= nx - 2 || nj >= nz - 2 || seen.has(k) || !free(ni * cell - W, nj * cell - L)) continue;
+            seen.add(k); stack.push([ni, nj]);
+          }
+        }
+        const reached = (x, z) => { for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) if (seen.has(idx(x, z) + a * 100000 + b)) return true; return false; };
+        const walked = [I.traps, I.powers, I.tramps, I.catapults.blue, I.catapults.red, I.gorillas].flat().every(([x, z]) => reached(x, z)) && S.TEAMS.every((t) => reached(I.stands[t].x, I.stands[t].z));
+        const ladders = S.TEAMS.every((t) => { const l = I.ladders[t]; return reached((l.zone[0] + l.zone[1]) / 2 - l.dx * 0.75, (l.zone[2] + l.zone[3]) / 2 - l.dz * 0.75); });
+        const caves = (I.terrain || []).filter(([k]) => k === "cave").length >= 12 && I.hookSpots.filter(([, y]) => y < 0.5).length >= 4;
+        const hidden = I.hookSpots.length >= 3 && I.hookSpots.every(([x, y, z]) => y < 0.5 ? reached(x, z) : Math.abs(S.groundAt(x, z, y + 0.1) - y) < 0.05);
+        rows[map] = { mirrored, clearOfBuildings, clearOfSpots, walked, ladders, caves, hidden };
+        // Loose blocks, through the same flood: dropped from the top of every fixed block, and landing from the air on it.
+        const cr = r.actors[0], red = r.flags.red, rests = (f) => f.state === "dropped" && f.y === 0 && reached(f.x, f.z);
+        let dropped = true, landed = true;
+        for (const b of I.BLOCKS) {
+          const x = (b[0] + b[1]) / 2, z = (b[2] + b[3]) / 2;
+          Object.assign(cr, { x, z, y: b[4], vx: 0, vy: 0, vz: 0, splat: 0, trapped: 0, carrying: "red", blocked: null, grounded: true });
+          Object.assign(red, { state: "carried", carrier: 0, homeT: 0 });
+          dropped &&= S.drop(r, 0) && rests(red);
+          cr.carrying = null;
+          Object.assign(red, { state: "flying", carrier: null, thrower: -1, t: 1, x, y: b[4] + 1.2, z, vx: 0, vy: -2, vz: 0 });
+          Object.assign(cr, { x: 0, z: I.spawnZ, y: 0 });
+          r.prep = 1;
+          for (let t = 0; t < 2 && red.state === "flying"; t += S.CONFIG.STEP) S.tick(r, S.CONFIG.STEP, still);
+          r.eventCount = 0;
+          landed &&= rests(red);
+        }
+        // A gorilla's grab on the mound's lower tier.
+        const mound = rocks.find((b) => I.rockKind.get(b) === "mound" && b[4] === 1 && b[0] < 0 && b[2] > 0), g = r.gorillas[0], tierX = mound[1] - 0.3, tierZ = (mound[2] + mound[3]) / 2;
+        Object.assign(cr, { x: tierX, z: tierZ, y: 1, splat: 0, trapped: 0, guard: 0, carrying: "red", blocked: null, grounded: true, grabbed: 0 });
+        Object.assign(red, { state: "carried", carrier: 0, homeT: 0 });
+        Object.assign(g, { x: tierX + 1, z: tierZ, wx: tierX + 1, wz: tierZ, hx: tierX + 1, hz: tierZ, state: 0, t: 0, holding: -1 });
+        r.prep = 0;
+        S.tick(r, S.CONFIG.STEP, still);
+        loose[map] = { dropped, landed, grabbed: cr.grabbed > 0 && rests(red) };
+      }
+      record("block frenzy loose blocks: on every map a block dropped from the top of any block, landing on it from the air, or dropped by a gorilla's grab on a mound comes to rest on ground the bots can walk to",
+        Object.values(loose).every((v) => Object.values(v).every(Boolean)), JSON.stringify(loose));
+      record("block frenzy terrain: on every map the mounds, caves and outcrops are mirrored half round, clear of the buildings and every spot in use, and the forts, stands, catapults, ladders and hiding spots stay reachable on foot",
+        Object.values(rows).every((v) => Object.values(v).every(Boolean)), JSON.stringify(rows));
+    }
+    {
+      // The grappling hook, played through the sim's own calls: a hook found at its hiding spot, a bite on rock reeling the
+      // Ooga in, a block yanked off a rival carrier (nothing from a teammate), and a wallet bomb taking a held hook as it
+      // takes the Golden AKs. A hook lost over the edge goes back into hiding.
+      const fresh = (map = "fort", seed = 5) => {
+        const r = S.create({ seed, prep: 0, map });
+        for (const o of r.actors) o.bot = false;
+        Object.assign(r.weather, { left: 1e9 });
+        for (const g of r.gorillas) { g.x = g.wx = g.hx = 100; g.z = g.wz = g.hz = 100; g.state = 3; g.t = 1e9; }
+        return r;
+      };
+      const run = (r, secs, input = still, until = () => false) => { const seen = {}; for (let t = 0; t < secs && !until(); t += S.CONFIG.STEP) { S.tick(r, S.CONFIG.STEP, input); for (let i = 0; i < r.eventCount; i++) seen[r.events[i].type] = (seen[r.events[i].type] || 0) + 1; r.eventCount = 0; } return seen; };
+      const rows = {};
+      let r = fresh(), o = r.actors[0];
+      const h = r.hooks[0];
+      o.x = h.x; o.z = h.z; o.y = h.y; run(r, S.CONFIG.STEP);
+      rows.pickup = o.hook === 1 && h.state === 1 && h.holder === 0;
+      r = fresh(); o = r.actors[0]; o.hook = 1; o.x = 10; o.z = 20; o.y = 0;
+      const yaw = Math.atan2(5.5, -4), bit = S.grapple(r, 0, yaw, Math.atan2(1, Math.hypot(5.5, 4)));
+      run(r, 0.5, still, () => o.hk === 2);
+      const bx = o.x, bz = o.z;
+      run(r, 1.5);
+      rows.pull = bit && Math.hypot(o.x - bx, o.z - bz) > 2 && o.hCool > 0 && !S.grapple(r, 0, yaw, 0);
+      r = fresh(); o = r.actors[0];
+      const c = r.actors[2];
+      o.hook = 1; o.x = -17; o.z = -1; c.x = -17; c.z = 10; r.flags.blue.state = "carried"; r.flags.blue.carrier = 2; c.carrying = "blue";
+      S.grapple(r, 0, 0, 0);
+      const log = run(r, 2, still, () => r.flags.blue.state === "home");
+      rows.yank = !!log.hookwarn && !!log.yank && !c.carrying && r.flags.blue.state === "home" && o.rescues === 1;
+      r = fresh(); o = r.actors[0];
+      const mate = r.actors[1];
+      o.hook = 1; o.x = -17; o.z = 0; mate.x = -17; mate.z = 6; r.flags.blue.state = "carried"; r.flags.blue.carrier = 1; mate.carrying = "blue";
+      S.grapple(r, 0, 0, 0);
+      rows.mate = !run(r, 0.6).hookwarn && mate.carrying === "blue";
+      r = fresh(); o = r.actors[0];
+      const holder = r.actors[2];
+      holder.hook = 1; r.hooks[0].state = 1; r.hooks[0].holder = 2; o.x = -17; o.z = 0; holder.x = -17; holder.z = 2.5; o.guard = holder.guard = 9;
+      const w = r.wallets.find((v) => !v.live);
+      Object.assign(w, { live: true, state: 3, owner: 0, team: o.team, look: 0, x: holder.x, y: holder.y + 1, z: holder.z, fuse: 0.01, stuck: 2 });
+      rows.steal = !!run(r, 0.2).hooksteal && o.hook === 1 && holder.hook === 0 && r.hooks[0].holder === 0;
+      r = fresh(); o = r.actors[0]; o.hook = 2; r.hooks[1].state = 1; r.hooks[1].holder = 0; o.y = S.CONFIG.FALL_FLOOR - 1; o.x = 40; o.grounded = false;
+      const fell = run(r, S.CONFIG.STEP * 2);
+      rows.rehide = !!fell.hookhide && o.hook === 0 && r.hooks[1].state === 0;
+      const hidden = S.MAPS.every((map) => { const m = fresh(map); return m.hooks.length === 2 && m.hooks.every((k) => k.state === 0 && S.ARENA.hookSpots.some(([x, , z]) => (Math.abs(k.x - x) < 1e-9 && Math.abs(k.z - z) < 1e-9) || (Math.abs(k.x + x) < 1e-9 && Math.abs(k.z + z) < 1e-9))); });
+      rows.hidden = hidden;
+      // A block on the hook comes along the rope into the hooker's hands, under touching's rules.
+      {
+        const hookAt = (setup) => {
+          const m = fresh();
+          for (const k of m.crates) k.live = false;
+          const u = m.actors[0];
+          u.hook = 1; u.x = -17; u.z = -2; u.y = 0;
+          setup(m, u);
+          S.grapple(m, 0, u.aim0 ?? 0, 0);
+          run(m, 3, still, () => u.hk === 4 || !u.hook);
+          return { m, u };
+        };
+        let hooked = hookAt((m, u) => { u.x = 0; u.z = -20; u.aim0 = Math.PI; });
+        rows.stand = hooked.u.carrying === "red" && hooked.m.flags.red.state === "carried" && hooked.m.flags.red.carrier === 0 && hooked.u.hCool > 2.5;
+        hooked = hookAt((m) => Object.assign(m.flags.red, { state: "dropped", x: -17, y: 0, z: 8, homeT: 0 }));
+        rows.loose = hooked.u.carrying === "red" && hooked.m.flags.red.state === "carried";
+        hooked = hookAt((m) => Object.assign(m.flags.blue, { state: "dropped", x: -17, y: 0, z: 8, homeT: 0 }));
+        rows.ownLoose = hooked.u.rescues === 1 && hooked.m.flags.blue.state === "home" && !hooked.u.carrying;
+        hooked = hookAt((m) => { const k = m.actors[2]; k.x = -17; k.z = 9; k.carrying = "red"; Object.assign(m.flags.red, { state: "carried", carrier: 2 }); });
+        rows.carrier = hooked.u.carrying === "red" && !hooked.m.actors[2].carrying && hooked.m.flags.red.carrier === 0;
+        hooked = hookAt((m, u) => { u.carrying = "red"; Object.assign(m.flags.red, { state: "carried", carrier: 0 }); Object.assign(m.flags.blue, { state: "dropped", x: -17, y: 0, z: 8, homeT: 0 }); });
+        rows.handsFull = hooked.u.carrying === "red" && hooked.m.flags.blue.state === "dropped" && hooked.m.flags.blue.y === 0 && Math.hypot(hooked.m.flags.blue.x - hooked.u.x, hooked.m.flags.blue.z - hooked.u.z) < 2.5;
+        // The parachute drops to a jump, a click (`cutChute`) or the hook; the hook also bites a canopy and, from mid-air off the edge, the rim.
+        const chuted = () => { const m = fresh(), u = m.actors[0]; for (const o of m.actors) if (o.id) o.bot = true; Object.assign(u, { x: -17, z: 12, y: 8, flight: 2, grounded: false, hook: 1 }); return { m, u }; };
+        let cut = chuted();
+        S.tick(cut.m, S.CONFIG.STEP, { x: 0, z: 0, jump: 1 });
+        rows.chuteJump = cut.u.flight === 0;
+        cut = chuted();
+        rows.chuteClick = S.cutChute(cut.m, 0) && cut.u.flight === 0;
+        cut = chuted();
+        rows.chuteHook = S.grapple(cut.m, 0, 0, 0.1) && cut.u.flight === 0 && cut.u.hk === 1;
+        const cm = fresh("jungle"), cu = cm.actors[0];
+        for (const k of cm.crates) k.live = false;
+        Object.assign(cu, { hook: 1, x: 5, z: 10, y: 0 });
+        S.grapple(cm, 0, 0, Math.atan2(5.2, 7));
+        run(cm, 0.6, still, () => cu.hk === 2);
+        rows.canopy = cu.hk === 2;
+        const sm = fresh(), su = sm.actors[0], sI = S.ARENA;
+        Object.assign(su, { hook: 1, x: sI.W + 3, z: 0, y: -1, vy: -2, grounded: false });
+        S.grapple(sm, 0, -Math.PI / 2, Math.atan2(-1.8, 4));
+        run(sm, 0.5, still, () => su.hk === 2);
+        const bitRim = su.hk === 2, sx = su.x;
+        run(sm, 0.6);
+        rows.midAirSave = bitRim && su.x < sx - 1;
+        // Anything that is not a block or an Ooga pulls the Ooga: a crate, and past a rival who carries nothing.
+        const pm = fresh(), pu = pm.actors[0], pc = pm.crates.find((k) => !k.live) || pm.crates[0];
+        for (const k of pm.crates) k.live = false;
+        Object.assign(pc, { live: true, team: "red", x: -15, y: 0, z: 9 });
+        Object.assign(pm.actors[2], { x: -15, z: 5 });
+        pu.hook = 1; pu.x = -15; pu.z = -2; S.grapple(pm, 0, 0, -0.03);
+        run(pm, 0.6, still, () => pu.hk === 2);
+        const pz = pu.z, bitCrate = pu.hk === 2;
+        run(pm, 1);
+        rows.anythingElse = bitCrate && pu.z > pz + 2;
+      }
+      // A netted rival's block can be taken by a touch; the net launcher opens wide.
+      {
+        const m = fresh(), u = m.actors[0], c = m.actors[2];
+        for (const k of m.crates) k.live = false;
+        Object.assign(u, { x: -17, z: 12 }); Object.assign(c, { x: -16.5, z: 12, netted: 3, carrying: "red" });
+        Object.assign(m.flags.red, { state: "carried", carrier: 2 });
+        S.tick(m, S.CONFIG.STEP, still); m.eventCount = 0;
+        rows.netTake = u.carrying === "red" && !c.carrying && m.flags.red.carrier === 0;
+        rows.netLauncher = S.TOOLS.net.speed >= 25 && S.TOOLS.net.r >= 1.5;
+        const rg = fresh(), ru = rg.actors[0];
+        ru.y = S.CONFIG.FALL_FLOOR - 1; ru.x = 40; ru.grounded = false; run(rg, S.CONFIG.STEP * 2);
+        rows.spawnGuard = ru.guard > 0 && ru.guard <= 0.5;
+      }
+      // Storm lightning warns a spot, then strikes whoever stays; a jungle puddle slips without dropping the block.
+      {
+        const m = fresh(), u = m.actors[0], w = m.weather;
+        for (const k of m.crates) k.live = false;
+        Object.assign(u, { x: -17, z: 12 });
+        w.kind = "storm"; w.boltWarn = 0.5; w.boltX = u.x; w.boltZ = u.z;
+        run(m, 0.6);
+        rows.bolt = u.splat > 0 && u.boltCool > 0;
+        const j = fresh("jungle"), ju = j.actors[0];
+        for (const k of j.crates) k.live = false;
+        const pu = j.puddles[0];
+        Object.assign(ju, { x: pu.x, z: pu.z, y: 0, carrying: "red", grounded: true }); Object.assign(j.flags.red, { state: "carried", carrier: 0 });
+        run(j, 0.1);
+        rows.puddle = ju.slip > 0 && ju.carrying === "red" && pu.dark > 0;
+        rows.weatherMix = S.ARENAS.jungle.puddles.length >= 6;
+      }
+      // Regressions: a block behind solid can't be hooked (thin fence), and cover reached during the warning stops the yank.
+      {
+        const f1 = fresh("haunted"), a1 = f1.actors[0], c1 = f1.actors[2];
+        for (const k of f1.crates) k.live = false;
+        Object.assign(a1, { hook: 1, x: -16, z: 23.9, y: 0 }); Object.assign(c1, { x: -16, z: 25.75, y: 0, carrying: "blue" });
+        Object.assign(f1.flags.blue, { state: "carried", carrier: 2 });
+        S.grapple(f1, 0, 0, -0.12);
+        const fence = run(f1, 0.6);
+        rows.throughSolid = !fence.hookwarn && c1.carrying === "blue";
+        const f2 = fresh(), a2 = f2.actors[0], c2 = f2.actors[2];
+        for (const k of f2.crates) k.live = false;
+        Object.assign(a2, { hook: 1, x: -18.8, z: 22.3, y: 0 }); Object.assign(c2, { x: -16.9, z: 25, y: 0, carrying: "blue" });
+        Object.assign(f2.flags.blue, { state: "carried", carrier: 2 });
+        S.grapple(f2, 0, Math.atan2(c2.x - a2.x, c2.z - a2.z), 0);
+        run(f2, 0.5, still, () => a2.hk === 3);
+        const latched = a2.hk === 3;
+        Object.assign(c2, { x: -18.8, z: 25.4 });
+        run(f2, 0.5);
+        rows.reachedCover = latched && c2.carrying === "blue" && f2.flags.blue.state === "carried";
+        // Live fees: only storm overrides a map's weather.
+        const fees = fresh(), liveTry = (v) => { S.setLive(fees, v); return fees.live; };
+        rows.feeClear = liveTry("clear") === null;
+        rows.feeCalm = liveTry("clear") === null;
+        // No wind: a body in the air over a storm drifts nowhere, and only clear and storm ever come up.
+        const calm = fresh(), cu = calm.actors[0];
+        for (const k of calm.crates) k.live = false;
+        Object.assign(calm.weather, { kind: "storm", strength: 1 });
+        Object.assign(cu, { x: 3, z: 3, y: 8, vx: 0, vz: 0, vy: 0, grounded: false, guard: 9 });
+        run(calm, 0.4, still);
+        const kinds = new Set();
+        for (let n = 0; n < 40; n++) { calm.weather.left = 0; S.tick(calm, S.CONFIG.STEP, still); calm.eventCount = 0; kinds.add(calm.weather.kind); }
+        rows.noWind = cu.x === 3 && cu.z === 3 && S.CONFIG.WIND === undefined && [...kinds].every((k) => k === "clear" || k === "storm") && kinds.size === 2;
+        // The tall iron gate is solid, with the way round either end of it open, and the block zones are at the back.
+        const hg = fresh("haunted"), hu = hg.actors[0], hI = S.ARENAS.haunted;
+        for (const k of hg.crates) k.live = false;
+        Object.assign(hu, { x: 0, z: 26, y: 0, grounded: true });
+        run(hg, 1, { x: 0, z: -1 });
+        const stopped = hu.z > 24.5;
+        Object.assign(hu, { x: 3.2, z: 26, y: 0, vx: 0, vz: 0, grounded: true });
+        run(hg, 1, { x: 0, z: -1 });
+        rows.gateSolid = stopped && hu.z < 23.5 && S.solidAt(0, 1.5, 24.5) && S.solidAt(0, 1.5, -24.5) && !S.solidAt(3.2, 1.5, 24.5);
+        const twn = S.ARENAS.town;
+        rows.blockZones = twn.stands.blue.z === 32.2 && twn.stands.red.z === -32.2 && hI.goals.blue.z === 52.5 && hI.goals.red.z === -52.5;
+        rows.feeStorm = liveTry("storm") === "storm" && (() => { fees.weather.left = 0; S.tick(fees, S.CONFIG.STEP, still); return fees.weather.kind === "storm"; })();
+        rows.feeNone = liveTry(null) === null;
+        // An open grave: fall in, one jump can't clear the rim, a double jump does, a block can't rest inside, and a
+        // bot knocked in gets out on its own.
+        const g = fresh("haunted"), gu = g.actors[0], I = S.ARENAS.haunted, [gx0, gx1, gz0, gz1] = I.graves[0], cx = (gx0 + gx1) / 2, cz = (gz0 + gz1) / 2;
+        for (const k of g.crates) k.live = false;
+        for (const o of g.actors) if (o.id) o.bot = true;
+        Object.assign(gu, { x: cx, z: cz, y: 0, grounded: true });
+        run(g, 0.7, still, () => gu.grounded && gu.y === S.GRAVE_Y);
+        rows.graveFall = gu.y === S.GRAVE_Y && S.inGrave(gu.x, gu.z);
+        const climb = { x: 0, z: 1, jump: 1 };
+        run(g, 0.15, climb);
+        run(g, 2, climb, () => gu.grounded);
+        rows.graveOneJump = gu.y === S.GRAVE_Y && S.inGrave(gu.x, gu.z);
+        Object.assign(gu, { carrying: "red" }); Object.assign(g.flags.red, { state: "carried", carrier: 0 });
+        climb.jump = 1;
+        run(g, 1, climb, () => gu.vy <= 0.6 && !gu.grounded);
+        climb.jump = 1;
+        run(g, 2.5, climb, () => gu.grounded);
+        rows.graveTwoJumps = gu.y === 0 && !S.inGrave(gu.x, gu.z) && gu.carrying === "red";
+        const gb2 = fresh("haunted"), gbot = gb2.actors[1];
+        for (const k of gb2.crates) k.live = false;
+        gbot.bot = true; Object.assign(gbot, { x: cx, z: cz, y: S.GRAVE_Y, grounded: true, guard: 9 });
+        run(gb2, 6, still, () => !S.inGrave(gbot.x, gbot.z) && gbot.y >= -0.1);
+        rows.graveBotOut = !S.inGrave(gbot.x, gbot.z);
+        // A block thrown into a grave lands and is lifted out to ground the bots can reach.
+        const gf = fresh("haunted"), fb = gf.flags.red;
+        for (const k of gf.crates) k.live = false;
+        Object.assign(fb, { state: "flying", carrier: null, thrower: -1, t: 0, x: cx, y: 1, z: cz, vx: 0, vy: 0, vz: 0, hookedBy: -1 });
+        run(gf, 2, still, () => fb.state !== "flying");
+        rows.graveBlockLands = fb.state === "dropped" && fb.y === 0 && !S.inGrave(fb.x, fb.z);
+        // Below the surface it always lands, even travelling along the pit and out through its wall, at any depth.
+        rows.graveBlockAlong = [-0.2, -0.5, -0.95, -1.5].every((y) => {
+          const q = fresh("haunted"), f2 = q.flags.red;
+          for (const k of q.crates) k.live = false;
+          Object.assign(f2, { state: "flying", carrier: null, thrower: -1, t: 0, x: cx, y, z: cz, vx: 0, vy: -0.5, vz: 12, hookedBy: -1 });
+          run(q, 3, still, () => f2.state !== "flying");
+          return f2.state === "dropped" && f2.y === 0 && !S.inGrave(f2.x, f2.z);
+        });
+        // Wherever a block is lifted out of a grave to, it is outside the margin bots walk round the grave with.
+        S.create({ map: "haunted" });
+        const graveMargin = S.CONFIG.BODY_R;
+        rows.graveRestReach = S.ARENAS.haunted.graves.every(([x0, x1, z0, z1]) => [[(x0 + x1) / 2, (z0 + z1) / 2], [x0 - 0.1, z0 - 0.1], [x1 + 0.1, z1 + 0.1], [x0 - 0.3, (z0 + z1) / 2], [(x0 + x1) / 2, z1 + 0.3]].every(([x, z]) => {
+          const p = S.restSpot(x, z);
+          return S.clearLine(p.x, p.z, p.x + 0.01, p.z, graveMargin);
+        }));
+        // A walk is blocked only by a line that really crosses a grave; a throw at chest height never is.
+        const [lx0, lx1, lz0, lz1] = S.ARENAS.haunted.graves[0], lxm = (lx0 + lx1) / 2;
+        rows.graveLine = !S.clearLine(lxm, lz0 - 3, lxm, lz1 + 3, 0.4) && S.clearLine(lx1 + 1, lz0 - 3, lx1 + 1, lz1 + 3, 0.4) && S.clearLine(lxm, lz0 - 3, lxm, lz1 + 3, 0.05, 1.8);
+        S.create({ map: "haunted" });
+        rows.graveRest = I.graves.every(([x0, x1, z0, z1]) => { const p = S.restSpot((x0 + x1) / 2, (z0 + z1) / 2); return !S.inGrave(p.x, p.z); });
+      }
+      // A block back on its stand has a moment of grace, so a netted rival parked there can't loop take and return.
+      {
+        const m = fresh(), d = m.actors[0], c = m.actors[2], st = S.ARENA.stands.blue;
+        for (const k of m.crates) k.live = false;
+        for (const o of m.actors) if (o.id > 1) o.bot = false;
+        Object.assign(d, { x: st.x, z: st.z, y: 0 }); Object.assign(c, { x: st.x + 0.4, z: st.z + 0.3, y: 0, netted: 5, guard: 0 });
+        const seen = {};
+        for (let t = 0; t < 3; t += S.CONFIG.STEP) { S.tick(m, S.CONFIG.STEP, still); for (let i = 0; i < m.eventCount; i++) { const ty = m.events[i].type; seen[ty] = (seen[ty] || 0) + 1; } m.eventCount = 0; }
+        rows.blockLoop = (seen.pickup || 0) <= 5 && (seen.rescue || 0) <= 5;
+        // The other side's catapult throws a visitor off the back of the island, no parachute.
+        const ec = fresh(), v = ec.actors[0], I2 = S.ARENA, [cx, cz] = I2.catapults.red[0];
+        Object.assign(v, { x: cx, z: cz, y: 0, carrying: null, grounded: true });
+        const threw = S.launch(ec, 0), outZ = v.vz < 0 && !v.flight;
+        run(ec, 4, still, () => !S.onIsland(v.x, v.z) && v.y < 0);
+        rows.enemyCat = threw && outZ && !S.onIsland(v.x, v.z);
+        // A carrier flung by it keeps the block in flight: jetpacked back it still has it; fallen all the way, the block
+        // goes home with no drop at the edge. An ordinary walk off the edge still drops it there.
+        const fling = () => { const q = fresh(), c1 = q.actors[0], [fx, fz] = S.ARENA.catapults.red[0]; Object.assign(c1, { x: fx, z: fz, y: 0, carrying: "red", grounded: true }); q.flags.red.state = "carried"; q.flags.red.carrier = 0; S.launch(q, 0); return [q, c1]; };
+        let [fq, fc] = fling();
+        const fallLog = run(fq, 12, still, () => fc.falls > 0);
+        rows.flungFalls = fc.falls === 1 && !fc.carrying && fq.flags.red.state === "home" && !fallLog.edgedrop && !!fallLog.return;
+        [fq, fc] = fling();
+        run(fq, 6, still, () => fc.knock <= 0);
+        const home = { x: 0, z: 0, jet: 1 };
+        run(fq, 8, home, () => { const l = Math.hypot(fc.x, fc.z) || 1; home.x = -fc.x / l; home.z = -fc.z / l; home.jet = S.onIsland(fc.x, fc.z) ? 0 : 1; return fc.grounded && S.onIsland(fc.x, fc.z); });
+        rows.flungRecovers = fc.grounded && S.onIsland(fc.x, fc.z) && fc.carrying === "red" && fc.falls === 0 && !fc.flung;
+        Object.assign(fc, { x: 0, z: 200, y: -1, vy: -3, grounded: false });
+        const walkLog = run(fq, 0.2, still, () => !fc.carrying);
+        rows.walkOffDrops = !fc.carrying && (fq.flags.red.state === "dropped") && !walkLog.return;
+        const bot = fresh(), bv = bot.actors[1], [bx, bz] = S.ARENA.catapults.red[0];
+        bv.bot = true; Object.assign(bv, { x: bx, z: bz, y: 0, grounded: true });
+        rows.enemyCatBot = !S.nearEnemyCatapult(bot, bv);
+      }
+      record("block frenzy grapple: a hook found at a hidden spot bites rock and reels its Ooga in, yanks a block off a rival carrier but not a teammate, a wallet bomb steals a held hook, and a hook lost over the edge goes back into hiding", Object.values(rows).every(Boolean), JSON.stringify(rows));
+      {
+        // wicked's gorillas: a charge and grab dropping the block where it was grabbed, a drag by the feet to the nearest
+        // edge, a throw off it, a jetpack back, breaking free by mashing, and the hook stunning a gorilla to free its
+        // captive, once per cooldown.
+        const hunt = (map, i, x, z) => { const m = fresh(map), g = m.gorillas[i]; g.x = g.wx = g.hx = x; g.z = g.wz = g.hz = z; g.state = 0; g.t = 0; return [m, g]; };
+        const out = {};
+        let [m, g] = hunt("jungle", 0, -12, 23.5);
+        const v = m.actors[0];
+        v.x = -12; v.z = 25; v.y = 0; v.carrying = "red"; m.flags.red.state = "carried"; m.flags.red.carrier = 0;
+        run(m, 0.3, still, () => v.grabbed);
+        out.grab = v.grabbed === 1 && g.state === 2 && !v.carrying && m.flags.red.state === "dropped" && Math.abs(m.flags.red.z - 25) < 1.5;
+        const edge = S.edgeDist(g.ex, g.ez) <= 1.5;
+        run(m, 12, still, () => g.state === 5 || !v.grabbed);
+        out.drag = edge && g.state === 5 && Math.hypot(v.x - g.x, v.z - g.z) < 2 && S.edgeDist(g.x, g.z) <= 2.2;
+        const thrown = run(m, 1, still, () => !v.grabbed);
+        out.thrown = !!thrown.thrown && Math.hypot(v.vx, v.vz) > 5 && v.vy > 5 && g.state === 3 && !S.onIsland(v.x, v.z);
+        // Steering back in, the jetpack held only until back over the island.
+        const fly = { x: Math.sign(-v.x) * Math.abs(v.vx) / (Math.hypot(v.vx, v.vz) || 1), z: Math.sign(-v.z) * Math.abs(v.vz) / (Math.hypot(v.vx, v.vz) || 1), jet: 1 };
+        run(m, 8, fly, () => { fly.jet = S.onIsland(v.x, v.z) ? 0 : 1; return v.grounded && S.onIsland(v.x, v.z); });
+        out.back = v.grounded && S.onIsland(v.x, v.z) && v.falls === 0;
+        [m, g] = hunt("fort", 1, 0, -14);
+        const e = m.actors[0];
+        e.x = 0; e.z = -15; run(m, 0.3, still, () => e.grabbed);
+        const held = e.grabbed === 2, mash = { x: 0, z: 0, jump: 0 };
+        for (let t = 0, n = 0; t < 3 && e.grabbed; t += S.CONFIG.STEP, n++) { mash.jump = n % 10 === 0 ? 1 : 0; S.tick(m, S.CONFIG.STEP, mash); m.eventCount = 0; }
+        out.escape = held && !e.grabbed && g.state === 3;
+        [m, g] = hunt("jungle", 0, -17, 25);
+        const cap = m.actors[1], o2 = m.actors[0];
+        cap.x = -17; cap.z = 26; run(m, 0.3, still, () => cap.grabbed);
+        o2.hook = 1; o2.x = g.x; o2.z = g.z - 8;
+        S.grapple(m, 0, 0, 0);
+        const stunLog = run(m, 0.6, still, () => g.state === 4);
+        out.stun = !!stunLog.gorillahooked && !cap.grabbed && g.state === 4 && g.hookCool > 0;
+        // The grip: the struggle meter fills a press at a time against its drain, paint or a blast doesn't break it, a
+        // held key counts once, and an idle meter empties.
+        [m, g] = hunt("fort", 1, 0, -14);
+        const grip = m.actors[0];
+        for (const o of m.actors) if (o.id) o.bot = true;
+        Object.assign(grip, { x: 0, z: -15 }); run(m, 0.3, still, () => grip.grabbed);
+        const press = { x: 0, z: 0, jump: 0 }, gb = m.bots.gorilla, need = gb.need;
+        const oneTick = () => { S.tick(m, S.CONFIG.STEP, press); m.eventCount = 0; };
+        press.jump = 1; for (let k = 0; k < 24; k++) oneTick();
+        out.heldOnce = grip.grabFill > 0.5 && grip.grabFill <= 1 && press.jump === 0;
+        for (let k = 0; k < 120 && grip.grabFill > 0; k++) oneTick();
+        out.drains = grip.grabFill === 0 && grip.grabbed === 2;
+        for (let k = 0; k < need - 2; k++) { press.jump = 1; oneTick(); }
+        const stillHeld = grip.grabbed === 2;
+        const shot = m.shots.find((q) => !q.live);
+        Object.assign(shot, { live: true, kind: "paint", team: "blue", owner: 1, t: 0, ox: g.x, oz: g.z, x: g.x, y: 1.2, z: g.z, vx: 0.1, vy: 0, vz: 0, target: -1 });
+        oneTick();
+        const paintHolds = grip.grabbed === 2 && g.holding === 0;
+        for (let k = 0; k < 4 && grip.grabbed; k++) { press.jump = 1; oneTick(); }
+        out.grip = need === S.CONFIG.GRAB_NEED && stillHeld && paintHolds && !grip.grabbed;
+        // Every difficulty: more presses against a faster drain, and every gorilla number a step harder than the last.
+        const LEVELS = ["easy", "normal", "hard", "expert"].map((k) => S.SKILLS[k].gorilla);
+        const rises = (f, sign = 1) => LEVELS.every((l, i) => !i || (l[f] - LEVELS[i - 1][f]) * sign > 0);
+        out.meterRises = rises("need") && rises("drain") && rises("mash");
+        out.gorillaRises = rises("charge") && rises("drag") && rises("sight") && rises("reach") && rises("rest", -1);
+        // Beatable: an idle-meter fill at a firm mash (9 a second, 5 on Easy) beats the longest drag from home on Expert.
+        out.possible = LEVELS.every((l, i) => l.need / ((i ? 9 : 5) - l.drain) < 4.5);
+        // A round of bots still finishes at Expert.
+        const expert = S.create({ seed: 11, prep: 0, map: "fort", skill: "expert", target: 1 });
+        for (const o of expert.actors) o.bot = true;
+        for (let t = 0; t < 600 && !expert.over; t += S.CONFIG.STEP) { S.tick(expert, S.CONFIG.STEP, still); expert.eventCount = 0; }
+        out.expertRound = expert.over;
+        out.count = S.MAPS.every((map) => S.ARENAS[map].gorillas.length >= 3 && S.ARENAS[map].gorillas.length <= 4);
+        // The whole capture, on every map, from around every piece of terrain and across the field: grabbed, dragged by a
+        // route that gets there, thrown from the edge past it and off the ground.
+        const sweep = {};
+        for (const map of S.MAPS) {
+          const I = S.ARENAS[map], spots = [[0, I.L * 0.25], [I.W * 0.5, I.L * 0.4], [-I.W * 0.6, -I.L * 0.5]], done = { spots: 0, thrown: 0, off: 0, fails: [] };
+          for (const [kind, b] of I.terrain.filter(([k, bx], n) => k !== "cave" && bx[5] === 0 && n % 3 === 0)) if (kind !== "cave") spots.push([b[0] - 1.6, (b[2] + b[3]) / 2], [b[1] + 1.6, (b[2] + b[3]) / 2], [(b[0] + b[1]) / 2, b[2] - 1.6]);
+          for (const [x, z] of spots) {
+            // Only open ground: a spot next to one piece of a rounded mound can land inside another.
+            S.create({ map }); if (S.solidAt(x, 0.5, z)) continue;
+            const q = fresh(map), who = q.actors[0], gor = q.gorillas[0];
+            for (const t of q.traps) t.dark = 1e9;
+            for (const k of q.crates) k.live = false;
+            Object.assign(who, { x, z, y: 0 });
+            S.resolve(who, S.CONFIG.BODY_R);
+            Object.assign(gor, { state: 0, t: 0, x: who.x + 0.8, z: who.z });
+            S.resolve(gor, S.CONFIG.GORILLA_R);
+            if (Math.hypot(gor.x - who.x, gor.z - who.z) > 1.1) { gor.x = who.x - 0.8; gor.z = who.z; S.resolve(gor, S.CONFIG.GORILLA_R); }
+            gor.hx = gor.wx = gor.x; gor.hz = gor.wz = gor.z;
+            const seen = run(q, 30, still, () => !S.onIsland(who.x, who.z) && who.y < -1.5);
+            done.spots++;
+            if (seen.thrown) done.thrown++;
+            if (seen.grab && seen.windup && seen.thrown && !seen.letgo && !S.onIsland(who.x, who.z) && !who.grounded) done.off++;
+            else done.fails.push([x, z, Object.keys(seen).join()]);
+          }
+          sweep[map] = done;
+        }
+        record("block frenzy capture: on every map, from around the terrain and across the field, a gorilla grabs the Ooga, drags it to an edge by a route that gets there, and throws it off the island",
+          Object.values(sweep).every((v) => v.spots >= 12 && v.off === v.spots), JSON.stringify(sweep));
+        record("block frenzy gorillas: a charge and grab drops the block where it was grabbed, the captive is dragged by the feet to the nearest edge and thrown off, and jetpacks back; mashing breaks free; a hook stuns a gorilla and frees its captive; three or four on every map", Object.values(out).every(Boolean), JSON.stringify(out));
+      }
+    }
+    {
+      // The play strip repaints only when something it shows moved (`stripChanged`, the scene's own test before it
+      // touches the DOM): never on an unchanged frame or inside a clock second, on every input it shows, and afresh for
+      // a new round or visit (`shown` cleared, as `start` does).
+      const sim = S.create({ seed: 5, prep: 0 }), me = sim.actors[0], view = S.stripView(), changed = () => S.stripChanged(sim, view);
+      const first = changed(), quiet = [changed(), changed(), changed()].every((c) => !c);
+      sim.time = 0.4; const subSecond = !changed(); sim.time = 1; const second = changed() && !changed();
+      const misses = [];
+      const each = (name, set, unset) => { set(); const on = changed(), held = !changed(); unset(); const off = changed(), after = !changed(); if (!(on && held && off && after)) misses.push(name); };
+      each("blue score", () => { sim.score.blue = 1; }, () => { sim.score.blue = 0; });
+      each("red score", () => { sim.score.red = 2; }, () => { sim.score.red = 0; });
+      each("own block", () => { sim.flags[sim.team].state = "carried"; }, () => { sim.flags[sim.team].state = "home"; });
+      each("their block", () => { sim.flags[sim.rival].state = "dropped"; }, () => { sim.flags[sim.rival].state = "home"; });
+      each("carrying", () => { me.carrying = sim.rival; }, () => { me.carrying = null; });
+      each("holding", () => { me.holding = true; }, () => { me.holding = false; });
+      each("splatted", () => { me.splat = 1; }, () => { me.splat = 0; });
+      for (const k of ["boots", "laser", "monkeys"]) each(k, () => { me[k] = 2.5; }, () => { me[k] = 0; });
+      for (const k of ["halving", "cold"]) each(k, () => { sim[k][sim.team] = 3; }, () => { sim[k][sim.team] = 0; });
+      me.boots = 2.5; changed(); me.boots = 2.1; const powerSecond = !changed(); me.boots = 1.9; const powerTick = changed(); me.boots = 0; changed();
+      // Their power-ups are not on the visitor's strip.
+      sim.halving[sim.rival] = 4; const rivalPower = !changed(); sim.halving[sim.rival] = 0;
+      // A round played through the sim's own steps: a repaint whenever what shows moved, and none otherwise.
+      const still = { x: 0, z: 0, sprint: 0, jump: 0 };
+      // Each frame a fresh view read from the sim must match the kept one, so a frame that repaints nothing missed nothing.
+      let frames = 0, paints = 0, missed = 0;
+      for (let t = 0; t < 40 && !sim.over; t += 1 / 60) {
+        S.step(sim, 1 / 60, still); frames++;
+        if (changed()) paints++;
+        const probe = S.stripView(); S.stripChanged(sim, probe);
+        if (JSON.stringify(probe) !== JSON.stringify(view)) missed++;
+      }
+      const wasShown = changed() === false;
+      view.shown = false; const fresh = changed() && !changed();
+      S.reset(sim, 9); view.shown = false; const newRound = changed() && view.blue === 0 && view.red === 0 && view.second === 0 && view.own === "home" && view.theirs === "home" && !changed();
+      record("block frenzy strip: an unchanged frame or one inside a clock second repaints nothing, each score, block state, carry, hold, splat and power-up second repaints once, and a new round or visit repaints afresh",
+        first && quiet && subSecond && second && !misses.length && powerSecond && powerTick && rivalPower && frames > 2000 && paints > 0 && paints < frames / 10 && missed === 0 && wasShown && fresh && newRound,
+        JSON.stringify({ first, quiet, subSecond, second, misses, powerSecond, powerTick, rivalPower, frames, paints, missed, wasShown, fresh, newRound }));
+    }
   }
   {
     const run = () => { const sim = M.create({ seed: 42 }); sim.place(R.GPU); return sim; };
@@ -7288,7 +8003,7 @@ const gameRulesChecks = async () => {
     // The jackpot wheel, from arcade-models.js and its scene half on the builders they load with: the house wins slowly, and every
     // wedge, from a turn at rest and one far round after many spins, stops under the clapper wherever in it the spin
     // aims, after its whole turns and less than one more.
-    for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "hockey-wire", "arcade-models", "arcade-scene-models"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+    for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "hockey-wire", "arcade-models", "haunt-models", "arcade-scene-models"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
     runInNewContext(await readFile(new URL("../src/js/arcade-games.js", import.meta.url), "utf8"), context);
     // Solo smash assistance must never send an out-of-bounds authoritative frame at a rail.
     const soloAim={x:1}, solo=BL.arcadeGames.airHockey({node:BL.scene.createNode(),aim:soloAim,onEnd(){},burst(){}});
@@ -7378,6 +8093,20 @@ const gameRulesChecks = async () => {
     record("arcade scores: every carnival and retro machine carries its own permanent registered ID, including duplicates; excluded worlds have no score contract",
       Object.keys(machines).length === 16 && ids.length === 26 && new Set(ids).size === 26 && registered
         && L.frames.hockey.length === 3 && ["ghost", "poker", "dsb", "hockey"].every(id => BL.highscoreRules.get(id) === null), JSON.stringify({ registered, machines: ids }));
+    // Block Frenzy adds a fifth stage slot, so nothing on the mezzanine may shift: each retro cabinet still plays its
+    // own retro game under that game's registered ID, in order after the stage's slots; every cabinet game is on
+    // exactly one cabinet (Rally on its service cabinet by the retro row, Cloud Hopper in Rally's old stage slot); a
+    // cabinet's machine ID, where it has one, is its own game's; and Block Frenzy, outside the shared registry, has none.
+    const cabs = A.CABINETS, retroRows = cabs.filter(c => c.retro >= 0), stage = cabs.filter(c => c.retro < 0 && !c.service), first = retroRows[0].index;
+    const retroOwn = retroRows.length === A.RETRO.length && first === stage.length && retroRows.every((c, k) => c.index === first + k && c.retro === k
+      && c.game === -1 && c.scoreId === A.RETRO[k].scoreId && BL.highscoreRules.games[A.RETRO[k].id].machines.includes(c.scoreId));
+    const gameOwn = A.GAMES.every((g, k) => cabs.filter(c => c.game === k).length === 1) && cabs.every(c => c.retro >= 0 || A.GAMES[c.game]);
+    const idsOwn = cabs.every(c => c.retro >= 0 || c.scoreId === null || (c.scoreId === A.GAMES[c.game].scoreId && BL.highscoreRules.get(A.GAMES[c.game].id) !== null));
+    const byId = (id) => cabs.find(c => c.game === A.GAMES.findIndex(g => g.id === id));
+    const placed = stage.length === 5 && byId("cloud-hopper") === cabs[0] && byId("block") === stage[4] && byId("race").service && byId("race").z === retroRows[0].z
+      && byId("block").scoreId === null && BL.highscoreRules.get("block") === null;
+    record("arcade cabinets: Block Frenzy's stage slot leaves every retro cabinet on its own game and score ID, and every cabinet game stands on one cabinet with its own ID or none",
+      retroOwn && gameOwn && idsOwn && placed, JSON.stringify(cabs.map(c => [c.index, c.game, c.retro, c.scoreId, !!c.service])));
     {
       // The handrail slide: Space offers it only at a stair's head, inside the stair beside its hall-side handrail and
       // facing down it, never anywhere along the deck's rail between the stairs' heads; a slide runs the cane from
@@ -10932,6 +11661,87 @@ const dropSteer = (canopy) => `(() => { const B = window.__ooga, D = B.drop; ${E
   for (const k of ["a", "d", "q", "e"]) out[k] = +(out[k] - out.none).toFixed(1);
   out.none = +out.none.toFixed(1);
   return out; })()`;
+const blockState = `({ phase: window.__ooga.block.phase, card: !document.querySelector('[data-intro="block"]').hidden, board: !document.getElementById("block-board").hidden })`;
+const blockStart = { name: "block start", why: "rule: Space only closes the title card, Enter starts the round, Escape steps back as on the island (the mouse, a pause the round waits in, then the sides with nothing saved), and nothing acts while paused", run: async (b) => {
+  const fresh = await b.evaluate(blockState);
+  await b.key(" ");
+  const closed = await b.evaluate(blockState);
+  await b.key("Enter");
+  const play = await b.evaluate(blockState);
+  // The round locks the mouse, so the first Escape lets it go (a headless page may never lock it) and the next pauses.
+  await b.key("Escape");
+  const freed = await b.evaluate(`({ ...${blockState}, locked: !!document.pointerLockElement, paused: window.__ooga.block.paused })`);
+  if (!freed.paused) await b.key("Escape");
+  // Held: the fortifying clock stands still however long the frames run.
+  const held = await b.evaluate(`(() => { const B = window.__ooga, s = B.block.sim, before = s.prep; B.advance(1, 1 / 60); return { ...${blockState}, paused: B.block.paused, still: s.prep === before }; })()`);
+  // The real buttons while held: the touch Throw!, the tool bar's Crate, Throw and Ride, and B. Nothing fires, places,
+  // passes or rides; after P the same buttons act. `stage` puts the visitor's Ooga where each can act: a carried block
+  // in hand, then up on its own tower by the zipline.
+  const actions = `(() => {
+    const B = window.__ooga, S = window.BL.blockSim, s = B.block.sim, a = s.actors[0], tools = (k) => document.querySelector('#block-tools [data-tool="' + k + '"]');
+    const press = (k) => { const t = tools(k); t.disabled = false; t.click(); };
+    const shots = () => s.shots.filter((x) => x.live).length;
+    s.prep = 0; a.cooldown = 0; a.crates = 3; a.splat = a.trapped = 0;
+    for (const o of s.actors) if (o.id) { o.x = 20; o.z = o.team === s.team ? 34 : -34; }
+    B.block.chooseTool("paint");
+    Object.assign(a, { x: -14, y: 0, z: s.team === "blue" ? 6 : -6, vx: 0, vy: 0, vz: 0, grounded: true, holding: false, riding: false });
+    const fired = shots(); document.getElementById("block-paint").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+    window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    const crates = a.crates; press("crate");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", code: "KeyB", bubbles: true })); window.dispatchEvent(new KeyboardEvent("keyup", { key: "b", code: "KeyB", bubbles: true }));
+    const f = s.flags[s.rival]; f.state = "carried"; f.carrier = 0; a.carrying = s.rival; press("pass");
+    const passed = f.state !== "carried";
+    if (!passed) { f.state = "home"; f.carrier = null; a.carrying = null; }
+    const z = S.ARENA.zips[a.team]; Object.assign(a, { x: z.ax, z: z.az, y: S.CONFIG.TOWER_TOP, vy: 0, grounded: true }); press("zip");
+    const rode = !!a.riding;
+    return { paused: B.block.paused, fired: shots() > fired, placed: a.crates < crates, passed, rode };
+  })()`;
+  const heldActions = await b.evaluate(actions);
+  await b.key("p");
+  // The round's own clock (`time`), since the held actions above ended the fortifying.
+  const resumed = await b.evaluate(`(() => { const B = window.__ooga, s = B.block.sim, before = s.time; B.advance(0.5, 1 / 60); return { paused: B.block.paused, ran: s.time > before }; })()`);
+  const liveActions = await b.evaluate(actions);
+  await b.evaluate(`(() => { const a = window.__ooga.block.sim.actors[0]; a.riding = false; a.zipT = 0; a.y = 0; a.x = -14; a.z = 6; })()`);
+  // Back to the sides one step at a time: the tower's scope may have left the view in first person.
+  for (let i = 0; i < 4 && (await b.evaluate(`window.__ooga.block.phase`)) === "play"; i++) await b.key("Escape");
+  const back = await b.evaluate(`({ ...${blockState}, paused: window.__ooga.block.paused, games: window.__ooga.game.state.block.games })`);
+  record("block start: Space closes the title card on the sides, Enter plays, Escape frees the mouse, then pauses (P plays on), then returns to the sides unsaved",
+    fresh.card && fresh.phase === "board" && !closed.card && closed.phase === "board" && play.phase === "play" && !freed.locked
+      && held.phase === "play" && held.paused && held.still && !resumed.paused && resumed.ran && back.phase === "board" && back.board && !back.paused && back.games === 0,
+    JSON.stringify({ fresh, closed, play, freed, held, resumed, back }));
+  record("block pause: while paused the touch Throw!, the tool bar's Crate, Throw and Ride, and B do nothing; after P each acts",
+    heldActions.paused && !heldActions.fired && !heldActions.placed && !heldActions.passed && !heldActions.rode
+      && !liveActions.paused && liveActions.fired && liveActions.placed && liveActions.passed && liveActions.rode,
+    JSON.stringify({ heldActions, liveActions }));
+} };
+// Steering measured on screen, as on the island: W A S D move the Ooga forward, back, left and right of where the
+// camera looks, and Q and E turn it, the chase camera following round, Q to the left on screen and E to the right.
+const blockWalk = { name: "block walk", why: "rule: W A S D move the visitor's Ooga their way on screen, and Q and E turn it and the camera their way", run: async (b) => {
+  await b.key("Enter");
+  const rows = {};
+  for (const k of "wsadqe") {
+    await b.evaluate(`(() => { const B = window.__ooga, s = B.block.sim, a = s.actors[0]; s.prep = 0; Object.assign(s.weather, { left: 1e9 }); a.x = -14; a.z = 2; a.vx = a.vz = 0; for (const o of s.actors) if (o.id) { o.x = 20; o.z = o.team === s.team ? 30 : -30; } B.advance(0.6, 1 / 60); const c = B.camera, vx = c.target.x - c.position.x, vz = c.target.z - c.position.z, l = Math.hypot(vx, vz); window.__walk = { fx: vx / l, fz: vz / l, x0: a.x, z0: a.z }; })()`);
+    await holdKey(b, k, 0.5);
+    rows[k] = await b.evaluate(`(() => { const q = window.__walk, a = window.__ooga.block.sim.actors[0], c = window.__ooga.camera, dx = a.x - q.x0, dz = a.z - q.z0, vx = c.target.x - c.position.x, vz = c.target.z - c.position.z, l = Math.hypot(vx, vz); return { fwd: +(dx * q.fx + dz * q.fz).toFixed(2), side: +(dx * -q.fz + dz * q.fx).toFixed(2), turn: +((vx / l) * -q.fz + (vz / l) * q.fx).toFixed(2) }; })()`);
+  }
+  // Movement along the old forward and right, and the camera's new forward against the old right: negative is to
+  // the left on screen. A and D step without turning the view; Q and E turn it.
+  const ok = rows.w.fwd > 1 && rows.s.fwd < -1 && rows.a.side < -1 && rows.d.side > 1 && Math.abs(rows.a.turn) < 0.1 && Math.abs(rows.d.turn) < 0.1
+    && rows.q.turn < -0.3 && rows.e.turn > 0.3;
+  record("block walk: W and S run the Ooga forward and back on screen, A and D step it left and right, Q turns it and the camera left and E right", ok, JSON.stringify(rows));
+} };
+const blockQuiz = { name: "block quiz", why: "rule: a quiz trap holds the visitor until a right answer, a wrong one locks the answers, and a right one frees them", run: async (b) => {
+  const r = await b.evaluate(`(() => { const B = window.__ooga, D = B.block, s = D.sim, a = s.actors[0], t = s.traps[2];
+    a.x = t.x; a.z = t.z + 0.5; B.advance(0.2, 1 / 60);
+    const open = D.quiz.open && !document.getElementById("block-quiz").hidden && a.trapped > 0;
+    D.answer((D.quiz.right + 1) % 4);
+    const locked = D.quiz.locked && a.trapped > 0;
+    return { open, locked }; })()`);
+  await b.evaluate(`new Promise((resolve) => setTimeout(resolve, 2700))`);
+  const f = await b.evaluate(`(() => { const B = window.__ooga, D = B.block, a = D.sim.actors[0]; const fresh = !D.quiz.locked && D.quiz.asked === 2; D.answer(D.quiz.right); B.advance(0.1, 1 / 60); return { fresh, free: a.trapped === 0 && !D.quiz.open && document.getElementById("block-quiz").hidden }; })()`);
+  record("block quiz: a trap opens the question, a wrong answer locks the card and brings another, a right answer breaks the bubble", r.open && r.locked && f.fresh && f.free, JSON.stringify({ ...r, ...f }));
+} };
+const blockRun = `(() => { const B = window.__ooga, D = B.block; D.start(); for (let i = 0; i < 80 && D.phase === "play"; i++) D.simulate(15, true); B.advance(0.3, 1 / 30); const save = B.game.state.block; return { ok: D.phase === "results" && !document.getElementById("block-results").hidden && save.games === 1 && save.wins === (D.result.won ? 1 : 0), phase: D.phase, result: D.result, save }; })()`;
 const dropStart = { name: "drop start", why: "regression: Space on the title card also launched the flight", run: async (b) => {
   const st = () => b.evaluate(`({ phase: window.__ooga.drop.phase, card: !document.querySelector('[data-intro="drop"]').hidden })`);
   const fresh = await st();
@@ -22072,6 +22882,7 @@ scene("race", { label:"optional rig link fallback",url:hubPage(src, "scene=hub")
 }}]});
 scene("race", { query: "rain=0&draw=0", steps: [raceStart, raceOwn, raceBench, { name: "race tracks", why: "regression: the 12-slot grid spawned a free banana on Banana Bay", run: async (b) => { await b.evaluate(`window.__ooga.race.toGarage()`); await raceTracks[1](b); } }, raceRigs, raceRigContext, racePause, play("race", "a whole cup under the autopilot: one drawn field of fifteen runs every race and finishes in order, the cup medal and every track's best are saved", cupRun), raceMirror, raceAgain, trip("race")] });
 scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on the target, scores its own medal and is saved as the best", dropRun), dropCrash, trip("drop"), dropOwn] });
+scene("block", { steps: [blockStart, blockWalk, blockQuiz, play("block", "a round on autopilot reaches three captures, shows its results and saves the round", blockRun), trip("block")] });
 scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit"), orbitOwn] });
 scene("mine", { steps: [mineResume, trip("mine"), mineControls, mineOwn] });
 // ---- The Lightning Jet Hangar ----
