@@ -35,8 +35,14 @@
   // Ooga no more than `past` beyond its own shield, so it is seen coming through. Where the switch will take long (the
   // island's rebuild on the way out, the hall's first build of a page on the way in), the Ooga stands `beat` seconds at
   // the shield first, as the Timechain Sphere's doorway does, so the switch lands on a still frame. `limit` lets go of
-  // a walk that runs long.
-  const GLIDE = { reach: 3, moving: 0.2, speed: 0.55, ahead: 1.6, through: 0.3, beat: 0.15, still: 0.1, dissolve: 0.45, limit: 4, past: 0.5 };
+  // a walk that runs long. Walking in from the island the hall is readied ahead of the walk (door-ready.js), with `warm`
+  // milliseconds of a frame while someone is near; not ready by `hold` metres before the shield, the Ooga stands there
+  // with the island running on and `hurry` milliseconds a frame. After `slow` seconds the shield beats every `pulse` and
+  // says so; the hangar's code, which the hall opens without, is waited for only `extra` seconds, and `wait` gives up.
+  // The gate's walk (`eyes`, below) goes at `eyePace` of a walk, slow enough that the swoop into the eyes is done by the
+  // time they reach the shield, and hands over as the eye comes within `hand` metres of it. The hangar's door still
+  // walks in the third person, the view no farther behind than `view` metres and no higher than `pitch`.
+  const GLIDE = { reach: 3, moving: 0.2, speed: 0.55, eyePace: 0.33, ahead: 1.6, through: 0.3, beat: 0.15, still: 0.1, dissolve: 0.45, limit: 4, past: 0.5, hold: 0.7, warm: 3, hurry: 20, slow: 0.6, pulse: 0.9, extra: 1.5, wait: 15, view: 4, pitch: 0.45, hand: 0.15 };
   // The frame held over the switch: one canvas for the page, grabbed from the scene's canvas right after it is drawn
   // (`grab`, from the scene's overlay pass in the frame the switch is asked for) and painted over the next scene's
   // overlay at `k`, eased (`still`).
@@ -366,5 +372,83 @@
     return { root, update, suspend, resume, dispose, debug };
   };
 
-  BL.factoryWindow = { create, relief, grab, still, crossing, arrival, AXIS, DEPTH, TINT, GLIDE };
+  // The view through the gate's walk, as the Timechain Sphere's doorway and Ooga Arcade's doors take theirs: `enter` swoops
+  // it from wherever it stands into the Ooga's own eyes over EYES_S, looking straight down the way through (`heading`), so
+  // the view held there and the one the next scene takes over are the same whichever way the Ooga is still turning.
+  // `arrive` starts there on the far side, and once the Ooga has walked `stopPast(dist)` metres on, far enough that the
+  // view handed back `dist` behind it stands clear of the shield, `letGo` gives it back and glides the view out from the
+  // eyes to the visitor's own. Runs (`view`) once the camera is final for the frame. Allocates nothing a frame.
+  const EYES_S = 0.45, EYE_AHEAD = 0.16, LET_GO_PITCH = 0.12, ARRIVE = 2.4, CLEAR_BACK = 0.7;
+  const CALM = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
+  const stopPast = (dist) => Math.max(ARRIVE, dist * Math.cos(LET_GO_PITCH) + CLEAR_BACK);
+  const eyes = (pilot, camera) => {
+    const IN_EYES = 1, GOING_BACK = 2, from = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 }, to = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 };
+    let mode = 0, cave = null, heading = 0, glide = 1, fromFov = 0, head = null, headWas = false;
+    const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+    const eyePose = (out) => {
+      const p = cave.root.position, ahead = EYE_AHEAD * cave.traits.height;
+      out.x = p.x + Math.sin(heading) * ahead; out.z = p.z + Math.cos(heading) * ahead;
+      out.y = p.y - cave.baseY + cave.headOffset * 0.95 + cave.viewLift;
+      out.yaw = heading; out.pitch = 0;
+    };
+    const read = (out) => {
+      const p = camera.position, t = camera.target, dx = t.x - p.x, dy = t.y - p.y, dz = t.z - p.z;
+      out.x = p.x; out.y = p.y; out.z = p.z; out.yaw = Math.atan2(dx, dz); out.pitch = Math.atan2(dy, Math.hypot(dx, dz));
+    };
+    const put = (k) => {
+      const e = k * k * (3 - 2 * k), yaw = from.yaw + wrap(to.yaw - from.yaw) * e, pitch = from.pitch + (to.pitch - from.pitch) * e, cp = Math.cos(pitch), p = camera.position, t = camera.target;
+      p.x = from.x + (to.x - from.x) * e; p.y = from.y + (to.y - from.y) * e; p.z = from.z + (to.z - from.z) * e;
+      t.x = p.x + Math.sin(yaw) * cp; t.y = p.y + Math.sin(pitch); t.z = p.z + Math.cos(yaw) * cp;
+      camera.up = null;
+      return e;
+    };
+    const hideHead = (on) => {
+      if (on && !head) { head = cave.parts.head; headWas = head.cameraHidden; head.cameraHidden = true; }
+      else if (!on && head) { head.cameraHidden = headWas; head = null; }
+    };
+    const enter = (walker, way) => {
+      cave = walker; heading = way; mode = IN_EYES; glide = CALM.matches ? 1 : 0; fromFov = camera.fov;
+      read(from);
+      pilot.setExternalControl(true);
+    };
+    const arrive = (walker, way) => {
+      cave = walker; heading = way; mode = IN_EYES; glide = 1; fromFov = 0;
+      pilot.setExternalControl(true);
+      hideHead(true);
+    };
+    const letGo = (dist) => {
+      if (mode !== IN_EYES) return;
+      const walker = cave;
+      hideHead(false);
+      pilot.setExternalControl(false);
+      read(from);
+      fromFov = camera.fov; mode = GOING_BACK; glide = CALM.matches ? 1 : 0; cave = null;
+      if (pilot.player !== walker) return;
+      const p = walker.root.position;
+      pilot.navigate({ position: { x: p.x, y: p.y - walker.baseY, z: p.z }, yaw: walker.root.rotation.y + Math.PI, pitch: LET_GO_PITCH, dist });
+    };
+    const view = (dt) => {
+      if (mode === IN_EYES) {
+        glide = Math.min(1, glide + dt / EYES_S);
+        eyePose(to);
+        const e = put(glide), fov = pilot.eyeFov();
+        camera.fov = fromFov ? fromFov + (fov - fromFov) * e : fov;
+        if (glide > 0.5) hideHead(true);
+      } else if (mode === GOING_BACK) {
+        glide = Math.min(1, glide + dt / EYES_S);
+        read(to);
+        const fov = camera.fov, e = put(glide);
+        camera.fov = fromFov + (fov - fromFov) * e;
+        if (glide >= 1) mode = 0;
+      }
+    };
+    // A walk ended by anything but its own end: the Ooga its head back, the view the pilot's again at once.
+    const reset = () => {
+      if (mode === IN_EYES) pilot.setExternalControl(false);
+      if (head) hideHead(false);
+      mode = 0; cave = null;
+    };
+    return { enter, arrive, letGo, view, reset, ahead: (walker) => EYE_AHEAD * walker.traits.height, get on() { return mode === IN_EYES; }, get there() { return mode === IN_EYES && glide >= 1; } };
+  };
+  BL.factoryWindow = { create, relief, grab, still, crossing, arrival, eyes, stopPast, AXIS, DEPTH, TINT, GLIDE };
 })();

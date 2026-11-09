@@ -86,6 +86,12 @@
     return s;
   };
   // Joystick bases, a hold-to-climb button, a canvas whose mouse chord walks, and a Space handler
+  // The keys physically down, whichever scene is listening. A scene's controls learn of a key only from its events, so a
+  // key held across a change of scene is lost to them (at once where a later key has stopped its auto-repeat).
+  const physical = new Map();
+  window.addEventListener("keydown", (e) => { if (!e.metaKey && !e.ctrlKey && !e.altKey && !uiKey(e)) physical.set(e.code || e.key, e); }, true);
+  window.addEventListener("keyup", (e) => physical.delete(e.code || e.key), true);
+  window.addEventListener("blur", () => physical.clear());
   const create = ({ move = null, look = null, boost = null, chord = null, onAction = null, pressActions = false, tabNavigation = false, shooter = () => false, canDescend = () => true } = {}) => {
     const held = { forward: 0, back: 0, left: 0, right: 0, yawLeft: 0, yawRight: 0, pitchDown: 0, pitchUp: 0, up: 0, space: 0, down: 0, boost: 0, chord: 0, sprint: 0, peek: 0 };
     const axes = { x: 0, y: 0, up: 0, yaw: 0, pitch: 0, keyPitch: 0, orbitYaw: 0, sprint: 0, peek: 0, shiftTap: 0 };
@@ -274,6 +280,14 @@
     // read without consuming a tap or a pad edge: what ends a look or a tour and goes to the Ooga instead.
     const moving = () => !!(moveTap || held.forward || held.back || held.left || held.right || held.up || held.space
       || held.chord || moveStick && (moveStick.x || moveStick.y) || pad.lx || pad.ly || padActions.held & PAD.act);
+    // A forward movement still held, which a walk just ended hands back to the player: true if there is one. Keys are
+    // taken up here from the physical record, with the sprint and sideways keys held with them; a stick is read live.
+    const takeForward = () => {
+      let forward = false;
+      for (const e of physical.values()) if (keyName(e) === "forward") forward = true;
+      if (forward) for (const e of physical.values()) { const name = keyName(e); if (name === "forward" || name === "left" || name === "right" || name === "sprint") held[name] = 1; }
+      return forward || pad.ly > 0.2 || !!moveStick && moveStick.y > 0.2;
+    };
     let listening = true;
     const dispose = () => {
       resets.delete(reset);
@@ -343,7 +357,7 @@
       if (moveStick) moveStick.resume();
       if (lookStick) lookStick.resume();
     };
-    return { read, moving, axes, clearPointer, reset, consumeTab, resume, borrowPitch, dispose, get rightShift() { return !!held.peek; } };
+    return { read, moving, takeForward, axes, clearPointer, reset, consumeTab, resume, borrowPitch, dispose, get rightShift() { return !!held.peek; } };
   };
   // Whether the controller was the last thing used, for words that name its buttons: a key or pointer press from the
   // visitor (never a key the pad delivered) hands prompts back to the keyboard.
