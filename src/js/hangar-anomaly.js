@@ -132,9 +132,10 @@
   // which the revs rock and put back at rest; `stage`, the stage it shows; `auto`: whether they come by themselves (off
   // on a test page, where only `debug.play` starts one); `gap`, a fixed wait between them instead of GAP's, s; `riders()`,
   // whether any Ooga stands on the Jet (`standsOn` says for one); `near(test)`, whether `test(x, z, feet, height,
-  // radius)` holds for anything that walks the hall.
+  // radius)` holds for anything that walks the hall; `busy()`, whether something else has the hall, which holds the next
+  // one off until it is done.
   // `room`: the rooms' fire (`hangar-room-fire.js`: `pick(i)`, where the bolt lands, `ignite()` and `burning`).
-  const create = ({ root, fire, sis, fx, audio, jet, stage, room, auto = true, gap = null, riders = () => false, near = () => false }) => {
+  const create = ({ root, fire, sis, fx, audio, jet, stage, room, auto = true, gap = null, riders = () => false, near = () => false, busy = () => false }) => {
     const SPARK = HM.blast().spark, BLUE = BL.models.particleGeometry("#a8ecff", 0.05, 1), J = jet.position;
     const exits = JM.EXHAUST.map((e) => ({ x: J.x + e.x, y: e.y, z: J.z + e.z, r: e.r }));
     // Where Kortik's Sis turns to: between the engines. How the Jet stands at rest. Each throat's glow, in the nozzles'
@@ -469,7 +470,7 @@
     const update = (dt) => {
       for (const a of arcs) if (a.life > 0 && (a.life -= dt) <= 0) a.node.visible = false;
       if (!kind) {
-        if (auto && (wait -= dt) <= 0 && !held()) {
+        if (auto && (wait -= dt) <= 0 && !held() && !busy()) {
           // The lowrider only with nobody on the Jet, the shuffle only with everyone clear of it: the next in the bag
           // instead, or the failed start.
           let k = next();

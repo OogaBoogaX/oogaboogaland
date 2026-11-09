@@ -31,8 +31,10 @@
   const INSTANCE_FLOATS = 20;
   const NO_OBJECT_CLIP = new Float32Array([0, 0, 0, -1]);
   const NO_OBJECT_SLAB = new Float32Array(4);
-  // A glossy reflector's capture: its size against the tier's mirror size, and how many frames apart it refreshes.
-  const GLOSS_CAPTURE = { size: 0.5, every: 2 };
+  // A glossy reflector's capture: its size against the tier's mirror size, and how many frames apart it refreshes on
+  // each tier at most. A capture shows the floor as the eye saw it then, so while the eye moves (a turn swings the view
+  // round the Ooga) one reused between captures trails the floor; High takes a fresh one every frame.
+  const GLOSS_CAPTURE = { size: 0.5, every: { high: 1, medium: 2, low: 2 } };
   // Up to two cone lights (`renderOpts.spotLight`, 12 floats each); a scene that passes one has the second zeroed.
   const NO_SPOT_LIGHT = new Float32Array(24), SPOT_SCRATCH = new Float32Array(24);
   const spotUniform = (spot) => {
@@ -1887,7 +1889,7 @@ void main() {
     // Stable records keep their own buffer, so a stationary prop never joins the per-frame copy.
     const instanceStream = { buffer: null, data: null, capacity: 0, slot: 0, trimFrame: -1, trimSince: -1 };
     const reflectorNodes = [], reflectorTargets = new Map();
-    let reflectorTurn = 0, reflectorPass = null, reflectorFrame = 0, glossFrame = 0;
+    let reflectorTurn = 0, reflectorPass = null, reflectorFrame = 0, glossClock = 0;
     let reducedCapture = false;
     // Glass (`geometry.glass`, its see-through alpha) draws after everything opaque and the sky, blended and leaving
     // the depth alone, back faces first so a tube shows its far wall through its near one. `glassPass` is set while it
@@ -2097,7 +2099,7 @@ void main() {
     };
     const reflectorTarget = (geometry) => {
       let t = reflectorTargets.get(geometry);
-      if (!t) reflectorTargets.set(geometry, t = { fb: null, tex: null, depth: null, size: 0, renderWidth: 0, renderHeight: 0, viewProj: new Float32Array(16), valid: false, area: 0, record: null });
+      if (!t) reflectorTargets.set(geometry, t = { fb: null, tex: null, depth: null, size: 0, renderWidth: 0, renderHeight: 0, viewProj: new Float32Array(16), valid: false, area: 0, record: null, at: 0 });
       return t;
     };
     // One square allocation per reflector at the tier's mirror size, as the mirror keeps.
@@ -4463,11 +4465,13 @@ void main() {
         const due = qualityName === "high" || reflectorFrame++ % settings.mirrorCadence === 0;
         if (!due && best >= 0 && reflectorTargets.get(reflectorNodes[best].geometry).valid
           && (qualityName === "low" || bestArea * 25 < width * height)) best = -1;
-        // A glossy one, once it has a reflection, refreshes no more often than every `GLOSS_CAPTURE.every` frames on any
-        // tier, nor takes the other pass's turn meanwhile (`resting`).
+        // A glossy one, once it has a reflection, waits its tier's `GLOSS_CAPTURE.every` frames from its last capture
+        // (`at`), nor takes the other pass's turn meanwhile (`resting`). A tier whose cadence is already that long refreshes
+        // it on its cadence: the wait is counted in frames, not in the tier's due frames.
+        glossClock++;
         let resting = -1;
         if (best >= 0 && reflectorNodes[best].geometry.gloss && reflectorTargets.get(reflectorNodes[best].geometry).valid
-          && glossFrame++ % GLOSS_CAPTURE.every) { resting = best; best = -1; }
+          && glossClock - reflectorTargets.get(reflectorNodes[best].geometry).at < GLOSS_CAPTURE.every[qualityName]) { resting = best; best = -1; }
         // One just come into view with nothing captured yet goes first.
         let turn = -1;
         for (let i = 0; due && i < n && turn < 0; i++) {
@@ -4483,7 +4487,9 @@ void main() {
           const i = pass ? turn : best;
           if (i < 0) continue;
           const node = reflectorNodes[i], t = reflectorTargets.get(node.geometry);
-          if (prepareMirrorCamera(camera, node, t)) renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB, matrix, spotLight, blacklight, -1, t);
+          if (!prepareMirrorCamera(camera, node, t)) continue;
+          renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB, matrix, spotLight, blacklight, -1, t);
+          t.at = glossClock;
         }
       }
       const viewActor = opts.beforeView?.();

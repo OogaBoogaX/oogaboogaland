@@ -62,6 +62,8 @@
   const ARRIVAL = { position: { x: 0, y: DOOR.y, z: DOOR.z - 4.6 }, target: { x: 0, y: DOOR.y + 1, z: DOOR.z - 4.6 }, yaw: 0.12, pitch: 0.3, dist: 4.2 };
   const ARRIVAL_TALL = { ...ARRIVAL, yaw: -0.45, pitch: 0.04 };
   const arrival = () => renderer.size.width < renderer.size.height ? ARRIVAL_TALL : ARRIVAL;
+  // Where a door keypad shows on screen as its panel opens (`hangar-keypad.js`'s `across`).
+  const KEYPAD_AT = { x: 0, y: 0, depth: 0 };
   // The walk through the door's shield either way, as the Factory's gate walks it (`factoryWindow.GLIDE`): the door as
   // the walk takes it (its middle, the way out through it, its shield), how far in from it an arrival stands, how near
   // the door a step back from there may come before it walks out (OUT_SLACK), and the view's reach as an Ooga comes in
@@ -200,7 +202,7 @@
   // it answers again; and how much of the hall's haze its shimmer cuts through.
   const SHIELD_NEAR = 0.6, SHIELD_REARM = 3, SHIELD_PIERCE = 0.7;
 
-  let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
+  let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null, ctx2canvas = null;
   let canvas = null, people = null, avatar = null, playerWorld = null, scene = null, leaving = false, dust = null, unsubscribeAccount = null, remotes = null, footsteps = null, node = null;
   let unsubscribeFeed = null, boardsDirty = false, audio = null, actPrompt = false, soundPanel = null;
   const NO_ACTORS = [];
@@ -244,6 +246,58 @@
     BL.net.remotes.forEach(roomBody);
     nearTest = null;
     return nearHit;
+  };
+  // The command room's door: its two leaves swing open into the room while anything that walks the hall (as `nearJet`
+  // counts them) stands within `COMMAND_DOOR.reach` of its middle on the floor, and shut again once nobody does, easing
+  // at `ease` a second, a quarter turn open; shut for good while the room is locked (`COMMAND.locked`).
+  const COMMAND_DOOR = { reach: 3.6, ease: 6, swing: Math.PI * 0.48 };
+  const atCommandDoor = (x, z, feet) => feet < 1 && Math.hypot(x - HM.COMMAND.doorX, z - HM.COMMAND.front) < COMMAND_DOOR.reach;
+  // The control room's warning beacon: dim at rest, flashing `rate` times a second while one of the crew is out of their
+  // room (a worker's meltdown).
+  const BEACON = { idle: 0.12, rate: 2.2 };
+  const beaconLife = (s, elapsed) => {
+    s.commandBeacon.glow = s.meltdown.active ? (Math.sin(elapsed * BEACON.rate * Math.PI * 2) > 0 ? 1.4 : 0.15) * s.anomaly.dim : BEACON.idle;
+  };
+  const commandDoorLife = (s, dt) => {
+    const want = !HM.COMMAND.locked && nearJet(atCommandDoor) ? 1 : 0;
+    s.commandOpen += (want - s.commandOpen) * Math.min(1, dt * COMMAND_DOOR.ease);
+    const k = s.commandOpen * s.commandOpen * (3 - 2 * s.commandOpen), doors = HM.commandRoom().doors;
+    for (let i = 0; i < 2; i++) s.commandDoors[i].rotation.y = doors[i].turn + doors[i].open * k * COMMAND_DOOR.swing;
+  };
+  // HANGAR CAMERAS live, on WebGL: while the screen stands within `near` of the eye and in front of it, every `every`
+  // frames (a security feed's few frames a second, since each costs about a frame's own draw) the hall is drawn from the
+  // next of the security cameras (`COMMAND.cameras.feeds`) before the frame's own draw, its middle copied into that
+  // feed's quarter of the screen under the CCTV's blue tint and scanlines with its label, and the screen's picture
+  // bumped. The runway's gloss is hidden for that draw, so it captures nothing; `half` is each feed's half-height as the
+  // tangent of its angle.
+  const FEED = { every: 20, near: 13, ahead: 0.35, half: Math.tan(26 * Math.PI / 180) };
+  const feedLife = (s) => {
+    const F = s.feeds, C = HM.COMMAND, A = C.cameras;
+    if (!F) return;
+    const p = camera.position, aim = camera.target, dx = C.x1 - 0.1 - p.x, dy = A.y - p.y, dz = A.z - p.z, d = Math.hypot(dx, dy, dz);
+    const vx = aim.x - p.x, vy = aim.y - p.y, vz = aim.z - p.z, v = Math.hypot(vx, vy, vz) || 1;
+    if (d > FEED.near || (dx * vx + dy * vy + dz * vz) / (d * v) < FEED.ahead) return;
+    if (--F.wait > 0) return;
+    F.wait = FEED.every;
+    const i = F.next, f = A.feeds[i], c = F.cams[i], src = ctx2canvas, W = src.width, H = src.height, aspect = W / H;
+    F.next = (i + 1) % F.cams.length;
+    const cw = F.canvas.width, ch = F.canvas.height, rw = cw * A.feed[0], rh = ch * A.feed[1], rx = cw * f.at[0], ry = ch * f.at[1];
+    const across = FEED.half * rw / rh, t = Math.max(FEED.half, across / aspect);
+    c.fov = 2 * Math.atan(t);
+    if (s.gloss) s.gloss.visible = false;
+    const drawn = renderer.render(root, c, RENDER_OPTS);
+    if (s.gloss) s.gloss.visible = true;
+    if (!drawn) return;
+    const sx = W / 2 * (1 - across / (t * aspect)), sy = H / 2 * (1 - FEED.half / t), g = F.g;
+    g.drawImage(src, sx, sy, W - 2 * sx, H - 2 * sy, rx, ry, rw, rh);
+    g.fillStyle = "rgba(20, 60, 140, 0.12)"; g.fillRect(rx, ry, rw, rh);
+    g.fillStyle = "rgba(0, 0, 0, 0.2)";
+    for (let y = ry + 1; y < ry + rh; y += 3) g.fillRect(rx, y, rw, 1);
+    g.strokeStyle = "#3fa9ff"; g.lineWidth = 2; g.strokeRect(rx, ry, rw, rh);
+    g.fillStyle = "#e8f4ff"; g.font = `bold ${Math.round(ch * 0.04)}px sans-serif`; g.textAlign = "left"; g.textBaseline = "alphabetic";
+    g.fillText(f.label, rx + rw * 0.03, ry + rh * 0.94);
+    g.fillStyle = "#ff3b30"; g.beginPath(); g.arc(rx + rw * 0.95, ry + rh * 0.09, ch * 0.012, 0, Math.PI * 2); g.fill();
+    F.surface.version++;
   };
   // Whether anything that walks the hall (as `nearJet` counts them) stands within `reach` of the line from (ax, az) to
   // (bx, bz) with its feet lower than `bottom`, for the crane, which holds its load while anyone is under it; `UNDER` is
@@ -338,6 +392,7 @@
     if (!leaving) { world.hangarCrossing = null; w.through = w.grab = false; }
   };
   const onKey = (e) => {
+    if (scene && scene.keypad.onKey(e)) return true;
     if (BL.controls.matches(e, "resetView") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) return pilot.resetCamera();
     if (BL.controls.matches(e, "horn") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && scene && honk(scene.forklift, people && people.player, false)) return true;
     if (BL.controls.matches(e, "view") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) {
@@ -849,6 +904,13 @@
   };
   // The lofts' life (`LOFT_LIFE`): what each one's crew member does next, where it stands and which way it and its head
   // face, its monitor's flicker and colour, and its light.
+  // The wall fan turns at its rate while the hall has power, running down when a blackout cuts it and back up after,
+  // easing `FAN_EASE` a second.
+  const FAN_EASE = 0.5;
+  const fanLife = (s, dt) => {
+    s.fanSpeed += ((s.anomaly.powered ? HM.FAN.rate * Math.PI * 2 : 0) - s.fanSpeed) * Math.min(1, dt * FAN_EASE);
+    s.fan.rotation.x = (s.fan.rotation.x + s.fanSpeed * dt) % (Math.PI * 2);
+  };
   const loftLife = (s, dt, elapsed, dim) => {
     const F = LOFT_LIFE, far = HM.LOFT.w / 2 + 0.4, step = F.turn * dt;
     if ((s.loftDark -= dt) <= 0) {
@@ -954,7 +1016,8 @@
     // The polished runway (`HM.glossRunway`), on WebGL a glossy reflector laid face up over it.
     if (renderer.kind === "webgl2") {
       const gloss = HM.glossRunway();
-      addChild(root, createNode({ position: gloss.at, rotation: { x: -Math.PI / 2, y: 0, z: 0 }, geometry: gloss, sightHidden: true }));
+      s.gloss = createNode({ position: gloss.at, rotation: { x: -Math.PI / 2, y: 0, z: 0 }, geometry: gloss, sightHidden: true });
+      addChild(root, s.gloss);
     }
     // The side walls' strip lamps and box lamps and the catwalks' amber and blue strips (`HM.wallLights`), their lenses
     // dimmed with the glass; on Canvas 2D the walls' sort with the wall, a little nearer than its panels.
@@ -970,10 +1033,52 @@
     addChild(root, createNode({ geometry: room.flat }), roomGlow, createNode({ geometry: room.glass, sightHidden: true }));
     for (const p of room.pictures) addChild(root, createNode({ position: { x: p.x, y: p.y, z: p.z }, rotation: { x: 0, y: p.turn, z: 0 }, geometry: p.geometry, sightHidden: true, depthBias: -1 }));
     s.glass.push(roomGlow);
-    // The crew's rooms on the right wall, as the control room.
+    // The command room set into the front wall left of the door (`HM.commandRoom`), as the control room: its small parts
+    // sorted nearer on Canvas 2D and its facade's lamps and its board's frame nearer still, its glow, lamps and board
+    // dimmed with the glass, its signs' and screens' faces nearer on Canvas 2D (a metre, or as each says; the board's
+    // picture whole, or on Canvas 2D in its slices), and its
+    // door's two leaves on nodes of their own on their hinges, which `commandDoorLife` swings open, each with its trim
+    // sorted nearer.
+    const command = HM.commandRoom(), commandGlow = createNode({ geometry: command.glow, sightHidden: true });
+    addChild(root, createNode({ geometry: command.flat }), createNode({ geometry: command.detail, depthBias: DETAIL_BIAS }), commandGlow, createNode({ geometry: command.glass, sightHidden: true }));
+    s.commandBeacon = createNode({ position: { x: command.beacon.x, y: command.beacon.y, z: command.beacon.z }, geometry: command.beacon.geometry, sightHidden: true, depthBias: DETAIL_BIAS - 0.2 });
+    s.commandBeacon.glow = BEACON.idle;
+    addChild(root, s.commandBeacon);
+    const cam = command.cameraScreen;
+    addChild(root, createNode({ position: { x: cam.x, y: cam.y, z: cam.z }, rotation: { x: 0, y: cam.turn, z: 0 }, geometry: cam.geometry, sightHidden: true, depthBias: -1 }));
+    s.feeds = renderer.kind === "webgl2" ? {
+      g: cam.canvas.getContext("2d"), canvas: cam.canvas, surface: cam.geometry.imageSurface, next: 0, wait: 0,
+      cams: HM.COMMAND.cameras.feeds.map((f) => {
+        const c = createCamera({ fov: 50, near: 0.3, far: 160 });
+        Object.assign(c.position, { x: f.eye[0], y: f.eye[1], z: f.eye[2] });
+        Object.assign(c.target, { x: f.look[0], y: f.look[1], z: f.look[2] });
+        return c;
+      })
+    } : null;
+    for (const p of [...command.pictures, ...command.boardFace[renderer.kind === "canvas2d" ? "slices" : "whole"]]) {
+      addChild(root, createNode({ position: { x: p.x, y: p.y, z: p.z }, rotation: { x: p.tilt || 0, y: p.turn, z: 0 }, geometry: p.geometry, sightHidden: true, depthBias: p.bias ?? -1 }));
+    }
+    s.glass.push(commandGlow);
+    const commandLit = createNode({ geometry: command.lit, sightHidden: true, depthBias: DETAIL_BIAS - 0.2 }), commandBoard = createNode({ geometry: command.board, sightHidden: true, depthBias: DETAIL_BIAS - 0.1 });
+    addChild(root, commandLit, commandBoard);
+    s.glass.push(commandLit, commandBoard);
+    s.commandDoors = command.doors.map((d) => {
+      const leaf = createNode({ position: { x: d.x, y: 0, z: d.z }, rotation: { x: 0, y: d.turn, z: 0 }, geometry: HM.commandDoor().leaf });
+      const trim = createNode({ geometry: HM.commandDoor().trim, depthBias: DETAIL_BIAS });
+      addChild(leaf, trim);
+      addChild(root, leaf);
+      s.glass.push(trim);
+      return leaf;
+    });
+    s.commandOpen = 0;
+    // The crew's rooms on the right wall, as the control room, each its door on a node of its own on its hinge, its amber
+    // window dimmed with the glass.
+    s.roomDoors = [];
     for (const r of HM.sideRooms()) {
-      const lit = createNode({ geometry: r.glow, sightHidden: true });
-      addChild(root, createNode({ geometry: r.flat }), lit, createNode({ geometry: r.glass, sightHidden: true }));
+      const lit = createNode({ geometry: r.glow, sightHidden: true }), door = createNode({ position: { x: r.door.x, y: r.door.y, z: r.door.z }, rotation: { x: 0, y: r.door.turn, z: 0 }, geometry: HM.roomDoor() });
+      addChild(root, createNode({ geometry: r.flat }), lit, createNode({ geometry: r.glass, sightHidden: true }), door);
+      s.glass.push(door);
+      s.roomDoors.push(door);
       for (const p of r.pictures) addChild(root, createNode({ position: { x: p.x, y: p.y, z: p.z }, rotation: { x: 0, y: p.turn, z: 0 }, geometry: p.geometry, sightHidden: true, depthBias: -1 }));
       s.glass.push(lit);
     }
@@ -997,6 +1102,13 @@
         heading: -Math.PI / 2, look: 0, picture: 0, change: between(LOFT_LIFE.picture), blink: 0, out: 0
       };
     });
+    // The industrial fan high on the right wall, its lamps dimmed with the glass (and sorted nearer, so the Canvas 2D sort
+    // never paints the housing over them) and its rotor turned by `fanLife`.
+    const fan = HM.fan(), fanGlow = createNode({ geometry: fan.glow, sightHidden: true, depthBias: DETAIL_BIAS - 0.2 });
+    s.fan = createNode({ position: { ...fan.at }, geometry: fan.rotor, sightHidden: true, depthBias: DETAIL_BIAS });
+    s.fanSpeed = HM.FAN.rate * Math.PI * 2;
+    addChild(root, createNode({ geometry: fan.flat }), fanGlow, s.fan);
+    s.glass.push(fanGlow);
     s.fixtures = createNode({ geometry: fixtures.flat });
     addChild(s.fixtures, createNode({ geometry: fixtures.detail, depthBias: DETAIL_BIAS }), createNode({ geometry: fixtures.crateDetail, depthBias: CRATE_BIAS }));
     addChild(root, s.mouth, s.fixtures);
@@ -1084,13 +1196,12 @@
     s.statsStars = createNode({ geometry: faces.stats.stars, sightHidden: true });
     s.statsFlag = createNode({ geometry: faces.stats.flag, sightHidden: true, visible: false });
     addChild(s.boards.stats, s.statsStars, s.statsFlag);
-    // The hangar's sign over the runway between two lit bolts, hung from the last roof rib on two rods.
-    const [hx, hy, hz] = L.signs.hangar, hangarSign = FM.label("LIGHTNING JET\nHANGAR", "", { height: 1.7 });
-    s.sign = sign(root, hangarSign, hx, hy, hz);
-    for (const side of [-1, 1]) {
-      addChild(root, createNode({ position: { x: hx + side * (hangarSign.width / 2 + 0.6), y: hy, z: hz + 0.05 }, geometry: FM.smoothBolt(1.2, 0.1, "#ffd23a", 1), sightHidden: true }));
-      addChild(root, createNode({ position: { x: hx + side * (hangarSign.width / 2 - 0.3), y: (hy + 1 + L.roofY) / 2, z: hz - 0.05 }, geometry: models.box({ w: 0.06, h: L.roofY - hy - 1, d: 0.06, color: "#2c2e33" }) }));
-    }
+    // The arch round the launch tunnel's mouth with the hangar's plaque across its top (`HM.arch`): its lights dimmed
+    // with the glass, its small parts and the plaque's face sorted nearer on Canvas 2D.
+    const archParts = HM.arch(), archGlow = createNode({ geometry: archParts.glow, sightHidden: true }), plaque = archParts.picture;
+    s.sign = createNode({ position: { x: plaque.x, y: plaque.y, z: plaque.z }, geometry: plaque.geometry, sightHidden: true, depthBias: -1 });
+    addChild(root, createNode({ geometry: archParts.flat }), createNode({ geometry: archParts.detail, depthBias: DETAIL_BIAS }), archGlow, s.sign);
+    s.glass.push(archGlow);
     // The door, the Factory's own stone arch turned to face in and set in the hangar's steel bulkhead, with the hall's
     // warm dark through it and its sign the way back.
     const door = FM.hangarDoor(), D = FM.HANGAR_DOOR;
@@ -1118,7 +1229,7 @@
       targets.push(n);
     };
     target(s.doorStone, "exit", null, 3);
-    target(s.sign, "sign", "runway", 2.5);
+    target(s.sign, "sign", "runway", 5);
     target(s.mouth, "mouth", "runway", 6);
     target(s.jet, "jet", "jet", 6);
     target(s.boards.stats, "stats", "boards", 4.6);
@@ -1212,7 +1323,9 @@
   // crew's desks (`HM.fixedLights`); the lanterns on the crates share what is left, the nearest the view first, each
   // reaching as far as `hangar-models.js` says and flickering like a flame, as the Factory shares its own.
   const LANTERN_GLOW = HM.LANTERN_GLOW, FIXED = 10;
-  const lanternPool = models.cached(() => new Float32Array(HM.fixtures().lights));
+  // The pool: the crates' lanterns, which flicker, and after them the command room's steady lamps.
+  const lanternPool = models.cached(() => new Float32Array([...HM.fixtures().lights, ...HM.commandRoom().lamps]));
+  const lanternCount = models.cached(() => HM.fixtures().lights.length / 4);
   const lamp = (i, x, y, z, radius, r, g, b) => {
     const o = i * 8, l = RENDER_OPTS.lights;
     l[o] = x; l[o + 1] = y; l[o + 2] = z; l[o + 3] = radius; l[o + 4] = r; l[o + 5] = g; l[o + 6] = b; l[o + 7] = 0;
@@ -1235,7 +1348,7 @@
   };
   let poolScore = null;
   // The shared slots go to the lanterns nearest the view, nearest first, by repeated minimum: no sort, no list; as dim
-  // as an anomaly has the hall's lights (`dim`).
+  // as an anomaly has the hall's lights (`dim`), the lanterns flickering and the command room's lamps steady.
   const glowNear = (elapsed, from, dim) => {
     const P = lanternPool(), n = P.length / 4, t = pilot.orbit.target, Lt = RENDER_OPTS.lights;
     if (!poolScore) poolScore = new Float32Array(n);
@@ -1247,7 +1360,7 @@
       let best = 0, bestD = Infinity;
       for (let i = 0; i < n; i++) if (poolScore[i] < bestD) { bestD = poolScore[i]; best = i; }
       poolScore[best] = Infinity;
-      const k = (0.9 + Math.sin(elapsed * 9.3 + best * 1.7) * 0.06 + Math.sin(elapsed * 23.7 + best * 5.3) * 0.04) * dim, w = slot * 8;
+      const k = (best < lanternCount() ? 0.9 + Math.sin(elapsed * 9.3 + best * 1.7) * 0.06 + Math.sin(elapsed * 23.7 + best * 5.3) * 0.04 : 1) * dim, w = slot * 8;
       Lt[w] = P[best * 4]; Lt[w + 1] = P[best * 4 + 1]; Lt[w + 2] = P[best * 4 + 2]; Lt[w + 3] = P[best * 4 + 3];
       Lt[w + 4] = LANTERN_GLOW[0] * k; Lt[w + 5] = LANTERN_GLOW[1] * k; Lt[w + 6] = LANTERN_GLOW[2] * k; Lt[w + 7] = 0;
     }
@@ -1364,9 +1477,23 @@
   // whoever walks down it.
   const inDoorway = (p) => Math.abs(p.x - DOOR.x) < DOOR.half && p.z > HALL.front - 2.5 && p.y > DOOR.y && p.y < DOOR.y + DOOR.top;
   const inTunnel = (p) => p.z < HALL.back + 2;
+  // Past the front wall's face into the command room, `gap` in from its ends, and no higher than a little over its
+  // ceiling, so a view that rises there stays in the room while one over the left catwalk stays in the hall.
+  const inCommand = (p, gap) => p.z > HM.COMMAND.front - gap && p.y < HM.COMMAND.top + 2 && p.x > HM.COMMAND.x0 + gap && p.x < HM.COMMAND.x1 - gap;
+  // Whether the view's target stands in the command room, and whether the line from it to the eye passes through the
+  // room's door while it stands open, so the view may only cross the room's front through the door.
+  const inCommandRoom = (t) => t.z > HM.COMMAND.front && t.y < HM.COMMAND.top && t.x > HM.COMMAND.x0 && t.x < HM.COMMAND.x1;
+  const throughCommandDoor = (t, p) => {
+    const K = HM.COMMAND, dz = p.z - t.z;
+    if (!scene || scene.commandOpen < 0.6 || Math.abs(dz) < 1e-3) return false;
+    const k = (K.front + 0.1 - t.z) / dz;
+    if (k < 0 || k > 1) return false;
+    return Math.abs(t.x + (p.x - t.x) * k - K.doorX) < K.door / 2 - 0.2 && t.y + (p.y - t.y) * k < K.doorH - 0.2;
+  };
 
   const enter = (ctx) => {
     ({ renderer, game, world, go, agentPlay } = ctx);
+    ctx2canvas = ctx.canvas;
     camera = createCamera({ fov: 55, near: 0.3, far: 700 });
     root = createNode();
     hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
@@ -1382,11 +1509,18 @@
         p.z = Math.max(p.z, TUN.holdShort - 1);
         return;
       }
+      if (inCommand(p, 0.6)) {
+        p.x = clamp(p.x, HM.COMMAND.x0 + 0.6, HM.COMMAND.x1 - 0.6);
+        p.y = Math.min(p.y, HM.COMMAND.top - 0.6);
+        p.z = Math.min(p.z, HM.COMMAND.back - 0.6);
+        return;
+      }
       p.x = clamp(p.x, HALL.x0 + 3, HALL.x1 - 3);
       p.z = Math.min(p.z, HALL.front - 2);
     };
     // Inside the walls, clear of the ribs that stand out of the side walls (`WALL_GAP`); the door's passage lets the eye
-    // nearer the front, and the launch tunnel lets it on down the runway, inside its frames and short of the shield.
+    // nearer the front, the command room into itself, and the launch tunnel lets it on down the runway, inside its
+    // frames and short of the shield.
     const clampCamera = (p) => {
       p.y = clamp(p.y, 0.6, HALL.h - 1.5);
       if (inDoorway(p)) { p.z = Math.min(p.z, DOOR.z + 3); return; }
@@ -1394,6 +1528,15 @@
         p.x = clamp(p.x, -TUN.r + 1.5, TUN.r - 1.5);
         p.y = Math.min(p.y, TUN.y + TUN.r - 1.8);
         p.z = Math.max(p.z, TUN.z1 + 1.5);
+        return;
+      }
+      // With the target in the command room the eye stays in it, but where it looks back out through the open door;
+      // with the target in the hall the eye stays in the hall, but where it looks in through the open door.
+      const t = pilot && pilot.orbit.target;
+      if (t && (inCommandRoom(t) ? !throughCommandDoor(t, p) : inCommand(p, WALL_GAP) && throughCommandDoor(t, p))) {
+        p.x = clamp(p.x, HM.COMMAND.x0 + WALL_GAP, HM.COMMAND.x1 - WALL_GAP);
+        p.y = Math.min(p.y, HM.COMMAND.top - 0.4);
+        p.z = clamp(p.z, HM.COMMAND.front + WALL_GAP, HM.COMMAND.back - WALL_GAP);
         return;
       }
       p.x = clamp(p.x, HALL.x0 + SHELL.face + SHELL.rib + WALL_GAP, HALL.x1 - SHELL.face - SHELL.rib - WALL_GAP);
@@ -1423,6 +1566,8 @@
         if (o.kind === "firetest" && scene.fire.near && scene.fire.press()) return;
         if (o.kind === "sis" && scene.sis.near && scene.sis.poke()) return;
         if (o.kind === "terminal" && scene.terminals.near && scene.terminals.press()) return;
+        if (o.kind === "keypad" && scene.keypad.press()) return;
+        if (o.kind === "monitor" && scene.terminals.tapMonitor(o.desk, o.monitor)) return;
         if (o.kind === "forkliftButton") return pressButton(scene.forklift, people && people.player);
         if (o.kind === "forkliftKey") return turnKey(scene.forklift, people && people.player);
         if (o.kind === "forkliftStick") return workStick(scene.forklift, people && people.player);
@@ -1467,7 +1612,7 @@
     scene.fire = BL.hangarFire.create({ root, jet: scene.jet, nozzles: scene.jet.children[0] || null, fx, audio, hold: (on) => {
       pilot.setActive(!on);
       pilot.setExternalControl(on);
-    }, toast: hud.toast, busy: () => !!scene.anomaly && scene.anomaly.playing });
+    }, toast: hud.toast, busy: () => !!scene.anomaly && scene.anomaly.playing || !!scene.meltdown && scene.meltdown.active });
     input.add(scene.fire.body, { kind: "firetest", preset: null }, { radius: 1.6 });
     targets.push(scene.fire.body);
     soundPanel = openSoundPanel();
@@ -1486,11 +1631,42 @@
     // on the right wall, whose operators' posts come just before it.
     const side = HM.sideRooms(), first = LAYOUT.crew.length - 1 - side.length;
     scene.roomFire = BL.hangarRoomFire.create({ root, fx, audio, rooms: [{ spots: HM.controlRoom().spots, gorilla: scene.crew[LAYOUT.crew.length - 1] }, ...side.map((r, i) => ({ spots: r.spots, gorilla: scene.crew[first + i] }))] });
-    scene.anomaly = BL.hangarAnomaly.create({ root, fire: scene.fire, sis: scene.sis, fx, audio, jet: scene.jet, stage: JET_STAGE, room: scene.roomFire, auto: !params.has("nosim") || every > 0, gap: every > 0 ? every : null, riders: () => jetRidden(), near: (test) => nearJet(test) });
+    scene.anomaly = BL.hangarAnomaly.create({ root, fire: scene.fire, sis: scene.sis, fx, audio, jet: scene.jet, stage: JET_STAGE, room: scene.roomFire, auto: !params.has("nosim") || every > 0, gap: every > 0 ? every : null, riders: () => jetRidden(), near: (test) => nearJet(test), busy: () => scene.meltdown.active });
+    // Now and then a worker in one of the crew's rooms has had enough, and runs down to pound on the Jet
+    // (`hangar-meltdown.js`), with nothing else going on: not on a test page unless `meltdown=` asks, which under debug
+    // also sets the wait between them, s.
+    const fed = DEBUG ? Number(params.get("meltdown")) : NaN;
+    scene.meltdown = BL.hangarMeltdown.create({ root, fx, audio, sis: scene.sis, rooms: side.map((r, i) => ({ spots: r.spots, gorilla: scene.crew[first + i], door: scene.roomDoors[i], shut: r.door.turn })),
+      // Tess, to break up the fight, when nobody else has her.
+      tess: { free: () => !scene.guide.lent && !scene.guide.holding, lend: (drive) => { scene.guide.lend(drive); scene.tessFor = drive ? "meltdown" : null; } },
+      busy: () => leaving || scene.anomaly.playing || scene.fire.t >= 0 || scene.roomFire.burning || scene.sis.rampaging || scene.guide.lent,
+      blocker: () => people && people.player, auto: !params.has("nosim") || fed > 0, gap: fed > 0 ? fed : null });
     // The terminals by the runway and the film show they start (`hangar-terminals.js`), its mood page reading hers.
     scene.terminals = BL.hangarTerminals.create({ root, audio, mood: () => scene.sis.mood, toast: hud.toast });
     for (const n of scene.terminals.nodes) {
       input.add(n, { kind: "terminal", preset: null }, { radius: 0.8 });
+      targets.push(n);
+    }
+    // The crew's desks' monitors, each turned on to its next picture by a tap from in front of its desk.
+    scene.terminals.monitors.forEach((pair, desk) => pair.forEach((n, monitor) => {
+      input.add(n, { kind: "monitor", preset: null, desk, monitor }, { radius: 0.35 });
+      targets.push(n);
+    }));
+    // The rooms' door keypads (`hangar-keypad.js`), dimmed with the glass; the Ooga stands still while one is open, and
+    // Tess, if she is coming over or offering, goes back to work.
+    const pads = [{ ...HM.controlRoom().keypad, name: "Control room" }, ...HM.sideRooms().map((r, i) => ({ ...r.keypad, name: `Crew room ${i + 1}` })),
+      { ...HM.commandRoom().keypad, name: "Command & Observation", bias: DETAIL_BIAS - 0.2 }];
+    scene.keypad = BL.hangarKeypad.create({ audio, hud, pads, hold: (on) => {
+      if (on) scene.guide.escape();
+      pilot.setActive(!on);
+    }, across: (x, y, z) => {
+      const at = renderer.project(x, y, z, KEYPAD_AT);
+      return at ? at.x / renderer.size.width : 0.5;
+    } });
+    for (const n of scene.keypad.nodes) {
+      addChild(root, n);
+      scene.glass.push(n);
+      input.add(n, { kind: "keypad", preset: null }, { radius: 0.3 });
       targets.push(n);
     }
     input.add(scene.terminals.projector, { kind: "projector", preset: null }, { radius: 1.2 });
@@ -1502,7 +1678,7 @@
     scene.sisHead = { x: 0, y: 0, z: 0 };
     scene.guide = BL.hangarGuide.create({
       parent: root, input, fx, camera, pilot, visitor: () => people && people.player, world, hud, coarse: COARSE, landing: true,
-      quality: () => renderer.quality, busy: () => leaving || scene.fire.t >= 0,
+      quality: () => renderer.quality, busy: () => leaving || scene.fire.t >= 0 || scene.keypad.open >= 0,
       targets: { sis: [scene.sisHead], show: [HM.projector().lens, HM.filmScreen().picture] }
     });
     scene.distraction = BL.hangarGuide.distraction(scene.sis);
@@ -1529,7 +1705,7 @@
       // Keep the visitor's weapons and magazines across the doorway, as the hall does.
       playerWorld = { level: 0, weapons: world.weapons, magazine: world.magazine };
       const shared = { root, input, hud, game, world: playerWorld, playerName, weaponsEnabled: true, fx, viewYaw: 0, outsideActors, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: groundFor, walkable: walkableFor, flyable: flyableFor, clipProjectileTarget, absorbProjectile, reloadPolicy,
-        useNear: (x, z, reach, feet) => scene.fire.useNear(x, z, reach, feet) || scene.terminals.useNear(x, z, reach, feet) || scene.sis.useNear() || getIn(scene.forklift, people.player) };
+        useNear: (x, z, reach, feet) => scene.keypad.useNear() || scene.fire.useNear(x, z, reach, feet) || scene.terminals.useNear(x, z, reach, feet) || scene.sis.useNear() || getIn(scene.forklift, people.player) };
       shared.onModelChange = () => {
         if (!avatar) return;
         scene.gate.phase.body.refresh(avatar.root);
@@ -1566,7 +1742,7 @@
     hangarScene.input = input;
     hangarScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
-      hangar: { layout: LAYOUT, feed: BL.jetFeed, get scene() { return scene; }, get avatar() { return avatar; }, get audio() { return audio; }, get fire() { return scene && scene.fire; }, get sis() { return scene && scene.sis && scene.sis.debug; }, get anomaly() { return scene && scene.anomaly && scene.anomaly.debug; }, get roomFire() { return scene && scene.roomFire && scene.roomFire.debug; }, get terminals() { return scene && scene.terminals && scene.terminals.debug; }, get crane() { return scene && scene.crane && scene.crane.debug; }, get guide() { return scene && scene.guide; } }
+      hangar: { layout: LAYOUT, feed: BL.jetFeed, get scene() { return scene; }, get avatar() { return avatar; }, get audio() { return audio; }, get fire() { return scene && scene.fire; }, get sis() { return scene && scene.sis && scene.sis.debug; }, get anomaly() { return scene && scene.anomaly && scene.anomaly.debug; }, get roomFire() { return scene && scene.roomFire && scene.roomFire.debug; }, get meltdown() { return scene && scene.meltdown && scene.meltdown.debug; }, get terminals() { return scene && scene.terminals && scene.terminals.debug; }, get keypad() { return scene && scene.keypad && scene.keypad.debug; }, get crane() { return scene && scene.crane && scene.crane.debug; }, get guide() { return scene && scene.guide; } }
     };
   };
   const feetOf = () => avatar ? avatar.root.position.y - avatar.baseY : 0;
@@ -1659,6 +1835,7 @@
     // the crew has moved, so a presser it knocks down lies where the crew left them.
     s.anomaly.update(dt);
     s.roomFire.update(dt);
+    s.meltdown.update(dt);
     s.fire.update(dt, drivenHere);
     pressLife(s.forklift, dt);
     powerLife(s.forklift, dt);
@@ -1668,11 +1845,13 @@
     audio.forkliftWork(Math.abs(s.forklift.speed) / DRIVE.forward, s.forklift.lifting ? 1 : 0);
     s.sis.update(dt, drivenHere, camera.position);
     s.terminals.update(dt, drivenHere);
+    s.keypad.update(dt, drivenHere);
     // Kortik's Sis smashing the Jet brings Tess over to distract her, whatever she was doing; it over, she goes back.
+    // A worker's meltdown borrows her too, to break up its fight (`tessFor` says who has her).
     const sp = s.sis.node.position;
     s.sisHead.x = sp.x; s.sisHead.y = sp.y + 0.9; s.sisHead.z = sp.z;
-    if (s.sis.rampaging && !s.guide.lent) { s.guide.lend(s.distraction.drive); s.sis.distract(s.guide.root.position); }
-    else if (!s.sis.rampaging && s.guide.lent) { s.distraction.done(); s.guide.lend(null); s.sis.distract(null); }
+    if (s.sis.rampaging && !s.guide.lent) { s.guide.lend(s.distraction.drive); s.tessFor = "sis"; s.sis.distract(s.guide.root.position); }
+    else if (!s.sis.rampaging && s.tessFor === "sis") { s.distraction.done(); s.guide.lend(null); s.tessFor = null; s.sis.distract(null); }
     seatViewBack(drivenHere);
     pilot.update(dt);
     s.guide.update(dt, elapsed);
@@ -1691,13 +1870,16 @@
     }
     remotes.update(dt);
     footsteps.update(drivenHere);
-    // The act button's START in the forklift (GET OUT while it runs), DON'T PRESS beside the static fire test's button, DISPLAY (or STOP) beside
-    // a terminal, POKE beside Kortik's Sis, and GET IN beside the forklift's cab.
-    const actLabel = drivenHere && (drivenHere.camp.seat === s.forklift.seat ? (s.forklift.on ? "GET OUT" : "START") : s.fire.actLabel() || s.terminals.actLabel() || s.sis.actLabel()
+    // The act button's START in the forklift (GET OUT while it runs), KEYPAD beside a room's door keypad, DON'T PRESS beside the static fire
+    // test's button, DISPLAY (or STOP) beside a terminal, NEXT SCREEN at a crew desk, POKE beside Kortik's Sis, and GET IN beside the
+    // forklift's cab.
+    const actLabel = drivenHere && (drivenHere.camp.seat === s.forklift.seat ? (s.forklift.on ? "GET OUT" : "START") : s.keypad.actLabel() || s.fire.actLabel() || s.terminals.actLabel() || s.sis.actLabel()
       || (!s.forklift.seat.sitter && besideCab(s.forklift, drivenHere) ? "GET IN" : null));
     if (actLabel) { hud.setAct(actLabel); actPrompt = true; }
     else if (actPrompt) { actPrompt = false; pilot.showAct(); }
     node.tick(dt);
+    commandDoorLife(s, dt);
+    beaconLife(s, elapsed);
     // The door answers whoever comes near (the Ooga driven here, or with none the view), as ₿IFRÖST's windows do: its
     // arch's studs and neon brighten, its light swells and reaches farther, and its field hums faster.
     const who = drivenHere ? drivenHere.root.position : pilot.orbit.target;
@@ -1742,15 +1924,17 @@
     neonLife(s, dt, elapsed, dim);
     lampLife(s, dt, elapsed, dim);
     loftLife(s, dt, elapsed, dim);
+    fanLife(s, dt);
     boardJets(s, dt);
+    feedLife(s);
     s.crane.update(dt, camera.position);
     craneBeam(s.crane.beam);
     dust.update(elapsed, pilot.orbit.target.x, pilot.orbit.target.z);
     for (let i = 0; i < s.crew.length; i++) {
-      // The control room's fire holds its operator while it burns.
-      if (s.roomFire.holding !== s.crew[i]) s.crew[i].update(dt);
+      // The control room's fire holds its operator while it burns, and a worker who has had enough is held while he is out.
+      if (s.roomFire.holding !== s.crew[i] && s.meltdown.holding !== s.crew[i]) s.crew[i].update(dt);
       const p = s.crew[i].root.position, a = s.crewActors[i];
-      a.x = p.x; a.z = p.z;
+      a.x = p.x; a.y = p.y; a.z = p.z;
     }
     if (boardsDirty) {
       boardsDirty = false;
@@ -1800,8 +1984,10 @@
     scene.launch.phase.dispose();
     if (scene.window) scene.window.dispose();
     scene.anomaly.dispose();
+    scene.meltdown.dispose();
     scene.roomFire.dispose();
     scene.fire.dispose();
+    scene.keypad.dispose();
     scene.guide.dispose();
     soundPanel.dispose();
     soundPanel = null;
@@ -1832,6 +2018,7 @@
       scene.sis.liveGeometry(set);
       scene.anomaly.liveGeometry(set);
       scene.terminals.liveGeometry(set);
+      scene.keypad.liveGeometry(set);
       scene.guide.liveGeometry(set);
       for (const a of scene.crew) a.liveGeometry(set);
       for (const g of scene.loftScreens) set.add(g);
