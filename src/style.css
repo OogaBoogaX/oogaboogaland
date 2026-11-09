@@ -3923,6 +3923,163 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   white-space: nowrap;
 }
 
+/* A hangar door's keypad on screen (`hangar-keypad.js`), in the steel of the one on the wall: the room's name, its
+   screen and twelve lit keys, the last row green; red while it refuses a code, shaking once as it does. On a wide
+   screen it stands to one side of the middle, away from the keypad on the wall (`data-side`), leaving the Ooga and
+   that keypad in view. */
+.hangar-keypad {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  margin: 0;
+  translate: -50% -50%;
+  width: min(232px, calc(100vw - 32px));
+  padding: 9px 12px 10px;
+  background: linear-gradient(#2c313c, #1d2028);
+  border: 3px solid #3b4351;
+  border-radius: 12px;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.45), 0 10px 26px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: #e8f4ff;
+  pointer-events: auto;
+  z-index: 6;
+}
+
+.hangar-keypad:focus {
+  outline: none;
+}
+
+@media (min-width: 760px) {
+  .hangar-keypad {
+    inset: 50% auto auto 72%;
+  }
+
+  .hangar-keypad[data-side="left"] {
+    inset: 50% auto auto 28%;
+  }
+}
+
+.hangar-keypad[data-state="deny"] {
+  animation: hangar-keypad-shake 0.4s ease-out;
+}
+
+@keyframes hangar-keypad-shake {
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(2px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hangar-keypad[data-state="deny"] {
+    animation: none;
+  }
+}
+
+.hangar-keypad-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.hangar-keypad-head h3 {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ffb347;
+  white-space: nowrap;
+}
+
+.hangar-keypad-close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 2px solid #3b4351;
+  border-radius: 6px;
+  background: #14171d;
+  color: #c9d0d8;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.hangar-keypad-screen {
+  margin: 0 0 10px;
+  padding: 7px 6px;
+  border: 2px solid #0b1510;
+  border-radius: 6px;
+  background: #0d2a1c;
+  color: #5dff9e;
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 18px;
+  letter-spacing: 0.12em;
+  text-align: center;
+  white-space: nowrap;
+  text-shadow: 0 0 6px rgba(93, 255, 158, 0.55);
+}
+
+.hangar-keypad[data-state="check"] .hangar-keypad-screen {
+  color: #ffd166;
+  text-shadow: 0 0 6px rgba(255, 209, 102, 0.55);
+}
+
+.hangar-keypad[data-state="deny"] .hangar-keypad-screen,
+.hangar-keypad[data-state="lock"] .hangar-keypad-screen {
+  background: #2a0d0d;
+  border-color: #160606;
+  color: #ff5a4f;
+  text-shadow: 0 0 6px rgba(255, 90, 79, 0.6);
+}
+
+.hangar-keypad-keys {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+}
+
+.hangar-keypad-keys button {
+  height: 40px;
+  border: 2px solid #0f1116;
+  border-radius: 7px;
+  background: linear-gradient(#26303e, #171f29);
+  color: #7fdcff;
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 700;
+  text-shadow: 0 0 6px rgba(127, 220, 255, 0.6);
+  box-shadow: inset 0 1px 0 rgba(127, 220, 255, 0.22), 0 2px 0 rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+.hangar-keypad-keys button:active {
+  translate: 0 1px;
+  box-shadow: inset 0 1px 0 rgba(127, 220, 255, 0.22), 0 1px 0 rgba(0, 0, 0, 0.5);
+}
+
+.hangar-keypad-keys .hangar-keypad-go {
+  color: #2ecc71;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-shadow: 0 0 6px rgba(46, 204, 113, 0.6);
+  box-shadow: inset 0 1px 0 rgba(46, 204, 113, 0.22), 0 2px 0 rgba(0, 0, 0, 0.5);
+}
+
+.hangar-keypad[data-state="deny"] .hangar-keypad-keys button,
+.hangar-keypad[data-state="lock"] .hangar-keypad-keys button {
+  color: #ff5a4f;
+  text-shadow: 0 0 6px rgba(255, 90, 79, 0.6);
+}
+
+.hangar-keypad-note {
+  margin: 8px 0 0;
+  font-size: 9.5px;
+  color: #9fb0c4;
+  text-align: center;
+  white-space: nowrap;
+}
+
 /* The hunt's mini player, bottom right: what is playing and the music switch, on the lobby card's planks. */
 .ghost-player {
   position: absolute;
