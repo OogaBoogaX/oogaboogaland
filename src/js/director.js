@@ -657,7 +657,7 @@
   const UNFOCUSED_INTERVAL = 1000 / 30;
   let lastRender = 0;
   let renderedFrames = 0;
-  let firstDraw = false;
+  let firstDraw = false, firstPlayable = false;
   // A first visit opens the Bananas panel a beat after the curtain (0.9 s) has parted on the world (`sheet.welcome`),
   // unless the visitor chose a panel, left the scene or began a game meanwhile. Quiet `nosim` pages (the suite, the
   // cards) opt out unless `welcome=1` asks; `welcome=0` turns it off anywhere.
@@ -701,6 +701,10 @@
     if (!helpHeld) agentPlay.update(sceneDt);
     updateWorldClock(now);
     const drawn = renderer.render(active.root, active.camera, active.renderOpts, activeMeshRigs);
+    if (drawn && !firstPlayable && !curtain.isConnected && !inputHeld && !transition) {
+      firstPlayable = true;
+      mark("first-playable");
+    }
     if (drawn && !firstDraw) {
       firstDraw = true;
       mark("drawn");
@@ -1057,6 +1061,7 @@
         bootFailed(error); return;
       }
     } else window.BL.buildTasks.measure(() => { enter(first, place); finishBootDonations(); });
+    mark("core-ready");
     mark("ready");
     // A restored island counts as the build it replaced, so the cache never starts a device a tier higher.
     tierFromBoot(window.BL.buildTasks.cpu - constructionCPU - uploadCPU + (window.BL.terrainCache?.stats.credit || 0));

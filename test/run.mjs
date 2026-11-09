@@ -4304,13 +4304,17 @@ const orbitFlow = async (b) => {
 const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
-for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
+for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
 const ONLY = process.env.ONLY || ""; // Optional comma-separated substrings within the requested scenes.
 const onlyMatches = value => ONLY.split(",").some(part => value.includes(part));
 const FULL = ARGS.includes("full");
 const PICKED = FULL ? SCENES : SCENES.filter((s) => ARGS.includes(s));
 const PERF = FULL || ARGS.includes("perf");
-const UNIT = !(ARGS.length === 1 && ["perf", "poker-protocol", "cloud-hopper-record", "cloud-hopper-arcade"].includes(ARGS[0]));
+const BROWSER_ONLY = ARGS.includes("--browser-only");
+if (BROWSER_ONLY && (!PICKED.length || FULL || ARGS.some(arg => arg !== "--browser-only" && !SCENES.includes(arg)))) {
+  throw new Error("--browser-only requires named scenes and cannot be combined with full, unit, perf or dedicated checks");
+}
+const UNIT = !BROWSER_ONLY && !(ARGS.length === 1 && ["perf", "poker-protocol", "cloud-hopper-record", "cloud-hopper-arcade"].includes(ARGS[0]));
 const PROTOCOL = FULL || ARGS.includes("poker-protocol");
 // What keeps the cruft out: every step says why it exists, or the run does not start.
 const WHY = /^(regression|playthrough|rule|contract): \S/;
@@ -4553,6 +4557,16 @@ const deferredLoadingChecks = async () => {
     return { BL, shell, scripts, links, base, baseGroup, baseFile, timeout, timers, probes, context };
   };
   const rejected = promise => promise.then(() => false, () => true);
+  {
+    const f = fixture();
+    f.context.navigator = { connection: { saveData: true } };
+    f.BL.deferred.prefetchScene("drop");
+    const quiet = !f.scripts().length && !f.links().length;
+    const pending = f.BL.deferred.load("drop");
+    const deliberate = f.scripts().length === 1;
+    f.base(); await pending;
+    rows.push({ path: "Save-Data suppresses speculation but permits deliberate play", ok: quiet && deliberate && f.BL.deferred.present("drop") });
+  }
   // A failed prerequisite never starts its scene; repeated retries must not grow the DOM. Only an error moves the
   // address on: a timed-out copy may still arrive, and the retry must not fetch a second one under a new address.
   {
@@ -9657,7 +9671,7 @@ const hubGuestLikeness = { name: "hub guest likeness", why: "regression: a guest
   // Cloud Hopper with the default Ooga, through its own card: the visible Play button (its hidden Next level button
   // carries the same class and stands before it) lifts the guest's own avatar into a run, and Escape ends it.
   const hopper = await b.evaluate(`(() => {
-    const B = __ooga, H = BL.scenes.hub.debug.cloudHopper, ghosts = BL.scenes.hub.debug.npcGhosts, guest = B.crew.cavemen.get("Ooga");
+    const B = __ooga, H = BL.scenes.hub.debug.prepareCloudHopper(), ghosts = BL.scenes.hub.debug.npcGhosts, guest = B.crew.cavemen.get("Ooga");
     const taken = B.pilot.possess(guest) && B.pilot.player === guest;
     B.advance(0.3, 1 / 30);
     const launched = taken && H.launch(true);
@@ -10612,6 +10626,36 @@ const factoryHostedShield = { name: "factory hosted shield", refuse: "/js/factor
   const entered = await untilPage(b, 'B.scene === "factory" && !B.transitioning', 15000);
   record("factory hosted: a refused factory download sends the Ooga back once, driving, until it steps out of the shield, and walking back in opens the hall", notified && refused.asked >= 1 && refused.asked <= 2 && refused.scene === "hub" && !refused.transitioning && refused.driving && entered && asked() > refused.asked, JSON.stringify({ notified, refused, entered, fetched: site.fetched }));
 } };
+// The hub reaches first play without constructing an unrelated cabinet game.
+const hubHostedOptionalGame = { name: "hub hosted optional game", refuse: "/js/cloud-hopper-", why: "rule: an island visit leaves Cloud Hopper unloaded, and its real cabinet can recover from a refused download without losing its actor", run: async (b, site) => {
+  const cold = await b.evaluate(`({ absent: !BL.cloudHopper && !document.querySelector(".cloud-hopper-panel"), scene: __ooga.scene, frames: __ooga.renderedFrames })`);
+  await b.evaluate(`(() => { const B=__ooga,a=B.cavemen.get("portlandhodl"),slot=BL.caves.slots.find(s=>s.scene==="arcade"),m=B.mouths.find(m=>m.id===slot.id);
+    if(B.crew.player!==a)B.pilot.possess(a); B.pilot.navigate({position:{x:m.x-Math.sin(m.ry)*1.2,y:m.floorY,z:m.z-Math.cos(m.ry)*1.2},yaw:m.ry,pitch:.4,dist:10}); B.advance(.5,1/60); })()`);
+  await b.key(" ");
+  if (!await untilPage(b, 'B.scene === "arcade" && !B.transitioning', 30000)) throw Error("Arcade did not open: " + JSON.stringify(await b.evaluate('({scene:__ooga.scene,transitioning:__ooga.transitioning,notice:document.getElementById("toast").textContent})')));
+  const approach = `(() => { const B=__ooga,a=B.pilot.player,s=BL.arcadeModels.CABINETS[0].play;
+    if(a.weapon.aiming)B.pilot.modeAction("mode-toggle"); B.pilot.freeCursor();
+    B.pilot.navigate({position:{x:s.x,y:BL.arcadeModels.STAGE.high,z:s.z},yaw:0,pitch:.2,dist:5}); B.advance(.2,1/60); })()`;
+  await b.evaluate(approach); await b.key(" ");
+  const asked = () => site.fetched.filter(chunkOf("cloud-hopper")).length;
+  for (let i=0; i<300 && !asked(); i++) await b.sleep(50);
+  const refused = await untilPage(b, 'B.scene === "arcade" && !B.transitioning && B.cabinet.phase === "idle"', 30000);
+  const kept = await b.evaluate(`__ooga.pilot.player?.traits.name === "portlandhodl"`);
+  site.refused.length=0; dropRefusals(b);
+  await b.evaluate(approach); await b.key(" ");
+  const opened = await untilPage(b, 'B.scene === "hub" && !B.transitioning && BL.scenes.hub.debug.cloudHopper?.phase === "intro"', 30000);
+  const actor = await b.evaluate(`__ooga.pilot.player?.traits.name`);
+  const interrupted = await b.evaluate(`(() => {
+    document.querySelector(".cloud-hopper-panel .game-intro-go:not([hidden])").click();
+    __ooga.advance(0.25, 1 / 60);
+    return { phase: BL.scenes.hub.debug.cloudHopper.phase, focus: document.activeElement.id, cabinet: __ooga.cabinet.phase };
+  })()`);
+  await b.key("Escape");
+  const returned = await untilPage(b, 'B.scene === "arcade" && !B.transitioning', 30000);
+  const returnedActor = await b.evaluate('__ooga.pilot.player?.traits.name');
+  record("hub hosted: first play excludes Cloud Hopper, its failed cabinet load retains control and retry opens the same Ooga then returns safely", cold.absent && cold.scene === "hub" && cold.frames > 2 && refused && kept && opened && actor === "portlandhodl" && interrupted.phase === "lifting" && interrupted.focus === "scene" && returned && returnedActor === actor && asked() >= 2,
+    JSON.stringify({cold,refused,kept,opened,actor,interrupted,returned,returnedActor,asked:asked()}));
+} };
 // After a deploy the tab's chunks are gone: the page says so once and offers a reload, never "try again".
 const orbitHostedDeploy = { name: "orbit hosted deploy", gone: "/js/drop", why: "regression: after a deploy replaced the chunks, an open tab asked again and again for its old chunk and said try again, which could never work", run: async (b, site) => {
   await b.evaluate(`__ooga.go("drop")`);
@@ -10628,7 +10672,7 @@ const orbitHostedDeploy = { name: "orbit hosted deploy", gone: "/js/drop", why: 
       && payment.text === "Your on-chain tip confirmed · 1,000 sats" && payment.shown && payment.separate && heads >= 1 && heads <= 2 && probes >= 1,
     JSON.stringify({ offered, toast, payment, heads, probes, fetched: site.fetched }));
 } };
-for (const [id, step, path] of [["orbit", orbitHosted, "/oogaorbit"], ["orbit", orbitHostedDeploy, "/oogaorbit"], ["arcade", arcadeHostedDrop, "/oogaarcade"], ["factory", factoryHostedShield, "/"]]) {
+for (const [id, step, path] of [["hub", hubHostedOptionalGame, "/"], ["orbit", orbitHosted, "/oogaorbit"], ["orbit", orbitHostedDeploy, "/oogaorbit"], ["arcade", arcadeHostedDrop, "/oogaarcade"], ["factory", factoryHostedShield, "/"]]) {
   if (ONLY && !onlyMatches(step.name)) continue;
   tasks.push({ name: `${id} hosted${step.gone ? " deploy" : ""}`, scene: id, perf: false, run: async () => {
     const site = await hostedSite();
@@ -12789,7 +12833,7 @@ const hubPlayerStacking = { name: "players stand on players", why: "regression: 
 } };
 const hubCloudCamera ={ name: "cloud hopper fixed camera", why: "regression: scenery, rock and downhill movement changed the racing camera's angle and distance", run: async (b) => {
   const r = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, H = BL.scenes.hub.debug.cloudHopper, S = BL.scene, solids = B.headquarters.solids.props;
+    const B = __ooga, P = B.pilot, H = BL.scenes.hub.debug.prepareCloudHopper(), S = BL.scene, solids = B.headquarters.solids.props;
     let actor = B.cavemen.get("portlandhodl");
     const rows = [], movementRows = [], rockRows = [], nodes = [];
     const pose = Object.fromEntries(["position", "target", "up", "orbit", "headOffset", "actor", "body", "head", "bodyQuaternion", "headQuaternion", "magazines"].map(key => [key, []]));
@@ -12821,8 +12865,10 @@ const hubCloudCamera ={ name: "cloud hopper fixed camera", why: "regression: sce
     const opened = H.launch(true);
     [...document.querySelectorAll(".cloud-hopper-panel .game-intro-go")].find(button => !button.hidden).click();
     B.advance(BL.cloudHopper.LIFT_SECONDS + 0.1, 1 / 60);
-    if (H.phase === "briefing") document.querySelector(".cloud-hopper-guide .actions button:last-child").click();
+    if (H.phase === "briefing") document.querySelector(".cloud-hopper-panel .actions [data-role=leave]").click();
+    B.advance(1, 1 / 60);
     const ready = H.phase === "ready";
+    // Cloud Hopper now races in shoulder/first person; carry and overhead are not game views.
     actor.hop = 0.1; actor.hopV = 1; H.postUpdate();
     ghost.begin(actor); const recording = ghost.finish(0.1, actor);
     try {
@@ -12869,7 +12915,7 @@ const hubCloudCamera ={ name: "cloud hopper fixed camera", why: "regression: sce
         if (rockClear(a, a) && !rockClear(a, e)) shore = { nx, nz, x: a.x, z: a.z };
       }
       if (shore) for (const dt of [1 / 30, 1 / 60]) {
-        setMode("orbit");
+        setMode("shoulder");
         const yaw = Math.atan2(-shore.nx, -shore.nz), far = { x: shore.nx * (B.island.radius + 30), y: -4, z: shore.nz * (B.island.radius + 30) };
         P.navigate({ position: far, yaw, pitch: 0.1, dist: 12 }); actor.hop = 100;
         for (let i = 0; i < Math.round(3 / dt); i++) P.update(dt);
@@ -12896,7 +12942,7 @@ const hubCloudCamera ={ name: "cloud hopper fixed camera", why: "regression: sce
 } };
 const hubCloudFraming = { name: "cloud hopper island framing", why: "regression: the starting cloud hid the island, replay changed the selected view, and held gameplay keys could activate the result panel", run: async (b) => {
   const r = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, H = BL.scenes.hub.debug.cloudHopper;
+    const B = __ooga, P = B.pilot, H = BL.scenes.hub.debug.prepareCloudHopper();
     let actor = B.cavemen.get("portlandhodl");
     const pose = Object.fromEntries(["position", "target", "up", "orbit", "headOffset", "actor", "body", "head", "bodyQuaternion", "headQuaternion", "magazines"].map(key => [key, []]));
     const view = BL.math.mat4.create(), projection = BL.math.mat4.create(), island = new Float64Array(3), rows = [], keys = [];
@@ -12957,7 +13003,8 @@ const hubCloudFraming = { name: "cloud hopper island framing", why: "regression:
     try {
       [...document.querySelectorAll(".cloud-hopper-panel .game-intro-go")].find(button => !button.hidden).click();
       B.advance(BL.cloudHopper.LIFT_SECONDS + 0.1, 1 / 60);
-      if (H.phase === "briefing") document.querySelector(".cloud-hopper-guide .actions button:last-child").click();
+      if (H.phase === "briefing") document.querySelector(".cloud-hopper-panel .actions [data-role=leave]").click();
+      B.advance(1, 1 / 60);
       const ascent = project(); B.advance(0.25, 1 / 60); const settled = project();
       // A run is played in combat alone (the hub's combatOnly, cloud-hopper.js noOverhead): first person and shoulder,
       // the shoulder last so the manual turn below is measured from a third-person view, as it was from the orbit.
@@ -23824,7 +23871,7 @@ const dsbSoak = async (b, { geometry = false, factory = false } = {}) => {
   // replacing any resource. Subsequent growth is still measured by the same bounds. Cloud Hopper's cabinet now stands in
   // Ooga Arcade (cloud-hopper.js \`arcade\`), so the hub holds none of its screen frames: \`frames\` reports that.
   const warmHubGeometry = () => b.evaluate(`(() => {
-    const B = __ooga, H = BL.scenes.hub, characters = new Set(), frames = H.debug.cloudHopper.cabinet.frames || [];
+    const B = __ooga, H = BL.scenes.hub, characters = new Set(), frames = H.debug.cloudHopper?.cabinet.frames || [];
     const visit = node => {
       if (node.geometry?.characterPart) characters.add(node.geometry);
       for (const child of node.children) visit(child);
@@ -31433,6 +31480,7 @@ const runTasks = async () => {
   await dispose();
 };
 if (!PICKED.length && !PERF) console.log(`Global tier only. Name scenes to test them too: npm test -- ${SCENES.join(" ")} | full`);
+if (BROWSER_ONLY) console.log("Browser scenes only; global tier not run.");
 await runTasks();
 if (ARGS.includes("cloud-hopper-arcade")) {
   await fold(sceneUrl("arcade", "character=portlandhodl&hubcache=keep"), [[arcadePlay.name, arcadePlay.run]]);
