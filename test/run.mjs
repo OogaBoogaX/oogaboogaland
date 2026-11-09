@@ -6273,23 +6273,12 @@ const hammockChecks = async () => {
   record("hub hammock fall-out: the tipped Ooga rolls out over the edge away from the gunfire, lies, and gets up upright at the landing spot in 1.2 to 1.8 s; meanwhile it no longer rests, ignores getting up and is not tipped again",
     rolls.every((r) => r.spilled && r.side === -r.sgn && r.began && r.quiet && r.rolledToward > 0.3 && r.tilted > 0.3 && r.done >= 1.2 && r.done <= 1.8
       && r.atLanding < 1e-6 && Math.abs(r.standY) < 1e-6 && r.upright > 0.999), JSON.stringify({ rolls }));
-  // Lying in it, A and D rock the bed: a key held with the swing for a third of a second is a good pump that lifts the swing a step, every
-  // good pump visibly higher than the last (at least 1.5 degrees); a key held against the swing damps it, and brief taps get nowhere.
-  // Well-timed pumping from rest tips the Ooga out on the eighth to twelfth half-swing (its own swing past FALL, the count untouched: four
-  // pushes are still needed after pumping a while), mistimed pumping never does, and pumping an empty bed tips nobody.
-  const pumpDrive = (h, seconds, mode, tapLen = Infinity, onFrame = null) => { let t = 0, last = acrossOf(h), prevKey = 0, held = 0, tipT = null, peak = 0;
-    for (let f = 0; f < seconds * 60; f++) { h.update(1 / 60, t, false); t += 1 / 60; const a = acrossOf(h), v = a - last; last = a;
-      let key = v > 0 ? 1 : v < 0 ? -1 : 0; if (mode === "against") key = -key; if (key !== prevKey) { held = 0; prevKey = key; } held += 1 / 60; if (held > tapLen) key = 0;
-      h.pump(key, 1 / 60); peak = Math.max(peak, h.amp); if (tipT === null && h.spilling) tipT = t; if (onFrame) onFrame(h, t); }
-    return { tipT, halfSwings: tipT === null ? null : Math.floor(tipT * 2.1 / Math.PI) + 1, peak }; };
-  const pumped = () => { const h = settled(), cave = stubCave(); h.seats[0].remote = 0; h.seats[0].sitter = cave; cave.camp.seat = h.seats[0]; return h; };
-  const rockWith = pumpDrive(pumped(), 40, "with"), rockAgainst = pumpDrive(pumped(), 40, "against"), taps = pumpDrive(pumped(), 40, "with", 0.2);
-  const steps = []; let lastHalf = -1; pumpDrive(pumped(), 12, "with", Infinity, (h, t) => { const half = Math.floor(t * 2.1 / Math.PI); if (half !== lastHalf) { if (lastHalf >= 0) steps.push(h.amp); lastHalf = half; } });
-  const grown = pumpDrive(pumped(), 6, "with"), partly = pumped(); pumpDrive(partly, 6, "with"); const stillFour = run(partly, evenly(5, 2)), unmanned = pumpDrive(settled(), 40, "with");
-  record("hub hammock rocking: every good pump lifts the swing a visible step and the eighth to twelfth tips the Ooga out, against the swing it never grows, brief taps get nowhere, the count is untouched, and an empty bed tips nobody",
-    rockWith.halfSwings >= 8 && rockWith.halfSwings <= 12 && steps.length >= 6 && steps.every((v, k) => k === 0 || v - steps[k - 1] >= 0.026) && grown.peak > 0.15 && rockAgainst.tipT === null && rockAgainst.peak < 0.05 && taps.tipT === null && taps.peak < 0.08
-      && stillFour === 4 && unmanned.tipT === null && unmanned.peak > 0.2,
-    JSON.stringify({ steps, rockWith, rockAgainst, taps, grownIn6s: grown.peak, pushesAfterPumping: stillFour, emptyBed: unmanned }));
+  // Knocks that lift the swing without adding to the count (a struck palm, a gentle push) still tip the visitor's own Ooga once it passes
+  // FALL, as the code that once served the occupant's own rocking also serves these; a bed nobody on this page lies in reports nothing.
+  const knocked = (lying) => { const h = settled(); if (lying) { const cave = stubCave(); h.seats[0].remote = 0; h.seats[0].sitter = cave; cave.camp.seat = h.seats[0]; } let n = 0; while (!h.spilling && n < 12) { h.kick(0.06); h.update(1 / 60, n / 60, false); n++; } return { kicks: n, spilling: h.spilling, amp: h.amp }; };
+  const knockedOwn = knocked(true), knockedRemote = knocked(false);
+  record("hub hammock fall-out: knocks that never reach the count still tip the visitor's own Ooga once the swing passes the fourth hit's height, and never report a bed another page's Ooga lies in",
+    knockedOwn.spilling && knockedOwn.kicks >= 6 && knockedOwn.kicks <= 8 && !knockedRemote.spilling, JSON.stringify({ knockedOwn, knockedRemote }));
   // A plain walk (7.75 m/s) is a full hit; slower pushes count in proportion (5 m/s is 0.71 of one, so six tip) and a gentle one, under half
   // a hit, only eases the swing up and never counts, however many there are.
   const walk = tipsAt(evenly(8, 2, 7.75)), brisk = tipsAt(evenly(10, 2, 5)), gentle = tipsAt(evenly(60, 2, 2));
@@ -25174,6 +25163,34 @@ const petRideChecks = BL => {
   if(rides===undefined)delete look.petRidesHat;else look.petRidesHat=rides;
 };
 
+// Rule: the hammock's occupant has no rocking of their own: sideways input, through the real crew and the real seat, gets them up and leaves
+// the bed's swing alone, as forward and back do, and no input keeps them lying there.
+const hammockSidewaysChecks = BL => {
+  const noop=()=>{},S=BL.scene,H=BL.hubHammock,root=S.createNode(),targets=new Set();
+  const plan=H.plan({a:{x:-3,z:4,ground:0},b:{x:3,z:4,ground:0},clear:(x,z,r)=>z>1+r,surfaceAt:()=>0});
+  const C=BL.crew.create({root,world:{level:0},playerName:"YellowBrokeIt",input:{add:n=>targets.add(n),remove:n=>targets.delete(n)},hud:{setRosterRow:noop},game:{state:{assignments:{},inventory:[]}},viewYaw:0,groundAt:()=>0,walkable:()=>true,fx:{say:noop,zzzAt:noop,burst:noop,puff:noop,spawnParticle:noop,damageNumber:noop}});
+  const A=C.cavemen.get("YellowBrokeIt");C.control(A);
+  let t=0;
+  const trial=(x,z,forward,strafe)=>{
+    const ham=H.create({plan,root,solids:BL.solidProps.create(),ra:.15,rb:.15,seed:1}),seat=ham.seats[0];
+    Object.assign(A.root.position,{x:seat.walkAt.x,y:seat.floor+A.baseY,z:seat.walkAt.z});A.hop=A.hopV=0;
+    const sat=ham.enter(A,seat,C.sitPlayer);
+    const step=()=>{C.update(1/60,t);ham.update(1/60,t,false);t+=1/60;};
+    C.steer(0,0);for(let i=0;i<120;i++)step();
+    const stayed=A.camp.seat===seat,from=ham.amp;let peak=from;
+    C.steer(x,z,0,forward,strafe);let f=0;for(;f<240&&seat.sitter;f++){step();peak=Math.max(peak,ham.amp);}
+    C.steer(0,0);const up=!seat.sitter&&!A.camp.seat;ham.dispose();
+    return{sat,stayed,up,frames:f,from,peak};
+  };
+  const left=trial(-1,0,0,-1),right=trial(1,0,0,1),forward=trial(0,1,1,0);
+  const ok=r=>r.sat&&r.stayed&&r.up&&r.peak<=r.from+1e-9;
+  const probe=H.create({plan,root,solids:BL.solidProps.create(),ra:.15,rb:.15,seed:1});
+  const gone=probe.pump===undefined&&probe.seats[0].pumps===undefined;probe.dispose();
+  record("hub hammock: left and right get the lying Ooga up just as forward does, never rock the bed on the way, and no input leaves them lying there",
+    ok(left)&&ok(right)&&ok(forward)&&gone,JSON.stringify({left,right,forward,gone}));
+  C.dispose?.();
+};
+
 // Rule: the authored Maxis routes and stand points must fit the real Yellow actor, not a guessed radius.
 const maxisChecks = BL => {
   const noop=()=>{},S=BL.scene,root=S.createNode(),targets=new Set();
@@ -29142,6 +29159,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   exteriorEnrichmentChecks(BL);
   if(ARGS.includes("exterior-unit"))return;
   maxisChecks(BL);
+  hammockSidewaysChecks(BL);
   if(ARGS.includes("maxis-unit"))return;
   petChecks(BL);
   rulersChecks(BL);

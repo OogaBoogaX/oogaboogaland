@@ -3721,8 +3721,7 @@
         }
       }
       if (c.seat) {
-        // A seat that `pumps` (the hammock) keeps A and D for rocking; forward or back still gets up.
-        if (cave === player && !c.seat.lockMovement && (c.seat.pumps ? Math.abs(steer.forward) : Math.hypot(steer.x, steer.z)) > 0.05 && standPlayer(cave, true) && !c.seat) return false;
+        if (cave === player && !c.seat.lockMovement && Math.hypot(steer.x, steer.z) > 0.05 && standPlayer(cave, true) && !c.seat) return false;
         standPose(cave);
         parts.legR.rotation.x = parts.legL.rotation.x = -Math.PI / 2;
         parts.armR.rotation.x = parts.armL.rotation.x = -0.75;

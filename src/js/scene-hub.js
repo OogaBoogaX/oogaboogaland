@@ -1999,7 +1999,7 @@
   const HAMMOCK_LAND = [1.2, 0.8], HAMMOCK_SLOTS = 1 + BL.remotePlayers.MAX;
   const hamRemoteId = new Float64Array(HAMMOCK_SLOTS), hamRemoteSeen = new Int32Array(HAMMOCK_SLOTS);
   const hamRemoteX = new Float64Array(HAMMOCK_SLOTS), hamRemoteZ = new Float64Array(HAMMOCK_SLOTS), hamRemoteT = new Float64Array(HAMMOCK_SLOTS);
-  let hamLocalHave = false, hamLocalX = 0, hamLocalZ = 0, hamFrame = 0, hamCueDir = 0, unshotHammock = null;
+  let hamLocalHave = false, hamLocalX = 0, hamLocalZ = 0, hamFrame = 0, unshotHammock = null;
   const hamRemote = (rec) => {
     if (!rec.body || rec.bodyKind === "gorilla" || rec.rest || !remoteShown(rec)) return;
     let slot = -1, free = -1;
@@ -2029,15 +2029,6 @@
     hamFrame = (hamFrame + 1) | 0;
     BL.net.remotes.forEach(hamRemote);
     for (let i = 1; i < HAMMOCK_SLOTS; i++) if (hamRemoteId[i] && hamRemoteSeen[i] !== hamFrame) hamRemoteId[i] = 0;
-    // Lying in it, the visitor rocks it with A and D (hub-hammock.js `pump`), while nothing else is going on with the seat.
-    const seat = hammock.seats[0];
-    if (player && seat.sitter === player && !seat.entry && !seat.exit && !seat.fall && dt > 0) {
-      const rock = pilot.controls.axes.x, dir = rock > 0.5 ? 1 : rock < -0.5 ? -1 : rock > -0.2 && rock < 0.2 ? 0 : hamCueDir;
-      hammock.pump(rock, dt);
-      // A fresh press of A or D (or the stick pushed sideways) shows its arrow, so the rock is seen to register.
-      if (dir !== hamCueDir && dir !== 0) hud.rockCue(dir);
-      hamCueDir = dir;
-    } else hamCueDir = 0;
     if (hammock.spilling) tipOutOfHammock();
   };
   // Swung hard enough, the bed tips its occupant out: only the visitor's own Ooga on this page. It rolls out over the edge on the side the bed
@@ -6646,9 +6637,7 @@
         hud.hint(COARSE ? "Tap DROP & ROLL! to put the fire out" : "Press Space to drop and roll until the fire goes out");
         hud.setAct("DROP & ROLL!");
       } else if (action === STAND_ACTION) {
-        const inHammock = pilot.player?.camp.seat?.kind === "hammock";
-        hud.hint(inHammock ? (COARSE ? "Stick sideways rocks the hammock · forward, back or STAND UP! to get up" : "A and D rock the hammock · W, S or Space to get up")
-          : COARSE ? "Move or tap STAND UP! to get up" : "Move or press Space to stand up");
+        hud.hint(COARSE ? "Move or tap STAND UP! to get up" : "Move or press Space to stand up");
         hud.setAct("STAND UP!");
       } else if (action.kind === "bench") {
         hud.hint(COARSE ? "Tap SIT to sit facing the fire" : "Press Space to sit facing the fire");
@@ -12500,7 +12489,6 @@
       if (!gorilla && player) {
         if (!pilot.birdsEye && player.traits.nunchaku && player.state !== "sleeping" && !player.camp.burning && !player.camp.rolling) help.rows.push(H.row(BL.controls.shortcutKeys("twirl"), "Twirl nunchaku"));
         if (player.tint) help.rows.push(H.row(BL.controls.shortcutKeys("tint"), "Change colourway"));
-        if (player.camp.seat?.kind === "hammock") help.rows.push(H.row(["a", "d"], "Rock the hammock (in time with the swing)"));
       }
     }
     if (!gorilla) help.title = "Island · " + help.title; return help;
