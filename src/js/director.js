@@ -658,7 +658,7 @@
   const UNFOCUSED_INTERVAL = 1000 / 30;
   let lastRender = 0;
   let renderedFrames = 0;
-  let firstDraw = false;
+  let firstDraw = false, firstPlayable = false;
   // A first visit opens the Bananas panel a beat after the curtain (0.9 s) has parted on the world (`sheet.welcome`),
   // unless the visitor chose a panel, left the scene or began a game meanwhile. Quiet `nosim` pages (the suite, the
   // cards) opt out unless `welcome=1` asks; `welcome=0` turns it off anywhere.
@@ -703,6 +703,10 @@
     if (!helpHeld) agentPlay.update(sceneDt);
     updateWorldClock(now);
     const drawn = renderer.render(active.root, active.camera, active.renderOpts, activeMeshRigs);
+    if (drawn && !firstPlayable && !curtain.isConnected && !inputHeld && !transition) {
+      firstPlayable = true;
+      mark("first-playable");
+    }
     if (drawn && !firstDraw) {
       firstDraw = true;
       mark("drawn");
@@ -817,9 +821,14 @@
       sound.toggle();
       return;
     }
+    // L is the room's while one takes voice links (a demo tip is the scene's otherwise); H is the scene's first, for a
+    // forklift's horn, and the raised hand's when the scene had no use for it. Shift still counts, since it is the run key.
+    const plain = !e.metaKey && !e.ctrlKey && !e.altKey;
+    if (key === "l" && plain && net.linkEveryone()) { e.preventDefault(); return; }
     // Every scene's B shortcut adds demo bananas; ordinary visits leave donations to the feed.
     if (key === "b" && !DEBUG) return;
-    active.onKey(e);
+    const used = active.onKey(e);
+    if (key === "h" && plain && !used && window.BL.reactions.toggleHand()) e.preventDefault();
   };
   const onVisibility = () => {
     // A hidden tab holds no sockets; the chain's REST polls already skip themselves while hidden.
@@ -1054,6 +1063,7 @@
         bootFailed(error); return;
       }
     } else window.BL.buildTasks.measure(() => { enter(first, place); finishBootDonations(); });
+    mark("core-ready");
     mark("ready");
     // A restored island counts as the build it replaced, so the cache never starts a device a tier higher.
     tierFromBoot(window.BL.buildTasks.cpu - constructionCPU - uploadCPU + (window.BL.terrainCache?.stats.credit || 0));
@@ -1125,7 +1135,7 @@
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "drop", "diver", "plane", "course", "jumbotron", "totems", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "dsb", "clankers", "clankerPlay", "factory", "hangar", "bifrost", "arcade", "carnival", "npcSync", "footsteps", "timechain", "halloween" /* HALLOWEEN */]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "drop", "diver", "plane", "course", "jumbotron", "totems", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "block", "dsb", "clankers", "clankerPlay", "factory", "hangar", "bifrost", "arcade", "carnival", "npcSync", "footsteps", "timechain", "halloween" /* HALLOWEEN */]) {
       Object.defineProperty(ooga, key, { get: () => active && active.debug && active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;

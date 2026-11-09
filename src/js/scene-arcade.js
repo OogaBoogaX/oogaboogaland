@@ -163,7 +163,8 @@
     if (id === "race") { hud.toast("Ooga Rally · out of order"); return; }
     const cabinetId = id === "hub" && place === "cloud-hopper" ? "cloud-hopper" : id;
     const cabinet = LAYOUT.cabinets.find(c => (c.game >= 0 ? GAMES[c.game].id : AM.RETRO[c.retro].id) === cabinetId);
-    if (!cabinet) {
+    // A machine, or a cabinet outside the seat registry (Block Frenzy's, played solo), opens its scene directly.
+    if (!cabinet || !BL.arcadeCabinets.get(cabinetId)) {
       const preferred = id === "hockey" && Number.isInteger(place) && BL.hockeyWire.TABLES[place] && avatar && avatar.root.position.z < BL.hockeyWire.TABLES[place][1] ? 1 : 0;
       if (go(id, place)) { if (id === "hockey") world.hockeyEnd = preferred; leaving = openingGame = true; } return;
     }
@@ -1886,7 +1887,7 @@
       // Nothing through a wall or a floor: no tooltip, and no game started by a tap.
       onHover: (hit, p) => {
         if (hit && !inView(hit)) hit = null;
-        if (hit?.owner.kind === "cabinet" && GAMES[hit.owner.game] && !GAMES[hit.owner.game].unavailable && GAMES[hit.owner.game].id !== "cloud-hopper") BL.deferred.prefetchScene(GAMES[hit.owner.game].id);
+        if (hit?.owner.kind === "cabinet" && GAMES[hit.owner.game] && !GAMES[hit.owner.game].unavailable) BL.deferred.prefetchScene(GAMES[hit.owner.game].id);
         if (hit) hud.tooltip.show(tipFor(hit), p.x, p.y);
         else hud.tooltip.hide();
       },
@@ -2084,7 +2085,7 @@
       const p = pilot.player ? pilot.player.root.position : camera.position;
       for (let i = 0; i < live.length; i++) {
         const c = live[i], dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
-        if (GAMES[c.game] && !GAMES[c.game].unavailable && GAMES[c.game].id !== "cloud-hopper" && dx * dx + dy * dy + dz * dz <= 225) BL.deferred.prefetchScene(GAMES[c.game].id);
+        if (GAMES[c.game] && !GAMES[c.game].unavailable && dx * dx + dy * dy + dz * dz <= 225) BL.deferred.prefetchScene(GAMES[c.game].id);
       }
     }
     if (!leaving) pilot.readInput(dt);

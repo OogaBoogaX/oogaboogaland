@@ -8,21 +8,7 @@
   const NODE_STRIDE = 14, STRIDE = 1 + PARTS.length * NODE_STRIDE, SAMPLE_SECONDS = 0.05, MAX_SAMPLES = 12001;
   // The replay ghost's look, shared with the island's NPC ghost tracks (npc-ghosts.js): a fresh cyan, glassy,
   // shadowless copy of one geometry with its normals kept. The source is never changed; the caller owns the copy.
-  const style = (source) => {
-    const geometry = BL.models.merge(source);
-    for (const face of geometry.faces) {
-      const light = (face.color[0] + face.color[1] + face.color[2]) / 765;
-      face.color = [105 + light * 50, 190 + light * 45, 225 + light * 30];
-      face.emissive = 0.35;
-    }
-    for (const line of geometry.lines) line.color = [150, 225, 255];
-    geometry.smooth = source.smooth;
-    if (source.normals) geometry.normals = source.normals;
-    geometry.glass = 0.3;
-    geometry.castShadow = false;
-    geometry.characterPart = true;
-    return geometry;
-  };
+  const style = BL.ghostStyle;
   const create = ({ root, renderer }) => {
     const rotation = quat.create(), nextRotation = quat.create(), sourceNodes = new Array(PARTS.length);
     const readyRotation = quat.create(), readyPosition = { x: 0, y: 0, z: 0 }, screen = { x: 0, y: 0 };

@@ -74,8 +74,9 @@
 // snapshots and this page's own reports, a few times a second at most, nothing while nobody moves.
 // Reactions (reactions.js, reaction-policy.js): a room whose `features` hold REACT_FEATURE (`state.reactions`) takes
 // `sendReaction(emoji)`, an emoji shown over this page's driven body for a moment, relayed to the pages in its zone,
-// and `setHand(on, tone)`, the raised hand in a skin tone, kept by the room for everyone (`hand` and `handTone` on every
-// remote record, `state.hand` and `state.handTone` for this page, sent again after a reconnect, lowered on signing out). `subscribeReactions` hears `fn(id, emoji)` for a
+// and `setHand(on, tone, emoji)`, one persistent slot (the raised hand by default), kept by the room for everyone
+// (`hand`, `handTone` and `handEmoji` on remote records and `state`, sent again after a reconnect, lowered on signing out).
+// `subscribeReactions` hears `fn(id, emoji)` for a
 // remote player's reaction, and for this page's own as id 0, as it is sent; a hand going up or down is a roster change.
 // Both spend one bucket mirroring the room's, a little short of it, so neither is ever shown here and dropped there;
 // `setHand` refuses (false, nothing changed) when it is empty, and a hand change the room still refuses comes back as
@@ -91,9 +92,11 @@
 // already there on this page's (re)join, and `fn(rec, false)` when one leaves (players.js names the joins, #430).
 // Voice links: a room whose `features` hold LINK_FEATURE (`state.voiceLinks`) keeps asks to hear another player in any
 // zone. `voiceLink(id)` is where this page stands with them ("none", "asked" or "linked"), from the room's `links` alone
-// (`state.linkWants`, `state.linked`), and `toggleVoiceLink(id)` asks or takes this page's ask back. Moving to another
-// place lets go of every voice but the linked ones, which never drop.
-// Exports voiceLink, toggleVoiceLink, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
+// (`state.linkWants`, `state.linked`), and `toggleVoiceLink(id)` asks or takes this page's ask back. `linkEveryone()`
+// (the L key) has the room link this page with everyone here who has asked it or, with nobody waiting, take back all of
+// its asks; only the room knows who has asked. Moving to another place lets go of every voice but the linked ones, which
+// never drop.
+// Exports voiceLink, toggleVoiceLink, linkEveryone, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
 // setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendGhostState and subscribeGhostState (HALLOWEEN), npcFrame, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
 // ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
 (() => {
@@ -188,7 +191,7 @@
   const state = { backend: false, me: null, donations: false, tess: false, highscores: false, highscoreSnapshots: false, logoutEpoch: 0, started: false,
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
     room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, ghostHostId: 0, ghostFollowers: 0, npcVersion: 0, doorway: false, pokerVoice: null,
-    self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, privateChat: false, chalk: null, blendTo: null, blendT: 0, reactions: false, hand: false, handTone: 0,
+    self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, privateChat: false, chalk: null, blendTo: null, blendT: 0, reactions: false, customHand: false, hand: false, handTone: 0, handEmoji: "",
     voiceLinks: false, linkWants: new Set(), linked: new Set() };
   const REACT_FEATURE = "react-v1", LINK_FEATURE = "vlink-v1", LINK_MAX = 64;
   const linkIds = (list) => new Set(Array.isArray(list) ? list.filter((id) => Number.isSafeInteger(id) && id > 0).slice(0, LINK_MAX) : []);
@@ -330,7 +333,7 @@
 
   const upsert = (p) => {
     if (!p || !Number.isSafeInteger(p.id) || p.id === state.selfId) return;
-    const rec = remotes.get(p.id) || { id: p.id, login: "", display: "", body: null, bodyKind: null, bodyName: null, zone: "outside", voice: false, muted: false, hand: false, handTone: 0, hp: 100, ko: false, x: 0, y: 0, z: 0, yaw: 0, poseZone: null, g: null, gData: null, jet: 0, weapon: 0 };
+    const rec = remotes.get(p.id) || { id: p.id, login: "", display: "", body: null, bodyKind: null, bodyName: null, zone: "outside", voice: false, muted: false, hand: false, handTone: 0, handEmoji: "", hp: 100, ko: false, x: 0, y: 0, z: 0, yaw: 0, poseZone: null, g: null, gData: null, jet: 0, weapon: 0 };
     rec.login = String(p.login);
     rec.display = String(p.display || p.login);
     rec.body = typeof p.body === "string" ? p.body : null;
@@ -349,6 +352,7 @@
     rec.muted = p.muted === true;
     rec.hand = p.hand === true;
     rec.handTone = BL.reactionPolicy.tone(p.handTone) ? p.handTone : 0;
+    rec.handEmoji = BL.reactionPolicy.valid(p.handEmoji) ? p.handEmoji : "";
     rec.x = +p.x || 0; rec.y = +p.y || 0; rec.z = +p.z || 0; rec.yaw = +p.yaw || 0;
     // A pose the room holds for someone driving is where they stand now; for anyone else it may be from a zone they
     // have since left, so it is not taken (`poseZone`).
@@ -476,6 +480,8 @@
       state.chatUnicode = Array.isArray(msg.features) && msg.features.includes(BL.chatPolicy.FEATURE);
       state.privateChat = Array.isArray(msg.features) && msg.features.includes("pm-v1");
       state.reactions = Array.isArray(msg.features) && msg.features.includes(REACT_FEATURE);
+      state.customHand = Array.isArray(msg.features) && msg.features.includes("hand-emoji-v1");
+      if (!state.customHand) state.handEmoji = "";
       state.voiceLinks = Array.isArray(msg.features) && msg.features.includes(LINK_FEATURE);
       // A room that keeps the chalkboard sends it next (chalk-board); an older one leaves the page its own board.
       if (state.chalk && !(Array.isArray(msg.features) && msg.features.includes(BL.chalkBoard.FEATURE))) { state.chalk = null; chalkEmit("board"); }
@@ -639,6 +645,9 @@
     } else if (msg.t === "links") {
       state.linkWants = linkIds(msg.wants); state.linked = linkIds(msg.linked);
       if (msg.refused === "full") BL.hud.toast("Too many voice links: break one first");
+      else if (msg.all === "linked" && msg.n > 0) BL.hud.toast(`Voices linked with ${msg.n} ${msg.n === 1 ? "player" : "players"}`);
+      else if (msg.all === "unlinked") BL.hud.toast("Unlinked everyone");
+      else if (msg.all === "none") BL.hud.toast("Nobody here has asked to link with you");
       rosterChanged();
     } else if (msg.t === "ghost") {
       if (ghostHeard) ghostHeard(msg); // HALLOWEEN
@@ -649,6 +658,7 @@
       if (msg.id === state.selfId) {
         state.hand = msg.on === true;
         state.handTone = BL.reactionPolicy.tone(msg.tone) ? msg.tone : 0;
+        state.handEmoji = BL.reactionPolicy.valid(msg.e) ? msg.e : "";
         emit();
         return;
       }
@@ -656,6 +666,7 @@
       if (!rec) return;
       rec.hand = msg.on === true;
       rec.handTone = BL.reactionPolicy.tone(msg.tone) ? msg.tone : 0;
+      rec.handEmoji = BL.reactionPolicy.valid(msg.e) ? msg.e : "";
       rosterChanged();
     } else if (msg.t === "release") {
       state.released = { name: String(msg.name), reason: String(msg.reason) };
@@ -997,16 +1008,19 @@
     reactSubscribers.add(fn);
     return () => reactSubscribers.delete(fn);
   };
-  // The raised hand in skin tone `tone` (0 to 5), up until it is lowered; false, with nothing changed, when the room
-  // cannot take it now (not live, an older room, or over the bucket it shares with reactions).
-  const sendHand = () => send(`{"t":"hand","on":${state.hand},"tone":${state.handTone}}`);
-  const setHand = (on, tone = state.handTone) => {
+  // The persistent slot: an empty emoji is the raised hand in skin tone `tone` (0 to 5). Older rooms only take the hand.
+  // False, with nothing changed, when the room cannot take it now (not live or over the bucket shared with reactions).
+  const sendHand = () => send(JSON.stringify({ t: "hand", on: state.hand, tone: state.handTone, ...(state.customHand ? { e: state.handEmoji } : {}) }));
+  const setHand = (on, tone = state.handTone, emoji = "") => {
+    if (typeof on !== "boolean" || emoji !== "" && !BL.reactionPolicy.valid(emoji)) return false;
+    if (!state.customHand) emoji = "";
     if (on && (!state.reactions || state.room !== "live")) return false;
-    if (state.hand === on && (!on || state.handTone === tone)) return true;
+    if (state.hand === on && (!on || state.handTone === tone && state.handEmoji === emoji)) return true;
     const live = state.room === "live" && !!ws && ws.readyState === WebSocket.OPEN;
     if (live && !reactToken()) return false;
     state.hand = on;
     state.handTone = BL.reactionPolicy.tone(tone) ? tone : 0;
+    state.handEmoji = emoji;
     if (live) sendHand();
     emit();
     return true;
@@ -1019,6 +1033,13 @@
   const toggleVoiceLink = (id) => {
     if (!state.voiceLinks || state.room !== "live" || !Number.isSafeInteger(id) || id <= 0) return false;
     send(JSON.stringify({ t: "link", to: id, on: !state.linkWants.has(id) }));
+    return true;
+  };
+  // Links with everyone here who has asked this page, or with nobody waiting takes back all of its asks; false when the
+  // room cannot take it, so the key stays with the scene. The room's `links` reply says what it did.
+  const linkEveryone = () => {
+    if (!state.voiceLinks || state.room !== "live") return false;
+    send('{"t":"link-all"}');
     return true;
   };
 
@@ -1312,5 +1333,5 @@
     close("off");
   };
 
-  BL.net = { voiceLink, toggleVoiceLink, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendReaction, subscribeReactions, setHand, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { voiceLink, toggleVoiceLink, linkEveryone, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendReaction, subscribeReactions, setHand, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

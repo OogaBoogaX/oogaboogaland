@@ -523,7 +523,7 @@
       ctx.restore();
     };
     const drawNames = (ctx, project, showHealth = false) => {
-      const ownHand = net.state && net.state.hand ? BL.reactionPolicy.HANDS[net.state.handTone] : "";
+      const ownHand = net.state && net.state.hand ? (net.state.handEmoji || BL.reactionPolicy.HANDS[net.state.handTone]) : "";
       // The visitor's own line stands over their raised hand, on whichever body they drive now.
       const own = player ? player() : crew && crew.player, speaker = ownHand && own || null;
       if (lifted !== speaker) {
@@ -590,7 +590,7 @@
         entry.screenX = mid; entry.plateLeft = left; entry.plateTop = top; entry.plateW = boxW; entry.plateH = boxH;
         entry.plateTextX = textX; entry.plateBaseline = line + nameBaseline;
         // A reaction and the raised hand over the plate's box, centred on it (clamped with it at the view's edge).
-        if (entry.reactT > 0 || rec.hand) drawReaction(ctx, left + boxW / 2, top, entry.react, entry.reactT, rec.hand ? BL.reactionPolicy.HANDS[rec.handTone] : "");
+        if (entry.reactT > 0 || rec.hand) drawReaction(ctx, left + boxW / 2, top, entry.react, entry.reactT, rec.hand ? (rec.handEmoji || BL.reactionPolicy.HANDS[rec.handTone]) : "");
         ctx.strokeStyle = NAME_STROKE;
         ctx.fillStyle = NAME_FILL;
         ctx.strokeText(rec.display, textX, line + nameBaseline);

@@ -2452,6 +2452,15 @@
         if (cave.traits.stoneAxe) poseWeapon(cave);
       }
     };
+    // A page following the room's host takes its Oogas' status from the frames and leaves its own bed trip as it was.
+    // Handed back awake, that trip would hold the Ooga in `runBed`, rifle hidden and club in hand, with `applyState`
+    // seeing no change of status to end it. It takes up the host's status afresh, as `runBed` settles a trip begun
+    // before an Ooga became passive.
+    const resumeFromHost = (cave) => {
+      if (cave.state !== "working" && cave.state !== "chilling" || !cave.bedTravel.mode) return;
+      const state = cave.state;
+      cave.state = "away"; applyState(cave, state, true);
+    };
     const rush = () => {
       if (!wanderSpot) return;
       for (let caveIndex = 0; caveIndex < crewList.length; caveIndex++) {
@@ -3721,8 +3730,7 @@
         }
       }
       if (c.seat) {
-        // A seat that `pumps` (the hammock) keeps A and D for rocking; forward or back still gets up.
-        if (cave === player && !c.seat.lockMovement && (c.seat.pumps ? Math.abs(steer.forward) : Math.hypot(steer.x, steer.z)) > 0.05 && standPlayer(cave, true) && !c.seat) return false;
+        if (cave === player && !c.seat.lockMovement && Math.hypot(steer.x, steer.z) > 0.05 && standPlayer(cave, true) && !c.seat) return false;
         standPose(cave);
         parts.legR.rotation.x = parts.legL.rotation.x = -Math.PI / 2;
         parts.armR.rotation.x = parts.armL.rotation.x = -0.75;
@@ -7416,7 +7424,7 @@
       showShot, setTint, spotOccupied, setCombatEnabled,
       get combatEnabled() { return combatEnabled; },
       get weaponsEnabled() { return weaponsEnabled; },
-      cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, refreshStates, refreshRosterRow, updateFan, rush, applyAllSwag, wornBy, renderLocker, pokeCave, idleSay, drawDrops,
+      cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, refreshStates, resumeFromHost, refreshRosterRow, updateFan, rush, applyAllSwag, wornBy, renderLocker, pokeCave, idleSay, drawDrops,
       throwTomato, clearProjectiles, control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, clearHeadLook, prepareDragged, recoverDragged, ignite, soot, dropRoll, damage, fireView, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, setJetpackOwnership, cutJet, thrust, holdRocketJump, update, pause, dispose, stats,
       actorClear, outsideSupportAt, builtInJetpack, toggleTint, twirl, pushPose, toggleWeapon, selectWeapon, configureWeapon, parkWeapons, unparkWeapons, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
       get sleeping() { return !!(player && player.bedTravel.manual && player.state === "sleeping"); },

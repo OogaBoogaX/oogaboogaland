@@ -2,7 +2,7 @@
 // own, signed in or out, crew.js/clankers.js `separateBodies`, or another page's, shown by remote-players.js), the roster NPC of that
 // name stays the same object on its own track: its route, fire seat, bed, work and status beams go on as before,
 // an Ooga through the room's one NPC host, a gorilla companion on each page from that host's Ooga states and plan/hit
-// events (npc-sync.js carries no companion poses). It is only drawn as a Cloud Hopper replay ghost (`cloudHopperGhost.style`: cyan,
+// events (npc-sync.js carries no companion poses). It is only drawn as a Cloud Hopper replay ghost (`ghostStyle`: cyan,
 // glassy, shadowless), and its harmless work rounds fly in the same colour (`shotLook`). Nothing here moves an
 // actor, reserves or frees a seat or bed, changes collision or authority, or sets `humanControlled`/`remoteControlled`;
 // the one mark is `ghostTrack`, which the roster dot, possession refusals and the work-round presentation read.
@@ -25,7 +25,7 @@
     const twin = (source) => {
       let geometry = twins.get(source);
       if (!geometry) {
-        geometry = BL.cloudHopperGhost.style(source);
+        geometry = BL.ghostStyle(source);
         // HALLOWEEN: a straight round keeps pointing along its line.
         if (source.straight) geometry.straight = true;
         twins.set(source, geometry); sources.set(geometry, source);
