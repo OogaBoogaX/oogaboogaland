@@ -13403,26 +13403,26 @@ const hubNameplates = { name: "live nameplates", why: "rule: names over live pla
   // is set), and the name drawn after the peer's hand still in the tooltip's type, so a hand's state never leaks into it.
   await place("ooga", 0); await plateAt();
   const hands = await b.evaluate(`(async () => {
-    const net = BL.net, rec = net.remotes.get(515515), HANDS = BL.reactionPolicy.HANDS, was = { hand: net.state.hand, tone: net.state.handTone };
-    rec.hand = true; rec.handTone = 3; net.state.hand = true; net.state.handTone = 0;
+    const net = BL.net, rec = net.remotes.get(515515), HANDS = BL.reactionPolicy.HANDS, ownGlyph = "🍌", was = { hand: net.state.hand, tone: net.state.handTone, emoji: net.state.handEmoji };
+    rec.hand = true; rec.handTone = 3; net.state.hand = true; net.state.handTone = 0; net.state.handEmoji = ownGlyph;
     const ctx = document.getElementById("overlay").getContext("2d"), calls = [], wrap = name => { const real = ctx[name];
-      ctx[name] = function (text, x, y) { if (text === "Plate peer" || HANDS.includes(text)) { const m = ctx.getTransform();
+      ctx[name] = function (text, x, y) { if (text === "Plate peer" || text === ownGlyph || HANDS.includes(text)) { const m = ctx.getTransform();
         calls.push({ name, text, x, y, font: ctx.font, spacing: ctx.letterSpacing, align: ctx.textAlign, base: ctx.textBaseline, m: [m.a, m.b, m.c, m.d, m.e, m.f].join() }); }
         return real.apply(this, arguments); }; return real; };
     const fill = wrap("fillText"), stroke = wrap("strokeText");
     await new Promise(r => setTimeout(r, 300));
     ctx.fillText = fill; ctx.strokeText = stroke;
     const live = BL.remotePlayers.nameplate(515515);
-    rec.hand = false; net.state.hand = was.hand; net.state.handTone = was.tone;
+    rec.hand = false; net.state.hand = was.hand; net.state.handTone = was.tone; net.state.handEmoji = was.emoji;
     const last = text => calls.filter(c => c.text === text).pop() || null, name = calls.filter(c => c.text === "Plate peer" && c.name === "fillText").pop() || null;
-    const peerAt = calls.lastIndexOf(last(HANDS[3])), nameAt = calls.lastIndexOf(name), ownAt = calls.lastIndexOf(last(HANDS[0]));
-    return { live, peer: last(HANDS[3]), own: last(HANDS[0]), name, peerFirst: peerAt >= 0 && nameAt > peerAt, ownFirst: ownAt >= 0 && peerAt > ownAt, distinct: HANDS[3] !== HANDS[0] };
+    const peerAt = calls.lastIndexOf(last(HANDS[3])), nameAt = calls.lastIndexOf(name), ownAt = calls.lastIndexOf(last(ownGlyph));
+    return { live, peer: last(HANDS[3]), own: last(ownGlyph), name, peerFirst: peerAt >= 0 && nameAt > peerAt, ownFirst: ownAt >= 0 && peerAt > ownAt, distinct: HANDS[3] !== ownGlyph };
   })()`);
   await b.evaluate(`(() => { BL.net.remotes.delete(515515); __ooga.advance(0.2, 1 / 60); })()`);
   // Chrome reads a context's untouched letter spacing as "" (its default, none) and keeps that when 0px is set over it.
   const emojiType = c => c && /Apple Color Emoji/.test(c.font) && /^20px/.test(c.font) && (c.spacing === "0px" || c.spacing === "") && c.align === "center" && c.base === "middle";
   const { live: hp, peer, own, name } = hands;
-  record("live nameplates: a raised hand stands centred over a live player's nameplate box, the visitor's own is drawn before any name, both in emoji type with no letter spacing, and the name drawn after a hand keeps the NPC tooltip's type, spacing and place",
+  record("live nameplates: a raised hand stands centred over a live player's nameplate box, the visitor's custom persistent emoji is drawn before any name, both in emoji type with no letter spacing, and the name drawn after a hand keeps the NPC tooltip's type, spacing and place",
     hands.distinct && hp && emojiType(peer) && emojiType(own) && hands.peerFirst && hands.ownFirst && peer.m === name.m && own.m === name.m
       && peer.x === hp.left + hp.width / 2 && peer.y === hp.top - 16 && Number.isInteger(own.x) && Number.isInteger(own.y)
       && name.font === hp.font && name.spacing === hp.spacing && name.align === "left" && name.base === "alphabetic" && name.x === hp.textX && name.y === hp.baseline,
@@ -27555,6 +27555,98 @@ const reactionWireChecks = async BL => {
       && corrected.hand === false && corrected.tone === 0,
     JSON.stringify({ sent, raised, afterBurst, later, up, corrected }));
 };
+// Uses the real panel and net client; the small DOM/clock follows #548's reusable panel fixture.
+const persistentPanel = (BL, net, saved = new Map()) => {
+  const timers = new Map(), ids = new Map();
+  let nextTimer = 1, focused = null;
+  const make = () => ({ on: {}, children: [], dataset: {}, attrs: {}, hidden: false, disabled: false, textContent: "", className: "", value: "", parent: null,
+    append(...items) { for (const c of items) if (typeof c !== "string") { c.parent = this; this.children.push(c); } },
+    addEventListener(type, fn) { (this.on[type] ||= []).push(fn); }, removeEventListener() {}, dispatchEvent() {}, focus() { focused = this; }, contains() { return true; },
+    setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return this.attrs[k] ?? null; },
+    querySelector: () => make(),
+    closest(sel) { return this.className.split(" ").includes(sel.slice(1).split("[")[0]) && (!sel.includes("[data-slot]") || this.dataset.slot !== undefined) ? this : null; } });
+  const body = make(); for (const id of ["players-reactions", "chat-reactions"]) ids.set(id, make());
+  const context = { window: { BL: { reactionPolicy: BL.reactionPolicy, emojiData: BL.emojiData, net }, addEventListener() {},
+    setTimeout: fn => { timers.set(nextTimer, fn); return nextTimer++; }, clearTimeout: id => timers.delete(id), matchMedia: () => ({ matches: true }) },
+    document: { createElement: make, getElementById: id => ids.get(id), body, addEventListener() {}, removeEventListener() {} },
+    localStorage: { getItem: key => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value) }, Event: class {} };
+  runInNewContext(readFileSync(join(root, "src/js/reactions.js"), "utf8"), context);
+  const bars = [...ids.values()].map(host => { const card = host.children[0]; return { card, buttons: [...card.children[0].children, card.children[2]] }; });
+  const event = (slot, type, extra = {}, bar = 0) => {
+    const e = { target: bars[bar].buttons[slot], button: 0, pointerId: 1, isPrimary: true, clientX: 0, clientY: 0, preventDefault() {}, ...extra };
+    for (const fn of bars[bar].card.on[type] || []) fn(e);
+  };
+  const tap = (slot, bar = 0) => { event(slot, "pointerdown", {}, bar); event(slot, "pointerup", {}, bar); event(slot, "click", {}, bar); };
+  const flush = () => { for (const [id, fn] of [...timers]) { timers.delete(id); fn(); } };
+  const hold = (slot, pointerType) => { event(slot, "pointerdown", { pointerType }); flush(); event(slot, "pointerup", { pointerType }); event(slot, "click", { pointerType }); };
+  const find = (cls, node = body) => node.className.split(" ").includes(cls) ? [node] : node.children.flatMap(c => find(cls, c));
+  const click = el => { for (let p = el; p; p = p.parent) for (const fn of p.on.click || []) fn({ target: el }); };
+  return { R: context.window.BL.reactions, bars, event, tap, hold, flush, find, click, saved, timers, focused: () => focused };
+};
+const persistentSlotChecks = async BL => {
+  const f = netFixture(BL, () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "Tester", display: "Tester" } }) }), 0);
+  await f.net.start();
+  const net = f.net, message = v => f.sockets.at(-1).onmessage({ data: JSON.stringify(v) });
+  const welcome = (features = ["react-v1", "hand-emoji-v1"]) => message({ t: "welcome", you: { id: 71 }, now: Date.now(), features,
+    players: [{ id: 5, login: "peer", display: "Peer", hand: true, handEmoji: "🍌" }, { id: 6, login: "old", hand: true, handTone: 3 }] });
+  welcome();
+  const p = persistentPanel(BL, net), frames = t => f.sent.filter(m => m.t === t), rest = () => f.advance(3000);
+  const choose = emoji => p.click(p.find("reaction-choice").find(b => b.dataset.e === emoji));
+  const pressed = () => p.bars.every(bar => bar.buttons[10].getAttribute("aria-pressed") === String(net.state.hand));
+  const rows = [];
+  for (const pointerType of ["mouse", "touch"]) {
+    p.hold(10, pointerType);
+    const held = p.R.stats().open && p.R.stats().slot === 10 && !net.state.hand;
+    choose("🍌");
+    const configured = p.R.persistent === "🍌" && p.bars.every(bar => bar.buttons[10].textContent === "🍌") && !net.state.hand && p.focused() === p.bars[0].buttons[10];
+    rest(); p.tap(10);
+    const up = net.state.hand && net.state.handEmoji === "🍌" && pressed();
+    rest(); const before = frames("hand").length, reactions = frames("react").length;
+    p.tap(0); p.tap(0);
+    const transient = frames("react").length === reactions + 2 && frames("hand").length === before && net.state.handEmoji === "🍌" && p.bars.every(bar => bar.buttons.slice(0, 10).every(b => b.getAttribute("aria-pressed") === null));
+    rest(); p.tap(10, 1);
+    rows.push({ pointerType, held, configured, up, transient, off: !net.state.hand && pressed() });
+  }
+  record("rule: the right slot toggles in both bars; mouse/touch holds customize without toggling, while every left double tap stays transient",
+    rows.every(r => r.held && r.configured && r.up && r.transient && r.off), JSON.stringify(rows));
+  const cancelled = [];
+  for (const [type, extra] of [["pointermove", { clientX: 20 }], ["pointercancel", {}], ["pointerleave", {}], ["pointerdown", { pointerId: 2, isPrimary: false }]]) {
+    p.event(10, "pointerdown"); p.event(10, type, extra); p.flush(); p.event(10, "pointerup"); p.event(10, "click");
+    cancelled.push(!p.R.stats().open && !net.state.hand && p.timers.size === 0);
+  }
+  p.event(10, "keydown", { key: "F10", shiftKey: true });
+  const keyboard = p.R.stats().open && p.R.stats().slot === 10;
+  choose("👍"); rest(); p.R.toggleHand();
+  p.hold(10, "touch"); p.click(p.find("reaction-tone")[3]);
+  const toned = net.state.handEmoji === "👍🏽";
+  rest(); choose("💜");
+  const heart = net.state.handEmoji === "💜";
+  rest(); p.hold(10, "mouse"); choose("🍌");
+  const slots = JSON.stringify(p.R.slots), replaced = net.state.handEmoji === "🍌";
+  rest(); p.hold(0, "mouse"); choose("🍌");
+  const independent = net.state.handEmoji === "🍌" && p.R.slots[0] === "🍌" && slots !== JSON.stringify(p.R.slots);
+  // The server can refuse an optimistic update: show its actual active glyph, not the saved next choice.
+  message({ t: "hand", id: 71, on: true, tone: 0, e: "💯" });
+  const correction = p.bars.every(bar => bar.buttons[10].textContent === "💯") && pressed();
+  rest(); welcome();
+  const reconnect = frames("hand").at(-1).e === "💯" && net.remotes.get(5).handEmoji === "🍌" && net.remotes.get(6).handEmoji === "";
+  message({ t: "hand", id: 5, on: true, tone: 0, e: "👍" });
+  const remote = net.remotes.get(5).handEmoji === "👍";
+  rest(); p.hold(10, "mouse"); p.click(p.find("reaction-picker-reset")[0]);
+  const reset = p.R.persistent === BL.reactionPolicy.HAND && net.state.hand && net.state.handEmoji === "" && net.state.handTone === 0;
+  rest(); p.tap(10); p.hold(10, "mouse"); choose("🍌");
+  const loaded = persistentPanel(BL, net, p.saved);
+  const stored = loaded.R.persistent === "🍌" && !net.state.hand;
+  welcome(["react-v1"]); rest(); p.tap(10);
+  const older = !net.state.customHand && net.state.hand && net.state.handEmoji === "" && !Object.hasOwn(frames("hand").at(-1), "e");
+  p.hold(10, "touch"); const gated = !p.R.stats().open;
+  message({ t: "kick", reason: "revoked" });
+  record("rule: persistent customization supports cancellation, keyboard, tone, heart, independent slots, reset, saved choice, authoritative corrections, reconnect and old rooms",
+    cancelled.every(Boolean) && keyboard && toned && heart && replaced && independent && correction && reconnect && remote && reset && stored && older && gated && !net.state.hand,
+    JSON.stringify({ cancelled, keyboard, toned, heart, replaced, independent, correction, reconnect, remote, reset, stored, older, gated }));
+  net.dispose();
+};
+
 // Online Oogas columns: every row, built by the real players.js on a small DOM, holds its cells in one order, and the
 // stylesheet puts each icon in a column of fixed width (lock, voice, distance as wide as "999 m", crosshair), so they
 // line up down the whole tab, in every group and on the visitor's own row.
@@ -30002,6 +30094,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   await privatePadChecks();
   await playersColumnChecks();
   await reactionWireChecks(BL);
+  await persistentSlotChecks(BL);
   await chalkboardClientChecks(BL);
   await chatAccountChecks(BL);
   await rememberedCharacterChecks(BL);

@@ -24,8 +24,8 @@
 // never tells the other player of an ask, so their link stays pale until they ask too. A click toggles this visitor's
 // ask. L (director.js, `net.linkEveryone`) links everyone waiting on them, or with nobody waiting unlinks everyone.
 // Hearing range and join-reading live together under the panel's Advanced settings disclosure.
-// A raised hand (reactions.js, `rec.hand` and `net.state.hand`) shows in its own column after the player's name, in their
-// skin tone, and each reaction they send pops up there, over the hand.
+// The persistent slot (reactions.js, `rec.hand` and `net.state.hand`) shows in its own column after the player's name:
+// `handEmoji`, or the raised hand in their skin tone. Each transient reaction pops up there, over the persistent one.
 // Joins (#430, `net.subscribePresence`): a player who comes online while the visitor is in the room is named on screen
 // (`hud.toast`, read out by assistive technology) and counted on the tab until the visitor looks at it
 // (`sheet.watchViews`), unless they are in the panel as it happens. Those already there when the visitor (re)joins are
@@ -145,12 +145,12 @@
   const paintMarks = () => {
     if (!showing || stale) return;
     const s = net.state, voice = BL.voice.stats, inVoice = voice.enabled || voice.returning;
-    paintMark(selfRow, inVoice ? voice.muted ? "muted" : voice.speaking ? "speaking" : "on" : "", "", inVoice, s.hostId === s.selfId, s.hand ? BL.reactionPolicy.HANDS[s.handTone] : "");
+    paintMark(selfRow, inVoice ? voice.muted ? "muted" : voice.speaking ? "speaking" : "on" : "", "", inVoice, s.hostId === s.selfId, s.hand ? (s.handEmoji || BL.reactionPolicy.HANDS[s.handTone]) : "");
     for (const row of rows.values()) {
       const rec = net.remotes.get(row.id);
       if (!rec) continue;
       const look = rec.voice ? rec.muted ? "muted" : !row.faded && BL.voice.speaking(rec.id) ? "speaking" : "on" : "";
-      paintMark(row, look || "off", rec.login, false, rec.id === s.hostId, rec.hand ? BL.reactionPolicy.HANDS[rec.handTone] : "");
+      paintMark(row, look || "off", rec.login, false, rec.id === s.hostId, rec.hand ? (rec.handEmoji || BL.reactionPolicy.HANDS[rec.handTone]) : "");
       paintLink(row, s.voiceLinks ? net.voiceLink(rec.id) : "", rec.display);
       const level = V.volumeOf(row.id), words = `${Math.round(level * 100)}%`;
       if (row.slider.value !== String(level * 100)) row.slider.value = String(level * 100);
@@ -169,7 +169,11 @@
     row.link.title = words; row.link.setAttribute("aria-label", words);
   };
   const paintMark = (row, look, login, self, host, hand = "") => {
-    if (row.handShown !== hand) { row.handShown = hand; row.hand.textContent = hand; row.hand.hidden = !hand; }
+    if (row.handShown !== hand) {
+      row.handShown = hand; row.hand.textContent = hand; row.hand.hidden = !hand;
+      const words = hand && BL.reactionPolicy.HANDS.includes(hand) ? "Hand raised" : `Pinned emoji ${hand}`;
+      row.hand.title = words; row.hand.setAttribute("aria-label", words);
+    }
     const blocked = !!login && BL.voice.mutedLocally(row.id);
     if (row.voiceLook !== look || row.voiceLogin !== login || row.voiceSelf !== self || row.blocked !== blocked) {
       row.voiceLook = look; row.voiceLogin = login; row.voiceSelf = self; row.blocked = blocked;
