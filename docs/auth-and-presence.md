@@ -14,6 +14,8 @@ Before a signed-in player opens a cabinet, the page sends `{ t: "cabinet", op: "
 
 While reserved, the room keeps the player's body, hall zone and canonical standing pose; game-world movement cannot move that avatar. The page stays in the same voice group. The matching `{ t: "cabinet", op: "leave", id, q }` releases the cabinet. Disconnect, stale-socket cleanup, socket replacement and forced body release also free it. Socket attachments preserve reservations across room hibernation. A late acknowledgement after cancellation is released using its own sequence, so it cannot release a newer visit.
 
+Four more stand in the island's Arcade cave (#554), which `arcade-outdoor-v1` in welcome's features admits: a seat there is `<id>@out`, separate from the game's hall seat so the two play at once, taken with the spot it stands at (`{ t: "cabinet", op: "take", id: "mine@out", q, slot }`, `slot` an index into `arcadeCabinets.slots`) from zone `outside`. One player still holds one cabinet. A player at one stays in the main island's voice for the whole game, their zone held at `outside` as the seat holds it: they hear the island's players and nobody in the hall. Which game a cave cabinet shows is the page's own reading of the plays (`arcade-popular.js`), so two pages briefly disagreeing about a slot's game still arbitrate by the game's seat.
+
 The page waits for acceptance, refuses live play on an older server without the feature, and returns to the arcade after losing the connection. Signed-out play is local and does not reserve a cabinet. Public game links enter through the corresponding arcade cabinet; debug scene fixtures can still open games directly. No game progress or new personal data is stored in the reservation.
 
 ## Pieces

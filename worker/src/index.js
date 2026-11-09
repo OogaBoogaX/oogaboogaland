@@ -9,6 +9,7 @@ import { handleAuth } from "./auth.js";
 import { purgeExpiredSessions } from "./db.js";
 import { handleDonations } from "./donations.js";
 import { handleHighscores } from "./highscores.js";
+import { handleArcadePlays } from "./arcade-plays.js";
 import { handleCloudHopperReplays } from "./cloud-hopper-replays.js";
 import { pruneCloudHopperReplays } from "./cloud-hopper-replay-store.js";
 import { allowed, fromSite, getSessionFromRequest, text } from "./http.js";
@@ -58,6 +59,7 @@ export default {
     if (url.pathname.startsWith("/api/voice/")) return handleVoice(request, env, url);
     if (url.pathname === "/api/tess") return handleTess(request, env);
     if (url.pathname.startsWith("/api/highscores/")) return handleHighscores(request, env, ctx);
+    if (url.pathname === "/api/arcade-plays" || url.pathname.startsWith("/api/arcade-plays/")) return handleArcadePlays(request, env);
     if (url.pathname.startsWith("/api/cloud-hopper-replays/")) return handleCloudHopperReplays(request, env, ctx);
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);
     if (url.pathname === "/room") return handleRoom(request, env);
