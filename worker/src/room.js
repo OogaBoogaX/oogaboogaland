@@ -517,6 +517,8 @@ export class Room extends DurableObject {
     } else if (msg.t === "link") {
       // Nothing in the attachment changes: asks live in storage, by account.
       return this.linkMessage(p, msg);
+    } else if (msg.t === "link-all") {
+      return this.linkAllMessage(p);
     } else if (msg.t === "door") {
       return this.doorMessage(p, msg);
     } else if (msg.t === "chalk") {
@@ -834,7 +836,7 @@ export class Room extends DurableObject {
 
   saveAttachment(p) { p.ws.serializeAttachment(this.attachment(p)); }
 
-  sendLinks(p, refused) { this.send(p.ws, { t: "links", ...linkView(this.links, p.id), ...(refused ? { refused } : {}) }); }
+  sendLinks(p, refused, all, n) { this.send(p.ws, { t: "links", ...linkView(this.links, p.id), ...(refused ? { refused } : {}), ...(all ? { all, n } : {}) }); }
 
   saveLinks() { if (this.ctx && this.ctx.storage) this.background(this.ctx.storage.put("voiceLinks", storedLinks(this.links))); }
 
@@ -859,6 +861,34 @@ export class Room extends DurableObject {
     if (was === voiceLinked(this.links, p.id, msg.to)) return;
     const q = this.players.get(msg.to);
     if (q) this.sendLinks(q);
+    this.enforceStudio();
+  }
+
+  // The L key: link with everyone in the room who has asked this player and has not been asked back, as far as the
+  // limits allow, or with nobody waiting take back every ask of this player's. One token, however many it changes; only
+  // those whose link was made or broken are told.
+  linkAllMessage(p) {
+    if (!p.linkBucket) p.linkBucket = { tokens: LINK_BURST, at: p.seenAt };
+    if (!takeToken(p.linkBucket, LINK_HZ, p.seenAt, LINK_BURST)) return;
+    let wants = this.links.get(p.id);
+    const waiting = [];
+    for (const id of this.players.keys()) if (id !== p.id && this.links.get(id)?.has(p.id) && !wants?.has(id)) waiting.push(id);
+    if (waiting.length) {
+      if (!wants && this.links.size >= LINK_ACCOUNTS) return this.sendLinks(p, "full");
+      if (!wants) this.links.set(p.id, wants = new Set());
+      const fits = waiting.slice(0, LINK_WANTS - wants.size);
+      for (const id of fits) wants.add(id);
+      if (!fits.length) return this.sendLinks(p, "full");
+      this.saveLinks();
+      this.sendLinks(p, fits.length < waiting.length ? "full" : undefined, "linked", fits.length);
+      for (const id of fits) this.sendLinks(this.players.get(id));
+    } else if (wants) {
+      const broken = [...wants].filter((id) => voiceLinked(this.links, p.id, id));
+      this.links.delete(p.id);
+      this.saveLinks();
+      this.sendLinks(p, undefined, "unlinked", wants.size);
+      for (const id of broken) { const q = this.players.get(id); if (q) this.sendLinks(q); }
+    } else return this.sendLinks(p, undefined, "none", 0);
     this.enforceStudio();
   }
 

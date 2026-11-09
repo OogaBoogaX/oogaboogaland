@@ -815,9 +815,14 @@
       sound.toggle();
       return;
     }
+    // L is the room's while one takes voice links (a demo tip is the scene's otherwise); H is the scene's first, for a
+    // forklift's horn, and the raised hand's when the scene had no use for it. Shift still counts, since it is the run key.
+    const plain = !e.metaKey && !e.ctrlKey && !e.altKey;
+    if (key === "l" && plain && net.linkEveryone()) { e.preventDefault(); return; }
     // Every scene's B shortcut adds demo bananas; ordinary visits leave donations to the feed.
     if (key === "b" && !DEBUG) return;
-    active.onKey(e);
+    const used = active.onKey(e);
+    if (key === "h" && plain && !used && window.BL.reactions.toggleHand()) e.preventDefault();
   };
   const onVisibility = () => {
     // A hidden tab holds no sockets; the chain's REST polls already skip themselves while hidden.

@@ -10480,14 +10480,14 @@ const signedInArrivalWire = (mode) => {
     return fetch(url, options);
   };
 };
-const signedInArrival = { name: "hub signed-in arrival", why: "regression: owners loaded asleep or away instead of standing beside the pile, and `view=` or saved underground views could put them back below", run: async b => {
+const signedInArrival = { name: "hub signed-in arrival", why: "regression: owners loaded asleep, away or at their NPC instead of standing round the pile on a first visit, and `view=` or saved underground views could put them back below", run: async b => {
   const result = await b.evaluate(`(async () => {
     const B = __ooga, W = __arrivalWire, c = B.cavemen.get("portlandhodl"), other = B.cavemen.get(W.otherAway);
     ${DRIVEN_OF}
     // The owner's driven body (the NPC itself, or the separate body standing for it) is what arrives; the activity is the NPC's own.
-    // #497: the body stands where the NPC is (the nearest clear spot beside a bed or seat), and only an away NPC, which
-    // has no place on the island, sends it to the pile; the NPC keeps its own activity, seat and bed throughout.
-    const read = (d = drivenOf(B, c)) => ({ selected: !!d, visible: !!d && d.root.visible, activity: BL.contributors.stateFor(c.contributor),
+    // A debug page has no remembered spot, so this is a first visit: the body stands round the pile whatever its NPC is
+    // doing, and the NPC keeps its own activity, seat and bed throughout.
+    const read =(d = drivenOf(B, c)) => ({ selected: !!d, visible: !!d && d.root.visible, activity: BL.contributors.stateFor(c.contributor),
       feet: d ? d.root.position.y - d.baseY + d.restLower : null, radius: d ? Math.hypot(d.root.position.x, d.root.position.z) : null,
       fromNpc: d && d !== c && c.root.visible ? Math.hypot(d.root.position.x - c.root.position.x, d.root.position.z - c.root.position.z) : null,
       bed: !!d && (!!d.bedroll || !!d.bedTravel.mode), seated: !!d && !!d.camp.seat, quaternion: !!d && !!d.root.quaternion,
@@ -10503,16 +10503,14 @@ const signedInArrival = { name: "hub signed-in arrival", why: "regression: owner
     return { mode: W.mode, arrival, refreshed, released, reclaimed: B.pilot.player === c || B.pilot.player?.npc === c, beds };
   })()`);
   // The small initial pile's existing player arrival area extends to 8 m;
-  // its platform radius is not the origin of that safety boundary. A present NPC places the body on crew.js's
-  // BODY_RING (at most 1.4 m from it), and that NPC keeps its own activity: asleep in its bed, chilling in its seat.
+  // its platform radius is not the origin of that safety boundary. The NPC keeps its own activity: asleep in its bed,
+  // chilling in its seat.
   const npcKept = npc => result.mode === "away" ? !npc.visible && npc.state === "away"
     : npc.visible && npc.state === result.mode && (result.mode !== "sleeping" || npc.bed);
-  const placed = state => result.mode === "away"
-    ? Math.abs(state.feet) < 1e-6 && state.radius > state.pile && state.radius <= 8 + 1e-6
-    : state.fromNpc !== null && state.fromNpc <= 1.4 + 1e-6;
-  const arrived = state => state.selected && state.visible && state.activity === result.mode && placed(state) && npcKept(state.npc)
+  const placed = state => Math.abs(state.feet) < 1e-6 && state.radius > state.pile && state.radius <= 8 + 1e-6;
+  const arrived =state => state.selected && state.visible && state.activity === result.mode && placed(state) && npcKept(state.npc)
     && !state.bed && !state.seated && !state.quaternion && state.eye > 0 && state.otherAway;
-  record(`signed-in ${result.mode}: the owner arrives upright beside their NPC (at the pile when it is away) on real support while the NPC keeps its activity, stays controlled through activity refresh, and after a teardown release the next account reply hands their Ooga back`,
+  record(`signed-in ${result.mode}: on a first visit the owner arrives upright round the pile on real support while the NPC keeps its activity, stays controlled through activity refresh, and after a teardown release the next account reply hands their Ooga back`,
     arrived(result.arrival) && arrived(result.refreshed) && result.refreshed.settled && result.released.detached && result.reclaimed
       && (result.mode !== "away" || result.released.state === "away" && !result.released.visible), JSON.stringify(result));
   record(`sleeping overflow ${result.mode}: newest sleepers occupy separate HQ and basement beds and older sleepers have their own rainforest anchors`,
@@ -26732,11 +26730,11 @@ const playersColumnChecks = async () => {
   const tracks = (ruleOf(".players-rows").match(/grid-template-columns:\s*([^;]+);/) || [, ""])[1].trim().split(/\s+(?![^(]*\))/);
   const columnOf = (selector) => +((ruleOf(selector).match(/grid-column:\s*(\d+);/) || [, NaN])[1]);
   const cellOfRule = (selector) => +((css.match(new RegExp(`\\.players-rows ${selector.replace(".", "\\.")} \\{ grid-column: (\\d+);`)) || [, NaN])[1]);
-  const columns = { link: cellOfRule(".players-link"), voice: cellOfRule(".roster-voice"), look: columnOf(".players-look"), distance: columnOf(".players-distance") };
-  record("Online Oogas columns: every row holds its cells in one order, and the voice link, voice mark, distance (as wide as 999 m) and crosshair each keep a fixed column, none sized to its content, so they line up across groups",
-    cells.rows === 3 && cells.shapes.every((s) => s === "roster-dots players-name roster-marks players-look players-distance players-volume")
-      && tracks.length === 6 && tracks[columns.link - 1] === "12px" && tracks[columns.voice - 1] === "12px" && tracks[columns.look - 1] === "12px" && /width:\s*5ch;/.test(ruleOf(".players-distance"))
-      && columns.link === 3 && columns.voice === 4 && columns.distance === 5 && columns.look === 6,
+  const columns = { hand: columnOf(".players-mark"), link: cellOfRule(".players-link"), voice: cellOfRule(".roster-voice"), look: columnOf(".players-look"), distance: columnOf(".players-distance") };
+  record("Online Oogas columns: every row holds its cells in one order, and the raised hand, voice link, voice mark and crosshair each keep a column of one width, none sized to its content, with the distance (as wide as 999 m) last, so they line up across groups",
+    cells.rows === 3 && cells.shapes.every((s) => s === "roster-dots players-name players-mark roster-marks players-look players-distance players-volume")
+      && tracks.length === 7 && [columns.hand, columns.link, columns.voice, columns.look].every((c) => tracks[c - 1] === "12px") && /width:\s*5ch;/.test(ruleOf(".players-distance"))
+      && columns.hand === 3 && columns.link === 4 && columns.voice === 5 && columns.look === 6 && columns.distance === 7,
     JSON.stringify({ cells, tracks, columns }));
 };
 const chatAccountChecks = async BL => {

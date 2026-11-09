@@ -2318,10 +2318,11 @@
     // A scene's arrival with the visitor's own Ooga: possessed with the view and combat it last had where they carry, its
     // weapon back in hand where this scene allows (the primary when the rifle is not), and the next `navigate` keeping the
     // look, pitch and zoom. Nothing blends in from the old scene's camera, whose coordinates mean nothing here. Before
-    // anything is carried this page, the view this browser last chose stands in, for whichever Ooga arrives. Whether a
-    // carried state was applied; without one it is an ordinary possess.
-    const arrive = (cave) => {
-      const c = !ctx.carry ? null : carried ? (carried.name === cave.traits.name ? carried : null) : saved;
+    // anything is carried this page, the view this browser last chose stands in, for whichever Ooga arrives; `anyOoga`
+    // takes what is carried for a different Ooga too (one account's Ooga giving way to another's). Whether a carried
+    // state was applied; without one it is an ordinary possess.
+    const arrive = (cave, anyOoga = false) => {
+      const c = !ctx.carry ? null : carried ? (anyOoga || carried.name === cave.traits.name ? carried : null) : saved;
       if (!c) { possess(cave); return false; }
       const t = captureControl(arrivalTransition), feet = cave.root.position.y - cave.baseY, held = c.held, ammo = c.ammo, focused = c.focused;
       t.active = true; t.view = c.view; t.combat = c.combat; t.yaw = cave.root.rotation.y + c.relYaw; t.pitch = c.pitch;
