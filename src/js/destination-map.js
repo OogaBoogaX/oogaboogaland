@@ -96,8 +96,9 @@
       if (e.pad) {
         // A pad's key (gamepad.js, marked `pad`) is not a held keyboard key: on foot its Menu press arrives as the fixed
         // row's Escape and opens Map where it is available; inside the dialog pad-focus.js sends Escape for B or Menu.
+        // Over any other menu layer (a dialog or card) that Escape is the layer's own, so it passes through untouched.
         if (dialog.open) { e.preventDefault(); e.stopImmediatePropagation(); if (e.key === "Escape") close(); }
-        else if (e.key === "Escape" && canOpen()) { e.preventDefault(); e.stopImmediatePropagation(); open(); }
+        else if (e.key === "Escape" && !BL.padFocus?.open() && canOpen()) { e.preventDefault(); e.stopImmediatePropagation(); open(); }
         return;
       }
       const key = e.code || e.key;

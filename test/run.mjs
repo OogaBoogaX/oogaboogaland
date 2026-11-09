@@ -337,6 +337,43 @@ const sleepBeamPoolProof = () => {
   beam.dispose(); beam.dispose(); const released = new Set(); beam.liveGeometry(released);
   return { compacted, bounded, calm, deterministic, clean, disposed: !sceneRoot.children.length && !released.size };
 };
+// Regression: Map's window capture listener is registered first, so a pad's Escape (pad-focus.js `back`, B or Menu)
+// over another menu layer reached it before that layer's own handler and was swallowed. It must pass through.
+const destinationMapPadEscapeProof = () => {
+  const els = new Map(), listeners = new Map(), state = { layer: false, otherDialog: null, shown: 0 };
+  const el = id => {
+    if (!els.has(id)) els.set(id, { id, hidden: false, disabled: false, open: false, textContent: "", dataset: {}, attrs: {},
+      addEventListener() {}, removeEventListener() {}, setAttribute(k, v) { this.attrs[k] = v; }, focus() {}, click() {}, append() {},
+      replaceChildren() {}, querySelectorAll: () => [], showModal() { this.open = true; state.shown++; }, close() { this.open = false; } });
+    return els.get(id);
+  };
+  const document = { getElementById: el, querySelector: sel => sel === "dialog[open]" ? (el("destination-map").open ? el("destination-map") : state.otherDialog) : null, pointerLockElement: null,
+    createElement: () => el("row" + els.size) };
+  const window = { BL: { controls: { resetAll() {} }, gamepad: { requireNeutral() {} }, padFocus: { open: () => state.layer } },
+    matchMedia: () => ({ matches: false }), addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener() {} };
+  const context = { window, document, localStorage: { getItem: () => "1", setItem() {} } };
+  runInNewContext(readFileSync(join(root, "src/js/destination-map.js"), "utf8"), context);
+  const scene = { id: "hub" }, map = window.BL.destinationMap.create({ current: () => scene, ready: () => true });
+  map.connect({ available: () => true, travels: () => true, selected: () => null, names: () => ["pile"], label: n => n, travel: () => true });
+  const press = (key, pad) => { const e = { key, code: key, pad, prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; } }; listeners.get("keydown")(e); return e; };
+  const dialog = el("destination-map");
+  // The Controls panel (or a board, Add an Ooga, the donation popup) is the open layer: B's Escape is its own.
+  state.layer = true; state.otherDialog = el("controls-help");
+  const overDialog = press("Escape", true), passedDialog = !overDialog.prevented && !overDialog.stopped && !dialog.open && state.shown === 0;
+  // A card such as the ghost lobby or #hangar-sound is a layer with no dialog: B is still its Escape, not Map.
+  state.otherDialog = null;
+  const overCard = press("Escape", true), passedCard = !overCard.prevented && !overCard.stopped && !dialog.open && state.shown === 0;
+  // On foot with no layer open, Menu's Escape still opens Map, and B inside Map still closes it.
+  state.layer = false;
+  const onFoot = press("Escape", true), opened = onFoot.prevented && onFoot.stopped && dialog.open && state.shown === 1;
+  state.layer = true;
+  const inside = press("Escape", true), closed = inside.prevented && !dialog.open;
+  // A keyboard Escape on foot is never Map's.
+  state.layer = false;
+  const keyboard = press("Escape", false), keyboardPassed = !keyboard.prevented && !dialog.open;
+  map.dispose();
+  return { passedDialog, passedCard, opened, closed, keyboardPassed };
+};
 // Rule: exercise the actual bounded rage state machine with a small physical
 // adapter. Collision and the rendered carry are covered by the hub regressions.
 const gorillaRageProof = async () => {
@@ -12650,14 +12687,28 @@ const hubDestinationNames = { name: "destination accessible names", why: "regres
       const ordinaryDisconnect = !P.state.connected && !P.state.lx && !P.state.rx && !P.state.held;
       pad.buttons[2].pressed=false; pad.connected=true; event("gamepadconnected"); await tick();
       const ordinaryReconnect = P.state.connected && P.state.lx > 0 && P.state.rx > 0;
-      return {opened,ordered,closed,quiet,resumed,disconnected,reconnectHeld,closeAbsent,reconnectClosed,bothRequired,neutralRelease,ordinaryDisconnect,ordinaryReconnect};
+      // Map's capture listener runs first, but a pad's B or Menu over another menu layer is that layer's Escape:
+      // it closes the Controls panel and never opens Map.
+      pad.axes[0]=pad.axes[2]=0; pad.buttons[2].pressed=false; await tick(); await tick();
+      const help = document.getElementById("controls-help"), map = document.getElementById("destination-map");
+      const otherLayer = [];
+      for (const button of [1, 9]) {
+        document.getElementById("controls-help-button").click(); await tick();
+        const shown = help.open && BL.padFocus.open();
+        await press(button); await tick();
+        otherLayer.push({ button, shown, closed: !help.open, map: map.open });
+        if (help.open) document.getElementById("controls-help-close").click();
+        BL.destinationMap.close(); await tick();
+      }
+      const otherLayerEscape = otherLayer.every(r => r.shown && r.closed && !r.map);
+      return {opened,ordered,closed,quiet,resumed,disconnected,reconnectHeld,closeAbsent,reconnectClosed,bothRequired,neutralRelease,ordinaryDisconnect,ordinaryReconnect,otherLayerEscape,otherLayer:JSON.stringify(otherLayer)};
     } finally {
       BL.destinationMap.close(); event("gamepaddisconnected");
       if(descriptor)Object.defineProperty(navigator,"getGamepads",descriptor);else delete navigator.getGamepads;
       P.poll();
     }
   })()`);
-  record("destination gamepad: Menu opens Map, Down moves focus into the destinations, B closes and a held stick waits for neutral", Object.values(gamepad).every(Boolean), JSON.stringify(gamepad));
+  record("destination gamepad: Menu opens Map, Down moves focus into the destinations, B closes, a held stick waits for neutral, and B or Menu over the Controls panel closes it without opening Map", Object.values(gamepad).every(Boolean), JSON.stringify(gamepad));
   const keyboardReplay = [];
   for (const [key, code] of [["Enter", "Enter"], [" ", "Space"]]) {
     await b.evaluate(`document.getElementById("controls-help-button").click(); document.getElementById("controls-learn").focus()`);
@@ -29977,6 +30028,8 @@ const unitChecks = async () => {
   record("gorilla re-sleep regression: waking remembers its former bed; the same bed keeps its return leg and a changed bed chooses the nearest waypoint on its own path", sleepRoutes.every(row => row.ok), JSON.stringify(sleepRoutes));
   const sleepLandingPlayers = sleepLandingPlayersProof();
   record("gorilla sleep landing: the real hub predicate protects local and remote players while allowing vertically clear beds", Object.values(sleepLandingPlayers).every(Boolean), JSON.stringify(sleepLandingPlayers));
+  const mapPadEscape = destinationMapPadEscapeProof();
+  record("destination map pad regression: a pad's B or Menu over another dialog or card is that layer's Escape and never opens Map; on foot it opens Map and inside Map it closes it", Object.values(mapPadEscape).every(Boolean), JSON.stringify(mapPadEscape));
   const sleepBeamPool = sleepBeamPoolProof();
   record("gorilla sleep beam: fixed pool, slot isolation, live reduced motion and scene cleanup", Object.values(sleepBeamPool).every(Boolean), JSON.stringify(sleepBeamPool));
   const sleepStalls = gorillaSleepStallProof();
