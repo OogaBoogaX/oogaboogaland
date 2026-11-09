@@ -48,7 +48,7 @@
 // (`crew.weaponFlags`: the one in hand, aiming, the gun's rounds), the same way; remote records carry it as `weapon`.
 // `sendShot` and `sendSwing` report the visitor's own Ooga firing a banana (from and to) and striking, which the
 // room relays to players in the same zone (from the ghost arena, to the arena and its hallway, #422); `subscribeShots`
-// hears theirs as `fn(id, a)` and `subscribeSwings` as `fn(id)`, for drawing and the hunt's shot sound only.
+// hears theirs as `fn(id, a)` and `subscribeSwings` as `fn(id)`, for drawing and the hunt's shot sound only, and, in the hub, shots rock the hammock.
 // Ooga Chat: `sendChat` sends a line (validated by chat-policy.js, CHAT_MAX UTF-16 units at most) while the
 // room is live; `subscribeChat` hears the room's lines as `fn(lines, joined, receipt)`: one new line, or on every
 // (re)join the lines the room still holds, which chat.js merges; a rejection keeps the draft. The room names each line's
@@ -72,20 +72,32 @@
 // zone before), and one who let go of their Ooga keeps the last. `state.self` is this page's own last reported
 // position and the zone it was in, kept after letting go. `subscribeMoves` hears positions change: the room's
 // snapshots and this page's own reports, a few times a second at most, nothing while nobody moves.
-// Ooga thumps (thump.js): `sendThump` sends `{"t":"thump"}` while the room is live (the room checks voice and rate),
-// and `subscribeThump` hears `fn(id, audible)` for a remote player's thump the room relayed, `audible` when the room says
-// this page would hear that player's voice; a sender never hears its own.
-// A crossing (#392, voice-blend.js): `setBlend(to, t)` says the driven body is `t` (0 to 1) of the way from its zone's
-// group toward the adjacent group `to` (null for none). `state.blendTo` and `state.blendT` keep it exact for this page's
-// own volumes; the room gets it in BLEND.STEPS steps, at most BLEND_MS apart, and every remote record carries the
-// other players' steps (`blendTo`, `blendK`), ended by their next zone unless it is the place they were crossing into,
-// which turns the crossing round here as the room does (the room's `blend` after it says the same). A zone change into
-// the place being crossed into keeps the voices this page hears, since it already plays them, and turns the crossing
-// round, as the room does.
+// Reactions (reactions.js, reaction-policy.js): a room whose `features` hold REACT_FEATURE (`state.reactions`) takes
+// `sendReaction(emoji)`, an emoji shown over this page's driven body for a moment, relayed to the pages in its zone,
+// and `setHand(on, tone, emoji)`, one persistent slot (the raised hand by default), kept by the room for everyone
+// (`hand`, `handTone` and `handEmoji` on remote records and `state`, sent again after a reconnect, lowered on signing out).
+// `subscribeReactions` hears `fn(id, emoji)` for a
+// remote player's reaction, and for this page's own as id 0, as it is sent; a hand going up or down is a roster change.
+// Both spend one bucket mirroring the room's, a little short of it, so neither is ever shown here and dropped there;
+// `setHand` refuses (false, nothing changed) when it is empty, and a hand change the room still refuses comes back as
+// this page's own `hand`, which puts `state.hand` back to what everyone else sees.
+// A crossing (#392, voice-blend.js): `setBlend(to, t)` says the driven body is `t` (0 to 1) of the way toward `to`
+// (null for none): in the main world the level below it is heading down to, whatever its zone, elsewhere the place next
+// to its zone's. `state.blendTo` and `state.blendT` keep it exact for this page's own volumes; the room gets it in
+// BLEND.STEPS steps, at most BLEND_MS apart, and every remote record carries the other players' steps (`blendTo`,
+// `blendK`). Between two zones of the main world a crossing stands and every voice stays as it is; any other next zone
+// ends it, unless it is the place being crossed into, which turns the crossing round here as the room does (the room's
+// `blend` after it says the same) and keeps the voices this page hears, since it already plays them.
 // `subscribePresence` hears `fn(rec, true)` for a player who joins the room while this page is in it, never for those
 // already there on this page's (re)join, and `fn(rec, false)` when one leaves (players.js names the joins, #430).
-// Exports start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
-// setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendGhostState and subscribeGhostState (HALLOWEEN), sendThump, subscribeThump, npcFrame, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
+// Voice links: a room whose `features` hold LINK_FEATURE (`state.voiceLinks`) keeps asks to hear another player in any
+// zone. `voiceLink(id)` is where this page stands with them ("none", "asked" or "linked"), from the room's `links` alone
+// (`state.linkWants`, `state.linked`), and `toggleVoiceLink(id)` asks or takes this page's ask back. `linkEveryone()`
+// (the L key) has the room link this page with everyone here who has asked it or, with nobody waiting, take back all of
+// its asks; only the room knows who has asked. Moving to another place lets go of every voice but the linked ones, which
+// never drop.
+// Exports voiceLink, toggleVoiceLink, linkEveryone, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
+// setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendGhostState and subscribeGhostState (HALLOWEEN), npcFrame, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
 // ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
 (() => {
   "use strict";
@@ -170,7 +182,7 @@
   const chalkSubscribers = new Set(), chalkOut = [];
   const chalkEmit = (kind, detail) => { for (const fn of chalkSubscribers) fn(kind, detail); };
   const walletSubscribers = new Set();
-  const shotSubscribers = new Set(), swingSubscribers = new Set();
+  const shotSubscribers = new Set(), swingSubscribers = new Set(), reactSubscribers = new Set();
   const presenceSubscribers = new Set();
   const remotes = new Map();
   // room: "off" (signed out or no backend), "connecting", "live", "paused" (hidden a while), or a kick that
@@ -179,7 +191,12 @@
   const state = { backend: false, me: null, donations: false, tess: false, voiceTurn: false, highscores: false, highscoreSnapshots: false, logoutEpoch: 0, started: false,
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
     room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, ghostHostId: 0, ghostFollowers: 0, npcVersion: 0, doorway: false, pokerVoice: null,
-    self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, privateChat: false, chalk: null, blendTo: null, blendT: 0 };
+    self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, privateChat: false, chalk: null, blendTo: null, blendT: 0, reactions: false, customHand: false, hand: false, handTone: 0, handEmoji: "",
+    voiceLinks: false, linkWants: new Set(), linked: new Set() };
+  const REACT_FEATURE = "react-v1", LINK_FEATURE = "vlink-v1", LINK_MAX = 64;
+  const linkIds = (list) => new Set(Array.isArray(list) ? list.filter((id) => Number.isSafeInteger(id) && id > 0).slice(0, LINK_MAX) : []);
+  // The room's last word on whom to hear, for what a move to another place keeps.
+  let peersHeard = [], gensHeard = null;
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, hiddenTimer = 0, stopped = false;
   let npcFrame = null, inHub = false, hubSent = null, visibleSent = null;
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
@@ -249,6 +266,7 @@
     state.room = room;
     if (room !== "live") { cabinetSeats.clear(); cabinetSeat = null; state.cabinets = false; finishCabinetRequest("Connection to the arcade was lost"); }
     if (room !== "live") state.chatUnicode = state.privateChat = false;
+    if (room !== "live") { state.voiceLinks = false; state.linkWants.clear(); state.linked.clear(); peersHeard = []; gensHeard = null; }
     if (lost) privateHeard({ op: "lost" });
     if (room !== "live") { hockeyTables.fill(null); hockeyEmit({ k: "lost" }); state.hockey = false; }
     if (room !== "live") { state.studio = null; state.connectionToken = ""; studioEmit({t:"studio-state",state:null}); }
@@ -315,7 +333,7 @@
 
   const upsert = (p) => {
     if (!p || !Number.isSafeInteger(p.id) || p.id === state.selfId) return;
-    const rec = remotes.get(p.id) || { id: p.id, login: "", display: "", body: null, bodyKind: null, bodyName: null, zone: "outside", voice: false, muted: false, hp: 100, ko: false, x: 0, y: 0, z: 0, yaw: 0, poseZone: null, g: null, gData: null, jet: 0, weapon: 0 };
+    const rec = remotes.get(p.id) || { id: p.id, login: "", display: "", body: null, bodyKind: null, bodyName: null, zone: "outside", voice: false, muted: false, hand: false, handTone: 0, handEmoji: "", hp: 100, ko: false, x: 0, y: 0, z: 0, yaw: 0, poseZone: null, g: null, gData: null, jet: 0, weapon: 0 };
     rec.login = String(p.login);
     rec.display = String(p.display || p.login);
     rec.body = typeof p.body === "string" ? p.body : null;
@@ -332,6 +350,9 @@
     rec.hp = Number.isFinite(p.hp) ? p.hp : 100;
     rec.ko = p.ko === true;
     rec.muted = p.muted === true;
+    rec.hand = p.hand === true;
+    rec.handTone = BL.reactionPolicy.tone(p.handTone) ? p.handTone : 0;
+    rec.handEmoji = BL.reactionPolicy.valid(p.handEmoji) ? p.handEmoji : "";
     rec.x = +p.x || 0; rec.y = +p.y || 0; rec.z = +p.z || 0; rec.yaw = +p.yaw || 0;
     // A pose the room holds for someone driving is where they stand now; for anyone else it may be from a zone they
     // have since left, so it is not taken (`poseZone`).
@@ -458,6 +479,10 @@
       state.doorway = Array.isArray(msg.features) && msg.features.includes("door");
       state.chatUnicode = Array.isArray(msg.features) && msg.features.includes(BL.chatPolicy.FEATURE);
       state.privateChat = Array.isArray(msg.features) && msg.features.includes("pm-v1");
+      state.reactions = Array.isArray(msg.features) && msg.features.includes(REACT_FEATURE);
+      state.customHand = Array.isArray(msg.features) && msg.features.includes("hand-emoji-v1");
+      if (!state.customHand) state.handEmoji = "";
+      state.voiceLinks = Array.isArray(msg.features) && msg.features.includes(LINK_FEATURE);
       // A room that keeps the chalkboard sends it next (chalk-board); an older one leaves the page its own board.
       if (state.chalk && !(Array.isArray(msg.features) && msg.features.includes(BL.chalkBoard.FEATURE))) { state.chalk = null; chalkEmit("board"); }
       remotes.clear();
@@ -484,12 +509,14 @@
       blendSent = ""; blendAt = -Infinity; sendBlend();
       sendPokerVoice();
       if (muted) sendMute();
+      // So does the raised hand: a fresh room record has it down.
+      if (state.hand) { if (state.reactions) sendHand(); else state.hand = false; }
       // A fresh room record starts at full health; the next report sends ours if it differs.
       hpSent = 100; koSent = false; hpAt = 0;
       hubSent = visibleSent = null;
       sendHub();
       sendVisible();
-      BL.voice.restart();
+      BL.voice.restart(true);
       if (restoredPose) poseAt = performance.now();
       else { poseAt = 0; px = NaN; gKnown = poseHasG = false; }
     } else if (msg.t === "join") {
@@ -535,8 +562,11 @@
         if (rec.poseZone && BLEND.sameFrame(rec.poseZone, msg.name)) rec.poseZone = msg.name;
         // Into the place it was crossing into, its crossing turns round as the room turns it (the room's `blend` after
         // this says the same), so its voice never plays a moment at the wrong share; any other zone ends it.
-        const across = !!rec.blendTo && BLEND.place(msg.name) === BLEND.place(rec.blendTo) && BLEND.STEPS - rec.blendK > 0;
-        rec.blendTo = across ? BLEND.place(rec.zone) : null; rec.blendK = across ? BLEND.STEPS - rec.blendK : 0;
+        // Between two zones of the main world it stands as it is: there a crossing is a level, whatever the zone.
+        if (!BLEND.world(rec.zone) || !BLEND.world(msg.name)) {
+          const across = !!rec.blendTo && BLEND.place(msg.name) === BLEND.place(rec.blendTo) && BLEND.STEPS - rec.blendK > 0;
+          rec.blendTo = across ? BLEND.place(rec.zone) : null; rec.blendK = across ? BLEND.STEPS - rec.blendK : 0;
+        }
         rec.zone = msg.name;
       }
       rosterChanged();
@@ -606,17 +636,44 @@
     } else if (msg.t === "transit-end") {
       if (chatIdValid(msg.cycle)) doorHeard({ t: "transit-end", cycle: msg.cycle });
     } else if (msg.t === "voice") {
-      if (Array.isArray(msg.peers)) BL.voice.setPeers(msg.peers, Array.isArray(msg.gens) ? msg.gens : null, state.zone === "dsb-studio" ? msg.listeners : undefined);
+      if (Array.isArray(msg.peers)) {
+        peersHeard = msg.peers; gensHeard = Array.isArray(msg.gens) ? msg.gens : null;
+        // Linked partners who only listen hold the microphone open as the Studio's audience does there.
+        const ears = Number.isSafeInteger(msg.ears) && msg.ears > 0 ? msg.peers.length + msg.ears : undefined;
+        BL.voice.setPeers(msg.peers, gensHeard, state.zone === "dsb-studio" ? msg.listeners : ears);
+      }
+    } else if (msg.t === "links") {
+      state.linkWants = linkIds(msg.wants); state.linked = linkIds(msg.linked);
+      if (msg.refused === "full") BL.hud.toast("Too many voice links: break one first");
+      else if (msg.all === "linked" && msg.n > 0) BL.hud.toast(`Voices linked with ${msg.n} ${msg.n === 1 ? "player" : "players"}`);
+      else if (msg.all === "unlinked") BL.hud.toast("Unlinked everyone");
+      else if (msg.all === "none") BL.hud.toast("Nobody here has asked to link with you");
+      rosterChanged();
     } else if (msg.t === "ghost") {
       if (ghostHeard) ghostHeard(msg); // HALLOWEEN
-    } else if (msg.t === "thump") {
-      if (thumpHeard && remotes.has(msg.id)) thumpHeard(msg.id, msg.a === 1);
+    } else if (msg.t === "react") {
+      if (remotes.has(msg.id) && BL.reactionPolicy.valid(msg.e)) for (const fn of reactSubscribers) fn(msg.id, msg.e);
+    } else if (msg.t === "hand") {
+      // The room's word on this page's own hand, sent back when it refused a change.
+      if (msg.id === state.selfId) {
+        state.hand = msg.on === true;
+        state.handTone = BL.reactionPolicy.tone(msg.tone) ? msg.tone : 0;
+        state.handEmoji = BL.reactionPolicy.valid(msg.e) ? msg.e : "";
+        emit();
+        return;
+      }
+      const rec = remotes.get(msg.id);
+      if (!rec) return;
+      rec.hand = msg.on === true;
+      rec.handTone = BL.reactionPolicy.tone(msg.tone) ? msg.tone : 0;
+      rec.handEmoji = BL.reactionPolicy.valid(msg.e) ? msg.e : "";
+      rosterChanged();
     } else if (msg.t === "release") {
       state.released = { name: String(msg.name), reason: String(msg.reason) };
       emit();
     } else if (msg.t === "kick") {
       // Revoked access stops reconnecting; the operator may later restore access.
-      if (msg.reason === "revoked") state.me = null;
+      if (msg.reason === "revoked") { state.me = null; state.hand = false; }
       // replaced and full stop here; stale reconnects like any drop.
       if (msg.reason !== "stale") stopped = true;
       close(msg.reason === "stale" ? "connecting" : msg.reason);
@@ -733,6 +790,7 @@
     stopped = true;
     window.clearTimeout(retryTimer);
     state.me = null;
+    state.hand = false;
     state.logoutEpoch++;
     close("off");
   };
@@ -779,13 +837,25 @@
     const n = groupLength(a);
     return n === groupLength(b) && a.startsWith(b.slice(0, n));
   };
+  // A move to another place lets go of every voice but the linked ones, which follow the visitor anywhere.
+  const keepLinkedVoices = () => {
+    const ids = [], gens = [];
+    peersHeard.forEach((id, i) => {
+      if (!state.linked.has(id)) return;
+      ids.push(id); gens.push(gensHeard ? gensHeard[i] : 0);
+    });
+    peersHeard = ids; gensHeard = gens;
+    BL.voice.setPeers(ids, gens);
+  };
   const setZone = (name) => {
     if (cabinetAnchor) return;
     if (name === zone) return;
-    // Into the place being crossed into (voice-blend.js `place`): the crossing turns round as the room turns it, off a
-    // bridge's far end to none and across the arcade hallway's midpoint (#422) to the same crossing from its other end.
-    const across = !!state.blendTo && BLEND.place(name) === BLEND.place(state.blendTo);
-    const moved = !sameGroup(name, zone) && !across;
+    // Between two zones of the main world nothing changes for voice: a crossing there is a level, whatever the zone.
+    // Into the place being crossed into (voice-blend.js `place`): the crossing turns round as the room turns it, across
+    // the arcade hallway's midpoint (#422) to the same crossing from its other end.
+    const kept = BLEND.world(name) && BLEND.world(zone);
+    const across = !kept && !!state.blendTo && BLEND.place(name) === BLEND.place(state.blendTo);
+    const moved = !kept && !sameGroup(name, zone) && !across;
     if (across) {
       const back = (1 - state.blendT) * BLEND.STEPS >= 0.5;
       state.blendTo = back ? BLEND.place(zone) : null;
@@ -794,7 +864,7 @@
     zone = state.zone = name;
     pokerVoice = state.pokerVoice = null;
     poseAt = 0; px = NaN;
-    if (moved) BL.voice.setPeers([]);
+    if (moved) keepLinkedVoices();
     sendZone();
     // The room may have inverted an older quantized step, even when this page is already at the endpoint. Always send
     // the next crossing, including none, so that stale remainder cannot keep the land just left audible.
@@ -805,7 +875,7 @@
   const setPokerVoice = table => {
     if (zone !== "ember-den" || table !== null && (!Number.isInteger(table) || table < 0 || table >= 10) || pokerVoice === table) return;
     pokerVoice = state.pokerVoice = table;
-    BL.voice.setPeers([]);
+    keepLinkedVoices();
     sendPokerVoice();
     rosterChanged();
   };
@@ -836,17 +906,6 @@
   };
   document.addEventListener("visibilitychange", onVisibility);
 
-  // One listener, thump.js; false when the room is not live.
-  let thumpHeard = null;
-  const sendThump = () => {
-    if (state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN) return false;
-    send('{"t":"thump"}');
-    return true;
-  };
-  const subscribeThump = (fn) => {
-    thumpHeard = fn;
-    return () => { if (thumpHeard === fn) thumpHeard = null; };
-  };
   // HALLOWEEN: the ghost hunt's word to its host (ghost-sync.js): a start or a hit, relayed to the arcade's ghost
   // arena's host (`ghostHostId`) alone, from a page in the arena.
   let ghostHeard = null, ghostStateHeard = null;
@@ -923,6 +982,66 @@
     hpSent = v;
     koSent = ko;
     send(`{"t":"hp","v":${v},"ko":${ko}}`);
+  };
+
+  // The room's one bucket for reactions and the hand (worker/src/protocol.js REACT_HZ 3, REACT_BURST 6), mirrored a
+  // little short of it, since frames can reach the room closer together than they left here.
+  const REACT_HZ = 2.5, REACT_BURST = 5;
+  let reactTokens = REACT_BURST, reactAt = 0;
+  const reactToken = () => {
+    const now = performance.now();
+    reactTokens = Math.min(REACT_BURST, reactTokens + (now - reactAt) * REACT_HZ / 1000);
+    reactAt = now;
+    if (reactTokens < 1) return false;
+    reactTokens--;
+    return true;
+  };
+  // A reaction over this page's driven body; false when it was not sent (not live, an older room, not an emoji, or
+  // over the bucket).
+  const sendReaction = (emoji) => {
+    if (!state.reactions || state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN || !BL.reactionPolicy.valid(emoji)) return false;
+    if (!reactToken()) return false;
+    send(JSON.stringify({ t: "react", e: emoji }));
+    for (const fn of reactSubscribers) fn(0, emoji);
+    return true;
+  };
+  const subscribeReactions = (fn) => {
+    reactSubscribers.add(fn);
+    return () => reactSubscribers.delete(fn);
+  };
+  // The persistent slot: an empty emoji is the raised hand in skin tone `tone` (0 to 5). Older rooms only take the hand.
+  // False, with nothing changed, when the room cannot take it now (not live or over the bucket shared with reactions).
+  const sendHand = () => send(JSON.stringify({ t: "hand", on: state.hand, tone: state.handTone, ...(state.customHand ? { e: state.handEmoji } : {}) }));
+  const setHand = (on, tone = state.handTone, emoji = "") => {
+    if (typeof on !== "boolean" || emoji !== "" && !BL.reactionPolicy.valid(emoji)) return false;
+    if (!state.customHand) emoji = "";
+    if (on && (!state.reactions || state.room !== "live")) return false;
+    if (state.hand === on && (!on || state.handTone === tone && state.handEmoji === emoji)) return true;
+    const live = state.room === "live" && !!ws && ws.readyState === WebSocket.OPEN;
+    if (live && !reactToken()) return false;
+    state.hand = on;
+    state.handTone = BL.reactionPolicy.tone(tone) ? tone : 0;
+    state.handEmoji = emoji;
+    if (live) sendHand();
+    emit();
+    return true;
+  };
+
+  // Where this page stands with player `id`: "linked", "asked" (this page's ask waits) or "none".
+  const voiceLink = (id) => state.linked.has(id) ? "linked" : state.linkWants.has(id) ? "asked" : "none";
+  // Asks for a voice link with player `id`, or takes this page's ask back; false when the room cannot take it. Nothing
+  // changes here until the room answers.
+  const toggleVoiceLink = (id) => {
+    if (!state.voiceLinks || state.room !== "live" || !Number.isSafeInteger(id) || id <= 0) return false;
+    send(JSON.stringify({ t: "link", to: id, on: !state.linkWants.has(id) }));
+    return true;
+  };
+  // Links with everyone here who has asked this page, or with nobody waiting takes back all of its asks; false when the
+  // room cannot take it, so the key stays with the scene. The room's `links` reply says what it did.
+  const linkEveryone = () => {
+    if (!state.voiceLinks || state.room !== "live") return false;
+    send('{"t":"link-all"}');
+    return true;
   };
 
   // This page's own microphone muted or not, for every other page's roster.
@@ -1125,18 +1244,18 @@
   // of another kind sends it, so a line's points go a few to a frame. Each says whether it was sent, or why not.
   const takeChalk = () => {
     if (!state.chalk || state.room !== "live") return false;
-    send(`{"t":"chalk","k":"take"}`);
+    send(`{"t":"chalk","v":${BL.chalkBoard.VERSION},"k":"take"}`);
     return true;
   };
   const flushChalk = () => {
-    for (const op of chalkOut) send(JSON.stringify({ t: "chalk", ...op }));
+    for (const op of chalkOut) send(JSON.stringify({ t: "chalk", v: BL.chalkBoard.VERSION, ...op }));
     chalkOut.length = 0;
   };
   const dropChalk = () => {
     const c = state.chalk;
     if (!c || c.editor !== state.selfId) return;
     flushChalk();
-    if (state.room === "live") send(`{"t":"chalk","k":"drop"}`);
+    if (state.room === "live") send(`{"t":"chalk","v":${BL.chalkBoard.VERSION},"k":"drop"}`);
     c.editor = 0;
     c.session = BL.chalkBoard.session(c.board);
   };
@@ -1208,13 +1327,12 @@
     chatSubscribers.clear();
     chalkSubscribers.clear();
     walletSubscribers.clear();
-    shotSubscribers.clear(); swingSubscribers.clear();
+    shotSubscribers.clear(); swingSubscribers.clear(); reactSubscribers.clear();
     presenceSubscribers.clear();
     doorSubscribers.clear();
     ghostHeard = ghostStateHeard = null; // HALLOWEEN
-    thumpHeard = null;
     close("off");
   };
 
-  BL.net = { cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendThump, subscribeThump, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { voiceLink, toggleVoiceLink, linkEveryone, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendReaction, subscribeReactions, setHand, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

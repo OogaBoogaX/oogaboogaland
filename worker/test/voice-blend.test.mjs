@@ -1,5 +1,5 @@
-// Voice across a crossing (#392): the room's reading of a crossing, who it lets hear whom along one, and the real Room
-// keeping a crossing, broadcasting it and re-planning voice only when a place is gained or lost.
+// Voice by level and crossing (#392): the room's reading of a crossing, who it lets hear whom in the main world and along a
+// crossing, and the real Room keeping a crossing, broadcasting it and re-planning voice only when a place is gained or lost.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -22,56 +22,52 @@ test("a crossing is a zone and a step from 1 to STEPS, or none; anything else is
   }
 });
 
-test("along a bridge a player hears the island and the land ahead, both ends only their own, and never a place behind the land", () => {
+test("on the main world's surface everyone hears everyone, whatever their zone; halls, rooms and chambers stay apart", () => {
   const on = { pub: "p", sub: "s", track: "mic" };
   const p = (id, zone, blendTo = null, blendK = 0) => ({ id, body: `ooga-${id}`, zone, voice: on, blendTo, blendK });
-  const hears = (listener) => {
-    const island = p(1, "outside"), forest = p(2, "rainforest"), isle = p(3, "bifrost"), chamber = p(4, "bifrost.chamber"), room = p(5, "sphere-3"), sphere = p(6, "sphere");
-    return voicePeers([island, forest, isle, chamber, room, sphere, listener]).get(listener.id);
-  };
-  assert.deepEqual(hears(p(9, "outside", "rainforest", 1)), [1, 2], "just onto the vine bridge: the island and the rainforest");
-  assert.deepEqual(hears(p(9, "outside", "rainforest", STEPS / 2)), [1, 2], "halfway: both");
-  assert.deepEqual(hears(p(9, "outside", "rainforest", STEPS)), [2], "at the far end: the rainforest alone");
-  assert.deepEqual(hears(p(9, "outside")), [1], "on the island: the island alone");
-  assert.deepEqual(hears(p(9, "outside", "bifrost", 10)), [1, 3], "toward ₿IFRÖST: its isle, never its chamber");
-  assert.deepEqual(hears(p(9, "outside", "sphere", 10)), [1, 6], "toward the Sphere: its outside, never one of its rooms");
-  assert.deepEqual(hears(p(9, "bifrost.chamber")), [3, 4], "the chamber still hears its group, the isle and the chamber");
-  // Both ways: whoever a crosser hears hears the crosser, and two at opposite ends of one bridge hear nobody across it.
-  const nearEnd = p(10, "outside", "rainforest", 1), farEnd = p(11, "outside", "rainforest", STEPS);
-  const peers = voicePeers([p(1, "outside"), p(2, "rainforest"), p(4, "bifrost.chamber"), nearEnd, farEnd]);
-  assert.deepEqual(peers.get(1), [10], "the island hears the one just onto the bridge, not the one at its far end");
-  assert.deepEqual(peers.get(2), [10, 11], "the rainforest hears both on the bridge");
-  assert.deepEqual(peers.get(10), [1, 2, 11], "two on one bridge hear each other");
-  assert.deepEqual(peers.get(4), [], "nothing reaches the chamber from the bridge");
+  const surface = [p(1, "outside"), p(2, "between"), p(3, "rainforest"), p(4, "sphere"), p(5, "bifrost")];
+  const apart = [p(6, "bifrost.chamber"), p(7, "sphere-3"), p(8, "factory.hall"), p(9, "arcade.hall"), p(10, "none")];
+  const peers = voicePeers([...surface, ...apart]);
+  for (const who of surface) assert.deepEqual(peers.get(who.id), surface.map((q) => q.id).filter((id) => id !== who.id), who.zone);
+  for (const who of apart) assert.deepEqual(peers.get(who.id), [], who.zone);
+  assert.ok(BLEND.world("between") && BLEND.world("hq") && BLEND.world("hq-basement") && BLEND.world("rainforest-under") && !BLEND.world("bifrost.chamber") && !BLEND.world("none") && !BLEND.world("factory.hall"));
+  assert.ok(BLEND.sameFrame("between", "hq") && BLEND.sameFrame("outside", "rainforest") && !BLEND.sameFrame("outside", "bifrost.chamber") && !BLEND.sameFrame("outside", "none"), "the world's zones share coordinates");
+  assert.ok(protocol.seenTogether("outside", "hq") && protocol.seenTogether("between", "sphere") && protocol.seenTogether("arcade.hall", "arcade.hall") && !protocol.seenTogether("outside", "arcade.hall") && !protocol.seenTogether("arcade.hall", "arcade.haunt"), "what the room relays follows who is shown");
 });
 
-test("down a slope a player hears the level above and the one below; on a level, that level alone", () => {
+test("down through the main world's levels a player hears the level above and the one below, whatever their zone; on a level, that level alone", () => {
   const on = { pub: "p", sub: "s", track: "mic" };
   const p = (id, zone, blendTo = null, blendK = 0) => ({ id, body: `ooga-${id}`, zone, voice: on, blendTo, blendK });
-  const island = p(1, "outside"), hq = p(2, "hq"), basement = p(3, "hq", "hq-basement", STEPS), forest = p(4, "rainforest"), chamber = p(5, "rainforest", "rainforest-under", STEPS);
-  const hears = (listener) => voicePeers([island, hq, basement, forest, chamber, listener]).get(listener.id);
-  assert.deepEqual(hears(p(9, "hq")), [2], "on HQ's floor: HQ, not the basement under it nor the island over it");
+  const surface = p(1, "outside"), hq = p(2, "hq", "hq", STEPS), basement = p(3, "hq", "hq-basement", STEPS), chamber = p(4, "rainforest", "rainforest-under", STEPS);
+  const hears = (listener) => voicePeers([surface, hq, basement, chamber, listener]).get(listener.id);
+  assert.deepEqual(hears(p(9, "hq", "hq", STEPS)), [2], "on HQ's level: HQ, not the basement under it nor the surface over it");
   assert.deepEqual(hears(p(9, "hq", "hq-basement", STEPS)), [3], "in the basement: the basement alone");
   assert.deepEqual(hears(p(9, "hq", "hq-basement", 10)), [2, 3], "halfway down the basement's ramp: both");
-  assert.deepEqual(hears(p(9, "outside", "hq", 10)), [1, 2], "halfway down an entrance ramp: the island and HQ");
-  assert.deepEqual(hears(p(9, "hq", "outside", 10)), [1, 2], "the same ramp from HQ's side");
-  assert.deepEqual(hears(p(9, "rainforest", "rainforest-under", 10)), [4, 5], "halfway down the descent: the forest and the chamber");
-  assert.deepEqual(hears(p(9, "rainforest")), [4], "in the forest: the forest, not the chamber under it");
-  assert.deepEqual(voicePeers([basement, hq, chamber, forest]).get(3), [], "the basement hears nobody on HQ's floor");
-  for (const [zone, to] of [["outside", "hq"], ["hq", "outside"], ["hq", "hq-basement"], ["rainforest", "rainforest-under"]]) assert.ok(BLEND.adjacent(zone, to), `${zone} to ${to}`);
-  for (const [zone, to] of [["outside", "hq-basement"], ["outside", "rainforest-under"], ["hq-basement", "outside"], ["rainforest", "hq-basement"]]) assert.ok(!BLEND.adjacent(zone, to), `not ${zone} to ${to}`);
+  assert.deepEqual(hears(p(9, "outside", "hq", 10)), [1, 2], "halfway down an entrance ramp: the surface and HQ");
+  assert.deepEqual(hears(p(9, "hq", "hq", 10)), [1, 2], "the same height from HQ's zone");
+  assert.deepEqual(hears(p(9, "between", "hq", 10)), [1, 2], "off the island's edge at that height: the same");
+  assert.deepEqual(hears(p(9, "between", "hq-basement", 10)), [2, 3], "lower, off the edge: HQ and the basement");
+  assert.deepEqual(hears(p(9, "between", "hq-basement", STEPS)), [3], "lowest of all: the basement alone");
+  assert.deepEqual(hears(p(9, "rainforest", "rainforest-under", 10)), [1, 4], "halfway down the rainforest's descent: the surface and the chamber");
+  assert.deepEqual(hears(p(9, "rainforest")), [1], "on the rainforest's top: the surface, not the chamber under it");
+  assert.deepEqual(hears(p(9, "rainforest", "rainforest-under", STEPS)), [4], "in the chamber: the chamber alone");
+  assert.deepEqual(voicePeers([basement, hq, chamber, surface]).get(3), [], "the basement hears nobody on HQ's level");
+  for (const [zone, to] of [["outside", "hq"], ["between", "hq-basement"], ["hq", "hq"], ["hq", "hq-basement"], ["rainforest", "rainforest-under"], ["sphere", "hq"]]) assert.ok(BLEND.crossable(zone, to), `${zone} to ${to}`);
+  for (const [zone, to] of [["outside", "outside"], ["outside", "rainforest"], ["hq", "outside"], ["factory.hall", "hq"], ["none", "hq"], ["outside", "ghost-arena"]]) assert.ok(!BLEND.crossable(zone, to), `not ${zone} to ${to}`);
 });
 
-test("the volumes: equal-power across a bridge, full between two side by side, nothing across a whole bridge", () => {
+test("the volumes: equal-power between two levels, full between two side by side, nothing across a whole level", () => {
   const { gain, weight } = BLEND;
   const close = (a, b) => Math.abs(a - b) < 1e-9;
-  assert.ok(close(gain("outside", "rainforest", 0.5, "outside", null, 0), Math.SQRT1_2) && close(gain("outside", "rainforest", 0.5, "rainforest", null, 0), Math.SQRT1_2));
-  assert.ok(close(gain("outside", "rainforest", 0, "outside", null, 0), 1) && close(gain("outside", "rainforest", 1, "outside", null, 0), 0));
-  assert.ok(close(gain("outside", "rainforest", 0.3, "outside", "rainforest", 0.3), 1), "side by side on the bridge");
-  assert.ok(close(gain("outside", "rainforest", 0, "outside", "rainforest", 1), 0), "the bridge's two ends");
-  assert.ok(close(gain("outside", null, 0, "outside", "rainforest", 0.25), gain("outside", "rainforest", 0.25, "outside", null, 0)), "the same both ways");
-  assert.equal(gain("outside", "bifrost", 0.5, "bifrost.chamber", null, 0), 0);
-  for (let t = 0; t <= 1; t += 0.05) assert.ok(close(weight("outside", "outside", "sphere", t) ** 2 + weight("sphere", "outside", "sphere", t) ** 2, 1), "equal power at " + t);
+  assert.ok(close(gain("outside", "hq", 0.5, "rainforest", null, 0), Math.SQRT1_2) && close(gain("outside", "hq", 0.5, "hq", "hq", 1), Math.SQRT1_2));
+  assert.ok(close(gain("outside", "hq", 0, "outside", null, 0), 1) && close(gain("outside", "hq", 1, "outside", null, 0), 0));
+  assert.ok(close(gain("between", "hq", 0.3, "outside", "hq", 0.3), 1), "side by side, each in a zone of their own");
+  assert.ok(close(gain("outside", "hq", 0, "outside", "hq", 1), 0), "a whole level apart");
+  assert.ok(close(gain("outside", null, 0, "sphere", null, 0), 1), "two zones of the surface");
+  assert.ok(close(gain("outside", null, 0, "outside", "hq", 0.25), gain("outside", "hq", 0.25, "outside", null, 0)), "the same both ways");
+  assert.ok(close(gain("hq", "hq-basement", 0.5, "between", "hq", 1), Math.SQRT1_2), "HQ's level into the basement's, from any zone");
+  assert.equal(gain("outside", "hq", 0.5, "bifrost.chamber", null, 0), 0);
+  for (let t = 0; t <= 1; t += 0.05) assert.ok(close(weight("outside", "outside", "hq", t) ** 2 + weight("hq", "outside", "hq", t) ** 2, 1), "equal power at " + t);
 });
 
 test("#422: the arcade's hallway crosses from Ooga Arcade to Ghost Hunter's Arena, each end its own, the arena one region hunting or not, and nowhere else", () => {
@@ -123,7 +119,7 @@ const harness = () => {
     .replace("export class Room", "class Room") + "\nglobalThis.Room = Room;";
   const context = {
     ...protocol, ...studioPolicy, sha256Hex, getPlayer, sfuClient: () => null,
-    CAST_ROWS: [{ handle: "a", github_login: "a" }, { handle: "b", github_login: "b" }, { handle: "c", github_login: "c" }],
+    CAST_ROWS: [{ handle: "a", github_login: "a" }, { handle: "b", github_login: "b" }, { handle: "c", github_login: "c" }, { handle: "d", github_login: "d" }],
     DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } },
     WebSocketPair, Response, WebSocketRequestResponsePair: class {}, URL, crypto, Date: Clock, Map, Set, setTimeout, clearTimeout, console, ArrayBuffer, DataView,
   };
@@ -151,52 +147,47 @@ const harness = () => {
 const last = (ws, t) => ws.sent.filter((m) => m.t === t).at(-1);
 const count = (ws, t) => ws.sent.filter((m) => m.t === t).length;
 
-test("room: a crossing reaches the next land's voices and everyone else's pages, and goes with the zone; it reaches nowhere else", async () => {
+test("room: a level reaches the next level's voices and everyone else's pages, stands across the main world's zones and ends on leaving it", async () => {
   const h = harness();
-  const islander = await h.join(1, "a", "outside"), forester = await h.join(2, "b", "rainforest"), crosser = await h.join(3, "c", "outside");
-  assert.deepEqual(last(crosser, "voice").peers, [1], "on the island: the island");
+  const islander = await h.join(1, "a", "outside"), low = await h.join(2, "b", "hq"), mover = await h.join(3, "c", "outside");
   h.advance(1000);
-  h.send(crosser, { t: "blend", to: "rainforest", k: 4 });
-  assert.deepEqual(last(crosser, "voice").peers, [1, 2], "onto the bridge: the rainforest too");
-  assert.deepEqual(last(forester, "voice").peers, [3], "and the rainforest hears the crosser");
-  assert.deepEqual(last(islander, "blend"), { t: "blend", id: 3, to: "rainforest", k: 4 }, "every other page gets the step");
-  assert.equal(count(crosser, "blend"), 0, "not the crosser's own");
-  const lists = count(crosser, "voice");
+  h.send(low, { t: "blend", to: "hq", k: STEPS });
+  assert.deepEqual(last(mover, "voice").peers, [1], "on the surface: the surface");
   h.advance(1000);
-  h.send(crosser, { t: "blend", to: "rainforest", k: 12 });
-  assert.equal(count(crosser, "voice"), lists, "a step along the way changes no list");
-  assert.equal(last(forester, "blend").k, 12);
+  h.send(mover, { t: "blend", to: "hq", k: 4 });
+  assert.deepEqual(last(mover, "voice").peers, [1, 2], "a little way down: HQ's level too");
+  assert.deepEqual(last(low, "voice").peers, [3], "and HQ's level hears the mover");
+  assert.deepEqual(last(islander, "blend"), { t: "blend", id: 3, to: "hq", k: 4 }, "every other page gets the step");
+  assert.equal(mover.sent.filter((m) => m.t === "blend" && m.id === 3).length, 0, "not the mover's own");
+  const lists = count(mover, "voice");
   h.advance(1000);
-  h.send(crosser, { t: "blend", to: "rainforest", k: BLEND.STEPS });
-  assert.deepEqual(last(crosser, "voice").peers, [2], "at the far end: the island is let go");
-  assert.equal(h.room.players.get(3).ws.store.blendK, BLEND.STEPS, "kept through a hibernation");
-  h.send(crosser, { t: "zone", name: "rainforest" });
-  assert.equal(h.room.players.get(3).blendTo, null, "the zone takes the crossing with it");
-  assert.deepEqual(last(crosser, "voice").peers, [2]);
-  // The page can reach the end before its throttled final step reaches the room. Its explicit clear after the zone
-  // must remove the room's inverted remainder, including the old land's permission to hear the arriving player.
-  h.send(crosser, { t: "zone", name: "outside" });
+  h.send(mover, { t: "blend", to: "hq", k: 12 });
+  assert.equal(count(mover, "voice"), lists, "a step along the way changes no list");
+  assert.equal(last(low, "blend").k, 12);
   h.advance(1000);
-  h.send(crosser, { t: "blend", to: "rainforest", k: STEPS - 1 });
-  h.send(crosser, { t: "zone", name: "rainforest" });
-  assert.equal(h.room.players.get(3).blendK, 1, "the room still holds the penultimate wire step");
-  h.send(crosser, { t: "blend", to: null, k: 0 });
-  assert.equal(h.room.players.get(3).blendTo, null, "the page's explicit endpoint clear removes the remainder");
-  assert.deepEqual([last(crosser, "voice").peers, last(islander, "voice").peers, last(forester, "voice").peers], [[2], [], [3]], "endpoint isolation holds both ways");
+  h.send(mover, { t: "blend", to: "hq", k: STEPS });
+  assert.deepEqual(last(mover, "voice").peers, [2], "all the way down: the surface is let go");
+  assert.equal(h.room.players.get(3).ws.store.blendK, STEPS, "kept through a hibernation");
+  h.send(mover, { t: "zone", name: "between" });
+  assert.deepEqual([h.room.players.get(3).blendTo, h.room.players.get(3).blendK, last(mover, "voice").peers], ["hq", STEPS, [2]], "a level stands across the world's zones");
+  h.send(mover, { t: "zone", name: "hq" });
+  assert.deepEqual([h.room.players.get(3).blendTo, last(mover, "voice").peers], ["hq", [2]], "into HQ's own zone too");
+  h.send(mover, { t: "zone", name: "factory.hall" });
+  assert.deepEqual([h.room.players.get(3).blendTo, last(mover, "voice").peers], [null, []], "out of the world, it ends");
   h.advance(1000);
-  h.send(crosser, { t: "blend", to: "bifrost", k: 5 });
-  assert.equal(h.room.players.get(3).blendTo, null, "no crossing from the rainforest to ₿IFRÖST");
+  h.send(mover, { t: "blend", to: "hq", k: 5 });
+  assert.equal(h.room.players.get(3).blendTo, null, "no level from a hall");
+  h.send(mover, { t: "zone", name: "outside" });
   h.advance(1000);
-  h.send(crosser, { t: "blend", to: "hq-basement", k: 5 });
-  assert.equal(h.room.players.get(3).blendTo, null, "no level below the rainforest but its own");
-  h.send(crosser, { t: "zone", name: "cave-lab" });
-  h.advance(1000);
-  h.send(crosser, { t: "blend", to: "rainforest", k: 5 });
-  assert.equal(h.room.players.get(3).blendTo, null, "nor from a cave");
-  assert.deepEqual(last(crosser, "voice").peers, []);
+  h.send(mover, { t: "blend", to: "rainforest", k: 5 });
+  assert.equal(h.room.players.get(3).blendTo, null, "a land is no level");
+  assert.deepEqual(last(mover, "voice").peers, [1], "and the surface is the surface again");
+  // What a player sends of themselves reaches everyone who can see them, all across the main world and nowhere else.
+  const away = await h.join(4, "d", "factory.hall");
+  h.send(islander, { t: "react", e: "🍌" });
+  assert.deepEqual([count(low, "react"), count(mover, "react"), count(away, "react")], [1, 1, 0], "a reaction crosses the world's zones and stops at a hall");
   // A page sending faster than BLEND_HZ is held to it.
-  h.send(crosser, { t: "zone", name: "outside" });
-  for (let k = 1; k <= BLEND.STEPS; k++) h.send(crosser, { t: "blend", to: "rainforest", k });
+  for (let k = 1; k <= STEPS; k++) h.send(mover, { t: "blend", to: "hq", k });
   assert.ok(h.room.players.get(3).blendK <= protocol.BLEND_HZ, "a burst is held to the bucket");
 });
 

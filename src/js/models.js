@@ -507,6 +507,9 @@
     return geo;
   };
   const BANANA_AMMO_SCALE = 0.34;
+  // A rifle magazine banana's resting scale, in caveman heights: as built, and as the crew sets it once its reload pop
+  // has settled.
+  const GUN_BANANA_SCALE = { x: 0.135, y: 0.175, z: 0.11 };
   // Full-shouldered profile hides the dead space between curved bananas without the old pointed silhouette.
   const BANANA_PILE_PROFILE = [[1, 0], [0.98, 0.11], [0.9, 0.31], [0.72, 0.53], [0.5, 0.7], [0.28, 0.82], [0.1, 0.87], [0, 0.88]];
   const bananaPileRadiusScale = (angle, radius) => {
@@ -968,7 +971,7 @@
     parts.gunBananas = [];
     for (let i = 0; i < 9; i++) {
       const curve = i * 5 / 8;
-      const round = createNode({ geometry: magazineBananaGeometry(), position: { x: 0, y: (-0.1063 - i * 0.023) * h, z: (0.045 + curve * curve * 0.0018) * h }, rotation: { x: 0, y: Math.PI / 2, z: 0 }, scale: { x: 0.135 * h, y: 0.175 * h, z: 0.11 * h } });
+      const round = createNode({ geometry: magazineBananaGeometry(), position: { x: 0, y: (-0.1063 - i * 0.023) * h, z: (0.045 + curve * curve * 0.0018) * h }, rotation: { x: 0, y: Math.PI / 2, z: 0 }, scale: { x: GUN_BANANA_SCALE.x * h, y: GUN_BANANA_SCALE.y * h, z: GUN_BANANA_SCALE.z * h } });
       round.ammoPopAt = -Infinity;
       parts.gunBananas.push(round);
       addChild(parts.gun, round);
@@ -1856,5 +1859,5 @@
     for (const geo of set) if (geo.foliageLods?.owner === geo) { set.add(geo.foliageLods.medium); set.add(geo.foliageLods.far); }
     return set;
   };
-  BL.models = { characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
+  BL.models = { GUN_BANANA_SCALE, characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
 })();

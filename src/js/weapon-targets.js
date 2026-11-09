@@ -122,7 +122,10 @@
     };
     const eligible = (target, ignore, includeNonWeapon = false) => {
       const { node, owner } = target;
-      return !!node.geometry && owner.active !== false && (includeNonWeapon || owner.weaponType !== "none")
+      // Passive Hub NPCs neither take nor block weapon rays and sweeps. Hover and
+      // carry picks (`includeNonWeapon`) still see them; selection is a separate pick.
+      return !!node.geometry && owner.active !== false
+        && (includeNonWeapon || owner.weaponType !== "none" && !owner.cave?.nonInteractive && !owner.entry?.nonInteractive)
         && (!ignore || owner.cave !== ignore && owner.entry?.owner !== ignore
           && (!ignore.owner || owner.cave !== ignore.owner) && !(ignore.gorilla && owner.kind === "clanker"))
         && !(node.mirror && (node.mirrorPortal || node.mirrorReveal >= 1)) && refreshWorld(node);

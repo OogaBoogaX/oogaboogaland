@@ -8,6 +8,8 @@ import "../../src/js/chat-policy.js";
 import "../../src/js/contributor-identities.js";
 import "../../src/js/chalk-board.js";
 import "../../src/js/voice-blend.js";
+import "../../src/js/emoji-data.js";
+import "../../src/js/reaction-policy.js";
 // The room's wire format and the limits it enforces, as pure functions the tests can reach.
 //
 // Client → room:  { t: "pose", x, y, z, yaw }   the driven body's feet and heading, at most MOVE_HZ
@@ -34,9 +36,13 @@ import "../../src/js/voice-blend.js";
 //                                (`parseStudioCommand` in studio-policy.js; see docs/dsb-studio-session.md)
 //                 { t: "ghost", k, g?, d?, h? }  HALLOWEEN: the ghost hunt's `start`, `ready`, `pause` or `leave`, or `hits` h, for its
 //                                host, from a page in the arcade's ghost arena
-//                 { t: "thump" }                 a voice participant's Ooga thump (see Thumps below); no other field
-//                 { t: "chalk", k, ... }        the EntropyLab chalkboard: `take` or `drop` the board, or an edit by
-//                                                whoever holds it (chalk-board.js; see CHALK_HZ below)
+//                 { t: "react", e }              an emoji over the driven body for a moment (see Reactions below)
+//                 { t: "hand", on, tone?, e? }   the persistent slot up or down; e omitted/empty means the hand in tone 0 to 5
+//                 { t: "link", to, on }          ask player `to` for a voice link, or take this player's ask back (see Voice links below)
+//                 { t: "link-all" }              link with everyone here who has asked this player, or with nobody waiting take back all its asks
+//                 { t: "chalk", v, k, ... }     the EntropyLab chalkboard: `take` or `drop` the board, or an edit by
+//                                                whoever holds it, on board layout `v` (chalk-board.js VERSION; see
+//                                                CHALK_HZ below)
 //                 { t: "wallet", k, u, ... }   DSB Land: one of the driven Ooga's free hardware wallets taken, set
 //                                                down, picked up, thrown or blown (see WALLET_CAP below)
 //                 binary                         the NPC host's frame of every Ooga's pose, relayed as is; or,
@@ -57,7 +63,9 @@ import "../../src/js/voice-blend.js";
 //                 blend { id, to, k }        a player's crossing changed; welcome and join carry blendTo and blendK
 //                 voice { peers, gens }      whom to hear, and each one's publication count (a new count is a
 //                                            microphone published again, to be pulled again); in the Studio also
-//                                            `listeners`, the other receive sessions there
+//                                            `listeners`, the other receive sessions there and linked partners'
+//                                            anywhere; `ears` elsewhere, how many can hear this page without
+//                                            publishing, so it hears none of them
 //                 studio-state { state }     the Studio's host, mode, program anchor, seats and this page's own
 //                                            rights; studio-result { action, commandId, ok, error, revision }
 //                                            answers a command; studio-mic-revoked: drop the microphone now
@@ -66,7 +74,8 @@ import "../../src/js/voice-blend.js";
 //                 chat-rejected { clientId?, reason }  refused; rate retries keep the same id
 //                 chat-history { messages }  after welcome: the lines the room still holds, oldest first
 //                 pm { op, ... }            a private conversation: invite { from }, inviting { to }, open { with },
-//                                            declined { from }, withdrawn { from }, closed { from, reason },
+//                                            declined { from, reason? }, withdrawn { from, reason? } (reason "left"
+//                                            when the other page left), closed { from, reason },
 //                                            data { from, d }, and to its sender ok { n, to } or refused { to, n?, reason }
 //                 chalk-board { marks, editor }  after welcome: the chalkboard as the room holds it, and who holds it
 //                 chalk-lock { id }          who holds the chalkboard now (0 for nobody), to everyone
@@ -81,11 +90,16 @@ import "../../src/js/voice-blend.js";
 //                 ghost-host { id, followers }  who runs the ghost arena's hunt (0 for nobody) and how many pages in
 //                                            the arena follow it; welcome carries ghostHost and ghostFollowers; binary
 //                                            frames led by GHOST_MAGIC from it, to pages in the arena
-//                 thump { id, a? }           player `id` thumped: sent only to those voice places them with, never the
-//                                            sender; `a: 1` when this recipient would hear the sender's voice
+//                 react { id, e }            player `id` reacted with emoji `e`, to the players in their zone
+//                 hand { id, on, tone, e }   player `id` toggled or changed their slot; welcome and join carry `hand`
+//                                            `handTone` and `handEmoji`. To the sender alone: a change it was refused
+//                 links { wants, linked, refused?, all?, n? }  this player's own asks and which of them are two-way links, after
+//                                            welcome and on every change to either; `refused: "full"` when an ask did not fit;
+//                                            in answer to link-all, `all` ("linked", "unlinked" or "none") and how many it changed, `n`
 // Zones: `<group>` or `<group>.<place>`. Voice is shared within a group; who is shown is matched on the whole
-// name, since a place inside a group can have coordinates of its own (the Factory's tunnel on the island and
-// its hall). `none` is nowhere: off the island's edge, or between scenes; it shares voice with nobody.
+// name, since a place inside a group can have coordinates of its own. The exception is the main world, every zone the
+// island scene reports (`BLEND.WORLD`): its players are all shown to each other (`seenTogether`) and its voice goes by
+// height, not zone (voice-blend.js). `none` is nowhere, between scenes; it shares voice with nobody.
 // Chat: one conversation for the whole island. The room names the speaker from the session (`login`, and
 // `name`, their display name), never from the frame, keeps the last CHAT_KEEP lines in memory alone (never
 // storage: a room that sleeps, restarts or is redeployed has forgotten them) and hands them to each socket
@@ -99,17 +113,23 @@ import "../../src/js/voice-blend.js";
 // and the rate limits stay with the account across its reconnects while the room is awake, as chat's do. The
 // conversation ends when either page leaves. A pm frame may run to CHAT_FRAME_MAX as a chat frame does, with
 // PM_DATA_MAX characters of frame.
-// Thumps: a reaction in voice instead of unmuting to say "yes!". Taken only from a current voice participant (a receive
-// session, as `voicePeers` counts a listener: talking or listen-only) and relayed as `{"t":"thump","id":N}` to every
-// other voice participant who shares a voice place with them either way (`thumpPeers`: the zone group or a crossing's
-// share of it, and in the Ember Den the table, by the same predicates as `voicePeers`), so other tables, other places
-// and `none` never see it. Each copy also says whether its recipient would hear the sender's voice there (`a: 1`,
-// `thumpAudible`): not where the DSB Studio keeps the sender from speaking, as it does its audience. The page shows every
-// thump it is sent and sounds only those, within its own hearing range and mutes. A frame with any other field is
-// ignored. Each account spends a bucket of THUMP_HZ a second bursting to THUMP_BURST
-// (`takeToken`); buckets live in memory alone, at most THUMP_BUCKET_KEEP, and an absent account's full bucket is
-// dropped when the next one is made (`thumpBucketFor`). No timer, alarm, storage, reply or history: a dropped thump is
-// simply not relayed. The page draws everything.
+// Reactions: a room that takes them lists REACT_FEATURE in welcome's `features`. A reaction is one emoji the shared
+// policy accepts (reaction-policy.js over emoji-data.js: plain or in a skin tone, never text), taken from a player
+// driving a body and relayed as `react { id, e }` to the other players in its zone, never kept. The raised hand is a
+// flag on the player's record, in its attachment and every view, sent to everyone on a change only. Both spend one
+// per-record bucket of REACT_HZ a second bursting to REACT_BURST (the page mirrors it, a little short); over it a
+// reaction is dropped without a word, and a hand change is refused with the sender's own `hand { id, on, tone }` as
+// the room holds it, so the sender's page puts it back. HAND_EMOJI_FEATURE allows the same slot to carry `e`, one
+// policy-valid emoji, or "" for the original hand. Old pages omit it and still see the hand; old rooms never receive it.
+// Voice links: a room that keeps them lists LINK_FEATURE in welcome's `features`. Each player holds a set of asks by
+// account id, and two who have asked for each other are linked: `voicePeers` lets them hear each other wherever they
+// are, in any zone or none, with or without a body. An ask is told only to the one who made it, so the player asked
+// sees nothing until they ask too; breaking a link takes back only the breaker's ask, so the other's still stands, and
+// they can cancel it. `link-all` answers every ask waiting on the sender from a player in the room or, with none
+// waiting, takes back all of the sender's asks. The asks go to the room's storage (`voiceLinks`, one value, LINK_WANTS an account and
+// LINK_ACCOUNTS accounts at most) on each change and last until taken back or the account is deleted
+// (`forgetVoiceLinks`). A Studio audience member still loses their microphone there: a link carries voices, it grants
+// no microphone.
 // "ping" answers "pong" without waking the room (setWebSocketAutoResponse).
 
 export const TICK_HZ = 15;
@@ -154,10 +174,10 @@ export const CHAT_HZ = 1;
 export const CHAT_BURST = 3;
 // Active accounts plus bounded reconnect debt, held only while the room is awake.
 export const CHAT_BUCKET_KEEP = MAX_PLAYERS * 2;
-// Thumps: about two a second per player, three in a burst; active accounts plus bounded reconnect debt.
-export const THUMP_HZ = 2;
-export const THUMP_BURST = 3;
-export const THUMP_BUCKET_KEEP = MAX_PLAYERS * 2;
+export const REACT_FEATURE = "react-v1";
+export const HAND_EMOJI_FEATURE = "hand-emoji-v1";
+export const REACT_HZ = 3;
+export const REACT_BURST = 6;
 // The page sends `{"t":"chat","text":…}` with its text already sanitized, under MESSAGE_MAX; the margin is
 // for a page that sends it raw (every character escaped as \uXXXX is six).
 export const CHAT_PREFIX = '{"t":"chat",';
@@ -179,6 +199,11 @@ export const PM_INVITES = 4;
 export const PM_BLOCKS = 32;
 // Accounts whose blocks and rate limits the room keeps across their reconnects while it is awake, as chat's buckets.
 export const PM_ACCOUNT_KEEP = MAX_PLAYERS * 2;
+export const LINK_FEATURE = "vlink-v1";
+export const LINK_HZ = 2;
+export const LINK_BURST = 6;
+export const LINK_WANTS = 64;
+export const LINK_ACCOUNTS = 512;
 const PM_OPS = ["invite", "accept", "decline", "block", "end"];
 const PM_DATA = /^[A-Za-z0-9+/]+={0,2}$/;
 // The Sphere's one exterior doorway is a short, server-leased FIFO. Room door transits are independent
@@ -346,6 +371,8 @@ export const parseClientMessage = (text) => {
       ? { t: "chat", text: line, clientId: msg.clientId } : null;
   }
   if (msg.t === "chalk") {
+    // A page on an older board layout sends thousandths of a smaller board: none of it is taken.
+    if (msg.v !== CHALK.VERSION) return null;
     if (msg.k === "take" || msg.k === "drop") return { t: "chalk", k: msg.k };
     const op = CHALK.parse(msg);
     return op ? { t: "chalk", ...op } : null;
@@ -381,7 +408,15 @@ export const parseClientMessage = (text) => {
     if (msg.k === "hits") return ghostHits(msg.h);
     return msg.k === "hit" && ghostHit(msg.g, msg.d) ? { t: "ghost", k: "hit", g: msg.g, d: msg.d } : null;
   }
-  if (msg.t === "thump") return Object.keys(msg).length === 1 ? { t: "thump" } : null;
+  if (msg.t === "react") return globalThis.BL.reactionPolicy.valid(msg.e) ? { t: "react", e: msg.e } : null;
+  if (msg.t === "hand") {
+    const tone = msg.tone === undefined ? 0 : msg.tone;
+    const e = msg.e === undefined ? "" : msg.e;
+    return typeof msg.on === "boolean" && globalThis.BL.reactionPolicy.tone(tone) && (e === "" || globalThis.BL.reactionPolicy.valid(e))
+      ? { t: "hand", on: msg.on, tone, e } : null;
+  }
+  if (msg.t === "link") return Number.isSafeInteger(msg.to) && msg.to > 0 && typeof msg.on === "boolean" ? { t: "link", to: msg.to, on: msg.on } : null;
+  if (msg.t === "link-all") return { t: "link-all" };
   if (msg.t === "shot") {
     const a = msg.a;
     if (!Array.isArray(a) || a.length !== 6 || !a.every(finite)) return null;
@@ -413,18 +448,6 @@ export const takeToken = (bucket, rate, now, burst = rate) => {
   if (bucket.tokens < 1) return false;
   bucket.tokens -= 1;
   return true;
-};
-
-/** A thump bucket for account `id`, made full on first use and kept while the room is awake; on making one, absent
- *  accounts whose bucket has refilled are dropped (lazy expiry), and at THUMP_BUCKET_KEEP none is made (null). */
-export const thumpBucketFor = (buckets, id, now, present) => {
-  let bucket = buckets.get(id);
-  if (bucket) return bucket;
-  for (const [account, b] of buckets) if (!present.has(account) && b.tokens + (now - b.at) * THUMP_HZ / 1000 >= THUMP_BURST) buckets.delete(account);
-  if (buckets.size >= THUMP_BUCKET_KEEP) return null;
-  bucket = { tokens: THUMP_BURST, at: now };
-  buckets.set(id, bucket);
-  return bucket;
 };
 
 /** The chat's last `keep` lines in a fixed ring: `push` is constant time, `list` copies them out oldest first. */
@@ -496,10 +519,11 @@ export const claimRefusal = (index, login, body, _players, contributor = false, 
 };
 
 // Voice: who hears whom. Players driving an Ooga or gorilla hear each other at one volume in the same
-// zone group (the island, a bridged land, one cave or portal; see Zones above). A listener with a receiving
-// session hears every other player in its group with a published microphone; nobody hears anyone `none`.
-// On a crossing between two adjacent groups (#392, `BLEND.PAIRS`) a player is in both, by its step along it
-// (`blendTo`, `blendK`), and hears whoever shares a place with it (`BLEND.shares`); the page sets the volumes.
+// zone group (one hall or portal; see Zones above). A listener with a receiving session hears every other player in
+// its group with a published microphone; nobody hears anyone `none`. In the main world (`BLEND.WORLD`) groups give way
+// to levels: the surface, HQ, HQ's basement and the rainforest's underground, by height (voice-blend.js).
+// On a crossing (#392) a player is in two places, by its step along it (`blendTo`, `blendK`), and hears whoever shares
+// a place with it (`BLEND.shares`), between the world's levels or across a pair `BLEND.PAIRS` names; the page sets the volumes.
 // Ooga Arcade (`arcade`) and Ghost Hunter's Arena (`ghost-arena`) are two groups joined by the haunted hallway, each
 // a place as a whole (`BLEND.place`), so its crossing reaches nothing else. The arena is one region with or without a
 // hunt; its older names (`arcade-hunt`, `arcade.arena`) are that region (`BLEND.ALIASES`), never the Arcade's.
@@ -507,18 +531,18 @@ export const claimRefusal = (index, login, body, _players, contributor = false, 
 export const VOICE_TRACK = "mic";
 
 /** The voice group of a zone name: its alias's (`BLEND.ALIASES`), else the part before its `.place`. */
-export const zoneGroup = (zone) => {
-  if (typeof zone === "string" && Object.hasOwn(BLEND.ALIASES, zone)) return BLEND.ALIASES[zone];
-  const dot = typeof zone === "string" ? zone.indexOf(".") : -1;
-  return dot < 0 ? zone : zone.slice(0, dot);
-};
+export const zoneGroup = BLEND.group;
 
-/** Whether listener `p` (in voice group `group`) and speaker `q` share a place. With neither crossing, a group; with
- * either, a zone, so a crossing's far end never reaches into another place of its group (₿IFRÖST's chamber). */
-const sharesPlace = (p, group, q) => p.blendTo || q.blendTo
+/** Whether two zones' players are shown to each other, for what the room relays of them: the same zone, or two of the
+ *  main world, all in the island scene's coordinates. */
+export const seenTogether = (a, b) => a === b || BLEND.world(a) && BLEND.world(b);
+
+/** Whether listener `p` (in voice group `group`) and speaker `q` share a place. With neither crossing nor in the main
+ * world, a group; else by place, so a crossing's far end never reaches into another place of its group. */
+const sharesPlace = (p, group, q) => p.blendTo || q.blendTo || BLEND.world(p.zone) || BLEND.world(q.zone)
   ? BLEND.shares(p.zone, p.blendTo || null, p.blendK || 0, q.zone, q.blendTo || null, q.blendK || 0)
   : zoneGroup(q.zone) === group;
-// The three halves of who hears whom, shared by `voicePeers` and `thumpPeers`. Both restrictions hold together: a
+// The three halves of who hears whom, for `voicePeers`. Both restrictions hold together: a
 // bodiless listener counts only inside the Studio, a Studio speaker only while permitted, and Ember Den voice only
 // between players at the same poker table.
 /** Whether `p` is a voice participant who can hear anyone: a receive session, driving (or in the Studio), not `none`. */
@@ -532,33 +556,50 @@ export const voiceTogether = (p, q) => {
   return sharesPlace(p, group, q) && (group !== "ember-den" || (p.pokerVoice ?? null) === (q.pokerVoice ?? null));
 };
 
-/** Map of player id → sorted ids that player should hear. */
-export const voicePeers = (players, studio = null) => {
+/** Whether accounts `a` and `b` have each asked for a voice link with the other. */
+export const voiceLinked = (links, a, b) => !!links && !!links.get(a)?.has(b) && !!links.get(b)?.has(a);
+
+/** In voice as every roster shows it: a live microphone, or back from an earlier session hearing others, microphone closed and muted. */
+export const inVoice = (p) => !!p.voice.track || !!p.voice.sub && p.muted === true;
+
+/** The asks as they load from storage, bounded and checked; anything malformed is dropped. */
+export const restoreLinks = (stored) => {
+  const links = new Map();
+  if (!Array.isArray(stored)) return links;
+  for (const row of stored.slice(0, LINK_ACCOUNTS)) {
+    if (!Array.isArray(row) || !Number.isSafeInteger(row[0]) || row[0] <= 0 || !Array.isArray(row[1])) continue;
+    const wants = new Set(row[1].filter((id) => Number.isSafeInteger(id) && id > 0 && id !== row[0]).slice(0, LINK_WANTS));
+    if (wants.size) links.set(row[0], wants);
+  }
+  return links;
+};
+
+/** The asks as they go to storage. */
+export const storedLinks = (links) => [...links].map(([id, wants]) => [id, [...wants]]);
+
+/** What player `id` is told: their own asks, and which of those are two-way. */
+export const linkView = (links, id) => {
+  const wants = [...(links.get(id) || [])];
+  return { wants, linked: wants.filter((other) => voiceLinked(links, id, other)) };
+};
+
+/** Map of player id → sorted ids that player should hear. A voice link needs only a receive session and a live microphone. */
+export const voicePeers = (players, studio = null, links = null) => {
   const out = new Map();
   for (const p of players) {
     const ids = [];
-    if (voiceListener(p, studio)) {
-      for (const q of players) if (q !== p && voiceAudible(q, studio) && voiceTogether(p, q) && q.voice && q.voice.track) ids.push(q.id);
+    if (p.voice && p.voice.sub) {
+      const listens = voiceListener(p, studio);
+      for (const q of players) {
+        if (q === p || !q.voice || !q.voice.track) continue;
+        if (voiceLinked(links, p.id, q.id) || listens && voiceAudible(q, studio) && voiceTogether(p, q)) ids.push(q.id);
+      }
       ids.sort((a, b) => a - b);
     }
     out.set(p.id, ids);
   }
   return out;
 };
-
-/** The players a thump from `sender` reaches: every other voice participant sharing a voice place with it, from either
- *  side (one may be part of the way across to the other's place). Empty unless the sender is a voice participant. */
-export const thumpPeers = (players, sender, studio = null) => {
-  const out = [];
-  if (!voiceListener(sender, studio)) return out;
-  for (const q of players) {
-    if (q !== sender && voiceListener(q, studio) && (voiceTogether(q, sender) || voiceTogether(sender, q))) out.push(q);
-  }
-  return out;
-};
-
-/** Whether recipient `q` would hear `sender`'s voice, microphone aside: the sound of its thump, not the sight. */
-export const thumpAudible = (q, sender, studio = null) => voiceListener(q, studio) && voiceAudible(sender, studio) && voiceTogether(q, sender);
 
 // NPC host: one page runs the Ooga crew (and the hub's events) for everyone and streams them; the others
 // follow. The sitting host (`incumbent`) keeps the role while it still shows the island (`inHub`: in the hub

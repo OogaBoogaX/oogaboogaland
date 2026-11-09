@@ -19,9 +19,6 @@
   const BL = window.BL = window.BL || {};
   const NAME = "Tess";
   const LINES = {
-    whitepaper: "We start where Bitcoin began! Satoshi published the Bitcoin whitepaper on October 31, 2008. Its monolith stands above the Library of Bitcoin.",
-    whitepaperRead: "Double-click the whitepaper to read it here. The shelves below have more to explore!",
-    newsWhitepaper: "The Library of Bitcoin is open! Above it stands the whitepaper monolith. Double-click its face to read Satoshi's paper.",
     greeting: "Hi! I'm Tess. New here? Want a quick look round the island?",
     again: "Want a look round the island? Or ask me about it.",
     declined: "No problem! Tap me any time for a tour.",
@@ -95,7 +92,6 @@
   // The island tour, one stop a landmark: where the view looks from (`eye`) and at (`look`), and the lines she says
   // there. She hovers between the view and the landmark, off to its right, and her beam lands on `look`.
   const STOPS = [
-    { id: "whitepaper", title: "Bitcoin whitepaper", eye: [-13.8, 12, 12.9], look: [-16.4, 11.4, 15.3], lines: ["whitepaper", "whitepaperRead"] },
     { id: "pile", title: "The pile", eye: [6, 8, 11], look: [0, 1.2, 0], lines: ["pile", "crew"] },
     { id: "totems", title: "Jumbotron and totems", eye: [7, 8, 7], look: [0, 5, 26], lines: ["jumbotron", "totems"] },
     { id: "timechain", title: "Timechain Sphere", eye: [-15, 16, 4], look: [-42, 5, 17], lines: ["timechain", "timechainWalls", "timechainBoards", "timechainSani"] },
@@ -110,7 +106,6 @@
   // and her line. A new feature worth showing a returning visitor is one entry here, added at the top: a visitor's news
   // is everything listed above the newest entry they were last offered.
   const NEWS = [
-    { date: "2026-10-31", at: "whitepaper", line: "newsWhitepaper" },
     { date: "2026-10-22", at: "factory", line: "newsKortik" },
     { date: "2026-10-19", at: "timechain", line: "newsSphereRooms" },
     { date: "2026-10-18", at: "bca", line: "newsBca" },
@@ -204,7 +199,6 @@
   // takes the visitor there when they ask to go, but a question about it is left to the Worker, and "it" or "there"
   // stands for the last place only in a trip ("take me there").
   const PLACES = {
-    whitepaper: ["whitepaper", "white paper", "bitcoin whitepaper", "library", "library of bitcoin", "monolith"],
     pile: ["pile", "banana pile", "bananas pile"],
     totems: ["jumbotron", "oogatron", "totem", "totems"],
     timechain: ["timechain", "timechain sphere", "sphere", "sani"],
@@ -305,8 +299,8 @@
     title: "island guide", tour: "Island tour", ask: "Ask me about the island", greeted: "tessGreeted", toured: TOURED, about: (stop) => stop.id
   };
 
-  const create = ({ parent, input, fx, camera, pilot, visitor, world, hud, busy, coarse, quality, landing, targets = {}, prepareStop = null, guide = ISLAND_GUIDE }) => {
-    const G = guide, LN = G.lines, PLACE = prepareStop ? G.stops.map((stop) => ({ ...stop })) : G.stops, VIEWS = PLACE.map((stop) => viewOf(stop, pose())), SPOTS = PLACE.map(() => [0, 0, 0]);
+  const create = ({ parent, input, fx, camera, pilot, visitor, world, hud, busy, coarse, quality, landing, targets = {}, guide = ISLAND_GUIDE }) => {
+    const G = guide, LN = G.lines, PLACE = G.stops, VIEWS = PLACE.map((stop) => viewOf(stop, pose())), SPOTS = PLACE.map(() => [0, 0, 0]);
     const TOUR = PLACE.map((stop, i) => legOf(i, stop.title, stop.lines, LN)), WORKS = G.work;
     const rig = BL.tess.create({ parent, input, fx, camera, kind: "tess", coarse, quality }), position = rig.position;
     const state = {
@@ -346,7 +340,10 @@
       chips.append(chip);
     }
     panel.append(heading, row, form, chips, help);
-    document.body.append(panel);
+    // On the stage beside the sheet and the sticks, so it inherits the drawer's live --drawer-height that sheet.js
+    // writes there for a resized drawer, and rides over the sticks that height lifts.
+    const stage = document.getElementById("stage");
+    stage.append(panel);
     // A question out with the Worker: Ask and the suggestions wait until her answer is in.
     const pending = (ask) => {
       state.ask = ask; send.disabled = !!ask;
@@ -377,11 +374,11 @@
       } else if (phase === "tour" && state.kind === "trip") {
         heading.textContent = `${NAME} · ${state.legs[state.stop].title}`;
         label(); skip.textContent = "Back";
-        help.textContent = coarse ? "Tap to go on" : "Enter or → goes on · Esc goes back";
+        help.textContent = coarse ? "Tap to go on · move to stop" : "Enter goes on · Esc goes back · move to stop";
       } else if (phase === "tour") {
         heading.textContent = `${news ? "What's new" : G.tour} · ${state.stop + 1} / ${state.legs.length}\n${state.legs[state.stop].title}`;
         label(); skip.textContent = "End tour";
-        help.textContent = coarse ? "Tap to go on" : "Enter or → goes on · Esc ends";
+        help.textContent = coarse ? "Tap to go on · move to stop" : "Enter goes on · Esc ends · move to stop";
       }
     };
     // Next goes on through what she says at a stop before it moves on: Finish only on the last stop's last bubble.
@@ -482,28 +479,10 @@
     };
     // A leg at a stop glides the view there while she flies ahead, and her lines start once she is there; one where the
     // visitor is keeps the view and her by them, and she starts at once.
-    let stopRequest = 0, waitingForStop = false;
-    const visit = async (index) => {
-      const request = ++stopRequest, leg = state.legs[index];
+    const visit = (index) => {
+      const leg = state.legs[index];
       state.stop = index; state.arrived = leg.stop < 0;
-      waitingForStop = false;
       show("tour");
-      if (leg.stop >= 0 && prepareStop) {
-        const preparing = prepareStop(PLACE[leg.stop]);
-        if (preparing) {
-          waitingForStop = true; rig.hush();
-          try { await preparing; } catch {
-            if (request !== stopRequest) return;
-            waitingForStop = false;
-            hud.toast("This tour stop could not be loaded. Please try again.");
-            endTour("cancelled"); return;
-          }
-          if (request !== stopRequest) return;
-          waitingForStop = false;
-          viewOf(PLACE[leg.stop], VIEWS[leg.stop]);
-          laySpots(camera, PLACE, SPOTS);
-        }
-      }
       if (leg.stop >= 0) {
         glideTo(VIEWS[leg.stop], GLIDE);
         const s = SPOTS[leg.stop];
@@ -517,16 +496,29 @@
     // and stops the driven Ooga's steering, fire and swing, so nothing walks on through the tour. Both come back, with
     // fresh controls, once the view is home.
     const hold = () => {
-      pilot.setActive(false); pilot.controls.reset(); input.reset();
+      pilot.setActive(false); pilot.controls.reset(true); input.reset();
       pilot.setExternalControl(true);
       state.holding = true;
       document.body.classList.add("tess-touring");
     };
-    const release = () => {
+    const release = (keepInput = false) => {
       pilot.setExternalControl(false);
-      pilot.setActive(true); pilot.controls.reset(); input.reset();
+      pilot.setActive(true, keepInput);
+      if (!keepInput) { pilot.controls.reset(); input.reset(); }
       state.holding = false;
       document.body.classList.remove("tess-touring");
+    };
+    // The visitor never stops driving their Ooga: a movement (keys, a stick, a pad) while she shows them round ends the
+    // tour where it is, the view is the Ooga's own again as it was, and the movement goes on to the Ooga.
+    const interrupt = () => {
+      rig.hush();
+      release(true);
+      toWork();
+    };
+    // Called by the scene before the pilot reads its input, so the movement that ends a tour moves the Ooga that frame
+    // with its own camera back; `update` asks again for a scene that does not.
+    const yieldToMovement = () => {
+      if (state.holding && !lender && pilot.controls.moving()) interrupt();
     };
     // The tour keeps where the view was, to give it back.
     const startTour = () => {
@@ -538,7 +530,6 @@
     };
     // The view glides home and she flies back to the visitor, and says her last line once she is there.
     const endTour = (line) => {
-      stopRequest++; waitingForStop = false;
       rig.hush();
       glideTo(home, RETURN);
       state.closing = line; state.arrived = false;
@@ -559,7 +550,6 @@
         answered(); startTour();
       }
       else if (state.phase === "tour") {
-        if (waitingForStop) return;
         // What she is saying here comes first, a bubble at a time.
         if (state.arrived && rig.next()) { label(); return; }
         if (state.stop === state.legs.length - 1) endTour(state.kind === "news" ? "newsDone" : state.kind === "trip" ? "more" : "done");
@@ -636,7 +626,8 @@
     };
     const captureKey = (e) => {
       if (state.phase !== "offer" && state.phase !== "tour" || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key !== "Enter" && e.key !== "ArrowRight") return;
+      // Enter alone: the arrows are movement, which reaches the Ooga and ends a tour (`interrupt`).
+      if (e.key !== "Enter") return;
       const target = e.target;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable || target.closest && target.closest("dialog"))) return;
       // Enter on one of her own buttons (Ask, a suggestion, Show me, Not now) presses that button.
@@ -650,7 +641,6 @@
     let lender = null;
     const lend = (driver) => {
       if (driver && !lender) {
-        stopRequest++; waitingForStop = false;
         if (state.holding) release();
         rig.hush();
         rig.mode = 0; rig.aims = null;
@@ -664,6 +654,7 @@
     };
     const update = (dt, elapsed) => {
       if (lender) { lender(rig, dt); rig.update(dt, elapsed); return; }
+      yieldToMovement();
       const actor = visitor();
       if (state.still && (state.phase === "work" || state.phase === "notice" || state.phase === "approach")) watchStill(dt);
       // A greeting she started is dropped, without a word, when the visitor gets going first; one they asked for by a
@@ -701,7 +692,6 @@
           else if (rig.said && !state.ask && (state.timer -= dt) <= 0) { say(state.asked ? "later" : "declined"); toWork(); }
           break;
         case "tour": {
-          if (waitingForStop) break;
           // Where the visitor is, she keeps by them; at a stop, she flies there and starts once she is nearly in place.
           const at = state.legs[state.stop].stop;
           if (at < 0) { placeBy(); rig.clearPath(3, 1); rig.push(spot.x, spot.y, spot.z); rig.track(); }
@@ -723,7 +713,7 @@
       }
       // The view: gliding to a stop, held there, and gliding home, written after the pilot's own every frame; home, it is
       // the visitor's again.
-      if (state.holding && !waitingForStop) {
+      if (state.holding) {
         state.glide = Math.min(1, state.glide + dt / state.glideTime);
         putPose(from, to, state.glide);
         if (state.phase === "returning" && state.glide >= 1) release();
@@ -755,7 +745,6 @@
     const suspend = () => {
       if (suspended) return;
       suspended = true;
-      stopRequest++; waitingForStop = false;
       if (state.ask) { state.ask.abort(); pending(null); }
       window.removeEventListener("keydown", captureKey, true);
       if (state.holding) release();
@@ -767,11 +756,11 @@
     const resume = () => {
       if (!suspended) return;
       suspended = false;
-      document.body.append(panel);
+      stage.append(panel);
       window.addEventListener("keydown", captureKey, true);
     };
     const dispose = () => { suspend(); rig.dispose(); };
-    return { root: rig.root, state, update, escape, tap, suspend, resume, dispose, liveGeometry: rig.liveGeometry, light: rig.light, lend, get holding() { return state.holding; }, get lent() { return !!lender; }, get speech() { return rig.speech; } };
+    return { root: rig.root, state, update, yieldToMovement, escape, tap, suspend, resume, dispose, liveGeometry: rig.liveGeometry, light: rig.light, lend, get holding() { return state.holding; }, get lent() { return !!lender; }, get speech() { return rig.speech; } };
   };
   BL.hubGuide = { create, NAME, LINES, STOPS, NEWS, freshAfter, legsOf, answer, SUGGESTIONS, fold, has };
 })();

@@ -131,7 +131,7 @@
     const fail = () => {
       if (disposed) return;
       loading = false; failed = true;
-      hud.toast("Ghost hunt couldn't load · click or shoot the ghost to retry");
+      hud.toast("Ghost hunt couldn't load · click the ghost to retry");
     };
     const wake = (local = false) => {
       if (disposed || game) return;
@@ -159,7 +159,7 @@
     });
     const owner = { kind: "halloween", role: "herald", priority: 3, weaponType: "object", active: true,
       tooltip: () => loading ? "The ghost hunt is loading…" : failed ? "Ghost hunt couldn't load · click to retry"
-        : tapWakes ? "A restless ghost · click or shoot it to start the ghost hunt" : "A restless ghost · shoot it to start the ghost hunt",
+        : "A restless ghost · click it to start the ghost hunt",
       tap: () => { if (failed || tapWakes) wake(tapWakes); } };
     addTarget(herald, owner);
     const update = dt => {
