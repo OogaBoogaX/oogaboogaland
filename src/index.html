@@ -1899,6 +1899,15 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
       <label class="hangar-sound-row" for="hangar-vibration"><span>Vibration</span><input type="range" id="hangar-vibration" min="0" max="100" step="5" value="100"></label>
       <p class="hangar-sound-note">Pad vibration: Chrome and Edge</p>
     </section>
+    <dialog class="hangar-keypad" id="hangar-keypad" aria-label="Door keypad" data-state="idle" tabindex="-1">
+      <div class="hangar-keypad-head">
+        <h3 id="hangar-keypad-name">Control room</h3>
+        <button type="button" class="hangar-keypad-close" id="hangar-keypad-close" aria-label="Close keypad">✕</button>
+      </div>
+      <p class="hangar-keypad-screen" id="hangar-keypad-screen" aria-live="polite">ENTER CODE</p>
+      <div class="hangar-keypad-keys"><button type="button" data-key="1">1</button><button type="button" data-key="2">2</button><button type="button" data-key="3">3</button><button type="button" data-key="4">4</button><button type="button" data-key="5">5</button><button type="button" data-key="6">6</button><button type="button" data-key="7">7</button><button type="button" data-key="8">8</button><button type="button" data-key="9">9</button><button type="button" class="hangar-keypad-go" data-key="clear" aria-label="Clear">CLR</button><button type="button" data-key="0">0</button><button type="button" class="hangar-keypad-go" data-key="enter" aria-label="Enter">ENT</button></div>
+      <p class="hangar-keypad-note" data-coarse="Tap a code, then ENT">Type a code, then Enter</p>
+    </dialog>
     <div class="ghost-player" id="ghost-player" hidden>
       <span class="ghost-player-note" aria-hidden="true">♪</span>
       <span class="ghost-player-title" id="ghost-player-title"></span>
@@ -2114,11 +2123,13 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/hangar-models.js" data-defer="hangar-scene"></script>
   <script src="js/hangar-fire.js" data-defer="hangar-scene"></script>
   <script src="js/hangar-terminals.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-keypad.js" data-defer="hangar-scene"></script>
   <script src="js/sis-models.js" data-defer="hangar-scene"></script>
   <script src="js/sis.js" data-defer="hangar-scene"></script>
   <script src="js/hangar-anomaly.js" data-defer="hangar-scene"></script>
   <script src="js/hangar-crane.js" data-defer="hangar-scene"></script>
   <script src="js/hangar-room-fire.js" data-defer="hangar-scene"></script>
+  <script src="js/hangar-meltdown.js" data-defer="hangar-scene"></script>
   <script src="js/hangar-window.js" data-defer="hangar-scene"></script>
   <script src="js/hangar-guide.js" data-defer="hangar-scene"></script>
   <script src="js/hangar-audio.js" data-defer="hangar-scene"></script>
