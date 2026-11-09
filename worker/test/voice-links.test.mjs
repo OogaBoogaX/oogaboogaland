@@ -235,6 +235,39 @@ test("room: asks are held to a rate, an offline player cannot be asked but can b
   assert.ok(seen(a).length <= LINK_BURST + 4, "a burst past the bucket writes and says nothing more");
 });
 
+test("room: link-all answers everyone here who has asked, with nobody waiting takes back every ask, and leaves the others' asks standing", async () => {
+  const h = await harness();
+  const a = await h.join(1, "a"), b = await h.join(2, "b", "dsb-outside"), c = await h.join(3, "c", "dsb-outside");
+  const did = (ws) => { const m = seen(ws).at(-1); return [m.all, m.n]; };
+  assert.deepEqual(parseClientMessage('{"t":"link-all"}'), { t: "link-all" });
+  h.send(a, { t: "link-all" });
+  assert.deepEqual(did(a), ["none", 0], "nobody has asked and nothing is held");
+  h.send(b, { t: "link", to: 1, on: true });
+  h.send(c, { t: "link", to: 1, on: true });
+  h.room.links.set(42, new Set([1]));
+  h.advance(10000);
+  h.send(a, { t: "link-all" });
+  assert.deepEqual(did(a), ["linked", 2], "both here are answered, the one offline is not");
+  assert.deepEqual(last(a), { wants: [2, 3], linked: [2, 3] });
+  assert.deepEqual(last(b), { wants: [1], linked: [1] }, "each is told");
+  assert.deepEqual(hears(a), [2, 3], "and heard across zones at once");
+  h.advance(10000);
+  h.send(a, { t: "link-all" });
+  assert.deepEqual(did(a), ["unlinked", 2], "with nobody left waiting it unlinks everyone");
+  assert.deepEqual(last(a), { wants: [], linked: [] });
+  assert.deepEqual(last(c), { wants: [1], linked: [] }, "the other's ask still stands");
+  assert.deepEqual(hears(a), []);
+  h.advance(10000);
+  h.send(a, { t: "link-all" });
+  assert.deepEqual(did(a), ["linked", 2], "so the next press links them again");
+  h.room.links.set(1, new Set(Array.from({ length: LINK_WANTS - 1 }, (_, i) => 1000 + i)));
+  h.advance(10000);
+  h.send(a, { t: "link-all" });
+  assert.equal(seen(a).at(-1).refused, "full", "more waiting than fit says so");
+  assert.deepEqual(did(a), ["linked", 1], "and links as many as fit");
+  assert.equal(h.room.links.get(1).size, LINK_WANTS);
+});
+
 test("room: a deleted account's asks, and every ask of it, go at once", async () => {
   const h = await harness();
   const a = await h.join(1, "a", "dsb-outside"), b = await h.join(2, "b"), c = await h.join(3, "c");

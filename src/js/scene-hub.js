@@ -520,7 +520,27 @@
   // Tess, the island's guide, for the visit (`hub-guide.js`).
   let islandGuide = null;
   let reuseHub = false, heldHub = false, heldDebug = null;
-  let stateTimer = 0, now = 0, hour = 12, unsubscribeActivity = null, unsubscribeAccount = null, ownOogaClaimed = false, claimView = false;
+  let stateTimer = 0, now = 0, hour = 12, unsubscribeActivity = null, unsubscribeAccount = null, ownOogaClaimed = false, claimView = false, claimArrival = false;
+  // Where the visitor last stood on the island in this browser (localStorage SPOT_KEY): the feet and heading of the Ooga
+  // they drive, noted each frame while it stands free (`noteSpot`) and written when the page hides or closes, as pilot.js
+  // keeps the view. An arrival on the island's own view comes back there (signing in is a full page load); with nothing
+  // saved, or nowhere to stand there now, it arrives at random round the pile. Debug pages neither read nor write it, so
+  // fixtures and the suite start at the pile.
+  const SPOT_KEY = "ooga-spot", SPOT_MAX = 1e3, SPOT = { x: 0, y: 0, z: 0, yaw: 0 };
+  let spotKnown = false;
+  if (!DEBUG) {
+    let v = null;
+    try { v = JSON.parse(localStorage.getItem(SPOT_KEY)); } catch { /* Storage may be unavailable. */ }
+    if (v && [v.x, v.y, v.z, v.yaw].every(Number.isFinite) && Math.max(Math.abs(v.x), Math.abs(v.y), Math.abs(v.z)) < SPOT_MAX) {
+      SPOT.x = v.x; SPOT.y = v.y; SPOT.z = v.z; SPOT.yaw = v.yaw; spotKnown = true;
+    }
+    const saveSpot = () => {
+      if (!spotKnown) return;
+      try { localStorage.setItem(SPOT_KEY, JSON.stringify(SPOT)); } catch { /* Storage may be unavailable. */ }
+    };
+    window.addEventListener("pagehide", saveSpot);
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveSpot(); });
+  }
   // The daylight inputs as last sampled; sampledDay starts at a never-true 0 so the first frame always samples.
   // `sampledSky` is the Cloud Hopper level sky sampled instead of the clock, and `skyHour` the hour the sky shows.
   let sampledHour = 0, sampledDay = 0, sampledLatitude = NaN, sampledContinuousDay = 0, sampledUtcMs = 0, sampledSky = null, skyHour = 12;
@@ -6838,9 +6858,15 @@
       const refusal = controller.travelRefusal();
       if (refusal) { hud.toast(refusal); return refusal; }
     }
-    const randomPile = respawn && name === "pile";
+    const randomPile = respawn && name === "pile", saved = name === "spot";
     let x = 0, z = 0, yaw = 0, pitch = 0.18, dist = player ? 6 : 8;
-    if (name === "pile") {
+    if (saved) {
+      // Where the visitor last stood (`noteSpot`), facing as they faced.
+      x = SPOT.x; z = SPOT.z; yaw = SPOT.yaw;
+      setVec(target, x + Math.sin(yaw) * 3, SPOT.y + 1.4, z + Math.cos(yaw) * 3);
+      pitch = player ? FOLLOW.view.pitch : 0.28;
+      dist = player ? FOLLOW.view.dist : 8;
+    } else if (name === "pile") {
       z = Math.max(5, altar.platformRadius + 1.3);
       setVec(target, 0, ALTAR_HEIGHT + Math.max(0.4, pile.pileEdge() * 0.3), 0);
       pitch = player ? FOLLOW.view.pitch : 0.28;
@@ -6908,9 +6934,9 @@
       else {
         p.x = x + Math.cos(yaw) * offset + Math.sin(yaw) * depth;
         p.z = z - Math.sin(yaw) * offset + Math.cos(yaw) * depth;
-        p.y = name === "timechain" ? timechainIsland.place.y + BL.timechainModels.SITE.bridgeFloor : name === "mempool" ? mempoolIsland.place.y + mempoolIsland.layout.FLOOR : name === "bifrost" ? bifrostIsle.site.arrival.y : underground ? (basement ? island.headquarters.basement.floor : island.headquarters.floor) : island.surfaceAt(p.x, p.z);
+        p.y = saved ? SPOT.y : name === "timechain" ? timechainIsland.place.y + BL.timechainModels.SITE.bridgeFloor : name === "mempool" ? mempoolIsland.place.y + mempoolIsland.layout.FLOOR : name === "bifrost" ? bifrostIsle.site.arrival.y : underground ? (basement ? island.headquarters.basement.floor : island.headquarters.floor) : island.surfaceAt(p.x, p.z);
       }
-      if (name !== "timechain" && name !== "bifrost" && name !== "mempool" && !island.onLand(p.x, p.z)) continue;
+      if (!saved && name !== "timechain" && name !== "bifrost" && name !== "mempool" && !island.onLand(p.x, p.z)) continue;
       if (player) {
         const floor = gorilla ? clankerSupportAt(gorilla, p.x, p.z, p.y, STEP_MAX) : playerSupportAt(p.x, p.z, p.y, p.y, player);
         if (!Number.isFinite(floor) || Math.abs(floor - p.y) > STEP_MAX) continue;
@@ -6918,7 +6944,8 @@
       }
       const radius = gorilla ? Math.max(BL.clankers.WALK_RADIUS, gorilla.gorilla.bodyRadius + 0.1) : Math.max(PLAYER_RADIUS, player?.bodyRadius || 0);
       const height = gorilla ? Math.max(BL.agent.LAB_HEIGHT, BL.clankers.WALK_HEIGHT, gorilla.gorilla.bodyHeight + 0.04) : player ? player.bodyHeight : 1.6;
-      if (!navigationClearAt(p.x, p.y + 1e-5, p.z, radius, height)) continue;
+      // A remembered spot was walked to, so only the body has to fit; a prop's box may hold more than the prop does.
+      if (!(saved ? physicalClearAt(p.x, p.y + 1e-5, p.z, radius, height) : navigationClearAt(p.x, p.y + 1e-5, p.z, radius, height))) continue;
       if (gorilla && !clankerCylinderClear(p.x, p.y, p.z, p.x, p.y, p.z, radius, height, gorilla)) continue;
       if (travel) {
         let occupied = false;
@@ -6959,7 +6986,11 @@
         eyeY = (player ? p.y + FOLLOW.y : target.y) + Math.sin(viewPitch) * arrivalDist;
         eyeZ = (player ? p.z : target.z) + Math.cos(destination.yaw) * Math.cos(viewPitch) * arrivalDist;
       }
-      if (!navigationClearAt(eyeX, eyeY - CAMERA_RADIUS, eyeZ, CAMERA_RADIUS, CAMERA_RADIUS * 2)) continue;
+      if (!navigationClearAt(eyeX, eyeY - CAMERA_RADIUS, eyeZ, CAMERA_RADIUS, CAMERA_RADIUS * 2)) {
+        if (!saved) continue;
+        // A spot in a cave has rock behind it: the eye starts at the body, and the camera's own collision settles it.
+        eyeX = p.x; eyeY = p.y + FOLLOW.y; eyeZ = p.z;
+      }
       if (!viewing) setVec(CAMERA_PREVIOUS, eyeX, eyeY, eyeZ);
       if (!travel && !viewing) setVec(camera.position, eyeX, eyeY, eyeZ);
       found = true;
@@ -6967,7 +6998,7 @@
     }
     if (!found) {
       const refusal = "That arrival is blocked. Choose another destination.";
-      if (!randomPile) hud.toast(refusal);
+      if (!randomPile && !saved) hud.toast(refusal);
       return refusal;
     }
     if (viewing) {
@@ -8268,10 +8299,21 @@
     pilot.release(true);
     hud.toast(refusal);
     ownOogaClaimed = false;
+    // The Ooga taken up in its place stands where this one stood, in the same view.
+    claimView = claimArrival = true;
     claimOwnOoga();
+    claimView = claimArrival = false;
   };
-  // The visitor arrives awake beside the pile: their authenticated Ooga, remembered local likeness, or Ooga.
-  // Claim once per arrival. Returning actors keep their exit.
+  // A body standing free counts as where the visitor is: not in the air, on a seat or in a bed, on a scripted walk through
+  // a doorway, or in an island game. Written in place, every frame.
+  const noteSpot = (cave) => {
+    if (gameMode || entering || cave.hop !== 0 || cave.hopV > 0 || cave.camp.seat || cave.root.quaternion || cave.bedTravel.mode || timechainIsland.gate.busy) return;
+    const p = cave.root.position;
+    SPOT.x = p.x; SPOT.y = p.y - cave.baseY; SPOT.z = p.z; SPOT.yaw = cave.root.rotation.y;
+    spotKnown = true;
+  };
+  // The visitor arrives awake where they last stood, else round the pile: their authenticated Ooga, remembered local
+  // likeness, or Ooga. Claim once per arrival. Returning actors keep their exit.
   const claimOwnOoga = () => {
     const me = BL.net.state.me;
     if (ownOogaClaimed) return false;
@@ -8291,14 +8333,17 @@
       return true;
     }
     // The visitor's body is a separate one (crew.js `separateBodies`): the NPC keeps its own activity and override,
-    // never woken or moved for this. The body stands where the NPC is, as it faces; only an away or hidden NPC,
-    // which has no place on the island, sends it to the pile (navigation also resets a saved underground eye).
+    // never woken or moved for this. An arrival on the island's own view stands at the visitor's remembered spot, or
+    // round the pile with none to stand at; otherwise the body stands where the NPC is, as it faces, and only an away or
+    // hidden NPC, which has no place on the island, sends it to the pile (navigation also resets a saved underground eye).
     const placed = cave.root.visible && crew.stateOf(cave) !== "away";
     if (claimView) {
-      pilot.arrive(cave);
+      pilot.arrive(cave, true);
       if (!drivesOoga(cave)) return false;
     } else if (!pilot.possess(cave)) return false;
-    if (!placed) navigate("pile", true, false);
+    if (claimArrival) {
+      if (!spotKnown || navigate("spot", false, false) !== true) navigate("pile", true, false);
+    } else if (!placed) navigate("pile", true, false);
     ownOogaClaimed = true;
     if (me) hud.toast(`Welcome back, ${BL.characters.displayOf(character.handle)}: this Ooga is yours`);
     return true;
@@ -8643,6 +8688,7 @@
     if (cloudHopper?.active) return;
     const gorilla = clankerPlay && clankerPlay.player, driven = gorilla || crew.player;
     if (!driven) return;
+    if (!gorilla) noteSpot(driven);
     const p = driven.root.position;
     if (gorilla) {
       const g = gorilla.netMotion, m = gorilla.motion, d = gorilla.drive;
@@ -11934,9 +11980,10 @@
     // Every arrival drives the visitor's Ooga: the one carried back in, else their own or assigned one, claimed here.
     // A page that lands on the island's own view claims it in the view this browser last chose (pilot.js `arrive`).
     ownOogaClaimed = !!pilot.player;
-    claimView = ctx.from === null && (!ctx.place || ctx.place === "donate") && !Number.isFinite(yawParam);
+    claimArrival = ctx.from === null && (!ctx.place || ctx.place === "donate");
+    claimView = claimArrival && !Number.isFinite(yawParam);
     claimOwnOoga();
-    claimView = false;
+    claimView = claimArrival = false;
     unsubscribeAccount = watchAccount();
     BL.players.setDoors(doorToward);
     const initialFirstPerson = ctx.from === null && preloadedFirstPerson && !initialGorilla;

@@ -2104,23 +2104,28 @@ body[data-active-scene="hub"] .home-link {
   cursor: default;
 }
 
-/* A voice link (net.js `voiceLink`): grey with nothing asked, ember while this visitor's ask waits, blue once linked. */
+/* A voice link (net.js `voiceLink`): pale stone with nothing asked, pulsing amber while this visitor's ask waits, green once linked. */
 .players-link {
   display: inline-flex;
   padding: 0;
   border: 0;
   background: none;
-  color: var(--muted);
+  color: #dcd8cb;
   cursor: pointer;
 }
 .players-link[hidden] { display: none; }
 .players-link svg { width: 11px; height: 11px; shape-rendering: crispEdges; }
-.players-link:hover, .players-link:focus-visible { color: var(--fg); outline: none; }
+.players-link:hover, .players-link:focus-visible { color: #fff; outline: none; }
 .players-link:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
-.players-link[data-link="asked"] { color: var(--warn); }
-.players-link[data-link="asked"]:is(:hover, :focus-visible) { color: var(--accent-text); }
-.players-link[data-link="linked"] { color: #9fbfee; }
-.players-link[data-link="linked"]:is(:hover, :focus-visible) { color: #cfe0ff; }
+.players-link[data-link="asked"] { color: #ffa51f; }
+.players-link[data-link="asked"]:is(:hover, :focus-visible) { color: #ffd27a; }
+.players-link[data-link="asked"] svg { animation: players-link-wait 2s ease-in-out infinite; }
+.players-link[data-link="linked"] { color: #35ff7e; }
+.players-link[data-link="linked"]:is(:hover, :focus-visible) { color: #a4ffc4; }
+@keyframes players-link-wait { 50% { opacity: 0.5; } }
+@media (prefers-reduced-motion: reduce) {
+  .players-link[data-link="asked"] svg { animation: none; }
+}
 
 .roster-voice:focus-visible {
   outline: 2px solid var(--accent);
@@ -2179,15 +2184,15 @@ body[data-active-scene="hub"] .home-link {
   display: none;
 }
 
-/* After the name: the voice link, the voice mark, the distance and the crosshair, each in a column of
-   fixed width. Every group is a grid of its own, so no column may size to its content: the icons line up down the
-   whole tab, the visitor's own row too, whoever shows a link, a voice mark or a distance. The distance cell is always
-   as wide as "999 m" (`.players-distance`), so the name keeps every other pixel. The gap spaces the items after the
-   name; the name takes back the extra beside its dot. Every cell sits on the row's first line; a player's volume,
-   under it. */
+/* After the name: the raised hand, the voice link, the voice mark and the crosshair, four columns of one width (the
+   voice mark's) with each icon centred in its own, then the distance against the row's right edge. Every group is a
+   grid of its own, so no column may size to its content: the icons line up down the whole tab, the visitor's own row
+   too, whoever shows a hand, a link, a voice mark or a distance. The distance cell is always as wide as "999 m"
+   (`.players-distance`), so the name keeps every other pixel. The gap spaces the items after the name; the name takes
+   back the extra beside its dot. Every cell sits on the row's first line; a player's volume, under it. */
 .players-rows {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) 12px 12px max-content 12px;
+  grid-template-columns: 8px minmax(0, 1fr) 12px 12px 12px 12px max-content;
   column-gap: 14px;
   margin: 0;
   padding: 0;
@@ -2215,27 +2220,26 @@ body[data-active-scene="hub"] .home-link {
 .players-rows li > .players-volume { grid-row: 2; }
 .players-rows .roster-dots { grid-column: 1; }
 .players-rows .roster-marks { display: contents; }
-.players-rows .players-link { grid-column: 3; grid-row: 1; justify-self: center; }
-.players-rows .roster-voice { grid-column: 4; grid-row: 1; justify-self: center; }
+.players-rows .players-link { grid-column: 4; grid-row: 1; justify-self: center; }
+.players-rows .roster-voice { grid-column: 5; grid-row: 1; justify-self: center; }
 
 .players-name {
   display: inline-flex;
   grid-column: 2;
   margin-left: -7px;
   align-items: center;
-  gap: 6px;
   min-width: 0;
   color: var(--paper);
 }
 
-/* A raised hand after the name, never squeezing it out: the name gives way first. A reaction (players.js) pops up in
-   the same place, over the hand when one is raised, and fades. The column is always as wide as the widest emoji, on
-   every row, with the hand centred in it, so nothing moves when a reaction comes and goes. */
+/* The raised hand's column. A reaction (players.js) pops up in the same place, over the hand when one is raised, and
+   fades. An emoji is wider than the column and stays centred on it, spilling into the gaps either side, so nothing
+   moves when a reaction comes and goes. */
 .players-mark {
-  display: inline-grid;
-  flex: none;
-  grid-template-columns: minmax(0, 1fr);
-  width: 22px;
+  display: grid;
+  grid-column: 3;
+  grid-template-columns: 12px;
+  width: 12px;
   place-items: center;
 }
 
@@ -2320,7 +2324,7 @@ body[data-active-scene="hub"] .home-link {
 /* Every row has this cell, empty or not, at the width of "999 m" in the panel's monospace face, numbers to the right so
    their units line up: the column it makes is the same in every group. */
 .players-distance {
-  grid-column: 5;
+  grid-column: 7;
   width: 5ch;
   text-align: right;
   color: var(--paper);

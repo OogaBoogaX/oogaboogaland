@@ -314,8 +314,12 @@
   net.subscribe(account);
   account();
 
+  // The hand's key (H, director.js): false where there is no room to raise it in, so the key stays with the scene.
+  const toggleHand = () => available && (net.setHand(!net.state.hand, tone), true);
+
   BL.reactions = {
     close,
+    toggleHand,
     get slots() { return slots.slice(); },
     get tone() { return tone; },
     get heart() { return HEARTS[heart]; },

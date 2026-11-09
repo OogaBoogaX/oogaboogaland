@@ -20,11 +20,12 @@
 // never shows them speaking, kept up as the slider moves. The slider is offered before any audio is active; Web Audio
 // supplies quieting and boost once the listener joins.
 // A voice link (`net.voiceLink`, `net.toggleVoiceLink`): the link on another player's row asks them for one, in any
-// zone. Grey with nothing asked, ember while this visitor's own ask waits, blue once both have asked; the room never
-// tells the other player of an ask, so their link stays grey until they ask too. A click toggles this visitor's ask.
+// zone. Pale with nothing asked, pulsing amber while this visitor's own ask waits, green once both have asked; the room
+// never tells the other player of an ask, so their link stays pale until they ask too. A click toggles this visitor's
+// ask. L (director.js, `net.linkEveryone`) links everyone waiting on them, or with nobody waiting unlinks everyone.
 // Hearing range and join-reading live together under the panel's Advanced settings disclosure.
-// A raised hand (reactions.js, `rec.hand` and `net.state.hand`) shows after the player's name, in their skin tone, and
-// each reaction they send pops up there, over the hand.
+// A raised hand (reactions.js, `rec.hand` and `net.state.hand`) shows in its own column after the player's name, in their
+// skin tone, and each reaction they send pops up there, over the hand.
 // Joins (#430, `net.subscribePresence`): a player who comes online while the visitor is in the room is named on screen
 // (`hud.toast`, read out by assistive technology) and counted on the tab until the visitor looks at it
 // (`sheet.watchViews`), unless they are in the panel as it happens. Those already there when the visitor (re)joins are
@@ -99,7 +100,7 @@
     hand.className = "players-hand"; hand.hidden = true; hand.setAttribute("role", "img"); hand.setAttribute("aria-label", "Hand raised"); hand.title = "Hand raised";
     react.className = "players-react"; react.hidden = true; react.setAttribute("aria-hidden", "true");
     mark.append(hand, react);
-    toggle.append(label); name.append(toggle, mark); dots.append(presence, host);
+    toggle.append(label); name.append(toggle); dots.append(presence, host);
     marks.className = "roster-marks";
     voice.className = "roster-voice"; voice.type = "button"; voice.hidden = true; voice.setAttribute("aria-describedby", id); voice.append(BL.hud.voiceIcon.cloneNode(true));
     // A voice link, offered where the room keeps them; never on the visitor's own row.
@@ -109,7 +110,7 @@
     distance.className = "players-distance"; distance.append("");
     note.className = "players-note"; note.textContent = ", last known location"; note.hidden = true;
     distance.append(note);
-    li.append(dots, name, marks, look, distance, volume);
+    li.append(dots, name, mark, marks, look, distance, volume);
     return { li, label, toggle, volume, slider, value, host, voice, link, linkShown: "", linkName: "", mark, hand, handShown: "", react, reacting: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
       aim: "", voiceLook: "", voiceLogin: "", voiceSelf: false, blocked: false, hostOn: false, metres: -1, lastKnown: false, far: false, faded: false };
   };
