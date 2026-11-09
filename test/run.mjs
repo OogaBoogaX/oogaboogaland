@@ -29894,6 +29894,32 @@ record("character visibility source bakes: ownership wrappers share exact immuta
         record("NPC sync: a local sleep quaternion yields to an upright host frame; host sleep poses lie down and wake",
           stood.puppet && stood.quaternion && stood.yaw && stood.state === "chilling" && laid.owned && laid.pose && laid.state === "sleeping"
             && woke.quaternion && woke.state === "chilling" && untouched, JSON.stringify(sideways));
+        // Regression (#547): an Ooga in bed on this page while the host has it at work keeps this page's bed trip as it
+        // follows. Handed back, that trip held it still with its rifle hidden until its status next changed, and a page
+        // then elected host sent that pose to every other.
+        {
+          BL.net.state.hostId = BL.net.state.selfId = "host";
+          sync = BL.npcSync.create(options);
+          sleeper.state = "working"; sr.quaternion = null; Object.assign(sr.position, { x: 2, y: sleeper.baseY, z: 5 }); Object.assign(sr.rotation, { x: 0, y: 0.5, z: 0 });
+          sync.update(0.3); const atWork = BL.net.npcFrame;
+          sync.dispose();
+          sleeper.state = sleeperSaved.state; Object.assign(sr.position, sleeperSaved.position); Object.assign(sr.rotation, sleeperSaved.rotation); sr.quaternion = sleepQ;
+          BL.net.state.selfId = "follower";
+          sync = BL.npcSync.create(options);
+          sleeper.slot = crew.fanSlots[0];
+          followSleeper(atWork);
+          const heldBed = sleeper.bedroll;
+          const following = sleeper.puppet && sleeper.state === "working" && sleeper.bedTravel.mode === "rest" && !!heldBed;
+          BL.net.state.hostId = "other"; sync.update(0.05);
+          crew.poseWeapon(sleeper);
+          const handedBack = { released: !sleeper.puppet, state: sleeper.state, trip: sleeper.bedTravel.mode, bedFreed: !sleeper.bedroll && heldBed.sleeper !== sleeper,
+            rifle: sleeper.parts.gun.visible && sleeper.parts.gun.parent !== sleeper.sleepWeapons, act: sleeper.act.kind };
+          sync.dispose();
+          sleeper.state = "away"; crew.refreshStates(true);
+          record("NPC sync: an Ooga this page has in bed and the host at work is handed back with no bed trip, its rifle out and its bed free",
+            following && handedBack.released && handedBack.state === "working" && handedBack.trip === "" && handedBack.bedFreed && handedBack.rifle && handedBack.act === "eat"
+              && sleeper.bedTravel.mode === "rest", JSON.stringify({ following, handedBack, restored: sleeper.bedTravel.mode }));
+        }
         // Real host frames, applied by a real follower at the host's 4 Hz: a
         // same-status move under SNAP plays across, while a status change under
         // SNAP (a passive beam on the host) places the puppet at once, its pose
