@@ -316,8 +316,13 @@ export const parseClientMessage = (text) => {
   if (!msg || typeof msg !== "object" || Array.isArray(msg)) return false;
   // Only chat and private frames earn the longer frame: a repeated key could make a prefixed frame parse as anything.
   if (text.length > MESSAGE_MAX && msg.t !== "chat" && msg.t !== "pm") return false;
-  if (msg.t === "cabinet") return CABINETS.get(msg.id) && (msg.op === "take" || msg.op === "leave") && Number.isSafeInteger(msg.q) && msg.q > 0
-    ? { t: "cabinet", op: msg.op, id: msg.id, q: msg.q } : null;
+  if (msg.t === "cabinet") {
+    const seat = CABINETS.get(msg.id);
+    if (!seat || (msg.op !== "take" && msg.op !== "leave") || !Number.isSafeInteger(msg.q) || msg.q <= 0) return null;
+    // A seat in the island's cave names the spot it stands at; a hall cabinet's is its own.
+    if (!seat.outdoor) return { t: "cabinet", op: msg.op, id: msg.id, q: msg.q };
+    return Number.isInteger(msg.slot) && CABINETS.slot(msg.slot) ? { t: "cabinet", op: msg.op, id: msg.id, q: msg.q, slot: msg.slot } : null;
+  }
   if (msg.t === "hockey") return HOCKEY.parse(msg);
   if (msg.t === "studio") return parseStudioCommand(msg);
   if (msg.t === "pose") {

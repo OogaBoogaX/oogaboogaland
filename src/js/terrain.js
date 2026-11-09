@@ -301,6 +301,10 @@
   const BLUFF = 6;
   const MOUTH = { w: 5, h: 3, depth: 5, front: 0.5 };
   const ROOM = { w: 6, h: 4, from: 2.5, to: 6.5 };
+  // The Arcade cave's extras (#554): the back runs on to `to` for the room behind its doors, and each long wall has a
+  // shallow alcove (`depth` into the rock, `w` wide, `h` high) for each of its two cabinets (`arcadeCabinets.slots`),
+  // just inside the mouth and well short of the doors.
+  const ARCADE_CAVE = { id: "c3", to: 7, alcove: { along: [1.15, 2.65], w: 1.5, depth: 0.6, h: 2.75 } };
   const PATH_HALF = 0.75;
   const RING_HALF = PATH_HALF * 1.5;
   const PATH_UNIT = UNIT / 2;
@@ -664,18 +668,18 @@
     // the same quarter-unit columns the carve removes, including their outer
     // corners; never raise a roof or break the island skin to gain floor space.
     const fitWorkRoom = (frame) => {
-      const columns = [];
+      const columns = [], roomEnd = frame.id === ARCADE_CAVE.id ? ARCADE_CAVE.to : 6.75;
       for (let gx = 2; gx < SX - 2; gx++) for (let gz = 2; gz < SZ - 2; gz++) {
         const x = (gx + 0.5) * UNIT + ORIGIN.x, z = (gz + 0.5) * UNIT + ORIGIN.z;
         const dx = x - frame.x, dz = z - frame.z;
         const along = dx * frame.ox + dz * frame.oz, across = Math.abs(dz * frame.ox - dx * frame.oz);
-        if (along < 0.5 - frame.e || along > 6.75 + frame.e || across > 3.625 + frame.e) continue;
+        if (along < 0.5 - frame.e || along > roomEnd + frame.e || across > 3.625 + frame.e) continue;
         let wallTop = Infinity;
         for (let ix = -2; ix <= 2; ix++) for (let iz = -2; iz <= 2; iz++) wallTop = Math.min(wallTop, tops[(gx + ix) * SZ + gz + iz]);
         columns.push({ along, across, top: tops[gx * SZ + gz], wallTop, skin: RADIUS - Math.hypot(Math.abs(x) + UNIT / 2, Math.abs(z) + UNIT / 2) });
       }
       let area = 0;
-      for (let w = 6; w <= 7.25; w += UNIT) for (let from = 0.5; from <= 2.5; from += UNIT) for (let to = 6.5; to <= 6.75; to += UNIT) {
+      for (let w = 6; w <= 7.25; w += UNIT) for (let from = 0.5; from <= 2.5; from += UNIT) for (let to = 6.5; to <= roomEnd; to += UNIT) {
         const candidateArea = w * (to - from);
         if (candidateArea <= area) continue;
         let safe = true;
@@ -698,8 +702,9 @@
           const dx = wx - f.x, dz = wz - f.z;
           const along = dx * f.ox + dz * f.oz, across = Math.abs(dz * f.ox - dx * f.oz);
           const room = along > chamber.from - e && along < chamber.to + e && across < chamber.w / 2 + e;
-          if (!room && !(along > -MOUTH.front && along < MOUTH.depth + e && across < MOUTH.w / 2 + e)) continue;
-          const gyTop = SURFACE - 1 + Math.round((room ? chamber.h : MOUTH.h) / UNIT);
+          const alcove = !room && f.id === ARCADE_CAVE.id && across < chamber.w / 2 + ARCADE_CAVE.alcove.depth + e && ARCADE_CAVE.alcove.along.some((a) => Math.abs(along - a) < ARCADE_CAVE.alcove.w / 2 + e);
+          if (!room && !alcove && !(along > -MOUTH.front && along < MOUTH.depth + e && across < MOUTH.w / 2 + e)) continue;
+          const gyTop = SURFACE - 1 + Math.round((room ? chamber.h : alcove ? ARCADE_CAVE.alcove.h : MOUTH.h) / UNIT);
           for (let gy = SURFACE; gy <= gyTop; gy++) {
             grid.set(gx, gy, gz, 0);
             // The opening lies at local z=.5; the exterior rim stays in global coordinates.
