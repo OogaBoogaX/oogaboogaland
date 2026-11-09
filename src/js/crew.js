@@ -175,6 +175,300 @@
     s.phase += dt * 4;
     return d < 0.15 && Math.abs(ty - s.y) < 0.15;
   };
+  // A pet whose owner's `look` sets `petRidesHat` rides the hat instead of flying beside a jetpack owner: the moment
+  // the jetpack goes on, grounded or not, it leaps up over `leap` seconds, trots a loop round the crown at `speed`
+  // radians a second (turning back each lap) while the jetpack is worn, and hops down over `hop` seconds with `hopUp`
+  // lift when it comes off (the maintainer's call on #520: other pages see the same from the shared jetpack state).
+  // The loop is measured once per head geometry (`HAT_SEATS`): `ring` angles round the top of the head and all it
+  // wears, each with the radius and height a pet of its width stands at, the middle of the outermost run of surface
+  // within a pet's width of the lowest there (a brim round a crown; on a bare head, its top). Under Calm it sits still.
+  const HAT_RIDE = Object.freeze({ ring: 16, steps: 24, leap: 0.5, hop: 0.4, hopUp: 2.5, speed: 1.4, bob: 0.04 });
+  const HAT_SEATS = new WeakMap();
+  // Read live; a context without matchMedia (the suite's bare loaders) is never Calm.
+  const CALM = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };
+  const RIDE_HEAD = math.quat.create(), RIDE_TURN = math.quat.create(), RIDE_SPIN = math.quat.create(), RIDE_MATRIX = math.mat4.create();
+  const hatSeatOf = (head, dog) => {
+    let seat = HAT_SEATS.get(head.geometry);
+    if (seat) return seat;
+    // Every shown vertex under the head, in the head's own frame; measured once, so plain arrays.
+    const points = [];
+    const gather = (node, m) => {
+      const verts = node.geometry ? node.geometry.verts : null;
+      if (verts) for (let i = 0; i < verts.length; i += 3) {
+        const x = verts[i], y = verts[i + 1], z = verts[i + 2];
+        points.push(m[0] * x + m[4] * y + m[8] * z + m[12], m[1] * x + m[5] * y + m[9] * z + m[13], m[2] * x + m[6] * y + m[10] * z + m[14]);
+      }
+      for (const child of node.children) {
+        if (!child.visible) continue;
+        BL.scene.updateLocal(child);
+        gather(child, math.mat4.multiply(math.mat4.create(), m, child.local));
+      }
+    };
+    gather(head, math.mat4.create());
+    let minY = Infinity, maxY = -Infinity, minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, half = 0;
+    for (let i = 1; i < points.length; i += 3) { minY = Math.min(minY, points[i]); maxY = Math.max(maxY, points[i]); }
+    // The top of the head and what it wears: the face, beard and chin below are never somewhere to stand.
+    const floor = maxY - (maxY - minY) * 0.4, top = [];
+    for (let i = 0; i < points.length; i += 3) if (points[i + 1] >= floor) {
+      top.push(points[i], points[i + 1], points[i + 2]);
+      minX = Math.min(minX, points[i]); maxX = Math.max(maxX, points[i]);
+      minZ = Math.min(minZ, points[i + 2]); maxZ = Math.max(maxZ, points[i + 2]);
+    }
+    const dv = dog.geometry.verts;
+    for (let i = 0; i < dv.length; i += 3) half = Math.max(half, Math.abs(dv[i]) * dog.scale.x);
+    const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
+    let outer = 0;
+    for (let i = 0; i < top.length; i += 3) outer = Math.max(outer, Math.hypot(top[i] - cx, top[i + 2] - cz));
+    const n = HAT_RIDE.ring, steps = HAT_RIDE.steps, reach = Math.max(half, outer - half), heights = new Float64Array(steps + 1);
+    seat = { cx, cz, r: new Float32Array(n), y: new Float32Array(n) };
+    for (let a = 0; a < n; a++) {
+      const sa = Math.sin(a / n * Math.PI * 2), ca = Math.cos(a / n * Math.PI * 2);
+      let low = Infinity;
+      for (let s = 0; s <= steps; s++) {
+        const px = cx + sa * reach * s / steps, pz = cz + ca * reach * s / steps;
+        let h = -Infinity;
+        for (let i = 0; i < top.length; i += 3) if (Math.hypot(top[i] - px, top[i + 2] - pz) <= half) h = Math.max(h, top[i + 1]);
+        heights[s] = h;
+        if (h > -Infinity) low = Math.min(low, h);
+      }
+      let hi = -1, lo = -1;
+      for (let s = steps; s >= 0; s--) {
+        const fits = heights[s] > -Infinity && heights[s] <= low + half;
+        if (fits && hi < 0) hi = s;
+        if (hi >= 0) { if (fits) lo = s; else break; }
+      }
+      const mid = Math.round((lo + hi) / 2);
+      seat.r[a] = reach * mid / steps;
+      seat.y[a] = heights[mid];
+    }
+    HAT_SEATS.set(head.geometry, seat);
+    return seat;
+  };
+  // A pet's ride state for `poseHatRide`: its owner's measured seat, where on the loop it is and which way it trots,
+  // and the leap's or hop's clock and ends, which the local crew and remote copies each keep.
+  const stomachSeatOf = (cave) => {
+    const b = BL.scene.boundsOf(cave.parts.torso.geometry), dog = cave.parts.dog;
+    return { x: (b.min[0] + b.max[0]) / 2, y: (b.min[1] + b.max[1]) / 2,
+      z: b.max[2] + 0.015 - BL.scene.boundsOf(dog.geometry).min[1] * dog.scale.y };
+  };
+  const hatRide = (cave) => ({ stomach: stomachSeatOf(cave), kind: 0, yaw: 0, seat: hatSeatOf(cave.parts.head, cave.parts.dog), q: math.quat.create(), angle: Math.PI, dir: 1, run: 0, step: 0,
+    t: 1, sx: 0, sy: 0, sz: 0, ex: 0, ez: 0, vy: 0, free: false });
+  // Trots the pet `dt` along its loop (not under Calm) and stands `node` there: `m` is the head's matrix in the node's
+  // parent frame, so the pet keeps to the hat through every turn and tilt of the head. Writes in place; allocates nothing.
+  const poseHatRide = (ride, node, m, dt) => {
+    const seat = ride.seat, n = seat.r.length, calm = CALM.matches;
+    if (dt > 0 && !calm) {
+      const go = HAT_RIDE.speed * dt;
+      ride.angle += ride.dir * go; ride.run += go; ride.step += go * 9;
+      if (ride.run >= Math.PI * 2) { ride.run -= Math.PI * 2; ride.dir = -ride.dir; }
+    }
+    const f = ((ride.angle / (Math.PI * 2)) % 1 + 1) % 1 * n, i = Math.floor(f) % n, j = (i + 1) % n, t = f - Math.floor(f);
+    const sa = Math.sin(ride.angle), ca = Math.cos(ride.angle), r = seat.r[i] + (seat.r[j] - seat.r[i]) * t;
+    const x = seat.cx + sa * r, z = seat.cz + ca * r;
+    const y = seat.y[i] + (seat.y[j] - seat.y[i]) * t + (calm ? 0 : Math.abs(Math.sin(ride.step)) * HAT_RIDE.bob);
+    posePetFrame(ride, node, m, x, y, z, 0,
+      calm ? 0 : Math.atan2(ride.dir * ca, -ride.dir * sa), calm ? 0 : Math.sin(ride.step) * 0.08);
+  };
+  // A pet stands on the torso's front, facing along its length, and inherits its owner's sway.
+  const poseStomachRide = (ride, node, m) => {
+    const s = ride.stomach;
+    posePetFrame(ride, node, m, s.x, s.y, s.z, Math.PI / 2, ride.yaw, 0);
+  };
+  const posePetFrame = (ride, node, m, x, y, z, pitch, yaw, roll) => {
+    node.position.x = m[0] * x + m[4] * y + m[8] * z + m[12];
+    node.position.y = m[1] * x + m[5] * y + m[9] * z + m[13];
+    node.position.z = m[2] * x + m[6] * y + m[10] * z + m[14];
+    // The head's turn without its scale (Shepperd's method on the normalized columns).
+    const lx = Math.hypot(m[0], m[1], m[2]), ly = Math.hypot(m[4], m[5], m[6]), lz = Math.hypot(m[8], m[9], m[10]);
+    const m00 = m[0] / lx, m10 = m[1] / lx, m20 = m[2] / lx, m01 = m[4] / ly, m11 = m[5] / ly, m21 = m[6] / ly;
+    const m02 = m[8] / lz, m12 = m[9] / lz, m22 = m[10] / lz, q = RIDE_HEAD, trace = m00 + m11 + m22;
+    if (trace > 0) {
+      const s = 0.5 / Math.sqrt(trace + 1);
+      q[3] = 0.25 / s; q[0] = (m21 - m12) * s; q[1] = (m02 - m20) * s; q[2] = (m10 - m01) * s;
+    } else if (m00 > m11 && m00 > m22) {
+      const s = 2 * Math.sqrt(1 + m00 - m11 - m22);
+      q[3] = (m21 - m12) / s; q[0] = 0.25 * s; q[1] = (m01 + m10) / s; q[2] = (m02 + m20) / s;
+    } else if (m11 > m22) {
+      const s = 2 * Math.sqrt(1 + m11 - m00 - m22);
+      q[3] = (m02 - m20) / s; q[0] = (m01 + m10) / s; q[1] = 0.25 * s; q[2] = (m12 + m21) / s;
+    } else {
+      const s = 2 * Math.sqrt(1 + m22 - m00 - m11);
+      q[3] = (m10 - m01) / s; q[0] = (m02 + m20) / s; q[1] = (m12 + m21) / s; q[2] = 0.25 * s;
+    }
+    math.quat.fromEuler(RIDE_TURN, pitch, pitch ? 0 : yaw, roll);
+    if (pitch) {
+      math.quat.fromEuler(RIDE_SPIN, 0, yaw, 0);
+      math.quat.multiply(RIDE_TURN, RIDE_TURN, RIDE_SPIN);
+    }
+    math.quat.multiply(ride.q, q, RIDE_TURN);
+    node.quaternion = ride.q;
+  };
+  // Shared by the local crew and live remote rigs; each viewer simulates the pet against its own scene.
+  const createPets = (ctx, root) => {
+    const groundAt = ctx.groundAt || (() => 0), walkable = ctx.walkable || (() => true);
+    // A character's pet: the node its file builds as `parts.dog`, where it stands by its Ooga (a step behind and to one
+    // side, in the Ooga's frame), is lifted off the body into the crew's root. Each frame it trots for that spot at up
+    // to `PET_SPEED`, every step checked with the scene's `walkable` (stopped by a wall, it waits) and set on the floor
+    // under it at its own height plus a step. A jetpack owner brings it aloft through the shared DSB flight helper, or,
+    // with `petRidesHat` in the owner's look, up onto the hat (`rideHat`). Out of reach (`PET_SNAP`, a door, a
+    // relocation) it turns up at its spot. Hidden with its Ooga. Allocates nothing.
+    const PET_SPEED = 9.5, PET_SNAP = 7, PET_STEP = 0.45, PET_HEIGHT = 0.5, PET_ARRIVE = 0.15;
+    const attachPet = (cave) => {
+      const node = cave.parts.dog, p = node.position;
+      removeChild(cave.root, node);
+      addChild(root, node);
+      node.visible = false;
+      const pack = createNode({ geometry: BL.hubModels.jetpack(), rotation: { x: Math.PI / 2 }, scale: { x: 0.25, y: 0.25, z: 0.25 }, visible: false });
+      const flame = createNode({ geometry: BL.hubModels.jetFlame(), visible: false });
+      let top = 0;
+      for (let i = 1; i < node.geometry.verts.length; i += 3) top = Math.max(top, node.geometry.verts[i]);
+      pack.position.y = top; addChild(pack, flame); addChild(node, pack);
+      const pet = cave.pet = { node, pack, flame, side: p.x, back: -p.z, lift: p.y, x: 0, y: 0, z: 0, feet: 0, heading: 0, step: 0,
+        speed: 0, phase: 0, mode: 0, fall: 0, stuck: 0, warm: false, ride: cave.traits.petRidesHat ? hatRide(cave) : null };
+      pet.floorAt = (x, z, y) => groundAt(x, z, y, y, cave);
+      pet.clear = (ax, az, bx, bz, y) => (ctx.flyable || walkable)(ax, az, bx, bz, y, PET_HEIGHT, cave);
+    };
+    // A relocation may put the authored trailing spot inside a wall or off an edge.
+    // Try that spot, the owner's feet, then a bounded ring; never publish invalid ground.
+    const placePet = (cave, tx, tz, feet, heading) => {
+      const pet = cave.pet, p = cave.root.position;
+      for (let i = 0; i < 10; i++) {
+        const angle = heading + (i - 2) * Math.PI / 4;
+        const x = i === 0 ? tx : i === 1 ? p.x : p.x + Math.sin(angle) * 1.2;
+        const z = i === 0 ? tz : i === 1 ? p.z : p.z + Math.cos(angle) * 1.2;
+        const y = groundAt(x, z, feet + PET_STEP, feet + PET_STEP, cave);
+        if (!Number.isFinite(y) || y < -100 || !walkable(x, z, x, z, y, PET_HEIGHT, cave)) continue;
+        pet.x = x; pet.z = z; pet.feet = y; pet.heading = heading; pet.warm = true;
+        return true;
+      }
+      pet.warm = false;
+      return false;
+    };
+    // The hat ride's own modes, after the heel's 0 and the fall's 2 (1, flight beside the owner, is never used): 3 the
+    // leap up, 4 on the hat, 5 the hop down. The hop goes to the heel's side when the way there is clear at the hat's
+    // height (else the other side, else straight down) and hands over to the fall, which lands only on checked ground.
+    // Off a resting owner the heel's spot means nothing and the bed itself is the ground under the hop, so a scene with a
+    // bed (`ctx.petLanding`) names the checked spot beyond it to hop to, and the hop leaves the bed without asking it.
+    // True while the ride poses the pet this frame.
+    const rideHat = (cave, dt, equipped, tx, tz, resting) => {
+      const pet = cave.pet, ride = pet.ride, node = pet.node, r = cave.root, p = node.position;
+      const kind = resting ? 2 : equipped ? 1 : 0;
+      if ((pet.mode === 3 || pet.mode === 4) && !kind) {
+        const feet = p.y - cave.baseY - pet.lift, mx = 2 * r.position.x - tx, mz = 2 * r.position.z - tz;
+        const off = ride.kind === 2 && ctx.petLanding ? ctx.petLanding(p.x, p.z) : null;
+        const side = off ? 0 : pet.clear(r.position.x, r.position.z, tx, tz, feet) ? 1 : pet.clear(r.position.x, r.position.z, mx, mz, feet) ? -1 : 0;
+        ride.sx = p.x; ride.sy = p.y; ride.sz = p.z; ride.t = 0; ride.vy = HAT_RIDE.hopUp; ride.free = !!off;
+        ride.ex = off ? off.x : side > 0 ? tx : side < 0 ? mx : p.x; ride.ez = off ? off.z : side > 0 ? tz : side < 0 ? mz : p.z;
+        node.quaternion = null; node.cameraHidden = false;
+        node.rotation.x = node.rotation.z = 0; node.rotation.y = Math.atan2(ride.ex - p.x, ride.ez - p.z);
+        pet.mode = 5; ride.kind = 0;
+      } else if (kind && (pet.mode !== 3 && pet.mode !== 4 || kind !== ride.kind)) {
+        ride.sx = p.x; ride.sy = p.y; ride.sz = p.z;
+        ride.t = pet.warm && node.visible && !CALM.matches ? 0 : 1;
+        ride.angle = Math.atan2(p.x - r.position.x, p.z - r.position.z) - r.rotation.y;
+        pet.mode = 3; ride.kind = kind; ride.yaw = 0;
+      }
+      if (pet.mode === 5) {
+        if (!(dt > 0)) return true;
+        ride.t = Math.min(1, ride.t + dt / HAT_RIDE.hop);
+        const feet = p.y - cave.baseY - pet.lift, nx = ride.sx + (ride.ex - ride.sx) * ride.t, nz = ride.sz + (ride.ez - ride.sz) * ride.t;
+        if (ride.free || pet.clear(p.x, p.z, nx, nz, feet)) { p.x = nx; p.z = nz; } else { ride.sx = ride.ex = p.x; ride.sz = ride.ez = p.z; }
+        p.y += ride.vy * dt; ride.vy -= BL.pilot.WALK.gravity * dt;
+        if (ride.t < 1 && p.y - cave.baseY - pet.lift > groundAt(p.x, p.z, feet, feet, cave)) return true;
+        pet.x = p.x; pet.z = p.z; pet.feet = Math.max(p.y - cave.baseY - pet.lift, feet); pet.heading = node.rotation.y;
+        pet.fall = Math.min(0, ride.vy); pet.stuck = 0; pet.warm = true; pet.mode = 2;
+        return false;
+      }
+      if (pet.mode !== 3 && pet.mode !== 4) return false;
+      const support = resting ? cave.parts.torso : cave.parts.head;
+      BL.scene.updateLocal(r); BL.scene.updateLocal(support);
+      math.mat4.multiply(RIDE_MATRIX, r.local, support.local);
+      if (resting) poseStomachRide(ride, node, RIDE_MATRIX);
+      else poseHatRide(ride, node, RIDE_MATRIX, pet.mode === 4 ? dt : 0);
+      // The stomach companion stays visible when the owner looks down in first person.
+      node.cameraHidden = !resting && cave.parts.head.cameraHidden;
+      if (pet.mode === 3) {
+        ride.t = Math.min(1, ride.t + Math.max(0, dt) / HAT_RIDE.leap);
+        const k = ease.inOutQuad(ride.t), arc = 4 * ride.t * (1 - ride.t) * 0.6;
+        p.x = ride.sx + (p.x - ride.sx) * k; p.y = ride.sy + (p.y - ride.sy) * k + arc; p.z = ride.sz + (p.z - ride.sz) * k;
+        if (ride.t >= 1) pet.mode = 4;
+      }
+      pet.warm = true;
+      return true;
+    };
+    const updatePet = (cave, dt, resting = undefined) => {
+      const seat = cave.camp?.seat;
+      if (resting === undefined) resting = !!(seat?.kind === "hammock" && !seat.entry && !seat.exit && !seat.fall);
+      const pet = cave.pet, r = cave.root, node = pet.node;
+      node.visible = r.visible;
+      if (!r.visible) {
+        pet.warm = false; pet.mode = 0; pet.pack.visible = pet.flame.visible = false;
+        if (pet.ride) { pet.ride.kind = 0; node.quaternion = null; node.cameraHidden = false; }
+        return;
+      }
+      const h = r.rotation.y, sh = Math.sin(h), ch = Math.cos(h);
+      const tx = r.position.x - sh * pet.back + ch * pet.side, tz = r.position.z - ch * pet.back - sh * pet.side;
+      const feet = r.position.y - cave.baseY;
+      const equipped = !!cave.jet, powered = equipped && !cave.jetRecovering && cave.jetFuel > 0 && (cave.jet.thrust || cave.jet.power > 0);
+      const ownerFloor = groundAt(r.position.x, r.position.z, feet, feet, cave);
+      const airborne = equipped && feet > ownerFloor + (powered ? 0.02 : 1.2);
+      // A pet riding the hat never wears its own little jetpack.
+      pet.pack.visible = equipped && !pet.ride;
+      if (pet.ride) { if (rideHat(cave, dt, equipped, tx, tz, resting)) return; }
+      else if (airborne && (powered || cave.hopV >= -0.05)) pet.mode = 1;
+      else if (pet.mode === 1) { pet.mode = 2; pet.fall = Math.min(0, cave.hopV); }
+      if (pet.mode && !(dt > 0)) return;
+      if (pet.mode && dt > 0) {
+        if (!pet.warm) {
+          if (!pet.clear(r.position.x, r.position.z, tx, tz, feet + 0.4)) { node.visible = false; return; }
+          pet.x = tx; pet.z = tz; pet.feet = feet + 0.4; pet.warm = true;
+        }
+        if (pet.mode === 1) {
+          pet.y = pet.feet;
+          flyCompanion(pet, r.position.x + ch * (pet.side < 0 ? -1.2 : 1.2), feet + 0.4, r.position.z - sh * (pet.side < 0 ? -1.2 : 1.2), dt, pet.floorAt, pet.clear);
+          pet.feet = pet.y;
+        } else {
+          const floor = groundAt(pet.x, pet.z, pet.feet, pet.feet, cave);
+          const next = Math.max(floor, pet.feet + pet.fall * dt - 0.5 * BL.pilot.WALK.gravity * dt * dt);
+          pet.fall -= BL.pilot.WALK.gravity * dt;
+          let clear = Number.isFinite(next), y = pet.feet;
+          while (clear && y > next) { y = Math.max(next, y - 0.2); clear = pet.clear(pet.x, pet.z, pet.x, pet.z, y); }
+          if (clear && floor > -100) { pet.feet = next; pet.stuck = 0; }
+          else pet.stuck += dt;
+          if (clear && pet.feet <= floor + 0.001 && walkable(pet.x, pet.z, pet.x, pet.z, floor, PET_HEIGHT, cave)) { pet.mode = 0; pet.fall = 0; }
+          // DSB's bounded recovery: a blocked landing may relocate only to checked ground.
+          else if (pet.stuck > 1.5 && feet <= ownerFloor + PET_STEP && placePet(cave, tx, tz, feet, h)) { pet.mode = 0; pet.stuck = pet.fall = 0; }
+        }
+        pet.flame.visible = equipped && pet.mode === 1;
+        pet.flame.scale.y = 0.7 + Math.sin(pet.phase * 10) * 0.3;
+        node.position.x = pet.x; node.position.z = pet.z; node.position.y = cave.baseY + pet.feet + pet.lift;
+        node.rotation.y = pet.heading; node.rotation.z = 0;
+        return;
+      }
+      pet.flame.visible = false;
+      const dx = tx - pet.x, dz = tz - pet.z, d = Math.hypot(dx, dz);
+      let moving = false;
+      if (!pet.warm || d > PET_SNAP) {
+        if (!placePet(cave, tx, tz, feet, h)) { node.visible = false; return; }
+      } else if (d > PET_ARRIVE && dt > 0) {
+        const step = Math.min(d, PET_SPEED * dt * Math.min(1, d / 1.2 + 0.25));
+        const nx = pet.x + dx / d * step, nz = pet.z + dz / d * step;
+        const floor = groundAt(nx, nz, pet.feet + PET_STEP, pet.feet + PET_STEP, cave);
+        if (Number.isFinite(floor) && Math.abs(floor - pet.feet) <= PET_STEP
+          && walkable(pet.x, pet.z, nx, nz, pet.feet, PET_HEIGHT, cave)
+          && walkable(nx, nz, nx, nz, floor, PET_HEIGHT, cave)) {
+          pet.x = nx; pet.z = nz; pet.step += step * 9; moving = true;
+          pet.feet = floor;
+        }
+        pet.heading = Math.atan2(dx, dz);
+      } else if (d <= PET_ARRIVE) pet.heading = h;
+      node.position.x = pet.x; node.position.z = pet.z;
+      node.position.y = cave.baseY + pet.feet + pet.lift + (moving ? Math.abs(Math.sin(pet.step)) * 0.08 : 0);
+      node.rotation.y = pet.heading;
+      node.rotation.z = moving ? Math.sin(pet.step) * 0.08 : 0;
+    };
+    return { attach: attachPet, update: updatePet };
+  };
   const JET_SPARKS = [models.particleGeometry("#ffb13b", 0.09, 1), models.particleGeometry("#f3efe4", 0.07, 0.6)];
   const LAND_DUST = [models.particleGeometry("#a3874f", 0.1, 0)];
   const MASK_SMOKE = { ...models.particleGeometry("#c9cbce", 0.09, 0.15) };
@@ -613,7 +907,7 @@
     let leftSupportsGun = false;
     parts.armL.quaternion = parts.armR.quaternion = null;
     for (let i = 0; i < parts.gunBananas.length; i++) {
-      const banana = parts.gunBananas[i], visible = w.ammo > (i + 1) * BURST_ROUNDS;
+      const banana = parts.gunBananas[i], visible = !cave.gunSkin && w.ammo > (i + 1) * BURST_ROUNDS;
       if (visible && !banana.visible && (w.reloading || gun.ammoReloading)) banana.ammoPopAt = elapsed;
       banana.visible = visible;
       const pop = 1 - 0.45 * (1 - clamp((elapsed - banana.ammoPopAt) / 0.22, 0, 1)) ** 3;
@@ -1173,106 +1467,7 @@
     const groundAt = ctx.groundAt || (() => 0);
     const walkable = ctx.walkable || (() => true);
     const npcWalkable = ctx.npcWalkable || walkable;
-    // A character's pet: the node its file builds as `parts.dog`, where it stands by its Ooga (a step behind and to one
-    // side, in the Ooga's frame), is lifted off the body into the crew's root. Each frame it trots for that spot at up
-    // to `PET_SPEED`, every step checked with the scene's `walkable` (stopped by a wall, it waits) and set on the floor
-    // under it at its own height plus a step. A jetpack owner brings it aloft through the shared DSB flight helper. Out of
-    // reach (`PET_SNAP`, a door, a relocation) it turns up at its spot. Hidden with its Ooga. Allocates nothing.
-    const PET_SPEED = 9.5, PET_SNAP = 7, PET_STEP = 0.45, PET_HEIGHT = 0.5, PET_ARRIVE = 0.15;
-    const attachPet = (cave) => {
-      const node = cave.parts.dog, p = node.position;
-      removeChild(cave.root, node);
-      addChild(root, node);
-      node.visible = false;
-      const pack = createNode({ geometry: BL.hubModels.jetpack(), rotation: { x: Math.PI / 2 }, scale: { x: 0.25, y: 0.25, z: 0.25 }, visible: false });
-      const flame = createNode({ geometry: BL.hubModels.jetFlame(), visible: false });
-      let top = 0;
-      for (let i = 1; i < node.geometry.verts.length; i += 3) top = Math.max(top, node.geometry.verts[i]);
-      pack.position.y = top; addChild(pack, flame); addChild(node, pack);
-      const pet = cave.pet = { node, pack, flame, side: p.x, back: -p.z, lift: p.y, x: 0, y: 0, z: 0, feet: 0, heading: 0, step: 0,
-        speed: 0, phase: 0, mode: 0, fall: 0, stuck: 0, warm: false };
-      pet.floorAt = (x, z, y) => groundAt(x, z, y, y, cave);
-      pet.clear = (ax, az, bx, bz, y) => (ctx.flyable || walkable)(ax, az, bx, bz, y, PET_HEIGHT, cave);
-    };
-    // A relocation may put the authored trailing spot inside a wall or off an edge.
-    // Try that spot, the owner's feet, then a bounded ring; never publish invalid ground.
-    const placePet = (cave, tx, tz, feet, heading) => {
-      const pet = cave.pet, p = cave.root.position;
-      for (let i = 0; i < 10; i++) {
-        const angle = heading + (i - 2) * Math.PI / 4;
-        const x = i === 0 ? tx : i === 1 ? p.x : p.x + Math.sin(angle) * 1.2;
-        const z = i === 0 ? tz : i === 1 ? p.z : p.z + Math.cos(angle) * 1.2;
-        const y = groundAt(x, z, feet + PET_STEP, feet + PET_STEP, cave);
-        if (!Number.isFinite(y) || y < -100 || !walkable(x, z, x, z, y, PET_HEIGHT, cave)) continue;
-        pet.x = x; pet.z = z; pet.feet = y; pet.heading = heading; pet.warm = true;
-        return true;
-      }
-      pet.warm = false;
-      return false;
-    };
-    const updatePet = (cave, dt) => {
-      const pet = cave.pet, r = cave.root, node = pet.node;
-      node.visible = r.visible;
-      if (!r.visible) { pet.warm = false; pet.mode = 0; pet.pack.visible = pet.flame.visible = false; return; }
-      const h = r.rotation.y, sh = Math.sin(h), ch = Math.cos(h);
-      const tx = r.position.x - sh * pet.back + ch * pet.side, tz = r.position.z - ch * pet.back - sh * pet.side;
-      const feet = r.position.y - cave.baseY;
-      const equipped = !!cave.jet, powered = equipped && !cave.jetRecovering && cave.jetFuel > 0 && (cave.jet.thrust || cave.jet.power > 0);
-      const ownerFloor = groundAt(r.position.x, r.position.z, feet, feet, cave);
-      const airborne = equipped && feet > ownerFloor + (powered ? 0.02 : 1.2);
-      pet.pack.visible = equipped;
-      if (airborne && (powered || cave.hopV >= -0.05)) pet.mode = 1;
-      else if (pet.mode === 1) { pet.mode = 2; pet.fall = Math.min(0, cave.hopV); }
-      if (pet.mode && !(dt > 0)) return;
-      if (pet.mode && dt > 0) {
-        if (!pet.warm) {
-          if (!pet.clear(r.position.x, r.position.z, tx, tz, feet + 0.4)) { node.visible = false; return; }
-          pet.x = tx; pet.z = tz; pet.feet = feet + 0.4; pet.warm = true;
-        }
-        if (pet.mode === 1) {
-          pet.y = pet.feet;
-          flyCompanion(pet, r.position.x + ch * (pet.side < 0 ? -1.2 : 1.2), feet + 0.4, r.position.z - sh * (pet.side < 0 ? -1.2 : 1.2), dt, pet.floorAt, pet.clear);
-          pet.feet = pet.y;
-        } else {
-          const floor = groundAt(pet.x, pet.z, pet.feet, pet.feet, cave);
-          const next = Math.max(floor, pet.feet + pet.fall * dt - 0.5 * BL.pilot.WALK.gravity * dt * dt);
-          pet.fall -= BL.pilot.WALK.gravity * dt;
-          let clear = Number.isFinite(next), y = pet.feet;
-          while (clear && y > next) { y = Math.max(next, y - 0.2); clear = pet.clear(pet.x, pet.z, pet.x, pet.z, y); }
-          if (clear && floor > -100) { pet.feet = next; pet.stuck = 0; }
-          else pet.stuck += dt;
-          if (clear && pet.feet <= floor + 0.001 && walkable(pet.x, pet.z, pet.x, pet.z, floor, PET_HEIGHT, cave)) { pet.mode = 0; pet.fall = 0; }
-          // DSB's bounded recovery: a blocked landing may relocate only to checked ground.
-          else if (pet.stuck > 1.5 && feet <= ownerFloor + PET_STEP && placePet(cave, tx, tz, feet, h)) { pet.mode = 0; pet.stuck = pet.fall = 0; }
-        }
-        pet.flame.visible = equipped && pet.mode === 1;
-        pet.flame.scale.y = 0.7 + Math.sin(pet.phase * 10) * 0.3;
-        node.position.x = pet.x; node.position.z = pet.z; node.position.y = cave.baseY + pet.feet + pet.lift;
-        node.rotation.y = pet.heading; node.rotation.z = 0;
-        return;
-      }
-      pet.flame.visible = false;
-      const dx = tx - pet.x, dz = tz - pet.z, d = Math.hypot(dx, dz);
-      let moving = false;
-      if (!pet.warm || d > PET_SNAP) {
-        if (!placePet(cave, tx, tz, feet, h)) { node.visible = false; return; }
-      } else if (d > PET_ARRIVE && dt > 0) {
-        const step = Math.min(d, PET_SPEED * dt * Math.min(1, d / 1.2 + 0.25));
-        const nx = pet.x + dx / d * step, nz = pet.z + dz / d * step;
-        const floor = groundAt(nx, nz, pet.feet + PET_STEP, pet.feet + PET_STEP, cave);
-        if (Number.isFinite(floor) && Math.abs(floor - pet.feet) <= PET_STEP
-          && walkable(pet.x, pet.z, nx, nz, pet.feet, PET_HEIGHT, cave)
-          && walkable(nx, nz, nx, nz, floor, PET_HEIGHT, cave)) {
-          pet.x = nx; pet.z = nz; pet.step += step * 9; moving = true;
-          pet.feet = floor;
-        }
-        pet.heading = Math.atan2(dx, dz);
-      } else if (d <= PET_ARRIVE) pet.heading = h;
-      node.position.x = pet.x; node.position.z = pet.z;
-      node.position.y = cave.baseY + pet.feet + pet.lift + (moving ? Math.abs(Math.sin(pet.step)) * 0.08 : 0);
-      node.rotation.y = pet.heading;
-      node.rotation.z = moving ? Math.sin(pet.step) * 0.08 : 0;
-    };
+    const pets = createPets(ctx, root), attachPet = pets.attach, updatePet = pets.update;
     const inBananas = ctx.inBananas || (() => false);
     const npcDestinationBlocked = ctx.npcDestinationBlocked || inBananas;
     const flyable = ctx.flyable || walkable;
@@ -2698,6 +2893,28 @@
         changed = true;
       }
       return changed;
+    };
+    // A place with no weapons (DSB Land, ₿IFRÖST's chamber, the Lightning Factory and its Jet Hangar, the arcade's hall)
+    // parks the visitor's on the weapon itself for the visit: nothing owned is nothing to hold, no button and no key that brings one out. It
+    // hands them back as it leaves, so the next scene with weapons gets what they came in with (pilot.js `remember`).
+    const parkWeapons = (cave) => {
+      const w = cave.weapon;
+      if (w.parked) return;
+      w.parked = { primaryOwned: w.primaryOwned, secondaryOwned: w.secondaryOwned, selectedSlot: w.selectedSlot,
+        held: w.equipped ? 2 : w.primaryEquipped ? 1 : 0, unlimited: w.unlimited, ammo: w.ammo, spareAmmo: w.spareAmmo.slice() };
+      selectWeapon(0, cave);
+      w.primaryOwned = w.secondaryOwned = false;
+      w.spareAmmo.length = 0;
+      poseWeapon(cave);
+    };
+    const unparkWeapons = (cave) => {
+      const w = cave.weapon, was = w.parked;
+      if (!was) return;
+      w.parked = null;
+      w.primaryOwned = was.primaryOwned; w.secondaryOwned = was.secondaryOwned; w.unlimited = was.unlimited; w.ammo = was.ammo;
+      w.spareAmmo.splice(0, w.spareAmmo.length, ...was.spareAmmo);
+      selectWeapon(was.held, cave);
+      w.selectedSlot = was.selectedSlot;
     };
     const swingWeapon = (cave = player, held = false, focused = false) => {
       if (!weaponsEnabled) return false;
@@ -7195,18 +7412,18 @@
     }
     const stats = () => ({ built: builtEquipment.length, tomatoesThrown, projectiles: bulletPool.reduce((n, b) => n + (b.life > 0 ? 1 : 0), 0) });
     return {
-      passiveNpcs, separateBodies,
+      passiveNpcs, separateBodies, pets,
       showShot, setTint, spotOccupied, setCombatEnabled,
       get combatEnabled() { return combatEnabled; },
       get weaponsEnabled() { return weaponsEnabled; },
       cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, refreshStates, refreshRosterRow, updateFan, rush, applyAllSwag, wornBy, renderLocker, pokeCave, idleSay, drawDrops,
       throwTomato, clearProjectiles, control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, clearHeadLook, prepareDragged, recoverDragged, ignite, soot, dropRoll, damage, fireView, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, setJetpackOwnership, cutJet, thrust, holdRocketJump, update, pause, dispose, stats,
-      actorClear, outsideSupportAt, builtInJetpack, toggleTint, twirl, pushPose, toggleWeapon, selectWeapon, configureWeapon, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
+      actorClear, outsideSupportAt, builtInJetpack, toggleTint, twirl, pushPose, toggleWeapon, selectWeapon, configureWeapon, parkWeapons, unparkWeapons, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
       get sleeping() { return !!(player && player.bedTravel.manual && player.state === "sleeping"); },
       get player() {
         return player;
       }
     };
   };
-  BL.crew = { create, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, preparePresentation, poseEquipment, poseReload, captureMeleePose, bodyHeightOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, CHUK_FOLD, BURST_STEP, MELEE_TAP_TIME, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
+  BL.crew = { create, createPets, hatRide, poseHatRide, poseStomachRide, HAT_RIDE, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, preparePresentation, poseEquipment, poseReload, captureMeleePose, bodyHeightOf, bodyRadiusOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, CHUK_FOLD, BURST_STEP, MELEE_TAP_TIME, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
 })();

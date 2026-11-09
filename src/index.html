@@ -414,6 +414,13 @@
           <h2><span data-sign>Contributing Oogas</span></h2>
           <span class="panel-chip" id="roster-count" data-tone="idle"></span>
         </header>
+        <div class="roster-sort">
+          <label class="roster-sort-label" for="roster-sort">Sorted by</label>
+          <select id="roster-sort">
+            <option value="recent">Most recent contributions</option>
+            <option value="most">Most contributions</option>
+          </select>
+        </div>
         <ul id="roster" class="roster slab" aria-label="Contributing Oogas"></ul>
         <p class="help roster-hint" data-scene="hub"><span id="world-loot-hint" hidden>Something is hidden out there.</span></p>
         <div class="account" id="account" hidden>
@@ -442,7 +449,7 @@
               <label class="players-hearing-label" for="players-hearing-range">Hearing range</label>
               <input type="range" id="players-hearing-range" min="1" max="61" step="1" value="61" aria-describedby="players-hearing-help" aria-valuetext="No limit">
               <output class="players-hearing-value" id="players-hearing-value" for="players-hearing-range">No limit</output>
-              <span class="players-hearing-help" id="players-hearing-help">Voices at or beyond this range are muted for you</span>
+              <span class="players-hearing-help" id="players-hearing-help">Voices at or beyond this range are automatically muted</span>
             </div>
             <label class="players-speak" id="players-speak" hidden><input type="checkbox" id="players-speak-input"> Read joins aloud</label>
           </div>
@@ -722,7 +729,7 @@
                 <path fill="#789a3b" d="M1 0h1v2H1z" />
               </g>
             </defs>
-            <g transform="translate(16 16) scale(-1 1) rotate(-48) translate(-15.5 -12)">
+            <g class="weapon-art-ak" transform="translate(16 16) scale(-1 1) rotate(-48) translate(-15.5 -12)">
               <path fill="#a76f3b" d="M1 8h4V7h3v3H5v1H1zM18 6h6v4h-6zM10 11h3v5h-3z" />
               <path fill="#ca9657" d="M2 8h3v1H2zM5 7h3v1H5zM18 6h6v1h-6z" />
               <path fill="#81898b" d="M8 6h10v5H8z" />
@@ -731,6 +738,8 @@
               <path fill="#81898b" d="M24 8h7v2h-7zM29 7h1v1h-1z" />
               <path fill="#748080" d="M18 12h1v2h1v2h1v1h-1v-1h-1v-2h-1zM20 12h1v2h1v2h-1v-2h-1z" />
             </g>
+            <!-- HALLOWEEN: the ghost hunt gun (ghost-gear.js), shown by the weapon button data-skin. -->
+            <g class="weapon-art-ghost" transform="translate(16 16) scale(-1 1) rotate(-48) translate(-15.5 -12)"><path fill="#aeb4bb" d="M3 5h16v1H3zM2 6h1v1H2zM19 6h6v1H19zM29 6h2v1H29zM2 7h1v1H2zM25 7h4v1H25zM31 7h1v1H31zM2 8h1v1H2zM31 8h1v1H31zM2 9h1v1H2zM31 9h1v1H31zM2 10h1v1H2zM25 10h4v1H25zM31 10h1v1H31zM2 11h1v1H2zM19 11h1v1H19zM23 11h2v1H23zM29 11h2v1H29zM3 12h3v1H3zM10 12h10v1H10zM23 12h1v1H23zM5 13h1v1H5zM10 13h1v1H10zM19 13h1v1H19zM23 13h1v1H23zM5 14h1v1H5zM10 14h1v1H10zM19 14h1v1H19zM23 14h1v1H23zM4 15h1v1H4zM9 15h1v1H9zM20 15h3v1H20zM4 16h1v1H4zM9 16h1v1H9zM4 17h1v1H4zM9 17h1v1H9zM5 18h4v1H5z" /><path fill="#0b0c0e" d="M3 6h1v1H3zM11 6h2v1H11zM14 6h1v1H14zM16 6h1v1H16zM18 6h1v1H18zM3 7h10v1H3zM14 7h1v1H14zM16 7h1v1H16zM18 7h7v1H18zM29 7h2v1H29zM3 8h10v1H3zM14 8h1v1H14zM16 8h1v1H16zM18 8h13v1H18zM3 9h10v1H3zM14 9h1v1H14zM16 9h1v1H16zM18 9h13v1H18zM3 10h10v1H3zM14 10h1v1H14zM16 10h1v1H16zM18 10h7v1H18zM29 10h2v1H29zM3 11h10v1H3zM14 11h1v1H14zM16 11h1v1H16zM18 11h1v1H18zM20 11h3v1H20zM6 12h4v1H6zM20 12h3v1H20zM6 13h4v1H6zM20 13h3v1H20zM6 14h4v1H6zM20 14h3v1H20zM5 15h4v1H5zM5 16h4v1H5zM5 17h4v1H5z" /><path fill="#4b4f56" d="M4 6h7v1H4zM13 6h1v1H13zM15 6h1v1H15zM17 6h1v1H17zM13 7h1v1H13zM15 7h1v1H15zM17 7h1v1H17zM13 8h1v1H13zM15 8h1v1H15zM17 8h1v1H17zM13 9h1v1H13zM15 9h1v1H15zM17 9h1v1H17zM13 10h1v1H13zM15 10h1v1H15zM17 10h1v1H17zM13 11h1v1H13zM15 11h1v1H15zM17 11h1v1H17z" /><path fill="#050506" d="M1 9h1v1H1zM0 10h2v1H0zM1 11h1v1H1zM0 12h2v1H0zM0 13h2v1H0zM1 14h1v1H1zM0 15h2v1H0z" /><path fill="#3f4349" d="M0 11h1v1H0zM0 14h1v1H0z" /></g>
           </svg>
         </span>
         <span class="equipment-compact weapon-compact" id="weapon-ammo-compact" aria-hidden="true">0</span>
@@ -1688,6 +1697,7 @@
       </div>
       <p id="controls-help-context"></p>
       <p id="controls-help-note">Try the keys here. Your character stays still while this panel is open.</p>
+      <button type="button" class="controls-help-pad" id="controls-help-pad">Controller settings</button>
       <div class="controls-list" id="controls-help-list"></div>
       <button type="button" id="controls-learn" hidden>Learn by exploring</button>
     </dialog>
@@ -1700,6 +1710,61 @@
       <p id="explore-coach-text" role="status"></p>
       <div><button type="button" id="explore-coach-start">Learn the controls</button><button type="button" id="explore-coach-skip">Not now</button></div>
     </aside>
+    <dialog class="modal pad-settings" id="pad-settings" aria-labelledby="pad-settings-title">
+      <div class="panel-head">
+        <h2 id="pad-settings-title">Controller</h2>
+        <div class="pad-device"><span class="pad-dot" id="pad-device-dot"></span><span><b id="pad-device-name">No controller yet</b> <small id="pad-device-sub">Press any button on your controller</small></span></div>
+        <button type="button" class="modal-close" id="pad-close" aria-label="Close controller settings">&times;</button>
+      </div>
+      <div class="pad-family" role="group" aria-label="Show buttons as">
+        <span class="pad-label">Buttons</span>
+        <button type="button" data-family="">Auto</button>
+        <button type="button" data-family="xbox">Xbox</button>
+        <button type="button" data-family="playstation">PlayStation</button>
+        <button type="button" data-family="nintendo">Switch</button>
+        <button type="button" data-family="stadia">Stadia</button>
+        <button type="button" data-family="generic">Other</button>
+      </div>
+      <div class="pad-setup" id="pad-setup" hidden>
+        <h3 class="section-head">Set up this controller</h3>
+        <div class="pad-setup-step" id="pad-setup-step"></div>
+        <div class="pad-setup-bar"><i id="pad-setup-bar"></i></div>
+        <p class="pad-note">Press the highlighted input. Hold nothing else. Skip anything your controller doesn't have.</p>
+        <div class="pad-buttons"><button type="button" id="pad-setup-skip">Skip this one</button><button type="button" id="pad-setup-cancel">Cancel setup</button></div>
+      </div>
+      <div class="pad-main">
+        <div class="pad-picture">
+          <svg id="pad-diagram" viewBox="0 0 400 270" role="img" aria-label="Controller diagram"></svg>
+          <p class="pad-hint" id="pad-hint" aria-live="polite"></p>
+        </div>
+        <div>
+          <div class="pad-tabs" role="tablist" id="pad-tabs" aria-label="Where the buttons apply"></div>
+          <div class="pad-list" id="pad-list"></div>
+        </div>
+      </div>
+      <div class="pad-tune">
+        <h3 class="section-head">Feel</h3>
+        <div class="pad-field"><label for="pad-dead">Stick dead zone <output id="pad-dead-out"></output></label><input type="range" id="pad-dead" min="5" max="35" step="1"><span class="pad-note">Raise it if your Ooga creeps while you aren't touching the stick. The dotted ring on the picture shows it.</span></div>
+        <div class="pad-field"><label for="pad-look">Look speed <output id="pad-look-out"></output></label><input type="range" id="pad-look" min="25" max="250" step="5"></div>
+        <div class="pad-field"><span class="pad-label">Run</span><div class="pad-seg" role="group" aria-label="Run"><button type="button" data-feel="runHold" data-value="true">Hold</button><button type="button" data-feel="runHold" data-value="false">Click until you stop</button></div></div>
+        <div class="pad-field"><span class="pad-label">Aim down sights</span><div class="pad-seg" role="group" aria-label="Aim down sights"><button type="button" data-feel="aimToggle" data-value="false">Hold</button><button type="button" data-feel="aimToggle" data-value="true">Toggle</button></div></div>
+        <div class="pad-field">
+          <label class="pad-check"><input type="checkbox" id="pad-invertY"> Invert look up and down (Y)</label>
+          <label class="pad-check"><input type="checkbox" id="pad-invertX"> Invert look left and right (X)</label>
+          <label class="pad-check"><input type="checkbox" id="pad-swap"> Swap sticks (left-handed)</label>
+        </div>
+        <div class="pad-field"><label for="pad-rumble">Vibration <output id="pad-rumble-out"></output></label><input type="range" id="pad-rumble" min="0" max="100" step="5"><button type="button" class="pad-small" id="pad-rumble-test">Feel it</button></div>
+      </div>
+      <div class="pad-foot">
+        <p class="pad-note">View and Menu together open this screen from anywhere. Your choices stay on this browser.</p>
+        <div class="pad-buttons">
+          <button type="button" id="pad-setup-open" hidden>Set up this controller</button>
+          <button type="button" id="pad-reset">Reset this tab</button>
+          <button type="button" class="primary" id="pad-done">Done</button>
+        </div>
+      </div>
+      <div class="pad-toast" id="pad-toast" role="status" hidden><span id="pad-toast-text"></span><button type="button" id="pad-toast-undo">Undo</button></div>
+    </dialog>
     <dialog class="modal" id="recipe" aria-label="Add an Ooga">
       <div class="panel-head">
         <h2><span data-sign>Add an Ooga</span></h2>
@@ -1789,13 +1854,6 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
         <output class="toast" id="reload-notice" data-reload="true" hidden></output>
         <output class="toast" id="toast" hidden></output>
         <div class="hint" id="hint" hidden></div>
-      </div>
-      <!-- Reading the whitepaper's poster (scene-hub.js shows it): the help line, or, on a touch screen, its buttons. -->
-      <div class="wp-nav" id="wp-nav" hidden>
-        <span class="wp-nav-help" id="wp-nav-help"></span>
-        <button type="button" class="wp-nav-step" data-action="wp-next" aria-label="Next page">&#9660;</button>
-        <button type="button" class="wp-nav-step" data-action="wp-prev" aria-label="Previous page">&#9650;</button>
-        <button type="button" class="wp-nav-step" data-action="wp-close" aria-label="Close the whitepaper">&#10005;</button>
       </div>
     </div>
     <output class="mic-note" id="mic-note" data-muted="false" hidden></output>
@@ -1920,8 +1978,6 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/lab-wallpaper.js"></script>
   <script src="js/lab-wallpaper-data.js" data-defer="lab-wallpaper"></script>
   <script src="js/hub-models.js"></script>
-  <script src="js/goldbug-models.js"></script>
-  <script src="js/hub-goldbug.js"></script>
   <script src="js/sleep-beam.js"></script>
   <script src="js/npc-status-beams.js"></script>
   <script src="js/dressing.js"></script>
@@ -2017,6 +2073,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/remote-players.js"></script>
   <script src="js/npc-sync.js"></script>
   <script src="js/footsteps.js"></script>
+  <script src="js/pet-reactions.js"></script>
   <script src="js/ooga-portal-models.js"></script>
   <script src="js/ooga-portal.js"></script>
   <script src="js/lab-phase.js"></script>
@@ -2025,8 +2082,6 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/clankers.js"></script>
   <script src="js/clanker-play.js"></script>
   <script src="js/bca-models.js"></script>
-  <script src="js/whitepaper-poster-data.js" data-defer="whitepaper"></script>
-  <script src="js/whitepaper-pages-data.js" data-defer="whitepaper"></script>
   <script src="js/arcade-models.js"></script>
   <script src="js/arcade-ambience.js"></script>
   <script src="js/hockey-session.js"></script>
@@ -2079,6 +2134,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/hangar-guide.js" data-defer="hangar-scene"></script>
   <script src="js/hangar-audio.js" data-defer="hangar-scene"></script>
   <script src="js/scene-hangar.js" data-defer="hangar-scene"></script>
+  <script src="js/ghost-gear.js" data-defer="arcade"></script>
   <script src="js/arcade-scene-models.js" data-defer="arcade"></script>
   <script src="js/arcade-games.js" data-defer="arcade"></script>
   <script src="js/retro-games.js" data-defer="arcade"></script>
@@ -2218,6 +2274,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/ghost-track-nr.js" data-defer="halloween-track-nr"></script>
   <script src="js/controls-help.js"></script>
   <script src="js/destination-map.js"></script>
+  <script src="js/pad-focus.js"></script>
+  <script src="js/pad-settings.js"></script>
   <script src="js/arcade-view.js"></script>
   <script src="js/director.js"></script>
 </body>

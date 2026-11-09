@@ -66,24 +66,48 @@
   const showSound = () => {
     const label = sound.muted ? "Unmute environment sounds" : "Mute environment sounds";
     const voice = window.BL.voice.stats;
-    soundButton.setAttribute("aria-label", label); soundButton.title = voice.enabled || voice.joining ? label : `${label} · M`;
+    soundButton.setAttribute("aria-label", label); soundButton.title = voice.enabled || voice.joining || voice.returning ? label : `${label} · M`;
     soundButton.setAttribute("aria-pressed", String(sound.muted));
   };
   BL.destinationMap = BL.destinationMap.create({ current: () => active, ready: () => !!active && !transition });
   let helpHeld = false;
+  // Both panels pause the scene. A pad keeps working inside them: its Menus context reaches no scene while they show.
   const controlsHelp = BL.controlsHelp.create({ current: () => active, ready: () => !!active && !transition,
-    hold: on => { helpHeld = on; rightShift = false; gamepad.hold(on); } });
+    hold: on => { helpHeld = on; rightShift = false; } });
+  const padSettings = BL.padSettings.install(BL.padSettings.create({ current: () => active, ready: () => !!active && !transition,
+    hold: on => { helpHeld = on; rightShift = false; BL.controls.resetAll(); } }));
+  // The controller's own news: named the first time it is used, offered setup when the browser can't read it, and in
+  // a game, losing it pauses the game. View and Menu together open its screen.
+  let padNamed = "";
+  const offPad = gamepad.subscribe((what) => {
+    const hud = window.BL.hud, st = gamepad.state;
+    if (what === "settings") padSettings.open();
+    else if (what === "device" && st.connected && st.id !== padNamed) {
+      padNamed = st.id;
+      hud.toast(`${gamepad.nameOf(st.id)} ready · ${gamepad.glyph("view")} + ${gamepad.glyph("menu")} for controller settings`);
+    } else if (what === "unknown") {
+      hud.toast(`${gamepad.nameOf(st.unknown)} needs a one-time setup`);
+      padSettings.open({ setup: true });
+    } else if (what === "disconnected") {
+      const pause = gamepad.CONTEXTS[gamepad.context]?.pauseKey;
+      if (pause && active && !transition) gamepad.tap(pause);
+      hud.toast("Controller disconnected");
+    }
+  });
   const offSound = sound.subscribe(showSound);
   soundButton.addEventListener("click", sound.toggle);
   showSound();
   // Reserve M before scene capture listeners and transition holds; editable fields keep it for typing.
   const onVoiceMuteKey = (e) => {
     const voice = window.BL.voice;
-    if (e.key.toLowerCase() !== "m" || e.metaKey || e.ctrlKey || e.altKey || !voice.stats.enabled && !voice.stats.joining) return;
+    if (e.key.toLowerCase() !== "m" || e.metaKey || e.ctrlKey || e.altKey || !voice.stats.enabled && !voice.stats.joining && !voice.stats.returning) return;
     if (e.target && (e.target.isContentEditable || e.target.closest && e.target.closest("input, textarea, select"))) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    if (!e.repeat) voice.setMuted(!voice.stats.muted);
+    if (e.repeat) return;
+    // Back from an earlier session the microphone is still closed, so M opens it as Unmute does.
+    if (voice.stats.returning) voice.toggle();
+    else voice.setMuted(!voice.stats.muted);
   };
   window.addEventListener("keydown", onVoiceMuteKey, true);
   let renderer = null;
@@ -312,7 +336,7 @@
   const openIntro = () => { for (const el of intros) if (!el.hidden) return el; return null; };
   const showMic = () => {
     const voice = window.BL.voice.stats;
-    window.BL.hud.showMic(voice, voice.enabled || voice.joining);
+    window.BL.hud.showMic(voice, voice.enabled || voice.joining || voice.returning);
     showSound();
   };
   // An arrival in three parts: `arriving` before the scene's own enter, the enter, then `arrived`. A scene with
@@ -342,6 +366,7 @@
   const arrived = (next, place, retainedTime) => {
     activeMeshRigs = next.renderOpts?.meshRigs === true;
     active = next;
+    gamepad.setContext(next.padContext || "foot");
     cabinetView.arrived(next);
     // Rasterize hidden render alternatives before the curtain lifts or the visitor can zoom out.
     renderer.prepareScene(liveGeometry());
@@ -1140,6 +1165,8 @@
     net.dispose();
     offSound(); soundButton.removeEventListener("click", sound.toggle);
     window.removeEventListener("keydown", onVoiceMuteKey, true);
+    offPad();
+    padSettings.dispose();
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", clearRightShift);
     window.removeEventListener("blur", clearRightShift);

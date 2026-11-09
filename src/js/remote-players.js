@@ -89,9 +89,11 @@
   // use a basic managed rig. Both bodies share the room pose, nameplate and collision actor lifecycle.
   // A scene with `ghost(cave, on)` (the hub, npc-ghosts.js) keeps the crew's copy on its own track instead: never
   // sent away nor marked `remoteControlled`, only drawn as a ghost while the remote body stands beside it.
-  const create = ({ root, crew = null, fx = null, player = null, posed = null, visible = sameZone, hide = null, createGorilla = null, hideGorilla = null, ghost = null }) => {
+  // `unarmed` is a place with no weapons: however a body's last pose reads, it shows neither club nor gun there.
+  const create = ({ root, crew = null, fx = null, player = null, posed = null, visible = sameZone, hide = null, createGorilla = null, hideGorilla = null, ghost = null, unarmed = false }) => {
     const net = BL.net;
     const bodies = new Map();
+    const pets = crew?.pets || BL.crew.createPets({}, root);
     // The chat subscription, taken on the first update and again after a kept hub's suspend disposed it; the
     // shot and strike subscriptions the same way.
     let unheard = null, unshot = null, unswung = null, unreacted = null;
@@ -187,6 +189,18 @@
       const height = gorilla ? 0 : BL.crew.bodyHeightOf(cave);
       addChild(root, cave.root);
       const motion = gorilla ? { walkPhase: NaN, walkGait: "knuckle", climb: 0, climbStride: 0, climbDirection: 0, climbSide: 0, swim: 0, lab: false, labRunIn: false, office: false, officeRise: 0 } : null;
+      if (!gorilla) {
+        cave.baseY = cave.root.position.y; cave.jetFuel = 1; cave.hopV = 0;
+        if (cave.parts.dog) {
+          // The shared terrain queries read the owner's standing envelope and passenger origin.
+          cave.bodyHeight = height; cave.bodyRadius = BL.crew.bodyRadiusOf(cave); cave.hop = 0;
+          cave.riding = { support: null, outside: null, x: rec.x, y: rec.y + cave.baseY, z: rec.z };
+          cave.sleepParts = { headX: cave.parts.head.position.x, headZ: cave.parts.head.position.z };
+          pets.attach(cave);
+          // Detached from the sightHidden root, and as late to the outline registry as the body it follows.
+          cave.pet.node.sightHidden = true;
+        }
+      }
       const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, jetNode: null, jetFlame: null, swing: 0, shotAt: -Infinity, lastHeld: 0, lastMode: 0, lastMelee: 0, sampleAt: 0, sampleMelee: 0, sampleFlags: 0, sampleSwap: 0, sampleSwapIndex: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, ghosted: null, label: "", labelW: 0,
         react: "", reactT: 0, screenX: NaN, plateLeft: NaN, plateTop: NaN, plateW: 0, plateH: 0, plateTextX: NaN, plateBaseline: NaN, plateBarLeft: NaN, plateBarTop: NaN, pickOwner: { kind: "player", id: rec.id, cave, weaponType: "none" } };
       bodies.set(rec.id, entry);
@@ -201,7 +215,10 @@
       pickCount = 0;
       if (fx) fx.hush(entry.cave);
       if (entry.gorilla) entry.cave.dispose();
-      else removeChild(root, entry.cave.root);
+      else {
+        removeChild(root, entry.cave.root);
+        if (entry.cave.pet) removeChild(entry.cave.pet.node.parent, entry.cave.pet.node);
+      }
       restoreLocal(entry);
       bodies.delete(entry.id);
     };
@@ -384,6 +401,7 @@
         entry.dx = (rec.x - entry.x) * t;
         entry.dz = (rec.z - entry.z) * t;
         entry.x += entry.dx;
+        entry.cave.hopV = far || !(dt > 0) ? 0 : (rec.y - entry.y) * t / dt;
         entry.y += (rec.y - entry.y) * t;
         entry.z += entry.dz;
         entry.yaw += Math.atan2(Math.sin(rec.yaw - entry.yaw), Math.cos(rec.yaw - entry.yaw)) * t;
@@ -395,7 +413,17 @@
           pose(entry, dt);
           showJet(entry, rec);
           showWeapon(entry, rec, dt);
+          if (unarmed) {
+            const { club, gun } = entry.cave.parts;
+            if (club) club.visible = false;
+            if (gun) gun.visible = false;
+          }
           if (posed) posed(entry.cave, entry.cave.root.position.y - entry.baseY, rec, dt);
+          if (entry.cave.pet) {
+            const p = entry.cave.root.position, riding = entry.cave.riding;
+            riding.x = p.x; riding.y = p.y; riding.z = p.z;
+            pets.update(entry.cave, dt, !!entry.cave.hammockRest && (!rec.rest || rec.rest[1] === 2));
+          }
         }
         // The top's move carries a player standing on it; a snap carries nobody.
         const height = entry.gorilla ? entry.cave.bodyHeight : entry.height, top = entry.y + height;

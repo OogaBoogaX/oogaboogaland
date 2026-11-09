@@ -17,7 +17,7 @@
   const { clamp, ease, fnv1a } = BL.math;
   const { createNode, addChild, removeChild, createCamera } = BL.scene;
   const SIM = BL.ghostSim, ST = SIM.STATE, C = SIM.CONFIG, MODELS = BL.ghostModels, TIERS = MODELS.TIERS;
-  const { BUTTON: PAD, state: pad } = BL.gamepad;
+  const { ACTION: PAD, state: pad } = BL.gamepad, padActions = pad.actions;
   const TAU = Math.PI * 2;
   // The rising (ms): the orange beam held on the herald, its vanishing straight up, when the land starts to quake, how
   // long it shakes (`QUAKE` metres at its height), then a moment before the dusk's countdown; how it settles at dawn.
@@ -267,7 +267,7 @@
     const owner = (role, slot) => ({
       kind: "halloween", role, slot, priority: role === "herald" ? 3 : 2, weaponType: role === "herald" ? "object" : "enemy", active: role === "herald",
       tooltip: () => role === "herald" ? S.state === ST.GATHER ? coarse ? "The restless ghost · tap it to ready up" : "The restless ghost · click it to ready up"
-        : hub.tapWakes ? "A restless ghost · click or shoot it to start the ghost hunt" : "A restless ghost · shoot it to start the ghost hunt"
+        : "A restless ghost · click it to start the ghost hunt"
         : role === "boss" ? "THE BOSS · shoot him down" : role === "ling" ? "Spiderling · it scuttles after you and bites" : role === "brute" ? BRUTE_TIPS[sim.brutes[slot].kind] : TIPS[sim.ghosts[slot].tier],
       // Clicking the herald readies a player in its lobby; only a shot wakes it (`hit`), but in the arena a click does too.
       tap: () => { if (role === "herald" && (S.state === ST.GATHER || hub.tapWakes && S.state === ST.IDLE)) tapHerald(); }
@@ -611,8 +611,8 @@
       if (lobbyShown === -1) padFrame = pad.frame;
       else if (pad.frame !== padFrame) {
         padFrame = pad.frame;
-        if (pad.pressed & PAD.a) readyUp();
-        else if (pad.pressed & PAD.b && !meReady) { decline(); return; }
+        if (padActions.pressed & PAD.act) readyUp();
+        else if (padActions.pressed & PAD.back && !meReady) { decline(); return; }
       }
       // One number for all of it: seconds, how many, which (a sum of ids by place), who is ready, and the two flags.
       const key = secs * 1e14 + count * 1e12 + (ids % 10000) * 1e8 + readyBits * 8 + (hostReady ? 4 : 0) + (meReady ? 2 : 0) + (signIn ? 1 : 0);
@@ -2972,6 +2972,8 @@
       update, drawOverlay, hit, shot, key, down, get waiting() { return spectating; }, shotGeometry: () => { const tier = rifleTier(); return tier ? MODELS.laserBolt(tier - 1) : MODELS.rock(); }, lanternsWanted, lanterns, shade, shake, unshake, dispose, liveGeometry, debug,
       get hunting() { return !off(S.state); }, get launch() { return LAUNCH; },
       get inHunt() { return !off(S.state) && !quitting && !!sim.playerById(myId())?.inGame; },
+      /** Whether room player `id` is one of this running hunt's hunters (a spectator never is). */
+      isHunter: (id) => !off(S.state) && !!sim.playerById(id)?.inGame,
       get inMotion() { return S.state !== ST.IDLE || sim.alive() > 0; },
       stats: () => ({ ghosts: sim.alive() + sim.brutesAlive() })
     };

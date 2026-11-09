@@ -860,7 +860,8 @@
       const planted = shoulderCombat && axes.peek && !run;
       peek = damp(peek, planted ? axes.x * 0.34 : 0, 14, dt);
       const moveX = planted ? 0 : axes.x, moveY = planted ? 0 : axes.y;
-      const turn = isCombat() ? clamp(axes.yaw + axes.orbitYaw, -1, 1) : axes.yaw;
+      // A pad's look speed lets `axes.yaw` pass 1; Q and E take only the room left, as they did at 1.
+      const turnMax = Math.max(1, Math.abs(axes.yaw)), turn = isCombat() ? clamp(axes.yaw + axes.orbitYaw, -turnMax, turnMax) : axes.yaw;
       if (turn || axes.pitch || planted) viewChanged = true;
       moving = Math.hypot(moveX, moveY) > 0.05;
       if (turn || axes.pitch || planted || moving) shoulderPointActive = carryShoulderAim = false;

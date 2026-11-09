@@ -2071,7 +2071,7 @@
       e.climb.traverseStart = e.climb.traverseEnd = 0;
       e.climb.stallX = NaN; e.climb.stallTime = 0;
       e.climb.retry = e.climb.airAttachAfter = e.climb.handoffDirection = d.climbAxis = d.climbSide = 0; e.roam.count = e.roam.index = 0; e.roam.departPending = e.roam.propDeparture = e.roam.fromPile = false;
-      e.actionControlled = e.motion.smash = false; e.startled.active = false;
+      e.actionControlled = e.motion.smash = false;
       releaseLab(e); e.motion.lab = false; releaseOffice(e);
       e.mode = e.owner.state; e.site = e.owner.work.plannedSite >= 0 ? e.owner.work.plannedSite : e.owner.work.site;
       e.parked = e.mode === "working"; e.parkFor = 0; e.exitFootprint = false;
@@ -2131,7 +2131,6 @@
         animation: { due: true, dt: 0, pending: 0, at: 0, interval: 0, settle: 0, phase: "", lounge: "", work: "", office: "", updates: 0 },
         health: { value: BL.crew.HEALTH_MAX * 2, max: BL.crew.HEALTH_MAX * 2, delay: 0 }, index: i,
         rage: BL.clankerRage.state(),
-        startled: { active: false, planned: false, time: 0, heading: 0, fromY: 0 },
         radius: WALK_RADIUS, height: 2.7, foot: FOOT, minY: 0, biped: false, compact: owner.state === "working" && gorilla.compact, footprintMode: "walk",
         active: false, tracked: false, mode: "", phase: "", route: "", entryTurn: false, planningEntry: false, site: -1, fromSite: -1, portal: -1,
         hasSlot: false, slotIndex: -1, slotX: 0, slotY: 0, slotZ: 0, goalX: 0, goalY: 0, goalZ: 0,
@@ -5069,56 +5068,6 @@
       c.departurePlanning = departurePlanning;
       d.x = d.z = 0; d.run = false;
     };
-    // A nearby lightning strike sends rooftop NPCs towards a clear lower landing. The existing running ledge
-    // controller owns takeoff, the swept body, gravity and landing; this never moves a player-controlled gorilla.
-    const startleHill = (x, y, z, heading) => {
-      const roof = roofAt(x, y, z);
-      for (const e of list) {
-        const p = e.root.position, s = e.startled;
-        if (e.nonInteractive || !e.active || !e.root.visible || e.controlled || e.remoteControlled || e.sleep.stage || sleeps(e.owner)
-          || e.rage.active || e.fire.burning || e.fire.rolling || e.climb.active || e.jump.active || e.drive.airborne
-          || e.actionControlled || (p.x - x) ** 2 + (p.z - z) ** 2 > 12 ** 2
-          || (roof >= 0 ? roofAt(p.x, p.y, p.z) !== roof : Math.abs(p.y - y) > 2)) continue;
-        s.active = true; s.planned = false; s.time = 0; s.heading = heading; s.fromY = p.y;
-        e.rest = e.pound = e.beat = e.stand = 0;
-        if (e.lounge) leaveLounge(e);
-      }
-    };
-    const updateStartled = (e, dt) => {
-      const s = e.startled, p = e.root.position;
-      s.time += dt;
-      if (!e.drive.airborne && (p.y < s.fromY - 1.5 || s.time > 20)) {
-        s.active = false; e.drive.x = e.drive.z = 0; e.drive.run = false;
-        resumeEntry(e); return;
-      }
-      if (!s.planned) {
-        // Share the ordinary planning budget so a crowd does not all search in the strike's frame.
-        if (!roamBudget) { e.speed = 0; return; }
-        roamBudget--;
-        let best = Infinity, gx = 0, gy = 0, gz = 0;
-        for (const turn of STEERING) {
-          const heading = s.heading + turn, sx = Math.sin(heading), sz = Math.cos(heading);
-          for (let distance = 6; distance <= 16; distance += 2) {
-            const x = p.x + sx * distance, z = p.z + sz * distance, y = ctx.surfaceAt(x, z);
-            const cost = distance + Math.abs(turn) * 4;
-            if (cost >= best || !Number.isFinite(y) || y > p.y - 2 || !ctx.onLand(x, z)
-              || !actorLanding(e, x, y, z) || !staticClear(e, x, y, z, x, y, z, heading, heading)
-              || ctx.fireClear && !ctx.fireClear(e, p.x, p.y, p.z, x, y, z, e.heading, heading)) continue;
-            best = cost; gx = x; gy = y; gz = z;
-          }
-        }
-        if (!Number.isFinite(best)) { s.active = false; resumeEntry(e); return; }
-        cancelDebugMove(e); clearWallSearch(e);
-        releasePortal(e); releaseLab(e); releaseOffice(e);
-        e.hasSlot = false; e.parked = false; e.phase = "startled"; e.route = "";
-        e.roam.count = e.roam.index = 0; e.roam.departPending = false;
-        setGoal(e, gx, gy, gz); s.planned = true;
-      }
-      e.motion.walkGait = "gallop";
-      if (e.loungeDepart) { departLounge(e, dt); return; }
-      if (e.drive.airborne) updateDriven(e, dt);
-      else runDownhill(e, dt, Math.atan2(e.goalX - p.x, e.goalZ - p.z));
-    };
     const moveRoam = (e, dt) => {
       const p = e.root.position, r = e.roam;
       if (r.targetX !== e.goalX || r.targetY !== e.goalY || r.targetZ !== e.goalZ) {
@@ -7112,8 +7061,7 @@
       if ((e.sleep.stage === "beamOut" || e.sleep.stage === "beamIn")
         && (e.remoteControlled || e.controlled || allAway || !sleeps(e.owner) || e.fire.burning || e.fire.rolling
           || e.climb.active || e.jump.active || e.drive.airborne || e.rage.active)) cancelSleepBeam(e);
-      if (e.remoteControlled) { e.startled.active = false; return; }
-      if (e.controlled || e.rage.active || e.fire.burning || e.fire.rolling || !e.active) e.startled.active = false;
+      if (e.remoteControlled) return;
       // Expiry, health and account/activity cancellation precede regeneration
       // and every movement controller, including swimming or climbing.
       if (combatEnabled && !e.nonInteractive && rage) rage.check(e, elapsed);
@@ -7185,9 +7133,6 @@
       }
       // Off the wall the no-headway watch forgets its spot, so a later climb from the same place gets its full time.
       e.climb.stallX = NaN;
-      if (e.startled.active) {
-        updateStartled(e, dt); poseEntry(e, dt, beforeX, beforeY, beforeZ); return;
-      }
       if (e.controlled || e.drive.airborne || e.drive.resume) {
         updateDriven(e, dt); poseEntry(e, dt, beforeX, beforeY, beforeZ); return;
       }
@@ -7634,11 +7579,11 @@
         }
         for (let i = 0; i < list.length; i++) {
           updateEntry(list[i], step);
-          if (!list[i].remoteControlled && !list[i].rage.active && !list[i].startled.active) recoverStall(list[i], step);
+          if (!list[i].remoteControlled && !list[i].rage.active) recoverStall(list[i], step);
         }
         if (body && player === body) {
           updateEntry(body, step);
-          if (!body.rage.active && !body.startled.active) recoverStall(body, step);
+          if (!body.rage.active) recoverStall(body, step);
         }
       }
     };
@@ -7757,7 +7702,7 @@
       }
       return spots;
     };
-    return { list, sync, update, startleHill, target, companionTarget, hit, damage, bananaHit, debugRage, setCombatEnabled, plan, startLabShuttle, debugMove, cancelDebugMove, stats, liveGeometry, dispose, contactAt,
+    return { list, sync, update, target, companionTarget, hit, damage, bananaHit, debugRage, setCombatEnabled, plan, startLabShuttle, debugMove, cancelDebugMove, stats, liveGeometry, dispose, contactAt,
       debugLoungeSpots, wallSupported,
       possess, release, sleeping, wake, setAway, cancelSleepBeams, setRemote, createRemote, respawn, travelRefusal, travel, control, cancelInput, smash, smashPower, quickSmash, chestBeat, ignite, dropRoll, supportRemoved,
       get combatEnabled() { return combatEnabled; }, get player() { return player; } };

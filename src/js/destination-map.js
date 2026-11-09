@@ -25,7 +25,7 @@
     const learn = $("controls-learn"), controls = $("controls-help-button");
     const coarse = window.matchMedia("(pointer: coarse)");
     const KEY = "ooga-explore-coach-v1", down = new Set(), swallowed = new Set();
-    let provider = null, owner = null, rows = [], seen = false, coaching = -1, anchor = null, x = 0, z = 0, padAt = 0, padDirection = 0;
+    let provider = null, owner = null, rows = [], seen = false, coaching = -1, anchor = null, x = 0, z = 0;
     try { seen = localStorage.getItem(KEY) === "1"; } catch { /* Optional coaching also works without storage. */ }
     const remember = () => { seen = true; try { localStorage.setItem(KEY, "1"); } catch { /* No persistence. */ } };
     const canOpen = () => !!provider && ready() && current()?.navigationReady !== false && provider.available();
@@ -34,7 +34,8 @@
       if (!owner) return;
       const previous = owner; owner = null;
       previous.controlsHelpHold?.(false);
-      BL.controls.resetAll(); BL.gamepad.hold(false);
+      // The pad was in the Menus context while the dialog was modal (pad-focus.js); a stick still deflected waits for neutral.
+      BL.controls.resetAll(); BL.gamepad.requireNeutral();
       button.setAttribute("aria-expanded", "false");
       if (chosen) $("scene").focus({ preventScroll: true });
       else if (!button.hidden) button.focus({ preventScroll: true });
@@ -62,7 +63,7 @@
       if (!canOpen() || dialog.open || document.querySelector("dialog[open]")) return false;
       owner = current();
       for (const key of down) swallowed.add(key);
-      BL.controls.resetAll(); owner.controlsHelpHold?.(true); BL.gamepad.hold(true, true);
+      BL.controls.resetAll(); owner.controlsHelpHold?.(true);
       if (document.pointerLockElement) document.exitPointerLock();
       const travels = provider.travels(), selected = provider.selected();
       title.textContent = travels ? "Where shall we go?" : "Choose a viewpoint";
@@ -88,10 +89,17 @@
       rows = Array.from(list.querySelectorAll("button"));
       status.textContent = "The world keeps moving while the map is open.";
       dialog.showModal(); closeButton.focus({ preventScroll: true });
-      button.setAttribute("aria-expanded", "true"); padAt = 0; padDirection = 0;
+      button.setAttribute("aria-expanded", "true");
       return true;
     };
     const onDown = e => {
+      if (e.pad) {
+        // A pad's key (gamepad.js, marked `pad`) is not a held keyboard key: on foot its Menu press arrives as the fixed
+        // row's Escape and opens Map where it is available; inside the dialog pad-focus.js sends Escape for B or Menu.
+        if (dialog.open) { e.preventDefault(); e.stopImmediatePropagation(); if (e.key === "Escape") close(); }
+        else if (e.key === "Escape" && canOpen()) { e.preventDefault(); e.stopImmediatePropagation(); open(); }
+        return;
+      }
       const key = e.code || e.key;
       if (down.size < 64) down.add(key);
       if (!dialog.open) {
@@ -104,6 +112,7 @@
       else if (!["Tab", "Enter", " "].includes(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey) e.preventDefault();
     };
     const onUp = e => {
+      if (e.pad) return;
       const key = e.code || e.key; down.delete(key);
       if (swallowed.delete(key) || dialog.open) { e.stopImmediatePropagation(); if (!dialog.open) e.preventDefault(); }
     };
@@ -139,22 +148,8 @@
       get coaching() { return coaching >= 0; },
       connect(next) { close(); provider = next; anchor = null; },
       disconnect(previous) { if (provider === previous) { close(); provider = null; coach.hidden = true; anchor = null; } },
-      update(now) {
-        const pad = BL.gamepad.ui, B = BL.gamepad.BUTTON;
+      update() {
         if (dialog.open && (!ready() || current() !== owner)) close();
-        if (pad.pressed & B.menu && (dialog.open || canOpen())) { if (dialog.open) close(); else open(); }
-        else if (dialog.open) {
-          if (pad.pressed & B.b) close();
-          else if (pad.pressed & B.a) document.activeElement?.click();
-          else {
-            const direction = pad.held & B.down || pad.ly < -0.5 ? 1 : pad.held & B.up || pad.ly > 0.5 ? -1 : 0;
-            if (direction && (direction !== padDirection || now >= padAt)) {
-              const at = rows.indexOf(document.activeElement), next = at < 0 ? (direction > 0 ? 0 : rows.length - 1) : (at + direction + rows.length) % rows.length;
-              rows[next]?.focus(); padAt = now + (direction === padDirection ? 150 : 350);
-            }
-            padDirection = direction;
-          }
-        }
         const hub = current()?.id === "hub";
         if (learn.hidden === hub) learn.hidden = !hub;
         const learnDisabled = !canOpen();

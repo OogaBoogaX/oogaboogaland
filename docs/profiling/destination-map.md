@@ -1,5 +1,17 @@
 # Destination Map and optional coaching
 
+## Integration with rock 5e5ad247 (controller profiles)
+
+Published head: the merge of `rock` at `5e5ad247` into this branch. Upstream's pad-action layer (#535) rewrote `gamepad.js` around contexts, learned profiles and a Menus layer (`pad-focus.js`) that takes the pad whenever a modal dialog is open, and removed Whitepaper Day and Goldbug (#539). Map follows it instead of carrying its own pad reading:
+
+- The dialog is modal, so `pad-focus.js` drives it: the d-pad or left stick moves focus to the nearest control, A chooses, B or Menu closes. Map's own `ui` state, d-pad list walking and `hold(on, requireNeutral)` are gone from `gamepad.js`.
+- On foot, Menu's fixed row still sends Escape; `destination-map.js` opens Map on a pad-marked Escape wherever Map is available (`canOpen`) and otherwise leaves the key its let-go meaning. The row is labelled `Map · let go · back`.
+- Closing Map calls the new `gamepad.requireNeutral()`: no stick movement is published until both sticks have rested inside the dead zone, a requirement a controller's absence leaves standing, as before.
+- Pad-synthesised keys (`e.pad`) are no longer tracked as held keyboard keys, since `pad-focus.js` sends Escape without a keyup.
+- Tess's guide no longer waits on the removed Whitepaper tour; it still yields to the coaching. DSB Land's action table is upstream's weapon-free one with `mode-preset` returning Map's answer.
+
+Checks on this head: `npm run build` and `node --check` on every touched file pass; `npm run test:unit` 483/483 (the gamepad hold check now exercises `requireNeutral`); `ONLY='destination accessible names,hub map navigation' LANES=1 node test/run.mjs hub` 493/493 (the global tier plus those two hub steps). The destination pad check now drives the pad through the menus layer (a real microtask between polls, a named Xbox id) and reads a press edge right after its own poll, since the page's frames poll too; the coaching check first drives an Ooga, as the guide's movement step is about the visitor's own. No full suite, Factory, perf or stopped check was run for this synchronization; the results below are historical.
+
 ## Current integration with rock
 
 The chooser now follows upstream's player controls: choosing a view moves the camera while the Ooga stays where it stands. Movement or Escape returns to the Ooga. Hub gorillas keep upstream's guarded travel behavior. The chooser labels these actions “View” and “Go to” respectively; coaching no longer offers a free camera or tells the visitor to retake control. DSB rooms retain the explicit Return outside action.

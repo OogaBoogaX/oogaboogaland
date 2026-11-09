@@ -1774,6 +1774,41 @@ body[data-active-scene="hub"] .home-link {
   text-transform: uppercase;
 }
 
+/* How Contributing Oogas are ordered, over the list (hud.js). */
+.roster-sort {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.roster-sort-label {
+  color: rgba(243, 239, 228, 0.78);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.roster-sort select {
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 6px;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--paper);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.roster-sort select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+@media (pointer: coarse) {
+  .roster-sort select { min-height: 40px; }
+}
+
 /* One row an Ooga: presence, name, the player's marks, activity age and state, each in a column of its own
    so a long name ends in an ellipsis inside its cell and a mark or state coming and going never moves the others.
    The voice mark's column is the mark's own width, so the age follows it closely and the name keeps the room. */
@@ -2043,8 +2078,8 @@ body[data-active-scene="hub"] .home-link {
 
 .roster-host {
   flex: none;
-  width: 14px;
-  height: 14px;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
   background: #000;
   box-shadow: 0 0 0 1px var(--paper);
@@ -2069,9 +2104,8 @@ body[data-active-scene="hub"] .home-link {
   cursor: default;
 }
 
-/* The private conversation's lock (private-chat.js `lock`): open and grey, amber while it waits, shut and blue once
-   sealed, dim on the other rows while one is under way. */
-.players-private {
+/* A voice link (net.js `voiceLink`): grey with nothing asked, ember while this visitor's ask waits, blue once linked. */
+.players-link {
   display: inline-flex;
   padding: 0;
   border: 0;
@@ -2079,21 +2113,14 @@ body[data-active-scene="hub"] .home-link {
   color: var(--muted);
   cursor: pointer;
 }
-.players-private[hidden] { display: none; }
-.players-private svg { width: 10px; height: 12px; shape-rendering: crispEdges; }
-.players-private:hover, .players-private:focus-visible { color: var(--fg); outline: none; }
-.players-private:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
-.players-private[data-lock="waiting"] { color: var(--warn); }
-.players-private[data-lock="waiting"]:is(:hover, :focus-visible) { color: var(--accent-text); }
-.players-private[data-lock="waiting"] svg { animation: players-private-wait 2s ease-in-out infinite; }
-.players-private[data-lock="sealed"] { color: #9fbfee; }
-.players-private[data-lock="sealed"]:is(:hover, :focus-visible) { color: #cfe0ff; }
-.players-private[data-lock="busy"] { color: var(--faint); }
-.players-private[data-lock="busy"]:is(:hover, :focus-visible) { color: var(--muted); }
-@keyframes players-private-wait { 50% { opacity: 0.5; } }
-@media (prefers-reduced-motion: reduce) {
-  .players-private[data-lock="waiting"] svg { animation: none; }
-}
+.players-link[hidden] { display: none; }
+.players-link svg { width: 11px; height: 11px; shape-rendering: crispEdges; }
+.players-link:hover, .players-link:focus-visible { color: var(--fg); outline: none; }
+.players-link:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.players-link[data-link="asked"] { color: var(--warn); }
+.players-link[data-link="asked"]:is(:hover, :focus-visible) { color: var(--accent-text); }
+.players-link[data-link="linked"] { color: #9fbfee; }
+.players-link[data-link="linked"]:is(:hover, :focus-visible) { color: #cfe0ff; }
 
 .roster-voice:focus-visible {
   outline: 2px solid var(--accent);
@@ -2125,8 +2152,14 @@ body[data-active-scene="hub"] .home-link {
   opacity: 0.55;
 }
 
+/* A voice this visitor cannot hear where they stand (another zone, or past the hearing range), in Online Oogas. */
+.roster-voice[data-far="true"] {
+  opacity: 0.45;
+}
+
 @media (pointer: coarse) {
-  .roster-voice {
+  .roster-voice,
+  .players-link {
     padding: 6px;
     margin: -6px;
   }
@@ -2146,15 +2179,15 @@ body[data-active-scene="hub"] .home-link {
   display: none;
 }
 
-/* After the name: the private-conversation lock, the voice mark, the distance and the crosshair, each in a column of
+/* After the name: the voice link, the voice mark, the distance and the crosshair, each in a column of
    fixed width. Every group is a grid of its own, so no column may size to its content: the icons line up down the
-   whole tab, the visitor's own row too, whoever shows a lock, a voice mark or a distance. The distance cell is always
+   whole tab, the visitor's own row too, whoever shows a link, a voice mark or a distance. The distance cell is always
    as wide as "999 m" (`.players-distance`), so the name keeps every other pixel. The gap spaces the items after the
    name; the name takes back the extra beside its dot. Every cell sits on the row's first line; a player's volume,
    under it. */
 .players-rows {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) 10px 12px max-content 12px;
+  grid-template-columns: 8px minmax(0, 1fr) 12px 12px max-content 12px;
   column-gap: 14px;
   margin: 0;
   padding: 0;
@@ -2182,7 +2215,7 @@ body[data-active-scene="hub"] .home-link {
 .players-rows li > .players-volume { grid-row: 2; }
 .players-rows .roster-dots { grid-column: 1; }
 .players-rows .roster-marks { display: contents; }
-.players-rows .players-private { grid-column: 3; grid-row: 1; justify-self: end; }
+.players-rows .players-link { grid-column: 3; grid-row: 1; justify-self: center; }
 .players-rows .roster-voice { grid-column: 4; grid-row: 1; justify-self: center; }
 
 .players-name {
@@ -2196,14 +2229,16 @@ body[data-active-scene="hub"] .home-link {
 }
 
 /* A raised hand after the name, never squeezing it out: the name gives way first. A reaction (players.js) pops up in
-   the same place, over the hand when one is raised, and fades. */
+   the same place, over the hand when one is raised, and fades. The column is always as wide as the widest emoji, on
+   every row, with the hand centred in it, so nothing moves when a reaction comes and goes. */
 .players-mark {
   display: inline-grid;
   flex: none;
+  grid-template-columns: minmax(0, 1fr);
+  width: 22px;
   place-items: center;
 }
 
-.players-mark[hidden] { display: none; }
 .players-mark > * { grid-area: 1 / 1; }
 
 .players-hand {
@@ -3209,63 +3244,6 @@ body[data-active-scene="hub"] .home-link {
 @media (prefers-reduced-motion: reduce) {
   .rock-cue.show[data-side] { animation: rock-cue-fade 0.4s ease-out both; }
   @keyframes rock-cue-fade { from { opacity: 1; } to { opacity: 0; } }
-}
-
-/* Reading the whitepaper's poster: the help line at the foot of the screen, and, on a touch screen, the one button
-   that steps through it. */
-.wp-nav {
-  position: absolute;
-  z-index: 6;
-  left: 50%;
-  bottom: calc(16px + var(--safe-bottom));
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: min(620px, calc(100vw - 32px));
-  padding: 9px 16px;
-  background: linear-gradient(var(--plank), var(--wood));
-  border: 2px solid var(--wood-edge);
-  border-radius: 6px;
-  box-shadow: 0 3px 0 var(--nail);
-  color: var(--paper);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-align: center;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
-}
-.wp-nav-help {
-  white-space: nowrap;
-}
-.wp-nav-step {
-  display: none;
-}
-@media (pointer: coarse) {
-  .wp-nav-help {
-    display: none;
-  }
-  .wp-nav-step {
-    display: inline-block;
-    min-width: 44px;
-    min-height: 40px;
-    padding: 0 12px;
-    border: 2px solid var(--wood-edge);
-    border-radius: 6px;
-    background: linear-gradient(#e2a04a, var(--accent));
-    color: var(--ink);
-    font: inherit;
-    font-size: 15px;
-    font-weight: 600;
-    line-height: 1;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
-}
-/* The act button and the sticks wait while the poster is read, and the bar stands down so the page runs to the top. */
-body.wp-reading .bottom-hud>.act,
-body.wp-reading .topbar,
-body.wp-reading .joysticks {
-  display: none;
 }
 
 /* The microphone's note: stays while muted in voice, under the clock, clear of the act button and the toasts. */
@@ -4491,6 +4469,31 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 
 .weapon-hud[data-equipped="true"] {
   width: 218px;
+}
+
+/* HALLOWEEN: the ghost hunt's gun has its own icon and no magazine to count, so it stays the small button with its
+   infinity beside it, and a hunter keeps it on screen through the hunt on every kind of pointer. */
+.weapon-icon .weapon-art-ghost,
+.weapon-hud[data-skin="ghost"] .weapon-art-ak,
+.weapon-hud[data-skin="ghost"] .weapon-readout {
+  display: none;
+}
+
+.weapon-hud[data-skin="ghost"] .weapon-art-ghost {
+  display: inline;
+}
+
+.weapon-hud[data-skin="ghost"][data-equipped="true"] {
+  width: 78px;
+}
+
+.weapon-hud[data-skin="ghost"][data-equipped="true"] .weapon-compact {
+  opacity: 1;
+  visibility: visible;
+}
+
+body.game-mode .weapon-hud[data-skin="ghost"] {
+  display: flex;
 }
 
 .rescue-hud {
@@ -8102,6 +8105,17 @@ body[data-active-scene="timechain"] .weapon-reticle > span {
   visibility: visible;
 }
 
+/* With no weapon to aim (pilot.js `syncWeaponHud`), combat's crosshair is a single dot. */
+.weapon-reticle[data-unarmed="true"] { visibility: visible; }
+.weapon-reticle[data-unarmed="true"] > svg,
+.weapon-reticle[data-unarmed="true"] > span::after { display: none; }
+.weapon-reticle[data-unarmed="true"] > span {
+  width: 3px;
+  height: 3px;
+  background: #fff9dc;
+  visibility: visible;
+}
+
 /* DSB keeps controls in the existing page and its world in a separate scene. */
 .dsb-island-icon, .ember-den-icon { display: none; }
 body[data-active-scene="dsb"] .dsb-island-icon,
@@ -11179,6 +11193,87 @@ body[data-active-scene] #controls-help-button { display: flex; align-items: cent
 @media (max-width: 420px) {
   .controls-help { padding: 12px; }
   .controls-row { grid-template-columns: minmax(110px, 1fr) 1.1fr; gap: 8px; }
+}
+.controls-help-pad { margin: 0 0 4px; padding: 6px 12px; border: 2px solid var(--wood-edge); border-radius: 6px; background: var(--accent); color: #1b1006; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.controls-help-pad:hover, .controls-help-pad:focus-visible { background: #e89a3c; outline: 2px solid #ffd84a; outline-offset: 2px; }
+.controls-glyph, .pad-glyph { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0 6px; border: 1px solid #f3efe465; border-radius: 12px; background: var(--slab-dark); color: #f3efe4; font-weight: 700; font-size: 12px; white-space: nowrap; }
+.controls-glyph.round, .pad-glyph.round { width: 24px; padding: 0; }
+.controls-glyph.stick, .pad-glyph.stick { width: 24px; padding: 0; border-radius: 50%; border-style: double; border-width: 3px; font-size: 10px; }
+.g-xa { color: #5fb94a; } .g-xb { color: #e5533d; } .g-xx { color: #3d8be5; } .g-xy { color: #e8c43a; }
+.g-pcross { color: #8fb3f0; } .g-pcircle { color: #f07a7a; } .g-psquare { color: #ee97d6; } .g-ptri { color: #4fd1a8; }
+/* A pad's focus ring, the same in every dialog and card the controller walks. */
+.pad-focus, .pad-focus:focus, .pad-settings :is(button, input):focus-visible { outline: 2px solid #ffd84a; outline-offset: 2px; }
+
+/* The controller screen: the player's controller beside its actions, the feel below. One column on phones. */
+.pad-settings { width: min(1000px, calc(100vw - 24px)); padding: 14px; max-height: calc(100dvh - 24px - var(--safe-top) - var(--safe-bottom)); overflow-y: auto; overscroll-behavior: contain; }
+.pad-settings > * + * { margin-top: 12px; }
+.pad-settings .panel-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.pad-device { display: flex; align-items: center; gap: 8px; margin-left: auto; padding: 5px 10px; border-radius: 999px; background: var(--tablet); font-size: 12px; }
+.pad-device small { display: block; color: var(--muted); font-size: 10px; }
+.pad-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.pad-dot.live { background: var(--ok); box-shadow: 0 0 0 3px #22c55e33; }
+.pad-family, .pad-tabs, .pad-seg, .pad-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.pad-label { margin-right: 4px; color: var(--paper); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; opacity: .8; white-space: nowrap; }
+.pad-settings button { font: inherit; color: var(--paper); cursor: pointer; }
+.pad-family button, .pad-tabs button, .pad-seg button, .pad-buttons button, .pad-small, .pad-change { padding: 5px 10px; border: 1px solid #f3efe440; border-radius: 6px; background: var(--tablet); font-size: 12px; white-space: nowrap; }
+.pad-family button[aria-pressed="true"], .pad-tabs button[aria-selected="true"], .pad-seg button[aria-pressed="true"], .pad-buttons button.primary { border-color: transparent; background: var(--accent); color: #1b1006; font-weight: 700; }
+.pad-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.pad-picture, .pad-setup, .pad-tune, .pad-list { padding: 10px; border-radius: var(--radius); background: var(--tablet); box-shadow: var(--tablet-shadow); }
+.pad-picture svg { display: block; width: 100%; height: auto; }
+.pad-hint { min-height: 2.9em; margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.pad-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.pad-list .pad-note { margin-bottom: 4px; }
+.pad-tabs { margin-bottom: 8px; }
+.pad-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 6px 4px; border-top: 1px solid #f3efe424; border-radius: 4px; font-size: 12px; }
+.pad-row.lit { background: #ffd84a14; }
+.pad-row.capture { background: #d8892b22; outline: 1px solid var(--accent); }
+.pad-name small { display: block; color: var(--faint); font-size: 10px; }
+.pad-glyphs { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.pad-none { color: var(--faint); font-size: 10px; }
+.pad-change:disabled { opacity: .45; cursor: default; }
+.pad-prompt { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--accent-text); font-size: 12px; }
+.pad-prompt button { padding: 4px 10px; border: 0; border-radius: 6px; background: var(--accent); color: #1b1006; font-weight: 700; }
+.pad-prompt button.plain { background: var(--stone-lt); color: var(--paper); font-weight: 400; }
+.pad-tune { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 18px; }
+.pad-tune .section-head { grid-column: 1 / -1; margin: 0; }
+.pad-field { display: grid; gap: 4px; align-content: start; }
+.pad-field > label { display: flex; justify-content: space-between; gap: 8px; color: var(--paper); font-size: 12px; }
+.pad-field output { font: 12px var(--mono); font-variant-numeric: tabular-nums; }
+.pad-field input[type="range"] { width: 100%; accent-color: var(--accent); }
+.pad-small { justify-self: start; }
+.pad-check { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.pad-check input { width: 16px; height: 16px; accent-color: var(--accent); }
+.pad-setup { display: grid; gap: 8px; }
+.pad-setup .section-head { margin: 0; }
+.pad-setup-step { font-size: 14px; font-weight: 700; }
+.pad-setup-bar { height: 6px; overflow: hidden; border-radius: 3px; background: var(--stone-lt); }
+.pad-setup-bar i { display: block; width: 0; height: 100%; background: var(--accent); transition: width .2s; }
+.pad-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.pad-foot .pad-buttons { margin-left: auto; }
+.pad-toast { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; width: fit-content; max-width: 100%; margin: 12px auto 0; padding: 8px 12px; border-radius: 8px; background: var(--stone-lt); box-shadow: 0 6px 20px #0008; font-size: 12px; }
+.pad-toast button { border: 0; background: transparent; color: #ffd84a; font-weight: 700; }
+#pad-diagram .body { fill: #1f1d1b; stroke: #57524c; stroke-width: 2; }
+#pad-diagram .ctl { cursor: pointer; }
+#pad-diagram .ctl .cap { fill: #2c2a27; stroke: #6b655e; stroke-width: 1.5; transition: fill .08s; }
+#pad-diagram .ctl text { fill: var(--fg); font: 700 12px system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+#pad-diagram .ctl.small text { font-size: 9px; }
+#pad-diagram .ctl text.g-xa { fill: #5fb94a; } #pad-diagram .ctl text.g-xb { fill: #e5533d; } #pad-diagram .ctl text.g-xx { fill: #3d8be5; } #pad-diagram .ctl text.g-xy { fill: #e8c43a; }
+#pad-diagram .ctl text.g-pcross { fill: #8fb3f0; } #pad-diagram .ctl text.g-pcircle { fill: #f07a7a; } #pad-diagram .ctl text.g-psquare { fill: #ee97d6; } #pad-diagram .ctl text.g-ptri { fill: #4fd1a8; }
+#pad-diagram .ctl:hover .cap, #pad-diagram .ctl.sel .cap { stroke: #ffd84a; stroke-width: 2.5; }
+#pad-diagram .ctl.on .cap { fill: #ffd84a; }
+#pad-diagram .ctl.on text { fill: #171308; }
+#pad-diagram .ctl.target .cap { stroke: #ffd84a; stroke-width: 3; animation: pad-pulse 1s ease-in-out infinite; }
+#pad-diagram .ctl.unused .cap { stroke-dasharray: 3 3; }
+#pad-diagram .dead { fill: none; stroke: #ffd84a55; stroke-dasharray: 2 3; }
+#pad-diagram .stickdot { fill: var(--accent); }
+#pad-diagram .stickdot.rest { fill: var(--faint); }
+#pad-diagram .stick-name { fill: var(--muted); font-size: 10px; }
+@keyframes pad-pulse { 50% { stroke-opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { #pad-diagram .ctl.target .cap { animation: none; } }
+@media (max-width: 760px) {
+  .pad-main { grid-template-columns: minmax(0, 1fr); }
+  .pad-device { margin-left: 0; }
+  .pad-foot .pad-buttons { margin-left: 0; }
 }
 /* Players read shared hockey scores inside the goal half-circles. */
 #carnival[data-kind="hockey"][data-hockey-shared="true"] .carnival-scores,
