@@ -76,7 +76,10 @@
       const rows = groupedRows(help.rows).concat(row(touch ? [] : ["m"], !touch && (BL.voice.stats.enabled || BL.voice.stats.joining || BL.voice.stats.returning) ? "Mute microphone" : "Mute environment sounds", touch ? "Sound button" : ""));
       // The room's own keys, where signed in to a room that takes them.
       const room = BL.net.state;
-      if (!touch && room.me && room.room === "live" && room.reactions) rows.push(row(BL.controls.shortcutKeys("hand"), room.hand ? "Lower your hand" : "Raise your hand"));
+      if (!touch && room.me && room.room === "live" && room.reactions) {
+        const hand = !room.customHand || (room.hand ? !room.handEmoji || BL.reactionPolicy.HANDS.includes(room.handEmoji) : BL.reactions.persistent === BL.reactionPolicy.HAND);
+        rows.push(row(BL.controls.shortcutKeys("hand"), hand ? room.hand ? "Lower your hand" : "Raise your hand" : room.hand ? "Unpin your emoji" : "Pin your emoji"));
+      }
       if (!touch && room.me && room.room === "live" && room.voiceLinks) rows.push(row(BL.controls.shortcutKeys("linkAll"), "Link voices with everyone who asked, or unlink everyone"));
       for (const entry of rows) {
         const line = document.createElement("div"), keys = document.createElement("div"), text = document.createElement("span");

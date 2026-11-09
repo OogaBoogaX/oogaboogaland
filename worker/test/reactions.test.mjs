@@ -11,7 +11,7 @@ import * as studio from "../src/studio-policy.js";
 import { sfuClient } from "../src/sfu.js";
 import { getPlayer } from "../src/db.js";
 
-const { REACT_FEATURE, REACT_BURST, REACT_HZ, MESSAGE_MAX, parseClientMessage } = protocol;
+const { REACT_FEATURE, HAND_EMOJI_FEATURE, REACT_BURST, REACT_HZ, MESSAGE_MAX, parseClientMessage } = protocol;
 const policy = globalThis.BL.reactionPolicy;
 
 test("a reaction is one emoji the policy knows, in any of its skin tones; the hand is a boolean; anything else is ignored", () => {
@@ -21,9 +21,9 @@ test("a reaction is one emoji the policy knows, in any of its skin tones; the ha
   for (const e of ["hello", "😂😂", "❤", "", " 😂", 7, null, "x".repeat(policy.MAX + 1), "😂".padEnd(30, "!")]) {
     assert.equal(parseClientMessage(JSON.stringify({ t: "react", e })), null, JSON.stringify(e));
   }
-  assert.deepEqual(parseClientMessage('{"t":"hand","on":true}'), { t: "hand", on: true, tone: 0 });
-  assert.deepEqual(parseClientMessage('{"t":"hand","on":true,"tone":5}'), { t: "hand", on: true, tone: 5 });
-  assert.deepEqual(parseClientMessage('{"t":"hand","on":false}'), { t: "hand", on: false, tone: 0 });
+  assert.deepEqual(parseClientMessage('{"t":"hand","on":true}'), { t: "hand", on: true, tone: 0, e: "" });
+  assert.deepEqual(parseClientMessage('{"t":"hand","on":true,"tone":5}'), { t: "hand", on: true, tone: 5, e: "" });
+  assert.deepEqual(parseClientMessage('{"t":"hand","on":false}'), { t: "hand", on: false, tone: 0, e: "" });
   for (const on of [1, "true", null]) assert.equal(parseClientMessage(JSON.stringify({ t: "hand", on })), null);
   for (const tone of [6, -1, 1.5, "2", null]) assert.equal(parseClientMessage(JSON.stringify({ t: "hand", on: true, tone })), null, JSON.stringify(tone));
   assert.deepEqual(policy.HANDS, ["✋", "✋🏻", "✋🏼", "✋🏽", "✋🏾", "✋🏿"]);
@@ -79,16 +79,16 @@ test("the raised hand lives on the record, its attachment and every view, and go
   const a = join(1, "outside"), b = join(2, "lab");
   assert.equal(room.view(room.players.get(1)).hand, false);
   room.webSocketMessage(a, '{"t":"hand","on":true,"tone":3}');
-  assert.deepEqual(b.sent, ['{"t":"hand","id":1,"on":true,"tone":3}'], "everyone, any zone");
+  assert.deepEqual(b.sent, ['{"t":"hand","id":1,"on":true,"tone":3,"e":""}'], "everyone, any zone");
   assert.deepEqual([a.saved.hand, a.saved.handTone], [true, 3], "kept in the attachment for a woken room");
   assert.deepEqual([room.view(room.players.get(1)).hand, room.view(room.players.get(1)).handTone], [true, 3], "welcome and join carry it");
   room.webSocketMessage(a, '{"t":"hand","on":true,"tone":3}');
   assert.equal(b.sent.length, 1, "no change, no message");
   clock.now += 1000;
   room.webSocketMessage(a, '{"t":"hand","on":true,"tone":1}');
-  assert.deepEqual(b.sent.at(-1), '{"t":"hand","id":1,"on":true,"tone":1}', "a new tone on a raised hand goes out");
+  assert.deepEqual(b.sent.at(-1), '{"t":"hand","id":1,"on":true,"tone":1,"e":""}', "a new tone on a raised hand goes out");
   room.webSocketMessage(a, '{"t":"hand","on":false}');
-  assert.deepEqual(b.sent.at(-1), '{"t":"hand","id":1,"on":false,"tone":0}');
+  assert.deepEqual(b.sent.at(-1), '{"t":"hand","id":1,"on":false,"tone":0,"e":""}');
   const restored = room.record({}, { id: 9, hand: true, handTone: 2 });
   assert.deepEqual([restored.hand, restored.handTone], [true, 2], "an attachment's hand survives hibernation");
   assert.equal(room.record({}, { id: 10 }).hand, false, "an older attachment starts with it down");
@@ -104,11 +104,42 @@ test("one bucket a record: a burst, then three a second across reactions and the
   // regression: a hand change over the bucket was dropped silently, so the sender's page showed a hand nobody else saw.
   room.webSocketMessage(a, '{"t":"hand","on":true,"tone":2}');
   assert.equal(b.sent.length, REACT_BURST, "the hand spends the same bucket");
-  assert.deepEqual(a.sent, ['{"t":"hand","id":1,"on":false,"tone":0}'], "the sender hears the hand the room still holds");
+  assert.deepEqual(a.sent, ['{"t":"hand","id":1,"on":false,"tone":0,"e":""}'], "the sender hears the hand the room still holds");
   assert.equal(room.players.get(1).hand, false, "and the room keeps it");
   clock.now += Math.ceil(1000 / REACT_HZ);
   room.webSocketMessage(a, '{"t":"hand","on":true}');
-  assert.deepEqual(b.sent.at(-1), '{"t":"hand","id":1,"on":true,"tone":0}', "one more a third of a second later");
+  assert.deepEqual(b.sent.at(-1), '{"t":"hand","id":1,"on":true,"tone":0,"e":""}', "one more a third of a second later");
   assert.equal(a.sent.length, 1, "an accepted change is never echoed to its sender");
   assert.ok(REACT_FEATURE === "react-v1");
+});
+
+
+test("the persistent slot accepts one emoji, replaces its glyph atomically, and retains legacy hand semantics", () => {
+  for (const e of [...policy.DEFAULTS, policy.toned("👍", 3), "🇯🇵", ""]) {
+    assert.deepEqual(parseClientMessage(JSON.stringify({ t: "hand", on: true, e })), { t: "hand", on: true, tone: 0, e });
+  }
+  for (const e of ["hello", "😂😂", "❤", " 😂", 7, null, true, "x".repeat(policy.MAX + 1)]) {
+    assert.equal(parseClientMessage(JSON.stringify({ t: "hand", on: true, e })), null);
+  }
+  const clock = { now: 1000 }, { room, join } = reactionRoom(clock);
+  const a = join(1, "outside"), b = join(2, "lab");
+  room.webSocketMessage(a, JSON.stringify({ t: "hand", on: true, e: "🍌" }));
+  assert.equal(JSON.parse(b.sent.at(-1)).e, "🍌");
+  assert.equal(a.saved.handEmoji, "🍌", "hibernation attachment");
+  assert.equal(room.view(room.players.get(1)).handEmoji, "🍌", "late arrivals");
+  assert.equal(room.record({}, a.saved).handEmoji, "🍌", "restored attachment");
+  room.webSocketMessage(a, JSON.stringify({ t: "hand", on: true, e: "🍌" }));
+  assert.equal(b.sent.length, 1, "no change emits nothing");
+  room.webSocketMessage(a, JSON.stringify({ t: "hand", on: true, e: "👍🏽" }));
+  assert.equal(JSON.parse(b.sent.at(-1)).e, "👍🏽", "one glyph replaces the other");
+  for (let i = 0; i < REACT_BURST; i++) room.webSocketMessage(a, '{"t":"react","e":"💯"}');
+  room.webSocketMessage(a, '{"t":"hand","on":false}');
+  assert.deepEqual(JSON.parse(a.sent.at(-1)), { t: "hand", id: 1, on: true, tone: 0, e: "👍🏽" }, "refusal restores the active glyph");
+  clock.now += 1000;
+  room.webSocketMessage(a, '{"t":"hand","on":true,"tone":2}');
+  assert.equal(room.view(room.players.get(1)).handEmoji, "", "a legacy hand replaces the custom glyph");
+  assert.equal(room.view(room.players.get(1)).handTone, 2);
+  assert.equal(room.record({}, { id: 10 }).handEmoji, "", "old attachments retain the hand");
+  assert.equal(HAND_EMOJI_FEATURE, "hand-emoji-v1");
+  assert.match(readFileSync(new URL("../src/room.js", import.meta.url), "utf8"), /features: \[[^\]]*HAND_EMOJI_FEATURE/);
 });
