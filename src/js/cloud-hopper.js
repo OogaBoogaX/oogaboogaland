@@ -897,12 +897,7 @@
     };
     const letGo = () => { hookAt = REEL; hookCloud = null; audio.hookRelease(); };
     // Moves the hook's head `step` metres toward a point; true once it is there.
-    const hookToward = (x, y, z, step) => {
-      const dx = x - hookTip.x, dy = y - hookTip.y, dz = z - hookTip.z, d = Math.hypot(dx, dy, dz);
-      if (d <= step) { hookTip.x = x; hookTip.y = y; hookTip.z = z; return true; }
-      hookTip.x += dx / d * step; hookTip.y += dy / d * step; hookTip.z += dz / d * step;
-      return false;
-    };
+    const hookToward = (x, y, z, step) => BL.grapple.toward(hookTip, x, y, z, step);
     // Before the crew moves: the hook flies, bites, pulls the Ooga toward its bite while the button is held, and
     // reels back once it lets go, the Ooga keeping its speed and the crew's air drag easing it.
     const updateHook = (dt) => {
@@ -933,7 +928,7 @@
       const dx = hookTip.x - p.x, dy = hookCloud.top + 0.8 - feet, dz = hookTip.z - p.z, d = Math.hypot(dx, dy, dz);
       hookPull += dt;
       if (d < HOOK_ARRIVE || hookPull > HOOK_PULL_SECONDS) { letGo(); return; }
-      const speed = Math.min(HOOK_PULL, d * 5) / d;
+      const speed = BL.grapple.pullSpeed(d, HOOK_PULL);
       if (actor.hop < 0.001) { crew.elevate(0); p.y += LAUNCH_CLEARANCE; actor.hop += LAUNCH_CLEARANCE; }
       actor.leap.vx = dx * speed; actor.leap.vz = dz * speed;
       actor.hopV = actor.hop <= LAUNCH_CLEARANCE ? Math.max(dy * speed, 4) : dy * speed;
