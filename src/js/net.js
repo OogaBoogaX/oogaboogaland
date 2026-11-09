@@ -144,23 +144,23 @@
   };
   const leaveCabinet = () => {
     const seat = cabinetSeat || cabinetRequest;
-    if (seat) send(JSON.stringify({ t: "cabinet", op: "leave", id: seat.id, q: seat.q }));
+    if (seat) send(JSON.stringify({ t: "cabinet", op: "leave", id: seat.id, q: seat.q, ...(seat.slot === undefined ? {} : { slot: seat.slot }) }));
     cabinetSeat = cabinetAnchor = null;
     finishCabinetRequest("Cabinet opening cancelled");
   };
   // Resolves to null on success, or a player-facing reason. Never enter a live game optimistically.
-  const takeCabinet = id => {
+  const takeCabinet = (id, slot) => {
     if (!state.me) return Promise.resolve(null);
     if (state.room !== "live") return Promise.resolve("Connect to the live arcade before playing");
-    if (!state.cabinets) return Promise.resolve("The live arcade needs an update before cabinets can open");
+    if (!state.cabinets || slot !== undefined && !state.cabinetsOutdoor) return Promise.resolve("The live arcade needs an update before cabinets can open");
     if (cabinetSeat || cabinetRequest) return Promise.resolve("A cabinet is already opening");
-    const q = ++cabinetSequence;
+    const q = ++cabinetSequence, where = slot === undefined ? {} : { slot };
     return new Promise(resolve => {
-      cabinetRequest = { id, q, resolve, timer: window.setTimeout(() => {
-        send(JSON.stringify({ t: "cabinet", op: "leave", id, q }));
+      cabinetRequest = { id, q, slot, resolve, timer: window.setTimeout(() => {
+        send(JSON.stringify({ t: "cabinet", op: "leave", id, q, ...where }));
         finishCabinetRequest("The arcade did not answer · try again");
       }, 8000) };
-      send(JSON.stringify({ t: "cabinet", op: "take", id, q }));
+      send(JSON.stringify({ t: "cabinet", op: "take", id, q, ...where }));
     });
   };
   const subscribers = new Set();
@@ -397,9 +397,9 @@
       if (cabinetSeat && cabinetSeats.get(cabinetSeat.id)?.player !== state.selfId) { cabinetSeat = null; emit(); }
     } else if (msg.t === "cabinet") {
       if (cabinetRequest?.id === msg.id && cabinetRequest.q === msg.q) {
-        if (msg.ok) { cabinetSeat = { id: msg.id, q: msg.q }; cabinetAnchor = BL.arcadeCabinets.get(msg.id); }
+        if (msg.ok) { const slot = cabinetRequest.slot; cabinetSeat = { id: msg.id, q: msg.q, slot }; cabinetAnchor = slot === undefined ? BL.arcadeCabinets.get(msg.id) : BL.arcadeCabinets.slot(slot); }
         finishCabinetRequest(msg.ok ? null : msg.reason || "This cabinet is occupied");
-      } else if (msg.ok) send(JSON.stringify({ t: "cabinet", op: "leave", id: msg.id, q: msg.q }));
+      } else if (msg.ok) send(JSON.stringify({ t: "cabinet", op: "leave", id: msg.id, q: msg.q, ...(Number.isInteger(msg.slot) ? { slot: msg.slot } : {}) }));
     } else if (msg.t === "highscore") {
       if (state.room === "live") for (const fn of highscoreSubscribers) fn(msg.board);
     } else if (msg.t === "studio-mic-revoked") {
@@ -475,6 +475,7 @@
       state.selfId = msg.you.id;
       state.connectionToken = typeof msg.connectionToken === "string" ? msg.connectionToken : "";
       state.cabinets = Array.isArray(msg.features) && msg.features.includes(BL.arcadeCabinets.FEATURE);
+      state.cabinetsOutdoor = Array.isArray(msg.features) && msg.features.includes(BL.arcadeCabinets.OUTDOOR_FEATURE);
       state.hockey = Array.isArray(msg.features) && msg.features.includes("hockey-v4");
       state.doorway = Array.isArray(msg.features) && msg.features.includes("door");
       state.chatUnicode = Array.isArray(msg.features) && msg.features.includes(BL.chatPolicy.FEATURE);
@@ -744,6 +745,7 @@
       state.tess = data.tess === true;
       state.highscores = data.highscores === true;
       state.highscoreSnapshots = data.highscoreSnapshots === true;
+      state.arcadePlays = data.arcadePlays === true;
       state.resolved = data.player === null || !!state.me;
       if (state.me) {
         BL.contributors.addTemporary(data.character, state.me.login);

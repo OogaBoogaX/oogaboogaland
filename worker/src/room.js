@@ -366,7 +366,7 @@ export class Room extends DurableObject {
 
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, features: [CABINETS.FEATURE, "door", CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE] });
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, features: [CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE] });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
     this.send(server, { t: "chat-history", messages: this.chat.list() });
     this.sendCabinets(server);
@@ -605,11 +605,12 @@ export class Room extends DurableObject {
     const reply = reason => this.send(p.ws, { t: "cabinet", id: msg.id, q: msg.q, ok: !reason, reason });
     p.cabinetBucket ||= { tokens: 3, at: Date.now() };
     if (!takeToken(p.cabinetBucket, 2, Date.now(), 3)) { reply("Please wait before trying again"); return; }
-    if (!p.body || p.zone !== "arcade.hall" || p.ko) { reply("Stand in the arcade with your Ooga first"); return; }
+    const seat = CABINETS.get(msg.id);
+    if (!p.body || p.zone !== (seat.outdoor ? OUTSIDE : "arcade.hall") || p.ko) { reply("Stand in the arcade with your Ooga first"); return; }
     if (p.cabinet) { reply(p.cabinet.id === msg.id && p.cabinet.q === msg.q ? null : "You already have a cabinet open"); return; }
     for (const other of this.players.values()) if (other.cabinet?.id === msg.id) { reply("This cabinet is occupied"); return; }
     // No await between checking and assigning: concurrent requests have exactly one winner.
-    const at = CABINETS.get(msg.id);
+    const at = seat.outdoor ? CABINETS.slot(msg.slot) : seat;
     p.cabinet = { id: msg.id, q: msg.q };
     p.x = at.x; p.y = at.y; p.z = at.z; p.yaw = at.yaw; p.g = null; p.j = p.w = 0; p.v = null; p.va = 0; p.r = undefined;
     p.blendTo = null; p.blendK = 0;
