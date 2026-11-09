@@ -1999,7 +1999,7 @@
   const HAMMOCK_LAND = [1.2, 0.8], HAMMOCK_SLOTS = 1 + BL.remotePlayers.MAX;
   const hamRemoteId = new Float64Array(HAMMOCK_SLOTS), hamRemoteSeen = new Int32Array(HAMMOCK_SLOTS);
   const hamRemoteX = new Float64Array(HAMMOCK_SLOTS), hamRemoteZ = new Float64Array(HAMMOCK_SLOTS), hamRemoteT = new Float64Array(HAMMOCK_SLOTS);
-  let hamLocalHave = false, hamLocalX = 0, hamLocalZ = 0, hamFrame = 0, hamCueDir = 0, unshotHammock = null;
+  let hamLocalHave = false, hamLocalX = 0, hamLocalZ = 0, hamFrame = 0, unshotHammock = null;
   const hamRemote = (rec) => {
     if (!rec.body || rec.bodyKind === "gorilla" || rec.rest || !remoteShown(rec)) return;
     let slot = -1, free = -1;
@@ -2029,15 +2029,6 @@
     hamFrame = (hamFrame + 1) | 0;
     BL.net.remotes.forEach(hamRemote);
     for (let i = 1; i < HAMMOCK_SLOTS; i++) if (hamRemoteId[i] && hamRemoteSeen[i] !== hamFrame) hamRemoteId[i] = 0;
-    // Lying in it, the visitor rocks it with A and D (hub-hammock.js `pump`), while nothing else is going on with the seat.
-    const seat = hammock.seats[0];
-    if (player && seat.sitter === player && !seat.entry && !seat.exit && !seat.fall && dt > 0) {
-      const rock = pilot.controls.axes.x, dir = rock > 0.5 ? 1 : rock < -0.5 ? -1 : rock > -0.2 && rock < 0.2 ? 0 : hamCueDir;
-      hammock.pump(rock, dt);
-      // A fresh press of A or D (or the stick pushed sideways) shows its arrow, so the rock is seen to register.
-      if (dir !== hamCueDir && dir !== 0) hud.rockCue(dir);
-      hamCueDir = dir;
-    } else hamCueDir = 0;
     if (hammock.spilling) tipOutOfHammock();
   };
   // Swung hard enough, the bed tips its occupant out: only the visitor's own Ooga on this page. It rolls out over the edge on the side the bed
@@ -6646,9 +6637,7 @@
         hud.hint(COARSE ? "Tap DROP & ROLL! to put the fire out" : "Press Space to drop and roll until the fire goes out");
         hud.setAct("DROP & ROLL!");
       } else if (action === STAND_ACTION) {
-        const inHammock = pilot.player?.camp.seat?.kind === "hammock";
-        hud.hint(inHammock ? (COARSE ? "Stick sideways rocks the hammock · forward, back or STAND UP! to get up" : "A and D rock the hammock · W, S or Space to get up")
-          : COARSE ? "Move or tap STAND UP! to get up" : "Move or press Space to stand up");
+        hud.hint(COARSE ? "Move or tap STAND UP! to get up" : "Move or press Space to stand up");
         hud.setAct("STAND UP!");
       } else if (action.kind === "bench") {
         hud.hint(COARSE ? "Tap SIT to sit facing the fire" : "Press Space to sit facing the fire");
@@ -7888,7 +7877,7 @@
   const update = (dt, elapsed) => {
     // Every system reads the real models; the ghosts are painted back once the frame's poses are final.
     npcGhosts.restore();
-    cloudHopper.preUpdate(dt);
+    cloudHopper?.preUpdate(dt);
     if (cloudPlaying()) {
       cloudMask();
       Object.assign(cloudPile.position, pile.core.position);
@@ -8004,7 +7993,7 @@
     updateSleepingSolids();
     if (!chalkboard.openNow) {
       // A movement ends Tess's tour before the pilot reads it, so it moves the Ooga this frame (hub-guide.js).
-      if (!cloudHopper.active) islandGuide.yieldToMovement();
+      if (!cloudHopper?.active) islandGuide.yieldToMovement();
       if (clankerPlay.active) clankerPlay.readInput(dt);
       else pilot.readInput(dt);
     }
@@ -8084,8 +8073,8 @@
       // The doorway's walks steer the Ooga before the crew moves it.
       if (!cloudPlaying()) timechainIsland.gate.update(dt);
     }
-    if (!cloudHopper.held) crew.update(dt, elapsed);
-    cloudHopper.postUpdate();
+    if (!cloudHopper?.held) crew.update(dt, elapsed);
+    cloudHopper?.postUpdate();
     if (hammock) {
       hammock.settle(BL.net.remotes, BL.net.state.selfId, remoteShown, moveHammockSeat, leaveFullHammock);
       // Sample once so the CPU suspension ends and GPU palm/wrap sway share a clock.
@@ -8129,12 +8118,12 @@
     updateLazyBedding();
     pile.update(dt);
     const player = pilot.player;
-    if (player && !cloudHopper.active && !pilot.poseHeld && player.root.position.y - player.baseY < ABYSS_RESPAWN_Y && abyssAt(player.root.position.x, player.root.position.z, player.root.position.y - player.baseY)) {
+    if (player && !cloudHopper?.active && !pilot.poseHeld && player.root.position.y - player.baseY < ABYSS_RESPAWN_Y && abyssAt(player.root.position.x, player.root.position.z, player.root.position.y - player.baseY)) {
       loseAbyssAmmo(player);
       respawnAtPile();
     }
     updatePlayerCave(player);
-    if (player && player.jet && !cloudHopper.held && !jetpackAllowed(player)) {
+    if (player && player.jet && !cloudHopper?.held && !jetpackAllowed(player)) {
       crew.removeJetpack(player);
       pilot.showAct();
       hud.toast("No jetpacks under ground");
@@ -8173,11 +8162,11 @@
     if (chalkboard.waiting && chalkboardRefusal()) chalkboard.close();
     if (chalkboard.openNow) { if (chalkboardRefusal()) chalkboard.close(); }
     else if (clankerPlay.active) clankerPlay.update(dt);
-    else if (!cloudHopper.fallView()) pilot.update(dt);
+    else if (!cloudHopper?.fallView()) pilot.update(dt);
     // The doorway's views (the keypad's, the swoop into the eyes and back out) take over from the pilot's.
     if (!cloudPlaying()) timechainIsland.gate.view(dt);
     // Tess moves after the view is set, so a tour's glide has the last word on it.
-    if (!cloudHopper.active) islandGuide.update(dt, elapsed);
+    if (!cloudHopper?.active) islandGuide.update(dt, elapsed);
     shareDrivenPose();
     timechainIsland.site.view(camera.position);
     for (let i = 0; i < signDetails.length; i++) {
@@ -10991,7 +10980,7 @@
       updatePositionDebug(true);
     }
     updatePoolEffectsActivity();
-    if (ctx.from === "arcade" && ctx.place === "cloud-hopper") cloudHopper.launch(true);
+    if (ctx.from === "arcade" && ctx.place === "cloud-hopper") ensureCloudHopper(ctx).launch(true);
   };
   // Prepare only raw character rigs: the published crew, its stable roster order, input, health and NPC/remote
   // registration are still created together by enter. No partly populated actor registry reaches a live scene.
@@ -12149,6 +12138,32 @@
     });
     yield* pause(slice);
     cloudRememberNodes(cloudNodeStart);
+    Object.defineProperty(hubScene.debug, "cloudHopper", { enumerable: true, get: () => cloudHopper });
+    // Explicit setup for the portable engine fixtures; observation never builds a game.
+    hubScene.debug.prepareCloudHopper = () => models.withScope("hub", () => ensureCloudHopper(ctx));
+    hubScene.debug.tess = islandGuide;
+    hubScene.debug.petReactions = petReactions;
+    // Tess wears every tier of her detail in her first frames, so each is on the GPU before she comes close: build
+    // them here, a mesh a slice, rather than in her first frame.
+    const tessTiers = new Set();
+    islandGuide.liveGeometry(tessTiers);
+    for (const geometry of tessTiers) { renderer.prepareGeometry(geometry); yield* pause(slice); }
+    mark("visibility-start");
+    fx.warmVisibility(crew);
+    fx.warmBlockers();
+    mark("visibility");
+    mark("covered-view-start");
+    yield* prepareCoveredView(ctx.overlay, slice);
+    mark("covered-view");
+    totemUnsub = BL.totemFeed.subscribe(onTotem);
+    if (ctx.from === "arcade" && ctx.place === "cloud-hopper") ensureCloudHopper(ctx).launch(true);
+    if (DEBUG_GORILLA_MOVE) hud.toast("Gorilla movement debug · click a gorilla, then a destination");
+  };
+  // The cabinet is Cloud Hopper's only entrance. Its dormant game graphs, HUD,
+  // weather and sound belong to the hub visit, but are installed only on demand.
+  const ensureCloudHopper = ctx => {
+    if (cloudHopper) return cloudHopper;
+    mark("cloud-hopper-start");
     cloudIsland = BL.cloudHopperIsland.create({ root, island, solids });
     cloudPile = createNode({ geometry: pile.core.geometry });
     cloudPileSolids = BL.solidProps.create(); cloudPileSolids.add(cloudPile);
@@ -12173,24 +12188,8 @@
       refusal: () => gameMode ? "Finish the island event before playing Cloud Hopper"
         : islandGuide.holding || entering || factoryHeld || factoryDeparting || bifrostDeparting
           ? "Finish the current tour before playing Cloud Hopper" : clankerPlay.active ? "Choose an Ooga to play Cloud Hopper" : null });
-    hubScene.debug.cloudHopper = cloudHopper;
-    hubScene.debug.tess = islandGuide;
-    hubScene.debug.petReactions = petReactions;
-    // Tess wears every tier of her detail in her first frames, so each is on the GPU before she comes close: build
-    // them here, a mesh a slice, rather than in her first frame.
-    const tessTiers = new Set();
-    islandGuide.liveGeometry(tessTiers);
-    for (const geometry of tessTiers) { renderer.prepareGeometry(geometry); yield* pause(slice); }
-    mark("visibility-start");
-    fx.warmVisibility(crew);
-    fx.warmBlockers();
-    mark("visibility");
-    mark("covered-view-start");
-    yield* prepareCoveredView(ctx.overlay, slice);
-    mark("covered-view");
-    totemUnsub = BL.totemFeed.subscribe(onTotem);
-    if (ctx.from === "arcade" && ctx.place === "cloud-hopper") cloudHopper.launch(true);
-    if (DEBUG_GORILLA_MOVE) hud.toast("Gorilla movement debug · click a gorilla, then a destination");
+    mark("cloud-hopper-ready");
+    return cloudHopper;
   };
   const enter = (ctx) => { const steps = enterSteps(ctx); while (!steps.next().done); };
   // The scene a departure was heading for could not be prepared (its deferred code did not arrive): the visitor stays on
@@ -12488,6 +12487,7 @@
     }
   };
   BL.scenes = BL.scenes || {};
+  hubScene.prepare = place => place === "cloud-hopper" ? BL.deferred.load("cloud-hopper") : null;
   hubScene.buildSteps = prepareHubSteps;
   hubScene.controlsHelp = touch => {
     const H = BL.controlsHelp;
@@ -12500,7 +12500,6 @@
       if (!gorilla && player) {
         if (!pilot.birdsEye && player.traits.nunchaku && player.state !== "sleeping" && !player.camp.burning && !player.camp.rolling) help.rows.push(H.row(BL.controls.shortcutKeys("twirl"), "Twirl nunchaku"));
         if (player.tint) help.rows.push(H.row(BL.controls.shortcutKeys("tint"), "Change colourway"));
-        if (player.camp.seat?.kind === "hammock") help.rows.push(H.row(["a", "d"], "Rock the hammock (in time with the swing)"));
       }
     }
     if (!gorilla) help.title = "Island · " + help.title; return help;

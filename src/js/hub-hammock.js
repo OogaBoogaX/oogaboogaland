@@ -42,12 +42,6 @@
   // `SHOT_PERIOD`; magazine `AMMO_MAX` 30), so no gap in a held trigger is over 0.26 s: BURST_GAP of 0.4 s keeps a hold one burst and
   // parts separate bursts. A held trigger of BURST_N rounds (a magazine is 30) tips an occupant out by itself.
   const STEP = 0.09, RESET_S = 60, TIP_COUNT = 4, BURST_GAP = 0.4, BURST_N = 20, MOMENTUM = 0.03;
-  // Lying in it, the visitor rocks it with A and D (`pump`): a key held with the swing for PUMP_HOLD seconds is one good pump, which
-  // lifts the swing a step of PUMP_STEP (the ease-back waiting while the key is held with the swing, so each step is kept), a key held
-  // against the swing damps it PUMP_DAMP a second, and a tap shorter than PUMP_HOLD does nothing. It never touches the count, but the
-  // swing itself passing FALL tips them out, so ten good pumps from rest (one each half-swing, about fifteen seconds of good timing) roll
-  // them out of their own hammock, each visibly higher than the last; holding one key, or casual taps, come nowhere near.
-  const PUMP_STEP = 0.036, PUMP_HOLD = 0.3, PUMP_DAMP = 0.04;
   // The swing the fourth hit lifts the bed to: a swing this high with the visitor's own Ooga lying in it tips them out however it got there.
   const FALL = REST_HELD + TIP_COUNT * STEP;
   // A body walking into the bed (`bump`): its footprint BUMP_RADIUS across (the hub's walker) touching the swing's
@@ -365,9 +359,8 @@
     const bedRotation = quat.create(), restRotation = quat.create(), bodyRotation = quat.create(), limbTarget = quat.create();
     // A bed sleeper lies on their back. Turn their long axis along the hammock's +x.
     quat.fromEuler(restRotation, -Math.PI / 2, -Math.PI / 2, 0);
-    const seats = p.seats.map((s, index) => ({ kind: "hammock", lying: true, keepEquipment: true, pumps: true, index, x: 0, y: 0, z: 0, ry: p.seatRy, floor: s.floor, walkAt: { x: s.walkAt.x, z: s.walkAt.z }, sitter: null, remote: 0, restX: 0, restY: 0, restZ: 0, wire: new Int16Array(6) }));
-    let amp = REST, angle = 0, phase = 0, lean = 0, leanIn = 0, leanInT = LEAN_RISE, count = 0, sinceHit = 0, sinceRound = 1e9, wasHeld = false, fallSide = 0, pumping = false, pumpHeld = 0, pumpStepped = 0;
-    const bodyRight = new Float64Array(3);
+    const seats = p.seats.map((s, index) => ({ kind: "hammock", lying: true, keepEquipment: true, index, x: 0, y: 0, z: 0, ry: p.seatRy, floor: s.floor, walkAt: { x: s.walkAt.x, z: s.walkAt.z }, sitter: null, remote: 0, restX: 0, restY: 0, restZ: 0, wire: new Int16Array(6) }));
+    let amp = REST, angle = 0, phase = 0, lean = 0, leanIn = 0, leanInT = LEAN_RISE, count = 0, sinceHit = 0, sinceRound = 1e9, wasHeld = false, fallSide = 0;
     const occupied = () => { for (const seat of seats) if (seat.sitter || seat.remote) return true; return false; };
     // A seat's place for an angle of swing: the bed turns about the virtual swing axis (+x in its frame), so a point `drop`
     // under it moves `drop` sin(angle) across and rises by drop (1 - cos(angle)).
@@ -900,8 +893,7 @@
       }
       for (let i = tipped.length - 1; i >= 0; i--) if (!tipped[i].root.parent) upright(tipped[i]);
       const held = occupied(), rest = held ? REST_HELD : REST;
-      if (!pumping) amp += (rest - amp) * Math.min(1, DECAY * dt);
-      pumping = false;
+      amp += (rest - amp) * Math.min(1, DECAY * dt);
       sinceHit += dt; sinceRound += dt;
       if (wasHeld !== held || sinceHit > RESET_S) count = 0;
       wasHeld = held;
@@ -984,22 +976,6 @@
       if (strength < STEP / 2) { amp = Math.min(SWAY_MAX, amp + strength); return 0; }
       push(strength / STEP, across < 0 ? -p.side : p.side, Math.min(SHOVE_RUN, speed / 7));
       return strength / STEP;
-    };
-    // The occupant rocks the bed: `axis` is A (-1) to D (+1), held for `dt` seconds. D pushes toward the lying body's right (its own +x,
-    // through `bodyRotation`, across the bed), A toward its left; pressed while the bed swings that way the swing grows, pressed against
-    // it the swing is damped. The count is untouched; `fallSide` follows the push, as a hit's would.
-    const pump = (axis, dt) => {
-      if (!(axis > 0.05 || axis < -0.05) || !(dt > 0)) { pumpHeld = 0; return; }
-      quat.rotateVec(bodyRight, bodyRotation, 1, 0, 0);
-      const across = bodyRight[0] * p.nx + bodyRight[2] * p.nz;
-      if (Math.abs(across) < 1e-3) return;
-      // The bed's motion across, in the plan's n: angle grows toward the seats' side (`place`: across = -sin(angle) drop side).
-      const motion = -Math.cos(phase) * p.side, want = (axis > 0 ? 1 : -1) * (across > 0 ? 1 : -1), swing = motion > 0 ? 1 : -1;
-      if (motion * want > 0) {
-        pumping = true; pumpHeld += dt;
-        // One step a half-swing (`pumpStepped` is the swing it was earned on), however the key is worked.
-        if (pumpStepped !== swing && pumpHeld >= PUMP_HOLD) { amp = Math.min(SWAY_MAX, amp + PUMP_STEP); pumpStepped = swing; fallSide = want; }
-      } else { amp = Math.max(occupied() ? REST_HELD : REST, amp - PUMP_DAMP * dt); pumpHeld = 0; }
     };
     // Whether a walker of radius `r` with its feet at `feet` is within the occupied bed's footprint, which it cannot walk into: the
     // cloth is stepped onto when empty, never through the Ooga lying on it. Above the shell (a jump) is clear.
@@ -1142,8 +1118,8 @@
     update(0, 0, false);
     // Whether the bed has taken enough hits to tip out whoever lies in it. Only the occupant's own page acts on it (a bed held
     // only by another page's remote pose never reports it to anyone who could stand them up).
-    // ... or, for the visitor's own Ooga lying in it, the swing itself past FALL (rocked there by them, or by others' hits with their
-    // pumping on top); a bed another page's Ooga lies in is never judged by this page's swing.
+    // ... or, for the visitor's own Ooga lying in it, the swing itself past FALL (knocks and gentle pushes that lift it without
+    // adding to the count); a bed another page's Ooga lies in is never judged by this page's swing.
     const spilling = () => {
       for (const seat of seats) if (seat.fall) return false;
       if (count >= TIP_COUNT - 1e-9) return occupied();
@@ -1151,7 +1127,7 @@
       for (const seat of seats) if (seat.sitter) return true;
       return false;
     };
-    return { plan: p, seats, ridgeNode, bedNode, ropes, update, syncRopes, kick, bump, hit, pump, blocks, crosses, tip, enter, restingAt, settle, free, near, reachable, landing, poseRemote, stateFor, releaseEquipment, dispose, get angle() { return angle; }, get amp() { return amp; }, get spilling() { return spilling(); }, get fallSide() { return fallSide; } };
+    return { plan: p, seats, ridgeNode, bedNode, ropes, update, syncRopes, kick, bump, hit, blocks, crosses, tip, enter, restingAt, settle, free, near, reachable, landing, poseRemote, stateFor, releaseEquipment, dispose, get angle() { return angle; }, get amp() { return amp; }, get spilling() { return spilling(); }, get fallSide() { return fallSide; } };
   };
 
   BL.hubHammock = { SLOTS, TIE, SPAN_MIN, SPAN_MAX, SWAY_MAX, REST_HELD, STAND, GEAR_TOP, GEAR_CLEAR, plan, create, ridgeY };
