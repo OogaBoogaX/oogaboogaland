@@ -12,7 +12,7 @@
   // Discrete shortcuts shared by scene handlers and their reference rows.
   const SHORTCUTS = { view: ["x"], resetView: ["0"], weapon: ["1", "2"], swapWeapon: ["g"], attack: ["v"], reload: ["r"], bash: ["f"], jetpack: ["j"], actor: ["t"], escape: ["escape"], start: ["enter"], item: ["e", "shift"], autopilot: ["g"], spacewalk: ["v"], mineView: ["v"], crack: ["c"], pause: ["p"], act: [" ", "enter"] };
   const shortcutKeys = action => SHORTCUTS[action];
-  Object.assign(SHORTCUTS, { north: ["n"], twirl: ["n"], tint: ["c"], horn: ["h"], tomato: ["t"], throwWallet: ["y"], grab: ["g"], smash: ["1"], chest: ["c"] });
+  Object.assign(SHORTCUTS, { north: ["n"], twirl: ["n"], tint: ["c"], horn: ["h"], tomato: ["t"], throwWallet: ["y"], grab: ["g"], smash: ["1"], chest: ["c"], hand: ["h"], linkAll: ["l"] });
   const matches = (e, action) => SHORTCUTS[action].includes(e.key.toLowerCase());
   const resets = new Set();
   const resetAll = () => { for (const reset of resets) reset(); };

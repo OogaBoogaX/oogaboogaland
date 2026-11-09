@@ -91,9 +91,11 @@
 // already there on this page's (re)join, and `fn(rec, false)` when one leaves (players.js names the joins, #430).
 // Voice links: a room whose `features` hold LINK_FEATURE (`state.voiceLinks`) keeps asks to hear another player in any
 // zone. `voiceLink(id)` is where this page stands with them ("none", "asked" or "linked"), from the room's `links` alone
-// (`state.linkWants`, `state.linked`), and `toggleVoiceLink(id)` asks or takes this page's ask back. Moving to another
-// place lets go of every voice but the linked ones, which never drop.
-// Exports voiceLink, toggleVoiceLink, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
+// (`state.linkWants`, `state.linked`), and `toggleVoiceLink(id)` asks or takes this page's ask back. `linkEveryone()`
+// (the L key) has the room link this page with everyone here who has asked it or, with nobody waiting, take back all of
+// its asks; only the room knows who has asked. Moving to another place lets go of every voice but the linked ones, which
+// never drop.
+// Exports voiceLink, toggleVoiceLink, linkEveryone, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
 // setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendGhostState and subscribeGhostState (HALLOWEEN), npcFrame, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
 // ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
 (() => {
@@ -639,6 +641,9 @@
     } else if (msg.t === "links") {
       state.linkWants = linkIds(msg.wants); state.linked = linkIds(msg.linked);
       if (msg.refused === "full") BL.hud.toast("Too many voice links: break one first");
+      else if (msg.all === "linked" && msg.n > 0) BL.hud.toast(`Voices linked with ${msg.n} ${msg.n === 1 ? "player" : "players"}`);
+      else if (msg.all === "unlinked") BL.hud.toast("Unlinked everyone");
+      else if (msg.all === "none") BL.hud.toast("Nobody here has asked to link with you");
       rosterChanged();
     } else if (msg.t === "ghost") {
       if (ghostHeard) ghostHeard(msg); // HALLOWEEN
@@ -1021,6 +1026,13 @@
     send(JSON.stringify({ t: "link", to: id, on: !state.linkWants.has(id) }));
     return true;
   };
+  // Links with everyone here who has asked this page, or with nobody waiting takes back all of its asks; false when the
+  // room cannot take it, so the key stays with the scene. The room's `links` reply says what it did.
+  const linkEveryone = () => {
+    if (!state.voiceLinks || state.room !== "live") return false;
+    send('{"t":"link-all"}');
+    return true;
+  };
 
   // This page's own microphone muted or not, for every other page's roster.
   const setMuted = (on) => {
@@ -1312,5 +1324,5 @@
     close("off");
   };
 
-  BL.net = { voiceLink, toggleVoiceLink, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendReaction, subscribeReactions, setHand, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { voiceLink, toggleVoiceLink, linkEveryone, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendReaction, subscribeReactions, setHand, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();
