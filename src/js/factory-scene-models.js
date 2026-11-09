@@ -1,7 +1,7 @@
 // Scene-only factory geometry. Shared island props and their model-cache owners stay in factory-models.js.
 (() => {
   "use strict";
-  const { BL, BOARD, BOARD_FACE, BOARD_VALUES, BRASS, BRONZE, BRONZE_DK, CAP, CAP_BLUE, CAP_ORANGE, COILS, COIN_R, CONDUIT_SAMPLES, CONSOLE, COOK, COPPER, COPPER_DK, CRYSTAL, CYAN, FALLS, FLOOR, FORGE_CONSOLE, FORGE_CY, FORGE_TRACKS, GOLD, HALL, HANGAR_DOOR, HANGAR_SET_BACK, IRON_BK, IRON_DK, IRON_LT, KIOSK, LABEL_FONT, LAYOUT, LEVEL, LINE_STEP, LOOKOUT_BEAM, MONITORS, ORANGE, PORCH_HALF, REB, RING_BRIDGES, SHAFTS, STEP, STONE, STONE_DK, STUDY, TAU, TIMBER, TIMBER_DK, TIMBER_LT, TRE, TUNNEL_BOX, TUNNEL_POST, TUNNEL_THEMES, WALL_LEAN, along, banner, beam, bevelBox, box, cached, chain, columnParts, conduitPath, deckParts, donationCorner, face, flame, forwardLathe, gem, geometry, groundUnder, hangarEntry, hexToRgb, label, labelCache, lanternParts, lathe, makeVox, merge, models, moved, mulberry32, networkGlyph, noShadow, outcropTop, outcrops, plate, porchOf, prism, pushVert, railParts, railPlan, deckRailing, walkRails, ringLanding, shaded, smoothBitcoin, smoothBolt, span, stairParts, stationX, stationZ, torus, tube, tunnelFrame, turn, turnedX, turnedY, turnedZ, voxelGeometry } = window.BL.factoryModelsSceneKit;
+  const { BL, BOARD, BOARD_FACE, BOARD_VALUES, BRASS, BRONZE, BRONZE_DK, CAP, CAP_BLUE, CAP_ORANGE, COILS, COIN_R, CONDUIT_SAMPLES, CONSOLE, COOK, COPPER, COPPER_DK, CRYSTAL, CYAN, FALLS, FLOOR, FORGE_CONSOLE, FORGE_CY, FORGE_TRACKS, GOLD, HALL, HANGAR_DOOR, HANGAR_SET_BACK, IRON_BK, IRON_DK, IRON_LT, KIOSK, LABEL_FONT, LAYOUT, LEVEL, LINE_STEP, LOOKOUT_BEAM, MONITORS, ORANGE, PORCH_HALF, REB, RING_BRIDGES, SHAFTS, STEP, STONE, STONE_DK, STUDY, TAU, TIMBER, TIMBER_DK, TIMBER_LT, TRE, TUNNEL_BOX, TUNNEL_POST, TUNNEL_THEMES, WALL_LEAN, along, banner, beam, bevelBox, box, cached, chain, columnParts, conduitPath, deckParts, donationCorner, face, flame, forwardLathe, gem, geometry, groundUnder, hangarEntry, hexToRgb, label, labelCache, lanternParts, lathe, makeVox, merge, models, moved, mulberry32, networkGlyph, noShadow, outcropTop, outcrops, plate, porchOf, prism, pushVert, railParts, railPlan, deckRailing, walkRails, ringLanding, shaded, smoothBitcoin, smoothBolt, span, stairParts, stationX, stationZ, torus, tube, tunnelFrame, HALL_FLOOR, turn, turnedX, turnedY, turnedZ, voxelGeometry } = window.BL.factoryModelsSceneKit;
   // Construction checkpoints (see build-tasks.js). They reach it only when sliced, so an unsliced build runs without it.
   const pause = function* (slice) { if (slice) yield* BL.buildTasks.pause(slice); };
   const ROCK_LT = "#75614f";
@@ -2227,7 +2227,7 @@
   // terrain's own dark inner stone; toward the hall it takes the hall's stone and fills the front wall round the
   // portal. `outside` is the island drawn simply, for a visit that did not come in from the hub, which is the one
   // time there is no picture of it to hang past the rim (`outsideView`).
-  const EXIT_ROCK = { unit: 0.5, x: [-13, 12], y: [-4, 8], z: [-9, 0] };
+  const EXIT_ROCK = { unit: 0.5, x: [-13, 12], y: [-4, 8], z: [Math.ceil((BL.factoryModels.SHIELD_Z - 0.7) / 0.5), 0] };
   const exitTunnel = cached(() => {
     const R = EXIT_ROCK, u = R.unit, v = makeVox();
     const open = (x, y, z) => y > 0 && (z > -2.5 ? Math.abs(x) < 2.5 && y < 3 : Math.abs(x) < 3 && y < 4);
@@ -2238,15 +2238,15 @@
       // The face toward the hall is craggy: about a third of it stands half a block proud, clear of the portal.
       if (k === R.z[0] && (Math.abs(x) < 3.6 && y < 4 || (((i * 73856093) ^ (j * 19349663)) >>> 0) % 8 > 2)) continue;
       const inside = open(x + u, y, z) || open(x - u, y, z) || open(x, y + u, z) || open(x, y - u, z) || open(x, y, z + u) || open(x, y, z - u);
-      // Inner stone in blocks of about a metre and floor under foot, both paling toward the rim with the daylight
-      // falling in (baked, so it holds on the tiers that light only the stations); the hall's stone in blocks of
-      // its own size.
+      // Inner stone in blocks of about a metre, paling toward the rim with the daylight falling in (baked, so it holds on
+      // the tiers that light only the stations); under the boards all dark, which is all a seam Canvas 2D leaves in them
+      // should show; the hall's stone in blocks of its own size.
       const block = (Math.floor(x) * 7 + Math.floor(y) * 13 + Math.floor(z) * 5) & 3, day = z > -1 ? 2 : z > -2.5 ? 1 : 0;
-      v.set(i, j, k, inside ? (j < 0 ? 7 + day : 1 + day * 2 + (block & 1)) : 10 + ((Math.floor(x / 1.5) * 3 + Math.floor(y / 1.5) * 5 + k) & 3));
+      v.set(i, j, k, inside ? (j < 0 ? 7 : 1 + day * 2 + (block & 1)) : 8 + ((Math.floor(x / 1.5) * 3 + Math.floor(y / 1.5) * 5 + k) & 3));
     }
-    const palette = [null, "#4e443c", "#453b34", "#62564c", "#584d44", "#7a6d60", "#6e6256", "#4a3e34", "#5a4c40", "#6c5c4d", ...STONE];
+    const palette = [null, "#4e443c", "#453b34", "#62564c", "#584d44", "#7a6d60", "#6e6256", "#1c120a", ...STONE];
     const rock = voxelGeometry(v, { unit: u, palette, origin: { x: 0, y: -0.01, z: 0 } });
-    const { geos, glow } = tunnelFrame(0.45);
+    const { geos, glow, boards, floor } = tunnelFrame(0.45, HALL_FLOOR);
     const outside = [], band = (h, yc, color, emissive, z) => outside.push(box({ w: 11, h, d: 0.2, color, emissive, offset: { y: yc, z } }));
     const out = 0.5;
     band(2.2, 4.3, "#d6eeff", 1, out + 7.2);
@@ -2255,9 +2255,10 @@
     band(0.7, 0.45, "#a9d8b0", 0.9, out + 6.9);
     outside.push(box({ w: 3.6, h: 0.9, d: 0.4, color: "#9cc9a2", emissive: 0.8, offset: { x: -1.9, y: 0.55, z: out + 6.6 } }));
     outside.push(box({ w: 1.8, h: 0.6, d: 0.4, color: "#a8d3ac", emissive: 0.8, offset: { x: 2.5, y: 0.4, z: out + 6.6 } }));
-    outside.push(box({ w: 11, h: 1, d: 6.2, color: "#9cc98c", emissive: 0.7, offset: { y: -0.52, z: out + 3.6 } }));
-    outside.push(box({ w: 1.5, h: 0.08, d: 6.4, color: "#e6d0a2", emissive: 0.75, offset: { y: 0.02, z: out + 3.4 } }));
-    outside.push(box({ w: 2.3, h: 0.06, d: 6.4, color: "#c1d09a", emissive: 0.7, offset: { y: 0, z: out + 3.4 } }));
+    // The ground and the path on it start under the boards' end, and stay under their tops.
+    outside.push(box({ w: 11, h: 1, d: 6.8, color: "#9cc98c", emissive: 0.7, offset: { y: -0.5, z: out + 3.3 } }));
+    outside.push(box({ w: 1.5, h: 0.08, d: 6.8, color: "#e6d0a2", emissive: 0.75, offset: { y: -0.03, z: out + 3.3 } }));
+    outside.push(box({ w: 2.3, h: 0.06, d: 6.8, color: "#c1d09a", emissive: 0.7, offset: { y: -0.025, z: out + 3.3 } }));
     for (const [x, z, h] of [[-2.4, out + 4.2, 3.2], [2.1, out + 5, 2.7]]) {
       outside.push(box({ w: 0.26, h, d: 0.26, color: "#a8906e", emissive: 0.7, offset: { x, y: h / 2, z } }));
       for (let k = 0; k < 4; k++) {
@@ -2265,15 +2266,16 @@
         outside.push(moved(turnedY(box({ w: 1.5, h: 0.14, d: 0.4, color: k % 2 ? "#86bf78" : "#94c986", emissive: 0.75, offset: { x: 0.7 } }), a), x, 0.05 + h, z));
       }
     }
-    return { rock, timber: merge(...geos), glow: noShadow(merge(...glow)), outside: noShadow(merge(...outside)) };
+    return { rock, timber: merge(...geos), boards, floor, glow: noShadow(merge(...glow)), outside: noShadow(merge(...outside)) };
   });
-  const buildSteps = function* () {
-    const slice = { until: 0, budget: BL.buildTasks.SLICE_MS };
-    for (const build of [hall, scaffold, coreBody, conduits, stationFrame, forge, peerPipes, cookerBody, studyHall]) yield* build.steps(slice);
+  // The hall's heavy, unchanging builders: built behind the crossing, or ahead of it on the island's own `slice`.
+  const BULK = [hall, scaffold, coreBody, conduits, stationFrame, forge, peerPipes, cookerBody, studyHall];
+  const buildSteps = function* (slice = { until: 0, budget: BL.buildTasks.SLICE_MS }) {
+    for (const build of BULK) yield* build.steps(slice);
     return null;
   };
   Object.assign(BL.factoryModels, {
-    buildSteps,
+    buildSteps, BULK,
     forgeSign, forgeLines, forgeTrack, forgeShafts, mintCoin, teslaCoil, statusLantern, peerPipes, peerMirrors, supportAt, stairCeilingAt, clearAt, walkable, resolveFall, hall, scaffold, coreBody, coreChamber, conduits, stationFrame, capacitor, forge, forgeFire, cart, switchboard, switchScreens, rebalancerBase, rebalancerRing, rebalancerFlow, treasuryBody, goldPile, hopperFill, beltNugget, goldCrate, dataBoard, moveBoard, cookerBody, cookerFixtures, cookerLid, cookerPort, cookerGear, cookerSats, donationKiosk, kioskScreen, kioskIdle, kioskThanks, donationBoard, boardFace, boardValues, paintBoard, satCube, flyingBanana, coreRingLime, coreRing, teslaArcs, lookoutTower, lookoutLamp, lookoutOptics, lookoutBeam, studyHall, studyNote, studyBoard, tunnels, galleryStation, galleryCaps, hardHat, exitTunnel, hangarDoor
   });
 })();

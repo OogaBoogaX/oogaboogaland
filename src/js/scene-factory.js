@@ -47,12 +47,13 @@
   const FOLLOW = { y: 0.9, min: 3, max: 7, pitch: [0.25, 0.8] };
   // The shield across the way out, as wide as the mouth's opening, as on the hub's side; and how far past where the
   // hub took its picture of the island the picture hangs.
-  const GATE_OPENING = { minX: -2.5, maxX: 2.5, floorY: 0, ceilingY: 3 }, OUTSIDE_DISTANCE = 34;
-  // The gate's shield stands at the balcony's back edge, where the island's tunnel's shield lands in the hall; an Ooga
-  // walking in through it comes on with the view no farther behind it than IN_VIEW and no higher than IN_PITCH, so the
-  // view starts in the tunnel. Walking out, the walk takes it no nearer the arrival's step than OUT_SLACK behind it, so a
-  // step back from there stays in the hall.
-  const GATE_Z = HALL.front - 0.6, IN_VIEW = 3.4, IN_PITCH = 0.45, OUT_SLACK = 1.2;
+  // How far past where the hub took it the picture of the island hangs: at the end of the tunnel's boards.
+  const GATE_OPENING = { minX: -2.5, maxX: 2.5, floorY: 0, ceilingY: 3 }, OUTSIDE_DISTANCE = 5.55;
+  // The gate's shield stands at the balcony's back edge, where the island's tunnel's shield lands in the hall. Walking out,
+  // the walk takes an Ooga no nearer the arrival's step than OUT_SLACK behind it, so a step back from there stays in the
+  // hall. An Ooga walking in through the hangar's door comes on with the view no farther behind it than IN_VIEW and no
+  // higher than IN_PITCH, so the view starts in the doorway. WALK_STOP is how far past the gate a walk in ends.
+  const GATE_Z = HALL.front - 0.6, IN_VIEW = BL.factoryWindow.GLIDE.view + 0.8, IN_PITCH = BL.factoryWindow.GLIDE.pitch, OUT_SLACK = 1.2, WALK_STOP = BL.factoryWindow.stopPast(FOLLOW.min);
   // Paired peer mirrors share their arch coordinates. A half turn carries an
   // incoming walk out of the other face, retaining height and distance crossed.
   const PEER_OPENING = { minX: -2.1, maxX: 2.1, floorY: 0.1, ceilingY: 4.65 }, PEER_PLANE = 0.45, PEER_TINT = [0.3, 0.72, 1];
@@ -196,7 +197,7 @@
   const SPOTS = {
     core: [LAYOUT.core.x, (LAYOUT.core.chamber[0] + LAYOUT.core.chamber[1]) / 2, LAYOUT.core.z], forge: [FIRE.x, FIRE.y + 0.6, FIRE.z],
     rebalancer: above(LAYOUT.rebalancer, 2), cooker: above(LAYOUT.cooker, 1.5), board: FM.kortikAt(0, 1.3, FM.KORTIK.seat),
-    shields: [[0, LAYOUT.entrance.y + 1.5, FM.EXIT_Z], ...LAYOUT.tunnels.map((t) => [t.x, t.y + 2, t.z])],
+    shields: [[0, LAYOUT.entrance.y + 1.5, FM.EXIT_Z + FM.SHIELD_Z], ...LAYOUT.tunnels.map((t) => [t.x, t.y + 2, t.z])],
     console: above(LAYOUT.switchboard, 1.5), treasury: above(LAYOUT.treasury, 1.2), lookout: above(LAYOUT.lookout, LAYOUT.lookout.tower),
     shaftIn: [FM.SHAFTS[0][0], 0.5, FM.SHAFTS[0][1]], shaftOut: [FM.SHAFTS[1][0], 0.5, FM.SHAFTS[1][1]], gallery: [0, LEVEL.top + 4.5, HALL.back + 4.9]
   };
@@ -216,12 +217,12 @@
   const arrive = (b) => { if (b.flashL <= 0) hearNode("land", b.node, 2, 1, b.index); b.flashL = FLASH; };
   const sputter = (b) => { if (b.sputter < SPUTTER * 0.5) hearNode("fail", b.node, 2); b.sputter = SPUTTER; };
   const NO_ACTORS = [];
-  let scene = null, greeter = null, kortik = null, actPrompt = false;
+  let scene = null, greeter = null, kortik = null, actPrompt = false, eyes = null;
   // The walk through the gate's shield (factory-window.js has its timings), as the island walks it in: on in from the
-  // island in the shield's light, walking on to where an arrival stands while the light clears; and out, walking
-  // itself through, where the light fills the view and the island takes over in it, from the crossing it is handed
-  // (`world.factoryCrossing`: across, how far past the shield, the view's pitch and distance). Which way, how long it has
-  // walked, where the Ooga stood the frame before, whether it is through, and the light over the view.
+  // island from the Ooga's own eyes (`eyes`), walking on until the view handed back will clear the shield; and out,
+  // walking itself toward the shield while the view swoops into those eyes, the island taking over as they reach it, from
+  // the crossing it is handed (`world.factoryCrossing`: across, how far past the shield). Which way, how long it has
+  // walked, where the Ooga stood the frame before and whether it is through.
   // Once a walk is done the Ooga stands (`settle`) until the visitor lets go of moving, since the view has turned round
   // behind it and a key still held may now mean the other way.
   // The hangar's door walks the same way, on in from the hangar (HANGAR_ON) and out into it (HANGAR_OFF), handing over
@@ -230,7 +231,8 @@
   // Across the switch, `grab` takes the hall's last frame as it hands the Ooga to the island, and `still` is the
   // island's last frame over the hall's first (`hold` seconds full, then dissolving); `beat` is how long the Ooga stands
   // in the shield before the island's rebuild. `canvas` is the scene's, to take the frame from.
-  const walk = { phase: 0, t: 0, x: 0, z: 0, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false };
+  // `handing` is that the walk out has reached where the island takes over.
+  const walk = { phase: 0, t: 0, x: 0, z: 0, through: false, handing: false, beat: 0, grab: false, still: 0, hold: 0, settle: false };
   let canvas = null;
   // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
   // room every frame, so signed-in players in the hall hear each other (voice needs a driven Ooga).
@@ -1134,20 +1136,26 @@
   };
   // While the hangar is open its door shows the hangar through the shield from the hangar's own stand-in, so a hosted
   // page fetches the hangar's code with the hall's. Should that fail, the hall opens all the same, its door keeping the
-  // glimpse, and walking through tries the hangar's code again.
-  const prepare = () => {
-    const loading = FM.hangarEntry() ? BL.deferred.load("hangar-scene") : null;
-    return loading && loading.catch(() => null);
+  // glimpse, and walking through tries the hangar's code again. It is a nicety, so slow code is treated the same way:
+  // the hall waits for it only HANGAR_GRACE, and an Ooga that walked in has already waited with the island running on.
+  const HANGAR_GRACE = 1500;
+  const prepare = (place, ctx) => {
+    const loading = FM.hangarEntry() && !ctx.world.factoryCrossing ? BL.deferred.load("hangar-scene") : null;
+    return loading && new Promise((resolve) => {
+      const done = () => { clearTimeout(timer); resolve(null); };
+      const timer = setTimeout(done, HANGAR_GRACE);
+      loading.then(done, done);
+    });
   };
-  // On in through the gate's shield from the island: as far across and as far past it as the Ooga went through the
-  // island's, facing in, the view square behind it, and the walk on.
+  // On in through the gate's shield from the island: as far across and as far past it as the Ooga stood at the island's,
+  // from that same eye, facing in, and the walk on.
   const walkIn = (c) => {
-    const G = BL.factoryWindow.GLIDE, pitch = clamp(c.pitch, FOLLOW.pitch[0], IN_PITCH);
-    pilot.navigate({ yaw: 0, pitch, dist: clamp(c.dist, FOLLOW.min, IN_VIEW), position: { x: clamp(c.across, -1.2, 1.2), y: LAYOUT.entrance.y, z: GATE_Z - clamp(c.past, 0, G.past) }, framed: true });
-    // The view eases back out to where an arrival's stands as the Ooga walks on.
-    pilot.orbit.tDist = ARRIVAL.dist;
+    // A step short of this shield in the tunnel the two ends share, which the walk opens.
+    walk.phase = WALK_ON;
+    pilot.navigate({ yaw: 0, pitch: 0, dist: FOLLOW.min, position: { x: clamp(c.across, -1.2, 1.2), y: LAYOUT.entrance.y, z: GATE_Z - c.past }, framed: true });
+    eyes.arrive(avatar, Math.PI);
     const p = avatar.root.position;
-    Object.assign(walk, { phase: WALK_ON, t: 0, x: p.x, z: p.z, through: false });
+    Object.assign(walk, { phase: WALK_ON, t: 0, x: p.x, z: p.z, through: false, handing: false });
   };
   // On foot, heading out across the balcony's last stretch before the gate's shield, or just through it in a long frame.
   const walkingOut = (p, previousZ, dt) => {
@@ -1156,47 +1164,49 @@
       && p.z > Math.max(GATE_Z - G.reach, ARRIVAL.position.z + OUT_SLACK) && (p.z - previousZ) / Math.max(dt, 1e-3) > G.moving;
   };
   // The walk, a frame at a time, after the pilot has read the visitor's input and before the crew moves: the Ooga's
-  // steering set aside for the walk's own, it walks itself down the gate's middle at an even pace while the view follows
-  // as always, swinging round behind it. Out through the shield, its
-  // light fills the view and the island takes over without a fade. Anything else moving the Ooga, or a walk that runs
-  // long, lets go; so does reaching where an arrival stands.
+  // steering set aside for the walk's own, it walks itself down the gate's middle at an even pace. Out, the view swoops
+  // into its eyes and the island takes over as they reach the shield. Anything else moving the Ooga, or a walk that runs
+  // long, lets go; so does getting far enough in for the view handed back to clear the shield.
+  const walkLetGo = () => {
+    walk.phase = 0;
+    walk.through = false;
+    people.steer(0, 0, 0, 0, 0);
+    eyes.letGo(FOLLOW.min);
+    // A forward key held through the walk goes on walking; anything else waits to be let go, as the view has turned.
+    walk.settle = people.player === avatar && !pilot.controls.takeForward();
+  };
   const walkStep = (dt) => {
-    const w = walk, G = BL.factoryWindow.GLIDE, p = avatar.root.position, o = pilot.orbit, off = w.phase === WALK_OFF;
+    const w = walk, G = BL.factoryWindow.GLIDE, p = avatar.root.position, off = w.phase === WALK_OFF;
     w.t += dt;
     const moved = Math.hypot(p.x - w.x, p.z - w.z);
-    if (people.player !== avatar || moved > 1.2 || w.t > G.limit || !off && p.z <= ARRIVAL.position.z) {
-      w.phase = 0;
-      w.through = false;
-      w.settle = people.player === avatar;
-      people.steer(0, 0, 0, 0, 0);
-      return;
-    }
+    if (people.player !== avatar || moved > 1.2 || w.t > G.limit || !off && p.z <= GATE_Z - WALK_STOP) return walkLetGo();
     w.x = p.x; w.z = p.z;
     const dx = -p.x * 0.6, dz = off ? G.ahead : -G.ahead, d = Math.hypot(dx, dz);
-    people.steer(dx / d, dz / d, 0, 1, 0, G.speed);
-    const behind = off ? Math.PI : 0;
-    o.tYaw = o.yaw + Math.atan2(Math.sin(behind - o.yaw), Math.cos(behind - o.yaw));
-    if (!off) return;
-    if (!w.through && p.z >= GATE_Z) {
+    people.steer(dx / d, dz / d, 0, 1, 0, G.eyePace);
+    if (!w.through && (off ? p.z >= GATE_Z : p.z <= GATE_Z)) {
       w.through = true;
-      w.beat = G.beat;
       scene.gate.phase.ripples.pulse(p.x, feetOf() - LAYOUT.entrance.y + 1, 0);
     }
-    // A step into the shield, it stands a beat, as the Timechain Sphere's way out does, so the island's rebuild lands on
-    // a still frame; then the island takes over with this frame held over its first.
-    if (!w.through || p.z < GATE_Z + G.through / 2 && moved > 0.005) return;
+    if (!off || p.z + eyes.ahead(avatar) < GATE_Z - G.hand) return;
+    // There before the swoop is done: it stands until the view is in its eyes.
+    if (!eyes.there) { people.steer(0, 0, 0, 0, 0); return; }
+    // At the shield, the island takes over from this eye: at once with this frame held over its first where it is kept,
+    // and where it must be rebuilt (seconds on a phone) by fading over that, as the Timechain Sphere's way out does, from
+    // a beat standing still.
+    const kept = !!BL.scenes.hub.retained;
+    if (!w.handing) { w.handing = true; w.beat = kept ? 0 : G.beat; }
     if (w.beat > 0) {
       w.beat -= dt;
       people.steer(0, 0, 0, 0, 0);
       return;
     }
-    world.factoryCrossing = { across: p.x, past: p.z - GATE_Z, pitch: o.pitch, dist: o.dist };
+    world.factoryCrossing = { across: p.x, past: p.z - GATE_Z, held: kept };
     w.phase = 0;
-    w.grab = true;
+    w.grab = kept;
     people.steer(0, 0, 0, 0, 0);
-    leaveCave(true);
+    leaveCave(kept);
     // A switch the director refuses (another under way) leaves the Ooga in the hall.
-    if (!leaving) { world.factoryCrossing = null; w.through = w.grab = false; }
+    if (!leaving) { world.factoryCrossing = null; w.through = w.grab = false; eyes.letGo(FOLLOW.min); }
   };
   // On foot on the landing, heading into the hangar's door within the walk's reach of its shield (but not from a step
   // back from where an arrival stands), or just through it in a long frame.
@@ -1260,7 +1270,8 @@
   // Ooga is the visitor's again, and the hangar's door waits the same way.
   const stay = () => {
     if (toHangar) { toHangar = false; hangarHeld = true; pilot.setActive(true); }
-    leaving = false; exitHeld = true; walk.phase = 0; walk.through = walk.grab = false; walk.still = walk.hold = 0; world.factoryCrossing = world.hangarCrossing = null;
+    leaving = false; exitHeld = true; walk.phase = 0; walk.through = walk.handing = walk.grab = false; walk.still = walk.hold = 0; world.factoryCrossing = world.hangarCrossing = null;
+    eyes.reset();
   };
   const onKey = (e) => {
     if (scene.booth.mode) return boothKey(scene, e);
@@ -1616,7 +1627,7 @@
     const e = LAYOUT.entrance, tunnel = FM.exitTunnel(), view = world.factoryView;
     const mouth = createNode({ position: { x: 0, y: e.y, z: FM.EXIT_Z } }), exit = createNode({ geometry: tunnel.timber });
     addChild(root, mouth);
-    addChild(mouth, createNode({ geometry: tunnel.rock }), exit, createNode({ geometry: tunnel.glow, sightHidden: true }), view
+    addChild(mouth, createNode({ geometry: tunnel.rock }), exit, createNode({ geometry: tunnel.floor, sightHidden: true, depthBias: FM.FLOOR_BIAS }), createNode({ geometry: tunnel.boards, sightHidden: true }), createNode({ geometry: tunnel.glow, sightHidden: true }), view
       ? createNode({ geometry: FM.outsideView(view, OUTSIDE_DISTANCE), position: { x: 0, y: 0, z: view.from + OUTSIDE_DISTANCE }, rotation: { x: 0, y: Math.PI, z: 0 }, sightHidden: true })
       : createNode({ geometry: tunnel.outside, sightHidden: true }));
     target(exit, "exit", null, 2.5);
@@ -1723,10 +1734,12 @@
 
   // The crew's support and step test on the hall's floor: the highest surface within a step of the feet, clear of
   // what stands there, and never off an edge.
-  const groundFor = (x, z, feet) => FM.supportAt(x, z, feet);
+  // The tunnel behind the gate's shield, open to the walk through it alone, as the Timechain rooms' doorway is.
+  const walkTunnel = (x, z) => (walk.phase === WALK_ON || walk.phase === WALK_OFF) && Math.abs(x) < 2.3 && z >= GATE_Z - 0.5 && z <= FM.EXIT_Z;
+  const groundFor = (x, z, feet) => walkTunnel(x, z) ? LAYOUT.entrance.y : FM.supportAt(x, z, feet);
   // There is no banana pile in the hall. Space must jump even when the rifle needs ammunition.
   const reloadPolicy = { near: () => false, available: () => false };
-  const walkableFor = (ax, az, bx, bz, y, height, actor) => FM.walkable(ax, az, bx, bz, y, actor.bodyRadius || 0.35, height);
+  const walkableFor = (ax, az, bx, bz, y, height, actor) => actor === avatar && walkTunnel(bx, bz) || FM.walkable(ax, az, bx, bz, y, actor.bodyRadius || 0.35, height);
   const ceilingFor = (x, z, feet, actor) => FM.stairCeilingAt(x, z, feet, actor.bodyRadius || 0.35);
   // In the air, keep the same obstacle clearance without requiring the floor to be within a step.
   const flyableFor = (ax, az, bx, bz, y, height, actor) => {
@@ -1824,6 +1837,7 @@
       follow: FOLLOW, clampTarget, clampCamera, ceilingAt: () => HALL.h - 2, coarse: COARSE, mayPossess,
       close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: (x, z) => FM.supportAt(x, z, feetOf()) }
     });
+    eyes = BL.factoryWindow.eyes(pilot, camera);
     const tipFor = (hit) => {
       const o = hit.owner, tip = TIPS[o.kind];
       if (o.kind === "board") return COARSE ? "Banana donation board · tap to read it" : "Banana donation board · click to read it";
@@ -2203,6 +2217,7 @@
     }
     if (people) people.update(dt, elapsed);
     pilot.update(dt);
+    eyes.view(dt);
     // The hall's sound hears from the Ooga driven here, or from the view's target.
     const ear = people && people.player, at = ear ? ear.root.position : pilot.orbit.target;
     audio.listen(at.x, ear ? at.y - ear.baseY + 1.4 : at.y, at.z, camera.target.x - camera.position.x, camera.target.z - camera.position.z);
@@ -2278,8 +2293,9 @@
       // shield. Anything else in the doorway (an Ooga in the air, say) goes out as it always has.
       if (walk.phase) { /* walking itself */ }
       else if (!exitHeld && driven === avatar && walkingOut(p, previousZ, dt)) {
-        Object.assign(walk, { phase: WALK_OFF, t: 0, x: p.x, z: p.z, through: false });
+        Object.assign(walk, { phase: WALK_OFF, t: 0, x: p.x, z: p.z, through: false, handing: false });
         pilot.controls.reset(); input.reset(); hud.tooltip.hide();
+        eyes.enter(avatar, 0);
       } else if (!hangarHeld && driven === avatar && walkingToHangar(s, p, previousX, previousZ, dt)) {
         Object.assign(walk, { phase: HANGAR_OFF, t: 0, x: p.x, z: p.z, through: false });
         pilot.controls.reset(); input.reset(); hud.tooltip.hide();
@@ -2468,6 +2484,8 @@
     return kept;
   };
   const leave = () => {
+    eyes.reset();
+    eyes = null;
     // Capture once, before disposal: the island retains only this visit, never a union of earlier halls.
     world.factoryKeep = factoryScene.allGeometry(new Set());
     // A visitor at the kiosk steps away first, and a tip of theirs still on its screen goes into the cooker.
@@ -2539,6 +2557,32 @@
     if (kortik) kortik.liveGeometry(set);
     if (remotes) remotes.liveGeometry(set);
   };
+  // Every mesh in a builder's result. `in` runs no accessor, so a packed mesh's lazy arrays stay unread.
+  const WARM_FACES = 40000;
+  const meshesIn = (value, out) => {
+    if (!value || typeof value !== "object") return;
+    if ("verts" in value && "faces" in value) out.add(value);
+    else for (const key in value) meshesIn(value[key], out);
+  };
+  // What the hall's first frame would otherwise build and upload all at once, readied while the visitor is still on the
+  // island (door-ready.js, on its `slice`): the pure builders, then their meshes and the ones the hall swaps in. `out`
+  // collects each mesh as it goes up, so the island keeps it on the GPU until the hall's own visit holds it.
+  const warmSteps = function* (gl, slice, out) {
+    const { pause } = BL.buildTasks;
+    yield* FM.buildSteps(slice);
+    for (const read of [...FM.BULK, FM.coreChamber, FM.forgeFire, FM.forgeSign, FM.forgeWave, FM.switchScreens, FM.rebalancerRing, FM.rebalancerFlow, FM.lookoutLamp, FM.galleryCaps, FM.capacitor, FM.cookerPort, FM.forgeShafts, FM.teslaArcs, FM.exitTunnel, BL.kortikModels.station, BL.kortikModels.geometries]) {
+      meshesIn(read(), out);
+      yield* pause(slice);
+    }
+    for (const geometry of out) {
+      // One upload cannot be cut short, so the hall's rock goes up under the crossing's held frame instead: a stumble
+      // in a free walk shows where a held frame a little longer does not. The hangar's door window stays there for the same reason.
+      if (geometry.faces.length > WARM_FACES) { out.delete(geometry); continue; }
+      gl.prepareGeometry(geometry);
+      yield* pause(slice);
+    }
+    return null;
+  };
   const stats = () => {
     let nodes = 0;
     traverseVisible(root, () => nodes++);
@@ -2550,10 +2594,12 @@
     // Voice zone: the Factory group, which its tunnel on the island shares (`factory`).
     voiceZone: "factory.hall",
     micKey: true,
-    id: "factory", prepare, buildSteps: () => FM.buildSteps(), enter, update, overlay, onDonation, previewDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, allGeometry, hallGeometry,
+    id: "factory", prepare, buildSteps: () => FM.buildSteps(), warmSteps, enter, update, overlay, onDonation, previewDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, allGeometry, hallGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     // Diagnostics observe the existing detached owner without reading model caches.
     get retainedGeometry() { return world ? world.factoryKeep : null; },
+    // The island, released, took the builders it kept warm with it: the next visit makes new meshes, so it lets go of these.
+    cachesReleased() { if (world) world.factoryKeep = null; },
     get inMotion() {
       return !!scene;
     }
