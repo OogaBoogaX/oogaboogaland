@@ -3,7 +3,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { box, bevelBox, merge, moved, turnedY, cached, variants, geometry, pushVert, face, tube, lathe } = BL.models;
+  const { box, bevelBox, merge, moved, turnedX, turnedY, turnedZ, torus, cached, variants, geometry, pushVert, face, tube, lathe } = BL.models;
   const { hexToRgb } = BL.math;
   // Each map's own ground and buildings are `arena(map index)`; its ziplines `zipline(map index * 2 + side)`.
   const SIM = BL.blockSim;
@@ -612,7 +612,7 @@
   const rack = variants((i) => merge(
     box({ w: 0.08, h: 0.7, d: 0.08, color: "#5a3a22", offset: { x: -0.35, y: 0.35 } }), box({ w: 0.08, h: 0.7, d: 0.08, color: "#5a3a22", offset: { x: 0.35, y: 0.35 } }),
     box({ w: 0.8, h: 0.06, d: 0.1, color: "#8a6440", offset: { y: 0.6 } }),
-    moved(turnedY(gun(8 + i), Math.PI / 2), 0, 0.7, 0)
+    moved(turnedY(merge(gun(8 + i)), Math.PI / 2), 0, 0.7, 0)
   ));
   // A zipline: a cable sagging a little between its anchors, in the team's colour, and a pole at the low end.
   const zipline = variants((k) => {
@@ -901,5 +901,26 @@
     }
     return merge(...parts);
   });
-  BL.blockModels = { isle, keel, puddle, bolt, hauntDress, beam, laserEyes, ghost, walletDevice, walletLight, vend, net2, jetpack, jetFlames, monkey, catapult, catapultArm, chute, goldBall, banana, bananaPile, peel, firePit, flames, potato, potatoArm, power, ice, tramp, TEAM, ORANGE, GUNS, arena, stand, block, tick, ball, splat, ring, pad, bubble, crate, grenade, rocket, net, draped, streak, gun, ladder, rack, zipline, trolley, cache, SPLATS: 6 };
+  // The grapple's head and rope, as Cloud Hopper's look. That game's models are deferred on a hosted page, and neither
+  // this scene nor the Arcade's weapon racks should fetch a whole game for them.
+  const hookHead = cached(() => {
+    const parts = [turnedX(lathe({ profile: [[0.045, -0.4], [0.06, -0.3], [0.05, 0.05], [0.075, 0.12], [0, 0.2]], segments: 8, color: "#efe6cf" }), Math.PI / 2),
+      moved(turnedX(torus(0.07, 0.02, "#6b4a2b", 0, 10, 5), Math.PI / 2), 0, 0, -0.46)];
+    for (let k = 0; k < 3; k++) {
+      const prong = tube({ path: (t) => { const a = t * 2.3; return { x: 0.18 - 0.18 * Math.cos(a), y: 0, z: 0.1 + 0.18 * Math.sin(a) }; },
+        radius: (t) => 0.036 - 0.022 * t, rings: 10, segments: 6, colorFn: () => "#9a8f80" });
+      parts.push(turnedZ(prong, k * Math.PI * 2 / 3));
+    }
+    for (let k = 0; k < 3; k++) parts.push(box({ w: 0.15, h: 0.15, d: 0.035, color: "#4f8a35", offset: { z: -0.22 + k * 0.07 } }));
+    const hook = merge(...parts);
+    for (const f of hook.faces) f.emissive = Math.max(f.emissive || 0, 0.22);
+    hook.castShadow = false;
+    return hook;
+  });
+  const rope = cached(() => {
+    const line = box({ w: 0.08, h: 0.08, d: 1, color: "#8a7040", emissive: 0.35, offset: { z: 0.5 } });
+    line.castShadow = false;
+    return line;
+  });
+  BL.blockModels = { hookHead, rope, isle, keel, puddle, bolt, hauntDress, beam, laserEyes, ghost, walletDevice, walletLight, vend, net2, jetpack, jetFlames, monkey, catapult, catapultArm, chute, goldBall, banana, bananaPile, peel, firePit, flames, potato, potatoArm, power, ice, tramp, TEAM, ORANGE, GUNS, arena, stand, block, tick, ball, splat, ring, pad, bubble, crate, grenade, rocket, net, draped, streak, gun, ladder, rack, zipline, trolley, cache, SPLATS: 6 };
 })();

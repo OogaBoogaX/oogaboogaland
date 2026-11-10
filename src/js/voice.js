@@ -62,7 +62,7 @@
   const BL = window.BL = window.BL || {};
   const ICE = { iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }], bundlePolicy: "max-bundle" };
   const TURN_TLS = "turns:turn.cloudflare.com:443?transport=tcp";
-  const ICE_GATHER_MS = 1500, RELAY_GATHER_MS = 3500, CONNECT_MS = 10000, RETRY_MS = 2000;
+  const ICE_GATHER_MS = 1500, RELAY_GATHER_MS = 3500, CONNECT_MS = 10000, RETRY_MS = 2000, SLOW_RETRY_MS = 15000, RESTART_TRIES = 3, RESTART_WAIT_MS = 3000;
   // A connection that drops after it was up gets this long to come back on its own before voice starts over.
   const DROP_GRACE_MS = 5000;
   // Speaking: RMS over SPEAK_ON starts it at once; SPEAK_HOLD quiet reads in a row end it, so words do not flicker.
@@ -408,10 +408,11 @@
     for (let attempt = 0; ; attempt++) {
       valid();
       const config = await iceFor(token); valid();
-      await api("session", { kind: "pub" }, token); valid();
-      const pc = new RTCPeerConnection(config);
-      pubPc = pc;
+      let pc = null;
       try {
+        await api("session", { kind: "pub" }, token); valid();
+        pc = new RTCPeerConnection(config);
+        pubPc = pc;
         const tx = pc.addTransceiver(mic.getAudioTracks()[0], { direction: "sendonly" });
         const offer = await pc.createOffer(); valid();
         await pc.setLocalDescription(offer); valid();
@@ -423,7 +424,7 @@
         await api("live", null, token); valid();
         return;
       } catch (err) {
-        pc.close(); if (pubPc === pc) pubPc = null;
+        if (pc) { pc.close(); if (pubPc === pc) pubPc = null; }
         valid();
         if (attempt) throw err;
       }
@@ -472,6 +473,42 @@
     window.addEventListener("pointerup", wake, true);
     window.addEventListener("keydown", wake, true);
   }
+
+  // What a visitor in voice hears as a hidden tab nears leaving the room (net.js), and the hang-up as it does: on this
+  // page alone, straight to the context's output as the voices go, so the environment mute does not silence them. One
+  // oscillator and gain for the context's life; a cue only schedules automation on them. Each note is [Hz, seconds].
+  const CUE_LEVEL = 0.22, CUE_EDGE = 0.012, CUE_GAP = 0.05, CUE_START = 0.02;
+  const CUE_WARNINGS = [[[659.25, 0.16], [880, 0.24]], [[880, 0.12], [880, 0.12], [880, 0.2]]];
+  const CUE_HANG_UP = [[523.25, 0.16], [392, 0.16], [261.63, 0.36]];
+  let cueOsc = null, cueGain = null;
+  const playCue = (notes) => {
+    if (!stats.enabled || !audio || audio.state !== "running") return 0;
+    if (!cueGain) {
+      cueGain = audio.createGain();
+      cueGain.gain.value = 0;
+      cueGain.connect(audio.destination);
+      cueOsc = audio.createOscillator();
+      cueOsc.type = "triangle";
+      cueOsc.connect(cueGain);
+      cueOsc.start();
+    }
+    const gain = cueGain.gain, begin = audio.currentTime + CUE_START;
+    gain.cancelScheduledValues(begin);
+    let t = begin;
+    for (let i = 0; i < notes.length; i++) {
+      const hz = notes[i][0], seconds = notes[i][1];
+      cueOsc.frequency.setValueAtTime(hz, t);
+      gain.setValueAtTime(0, t);
+      gain.linearRampToValueAtTime(CUE_LEVEL, t + CUE_EDGE);
+      gain.setValueAtTime(CUE_LEVEL, t + seconds - CUE_EDGE);
+      gain.linearRampToValueAtTime(0, t + seconds);
+      t += seconds + CUE_GAP;
+    }
+    return Math.ceil((t - audio.currentTime) * 1000);
+  };
+  const warnLeaving = (stage) => { playCue(CUE_WARNINGS[stage]); };
+  // How long the hang-up lasts, in milliseconds, so the room is left once it has played; 0 for a visitor not in voice.
+  const hangUp = () => playCue(CUE_HANG_UP);
 
   // Listening does not acquire or publish a microphone. Both entry points run inside a gesture.
   const listen = async () => {
@@ -559,6 +596,17 @@
     subs.forEach(nearSub);
     emit();
   };
+  // The microphone itself went (unplugged, a headset switched off): the speaker would go on hearing everyone and sending
+  // nothing, with nothing to say so. Back in on the device that is there.
+  const micLost = () => {
+    if (!stats.publishing) return;
+    if (mic) for (const track of mic.getTracks()) track.stop();
+    mic = null;
+    stats.deviceId = "";
+    if (micMeter) micMeter.source.disconnect();
+    micMeter = null;
+    restart();
+  };
   const enable = async (preserveMute = false) => {
     activate();
     if (stats.joining || stats.publishing) return;
@@ -572,7 +620,7 @@
       const stream = mic || await navigator.mediaDevices.getUserMedia(micConstraints());
       if (token !== lifecycle || generation !== micGeneration || !microphoneWanted) { for (const track of stream.getTracks()) track.stop(); return; }
       mic = stream; stats.permission = "granted";
-      for (const track of mic.getAudioTracks()) track.enabled = !stats.muted;
+      for (const track of mic.getAudioTracks()) { track.enabled = !stats.muted; track.onended = micLost; }
       micMeter = micMeter || meter(mic);
       gate();
       openingPublisher = true;
@@ -736,6 +784,7 @@
     micMeter = null;
     if (audio) audio.close().catch(() => {});
     audio = null;
+    cueOsc = cueGain = null;
     stats.muted = stats.alone = false; stats.micError = "";
     BL.net.setMuted(false);
     desired = [];
@@ -761,16 +810,29 @@
     emit();
   };
   // `welcomed`: the room has just let this page in, which puts a visitor out of voice back in if they were.
+  let restarting = false;
   const restart = async (welcomed = false) => {
-    if (!stats.enabled) { if (welcomed) resume(); return; }
-    const wanted = microphoneWanted;
+    // A welcome during a restart is the same blip: it must not put a speaker back in as a muted listener.
+    if (!stats.enabled) { if (welcomed && !restarting) resume(); return; }
+    const wanted = microphoneWanted, muted = stats.muted;
     const token = ++lifecycle; micGeneration++; abortRequests();
     teardown(); stats.joining = false;
-    cleanup = api("leave", null, token).catch(() => {});
-    await cleanup;
-    if (token !== lifecycle) return;
-    if (wanted && microphoneWanted) await enable(true);
-    else await listen();
+    restarting = true;
+    try {
+      cleanup = api("leave", null, token).catch(() => {});
+      await cleanup;
+      if (token !== lifecycle) return;
+      if (!wanted || !microphoneWanted) { await listen(); return; }
+      // A failed call here is usually the same network blip that caused the restart: it should not end a speaker's voice.
+      for (let tries = 1; ; tries++) {
+        await enable(true);
+        if (token !== lifecycle || stats.publishing || stats.permission === "denied" || tries === RESTART_TRIES) return;
+        await new Promise((resolve) => window.setTimeout(resolve, RESTART_WAIT_MS));
+        if (token !== lifecycle) return;
+        // Giving up the microphone muted this page; the next try comes back as the visitor had it.
+        microphoneWanted = stats.micWanted = true; stats.muted = muted;
+      }
+    } finally { restarting = false; }
   };
 
   // Whom the room wants heard, and each one's publication count (`gens`; none from an older room).
@@ -810,6 +872,9 @@
         return;
       }
       stats.error = "voice unavailable"; emit();
+      // Whoever is still wanted goes on being tried, slowly, rather than waiting on the room's next change.
+      window.clearTimeout(retryTimer);
+      retryTimer = window.setTimeout(() => { if (token === lifecycle && stats.enabled) schedule(); }, SLOW_RETRY_MS);
     });
   };
 
@@ -818,7 +883,9 @@
   // it is retried rather than left silent.
   const apply = async (token) => {
     current(token);
-    if (!stats.enabled || !subPc) return;
+    if (!stats.enabled) return;
+    // A retry that could not open a new receive session leaves none, and nothing else would notice: open one or fail the change.
+    if (!subPc) { await openReceiver(token); current(token); }
     const pc = subPc;
     const valid = () => { current(token); if (pc !== subPc) throw new Error("receiver replaced"); };
     const want = new Set(desired);
@@ -857,7 +924,8 @@
         await gathered(pc, relayConfig !== ICE); valid();
         await api("renegotiate", { sdp: pc.localDescription.sdp }, token); valid();
       }
-      for (const id of add) if (!subs.has(id) && want.has(id)) throw new Error("voice pull incomplete");
+      // Against the list as it stands now: someone who left while this pull was out is no failure, and must not cost the listener every other voice.
+      for (const id of add) if (!subs.has(id) && desired.includes(id)) throw new Error("voice pull incomplete");
     }
     if (!subs.size && pc.connectionState === "new") stats.receiveState = "idle";
     if (stats.peers !== subs.size) {
@@ -926,5 +994,5 @@
   const inspect = () => ({ desired: desired.slice(), pulled: [...subs.keys()], publish: pubPc ? pubPc.connectionState : "none", receive: subPc ? subPc.connectionState : "none",
     playback: GAIN_PLAY ? "gain" : "element", context: audio ? audio.state : "none" });
 
-  BL.voice = { preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, leave, restart, stop, setPeers, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
+  BL.voice = { warnLeaving, hangUp, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, leave, restart, stop, setPeers, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
 })();

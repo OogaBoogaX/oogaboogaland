@@ -46,7 +46,7 @@ const reactionRoom = (clock) => {
   const room = Object.create(Room.prototype);
   room.ctx = { storage: new Proxy({}, { get: (_, key) => forbidden(`storage.${String(key)}`) }) };
   room.env = {};
-  room.players = new Map(); room.chatBuckets = new Map(); room.chat = protocol.chatLog();
+  room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.chat = protocol.chatLog();
   room.studio = studio.studioState(0);
   const join = (id, zone, extra = {}) => {
     const ws = { sent: [], saved: null, deserializeAttachment: () => ({ id }), serializeAttachment: (a) => { ws.saved = a; }, send: (text) => ws.sent.push(text) };

@@ -13,7 +13,7 @@
 //
 // The screens are native charts (timechain-charts.js) of mempool.space's public block and mining data
 // (timechain-blocks.js), repainted only when what they print changes, one picture a frame at most, plus the six
-// Timechain Index holdings readings at the desk's terminal. Sleeping or away, Sani sits in his recliner with his beer.
+// Timechain Index holdings readings at the desk's terminal.
 (() => {
   "use strict";
   const BL = window.BL;
@@ -152,10 +152,8 @@
     screen: "Timechain display · tap for a close-up",
     card: "Latest blocks · tap for the charts",
     terminal: "Holdings desk · tap for Timechain Index holdings",
-    sani: "Sani · tap to spin his chair",
-    beer: "500 ml beer · tap to chug",
-    recliner: "Sani's recliner · tap to spin and spill the glass",
     door: "The way out · use the Exit button",
+    lockkey: "Room lock · walk up and press Space",
     table: "Meeting table · jump up on it",
     chair: COARSE ? "Chair · tap SIT beside it" : "Chair · Space beside it sits"
   };
@@ -317,14 +315,6 @@
       go: (i) => { holdingsIndex = i; holdingsVersion++; sweep = true; }
     };
 
-    // Sleeping or away, Sani is in his recliner; active, he is with the mainland crew.
-    const lounge = built.lounge, beer = BL.timechainBeer.create(lounge);
-    const seat = { x: lounge.spots.chair.x, z: lounge.spots.chair.z, angle: Math.PI, speed: 0, phase: 0, active: true };
-    target(lounge.chair, { kind: "recliner" }, 1.2);
-    target(beer.mug, { kind: "beer" }, 0.3);
-    let sani = null, saniRemote = false;
-    const saniContributor = contributors.roster.find(entry => entry.name === "SaniExp");
-    const saniActor = { x: 0, y: 0, z: 0, radius: 0.35, height: 1.8 };
     const NO_ACTORS = [], actors = [];
 
     // The visitor's Ooga: the one handed over, else the visit's, else `character=` on a page that opens here, else
@@ -345,7 +335,6 @@
     const outsideActors = () => {
       actors.length = 0;
       if (remotes) { const list = remotes.actors(); for (let i = 0; i < list.length; i++) actors.push(list[i]); }
-      if (sani && sani.root.visible) actors.push(saniActor);
       return actors.length ? actors : NO_ACTORS;
     };
     // Space beside the Exit button walks out, beside a free chair and facing it (standing on the floor) sits in it;
@@ -365,9 +354,123 @@
       }
       return near;
     };
+    // The room's lock, shared rooms only: Space beside its keypad takes the view and the keys. Four digits and LOCK lock the
+    // room (`net.lockRoom`); UNLOCK opens it for anyone inside, and it opens by itself once nobody is inside. Locked, the
+    // keypad shows its PIN to whoever is using it (`net.state.roomPin`, which the room tells only those inside).
+    const lockPad = built.lockPad, LOCK_ANSWER = 4, LOCK_NOTE = 1.4, LOCKED_RED = "#ff4a3d";
+    let pinShown = "", pinWords = "";
+    const pinLine = () => {
+      const pin = BL.net.state.roomPinRoom === room.id ? BL.net.state.roomPin : "";
+      if (pin !== pinShown) { pinShown = pin; pinWords = pin ? `PIN ${pin}` : ""; }
+      return pinWords;
+    };
+    const DOTS = ["", "*", "**", "***", "****"], lock = { on: false, digits: "", sent: 0, note: "", noteLeft: 0, locked: false, hidden: false, ease: 1, from: { x: 0, y: 0, z: 0 }, fromLook: { x: 0, y: 0, z: 0 } };
+    const isLocked = () => shared && !!BL.net.state.lockedRooms[room.id];
+    const nearLock = () => {
+      if (!avatar || avatar.camp.seat) return false;
+      const p = avatar.root.position;
+      return Math.hypot(p.x - L.lockPad.x, p.z - L.lockPad.z) < L.lockReach;
+    };
+    const lockNote = (words) => { lock.note = words; lock.noteLeft = LOCK_NOTE; };
+    const lockLetGo = () => {
+      if (!lock.on) return;
+      lock.on = false; lock.digits = ""; lock.sent = 0;
+      if (avatar) avatar.root.cameraHidden = lock.hidden;
+      pilot.setExternalControl(false);
+      hud.el.act.hidden = !avatar;
+      pilot.showAct();
+      // Combat's mouse-look comes back as it does when a menu closes (pilot.js `setMenuOpen`).
+      pilot.focusAim(!!navigator.userActivation?.isActive);
+    };
+    const lockEngage = () => {
+      if (lock.on || !avatar || guide.stage) return false;
+      if (!shared) { hud.toast("A solo copy is yours alone: nobody else can come in"); return true; }
+      if (!BL.net.state.roomLocks) { hud.toast("This room can't be locked just now"); return true; }
+      lock.on = true; lock.digits = ""; lock.sent = 0; lock.noteLeft = 0; lock.ease = 0;
+      people.steer(0, 0, 0, 0, 0);
+      pilot.setExternalControl(true);
+      if (document.pointerLockElement) document.exitPointerLock();
+      hud.el.act.hidden = true;
+      hud.tooltip.hide();
+      // The view stands in front of the pad, where the visitor's own Ooga would only be in the way of the keys, to the
+      // eye and to the picks. Its head alone is the pilot's to hide in first person, so the whole Ooga goes instead.
+      lock.hidden = avatar.root.cameraHidden;
+      avatar.root.cameraHidden = true;
+      const c = camera.position, t = camera.target;
+      lock.from.x = c.x; lock.from.y = c.y; lock.from.z = c.z;
+      lock.fromLook.x = t.x; lock.fromLook.y = t.y; lock.fromLook.z = t.z;
+      const pin = isLocked() && pinLine();
+      hud.hint(isLocked() ? `${pin ? `${pin} · ` : ""}Press UNLOCK to open the room · move or Esc to step back` : "Type a 4-digit PIN, then press LOCK · move or Esc to step back", 7000);
+      return true;
+    };
+    const lockSend = () => {
+      if (isLocked() ? BL.net.unlockRoom(room.id) : BL.net.lockRoom(room.id, lock.digits)) lock.sent = LOCK_ANSWER;
+      else { lock.digits = ""; lockNote("NO SIGNAL"); }
+    };
+    const lockPress = (key) => {
+      if (!lock.on || lock.sent) return;
+      if (key === "back") {
+        if (lock.digits) lock.digits = lock.digits.slice(0, -1);
+        else lockLetGo();
+      } else if (key === "enter") {
+        if (isLocked() || lock.digits.length === 4) lockSend();
+      } else if (/^[0-9]$/.test(key) && !isLocked() && lock.digits.length < 4) lock.digits += key;
+    };
+    // A step steps back from the keypad, as from any look (pilot.js), and goes on to the Ooga, unless an answer is due.
+    const LOCK_STEPS = new Set(BL.controls.keysFor("forward", "back", "left", "right"));
+    const lockKeys = (e) => {
+      if (!lock.on || e.metaKey || e.ctrlKey || e.altKey || e.target && e.target.closest && e.target.closest("input, textarea, [contenteditable]")) return;
+      if (!lock.sent && LOCK_STEPS.has(e.key.toLowerCase())) { lockLetGo(); return; }
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.repeat) return;
+      if (/^[0-9]$/.test(e.key)) lockPress(e.key);
+      else if (e.key === "Backspace") lockPress("back");
+      else if (e.key === "Enter") lockPress("enter");
+      else if (e.key === "Escape" && !lock.sent) lockLetGo();
+    };
+    window.addEventListener("keydown", lockKeys, { capture: true, signal: ctx.signal });
+    // While the keypad has the keys the view stands square in front of it, gliding there and held; everything else follows
+    // from the room's own word on the lock.
+    const LOCK_EYE = 0.82, LOCK_GLIDE = 0.35;
+    const lockUpdate = (dt) => {
+      lock.noteLeft = Math.max(0, lock.noteLeft - dt);
+      if (lock.sent > 0 && (lock.sent -= dt) <= 0) { lock.digits = ""; lockNote("NO ANSWER"); }
+      const locked = isLocked();
+      if (locked !== lock.locked) {
+        lock.locked = locked;
+        hud.toast(locked ? `${room.name} is locked · players outside need its PIN` : `${room.name} is unlocked`);
+      }
+      built.lockSign.visible = locked && doors.open < 0.05;
+      const words = lock.noteLeft > 0 ? lock.note : locked ? lock.on && pinLine() || "LOCKED" : lock.on ? lock.digits ? DOTS[lock.digits.length] : "SET 4-DIGIT PIN" : !shared ? "SOLO" : "UNLOCKED";
+      lockPad.say(words, locked ? LOCKED_RED : undefined);
+      lockPad.actAs(locked ? "UNLOCK" : "LOCK", locked || lock.digits.length === 4);
+      lockPad.tick(dt);
+      if (!lock.on) return;
+      lock.ease = Math.min(1, lock.ease + dt / LOCK_GLIDE);
+      const e = lock.ease * lock.ease * (3 - 2 * lock.ease), P = L.lockPad, eyeZ = P.z - LOCK_EYE;
+      camera.position.x = lock.from.x + (P.x - lock.from.x) * e;
+      camera.position.y = lock.from.y + (P.y - lock.from.y) * e;
+      camera.position.z = lock.from.z + (eyeZ - lock.from.z) * e;
+      camera.target.x = lock.fromLook.x + (P.x - lock.fromLook.x) * e;
+      camera.target.y = lock.fromLook.y + (P.y - lock.fromLook.y) * e;
+      camera.target.z = lock.fromLook.z + (P.z - lock.fromLook.z) * e;
+      camera.up = null;
+    };
+    const lockHeard = (event) => {
+      if (event.op !== "lock-result" || event.room !== room.id || !lock.sent) return;
+      lock.sent = 0; lock.digits = "";
+      // Done, the view goes straight back to the Ooga; the keypad's window and a toast say what changed.
+      if (event.ok) lockLetGo();
+      else lockNote(event.reason === "already-locked" ? "LOCKED" : "TRY AGAIN");
+    };
+    // Over the door leaves' broad pick spheres, which reach across the pad from where its view stands, and over the
+    // Ooga's own (priority 1), as the island keypad's keys are (scene-hub.js).
+    for (const key of lockPad.keys) target(key.node, { kind: "lockkey", key: key.key, priority: 2 }, key.key.length === 1 ? 0.055 : 0.09);
     const useNear = () => {
       if (guide.stage) return false;
       if (nearExit()) { walkOut(); return true; }
+      if (nearLock()) return lockEngage();
       const chair = nearChair();
       return !!chair && people.sitPlayer(chair);
     };
@@ -385,13 +488,6 @@
       avatar.root.position.y = avatar.baseY;
       pilot.possess(avatar);
       pilot.enterClose();
-    }
-    if (playerName !== "SaniExp") {
-      sani = models.caveman(contributors.traitsFor("SaniExp"));
-      sani.baseY = sani.root.position.y;
-      for (const key of ["snack", "gun", "jetpack", "jetFlame"]) if (sani.parts[key]) sani.parts[key].visible = false;
-      addChild(root, sani.root);
-      for (const key of ["head", "torso", "legL", "legR", "armL", "armR"]) if (sani.parts[key]) target(sani.parts[key], { kind: "sani" });
     }
     // In the room, as the visit has it: a guided arrival from the vestibule, or (a reload, a link, a history step)
     // standing at the arrival facing the screens.
@@ -434,13 +530,18 @@
       if (guide.stage) BL.net.passDoor(room.zone, "in");
     } else { BL.net.setBody(null); BL.net.setZone("none"); }
     remotes = shared ? BL.remotePlayers.create({ root, crew: people, fx,
-      hide: (name, on) => { if (name === "SaniExp") saniRemote = on; },
       posed: (cave) => { cave.parts.club.visible = cave.parts.gun.visible = false; }
     }) : null;
     const footsteps = BL.footsteps.create();
     const sound = ambience(room, ctx.signal);
     // Another player crossing this room's own doorway opens its doors here too (net.js `subscribeDoor`).
     const unsubscribeDoor = shared ? BL.net.subscribeDoor((event) => {
+      if (event.op === "denied" && event.reason === "locked") {
+        hud.toast(`${room.name} is locked from inside`);
+        handOff();
+        return;
+      }
+      lockHeard(event);
       if (event.t !== "transit" || event.door !== room.zone) return;
       doors.until = Math.max(doors.until, performance.now() + Math.max(0, Math.min(8000, event.exp - BL.net.serverNow())));
     }) : null;
@@ -511,16 +612,19 @@
       return o.kind === "screen" ? `${CH.PANELS[o.index].title} · tap for a close-up` : TIPS[o.kind] || "";
     };
     Object.assign(hooks, {
-      onHover: (hit, p) => { if (hit && !guide.stage) hud.tooltip.show(tipFor(hit), p.x, p.y); else hud.tooltip.hide(); },
-      onHoverMove: (hit, p) => { if (!guide.stage) hud.tooltip.show(tipFor(hit), p.x, p.y); },
+      onHover: (hit, p) => { if (hit && !guide.stage && !lock.on) hud.tooltip.show(tipFor(hit), p.x, p.y); else hud.tooltip.hide(); },
+      onHoverMove: (hit, p) => { if (!guide.stage && !lock.on) hud.tooltip.show(tipFor(hit), p.x, p.y); },
       onTap: (hit) => {
         if (!hit || guide.stage) return;
         const o = hit.owner;
         if (o.kind === "exit") { if (nearExit()) walkOut(); else hud.toast("Walk up to the Exit button, then press it"); }
+        else if (o.kind === "lockkey") {
+          if (lock.on) lockPress(o.key);
+          else if (!nearLock()) hud.toast("Walk up to the keypad, then press Space");
+          else { lockEngage(); lockPress(o.key); }
+        }
         else if (o.kind === "screen" || o.kind === "card") { chartIndex = o.kind === "screen" ? o.index : 2; chartVersion++; hud.openBoard(chartBoard); }
         else if (o.kind === "terminal") { holdingsVersion++; hud.openBoard(holdingsBoard); }
-        else if (o.kind === "sani" || o.kind === "recliner") beer.act("spin", seat);
-        else if (o.kind === "beer") beer.act("chug", seat);
         else if (o.kind === "door") hud.toast(COARSE ? "Tap EXIT beside the doors to walk out" : "Press Space at the Exit button to walk out");
         else if (o.kind === "chair") {
           const s = seats[o.index], p = avatar && avatar.root.position;
@@ -528,6 +632,8 @@
         } else if (o.kind === "table") hud.toast(`${room.name} · ${room.scale}× · ${shared ? "shared with whoever chose it" : "a solo copy, just for you"}`);
       },
       ...pilot.hooks,
+      // A key pressed twice quickly is pressed twice (a PIN may repeat a digit), never a double tap.
+      onDoubleTap: (hit, p) => { if (hit && hit.owner.kind === "lockkey") hooks.onTap(hit, p); else pilot.hooks.onDoubleTap(hit, p); },
       onZoom: (factor, gesture, px, py) => { if (!guide.stage) pilot.hooks.onZoom(factor, gesture, px, py); }
     });
     hud.onAction((action) => {
@@ -544,7 +650,7 @@
       if (!mode) return;
       let others = 0;
       if (shared) for (const rec of BL.net.remotes.values()) if (rec.zone === room.zone && rec.body) others++;
-      const text = shared ? `${room.name} · ${room.scale}×${others ? ` · ${others + 1} here` : ""}` : `${room.name} · Solo visit · not signed in`;
+      const text = shared ? `${room.name} · ${room.scale}×${isLocked() ? " · LOCKED" : ""}${others ? ` · ${others + 1} here` : ""}` : `${room.name} · Solo visit · not signed in`;
       if (mode.textContent !== text) mode.textContent = text;
     };
     showMode();
@@ -599,37 +705,6 @@
         }
       } else if (guide.stage === "out") people.steer(0, 0, 0, 0, 0);
     };
-    // Sani at his laptop, in the pose the island used to give him there, his beer gear doing the rest.
-    const poseSani = (dt) => {
-      if (!sani) return;
-      const state = contributors.stateFor(saniContributor);
-      const visible = !saniRemote && (state === "sleeping" || state === "away");
-      if (!visible) {
-        if (sani.root.visible) beer.pause();
-        sani.root.visible = false;
-        return;
-      }
-      sani.root.visible = true;
-      seat.phase = (seat.phase + dt * 7) % (Math.PI * 2);
-      const decay = Math.exp(-1.15 * dt);
-      seat.angle = (seat.angle + seat.speed * (1 - decay) / 1.15) % (Math.PI * 2);
-      seat.speed *= decay;
-      if (seat.speed < 0.005) seat.speed = 0;
-      lounge.swivel.rotation.y = seat.angle;
-      const h = sani.traits.height, parts = sani.parts;
-      sani.root.position.x = seat.x; sani.root.position.z = seat.z; sani.root.position.y = 0.88 * h;
-      sani.root.rotation.x = -0.23; sani.root.rotation.z = 0; sani.root.rotation.y = seat.angle;
-      lounge.chair.scale.x = lounge.chair.scale.y = lounge.chair.scale.z = h;
-      parts.legR.rotation.x = parts.legL.rotation.x = -1.05;
-      parts.armR.rotation.x = -0.95 + Math.sin(seat.phase) * 0.035;
-      parts.armL.rotation.x = -0.95 - Math.sin(seat.phase) * 0.035;
-      parts.armR.rotation.z = -0.12; parts.armL.rotation.z = 0.12;
-      parts.head.rotation.x = 0.28;
-      if (parts.club) parts.club.visible = false;
-      beer.update(sani, seat, dt);
-      saniActor.x = sani.root.position.x; saniActor.z = sani.root.position.z;
-    };
-
     const update = (dt, elapsed) => {
       pilot.readInput(dt);
       if (guide.stage && avatar) runGuide(dt);
@@ -655,12 +730,13 @@
       }
       if (remotes) remotes.update(dt);
       footsteps.update(driven);
-      poseSani(dt);
+      lockUpdate(dt);
       if (avatar && !guide.stage) {
-        const near = avatar.camp.seat ? "stand" : nearExit() ? "exit" : nearChair() ? "sit" : null;
+        const near = lock.on ? null : avatar.camp.seat ? "stand" : nearExit() ? "exit" : nearLock() ? "lock" : nearChair() ? "sit" : null;
         if (near !== guide.near) {
           guide.near = near;
           if (near === "exit") { hud.setAct("EXIT"); hud.hint(COARSE ? "Tap EXIT to walk out" : "Space · Exit"); }
+          else if (near === "lock") { hud.setAct(isLocked() ? "UNLOCK" : "LOCK"); hud.hint(COARSE ? "Tap to use the room's lock" : isLocked() ? "Space · Unlock the room" : "Space · Lock the room"); }
           else if (near === "sit") { hud.setAct("SIT"); hud.hint(COARSE ? "Tap SIT to take the chair" : "Space · Sit"); }
           else if (near === "stand") { hud.setAct("STAND UP!"); hud.hint(COARSE ? "Move or tap STAND UP! to get up" : "Move or press Space to stand up"); }
           else pilot.showAct();
@@ -711,8 +787,8 @@
     shell.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
       timechain: {
-        room, visit, layout: L, built, reader, holdings, guide, doors, beer, seat, seats,
-        get avatar() { return avatar; }, get sani() { return sani; }, get remotes() { return remotes; }, get sound() { return sound.stats; },
+        room, visit, layout: L, built, reader, holdings, guide, doors, seats,
+        get avatar() { return avatar; }, get remotes() { return remotes; }, get sound() { return sound.stats; },
         get slots() { return all.map((s) => ({ key: s.key, shown: !!s.node.geometry })); }, get exitEye() { return exitEye; },
         exit: walkOut, chartBoard, holdingsBoard
       }
@@ -736,7 +812,6 @@
         if (s.node.geometry) renderer.releaseGeometry(s.node.geometry);
         s.node.geometry = null;
       }
-      beer.dispose();
       if (remotes) remotes.dispose();
       footsteps.dispose();
       if (people) people.dispose();

@@ -1002,6 +1002,24 @@
         <div class="garage-head">
           <h2><span data-sign>Block Frenzy</span></h2>
           <p class="help block-tip" id="block-tip"></p>
+          <section id="block-live" class="block-live" hidden aria-label="Live match">
+            <h3 class="section-head" id="block-live-title">Live match</h3>
+            <p class="help" id="block-live-status"></p>
+            <div class="block-live-sizes" id="block-live-sizes" hidden>
+              <button type="button" class="block-side block-target" data-action="block-live-size-1" data-live-size="1" aria-pressed="false">1v1</button>
+              <button type="button" class="block-side block-target" data-action="block-live-size-2" data-live-size="2" aria-pressed="false">2v2</button>
+              <button type="button" class="block-side block-target" data-action="block-live-size-3" data-live-size="3" aria-pressed="false">3v3</button>
+              <button type="button" class="block-side block-target" data-action="block-live-size-4" data-live-size="4" aria-pressed="false">4v4</button>
+            </div>
+            <ul class="block-live-list" id="block-live-list"></ul>
+            <div class="block-live-buttons">
+              <button type="button" data-action="block-live-reg" id="block-live-reg">Register</button>
+              <button type="button" data-action="block-live-ready" id="block-live-ready" hidden>Ready!</button>
+              <button type="button" data-action="block-live-alone" id="block-live-alone" hidden>Start alone</button>
+              <button type="button" data-action="block-live-wait" id="block-live-wait" hidden>Wait for players</button>
+              <button type="button" data-action="block-live-watch" id="block-live-watch" hidden>Watch from the deck</button>
+            </div>
+          </section>
           <p class="help" id="block-board-help">Pick a side. Steal the rivals' Bitcoin block (their colour), carry it to your own stand while your block is home. First to 3 captures wins.</p>
         </div>
         <div class="garage-columns">
@@ -1081,6 +1099,12 @@
           <div class="race-lap block-weather"><b id="block-weather-word">Clear</b></div>
         </div>
       </div>
+      <section class="block-watch" id="block-watch" hidden aria-label="Watch deck" aria-live="polite">
+        <span id="block-watch-line"></span>
+        <button type="button" data-action="block-live-reg" id="block-watch-reg">Register for next round</button>
+        <button type="button" data-action="block-board">Main menu</button>
+      </section>
+      <div class="block-viewer-board" id="block-viewer-board" hidden aria-live="off"><div class="block-board-side" data-side="blue"><span>Blue</span><b id="block-viewer-blue">0</b></div><div class="block-board-mid"><small id="block-viewer-goal"></small><small id="block-viewer-clock"></small></div><div class="block-board-side" data-side="red"><span>Red</span><b id="block-viewer-red">0</b></div><table class="block-board-stats" id="block-viewer-captures" hidden></table></div>
       <div class="race-center" id="block-center" hidden>GO!</div>
       <div class="block-struggle" id="block-struggle" hidden>
         <span id="block-struggle-word">Mash SPACE!</span> <b id="block-struggle-left">6</b>
@@ -2196,7 +2220,9 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/reaction-policy.js"></script>
   <script src="js/voice-blend.js"></script>
   <script src="js/hockey-wire.js"></script>
+  <script src="js/block-wire.js"></script>
   <script src="js/arcade-cabinets.js"></script>
+  <script src="js/arcade-popular.js"></script>
   <script src="js/net.js"></script>
   <script src="js/highscores.js"></script>
   <script src="js/cloud-hopper-replays.js"></script>
@@ -2233,6 +2259,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/terrain-snapshot.js" data-defer="terrain-cache"></script>
   <script src="js/terrain-cache.js" data-defer="terrain-cache"></script>
   <script src="js/build-tasks.js"></script>
+  <script src="js/door-ready.js"></script>
   <script src="js/timechain-models.js"></script>
   <script src="js/timechain-gate.js"></script>
   <script src="js/solid-props.js"></script>
@@ -2281,6 +2308,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/factory-models.js"></script>
   <script src="js/factory-scene-models.js" data-defer="factory-scene"></script>
   <script src="js/factory-window.js"></script>
+  <script src="js/arcade-doors.js"></script>
+  <script src="js/arcade-entrance.js"></script>
   <script src="js/tess.js"></script>
   <script src="js/hub-guide.js"></script>
   <script src="js/scene-deferred.js"></script>
@@ -2308,6 +2337,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/hangar-audio.js" data-defer="hangar-scene"></script>
   <script src="js/scene-hangar.js" data-defer="hangar-scene"></script>
   <script src="js/ghost-gear.js" data-defer="arcade"></script>
+  <script src="js/zipline-models.js" data-defer="arcade"></script>
+  <script src="js/zipline.js" data-defer="arcade"></script>
   <script src="js/arcade-scene-models.js" data-defer="arcade"></script>
   <script src="js/arcade-games.js" data-defer="arcade"></script>
   <script src="js/retro-games.js" data-defer="arcade"></script>
@@ -2328,6 +2359,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/dsb-menu-shell.js"></script>
   <script src="js/wallets-menu.js"></script>
   <script src="js/block-sim.js"></script>
+  <script src="js/block-live.js"></script>
+  <script src="js/block-viewer.js" data-defer="block-viewer"></script>
   <script src="js/block-trivia.js"></script>
   <script src="js/block-models.js"></script>
   <script src="js/block-audio.js"></script>
@@ -2418,7 +2451,6 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/bifrost-window.js"></script>
   <script src="js/scene-bifrost.js"></script>
   <script src="js/scene-timechain.js"></script>
-  <script src="js/timechain-beer.js" data-defer="timechain"></script>
   <script src="js/timechain-data.js" data-defer="timechain"></script>
   <script src="js/timechain-blocks.js" data-defer="timechain"></script>
   <script src="js/timechain-charts.js" data-defer="timechain"></script>

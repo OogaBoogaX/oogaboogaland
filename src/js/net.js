@@ -119,8 +119,10 @@
   const POSE_MS = 1000 / 10;
   // Health in steps of the smallest hit, a few reports a second at most; the room's own bounds for poses.
   const HP_MS = 250, HP_STEP = 4, BOUND_XZ = 160, BOUND_Y_MIN = -130, BOUND_Y_MAX = 100;
-  const PING_MS = 10000;
+  const PING_MS = 10000, PING_MISSES = 3;
   const HIDDEN_PAUSE_MS = 5 * 60000;
+  // How long before leaving a hidden tab still in voice hears each warning.
+  const HIDDEN_WARN_BEFORE_MS = [30000, 15000];
   const BACKOFF_MS = 500, BACKOFF_MAX_MS = 15000;
   // The room's own limits (worker/src/protocol.js): characters in a line, lines it holds.
   const CHAT_MAX = BL.chatPolicy.MAX, CHAT_KEEP = 100;
@@ -144,23 +146,23 @@
   };
   const leaveCabinet = () => {
     const seat = cabinetSeat || cabinetRequest;
-    if (seat) send(JSON.stringify({ t: "cabinet", op: "leave", id: seat.id, q: seat.q }));
+    if (seat) send(JSON.stringify({ t: "cabinet", op: "leave", id: seat.id, q: seat.q, ...(seat.slot === undefined ? {} : { slot: seat.slot }) }));
     cabinetSeat = cabinetAnchor = null;
     finishCabinetRequest("Cabinet opening cancelled");
   };
   // Resolves to null on success, or a player-facing reason. Never enter a live game optimistically.
-  const takeCabinet = id => {
+  const takeCabinet = (id, slot) => {
     if (!state.me) return Promise.resolve(null);
     if (state.room !== "live") return Promise.resolve("Connect to the live arcade before playing");
-    if (!state.cabinets) return Promise.resolve("The live arcade needs an update before cabinets can open");
+    if (!state.cabinets || slot !== undefined && !state.cabinetsOutdoor) return Promise.resolve("The live arcade needs an update before cabinets can open");
     if (cabinetSeat || cabinetRequest) return Promise.resolve("A cabinet is already opening");
-    const q = ++cabinetSequence;
+    const q = ++cabinetSequence, where = slot === undefined ? {} : { slot };
     return new Promise(resolve => {
-      cabinetRequest = { id, q, resolve, timer: window.setTimeout(() => {
-        send(JSON.stringify({ t: "cabinet", op: "leave", id, q }));
+      cabinetRequest = { id, q, slot, resolve, timer: window.setTimeout(() => {
+        send(JSON.stringify({ t: "cabinet", op: "leave", id, q, ...where }));
         finishCabinetRequest("The arcade did not answer · try again");
       }, 8000) };
-      send(JSON.stringify({ t: "cabinet", op: "take", id, q }));
+      send(JSON.stringify({ t: "cabinet", op: "take", id, q, ...where }));
     });
   };
   const subscribers = new Set();
@@ -173,6 +175,13 @@
   const hockeyTables = [null, null, null];
   const hockeyEmit = m => { for (const fn of hockeySubscribers) fn(m); };
   const subscribeHockey = fn => { hockeySubscribers.add(fn); return () => hockeySubscribers.delete(fn); };
+  // Block Frenzy's live match: its registry messages, the host's binary frames and a guest's input (block-live.js).
+  const bfSubscribers = new Set(), bfFrameSubscribers = new Set();
+  const subscribeBf = fn => { bfSubscribers.add(fn); return () => bfSubscribers.delete(fn); };
+  const subscribeBfFrame = fn => { bfFrameSubscribers.add(fn); return () => bfFrameSubscribers.delete(fn); };
+  const sendBf = m => { if (!state.blockLive || state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN) return false; send(JSON.stringify({ t: "bf", v: BL.blockWire.WIRE, ...m })); return true; };
+  const sendBfInput = m => { if (!state.blockLive || state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN) return false; send(JSON.stringify(m)); return true; };
+  const sendBfFrame = bytes => { if (state.blockLive && ws && ws.readyState === WebSocket.OPEN) ws.send(bytes); };
   const sendHockey = m => { if (!state.hockey || state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN) return false; send(JSON.stringify({ t: "hockey", ...m, v: 4 })); return true; };
   const studioEmit = message => { for (const fn of studioSubscribers) fn(message); };
   const chatSubscribers = new Set();
@@ -188,7 +197,7 @@
   // room: "off" (signed out or no backend), "connecting", "live", "paused" (hidden a while), or a kick that
 // stopped it ("replaced", "full").
   const offline = new URLSearchParams(location.search);
-  const state = { backend: false, me: null, donations: false, tess: false, voiceTurn: false, highscores: false, highscoreSnapshots: false, logoutEpoch: 0, started: false,
+  const state = { roomLocks: false, lockedRooms: new Uint8Array(10), roomPin: "", roomPinRoom: 0, backend: false, me: null, donations: false, tess: false, voiceTurn: false, highscores: false, highscoreSnapshots: false, logoutEpoch: 0, started: false,
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
     room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, ghostHostId: 0, ghostFollowers: 0, npcVersion: 0, doorway: false, pokerVoice: null,
     self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, privateChat: false, chalk: null, blendTo: null, blendT: 0, reactions: false, customHand: false, hand: false, handTone: 0, handEmoji: "",
@@ -197,7 +206,7 @@
   const linkIds = (list) => new Set(Array.isArray(list) ? list.filter((id) => Number.isSafeInteger(id) && id > 0).slice(0, LINK_MAX) : []);
   // The room's last word on whom to hear, for what a move to another place keeps.
   let peersHeard = [], gensHeard = null;
-  let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, hiddenTimer = 0, stopped = false;
+  let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, unanswered = 0, hiddenTimer = 0, stopped = false;
   let npcFrame = null, inHub = false, hubSent = null, visibleSent = null;
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
   const gSent = new Float64Array(6);
@@ -269,6 +278,7 @@
     if (room !== "live") { state.voiceLinks = false; state.linkWants.clear(); state.linked.clear(); peersHeard = []; gensHeard = null; }
     if (lost) privateHeard({ op: "lost" });
     if (room !== "live") { hockeyTables.fill(null); hockeyEmit({ k: "lost" }); state.hockey = false; }
+    if (room !== "live") { for (const fn of bfSubscribers) fn({ k: "lost" }); state.blockLive = false; }
     if (room !== "live") { state.studio = null; state.connectionToken = ""; studioEmit({t:"studio-state",state:null}); }
     state.online = room === "live" ? remotes.size + 1 : 0;
     emit();
@@ -369,6 +379,19 @@
   const chatHeard = (lines, replace, receipt = null) => {
     for (const fn of chatSubscribers) fn(lines, replace, receipt);
   };
+  // Which of the Sphere's numbered rooms are locked from inside (`state.lockedRooms`, 1 by room number); true when that changed.
+  const setLockedRooms = (rooms) => {
+    let changed = false;
+    for (let room = 1; room <= 9; room++) {
+      const locked = Array.isArray(rooms) && rooms.includes(room) ? 1 : 0;
+      if (state.lockedRooms[room] !== locked) { state.lockedRooms[room] = locked; changed = true; }
+    }
+    if (!state.lockedRooms[state.roomPinRoom]) forgetRoomPin();
+    return changed;
+  };
+  // The PIN of the locked room this page stands in (`state.roomPin`), which the room tells only those inside it; kept
+  // until the room opens, the page leaves it or the socket goes.
+  const forgetRoomPin = () => { state.roomPin = ""; state.roomPinRoom = 0; };
   const doorHeard = (event) => {
     for (const fn of doorSubscribers) fn(event);
   };
@@ -378,7 +401,9 @@
     ? { t: "transit", cycle: m.cycle, actor: m.actor, door: m.door, dir: m.dir, at: m.at, exp: m.exp } : null;
 
   const onMessage = (e) => {
+    unanswered = 0;
     if (e.data instanceof ArrayBuffer) {
+      if (e.data.byteLength >= 4 && new DataView(e.data).getUint32(0, true) === 0x315a4642) { for (const fn of bfFrameSubscribers) fn(e.data); return; }
       if (e.data.byteLength >= 4 && new DataView(e.data).getUint32(0, true) === GHOST_MAGIC) { ghostFrame(e.data); return; } // HALLOWEEN
       npcFrame = e.data;
       state.npcVersion++;
@@ -397,9 +422,9 @@
       if (cabinetSeat && cabinetSeats.get(cabinetSeat.id)?.player !== state.selfId) { cabinetSeat = null; emit(); }
     } else if (msg.t === "cabinet") {
       if (cabinetRequest?.id === msg.id && cabinetRequest.q === msg.q) {
-        if (msg.ok) { cabinetSeat = { id: msg.id, q: msg.q }; cabinetAnchor = BL.arcadeCabinets.get(msg.id); }
+        if (msg.ok) { const slot = cabinetRequest.slot; cabinetSeat = { id: msg.id, q: msg.q, slot }; cabinetAnchor = slot === undefined ? BL.arcadeCabinets.get(msg.id) : BL.arcadeCabinets.slot(slot); }
         finishCabinetRequest(msg.ok ? null : msg.reason || "This cabinet is occupied");
-      } else if (msg.ok) send(JSON.stringify({ t: "cabinet", op: "leave", id: msg.id, q: msg.q }));
+      } else if (msg.ok) send(JSON.stringify({ t: "cabinet", op: "leave", id: msg.id, q: msg.q, ...(Number.isInteger(msg.slot) ? { slot: msg.slot } : {}) }));
     } else if (msg.t === "highscore") {
       if (state.room === "live") for (const fn of highscoreSubscribers) fn(msg.board);
     } else if (msg.t === "studio-mic-revoked") {
@@ -411,6 +436,8 @@
       studioEmit(msg);
     } else if (msg.t === "studio-result") {
       studioEmit(msg);
+    } else if (msg.t === "bf") {
+      for (const fn of bfSubscribers) fn(msg);
     } else if (msg.t === "hockey") {
       if (Number.isInteger(msg.i) && msg.i >= 0 && msg.i < 3) {
         if (msg.k === "table") hockeyTables[msg.i] = msg.phase === "closed" ? null : msg;
@@ -475,8 +502,12 @@
       state.selfId = msg.you.id;
       state.connectionToken = typeof msg.connectionToken === "string" ? msg.connectionToken : "";
       state.cabinets = Array.isArray(msg.features) && msg.features.includes(BL.arcadeCabinets.FEATURE);
+      state.cabinetsOutdoor = Array.isArray(msg.features) && msg.features.includes(BL.arcadeCabinets.OUTDOOR_FEATURE);
       state.hockey = Array.isArray(msg.features) && msg.features.includes("hockey-v4");
+      state.blockLive = Array.isArray(msg.features) && msg.features.includes("block-v1");
       state.doorway = Array.isArray(msg.features) && msg.features.includes("door");
+      state.roomLocks = Array.isArray(msg.features) && msg.features.includes("room-lock-v1");
+      setLockedRooms(msg.locks);
       state.chatUnicode = Array.isArray(msg.features) && msg.features.includes(BL.chatPolicy.FEATURE);
       state.privateChat = Array.isArray(msg.features) && msg.features.includes("pm-v1");
       state.reactions = Array.isArray(msg.features) && msg.features.includes(REACT_FEATURE);
@@ -630,6 +661,12 @@
       else if (msg.op === "started" && chatIdValid(msg.cycle) && Number.isFinite(msg.exp)) doorHeard({ t: "door", op: "started", cycle: msg.cycle, exp: msg.exp });
       else if (msg.op === "wait") doorHeard({ t: "door", op: "wait", ahead: Number.isSafeInteger(msg.ahead) && msg.ahead >= 0 ? msg.ahead : 0 });
       else if (msg.op === "denied") doorHeard({ t: "door", op: "denied", reason: typeof msg.reason === "string" ? msg.reason.slice(0, 32) : "" });
+      else if (msg.op === "locks") { setLockedRooms(msg.rooms); doorHeard({ t: "door", op: "locks" }); }
+      else if (msg.op === "room-pin" && Number.isInteger(msg.room) && msg.room >= 1 && msg.room <= 9 && typeof msg.pin === "string" && /^[0-9]{4}$/.test(msg.pin)) {
+        state.roomPin = msg.pin; state.roomPinRoom = msg.room;
+        doorHeard({ t: "door", op: "room-pin", room: msg.room });
+      }
+      else if (msg.op === "lock-result" && (msg.action === "lock" || msg.action === "unlock" || msg.action === "try") && Number.isInteger(msg.room) && msg.room >= 1 && msg.room <= 9) doorHeard({ t: "door", op: "lock-result", action: msg.action, room: msg.room, ok: msg.ok === true, reason: typeof msg.reason === "string" ? msg.reason.slice(0, 32) : "" });
     } else if (msg.t === "transit") {
       const transit = transitOf(msg);
       if (transit && transit.actor !== state.selfId) doorHeard(transit);
@@ -695,6 +732,9 @@
     state.ghostFollowers = 0;
     // Any request for the doorway went with the socket.
     if (state.doorway) doorHeard({ t: "door", op: "lost" });
+    state.roomLocks = false;
+    forgetRoomPin();
+    if (setLockedRooms(null)) doorHeard({ t: "door", op: "locks" });
     // So did the chalkboard: the board is kept to show until the room sends it again, but nobody here holds it.
     chalkOut.length = 0;
     if (state.chalk && (room === "connecting" || room === "paused")) { state.chalk.editor = 0; chalkEmit("lock"); }
@@ -719,11 +759,19 @@
     retryTimer = 0;
     if (stopped || ws || !state.me) return;
     setRoom("connecting");
+    // A tab opened in the background has no visibility change to arm this.
+    if (document.hidden && !hiddenTimer) armHidden();
     ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room`);
     ws.binaryType = "arraybuffer";
     ws.onmessage = onMessage;
     ws.onopen = () => {
-      pingTimer = window.setInterval(() => send("ping"), PING_MS);
+      unanswered = 0;
+      pingTimer = window.setInterval(() => {
+        // A half-open socket never closes by itself for minutes, while the room has long since evicted this page.
+        if (unanswered >= PING_MISSES) { close("connecting"); return; }
+        unanswered++;
+        send("ping");
+      }, PING_MS);
     };
     ws.onclose = () => close("connecting");
   };
@@ -745,6 +793,7 @@
       state.voiceTurn = data.voiceTurn === true;
       state.highscores = data.highscores === true;
       state.highscoreSnapshots = data.highscoreSnapshots === true;
+      state.arcadePlays = data.arcadePlays === true;
       state.resolved = data.player === null || !!state.me;
       if (state.me) {
         BL.contributors.addTemporary(data.character, state.me.login);
@@ -850,6 +899,7 @@
   const setZone = (name) => {
     if (cabinetAnchor) return;
     if (name === zone) return;
+    if (name !== `sphere-${state.roomPinRoom}`) forgetRoomPin();
     // Between two zones of the main world nothing changes for voice: a crossing there is a level, whatever the zone.
     // Into the place being crossed into (voice-blend.js `place`): the crossing turns round as the room turns it, across
     // the arcade hallway's midpoint (#422) to the same crossing from its other end.
@@ -892,10 +942,29 @@
     window.clearTimeout(hiddenTimer);
     hiddenTimer = 0;
     if (document.hidden) {
-      if (state.me && !stopped) hiddenTimer = window.setTimeout(pause, HIDDEN_PAUSE_MS);
+      if (state.me && !stopped) armHidden();
     } else if (state.room === "paused") {
       rejoin();
     }
+  };
+  // Someone in voice hears it coming: two warnings, then a hang-up that plays out before voice stops with the room.
+  let hiddenStage = 0;
+  const armHidden = () => {
+    hiddenStage = 0;
+    hiddenTimer = window.setTimeout(hiddenTick, HIDDEN_PAUSE_MS - HIDDEN_WARN_BEFORE_MS[0]);
+  };
+  const hiddenTick = () => {
+    hiddenTimer = 0;
+    if (!document.hidden || stopped || !state.me) return;
+    if (hiddenStage < HIDDEN_WARN_BEFORE_MS.length) {
+      BL.voice.warnLeaving(hiddenStage);
+      const left = HIDDEN_WARN_BEFORE_MS[hiddenStage++];
+      hiddenTimer = window.setTimeout(hiddenTick, left - (HIDDEN_WARN_BEFORE_MS[hiddenStage] || 0));
+      return;
+    }
+    const playing = BL.voice.hangUp();
+    if (playing) hiddenTimer = window.setTimeout(pause, playing);
+    else pause();
   };
   const pause = () => {
     hiddenTimer = 0;
@@ -1157,6 +1226,12 @@
   const goDoor = (cycle) => chatIdValid(cycle) && doorSend(JSON.stringify({ t: "door", op: "go", cycle }));
   const doneDoor = (cycle) => chatIdValid(cycle) && doorSend(JSON.stringify({ t: "door", op: "done", cycle }));
   const cancelDoor = () => doorSend('{"t":"door","op":"cancel"}');
+  // A room's lock (room.js): from inside, set its PIN or open it (anyone inside may); from the doorway, try the PIN.
+  const roomPin = (op, room, pin) => state.roomLocks && Number.isInteger(room) && room >= 1 && room <= 9 && /^[0-9]{4}$/.test(pin)
+    && doorSend(JSON.stringify({ t: "door", op, room, pin }));
+  const lockRoom = (room, pin) => roomPin("lock", room, pin);
+  const unlockRoom = (room) => state.roomLocks && Number.isInteger(room) && room >= 1 && room <= 9 && doorSend(JSON.stringify({ t: "door", op: "unlock", room }));
+  const tryRoomPin = (room, pin) => roomPin("try", room, pin);
   const passDoor = (door, dir) => typeof door === "string" && DOOR_NAME.test(door) && (dir === "in" || dir === "out")
     && doorSend(JSON.stringify({ t: "door", op: "pass", door, dir }));
 
@@ -1334,5 +1409,5 @@
     close("off");
   };
 
-  BL.net = { voiceLink, toggleVoiceLink, linkEveryone, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendReaction, subscribeReactions, setHand, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { lockRoom, unlockRoom, tryRoomPin, voiceLink, toggleVoiceLink, linkEveryone, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeBf, subscribeBfFrame, sendBf, sendBfInput, sendBfFrame, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendGhost, subscribeGhost, sendReaction, subscribeReactions, setHand, sendGhostState, subscribeGhostState, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

@@ -349,7 +349,8 @@
     for (const el of sceneSections) el.hidden = el.classList.contains("hub-presets") || el.dataset.scene !== next.id;
     zoneLine = sceneSections.find((el) => el.dataset.scene === next.id && zoneLines.has(el)) || null;
     zoneLineFor = "";
-    for (const el of intros) el.hidden = el.dataset.intro !== next.id;
+    // Off the zipline the sides board is the arrival: no title card first.
+    for (const el of intros) el.hidden = el.dataset.intro !== next.id || place === "zipline" || place === BL.blockWire.WATCH_DECK_PLACE;
     // Arcade games share the hall's controls and start with folded social panels.
     document.body.dataset.activeScene = next.id;
     document.body.classList.toggle("arcade-game", arcadeScenes.has(next.id) || next.id === "hub" && place === "cloud-hopper");
@@ -416,6 +417,8 @@
     const retained = liveGeometry(), keptScenes = KEEP_HUB ? ["hub", next.id, ...(next.keeps || [])] : [next.id, ...(next.keeps || [])];
     if (leaving.id !== "hub" || !KEEP_HUB) {
       models.release(leaving.id, keptScenes, retained);
+      // What it kept warm for its own doors goes with it, so a door readied and never walked through pins nothing.
+      for (const id of leaving.keeps || []) if (!keptScenes.includes(id)) { models.release(id, keptScenes, retained); window.BL.scenes[id]?.cachesReleased?.(); }
       if (DEBUG && leaving.id !== next.id && !keptScenes.includes(leaving.id)) models.assertReleased(leaving.id);
     }
     renderer.releaseUnused(retained);
@@ -481,7 +484,9 @@
     clearTweens();
     if (DEBUG && tweenCount()) throw new Error(`${tweenCount()} tweens survived clearTweens`);
     if (!next.enterSteps) {
-      enter(next, place);
+      const t = transition;
+      try { enter(next, place); }
+      catch (error) { entryFailed(t, error); return false; }
       releaseLeft(leaving, next);
       return true;
     }
@@ -623,8 +628,8 @@
     const idx = QUALITY_ORDER.indexOf(renderer.quality);
     // Stepping is one-way and stops at the bottom tier, so quality cannot oscillate.
     if (idx < 0 || idx >= QUALITY_ORDER.length - 1) return;
-    // An unfocused tab and a transition building the next scene are not evidence that the tier is too expensive.
-    if (!document.hasFocus() || transition) { perf.frames = perf.total = 0; perf.since = 0; return; }
+    // An unfocused tab, a transition building the next scene and a scene readying one are not evidence that the tier is too expensive.
+    if (!document.hasFocus() || transition || active?.warming) { perf.frames = perf.total = perf.bad = 0; perf.since = 0; return; }
     if (!perf.since) perf.since = now;
     perf.frames++;
     perf.total += intervalMs;
@@ -684,14 +689,16 @@
     if (transition) stepTransition(dt);
     // Hold the fully black frame while resumable pure builders run; the old visit keeps its graph and controls.
     if (transition && transition.building) { drawFade(); return; }
-    if (helpHeld) dt = 0;
+    // The panels hold the scene, unless a live session needs it to keep stepping.
+    const panelHolds = helpHeld && !active.runsBehindPanels;
+    if (panelHolds) dt = 0;
     if (!transition) holdInput(!!cabinetView.held);
     const sceneDt = cabinetView.held ? 0 : dt;
     sceneTime += sceneDt;
     // In real mode the API owns the pile, so every browser shows the same one: its last count less what has been
     // eaten since it arrived, in whole bananas.
     if (pileFeed.at) world.level = Math.min(pileMod.MAX_BANANAS, Math.max(0, Math.floor(pileFeed.bananas - pileFeed.eatPerHour * (performance.now() - pileFeed.at) / 36e5)));
-    if (!helpHeld) active.update(sceneDt, sceneTime);
+    if (!panelHolds) active.update(sceneDt, sceneTime);
     showZoneLine();
     cabinetView.update(dt, active, !!openIntro() || !!active.cabinetMenu, !!transition);
     if (POSITION_DEBUG && active.id !== "hub" && elapsed >= positionDebugNext) {
@@ -726,7 +733,7 @@
     if (!drawn && renderer.failure && !params.has("canvas2d")) {
       console.warn("WebGL2 programs failed, reloading with the Canvas 2D fallback", renderer.failure);
       params.set("canvas2d", "1");
-      location.replace(`${location.pathname}?${params}`);
+      location.replace(`${location.pathname}?${params}${location.hash}`);
       return;
     }
     active.input.update();
@@ -734,6 +741,8 @@
     cabinetView.afterDraw();
     if (fade > 0 || transition && transition.instant && !transition.ready) drawFade();
   };
+  const FRAME_ERRORS_MAX = 30;
+  let frameErrors = 0;
   const frame = (now) => {
     raf = window.requestAnimationFrame(frame);
     const interval = frameInterval();
@@ -749,7 +758,13 @@
     // Only a displayed frame carries a real interval; `advance` must not tier. A step resizes the canvas, which
     // clears it, so it comes before this frame's draw: after it, the browser presented one black frame.
     if (!interval) autoTier(delivered, now);
-    step(dt, now);
+    // A throw every frame stops the picture while the panels, chat and voice carry on: report it once, and after a
+    // moment offer the way out rather than leave the visitor with a frozen screen.
+    try { step(dt, now); frameErrors = 0; }
+    catch (error) {
+      if (++frameErrors === 1) reportError(error);
+      if (frameErrors === FRAME_ERRORS_MAX) window.BL.hud.offerReload("Ooga Booga Land hit a problem");
+    }
   };
 
   let rightShift = false;
@@ -836,7 +851,9 @@
       window.cancelAnimationFrame(raf);
       raf = 0;
     } else if (!raf && (active || transition && transition.entering)) {
-      lastTime = performance.now();
+      // The time away is no frame interval: the first one back would close a tier window as slow on its own.
+      lastTime = lastRender = performance.now();
+      perf.frames = perf.total = perf.since = perf.bad = 0;
       raf = window.requestAnimationFrame(frame);
     }
   };
@@ -897,6 +914,8 @@
   accountReady.then(() => {
     if (destroyed) return;
     if (net.state.donations) donations.useOrigin();
+    // A Worker's page whose look went unanswered knows nothing of its API: no made-up tips under the visitor's own name.
+    else if (net.state.started && !net.state.backend && document.documentElement.dataset.workerPage === "1") donations.config.simulate = false;
     unsubscribeDonations = donations.subscribe((donation, bananas) => {
       if (donations.receivedOwnInvoice(donation.id)) game.rememberHandle(donation.handle);
       window.BL.donationPopup.receive(donation, bananas);
@@ -1060,7 +1079,13 @@
         if (destroyed) { models.release(first.id, []); return; }
         bootFailed(error); return;
       }
-    } else window.BL.buildTasks.measure(() => { enter(first, place); finishBootDonations(); });
+    } else {
+      try { window.BL.buildTasks.measure(() => { enter(first, place); finishBootDonations(); }); }
+      catch (error) {
+        if (destroyed) { models.release(first.id, []); return; }
+        bootFailed(error); return;
+      }
+    }
     mark("core-ready");
     mark("ready");
     // A restored island counts as the build it replaced, so the cache never starts a device a tier higher.

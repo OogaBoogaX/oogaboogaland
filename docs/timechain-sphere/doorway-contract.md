@@ -39,6 +39,23 @@ Room → client:
 
 `cycle` is an opaque id of 1–64 characters from `[A-Za-z0-9_-]`, issued by the room.
 
+## Locking a room
+
+A signed-in player inside a numbered room can lock it with a 4-digit PIN from the keypad beside its doors. `welcome` lists `room-lock-v1` in `features` and the rooms already locked in `locks`.
+
+| Message | When |
+|---|---|
+| `{ t: "door", op: "lock", room, pin }` | From inside that room: lock it. Refused if it is already locked. |
+| `{ t: "door", op: "unlock", room }` | From inside that room: open it. Anyone inside may. |
+| `{ t: "door", op: "try", room, pin }` | From the doorway's zone: the PIN for a locked room. |
+| `{ t: "door", op: "lock-result", action, room, ok, reason }` | The answer to any of those, to the sender alone; `reason` is `wrong`, `wait`, `wrong-room`, `not-at-door` or `already-locked`. |
+| `{ t: "door", op: "locks", rooms }` | Which rooms are locked now, to every page, whenever that changes. |
+| `{ t: "door", op: "room-pin", room, pin }` | A locked room's PIN, to each player inside it as it is locked and to each who walks in while it is. The page shows it on the inside keypad while it is in use and forgets it on leaving the room. |
+
+The room enforces it, not the page. A locked room refuses `ask` with `dir: "in"` and the `zone` message for its name (`denied`, reason `locked`) unless the player holds a pass: a right PIN gives one for a minute, spent on walking in, and a socket dropped inside gives one so a reconnect can come back. Leaving by the door needs the PIN to return. Five wrong tries make a player wait a minute; the tally is the player's, so a reconnect or the room's hibernation does not start it again. The PIN reaches only the players inside that room, is kept only while the room is locked and in the occupants' socket attachments, so hibernation keeps it, and the room opens by itself when its last occupant goes.
+
+On the island a locked room's number wears a padlock. Pressing it scrolls `ENTER 4-DIGIT PIN` in the window until a digit is typed; a right PIN crosses as Enter would, and a wrong one says so and goes back to choosing with no room selected. A solo copy has nothing to lock.
+
 ## Rules the room keeps
 
 - One pending request per socket; a second `ask` while one is pending is `denied`. Requests from signed-out or bodiless sockets are ignored.

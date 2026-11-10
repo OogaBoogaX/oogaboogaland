@@ -154,6 +154,8 @@
     cloud: { ink: { "#": "#f2efe8", "+": "#ffffff", "S": "#a9d7ef" }, rows: [".......", "..++...", ".++++..", "++##+++", "+######", ".SSSSS.", "......."] },
     // Ghost Hunter: the hunt's white ghost, its eyes and mouth dark.
     ghost: { ink: { "#": "#f2efe8", "+": "#ffffff", "*": "#1b1b1e" }, rows: ["..+++..", ".+####.", "+#*#*##", "+######", "+##*###", "+######", "#.#.#.#"] },
+    // Block Frenzy: an orange cube in three faces.
+    cube: { ink: { "#": "#f7931a", "+": "#ffc46b", "*": "#b8650a" }, rows: ["..+++..", ".+++++.", "#+++**#", "###*#*#", "##*###*", "##*#*#*", ".#####."] },
     // B.C.A.: a walnut abacus whose beads are bananas and ivory, on brass rods.
     abacus: { ink: { "W": "#8a5a32", "-": "#d9b45a", "Y": "#f5d142", "I": "#f2efe8" }, rows: ["WWWWWWW", "WYY--IW", "W-IY-YW", "WI--YYW", "WYI--IW", "WWWWWWW", "W.....W"] }
   };

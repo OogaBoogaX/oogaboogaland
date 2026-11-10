@@ -72,7 +72,7 @@
     document.body.append(foreground);
     const exitButton = document.createElement("button");
     exitButton.type = "button"; exitButton.className = "cabinet-exit"; exitButton.textContent = "Return to arcade"; exitButton.hidden = true;
-    exitButton.addEventListener("click", () => route("arcade")); document.body.append(exitButton);
+    exitButton.addEventListener("click", () => route(visit?.home || "arcade")); document.body.append(exitButton);
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
     let scores = null;
     let visit = null, phase = "idle", age = 0, zoom = 0, dispatching = false, lost = false;
@@ -158,7 +158,8 @@
     const unsubscribe = BL.net.subscribe(() => {
       if (visit?.live && (BL.net.state.room !== "live" || !BL.net.state.me || !BL.net.cabinet)) lost = true;
     });
-    const begin = (id, cabinet, camera, display) => {
+    // `home` is the scene the cabinet stands in: the hall's, or the island's cave (#554).
+    const begin = (id, cabinet, camera, display, { home = "arcade" } = {}) => {
       if (visit) return false;
       rect();
       const S = BL.arcadeModels.SCREEN, c = Math.cos(cabinet.turn), s = Math.sin(cabinet.turn);
@@ -171,7 +172,8 @@
         const z = S.z + Math.sin(S.lean) * y;
         corners.push({ x: cabinet.x + c * x + s * z, y: cabinet.y + S.y + Math.cos(S.lean) * y, z: cabinet.z - s * x + c * z });
       }
-      visit = { camera, id, cabinet, display, corners, live: !!BL.net.state.me, from: copy(camera), close, returnView: null, exit: null };
+      visit = { camera, id, cabinet, display, corners, live: !!BL.net.state.me, from: copy(camera), close, returnView: null, exit: null, home };
+      exitButton.textContent = home === "arcade" ? "Return to arcade" : "Return to the island";
       zoom = 0;
       setPhase("approach");
       return true;
@@ -179,7 +181,7 @@
     const route = (id, place) => {
       if (!visit || dispatching) return false;
       if (phase === "return" || phase === "shrinking" || phase === "leaving") return true;
-      visit.exit = id === "arcade" ? null : { id, place };
+      visit.exit = id === "arcade" || id === visit.home ? null : { id, place };
       if (phase === "approach") {
         visit.returnView = visit.from; visit.close = copy(visit.camera); setPhase("return"); return true;
       }
@@ -190,7 +192,7 @@
     const arrived = scene => {
       if (!visit) return;
       if (phase === "loading") { setPhase("menu"); screen(0); scores = leaderboard(visit.id); }
-      else if (phase === "leaving" && scene.id === "arcade") {
+      else if (phase === "leaving" && scene.id === visit.home) {
         visit.returnView = null; full(); setPhase("return");
         BL.net.leaveCabinet();
       }
@@ -198,7 +200,7 @@
     const update = (dt, scene, menu, transitioning) => {
       if (!visit) return;
       if (lost && !transitioning && phase !== "return" && phase !== "leaving" && phase !== "shrinking") {
-        BL.hud.toast("Cabinet connection lost · returning to the arcade"); route("arcade");
+        BL.hud.toast(visit.home === "arcade" ? "Cabinet connection lost · returning to the arcade" : "Cabinet connection lost · returning to the island"); route(visit.home);
       }
       age += dt;
       const k = ease(duration() ? Math.min(1, age / duration()) : 1);
@@ -209,6 +211,7 @@
       else if (phase === "menu") {
         screen(0);
         if (!menu) {
+          BL.arcadePopular.count(visit.id);
           setPhase("expanding"); age = dt;
           screen(ease(duration() ? Math.min(1, age / duration()) : 1));
         }
@@ -221,7 +224,7 @@
         if (k === 1 || visit.shrink === 0) {
           setPhase("leaving");
           // Do not hand a game-world pose to the room between scenes.
-          dispatch("arcade", visit.id === "cloud-hopper" ? "cloud-hopper-return" : null);
+          dispatch(visit.home, visit.id === "cloud-hopper" ? "cloud-hopper-return" : null);
         }
       } else if (phase === "return") {
         if (!visit.returnView) visit.returnView = copy(scene.camera);

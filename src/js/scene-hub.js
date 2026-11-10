@@ -65,8 +65,6 @@
   const CLOSE_VIEW = { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 6, orbitDist: 6 };
   const STEP_MAX = pilotMod.WALK.step;
   const MAGAZINE_REACH = 0.7, MAGAZINE_SCALE = 2.4;
-  // Space at Ooga Arcade's mouth works from MOUTH_REACH of a point MOUTH_ACTION_Z inside its doorway.
-  const MOUTH_REACH = 3.2, MOUTH_ACTION_Z = -3.6;
   const MATRIX_GATE_HIDDEN_Y = 3.2, MATRIX_BUTTON_REACH = 3.4, MATRIX_BUTTON_USE_REACH = 2.2;
   const MIRROR_GATE_Z = 0.28;
   const MIRROR_GATE_CLOSED = true;
@@ -155,7 +153,7 @@
   const NIGHT = 0.5, FIRE_SEAT_CHANCE = 0.5;
   // Clock-face degrees to a meadow point: 0 is -z (far), 90 is +x (right).
   const polar = (deg, r) => ({ x: Math.sin(deg * DEG) * r, z: -Math.cos(deg * DEG) * r });
-  const BUILD_DEGREES = [12, 40, 66, 80, 102, 165, 195, 212, 282, 297, 312, 340];
+  const BUILD_DEGREES = [12, 40, 66, 80, 110, 165, 195, 212, 282, 297, 312, 340];
   const BUILD_RADIUS = 13;
   const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
   const PATH_GEOMETRY = new WeakMap();
@@ -335,6 +333,11 @@
   // Its floating lanterns (one node each over one geometry), and whether they showed last frame.
   const ringLanterns = [];
   let ringLanternsShown = false;
+  // The cave cabinet a Cloud Hopper run began at, when it began at one on the island (#554).
+  let cloudYard = null;
+  // Every way out of an island cabinet's Cloud Hopper but its own Exit (Escape at the menu, Return to the island, a lost
+  // seat) comes back with this place and no yard: the launch used it up, and the Ooga would never be stood at its cabinet.
+  const restoreCloudYard = (ctx) => { if (ctx.place === "cloud-hopper-return" && cloudYard && !world.arcadeYard) { world.arcadeYard = cloudYard; cloudYard = null; } };
   let magazine, magazineState, clankers, clankerPlay, clankerMeshes, clankerPartOwners, grabSupportEntry = null, entropyLab, chalkboard, factoryMouth = null, arcadeMouth = null, bcaMouth = null, glCanvas = null;
   const dragHand = new Float64Array(3), dragFoot = new Float64Array(3);
   const THROW_SWING_TIME = 0.28, THROW_SETTLE_TIME = 0.2, THROW_CARRY_SPEED_MAX = 8;
@@ -508,15 +511,21 @@
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
   let enteringTween = null, factoryDeparting = false, bifrostDeparting = false, factoryHeld = false;
   // The walk through the Lightning Factory's shield (factoryGlide): which way, the Ooga it walks, how long it has
-  // walked, where the Ooga stood the frame before, whether it is through, and the shield's light over the view.
-  // Coming back out, the Ooga walks on until it is OUT_WALK metres out of the mouth.
-  const FACTORY_WALK_IN = 1, FACTORY_WALK_OUT = 2, OUT_WALK = 2;
+  // walked, where the Ooga stood the frame before and whether it is through. `eyes` is the view through the walk, and
+  // coming back out the Ooga walks on `stop` metres past the shield.
+  const FACTORY_WALK_IN = 1, FACTORY_WALK_OUT = 2;
   // Once a walk is done the Ooga stands (`settle`) until the visitor lets go of moving, since the view has turned round
   // behind it and a key still held may now mean the other way.
   // Across the switch, `grab` takes the island's last frame as it hands the Ooga over, and `still` is the Factory's last
   // frame over the island's first (`hold` seconds full, then dissolving); `beat` is how long the Ooga still stands in
-  // the shield before a slow switch.
-  const factoryWalk = { phase: 0, cave: null, t: 0, x: 0, z: 0, seen: false, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false };
+  // the shield before a slow switch. `wait` is how long it has stood before the shield for the hall to be ready, and
+  // `pulse` the time to that wait's next beat on the shield (0 until the first). `warming` is that this frame spent a slice
+  // readying the hall, set fresh each frame, so a warm-up left unfinished by walking away stops counting.
+  const factoryWalk = { phase: 0, cave: null, t: 0, x: 0, z: 0, seen: false, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false, wait: 0, pulse: 0, stop: 0, eyes: null, warming: false };
+  // The hall, readied behind its shield from FACTORY_NEAR2 (the prefetch's 15 m, squared) of the mouth or on the walk in
+  // (door-ready.js), and the meshes that has uploaded so far, which the island keeps live until the hall's visit does.
+  const FACTORY_NEAR2 = 225, factoryWarm = new Set();
+  let factoryReady = null;
   // Tess, the island's guide, for the visit (`hub-guide.js`).
   let islandGuide = null;
   let reuseHub = false, heldHub = false, heldDebug = null;
@@ -833,7 +842,8 @@
     gauge: ["Gauge", "spark", ["The needle twitches.", "Pressure high. Ooga fine."]],
     rubble: ["Rubble", "chip", ["Loose rocks.", "Ooga kicks a pebble."]],
     bench: ["Log bench", "dust", ["A good log for sitting."]],
-    cabinet: ["Arcade cabinet", "spark", ["PRESS START. Ooga presses everything.", "The games are inside. Ooga points."]],
+    bigJoystick: ["Giant joystick", "spark", ["Ooga pulls it. Nothing happens. Ooga pulls harder.", "Up, up, down, down. Ooga forgets the rest."]],
+    tokenStack: ["Arcade tokens", "chip", ["One token, one go. Ooga counts to one.", "Ooga bites a token. Not banana."]],
     vine: ["Vines", "leaf", ["The vines swing.", "Rustle rustle."]],
     boards: ["Boarded up · coming soon", "dust", ["Boarded up. Coming soon.", "Ooga peeks through a gap. Dark."]],
     abacus: ["Abacus", "dust", ["Clack clack. Ooga counts to banana.", "The beads slide. Every banana counted."]],
@@ -896,76 +906,14 @@
     const iy = camera.position.y - m.floorY + (y - camera.position.y) * amount;
     return ix >= PORTAL_MIN_X && ix <= PORTAL_MAX_X && iy >= PORTAL_MIN_Y && iy <= PORTAL_MAX_Y;
   };
-  const SLEEP_SCREEN = { x: 0, y: 0, depth: 0 };
-  let sleepSightFrame = 0, sleepSightSince = Infinity;
-  const SLEEP_SIGHT_VIEW = new Float64Array(12);
-  let sleepSightMode = null, sleepSightGorilla = false;
-  const advanceSleepSight = (dt) => {
-    sleepSightSince += Math.max(0, dt);
-    const p = camera.position, t = camera.target, view = SLEEP_SIGHT_VIEW;
-    const changed = pilot.mode !== sleepSightMode || !!clankerPlay.active !== sleepSightGorilla
-      || camera.near !== view[6] || camera.fov !== view[7] || renderer.size.width !== view[8] || renderer.size.height !== view[9]
-      || +RENDER_OPTS.birdsEyeCutaway !== view[10] || +matrixCave.portal.inside !== view[11]
-      || Math.hypot(p.x - view[0], p.y - view[1], p.z - view[2]) > 1
-      || Math.hypot(t.x - view[3], t.y - view[4], t.z - view[5]) > 1;
-    if (dt !== 0 && !changed && sleepSightSince < 1 / SIGHT_RECOMPUTE_HZ) return;
-    sleepSightFrame++; sleepSightSince = 0; sleepSightMode = pilot.mode; sleepSightGorilla = !!clankerPlay.active;
-    view[0] = p.x; view[1] = p.y; view[2] = p.z; view[3] = t.x; view[4] = t.y; view[5] = t.z;
-    view[6] = camera.near; view[7] = camera.fov; view[8] = renderer.size.width; view[9] = renderer.size.height;
-    view[10] = +RENDER_OPTS.birdsEyeCutaway; view[11] = +matrixCave.portal.inside;
-  };
-  const sleepSightAt = (x, y, z) => {
-    if (!matrixOverlayVisible(x, y, z)) return false;
-    const screen = renderer.project(x, y, z, SLEEP_SCREEN);
-    if (!screen || screen.x < 0 || screen.y < 0 || screen.x > renderer.size.width || screen.y > renderer.size.height) return false;
-    const eye = camera.position, dx = x - eye.x, dy = y - eye.y, dz = z - eye.z;
-    if (!entranceSegmentClear(eye.x, eye.y, eye.z, x, y, z, 0.002) || !bedSegmentClear(eye.x, eye.y, eye.z, x, y, z, 0.002, 0.004)) return false;
-    // Short exact sweeps keep long sight rays from scanning an island-sized box.
-    // The point checks also include the continuous ramp surfaces.
-    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    const outside = Math.max(0, Math.sqrt(eye.x * eye.x + eye.y * eye.y + eye.z * eye.z) - Math.sqrt(island.radius * island.radius + island.undersideDepth * island.undersideDepth + terrain.MAX_HEIGHT * terrain.MAX_HEIGHT) - island.unit);
-    const start = Math.min(1, outside / Math.max(distance, 1e-7));
-    // The pieces are walked from the sleeper back toward the eye: a mark indoors is usually blocked near it, and the
-    // answer is the same in either order.
-    const steps = Math.max(1, Math.ceil(distance * (1 - start) / (island.unit * 0.5)));
-    const last = start + (1 - start) * steps / steps;
-    let nx = eye.x + dx * last, ny = eye.y + dy * last, nz = eye.z + dz * last;
-    for (let i = steps - 1; i >= 0; i--) {
-      const k = start + (1 - start) * i / steps, px = eye.x + dx * k, py = eye.y + dy * k, pz = eye.z + dz * k;
-      if (!island.clearAt(nx, ny, nz, 0.002, 0.004) || !island.voxelSegmentClearAt(px, py, pz, nx, ny, nz, 0.002, 0.004)) return false;
-      nx = px; ny = py; nz = pz;
-    }
-    return true;
-  };
-  const sleepOpeningVisible = (x, y, z, cr, sr, halfWidth, halfHeight) => {
-    if (sleepSightAt(x, y, z)) return true;
-    for (let i = 0; i < 4; i++) {
-      const across = (i & 1 ? 1 : -1) * halfWidth, lift = (i & 2 ? 1 : -1) * halfHeight;
-      if (sleepSightAt(x + cr * across, y + lift, z + sr * across)) return true;
-    }
-    return false;
-  };
-  const sleepMarksVisible = (cave, x, y, z, mark = null) => {
-    if (cloudPlaying()) return false;
-    // Nobody's sleep is seen through the Mempool island's rock: not from the tunnels and the chamber inside it,
-    // and not a gorilla's in its nest from under the island or beyond its cliffs.
-    if (poolShade > 0.5) return false;
-    if (mempoolIsland?.billboardOccludes(camera.position.x, camera.position.y, camera.position.z, x, y, z)) return false;
-    if (!cave) {
-      if (mark && mark.sightFrame === sleepSightFrame) return mark.sightVisible;
-      const visible = sleepSightAt(x, y, z) && mempoolIsland.sightClear(camera.position.x, camera.position.y, camera.position.z, x, y, z);
-      if (mark) { mark.sightFrame = sleepSightFrame; mark.sightVisible = visible; }
-      return visible;
-    }
-    const bed = cave.bedroll;
-    if (cave.state !== "sleeping" || cave.bedTravel.mode !== "rest" || !bed || bed.sleeper !== cave) return false;
-    if (bed.sightFrame === sleepSightFrame && bed.sightActor === cave.index) return bed.sightVisible;
-    bed.sightFrame = sleepSightFrame; bed.sightActor = cave.index;
-    const head = cave.sleepHead, body = cave.root.position, room = bed.room, window = bed.window;
-    bed.sightVisible = sleepSightAt(head.x, head.y, head.z) || sleepSightAt(body.x, body.y, body.z)
-      || !bed.outdoor && sleepOpeningVisible(room.entrance.x, room.floor + 1.8, room.entrance.z, bed.cr, -bed.sr, (room.corridorWidth ?? room.width - 1.3) * 0.35, 1.1)
-      || !!window && sleepOpeningVisible(window.x, window.y, window.z, Math.cos(window.angle), Math.sin(window.angle), window.width * 0.35, window.height * 0.35);
-    return bed.sightVisible;
+  // A sleeper's Z's show only within SLEEP_MARK_RANGE of the Ooga the visitor drives (the view, with none) and on its own
+  // level, so a body asleep in a room under the meadow is not marked up through the ground.
+  const SLEEP_MARK_RANGE = 10, SLEEP_MARK_LEVEL = 3.5;
+  const sleepMarksVisible = (cave, x, y, z) => {
+    if (cloudPlaying() || poolShade > 0.5) return false;
+    if (cave && (cave.state !== "sleeping" || cave.bedTravel.mode !== "rest" || !cave.bedroll || cave.bedroll.sleeper !== cave)) return false;
+    const from = controlledGuideActor()?.root.position || camera.position, dx = x - from.x, dy = y - from.y, dz = z - from.z;
+    return Math.abs(dy) <= SLEEP_MARK_LEVEL && dx * dx + dy * dy + dz * dz <= SLEEP_MARK_RANGE * SLEEP_MARK_RANGE;
   };
   const viewInsideMatrix = (lookOut = false) => {
     const m = matrixCave.mouth, targetZ = lookOut ? 0.45 : -5.45;
@@ -1322,18 +1270,18 @@
   // Mouth local frame: +z leads out of the cave.
   const sealedCaveVariant = (id) => id === "c3" ? 1 : id === "c10" ? 2 : 0;
   // Every cave wears its own facade from the shared voxel kit: two lantern posts with a banner behind each, a string over the lintel,
-  // vines off the rim, and the theme's own things either side of the path (lab dice and flasks, the mirror's glyph
-  // monoliths, the Lightning Factory's coil and coal, Ooga Arcade's two cabinets, hard against the left of its
-  // door and facing the island's centre: the Mempool stairs start at the right jamb and the Lightning Factory's right side fills the ground further left). A slot without a theme wears none: the sealed caves, and the
+  // vines off the rim, and the theme's own things either side of the path (lab dice, the mirror's glyph
+  // monoliths, the Lightning Factory's coil and coal, Ooga Arcade's tokens and joystick, hard against the left of its
+  // door: the Mempool stairs start at the right jamb and the Lightning Factory's right side fills the ground further left). A slot without a theme wears none: the sealed caves, and the
   // Headquarters ramps that run down a cutting rather than into a cliff. Each mouth bakes to one solid, one hanging and one glowing mesh, memoised per island
   // so a revisit only places nodes. Pieces are [kind, x, z, quarter turns, variant, lift] in the mouth's frame.
   // A `ceiling` run is two cables into the room, [left x, right x, from z, to z, height, lamp places, lamp kind], the kind a
   // hanging lantern unless named (EntropyLab's white strip lights).
   const THEMES = {
-    lab: { glass: 4, icon: "die", banners: [[-1, 1], [1, 1]], string: ["bulb", 4], ceiling: [[-1.6, 1.6, -1.5, -5.6, 3.0, [0.3, 0.72], "tube"]], pieces: [["flaskBench", -5.3, 1.1], ["die", -4.1, 2.8, 0, 1], ["die", -3.5, 3.6, 1, 3], ["die", -4.1, 2.8, 1, 4, 0.5], ["terminal", 3.7, 1.0], ["die", 4.3, 3.2, 1, 2]] },
+    lab: { glass: 4, icon: "die", banners: [[-1, 1], [1, 1]], string: ["bulb", 4], ceiling: [[-1.6, 1.6, -1.5, -5.6, 3.0, [0.3, 0.72], "tube"]], pieces: [["die", -4.1, 2.8, 0, 1], ["die", -3.5, 3.6, 1, 3], ["die", -4.1, 2.8, 1, 4, 0.5], ["terminal", 3.7, 1.0], ["die", 4.3, 3.2, 1, 2]] },
     matrix: { glass: 2, icon: "glyph", banners: [[1, 2], [-1, 2]], string: ["bulb", 2], pieces: [["monolith", -5.0, 0.9, 0, 0], ["monolith", 5.0, 0.9, 0, 1], ["runeStone", -4.2, 2.8, 0, 0], ["runeStone", 4.4, 2.9, 0, 1]] },
     lightning: { glass: 0, icon: "bolt", banners: [[-1, 0], [1, 0]], string: ["hanging", 0, [0.3, 0.7]], boards: true, pieces: [["gauge", 5.0, 0.9], ["cart", 5.7, 2.4, 1], ["coil", 3.8, 3.4]] },
-    arcade: { glass: 3, icon: "invader", banners: [[-1, 3], [1, 3]], string: ["hanging", 3, [0.12, 0.5, 0.88]], ceiling: [[-2.35, 2.35, -1.5, -5.8, 3.0, [0.35, 0.8]]], pieces: [["cabinet", -3.6, 1.0, 0, 0], ["cabinet", -2.9, 2.2, 0, 1]] },
+    arcade: { glass: 3, icon: "invader", banners: [[-1, 3], [1, 3]], string: ["hanging", 3, [0.12, 0.5, 0.88]], ceiling: [[-2.35, 2.35, -1.5, -5.2, 3.72, [0.1, 0.26, 0.42, 0.58, 0.74, 0.9], "bulb"]], pieces: [["tokenStack", -3.45, 1.65, 1, 0], ["bigJoystick", -3.0, 2.8, 0, 0]] },
     bca: { glass: 0, icon: "abacus", banners: [[-1, 4], [1, 4]], string: ["hanging", 0, [0.2, 0.5, 0.8]], ceiling: [[-1.6, 1.6, -2.2, -5.6, 3.1, [0.5]]], pieces: [["abacus", -5.0, 1.0], ["ledger", 5.0, 1.0, 2]] }
   };
   // Themes choose only [side, variant]. The whole standard stays behind and outside the lanterns,
@@ -1929,15 +1877,31 @@
       consider(a, { owner }, true);
     }
     if (!chosen) return;
-    // Keep the near palm; move its companion toward the Arcade, beside the berry bush.
-    // This authored spot uses actual trunk, path and stair clearance instead of the
+    // Step the near palm NEAR_NORTH metres north of its meadow spot and move its companion toward the Arcade, beside the berry bush.
+    // These authored spots use actual trunk, path and stair clearance instead of the
     // random meadow planting's broad exclusion around the clankers' bed approach.
-    const companionX = 13.5, companionZ = 4.75;
+    const NEAR_NORTH = 1, companionX = 13.5, companionZ = 2.75;
     if (chosen.extra && planting.stands(companionX, companionZ)
       && entranceClear(companionX, companionZ, 1.2) && offRuns(companionX, companionZ) && !nearMouth(companionX, companionZ, 6)) {
       const x = companionX, z = companionZ;
       const owner = { x, z, variant: planting.variant(), node: { position: { x, y: island.surfaceAt(x, z), z }, rotation: { y: 0 } } };
-      consider(chosen.a, { owner }, true);
+      const near = chosen.a.owner, reservation = meadowPalms.find((entry) => entry.owner === near).reservation;
+      const nearZ = near.z - NEAR_NORTH, fallback = chosen, fallbackMid = nearest;
+      drop(claimed, reservation);
+      const nearFits = planting.stands(near.x, nearZ) && entranceClear(near.x, nearZ, 1.2) && offRuns(near.x, nearZ);
+      claimed.push(reservation);
+      if (nearFits) {
+        const fromZ = near.z;
+        near.z = reservation.z = near.node.position.z = nearZ;
+        near.node.position.y = island.surfaceAt(near.x, nearZ);
+        chosen = null; nearest = Infinity;
+        consider(fallback.a, { owner }, true);
+        if (!chosen) {
+          near.z = reservation.z = near.node.position.z = fromZ;
+          near.node.position.y = island.surfaceAt(near.x, fromZ);
+          chosen = fallback; nearest = fallbackMid;
+        }
+      }
     }
     if (chosen.extra) {
       const entry = planting.plant(chosen.b.owner.x, chosen.b.owner.z, 0);
@@ -2158,15 +2122,9 @@
     if (slot.status === "headquarters") {
       addChild(group, createNode({ position: { x: 0, y: 0, z: 0 }, geometry: headquartersModels.entranceRamp(), depthBias: 0.25 }));
     } else if (slot.status === "open" && slot.scene === "arcade") {
-      // Ooga Arcade's mouth: two cabinets glowing in the dark inside, each showing its loop's first frame.
-      const AM = BL.arcadeModels;
-      for (const [c, x, turn] of [[AM.CABINETS[0], -1.3, 0.25], [AM.CABINETS[3], 1.3, -0.25]]) {
-        const cabinet = createNode({ position: { x, y: 0, z: -4.4 }, rotation: { x: 0, y: turn, z: 0 }, geometry: AM.cabinet(c.index) });
-        addChild(cabinet, createNode({ position: { x: 0, y: AM.SCREEN.y, z: AM.SCREEN.z }, rotation: { x: AM.SCREEN.lean, y: 0, z: 0 }, geometry: AM.attractFrames(c.game)[0], sightHidden: true }));
-        addChild(group, cabinet);
-        solids.add(cabinet);
-      }
-      arcadeMouth = { slot, x: m.x + ax * MOUTH_ACTION_Z, y: m.floorY + 1.1, z: m.z + az * MOUTH_ACTION_Z };
+      // Ooga Arcade's cave: its doors at the back and the most played cabinets recessed down its walls (arcade-entrance.js).
+      const entrance = BL.arcadeEntrance.build({ group, mouth: m, solids, addTarget, removeTarget, reachable: actionReachable, sightClear: (x, y, z, toX, toY, toZ) => island.sightClearAt(x, y, z, toX, toY, toZ) });
+      arcadeMouth = { slot, x: m.x + ax * BL.arcadeEntrance.DOOR_Z, y: m.floorY + 1.1, z: m.z + az * BL.arcadeEntrance.DOOR_Z, entrance };
     } else if (slot.status === "open" && slot.scene === "lab") {
       const lab = hubModels.entropyLab(m.room, m.floorY);
       addChild(group, lab.node);
@@ -2189,7 +2147,8 @@
     } else if (slot.status === "open" && slot.scene === "factory") {
       // The Lightning Factory's tunnel: timber sets and lamps down to a phase shield like the lab's, set further in.
       const tunnel = BL.factoryModels.hubTunnel();
-      addChild(group, createNode({ geometry: tunnel.timber }), createNode({ geometry: tunnel.glow, sightHidden: true }));
+      addChild(group, createNode({ geometry: tunnel.timber }), createNode({ geometry: tunnel.floor, sightHidden: true, depthBias: BL.factoryModels.FLOOR_BIAS }), createNode({ geometry: tunnel.boards, sightHidden: true }), createNode({ geometry: tunnel.glow, sightHidden: true }));
+      if (renderer.kind !== "webgl2") addChild(group, createNode({ geometry: tunnel.backdrop, sightHidden: true }));
       const tube = BL.factoryModels.ROOF_TUBE, sr = Math.sin(m.ry), cr = Math.cos(m.ry);
       const tx = m.x + cr * tube.x + sr * tube.z, tz = m.z - sr * tube.x + cr * tube.z;
       const base = island.surfaceAt(tx, tz) - 0.35;
@@ -2317,7 +2276,6 @@
       mattresses.push({
         roomIndex: i, basement: level === basement, corner: "rear-left", room: cave, node, ...geometry.mattress,
         x: node.position.x, y: cave.floor, z: node.position.z, sr: -sx, cr: cx, sleeper: null, sleep: dimensions,
-        window: island.headquarters.windows.find((window) => window.kind === "room" && window.roomIndex === i && window.basement === (level === basement)), sightFrame: -1, sightVisible: false,
         collisionBoxes: new Float64Array([-dimensions.width / 2, 0, -dimensions.depth / 2, dimensions.width / 2, dimensions.surface, dimensions.depth / 2,
         -0.45, dimensions.surface, dimensions.pillowZ - 0.25, 0.45, dimensions.pillowTop, dimensions.pillowZ + 0.25]),
         walkAt: { x: node.position.x + cx * side, y: cave.floor, z: node.position.z + sx * side }
@@ -2965,7 +2923,7 @@
       claim(p.x, p.z, T.SITE.radius + 1);
       for (let r = p.approachFrom - 1; r <= p.rim; r += 1) claim(T.DIR.x * r, T.DIR.z * r, T.SITE.width / 2 + 0.9);
     };
-    return { site, place: p, cos, sin, worldX, worldZ, claimGround, show: T.show(site), gate: null, residentInside: false };
+    return { site, place: p, cos, sin, worldX, worldZ, claimGround, show: T.show(site), gate: null };
   };
   // ₿IFRÖST's arch dressed where its stone stands as the gate, off the outlines: its gold, vines and banners' rods and
   // marks, the banners' cloth, its lit name, runes and crystals, and its lanterns' glass, which comes back with the
@@ -3018,41 +2976,6 @@
     };
     BL.bifrostIsle.update(site, 0, 0, NaN, NaN, NaN);
     return { site, group, claimGround, phase: null, window: null, heimdall: null, hum: 0, effectsActive: false, effectsTime: 0 };
-  };
-  // Sleeping or away, Sani lives in the Sphere's rooms rather than HQ. Active, he joins the mainland crew.
-  // Possessing him inside the ball brings him out onto the bridge before its doors.
-  const timechainResidentPose = (cave) => {
-    if (!timechainIsland || cave.traits.name !== "SaniExp") return false;
-    const T = timechainIsland;
-    // A separate body made where its resident NPC sits inside the ball steps out onto the bridge; the NPC stays in.
-    if (cave.npc) {
-      const p = cave.root.position;
-      if (T.residentInside && Math.hypot(p.x - T.place.x, p.z - T.place.z) < 1) {
-        const W = BL.timechainModels.SPOTS.WAIT;
-        p.x = T.worldX(W.x, W.z + 1.2); p.z = T.worldZ(W.x, W.z + 1.2); p.y = T.place.y + cave.baseY;
-        cave.root.rotation.y = T.place.ry + Math.PI;
-      }
-      return false;
-    }
-    if (cave.state === "working" || cave.state === "chilling" || cave === pilot?.player || cave.remoteControlled) {
-      if (T.residentInside) {
-        T.residentInside = false;
-        if (cave === pilot?.player) {
-          const W = BL.timechainModels.SPOTS.WAIT;
-          cave.root.position.x = T.worldX(W.x, W.z + 1.2); cave.root.position.z = T.worldZ(W.x, W.z + 1.2);
-          cave.root.position.y = T.place.y + cave.baseY;
-          cave.root.rotation.y = T.place.ry + Math.PI;
-          cave.root.visible = true;
-        }
-      }
-      return false;
-    }
-    T.residentInside = true;
-    cave.walk = null; cave.hop = cave.hopV = cave.cheer = cave.catchT = 0;
-    cave.act.kind = "idle"; cave.act.until = Infinity;
-    cave.root.visible = false;
-    cave.root.position.x = T.place.x; cave.root.position.z = T.place.z; cave.root.position.y = T.place.y + cave.baseY;
-    return true;
   };
   // The ladder on the bluff; the former Cloud Hopper dock is retired.
   const buildRim = () => {
@@ -5715,7 +5638,9 @@
       case "crate":
         return `${o.crate.loot.tier} crate · tap to open`;
       case "cave":
-        return o.slot.status === "open" ? o.slot.scene === "lab" ? `${o.slot.name} · island workshop` : o.slot.title ? `${o.slot.name} · ${o.slot.title}` : `${o.slot.name} · tap to enter` : o.slot.status === "headquarters" ? "Headquarters · walk down the ramp" : o.slot.status === "mirror" ? `${o.slot.name} · mirror` : o.slot.status === "sleeping" ? "A project sleeps here · zzz" : o.slot.soon ? `${o.slot.name} · coming soon` : "An empty cave";
+        return o.slot.status === "open" ? o.slot.scene === "lab" ? `${o.slot.name} · island workshop` : o.slot.title ? `${o.slot.name} · ${o.slot.title}` : walkedInto(o.slot) ? `${o.slot.name} · walk in through the cave` : `${o.slot.name} · tap to enter` : o.slot.status === "headquarters" ? "Headquarters · walk down the ramp" : o.slot.status === "mirror" ? `${o.slot.name} · mirror` : o.slot.status === "sleeping" ? "A project sleeps here · zzz" : o.slot.soon ? `${o.slot.name} · coming soon` : "An empty cave";
+      case "arcade-cabinet":
+        return arcadeMouth.entrance.tip(o);
       case "cave-sign":
         return `${o.slot.name} · open GitHub repo in a new tab`;
       case "gate":
@@ -5841,7 +5766,7 @@
     const o = hit.owner;
     if (hit.node === mirrorCave.node || o.kind === "cave-sign" || o.kind === "room-sign" || o.kind === "sphere-key"
       || o.kind === "lab-link" || o.kind === "piece" || o.kind === "book") return "object";
-    if (o.kind === "cave") return o.slot.status === "open" ? "object" : "none";
+    if (o.kind === "cave") return o.slot.status === "open" && !walkedInto(o.slot) ? "object" : "none";
     if (o.kind === "prop" && RETICLE_PROPS.has(o.prop)) return "object";
     return "none";
   };
@@ -6053,7 +5978,7 @@
       HAMMOCK_FROM.x = x; HAMMOCK_FROM.z = z;
       return hammock.free(HAMMOCK_FROM) || HAMMOCK_FULL;
     }
-    if (arcadeMouth && actionWithinReach(x, y, z, arcadeMouth.x, arcadeMouth.y, arcadeMouth.z, MOUTH_REACH)) return arcadeMouth;
+    if (arcadeMouth) { const near = arcadeMouth.entrance.nearby(x, y, z, player); if (near) return near; }
     if (player && timechainIsland.gate && timechainIsland.gate.nearKeypad(x, y, z)) return timechainIsland.gate.action;
     if (player && nearChalkboard(x, y, z)) return CHALK_ACTION;
     return null;
@@ -6069,7 +5994,7 @@
     else if (action.sleep) crew.sleepPlayer(action);
     else if (action === timechainIsland.gate.action) timechainIsland.gate.engage();
     else if (action === CHALK_ACTION) chalkboard.open(null);
-    else enterCave(action.slot);
+    else arcadeMouth.entrance.use(action);
   };
   // Stationary functional controls take priority over a jump or jetpack thrust.
   const useNear = (x, z, reach, feetY) => {
@@ -6078,17 +6003,23 @@
     useNearbyAction(action);
     return true;
   };
-  const releaseForScene = id => {
-    if (id === "factory" && factoryMouth) factoryMouth.snap = true;
+  const releaseForScene = () => {
     pilot.release(true);
     hud.tooltip.hide();
+  };
+  // The Arcade cave's doors and cabinets, handed this visit's controls (arcade-entrance.js).
+  const bindArcadeEntrance = (ctx) => {
+    if (!arcadeMouth) return;
+    arcadeMouth.entrance.bind({ pilot, crew, input, hud, ctx, world, go, renderer, camera, cabinet: ctx.cabinet, coarse: COARSE, followMin: FOLLOW.min, refreshPrompt: () => {},
+      entering: () => entering, setEntering: (on) => { entering = on; }, grab: () => { factoryWalk.grab = true; arcadeMouth.snap = true; } });
   };
   const enterScene = (view, id) => {
     if (entering) return;
     // A game still being built is unregistered unless the page opted in (director.js, `wip`).
     if (!BL.scenes[id]) return hud.toast("Not open yet. Ooga still building it.");
     entering = true;
-    releaseForScene(id);
+    releaseForScene();
+    if (id === "arcade" && arcadeMouth) arcadeMouth.snap = true;
     const orbit = pilot.orbit;
     const from = { x: orbit.tx, y: orbit.ty, z: orbit.tz, dist: orbit.dist, yaw: orbit.yaw };
     const turn = Math.atan2(Math.sin(view.yaw - from.yaw), Math.cos(view.yaw - from.yaw));
@@ -6126,7 +6057,11 @@
     const w = factoryWalk, G = BL.factoryWindow.GLIDE;
     // The Factory's last frame dissolves away once the island has taken over.
     if (w.still > 0 && (w.hold -= dt) <= 0) w.still = Math.max(0, w.still - dt / G.dissolve);
-    if (!player || entering || !BL.scenes.factory) { w.phase = 0; w.seen = false; w.settle = false; return; }
+    if (!player || entering || !BL.scenes.factory) {
+      if (w.phase && !entering) w.eyes.reset();
+      w.phase = 0; w.seen = false; w.settle = false;
+      return;
+    }
     if (w.settle) {
       const a = pilot.controls.read();
       if (player === w.cave && (a.x || a.y)) crew.steer(0, 0, 0, 0, 0);
@@ -6135,6 +6070,12 @@
     const p = player.root.position, sr = Math.sin(m.ry), cr = Math.cos(m.ry), shield = BL.factoryModels.SHIELD_Z;
     const along = (p.x - m.x) * sr + (p.z - m.z) * cr, across = (p.x - m.x) * cr - (p.z - m.z) * sr;
     const feet = p.y - player.baseY - m.floorY;
+    if (w.phase === FACTORY_WALK_IN || (p.x - m.x) ** 2 + (p.y - m.floorY) ** 2 + (p.z - m.z) ** 2 <= FACTORY_NEAR2) {
+      factoryReady.approach();
+      const working = factoryReady.working;
+      factoryReady.step(w.wait > 0 ? G.hurry : G.warm);
+      w.warming = working || factoryReady.working;
+    }
     if (factoryHeld) {
       if (along > shield || along < shield - 2 || Math.abs(across) > 2.4 || feet < o.floorY - 0.12 || feet >= o.ceilingY) factoryHeld = false;
       return;
@@ -6145,7 +6086,8 @@
     const stepped = Math.hypot(p.x - w.x, p.z - w.z), inward = w.seen && stepped < Math.max(0.5, dt * 12) ? ((w.x - p.x) * sr + (w.z - p.z) * cr) / Math.max(dt, 1e-3) : 0;
     w.x = p.x; w.z = p.z; w.seen = true;
     if (along < shield + G.reach && along > shield && Math.abs(across) < o.maxX && Math.abs(feet - o.floorY) < 0.3 && inward > G.moving) {
-      Object.assign(w, { phase: FACTORY_WALK_IN, cave: player, t: 0, through: false });
+      Object.assign(w, { phase: FACTORY_WALK_IN, cave: player, t: 0, through: false, wait: 0, pulse: 0 });
+      factoryReady.commit();
       pilot.controls.reset(); input.reset(); hud.tooltip.hide();
       return factoryGlide(dt, player, along, across, feet);
     }
@@ -6159,47 +6101,62 @@
     pilot.controls.reset(); input.reset(); pilot.setActive(false); hud.tooltip.hide();
     go("factory");
   };
-  // The walk through the Factory's shield, in the third person, as the Timechain Sphere's doorway walks its visitor
-  // through: after the pilot has read the visitor's input, the Ooga's steering is set aside for the walk's own, so it
-  // walks itself down the tunnel's middle at an even pace while the view follows as always, swinging round behind it.
-  // Going in, a step through the shield the factory takes over with an instant switch, the island's last frame held
-  // over its first and dissolving away, with the same Ooga as far past its own shield and the view's pitch and distance
-  // (`world.factoryCrossing`); on a page's first walk in, whose switch builds the whole hall, the Ooga stands a beat in
-  // the shield first, so the switch lands on a still frame. Coming out (`arriveFromFactory`) the Ooga walks on out of
-  // the mouth while the Factory's last frame dissolves. Anything else moving the Ooga, or a walk that runs long, lets go.
+  // The walk through the Factory's shield, as the Timechain Sphere's doorway and Ooga Arcade's doors walk their visitors
+  // through: the pilot reads the visitor's input and the walk then sets the Ooga's steering aside for its own, so it walks
+  // itself down the tunnel's middle at an even pace, while the view swoops into its own eyes (`factoryWindow.eyes`). As
+  // that eye reaches the shield the factory takes over from the same eye with an instant switch (`world.factoryCrossing`:
+  // as far across and as far past as the Ooga stood), the island's last frame held over its first and dissolving away; on
+  // a page's first walk in, whose switch builds the whole hall, the Ooga stands a beat first, so the switch lands on a still
+  // frame. Coming out (`arriveFromFactory`) it goes on from that eye far enough for the view handed back behind it to clear
+  // the shield, then the view glides out. Anything else moving the Ooga, or a walk that runs long, lets go.
+  // Nothing commits to the crossing before the hall is ready: as the Timechain Sphere's doors wait on its room, the view
+  // stays the visitor's and the Ooga stands before the shield until then (`factoryWait`).
+  // Whether the hall about to be walked into is the one the island kept: builders released since then made new meshes.
+  const hallKept = () => {
+    if (world.factoryKeep) for (const geometry of factoryWarm) if (world.factoryKeep.has(geometry)) return true;
+    return false;
+  };
+  const factoryLetGo = (player) => {
+    const w = factoryWalk;
+    w.phase = 0; w.through = false; w.seen = false;
+    crew.steer(0, 0, 0, 0, 0);
+    w.eyes.letGo(FOLLOW.min);
+    // A forward key held through the walk goes on walking; anything else waits to be let go, as the view has turned.
+    w.settle = player === w.cave && !pilot.controls.takeForward();
+  };
   const factoryGlide = (dt, player, along, across, feet) => {
-    const w = factoryWalk, G = BL.factoryWindow.GLIDE, m = factoryMouth.mouth, p = player.root.position, o = pilot.orbit;
+    const w = factoryWalk, G = BL.factoryWindow.GLIDE, m = factoryMouth.mouth, p = player.root.position;
     const sr = Math.sin(m.ry), cr = Math.cos(m.ry), shield = BL.factoryModels.SHIELD_Z, going = w.phase === FACTORY_WALK_IN;
+    // The visitor's own move this frame, before the walk's steering replaces it.
+    const ownX = crew.steering.x, ownZ = crew.steering.z;
     w.t += dt;
     const moved = Math.hypot(p.x - w.x, p.z - w.z);
-    if (player !== w.cave || moved > 1.2 || w.t > G.limit || !going && along > OUT_WALK) {
-      w.phase = 0; w.through = false; w.seen = false; w.settle = player === w.cave;
-      crew.steer(0, 0, 0, 0, 0);
-      return;
-    }
+    if (player !== w.cave || moved > 1.2 || w.t > G.limit || !going && along >= shield + w.stop) return factoryLetGo(player);
     w.x = p.x; w.z = p.z;
     const to = along + (going ? -G.ahead : G.ahead), side = across * 0.4;
     const dx = m.x + sr * to + cr * side - p.x, dz = m.z + cr * to - sr * side - p.z, d = Math.hypot(dx, dz) || 1;
-    crew.steer(dx / d, dz / d, 0, 1, 0, G.speed);
-    const behind = going ? m.ry : m.ry + Math.PI;
-    o.tYaw = o.yaw + Math.atan2(Math.sin(behind - o.yaw), Math.cos(behind - o.yaw));
-    if (!going) return;
-    if (!w.through && along <= shield) {
-      w.through = true;
-      factoryMouth.phase.ripples.pulse(across, feet + 1, 0);
-      w.beat = world.factoryKeep ? 0 : G.beat;
+    crew.steer(dx / d, dz / d, 0, 1, 0, G.eyePace);
+    if (!going) {
+      if (!w.through && along >= shield) { w.through = true; factoryMouth.phase.ripples.pulse(across, feet + 1.2, 0); }
+      return;
     }
-    // On a step past the shield, or as far as it gets.
-    if (!w.through || along > shield - G.through && moved > 0.005) return;
+    const ready = factoryReady.ready && (factoryReady.extraDone || w.wait >= G.extra);
+    if (!ready) { if (along <= shield + G.hold) factoryWait(dt, ownX, ownZ, across, feet); return; }
+    if (w.pulse) { w.pulse = 0; hud.hideHint(); }
+    if (!w.eyes.on) w.eyes.enter(player, m.ry + Math.PI);
+    if (along - w.eyes.ahead(player) > shield + G.hand) return;
+    // There before the swoop is done (a walk begun right at the shield): it stands until the view is in its eyes.
+    if (!w.eyes.there) { crew.steer(0, 0, 0, 0, 0); return; }
+    if (!w.through) { w.through = true; w.beat = hallKept() ? 0 : G.beat; }
     if (w.beat > 0) {
       w.beat -= dt;
       crew.steer(0, 0, 0, 0, 0);
       return;
     }
-    // Through: still played, so the crew never stands it up and turns it back out to work. The island's meshes stay on
-    // the GPU while the visit lasts (`world.islandKeep`), so walking back out uploads nothing, and this frame, once
-    // drawn, is held over the factory's first (`grab`).
-    world.factoryCrossing = { across, past: shield - along, pitch: o.pitch, dist: o.dist };
+    // Still played, so the crew never stands it up and turns it back out to work. The island's meshes stay on the GPU while
+    // the visit lasts (`world.islandKeep`), so walking back out uploads nothing, and this frame, once drawn, is held over
+    // the factory's first (`grab`).
+    world.factoryCrossing = { across, past: shield - along };
     world.islandKeep = islandMeshes();
     w.phase = 0;
     w.grab = true;
@@ -6211,21 +6168,51 @@
     // A switch the director refuses (another under way) puts it all back.
     if (!go("factory", null, true)) { world.factoryCrossing = world.islandKeep = null; stay(); }
   };
-  // Back out of the Factory's shield: the Ooga at the mouth's rim facing out, as far across as it left, the view behind
-  // it in the tunnel looking out, the Factory's last frame dissolving off it, and the walk on out of the mouth.
+  // The hall is not ready when the Ooga reaches the shield (a first walk in on a slow connection): it stands in front of
+  // the shield, this side of it, with the island running on, and the shield beats and says so once that takes a while.
+  // The visitor's own move anywhere but into the shield gives the Ooga back at once; code that fails to arrive, or a wait
+  // that runs out, says so and gives it back too, and walking in again tries again.
+  const stopFactoryWait = () => {
+    const w = factoryWalk;
+    if (w.pulse) hud.hideHint();
+    w.phase = 0; w.seen = false; w.wait = w.pulse = 0;
+  };
+  const factoryWait = (dt, ownX, ownZ, across, feet) => {
+    const w = factoryWalk, G = BL.factoryWindow.GLIDE, m = factoryMouth.mouth, own = Math.hypot(ownX, ownZ);
+    // Standing is not walking: `limit` is the walk's.
+    w.t -= dt;
+    crew.steer(0, 0, 0, 0, 0);
+    if (own > 0.2 && -(ownX * Math.sin(m.ry) + ownZ * Math.cos(m.ry)) < own * 0.5) return stopFactoryWait();
+    w.wait += dt;
+    if (factoryReady.failed || w.wait > G.wait) {
+      stopFactoryWait();
+      w.settle = true;
+      if (!BL.deferred.stale) hud.toast("The Lightning Factory could not be opened · try again");
+      return;
+    }
+    if (w.wait >= G.slow && (w.pulse -= dt) <= 0) {
+      w.pulse = G.pulse;
+      factoryMouth.phase.ripples.pulse(across, feet + 1.2, 0);
+      hud.hint("Opening the Lightning Factory…", G.pulse * 1500);
+    }
+  };
+  // Back out of the Factory's shield: the Ooga as far past it and as far across as the hall let it go, seen from its own
+  // eyes facing the daylight, the Factory's last frame dissolving off it (when it was held over the crossing at all: an
+  // island that had to be rebuilt fades in instead), and the walk on out of the tunnel.
   const arriveFromFactory = (c) => {
     const m = factoryMouth.mouth, sr = Math.sin(m.ry), cr = Math.cos(m.ry), G = BL.factoryWindow.GLIDE, player = pilot.player;
-    const pitch = clamp(c.pitch, FOLLOW.pitch[0], FOLLOW.pitch[1]), along = BL.factoryModels.SHIELD_Z + Math.max(c.past, FOLLOW.min * Math.cos(pitch) + 0.4);
-    const across = clamp(c.across, -1.2, 1.2), x = m.x + sr * along + cr * across, z = m.z + cr * along - sr * across;
-    pilot.navigate({ position: { x, y: m.floorY, z }, yaw: m.ry + Math.PI, pitch, dist: FOLLOW.min, framed: true });
+    const along = BL.factoryModels.SHIELD_Z + c.past, across = clamp(c.across, -1.2, 1.2), x = m.x + sr * along + cr * across, z = m.z + cr * along - sr * across;
+    pilot.navigate({ position: { x, y: m.floorY, z }, yaw: m.ry + Math.PI, pitch: 0, dist: FOLLOW.min, framed: true });
+    factoryWalk.eyes.arrive(player, m.ry);
     const p = player.root.position;
-    Object.assign(factoryWalk, { phase: FACTORY_WALK_OUT, cave: player, t: 0, x: p.x, z: p.z, seen: true, through: false, still: 1, hold: G.still });
+    Object.assign(factoryWalk, { phase: FACTORY_WALK_OUT, cave: player, t: 0, x: p.x, z: p.z, seen: true, through: false, stop: BL.factoryWindow.stopPast(FOLLOW.min), still: c.held ? 1 : 0, hold: c.held ? G.still : 0 });
   };
   // Step out into the mainland's Arcade overhang, independent of the carried camera/combat mode.
   // This is a doorway arrival, not the map destination's exterior framing (which can be blocked).
   const arriveFromArcade = () => {
-    const m = island.mouths.find((mouth) => mouth.id === arcadeMouth.slot.id);
-    pilot.navigate({ position: { x: m.x - Math.sin(m.ry) * 1.2, y: m.floorY, z: m.z - Math.cos(m.ry) * 1.2 },
+    // Far enough out that the view behind it stays on this side of the doors.
+    const m = island.mouths.find((mouth) => mouth.id === arcadeMouth.slot.id), out = BL.arcadeEntrance.DOOR_Z + FOLLOW.min + 0.7;
+    pilot.navigate({ position: { x: m.x + Math.sin(m.ry) * out, y: m.floorY, z: m.z + Math.cos(m.ry) * out },
       yaw: m.ry + Math.PI, pitch: 0.18, dist: FOLLOW.min });
     cameraPreviousValid = cameraTerrainValid = cameraTerrainRecovering = cameraManualContact = false;
     cameraTrailPlayer = null; cameraTrailCount = cameraTrailNext = 0;
@@ -6235,6 +6222,8 @@
   };
   // B.C.A.'s veil, in a banker's lamp amber, where the lab's stands, so the gorillas' suits show from where they cross.
   const BCA_TINT = [1, 0.78, 0.4], BCA_VEIL_Z = 0.5;
+  // EntropyLab's veil: its glyphs are white.
+  const ENTROPY_TINT = [1, 1, 1];
   const bcaVeil = (dt, elapsed) => {
     updatePortalEffects(bcaMouth.phase, dt);
     bcaMouth.office.update(dt);
@@ -6286,8 +6275,11 @@
   // photographed once from the shield, looking out, while the screen is dark: the mouth's own dressing is hidden,
   // since the factory builds the tunnel and its lamps itself, and so is the Ooga walking in. What the factory can
   // see through its rim is cropped out, halved down to a small copy that its display blurs as it enlarges it, given
-  // back the saturation the page's grade will add again, and misted a little, as seen through the shield.
-  const FACTORY_VIEW = { width: 320, eye: 1.7, across: 0.82, up: 0.46, down: 0.5, colour: 0.83, mist: 0.12, haze: [206, 228, 238] };
+  // back the saturation the page's grade will add again, and misted a little, as seen through the shield. It is taken
+  // from the eye the walk hands over at, so the picture and the island agree there. The crop is the rim's own opening, 2.5 m
+  // either side, the floor to 3 m up, at the boards' end 5.55 m ahead, where the hall hangs it: its foot on the floor at
+  // that very edge, so grass and path meet the boards from any angle.
+  const FACTORY_VIEW = { width: 640, eye: 1.2, across: 2.5 / 5.55, up: 1.8 / 5.55, down: 1.2 / 5.55, colour: 0.83, mist: 0.12, haze: [206, 228, 238] };
   // ₿IFRÖST's chamber looks back out through its own field the same way, at a picture taken from the portal as the
   // Ooga walks in: the landing, Heimdall, the bridge and the island past it, misted in the field's blue.
   // The window into the chamber follows the eye, so it moves once the camera is final for the frame. It is built on the
@@ -6301,7 +6293,7 @@
     }
     if (b.window) b.window.update(dt, camera, RENDER_OPTS, !b.phase.paused);
   };
-  const BIFROST_VIEW = { ...FACTORY_VIEW, haze: [188, 208, 255] };
+  const BIFROST_VIEW = { width: 320, eye: 1.7, across: 0.82, up: 0.46, down: 0.5, colour: 0.83, mist: 0.12, haze: [188, 208, 255] };
   const snapFactoryView = () => {
     const view = snapFromShield(factoryMouth.group, factoryMouth.mouth, BL.factoryModels.SHIELD_Z, FACTORY_VIEW);
     if (view) world.factoryView = view;
@@ -6312,18 +6304,28 @@
   };
   // A picture from a shield in `group` at `from` along its mouth's axis `m`, looking out, with the group and the Ooga
   // walking in hidden, cropped to `V` and graded: the record a scene hangs past its own end of the tunnel.
+  // Ooga Arcade's exit looks at this from behind its doors (#554): the cave and the mainland past its mouth, as seen from
+  // the doors looking out, to the passage's measure in the hall, with the doors and their gorillas left out of the shot.
+  const ARCADE_VIEW = { width: 640, eye: 1.2, across: 2.5 / 5.6, up: 1.8 / 5.6, down: 1.2 / 5.6, colour: 1, mist: 0, haze: [0, 0, 0] };
+  const snapArcadeView = () => {
+    const entrance = arcadeMouth.entrance, view = snapFromShield(entrance.door.node, arcadeMouth.slot && island.mouths.find((m) => m.id === arcadeMouth.slot.id), BL.arcadeEntrance.DOOR_Z, ARCADE_VIEW);
+    if (view) world.arcadeView = view;
+  };
   const snapFromShield = (group, m, from, V) => {
     const sr = Math.sin(m.ry), cr = Math.cos(m.ry);
     const W = glCanvas.width, H = glCanvas.height, aspect = W / H, t = Math.max(V.up, V.down, V.across / aspect);
     const view = createCamera({ fov: 2 * Math.atan(t) * 180 / Math.PI, near: 0.2, far: camera.far });
     Object.assign(view.position, { x: m.x + sr * from, y: m.floorY + V.eye, z: m.z + cr * from });
     Object.assign(view.target, { x: view.position.x + sr, y: view.position.y, z: view.position.z + cr });
-    const me = world.pilot ? crew.cavemen.get(world.pilot) : null, shown = !!me && me.root.visible;
+    // The Ooga driven may be a body of its own beside its roster copy: neither is in the shot.
+    const me = world.pilot ? crew.cavemen.get(world.pilot) : null, shown = !!me && me.root.visible, driven = pilot.player, drivenShown = !!driven && driven.root.visible;
     group.visible = false;
     if (me) me.root.visible = false;
+    if (driven) driven.root.visible = false;
     const drawn = renderer.render(root, view, { ...RENDER_OPTS, birdsEyeCutaway: false, cutawayFade: 0, cutawayMaxY: 1e6, cutawayRegionCount: 0 });
     group.visible = true;
     if (me) me.root.visible = shown;
+    if (driven) driven.root.visible = drivenShown;
     if (!drawn) return null;
     let src = glCanvas, sx = W / 2 * (1 - V.across / (t * aspect)), sy = H / 2 * (1 - V.up / t), sw = W - 2 * sx, sh = H / 2 * (V.up + V.down) / t;
     const w = V.width, h = Math.round(w * (V.up + V.down) / (2 * V.across));
@@ -6349,6 +6351,8 @@
   };
   // Whoever the visitor is playing goes in with them, as world.pilot; a scene that has a use for it
   // takes it on the way in.
+  // The Lightning Factory has no door to tap: its shield is walked through (`factoryShield`).
+  const walkedInto = (slot) => slot.scene === "factory";
   const enterCave = (slot) => {
     if (slot.scene === "lab") return;
     if (!slot.scene) { if (slot.place) navigate(slot.place); return; }
@@ -6471,8 +6475,11 @@
         crates.openCrate(o.crate);
         break;
       case "cave":
-        if (o.slot.status === "open") enterCave(o.slot);
+        if (o.slot.status === "open" && !walkedInto(o.slot)) enterCave(o.slot);
         else hud.toast(tooltipFor(hit));
+        break;
+      case "arcade-cabinet":
+        arcadeMouth.entrance.tap(o);
         break;
       case "cave-sign":
         window.open(`https://github.com/${o.repo}`, "_blank", "noopener,noreferrer");
@@ -6657,10 +6664,7 @@
       } else if (action === CHALK_ACTION) {
         hud.hint(COARSE ? "Tap WRITE to use the chalkboard" : "Press Space to write on the chalkboard");
         hud.setAct("WRITE");
-      } else {
-        hud.hint(COARSE ? "Tap ENTER ARCADE to go in" : "Press Space to enter Ooga Arcade");
-        if (player) hud.setAct("ENTER ARCADE");
-      }
+      } else arcadeMouth.entrance.prompt(action, hud, COARSE);
     } else if (hadPlayerPrompt || player) pilot.showAct();
   };
   const syncMatrixInside = (player) => {
@@ -8000,7 +8004,9 @@
     mirrorCave.ripples.update(dt, elapsed);
     updatePortalEffects(entropyLab.phase, dt);
     for (const veil of caveVeils) updatePortalEffects(veil.phase, dt);
+    factoryWalk.warming = false;
     if (factoryMouth && !cloudPlaying()) factoryShield(dt, elapsed);
+    if (arcadeMouth && !cloudPlaying()) arcadeMouth.entrance.update(dt, elapsed, pilot.player);
     if (bifrostIsle && !cloudPlaying()) bifrostGate(dt, elapsed);
     if (bcaMouth) bcaVeil(dt, elapsed);
     if (factoryDeparting || bifrostDeparting) { npcGhosts.paint(dt); return; } // The Ooga through a shield and its camera hold through the director fade.
@@ -8059,7 +8065,12 @@
         clankerPlay.respawn(p.x - oldX, p.y - oldY, p.z - oldZ);
         found = true; break;
       }
-      if (!found) throw new Error("No clear gorilla respawn at pile");
+      // Taken spots are no reason to stop the world: thrown here it would fail every frame until a reload.
+      if (!found) {
+        const x = NAVIGATION_OFFSETS[0], y = island.surfaceAt(x, z);
+        clankers.respawn(entry, x, y, z);
+        clankerPlay.respawn(p.x - oldX, p.y - oldY, p.z - oldZ);
+      }
     }
     if (gameMode && dt > 0) updateClankerFireContacts(clankerFireReachable);
     if (debugSelectedGorilla && (!debugSelectedGorilla.active || !debugSelectedGorilla.root.visible || !DEBUG_GORILLA_RAGE && pilot.player || clankerPlay.active
@@ -8165,6 +8176,7 @@
     else if (!cloudHopper?.fallView()) pilot.update(dt);
     // The doorway's views (the keypad's, the swoop into the eyes and back out) take over from the pilot's.
     if (!cloudPlaying()) timechainIsland.gate.view(dt);
+    if (factoryMouth && !cloudPlaying()) factoryWalk.eyes.view(dt);
     // Tess moves after the view is set, so a tour's glide has the last word on it.
     if (!cloudHopper?.active) islandGuide.update(dt, elapsed);
     shareDrivenPose();
@@ -8188,6 +8200,7 @@
     // clampCamera resolves the eye's entrance crossing inside pilot.update.
     // Commit portal and Matrix state after that, before rendering, so mirror and interior never disagree.
     syncMatrixInside(player);
+    if (arcadeMouth && !cloudPlaying()) arcadeMouth.entrance.afterCamera(camera, dt);
     // The factory's window follows the eye, so it moves once the camera is final for the frame.
     if (factoryMouth && factoryMouth.hall) factoryMouth.hall.update(dt, camera, RENDER_OPTS, !factoryMouth.phase.paused);
     if (factoryMouth && factoryMouth.roofWindow) {
@@ -8224,6 +8237,7 @@
     if (drivesOoga(cave)) return true;
     // The Timechain Sphere's doorway holds its Ooga from the keypad until it is through.
     if (timechainIsland.gate && timechainIsland.gate.busy) { hud.toast("Finish at the Timechain Sphere's doors first"); return false; }
+    if (arcadeMouth?.entrance.walk?.holding) { hud.toast("Finish walking through Ooga Arcade's doors first"); return false; }
     const refusal = mayDriveOoga(cave);
     if (refusal) { hud.toast(refusal); return false; }
     if (cave.remoteControlled || cave.ghostTrack) { hud.toast(`Someone is already driving ${cave.traits.display}`); return false; }
@@ -8245,6 +8259,7 @@
       hud.toast("That gorilla is not available here"); return false;
     }
     if (clankerPlay.player === entry || clankerPlay.player?.npc === entry) return true;
+    if (arcadeMouth?.entrance.walk?.holding) { hud.toast("Finish walking through Ooga Arcade's doors first"); return false; }
     const refusal = BL.net.mayDriveGorilla(entry.owner.traits.name);
     if (refusal) { hud.toast(refusal); return false; }
     if (entry.remoteControlled || entry.ghostTrack) { hud.toast("Someone is already driving that gorilla"); return false; }
@@ -10634,7 +10649,6 @@
     else if (ghostHovered) showGhostTooltip();
     else if (pileHovered) showPileTooltip();
     // World-anchored sleeping marks share the guide visibility cadence; their particles still move every frame.
-    advanceSleepSight(dt);
     const gorilla = clankerPlay.active, player = controlledGuideActor();
     const closeWanted = gorilla ? clankerPlay.firstPerson : pilot.closeWanted, closeMix = gorilla ? (closeWanted ? 1 : 0) : pilot.closeMix;
     const combatBirdsEye = gorilla ? clankerPlay.combat && clankerPlay.birdsEye : !!player && pilot.aiming && pilot.birdsEye;
@@ -10836,7 +10850,9 @@
     actorTransition.sourceRoot = actorTransition.sourceHead = null;
     if (factoryMouth && factoryMouth.snap) snapFactoryView();
     if (bifrostIsle && bifrostIsle.snap) snapBifrostView();
+    if (arcadeMouth && arcadeMouth.snap) snapArcadeView();
     if (factoryMouth) factoryMouth.snap = false;
+    if (arcadeMouth) arcadeMouth.snap = false;
     if (bifrostIsle) bifrostIsle.snap = false;
     // Heimdall's horn closes its sound as a full leave does; his next blast opens it again.
     if (bifrostIsle) bifrostIsle.heimdall.dispose();
@@ -10883,7 +10899,6 @@
     hud.dispose();
     BL.net.setBody(null); BL.net.setBlend(null, 0); BL.net.setHub(false); zoneHeld = null;
     CLANKER_REST_SLOPE.supportEntry = RAGE_WARP_MOTION.supportEntry = null;
-    sleepSightSince = Infinity; sleepSightMode = null; sleepSightGorilla = false; sleepSightFrame++;
     CLANKER_HIT.node = CLANKER_HIT.owner = POOL_BLOCK_HIT.node = POOL_BLOCK_HIT.owner = null;
     DEBUG_MOVE_HIT.node = DEBUG_MOVE_HIT.owner = DEBUG_GORILLA_HIT.node = DEBUG_GORILLA_HIT.owner = null;
     viewPoseActor = grabSupportEntry = clankerSupportActor = clankerPassingEntry = preparingGuideActor = null;
@@ -10906,6 +10921,7 @@
     Object.assign(factoryWalk, { phase: 0, cave: null, seen: false, through: false, beat: 0, grab: false, still: 0, hold: 0, settle: false });
     world.islandKeep = null;
     if (factoryMouth) factoryMouth.snap = false;
+    if (arcadeMouth) arcadeMouth.snap = false;
     if (bifrostIsle) bifrostIsle.snap = false;
     hubScene.root = root; hubScene.camera = camera; hubScene.input = input; hubScene.debug = heldDebug;
     heldDebug = null;
@@ -10935,8 +10951,9 @@
     totemUnsub = BL.totemFeed.subscribe(onTotem);
     BL.net.setHub(true);
     crew.refreshStates(true);
-    const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || ctx.from === "lab" || ctx.from === "timechain";
-    const returningCharacter = handsBack ? world.pilot : null;
+    restoreCloudYard(ctx);
+    const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || ctx.from === "lab" || ctx.from === "timechain" || !!world.arcadeYard;
+    const returningCharacter = handsBack ? (world.arcadeYard ? world.arcadeYard.name : world.pilot) : null;
     if (handsBack) world.pilot = null;
     if (returningCharacter) {
       // A separate body comes back (crew.js `separateBodies`); the NPC keeps its own track and override, untouched.
@@ -10953,14 +10970,19 @@
     claimOwnOoga();
     unsubscribeActivity = contributors.subscribe(() => crew.refreshStates());
     unsubscribeAccount = watchAccount();
+    bindArcadeEntrance(ctx);
     BL.players.setDoors(doorToward);
-    const donate = ctx.place === "donate", routedPlace = donate ? null : ctx.place;
+    const donate = ctx.place === "donate", routedPlace = donate || ctx.place === "cloud-hopper-return" ? null : ctx.place;
     const sphereExit = ctx.from === "timechain" ? world.sphereExit : null;
     world.sphereExit = null;
     const factoryCrossing = ctx.from === "factory" ? world.factoryCrossing : null;
     world.factoryCrossing = null;
+    const arcadeCrossing = ctx.from === "arcade" ? world.arcadeCrossing : null, arcadeYard = world.arcadeYard;
+    world.arcadeCrossing = world.arcadeYard = null;
     if (returningCharacter && sphereExit && pilot.player) timechainIsland.gate.arrive(sphereExit);
     else if (returningCharacter && factoryCrossing && pilot.player && factoryMouth) arriveFromFactory(factoryCrossing);
+    else if (returningCharacter && arcadeYard && pilot.player && arcadeMouth) arcadeMouth.entrance.standAt(arcadeYard.slot);
+    else if (returningCharacter && arcadeCrossing && pilot.player && arcadeMouth) { arcadeMouth.entrance.arrive(arcadeCrossing); factoryWalk.still = 1; factoryWalk.hold = BL.factoryWindow.GLIDE.still; }
     else if (returningCharacter && ctx.from === "arcade" && pilot.player && arcadeMouth) arriveFromArcade();
     else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile", false, false);
     else navigate(routedPlace || (ctx.from === "bifrost" ? "bifrost" : "pile"), false, false);
@@ -10980,7 +11002,7 @@
       updatePositionDebug(true);
     }
     updatePoolEffectsActivity();
-    if (ctx.from === "arcade" && ctx.place === "cloud-hopper") ensureCloudHopper(ctx).launch(true);
+    if ((ctx.from === "arcade" || ctx.from === "hub") && ctx.place === "cloud-hopper") { cloudYard = ctx.from === "hub" ? arcadeYard : null; ensureCloudHopper(ctx).launch(true); }
   };
   // Prepare only raw character rigs: the published crew, its stable roster order, input, health and NPC/remote
   // registration are still created together by enter. No partly populated actor registry reaches a live scene.
@@ -11378,7 +11400,7 @@
     };
     shared.onBodyMove = moveCampBody;
     mirrorCave.ripples = BL.mirrorRipples.create(mirrorCave.node);
-    entropyLab.phase = BL.labPhase.create(entropyLab.group, entropyLab.mouth, entropyLab.opening);
+    entropyLab.phase = BL.labPhase.create(entropyLab.group, entropyLab.mouth, entropyLab.opening, 0.5, ENTROPY_TINT);
     yield* pause(slice);
     for (const veil of caveVeils) {
       veil.phase = BL.labPhase.create(veil.group, veil.mouth, veil.opening, veil.plane, veil.tint);
@@ -11390,6 +11412,9 @@
     if (factoryMouth) {
       Object.assign(factoryMouth, { phase: BL.labPhase.create(factoryMouth.group, factoryMouth.mouth, factoryMouth.opening, BL.factoryModels.SHIELD_Z, BL.factoryWindow.TINT), hum: 0, node: BL.factoryFeed.node(world) });
       factoryMouth.roofEffectsActive = false;
+      factoryWalk.eyes = BL.factoryWindow.eyes(pilot, camera);
+      factoryReady = BL.doorReady.create({ code: "factory-scene", extra: BL.factoryModels.hangarEntry() ? "hangar-scene" : null, scope: "factory",
+        steps: (slice) => BL.scenes.factory.warmSteps(renderer, slice, factoryWarm) });
       factoryMouth.hall = renderer.kind === "webgl2" ? BL.factoryWindow.create({ group: factoryMouth.group, mouth: factoryMouth.mouth, node: factoryMouth.node }) : null;
       if (factoryMouth.hall && island.roofOpening) {
         const roof = island.roofOpening;
@@ -11601,8 +11626,7 @@
     shared.workHit = (cave) => clankers && clankers.hit(cave);
     shared.workPlanned = (cave, site) => clankers && clankers.plan(cave, site);
     mark("pile");
-    shared.residentName = "SaniExp";
-    shared.residentPose = (cave, dt) => grabbedOogaPose(cave) || timechainResidentPose(cave, dt);
+    shared.residentPose = (cave) => grabbedOogaPose(cave);
     shared.releaseGrabbed = (cave) => cave.grabbedBy && finishClankerRider(cave.grabbedBy, false);
     // Signed-in visitors elsewhere, as the Oogas they drive; the crew walks round them.
     shared.outsideActors = () => cloudPlaying() ? CLOUD_NO_ACTORS : remotes.actors();
@@ -11947,8 +11971,9 @@
     if (ctx.from === null && !signedInArrival && (preloadedJetpackWear || preloadedEquipment) && !params.has("character") && !initialCharacter) initialCharacter = contributors.activeRoster.find((entry) => crew.stateOf(crew.cavemen.get(entry.name)) === "working") || contributors.activeRoster[0];
     const initialGorilla = initialCharacter && preloadedGorilla ? crew.cavemen.get(initialCharacter.name) : null;
     // The Ooga that went into DSB, the Lightning Factory, ₿IFRÖST or Ooga Arcade comes back out as the one played.
-    const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || ctx.from === "lab" || ctx.from === "timechain";
-    const returningCharacter = handsBack ? world.pilot : null;
+    restoreCloudYard(ctx);
+    const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || ctx.from === "lab" || ctx.from === "timechain" || !!world.arcadeYard;
+    const returningCharacter = handsBack ? (world.arcadeYard ? world.arcadeYard.name : world.pilot) : null;
     if (handsBack) world.pilot = null;
     if (initialGorilla) {
       // A sleeping contributor has no active companion. Wake only the named
@@ -11974,20 +11999,25 @@
     claimOwnOoga();
     claimView = claimArrival = false;
     unsubscribeAccount = watchAccount();
+    bindArcadeEntrance(ctx);
     BL.players.setDoors(doorToward);
     const initialFirstPerson = ctx.from === null && preloadedFirstPerson && !initialGorilla;
     if (initialFirstPerson) pilot.enterClose(true);
     // The /donate route: the island's own view with the donation popup open. As a routed place it keeps Tess from
     // greeting over the dialog.
-    const donate = ctx.place === "donate", routedPlace = donate ? null : ctx.place;
+    const donate = ctx.place === "donate", routedPlace = donate || ctx.place === "cloud-hopper-return" ? null : ctx.place;
     // Out of a Timechain room: behind the Sphere's curtain, to walk out through its doors.
     const sphereExit = ctx.from === "timechain" ? world.sphereExit : null;
     world.sphereExit = null;
     // Out of the Lightning Factory's shield on foot: in its light, walking on out of the mouth.
     const factoryCrossing = ctx.from === "factory" ? world.factoryCrossing : null;
     world.factoryCrossing = null;
+    const arcadeCrossing = ctx.from === "arcade" ? world.arcadeCrossing : null, arcadeYard = world.arcadeYard;
+    world.arcadeCrossing = world.arcadeYard = null;
     if (returningCharacter && sphereExit && pilot.player) timechainIsland.gate.arrive(sphereExit);
     else if (returningCharacter && factoryCrossing && pilot.player && factoryMouth) arriveFromFactory(factoryCrossing);
+    else if (returningCharacter && arcadeYard && pilot.player && arcadeMouth) arcadeMouth.entrance.standAt(arcadeYard.slot);
+    else if (returningCharacter && arcadeCrossing && pilot.player && arcadeMouth) { arcadeMouth.entrance.arrive(arcadeCrossing); factoryWalk.still = 1; factoryWalk.hold = BL.factoryWindow.GLIDE.still; }
     else if (returningCharacter && ctx.from === "arcade" && pilot.player && arcadeMouth) arriveFromArcade();
     else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile", false, false);
     else if (ctx.from === "bifrost" && !routedPlace) navigate("bifrost", false, false);
@@ -12039,6 +12069,7 @@
         get gameMode() { return gameMode; },
         selectDebugGorilla,
         get timechainIsland() { return timechainIsland; },
+        get arcadeEntrance() { return arcadeMouth && arcadeMouth.entrance; },
         levelOf,
         get factory() { return factoryMouth && factoryMouth.hall ? factoryMouth.hall.debug : null; },
         get bifrost() { return bifrostIsle; },
@@ -12142,6 +12173,8 @@
     // Explicit setup for the portable engine fixtures; observation never builds a game.
     hubScene.debug.prepareCloudHopper = () => models.withScope("hub", () => ensureCloudHopper(ctx));
     hubScene.debug.tess = islandGuide;
+    hubScene.debug.factoryReady = factoryReady;
+    hubScene.debug.factoryWalk = factoryWalk;
     hubScene.debug.petReactions = petReactions;
     // Tess wears every tier of her detail in her first frames, so each is on the GPU before she comes close: build
     // them here, a mesh a slice, rather than in her first frame.
@@ -12156,7 +12189,7 @@
     yield* prepareCoveredView(ctx.overlay, slice);
     mark("covered-view");
     totemUnsub = BL.totemFeed.subscribe(onTotem);
-    if (ctx.from === "arcade" && ctx.place === "cloud-hopper") ensureCloudHopper(ctx).launch(true);
+    if ((ctx.from === "arcade" || ctx.from === "hub") && ctx.place === "cloud-hopper") { cloudYard = ctx.from === "hub" ? arcadeYard : null; ensureCloudHopper(ctx).launch(true); }
     if (DEBUG_GORILLA_MOVE) hud.toast("Gorilla movement debug · click a gorilla, then a destination");
   };
   // The cabinet is Cloud Hopper's only entrance. Its dormant game graphs, HUD,
@@ -12180,7 +12213,7 @@
     const launchPoint = { x: mouth.x, y: island.surfaceAt(mouth.x, mouth.z) + 4, z: mouth.z };
     cloudHopper = BL.cloudHopper.create({ root, dock: { position: launchPoint, rotation: { y: mouth.ry } }, launchPoint, arcade: true,
       cabinet: () => ctx.cabinet.active,
-      park: () => navigate("arcade", false, false), onExit: () => go("arcade", "cloud-hopper-return"),
+      park: () => navigate("arcade", false, false), onExit: () => { if (cloudYard) { world.arcadeYard = cloudYard; cloudYard = null; go("hub", "cloud-hopper-return"); } else go("arcade", "cloud-hopper-return"); },
       crew, pilot, hud, renderer, camera, game, seaY: SEA_Y,
       move: cloudMove, mode: cloudMode, pileSurface: cloudPileSurface, mainlandRadius: island.radius,
       finish: () => ({ x: 0, y: ALTAR_HEIGHT + 2, z: 0 }),
@@ -12195,22 +12228,32 @@
   // The scene a departure was heading for could not be prepared (its deferred code did not arrive): the visitor stays on
   // the island, driving again, and nothing is photographed for a crossing that did not happen.
   const stay = () => {
+    if (arcadeMouth) arcadeMouth.entrance.stay();
     factoryHeld = factoryDeparting;
     entering = factoryDeparting = bifrostDeparting = false;
     factoryWalk.phase = 0; factoryWalk.seen = factoryWalk.through = factoryWalk.grab = false; factoryWalk.still = factoryWalk.hold = 0;
+    if (factoryWalk.eyes) factoryWalk.eyes.reset();
     world.factoryCrossing = world.islandKeep = null;
     if (factoryMouth) factoryMouth.snap = false;
+    if (arcadeMouth) arcadeMouth.snap = false;
     if (bifrostIsle) bifrostIsle.snap = false;
     pilot.controls.reset(); input.reset(); pilot.setActive(true);
   };
   const leave = (destroy = false) => {
+    if (arcadeMouth) arcadeMouth.entrance.unbind();
     // Left by Back or Forward, the logo or any other way than a door of its own (which handed its Ooga over and set
     // `entering`), the island hands on the Ooga driven, as every other scene does, so the next one plays the same one;
     // driving none (a gorilla), nothing stale goes with it.
     if (!entering) world.pilot = pilot.player ? (pilot.player.npc || pilot.player).traits.name : null;
+    // A walk handed over to the Factory ends here: the island may be kept for the way back, so its Ooga gets its head back.
+    if (factoryWalk.eyes) factoryWalk.eyes.reset();
     cloudHopper?.cancel();
     rememberCharacterLocations();
     stopLazyBedding();
+    // What was readied behind the shield goes with the visit: the hall's own visit now holds its meshes, and a later
+    // approach readies again whatever it needs.
+    if (factoryReady) factoryReady.reset();
+    factoryWarm.clear();
     if (reuseHub && !destroy) return suspendHub();
     if (hammock) removeHammock();
     heldHub = false; heldDebug = null;
@@ -12224,6 +12267,7 @@
     resetRageThrowMap(false);
     if (factoryMouth && factoryMouth.snap) snapFactoryView();
     if (bifrostIsle && bifrostIsle.snap) snapBifrostView();
+    if (arcadeMouth && arcadeMouth.snap) snapArcadeView();
     glCanvas = null;
     poolBlockHovered = poolBlockHoverIgnore = ghostHovered = null;
     ghostHoverText = "";
@@ -12341,7 +12385,8 @@
       factoryMouth.phase.dispose();
     }
     if (bcaMouth) bcaMouth.phase.dispose();
-    factoryMouth = arcadeMouth = bcaMouth = coilCharge = null;
+    if (arcadeMouth) arcadeMouth.entrance.dispose();
+    factoryMouth = factoryReady = arcadeMouth = bcaMouth = coilCharge = null;
     if (bifrostIsle) {
       if (bifrostIsle.window) bifrostIsle.window.dispose();
       bifrostIsle.phase.dispose();
@@ -12400,7 +12445,6 @@
     hud.dispose();
     // Shared query scratch must not keep an actor (and its groundAt closure) alive past this visit.
     CLANKER_REST_SLOPE.supportEntry = RAGE_WARP_MOTION.supportEntry = null;
-    sleepSightSince = Infinity; sleepSightMode = null; sleepSightGorilla = false; sleepSightFrame++;
     CLANKER_HIT.node = CLANKER_HIT.owner = null;
     viewPoseActor = grabSupportEntry = clankerSupportActor = clankerPassingEntry = preparingGuideActor = null;
     // Drop every per-visit ref but the cached island.
@@ -12426,6 +12470,8 @@
   const liveGeometry = (set) => {
     // The Lightning Factory's meshes stay on the GPU while the island runs, so walking back in uploads nothing.
     if (world && world.factoryKeep) for (const geometry of world.factoryKeep) set.add(geometry);
+    // And the meshes readied ahead of a first walk in.
+    for (const geometry of factoryWarm) set.add(geometry);
     hubScene.islandGeometry(set);
   };
   const islandGeometry = (set) => {
@@ -12440,6 +12486,7 @@
     entropyLab.phase.liveGeometry(set);
     for (const veil of caveVeils) veil.phase.liveGeometry(set);
     if (factoryMouth) factoryMouth.phase.liveGeometry(set);
+    if (arcadeMouth) arcadeMouth.entrance.liveGeometry(set);
     if (bcaMouth) bcaMouth.phase.liveGeometry(set);
     if (bifrostIsle) bifrostIsle.phase.liveGeometry(set);
     for (const item of clankerEquipment) set.add(item.node.geometry);
@@ -12466,8 +12513,10 @@
     id: "hub", enter, enterSteps, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, cachedGeometry, islandGeometry, libraryNook: LIBRARY,
     get retained() { return heldHub; }, get elapsed() { return now; },
     get retainedRoot() { return heldHub ? root : null; },
+    // Readying the hall takes a slice of frames that are otherwise the island's; the tier does not judge them.
+    get warming() { return factoryWalk.warming || !!arcadeMouth?.entrance.warming; },
     // The Lightning Factory's builders stay warm while the island runs, since its shield walks straight in.
-    keeps: ["factory"],
+    keeps: ["factory", "arcade"],
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
       // A crossing through the Timechain Sphere's doors keeps full rate, so its walk and swoop finish smoothly, and so

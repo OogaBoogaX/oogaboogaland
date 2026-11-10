@@ -12,10 +12,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 import FACTS from "./tess-facts.gen.json" with { type: "json" };
 import { RULES } from "./tess-rules.js";
-import { allowed, clientIp, fromSite, json } from "./http.js";
+import { allowed, clientIp, fromSite, json, readBody } from "./http.js";
 
 export const MODEL = "claude-haiku-5-5";
-const BODY_MAX = 1024, QUESTION_MAX = 200, SAY_MAX = 600, LINES_MAX = 4, KEEP_DAYS = 90, DAILY_CENTS = 50, MAX_TOKENS = 1024;
+const BODY_MAX = 1024, FOLD_DROPS = 8, QUESTION_MAX = 200, SAY_MAX = 600, LINES_MAX = 4, KEEP_DAYS = 90, DAILY_CENTS = 50, MAX_TOKENS = 1024;
 // One paid attempt a question, ended with its body at DEADLINE_MS, inside the 15 s the page waits. The SDK retries
 // nothing: an attempt that timed out may still be billed, and its retry would be paid for again.
 const DEADLINE_MS = 12000;
@@ -43,6 +43,12 @@ const day = (ms) => new Date(ms).toISOString().slice(0, 10);
 const clean = (text) => typeof text === "string" ? text.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim() : "";
 const fold = (text) => text.toLowerCase().replace(/₿/g, "b").normalize("NFKD").replace(/\p{M}/gu, "")
   .replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+// A question's answer is kept under its folded key only when the key says everything Claude was asked: what `fold` drops
+// beyond a few marks of punctuation (invisible characters, Braille, Morse) would otherwise answer the plain question for everyone.
+const foldsWhole = (text) => {
+  const dropped = text.normalize("NFKD").replace(/[\p{L}\p{N}\s]|(?!\p{VS})\p{M}/gu, "");
+  return dropped.length <= FOLD_DROPS && /^[\p{P}\p{Sc}]*$/u.test(dropped);
+};
 const placeOf = (id) => FACTS.places.includes(id) ? id : null;
 export const costOf = (usage) => Math.ceil((usage.input_tokens || 0) * PRICE.input + (usage.cache_creation_input_tokens || 0) * PRICE.write
   + (usage.cache_read_input_tokens || 0) * PRICE.read + (usage.output_tokens || 0) * PRICE.output);
@@ -82,8 +88,8 @@ export const handleTess = async (request, env) => {
   if (request.method !== "POST") return json({ error: "method not allowed" }, 405, { allow: "POST" });
   if (!fromSite(request, env.SITE_ORIGIN)) return json({ error: "forbidden" }, 403);
   if (!env.ANTHROPIC_API_KEY) return json({ error: "closed" }, 503);
-  const raw = await request.text();
-  if (raw.length > BODY_MAX) return json({ error: "too large" }, 413);
+  const raw = await readBody(request, BODY_MAX);
+  if (raw === null) return json({ error: "too large" }, 413);
   let body;
   try { body = JSON.parse(raw); } catch { return json({ error: "bad json" }, 400); }
   const question = clean(body && body.question), key = fold(question), about = placeOf(body && body.about);
@@ -118,6 +124,7 @@ export const handleTess = async (request, env) => {
   await settle(costOf(message.usage), 1);
   const reply = replyOf(message);
   if (!reply) return json({ error: "refused" }, 422);
+  if (!foldsWhole(question)) return json(reply);
   await db.prepare("INSERT INTO tess_answers (version, question, about, say, go, asked, first_day, last_day) VALUES (?, ?, ?, ?, ?, 1, ?, ?) "
     + "ON CONFLICT (version, question, about) DO UPDATE SET asked = asked + 1, last_day = excluded.last_day")
     .bind(...where, reply.say, reply.go, today, today).run();
