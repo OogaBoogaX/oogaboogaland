@@ -29,7 +29,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import {
-  CABINETS, hockey, CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
+  CABINETS, hockey, block, BLOCK, CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
   NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
   DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, ROOM_LOCK_FEATURE, PIN_PASS_MS, PIN_TRIES, PIN_WAIT_MS, CONTROL_FRAMES, CONTROL_HZ, CONTROL_BURST, GHOST_HZ, GHOST_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, REACT_FEATURE, HAND_EMOJI_FEATURE, REACT_HZ, REACT_BURST,
   GHOST_MAGIC, GHOST_FRAME_MAX, GHOST_FRAME_HZ, GHOST_FRAME_BURST, inGhostArena, ghostCandidate, watchesGhost,
@@ -97,6 +97,7 @@ export class Room extends DurableObject {
     ctx.blockConcurrencyWhile(async () => {
       await hockey.loadLimits(this);
       hockey.restore(this);
+      block.restore(this);
       this.studio = (await ctx.storage.get("studio")) || this.studio;
       if (!studioSource(this.studio.source)) { this.studio.source = studioState().source; this.studio.position = 0; this.studio.playing = false; this.studio.at = Date.now(); this.studio.revision++; this.studio.playbackRevision = (this.studio.playbackRevision || 0) + 1; await ctx.storage.put("studio", this.studio); }
       this.studio.position = studioPosition(this.studio, this.studio.at);
@@ -173,7 +174,7 @@ export class Room extends DurableObject {
   }
 
   attachment(p) {
-    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, roomLock: p.roomLock, pinTries: this.pinTries.get(p.id) || null, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm };
+    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, block: p.block || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, roomLock: p.roomLock, pinTries: this.pinTries.get(p.id) || null, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm };
   }
 
   view(p) {
@@ -479,7 +480,7 @@ export class Room extends DurableObject {
 
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, locks: this.lockedRooms(), features: [CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE] });
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, locks: this.lockedRooms(), features: [CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE] });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
     this.send(server, { t: "chat-history", messages: this.chat.list() });
     this.sendCabinets(server);
@@ -503,7 +504,8 @@ export class Room extends DurableObject {
     if (!p) return;
     if (!ownedBody(CAST, p.login, p.contributor, p.id)) { this.evict(p, "revoked"); return; }
     if (typeof message !== "string") {
-      if (message instanceof ArrayBuffer && message.byteLength >= 4 && new DataView(message).getUint32(0, true) === GHOST_MAGIC) this.ghostFrame(p, message);
+      if (message instanceof ArrayBuffer && message.byteLength >= 4 && new DataView(message).getUint32(0, true) === BLOCK.MAGIC) block.frame(this, p, message);
+      else if (message instanceof ArrayBuffer && message.byteLength >= 4 && new DataView(message).getUint32(0, true) === GHOST_MAGIC) this.ghostFrame(p, message);
       else this.npcFrame(p, message);
       return;
     }
@@ -517,7 +519,8 @@ export class Room extends DurableObject {
     if (!msg) return;
     if (msg.t === "cabinet") { this.cabinetMessage(p, msg); return; }
     // While playing, the room owns the floor pose and body, regardless of game-scene reports.
-    if (p.cabinet && ["pose", "zone", "body", "blend", "hp", "shot", "swing", "hockey"].includes(msg.t)) return;
+    if (p.cabinet && ["pose", "zone", "body", "blend", "hp", "shot", "swing", "hockey", "bf"].includes(msg.t)) return;
+    if (msg.t === "bf") { block.message(this, p, msg); return; }
     if (msg.t === "hockey") { hockey.message(this, p, msg); ws.serializeAttachment(this.attachment(p)); return; }
     if (CONTROL_FRAMES.has(msg.t)) {
       if (!p.controlBucket) p.controlBucket = { tokens: CONTROL_BURST, at: p.seenAt };
@@ -550,6 +553,7 @@ export class Room extends DurableObject {
       if (msg.on === p.visible) return;
       p.visible = msg.on;
       this.electGhostHost();
+      block.visibility(this, p);
     } else if (msg.t === "zone") {
       if (msg.name === p.zone) return;
       const room = this.roomOf(msg.name);
@@ -558,9 +562,11 @@ export class Room extends DurableObject {
       if (msg.name !== p.zone) this.clearPasses(p);
       const leavingStudio = p.zone === STUDIO_ZONE, watched = watchesGhost(p), from = p.zone;
       if (msg.name !== "arcade.hall") hockey.leave(this, p.id);
+      if (msg.name !== BLOCK.ZONE) block.leave(this, p.id);
       p.zone = msg.name;
       this.roomZoneChanged(p, from);
       hockey.arrive(this, p);
+      block.arrive(this, p);
       p.pokerVoice = null;
       if (this.chalkEditor && this.chalkEditor.id === p.id && this.chalkRefusal(p)) this.chalkLetGo(p);
       // A crossing belongs to the zone it started from (everyone resets theirs on this broadcast). A zone that is the
@@ -670,6 +676,7 @@ export class Room extends DurableObject {
     } else if (msg.t === "body") {
       if (msg.name === p.body) return;
       hockey.leave(this, p.id);
+      block.leave(this, p.id);
       const refusal = claimRefusal(CAST, p.login, msg.name, this.players.values(), p.contributor, p.id);
       if (refusal) {
         this.send(ws, { t: "release", name: msg.name, reason: refusal });
@@ -745,6 +752,7 @@ export class Room extends DurableObject {
     if (this.players.get(p.id) !== p) return;
     this.releaseCabinet(p);
     hockey.leave(this, p.id);
+    block.leave(this, p.id);
     this.cancelDoor(p);
     this.clearPasses(p);
     this.leaveStudio(p);
@@ -769,6 +777,7 @@ export class Room extends DurableObject {
   release(p, reason) {
     this.releaseCabinet(p);
     hockey.leave(this, p.id);
+    block.leave(this, p.id);
     this.cancelDoor(p);
     this.clearPasses(p);
     this.send(p.ws, { t: "release", name: p.body, reason });
@@ -1718,6 +1727,7 @@ export class Room extends DurableObject {
   // Sockets silent past STALE_MS, auto-answered pings included, are evicted as stale.
   async alarm() {
     hockey.sweep(this);
+    block.sweep(this);
     const now = Date.now();
     // Cleanup retries run on every wake, not only at sweep time.
     await this.retryCleanup();

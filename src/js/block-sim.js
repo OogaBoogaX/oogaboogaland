@@ -772,13 +772,13 @@
   // A round. `team` is the player's colour; `seed` seeds the bots and the weather; `prep` the fortifying seconds.
   // `names` names the four Oogas: the player first, then their teammate, then the two rivals (only carried for the
   // scene).
-  // `size` Oogas a side (2 to `MAX_SIDE`): the player first, then their teammates, then the rivals. `skill` picks the
+  // `size` Oogas a side (1 to `MAX_SIDE`): the player first, then their teammates, then the rivals. `skill` picks the
   // bots' `SKILLS`.
   const create = ({ team = "blue", seed = 1, names = [], prep = CONFIG.PREP_S, target = CONFIG.CAPTURES, size = 2, skill = "normal", map = "fort" } = {}) => {
     map = ARENAS[map] ? map : "fort";
     const A = ARENAS[map];
     const rival = other(team);
-    size = Math.max(2, Math.min(CONFIG.MAX_SIDE, size | 0));
+    size = Math.max(1, Math.min(CONFIG.MAX_SIDE, size | 0));
     const actors = Array.from({ length: size * 2 }, (_, i) => ({
       id: i, slot: i % size, name: names[i] || null, team: i < size ? team : rival, bot: i > 0, role: i % size % 2 ? "defend" : "attack",
       x: 0, z: 0, y: 0, vx: 0, vz: 0, vy: 0, heading: 0, moving: 0, carrying: null, splat: 0, guard: 0, cooldown: 0,
@@ -1596,6 +1596,11 @@
     a.flight = 0; a.jumps = 1;
     emit(sim, "chuteoff", a.team, id, a.x, a.y, a.z);
     return true;
+  };
+  // A page taking over as a live round's host holds what frames carry, and frames carry no hook's target: a hook
+  // reeling or yanking a target nobody can name comes home instead.
+  const settleHooks = (sim) => {
+    for (const a of sim.actors) if (a.hk === H_YANK || a.hk === H_REEL) { a.hk = H_BACK; a.hookTarget = -1; }
   };
   const hookBack = (sim, a, why) => {
     // Let go of a block still on the rope, and it lands where it is.
@@ -2722,7 +2727,8 @@
   };
   // One fixed step. `input` is the player's: `x`, `z` a world-space move direction of length up to 1, `sprint`,
   // `jump` (a press), `crouch` (held), and optionally `face`, the yaw the player looks along. The scene throws, drops and builds through `fire`, `drop` and `build`.
-  const tick = (sim, dt, input) => {
+  // `given` is the visitor's input. A live round's host sets `sim.inputs[id]` for each other live Ooga.
+  const tick = (sim, dt, given) => {
     use(sim);
     sim.time += dt;
     const prepWas = sim.prep;
@@ -2737,6 +2743,7 @@
     const N = sim.actors.length;
     for (let n = 0; n < N; n++) {
       const a = sim.actors[sim.flip ? N - 1 - n : n];
+      const input = (sim.inputs && sim.inputs[a.id]) || given;
       if (a.cooldown > 0) a.cooldown -= dt;
       if (a.monkeyCool > 0) a.monkeyCool -= dt;
       if (a.boltCool > 0) a.boltCool -= dt;
@@ -3076,7 +3083,7 @@
     v.second = second; v.boots = boots; v.laser = laser; v.monkeys = monkeys; v.halving = halving; v.cold = cold;
     return true;
   };
-  BL.blockSim = { parachuteIn, LEAF_TOP, stripView, stripChanged, hopOn, callRide, WALLETS, takeWallet, throwWallet, dropWallet, nearVend, CONFIG, TOOLS, KINDS, SKILLS, POWERS, ARENAS, MAPS, TEAMS, other, create, reset, step, tick, setLive, newBlock, launch, nearCatapult, nearEnemyCatapult, fire, drop, pass, build, grab, zip, nearZip, onTower, escape, clearLine, solidAt, resolve, groundAt, onIsland, isleDepth, grapple, restSpot, edgeDist, cutChute, inGrave, inGraveOf, GRAVE_Y };
+  BL.blockSim = { settleHooks, parachuteIn, LEAF_TOP, stripView, stripChanged, hopOn, callRide, WALLETS, takeWallet, throwWallet, dropWallet, nearVend, CONFIG, TOOLS, KINDS, SKILLS, POWERS, ARENAS, MAPS, TEAMS, other, create, reset, step, tick, setLive, newBlock, launch, nearCatapult, nearEnemyCatapult, fire, drop, pass, build, grab, zip, nearZip, onTower, escape, clearLine, solidAt, resolve, groundAt, onIsland, isleDepth, grapple, restSpot, edgeDist, cutChute, inGrave, inGraveOf, GRAVE_Y };
   // The map last stepped (or reset), for the scene's and models' reads.
   Object.defineProperty(BL.blockSim, "ARENA", { get: () => ARENA, enumerable: true });
 })();
