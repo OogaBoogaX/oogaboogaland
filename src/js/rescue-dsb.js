@@ -13,7 +13,8 @@
 // adopting), one dog a login; the Ooga a signed-out visitor drives belongs to a contributor, so the desk, the dog
 // houses and a stray's tap open the dialog on SIGN_IN alone. The dog is out while that login drives its own Ooga in
 // DSB Land. Debug visitors may adopt for their driven Ooga without signing in, under a separate saved identity.
-// Strays and scooping are everyone's.
+// Strays and scooping are everyone's. Shared-authority migration is staged below,
+// but not called until the scene's shared renderer/command integration is installed.
 (() => {
   "use strict";
   const BL=window.BL,D=BL.rescueDogs;
@@ -24,7 +25,7 @@
     const owner=BL.accountIdentities.accountForId(me.id),reserved=BL.accountIdentities.accountForHandle(me.login);
     return owner?owner.legacyLogin:reserved?(Number.isSafeInteger(me.id)&&me.id>0?`github:${me.id}`:null):me.login.toLowerCase();
   };
-  const SIGN_IN="Sign in to adopt a puppy.";
+  const SHARED_KEY=KEY+".shared",SIGN_IN="Sign in to adopt a puppy.";
   const DEBUG_LOGIN="@debug"; // Cannot collide with a GitHub login or take one of its saved slots.
   const params=new URLSearchParams(location.search),DEBUG=params.has("debug");
   const isDog=d=>d&&typeof d==="object"&&typeof d.name==="string"&&d.name.length>0&&d.name.length<=BL.rescueMenu.NAME_MAX&&Number.isInteger(d.breed)&&d.breed>=0&&d.breed<D.BREEDS.length
@@ -33,12 +34,14 @@
   const load=()=>{
     const out={dogs:{},poops:[],scooped:0};
     try{
+      if(localStorage.getItem(SHARED_KEY)==="1")out.shared=1;
       const saved=JSON.parse(localStorage.getItem(KEY));
       if(!saved||typeof saved!=="object")return out;
       const dogs=saved.dogs&&typeof saved.dogs==="object"&&!Array.isArray(saved.dogs)?Object.entries(saved.dogs).filter(([login,d])=>LOGIN.test(login)&&isDog(d)):[];
       for(const [login,d] of dogs.sort((a,b)=>b[1].adoptedAt-a[1].adoptedAt).slice(0,LOGINS))out.dogs[login]={name:d.name,breed:d.breed,adoptedAt:d.adoptedAt,hunger:d.hunger};
       const debug=saved.dogs?.[DEBUG_LOGIN];
       if(isDog(debug))out.dogs[DEBUG_LOGIN]={name:debug.name,breed:debug.breed,adoptedAt:debug.adoptedAt,hunger:debug.hunger};
+      if(out.shared===1||saved.shared===1){out.shared=1;return out;}
       const p=saved.poops;
       if(Array.isArray(p)&&p.length%3===0&&p.every(n=>Number.isFinite(n)&&Math.abs(n)<=REACH))out.poops=p.slice(-D.POOP_CAP*3);
       if(Number.isFinite(saved.scooped)&&saved.scooped>=0&&saved.scooped<1e9)out.scooped=Math.floor(saved.scooped);
@@ -48,7 +51,17 @@
   const save=store=>{
     const dogs={};
     for(const [login,d] of Object.entries(store.dogs))dogs[login]={name:d.name,breed:d.breed,adoptedAt:d.adoptedAt,hunger:Math.round(d.hunger*1000)/1000};
-    try{localStorage.setItem(KEY,JSON.stringify({dogs,poops:store.poops,scooped:store.scooped}));}catch{/* Storage unavailable: the rescue lasts the visit. */}
+    try{if(localStorage.getItem(SHARED_KEY)==="1")store.shared=1;localStorage.setItem(KEY,JSON.stringify(store.shared===1?{dogs,shared:1}:{dogs,poops:store.poops,scooped:store.scooped}));}catch{/* Storage unavailable: the rescue lasts the visit. */}
+  };
+  // One-way migration, called only after the shared receiver accepts a complete
+  // authoritative frame. Keep adopted dogs and every unrelated storage key. A
+  // reload of the marker ignores legacy fields even if an old tab copied them
+  // into the record. Failed storage still cannot reimport them in this visit.
+  const retireLegacyPoop=(store,receiver)=>{
+    if(!receiver?.current||!BL.rescueShared.validate(receiver.current))return false;
+    store.shared=1;store.poops=[];store.scooped=0;
+    let persisted=false;try{localStorage.setItem(SHARED_KEY,"1");persisted=true;}catch{/* Keep only visit-local shared cache. */}
+    save(store);return persisted;
   };
   // DSB Land's stray homes are the same on every visit: laid out on the first and kept for the page's life.
   let homes=null;
@@ -144,5 +157,5 @@
       // An adoption as the dialog's Adopt makes it, under the same rules.
       adopt:(breed=0,name="Rex")=>adopted({breed,name,stray:-1})}};
   };
-  BL.rescueDsb={attach,load,save,accountKey,KEY,LOGINS,SIGN_IN};
+  BL.rescueDsb={attach,load,save,retireLegacyPoop,accountKey,KEY,SHARED_KEY,LOGINS,SIGN_IN};
 })();
