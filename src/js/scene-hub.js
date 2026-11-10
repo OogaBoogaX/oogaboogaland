@@ -2923,7 +2923,7 @@
       claim(p.x, p.z, T.SITE.radius + 1);
       for (let r = p.approachFrom - 1; r <= p.rim; r += 1) claim(T.DIR.x * r, T.DIR.z * r, T.SITE.width / 2 + 0.9);
     };
-    return { site, place: p, cos, sin, worldX, worldZ, claimGround, show: T.show(site), gate: null, residentInside: false };
+    return { site, place: p, cos, sin, worldX, worldZ, claimGround, show: T.show(site), gate: null };
   };
   // ₿IFRÖST's arch dressed where its stone stands as the gate, off the outlines: its gold, vines and banners' rods and
   // marks, the banners' cloth, its lit name, runes and crystals, and its lanterns' glass, which comes back with the
@@ -2976,41 +2976,6 @@
     };
     BL.bifrostIsle.update(site, 0, 0, NaN, NaN, NaN);
     return { site, group, claimGround, phase: null, window: null, heimdall: null, hum: 0, effectsActive: false, effectsTime: 0 };
-  };
-  // Sleeping or away, Sani lives in the Sphere's rooms rather than HQ. Active, he joins the mainland crew.
-  // Possessing him inside the ball brings him out onto the bridge before its doors.
-  const timechainResidentPose = (cave) => {
-    if (!timechainIsland || cave.traits.name !== "SaniExp") return false;
-    const T = timechainIsland;
-    // A separate body made where its resident NPC sits inside the ball steps out onto the bridge; the NPC stays in.
-    if (cave.npc) {
-      const p = cave.root.position;
-      if (T.residentInside && Math.hypot(p.x - T.place.x, p.z - T.place.z) < 1) {
-        const W = BL.timechainModels.SPOTS.WAIT;
-        p.x = T.worldX(W.x, W.z + 1.2); p.z = T.worldZ(W.x, W.z + 1.2); p.y = T.place.y + cave.baseY;
-        cave.root.rotation.y = T.place.ry + Math.PI;
-      }
-      return false;
-    }
-    if (cave.state === "working" || cave.state === "chilling" || cave === pilot?.player || cave.remoteControlled) {
-      if (T.residentInside) {
-        T.residentInside = false;
-        if (cave === pilot?.player) {
-          const W = BL.timechainModels.SPOTS.WAIT;
-          cave.root.position.x = T.worldX(W.x, W.z + 1.2); cave.root.position.z = T.worldZ(W.x, W.z + 1.2);
-          cave.root.position.y = T.place.y + cave.baseY;
-          cave.root.rotation.y = T.place.ry + Math.PI;
-          cave.root.visible = true;
-        }
-      }
-      return false;
-    }
-    T.residentInside = true;
-    cave.walk = null; cave.hop = cave.hopV = cave.cheer = cave.catchT = 0;
-    cave.act.kind = "idle"; cave.act.until = Infinity;
-    cave.root.visible = false;
-    cave.root.position.x = T.place.x; cave.root.position.z = T.place.z; cave.root.position.y = T.place.y + cave.baseY;
-    return true;
   };
   // The ladder on the bluff; the former Cloud Hopper dock is retired.
   const buildRim = () => {
@@ -11661,8 +11626,7 @@
     shared.workHit = (cave) => clankers && clankers.hit(cave);
     shared.workPlanned = (cave, site) => clankers && clankers.plan(cave, site);
     mark("pile");
-    shared.residentName = "SaniExp";
-    shared.residentPose = (cave, dt) => grabbedOogaPose(cave) || timechainResidentPose(cave, dt);
+    shared.residentPose = (cave) => grabbedOogaPose(cave);
     shared.releaseGrabbed = (cave) => cave.grabbedBy && finishClankerRider(cave.grabbedBy, false);
     // Signed-in visitors elsewhere, as the Oogas they drive; the crew walks round them.
     shared.outsideActors = () => cloudPlaying() ? CLOUD_NO_ACTORS : remotes.actors();

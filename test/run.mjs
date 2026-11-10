@@ -10128,10 +10128,9 @@ const hubWorkingArrival = { name: "hub working arrival", why: "regression: worki
 const hubLiveWake = { name: "hub live wake", why: "regression: live activity must clear HQ and basement mattresses before reuse; passive Hub NPCs now leave every bed by beam", run: async b => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, scene = BL.scenes.hub, now = Date.now(), day = 86400000, mattresses = B.headquarters.mattresses;
-    // The baked roster ages with the clock, so the sleepers are made here. Sani is the Sphere's resident, hidden in its
-    // ball whatever his activity says, so he is no rainforest walker. Activity is set directly and settled at once:
+    // The baked roster ages with the clock, so the sleepers are made here. Activity is set directly and settled at once:
     // applyActivity would hand it to the hub's listener, which walks new sleepers in from the pile.
-    const cast = B.crew.list.filter(c => c !== B.pilot.player && !c.override && c.traits.name !== "SaniExp");
+    const cast = B.crew.list.filter(c => c !== B.pilot.player && !c.override);
     const sleepAt = (c, at) => { c.contributor.lastCommitAt = c.contributor.lastContributionAt = at; };
     // Earlier steps may leave sleepers walking to reserved beds. A same-state refresh deliberately leaves
     // that travel alone, so expire those naps first and let fresh away-to-sleeping transitions settle them.
@@ -10192,7 +10191,7 @@ const hubSeparateBodies = { name: "hub separate bodies", why: "rule: a driven Oo
         && crew.list.every(o => o === c || seatOf(o) !== i);
       const npcState = (c) => ({ state: c.state, override: c.override, seat: seatOf(c), bed: c.bedroll, mode: c.bedTravel.mode, visible: c.root.visible,
         human: !!c.humanControlled, remote: !!c.remoteControlled, passive: c.nonInteractive, ghost: !!c.ghostTrack && ghosts.has(c) });
-      const eligible = c => c.root.visible && !c.remoteControlled && !c.ghostTrack && !c.override && c.traits.name !== "SaniExp";
+      const eligible = c => c.root.visible && !c.remoteControlled && !c.ghostTrack && !c.override;
       const pick = (test) => crew.list.find(c => eligible(c) && test(c));
       const cases = [["seated", c => c.state === "chilling" && seatHeld(c, seatOf(c))], ["sleeping", c => c.state === "sleeping" && !!c.bedroll && c.bedTravel.mode === "rest"],
         ["working", c => c.state === "working" && !c.bedTravel.mode]];
@@ -10423,7 +10422,7 @@ const hubGuestLikeness = { name: "hub guest likeness", why: "regression: a guest
     const copies = (guest) => crew.list.filter(c => c === guest || c.npc === guest).length + (guest.localBody ? 1 : 0);
     const guest = crew.cavemen.get("Ooga"), temp = crew.cavemen.get("fixture-temp");
     const contributor = crew.list.find(c => !c.contributor.temporary && c.root.visible && !c.ghostTrack && !c.remoteControlled
-      && (c.state === "chilling" || c.state === "working") && c.traits.name !== "SaniExp");
+      && (c.state === "chilling" || c.state === "working"));
     try {
       pilot.release(true); play.release(); step(0.3);
       if (!guest || !temp || !contributor) return { missing: { guest: !!guest, temp: !!temp, contributor: !!contributor } };
@@ -20679,41 +20678,6 @@ scene("hub", { label: "timechain doorway", query: "solo=1&character=portlandhodl
 // The released hub (phones under 8 GB): the walk-out rebuilds the hub behind the room's held frame.
 scene("hub", { label: "timechain doorway release", query: "solo=1&character=portlandhodl&view=timechain&pos=0&hubcache=release", opts: { motion: true }, steps: [sphereApproach, sphereCrossing] });
 scene("hub", { label: "timechain doorway canvas2d", exclusive: true, query: "solo=1&character=portlandhodl&view=timechain&pos=0&canvas2d=1", steps: [sphereApproach, sphereCrossing] });
-scene("hub", { label: "timechain resident", steps: [{ name: "timechain resident", why: "regression: Sani belongs in the Sphere while sleeping or away, and on the mainland while working or chilling", run: async (b) => {
-  const r = await b.evaluate(`(() => {
-    const B = __ooga, ${sphereLocal}, c = B.cavemen.get("SaniExp"), entry = c.contributor;
-    const saved = { lastCommitAt: entry.lastCommitAt, lastContributionAt: entry.lastContributionAt, override: c.override };
-    const sample = () => ({ state: c.state, visible: c.root.visible, held: T.residentInside,
-      fromMiddle: Math.hypot(c.root.position.x - T.place.x, c.root.position.z - T.place.z),
-      bed: !!c.bedroll || !!c.bedTravel.mode, walk: !!c.walk });
-    const activity = age => {
-      entry.lastCommitAt = entry.lastContributionAt = Date.now() - age;
-      B.refreshStates(); B.advance(0.5, 1 / 60);
-      return sample();
-    };
-    try {
-      c.override = null;
-      const away = activity(40 * 86400000), working = activity(1000), sleeping = activity(2 * 86400000);
-      // Driven, Sani is a separate body (#501) that steps out onto the bridge before the doors; the NPC stays inside.
-      B.pilot.possess(c); B.advance(0.3, 1 / 60);
-      const body = B.pilot.player, driven = !!body && body !== c && body.npc === c;
-      const out = { driven, visible: driven && body.root.visible, fromDoors: driven ? local(body.root.position) - SP.THRESHOLD : null, npc: sample() };
-      B.pilot.release(true); B.refreshStates(); B.advance(0.5, 1 / 60);
-      const again = sample(), chilling = activity(2 * 3600000), back = activity(40 * 86400000);
-      return { away, working, sleeping, out, again, chilling, back };
-    } finally {
-      B.pilot.release(true);
-      entry.lastCommitAt = saved.lastCommitAt; entry.lastContributionAt = saved.lastContributionAt; c.override = saved.override;
-      B.refreshStates();
-    }
-  })()`);
-  const inside = row => !row.visible && row.held && row.fromMiddle < 0.5 && !row.bed && !row.walk;
-  const mainland = row => row.visible && !row.held && row.fromMiddle > 20 && !row.bed;
-  record("timechain resident: sleeping and away Sani lives inside the Sphere without a bed, his driven body emerges onto the bridge while he stays in, and he is inside when released; working and chilling Sani joins the mainland crew",
-    r.away.state === "away" && inside(r.away) && r.sleeping.state === "sleeping" && inside(r.sleeping) && inside(r.again) && inside(r.back)
-      && r.working.state === "working" && mainland(r.working) && r.chilling.state === "chilling" && mainland(r.chilling)
-      && r.out.driven && r.out.visible && r.out.fromDoors > 1 && inside(r.out.npc), JSON.stringify(r));
-} }] });
 const roomPage = (room, query = "") => `${src}?debug=1&nosim=1${clock(`character=portlandhodl&pos=0${query ? "&" + query : ""}`)}#/sphere-${room}`;
 const roomGo = (room) => `(() => { const B = window.__ooga; B.go("timechain", "${room}"); for (let i = 0; i < 150 && (B.transitioning || B.scene !== "timechain" || B.timechain.room.id !== ${room}); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); B.housekeep(); const s = B.stats(); return { scene: B.scene, room: B.timechain.room.id, records: B.renderer.stats.records, nodes: s.allNodes, targets: s.targets, dom: s.dom, timers: s.timers, requests: s.requests }; })()`;
 const timechainRoom = { name: "timechain room", why: "playthrough: a signed-out arrival gets a solo copy of its room with first-person, shoulder and orbit views, without weapons or a jetpack, its screens painted, and touches no network under nosim", run: async (b) => {

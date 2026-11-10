@@ -1782,7 +1782,7 @@
         // Reserve vacancies for more recent sleepers even when their update
         // comes later in stable roster order. Never evict an occupied bed.
         if (available) for (const other of crewList) {
-          if (other !== cave && other !== player && other.traits.name !== ctx.residentName && (!other.bedroll || other.bedroll.outdoor) && !other.camp.burning && !other.camp.panic.active
+          if (other !== cave && other !== player && (!other.bedroll || other.bedroll.outdoor) && !other.camp.burning && !other.camp.panic.active
             && stateOf(other) === "sleeping" && sleepPriority(other, cave) < 0) available--;
         }
         if (available > 0) for (const bed of bedrolls) if (!bed.sleeper) {
@@ -2183,14 +2183,12 @@
       // chilling, which returns along its route via the pile (startChillReturn).
       const beam = cave.nonInteractive;
       const wasAwake = cave.state === "working" || cave.state === "chilling";
-      // The Timechain resident keeps its authored recliner rest, passive or not.
-      const resident = cave.traits.name === ctx.residentName && (state === "sleeping" || state === "away");
       if (cave.state === state) {
         // Same-state call still re-seats a moved eater; it must interrupt nothing else.
         if (state === "working") walkToSlot(cave);
         return;
       }
-      if ((ctx.bedRoute || beam) && state === "sleeping" && !resident) { startSleep(cave, beam || settle && cave.state === "away"); return; }
+      if ((ctx.bedRoute || beam) && state === "sleeping") { startSleep(cave, beam || settle && cave.state === "away"); return; }
       if (!beam && ctx.bedRoute && cave.state === "sleeping" && (state === "working" || state === "chilling")) { beginWalk(cave, state); return; }
       // Clanking to chilling is a walk, not a beam: back along the route to the
       // pile, then to the chill spot (falls back to the beam with no chill spot).
@@ -2216,11 +2214,10 @@
         cave.bedTravel.mode = "";
       }
       releaseBuild(cave);
-      if (state === "sleeping" && !resident) claimBedroll(cave);
+      if (state === "sleeping") claimBedroll(cave);
       else releaseBedroll(cave);
       const r = cave.root;
-      if (resident) ctx.residentPose(cave, 0);
-      else if (state === "working" || state === "chilling") {
+      if (state === "working" || state === "chilling") {
         r.visible = true;
         if ((beam || !wasAwake) && state === "working") {
           if ((beam || settle) && ctx.initialWorkSpot) {
