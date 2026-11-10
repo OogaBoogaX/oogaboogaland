@@ -483,7 +483,9 @@
     clearTweens();
     if (DEBUG && tweenCount()) throw new Error(`${tweenCount()} tweens survived clearTweens`);
     if (!next.enterSteps) {
-      enter(next, place);
+      const t = transition;
+      try { enter(next, place); }
+      catch (error) { entryFailed(t, error); return false; }
       releaseLeft(leaving, next);
       return true;
     }
@@ -626,7 +628,7 @@
     // Stepping is one-way and stops at the bottom tier, so quality cannot oscillate.
     if (idx < 0 || idx >= QUALITY_ORDER.length - 1) return;
     // An unfocused tab, a transition building the next scene and a scene readying one are not evidence that the tier is too expensive.
-    if (!document.hasFocus() || transition || active?.warming) { perf.frames = perf.total = 0; perf.since = 0; return; }
+    if (!document.hasFocus() || transition || active?.warming) { perf.frames = perf.total = perf.bad = 0; perf.since = 0; return; }
     if (!perf.since) perf.since = now;
     perf.frames++;
     perf.total += intervalMs;
@@ -728,7 +730,7 @@
     if (!drawn && renderer.failure && !params.has("canvas2d")) {
       console.warn("WebGL2 programs failed, reloading with the Canvas 2D fallback", renderer.failure);
       params.set("canvas2d", "1");
-      location.replace(`${location.pathname}?${params}`);
+      location.replace(`${location.pathname}?${params}${location.hash}`);
       return;
     }
     active.input.update();
@@ -736,6 +738,8 @@
     cabinetView.afterDraw();
     if (fade > 0 || transition && transition.instant && !transition.ready) drawFade();
   };
+  const FRAME_ERRORS_MAX = 30;
+  let frameErrors = 0;
   const frame = (now) => {
     raf = window.requestAnimationFrame(frame);
     const interval = frameInterval();
@@ -751,7 +755,13 @@
     // Only a displayed frame carries a real interval; `advance` must not tier. A step resizes the canvas, which
     // clears it, so it comes before this frame's draw: after it, the browser presented one black frame.
     if (!interval) autoTier(delivered, now);
-    step(dt, now);
+    // A throw every frame stops the picture while the panels, chat and voice carry on: report it once, and after a
+    // moment offer the way out rather than leave the visitor with a frozen screen.
+    try { step(dt, now); frameErrors = 0; }
+    catch (error) {
+      if (++frameErrors === 1) reportError(error);
+      if (frameErrors === FRAME_ERRORS_MAX) window.BL.hud.offerReload("Ooga Booga Land hit a problem");
+    }
   };
 
   let rightShift = false;
@@ -838,7 +848,9 @@
       window.cancelAnimationFrame(raf);
       raf = 0;
     } else if (!raf && (active || transition && transition.entering)) {
-      lastTime = performance.now();
+      // The time away is no frame interval: the first one back would close a tier window as slow on its own.
+      lastTime = lastRender = performance.now();
+      perf.frames = perf.total = perf.since = perf.bad = 0;
       raf = window.requestAnimationFrame(frame);
     }
   };
@@ -899,6 +911,8 @@
   accountReady.then(() => {
     if (destroyed) return;
     if (net.state.donations) donations.useOrigin();
+    // A Worker's page whose look went unanswered knows nothing of its API: no made-up tips under the visitor's own name.
+    else if (net.state.started && !net.state.backend && document.documentElement.dataset.workerPage === "1") donations.config.simulate = false;
     unsubscribeDonations = donations.subscribe((donation, bananas) => {
       if (donations.receivedOwnInvoice(donation.id)) game.rememberHandle(donation.handle);
       window.BL.donationPopup.receive(donation, bananas);
@@ -1062,7 +1076,13 @@
         if (destroyed) { models.release(first.id, []); return; }
         bootFailed(error); return;
       }
-    } else window.BL.buildTasks.measure(() => { enter(first, place); finishBootDonations(); });
+    } else {
+      try { window.BL.buildTasks.measure(() => { enter(first, place); finishBootDonations(); }); }
+      catch (error) {
+        if (destroyed) { models.release(first.id, []); return; }
+        bootFailed(error); return;
+      }
+    }
     mark("core-ready");
     mark("ready");
     // A restored island counts as the build it replaced, so the cache never starts a device a tier higher.

@@ -226,6 +226,11 @@ export const SHOT_BURST = 6;
 export const SHOT_RANGE = 120;
 export const SWING_HZ = 4;
 export const SWING_BURST = 4;
+// The frames that change who sees and hears whom, each fanned out to the whole room: well over anything a page sends,
+// and low enough that one account cannot saturate the island's only room.
+export const CONTROL_FRAMES = new Set(["hub", "visible", "zone", "poker-voice", "mute", "body"]);
+export const CONTROL_HZ = 8;
+export const CONTROL_BURST = 20;
 export const GHOST_HZ = 20;
 export const GHOST_BURST = 24;
 // Chalkboard: the EntropyLab board on the island, kept for good. One page at a time holds it, and only while its

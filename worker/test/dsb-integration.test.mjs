@@ -848,3 +848,41 @@ test("concurrent cleanup of one session closes newly queued MIDs before acknowle
   assert.deepEqual(closed, [["0"], ["1"]]);
   assert.equal(room.cleanupJobs.length, 0);
 });
+
+test("a close queued while another is on its way never sweeps a session a listener still holds", async () => {
+  const { room, add } = studioRoom();
+  const listener = add(2, { zone: "outside" });
+  listener.voice = { ...listener.voice, sub: "receive", mids: { 2: 4, 3: 5 } };
+  const closed = []; let release;
+  room.sfu.getSession = async () => ({ tracks: [{ mid: "2", status: "active" }, { mid: "3", status: "active" }] });
+  room.sfu.closeTracks = async (_session, mids) => { closed.push([...mids]); if (closed.length === 1) await new Promise(resolve => { release = resolve; }); return { tracks: mids.map(mid => ({ mid })) }; };
+  const first = room.queueClose("receive", ["0"]);
+  await new Promise(resolve => setImmediate(resolve));
+  const second = room.queueClose("receive", ["1"]);
+  await new Promise(resolve => setImmediate(resolve));
+  release();
+  await Promise.all([first, second]);
+  assert.deepEqual(closed, [["0"], ["1"]], "the voices the listener still hears are left alone");
+  // A session nobody holds any more is still swept for whatever is left on it.
+  const swept = []; room.sfu.closeTracks = async (_session, mids) => { swept.push([...mids]); return { tracks: mids.map(mid => ({ mid })) }; };
+  room.sfu.getSession = async () => ({ tracks: [{ mid: "7", status: "active" }] });
+  await room.queueClose("retired", [], true);
+  assert.deepEqual(swept, [["7"]]);
+});
+
+test("a speaker the room closed on a listener reads as new when it comes back, so the page pulls it again", () => {
+  const { room, add } = studioRoom();
+  const listener = add(2, { zone: "outside" }), speaker = add(4, { zone: "outside" });
+  room.sfu.closeTracks = async (_session, mids) => ({ tracks: mids.map(mid => ({ mid })) });
+  listener.voice = { ...listener.voice, sub: "receive", mids: { a: 4 } };
+  speaker.voice = { ...speaker.voice, pub: "pub", track: "mic", gen: 1 };
+  room.updateVoice();
+  const gens = () => listener.ws.sent.filter(m => m.t === "voice").at(-1).gens;
+  assert.deepEqual(gens(), [1]);
+  speaker.zone = "arcade.hall";
+  room.enforceStudio();
+  assert.deepEqual({ ...listener.voice.mids }, {}, "the room closed it");
+  speaker.zone = "outside";
+  room.updateVoice();
+  assert.deepEqual(gens(), [2], "the same publication, but no longer the track this page holds");
+});

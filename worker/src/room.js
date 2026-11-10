@@ -31,7 +31,7 @@ import { DurableObject } from "cloudflare:workers";
 import {
   CABINETS, hockey, CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
   NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
-  DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, GHOST_HZ, GHOST_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, REACT_FEATURE, HAND_EMOJI_FEATURE, REACT_HZ, REACT_BURST,
+  DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, CONTROL_FRAMES, CONTROL_HZ, CONTROL_BURST, GHOST_HZ, GHOST_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, REACT_FEATURE, HAND_EMOJI_FEATURE, REACT_HZ, REACT_BURST,
   GHOST_MAGIC, GHOST_FRAME_MAX, GHOST_FRAME_HZ, GHOST_FRAME_BURST, inGhostArena, ghostCandidate, watchesGhost,
   CHALK, CHALK_HZ, CHALK_BURST, CHALK_IDLE_MS, CHALK_SAVE_MS, CHALK_TELL_MS, CHALK_FEATURE,
   WALLET_CAP, WALLET_HZ, WALLET_BURST,
@@ -123,8 +123,11 @@ export class Room extends DurableObject {
         if (set === null || set > this.cleanupAt) await ctx.storage.setAlarm(this.cleanupAt);
       }
     });
-    // A woken room rebuilds its roster from the attachments its sockets carry.
+    // A woken room rebuilds its roster from the attachments its sockets carry. The runtime still lists a socket that is
+    // closing, newest first, and a half-open one can stay closing for minutes: it must never take a player's record from
+    // the socket that replaced it, or bring back a player evicted.
     for (const ws of ctx.getWebSockets()) {
+      if (ws.readyState > 1) continue;
       const a = ws.deserializeAttachment();
       if (a) this.players.set(a.id, this.record(ws, a));
     }
@@ -147,7 +150,7 @@ export class Room extends DurableObject {
   }
 
   record(ws, a) {
-    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hand: false, handTone: 0, handEmoji: "", hp: 100, ko: false, g: null, j: 0, w: 0, v: null, va: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], blendTo: null, blendK: 0, pm: { inv: [], open: 0, blocked: [] }, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, ghostBucket: { tokens: GHOST_BURST, at: Date.now() }, ghostFrameBucket: { tokens: GHOST_FRAME_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: Date.now() };
+    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hand: false, handTone: 0, handEmoji: "", hp: 100, ko: false, g: null, j: 0, w: 0, v: null, va: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], blendTo: null, blendK: 0, pm: { inv: [], open: 0, blocked: [] }, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, ghostBucket: { tokens: GHOST_BURST, at: Date.now() }, ghostFrameBucket: { tokens: GHOST_FRAME_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: a.joinedAt || Date.now() };
   }
 
   // Retain account debt across socket records, only while awake. Reclaim fully replenished
@@ -216,6 +219,8 @@ export class Room extends DurableObject {
       p.ws.serializeAttachment(this.attachment(p));
       this.replayDoor(p);
     }
+    // A lease that ran out while the room slept has no alarm left to pass the doors on.
+    if (!this.doorActive) this.grantDoor(now);
   }
 
   doorCycle(p) {
@@ -406,6 +411,10 @@ export class Room extends DurableObject {
     // While playing, the room owns the floor pose and body, regardless of game-scene reports.
     if (p.cabinet && ["pose", "zone", "body", "blend", "hp", "shot", "swing", "hockey"].includes(msg.t)) return;
     if (msg.t === "hockey") { hockey.message(this, p, msg); ws.serializeAttachment(this.attachment(p)); return; }
+    if (CONTROL_FRAMES.has(msg.t)) {
+      if (!p.controlBucket) p.controlBucket = { tokens: CONTROL_BURST, at: p.seenAt };
+      if (!takeToken(p.controlBucket, CONTROL_HZ, p.seenAt, CONTROL_BURST)) return;
+    }
     if (msg.t === "studio") {
       this.studioMessage(p, msg);
     } else if (msg.t === "pose") {
@@ -663,6 +672,7 @@ export class Room extends DurableObject {
     this.drop(p, reason);
     this.send(p.ws, { t: "kick", reason });
     try {
+      p.ws.serializeAttachment(null);
       p.ws.close(CLOSE_KICK, reason);
     } catch {
       // Already closed.
@@ -974,7 +984,7 @@ export class Room extends DurableObject {
     for (const q of this.players.values()) if (q.voice.sub && !q.voice.track) for (const id of desired.get(q.id) || []) quiet.set(id, (quiet.get(id) || 0) + 1);
     for (const p of this.players.values()) {
       const peers = desired.get(p.id) || [];
-      const gens = peers.map((id) => this.players.get(id).voice.gen || 0);
+      const reopened = p.voice.reopened || {}, gens = peers.map((id) => (this.players.get(id).voice.gen || 0) + (reopened[id] || 0));
       // Receiving attendees do not publish tracks. Their receive sessions, rather
       // than the list of speakers this player hears, keep a Studio microphone live.
       // A linked partner's does too, wherever that partner is, since it hears from anywhere.
@@ -1436,7 +1446,14 @@ export class Room extends DurableObject {
     for (const p of this.players.values()) {
       const allowed = new Set(desired.get(p.id));
       const mids = Object.keys(p.voice.mids || {}).filter(mid => !allowed.has(p.voice.mids[mid]));
-      if (mids.length) { this.background(this.queueClose(p.voice.sub, mids)); for (const mid of mids) delete p.voice.mids[mid]; p.ws.serializeAttachment(this.attachment(p)); }
+      if (mids.length) {
+        this.background(this.queueClose(p.voice.sub, mids));
+        // The page cannot see this close: a speaker back in its list with the same publication must still read as new, or it is never pulled again.
+        const reopened = p.voice.reopened ||= {};
+        for (const id of Object.keys(reopened)) if (!this.players.has(Number(id))) delete reopened[id];
+        for (const mid of mids) { reopened[p.voice.mids[mid]] = (reopened[p.voice.mids[mid]] || 0) + 1; delete p.voice.mids[mid]; }
+        p.ws.serializeAttachment(this.attachment(p));
+      }
     }
     this.updateVoice();
   }
@@ -1494,7 +1511,10 @@ export class Room extends DurableObject {
             const state = await this.sfu.getSession(job.session);
             const inactive = new Set((state.tracks || []).filter(t => t.status === "inactive").map(t => t.mid));
             job.mids = job.mids.filter(mid => !inactive.has(mid) || (job.midVersions || {})[mid] !== priorVersions[mid]);
-            job.mids = [...new Set(job.mids.concat((state.tracks || []).filter(t => t.status !== "inactive" && typeof t.mid === "string").map(t => t.mid)))];
+            // Only a session nobody holds any more is swept for what is left. On a live one that would close every voice
+            // it still receives, with no page any the wiser: one listener gone deaf to everybody.
+            const held = [...this.players.values()].some(p => p.voice.sub === job.session || p.voice.pub === job.session);
+            if (!held) job.mids = [...new Set(job.mids.concat((state.tracks || []).filter(t => t.status !== "inactive" && typeof t.mid === "string").map(t => t.mid)))];
           }
           const mids = job.mids.slice();
           const versions = { ...(job.midVersions || {}) };
@@ -1503,7 +1523,8 @@ export class Room extends DurableObject {
           const succeeded = new Set((Array.isArray(res.tracks) ? res.tracks : []).filter(t => t && typeof t.mid === "string" && !t.errorCode).map(t => t.mid));
           job.mids = job.mids.filter(mid => !succeeded.has(mid) || (job.midVersions || {})[mid] !== versions[mid]);
           for (const mid of succeeded) if (!job.mids.includes(mid) && job.midVersions) delete job.midVersions[mid];
-          if (job.mids.length) job.inspect = true;
+          // A close this pass sent that the SFU did not confirm; a mid queued while it was on its way is simply next.
+          if (mids.some(mid => job.mids.includes(mid))) job.inspect = true;
           // A concurrent queue may have appended/reallocated owned MIDs while upstream was pending.
           if ((job.revision || 0) !== revision || job.mids.length || (job.inspect && Date.now() < job.inspectUntil)) continue;
           this.cleanupJobs.splice(this.cleanupJobs.indexOf(job), 1);

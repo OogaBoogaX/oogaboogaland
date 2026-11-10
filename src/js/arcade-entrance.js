@@ -50,7 +50,8 @@
     } };
   };
 
-  const build = ({ group, mouth: m, solids, addTarget, removeTarget, reachable }) => {
+  const MIDDLE = new Float64Array(3);
+  const build = ({ group, mouth: m, solids, addTarget, removeTarget, reachable, sightClear }) => {
     const sr = Math.sin(m.ry), cr = Math.cos(m.ry);
     addChild(group, createNode({ geometry: AM.caveFloor(0), sightHidden: true }));
     const door = BL.arcadeDoors.create({ parent: group, z: DOOR_Z, wall: true, solids });
@@ -168,7 +169,14 @@
       if (action.kind === "arcade-door") { walk.ask(); return; }
       play(entries[action.slot]);
     };
-    const tap = (o) => play(entries[o.slot]);
+    // A click finds a cabinet by a broad sphere: only one the view can see counts, or a press on the rock beside the mouth
+    // or the hill over the cave would open a game. And never in the middle of a walk through the doors.
+    const inSight = (e) => {
+      const c = visit.camera.position, g = boundsOf(e.body.geometry).center;
+      BL.math.mat4.transformPoint(MIDDLE, e.body.world, g[0], g[1], g[2]);
+      return sightClear(c.x, c.y, c.z, MIDDLE[0], MIDDLE[1], MIDDLE[2]);
+    };
+    const tap = (o) => { const e = entries[o.slot]; if (!walk.holding && inSight(e)) play(e); };
     const prompt = (action, hud, coarse) => {
       if (action.kind === "arcade-cabinet") {
         const e = entries[action.slot], seat = BL.net.cabinetSeats.get(AC.outdoorSeat(e.game)), label = gameOf(e.cabinet).name;
@@ -221,7 +229,7 @@
     };
     const liveGeometry = (set) => { for (const e of entries) if (e.frames) for (const f of e.frames) set.add(f); };
     const dispose = unbind;
-    return { door, entries, frame, bind, unbind, update, afterCamera, nearby, use, tap, tip, prompt, arrive, standAt, stay, liveGeometry, dispose, get walk() { return walk; } };
+    return { door, entries, frame, bind, unbind, update, afterCamera, nearby, use, tap, tip, prompt, arrive, standAt, stay, liveGeometry, dispose, get walk() { return walk; }, get warming() { return !!walk && walk.state.busy; } };
   };
   BL.arcadeEntrance = { build, yard, DOOR_Z };
 })();

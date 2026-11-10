@@ -33,7 +33,7 @@ anthropic = class { constructor() { throw new Error("Unexpected Claude call"); }
   const access = load("contributor-access", { CAST_ROWS: cast,
     createOwnedCharacterLookup: (rows) => createOwnedCharacterLookup(rows, lookup) }, ["contributorFor"]);
   const http = load("http", { ...cookies, ...db, ...access }, ["json", "text", "redirect", "fromSite", "safeNext",
-    "clientIp", "allowed", "sessionToken", "getSessionFromRequest", "getSessionForRemoval"]);
+    "clientIp", "allowed", "sessionToken", "getSessionFromRequest", "getSessionForRemoval", "readBody"]);
   const auth = load("auth", { ...cookies, ...crypto, ...db, ...http, ...access, fetch: fetcher }, ["handleAuth"]);
   const api = load("api", { ...cookies, ...db, ...http }, ["handleApi"]);
   const donations = load("donations", http, ["handleDonations"]);
