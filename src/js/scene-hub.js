@@ -335,6 +335,9 @@
   let ringLanternsShown = false;
   // The cave cabinet a Cloud Hopper run began at, when it began at one on the island (#554).
   let cloudYard = null;
+  // Every way out of an island cabinet's Cloud Hopper but its own Exit (Escape at the menu, Return to the island, a lost
+  // seat) comes back with this place and no yard: the launch used it up, and the Ooga would never be stood at its cabinet.
+  const restoreCloudYard = (ctx) => { if (ctx.place === "cloud-hopper-return" && cloudYard && !world.arcadeYard) { world.arcadeYard = cloudYard; cloudYard = null; } };
   let magazine, magazineState, clankers, clankerPlay, clankerMeshes, clankerPartOwners, grabSupportEntry = null, entropyLab, chalkboard, factoryMouth = null, arcadeMouth = null, bcaMouth = null, glCanvas = null;
   const dragHand = new Float64Array(3), dragFoot = new Float64Array(3);
   const THROW_SWING_TIME = 0.28, THROW_SETTLE_TIME = 0.2, THROW_CARRY_SPEED_MAX = 8;
@@ -2166,7 +2169,7 @@
       addChild(group, createNode({ position: { x: 0, y: 0, z: 0 }, geometry: headquartersModels.entranceRamp(), depthBias: 0.25 }));
     } else if (slot.status === "open" && slot.scene === "arcade") {
       // Ooga Arcade's cave: its doors at the back and the most played cabinets recessed down its walls (arcade-entrance.js).
-      const entrance = BL.arcadeEntrance.build({ group, mouth: m, solids, addTarget, removeTarget, reachable: actionReachable });
+      const entrance = BL.arcadeEntrance.build({ group, mouth: m, solids, addTarget, removeTarget, reachable: actionReachable, sightClear: (x, y, z, toX, toY, toZ) => island.sightClearAt(x, y, z, toX, toY, toZ) });
       arcadeMouth = { slot, x: m.x + ax * BL.arcadeEntrance.DOOR_Z, y: m.floorY + 1.1, z: m.z + az * BL.arcadeEntrance.DOOR_Z, entrance };
     } else if (slot.status === "open" && slot.scene === "lab") {
       const lab = hubModels.entropyLab(m.room, m.floorY);
@@ -8142,7 +8145,12 @@
         clankerPlay.respawn(p.x - oldX, p.y - oldY, p.z - oldZ);
         found = true; break;
       }
-      if (!found) throw new Error("No clear gorilla respawn at pile");
+      // Taken spots are no reason to stop the world: thrown here it would fail every frame until a reload.
+      if (!found) {
+        const x = NAVIGATION_OFFSETS[0], y = island.surfaceAt(x, z);
+        clankers.respawn(entry, x, y, z);
+        clankerPlay.respawn(p.x - oldX, p.y - oldY, p.z - oldZ);
+      }
     }
     if (gameMode && dt > 0) updateClankerFireContacts(clankerFireReachable);
     if (debugSelectedGorilla && (!debugSelectedGorilla.active || !debugSelectedGorilla.root.visible || !DEBUG_GORILLA_RAGE && pilot.player || clankerPlay.active
@@ -8309,6 +8317,7 @@
     if (drivesOoga(cave)) return true;
     // The Timechain Sphere's doorway holds its Ooga from the keypad until it is through.
     if (timechainIsland.gate && timechainIsland.gate.busy) { hud.toast("Finish at the Timechain Sphere's doors first"); return false; }
+    if (arcadeMouth?.entrance.walk?.holding) { hud.toast("Finish walking through Ooga Arcade's doors first"); return false; }
     const refusal = mayDriveOoga(cave);
     if (refusal) { hud.toast(refusal); return false; }
     if (cave.remoteControlled || cave.ghostTrack) { hud.toast(`Someone is already driving ${cave.traits.display}`); return false; }
@@ -8330,6 +8339,7 @@
       hud.toast("That gorilla is not available here"); return false;
     }
     if (clankerPlay.player === entry || clankerPlay.player?.npc === entry) return true;
+    if (arcadeMouth?.entrance.walk?.holding) { hud.toast("Finish walking through Ooga Arcade's doors first"); return false; }
     const refusal = BL.net.mayDriveGorilla(entry.owner.traits.name);
     if (refusal) { hud.toast(refusal); return false; }
     if (entry.remoteControlled || entry.ghostTrack) { hud.toast("Someone is already driving that gorilla"); return false; }
@@ -11023,6 +11033,7 @@
     totemUnsub = BL.totemFeed.subscribe(onTotem);
     BL.net.setHub(true);
     crew.refreshStates(true);
+    restoreCloudYard(ctx);
     const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || ctx.from === "lab" || ctx.from === "timechain" || !!world.arcadeYard;
     const returningCharacter = handsBack ? (world.arcadeYard ? world.arcadeYard.name : world.pilot) : null;
     if (handsBack) world.pilot = null;
@@ -11043,7 +11054,7 @@
     unsubscribeAccount = watchAccount();
     bindArcadeEntrance(ctx);
     BL.players.setDoors(doorToward);
-    const donate = ctx.place === "donate", routedPlace = donate ? null : ctx.place;
+    const donate = ctx.place === "donate", routedPlace = donate || ctx.place === "cloud-hopper-return" ? null : ctx.place;
     const sphereExit = ctx.from === "timechain" ? world.sphereExit : null;
     world.sphereExit = null;
     const factoryCrossing = ctx.from === "factory" ? world.factoryCrossing : null;
@@ -12043,6 +12054,7 @@
     if (ctx.from === null && !signedInArrival && (preloadedJetpackWear || preloadedEquipment) && !params.has("character") && !initialCharacter) initialCharacter = contributors.activeRoster.find((entry) => crew.stateOf(crew.cavemen.get(entry.name)) === "working") || contributors.activeRoster[0];
     const initialGorilla = initialCharacter && preloadedGorilla ? crew.cavemen.get(initialCharacter.name) : null;
     // The Ooga that went into DSB, the Lightning Factory, ₿IFRÖST or Ooga Arcade comes back out as the one played.
+    restoreCloudYard(ctx);
     const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || ctx.from === "lab" || ctx.from === "timechain" || !!world.arcadeYard;
     const returningCharacter = handsBack ? (world.arcadeYard ? world.arcadeYard.name : world.pilot) : null;
     if (handsBack) world.pilot = null;
@@ -12076,7 +12088,7 @@
     if (initialFirstPerson) pilot.enterClose(true);
     // The /donate route: the island's own view with the donation popup open. As a routed place it keeps Tess from
     // greeting over the dialog.
-    const donate = ctx.place === "donate", routedPlace = donate ? null : ctx.place;
+    const donate = ctx.place === "donate", routedPlace = donate || ctx.place === "cloud-hopper-return" ? null : ctx.place;
     // Out of a Timechain room: behind the Sphere's curtain, to walk out through its doors.
     const sphereExit = ctx.from === "timechain" ? world.sphereExit : null;
     world.sphereExit = null;
@@ -12586,7 +12598,7 @@
     get retained() { return heldHub; }, get elapsed() { return now; },
     get retainedRoot() { return heldHub ? root : null; },
     // Readying the hall takes a slice of frames that are otherwise the island's; the tier does not judge them.
-    get warming() { return factoryWalk.warming; },
+    get warming() { return factoryWalk.warming || !!arcadeMouth?.entrance.warming; },
     // The Lightning Factory's builders stay warm while the island runs, since its shield walks straight in.
     keeps: ["factory", "arcade"],
     root: null, camera: null, input: null, debug: null,

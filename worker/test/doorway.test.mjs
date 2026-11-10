@@ -10,7 +10,7 @@ import { getPlayer } from "../src/db.js";
 
 const host = () => {
   let now = 100000;
-  const accepted = [], alarms = [];
+  const accepted = [], alarms = [], runtime = { listed: null, pinged: null };
   const socket = () => ({
     sent: [], closed: null, store: null,
     send(text) { this.sent.push(JSON.parse(text)); },
@@ -40,7 +40,7 @@ const host = () => {
   const stored = new Map();
   const ctx = {
     setWebSocketAutoResponse() {}, blockConcurrencyWhile: (fn) => fn(), acceptWebSocket: (ws) => accepted.push(ws),
-    getWebSockets: () => accepted.filter((ws) => !ws.closed), getWebSocketAutoResponseTimestamp: () => null,
+    getWebSockets: () => runtime.listed || accepted.filter((ws) => !ws.closed), getWebSocketAutoResponseTimestamp: () => runtime.pinged,
     storage: {
       // As Cloudflare's storage: an array of keys answers a Map of those found.
       get: async (key) => Array.isArray(key) ? new Map(key.filter((k) => stored.has(k)).map((k) => [k, stored.get(k)])) : stored.get(key),
@@ -60,7 +60,7 @@ const host = () => {
     await send(r, ws, { t: "pose", x: 1, y: 2, z: 3, yaw: 0 });
     await send(r, ws, { t: "zone", name: zone });
   };
-  return { room, join, send, enter, accepted, alarms, advance: (ms) => { now += ms; } };
+  return { room, join, send, enter, accepted, alarms, runtime, advance: (ms) => { now += ms; }, now: () => now };
 };
 
 const messages = (ws, t, op) => ws.sent.filter((m) => m.t === t && (op === undefined || m.op === op));
@@ -166,4 +166,63 @@ test("a voice pull is closed if its room membership changes while the SFU answer
   assert.equal(closed.length, 1);
   assert.equal(closed[0].session, "sub-a");
   assert.equal(Array.from(closed[0].mids).join(","), "7");
+});
+
+const woken = async (h) => { const r = h.room(); await new Promise((resolve) => setImmediate(resolve)); return r; };
+
+test("a woken room keeps the socket that replaced a half-open one, and brings back nobody it evicted", async () => {
+  const h = host(), r = h.room(), dead = await h.join(r, 1, "a");
+  await h.send(r, dead, { t: "body", name: "a" });
+  const live = await h.join(r, 1, "a");
+  assert.equal(dead.closed.reason, "replaced");
+  assert.equal(dead.store, null, "an evicted socket carries no player");
+  // As the runtime lists them after a wake: newest first, the half-open one still closing.
+  dead.readyState = 2; live.readyState = 1; h.runtime.listed = [live, dead];
+  dead.store = JSON.parse(JSON.stringify(live.store));
+  let room = await woken(h);
+  assert.equal(room.players.get(1).ws, live, "the live page's frames are not dropped");
+  await h.send(room, live, { t: "zone", name: "sphere" });
+  assert.equal(room.players.get(1).zone, "sphere");
+  // And one that was evicted, with no newer socket, stays gone.
+  h.runtime.listed = [dead];
+  room = await woken(h);
+  assert.equal(room.players.size, 0, "a closing socket is no player");
+});
+
+test("a woken room still finds a socket gone silent, and leaves one still pinging alone", async () => {
+  const h = host(), r = h.room(), a = await h.join(r, 1, "a"), b = await h.join(r, 2, "b");
+  h.advance(protocol.STALE_MS + 1000);
+  h.runtime.pinged = new Date(h.now() - 1000);
+  let room = await woken(h);
+  room.sweepAt = 0;
+  await room.alarm();
+  assert.equal(a.closed, null, "pings answered without waking the room count as heard");
+  h.runtime.pinged = new Date(h.now() - protocol.STALE_MS - 500);
+  room = await woken(h);
+  room.sweepAt = 0;
+  await room.alarm();
+  assert.equal(a.closed.reason, "stale");
+  assert.equal(b.closed.reason, "stale");
+});
+
+test("a lease that ran out while the room slept hands the doors to the next in the queue", async () => {
+  const h = host(), r = h.room();
+  const a = await h.join(r, 1, "a"), b = await h.join(r, 2, "b");
+  await h.enter(r, a, "a"); await h.enter(r, b, "b");
+  await h.send(r, a, { t: "door", op: "ask", dir: "in", room: 1 });
+  await h.send(r, b, { t: "door", op: "ask", dir: "in", room: 2 });
+  assert.equal(messages(b, "door", "grant").length, 0);
+  h.advance(protocol.DOOR_GRANT_MS + 1);
+  await woken(h);
+  assert.equal(messages(b, "door", "grant").length, 1);
+});
+
+test("the frames every page hears are held to a rate, well over any page's", async () => {
+  const h = host(), r = h.room(), a = await h.join(r, 1, "a"), b = await h.join(r, 2, "b");
+  for (let i = 0; i < 200; i++) await h.send(r, a, { t: "zone", name: i % 2 ? "sphere" : "outside" });
+  const heard = b.sent.filter((m) => m.t === "zone").length;
+  assert.ok(heard > 2 && heard <= protocol.CONTROL_BURST, `heard ${heard}`);
+  h.advance(10000);
+  await h.send(r, a, { t: "zone", name: "sphere-7" });
+  assert.equal(b.sent.filter((m) => m.t === "zone").at(-1).name, "sphere-7", "and it comes back");
 });

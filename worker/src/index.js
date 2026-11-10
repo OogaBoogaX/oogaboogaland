@@ -12,7 +12,7 @@ import { handleHighscores } from "./highscores.js";
 import { handleArcadePlays } from "./arcade-plays.js";
 import { handleCloudHopperReplays } from "./cloud-hopper-replays.js";
 import { pruneCloudHopperReplays } from "./cloud-hopper-replay-store.js";
-import { allowed, fromSite, getSessionFromRequest, text } from "./http.js";
+import { allowed, fromSite, getSessionFromRequest, readBody, text } from "./http.js";
 import { handlePoker } from "./poker.js";
 import { handleTess, pruneTess } from "./tess.js";
 import { handleTotems } from "./totems.js";
@@ -37,6 +37,8 @@ const handleRoom = async (request, env) => {
   return env.ROOM.getByName(ROOM_NAME).fetch(new Request(request, { headers }));
 };
 
+// A voice call's body: a session description, however many tracks it carries.
+const VOICE_BODY_MAX = 256 * 1024;
 // Voice signalling: the room validates ownership and talks to the SFU with the secret.
 const handleVoice = async (request, env, url) => {
   if (request.method !== "POST") return text("Method not allowed", 405);
@@ -44,10 +46,13 @@ const handleVoice = async (request, env, url) => {
   const found = await getSessionFromRequest(request, env);
   if (!found) return text("Sign in first", 401);
   if (!(await allowed(env.VOICE_LIMITER, String(found.player.id)))) return text("Too many voice requests", 429);
+  // Read here, and bounded, so a huge body can never reach the island's only room.
+  const body = await readBody(request, VOICE_BODY_MAX);
+  if (body === null) return text("Too large", 413);
   const op = url.pathname.slice("/api/voice/".length);
   const headers = new Headers({ "content-type": "application/json", "x-player-id": String(found.player.id) });
   headers.set("x-room-token", request.headers.get("x-room-token") || "");
-  return env.ROOM.getByName(ROOM_NAME).fetch(new Request(new URL(`/voice/${op}`, url), { method: "POST", headers, body: request.body }));
+  return env.ROOM.getByName(ROOM_NAME).fetch(new Request(new URL(`/voice/${op}`, url), { method: "POST", headers, body }));
 };
 
 export default {
@@ -55,7 +60,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/poker/")) return handlePoker(request, env);
     if (url.pathname.startsWith("/auth/")) return handleAuth(request, env, url);
-    if (url.pathname.startsWith("/api/totems/")) return handleTotems(request, url, env);
+    if (url.pathname.startsWith("/api/totems/")) return handleTotems(request, url, env, ctx);
     if (url.pathname.startsWith("/api/voice/")) return handleVoice(request, env, url);
     if (url.pathname === "/api/tess") return handleTess(request, env);
     if (url.pathname.startsWith("/api/highscores/")) return handleHighscores(request, env, ctx);

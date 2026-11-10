@@ -183,6 +183,8 @@
       state.x = p.x; state.z = p.z; state.seen = true;
       if (near && !state.ready && !state.busy && !state.failed) load();
       const atDoor = near && d < TOUCH;
+      // Walking into doors still readying is asking to go through: stopped against them nothing else would say so.
+      if (state.busy && atDoor && inward > 0.2) state.wanted = true;
       if (state.ready && near && Math.abs(across) < WALK_HALF && (state.wanted || atDoor && inward > 0.2) && Math.abs(p.y - player.baseY - (F.floor || 0)) < 0.3) {
         state.wanted = false;
         state.t = 0; state.cave = player; state.dist = pilot.orbit.dist; state.pitch = 0; state.heading = Math.atan2(sign * F.sr, sign * F.cr);
@@ -191,7 +193,7 @@
         pilot.setExternalControl(true);
         lens("eyes");
         set("opening");
-      } else if (!near) state.wanted = false;
+      } else if (!near) state.wanted = state.failed = false;
       door.update(dt, false);
     };
     // Coming in on the far side: at the eye the other scene left off from, and on from there.

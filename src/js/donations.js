@@ -260,6 +260,9 @@
         if (entry.seq > newestSeq && !recent.some((item) => item.id === entry.id)) insertRecent(recent, entry);
       }
       state.recent = recent;
+      // Where a reconnect asks to resume from, even on a page that has heard no donation yet: a payment made while the
+      // socket was down (a phone away in its wallet app, a deploy) is then replayed to the kiosk waiting on it.
+      if (!after && recent.length) after = recent[0].id;
       notify();
     } else if (data.type === "pile" && isNumber(data.bananas) && isNumber(data.eatPerHour)) {
       if (handlers.pile) handlers.pile({ bananas: Math.max(0, data.bananas), eatPerHour: Math.max(0, data.eatPerHour) });

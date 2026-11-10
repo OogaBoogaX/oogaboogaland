@@ -5278,7 +5278,13 @@
           planWorkSite(cave);
         }
       }
-      const site = workSites[work.site], route = site.route;
+      const site = workSites[work.site];
+      // A page following the room's host takes the phase and site from its frames but no place along the route: handed
+      // back its Oogas, its own index can lie off either end of this one, and a thrown frame here would freeze the picture.
+      if (!site) { work.phase = ""; standPose(cave); return; }
+      const route = site.route;
+      if (work.phase === "outbound") work.index = Math.max(0, Math.min(work.index, route.length));
+      else if (work.phase === "return") work.index = Math.min(work.index, route.length - 1);
       if ((work.phase === "outbound" || work.phase === "station" || work.phase === "shoot") && !siteActive(cave, site)) {
         work.index = work.phase === "outbound" ? Math.min(work.index, route.length - 1) : route.length - 1;
         work.phase = "return"; cave.act.kind = "reload-return"; cave.avoidance.tx = NaN;
