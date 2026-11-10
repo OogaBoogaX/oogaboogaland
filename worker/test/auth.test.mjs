@@ -87,6 +87,20 @@ test("the page takes real donations only from a Worker with the bananapayserver 
   assert.equal((await me({ DB: {} })).highscores, true);
 });
 
+test("a D1 failure is never reported as signed out, and a failed session stamp is no failure at all", async () => {
+  const token = "session-token", cookie = `${cookieNames("https://site.test").session}=${token}`;
+  const request = () => new Request("https://site.test/api/me", { headers: { cookie } }), url = new URL("https://site.test/api/me");
+  const failing = { prepare: () => ({ bind: () => ({ first: async () => { throw new Error("D1_ERROR"); } }) }) };
+  const down = await handleApi(request(), { SITE_ORIGIN: "https://site.test", DB: failing }, url);
+  assert.equal(down.status, 503, "the page asks again rather than believing it is signed out");
+  const player = { id: 7, login: "ooga-dev", banned_at: null, created_at: 1, token_hash: "h", expires_at: 4102444800, last_used_at: 1 };
+  let stamps = 0;
+  const unstamped = { prepare: () => ({ bind: () => ({ first: async () => player }) }), batch: async () => { stamps++; throw new Error("D1_ERROR"); } };
+  const body = await (await handleApi(request(), { SITE_ORIGIN: "https://site.test", DB: unstamped }, url)).json();
+  assert.equal(stamps, 1);
+  assert.equal(body.player && body.player.login, "ooga-dev", "only the last-used stamp failed");
+});
+
 const SITE = "https://site.test", FAR = 4102444800;
 const CAST = [{ handle: "Cave-Name", github_login: "real-owner",
   joined_at: "2026-09-01T00:00:00Z", last_commit_at: "2026-10-01T00:00:00Z" }];

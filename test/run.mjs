@@ -9168,6 +9168,22 @@ const highscoreClientChecks = async () => {
     record("highscores: an older Worker keeps the per-game public read contract", legacy);
   }
 };
+// A page that has heard no donation yet still names where to resume from: a tip paid while its socket is down is replayed.
+const donationResumeCheck = async () => {
+  const sockets = [], timers = [];
+  const context = { window: { setTimeout: fn => { const t = { fn }; timers.push(t); return t; }, clearTimeout: () => {} }, location: { protocol: "https:", origin: "https://site.test" },
+    WebSocket: class { constructor(url) { this.url = url; sockets.push(this); } close() { this.closed = true; } } };
+  runInNewContext(await readFile(new URL("../src/js/donations.js", import.meta.url), "utf8"), context);
+  const D = context.window.BL.donations;
+  D.useOrigin();
+  const stop = D.subscribe(() => {});
+  const first = sockets.at(-1), row = (id, seq) => ({ id, sats: 1000, handle: "a", message: "", at: Date.now(), bananas: 0.25, seq });
+  first.onmessage({ data: JSON.stringify({ type: "recent", entries: [row("older", 8), row("newest", 9)] }) });
+  first.onclose();
+  timers.at(-1).fn();
+  record("donation socket: a page that has played no donation resumes from the newest row of its snapshot", sockets.at(-1) !== first && sockets.at(-1).url.endsWith("?after=newest"), sockets.at(-1).url);
+  stop();
+};
 const donationClientChecks = async () => {
   const sockets = [], timers = [], received = [], seen = [], requests = [];
   const context = { window: { setTimeout: fn => { const t = { fn }; timers.push(t); return t; }, clearTimeout: () => {} },
@@ -11810,12 +11826,14 @@ const blockWalk = { name: "block walk", why: "rule: W A S D move the visitor's O
   await b.key("Enter");
   const rows = {};
   for (const k of "wsadqe") {
-    await b.evaluate(`(() => { const B = window.__ooga, s = B.block.sim, a = s.actors[0]; s.prep = 0; Object.assign(s.weather, { left: 1e9 }); a.x = -14; a.z = 2; a.vx = a.vz = 0; for (const o of s.actors) if (o.id) { o.x = 20; o.z = o.team === s.team ? 30 : -30; } B.advance(0.6, 1 / 60); const c = B.camera, vx = c.target.x - c.position.x, vz = c.target.z - c.position.z, l = Math.hypot(vx, vz); window.__walk = { fx: vx / l, fz: vz / l, x0: a.x, z0: a.z }; })()`);
+    // The map's own gorillas, trap and peels stand round this spot: they would drag or trip the Ooga being measured.
+    await b.evaluate(`(() => { const B = window.__ooga, s = B.block.sim, a = s.actors[0]; s.prep = 0; Object.assign(s.weather, { left: 1e9 }); a.x = -14; a.z = 2; a.vx = a.vz = 0; for (const o of s.actors) if (o.id) { o.x = 20; o.z = o.team === s.team ? 30 : -30; } for (const g of s.gorillas) { g.x = g.wx = g.hx = 34; g.z = g.wz = g.hz = 34; g.holding = -1; } for (const h of [...s.peels, ...s.traps]) { h.walkX ??= h.x; h.walkZ ??= h.z; h.x = h.z = 999; } B.advance(0.6, 1 / 60); const c = B.camera, vx = c.target.x - c.position.x, vz = c.target.z - c.position.z, l = Math.hypot(vx, vz); window.__walk = { fx: vx / l, fz: vz / l, x0: a.x, z0: a.z }; })()`);
     await holdKey(b, k, 0.5);
     rows[k] = await b.evaluate(`(() => { const q = window.__walk, a = window.__ooga.block.sim.actors[0], c = window.__ooga.camera, dx = a.x - q.x0, dz = a.z - q.z0, vx = c.target.x - c.position.x, vz = c.target.z - c.position.z, l = Math.hypot(vx, vz); return { fwd: +(dx * q.fx + dz * q.fz).toFixed(2), side: +(dx * -q.fz + dz * q.fx).toFixed(2), turn: +((vx / l) * -q.fz + (vz / l) * q.fx).toFixed(2) }; })()`);
   }
   // Movement along the old forward and right, and the camera's new forward against the old right: negative is to
   // the left on screen. A and D step without turning the view; Q and E turn it.
+  await b.evaluate(`(() => { const s = window.__ooga.block.sim; for (const h of [...s.peels, ...s.traps]) { h.x = h.walkX; h.z = h.walkZ; delete h.walkX; delete h.walkZ; } })()`);
   const ok = rows.w.fwd > 1 && rows.s.fwd < -1 && rows.a.side < -1 && rows.d.side > 1 && Math.abs(rows.a.turn) < 0.1 && Math.abs(rows.d.turn) < 0.1
     && rows.q.turn < -0.3 && rows.e.turn > 0.3;
   record("block walk: W and S run the Ooga forward and back on screen, A and D step it left and right, Q turns it and the camera left and E right", ok, JSON.stringify(rows));
@@ -19723,6 +19741,79 @@ const hubBootDonationReplay = { name: "hub boot donation replay", why: "regressi
   record("hub boot donation replay: the real subscription replays a boot tip to the arriving scene exactly once", paused && captured && ready && state.seen === 1 && state.donations === 1 && /1\.2K|1,200/.test(state.toast), JSON.stringify(state));
 } };
 scene("hub", { label: "boot lifecycle", query: "terrainworker=0", steps: [hubBootHold, hubBootFailure, hubBootPagehide, hubBootTierUploads, hubBootDonationReplay] });
+// A scene with no enterSteps is entered in one go: a throw there must end at the Reload notice, not throw again every frame.
+const ordinaryEntryFailure = { name: "ordinary entry failure", why: "regression: a throw from an ordinary scene's enter left every later frame throwing on a black screen with no way out", run: async (b) => {
+  const r = await b.evaluate(`(async () => {
+    const S = { errors: [], calls: 0, report: window.reportError }, lab = BL.scenes.lab, enter = lab.enter;
+    window.reportError = error => S.errors.push(error.message);
+    lab.enter = () => { S.calls++; throw new Error("entry failure fixture"); };
+    __ooga.go("lab");
+    const end = performance.now() + 6000;
+    while (!S.errors.length && performance.now() < end) { __ooga.advance(1 / 30, 1 / 30); await new Promise(r => setTimeout(r, 0)); }
+    let threw = null;
+    try { __ooga.advance(1, 1 / 30); } catch (error) { threw = error.message; }
+    const notice = document.getElementById("reload-notice");
+    window.reportError = S.report; lab.enter = enter;
+    return { calls: S.calls, errors: S.errors, threw, scene: __ooga.scene, visible: !notice.hidden, message: notice.textContent };
+  })()`);
+  record("ordinary entry failure: a throw from enter reports once, leaves no frame throwing and offers Reload", r.calls === 1 && r.errors.length === 1 && r.threw === null && r.scene === null && r.visible && r.message.includes("could not be opened"), JSON.stringify(r));
+} };
+scene("hub", { label: "ordinary entry failure", steps: [ordinaryEntryFailure] });
+// The room's host sends each NPC's phase and site but no place along the route, so a page handed its Oogas back keeps its own.
+const hubHandBack = { name: "hub host hand-back", why: "regression: a work index left off the route by a hand-back from the room's host threw every frame, freezing the picture for good with voice still running", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, S = B.crew.list.filter(c => c.state === "working");
+    B.advance(1, 1 / 60);
+    for (const c of S) if (c.work.phase) { c.work.phase = "outbound"; c.work.index = -1; }
+    let threw = null, after = 0;
+    try { B.advance(0.5, 1 / 60); after = S.filter(c => c.work.phase === "outbound" && c.work.index < 0).length; for (const c of S) if (c.work.phase) { c.work.phase = "return"; c.work.index = 99; } B.advance(0.5, 1 / 60); }
+    catch (error) { threw = error.message; }
+    return { workers: S.length, threw, after };
+  })()`);
+  record("hub host hand-back: Oogas handed back mid-route with their index off either end walk on without a throw", r.workers > 0 && r.threw === null && r.after === 0, JSON.stringify(r));
+} };
+scene("hub", { label: "host hand-back", query: "status=clankin", steps: [hubHandBack] });
+// A per-frame throw stops the picture while the panels and voice go on: the director reports it once and offers Reload.
+const frameFailure = { name: "frame failure", why: "regression: an exception in per-frame code froze the picture silently, with no way out but a reload nobody was told to do", run: async (b) => {
+  const r = await b.evaluate(`(async () => {
+    const H = BL.scenes.hub, update = H.update, S = { errors: [], report: window.reportError }, notice = document.getElementById("reload-notice");
+    window.reportError = error => S.errors.push(error.message);
+    H.update = () => { throw new Error("frame failure fixture"); };
+    const end = performance.now() + 8000;
+    while (notice.hidden && performance.now() < end) await new Promise(requestAnimationFrame);
+    window.reportError = S.report; H.update = update;
+    return { errors: S.errors, visible: !notice.hidden, message: notice.textContent };
+  })()`);
+  record("frame failure: a throw every frame reports once and offers Reload", r.errors.length === 1 && r.errors[0] === "frame failure fixture" && r.visible && r.message.includes("hit a problem"), JSON.stringify(r));
+} };
+scene("hub", { label: "frame failure", steps: [frameFailure] });
+// The island's cave cabinets are found by a broad pick sphere, so what counts is whether the view can actually see one.
+const hubCaveCabinets = { name: "hub cave cabinets", why: "regression: a click through the rock or hill over the cave teleported the Ooga to a cabinet and opened its game, and walking into doors still loading never went through", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, E = BL.scenes.hub.debug.arcadeEntrance, a = B.pilot.player, s = E.entries[0], at = s.slot, c = B.camera.position;
+    const take = BL.net.takeCabinet, asked = []; BL.net.takeCabinet = seat => { asked.push(seat); return Promise.resolve("fixture refused"); };
+    const stand = (x, y, z) => { c.x = x; c.y = y; c.z = z; };
+    B.advance(1 / 60, 1 / 60);
+    stand(at.x, B.island.surfaceAt(at.x, at.z) + 12, at.z);
+    E.tap(s.owner);
+    const through = asked.length;
+    stand(at.x - Math.sin(at.yaw) * 3, E.frame.floor + 1.6, at.z - Math.cos(at.yaw) * 3);
+    E.tap(s.owner);
+    const inSight = asked.length;
+    BL.net.takeCabinet = take;
+    // A walk that reaches the doors before they are ready goes on its own when they are.
+    const w = E.walk, F = E.frame, fake = { root: { position: { x: 0, y: F.floor, z: 0 }, rotation: { y: 0 } }, baseY: 0 };
+    const put = d => { const along = F.plane + d; fake.root.position.x = F.x + F.sr * along; fake.root.position.z = F.z + F.cr * along; };
+    const busy = w.state.busy, ready = w.state.ready, seen = w.state.seen, wanted = w.state.wanted;
+    w.state.busy = true; w.state.ready = false; w.state.wanted = false; w.state.seen = false;
+    put(1.1); w.update(1 / 60, fake); put(1.0); w.update(1 / 60, fake);
+    const asks = w.state.wanted;
+    Object.assign(w.state, { busy, ready, seen, wanted });
+    return { through, inSight, asks };
+  })()`);
+  record("hub cave cabinets: a click through the rock does nothing, one in sight opens the cabinet, and walking into doors still loading asks to go through", r.through === 0 && r.inSight === 1 && r.asks, JSON.stringify(r));
+} };
+scene("hub", { label: "cave cabinets", query: "solo=1&character=portlandhodl&pos=0", steps: [hubCaveCabinets] });
 scene("hub", { label: "entry failure", query: "hubcache=release", steps: [{ name: "hub entry failure", why: "regression: entry errors before or after the first yield left input held with no way to recover", run: async (b) => {
   await hubEntryFailure(b, "later");
   await hubEntryFailure(b, "first");
@@ -25685,6 +25776,69 @@ const voiceAloneChecks = async () => {
     is(rows.mutedAlone,true,true,false)&&is(rows.mutedWithOther,false,true,false)&&is(rows.unmutedAlone,true,false,false)&&is(rows.twoOthers,false,false,true)&&
     rows.netMuted==="false,true,false"&&rows.emitted&&!rows.stopped.alone&&!rows.stopped.muted,JSON.stringify(rows));
 };
+// A fresh fixture of voice.js for the failure paths: whatever the SFU refuses is named in `failing`, and timers are held.
+const voiceFailureChecks = async () => {
+  const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8");
+  const page=(joined=false,AudioContext=undefined)=>{
+    const timers=[],calls=[],failing=new Set(),holds=new Map();let holdLeave=null;
+    const track={enabled:true,stopped:false,stop(){this.stopped=true;}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
+    class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0"};}addTransceiver(){return {mid:"0"};}getTransceivers(){return [];}addEventListener(){}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}close(){this.connectionState="closed";}}
+    class Audio {pause(){}play(){return Promise.resolve();}}
+    const fetch=async(url,o)=>{const op=url.split("/").pop();calls.push(op);if(op==="leave"&&holdLeave)await holdLeave;if(holds.has(op))await holds.get(op);return failing.has(op)?{ok:false,status:503,json:async()=>({error:"sfu"})}:{ok:true,status:200,json:async()=>({tracks:[],sessionDescription:{}})};};
+    const context={window:{BL:{net:{state:{connectionToken:"synthetic",me:{id:900,login:"listener"},zone:"outside",self:{x:0,y:0,z:0,zone:"outside"},blendTo:null,blendT:0},setMuted(){},remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{}},voiceBlend:{}},setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout(){},setInterval:()=>1,clearInterval(){},addEventListener(){},removeEventListener(){},AudioContext},document:{createElement:()=>({volume:1})},navigator:{userActivation:{hasBeenActive:true},mediaDevices:{getUserMedia:async()=>stream}},localStorage:{getItem:k=>joined&&k.includes("voice-joined")?"1":null,setItem(){},removeItem(){}},fetch,RTCPeerConnection:Pc,MediaStream:class {},Audio,AudioContext,AbortController,console};
+    context.window.navigator=context.navigator;context.window.document=context.document;context.window.localStorage=context.localStorage;
+    runInNewContext(source,context);
+    return {V:context.window.BL.voice,timers,calls,failing,holds,track,hold:p=>{holdLeave=p;}};
+  };
+  const settle=async()=>{for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r));};
+  // The retry's new receive session is refused, so there is no receiver at all: the next change must open one, or say so.
+  const dead=page();
+  await dead.V.listen();await settle();
+  dead.failing.add("pull");dead.V.setPeers([2],[1]);await settle();
+  dead.failing.clear();dead.failing.add("session");dead.timers.filter(t=>t.ms===2000).at(-1).fn();await settle();
+  const told=dead.V.stats.error;
+  dead.failing.clear();dead.calls.length=0;dead.V.setPeers([2,3],[1,1]);await settle();
+  record("voice recovery: a retry refused a receive session says so, and the next room change opens one rather than hearing nobody",told==="voice unavailable"&&dead.calls[0]==="session"&&dead.calls.includes("pull"),JSON.stringify({told,calls:dead.calls}));
+  // The same network blip fails the connection and reconnects the room: a speaker stays a speaker.
+  const speaker=page(true);
+  await speaker.V.enable();await settle();
+  let release;speaker.hold(new Promise(r=>{release=r;}));
+  speaker.V.restart();await settle();
+  speaker.V.restart(true);await settle();
+  speaker.hold(null);release();await settle();
+  const after={publishing:speaker.V.stats.publishing,muted:speaker.V.stats.muted,returning:speaker.V.stats.returning,mic:!speaker.track.stopped};
+  record("voice recovery: a room welcome during a connection restart leaves a speaker publishing and unmuted",after.publishing&&!after.muted&&!after.returning,JSON.stringify(after));
+  // Someone who leaves while a pull is on its way is no failed pull: every other voice this listener hears stays put.
+  const racer=page();
+  await racer.V.listen();await settle();
+  let go;racer.holds.set("pull",new Promise(r=>{go=r;}));
+  racer.V.setPeers([2],[1]);await settle();
+  racer.V.setPeers([],[]);racer.holds.delete("pull");go();await settle();
+  record("voice recovery: a speaker who left during a pull does not fail the change or cost the listener its receiver",!racer.timers.some(t=>t.ms===2000)&&racer.V.stats.error==="",JSON.stringify({error:racer.V.stats.error,retries:racer.timers.filter(t=>t.ms===2000).length}));
+  // A network blip can take the first call of a restart too: the speaker comes back, not out of voice.
+  const blip=page();
+  await blip.V.enable();await settle();
+  blip.failing.add("session");blip.V.restart();await settle();
+  const waiting=blip.timers.filter(t=>t.ms===3000).at(-1);
+  blip.failing.clear();if(waiting)waiting.fn();await settle();
+  record("voice recovery: a restart whose first calls fail tries again and the speaker is back",!!waiting&&blip.V.stats.publishing&&!blip.V.stats.muted&&blip.V.stats.micError==="",JSON.stringify({waited:!!waiting,publishing:blip.V.stats.publishing,micError:blip.V.stats.micError}));
+  // A microphone that goes away ends its track with no error anywhere: the speaker comes back on the device that is left.
+  const unplugged=page();
+  await unplugged.V.enable();await settle();
+  unplugged.calls.length=0;unplugged.track.onended();await settle();
+  // The leaving cues: nothing for someone not in voice, straight to the output for someone who is, and gone with the context.
+  const nodes={gains:0,oscs:[],out:[]};
+  class Audio2 {constructor(){this.state="running";this.currentTime=5;this.destination={};}addEventListener(){}resume(){return Promise.resolve();}close(){return Promise.resolve();}
+    createGain(){nodes.gains++;const param={value:0,cancelScheduledValues(){},setValueAtTime(){},linearRampToValueAtTime(){}};return {gain:param,connect:to=>nodes.out.push(to===this.destination)};}
+    createOscillator(){const notes=[];nodes.oscs.push(notes);return {frequency:{setValueAtTime:hz=>notes.push(Math.round(hz))},connect(){},start(){}};}}
+  const cues=page(false,Audio2);
+  const silent=[cues.V.hangUp(),nodes.gains];
+  await cues.V.listen();await settle();
+  cues.V.warnLeaving(0);const first=nodes.oscs[0].length;cues.V.warnLeaving(1);const hang=cues.V.hangUp(),notes=nodes.oscs[0].slice();
+  cues.V.stop();
+  record("voice cues: only someone in voice hears them, straight to the output on one voice, and the hang-up says how long it plays",silent.join()==="0,0"&&nodes.gains===1&&nodes.out.join()==="true"&&first===2&&notes.length===8&&notes[7]<notes[5]&&notes[5]<notes[4]+1&&hang>600&&cues.V.hangUp()===0,JSON.stringify({silent,first,notes,hang,gains:nodes.gains}));
+  record("voice recovery: a microphone that ends brings the speaker back, publishing",unplugged.V.stats.publishing&&unplugged.calls.includes("publish"),JSON.stringify({calls:unplugged.calls,publishing:unplugged.V.stats.publishing}));
+};
 // Someone who pressed Join voice comes back in voice, muted, on their first press, with the microphone never touched
 // until they unmute; only Leave voice ends that. voice.js runs per "page" over one shared localStorage.
 const voiceReturnChecks = async () => {
@@ -27019,13 +27173,54 @@ const menuShellChecks = BL => {
 // net.js in a sandbox: a canned /api/me and fake sockets that record what the page sends.
 const netFixture=(BL,response,step=200,cookie="")=>{
   const source=readFileSync(join(root,"src/js/net.js"),"utf8");
-  const sockets=[],sent=[],events=new Map(),navigations=[];let calls=0,tick=1000,savedViews=0;
-  class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"?JSON.parse(v):v);}close(){this.readyState=3;}}
-  const voice={setPeers:()=>{},restart:()=>{},stop:()=>{}};
+  const sockets=[],sent=[],events=new Map(),navigations=[],timers=[],intervals=[];let calls=0,tick=1000,savedViews=0;
+  class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"&&v!=="ping"?JSON.parse(v):v);}close(){this.readyState=3;}}
+  const voice={setPeers:()=>{},restart:()=>{},stop:()=>{},warnings:[],hangUps:0,playing:0,warnLeaving(stage){this.warnings.push(stage);},hangUp(){this.hangUps++;return this.playing;}};
   const location={protocol:"https:",host:"fixture.invalid",pathname:"/",search:"",assign:url=>navigations.push(url)},pilot={saveLoginView(){savedViews++;}};
-  const context={window:{BL:{characters:BL.characters,accountIdentities:BL.accountIdentities,contributors:BL.contributors,donations:BL.donations,chatPolicy:BL.chatPolicy,reactionPolicy:BL.reactionPolicy,arcadeCabinets:BL.arcadeCabinets,chalkBoard:BL.chalkBoard,voiceBlend:BL.voiceBlend,voice,pilot},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,cookie,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams};
+  const context={window:{BL:{characters:BL.characters,accountIdentities:BL.accountIdentities,contributors:BL.contributors,donations:BL.donations,chatPolicy:BL.chatPolicy,reactionPolicy:BL.reactionPolicy,arcadeCabinets:BL.arcadeCabinets,chalkBoard:BL.chalkBoard,voiceBlend:BL.voiceBlend,voice,pilot},setTimeout:(fn,ms)=>{timers.push({fn,ms});return 1;},clearTimeout(){},setInterval:(fn,ms)=>{intervals.push({fn,ms});return 1;},clearInterval(){}},document:{hidden:false,cookie,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams};
   runInNewContext(source,context);
-  return {net:context.window.BL.net,document:context.document,voice,sockets,sent,events,location,navigations,advance(ms){tick+=ms;},get calls(){return calls;},get savedViews(){return savedViews;}};
+  return {net:context.window.BL.net,document:context.document,voice,sockets,sent,events,location,navigations,timers,intervals,advance(ms){tick+=ms;},get calls(){return calls;},get savedViews(){return savedViews;}};
+};
+const roomSocketChecks = async BL => {
+  const reply = () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "YellowBrokeIt", display: "Yellow" } }) });
+  const f = netFixture(BL, reply);
+  await f.net.start();
+  const ws = f.sockets[0], intervals = f.intervals, timers = f.timers;
+  ws.onopen();
+  const tick = intervals.at(-1).fn;
+  tick(); tick(); ws.onmessage({ data: "pong" }); tick(); tick(); tick();
+  const heard = ws.readyState === 1 && f.sockets.length === 1;
+  tick();
+  record("room socket: pings that go unanswered end a half-open socket, and any answer resets the count", heard && ws.readyState === 3 && f.net.state.room === "connecting" && timers.length > 0, JSON.stringify({ ready: ws.readyState, room: f.net.state.room }));
+  // Fires the timers a hidden tab has armed, in order, as the clock reaches each.
+  const run = (f, marks) => { for (let i = 0; i < 12; i++) { const t = f.timers.find(t => !t.ran && marks.includes(t.ms)); if (!t) break; t.ran = true; t.fn(); } };
+  const hidden = netFixture(BL, reply);
+  hidden.document.hidden = true;
+  await hidden.net.start();
+  hidden.sockets[0].onopen();
+  const delays = () => hidden.timers.map(t => t.ms).filter(ms => ms === 270000 || ms === 15000);
+  run(hidden, [270000, 15000]);
+  record("room socket: a tab opened hidden leaves the room after its five minutes like any other", hidden.sockets[0].readyState === 3 && hidden.net.state.room === "paused", JSON.stringify({ room: hidden.net.state.room, delays: delays() }));
+  record("hidden tab: the warnings come at 4:30 and 4:45 and the hang-up at five minutes", delays().join() === "270000,15000,15000" && hidden.voice.warnings.join() === "0,1" && hidden.voice.hangUps === 1, JSON.stringify({ delays: delays(), warnings: hidden.voice.warnings, hangUps: hidden.voice.hangUps }));
+  // In voice the hang-up plays out first, and leaves the room only when it is over.
+  const speaking = netFixture(BL, reply);
+  speaking.voice.playing = 700;
+  speaking.document.hidden = true;
+  await speaking.net.start();
+  speaking.sockets[0].onopen();
+  run(speaking, [270000, 15000]);
+  const before = speaking.net.state.room, last = speaking.timers.at(-1);
+  last.fn();
+  record("hidden tab: the room is left only once the hang-up has played", before !== "paused" && last.ms === 700 && speaking.net.state.room === "paused", JSON.stringify({ before, last: last.ms, room: speaking.net.state.room }));
+  // Back on the tab in time, nothing more is heard and the visitor stays in the room.
+  const back = netFixture(BL, reply);
+  back.document.hidden = true;
+  await back.net.start();
+  back.sockets[0].onopen();
+  run(back, [270000]);
+  back.document.hidden = false; back.events.get("visibilitychange")();
+  run(back, [15000]);
+  record("hidden tab: coming back after a warning stops the rest and keeps the room", back.voice.warnings.join() === "0" && back.voice.hangUps === 0 && back.sockets[0].readyState === 1, JSON.stringify({ warnings: back.voice.warnings, hangUps: back.voice.hangUps }));
 };
 const cabinetNetworkChecks = async BL => {
   const C = BL.arcadeCabinets;
@@ -30189,6 +30384,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   if(ARGS.includes("stackchain-unit")){stackchainChecks(BL);menuShellChecks(BL);return;}
   if(ARGS.includes("dsb-menus-unit")){stackchainChecks(BL);memeFactoryChecks(BL);menuShellChecks(BL);maxisChecks(BL);rulersChecks(BL);inkChecks(BL);bigBitcoinChecks(BL);return;}
   await cabinetNetworkChecks(BL);
+  await roomSocketChecks(BL);
   await chatNetChecks(BL);
   await chatClientChecks();
   await privatePadChecks();
@@ -30204,6 +30400,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   walletShareChecks(BL);
   footstepChecks(BL);
   await voiceAloneChecks();
+  await voiceFailureChecks();
   await voiceReturnChecks();
   await voiceHearingChecks();
   await ghostAudioChecks();
@@ -30349,7 +30546,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
   await cloudHopperFailureChecks(BL);
-  await deferredLoadingChecks(); await doorReadyChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await mirrorRippleChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await hammockChecks(); await poolLayoutChecks(); await gameRulesChecks(); await highscoreClientChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
+  await deferredLoadingChecks(); await doorReadyChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await mirrorRippleChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await hammockChecks(); await poolLayoutChecks(); await gameRulesChecks(); await highscoreClientChecks(); await ghostHuntChecks(); await donationClientChecks(); await donationResumeCheck(); await poolWildlifeChecks(); await totemFeedChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
