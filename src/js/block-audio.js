@@ -139,8 +139,11 @@
       rescue: () => chord([0, 4, 7], 0.06, "triangle", 0.06, 0.18),
       drop: (k = 1) => blip("triangle", NOTE(7), NOTE(-5), 0.01, 0.05, 0.3, 0.2 * k),
       pass: (k = 1) => blip("sine", 300, 700, 0.02, 0.1, 0.2, 0.16 * k),
-      capture: () => { chord([0, 4, 7, 12], 0.12, "square", 0.1, 0.2); blip("sawtooth", NOTE(12), NOTE(12), 0.01, 0.5, 0.4, 0.15, 0.5); },
-      theirCapture: () => chord([7, 3, 0, -5], 0.13, "triangle", 0.1, 0.18),
+      // Landing in the viewing chairs: two soft high sine notes, nothing like a capture.
+      seat: () => { blip("sine", NOTE(19), NOTE(24), 0.02, 0.1, 0.35, 0.1); blip("sine", NOTE(24), NOTE(24), 0.02, 0.06, 0.4, 0.07, 0.12); },
+      // A block mined: three warm low triangle notes rising, short and soft, with no high edge or tail.
+      capture: () => { blip("triangle", NOTE(3), NOTE(3), 0.01, 0.07, 0.12, 0.16); blip("triangle", NOTE(7), NOTE(7), 0.01, 0.07, 0.12, 0.16, 0.09); blip("triangle", NOTE(12), NOTE(12), 0.01, 0.1, 0.18, 0.18, 0.18); },
+      theirCapture: () => chord([5, 2, -2], 0.09, "triangle", 0.07, 0.15),
       win: () => { chord([0, 4, 7, 12, 16, 19, 24], 0.1, "square", 0.08, 0.18); boomNoise(0.4, 1.4); },
       lose: () => blip("sine", NOTE(0), NOTE(-24), 0.02, 0.4, 0.9, 0.22),
       trap: () => { for (let i = 0; i < 6; i++) blip("triangle", NOTE(i % 2 ? 7 : 12), NOTE(i % 2 ? 7 : 12), 0.005, 0.04, 0.03, 0.16, i * 0.07); },
