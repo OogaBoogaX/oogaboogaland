@@ -3,10 +3,8 @@
   "use strict";
   const BL = globalThis.BL = globalThis.BL || {};
   const ids = ["cloud-hopper", "drop", "orbit", "mine", "invaders", "stampede", "pong", "snake", "flap", "breaker", "dash", "stacker"];
-  // The stage's arc holds five slots (`arcadeModels.CABINETS`): these four and Block Frenzy's, the fifth, which plays
-  // solo and takes no seat. Its step closes up so the outer cabinets stay on the stage.
   const entries = ids.map((id, i) => {
-    const a = (i - 2) * 0.22, turn = i < 4 ? -a : 0;
+    const a = (i - 1.5) * 0.265, turn = i < 4 ? -a : 0;
     const x = i < 4 ? 8 * Math.sin(a) : (i - 7.5) * 1.5;
     const z = i < 4 ? -0.2 - 8 * Math.cos(a) : -23.15;
     return Object.freeze({ id, x: x + Math.sin(turn) * 1.25, y: i < 4 ? 0.36 : 3.2,

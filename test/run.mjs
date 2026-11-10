@@ -8093,7 +8093,7 @@ const gameRulesChecks = async () => {
     // The jackpot wheel, from arcade-models.js and its scene half on the builders they load with: the house wins slowly, and every
     // wedge, from a turn at rest and one far round after many spins, stops under the clapper wherever in it the spin
     // aims, after its whole turns and less than one more.
-    for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "hockey-wire", "arcade-models", "haunt-models", "arcade-scene-models"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+    for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "hockey-wire", "arcade-models", "haunt-models", "arcade-scene-models", "zipline-models", "zipline"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
     runInNewContext(await readFile(new URL("../src/js/arcade-games.js", import.meta.url), "utf8"), context);
     // Solo smash assistance must never send an out-of-bounds authoritative frame at a rail.
     const soloAim={x:1}, solo=BL.arcadeGames.airHockey({node:BL.scene.createNode(),aim:soloAim,onEnd(){},burst(){}});
@@ -8183,20 +8183,50 @@ const gameRulesChecks = async () => {
     record("arcade scores: every carnival and retro machine carries its own permanent registered ID, including duplicates; excluded worlds have no score contract",
       Object.keys(machines).length === 16 && ids.length === 26 && new Set(ids).size === 26 && registered
         && L.frames.hockey.length === 3 && ["ghost", "poker", "dsb", "hockey"].every(id => BL.highscoreRules.get(id) === null), JSON.stringify({ registered, machines: ids }));
-    // Block Frenzy adds a fifth stage slot, so nothing on the mezzanine may shift: each retro cabinet still plays its
-    // own retro game under that game's registered ID, in order after the stage's slots; every cabinet game is on
-    // exactly one cabinet (Rally on its service cabinet by the retro row, Cloud Hopper in Rally's old stage slot); a
-    // cabinet's machine ID, where it has one, is its own game's; and Block Frenzy, outside the shared registry, has none.
+    // Block Frenzy left the stage for its hall: the stage is back to rock's four cabinets on rock's arc and anchors, and
+    // Block Frenzy has no cabinet at all.
     const cabs = A.CABINETS, retroRows = cabs.filter(c => c.retro >= 0), stage = cabs.filter(c => c.retro < 0 && !c.service), first = retroRows[0].index;
     const retroOwn = retroRows.length === A.RETRO.length && first === stage.length && retroRows.every((c, k) => c.index === first + k && c.retro === k
       && c.game === -1 && c.scoreId === A.RETRO[k].scoreId && BL.highscoreRules.games[A.RETRO[k].id].machines.includes(c.scoreId));
     const gameOwn = A.GAMES.every((g, k) => cabs.filter(c => c.game === k).length === 1) && cabs.every(c => c.retro >= 0 || A.GAMES[c.game]);
-    const idsOwn = cabs.every(c => c.retro >= 0 || c.scoreId === null || (c.scoreId === A.GAMES[c.game].scoreId && BL.highscoreRules.get(A.GAMES[c.game].id) !== null));
     const byId = (id) => cabs.find(c => c.game === A.GAMES.findIndex(g => g.id === id));
-    const placed = stage.length === 5 && byId("cloud-hopper") === cabs[0] && byId("block") === stage[4] && byId("race").service && byId("race").z === retroRows[0].z
-      && byId("block").scoreId === null && BL.highscoreRules.get("block") === null;
-    record("arcade cabinets: Block Frenzy's stage slot leaves every retro cabinet on its own game and score ID, and every cabinet game stands on one cabinet with its own ID or none",
-      retroOwn && gameOwn && idsOwn && placed, JSON.stringify(cabs.map(c => [c.index, c.game, c.retro, c.scoreId, !!c.service])));
+    const cabinetsWorld = {};
+    runInNewContext(readFileSync(new URL("../src/js/arcade-cabinets.js", import.meta.url), "utf8"), cabinetsWorld);
+    const anchors = cabinetsWorld.BL.arcadeCabinets.entries.slice(0, 4).map((e, i) => { const a = (i - 1.5) * 0.265, turn = -a; return Math.abs(e.x - (8 * Math.sin(a) + Math.sin(turn) * 1.25)) < 1e-9 && e.y === 0.36; });
+    const placed = stage.length === 4 && !A.GAMES.some(g => g.id === "block") && byId("cloud-hopper") === cabs[0] && byId("race").service && byId("race").z === retroRows[0].z && anchors.every(Boolean);
+    record("arcade cabinets: the stage is back to four cabinets on rock's arc and anchors, every retro cabinet keeps its own game and ID, and Block Frenzy has no cabinet",
+      retroOwn && gameOwn && placed, JSON.stringify({ stage: stage.length, anchors, games: A.GAMES.map(g => g.id) }));
+    // The entry hall: the mouth clear of the back wall's paintings and the deck's fire bowls, the passage level with the
+    // deck, reaching the ledge; the Rally poster beside the mouth and off it; Ghost Hunter's hall exactly where it was.
+    const H = A.BLOCK_HALL, rallyPosters = L.posters.filter(p => p[4] === 0), beside = rallyPosters.find(p => p[2] === A.HALL.back + 0.1);
+    record("arcade block hall: a walkable passage from the deck to the cliff ledge, the Rally poster moved just beside the mouth, Ghost Hunter's hall untouched",
+      H.y === A.MEZZ.y && H.x0 >= 8 && H.x1 <= 12 && H.z0 < A.HALL.back && H.ledge < H.z0 && H.h === A.HAUNT.h && H.x1 - H.x0 === A.HAUNT.z1 - A.HAUNT.z0 && A.HALL.back - H.z0 === A.HAUNT.end - A.HALL.halfW
+      && !!beside && beside[0] > H.x1 && beside[0] < H.x1 + 1.5 && beside[1] + 0.7 < 6 && !L.posters.some(p => p[2] === A.HALL.back + 0.1 && p[0] > H.x0 && p[0] < H.x1)
+      && A.HAUNT.z0 === -22 && A.HAUNT.z1 === -18 && A.HAUNT.y === A.MEZZ.y && A.HAUNT.h === 4 && A.HAUNT.end === 34,
+      JSON.stringify({ H, posters: rallyPosters }));
+    const racked = H.racks.flatMap(([, , rows]) => rows.map(([id]) => id));
+    record("arcade block hall: three racks hold the game's nine weapons, each from its own held model",
+      racked.length === 9 && racked.filter(Number.isInteger).every((i, k) => i === k) && racked.includes("hook") && racked.includes("wallet") && H.pictures.length === 4, JSON.stringify(racked));
+    // The zipline off the ledge: the survey over the scene's world, ledge to island, is clean and the ride ends on the island's top.
+    const Z = BL.zipline, far = (z) => z <= H.stop.z + 1;
+    const q = { support: (x, z) => far(z) ? H.cloudY : z >= H.ledge - 0.5 ? H.y : NaN, clear: () => true, landable: (x, y, z) => far(z) };
+    const plan = Z.layout("arcade", { x: H.top.x, y: H.y, z: H.top.z }, H.stop.x, H.stop.z, H.sag, { bottomGap: 1, bottomGround: () => H.cloudY }), run = Z.survey(plan.line, plan.grabS, q);
+    const arcadeSource = readFileSync(new URL("../src/js/scene-arcade.js", import.meta.url), "utf8");
+    // A hosted page carries a deferred group only once it is fetched; the source tree and portable page always have it, so only this reads the difference.
+    {
+      const source = (f) => readFileSync(new URL("../src/js/" + f, import.meta.url), "utf8"), page = readFileSync(new URL("../src/index.html", import.meta.url), "utf8");
+      const tags = [...page.matchAll(/<script src="js\/([\w.-]+\.js)"(?: data-defer="([\w-]+)")?><\/script>/g)], groupOf = new Map(tags.map(([, f, g]) => [f, g || ""])), owners = new Map();
+      for (const [f, g] of groupOf) if (g) for (const [, name] of source(f).matchAll(/BL\.(\w+)\s*=(?!=)/g)) if (!owners.has(name)) owners.set(name, g);
+      for (const [f, g] of groupOf) if (!g && !f.endsWith(".gen.js")) for (const [, name] of source(f).matchAll(/BL\.(\w+)\s*=(?!=)/g)) owners.delete(name);
+      // Each of these is read only on a path that has loaded its group: the viewing chairs, and a line laid in DSB Land.
+      const loaded = { "scene-block.js": ["blockViewer"], "zipline.js": ["dsbCoast"] };
+      const stray = [...groupOf.keys()].filter(f => /^(block-|scene-block|zipline|arcade-scene-models)/.test(f)).flatMap(f => [...new Set([...source(f).matchAll(/BL\.(\w+)/g)].map(m => m[1]))]
+        .filter(n => owners.has(n) && owners.get(n) !== groupOf.get(f) && !(loaded[f] || []).includes(n)).map(n => f + ": " + n));
+      record("arcade block hall: the hall and Block Frenzy read no deferred group's code a hosted page hasn't fetched", stray.length === 0 && /BL\.blockModels = \{ hookHead, rope,/.test(source("block-models.js")), JSON.stringify(stray));
+    }
+    record("arcade block hall: the zipline runs clear from the ledge into the clouds and hands off to Block Frenzy's start before its end",
+      run.ok && H.fade > H.stop.z && H.fade < H.ledge && !A.BLOCK_HALL.island && plan.stand.z < H.z0 && plan.stand.z > H.ledge
+      && /open\("block", "zipline"\)/.test(arcadeSource) && arcadeSource.includes('fromBlockHall = ctx.from === "block"'), JSON.stringify({ ok: run.ok, landing: run.landing, blocked: run.blocked }));
     {
       // The handrail slide: Space offers it only at a stair's head, inside the stair beside its hall-side handrail and
       // facing down it, never anywhere along the deck's rail between the stairs' heads; a slide runs the cane from
@@ -11829,7 +11859,7 @@ const blockWalk = { name: "block walk", why: "rule: W A S D move the visitor's O
   const rows = {};
   for (const k of "wsadqe") {
     // The map's own gorillas, trap and peels stand round this spot: they would drag or trip the Ooga being measured.
-    await b.evaluate(`(() => { const B = window.__ooga, s = B.block.sim, a = s.actors[0]; s.prep = 0; Object.assign(s.weather, { left: 1e9 }); a.x = -14; a.z = 2; a.vx = a.vz = 0; for (const o of s.actors) if (o.id) { o.x = 20; o.z = o.team === s.team ? 30 : -30; } for (const g of s.gorillas) { g.x = g.wx = g.hx = 34; g.z = g.wz = g.hz = 34; g.holding = -1; } for (const h of [...s.peels, ...s.traps]) { h.walkX ??= h.x; h.walkZ ??= h.z; h.x = h.z = 999; } B.advance(0.6, 1 / 60); const c = B.camera, vx = c.target.x - c.position.x, vz = c.target.z - c.position.z, l = Math.hypot(vx, vz); window.__walk = { fx: vx / l, fz: vz / l, x0: a.x, z0: a.z }; })()`);
+    await b.evaluate(`(() => { const B = window.__ooga, s = B.block.sim, a = s.actors[0]; s.prep = 0; a.flight = 0; a.y = 0; a.vy = 0; a.grounded = true; Object.assign(s.weather, { left: 1e9 }); a.x = -14; a.z = 2; a.vx = a.vz = 0; for (const o of s.actors) if (o.id) { o.x = 20; o.z = o.team === s.team ? 30 : -30; } for (const g of s.gorillas) { g.x = g.wx = g.hx = 34; g.z = g.wz = g.hz = 34; g.holding = -1; } for (const h of [...s.peels, ...s.traps]) { h.walkX ??= h.x; h.walkZ ??= h.z; h.x = h.z = 999; } B.advance(0.6, 1 / 60); const c = B.camera, vx = c.target.x - c.position.x, vz = c.target.z - c.position.z, l = Math.hypot(vx, vz); window.__walk = { fx: vx / l, fz: vz / l, x0: a.x, z0: a.z }; })()`);
     await holdKey(b, k, 0.5);
     rows[k] = await b.evaluate(`(() => { const q = window.__walk, a = window.__ooga.block.sim.actors[0], c = window.__ooga.camera, dx = a.x - q.x0, dz = a.z - q.z0, vx = c.target.x - c.position.x, vz = c.target.z - c.position.z, l = Math.hypot(vx, vz); return { fwd: +(dx * q.fx + dz * q.fz).toFixed(2), side: +(dx * -q.fz + dz * q.fx).toFixed(2), turn: +((vx / l) * -q.fz + (vz / l) * q.fx).toFixed(2) }; })()`);
   }
@@ -11858,6 +11888,7 @@ const dropStart = { name: "drop start", why: "regression: Space on the title car
   await b.key(" ");
   const closed = await st();
   await b.key("Enter");
+  await b.evaluate(`(() => { const a = window.__ooga.block.sim.actors[0]; a.flight = 0; a.y = 0; a.vy = 0; a.grounded = true; })()`);
   const climb = await st();
   const mark = await b.evaluate(`(() => { const B = window.__ooga; let t = 0; for (; t < 60 && !B.drop.jumpOpen; t += 0.25) B.advance(0.25, 1 / 60); return t; })()`);
   await b.key(" ");
@@ -18852,6 +18883,16 @@ const arcadeHandrail = { name: "arcade handrail slide", why: "playthrough: Space
       && !off.seated && !off.sliding && off.feet > 0.5 && Math.abs(off.feet - off.ground) < 0.01 && off.walkable
       && deck.every(d => !d.hint.includes("slide") && !d.seated), JSON.stringify({ rows, off, deck }));
 } };
+const arcadeBlockHall = { name: "arcade block hall", why: "rule: an Ooga walks the hall from the deck to the cliff ledge and only there is offered the zipline", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, A = BL.arcadeModels, H = A.BLOCK_HALL, actor = B.cavemen.get('portlandhodl');
+    let ok = true, x = H.x - 0.6, z = -20;
+    while (z > H.ledge + 0.8) { const nz = z - 0.2; ok = ok && B.arcade.walkable(x, z, x, nz, H.y, actor.bodyHeight, actor) && B.arcade.supportAt(x, nz, H.y) === H.y; z = nz; }
+    const past = B.arcade.walkable(x, H.ledge + 0.5, x, H.ledge - 0.6, H.y, actor.bodyHeight, actor);
+    return { ok, z, past, wall: B.arcade.walkable(H.x0 - 0.3, -28, H.x0 - 0.3, -28.2, H.y, actor.bodyHeight, actor) };
+  })()`);
+  record("arcade block hall: walkable from the deck to the ledge, held by its railing and walls", r.ok && !r.past && !r.wall, JSON.stringify(r));
+} };
 const arcadeStage = { name: "arcade stage approaches", why: "regression: oversized decorative root collision boxes blocked walking onto the central stage from its sides and back", run: async (b) => {
   const r = await b.evaluate(`(() => {
     const B = __ooga, A = B.arcade, S = BL.arcadeModels.STAGE, a = B.pilot.player, rows = [];
@@ -23306,7 +23347,7 @@ scene("arcade", { label: "cabinet public route", opts: { motion: true }, steps: 
   const cancelled = await wait(`document.body.dataset.cabinetPhase === 'idle' && document.body.dataset.activeScene === 'arcade'`);
   record("cabinet public route: direct arrival and a link from the hall both visit the cabinet, play and cancel cleanly", menu && full && returned && linked && cancelled, JSON.stringify({menu,full,returned,linked,cancelled}));
 } }] });
-scene("arcade", { query: "character=portlandhodl", exclusive: true, steps: [arcadeWalking, arcadeMachine, arcadeHall, arcadeCarry, arcadeMaintenance, arcadeStage, arcadeHandrail, arcadePlay, trip("arcade")] });
+scene("arcade", { query: "character=portlandhodl", exclusive: true, steps: [arcadeWalking, arcadeMachine, arcadeHall, arcadeCarry, arcadeMaintenance, arcadeStage, arcadeBlockHall, arcadeHandrail, arcadePlay, trip("arcade")] });
 scene("arcade", { query: "character=portlandhodl", steps: [arcadeSpectatorAmmo] });
 scene("arcade", { label: "ghost spectate follows", query: "character=portlandhodl", steps: [arcadeSpectateFollow] });
 scene("arcade", { query: "character=portlandhodl", steps: [arcadeRemoteWeapons] });
