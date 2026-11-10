@@ -6,15 +6,18 @@
 //
 // The herald loads this group when a player starts or joins (data-defer="halloween") and hands `create` one adapter
 // (`arenaHunt` in scene-arcade.js), whose hooks there are tagged HALLOWEEN, so the hunt comes out by deleting the group
-// and those lines. The rules are ghost-sim.js; the arena's host page runs them and sends the hunt to the others
-// (ghost-sync.js); a page alone runs its own. Everything this file draws is pooled and built once a visit: the
+// and those lines. The rules are ghost-sim.js; the server runs them for everyone in the arena (worker/src/games/
+// ghost-hunt.js) and this page follows it (ghost-sync.js), sending where its player stands and every round it fires,
+// which the server alone decides the hits of; a page alone (signed out, no backend) runs its own with the same rules.
+// A following page draws the hunt a little behind the server's newest (`smooth`), so what it shows is a moment the
+// server can rewind a shot to. Everything this file draws is pooled and built once a visit: the
 // herald, MAX_GHOSTS ghosts, the boss, the drops, beams, soul streams and ice; `update` and `drawOverlay` allocate
 // nothing past a cue's or a toast's string. The visitor's Ooga keeps the bar the ghosts take from: five segments, no
 // healing between hits, down under a gravestone when it empties.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { clamp, ease, fnv1a } = BL.math;
+  const { clamp, ease } = BL.math;
   const { createNode, addChild, removeChild, createCamera } = BL.scene;
   const SIM = BL.ghostSim, ST = SIM.STATE, C = SIM.CONFIG, MODELS = BL.ghostModels, TIERS = MODELS.TIERS;
   const { ACTION: PAD, state: pad } = BL.gamepad, padActions = pad.actions;
@@ -27,12 +30,15 @@
   // While a banner is up (a round coming, a round cleared, the boss, the end, a pause) the island goes darker still, to
   // `BANNER_KEEP` of the hunt's night, over `BANNER_IN_S`, and lifts again over `BANNER_OUT_S` for play.
   const BANNER_KEEP = 0.4, BANNER_IN_S = 0.6, BANNER_OUT_S = 0.9;
-  // An idle host may need the deferred loader's 20 s before it can answer a follower's first start.
+  // How long a page waits on the server's answer to its start, and how long a hunt shown goes without a word from the
+  // server before it drifts away.
   const NIGHT_FADE_MS = 6000, COOLDOWN_MS = 5000, START_WAIT_MS = 24000, LOST_HOST_MS = 6000;
+  // The herald's lap here (the rise above) is the one the rules run (ghost-sim.js `ARENA.lapMs`).
+  if (RISE_AT + RISE_MS + SETTLE_MS !== SIM.ARENA.lapMs) throw new Error("ghost-game: the herald's lap differs from ghost-sim.js ARENA.lapMs");
   const MAX_BEAMS = 8, MAX_SOULS = 6, MAX_GRAVES = C.MAX_PLAYERS;
   const BOSS_Y = C.BOSS.y;
-  // How tall each stands (m): a plain ghost, a general, a wraith; the boss and the herald.
-  const HEIGHT = [1.3, 1.3 * C.BIG * C.GENERAL, 1.3 * C.BIG], BOSS_H = 5.2, HERALD_H = 1.7;
+  // How tall each stands (m): a plain ghost, a general, a wraith and the boss, as the rules' shots meet them; the herald.
+  const HEIGHT = SIM.HIT.ghostH, BOSS_H = SIM.HIT.bossH, HERALD_H = 1.7;
   const MAX_ORBS = 8 * 5, ORB_TURN_MS = 650, ORB_R = 0.42, ORB_Y = 0.55;
   // The herald's green wisps, how many and their light.
   const HERALD_WISPS = 4, WISP = [70, 255, 114];
@@ -54,11 +60,13 @@
   const DROP_WORDS = ["Bomb! Every ghost burns", "Shield up for everyone", "Ice! The ghosts slow down", "Health banana! Everyone's bar is full", "Double points",
     "Tess joins you! She zaps any ghost that comes near", "Lightning Network! Bolts strike every enemy", "Monkeys! One at each side, shooting with you"];
   const DROP_CUES = ["boom", "shield", "ice", "health", "double", "tess", "thunder", "monkeys"];
-  // The monkeys at a player's hips: how far out to each side (m), how high on the Ooga (a fraction of its height), how
-  // tall they stand and how they bob; each shot of theirs, a rock from each aimed `MONKEY_AIM_SIDE` m to its own side
-  // of theirs, in the air as long as a banana round is (`ROCK_FLIGHT_S`, the rifle's), a rifle round's damage
-  // (`rifleDamage`), as far as `ROCK_RANGE`.
-  const MONKEY_OUT = 0.78, MONKEY_UP = 0.1, MONKEY_SIZE = 0.42, MONKEY_BOB = 0.04, MONKEY_AIM_SIDE = 1.2, ROCK_FLIGHT_S = 0.22, ROCK_RANGE = 60;
+  // The monkeys at a player's hips (where, how big and where they aim are the rules', ghost-sim.js `MONKEY`) and how
+  // they bob; each shot of theirs a rock in the air as long as a banana round is (`ROCK_FLIGHT_S`, the rifle's), a
+  // rifle round's damage (`rifleDamage`), as far as `ROCK_RANGE`.
+  const MONKEY_SIZE = SIM.MONKEY.size, MONKEY_BOB = 0.04, ROCK_FLIGHT_S = 0.22, ROCK_RANGE = SIM.HIT.range;
+  // A following page draws the hunt this far behind the server's newest motion (ms): two of its ticks and a little more,
+  // so a late frame still has one either side to ease between.
+  const INTERP_MS = 120;
   // What each rifle tier fires (ghost-sim.js `WEAPON`), for the round banner that hands it out.
   const RIFLE_WORDS = ["", "yellow laser", "green laser", "red laser"];
   // The monkeys' shots: bursts of orange laser this long, each trailing a spark or two.
@@ -249,12 +257,12 @@
     // Where ghosts come in (`hub.spots`), and the middle, where the lightning drop hangs: reached within `pileRadius` and
     // a step.
     const spots = hub.spots, PILE = { x: 0, z: 0, r: hub.pileRadius() + 0.9 };
-    const sim = SIM.create({ seed: fnv1a("ooga ghosts"), spots, lapMs, pile: PILE, elixirs: hub.elixirSpots, maxReady: MAX_READY });
+    const sim = SIM.create({ seed: SIM.ARENA.seed, spots, lapMs, pile: PILE, elixirs: hub.elixirSpots, maxReady: MAX_READY });
     const S = sim.state;
-    // The rifles' tier as the hunt stands (it grows with the rounds, red for the boss), and a round's damage at it.
+    // The rifles' tier as the hunt stands (it grows with the rounds, red for the boss), and a round's damage at it (half,
+    // at least 1, while an hourglass stands).
     const rifleTier = () => SIM.weaponTier(S.round, S.state === ST.BOSS);
-    // While an hourglass stands every rifle round does half (at least 1).
-    const rifleDamage = () => sim.halving() ? Math.max(1, Math.round(C.WEAPON.damage[rifleTier()] / 2)) : C.WEAPON.damage[rifleTier()];
+    const rifleDamage = () => sim.shotDamage();
 
     // ---------- nodes ----------
     const pool = (n, geometry, extra) => Array.from({ length: n }, () => {
@@ -311,7 +319,7 @@
     // where this page's own two stand (x, y, z each), to fire from.
     const monkeyNodes = pool(C.MAX_PLAYERS * 2, null);
     const rockNodes = pool(MAX_ROCKS, MODELS.laserBurst()), rockPath = new Float64Array(MAX_ROCKS * 6), rockAt = new Float64Array(MAX_ROCKS).fill(-1);
-    const myMonkeys = new Float64Array(6);
+    const myMonkeys = new Float64Array(6), MONKEY_AT = { x: 0, y: 0, z: 0 };
     // Each player's glow (by their slot in the hunt), and when the monkeys last came to each.
     const playerGlows = pool(C.MAX_PLAYERS, null), giftAt = new Float64Array(C.MAX_PLAYERS).fill(-1e9);
     // Whether each player held monkeys last frame, so losing them to a hit can shriek.
@@ -459,10 +467,12 @@
     let lingCried = -1e9;
     const puddleAt = new Float64Array(B.max).fill(-1e9), puddleX = new Float64Array(B.max), puddleZ = new Float64Array(B.max);
     // By kind (gorilla, skeleton, spider, hourglass), built once so drawing a brute builds nothing: each slot's bodies,
-    // and each kind's height, base health, death pixels and hit radius.
+    // and each kind's height, base health and death pixels. Each is drawn as tall as the rules' shots meet it
+    // (ghost-sim.js `HIT.bruteH`).
     const bodies = rigs.map((rig, i) => [rig.root, skels[i].root, spiders[i].root, glasses[i].root]);
     const KIND_H = [BRUTE_H, BONES_H, SPIDER_H, GLASS_H], KIND_HP = [B.hp, C.BONES.hp, C.SPIDER.hp, C.HOURGLASS.hp];
-    const KIND_PIXELS = [PIXELS.gorilla, PIXELS.skeleton, PIXELS.spider, PIXELS.hourglass], KIND_HIT = [BRUTE_H * 0.55, 0.6 * BONES_SCALE, 0.85 * SPIDER_SCALE, 0.9];
+    if (KIND_H.some((h, k) => h !== SIM.HIT.bruteH[k])) throw new Error("ghost-game: an enemy's height differs from ghost-sim.js HIT.bruteH");
+    const KIND_PIXELS = [PIXELS.gorilla, PIXELS.skeleton, PIXELS.spider, PIXELS.hourglass];
     // A brute's body as this page draws it, how tall it stands and its full health this round.
     const bodyOf = (i, b) => bodies[i][b.kind];
     const heightOf = (b) => KIND_H[b.kind];
@@ -507,27 +517,72 @@
     };
     const sync = BL.ghostSync.create({
       npcSync,
-      write: () => S.state !== ST.IDLE || clock() - idleAt < 3000 ? sim.snapshot() : null,
-      onSnapshot: (snap) => {
-        if (npcSync.role === "follow") restore(snap);
-      },
-      onMessage: (msg) => {
-        if (msg.k === "pause") togglePause();
-        else if (msg.k === "ready") sim.ready(msg.from);
-        else if (msg.k === "leave") sim.leave(msg.from);
-        else if (msg.k === "start") {
-          if (S.state === ST.IDLE && clock() - idleAt >= COOLDOWN_MS) sim.start(clock(), msg.from, SKIP);
-          else if (S.state === ST.GATHER) sim.ready(msg.from);
-        }
-        else sim.hit(msg.g, msg.d, msg.from);
-      }
+      onSnapshot: (snap) => { if (npcSync.role === "follow") restore(snap); },
+      onMotion: (frame) => { if (npcSync.role === "follow") motionIn(frame); }
     });
     let skew = 0, heardAt = 0, idleAt = -Infinity, startAskedAt = 0, prevState = ST.IDLE, lastRole = "";
-    const clock = () => net.serverNow() + skew;
-    // The hunt's own time: held where it stopped while paused (a follower's snapshots move its start on only 4 a second).
-    const huntTime = () => S.paused ? S.now : clock() - S.epoch;
+    // The clock the hunt runs on: the server's as its socket has it (the room's before it has spoken), plus the debug
+    // `simulate`'s skew.
+    const clock = () => npcSync.serverNow() + skew;
+    // The hunt's own time: held where it stopped while paused (a follower's snapshots move its start on only 4 a second),
+    // and on a following page as far behind as it draws the hunt (`lag`, `smooth`), so every animation keyed to the
+    // rules' times keeps step with the places it is drawn at.
+    let lag = 0;
+    const huntTime = () => S.paused ? S.now : clock() - S.epoch - lag;
     const togglePause = () => { if (sim.pause(!S.paused, clock())) audio.play("thump"); };
-    const myId = () => npcSync.role === "solo" ? 1 : net.state.selfId;
+    // This page's player in the hunt: its account (the server's id for it) when following, 1 when alone.
+    const myId = () => npcSync.role === "solo" ? 1 : (npcSync.link && npcSync.link.id) || net.state.selfId;
+
+    // ---------- the server's motion ----------
+    // A following page hears where every ghost, gorilla, spiderling and the boss stands each server tick (game-wire.js
+    // frames, `motionIn`) and keeps the last moments (`motionPast`, a game-timeline.js table laid out as the rules'
+    // target table: [id's low 16 bits, x, y, z, heading, flags]); each frame `smooth` writes the places as they stood
+    // `INTERP_MS` behind the newest over the sim's own, eased between ticks, so everything that reads the sim draws the
+    // hunt as it stood then, and sets `lag` so the hunt's clock does too. The state the server sends a few times a
+    // second still says what is there and what it does. Too far from what came (a gap, a new hunt), it draws the sim's
+    // own places as they come, eased (`lag` 0).
+    const MOTION_W = 6, MOTION_TYPE = [0, SIM.TARGET_BRUTES, SIM.TARGET_LINGS, SIM.TARGET_BOSS];
+    const motionPast = BL.gameTimeline.create({ slots: SIM.TARGET_SLOTS, width: MOTION_W, depth: 12, lerp: [1, 2, 3] });
+    const motionRows = new Float64Array(SIM.TARGET_SLOTS * MOTION_W), motionAt = new Float64Array(SIM.TARGET_SLOTS * MOTION_W);
+    const motionIn = (f) => {
+      motionRows.fill(0);
+      for (let i = 0; i < f.count; i++) {
+        const k = i * BL.gameWire.ROW_WIDTH, type = f.rows[k], base = MOTION_TYPE[type];
+        if (base === undefined) continue;
+        const o = (base + f.rows[k + 1]) * MOTION_W;
+        if (o >= motionRows.length || type === 3 && f.rows[k + 1]) continue;
+        motionRows[o] = f.rows[k + 2]; motionRows[o + 1] = f.rows[k + 3]; motionRows[o + 2] = f.rows[k + 4]; motionRows[o + 3] = f.rows[k + 5];
+        motionRows[o + 4] = f.rows[k + 6]; motionRows[o + 5] = 1;
+      }
+      // A hunt's time only goes forward: one going back is a new hunt (or the server picking one up again).
+      if (motionPast.count && !(f.gameMs > motionPast.newest)) motionPast.clear();
+      motionPast.push(f.gameMs, motionRows);
+      const me = myId();
+      for (let i = 0; i < f.confirms; i++) if (f.confirm[i * BL.gameWire.CONFIRM_WIDTH] === me) confirmed++;
+    };
+    const smooth = (now) => {
+      lag = 0;
+      if (S.paused || S.state === ST.IDLE || !motionPast.count) return;
+      const want = now - S.epoch - INTERP_MS;
+      if (want < motionPast.oldest - INTERP_MS || want > motionPast.newest + 4 * INTERP_MS) return;
+      motionPast.sample(want, motionAt);
+      lag = INTERP_MS;
+      const W = MOTION_W;
+      for (let i = 0; i < C.MAX_GHOSTS; i++) {
+        const g = sim.ghosts[i], o = i * W;
+        if (g.on && motionAt[o + 5] && motionAt[o] === (g.id & 0xffff)) { g.x = motionAt[o + 1]; g.y = motionAt[o + 2]; g.z = motionAt[o + 3]; }
+      }
+      for (let i = 0; i < B.max; i++) {
+        const b = sim.brutes[i], o = (SIM.TARGET_BRUTES + i) * W;
+        if (b.on && motionAt[o + 5] && motionAt[o] === (b.id & 0xffff)) { b.x = motionAt[o + 1]; b.y = motionAt[o + 2]; b.z = motionAt[o + 3]; b.heading = motionAt[o + 4]; }
+      }
+      for (let i = 0; i < C.LING.max; i++) {
+        const l = sim.lings[i], o = (SIM.TARGET_LINGS + i) * W;
+        if (l.on && motionAt[o + 5] && motionAt[o] === (l.id & 0xffff)) { l.x = motionAt[o + 1]; l.z = motionAt[o + 3]; l.heading = motionAt[o + 4]; }
+      }
+      const o = SIM.TARGET_BOSS * W;
+      if (S.bossOn && motionAt[o + 5]) { S.bossX = motionAt[o + 1]; S.bossZ = motionAt[o + 3]; }
+    };
 
     // Every hunter's rifle never runs dry; each one's own setting comes back with the dawn.
     const ammo = new Map();
@@ -655,7 +710,7 @@
       // Its "oogaa" plays as the lobby opens (`onState`), on every page.
       audio.open();
       if (npcSync.role === "follow") {
-        sync.start();
+        sync.start(SKIP);
         startAskedAt = clock();
         hub.hud.toast("The ghost stirs…");
       } else sim.start(clock(), myId(), SKIP);
@@ -680,11 +735,7 @@
     };
     const inArena = (x, y, z) => y > -1.5 && Math.hypot(x, z) <= ARENA_R;
     let localHere = false;
-    const presentRemote = (rec) => {
-      if (rec.bodyKind !== "ooga" || !inZone(rec.zone)) return;
-      const p = local(rec);
-      if (inArena(p.x, p.y, p.z)) sim.present(rec.id, p.x, p.y, p.z);
-    };
+    // A page alone presents its own player to its hunt (the server presents everyone from the poses they send).
     const gatherPlayers = () => {
       sim.beginPresence();
       const cave = crew.player;
@@ -693,7 +744,6 @@
         const p = local(cave.root.position), feet = p.y - cave.baseY;
         if (inZone(hub.zoneOf(cave)) && inArena(p.x, feet, p.z)) { sim.present(myId(), p.x, feet, p.z); localHere = true; }
       }
-      if (npcSync.role === "host") net.remotes.forEach(presentRemote);
       // The debug stand-in (Shift+E) lies where it was laid until it is brought back (and a moment more), or the round ends.
       if (bot.on && (!(S.state === ST.ACTIVE || S.state === ST.BOSS) || bot.dropAt && huntTime() >= bot.dropAt)) { bot.on = false; sim.debug.dropBot(); }
       if (bot.on) sim.present(SIM.REVIVE_BOT, bot.x, bot.y, bot.z);
@@ -1217,8 +1267,10 @@
           sample[s + 4] = (g.x - sample[s]) / gap; sample[s + 5] = (g.y - sample[s + 1]) / gap; sample[s + 6] = (g.z - sample[s + 2]) / gap;
           sample[s] = g.x; sample[s + 1] = g.y; sample[s + 2] = g.z; sample[s + 3] = now;
         }
-        const ahead = Math.min(0.3, (now - sample[s + 3]) / 1000), tx = sample[s] + sample[s + 4] * ahead, ty = sample[s + 1] + sample[s + 5] * ahead, tz = sample[s + 2] + sample[s + 6] * ahead;
-        const far = Math.hypot(tx - view[v], tz - view[v + 2]) > 4;
+        // Drawn behind the server's motion (`lag`), the sim already holds the smoothed place: it is drawn there exactly,
+        // as the server rewinds a shot to it.
+        const ahead = lag ? 0 : Math.min(0.3, (now - sample[s + 3]) / 1000), tx = sample[s] + sample[s + 4] * ahead, ty = sample[s + 1] + sample[s + 5] * ahead, tz = sample[s + 2] + sample[s + 6] * ahead;
+        const far = lag || Math.hypot(tx - view[v], tz - view[v + 2]) > 4;
         view[v] += (tx - view[v]) * (far ? 1 : easeK); view[v + 1] += (ty - view[v + 1]) * (far ? 1 : easeK); view[v + 2] += (tz - view[v + 2]) * (far ? 1 : easeK);
         // Which drawing, as the lab chose it: by how it moves across the camera's view, once it moves enough.
         if (Math.hypot(sample[s + 4], sample[s + 6]) > 0.17) {
@@ -1720,7 +1772,12 @@
         // Movement arrives on 50 ms sim ticks (250 ms snapshots on followers).
         // Measure that interval, then keep the shared gait running between
         // updates instead of alternating idle frames with clipped speed spikes.
-        if (S.now !== bruteAt[i]) {
+        // Drawn behind the server's motion (`lag`), it moves every frame: its speed is how far it went, eased.
+        if (lag) {
+          const v = dt > 0 ? Math.hypot(b.x - bruteX[i], b.z - bruteZ[i]) / dt : 0;
+          bruteSpeed[i] += (Math.min(v, 2 * B.speed) - bruteSpeed[i]) * (1 - Math.exp(-8 * dt));
+          bruteX[i] = b.x; bruteZ[i] = b.z; bruteAt[i] = S.now;
+        } else if (S.now !== bruteAt[i]) {
           const elapsed = (S.now - bruteAt[i]) / 1000;
           bruteSpeed[i] = elapsed > 0 ? Math.hypot(b.x - bruteX[i], b.z - bruteZ[i]) / elapsed : 0;
           bruteX[i] = b.x; bruteZ[i] = b.z; bruteAt[i] = S.now;
@@ -1730,7 +1787,7 @@
         const target = b.target ? playerAt(b.target) : null;
         if (target && b.phase === BP.RECOVER) heading = Math.atan2(target.x - b.x, target.z - b.z);
         // Falling it stands as high as the sim has it; leaping, it arcs over the ground; otherwise it is on it.
-        const k = b.phase === BP.LEAP ? Math.min(1, since / B.leapMs) : 0;
+        const k = b.phase === BP.LEAP ? clamp(since / B.leapMs, 0, 1) : 0;
         const lift = b.phase === BP.FALL ? Math.max(0, b.y) : B.leapH * 4 * k * (1 - k);
         rig.poseManaged(dt, b.x + (Math.random() - 0.5) * shake, ground + lift + (Math.random() - 0.5) * shake, b.z + (Math.random() - 0.5) * shake,
           heading, b.phase === BP.CHASE && !zapped && !S.paused ? bruteSpeed[i] : 0, b.phase === BP.FALL || b.phase === BP.LEAP);
@@ -2108,7 +2165,8 @@
         const geometry = MODELS.monkey(view, mirror), mine = q.id === myId();
         for (let k = 0; k < 2; k++) {
           const side = k ? -1 : 1, node = monkeyNodes[n++], bob = Math.sin(now / 380 + q.id + k * 1.7) * MONKEY_BOB;
-          const x = STANDS.x + side * MONKEY_OUT * c, y = STANDS.y + MONKEY_UP * STANDS.h + bob, z = STANDS.z - side * MONKEY_OUT * s;
+          SIM.monkeyOrigin(STANDS.x, STANDS.y, STANDS.z, STANDS.yaw, STANDS.h, side, MONKEY_AT);
+          const x = MONKEY_AT.x, y = MONKEY_AT.y - MONKEY_SIZE * 0.5 + bob, z = MONKEY_AT.z;
           sprite(node, geometry, x, y, z, MONKEY_SIZE, MONKEY_SIZE, 1, false);
           face(node, MONKEY_SIZE);
           if (mine) { myMonkeys[k * 3] = x; myMonkeys[k * 3 + 1] = y + MONKEY_SIZE * 0.5; myMonkeys[k * 3 + 2] = z; }
@@ -2117,61 +2175,58 @@
       }
       for (; n < monkeyNodes.length; n++) monkeyNodes[n].visible = false;
     };
-    // The nearest ghost, gorilla or the boss along a rock's line, if any: its role, slot and where it is hit.
-    const ROCK_HIT = { role: "", slot: -1, x: 0, y: 0, z: 0 };
-    const rockHit = (x, y, z, dx, dy, dz) => {
-      let best = ROCK_RANGE;
-      ROCK_HIT.slot = -1;
-      const test = (role, slot, cx, cy, cz, r) => {
-        const ox = cx - x, oy = cy - y, oz = cz - z, along = ox * dx + oy * dy + oz * dz;
-        if (along <= 0 || along >= best) return;
-        const qx = ox - dx * along, qy = oy - dy * along, qz = oz - dz * along;
-        if (qx * qx + qy * qy + qz * qz > r * r) return;
-        best = along; ROCK_HIT.role = role; ROCK_HIT.slot = slot;
-        ROCK_HIT.x = x + dx * along; ROCK_HIT.y = y + dy * along; ROCK_HIT.z = z + dz * along;
-      };
-      for (let i = 0; i < C.MAX_GHOSTS; i++) {
-        const g = sim.ghosts[i];
-        if (!g.on || g.dying || !ghostNodes[i].visible) continue;
-        const h = HEIGHT[g.tier];
-        test("ghost", i, view[i * 4], view[i * 4 + 3] + h * 0.5, view[i * 4 + 2], h * 0.45);
+    // ---------- what a shot meets ----------
+    // Every enemy as this page shows it, as a target table (ghost-sim.js `targets`): the rules' own places, each ghost
+    // where it is drawn and only while it shows. A page alone lands what its shots meet here; a following page shows what
+    // they meet at once (`predicted`) and sends each round to the server, which rewinds to the moment this page showed
+    // (`huntTime`), decides what it met and lands it (`confirmed` counts those of this page's it took).
+    const ROWS = new Float64Array(SIM.TARGET_SLOTS * SIM.TARGET_WIDTH), MET = { slot: -1, id: 0, along: 0, x: 0, y: 0, z: 0 }, AIM = { x: 0, y: 0, z: 0 };
+    let predicted = 0, confirmed = 0;
+    const seen = () => {
+      sim.targets(ROWS);
+      for (let i = 0, o = 0; i < C.MAX_GHOSTS; i++, o += SIM.TARGET_WIDTH) {
+        if (!(ROWS[o + 5] & SIM.TARGET_OPEN)) continue;
+        if (!ghostNodes[i].visible) { ROWS[o + 5] = SIM.TARGET_ON; continue; }
+        ROWS[o + 1] = view[i * 4]; ROWS[o + 2] = view[i * 4 + 3] + HEIGHT[sim.ghosts[i].tier] * 0.5; ROWS[o + 3] = view[i * 4 + 2];
       }
-      for (let i = 0; i < B.max; i++) {
-        const b = sim.brutes[i], r = bodyOf(i, b), h = heightOf(b);
-        // A skeleton is long and low: its sphere sits a little ahead of its hips, round its chest and arms. A spider's
-        // sits over its body, a little behind its head, wide enough for its great abdomen.
-        const ahead = b.kind === 1 ? 0.25 : b.kind === 2 ? -0.15 * SPIDER_SCALE : 0, x = r.position.x + Math.sin(b.heading) * ahead, z = r.position.z + Math.cos(b.heading) * ahead;
-        if (b.on && !b.dying && r.visible) test("brute", i, x, r.position.y + h * 0.5, z, KIND_HIT[b.kind]);
-      }
-      for (let i = 0; i < C.LING.max; i++) {
-        const l = sim.lings[i], n = lingNodes[i];
-        if (l.on && !l.dying && lingOwners[i].active) test("ling", i, n.position.x, n.position.y + 0.25, n.position.z, 0.4);
-      }
-      if (bossNode.visible) test("boss", -1, S.bossX, BOSS_Y + bossSize * 0.5, S.bossZ, bossSize * 0.4);
-      return ROCK_HIT.slot >= 0 || ROCK_HIT.role === "boss" && best < ROCK_RANGE;
+      return ROWS;
     };
-    // This page's player fired from `from` toward `to`: each monkey fires a rock too, the left one toward a point to the
-    // left of theirs and the right one to the right, and whatever each meets first takes a rifle round.
-    const monkeyShot = (from, to) => {
-      if (!monkeysOn || !(S.state === ST.ACTIVE || S.state === ST.BOSS)) return;
-      let fx0 = to.x - from.x, fz0 = to.z - from.z;
-      const flat = Math.hypot(fx0, fz0) || 1;
-      fx0 /= flat; fz0 /= flat;
-      for (let k = 0; k < 2; k++) {
-        const side = k ? -1 : 1, ox = myMonkeys[k * 3], oy = myMonkeys[k * 3 + 1], oz = myMonkeys[k * 3 + 2];
-        const ax = to.x + side * fz0 * MONKEY_AIM_SIDE, ay = to.y, az = to.z - side * fx0 * MONKEY_AIM_SIDE;
-        let dx = ax - ox, dy = ay - oy, dz = az - oz;
-        const len = Math.hypot(dx, dy, dz) || 1;
-        dx /= len; dy /= len; dz /= len;
-        ROCK_HIT.role = "";
-        const struck = rockHit(ox, oy, oz, dx, dy, dz);
-        const r = rockNext, o = r * 6;
-        rockNext = (rockNext + 1) % MAX_ROCKS;
-        rockPath[o] = ox; rockPath[o + 1] = oy; rockPath[o + 2] = oz;
-        rockPath[o + 3] = struck ? ROCK_HIT.x : ax; rockPath[o + 4] = struck ? ROCK_HIT.y : ay; rockPath[o + 5] = struck ? ROCK_HIT.z : az;
-        rockAt[r] = clock() / 1000;
-        if (struck) hitAs(ROCK_HIT.role, ROCK_HIT.slot, ROCK_HIT.x, ROCK_HIT.y, ROCK_HIT.z, rifleDamage());
-      }
+    const fighting = () => S.state === ST.ACTIVE || S.state === ST.BOSS;
+    // What met a shot (`MET`, a target table's slot) landed: `hitAs` by its role and slot. Its id, -1 when nothing took it.
+    const landed = (met, damage) => {
+      const s = met.slot, role = s < SIM.TARGET_BRUTES ? "ghost" : s < SIM.TARGET_LINGS ? "brute" : s < SIM.TARGET_BOSS ? "ling" : "boss";
+      const slot = role === "ghost" ? s : role === "brute" ? s - SIM.TARGET_BRUTES : role === "ling" ? s - SIM.TARGET_LINGS : -1;
+      return hitAs(role, slot, met.x, met.y, met.z, damage);
+    };
+    // A monkey's rock (`k` 0 the one on the left, 1 the right) as this page's player fires from `from` toward `to`:
+    // aimed to its own side of theirs, drawn in the air; the id of what it met, -1 for nothing.
+    const monkeyRound = (k, from, to, rows) => {
+      const side = k ? -1 : 1, ox = myMonkeys[k * 3], oy = myMonkeys[k * 3 + 1], oz = myMonkeys[k * 3 + 2];
+      SIM.monkeyAim(from.x, from.z, to.x, to.y, to.z, side, AIM);
+      let dx = AIM.x - ox, dy = AIM.y - oy, dz = AIM.z - oz;
+      const len = Math.hypot(dx, dy, dz) || 1;
+      dx /= len; dy /= len; dz /= len;
+      const struck = SIM.resolveShot(rows, ox, oy, oz, dx, dy, dz, ROCK_RANGE, -1, 0, 0, MET);
+      const r = rockNext, o = r * 6;
+      rockNext = (rockNext + 1) % MAX_ROCKS;
+      rockPath[o] = ox; rockPath[o + 1] = oy; rockPath[o + 2] = oz;
+      rockPath[o + 3] = struck ? MET.x : AIM.x; rockPath[o + 4] = struck ? MET.y : AIM.y; rockPath[o + 5] = struck ? MET.z : AIM.z;
+      rockAt[r] = clock() / 1000;
+      return struck ? landed(MET, rifleDamage()) : -1;
+    };
+    // This page's player fired from `from` toward `to` (the round's line as the crew fired it, `to` where its round
+    // stops): the round meets the first enemy within its reach (a metre past where it stops, since a mesh and a ball
+    // differ), each monkey fires a rock too, and a following page sends the round to the server with what it saw meet.
+    const fire = (from, to) => {
+      if (!fighting()) return;
+      let dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
+      const len = Math.hypot(dx, dy, dz);
+      if (!(len > 1e-6)) return;
+      dx /= len; dy /= len; dz /= len;
+      const rows = seen();
+      const rifle = SIM.resolveShot(rows, from.x, from.y, from.z, dx, dy, dz, Math.min(ROCK_RANGE, len + 1), -1, 0, 0, MET) ? landed(MET, rifleDamage()) : -1;
+      const left = monkeysOn ? monkeyRound(0, from, to, rows) : -1, right = monkeysOn ? monkeyRound(1, from, to, rows) : -1;
+      if (npcSync.role === "follow") sync.shot(huntTime(), from.x, from.y, from.z, dx, dy, dz, len, rifle, left, right);
     };
     // The monkeys' laser bursts in the air, each along its line for as long as a banana round flies, sparks trailing.
     const drawRocks = () => {
@@ -2283,8 +2338,8 @@
     // or leaves. Nothing moves the view about on its own: with nobody left standing it holds still before this
     // player's own grave until they are back or the hunt ends.
     let specId = 0;
-    // A hunter this page can watch: someone else in the hunt, standing, and still driving an Ooga in the arena, as the
-    // host counts them present (`presentRemote`); one who lets go of theirs is passed over as one who goes down is.
+    // A hunter this page can watch: someone else in the hunt, standing, and still driving an Ooga in the arena as the
+    // room has them; one who lets go of theirs is passed over as one who goes down is.
     const watchable = (id) => {
       if (!id || id === myId() || id === SIM.REVIVE_BOT || down(id) || !sim.playerById(id)?.inGame) return false;
       const rec = net.remotes.get(id);
@@ -2580,21 +2635,28 @@
       const now = clock(), role = npcSync.role;
       PILE.r = hub.pileRadius() + 0.9;
       if (role !== "follow") {
+        lag = 0;
         if (S.state !== ST.IDLE) gatherPlayers();
         sim.advance(now);
         if (startAskedAt) startAskedAt = 0;
       } else {
+        smooth(now);
         localHere = false;
         const cave = crew.player;
-        if (S.state !== ST.IDLE && cave && !hub.gorillaActive()) { const p = local(cave.root.position); localHere = inZone(hub.zoneOf(cave)) && inArena(p.x, p.y - cave.baseY, p.z); }
-        // Just turned follower (a page come back to the island, the host elsewhere): the host's frames get a fair wait.
+        // This page's player where the server presents it from: standing in the arena (its own ground), every frame a
+        // pose might be due (ghost-sync.js sends at most ten a second, one a second while still).
+        if (cave && !hub.gorillaActive() && inZone(hub.zoneOf(cave))) {
+          const p = local(cave.root.position), feet = p.y - cave.baseY;
+          localHere = S.state !== ST.IDLE && inArena(p.x, feet, p.z);
+          sync.pose(p.x, feet, p.z, cave.root.rotation.y, cave.bodyHeight, performance.now());
+        }
+        // Just turned follower (a page come back to the arena): the server's frames get a fair wait.
         if (role !== lastRole) heardAt = now;
-        if (S.state !== ST.IDLE && now - heardAt > LOST_HOST_MS) { sim.clear(); hub.hud.toast("The ghosts drift away"); }
+        if (S.state !== ST.IDLE && now - heardAt > LOST_HOST_MS) { sim.clear(); motionPast.clear(); hub.hud.toast("The ghosts drift away"); }
         if (startAskedAt && S.state === ST.IDLE && now - startAskedAt > START_WAIT_MS) { startAskedAt = 0; hub.hud.toast("The ghost slips away"); }
         else if (startAskedAt && S.state !== ST.IDLE) startAskedAt = 0;
       }
       lastRole = role;
-      if (role === "follow") flushHits(now);
       // How much of the hunt's music and sound this page hears (`hub.hearing`, #422): all of it in the arena, a hallway
       // spectator's share by where they stand, set before this frame's cues so every one of them plays at it.
       const heard = hub.hearing ? hub.hearing() : 1;
@@ -2807,55 +2869,47 @@
         ctx2d.globalAlpha = 1;
       }
     };
-    // A follower's hits go to the host as one report a tenth of a second (`HIT_BATCH_MS`), each target's damage summed,
-    // so any mix of rifle and monkey fire, at any number of targets, stays at ten reports a second.
-    const HIT_BATCH_MS = 100, HIT_SLOTS = 16, HIT_MAX = 60;
-    const hitIds = new Float64Array(HIT_SLOTS), hitDamage = new Float64Array(HIT_SLOTS);
-    let hitCount = 0, hitSentAt = 0;
-    const flushHits = (now) => {
-      if (!hitCount || now - hitSentAt < HIT_BATCH_MS) return;
-      hitSentAt = now;
-      for (let i = 0; i < hitCount; i++) hitDamage[i] = Math.min(HIT_MAX, hitDamage[i]);
-      sync.hits(hitIds, hitDamage, hitCount);
-      hitCount = 0;
-    };
-    const queueHit = (id, damage) => {
-      for (let i = 0; i < hitCount; i++) if (hitIds[i] === id) { hitDamage[i] += damage; return; }
-      if (hitCount === HIT_SLOTS) { hitSentAt = 0; flushHits(clock()); }
-      hitIds[hitCount] = id; hitDamage[hitCount++] = damage;
-    };
-    /** A weapon landed on the herald, a ghost or the boss (the hub's weaponImpact); `shot` when a round did it. */
+    /**
+     * A weapon landed on the herald, a ghost or the boss (the hub's weaponImpact); `shot` when a round did it. A round's
+     * damage was settled as it was fired (`fire`): its meeting an enemy here only stops the round. A bash with the gun's
+     * butt lands here, and a following page sends it to the server, which finds what it met.
+     */
     const hit = (source, h, power, byPlayer, shot = false) => {
       const o = h.owner;
       if (!byPlayer) return;
       // Only a shot wakes the herald; the rest of a burst must not ready the visitor in the lobby it just opened.
       if (o.role === "herald") { if (shot && S.state === ST.IDLE) tapHerald(); return; }
-      // A rifle round hits as hard as the hunt's tier makes it; a swing or a bash as it always has.
-      const scale = shot ? rifleDamage() / C.WEAPON.damage[0] : 1, at = local(h);
-      hitAs(o.role, o.slot, at.x, at.y, at.z, Math.max(1, Math.min(20, Math.round(power * 4 * scale))));
+      if (shot || !fighting()) return;
+      const at = local(h), id = hitAs(o.role, o.slot, at.x, at.y, at.z, SIM.HIT.bash.damage);
+      if (id >= 0 && npcSync.role === "follow") sync.bash(huntTime(), id);
     };
-    /** `damage` to the ghost or gorilla in `slot`, or the boss, landing at (x, y, z), for this page's player. */
+    /**
+     * `damage` to the ghost or gorilla in `slot`, or the boss, landing at (x, y, z), for this page's player: its number,
+     * sound and flash here, and on a page alone its damage (a following page's comes from the server). Its id, -1 when it
+     * is gone or going.
+     */
     const hitAs = (role, slot, x, y, z, damage) => {
       let id;
       if (role === "boss") id = 0;
       else if (role === "ling") {
         const l = sim.lings[slot];
-        if (!l.on || l.dying) return;
+        if (!l.on || l.dying) return -1;
         id = l.id;
       } else if (role === "brute") {
         const b = sim.brutes[slot];
-        if (!b.on || b.dying) return;
+        if (!b.on || b.dying) return -1;
         id = b.id;
       } else {
         const g = sim.ghosts[slot];
-        if (!g.on || g.dying) return;
+        if (!g.on || g.dying) return -1;
         id = g.id;
         flashUntil[slot] = huntTime() + 80;
       }
       fx.damageNumber(x, y + 0.25, z, damage);
       audio.play("hit");
-      if (npcSync.role === "follow") queueHit(id, damage);
-      else sim.hit(id, damage, myId());
+      if (npcSync.role === "follow") predicted++;
+      else sim.hitBy(id, damage, myId());
+      return id;
     };
     // Debug (Shift+9): straight to a won hunt's end with this page's player and three stand-ins from the roster (Oogas
     // other than the visitor's own), with mock points and enemies, a hunt opened first if none is under way.
@@ -2876,7 +2930,8 @@
     /** The lab's debug keys, with Shift, on a `debug=1` page during a hunt; true when one was used. */
     const key = (e) => {
       if (S.state === ST.GATHER && !declined && (e.key === "r" || e.key === "R") && !e.shiftKey && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) { readyUp(); return true; }
-      // P holds the hunt still and lets it go on, for everyone in it (a follower asks the host); on a debug page only.
+      // P holds the hunt still and lets it go on, for everyone in it (a follower asks the server, which takes it only
+      // from a debug account); on a debug page only.
       if (hub.debug && (e.key === "p" || e.key === "P") && !e.shiftKey && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && S.state >= ST.LAP && S.state <= ST.BOSS) {
         if (npcSync.role === "follow") sync.pause();
         else togglePause();
@@ -2885,7 +2940,7 @@
       if (!hub.debug || !e.shiftKey || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return false;
       const what = DEBUG_KEYS[e.code];
       if (!what || S.state === ST.IDLE && what !== "results") return false;
-      if (npcSync.role === "follow") { hub.hud.toast("Ghost debug keys work on the host's page"); return true; }
+      if (npcSync.role === "follow") { hub.hud.toast("Ghost debug keys work on a page hunting alone"); return true; }
       const me = myId();
       if (what === "results") { mockResults(me); return true; }
       if (what === "drop") {
@@ -2921,10 +2976,10 @@
       }
       return true;
     };
-    /** The visitor's own rifle fired, from `from` toward `to` (the hub's shot hook): its sound, and the monkeys' rocks. */
+    /** The visitor's own rifle fired, from `from` toward `to` (the hub's shot hook): its sound, the round and the monkeys' rocks. */
     const shot = (from, to) => {
       audio.play("shot");
-      monkeyShot(inside(from, LOCAL), inside(to, LOCAL2));
+      fire(inside(from, LOCAL), inside(to, LOCAL2));
     };
     const liveGeometry = (set) => {
       for (let i = 0; i < used.length; i++) set.add(used[i]);
@@ -2956,7 +3011,9 @@
       get round() { return S.round; },
       get role() { return npcSync.role; },
       get audio() { return audio; },
-      start: () => { if (npcSync.role === "follow") sync.start(); else sim.start(clock(), myId(), SKIP); },
+      start: () => { if (npcSync.role === "follow") sync.start(SKIP); else sim.start(clock(), myId(), SKIP); },
+      /** A following page's rounds shown as landing here, and of those the server's motion has confirmed it took. */
+      get shots() { return { predicted, confirmed, lag, past: motionPast.count }; },
       /** Straight to a state by name ("BOSS", "BREAK", ...), and a round for a countdown. */
       skip: (state, round) => sim.jump(ST[state], round),
       end: () => { if (S.state !== ST.IDLE) sim.jump(ST.DAWN); },
@@ -2968,7 +3025,7 @@
     };
 
     return {
-      start: () => { if (S.state === ST.IDLE) tapHerald(); }, quit, receive: sync.receive, restore,
+      start: () => { if (S.state === ST.IDLE) tapHerald(); }, quit, restore, motionIn,
       update, drawOverlay, hit, shot, key, down, get waiting() { return spectating; }, shotGeometry: () => { const tier = rifleTier(); return tier ? MODELS.laserBolt(tier - 1) : MODELS.rock(); }, lanternsWanted, lanterns, shade, shake, unshake, dispose, liveGeometry, debug,
       get hunting() { return !off(S.state); }, get launch() { return LAUNCH; },
       get inHunt() { return !off(S.state) && !quitting && !!sim.playerById(myId())?.inGame; },

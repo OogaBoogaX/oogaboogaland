@@ -50,7 +50,7 @@
     "bifrost.chamber": "bifrost", "ember-den": "bifrost.chamber", "dsb-outside": "bifrost.chamber", "dsb-transit": "bifrost.chamber"
   };
   // A zone is whatever a page reports, so the tables are read by their own keys alone, never their prototype's.
-  const parentOf = (zone) => Object.hasOwn(PARENTS, zone) ? PARENTS[zone] : (zone.startsWith("cave-") ? ROOT : /^sphere-[1-9]$/.test(zone) ? "sphere"
+  const parentOf = (zone) => Object.hasOwn(PARENTS, zone) ? PARENTS[zone] : (zone.startsWith("cave-") ? ROOT : /^sphere-[0-9]$/.test(zone) ? "sphere"
     : zone.startsWith("dsb-") ? "dsb-outside" : zone.startsWith("scene-") && zone !== "scene-transition" ? "arcade.hall" : null);
   // Steps up to the island, or -1 for a zone with no way there.
   const depthOf = (zone) => {
