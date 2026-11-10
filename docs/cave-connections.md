@@ -1,10 +1,15 @@
 # Connecting caves and independent lands
 
-Design proposal for [#85](https://github.com/OogaBoogaX/oogaboogaland/issues/85).
-This document and its [submission template](templates/cave-connection.md) define a
-reviewable connection contract. They do not register a new cave, ship an external
-world loader, reserve a physical entrance or change the site's permissions.
-Maintainers must agree the decisions below before a connection is implemented.
+Connection contract for [#85](https://github.com/OogaBoogaX/oogaboogaland/issues/85).
+The **Caves and lands** button in ₿IFRÖST lists mainland project caves, integrated
+worlds and independent sites. `/bifrost` opens the chamber directly; the portable
+page uses `#/bifrost`. The first external entry reuses the EntropyLab site already
+linked from the lab display.
+
+The default is reversible: a source-controlled directory, separate-site travel
+without player-state transfer, and no new cave geometry or displaced mirrors.
+Use the [submission template](templates/cave-connection.md) to add a land. This
+connection layer does not implement cross-site SSO, shared voice or an economy.
 
 ## Two kinds of connection
 
@@ -21,9 +26,9 @@ repository, an IIFE, or a deferred script is not a security boundary.
 Today DSB is an integrated scene. `deferred.js` downloads same-origin scripts and
 runs them in OBL's realm. `scene-deferred.js` registers shells for several other
 scenes. These reduce initial loading; they do not sandbox a contributor's code.
-Do not migrate existing scenes as a side effect of adopting this proposal.
+Do not migrate existing scenes as a side effect of adding this connection layer.
 
-**Proposed first independent-land contract:** ordinary same-tab navigation with
+**Independent-land contract:** ordinary same-tab navigation with
 no player-state transfer. This avoids running two active worlds by default and
 needs neither an iframe nor a cross-origin message protocol. It gives up seamless
 avatar/voice continuity. If that continuity is required, agree a separate,
@@ -41,7 +46,7 @@ Current physical entries, from `src/js/caves.js` and `bifrost-models.js`:
 |---|---|
 | `c11`, 11 o'clock | EntropyLab; integrated hub work site |
 | `c10`, 10 o'clock | B.C.A.; a room within the hub |
-| `c9`, 9 o'clock | Dark, without a scene or repository; not a reservation for this proposal |
+| `c9`, 9 o'clock | Dark, without a scene or repository; not reserved by the directory |
 | `c730`, 7.25 o'clock; `c5`, 4.75 o'clock | Headquarters |
 | `c1`, 1 o'clock | OBL's Matrix mirror cave |
 | `c2`, 2 o'clock | Lightning Factory; Lightning Foundry and Banana Pay Server |
@@ -49,18 +54,17 @@ Current physical entries, from `src/js/caves.js` and `bifrost-models.js`:
 | ₿IFRÖST `dsb`, `poker` windows | Integrated DSB Land and The Ember Den |
 | ₿IFRÖST `west`, `east` windows | Mirrors; no new destination is assigned here |
 
-Proposed discovery rule: list independent lands in one accessible directory at
-₿IFRÖST before adding more geometry. Give each listing its name, repository,
-operator/site hostname, short description, status and **Visit external land**
-action. Use text as well as color for status. A dedicated cave/window is optional
-and requires a separate footprint and approach review. The directory and its
-interaction are implementation work, not present in this patch.
+Independent lands appear in the accessible **Caves and lands** directory at
+₿IFRÖST before adding more geometry. Each listing shows its name, repository,
+site hostname, description, status and **Visit external site** action. A dedicated
+cave/window is optional and requires a separate footprint and approach review.
+Listing an external site never fetches its code or builds a remote preview.
 
 For a physical entrance, the submission names its parent area and requested slot;
 maintainers assign the stable slot ID, position, facing and safe return point.
 Check walking clearance, existing NPC work lanes, camera visibility and both
 renderers. Never move another entrance or replace a mirror automatically. If no
-slot is agreed, keep the entry proposed and unlaunchable.
+slot is agreed, use the directory entry without reserving a physical slot.
 
 Keep repository identity separate from scenery: `caves.js`'s `repo` participates
 in NPC work-site logic, while `link` is only a sign's repository link. Adding an
@@ -74,10 +78,11 @@ review checklist. The land owns its source, build/run instructions, license,
 service inventory, storage/retention policy and release evidence. OBL owns the
 reviewed directory entry and mainland entrance, if one is approved.
 
-Record the exact source revision reviewed. A link to a mutable branch is not a
-release identifier. A live independent site can change after review; listing it
-means linking to an independently operated site, not certifying every later
-release. Ownership or destination-origin changes need another OBL review.
+Record source/release review in the connection PR, separately from the runtime
+link. The existing EntropyLab entry reuses a current link, not a newly audited
+release. A live independent site can change after review; listing it means linking
+to an independently operated site, not certifying its code. Ownership or
+destination-origin changes need another OBL review.
 
 An integrated scene instead follows **Adding things** and **Scenes and the
 director** in [AGENTS.md](../AGENTS.md). Keep a new scene WIP until approved. Use
@@ -115,25 +120,23 @@ limits and deletion rules. They are outside this zero-payload contract.
 
 ## 4. What OBL stores
 
-One bounded, source-controlled record per approved listing, maintained by PR.
-Use the fields in the template: schema version, stable lowercase ID, display
-name, canonical `owner/repo`, responsible public GitHub account, HTTPS entry URL,
-fixed return URL, connection kind, placement, status and reviewed source revision.
-An optional preview is a reviewed local asset, not remote executable content.
-No per-visitor record, visit history, new database or background poll is needed.
+`src/js/cave-directory.js` owns a schema-1 registry, capped at 64 external entries.
+Each entry has exactly `id`, `name`, `description`, `repository`, `url` and `status`.
+The repository names its public owner; placement is the ₿IFRÖST directory, keyed
+by the stable ID. No per-visitor record, visit history, database or poll is added.
 
-Validate records before publication: unique IDs and physical slots, bounded
-plain-text labels, exact HTTPS destinations without credentials, no dynamically
-supplied redirect target, and an existing OBL return route. Reject unknown
-schema versions or connection kinds instead of silently interpreting them.
-Store proposed entries separately from launchable entries; a metadata file by
-itself grants no runtime capability.
+`npm run build` evaluates the registry's validator before producing the page.
+It rejects unknown schemas/fields, duplicate IDs, oversized/control-character
+labels, invalid repository names, noncanonical URLs, non-HTTPS schemes,
+credentials, custom ports and query/fragment payloads. The validated registry is
+frozen. The template gives the exact shape and limits. Text is rendered through
+`textContent`, never as HTML. No external manifest is discovered or executed.
 
-Lifecycle: **proposed → enabled → unavailable or retired**. Enabling requires
-review plus implementation evidence. Unavailable/retired entries keep their
-identity and location label but disable travel and explain why. Do not redirect
-a retired ID to a different operator. Availability is a reviewed status, not a
-claim that an unpolled remote site is currently healthy.
+Statuses are **open**, **unavailable** and **retired**. The last two keep the
+listing and source link, but omit its travel action. Do not reuse a retired ID
+for a different operator. These are reviewed statuses, not claims that an
+unpolled remote site is currently healthy. Keep unapproved proposals out of the
+runtime registry. A physical entrance later needs its own reviewed assignment.
 
 ## 5. Addresses, navigation and return
 
@@ -143,23 +146,27 @@ claim that an unpolled remote site is currently healthy.
   a destination to publish. Direct entry, reload and internal Back/Forward must
   work without first visiting OBL.
 - A connection ID is an OBL catalogue key, not a new mainland route. This
-  proposal adds no `/worlds/<id>` or redirect endpoint. If aliases are wanted
+  implementation adds no `/worlds/<id>` or redirect endpoint. `/bifrost` is the
+  ordinary scene route to the directory. If aliases are wanted
   later, design and test them in `routes.js`, the router and site generator.
 - Existing OBL path routes and portable `#/<route>` routes remain unchanged.
   For example, `/entropylab` is the hub's lab view, not an external redirect.
-- The land always offers **Return to Ooga Booga Land**, using a literal approved
-  route such as `https://oogabooga.land/`. A later physical-entry PR may choose a
-  more specific existing route. Never concatenate the current location, an
-  arbitrary return parameter or an untrusted manifest value into that link.
+- A new land follows the template and offers **Return to Ooga Booga Land**, using
+  a literal approved route such as `https://oogabooga.land/`. The existing
+  EntropyLab site is not changed by this PR; its directory entry tells visitors
+  to use browser Back. A later physical-entry PR may choose a more specific
+  existing route. Never concatenate the current location, an arbitrary return
+  parameter or an untrusted manifest value into that link.
 - Travel requires a deliberate accessible action, not automatic navigation on
   collision. Display the destination before activation. A cancel leaves the
   current Ooga and input state unchanged. Keep repository browsing separate
   from visiting the land; existing repository signs open GitHub in a new tab.
 - For the default same-tab crossing, the old document must stop rendering,
   timers, voice and networking. Existing `director.js` destroys on non-persisted
-  `pagehide`, but skips destruction for the back/forward cache. Verify and, if
-  necessary, implement an explicit suspend/resume path before enabling travel.
-  Do not promise that a hidden or cached OBL page immediately stops all work.
+  `pagehide`, closing voice, networking and scene resources. A browser-cached
+  document is frozen by the browser and resumes through normal Back behavior.
+  The directory adds no alternate renderer, timer, iframe or background bridge.
+  Test real signed-in voice/device behavior separately from offline fixtures.
 - Browser Back and the visible return link are both valid. Returning establishes
   a normal OBL visit and its own authentication; it does not import remote state
   or promise to restore the exact actor pose. Destination failure leaves the
@@ -174,34 +181,35 @@ A listing and a physical sign must resolve the same reviewed record; do not keep
 two competing destination URLs. A land may link to another land, but that does
 not register the latter in OBL or give it OBL permissions.
 
-Show **Integrated**, **External**, **Unavailable** or **Proposed** in text. External
+Show **Integrated**, **External**, **Unavailable** or **Retired** in text. External
 entries name their hostname and zero-transfer boundary. Keep keyboard focus,
 touch targets, reduced motion and Canvas 2D fallbacks usable without a live 3D
 preview. No remote page, renderer, scene graph or audio runs to draw the directory.
 
-## 7. Implementation gates and evidence
+## 7. Adding and validating a connection
 
-The design covers the seven definition/template requests in #85. It is not
-runtime completion evidence. Before enabling the first independent land:
+1. Copy the [template](templates/cave-connection.md), build the independent page
+   and establish its real HTTPS destination. Document its operator, source,
+   network use and return link. A different origin owns its own data and services.
+2. In an OBL PR, add one reviewed row to `registry.entries` in
+   `src/js/cave-directory.js`. No scene, character, terrain or NPC work-site change
+   is necessary. Use the next free stable ID, not an index-based placement.
+3. Run the build and syntax checks. Under an authorized test scope, run the unit
+   lane and the focused directory checks in `test/run.mjs` (desktop and emulated
+   phone). They cover schema boundaries, modal/input handling, repeated opening,
+   scene disposal, navigation with an intercepted external fixture and Back.
+4. Check the real site's direct entry/deep links, return, failure behavior and
+   accessibility before publishing a new destination. The fixture is not a
+   certificate of the live service. Review destination or ownership changes.
+5. For an integrated scene or physical entrance, follow AGENTS.md's scene,
+   route/card, lifecycle and renderer contracts and run its applicable checks.
+   Do not confuse the zero-payload link contract with a sandboxed plugin API.
 
-1. Agree the same-tab, zero-payload boundary and directory-first placement. If
-   maintainers want seamless shared avatars/voice instead, revise the contract
-   before building a bridge.
-2. Select a real destination, verify its operator/repository, choose its location
-   and return route, and review the completed template and pinned revision.
-3. Implement the reviewed directory/entry, validation and navigation lifecycle.
-   Keep external code and requests absent until an explicit visit.
-4. With the requested test scope, verify keyboard/touch activation, cancel,
-   repeated clicks, offline destination, direct deep links, return link,
-   reload, Back/Forward (including cache restoration), voice shutdown and
-   connection cleanup. Confirm no identity/state appears in URLs or referrers,
-   and no external script executes in OBL.
-5. Record before/after boot bytes, retained memory and active client work under
-   matching conditions, plus repeated trips and real-phone evidence where
-   available. No performance saving is claimed by this documentation change.
-6. Record build/syntax and applicable suite results under AGENTS.md. Keep missing
-   browser/device or integration evidence explicit. Enabling or deploying the
-   first connection is a separate reviewed change.
+No external code, renderer or polling is added to OBL's per-frame work. The
+small directory module and styles load with the page; its DOM rows are built
+only when opened and removed with the chamber. The registry adds no network
+requests while browsing. No measured FPS, real-phone, live voice or heap saving
+is claimed. Current verification and remaining gates are recorded in the PR.
 
 Sources: [cave slots](../src/js/caves.js),
 [₿IFRÖST windows](../src/js/bifrost-models.js),

@@ -1,8 +1,9 @@
 # Cave connection submission template
 
 Copy this into the independent land's repository and replace every placeholder.
-Follow the proposed [connection contract](../cave-connections.md). This is a
-review document, not a manifest that OBL currently discovers or executes.
+Follow the [connection contract](../cave-connections.md). OBL does not discover
+or execute this file remotely: submit its reviewed entry to the registry in
+`src/js/cave-directory.js`. The build validates it and the directory renders it.
 
 ## Project
 
@@ -20,7 +21,7 @@ review document, not a manifest that OBL currently discovers or executes.
 ```text
 README.md                  Run/build, ownership, release and support instructions
 LICENSE                    Applicable source and asset licenses
-cave-connection.json        Proposed public metadata, reviewed manually
+cave-connection.json        Public connection entry to submit in an OBL PR
 public/index.html          Standalone entry; works without an OBL visit
 public/style.css           Local styling
 src/                       The land's own optional source and assets
@@ -67,36 +68,36 @@ page is only a navigation starter; it supplies no renderer, Ooga, SSO or voice.
 Use a separate origin with its own credentials and storage. Do not share OBL's
 cookie scope, Worker bindings or service-worker control.
 
-## Proposed metadata
+## Registry entry
 
 ```json
 {
-  "schema": 1,
   "id": "example-land",
   "name": "Example land",
   "description": "A short public description.",
   "repository": "OWNER/REPOSITORY",
-  "maintainer": "GITHUB-LOGIN",
-  "kind": "external",
-  "entryUrl": "https://example.invalid/",
-  "returnUrl": "https://oogabooga.land/",
-  "placement": { "parent": "bifrost", "slot": null },
-  "status": "proposed",
-  "reviewedRevision": null
+  "url": "https://example.invalid/",
+  "status": "open"
 }
 ```
 
-The example stays unlaunchable: `example.invalid` is not a real destination,
-`reviewedRevision` must become a verified full commit SHA, and `slot: null`
-reserves nothing. Proposed field limits for the eventual validator: ID 1–48
-lowercase letters/digits/hyphens, name 1–64 characters, description 1–240,
-repository in GitHub `owner/repo` form, maintainer a public GitHub login, and URLs
-at most 2048 characters. Accept HTTPS only, with no credentials or arbitrary
-query/fragment payload; host and path changes require review. External entries
-have `kind: "external"`; integrated scenes continue through the existing scene
-registration process rather than this external record. Unknown fields/versions
-must be reviewed before enabling. Do not include personal contact details,
-visitor identifiers, API keys, deployment secrets or mutable remote scripts.
+Replace the placeholder hostname before submitting. Add the approved object to
+`registry.entries` in `src/js/cave-directory.js`; the enclosing registry already
+has `schema: 1`. This puts the land in the ₿IFRÖST directory at the stable ID
+without allocating a physical cave or changing NPC work. The field names must
+match exactly. No remote manifest fetch or runtime registration call is needed.
+
+The build accepts at most 64 entries. IDs have 1–48 lowercase letters/digits
+separated by single hyphens; names 1–64 characters; descriptions 1–240; GitHub
+`owner/repo` strings 1–140; and canonical HTTPS URLs at most 2048 characters.
+No blank, padded or control-character text, duplicate IDs, extra fields,
+credentials, custom ports or URL query/fragment payloads. Use the final canonical
+URL, including its trailing slash when it is an origin root. Paths may deep-link
+to the independent site's own places. Status is `open`, `unavailable` or
+`retired`; the last two have no travel link. Unapproved proposals stay outside
+the runtime registry. A live URL is not a code-release approval; record the
+reviewed source revision, operator and evidence in the PR, not a fake revision
+in the directory. Do not add visitor data, API keys or deployment secrets.
 
 ## Data and operation review
 
@@ -109,7 +110,7 @@ visitor identifiers, API keys, deployment secrets or mutable remote scripts.
 
 ## Submission evidence
 
-- [ ] Mainland maintainers agreed the mode, directory/physical placement and return route.
+- [ ] The OBL PR identifies the external boundary, directory placement and fixed return link.
 - [ ] Repository, operator, release revision and destination match this record.
 - [ ] Direct entry, deep link and reload work independently of OBL.
 - [ ] The return link works without an opener, passed token or dynamic return URL.
@@ -119,7 +120,7 @@ visitor identifiers, API keys, deployment secrets or mutable remote scripts.
 - [ ] Leaving stops the previous client's active work, voice and connections; cached restoration is checked.
 - [ ] Measured boot/runtime cost and repeated-visit results are attached with revisions and conditions.
 - [ ] Tests run are named; unrun, blocked or physical-device checks are listed separately.
-- [ ] An OBL integration PR implements and validates the listing before it is enabled.
+- [ ] The registry build/unit checks and focused directory browser checks pass.
 
 Unresolved decisions and missing evidence:
 

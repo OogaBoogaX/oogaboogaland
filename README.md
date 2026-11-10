@@ -229,7 +229,7 @@ Public domain under [The Ooga Booga License](LICENSE), a caveman-speak dedicatio
 
 Read [AGENTS.md](AGENTS.md) first: the module layout, the engine patterns, how to add things, and the checks every change must pass.
 
-For a new project cave or independently hosted land, start with the proposed [connection contract](docs/cave-connections.md) and [submission template](docs/templates/cave-connection.md). Placement and external travel still need maintainer agreement and an integration PR.
+For a new project cave or independently hosted land, use the [connection contract](docs/cave-connections.md) and [submission template](docs/templates/cave-connection.md). The **Caves and lands** directory in ₿IFRÖST (also at `/bifrost`) lists the integrated caves and independent sites. External sites open in the same tab without transferring OBL account, inventory or voice data; browser Back returns to OBL.
 
 ## DSB Land
 
