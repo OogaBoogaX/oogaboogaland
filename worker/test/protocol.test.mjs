@@ -203,28 +203,33 @@ test("voice zones: a group shares voice across its places; nobody is heard from 
   assert.equal(parseClientMessage('{"t":"zone","name":".hall"}'), null);
 });
 
-test("Sphere rooms isolate voice by number and doorway frames are strictly bounded", async () => {
+test("Sphere rooms 0–9 isolate voice by number, only the Conference Room locks, and doorway frames are strictly bounded", async () => {
   const { voicePeers } = await import("../src/protocol.js");
   const on = { pub: "p", sub: "s", track: "mic" };
   const p = (id, zone) => ({ id, body: `ooga-${id}`, zone, voice: on });
-  const peers = voicePeers([p(1, "sphere-1"), p(2, "sphere-1"), p(3, "sphere-2"), p(4, "sphere"), p(5, "sphere-9")]);
+  const peers = voicePeers([p(1, "sphere-1"), p(2, "sphere-1"), p(3, "sphere-2"), p(4, "sphere"), p(5, "sphere-9"), p(6, "sphere-0"), p(7, "sphere-0")]);
   assert.deepEqual(peers.get(1), [2]);
   assert.deepEqual(peers.get(2), [1]);
   assert.deepEqual(peers.get(3), []);
   assert.deepEqual(peers.get(4), []);
   assert.deepEqual(peers.get(5), []);
+  assert.deepEqual(peers.get(6), [7], "room 0 is a room of its own too");
 
   assert.deepEqual(parseClientMessage('{"t":"door","op":"ask","dir":"in","room":7}'), { t: "door", op: "ask", dir: "in", room: 7 });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"ask","dir":"out","room":0}'), { t: "door", op: "ask", dir: "out", room: 0 });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"pass","door":"sphere-0","dir":"in"}'), { t: "door", op: "pass", door: "sphere-0", dir: "in" });
   assert.deepEqual(parseClientMessage('{"t":"door","op":"go","cycle":"abc_123"}'), { t: "door", op: "go", cycle: "abc_123" });
   assert.deepEqual(parseClientMessage('{"t":"door","op":"done","cycle":"abc-123"}'), { t: "door", op: "done", cycle: "abc-123" });
   assert.deepEqual(parseClientMessage('{"t":"door","op":"cancel","extra":true}'), { t: "door", op: "cancel" });
   assert.deepEqual(parseClientMessage('{"t":"door","op":"pass","door":"sphere-9","dir":"out"}'), { t: "door", op: "pass", door: "sphere-9", dir: "out" });
-  assert.deepEqual(parseClientMessage('{"t":"door","op":"lock","room":3,"pin":"0042"}'), { t: "door", op: "lock", room: 3, pin: "0042" });
-  assert.deepEqual(parseClientMessage('{"t":"door","op":"try","room":9,"pin":"1234","extra":1}'), { t: "door", op: "try", room: 9, pin: "1234" });
-  assert.deepEqual(parseClientMessage('{"t":"door","op":"unlock","room":3}'), { t: "door", op: "unlock", room: 3 });
-  for (const bad of ['{"t":"door","op":"lock","room":3,"pin":"123"}', '{"t":"door","op":"unlock","room":0}', '{"t":"door","op":"try","room":0,"pin":"1234"}', '{"t":"door","op":"try","room":3}']) assert.equal(parseClientMessage(bad), null);
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"lock","room":1,"pin":"0042"}'), { t: "door", op: "lock", room: 1, pin: "0042" });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"try","room":1,"pin":"1234","extra":1}'), { t: "door", op: "try", room: 1, pin: "1234" });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"unlock","room":1}'), { t: "door", op: "unlock", room: 1 });
+  for (const bad of ['{"t":"door","op":"lock","room":1,"pin":"123"}', '{"t":"door","op":"try","room":1}']) assert.equal(parseClientMessage(bad), null);
+  // Every other room has no lock to set, try or open.
+  for (const room of [0, 2, 3, 4, 5, 6, 7, 8, 9]) for (const op of ["lock", "try", "unlock"]) assert.equal(parseClientMessage(JSON.stringify({ t: "door", op, room, pin: "1234" })), null, `${op} room ${room}`);
   for (const bad of [
-    { t: "door", op: "ask", dir: "in", room: 0 }, { t: "door", op: "ask", dir: "side", room: 1 },
+    { t: "door", op: "ask", dir: "in", room: 10 }, { t: "door", op: "ask", dir: "in", room: -1 }, { t: "door", op: "ask", dir: "side", room: 1 },
     { t: "door", op: "go", cycle: "bad cycle" }, { t: "door", op: "done", cycle: "x".repeat(65) },
     { t: "door", op: "pass", door: "sphere-10", dir: "in" }, { t: "door", op: "pass", door: "sphere-1", dir: "side" },
     { t: "door", op: "open" },
