@@ -1,6 +1,6 @@
 # Block Frenzy
 
-Capture the flag on Fort Chaos, Bitcoin themed, as a fifth stage cabinet in Ooga Arcade (and at `/blockfrenzy`).
+Capture the flag on Fort Chaos, Bitcoin themed, reached down Ooga Arcade's upper hall, by zipline (and directly at `/blockfrenzy`).
 Each side guards its Bitcoin block, a glowing cube in its team's colour on a stand inside its fort. Steal the other
 side's block, carry it home and touch your own stand while your own block is home. Two Oogas a side: the visitor and
 a teammate against two rivals, the three bots run by the rules module. First to three captures wins. Nobody dies,
@@ -17,8 +17,7 @@ It is a single-player game for now. Multiplayer is described under Open question
 | `block-models.js` | Cached geometry: Fort Chaos, the stands, the two team blocks, crates, paint balls, grenades, rockets, nets, splats, quiz pads and bubbles, rain. |
 | `scene-block.js` | The scene: the side and Ooga picker, the round, the HUD, the cameras, the quiz card and the results. Registers `BL.scenes.block`. |
 
-Shared files touched, each by the smallest change: `arcade-models.js` (a fifth game in `GAMES`, its cabinet paint,
-marquee loop, pictographs and poster; the stage arc's step closes from 0.265 to 0.22 so five cabinets fit),
+Shared files touched, each by the smallest change: `arcade-models.js`, `arcade-scene-models.js` and `scene-arcade.js` (the entry hall: `BLOCK_HALL`, its walk, sight and light, and its zipline off the ledge; the stage stays rock's four cabinets, and the Rally poster moved just beside the mouth),
 `game.js` (a `block` save slot: rounds, wins, fastest win, validated on load), `routes.js` (`/blockfrenzy`),
 `director.js` (`block` in the debug handle list), `src/index.html` (script tags, the nav, `#block` and its title
 card), `src/style.css` (the game's panels, appended), `test/run.mjs` (rules in the global tier, a `block` scene) and
@@ -176,14 +175,12 @@ and thrown to stun, and a seeded round on
 autopilot replaying exactly to three captures. The `block` scene runs the title card and Escape, W S and A D on screen,
 a quiz trap through a wrong and a right answer, an autopilot round to its saved results, and the round trip.
 
-On 2026-11-01, after merging rock, the global tier passes 363 of 363, including a check that every retro cabinet
-still maps to its own retro game and score ID behind the fifth live cabinet. Browser scenes have not been run for this
+The entry hall's Node checks cover the stage's four cabinets, the hall reaching the ledge, the zipline's survey and the Rally poster's move; the `arcade` step walks it. Browser scenes have not been run for this
 head: `npm test -- block arcade` needs real Chrome on real hardware before merge.
 
 ## High scores
 
-Rock's shared high-score registry (`highscore-rules.js` and the Worker) does not know Block Frenzy, so its cabinet
-carries no `scoreId` (`null` in `arcadeModels.GAMES`) and submits nothing. Its best stays local through
+Rock's shared high-score registry (`highscore-rules.js` and the Worker) does not know Block Frenzy, so it submits nothing. Its best stays local through
 `game.recordBlock`. Registering it is a maintainer question.
 
 
