@@ -2053,7 +2053,7 @@
   const buildZipline = () => {
     const Z = BL.hubZipline, spot = Z.plan(island, zipQueries, TOTEM_SPOTS.map(([x, z]) => [x, z, 2]), Z.crowns(mempoolIsland));
     if (!spot) return;
-    zipline = BL.zipline.create({ root, plan: spot.layout, crew, calm: !!goldbugCalm?.matches, landYaw: spot.downYaw, speed: Z.SPEED, brake: Z.BRAKE });
+    zipline = BL.zipline.create({ root, plan: spot.layout, crew, calm: matchMedia("(prefers-reduced-motion: reduce)").matches, landYaw: spot.downYaw, speed: Z.SPEED, brake: Z.BRAKE });
     // Registered and placed now, not at the next frame's sync, so the survey stands the bar on the step itself.
     solids.add(zipline.top); solids.add(zipline.deck); solids.sync();
     if (!zipline.survey(zipQueries)) { solids.remove(zipline.top); solids.remove(zipline.deck); zipline.dispose(); zipline = null; return; }

@@ -20288,6 +20288,33 @@ const tessCacheChecks = async BL => {
 
 // Ziplines (zipline.js): the grab, the ride down the sagging cable, the drop-off on checked ground, letting go early,
 // GAME MODE and reduced motion on a made-up line; then the island's and DSB Land's own lines in their places.
+const ziplineRide = (id) => ({ name: id + " zipline ride", why: "playthrough: the scene's real action rides its surveyed line, refuses an unsafe drop and returns control on dry ground", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, hub = ${id == "hub"}, D = hub ? BL.scenes.hub.debug : B.dsb, z = D.zipline;
+    if (!z) return { built: false };
+    if (hub) B.pilot.possess(B.cavemen.get("portlandhodl"));
+    if (B.crew.sleeping) B.crew.wakePlayer();
+    const a = B.pilot.player;
+    const space = () => { for (const type of ["keydown", "keyup"]) window.dispatchEvent(new KeyboardEvent(type, { key: " ", code: "Space", bubbles: true, cancelable: true })); };
+    B.pilot.navigate({ position: { x: z.plan.stand.x, y: z.standFloor, z: z.plan.stand.z }, yaw: z.plan.line.yaw, pitch: .5, dist: 7 }); B.advance(.2, 1 / 30);
+    const offered = z.actionFor(a, a.root.position.x, a.root.position.y - a.baseY, a.root.position.z) === z.GRAB;
+    space(); const grabbed = z.riding === a;
+    space(); const held = z.riding === a;
+    let frames = 0, travelled = 0;
+    while (z.riding && frames++ < 1500) { B.advance(1 / 30, 1 / 30); travelled = Math.max(travelled, z.s - z.plan.grabS); }
+    const p = a.root.position, landing = z.surveyed.landing;
+    const landed = !z.riding && B.pilot.player === a && Math.hypot(p.x - landing.x, p.z - landing.z) < .15 && Math.abs(p.y - a.baseY - landing.y) < .15;
+    B.advance(.3, 1 / 30);
+    const stable = Math.abs(a.root.position.y - a.baseY - landing.y) < .2;
+    let mode = true;
+    if (hub) { D.setGameMode(true); mode = !z.group.visible && z.actionFor(a, z.plan.stand.x, z.standFloor, z.plan.stand.z) === null; D.setGameMode(false); mode &&= z.group.visible; }
+    return { built: true, offered, grabbed, held, frames, travelled, landed, stable, mode, phase: z.phase, at: [p.x, p.y - a.baseY, p.z], landing };
+  })()`);
+  record(id + " zipline: the scene's Space action grabs, holds on above unsafe ground and finishes on its surveyed dry landing with control restored",
+    r.built && r.offered && r.grabbed && r.held && r.frames < 1500 && r.travelled > 60 && r.landed && r.stable && r.mode, JSON.stringify(r));
+} });
+scene("hub", { label: "zipline", query: "solo=1&character=portlandhodl&pos=0", steps: [ziplineRide("hub"), trip("hub")] });
+scene("dsb", { label: "zipline", query: "weather=clear&time=1200", steps: [ziplineRide("dsb"), trip("dsb")] });
 const ziplineChecks = BL => {
   const S = BL.scene, Z = BL.zipline, P = Z.PHASES;
   // A made-up island to ride: a hilltop 8 m up for x > 20, a meadow at 0, a wall from x 8 to 9 standing 3 m (rides
@@ -20421,7 +20448,12 @@ const ziplineChecks = BL => {
     // generation as it was (measured once the code is warm and between collections; a run a collection cuts into is
     // tried again).
     const w = world();
-    w.standAt(); w.zip.use(w.zip.GRAB, w.cave); ride(w);
+    // Warm the measured pose/action loop, not just the different 60 Hz ride helper.
+    for (let warm = 0; warm < 80; warm++) {
+      w.standAt(); w.zip.use(w.zip.GRAB, w.cave);
+      while (w.zip.riding && w.zip.phase !== P.FALL) { w.zip.pose(w.cave, 1 / 240); w.zip.actionFor(w.cave, 0, 0, 0); }
+      w.zip.setGameMode(true); w.zip.setGameMode(false); w.landed.length = 0;
+    }
     const young = () => getHeapSpaceStatistics().find((space) => space.space_name === "new_space").space_used_size;
     let frames = 0, grew = Infinity, tries = 0;
     for (; tries < 6 && grew === Infinity; tries++) {
