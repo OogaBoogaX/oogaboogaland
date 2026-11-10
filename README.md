@@ -229,6 +229,8 @@ Public domain under [The Ooga Booga License](LICENSE), a caveman-speak dedicatio
 
 Read [AGENTS.md](AGENTS.md) first: the module layout, the engine patterns, how to add things, and the checks every change must pass.
 
+For a new project cave or independently hosted land, start with the proposed [connection contract](docs/cave-connections.md) and [submission template](docs/templates/cave-connection.md). Placement and external travel still need maintainer agreement and an integration PR.
+
 ## DSB Land
 
 Reached through **₿IFRÖST** beyond the north pass. Walk through the DSB window in its chamber. To come home, use the **DSB Dialer** beside the upright gate and walk back through it into ₿IFRÖST.
