@@ -219,6 +219,10 @@ test("Sphere rooms isolate voice by number and doorway frames are strictly bound
   assert.deepEqual(parseClientMessage('{"t":"door","op":"done","cycle":"abc-123"}'), { t: "door", op: "done", cycle: "abc-123" });
   assert.deepEqual(parseClientMessage('{"t":"door","op":"cancel","extra":true}'), { t: "door", op: "cancel" });
   assert.deepEqual(parseClientMessage('{"t":"door","op":"pass","door":"sphere-9","dir":"out"}'), { t: "door", op: "pass", door: "sphere-9", dir: "out" });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"lock","room":3,"pin":"0042"}'), { t: "door", op: "lock", room: 3, pin: "0042" });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"try","room":9,"pin":"1234","extra":1}'), { t: "door", op: "try", room: 9, pin: "1234" });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"unlock","room":3}'), { t: "door", op: "unlock", room: 3 });
+  for (const bad of ['{"t":"door","op":"lock","room":3,"pin":"123"}', '{"t":"door","op":"unlock","room":0}', '{"t":"door","op":"try","room":0,"pin":"1234"}', '{"t":"door","op":"try","room":3}']) assert.equal(parseClientMessage(bad), null);
   for (const bad of [
     { t: "door", op: "ask", dir: "in", room: 0 }, { t: "door", op: "ask", dir: "side", room: 1 },
     { t: "door", op: "go", cycle: "bad cycle" }, { t: "door", op: "done", cycle: "x".repeat(65) },

@@ -1378,9 +1378,11 @@
   const visualState = (cave) => {
     if (!cave || !cave.weapon) return null;
     const w = cave.weapon, v = cave.visualData || (cave.visualData = new Int16Array(VISUAL_SIZE));
-    v[0] = Math.round(clamp(cave.parts.head.rotation.x, -1.57, 1.57) * 100);
+    // A body lying in a hammock sends the look its first-person view gives (pilot.js `shareRestLook`), as the head and the aim.
+    const lying = !!cave.camp?.seat?.lying;
+    v[0] = Math.round(clamp(lying ? cave.restLookPitch : cave.parts.head.rotation.x, -1.57, 1.57) * 100);
     v[1] = Math.round(clamp(w.aimPitch, -1.57, 1.57) * 100);
-    v[2] = Math.round(clamp(w.aimYaw, -3.14, 3.14) * 100);
+    v[2] = Math.round(clamp(lying ? cave.restLookYaw : w.aimYaw, -3.14, 3.14) * 100);
     const handoff = w.reloadHandoff < 0 ? 1 : w.reloadHandoff === 1 ? 2 : w.reloadHandoff === 2 ? 3 : 0;
     v[3] = (w.primaryOwned ? 1 : 0) | (w.secondaryOwned ? 2 : 0) | (cave.jetpackOwned || cave.parts.jetpack ? 4 : 0)
       | (w.reloading ? 8 : 0) | (w.reloadSpare ? 16 : 0) | (w.meleeHeld ? 32 : 0) | (w.meleeQuick ? 64 : 0)
@@ -1623,6 +1625,7 @@
         sleepHead: { x: 0, y: 0, z: 0 },
         sleepWeapons: createNode({ visible: false }),
         headLookRotation: math.quat.create(), headLookPosition: { x: 0, y: 0, z: 0 },
+        restLookYaw: 0, restLookPitch: 0,
         sleepRotation: math.quat.create(), sleepFromRotation: math.quat.create(), sleepTargetRotation: math.quat.create(),
         // Knockout effects are not equipment: waking or resetting a pose must never show them.
         sleepParts: { armRX: cave.parts.armR.position.x, armLX: cave.parts.armL.position.x, headX: cave.parts.head.position.x, headY: cave.parts.head.position.y, headZ: cave.parts.head.position.z, equipment: cave.root.children.filter((node) => node !== stunBirds && !BODY_PARTS.some((key) => cave.parts[key] === node)) },
@@ -1779,7 +1782,7 @@
         // Reserve vacancies for more recent sleepers even when their update
         // comes later in stable roster order. Never evict an occupied bed.
         if (available) for (const other of crewList) {
-          if (other !== cave && other !== player && other.traits.name !== ctx.residentName && (!other.bedroll || other.bedroll.outdoor) && !other.camp.burning && !other.camp.panic.active
+          if (other !== cave && other !== player && (!other.bedroll || other.bedroll.outdoor) && !other.camp.burning && !other.camp.panic.active
             && stateOf(other) === "sleeping" && sleepPriority(other, cave) < 0) available--;
         }
         if (available > 0) for (const bed of bedrolls) if (!bed.sleeper) {
@@ -2180,14 +2183,12 @@
       // chilling, which returns along its route via the pile (startChillReturn).
       const beam = cave.nonInteractive;
       const wasAwake = cave.state === "working" || cave.state === "chilling";
-      // The Timechain resident keeps its authored recliner rest, passive or not.
-      const resident = cave.traits.name === ctx.residentName && (state === "sleeping" || state === "away");
       if (cave.state === state) {
         // Same-state call still re-seats a moved eater; it must interrupt nothing else.
         if (state === "working") walkToSlot(cave);
         return;
       }
-      if ((ctx.bedRoute || beam) && state === "sleeping" && !resident) { startSleep(cave, beam || settle && cave.state === "away"); return; }
+      if ((ctx.bedRoute || beam) && state === "sleeping") { startSleep(cave, beam || settle && cave.state === "away"); return; }
       if (!beam && ctx.bedRoute && cave.state === "sleeping" && (state === "working" || state === "chilling")) { beginWalk(cave, state); return; }
       // Clanking to chilling is a walk, not a beam: back along the route to the
       // pile, then to the chill spot (falls back to the beam with no chill spot).
@@ -2213,11 +2214,10 @@
         cave.bedTravel.mode = "";
       }
       releaseBuild(cave);
-      if (state === "sleeping" && !resident) claimBedroll(cave);
+      if (state === "sleeping") claimBedroll(cave);
       else releaseBedroll(cave);
       const r = cave.root;
-      if (resident) ctx.residentPose(cave, 0);
-      else if (state === "working" || state === "chilling") {
+      if (state === "working" || state === "chilling") {
         r.visible = true;
         if ((beam || !wasAwake) && state === "working") {
           if ((beam || settle) && ctx.initialWorkSpot) {
