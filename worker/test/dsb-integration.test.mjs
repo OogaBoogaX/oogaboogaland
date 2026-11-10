@@ -33,7 +33,7 @@ const roomClass = (extra = {}) => {
 test("room broadcasts DSB zone changes, persists them and keeps ownership enforcement", () => {
   const Room = roomClass(), room = Object.create(Room.prototype), sent = [];
   room.hockeyTables = [null, null, null];
-  room.players = new Map(); room.chatBuckets = new Map(); room.voiceSig = new Map();
+  room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.voiceSig = new Map();
   let attachment;
   const ws = { deserializeAttachment: () => ({ id: 1 }), serializeAttachment: value => { attachment = value; }, send: text => sent.push(JSON.parse(text)) };
   const player = room.record(ws, { id: 1, login: "YellowBrokeIt", display: "Yellow", body: "YellowBrokeIt", x: -45, y: 40, z: -43, yaw: 0 });
@@ -71,7 +71,7 @@ test("room broadcasts DSB zone changes, persists them and keeps ownership enforc
 test("room passes DSB wallets to the pages in their zone, and hands the live ones to whoever walks in", () => {
   const Room = roomClass(), room = Object.create(Room.prototype), now = Date.now();
   room.hockeyTables = [null, null, null];
-  room.players = new Map(); room.chatBuckets = new Map(); room.voiceSig = new Map();
+  room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.voiceSig = new Map();
   room.scheduleFlush = () => {};
   const join = (id, login, zone) => {
     const sent = [];
@@ -117,7 +117,7 @@ test("room passes DSB wallets to the pages in their zone, and hands the live one
 
 test("room carries an Ooga's jetpack to every page and drops it with the body", () => {
   const Room = roomClass(), room = Object.create(Room.prototype), sent = [];
-  room.players = new Map(); room.chatBuckets = new Map(); room.voiceSig = new Map();
+  room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.voiceSig = new Map();
   let attachment;
   const ws = { deserializeAttachment: () => ({ id: 1 }), serializeAttachment: value => { attachment = value; }, send: text => sent.push(JSON.parse(text)) };
   const player = room.record(ws, { id: 1, login: "YellowBrokeIt", display: "Yellow", body: "YellowBrokeIt", x: 0, y: 0, z: 0, yaw: 0 });
@@ -144,7 +144,7 @@ test("room carries an Ooga's jetpack to every page and drops it with the body", 
 
 test("room carries an Ooga's weapons and relays its shots and strikes to its own zone alone", () => {
   const Room = roomClass(), room = Object.create(Room.prototype);
-  room.players = new Map(); room.chatBuckets = new Map(); room.voiceSig = new Map();
+  room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.voiceSig = new Map();
   room.scheduleFlush = () => {};
   const join = (id, login, zone) => {
     const sent = [], store = {};
@@ -187,13 +187,13 @@ test("voice lists survive the room sleeping and follow a microphone published ag
   const wake = () => {
     const room = Object.create(Room.prototype);
     room.sfu = {};
-    room.players = new Map(); room.chatBuckets = new Map();
+    room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map();
     for (const id of [1, 2]) if (stores[id].a) room.players.set(id, room.record(sockets[id], stores[id].a));
     return room;
   };
   const room = Object.create(Room.prototype);
   room.sfu = {};
-  room.players = new Map(); room.chatBuckets = new Map();
+  room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map();
   for (const id of [1, 2]) {
     const p = room.record(sockets[id], { id, login: `p${id}`, display: `p${id}`, body: id === 1 ? "gorilla:ooga-1" : "ooga-2", g: id === 1 ? [4, 1.8, 12, 1, 0, 0] : null, zone: "factory.hall", x: 0, y: 0, z: 0, yaw: 0 });
     p.voice = { pub: `pub${id}`, sub: `sub${id}`, track: "mic", gen: 10 + id };
@@ -239,8 +239,8 @@ test("SFU stays unavailable without secrets and uses bounded upstream calls with
 const studioRoom = () => {
   const Room = roomClass(), room = Object.create(Room.prototype);
   room.hockeyTables = [null, null, null];
-  room.players = new Map(); room.chatBuckets = new Map(); room.studio = studio.studioState(1000); room.env = { STUDIO_HOST_IDS: "1,3" }; room.cleanupJobs = [];
-  room.doorQueue = []; room.doorActive = null; room.doorPasses = new Map(); room.sweepAt = 0;
+  room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.studio = studio.studioState(1000); room.env = { STUDIO_HOST_IDS: "1,3" }; room.cleanupJobs = [];
+  room.doorQueue = []; room.doorActive = null; room.doorPasses = new Map(); room.roomLocks = new Map(); room.sweepAt = 0;
   const pending = [], storage = new Map();
   room.ctx = { waitUntil: p => pending.push(p), storage: { put: async (k, v) => storage.set(k, structuredClone(v)), getAlarm: async () => null, setAlarm: async () => {} } };
   room.sfu = { closeTracks: async (_session, mids) => ({ tracks: mids.map(mid => ({ mid })) }), getSession: async () => ({ tracks: [] }) };
@@ -561,7 +561,7 @@ test("Studio wake migrates old snapshots, clamps catalogue edits and rechecks co
 test("room scopes poker voice to Ember Den and clears it on departure", () => {
   const Room = roomClass(), room = Object.create(Room.prototype);
   room.hockeyTables = [null, null, null];
-  room.players = new Map(); room.chatBuckets = new Map(); room.sfu = {};
+  room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.sfu = {};
   let attachment;
   const ws = { deserializeAttachment: () => ({ id: 1 }), serializeAttachment: value => { attachment = value; }, send() {} };
   const player = room.record(ws, { id: 1, login: "YellowBrokeIt", display: "Fixture", body: "YellowBrokeIt", zone: "outside" });
