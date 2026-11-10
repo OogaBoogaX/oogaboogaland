@@ -192,6 +192,10 @@
     const writeXYZ = (o, v) => {
       out[o] = v.x; out[o + 1] = v.y; out[o + 2] = v.z;
     };
+    const placed = (f, o) => {
+      for (let j = 2; j < 15; j++) if ((j < 8 || j > 11) && !Number.isFinite(f[o + j])) return false;
+      return true;
+    };
     const encodeCave = (o, i, cave) => {
       const r = cave.root, p = cave.parts;
       let flags = 0;
@@ -323,7 +327,8 @@
       const base = s * n * RECORD;
       for (let k = 0; k < count; k++) {
         const o = HEADER + k * RECORD, i = f[o];
-        if (!(i >= 0 && i < n)) continue;
+        // The host is only another page: a transform that is no number would poison the Ooga here for good.
+        if (!(i >= 0 && i < n) || !placed(f, o)) continue;
         for (let j = 0; j < RECORD; j++) target[i * RECORD + j] = ring[base + i * RECORD + j] = f[o + j];
         carries[s * n + i] = 1;
         if (!have[i]) fresh[i] = 1;

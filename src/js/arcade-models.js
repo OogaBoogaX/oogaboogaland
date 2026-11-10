@@ -23,7 +23,8 @@
 
   // The hall, in the cave's frame: the mouth at +z (`front`). A timber mezzanine (`MEZZ`) runs along the back wall
   // with a stair up each side wall; a round stage (`STAGE`, two steps up) holds the live games in the middle.
-  const HALL = { halfW: 18, back: -24, front: 6, h: 11, door: 2.5, doorH: 3.6 };
+  // `exit`: the passage past the doors, as long as the cave's walk from its doors to its mouth on the island.
+  const HALL = { halfW: 18, back: -24, front: 6, h: 11, door: 1.7, doorH: 3.1, exit: 6.1 };
   const STAGE = { x: 0, z: -7.5, r: 4.6, inner: 4.2, low: 0.18, high: 0.36 };
   // The mezzanine's deck (its top at `y`, from `z0` at the back wall to its front edge `z1`) and its two stairs up
   // the side walls, [x, z] at the foot and the head, `w` wide.
@@ -77,6 +78,15 @@
     z0: -22, z1: -18, y: MEZZ.y, h: 4, end: 34, torches: [[20.6, -1], [23.8, 1], [27, -1], [30.2, 1], [33.1, -1]],
     arena: { x: 64, z: -20, r: 30, wall: 7, torches: 24 }
   };
+  // Block Frenzy's entry hall, off the deck's back wall, as wide and long as the haunted hallway: the mouth `x0` to `x1`
+  // where the Rally poster hung, a carved passage to `z0`, then an open-air ledge out to `ledge` with a railing and gate.
+  // The zipline runs from `top` out into the clouds: its far end (`stop`, over `cloudY`) sits inside a cloud bank, and the
+  // visitor is handed to Block Frenzy at `fade`, before it (`scene-arcade.js`'s walk and the ride both read this).
+  const BLOCK_HALL = { x: 10, x0: 8, x1: 12, y: MEZZ.y, h: 4, z0: -40, ledge: -44, top: { x: 10, z: -42.6 }, stop: { x: 10, z: -85.5 }, sag: 1.4, cloudY: -8, fade: -74,
+    torches: [[8, -27.6, 1], [12, -28.5, -1], [8, -32.2, 1], [12, -33.6, -1], [8, -39.2, 1]],
+    // The hall's walls: the four maps, [z, side], and three racks of the game's weapons, each a row [`gun` index, label].
+    pictures: [[-26, -1], [-31, 1], [-34, -1], [-38, 1]],
+    racks: [[-30, -1, [[0, "PAINT"], [1, "GRENADE"], [2, "ROCKET"]]], [-26.4, 1, [[3, "NET"], [4, "SNIPER"], [5, "GOLD AKS"]]], [-37.5, -1, [[6, "OOGA AK"], ["hook", "HOOK"], ["wallet", "WALLET"]]]] };
   // The games with cabinets, as the island names them: scene id, name, the marquee's words and badge, and the
   // colour of its screen's light.
   const GAMES = [
@@ -84,9 +94,7 @@
     { id: "drop", scoreId: "drop-1", name: "Ooga Drop", title: "DROP", icon: "chute", light: [0.4, 0.8, 1] },
     { id: "orbit", scoreId: "orbit-1", name: "Ooga Orbit", title: "ORBIT", icon: "rocket", light: [0.7, 0.55, 1] },
     { id: "mine", scoreId: "mine-1", name: "Ooga Mine", title: "MINE", icon: "pick", light: [1, 0.6, 0.25] },
-    { id: "cloud-hopper", name: "Cloud Hopper", title: "CLOUD HOPPER", icon: "cloud", light: [0.4, 0.8, 1] },
-    // Not in the shared high-score registry yet: its best stays local (`game.recordBlock`).
-    { id: "block", scoreId: null, name: "Block Frenzy", title: "BLOCK", icon: "flag", light: [1, 0.58, 0.1] }
+    { id: "cloud-hopper", name: "Cloud Hopper", title: "CLOUD HOPPER", icon: "cloud", light: [0.4, 0.8, 1] }
   ];
   // The Ooga retro games (`retro-games.js`), one on each cabinet along the mezzanine, in the cabinets' order from the
   // fifth: scene id, name, and the marquee's words and badge. Each cabinet's trim is its screen's colour.
@@ -107,28 +115,23 @@
   // game (`retro`, its index in RETRO).
   const PAINT = [
     ["#8a5a32", "#ffd23a", "#b8402e", 0, 0], ["#7a4e2c", "#5ec8ff", "#e8dcc0", 2, 0], ["#94643a", "#b98cff", "#e8dcc0", 1, 0], ["#6e655c", "#ff9a3c", "#e8dcc0", 0, 1],
-    ["#4a4440", "#f7931a", "#3a8dff", 1, 1],
     ["#86582f", "#46ffd2", "#e8dcc0", 1, 0], ["#6a625a", "#e0452b", "#c8862c", 2, 1], ["#7c5230", "#c8ff5a", "#b8402e", 2, 0], ["#726758", "#ffd23a", "#b8402e", 0, 1],
     ["#8e5e34", "#7fe0ff", "#e8dcc0", 1, 0], ["#655c54", "#ffb02e", "#e8dcc0", 0, 1], ["#805430", "#2fd0c0", "#c8862c", 2, 0], ["#6c6258", "#ff5fa2", "#e8dcc0", 1, 1]
   ];
-  // The stage's slots, one a PAINT row before the retro ones, and the game each was laid out for, by id: Cloud
-  // Hopper has no row of its own and takes Rally's slot below. The arc's step closes up for the fifth slot so the
-  // outer cabinets stay on the stage.
-  const LIVE = PAINT.length - RETRO.length, STAGE_GAMES = ["race", "drop", "orbit", "mine", "block"].map((id) => GAMES.findIndex((g) => g.id === id));
   const CAB = { w: 1.24, d: 0.96, pitch: 1.5 };
-  const ARC = { x: 0, z: -0.2, r: 8, step: 0.22 };
+  const ARC = { x: 0, z: -0.2, r: 8, step: 0.265 };
   const CABINETS = PAINT.map(([body, trim, second, art, stone], i) => {
-    const live = i < LIVE, game = live ? STAGE_GAMES[i] : -1;
-    const a = (i - (LIVE - 1) / 2) * ARC.step, x = live ? ARC.x + ARC.r * Math.sin(a) : (i - LIVE - 3.5) * CAB.pitch;
+    const live = i < 4;
+    const a = (i - 1.5) * ARC.step, x = live ? ARC.x + ARC.r * Math.sin(a) : (i - 4 - 3.5) * CAB.pitch;
     const z = live ? ARC.z - ARC.r * Math.cos(a) : MEZZ.z0 + 0.85, turn = live ? -a : 0, y = live ? STAGE.high : MEZZ.y;
     const play = { x: x + Math.sin(turn) * 1.25, z: z + Math.cos(turn) * 1.25, facing: turn + Math.PI };
-    return { index: i, scoreId: live ? GAMES[game].scoreId : RETRO[i - LIVE].scoreId, x, y, z, turn, game, retro: live ? -1 : i - LIVE, body, trim, second, art, stone: !!stone, play };
+    return { index: i, scoreId: live ? GAMES[i].scoreId : RETRO[i - 4].scoreId, x, y, z, turn, game: live ? i : -1, retro: live ? -1 : i - 4, body, trim, second, art, stone: !!stone, play };
   });
   // Rally stands left of Invaders across the existing fire bowl at x -6.5, facing the same aisle.
-  // Cloud Hopper inherits Rally's exact stage frame and play spot; the other positions stay authored.
-  const rally = { ...CABINETS[0], index: CABINETS.length, x: -7.75, y: MEZZ.y, z: CABINETS[LIVE].z, turn: 0, service: true,
-    play: { x: -7.75, z: CABINETS[LIVE].z + 1.8, facing: Math.PI } };
-  CABINETS[0] = { ...CABINETS[0], game: GAMES.findIndex((g) => g.id === "cloud-hopper"), scoreId: null, pictograph: "cloudHopper", trim: "#d8efff", second: "#5ec8ff" };
+  // Cloud Hopper inherits Rally's exact stage frame and play spot; the other twelve positions stay authored.
+  const rally = { ...CABINETS[0], index: CABINETS.length, x: -7.75, y: MEZZ.y, z: CABINETS[4].z, turn: 0, service: true,
+    play: { x: -7.75, z: CABINETS[4].z + 1.8, facing: Math.PI } };
+  CABINETS[0] = { ...CABINETS[0], game: 4, scoreId: null, pictograph: "cloudHopper", trim: "#d8efff", second: "#5ec8ff" };
   CABINETS.push(rally);
   // Everything else, each built in its own frame facing +z; `turn` stands the frame in the hall. For the carnival
   // machines the player stands at the frame's origin (`play`); the counters are built with their customers on +z.
@@ -179,7 +182,7 @@
     // the hall's vine curtains; the zone signs clear the paintings under them. The zones go by the Oogas' own words,
     // each with its earth paint for the handprints.
     posters: [
-      [-9.5, 7.4, HALL.back + 0.1, 0, 2], [9.5, 7.4, HALL.back + 0.1, 0, 0], [HALL.halfW - 0.1, 3.8, -2.8, -Math.PI / 2, 1],
+      [-9.5, 7.4, HALL.back + 0.1, 0, 2], [13.2, 5, HALL.back + 0.1, 0, 0], [HALL.halfW - 0.1, 3.8, -2.8, -Math.PI / 2, 1],
       [-HALL.halfW + 0.1, 4.6, -9.6, Math.PI / 2, 3], [HALL.halfW - 0.1, 6.2, 0.6, -Math.PI / 2, 2], [-HALL.halfW + 0.1, 6.4, -5.9, Math.PI / 2, 0]
     ],
     zones: [
@@ -210,6 +213,107 @@
   const BANANA = "#ffd23a";
   const RED = "#e0452b";
   const GLASS_DK = "#0b0d10";
+
+  const FLOOR_UP = [0, 1, 0];
+  // Crazy paving: each real seed's flagstone is its cell among all the seeds (the unseen ones only cut), `GROUT`
+  // short of halfway to each neighbour and cut to an octagon `reach` round the seed, so the stones at a walk's edge
+  // round off and the walk frays into the earth. Each stone comes back as its outline, its middle and its inner radius.
+  const GROUT = 0.035;
+  const clipped = (poly, nx, nz, c) => {
+    const out = [];
+    for (let i = 0; i < poly.length; i++) {
+      const p = poly[i], q = poly[(i + 1) % poly.length], dp = nx * p[0] + nz * p[1] - c, dq = nx * q[0] + nz * q[1] - c;
+      if (dp <= 0) out.push(p);
+      if ((dp <= 0) !== (dq <= 0)) { const t = dp / (dp - dq); out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]); }
+    }
+    return out;
+  };
+  const paving = (seeds, reach) => {
+    const stones = [], corner = reach / Math.cos(Math.PI / 8);
+    for (const [x, z, real] of seeds) {
+      if (!real) continue;
+      let poly = Array.from({ length: 8 }, (_, k) => [x + Math.cos((k + 0.5) / 8 * Math.PI * 2) * corner, z + Math.sin((k + 0.5) / 8 * Math.PI * 2) * corner]);
+      for (const [qx, qz] of seeds) {
+        const dx = qx - x, dz = qz - z, d = Math.hypot(dx, dz);
+        if (d > 1e-6 && d < reach * 2.2) poly = clipped(poly, dx / d, dz / d, ((qx + x) * dx + (qz + z) * dz) / (2 * d) - GROUT / 2);
+      }
+      if (poly.length < 3) continue;
+      const cx = poly.reduce((t, p) => t + p[0], 0) / poly.length, cz = poly.reduce((t, p) => t + p[1], 0) / poly.length;
+      let r = Infinity;
+      for (let i = 0; i < poly.length; i++) {
+        const [px, pz] = poly[i], [qx, qz] = poly[(i + 1) % poly.length], l = Math.hypot(qx - px, qz - pz);
+        if (l > 1e-6) r = Math.min(r, Math.abs((qx - px) * (cz - pz) - (qz - pz) * (cx - px)) / l);
+      }
+      stones.push({ poly, x: cx, z: cz, r });
+    }
+    return stones;
+  };
+  // A flagstone on `poly` ([x, z] corners): a flat top `top` high inset from its edge, and a bevel falling to `foot`
+  // all round it in a darker shade, glowing `e`.
+  const flagstone = (geo, poly, tone, top, foot = 0.004, e = 0.03) => {
+    const cx = poly.reduce((t, p) => t + p[0], 0) / poly.length, cz = poly.reduce((t, p) => t + p[1], 0) / poly.length, rgb = hexToRgb(tone), edge = rgb.map((v) => Math.round(v * 0.78));
+    const lo = poly.map(([x, z]) => pushVert(geo, x, foot, z));
+    const hi = poly.map(([x, z]) => { const dx = x - cx, dz = z - cz, k = Math.max(0.5, 1 - 0.07 / (Math.hypot(dx, dz) || 1)); return pushVert(geo, cx + dx * k, top, cz + dz * k); });
+    face(geo, facing(geo, hi.slice(), FLOOR_UP), rgb, { emissive: e });
+    for (let i = 0; i < poly.length; i++) { const j = (i + 1) % poly.length; face(geo, facing(geo, [lo[i], lo[j], hi[j], hi[i]], FLOOR_UP), edge, { emissive: e * 0.67 }); }
+  };
+  // The hall's floor, in the cave in front of it (#554), so the two read as one place: packed earth under the same
+  // crazy paving, laid wall to wall from the mouth back past the doors. Mouth frame (`z` falling into the cave). Built
+  // once a page; cosmetic, on top of the terrain's own floor. Variant 1 stops at the doors, for the hall's copy of the cave.
+  // The grass and path start at the mouth, z 0. The packed earth runs right up to them (`CAVE_EARTH_END`) and the stones
+  // stop a hand short (`CAVE_FLOOR_END`), so a dark margin shows between the two.
+  const CAVE_FLOOR_END = -0.16, CAVE_EARTH_END = 0.005, CAVE_DOORS_Z = -5.6;
+  const caveFloor = variants((toDoors) => {
+    // The hall's stones as its firelight shows them, measured on screen just inside its doors. The cave has no fires of
+    // its own, so they glow in those colours, the same at any hour, as the hall's firelight does.
+    // The hall blooms bright things more than the island does, so its copy of this floor starts darker to end up the same.
+    const TONES = toDoors ? ["#352214", "#2f1f12", "#3b2716", "#291b11"] : ["#513420", "#472e1c", "#5b3c23", "#3e291a"], seeds = [], rand = mulberry32(3401), stones = geometry(), SPACE = 1.1;
+    const back = toDoors ? CAVE_DOORS_Z : -7.1, inside = (x, z) => Math.abs(x) < (z > -0.5 ? 2.5 : 3.85) && z < CAVE_FLOOR_END + 0.5 && z > back + 0.1;
+    for (let z = -6.8; z < 0.4; z += SPACE) for (let x = -3.9; x < 4; x += SPACE) {
+      const sx = x + (rand() - 0.5) * 0.5, sz = z + (rand() - 0.5) * 0.5;
+      seeds.push([sx, sz, inside(sx, sz)]);
+    }
+    // A straight edge just inside the mouth, along the line where the grass and the path begin.
+    paving(seeds, 0.78).forEach(({ poly }) => {
+      const end = clipped(poly, 0, 1, CAVE_FLOOR_END), cut = toDoors ? clipped(end, 0, -1, -CAVE_DOORS_Z) : end;
+      if (cut.length > 2) flagstone(stones, cut, TONES[Math.floor(rand() * TONES.length)], 0.012, 0.004, 1);
+    });
+    const parts = [box({ w: 7.8, h: 0.02, d: CAVE_EARTH_END - back, color: toDoors ? "#24130a" : "#3a1e0e", emissive: 1, offset: { x: 0, y: -0.006, z: (CAVE_EARTH_END + back) / 2 } }), stones];
+    // On the island the bare rock runs a little further out on the left, from the opening along the foot of its pillar.
+    if (!toDoors) parts.push(box({ w: 1.75, h: 0.02, d: 0.255, color: "#3a1e0e", emissive: 1, offset: { x: -3.125, y: -0.006, z: 0.1275 } }));
+    const floor = merge(...parts);
+    floor.castShadow = false;
+    return floor;
+  });
+
+  // The double doors between the island and the hall (#554), one pair in each scene's copy of the same doorway, in a
+  // frame on the door's plane with +z out of the hall. `leaf` hangs from its hinge at the origin and runs along +x; the
+  // scene turns each on its own node. `wall` fills the island's cave round the frame, side panels and all; the hall's
+  // own rock does that there.
+  const DOOR = { half: HALL.door, h: HALL.doorH, post: 0.42, deep: 0.2 };
+  const doorPlank = (x, w, h, color) => box({ w, h, d: DOOR.deep * 0.36, color, emissive: 0.22, offset: { x, y: h / 2 } });
+  const doorParts = cached(() => {
+    const { half, h, post, deep } = DOOR, W = half * 2, posts = [], planks = [], iron = [];
+    for (const s of [-1, 1]) posts.push(bevelBox({ w: post, h: h + 0.7, d: deep * 2, color: TIMBER_DK, emissive: 0.16, offset: { x: s * (half + post / 2), y: (h + 0.7) / 2 } }));
+    posts.push(bevelBox({ w: W + post * 2, h: 0.7, d: deep * 2 + 0.06, color: TIMBER_DK, emissive: 0.16, offset: { y: h + 0.35 } }));
+    // Red lacquer along the frame's face and a banana-gold boss over each post.
+    for (const s of [-1, 1]) {
+      posts.push(box({ w: 0.08, h: h + 0.02, d: 0.02, color: RED, emissive: 0.75, offset: { x: s * (half + 0.06), y: h / 2, z: deep + 0.01 } }));
+      posts.push(box({ w: 0.2, h: 0.2, d: 0.05, color: BANANA, emissive: 0.1, offset: { x: s * (half + post / 2), y: h + 0.35, z: deep + 0.04 } }));
+    }
+    posts.push(box({ w: W + 0.1, h: 0.06, d: 0.02, color: RED, emissive: 0.75, offset: { y: h + 0.1, z: deep + 0.04 } }));
+    const n = 6, w = half / n;
+    for (let i = 0; i < n; i++) planks.push(doorPlank(w * (i + 0.5), w - 0.012, h - 0.05, i % 2 ? "#6e4726" : "#5e3c20"));
+    for (const y of [0.42, h / 2, h - 0.5]) for (const face of [-1, 1]) iron.push(box({ w: half - 0.12, h: 0.09, d: 0.018, color: "#4a4644", emissive: 0.18, offset: { x: half / 2 + 0.03, y, z: face * deep * 0.2 } }));
+    for (const face of [-1, 1]) iron.push(box({ w: 0.11, h: 0.11, d: 0.05, color: BANANA, emissive: 0.1, offset: { x: half - 0.26, y: h * 0.47, z: face * (deep * 0.2 + 0.03) } }));
+    // A batten down the meeting edge, so nothing shows between the shut leaves.
+    planks.push(doorPlank(half, 0.03, h - 0.05, "#2e1c0e"));
+    const leaf = merge(...planks, ...iron);
+    const stone = "#413a35", wallPieces = [];
+    for (const s of [-1, 1]) wallPieces.push(box({ w: 1.4, h: 4.3, d: 0.4, color: stone, offset: { x: s * (half + post + 0.7), y: 2.15 } }));
+    wallPieces.push(box({ w: W + post * 2, h: 0.5, d: 0.4, color: stone, offset: { y: h + 0.95 } }));
+    return { frame: merge(...posts), leaf, wall: merge(...wallPieces) };
+  });
 
   // ---- small builders -------------------------------------------------------------------------------------
   // A flat bar from a to b in the (z, y) plane at x: its length along the line, `t` across it and `w` thick in x.
@@ -433,14 +537,6 @@
       daubDot(g, ...at(0, 0.62), s * 0.06, s * 0.06, EARTH_CHALK, e, 0, z + 0.012, 8);
       for (const [u, v] of [[-0.4, 0.82], [0.36, 0.64], [0.42, 0.96], [-0.32, 0.42]]) daubDot(g, ...at(u, v), s * 0.03, s * 0.03, color, e, 0, z, 5);
       return g;
-    },
-    // Block Frenzy's block: a cube's front, top and side, with a bone stroke down its face for the ₿; (x, y) its foot.
-    block: (g, x, y, s, color, e, z = 0) => {
-      const h = s * 0.5, d = s * 0.18;
-      daubPoly(g, [[x - h / 2, y], [x + h / 2, y], [x + h / 2, y + h], [x - h / 2, y + h]], color, e, z);
-      daubPoly(g, [[x - h / 2, y + h], [x + h / 2, y + h], [x + h / 2 + d, y + h + d], [x - h / 2 + d, y + h + d]], EARTH_OCHRE, e, z);
-      daubPoly(g, [[x + h / 2, y], [x + h / 2 + d, y + d], [x + h / 2 + d, y + h + d], [x + h / 2, y + h]], EARTH_RED, e, z);
-      return daubStroke(g, [[x - h * 0.1, y + h * 0.15], [x - h * 0.1, y + h * 0.85]], s * 0.05, EARTH_CHALK, e, z + 0.004);
     },
     pick: (g, x, y, s, color, e, z = 0) => {
       const at = (u, v) => [x + u * s, y + v * s], R = 0.5, cu = 0.22 - 0.6 * R, cv = 0.72 - 0.8 * R;
@@ -728,9 +824,6 @@
       ["D", 2, 0, -0.12, 0.14], ["L", 2, 0, -0.25, 0, -0.6, 0.1], ["L", 2, 0, -0.6, -0.22, -0.9, 0.08], ["L", 2, 0, -0.6, 0.22, -0.9, 0.08], ["L", 2, 0, -0.32, -0.3, -0.18, 0.07], ["L", 2, 0, -0.32, 0.3, -0.18, 0.07]],
     orbit: [["P", 0, [[-0.22, -0.5], [0.22, -0.5], [0.22, 0.4], [0, 0.85], [-0.22, 0.4]]], ["P", 1, [[-0.22, -0.5], [-0.22, -0.05], [-0.5, -0.62]]], ["P", 1, [[0.22, -0.5], [0.5, -0.62], [0.22, -0.05]]],
       ["D", 2, 0, 0.22, 0.1], ["P", 1, [[-0.15, -0.56], [0.15, -0.56], [0, -0.95]]], ["D", 2, -0.7, 0.6, 0.06], ["D", 2, 0.66, 0.2, 0.05], ["D", 2, 0.55, 0.78, 0.06], ["D", 2, -0.6, -0.2, 0.05]],
-    // Block Frenzy's block: a cube in three faces with a bone ₿ stroke down its front.
-    block: [["P", 0, [[-0.55, -0.6], [0.35, -0.6], [0.35, 0.3], [-0.55, 0.3]]], ["P", 1, [[-0.55, 0.3], [0.35, 0.3], [0.65, 0.6], [-0.25, 0.6]]], ["P", 1, [[0.35, -0.6], [0.65, -0.3], [0.65, 0.6], [0.35, 0.3]]],
-      ["L", 2, -0.25, -0.45, -0.25, 0.15, 0.09], ["L", 2, -0.25, 0.12, 0.08, 0.05, 0.08], ["L", 2, -0.25, -0.15, 0.1, -0.2, 0.08], ["L", 2, -0.25, -0.42, 0.08, -0.45, 0.08], ["L", 2, -0.12, 0.15, -0.12, 0.25, 0.05], ["L", 2, -0.12, -0.45, -0.12, -0.55, 0.05]],
     mine: [["L", 2, -0.6, -0.75, 0.3, 0.45, 0.1], ["L", 0, 0.3, 0.45, -0.1, 0.78, 0.11], ["L", 0, 0.3, 0.45, 0.72, 0.18, 0.11], ["D", 1, 0.45, -0.55, 0.13], ["D", 1, 0.74, -0.32, 0.09], ["D", 1, 0.16, -0.74, 0.08]],
     // Chalk cloud puffs beside a twin-tank jetpack, its blue exhaust pointing down.
     cloudHopper: [["D", 2, -0.8, 0.54, 0.2], ["D", 2, -0.53, 0.64, 0.27], ["D", 2, -0.27, 0.52, 0.2], ["L", 2, -0.8, 0.4, -0.27, 0.4, 0.16],
@@ -780,7 +873,7 @@
     const at = (ops, z, y, s, ink = inks) => moved(turnedY(pictograph(x > 0 ? mirror(ops) : ops, s, ink, emissive), x > 0 ? Math.PI / 2 : -Math.PI / 2), x, y, z);
     const second = [inks[1], inks[1], inks[2]], bone = [inks[2], inks[2], inks[2]];
     return [
-      at(PICTOS[c.pictograph || (c.game >= 0 ? GAMES[c.game].id : TEASER_ART[c.index - LIVE])], 0, 0.58, 0.27),
+      at(PICTOS[c.pictograph || (c.game >= 0 ? GAMES[c.game].id : TEASER_ART[c.index - 4])], 0, 0.58, 0.27),
       at(dots(7, 2, 0.95, 0.2), -0.02, 0.24, 0.11),
       c.art === 2 ? at(PICTOS.spiral, -0.2, 1.42, 0.15, bone) : at(PICTOS.hand, -0.2, 1.4, 0.17, c.art ? second : inks),
       c.art === 1 ? at(zigzag(7, 0), -0.05, 1.97, 0.1) : at(dots(6, c.art ? 0 : 2, 1.1, 0.26), -0.05, 1.97, 0.1)
@@ -915,7 +1008,7 @@
       // A live cabinet's back, seen from the back room: its game's pictograph over two handprints, daubed on the planks.
       if (on) {
         const art = c.pictograph ? moved(pictograph(PICTOS[c.pictograph], 0.34, inks, paint), 0, 1.5, 0) : geometry();
-        if (!c.pictograph) ({ race: MARK.kart, drop: MARK.chute, orbit: MARK.rocket, mine: MARK.pick, block: MARK.block })[GAMES[c.game].id](art, 0, 1.25, 0.55, inks[0], paint);
+        if (!c.pictograph) [MARK.kart, MARK.chute, MARK.rocket, MARK.pick][c.game](art, 0, 1.25, 0.55, inks[0], paint);
         daubHand(art, -0.2, 0.82, 0.3, 0.2, EARTH_RED, paint);
         daubHand(art, 0.2, 0.78, 0.3, -0.2, EARTH_CHALK, paint, 0.004);
         J.flatInto(g, moved(turnedY(art, Math.PI), 0, 0, -0.456));
@@ -986,8 +1079,7 @@
     race: ["#0d1a0d", BANANA, "#4a4a52", "#f2efe8", RED, "#8a5a34", "#3a8f2a", "#1b1b1e", "#2e6b20"],
     drop: ["#123a66", "#5ec8ff", "#f2efe8", "#c7dcef", RED, "#c68642", BANANA, "#1b1b1e", "#ff9c86"],
     orbit: ["#0a0820", "#b98cff", "#f2efe8", "#8a86c9", RED, "#7fe0ff", "#ffb02e", BANANA, "#5a5670"],
-    mine: ["#1a120a", "#ff9a3c", "#6b6b73", "#8e8e96", BANANA, "#a8703e", "#c9ced6", "#fff3a0", "#4a4a52"],
-    block: ["#140c04", "#f7931a", "#c9a96b", "#3a8dff", "#ff4a3a", "#fff3d6", "#8a8178", "#ffd27a", "#b8650a"]
+    mine: ["#1a120a", "#ff9a3c", "#6b6b73", "#8e8e96", BANANA, "#a8703e", "#c9ced6", "#fff3a0", "#4a4a52"]
   };
   // Each game's loop, drawn into the anim box a frame at a time: `f` runs 0 to FRAMES - 1 and the loop is seamless.
   const DRAW = {
@@ -1046,27 +1138,13 @@
         const t = f - 9;
         for (const [vx, vy] of [[-1, -1], [-2, 0], [-1, 1], [0, -2]]) at(g, 25 + vx * t, 15 + vy * t, t < 2 ? 7 : 4);
       }
-    },
-    // Block Frenzy: a blue Ooga runs the glowing orange block home across the sand while red paint flies past.
-    block: (g, f) => {
-      rect(g, 0, 18, GRID_W, ANIM_Y1 - 17, 2);
-      rect(g, 2, 14, 3, 4, 6); rect(g, 35, 14, 3, 4, 6);
-      const ox = 6 + Math.round(f / FRAMES * 24), step = f % 4 < 2;
-      rect(g, ox, 13, 2, 2, 5); rect(g, ox, 15, 2, 2, 3);
-      at(g, ox - (step ? 1 : 0), 17, 3); at(g, ox + 1 + (step ? 1 : 0), 17, 3);
-      rect(g, ox - 1, 9, 4, 3, 1); at(g, ox, 10, 7); at(g, ox + 1, 10, 7);
-      at(g, ox - 1, 12, 5); at(g, ox + 2, 12, 5);
-      for (const [y, phase] of [[11, 0], [15, 6]]) {
-        const x = GRID_W - 1 - (phase + f * 3) % GRID_W;
-        at(g, x, y, 4); at(g, x + 1, y, 4);
-      }
     }
   };
   // A little bone lying on three rows of a pixel grid from (x, y), in palette colour `c`; `titleBones` lays one either
   // side of a screen's title, each game's in its palette's cream.
   const pixelBone = (g, x, y, c) => { at(g, x, y, c); at(g, x + 3, y, c); rect(g, x, y + 1, 4, 1, c); at(g, x, y + 2, c); at(g, x + 3, y + 2, c); };
   const titleBones = (g, c) => { pixelBone(g, 0, 3, c); pixelBone(g, GRID_W - 4, 3, c); };
-  const BONE_INK = { "cloud-hopper": 2, race: 3, drop: 2, orbit: 2, mine: 7, block: 5 };
+  const BONE_INK = { "cloud-hopper": 2, race: 3, drop: 2, orbit: 2, mine: 7 };
   // A game's loop, by its index in GAMES: the title across the top in the game's colour between two bones, then the
   // anim box.
   const attractFrames = variants((i) => {
@@ -1411,8 +1489,8 @@
     ride: LAYOUT.rides.map((r) => ({ ...r, play: { x: r.x + Math.sin(r.turn) * 1.4, z: r.z + Math.cos(r.turn) * 1.4, facing: r.turn + Math.PI } }))
   };
   BL.arcadeModels = {
-    HALL, STAGE, MEZZ, HANDRAIL, HANDRAILS, handrailAt, slideAt, HAUNT, MEZZ_POSTS, GAMES, CABINETS, LAYOUT, CAB, SCREEN, FRAMES, FPS, START_FRAMES, SKEE, HOOP, SHY, METER_LEN, METER_WINDOW, SIGN_FRAME, POSTER_SCALE, MARQUEE, PRIZES, SPOTS, SPOT_Y, SPOT_FIRE, spark, CLAW, PIN, HOCKEY, WHEEL_VALUES, WHEEL_COST, blaze, MAMMOTH_AT, RETRO, RIDE_Y, RIDE_SEATS, RIDE_BEAT, POOL, POOL_COLORS, DART, FAME, PRIZE_SHELF, MAT_Y, cabinet, cabinetPanel, attractFrames, CLOUD_HOPPER, cloudHopperCabinet, cloudHopperFrames
+    DOOR, doorParts, caveFloor, HALL, STAGE, MEZZ, HANDRAIL, HANDRAILS, handrailAt, slideAt, HAUNT, BLOCK_HALL, MEZZ_POSTS, GAMES, CABINETS, LAYOUT, CAB, SCREEN, FRAMES, FPS, START_FRAMES, SKEE, HOOP, SHY, METER_LEN, METER_WINDOW, SIGN_FRAME, POSTER_SCALE, MARQUEE, PRIZES, SPOTS, SPOT_Y, SPOT_FIRE, spark, CLAW, PIN, HOCKEY, WHEEL_VALUES, WHEEL_COST, blaze, MAMMOTH_AT, RETRO, RIDE_Y, RIDE_SEATS, RIDE_BEAT, POOL, POOL_COLORS, DART, FAME, PRIZE_SHELF, MAT_Y, cabinet, cabinetPanel, attractFrames, CLOUD_HOPPER, cloudHopperCabinet, cloudHopperFrames
   };
   // Private lexical bindings used by the scene-only extension; read once when that group evaluates.
-  BL.arcadeModelsSceneKit = { BANANA, BANANA_LEAF_TONES, BARK, BL, BONE, BONE_INK, CABINETS, CLAW, DART, DOT, EARTH_BLACK, EARTH_CHALK, EARTH_OCHRE, EARTH_RED, EMBER_GLOW, FAME, FAME_ROW, FAME_W, FRAMES, GAMES, GLASS_DK, GLYPH_H, GLYPH_W, GRID_H, GRID_W, HALL, HAUNT, HOCKEY, HOOP, LAYOUT, MAMMOTH_AT, MARK, MAT_Y, METER_LEN, METER_WINDOW, MEZZ, MEZZ_POSTS, NUTS, PALETTES, PICTOS, PIN, PIXEL, POOL, POOL_COLORS, POSTER_SCALE, PRIZES, PRIZE_SHELF, RETRO, RIDE_BEAT, RIDE_Y, ROPE, SCREEN, SHY, SIGN_FRAME, SKEE, SPOTS, SPOT_Y, STAGE, TIMBER_DK, TIMBER_LT, TRACKING, WHEEL_COST, WHEEL_VALUES, along, at, bake, bananaLeaf, band, beam, bevelBox, blaze, boneTusk, box, cached, ccw, centred, daubDot, daubHand, daubPoly, daubStroke, daubTaper, daubZigzag, dots, earth, face, facing, flame, geometry, grid, hexToRgb, hide, lathe, leafBlade, line, merge, mirror, moved, mulberry32, nut, oval, pictograph, prism, pushVert, rect, ring, scaled, shaded, sideShape, signBinding, stone, strip, text, textWidth, tikiMouth, tint, titleBones, torus, tuck, turn, turnedX, turnedY, turnedZ, unshadowed, variants, zigzag };
+  BL.arcadeModelsSceneKit = { paving, flagstone, clipped, BANANA, BANANA_LEAF_TONES, BARK, BL, BONE, BONE_INK, CABINETS, CLAW, DART, DOT, EARTH_BLACK, EARTH_CHALK, EARTH_OCHRE, EARTH_RED, EMBER_GLOW, FAME, FAME_ROW, FAME_W, FRAMES, GAMES, GLASS_DK, GLYPH_H, GLYPH_W, GRID_H, GRID_W, HALL, HAUNT, BLOCK_HALL, HOCKEY, HOOP, LAYOUT, MAMMOTH_AT, MARK, MAT_Y, METER_LEN, METER_WINDOW, MEZZ, MEZZ_POSTS, NUTS, PALETTES, PICTOS, PIN, PIXEL, POOL, POOL_COLORS, POSTER_SCALE, PRIZES, PRIZE_SHELF, RETRO, RIDE_BEAT, RIDE_Y, ROPE, SCREEN, SHY, SIGN_FRAME, SKEE, SPOTS, SPOT_Y, STAGE, TIMBER_DK, TIMBER_LT, TRACKING, WHEEL_COST, WHEEL_VALUES, along, at, bake, bananaLeaf, band, beam, bevelBox, blaze, boneTusk, box, cached, ccw, centred, daubDot, daubHand, daubPoly, daubStroke, daubTaper, daubZigzag, dots, earth, face, facing, flame, geometry, grid, hexToRgb, hide, lathe, leafBlade, line, merge, mirror, moved, mulberry32, nut, oval, pictograph, prism, pushVert, rect, ring, scaled, shaded, sideShape, signBinding, stone, strip, text, textWidth, tikiMouth, tint, titleBones, torus, tuck, turn, turnedX, turnedY, turnedZ, unshadowed, variants, zigzag };
 })();

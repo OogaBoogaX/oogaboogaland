@@ -54,7 +54,7 @@
     // A captive is dragged by the feet to the nearest edge at `GORILLA_DRAG`, swung over the wind-up (`GORILLA_THROW_S`)
     // and thrown off at `GORILLA_THROW`, up at `GORILLA_THROW_UP`, its steering knocked out for `THROWN_S`.
     GORILLA_DRAG: 7.5, GORILLA_DRAG_R: 0.5, GORILLA_THROW_S: 0.45, GORILLA_THROW: 11, GORILLA_THROW_UP: 9, THROWN_S: 0.5, DRAG_BACK: 1.3, DRAG_EDGE: 1.2,
-    GOLD_GUNS: 2, AK_MAG: 30, GOLD_SIDE: 0.3, AK_RELOAD: 1.4, MONKEYS_S: 12, MONKEY_SIDE: 0.8, MONKEY_COOL: 1, HOMER_TURN: 3.5, HOMER_SEEK: 20, CATAPULT_R: 1.0, LAUNCH_H: 13, CHUTE_FALL: 2.8, CHUTE_SPEED: 3.4, PEEL_R: 0.55, SLIP_S: 1.5, SLIP_SPIN: 13, PEEL_REARM: 8,
+    GOLD_GUNS: 2, AK_MAG: 30, GOLD_SIDE: 0.3, AK_RELOAD: 1.4, MONKEYS_S: 12, MONKEY_SIDE: 0.8, MONKEY_COOL: 1, HOMER_TURN: 3.5, HOMER_SEEK: 20, CATAPULT_R: 1.0, LAUNCH_H: 13, CHUTE_FALL: 2.8, DROP_IN_H: 14, CHUTE_SPEED: 3.4, PEEL_R: 0.55, SLIP_S: 1.5, SLIP_SPIN: 13, PEEL_REARM: 8,
     POWER_R: 1.1, POWER_RESPAWN: 20, BOOTS_S: 6, BOOTS: 1.5, HALVING_S: 12, COLD_S: 12, LASER_S: 25, BEAM_S: 3, BEAM_LEN: 30, BEAM_R: 0.45,
     // Free Hardware Wallets (DSB Land's VAC 2, brought over): a vending machine each side; a device taken goes off when
     // its fuse runs out, and a blast sets off any other within `WALLET_CHAIN`, knocking everyone near it back.
@@ -772,13 +772,13 @@
   // A round. `team` is the player's colour; `seed` seeds the bots and the weather; `prep` the fortifying seconds.
   // `names` names the four Oogas: the player first, then their teammate, then the two rivals (only carried for the
   // scene).
-  // `size` Oogas a side (2 to `MAX_SIDE`): the player first, then their teammates, then the rivals. `skill` picks the
+  // `size` Oogas a side (1 to `MAX_SIDE`): the player first, then their teammates, then the rivals. `skill` picks the
   // bots' `SKILLS`.
   const create = ({ team = "blue", seed = 1, names = [], prep = CONFIG.PREP_S, target = CONFIG.CAPTURES, size = 2, skill = "normal", map = "fort" } = {}) => {
     map = ARENAS[map] ? map : "fort";
     const A = ARENAS[map];
     const rival = other(team);
-    size = Math.max(2, Math.min(CONFIG.MAX_SIDE, size | 0));
+    size = Math.max(1, Math.min(CONFIG.MAX_SIDE, size | 0));
     const actors = Array.from({ length: size * 2 }, (_, i) => ({
       id: i, slot: i % size, name: names[i] || null, team: i < size ? team : rival, bot: i > 0, role: i % size % 2 ? "defend" : "attack",
       x: 0, z: 0, y: 0, vx: 0, vz: 0, vy: 0, heading: 0, moving: 0, carrying: null, splat: 0, guard: 0, cooldown: 0,
@@ -1582,6 +1582,12 @@
     a.hk = H_REEL; a.hookT = 0; a.hookTarget = TEAMS.indexOf(f.team);
     if (f.y < 1) f.y = 1;
   };
+  // The visitor's Ooga opens a round under its parachute, dropped in over its own start: bots start where they stand.
+  const parachuteIn = (sim, id = 0, height = CONFIG.DROP_IN_H) => {
+    const a = sim.actors[id];
+    a.y += height; a.vx = a.vz = 0; a.vy = -CONFIG.CHUTE_FALL; a.grounded = false; a.flight = 2;
+    emit(sim, "chute", a.team, id, a.x, a.y, a.z);
+  };
   // Out of the parachute in the air: a fall from here, the jetpack free again.
   const cutChute = (sim, id = 0) => {
     use(sim);
@@ -1590,6 +1596,11 @@
     a.flight = 0; a.jumps = 1;
     emit(sim, "chuteoff", a.team, id, a.x, a.y, a.z);
     return true;
+  };
+  // A page taking over as a live round's host holds what frames carry, and frames carry no hook's target: a hook
+  // reeling or yanking a target nobody can name comes home instead.
+  const settleHooks = (sim) => {
+    for (const a of sim.actors) if (a.hk === H_YANK || a.hk === H_REEL) { a.hk = H_BACK; a.hookTarget = -1; }
   };
   const hookBack = (sim, a, why) => {
     // Let go of a block still on the rope, and it lands where it is.
@@ -2716,7 +2727,8 @@
   };
   // One fixed step. `input` is the player's: `x`, `z` a world-space move direction of length up to 1, `sprint`,
   // `jump` (a press), `crouch` (held), and optionally `face`, the yaw the player looks along. The scene throws, drops and builds through `fire`, `drop` and `build`.
-  const tick = (sim, dt, input) => {
+  // `given` is the visitor's input. A live round's host sets `sim.inputs[id]` for each other live Ooga.
+  const tick = (sim, dt, given) => {
     use(sim);
     sim.time += dt;
     const prepWas = sim.prep;
@@ -2731,6 +2743,7 @@
     const N = sim.actors.length;
     for (let n = 0; n < N; n++) {
       const a = sim.actors[sim.flip ? N - 1 - n : n];
+      const input = (sim.inputs && sim.inputs[a.id]) || given;
       if (a.cooldown > 0) a.cooldown -= dt;
       if (a.monkeyCool > 0) a.monkeyCool -= dt;
       if (a.boltCool > 0) a.boltCool -= dt;
@@ -3070,7 +3083,7 @@
     v.second = second; v.boots = boots; v.laser = laser; v.monkeys = monkeys; v.halving = halving; v.cold = cold;
     return true;
   };
-  BL.blockSim = { LEAF_TOP, stripView, stripChanged, hopOn, callRide, WALLETS, takeWallet, throwWallet, dropWallet, nearVend, CONFIG, TOOLS, KINDS, SKILLS, POWERS, ARENAS, MAPS, TEAMS, other, create, reset, step, tick, setLive, newBlock, launch, nearCatapult, nearEnemyCatapult, fire, drop, pass, build, grab, zip, nearZip, onTower, escape, clearLine, solidAt, resolve, groundAt, onIsland, isleDepth, grapple, restSpot, edgeDist, cutChute, inGrave, inGraveOf, GRAVE_Y };
+  BL.blockSim = { settleHooks, parachuteIn, LEAF_TOP, stripView, stripChanged, hopOn, callRide, WALLETS, takeWallet, throwWallet, dropWallet, nearVend, CONFIG, TOOLS, KINDS, SKILLS, POWERS, ARENAS, MAPS, TEAMS, other, create, reset, step, tick, setLive, newBlock, launch, nearCatapult, nearEnemyCatapult, fire, drop, pass, build, grab, zip, nearZip, onTower, escape, clearLine, solidAt, resolve, groundAt, onIsland, isleDepth, grapple, restSpot, edgeDist, cutChute, inGrave, inGraveOf, GRAVE_Y };
   // The map last stepped (or reset), for the scene's and models' reads.
   Object.defineProperty(BL.blockSim, "ARENA", { get: () => ARENA, enumerable: true });
 })();

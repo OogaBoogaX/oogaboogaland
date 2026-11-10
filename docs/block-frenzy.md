@@ -1,12 +1,12 @@
 # Block Frenzy
 
-Capture the flag on Fort Chaos, Bitcoin themed, as a fifth stage cabinet in Ooga Arcade (and at `/blockfrenzy`).
+Capture the flag on Fort Chaos, Bitcoin themed, reached down Ooga Arcade's upper hall, by zipline (and directly at `/blockfrenzy`).
 Each side guards its Bitcoin block, a glowing cube in its team's colour on a stand inside its fort. Steal the other
 side's block, carry it home and touch your own stand while your own block is home. Two Oogas a side: the visitor and
 a teammate against two rivals, the three bots run by the rules module. First to three captures wins. Nobody dies,
 nobody loses health and nobody is removed: paint wears off.
 
-It is a single-player game for now. Multiplayer is described under Open questions.
+Solo by default. Signed-in Oogas can also play together: see Live rounds below.
 
 ## Files
 
@@ -17,10 +17,9 @@ It is a single-player game for now. Multiplayer is described under Open question
 | `block-models.js` | Cached geometry: Fort Chaos, the stands, the two team blocks, crates, paint balls, grenades, rockets, nets, splats, quiz pads and bubbles, rain. |
 | `scene-block.js` | The scene: the side and Ooga picker, the round, the HUD, the cameras, the quiz card and the results. Registers `BL.scenes.block`. |
 
-Shared files touched, each by the smallest change: `arcade-models.js` (a fifth game in `GAMES`, its cabinet paint,
-marquee loop, pictographs and poster; the stage arc's step closes from 0.265 to 0.22 so five cabinets fit),
+Shared files touched, each by the smallest change: `arcade-models.js`, `arcade-scene-models.js` and `scene-arcade.js` (the entry hall: `BLOCK_HALL`, its walk, sight and light, and its zipline off the ledge; the stage stays rock's four cabinets, and the Rally poster moved just beside the mouth),
 `game.js` (a `block` save slot: rounds, wins, fastest win, validated on load), `routes.js` (`/blockfrenzy`),
-`director.js` (`block` in the debug handle list), `src/index.html` (script tags, the nav, `#block` and its title
+`director.js` (`block` in the debug handle list; `runsBehindPanels`, an opt-in that keeps a live session stepping behind the controls panels with the player's Ooga idle), `src/index.html` (script tags, the nav, `#block` and its title
 card), `src/style.css` (the game's panels, appended), `test/run.mjs` (rules in the global tier, a `block` scene) and
 `AGENTS.md` (the module and test rows).
 
@@ -176,14 +175,12 @@ and thrown to stun, and a seeded round on
 autopilot replaying exactly to three captures. The `block` scene runs the title card and Escape, W S and A D on screen,
 a quiz trap through a wrong and a right answer, an autopilot round to its saved results, and the round trip.
 
-On 2026-11-01, after merging rock, the global tier passes 363 of 363, including a check that every retro cabinet
-still maps to its own retro game and score ID behind the fifth live cabinet. Browser scenes have not been run for this
+The entry hall's Node checks cover the stage's four cabinets, the hall reaching the ledge, the zipline's survey and the Rally poster's move; the `arcade` step walks it. Browser scenes have not been run for this
 head: `npm test -- block arcade` needs real Chrome on real hardware before merge.
 
 ## High scores
 
-Rock's shared high-score registry (`highscore-rules.js` and the Worker) does not know Block Frenzy, so its cabinet
-carries no `scoreId` (`null` in `arcadeModels.GAMES`) and submits nothing. Its best stays local through
+Rock's shared high-score registry (`highscore-rules.js` and the Worker) does not know Block Frenzy, so it submits nothing. Its best stays local through
 `game.recordBlock`. Registering it is a maintainer question.
 
 
@@ -195,3 +192,13 @@ Mounted riders keep their existing trap/blast behaviour, but their knockback and
 clocks now expire normally while riding. The existing piggyback proof checks intermediate
 and completed expiry without dismounting. Multiplayer, low-ceiling/overhang geometry,
 physical touch controls and browser performance still require verification.
+
+## Live rounds
+Signed-in Oogas only, on a Worker that lists `block-v1` in welcome; anywhere else the game is solo as before.
+
+- **Registry** (`worker/src/block.js`, contract in `block-wire.js`): one match a room. `reg`/`unreg`/`ready`/`opt` in the lobby; the first registered picks the map and size (1v1 to 4v4, `MAX_SIDE`); `reg` carries the map already picked on their board, and registered players' boards follow the match's map, grown if more have registered than it seats. With two or more registered, everyone ready starts a 3 s countdown. One person alone chooses: Start alone (`alone`, at once with NPCs) or Wait for players (marks them ready, which starts nothing until someone else registers and readies). If the others leave, the choice comes back.
+- **Teams:** random and as even as can be (`split`); empty seats are NPCs.
+- **Host:** one seated page runs `block-sim.js`, chosen as Ghost Hunter's host is (longest in the room, a visible page first). If it leaves, the next seated page continues from its last snapshot; if no seated human is left, the round ends. A leaver's seat goes to an NPC.
+- **No joining mid-round.** Late arrivals sit in the viewing chairs (`block-viewer.js`, `phase === "watch"`), a row of plain chairs in a blank white space above the game, as do visitors sent by `BL.blockLive.openWatchDeck(go)`. A viewer has no body, sends no input or position and is local to its page; it asks for the feed (`watch`) and receives every other frame, drawn smoothly between them, and only the match draws. The wheel, a pinch or the scope's +/- keys zoom the view (local only, stopping at the default view); a dark sports-style scoreboard in the corner, with a small table per player of blocks mined, stolen (counted on the viewer from who starts carrying the other side's block) and splats landed and the block-mined sound (once per capture, read from the score) come from the same match state. It has no voice in this version. It can register for the next round from there.
+- **Wire:** binary frames (`"BFZ1"`, round tag, host epoch, sequence, at most 2048 bytes, 12/s), JSON inputs (20/s, at most four actions a message). Nothing reaches storage: the match rides one socket attachment.
+- **Voice:** zone `block-frenzy`, its own voice group, blended in from the arcade down the zipline (`voice-blend.js`), isolated on arrival.

@@ -756,6 +756,19 @@ test("signed-in lookups coalesce requests and bound last-good identities by snap
   assert.equal(await lookup("new-ooga"), null, "an outage cannot resurrect an identity removed by a successful refresh");
 });
 
+test("a refresh that never settles, its request cancelled, keeps nobody waiting and is replaced", async () => {
+  let now = NOW, calls = 0, hang = true;
+  const lookup = createContributorLookup(() => {
+    calls++;
+    if (hang) return new Promise(() => {});
+    return Promise.resolve(Response.json({ ...snapshot(person("new-ooga")), meta: { ...snapshot().meta, generated_at: new Date(now).toISOString() } }));
+  }, () => now, 5);
+  assert.equal(await lookup("new-ooga"), null, "the hung refresh answers nobody and holds nobody");
+  now += 10; hang = false;
+  assert.equal((await lookup("new-ooga")).handle, "new-ooga", "the next look starts a new refresh");
+  assert.equal(calls, 2);
+});
+
 test("sign-in belongs to the bundled GitHub owner, never an account named after their alias", async () => {
   let requests = 0;
   const lookup = createOwnedCharacterLookup([{ handle: "Cave-Name", github_login: "real-owner",

@@ -11,9 +11,11 @@ import { fromSite, getSessionForRemoval, getSessionFromRequest, json, text } fro
 const BODY_MAX = 1024;
 
 const me = async (request, env) => {
-  const found = await (request.method === "DELETE" ? getSessionForRemoval : getSessionFromRequest)(request, env);
+  let found;
+  try { found = await (request.method === "DELETE" ? getSessionForRemoval : getSessionFromRequest)(request, env, true); }
+  catch { return json({ error: "unavailable" }, 503, { "retry-after": "5" }); }
   if (request.method === "GET") return json({ player: found ? publicPlayer(found.player) : null,
-    character: found ? found.character : null, donations: !!env.DONATIONS, tess: !!env.ANTHROPIC_API_KEY, highscores: !!env.DB, highscoreSnapshots: !!env.DB });
+    character: found ? found.character : null, donations: !!env.DONATIONS, tess: !!env.ANTHROPIC_API_KEY, highscores: !!env.DB, highscoreSnapshots: !!env.DB, arcadePlays: !!env.DB });
   if (!fromSite(request, env.SITE_ORIGIN)) return json({ error: "forbidden" }, 403);
   if (!found) return json({ error: "unauthenticated" }, 401);
 

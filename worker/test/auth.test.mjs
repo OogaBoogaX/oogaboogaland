@@ -81,10 +81,24 @@ test("the page never receives the avatar url or ban fields", () => {
 
 test("the page takes real donations only from a Worker with the bananapayserver binding, and asks Tess's questions only of one with her key", async () => {
   const me = async (env) => (await handleApi(new Request("https://site.test/api/me"), { SITE_ORIGIN: "https://site.test", ...env }, new URL("https://site.test/api/me"))).json();
-  assert.deepEqual(await me({}), { player: null, character: null, donations: false, tess: false, highscores: false, highscoreSnapshots: false });
-  assert.deepEqual(await me({ DONATIONS: {} }), { player: null, character: null, donations: true, tess: false, highscores: false, highscoreSnapshots: false });
-  assert.deepEqual(await me({ ANTHROPIC_API_KEY: "sk-test" }), { player: null, character: null, donations: false, tess: true, highscores: false, highscoreSnapshots: false });
+  assert.deepEqual(await me({}), { player: null, character: null, donations: false, tess: false, highscores: false, highscoreSnapshots: false, arcadePlays: false });
+  assert.deepEqual(await me({ DONATIONS: {} }), { player: null, character: null, donations: true, tess: false, highscores: false, highscoreSnapshots: false, arcadePlays: false });
+  assert.deepEqual(await me({ ANTHROPIC_API_KEY: "sk-test" }), { player: null, character: null, donations: false, tess: true, highscores: false, highscoreSnapshots: false, arcadePlays: false });
   assert.equal((await me({ DB: {} })).highscores, true);
+});
+
+test("a D1 failure is never reported as signed out, and a failed session stamp is no failure at all", async () => {
+  const token = "session-token", cookie = `${cookieNames("https://site.test").session}=${token}`;
+  const request = () => new Request("https://site.test/api/me", { headers: { cookie } }), url = new URL("https://site.test/api/me");
+  const failing = { prepare: () => ({ bind: () => ({ first: async () => { throw new Error("D1_ERROR"); } }) }) };
+  const down = await handleApi(request(), { SITE_ORIGIN: "https://site.test", DB: failing }, url);
+  assert.equal(down.status, 503, "the page asks again rather than believing it is signed out");
+  const player = { id: 7, login: "ooga-dev", banned_at: null, created_at: 1, token_hash: "h", expires_at: 4102444800, last_used_at: 1 };
+  let stamps = 0;
+  const unstamped = { prepare: () => ({ bind: () => ({ first: async () => player }) }), batch: async () => { stamps++; throw new Error("D1_ERROR"); } };
+  const body = await (await handleApi(request(), { SITE_ORIGIN: "https://site.test", DB: unstamped }, url)).json();
+  assert.equal(stamps, 1);
+  assert.equal(body.player && body.player.login, "ooga-dev", "only the last-used stamp failed");
 });
 
 const SITE = "https://site.test", FAR = 4102444800;
@@ -154,7 +168,7 @@ test("old nonowner sessions receive no identity and cannot reach account, room o
   for (const login of ["visitor", "cave-name"]) {
     const DB = database(login), env = { SITE_ORIGIN: SITE, DB,
       ROOM: { getByName: () => { throw new Error("Ineligible session reached the room binding"); } } };
-    assert.deepEqual(await (await worker.fetch(requestFor("/api/me"), env)).json(), { player: null, character: null, donations: false, tess: false, highscores: true, highscoreSnapshots: true });
+    assert.deepEqual(await (await worker.fetch(requestFor("/api/me"), env)).json(), { player: null, character: null, donations: false, tess: false, highscores: true, highscoreSnapshots: true, arcadePlays: true });
     assert.equal((await worker.fetch(requestFor("/api/me", "PATCH"), env)).status, 401);
     assert.equal((await worker.fetch(requestFor("/room", "GET", { upgrade: "websocket", "x-player-contributor": "1" }), env)).status, 401);
     assert.equal((await worker.fetch(requestFor("/api/voice/publish", "POST"), env)).status, 401);
