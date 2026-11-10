@@ -347,14 +347,15 @@ const destinationMapPadEscapeProof = () => {
       replaceChildren() {}, querySelectorAll: () => [], showModal() { this.open = true; state.shown++; }, close() { this.open = false; } });
     return els.get(id);
   };
-  const document = { getElementById: el, querySelector: sel => sel === "dialog[open]" ? (el("destination-map").open ? el("destination-map") : state.otherDialog) : null, pointerLockElement: null,
+  const document = { getElementById: el, querySelector: sel => sel === "dialog:modal, dialog[open]:not(.board-floating)" ? (el("destination-map").open ? el("destination-map") : state.otherDialog && !state.otherDialog.floating ? state.otherDialog : null) : null, pointerLockElement: null,
     createElement: () => el("row" + els.size) };
   const window = { BL: { controls: { resetAll() {} }, gamepad: { requireNeutral() {} }, padFocus: { open: () => state.layer } },
     matchMedia: () => ({ matches: false }), addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener() {} };
   const context = { window, document, localStorage: { getItem: () => "1", setItem() {} } };
   runInNewContext(readFileSync(join(root, "src/js/destination-map.js"), "utf8"), context);
   const scene = { id: "hub" }, map = window.BL.destinationMap.create({ current: () => scene, ready: () => true });
-  map.connect({ available: () => true, travels: () => true, selected: () => null, names: () => ["pile"], label: n => n, travel: () => true });
+  let available = true;
+  map.connect({ available: () => available, travels: () => true, selected: () => null, names: () => ["pile"], label: n => n, travel: () => true });
   const press = (key, pad) => { const e = { key, code: key, pad, prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; } }; listeners.get("keydown")(e); return e; };
   const dialog = el("destination-map");
   // The Controls panel (or a board, Add an Ooga, the donation popup) is the open layer: B's Escape is its own.
@@ -371,8 +372,18 @@ const destinationMapPadEscapeProof = () => {
   // A keyboard Escape on foot is never Map's.
   state.layer = false;
   const keyboard = press("Escape", false), keyboardPassed = !keyboard.prevented && !dialog.open;
+  // The floating Oogatron board is a non-modal dialog that padFocus does not see: it must not block Map.
+  state.otherDialog = Object.assign(el("board"), { open: true, floating: true });
+  const shownBefore = state.shown, overBoard = press("Escape", true), floatingOpens = overBoard.prevented && overBoard.stopped && dialog.open && state.shown === shownBefore + 1;
+  press("Escape", true); state.otherDialog = null;
+  // A refused Map (a modal dialog padFocus misses, or Map unavailable) must not swallow Menu's Escape.
+  state.otherDialog = Object.assign(el("modal"), { open: true, floating: false });
+  const refused = press("Escape", true), refusedPassed = !refused.prevented && !refused.stopped && !dialog.open;
+  state.otherDialog = null; available = false;
+  const unavailable = press("Escape", true), unavailablePassed = !unavailable.prevented && !unavailable.stopped && !dialog.open;
+  available = true;
   map.dispose();
-  return { passedDialog, passedCard, opened, closed, keyboardPassed };
+  return { passedDialog, passedCard, opened, closed, keyboardPassed, floatingOpens, refusedPassed, unavailablePassed };
 };
 // Rule: exercise the actual bounded rage state machine with a small physical
 // adapter. Collision and the rendered carry are covered by the hub regressions.
@@ -30485,7 +30496,7 @@ const unitChecks = async () => {
   const sleepLandingPlayers = sleepLandingPlayersProof();
   record("gorilla sleep landing: the real hub predicate protects local and remote players while allowing vertically clear beds", Object.values(sleepLandingPlayers).every(Boolean), JSON.stringify(sleepLandingPlayers));
   const mapPadEscape = destinationMapPadEscapeProof();
-  record("destination map pad regression: a pad's B or Menu over another dialog or card is that layer's Escape and never opens Map; on foot it opens Map and inside Map it closes it", Object.values(mapPadEscape).every(Boolean), JSON.stringify(mapPadEscape));
+  record("destination map pad regression: a pad's B or Menu over another dialog or card is that layer's Escape and never opens Map; on foot it opens Map and inside Map it closes it; a floating board does not block Map and a refused Map never swallows Menu's Escape", Object.values(mapPadEscape).every(Boolean), JSON.stringify(mapPadEscape));
   const sleepBeamPool = sleepBeamPoolProof();
   record("gorilla sleep beam: fixed pool, slot isolation, live reduced motion and scene cleanup", Object.values(sleepBeamPool).every(Boolean), JSON.stringify(sleepBeamPool));
   const sleepStalls = gorillaSleepStallProof();

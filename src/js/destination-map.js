@@ -60,7 +60,7 @@
       complete(); close(true);
     };
     const open = () => {
-      if (!canOpen() || dialog.open || document.querySelector("dialog[open]")) return false;
+      if (!canOpen() || dialog.open || document.querySelector("dialog:modal, dialog[open]:not(.board-floating)")) return false;
       owner = current();
       for (const key of down) swallowed.add(key);
       BL.controls.resetAll(); owner.controlsHelpHold?.(true);
@@ -98,7 +98,7 @@
         // row's Escape and opens Map where it is available; inside the dialog pad-focus.js sends Escape for B or Menu.
         // Over any other menu layer (a dialog or card) that Escape is the layer's own, so it passes through untouched.
         if (dialog.open) { e.preventDefault(); e.stopImmediatePropagation(); if (e.key === "Escape") close(); }
-        else if (e.key === "Escape" && !BL.padFocus?.open() && canOpen()) { e.preventDefault(); e.stopImmediatePropagation(); open(); }
+        else if (e.key === "Escape" && !BL.padFocus?.open() && open()) { e.preventDefault(); e.stopImmediatePropagation(); }
         return;
       }
       const key = e.code || e.key;
