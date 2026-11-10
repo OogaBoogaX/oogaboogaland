@@ -19770,7 +19770,35 @@ scene("hub", { label: "distant effects", query: "pos=0", steps: [hubDistantEffec
 // the crew is built, as on a real arrival.
 scene("hub", { label: "guest likeness", query: "pos=0", opts: { initScript: GUEST_LIKENESS_INIT }, steps: [hubGuestLikeness] });
 scene("hub", { label: "outdoor travel", opts: { initScript: `window.BL={};let outdoorCrew;Object.defineProperty(BL,"crew",{configurable:true,get:()=>outdoorCrew,set:value=>{outdoorCrew=value;const create=value.create;value.create=ctx=>{window.__outdoorTravelContext=ctx;return create(ctx);};}});` }, steps: [hubOutdoorTravel] });
-scene("hub", { opts: !ONLY || onlyMatches(hubArrival.name) ? { initScript: `(${hubSleepWire.toString()})()` } : {}, steps: [hubArrival, { name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hudVisit, hubKeptDelivery, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, hubCloudCamera, hubCloudFraming, hubKeypadRedirect, trip("hub"), factoryActivityRouting, hubLiveWake, hubSeparateBodies] });
+const hubCatapultRide = { name: "hub catapult ride", why: "playthrough: the real hub action launches once, lands on dry ground, and GAME MODE interrupts a second flight safely", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, H = BL.scenes.hub.debug, first = H.catapult;
+    if (!first) return { built: false };
+    B.pilot.possess(B.cavemen.get("portlandhodl"));
+    if (B.crew.sleeping) B.crew.wakePlayer();
+    const a = B.pilot.player, site = first.site;
+    const space = (repeat = false) => { for (const type of ["keydown", "keyup"]) window.dispatchEvent(new KeyboardEvent(type, { key: " ", code: "Space", repeat, bubbles: true, cancelable: true })); };
+    const board = () => { B.pilot.navigate({ position: { x: site.padX, y: site.padY, z: site.padZ }, yaw: site.ry, pitch: .5, dist: 7 }); B.advance(.3, 1 / 30); };
+    board(); const prompt = document.getElementById("act").textContent;
+    space(); const launched = H.catapult.flight.launches;
+    space(true); const single = H.catapult.flight.launches === launched && a.camp.seat?.kind === "catapult";
+    let frames = 0, chute = false;
+    while (H.catapult.phase !== "idle" && frames++ < 600) { B.advance(1 / 30, 1 / 30); chute ||= H.catapult.chute; }
+    const p = a.root.position, landed = { phase: H.catapult.phase, seated: !!a.camp.seat, x: p.x, y: p.y - a.baseY, z: p.z, floor: B.headquarters.solids.supportAt(p.x, p.z, p.y - a.baseY, p.y - a.baseY, a), onLand: B.island.onLand(p.x, p.z), landings: H.catapult.flight.landings };
+    board(); space(); B.advance(.5, 1 / 30);
+    const again = H.catapult.phase !== "idle";
+    H.setGameMode(true);
+    const ended = H.catapult.phase === "idle" && !a.camp.seat;
+    board(); space(); const refused = H.catapult.phase === "idle";
+    H.setGameMode(false); B.advance(.2, 1 / 30);
+    return { built: true, hidden: first.hidden, prompt, launched, single, frames, chute, landed, again, ended, refused, restored: !H.gameMode };
+  })()`);
+  record("hub catapult: Space launches once, opens the parachute and lands on dry island ground; GAME MODE ends a second flight, refuses launches and restores normal play",
+    r.built && r.hidden.length === 0 && r.prompt === "LAUNCH!" && r.launched === 1 && r.single && r.chute && r.frames < 600
+      && r.landed.phase === "idle" && !r.landed.seated && r.landed.onLand && Math.abs(r.landed.y - r.landed.floor) < .15 && r.landed.landings === 1
+      && r.again && r.ended && r.refused && r.restored, JSON.stringify(r));
+} };
+scene("hub", { opts: !ONLY || onlyMatches(hubArrival.name) ? { initScript: `(${hubSleepWire.toString()})()` } : {}, steps: [hubArrival, hubCatapultRide, { name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hudVisit, hubKeptDelivery, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, hubCloudCamera, hubCloudFraming, hubKeypadRedirect, trip("hub"), factoryActivityRouting, hubLiveWake, hubSeparateBodies] });
 // The same ownership contract exercises complete destruction on memory-limited devices.
 // A released hub's return enters in slices (`enterSteps`), one at boot or with no slicing in one go (`enter`): the same
 // statements in the same order, so the island it builds, its targets, rock guides and outline registry must be equal.
@@ -20493,14 +20521,22 @@ const catapultChecks = (BL, island) => {
   const flown = () => { onBoard(); for (let i = 0; i < 200; i++) K.update(1 / 60); K.launch(cave); for (let i = 0; K.flying && i < 600; i++) K.update(1 / 60, stick[i], -stick[i]); };
   const stepped = () => { C.start(site, bare, site.padX, site.padY, site.padZ, false); for (let i = 0; i < 400; i++) C.step(site, bare, 1 / 60, stick[i], -stick[i]); };
   for (let k = 0; k < 60; k++) { flown(); stepped(); }
+  // Warm the same fixed-length call sites that are measured below. The whole-flight helper exits on a getter,
+  // while these loops cross the controller and bare arithmetic with the same 400 changing input pairs.
+  const frames400 = () => { for (let i = 0; i < 400; i++) K.update(1 / 60, stick[i], -stick[i]); };
+  const steps400 = () => { for (let i = 0; i < 400; i++) C.step(site, bare, 1 / 60, stick[i], -stick[i]); };
+  for (let k = 0; k < 100; k++) {
+    onBoard(); for (let i = 0; i < 200; i++) K.update(1 / 60); K.launch(cave); frames400(); K.end();
+    C.start(site, bare, site.padX, site.padY, site.padZ, false); steps400();
+  }
   let extra = Infinity;
   for (let round = 0; round < 3; round++) {
     onBoard(); for (let i = 0; i < 200; i++) K.update(1 / 60); K.launch(cave);
     let from = young();
-    for (let i = 0; i < 400; i++) K.update(1 / 60, stick[i], -stick[i]);
+    frames400();
     const frames = young() - from;
     C.start(site, bare, site.padX, site.padY, site.padZ, false); from = young();
-    for (let i = 0; i < 400; i++) C.step(site, bare, 1 / 60, stick[i], -stick[i]);
+    steps400();
     extra = Math.min(extra, (frames - (young() - from)) / 400);
     K.end();
   }
