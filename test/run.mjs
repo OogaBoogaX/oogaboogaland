@@ -385,6 +385,45 @@ const destinationMapPadEscapeProof = () => {
   map.dispose();
   return { passedDialog, passedCard, opened, closed, keyboardPassed, floatingOpens, refusedPassed, unavailablePassed };
 };
+const destinationMapCoachingHintProof = () => {
+  const els = new Map(), state = { otherDialog: null };
+  const el = id => {
+    if (!els.has(id)) els.set(id, { id, hidden: id === "explore-coach", disabled: false, open: false, textContent: "", dataset: {}, attrs: {},
+      addEventListener() {}, removeEventListener() {}, setAttribute(k, v) { this.attrs[k] = v; }, focus() {}, click() {}, append() {},
+      replaceChildren() {}, querySelectorAll: () => [], showModal() { this.open = true; }, close() { this.open = false; } });
+    return els.get(id);
+  };
+  const querySelector = sel => {
+    const open = [el("destination-map"), state.otherDialog].find(d => d && d.open) || null;
+    if (!open) return null;
+    if (sel === "dialog[open]") return open;
+    if (sel === "dialog:modal, dialog[open]:not(.board-floating)") return open.floating ? null : open;
+    return null;
+  };
+  const document = { getElementById: el, querySelector, pointerLockElement: null, createElement: () => el("row" + els.size) };
+  const window = { BL: { controls: { resetAll() {} }, gamepad: { requireNeutral() {}, state: { connected: false } }, padFocus: { open: () => false } },
+    matchMedia: () => ({ matches: false }), addEventListener() {}, removeEventListener() {} };
+  const context = { window, document, localStorage: { getItem: () => null, setItem() {} } };
+  runInNewContext(readFileSync(join(root, "src/js/destination-map.js"), "utf8"), context);
+  const scene = { id: "hub" }, map = window.BL.destinationMap.create({ current: () => scene, ready: () => true });
+  map.connect({ available: () => true, travels: () => true, selected: () => null, names: () => ["pile"], label: n => n, travel: () => true, controlled: () => false, position: () => null });
+  const coach = el("explore-coach");
+  map.update();
+  const offered = !coach.hidden;
+  // A floating Oogatron board is a non-modal dialog: it must not hide the coaching hint.
+  state.otherDialog = Object.assign(el("board"), { open: true, floating: true });
+  map.update();
+  const floatingShows = !coach.hidden;
+  // A modal or other non-floating dialog still hides the hint.
+  state.otherDialog = Object.assign(el("controls-help"), { open: true, floating: false });
+  map.update();
+  const modalHides = coach.hidden;
+  state.otherDialog = null;
+  map.update();
+  const restored = !coach.hidden;
+  map.dispose();
+  return { offered, floatingShows, modalHides, restored };
+};
 // Rule: exercise the actual bounded rage state machine with a small physical
 // adapter. Collision and the rendered carry are covered by the hub regressions.
 const gorillaRageProof = async () => {
@@ -30497,6 +30536,8 @@ const unitChecks = async () => {
   record("gorilla sleep landing: the real hub predicate protects local and remote players while allowing vertically clear beds", Object.values(sleepLandingPlayers).every(Boolean), JSON.stringify(sleepLandingPlayers));
   const mapPadEscape = destinationMapPadEscapeProof();
   record("destination map pad regression: a pad's B or Menu over another dialog or card is that layer's Escape and never opens Map; on foot it opens Map and inside Map it closes it; a floating board does not block Map and a refused Map never swallows Menu's Escape", Object.values(mapPadEscape).every(Boolean), JSON.stringify(mapPadEscape));
+  const mapCoachingHint = destinationMapCoachingHintProof();
+  record("destination map coaching hint: a floating board does not hide the island coaching hint, while a non-floating dialog still does", Object.values(mapCoachingHint).every(Boolean), JSON.stringify(mapCoachingHint));
   const sleepBeamPool = sleepBeamPoolProof();
   record("gorilla sleep beam: fixed pool, slot isolation, live reduced motion and scene cleanup", Object.values(sleepBeamPool).every(Boolean), JSON.stringify(sleepBeamPool));
   const sleepStalls = gorillaSleepStallProof();

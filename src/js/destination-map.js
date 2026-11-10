@@ -156,7 +156,7 @@
         const learnDisabled = !canOpen();
         if (learn.disabled !== learnDisabled) { learn.disabled = learnDisabled; learn.title = learnDisabled ? "Finish the current interaction before learning the controls" : "Replay the movement and Map guide"; }
         if (seen && coaching < 0) { if (!coach.hidden) coach.hidden = true; return; }
-        const available = hub && canOpen() && current().coachingReady !== false && !document.querySelector("dialog[open]");
+        const available = hub && canOpen() && current().coachingReady !== false && !document.querySelector("dialog:modal, dialog[open]:not(.board-floating)");
         const show = available && (!seen || coaching >= 0);
         if (coach.hidden === show) coach.hidden = !show;
         if (!show) return;
