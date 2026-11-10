@@ -26,11 +26,13 @@
     // The production GitHub OAuth App (callback <SITE_ORIGIN>/auth/callback).
     "GITHUB_CLIENT_ID": "Ov23livdIME2GaBaPdAg",
     // The production Realtime SFU app, for voice. Without it voice says unavailable.
-    "REALTIME_APP_ID": "c7ad1d5bf43116572f082ebe18011061"
+    "REALTIME_APP_ID": "c7ad1d5bf43116572f082ebe18011061",
+    // Where a hosted game's instance (GAMES, worker/src/game-host.js) is made: eastern North America. Only an object's
+    // first making reads it, and it stays there; moving one takes a new version in worker/src/games.js.
+    "GAME_LOCATION_HINT": "enam"
     // Secrets, never here: `wrangler secret put GITHUB_CLIENT_SECRET --config wrangler.production.jsonc`, and REALTIME_SECRET.
-    // Optional, for the games the Worker hosts (GAMES, worker/src/game-host.js): GAME_LOCATION_HINT, a region such as
-    // "enam" an instance's object is made in (else near whoever first connects; it stays there), and GAME_DEBUG_IDS,
-    // account ids, comma-separated, that may pause a hosted game or start it past its first round (staging).
+    // Optional, for the games the Worker hosts: GAME_DEBUG_IDS, account ids, comma-separated, that may pause a hosted
+    // game or start it past its first round (staging).
   },
   // Private production replay storage; public reads are served through the Worker.
   // See docs/cloud-hopper-replays.md for validation and bounded retention.

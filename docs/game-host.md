@@ -22,7 +22,7 @@ Each kind and venue is one Durable Object, `GAMES.idFromName("<kind>:<venue>:v<v
 - **Moving an instance takes a new version.** An object stays where it was first made, so bumping `version` is how
   an instance moves.
 - **Where it is made.** `GAME_LOCATION_HINT` (a region such as `enam`) says where a new object is made. Without it,
-  it is made near whoever connects first.
+  it is made near whoever connects first. Production sets `enam`; staging leaves it unset.
 
 The ghost hunt is kind `ghost-hunt` at the venue `arena`: one arena, one hunt at a time, as the arcade has. More arenas
 or private hunts would be more venues, or match tickets a matchmaker signs; neither exists yet.
