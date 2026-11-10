@@ -21,7 +21,7 @@ import "../../src/js/reaction-policy.js";
 //                 { t: "poker-voice", table }   0-9 while watching a table, null for the Ember Den floor
 //                 { t: "blend", to, k }          crossing toward voice group `to`, k of BLEND.STEPS along (null, 0: none)
 //                 { t: "hub", on }               this page shows the island and is visible (host candidates)
-//                 { t: "visible", on }           HALLOWEEN: this page is visible (the ghost arena's host candidates)
+//                 { t: "visible", on }           this page is visible (Block Frenzy's host candidates, block.js)
 //                 { t: "mute", on }              this page muted its own microphone, for everyone's roster
 //                 { t: "hp", v, ko }             the driven body's health (normalized 0-100) and knockout flag
 //                 pose.g                         optional gorilla locomotion: [flags, speed, stride, climb, side, swim]
@@ -37,8 +37,6 @@ import "../../src/js/reaction-policy.js";
 //                 { t: "studio", action, playback?, commandId?, ... }  a DSB Studio seat or host command; transport
 //                                checks `playback` against the state's playbackRevision
 //                                (`parseStudioCommand` in studio-policy.js; see docs/dsb-studio-session.md)
-//                 { t: "ghost", k, g?, d?, h? }  HALLOWEEN: the ghost hunt's `start`, `ready`, `pause` or `leave`, or `hits` h, for its
-//                                host, from a page in the arcade's ghost arena
 //                 { t: "react", e }              an emoji over the driven body for a moment (see Reactions below)
 //                 { t: "hand", on, tone?, e? }   the persistent slot up or down; e omitted/empty means the hand in tone 0 to 5
 //                 { t: "link", to, on }          ask player `to` for a voice link, or take this player's ask back (see Voice links below)
@@ -48,8 +46,9 @@ import "../../src/js/reaction-policy.js";
 //                                                CHALK_HZ below)
 //                 { t: "wallet", k, u, ... }   DSB Land: one of the driven Ooga's free hardware wallets taken, set
 //                                                down, picked up, thrown or blown (see WALLET_CAP below)
-//                 binary                         the NPC host's frame of every Ooga's pose, relayed as is; or,
-//                                                led by GHOST_MAGIC, the ghost arena host's hunt state
+//                 binary                         the NPC host's frame of every Ooga's pose, relayed as is (HALLOWEEN: one
+//                                                led by GHOST_MAGIC, from a page loaded before the ghost hunt ran on
+//                                                the server, game-host.js, is dropped)
 // Room → client:  welcome { you, players, tickHz, now, loopEpoch, connectionToken }, join { p }, leave { id, reason },
 //                 body { id, name }, state { now, ps: [id, x, y, z, yaw, ...], gs?, js? }, kick { reason },
 //                 state.gs                       gorilla locomotion in [id, ...g] runs; welcome/join carry g too
@@ -89,10 +88,6 @@ import "../../src/js/reaction-policy.js";
 //                                            "d" set down or "f" thrown, at and end on the room's clock;
 //                                            wallet { k: "blast", id, u } their wallets that went off together.
 //                                            wallets { list } on entering a DSB zone: the live wallets there, each a w
-//                 ghost { k, g, d, from }    HALLOWEEN: a follower's start or hit, relayed to its hunt's host alone
-//                 ghost-host { id, followers }  who runs the ghost arena's hunt (0 for nobody) and how many pages in
-//                                            the arena follow it; welcome carries ghostHost and ghostFollowers; binary
-//                                            frames led by GHOST_MAGIC from it, to pages in the arena
 //                 react { id, e }            player `id` reacted with emoji `e`, to the players in their zone
 //                 hand { id, on, tone, e }   player `id` toggled or changed their slot; welcome and join carry `hand`
 //                                            `handTone` and `handEmoji`. To the sender alone: a change it was refused
@@ -212,7 +207,10 @@ const PM_DATA = /^[A-Za-z0-9+/]+={0,2}$/;
 // The Sphere's one exterior doorway is a short, server-leased FIFO. Room door transits are independent
 // announcements inside exactly one numbered room. Alarms, rather than timers, expire both while idle.
 export const DOOR_ZONE = "sphere";
-export const DOOR_ROOM = /^sphere-([1-9])$/;
+export const DOOR_ROOM = /^sphere-([0-9])$/;
+// Of the Sphere's ten rooms (0–9) only room 1, the Conference Room, has a lock (src/js/timechain-rooms.js `lockable`).
+export const LOCKABLE_ROOMS = [1];
+const sphereRoom = (room) => Number.isInteger(room) && room >= 0 && room <= 9;
 export const DOOR_CYCLE = /^[A-Za-z0-9_-]{1,64}$/;
 export const DOOR_GRANT_MS = 5000;
 export const DOOR_TRANSIT_MS = 12000;
@@ -227,9 +225,6 @@ export const ROOM_PIN = /^[0-9]{4}$/;
 export const PIN_PASS_MS = 60000;
 export const PIN_TRIES = 5;
 export const PIN_WAIT_MS = 60000;
-// HALLOWEEN: the arcade's ghost hunt's reports to its host: a follower's hits, every target's summed damage a tenth of a second
-// at a time in one `hits` report (up to 60 a target), so any mix of rifle and monkey fire stays at ten reports a second;
-// the rest of the budget is for a start or pause.
 // A driven Ooga's own shots and strikes, relayed for drawing only (nothing is hit and nothing is kept): a burst is
 // three bananas 0.09 s apart, every 0.44 s at most, and a shot never flies past SHOT_RANGE.
 export const SHOT_HZ = 12;
@@ -242,8 +237,6 @@ export const SWING_BURST = 4;
 export const CONTROL_FRAMES = new Set(["hub", "visible", "zone", "poker-voice", "mute", "body"]);
 export const CONTROL_HZ = 8;
 export const CONTROL_BURST = 20;
-export const GHOST_HZ = 20;
-export const GHOST_BURST = 24;
 // Chalkboard: the EntropyLab board on the island, kept for good. One page at a time holds it, and only while its
 // Ooga stands at the board in the island's `outside` zone (chalk-board.js `near`, against the last pose it sent);
 // moving off, changing zone or body, or leaving lets it go. A holder silent for CHALK_IDLE_MS can be taken over by the
@@ -272,33 +265,17 @@ export const WALLET_HZ = 8;
 export const WALLET_BURST = 8;
 export const WALLET_FUSE_MAX = 60;
 const walletId = (u) => Number.isInteger(u) && u >= 1 && u <= 65535;
-// A follower's batch: up to GHOST_BATCH targets, each a ghost id (0 the boss) and its summed damage, as one report.
-export const GHOST_BATCH = 16;
-// The arcade's ghost arena runs its own hunt: its pages (zone `ghost-arena`, Ghost Hunter's Arena, a voice region of its
-// own (#422) whether a hunt runs or not; `arcade-hunt` from a page loaded before #422) elect a ghost host of their own,
-// follower reports from the arena go to it, and it sends the hunt's
-// state as a binary frame led by GHOST_MAGIC ("GHST"), up to GHOST_FRAME_MAX bytes and GHOST_FRAME_HZ a second, which
-// the room hands to every other page in the arena and keeps for the next to walk in. Only a visible page may host
-// (`ghostCandidate`): a hidden one runs no frames, so it would send nothing while every follower's hunt froze. The
-// arena's hallway watches, both its halves (`arcade.haunt` toward the hall, `ghost-arena.haunt` toward the arena): its
-// pages hear the frames and count as followers, so a spectator walked out sees and hears the hunt through the fence,
-// but they neither host nor report to the host (`watchesGhost`). `arcade.arena` is the arena's zone before #422, kept
-// for a page loaded before it.
+// HALLOWEEN: the arcade's ghost arena (zone `ghost-arena`, Ghost Hunter's Arena, a voice region of its own (#422)
+// whether a hunt runs or not; `arcade-hunt` and `arcade.arena` from pages loaded before #422) and its hallway, both
+// halves (`arcade.haunt` toward the hall, `ghost-arena.haunt` toward the arena). Its hunt runs on the server
+// (game-host.js, games/ghost-hunt.js), which pages there follow over their own socket; the room only hands a shot fired
+// in the arena to the hallway's pages too, so a spectator sees and hears the hunt through the fence. A binary frame
+// led by GHOST_MAGIC ("GHST") is a page from before that still sending its hunt as a host: dropped.
 export const GHOST_ARENA_ZONES = ["ghost-arena", "arcade-hunt", "arcade.arena"];
 export const GHOST_WATCH_ZONES = [...GHOST_ARENA_ZONES, "arcade.haunt", "ghost-arena.haunt"];
 export const inGhostArena = (p) => GHOST_ARENA_ZONES.includes(p.zone);
 export const watchesGhost = (p) => GHOST_WATCH_ZONES.includes(p.zone);
-export const ghostCandidate = (p) => p.visible && inGhostArena(p);
 export const GHOST_MAGIC = 0x54534847;
-export const GHOST_FRAME_MAX = 65536;
-export const GHOST_FRAME_HZ = 5;
-export const GHOST_FRAME_BURST = 6;
-const ghostHit = (g, d) => Number.isInteger(g) && g >= 0 && g < 65536 && Number.isInteger(d) && d >= 1 && d <= 60;
-const ghostHits = (h) => {
-  if (!Array.isArray(h) || h.length < 2 || h.length > GHOST_BATCH * 2 || h.length % 2) return null;
-  for (let i = 0; i < h.length; i += 2) if (!ghostHit(h[i], h[i + 1])) return null;
-  return { t: "ghost", k: "hits", h: h.slice() };
-};
 // Compatibility name: invalid chat is refused, never stripped or truncated. Same policy as the page.
 export const sanitizeChat = (text) => globalThis.BL.chatPolicy.error(text) ? "" : globalThis.BL.chatPolicy.text(text);
 
@@ -400,16 +377,16 @@ export const parseClientMessage = (text) => {
     return op ? { t: "chalk", ...op } : null;
   }
   if (msg.t === "door") {
-    if (msg.op === "ask") return (msg.dir === "in" || msg.dir === "out") && Number.isInteger(msg.room) && msg.room >= 1 && msg.room <= 9
+    if (msg.op === "ask") return (msg.dir === "in" || msg.dir === "out") && sphereRoom(msg.room)
       ? { t: "door", op: "ask", dir: msg.dir, room: msg.room } : null;
     if (msg.op === "go" || msg.op === "done") return typeof msg.cycle === "string" && DOOR_CYCLE.test(msg.cycle)
       ? { t: "door", op: msg.op, cycle: msg.cycle } : null;
     if (msg.op === "cancel") return { t: "door", op: "cancel" };
     if (msg.op === "pass") return typeof msg.door === "string" && DOOR_ROOM.test(msg.door) && (msg.dir === "in" || msg.dir === "out")
       ? { t: "door", op: "pass", door: msg.door, dir: msg.dir } : null;
-    if (msg.op === "lock" || msg.op === "try") return Number.isInteger(msg.room) && msg.room >= 1 && msg.room <= 9 && typeof msg.pin === "string" && ROOM_PIN.test(msg.pin)
+    if (msg.op === "lock" || msg.op === "try") return LOCKABLE_ROOMS.includes(msg.room) && typeof msg.pin === "string" && ROOM_PIN.test(msg.pin)
       ? { t: "door", op: msg.op, room: msg.room, pin: msg.pin } : null;
-    if (msg.op === "unlock") return Number.isInteger(msg.room) && msg.room >= 1 && msg.room <= 9 ? { t: "door", op: "unlock", room: msg.room } : null;
+    if (msg.op === "unlock") return LOCKABLE_ROOMS.includes(msg.room) ? { t: "door", op: "unlock", room: msg.room } : null;
     return null;
   }
   if (msg.t === "wallet") {
@@ -426,12 +403,6 @@ export const parseClientMessage = (text) => {
     const { vx, vy, vz } = msg;
     if (![vx, vy, vz].every(v => finite(v) && Math.abs(v) <= 20)) return null;
     return { t: "wallet", k, u, f, x: round(x), y: round(y), z: round(z), vx: round(vx), vy: round(vy), vz: round(vz) };
-  }
-  // HALLOWEEN: a follower's word to the ghost hunt's host.
-  if (msg.t === "ghost") {
-    if (msg.k === "start" || msg.k === "pause" || msg.k === "ready" || msg.k === "leave") return { t: "ghost", k: msg.k };
-    if (msg.k === "hits") return ghostHits(msg.h);
-    return msg.k === "hit" && ghostHit(msg.g, msg.d) ? { t: "ghost", k: "hit", g: msg.g, d: msg.d } : null;
   }
   if (msg.t === "react") return globalThis.BL.reactionPolicy.valid(msg.e) ? { t: "react", e: msg.e } : null;
   if (msg.t === "hand") {
@@ -630,8 +601,7 @@ export const voicePeers = (players, studio = null, links = null) => {
 // follow. The sitting host (`incumbent`) keeps the role while it still shows the island (`inHub`: in the hub
 // scene and visible); otherwise it goes to the page longest in the room among those that do. So a page that
 // hides and comes back returns as a follower and catches up from the host's frames, never taking hosting
-// back with its own stale state. 0 when no page qualifies. `on` says who qualifies (the arena's ghost hunt elects
-// its own host among the visible pages in its arena, `ghostCandidate`).
+// back with its own stale state. 0 when no page qualifies. `on` says who qualifies.
 const showsIsland = (p) => p.inHub;
 export const electHost = (players, incumbent = 0, on = showsIsland) => {
   let best = null;

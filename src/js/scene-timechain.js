@@ -19,7 +19,7 @@
       const raw = window.sessionStorage.getItem(VISIT_KEY);
       if (!raw || raw.length > 512) return null;
       const v = JSON.parse(raw), age = Date.now() - v.at;
-      if (!v || !ROOMS.parse(v.room) || v.mode !== "shared" && v.mode !== "solo" || !Number.isFinite(age) || age < 0 || age > VISIT_AGE) return null;
+      if (!v || ROOMS.parse(v.room) === null || v.mode !== "shared" && v.mode !== "solo" || !Number.isFinite(age) || age < 0 || age > VISIT_AGE) return null;
       if (v.login !== null && (typeof v.login !== "string" || v.login.length > 64)) return null;
       if (v.character !== null && (typeof v.character !== "string" || v.character.length > 40)) return null;
       return { room: v.room, mode: v.mode, login: v.login, character: v.character, guided: false };
@@ -47,7 +47,7 @@
     // Null to go ahead (or a promise of it while the code loads), or where to arrive instead.
     prepare(place, ctx) {
       const id = ROOMS.parse(place), world = ctx.world, me = BL.net.state.me;
-      if (!id) return { scene: "hub", place: "timechain" };
+      if (id === null) return { scene: "hub", place: "timechain" };
       const fresh = world.sphereVisit && world.sphereVisit.room === id ? world.sphereVisit : null;
       world.sphereVisit = null;
       let v = fresh || stored();
