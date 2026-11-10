@@ -153,7 +153,7 @@
   const NIGHT = 0.5, FIRE_SEAT_CHANCE = 0.5;
   // Clock-face degrees to a meadow point: 0 is -z (far), 90 is +x (right).
   const polar = (deg, r) => ({ x: Math.sin(deg * DEG) * r, z: -Math.cos(deg * DEG) * r });
-  const BUILD_DEGREES = [12, 40, 66, 80, 102, 165, 195, 212, 282, 297, 312, 340];
+  const BUILD_DEGREES = [12, 40, 66, 80, 110, 165, 195, 212, 282, 297, 312, 340];
   const BUILD_RADIUS = 13;
   const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
   const PATH_GEOMETRY = new WeakMap();
@@ -906,76 +906,14 @@
     const iy = camera.position.y - m.floorY + (y - camera.position.y) * amount;
     return ix >= PORTAL_MIN_X && ix <= PORTAL_MAX_X && iy >= PORTAL_MIN_Y && iy <= PORTAL_MAX_Y;
   };
-  const SLEEP_SCREEN = { x: 0, y: 0, depth: 0 };
-  let sleepSightFrame = 0, sleepSightSince = Infinity;
-  const SLEEP_SIGHT_VIEW = new Float64Array(12);
-  let sleepSightMode = null, sleepSightGorilla = false;
-  const advanceSleepSight = (dt) => {
-    sleepSightSince += Math.max(0, dt);
-    const p = camera.position, t = camera.target, view = SLEEP_SIGHT_VIEW;
-    const changed = pilot.mode !== sleepSightMode || !!clankerPlay.active !== sleepSightGorilla
-      || camera.near !== view[6] || camera.fov !== view[7] || renderer.size.width !== view[8] || renderer.size.height !== view[9]
-      || +RENDER_OPTS.birdsEyeCutaway !== view[10] || +matrixCave.portal.inside !== view[11]
-      || Math.hypot(p.x - view[0], p.y - view[1], p.z - view[2]) > 1
-      || Math.hypot(t.x - view[3], t.y - view[4], t.z - view[5]) > 1;
-    if (dt !== 0 && !changed && sleepSightSince < 1 / SIGHT_RECOMPUTE_HZ) return;
-    sleepSightFrame++; sleepSightSince = 0; sleepSightMode = pilot.mode; sleepSightGorilla = !!clankerPlay.active;
-    view[0] = p.x; view[1] = p.y; view[2] = p.z; view[3] = t.x; view[4] = t.y; view[5] = t.z;
-    view[6] = camera.near; view[7] = camera.fov; view[8] = renderer.size.width; view[9] = renderer.size.height;
-    view[10] = +RENDER_OPTS.birdsEyeCutaway; view[11] = +matrixCave.portal.inside;
-  };
-  const sleepSightAt = (x, y, z) => {
-    if (!matrixOverlayVisible(x, y, z)) return false;
-    const screen = renderer.project(x, y, z, SLEEP_SCREEN);
-    if (!screen || screen.x < 0 || screen.y < 0 || screen.x > renderer.size.width || screen.y > renderer.size.height) return false;
-    const eye = camera.position, dx = x - eye.x, dy = y - eye.y, dz = z - eye.z;
-    if (!entranceSegmentClear(eye.x, eye.y, eye.z, x, y, z, 0.002) || !bedSegmentClear(eye.x, eye.y, eye.z, x, y, z, 0.002, 0.004)) return false;
-    // Short exact sweeps keep long sight rays from scanning an island-sized box.
-    // The point checks also include the continuous ramp surfaces.
-    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    const outside = Math.max(0, Math.sqrt(eye.x * eye.x + eye.y * eye.y + eye.z * eye.z) - Math.sqrt(island.radius * island.radius + island.undersideDepth * island.undersideDepth + terrain.MAX_HEIGHT * terrain.MAX_HEIGHT) - island.unit);
-    const start = Math.min(1, outside / Math.max(distance, 1e-7));
-    // The pieces are walked from the sleeper back toward the eye: a mark indoors is usually blocked near it, and the
-    // answer is the same in either order.
-    const steps = Math.max(1, Math.ceil(distance * (1 - start) / (island.unit * 0.5)));
-    const last = start + (1 - start) * steps / steps;
-    let nx = eye.x + dx * last, ny = eye.y + dy * last, nz = eye.z + dz * last;
-    for (let i = steps - 1; i >= 0; i--) {
-      const k = start + (1 - start) * i / steps, px = eye.x + dx * k, py = eye.y + dy * k, pz = eye.z + dz * k;
-      if (!island.clearAt(nx, ny, nz, 0.002, 0.004) || !island.voxelSegmentClearAt(px, py, pz, nx, ny, nz, 0.002, 0.004)) return false;
-      nx = px; ny = py; nz = pz;
-    }
-    return true;
-  };
-  const sleepOpeningVisible = (x, y, z, cr, sr, halfWidth, halfHeight) => {
-    if (sleepSightAt(x, y, z)) return true;
-    for (let i = 0; i < 4; i++) {
-      const across = (i & 1 ? 1 : -1) * halfWidth, lift = (i & 2 ? 1 : -1) * halfHeight;
-      if (sleepSightAt(x + cr * across, y + lift, z + sr * across)) return true;
-    }
-    return false;
-  };
-  const sleepMarksVisible = (cave, x, y, z, mark = null) => {
-    if (cloudPlaying()) return false;
-    // Nobody's sleep is seen through the Mempool island's rock: not from the tunnels and the chamber inside it,
-    // and not a gorilla's in its nest from under the island or beyond its cliffs.
-    if (poolShade > 0.5) return false;
-    if (mempoolIsland?.billboardOccludes(camera.position.x, camera.position.y, camera.position.z, x, y, z)) return false;
-    if (!cave) {
-      if (mark && mark.sightFrame === sleepSightFrame) return mark.sightVisible;
-      const visible = sleepSightAt(x, y, z) && mempoolIsland.sightClear(camera.position.x, camera.position.y, camera.position.z, x, y, z);
-      if (mark) { mark.sightFrame = sleepSightFrame; mark.sightVisible = visible; }
-      return visible;
-    }
-    const bed = cave.bedroll;
-    if (cave.state !== "sleeping" || cave.bedTravel.mode !== "rest" || !bed || bed.sleeper !== cave) return false;
-    if (bed.sightFrame === sleepSightFrame && bed.sightActor === cave.index) return bed.sightVisible;
-    bed.sightFrame = sleepSightFrame; bed.sightActor = cave.index;
-    const head = cave.sleepHead, body = cave.root.position, room = bed.room, window = bed.window;
-    bed.sightVisible = sleepSightAt(head.x, head.y, head.z) || sleepSightAt(body.x, body.y, body.z)
-      || !bed.outdoor && sleepOpeningVisible(room.entrance.x, room.floor + 1.8, room.entrance.z, bed.cr, -bed.sr, (room.corridorWidth ?? room.width - 1.3) * 0.35, 1.1)
-      || !!window && sleepOpeningVisible(window.x, window.y, window.z, Math.cos(window.angle), Math.sin(window.angle), window.width * 0.35, window.height * 0.35);
-    return bed.sightVisible;
+  // A sleeper's Z's show only within SLEEP_MARK_RANGE of the Ooga the visitor drives (the view, with none) and on its own
+  // level, so a body asleep in a room under the meadow is not marked up through the ground.
+  const SLEEP_MARK_RANGE = 10, SLEEP_MARK_LEVEL = 3.5;
+  const sleepMarksVisible = (cave, x, y, z) => {
+    if (cloudPlaying() || poolShade > 0.5) return false;
+    if (cave && (cave.state !== "sleeping" || cave.bedTravel.mode !== "rest" || !cave.bedroll || cave.bedroll.sleeper !== cave)) return false;
+    const from = controlledGuideActor()?.root.position || camera.position, dx = x - from.x, dy = y - from.y, dz = z - from.z;
+    return Math.abs(dy) <= SLEEP_MARK_LEVEL && dx * dx + dy * dy + dz * dz <= SLEEP_MARK_RANGE * SLEEP_MARK_RANGE;
   };
   const viewInsideMatrix = (lookOut = false) => {
     const m = matrixCave.mouth, targetZ = lookOut ? 0.45 : -5.45;
@@ -1332,7 +1270,7 @@
   // Mouth local frame: +z leads out of the cave.
   const sealedCaveVariant = (id) => id === "c3" ? 1 : id === "c10" ? 2 : 0;
   // Every cave wears its own facade from the shared voxel kit: two lantern posts with a banner behind each, a string over the lintel,
-  // vines off the rim, and the theme's own things either side of the path (lab dice and flasks, the mirror's glyph
+  // vines off the rim, and the theme's own things either side of the path (lab dice, the mirror's glyph
   // monoliths, the Lightning Factory's coil and coal, Ooga Arcade's tokens and joystick, hard against the left of its
   // door: the Mempool stairs start at the right jamb and the Lightning Factory's right side fills the ground further left). A slot without a theme wears none: the sealed caves, and the
   // Headquarters ramps that run down a cutting rather than into a cliff. Each mouth bakes to one solid, one hanging and one glowing mesh, memoised per island
@@ -1340,7 +1278,7 @@
   // A `ceiling` run is two cables into the room, [left x, right x, from z, to z, height, lamp places, lamp kind], the kind a
   // hanging lantern unless named (EntropyLab's white strip lights).
   const THEMES = {
-    lab: { glass: 4, icon: "die", banners: [[-1, 1], [1, 1]], string: ["bulb", 4], ceiling: [[-1.6, 1.6, -1.5, -5.6, 3.0, [0.3, 0.72], "tube"]], pieces: [["flaskBench", -5.3, 1.1], ["die", -4.1, 2.8, 0, 1], ["die", -3.5, 3.6, 1, 3], ["die", -4.1, 2.8, 1, 4, 0.5], ["terminal", 3.7, 1.0], ["die", 4.3, 3.2, 1, 2]] },
+    lab: { glass: 4, icon: "die", banners: [[-1, 1], [1, 1]], string: ["bulb", 4], ceiling: [[-1.6, 1.6, -1.5, -5.6, 3.0, [0.3, 0.72], "tube"]], pieces: [["die", -4.1, 2.8, 0, 1], ["die", -3.5, 3.6, 1, 3], ["die", -4.1, 2.8, 1, 4, 0.5], ["terminal", 3.7, 1.0], ["die", 4.3, 3.2, 1, 2]] },
     matrix: { glass: 2, icon: "glyph", banners: [[1, 2], [-1, 2]], string: ["bulb", 2], pieces: [["monolith", -5.0, 0.9, 0, 0], ["monolith", 5.0, 0.9, 0, 1], ["runeStone", -4.2, 2.8, 0, 0], ["runeStone", 4.4, 2.9, 0, 1]] },
     lightning: { glass: 0, icon: "bolt", banners: [[-1, 0], [1, 0]], string: ["hanging", 0, [0.3, 0.7]], boards: true, pieces: [["gauge", 5.0, 0.9], ["cart", 5.7, 2.4, 1], ["coil", 3.8, 3.4]] },
     arcade: { glass: 3, icon: "invader", banners: [[-1, 3], [1, 3]], string: ["hanging", 3, [0.12, 0.5, 0.88]], ceiling: [[-2.35, 2.35, -1.5, -5.2, 3.72, [0.1, 0.26, 0.42, 0.58, 0.74, 0.9], "bulb"]], pieces: [["tokenStack", -3.45, 1.65, 1, 0], ["bigJoystick", -3.0, 2.8, 0, 0]] },
@@ -1939,15 +1877,31 @@
       consider(a, { owner }, true);
     }
     if (!chosen) return;
-    // Keep the near palm; move its companion toward the Arcade, beside the berry bush.
-    // This authored spot uses actual trunk, path and stair clearance instead of the
+    // Step the near palm NEAR_NORTH metres north of its meadow spot and move its companion toward the Arcade, beside the berry bush.
+    // These authored spots use actual trunk, path and stair clearance instead of the
     // random meadow planting's broad exclusion around the clankers' bed approach.
-    const companionX = 13.5, companionZ = 4.75;
+    const NEAR_NORTH = 1, companionX = 13.5, companionZ = 2.75;
     if (chosen.extra && planting.stands(companionX, companionZ)
       && entranceClear(companionX, companionZ, 1.2) && offRuns(companionX, companionZ) && !nearMouth(companionX, companionZ, 6)) {
       const x = companionX, z = companionZ;
       const owner = { x, z, variant: planting.variant(), node: { position: { x, y: island.surfaceAt(x, z), z }, rotation: { y: 0 } } };
-      consider(chosen.a, { owner }, true);
+      const near = chosen.a.owner, reservation = meadowPalms.find((entry) => entry.owner === near).reservation;
+      const nearZ = near.z - NEAR_NORTH, fallback = chosen, fallbackMid = nearest;
+      drop(claimed, reservation);
+      const nearFits = planting.stands(near.x, nearZ) && entranceClear(near.x, nearZ, 1.2) && offRuns(near.x, nearZ);
+      claimed.push(reservation);
+      if (nearFits) {
+        const fromZ = near.z;
+        near.z = reservation.z = near.node.position.z = nearZ;
+        near.node.position.y = island.surfaceAt(near.x, nearZ);
+        chosen = null; nearest = Infinity;
+        consider(fallback.a, { owner }, true);
+        if (!chosen) {
+          near.z = reservation.z = near.node.position.z = fromZ;
+          near.node.position.y = island.surfaceAt(near.x, fromZ);
+          chosen = fallback; nearest = fallbackMid;
+        }
+      }
     }
     if (chosen.extra) {
       const entry = planting.plant(chosen.b.owner.x, chosen.b.owner.z, 0);
@@ -2322,7 +2276,6 @@
       mattresses.push({
         roomIndex: i, basement: level === basement, corner: "rear-left", room: cave, node, ...geometry.mattress,
         x: node.position.x, y: cave.floor, z: node.position.z, sr: -sx, cr: cx, sleeper: null, sleep: dimensions,
-        window: island.headquarters.windows.find((window) => window.kind === "room" && window.roomIndex === i && window.basement === (level === basement)), sightFrame: -1, sightVisible: false,
         collisionBoxes: new Float64Array([-dimensions.width / 2, 0, -dimensions.depth / 2, dimensions.width / 2, dimensions.surface, dimensions.depth / 2,
         -0.45, dimensions.surface, dimensions.pillowZ - 0.25, 0.45, dimensions.pillowTop, dimensions.pillowZ + 0.25]),
         walkAt: { x: node.position.x + cx * side, y: cave.floor, z: node.position.z + sx * side }
@@ -6304,6 +6257,8 @@
   };
   // B.C.A.'s veil, in a banker's lamp amber, where the lab's stands, so the gorillas' suits show from where they cross.
   const BCA_TINT = [1, 0.78, 0.4], BCA_VEIL_Z = 0.5;
+  // EntropyLab's veil: its glyphs are white.
+  const ENTROPY_TINT = [1, 1, 1];
   const bcaVeil = (dt, elapsed) => {
     updatePortalEffects(bcaMouth.phase, dt);
     bcaMouth.office.update(dt);
@@ -10729,7 +10684,6 @@
     else if (ghostHovered) showGhostTooltip();
     else if (pileHovered) showPileTooltip();
     // World-anchored sleeping marks share the guide visibility cadence; their particles still move every frame.
-    advanceSleepSight(dt);
     const gorilla = clankerPlay.active, player = controlledGuideActor();
     const closeWanted = gorilla ? clankerPlay.firstPerson : pilot.closeWanted, closeMix = gorilla ? (closeWanted ? 1 : 0) : pilot.closeMix;
     const combatBirdsEye = gorilla ? clankerPlay.combat && clankerPlay.birdsEye : !!player && pilot.aiming && pilot.birdsEye;
@@ -10980,7 +10934,6 @@
     hud.dispose();
     BL.net.setBody(null); BL.net.setBlend(null, 0); BL.net.setHub(false); zoneHeld = null;
     CLANKER_REST_SLOPE.supportEntry = RAGE_WARP_MOTION.supportEntry = null;
-    sleepSightSince = Infinity; sleepSightMode = null; sleepSightGorilla = false; sleepSightFrame++;
     CLANKER_HIT.node = CLANKER_HIT.owner = POOL_BLOCK_HIT.node = POOL_BLOCK_HIT.owner = null;
     DEBUG_MOVE_HIT.node = DEBUG_MOVE_HIT.owner = DEBUG_GORILLA_HIT.node = DEBUG_GORILLA_HIT.owner = null;
     viewPoseActor = grabSupportEntry = clankerSupportActor = clankerPassingEntry = preparingGuideActor = null;
@@ -11482,7 +11435,7 @@
     };
     shared.onBodyMove = moveCampBody;
     mirrorCave.ripples = BL.mirrorRipples.create(mirrorCave.node);
-    entropyLab.phase = BL.labPhase.create(entropyLab.group, entropyLab.mouth, entropyLab.opening);
+    entropyLab.phase = BL.labPhase.create(entropyLab.group, entropyLab.mouth, entropyLab.opening, 0.5, ENTROPY_TINT);
     yield* pause(slice);
     for (const veil of caveVeils) {
       veil.phase = BL.labPhase.create(veil.group, veil.mouth, veil.opening, veil.plane, veil.tint);
@@ -12528,7 +12481,6 @@
     hud.dispose();
     // Shared query scratch must not keep an actor (and its groundAt closure) alive past this visit.
     CLANKER_REST_SLOPE.supportEntry = RAGE_WARP_MOTION.supportEntry = null;
-    sleepSightSince = Infinity; sleepSightMode = null; sleepSightGorilla = false; sleepSightFrame++;
     CLANKER_HIT.node = CLANKER_HIT.owner = null;
     viewPoseActor = grabSupportEntry = clankerSupportActor = clankerPassingEntry = preparingGuideActor = null;
     // Drop every per-visit ref but the cached island.

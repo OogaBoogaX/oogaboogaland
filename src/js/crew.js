@@ -1378,9 +1378,11 @@
   const visualState = (cave) => {
     if (!cave || !cave.weapon) return null;
     const w = cave.weapon, v = cave.visualData || (cave.visualData = new Int16Array(VISUAL_SIZE));
-    v[0] = Math.round(clamp(cave.parts.head.rotation.x, -1.57, 1.57) * 100);
+    // A body lying in a hammock sends the look its first-person view gives (pilot.js `shareRestLook`), as the head and the aim.
+    const lying = !!cave.camp?.seat?.lying;
+    v[0] = Math.round(clamp(lying ? cave.restLookPitch : cave.parts.head.rotation.x, -1.57, 1.57) * 100);
     v[1] = Math.round(clamp(w.aimPitch, -1.57, 1.57) * 100);
-    v[2] = Math.round(clamp(w.aimYaw, -3.14, 3.14) * 100);
+    v[2] = Math.round(clamp(lying ? cave.restLookYaw : w.aimYaw, -3.14, 3.14) * 100);
     const handoff = w.reloadHandoff < 0 ? 1 : w.reloadHandoff === 1 ? 2 : w.reloadHandoff === 2 ? 3 : 0;
     v[3] = (w.primaryOwned ? 1 : 0) | (w.secondaryOwned ? 2 : 0) | (cave.jetpackOwned || cave.parts.jetpack ? 4 : 0)
       | (w.reloading ? 8 : 0) | (w.reloadSpare ? 16 : 0) | (w.meleeHeld ? 32 : 0) | (w.meleeQuick ? 64 : 0)
@@ -1623,6 +1625,7 @@
         sleepHead: { x: 0, y: 0, z: 0 },
         sleepWeapons: createNode({ visible: false }),
         headLookRotation: math.quat.create(), headLookPosition: { x: 0, y: 0, z: 0 },
+        restLookYaw: 0, restLookPitch: 0,
         sleepRotation: math.quat.create(), sleepFromRotation: math.quat.create(), sleepTargetRotation: math.quat.create(),
         // Knockout effects are not equipment: waking or resetting a pose must never show them.
         sleepParts: { armRX: cave.parts.armR.position.x, armLX: cave.parts.armL.position.x, headX: cave.parts.head.position.x, headY: cave.parts.head.position.y, headZ: cave.parts.head.position.z, equipment: cave.root.children.filter((node) => node !== stunBirds && !BODY_PARTS.some((key) => cave.parts[key] === node)) },

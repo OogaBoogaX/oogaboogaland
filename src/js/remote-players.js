@@ -299,7 +299,10 @@
       w.equipped = held === 2; w.primaryEquipped = held === 1; w.aiming = !!mode;
       w.ammo = weapon >> 3;
       parts.head.quaternion = null;
-      parts.head.rotation.x += ((v ? v[0] / 100 : 0) - parts.head.rotation.x) * (1 - Math.exp(-EASE * dt));
+      const headEase = 1 - Math.exp(-EASE * dt);
+      parts.head.rotation.x += ((v ? v[0] / 100 : 0) - parts.head.rotation.x) * headEase;
+      // Settled in the hammock, the head turns as its owner looks round (hub-hammock.js `poseRemote` keeps it through the bed's pose).
+      parts.head.rotation.y += ((v && rec.rest && rec.rest[1] === 2 ? v[2] / 100 : 0) - parts.head.rotation.y) * headEase;
       w.aimPitch = v ? v[1] / 100 : parts.head.rotation.x;
       w.aimYaw = v ? v[2] / 100 : 0;
       w.recoil = held === 2 ? Math.max(v ? v[4] / 1000 - age : 0, 0.24 - (now - entry.shotAt) / 1000, 0) : 0;

@@ -321,8 +321,10 @@
   const POOL_APPROACH = { bearing: 3.625 / 12 * Math.PI * 2, from: 19, to: RADIUS - 0.5, top: 6.25, tread: 0.4, halfWidth: 2.6, blend: 1.5 };
   const POOL_X = Math.sin(POOL_APPROACH.bearing), POOL_Z = -Math.cos(POOL_APPROACH.bearing);
   const BLUFF_LEN = 8, SIDE_OUT = 2.5, APRON = 3, TRAIL_LEAN = 1.2;
-  const P = { grass: 1, grassLight: 2, grassDark: 3, path: 4, stone: 5, stoneDark: 6, inner: 7, dirt: 8, floor: 9 };
-  const PALETTE = [null, "#6f7d3e", "#7b8945", "#65733a", "#a3874f", "#877869", "#5e5449", "#2f2824", "#6a4e39", "#3a302a"].map((hex) => hex && hexToRgb(hex));
+  const P = { grass: 1, grassLight: 2, grassDark: 3, path: 4, stone: 5, stoneDark: 6, inner: 7, dirt: 8, floor: 9, whiteFloor: 10 };
+  const PALETTE = [null, "#6f7d3e", "#7b8945", "#65733a", "#a3874f", "#877869", "#5e5449", "#2f2824", "#6a4e39", "#3a302a", "#f4f4f0"].map((hex) => hex && hexToRgb(hex));
+  // EntropyLab's cave: the whole of its cut floor is white, out to the edge of the grass and the path.
+  const WHITE_FLOOR_CAVE = "c11";
   const PATH_TILE = {
     verts: [-PATH_UNIT / 2, 0, -PATH_UNIT / 2, PATH_UNIT / 2, 0, -PATH_UNIT / 2, PATH_UNIT / 2, 0, PATH_UNIT / 2, -PATH_UNIT / 2, 0, PATH_UNIT / 2],
     faces: [{ i: [0, 3, 2, 1], color: PALETTE[P.path], emissive: 0 }],
@@ -719,7 +721,7 @@
       }
       for (let i = 0; i < columns.length; i += 3) {
         const gx = columns[i], gyTop = columns[i + 1], gz = columns[i + 2];
-        if (grid.has(gx, SURFACE - 1, gz)) grid.set(gx, SURFACE - 1, gz, P.floor);
+        if (grid.has(gx, SURFACE - 1, gz)) grid.set(gx, SURFACE - 1, gz, f.id === WHITE_FLOOR_CAVE ? P.whiteFloor : P.floor);
         if (grid.has(gx, gyTop + 1, gz)) grid.set(gx, gyTop + 1, gz, P.inner);
         for (let gy = SURFACE; gy <= gyTop; gy++) {
           if (grid.has(gx + 1, gy, gz)) grid.set(gx + 1, gy, gz, P.inner);

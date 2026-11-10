@@ -31,7 +31,7 @@ import { DurableObject } from "cloudflare:workers";
 import {
   CABINETS, hockey, CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
   NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
-  DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, CONTROL_FRAMES, CONTROL_HZ, CONTROL_BURST, GHOST_HZ, GHOST_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, REACT_FEATURE, HAND_EMOJI_FEATURE, REACT_HZ, REACT_BURST,
+  DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, ROOM_LOCK_FEATURE, PIN_PASS_MS, PIN_TRIES, PIN_WAIT_MS, CONTROL_FRAMES, CONTROL_HZ, CONTROL_BURST, GHOST_HZ, GHOST_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, REACT_FEATURE, HAND_EMOJI_FEATURE, REACT_HZ, REACT_BURST,
   GHOST_MAGIC, GHOST_FRAME_MAX, GHOST_FRAME_HZ, GHOST_FRAME_BURST, inGhostArena, ghostCandidate, watchesGhost,
   CHALK, CHALK_HZ, CHALK_BURST, CHALK_IDLE_MS, CHALK_SAVE_MS, CHALK_TELL_MS, CHALK_FEATURE,
   WALLET_CAP, WALLET_HZ, WALLET_BURST,
@@ -83,6 +83,11 @@ export class Room extends DurableObject {
     this.doorActive = null;
     this.doorPasses = new Map();
     this.doorId = 0;
+    // Locked Sphere rooms by number: { pin, passes: id -> ms the way in stays open }. Every page hears which rooms are
+    // locked; only the players inside one hear its PIN. Every occupant's socket attachment carries its room's lock so
+    // hibernation keeps it.
+    this.roomLocks = new Map();
+    this.pinTries = new Map();
     this.sweepAt = 0;
     this.cleanupAt = 0;
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
@@ -150,7 +155,7 @@ export class Room extends DurableObject {
   }
 
   record(ws, a) {
-    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hand: false, handTone: 0, handEmoji: "", hp: 100, ko: false, g: null, j: 0, w: 0, v: null, va: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], blendTo: null, blendK: 0, pm: { inv: [], open: 0, blocked: [] }, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, ghostBucket: { tokens: GHOST_BURST, at: Date.now() }, ghostFrameBucket: { tokens: GHOST_FRAME_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: a.joinedAt || Date.now() };
+    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hand: false, handTone: 0, handEmoji: "", hp: 100, ko: false, g: null, j: 0, w: 0, v: null, va: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], roomLock: null, blendTo: null, blendK: 0, pm: { inv: [], open: 0, blocked: [] }, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, ghostBucket: { tokens: GHOST_BURST, at: Date.now() }, ghostFrameBucket: { tokens: GHOST_FRAME_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: a.joinedAt || Date.now() };
   }
 
   // Retain account debt across socket records, only while awake. Reclaim fully replenished
@@ -168,7 +173,7 @@ export class Room extends DurableObject {
   }
 
   attachment(p) {
-    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm };
+    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, roomLock: p.roomLock, pinTries: this.pinTries.get(p.id) || null, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm };
   }
 
   view(p) {
@@ -203,6 +208,10 @@ export class Room extends DurableObject {
       } else p.door = null;
       p.passes = Array.isArray(p.passes) ? p.passes.filter((x) => x && DOOR_ROOM.test(x.door) && x.exp > now && p.body && p.zone === x.door) : [];
       for (const pass of p.passes) this.doorPasses.set(pass.cycle, { ...pass, id: p.id });
+      if (p.roomLock && this.roomOf(p.zone) === p.roomLock.room) this.roomLocks.set(p.roomLock.room, { pin: p.roomLock.pin, passes: new Map() });
+      else p.roomLock = null;
+      if (p.pinTries && (p.pinTries.until > now || now - p.pinTries.at <= PIN_WAIT_MS)) this.pinTries.set(p.id, p.pinTries);
+      p.pinTries = undefined;
     }
     queued.sort((a, b) => a.door.at - b.door.at || a.id - b.id);
     active.sort((a, b) => a.door.at - b.door.at || a.id - b.id);
@@ -239,14 +248,113 @@ export class Room extends DurableObject {
     }
   }
 
+  // A numbered room's zone's number, or 0.
+  roomOf(zone) {
+    const match = DOOR_ROOM.exec(zone);
+    return match ? Number(match[1]) : 0;
+  }
+
+  lockedRooms() {
+    return [...this.roomLocks.keys()].sort((a, b) => a - b);
+  }
+
+  // A locked room lets in whoever is holding a pass; everyone else needs the PIN.
+  mayEnter(p, room, now) {
+    const lock = this.roomLocks.get(room);
+    return !lock || (lock.passes.get(p.id) || 0) > now;
+  }
+
+  // Every occupant carries the lock, so whichever socket a hibernated room wakes with still has it.
+  shareRoomLock(room, lock) {
+    for (const o of this.players.values()) if (this.roomOf(o.zone) === room) {
+      o.roomLock = lock ? { room, pin: lock.pin } : null;
+      o.ws.serializeAttachment(this.attachment(o));
+      if (lock) this.send(o.ws, { t: "door", op: "room-pin", room, pin: lock.pin });
+    }
+  }
+
+  // Nobody left inside: the room opens by itself.
+  freeEmptyRoom(room) {
+    if (!room || !this.roomLocks.has(room)) return;
+    for (const o of this.players.values()) if (this.roomOf(o.zone) === room) return;
+    this.roomLocks.delete(room);
+    this.broadcast({ t: "door", op: "locks", rooms: this.lockedRooms() });
+  }
+
+  // A pass is spent on walking in; the new occupant holds the lock with everyone else inside.
+  roomZoneChanged(p, from) {
+    const entered = this.roomOf(p.zone), left = this.roomOf(from), lock = entered ? this.roomLocks.get(entered) : null;
+    if (lock) {
+      lock.passes.delete(p.id); p.roomLock = { room: entered, pin: lock.pin };
+      this.send(p.ws, { t: "door", op: "room-pin", room: entered, pin: lock.pin });
+    } else p.roomLock = null;
+    if (left !== entered) this.freeEmptyRoom(left);
+  }
+
+  // Whether this player has run out of tries; a wrong PIN counts one, a right one forgives them. The tally is the
+  // player's, not the socket's: it outlives a reconnect, and rides the socket's attachment through hibernation. A tally
+  // is forgotten a wait's length after its last wrong try, so the map holds only the players trying lately.
+  pinRefused(p, now) {
+    const tries = this.pinTries.get(p.id);
+    return !!tries && tries.until > now;
+  }
+
+  pinWrong(p, now) {
+    for (const [id, old] of this.pinTries) if (old.until <= now && now - old.at > PIN_WAIT_MS) this.pinTries.delete(id);
+    const tries = this.pinTries.get(p.id) || { count: 0, until: 0, at: 0 };
+    tries.count++; tries.at = now;
+    if (tries.count >= PIN_TRIES) { tries.count = 0; tries.until = now + PIN_WAIT_MS; }
+    this.pinTries.set(p.id, tries);
+    p.ws.serializeAttachment(this.attachment(p));
+  }
+
+  pinRight(p) {
+    if (this.pinTries.delete(p.id)) p.ws.serializeAttachment(this.attachment(p));
+  }
+
+  roomLockMessage(p, msg, now) {
+    const reply = (ok, reason = "") => this.send(p.ws, { t: "door", op: "lock-result", action: msg.op, room: msg.room, ok, reason });
+    const lock = this.roomLocks.get(msg.room);
+    if (msg.op === "lock") {
+      if (!p.body || this.roomOf(p.zone) !== msg.room) return reply(false, "wrong-room");
+      if (lock) return reply(false, "already-locked");
+      const made = { pin: msg.pin, passes: new Map() };
+      this.roomLocks.set(msg.room, made);
+      this.shareRoomLock(msg.room, made);
+      this.broadcast({ t: "door", op: "locks", rooms: this.lockedRooms() });
+      return reply(true);
+    }
+    if (msg.op === "unlock") {
+      // Anyone inside may open it.
+      if (!p.body || this.roomOf(p.zone) !== msg.room) return reply(false, "wrong-room");
+      if (!lock) return reply(true);
+      this.roomLocks.delete(msg.room);
+      this.shareRoomLock(msg.room, null);
+      this.broadcast({ t: "door", op: "locks", rooms: this.lockedRooms() });
+      return reply(true);
+    }
+    if (this.pinRefused(p, now)) return reply(false, "wait");
+    if (!p.body || p.zone !== DOOR_ZONE) return reply(false, "not-at-door");
+    if (!lock) return reply(true);
+    if (lock.pin !== msg.pin) { this.pinWrong(p, now); return reply(false, "wrong"); }
+    this.pinRight(p);
+    lock.passes.set(p.id, now + PIN_PASS_MS);
+    return reply(true);
+  }
+
   async doorMessage(p, msg) {
     const now = Date.now();
     if (!takeToken(p.doorBucket, DOOR_HZ, now, DOOR_BURST)) {
       this.send(p.ws, { t: "door", op: "denied", reason: "rate" });
       return;
     }
+    if (msg.op === "lock" || msg.op === "unlock" || msg.op === "try") {
+      this.roomLockMessage(p, msg, now);
+      return;
+    }
     if (msg.op === "ask") {
       if (!p.body || p.zone !== DOOR_ZONE) { this.send(p.ws, { t: "door", op: "denied", reason: "not-at-door" }); return; }
+      if (msg.dir === "in" && !this.mayEnter(p, msg.room, now)) { this.send(p.ws, { t: "door", op: "denied", reason: "locked" }); return; }
       if (p.door) { this.send(p.ws, { t: "door", op: "denied", reason: "already-waiting" }); return; }
       if (this.doorQueue.length >= MAX_PLAYERS) { this.send(p.ws, { t: "door", op: "denied", reason: "full" }); return; }
       p.door = { phase: "queued", dir: msg.dir, room: msg.room, at: now, exp: Number.MAX_SAFE_INTEGER };
@@ -371,7 +479,7 @@ export class Room extends DurableObject {
 
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, features: [CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE] });
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, locks: this.lockedRooms(), features: [CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE] });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
     this.send(server, { t: "chat-history", messages: this.chat.list() });
     this.sendCabinets(server);
@@ -444,11 +552,14 @@ export class Room extends DurableObject {
       this.electGhostHost();
     } else if (msg.t === "zone") {
       if (msg.name === p.zone) return;
+      const room = this.roomOf(msg.name);
+      if (room && !this.mayEnter(p, room, Date.now())) { this.send(p.ws, { t: "door", op: "denied", reason: "locked" }); return; }
       if (msg.name !== DOOR_ZONE) this.cancelDoor(p);
       if (msg.name !== p.zone) this.clearPasses(p);
       const leavingStudio = p.zone === STUDIO_ZONE, watched = watchesGhost(p), from = p.zone;
       if (msg.name !== "arcade.hall") hockey.leave(this, p.id);
       p.zone = msg.name;
+      this.roomZoneChanged(p, from);
       hockey.arrive(this, p);
       p.pokerVoice = null;
       if (this.chalkEditor && this.chalkEditor.id === p.id && this.chalkRefusal(p)) this.chalkLetGo(p);
@@ -641,6 +752,10 @@ export class Room extends DurableObject {
     this.background(this.clearVoice(p));
     this.privateLeave(p);
     this.players.delete(p.id);
+    // A dropped socket can come straight back in; the last one out frees the room.
+    const lockedIn = this.roomOf(p.zone), held = this.roomLocks.get(lockedIn);
+    if (held) held.passes.set(p.id, Date.now() + PIN_PASS_MS);
+    this.freeEmptyRoom(lockedIn);
     this.broadcast({ t: "leave", id: p.id, reason });
     this.electHost();
     this.electGhostHost();

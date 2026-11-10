@@ -9,8 +9,8 @@ Frontend, implemented:
 | Part | Where |
 |---|---|
 | Nine rooms, `roomId` 1–9 validated at every boundary, 1× / 1.5× / 2× layouts with a fixed doorway, arrival, Exit button and chairs, and a table for 4, 8 or 12 | `src/js/timechain-rooms.js` |
-| The shared room design (screens centred opposite the one doorway, latest-blocks ribbon, the ribbed dome, charcoal tiles with the amber chain from the doorway's seam to the ring round the table and out to the wall a third of a turn either side, the table and its chairs, the holdings desk against the left wall, Sani's corner beside the doorway, the doors under their EXIT header with the wall's strip carried across them as a chain, and the vestibule) | `src/js/timechain-room-models.js` |
-| The room scene: first person, shoulder and orbit, no weapons or jetpack, guided first-person arrival and exit, shared presence (`sphere-<id>`) or a solo copy, a table to jump on and chairs to sit in, Sani and his beer, local ambience, complete disposal | `src/js/scene-timechain.js` (always loaded), `src/js/timechain-interior.js` (deferred) |
+| The shared room design (screens centred opposite the one doorway, latest-blocks ribbon, the ribbed dome, charcoal tiles with the amber chain from the doorway's seam to the ring round the table and out to the wall a third of a turn either side, the table and its chairs, the holdings desk against the left wall, the doors under their EXIT header with the wall's strip carried across them as a chain, and the vestibule) | `src/js/timechain-room-models.js` |
+| The room scene: first person, shoulder and orbit, no weapons or jetpack, guided first-person arrival and exit, shared presence (`sphere-<id>`) or a solo copy, a table to jump on and chairs to sit in, local ambience, complete disposal | `src/js/scene-timechain.js` (always loaded), `src/js/timechain-interior.js` (deferred) |
 | Block and mining data from mempool.space's public API: one in-flight request per dataset, backoff with Retry-After, hidden-tab pause, last good value kept as STALE, the 144-block window chained by parent hash, a page-wide cache shared by every room | `src/js/timechain-blocks.js` |
 | Native charts in the Timechain Blocks look, each naming its source, window and freshness; the six holdings readings at the desk | `src/js/timechain-charts.js` |
 | The exterior: doors whose outer faces carry the ball's turning pattern across their seam, the keypad, the dim passage and its curtain, the plug that stops tailgating | `src/js/timechain-models.js` |
@@ -43,7 +43,7 @@ Byte-level exception: the portable single file (`oogaboogaland.html`) and the so
 
 Use one shared Timechain interior template. All nine may show the same data and reuse immutable assets; each signed-in room has independent membership, voice and soundscape lifecycle. Only the active room is instantiated. Keep exterior dimensions, avatars, eye height, movement speed, furniture and controls at their normal scale (the meeting table alone grows, to seat 4, 8 or 12). Larger variants expand the architecture and layout around a standard doorway and arrival area.
 
-Use charcoal/black panels, fine amber borders and labels, white values, green mining data, a latest-block ribbon and native line/bar/donut charts, following [Timechain Index Blocks](https://timechainindex.com/blocks). Preserve the existing distribution/holdings readings and Sani/beer interactions in useful secondary views. Chart text must remain readable in the existing close-up/source modal.
+Use charcoal/black panels, fine amber borders and labels, white values, green mining data, a latest-block ribbon and native line/bar/donut charts, following [Timechain Index Blocks](https://timechainindex.com/blocks). Preserve the existing distribution/holdings readings in useful secondary views. Chart text must remain readable in the existing close-up/source modal.
 
 ## Spectators and the shared doorway
 
