@@ -669,6 +669,11 @@
       if (crew.player) hideHead(crew.player, false);
       g.state = "idle";
       g.ask = 0; g.cycle = null;
+      // A kept island comes back with the doors shut behind the crossing and the plug down, so the walk back out
+      // finds them shut, as the room's picture of them shows, and they part for it.
+      g.want = g.open = 0;
+      site.setDoors(0);
+      site.plug.visible = true;
     };
     // A kept island's gate takes a room chosen in advance on resuming, as `create` does; true when one was.
     const resume = () => {

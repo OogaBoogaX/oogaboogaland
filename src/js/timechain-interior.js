@@ -364,21 +364,23 @@
       if (pin !== pinShown) { pinShown = pin; pinWords = pin ? `PIN ${pin}` : ""; }
       return pinWords;
     };
-    const DOTS = ["", "*", "**", "***", "****"], lock = { on: false, digits: "", sent: 0, note: "", noteLeft: 0, leaveLeft: 0, locked: false, ease: 1, from: { x: 0, y: 0, z: 0 }, fromLook: { x: 0, y: 0, z: 0 } };
+    const DOTS = ["", "*", "**", "***", "****"], lock = { on: false, digits: "", sent: 0, note: "", noteLeft: 0, locked: false, hidden: false, ease: 1, from: { x: 0, y: 0, z: 0 }, fromLook: { x: 0, y: 0, z: 0 } };
     const isLocked = () => shared && !!BL.net.state.lockedRooms[room.id];
     const nearLock = () => {
       if (!avatar || avatar.camp.seat) return false;
       const p = avatar.root.position;
       return Math.hypot(p.x - L.lockPad.x, p.z - L.lockPad.z) < L.lockReach;
     };
-    const lockNote = (words, leave = false) => { lock.note = words; lock.noteLeft = LOCK_NOTE; lock.leaveLeft = leave ? LOCK_NOTE : 0; };
+    const lockNote = (words) => { lock.note = words; lock.noteLeft = LOCK_NOTE; };
     const lockLetGo = () => {
       if (!lock.on) return;
-      lock.on = false; lock.digits = ""; lock.sent = 0; lock.leaveLeft = 0;
-      if (avatar) avatar.parts.head.cameraHidden = false;
+      lock.on = false; lock.digits = ""; lock.sent = 0;
+      if (avatar) avatar.root.cameraHidden = lock.hidden;
       pilot.setExternalControl(false);
       hud.el.act.hidden = !avatar;
       pilot.showAct();
+      // Combat's mouse-look comes back as it does when a menu closes (pilot.js `setMenuOpen`).
+      pilot.focusAim(!!navigator.userActivation?.isActive);
     };
     const lockEngage = () => {
       if (lock.on || !avatar || guide.stage) return false;
@@ -389,12 +391,16 @@
       pilot.setExternalControl(true);
       if (document.pointerLockElement) document.exitPointerLock();
       hud.el.act.hidden = true;
-      avatar.parts.head.cameraHidden = true;
+      hud.tooltip.hide();
+      // The view stands in front of the pad, where the visitor's own Ooga would only be in the way of the keys, to the
+      // eye and to the picks. Its head alone is the pilot's to hide in first person, so the whole Ooga goes instead.
+      lock.hidden = avatar.root.cameraHidden;
+      avatar.root.cameraHidden = true;
       const c = camera.position, t = camera.target;
       lock.from.x = c.x; lock.from.y = c.y; lock.from.z = c.z;
       lock.fromLook.x = t.x; lock.fromLook.y = t.y; lock.fromLook.z = t.z;
       const pin = isLocked() && pinLine();
-      hud.hint(isLocked() ? `${pin ? `${pin} · ` : ""}Press UNLOCK to open the room · Esc steps back` : "Type a 4-digit PIN, then press LOCK · Esc steps back", 7000);
+      hud.hint(isLocked() ? `${pin ? `${pin} · ` : ""}Press UNLOCK to open the room · move or Esc to step back` : "Type a 4-digit PIN, then press LOCK · move or Esc to step back", 7000);
       return true;
     };
     const lockSend = () => {
@@ -402,7 +408,7 @@
       else { lock.digits = ""; lockNote("NO SIGNAL"); }
     };
     const lockPress = (key) => {
-      if (!lock.on || lock.sent || lock.leaveLeft) return;
+      if (!lock.on || lock.sent) return;
       if (key === "back") {
         if (lock.digits) lock.digits = lock.digits.slice(0, -1);
         else lockLetGo();
@@ -410,8 +416,11 @@
         if (isLocked() || lock.digits.length === 4) lockSend();
       } else if (/^[0-9]$/.test(key) && !isLocked() && lock.digits.length < 4) lock.digits += key;
     };
+    // A step steps back from the keypad, as from any look (pilot.js), and goes on to the Ooga, unless an answer is due.
+    const LOCK_STEPS = new Set(BL.controls.keysFor("forward", "back", "left", "right"));
     const lockKeys = (e) => {
       if (!lock.on || e.metaKey || e.ctrlKey || e.altKey || e.target && e.target.closest && e.target.closest("input, textarea, [contenteditable]")) return;
+      if (!lock.sent && LOCK_STEPS.has(e.key.toLowerCase())) { lockLetGo(); return; }
       e.preventDefault();
       e.stopImmediatePropagation();
       if (e.repeat) return;
@@ -427,7 +436,6 @@
     const lockUpdate = (dt) => {
       lock.noteLeft = Math.max(0, lock.noteLeft - dt);
       if (lock.sent > 0 && (lock.sent -= dt) <= 0) { lock.digits = ""; lockNote("NO ANSWER"); }
-      if (lock.leaveLeft > 0 && (lock.leaveLeft -= dt) <= 0) lockLetGo();
       const locked = isLocked();
       if (locked !== lock.locked) {
         lock.locked = locked;
@@ -452,10 +460,13 @@
     const lockHeard = (event) => {
       if (event.op !== "lock-result" || event.room !== room.id || !lock.sent) return;
       lock.sent = 0; lock.digits = "";
-      if (event.ok) lockNote(event.action === "lock" ? "LOCKED" : "UNLOCKED", true);
+      // Done, the view goes straight back to the Ooga; the keypad's window and a toast say what changed.
+      if (event.ok) lockLetGo();
       else lockNote(event.reason === "already-locked" ? "LOCKED" : "TRY AGAIN");
     };
-    for (const key of lockPad.keys) target(key.node, { kind: "lockkey", key: key.key }, key.key.length === 1 ? 0.055 : 0.09);
+    // Over the door leaves' broad pick spheres, which reach across the pad from where its view stands, and over the
+    // Ooga's own (priority 1), as the island keypad's keys are (scene-hub.js).
+    for (const key of lockPad.keys) target(key.node, { kind: "lockkey", key: key.key, priority: 2 }, key.key.length === 1 ? 0.055 : 0.09);
     const useNear = () => {
       if (guide.stage) return false;
       if (nearExit()) { walkOut(); return true; }
@@ -601,8 +612,8 @@
       return o.kind === "screen" ? `${CH.PANELS[o.index].title} · tap for a close-up` : TIPS[o.kind] || "";
     };
     Object.assign(hooks, {
-      onHover: (hit, p) => { if (hit && !guide.stage) hud.tooltip.show(tipFor(hit), p.x, p.y); else hud.tooltip.hide(); },
-      onHoverMove: (hit, p) => { if (!guide.stage) hud.tooltip.show(tipFor(hit), p.x, p.y); },
+      onHover: (hit, p) => { if (hit && !guide.stage && !lock.on) hud.tooltip.show(tipFor(hit), p.x, p.y); else hud.tooltip.hide(); },
+      onHoverMove: (hit, p) => { if (!guide.stage && !lock.on) hud.tooltip.show(tipFor(hit), p.x, p.y); },
       onTap: (hit) => {
         if (!hit || guide.stage) return;
         const o = hit.owner;
@@ -621,6 +632,8 @@
         } else if (o.kind === "table") hud.toast(`${room.name} · ${room.scale}× · ${shared ? "shared with whoever chose it" : "a solo copy, just for you"}`);
       },
       ...pilot.hooks,
+      // A key pressed twice quickly is pressed twice (a PIN may repeat a digit), never a double tap.
+      onDoubleTap: (hit, p) => { if (hit && hit.owner.kind === "lockkey") hooks.onTap(hit, p); else pilot.hooks.onDoubleTap(hit, p); },
       onZoom: (factor, gesture, px, py) => { if (!guide.stage) pilot.hooks.onZoom(factor, gesture, px, py); }
     });
     hud.onAction((action) => {
