@@ -42,7 +42,7 @@
       { path: "jet", scene: "hangar", title: "Lightning Jet Hangar",
         description: "Behind the Lightning Factory, the hangar where Lightning Jet v2 is being built: the Jet in its dock, its crew at work and the project's progress on the wall." },
       { path: "oogaarcade", scene: "arcade", title: "Ooga Arcade",
-        description: "A torchlit cave of arcade cabinets, one for every Ooga game: walk up to Ooga Rally, Drop, Orbit, Mine or Block Frenzy and play." },
+        description: "A torchlit cave of arcade cabinets, one for every Ooga game: walk up to Ooga Rally, Drop, Orbit or Mine and play, or take the upper hall's zipline to Block Frenzy." },
       { path: "sphere", scene: "hub", place: "timechain", image: "sphere", title: "Timechain Sphere",
         description: "The Timechain Sphere's doors: choose one of nine rooms at the keypad. Inside, live block and mining charts, Timechain Index holdings and Sani in his recliner." },
       // The nine rooms, each its own address: 1–3 at 1×, 4–6 at 1.5×, 7–9 at 2× (timechain-rooms.js).
