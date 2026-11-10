@@ -3,6 +3,9 @@ export const CABINETS = globalThis.BL.arcadeCabinets;
 export { hockey } from "./hockey.js";
 import "../../src/js/hockey-wire.js";
 export const HOCKEY = globalThis.BL.hockeyWire;
+export { block } from "./block.js";
+import "../../src/js/block-wire.js";
+export const BLOCK = globalThis.BL.blockWire;
 import { parseStudioCommand, studioCanSpeak, STUDIO_ZONE } from "./studio-policy.js";
 import "../../src/js/chat-policy.js";
 import "../../src/js/contributor-identities.js";
@@ -337,6 +340,7 @@ export const parseClientMessage = (text) => {
     return Number.isInteger(msg.slot) && CABINETS.slot(msg.slot) ? { t: "cabinet", op: msg.op, id: msg.id, q: msg.q, slot: msg.slot } : null;
   }
   if (msg.t === "hockey") return HOCKEY.parse(msg);
+  if (msg.t === "bf") return BLOCK.parse(msg);
   if (msg.t === "studio") return parseStudioCommand(msg);
   if (msg.t === "pose") {
     const { x, y, z, yaw } = msg;

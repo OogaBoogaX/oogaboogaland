@@ -31,8 +31,8 @@
   // The levels below the world's surface, each with the level over it.
   const ABOVE = Object.freeze({ hq: SURFACE, "hq-basement": "hq", "rainforest-under": SURFACE });
   // Places outside the world whose voices blend across the crossing between them, in one scene's coordinates.
-  const PAIRS = [["arcade", "ghost-arena"]];
-  const GROUPED = ["arcade", "ghost-arena"];
+  const PAIRS = [["arcade", "ghost-arena"], ["arcade", "block-frenzy"]];
+  const GROUPED = ["arcade", "ghost-arena", "block-frenzy"];
   const ALIASES = Object.freeze({ "arcade-hunt": "ghost-arena", "arcade.arena": "ghost-arena" });
   // Whether a zone is in the main world. Allocates nothing.
   const world = (zone) => {
