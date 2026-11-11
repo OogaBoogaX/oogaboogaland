@@ -10,6 +10,8 @@
     && Object.keys(o).length === keys.length && keys.every(k => Object.hasOwn(o, k));
   const point = n => Number.isInteger(n) && Math.abs(n) <= 20000; // centimetres, matching rescue's 200 m save boundary
   const worldId = s => typeof s === "string" && /^[A-Za-z0-9_.:-]{1,80}$/.test(s);
+  // Real scene/voice zones use dsb-*; older staged fixtures used dsb or dsb:*.
+  const zoneId = s => typeof s === "string" && s.length <= 64 && /^dsb(?:-[a-z0-9-]{1,20}(?:\.[a-z0-9-]{1,16})?|:[A-Za-z0-9_.:-]{1,58})?$/.test(s);
   // dog: home slot, birth generation, breed, activity, x/y/z cm, yaw milliradians.
   // pile: monotonically increasing id, x/y/z cm. Removed ids never get reused.
   const validate = frame => {
@@ -58,5 +60,5 @@
       },
     };
   };
-  BL.rescueShared = { LIMITS, integer, exact, point, worldId, validate, create };
+  BL.rescueShared = { LIMITS, integer, exact, point, worldId, zoneId, validate, create };
 })();

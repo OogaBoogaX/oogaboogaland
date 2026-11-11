@@ -7,7 +7,7 @@ import { RESCUE, validateRoutes, initialRescue, validateRescue, advanceRescue, r
 const { integer, exact } = globalThis.BL.rescueShared;
 export const RESCUE_KEY = 'dsb-rescue-v1';
 const fail = why => { throw Error(`host rescue: ${why}`); };
-const dsb = zone => zone === 'dsb' || zone.startsWith('dsb:');
+const dsb = globalThis.BL.rescueShared.zoneId;
 function checkCensus(census) {
   if (!exact(census, ['ready', 'revision', 'tokens']) || typeof census.ready !== 'boolean'
     || !integer(census.revision) || !census.revision || !Array.isArray(census.tokens) || census.tokens.length > 64
@@ -75,6 +75,24 @@ export class HostRescue {
       if (!session || !dsb(session.zone)) fail('current DSB session required');
       return rescueCommand(state, session, value, now);
     }, options);
+  }
+  // One private transaction supplies the caller's command cursor and the
+  // complete live roster from the same component revision. Never guest-cache it.
+  privateSnapshot(ticket, census, ref) {
+    if (!exact(ref, ['accountId', 'generation', 'token']) || !integer(ref.accountId) || !ref.accountId
+      || !integer(ref.generation) || !ref.generation || typeof ref.token !== 'string' || !/^[0-9a-f]{32}$/.test(ref.token)) fail('session reference');
+    const who = { ...ref };
+    return this.operation(ticket, census, (state, live) => {
+      const session = live.find(s => s.accountId === who.accountId && s.generation === who.generation && s.token === who.token);
+      if (!session || !dsb(session.zone)) fail('current DSB session required');
+      const owner = state.owners.find(o => o.accountId === who.accountId), sameGeneration = owner?.generation === session.generation;
+      return { result: { bodyId: session.bodyId, zone: session.zone, sequence: sameGeneration ? owner.sequence : owner ? 1 : 0, command: sameGeneration && owner.command ? JSON.parse(owner.command) : null,
+        receipt: sameGeneration && owner.result ? structuredClone(owner.result) : null, dog: owner?.dog ? { ...owner.dog } : null },
+        companions: live.flatMap(s => {
+          const dog = state.owners.find(o => o.accountId === s.accountId)?.dog;
+          return dog ? [{ accountId: s.accountId, generation: s.generation, bodyId: s.bodyId, zone: s.zone, dog: { ...dog } }] : [];
+        }) };
+    }, { write: false });
   }
   // Trusted live delivery only. These records contain owner identity. Never
   // pass this method's result to guest cache publication; use snapshot().frame.

@@ -82,25 +82,34 @@
     const ownOoga=()=>{const own=BL.net.ownCharacter(),cave=own?crew.cavemen.get(own.handle):DEBUG&&!BL.net.state.me?crew.player:null;return cave&&!BL.net.mayDrive(cave.traits.name)?cave:null;};
     let changes=0,saveTimer=0,shownFor=undefined,lastLine=null,pick=null,inRoom=null,disposed=false;
     let migrationAttempted=false,migrationPersisted=false;
+    let client=null,sharedOwn=null,sharedCave=null,sharedSelected=null,sharedAccount,sharedConnection,sharedZone,poseTimer=0,poseSequence=0,poseBusy=false;
     const persist=()=>{dogs.writeStore();save(store);changes=dogs.changes;saveTimer=0;};
     // The visitor's own line, in the dialog and on the board over the dog houses (in sign letters, so without the name).
     const line=()=>{
       button.setDog(dogs.own);
-      const who=login(),mine=who&&store.dogs[who],n=store.scooped,scooped=n?` · ${n} poop${n===1?"":"s"} scooped`:"";
+      const who=login(),mine=client?sharedOwn:who&&store.dogs[who],n=store.scooped,scooped=n?` · ${n} poop${n===1?"":"s"} scooped`:"";
       const text=!who?SIGN_IN:mine?`${mine.name} is with you${scooped}`:`A puppy is waiting for you${scooped}`;
       if(text===lastLine)return;lastLine=text;menu.setLine(text);
       interiors.rooms.get("puppy-rescue")?.setLine(!who?"SIGN IN TO ADOPT A PUPPY":mine?"YOUR DOG IS WITH YOU":"A PUPPY IS WAITING FOR YOU");
     };
-    const open=(route="adopt",breed=-1,stray=-1)=>{
+    const open=(route="adopt",breed=-1,stray=-1,identity=null)=>{
+      sharedSelected=identity;
       if(route==="feed")return dogs.feedOwn()||true;
       const who=login(),cave=ownOoga();
       if(!who||!cave){menu.setLine(SIGN_IN);return menu.open({signIn:true});}
-      if(store.dogs[who]){hud.toast(`${store.dogs[who].name} is already with you.`);return true;}
+      const existing=client?sharedOwn:store.dogs[who];
+      if(existing){hud.toast(`${existing.name} is already with you.`);return true;}
       lastLine=null;line();return menu.open({breed:breed>=0?breed:D.breedFor(cave.traits.name),ooga:cave.traits.display,suggest:D.nameFor(cave.traits.name),stray});
+    };
+    const sharedSend=input=>{
+      if(!client?.ready){hud.toast("Shared rescue is reconnecting. Please try again shortly.");return false;}
+      if(client.pending){hud.toast("Your previous rescue action is awaiting confirmation.");return false;}
+      client.command(input).catch(()=>{if(!disposed)hud.toast("That action is awaiting server confirmation.");});
+      return false; // The dialog stays open until the actual host receipt arrives.
     };
     const adopted=({breed,name,stray})=>{
       const who=login(),cave=ownOoga();
-      if(dogs.shared){hud.toast("Shared adoption is waiting for its server connection.");return false;}
+      if(client||dogs.shared){if(client)return sharedSend({kind:"adopt",stray:sharedSelected&&[...sharedSelected],breed,name});hud.toast("Shared adoption is waiting for its server connection.");return false;}
       if(!who||!cave||store.dogs[who]){hud.toast(who&&cave?"You already have a dog.":SIGN_IN);return false;}
       const entry={name,breed,adoptedAt:Date.now(),hunger:0},logins=Object.keys(store.dogs).filter(who=>who!==DEBUG_LOGIN);
       if(who!==DEBUG_LOGIN&&logins.length>=LOGINS)delete store.dogs[logins.reduce((a,b)=>store.dogs[a].adoptedAt<=store.dogs[b].adoptedAt?a:b)];
@@ -112,18 +121,20 @@
     const dogs=D.create({root,crew,fx,hud,pile:{eat:()=>{if(world.level<1)return false;world.level=Math.max(0,world.level-1);return true;}},yard:BL.rescueRoom.YARD,door:[rescueDoor.x,rescueDoor.z],
       ground:(x,z,feet)=>groundAt(x,z,feet,undefined,DOG),standable,flyClear,addTarget:(node,owner,opts)=>input.add(node,owner,opts),removeTarget:node=>input.remove(node),pickGeometry:BL.rescueRoom.PICK,
       strays:{homes,renderer,clearSegment:clear},camera,store,onRelease});
-    const button=BL.rescueMenu.createButton({onFeed:()=>dogs.feedOwn(),onRelease:()=>dogs.releaseOwn()});
+    const button=BL.rescueMenu.createButton({onFeed:()=>dogs.feedOwn(),onRelease:()=>client&&sharedOwn?sharedSend({kind:"release",dog:sharedOwn.id}):dogs.releaseOwn()});
     changes=dogs.changes;line();
     // The rescue's venue for the scene's menu zones and Space.
     const venue={open:route=>open(route),get isOpen(){return menu.isOpen;}};
     // Follow the account's own Ooga, or the signed-out debug visitor's driven Ooga, when either changes.
     let me,player,sleepTimer=0,sleepIndex=0;
     const follow=()=>{
+      if(client){const cave=ownOoga();if(cave!==sharedCave){sharedCave=cave;dogs.setOwn(cave,sharedOwn);}line();return;}
       const who=login(),cave=ownOoga(),out=cave&&who&&store.dogs[who]?who:null;
       if(out!==shownFor){shownFor=out;dogs.setOwn(cave,out&&store.dogs[out]);}
       line();
     };
     const update=(dt,time,day)=>{
+      if(client){syncShared();client.update(dt);}
       if(BL.net.state.me!==me||DEBUG&&crew.player!==player){me=BL.net.state.me;player=crew.player;follow();}
       const now=room();
       if(now!==inRoom){
@@ -143,12 +154,16 @@
       }
       dogs.update(dt,time,day,!interiors.active?D.CHORA:now?D.YARD:D.ROOM);
       button.update();
+      if(client?.ready&&sharedOwn&&!poseBusy&&(poseTimer-=dt)<=0){
+        poseTimer=.25;const pose=dogs.companionPose(++poseSequence);
+        if(pose){poseBusy=true;client.pose(pose).catch(()=>{}).finally(()=>{poseBusy=false;});}
+      }
       if((saveTimer+=dt)>=SAVE_EVERY){saveTimer=0;if(dogs.own||dogs.changes!==changes)persist();}
     };
     const onTap=hit=>{
       const o=hit?.owner;
-      if(o?.kind==="dog"){const breed=dogs.tap(o.dog);if(breed>=0)open("adopt",breed,o.dog);return true;}
-      if(o?.kind==="poop"){if(dogs.scoop(o.poop))line();return true;}
+      if(o?.kind==="dog"){const identity=dogs.sharedStray(o),breed=dogs.tap(o.dog);if(breed>=0)open("adopt",breed,o.dog,identity);return true;}
+      if(o?.kind==="poop"){if(client||dogs.shared){const pile=dogs.sharedPile(o);if(pile&&client)sharedSend({kind:"scoop",pile});}else if(dogs.scoop(o.poop))line();return true;}
       if(o?.kind==="rescue-desk"&&room()){open();return true;}
       return false;
     };
@@ -161,9 +176,35 @@
       if(!migrationAttempted){migrationAttempted=true;migrationPersisted=retireLegacyPoop(store,dogs.sharedSource);}
       lastLine=null;line();return {accepted:true,persisted:migrationPersisted};
     };
-    const dispose=()=>{if(disposed)return;disposed=true;persist();button.dispose();menu.dispose();if(pick){input.remove(pick.screen);pick=null;}dogs.dispose();};
-    return {update,drawOverlay:dogs.drawOverlay,onTap,onKey,acceptShared,menuForRoom:r=>r?.id==="puppy-rescue"?venue:null,stats:dogs.stats,dispose,
-      get isOpen(){return menu.isOpen;},debug:{acceptShared,get dogs(){return dogs.debug;},menu,open,store,save:persist,get line(){return lastLine;},clear,standable,flyClear,
+    const syncShared=()=>{
+      const me=BL.net.state.me,live=BL.net.state.room==="live",account=live&&Number.isSafeInteger(me?.id)?me.id:null;
+      const connection=account?BL.net.state.connectionToken||"":"",zone=BL.rescueShared.zoneId(BL.net.state.zone)?BL.net.state.zone:"dsb-outside";
+      if(sharedAccount===account&&sharedConnection===connection&&sharedZone===zone)return;
+      sharedAccount=account;sharedConnection=connection;sharedZone=zone;poseSequence=0;poseTimer=0;
+      client.setConnection({accountId:connection?account:null,connection,zone});
+    };
+    const applySharedDog=dog=>{
+      const cave=ownOoga(),changed=sharedOwn?.id!==dog?.id||sharedCave!==cave;
+      if(changed){sharedOwn=dog?{...dog,adoptedAt:Date.now(),hunger:0,shared:true}:null;sharedCave=cave;dogs.setOwn(cave,sharedOwn);}
+      lastLine=null;line();
+    };
+    // Explicit installation only. The scene does not create a network client
+    // until its trusted host/guest integration supplies the expected world.
+    const connectShared=options=>{
+      if(disposed||client||!BL.rescueClient)return false;
+      client=BL.rescueClient.create({...options,onFrame:acceptShared,onPrivate:dogs.acceptCompanions,
+        onSession:session=>applySharedDog(session.dog),
+        onReceipt:(input,result)=>{
+          if(!result.ok){hud.toast(result.reason);return;}
+          if(input.kind==="adopt"){applySharedDog(result.dog);menu.close();hud.toast(`${result.dog.name} is now with you.`);}
+          else if(input.kind==="release"){applySharedDog(null);hud.toast("Your dog has returned to Free Puppies Rescue.");}
+          else hud.toast("Poop scooped.");
+        },onLost:()=>{dogs.clearCompanions();sharedOwn=sharedCave=null;dogs.setOwn(null,null);lastLine=null;line();}});
+      syncShared();return true;
+    };
+    const dispose=()=>{if(disposed)return;disposed=true;client?.dispose();persist();button.dispose();menu.dispose();if(pick){input.remove(pick.screen);pick=null;}dogs.dispose();};
+    return {update,drawOverlay:dogs.drawOverlay,onTap,onKey,acceptShared,connectShared,menuForRoom:r=>r?.id==="puppy-rescue"?venue:null,stats:dogs.stats,dispose,
+      get isOpen(){return menu.isOpen;},debug:{acceptShared,connectShared,get client(){return client;},get dogs(){return dogs.debug;},menu,open,store,save:persist,get line(){return lastLine;},clear,standable,flyClear,
       // An adoption as the dialog's Adopt makes it, under the same rules.
       adopt:(breed=0,name="Rex")=>adopted({breed,name,stray:-1})}};
   };

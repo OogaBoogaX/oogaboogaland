@@ -75,4 +75,4 @@ Focused checks: `node test/run.mjs rescue-unit` (the rescue's own save, address,
 
 ## Shared-state work
 
-Issue #384's inactive, stacked host core is documented in [Shared DSB rescue](dsb-shared-rescue.md). It includes an explicit legacy-poop migration helper but does not activate shared scene authority. The local behavior above still describes the deployed path; end-to-end integration and performance gates remain open.
+Issue #384's inactive, stacked host integration is documented in [Shared DSB rescue](dsb-shared-rescue.md). It includes the renderer, acknowledged command/client adapters, private companion presentation, real route data and public-cache adapter, but does not activate shared scene authority. The local behavior above still describes the deployed path; end-to-end integration and performance gates remain open.

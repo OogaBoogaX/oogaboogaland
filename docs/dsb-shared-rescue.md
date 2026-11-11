@@ -1,11 +1,12 @@
-# Shared DSB rescue: inactive core and follower for #384
+# Shared DSB rescue: staged integration for #384
 
-**Status: staged core, not end-to-end implementation or activation.** This change
+**Status: staged integration, not end-to-end completion or activation.** This change
 is stacked on #467 (`codex/377-virtual-host`, base
 `fffe3afedb57c56c88e6b5bca3073744b45df8b0`). It does not close #384. No
 production binding, alarm, socket message or provider resource is enabled. The
-real browser renderer has an explicit shared-state follower seam, but no runtime
-transport calls it. The existing local rescue continues until an integration
+real browser renderer, acknowledged command client, authenticated HTTP adapter
+and public cache are implemented, but the production index/bindings and scene
+entry do not install them. The existing local rescue continues until an integration
 installs the receiver and explicitly switches authority.
 Do not deploy or merge this independently of its prerequisite.
 
@@ -60,11 +61,42 @@ Do not deploy or merge this independently of its prerequisite.
   repeated snapshots do not cause repeated local-storage writes. The migration
   marker suppresses local strays/piles on a later visit pending a fresh frame.
 
+- `worker/src/room-rescue.js` / `Room.rescueObservation`: an atomic Room-side
+  observation of current connection, committed body handoff and census. Pending
+  movement, close, handoff or quiescence refuses new rescue actions. The host
+  revision read before the observation is checked in the sidecar transaction.
+- `worker/src/rescue-delivery.js` / `rescue-http.js`: an explicit host/Room
+  coordinator and same-origin HTTP adapter. Private reads/commands require the
+  normal verified contributor session and current Room connection. Client owner
+  headers/session references are ignored. Requests are size-bounded and use the
+  existing configurable limiter. Private responses are `no-store`; the public
+  path can read only the separately validated public cache and never calls the
+  host or starts simulation. Cache writes use transaction-serialized revision
+  checks, reject owner/companion fields, and default to a 24-hour maximum age.
+- `rescue-client.js` / `rescueDsb.connectShared({world})`: explicitly installed
+  public/private polling and acknowledged adoption, release and scoop controls.
+  One pending command retains its exact sequence/payload across uncertain replies,
+  reconciles a committed receipt on refresh, and retries with exponential delay
+  capped at 30 seconds. Scene/account/generation changes and disposal fence late
+  callbacks. Neither adoption nor scooping falls back to legacy mutation while
+  the first shared frame is loading. Actual `dsb-*` scene zones are accepted.
+- Private companion frames now use the existing body/leg/tail renderer, with
+  64 reserved slots, batched tags/flight equipment, own-account deduplication,
+  generation/revision/sequence fences and two-second presentation expiry. They
+  create no pick targets, local AI, saved private rows or public cache fields.
+  The own dog's pose still comes from the existing walking/crew flight solver.
+- `worker/src/rescue-routes.js`: 300 server-owned routes baked from actual DSB
+  geography, exterior solids, home seeding and ground/walking queries. There are
+  295 moving routes and 2,265 nodes. Every loop, including its closing segment,
+  has floor/chord checks; moving loops also pass the full-body solid sweep.
+  Three inherited lower-body overlap homes (25, 95, 147) remain stationary and
+  are **not** certified full-body clear. See [route evidence](rescue-routes.md).
+
 Existing `remote-players.js` already renders contributor-authored character pets
 through `crew.createPets()`. That is **not** the adopted rescue-dog system. This
 change does not add a second visual copy of those pets. The new private companion
-roster must be wired into the existing adopted-dog renderer, retaining the shared
-`crew.flyCompanion` motion/clearance helpers, before live visibility is claimed.
+renderer is separate from those pets and uses the same adopted-dog batches. Live
+visibility still requires installing the authenticated delivery path.
 
 ## Authority and recovery
 
@@ -77,10 +109,10 @@ terrain-cleared routes**, each with 1–8 nodes within 3.5 m of its home. Consec
 segments, including last→first, must already be valid on DSB terrain. No route,
 spawn point or authoritative pile position is accepted from a browser.
 
-The core has no pathfinder. The finite source tests use clearly synthetic
-pre-cleared two-node routes, not the real DSB terrain. Extracting/validating the
-actual scene's `homesAcross` and clearance geometry is an outstanding integration
-gate. Night activity rests at a route node; exact existing sleep-at-home and
+The core has no pathfinder. Its deterministic model tests still use synthetic
+routes, while the separate route tests reconstruct real DSB exterior geometry
+and compare the committed route table and source fingerprint. The inherited
+three-home collision limitation remains an activation gate. Night activity rests at a route node; exact existing sleep-at-home and
 passing-player tagging behavior is not claimed equivalent yet.
 
 Occupied DSB advances at 1 Hz; each invocation performs at most eight steps.
@@ -107,27 +139,29 @@ this core does not claim that browser/server adoption handoff is complete.
    `HostRescue` refuses a revision change inside its transaction. Derive session
    references from the authenticated socket, never an account ID supplied by a
    client. Reserve command receipts before acknowledging adoption to the UI.
-2. Generate the real DSB routes from the current geometry and bind the checked
-   layout. Schedule `tick` only while there is occupied work and on lifecycle
-   changes; no new persistent paid loop is included here.
-3. Connect the authenticated/public component transport to the scene's new
-   `acceptShared` seam, binding its first frame to the expected world/layout.
-   The renderer switch and migration are implemented, but **no current transport
-   calls the seam**. Connect adoption/release/scoop UI to acknowledged host
-   commands before exposing the feature. Existing locally saved companion
-   adoption/hunger/feed/release behavior remains separate; it is not promoted
-   to authoritative shared state by accepting a public frame.
-4. Feed `companions().companionRoster` only to authenticated live delivery and
-   install it before accepting companion poses. Pose refs must come from that
-   current roster. A full-host revision change currently invalidates old refs,
-   even for unrelated host work; promptly refreshed refs or a separately reviewed
-   companion incarnation protocol are needed to avoid presentation dropouts.
-   Add the real renderer/scene lifecycle and adopted-dog poop/feed/hunger paths.
-5. #378 may cache only `snapshot().frame` (the public dogs/piles component),
-   separately versioned from the existing NPC/hub snapshot. Never serialize the
-   sidecar checkpoint, command receipts or private companion roster into guests.
-   The actual guest cache route, refresh/drift blending and public projection
-   composition are not installed here.
+2. Install the real `RESCUE_ROUTES` configuration and bind its exact layout to
+   the checkpoint. The sidecar already refuses changed layouts. Regenerate and
+   review route/source revisions after geometry changes; never silently reset
+   identities. Resolve the inherited clearance limitation before activation.
+   Schedule `tick` only from occupied host work/lifecycle changes, not guest reads.
+3. Install the HTTP handler on the existing trusted host router and call the
+   scene's `connectShared` with its expected world. **Neither is installed by
+   this PR.** Commands and UI acknowledgement are implemented, including initial
+   loading and uncertain-reply handling, but they do not bypass #467's disabled
+   live host/body routing. The new shared own-dog record is visit-local and restored
+   from authenticated state; it never overwrites legacy adoption saves.
+4. Complete authoritative companion care and durable cross-session adoption
+   restoration/migration. Shared own-dog feeding, hunger/starvation, local poop
+   and local release are deliberately blocked; only acknowledged release applies.
+   This is a missing feature, not equivalent existing care. Local legacy dogs
+   retain their old care until the shared integration replaces their presentation.
+   Pose refs still require promptly refreshed full-host revisions; continuity and
+   cost under concurrent host activity need validation.
+5. Install the public cache adapter in #378's trusted cache/router. Only
+   `snapshot().frame` can enter it. The handler and monotonic cache are tested,
+   but no production cache binding or route exists. A cache write failure does
+   not replay a committed command; the next explicit host tick repairs delivery.
+   Expired/unavailable caches return unavailable without starting a paid run.
 6. Complete two-player adoption/scoop/travel/reconnect checks; real DSB terrain,
    browser animation/quality/cleanup, physical-phone and combined NPC/dog/ghost,
    projectile and voice checks. Agree performance/cost budgets before activation.
@@ -139,11 +173,17 @@ existing maximum session count); 1 Hz simulation; 4 accepted command attempts/s
 per owner; a 64 KiB public frame; 96 KiB state and 64 KiB route configuration,
 with a 192 KiB sidecar-envelope guard. Exhaustion is refused, not truncated.
 No per-frame durable write, unbounded event queue or pile archive is introduced.
+The new guest cache adds up to one logical public-frame put per changed
+publication. Private polling is at most once per two seconds and owner poses at
+most 4 Hz while active; each currently performs fenced host/Room reads. Those
+RPC/cache costs and the larger 224-instance draw ceiling are additional and
+**not included** in the earlier core-only source measurement below.
 
 Reproduce the bounded measurement and correctness checks:
 
 ```
-node --test worker/test/rescue-world.test.mjs worker/test/rescue-renderer.test.mjs worker/test/virtual-host.test.mjs worker/test/host-sessions.test.mjs
+node scripts/characters.mjs --json > worker/src/characters.gen.json
+node --test worker/test/rescue-world.test.mjs worker/test/rescue-renderer.test.mjs worker/test/rescue-delivery.test.mjs worker/test/rescue-routes.test.mjs worker/test/virtual-host.test.mjs worker/test/host-sessions.test.mjs
 npm run build
 ```
 
@@ -199,10 +239,12 @@ results and the combined companion-feature run are **not measured and remain
 acceptance gates**. Browser emulation is not substituted for a physical phone.
 No Factory, browser, full-suite, performance-floor or local visibility/storage
 suite was run. The source-only rescue migration checks use a fake map, not a live
-browser or existing user storage. Four renderer/scene tests load the actual
-math, scene, model, dog-renderer and rescue-attachment code in a VM on synthetic
-flat ground. They exercise populated instance buffers, tier limits, clear/blocked
-corrections, stable IDs, removal, stale-frame rejection, one-time migration and
-node/picker disposal. They do not measure GPU rendering or actual DSB clearance.
-The focused host/rescue suite passes 66/66; syntax, build and whitespace checks
-pass. That is not a complete #384 pass.
+browser or existing user storage. Renderer/scene tests load real math, scene,
+models, rescue code and controller in a VM. HTTP/client tests use actual HostRescue,
+VirtualHost and validated Room handoff records with rollback-capable in-memory
+stores. They exercise acknowledged UI, lost replies, exact retries, disposal,
+private/public boundaries, actual scene-zone names and retained generations.
+The route tests construct real terrain but do not exercise a browser or GPU.
+The focused aggregate passes 87/87 after the final source bake, including two
+real-terrain checks. Syntax, build and whitespace checks pass. Exact-head CI is
+reported in the PR. None is a complete #384 pass.
