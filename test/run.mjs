@@ -30050,9 +30050,12 @@ const studioVoiceLifecycleProof = async () => {
   const turnShared = relay.voice.stats.enabled && relay.peers.length === 2
     && relay.calls.filter(c => c.op === "ice").length === 1 && relay.peers.every(pc => hasRelay(pc, "initial"));
   const refreshIce = relay.defer("ice"), refreshTimer = [...relay.timers].find(([, task]) => task.delay === 60000);
-  if (refreshTimer) { relay.timers.delete(refreshTimer[0]); refreshTimer[1].fn(); }
-  refreshIce(ice("fresh")); await drain();
-  const turnRefreshed = !!refreshTimer && relay.peers.every(pc => hasRelay(pc, "fresh"));
+  let refreshing;
+  if (refreshTimer) { relay.timers.delete(refreshTimer[0]); refreshing = refreshTimer[1].fn(); }
+  // Recovery closes the old SFU sessions before it asks for fresh credentials.
+  await drain(); refreshIce(ice("fresh")); await refreshing; await drain();
+  const turnRefreshed = !!refreshTimer && relay.peers.length === 4 && relay.peers.slice(0, 2).every(pc => pc.connectionState === "closed")
+    && relay.peers.slice(2).every(pc => hasRelay(pc, "fresh")) && relay.voice.stats.enabled;
   relay.voice.stop(); await drain();
   const turnStopped = relay.timers.size === 0;
   const cancelled = fixture(true), lateIce = cancelled.defer("ice"), cancelledJoin = cancelled.voice.enable();

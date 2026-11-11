@@ -238,7 +238,7 @@ test("SFU stays unavailable without secrets and uses bounded upstream calls with
 
 test("TURN credentials require the active room token and return only a temporary TLS relay", async () => {
   const Room = roomClass(), room = Object.create(Room.prototype);
-  const player = { id: 1, connectionToken: "active" };
+  const player = { id: 1, login: "YellowBrokeIt", connectionToken: "active" };
   room.players = new Map([[1, player]]);
   room.env = { REALTIME_APP_ID: "test-app", REALTIME_SECRET: "test-app-secret", REALTIME_TURN_KEY_ID: "test-key", REALTIME_TURN_TOKEN: "test-token" };
   const request = token => new Request("https://example.test/voice/ice", { method: "POST", headers: { "x-player-id": "1", "x-room-token": token } });
@@ -260,6 +260,15 @@ test("TURN credentials require the active room token and return only a temporary
     assert.equal(calls[0].url, "https://rtc.live.cloudflare.com/v1/turn/keys/test-key/credentials/generate-ice-servers");
     assert.equal(calls[0].options.headers.authorization, "Bearer test-token");
     assert.equal(JSON.parse(calls[0].options.body).ttl, 7200);
+    room.env.REALTIME_TURN_TTL = "300";
+    assert.equal((await (await room.voiceRequest("ice", request("active"))).json()).ttl, 300);
+    assert.equal(JSON.parse(calls[1].options.body).ttl, 300);
+    let evicted = false;
+    room.evict = (p, reason) => { evicted = p === player && reason === "revoked"; };
+    player.login = "not-a-contributor";
+    assert.equal((await room.voiceRequest("ice", request("active"))).status, 403);
+    assert.ok(evicted); assert.equal(calls.length, 2, "revoked accounts cannot mint relay credentials");
+    player.login = "YellowBrokeIt";
     replaced = true;
     assert.equal((await room.voiceRequest("ice", request("active"))).status, 409);
   } finally { globalThis.fetch = original; }

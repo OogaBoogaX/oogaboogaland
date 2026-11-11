@@ -369,10 +369,9 @@
         return relayConfig;
       }
       relayConfig = { ...ICE, iceServers: [...ICE.iceServers, server] };
-      relayTimer = window.setTimeout(() => renewRelay(token), (ttl - 60) * 1000);
-      for (const pc of [pubPc, subPc]) if (pc) {
-        try { pc.setConfiguration(relayConfig); } catch { /* The next connection uses the fresh configuration. */ }
-      }
+      // setConfiguration alone does not replace an established TURN allocation. Rebuild both
+      // connections before expiry, through the ordinary recovery path that preserves the mute.
+      relayTimer = window.setTimeout(() => token === lifecycle ? restart() : undefined, (ttl - 60) * 1000);
       return relayConfig;
     };
     const pending = refresh().catch(() => ICE);

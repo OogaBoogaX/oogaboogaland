@@ -14,10 +14,13 @@ export const turnConfigured = (env) => !!(env.REALTIME_APP_ID && env.REALTIME_SE
 export const turnCredentials = async (env) => {
   if (!turnConfigured(env)) return null;
   const key = encodeURIComponent(env.REALTIME_TURN_KEY_ID);
+  // Staging can exercise an allocation renewal in five minutes. Production defaults to two hours.
+  const configured = Number(env.REALTIME_TURN_TTL);
+  const ttl = Number.isInteger(configured) && configured >= 300 && configured <= TURN_TTL ? configured : TURN_TTL;
   const res = await fetch(`${TURN_BASE}/${key}/credentials/generate-ice-servers`, {
     method: "POST", redirect: "error", signal: AbortSignal.timeout(5000),
     headers: { authorization: `Bearer ${env.REALTIME_TURN_TOKEN}`, "content-type": "application/json" },
-    body: JSON.stringify({ ttl: TURN_TTL }),
+    body: JSON.stringify({ ttl }),
   });
   if (!res.ok) return null;
   const { iceServers } = await res.json();
@@ -25,7 +28,7 @@ export const turnCredentials = async (env) => {
   for (const server of iceServers) {
     if (!server || !(server.urls === TURN_TLS || Array.isArray(server.urls) && server.urls.includes(TURN_TLS))) continue;
     if (typeof server.username !== "string" || !server.username || typeof server.credential !== "string" || !server.credential) continue;
-    return { iceServers: [{ urls: TURN_TLS, username: server.username, credential: server.credential }], ttl: TURN_TTL };
+    return { iceServers: [{ urls: TURN_TLS, username: server.username, credential: server.credential }], ttl };
   }
   return null;
 };

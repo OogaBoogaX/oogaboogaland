@@ -39,7 +39,7 @@ Run from `worker/` after `npm ci`, logged in with `npx wrangler login` as a memb
 1. **D1.** `npx wrangler d1 create oogaboogaland-<env>`; put its id in `database_id` (wrangler may offer to add a second binding: keep only `DB`).
 2. **GitHub OAuth App** (OogaBoogaX → Settings → Developer settings → OAuth Apps → New): homepage `https://oogaboogaland-<env>.wickedsmartbitcoin.workers.dev`, callback `https://oogaboogaland-<env>.wickedsmartbitcoin.workers.dev/auth/callback`. Put the client id in `vars.GITHUB_CLIENT_ID`, then `npx wrangler secret put GITHUB_CLIENT_SECRET --config ../wrangler.<env>.jsonc`.
 3. **Voice.** dash.cloudflare.com → Realtime → Serverless SFU → Create `oogaboogaland-<env>`; put the App ID in `vars.REALTIME_APP_ID`, then `npx wrangler secret put REALTIME_SECRET --config ../wrangler.<env>.jsonc` with the App token. Without it **Join voice** says voice is unavailable and everything else works.
-   To enable fallback on networks that block UDP, create a separate **Realtime → TURN** key for this environment and set `REALTIME_TURN_KEY_ID` and `REALTIME_TURN_TOKEN` as Worker secrets. Set both on staging first. With either secret missing, the Worker advertises no relay.
+   For UDP-blocked networks, create a separate Realtime TURN key per environment and set `REALTIME_TURN_KEY_ID` and `REALTIME_TURN_TOKEN` as Worker secrets. Configure staging first. To exercise renewal quickly on staging, temporarily set `REALTIME_TURN_TTL` to `300` (accepted range 300–7200 seconds; default 7200), then restore the default after testing.
 4. **Tess's answers** (optional). An Anthropic API key from a workspace with a monthly spend limit, one key per Worker: `npx wrangler secret put ANTHROPIC_API_KEY --config ../wrangler.<env>.jsonc`. Without it `/api/tess` answers `closed` and Tess says only what the page knows by itself.
 5. `npm run deploy:<env>`: builds `_site`, applies the D1 migrations and deploys.
 6. **Deploy token**, once for both: Manage Account → Account API Tokens → Create, with *Workers Scripts → Edit* and *D1 → Edit* on this account. Save it in the OogaBoogaX repo as `CLOUDFLARE_API_TOKEN`.
@@ -91,3 +91,7 @@ If using local sign-in, first apply its local schema with
 The feed reflects the currently deployed backend. The independent sats leaderboard requires
 bananapayserver's donor-sats migration and updated feed to be deployed; starting this local
 preview does not deploy either.
+
+## TURN staging acceptance
+
+Use two distinct eligible contributor accounts, both driving Oogas in the same voice region. Block UDP in the test browsers, join voice, and verify a selected relay candidate over TLS/TCP port 443 on both publish and receive connections, with audible sound in both directions. With staging TTL 300, keep the call past five minutes and verify fresh connections/credentials, continued two-way audio and preserved mute. Repeat receive-only and leave/rejoin. Record browser versions, deployment revision and observed gaps; mocked signalling checks do not establish live relay connectivity.
