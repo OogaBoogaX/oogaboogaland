@@ -4351,6 +4351,7 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 }
 
 .mode-hud,
+.leave-hud,
 .gorilla-hud,
 .primary-hud,
 .weapon-hud,
@@ -4380,6 +4381,9 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 .mode-hud:hover,
 .mode-hud.virtual-hover,
 .mode-hud:focus-visible,
+.leave-hud:hover,
+.leave-hud.virtual-hover,
+.leave-hud:focus-visible,
 .gorilla-hud:hover,
 .gorilla-hud.virtual-hover,
 .gorilla-hud:focus-visible,
@@ -4405,6 +4409,7 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 }
 
 .mode-hud:active,
+.leave-hud:active,
 .gorilla-hud:active,
 .primary-hud:active,
 .weapon-hud:active,
@@ -4415,6 +4420,7 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 }
 
 .mode-hud:focus-visible,
+.leave-hud:focus-visible,
 .gorilla-hud:focus-visible,
 .primary-hud:focus-visible,
 .weapon-hud:focus-visible,
@@ -4464,6 +4470,26 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 
 @keyframes mode-release-progress {
   to { transform: scaleX(1); }
+}
+
+/* The way out, beside the Ooga's face: an arrow out of a bracket, no words. Where a place's banner has a Leave button,
+   hud.js shows this one, named by it, and the banner's own is kept out of sight. */
+body[data-leave-hud] .presets [data-action="leave"] {
+  display: none;
+}
+
+.leave-hud {
+  flex: none;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+}
+
+.leave-icon {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
 }
 
 .freeroam-icon,
@@ -5979,6 +6005,101 @@ body.tess-touring #joy-look {
 .board-links {
   margin: 10px 0 0;
 }
+
+/* The model viewer: a machine up close in 3D, turned by a drag, beside its stats. Wide on desktop, the model on the
+   left and its account in a column beside it; stacked on a phone, the model first. */
+.model-modal {
+  width: min(880px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.model-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.model-canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  margin: 0 0 8px;
+  border: 3px solid #1a1612;
+  border-radius: 6px;
+  background: radial-gradient(ellipse at 50% 38%, #3a332b 0%, #1d1915 62%, #120f0c 100%);
+  cursor: grab;
+  touch-action: none;
+}
+
+.model-canvas:active { cursor: grabbing; }
+
+.model-canvas:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.model-view .help { margin: 8px 0 0; text-align: center; }
+
+.model-kicker {
+  margin: 0;
+  color: var(--accent-text);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.model-name {
+  margin: 2px 0 8px;
+  font-size: 18px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.model-text {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.model-stats {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 5px 12px;
+  margin: 0;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.24);
+  border: 2px solid var(--wood-edge);
+  border-radius: 8px;
+}
+
+.model-stats dt {
+  color: var(--accent-text);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding-top: 2px;
+}
+
+.model-stats dd {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.model-info .board-link { text-align: left; }
+
+@media (max-width: 720px) {
+  .model-body { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .model-stats { grid-template-columns: minmax(0, 1fr); gap: 1px 0; }
+  .model-stats dd { margin-bottom: 5px; }
+}
+
 
 .board-links[hidden] {
   display: none;
@@ -11030,18 +11151,6 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
 .studio-session [data-transcript] { line-height:1.5; }
 .studio-session select { max-width:100%; }
 
-.sphere-mode {
-  align-self: center;
-  padding: 0 10px;
-  color: #f2a33a;
-  font: 700 11px var(--mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-@media (max-width: 720px) {
-  .sphere-mode { white-space: normal; max-width: 46vw; overflow-wrap: anywhere; }
-}
 
 /* Block Frenzy: the side picker's two forts, the score chips in their team colours, and the blocks' states. */
 .block-sides {

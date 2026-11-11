@@ -4,7 +4,7 @@ The shared doorway for [issue #235](https://github.com/OogaBoogaX/oogaboogaland/
 
 ## What it is for
 
-The Sphere has one doorway on the island (zone `sphere`) and nine rooms behind it (zones `sphere-1` … `sphere-9`). Signed-in players share it, so its short crossing is serialized and shown: an outside observer sees the doors part and the traveler walk into the dim passage and out of sight behind its curtain, and the doors close again. Only the crossing is serialized, never keypad use or loading: a page asks for the doorway only once its room is prepared (code loaded, picture taken), from the waiting spot square to the doors. The reservation coordinates presentation; the room does not simulate anyone's walk.
+The Sphere has one doorway on the island (zone `sphere`) and ten rooms behind it (zones `sphere-0` … `sphere-9`). Signed-in players share it, so its short crossing is serialized and shown: an outside observer sees the doors part and the traveler walk into the dim passage and out of sight behind its curtain, and the doors close again. Only the crossing is serialized, never keypad use or loading: a page asks for the doorway only once its room is prepared (code loaded, picture taken), from the waiting spot square to the doors. The reservation coordinates presentation; the room does not simulate anyone's walk.
 
 Signed-out (solo) visits never send any of this: their crossings are local and invisible to everyone else.
 
@@ -20,7 +20,7 @@ Client → room (each under `MESSAGE_MAX`):
 
 | Message | When |
 |---|---|
-| `{ t: "door", op: "ask", dir: "in" \| "out", room: 1…9 }` | Prepared and standing at the source-side waiting point: outside on the bridge for `in`, hidden behind the passage's curtain (already in zone `sphere`, with a valid pose there) for `out`. |
+| `{ t: "door", op: "ask", dir: "in" \| "out", room: 0…9 }` | Prepared and standing at the source-side waiting point: outside on the bridge for `in`, hidden behind the passage's curtain (already in zone `sphere`, with a valid pose there) for `out`. |
 | `{ t: "door", op: "go", cycle }` | A `grant` arrived and the page rechecked that it is still ready and still where it asked from; the walk starts now. |
 | `{ t: "door", op: "done", cycle }` | The traveler is through: behind the curtain at the scene handoff (`in`), or clear of the threshold on the bridge (`out`). |
 | `{ t: "door", op: "cancel" }` | Withdraws a pending ask or gives back a grant not yet used (Cancel, a failed recheck, a stale tab). |
@@ -41,7 +41,7 @@ Room → client:
 
 ## Locking a room
 
-A signed-in player inside a numbered room can lock it with a 4-digit PIN from the keypad beside its doors. `welcome` lists `room-lock-v1` in `features` and the rooms already locked in `locks`.
+A signed-in player inside the Conference Room (room 1, the only room with a lock) can lock it with a 4-digit PIN from the keypad beside its doors; the room refuses `lock`, `unlock` and `try` for any other room. `welcome` lists `room-lock-v1` in `features` and the rooms already locked in `locks`.
 
 | Message | When |
 |---|---|
@@ -79,4 +79,4 @@ On the island a locked room's number wears a padlock. Pressing it scrolls `ENTER
 
 ## Zones, presence and voice
 
-`sphere-1` … `sphere-9` match `ZONE_NAME`, have no dot, and are nine separate voice groups, apart from each other and from `sphere`. The page sends the destination body and bounded pose before its zone, and filters remote players by exact zone. A solo visit publishes `none` with no body for its whole length. The Worker rechecks voice eligibility after each asynchronous SFU pull and closes any track whose socket, body, zone, receiving session or publication changed while that call was in flight.
+`sphere-0` … `sphere-9` match `ZONE_NAME`, have no dot, and are ten separate voice groups, apart from each other and from `sphere`. The page sends the destination body and bounded pose before its zone, and filters remote players by exact zone. A solo visit publishes `none` with no body for its whole length. The Worker rechecks voice eligibility after each asynchronous SFU pull and closes any track whose socket, body, zone, receiving session or publication changed while that call was in flight.

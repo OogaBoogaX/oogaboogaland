@@ -2901,7 +2901,7 @@
     return { slots, path, mark: (x, y, z) => fx.zzzAt(x, y, z, null) };
   };
   // The Timechain Sphere off the southwest rim: the ball, its bridge and its doorway, whose keypad and crossing
-  // (timechain-gate.js) open its nine rooms, a scene of their own. Only the outside is the island's.
+  // (timechain-gate.js) open its ten rooms, a scene of their own. Only the outside is the island's.
   const buildTimechainIsland = function* (slice) {
     const T = BL.timechainModels, site = T.build(island), p = site.place;
     yield* pause(slice);
@@ -5654,7 +5654,7 @@
       case "book":
         return `${BOOKS[o.index].title} · open it`;
       case "prop":
-        if (o.prop === "timechainentrance") return "Timechain Sphere · nine rooms, chosen at the keypad";
+        if (o.prop === "timechainentrance") return "Timechain Sphere · ten rooms, chosen at the keypad";
         if (o.prop === "timechainbridge") return "Wooden bridge · to Timechain Sphere";
         if (o.prop === "timechainkeypad") return COARSE ? "Room keypad · walk up and tap to choose a room" : "Room keypad · walk up and press Space to choose a room";
         if (o.prop === "totem") return totemTip(o.totem);
