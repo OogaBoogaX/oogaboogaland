@@ -15,6 +15,7 @@
     factory: ["Learn", "A Lightning node at work · enter through its shield."],
     lab: ["Learn", "EntropyLab's contributors at work."],
     bca: ["Learn", "Banana Certified Accounting."],
+    repos: ["Learn", "Explore open-source Bitcoin projects · cross the stone bridge past the Oogatron."],
     timechain: ["Learn", "Live Bitcoin charts · choose a room at the keypad."]
   };
   const create = ({ current, ready }) => {

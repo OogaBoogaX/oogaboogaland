@@ -12,6 +12,7 @@
       factory: "M14 2L5 13h6l-1 9 9-13h-6z", arcade: "M5 9h14l3 10-5-1-3-3h-4l-3 3-5 1zM6 10v5M4 12h5M16 11v2M19 14v2",
       bca: "M5 4h14v17H5zM8 8h8M8 12h2M14 12h2M8 16h2M14 16h2",
       gate: "M4 21V8q8-10 16 0v13M8 21V9q4-5 8 0v12", bifrost: "M3 20Q12-11 21 20M7 20Q12 0 17 20",
+      repos: "M5 3h14v18H5zM8 7h8M8 12h8M8 17h8",
       timechain: "M12 2a10 10 0 1 0 .01 0M12 6v6l4 3"
     };
     const svg = (tag, attrs) => {
@@ -24,12 +25,15 @@
     const layout = () => {
       if (!data || !bounds) return;
       overlay.replaceChildren();
+      for (const m of markers) {
+        m.button.hidden = layer !== "all" && (m.point.layer || "surface") !== layer;
+        m.button.setAttribute("aria-pressed", String(m.point.name === picked));
+      }
       const width = pins.clientWidth;
       if (!width) return;
       const gap = 48 * W / width, radius = gap / 2, placed = origin ? [project(origin)] : [];
       // Fanned callouts keep shared x/z floors and nearby mouths individually tappable at phone widths.
       for (const m of markers) {
-        m.button.hidden = layer !== "all" && (m.point.layer || "surface") !== layer;
         if (m.button.hidden) continue;
         const at = project(m.point);
         let spot = null;
@@ -40,7 +44,6 @@
         }
         spot = spot || at; placed.push(spot);
         m.button.style.left = `${spot.x / W * 100}%`; m.button.style.top = `${spot.y / H * 100}%`;
-        m.button.setAttribute("aria-pressed", String(m.point.name === picked));
         if (Math.hypot(spot.x - at.x, spot.y - at.y) > 4) line(at, spot, "atlas-callout");
         overlay.append(svg("circle", { cx: at.x, cy: at.y, r: 3, class: "atlas-anchor" }));
       }

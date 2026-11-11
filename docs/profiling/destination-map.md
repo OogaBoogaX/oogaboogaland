@@ -1,5 +1,19 @@
 # Destination Map and optional coaching
 
+## Integration with rock dc381fa8 (November 11, 2026)
+
+The atlas now includes upstream's Repo Island: its island footprint, stone bridge, named destination, View action and entrance bearing. All thirteen destinations use the existing scene guards. Navigation checks follow upstream's five supported Ooga modes; the removed normal overhead mode is not reintroduced.
+
+Selecting in the phone List now immediately updates the map pin's selected state while the atlas is hidden. The mobile preview scrolls in the normal flow so it cannot cover pins. Close remains sticky, and selecting a destination brings its confirmation into view.
+
+Build, changed JavaScript syntax and whitespace checks pass. The existing map/navigation browser flow passed 13/13 after the selection fix. Adding a stricter check of every pin's center exposed an unresolved 320px hit-target failure: the final run is **12/13**, with 390px, Map/List selection, touch guidance/cancellation, Repo Island View/Return and all other checks passing. Waiting for ResizeObserver did not resolve it. The repository's two-failure STOP rule was reached on that check (2026-11-11T23:56:04Z); further investigation requires explicit authorization. This is a local blocker, separate from deployed acceptance.
+
+Fresh normal-vsync diagnostics cover desktop, 390px, 320px, short-height, driven-gorilla and DSB layouts. All six report no horizontal overflow or console messages; phone touch Close passes, reduced motion disables the receipt/edge effects, gorilla confirmation moves to Lab and DSB Harbor preserves the actor position. These observations do not override the stricter 320px failure. The captures are local Chrome emulation, not real-device or staging evidence.
+
+[Desktop](world-map-480-desktop.png) · [390px phone](world-map-480-phone.png) · [320px phone](world-map-480-narrow.png) · [DSB](world-map-480-dsb.png) · [Raw diagnostics](world-map-480.json)
+
+Remaining acceptance: resolve the 320px hit target, walk actual entrances/bridges on staging, real phones in both orientations, physical controllers/disconnect, screen readers, actual 200% zoom, pointer-lock denial and the historical broader-suite gates below. Keep this PR draft and all four issues open.
+
 ## Usability follow-up (November 11, 2026)
 
 Landmark icons retain 44px touch targets with smaller drawn symbols, a numbered list and short selected/focused names. Phones switch between Map and List without losing the selection; desktop keeps both. Surface, HQ and Basement filters separate stacked landmarks. The explicit Return to my Ooga button restores a previewed view through the existing pilot API. Known action restrictions appear during selection; the scene still checks the final travel action.
