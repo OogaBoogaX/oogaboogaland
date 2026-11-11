@@ -13823,7 +13823,7 @@ const hubNameplates = { name: "live nameplates", why: "rule: names over live pla
 // would, walks off it, then walks and jumps at the tall one, which no jump clears. Its gorilla, driven, then does the
 // same. The spot has nothing else to stand on near it: a tree's crown is a landing surface, and a rider lifted within
 // a step of one steps onto it.
-const hubPlayerStacking = { name: "players stand on players", why: "regression: landing on another player from above sank into their body, and a driven gorilla passed straight through them; their head holds the lander, Ooga or gorilla, carries it as they walk or fly and lets go when they leave, and a jump or fall into them is held off as a walk is", run: async (b) => {
+const hubPlayerStacking = { name: "players stand on players", why: "regression: landing on another player from above sank into their body, and a driven gorilla passed straight through them; their head holds the lander, Ooga or gorilla, carries it as they walk or fly and lets go when they leave, and a jump or fall into them is held off", run: async (b) => {
   const SHORT = "NickDaGreek", TALL = "rules-without-rulers";
   const drops = await b.evaluate(`(() => {
     const B = __ooga, npc = B.cavemen.get("portlandhodl"), net = BL.net;
@@ -13896,9 +13896,14 @@ const hubPlayerStacking = { name: "players stand on players", why: "regression: 
     const run = (jump) => {
       B.pilot.navigate({ position: { x: fromX, y: B.island.surfaceAt(fromX, fromZ), z: fromZ }, yaw: S.ang, pitch: 0.4, dist: 10 });
       const accepted = jump ? B.crew.jumpPlayer() : true;
-      let nearest = Infinity, peak = 0;
-      for (let i = 0; i < 90; i++) { B.advance(1 / 60, 1 / 60); nearest = Math.min(nearest, S.off()); peak = Math.max(peak, S.feet() - S.ground); }
-      return { accepted, nearest, peak };
+      let nearest = Infinity, air = Infinity, peak = 0;
+      for (let i = 0; i < 90; i++) {
+        B.advance(1 / 60, 1 / 60);
+        const off = S.off(), up = S.feet() - S.ground;
+        nearest = Math.min(nearest, off); peak = Math.max(peak, up);
+        if (up > 0.05) air = Math.min(air, off);
+      }
+      return { accepted, nearest, air, peak };
     };
     return { walk: run(false), jump: run(true) };
   })()`);
@@ -14004,10 +14009,11 @@ const hubPlayerStacking = { name: "players stand on players", why: "regression: 
   const kept = s => Math.abs(s.feet - ride.start.feet) < 0.03 && Math.abs(s.off - ride.start.off) < 0.05;
   record("players stand on players: standing on a player who walks, rises 3 m and comes down keeps the rider on their head, and walking off lands beside them",
     Math.abs(ride.start.feet - short.height) < 0.02 && kept(ride.walked) && kept(ride.up) && kept(ride.down)
-      && Math.abs(walkOff.feet) < 1e-3 && walkOff.off >= approach.walk.nearest - 0.02,
+      && Math.abs(walkOff.feet) < 1e-3 && walkOff.off >= approach.jump.air - 0.02,
     JSON.stringify({ ride, walkOff }));
-  record("players stand on players: a jump at a player too tall to clear is held off as far as a walk at them is",
-    approach.walk.nearest < 2 && approach.jump.accepted && approach.jump.peak > 0.5 && approach.jump.nearest >= approach.walk.nearest - 0.02,
+  // On foot players give way (crew.js PUSH_DEPTH): a walk presses into the gap a jump keeps.
+  record("players stand on players: a jump at a player too tall to clear is held off in the air, where a walk at them presses into their gap",
+    approach.jump.accepted && approach.jump.peak > 0.5 && approach.jump.air < 2 && approach.walk.nearest < approach.jump.air * 0.7,
     JSON.stringify(approach));
   record("players stand on players: the visitor's gorilla lands on a player's head at their height, rides them as they walk, rise 3 m and come down, and falls to the ground when they leave",
     driven.possessed && Math.abs(driven.landed.feet - driven.height) < 0.03 && driven.landed.off < 0.25
@@ -24398,9 +24404,9 @@ const hubHammockTap = { name: "hub hammock tap", why: "rule: on a phone one tap 
 scene("hub", { label: "sphere keypad", query: "solo=1&character=portlandhodl&view=timechain&pos=0", opts: PHONE_SIZE, steps: [hubHammockTap, { ...sphereKeypadPhone, name: "sphere keypad phone", run: async (b) => {
   await sphereKeypadPhone.run(b);
   const keys = await b.evaluate(`(() => { const B = __ooga, T = BL.scenes.hub.debug.timechainIsland, out = {};
-    return T.site.keys.map((k) => { const w = k.node.world; B.renderer.project(w[12], w[13], w[14], out); const hit = document.elementFromPoint(out.x, out.y);
+    return [...T.site.keys, { key: "directory", node: T.site.directoryKey }].map((k) => { const w = k.node.world; B.renderer.project(w[12], w[13], w[14], out); const hit = document.elementFromPoint(out.x, out.y);
       return { key: k.key, x: Math.round(out.x), y: Math.round(out.y), on: out.x > 0 && out.x < innerWidth && out.y > 0 && out.y < innerHeight, free: !!hit && hit.id === "scene" }; }); })()`);
-  record("timechain keypad phone: in first person every physical key, 1–9, 0, Back and Enter, is on screen with nothing over it", keys.length === 12 && keys.every((k) => k.on && k.free), JSON.stringify(keys));
+  record("timechain keypad phone: in first person every physical key, 1–9, 0, Back, Enter and Directory, is on screen with nothing over it", keys.length === 13 && keys.every((k) => k.on && k.free), JSON.stringify(keys));
 } }] });
 scene("arcade", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("arcade", { required: ["#joy-move", "#joy-look", "#leave-hud"] })] });
 
@@ -30260,6 +30266,60 @@ const terrainParityChecks = (BL, island) => {
   record("terrain collision: direct and Worker-restored voxel sweeps use caller-owned typed box queries instead of the allocating scalar adapter",
     voxelPaths.every(path => path.typed), JSON.stringify(voxelPaths));
 };
+// Repo Island (repo-island-data.js, repo-island-models.js, repo-feed.js): the list the page and the Worker share, the
+// island laid out from it, and the feed's boundary. The meadow's four totems are carved by the same kit at its full
+// detail, so their golden is the one they had before the island's details existed.
+const MEADOW_TOTEMS_GOLDEN = "8bdd4fca5a005b4f";
+const repoIslandChecks = (BL, island) => {
+  const D = BL.repoIslandData, M = BL.repoIslandModels, TM = BL.totemModels, H = BL.hubModels;
+  const sections = D.SECTIONS.map((s) => s.id), order = D.REPOS.map((r) => sections.indexOf(r.section));
+  const glyphs = (text) => [...text].every((ch) => ch === " " || ch === "M" || H.SIGN_GLYPHS[ch]);
+  let badges = true;
+  for (const s of D.SECTIONS) try { H.caveSign(s.name, s.badge); } catch { badges = false; }
+  const list = {
+    repos: new Set(D.REPOS.map((r) => r.repo.toLowerCase())).size === D.REPOS.length && D.REPOS.every((r) => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r.repo)),
+    words: new Set(D.REPOS.map((r) => r.word)).size === D.REPOS.length && D.REPOS.every((r) => /^[A-WYZ]{2,7}$/.test(r.word)),
+    sections: order.every((k, i) => k >= 0 && (!i || k >= order[i - 1])) && D.SECTIONS.every((s) => s.name.length <= 18 && glyphs(s.name)) && badges,
+    sized: D.REPOS.every((r) => r.importance >= 0.2 && r.importance <= 1 && r.name.length <= 28),
+    anchors: BL.totemFeed.REPOS.every((t) => D.REPOS.some((r) => r.repo === t.repo && r.importance === t.importance))
+  };
+  record("repo island list: every repository once under its canonical name, a carvable word of its own, its section in order, signs the carved alphabet can spell with a badge, heights a share of Core's and the meadow's four at their own",
+    Object.values(list).every(Boolean), JSON.stringify(list));
+  const P = M.plan(), spot = M.spot(island), seen = new Set(), signatures = new Set(), meadow = new Set(BL.totemFeed.REPOS.map((t) => t.repo));
+  let placed = true, own = true, tall = true, inside = true;
+  for (const t of P.totems) {
+    placed &&= !seen.has(t.index) && D.REPOS[t.index].repo === t.repo;
+    seen.add(t.index);
+    if (meadow.has(t.repo)) own &&= t.design === TM.DESIGNS[BL.totemFeed.REPOS.find((r) => r.repo === t.repo).word];
+    else { const key = JSON.stringify(t.design); own &&= !signatures.has(key); signatures.add(key); }
+    tall &&= Math.abs(t.L.apex - t.importance * TM.CORE_HEIGHT) < 1e-9;
+    inside &&= Math.hypot(t.x, t.z) + t.L.reach < M.PLAN.edge && (t.r === 0 || !M.pathAt(t.x, t.z, P.spokes));
+  }
+  const chunked = P.chunks.flat().sort((a, b) => a - b).every((at, k) => at === k) && P.chunks.flat().length === P.totems.length && P.chunks.every((c) => c.length <= M.CHUNK);
+  // The bridge leaves the south terrace level with it, past the rim, and the island's middle is a deck and its radius further.
+  const bridged = spot.y === island.surfaceAt(0, spot.rim - 0.3) && island.surfaceAt(0, spot.rim + 0.1) < 0.5 && spot.z === spot.rim + M.BRIDGE.span + M.ISLE.R;
+  record("repo island plan: every repository stands once, in its own carving (the meadow's four in theirs), as tall as its importance makes it, wholly inside the lip and off its paths, in chunks of up to four, past a bridge level with the south terrace",
+    placed && seen.size === D.REPOS.length && own && tall && inside && chunked && bridged, JSON.stringify({ placed, count: seen.size, own, tall, inside, chunked, bridged, spot }));
+  const h = createHash("sha256");
+  for (let i = 0; i < 4; i++) for (const g of [TM.body(i), TM.glyphs(i), TM.featureHighlights(i)]) h.update(JSON.stringify([g.verts, g.faces.map((f) => [f.i, f.color, f.emissive || 0])]));
+  const digest = h.digest("hex").slice(0, 16);
+  record("meadow totems: carved at full detail by the shared kit, the four keep their golden", digest === MEADOW_TOTEMS_GOLDEN, JSON.stringify({ digest, golden: MEADOW_TOTEMS_GOLDEN }));
+  // The feed's boundary, on the page's own module: a first reading celebrates nothing, a newer merge seen later does,
+  // a repository the page does not list is skipped, a merge older than the day is none, and a malformed reply refuses.
+  const F = BL.repoFeed, events = [], stop = F.subscribe((e) => events.push(e)), now = Date.now(), core = D.REPOS.findIndex((r) => r.repo === "bitcoin/bitcoin");
+  const lnd = D.REPOS.findIndex((r) => r.repo === "lightningnetwork/lnd");
+  F.apply({ at: now, merges: { "bitcoin/bitcoin": [now - 3600000, 5], "someone/else": [now, 9], "lightningnetwork/lnd": [now - 25 * 3600000, 7] } }, now);
+  const first = F.state.repos[core].number === 5 && F.state.repos[core].url === "https://github.com/bitcoin/bitcoin/pull/5" && F.state.repos[lnd].number === 0 && events.length === 1 && !events[0].fresh;
+  F.apply({ at: now, merges: { "bitcoin/bitcoin": [now - 60000, 6] } }, now);
+  const fresh = events.length === 2 && events[1].fresh && events[1].index === core;
+  let refused = false;
+  try { F.apply({ merges: { "bitcoin/bitcoin": ["soon", 6] } }, now); } catch { refused = true; }
+  F.apply({ merges: {} }, now);
+  const cleared = F.state.repos[core].number === 0 && F.state.repos[core].changedAt === 0;
+  stop();
+  record("repo feed: a first reading lights without celebrating, a newer merge is fresh, unknown repositories and merges older than the day are skipped, a malformed reply refuses and an empty one puts the totems out",
+    first && fresh && refused && cleared, JSON.stringify({ first, fresh, refused, cleared, events: events.length }));
+};
 const artifactUnitProof = () => {
   const workflow = readFileSync(join(root, ".github/workflows/pages.yml"), "utf8");
   const script = workflow.split("      - name: Commit the built page\n        run: |\n")[1]?.split("        env:\n")[0]?.replace(/^          /gm, "");
@@ -30776,6 +30836,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
 
   const island = BL.terrain.island({ seed: 1 });
   terrainParityChecks(BL, island);
+  repoIslandChecks(BL, island);
   await terrainCacheChecks();
   {
     // These real c3 roof poses must follow the same limb animation as open space.
