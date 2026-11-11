@@ -138,6 +138,11 @@
   // A body the scene owns rather than the roster can be bigger than an Ooga, so
   // the gap kept from it is wider than the one walkers keep from each other.
   const OUTSIDE_GAP = 0.86;
+  // Other players give way rather than stand in a walker's way. A driven Ooga on foot walks on into another player's
+  // gap down to `PUSH_DEPTH` of it, and each page moves its own Ooga back out of any player's gap at up to
+  // `PUSH_SPEED` metres a second, unless it is walking into them itself. One that has not given way after
+  // `PUSH_PATIENCE` seconds of pushing (a page that no longer answers, a body with nowhere to go) is walked through.
+  const PUSH_DEPTH = 0.55, PUSH_SPEED = 3, PUSH_PATIENCE = 0.6;
   const FOLLOW_GAP = 1.15, FOLLOW_RELEASE = 1.7, NPC_PASS_REACH = 1.9;
   const FIRE_FLEE_REACH = 8, FIRE_FLEE_CLEAR = 10, FIRE_MEMORY_RELEASE = 3, NPC_WALK_SPEED = 1.6;
   const NAV_WIDTH = 21, NAV_SIZE = NAV_WIDTH * NAV_WIDTH, NAV_HALF = 10, NAV_CELL = 0.5, NAV_STEP = 0.025, NAV_CENTER = NAV_HALF * NAV_WIDTH + NAV_HALF;
@@ -4204,7 +4209,9 @@
       }
       return false;
     };
-    const outsideClear = (fromX, fromZ, x, z, y, height, radius = 0, npc = false, players = false) => {
+    // `soft`: the driven Ooga on foot, which presses into another player's gap (`PUSH_DEPTH`) and through the one it
+    // is walking through (`pushThrough`), noting the player that held it off (`pushBlock`).
+    const outsideClear = (fromX, fromZ, x, z, y, height, radius = 0, npc = false, players = false, soft = false) => {
       if (passiveNpcs && npc) return true;
       const bodies = ctx.outsideActors && ctx.outsideActors();
       if (!bodies) return true;
@@ -4212,9 +4219,74 @@
         const body = bodies[i];
         if (body.nonInteractive || passiveNpcs && !body.player || npc && body.player || players && !body.player) continue;
         if (y >= body.y + (body.height || ctx.outsideActorHeight) || y + height <= body.y) continue;
-        if (!gapClear(fromX, fromZ, x, z, body, Math.max(OUTSIDE_GAP, (body.radius || 0) + radius))) return false;
+        const pushing = soft && body.player;
+        if (pushing && pushThrough !== null && bodyKey(body) === pushThrough) continue;
+        if (!gapClear(fromX, fromZ, x, z, body, Math.max(OUTSIDE_GAP, (body.radius || 0) + radius) * (pushing ? PUSH_DEPTH : 1))) {
+          if (pushing) pushBlock = body;
+          return false;
+        }
       }
       return true;
+    };
+    // The push between players (`PUSH_DEPTH`): the player that last held the driven Ooga off, the one it is walking
+    // through, and how long it has pushed without getting anywhere. Remote bodies' slots are reused, so a body is
+    // known by its player's id.
+    let pushBlock = null, pushThrough = null, pushStall = 0;
+    const bodyKey = (body) => body.id === null || body.id === undefined ? body : body.id;
+    // After a step on foot that wanted `want` metres: held off by a player and barely moving, the push runs on, and
+    // once it has run `PUSH_PATIENCE` the driven Ooga walks through that player.
+    const pushOn = (want, fromX, fromZ, dt) => {
+      const p = player.root.position;
+      if (pushBlock && Math.hypot(p.x - fromX, p.z - fromZ) < want * 0.3) {
+        pushStall += dt;
+        if (pushStall >= PUSH_PATIENCE) { pushThrough = bodyKey(pushBlock); pushStall = 0; }
+      } else pushStall = 0;
+      pushBlock = null;
+    };
+    // The driven Ooga moved by someone else, a step at a time, only where it could walk and never off a drop.
+    const shove = (cave, dx, dz) => {
+      const p = cave.root.position, steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / PLAYER_STEP));
+      dx /= steps; dz /= steps;
+      let moved = false;
+      for (let i = 0; i < steps; i++) {
+        const feet = p.y - cave.baseY, x = p.x + dx, z = p.z + dz;
+        if (!canStep(cave, false, p.x, p.z, x, z) || Math.abs(groundAt(x, z, feet, feet, cave) - feet) > STEP) break;
+        p.x = x; p.z = z; p.y = groundY(cave);
+        moved = true;
+      }
+      return moved;
+    };
+    // Another player in the driven Ooga's gap moves it out, straight away from them or else to one side, unless it is
+    // walking into them (it is the one pushing, and they give way on their own page) or the scene holds it in place
+    // (`holdsPlace`). The player it walked through is let go once it is clear of them.
+    const giveWay = (cave, dt) => {
+      const bodies = ctx.outsideActors && ctx.outsideActors();
+      if (!bodies) return;
+      const p = cave.root.position, walking = Math.hypot(steer.x, steer.z) > 0.05;
+      let ox = 0, oz = 0, through = false;
+      for (let i = 0; i < bodies.length; i++) {
+        const body = bodies[i];
+        if (!body.player || body.nonInteractive || !outsideNeighbor(cave, body)) continue;
+        const gap = Math.max(OUTSIDE_GAP, (body.radius || 0) + cave.bodyRadius);
+        let dx = p.x - body.x, dz = p.z - body.z;
+        const d = Math.hypot(dx, dz);
+        if (d >= gap) continue;
+        if (pushThrough !== null && bodyKey(body) === pushThrough) through = true;
+        if (walking && steer.x * dx + steer.z * dz < 0) continue;
+        if (d > 1e-4) { dx /= d; dz /= d; }
+        else {
+          // Squarely on top: on along the way they last moved, or else back the way this one faces.
+          const m = Math.hypot(body.dx, body.dz);
+          if (m > 1e-6) { dx = body.dx / m; dz = body.dz / m; }
+          else { dx = -Math.sin(cave.root.rotation.y); dz = -Math.cos(cave.root.rotation.y); }
+        }
+        ox += dx * (gap - d); oz += dz * (gap - d);
+      }
+      if (!through) pushThrough = null;
+      const want = Math.hypot(ox, oz);
+      if (want < 1e-4 || cave.hop > 0 || cave.hopV > 0 || cave.root.quaternion || ctx.holdsPlace && ctx.holdsPlace(cave)) return;
+      const step = Math.min(want, PUSH_SPEED * dt), ux = ox / want * step, uz = oz / want * step;
+      if (!shove(cave, ux, uz) && !shove(cave, -uz, ux)) shove(cave, uz, -ux);
     };
     // Another player's body is solid from above too: its top holds the driven Ooga anywhere the gap above would hold
     // it off from the side, so it never comes down inside the body. A scene with character support adds this to its
@@ -4261,7 +4333,7 @@
         if (!gapClear(p.x, p.z, x, z, other.root.position, gap)) return false;
       }
       // Walking bodies the scene owns rather than the roster keep the same gap.
-      return outsideClear(p.x, p.z, x, z, p.y - cave.baseY, cave.bodyHeight, cave.bodyRadius, cave !== player);
+      return outsideClear(p.x, p.z, x, z, p.y - cave.baseY, cave.bodyHeight, cave.bodyRadius, cave !== player, false, cave === player);
     };
     // The same gap from the other side: a scene's own walker against the whole crew.
     const actorClear = (fromX, fromZ, x, z, y, height) => {
@@ -5537,7 +5609,7 @@
       const height = cave.bodyHeight + Math.max(0, cave.viewLift);
       // On foot, the scene's own walkers are bodies to walk round, not through.
       if (!flying && cave.hop <= 0 && (!shoulderClear(cave, toX, toZ)
-        || !outsideClear(fromX, fromZ, toX, toZ, y, height, cave.bodyRadius))) return false;
+        || !outsideClear(fromX, fromZ, toX, toZ, y, height, cave.bodyRadius, false, false, cave === player))) return false;
       // Other players hold off a jump or a flight as they do a walk, so neither comes down inside one.
       if ((flying || cave.hop > 0) && !outsideClear(fromX, fromZ, toX, toZ, y, height, cave.bodyRadius, false, true)) return false;
       return flying || cave.hop > 0
@@ -5684,7 +5756,9 @@
             (vz + leap.vz) * 0.5 * burn + leap.vz * (dt - burn));
         } else {
           const k = Math.min(1, len) * (flying ? JET_SPEED : PLAYER_SPEED * steer.speed) * dt;
+          pushBlock = null;
           movePlayer(cave, flying, steer.x / len * k, steer.z / len * k);
+          if (cave === player) pushOn(flying ? 0 : k, fromX, fromZ, dt);
         }
         const heading = Math.atan2(steer.x, steer.z);
         if (!cave.weapon.aiming && Math.abs(steer.forward) > 0.05 && Math.abs(steer.strafe) <= 0.05) cave.root.rotation.y = heading;
@@ -5696,6 +5770,7 @@
         if (steer.view > 0) closeWalkPose(cave);
         cave.parts.snack.visible = false;
       } else {
+        if (cave === player) pushStall = 0;
         cave.act.phase = 0;
         standPose(cave);
         cave.parts.torso.scale.y = 1 + Math.sin(elapsed * 2.2 + cave.phase) * 0.015;
@@ -5955,6 +6030,7 @@
       if (ctx.playerName && cave !== player) { standPose(cave); poseWeapon(cave); return; }
       if (cave === player) {
         runPlayer(cave, dt);
+        giveWay(cave, dt);
         runReload(cave, dt);
         return;
       }
