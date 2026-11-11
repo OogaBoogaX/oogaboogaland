@@ -13110,6 +13110,46 @@ const TOUR_ENDED = `(() => {
   B.advance(0.5, 1 / 60);
   return { ended, walked: +Math.hypot(body.root.position.x - f.x, body.root.position.z - f.z).toFixed(3) };
 })()`;
+const hubSharedGuide = { name: "hub shared guide", why: "rule: visitors opt into Tess's queue, accept their turn, keep conversations private and retain their own camera while another visitor uses the guide", run: async b => {
+  const result = await b.evaluate(`(() => {
+    const N=BL.net,G=BL.scenes.hub.debug.tess,s=G.state,camera=__ooga.camera;
+    const saved={me:N.state.me,room:N.state.room,connectionToken:N.state.connectionToken,tessShared:N.state.tessShared,tessGuide:N.state.tessGuide},send=N.sendTess,calls=[];
+    let elapsed=0;const step=(n=1)=>{for(let i=0;i<n;i++){elapsed+=1/30;G.update(1/30,elapsed);}};
+    const receive=(phase,position=0,token="")=>{N.state.tessGuide={phase,position,token,count:position?2:0,until:N.serverNow()+60000,busy:phase==="wait"||phase==="active",pose:null};step();};
+    const view=()=>JSON.stringify([camera.position,camera.target]);
+    try {
+      N.sendTess=m=>{calls.push(JSON.parse(JSON.stringify(m)));return true;};
+      Object.assign(N.state,{me:{id:901,login:"queue-fixture"},room:"live",connectionToken:"queue-fixture",tessShared:true,tessGuide:null});
+      receive("none");G.tap();step();
+      const panel=document.querySelector(".greeter-menu"),go=panel.querySelector(".greeter-row button:first-child"),skip=panel.querySelector(".greeter-row button:last-child");
+      const optIn=!panel.hidden&&go.textContent==="Join queue"&&!calls.some(m=>m.op==="join");
+      const fits=()=>{const r=panel.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1&&r.top>=0&&r.bottom<=innerHeight+1;};
+      let contained=fits();
+      N.state.tessGuide={...N.state.tessGuide,count:32};step();
+      const full=go.disabled&&panel.textContent.includes("queue is full");
+      const announced=panel.querySelector(".greeter-menu-help").getAttribute("aria-live")==="polite";
+      receive("none");
+      go.click();const joined=calls.at(-1).op==="join";
+      receive("wait",2,"mine");const before=view();
+      N.state.tessGuide.pose=[3,2,4,1,0,0,0,0,0,0,0,0];step(60);
+      const observer=before===view()&&!s.holding&&go.hidden&&panel.textContent.includes("2 of 2")&&Math.hypot(G.root.position.x-3,G.root.position.y-2,G.root.position.z-4)<.01;
+      receive("ready",1,"mine");contained&&=fits();const ready=go.textContent==="Talk to Tess"&&!go.hidden&&!s.holding;
+      go.click();const accepted=calls.at(-1).op==="accept"&&calls.at(-1).token==="mine";
+      receive("active",1,"mine");for(let i=0;i<450&&s.phase!=="offer";i++)step();
+      contained&&=fits();const offered=s.phase==="offer"&&!panel.querySelector("form").hidden;
+      const field=panel.querySelector("input");field.value="How do I donate?";panel.querySelector("form").requestSubmit();step();
+      const privateReply=String(JSON.stringify(G.speech?.beats)).includes("Feed the Oogas")&&calls.every(m=>!["question","say","answer"].some(k=>k in m));
+      const boundedWire=calls.filter(m=>m.op==="pose").length>0&&calls.every(m=>JSON.stringify({t:"tess-guide",...m}).length<=256);
+      go.click();step();const touring=s.holding;
+      N.state.room="connecting";N.state.tessGuide=null;step();
+      const disconnected=!s.holding&&!G.speech&&go.disabled&&panel.textContent.includes("15 seconds");
+      N.state.room="live";N.state.connectionToken="reconnected";receive("wait",2,"mine");skip.click();
+      const cancelled=calls.at(-1).op==="cancel"&&panel.hidden;
+      return {optIn,full,announced,contained,joined,observer,ready,accepted,offered,privateReply,boundedWire,touring,disconnected,cancelled};
+    } finally {Object.assign(N.state,saved);N.sendTess=send;step();}
+  })()`);
+  record("hub shared guide: explicit join/accept, queue position, private answers, observer camera independence, disconnect release and cancellation",Object.values(result).every(Boolean),JSON.stringify(result));
+} };
 const hubGuide = { name: "hub guide", why: "regression: Tess's offer showed only its first speech bubble, she stopped shots aimed past her, an Ooga walking or flying as her tour began went on through it, and T before or during her tour let the gorilla and tour share control", run: async (b) => {
   const guide = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, a = B.cavemen.get("portlandhodl"), G = BL.scenes.hub.debug.tess, s = G.state;
@@ -23711,7 +23751,8 @@ scene("poker", { opts: PHONE_SIZE, steps: [phone("poker", { card: '[data-intro="
 scene("hub", { label: "gorilla population restoration", query: "status=clankin", exclusive: true, opts: { motion: true }, steps: [hubGorillaPopulation] });
 scene("hub", { label: "weapons", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1&gorillarage=1", steps: [hubCombatGate, ...[hubAk, hubMelee, hubJetpack].map(gameCombat)] });
 // Her greeting comes once a page, to a fresh landing nothing has moved, so the guide has its own page.
-scene("hub", { label: "guide", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubGuide, hubAsk, hubTourInput] });
+scene("hub", { label: "guide", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubGuide, hubAsk, hubTourInput, hubSharedGuide] });
+scene("hub", { label: "shared guide phone", opts: { w: 390, h: 844, mobile: true }, query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubSharedGuide] });
 // Native pointer-lock assertions need sole focus; another browser lane can
 // steal capture and spend this long scenario's deadline waiting for it back.
 scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", exclusive: true, steps: [hubBirdsEye] });

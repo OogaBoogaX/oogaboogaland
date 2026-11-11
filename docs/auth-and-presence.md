@@ -202,6 +202,10 @@ Everyone in the room hears the same fire at the pile at the same moment (`src/js
 
 The sound is an eight-second crackle over an ember rumble, synthesized in Web Audio from a fixed seed, so the crackles fall at the same seconds on every machine: no audio file. It is quiet on purpose (half its first level), full within 5 of the pile and gone by 16, heard from the driven Ooga, or from where the camera looks while roaming free. It plays only for signed-in visitors while the room is live, starts after the first click or key (browsers allow sound only after a gesture), and honours the page-wide mute (`oogaboogaland.audio`, which the games' M key sets).
 
+## Shared Tess
+
+The island guide uses an opt-in FIFO queue for signed-in room visitors. Turns and visual movement are shared; conversation text and camera controls stay private. See [Shared Tess](shared-tess.md) for timing, reconnect, persistence and standalone behavior.
+
 ## Voice
 
 Signed-in players can talk (`src/js/voice.js`, `worker/src/room.js`, `worker/src/sfu.js`), over a Cloudflare Realtime SFU app per Worker (`REALTIME_APP_ID` in `wrangler.<env>.jsonc`, `REALTIME_SECRET` a Worker secret).

@@ -1,3 +1,5 @@
+import { tessQueue } from "./tess-queue.js";
+export { tessQueue };
 import "../../src/js/arcade-cabinets.js";
 export const CABINETS = globalThis.BL.arcadeCabinets;
 export { hockey } from "./hockey.js";
@@ -316,6 +318,7 @@ export const parseClientMessage = (text) => {
     if (!seat.outdoor) return { t: "cabinet", op: msg.op, id: msg.id, q: msg.q };
     return Number.isInteger(msg.slot) && CABINETS.slot(msg.slot) ? { t: "cabinet", op: msg.op, id: msg.id, q: msg.q, slot: msg.slot } : null;
   }
+  if (msg.t === "tess-guide") return tessQueue.parse(msg);
   if (msg.t === "hockey") return HOCKEY.parse(msg);
   if (msg.t === "bf") return BLOCK.parse(msg);
   if (msg.t === "studio") return parseStudioCommand(msg);
