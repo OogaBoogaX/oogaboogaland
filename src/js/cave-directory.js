@@ -74,7 +74,8 @@
         if (!slot.name || !["open", "mirror"].includes(slot.status) || slot.scene && !BL.scenes[slot.scene]) continue;
         const route = BL.routes.list.find(row => slot.place ? row.scene === "hub" && row.place === slot.place
           : slot.scene === "lab" ? row.scene === "hub" && row.place === "lab" : slot.scene && row.scene === slot.scene);
-        internal(caves, slot.name, route?.scene || "hub", route?.place || null, slot.repo || slot.link);
+        // The mirror cave has no route of its own; the hub still stands an Ooga at its mouth.
+        internal(caves, slot.name, route?.scene || "hub", route?.place || (slot.status === "mirror" ? "mirror" : null), slot.repo || slot.link);
       }
       const worlds = group("₿IFRÖST windows · integrated");
       for (const window of BL.bifrostModels.WINDOWS) if (window.kind === "travel" && BL.scenes[window.scene]) internal(worlds, window.name, window.scene, null, null);

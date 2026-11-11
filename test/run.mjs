@@ -23423,6 +23423,16 @@ const caveDirectory = (mobile = false) => ({ name: "cave directory", why: "rule:
     await b.send("Fetch.disable"); b.on("Fetch.requestPaused",null);
     record("cave directory: same-tab cross-origin navigation carries only the registered URL, suppresses referrer, leaves the old runtime and supports browser Back",!interceptionError&&request?.url==="https://entropylab.online/"&&!Object.keys(request.headers).some(k=>k.toLowerCase()==="referer")&&away.fixture&&!away.referrer&&!away.obl&&back.scene==="bifrost"&&back.count===1&&back.departure&&(back.departure.persisted||back.departure.voice===1&&back.departure.net===1),JSON.stringify({away,back,interceptionError}));
   }
+  if (!mobile) {
+    // Visit in OBL on a hub cave hands the Ooga back to the island at that cave's mouth, not at the bridge.
+    await click("#cave-directory-button");
+    await untilPage(b, 'document.getElementById("cave-directory").open', 3000);
+    await b.evaluate(`[...document.querySelectorAll("#cave-directory li")].find(li => li.querySelector("strong")?.textContent === "EntropyLab").querySelector("button").click()`);
+    await untilPage(b, '__ooga.scene === "hub" && !__ooga.transitioning', 20000);
+    const arrival = await b.evaluate(`(() => { const B = __ooga, p = B.pilot.player.root.position, m = B.island.mouths.find(m => m.id === "c11");
+      return { scene: B.scene, path: location.pathname + location.hash, lab: Math.round(Math.hypot(p.x - m.x, p.z - m.z) * 10) / 10 }; })()`);
+    record("cave directory: Visit in OBL on a hub cave brings the driven Ooga back to the island at that cave's mouth, not the bridge", arrival.scene === "hub" && arrival.path.endsWith("/entropylab") && arrival.lab < 12, JSON.stringify(arrival));
+  }
   await b.evaluate(`document.getElementById("cave-directory")?.close()`);
 } });
 scene("bifrost", { label: "cave directory", query: "solo=1&character=portlandhodl", steps: [caveDirectory()] });
@@ -30408,9 +30418,19 @@ const caveDirectoryProof = () => {
   const staleClose=dialog.open&&ui.opened;
   ui.dispose();ui.dispose();while(tasks.length)tasks.shift()();
   const lifecycle=first&&!duplicate&&escape&&reopen&&staleClose&&!document.body.children.length&&!ui.open()&&holds.join(",")==="true,false,true,false";
+  // Visit in OBL hands each mainland row's own hub place to travel: the lab and B.C.A. through their routes, the
+  // mirror (no route of its own) by its navigation name, so none falls back to a bare hub arrival at the bridge.
+  Object.assign(context.window.BL,{caves:{slots:[{name:"EntropyLab",status:"open",scene:"lab"},{name:"B.C.A.",status:"open",scene:null,place:"bca"},
+    {name:"Ooga Booga Land",status:"mirror",scene:null},{name:"Lightning Factory",status:"open",scene:"factory"}]},
+    routes:{list:[{scene:"hub",place:"lab"},{scene:"hub",place:"bca"},{scene:"factory",place:null}]},scenes:{lab:{},factory:{}}});
+  const trips=[], placesUi=api.create({button:make("button"),hold:()=>{},travel:(id,place)=>{trips.push(`${id}:${place}`);return false;}});
+  placesUi.open();
+  for(const node of nodes.filter(node=>node.tag==="button"&&node.textContent==="Visit in OBL"&&node.isConnected))node.emit("click");
+  const mainlandPlaces=trips.slice(0,4).join(",")==="hub:lab,hub:bca,hub:mirror,factory:null";
+  placesUi.dispose();while(tasks.length)tasks.shift()();
   const empty = api.validate({ schema: 1, entries: [] }).entries.length === 0;
   const statuses = ["open", "unavailable", "retired"].every(status => api.validate({ schema: 1, entries: [{ ...row, status }] }).entries[0].status === status);
-  return { rejected, empty, statuses, lifecycle, existingDestination: row.url === "https://entropylab.online/" && row.repository === "OogaBoogaX/entropylab",
+  return { rejected, empty, statuses, lifecycle, mainlandPlaces, existingDestination: row.url === "https://entropylab.online/" && row.repository === "OogaBoogaX/entropylab",
     immutable: Object.isFrozen(api) && Object.isFrozen(data) && Object.isFrozen(data.entries) && data.entries.every(Object.isFrozen) };
 };
 
