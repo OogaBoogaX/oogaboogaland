@@ -4853,7 +4853,7 @@ const hudNoticeChecks = async () => {
 const characterChecks = async () => {
   const context = { window: {}, URLSearchParams, location: { search: "" } };
   for (const name of CONTRIBUTOR_SOURCES) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
-  const BL = context.window.BL, all = BL.characters.all(), hooks = ["torso", "club", "gear", "skull", "crown", "eyes", "mark", "hatY", "headgear", "extras", "tint"], mirrorGeometries = new Set();
+  const BL = context.window.BL, all = BL.characters.all(), hooks = ["torso", "club", "gear", "skull", "crown", "eyes", "mark", "hatY", "headgear", "extras", "tint", "refine"], mirrorGeometries = new Set();
   const collect = node => {
     if (node.geometry) mirrorGeometries.add(node.geometry);
     if (node.skins) for (const skin of Object.values(node.skins)) mirrorGeometries.add(skin);
@@ -25701,7 +25701,6 @@ const portalChecks=(BL,el)=>{
 };
 
 // Rule: one support mesh, bounded water effects and the real crew must agree about immersion.
-
 // Island shoreline regressions live in the existing global ledger, not a second test runner.
 function dryFingerprint(land) {
   let count=0,hash=2166136261;
@@ -26647,7 +26646,8 @@ const maxisChecks = BL => {
   C.setCombatEnabled(true);
   const A=C.cavemen.get("YellowBrokeIt");C.control(A);
   const clear=(ax,az,bx=ax,bz=az)=>I.walkable(ax,az,bx,bz,R.groundAt(ax,az),A.bodyHeight,A);
-  record("Maxis: 50 reusable seats fit measured Yellow scale",R.seats.length===50&&A.bodyHeight>1.3&&A.bodyHeight<1.5&&R.seats.every(s=>s.allowWeapons&&s.lockMovement&&clear(s.walkAt.x,s.walkAt.z)),JSON.stringify({height:A.bodyHeight,radius:A.bodyRadius,blocked:R.seats.map((s,i)=>!clear(s.walkAt.x,s.walkAt.z)?i:null).filter(i=>i!==null)}));
+  // The refined body stands Yellow at about 1.57 m (1.3 to 1.5 before the longer legs and torso).
+  record("Maxis: 50 reusable seats fit measured Yellow scale",R.seats.length===50&&A.bodyHeight>1.45&&A.bodyHeight<1.7&&R.seats.every(s=>s.allowWeapons&&s.lockMovement&&clear(s.walkAt.x,s.walkAt.z)),JSON.stringify({height:A.bodyHeight,radius:A.bodyRadius,blocked:R.seats.map((s,i)=>!clear(s.walkAt.x,s.walkAt.z)?i:null).filter(i=>i!==null)}));
   const seatResults=[];
   for(const [i,seat] of R.seats.entries()){
     Object.assign(A.root.position,{x:seat.walkAt.x,y:seat.floor+A.baseY,z:seat.walkAt.z});A.hop=A.hopV=0;
@@ -33116,7 +33116,6 @@ const dsbIntegrationCheckpoint={name:"dsb integration checkpoint",why:"contract:
 }};
 scene("dsb",{label:"integration checkpoint",query:"&weather=clear&time=1200",steps:[dsbIslandShorelineStep,dsbIntegrationCheckpoint]});
 scene("dsb",{label:"integration checkpoint phone",query:"&weather=clear&time=1200",opts:{w:390,h:844,mobile:true},steps:[dsbIslandShorelineStep,dsbIntegrationCheckpoint]});
-
 
 const runTasks = async () => {
   const picked = tasks.filter((t) => (t.perf ? PERF : PICKED.includes(t.scene)));
