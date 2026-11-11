@@ -13068,6 +13068,30 @@ const hubDestinationNames = { name: "destination accessible names", why: "regres
       pins: document.querySelectorAll("[data-map-destination]").length === 12 };
   })()`);
   record("destinations: a real-world map pin previews without moving camera or actor, requires confirmation, and distinguishes underground floors", Object.values(preview).every(Boolean), JSON.stringify(preview));
+  const usability = await b.evaluate(`(() => {
+    const D=BL.destinationMap,H=BL.scenes.hub,P=__ooga.pilot,dialog=document.getElementById("destination-map"),list=document.getElementById("destination-map-list");
+    const layers=document.getElementById("destination-map-layers"), pins=()=>[...document.querySelectorAll("[data-map-destination]")].filter(p=>!p.hidden).map(p=>p.dataset.mapDestination);
+    layers.querySelector('[data-map-layer="hq"]').click();const hq=pins().join()==="underground";
+    layers.querySelector('[data-map-layer="basement"]').click();const basement=pins().join()==="basement";
+    layers.querySelector('[data-map-layer="surface"]').click();const surface=!pins().includes("underground")&&!pins().includes("basement")&&pins().length===10;
+    layers.querySelector('[data-map-layer="all"]').click();
+    document.getElementById("destination-show-list").click();const listMode=dialog.dataset.display==="list"&&getComputedStyle(list).display!=="none";
+    document.getElementById("destination-show-map").click();const mapMode=dialog.dataset.display==="map";
+    P.possess(__ooga.cavemen.get("portlandhodl")); if(__ooga.crew.sleeping)__ooga.crew.wakePlayer(); P.endLook();
+    const p=P.player?.root.position, before=p&&JSON.stringify(p), point={};
+    const doors=!!p&&["pile","lab","underground","basement","factory","arcade","bca","mirror","mempool","timechain","bifrost","gate"].every(n=>H.navigationWaypoint(n,point)&&[point.x,point.y,point.z].every(Number.isFinite));
+    document.querySelector('[data-map-destination="lab"]').click();document.getElementById("destination-map-guide").click();D.update();
+    const guided=!dialog.open&&!document.getElementById("destination-waypoint").hidden&&JSON.stringify(p)===before&&!P.looking;
+    document.getElementById("destination-waypoint-stop").click();const stopped=document.getElementById("destination-waypoint").hidden;
+    document.getElementById("destination-hud").click();document.querySelector('[data-map-destination="lab"]').click();document.getElementById("destination-map-go").click();D.update();
+    const returnShown=P.looking&&!document.getElementById("destination-return").hidden;
+    document.getElementById("destination-return").click();const returned=!P.looking&&JSON.stringify(p)===before;
+    document.getElementById("destination-hud").click();
+    const status=H.navigationStatus;H.navigationStatus=()=>"Finish carrying first.";document.querySelector('[data-map-destination="lab"]').click();
+    const refusal=document.getElementById("destination-map-go").disabled&&document.getElementById("destination-map-detail").textContent.includes("Finish carrying first.");H.navigationStatus=status;
+    return {hq,basement,surface,listMode,mapMode,doors,guided,stopped,returnShown,returned,refusal};
+  })()`);
+  record("destinations: floor filters, phone Map/List, entrance bearings, touch return and early refusals preserve the actor",Object.values(usability).every(Boolean),JSON.stringify(usability));
   await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
   await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
   const closed = await b.evaluate(`!document.getElementById("destination-map").open && document.activeElement.id === "destination-hud" && __ooga.scene === "hub"`);
@@ -13103,7 +13127,7 @@ const hubDestinationNames = { name: "destination accessible names", why: "regres
     try {
       await press(9); const opened = document.getElementById("destination-map").open;
       // pad-focus.js moves to the nearest control below the Close button: a destination, whichever column is nearer.
-      await press(13); const ordered = !!(document.activeElement.dataset.destination || document.activeElement.dataset.mapDestination);
+      await press(13); const ordered = !!(document.activeElement.dataset.destination || document.activeElement.dataset.mapDestination || document.activeElement.dataset.mapLayer || document.activeElement.id === "destination-show-map");
       pad.axes[0]=1; await press(1); const closed = !document.getElementById("destination-map").open;
       await tick(); const quiet = P.state.lx === 0;
       pad.axes[0]=0; await tick(); pad.axes[0]=1; await tick(); const resumed = P.state.lx > 0;

@@ -593,6 +593,9 @@
     if (walletTools && !walletTools.hidden) help.rows.push(H.row(touch ? [] : BL.controls.shortcutKeys("throwWallet"), "Throw carried wallet", touch ? "Throw button" : ""), H.row([], "Place carried wallet", touch ? "Tap ground" : "Click ground"));
     help.title = "DSB Land · " + help.title; return help;
   };
+  scene.navigationLooking = () => !!pilot?.looking;
+  scene.navigationReturn = () => pilot?.endLook();
+  scene.navigationStatus = () => scene.navigationReady ? "" : "Finish the current interaction first.";
   scene.navigationMap = () => {
     if (!land || !navigationViews || interiors?.active) return null;
     const bounds = { minX: Infinity, minZ: Infinity, maxX: -Infinity, maxZ: -Infinity };

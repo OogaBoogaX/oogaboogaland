@@ -12563,7 +12563,7 @@
     if (T) include(T.place.x, T.place.z, BL.timechainModels.SITE.radius);
     if (B) include(B.site.cloud.x, B.site.cloud.z, B.site.cloud.r);
     const points = [{ name: "pile", x: 0, z: 0 }, { name: "gate", x: island.gate.x, z: island.gate.z },
-      { name: "underground", x: 0, z: 6, level: "HQ · below ground" }, { name: "basement", x: 0, z: 6, level: "Basement · lower floor" },
+      { name: "underground", layer: "hq", x: 0, z: 6, level: "HQ · below ground" }, { name: "basement", layer: "basement", x: 0, z: 6, level: "Basement · lower floor" },
       { name: "mempool", x: M.worldX(0, 7.4), z: M.worldZ(0, 7.4), level: "Chamber · beneath the lake" }];
     for (const [id, name] of Object.entries(CAVE_ZONES)) {
       const mouth = island.mouths.find(m => m.id === id);
@@ -12587,6 +12587,36 @@
       },
       isPath: (x, z) => !!island && (island.onLand(x, z) && island.isPath(x, z) || Number.isFinite(poolBridge(x, z)) || !!T && onSphere(x, z) && Math.hypot(x - T.place.x, z - T.place.z) >= BL.timechainModels.SITE.radius)
     };
+  };
+  hubScene.navigationLooking = () => !clankerPlay?.active && !!pilot?.looking;
+  hubScene.navigationReturn = () => pilot?.endLook();
+  hubScene.navigationStatus = name => {
+    if (!hubScene.navigationReady) return "Finish the current interaction first.";
+    return clankerPlay?.active ? clankerPlay.travelRefusal() : "";
+  };
+  const MAP_ZONES = { pile: "outside", gate: "outside", lab: "lab", mirror: "mirror", factory: "factory.hall", arcade: "arcade.hall", bca: "bca", underground: "hq", basement: "hq", mempool: "rainforest", bifrost: "bifrost.chamber", timechain: "sphere" };
+  // Bearings lead to authored doors and bridge ends. They are not a collision-free walking path or auto-walk.
+  hubScene.navigationWaypoint = (name, out) => {
+    const actor = clankerPlay?.active ? clankerPlay.player : pilot?.player;
+    if (!actor || !island || !Object.hasOwn(MAP_ZONES, name)) return false;
+    const p = actor.root.position, from = zoneOf(actor, !!clankerPlay?.active), to = MAP_ZONES[name], step = BL.zoneMap.next(from, to);
+    out.note = "Entrance reached · use the on-screen action";
+    if (step && doorToward(from, step, out, p.x, p.z)) return true;
+    if (to === "hq") {
+      if (BL.zoneMap.routeFrom(from) === "hq") { out.x = p.x; out.y = p.y; out.z = p.z; out.note = name === "basement" ? "Inside HQ · follow the stairs down to the basement" : "You are inside HQ"; return true; }
+      return mouthDoor("hq", out, p.x, p.z);
+    }
+    if (["lab", "mirror", "bca"].includes(name)) return mouthDoor(to, out, p.x, p.z);
+    if (name === "mempool" && mempoolIsland) {
+      const M = mempoolIsland, R = M.layout.RAMP, x = Math.sin(R.start) * R.r, z = Math.cos(R.start) * R.r;
+      out.x = M.worldX(x, z); out.y = M.place.y + DOOR_Y; out.z = M.worldZ(x, z); out.note = "Tunnel entrance · follow the descent beneath the lake"; return true;
+    }
+    if (name === "timechain") return bridgeDoor("sphere", true, out);
+    if (name === "bifrost") return doorToward("bifrost", "bifrost.chamber", out, p.x, p.z);
+    if (name === "factory" || name === "arcade") return doorToward(name, to, out, p.x, p.z);
+    if (name === "gate") { out.x = island.gate.x; out.y = island.surfaceAt(out.x, island.gate.z) + DOOR_Y; out.z = island.gate.z; return true; }
+    if (name === "pile") { out.x = 0; out.y = ALTAR_HEIGHT + DOOR_Y; out.z = Math.max(5, altar.platformRadius + 1.3); out.note = "You reached the pile"; return true; }
+    return false;
   };
   hubScene.beginCoaching = () => islandGuide.escape();
   Object.defineProperty(hubScene, "coachingReady", { get: () => islandGuide?.state.phase === "work" && !gameMode });

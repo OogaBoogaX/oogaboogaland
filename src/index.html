@@ -1906,6 +1906,10 @@
     <dialog class="modal destination-map" id="destination-map" aria-labelledby="destination-map-title">
       <div class="panel-head"><h2 id="destination-map-title">Explore the island</h2><button type="button" class="modal-close" id="destination-map-close" aria-label="Close map">&times;</button></div>
       <p class="destination-map-mode" id="destination-map-mode"></p>
+      <div class="destination-map-tools">
+        <div class="destination-map-tabs" role="group" aria-label="Map display"><button type="button" id="destination-show-map" aria-pressed="true">Map</button><button type="button" id="destination-show-list" aria-pressed="false">List</button></div>
+        <div id="destination-map-layers" role="group" aria-label="Destination floor"><button type="button" data-map-layer="all" aria-pressed="true">All</button><button type="button" data-map-layer="surface" aria-pressed="false">Surface</button><button type="button" data-map-layer="hq" aria-pressed="false">HQ</button><button type="button" data-map-layer="basement" aria-pressed="false">Basement</button></div>
+      </div>
       <div class="destination-map-layout">
         <section class="destination-map-survey" aria-label="World map">
           <div class="destination-atlas" id="destination-atlas">
@@ -1913,19 +1917,21 @@
             <svg id="destination-atlas-overlay" viewBox="0 0 720 600" aria-hidden="true"></svg>
             <div id="destination-atlas-pins" role="group" aria-label="Preview a zone on the map"></div>
           </div>
-          <p class="destination-map-key"><span id="destination-map-origin">◉ Your position</span><span>◎ Selected zone</span><span>North up · Numbers match the list</span></p>
+          <p class="destination-map-key"><span id="destination-map-origin">◉ Your position</span><span>◎ Selected zone</span><span>North up · Landmark numbers match the list</span></p>
           <p class="destination-map-mapnote" id="destination-map-mapnote"></p>
         </section>
         <div id="destination-map-list" aria-label="All destinations"></div>
       </div>
       <div class="destination-map-preview">
         <div><p class="destination-map-eyebrow" id="destination-map-phase">SELECT A ZONE</p><h3 id="destination-map-selection">Where next?</h3><p id="destination-map-detail">Choose a numbered place on the map or in the list.</p></div>
-        <button type="button" id="destination-map-go" disabled>Choose a zone</button>
+        <div class="destination-map-actions"><button type="button" id="destination-map-guide" disabled>Guide me there</button><button type="button" id="destination-map-go" disabled>Choose a zone</button></div>
       </div>
       <p class="help" id="destination-map-status" role="status" aria-live="polite" aria-atomic="true"></p>
     </dialog>
     <div id="destination-map-effect" aria-hidden="true" hidden></div>
     <aside id="destination-map-receipt" class="destination-map-receipt" role="status" aria-live="polite" aria-atomic="true" hidden></aside>
+    <button type="button" id="destination-return" hidden>Return to my Ooga</button>
+    <aside id="destination-waypoint" aria-label="Walking directions" hidden><span id="destination-waypoint-arrow" aria-hidden="true">↑</span><span id="destination-waypoint-text"></span><button type="button" id="destination-waypoint-stop" aria-label="Stop walking directions">×</button></aside>
     <aside id="explore-coach" class="explore-coach" aria-label="Learn to explore" hidden>
       <p id="explore-coach-text" role="status"></p>
       <div><button type="button" id="explore-coach-start">Learn the controls</button><button type="button" id="explore-coach-skip">Not now</button></div>

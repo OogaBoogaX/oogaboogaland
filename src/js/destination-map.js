@@ -25,6 +25,34 @@
     const learn = $("controls-learn"), controls = $("controls-help-button");
     const coarse = window.matchMedia("(pointer: coarse)");
     const mode = $("destination-map-mode"), go = $("destination-map-go"), selection = $("destination-map-selection"), detail = $("destination-map-detail");
+    const guide = $("destination-map-guide"), returnButton = $("destination-return"), waypoint = $("destination-waypoint"), waypointText = $("destination-waypoint-text"), waypointArrow = $("destination-waypoint-arrow"), waypointStop = $("destination-waypoint-stop");
+    const mapTab = $("destination-show-map"), listTab = $("destination-show-list"), layers = $("destination-map-layers");
+    let layer = "all", waypointName = "", waypointOwner = null, waypointAt = 0;
+    const waypointPoint = { x: 0, y: 0, z: 0, note: "" };
+    const stopGuidance = () => { waypointName = ""; waypointOwner = null; waypoint.hidden = true; };
+    const returnToActor = () => { current()?.navigationReturn?.(); hideReceipt(); returnButton.hidden = true; $("scene").focus({ preventScroll: true }); };
+    const setDisplay = view => { dialog.dataset.display = view; mapTab.setAttribute("aria-pressed", String(view === "map")); listTab.setAttribute("aria-pressed", String(view === "list")); };
+    const showMap = () => setDisplay("map"), showList = () => setDisplay("list");
+    const setLayer = value => {
+      layer = value; atlas?.filter(layer);
+      for (const row of rows) { const p = mapData?.points.find(p => p.name === row.dataset.destination); row.hidden = layer !== "all" && (p?.layer || "surface") !== layer; }
+      for (const section of list.children) section.hidden = !Array.from(section.querySelectorAll("button")).some(row => !row.hidden);
+      for (const button of layers.children) button.setAttribute("aria-pressed", String(button.dataset.mapLayer === layer));
+    };
+    const changeLayer = e => {
+      if (!e.target.dataset.mapLayer) return;
+      setLayer(e.target.dataset.mapLayer); selectedName = ""; go.disabled = guide.disabled = true;
+      for (const row of rows) row.setAttribute("aria-pressed", "false");
+      selection.textContent = "Where next?"; phase.textContent = "SELECT A ZONE"; go.textContent = "Choose a zone";
+      detail.textContent = "Choose a landmark on this floor."; status.textContent = "";
+      atlas?.select("", provider?.position?.());
+    };
+    const startGuidance = () => {
+      const scene = current(), name = selectedName;
+      if (!canOpen() || !name || !scene.navigationWaypoint?.(name, waypointPoint)) return;
+      waypointName = name; waypointOwner = scene; waypointAt = 0;
+      scene.navigationReturn?.(); close(true); hideReceipt();
+    };
     const phase = $("destination-map-phase"), receipt = $("destination-map-receipt"), effect = $("destination-map-effect"), survey = $("destination-atlas");
     const atlas = BL.destinationAtlas?.create($("destination-atlas-ground"), $("destination-atlas-overlay"), $("destination-atlas-pins"));
     let mapData = null, selectedName = "", selectedTravels = false, acting = false, receiptTimer = 0;
@@ -45,7 +73,7 @@
       if (chosen) $("scene").focus({ preventScroll: true });
       else if (!button.hidden) button.focus({ preventScroll: true });
       rows = []; list.replaceChildren(); status.textContent = "";
-      atlas?.clear(); mapData = null; selectedName = ""; acting = false; go.disabled = true;
+      atlas?.clear(); mapData = null; selectedName = ""; acting = false; go.disabled = guide.disabled = true; guide.hidden = true;
       dialog.setAttribute("aria-busy", "false");
     };
     const close = (chosen = false) => { if (dialog.open) dialog.close(); finish(chosen); };
@@ -64,9 +92,14 @@
       phase.textContent = outside ? "RETURN TO TOWN" : selectedTravels ? "WARP PREVIEW" : "VIEW PREVIEW";
       const place = current().id === "hub" ? PLACES[name] : null;
       detail.textContent = [point?.level, outside ? "Leave this room before choosing another town view." : place ? place[1] : "Look around this part of DSB Land.",
-        outside ? "" : selectedTravels ? "Your gorilla keeps its heading and equipment. The landing must be clear." : "Only the camera moves. Move or press Escape to return to your Ooga."].filter(Boolean).join(" · ");
+        outside ? "" : selectedTravels ? "Heading and equipment stay. Landing must be clear." : "Camera only. Move, Escape or Return to my Ooga to resume."].filter(Boolean).join(" · ");
       go.textContent = outside ? "Return outside" : `${selectedTravels ? "Warp to" : "View"} ${provider.label(name)}`;
-      go.disabled = false;
+      const refusal = current().navigationStatus?.(name) || "";
+      go.disabled = !!refusal;
+      guide.hidden = !current().navigationWaypoint;
+      guide.disabled = !current().navigationWaypoint?.(name, waypointPoint);
+      if (refusal) detail.textContent += ` · ${refusal}`;
+      if (layer !== "all" && point && (point.layer || "surface") !== layer) setLayer(point.layer || "surface");
       go.scrollIntoView?.({ block: "nearest", inline: "nearest" });
       for (const row of rows) row.setAttribute("aria-pressed", String(row.dataset.destination === name));
       const position = provider.position?.() || mapData?.origin;
@@ -97,17 +130,18 @@
     };
     const open = () => {
       if (!canOpen() || dialog.open || document.querySelector("dialog:modal, dialog[open]:not(.board-floating)")) return false;
-      hideReceipt(); owner = current();
+      hideReceipt(); waypoint.hidden = true; owner = current();
       for (const key of down) swallowed.add(key);
       BL.controls.resetAll(); owner.controlsHelpHold?.(true);
       if (document.pointerLockElement) document.exitPointerLock();
       const travels = provider.travels(), selected = provider.selected();
+      setDisplay("map"); layer = "all"; atlas?.filter(layer);
       mapData = owner.navigationMap?.() || null;
       title.textContent = mapData?.title || "Explore the world";
       mode.textContent = owner.id === "dsb" && provider.names().length === 1 && provider.names()[0] === "outside" ? "RETURN TO TOWN · Leave this room to explore CHORA." : travels ? "GORILLA WARP · Choose a zone, preview, then warp." : "CAMERA VIEW · Your Ooga stays where it is.";
-      selectedName = ""; acting = false; go.disabled = true; go.textContent = "Choose a zone";
+      selectedName = ""; acting = false; go.disabled = guide.disabled = true; guide.hidden = !owner.navigationWaypoint; go.textContent = "Choose a zone";
       selection.textContent = "Where next?"; phase.textContent = "SELECT A ZONE";
-      detail.textContent = "Choose a numbered place on the map or in the list.";
+      detail.textContent = "Choose a landmark on the map or in the list.";
       dialog.setAttribute("aria-busy", "false");
       list.replaceChildren(); rows = [];
       const groups = new Map();
@@ -132,8 +166,10 @@
       }
       for (const group of ["Play", "Explore", "Learn"]) if (groups.has(group)) list.append(groups.get(group));
       rows = Array.from(list.querySelectorAll("button"));
-      survey.hidden = !mapData;
-      $("destination-map-mapnote").textContent = mapData ? "Live world layout · Underground rooms share the ground above them. The dotted line previews your selection, not a walking route." : "The world map is available outside. Return to town to choose a viewpoint.";
+      survey.hidden = !mapData; mapTab.disabled = !mapData; if (!mapData) setDisplay("list");
+      layers.hidden = !mapData?.points.some(p => p.layer);
+      setLayer("all");
+      $("destination-map-mapnote").textContent = mapData ? "Select a landmark. The dotted line is a preview, not a walking route." : "The world map is available outside. Return to town to choose a viewpoint.";
       if (mapData) {
         atlas?.show(mapData, names, name => provider.label(name), select);
         const actorPosition = provider.position?.(), position = actorPosition || mapData.origin;
@@ -196,6 +232,8 @@
       else dismissCoach();
     };
     const replay = () => { $("controls-help-close").click(); begin(); };
+    mapTab.addEventListener("click", showMap); listTab.addEventListener("click", showList); layers.addEventListener("click", changeLayer);
+    guide.addEventListener("click", startGuidance); returnButton.addEventListener("click", returnToActor); waypointStop.addEventListener("click", stopGuidance);
     go.addEventListener("click", choose);
     closeButton.addEventListener("click", closeFromButton); dialog.addEventListener("cancel", onCancel);
     dialog.addEventListener("close", onClose); dialog.addEventListener("click", onBackdrop);
@@ -204,9 +242,28 @@
     return {
       open, close,
       get coaching() { return coaching >= 0; },
-      connect(next) { close(); hideReceipt(); provider = next; anchor = null; },
-      disconnect(previous) { if (provider === previous) { close(); hideReceipt(); provider = null; coach.hidden = true; anchor = null; } },
+      connect(next) { close(); hideReceipt(); stopGuidance(); provider = next; anchor = null; },
+      disconnect(previous) { if (provider === previous) { close(); hideReceipt(); stopGuidance(); returnButton.hidden = true; provider = null; coach.hidden = true; anchor = null; } },
       update() {
+        returnButton.hidden = dialog.open || !current()?.navigationLooking?.();
+        if (waypointName) {
+          const scene = current(), at = performance.now();
+          if (scene !== waypointOwner || !provider?.position?.()) stopGuidance();
+          else if (at >= waypointAt) {
+            waypointAt = at + 100;
+            if (!scene.navigationWaypoint(waypointName, waypointPoint)) stopGuidance();
+            else {
+              const p = provider.position(), camera = scene.camera, dx = waypointPoint.x - p.x, dz = waypointPoint.z - p.z, distance = Math.hypot(dx, dz);
+              const arrived = distance < 2.5 && Math.abs(p.y - waypointPoint.y) < 3;
+              const facing = camera ? Math.atan2(camera.target.x - camera.position.x, camera.target.z - camera.position.z) : 0;
+              waypointArrow.style.transform = `rotate(${(facing - Math.atan2(dx, dz)) * 180 / Math.PI}deg)`;
+              waypointArrow.hidden = arrived;
+              const text = `${provider.label(waypointName)} · ${arrived ? waypointPoint.note || "Entrance reached · use the on-screen action" : Math.round(distance) + " m to next entrance · follow paths"}`;
+              if (waypointText.textContent !== text) waypointText.textContent = text;
+              waypoint.hidden = dialog.open;
+            }
+          }
+        }
         if (dialog.open && (!ready() || current() !== owner)) close();
         const hub = current()?.id === "hub";
         if (learn.hidden === hub) learn.hidden = !hub;
@@ -234,7 +291,9 @@
         }
       },
       dispose() {
-        close(); hideReceipt(); atlas?.dispose(); provider = anchor = null; coach.hidden = true;
+        close(); hideReceipt(); stopGuidance(); returnButton.hidden = true; atlas?.dispose();
+        mapTab.removeEventListener("click", showMap); listTab.removeEventListener("click", showList); layers.removeEventListener("click", changeLayer);
+        guide.removeEventListener("click", startGuidance); returnButton.removeEventListener("click", returnToActor); waypointStop.removeEventListener("click", stopGuidance); provider = anchor = null; coach.hidden = true;
         go.removeEventListener("click", choose);
         closeButton.removeEventListener("click", closeFromButton); dialog.removeEventListener("cancel", onCancel);
         dialog.removeEventListener("close", onClose); dialog.removeEventListener("click", onBackdrop);

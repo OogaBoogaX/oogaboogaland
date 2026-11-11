@@ -1,5 +1,13 @@
 # Destination Map and optional coaching
 
+## Usability follow-up (November 11, 2026)
+
+Landmark icons retain 44px touch targets with smaller drawn symbols, a numbered list and short selected/focused names. Phones switch between Map and List without losing the selection; desktop keeps both. Surface, HQ and Basement filters separate stacked landmarks. The explicit Return to my Ooga button restores a previewed view through the existing pilot API. Known action restrictions appear during selection; the scene still checks the final travel action.
+
+Guide me there adds a cancellable bearing and distance to the next authored entrance, using existing zone/door links for cave exits and bridge crossings. It never moves the actor, unlocks a door, enters a game or draws a claimed walkable route. HQ/basement guidance ends at HQ with a stairs instruction; Mempool leads to its descent entrance. The indicator updates at most 10 Hz only while guiding and disappears on scene/provider changes. This first entrance guide is available in the hub; DSB retains camera views and explicit return.
+
+Build, changed-JavaScript syntax and whitespace checks pass. Focused map/navigation checks pass 12/12, covering all twelve finite entrance targets, actor preservation, floor filters, Map/List, return and early refusal. A 320px phone capture was inspected and its touch Close check passed; compact floor controls retain 44px targets. Physical phones/controllers, screen readers and deployed acceptance remain pending. Earlier results below refer to their earlier revisions.
+
 ## Top-down world atlas (November 11, 2026)
 
 The Map now surveys the actual current world from above, using the already-built hub islands and DSB terrain. Numbered, 44px pin buttons and the equivalent named list share selection. Nearby pins fan out with callout lines, keeping separate HQ/basement levels selectable without inventing different coordinates. The camera target or controlled body is marked independently from the last-chosen destination.
