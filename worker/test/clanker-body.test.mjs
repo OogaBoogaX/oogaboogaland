@@ -21,7 +21,7 @@ const make = (start = false) => {
 };
 
 test("passive interaction getters keep possession and remote changes without per-actor accessor closures", () => {
-  const f = clankerController({ count: 2, passiveNpcs: true });
+  const f = clankerController({ count: 2, passiveNpcs: true }); let hosted;
   try {
     f.start();
     const [first, second] = f.sim.list;
@@ -30,17 +30,35 @@ test("passive interaction getters keep possession and remote changes without per
     assert.equal(policy.configurable, false);
     assert.equal(policy.get, Object.getOwnPropertyDescriptor(second, 'nonInteractive').get,
       'cached accessor metadata must not capture a controller or individual actor');
-    assert.equal(first.nonInteractive, true); assert.equal(first.root.collisionDisabled, true);
+    // Current browser scenes filter passive companions at their interaction query, without a blanket mesh flag.
+    assert.equal(first.nonInteractive, true); assert.equal(first.root.collisionDisabled, undefined);
     assert.equal(f.sim.possess(first), true);
-    assert.equal(first.nonInteractive, false); assert.equal(first.root.collisionDisabled, false);
+    assert.equal(first.nonInteractive, false); assert.equal(first.root.collisionDisabled, undefined);
     assert.equal(second.nonInteractive, true);
     assert.equal(f.sim.release(), true);
-    assert.equal(first.nonInteractive, true); assert.equal(first.root.collisionDisabled, true);
+    assert.equal(first.nonInteractive, true); assert.equal(first.root.collisionDisabled, undefined);
     f.sim.setRemote(first.owner.traits.name, true);
-    assert.equal(first.nonInteractive, false); assert.equal(first.root.collisionDisabled, false);
+    assert.equal(first.nonInteractive, false); assert.equal(first.root.collisionDisabled, undefined);
     f.sim.setRemote(first.owner.traits.name, false);
-    assert.equal(first.nonInteractive, true); assert.equal(first.root.collisionDisabled, true);
-  } finally { f.dispose(); }
+    assert.equal(first.nonInteractive, true); assert.equal(first.root.collisionDisabled, undefined);
+    // The authoritative world still disables collision on its passive roots,
+    // with the same cached accessor rather than a getter retaining each actor.
+    const owners = f.sim.list.map(e => e.owner);
+    hosted = f.B.clankers.create({ root: f.B.scene.createNode(), sites: [], groundAt: () => 0, clear: () => true,
+      crew: { list: owners, cavemen: new Map(owners.map(o => [o.traits.name, o])), stateOf: o => o.state, authoritative: true },
+      npcExecution: {}, npcClock: () => 0, npcPlacement: () => true });
+    hosted.sync();
+    const [hostFirst, hostSecond] = hosted.list;
+    assert.equal(hostFirst.active, true); assert.equal(hostFirst.root.visible, true);
+    const collision = Object.getOwnPropertyDescriptor(hostFirst.root, 'collisionDisabled');
+    assert.equal(collision.enumerable, false); assert.equal(collision.configurable, false);
+    assert.equal(collision.get, Object.getOwnPropertyDescriptor(hostSecond.root, 'collisionDisabled').get);
+    assert.equal(collision.get, policy.get, 'body and collision policy share the receiver-keyed accessor');
+    assert.equal(hostFirst.nonInteractive, true); assert.equal(hostFirst.root.collisionDisabled, true);
+    assert.equal(hosted.possess(hostFirst), false, 'a host NPC cannot acquire local controls');
+    assert.equal(hosted.setRemote(hostFirst.owner.traits.name, true), false, 'legacy remote control cannot replace host authority');
+    assert.equal(hostFirst.nonInteractive, true); assert.equal(hostFirst.root.collisionDisabled, true);
+  } finally { hosted?.dispose(); f.dispose(); }
 });
 
 test("controlled Clanker recovers gameplay in a fresh standard pose without possession resets or held input replay", () => {

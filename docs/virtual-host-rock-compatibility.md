@@ -162,6 +162,19 @@ real-Hub reconciliation file passes three checks, including invalid live values,
 Infinity/null encoding and finite timestamp retention. No gameplay path that
 produced the invalid null value was established.
 
+The next fixture correction supplies the legacy authority state to the remote
+pet mock; all seven unchanged pet checks pass through `pet-unit`. That selector
+loads the production modules and leaves the normal unit prelude intact.
+CI then passed all 573 unit checks and the site build. The first complete
+Worker run passed 748 of 763 checks. Twelve frozen-body fixtures lacked the
+real weapon-target module, two contributor fixtures lacked the real cave-slot
+data, and one Clanker check expected the older blanket browser collision flag.
+The fixtures now load those production dependencies. The Clanker regression
+checks both current browser query-based filtering and the host-only root flag,
+including shared accessor metadata and refused host possession/remote control.
+Focused files pass 12/12, 44/44 and 6/6 respectively. No runtime policy or
+assertion threshold changed in these fixture corrections.
+
 ## Rescue integration
 
 A read-only application check of #579 at

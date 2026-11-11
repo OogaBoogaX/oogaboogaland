@@ -806,7 +806,7 @@ test("only verified commit contributors gain temporary access; outages retain on
 
 test("the browser accepts one matching temporary identity without reordering the bundled crew", () => {
   const context = { window: {}, URLSearchParams, location: { search: "" } };
-  for (const name of ["math", "characters", "contributor-identities", "activity-repos"]) runInNewContext(readFileSync(new URL(`../../src/js/${name}.js`, import.meta.url), "utf8"), context);
+  for (const name of ["math", "characters", "contributor-identities", "activity-repos", "caves"]) runInNewContext(readFileSync(new URL(`../../src/js/${name}.js`, import.meta.url), "utf8"), context);
   const BL = context.window.BL;
   BL.characters.add({ handle: "alias", github: "owner", joined: 1, lastCommit: 2 });
   runInNewContext(readFileSync(new URL("../../src/js/contributors.js", import.meta.url), "utf8"), context);
@@ -846,7 +846,7 @@ test("cutover preparation emits nothing until both GitHub lookups verify the ren
 
 test("activity and public labels use the current owner login, never a reused permanent art handle", () => {
   const context = { window: {}, URLSearchParams, location: { search: "" } };
-  for (const name of ["math", "characters", "contributor-identities", "activity-repos"])
+  for (const name of ["math", "characters", "contributor-identities", "activity-repos", "caves"])
     runInNewContext(readFileSync(new URL(`../../src/js/${name}.js`, import.meta.url), "utf8"), context);
   const BL = context.window.BL;
   BL.characters.add({ handle: "Bitcoin-Bill", github: "Bitclank-Bill", display: "Bill", joined: 1, lastCommit: 2 });
