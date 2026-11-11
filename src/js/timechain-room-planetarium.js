@@ -311,7 +311,28 @@
   };
   const TAP = "Projector console · tap to run the night forward";
 
+  // ---------- its door ----------
+  // A night door: midnight leaves, each with a constellation (Orion on the left, the Plough on the right), its stars
+  // lit and joined by faint lines over a scatter of dim ones, in a silver frame strung round with pale stars that
+  // twinkle.
+  const STAR_FIGURES = {
+    "-1": { stars: [[-0.34, 2.55], [0.3, 2.48], [-0.14, 1.92], [0, 1.86], [0.14, 1.8], [-0.3, 1.2], [0.36, 1.26]], lines: [[0, 2], [1, 4], [2, 3], [3, 4], [2, 5], [4, 6]] },
+    "1": { stars: [[-0.5, 2.62], [-0.18, 2.5], [0.1, 2.44], [0.34, 2.24], [0.46, 1.8], [0.08, 1.72], [0.02, 2.14]], lines: [[0, 1], [1, 2], [2, 3], [3, 6], [6, 5], [5, 4], [4, 3]] }
+  };
+  const door = {
+    casing: "#0d1226", frame: "#9aa6b8", header: "#0a0e1d", word: "#9fd8ff", strip: "#5b8cff", chain: false,
+    leaf: "#121a36", seam: "#070a16", plate: "#0a0e1d", face: "#9fd8ff", mark: "#0a0e1d",
+    leafFace(side, H) {
+      const fig = STAR_FIGURES[side], r = RM.paintKit.rng(side < 0 ? 11 : 12);
+      for (let i = 0; i < 26; i++) H.diamond((r() - 0.5) * 1.3, 0.3 + r() * 2.8, 0.008 + r() * 0.01, "#6f7fb0", 0.5);
+      for (const [a, b] of fig.lines) H.line(fig.stars[a][0], fig.stars[a][1], fig.stars[b][0], fig.stars[b][1], 0.008, "#3d5a9a", 0.6, 1);
+      for (const [x, y] of fig.stars) H.diamond(x, y, 0.03, "#e8f2ff", 1, 2);
+    }
+  };
+  const doorTrim = (K, L) => { RM.doorBulbs(K, L, "#cfe6ff", 0.36, 0.03); };
+
   const plan = (K, L) => {
+    doorTrim(K, L);
     K.wallColor("#15161b");
     K.render({ sky: [0.13, 0.16, 0.26], ground: [0.05, 0.05, 0.06], ambientFloor: 0.2, bloomStrength: 0.9 });
     // The dome under the stars: night, with the town's glow low over the horizon.
@@ -373,10 +394,12 @@
   // The sky turns by the sidereal time: now or, with the time-lapse running, an hour further every second; stopped,
   // it eases back to now the short way round. Nothing here allocates.
   const animate = (nodes) => {
-    const spin = nodes.skySpin;
+    const spin = nodes.skySpin, stars = RM.bulbsOf(nodes);
     SKY.offset = 0; SKY.lapse = false;
     return {
-      update(dt) {
+      update(dt, t) {
+        // The door's stars twinkle, each on its own beat.
+        for (let i = 0; i < stars.length; i++) stars[i].glow = 0.55 + 0.45 * Math.sin(t * (1.3 + (i % 5) * 0.37) + i * 2.1);
         if (SKY.lapse) SKY.offset += dt * LAPSE;
         else if (SKY.offset) {
           SKY.offset -= SKY.offset * Math.min(1, dt * 1.4);
@@ -394,7 +417,7 @@
     };
   };
   BL.timechainRoomKinds.planetarium = {
-    plan, animate, steps: (L) => [() => sky(L.id), () => skyline(L.id)],
+    plan, animate, door, steps: (L) => [() => sky(L.id), () => skyline(L.id)],
     // The sky's builder and clock, shared with the Observatory's slit.
     sky: { build: skyGeometry, lst, TILT }
   };

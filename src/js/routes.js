@@ -49,8 +49,8 @@
       ...[
         ["Planetarium", "Tonight's sky over London on the whole dome, from reclining seats round the star projector."],
         ["Conference Room", "A round table for eight under a dome of live block and mining charts from mempool.space, the latest blocks round its base and the next block at the crown. The one room that locks."],
-        ["Low Time Preference Temple", "A meditation temple under a dusk sky: a lantern path, a pagoda, a koi pond and a replica of Valentina Picozzi's Satoshi statue in the main hall."],
-        ["Block Party", "An LED dance floor under a dome-wide light show, a DJ booth and a bar: the bass drops on every block."],
+        ["Satoshi's Temple", "A meditation temple under a dusk sky: a lantern path, a pagoda, a koi pond and a replica of Valentina Picozzi's Satoshi statue in the main hall."],
+        ["Block Party", "Live dance radio in a club of light: an LED floor and wall that move to the music, lasers on a truss, and a DJ booth to change the channel behind. The bass drops on every block."],
         ["Fireside Lounge", "Sofas round a fire pit in a forest clearing under the Milky Way, a small room for a fireside chat."],
         ["Proof of Work-out", "Exercise bikes facing a mountain sunrise: pedal to find a fake block and climb the gym's leaderboard."],
         ["The Observatory", "A telescope on its mount under the dome's slit to the night sky, with views of Saturn and the Moon."],

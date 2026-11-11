@@ -500,6 +500,9 @@
       viewRotation(headRotation, rollingForward[0], rollingForward[1], rollingForward[2], sleepCameraUp.x, sleepCameraUp.y, sleepCameraUp.z, orbit.yaw);
     };
     const viewMode = () => !player() ? "detached" : closeWanted ? "first-person" : shoulderView ? "shoulder" : armed() ? "birds-eye" : "orbit";
+    // How far a seated Ooga's head follows the view: only as far as the view is its own eyes. Seen from outside it sits
+    // looking straight out from the seat (a lying or armed seat looks where it likes).
+    const seatedLook = (cave) => cave && cave.camp.seat && !cave.camp.seat.lying && !cave.camp.seat.allowWeapons ? closeMix : 1;
     const birdsEye = () => armed() && !closeWanted && !shoulderView;
     const captureControl = (out) => {
       const cave = player(), overhead = birdsEye();
@@ -1241,7 +1244,7 @@
       }
       if (Math.hypot(dx, dz) > 0.05 && !cave.camp.seat?.lying) {
         const turn = Math.atan2(Math.sin(Math.atan2(dx, dz) - cave.root.rotation.y), Math.cos(Math.atan2(dx, dz) - cave.root.rotation.y));
-        crew.look(cave.root.rotation.y + turn * (1 - Math.exp(-20 * dt)), pitch, 1);
+        crew.look(cave.root.rotation.y + turn * (1 - Math.exp(-20 * dt)), pitch, seatedLook(cave));
       }
       const weaponTurn = Math.atan2(Math.sin(cave.root.rotation.y - overheadWeaponYaw), Math.cos(cave.root.rotation.y - overheadWeaponYaw));
       const weaponYaw = overheadWeaponYaw + weaponTurn * overheadMix - cave.root.rotation.y;
@@ -2223,6 +2226,15 @@
       // From here on the Ooga is the one driven: the NPC's own body where it is driven, else a separate one.
       cave = player();
       restoredPose = null;
+      takeView(cave, incoming);
+      fx.say(cave, crew.sleeping ? "zzz..." : "Ooga? Me?", 1.6);
+      if (cave.jet && cave.jetRecovering) hud.hint("Jetpack recharges on the ground · restart above 20% fuel");
+      requireCombat();
+      return true;
+    };
+    // The Ooga driven now in the view and mode `incoming` describes (as `captureControl` writes them), the shown camera
+    // handing over to it: a possession's, or `adopt`'s for an Ooga already driven.
+    const takeView = (cave, incoming) => {
       centeredCarry = carrySelection = resumeSleepOverhead = false;
       const nextView = incoming.active ? incoming.view : "orbit";
       closeWanted = nextView === "first-person";
@@ -2286,12 +2298,42 @@
       syncAim();
       syncWeaponHud();
       hud.tooltip.hide();
-      fx.say(cave, crew.sleeping ? "zzz..." : "Ooga? Me?", 1.6);
-      if (cave.jet && cave.jetRecovering) hud.hint("Jetpack recharges on the ground · restart above 20% fuel");
       syncModeHud();
       handoff.begin(incoming);
       targetWait = assistedTargetWait = 0;
       finishHandoffView(0);
+    };
+    // The view and mode of the Ooga driven now, to give back later with `adopt` (the Timechain doorway keeps the one it
+    // was walked into with, and the room's on the way out): the view, combat, the look as an angle from the Ooga's
+    // heading, pitch, zoom, the overhead height over its feet and the shoulder side, as `carried` keeps them.
+    const viewState = () => {
+      const cave = player();
+      if (!cave) return null;
+      const overhead = birdsEye(), feet = cave.root.position.y - cave.baseY;
+      return { view: resumeSleepOverhead ? "birds-eye" : viewMode(), combat: !!cave.weapon.aiming, relYaw: (overhead ? overheadYaw : orbit.yaw) - cave.root.rotation.y,
+        pitch: overhead ? Math.PI / 2 : orbit.pitch, distance: overhead ? overheadHeight - cave.baseY : orbit.dist, height: overhead ? overheadHeight - feet : camera.position.y - feet,
+        side: shoulderSideTarget < 0 ? -1 : 1 };
+    };
+    // The Ooga driven now takes a view and mode `viewState` gave, blending from the view shown, without letting go of it.
+    // First person keeps the look it has (where the Ooga faces now is what it looks at); the others take the kept look
+    // from the Ooga's heading, pitch and zoom.
+    const adopt = (state) => {
+      const cave = player();
+      if (!cave || !state || !VIEWS.includes(state.view) || firstOnly) return false;
+      const t = captureControl(controlTransition), feet = cave.root.position.y - cave.baseY;
+      t.active = true; t.view = state.view; t.combat = state.combat; t.side = state.side; t.focused = false;
+      if (state.view !== "first-person") {
+        t.yaw = cave.root.rotation.y + state.relYaw; t.pitch = state.pitch; t.distance = state.distance;
+        t.height = state.view === "birds-eye" ? feet + state.height : state.height;
+      }
+      // What a letting go would clear, short of letting go: a look, the centred carry, a captured cursor and the
+      // close view's held angles.
+      endLook();
+      clearRightGesture();
+      endCenteredCarry();
+      unlockAim();
+      headOrbit = exitAngleHold = closeCameraActive = entryRebase = entryOffsetActive = false;
+      takeView(cave, t);
       requireCombat();
       return true;
     };
@@ -2799,13 +2841,14 @@
 
     const poseAim = () => {
       if (player()?.grabbedBy || player()?.camp.seat?.lying) return;
+      const mix = seatedLook(player());
       if (aimPreserveFacing) {
-        crew.look(aimBodyYaw, aimBodyPitch, 1);
-        player().parts.head.rotation.y = aimBodyHeadYaw;
+        crew.look(aimBodyYaw, aimBodyPitch, mix);
+        player().parts.head.rotation.y = aimBodyHeadYaw * mix;
         return;
       }
       const turn = Math.atan2(Math.sin(orbit.yaw + Math.PI - aimBodyYaw), Math.cos(orbit.yaw + Math.PI - aimBodyYaw));
-      crew.look(aimBodyYaw + turn * aimMix, aimBodyPitch + (orbit.pitch - aimBodyPitch) * aimMix, 1);
+      crew.look(aimBodyYaw + turn * aimMix, aimBodyPitch + (orbit.pitch - aimBodyPitch) * aimMix, mix);
     };
     const updateAim = (cave, dt) => {
       syncJetpackHud(); syncWeaponHud();
@@ -3988,7 +4031,7 @@
       get shoulderEntryMix() { return aimMix; },
       // The view being kept: "first-person", "shoulder", "birds-eye", "orbit", or "detached" with nobody driven.
       get view() { return viewMode(); },
-      bind, setActive, refreshCombat, readInput, update, syncHeadVisibility, turnToward, goPreset, look, endLook, get looking() { return looking(); }, resetCamera, freeCursor, navigate, travelRefusal, travel, transformView, tiltView, framePoint, releaseFrame, pickCarryTarget, enterClose, exitClose, possess, release, escape, action, modeAction, weaponAction, weaponMode, showAct, suspend, resume, dispose, get player() {
+      bind, setActive, refreshCombat, viewState, adopt, readInput, update, syncHeadVisibility, turnToward, goPreset, look, endLook, get looking() { return looking(); }, resetCamera, freeCursor, navigate, travelRefusal, travel, transformView, tiltView, framePoint, releaseFrame, pickCarryTarget, enterClose, exitClose, possess, release, escape, action, modeAction, weaponAction, weaponMode, showAct, suspend, resume, dispose, get player() {
       return player();
     }, get assistedTarget() {
       if (birdsEye() && assistedTargetActive) return assistedTargetHit;

@@ -145,6 +145,133 @@
     return nearest;
   };
 
+  // A mesh's triangles in the cells of a coarse grid over its own frame, each cell with its triangles and the box round
+  // them, made once a geometry in one pass over its faces (nothing sorted), so a ray tests only the triangles of the
+  // cells it passes through.
+  const GRIDS = new WeakMap();
+  const gridOf = (geometry) => {
+    let grid = GRIDS.get(geometry);
+    if (grid) return grid;
+    const v = geometry.verts, faces = geometry.faces;
+    let tris = 0, x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (const face of faces) tris += Math.max(0, face.i.length - 2);
+    for (let i = 0; i < v.length; i += 3) {
+      if (v[i] < x0) x0 = v[i];
+      if (v[i] > x1) x1 = v[i];
+      if (v[i + 1] < y0) y0 = v[i + 1];
+      if (v[i + 1] > y1) y1 = v[i + 1];
+      if (v[i + 2] < z0) z0 = v[i + 2];
+      if (v[i + 2] > z1) z1 = v[i + 2];
+    }
+    // About a dozen triangles a cell, and no more than 24 cells along any side.
+    const ex = x1 - x0 + 1e-6, ey = y1 - y0 + 1e-6, ez = z1 - z0 + 1e-6, size = Math.max(Math.max(ex, ey, ez) / 24, Math.cbrt(ex * ey * ez * 12 / Math.max(1, tris)));
+    const nx = Math.ceil(ex / size), ny = Math.ceil(ey / size), nz = Math.ceil(ez / size), cells = nx * ny * nz;
+    const corners = new Uint32Array(tris * 3), cellOf = new Uint32Array(tris), start = new Uint32Array(cells + 1);
+    let n = 0;
+    for (const face of faces) for (let k = 1; k + 1 < face.i.length; k++, n++) {
+      const a = face.i[0] * 3, b = face.i[k] * 3, c = face.i[k + 1] * 3;
+      corners[n * 3] = a; corners[n * 3 + 1] = b; corners[n * 3 + 2] = c;
+      const cx = Math.min(nx - 1, Math.floor(((v[a] + v[b] + v[c]) / 3 - x0) / size));
+      const cy = Math.min(ny - 1, Math.floor(((v[a + 1] + v[b + 1] + v[c + 1]) / 3 - y0) / size));
+      const cz = Math.min(nz - 1, Math.floor(((v[a + 2] + v[b + 2] + v[c + 2]) / 3 - z0) / size));
+      cellOf[n] = (cx * ny + cy) * nz + cz;
+      start[cellOf[n] + 1]++;
+    }
+    for (let c = 0; c < cells; c++) start[c + 1] += start[c];
+    const order = new Uint32Array(tris), fill = start.slice(0, cells), box = new Float64Array(cells * 6);
+    for (let c = 0; c < cells; c++) for (let axis = 0; axis < 3; axis++) { box[c * 6 + axis] = Infinity; box[c * 6 + 3 + axis] = -Infinity; }
+    for (let t = 0; t < tris; t++) {
+      const c = cellOf[t], o = c * 6;
+      order[fill[c]++] = t;
+      for (let k = 0; k < 3; k++) {
+        const p = corners[t * 3 + k];
+        for (let axis = 0; axis < 3; axis++) { const q = v[p + axis]; if (q < box[o + axis]) box[o + axis] = q; if (q > box[o + 3 + axis]) box[o + 3 + axis] = q; }
+      }
+    }
+    grid = { v, corners, order, start, box, cells, all: [x0, y0, z0, x1, y1, z1] };
+    GRIDS.set(geometry, grid);
+    return grid;
+  };
+  // Whether a ray (its direction not necessarily a unit) passes through the box at `o` in `b` before `limit`.
+  const crosses = (b, o, ox, oy, oz, dx, dy, dz, limit) => {
+    let near = 0, far = limit;
+    for (let axis = 0; axis < 3; axis++) {
+      const p = axis === 0 ? ox : axis === 1 ? oy : oz, d = axis === 0 ? dx : axis === 1 ? dy : dz, lo = b[o + axis] - 1e-6, hi = b[o + 3 + axis] + 1e-6;
+      if (Math.abs(d) < 1e-12) { if (p < lo || p > hi) return false; continue; }
+      let a = (lo - p) / d, c = (hi - p) / d;
+      if (a > c) { const s = a; a = c; c = s; }
+      if (a > near) near = a;
+      if (c < far) far = c;
+      if (near > far) return false;
+    }
+    return true;
+  };
+  // Where a ray in a grid's frame first meets one of its triangles, if nearer than `limit`; `limit` otherwise.
+  const gridRay = (g, ox, oy, oz, dx, dy, dz, limit) => {
+    if (!crosses(g.all, 0, ox, oy, oz, dx, dy, dz, limit)) return limit;
+    const v = g.v, C = g.corners;
+    let nearest = limit;
+    for (let c = 0; c < g.cells; c++) {
+      if (g.start[c] === g.start[c + 1] || !crosses(g.box, c * 6, ox, oy, oz, dx, dy, dz, nearest)) continue;
+      for (let k = g.start[c]; k < g.start[c + 1]; k++) {
+        const t = g.order[k], a = C[t * 3], b = C[t * 3 + 1], e = C[t * 3 + 2];
+        const ux = v[b] - v[a], uy = v[b + 1] - v[a + 1], uz = v[b + 2] - v[a + 2], wx = v[e] - v[a], wy = v[e + 1] - v[a + 1], wz = v[e + 2] - v[a + 2];
+        const px = dy * wz - dz * wy, py = dz * wx - dx * wz, pz = dx * wy - dy * wx, det = ux * px + uy * py + uz * pz;
+        if (Math.abs(det) < 1e-14) continue;
+        const sx = ox - v[a], sy = oy - v[a + 1], sz = oz - v[a + 2], u = (sx * px + sy * py + sz * pz) / det;
+        if (u < 0 || u > 1) continue;
+        const qx = sy * uz - sz * uy, qy = sz * ux - sx * uz, qz = sx * uy - sy * ux, w = (dx * qx + dy * qy + dz * qz) / det;
+        if (w < 0 || u + w > 1) continue;
+        const along = (wx * qx + wy * qy + wz * qz) / det;
+        if (along > 1e-5 && along < nearest) nearest = along;
+      }
+    }
+    return nearest;
+  };
+  // Clicks that land where they are drawn: the meshes of every target that asks for it (`pick` in a kind's target, and
+  // then the live pictures) and the room's own body in their way, cast once a ray each frame. A target is hit only where
+  // its own mesh is the nearest of them, so it neither reaches past its edges nor through a wall or a roof in front of
+  // it. A node marked `pickProxy` stands in for a part too fine to test; it is never drawn, and is tested all the same.
+  const sharpPicker = () => {
+    const meshes = [], INV = math.mat4.create(), last = { ox: NaN, oy: NaN, oz: NaN, dx: NaN, dy: NaN, dz: NaN, frame: -1 }, hit = { owner: null, t: Infinity };
+    let frame = 0, warmed = 0;
+    const shown = (node) => { for (let n = node; n; n = n.parent) if (!n.visible) return false; return true; };
+    const add = (node, owner) => { meshes.push({ node, owner }); for (const child of node.children) add(child, owner); };
+    const cast = (ray) => {
+      hit.owner = null; hit.t = Infinity;
+      for (const m of meshes) {
+        const node = m.node, geometry = node.geometry;
+        if (!geometry || !geometry.faces.length || !node.pickProxy && !shown(node)) continue;
+        // A stand-in is never drawn, so the renderer never places it: it is placed here, under its drawn parent.
+        if (node.pickProxy) { BL.scene.updateLocal(node); if (node.parent) math.mat4.multiply(node.world, node.parent.world, node.local); else node.world.set(node.local); }
+        math.mat4.invert(INV, node.world);
+        const M = INV;
+        const ox = M[0] * ray.ox + M[4] * ray.oy + M[8] * ray.oz + M[12], oy = M[1] * ray.ox + M[5] * ray.oy + M[9] * ray.oz + M[13], oz = M[2] * ray.ox + M[6] * ray.oy + M[10] * ray.oz + M[14];
+        const dx = M[0] * ray.dx + M[4] * ray.dy + M[8] * ray.dz, dy = M[1] * ray.dx + M[5] * ray.dy + M[9] * ray.dz, dz = M[2] * ray.dx + M[6] * ray.dy + M[10] * ray.dz;
+        const t = gridRay(gridOf(geometry), ox, oy, oz, dx, dy, dz, hit.t);
+        if (t < hit.t) { hit.t = t; hit.owner = m.owner; }
+      }
+    };
+    return {
+      add,
+      // The scene moves between frames, so a ray asked again in a later frame is cast again. A second in, the grids
+      // are made a mesh a frame, so the first pointer over the room finds them ready.
+      tick() {
+        if (++frame > 60 && warmed < meshes.length) { const g = meshes[warmed++].node.geometry; if (g && g.faces.length) gridOf(g); }
+      },
+      pickRay: (owner) => (ray) => {
+        if (ray.ox !== last.ox || ray.oy !== last.oy || ray.oz !== last.oz || ray.dx !== last.dx || ray.dy !== last.dy || ray.dz !== last.dz || frame !== last.frame) {
+          last.ox = ray.ox; last.oy = ray.oy; last.oz = ray.oz; last.dx = ray.dx; last.dy = ray.dy; last.dz = ray.dz; last.frame = frame;
+          cast(ray);
+        }
+        return hit.owner === owner ? hit.t : NaN;
+      }
+    };
+  };
+
+  // What the room's own body is to the picker: in the way, and never anything to tap.
+  const BODY = { kind: "body" };
+
   const TIPS = {
     exit: "Exit · press Space beside it to walk out",
     door: "The way out · use the Exit button",
@@ -182,20 +309,90 @@
       for (let i = 1; i <= steps; i++) if (!ROOMS.clearAt(L, ax + (bx - ax) * i / steps, az + (bz - az) * i / steps, r, guided, y, solids)) return false;
       return true;
     };
-    // What a body stands on: the floor (a raked hall's terrace), or a solid's top once its feet are up there, as far out
-    // as the solid stands in its way below, so stepping off the edge lands it clear.
+    // What a body stands on: the floor (a raked hall's terrace), or a solid's top once its feet are within a step of
+    // it, as far out as the solid stands in its way below, so stepping off the edge lands it clear.
     const groundAt = (x, z, feet, _, actor) => {
       let y = ROOMS.floorAt(L, x, z);
       const r = actor ? actor.bodyRadius : 0.35;
       for (let i = 0; i < tops.length; i++) {
         const o = tops[i];
-        if (feet < o.top - 0.02 || o.top <= y) continue;
+        if (feet < o.top - ROOMS.STEP_UP || o.top <= y) continue;
         if (o.r !== undefined) { if (Math.hypot(x - o.x, z - o.z) < o.r + r) y = o.top; continue; }
         // A box in its own turned frame, as clearAt reads it (timechain-rooms.js).
         const c = o.ry ? Math.cos(o.ry) : 1, s = o.ry ? Math.sin(o.ry) : 0, dx = x - o.x, dz = z - o.z;
         if (Math.abs(dx * c - dz * s) < o.hx + r && Math.abs(dx * s + dz * c) < o.hz + r) y = o.top;
       }
       return y;
+    };
+    // The island's shoulder pass (crew.js `shoulderStep`): walking into something taller than a step, the Ooga turns
+    // a shoulder and slides round it rather than stopping dead. The nearest solid its body would meet along its line
+    // within `reach`, as the solid's extents in the walker's frame (along the line, and across it to the right).
+    const SHOULDER_SIDE = 0.315;
+    const blocks = (o, feet) => !(o.top !== undefined && feet >= o.top - ROOMS.STEP_UP) && !(o.below !== undefined && feet + 1.8 <= o.below);
+    const shoulderObstacle = (cave, fx, fz, reach, out) => {
+      const p = cave.root.position, feet = p.y - cave.baseY, r = cave.bodyRadius;
+      let best = reach;
+      out.node = null;
+      for (let i = 0; i < solids.length; i++) {
+        const o = solids[i];
+        if (!blocks(o, feet)) continue;
+        const dx = o.x - p.x, dz = o.z - p.z, along = dx * fx + dz * fz, across = dx * fz - dz * fx;
+        let a0, a1, c0, c1, hit;
+        if (o.r !== undefined) {
+          const reachR = o.r + r;
+          if (Math.abs(across) >= reachR) continue;
+          a0 = along - o.r; a1 = along + o.r; c0 = across - o.r; c1 = across + o.r;
+          hit = along - Math.sqrt(reachR * reachR - across * across);
+        } else {
+          // Its corners: clearAt's turned frame (u across its x, v across its z) back into the world, then the walker's.
+          const c = o.ry ? Math.cos(o.ry) : 1, s = o.ry ? Math.sin(o.ry) : 0;
+          a0 = c0 = Infinity; a1 = c1 = -Infinity;
+          for (let k = 0; k < 4; k++) {
+            const u = k & 1 ? o.hx : -o.hx, v = k & 2 ? o.hz : -o.hz, wx = dx + u * c + v * s, wz = dz - u * s + v * c;
+            const ka = wx * fx + wz * fz, kc = wx * fz - wz * fx;
+            if (ka < a0) a0 = ka; if (ka > a1) a1 = ka; if (kc < c0) c0 = kc; if (kc > c1) c1 = kc;
+          }
+          if (c0 >= r || c1 <= -r) continue;
+          hit = a0 - r;
+        }
+        if (hit < -r || hit > best) continue;
+        // The crew sidesteps to a hub walker's width past either edge (SHOULDER_SIDE); a wider Ooga needs its own.
+        const wide = Math.max(0, r - SHOULDER_SIDE);
+        best = hit; out.node = o;
+        out.minAlong = a0; out.maxAlong = a1; out.minAcross = out.minContactAcross = c0 - wide; out.maxAcross = out.maxContactAcross = c1 + wide;
+      }
+      if (!out.node) return false;
+      // Only a pass that can be made, to one side (away from the solid's middle, as the crew takes it, `side` 1 to its
+      // left edge and -1 to its right) or the other (a solid further on gets a pass of its own). When only the other side is open,
+      // the solid's edge on the blocked side is reported further out, so its middle lies there and the crew goes the
+      // open way (its sidestep reads only the open edge); when neither is, the Ooga stops at the solid as it always has
+      // rather than wedge itself beside the next one.
+      // The crew slants out as it closes, so it is beside the solid as it reaches it: the spot beside the solid's near
+      // edge must be clear, and the way on from there past its far edge.
+      const open = (side, past = 0.1) => {
+        const across = side > 0 ? out.minAcross - SHOULDER_SIDE : out.maxAcross + SHOULDER_SIDE, near = Math.max(0, out.minAlong), on = out.maxAlong - near + past;
+        const sx = p.x + fx * near + fz * across, sz = p.z + fz * near - fx * across;
+        return walkable(sx, sz, sx, sz, feet, cave.bodyHeight, cave) && walkable(sx, sz, sx + fx * on, sz + fz * on, feet, cave.bodyHeight, cave);
+      };
+      const mid = (out.minAcross + out.maxAcross) / 2, natural = Math.abs(mid) < 0.02 ? 1 : Math.sign(mid);
+      let side = natural;
+      // Nearly head on, either way would do: take the one that stays clear further on.
+      if (Math.abs(mid) < 0.25 && !open(side, 1.5) && open(-side, 1.5)) side = -side;
+      if (!open(side)) {
+        if (!open(-side)) { out.node = null; return false; }
+        side = -side;
+      }
+      if (side !== natural) {
+        if (natural > 0) out.minAcross = Math.min(out.minAcross, -out.maxAcross - 0.05);
+        else out.maxAcross = Math.max(out.maxAcross, -out.minAcross + 0.05);
+      }
+      return true;
+    };
+    // The room's solids never move, and a pass lets go once the line past one is walkable.
+    const shoulderObstacleActive = () => true;
+    const shoulderPropClear = (cave, x, z) => {
+      const p = cave.root.position;
+      return walkable(p.x, p.z, x, z, p.y - cave.baseY, cave.bodyHeight, cave);
     };
     // Under the dome: the ceiling `margin` lower than it stands over (x, z), read that far further out too, so a
     // point keeps clear of the curve above. The vestibule's flat ceiling is the doorway's.
@@ -260,16 +457,25 @@
     const all = built.live.map((live, i) => slot(L, live, prepared && prepared.slots[i]));
     // The charts' close-up pages through every live picture that names the charts' board.
     const charts = all.filter((s) => s.spec.board === "charts" && s.spec.panel !== undefined);
+    // A room whose targets name their meshes (`pick`, true for the target's own node) is picked where things are drawn
+    // (`sharpPicker`): those meshes, its live pictures and its body in their way.
+    const sharp = built.targets.some((t) => t.pick) ? sharpPicker() : null;
     all.forEach((s) => {
       if (!s.spec.tip && !s.spec.board) return;
       const owner = target(s.node, { kind: "live", slot: s, tip: s.spec.tip || "" });
-      owner.pickRay = facePick(s.node);
+      if (sharp) { sharp.add(s.node, owner); owner.pickRay = sharp.pickRay(owner); } else owner.pickRay = facePick(s.node);
     });
     let holdingsVersion = 0, chartIndex = 0, chartVersion = 0;
     const holdings = BL.timechainData.create(() => { holdingsDirty = true; });
     let holdingsDirty = true;
     // The kind's own targets (its furniture and exhibits) and the doorway's.
-    for (const t of built.targets) target(t.node, { kind: t.kind, tip: t.tip, index: t.index, data: t.data }, t.radius);
+    for (const t of built.targets) {
+      const owner = target(t.node, { kind: t.kind, tip: t.tip, index: t.index, data: t.data }, t.radius);
+      if (!t.pick) continue;
+      for (const name of t.pick === true ? [""] : t.pick) sharp.add(name ? built.nodes[name] : t.node, owner);
+      owner.pickRay = sharp.pickRay(owner);
+    }
+    if (sharp && built.body) sharp.add(built.body, BODY);
     target(built.exitButton, { kind: "exit" }, 0.45);
     for (const leaf of built.doors) target(leaf, { kind: "door" }, 1.6);
     // Each of the room's seats takes the visitor's Ooga, facing the way it faces; standing up leaves it behind it.
@@ -320,7 +526,10 @@
       get version() { return holdingsVersion; },
       go: (i) => { feeds.holdingsIndex = i; holdingsVersion++; sweep = true; }
     };
-    // A kind's own moving parts, driven every frame from its nodes (timechain-room-*.js `animate`).
+    // A kind's own moving parts, driven every frame from its nodes (timechain-room-*.js `animate`), its taps, and
+    // what it lets go of on leaving (`dispose`, the Block Party's radio). `built.ear` is where the visitor hears from
+    // (their Ooga, else the view's target), kept current every frame for a kind's sounds.
+    const ear = built.ear = { x: 0, y: 0, z: 0 };
     const motion = kind.animate ? kind.animate(built.nodes, built) : null;
 
     const NO_ACTORS = [], actors = [];
@@ -477,15 +686,27 @@
     // Over the door leaves' broad pick spheres, which reach across the pad from where its view stands, and over the
     // Ooga's own (priority 1), as the island keypad's keys are (scene-hub.js).
     if (lockPad) for (const key of lockPad.keys) target(key.node, { kind: "lockkey", key: key.key, priority: 2 }, key.key.length === 1 ? 0.055 : 0.09);
+    // A kind's own Space action where the Ooga stands and looks (the Temple's bell, gong and bowl): `motion.near(x, z,
+    // fx, fz)` names one, `{ key, label, hint, tap, run(hud) }`, or null.
+    const kindNear = () => {
+      if (!motion || !motion.near || !avatar || avatar.camp.seat || avatar.hop > 0) return null;
+      const p = avatar.root.position, c = camera.position, t = camera.target;
+      return motion.near(p.x, p.z, t.x - c.x, t.z - c.z);
+    };
     const useNear = () => {
       if (guide.stage) return false;
       if (nearExit()) { walkOut(); return true; }
       if (nearLock()) return lockEngage();
       const chair = nearChair();
-      return !!chair && people.sitPlayer(chair);
+      if (chair) return people.sitPlayer(chair);
+      const action = kindNear();
+      if (!action) return false;
+      action.run(hud);
+      return true;
     };
     if (playerName) {
-      const sharedCtx = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt, walkable, useNear, jetpackAllowed: () => false };
+      const sharedCtx = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt, walkable, useNear, jetpackAllowed: () => false,
+        shoulderObstacle, shoulderObstacleActive, shoulderPropClear };
       people = sharedCtx.crew = BL.crew.create(sharedCtx);
       pilot.bind(sharedCtx);
       avatar = people.cavemen.get(playerName);
@@ -558,13 +779,16 @@
     let leaving = false;
     // Leaving: the same Ooga goes back out to the island's passage behind the sphere's doors.
     const exitNote = (signedOut) => ({ room: room.id, mode: signedOut ? "solo" : visit.mode, character: avatar ? avatar.traits.name : null, jetpack: visit.jetpack || null });
+    // The view and mode the room was in when the visitor pressed Exit, which the island gives back once the walk out
+    // is done.
+    let exitView = null;
     // A walked-out exit hands over mid-stride without the fade, with where its eye stood from the handover point
     // (`pose`), so the island starts from the same view; any other way out (signed out, Leave far from the doors)
     // fades as before. Under the `release` hub policy the island is built again on the way out, so that build happens
     // behind the fade too rather than freezing the room's last frame.
     const handOff = (signedOut = false, pose = null) => {
       if (leaving) return;
-      world.sphereExit = { ...exitNote(signedOut), pose };
+      world.sphereExit = { ...exitNote(signedOut), pose, view: pose ? exitView : null };
       world.pilot = avatar ? avatar.traits.name : null;
       BL.net.setBody(null);
       BL.net.setZone("none");
@@ -594,6 +818,7 @@
       if (!avatar || !nearExit() && Math.hypot(avatar.root.position.x - L.doorStep.x, avatar.root.position.z - L.doorStep.z) > 3) { handOff(); return; }
       // The doorway hands the island an eye pose, even when the room was explored in orbit or detached.
       if (pilot.player !== avatar && !pilot.possess(avatar)) return;
+      exitView = pilot.viewState();
       pilot.enterClose();
       guide.stage = "toDoor"; guide.t = 0;
       guided = true;
@@ -608,10 +833,11 @@
       }
     };
     const unsubscribeAccount = BL.net.subscribe(accountChanged);
-    // Weapon shortcuts do nothing in here; right-click and scroll keep the pilot's camera controls.
+    // Weapon shortcuts do nothing in here (a dialog, such as the model viewer, keeps its own keys); right-click and
+    // scroll keep the pilot's camera controls.
     const WEAPON_KEYS = new Set(["1", "2", "r", "f", "g"]);
     const armsKeys = (e) => {
-      if (e.metaKey || e.ctrlKey || e.altKey || !WEAPON_KEYS.has(e.key.toLowerCase()) || e.target && e.target.closest && e.target.closest("input, textarea, [contenteditable]")) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || !WEAPON_KEYS.has(e.key.toLowerCase()) || e.target && e.target.closest && e.target.closest("input, textarea, [contenteditable], dialog")) return;
       e.preventDefault();
       e.stopImmediatePropagation();
     };
@@ -621,10 +847,12 @@
       const o = hit.owner;
       return o.kind === "chair" ? `${o.tip}${TIPS.chair}` : o.tip || TIPS[o.kind] || "";
     };
+    // The ray under a tap, handed to a kind's own tap so it can tell where on a thing the tap fell (the Temple's koi pond).
+    const tapRay = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
     Object.assign(hooks, {
       onHover: (hit, p) => { if (hit && !guide.stage && !lock.on) hud.tooltip.show(tipFor(hit), p.x, p.y); else hud.tooltip.hide(); },
       onHoverMove: (hit, p) => { if (!guide.stage && !lock.on) hud.tooltip.show(tipFor(hit), p.x, p.y); },
-      onTap: (hit) => {
+      onTap: (hit, p) => {
         if (!hit || guide.stage) return;
         const o = hit.owner;
         if (o.kind === "exit") { if (nearExit()) walkOut(); else hud.toast("Walk up to the Exit button, then press it"); }
@@ -644,7 +872,7 @@
           const s = seats[o.index], p = avatar && avatar.root.position;
           if (!p || !s || s.sitter || nearChair() !== s || !people.sitPlayer(s)) hud.toast(COARSE ? "Walk up to a free seat, then tap SIT" : "Walk up to a free seat and press Space to sit");
         } else if (o.kind === "table") hud.toast(`${room.name} · ${shared ? "shared with whoever chose it" : "a solo copy, just for you"}`);
-        else if (motion && motion.tap && motion.tap(o, hud)) return;
+        else if (motion && motion.tap && motion.tap(o, hud, p ? (renderer.ray(p.x, p.y, camera, tapRay), tapRay) : null)) return;
         else if (o.data && o.data.say) hud.toast(o.data.say);
       },
       ...pilot.hooks,
@@ -658,18 +886,9 @@
       else if (action === "jetpack-toggle") hud.toast("No jetpacks in the Sphere");
       else if (action.startsWith("mode-") && !guide.stage) pilot.modeAction(action);
     });
-    const mode = document.getElementById("sphere-mode"), subtitle = document.getElementById("sphere-subtitle");
+    // The room's name under the banner's title; nothing beside its buttons.
+    const subtitle = document.getElementById("sphere-subtitle");
     if (subtitle) subtitle.textContent = `TCS · ${room.name}`;
-    // The chip under the title: the room and its size, or that this is a solo copy; checked once a second.
-    let modeWait = 0;
-    const showMode = () => {
-      if (!mode) return;
-      let others = 0;
-      if (shared) for (const rec of BL.net.remotes.values()) if (rec.zone === room.zone && rec.body) others++;
-      const text = shared ? `${room.name}${isLocked() ? " · LOCKED" : ""}${others ? ` · ${others + 1} here` : ""}` : `${room.name} · Solo visit · not signed in`;
-      if (mode.textContent !== text) mode.textContent = text;
-    };
-    showMode();
     if (guide.stage) hud.hint(`Entering ${room.name}`, 5000);
 
     // The guided walks, steered as a held stick would steer them; the view turns with the walk, its pitch easing to
@@ -705,6 +924,8 @@
           if (guide.t > GUIDE_LIMIT) arrive(L.arrival);
           doors.want = 0;
           finishGuide();
+          // In, the view and mode the visitor walked up to the keypad in (first person and carry only for the walk).
+          if (visit.view) pilot.adopt(visit.view);
         }
       } else if (guide.stage === "toDoor") {
         if (steerTo(L.doorStep.x, L.doorStep.z, dt) || guide.t > GUIDE_LIMIT) { guide.stage = "open"; guide.t = 0; doors.want = 1; }
@@ -748,19 +969,23 @@
       footsteps.update(driven);
       lockUpdate(dt);
       if (avatar && !guide.stage) {
-        const near = lock.on ? null : avatar.camp.seat ? "stand" : nearExit() ? "exit" : nearLock() ? "lock" : nearChair() ? "sit" : null;
+        let action = null;
+        const near = lock.on ? null : avatar.camp.seat ? "stand" : nearExit() ? "exit" : nearLock() ? "lock" : nearChair() ? "sit" : (action = kindNear()) ? action.key : null;
         if (near !== guide.near) {
           guide.near = near;
           if (near === "exit") { hud.setAct("EXIT"); hud.hint(COARSE ? "Tap EXIT to walk out" : "Space · Exit"); }
           else if (near === "lock") { hud.setAct(isLocked() ? "UNLOCK" : "LOCK"); hud.hint(COARSE ? "Tap to use the room's lock" : isLocked() ? "Space · Unlock the room" : "Space · Lock the room"); }
           else if (near === "sit") { hud.setAct("SIT"); hud.hint(COARSE ? "Tap SIT to take the chair" : "Space · Sit"); }
           else if (near === "stand") { hud.setAct("STAND UP!"); hud.hint(COARSE ? "Move or tap STAND UP! to get up" : "Move or press Space to stand up"); }
+          else if (action) { hud.setAct(action.label); hud.hint(COARSE ? action.tap : action.hint); }
           else pilot.showAct();
         }
       }
-      if ((modeWait -= dt) <= 0) { modeWait = 1; showMode(); }
       paintNext();
+      const heard = avatar ? avatar.root.position : camera.target;
+      ear.x = heard.x; ear.y = heard.y; ear.z = heard.z;
       if (motion) motion.update(dt, elapsed);
+      if (sharp) sharp.tick();
       stepTweens(dt);
       fx.update(dt, elapsed);
     };
@@ -806,6 +1031,7 @@
       timechain: {
         room, visit, layout: L, built, reader, holdings, guide, doors, seats,
         get avatar() { return avatar; }, get remotes() { return remotes; }, get sound() { return sound.stats; },
+        get motion() { return motion && motion.stats; },
         get slots() { return all.map((s) => ({ key: s.key, shown: !!s.node.geometry })); }, get exitEye() { return exitEye; },
         exit: walkOut, chartBoard, holdingsBoard
       }
@@ -821,6 +1047,7 @@
       reader.dispose();
       holdings.dispose();
       sound.dispose();
+      if (motion && motion.dispose) motion.dispose();
       if (unsubscribeDoor) unsubscribeDoor();
       unsubscribeAccount();
       window.removeEventListener("keydown", armsKeys, true);

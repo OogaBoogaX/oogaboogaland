@@ -6668,9 +6668,10 @@
       if (!player || player.grabbedBy) return;
       clearHeadLook(player);
       if (player.camp.rolling) return;
-      if (mix <= 0) return;
-      const root = player.root, head = player.parts.head;
-      if (player.camp.seat && !player.camp.seat.allowWeapons) {
+      const root = player.root, head = player.parts.head, seat = player.camp.seat;
+      // Sitting up with nothing to look at, the head faces straight out from the seat.
+      if (mix <= 0) { if (seat && !seat.lying && !seat.allowWeapons) head.rotation.x = head.rotation.y = 0; return; }
+      if (seat && !seat.allowWeapons) {
         head.rotation.y = clamp(Math.atan2(Math.sin(heading - root.rotation.y), Math.cos(heading - root.rotation.y)), -1.2, 1.2) * mix;
         head.rotation.x = pitch * mix;
         return;

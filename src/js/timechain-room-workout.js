@@ -160,7 +160,30 @@
   const BOARD = [["1  BIG LEGS", "7"], ["2  OOGA 12", "5"], ["3  SPIN CYCLE", "4"], ["4  HODL HAMSTRING", "3"], ["5  LOW FEE LARRY", "1"], ["6  SANI", "0 · on a break", C.grey]];
   const HOW = [["1  Pedal"], ["2  Every crank turn tries a hash"], ["3  A hash under the target"], ["    finds a fake block"], ["4  More legs, more tries:", null, C.amberText], ["    that's proof of work", null, C.amberText]];
 
+  // ---------- its door ----------
+  // A gym's fire door: brushed steel leaves with a push bar, a wired-glass window and hazard-striped kick plates, in a
+  // black rubber frame striped yellow and black.
+  const door = {
+    casing: "#3a3f45", frame: "#111317", header: "#111317", word: "#3cff7a", strip: "#3cff7a", chain: false,
+    leaf: "#8d949c", seam: "#2b2f34", plate: "#111317", face: "#3cff7a", mark: "#111317",
+    leafFace(side, H) {
+      for (let y = 0.4; y < 3.1; y += 0.12) H.rect(-0.75, y, 0.75, y + 0.004, "#9aa1a9");
+      H.rect(-0.62, 0.98, 0.62, 1.1, "#2b2f34", 0, 1);
+      H.rect(-0.6, 1.07, 0.6, 1.1, "#c9ccd2", 0.2, 2);
+      H.rect(-0.25, 2.1, 0.25, 2.75, "#22343c", 0.25, 1);
+      for (let k = 1; k < 4; k++) H.rect(-0.25 + k * 0.125 - 0.004, 2.1, -0.25 + k * 0.125 + 0.004, 2.75, "#7a8a90", 0.2, 2);
+      for (let k = 1; k < 5; k++) H.rect(-0.25, 2.1 + k * 0.13 - 0.004, 0.25, 2.1 + k * 0.13 + 0.004, "#7a8a90", 0.2, 2);
+      H.rect(-0.75, 0.04, 0.75, 0.32, "#151515", 0, 1);
+      for (let k = 0; k < 10; k++) H.rect(-0.75 + k * 0.15, 0.04, -0.75 + k * 0.15 + 0.075, 0.32, "#f2c230", 0.15, 2);
+    }
+  };
+  const doorTrim = (K, L) => {
+    const d = RM.doorway(L), x = d.W + d.F / 2, z = d.Z - 0.125;
+    for (const sx of [-1, 1]) for (let y = 0.1; y < d.D; y += 0.36) K.box(d.F, 0.16, 0.012, "#f2c230", sx * x, y + 0.08, z, { emissive: 0.15 });
+  };
+
   const plan = (K, L) => {
+    doorTrim(K, L);
     const e0 = ROOMS.edgeEl(L, 0) / P.DEG;
     K.wallColor("#1f1d24");
     K.render({ sky: [0.62, 0.52, 0.5], ground: [0.26, 0.21, 0.2], ambientFloor: 0.44, bloomStrength: 0.6 });
@@ -309,5 +332,5 @@
       }
     };
   };
-  BL.timechainRoomKinds.workout = { plan, animate };
+  BL.timechainRoomKinds.workout = { plan, animate, door };
 })();

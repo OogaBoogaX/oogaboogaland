@@ -2,9 +2,9 @@
 // (timechain-room-*.js, registered on `BL.timechainRoomKinds`). The shell: the sphere of the room's layout
 // (timechain-rooms.js), the dark wall below its screen's lower edge and the screen over it, one canvas wrapped round
 // the whole dome (`dome`); the floor, a canvas laid flat (`floor`) or a raked hall's terraces; and behind the visitor
-// the one doorway in a flat bay under its EXIT header, its two leaves carrying an amber chain across their seam, the
-// Exit button and the room's lock either side, and a dim vestibule past it. The doorway, the buttons and everything a
-// body touches keep human size in every room.
+// the one doorway in a flat bay under its EXIT header, its two leaves meeting at a seam, the Exit button and the
+// room's lock either side, and a dim vestibule past it, each room's door in its own style (a kind's `door`, and its
+// own trim round the frame). The doorway, the buttons and everything a body touches keep human size in every room.
 //
 // A kind's `plan(K, L, room)` builds its place through the kit `K`: parts merged into the room's few static meshes
 // (`box`, `cyl`, `ball`, `torus`, `lathe`, `prism`, `slab`, `sector`, each placed in the current `group`'s frame), nodes
@@ -176,7 +176,8 @@
       // A built geometry placed as it is.
       add: (geo, x, y, z, o = {}) => place(geo, x, y, z, o),
       // A node of its own, for what moves or swaps, named for the kind's `animate`; a geometry, or a builder run in a
-      // fresh kit whose parts make its mesh, in the node's own frame.
+      // fresh kit whose parts make its mesh, in the node's own frame. With `proxy` it is never drawn: a stand-in a
+      // target's `pick` names for clicks, where its real mesh is too fine to test.
       node: (name, geometry, x = 0, y = 0, z = 0, o = {}) => {
         let geo = geometry;
         if (typeof geometry === "function") {
@@ -186,7 +187,7 @@
           if (geo && !sub.body.length) noShadow(geo);
         }
         // A node with a `parent` stands in that node's own frame; any other in this group's, turned with it.
-        const p = o.parent ? { x, y, z } : at(x, y, z), spec = { name, geometry: geo, x: p.x, y: p.y, z: p.z, rx: o.rx || 0, ry: (o.parent ? 0 : yawOf(m)) + (o.ry || 0), rz: o.rz || 0, parent: o.parent || null, sightHidden: !!o.glow, depthBias: o.depthBias || 0, target: o.target || null };
+        const p = o.parent ? { x, y, z } : at(x, y, z), spec = { name, geometry: geo, x: p.x, y: p.y, z: p.z, rx: o.rx || 0, ry: (o.parent ? 0 : yawOf(m)) + (o.ry || 0), rz: o.rz || 0, scale: o.scale || 1, parent: o.parent || null, sightHidden: !!o.glow, depthBias: o.depthBias || 0, target: o.target || null, proxy: !!o.proxy };
         into.nodes.push(spec);
         if (geo) into.geometries.push(geo);
         return spec;
@@ -214,8 +215,11 @@
       // A tap target over a node (`kind`, `tip` and what the scene does with it).
       target: (spec, kind, tip, radius = 0.8, extra = null) => { spec.target = { kind, tip, radius, ...extra }; return spec; },
       // The dome's and the floor's paint, and a live picture on the dome.
-      dome: (paint) => { into.domePaint = paint; },
-      floor: (paint) => { into.floorPaint = paint; },
+      // `size` ({ w, h, smooth }) for a dome a kind repaints as it plays: a small canvas, drawn up smooth.
+      dome: (paint, size = null) => { into.domePaint = paint; into.domeSize = size; },
+      // `size` ({ scale, emissive }) for a floor a kind repaints as it plays: `scale` pixels a metre, so whole pixels
+      // fall on a grid of that pitch, and how brightly it shows (an LED floor at full).
+      floor: (paint, size = null) => { into.floorPaint = paint; into.floorSize = size; },
       live: (spec) => { into.live.push(spec); return spec; },
       // The room's light: overrides of the scene's render options (sky, ground, direct, ambient floor, bloom).
       render: (o) => { into.render = o; },
@@ -232,11 +236,11 @@
   // the seam, the front in the middle) and a row per height, so a node at z -1 maps it by its curve (gl-renderer
   // `uCanvasCurve`). `D` turns degrees into its pixels and says how large a metre of the dome is there.
   const DOME_W = 4096, DOME_H = 1024;
-  const domeMap = (L) => {
+  const domeMap = (L, W = DOME_W, H = DOME_H) => {
     let yLow = Infinity;
     for (let a = -180; a <= 180; a += 2) { const p = ROOMS.onSphere(L, a * DEG, ROOMS.edgeEl(L, a * DEG)); yLow = Math.min(yLow, p.y); }
     yLow -= 0.05;
-    const yHigh = L.crown, span = yHigh - yLow, W = DOME_W, H = DOME_H;
+    const yHigh = L.crown, span = yHigh - yLow;
     const x = (az) => ((((az + 180) / 360) % 1) + 1) % 1 * W;
     const y = (el) => (yHigh - (L.c + L.R * Math.sin(el * DEG))) / span * H;
     const elAt = (row) => Math.asin(Math.max(-1, Math.min(1, (yHigh - row / H * span - L.c) / L.R))) / DEG;
@@ -304,24 +308,26 @@
   const paintDome = perRoom((id) => {
     const into = plan(id);
     if (!into.domePaint) return null;
-    const D = domeMap(ROOMS.layout(id)), canvas = BL.timechainCharts.canvas(D.W, D.H), ctx = canvas.getContext("2d");
+    const size = into.domeSize, D = size ? domeMap(ROOMS.layout(id), size.w, size.h) : domeMap(ROOMS.layout(id)), canvas = BL.timechainCharts.canvas(D.W, D.H), ctx = canvas.getContext("2d");
     ctx.fillStyle = "#0b0a09"; ctx.fillRect(0, 0, D.W, D.H);
     into.domePaint(ctx, { ...D, ...paintKit, text: domeText(D), pixText: domePix(D), sky: domeSky(D), stars: domeStars(D), wrap: domeWrap(D) });
     return canvas;
   });
   // The floor's canvas, a square laid on the floor's disc: `X` and `Y` turn metres into its pixels, the front up.
-  const floorMap = (L) => {
+  const floorMap = (L, scale = 0) => {
+    if (scale) { const N = 2 * Math.ceil(L.r0 * scale), rf = N / (2 * scale); return { N, s: scale, rf, X: (x) => N / 2 + x * scale, Y: (z) => N / 2 + z * scale }; }
     const rf = L.r0, N = Math.min(2048, Math.max(512, Math.ceil(rf * 2 * 64 / 128) * 128)), s = N / (2 * rf);
     return { N, s, rf, X: (x) => N / 2 + x * s, Y: (z) => N / 2 + z * s };
   };
-  // The Sphere's amber chain inlaid along a line, a link a tile long with its dark square, and round a ring.
+  // The Sphere's amber chain inlaid along a line, a link a tile long with its dark square (a room may give its own
+  // colour), and round a ring.
   const chainKit = (F, ctx) => ({
-    path: (x0, z0, x1, z1, width = 0.7) => {
+    path: (x0, z0, x1, z1, width = 0.7, color = "#e8891a") => {
       const { X, Y, s } = F, dx = x1 - x0, dz = z1 - z0, len = Math.hypot(dx, dz), k = Math.max(1, Math.round(len / 0.8)), a = Math.atan2(-dx, dz);
       for (let i = 0; i < k; i++) {
         const t = (i + 0.5) / k;
         ctx.save(); ctx.translate(X(x0 + dx * t), Y(z0 + dz * t)); ctx.rotate(a);
-        ctx.fillStyle = "#e8891a"; ctx.fillRect(-width / 2 * s, -len / k / 2 * s + 1.5, width * s, len / k * s - 3);
+        ctx.fillStyle = color; ctx.fillRect(-width / 2 * s, -len / k / 2 * s + 1.5, width * s, len / k * s - 3);
         ctx.fillStyle = "#1a1410"; ctx.fillRect(-0.12 * s, -0.12 * s, 0.24 * s, 0.24 * s);
         ctx.restore();
       }
@@ -345,7 +351,7 @@
   const paintFloor = perRoom((id) => {
     const into = plan(id);
     if (!into.floorPaint) return null;
-    const F = floorMap(ROOMS.layout(id)), canvas = BL.timechainCharts.canvas(F.N, F.N), ctx = canvas.getContext("2d");
+    const F = floorMap(ROOMS.layout(id), into.floorSize ? into.floorSize.scale : 0), canvas = BL.timechainCharts.canvas(F.N, F.N), ctx = canvas.getContext("2d");
     ctx.fillStyle = "#121110"; ctx.fillRect(0, 0, F.N, F.N);
     into.floorPaint(ctx, { ...F, ...paintKit, ...chainKit(F, ctx) });
     return canvas;
@@ -395,6 +401,7 @@
     if (!canvas) return null;
     const D = domeMap(ROOMS.layout(id)), geo = { verts: parts.screen.verts, faces: parts.screen.faces, lines: [], castShadow: false };
     geo.imageSurface = { canvas, version: 1, rect: [-Math.PI, D.yLow, TAU, D.span], curve: [1, 0, 0], tessellated: true };
+    if (plan(id).domeSize && plan(id).domeSize.smooth) geo.imageSurface.smooth = true;
     return geo;
   });
   // The floor's disc in rings and sectors, so Canvas 2D sorts it under what stands on it, with the floor's canvas
@@ -409,12 +416,12 @@
       for (let k = 0; k < sectors; k++) {
         const b0 = TAU * k / sectors, b1 = TAU * (k + 1) / sectors, p = (r, b) => [r * Math.sin(b), -r * Math.cos(b), 0];
         const pts = i === 0 ? [[0, 0, 0], p(r1, b0), p(r1, b1), p(r1, b1)] : [p(r0, b0), p(r1, b0), p(r1, b1), p(r0, b1)];
-        if (canvas) face(geo, pts, [255, 255, 255], 0.08, [0, 0, 1]);
+        if (canvas) face(geo, pts, [255, 255, 255], into.floorSize && into.floorSize.emissive !== undefined ? into.floorSize.emissive : 0.08, [0, 0, 1]);
         else face(geo, pts, into.floorColor || C.floor, 0, [0, 0, 1]);
       }
     }
     if (canvas) {
-      const F = floorMap(L);
+      const F = floorMap(L, into.floorSize ? into.floorSize.scale : 0);
       geo.imageSurface = { canvas, version: 1, rect: [-F.rf, -F.rf, 2 * F.rf, 2 * F.rf], tessellated: true };
     }
     return geo;
@@ -467,20 +474,28 @@
   // The bay round the doorway, standing in front of the sphere: its face with the doorway cut in it, its sides and
   // top running back past the wall, the frame and the header with EXIT, all at human size in every room.
   const EXIT_HEADER = { over: 0.12, h: 0.44, d: 0.22 };
+  // ---------- each room's door ----------
+  // The doorway is the same in every room (its size, the leaves that slide apart, the Exit button's place), but each
+  // dresses it in its own style: a kind's `door` names its colours (the bay's `casing`, the `frame`, the EXIT `header`
+  // and its `word`, the `leaf` and its `seam`, the Exit button's `plate`, `face` and `mark`), whether the Sphere's amber
+  // `strip` crosses the bay and its `chain` the leaves, and draws its leaves' faces (`leafFace(side, H)`, flat marks in
+  // the leaf's own frame, `H` below). The trim round the frame is the kind's own, in its plan. What a kind leaves out
+  // keeps the Sphere's charcoal and amber.
+  const DOOR_STYLE = { casing: C.casing, frame: C.frame, header: C.trim, word: C.amber, strip: C.amber, chain: true, leaf: C.wall, seam: C.leg, plate: C.trim, face: C.amber, mark: C.curtain, leafFace: null };
+  const doorStyle = (id) => ({ ...DOOR_STYLE, ...(KINDS[ROOMS.get(id).kind].door || {}) });
   const bay = perRoom((id) => {
-    const L = ROOMS.layout(id), geo = blank(), Z = L.doorZ, B = DOOR.bay, W = DOOR.halfW, D = DOOR.height, H = DOOR.casing, back = L.R + 0.5, IN = [0, 0, -1];
-    quad(geo, [-B, 0, Z], [-W, 0, Z], [-W, H, Z], [-B, H, Z], C.casing, 0, IN);
-    quad(geo, [W, 0, Z], [B, 0, Z], [B, H, Z], [W, H, Z], C.casing, 0, IN);
-    quad(geo, [-W, D, Z], [W, D, Z], [W, H, Z], [-W, H, Z], C.casing, 0, IN);
-    for (const side of [-1, 1]) quad(geo, [side * B, 0, Z], [side * B, 0, back], [side * B, H, back], [side * B, H, Z], C.casing, 0, [side, 0, 0]);
-    quad(geo, [-B, H, Z], [B, H, Z], [B, H, back], [-B, H, back], C.casing, 0, UP);
+    const L = ROOMS.layout(id), st = doorStyle(id), geo = blank(), Z = L.doorZ, B = DOOR.bay, W = DOOR.halfW, D = DOOR.height, H = DOOR.casing, back = L.R + 0.5, IN = [0, 0, -1];
+    quad(geo, [-B, 0, Z], [-W, 0, Z], [-W, H, Z], [-B, H, Z], st.casing, 0, IN);
+    quad(geo, [W, 0, Z], [B, 0, Z], [B, H, Z], [W, H, Z], st.casing, 0, IN);
+    quad(geo, [-W, D, Z], [W, D, Z], [W, H, Z], [-W, H, Z], st.casing, 0, IN);
+    for (const side of [-1, 1]) quad(geo, [side * B, 0, Z], [side * B, 0, back], [side * B, H, back], [side * B, H, Z], st.casing, 0, [side, 0, 0]);
+    quad(geo, [-B, H, Z], [B, H, Z], [B, H, back], [-B, H, back], st.casing, 0, UP);
     const F = DOOR.frame, X = EXIT_HEADER, parts = [geo];
-    for (const side of [-1, 1]) parts.push(box({ w: F, h: D + F, d: 0.14, color: C.frame, offset: { x: side * (W + F / 2), y: (D + F) / 2, z: Z - 0.05 } }));
-    parts.push(box({ w: 2 * W + 2 * F, h: F, d: 0.14, color: C.frame, offset: { y: D + F / 2, z: Z - 0.05 } }));
-    parts.push(box({ w: 2 * W + 2 * F + 2 * X.over, h: X.h, d: X.d, color: C.trim, offset: { y: D + F + X.h / 2, z: Z - X.d / 2 + 0.02 } }));
-    // A strip of amber across the bay at the wall's low strip height, either side of the doors.
-    parts.push(box({ w: B - W - F, h: 0.05, d: 0.02, color: C.amber, emissive: 1, offset: { x: -(B + W + F) / 2, y: 0.925, z: Z - 0.015 } }));
-    parts.push(box({ w: B - W - F, h: 0.05, d: 0.02, color: C.amber, emissive: 1, offset: { x: (B + W + F) / 2, y: 0.925, z: Z - 0.015 } }));
+    for (const side of [-1, 1]) parts.push(box({ w: F, h: D + F, d: 0.14, color: st.frame, offset: { x: side * (W + F / 2), y: (D + F) / 2, z: Z - 0.05 } }));
+    parts.push(box({ w: 2 * W + 2 * F, h: F, d: 0.14, color: st.frame, offset: { y: D + F / 2, z: Z - 0.05 } }));
+    parts.push(box({ w: 2 * W + 2 * F + 2 * X.over, h: X.h, d: X.d, color: st.header, offset: { y: D + F + X.h / 2, z: Z - X.d / 2 + 0.02 } }));
+    // A lit strip across the bay at the wall's low strip height, either side of the doors.
+    if (st.strip) for (const side of [-1, 1]) parts.push(box({ w: B - W - F, h: 0.05, d: 0.02, color: st.strip, emissive: 1, offset: { x: side * (B + W + F) / 2, y: 0.925, z: Z - 0.015 } }));
     return merge(...parts);
   });
   // The vestibule past the doorway, dim, ending in a hanging curtain of dark strips; the same depth in every room.
@@ -501,18 +516,67 @@
     for (const side of [-1, 1]) quad(geo, [side * W - 0.02, 0.005, Z], [side * W + 0.02, 0.005, Z], [side * W + 0.02, 0.005, end], [side * W - 0.02, 0.005, end], C.ember, 0.6, UP);
     return noShadow(geo);
   });
-  // A door leaf, `side` -1 or 1, centred on its own origin: charcoal, its leading edge dark so the seam shows as a
-  // line, on the face toward the room (-z).
-  const leaf = (side) => {
-    const W = DOOR.halfW, D = DOOR.height, geo = box({ w: W, h: D, d: 0.08, color: C.wall, offset: { y: D / 2 } }), IN = [0, 0, -1], z = -0.046;
+  // A door leaf, `side` -1 or 1, centred on its own origin, in the room's `leaf` colour, its leading edge in its `seam`
+  // colour so the seam shows as a line, on the face toward the room (-z).
+  const leaf = (side, st) => {
+    const W = DOOR.halfW, D = DOOR.height, geo = box({ w: W, h: D, d: 0.08, color: st.leaf, offset: { y: D / 2 } }), IN = [0, 0, -1], z = -0.046;
     const e = side < 0 ? W / 2 : -W / 2;
-    quad(geo, [e - 0.015, 0, z], [e + 0.015, 0, z], [e + 0.015, D, z], [e - 0.015, D, z], C.leg, 0, IN);
+    quad(geo, [e - 0.015, 0, z], [e + 0.015, 0, z], [e + 0.015, D, z], [e - 0.015, D, z], st.seam, 0, IN);
     return geo;
   };
+  // What a kind's `leafFace` draws with: the leaf's width `W` and height `D`, its `inner` (seam) and `outer` edges' x,
+  // and flat marks a little proud of its face (each `lift` further): a rectangle, a diamond and a ring of `n` sides.
+  const leafKit = (geo, side) => {
+    const W = DOOR.halfW, IN = [0, 0, -1], z0 = -0.049, at = (lift) => z0 - (lift || 0) * 0.004;
+    return {
+      W, D: DOOR.height, side, inner: side < 0 ? W / 2 : -W / 2, outer: side < 0 ? -W / 2 : W / 2,
+      rect: (x0, y0, x1, y1, color, emissive = 0, lift = 0) => quad(geo, [Math.min(x0, x1), y0, at(lift)], [Math.max(x0, x1), y0, at(lift)], [Math.max(x0, x1), y1, at(lift)], [Math.min(x0, x1), y1, at(lift)], color, emissive, IN),
+      diamond: (x, y, r, color, emissive = 0, lift = 0) => face(geo, [[x, y - r, at(lift)], [x + r, y, at(lift)], [x, y + r, at(lift)], [x - r, y, at(lift)]], color, emissive, IN),
+      ring: (x, y, r, w, color, emissive = 0, n = 16, lift = 0) => {
+        for (let i = 0; i < n; i++) {
+          const a = i / n * TAU, b = (i + 1) / n * TAU, p = (k, rr) => [x + Math.cos(k) * rr, y + Math.sin(k) * rr, at(lift)];
+          face(geo, [p(a, r - w), p(b, r - w), p(b, r), p(a, r)], color, emissive, IN);
+        }
+      },
+      disc: (x, y, r, color, emissive = 0, n = 12, lift = 0) => {
+        for (let i = 0; i < n; i++) { const a = i / n * TAU, b = (i + 1) / n * TAU; face(geo, [[x, y, at(lift)], [x + Math.cos(a) * r, y + Math.sin(a) * r, at(lift)], [x + Math.cos(b) * r, y + Math.sin(b) * r, at(lift)]], color, emissive, IN); }
+      },
+      line: (x0, y0, x1, y1, w, color, emissive = 0, lift = 0) => {
+        const l = Math.hypot(x1 - x0, y1 - y0) || 1, nx = -(y1 - y0) / l * w / 2, ny = (x1 - x0) / l * w / 2;
+        face(geo, [[x0 + nx, y0 + ny, at(lift)], [x1 + nx, y1 + ny, at(lift)], [x1 - nx, y1 - ny, at(lift)], [x0 - nx, y0 - ny, at(lift)]], color, emissive, IN);
+      }
+    };
+  };
+  // Where the doorway's parts stand in a room, for a kind's own trim: the bay's face `Z` (the room is toward -z), the
+  // opening's half width `W` and height `D`, the frame `F`, the bay's half width `B` and height `H`, the EXIT header's
+  // top `head`, and the Exit button (keep trim off it, and off the Conference Room's keypad).
+  const doorway = (L) => ({ Z: L.doorZ, W: DOOR.halfW, D: DOOR.height, F: DOOR.frame, B: DOOR.bay, H: DOOR.casing, head: DOOR.height + DOOR.frame + EXIT_HEADER.h, button: L.exitButton });
+  // A string of bulbs round the frame, up one side, across over the header and down the other, each a node of its own
+  // (`doorBulb0`, …) for a kind to light in turn; how many it hung.
+  const bulbGeos = new Map();
+  const doorBulbs = (K, L, color, step = 0.42, r = 0.045) => {
+    const d = doorway(L), x = d.W + d.F + 0.1, top = d.head + 0.1, z = d.Z - 0.15, key = `${color}|${r}`;
+    if (!bulbGeos.has(key)) bulbGeos.set(key, noShadow(ballGeo(r, color, 8, 1)));
+    const geo = bulbGeos.get(key), ys = [];
+    for (let y = 0.3; y < top - step / 2; y += step) ys.push(y);
+    let n = 0;
+    for (const y of ys) K.node(`doorBulb${n++}`, geo, -x, y, z, { glow: true });
+    for (let k = 0, m = Math.max(1, Math.round(2 * x / step)); k <= m; k++) K.node(`doorBulb${n++}`, geo, -x + 2 * x * k / m, top, z, { glow: true });
+    for (let i = ys.length - 1; i >= 0; i--) K.node(`doorBulb${n++}`, geo, x, ys[i], z, { glow: true });
+    return n;
+  };
+  // A builder run on its own, outside any room's plan: its parts merged into one geometry, for a viewer to show.
+  const solo = (build) => {
+    const into = { L: null, room: null, body: [], glow: [], flat: [], nodes: [], solids: [], seats: [], lights: [], live: [], geometries: [], targets: [] };
+    build(kit(into));
+    return merge(...into.body, ...into.flat, ...into.glow);
+  };
+  // A kind's bulbs, in order round the frame.
+  const bulbsOf = (nodes) => { const list = []; for (let i = 0; nodes[`doorBulb${i}`]; i++) list.push(nodes[`doorBulb${i}`]); return list; };
   // The bay's low strip carried across a leaf as a chain of three hollow links, joined to its partner's across the
   // seam and running out to the frame: its own mesh, a child of the leaf, so Canvas 2D can sort it over the leaf.
-  const leafChain = (side) => {
-    const W = DOOR.halfW, geo = blank(), IN = [0, 0, -1], z = -0.045;
+  const leafChain = (side, geo = blank()) => {
+    const W = DOOR.halfW, IN = [0, 0, -1], z = -0.045;
     const e = side < 0 ? W / 2 : -W / 2, at = (u) => e + side * u;
     const bar = (u0, u1, y0, y1) => quad(geo, [Math.min(at(u0), at(u1)), y0, z], [Math.max(at(u0), at(u1)), y0, z], [Math.max(at(u0), at(u1)), y1, z], [Math.min(at(u0), at(u1)), y1, z], C.amber, 0.9, IN);
     const LINK = 0.38, JOIN = 0.1, SIDE = 0.08, y0 = 0.845, y1 = 1.005, h0 = 0.895, h1 = 0.955;
@@ -527,13 +591,24 @@
     }
     return noShadow(geo);
   };
-  const leaves = own(() => [leaf(-1), leaf(1)]), chains = own(() => [leafChain(-1), leafChain(1)]);
+  const leaves = perRoom((id) => { const st = doorStyle(id); return [leaf(-1, st), leaf(1, st)]; });
+  // Each leaf's marks, a mesh of their own (a child of the leaf, so Canvas 2D sorts them over it): the Sphere's chain
+  // where the room keeps it, and the room's own face.
+  const marks = perRoom((id) => {
+    const st = doorStyle(id);
+    return [-1, 1].map((side) => {
+      const geo = blank();
+      if (st.chain) leafChain(side, geo);
+      if (st.leafFace) st.leafFace(side, leafKit(geo, side));
+      return geo.faces.length ? noShadow(geo) : null;
+    });
+  });
   // The Exit button's plate, its amber face and the play mark on it, facing -z and pointing right as seen from the room.
-  const button = own(() => {
-    const geo = merge(box({ w: 0.38, h: 0.38, d: 0.06, color: C.trim }), box({ w: 0.28, h: 0.28, d: 0.02, color: C.amber, emissive: 0.85, offset: { z: -0.035 } }));
+  const button = perRoom((id) => {
+    const st = doorStyle(id), geo = merge(box({ w: 0.38, h: 0.38, d: 0.06, color: st.plate }), box({ w: 0.28, h: 0.28, d: 0.02, color: st.face, emissive: 0.85, offset: { z: -0.035 } }));
     const base = geo.verts.length / 3;
     geo.verts.push(0.06, 0.08, -0.047, 0.06, -0.08, -0.047, -0.08, 0, -0.047);
-    geo.faces.push({ i: [base, base + 1, base + 2], color: hexToRgb(C.curtain), emissive: 0 });
+    geo.faces.push({ i: [base, base + 1, base + 2], color: hexToRgb(st.mark), emissive: 0 });
     return geo;
   });
   // A word in the jumbotron's letters, lit, facing into the room (-z).
@@ -555,7 +630,7 @@
     }
     return noShadow(geo);
   };
-  const exitWord = own(() => litWord("EXIT", 0.036, C.amber, 0.9));
+  const exitWord = perRoom((id) => litWord("EXIT", 0.036, doorStyle(id).word, 0.9));
   // Across the doors while the room is locked: ROOM LOCKED in red between two padlocks.
   const LOCK_RED = "#ff3b30", PADLOCK = [".###.", "#...#", "#...#", "#####", "##.##", "#####"];
   const lockedSign = own(() => {
@@ -641,16 +716,18 @@
     const L = ROOMS.layout(id), into = plan(id), root = createNode(), parts = sphereParts(id);
     const dome = domeGeometry(id), floor = floorGeometry(id), rake = rakeGeometry(id), cap = L.c;
     addChild(root, createNode({ geometry: parts.wall }), createNode({ geometry: parts.glow, sightHidden: true }));
-    if (dome) addChild(root, createNode({ geometry: dome, position: { x: 0, y: 0, z: -1 } }));
-    if (floor) addChild(root, createNode({ geometry: floor, position: { x: 0, y: L.yMin + 0.002, z: 0 }, rotation: { x: -Math.PI / 2, y: 0, z: 0 } }));
+    const domeNode = dome ? createNode({ geometry: dome, position: { x: 0, y: 0, z: -1 } }) : null;
+    if (domeNode) addChild(root, domeNode);
+    const floorNode = floor ? createNode({ geometry: floor, position: { x: 0, y: L.yMin + 0.002, z: 0 }, rotation: { x: -Math.PI / 2, y: 0, z: 0 } }) : null;
+    if (floorNode) addChild(root, floorNode);
     if (rake) addChild(root, createNode({ geometry: rake.body }), createNode({ geometry: rake.glow, sightHidden: true }));
     addChild(root, createNode({ geometry: bay(id) }), createNode({ geometry: vestibule(id) }), createNode({ geometry: vestibuleGlow(id), sightHidden: true }));
-    const doors = [-1, 1].map((side) => createNode({ geometry: leaves()[side < 0 ? 0 : 1], position: { x: side * DOOR.halfW / 2, y: 0, z: L.doorZ + 0.06 } }));
-    doors.forEach((door, i) => addChild(door, createNode({ geometry: chains()[i], depthBias: MARK_BIAS })));
+    const doors = [-1, 1].map((side) => createNode({ geometry: leaves(id)[side < 0 ? 0 : 1], position: { x: side * DOOR.halfW / 2, y: 0, z: L.doorZ + 0.06 } }));
+    doors.forEach((door, i) => { const m = marks(id)[i]; if (m) addChild(door, createNode({ geometry: m, depthBias: MARK_BIAS })); });
     addChild(root, ...doors);
     const E = L.exitButton;
-    const exitButton = createNode({ geometry: button(), position: { x: E.x, y: E.y, z: E.z } });
-    const exitSign = createNode({ geometry: exitWord(), depthBias: MARK_BIAS, position: { x: 0, y: DOOR.height + DOOR.frame + EXIT_HEADER.h / 2, z: L.doorZ - EXIT_HEADER.d + 0.016 } });
+    const exitButton = createNode({ geometry: button(id), position: { x: E.x, y: E.y, z: E.z } });
+    const exitSign = createNode({ geometry: exitWord(id), depthBias: MARK_BIAS, position: { x: 0, y: DOOR.height + DOOR.frame + EXIT_HEADER.h / 2, z: L.doorZ - EXIT_HEADER.d + 0.016 } });
     addChild(root, exitButton, exitSign);
     // The Conference Room's lock: its keypad faces into the room, and the sign across the doors hangs there only while
     // it is locked. No other room has one.
@@ -663,12 +740,15 @@
       addChild(root, lockPad.pad, lockSign);
     }
     // The kind's own place: its static meshes, then its nodes by name.
-    if (into.bodyGeo) addChild(root, createNode({ geometry: into.bodyGeo }));
+    const body = into.bodyGeo ? createNode({ geometry: into.bodyGeo }) : null;
+    if (body) addChild(root, body);
     if (into.flatGeo) addChild(root, createNode({ geometry: into.flatGeo, sightHidden: true }));
     if (into.glowGeo) addChild(root, createNode({ geometry: into.glowGeo, sightHidden: true }));
     const nodes = {}, targets = [];
     for (const spec of into.nodes) {
-      const node = createNode({ geometry: spec.geometry, position: { x: spec.x, y: spec.y, z: spec.z }, rotation: { x: spec.rx, y: spec.ry, z: spec.rz }, sightHidden: spec.sightHidden, depthBias: spec.depthBias || 0 });
+      const node = createNode({ geometry: spec.geometry, position: { x: spec.x, y: spec.y, z: spec.z }, rotation: { x: spec.rx, y: spec.ry, z: spec.rz }, scale: { x: spec.scale, y: spec.scale, z: spec.scale }, sightHidden: spec.sightHidden, depthBias: spec.depthBias || 0 });
+      // A stand-in a click is tested against, never drawn.
+      if (spec.proxy) { node.visible = false; node.pickProxy = true; }
       addChild(spec.parent && nodes[spec.parent] ? nodes[spec.parent] : root, node);
       if (spec.name) nodes[spec.name] = node;
       if (spec.target) targets.push({ node, ...spec.target });
@@ -682,17 +762,17 @@
     const lights = [...into.lights];
     // The doorway's own light, and a dim one in the vestibule.
     lights.push([0, 2.6, L.doorZ - 1.6, 6, 0.7, 0.46, 0.2], [0, DOOR.height - 0.4, L.doorZ + DOOR.vestibule * 0.5, 3.2, 0.32, 0.2, 0.08]);
-    return { root, layout: L, room: into.room, doors, exitButton, exitSign, lockPad, lockSign, lights, nodes, targets, live, seats: into.seats.map((s) => ({ ...s, sitter: null })), solids: into.solids, render: into.render || null, crown: cap };
+    return { root, layout: L, room: into.room, body, dome: domeNode, floor: floorNode, doors, exitButton, exitSign, lockPad, lockSign, lights, nodes, targets, live, seats: into.seats.map((s) => ({ ...s, sitter: null })), solids: into.solids, render: into.render || null, crown: cap };
   };
   // A room's construction as steps, each a slice of a frame at the doorway: a kind may split its own costly parts
   // (`steps`, run before its plan, each building something its plan then reads from a cache).
   const prepareSteps = (id) => {
     const kind = KINDS[ROOMS.get(id).kind];
-    return [...(kind.steps ? kind.steps(ROOMS.layout(id)) : []), () => plan(id), () => sphereParts(id), () => paintDome(id), () => domeGeometry(id), () => paintFloor(id), () => floorGeometry(id), () => rakeGeometry(id), () => bay(id)];
+    return [...(kind.steps ? kind.steps(ROOMS.layout(id)) : []), () => plan(id), () => sphereParts(id), () => paintDome(id), () => domeGeometry(id), () => paintFloor(id), () => floorGeometry(id), () => rakeGeometry(id), () => bay(id), () => marks(id)];
   };
   // Every static geometry a room draws, for the scene's live set and for releasing a preview.
   const geometries = (id) => {
-    const into = plan(id), parts = sphereParts(id), rake = rakeGeometry(id), list = [parts.wall, parts.glow, bay(id), vestibule(id), vestibuleGlow(id), ...leaves(), ...chains(), button(), exitWord(), lockedSign()];
+    const into = plan(id), parts = sphereParts(id), rake = rakeGeometry(id), list = [parts.wall, parts.glow, bay(id), vestibule(id), vestibuleGlow(id), ...leaves(id), ...marks(id).filter(Boolean), button(id), exitWord(id), lockedSign()];
     const dome = domeGeometry(id), floor = floorGeometry(id);
     if (dome) list.push(dome);
     if (floor) list.push(floor);
@@ -708,7 +788,8 @@
     return geo;
   };
   BL.timechainRoomModels = {
-    build, plan, prepareSteps, geometries, picture, liveGeometry, flatPicture, sphere: sphereParts, domeMap, floorMap, paintKit, KINDS, COLORS: C, MARK_BIAS,
+    build, plan, prepareSteps, geometries, picture, liveGeometry, flatPicture, sphere: sphereParts, domeMap, floorMap, paintKit, KINDS, COLORS: C, MARK_BIAS, EXIT_HEADER,
+    doorway, doorBulbs, bulbsOf, solo,
     helpers: { face, quad, blank, clip, own, perRoom, cylinder, ballGeo, slabGeo, sectorGeo, litWord, UP, DOWN }
   };
 })();

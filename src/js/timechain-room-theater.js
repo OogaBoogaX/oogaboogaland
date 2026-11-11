@@ -255,7 +255,26 @@
     g.light(0, 1.2, -0.6, 3.2, 0.9, 0.62, 0.3);
   };
 
+  // ---------- its door ----------
+  // A cinema's: red velvet leaves buttoned with brass studs, a round porthole each and a brass push plate, in a brass
+  // frame on deep red, marquee bulbs round it chasing.
+  const door = {
+    casing: "#2a0d10", frame: "#b08a3a", header: "#1a0608", word: "#ff3b30", strip: null, chain: false,
+    leaf: "#7a0f18", seam: "#3a050a", plate: "#1a0608", face: "#ff3b30", mark: "#1a0608",
+    leafFace(side, H) {
+      for (let row = 0; row < 11; row++) for (let col = 0; col < 5; col++) {
+        const x = -0.6 + col * 0.3 + (row & 1 ? 0.15 : 0), y = 0.35 + row * 0.27;
+        if (x < 0.72 && Math.hypot(x, y - 2.3) > 0.32) H.diamond(x, y, 0.022, "#d4a63a", 0.25, 1);
+      }
+      H.disc(0, 2.3, 0.19, "#140306", 0.35, 16, 1);
+      H.ring(0, 2.3, 0.23, 0.045, "#d4a63a", 0.25, 16, 2);
+      H.rect(H.inner + side * 0.06, 1.0, H.inner + side * 0.2, 1.45, "#d4a63a", 0.3, 2);
+    }
+  };
+  const doorTrim = (K, L) => { RM.doorBulbs(K, L, "#ffe7a8", 0.32); };
+
   const plan = (K, L) => {
+    doorTrim(K, L);
     const R = L.rake, J = projector(L);
     K.wallColor("#141316");
     K.rakeColors({ terrace: ["#1b1917", "#161412"], nosing: C.amber, landing: "#1f1c1a" });
@@ -283,12 +302,15 @@
 
   // The cart's bulbs blink by turns, every other one; a tap on the picture says what is showing.
   const animate = (nodes) => {
-    const bulbs = [nodes.bulbs0, nodes.bulbs1];
+    const bulbs = [nodes.bulbs0, nodes.bulbs1], door = RM.bulbsOf(nodes);
     return {
       update(dt, t) {
         const on = Math.floor(t * 2.5) & 1;
         bulbs[0].glow = on ? 1 : 0.25;
         bulbs[1].glow = on ? 0.25 : 1;
+        // The door's marquee chases round it, every fourth bulb lit.
+        const lead = Math.floor(t * 6);
+        for (let i = 0; i < door.length; i++) door[i].glow = (i + lead) % 4 === 0 ? 1 : 0.3;
       },
       tap(owner, hud) {
         if (owner.kind !== "live" || owner.slot.spec.id !== "film") return false;
@@ -297,5 +319,5 @@
       }
     };
   };
-  BL.timechainRoomKinds.theater = { plan, animate };
+  BL.timechainRoomKinds.theater = { plan, animate, door };
 })();

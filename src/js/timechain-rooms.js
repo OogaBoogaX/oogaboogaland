@@ -1,5 +1,5 @@
 // The Timechain Sphere's ten rooms, each its own kind of place, numbered 0–9 on the keypad: 1 the Conference Room, 2
-// the Low Time Preference Temple, 3 the Block Party, 4 the Fireside Lounge, 5 Proof of Work-out, 6 the Observatory, 7
+// Satoshi's Temple, 3 the Block Party, 4 the Fireside Lounge, 5 Proof of Work-out, 6 the Observatory, 7
 // the Mining Museum, 8 the Lecture Hall, 9 the Movie Theater and 0 the Planetarium. A room is an integer `id` 0–9,
 // validated wherever one comes in (`parse`): the keypad, a route, a history entry, a stored visit.
 // Signed in, a room's zone (`sphere-<id>`, never a dotted name, which would fold every room into one voice group)
@@ -28,7 +28,7 @@
   const KINDS = [
     { kind: "planetarium", name: "Planetarium", tag: "Tonight's sky over London", R: 8 },
     { kind: "conference", name: "Conference Room", tag: "Live block and mining charts round the dome", R: 10.5 },
-    { kind: "temple", name: "Low Time Preference Temple", tag: "A meditation temple; the bell rings every block", R: 15 },
+    { kind: "temple", name: "Satoshi's Temple", tag: "A meditation temple; the bell rings every block", R: 15 },
     { kind: "party", name: "Block Party", tag: "The bass drops on every block", R: 13.5 },
     { kind: "fireside", name: "Fireside Lounge", tag: "A small room for a fireside chat", R: 9 },
     { kind: "workout", name: "Proof of Work-out", tag: "Pedal to find a fake block", R: 12 },
@@ -161,16 +161,19 @@
   };
   // How far out a body may stand with its feet at `y` and stay inside the sphere from its feet to its head.
   const wallAt = (L, y) => Math.min(radiusAt(L, y + 0.05), radiusAt(L, y + 1.9)) - L.wallGap;
+  // How high a walker steps up onto a solid's top without a jump: a step, a low plinth, a cushion, a treadmill's deck.
+  const STEP_UP = 0.45;
   // Whether a body of `radius` with its feet at `feet` may stand at (x, z): inside the sphere and short of the closed
-  // door's bay, clear of `solids` (circles and boxes, a box turned by `ry`; one with a `top` only below it, one with a
-  // `below` only for a head that reaches it). `door` opens the doorway and its vestibule to the guided walk alone.
+  // door's bay, clear of `solids` (circles and boxes, a box turned by `ry`; one with a `top` only below it, less a step,
+  // so a body steps up onto it; one with a `below` only for a head that reaches it). `door` opens the doorway and its
+  // vestibule to the guided walk alone.
   const clearAt = (L, x, z, radius = BODY, door = false, feet = 0, solids = null) => {
     const r = radius;
     // Reaching back a body's width, so it overlaps the room's own edge below whatever the walker's size.
     if (door && Math.abs(x) < DOOR.halfW - r && z >= L.doorZ - 0.6 - r && z <= L.doorZ + DOOR.vestibule - r) return true;
     if (Math.hypot(x, z) > wallAt(L, feet) - r || z > L.doorZ - 0.12 - r) return false;
     if (solids) for (const o of solids) {
-      if (o.top !== undefined && feet >= o.top - 0.02) continue;
+      if (o.top !== undefined && feet >= o.top - STEP_UP) continue;
       if (o.below !== undefined && feet + 1.8 <= o.below) continue;
       if (o.r !== undefined) { if (Math.hypot(x - o.x, z - o.z) < o.r + r) return false; }
       else {
@@ -195,5 +198,5 @@
     const D = Math.max(0.3, Math.min(width / (2 * h), (eye - floor) / v, (ceiling - eye) / v, reach));
     return { D, w: 2 * D * h, h: 2 * D * v };
   };
-  BL.timechainRooms = { COUNT, ROOMS, LOCKABLE, EXTERIOR_ZONE, DOOR, BODY, DEG, TAU, parse, get, layout, radiusAt, onSphere, edgeY, edgeEl, floorAt, wallAt, clearAt, ceilingAt, fill };
+  BL.timechainRooms = { COUNT, ROOMS, LOCKABLE, EXTERIOR_ZONE, DOOR, BODY, STEP_UP, DEG, TAU, parse, get, layout, radiusAt, onSphere, edgeY, edgeEl, floorAt, wallAt, clearAt, ceilingAt, fill };
 })();

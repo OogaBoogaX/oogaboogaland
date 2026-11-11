@@ -65,6 +65,9 @@
     const g = {
       state: "idle", selection: NONE, room: null, mode: null, prep: 0, stage: null, prepared: null, picture: null, t: 0, ask: 0,
       cycle: null, exp: 0, starting: false, dir: null, open: 0, want: 0, remoteUntil: 0, hintAt: -Infinity, jetpack: null, exit: null, failures: 0, login: null,
+      // The view and mode (`pilot.viewState`) the visitor walked up to the keypad in, which the room gives back once its
+      // guided arrival is done, and the room's own on the way out, which the island gives back on the bridge.
+      view: null,
       // The view: null (the pilot's own), "eyes" (gliding into and held at the Ooga's eyes from engagement until the
       // crossing hands over, and coming back out) or "back" (gliding back to the pilot's, once free). `glide` runs 0
       // to 1 from the pose held in `from`; `pitch` is the eye's, easing toward `pitchTo`.
@@ -210,6 +213,7 @@
     const engage = () => {
       if (g.state !== "idle" || !crew.player) return false;
       g.state = "keypad";
+      g.view = pilot.viewState();
       g.selection = preselect;
       preselect = NONE;
       g.pass = NONE; g.noteLeft = 0;
@@ -442,7 +446,7 @@
     const handOff = () => {
       const cave = crew.player, p = camera.position, t = camera.target, dx = t.x - p.x, dz = t.z - p.z;
       const entry = { x: localX(p.x, p.z), dz: localZ(p.x, p.z) - g.handZ, heading: wrap(Math.atan2(dx, dz) - IN_HEADING), pitch: Math.atan2(t.y - p.y, Math.hypot(dx, dz)) };
-      world.sphereVisit = { room: g.room.id, mode: g.mode, login: g.login, character: cave.traits.name, guided: true, jetpack: g.jetpack, prepared: g.prepared, entry };
+      world.sphereVisit = { room: g.room.id, mode: g.mode, login: g.login, character: cave.traits.name, guided: true, jetpack: g.jetpack, prepared: g.prepared, entry, view: g.view };
       world.sphereKeep = h.keep();
       world.pilot = cave.traits.name;
       if (go("timechain", String(g.room.id), true)) { g.prepared = null; g.state = "gone"; g.t = 0; }
@@ -461,6 +465,7 @@
       g.room = ROOMS.get(exit.room);
       g.mode = exit.mode;
       g.jetpack = exit.jetpack || null;
+      g.view = exit.view || null;
       const pose = exit.pose;
       if (pose) {
         const heading = OUT_HEADING + pose.heading, ahead = eyeAhead(cave, pose.pitch), lx = pose.x - Math.sin(pose.heading) * ahead, lz = OUT_Z + pose.dz - Math.cos(pose.heading) * ahead;
@@ -500,6 +505,9 @@
       // The pilot's own camera resumes behind the Ooga where it now stands on the bridge, not where it was left inside
       // the doors when the island opened.
       if (cave) pilot.navigate({ position: { x: cave.root.position.x, y: cave.root.position.y - cave.baseY, z: cave.root.position.z }, yaw: cave.root.rotation.y + Math.PI, pitch: 0.12, dist: 4.5 });
+      // In the view and mode the room was left in.
+      if (cave && g.view) pilot.adopt(g.view);
+      g.view = null;
       if (g.jetpack && g.jetpack.equipped && cave && h.equipJetpack(cave)) cave.jetFuel = g.jetpack.fuel;
       else if (g.jetpack && cave) cave.jetFuel = g.jetpack.fuel;
       g.jetpack = null;

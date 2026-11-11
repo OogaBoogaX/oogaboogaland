@@ -92,7 +92,27 @@
     ctx.fillText(b ? `${CH.format.group(b.height)} · ${CH.format.ago(now - b.time * 1000)}` : reader.status("recent"), cx, 720);
   };
 
+  // ---------- its door ----------
+  // A boardroom's: walnut leaves, each with a tall frosted light by the seam and a brushed-steel pull over a steel kick
+  // plate, in a walnut frame with steel strips standing either side.
+  const door = {
+    casing: "#1b1d22", frame: "#5a3d26", header: "#14161a", word: C.amber, strip: C.amber, chain: false,
+    leaf: "#4a3220", seam: "#20140c", plate: "#2a2c31", face: C.amber, mark: "#14161a",
+    leafFace(side, H) {
+      const at = (d) => H.inner + side * d;
+      for (let y = 0.45; y < 3.1; y += 0.42) H.rect(-0.75, y, 0.75, y + 0.008, "#3d2919");
+      H.rect(at(0.14), 0.55, at(0.34), 2.95, "#b7cdd6", 0.3, 1);
+      H.rect(at(0.05), 0.95, at(0.085), 1.95, "#c9ccd2", 0.25, 2);
+      H.rect(-0.75, 0.04, 0.75, 0.3, "#8e9298", 0.1, 1);
+    }
+  };
+  const doorTrim = (K, L) => {
+    const d = RM.doorway(L);
+    for (const sx of [-1, 1]) K.box(0.05, d.head, 0.04, "#9ea2a8", sx * (d.W + d.F + 0.06), d.head / 2, d.Z - 0.03, { emissive: 0.1 });
+  };
+
   const plan = (K, L) => {
+    doorTrim(K, L);
     K.wallColor("#1c1a17");
     K.render({ sky: [0.5, 0.46, 0.42], ground: [0.24, 0.2, 0.17], ambientFloor: 0.42, bloomStrength: 0.6 });
     // The dome: dark amber, faintly panelled, under its pictures.
@@ -148,5 +168,5 @@
     K.light(dx * 0.8, 3, 0, 6, 0.6, 0.42, 0.22);
     K.light(0.45 * L.R, 3, L.doorZ - 2, 6, 0.6, 0.42, 0.22);
   };
-  BL.timechainRoomKinds.conference = { plan, TABLE, SEATS };
+  BL.timechainRoomKinds.conference = { plan, door, TABLE, SEATS };
 })();

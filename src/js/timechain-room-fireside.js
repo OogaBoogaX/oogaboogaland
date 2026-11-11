@@ -167,7 +167,36 @@
     ctx.fillStyle = "#2a1a0e"; ctx.fillRect(0, 0, 3, H); ctx.fillRect(W - 3, 0, 3, H);
   };
 
+  // ---------- its door ----------
+  // A cabin's: plank leaves with black iron strap hinges and a ring pull, in a frame of round logs on fieldstone, and
+  // an iron lantern glowing on its bracket beside it.
+  const door = {
+    casing: "#5e5850", frame: "#4a2e1a", header: "#3a2414", word: "#ff9a3c", strip: null, chain: false,
+    leaf: "#6b4426", seam: "#2a180c", plate: "#3a2414", face: "#ff9a3c", mark: "#2a180c",
+    leafFace(side, H) {
+      for (let k = 0; k < 5; k++) { const x0 = -0.75 + k * 0.3; H.rect(x0 + 0.012, 0, x0 + 0.288, H.D, k & 1 ? "#714829" : "#65401f"); }
+      for (const y of [0.55, 2.65]) {
+        H.rect(H.outer, y - 0.045, H.outer - side * 1.37, y + 0.045, "#1c1c1e", 0.05, 1);
+        for (let d = 0.08; d < 1.3; d += 0.22) H.diamond(H.outer - side * d, y, 0.016, "#3a3a3e", 0, 2);
+      }
+      H.ring(H.inner + side * 0.18, 1.2, 0.09, 0.02, "#1c1c1e", 0.05, 12, 2);
+    }
+  };
+  const doorTrim = (K, L) => {
+    const d = RM.doorway(L), x = d.W + d.F + 0.12, z = d.Z - 0.16;
+    for (const sx of [-1, 1]) K.cyl(0.15, 0.17, d.head + 0.15, "#5a381e", sx * x, (d.head + 0.15) / 2, z, { seg: 10 });
+    K.cyl(0.16, 0.16, 2 * x + 0.5, "#5a381e", 0, d.head + 0.2, z, { rz: Math.PI / 2, seg: 10 });
+    // The lantern on its bracket, right of the door (the Exit button is on the left).
+    K.box(0.32, 0.04, 0.04, C.iron, 2.25, 2.45, d.Z - 0.18);
+    K.box(0.22, 0.04, 0.22, C.iron, 2.4, 2.45, d.Z - 0.3);
+    K.cyl(0, 0.1, 0.08, C.iron, 2.4, 2.51, d.Z - 0.3, { seg: 4 });
+    K.box(0.2, 0.03, 0.2, C.iron, 2.4, 2.16, d.Z - 0.3);
+    for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) K.box(0.02, 0.28, 0.02, C.iron, 2.4 + dx * 0.09, 2.3, d.Z - 0.3 + dz * 0.09);
+    K.box(0.13, 0.2, 0.13, "#ffb04a", 2.4, 2.29, d.Z - 0.3, { emissive: 0.95, glow: true });
+  };
+
   const plan = (K, L) => {
+    doorTrim(K, L);
     const r0 = L.r0, D = RM.domeMap(L), e0 = ROOMS.edgeEl(L, 0) / DEG;
     K.wallColor("#2a1c12");
     K.render({ sky: [0.22, 0.24, 0.34], ground: [0.16, 0.1, 0.07], direct: [0.5, 0.42, 0.36], directStrength: 0.12, ambientFloor: 0.26, bloomStrength: 0.75 });
@@ -338,5 +367,5 @@
       }
     };
   };
-  BL.timechainRoomKinds.fireside = { plan, animate };
+  BL.timechainRoomKinds.fireside = { plan, animate, door };
 })();

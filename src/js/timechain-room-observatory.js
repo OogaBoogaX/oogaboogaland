@@ -155,7 +155,34 @@
     ctx.fillText("RA 05h 35m", W / 2, H * 0.36); ctx.fillText("DEC −05° 23′", W / 2, H * 0.66);
   };
 
+  // ---------- its door ----------
+  // An observatory's steel bulkhead: riveted plates, a porthole glowing night-red, a lever handle, in a heavy riveted
+  // frame under a red night lamp.
+  const door = {
+    casing: "#24282e", frame: "#4a505a", header: C.black, word: "#ff3b30", strip: C.red, chain: false,
+    leaf: "#5c626b", seam: "#1c1e22", plate: C.black, face: C.red, mark: C.black,
+    leafFace(side, H) {
+      for (const y of [0.8, 1.6, 2.4]) {
+        H.rect(-0.75, y - 0.01, 0.75, y + 0.01, "#3a3f47", 0, 1);
+        for (let x = -0.66; x < 0.7; x += 0.16) H.diamond(x, y + 0.05, 0.012, "#8a909a", 0.1, 2);
+      }
+      for (let y = 0.15; y < 3.1; y += 0.2) { H.diamond(-0.68, y, 0.012, "#8a909a", 0.1, 2); H.diamond(0.68, y, 0.012, "#8a909a", 0.1, 2); }
+      H.disc(0, 2.0, 0.2, "#3a0a08", 0.5, 16, 1);
+      H.ring(0, 2.0, 0.24, 0.05, "#2a2e35", 0.05, 16, 2);
+      H.rect(H.inner + side * 0.08, 1.12, H.inner + side * 0.32, 1.18, "#c9ccd2", 0.15, 2);
+    }
+  };
+  const doorTrim = (K, L) => {
+    const d = RM.doorway(L), x = d.W + d.F + 0.08, z = d.Z - 0.15;
+    for (const sx of [-1, 1]) {
+      K.box(0.16, d.head, 0.08, C.frame, sx * x, d.head / 2, z);
+      for (let y = 0.25; y < d.head; y += 0.32) K.ball(0.022, C.steel, sx * x, y, z - 0.045, { seg: 6 });
+    }
+    K.cyl(0.09, 0.11, 0.12, C.red, 0, d.head + 0.1, d.Z - 0.12, { emissive: 1, glow: true, seg: 12 });
+  };
+
   const plan = (K, L) => {
+    doorTrim(K, L);
     const e0 = ROOMS.edgeEl(L, 0) / DEG, top = crownEl(L), SKY = BL.timechainRoomKinds.planetarium.sky;
     K.wallColor("#1b1d22");
     K.render({ sky: [0.26, 0.27, 0.33], ground: [0.1, 0.08, 0.08], ambientFloor: 0.32, bloomStrength: 0.7 });
@@ -335,5 +362,5 @@
       }
     };
   };
-  BL.timechainRoomKinds.observatory = { plan, animate, steps: (L) => [() => steelwork(L.id), () => perSky(L.id)] };
+  BL.timechainRoomKinds.observatory = { plan, animate, door, steps: (L) => [() => steelwork(L.id), () => perSky(L.id)] };
 })();
