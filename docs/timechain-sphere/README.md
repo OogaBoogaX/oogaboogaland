@@ -10,7 +10,7 @@ Frontend, implemented:
 |---|---|
 | Ten rooms, `roomId` 0–9 validated at every boundary, each its own kind and size: a true sphere whose dome over the screen's lower edge is all screen, with the doorway, arrival, Exit button and (in the Conference Room alone) the lock at human size, and the raked halls' rows and aisles | `src/js/timechain-rooms.js` |
 | The shell every room shares (the sphere's wall and its screen, one canvas wrapped round the dome; the floor's canvas or a raked hall's terraces; the doors under their EXIT header with an amber chain across them, the Exit button, the lock, the vestibule) and the kit each room builds with | `src/js/timechain-room-models.js` |
-| The ten rooms, one file each: 0 the Planetarium, 1 the Conference Room (the live charts round the dome, the latest blocks round its base, the next block at the crown, the table for eight and the holdings desk), 2 the Low Time Preference Temple (with the replica of Valentina Picozzi's Lugano Satoshi statue, made with her permission), 3 the Block Party, 4 the Fireside Lounge, 5 Proof of Work-out, 6 the Observatory, 7 the Mining Museum, 8 the Lecture Hall, 9 the Movie Theater | `src/js/timechain-room-<kind>.js` |
+| The ten rooms, one file each: 0 the Planetarium, 1 the Conference Room (the live charts round the dome, the latest blocks round its base, the next block at the crown, the table for eight and the holdings desk), 2 Satoshi's Temple (with the replica of Valentina Picozzi's Lugano Satoshi statue, made with her permission), 3 the Block Party, 4 the Fireside Lounge, 5 Proof of Work-out, 6 the Observatory, 7 the Mining Museum, 8 the Lecture Hall, 9 the Movie Theater | `src/js/timechain-room-<kind>.js` |
 | The room scene: first person, shoulder and orbit, no weapons or jetpack, guided first-person arrival and exit, shared presence (`sphere-<id>`) or a solo copy, a table to jump on and chairs to sit in, local ambience, complete disposal | `src/js/scene-timechain.js` (always loaded), `src/js/timechain-interior.js` (deferred) |
 | Block and mining data from mempool.space's public API: one in-flight request per dataset, backoff with Retry-After, hidden-tab pause, last good value kept as STALE, the 144-block window chained by parent hash, a page-wide cache shared by every room | `src/js/timechain-blocks.js` |
 | Native charts in the Timechain Blocks look, each naming its source, window and freshness; the six holdings readings at the desk | `src/js/timechain-charts.js` |
@@ -40,16 +40,16 @@ Byte-level exception: the portable single file (`oogaboogaland.html`) and the so
 |---|---|---|
 | 0 | Planetarium: tonight's sky over London from reclining seats round the star projector | 8 m |
 | 1 | Conference Room: the round table for eight under live block and mining charts; the one room that locks | 10.5 m |
-| 2 | Low Time Preference Temple: a meditation temple round the Satoshi statue | 15 m |
-| 3 | Block Party: an LED dance floor under a dome-wide light show | 13.5 m |
+| 2 | Satoshi's Temple: a meditation temple round the Satoshi statue at half as large again as life; its bell, gong, singing bowl and wind bells are heard, its koi fed, its trees shaken, its lanterns put out or lit | 15 m |
+| 3 | Block Party: a floor of LED panels in a hash grid that re-hashes on the beat, wall to wall under a dome-wide light show, a truss of laser projectors over a DJ booth you can walk behind (and change the channel) or jump over, and the music's spectrum on the booth's screen and an LED wall all round the room, EDM Sessions or SomaFM playing live and all of it on its beat | 13.5 m |
 | 4 | Fireside Lounge: sofas round a fire pit under the Milky Way | 9 m |
 | 5 | Proof of Work-out: exercise bikes facing a mountain sunrise | 12 m |
 | 6 | The Observatory: a telescope under a slit to the night sky | 12 m |
-| 7 | The Mining Museum: miners from Satoshi's CPU to today's ASICs under the hashrate's history | 15 m |
+| 7 | The Mining Museum: miners from Satoshi's CPU (one high-end 2009 desktop, as Sergio Demian Lerner's Patoshi research reads it) to today's ASICs under the hashrate's history, each opening up close in 3D with all its stats and sources (`model-viewer.js`) | 15 m |
 | 8 | Lecture Hall: raked rows facing a stage, a slide on the dome | 15 m |
 | 9 | Movie Theater: recliners on a steep rake under a dome that is all picture | 20 m |
 
-Each room is its own kind of place, built on one shell (`timechain-room-models.js`): the doorway, its bay and vestibule, the Exit button, the arrival and everything a body touches keep human size in every room. Each signed-in room has independent membership, voice and soundscape lifecycle. Only the active room is instantiated. The Conference Room alone has the lock.
+Each room is its own kind of place, built on one shell (`timechain-room-models.js`): the doorway, its bay and vestibule, the Exit button, the arrival and everything a body touches keep human size in every room, and each room dresses its door in its own style (shōji in the Temple, red velvet in the Movie Theater, a bulkhead in the Observatory, and so on). Walkers step up onto anything low and shoulder round the rest, as on the island. Each signed-in room has independent membership, voice and soundscape lifecycle. Only the active room is instantiated. The Conference Room alone has the lock.
 
 ## Spectators and the shared doorway
 
@@ -67,7 +67,7 @@ For exit, publish exterior zone `sphere` with a valid exterior pose behind the o
 
 Signed-out visitors get the same keypad, ten choices, rooms, camera rules and guided flow in a private local copy. The number chooses the template only. Two guests choosing 3, or a guest and a signed-in player choosing 3, never share occupancy.
 
-Show “Solo visit · not signed in”. Do not register guest rooms, poses, transit events, occupancy, persistent identifiers, remote actors or voice; do not request a microphone. No `sphere-guest` network zone. Guest door cycles are local and do not contend with the shared doorway. Public charts and local ambience still work after entry.
+The banner names the room under its title and nothing more; the way out is the wordless exit button left of the Ooga's face, in every room. Do not register guest rooms, poses, transit events, occupancy, persistent identifiers, remote actors or voice; do not request a microphone. No `sphere-guest` network zone. Guest door cycles are local and do not contend with the shared doorway. Public charts and local ambience still work after entry.
 
 Wait for account resolution before choosing shared versus solo mode, then keep the choice for the visit. Pending authentication is not confirmed sign-out. Late authentication/reconnect cannot publish a solo room. Sign-in returns to the exterior keypad for deliberate shared entry. Logout or session revocation inside immediately removes shared presence/voice and returns safely outside.
 
