@@ -1360,7 +1360,9 @@
       figure.scale.x = figure.scale.z = size;
       figure.scale.y = size / 0.85;
       figure.position.x = seated ? -0.3 : 0.3;
-      figure.position.y = deck + figure.scale.y * passenger.traits.height * 5 / 16 * (seated ? 0.4 : 1);
+      // Standing on the deck from the hip the build stands it at; seated, its thighs tipped forward so the hip is
+      // about four tenths of that over the deck.
+      figure.position.y = deck + figure.scale.y * passenger.root.position.y * (seated ? 0.4 : 1);
       figure.position.z = -0.65;
       figure.rotation.y = seated ? -0.12 : 0.12;
       passenger.parts.club.visible = false;
