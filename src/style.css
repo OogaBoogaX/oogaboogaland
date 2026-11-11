@@ -5740,6 +5740,7 @@ body.tess-touring #joy-look {
 }
 
 .board-caption-above .board-screen { margin-top: 0; }
+.board-screen.board-pickable { cursor: pointer; }
 .board-caption-above .board-dots { margin: 0; }
 
 .board-modal.board-carousel {

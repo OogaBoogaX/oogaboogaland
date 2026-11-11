@@ -1,5 +1,5 @@
 // The Worker in front of Ooga Booga Land: the built page from static assets, GitHub sign-in under
-// /auth/*, the account API under /api/*, the totems' merge summaries under /api/totems/*, voice
+// /auth/*, the account API under /api/*, the totems' merge summaries under /api/totems/* and Repo Island's at /api/repo-totems, voice
 // signalling under /api/voice/*, Tess's answers at /api/tess, /room, the island's live socket, /game/*, the sockets
 // of the games the Worker hosts itself (game-host.js), and /donations/*, passed on to bananapayserver over the
 // DONATIONS binding. Only those paths run this code (`run_worker_first` in wrangler.<env>.jsonc); every other path is
@@ -17,6 +17,7 @@ import { allowed, fromSite, getSessionFromRequest, readBody, text } from "./http
 import { handlePoker } from "./poker.js";
 import { handleTess, pruneTess } from "./tess.js";
 import { handleTotems } from "./totems.js";
+import { handleRepoTotems } from "./repo-totems.js";
 import { gameName } from "./games.js";
 
 export { Room } from "./room.js";
@@ -87,6 +88,7 @@ export default {
     if (url.pathname.startsWith("/poker/")) return handlePoker(request, env);
     if (url.pathname.startsWith("/auth/")) return handleAuth(request, env, url);
     if (url.pathname.startsWith("/api/totems/")) return handleTotems(request, url, env, ctx);
+    if (url.pathname === "/api/repo-totems") return handleRepoTotems(request, url, env, ctx);
     if (url.pathname.startsWith("/api/voice/")) return handleVoice(request, env, url);
     if (url.pathname === "/api/tess") return handleTess(request, env);
     if (url.pathname.startsWith("/api/highscores/")) return handleHighscores(request, env, ctx);
