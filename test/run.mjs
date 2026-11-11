@@ -19786,13 +19786,23 @@ const hubCliffLedges = { name: "hub cliff ledges", why: "rule: both cliff paths 
         }
         if (mounted && !a.ladder.plane) break;
       }
-      key("w", false); const top = feet();
-      B.pilot.navigate({ position: { x: l.x - l.nx * 0.2, y: l.top, z: l.z - l.nz * 0.2 }, yaw: yaw + Math.PI, pitch: 0, dist: 6 });
+      key("w", false); const top = feet(), landing = { x: a.root.position.x, y: top, z: a.root.position.z };
+      const landed = Math.hypot(landing.x - l.x + l.nx * l.inset, landing.z - l.z + l.nz * l.inset) < 1e-6;
+      // Turn in place at the landing actually reached by climbing. Walking must
+      // cover the full inset to the lip; never place the fixture beside the rope.
+      B.advance(0.4, 1 / 60);
+      const landingHeld = Math.hypot(a.root.position.x - landing.x, a.root.position.z - landing.z) < 1e-6 && Math.abs(feet() - top) < 1e-6;
+      B.pilot.orbit.yaw = B.pilot.orbit.tYaw = yaw + Math.PI;
       B.advance(0.1, 1 / 60); key("w", true);
-      let descended = false;
-      for (let frame = 0; frame < 1800; frame++) { B.advance(1 / 60, 1 / 60); descended ||= !!a.ladder.plane; if (descended && !a.ladder.plane) break; }
+      let descended = false, approach = 0;
+      for (let frame = 0; frame < 1800; frame++) {
+        B.advance(1 / 60, 1 / 60);
+        if (!descended && a.ladder.plane) approach = Math.hypot(a.root.position.x - landing.x, a.root.position.z - landing.z);
+        descended ||= !!a.ladder.plane;
+        if (descended && !a.ladder.plane) break;
+      }
       key("w", false);
-      rows.push({ kind: l.kind, mounted, paused, hold, top, expectedTop: l.top, descended, bottom: feet(), expectedBottom: l.bottom, active: !!a.ladder.plane });
+      rows.push({ kind: l.kind, mounted, paused, hold, top, expectedTop: l.top, landed, landingHeld, approach, descended, bottom: feet(), expectedBottom: l.bottom, active: !!a.ladder.plane });
     }
     const l = routes.find(r => r.kind === "ladder");
     l.pathAt(l.bottom, anchor);
@@ -19803,14 +19813,25 @@ const hubCliffLedges = { name: "hub cliff ledges", why: "rule: both cliff paths 
     B.pilot.navigate({ position: { x: anchor.x + l.nx * a.bodyRadius * 0.5, y: l.bottom, z: anchor.z + l.nz * a.bodyRadius * 0.5 }, yaw: Math.atan2(l.nx, l.nz), pitch: 0, dist: 6 });
     key("w", true); B.advance(0.4, 1 / 60); key("w", false); const jetAttached = !!a.ladder.plane && !!a.jet;
     key("Space", true); B.advance(1 / 60, 1 / 60); key("Space", false); const jetReleased = !a.ladder.plane && a.hopV > 0 && !a.jet.thrust;
-    H.debug.setGameMode(true); key("w", true); B.advance(0.2, 1 / 60); key("w", false);
-    const disabled = !a.ladder.plane; H.debug.setGameMode(false);
-    return { rows, attached, released, jetAttached, jetReleased, disabled };
+    const bottomLanding = { position: { x: anchor.x + l.nx * a.bodyRadius * 0.5, y: l.bottom, z: anchor.z + l.nz * a.bodyRadius * 0.5 }, yaw: Math.atan2(l.nx, l.nz), pitch: 0, dist: 6 };
+    B.pilot.navigate(bottomLanding);
+    key("w", true); B.advance(0.4, 1 / 60); key("w", false); const modeAttached = !!a.ladder.plane;
+    H.debug.setGameMode(true); B.advance(1 / 60, 1 / 60); const modeDetached = !a.ladder.plane;
+    // Navigation gives a fresh, grounded attempt with zero cooldown. Otherwise
+    // the release cooldown alone could make the disabled-mount check pass.
+    B.pilot.navigate(bottomLanding); const mountReady = a.ladder.cooldown === 0;
+    key("w", true); let mountedInMode = false;
+    for (let frame = 0; frame < 24; frame++) { B.advance(1 / 60, 1 / 60); mountedInMode ||= !!a.ladder.plane; }
+    key("w", false); const modeBlocked = mountReady && !mountedInMode && a.ladder.cooldown === 0;
+    H.debug.setGameMode(false); B.pilot.navigate(bottomLanding);
+    key("w", true); B.advance(0.4, 1 / 60); key("w", false); const reenabled = !!a.ladder.plane;
+    key("Space", true); B.advance(1 / 60, 1 / 60); key("Space", false);
+    return { rows, attached, released, jetAttached, jetReleased, modeAttached, modeDetached, modeBlocked, reenabled };
   })()`);
   record("hub cliff ledges: rappel ropes and lower ladders climb and descend, hold at rest, release on Space and respect GAME MODE",
     r.rows.filter(v => v.kind === "rope").length >= 2 && r.rows.filter(v => v.kind === "ladder").length === 3
-      && r.rows.every(v => v.mounted && v.paused && v.hold < 1e-6 && Math.abs(v.top - v.expectedTop) < 1e-6 && v.descended && Math.abs(v.bottom - v.expectedBottom) < 1e-6 && !v.active)
-      && r.attached && r.released && r.jetAttached && r.jetReleased && r.disabled, JSON.stringify(r));
+      && r.rows.every(v => v.mounted && v.paused && v.hold < 1e-6 && Math.abs(v.top - v.expectedTop) < 1e-6 && v.landed && v.landingHeld && v.approach > 0.25 && v.descended && Math.abs(v.bottom - v.expectedBottom) < 1e-6 && !v.active)
+      && r.attached && r.released && r.jetAttached && r.jetReleased && r.modeAttached && r.modeDetached && r.modeBlocked && r.reenabled, JSON.stringify(r));
 } };
 scene("hub", { label: "cliff ledges", query: "solo=1&character=portlandhodl&pos=0", steps: [hubCliffLedges] });
 scene("hub", { label: "distant effects", query: "pos=0", steps: [hubDistantEffects] });
