@@ -48,11 +48,12 @@
   };
   const factory = options => {
     check(options);
-    const { slot, mouth: m, group, opening, solids, island } = options;
+    const { slot, mouth: m, group, opening, solids, island, rendererKind = "webgl2" } = options;
     if (typeof island?.surfaceAt !== "function") throw Error("Hub factory terrain provider required");
     const { createNode, addChild } = BL.scene, models = BL.factoryModels;
     const tunnel = models.hubTunnel();
-    addChild(group, createNode({ geometry: tunnel.timber }), createNode({ geometry: tunnel.glow, sightHidden: true }));
+    addChild(group, createNode({ geometry: tunnel.timber }), createNode({ geometry: tunnel.floor, sightHidden: true, depthBias: models.FLOOR_BIAS }), createNode({ geometry: tunnel.boards, sightHidden: true }), createNode({ geometry: tunnel.glow, sightHidden: true }));
+    if (rendererKind !== "webgl2") addChild(group, createNode({ geometry: tunnel.backdrop, sightHidden: true }));
     const tube = models.ROOF_TUBE, sr = Math.sin(m.ry), cr = Math.cos(m.ry);
     const tx = m.x + cr * tube.x + sr * tube.z, tz = m.z - sr * tube.x + cr * tube.z;
     const base = island.surfaceAt(tx, tz) - 0.35;

@@ -10,7 +10,7 @@ test('recovered outdoor walkers retain live core collision while specialized pos
       if (radius === .34) coreQueries++;
       return blocker !== 'terrain' && !(blocker === 'core' && radius === .34);
     }, voxelSegmentClearAt: () => blocker !== 'sweep' },
-    solids: { segmentClear: () => blocker !== 'prop' },
+    solids: { segmentClear: () => blocker !== 'prop', isActive: () => blocker === 'masonry' },
     npcLandSegmentClear: () => blocker !== 'lake',
     clankerSupport: { clankerGroundPlaneAt: no, clankerRectangleAt: (entry, out) =>
       Object.assign(out, { centerForward: 0, halfForward: .5, halfSide: .5 }), clankerTerraceAt: no },
@@ -30,8 +30,19 @@ test('recovered outdoor walkers retain live core collision while specialized pos
   assert.equal(clearance.npcPlacement(entry), true);
   assert.equal(posed, 0);
   assert.ok(coreQueries > 0, 'stationary recovery must query the forward trunk core');
-  for (blocker of ['terrain', 'core', 'sweep', 'prop', 'lake', 'sealed', 'gate'])
+  for (blocker of ['terrain', 'core', 'sweep', 'lake', 'sealed', 'gate'])
     assert.equal(clearance.npcPlacement(entry), false, `${blocker} still blocks recovery`);
+  blocker = 'prop';
+  assert.equal(clearance.npcPlacement(entry), true, 'passive NPCs ignore props, matching live rock movement');
+  const box = new Float64Array(24);
+  for (let i = 0; i < 8; i++) {
+    box[i * 3] = i & 1 ? 1 : -1;
+    box[i * 3 + 1] = i & 2 ? 2 : 0;
+    box[i * 3 + 2] = i & 4 ? 1 : -1;
+  }
+  geometry.climbMasonry.push({ node: {}, minX: -1, maxX: 1, minY: 0, maxY: 2, minZ: -1, maxZ: 1, boxes: [box] });
+  blocker = 'masonry';
+  assert.equal(clearance.npcPlacement(entry), false, 'real cave masonry still blocks the passive core');
   blocker = '';
   for (const [object, key, value] of [[entry, 'biped', true], [entry, 'lounge', 'sit'],
     [entry.motion, 'lab', true], [entry.motion, 'office', true], [entry.climb, 'active', true],

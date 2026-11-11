@@ -25,7 +25,7 @@ test("passive Oogas bypass peer scans and shoulder poses while retaining scenery
     + section('snapshotTraffic', 'waitingFor') + section('shoulderClear', 'actorClear')
     + section('poseShoulder', 'resetWalkerRoute')
     + '\n({ shoulderClear, poseShoulder, walkerClear, snapshotTraffic });', {
-    crewList, ctx: { npcFixedPaths: true }, shoulderNeighbor: forbidden, outsideClear: forbidden,
+    crewList, ctx: { npcFixedPaths: true }, fixedTrip: cave => cave.nonInteractive, shoulderNeighbor: forbidden, outsideClear: forbidden,
     damp: forbidden, npcWalkable: () => { terrainChecks++; return scenery; },
     groundAt: () => { floorChecks++; return 0; }, STEP: .5,
   });
@@ -73,7 +73,8 @@ test("shared walker packaging matches original decisions across authored work tr
   assert.ok(states[1].events.shots > 0, "actual movement reaches a station; weapon effects remain fixture-owned");
   const passive = f.initial(); passive.actor.nonInteractive = true; passive.actor.pathing = null;
   const hooks = f.runtime(passive).hooks;
-  hooks.ctx.npcFixedPaths = true; hooks.walkerClear = () => false;
+  hooks.ctx.npcFixedPaths = true; hooks.ctx.npcExecution = {};
+  hooks.fixedTrip = cave => cave.nonInteractive; hooks.walkerClear = () => false;
   const fixed = createNpcWalker(hooks), before = { ...passive.actor.root.position };
   for (let i = 0; i < 20; i++) fixed.recoverWalker(passive.actor, 0, 4, .1);
   assert.equal(passive.actor.avoidance.navigation.mode, 0, 'fixed paths never launch dynamic searches');

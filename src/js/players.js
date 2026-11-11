@@ -2,25 +2,30 @@
 // the zone they are in (zone-map.js), the visitor's own group first with their own row at its head, then the other
 // groups by heading and everyone in a group by name. A row keeps the roster's marks (the online dot, the host's dot,
 // the voice mark, which mutes as it does there), a crosshair that turns the camera (`BL.pilot.turnToward`) and, for
-// others in the visitor's own zone, how many metres away they stand, kept up to date without moving any row.
+// others standing in the visitor's own coordinates (the whole main world, `BL.voiceBlend.sameFrame`), how many metres away they stand, kept up to date without moving any row.
 // Where people stand comes from net.js: a player's position counts in their zone only once they have moved there,
 // and one who let go of their Ooga keeps their last, shown in red as their last known location. The visitor's own is
 // their Ooga's last reported (`net.state.self`), kept after they let go; the visitor's row shows no distance.
-// The crosshair turns toward a player in the visitor's zone, or their last known spot; toward another zone, at the
+// The crosshair turns toward a player in those coordinates, or their last known spot; toward anywhere else, at the
 // door the route there takes first, as the scene the visitor is in names it (`setDoors`; the island's for now). It is
 // greyed out, saying why, where there is no spot or no door. Nothing moves but the camera. A click checks again that
 // the player is still in the room and where the row put them and that the visitor has not changed zone; if anything
 // changed it does nothing, and the next event redraws the rows.
 // Cost: rows are placed only when someone joins, leaves or changes zone, body or name, and only while the panel shows;
 // distances and crosshairs are rewritten as positions arrive (`subscribeMoves`, a few times a second at most), and only
-// what changed. No timers. An Ooga thump (thump.js) shows a mallet beside its thumper's voice mark for a moment (`pulse`): every
-// row holds that mark's cell from the start, shown and hidden by visibility, so it never moves a name or a control, and its
-// animation's end hides it again; `clearPulses` hides them all at once. Exports setDoors, pulse, clearPulses and stats.
+// what changed. No timers. Exports setDoors and stats.
 // The tab always holds the visitor's hearing range (#380, `BL.voice.setRadius`), ready before joining: the slider's last
-// stop is no limit, and a distance at or past the range is dimmed, since that voice is muted for them. A voice in
-// another place of the group, which shows no distance, is silenced by a range without a mark here. The slider is offered
-// before any audio is active; Web Audio supplies quieting and boost once the listener joins.
+// stop is no limit, and a distance at or past the range is dimmed, since that voice is muted for them. The voice mark of
+// anyone this visitor cannot hear where they stand, in another zone or past the range (`BL.voice.inEarshot`), fades and
+// never shows them speaking, kept up as the slider moves. The slider is offered before any audio is active; Web Audio
+// supplies quieting and boost once the listener joins.
+// A voice link (`net.voiceLink`, `net.toggleVoiceLink`): the link on another player's row asks them for one, in any
+// zone. Pale with nothing asked, pulsing amber while this visitor's own ask waits, green once both have asked; the room
+// never tells the other player of an ask, so their link stays pale until they ask too. A click toggles this visitor's
+// ask. L (director.js, `net.linkEveryone`) links everyone waiting on them, or with nobody waiting unlinks everyone.
 // Hearing range and join-reading live together under the panel's Advanced settings disclosure.
+// The persistent slot (reactions.js, `rec.hand` and `net.state.hand`) shows in its own column after the player's name:
+// `handEmoji`, or the raised hand in their skin tone. Each transient reaction pops up there, over the persistent one.
 // Joins (#430, `net.subscribePresence`): a player who comes online while the visitor is in the room is named on screen
 // (`hud.toast`, read out by assistive technology) and counted on the tab until the visitor looks at it
 // (`sheet.watchViews`), unless they are in the panel as it happens. Those already there when the visitor (re)joins are
@@ -52,21 +57,27 @@
   crosshairPath.setAttribute("fill", "currentColor");
   crosshairPath.setAttribute("d", "M3 1h3v1H3zM3 7h3v1H3zM1 3h1v3H1zM7 3h1v3H7zM2 2h1v1H2zM6 2h1v1H6zM2 6h1v1H2zM6 6h1v1H6zM4 0h1v3H4zM4 6h1v3H4zM0 4h3v1H0zM6 4h3v1H6zM4 4h1v1H4z");
   crosshair.append(crosshairPath);
-  const lockIcon = document.createElementNS(SVG, "svg");
-  lockIcon.setAttribute("viewBox", "0 0 7 8");
-  lockIcon.setAttribute("aria-hidden", "true");
-  const lockPath = document.createElementNS(SVG, "path");
-  lockPath.setAttribute("fill", "currentColor");
-  lockPath.setAttribute("d", "M2 0h3v1H2zM1 1h1v2H1zM5 1h1v2H5zM0 3h7v5H0z");
-  lockIcon.append(lockPath);
+  // A voice link's mark, an 11x11 pixel chain of two links.
+  const linkIcon = document.createElementNS(SVG, "svg");
+  linkIcon.setAttribute("viewBox", "0 0 11 11");
+  linkIcon.setAttribute("aria-hidden", "true");
+  const linkPath = document.createElementNS(SVG, "path");
+  linkPath.setAttribute("fill", "currentColor");
+  linkPath.setAttribute("d", "M7 0h3v1H7zM6 1h1v1H6zM9 1h2v1H9zM5 2h1v1H5zM10 2h1v1h-1zM4 3h1v1H4zM10 3h1v1h-1zM4 4h1v1H4zM9 4h1v1H9zM2 5h1v1H2zM4 5h1v1H4zM8 5h1v1H8zM1 6h1v1H1zM4 6h4v1H4zM0 7h1v1H0zM0 8h1v1H0zM5 8h1v1H5zM0 9h2v1H0zM4 9h1v1H4zM1 10h3v1H1z");
+  linkIcon.append(linkPath);
+  const LINK_WORDS = {
+    none: (name) => `Link voices with ${name}: once they link back, you hear each other in any zone`,
+    asked: (name) => `Waiting for ${name} to link back: click to cancel`,
+    linked: (name) => `Voices linked with ${name}: click to unlink`,
+  };
 
   const rows = new Map(), groups = new Map(), order = [], door = { x: 0, y: 0, z: 0 };
   let serial = 0, pass = 0, showing = false, stale = true, doors = null, shownZone = "", shownRadius = -1;
   const makeRow = () => {
-    const li = document.createElement("li"), presence = document.createElement("span"), name = document.createElement("span");
+    const li = document.createElement("li"), dots = document.createElement("span"), presence = document.createElement("span"), name = document.createElement("span");
     const label = document.createElement("span"), host = document.createElement("span"), marks = document.createElement("span");
     const voice = document.createElement("button"), look = document.createElement("button"), distance = document.createElement("span");
-    const priv = document.createElement("button");
+    const link = document.createElement("button");
     const note = document.createElement("span"), id = `players-name-${++serial}`;
     const toggle = document.createElement("button"), volume = document.createElement("div"), volumeLabel = document.createElement("label");
     const slider = document.createElement("input"), value = document.createElement("output");
@@ -78,27 +89,30 @@
     slider.min = "0"; slider.max = String(V.VOLUME_MAX * 100); slider.step = "5"; slider.value = "100";
     value.className = "players-volume-value"; value.htmlFor = slider.id; value.textContent = "100%";
     volume.append(volumeLabel, slider, value);
+    dots.className = "roster-dots";
     presence.className = "roster-presence"; presence.dataset.online = "true"; presence.setAttribute("role", "img");
     presence.setAttribute("aria-label", "Online"); presence.title = "Online";
     name.className = "players-name"; label.className = "roster-label"; label.id = id;
     host.className = "roster-host"; host.hidden = true; host.setAttribute("role", "img");
     host.setAttribute("aria-label", "Host: runs the Oogas for everyone"); host.title = "Host: runs the Oogas for everyone";
-    toggle.append(label); name.append(toggle, host);
+    const mark = document.createElement("span"), hand = document.createElement("span"), react = document.createElement("span");
+    mark.className = "players-mark";
+    hand.className = "players-hand"; hand.hidden = true; hand.setAttribute("role", "img"); hand.setAttribute("aria-label", "Hand raised"); hand.title = "Hand raised";
+    react.className = "players-react"; react.hidden = true; react.setAttribute("aria-hidden", "true");
+    mark.append(hand, react);
+    toggle.append(label); name.append(toggle); dots.append(presence, host);
     marks.className = "roster-marks";
     voice.className = "roster-voice"; voice.type = "button"; voice.hidden = true; voice.setAttribute("aria-describedby", id); voice.append(BL.hud.voiceIcon.cloneNode(true));
-    // A private conversation (#188), offered where the room relays them; never on the visitor's own row.
-    priv.className = "players-private"; priv.type = "button"; priv.hidden = true; priv.append(lockIcon.cloneNode(true));
-    marks.append(voice, priv);
-    const thump = document.createElement("span");
-    thump.className = "players-thump"; thump.dataset.on = "false"; thump.setAttribute("aria-hidden", "true");
-    thump.append(BL.hud.malletIcon.cloneNode(true));
+    // A voice link, offered where the room keeps them; never on the visitor's own row.
+    link.className = "players-link"; link.type = "button"; link.hidden = true; link.append(linkIcon.cloneNode(true));
+    marks.append(voice, link);
     look.className = "players-look"; look.type = "button"; look.setAttribute("aria-describedby", id); look.append(crosshair.cloneNode(true));
     distance.className = "players-distance"; distance.append("");
     note.className = "players-note"; note.textContent = ", last known location"; note.hidden = true;
     distance.append(note);
-    li.append(presence, name, marks, thump, look, distance, volume);
-    return { li, label, toggle, volume, slider, value, host, voice, priv, privName: null, thump, pulse: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
-      aim: "", voiceLook: "", voiceLogin: "", voiceSelf: false, blocked: false, hostOn: false, metres: -1, lastKnown: false, far: false };
+    li.append(dots, name, mark, marks, look, distance, volume);
+    return { li, label, toggle, volume, slider, value, host, voice, link, linkShown: "", linkName: "", mark, hand, handShown: "", react, reacting: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
+      aim: "", voiceLook: "", voiceLogin: "", voiceSelf: false, blocked: false, hostOn: false, metres: -1, lastKnown: false, far: false, faded: false };
   };
   const selfRow = makeRow();
   selfRow.self = true;
@@ -130,26 +144,36 @@
   // The voice and host marks, as the roster paints them.
   const paintMarks = () => {
     if (!showing || stale) return;
-    const s = net.state, voice = BL.voice.stats;
-    paintMark(selfRow, voice.enabled ? voice.muted ? "muted" : voice.speaking ? "speaking" : "on" : "", "", voice.enabled, s.hostId === s.selfId);
+    const s = net.state, voice = BL.voice.stats, inVoice = voice.enabled || voice.returning;
+    paintMark(selfRow, inVoice ? voice.muted ? "muted" : voice.speaking ? "speaking" : "on" : "", "", inVoice, s.hostId === s.selfId, s.hand ? (s.handEmoji || BL.reactionPolicy.HANDS[s.handTone]) : "");
     for (const row of rows.values()) {
       const rec = net.remotes.get(row.id);
       if (!rec) continue;
-      const look = rec.voice ? rec.muted ? "muted" : BL.voice.speaking(rec.id) ? "speaking" : "on" : "";
-      paintMark(row, look || "off", rec.login, false, rec.id === s.hostId);
-      const name = BL.privateChat && BL.privateChat.available() ? rec.display : "";
-      if (row.privName !== name) {
-        row.privName = name; row.priv.hidden = !name;
-        const words = `Ask ${name} for a private conversation`;
-        row.priv.title = words; row.priv.setAttribute("aria-label", words);
-      }
+      const look = rec.voice ? rec.muted ? "muted" : !row.faded && BL.voice.speaking(rec.id) ? "speaking" : "on" : "";
+      paintMark(row, look || "off", rec.login, false, rec.id === s.hostId, rec.hand ? (rec.handEmoji || BL.reactionPolicy.HANDS[rec.handTone]) : "");
+      paintLink(row, s.voiceLinks ? net.voiceLink(rec.id) : "", rec.display);
       const level = V.volumeOf(row.id), words = `${Math.round(level * 100)}%`;
       if (row.slider.value !== String(level * 100)) row.slider.value = String(level * 100);
       if (row.value.textContent !== words) row.value.textContent = words;
       row.slider.setAttribute("aria-valuetext", words);
     }
   };
-  const paintMark = (row, look, login, self, host) => {
+  // A row's link, offered where the room keeps them (`state` empty hides it), painted again only when it or the name moves.
+  const paintLink = (row, state, name) => {
+    if (row.linkShown === state && row.linkName === name) return;
+    row.linkShown = state; row.linkName = name; row.link.hidden = !state;
+    if (!state) return;
+    const words = LINK_WORDS[state](name);
+    row.link.dataset.link = state;
+    row.link.setAttribute("aria-pressed", String(state !== "none"));
+    row.link.title = words; row.link.setAttribute("aria-label", words);
+  };
+  const paintMark = (row, look, login, self, host, hand = "") => {
+    if (row.handShown !== hand) {
+      row.handShown = hand; row.hand.textContent = hand; row.hand.hidden = !hand;
+      const words = hand && BL.reactionPolicy.HANDS.includes(hand) ? "Hand raised" : `Pinned emoji ${hand}`;
+      row.hand.title = words; row.hand.setAttribute("aria-label", words);
+    }
     const blocked = !!login && BL.voice.mutedLocally(row.id);
     if (row.voiceLook !== look || row.voiceLogin !== login || row.voiceSelf !== self || row.blocked !== blocked) {
       row.voiceLook = look; row.voiceLogin = login; row.voiceSelf = self; row.blocked = blocked;
@@ -162,34 +186,29 @@
     }
     if (row.hostOn !== host) { row.hostOn = host; row.host.hidden = !host; }
   };
-
-  // An Ooga thump's mallet beside a player's voice mark, while the tab shows (thump.js); 0 or the visitor's own id is their
-  // row. Only the cell's own state changes: its place in the row is kept either way. Under Calm it holds still.
-  const THUMP_MS = 1400, CALM = window.matchMedia("(prefers-reduced-motion: reduce)");
-  const THUMP_PULSE = [{ opacity: 0, transform: "scale(0.6)" }, { opacity: 1, transform: "scale(1.25)", offset: 0.18 }, { opacity: 1, transform: "scale(1)", offset: 0.4 }, { opacity: 0, transform: "scale(1)" }];
-  const THUMP_STILL = [{ opacity: 1 }, { opacity: 1, offset: 0.85 }, { opacity: 0 }];
-  const unmark = (row) => {
-    row.pulse = null;
-    row.thump.dataset.on = "false";
-    row.thump.removeAttribute("role"); row.thump.removeAttribute("aria-label"); row.thump.removeAttribute("title");
-    row.thump.setAttribute("aria-hidden", "true");
-  };
-  const pulse = (id) => {
-    if (!showing || stale) return false;
-    const row = id === 0 || id === net.state.selfId ? selfRow : rows.get(id);
-    if (!row || !row.li.isConnected) return false;
-    const mark = row.thump;
-    if (row.pulse) row.pulse.cancel();
-    mark.dataset.on = "true";
-    mark.removeAttribute("aria-hidden"); mark.setAttribute("role", "img");
-    mark.setAttribute("aria-label", "Thumped"); mark.title = "Thumped";
-    const run = row.pulse = mark.animate(CALM.matches ? THUMP_STILL : THUMP_PULSE, { duration: THUMP_MS, easing: "ease-out" });
-    run.onfinish = () => { if (row.pulse === run) unmark(row); };
-    return true;
-  };
-  // Every mallet still showing goes at once (thump.js, when the visitor's voice membership changes).
-  const clearPulses = () => {
-    for (const row of [selfRow, ...rows.values()]) if (row.pulse) { row.pulse.cancel(); unmark(row); }
+  // A reaction (`net.subscribeReactions`, 0 for the visitor's own) pops up on its sender's row where a raised hand stands,
+  // over the hand when one is up, rises a little and fades, as it does over their Ooga; the newest replaces the one
+  // before, and under Calm it only fades. Rows are not kept up while the panel is hidden, so then it shows nowhere.
+  const REACT_TIMING = { duration: 2600, easing: "linear" }, CALM = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const REACT_POP = [
+    { opacity: 1, transform: "translateY(0) scale(0.4)" },
+    { opacity: 1, transform: "translateY(-2px) scale(1.15)", offset: 0.07 },
+    { opacity: 1, transform: "translateY(-3px) scale(1)", offset: 0.12 },
+    { opacity: 1, transform: "translateY(-5px) scale(1)", offset: 0.73 },
+    { opacity: 0, transform: "translateY(-7px) scale(1)" },
+  ];
+  const REACT_CALM = [{ opacity: 1 }, { opacity: 1, offset: 0.73 }, { opacity: 0 }];
+  const reacted = (id, emoji) => {
+    if (!showing || stale) return;
+    const row = id === 0 ? selfRow : rows.get(id);
+    if (!row || !row.li.isConnected) return;
+    if (row.reacting) row.reacting.cancel();
+    row.react.textContent = emoji; row.react.hidden = false;
+    const run = row.reacting = row.react.animate(CALM.matches ? REACT_CALM : REACT_POP, REACT_TIMING);
+    run.onfinish = () => {
+      if (row.reacting !== run) return;
+      row.reacting = null; row.react.hidden = true;
+    };
   };
 
   // Distances and crosshairs, from where everyone stands now.
@@ -197,11 +216,12 @@
     if (!showing || stale) return;
     const s = net.state, me = s.self, mine = s.zone, placed = me.zone === mine, radius = V.stats.radius;
     shownZone = mine; shownRadius = radius;
+    let faded = false;
     for (const row of rows.values()) {
       const rec = net.remotes.get(row.id);
       if (!rec) continue;
       let aim = "route", metres = -1, distance = -1, lastKnown = false;
-      if (rec.zone === mine) {
+      if (BL.voiceBlend.sameFrame(rec.zone, mine)) {
         if (rec.poseZone === rec.zone) {
           lastKnown = !rec.body;
           aim = lastKnown ? "known" : "player";
@@ -224,9 +244,13 @@
         row.distance.title = lastKnown && metres >= 0 ? "Last known location" : "";
         row.note.hidden = !(lastKnown && metres >= 0);
       }
-      const far = radius > 0 && distance >= radius;
+      const far = radius > 0 && distance >= radius && net.voiceLink(rec.id) !== "linked";
       if (row.far !== far) { row.far = far; row.distance.dataset.far = String(far); }
+      const out = !V.inEarshot(row.id);
+      if (row.faded !== out) { row.faded = out; row.voice.dataset.far = String(out); faded = true; }
     }
+    // A voice that fades stops showing as speaking at once, and shows it again on coming back.
+    if (faded) paintMarks();
   };
 
   // Hearing range is ready even alone and before voice joins; changing it never acquires a microphone.
@@ -281,12 +305,12 @@
       }
       if (group.ul.children[rowIndex] !== row.li) group.ul.insertBefore(row.li, group.ul.children[rowIndex] || null);
       rowIndex++;
-      if (row.label.textContent !== row.name) row.label.textContent = row.name;
+      if (row.label.textContent !== row.name) { row.label.textContent = row.name; row.label.title = row.name; }
       if (!row.self) row.slider.setAttribute("aria-label", `Volume for ${row.name}`);
     }
     for (const [key, entry] of groups) if (entry.seen !== pass) { entry.section.remove(); groups.delete(key); }
-    paintMarks();
     measure();
+    paintMarks();
   };
 
   // Turn toward the row's player, or the door on the way to them, if nothing has changed since the row was drawn.
@@ -295,7 +319,7 @@
     if (s.room !== "live" || !s.me || s.zone !== shownZone) return;
     const rec = net.remotes.get(row.id);
     if (!rec || rec.zone !== row.zone) return;
-    if (rec.zone === s.zone) {
+    if (BL.voiceBlend.sameFrame(rec.zone, s.zone)) {
       if (rec.poseZone === rec.zone) BL.pilot.turnToward(rec.x, rec.y + BODY_Y, rec.z);
       return;
     }
@@ -303,10 +327,10 @@
     if (step && doors && doors(s.zone, step, door, placed ? me.x : NaN, placed ? me.z : NaN)) BL.pilot.turnToward(door.x, door.y, door.z);
   };
   list.addEventListener("click", (e) => {
-    const priv = e.target.closest(".players-private");
-    if (priv) {
-      priv.blur();
-      BL.privateChat.invite(Number(priv.closest("li").dataset.id));
+    const link = e.target.closest(".players-link");
+    if (link) {
+      link.blur();
+      net.toggleVoiceLink(Number(link.closest("li").dataset.id));
       return;
     }
     const voice = e.target.closest(".roster-voice");
@@ -427,6 +451,7 @@
   net.subscribe(render);
   net.subscribeRoster(render);
   net.subscribeMoves(measure);
+  net.subscribeReactions(reacted);
   BL.voice.subscribe(paintMarks);
   BL.voice.subscribe(paintHearing);
   // The scene the visitor is in names its doors (`fn(from, step, out, nearX, nearZ)`, true with `out` written), or null.
@@ -434,5 +459,5 @@
     doors = fn;
     measure();
   };
-  BL.players = { setDoors, pulse, clearPulses, get stats() { return { showing, rows: rows.size, groups: groups.size, unread, speakOn }; } };
+  BL.players = { setDoors, get stats() { return { showing, rows: rows.size, groups: groups.size, unread, speakOn }; } };
 })();

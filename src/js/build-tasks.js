@@ -19,7 +19,12 @@
   };
   const later = () => {
     // Hidden tabs clamp idle callbacks and timers; there is no visible frame to yield for while the page is hidden.
-    if (typeof document !== "undefined" && document.hidden) return Promise.resolve();
+    // A macrotask, never a microtask: a build run in microtasks alone would starve sockets, timers and events until it ends.
+    if (typeof document !== "undefined" && document.hidden) return new Promise(resolve => {
+      const { port1, port2 } = new MessageChannel();
+      port1.onmessage = () => { port1.close(); resolve(); };
+      port2.postMessage(0);
+    });
     if (globalThis.scheduler && typeof scheduler.postTask === "function") return scheduler.postTask(() => {}, { priority: "user-visible" });
     return new Promise(resolve => {
       if (typeof requestIdleCallback === "function") requestIdleCallback(resolve, { timeout: 16 });

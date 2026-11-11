@@ -236,7 +236,7 @@ function* buildGeometry({ layout, getRosterCount }) {
     };
     const sleep = createMempoolSleep(mempool);
     yield;
-    const timechain = createTimechainSite(island);
+    const timechain = createTimechainSite(island, { presentation: false });
     attach(timechain.node);
     for (const node of [timechain.shell, timechain.entrance, timechain.bridge, timechain.plug]) solids.add(node);
     yield;

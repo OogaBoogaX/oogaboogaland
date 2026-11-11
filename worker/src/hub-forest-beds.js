@@ -1,3 +1,4 @@
+import { HOST } from './virtual-host.js';
 // Reuse the deterministic forest search, never its mutable beds or world.
 // The layout module is fixed for this isolate. The clearance proof from the
 // original search is replayed against each new private world's solids;
@@ -12,7 +13,7 @@ const bed = row => ({ x: row[0], y: row[1], z: row[2], outdoor: true,
 export function createHubForestBeds(pool, clear, count) {
   const place = pool?.place;
   if (pool?.layout !== hubPoolLayout || typeof clear !== 'function'
-    || !Number.isInteger(count) || count < 0 || count > 53
+    || !Number.isInteger(count) || count < 0 || count > HOST.maxOogas
     || !place || ![place.x, place.y, place.z, place.ry].every(Number.isFinite))
     throw Error('invalid Hub forest bed inputs');
   const key = [place.x, place.y, place.z, place.ry, count];

@@ -391,7 +391,12 @@ test('actual npc-sync freezes before crew update, including no frame, mismatched
   const BL={...globalThis.BL,math:{quat:{create:()=>new Float32Array([0,0,0,1])},fnv1a:()=>123},scene:{addChild(){},removeChild(){}},
     net:{state:{room:'live',selfId:1,hostId:1,followers:1,npcVersion:0,npcAuthority:{mode:'server',revision:1}},npcFrame:null,sendNpc(){throw Error('browser must not publish');}}};
   const cave=()=>({contributor:{},traits:{name:'a'},parts:{armL:{},armR:{}},root:{},sleepWeapons:{},puppet:false});
-  const a=cave(),b=cave(),player=cave(),crew={list:[a,b],player,workSites:[]};
+  const resumed=[];
+  const a=cave(),b=cave(),player=cave(),crew={list:[a,b],player,workSites:[],resumeFromHost(actor){
+    assert.ok(actor===a || actor===b,'only roster NPCs resume');
+    assert.equal(actor.puppet,false,'release clears the puppet before resuming');
+    resumed.push(actor);
+  }};
   for (const name of ['npc-lab-pose', 'npc-clanker-sync', 'npc-sync'])
     runInNewContext(readFileSync(new URL(`../../src/js/${name}.js`,import.meta.url),'utf8'),{window:{BL},TextEncoder,TextDecoder,ArrayBuffer,Uint32Array,Float32Array,Uint8Array,Int32Array});
   const sync=BL.npcSync.create({crew,fx:{},onPlan(){},onHit(){},onModelChange(){}});
@@ -403,7 +408,9 @@ test('actual npc-sync freezes before crew update, including no frame, mismatched
   assert.equal(a.puppet,true,'incompatible roster cannot enable local AI');assert.equal(b.puppet,true);assert.equal(player.puppet,false);
   BL.net.state.npcAuthority={mode:'browser',revision:2};sync.prepare();sync.update(.05);
   assert.equal(a.puppet,false);assert.equal(b.puppet,false);assert.equal(player.puppet,false);
+  assert.deepEqual(resumed,[a,b,a,b],'host replacement and authority release each return the prior puppets once');
   sync.dispose();
+  assert.equal(resumed.length,4,'disposing an already released crew does not resume it twice');
 });
 
 test('committed mixed host poses reach two clients and a late join with exact Clanker recovery and explicit format fencing',async t=>{

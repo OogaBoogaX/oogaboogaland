@@ -2,7 +2,7 @@
 // seen from the Ooga's own eyes. The hub creates it with the sphere (`create`) and drives it every frame.
 //
 // Space beside the keypad (or a click on one of its buttons) engages it: the view glides into the Ooga's first person
-// as the Ooga turns to face the keypad, and the physical buttons take the clicks and keys. 1–9 choose exactly one room
+// as the Ooga turns to face the keypad, and the physical buttons take the clicks and keys. 0–9 choose exactly one room
 // (choosing another replaces it), Enter is off until one is chosen, Back or Escape lets go and glides the view back to
 // the camera the player had. Enter commits: the visitor's account must already be resolved (signed in: a shared room;
 // signed out: a solo copy); after an unanswered account look, the selected number retries and Enter explicitly
@@ -38,6 +38,13 @@
   // the curtain behind the shut doors.
   const PICTURE_Z = P.curtain + 0.03, HAND_REACH = P.mouth - 1 - PICTURE_Z, OUT_Z = P.curtain + 0.55;
   const CURVE = 24;
+  // What the keypad's small window says while it is in use: the prompt until a number is pressed, then the room.
+  const SELECT_WORDS = "SELECT ROOM NUMBER", ROOM_WORDS = Array.from({ length: 10 }, (_, room) => `ROOM ${room}`);
+  // No room chosen; the hint while choosing; a room as the hint names it.
+  const NONE = -1, CHOOSE = "Choose a room on the keypad · 0–9", roomWords = (id) => `Room ${id}, the ${ROOMS.ROOMS[id].name.replace(/^The /, "")}`;
+  const ENTER_PIN_WORDS = "ENTER 4-DIGIT PIN", PIN_DOTS = ["", "*", "**", "***", "****"], WRONG_PIN_WORDS = "WRONG PIN", PIN_WAIT_WORDS = "TRY LATER";
+  // Seconds a note stands in the window, and the longest a PIN waits on the room's answer.
+  const NOTE_TIME = 1.8, PIN_ANSWER = 4;
   // The page's first sound wakes the browser's audio, tens of milliseconds on the main thread. Engaging the keypad is
   // a gesture and the view is still at that moment, so the pause is paid there rather than at the walk's first
   // footstep in the doorway.
@@ -56,17 +63,19 @@
     const localZ = (x, z) => (x - place.x) * sin + (z - place.z) * cos, localX = (x, z) => (x - place.x) * cos - (z - place.z) * sin;
     // idle, keypad, account, preparing, waiting, opening, crossing, gone, arriving, leaving.
     const g = {
-      state: "idle", selection: 0, room: null, mode: null, prep: 0, stage: null, prepared: null, picture: null, t: 0, ask: 0,
+      state: "idle", selection: NONE, room: null, mode: null, prep: 0, stage: null, prepared: null, picture: null, t: 0, ask: 0,
       cycle: null, exp: 0, starting: false, dir: null, open: 0, want: 0, remoteUntil: 0, hintAt: -Infinity, jetpack: null, exit: null, failures: 0, login: null,
       // The view: null (the pilot's own), "eyes" (gliding into and held at the Ooga's eyes from engagement until the
       // crossing hands over, and coming back out) or "back" (gliding back to the pilot's, once free). `glide` runs 0
       // to 1 from the pose held in `from`; `pitch` is the eye's, easing toward `pitchTo`.
       lens: null, glide: 1, from: { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 }, to: { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 }, fromFov: 0,
-      pitch: 0, pitchTo: 0, hidden: null, settledAt: 0, cued: 0, handZ: 0, outZ: OUT_Z, path: new Float64Array(CURVE * 2), along: 0, still: 0
+      pitch: 0, pitchTo: 0, hidden: null, settledAt: 0, cued: 0, handZ: 0, outZ: OUT_Z, path: new Float64Array(CURVE * 2), along: 0, still: 0,
+      // A locked room: the one being asked for, the digits so far, the one a right PIN opened, and a note in the window.
+      pinRoom: NONE, pin: "", pinSent: 0, pass: NONE, note: "", noteLeft: 0
     };
     const action = { kind: "sphere-keypad" };
     // A room chosen in advance (a signed-in arrival at its address, sent out here), lit when the keypad is next used.
-    let preselect = ROOMS.parse(world.sphereKeypad) || 0;
+    let preselect = ROOMS.parse(world.sphereKeypad) ?? NONE;
     world.sphereKeypad = null;
     const at = (spot) => ({ x: worldX(spot.x, spot.z), z: worldZ(spot.x, spot.z) });
     // The walk back out ends far enough along the bridge that a camera behind the Ooga stands outside the doors.
@@ -143,6 +152,56 @@
     };
 
     // ---------- the keypad ----------
+    const padWords = () => {
+      if (g.state === "pin") return g.pin ? PIN_DOTS[g.pin.length] : ENTER_PIN_WORDS;
+      if (g.state !== "keypad" && g.state !== "account" && g.state !== "preparing" && g.state !== "waiting" && g.state !== "opening") return "";
+      if (g.noteLeft > 0) return g.note;
+      return g.selection >= 0 ? ROOM_WORDS[g.selection] : SELECT_WORDS;
+    };
+    // Padlocks over the numbers of the rooms locked from inside (only the Conference Room has a lock).
+    const lockedRoom = (room) => room >= 0 && ROOMS.ROOMS[room].lockable && !!BL.net.state.lockedRooms[room];
+    const showLocks = () => { for (const room of ROOMS.LOCKABLE) site.lock(room, lockedRoom(room)); };
+    const askPin = (room) => {
+      g.state = "pin";
+      g.pinRoom = room; g.pin = ""; g.pinSent = 0;
+      g.selection = NONE;
+      site.choose(room);
+      show(`Room ${room} is locked from inside · enter its 4-digit PIN`);
+    };
+    // Back to choosing, with no room selected; a wrong PIN says so in the window first.
+    const leavePin = (note = "") => {
+      g.state = "keypad";
+      g.pinRoom = NONE; g.pin = ""; g.pinSent = 0;
+      g.selection = NONE;
+      site.choose(NONE);
+      g.note = note; g.noteLeft = note ? NOTE_TIME : 0;
+    };
+    const pinAnswer = (ok, reason) => {
+      const room = g.pinRoom;
+      if (ok) {
+        g.pass = room;
+        leavePin();
+        g.selection = room;
+        site.choose(room);
+        commit();
+        return;
+      }
+      leavePin(reason === "wait" ? PIN_WAIT_WORDS : WRONG_PIN_WORDS);
+      show(reason === "wait" ? "Too many tries · wait a minute and try again" : `Wrong PIN for Room ${room} · choose a room`);
+    };
+    const pinKey = (key) => {
+      if (g.pinSent) return;
+      if (key === "back") {
+        if (g.pin) g.pin = g.pin.slice(0, -1);
+        else { leavePin(); show(CHOOSE); }
+      } else if (/^[0-9]$/.test(key) && g.pin.length < 4) {
+        g.pin += key;
+        if (g.pin.length === 4) {
+          if (BL.net.tryRoomPin(g.pinRoom, g.pin)) g.pinSent = PIN_ANSWER;
+          else pinAnswer(false, "wrong");
+        }
+      }
+    };
     const nearKeypad = (x, y, z) => g.state === "idle" && !!crew.player && Math.hypot(x - KEYPAD.x, z - KEYPAD.z) < S.KEYPAD_REACH && Math.abs(y - KEYPAD.y) < 2;
     const keypadPitch = () => {
       const cave = crew.player, p = cave.root.position;
@@ -152,7 +211,9 @@
       if (g.state !== "idle" || !crew.player) return false;
       g.state = "keypad";
       g.selection = preselect;
-      preselect = 0;
+      preselect = NONE;
+      g.pass = NONE; g.noteLeft = 0;
+      showLocks();
       site.choose(g.selection);
       hold(true);
       if (document.pointerLockElement) document.exitPointerLock();
@@ -163,29 +224,31 @@
       g.pitch = g.from.pitch;
       g.pitchTo = keypadPitch();
       hud.tooltip.hide();
-      show(g.selection ? `Room ${g.selection} selected · press Enter` : "Choose a room on the keypad · 1–9");
+      show(g.selection >= 0 ? `${roomWords(g.selection)} selected · press Enter` : CHOOSE);
       return true;
     };
     // Back to walking, the view gliding back to the pilot's own camera.
     const disengage = () => {
-      if (g.state !== "keypad" && g.state !== "account") return;
+      if (g.state !== "keypad" && g.state !== "account" && g.state !== "pin") return;
       g.state = "idle";
-      site.choose(0);
+      site.choose(NONE);
       if (crew.player) hideHead(crew.player, false);
       lens("back");
       hold(false);
     };
     const choose = (digit) => {
-      if (g.state !== "keypad" || !ROOMS.parse(digit)) return;
+      if (g.state !== "keypad" || ROOMS.parse(digit) === null) return;
+      if (lockedRoom(digit) && g.pass !== digit) { askPin(digit); return; }
       g.selection = digit;
       site.choose(digit);
-      show(`Room ${digit} selected · press Enter`);
+      show(`${roomWords(digit)} selected · press Enter`);
     };
     // Enter: the room, the account's answer, then the turn to the doors while the room readies.
     const commit = (solo = false) => {
       const room = ROOMS.get(g.selection);
       if (!room || g.state !== "keypad" && g.state !== "account") return;
       const net = BL.net.state;
+      if (!solo && lockedRoom(room.id) && g.pass !== room.id) { askPin(room.id); return; }
       if (!solo && !net.resolved) {
         g.state = "account";
         show("Account unavailable · selected number retries · Enter continues solo · Back changes room");
@@ -208,7 +271,7 @@
       show("Looking up your account…");
       BL.net.recheck().then(() => {
         if (g.state !== "account") return;
-        if (BL.net.state.resolved) { g.state = "keypad"; show(`Press Enter to go to Room ${g.selection}`); }
+        if (BL.net.state.resolved) { g.state = "keypad"; show(`Press Enter to go to ${roomWords(g.selection)}`); }
         else show("Still unavailable · selected number retries · Enter continues solo · Back changes room");
       });
     };
@@ -291,7 +354,12 @@
     // ---------- the doorway ----------
     // The island room's word on the doorway, for this page's own crossing and for anyone else's.
     const onDoor = (event) => {
-      if (event.t === "transit") {
+      if (event.op === "locks") {
+        showLocks();
+        if (g.state === "pin" && !lockedRoom(g.pinRoom)) pinAnswer(true, "");
+      } else if (event.op === "lock-result") {
+        if (event.action === "try" && g.state === "pin" && event.room === g.pinRoom && g.pinSent) pinAnswer(event.ok, event.reason);
+      } else if (event.t === "transit") {
         if (event.door !== ROOMS.EXTERIOR_ZONE || event.cycle === g.cycle) return;
         g.remoteUntil = Math.max(g.remoteUntil, performance.now() + Math.max(0, Math.min(12000, event.exp - BL.net.serverNow())));
       } else if (event.t === "transit-end") {
@@ -314,7 +382,12 @@
         else { BL.net.cancelDoor(); g.cycle = null; }
       } else if (event.op === "denied" && (g.ask || g.cycle !== null)) {
         g.ask = 0; g.cycle = null; g.starting = false;
-        if (g.state === "waiting") fallBack("The doorway was not available · press Enter to try again");
+        if (g.state === "waiting" && event.reason === "locked") {
+          fallBack(`Room ${g.room.id} was locked from inside · choose a room`);
+          g.pass = NONE;
+          g.selection = NONE;
+          site.choose(NONE);
+        } else if (g.state === "waiting") fallBack("The doorway was not available · press Enter to try again");
         else if (g.state === "arriving") g.t = 0;
       } else if (event.op === "lost" && (g.ask || g.starting)) {
         if (g.state === "waiting") fallBack("Connection lost · press Enter to try again");
@@ -322,6 +395,7 @@
       }
     };
     let unsubscribeDoor = BL.net.subscribeDoor(onDoor);
+    showLocks();
     // Whether this crossing should wait its turn: shared, with a room that knows the doorway.
     const reserving = () => g.mode === "shared" && BL.net.state.doorway;
     const askDoor = (dir) => {
@@ -436,11 +510,13 @@
     const update = (dt) => {
       const cave = crew.player, now = performance.now();
       g.t += dt;
+      g.noteLeft = Math.max(0, g.noteLeft - dt);
+      if (g.pinSent > 0 && (g.pinSent -= dt) <= 0 && g.state === "pin") pinAnswer(false, "wrong");
       if (g.state !== "idle" && g.state !== "gone" && !cave) {
-        if (g.state === "keypad" || g.state === "account") disengage();
+        if (g.state === "keypad" || g.state === "account" || g.state === "pin") disengage();
         else if (g.state === "preparing" || g.state === "waiting") { fallBack("Walk an Ooga up to the keypad"); disengage(); }
       }
-      if (g.state === "keypad" || g.state === "account") {
+      if (g.state === "keypad" || g.state === "account" || g.state === "pin") {
         if (cave) { settleAtKeypad(dt); g.pitchTo = keypadPitch(); }
       } else if (g.state === "preparing" || g.state === "waiting") {
         if (g.starting && BL.net.serverNow() > g.exp) { fallBack("The doorway grant expired · press Enter to try again"); return; }
@@ -511,6 +587,8 @@
       const want = Math.max(g.want, now < g.remoteUntil ? 1 : 0), step = REDUCED.matches ? 1 : dt / DOOR_TIME;
       g.open = g.open < want ? Math.min(want, g.open + step) : Math.max(want, g.open - step);
       site.setDoors(g.open * g.open * (3 - 2 * g.open));
+      site.say(padWords());
+      site.tick(dt);
     };
     const view = (dt) => {
       const cave = crew.player;
@@ -534,8 +612,9 @@
     };
     const keyOf = (e) => e.key.length === 1 ? e.key.toLowerCase() : e.key;
     const press = (key) => {
-      const digit = Number(key);
-      if (digit >= 1 && digit <= 9) {
+      if (g.state === "pin") { pinKey(key); return; }
+      const digit = /^[0-9]$/.test(key) ? Number(key) : NONE;
+      if (digit >= 0) {
         if (g.state === "account" && digit === g.selection) retryAccount();
         else if (g.state === "account") { g.state = "keypad"; choose(digit); }
         else choose(digit);
@@ -543,9 +622,9 @@
         if (g.state === "keypad") commit();
         else if (g.state === "account") commit(true);
       } else if (key === "back") {
-        if (g.state === "account") { g.state = "keypad"; show(`Room ${g.selection} selected · press Enter`); }
+        if (g.state === "account") { g.state = "keypad"; show(`${roomWords(g.selection)} selected · press Enter`); }
         else if (g.state === "keypad") disengage();
-        else if (g.state === "preparing" || g.state === "waiting") fallBack(`Cancelled · Room ${g.selection} remains selected`);
+        else if (g.state === "preparing" || g.state === "waiting") fallBack(`Cancelled · ${roomWords(g.selection)} remains selected`);
       }
     };
     // From the keypad until the Ooga is through, the doorway has the keys: nothing reaches the Ooga, the camera or
@@ -557,8 +636,12 @@
       e.preventDefault();
       e.stopImmediatePropagation();
       if (e.repeat) return true;
-      if (g.state === "keypad" || g.state === "account") {
-        if (/^[1-9]$/.test(k)) press(k);
+      if (g.state === "pin") {
+        if (/^[0-9]$/.test(k)) press(k);
+        else if (k === "Backspace") press("back");
+        else if (k === "Escape" && !g.pinSent) { leavePin(); show(CHOOSE); }
+      } else if (g.state === "keypad" || g.state === "account") {
+        if (/^[0-9]$/.test(k)) press(k);
         else if (k === "Enter") press("enter");
         else if (k === "Escape" || k === "Backspace") press("back");
       } else if ((g.state === "preparing" || g.state === "waiting") && (k === "Escape" || k === "Backspace")) press("back");
@@ -588,18 +671,24 @@
       if (crew.player) hideHead(crew.player, false);
       g.state = "idle";
       g.ask = 0; g.cycle = null;
+      // A kept island comes back with the doors shut behind the crossing and the plug down, so the walk back out
+      // finds them shut, as the room's picture of them shows, and they part for it.
+      g.want = g.open = 0;
+      site.setDoors(0);
+      site.plug.visible = true;
     };
     // A kept island's gate takes a room chosen in advance on resuming, as `create` does; true when one was.
     const resume = () => {
-      const asked = ROOMS.parse(world.sphereKeypad) || 0;
+      const asked = ROOMS.parse(world.sphereKeypad);
       world.sphereKeypad = null;
-      if (asked) preselect = asked;
-      if (unsubscribeDoor) return !!asked;
+      if (asked !== null) preselect = asked;
+      if (unsubscribeDoor) return asked !== null;
+      showLocks();
       unsubscribeDoor = BL.net.subscribeDoor(onDoor);
       window.addEventListener("keydown", onKey, true);
       document.addEventListener("visibilitychange", onVisibility);
       show();
-      return !!asked;
+      return asked !== null;
     };
     show();
     return {

@@ -23,7 +23,10 @@
   --ink-muted: rgba(42, 26, 12, 0.72);
   --ink-faint: rgba(42, 26, 12, 0.5);
   --planks: radial-gradient(circle at 9px 9px, var(--nail) 2.5px, transparent 3px), radial-gradient(circle at calc(100% - 9px) 9px, var(--nail) 2.5px, transparent 3px), radial-gradient(circle at 9px calc(100% - 9px), var(--nail) 2.5px, transparent 3px), radial-gradient(circle at calc(100% - 9px) calc(100% - 9px), var(--nail) 2.5px, transparent 3px), repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.05) 0 2px, transparent 2px 11px), repeating-linear-gradient(180deg, var(--plank) 0 34px, var(--wood-edge) 34px 36px, var(--wood) 36px 70px, var(--wood-edge) 70px 72px);
-  --tablet: linear-gradient(160deg, var(--stone-lt), var(--stone) 55%, var(--stone-dk));
+  /* The panels' dark sections, the reaction card, the banner's HUD buttons and every "tablet" box (tooltips, notes,
+     fields, the games' HUDs), one near-black. */
+  --slab-dark: #161412;
+  --tablet: var(--slab-dark);
   --tablet-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -2px 0 rgba(0, 0, 0, 0.35), 0 2px 0 rgba(0, 0, 0, 0.4);
   --radius: 8px;
   --mono: ui-monospace, "Cascadia Code", Menlo, Consolas, "DejaVu Sans Mono", monospace;
@@ -602,6 +605,14 @@ body[data-active-scene="hub"] .home-link {
   }
 }
 
+/* Block Frenzy draws its own play HUD, Sound button and "All controls" list, so the banner's block height and its
+   `.mode-hud` buttons (character, sound and the controls reference, which has no rows for this scene) stay out of it;
+   its panels are hidden through the HUD (`setPanelsHidden`), as every game's are. */
+body[data-active-scene="block"] .world-block,
+body[data-active-scene="block"] .mode-hud {
+  display: none;
+}
+
 .sheet-toggle {
   position: absolute;
   z-index: 0;
@@ -963,7 +974,7 @@ body[data-active-scene="hub"] .home-link {
 .panel-chip[data-tone="closed"] { color: #ffb4a6; border-color: rgba(229, 83, 61, 0.45); }
 
 .slab {
-  background: var(--tablet);
+  background: var(--slab-dark);
   border: 2px solid var(--stone-dk);
   border-radius: 9px 7px 10px 8px;
   box-shadow: var(--tablet-shadow);
@@ -975,7 +986,7 @@ body[data-active-scene="hub"] .home-link {
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.45) transparent;
+  scrollbar-color: rgba(243, 239, 228, 0.2) transparent;
 }
 
 .slab-head {
@@ -991,9 +1002,10 @@ body[data-active-scene="hub"] .home-link {
 
 /* Bananas: the all-time total on top, its count and sats beneath, then the donors and the latest tips in the same
    slab. Like every panel's slab it scrolls above the panel's action, so Feed the Oogas stays at the foot as
-   Contributor sign-in does; its sections never shrink, and each list scrolls inside a window five donor rows tall
-   (`--banana-five`), both lists the same height. The slab may shrink to nothing, so even a phone's short drawer
-   keeps the action whole; only a drawer shorter than the title and the action scrolls the panel. */
+   Contributor sign-in does; its sections never shrink, and each list scrolls inside its own window: the donors' five
+   donor rows tall (`--banana-five`), the latest tips' at least as tall and taking whatever room the slab has left. The
+   slab may shrink to nothing, so even a phone's short drawer keeps the action whole; only a drawer shorter than the
+   title and the action scrolls the panel. */
 .panel > .banana-slab {
   --banana-five: calc(5 * (17px + 12px + 1px));
   display: flex;
@@ -1002,6 +1014,7 @@ body[data-active-scene="hub"] .home-link {
   padding: 12px 12px 10px;
 }
 .banana-slab > section { flex: none; }
+.banana-slab > .banana-recent { flex: 1 0 auto; display: flex; flex-direction: column; }
 /* A phone on its side leaves the default drawer under 100px: too short to stack the title, a row of the slab and a
    44px Feed the Oogas. While the Bananas panel shows there, its untouched drawer stands at least 200px tall
    (sheet.js's BANANA_DRAWER, which also holds a resized or saved drawer to it and, that drawer too tall to leave the
@@ -1013,28 +1026,25 @@ body[data-active-scene="hub"] .home-link {
 }
 .banana-leaders,
 .banana-recent-list {
-  /* One height for both, however few entries either holds. */
-  height: var(--banana-five);
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.45) transparent;
 }
+/* The donors' window holds five rows however few entries it has. The latest tips' is never shorter and grows into the
+   slab's spare room, unless it holds nothing: then it keeps the donors' height with its note under it. */
+.banana-leaders { height: var(--banana-five); }
+.banana-recent-list { flex: 1 0 var(--banana-five); min-height: var(--banana-five); }
+.banana-recent:has(> .banana-empty:not([hidden])) > .banana-recent-list { flex-grow: 0; }
 
+/* The total's title over it, and the total with the banana beside it as tall as its figures, both flush left. */
 .banana-hero {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  column-gap: 10px;
-  align-items: center;
+  row-gap: 4px;
+  text-align: left;
 }
 
-.banana-hero-icon {
-  grid-row: span 2;
-  width: 34px;
-  height: 34px;
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
-}
-
-.banana-hero > strong {
+.banana-hero-value {
+  margin: 0;
   color: var(--accent-text);
   font-size: clamp(26px, 7vw, 34px);
   font-weight: 700;
@@ -1042,6 +1052,17 @@ body[data-active-scene="hub"] .home-link {
   font-variant-numeric: tabular-nums;
   text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
   overflow-wrap: anywhere;
+}
+
+/* On the figures' baseline and a cap height tall (the em fallback is about a cap). */
+.banana-hero-icon {
+  width: 0.72em;
+  height: 0.72em;
+  width: 1cap;
+  height: 1cap;
+  margin-right: 0.2em;
+  vertical-align: baseline;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
 }
 
 .banana-hero-label,
@@ -1059,6 +1080,7 @@ body[data-active-scene="hub"] .home-link {
   gap: 10px;
   margin: 12px 0 0;
   padding-top: 10px;
+  text-align: left;
 }
 
 .banana-totals,
@@ -1079,51 +1101,41 @@ body[data-active-scene="hub"] .home-link {
   overflow-wrap: anywhere;
 }
 
+/* A banana's price in dollars and sats, then a bitcoin's in bananas, a line each, flush left. A stale price dims; the
+   line says so on hover. */
 .banana-rates {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
-  align-items: baseline;
-  gap: 6px 12px;
+  gap: 6px;
   margin: 12px 0 0;
   padding-top: 10px;
+  text-align: left;
 }
 
-.banana-rate-label {
-  position: relative;
-  padding-left: 11px;
-  color: rgba(243, 239, 228, 0.58);
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.banana-rates > dt:nth-of-type(2) { align-self: center; }
-
-.banana-rate-label[data-tone="live"]::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #22c55e;
-}
-
-.banana-rates dd {
+.banana-rate {
+  min-width: 0;
   margin: 0;
   color: var(--paper);
   font-size: 14px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  text-align: right;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
-.banana-exchange { position: relative; padding-left: 19px; }
-.banana-exchange-icon { position: absolute; left: 0; top: 50%; width: 14px; height: 14px; transform: translateY(-50%); }
-.banana-exchange > span + span { margin-left: 5px; }
+.banana-rate[data-tone="stale"] { color: rgba(243, 239, 228, 0.6); }
+/* The bitcoin line is measured on one line (hud.js `fitBtcRate`) and wraps only when even "100M sats" will not fit. */
+.banana-rate[data-fit="line"] { white-space: nowrap; }
+
+/* The banana before an amount, as a currency's sign: an em square centred on the figures after it. */
+.banana-rate-icon,
+.banana-amount-icon {
+  width: 1em;
+  height: 1em;
+  margin-right: 0.15em;
+  vertical-align: -0.15em;
+  vertical-align: calc((1cap - 1em) / 2);
+}
+
+#bananas-panel[data-unit="sats"] .banana-amount-icon { display: none; }
 
 .banana-board { margin-top: 12px; padding-top: 12px; }
 
@@ -1196,7 +1208,8 @@ body[data-active-scene="hub"] .home-link {
 
 .banana-rank { color: rgba(243, 239, 228, 0.5); font-size: 10px; font-variant-numeric: tabular-nums; }
 .banana-leaders li:nth-child(-n + 3) .banana-rank { color: var(--accent-text); }
-.banana-donor { min-width: 0; color: var(--paper); overflow-wrap: anywhere; }
+/* A donor's name keeps to one line and ends in an ellipsis where it would not fit; hovering shows it whole. */
+.banana-donor { min-width: 0; overflow: hidden; color: var(--paper); text-overflow: ellipsis; white-space: nowrap; }
 .banana-donor[data-anon="true"] { color: rgba(243, 239, 228, 0.55); font-style: italic; }
 .banana-amount { color: var(--paper); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 .banana-leaders li:first-child .banana-amount { color: var(--accent-text); }
@@ -1214,23 +1227,22 @@ body[data-active-scene="hub"] .home-link {
   border-top: 1px solid rgba(0, 0, 0, 0.35);
   font-size: 12px;
 }
-.banana-recent-name { min-width: 0; color: var(--paper); overflow-wrap: anywhere; }
+/* The name and its check share one line, the check centred on the name's line rather than on its x-height; a name too
+   long for it ends in an ellipsis before the check, and hovering shows it whole. */
+.banana-recent-name { display: flex; align-items: center; min-width: 0; color: var(--paper); }
 .banana-recent-name[data-anon="true"] { color: rgba(243, 239, 228, 0.55); font-style: italic; }
+.banana-recent-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The orange check is a seal with a ridged rim (hud.js `verifiedSeal`). */
 .banana-verified {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
+  flex: none;
+  width: 13px;
+  height: 13px;
   margin-left: 5px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: #211b14;
-  font-size: 11px;
-  font-style: normal;
-  font-weight: 900;
-  vertical-align: middle;
 }
+.banana-verified svg { width: 100%; height: 100%; }
+.banana-verified-seal { fill: var(--accent); }
+.banana-verified-tick { fill: none; stroke: #211b14; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .banana-recent-message { grid-column: 1 / -1; margin: 0; color: rgba(243, 239, 228, 0.7); overflow-wrap: anywhere; line-height: 1.4; }
 .banana-recent-list li[hidden], .banana-verified[hidden], .banana-recent-message[hidden] { display: none; }
 
@@ -1510,12 +1522,17 @@ body[data-active-scene="hub"] .home-link {
 .pm-switch-button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; }
 .pm-switch .pm-count { position: static; margin: 0 0 0 2px; }
 .pm-lock { flex: none; width: 9px; height: 10px; }
+/* As the partner's row lock shows it (private-chat.js): amber while an invite or the pad waits, blue once sealed. */
+.pm-switch-button[data-lock="waiting"] .pm-lock, .pm-title[data-lock="waiting"] .pm-lock { color: var(--warn); }
+.pm-switch-button[data-lock="sealed"] .pm-lock { color: #9fbfee; }
 
 .pm { display: none; flex: 1 1 auto; flex-direction: column; gap: 6px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .pm [hidden] { display: none; }
 .panel[data-panel="chat"][data-view="private"] .pm { display: flex; }
 .panel[data-panel="chat"][data-view="private"] > :is(.chat-identity, .chat-log, .chat-status, .chat-form),
 .panel[data-panel="chat"][data-view="private"] > .panel-title > .chat-about { display: none; }
+/* Without the island's About button, the title itself keeps the room's chip and the bell at the right. */
+.panel[data-panel="chat"][data-view="private"] > .panel-title h2 { margin-right: auto; }
 .pm-head { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; }
 .pm-head .pm-end { min-height: 24px; }
 .pm-title { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0; color: #cfe0ff; font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
@@ -1765,13 +1782,49 @@ body[data-active-scene="hub"] .home-link {
   text-transform: uppercase;
 }
 
+/* How Contributing Oogas are ordered, over the list (hud.js). */
+.roster-sort {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.roster-sort-label {
+  color: rgba(243, 239, 228, 0.78);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.roster-sort select {
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 6px;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--paper);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.roster-sort select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+@media (pointer: coarse) {
+  .roster-sort select { min-height: 40px; }
+}
+
 /* One row an Ooga: presence, name, the player's marks, activity age and state, each in a column of its own
-   so a long name wraps inside its cell and a mark or state coming and going never moves the others. */
+   so a long name ends in an ellipsis inside its cell and a mark or state coming and going never moves the others.
+   The voice mark's column is the mark's own width, so the age follows it closely and the name keeps the room. */
 .roster {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) 26px max-content 6.5ch;
+  grid-template-columns: 8px minmax(0, 1fr) 12px max-content 6.5ch;
   grid-auto-rows: max-content;
-  column-gap: 8px;
+  column-gap: 6px;
   align-content: start;
   list-style: none;
   margin: 0;
@@ -1790,6 +1843,8 @@ body[data-active-scene="hub"] .home-link {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
   font-size: 12px;
 }
+
+.roster li > .roster-name { padding-left: 2px; }
 
 .roster li:first-child {
   border-top: 0;
@@ -1822,7 +1877,23 @@ body[data-active-scene="hub"] .home-link {
   .roster-away button { min-height: 44px; }
 }
 
+/* The host's outlined black dot sits behind the online dot, sharing its centre without moving the row's name. */
+.roster-dots {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.roster-dots .roster-host {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
 .roster-presence {
+  position: relative;
+  z-index: 1;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -1835,15 +1906,15 @@ body[data-active-scene="hub"] .home-link {
   box-shadow: 0 0 5px rgba(34, 197, 94, 0.55);
 }
 
-/* The name, with the host's black dot right after it. A signed-in player's name is a button with a caret that
-   opens their row onto the land they are in, a darker strip under the row. */
+/* The name, on one line and cut short with an ellipsis where it would not fit, filling its cell: a button, with no
+   caret, that opens the row onto a darker strip under it (the contributor's stats here, a player's volume in Online
+   Oogas). */
 .roster-name {
   display: inline-flex;
   align-items: center;
-  justify-self: start;
   gap: 6px;
+  width: 100%;
   min-width: 0;
-  max-width: 100%;
   padding: 0;
   border: 0;
   background: none;
@@ -1858,26 +1929,13 @@ body[data-active-scene="hub"] .home-link {
 
 .roster-label {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .roster-name:not(:disabled) {
   cursor: pointer;
-}
-
-.roster-name:not(:disabled)::after {
-  content: "";
-  flex: none;
-  border-top: 4px solid currentColor;
-  border-right: 3.5px solid transparent;
-  border-left: 3.5px solid transparent;
-  opacity: 0.55;
-  transform: rotate(-90deg);
-  transition: transform 0.15s ease;
-}
-
-.roster-name[aria-expanded="true"]::after {
-  transform: none;
 }
 
 .roster-name:not(:disabled):hover,
@@ -1904,34 +1962,112 @@ body[data-active-scene="hub"] .home-link {
   }
 }
 
-.roster-where {
-  display: flex;
+/* A contributor's stats (hud.js `openStats`): their Ooga's face at the left with their total and first contribution
+   side by side next to it, then the kinds and a chip a repository with their count there across the whole strip, under
+   the face too. The facts keep to one line while they fit (`data-fit="line"`, hud.js `fitSince`). */
+.roster-stats {
+  display: grid;
   grid-column: 1 / -1;
-  align-items: baseline;
-  gap: 8px;
+  grid-template-columns: 40px minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 5px;
+  align-items: start;
   margin: 6px -6px 0;
-  padding: 6px 8px 6px 22px;
+  padding: 8px;
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.28);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
-.roster-where[hidden] {
+.roster-stats[hidden] {
   display: none;
 }
 
-.roster-where-label {
-  color: var(--muted);
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+.roster-stats-face {
+  grid-row: 1;
+  width: 40px;
+  height: 40px;
+  image-rendering: pixelated;
 }
 
-.roster-where-value {
-  min-width: 0;
+.roster-stats-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-self: center;
+  gap: 2px 14px;
+  margin: 0;
+}
+
+.roster-stats-facts[data-fit="line"] { flex-wrap: nowrap; }
+
+.roster-stats-facts dt {
+  color: var(--muted);
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.roster-stats-facts dd {
+  margin: 1px 0 0;
   color: var(--paper);
-  font-size: 11px;
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.roster-stats-kinds {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: rgba(243, 239, 228, 0.72);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.roster-stats-kinds[hidden] { display: none; }
+.roster-stats-kinds span { white-space: nowrap; }
+
+.roster-stats-repos {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  gap: 4px;
+}
+
+.roster-stats-repos a {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 2px 6px;
+  border: 1px solid rgba(243, 239, 228, 0.16);
+  border-radius: 999px;
+  background: rgba(243, 239, 228, 0.05);
+  color: var(--paper);
+  font-size: 10px;
+  text-decoration: none;
   overflow-wrap: anywhere;
+}
+
+.roster-stats-repos b {
+  color: var(--accent-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.roster-stats-repos a:hover,
+.roster-stats-repos a.virtual-hover {
+  border-color: var(--accent);
+}
+
+.roster-stats-repos a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.roster-stats-none {
+  color: var(--muted);
+  font-size: 10px;
 }
 
 /* A signed-in player's voice keeps a column of its own after the name (grey in voice, green speaking, red
@@ -1950,8 +2086,8 @@ body[data-active-scene="hub"] .home-link {
 
 .roster-host {
   flex: none;
-  width: 7px;
-  height: 7px;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
   background: #000;
   box-shadow: 0 0 0 1px var(--paper);
@@ -1976,18 +2112,28 @@ body[data-active-scene="hub"] .home-link {
   cursor: default;
 }
 
-.players-private {
+/* A voice link (net.js `voiceLink`): pale stone with nothing asked, pulsing amber while this visitor's ask waits, green once linked. */
+.players-link {
   display: inline-flex;
-  padding: 0 0 0 6px;
+  padding: 0;
   border: 0;
   background: none;
-  color: #9fbfee;
+  color: #dcd8cb;
   cursor: pointer;
 }
-.players-private[hidden] { display: none; }
-.players-private svg { width: 10px; height: 11px; shape-rendering: crispEdges; }
-.players-private:hover, .players-private:focus-visible { color: #cfe0ff; outline: none; }
-.players-private:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.players-link[hidden] { display: none; }
+.players-link svg { width: 11px; height: 11px; shape-rendering: crispEdges; }
+.players-link:hover, .players-link:focus-visible { color: #fff; outline: none; }
+.players-link:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.players-link[data-link="asked"] { color: #ffa51f; }
+.players-link[data-link="asked"]:is(:hover, :focus-visible) { color: #ffd27a; }
+.players-link[data-link="asked"] svg { animation: players-link-wait 2s ease-in-out infinite; }
+.players-link[data-link="linked"] { color: #35ff7e; }
+.players-link[data-link="linked"]:is(:hover, :focus-visible) { color: #a4ffc4; }
+@keyframes players-link-wait { 50% { opacity: 0.5; } }
+@media (prefers-reduced-motion: reduce) {
+  .players-link[data-link="asked"] svg { animation: none; }
+}
 
 .roster-voice:focus-visible {
   outline: 2px solid var(--accent);
@@ -2019,33 +2165,43 @@ body[data-active-scene="hub"] .home-link {
   opacity: 0.55;
 }
 
+/* A voice this visitor cannot hear where they stand (another zone, or past the hearing range), in Online Oogas. */
+.roster-voice[data-far="true"] {
+  opacity: 0.45;
+}
+
 @media (pointer: coarse) {
-  .roster-voice {
+  .roster-voice,
+  .players-link {
     padding: 6px;
-    margin: -6px -3px;
+    margin: -6px;
   }
 }
 
 /* The live players tab (players.js): a group a zone under its heading, and a row a player with the roster's marks,
    the crosshair that turns the camera and, for players in the visitor's zone, how far away they stand. Each cell keeps
-   its column, so a hidden crosshair or an empty distance never moves the others. An Ooga thump's mallet (thump.js) has
-   its own column beside the voice mark in every row, shown and hidden by visibility alone, so it never moves a name or
-   a control, and takes no pointer, so it never covers one. */
+   its column, so a hidden crosshair or an empty distance never moves the others. */
 .players {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 8px 10px;
+  padding: 8px;
 }
 
 .players[hidden] {
   display: none;
 }
 
+/* After the name: the raised hand, the voice link, the voice mark and the crosshair, four columns of one width (the
+   voice mark's) with each icon centred in its own, then the distance against the row's right edge. Every group is a
+   grid of its own, so no column may size to its content: the icons line up down the whole tab, the visitor's own row
+   too, whoever shows a hand, a link, a voice mark or a distance. The distance cell is always as wide as "999 m"
+   (`.players-distance`), so the name keeps every other pixel. The gap spaces the items after the name; the name takes
+   back the extra beside its dot. Every cell sits on the row's first line; a player's volume, under it. */
 .players-rows {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) 14px 12px 14px 6ch;
-  column-gap: 8px;
+  grid-template-columns: 8px minmax(0, 1fr) 12px 12px 12px 12px max-content;
+  column-gap: 14px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -2068,37 +2224,44 @@ body[data-active-scene="hub"] .home-link {
   box-shadow: none;
 }
 
-.players-rows .roster-presence { grid-column: 1; }
-.players-rows .roster-marks { grid-column: 3; }
-
-.players-thump {
-  display: inline-flex;
-  grid-column: 4;
-  justify-self: center;
-  width: 12px;
-  height: 12px;
-  color: var(--accent);
-  visibility: hidden;
-  pointer-events: none;
-}
-
-.players-thump[data-on="true"] {
-  visibility: visible;
-}
-
-.players-thump svg {
-  width: 12px;
-  height: 12px;
-  shape-rendering: crispEdges;
-}
+.players-rows li > * { grid-row: 1; }
+.players-rows li > .players-volume { grid-row: 2; }
+.players-rows .roster-dots { grid-column: 1; }
+.players-rows .roster-marks { display: contents; }
+.players-rows .players-link { grid-column: 4; grid-row: 1; justify-self: center; }
+.players-rows .roster-voice { grid-column: 5; grid-row: 1; justify-self: center; }
 
 .players-name {
   display: inline-flex;
   grid-column: 2;
+  margin-left: -7px;
   align-items: center;
-  gap: 6px;
   min-width: 0;
   color: var(--paper);
+}
+
+/* The raised hand's column. A reaction (players.js) pops up in the same place, over the hand when one is raised, and
+   fades. An emoji is wider than the column and stays centred on it, spilling into the gaps either side, so nothing
+   moves when a reaction comes and goes. */
+.players-mark {
+  display: grid;
+  grid-column: 3;
+  grid-template-columns: 12px;
+  width: 12px;
+  place-items: center;
+}
+
+.players-mark > * { grid-area: 1 / 1; }
+
+.players-hand {
+  font: 13px/1 "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+}
+
+.players-react {
+  position: relative;
+  z-index: 1;
+  font: 16px/1 "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  pointer-events: none;
 }
 
 /* A player's own disclosure keeps volume apart from mute and camera targeting. */
@@ -2132,7 +2295,7 @@ body[data-active-scene="hub"] .home-link {
 
 .players-look {
   display: inline-flex;
-  grid-column: 5;
+  grid-column: 6;
   justify-self: center;
   padding: 0;
   border: 0;
@@ -2166,9 +2329,12 @@ body[data-active-scene="hub"] .home-link {
   cursor: default;
 }
 
+/* Every row has this cell, empty or not, at the width of "999 m" in the panel's monospace face, numbers to the right so
+   their units line up: the column it makes is the same in every group. */
 .players-distance {
-  grid-column: 6;
-  justify-self: end;
+  grid-column: 7;
+  width: 5ch;
+  text-align: right;
   color: var(--paper);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
@@ -2240,6 +2406,280 @@ body[data-active-scene="hub"] .home-link {
   cursor: pointer;
 }
 
+/* Reactions (reactions.js), on X Spaces' pattern in its dark mode: a near-black card, two rows of five emoji, a divider
+   and the raised hand pinned past it, under Online Oogas' list and Ooga Chat's input. A long press opens the picker
+   floating over the screen, in the same dark. Emoji are the system's own colour glyphs. */
+.reactions {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.reactions[hidden] { display: none; }
+
+.reaction-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 22px;
+  border: 1px solid rgba(243, 239, 228, 0.1);
+  background: var(--slab-dark);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 4px 14px rgba(0, 0, 0, 0.45);
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.reaction-grid {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 2px 4px;
+}
+
+.reaction {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  font: 24px/1 "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform 0.12s ease, background-color 0.12s ease;
+}
+
+.reaction:hover,
+.reaction.virtual-hover { background: rgba(243, 239, 228, 0.1); }
+.reaction:active { transform: scale(1.22); }
+.reaction:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.reaction:disabled { opacity: 0.4; cursor: default; transform: none; background: none; }
+.reaction[data-picking="true"] { background: rgba(216, 137, 43, 0.22); box-shadow: inset 0 0 0 2px var(--accent); }
+
+.reaction-divider {
+  flex: none;
+  align-self: stretch;
+  width: 1px;
+  margin: 2px 2px;
+  background: rgba(243, 239, 228, 0.16);
+}
+
+.reaction-hand {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  font-size: 28px;
+}
+
+/* The hand while it is up: a ring in the accent, as a toggle that stays pressed. */
+.reaction-hand[aria-pressed="true"] {
+  background: rgba(216, 137, 43, 0.22);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reaction { transition: none; }
+  .reaction:active { transform: none; }
+}
+
+/* The picker floats in the middle of the screen, over the panels and the world, as wide as fits. */
+.reaction-picker {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  width: min(400px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px - var(--safe-top) - var(--safe-bottom));
+  padding: 12px;
+  border-radius: 18px;
+  background: var(--slab-dark);
+  color: var(--paper);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(243, 239, 228, 0.12);
+  transform: translate(-50%, -50%);
+}
+
+.reaction-picker[hidden] { display: none; }
+
+.reaction-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.reaction-picker-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.reaction-picker-current {
+  font: 22px/1 "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  letter-spacing: 0;
+}
+
+.reaction-picker-close {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(243, 239, 228, 0.1);
+  color: var(--paper);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.reaction-picker-close:hover { background: rgba(243, 239, 228, 0.18); }
+.reaction-picker-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.reaction-picker-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.reaction-picker-search {
+  flex: 1 1 140px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(243, 239, 228, 0.18);
+  border-radius: 15px;
+  background: #0b0a09;
+  color: var(--paper);
+  font-size: 12px;
+}
+
+.reaction-picker-search:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+
+.reaction-tones { display: flex; gap: 4px; }
+
+.reaction-tone {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: #ffcc4d;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+
+.reaction-tone[data-tone="1"] { background: #f7dece; }
+.reaction-tone[data-tone="2"] { background: #f3d2a2; }
+.reaction-tone[data-tone="3"] { background: #d5ab88; }
+.reaction-tone[data-tone="4"] { background: #af7e57; }
+.reaction-tone[data-tone="5"] { background: #7c533e; }
+.reaction-tone[aria-checked="true"] { border-color: var(--accent); }
+.reaction-tone:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.reaction-hearts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.reaction-heart {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: none;
+  font: 14px/1 "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  cursor: pointer;
+}
+
+.reaction-heart[aria-checked="true"] { border-color: var(--accent); background: rgba(216, 137, 43, 0.14); }
+.reaction-heart:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.reaction-picker-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 2px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(243, 239, 228, 0.12);
+}
+
+.reaction-picker-jump,
+.reaction-choice {
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.reaction-picker-jump { flex: 1; height: 26px; font-size: 16px; }
+
+.reaction-picker-jump:hover,
+.reaction-choice:hover,
+.reaction-picker-jump.virtual-hover,
+.reaction-choice.virtual-hover { background: rgba(243, 239, 228, 0.1); }
+
+.reaction-picker-jump:focus-visible,
+.reaction-choice:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.reaction-picker-grid {
+  flex: 1 1 auto;
+  min-height: 120px;
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.reaction-picker-group {
+  margin: 6px 2px 4px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.reaction-picker-group[hidden],
+.reaction-picker-set[hidden],
+.reaction-choice[hidden] { display: none; }
+
+.reaction-picker-set {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
+}
+
+.reaction-choice { height: 34px; font-size: 22px; }
+
+.reaction-picker-foot { display: flex; justify-content: flex-end; }
+.reaction-picker .reaction-picker-reset { color: var(--muted); font-size: 10px; }
+
+@media (pointer: coarse) {
+  .reaction { height: 44px; }
+  .reaction-choice { height: 40px; }
+  .reaction-picker-set { grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); }
+  .reaction-tone { width: 26px; height: 26px; }
+  .reaction-heart { width: 32px; height: 32px; font-size: 18px; }
+}
+
 /* Native disclosure keeps advanced settings together on every panel layout. */
 .players-settings { flex: none; }
 .players-settings:not(:has(.players-settings-content > :not([hidden]))) { display: none; }
@@ -2251,6 +2691,9 @@ body[data-active-scene="hub"] .home-link {
 }
 .players-settings > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .players-settings-content { display: grid; gap: 8px; padding-top: 8px; }
+/* Every word in Advanced settings is white, to read easily against the panel. */
+.players-settings > summary,
+.players-settings-content :is(.players-hearing-label, .players-hearing-value, .players-hearing-help, .players-speak) { color: #fff; }
 
 .players-hearing-label {
   color: rgba(243, 239, 228, 0.72);
@@ -2371,6 +2814,9 @@ body[data-active-scene="hub"] .home-link {
 .chat-form input:focus-visible {
   border-color: var(--accent);
 }
+
+/* Ooga Chat's message fields, island and private, as dark as the log over them and the reaction card under them. */
+.chat-form input { background: var(--slab-dark); }
 
 .actions {
   display: grid;
@@ -2771,63 +3217,6 @@ body[data-active-scene="hub"] .home-link {
   transform: translate(-50%, 0);
 }
 
-/* Reading the whitepaper's poster: the help line at the foot of the screen, and, on a touch screen, the one button
-   that steps through it. */
-.wp-nav {
-  position: absolute;
-  z-index: 6;
-  left: 50%;
-  bottom: calc(16px + var(--safe-bottom));
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: min(620px, calc(100vw - 32px));
-  padding: 9px 16px;
-  background: linear-gradient(var(--plank), var(--wood));
-  border: 2px solid var(--wood-edge);
-  border-radius: 6px;
-  box-shadow: 0 3px 0 var(--nail);
-  color: var(--paper);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-align: center;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
-}
-.wp-nav-help {
-  white-space: nowrap;
-}
-.wp-nav-step {
-  display: none;
-}
-@media (pointer: coarse) {
-  .wp-nav-help {
-    display: none;
-  }
-  .wp-nav-step {
-    display: inline-block;
-    min-width: 44px;
-    min-height: 40px;
-    padding: 0 12px;
-    border: 2px solid var(--wood-edge);
-    border-radius: 6px;
-    background: linear-gradient(#e2a04a, var(--accent));
-    color: var(--ink);
-    font: inherit;
-    font-size: 15px;
-    font-weight: 600;
-    line-height: 1;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
-}
-/* The act button and the sticks wait while the poster is read, and the bar stands down so the page runs to the top. */
-body.wp-reading .bottom-hud>.act,
-body.wp-reading .topbar,
-body.wp-reading .joysticks {
-  display: none;
-}
-
 /* The microphone's note: stays while muted in voice, under the clock, clear of the act button and the toasts. */
 .mic-note {
   position: absolute;
@@ -2850,16 +3239,6 @@ body.wp-reading .joysticks {
   color: #ffb3a6;
   border-color: var(--danger);
 }
-
-/* Thump beside the voice controls: its mallet before the word, and quick repeated taps never zoom a phone. */
-.foot-thump {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  touch-action: manipulation;
-}
-
-.foot-thump .pixel-mallet { width: 11px; height: 11px; shape-rendering: crispEdges; }
 
 /* HALLOWEEN: the ghost hunt (ghost-hud.js). The round line and the visitor's bar under the clock and the hint, the
    banners across the middle, the flash when a ghost gets you; none of it takes a pointer. */
@@ -3364,8 +3743,8 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   border-color: #b07a45;
 }
 
-/* The hunt's spectator menu, bottom centre while the visitor is down (above the thumb sticks on a touch screen): the
-   three views to watch from, and the hunter watched with a step on to the next. */
+/* The hunt's spectator bar, bottom centre while the visitor is down (above the thumb sticks on a touch screen): the
+   hunter followed, with a step on to the next. */
 .ghost-spectate {
   position: absolute;
   left: 50%;
@@ -3387,7 +3766,7 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 }
 
 .ghost-spectate[hidden],
-.ghost-spectate-watch[hidden] {
+.ghost-spectate-next[hidden] {
   display: none;
 }
 
@@ -3400,14 +3779,12 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   color: var(--accent-text);
 }
 
-.ghost-spectate-modes,
 .ghost-spectate-watch {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.ghost-spectate-modes button,
 .ghost-spectate-next {
   flex: none;
   padding: 5px 10px;
@@ -3422,11 +3799,6 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   cursor: pointer;
 }
 
-.ghost-spectate-modes button[aria-pressed="true"] {
-  background: linear-gradient(#f0b05a, var(--accent));
-  color: var(--ink);
-}
-
 .ghost-spectate-name {
   font-size: 10px;
   line-height: 1.25;
@@ -3438,7 +3810,6 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
     bottom: calc(216px + var(--safe-bottom, 0px));
   }
 
-  .ghost-spectate-modes button,
   .ghost-spectate-next {
     min-height: 32px;
   }
@@ -3520,6 +3891,163 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   font-size: 9.5px;
   line-height: 1.3;
   color: var(--accent-text);
+  white-space: nowrap;
+}
+
+/* A hangar door's keypad on screen (`hangar-keypad.js`), in the steel of the one on the wall: the room's name, its
+   screen and twelve lit keys, the last row green; red while it refuses a code, shaking once as it does. On a wide
+   screen it stands to one side of the middle, away from the keypad on the wall (`data-side`), leaving the Ooga and
+   that keypad in view. */
+.hangar-keypad {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  margin: 0;
+  translate: -50% -50%;
+  width: min(232px, calc(100vw - 32px));
+  padding: 9px 12px 10px;
+  background: linear-gradient(#2c313c, #1d2028);
+  border: 3px solid #3b4351;
+  border-radius: 12px;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.45), 0 10px 26px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: #e8f4ff;
+  pointer-events: auto;
+  z-index: 6;
+}
+
+.hangar-keypad:focus {
+  outline: none;
+}
+
+@media (min-width: 760px) {
+  .hangar-keypad {
+    inset: 50% auto auto 72%;
+  }
+
+  .hangar-keypad[data-side="left"] {
+    inset: 50% auto auto 28%;
+  }
+}
+
+.hangar-keypad[data-state="deny"] {
+  animation: hangar-keypad-shake 0.4s ease-out;
+}
+
+@keyframes hangar-keypad-shake {
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(2px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hangar-keypad[data-state="deny"] {
+    animation: none;
+  }
+}
+
+.hangar-keypad-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.hangar-keypad-head h3 {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ffb347;
+  white-space: nowrap;
+}
+
+.hangar-keypad-close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 2px solid #3b4351;
+  border-radius: 6px;
+  background: #14171d;
+  color: #c9d0d8;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.hangar-keypad-screen {
+  margin: 0 0 10px;
+  padding: 7px 6px;
+  border: 2px solid #0b1510;
+  border-radius: 6px;
+  background: #0d2a1c;
+  color: #5dff9e;
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 18px;
+  letter-spacing: 0.12em;
+  text-align: center;
+  white-space: nowrap;
+  text-shadow: 0 0 6px rgba(93, 255, 158, 0.55);
+}
+
+.hangar-keypad[data-state="check"] .hangar-keypad-screen {
+  color: #ffd166;
+  text-shadow: 0 0 6px rgba(255, 209, 102, 0.55);
+}
+
+.hangar-keypad[data-state="deny"] .hangar-keypad-screen,
+.hangar-keypad[data-state="lock"] .hangar-keypad-screen {
+  background: #2a0d0d;
+  border-color: #160606;
+  color: #ff5a4f;
+  text-shadow: 0 0 6px rgba(255, 90, 79, 0.6);
+}
+
+.hangar-keypad-keys {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+}
+
+.hangar-keypad-keys button {
+  height: 40px;
+  border: 2px solid #0f1116;
+  border-radius: 7px;
+  background: linear-gradient(#26303e, #171f29);
+  color: #7fdcff;
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 700;
+  text-shadow: 0 0 6px rgba(127, 220, 255, 0.6);
+  box-shadow: inset 0 1px 0 rgba(127, 220, 255, 0.22), 0 2px 0 rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+.hangar-keypad-keys button:active {
+  translate: 0 1px;
+  box-shadow: inset 0 1px 0 rgba(127, 220, 255, 0.22), 0 1px 0 rgba(0, 0, 0, 0.5);
+}
+
+.hangar-keypad-keys .hangar-keypad-go {
+  color: #2ecc71;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-shadow: 0 0 6px rgba(46, 204, 113, 0.6);
+  box-shadow: inset 0 1px 0 rgba(46, 204, 113, 0.22), 0 2px 0 rgba(0, 0, 0, 0.5);
+}
+
+.hangar-keypad[data-state="deny"] .hangar-keypad-keys button,
+.hangar-keypad[data-state="lock"] .hangar-keypad-keys button {
+  color: #ff5a4f;
+  text-shadow: 0 0 6px rgba(255, 90, 79, 0.6);
+}
+
+.hangar-keypad-note {
+  margin: 8px 0 0;
+  font-size: 9.5px;
+  color: #9fb0c4;
+  text-align: center;
   white-space: nowrap;
 }
 
@@ -3841,10 +4369,11 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   width: 78px;
   height: 52px;
   padding: 7px 10px;
-  background: var(--tablet);
-  border: 2px solid var(--stone-dk);
+  background: var(--slab-dark);
+  /* A border and top highlight only a little lighter than the near-black, so the frame stays quiet. */
+  border: 2px solid #221f1c;
   border-radius: 9px 7px 10px 8px;
-  box-shadow: var(--tablet-shadow);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), inset 0 -2px 0 rgba(0, 0, 0, 0.35), 0 2px 0 rgba(0, 0, 0, 0.4);
   color: var(--paper);
   font: inherit;
   overflow: hidden;
@@ -3873,7 +4402,9 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 .jetpack-hud:hover:not(:disabled),
 .jetpack-hud.virtual-hover:not(:disabled),
 .jetpack-hud:focus-visible {
-  background: linear-gradient(160deg, #504b47, #45413d 55%, #363330);
+  /* A solid colour, as at rest: the background fades between two colours, never a colour and a gradient, which would
+     show the button see-through for the length of the fade. */
+  background: #2a2622;
   outline: none;
 }
 
@@ -3911,12 +4442,10 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   overflow: visible;
 }
 
-.mode-hud[data-holding="true"],
 .rescue-hud[data-holding="true"] {
-  background: linear-gradient(160deg, #615645, #50483c 55%, #3e3932);
+  background: #33291f;
 }
 
-.mode-hud::after,
 .rescue-hud::after {
   content: "";
   position: absolute;
@@ -3932,7 +4461,6 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   pointer-events: none;
 }
 
-.mode-hud[data-selected="true"][data-holding="true"]::after,
 .rescue-hud[data-holding="true"]::after {
   opacity: 1;
   animation: mode-release-progress 650ms linear forwards;
@@ -4075,6 +4603,31 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   width: 218px;
 }
 
+/* HALLOWEEN: the ghost hunt's gun has its own icon and no magazine to count, so it stays the small button with its
+   infinity beside it, and a hunter keeps it on screen through the hunt on every kind of pointer. */
+.weapon-icon .weapon-art-ghost,
+.weapon-hud[data-skin="ghost"] .weapon-art-ak,
+.weapon-hud[data-skin="ghost"] .weapon-readout {
+  display: none;
+}
+
+.weapon-hud[data-skin="ghost"] .weapon-art-ghost {
+  display: inline;
+}
+
+.weapon-hud[data-skin="ghost"][data-equipped="true"] {
+  width: 78px;
+}
+
+.weapon-hud[data-skin="ghost"][data-equipped="true"] .weapon-compact {
+  opacity: 1;
+  visibility: visible;
+}
+
+body.game-mode .weapon-hud[data-skin="ghost"] {
+  display: flex;
+}
+
 .rescue-hud {
   flex: none;
   padding: 0;
@@ -4137,7 +4690,6 @@ body.dsb-menu-open .rescue-equipment { visibility: hidden; pointer-events: none;
   user-select: none;
 }
 
-#mode-hud[data-selected="true"],
 .primary-hud[data-equipped="true"],
 .weapon-hud[data-equipped="true"],
 .jetpack-hud[data-equipped="true"] {
@@ -4153,7 +4705,8 @@ body.dsb-menu-open .rescue-equipment { visibility: hidden; pointer-events: none;
   overflow: hidden;
   border-radius: 2px;
   background: rgba(0, 0, 0, 0.45);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+  /* A light ring, so the empty track reads on the banner's near-black buttons. */
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(243, 239, 228, 0.45);
 }
 
 .primary-strength::after {
@@ -4192,7 +4745,8 @@ body.dsb-menu-open .rescue-equipment { visibility: hidden; pointer-events: none;
   overflow: hidden;
   border-radius: 2px;
   background: rgba(0, 0, 0, 0.45);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+  /* A light ring, so the empty track reads on the banner's near-black buttons. */
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(243, 239, 228, 0.45);
 }
 
 .jetpack-compact-fuel-fill {
@@ -4702,10 +5256,22 @@ body.dsb-menu-open .rescue-equipment { visibility: hidden; pointer-events: none;
   pointer-events: none;
 }
 
-/* While her tour holds the view the touch sticks do nothing, so they step aside for her panel. */
-body.tess-touring #joy-move,
+/* While her tour holds the view the look stick does nothing and steps aside; the move stick stays, since moving ends
+   the tour and walks the Ooga, and on a touch screen her panel rises clear of the sticks. */
 body.tess-touring #joy-look {
   visibility: hidden;
+}
+
+@media (pointer: coarse) {
+  body.tess-touring .greeter-menu.greeter-tour {
+    bottom: calc(max(48px, var(--stick-inset) - var(--home-chrome)) + var(--stick-size) + 12px + var(--safe-bottom));
+  }
+
+  /* With the bottom drawer open the sticks ride up on it (`--drawer-lift`), and the panel rises over them. The panel
+     stands on the stage, so a resized drawer's --drawer-height, which sheet.js writes there, reaches it too. */
+  body.tess-touring:has(.sheet[data-dock="bottom"][data-sticks="true"][data-open="true"]:not([hidden])) .greeter-menu.greeter-tour {
+    bottom: calc(var(--drawer-height) + var(--drawer-clear) + var(--stick-size) + 12px);
+  }
 }
 
 /* On tour the heading is two lines on purpose: where in the tour, then the stop's name. */
@@ -5037,7 +5603,7 @@ body.tess-touring #joy-look {
 .chalk-frame canvas { display: block; width: 100%; height: auto; aspect-ratio: 8 / 5; touch-action: none; cursor: crosshair; }
 .chalk-frame.has-tool canvas { cursor: none; }
 .chalk-frame.typing canvas { cursor: text; }
-.chalk-caret { position: absolute; width: 3px; height: 12%; background: #f2f3d6; box-shadow: 0 0 5px #f2f3d6; pointer-events: none; animation: chalk-caret-blink 1s steps(1) infinite; }
+.chalk-caret { position: absolute; width: 3px; height: 8%; background: #f2f3d6; box-shadow: 0 0 5px #f2f3d6; pointer-events: none; animation: chalk-caret-blink 1s steps(1) infinite; }
 .chalk-caret[hidden] { display: none; }
 .chalk-type-input { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
 @keyframes chalk-caret-blink { 50% { opacity: 0; } }
@@ -5738,6 +6304,35 @@ body.tess-touring #joy-look {
   text-shadow: 0 4px 0 rgba(0, 0, 0, 0.6), 0 0 24px rgba(216, 137, 43, 0.6);
   letter-spacing: 0.1em;
   pointer-events: none;
+}
+
+.block-struggle {
+  position: absolute;
+  left: 50%;
+  top: 60%;
+  transform: translate(-50%, -50%);
+  width: min(260px, 66vw);
+  text-align: center;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--paper);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
+
+.block-struggle-bar {
+  height: 16px;
+  margin-top: 4px;
+  border: 2px solid var(--paper);
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.block-struggle-bar i {
+  display: block;
+  height: 100%;
+  background: #f2c230;
+  transform: scaleX(0);
+  transform-origin: left;
 }
 
 .race-notice {
@@ -7671,6 +8266,17 @@ body[data-active-scene="timechain"] .weapon-reticle > span {
   visibility: visible;
 }
 
+/* With no weapon to aim (pilot.js `syncWeaponHud`), combat's crosshair is a single dot. */
+.weapon-reticle[data-unarmed="true"] { visibility: visible; }
+.weapon-reticle[data-unarmed="true"] > svg,
+.weapon-reticle[data-unarmed="true"] > span::after { display: none; }
+.weapon-reticle[data-unarmed="true"] > span {
+  width: 3px;
+  height: 3px;
+  background: #fff9dc;
+  visibility: visible;
+}
+
 /* DSB keeps controls in the existing page and its world in a separate scene. */
 .dsb-island-icon, .ember-den-icon { display: none; }
 body[data-active-scene="dsb"] .dsb-island-icon,
@@ -7690,16 +8296,17 @@ body[data-active-scene="poker"] .ember-den-icon {
 }
 body[data-active-scene="dsb"] :is(#freeroam-icon, #weapon-hud, #magazine-hud) { display: none !important; }
 body[data-active-scene] :is(.world-clock, .world-block) {
-  right: calc(var(--hub-banner-gutter) + var(--safe-right) + 92px);
+  right: calc(var(--hub-banner-button-right, calc(var(--hub-banner-gutter) + var(--safe-right))) + var(--hub-banner-button, 36px) * 2 + var(--hub-banner-button-gap, 8px) + 12px);
 }
+/* The controls and sound buttons, sized and placed by hud.js (`--hub-banner-button`, `-top`, `-right`, `-gap`). */
 .environment-sound {
   position: absolute;
-  top: calc(10px + var(--safe-top));
-  right: calc(var(--hub-banner-gutter) + var(--safe-right));
-  width: 36px;
-  height: 36px;
+  top: var(--hub-banner-button-top, calc(10px + var(--safe-top)));
+  right: var(--hub-banner-button-right, calc(var(--hub-banner-gutter) + var(--safe-right)));
+  width: var(--hub-banner-button, 36px);
+  height: var(--hub-banner-button, 36px);
 }
-.environment-sound svg { width: 24px; height: 24px; }
+.environment-sound svg { width: calc(var(--hub-banner-button, 36px) * 2 / 3); height: calc(var(--hub-banner-button, 36px) * 2 / 3); }
 .environment-sound svg path:not(:first-child) { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .environment-sound .sound-muted, .environment-sound[aria-pressed="true"] .sound-waves { display: none; }
 .environment-sound[aria-pressed="true"] .sound-muted { display: block; }
@@ -8357,8 +8964,9 @@ body[data-active-scene="dsb"] #destination-hud:disabled { opacity: 1; cursor: de
   display: none;
   position: absolute;
   left: 50%;
-  /* Below the View, Pause and Sound row (to 62px on a phone), so it never takes their taps. */
-  top: calc(68px + var(--safe-top));
+  /* Below the banner's controls (hud.js measures where they end; a phone stacks them under the title), so it never
+     takes their taps. */
+  top: var(--banner-controls-bottom, calc(68px + var(--safe-top)));
   transform: translateX(-50%);
   gap: 10px;
   align-items: baseline;
@@ -10439,6 +11047,476 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
   .sphere-mode { white-space: normal; max-width: 46vw; overflow-wrap: anywhere; }
 }
 
+/* Block Frenzy: the side picker's two forts, the score chips in their team colours, and the blocks' states. */
+.block-sides {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.block-side {
+  flex: 1 1 120px;
+  min-height: 44px;
+  border: 3px solid var(--wood-edge);
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 700;
+  color: #fff;
+  cursor: pointer;
+}
+
+.block-target {
+  flex: 1 1 44px;
+  background: #5a3a22;
+}
+
+.block-side[data-team="blue"] {
+  background: #1d4fa8;
+}
+
+.block-side[data-team="red"] {
+  background: #a8261d;
+}
+
+.block-side[aria-pressed="false"] {
+  opacity: 0.55;
+}
+
+.block-side[aria-pressed="true"] {
+  box-shadow: 0 0 0 3px #f7931a;
+}
+
+.block-score[data-team="blue"] b {
+  color: #9cc8ff;
+}
+
+.block-score[data-team="red"] b {
+  color: #ffb0a6;
+}
+
+.block-state b {
+  font-size: 14px;
+  text-transform: uppercase;
+}
+
+.block-state b[data-state="carried"] {
+  color: #f7931a;
+}
+
+.block-state b[data-state="dropped"] {
+  color: #ffd27a;
+}
+
+/* The quiz trap's card: the question, four answers in a grid (one column on a phone), and the bubble's time left. */
+.block-quiz {
+  border-color: #3dff7a;
+  box-shadow: 0 0 0 3px rgba(61, 255, 122, 0.35), 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.block-quiz-q {
+  font-size: 17px;
+  line-height: 1.3;
+  margin: 6px 0 12px;
+}
+
+.block-answers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.block-answer {
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 8px;
+  background: #1c2a20;
+  color: #eaffef;
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.block-answer:hover:not(:disabled),
+.block-answer:focus-visible {
+  border-color: #3dff7a;
+}
+
+.block-answer[data-mark="right"] {
+  background: #1f6b35;
+  border-color: #3dff7a;
+}
+
+.block-answer[data-mark="wrong"] {
+  background: #6b1f1f;
+  border-color: #ff4a3a;
+}
+
+.block-answer:disabled {
+  cursor: default;
+}
+
+.block-quiz-time {
+  height: 6px;
+  margin-top: 8px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+}
+
+.block-quiz-time span {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: #3dff7a;
+}
+
+@media (max-width: 560px) {
+  .block-answers {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Block Frenzy's Ooga picker on the board, and the touch paint button above the jump. */
+.block-ooga {
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: #2a1d12;
+  color: #f3e6cc;
+  font: inherit;
+}
+
+.block-paint {
+  bottom: calc(118px + var(--safe-bottom));
+  background: linear-gradient(#ff7a6a, #d63a2a);
+}
+
+/* First person's crosshair: a small cross with a dot, centred on the view. */
+.block-cross {
+  position: absolute;
+  z-index: 12;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  pointer-events: none;
+  background:
+    linear-gradient(#fff3d6, #fff3d6) center / 2px 22px no-repeat,
+    linear-gradient(#fff3d6, #fff3d6) center / 22px 2px no-repeat;
+  filter: drop-shadow(0 0 2px #000);
+}
+
+.block-cross::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f7931a;
+}
+
+/* Block Frenzy's weapons bar, bottom right; movable and minimizable, and the wind sign in the strip. */
+.block-tools {
+  position: absolute;
+  z-index: 12;
+  right: calc(12px + var(--safe-right, 0px));
+  bottom: calc(14px + var(--safe-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: calc(100% - 24px);
+}
+
+.block-tools button {
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: rgba(30, 20, 12, 0.82);
+  color: #f3e6cc;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.block-bar-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.block-bar-tabs button {
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  line-height: 1;
+}
+
+.block-bar-grip {
+  cursor: move !important;
+  touch-action: none;
+}
+
+.block-slots {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.block-slots button {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.block-slots kbd {
+  position: absolute;
+  top: 1px;
+  left: 3px;
+  font: inherit;
+  font-size: 10px;
+  opacity: 0.75;
+}
+
+.block-slots b {
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  font-size: 10px;
+  font-weight: normal;
+  color: #ffd27a;
+}
+
+.block-slot-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.block-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.block-actions button {
+  min-height: 36px;
+  padding: 2px 8px;
+}
+
+.block-actions kbd {
+  margin-right: 4px;
+  font: inherit;
+  opacity: 0.6;
+}
+
+.block-actions b {
+  margin-left: 4px;
+  color: #ffd27a;
+}
+
+.block-tools button[aria-pressed="true"] {
+  border-color: #f7931a;
+  box-shadow: 0 0 0 2px rgba(247, 147, 26, 0.45);
+}
+
+.block-tools[data-min="true"] .block-slots,
+.block-tools[data-min="true"] .block-actions {
+  display: none;
+}
+
+.block-tool-crate {
+  background: rgba(70, 44, 20, 0.88) !important;
+}
+
+@media (pointer: fine) {
+  .block-actions {
+    display: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .block-tools kbd,
+  .block-bar-grip {
+    display: none;
+  }
+
+  .block-tools {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    align-items: center;
+    bottom: calc(176px + var(--safe-bottom));
+  }
+
+  .block-slots {
+    justify-content: center;
+  }
+}
+
+/* Block Frenzy's sprint gauge in the strip. */
+.block-sprint-bar {
+  width: 64px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+}
+
+.block-sprint-bar i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: #7fe08a;
+}
+
+.block-sprint-bar i[data-tired="true"] {
+  background: #f7931a;
+}
+
+.block-tools button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.block-tool-pass:not(:disabled) {
+  border-color: #f7931a;
+  background: rgba(120, 70, 10, 0.9);
+}
+
+/* Block Frenzy's mini-map, on the right below the strip, and the action feed on the left. */
+.block-map {
+  position: absolute;
+  z-index: 11;
+  right: calc(12px + var(--safe-right, 0px));
+  top: 160px;
+  width: 88px;
+  height: 148px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: rgba(30, 20, 12, 0.72);
+  pointer-events: none;
+}
+
+.block-feed {
+  position: absolute;
+  z-index: 11;
+  left: calc(12px + var(--safe-left, 0px));
+  top: 160px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-width: min(260px, 45vw);
+  pointer-events: none;
+}
+
+.block-feed li {
+  margin: 0 0 4px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: rgba(30, 20, 12, 0.72);
+  color: #f3e6cc;
+  font-size: 11px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.block-feed li:empty {
+  display: none;
+}
+
+.block-feed li[data-team="blue"] {
+  border-left: 3px solid #3a8dff;
+}
+
+.block-feed li[data-team="red"] {
+  border-left: 3px solid #ff4a3a;
+}
+
+@media (max-width: 520px) {
+  .block-map {
+    top: 226px;
+    width: 66px;
+    height: 111px;
+  }
+
+  .block-feed li {
+    font-size: 10px;
+  }
+}
+
+/* On a wide screen Block Frenzy's board sits on the left, leaving the right for the Ooga on show, with its name
+   under it. */
+@media (min-width: 760px) {
+  #block-board {
+    left: calc(20px + var(--safe-left, 0px));
+    transform: translateY(-50%);
+    width: min(560px, 54vw);
+  }
+
+  #block-board .garage-columns {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.block-preview-name {
+  position: absolute;
+  z-index: 11;
+  right: 9vw;
+  bottom: 9%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px 10px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 8px;
+  background: rgba(30, 20, 12, 0.82);
+  color: #f3e6cc;
+}
+
+.block-preview-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  margin-top: 4px;
+  min-width: 220px;
+}
+
+.block-preview-pick label {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.block-preview-name b {
+  font-size: 16px;
+}
+
+.block-preview-name span {
+  font-size: 10px;
+  opacity: 0.75;
+}
+
+#block-board[hidden] ~ .block-preview-name {
+  display: none;
+}
+
+/* Block Frenzy's jetpack fuel, beside the sprint gauge, in flame orange. */
+.block-jet .block-sprint-bar i {
+  background: #ff8a2a;
+}
+
 /* Presets keep their scene actions but share the same title/controls/clock layout. */
 body[data-active-scene] .topbar { align-items: start; }
 body[data-active-scene] .topbar > .presets {
@@ -10723,20 +11801,38 @@ body[data-active-scene="arcade"] #destination-hud:not([hidden]) { display: flex;
 }
 
 body.cloud-hopper-active #destination-hud,
-body.cloud-hopper-active #own-ooga-hud,
 body.cloud-hopper-active #mode-hud { display: none; }
+
+/* Block Frenzy's board: one short line of keys, the full list folded under "All controls" and scrolled within a
+   bounded height, so the choices above stay in view. */
+#block-board .block-help-wrap {
+  min-width: 0;
+}
+
+#block-board .block-controls summary {
+  cursor: pointer;
+  margin-top: 4px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+#block-board .block-controls[open] .help {
+  max-height: 22vh;
+  overflow-y: auto;
+  margin-top: 4px;
+}
 
 /* Controls reference: a quiet native modal, with real, independently lit keycaps. */
 body[data-active-scene] #controls-help-button { display: flex; align-items: center; justify-content: center; }
-.controls-help-button { position: absolute; top: calc(10px + var(--safe-top)); right: calc(var(--hub-banner-gutter) + var(--safe-right) + 44px); width: 36px; height: 36px; }
-.controls-help-button svg { width: 24px; height: 24px; }
+.controls-help-button { position: absolute; top: var(--hub-banner-button-top, calc(10px + var(--safe-top))); right: calc(var(--hub-banner-button-right, calc(var(--hub-banner-gutter) + var(--safe-right))) + var(--hub-banner-button, 36px) + var(--hub-banner-button-gap, 8px)); width: var(--hub-banner-button, 36px); height: var(--hub-banner-button, 36px); }
+.controls-help-button svg { width: calc(var(--hub-banner-button, 36px) * 2 / 3); height: calc(var(--hub-banner-button, 36px) * 2 / 3); }
 .controls-help { width: min(480px, calc(100vw - 24px)); padding: 16px; max-height: calc(100dvh - 32px - var(--safe-top) - var(--safe-bottom)); overflow-y: auto; overscroll-behavior: contain; }
 #controls-help-context { margin: 8px 0 4px; color: var(--gold, #ffd84a); font-size: 12px; }
 #controls-help-note { margin: 4px 0 8px; font-size: 12px; line-height: 1.4; opacity: .8; }
 .controls-list { margin-top: 8px; }
 .controls-row { display: grid; grid-template-columns: 174px minmax(0, 1fr); align-items: center; gap: 12px; padding: 5px 0; border-top: 1px solid #f3efe424; font-size: 12px; line-height: 1.4; }
 .controls-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.controls-keys kbd, .controls-gesture { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 2px 5px; border: 1px solid #f3efe465; border-bottom-width: 3px; border-radius: 4px; background: #24252a; color: #f3efe4; font: inherit; }
+.controls-keys kbd, .controls-gesture { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 2px 5px; border: 1px solid #f3efe465; border-bottom-width: 3px; border-radius: 4px; background: var(--slab-dark); color: #f3efe4; font: inherit; }
 .controls-keys kbd[data-pressed="true"] { background: #ffd84a; color: #171308; border-color: transparent; }
 .controls-key-cluster { display: grid; grid-template-columns: repeat(3, 24px); gap: 3px; }
 .controls-key-cluster :is([data-key="w"], [data-key="arrowup"]) { grid-area: 1 / 2; }
@@ -10747,6 +11843,87 @@ body[data-active-scene] #controls-help-button { display: flex; align-items: cent
 @media (max-width: 420px) {
   .controls-help { padding: 12px; }
   .controls-row { grid-template-columns: minmax(110px, 1fr) 1.1fr; gap: 8px; }
+}
+.controls-help-pad { margin: 0 0 4px; padding: 6px 12px; border: 2px solid var(--wood-edge); border-radius: 6px; background: var(--accent); color: #1b1006; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.controls-help-pad:hover, .controls-help-pad:focus-visible { background: #e89a3c; outline: 2px solid #ffd84a; outline-offset: 2px; }
+.controls-glyph, .pad-glyph { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0 6px; border: 1px solid #f3efe465; border-radius: 12px; background: var(--slab-dark); color: #f3efe4; font-weight: 700; font-size: 12px; white-space: nowrap; }
+.controls-glyph.round, .pad-glyph.round { width: 24px; padding: 0; }
+.controls-glyph.stick, .pad-glyph.stick { width: 24px; padding: 0; border-radius: 50%; border-style: double; border-width: 3px; font-size: 10px; }
+.g-xa { color: #5fb94a; } .g-xb { color: #e5533d; } .g-xx { color: #3d8be5; } .g-xy { color: #e8c43a; }
+.g-pcross { color: #8fb3f0; } .g-pcircle { color: #f07a7a; } .g-psquare { color: #ee97d6; } .g-ptri { color: #4fd1a8; }
+/* A pad's focus ring, the same in every dialog and card the controller walks. */
+.pad-focus, .pad-focus:focus, .pad-settings :is(button, input):focus-visible { outline: 2px solid #ffd84a; outline-offset: 2px; }
+
+/* The controller screen: the player's controller beside its actions, the feel below. One column on phones. */
+.pad-settings { width: min(1000px, calc(100vw - 24px)); padding: 14px; max-height: calc(100dvh - 24px - var(--safe-top) - var(--safe-bottom)); overflow-y: auto; overscroll-behavior: contain; }
+.pad-settings > * + * { margin-top: 12px; }
+.pad-settings .panel-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.pad-device { display: flex; align-items: center; gap: 8px; margin-left: auto; padding: 5px 10px; border-radius: 999px; background: var(--tablet); font-size: 12px; }
+.pad-device small { display: block; color: var(--muted); font-size: 10px; }
+.pad-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.pad-dot.live { background: var(--ok); box-shadow: 0 0 0 3px #22c55e33; }
+.pad-family, .pad-tabs, .pad-seg, .pad-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.pad-label { margin-right: 4px; color: var(--paper); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; opacity: .8; white-space: nowrap; }
+.pad-settings button { font: inherit; color: var(--paper); cursor: pointer; }
+.pad-family button, .pad-tabs button, .pad-seg button, .pad-buttons button, .pad-small, .pad-change { padding: 5px 10px; border: 1px solid #f3efe440; border-radius: 6px; background: var(--tablet); font-size: 12px; white-space: nowrap; }
+.pad-family button[aria-pressed="true"], .pad-tabs button[aria-selected="true"], .pad-seg button[aria-pressed="true"], .pad-buttons button.primary { border-color: transparent; background: var(--accent); color: #1b1006; font-weight: 700; }
+.pad-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.pad-picture, .pad-setup, .pad-tune, .pad-list { padding: 10px; border-radius: var(--radius); background: var(--tablet); box-shadow: var(--tablet-shadow); }
+.pad-picture svg { display: block; width: 100%; height: auto; }
+.pad-hint { min-height: 2.9em; margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.pad-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.pad-list .pad-note { margin-bottom: 4px; }
+.pad-tabs { margin-bottom: 8px; }
+.pad-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 6px 4px; border-top: 1px solid #f3efe424; border-radius: 4px; font-size: 12px; }
+.pad-row.lit { background: #ffd84a14; }
+.pad-row.capture { background: #d8892b22; outline: 1px solid var(--accent); }
+.pad-name small { display: block; color: var(--faint); font-size: 10px; }
+.pad-glyphs { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.pad-none { color: var(--faint); font-size: 10px; }
+.pad-change:disabled { opacity: .45; cursor: default; }
+.pad-prompt { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--accent-text); font-size: 12px; }
+.pad-prompt button { padding: 4px 10px; border: 0; border-radius: 6px; background: var(--accent); color: #1b1006; font-weight: 700; }
+.pad-prompt button.plain { background: var(--stone-lt); color: var(--paper); font-weight: 400; }
+.pad-tune { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 18px; }
+.pad-tune .section-head { grid-column: 1 / -1; margin: 0; }
+.pad-field { display: grid; gap: 4px; align-content: start; }
+.pad-field > label { display: flex; justify-content: space-between; gap: 8px; color: var(--paper); font-size: 12px; }
+.pad-field output { font: 12px var(--mono); font-variant-numeric: tabular-nums; }
+.pad-field input[type="range"] { width: 100%; accent-color: var(--accent); }
+.pad-small { justify-self: start; }
+.pad-check { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.pad-check input { width: 16px; height: 16px; accent-color: var(--accent); }
+.pad-setup { display: grid; gap: 8px; }
+.pad-setup .section-head { margin: 0; }
+.pad-setup-step { font-size: 14px; font-weight: 700; }
+.pad-setup-bar { height: 6px; overflow: hidden; border-radius: 3px; background: var(--stone-lt); }
+.pad-setup-bar i { display: block; width: 0; height: 100%; background: var(--accent); transition: width .2s; }
+.pad-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.pad-foot .pad-buttons { margin-left: auto; }
+.pad-toast { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; width: fit-content; max-width: 100%; margin: 12px auto 0; padding: 8px 12px; border-radius: 8px; background: var(--stone-lt); box-shadow: 0 6px 20px #0008; font-size: 12px; }
+.pad-toast button { border: 0; background: transparent; color: #ffd84a; font-weight: 700; }
+#pad-diagram .body { fill: #1f1d1b; stroke: #57524c; stroke-width: 2; }
+#pad-diagram .ctl { cursor: pointer; }
+#pad-diagram .ctl .cap { fill: #2c2a27; stroke: #6b655e; stroke-width: 1.5; transition: fill .08s; }
+#pad-diagram .ctl text { fill: var(--fg); font: 700 12px system-ui, sans-serif; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+#pad-diagram .ctl.small text { font-size: 9px; }
+#pad-diagram .ctl text.g-xa { fill: #5fb94a; } #pad-diagram .ctl text.g-xb { fill: #e5533d; } #pad-diagram .ctl text.g-xx { fill: #3d8be5; } #pad-diagram .ctl text.g-xy { fill: #e8c43a; }
+#pad-diagram .ctl text.g-pcross { fill: #8fb3f0; } #pad-diagram .ctl text.g-pcircle { fill: #f07a7a; } #pad-diagram .ctl text.g-psquare { fill: #ee97d6; } #pad-diagram .ctl text.g-ptri { fill: #4fd1a8; }
+#pad-diagram .ctl:hover .cap, #pad-diagram .ctl.sel .cap { stroke: #ffd84a; stroke-width: 2.5; }
+#pad-diagram .ctl.on .cap { fill: #ffd84a; }
+#pad-diagram .ctl.on text { fill: #171308; }
+#pad-diagram .ctl.target .cap { stroke: #ffd84a; stroke-width: 3; animation: pad-pulse 1s ease-in-out infinite; }
+#pad-diagram .ctl.unused .cap { stroke-dasharray: 3 3; }
+#pad-diagram .dead { fill: none; stroke: #ffd84a55; stroke-dasharray: 2 3; }
+#pad-diagram .stickdot { fill: var(--accent); }
+#pad-diagram .stickdot.rest { fill: var(--faint); }
+#pad-diagram .stick-name { fill: var(--muted); font-size: 10px; }
+@keyframes pad-pulse { 50% { stroke-opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { #pad-diagram .ctl.target .cap { animation: none; } }
+@media (max-width: 760px) {
+  .pad-main { grid-template-columns: minmax(0, 1fr); }
+  .pad-device { margin-left: 0; }
+  .pad-foot .pad-buttons { margin-left: 0; }
 }
 /* Players read shared hockey scores inside the goal half-circles. */
 #carnival[data-kind="hockey"][data-hockey-shared="true"] .carnival-scores,
@@ -10898,3 +12075,116 @@ body[data-cabinet-phase="menu"] .cloud-hopper-intro .cloud-hopper-scores-title {
 
 /* Arcade player controls remain reachable above game cards, including Cloud Hopper. */
 body.arcade-game .cloud-hopper-panel { z-index: 40; }
+
+/* Block Frenzy's menu: dark backing behind every line of text on the wood, so it reads. */
+#block-board .garage-head,
+#block-board .garage-col {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(18, 11, 6, 0.74);
+}
+
+#block-board .section-head,
+#block-board .help,
+#block-board label,
+#block-board summary {
+  color: #f7ecd8;
+}
+
+/* Block Frenzy's in-play help card. */
+.block-help {
+  position: absolute;
+  z-index: 15;
+  left: 50%;
+  top: 20%;
+  transform: translateX(-50%);
+  width: min(460px, calc(100% - 24px));
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(18, 11, 6, 0.92);
+  color: #f7ecd8;
+  font-size: 13px;
+}
+
+.block-tip {
+  color: #ffd27a !important;
+}
+
+/* Block Frenzy's controls list: grouped key and action rows on a dark backing. */
+/* With All controls open, the panel grows sideways and the list runs in columns, so it stays on screen. */
+@media (min-width: 900px) {
+  #block-board:has(.block-controls[open]) {
+    width: min(94vw, 1060px);
+    max-width: min(94vw, 1060px);
+  }
+
+  #block-board .block-keys {
+    column-count: 3;
+    column-gap: 22px;
+  }
+
+  #block-board .block-keys h4 {
+    break-after: avoid;
+  }
+
+  #block-board .block-keys div {
+    break-inside: avoid;
+  }
+}
+
+/* A small screen scrolls the list inside the panel instead. */
+@media (max-width: 899px) {
+  #block-board .block-keys {
+    max-height: 42vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+.block-keys {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(18, 11, 6, 0.82);
+  color: #f7ecd8;
+  font-size: 12px;
+}
+
+.block-keys h4 {
+  margin: 8px 0 3px;
+  color: #ffd27a;
+  font-size: 12px;
+}
+
+.block-keys h4:first-child {
+  margin-top: 0;
+}
+
+.block-keys div {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  gap: 6px;
+  padding: 1px 0;
+}
+
+.block-keys kbd {
+  font: inherit;
+  color: #ffd27a;
+}
+
+.block-live { margin: 8px 0; }
+.block-live-sizes, .block-live-buttons { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+.block-live-list { list-style: none; margin: 4px 0; padding: 0; font-size: 11px; }
+.block-watch { position: absolute; top: 56px; right: 12px; max-width: min(60%, 420px); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; max-width: calc(100% - 24px); padding: 8px 12px; background: rgba(255, 255, 255, 0.9); color: #222; border: 1px solid #bbb; border-radius: 6px; font-size: 13px; pointer-events: auto; }
+.block-viewer-board { position: absolute; top: 56px; left: 12px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 8px 16px; background: #15181d; border: 2px solid #2c333c; border-radius: 6px; pointer-events: none; }
+.block-board-stats { flex-basis: 100%; border-collapse: collapse; font-size: 12px; color: #c9cdd2; }
+.block-board-stats th, .block-board-stats td { padding: 1px 6px 1px 0; text-align: right; font-weight: normal; }
+.block-board-stats th:first-child, .block-board-stats td:first-child { text-align: left; max-width: 110px; overflow: hidden; }
+.block-board-stats tr[data-side="blue"] td { color: #58b4ff; }
+.block-board-stats tr[data-side="red"] td { color: #ff9a3c; }
+.block-board-side { display: flex; flex-direction: column; align-items: center; min-width: 58px; font-size: clamp(13px, 1.5vw, 16px); text-transform: uppercase; letter-spacing: 1px; }
+.block-board-side b { font-size: clamp(38px, 5.5vw, 62px); line-height: 1; font-variant-numeric: tabular-nums; }
+.block-board-side[data-side="blue"] { color: #58b4ff; }
+.block-board-side[data-side="red"] { color: #ff9a3c; }
+.block-board-mid { display: flex; flex-direction: column; align-items: center; gap: 2px; color: #f4f4f0; }
+.block-board-mid small { font-size: clamp(13px, 1.5vw, 16px); }
+.block-board-mid small:last-child { font-size: clamp(18px, 2.2vw, 24px); font-variant-numeric: tabular-nums; }

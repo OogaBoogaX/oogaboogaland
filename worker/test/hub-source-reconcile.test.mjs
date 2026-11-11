@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildHubWorld } from '../src/hub-world.js';
 import { createHubWorldSimulation } from '../src/hub-world-simulation.js';
+import { HUB_WORLD_CHECKPOINT_VERSION } from '../src/hub-world-recovery.js';
 import * as M from '../src/ooga-crew.js';
 import { HOST } from '../src/virtual-host.js';
 import { BODY_STORAGE } from '../src/host-body-storage.js';
@@ -118,4 +119,13 @@ test('the transaction adapter commits a reconciliation atomically and leaves the
   assert.equal(simulation.applySource(saved, pile({ bananas: 5000, at: observed - 1 }), timing(observed)), 'applied');
   assert.equal(saved.state.level, 5000);
   assert.equal(saved.state.at, untouched.state.at, 'no clock change');
+});
+
+
+test('complete Hub rejects pre-bridge recovery before constructing geometry or controllers', () => {
+  assert.equal(HUB_WORLD_CHECKPOINT_VERSION, 8);
+  const config = configuration();
+  // A stale envelope needs no valid actor payload: its schema is refused first.
+  const saved = { v: 7, world: config.version };
+  assert.throws(() => construct(config, saved, null), /migration required/);
 });

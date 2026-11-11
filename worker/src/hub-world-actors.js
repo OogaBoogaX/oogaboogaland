@@ -1,8 +1,9 @@
+import { HOST } from './virtual-host.js';
 // Construct the actual coupled Hub controllers over one private authored world.
 // Movement, placement and routine selection are composed over the real private
 // geometry here. There is no flat-ground or permissive-clearance fallback.
 import { createOogaCrew, createNpcClankers, createNpcLabEquipment, createNpcWorkSites,
-  createNpcClankerLayout, hubSlots, hubModels } from './ooga-crew.js';
+  createNpcClankerLayout, hubSlots, hubModels, hubWalkRules } from './ooga-crew.js';
 import { createHubForestBeds } from './hub-forest-beds.js';
 import { createHubWorldRecovery } from './hub-world-recovery.js';
 import { createHubWorldArrivals } from './hub-world-arrivals.js';
@@ -11,6 +12,7 @@ import { createHubWorldNavigation } from './hub-world-navigation.js';
 import { createHubWorldDestinations } from './hub-world-destinations.js';
 import { createHubWorldPlacement } from './hub-world-placement.js';
 import { createHubRoutinePaths } from './hub-routine-paths.js';
+import { CLANKER_FIXED_PATH_CAPACITY } from './clanker-buffers.js';
 
 const OOGA_QUERIES = ['groundAt', 'ceilingAt', 'walkable', 'npcWalkable', 'flyable',
   'wanderSpot', 'npcDestinationBlocked', 'npcLandingAllowed', 'npcRecoverySpot',
@@ -40,7 +42,7 @@ function constructHubWorldActors({ geometry, roster, execution, world, clock,
   tintWanted, game, stars, npcIdFor }) {
   if (!geometry?.lab || !geometry?.sleep || roster?.authoritative !== true
     || execution?.version !== 1 || !Array.isArray(roster.activeRoster)
-    || roster.activeRoster.length > 53 || typeof clock !== 'function'
+    || roster.activeRoster.length > HOST.maxOogas || typeof clock !== 'function'
     || typeof tintWanted !== 'function' || typeof npcIdFor !== 'function' || !game?.state?.assignments
     || typeof game.itemOf !== 'function' || !world || world.level !== geometry.pileLevel)
     fail('complete authoritative Hub actor inputs required');
@@ -68,6 +70,10 @@ function constructHubWorldActors({ geometry, roster, execution, world, clock,
   const { island, root, solids, headquarters, mempool, lab } = geometry;
   const walkIn = { x: 0, z: -(island.meadowRadius + 0.5) };
   const paths = createHubRoutinePaths(island);
+  // Use the browser source's trimmed spokes and ring joins for passive work
+  // legs, with the host's existing bounded state allocation.
+  const fixedPaths = globalThis.BL.npcPaths.fixed(island);
+  if (!fixedPaths || paths.capacity !== CLANKER_FIXED_PATH_CAPACITY) fail('unsupported authored mainland fixed routes');
   // Stable bed IDs require the same bounded search order after recovery. Reuse
   // its result only after replaying its clearance decisions in this world.
   const forest = createHubForestBeds(mempool,
@@ -110,7 +116,9 @@ function constructHubWorldActors({ geometry, roster, execution, world, clock,
     labEquipment = createNpcLabEquipment({ getLab: () => lab, getClankers: () => clankers });
     const shared = { ...oogaMovement, root, world, game,
       npcExecution: execution, npcContributors: roster, npcTintWanted: tintWanted,
-      npcPassive: true, npcFixedPaths: true, npcPaths: paths, bedrolls: headquarters.mattresses,
+      npcPassive: true, npcFixedPaths: fixedPaths, npcPaths: paths,
+      npcFixedTerrainAt: (x, z, y) => island.supportAt(x, z, y, hubWalkRules.step, -120, 0.3),
+      bedrolls: headquarters.mattresses,
       outdoorBedrolls: forest.beds, viewYaw: 0, walkIn, buildSpots: [], workSites: sites,
       weaponsEnabled: true, combatEnabled: false,
       reloadSlotRadius: () => island.path.debug.ringLoadingRadius,
@@ -124,6 +132,7 @@ function constructHubWorldActors({ geometry, roster, execution, world, clock,
     if (labSite < 0) fail('Hub lab work site missing');
     clankers = createNpcClankers({ ...clankerMovement, root, crew, sites,
       npcExecution: execution, npcClock: clock, npcPassive: true, combatEnabled: false,
+      npcFixedPaths: fixedPaths, npcPathState: paths.createState,
       sleep: geometry.sleep, labSite, labInside: lab.inside, labStations: lab.stations,
       labEquipment: lab.equipment, labPickup: labEquipment.pickup,
       labReturn: labEquipment.release, labRoll: labEquipment.roll,
@@ -133,6 +142,9 @@ function constructHubWorldActors({ geometry, roster, execution, world, clock,
       solidAt: island.solidAt, surfaceAt: island.surfaceAt, stairAt: island.stairAt,
       isGrass: island.isGrassAt, onLand: island.onLand,
       roamRadius: island.radius, meadowRadius: island.meadowRadius });
+    // Allocate the complete fixed-lane shape before recovery compiles actor
+    // defaults. Lazily adding pathing during a trip would escape that schema.
+    for (const entry of clankers.list) entry.pathing = paths.createState();
     clankers.sites = sites;
     const arrive = createHubWorldArrivals({ geometry, crew, clankers, npcIdFor,
       placement: navigation.playerPlacement });

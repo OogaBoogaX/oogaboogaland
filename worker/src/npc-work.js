@@ -18,6 +18,7 @@ const bad = () => { throw new Error("invalid NPC work checkpoint"); };
 
 export function createNpcWork(adapters) {
   if (!adapters || callbacks.some(k => typeof adapters[k] !== "function")
+    || ["fixedTrip", "clock"].some(k => adapters[k] !== undefined && typeof adapters[k] !== "function")
     || !Array.isArray(adapters.workSites) || !integer(adapters.workSites.length, 1, 32)
     || !integer(adapters.AMMO_MAX, 1, 30) || !finite(adapters.WORK_REST_MIN, 60)
     || adapters.WORK_REST_MIN < 0 || !finite(adapters.WORK_REST_SPREAD, 60) || adapters.WORK_REST_SPREAD < 0) {
@@ -42,25 +43,27 @@ export function createWorkCheckpoint(world, routeLengths) {
   const routes = routeLengths.slice(), keys = Object.keys(createWorkState(0));
   const booleans = ["targetReady", "aimReady", "blocked", "reloadSlot", "direct"];
   const numbers = ["blockedTime", "gait", "timer", "emptyTime", "rest"];
-  const valid = w => exact(w, keys) && ["", "outbound", "station", "shoot", "return", "reload"].includes(w.phase)
+  const valid = (w, saved = false) => exact(w, keys) && ["", "outbound", "station", "shoot", "return", "reload"].includes(w.phase)
     && integer(w.site, 0, routes.length - 1) && integer(w.plannedSite, -1, routes.length - 1)
     && integer(w.index, -1, routes[w.site]) && integer(w.place, -1, 4096)
     && (w.phase !== "outbound" || w.index >= 0) && (w.phase !== "return" || w.index < routes[w.site])
     && integer(w.aimSample, 0, Number.MAX_SAFE_INTEGER)
     && booleans.every(k => typeof w[k] === "boolean") && numbers.every(k => finite(w[k], 1e9))
+    && (w.reservedAt === (saved ? null : Infinity) || finite(w.reservedAt, 1e9) && w.reservedAt >= 0)
     && w.blockedTime >= 0 && w.gait >= 0 && w.emptyTime >= 0 && vector(w.position) && vector(w.target);
   const copy = w => ({ ...w, position: { ...w.position }, target: { ...w.target } });
   return {
     capture(work) {
       if (!valid(work)) bad();
-      return { v: 1, world, routes: routes.slice(), work: copy(work) };
+      return { v: 2, world, routes: routes.slice(),
+        work: { ...copy(work), reservedAt: work.reservedAt === Infinity ? null : work.reservedAt } };
     },
     restore(saved) {
-      if (!exact(saved, ["v", "world", "routes", "work"]) || saved.v !== 1 || saved.world !== world
+      if (!exact(saved, ["v", "world", "routes", "work"]) || saved.v !== 2 || saved.world !== world
         || !Array.isArray(saved.routes) || saved.routes.length !== routes.length
         || Object.keys(saved.routes).length !== routes.length
-        || routes.some((n, i) => saved.routes[i] !== n) || !valid(saved.work)) bad();
-      return copy(saved.work);
+        || routes.some((n, i) => saved.routes[i] !== n) || !valid(saved.work, true)) bad();
+      return { ...copy(saved.work), reservedAt: saved.work.reservedAt === null ? Infinity : saved.work.reservedAt };
     },
   };
 }

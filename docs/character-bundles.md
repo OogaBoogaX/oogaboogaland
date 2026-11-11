@@ -32,7 +32,8 @@ Maintain/Admin permission. This includes appearance-only edits. Existing
 `handle`/`github` aliases remain supported; new data-only aliases receive an explicit
 `github` field. Custom code must declare that alias itself. Duplicate identities,
 symlinks, executable files, path tricks, transfers, deletions and renames cannot
-enter the bundles. Transfers/deletions/renames need a separate maintainer process.
+enter the bundles. Transfers/deletions/renames use a [maintainer override
+PR](#maintainer-override-prs).
 
 The scanner reads each character revision, including intermediate revisions, as
 text through GitHub's API. It never checks out, imports, executes, builds or tests
@@ -215,6 +216,101 @@ second operator's approval; it is not the cosmetic display-name lane and never
 automatically merges. When ordinary bundles are paused,
 `CHARACTER_ACCOUNT_RENAMES_ENABLED=true` keeps only these verification checks
 running, without bundle or page mutations.
+
+## Maintainer override PRs
+
+A maintainer can make any character change in an ordinary PR: corrections,
+reverts, additions, deletions, renames and identity corrections, including
+replacing a malformed or hostile file and a competing queued version that a
+contributor's fork does not let us edit. To opt in:
+
+- Push a branch named `character-override/<topic>` to **this repository** (not
+  a fork). Change only `src/characters/<login>.js` files, at most 32. Put policy,
+  manifests and other work in a normal PR. The cap keeps the complete audit inside
+  one GitHub comment, which is never truncated (a larger audit is refused). A
+  full-roster emergency (capacity 128) is split into batches of up to 32, each
+  verified and merged in turn on the updated `rock`.
+- Open the PR against `rock` as a human account that currently has Maintain or
+  Admin permission. Commits need no signature, and other people's commits can be
+  kept for their history. GitHub's authenticated PR author is the authority, never
+  commit metadata.
+- Keep each file's `handle`/`github` of the person it depicts. The override never
+  adds a `github` field or assigns a character to the maintainer.
+
+The trusted coordinator reads the exact head through the API. It checks the author's
+current permission, whether the branch is from this repository, the character-only
+diff and whether each replaced path is still the PR's base blob on `rock`. Then it
+checks every added, modified or renamed source with the same `scanCharacter`
+safety screen as ordinary intake; custom dress code may pass its manual lane,
+but network/dynamic execution, ambient access, injected instructions and invisible
+direction controls are rejected. Every new source must declare exactly one literal
+identity, and the registry after the merge, including every unrelated queued revision, has no
+duplicate handle or owner. Old sources are compared only by blob ID. They are never
+fetched for parsing, so a broken old file cannot block its own repair or deletion.
+A comment records the head, every path's old and new blob, the new SHA-256 and owner,
+and each queued revision (bundle, source PR, head, author, hash) that the merge will
+supersede. The same comment ends with a small machine record: the head and one
+SHA-256 per superseded revision's exact identity (lane, path, source PR, head,
+author, hash, base). Immediately before passing, the coordinator rereads the author's
+permission, the PR and `rock`. A role lost or a push made during the scan fails the
+head. **Character intake** then passes with the record's SHA-256 in its description,
+and **Character bundle safety** passes for that head.
+Each new head, sweep or permission loss is checked again. Drafts stay pending. Forks,
+bots, non-maintainers, mixed diffs and stale bases fail without changing anything.
+**Character identity ownership** applies the same rules without reading replaced
+sources. Normal CI, review and a **manual merge** still apply. Automation never
+extracts, closes, approves or merges an override, and its branches are never treated
+as standalone submissions.
+
+The queue is not modified before the merge. A draft, failing or closed-unmerged
+override leaves every submission queued. After a merge, the closed event (with
+sweeps as retry) re-reads the PR. It requires the coordinator's own success status on
+the merged head and the merged blobs to match that head. It also requires the bot's
+own audit comment whose record hashes to the value in that status. An edited bot
+comment, a copy posted by anyone else, or a status written by another account does
+not count, and nothing is withdrawn. Then it removes the queued revisions it
+superseded from their bundles, but only entries at the overridden paths. An entry
+is removed if its exact identity is in the record. That holds however overrides of
+one path interleave and in whatever order their cleanups run, for example an
+addition corrected by one override and deleted by another before either cleanup.
+Otherwise an entry is removed if it was queued after the last audit but before the
+merge (its base is neither the override's merged blob nor current `rock`). A
+submission queued later always differs in head or base, so it stays queued.
+Each bundle path is restored to the bundle's own base bytes (not parsed), so
+the bundle stops changing it, and the override reaches the bundle through the usual
+expected-head branch update. The manifest drops only those entries. A signed bot
+commit's body lists the withdrawn provenance, and comments on the bundle, the
+override and each source PR link the change. Other entries, their files and their
+history stay. Later submissions built on the override are kept. A retry finds nothing
+left to withdraw. Until the withdrawal lands, onboarding skips a superseded revision
+that can no longer be read (its base is gone from `rock`) instead of failing the
+page build. Readable ones still reserve their identities, and an unrelated unreadable
+queue entry still fails. The source-PR comment does not claim attribution was kept:
+an override may change the character's content, owner or identity as reviewed. The
+original submission's provenance remains in the override's audit and the bundle's
+commit history.
+
+Sweeps retry cleanup only for merged overrides among the 100 most recently updated
+closed PRs. For an older one, an operator runs **Character bundles** by hand with
+`override_pr` set to its number. That run repeats every merge, status and record check
+for that PR alone. Normal bundle mode must be enabled.
+
+Deletion is not suppression. Deleting a file removes that source and its queued
+revisions. On a later post-merge build, onboarding generates a plain default
+character (handle, join and last-commit dates only, with no custom look, voice or
+code) for any eligible Oogatron contributor who has no character file and no queued
+reservation. A deleted active contributor therefore reappears as a clean generated
+default, never as the deleted code. To keep someone off the roster, a separate policy
+change is needed (`EXCLUDED` or onboarding eligibility in
+`worker/src/contributor-policy.js`); no override provides that.
+
+This policy (with its workflow input) must merge first through a normal operator
+policy PR without character files. Rock's current checks validate it, since
+submitted policy never checks itself.
+Branch rules are unchanged. Consider a ruleset limiting who can push to
+`character-override/*`. Same-repository write access could otherwise add commits
+to a maintainer's open override; each new head is verified again, but under the
+PR author's authority, so the manual merge review must cover the final head.
 
 GitHub references: [workflow triggering](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow),
 [branch protection](https://docs.github.com/en/rest/branches/branch-protection),

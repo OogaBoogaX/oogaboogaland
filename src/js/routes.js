@@ -27,6 +27,8 @@
         description: "Lash a rocket together, reach the Sky Top, touch the space rock and fall home shield first." },
       { path: "oogamine", scene: "mine", image: "oogamine", title: "Ooga Mine",
         description: "A mining tycoon about margin: power, heat and the halving. Mine 21 coin in an hour without going broke." },
+      { path: "blockfrenzy", scene: "block", title: "Block Frenzy",
+        description: "Capture the block on Fort Chaos: steal the rivals' glowing Bitcoin block, carry it home and splat their runners with paint. Nobody gets hurt." },
       { path: "mempool", scene: "hub", place: "mempool", image: "mempool", title: "Mempool chamber",
         description: "The live Bitcoin mempool as a rainforest lake: the backlog fills it, new blocks fall from it, and the chamber under it reads the chain out in paint." },
       { path: "dsb", scene: "dsb", title: "DSB Land",
@@ -40,14 +42,22 @@
       { path: "jet", scene: "hangar", title: "Lightning Jet Hangar",
         description: "Behind the Lightning Factory, the hangar where Lightning Jet v2 is being built: the Jet in its dock, its crew at work and the project's progress on the wall." },
       { path: "oogaarcade", scene: "arcade", title: "Ooga Arcade",
-        description: "A torchlit cave of arcade cabinets, one for every Ooga game: walk up to Ooga Rally, Drop, Orbit or Mine and play." },
+        description: "A torchlit cave of arcade cabinets, one for every Ooga game: walk up to Ooga Rally, Drop, Orbit or Mine and play, or take the upper hall's zipline to Block Frenzy." },
       { path: "sphere", scene: "hub", place: "timechain", image: "sphere", title: "Timechain Sphere",
-        description: "The Timechain Sphere's doors: choose one of nine rooms at the keypad. Inside, live block and mining charts, Timechain Index holdings and Sani in his recliner." },
-      // The nine rooms, each its own address: 1–3 at 1×, 4–6 at 1.5×, 7–9 at 2× (timechain-rooms.js).
-      ...Array.from({ length: 9 }, (_, i) => ({
-        path: `sphere-${i + 1}`, scene: "timechain", place: String(i + 1), title: `Timechain Sphere Room ${i + 1}`,
-        description: `Room ${i + 1} of the Timechain Sphere, ${["normal sized", "half as big again", "twice the size"][Math.floor(i / 3)]}: live block and mining charts from mempool.space on a curved wall of screens, Timechain Index holdings at the desk, Sani in his recliner.`
-      }))
+        description: "The Timechain Sphere's doors: choose one of ten rooms at the keypad, from a planetarium and a conference room to a meditation temple, a block party, a mining museum and a movie theater." },
+      // The ten rooms, each its own kind of place and its own address (timechain-rooms.js), in keypad order's numbers.
+      ...[
+        ["Planetarium", "Tonight's sky over London on the whole dome, from reclining seats round the star projector."],
+        ["Conference Room", "A round table for eight under a dome of live block and mining charts from mempool.space, the latest blocks round its base and the next block at the crown. The one room that locks."],
+        ["Low Time Preference Temple", "A meditation temple under a dusk sky: a lantern path, a pagoda, a koi pond and a replica of Valentina Picozzi's Satoshi statue in the main hall."],
+        ["Block Party", "An LED dance floor under a dome-wide light show, a DJ booth and a bar: the bass drops on every block."],
+        ["Fireside Lounge", "Sofas round a fire pit in a forest clearing under the Milky Way, a small room for a fireside chat."],
+        ["Proof of Work-out", "Exercise bikes facing a mountain sunrise: pedal to find a fake block and climb the gym's leaderboard."],
+        ["The Observatory", "A telescope on its mount under the dome's slit to the night sky, with views of Saturn and the Moon."],
+        ["The Mining Museum", "From Satoshi's CPU to today's ASICs: miners from every era round the room, under seventeen years of hashrate on the dome."],
+        ["Lecture Hall", "Raked rows facing a stage with three whiteboards, a slide on the dome and live charts either side."],
+        ["Movie Theater", "Recliners on a steep rake facing a dome that is all picture, the biggest room in the Sphere."]
+      ].map(([name, what], i) => ({ path: `sphere-${i}`, scene: "timechain", place: String(i), title: `Timechain Sphere · ${name}`, description: `${name}, room ${i} of the Timechain Sphere. ${what}` }))
     ]
   };
 })();

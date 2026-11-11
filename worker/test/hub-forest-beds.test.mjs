@@ -2,13 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { HOST } from '../src/virtual-host.js';
 
 function fixture(extraQueries = 0) {
   const layout = {}, pool = { layout, place: { x: 1, y: 2, z: 3, ry: 0 } };
   let searches = 0, checked = 0, blocked = false;
   const source = readFileSync(new URL('../src/hub-forest-beds.js', import.meta.url), 'utf8')
     .replace(/^import .*;\n/gm, '').replace('export function createHubForestBeds', 'function createHubForestBeds');
-  const create = runInNewContext(`${source}\ncreateHubForestBeds;`, { hubPoolLayout: layout,
+  const create = runInNewContext(`${source}\ncreateHubForestBeds;`, { HOST, hubPoolLayout: layout,
     createHubOutdoorBeds(pool, clear) {
       searches++;
       const beds = [];
@@ -47,7 +48,8 @@ test('forest cache is bounded to one placement/count and never truncates oversiz
   assert.equal(large.run(1).beds.length, 1);
   assert.equal(large.run(1).beds.length, 1);
   assert.equal(large.counts().searches, 2, 'oversized transcripts disable caching');
-  assert.throws(() => f.run(54), /invalid Hub forest/);
+  assert.equal(f.run(HOST.maxOogas).beds.length, HOST.maxOogas);
+  assert.throws(() => f.run(HOST.maxOogas + 1), /invalid Hub forest/);
   f.pool.layout = {};
   assert.throws(() => f.run(), /invalid Hub forest/);
 });
@@ -57,7 +59,7 @@ test('rejected candidates keep their blocking witness and accepted footprints ke
   let searches = 0, blocked = true, calls = [];
   const source = readFileSync(new URL('../src/hub-forest-beds.js', import.meta.url), 'utf8')
     .replace(/^import .*;\n/gm, '').replace('export function createHubForestBeds', 'function createHubForestBeds');
-  const create = runInNewContext(`${source}\ncreateHubForestBeds;`, { hubPoolLayout: layout,
+  const create = runInNewContext(`${source}\ncreateHubForestBeds;`, { HOST, hubPoolLayout: layout,
     createHubOutdoorBeds(pool, clear) {
       searches++;
       const beds = [];

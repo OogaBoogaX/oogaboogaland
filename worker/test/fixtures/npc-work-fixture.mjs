@@ -113,7 +113,12 @@ export function record(scenario, create, frames = 420) {
     run.step();
     const work = state.actor.work;
     if (work.phase !== phase) { phase = work.phase; transitions.push({ frame: state.frame, phase, site: work.site, ammo: state.actor.weapon.ammo }); }
-    hash.update(JSON.stringify(canonical(encode(state))) + "\n");
+    // Keep the original-source oracle in its original encoding. Reservation
+    // order is a later field, covered by full-state recovery and timestamp tests.
+    const legacy = encode(state);
+    legacy.work.v = 1;
+    delete legacy.work.work.reservedAt;
+    hash.update(JSON.stringify(canonical(legacy)) + "\n");
   }
   return { frames, sha256: hash.digest("hex"), transitions, events: state.events };
 }

@@ -46,7 +46,7 @@ test("work codec fences versions, route catalogs, malformed cursors and mutable 
     assert.throws(() => codec.capture({ ...work, ...patch }), /checkpoint/);
   }
   const valid = codec.capture(work);
-  for (const patch of [{ v: 2 }, { world: "other" }, { routes: [1, 2] }, { routes: [2] }, { extra: true }]) {
+  for (const patch of [{ v: 1 }, { v: 3 }, { world: "other" }, { routes: [1, 2] }, { routes: [2] }, { extra: true }]) {
     assert.throws(() => codec.restore({ ...valid, ...patch }), /checkpoint/);
   }
   for (const routes of [[], Array(1), [0], [4097], Array(33).fill(1)]) assert.throws(() => createWorkCheckpoint("test", routes), /checkpoint/);
@@ -146,4 +146,22 @@ test("VirtualHost recovers actual work phases atomically and bounds delivery to 
     assert.ok(Buffer.byteLength(JSON.stringify(committed)) < HOST.checkpointBytes);
     assert.ok(delivery.latest.bytes <= HOST.snapshotBytes);
   }
+});
+
+
+test("work reservation timestamps survive JSON recovery and reject invalid values", () => {
+  const work = createWorkState(0);
+  assert.equal(work.reservedAt, Infinity);
+  const empty = codec.capture(work);
+  assert.equal(empty.v, 2);
+  assert.equal(empty.work.reservedAt, null);
+  assert.equal(codec.restore(JSON.parse(JSON.stringify(empty))).reservedAt, Infinity);
+  for (const reservedAt of [0, 0.25, 12345]) {
+    work.reservedAt = reservedAt;
+    assert.equal(codec.restore(JSON.parse(JSON.stringify(codec.capture(work)))).reservedAt, reservedAt);
+  }
+  for (const reservedAt of [-1, NaN, -Infinity, null, '1'])
+    assert.throws(() => codec.capture({ ...work, reservedAt }), /checkpoint/);
+  for (const reservedAt of [-1, NaN, Infinity, '1'])
+    assert.throws(() => codec.restore({ ...empty, work: { ...empty.work, reservedAt } }), /checkpoint/);
 });

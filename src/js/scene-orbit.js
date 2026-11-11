@@ -415,6 +415,7 @@
       rhud.notice(`Stage dropped with ${Math.round(left / full * 100)}% fuel still in it`, 2200);
     }
     audio.cues.stage();
+    BL.gamepad.rumble(0.7, 0.5, 220);
     const jx = bx + s.up[0] * d.height, jy = by + s.up[1] * d.height, jz = bz + s.up[2] * d.height;
     for (let i = 0; i < 10; i++) {
       const a = i / 10 * Math.PI * 2;
@@ -497,6 +498,7 @@
     }
     cam.shake = 1.4;
     audio.cues.boom();
+    BL.gamepad.rumble(1, 1, 400);
   };
   const splashAt = (x, y, z, size) => {
     for (let i = 0; i < 26 * size; i++) {
@@ -634,6 +636,7 @@
       audio.cues.early();
     }
     audio.cues.clamp();
+    BL.gamepad.rumble(0.5, 0.6, 260);
     phase = "ascent";
     phaseT = 0;
     releasedAt = flightTime;
@@ -716,6 +719,7 @@
     rhud.center("HOME!", 1200);
     rhud.notice("Keep the shield down (hands off is fine) · Space pulls the chute at the CHUTE call", 4200);
     audio.cues.clamp();
+    BL.gamepad.rumble(0.5, 0.6, 260);
     fx.say(speaker, "Ooga go home!", 1.8);
     return true;
   };
@@ -789,10 +793,12 @@
     if (place === "sea") {
       splashAt(bx, by, bz, 1.4);
       audio.cues.splash();
+      BL.gamepad.rumble(0.4, 0.4, 180);
       rhud.center("SPLASHDOWN", 1800);
     } else {
       fx.burst(bx, by + 0.1, bz, 10, SPLASH_BITS, 1.4);
       audio.cues.thud();
+      BL.gamepad.rumble(0.8, 0.5, 200);
       rhud.center(place === "pad" ? "ON THE PAD!" : place === "land" ? "FAR LAND" : "LANDED", 1800);
       if (place === "pad") {
         // The 1500-point moment gets a party: confetti, the ticker, and the Agent's word.
@@ -1130,6 +1136,7 @@
       eva.drift = EVA.drift;
       eva.spin = Math.min(1.2, -into * 0.4);
       audio.cues.thud();
+      BL.gamepad.rumble(0.8, 0.5, 200);
       cam.shake = Math.max(cam.shake, 0.08);
       fx.sayAt(WALKER.x, WALKER.y + 0.9, WALKER.z, "bonk", 0.8);
     }
@@ -1166,6 +1173,7 @@
     cam.warm = false;
     hud.setAct("Home");
     audio.cues.clamp();
+    BL.gamepad.rumble(0.5, 0.6, 260);
     if (eva.measured) {
       eva.back = true;
       // The air left over is worth something: a quick walk pays more, and the flight log shows it.
@@ -1605,6 +1613,7 @@
         if (flight.ignite()) {
           rhud.notice("", 1);
           audio.cues.clamp();
+          BL.gamepad.rumble(0.5, 0.6, 260);
         }
       }
       simulate(dt);
@@ -2138,7 +2147,7 @@
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), phase, smoke: smoke.count, debris: debris.length };
   };
   const orbitScene = BL.deferred.scene("orbit", {
-    id: "orbit", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
+    id: "orbit", padContext: "orbit", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry,
     get inMotion() {
       return (phase !== "build" && phase !== "results") || fx.inMotion || smoke.count > 0;
