@@ -730,7 +730,7 @@
         skip.textContent = waiting || ready ? "Leave queue" : "Not now";
         help.textContent = !connected ? "Reconnecting · your place is held for 15 seconds"
           : ready ? "Your turn · choose Talk to Tess within 20 seconds. Your conversation stays private."
-          : waiting ? `Your place: ${q.position} of ${q.count} · you can keep exploring the island`
+          : waiting ? `Your place: ${q.position} of ${q.count} · kept while you explore this island. When ready, accept within 20 seconds.`
           : full ? "The queue is full. A place will open when another visitor finishes or leaves."
           : "Talk privately with Tess, one visitor at a time. Join when you are ready.";
       }

@@ -77,6 +77,23 @@ test("Tess messages reject malformed poses and traffic cannot hold a turn foreve
   assert.equal(h.room.tessQueue.entries[0].end, end);
   h.advance(15001); Q.sweep(h.room); assert.equal(h.room.tessQueue.entries.length, 0);
   a.inHub = false; h.send(a, "join"); assert.equal(h.room.tessQueue.entries.length, 0);
+  // The fourth visitor used to expire behind three valid five-minute turns.
+  a.inHub = true;
+  const visitors = [a, h.add(2), h.add(3), h.add(4)];
+  for (const p of visitors) h.send(p, "join");
+  const lastToken = h.last(4).token;
+  for (const p of visitors.slice(0, 3)) {
+    assert.equal(h.last(p.id).phase, "ready"); h.send(p, "accept");
+    for (let i = 0; i < 19; i++) { h.advance(15000); h.send(p, "touch"); }
+    h.advance(15001); Q.sweep(h.room);
+    await h.room.tessSaving;
+    delete h.room.tessQueue; await Q.restore(h.room);
+  }
+  assert.equal(h.last(4).token, lastToken); assert.equal(h.last(4).phase, "ready");
+  assert.equal(h.room.tessQueue.entries.length, 1);
+  h.advance(20001); Q.sweep(h.room);
+  assert.equal(h.room.tessQueue.entries.length, 0, "an unattended ready prompt still releases its place");
+  assert.equal(Q.deadline(h.room), Infinity);
   await h.room.tessSaving;
 });
 test("real Room sockets bind Tess turns to the account, reject replaced connections and schedule the lease deadline", async t => {

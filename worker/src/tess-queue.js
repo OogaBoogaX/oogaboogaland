@@ -1,9 +1,11 @@
 // One opt-in guide on the island. Only queue leases are durable; questions, answers and camera poses
 // never enter this protocol. The active visitor supplies a bounded visual pose, like the NPC host.
 const FEATURE = "tess-guide-v1", KEY = "tessQueue", CAP = 32;
-const READY = 20000, GRACE = 15000, IDLE = 60000, TURN = 300000, WAIT = 600000;
+const READY = 20000, GRACE = 15000, IDLE = 60000, TURN = 300000;
 const state = room => room.tessQueue || (room.tessQueue = { entries: [], pose: null });
 const eligible = p => p && p.inHub && p.visible !== false && p.zone === "outside";
+// Present visitors keep their FIFO place; only absence and the ready/active turn have deadlines.
+const expires = e => e.phase === "wait" ? e.away || Infinity : Math.min(e.until, e.end, e.away || Infinity);
 const parse = m => {
   if (!["watch", "join", "cancel", "accept", "touch", "pose"].includes(m.op)) return null;
   const out = { t: "tess-guide", op: m.op };
@@ -22,7 +24,7 @@ const view = (room, p) => {
   const s = state(room), i = s.entries.findIndex(e => e.id === p.id), e = s.entries[i];
   return { t: "tess-guide", op: "state", count: s.entries.length, busy: s.entries[0]?.phase === "active",
     position: i < 0 ? 0 : i + 1, phase: e?.phase || "none", token: e?.token || "",
-    until: e ? Math.min(e.until, e.end, e.away || Infinity) : 0, pose: s.pose };
+    until: e && Number.isFinite(expires(e)) ? expires(e) : 0, pose: s.pose };
 };
 const tell = (room, p = null) => {
   if (p) room.send(p.ws, view(room, p));
@@ -30,7 +32,7 @@ const tell = (room, p = null) => {
 };
 const deadline = room => {
   let at = Infinity;
-  for (const e of room.tessQueue?.entries || []) at = Math.min(at, e.until, e.end, e.away || Infinity);
+  for (const e of room.tessQueue?.entries || []) at = Math.min(at, expires(e));
   return at;
 };
 const save = room => {
@@ -46,12 +48,12 @@ const advance = (room, now) => {
   let changed = false;
   for (let i = s.entries.length - 1; i >= 0; i--) {
     const e = s.entries[i];
-    if (Math.min(e.until, e.end, e.away || Infinity) <= now) { s.entries.splice(i, 1); changed = true; }
+    if (expires(e) <= now) { s.entries.splice(i, 1); changed = true; }
   }
   if (s.entries[0] !== first) s.pose = null;
   const e = s.entries[0];
   if (e && e.phase === "wait" && !e.away && eligible(room.players.get(e.id))) {
-    e.phase = "ready"; e.until = now + READY; changed = true;
+    e.phase = "ready"; e.end = e.until = now + READY; changed = true;
   }
   return changed;
 };
@@ -78,7 +80,7 @@ const restore = async room => {
   // A deployment can drop every socket. Hold each place briefly for its account to reconnect.
   for (let i = 0; i < s.entries.length; i++) {
     const e = s.entries[i];
-    if (i && e.phase !== "wait") { e.phase = "wait"; e.until = e.end; }
+    if (i && e.phase !== "wait") { e.phase = "wait"; e.until = e.end = 0; }
     if (!eligible(room.players.get(e.id))) e.away = Math.min(e.away || now + GRACE, now + GRACE);
   }
   advance(room, now);
@@ -104,7 +106,7 @@ const message = (room, p, m) => {
   let e = s.entries.find(e => e.id === p.id), changed = false;
   if (m.op === "join") {
     if (!e && s.entries.length < CAP) {
-      e = { id: p.id, token: crypto.randomUUID(), phase: "wait", until: now + WAIT, end: now + WAIT, away: 0 };
+      e = { id: p.id, token: crypto.randomUUID(), phase: "wait", until: 0, end: 0, away: 0 };
       s.entries.push(e); changed = true;
     }
   } else if (e && e.token === m.token) {
