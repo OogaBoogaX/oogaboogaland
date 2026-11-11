@@ -19764,6 +19764,52 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
       && animation.far.gorilla > 0 && animation.far.gorilla < 12 && animation.nearOoga.ooga >= 58 && animation.nearGorilla.gorilla >= 58
       && animation.host.ooga >= 58 && animation.host.gorilla >= 58 && animation.network && animation.controlled >= 58, JSON.stringify(animation));
 } };
+const hubCliffLedges = { name: "hub cliff ledges", why: "rule: both cliff paths must be reachable up and down by existing Ooga controls, with pause and jump release and GAME MODE disabling the ropes", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, H = BL.scenes.hub, a = B.cavemen.get("portlandhodl"), routes = H.debug.cliffLadders, rows = [];
+    if (B.crew.player !== a) B.pilot.possess(a);
+    const key = (name, down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: name === "Space" ? " " : name, code: name === "Space" ? name : "Key" + name.toUpperCase(), bubbles: true }));
+    const feet = () => a.root.position.y - a.baseY, anchor = {};
+    for (const l of routes) {
+      l.pathAt(l.bottom, anchor);
+      const yaw = Math.atan2(l.nx, l.nz), gap = a.bodyRadius * 0.5;
+      B.pilot.navigate({ position: { x: anchor.x + l.nx * gap, y: l.bottom, z: anchor.z + l.nz * gap }, yaw, pitch: 0, dist: 6 });
+      B.advance(0.1, 1 / 60); key("w", true);
+      let mounted = false, paused = false, hold = 0;
+      for (let frame = 0; frame < 1800; frame++) {
+        B.advance(1 / 60, 1 / 60); mounted ||= !!a.ladder.plane;
+        if (!paused && a.ladder.plane && feet() > (l.top + l.bottom) / 2) {
+          key("w", false); const y = feet(); B.advance(0.2, 1 / 60); hold = Math.abs(feet() - y); paused = true; key("w", true);
+        }
+        if (mounted && !a.ladder.plane) break;
+      }
+      key("w", false); const top = feet();
+      B.pilot.navigate({ position: { x: l.x - l.nx * 0.2, y: l.top, z: l.z - l.nz * 0.2 }, yaw: yaw + Math.PI, pitch: 0, dist: 6 });
+      B.advance(0.1, 1 / 60); key("w", true);
+      let descended = false;
+      for (let frame = 0; frame < 1800; frame++) { B.advance(1 / 60, 1 / 60); descended ||= !!a.ladder.plane; if (descended && !a.ladder.plane) break; }
+      key("w", false);
+      rows.push({ kind: l.kind, mounted, paused, hold, top, expectedTop: l.top, descended, bottom: feet(), expectedBottom: l.bottom, active: !!a.ladder.plane });
+    }
+    const l = routes.find(r => r.kind === "ladder");
+    l.pathAt(l.bottom, anchor);
+    B.pilot.navigate({ position: { x: anchor.x + l.nx * a.bodyRadius * 0.5, y: l.bottom, z: anchor.z + l.nz * a.bodyRadius * 0.5 }, yaw: Math.atan2(l.nx, l.nz), pitch: 0, dist: 6 });
+    key("w", true); B.advance(0.4, 1 / 60); key("w", false); const attached = !!a.ladder.plane;
+    key("Space", true); B.advance(1 / 60, 1 / 60); key("Space", false); const released = !a.ladder.plane;
+    B.crew.wearJetpack(a, BL.hubModels.jetpack(), BL.hubModels.jetFlame()); a.jetFuel = 1; a.jetRecovering = false;
+    B.pilot.navigate({ position: { x: anchor.x + l.nx * a.bodyRadius * 0.5, y: l.bottom, z: anchor.z + l.nz * a.bodyRadius * 0.5 }, yaw: Math.atan2(l.nx, l.nz), pitch: 0, dist: 6 });
+    key("w", true); B.advance(0.4, 1 / 60); key("w", false); const jetAttached = !!a.ladder.plane && !!a.jet;
+    key("Space", true); B.advance(1 / 60, 1 / 60); key("Space", false); const jetReleased = !a.ladder.plane && a.hopV > 0 && !a.jet.thrust;
+    H.debug.setGameMode(true); key("w", true); B.advance(0.2, 1 / 60); key("w", false);
+    const disabled = !a.ladder.plane; H.debug.setGameMode(false);
+    return { rows, attached, released, jetAttached, jetReleased, disabled };
+  })()`);
+  record("hub cliff ledges: rappel ropes and lower ladders climb and descend, hold at rest, release on Space and respect GAME MODE",
+    r.rows.filter(v => v.kind === "rope").length >= 2 && r.rows.filter(v => v.kind === "ladder").length === 3
+      && r.rows.every(v => v.mounted && v.paused && v.hold < 1e-6 && Math.abs(v.top - v.expectedTop) < 1e-6 && v.descended && Math.abs(v.bottom - v.expectedBottom) < 1e-6 && !v.active)
+      && r.attached && r.released && r.jetAttached && r.jetReleased && r.disabled, JSON.stringify(r));
+} };
+scene("hub", { label: "cliff ledges", query: "solo=1&character=portlandhodl&pos=0", steps: [hubCliffLedges] });
 scene("hub", { label: "distant effects", query: "pos=0", steps: [hubDistantEffects] });
 // No other session's cast holds the default local Ooga or a server-vouched contributor: both join the roster before
 // the crew is built, as on a real arrival.
@@ -30154,6 +30200,50 @@ const terrainCacheChecks = async () => {
 // must keep its golden digest, and the snapshot's queries, rehydrated after a structured clone (the Worker's and
 // IndexedDB's codec), must answer exactly as the direct build does on a seeded sample of every query.
 // The golden is the island as it was built before the snapshot existed, since given EntropyLab's white floor.
+const cliffLedgeChecks = (BL, baseline, baselineRestored) => {
+  const options = { seed: 1, cliffLedges: true }, island = BL.terrain.island(options);
+  let step; const steps = BL.terrain.islandSnapshotSteps(options);
+  do { step = steps.next(); } while (!step.done);
+  const restored = BL.terrainSnapshot.create(structuredClone(step.value)), failures = [];
+  let samples = 0;
+  for (const ledge of BL.terrain.CLIFF_LEDGES.levels) for (let degrees = 0; degrees < 360; degrees++) {
+    const angle = degrees * Math.PI / 180;
+    for (const radius of [ledge.inner + 0.55, (ledge.inner + ledge.outer) / 2, ledge.outer - 0.6]) {
+      const x = Math.sin(angle) * radius, z = -Math.cos(angle) * radius;
+      for (const built of [island, restored]) {
+        const floor = built.supportAt(x, z, ledge.floor, 0.1, -120, 0.4);
+        const clear = built.clearAt(x, ledge.floor + 0.01, z, 0.4, 2.5);
+        samples++;
+        if ((Math.abs(floor - ledge.floor) > 1e-6 || !clear) && failures.length < 12) failures.push({ degrees, radius, floor, expected: ledge.floor, clear });
+      }
+    }
+  }
+  const a = baseline.cutawaySource, b = island.cutawaySource;
+  let topChanges = 0;
+  for (let x = 0; x < a.sx; x++) for (let z = 0; z < a.sz; z++) for (let y = 120; y < a.sy; y++) {
+    const i = (x * a.sy + y) * a.sz + z;
+    if (a.data[i] !== b.data[i]) topChanges++;
+  }
+  const rooms = built => JSON.stringify([built.headquarters.rooms, built.headquarters.basement.rooms]);
+  const apertures = built => JSON.stringify(built.headquarters.windows.map(w => [w.kind, w.x, w.z, w.width, w.height, w.sill, w.flare.frusta.filter(f => f.inner)]));
+  const paths = built => {
+    const path = built.path, hash = createHash("sha256");
+    hash.update(JSON.stringify([path.centerlines, path.debug.masterMaskHash, path.debug.masterSpokeCellCount]));
+    for (const radius of [4, 8, 16]) {
+      path.setRadius(radius);
+      const count = path.debug.visibleInstanceCount;
+      hash.update(JSON.stringify([radius, count, path.debug.visibleSpokeCellCount, path.debug.ringCellCount]));
+      hash.update(new Uint8Array(path.instanceData.buffer, path.instanceData.byteOffset, count * 20 * Float32Array.BYTES_PER_ELEMENT));
+    }
+    return hash.digest("hex");
+  };
+  // Reuse parity's restored baseline so sampling active radii does not change the
+  // original island used by the remaining unit checks. Compare placements, not PATH_TILE.
+  const originalPaths = paths(baselineRestored), samePaths = paths(island) === originalPaths && paths(restored) === originalPaths;
+  record("hub cliff ledges: two full-width rings have real floor and headroom in direct and cached terrain, without changing top voxels, rooms, inner windows or paths",
+    !failures.length && !topChanges && rooms(baseline) === rooms(island) && apertures(baseline) === apertures(island) && samePaths,
+    JSON.stringify({ samples, failures, topChanges, rooms: rooms(baseline) === rooms(island), apertures: apertures(baseline) === apertures(island), paths: samePaths }));
+};
 const TERRAIN_GOLDEN = "7ceeb12cec5b0ec3";
 const terrainParityChecks = (BL, island) => {
   const islandDigest = (built) => {
@@ -30214,6 +30304,7 @@ const terrainParityChecks = (BL, island) => {
   });
   record("terrain collision: direct and Worker-restored voxel sweeps use caller-owned typed box queries instead of the allocating scalar adapter",
     voxelPaths.every(path => path.typed), JSON.stringify(voxelPaths));
+  return restored;
 };
 const artifactUnitProof = () => {
   const workflow = readFileSync(join(root, ".github/workflows/pages.yml"), "utf8");
@@ -30730,7 +30821,8 @@ record("character visibility source bakes: ownership wrappers share exact immuta
     npcActivity.every(row => row.preserved && row.restoredByHost && row.resumedLocally), JSON.stringify(npcActivity));
 
   const island = BL.terrain.island({ seed: 1 });
-  terrainParityChecks(BL, island);
+  const originalTerrainSnapshot = terrainParityChecks(BL, island);
+  cliffLedgeChecks(BL, island, originalTerrainSnapshot);
   await terrainCacheChecks();
   {
     // These real c3 roof poses must follow the same limb animation as open space.
