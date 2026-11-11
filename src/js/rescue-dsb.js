@@ -13,8 +13,8 @@
 // adopting), one dog a login; the Ooga a signed-out visitor drives belongs to a contributor, so the desk, the dog
 // houses and a stray's tap open the dialog on SIGN_IN alone. The dog is out while that login drives its own Ooga in
 // DSB Land. Debug visitors may adopt for their driven Ooga without signing in, under a separate saved identity.
-// Strays and scooping are everyone's. Shared-authority migration is staged below,
-// but not called until the scene's shared renderer/command integration is installed.
+// Strays and scooping are everyone's. The explicit acceptShared seam below switches public rendering and migration,
+// but no transport invokes it until the scene's shared command integration is installed.
 (() => {
   "use strict";
   const BL=window.BL,D=BL.rescueDogs;
@@ -80,7 +80,8 @@
     // Debug alone lends a signed-out visitor the driven Ooga; signed-in ownership still takes precedence.
     const login=()=>{const me=BL.net.state.me;return me?accountKey(me):DEBUG?DEBUG_LOGIN:null;};
     const ownOoga=()=>{const own=BL.net.ownCharacter(),cave=own?crew.cavemen.get(own.handle):DEBUG&&!BL.net.state.me?crew.player:null;return cave&&!BL.net.mayDrive(cave.traits.name)?cave:null;};
-    let changes=0,saveTimer=0,shownFor=undefined,lastLine=null,pick=null,inRoom=null;
+    let changes=0,saveTimer=0,shownFor=undefined,lastLine=null,pick=null,inRoom=null,disposed=false;
+    let migrationAttempted=false,migrationPersisted=false;
     const persist=()=>{dogs.writeStore();save(store);changes=dogs.changes;saveTimer=0;};
     // The visitor's own line, in the dialog and on the board over the dog houses (in sign letters, so without the name).
     const line=()=>{
@@ -99,6 +100,7 @@
     };
     const adopted=({breed,name,stray})=>{
       const who=login(),cave=ownOoga();
+      if(dogs.shared){hud.toast("Shared adoption is waiting for its server connection.");return false;}
       if(!who||!cave||store.dogs[who]){hud.toast(who&&cave?"You already have a dog.":SIGN_IN);return false;}
       const entry={name,breed,adoptedAt:Date.now(),hunger:0},logins=Object.keys(store.dogs).filter(who=>who!==DEBUG_LOGIN);
       if(who!==DEBUG_LOGIN&&logins.length>=LOGINS)delete store.dogs[logins.reduce((a,b)=>store.dogs[a].adoptedAt<=store.dogs[b].adoptedAt?a:b)];
@@ -151,9 +153,17 @@
       return false;
     };
     const onKey=e=>{if(!menu.isOpen)return false;if(e.key==="Escape")menu.close();return true;};
-    const dispose=()=>{persist();button.dispose();menu.dispose();if(pick){input.remove(pick.screen);pick=null;}dogs.dispose();};
-    return {update,drawOverlay:dogs.drawOverlay,onTap,onKey,menuForRoom:r=>r?.id==="puppy-rescue"?venue:null,stats:dogs.stats,dispose,
-      get isOpen(){return menu.isOpen;},debug:{get dogs(){return dogs.debug;},menu,open,store,save:persist,get line(){return lastLine;},clear,standable,flyClear,
+    // Explicit integration seam for the authenticated host/guest component
+    // receiver. No transport is opened here. Invalid frames cannot migrate saves.
+    const acceptShared=frame=>{
+      if(disposed||!dogs.acceptShared(frame))return false;
+      // One bounded attempt per visit, not a storage write for every snapshot.
+      if(!migrationAttempted){migrationAttempted=true;migrationPersisted=retireLegacyPoop(store,dogs.sharedSource);}
+      lastLine=null;line();return {accepted:true,persisted:migrationPersisted};
+    };
+    const dispose=()=>{if(disposed)return;disposed=true;persist();button.dispose();menu.dispose();if(pick){input.remove(pick.screen);pick=null;}dogs.dispose();};
+    return {update,drawOverlay:dogs.drawOverlay,onTap,onKey,acceptShared,menuForRoom:r=>r?.id==="puppy-rescue"?venue:null,stats:dogs.stats,dispose,
+      get isOpen(){return menu.isOpen;},debug:{acceptShared,get dogs(){return dogs.debug;},menu,open,store,save:persist,get line(){return lastLine;},clear,standable,flyClear,
       // An adoption as the dialog's Adopt makes it, under the same rules.
       adopt:(breed=0,name="Rex")=>adopted({breed,name,stray:-1})}};
   };

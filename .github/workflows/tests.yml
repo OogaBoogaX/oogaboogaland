@@ -33,7 +33,7 @@ jobs:
       - name: Run the unit lane
         run: npm run test:unit
       - name: Check shared DSB rescue authority and migration
-        run: node --test worker/test/rescue-world.test.mjs
+        run: node --test worker/test/rescue-world.test.mjs worker/test/rescue-renderer.test.mjs
       - name: Check shared Cloud Hopper replay publication and playback
         run: node --test worker/test/cloud-hopper-replays.test.mjs worker/test/highscores.test.mjs
       - name: Check virtual-host authority and disconnect recovery

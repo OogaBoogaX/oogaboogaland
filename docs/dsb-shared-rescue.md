@@ -1,11 +1,12 @@
-# Shared DSB rescue: inactive core for #384
+# Shared DSB rescue: inactive core and follower for #384
 
 **Status: staged core, not end-to-end implementation or activation.** This change
 is stacked on #467 (`codex/377-virtual-host`, base
 `fffe3afedb57c56c88e6b5bca3073744b45df8b0`). It does not close #384. No
-production binding, alarm, socket message, browser scene authority switch or
-provider resource is enabled. The existing local rescue continues unchanged
-until an explicit integration installs the shared receiver and calls migration.
+production binding, alarm, socket message or provider resource is enabled. The
+real browser renderer has an explicit shared-state follower seam, but no runtime
+transport calls it. The existing local rescue continues until an integration
+installs the receiver and explicitly switches authority.
 Do not deploy or merge this independently of its prerequisite.
 
 ## What is implemented
@@ -27,7 +28,19 @@ Do not deploy or merge this independently of its prerequisite.
   duplicate frames, malformed rows and owner/session fields before replacing
   state. Missing piles/dogs are removals; no delta history or tombstone archive
   is required. Quality chooses 300/150/60 render candidates without changing
-  the 300-record shared state.
+  the 300-record shared state. The actual renderer retains its existing bounded
+  per-tier draw and shadow caps.
+- `rescueDsb.attach().acceptShared(frame)` installs accepted public rows in the
+  actual batched dog/pile renderer. All 300 logical identities survive quality
+  changes, while local stray AI, respawn, public pile creation and local scooping
+  stop. Small corrections blend only across a clear, nearby segment on the same
+  floor; new identities, larger gaps or blocked segments snap with the existing
+  grow-in animation. Complete snapshots remove absent dogs/piles, and stale
+  frames cannot restore them. Stable home/generation and pile IDs are exposed
+  for the future command layer from the displayed pick, not its current pool
+  index, so snapshots between drawing and clicking cannot retarget replacements.
+  Unacknowledged local adoption is blocked.
+  Disposing a visit removes nodes/pickers and rejects late frame callbacks.
 - Private owner-linked companion roster and latest-only, **non-durable** pose
   relay. It carries identity, name, breed, scene, position and basic activity.
   Disconnect, release, travel, generation and host changes clear the old pose.
@@ -42,7 +55,10 @@ Do not deploy or merge this independently of its prerequisite.
   those old fields thereafter. No unrelated key or preference is cleared.
   A false return reports failure to persist the marker; the current visit is
   still marked shared and must not use local piles. A scene integration must
-  handle that failure before promising migration survives a reload.
+  handle that failure before promising migration survives a reload. The scene
+  seam attempts migration once per visit and returns `{accepted, persisted}`;
+  repeated snapshots do not cause repeated local-storage writes. The migration
+  marker suppresses local strays/piles on a later visit pending a fresh frame.
 
 Existing `remote-players.js` already renders contributor-authored character pets
 through `crew.createPets()`. That is **not** the adopted rescue-dog system. This
@@ -94,11 +110,13 @@ this core does not claim that browser/server adoption handoff is complete.
 2. Generate the real DSB routes from the current geometry and bind the checked
    layout. Schedule `tick` only while there is occupied work and on lifecycle
    changes; no new persistent paid loop is included here.
-3. Make `rescue-dogs.js` follow accepted shared state, suppressing its local
-   stray AI, pile creation and scoop counter. Connect adoption/release/scoop UI
-   to the acknowledged command API. Call `retireLegacyPoop` only as part of that
-   authority switch. **The migration helper alone does not switch rendering or
-   stop the old local simulation.** No current application caller invokes it.
+3. Connect the authenticated/public component transport to the scene's new
+   `acceptShared` seam, binding its first frame to the expected world/layout.
+   The renderer switch and migration are implemented, but **no current transport
+   calls the seam**. Connect adoption/release/scoop UI to acknowledged host
+   commands before exposing the feature. Existing locally saved companion
+   adoption/hunger/feed/release behavior remains separate; it is not promoted
+   to authoritative shared state by accepting a public frame.
 4. Feed `companions().companionRoster` only to authenticated live delivery and
    install it before accepting companion poses. Pose refs must come from that
    current roster. A full-host revision change currently invalidates old refs,
@@ -125,7 +143,7 @@ No per-frame durable write, unbounded event queue or pile archive is introduced.
 Reproduce the bounded measurement and correctness checks:
 
 ```
-node --test worker/test/rescue-world.test.mjs worker/test/virtual-host.test.mjs worker/test/host-sessions.test.mjs
+node --test worker/test/rescue-world.test.mjs worker/test/rescue-renderer.test.mjs worker/test/virtual-host.test.mjs worker/test/host-sessions.test.mjs
 npm run build
 ```
 
@@ -180,6 +198,11 @@ network framing/fan-out, provider duration/requests/storage usage, real-phone
 results and the combined companion-feature run are **not measured and remain
 acceptance gates**. Browser emulation is not substituted for a physical phone.
 No Factory, browser, full-suite, performance-floor or local visibility/storage
-suite was run. The source-only rescue migration test uses a fake map, not a live
-browser or existing user storage. The focused host/rescue suite passes 62/62;
-syntax, build and whitespace checks pass. That is not a complete #384 pass.
+suite was run. The source-only rescue migration checks use a fake map, not a live
+browser or existing user storage. Four renderer/scene tests load the actual
+math, scene, model, dog-renderer and rescue-attachment code in a VM on synthetic
+flat ground. They exercise populated instance buffers, tier limits, clear/blocked
+corrections, stable IDs, removal, stale-frame rejection, one-time migration and
+node/picker disposal. They do not measure GPU rendering or actual DSB clearance.
+The focused host/rescue suite passes 66/66; syntax, build and whitespace checks
+pass. That is not a complete #384 pass.
