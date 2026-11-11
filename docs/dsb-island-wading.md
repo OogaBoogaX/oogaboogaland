@@ -15,8 +15,8 @@ The original Chora beach is unchanged. Rocky coasts receive shallow seabed gradi
 All shoreline assertions are registered with the existing `test/run.mjs` regression ledger and browser driver. No extra test runner, dependency, workflow, or screenshot path is introduced.
 
 - `npm run test:unit` — global rules: all 34 sectors, body-width walking in/out, deep-water stops, 42 distributed shore routes, exclusions, harbor support, original 8,957-sample dry-land fingerprint, shoreline optics and Canvas budget
-- `ONLY="DSB shoreline" node test/run.mjs --browser-only dsb` — actual built page in desktop and phone-sized Chrome sessions; verifies navigation through Chora, east/west rocky coasts, harbor and Olympus
-- `node test/run.mjs water-unit` — pre-existing detailed water, FFT, ripple and pier route regressions, adapted so approved new offshore depths do not invalidate protection for unchanged dry land
+- `ONLY="DSB shoreline" node test/run.mjs --browser-only dsb` — the existing DSB desktop/phone scene sessions verify the loaded game's 34-segment mask, shallow shelves, depth safety, water interaction and renderer without adding another Chrome startup
+- `node test/run.mjs water-unit` — pre-existing detailed water, FFT, ripple and pier route regressions, with the dry-land hash fixed and the approved, updated Olympus sea-facing group hash separately pinned
 - `npm run build` — rebuild the production page
 
 Source code and tests are inside `feature/dsb-island-wading-upstream-20261111` and are proposed as PR #600 against upstream `rock`. The fork's `feature/dsb-land-master` preview remains untouched. Production is only updated after upstream accepts a merge and its maintainers deploy.

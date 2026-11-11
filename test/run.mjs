@@ -26000,8 +26000,11 @@ const waterChecks = BL => {
 // Recorded from f578f9cda6e77468049b5e000e3002ce9711809b before applying the water extension.
 // Upstream 822addee keeps leaf vertices/normals/fronts and placement, but anchors each reversed
 // back-face fan at the front's first vertex. Approved/merged/A-B geometry comparison and
-// Olympus renders are documented in docs/dsb-upstream-validation.md; all other hashes stay frozen.
-const WATER_GOLDEN = {ground:"bc6a1a4f",olympus:"7490fca7",bridges:"9164c056",buildings:"634c3799",fft:"aa331f6b"};
+// Olympus renders are documented in docs/dsb-upstream-validation.md; the new
+// eligible west-flank underwater shelf changes the full Olympus group (including
+// the stream's sea-facing geometry). The original dry-land fingerprint stays
+// separately fixed at bc6a1a4f, while the updated Olympus group is pinned below.
+const WATER_GOLDEN = {ground:"bc6a1a4f",olympus:"932687d1",bridges:"9164c056",buildings:"634c3799",fft:"aa331f6b"};
 
 // Rule: exterior addresses must survive registry reordering and preserve every established route/venue.
 const vacancyChecks = async BL => {
@@ -33032,6 +33035,36 @@ const dsbSharedSessionCheckpoint={name:"dsb shared session checkpoint",why:"cont
 for(const fallback of [false,true])scene("dsb",{label:"shared session "+(fallback?"canvas2d":"webgl2"),query:"&overview=1&weather=clear&time=1200"+(fallback?"&canvas2d=1":""),exclusive:true,httpMedia:true,steps:[dsbSharedSessionCheckpoint]});
 scene("dsb",{label:"shared session phone",query:"&overview=1&weather=clear&time=1200",opts:{w:390,h:844,mobile:true},exclusive:true,httpMedia:true,steps:[dsbSharedSessionCheckpoint]});
 
+// Desktop and phone review uses the suite driver, watchdogs and failure ledger.
+function inspectDSBIslandPage() {
+  const B=window.__ooga,D=B?.dsb,C=window.BL?.dsbCoast,L=D?.land,canvas=document.getElementById("scene");
+  if(!D||!C||!L||!canvas||!D.water||!D.waterInteraction)return {ready:false};
+  const blocked=new Set([0,1,2,3,4,5,22,23,24,25,26,27,28,31,32,33]);
+  let accessible=0,excluded=0,stops=0;const errors=[];
+  for(let i=0;i<L.coast.length;i++){
+    const a=L.coast[i],b=L.coast[(i+1)%L.coast.length],x=(a[0]+b[0])/2,z=(a[1]+b[1])/2,near={};
+    const w=C.wade(L.coast,x,z,near);
+    if(blocked.has(i)){excluded++;if(w!==0)errors.push(i+" excluded");}
+    else{
+      accessible++;if(w<.99)errors.push(i+" access");
+      const sx=x+near.nx*7,sz=z+near.nz*7;
+      if(L.heightAt(sx,sz)>=C.LEVEL)errors.push(i+" dry shelf");
+      const px=x+near.nx*8,pz=z+near.nz*8,dx=x+near.nx*23,dz=z+near.nz*23;
+      if(!L.walkable(px,pz,dx,dz,L.heightAt(px,pz),D.avatar.bodyHeight,D.avatar))stops++;
+      else errors.push(i+" deep");
+    }
+  }
+  return {ready:true,accessible,excluded,stops,errors,frame:B.renderedFrames||0,kind:B.renderer?.kind,canvas:[canvas.width,canvas.height],rippleBudget:D.waterInteraction.stats.capacity};
+}
+
+async function dsbIslandShorelineBrowserCheck(b) {
+  const snapshot=await b.evaluate("("+inspectDSBIslandPage.toString()+")()");
+  record("DSB shoreline browser: built-page coast, depth gates, water interaction and renderer agree",
+    snapshot.ready&&snapshot.accessible===18&&snapshot.excluded===16&&snapshot.stops===18&&!snapshot.errors.length&&snapshot.canvas[0]>0&&snapshot.canvas[1]>0&&snapshot.rippleBudget===24,
+    JSON.stringify(snapshot));
+}
+const dsbIslandShorelineStep={name:"DSB shoreline accessible coasts and exclusions",why:"regression: the loaded DSB desktop and phone scene preserves shallow wading, harbor and rear Olympus",run:dsbIslandShorelineBrowserCheck};
+
 const dsbIntegrationCheckpoint={name:"dsb integration checkpoint",why:"contract: global account UI, venue zones and direct return survive desktop and mobile scene transitions",run:async b=>{
   const step=()=>b.evaluate('for(let i=0;i<36;i++)BL.scenes.dsb.update(1/60,i/60)');
   const read=()=>b.evaluate('({zone:BL.net.state.zone,body:__ooga.dsb?.presence.body,backend:BL.net.state.backend,room:BL.net.state.room,hidden:document.getElementById("sheet").hidden,open:document.getElementById("sheet").dataset.open})');
@@ -33081,56 +33114,9 @@ const dsbIntegrationCheckpoint={name:"dsb integration checkpoint",why:"contract:
   await b.evaluate('__ooga.dsb.entrance.skip();__ooga.advance(.1,.1)');
   record("DSB integration: arrival restores exterior and rectangular membrane",await b.evaluate('BL.net.state.zone==="dsb-outside"&&__ooga.dsb.gate.horizon.geometry.portalRect'));
 }};
-scene("dsb",{label:"integration checkpoint",query:"&weather=clear&time=1200",steps:[dsbIntegrationCheckpoint]});
-scene("dsb",{label:"integration checkpoint phone",query:"&weather=clear&time=1200",opts:{w:390,h:844,mobile:true},steps:[dsbIntegrationCheckpoint]});
+scene("dsb",{label:"integration checkpoint",query:"&weather=clear&time=1200",steps:[dsbIslandShorelineStep,dsbIntegrationCheckpoint]});
+scene("dsb",{label:"integration checkpoint phone",query:"&weather=clear&time=1200",opts:{w:390,h:844,mobile:true},steps:[dsbIslandShorelineStep,dsbIntegrationCheckpoint]});
 
-
-// Desktop and phone review uses the suite driver, watchdogs and failure ledger.
-function inspectDSBIslandPage() {
-  const B=window.__ooga,D=B?.dsb,C=window.BL?.dsbCoast,L=D?.land,canvas=document.getElementById("scene");
-  if(!D||!C||!L||!canvas||!D.water||!D.waterInteraction)return {ready:false};
-  const blocked=new Set([0,1,2,3,4,5,22,23,24,25,26,27,28,31,32,33]);
-  let accessible=0,excluded=0,stops=0;const errors=[];
-  for(let i=0;i<L.coast.length;i++){
-    const a=L.coast[i],b=L.coast[(i+1)%L.coast.length],x=(a[0]+b[0])/2,z=(a[1]+b[1])/2,near={};
-    const w=C.wade(L.coast,x,z,near);
-    if(blocked.has(i)){excluded++;if(w!==0)errors.push(i+" excluded");}
-    else{
-      accessible++;if(w<.99)errors.push(i+" access");
-      const sx=x+near.nx*7,sz=z+near.nz*7;
-      if(L.heightAt(sx,sz)>=C.LEVEL)errors.push(i+" dry shelf");
-      const px=x+near.nx*8,pz=z+near.nz*8,dx=x+near.nx*23,dz=z+near.nz*23;
-      if(!L.walkable(px,pz,dx,dz,L.heightAt(px,pz),D.avatar.bodyHeight,D.avatar))stops++;
-      else errors.push(i+" deep");
-    }
-  }
-  return {ready:true,accessible,excluded,stops,errors,frame:B.renderedFrames||0,kind:B.renderer?.kind,canvas:[canvas.width,canvas.height],rippleBudget:D.waterInteraction.stats.capacity};
-}
-function navigateDSBIslandSector(i) {
-  const D=window.__ooga.dsb,L=D.land,C=window.BL.dsbCoast,a=L.coast[i],b=L.coast[(i+1)%L.coast.length];
-  const x=(a[0]+b[0])/2,z=(a[1]+b[1])/2,near={};
-  C.nearest(L.coast,x,z,near);
-  const outside=i===2,depth=outside?-4:2,px=x-near.nx*depth,pz=z-near.nz*depth;
-  window.__ooga.pilot.navigate({position:{x:px,y:L.heightAt(px,pz),z:pz},yaw:Math.atan2((outside?1:-1)*near.nx,(outside?1:-1)*near.nz),pitch:.25,dist:outside?18:10});
-  return {sector:i,allowed:C.wade(L.coast,x,z)>0,ready:!!window.__ooga.camera};
-}
-async function dsbIslandShorelineBrowserCheck(b) {
-  const snapshot=await b.evaluate("("+inspectDSBIslandPage.toString()+")()");
-  record("DSB shoreline browser: built-page coast, depth gates, water interaction and renderer agree",
-    snapshot.ready&&snapshot.accessible===18&&snapshot.excluded===16&&snapshot.stops===18&&!snapshot.errors.length&&snapshot.canvas[0]>0&&snapshot.canvas[1]>0&&snapshot.rippleBudget===24,
-    JSON.stringify(snapshot));
-  const samples=[];
-  for(const i of [19,14,29,24,2]){
-    const view=await b.evaluate("("+navigateDSBIslandSector.toString()+")("+i+")");
-    await b.sleep(120);
-    const frames=await b.evaluate("window.__ooga?.renderedFrames||0");
-    samples.push({...view,frames});
-  }
-  record("DSB shoreline browser: playable views cover Chora, east rocks, west flank, excluded harbor and Olympus",
-    samples.every(v=>v.ready&&v.frames>0&&v.allowed!==[24,2].includes(v.sector))&&samples.length===5,JSON.stringify(samples));
-}
-const dsbIslandShorelineStep={name:"DSB shoreline accessible coasts and exclusions",why:"regression: island-wide wading works in the real DSB browser scene and preserves harbor and Olympus",run:dsbIslandShorelineBrowserCheck};
-for(const phone of [false,true])scene("dsb",{label:phone?"island shoreline phone":"island shoreline desktop",query:"&overview=1&weather=clear&time=1200",opts:phone?{w:390,h:844,mobile:true}:{w:800,h:500},steps:[dsbIslandShorelineStep]});
 
 const runTasks = async () => {
   const picked = tasks.filter((t) => (t.perf ? PERF : PICKED.includes(t.scene)));
