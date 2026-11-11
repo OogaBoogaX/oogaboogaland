@@ -16,7 +16,7 @@
     }
     return merge(brim, crown, ring({ r: 0.21, thickness: 0.035, y: 0.075, segments: 14, color: "#d8892b" }), ...cross);
   });
-  const PUMPKIN = "#e8862a", PUMPKIN_DK = "#cf6f1c", PUMPKIN_GLOW = "#ffc14d";
+  const PUMPKIN = "#e8862a", PUMPKIN_DK = "#cf6f1c", PUMPKIN_GLOW = "#ffc14d", STEM = "#5b6b2a", STEM_DK = "#3f4a1d";
   BL.characters.add({
     handle: "rules-without-rulers",
     // In-game name; activity still joins on the handle (the GitHub login)
@@ -80,6 +80,48 @@
         k.headEmissive = { [glow]: 1 };
         k.lid = k.color(PUMPKIN_DK);
         return true;
+      },
+      // At the refined detail the head is a real pumpkin: a squat gourd with eight ribs round it, its grooves darker, a
+      // dimple and a short stem on top (under the hat, but in the face button), in the authored head's bounds. The
+      // carving is the same, laid onto the curved front where it was on the flat one.
+      refine(k, part, v) {
+        if (part !== "head" && part !== "closed" && part !== "portrait") return;
+        const f = k.fine, pumpkin = k.color(PUMPKIN), pumpkinDk = k.color(PUMPKIN_DK), stem = k.color(STEM), stemDk = k.color(STEM_DK);
+        const front = 6 * f - 1, face = new Map();
+        const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+        v.each((x, y, z, c) => {
+          lo[0] = Math.min(lo[0], x); lo[1] = Math.min(lo[1], y); lo[2] = Math.min(lo[2], z);
+          hi[0] = Math.max(hi[0], x); hi[1] = Math.max(hi[1], y); hi[2] = Math.max(hi[2], z);
+          if (z === front && c !== pumpkin && c !== pumpkinDk) face.set(x + "," + y, c);
+        });
+        v.clear();
+        const cx = 3.5, cy = 4, cz = 2.5, ax = 4.5, az = 3.5, hy = 4, n = 2.6, m = 2.4, top = {};
+        for (let x = -f; x < 8 * f; x++) for (let z = -f; z < 6 * f; z++) {
+          const dx = ((x + 0.5) / f - cx) / ax, dz = ((z + 0.5) / f - cz) / az;
+          const lobe = Math.cos(8 * Math.atan2(dz, dx)), rib = (1 - lobe) / 2;
+          const reach = Math.pow(Math.pow(Math.abs(dx), n) + Math.pow(Math.abs(dz), n), 1 / n) / (1 - 0.05 * rib);
+          if (reach > 1) continue;
+          const tall = hy * Math.pow(1 - Math.pow(reach, m), 1 / m) * (1 - (reach < 0.22 ? 0.12 * (1 - reach / 0.22) : 0));
+          for (let y = Math.ceil((cy - tall) * f - 0.5); (y + 0.5) / f <= cy + tall; y++) {
+            if (y < 0 || y >= 8 * f) continue;
+            v.set(x, y, z, rib > 0.86 ? pumpkinDk : pumpkin);
+          }
+        }
+        // The carving, onto the front cell of each of its columns and the one behind it.
+        for (const [col, c] of face) {
+          const [x, y] = col.split(",").map(Number);
+          for (let z = 6 * f; z >= -f; z--) if (v.has(x, y, z)) { v.set(x, y, z, c); if (v.has(x, y, z - 1)) v.set(x, y, z - 1, c); break; }
+        }
+        // The stem, out of the dimple.
+        let crown = 0;
+        for (let y = 8 * f - 1; y >= 0 && !crown; y--) if (v.has(Math.round(cx * f), y, Math.round(cz * f))) crown = y;
+        for (let y = crown + 1; y <= crown + Math.round(1.25 * f); y++) for (let x = -1; x <= 0; x++) for (let z = -1; z <= 0; z++) {
+          v.set(Math.round(cx * f) + x + (y > crown + f ? 1 : 0), y, Math.round(cz * f) + z, (x + z) % 2 ? stemDk : stem);
+        }
+        // Whatever the authored part did not reach stays empty (the face button keeps to its bounds).
+        const outside = [];
+        v.each((x, y, z) => { if (x < lo[0] || y < lo[1] || z < lo[2] || x > hi[0] || z > hi[2]) outside.push(x, y, z); });
+        for (let i = 0; i < outside.length; i += 3) v.del(outside[i], outside[i + 1], outside[i + 2]);
       },
       headgear(k) {
         const h = k.h, u = k.u;

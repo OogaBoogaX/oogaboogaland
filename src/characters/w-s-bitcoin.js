@@ -97,8 +97,9 @@
         k.nose = [appleDk, apple];
         return true;
       },
-      // The axe rests at 0.24; carried while working it hangs like a club.
-      club: (k) => ({ default: stoneAxeGeometry(k.h), gold: stoneAxeGeometry(k.h, true), rest: { x: 0.24, z: 0 }, carry: { x: 0.95, z: 0 } }),
+      // The axe rests at 0.24; carried while working it hangs like a club. Either way it is turned a quarter about
+      // its haft (y, then the tilt as z: the rotation's order is YXZ), so the broad blade faces forward, not sideways.
+      club: (k) => ({ default: stoneAxeGeometry(k.h), gold: stoneAxeGeometry(k.h, true), rest: { x: 0, y: Math.PI / 2, z: 0.24 }, carry: { x: 0, y: Math.PI / 2, z: 0.95 } }),
       // Repaint the stubble beside the tusks so both sides stay a clean mirror pair.
       mark(k, v) {
         const P = k.P;

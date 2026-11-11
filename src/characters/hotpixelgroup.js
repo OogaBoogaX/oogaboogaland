@@ -190,13 +190,17 @@
         // Below the eyes and clear of the blink cells.
         for (const x of [0, 1, 5, 6]) v.set(x, 1, 7, green);
       },
-      gear(k) {
-        // Bone wrist bands follow each animated arm.
-        const v = makeVox(), bone = k.color("#e8e5d5");
-        v.fill(-2, 4, 2, 3, -2, 4, (x, y, z) =>
-          x === -2 || x === 4 || z === -2 || z === 4 ? bone : null);
-        const geometry = k.vg(v, { x: -1.5 * k.u, y: -11 * k.u, z: -1.5 * k.u });
-        for (const arm of [k.parts.armR, k.parts.armL]) addChild(arm, createNode({ geometry }));
+      // Bone wrist bands, drawn on the arm's fine grid: a cuff standing a cell proud round the wrist and forearm's foot,
+      // so it follows each animated arm.
+      refine(k, part, v) {
+        if (part !== "arm") return;
+        const bone = k.color("#e8e5d5"), band = [];
+        const f = k.fine;
+        for (let y = 3 * f; y < 5 * f; y++) for (let x = -2 * f; x <= 5 * f; x++) for (let z = -2 * f; z <= 5 * f; z++) {
+          if (v.has(x, y, z)) continue;
+          if (v.has(x + 1, y, z) || v.has(x - 1, y, z) || v.has(x, y, z + 1) || v.has(x, y, z - 1)) band.push(x, y, z);
+        }
+        for (let i = 0; i < band.length; i += 3) v.set(band[i], band[i + 1], band[i + 2], bone);
       }
     }
   });

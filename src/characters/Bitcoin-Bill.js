@@ -177,7 +177,7 @@
       // The chihuahua trots along at his heel, a little behind and to his left, wherever he goes.
       extras(k) {
         const s = 0.7, h = k.h;
-        k.parts.dog = createNode({ position: { x: 0.55 * h, y: -5 * k.u, z: -0.25 * h }, scale: { x: s, y: s, z: s }, geometry: k.vg(dogVox(k), { x: -0.5 * k.u, y: 0, z: -0.5 * k.u }) });
+        k.parts.dog = createNode({ position: { x: 0.55 * h, y: -k.legH, z: -0.25 * h }, scale: { x: s, y: s, z: s }, geometry: k.vg(dogVox(k), { x: -0.5 * k.u, y: 0, z: -0.5 * k.u }) });
         addChild(k.root, k.parts.dog);
       }
     }

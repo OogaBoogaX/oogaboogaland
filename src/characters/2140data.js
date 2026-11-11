@@ -267,7 +267,7 @@
           addChild(k.parts.armR, ghost);
         }
         // Both the held jump and an equipped jetpack use the same sole thrusters.
-        k.parts.jetpack = createNode({ position: { x: 0, y: -5 * u, z: 0 }, visible: false });
+        k.parts.jetpack = createNode({ position: { x: 0, y: -k.legH, z: 0 }, visible: false });
         k.parts.jetFlame = createNode({ geometry: voxelGeometry(flameVox(), { unit: u, palette: FLAME_PALETTE, origin: { x: -4.5 * u, y: 0, z: -u }, emissive: FLAME_GLOW }), visible: false });
         addChild(k.parts.jetpack, k.parts.jetFlame);
         addChild(k.root, k.parts.jetpack);

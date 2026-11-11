@@ -1,7 +1,80 @@
 {
   "version": 1,
   "lane": "manual",
-  "openedOn": "2026-11-08",
+  "openedOn": "2026-11-11",
   "round": "6d183631f9193c413118eb4608b46de17ead3ec9",
-  "entries": []
+  "entries": [
+    {
+      "pr": 591,
+      "head": "ff2aa154c5f232817670c4f7d14b3bb4685096a9",
+      "author": "w-s-bitcoin",
+      "path": "src/characters/2140data.js",
+      "base": "244ec3968c50bb1afdd52e70de102933686d61b5",
+      "hash": "f2849ebb72602579b675c3f4943725dd6e668e413d8623634d7f62f9d5bf539e",
+      "lane": "manual"
+    },
+    {
+      "pr": 591,
+      "head": "ff2aa154c5f232817670c4f7d14b3bb4685096a9",
+      "author": "w-s-bitcoin",
+      "path": "src/characters/Bitcoin-Bill.js",
+      "base": "5ee2c9591f2582e2127d256fcff2fc37de19d6dd",
+      "hash": "0ebcc7976343cec0931bc008277b754d3a9283c3a0387d5e0a17114381c5751a",
+      "lane": "manual"
+    },
+    {
+      "pr": 591,
+      "head": "ff2aa154c5f232817670c4f7d14b3bb4685096a9",
+      "author": "w-s-bitcoin",
+      "path": "src/characters/MrHodlX.js",
+      "base": "4d3f9e34c3725c451a1bbae44f4bd27e51f6608d",
+      "hash": "916e435de15221863a4d06062157a99a8306aeb5efd883568d1108c4b5b9539e",
+      "lane": "manual"
+    },
+    {
+      "pr": 591,
+      "head": "ff2aa154c5f232817670c4f7d14b3bb4685096a9",
+      "author": "w-s-bitcoin",
+      "path": "src/characters/hotpixelgroup.js",
+      "base": "a7d7892a2b405a83df27f84d76130effe56117ed",
+      "hash": "8fb274aab8266592f796b9b44bc75756a28ead30837c60655b2ce04d7dd7051e",
+      "lane": "manual"
+    },
+    {
+      "pr": 591,
+      "head": "ff2aa154c5f232817670c4f7d14b3bb4685096a9",
+      "author": "w-s-bitcoin",
+      "path": "src/characters/ibrihamturay-coder.js",
+      "base": "7903d4bcea12438ac50d2022ea9bfda4fc3f209d",
+      "hash": "a997703d06acac208936ca31eb51897a9a9006c82c12bfef0abf72dbcca0244e",
+      "lane": "manual"
+    },
+    {
+      "pr": 591,
+      "head": "ff2aa154c5f232817670c4f7d14b3bb4685096a9",
+      "author": "w-s-bitcoin",
+      "path": "src/characters/rules-without-rulers.js",
+      "base": "d85f157c4aa32e7e4108f1e4ed64683c137c264d",
+      "hash": "f0fe7aee738db429f90a43a11920c331f8a5a3a4309b4ce87681347135ad4825",
+      "lane": "manual"
+    },
+    {
+      "pr": 591,
+      "head": "ff2aa154c5f232817670c4f7d14b3bb4685096a9",
+      "author": "w-s-bitcoin",
+      "path": "src/characters/timechainb.js",
+      "base": "de161ba65b2ade655a11bac8a899562beef52ed3",
+      "hash": "003cb53a6e73a0b64005fbbebd60a7317367af2a98a686e270e91aae8be65c6e",
+      "lane": "manual"
+    },
+    {
+      "pr": 591,
+      "head": "ff2aa154c5f232817670c4f7d14b3bb4685096a9",
+      "author": "w-s-bitcoin",
+      "path": "src/characters/w-s-bitcoin.js",
+      "base": "8289f0a484db64ee3575081d8b9e1b03bb27c934",
+      "hash": "e7d74b881c7d1921a42146cb49c6acb85abd75cc040640754dd28184ddbb0dd7",
+      "lane": "manual"
+    }
+  ]
 }
