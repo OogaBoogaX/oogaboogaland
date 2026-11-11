@@ -283,15 +283,19 @@
     out[2] = +a[2];
     return out;
   };
-  const makeVox = () => {
+  const voxMap = (key) => {
     const map = new Map();
-    const key = voxKey;
     return {
       map,
       has: (x, y, z) => map.has(key(x, y, z)),
       get: (x, y, z) => map.get(key(x, y, z)),
       set: (x, y, z, c) => map.set(key(x, y, z), c),
       del: (x, y, z) => map.delete(key(x, y, z)),
+      // Every cell as (x, y, z, colour), whatever the key.
+      each(fn) {
+        const at = [0, 0, 0];
+        for (const [k, c] of map) { voxCoords(k, at); fn(at[0], at[1], at[2], c); }
+      },
       fill(x0, x1, y0, y1, z0, z1, c) {
         for (let x = x0; x <= x1; x++) {
           for (let y = y0; y <= y1; y++) {
@@ -304,8 +308,116 @@
       }
     };
   };
+  const makeVox = () => voxMap(voxKey);
+  // A fine map, for the refined body's many small cells (see FINE): makeVox's interface (`has`, `get`, `set`, `del`,
+  // `each`, `fill`) and `clear`, `size` and `clone` on a dense box of cells, each its colour plus one (0 empty) in a
+  // Uint16Array, grown by `PAD` cells a side whenever a cell lands outside it.
+  const makeFineVox = (from, bounds) => {
+    const PAD = 8;
+    let x0 = 0, y0 = 0, z0 = 0, nx = 0, ny = 0, nz = 0, cells = new Uint16Array(0), count = 0;
+    if (from) ({ x0, y0, z0, nx, ny, nz, count } = from.box()), cells = from.box().cells.slice();
+    else if (bounds) {
+      x0 = bounds[0]; y0 = bounds[2]; z0 = bounds[4];
+      nx = bounds[1] - x0 + 1; ny = bounds[3] - y0 + 1; nz = bounds[5] - z0 + 1;
+      cells = new Uint16Array(nx * ny * nz);
+    }
+    const inside = (x, y, z) => x >= x0 && y >= y0 && z >= z0 && x < x0 + nx && y < y0 + ny && z < z0 + nz;
+    // Whether the box is as small as its cells allow: true once trimmed, until it grows (a deleted cell leaves it a little
+    // large, which costs a pass nothing it would notice).
+    let tight = false;
+    const grow = (x, y, z) => {
+      tight = false;
+      const ax = nx ? Math.min(x0, x - PAD) : x - PAD, ay = ny ? Math.min(y0, y - PAD) : y - PAD, az = nz ? Math.min(z0, z - PAD) : z - PAD;
+      const bx = nx ? Math.max(x0 + nx, x + PAD + 1) : x + PAD + 1, by = ny ? Math.max(y0 + ny, y + PAD + 1) : y + PAD + 1;
+      const bz = nz ? Math.max(z0 + nz, z + PAD + 1) : z + PAD + 1;
+      const mx = bx - ax, my = by - ay, mz = bz - az, next = new Uint16Array(mx * my * mz);
+      for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+        const src = (i * ny + j) * nz, dst = ((i + x0 - ax) * my + j + y0 - ay) * mz + z0 - az;
+        next.set(cells.subarray(src, src + nz), dst);
+      }
+      x0 = ax; y0 = ay; z0 = az; nx = mx; ny = my; nz = mz; cells = next;
+    };
+    const v = {
+      has: (x, y, z) => inside(x, y, z) && cells[((x - x0) * ny + y - y0) * nz + z - z0] !== 0,
+      get(x, y, z) {
+        if (!inside(x, y, z)) return undefined;
+        const c = cells[((x - x0) * ny + y - y0) * nz + z - z0];
+        return c ? c - 1 : undefined;
+      },
+      set(x, y, z, c) {
+        if (c === undefined || c === null) throw new Error("a fine cell needs a colour");
+        if (!inside(x, y, z)) grow(x, y, z);
+        const i = ((x - x0) * ny + y - y0) * nz + z - z0;
+        if (!cells[i]) count++;
+        cells[i] = c + 1;
+      },
+      del(x, y, z) {
+        if (!inside(x, y, z)) return;
+        const i = ((x - x0) * ny + y - y0) * nz + z - z0;
+        if (cells[i]) { cells[i] = 0; count--; }
+      },
+      each(fn) {
+        for (let x = 0, i = 0; x < nx; x++) for (let y = 0; y < ny; y++) for (let z = 0; z < nz; z++, i++) {
+          if (cells[i]) fn(x + x0, y + y0, z + z0, cells[i] - 1);
+        }
+      },
+      fill(xa, xb, ya, yb, za, zb, c) {
+        if (typeof c !== "function") {
+          // One colour: the box grown to both corners once, then written straight.
+          if (c == null || xa > xb || ya > yb || za > zb) return;
+          if (!inside(xa, ya, za)) grow(xa, ya, za);
+          if (!inside(xb, yb, zb)) grow(xb, yb, zb);
+          const value = c + 1;
+          for (let x = xa; x <= xb; x++) for (let y = ya; y <= yb; y++) {
+            for (let i = ((x - x0) * ny + y - y0) * nz + za - z0, end = i + zb - za; i <= end; i++) {
+              if (!cells[i]) count++;
+              cells[i] = value;
+            }
+          }
+          return;
+        }
+        for (let x = xa; x <= xb; x++) for (let y = ya; y <= yb; y++) for (let z = za; z <= zb; z++) {
+          const value = c(x, y, z);
+          if (value != null) v.set(x, y, z, value);
+        }
+      },
+      clear() { cells.fill(0); count = 0; tight = false; },
+      // Shrinks the box to the cells it holds, so a pass over it covers no empty space.
+      trim() {
+        if (tight) return v;
+        tight = true;
+        // Each side found by reading in from it to its first cell, so the cells within are never read.
+        const slab = ny * nz;
+        let ax = 0, bx = nx - 1, ay = 0, by = ny - 1, az = nz, bz = -1;
+        first: for (; ax < nx; ax++) for (let i = ax * slab, end = i + slab; i < end; i++) if (cells[i]) break first;
+        if (ax === nx) { x0 = y0 = z0 = nx = ny = nz = 0; cells = new Uint16Array(0); return v; }
+        last: for (; bx > ax; bx--) for (let i = bx * slab, end = i + slab; i < end; i++) if (cells[i]) break last;
+        low: for (; ay < ny; ay++) for (let x = ax; x <= bx; x++) for (let i = (x * ny + ay) * nz, end = i + nz; i < end; i++) if (cells[i]) break low;
+        high: for (; by > ay; by--) for (let x = ax; x <= bx; x++) for (let i = (x * ny + by) * nz, end = i + nz; i < end; i++) if (cells[i]) break high;
+        for (let x = ax; x <= bx; x++) for (let y = ay; y <= by; y++) {
+          const row = (x * ny + y) * nz;
+          for (let z = 0; z < az; z++) if (cells[row + z]) { az = z; break; }
+          for (let z = nz - 1; z > bz; z--) if (cells[row + z]) { bz = z; break; }
+        }
+        if (ax === 0 && ay === 0 && az === 0 && bx === nx - 1 && by === ny - 1 && bz === nz - 1) return v;
+        const mx = bx - ax + 1, my = by - ay + 1, mz = bz - az + 1, next = new Uint16Array(mx * my * mz);
+        for (let i = 0; i < mx; i++) for (let j = 0; j < my; j++) {
+          const src = ((i + ax) * ny + j + ay) * nz + az;
+          next.set(cells.subarray(src, src + mz), (i * my + j) * mz);
+        }
+        x0 += ax; y0 += ay; z0 += az; nx = mx; ny = my; nz = mz; cells = next;
+        return v;
+      },
+      get size() { return count; },
+      clone: () => makeFineVox(v),
+      // The box itself, for passes that read it directly (`rounded`).
+      box: () => ({ x0, y0, z0, nx, ny, nz, cells, count })
+    };
+    return v;
+  };
   // Exposed voxel faces emitted as run-merged quads.
   const CELL = [0, 0, 0];
+  const SIX = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
   const voxelFaces = (iterate, has, emit) => {
     const F = { py: [], ny: [], px: [], nx: [], pz: [], nz: [] };
     iterate((x, y, z, c) => {
@@ -332,19 +444,84 @@
     mergeEmit(F.pz, (f, r1) => emit([[f.r, f.b, f.a + 1], [r1 + 1, f.b, f.a + 1], [r1 + 1, f.b + 1, f.a + 1], [f.r, f.b + 1, f.a + 1]], f.c));
     mergeEmit(F.nz, (f, r1) => emit([[f.r, f.b, f.a], [f.r, f.b + 1, f.a], [r1 + 1, f.b + 1, f.a], [r1 + 1, f.b, f.a]], f.c));
   };
-  const voxelGeometry = (vox, { unit, palette, origin = { x: 0, y: 0, z: 0 }, emissive = {} }) => {
+  // Exposed voxel faces merged into the largest same-coloured rectangles each plane allows, wound as `voxelFaces` winds
+  // them. The refined Oogas bake this way: cells split eight ways would otherwise cost them several times the faces.
+  // Each writes its quad's four corners, x y z in turn, into `o`.
+  const corners = (o, ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz) => {
+    o[0] = ax; o[1] = ay; o[2] = az; o[3] = bx; o[4] = by; o[5] = bz; o[6] = cx; o[7] = cy; o[8] = cz; o[9] = dx; o[10] = dy; o[11] = dz;
+  };
+  const RECT_QUADS = [
+    (o, a, r0, r1, b0, b1) => corners(o, r0, a + 1, b0, r0, a + 1, b1 + 1, r1 + 1, a + 1, b1 + 1, r1 + 1, a + 1, b0),
+    (o, a, r0, r1, b0, b1) => corners(o, r0, a, b0, r1 + 1, a, b0, r1 + 1, a, b1 + 1, r0, a, b1 + 1),
+    (o, a, r0, r1, b0, b1) => corners(o, a + 1, b0, r0, a + 1, b1 + 1, r0, a + 1, b1 + 1, r1 + 1, a + 1, b0, r1 + 1),
+    (o, a, r0, r1, b0, b1) => corners(o, a, b0, r0, a, b0, r1 + 1, a, b1 + 1, r1 + 1, a, b1 + 1, r0),
+    (o, a, r0, r1, b0, b1) => corners(o, r0, b0, a + 1, r1 + 1, b0, a + 1, r1 + 1, b1 + 1, a + 1, r0, b1 + 1, a + 1),
+    (o, a, r0, r1, b0, b1) => corners(o, r0, b0, a, r0, b1 + 1, a, r1 + 1, b1 + 1, a, r1 + 1, b0, a)
+  ];
+  const QUAD = new Float64Array(12);
+  // A fine map's exposed faces, merged into same-coloured rectangles, on its dense box. One pass finds every exposed face
+  // in each of the six directions (RECT_QUADS' order) and lays it on that direction's mask, kept the box's size and left
+  // empty again by the merging; then each direction's faces, in the box's order, grow greedily within their slice, first
+  // along its inner axis R and then down its outer axis B (`RECT_AXES`: the slice's axis A, then B and R, with the box's
+  // x outermost and z innermost, so the faces come in each slice's order). RECT_SWAP says when RECT_QUADS take B as their
+  // rows rather than R.
+  const RECT_AXES = [[1, 0, 2], [1, 0, 2], [0, 1, 2], [0, 1, 2], [2, 0, 1], [2, 0, 1]], RECT_SWAP = [true, true, false, false, true, true];
+  const rectMasks = [new Uint16Array(0), new Uint16Array(0), new Uint16Array(0), new Uint16Array(0), new Uint16Array(0), new Uint16Array(0)];
+  const rectLists = [[], [], [], [], [], []];
+  const gridRects = (v, emit) => {
+    const { x0, y0, z0, nx, ny, nz, cells } = v.box(), total = cells.length, base = [x0, y0, z0], size = [nx, ny, nz], step = [ny * nz, nz, 1];
+    if (rectMasks[0].length < total) for (let d = 0; d < 6; d++) rectMasks[d] = new Uint16Array(total);
+    const [m0, m1, m2, m3, m4, m5] = rectMasks, [l0, l1, l2, l3, l4, l5] = rectLists;
+    for (let d = 0; d < 6; d++) rectLists[d].length = 0;
+    const sx = step[0], sy = step[1];
+    for (let x = 0, i = 0; x < nx; x++) for (let y = 0; y < ny; y++) for (let z = 0; z < nz; z++, i++) {
+      const c = cells[i];
+      if (!c) continue;
+      if (y + 1 >= ny || !cells[i + sy]) { m0[i] = c; l0.push(i); }
+      if (y === 0 || !cells[i - sy]) { m1[i] = c; l1.push(i); }
+      if (x + 1 >= nx || !cells[i + sx]) { m2[i] = c; l2.push(i); }
+      if (x === 0 || !cells[i - sx]) { m3[i] = c; l3.push(i); }
+      if (z + 1 >= nz || !cells[i + 1]) { m4[i] = c; l4.push(i); }
+      if (z === 0 || !cells[i - 1]) { m5[i] = c; l5.push(i); }
+    }
+    const at = [0, 0, 0];
+    for (let d = 0; d < 6; d++) {
+      const [A, B, R] = RECT_AXES[d], mask = rectMasks[d], list = rectLists[d], sB = step[B], sR = step[R], nB = size[B], nR = size[R];
+      for (let n = 0; n < list.length; n++) {
+        const start = list[n], c = mask[start];
+        if (!c) continue;
+        at[0] = Math.floor(start / sx); at[1] = Math.floor(start / sy) % ny; at[2] = start % nz;
+        const b0 = at[B], r0 = at[R];
+        let r1 = r0, b1 = b0;
+        while (r1 + 1 < nR && mask[start + (r1 + 1 - r0) * sR] === c) r1++;
+        for (let row = true; row && b1 + 1 < nB; ) {
+          const line = start + (b1 + 1 - b0) * sB;
+          for (let r = 0; r <= r1 - r0 && row; r++) row = mask[line + r * sR] === c;
+          if (row) b1++;
+        }
+        for (let b = 0; b <= b1 - b0; b++) for (let r = 0; r <= r1 - r0; r++) mask[start + b * sB + r * sR] = 0;
+        const a = at[A] + base[A], bl = b0 + base[B], bh = b1 + base[B], rl = r0 + base[R], rh = r1 + base[R];
+        if (RECT_SWAP[d]) RECT_QUADS[d](QUAD, a, bl, bh, rl, rh);
+        else RECT_QUADS[d](QUAD, a, rl, rh, bl, bh);
+        emit(QUAD, c - 1);
+      }
+    }
+  };
+  const voxelGeometry = (vox, { unit, palette, origin = { x: 0, y: 0, z: 0 }, emissive = {}, rects = false }) => {
     const geo = geometry();
     geo.voxel = new Float32Array([unit, origin.x, origin.y, origin.z]);
     const rgb = palette.map((c) => typeof c === "string" ? hexToRgb(c) : c);
     const emit = (pts, c) => {
       face(geo, pts.map(([x, y, z]) => pushVert(geo, origin.x + x * unit, origin.y + y * unit, origin.z + z * unit)), rgb[c], { emissive: emissive[c] || 0 });
     };
-    voxelFaces((fn) => {
-      for (const [k, c] of vox.map) {
-        voxCoords(k, CELL);
-        fn(CELL[0], CELL[1], CELL[2], c);
-      }
-    }, vox.has, emit);
+    // A rectangle's four corners come flat (`QUAD`).
+    const quad = (o, c) => {
+      const n = geo.verts.length / 3;
+      for (let q = 0; q < 12; q += 3) geo.verts.push(origin.x + o[q] * unit, origin.y + o[q + 1] * unit, origin.z + o[q + 2] * unit);
+      face(geo, [n, n + 1, n + 2, n + 3], rgb[c], { emissive: emissive[c] || 0 });
+    };
+    if (rects) gridRects(vox, quad);
+    else voxelFaces((fn) => vox.each(fn), vox.has, emit);
     return geo;
   };
   const clamp255 = (v) => Math.max(0, Math.min(255, Math.round(v)));
@@ -780,6 +957,300 @@
   };
   // Resting club angles: x tilts the head forward, z rolls it; carry is the working hang.
   const CLUB_REST = { x: 0.95, z: 0 };
+  // ---- The refined body ----------------------------------------------------------------------------------------------
+  // Every Ooga is authored on the sixteenths grid of `buildCaveman` (a character file's `u`) and drawn at FINE times that
+  // detail. Once every hook has run, each authored part is drawn again on the fine grid: the head is the same head with
+  // every cell split FINE ways each way, rounded behind its face, whose cells all stay, so no face changes; the torso
+  // keeps its cells, TORSO_RISE taller (the head and arms lifted with it), its hip band shorter and its chest longer,
+  // narrow at the waist and full through the chest into the shoulders, over a hip band fitted to the thighs and a
+  // loincloth wrapped close round them; arms and legs are drawn anew from smooth profiles over plain block fists and
+  // feet, the legs `LEG_UNITS` from hip to sole (five authored) and LEGS_IN closer together. Every shape here is given in
+  // authored units and drawn at whatever FINE is. Colours come from the authored part region by region, so a sleeve, a
+  // cuff, a boot or a glove stays where its owner drew it, and whatever a hook built out past the plain part rides along.
+  // Nothing here draws from `k.rand`: the body's own small variation and the cloth's weave are hashed from the grid.
+  const FINE = 4, LEG_UNITS = 7, FOOT_UNITS = 1.5, TORSO_RISE = 1, LEGS_IN = 0.5;
+  // The refined body's proportions as shares of an Ooga's height, for what is set beside an Ooga before one is built:
+  // the hip over the soles (a built Ooga's root stands there), and how much higher than authored the torso's top, the
+  // head and the shoulders stand.
+  const BODY = { hip: LEG_UNITS / 16, rise: TORSO_RISE / 16 };
+  // Every Ooga is built through here, many cells at a time, so the hot paths keep Math's functions at hand.
+  const { imul, floor, abs } = Math;
+  const fineMix = (x, y, z) => ((imul(x + 101, 73856093) ^ imul(y + 37, 19349663) ^ imul(z + 13, 83492791)) >>> 0) % 1000;
+  // The body's grain, half an authored unit across at any FINE, so speckle and weave keep one size and their faces merge.
+  const GRAIN = Math.max(1, FINE / 2);
+  const grainMix = (x, y, z, salt) => fineMix(floor(x / GRAIN) + salt, floor(y / GRAIN), floor(z / GRAIN));
+  const upscaled = (v) => {
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    v.each((x, y, z) => {
+      if (x < lo[0]) lo[0] = x; if (x > hi[0]) hi[0] = x; if (y < lo[1]) lo[1] = y; if (y > hi[1]) hi[1] = y;
+      if (z < lo[2]) lo[2] = z; if (z > hi[2]) hi[2] = z;
+    });
+    const out = lo[0] > hi[0] ? makeFineVox() : makeFineVox(null, [lo[0] * FINE, hi[0] * FINE + FINE - 1, lo[1] * FINE, hi[1] * FINE + FINE - 1, lo[2] * FINE, hi[2] * FINE + FINE - 1]);
+    v.each((ax, ay, az, c) => {
+      const x = ax * FINE, y = ay * FINE, z = az * FINE;
+      out.fill(x, x + FINE - 1, y, y + FINE - 1, z, z + FINE - 1, c);
+    });
+    return out;
+  };
+  // Rounds a fine map's convex edges: a cell goes when it lies outside the quarter circle of radius r that edge is rounded
+  // to, judged by how deep it sits under each of the edge's two faces, and when the body runs on behind it both ways
+  // past the rounding, so a brim, a strap or a single authored cell keeps its shape. Each of `edges` is
+  // [axis a, the side a's face looks to, axis b, the side b's face looks to, r]; `keep(x, y, z)` protects a cell. Every
+  // cell is judged on the map as it was.
+  // The rounding's six run buffers, reused and grown to the largest box rounded so far.
+  const roundRuns = [0, 1, 2, 3, 4, 5].map(() => new Uint8Array(0));
+  const rounded = (v, edges, keep) => {
+    // Straight on the fine map's dense box, with each cell's run of filled cells in each of the six directions (`runs`:
+    // x, y and z, each positive then negative), so each edge is judged in a few reads.
+    v.trim();
+    const { x0, y0, z0, nx, ny, nz, cells } = v.box(), size = [nx, ny, nz], step = [ny * nz, nz, 1], total = cells.length;
+    if (roundRuns[0].length < total) for (let r = 0; r < 6; r++) roundRuns[r] = new Uint8Array(total);
+    const runs = roundRuns;
+    for (let a = 0; a < 3; a++) for (let side = 0; side < 2; side++) {
+      const run = runs[a * 2 + side], s = side ? -1 : 1, st = step[a], n = size[a];
+      if (st === 1) {
+        // Along z each line is its own run of cells, walked from its far end (in direction s) back, counting filled
+        // cells ahead.
+        for (let line = 0; line < total; line += n) {
+          let at = line + (s > 0 ? n - 1 : 0), ahead = 0;
+          for (let m = 0; m < n; m++, at -= s) {
+            run[at] = ahead;
+            ahead = cells[at] ? (ahead < 255 ? ahead + 1 : 255) : 0;
+          }
+        }
+        continue;
+      }
+      // Along x or y a whole row of cells at a time (st of them, side by side in the box), from the far row back.
+      for (let base = 0; base < total; base += n * st) {
+        const far = base + (s > 0 ? (n - 1) * st : 0);
+        for (let q = 0; q < st; q++) run[far + q] = 0;
+        for (let m = s > 0 ? n - 2 : 1; m >= 0 && m < n; m -= s) {
+          const row = base + m * st, ahead = row + s * st;
+          for (let q = 0; q < st; q++) {
+            const before = run[ahead + q];
+            run[row + q] = cells[ahead + q] ? (before < 255 ? before + 1 : 255) : 0;
+          }
+        }
+      }
+    }
+    const p = [0, 0, 0], drop = [], count = edges.length;
+    // Each edge needs its cell near both its faces: a cell's `near` holds a bit for each direction it lies within some
+    // edge's radius of a face in (`reach`, the largest radius looking that way), and `able` lists, for each such set of
+    // bits, the edges whose two faces it holds.
+    const reach = [0, 0, 0, 0, 0, 0], need = [], plan = [];
+    for (let e = 0; e < count; e++) {
+      const [a, sa, b, sb, r] = edges[e], da = a * 2 + (sa > 0 ? 0 : 1), db = b * 2 + (sb > 0 ? 0 : 1);
+      reach[da] = Math.max(reach[da], r);
+      reach[db] = Math.max(reach[db], r);
+      need.push(1 << da | 1 << db);
+      // Each edge's runs toward its two faces (`toA`, `toB`) and away from them, and its steps through the box.
+      plan.push({ a, b, r, sa, sb, toA: runs[da], toB: runs[db], fromA: runs[da ^ 1], fromB: runs[db ^ 1], stepA: sa * step[a], stepB: sb * step[b] });
+    }
+    const able = [];
+    for (let near = 0; near < 64; near++) able.push(need.flatMap((bits, e) => (near & bits) === bits ? [e] : []));
+    const [r0, r1, r2, r3, r4, r5] = runs, [q0, q1, q2, q3, q4, q5] = reach;
+    for (let x = 0, index = 0; x < nx; x++) for (let y = 0; y < ny; y++) for (let z = 0; z < nz; z++, index++) {
+      if (!cells[index]) continue;
+      const near = (r0[index] < q0 ? 1 : 0) | (r1[index] < q1 ? 2 : 0) | (r2[index] < q2 ? 4 : 0) | (r3[index] < q3 ? 8 : 0)
+        | (r4[index] < q4 ? 16 : 0) | (r5[index] < q5 ? 32 : 0);
+      // Near no edge's two faces at once, no edge's rounding reaches it.
+      const list = able[near];
+      if (!list.length) continue;
+      if (keep && keep(x + x0, y + y0, z + z0)) continue;
+      p[0] = x; p[1] = y; p[2] = z;
+      for (let n = 0; n < list.length; n++) {
+        const edge = plan[list[n]], r = edge.r, i = edge.toA[index];
+        if (i >= r) continue;
+        const j = edge.toB[index];
+        if (j >= r) continue;
+        const di = r - i - 0.5, dj = r - j - 0.5;
+        if (di * di + dj * dj <= r * r) continue;
+        // The corner cell i toward a's face and j toward b's must be filled, with nothing past it toward either face.
+        const qa = p[edge.a] + edge.sa * i, qb = p[edge.b] + edge.sb * j, na = size[edge.a], nb = size[edge.b];
+        if (qa < 0 || qb < 0 || qa >= na || qb >= nb) continue;
+        const corner = index + edge.stepA * i + edge.stepB * j;
+        if (cells[corner] === 0) continue;
+        const pa = qa + edge.sa, pb = qb + edge.sb;
+        if (pa >= 0 && pa < na && cells[corner + edge.stepA] !== 0) continue;
+        if (pb >= 0 && pb < nb && cells[corner + edge.stepB] !== 0) continue;
+        if (edge.fromA[index] >= r - i + 1 && edge.fromB[index] >= r - j + 1) { drop.push(x, y, z); break; }
+      }
+    }
+    for (let d = 0; d < drop.length; d += 3) v.del(drop[d] + x0, drop[d + 1] + y0, drop[d + 2] + z0);
+    return v;
+  };
+  // A rounding radius given in half units, in fine cells.
+  const half = (n) => Math.max(1, Math.round(n * FINE / 2));
+  // Edge lists for `rounded`, axes 0 x, 1 y, 2 z: the four edges running up a part, then those along its top and foot.
+  const upEdges = (back, front) => [[0, -1, 2, -1, back], [0, 1, 2, -1, back], [0, -1, 2, 1, front], [0, 1, 2, 1, front]];
+  const rimEdges = (dir, side, back, front) => [[1, dir, 0, -1, side], [1, dir, 0, 1, side], [1, dir, 2, -1, back], [1, dir, 2, 1, front]];
+  // Is a point (dx, dz) from a rounded rectangle's middle inside it: half width hx, half depth hz, corner radius rc?
+  const inRound = (dx, dz, hx, hz, rc) => {
+    dx = abs(dx); dz = abs(dz);
+    if (dx > hx + 1e-6 || dz > hz + 1e-6) return false;
+    const qx = dx - (hx - rc), qz = dz - (hz - rc);
+    return qx <= 0 || qz <= 0 || qx * qx + qz * qz <= rc * rc + 1e-6;
+  };
+  // A profile's values at y: knots [y, ...values], straight between them and held past either end, written into `out`.
+  const profile = (knots, y, out) => {
+    let i = 1;
+    while (i < knots.length - 1 && y > knots[i][0]) i++;
+    const a = knots[i - 1], b = knots[i], t = Math.max(0, Math.min(1, (y - a[0]) / (b[0] - a[0])));
+    for (let n = 1; n < a.length; n++) out[n - 1] = a[n] + (b[n] - a[n]) * t;
+    return out;
+  };
+  // The arm in authored units from the fist's foot, about its axis 1.5 in from the authored arm's corner: the fist a
+  // plain block (FIST_HALF each way, FIST_TOP tall), then [y, half width, half depth, corner radius]: a wrist and forearm,
+  // the upper arm swelling smoothly into the shoulder's deltoid and rolling over at its top, which stands half a unit
+  // over the pivot (11), level with the torso's top. A slim build's shoulder is its arm's width, rounded over.
+  const FIST_TOP = 3, FIST_HALF = 2, ARM_TOP = 11.5;
+  const ARM_PROFILE = [[3, 1.5, 1.5, 0.8], [6, 1.5, 1.5, 1], [8, 2.4, 2, 1.4], [8.6, 2.5, 2, 1.5], [10.4, 2.5, 2, 1.6], [11, 2.3, 1.85, 1.6],
+    [11.3, 2, 1.6, 1.4], [11.5, 1.6, 1.3, 1.1]];
+  const SLIM_ARM_PROFILE = [[3, 1.5, 1.5, 0.8], [10.6, 1.5, 1.5, 1], [11.5, 1.1, 1.1, 0.8]];
+  // Which authored row a height on the arm takes its colours from: the fist from the fist's two, the arm from its six,
+  // the shoulder from its three.
+  const armSourceY = (y) => y < FIST_TOP ? Math.min(1, Math.floor(y / 1.5)) : y < 8.5 ? Math.min(7, 2 + Math.floor((y - 3) * 6 / 5.5)) : Math.min(10, 8 + Math.floor(y - 8.5));
+  // The leg in authored units from the sole, about its axis 2 in from the authored leg's corner: the foot a plain block
+  // FOOT_UNITS tall, as wide as the shin, then [y, half width, half depth, corner radius]: from the ankle the leg widens
+  // evenly all the way to the hip, where it is as wide as the authored leg, so it is already narrowing where it leaves
+  // the loincloth and nothing bulges under the cloth. `THIGH` is its top, for the hips.
+  const FOOT_BOX = [0.5, 3.5, 0, 5];
+  const LEG_PROFILE = [[FOOT_UNITS, 1.5, 1.5, 0.9], [2.5, 1.5, 1.5, 0.9], [LEG_UNITS, 2, 2, 1.2]];
+  const THIGH = LEG_PROFILE[LEG_PROFILE.length - 1];
+  // A leg's authored rows are two of foot and three of leg: the foot's lower row its sole, the leg's end rows keep their
+  // thickness (a cuff, a boot's top) and its middle row stretches.
+  const legSourceY = (y) => y < 1 ? 0 : y < FOOT_UNITS ? 1 : y < 2.5 ? 2 : y < 6 ? 3 : 4;
+  // A part's authored map read as colours: the cell itself, or the nearest one in its row, or in the nearest row.
+  const colourSource = (v) => {
+    // A fine map may change after its source is made, so its cells are read from a copy taken now; an authored part's
+    // never does.
+    const kept = v.clone ? v.clone() : null;
+    let rows = null;
+    const rowsOfSource = () => {
+      rows = new Map();
+      (kept || v).each((x, y, z, c) => {
+        let row = rows.get(y);
+        if (!row) rows.set(y, row = []);
+        row.push(x, z, c);
+      });
+      return rows;
+    };
+    // A fine source's nearest kept cell in row ry to (x, z), or undefined when the row is empty: found ring by ring
+    // outward, the least squared distance and, of those, the least x then z, which a walk along the row finds first.
+    let box = null;
+    const nearestKept = (ry, x, z) => {
+      if (!box) box = kept.box();
+      const { x0, y0, z0, nx, ny, nz, cells } = box, j = ry - y0;
+      if (j < 0 || j >= ny) return undefined;
+      const qx = x - x0, qz = z - z0, far = Math.max(qx, nx - 1 - qx, qz, nz - 1 - qz);
+      let best = Infinity, bi = 0, bk = 0, colour;
+      const look = (i, k) => {
+        if (i < 0 || k < 0 || i >= nx || k >= nz) return;
+        const c = cells[(i * ny + j) * nz + k];
+        if (!c) return;
+        const e = (i - qx) * (i - qx) + (k - qz) * (k - qz);
+        if (e < best || e === best && (i < bi || i === bi && k < bk)) { best = e; bi = i; bk = k; colour = c - 1; }
+      };
+      for (let r = 0; r <= far && r * r <= best; r++) {
+        if (!r) { look(qx, qz); continue; }
+        for (let i = qx - r; i <= qx + r; i++) { look(i, qz - r); look(i, qz + r); }
+        for (let k = qz - r + 1; k < qz + r; k++) { look(qx - r, k); look(qx + r, k); }
+      }
+      return colour;
+    };
+    // A fine source is asked each cell about once, and answers straight. An authored part's answer is kept by the cell
+    // asked about (its cells lie well within 128 of its origin), since a fine part asks the same authored cell many
+    // times.
+    if (kept) return colourAt;
+    const known = new Map();
+    return (x, y, z) => {
+      const key = ((x + 128) * 256 + y + 128) * 256 + z + 128;
+      let c = known.get(key);
+      if (c === undefined) known.set(key, c = colourAt(x, y, z));
+      return c;
+    };
+    function colourAt(x, y, z) {
+      const c = v.get(x, y, z);
+      if (c !== undefined) return c;
+      // The cell as it stood when the source was made, else its nearest in the row.
+      const was = kept ? kept.get(x, y, z) : undefined;
+      if (was !== undefined) return was;
+      if (kept) {
+        for (let d = 0; d < 16; d++) {
+          let found = nearestKept(y - d, x, z);
+          if (found === undefined && d) found = nearestKept(y + d, x, z);
+          if (found !== undefined) return found;
+        }
+        return undefined;
+      }
+      if (!rows) rowsOfSource();
+      for (let d = 0; d < 16; d++) for (const ry of d ? [y - d, y + d] : [y]) {
+        const row = rows.get(ry);
+        if (!row) continue;
+        let best = Infinity, colour;
+        for (let i = 0; i < row.length; i += 3) {
+          const e = (row[i] - x) ** 2 + (row[i + 1] - z) ** 2;
+          if (e < best) { best = e; colour = row[i + 2]; }
+        }
+        return colour;
+      }
+      return undefined;
+    }
+  };
+  // The authored cells a part's plain shape leaves out, as `[x, y, z, colour]`: whatever a hook built out past it.
+  const extrasOf = (v, plain) => {
+    const out = [];
+    for (const [key, c] of v.map) {
+      if (plain.has(key)) continue;
+      voxCoords(key, CELL);
+      out.push(CELL[0], CELL[1], CELL[2], c);
+    }
+    return out;
+  };
+  // Plain authored shapes, for telling what a hook added: an arm (either build) with its fist, and a leg with its toes.
+  const PLAIN_ARM = new Set(), PLAIN_LEG = new Set();
+  for (let x = -1; x <= 3; x++) for (let z = -1; z <= 3; z++) for (let y = 0; y <= 10; y++) {
+    if (y < 2 || y > 7 || x >= 0 && x <= 2 && z >= 0 && z <= 2) PLAIN_ARM.add(voxKey(x, y, z));
+  }
+  for (let x = 0; x <= 3; x++) for (let y = 0; y <= 4; y++) for (let z = 0; z <= 6; z++) {
+    if (y < 2 ? z <= 5 || y === 0 : z <= 3) PLAIN_LEG.add(voxKey(x, y, z));
+  }
+  // Lays authored extras on a fine part: each cell its eight, rows mapped by `rowsOf` (the fine rows an authored row
+  // became), and pressed in toward the part's axis until it touches it, so a buckle never floats off a narrower limb.
+  const layExtras = (fine, extras, rowsOf, ax, az) => {
+    const solid = fine.clone();
+    for (let i = 0; i < extras.length; i += 4) {
+      const x0 = extras[i] * FINE, z0 = extras[i + 2] * FINE, c = extras[i + 3];
+      const [y0, y1] = rowsOf(extras[i + 1]);
+      const cx = x0 + 0.5 * FINE - ax, cz = z0 + 0.5 * FINE - az;
+      const sx = Math.abs(cx) >= Math.abs(cz) ? -Math.sign(cx) : 0, sz = sx ? 0 : -Math.sign(cz);
+      let shift = 0;
+      const touches = (s) => {
+        for (let x = x0; x < x0 + FINE; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z < z0 + FINE; z++) {
+          const px = x + sx * s, pz = z + sz * s;
+          if (solid.has(px + 1, y, pz) || solid.has(px - 1, y, pz) || solid.has(px, y, pz + 1) || solid.has(px, y, pz - 1)
+            || solid.has(px, y + 1, pz) || solid.has(px, y - 1, pz) || solid.has(px, y, pz)) return true;
+        }
+        return false;
+      };
+      while (shift < 2 * FINE && (sx || sz) && !touches(shift)) shift++;
+      for (let x = x0; x < x0 + FINE; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z < z0 + FINE; z++) {
+        const px = x + sx * shift, pz = z + sz * shift;
+        if (!fine.has(px, y, pz)) fine.set(px, y, pz, c);
+      }
+    }
+    return fine;
+  };
+  // The fine rows an authored row became on a part drawn from `source` up to `top` units, or its own rows for one past it.
+  const rowsOf = (source, top) => (oy) => {
+    let a = Infinity, b = -Infinity;
+    for (let y = 0; (y + 0.5) / FINE < top; y++) if (source((y + 0.5) / FINE) === oy) { a = Math.min(a, y); b = y; }
+    return a <= b ? [a, b] : [oy * FINE, oy * FINE + FINE - 1];
+  };
+  const ARM_ROWS_OF = rowsOf(armSourceY, ARM_TOP), LEG_ROWS_OF = rowsOf(legSourceY, LEG_UNITS);
+  // A leg's authored height mapped onto the refined leg, for anything a hook hung on a leg that is not a voxel map: the
+  // foot drops to the sole and shallows to the refined foot, and the leg above it stretches.
+  const legHeight = (y, u) => y <= -3 * u ? -LEG_UNITS * u + (y + 5 * u) * FOOT_UNITS / 2 : y * (LEG_UNITS - FOOT_UNITS) / 3;
   // The shared body every contributor gets. A character file (src/characters/<handle>.js)
   // adds its own look through `dress` hooks, each called with the build kit `k` at a fixed
   // point, so the hashed jitter draws in the same order for every build:
@@ -790,6 +1261,7 @@
   //   headgear(k)  nodes on the head              extras(k)    nodes on the root, last
   //   tint(k, palette)  a second colourway: return an alternate palette and every
   //                     voxel part is baked again under it, paired in `tint`
+  //   refine(k, part, v, side)  paints a part's fine map before it bakes (see FINE)
   // `look` flags read here: slim, bald, cleanShaven, wideEyes, hairless, noBrow, noPupils,
   // face ("nose" | "smirk" | "beard" | "none"), eyeColor, eyeGlow, hatY.
   // A character file may keep the slot numbers its first build was given; every later build registers that
@@ -847,18 +1319,29 @@
     // Each voxel map is kept with what it was baked from, so a second colourway
     // can bake the same maps again under another palette.
     const bakes = [];
+    // A voxel part's geometry is filled once the build is done (`pending`), since the refined body (see FINE) draws most
+    // parts again and their authored meshes would go unused; until then it is an empty geometry, which no hook reads.
     const vg = (v, origin, emissive) => {
-      const geo = voxelGeometry(v, { unit: u, palette, origin, emissive });
-      bakes.push({ v, origin, emissive, geo });
+      const geo = geometry();
+      bakes.push({ v, origin, emissive, geo, unit: u, pending: true });
       return geo;
     };
+    // Meshes a pending bake now: once the build is done, or sooner where the refinement reads a mesh a hook hung on.
+    const fill = (bake) => {
+      if (!bake.pending) return;
+      bake.pending = false;
+      Object.assign(bake.geo, voxelGeometry(bake.v, { unit: bake.unit, palette, origin: bake.origin, emissive: bake.emissive }));
+    };
     const parts = {};
-    const legH = 5 * u;
+    // The hip's height over the soles: the refined body's longer legs (see FINE). Authored legs stay five units.
+    const legH = LEG_UNITS * u;
     const root = createNode({ position: { x: 0, y: legH, z: 0 } });
     const eyeCells = [];
     // nose: the beard's nose jitter pair; lid: closed-eye colour; headEmissive: lit head indices
     // loin: the loincloth's two colours, fur and spot unless a torso hook names its own.
-    const k = { traits, h, u, rand, P, color, jit, skinJ, hairJ, leopard, vg, root, parts, armX: 0, eyeCells, nose: [P.nose, P.skin], lid: null, headEmissive: undefined, loin: null };
+    // legH: the root's height over the soles, for anything a hook stands on the ground beside its Ooga.
+    // fine: how many fine cells a refine hook's maps run to an authored unit (see FINE).
+    const k = { traits, h, u, rand, P, color, jit, skinJ, hairJ, leopard, vg, root, parts, legH, fine: FINE, armX: 0, eyeCells, nose: [P.nose, P.skin], lid: null, headEmissive: undefined, loin: null };
     // Hashed from the cell, never drawn from rand, so no character's existing draws move.
     const cellMix = (x, y, z) => ((Math.imul(x + 11, 73856093) ^ Math.imul(y + 7, 19349663) ^ Math.imul(z + 5, 83492791)) >>> 0) % 7;
     // The loincloth every Ooga wears: a flap front and back that hangs over the thighs, cut ragged at the hem.
@@ -940,7 +1423,8 @@
     parts.armR = arm(-1);
     parts.armL = arm(1);
     // club(k) returns { voxels, palette, goldPalette } for a voxel item, or { default, gold }
-    // geometry, plus optional rest and carry angles.
+    // geometry, plus optional rest and carry angles ({ x, y, z } in the rotation's YXZ order, y 0
+    // when left out: a quarter turn in y with the tilt in z turns a blade about its haft).
     const club = dress.club ? dress.club(k) : {};
     const clubV = club.voxels || clubVoxels(rand);
     const clubOrigin = { x: -1 * u, y: -1 * u, z: -1 * u };
@@ -952,7 +1436,7 @@
     };
     parts.club = createNode({
       position: { x: 0, y: -0.62 * h, z: 0.08 * h },
-      rotation: { x: clubRest.x, y: 0, z: clubRest.z },
+      rotation: { x: clubRest.x, y: clubRest.y || 0, z: clubRest.z },
       geometry: skins.club.default
     });
     addChild(parts.armR, parts.club);
@@ -1011,12 +1495,24 @@
       // Ears on a bare head; hair covers them otherwise.
       if (!hairy && !dress.skull) for (const x of [-1, 7]) v.fill(x, x, 2, 3, 2, 3, P.skinDk);
       if (dress.crown) dress.crown(k, v);
+      // Ragged hair: a few exposed cells go. One cut out of the middle of a flat stretch of hair behind the face (a cell
+      // with hair or head on every side but its outer one) is a hole, so it goes back once the pass is over; the draws
+      // are taken as ever, so nobody's later ones move, and the outline stays ragged.
+      const whole = new Set(v.map.keys()), torn = [];
       for (const [key, c] of [...v.map]) {
         if (c !== P.hair && c !== P.hairDk) continue;
         voxCoords(key, CELL);
         const x = CELL[0], y = CELL[1], z = CELL[2];
         const exposed = !v.has(x + 1, y, z) || !v.has(x - 1, y, z) || !v.has(x, y, z + 1) || !v.has(x, y, z - 1) || !v.has(x, y + 1, z);
-        if (exposed && rand() < 0.07) v.del(x, y, z);
+        if (exposed && rand() < 0.07) { v.del(x, y, z); torn.push(key, c); }
+      }
+      for (let i = 0; i < torn.length; i += 2) {
+        voxCoords(torn[i], CELL);
+        const x = CELL[0], y = CELL[1], z = CELL[2];
+        if (z >= 5) continue;
+        let open = 0;
+        for (const [dx, dy, dz] of SIX) if (!whole.has(voxKey(x + dx, y + dy, z + dz))) open++;
+        if (open <= 1) v.map.set(torn[i], torn[i + 1]);
       }
       if (hairy) {
         for (let x = 0; x <= 6; x++) for (let z = 0; z <= 5; z++) if (rand() < 0.08) v.set(x, 9, z, rand() < 0.5 ? P.hair : P.hairDk);
@@ -1042,7 +1538,7 @@
     const headOrigin = { x: -3.5 * u, y: 0, z: -3 * u };
     // Dress hooks define any glowing face cells for both the head and portrait.
     const headEmissive = k.headEmissive;
-    const headOpen = vg(headVox, headOrigin, headEmissive);
+    let headOpen = vg(headVox, headOrigin, headEmissive);
     // Each character may widen the central-face crop to retain a hat or hair.
     // Bounds are in the same voxel coordinates as the character's head hooks.
     const portraitVox = makeVox();
@@ -1053,11 +1549,11 @@
       const x = CELL[0], y = CELL[1], z = CELL[2];
       if (x >= portraitMin[0] && x <= portraitMax[0] && y >= portraitMin[1] && y <= portraitMax[1] && z >= portraitMin[2] && z <= portraitMax[2]) portraitVox.map.set(k, c);
     }
-    const portraitHead = vg(portraitVox, headOrigin, headEmissive);
+    let portraitHead = vg(portraitVox, headOrigin, headEmissive);
     const closedVox = makeVox();
     for (const [key, c] of headVox.map) closedVox.map.set(key, c);
     for (const [x, y] of eyeCells) closedVox.set(x, y, 5, k.lid !== null ? k.lid : y === 2 ? P.skinDk : P.skin);
-    const headClosed = vg(closedVox, headOrigin, k.headEmissive);
+    let headClosed = vg(closedVox, headOrigin, k.headEmissive);
     parts.head = createNode({ position: { x: 0, y: 0.5 * h, z: 0.02 * h }, geometry: headOpen });
     const hatY = dress.hatY ? dress.hatY(k) : (traits.hatY || (traits.bald ? 6 : 9)) * u;
     parts.hat = createNode({ position: { x: 0, y: hatY, z: 0 }, scale: { x: h, y: h, z: h }, visible: false });
@@ -1067,12 +1563,443 @@
     if (dress.headgear) dress.headgear(k);
     addChild(root, parts.legR, parts.legL, parts.torso, parts.armR, parts.armL, parts.head);
     if (dress.extras) dress.extras(k);
+    // The refined body (see FINE): every authored part drawn again on the fine grid, after every hook. A character's
+    // `refine(k, part, v, side)` hook may paint the fine maps before they bake: "head", "closed" and "portrait" (the
+    // head's three faces), "torso", "arm", "fingers" and "leg" (with its side), in fine cells of the part's own frame,
+    // `k.fine` of them to an authored unit.
+    const weaves = new Map(), refinedSources = new Set();
+    // The face button's head, built the first time something shows it (only a face icon does).
+    let facePending = null;
+    {
+      const F = FINE, fineU = u / F, bakeOf = new Map(), done = new Map();
+      for (const bake of bakes) bakeOf.set(bake.geo, bake);
+      const fineBake = (v, origin, emissive) => {
+        v.trim();
+        const geo = voxelGeometry(v, { unit: fineU, palette, origin, emissive, rects: true });
+        bakes.push({ v, origin, emissive, geo, unit: fineU, rects: true });
+        return geo;
+      };
+      // The body's own fine variation: skin and hair speckled grain by grain, a fleck or two in the fur.
+      const fineBody = (c, x, y, z, salt) => {
+        const m = grainMix(x, y, z, salt);
+        return c === P.skin || c === P.skinDk ? (m < 40 ? P.skinDk : P.skin)
+          : c === P.hair || c === P.hairDk ? (m < 120 ? P.hairDk : P.hair) : c === P.fur && m < 25 ? P.spot : c;
+      };
+      const once = (geo, tag, make) => {
+        const key = geo, seen = done.get(key);
+        if (seen && seen[tag]) return seen[tag];
+        const bake = bakeOf.get(geo);
+        if (bake) refinedSources.add(geo);
+        const out = bake ? make(bake) : geo;
+        (seen || done.set(key, {}).get(key))[tag] = out;
+        return out;
+      };
+      // Cloth gets a weave: a few grains of every colour a part wears widely, outside the body's own colours and
+      // anything glowing, a shade darker or lighter, as Kortik's robe and his sister's overalls are. The shades join the
+      // palette once a build, each after its colour, and a second colourway shades them from its own (see tint).
+      const weave = (c, dark) => {
+        let pair = weaves.get(c);
+        if (!pair) {
+          const rgb = palette[c];
+          pair = [palette.length, palette.length + 1];
+          palette.push(rgb.map((value) => clamp255(value * 0.86)), rgb.map((value) => clamp255(value * 1.08)));
+          weaves.set(c, pair);
+        }
+        return pair[dark ? 0 : 1];
+      };
+      const BODY_COLOURS = new Set([P.skin, P.skinDk, P.hair, P.hairDk, P.fur, P.spot, P.white, P.black, P.nose, P.stubble]);
+      const fabric = (v, salt, emissive, keep) => {
+        v.trim();
+        const { x0, y0, z0, nx, ny, nz, cells } = v.box(), counts = new Uint32Array(palette.length + 1), least = 4 * F * F * F;
+        for (let i = 0; i < cells.length; i++) counts[cells[i]]++;
+        // Which colours weave: worn widely, not the body's own, not glowing.
+        const woven = new Uint8Array(counts.length);
+        for (let c = 1; c < counts.length; c++) woven[c] = counts[c] >= least && !BODY_COLOURS.has(c - 1) && !(emissive && emissive[c - 1] !== undefined) ? 1 : 0;
+        for (let x = 0, i = 0; x < nx; x++) for (let y = 0; y < ny; y++) for (let z = 0; z < nz; z++, i++) {
+          const stored = cells[i];
+          if (!woven[stored] || keep && keep(x + x0, y + y0, z + z0)) continue;
+          const m = grainMix(x + x0, y + y0, z + z0, salt);
+          if (m < 70) cells[i] = weave(stored - 1, true) + 1;
+          else if (m >= 975) cells[i] = weave(stored - 1, false) + 1;
+        }
+        return v;
+      };
+      // The head rounds at the back, over its crown and under it, but its face (the front plane and all before it,
+      // from the brow down: eyes, nose, mouth, beard and paint) keeps every cell, so no face changes.
+      const faceKeep = (x, y, z) => z >= 5 * F && y < 6 * F;
+      const HEAD_EDGES = [...upEdges(half(4), half(3)), ...rimEdges(1, half(4), half(4), half(3)), ...rimEdges(-1, half(2), half(3), half(2))];
+      const roundHead = (v) => fabric(rounded(upscaled(v), HEAD_EDGES, faceKeep), 900, k.headEmissive, faceKeep);
+      // Each authored head is rounded once and copied for each use. The closed eyes are the open head with its eye
+      // cells closed (they lie on the face, which rounding and weave leave alone), and the face button the open head cut
+      // to the portrait's bounds.
+      const roundedHeads = new Map();
+      const roundedOf = (src) => {
+        let r = roundedHeads.get(src);
+        if (!r) {
+          if (src === closedVox) {
+            r = roundedOf(headVox).clone();
+            for (const [x, y] of eyeCells) {
+              const c = closedVox.get(x, y, 5);
+              for (let fx = x * F; fx < x * F + F; fx++) for (let fy = y * F; fy < y * F + F; fy++) for (let fz = 5 * F; fz < 6 * F; fz++) {
+                if (r.has(fx, fy, fz)) r.set(fx, fy, fz, c);
+              }
+            }
+          } else r = roundHead(src);
+          roundedHeads.set(src, r);
+        }
+        return r;
+      };
+      const head = (geo, part) => once(geo, part, (bake) => {
+        const v = roundedOf(bake.v).clone();
+        if (dress.refine) dress.refine(k, part, v);
+        return fineBake(v, bake.origin, bake.emissive);
+      });
+      // The face button is the same rounded head, cut to the portrait's bounds.
+      const portrait = (geo) => once(geo, "portrait", (bake) => {
+        const full = roundedOf(headVox), v = makeFineVox();
+        const lo = portraitMin.map((n) => n * F), hi = portraitMax.map((n) => n * F + F - 1);
+        full.each((x, y, z, c) => {
+          if (x >= lo[0] && x <= hi[0] && y >= lo[1] && y <= hi[1] && z >= lo[2] && z <= hi[2]) v.set(x, y, z, c);
+        });
+        if (dress.refine) dress.refine(k, "portrait", v);
+        return fineBake(v, bake.origin, bake.emissive);
+      });
+      // The torso, TORSO_RISE taller than it was authored, in proportion: its hip band two units tall, not three, and
+      // its chest the longer for it (`TORSO_FROM`, a new height's authored one, in units), easing out into a full chest
+      // (`SIDE`, how far its sides move; a slim build's waist comes in over the belt first, the others' keeps its width),
+      // deeper before (`DEEP`) and shaped behind (`BACK`), which runs out under each arm's shoulder its whole height (`REACH`, how far
+      // short of the arm's middle it stops) so the shoulder sits in the torso. Its hip band fits the body over the thighs
+      // and slopes in to the waist (`BAND_IN`, a slim build's the more), and
+      // the loincloth is a wrap close round them, a panel before and behind and a shorter one down each hip, in place of
+      // the authored flaps. `TORSO_KNOTS` maps an authored height on the torso to its new one, for what a hook hung there.
+      const TORSO_KNOTS = [[0, 0], [3, 2], [4, 3], [8, 8 + TORSO_RISE]];
+      const TORSO_FROM = TORSO_KNOTS.map(([a, b]) => [b, a]);
+      // A slim build's waist comes in over the belt; the others' lower torso keeps its width up into the chest.
+      const SIDE = traits.slim ? [[2.95, 0], [3.05, -0.5], [4.25, -0.5], [4.75, 0], [5.1, 0.5], [9, 0.5]] : [[4.75, 0], [5.1, 0.5], [9, 0.5]];
+      const REACH = [[4.25, 3.5], [4.75, 2.9], [5.25, 2.35], [5.75, 1.95], [6.5, 1.65], [7.5, 1.5], [9, 1.5]];
+      const DEEP = [[4.5, 0], [5, 0.5], [8.5, 0.5], [9, 0.25]];
+      // The back, by how far it stands out past the authored torso, in units up it: rising a little from the waist and
+      // level from there to the top, smooth across, so no ledge or bump shows on it.
+      const BACK = [[4.25, 0], [5.5, 0.15], [9, 0.15]];
+      const BAND_UNITS = 2, BAND_IN = traits.slim ? [[1, 0, 0], [1.25, 0.1, 0], [2, 0.8, 0.5]] : [[1, 0, 0], [2, 0.4, 0.5]], WRAP = [2, 2.5, 1.25];
+      // The shoulder line keeps nearly square into the shoulders (its top's side edges barely rounded), so the upper back
+      // meets each deltoid rather than falling away before it.
+      const TORSO_EDGES = [...upEdges(half(3), half(4)), ...rimEdges(1, half(1), half(2), half(3)), ...rimEdges(-1, half(2), half(2), half(2))];
+      const TORSO_SOFT = [...upEdges(half(1), half(1)), ...rimEdges(1, half(1), half(1), half(1)), ...rimEdges(-1, half(2), half(1), half(1))];
+      const CX = 4.5 * F, CZ = 3 * F, at = [0, 0, 0];
+      // The run of a row through the torso's middle, along x at depth z (or along z at column x), or null.
+      const runX = (v, y, z) => {
+        if (!v.has(CX - 1, y, z) || !v.has(CX, y, z)) return null;
+        let lo = CX - 1, hi = CX;
+        while (v.has(lo - 1, y, z)) lo--;
+        while (v.has(hi + 1, y, z)) hi++;
+        return [lo, hi];
+      };
+      const runZ = (v, x, y) => {
+        if (!v.has(x, y, CZ - 1) || !v.has(x, y, CZ)) return null;
+        let lo = CZ - 1, hi = CZ;
+        while (v.has(x, y, lo - 1)) lo--;
+        while (v.has(x, y, hi + 1)) hi++;
+        return [lo, hi];
+      };
+      // Where the thighs stand in the torso's fine cells: the outermost column clear of them each side, and the depths
+      // just before and behind them.
+      const hips = () => {
+        const sx = parts.torso.scale.x * fineU, sz = parts.torso.scale.z * fineU, legX = Math.abs(parts.legR.position.x), legZ = parts.legR.position.z - 0.5 * u;
+        const xR = Math.ceil(CX - 0.5 + (legX + THIGH[1] * u) / sx);
+        return { xL: 2 * CX - 1 - xR, xR, zf: Math.ceil(CZ - 0.5 + (legZ + THIGH[2] * u) / sz), zb: Math.floor(CZ - 0.5 + (legZ - THIGH[2] * u) / sz) };
+      };
+      const torso = (geo) => once(geo, "torso", (bake) => {
+        const old = upscaled(bake.v), ob = old.box(), sx = parts.torso.scale.x, top = (8 + TORSO_RISE) * F;
+        const [loinA, loinB] = k.loin || [P.fur, P.spot];
+        // In proportion: each new row from its authored one, anything over the authored torso raised.
+        const newRows = new Map();
+        for (let y = 0; y < top; y++) {
+          const from = Math.min(8 * F - 1, Math.floor(profile(TORSO_FROM, (y + 0.5) / F, at)[0] * F));
+          if (!newRows.has(from)) newRows.set(from, []);
+          newRows.get(from).push(y);
+        }
+        const rowCache = new Map();
+        const rowsFor = (y) => {
+          let rows = rowCache.get(y);
+          if (!rows) rowCache.set(y, rows = y < 0 ? [y] : y >= 8 * F ? [y + TORSO_RISE * F] : newRows.get(y) || []);
+          return rows;
+        };
+        // Each authored row copied whole into the rows it becomes, in a box from the lowest of them to the highest.
+        let yLo = Infinity, yHi = -Infinity;
+        for (let y = ob.y0; y < ob.y0 + ob.ny; y++) for (const n of rowsFor(y)) yLo = Math.min(yLo, n), yHi = Math.max(yHi, n);
+        const tall = yHi - yLo + 1, slab = tall * ob.nz, raised = new Uint16Array(ob.nx * slab);
+        for (let i = 0; i < ob.nx; i++) for (let j = 0; j < ob.ny; j++) {
+          const x = i + ob.x0, y = j + ob.y0, rows = rowsFor(y), from = (i * ob.ny + j) * ob.nz, line = ob.cells.subarray(from, from + ob.nz);
+          const flaps = y < 0 && y >= -3 * F && x >= 2 * F && x < 7 * F;
+          for (let r = 0; r < rows.length; r++) {
+            const to = i * slab + (rows[r] - yLo) * ob.nz;
+            raised.set(line, to);
+            // The authored flaps go; the wrap below takes their place.
+            if (flaps) for (let q = 0; q < ob.nz; q++) {
+              const z = q + ob.z0, c = line[q] - 1;
+              if (line[q] && (z < F || z >= 5 * F) && (c === loinA || c === loinB)) raised[to + q] = 0;
+            }
+          }
+        }
+        let filled = 0;
+        for (let i = 0; i < raised.length; i++) if (raised[i]) filled++;
+        const v = makeFineVox({ box: () => ({ x0: ob.x0, y0: yLo, z0: ob.z0, nx: ob.nx, ny: tall, nz: ob.nz, cells: raised, count: filled }) });
+        v.trim();
+        // The hip band, refitted to the thighs and sloping in to the waist, and anything a hook built out past it kept
+        // against it.
+        const { xL, xR, zf, zb } = hips(), band = colourSource(v), bandRows = BAND_UNITS * F;
+        const band0 = [];
+        v.each((x, y, z) => { if (y >= 0 && y < bandRows) band0.push(x, y, z); });
+        for (let i = 0; i < band0.length; i += 3) v.del(band0[i], band0[i + 1], band0[i + 2]);
+        for (let y = 0; y < bandRows; y++) {
+          profile(BAND_IN, (y + 0.5) / F, at);
+          const inX = Math.round(at[0] * F), inZ = Math.round(at[1] * F);
+          for (let x = xL + inX; x <= xR - inX; x++) for (let z = zb + inZ; z <= zf; z++) v.set(x, y, z, band(Math.max(0, Math.min(9 * F - 1, x)), y, Math.max(0, Math.min(6 * F - 1, z))));
+        }
+        old.each((x, y, z, c) => {
+          if (x >= 0 && x < 9 * F && z >= 0 && z < 6 * F) return;
+          x += x < 0 ? xL : x >= 9 * F ? xR - (9 * F - 1) : 0;
+          z += z < 0 ? zb : z >= 6 * F ? zf - (6 * F - 1) : 0;
+          const rows = rowsFor(y);
+          for (let r = 0; r < rows.length; r++) if (rows[r] >= 0 && rows[r] < bandRows) v.set(x, rows[r], z, c);
+        });
+        // The chest deeper, the waist in and the chest out, and its sides into the shoulders.
+        const reach = [Math.abs(parts.armR.position.x) / sx / fineU, Math.abs(parts.armL.position.x) / sx / fineU];
+        // The chest deeper, the back shaped, the waist in and the chest out; the sides go out into the shoulders after
+        // the rounding (below).
+        for (let y = bandRows; y < top; y++) {
+          const yc = (y + 0.5) / F;
+          const front = Math.round(profile(DEEP, yc, at)[0] * F), back = Math.round(profile(BACK, yc, at)[0] * F);
+          if (front || back) for (let x = 0; x < 9 * F; x++) {
+            const run = runZ(v, x, y);
+            if (!run || run[1] - run[0] < 2.5 * F) continue;
+            const cf = v.get(x, y, run[1]), cb = v.get(x, y, run[0]);
+            for (let n = 1; n <= front; n++) v.set(x, y, run[1] + n, cf);
+            for (let n = 1; n <= back; n++) v.set(x, y, run[0] - n, cb);
+          }
+          const by = Math.round(profile(SIDE, yc, at)[0] * F);
+          if (by) for (let z = -F; z < 7 * F; z++) {
+            const run = runX(v, y, z);
+            if (!run || run[1] - run[0] < 4.5 * F) continue;
+            const [lo, hi] = run;
+            if (by < 0) {
+              for (let n = 0; n < -by; n++) { v.del(lo + n, y, z); v.del(hi - n, y, z); }
+              continue;
+            }
+            const cl = v.get(lo, y, z), ch = v.get(hi, y, z);
+            for (let n = 1; n <= by; n++) { v.set(lo - n, y, z, cl); v.set(hi + n, y, z, ch); }
+          }
+        }
+        // The wrap: front and back panels clear of the band's rounded corners, the back a little longer over the seat, a
+        // shorter one down each hip, each hem a little torn: teeth a grain wide, most a cell or two short, now and then
+        // one nicked deeper (`WRAP`, each panel's length in units). Only an Ooga that wore loin flaps gets one: a
+        // character whose own torso has trousers, shorts or a suit and no flaps keeps its clothes bare.
+        let flapped = false;
+        bake.v.each((x, y, z, c) => { if (y < 0 && (c === loinA || c === loinB)) flapped = true; });
+        const wrap = (x, y, z) => { if (flapped) v.set(x, y, z, grainMix(x, y, z, 900) < 140 ? loinB : loinA); };
+        const hem = (x, z, units) => {
+          const m = grainMix(x, 0, z, 811);
+          return Math.round(units * F) - (m > 965 ? 3 : m < 150 ? 2 : m < 450 ? 1 : 0);
+        };
+        for (let x = xL + F; x <= xR - F; x++) {
+          for (let y = -1, n = hem(x, zf, WRAP[0]); y >= -n; y--) wrap(x, y, zf);
+          for (let y = -1, n = hem(x, zb, WRAP[1]); y >= -n; y--) wrap(x, y, zb);
+        }
+        for (let z = zb + F; z <= zf - F; z++) for (const x of [xL, xR]) for (let y = -1, n = hem(z, x, WRAP[2]); y >= -n; y--) wrap(x, y, z);
+        rounded(v, TORSO_EDGES);
+        // Then the upper torso's sides carried out under each shoulder at every depth, so the back and chest meet each
+        // deltoid square rather than rounding away before it, and only softened there.
+        const reachFrom = Math.floor(REACH[0][0] * F);
+        for (let y = reachFrom; y < top; y++) {
+          const short = profile(REACH, (y + 0.5) / F, at)[0] * F;
+          for (let z = -2 * F; z < 8 * F; z++) {
+            const run = runX(v, y, z);
+            if (!run || run[1] - run[0] < 4.5 * F) continue;
+            const [lo, hi] = run, cl = v.get(lo, y, z), ch = v.get(hi, y, z);
+            const toL = Math.ceil(CX - (reach[0] - short) - 0.5), toR = Math.floor(CX + (reach[1] - short) - 0.5);
+            for (let x = lo - 1; x >= toL; x--) v.set(x, y, z, cl);
+            for (let x = hi + 1; x <= toR; x++) v.set(x, y, z, ch);
+          }
+        }
+        rounded(v, TORSO_SOFT, (x, y) => y < reachFrom);
+        {
+          v.trim();
+          const { x0, y0, z0, nx, ny, nz, cells } = v.box(), skin = P.skin + 1, fur = P.fur + 1;
+          for (let x = 0, i = 0; x < nx; x++) for (let y = 0; y < ny; y++) for (let z = 0; z < nz; z++, i++) {
+            const stored = cells[i];
+            if (stored !== skin && stored !== fur) continue;
+            const m = grainMix(x + x0, y + y0, z + z0, 300);
+            if (stored === skin && m < 30) cells[i] = P.skinDk + 1;
+            else if (stored === fur && m < 25) cells[i] = P.spot + 1;
+          }
+        }
+        fabric(v, 300, bake.emissive);
+        if (dress.refine) dress.refine(k, "torso", v);
+        return fineBake(v, bake.origin, bake.emissive);
+      });
+      // The arm about its axis, the fist a plain block as Kortik's is, its colours the authored part's.
+      const arm = (geo) => once(geo, "arm", (bake) => {
+        const src = colourSource(bake.v), v = makeFineVox(null, [-3 * F, 6 * F, -F, 12 * F, -3 * F, 6 * F]), knots = traits.slim ? SLIM_ARM_PROFILE : ARM_PROFILE, A = 1.5;
+        for (let y = 0; y < ARM_TOP * F; y++) {
+          const yc = (y + 0.5) / F, sy = armSourceY(yc);
+          if (yc < FIST_TOP) at[0] = at[1] = FIST_HALF, at[2] = 0;
+          else profile(knots, yc, at);
+          const [hx, hz, rc] = at;
+          // The authored cell under a run of fine ones answers them all.
+          let srcX = NaN, srcZ = NaN, colour;
+          for (let x = Math.floor((A - hx) * F) - 1; x <= Math.ceil((A + hx) * F); x++) for (let z = Math.floor((A - hz) * F) - 1; z <= Math.ceil((A + hz) * F); z++) {
+            const xc = (x + 0.5) / F, zc = (z + 0.5) / F;
+            if (!inRound(xc - A, zc - A, hx, hz, rc)) continue;
+            const ax = Math.floor(xc), az = Math.floor(zc);
+            if (ax !== srcX || az !== srcZ) srcX = ax, srcZ = az, colour = src(ax, sy, az);
+            v.set(x, y, z, fineBody(colour, x, y, z, 0));
+          }
+        }
+        layExtras(v, extrasOf(bake.v, PLAIN_ARM), ARM_ROWS_OF, 1.5 * F, 1.5 * F);
+        fabric(v, 100, bake.emissive);
+        if (dress.refine) dress.refine(k, "arm", v);
+        return fineBake(v, bake.origin, bake.emissive);
+      });
+      // The fist is the hand, as Kortik's is: no fingers on it. The finger nodes stay for the poses and rigs that name
+      // them, holding one cell inside the fist where nothing sees it.
+      const fingers = (geo) => once(geo, "fingers", (bake) => {
+        const v = makeFineVox();
+        v.set(0, 0, 0, P.skin);
+        if (dress.refine) dress.refine(k, "fingers", v);
+        return fineBake(v, { x: -fineU / 2, y: -fineU / 2, z: -fineU / 2 }, bake.emissive);
+      });
+      // The leg about its axis over the foot, a plain block as Kortik's is, no toes.
+      const leg = (geo, side) => once(geo, side < 0 ? "legR" : "legL", (bake) => {
+        const old = bake.v, src = colourSource(old), v = makeFineVox(null, [-2 * F, 6 * F, -F, 8 * F, -2 * F, 7 * F]), salt = side < 0 ? 500 : 700, A = 2;
+        for (let y = 0; y < LEG_UNITS * F; y++) {
+          const yc = (y + 0.5) / F, sy = legSourceY(yc);
+          if (yc < FOOT_UNITS) {
+            for (let x = FOOT_BOX[0] * F; x < FOOT_BOX[1] * F; x++) for (let z = FOOT_BOX[2] * F; z < FOOT_BOX[3] * F; z++) {
+              v.set(x, y, z, fineBody(src(Math.floor((x + 0.5) / F), sy, Math.min(5, Math.floor((z + 0.5) / F * 6 / 5))), x, y, z, salt));
+            }
+            continue;
+          }
+          const [hx, hz, rc] = profile(LEG_PROFILE, yc, at);
+          let srcX = NaN, srcZ = NaN, colour;
+          for (let x = Math.floor((A - hx) * F) - 1; x <= Math.ceil((A + hx) * F); x++) for (let z = Math.floor((A - hz) * F) - 1; z <= Math.ceil((A + hz) * F); z++) {
+            const xc = (x + 0.5) / F, zc = (z + 0.5) / F;
+            if (!inRound(xc - A, zc - A, hx, hz, rc)) continue;
+            const ax = Math.floor(xc), az = Math.min(5, Math.floor(zc));
+            if (ax !== srcX || az !== srcZ) srcX = ax, srcZ = az, colour = src(ax, sy, az);
+            v.set(x, y, z, fineBody(colour, x, y, z, salt));
+          }
+        }
+        layExtras(v, extrasOf(old, PLAIN_LEG), LEG_ROWS_OF, 2 * F, 2 * F);
+        fabric(v, salt, bake.emissive);
+        if (dress.refine) dress.refine(k, "leg", v, side);
+        return fineBake(v, { x: bake.origin.x, y: -legH, z: bake.origin.z }, bake.emissive);
+      });
+      // Anything hung on a leg that is not an authored voxel leg keeps up with the longer leg: its foot drops and the
+      // rest stretches with the shin.
+      const stretched = new Map();
+      const stretch = (geo, py = 0) => {
+        let out = stretched.get(geo);
+        if (!out) {
+          if (bakeOf.has(geo)) fill(bakeOf.get(geo));
+          out = { ...geo, verts: geo.verts.slice(), voxel: undefined };
+          for (let i = 1; i < out.verts.length; i += 3) out.verts[i] = legHeight(out.verts[i] + py, u) - py;
+          stretched.set(geo, out);
+        }
+        return out;
+      };
+      // The legs stand closer, so the hips need be no wider than the waist and chest carry them.
+      parts.legR.position.x += LEGS_IN * u;
+      parts.legL.position.x -= LEGS_IN * u;
+      // The longer torso lifts the head and the arms, and what a hook hung on the torso or on the root over the hip
+      // keeps its place on it: a piece beside an arm (a cub carried on it) rises with the arm, anything else by how far
+      // its middle's height moved; one standing before the hip band comes back with the band's front.
+      const rise = TORSO_RISE * u, oldFront = 3 * u * parts.torso.scale.z;
+      const torsoY = (y) => {
+        if (y <= 0) return y;
+        for (let i = 1; i < TORSO_KNOTS.length; i++) {
+          const [a0, b0] = TORSO_KNOTS[i - 1], [a1, b1] = TORSO_KNOTS[i];
+          if (y <= a1 * u) return (b0 + (y / u - a0) * (b1 - b0) / (a1 - a0)) * u;
+        }
+        return y + rise;
+      };
+      const span = (node, x0, y0, z0, out) => {
+        const px = x0 + node.position.x, py = y0 + node.position.y, pz = z0 + node.position.z;
+        if (node.geometry && bakeOf.has(node.geometry)) fill(bakeOf.get(node.geometry));
+        if (node.geometry && node.geometry.verts && node.geometry.verts.length) {
+          const b = BL.scene.boundsOf(node.geometry), s = node.scale;
+          out[0] = Math.min(out[0], px + b.min[0] * s.x); out[1] = Math.max(out[1], px + b.max[0] * s.x);
+          out[2] = Math.min(out[2], py + b.min[1] * s.y); out[3] = Math.max(out[3], py + b.max[1] * s.y);
+          out[4] = Math.min(out[4], pz + b.min[2] * s.z);
+        }
+        for (const child of node.children) span(child, px, py, pz, out);
+        return out;
+      };
+      const { zf } = hips(), newFront = ((zf + 1) * fineU - 3 * u) * parts.torso.scale.z;
+      const keepOn = (node, frame) => {
+        const box = span(node, 0, 0, 0, [Infinity, -Infinity, Infinity, -Infinity, Infinity]);
+        // Nothing to move, or a piece that stands on the ground beside its Ooga (a pet at k.legH): it stays there.
+        if (box[2] > box[3] || frame === root && box[2] <= -legH + 1.5 * u) return;
+        const armX = Math.abs(parts.armL.position.x), c = (box[2] + box[3]) / 2;
+        const beside = frame === root && box[3] > 0 && (box[1] > -armX - 2.5 * u && box[0] < -armX + 2.5 * u || box[1] > armX - 2.5 * u && box[0] < armX + 2.5 * u);
+        node.position.y += beside ? rise : torsoY(c) - c;
+        if (beside || box[4] < oldFront - u) return;
+        // One worn on the front keeps to it: over the hip band it comes back with the band's front, and on the chest (a
+        // medallion) it comes out with the deeper chest, by as much as that stands out at its new height (`DEEP`).
+        const y = torsoY(c) / u;
+        if (y >= BAND_UNITS) node.position.z += Math.round(profile(DEEP, y, at)[0] * F) / F * u * (frame === parts.torso ? 1 : parts.torso.scale.z);
+        else if (box[2] < 6 * u) node.position.z += newFront - oldFront;
+      };
+      for (const child of parts.torso.children) keepOn(child, parts.torso);
+      for (const child of root.children) {
+        if (child !== parts.legR && child !== parts.legL && child !== parts.torso && child !== parts.armR && child !== parts.armL && child !== parts.head && child !== parts.gun) keepOn(child, root);
+      }
+      parts.head.position.y += rise;
+      parts.armR.position.y += rise;
+      parts.armL.position.y += rise;
+      const previousHead = headOpen;
+      headOpen = head(headOpen, "head");
+      headClosed = head(headClosed, "closed");
+      const authoredPortrait = portraitHead;
+      if (bakeOf.has(authoredPortrait)) refinedSources.add(authoredPortrait);
+      facePending = () => portrait(authoredPortrait);
+      parts.head.geometry = parts.head.geometry === previousHead ? headOpen : head(parts.head.geometry, "head");
+      parts.torso.geometry = torso(parts.torso.geometry);
+      for (const key of ["armR", "armL"]) parts[key].geometry = arm(parts[key].geometry);
+      for (const key of ["fingersR", "fingersL"]) parts[key].geometry = fingers(parts[key].geometry);
+      for (const [key, side] of [["legR", -1], ["legL", 1]]) {
+        const node = parts[key], geo = node.geometry;
+        node.geometry = bakeOf.has(geo) ? leg(geo, side) : stretch(geo);
+        for (const child of node.children) if (child.geometry) child.geometry = stretch(child.geometry, child.position.y);
+      }
+      // The rounded heads are not kept: the face button, when it comes, rounds its own again.
+      roundedHeads.clear();
+    }
+    // Every authored bake still shown (a hook's badge, plate or keyboard, or a part the refined body did not draw again)
+    // is meshed now; one the refined body replaced everywhere stays empty, since nothing draws it.
+    {
+      const shown = new Set([headOpen, headClosed]);
+      const visit = (node) => {
+        if (node.geometry) shown.add(node.geometry);
+        for (const child of node.children) visit(child);
+      };
+      visit(root);
+      for (const part of Object.values(parts)) if (part?.children) visit(part);
+      for (const bake of bakes) {
+        if (shown.has(bake.geo) || !refinedSources.has(bake.geo)) fill(bake);
+        else bake.pending = false;
+      }
+    }
     // A second colourway bakes every voxel part still in use under the alternate
     // palette and pairs each geometry with its twin both ways, so swapping a
     // clone's geometry twice returns it to the colour it was built in.
-    let tint = null;
+    let tint = null, tintPalette = null;
     if (dress.tint) {
-      const alt = dress.tint(k, palette), live = new Set([headClosed, portraitHead]);
+      const alt = tintPalette = dress.tint(k, palette), live = new Set([headClosed]);
+      for (const [c, [dark, light]] of weaves) {
+        alt[dark] = alt[c].map((value) => clamp255(value * 0.86));
+        alt[light] = alt[c].map((value) => clamp255(value * 1.08));
+      }
       const visit = (node) => {
         if (node.geometry) live.add(node.geometry);
         for (const child of node.children) visit(child);
@@ -1081,7 +2008,7 @@
       tint = new Map();
       for (const bake of bakes) {
         if (!live.has(bake.geo) || tint.has(bake.geo)) continue;
-        const twin = voxelGeometry(bake.v, { unit: u, palette: alt, origin: bake.origin, emissive: bake.emissive });
+        const twin = voxelGeometry(bake.v, { unit: bake.unit, palette: alt, origin: bake.origin, emissive: bake.emissive, rects: bake.rects });
         tint.set(bake.geo, twin).set(twin, bake.geo);
       }
     }
@@ -1093,12 +2020,12 @@
     };
     markCharacter(root);
     for (const weapon of Object.values(skins)) for (const skin of Object.values(weapon)) characterGeometry(skin);
-    headOpen.characterPart = headClosed.characterPart = portraitHead.characterPart = true;
+    headOpen.characterPart = headClosed.characterPart = true;
     if (tint) for (const twin of tint.keys()) twin.characterPart = true;
     // Only this builder's completed voxel bakes are immutable here. Dress hooks and both colourways finish
     // first; separately authored weapons, equipment and other geometry stay in their original representation.
     if (BL.compactGeometry?.enabled) {
-      const live = new Set([headOpen, headClosed, portraitHead]);
+      const live = new Set([headOpen, headClosed]);
       const visit = (node) => {
         if (node.geometry) live.add(node.geometry);
         for (const child of node.children) visit(child);
@@ -1110,7 +2037,27 @@
         if (twin) BL.compactGeometry.pack(twin, { immutable: true, renderOnly: true, precision: 64 });
       }
     }
-    return { root, parts, traits, headOffset: 1.1 * h, headOpen, headClosed, portraitHead, skins, clubRest, clubCarry, tint, gunHeadBounds: BL.scene.boundsOf(headOpen) };
+    // The fine maps the parts were baked from are done with; the face button bakes its own when it is first asked for,
+    // with its twin in the second colourway.
+    bakes.length = 0;
+    let face = null;
+    const faceHead = () => {
+      if (!face) {
+        face = facePending();
+        face.characterPart = true;
+        let twin = null;
+        if (tint) {
+          const bake = bakes[bakes.length - 1];
+          twin = voxelGeometry(bake.v, { unit: bake.unit, palette: tintPalette, origin: bake.origin, emissive: bake.emissive, rects: bake.rects });
+          twin.characterPart = true;
+          tint.set(face, twin).set(twin, face);
+        }
+        if (BL.compactGeometry?.enabled) for (const geo of twin ? [face, twin] : [face]) BL.compactGeometry.pack(geo, { immutable: true, renderOnly: true, precision: 64 });
+        bakes.length = 0;
+      }
+      return face;
+    };
+    return { root, parts, traits, headOffset: 1.1 * h + legH + TORSO_RISE * u - 5 * u, headOpen, headClosed, get portraitHead() { return faceHead(); }, skins, clubRest, clubCarry, tint, gunHeadBounds: BL.scene.boundsOf(headOpen) };
   };
   // Traits hash from the handle, so one handle always builds the same voxels.
   // Callers get fresh nodes over shared geometry: one build per contributor, GPU records survive a scene swap.
@@ -1126,12 +2073,21 @@
     let template = cavemen.get(traits.name);
     if (!template) cavemen.set(traits.name, template = buildCaveman(traits));
     const copies = new Map(), root = cloneNode(template.root, copies), parts = {};
+    // A legged companion names its own limbs (`legs`, `tail`); the clone's must be its own nodes, not the template's.
+    for (const [node, copy] of copies) {
+      if (node.legs) copy.legs = node.legs.map((leg) => copies.get(leg));
+      if (node.tail) copy.tail = copies.get(node.tail);
+    }
     for (const key of Object.keys(template.parts)) {
       const part = template.parts[key];
       parts[key] = Array.isArray(part) ? part.map((node) => copies.get(node)) : copies.get(part);
     }
     const skins = { club: { ...template.skins.club }, gun: { ...template.skins.gun } };
-    return { root, parts, traits, headOffset: template.headOffset, headOpen: template.headOpen, headClosed: template.headClosed, portraitHead: template.portraitHead, skins, clubRest: template.clubRest, clubCarry: template.clubCarry, tint: template.tint, gunHeadBounds: template.gunHeadBounds };
+    // The face button's head is the template's, built when first read; a clone swapping colourways may set its own.
+    let face;
+    return { root, parts, traits, headOffset: template.headOffset, headOpen: template.headOpen, headClosed: template.headClosed,
+      get portraitHead() { return face === undefined ? template.portraitHead : face; }, set portraitHead(geometry) { face = geometry; },
+      skins, clubRest: template.clubRest, clubCarry: template.clubCarry, tint: template.tint, gunHeadBounds: template.gunHeadBounds };
   };
   // A real die: opposite faces sum to seven. Round pip faces sit just above the
   // voxel shell so even the smallest die does not render them as square cells.
@@ -1859,5 +2815,5 @@
     for (const geo of set) if (geo.foliageLods?.owner === geo) { set.add(geo.foliageLods.medium); set.add(geo.foliageLods.far); }
     return set;
   };
-  BL.models = { GUN_BANANA_SCALE, characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
+  BL.models = { GUN_BANANA_SCALE, BODY, characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
 })();
