@@ -4306,7 +4306,7 @@ const orbitFlow = async (b) => {
 const SCENES = ["hub", "lab", "race", "drop", "block", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
-for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
+for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "cliffs-unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
 const ONLY = process.env.ONLY || ""; // Optional comma-separated substrings within the requested scenes.
 const onlyMatches = value => ONLY.split(",").some(part => value.includes(part));
 const FULL = ARGS.includes("full");
@@ -19766,8 +19766,11 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
 } };
 const hubCliffLedges = { name: "hub cliff ledges", why: "rule: both cliff paths must be reachable up and down by existing Ooga controls, with pause and jump release and GAME MODE disabling the ropes", run: async (b) => {
   const r = await b.evaluate(`(() => {
-    const B = __ooga, H = BL.scenes.hub, a = B.cavemen.get("portlandhodl"), routes = H.debug.cliffLadders, rows = [];
-    if (B.crew.player !== a) B.pilot.possess(a);
+    ${DRIVEN_OF}
+    const B = __ooga, H = BL.scenes.hub, npc = B.cavemen.get("portlandhodl"), routes = H.debug.cliffLadders, rows = [];
+    if (!drivenOf(B, npc)) B.pilot.possess(npc);
+    const a = drivenOf(B, npc);
+    if (!a) throw new Error("Cliff route fixture could not acquire its Ooga");
     const key = (name, down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: name === "Space" ? " " : name, code: name === "Space" ? name : "Key" + name.toUpperCase(), bubbles: true }));
     const feet = () => a.root.position.y - a.baseY, anchor = {};
     for (const l of routes) {
@@ -30200,11 +30203,18 @@ const terrainCacheChecks = async () => {
 // must keep its golden digest, and the snapshot's queries, rehydrated after a structured clone (the Worker's and
 // IndexedDB's codec), must answer exactly as the direct build does on a seeded sample of every query.
 // The golden is the island as it was built before the snapshot existed, since given EntropyLab's white floor.
+const CLIFF_TERRAIN_CHECK = "hub cliff ledges: two full-width rings have real floor and headroom in direct and cached terrain, without changing top voxels, rooms, inner windows or paths";
 const cliffLedgeChecks = (BL, baseline, baselineRestored) => {
   const options = { seed: 1, cliffLedges: true }, island = BL.terrain.island(options);
   let step; const steps = BL.terrain.islandSnapshotSteps(options);
   do { step = steps.next(); } while (!step.done);
-  const restored = BL.terrainSnapshot.create(structuredClone(step.value)), failures = [];
+  let restored;
+  try { restored = BL.terrainSnapshot.create(structuredClone(step.value)); }
+  catch (error) {
+    record(CLIFF_TERRAIN_CHECK, false, JSON.stringify({ error: error.message, faces: step.value.geometry?.faces?.length }));
+    return;
+  }
+  const failures = [];
   let samples = 0;
   for (const ledge of BL.terrain.CLIFF_LEDGES.levels) for (let degrees = 0; degrees < 360; degrees++) {
     const angle = degrees * Math.PI / 180;
@@ -30240,7 +30250,7 @@ const cliffLedgeChecks = (BL, baseline, baselineRestored) => {
   // Reuse parity's restored baseline so sampling active radii does not change the
   // original island used by the remaining unit checks. Compare placements, not PATH_TILE.
   const originalPaths = paths(baselineRestored), samePaths = paths(island) === originalPaths && paths(restored) === originalPaths;
-  record("hub cliff ledges: two full-width rings have real floor and headroom in direct and cached terrain, without changing top voxels, rooms, inner windows or paths",
+  record(CLIFF_TERRAIN_CHECK,
     !failures.length && !topChanges && rooms(baseline) === rooms(island) && apertures(baseline) === apertures(island) && samePaths,
     JSON.stringify({ samples, failures, topChanges, rooms: rooms(baseline) === rooms(island), apertures: apertures(baseline) === apertures(island), paths: samePaths }));
 };
@@ -30407,6 +30417,18 @@ const npcActivityRefreshProof = (BL) => {
 };
 
 const unitChecks = async () => {
+  // The same terrain rule can run alone without unrelated browser or global checks.
+  if (ARGS.includes("cliffs-unit")) {
+    const scope = {};
+    for (const name of ["math", "scene", "models", "convex", "terrain", "terrain-snapshot"]) {
+      new Function("window", readFileSync(join(root, "src/js", name + ".js"), "utf8"))(scope);
+    }
+    const BL = scope.BL, baseline = BL.terrain.island({ seed: 1 });
+    const steps = BL.terrain.islandSnapshotSteps({ seed: 1 });
+    let step; do { step = steps.next(); } while (!step.done);
+    cliffLedgeChecks(BL, baseline, BL.terrainSnapshot.create(structuredClone(step.value)));
+    return;
+  }
   const artifact = artifactUnitProof();
   record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
   const previewRange=await studioPreviewRangeProof();

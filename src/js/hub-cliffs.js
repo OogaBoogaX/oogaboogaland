@@ -23,10 +23,17 @@
           angle = (degrees + offset) * Math.PI / 180; nx = Math.sin(angle); nz = -Math.cos(angle);
           let edge = 28;
           for (let r = 28; r <= 30.5; r += 0.125) if (island.surfaceAt(nx * r, nz * r) >= 0) edge = r;
-          const landing = edge - 0.65, y = island.surfaceAt(nx * landing, nz * landing);
-          if (!Number.isFinite(y) || y < 0 || !island.clearAt(nx * landing, y + 0.01, nz * landing, 0.5, 2.5)
-            || landingClear && !landingClear(nx * landing, nz * landing, 0.6)) continue;
-          radius = edge + 0.45; top = y; inset = 1.1; found = true; break;
+          // The untouched top is stepped. A centre-cell height alone rejects
+          // otherwise safe landings beside a quarter-metre step; use the same
+          // footprint support as walking, then require full body clearance.
+          for (let setback = 0.65; setback <= 1.65; setback += 0.25) {
+            const landing = edge - setback, x = nx * landing, z = nz * landing;
+            const surface = island.surfaceAt(x, z), y = island.supportAt(x, z, surface, 0.5, -120, 0.5);
+            if (!Number.isFinite(y) || y < 0 || !island.clearAt(x, y + 0.01, z, 0.5, 2.5)
+              || landingClear && !landingClear(x, z, 0.6)) continue;
+            radius = edge + 0.45; top = y; inset = radius - landing; found = true; break;
+          }
+          if (found) break;
         }
         if (!found) return;
       }

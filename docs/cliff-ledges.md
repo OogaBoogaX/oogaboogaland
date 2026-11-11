@@ -43,3 +43,7 @@ snapshot-restored support/headroom, and unchanged top voxels, room definitions,
 inner window apertures and paths. The hub browser rule exercises climb, pause,
 descent, jump release and GAME MODE through the ordinary keyboard path. The
 existing Factory ladder rule covers unchanged vertical-ladder behavior.
+
+Run the focused terrain rule with `node test/run.mjs cliffs-unit`. After a build,
+`ONLY="hub cliff ledges" node test/run.mjs --browser-only hub` runs its browser
+rule without the global tier or other scenes.
