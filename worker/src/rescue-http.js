@@ -1,7 +1,7 @@
 // Explicitly installed same-origin HTTP adapter. The production index and
 // Wrangler bindings do not install it. Private routes use the normal verified
 // contributor session plus the current Room connection, never x-player-* data.
-import { allowed, fromSite, getSessionFromRequest, json } from './http.js';
+import { fromSite, getSessionFromRequest, json } from './http.js';
 async function smallJSON(request) {
   const size = Number(request.headers.get('content-length'));
   if (Number.isFinite(size) && size > 1024) throw Error('request too large');
@@ -18,7 +18,9 @@ async function smallJSON(request) {
   return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
 }
 export function createRescueHandler({ delivery, env, authenticate = request => getSessionFromRequest(request, env),
-  admit = id => allowed(env.ROOM_LIMITER, `rescue:${id}`) }) {
+  admit }) {
+  // The Room reconnect limiter is only 20/minute and cannot serve pose/poll
+  // traffic. Installation must supply a separately reviewed admission budget.
   if (!delivery || typeof authenticate !== 'function' || typeof admit !== 'function' || !env?.SITE_ORIGIN) throw Error('explicit rescue HTTP adapters required');
   return async request => {
     const path = new URL(request.url).pathname;

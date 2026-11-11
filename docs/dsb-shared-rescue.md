@@ -68,8 +68,9 @@ Do not deploy or merge this independently of its prerequisite.
 - `worker/src/rescue-delivery.js` / `rescue-http.js`: an explicit host/Room
   coordinator and same-origin HTTP adapter. Private reads/commands require the
   normal verified contributor session and current Room connection. Client owner
-  headers/session references are ignored. Requests are size-bounded and use the
-  existing configurable limiter. Private responses are `no-store`; the public
+  headers/session references are ignored. Requests are size-bounded and require an explicit
+  feature-specific admission limiter at installation. The existing Room
+  reconnect limiter (20/minute) is not reused for pose/poll traffic. Private responses are `no-store`; the public
   path can read only the separately validated public cache and never calls the
   host or starts simulation. Cache writes use transaction-serialized revision
   checks, reject owner/companion fields, and default to a 24-hour maximum age.
@@ -145,7 +146,8 @@ this core does not claim that browser/server adoption handoff is complete.
    identities. Resolve the inherited clearance limitation before activation.
    Schedule `tick` only from occupied host work/lifecycle changes, not guest reads.
 3. Install the HTTP handler on the existing trusted host router and call the
-   scene's `connectShared` with its expected world. **Neither is installed by
+   scene's `connectShared` with its expected world and supply a reviewed admission
+   budget to the handler. **Neither is installed by
    this PR.** Commands and UI acknowledgement are implemented, including initial
    loading and uncertain-reply handling, but they do not bypass #467's disabled
    live host/body routing. The new shared own-dog record is visit-local and restored
@@ -245,6 +247,7 @@ VirtualHost and validated Room handoff records with rollback-capable in-memory
 stores. They exercise acknowledged UI, lost replies, exact retries, disposal,
 private/public boundaries, actual scene-zone names and retained generations.
 The route tests construct real terrain but do not exercise a browser or GPU.
-The focused aggregate passes 87/87 after the final source bake, including two
-real-terrain checks. Syntax, build and whitespace checks pass. Exact-head CI is
+The final aggregate passes 87/87 after the source bake, including two
+real-terrain checks. The subsequent explicit-admission guard passes all 14
+HTTP/client checks, adding one regression for 88 distinct focused checks. Syntax, build and whitespace checks pass. Exact-head CI is
 reported in the PR. None is a complete #384 pass.

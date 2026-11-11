@@ -241,3 +241,9 @@ test('shared rescue accepts every real DSB scene zone, including outside and the
   for (const zone of ['dsb-outside', ...Object.values(zones)]) assert.equal(globalThis.BL.rescueShared.zoneId(zone), true, zone);
   for (const zone of ['outside', 'dsbevil', 'dsb:../../private', '', null]) assert.equal(globalThis.BL.rescueShared.zoneId(zone), false);
 });
+
+
+test('HTTP installation refuses to silently reuse a reconnect limiter for high-rate rescue traffic', async () => {
+  const f = await fixture();
+  assert.throws(() => createRescueHandler({ delivery: f.delivery, env: { SITE_ORIGIN: 'https://island.test' } }), /explicit rescue HTTP adapters/);
+});
