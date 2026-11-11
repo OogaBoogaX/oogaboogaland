@@ -342,13 +342,13 @@ const sleepBeamPoolProof = () => {
 const destinationMapPadEscapeProof = () => {
   const els = new Map(), listeners = new Map(), state = { layer: false, otherDialog: null, shown: 0 };
   const el = id => {
-    if (!els.has(id)) els.set(id, { id, hidden: false, disabled: false, open: false, textContent: "", dataset: {}, attrs: {},
-      addEventListener() {}, removeEventListener() {}, setAttribute(k, v) { this.attrs[k] = v; }, focus() {}, click() {}, append() {},
-      replaceChildren() {}, querySelectorAll: () => [], showModal() { this.open = true; state.shown++; }, close() { this.open = false; } });
+    if (!els.has(id)) els.set(id, { id, hidden: false, disabled: false, open: false, textContent: "", dataset: {}, attrs: {}, children: [],
+      addEventListener() {}, removeEventListener() {}, setAttribute(k, v) { this.attrs[k] = v; }, focus() {}, click() {}, append(...nodes) { this.children.push(...nodes); },
+      replaceChildren(...nodes) { this.children = nodes; }, querySelectorAll(tag) { return this.children.flatMap(n => [...(n.tagName === tag.toUpperCase() ? [n] : []), ...n.querySelectorAll(tag)]); }, showModal() { this.open = true; state.shown++; }, close() { this.open = false; } });
     return els.get(id);
   };
   const document = { getElementById: el, querySelector: sel => sel === "dialog:modal, dialog[open]:not(.board-floating)" ? (el("destination-map").open ? el("destination-map") : state.otherDialog && !state.otherDialog.floating ? state.otherDialog : null) : null, pointerLockElement: null,
-    createElement: () => el("row" + els.size) };
+    createElement: tag => Object.assign(el("row" + els.size), { tagName: tag.toUpperCase() }) };
   const window = { BL: { controls: { resetAll() {} }, gamepad: { requireNeutral() {} }, padFocus: { open: () => state.layer } },
     matchMedia: () => ({ matches: false }), addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener() {} };
   const context = { window, document, localStorage: { getItem: () => "1", setItem() {} } };
@@ -388,9 +388,9 @@ const destinationMapPadEscapeProof = () => {
 const destinationMapCoachingHintProof = () => {
   const els = new Map(), state = { otherDialog: null };
   const el = id => {
-    if (!els.has(id)) els.set(id, { id, hidden: id === "explore-coach", disabled: false, open: false, textContent: "", dataset: {}, attrs: {},
-      addEventListener() {}, removeEventListener() {}, setAttribute(k, v) { this.attrs[k] = v; }, focus() {}, click() {}, append() {},
-      replaceChildren() {}, querySelectorAll: () => [], showModal() { this.open = true; }, close() { this.open = false; } });
+    if (!els.has(id)) els.set(id, { id, hidden: id === "explore-coach", disabled: false, open: false, textContent: "", dataset: {}, attrs: {}, children: [],
+      addEventListener() {}, removeEventListener() {}, setAttribute(k, v) { this.attrs[k] = v; }, focus() {}, click() {}, append(...nodes) { this.children.push(...nodes); },
+      replaceChildren(...nodes) { this.children = nodes; }, querySelectorAll(tag) { return this.children.flatMap(n => [...(n.tagName === tag.toUpperCase() ? [n] : []), ...n.querySelectorAll(tag)]); }, showModal() { this.open = true; }, close() { this.open = false; } });
     return els.get(id);
   };
   const querySelector = sel => {
@@ -400,7 +400,7 @@ const destinationMapCoachingHintProof = () => {
     if (sel === "dialog:modal, dialog[open]:not(.board-floating)") return open.floating ? null : open;
     return null;
   };
-  const document = { getElementById: el, querySelector, pointerLockElement: null, createElement: () => el("row" + els.size) };
+  const document = { getElementById: el, querySelector, pointerLockElement: null, createElement: tag => Object.assign(el("row" + els.size), { tagName: tag.toUpperCase() }) };
   const window = { BL: { controls: { resetAll() {} }, gamepad: { requireNeutral() {}, state: { connected: false } }, padFocus: { open: () => false } },
     matchMedia: () => ({ matches: false }), addEventListener() {}, removeEventListener() {} };
   const context = { window, document, localStorage: { getItem: () => null, setItem() {} } };
