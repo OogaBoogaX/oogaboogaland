@@ -1,5 +1,29 @@
 # Destination Map and optional coaching
 
+## Top-down world atlas (November 11, 2026)
+
+The Map now surveys the actual current world from above, using the already-built hub islands and DSB terrain. Numbered, 44px pin buttons and the equivalent named list share selection. Nearby pins fan out with callout lines, keeping separate HQ/basement levels selectable without inventing different coordinates. The camera target or controlled body is marked independently from the last-chosen destination.
+
+Before confirmation, the selected zone, origin, dotted preview line and level description explain the action. The line is explicitly not a walking route. Oogas use **View**, leaving the body where it is; a driven gorilla uses **Warp to**, preserving the scene's existing guarded travel contract. Confirmation stays synchronous, with no queued teleport, fake progress bar or loading delay. A refusal stays open with the reason. Successful gorilla travel gets a brief, non-flashing edge settle and a receipt; camera choices say **View selected**, not that the actor arrived. DSB interior exits say the return **started**, since the scene owns that transition. Reduced motion removes the animations, and the optional guide waits until the receipt clears.
+
+The desktop layout pairs the survey with a scrollable list and preview footer. Phone layouts retain the 44px pins, a full-width confirmation and reachable sticky Close. Short-height windows scroll the preview into view without a footer covering the entire survey. Keyboard and controller input use the existing modal/focus/neutral-input paths. Selection alone does not move the camera or body. All new drawing is bounded to opening/resizing/selection, with at most 27,000 terrain samples on opening and no per-frame map rendering.
+
+### Current verification
+
+Integrated with `rock` at `77366597f9d75c555d459fd7da158a15d03fb5e9` in merge `044ae122`. Source build, changed-JavaScript syntax and whitespace checks pass. Focused command:
+
+```sh
+ONLY='destination accessible names,hub map navigation' LANES=1 CHROME_ARCH=arm64 node test/run.mjs --browser-only hub
+```
+
+**11/11 browser checks pass** on the atlas implementation. This excludes the global/unit tier. It covers accessible preview names, unchanged camera/body during preview, confirmation, underground floor distinctions, keyboard isolation, Close/Escape focus, controller menu and reconnect-neutral behavior, coaching and look/return flows. The first sandboxed Chrome launch aborted in macOS application registration before checks; native Chrome outside the sandbox ran successfully. No Factory, local visibility/storage, full suite or stopped workload was run.
+
+The existing visual diagnostic (`scripts/profile-destination-map.mjs`, not an additional test runner) captured desktop, 390px phone, 320px phone, 720px short-height, driven-gorilla and DSB scenarios. All six reported no horizontal overflow or console messages; every pin and Close measured 44px. Both phone-emulated touch Close checks succeeded. The driven gorilla moved about 14m to Lab after confirmation and produced a warp receipt; DSB Harbor changed the view with zero actor displacement. Reduced-motion computed styles disabled the receipt animation and edge effect. Map-open timings are local two-frame observations, not INP or user-study completion times. Raw observations are linked below.
+
+[Hub camera preview](world-map-480-desktop.png) · [Phone preview](world-map-480-phone.png) · [Gorilla warp preview](world-map-480-gorilla.png) · [Gorilla result](world-map-480-arrival.png) · [DSB preview](world-map-480-dsb.png) · [Raw observations](world-map-480.json)
+
+Read-only review found no remaining blocking issue after correcting the origin marker, DSB ground sampling/exit wording, and last-chosen accessibility semantics. These focused checks are not a full acceptance sign-off. Physical phones/controllers, screen-reader interaction, actual 200% zoom, pointer-lock denial and broader scene acceptance remain unverified. Required CI must be checked on the published head. All sections below are historical unless explicitly updated.
+
 ## Integration with rock 5e5ad247 (controller profiles)
 
 Published head: the merge of `rock` at `5e5ad247` into this branch. Upstream's pad-action layer (#535) rewrote `gamepad.js` around contexts, learned profiles and a Menus layer (`pad-focus.js`) that takes the pad whenever a modal dialog is open, and removed Whitepaper Day and Goldbug (#539). Map follows it instead of carrying its own pad reading:
@@ -42,7 +66,7 @@ The optional guide progresses from moving the controlled Ooga to a successful Ma
 
 ## Controls and layout
 
-Keyboard focus starts on Close; Tab, Enter and Space use native dialog controls. Escape closes Map and restores focus. Movement stays held off until a fresh key press. Gamepad Menu opens/closes, D-pad or left stick moves through the visible order, A chooses and B closes. Sticks must return to neutral before movement resumes. The existing M mute binding stays unchanged. Touch destinations are at least 64 CSS px tall, Close is 44×44, and the sticky header keeps it reachable while scrolling. The world continues running behind the chooser.
+Keyboard focus starts on Close; Tab, Enter and Space use native dialog controls. Escape closes Map and restores focus. Movement stays held off until a fresh key press. Gamepad Menu opens/closes, D-pad or left stick moves through the visible order, A chooses and B closes. Sticks must return to neutral before movement resumes. The existing M mute binding stays unchanged. The original list destinations were at least 64 CSS px tall, Close is 44×44, and the sticky header keeps it reachable while scrolling. The world continues running behind the chooser.
 
 [Desktop capture](destination-map-desktop.png) · [Phone-emulation capture](destination-map-phone.png) · [Raw layout and interaction observations](destination-map.json).
 

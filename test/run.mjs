@@ -10889,7 +10889,7 @@ const hubGuestLikeness = { name: "hub guest likeness", why: "regression: a guest
   const arcadeLook = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, a = P.player, map = document.getElementById("destination-hud");
     const name = a ? a.traits.name : null, p = a ? { x: a.root.position.x, z: a.root.position.z } : null, mode = P.mode;
-    map.click(); document.querySelector("#destination-map [data-destination]").click(); B.advance(0.1, 1 / 60);
+    map.click(); document.querySelector("#destination-map [data-destination]").click(); document.getElementById("destination-map-go").click(); B.advance(0.1, 1 / 60);
     const looked = !!a && P.looking && P.player === a && Math.hypot(a.root.position.x - p.x, a.root.position.z - p.z) < 1e-6;
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "w", code: "KeyW" })); B.advance(1 / 60, 1 / 60);
     const back = !P.looking && P.player === a && P.mode === mode;
@@ -12440,7 +12440,7 @@ const sharedPanelBuildings = { name: "shared panel buildings", why: "regression:
         const s = document.getElementById("sheet"), inside = I.active?.definition.id, shown = !s.hidden && getComputedStyle(s).display !== "none", open = s.dataset.open;
         document.getElementById("destination-hud").click();
         const map = document.getElementById("destination-map"), entries = map.querySelectorAll("[data-destination]"), outside = map.open && entries.length === 1 && entries[0].dataset.destination === "outside";
-        entries[0]?.click(); __ooga.advance(.5,1/60); return { inside, shown, open, outside, exited: !I.active && !map.open, after: s.dataset.open, panels: document.querySelectorAll(".sheet").length }; })()`);
+        entries[0]?.click(); document.getElementById("destination-map-go").click(); __ooga.advance(.5,1/60); return { inside, shown, open, outside, exited: !I.active && !map.open, after: s.dataset.open, panels: document.querySelectorAll(".sheet").length }; })()`);
       rows.push(r);
       record("shared panel: " + id + " preserves " + (pass ? "closed" : "open") + " state on entry and exit", r.inside === id && r.shown && r.open === String(!pass) && r.after === r.open && r.outside && r.exited && r.panels === 1, JSON.stringify(r));
     }
@@ -13054,15 +13054,27 @@ const hubDestinationNames = { name: "destination accessible names", why: "regres
     return { open: dialog.open, count: dialog.querySelectorAll("[data-destination]").length,
       stayed: document.getElementById("detached-destination-name").textContent === "Pile",
       focus: document.activeElement.id === "destination-map-close", expanded: map.getAttribute("aria-expanded"),
-      current: dialog.querySelector('[aria-current="location"]')?.dataset.destination };
+      current: dialog.querySelector('[aria-current="true"]')?.dataset.destination };
   })()`);
+  const preview = await b.evaluate(`(() => {
+    const P = __ooga.pilot, actor = P.player, at = actor && { ...actor.root.position }, camera = { ...__ooga.camera.position };
+    const pin = document.querySelector('[data-map-destination="mempool"]'); pin.click();
+    const points = BL.scenes.hub.navigationMap().points, hq = points.find(p => p.name === "underground"), basement = points.find(p => p.name === "basement");
+    return { stayed: (!actor || Math.hypot(actor.root.position.x - at.x, actor.root.position.z - at.z) < 1e-6) && Math.hypot(__ooga.camera.position.x - camera.x, __ooga.camera.position.z - camera.z) < 1e-6,
+      open: document.getElementById("destination-map").open, selected: pin.getAttribute("aria-pressed") === "true",
+      confirmation: document.getElementById("destination-map-go").textContent === "View Mempool",
+      underground: document.getElementById("destination-map-detail").textContent.includes("beneath the lake"),
+      layers: hq.x === basement.x && hq.z === basement.z && hq.level !== basement.level,
+      pins: document.querySelectorAll("[data-map-destination]").length === 12 };
+  })()`);
+  record("destinations: a real-world map pin previews without moving camera or actor, requires confirmation, and distinguishes underground floors", Object.values(preview).every(Boolean), JSON.stringify(preview));
   await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
   await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
   const closed = await b.evaluate(`!document.getElementById("destination-map").open && document.activeElement.id === "destination-hud" && __ooga.scene === "hub"`);
   const buttonClosed = await b.evaluate(`(() => { document.getElementById("destination-hud").click(); document.getElementById("destination-map-close").click(); return !document.getElementById("destination-map").open && document.activeElement.id === "destination-hud"; })()`);
   record("destinations: Map lists all twelve named actions with current location, opens without travelling and Escape restores its focus",
     opened.open && opened.count === 12 && opened.stayed && opened.focus && opened.expanded === "true" && opened.current === "pile" && closed && buttonClosed
-      && names.every(name => tree.result.nodes.some(node => node.role?.value === "button" && node.name?.value.startsWith("View " + name))), JSON.stringify({ opened, closed, buttonClosed }));
+      && names.every(name => tree.result.nodes.some(node => node.role?.value === "button" && node.name?.value.startsWith("Preview " + name))), JSON.stringify({ opened, closed, buttonClosed }));
   await b.evaluate(`document.getElementById("destination-hud").click(); window.__mapElapsed = BL.scenes.hub.elapsed`);
   await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW" });
   const held = await b.evaluate(`(__ooga.advance(.2, 1/60), { quiet: __ooga.pilot.controls.read().y === 0, moving: BL.scenes.hub.elapsed > __mapElapsed })`);
@@ -13091,7 +13103,7 @@ const hubDestinationNames = { name: "destination accessible names", why: "regres
     try {
       await press(9); const opened = document.getElementById("destination-map").open;
       // pad-focus.js moves to the nearest control below the Close button: a destination, whichever column is nearer.
-      await press(13); const ordered = !!document.activeElement.dataset.destination;
+      await press(13); const ordered = !!(document.activeElement.dataset.destination || document.activeElement.dataset.mapDestination);
       pad.axes[0]=1; await press(1); const closed = !document.getElementById("destination-map").open;
       await tick(); const quiet = P.state.lx === 0;
       pad.axes[0]=0; await tick(); pad.axes[0]=1; await tick(); const resumed = P.state.lx > 0;
@@ -13166,9 +13178,11 @@ const hubDestinationNames = { name: "destination accessible names", why: "regres
     window.dispatchEvent(new KeyboardEvent("keydown", {key:"w",code:"KeyW"})); __ooga.advance(1,1/60);
     window.dispatchEvent(new KeyboardEvent("keyup", {key:"w",code:"KeyW"})); __ooga.advance(.1,1/60);
     const moved = start.textContent === "Open Map";
-    start.click(); document.querySelector('[data-destination="arcade"]')?.click();
+    start.click(); document.querySelector('[data-destination="arcade"]')?.click(); document.getElementById("destination-map-go").click();
     const completed = start.textContent === "Done" && localStorage.getItem("ooga-explore-coach-v1") === "1";
-    start.click(); return {offered,dismissed,moved,completed};
+    __ooga.advance(.1,1/60);
+    const receiptClear = !document.getElementById("destination-map-receipt").hidden && document.getElementById("explore-coach").hidden;
+    start.click(); return {offered,dismissed,moved,completed,receiptClear};
   })()`);
   record("destination coaching: Controls replays a dismissible guide, actual movement advances it and a successful Arcade view completes it", Object.values(coaching).every(Boolean), JSON.stringify(coaching));
 } };
@@ -13555,7 +13569,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
   const r = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, H = B.hud, a = B.cavemen.get("portlandhodl");
     const map = document.getElementById("destination-hud"), label = document.getElementById("detached-destination-name");
-    const choose = name => { if (!document.getElementById("destination-map").open) map.click(); document.querySelector('[data-destination="' + name + '"]')?.click(); };
+    const choose = name => { if (!document.getElementById("destination-map").open) map.click(); document.querySelector('[data-destination="' + name + '"]')?.click(); document.getElementById("destination-map-go").click(); };
     const rows = [], net = BL.net.state, account = net.me, backend = net.backend;
     const character = BL.characters.get(a.traits.name), xyz = p => [p.x, p.y, p.z];
     // The driven Ooga is its own body standing for the roster's (crew.js \`separateBodies\`): read that body.
@@ -22888,7 +22902,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
         BL.scenes.hub.debug.setGameMode(false);
       }
       const mapRows = [], mapCrowds = [], map = document.getElementById("destination-hud"), label = document.getElementById("detached-destination-name");
-      const choose = name => { if (!document.getElementById("destination-map").open) map.click(); document.querySelector('[data-destination="' + name + '"]')?.click(); };
+      const choose = name => { if (!document.getElementById("destination-map").open) map.click(); document.querySelector('[data-destination="' + name + '"]')?.click(); document.getElementById("destination-map-go").click(); };
       // Camera-only updates above do not finish the preceding charged smash.
       // Travel is tested from an idle body, after the world advances its recovery.
       P.cancelInput(); B.advance(2, 1 / 60);
@@ -24827,7 +24841,7 @@ scene("dsb", { label: "dsb shared player", url: hubPage(dist), steps: [{ name: "
   record("dsb shared player: DSB Land leaves the Ooga with no weapon in hand, on its body or as a button", await b.evaluate(unarmedInPage("__ooga.pilot.player")));
   const move = await b.evaluate(`(() => { const c = __ooga.pilot.player, z = c.root.position.z; window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); __ooga.advance(0.3); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); return Math.abs(c.root.position.z - z); })()`);
   record("dsb shared player: shared walking moves the actor", move > 0.2, String(move));
-  await b.evaluate(`document.getElementById("destination-hud").click(); document.querySelector('#destination-map [data-destination="overview"]').click(); __ooga.advance(0.4)`);
+  await b.evaluate(`document.getElementById("destination-hud").click(); document.querySelector('#destination-map [data-destination="overview"]').click(); document.getElementById("destination-map-go").click(); __ooga.advance(0.4)`);
   record("dsb shared player: the island view selector looks at the overview, keeping its CHORA label, while the visitor keeps their Ooga", await b.evaluate('__ooga.pilot.player === __ooga.dsb.avatar && __ooga.pilot.looking && __ooga.camera.position.y > 5 && document.getElementById("detached-destination-name").textContent === "CHORA"'));
   const resumed = await b.evaluate(`(() => {
     const B = __ooga, a = B.dsb.avatar, p = { ...a.root.position };

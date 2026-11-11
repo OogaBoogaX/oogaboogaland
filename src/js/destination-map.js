@@ -11,7 +11,7 @@
     mirror: ["Explore", "The mirror cave."],
     gate: ["Explore", "The north pass and its arch."],
     bifrost: ["Explore", "Walk through the gateway to other worlds."],
-    mempool: ["Learn", "A rainforest shaped by Bitcoin's waiting transactions."],
+    mempool: ["Learn", "The chamber beneath the rainforest lake · Bitcoin's waiting transactions."],
     factory: ["Learn", "A Lightning node at work · enter through its shield."],
     lab: ["Learn", "EntropyLab's contributors at work."],
     bca: ["Learn", "Banana Certified Accounting."],
@@ -24,6 +24,11 @@
     const coach = $("explore-coach"), coachText = $("explore-coach-text"), start = $("explore-coach-start"), skip = $("explore-coach-skip");
     const learn = $("controls-learn"), controls = $("controls-help-button");
     const coarse = window.matchMedia("(pointer: coarse)");
+    const mode = $("destination-map-mode"), go = $("destination-map-go"), selection = $("destination-map-selection"), detail = $("destination-map-detail");
+    const phase = $("destination-map-phase"), receipt = $("destination-map-receipt"), effect = $("destination-map-effect"), survey = $("destination-atlas");
+    const atlas = BL.destinationAtlas?.create($("destination-atlas-ground"), $("destination-atlas-overlay"), $("destination-atlas-pins"));
+    let mapData = null, selectedName = "", selectedTravels = false, acting = false, receiptTimer = 0;
+    const hideReceipt = () => { if (receiptTimer) window.clearTimeout(receiptTimer); receiptTimer = 0; receipt.hidden = true; effect.hidden = true; receipt.textContent = ""; };
     const KEY = "ooga-explore-coach-v1", down = new Set(), swallowed = new Set();
     let provider = null, owner = null, rows = [], seen = false, coaching = -1, anchor = null, x = 0, z = 0;
     try { seen = localStorage.getItem(KEY) === "1"; } catch { /* Optional coaching also works without storage. */ }
@@ -40,6 +45,8 @@
       if (chosen) $("scene").focus({ preventScroll: true });
       else if (!button.hidden) button.focus({ preventScroll: true });
       rows = []; list.replaceChildren(); status.textContent = "";
+      atlas?.clear(); mapData = null; selectedName = ""; acting = false; go.disabled = true;
+      dialog.setAttribute("aria-busy", "false");
     };
     const close = (chosen = false) => { if (dialog.open) dialog.close(); finish(chosen); };
     const closeFromButton = () => close();
@@ -49,27 +56,63 @@
       remember(); coaching = 3; coachText.textContent = "You're ready to explore. Controls and Map are always here.";
       start.textContent = "Done"; skip.hidden = true;
     };
-    const choose = name => {
+    const select = name => {
+      if (acting || !provider || !provider.names().includes(name)) return;
+      selectedName = name; selectedTravels = provider.travels();
+      const outside = current().id === "dsb" && name === "outside", point = mapData?.points.find(p => p.name === name);
+      selection.textContent = provider.label(name);
+      phase.textContent = outside ? "RETURN TO TOWN" : selectedTravels ? "WARP PREVIEW" : "VIEW PREVIEW";
+      const place = current().id === "hub" ? PLACES[name] : null;
+      detail.textContent = [point?.level, outside ? "Leave this room before choosing another town view." : place ? place[1] : "Look around this part of DSB Land.",
+        outside ? "" : selectedTravels ? "Your gorilla keeps its heading and equipment. The landing must be clear." : "Only the camera moves. Move or press Escape to return to your Ooga."].filter(Boolean).join(" · ");
+      go.textContent = outside ? "Return outside" : `${selectedTravels ? "Warp to" : "View"} ${provider.label(name)}`;
+      go.disabled = false;
+      go.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+      for (const row of rows) row.setAttribute("aria-pressed", String(row.dataset.destination === name));
+      const position = provider.position?.() || mapData?.origin;
+      atlas?.select(name, position ? { x: position.x, z: position.z } : null);
+      status.textContent = `${provider.label(name)} selected. ${outside ? "Confirm to return outside." : selectedTravels ? "Confirm to warp your gorilla." : "Confirm to change the view; your Ooga stays in place."}`;
+    };
+    const choose = () => {
+      if (acting || !selectedName) return;
       if (!provider || !ready() || current() !== owner) { close(); return; }
       if (!canOpen()) { status.textContent = "That destination is unavailable right now. Close the map to continue."; return; }
+      // A change of controlled body while browsing needs a fresh preview, never an accidental warp.
+      if (provider.travels() !== selectedTravels) { select(selectedName); status.textContent = "Your controls changed. Review the action and confirm again."; return; }
+      const name = selectedName, label = provider.label(name), travels = selectedTravels, outside = current().id === "dsb" && name === "outside";
+      acting = true; go.disabled = true; dialog.setAttribute("aria-busy", "true");
+      // Travel is synchronous and guarded by the scene. No countdown, fake loading percentage or deferred move.
       const result = provider.travel(name);
-      if (result === false || typeof result === "string") {
-        status.textContent = typeof result === "string" ? result : "That destination is unavailable right now. Close the map to continue.";
+      if (result !== true) {
+        acting = false; go.disabled = false; dialog.setAttribute("aria-busy", "false");
+        status.textContent = typeof result === "string" ? result : "That destination is unavailable right now. Choose another zone or close the map.";
+        phase.textContent = "NOT MOVED";
         return;
       }
       complete(); close(true);
+      hideReceipt(); receipt.dataset.kind = travels ? "warp" : "view";
+      receipt.textContent = outside ? "Return outside to CHORA started." : travels ? `Warp complete · ${label}. Heading and equipment kept.` : `View selected · ${label}. Your Ooga stays in place. Move or Escape to return.`;
+      receipt.hidden = false; effect.hidden = !travels; coach.hidden = true;
+      receiptTimer = window.setTimeout(hideReceipt, 5500);
     };
     const open = () => {
       if (!canOpen() || dialog.open || document.querySelector("dialog:modal, dialog[open]:not(.board-floating)")) return false;
-      owner = current();
+      hideReceipt(); owner = current();
       for (const key of down) swallowed.add(key);
       BL.controls.resetAll(); owner.controlsHelpHold?.(true);
       if (document.pointerLockElement) document.exitPointerLock();
       const travels = provider.travels(), selected = provider.selected();
-      title.textContent = travels ? "Where shall we go?" : "Choose a viewpoint";
+      mapData = owner.navigationMap?.() || null;
+      title.textContent = mapData?.title || "Explore the world";
+      mode.textContent = owner.id === "dsb" && provider.names().length === 1 && provider.names()[0] === "outside" ? "RETURN TO TOWN · Leave this room to explore CHORA." : travels ? "GORILLA WARP · Choose a zone, preview, then warp." : "CAMERA VIEW · Your Ooga stays where it is.";
+      selectedName = ""; acting = false; go.disabled = true; go.textContent = "Choose a zone";
+      selection.textContent = "Where next?"; phase.textContent = "SELECT A ZONE";
+      detail.textContent = "Choose a numbered place on the map or in the list.";
+      dialog.setAttribute("aria-busy", "false");
       list.replaceChildren(); rows = [];
       const groups = new Map();
-      for (const name of provider.names()) {
+      const names = provider.names();
+      for (const [index, name] of names.entries()) {
         const place = current().id === "hub" ? PLACES[name] : null, group = place ? place[0] : "Explore";
         let section = groups.get(group);
         if (!section) {
@@ -79,17 +122,29 @@
         const entry = document.createElement("button"), label = document.createElement("strong"), description = document.createElement("span");
         entry.type = "button"; entry.dataset.destination = name;
         const outside = current().id === "dsb" && name === "outside";
-        label.textContent = outside ? provider.label(name) : `${travels ? "Go to" : "View"} ${provider.label(name)}`;
-        description.textContent = outside ? "Leave this room to choose another town viewpoint." : place ? place[1] : "Look around here. Move or press Escape to return to your Ooga.";
-        if (name === selected) { entry.setAttribute("aria-current", "location"); description.textContent += travels ? " · Current destination" : " · Selected view"; }
-        entry.append(label, description); entry.addEventListener("click", () => choose(name));
+        label.textContent = `${index + 1}. ${provider.label(name)}`;
+        entry.setAttribute("aria-label", `Preview ${provider.label(name)}`);
+        entry.setAttribute("aria-pressed", "false");
+        description.textContent = outside ? "Leave this room" : mapData?.points.find(p => p.name === name)?.level || (place ? place[0] : "Viewpoint");
+        if (name === selected) { entry.setAttribute("aria-current", "true"); description.textContent += " · Last chosen"; }
+        entry.append(label, description); entry.addEventListener("click", () => select(name));
         section.append(entry);
       }
       for (const group of ["Play", "Explore", "Learn"]) if (groups.has(group)) list.append(groups.get(group));
       rows = Array.from(list.querySelectorAll("button"));
-      status.textContent = "The world keeps moving while the map is open.";
+      survey.hidden = !mapData;
+      $("destination-map-mapnote").textContent = mapData ? "Live world layout · Underground rooms share the ground above them. The dotted line previews your selection, not a walking route." : "The world map is available outside. Return to town to choose a viewpoint.";
+      if (mapData) {
+        atlas?.show(mapData, names, name => provider.label(name), select);
+        const actorPosition = provider.position?.(), position = actorPosition || mapData.origin;
+        $("destination-map-origin").textContent = actorPosition ? "◉ Your position" : "◉ Camera target";
+        atlas?.select("", position ? { x: position.x, z: position.z } : null);
+      }
+      status.textContent = "Preview a zone before confirming. The world keeps moving while Map is open.";
       dialog.showModal(); closeButton.focus({ preventScroll: true });
       button.setAttribute("aria-expanded", "true");
+      // A sole exit still gets an explicit preview, with no imaginary map of the indoor room.
+      if (names.length === 1) select(names[0]);
       return true;
     };
     const onDown = e => {
@@ -104,6 +159,7 @@
       const key = e.code || e.key;
       if (down.size < 64) down.add(key);
       if (!dialog.open) {
+        if (["Escape", "KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(key)) hideReceipt();
         if (swallowed.has(key)) { e.preventDefault(); e.stopImmediatePropagation(); }
         return;
       }
@@ -117,7 +173,7 @@
       const key = e.code || e.key; down.delete(key);
       if (swallowed.delete(key) || dialog.open) { e.stopImmediatePropagation(); if (!dialog.open) e.preventDefault(); }
     };
-    const onBlur = () => { down.clear(); swallowed.clear(); BL.controls.resetAll(); };
+    const onBlur = () => { down.clear(); swallowed.clear(); BL.controls.resetAll(); hideReceipt(); };
     const onCancel = e => { e.preventDefault(); close(); };
     const onBackdrop = e => {
       if (e.target !== dialog) return;
@@ -140,6 +196,7 @@
       else dismissCoach();
     };
     const replay = () => { $("controls-help-close").click(); begin(); };
+    go.addEventListener("click", choose);
     closeButton.addEventListener("click", closeFromButton); dialog.addEventListener("cancel", onCancel);
     dialog.addEventListener("close", onClose); dialog.addEventListener("click", onBackdrop);
     window.addEventListener("keydown", onDown, true); window.addEventListener("keyup", onUp, true); window.addEventListener("blur", onBlur);
@@ -147,8 +204,8 @@
     return {
       open, close,
       get coaching() { return coaching >= 0; },
-      connect(next) { close(); provider = next; anchor = null; },
-      disconnect(previous) { if (provider === previous) { close(); provider = null; coach.hidden = true; anchor = null; } },
+      connect(next) { close(); hideReceipt(); provider = next; anchor = null; },
+      disconnect(previous) { if (provider === previous) { close(); hideReceipt(); provider = null; coach.hidden = true; anchor = null; } },
       update() {
         if (dialog.open && (!ready() || current() !== owner)) close();
         const hub = current()?.id === "hub";
@@ -156,7 +213,7 @@
         const learnDisabled = !canOpen();
         if (learn.disabled !== learnDisabled) { learn.disabled = learnDisabled; learn.title = learnDisabled ? "Finish the current interaction before learning the controls" : "Replay the movement and Map guide"; }
         if (seen && coaching < 0) { if (!coach.hidden) coach.hidden = true; return; }
-        const available = hub && canOpen() && current().coachingReady !== false && !document.querySelector("dialog:modal, dialog[open]:not(.board-floating)");
+        const available = receipt.hidden && hub && canOpen() && current().coachingReady !== false && !document.querySelector("dialog:modal, dialog[open]:not(.board-floating)");
         const show = available && (!seen || coaching >= 0);
         if (coach.hidden === show) coach.hidden = !show;
         if (!show) return;
@@ -177,7 +234,8 @@
         }
       },
       dispose() {
-        close(); provider = anchor = null; coach.hidden = true;
+        close(); hideReceipt(); atlas?.dispose(); provider = anchor = null; coach.hidden = true;
+        go.removeEventListener("click", choose);
         closeButton.removeEventListener("click", closeFromButton); dialog.removeEventListener("cancel", onCancel);
         dialog.removeEventListener("close", onClose); dialog.removeEventListener("click", onBackdrop);
         window.removeEventListener("keydown", onDown, true); window.removeEventListener("keyup", onUp, true); window.removeEventListener("blur", onBlur);

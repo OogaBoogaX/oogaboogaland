@@ -12553,6 +12553,41 @@
     }
     if (!gorilla) help.title = "Island · " + help.title; return help;
   };
+  // The map reads this visit's real terrain and door coordinates; it never builds another island.
+  hubScene.navigationMap = () => {
+    if (!island || !mempoolIsland) return null;
+    const M = mempoolIsland, T = timechainIsland, B = bifrostIsle, source = island.cutawaySource;
+    const bounds = { minX: source.origin.x, minZ: source.origin.z, maxX: source.origin.x + source.sx * source.unit, maxZ: source.origin.z + source.sz * source.unit };
+    const include = (x, z, r) => { bounds.minX = Math.min(bounds.minX, x - r); bounds.maxX = Math.max(bounds.maxX, x + r); bounds.minZ = Math.min(bounds.minZ, z - r); bounds.maxZ = Math.max(bounds.maxZ, z + r); };
+    include(M.place.x, M.place.z, poolModels.SITE.reach);
+    if (T) include(T.place.x, T.place.z, BL.timechainModels.SITE.radius);
+    if (B) include(B.site.cloud.x, B.site.cloud.z, B.site.cloud.r);
+    const points = [{ name: "pile", x: 0, z: 0 }, { name: "gate", x: island.gate.x, z: island.gate.z },
+      { name: "underground", x: 0, z: 6, level: "HQ · below ground" }, { name: "basement", x: 0, z: 6, level: "Basement · lower floor" },
+      { name: "mempool", x: M.worldX(0, 7.4), z: M.worldZ(0, 7.4), level: "Chamber · beneath the lake" }];
+    for (const [id, name] of Object.entries(CAVE_ZONES)) {
+      const mouth = island.mouths.find(m => m.id === id);
+      if (mouth) points.push({ name, x: mouth.x, z: mouth.z, level: "Cave entrance" });
+    }
+    if (T) points.push({ name: "timechain", x: T.worldX(0.4, 12.7), z: T.worldZ(0.4, 12.7), level: "Doorway · choose a room at the keypad" });
+    if (B) points.push({ name: "bifrost", x: B.site.portal.x, z: B.site.portal.z });
+    const poolBridge = (x, z) => {
+      const across = M.localX(x, z), along = M.localZ(x, z) - M.place.bridgeLocalZ, S = poolModels.SITE;
+      return Math.abs(across) <= S.width / 2 && along >= S.deckStart && along <= S.span ? along : -Infinity;
+    };
+    return { title: "The Island of Caves", bounds, points, origin: { x: pilot.orbit.target.x, z: pilot.orbit.target.z },
+      surfaceAt: (x, z) => {
+        if (!island || !mempoolIsland) return NaN;
+        const land = rageLandAt(x, z);
+        if (land) return rageExteriorFloor(land, x, z);
+        const along = poolBridge(x, z);
+        if (Number.isFinite(along)) return M.place.y + poolModels.deckY(along / poolModels.SITE.span);
+        if (T && onSphere(x, z)) return T.place.y + BL.timechainModels.SITE.bridgeFloor;
+        return B ? B.site.groundAt(x, z) : NaN;
+      },
+      isPath: (x, z) => !!island && (island.onLand(x, z) && island.isPath(x, z) || Number.isFinite(poolBridge(x, z)) || !!T && onSphere(x, z) && Math.hypot(x - T.place.x, z - T.place.z) >= BL.timechainModels.SITE.radius)
+    };
+  };
   hubScene.beginCoaching = () => islandGuide.escape();
   Object.defineProperty(hubScene, "coachingReady", { get: () => islandGuide?.state.phase === "work" && !gameMode });
   Object.defineProperty(hubScene, "navigationReady", { get: () => !!islandGuide && !islandGuide.holding && !cloudHopper?.active && !factoryDeparting && !bifrostDeparting && !timechainIsland?.gate.busy });
