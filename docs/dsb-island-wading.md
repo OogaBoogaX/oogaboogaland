@@ -1,27 +1,22 @@
-# DSB Land — island-wide shallow wading
+# DSB Land — shallow wading across accessible coastlines
 
-Upstream integration branch: `feature/dsb-island-wading-upstream-20261111` in `YellowBrokeIt/oogaboogaland`.
-Pinned upstream base: `2d7c396ac7c4c907201b5d46862a66b1d4fb39b9` from `OogaBoogaX/oogaboogaland:rock`.
-Original implementation was validated in `feature/dsb-island-wading` and merged into the fork's `rock`; its production shoreline modules are transferred unchanged here.
+DSB Land extends its existing shore walking (not swimming) to all **18 eligible sectors** of the 34-sector authored coast polygon. The **harbor** (segments 22–28) and **rear Olympus cliffs** (segments 31–33 and 0–5) remain excluded, with a two-metre shelf taper where eligible segments meet the excluded regions.
 
-## Scope and constraints
+The original Chora beach is unchanged. Rocky coasts receive shallow seabed grading and subdued shoaling optics, **not new beaches**. Body-width depth and slope gates stop movement into deep water. Dry-land terrain, the harbor's 1.35 m deck support, inland routes, buildings, and water level remain unchanged.
 
-Extend the existing **shallow walking/wading** system to every accessible DSB shoreline, **not swimming**. Keep the working harbor (coast polygon sectors 22–28) and the rocky rear of Olympus (31–33 and 0–5) excluded. The remaining 18 of 34 sectors share a gradual underwater shelf, with a 2 m taper where accessible sectors meet exclusions.
+## Source changes
 
-No new sand beaches, no beach behind Olympus, no changes to the terrain above water, inland roads, building locations, piers, player controls, water level, texture budget, or interiors. Beach-only stronger swash remains at Chora. The shore water is shallow; existing depth constraints block users entering deep water.
+- `src/js/dsb-coast.js`: authored coastline eligibility and boundary taper
+- `src/js/dsb-geography.js`: matching seabed and body-wide depth gate; one scratch object per land build avoids garbage in the walking hot path
+- `src/js/dsb-water.js`: shallow rocky-coast optics and bounded Canvas shoreline triangles
 
-## Files
+## Test integration
 
-- `src/js/dsb-coast.js`: nearest coast segment, eligible access mask, boundary taper, original beach treatment.
-- `src/js/dsb-geography.js`: grade only offshore seabed and keep terrain rendering and collision grounded in the same mesh. Harbor deck elevations remain.
-- `src/js/dsb-water.js`: subtle water optics for eligible rocky coasts and bounded shoreline tessellation for Canvas.
-- `test/dsb-island-wading.test.mjs`: island sectors, walk-and-return, deep-water stop, piers, 8,957-point inland invariant, ocean optics and clipping.
-- `test/dsb-island-browser.mjs`: repeatable desktop/phone smoke checks and screenshots of selected coasts.
-- `package.json`: include the dedicated regression in the existing browser-free unit test lane.
+All shoreline assertions are registered with the existing `test/run.mjs` regression ledger and browser driver. No extra test runner, dependency, workflow, or screenshot path is introduced.
 
-## Verification
+- `npm run test:unit` — global rules: all 34 sectors, body-width walking in/out, deep-water stops, 42 distributed shore routes, exclusions, harbor support, original 8,957-sample dry-land fingerprint, shoreline optics and Canvas budget
+- `ONLY="DSB shoreline" node test/run.mjs --browser-only dsb` — actual built page in desktop and phone-sized Chrome sessions; verifies navigation through Chora, east/west rocky coasts, harbor and Olympus
+- `node test/run.mjs water-unit` — pre-existing detailed water, FFT, ripple and pier route regressions, adapted so approved new offshore depths do not invalidate protection for unchanged dry land
+- `npm run build` — rebuild the production page
 
-The original isolated feature passed GitHub Actions shoreline validation, browser-free unit lane, production build, and desktop/phone Chromium smoke check:
-https://github.com/YellowBrokeIt/oogaboogaland/actions/runs/43042202670
-
-This integration branch is based on a newer upstream commit. That old green run is **not** a substitute for fresh CI/review on this integration branch. Before merge, require fresh `npm run test:unit`, `npm run build`, and browser navigation/visual validation against the integrated page.
+Source code and tests are inside `feature/dsb-island-wading-upstream-20261111` and are proposed as PR #600 against upstream `rock`. The fork's `feature/dsb-land-master` preview remains untouched. Production is only updated after upstream accepts a merge and its maintainers deploy.
