@@ -1269,9 +1269,9 @@
       for (let gx = 0; gx < SX; gx++) { yield* pause(slice); for (let gz = 0; gz < SZ; gz++) {
         const x = (gx + 0.5) * UNIT + ORIGIN.x, z = (gz + 0.5) * UNIT + ORIGIN.z;
         const radius = Math.hypot(x, z), angle = Math.atan2(x, -z);
-        // New rock keeps broad horizontal courses in the underside palette.
-        // A single course phase lets adjacent shelf faces merge; existing rock
-        // retains its authored variation and no extra random draws are consumed.
+        // Each added shelf is one stone bed in the existing underside palette.
+        // Matching its floor material through the backing lets adjacent faces
+        // merge without changing the shape or the original rock's variation.
         for (let level = 0; level < CLIFF_LEDGES.levels.length; level++) {
           const ledge = CLIFF_LEDGES.levels[level];
           let pad = 0;
@@ -1285,7 +1285,7 @@
             const y = (gy + 1 - SURFACE) * UNIT;
             const blend = clamp((y - ledge.floor + ledge.depth) / ledge.depth, 0, 1);
             const core = undersideRadiusAt(y), reach = core + Math.max(0, outer - core) * blend;
-            if (radius < reach && radius > core - UNIT && !grid.has(gx, gy, gz)) grid.set(gx, gy, gz, UNDER_BANDS[Math.floor((SURFACE - 1 - gy + 2) / 6) % 4]);
+            if (radius < reach && radius > core - UNIT && !grid.has(gx, gy, gz)) grid.set(gx, gy, gz, P.stoneDark);
           }
           if (radius >= ledge.inner - UNIT * Math.SQRT1_2) for (let gy = floorGy; gy < floorGy + 14; gy++) {
             grid.set(gx, gy, gz, 0); matrixCaves[grid.index(gx, gy, gz)] = 0;
