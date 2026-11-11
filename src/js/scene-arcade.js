@@ -1941,6 +1941,8 @@
       carry: true,
       renderer, canvas: ctx.canvas, camera, hud, presets: views, landing: "entrance", pitch: PITCH, dist: DIST,
       follow: FOLLOW, clampTarget, clampCamera, ceilingAt: () => HALL.h - 1, coarse: COARSE, mayPossess, combatOnly: () => gameMode && armed,
+      // HALLOWEEN: a hunter in a hunt under way may take combat overhead, the one place that offers it.
+      birdsEye: () => gameMode && armed,
       // HALLOWEEN: in combat view a click on the herald under the dot wakes it, as a click does in carry; so does the
       // click that captures a free cursor on it.
       primaryAction: (down) => {
