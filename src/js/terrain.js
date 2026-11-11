@@ -1894,7 +1894,9 @@
     let masterPathCount = 0, masterHashValue = 2166136261;
     const masterCell = (gx, gz, wx) => {
       const i = gx * PZ + gz, c = (gx >> 1) * SZ + (gz >> 1);
-      if (!land[c]) return;
+      // Shelf-only columns are real collision land, but they must not extend
+      // the original surface spokes down onto a new cliff walking circuit.
+      if (!land[c] || cliffLedges && tops[c] === NONE) return;
       const wz = (gz + 0.5) * PATH_UNIT + ORIGIN.z, r = Math.hypot(wx, wz);
       let path = !!masterPaths[i], headquartersPath = false;
       if (!path && meadow[c] && r >= MASTER_PATH_CENTER) {

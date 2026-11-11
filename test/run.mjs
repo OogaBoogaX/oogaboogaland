@@ -30307,25 +30307,31 @@ const cliffLedgeChecks = (BL, baseline, baselineRestored) => {
   }
   const rooms = built => JSON.stringify([built.headquarters.rooms, built.headquarters.basement.rooms]);
   const apertures = built => JSON.stringify(built.headquarters.windows.map(w => [w.kind, w.x, w.z, w.width, w.height, w.sill, w.flare.frusta.filter(f => f.inner)]));
-  const paths = built => {
+  const pathDetails = { baseline: [], direct: [], restored: [] };
+  const paths = (built, details) => {
     const path = built.path, hash = createHash("sha256");
     hash.update(JSON.stringify([path.centerlines, path.debug.masterMaskHash, path.debug.masterSpokeCellCount]));
     for (const radius of [4, 8, 16]) {
       path.setRadius(radius);
       const count = path.debug.visibleInstanceCount;
       hash.update(JSON.stringify([radius, count, path.debug.visibleSpokeCellCount, path.debug.ringCellCount]));
-      hash.update(new Uint8Array(path.instanceData.buffer, path.instanceData.byteOffset, count * 20 * Float32Array.BYTES_PER_ELEMENT));
+      const instances = new Uint8Array(path.instanceData.buffer, path.instanceData.byteOffset, count * 20 * Float32Array.BYTES_PER_ELEMENT);
+      hash.update(instances);
+      details.push({ radius, count, instances: createHash("sha256").update(instances).digest("hex") });
     }
     return hash.digest("hex");
   };
   // Reuse parity's restored baseline so sampling active radii does not change the
   // original island used by the remaining unit checks. Compare placements, not PATH_TILE.
-  const originalPaths = paths(baselineRestored), samePaths = paths(island) === originalPaths && paths(restored) === originalPaths;
+  const originalPaths = paths(baselineRestored, pathDetails.baseline), directPaths = paths(island, pathDetails.direct), restoredPaths = paths(restored, pathDetails.restored);
+  const samePaths = directPaths === originalPaths && restoredPaths === originalPaths;
   record(CLIFF_TERRAIN_CHECK,
     !failures.length && !topChanges && mergedPathFaces > 0 && !unsafeMergedPaths
       && rooms(baseline) === rooms(island) && apertures(baseline) === apertures(island) && samePaths,
     JSON.stringify({ samples, failures, topChanges, mergedPathFaces, unsafeMergedPaths, faces: island.geometry.faces.length,
-      rooms: rooms(baseline) === rooms(island), apertures: apertures(baseline) === apertures(island), paths: samePaths }));
+      rooms: rooms(baseline) === rooms(island), apertures: apertures(baseline) === apertures(island), paths: samePaths,
+      pathHashes: { baseline: originalPaths, direct: directPaths, restored: restoredPaths }, pathDetails: samePaths ? undefined : pathDetails,
+      masterCells: [baselineRestored.path.debug.masterSpokeCellCount, island.path.debug.masterSpokeCellCount, restored.path.debug.masterSpokeCellCount] }));
 };
 const TERRAIN_GOLDEN = "7ceeb12cec5b0ec3";
 const terrainParityChecks = (BL, island) => {
