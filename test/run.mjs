@@ -25722,6 +25722,19 @@ function dryFingerprint(land) {
   return {count,hash:hash.toString(16).padStart(8,"0")};
 }
 function dsbIslandWadingChecks(BL) {
+  // The unit tier is Node-only. Load the real shoreline modules into the suite's VM,
+  // rather than relying on scene/browser globals which are not present here.
+  const triangle=()=>({verts:[0,0,0,1,0,0,0,0,1],faces:[{i:[0,1,2],color:[255,255,255]}]});
+  const context={window:{BL:{
+    math:{hexToRgb:()=>[255,255,255]},
+    scene:{createNode:(options={})=>({...options}),addChild(){}},
+    models:{track:()=>({use(){}}),box:triangle,bevelBox:triangle,lathe:triangle,moved:triangle,shaded:triangle,merge:triangle}
+  }}};
+  for(const name of ["dsb-coast.js","dsb-geography.js","dsb-water.js"]){
+    const file=readFileSync(new URL("../src/js/"+name,import.meta.url),"utf8");
+    runInNewContext(file,context,{filename:name,timeout:30000});
+  }
+  BL=context.window.BL;
   const C=BL.dsbCoast,L=BL.dsbGeography.build(),actor={bodyHeight:1.370,bodyRadius:.697};
   const BLOCKED=new Set([0,1,2,3,4,5,22,23,24,25,26,27,28,31,32,33]);
   const at=(i,t=.5)=>{
@@ -30512,7 +30525,7 @@ const npcActivityRefreshProof = (BL) => {
 };
 
 const unitChecks = async () => {
-  dsbIslandWadingChecks(globalThis.BL);
+  dsbIslandWadingChecks();
   const artifact = artifactUnitProof();
   record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
   const previewRange=await studioPreviewRangeProof();
