@@ -124,7 +124,8 @@
     "+": ["000", "010", "111", "010", "000"],
     "-": ["000", "000", "111", "000", "000"],
     ".": ["000", "000", "000", "000", "010"],
-    "'": ["010", "010", "000", "000", "000"]
+    "'": ["010", "010", "000", "000", "000"],
+    "&": ["010", "101", "010", "101", "011"]
   };
   // The carved headline has room for both diagonals; a three-cell M reads too much like H at bridge distance.
   const CARVED_M = ["10001", "11011", "10101", "10001", "10001"];
@@ -157,7 +158,16 @@
     // Block Frenzy: an orange cube in three faces.
     cube: { ink: { "#": "#f7931a", "+": "#ffc46b", "*": "#b8650a" }, rows: ["..+++..", ".+++++.", "#+++**#", "###*#*#", "##*###*", "##*#*#*", ".#####."] },
     // B.C.A.: a walnut abacus whose beads are bananas and ivory, on brass rods.
-    abacus: { ink: { "W": "#8a5a32", "-": "#d9b45a", "Y": "#f5d142", "I": "#f2efe8" }, rows: ["WWWWWWW", "WYY--IW", "W-IY-YW", "WI--YYW", "WYI--IW", "WWWWWWW", "W.....W"] }
+    abacus: { ink: { "W": "#8a5a32", "-": "#d9b45a", "Y": "#f5d142", "I": "#f2efe8" }, rows: ["WWWWWWW", "WYY--IW", "W-IY-YW", "WI--YYW", "WYI--IW", "WWWWWWW", "W.....W"] },
+    // Repo Island's sections (repo-island-data.js): a node's rack, an explorer's eye, a library's chain, a tool's gear,
+    // a wallet's key, a signing device's shield and a scroll of learning.
+    server: { ink: { "#": "#5e5449", "*": "#2a211c", "+": "#d0c8b8", "G": "#46ff72" }, rows: ["#######", "#*+**G#", "#######", "#*+**G#", "#######", "#*+**G#", "#######"] },
+    eye: { ink: { "#": "#2f6f9a", "+": "#f2efe8", "*": "#1b1b1e", "O": "#5aa6d0" }, rows: [".......", "..###..", ".#+++#.", "#+O*O+#", ".#+++#.", "..###..", "......."] },
+    chain: { ink: { "#": "#c9ced6", "+": "#eef1f5" }, rows: ["+#.....", "#.#....", ".##.##.", "...#.#.", "...##.#", "....#.#", ".....#+"] },
+    gear: { ink: { "#": "#c9ced6", "+": "#8f949b", "*": "#3b3d42" }, rows: ["..#.#..", ".#####.", "###+###", ".#+*+#.", "###+###", ".#####.", "..#.#.."] },
+    key: { ink: { "Y": "#e8b83a", "+": "#fff1a0" }, rows: ["..+YY..", ".Y...Y.", ".Y...Y.", "..YYY..", "...Y...", "...YY..", "...YYY."] },
+    shield: { ink: { "#": "#3c5a8a", "+": "#c8ccd0", "O": "#f7931a" }, rows: ["#######", "#+++++#", "#++O++#", "#+OOO+#", ".#+O+#.", "..#+#..", "...#..."] },
+    scroll: { ink: { "#": "#a8703e", "+": "#f2efe8", "-": "#6b5a48" }, rows: [".#####.", "#+++++#", ".#---#.", ".#+++#.", ".#---#.", "#+++++#", ".#####."] }
   };
   const BADGE_OUTLINE = "#2a1a0c", BADGE_CELLS = 9;
   const BADGE_CELL = SIGN_CELL * 5 / 7, BADGE_GAP = SIGN_CELL * 2;

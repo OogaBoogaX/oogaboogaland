@@ -30266,6 +30266,60 @@ const terrainParityChecks = (BL, island) => {
   record("terrain collision: direct and Worker-restored voxel sweeps use caller-owned typed box queries instead of the allocating scalar adapter",
     voxelPaths.every(path => path.typed), JSON.stringify(voxelPaths));
 };
+// Repo Island (repo-island-data.js, repo-island-models.js, repo-feed.js): the list the page and the Worker share, the
+// island laid out from it, and the feed's boundary. The meadow's four totems are carved by the same kit at its full
+// detail, so their golden is the one they had before the island's details existed.
+const MEADOW_TOTEMS_GOLDEN = "8bdd4fca5a005b4f";
+const repoIslandChecks = (BL, island) => {
+  const D = BL.repoIslandData, M = BL.repoIslandModels, TM = BL.totemModels, H = BL.hubModels;
+  const sections = D.SECTIONS.map((s) => s.id), order = D.REPOS.map((r) => sections.indexOf(r.section));
+  const glyphs = (text) => [...text].every((ch) => ch === " " || ch === "M" || H.SIGN_GLYPHS[ch]);
+  let badges = true;
+  for (const s of D.SECTIONS) try { H.caveSign(s.name, s.badge); } catch { badges = false; }
+  const list = {
+    repos: new Set(D.REPOS.map((r) => r.repo.toLowerCase())).size === D.REPOS.length && D.REPOS.every((r) => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r.repo)),
+    words: new Set(D.REPOS.map((r) => r.word)).size === D.REPOS.length && D.REPOS.every((r) => /^[A-WYZ]{2,7}$/.test(r.word)),
+    sections: order.every((k, i) => k >= 0 && (!i || k >= order[i - 1])) && D.SECTIONS.every((s) => s.name.length <= 18 && glyphs(s.name)) && badges,
+    sized: D.REPOS.every((r) => r.importance >= 0.2 && r.importance <= 1 && r.name.length <= 28),
+    anchors: BL.totemFeed.REPOS.every((t) => D.REPOS.some((r) => r.repo === t.repo && r.importance === t.importance))
+  };
+  record("repo island list: every repository once under its canonical name, a carvable word of its own, its section in order, signs the carved alphabet can spell with a badge, heights a share of Core's and the meadow's four at their own",
+    Object.values(list).every(Boolean), JSON.stringify(list));
+  const P = M.plan(), spot = M.spot(island), seen = new Set(), signatures = new Set(), meadow = new Set(BL.totemFeed.REPOS.map((t) => t.repo));
+  let placed = true, own = true, tall = true, inside = true;
+  for (const t of P.totems) {
+    placed &&= !seen.has(t.index) && D.REPOS[t.index].repo === t.repo;
+    seen.add(t.index);
+    if (meadow.has(t.repo)) own &&= t.design === TM.DESIGNS[BL.totemFeed.REPOS.find((r) => r.repo === t.repo).word];
+    else { const key = JSON.stringify(t.design); own &&= !signatures.has(key); signatures.add(key); }
+    tall &&= Math.abs(t.L.apex - t.importance * TM.CORE_HEIGHT) < 1e-9;
+    inside &&= Math.hypot(t.x, t.z) + t.L.reach < M.PLAN.edge && (t.r === 0 || !M.pathAt(t.x, t.z, P.spokes));
+  }
+  const chunked = P.chunks.flat().sort((a, b) => a - b).every((at, k) => at === k) && P.chunks.flat().length === P.totems.length && P.chunks.every((c) => c.length <= M.CHUNK);
+  // The bridge leaves the south terrace level with it, past the rim, and the island's middle is a deck and its radius further.
+  const bridged = spot.y === island.surfaceAt(0, spot.rim - 0.3) && island.surfaceAt(0, spot.rim + 0.1) < 0.5 && spot.z === spot.rim + M.BRIDGE.span + M.ISLE.R;
+  record("repo island plan: every repository stands once, in its own carving (the meadow's four in theirs), as tall as its importance makes it, wholly inside the lip and off its paths, in chunks of up to four, past a bridge level with the south terrace",
+    placed && seen.size === D.REPOS.length && own && tall && inside && chunked && bridged, JSON.stringify({ placed, count: seen.size, own, tall, inside, chunked, bridged, spot }));
+  const h = createHash("sha256");
+  for (let i = 0; i < 4; i++) for (const g of [TM.body(i), TM.glyphs(i), TM.featureHighlights(i)]) h.update(JSON.stringify([g.verts, g.faces.map((f) => [f.i, f.color, f.emissive || 0])]));
+  const digest = h.digest("hex").slice(0, 16);
+  record("meadow totems: carved at full detail by the shared kit, the four keep their golden", digest === MEADOW_TOTEMS_GOLDEN, JSON.stringify({ digest, golden: MEADOW_TOTEMS_GOLDEN }));
+  // The feed's boundary, on the page's own module: a first reading celebrates nothing, a newer merge seen later does,
+  // a repository the page does not list is skipped, a merge older than the day is none, and a malformed reply refuses.
+  const F = BL.repoFeed, events = [], stop = F.subscribe((e) => events.push(e)), now = Date.now(), core = D.REPOS.findIndex((r) => r.repo === "bitcoin/bitcoin");
+  const lnd = D.REPOS.findIndex((r) => r.repo === "lightningnetwork/lnd");
+  F.apply({ at: now, merges: { "bitcoin/bitcoin": [now - 3600000, 5], "someone/else": [now, 9], "lightningnetwork/lnd": [now - 25 * 3600000, 7] } }, now);
+  const first = F.state.repos[core].number === 5 && F.state.repos[core].url === "https://github.com/bitcoin/bitcoin/pull/5" && F.state.repos[lnd].number === 0 && events.length === 1 && !events[0].fresh;
+  F.apply({ at: now, merges: { "bitcoin/bitcoin": [now - 60000, 6] } }, now);
+  const fresh = events.length === 2 && events[1].fresh && events[1].index === core;
+  let refused = false;
+  try { F.apply({ merges: { "bitcoin/bitcoin": ["soon", 6] } }, now); } catch { refused = true; }
+  F.apply({ merges: {} }, now);
+  const cleared = F.state.repos[core].number === 0 && F.state.repos[core].changedAt === 0;
+  stop();
+  record("repo feed: a first reading lights without celebrating, a newer merge is fresh, unknown repositories and merges older than the day are skipped, a malformed reply refuses and an empty one puts the totems out",
+    first && fresh && refused && cleared, JSON.stringify({ first, fresh, refused, cleared, events: events.length }));
+};
 const artifactUnitProof = () => {
   const workflow = readFileSync(join(root, ".github/workflows/pages.yml"), "utf8");
   const script = workflow.split("      - name: Commit the built page\n        run: |\n")[1]?.split("        env:\n")[0]?.replace(/^          /gm, "");
@@ -30782,6 +30836,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
 
   const island = BL.terrain.island({ seed: 1 });
   terrainParityChecks(BL, island);
+  repoIslandChecks(BL, island);
   await terrainCacheChecks();
   {
     // These real c3 roof poses must follow the same limb animation as open space.
