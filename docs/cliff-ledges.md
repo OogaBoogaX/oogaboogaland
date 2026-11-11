@@ -15,7 +15,8 @@ moving a tree or prop.
 
 - Walk toward a rope from its lower landing to attach. Forward climbs, backward
   descends, and releasing movement holds position.
-- Walk outward toward a rope at its upper landing to descend. Release forward
+- Walk outward from the anchor stake at an upper rappel landing to descend.
+  The Ooga holds the rope across the stepped rim before lowering. Release forward
   before reversing direction.
 - Space, or the ordinary touch jump control, releases the rope with a jump.
 - Three rope ladders join the circuits. Two or three rappel ropes reach the top,

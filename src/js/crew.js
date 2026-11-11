@@ -5609,8 +5609,12 @@
           // immediately reverse the mount and put the character back on the deck.
           const fromTop = Math.abs(feet - plane.top) < 0.15 && outward > 0.05;
           const fromFace = feet >= plane.bottom - 0.1 && feet < plane.top - 0.15 && outward < -0.05;
+          // A rappel starts at its stake, before the stepped rim falls away.
+          // The existing outward handoff carries the body along the lash at
+          // landing height, with ordinary collision checks, before descending.
+          const inner = fromTop && plane.topAnchor ? -plane.inset - 0.08 : -cave.bodyRadius;
           if ((!fromTop && !fromFace) || Math.abs(across) > half - 0.1
-            || along < -cave.bodyRadius || along > gap + 0.08) continue;
+            || along < inner || along > gap + 0.08) continue;
           l.plane = plane; l.across = across; l.along = along;
           l.descentHeld = fromTop && steer.forward > 0.05;
           l.flat.width = l.vertical.width = cave.bodyRadius * 2;

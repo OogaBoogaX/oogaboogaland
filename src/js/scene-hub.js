@@ -11295,7 +11295,7 @@
     reflowScenery();
     buildSpots();
     // Build after all seeded scatter and reflow, with no ground claims or RNG draws.
-    for (const cliff of BL.hubCliffs.create(island, free)) {
+    for (const cliff of BL.hubCliffs.create(island, free, PLAYER_RADIUS, STEP_MAX)) {
       const node = createNode({ geometry: cliff.geometry });
       addChild(root, node); placed.push(node); cliffLadders.push(cliff.route);
       // Help is reachable at either landing, not only halfway down an airborne rope.

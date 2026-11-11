@@ -10,7 +10,7 @@
     out.x = this.nx * radius; out.z = this.nz * radius;
     return out;
   };
-  const create = (island, landingClear) => {
+  const create = (island, landingClear, supportRadius, step) => {
     const layout = BL.terrain.CLIFF_LEDGES, routes = [], upper = layout.levels[0], lower = layout.levels[1];
     const add = (degrees, rope) => {
       let angle = degrees * Math.PI / 180, nx = Math.sin(angle), nz = -Math.cos(angle);
@@ -28,7 +28,7 @@
           // footprint support as walking, then require full body clearance.
           for (let setback = 0.65; setback <= 1.65; setback += 0.25) {
             const landing = edge - setback, x = nx * landing, z = nz * landing;
-            const surface = island.surfaceAt(x, z), y = island.supportAt(x, z, surface, 0.5, -120, 0.5);
+            const surface = island.surfaceAt(x, z), y = island.supportAt(x, z, surface, step, -120, supportRadius);
             if (!Number.isFinite(y) || y < 0 || !island.clearAt(x, y + 0.01, z, 0.5, 2.5)
               || landingClear && !landingClear(x, z, 0.6)) continue;
             radius = edge + 0.45; top = y; inset = radius - landing; found = true; break;
@@ -45,7 +45,7 @@
       }
       const bottom = rope ? upper.floor : lower.floor, bottomRadius = rope ? radius : 26.65;
       const route = { kind: rope ? "rope" : "ladder", nx, nz, x: nx * radius, z: nz * radius, radius, bottomRadius,
-        bottom, top, bend: rope ? top : top - 3, width: rope ? 1 : 1.2, inset, pathAt: pointAt, pathSpeed: rope ? 1 : 0.45 };
+        bottom, top, bend: rope ? top : top - 3, width: rope ? 1 : 1.2, inset, topAnchor: rope, pathAt: pointAt, pathSpeed: rope ? 1 : 0.45 };
       const parts = [], a = {}, b = {}, width = rope ? 0 : 0.45;
       route.pathAt(bottom, a);
       for (const side of rope ? [0] : [-1, 1]) {

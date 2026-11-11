@@ -19794,15 +19794,19 @@ const hubCliffLedges = { name: "hub cliff ledges", why: "rule: both cliff paths 
       const landingHeld = Math.hypot(a.root.position.x - landing.x, a.root.position.z - landing.z) < 1e-6 && Math.abs(feet() - top) < 1e-6;
       B.pilot.orbit.yaw = B.pilot.orbit.tYaw = yaw + Math.PI;
       B.advance(0.1, 1 / 60); key("w", true);
-      let descended = false, approach = 0;
+      let descended = false, approach = 0, lowering = false, clearedLip = false;
       for (let frame = 0; frame < 1800; frame++) {
         B.advance(1 / 60, 1 / 60);
-        if (!descended && a.ladder.plane) approach = Math.hypot(a.root.position.x - landing.x, a.root.position.z - landing.z);
+        if (!lowering && feet() < top - 1e-6) {
+          lowering = true;
+          approach = Math.hypot(a.root.position.x - landing.x, a.root.position.z - landing.z);
+          clearedLip = !!a.ladder.plane && (a.root.position.x - l.x) * l.nx + (a.root.position.z - l.z) * l.nz >= gap - 1e-6;
+        }
         descended ||= !!a.ladder.plane;
         if (descended && !a.ladder.plane) break;
       }
       key("w", false);
-      rows.push({ kind: l.kind, mounted, paused, hold, top, expectedTop: l.top, landed, landingHeld, approach, descended, bottom: feet(), expectedBottom: l.bottom, active: !!a.ladder.plane });
+      rows.push({ kind: l.kind, mounted, paused, hold, top, expectedTop: l.top, landed, landingHeld, approach, requiredApproach: l.inset + gap, clearedLip, descended, bottom: feet(), expectedBottom: l.bottom, active: !!a.ladder.plane });
     }
     const l = routes.find(r => r.kind === "ladder");
     l.pathAt(l.bottom, anchor);
@@ -19830,7 +19834,7 @@ const hubCliffLedges = { name: "hub cliff ledges", why: "rule: both cliff paths 
   })()`);
   record("hub cliff ledges: rappel ropes and lower ladders climb and descend, hold at rest, release on Space and respect GAME MODE",
     r.rows.filter(v => v.kind === "rope").length >= 2 && r.rows.filter(v => v.kind === "ladder").length === 3
-      && r.rows.every(v => v.mounted && v.paused && v.hold < 1e-6 && Math.abs(v.top - v.expectedTop) < 1e-6 && v.landed && v.landingHeld && v.approach > 0.25 && v.descended && Math.abs(v.bottom - v.expectedBottom) < 1e-6 && !v.active)
+      && r.rows.every(v => v.mounted && v.paused && v.hold < 1e-6 && Math.abs(v.top - v.expectedTop) < 1e-6 && v.landed && v.landingHeld && v.clearedLip && v.approach >= v.requiredApproach - 1e-6 && v.descended && Math.abs(v.bottom - v.expectedBottom) < 1e-6 && !v.active)
       && r.attached && r.released && r.jetAttached && r.jetReleased && r.modeAttached && r.modeDetached && r.modeBlocked && r.reenabled, JSON.stringify(r));
 } };
 scene("hub", { label: "cliff ledges", query: "solo=1&character=portlandhodl&pos=0", steps: [hubCliffLedges] });
