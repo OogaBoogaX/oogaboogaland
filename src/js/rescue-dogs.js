@@ -38,7 +38,7 @@
   const BL = window.BL = window.BL || {};
   const { fnv1a } = BL.math;
   // The yard's six waiting puppies, DSB Land's strays, the visitor's own dog and those on their way out.
-  const STRAY_CAP = 300, DOG_CAP = STRAY_CAP + 32;
+  const STRAY_CAP = 300, LOCAL_DOG_CAP = STRAY_CAP + 32, COMPANION_CAP = 64, DOG_CAP = LOCAL_DOG_CAP + COMPANION_CAP;
   const POOP_CAP = 512, FLY_PILES = 48, FLY_NEAR = 18;
   const HUNGER_SECONDS = 600, HUNGRY = 0.7, STARVE_SECONDS = 90;
   // Seconds between two poops of a fed dog, jittered by a throwaway roll; a stray goes half as often.
@@ -68,7 +68,7 @@
   // strays a frame (DRAWN_CAP holds the most of any tier plus every other dog), and piles within POOP_DRAW, at most
   // POOPS_DRAWN; a stray beyond DRAW + THINK_NEAR thinks one frame in FAR_SLICES. Of the dogs drawn, the yard's, the own
   // dog and the strays within SHADOW_NEAR cast shadows, at most SHADOW_CAP of a breed.
-  const DRAW = { high: 60, medium: 42, low: 28 }, DRAWN = { high: 128, medium: 72, low: 32 }, DRAWN_CAP = 160;
+  const DRAW = { high: 60, medium: 42, low: 28 }, DRAWN = { high: 128, medium: 72, low: 32 }, DRAWN_CAP = 160 + COMPANION_CAP;
   const SHADOW_NEAR = 16, SHADOW_CAP = 24;
   const POOP_DRAW = { high: 40, medium: 30, low: 22 }, POOPS_DRAWN = { high: 160, medium: 96, low: 48 };
   const THINK_NEAR = 12, FAR_SLICES = 8, VIEW_CONE = 0.45;
@@ -77,6 +77,44 @@
   const ROAM = 0, SNIFF = 1, REST = 2, DOZE = 3, TAG = 4, PLOP = 5;
   const MOOD_NAMES = ["roam", "sniff", "sit", "sleep", "tag", "poop"];
   const MOOD_POSE = [FOLLOW, EAT, SIT, NAP, FOLLOW, SQUAT];
+  const COMPANION_POSE = Object.freeze({ follow: FOLLOW, sit: SIT, eat: EAT, poop: SQUAT, sleep: NAP, fly: FLY, land: LAND });
+  const COMPANION_AGE = 2000;
+  // Private live delivery only. The adapter supplies the authenticated viewer
+  // and current session fence separately; public snapshots cannot authorize it.
+  const validateCompanions = (frame, context) => {
+    const wire = BL.rescueShared;
+    if (!wire) return false;
+    const { exact, integer, worldId } = wire;
+    if (!exact(context, ["world", "epoch", "revision", "rescueRevision", "accountId", "generation", "bodyId", "zone"])
+      || !worldId(context.world) || !integer(context.accountId) || !context.accountId
+      || !integer(context.generation) || !context.generation || !worldId(context.bodyId)
+      || !exact(frame, ["v", "world", "epoch", "revision", "rescueRevision", "zone", "at", "companions"])
+      || frame.v !== 1 || frame.world !== context.world || frame.zone !== context.zone
+      || !wire.zoneId(frame.zone)
+      || !integer(frame.epoch) || !frame.epoch || frame.epoch !== context.epoch
+      || !integer(frame.revision) || !frame.revision || frame.revision !== context.revision
+      || !integer(frame.rescueRevision) || !frame.rescueRevision || frame.rescueRevision !== context.rescueRevision
+      || !integer(frame.at) || !Array.isArray(frame.companions) || frame.companions.length > COMPANION_CAP) return false;
+    const accounts = new Set(), bodies = new Set(), dogs = new Set();
+    for (const row of frame.companions) {
+      if (!exact(row, ["accountId", "generation", "bodyId", "zone", "dog", "pose", "at"])
+        || !integer(row.accountId) || !row.accountId || accounts.has(row.accountId)
+        || !integer(row.generation) || !row.generation || !worldId(row.bodyId) || bodies.has(row.bodyId)
+        || row.zone !== frame.zone || !integer(row.at) || row.at > frame.at || frame.at - row.at > COMPANION_AGE
+        || !exact(row.dog, ["id", "name", "breed"])
+        || typeof row.dog.id !== "string" || row.dog.id.length > 80 || !/^(?:stray:[0-9]+:[0-9]+|adopted:[0-9]+:[0-9]+:[0-9]+)$/.test(row.dog.id) || dogs.has(row.dog.id)
+        || typeof row.dog.name !== "string" || !row.dog.name.length || row.dog.name.length > 16 || /[\x00-\x1f\x7f<>]/.test(row.dog.name)
+        || !integer(row.dog.breed) || row.dog.breed >= 6
+        || !exact(row.pose, ["sequence", "x", "y", "z", "yaw", "activity"])
+        || !integer(row.pose.sequence) || !row.pose.sequence
+        || ![row.pose.x, row.pose.y, row.pose.z].every(n => Number.isFinite(n) && Math.abs(n) <= 200)
+        || !Number.isFinite(row.pose.yaw) || Math.abs(row.pose.yaw) > Math.PI * 2
+        || !Object.hasOwn(COMPANION_POSE, row.pose.activity)
+        || (row.accountId === context.accountId ? row.generation !== context.generation || row.bodyId !== context.bodyId : row.bodyId === context.bodyId)) return false;
+      accounts.add(row.accountId); bodies.add(row.bodyId); dogs.add(row.dog.id);
+    }
+    return new TextEncoder().encode(JSON.stringify(frame)).byteLength <= 64 * 1024;
+  };
   // Each breed's look. Sizes are in voxel cells: `leg` the leg length, `torso` and `head` width, height and
   // length, `snout` the muzzle; colours index `ink` (coat, shade, cream, dark, collar, tongue, patch). `muscle`
   // bulks the shoulders and haunches out a cell, `socks` paints the paws cream.
@@ -390,6 +428,11 @@
     // Only the adopted dog wears a tag; its cached breed geometry follows the body's pose.
     const tag = createNode({ visible: false }), tags = BREEDS.map((b, i) => geometryOf(i, "tag"));
     addChild(root, tag);
+    // Private rescue companions share the same body/leg/tail batches. Tags and
+    // flight equipment are bounded batches too, not another remote Ooga/pet rig.
+    const companionTags = BREEDS.map((b, i) => batch(geometryOf(i, "tag", true), COMPANION_CAP));
+    const companionJets = batch(jet.geometry, COMPANION_CAP), companionFlames = batch(flame.geometry, COMPANION_CAP);
+    for (const node of [...companionTags, companionJets, companionFlames]) { batches.push(node); addChild(root, node); }
     const food = createNode({ geometry: BL.models.bananaGeometry(), visible: false });
     addChild(root, food);
     const layouts = BREEDS.map(layoutOf);
@@ -411,12 +454,21 @@
     // air), how long a walking dog has stood at a wall, and whether each dog was drawn this frame.
     const lag = new Float32Array(DOG_CAP), stuck = new Float32Array(DOG_CAP), drawnAt = new Uint8Array(DOG_CAP);
     // The homes, and the stray at each (-1 while free).
-    const homes = strays.homes, homeCount = homes.length / 3, homeDog = new Int16Array(homeCount).fill(-1);
+    const homes = strays.homes, homeCount = homes.length / 3, homeDog = new Int16Array(STRAY_CAP).fill(-1);
     const flyOf = new Int16Array(FLY_PILES);
+    // Shared rows keep the same batched renderer and animation, but never run
+    // local stray AI or decide population from a viewer's quality tier.
+    let sharedMode = store.shared === 1, sharedReceiver = null, sharedFrame = null, disposed = false;
+    const sharedBirth = new Float64Array(STRAY_CAP), sharedSeen = new Uint8Array(STRAY_CAP), sharedPiles = new Float64Array(POOP_CAP);
+    const sharedX = new Float32Array(DOG_CAP), sharedY = new Float32Array(DOG_CAP), sharedZ = new Float32Array(DOG_CAP), sharedYaw = new Float32Array(DOG_CAP);
+    const sharedMood = [ROAM, SNIFF, REST, DOZE, PLOP];
+    const companionRows = new Array(COMPANION_CAP).fill(null), companionLife = new Float32Array(COMPANION_CAP);
+    const companionSeen = new Uint8Array(COMPANION_CAP);
+    let companionFence = null, companionContext = null, companionText = null, companionKnown = new Map();
     // `changes` counts the piles dropped and scooped, for the saving.
     let poopCount = 0, stepCooldown = 0, version = 0, changes = 0, held = false, here = CHORA, frame = 0;
     let strayCount = 0, strayDue = STRAY_RESPAWN, strayBorn = 0, homeNext = 0;
-    let drawnCount = 0, picksShown = 0, poopsDrawn = 0, flyCount = 0, redraw = true, poopX = 0, poopY = 0, poopZ = 0;
+    let drawnCount = 0, pickCount = 0, picksShown = 0, poopsDrawn = 0, flyCount = 0, redraw = true, poopX = 0, poopY = 0, poopZ = 0;
     // The own dog's slot (-1 for none), where its Ooga was last frame, whether its head is up to an Ooga above it,
     // the ground it is landing on, and the next spark under its jetpack.
     let own = -1, ownX = 0, ownY = 0, ownZ = 0, lookUp = false, landX = 0, landY = 0, landZ = 0, spark = 0;
@@ -425,18 +477,18 @@
     const cursor = new Int32Array(BREEDS.length * 2);
     // Pick targets, made once a visit: one for each dog drawn, handed to whichever dog is drawn in its turn each frame,
     // and one a poop, each shown only while in use and in view.
-    const dogPicks = [], pickOwners = [], poopPicks = [];
-    for (let k = 0; k < DRAWN_CAP; k++) {
+    const dogPicks = [], pickOwners = [], poopPicks = [], poopOwners = [];
+    for (let k = 0; k < DRAWN_CAP - COMPANION_CAP; k++) {
       // Match Ooga priority so the nearer body wins when their click areas overlap.
-      const node = createNode({ geometry: bodies[0].geometry, visible: false }), owner = { kind: "dog", dog: -1, weaponType: "none", priority: 1 };
+      const node = createNode({ geometry: bodies[0].geometry, visible: false }), owner = { kind: "dog", dog: -1, sharedHome: -1, sharedBirth: 0, weaponType: "none", priority: 1 };
       addTarget(node, owner);
       dogPicks.push(node);
       pickOwners.push(owner);
     }
     for (let i = 0; i < POOP_CAP; i++) {
-      const node = createNode({ geometry: pickGeometry, visible: false });
-      addTarget(node, { kind: "poop", poop: i, weaponType: "none" }, { radius: 0.22 });
-      poopPicks.push(node);
+      const node = createNode({ geometry: pickGeometry, visible: false }), owner = { kind: "poop", poop: i, sharedPile: 0, weaponType: "none" };
+      addTarget(node, owner, { radius: 0.22 });
+      poopPicks.push(node); poopOwners.push(owner);
     }
     // The floor under dog i, looked up at its own height (a step up at most), never its Ooga's.
     const floorOf = (i, feet = py[i]) => {
@@ -448,7 +500,7 @@
       py[i] = floorOf(i, feet);
     };
     const freeSlot = () => {
-      for (let i = 0; i < DOG_CAP; i++) if (state[i] === FREE) return i;
+      for (let i = 0; i < LOCAL_DOG_CAP; i++) if (state[i] === FREE) return i;
       return -1;
     };
     const spot = (k, axis) => yard.spots[k * 3 + axis];
@@ -520,8 +572,8 @@
       return i;
     };
     const strayWanted = () => Math.min(homeCount, STRAY_TIER[strays.renderer.quality]);
-    for (let n = strayWanted(); strayCount < n && strayIn(true) >= 0;);
-    poopCount = Math.min(POOP_CAP, store.poops.length / 3);
+    if (!sharedMode) for (let n = strayWanted(); strayCount < n && strayIn(true) >= 0;);
+    poopCount = sharedMode ? 0 : Math.min(POOP_CAP, store.poops.length / 3);
     for (let k = 0; k < poopCount * 3; k++) poopAt[k] = store.poops[k];
     for (let k = 0; k < POOP_CAP; k++) flyPhase[k] = Math.random() * 6.28;
     version++;
@@ -530,6 +582,7 @@
     const placePoops = () => {
       for (let k = 0; k < poopCount; k++) {
         const node = poopPicks[k];
+        poopOwners[k].sharedPile = sharedMode ? sharedPiles[k] : 0;
         node.position.x = poopAt[k * 3]; node.position.y = poopAt[k * 3 + 1] + 0.08; node.position.z = poopAt[k * 3 + 2];
         node.visible = true;
         updateWorld(node);
@@ -558,13 +611,14 @@
       poopX = cam.x; poopY = cam.y; poopZ = cam.z;
     };
     const dropPoop = (x, y, z) => {
+      if (sharedMode) return; // The host owns creation; no local pile or durable cache may compete.
       if (poopCount === POOP_CAP) poopAt.copyWithin(0, 3);
       else poopCount++;
       poopAt[poopCount * 3 - 3] = x; poopAt[poopCount * 3 - 2] = y; poopAt[poopCount * 3 - 1] = z;
       version++; changes++;
     };
     const scoop = (k) => {
-      if (k >= poopCount) return false;
+      if (sharedMode || k < 0 || k >= poopCount) return false;
       const x = poopAt[k * 3], y = poopAt[k * 3 + 1], z = poopAt[k * 3 + 2];
       poopAt.copyWithin(k * 3, k * 3 + 3, poopCount * 3);
       poopCount--;
@@ -576,6 +630,7 @@
     };
     // The piles back into `store`, rounded to the centimetre, for saving.
     const writeStore = () => {
+      if (sharedMode) { store.poops.length = 0; store.scooped = 0; return; }
       store.poops.length = poopCount * 3;
       for (let k = 0; k < poopCount * 3; k++) store.poops[k] = Math.round(poopAt[k] * 100) / 100;
     };
@@ -583,6 +638,7 @@
     const feed = (i) => {
       if (!entries[i] || !owners[i]) return false;
       const e = entries[i];
+      if (e.shared) { hud.toast("Shared feeding is not connected yet."); return false; }
       if (e.hunger < 0.15) {
         wagT[i] = 2;
         hud.toast(`${e.name} is full. Woof!`);
@@ -629,6 +685,7 @@
     // The own Ooga `cave` adopts `entry`'s dog: the stray the adoption was opened on, taken in while it is still out
     // there and of the breed chosen, or else, in the yard, a waiting puppy of the breed, or else a new one at its side.
     const adopt = (cave, entry, stray = -1) => {
+      if (sharedMode) return false; // Adoption must first be acknowledged by the host.
       setOwn(null, null);
       let i = stray >= 0 && state[stray] === STRAY && breedOf[stray] === entry.breed ? stray : -1;
       if (i < 0 && here === YARD) for (let k = 0; k < DOG_CAP; k++) if (state[k] === KENNEL && breedOf[k] === entry.breed) { i = k; break; }
@@ -652,7 +709,7 @@
       if (py[i] > floorOf(i) + 0.05) state[i] = FREE;
       onRelease(e);
     };
-    const releaseOwn = () => { if (own < 0) return false; giveUp(own, false); return true; };
+    const releaseOwn = () => { if (own < 0 || entries[own]?.shared) return false; giveUp(own, false); return true; };
     const turn = (i, heading, k) => {
       let t = heading - yaw[i];
       t -= Math.round(t / (Math.PI * 2)) * Math.PI * 2;
@@ -732,8 +789,8 @@
       const rising = powered || p.y > ownY + 0.0001;
       ownX = p.x; ownY = p.y; ownZ = p.z; lookUp = false;
       if (state[i] === NAP) state[i] = FOLLOW;
-      e.hunger = hungerAfter(e.hunger, dt);
-      if (e.hunger >= 1 && (starve[i] += dt) >= STARVE_SECONDS) { giveUp(i); return; }
+      if (!e.shared) e.hunger = hungerAfter(e.hunger, dt);
+      if (!e.shared && e.hunger >= 1 && (starve[i] += dt) >= STARVE_SECONDS) { giveUp(i); return; }
       const up = here === CHORA && airborne(cave, p, feet), across = side[i] < 0 ? -FLY_SIDE : FLY_SIDE, tx = p.x + ch * across, tz = p.z - sh * across;
       if (moved && !up) {
         if (state[i] === EAT) mealQueued = true;
@@ -854,7 +911,7 @@
         else if ((stuck[i] += dt) > 0.4 && d > LEFT_BEHIND) beside(i, p, feet, h);
       } else stuck[i] = 0;
       if (step === ARRIVED && speed[i] < 0.2) turn(i, h, dt * 3);
-      if (!hungry && here === CHORA && (poopTimer[i] -= dt) <= 0 && speed[i] < 0.6) {
+      if (!e.shared && !hungry && here === CHORA && (poopTimer[i] -= dt) <= 0 && speed[i] < 0.6) {
         state[i] = SQUAT; timer[i] = SQUAT_SECONDS;
       }
     };
@@ -964,12 +1021,13 @@
       thinkOwn(i, dt);
     };
     // Whether dog i is in the visitor's space and drawn this frame.
-    const shown = (i) => state[i] !== FREE && state[i] !== NAP && (space[i] === WITH || space[i] === here);
+    const shown = (i) => state[i] !== FREE && (state[i] !== NAP || i >= LOCAL_DOG_CAP) && (space[i] === WITH || space[i] === here);
     // Legs swing in diagonal pairs while walking; sitting folds the hind legs, napping lays all four flat, flying
     // stretches them fore and aft under the jetpack. `near` is whether its shadow is worth drawing.
     const draw = (i, elapsed, near, dt) => {
       const b = breedOf[i], L = layouts[b], s = (spotOf[i] >= 0 || state[i] === HOME ? 0.88 : state[i] === STRAY ? 0.94 : 1) * (0.2 + 0.8 * grow[i]);
-      const st = state[i] === STRAY ? MOOD_POSE[mood[i]] : state[i], hunger = entries[i] ? entries[i].hunger : 0, aloft = st === FLY || st === LAND, powered = st === FLY || st === LAND && landingHover;
+      const remote = i >= LOCAL_DOG_CAP, hover = !remote && landingHover;
+      const st = state[i] === STRAY ? MOOD_POSE[mood[i]] : state[i], hunger = entries[i] ? entries[i].hunger : 0, aloft = st === FLY || st === LAND, powered = st === FLY || st === LAND && hover;
       let pitch = 0, lift = 0, front = 0, hind = 0;
       const walk = aloft ? 0 : Math.min(1, speed[i] / 1.4), swing = Math.sin(phase[i]) * 0.65 * walk;
       let y = py[i] + Math.abs(Math.cos(phase[i])) * 0.018 * walk;
@@ -978,7 +1036,7 @@
       else if (st === EAT && (i !== own || timer[i] < EAT_SECONDS - FOOD_DROP_SECONDS)) { pitch = 0.32 + Math.sin(elapsed * 14) * 0.05; front = -0.32; hind = -0.32; }
       else if (st === SQUAT) { pitch = -0.22; front = 0.22; hind = -0.75; lift = -0.035; }
       else if (st === KENNEL && speed[i] < 0.05 && (i & 1)) { pitch = -0.42; front = 0.42; hind = -1.25; y += L.leg * U * 0.1; }
-      else if (st === LAND && !landingHover) { front = -0.2; hind = 0.2; }
+      else if (st === LAND && !hover) { front = -0.2; hind = 0.2; }
       else if (aloft) { pitch = Math.sin(phase[i]) * 0.04; front = -1.05; hind = 1.1; y += Math.sin(elapsed * 3 + i) * 0.03; }
       else if (i === own && lookUp && speed[i] < 0.05) pitch = -0.3;
       y += lift * s;
@@ -1013,6 +1071,19 @@
       writeInstance(tails[k].instanceData, c * 20, yaw[i] + wag, pitch + droop, s,
         x0 + s * (sy * sp * ty + sy * cp * tz), y + s * (cp * ty - sp * tz), z0 + s * (cy * sp * ty + cy * cp * tz));
       cursor[k] = c + 1;
+      drawnCount++;
+      if (remote) {
+        const node = companionTags[b];
+        writeInstance(node.instanceData, node.instanceCount++ * 20, yaw[i], pitch, s, x0, y, z0);
+        if (aloft) {
+          const top = (L.top + 1) * U, mid = (L.back + L.front) * U * 0.5, js = JET_SCALE * s;
+          const jx = x0 + s * (sy * sp * top + sy * cp * mid), jy = y + s * (cp * top - sp * mid), jz = z0 + s * (cy * sp * top + cy * cp * mid);
+          writeInstance(companionJets.instanceData, companionJets.instanceCount++ * 20, yaw[i], pitch + Math.PI / 2, js, jx, jy, jz);
+          if (powered) writeInstance(companionFlames.instanceData, companionFlames.instanceCount++ * 20, yaw[i], pitch + Math.PI / 2, js * (0.85 + Math.sin(elapsed * 40 + i) * 0.15), jx, jy, jz);
+        }
+        // Other people's dogs are presentation, never a local adoption/feed pick.
+        return;
+      }
       if (i === own) {
         tag.geometry = tags[b]; tag.visible = true;
         tag.position.x = x0; tag.position.y = y; tag.position.z = z0;
@@ -1037,8 +1108,12 @@
         jet.scale.x = jet.scale.y = jet.scale.z = js;
         flame.scale.y = 0.7 + Math.sin(elapsed * 40 + i) * 0.3;
       }
-      const pick = dogPicks[drawnCount];
-      pickOwners[drawnCount++].dog = i;
+      const pick = dogPicks[pickCount];
+      const owner = pickOwners[pickCount++]; owner.dog = i;
+      // Capture the displayed identity; a later snapshot can reuse the pool slot
+      // before the next draw. Commands must keep this identity from the click.
+      owner.sharedHome = sharedMode && state[i] === STRAY ? homeOf[i] : -1;
+      owner.sharedBirth = owner.sharedHome >= 0 ? sharedBirth[owner.sharedHome] : 0;
       // Reuse the drawn body's mesh and pose: a small fixed sphere misses the head and longer breeds.
       pick.geometry = bodies[b].geometry;
       pick.position.x = x0; pick.position.y = y; pick.position.z = z0;
@@ -1047,22 +1122,168 @@
       pick.visible = true;
       updateWorld(pick);
     };
+    const sameCompanion = (a, b) => a.accountId === b.accountId && a.generation === b.generation
+      && a.bodyId === b.bodyId && a.zone === b.zone && a.dog.id === b.dog.id && a.dog.name === b.dog.name && a.dog.breed === b.dog.breed;
+    const dropCompanion = k => {
+      const i = LOCAL_DOG_CAP + k;
+      companionRows[k] = null; companionLife[k] = 0; state[i] = FREE; drawnAt[i] = 0;
+      owners[i] = entries[i] = tagged[i] = null; speed[i] = phase[i] = 0;
+    };
+    const clearCompanions = () => {
+      let had = false;
+      for (let k = 0; k < COMPANION_CAP; k++) { had ||= !!companionRows[k]; dropCompanion(k); }
+      companionContext = companionText = null; companionKnown.clear();
+      // Bodies share batches, so hide the old draw until the next update rebuilds
+      // it. No release/disconnect may leave a private dog in a retained scene.
+      if (had) {
+        for (const node of bodies) { node.visible = false; node.instanceCount = 0; }
+        for (const node of legs) { node.visible = false; node.instanceCount = 0; }
+        for (const node of tails) { node.visible = false; node.instanceCount = 0; }
+        for (const node of companionTags) { node.visible = false; node.instanceCount = 0; }
+        companionJets.visible = companionFlames.visible = false;
+        companionJets.instanceCount = companionFlames.instanceCount = 0;
+      }
+      // Keep the scalar watermark, not private rows, to fence delayed callbacks.
+    };
+    const acceptCompanions = (frame, context) => {
+      if (disposed || !validateCompanions(frame, context)
+        || sharedFrame && (frame.world !== sharedFrame.world || frame.epoch !== sharedFrame.epoch || frame.rescueRevision < sharedFrame.revision)) return false;
+      const before = companionFence, sameWorld = before?.world === frame.world;
+      if (sameWorld && (frame.epoch < before.epoch || frame.at < before.at
+        || frame.epoch === before.epoch && (frame.revision < before.revision || frame.rescueRevision < before.rescueRevision))) return false;
+      const sameFence = sameWorld && frame.epoch === before.epoch && frame.revision === before.revision && frame.rescueRevision === before.rescueRevision;
+      const text = JSON.stringify(frame), contextText = JSON.stringify([context.world, context.accountId, context.generation, context.bodyId, context.zone]);
+      if (sameFence && frame.at === before.at) return text === companionText && contextText === companionContext;
+      // A complete pose frame may omit an idle/expired owner. Remember identities
+      // for this roster fence so a later packet cannot change that owner's dog.
+      const known = sameFence ? new Map(companionKnown) : new Map();
+      for (const row of frame.companions) {
+        const previous = companionKnown.get(row.accountId);
+        if (sameWorld && frame.epoch === before.epoch && previous) {
+          const same = sameCompanion(previous, row);
+          if (sameFence && !same) return false;
+          // A missed travel/reconnect can reset the relay's sequence while the
+          // owner returns with the same body and dog. Only a newer host revision
+          // and strictly newer sample time can authorize that fresh stream.
+          const freshStream = frame.revision > before.revision && row.at > previous.at;
+          if (same && (row.at < previous.at || !freshStream && (row.pose.sequence < previous.pose.sequence
+            || row.pose.sequence === previous.pose.sequence && (row.at !== previous.at || JSON.stringify(row.pose) !== JSON.stringify(previous.pose))))) return false;
+        }
+        known.set(row.accountId, row);
+      }
+      if (known.size > COMPANION_CAP) return false;
+      // Copy at the boundary; caller-owned objects never reach animation arrays.
+      const accepted = JSON.parse(text);
+      for (const row of accepted.companions) known.set(row.accountId, row);
+      const reset = !sameWorld || before.epoch !== frame.epoch || companionContext !== contextText;
+      companionSeen.fill(0);
+      for (let k = 0; k < COMPANION_CAP; k++) {
+        const row = companionRows[k];
+        if (row && (reset || !accepted.companions.some(next => next.accountId !== context.accountId && sameCompanion(row, next)))) dropCompanion(k);
+      }
+      for (const row of accepted.companions) {
+        if (row.accountId === context.accountId || own >= 0 && entries[own]?.id === row.dog.id) continue;
+        let k = companionRows.findIndex(previous => previous && sameCompanion(previous, row));
+        const fresh = k < 0 || row.pose.sequence <= companionRows[k].pose.sequence && row.at > companionRows[k].at;
+        if (k < 0) k = companionRows.indexOf(null);
+        const i = LOCAL_DOG_CAP + k, p = row.pose;
+        const aloft = p.activity === "fly" || p.activity === "land";
+        const gap = Math.hypot(p.x - px[i], p.y - py[i], p.z - pz[i]);
+        if (fresh || gap > 4 || Math.abs(p.y - py[i]) > 0.5
+          || !(aloft ? flyClear(px[i], pz[i], p.x, p.z, py[i]) : strays.clearSegment(px[i], pz[i], p.x, p.z, py[i]))) {
+          px[i] = p.x; py[i] = p.y; pz[i] = p.z; yaw[i] = p.yaw; speed[i] = phase[i] = 0;
+        }
+        companionRows[k] = row; companionSeen[k] = 1; companionLife[k] = (COMPANION_AGE - (frame.at - row.at)) / 1000;
+        state[i] = COMPANION_POSE[p.activity]; space[i] = WITH; breedOf[i] = row.dog.breed; grow[i] = 1;
+        spotOf[i] = homeOf[i] = -1; owners[i] = entries[i] = tagged[i] = null;
+        sharedX[i] = p.x; sharedY[i] = p.y; sharedZ[i] = p.z; sharedYaw[i] = p.yaw;
+      }
+      for (let k = 0; k < COMPANION_CAP; k++) if (!companionSeen[k]) dropCompanion(k);
+      companionKnown = known; companionText = text; companionContext = contextText;
+      companionFence = { world: frame.world, epoch: frame.epoch, revision: frame.revision, rescueRevision: frame.rescueRevision, at: frame.at };
+      return true;
+    };
+    // Called by the authenticated adapter at its bounded sending cadence. This
+    // pose uses the local dog's existing walking/crew flight solver, not an owner
+    // position guessed from remote-player or contributor-pet presentation.
+    const companionPose = sequence => {
+      if (disposed || own < 0 || !BL.rescueShared?.integer(sequence) || !sequence || !awake(owners[own])) return null;
+      const activity = STATE_NAMES[state[own]];
+      if (!Object.hasOwn(COMPANION_POSE, activity)) return null;
+      const heading = yaw[own] - Math.round(yaw[own] / (Math.PI * 2)) * Math.PI * 2;
+      return { sequence, x: px[own], y: py[own], z: pz[own], yaw: heading, activity };
+    };
+    // Called on accepted transport events, never in the render loop. The full
+    // frame is checked before any pool, picker, store or receiver state changes.
+    const acceptShared = frame => {
+      if (disposed || !BL.rescueShared?.validate(frame)) return false;
+      let other = 0;
+      for (let i = 0; i < LOCAL_DOG_CAP; i++) if (state[i] !== FREE && state[i] !== STRAY) other++;
+      if (other + frame.dogs.length > LOCAL_DOG_CAP) return false;
+      const receiver = sharedReceiver || BL.rescueShared.create(frame.world);
+      if (!receiver.accept(frame)) return false;
+      if (receiver.current === sharedFrame) return true;
+      if (!sharedMode) {
+        for (let i = 0; i < DOG_CAP; i++) if (state[i] === STRAY) { unstray(i); state[i] = FREE; }
+        sharedMode = true;
+      }
+      sharedReceiver = receiver; sharedFrame = receiver.current; sharedSeen.fill(0);
+      if (companionFence && (companionFence.world !== sharedFrame.world || companionFence.epoch !== sharedFrame.epoch
+        || companionFence.rescueRevision < sharedFrame.revision)) clearCompanions();
+      for (const d of sharedFrame.dogs) sharedSeen[d[0]] = 1;
+      for (let h = 0; h < STRAY_CAP; h++) {
+        const i = homeDog[h];
+        if (i >= 0 && !sharedSeen[h]) { unstray(i); state[i] = FREE; sharedBirth[h] = 0; }
+      }
+      for (const d of sharedFrame.dogs) {
+        const h = d[0]; let i = homeDog[h], fresh = i < 0 || sharedBirth[h] !== d[1];
+        if (i < 0) { i = freeSlot(); homeDog[h] = i; strayCount++; }
+        const x = d[4] / 100, y = d[5] / 100, z = d[6] / 100;
+        const gap = Math.hypot(x - px[i], y - py[i], z - pz[i]);
+        state[i] = STRAY; space[i] = CHORA; homeOf[i] = h; sharedBirth[h] = d[1];
+        breedOf[i] = d[2]; mood[i] = sharedMood[d[3]]; owners[i] = entries[i] = tagged[i] = null;
+        spotOf[i] = -1; lag[i] = stuck[i] = 0;
+        sharedX[i] = x; sharedY[i] = y; sharedZ[i] = z; sharedYaw[i] = d[7] / 1000;
+        // A missed turn must not blend a dog through a wall or another floor.
+        if (fresh || gap > 4 || Math.abs(y - py[i]) > 0.5 || !strays.clearSegment(px[i], pz[i], x, z, py[i])) {
+          px[i] = x; py[i] = y; pz[i] = z; yaw[i] = sharedYaw[i]; grow[i] = 0; speed[i] = 0;
+        }
+      }
+      poopCount = sharedFrame.piles.length;
+      for (let k = 0; k < poopCount; k++) {
+        const p = sharedFrame.piles[k]; sharedPiles[k] = p[0];
+        poopAt[k * 3] = p[1] / 100; poopAt[k * 3 + 1] = p[2] / 100; poopAt[k * 3 + 2] = p[3] / 100;
+      }
+      sharedPiles.fill(0, poopCount); store.shared = 1; store.poops.length = 0; store.scooped = 0;
+      version++; redraw = true; return true;
+    };
+    const animateShared = (i, dt) => {
+      const t = Math.min(1, dt * 8), dx = (sharedX[i] - px[i]) * t, dz = (sharedZ[i] - pz[i]) * t;
+      px[i] += dx; py[i] += (sharedY[i] - py[i]) * t; pz[i] += dz;
+      turn(i, sharedYaw[i], dt * 8);
+      speed[i] = dt > 0 ? Math.hypot(dx, dz) / dt : 0;
+      phase[i] += speed[i] * dt * 11; grow[i] = Math.min(1, grow[i] + dt * 2.5);
+    };
     // `day` is DSB's daylight, 1 at noon: the strays sleep while it is low. `space` is where the visitor stands: CHORA,
     // YARD or ROOM.
     const update = (dt, elapsed, day, at) => {
+      if (disposed) return;
       if (at !== here) { here = at; redraw = true; }
+      for (let k = 0; k < COMPANION_CAP; k++) if (companionRows[k] && (companionLife[k] -= dt) <= 0) dropCompanion(k);
       for (let k = 0; k < spotCount; k++) if (restock[k] >= 0 && (restock[k] -= dt) < 0) stock(k);
       // The strays settle on the tier's number: one newcomer every STRAY_RESPAWN seconds while short, the extra ones
       // gone at once when the tier drops.
-      const wanted = strayWanted();
-      if (strayCount >= wanted) strayDue = STRAY_RESPAWN;
-      else if ((strayDue -= dt) <= 0) {
-        strayIn(false);
-        strayDue = STRAY_RESPAWN;
-      }
-      for (let i = DOG_CAP - 1; i >= 0 && strayCount > wanted; i--) if (state[i] === STRAY) {
-        unstray(i);
-        state[i] = FREE;
+      if (!sharedMode) {
+        const wanted = strayWanted();
+        if (strayCount >= wanted) strayDue = STRAY_RESPAWN;
+        else if ((strayDue -= dt) <= 0) {
+          strayIn(false);
+          strayDue = STRAY_RESPAWN;
+        }
+        for (let i = DOG_CAP - 1; i >= 0 && strayCount > wanted; i--) if (state[i] === STRAY) {
+          unstray(i);
+          state[i] = FREE;
+        }
       }
       const night = day < 0.2, quality = strays.renderer.quality, reach = DRAW[quality], cap = DRAWN[quality], think2 = (reach + THINK_NEAR) * (reach + THINK_NEAR);
       // The camera's facing, for the cone a dog must stand in to be drawn.
@@ -1070,7 +1291,9 @@
       const fwdX = tx / tl, fwdY = ty / tl, fwdZ = tz / tl;
       frame++;
       cursor.fill(0);
-      drawnCount = 0;
+      drawnCount = pickCount = 0;
+      for (const node of companionTags) node.instanceCount = 0;
+      companionJets.instanceCount = companionFlames.instanceCount = 0;
       food.visible = tag.visible = jet.visible = flame.visible = false;
       let straysDrawn = 0;
       for (let i = 0; i < DOG_CAP; i++) {
@@ -1080,7 +1303,8 @@
         // A stray far from the camera thinks one frame in FAR_SLICES, with the time it missed.
         // The own dog's lag measures blocked flight instead, and must survive between updates.
         if (!held) {
-          if (state[i] !== STRAY) think(i, dt, night);
+          if (i >= LOCAL_DOG_CAP || sharedMode && state[i] === STRAY) animateShared(i, dt);
+          else if (state[i] !== STRAY) think(i, dt, night);
           else if (d2 < think2) { think(i, dt, night); lag[i] = 0; }
           else if ((i + frame) % FAR_SLICES) lag[i] += dt;
           else { think(i, lag[i] + dt, night); lag[i] = 0; }
@@ -1088,10 +1312,10 @@
         if (!shown(i) || d2 > reach * reach || dx * fwdX + dy * fwdY + dz * fwdZ < VIEW_CONE * Math.sqrt(d2) - 1.5) continue;
         if (state[i] === STRAY && straysDrawn++ >= cap) continue;
         drawnAt[i] = 1;
-        draw(i, elapsed, state[i] !== STRAY || d2 < SHADOW_NEAR * SHADOW_NEAR, dt);
+        draw(i, elapsed, state[i] !== STRAY && i < LOCAL_DOG_CAP || d2 < SHADOW_NEAR * SHADOW_NEAR, dt);
       }
-      for (let k = drawnCount; k < picksShown; k++) dogPicks[k].visible = false;
-      picksShown = drawnCount;
+      for (let k = pickCount; k < picksShown; k++) dogPicks[k].visible = false;
+      picksShown = pickCount;
       for (let k = 0; k < bodies.length; k++) {
         const n = cursor[k];
         bodies[k].instanceCount = tails[k].instanceCount = n;
@@ -1102,6 +1326,10 @@
         legs[k].instanceVersion++;
         tails[k].instanceVersion++;
       }
+      for (const node of companionTags) { node.visible = node.instanceCount > 0; if (node.visible) node.instanceVersion++; }
+      companionJets.visible = companionJets.instanceCount > 0; companionFlames.visible = companionFlames.instanceCount > 0;
+      if (companionJets.visible) companionJets.instanceVersion++;
+      if (companionFlames.visible) companionFlames.instanceVersion++;
       // Sparks under the jetpack, as under the Ooga's.
       if (flame.visible && (spark -= dt) <= 0) {
         spark = 0.08;
@@ -1153,31 +1381,36 @@
       ctx.globalAlpha = 1;
     };
     const dispose = () => {
+      if (disposed) return;
+      disposed = true;
+      clearCompanions(); companionFence = null;
       for (const node of batches) removeChild(root, node);
       removeChild(root, jet);
       removeChild(root, tag);
       removeChild(root, food);
       for (const node of dogPicks) removeTarget(node);
       for (const node of poopPicks) removeTarget(node);
+      sharedReceiver = sharedFrame = null;
       state.fill(FREE);
       owners.fill(null);
       entries.fill(null);
       tagged.fill(null);
       homeDog.fill(-1);
       strayCount = 0; own = -1;
-      dogPicks.length = pickOwners.length = poopPicks.length = 0;
+      dogPicks.length = pickOwners.length = poopPicks.length = poopOwners.length = 0;
       poopCount = 0;
     };
     const stats = () => {
-      let dogs = 0, waiting = 0, hungry = 0, roaming = 0;
+      let dogs = 0, waiting = 0, hungry = 0, roaming = 0, companions = 0;
       for (let i = 0; i < DOG_CAP; i++) {
         if (state[i] === FREE) continue;
         dogs++;
+        if (i >= LOCAL_DOG_CAP) companions++;
         if (state[i] === KENNEL) waiting++;
         if (state[i] === STRAY) roaming++;
         if (state[i] === SIT) hungry++;
       }
-      return { dogs, dogsWaiting: waiting, dogsHungry: hungry, dogsDrawn: drawnCount, strays: roaming, poops: poopCount, poopsDrawn: here === CHORA ? poopsDrawn : 0, flies: here === CHORA ? flies.instanceCount : 0, dogJet: jet.visible ? 1 : 0 };
+      return { dogs, dogsWaiting: waiting, dogsHungry: hungry, dogsDrawn: drawnCount, companions, strays: roaming, poops: poopCount, poopsDrawn: here === CHORA ? poopsDrawn : 0, flies: here === CHORA ? flies.instanceCount : 0, dogJet: jet.visible ? 1 : 0 };
     };
     const debug = {
       stats,
@@ -1231,7 +1464,10 @@
       },
       get here() { return here; }
     };
-    return { update, drawOverlay, adopt, setOwn, tap, feed, feedOwn, releaseOwn, scoop, writeStore, stats, dispose, debug, get own() { return own >= 0 ? entries[own] : null; }, get changes() { return changes; } };
+    return { update, drawOverlay, adopt, setOwn, tap, feed, feedOwn, releaseOwn, scoop, writeStore, stats, dispose, debug, acceptShared, acceptCompanions, clearCompanions, companionPose,
+      sharedStray: owner => !disposed && sharedMode && owner?.kind === "dog" && owner.sharedHome >= 0 && owner.sharedBirth > 0 ? [owner.sharedHome, owner.sharedBirth] : null,
+      sharedPile: owner => !disposed && sharedMode && owner?.kind === "poop" && owner.sharedPile > 0 ? owner.sharedPile : null,
+      get shared() { return sharedMode; }, get sharedSource() { return sharedReceiver; }, get own() { return own >= 0 ? entries[own] : null; }, get changes() { return changes; } };
   };
-  BL.rescueDogs = { create, homesAcross, DOG_CAP, DRAWN_CAP, SHADOW_CAP, SHADOW_NEAR, POOP_CAP, FLY_PILES, FLY_SIDE, FLY_UP, STRAY_CAP, STRAY_TIER, DRAW, DRAWN, POOP_DRAW, POOPS_DRAWN, HOME_GAP, NEAR_HOMES, HUNGER_SECONDS, HUNGRY, STARVE_SECONDS, BREEDS, FACES, FACE_INK, CHORA, YARD, ROOM, hungerAfter, breedFor, nameFor };
+  BL.rescueDogs = { create, homesAcross, DOG_CAP, DRAWN_CAP, COMPANION_CAP, SHADOW_CAP, SHADOW_NEAR, POOP_CAP, FLY_PILES, FLY_SIDE, FLY_UP, STRAY_CAP, STRAY_TIER, DRAW, DRAWN, POOP_DRAW, POOPS_DRAWN, HOME_GAP, NEAR_HOMES, HUNGER_SECONDS, HUNGRY, STARVE_SECONDS, BREEDS, FACES, FACE_INK, CHORA, YARD, ROOM, hungerAfter, breedFor, nameFor, validateCompanions };
 })();
