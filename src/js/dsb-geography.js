@@ -74,11 +74,11 @@
           // switchback when it crosses the front/rear coastal treatment boundary.
           if(!(x<0&&z<-28)) h=Math.min(h,0.4+distance*.46+Math.max(0,distance-12)**2*.12);
         }
-        // Extend only offshore vertices of the existing furnished beach. Dry land is byte-identical.
+        // Grade the seabed beside eligible coastline sectors; preserve every dry-land vertex.
         if(h===-5&&!inside(x,z)){
           C.nearest(coast,x,z,shore);
-          const sand=Math.min(shore.beach,C.beach(x,z));
-          if(sand>0&&shore.distance<26)h=Math.max(-5,h+(Math.max(-5,C.shelfHeight(shore.distance))-h)*sand);
+          const access=C.wade(coast,x,z,shore);
+          if(access>0&&shore.distance<26)h=Math.max(-5,h+(Math.max(-5,C.shelfHeight(shore.distance))-h)*access);
         }
         heights[j*N+i]=h;geo.verts.push(x,h,z);
       } }
@@ -256,7 +256,7 @@
           const escape=h>last+.00001;
           for(let k=0;k<5;k++){
             const px=x+(k===1?r:k===2?-r:0),pz=z+(k===3?r:k===4?-r:0);
-            const limit=C.beach(px,pz)>.98?C.maxDepth(actor):px<-23&&pz>29&&pz<62?0:.22;
+            const limit=C.wade(coast,px,pz)>.98?C.maxDepth(actor):.22;
             if(C.LEVEL-heightAt(px,pz)>limit&&!escape)return false;
           }
         }

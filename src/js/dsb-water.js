@@ -72,7 +72,10 @@
     for(let z=0;z<B;z++)for(let x=0;x<B;x++){
       const i=(z*B+x)*4,d=depthAt(((x+.5)/B-.5)*SIZE,((z+.5)/B-.5)*SIZE);
       depths[i]=Math.round(d/30*255);
-      depths[i+1]=Math.round(BL.dsbCoast.beach(((x+.5)/B-.5)*SIZE,((z+.5)/B-.5)*SIZE)*255);depths[i+3]=255;
+      const sx=((x+.5)/B-.5)*SIZE,sz=((z+.5)/B-.5)*SIZE;
+      // Preserve the stronger original Chora sand treatment; give newly wadeable
+      // rocky shores softer shoaling foam without painting them as new beaches.
+      depths[i+1]=Math.round(Math.max(BL.dsbCoast.beach(sx,sz),.5*BL.dsbCoast.wade(land.coast,sx,sz))*255);depths[i+3]=255;
     }
     // A static mean surface retains the exact approved waterline. FFT height
     // drives optical normals/caustics, without flooding paths or moving piers.
@@ -90,11 +93,17 @@
       const at=geometry.verts.length/3;for(const p of clipped)geometry.verts.push(p[0],LEVEL,p[1]);
       for(let i=1;i<clipped.length-1;i++)geometry.faces.push({i:[at,at+i,at+i+1],color,water:"aegean"});
     };
+    const nearShore={};
     for(let z=0;z<G;z++)for(let x=0;x<G;x++){
       const x0=(x/G-.5)*SIZE,z0=(z/G-.5)*SIZE,cell=SIZE/G;
       // Small faces at the playable sand belt let Canvas painter sorting resolve a wading body and the wet edge.
       // This is static tessellation of the SAME mean surface; FFT, spectrum and displacement policy do not change.
-      const cuts=x0<56&&x0+cell>-6&&z0<99&&z0+cell>60?12:1,step=cell/cuts;
+      const originalBeach=x0<56&&x0+cell>-6&&z0<99&&z0+cell>60;
+      const mx=x0+cell/2,mz=z0+cell/2;
+      // On Canvas, subdivide only the newly reachable wet edges. Clip those
+      // triangles against the real bed, but keep offshore faces inexpensive.
+      const accessible=!originalBeach&&BL.dsbCoast.wade(land.coast,mx,mz,nearShore)>.05&&nearShore.distance<cell*1.7;
+      const cuts=originalBeach?12:accessible?6:1,step=cell/cuts;
       for(let j=0;j<cuts;j++)for(let i=0;i<cuts;i++){
         const px=x0+i*step,pz=z0+j*step,at=geometry.verts.length/3,depth=depthAt(px+step/2,pz+step/2),k=Math.min(1,depth/12);
         const color=[Math.round(45-31*k),Math.round(165-91*k),Math.round(175-58*k)];
