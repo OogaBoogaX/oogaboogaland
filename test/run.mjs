@@ -30052,19 +30052,32 @@ const studioVoiceLifecycleProof = async () => {
   const refreshIce = relay.defer("ice"), refreshTimer = [...relay.timers].find(([, task]) => task.delay === 60000);
   let refreshing;
   if (refreshTimer) { relay.timers.delete(refreshTimer[0]); refreshing = refreshTimer[1].fn(); }
-  // Recovery closes the old SFU sessions before it asks for fresh credentials.
-  await drain(); refreshIce(ice("fresh")); await refreshing; await drain();
+  // Keep the existing call while minting credentials; only the subsequent rebuild interrupts it.
+  await drain(); const turnPrefetched = relay.peers.length === 2 && relay.peers.every(pc => pc.connectionState === "connected");
+  refreshIce(ice("fresh")); await refreshing; await drain();
   const turnRefreshed = !!refreshTimer && relay.peers.length === 4 && relay.peers.slice(0, 2).every(pc => pc.connectionState === "closed")
     && relay.peers.slice(2).every(pc => hasRelay(pc, "fresh")) && relay.voice.stats.enabled;
-  relay.voice.stop(); await drain();
-  const turnStopped = relay.timers.size === 0;
+  relay.voice.setPeers([71],[1]); await drain();
+  relay.peers.findLast(pc => pc.connectionState === "connected" && pc.handlers.has("track")).handlers.get("track")({transceiver:{mid:"71"},track:{id:71,stop(){}}});
+  const renewal = relay.voice.inspect().relayRenewals.at(-1);
+  const turnMeasured = renewal.status === "rebuilt" && renewal.credentialsMs >= 0 && renewal.rebuildMs >= 0 && renewal.firstTrackMs >= 0
+    && !JSON.stringify(renewal).includes("fixture") && !JSON.stringify(renewal).includes("turn.cloudflare");
+  const failedIce = relay.defer("ice"), failedTimer = [...relay.timers].find(([, task]) => task.delay === 60000);
+  relay.timers.delete(failedTimer[0]); const failedRefresh = failedTimer[1].fn(); await drain(); failedIce({}); await failedRefresh;
+  const turnFailureKeepsCall = relay.peers.length === 4 && relay.peers.slice(2).every(pc => pc.connectionState === "connected")
+    && relay.voice.inspect().relayRenewals.at(-1).status === "credentials-unavailable";
+  // A stopped call must not return when a pending prefetch eventually resolves.
+  const stopIce = relay.defer("ice"), stopTimer = [...relay.timers].find(([, task]) => task.delay === 60000);
+  relay.timers.delete(stopTimer[0]); const stoppingRefresh = stopTimer[1].fn(); await drain();
+  relay.voice.stop(); stopIce(ice("too-late")); await stoppingRefresh; await drain();
+  const turnStopped = relay.timers.size === 0 && relay.peers.length === 4 && turnFailureKeepsCall && !relay.voice.stats.enabled;
   const cancelled = fixture(true), lateIce = cancelled.defer("ice"), cancelledJoin = cancelled.voice.enable();
   await drain();
   const iceWasPending = cancelled.calls.some(c => c.op === "ice");
   cancelled.voice.dropMic();
   lateIce(ice("stale")); await cancelledJoin; await drain();
   const turnCancelled = iceWasPending && cancelled.timers.size === 0 && cancelled.peers.length === 0;
-  return {turnShared,turnRefreshed,turnStopped,turnCancelled,publicationReplaced,leaveStopsAudio,latePlaybackStaysOff,leaveCancelsRestart,receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied,replaced,leaving,restarting].every(f=>f.timers.size===0)};
+  return {turnShared,turnRefreshed,turnPrefetched,turnMeasured,turnStopped,turnCancelled,publicationReplaced,leaveStopsAudio,latePlaybackStaysOff,leaveCancelsRestart,receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied,replaced,leaving,restarting].every(f=>f.timers.size===0)};
 };
 
 // The real controller runs against a bounded DOM/media double: no permission prompts or SFU.

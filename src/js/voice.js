@@ -352,30 +352,45 @@
   };
 
   // Keep the direct candidates. A configured Worker can add a short-lived TLS relay to both peers.
-  let relayConfig = ICE, relayRequest = null, relayTimer = 0;
+  let relayConfig = ICE, relayRequest = null, relayTimer = 0, relayProbe = null;
+  const relayRenewals = [];
+  const scheduleRelay = (token, ttl) => {
+    window.clearTimeout(relayTimer);
+    relayTimer = window.setTimeout(() => token === lifecycle ? renewRelay(token, true) : undefined, (ttl - 60) * 1000);
+  };
   const clearRelay = () => {
     window.clearTimeout(relayTimer);
-    relayTimer = 0; relayRequest = null; relayConfig = ICE;
+    relayTimer = 0; relayRequest = null; relayConfig = ICE; relayProbe = null;
   };
-  const renewRelay = (token) => {
+  const renewRelay = (token, renewal = false) => {
     if (token !== lifecycle) return;
+    const sample = renewal ? { startedAt: Date.now(), credentialsMs: null, rebuildAt: null, rebuildMs: null, firstTrackMs: null,
+      status: "fetching", peers: desired.length, muted: stats.muted } : null;
+    if (sample) { if (relayRenewals.length === 8) relayRenewals.shift(); relayRenewals.push(sample); }
     const refresh = async () => {
       const data = await api("ice", null, token).catch(() => null);
       current(token);
       if (relayRequest !== pending) return ICE;
       const server = data?.iceServers?.[0], ttl = data?.ttl;
       if (!server || server.urls !== TURN_TLS || !server.username || !server.credential || !Number.isInteger(ttl) || ttl < 120 || ttl > 172800) {
-        if (relayConfig !== ICE) relayTimer = window.setTimeout(() => renewRelay(token), 60000);
+        if (sample) sample.status = "credentials-unavailable";
+        if (relayConfig !== ICE) relayTimer = window.setTimeout(() => renewRelay(token, true), 60000);
         return relayConfig;
       }
-      relayConfig = { ...ICE, iceServers: [...ICE.iceServers, server] };
+      const config = { ...ICE, iceServers: [...ICE.iceServers, server] };
       // setConfiguration alone does not replace an established TURN allocation. Rebuild both
-      // connections before expiry, through the ordinary recovery path that preserves the mute.
-      relayTimer = window.setTimeout(() => token === lifecycle ? restart() : undefined, (ttl - 60) * 1000);
-      return relayConfig;
+      // connections before expiry. Mint credentials while the old audio still runs, then use
+      // the ordinary recovery path (one publication per account) with its preserved mute.
+      if (sample) {
+        sample.credentialsMs = Date.now() - sample.startedAt; sample.rebuildAt = Date.now(); sample.status = "rebuilding";
+        await restart(false, { config, ttl, sample });
+        sample.rebuildMs = Date.now() - sample.rebuildAt; sample.status = stats.enabled ? "rebuilt" : "stopped";
+      } else { relayConfig = config; scheduleRelay(token, ttl); }
+      return config;
     };
-    const pending = refresh().catch(() => ICE);
+    const pending = refresh().catch(() => { if (sample) sample.status = "cancelled"; return ICE; });
     relayRequest = pending;
+    return pending;
   };
   const iceFor = (token) => {
     if (!BL.net.state.voiceTurn) return ICE;
@@ -677,6 +692,7 @@
       syncPreferences();
       for (const [id, s] of subs) {
         if (s.mid !== e.transceiver.mid) continue;
+        if (relayProbe?.token === token && relayProbe.sample.firstTrackMs === null) relayProbe.sample.firstTrackMs = Date.now() - relayProbe.sample.rebuildAt;
         // A track landing again for the same voice replaces its nodes, so it never plays twice.
         unplug(s);
         s.near = nearness(id); s.inRange = withinRange(id); hear(s, heard(id) && s.gen === wantedGen.get(id)); setLevel(s, true);
@@ -810,12 +826,16 @@
   };
   // `welcomed`: the room has just let this page in, which puts a visitor out of voice back in if they were.
   let restarting = false;
-  const restart = async (welcomed = false) => {
+  const restart = async (welcomed = false, preparedRelay = null) => {
     // A welcome during a restart is the same blip: it must not put a speaker back in as a muted listener.
     if (!stats.enabled) { if (welcomed && !restarting) resume(); return; }
     const wanted = microphoneWanted, muted = stats.muted;
     const token = ++lifecycle; micGeneration++; abortRequests();
     teardown(); stats.joining = false;
+    if (preparedRelay) {
+      relayConfig = preparedRelay.config; relayRequest = Promise.resolve(relayConfig);
+      relayProbe = { token, sample: preparedRelay.sample }; scheduleRelay(token, preparedRelay.ttl);
+    }
     restarting = true;
     try {
       cleanup = api("leave", null, token).catch(() => {});
@@ -991,7 +1011,8 @@
   // For the feed panel and debugging: whom the room wants heard, whom this page pulled, both connections, where voices play
   // and the context's state.
   const inspect = () => ({ desired: desired.slice(), pulled: [...subs.keys()], publish: pubPc ? pubPc.connectionState : "none", receive: subPc ? subPc.connectionState : "none",
-    playback: GAIN_PLAY ? "gain" : "element", context: audio ? audio.state : "none" });
+    playback: GAIN_PLAY ? "gain" : "element", context: audio ? audio.state : "none",
+    relayRenewals: relayRenewals.map(sample => ({ ...sample })) });
 
   BL.voice = { warnLeaving, hangUp, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, leave, restart, stop, setPeers, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
 })();
