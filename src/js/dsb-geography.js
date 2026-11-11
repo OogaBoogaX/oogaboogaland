@@ -257,7 +257,7 @@
           const escape=h>last+.00001;
           for(let k=0;k<5;k++){
             const px=x+(k===1?r:k===2?-r:0),pz=z+(k===3?r:k===4?-r:0);
-            const limit=C.wade(coast,px,pz,wadeScratch)>.98?C.maxDepth(actor):.22;
+            const limit=C.wade(coast,px,pz,wadeScratch)>.98?C.maxDepth(actor):px<-23&&pz>29&&pz<62?0:.22;
             if(C.LEVEL-heightAt(px,pz)>limit&&!escape)return false;
           }
         }

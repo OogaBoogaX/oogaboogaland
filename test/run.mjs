@@ -33063,7 +33063,7 @@ async function dsbIslandShorelineBrowserCheck(b) {
     snapshot.ready&&snapshot.accessible===18&&snapshot.excluded===16&&snapshot.stops===18&&!snapshot.errors.length&&snapshot.canvas[0]>0&&snapshot.canvas[1]>0&&snapshot.rippleBudget===24,
     JSON.stringify(snapshot));
 }
-const dsbIslandShorelineStep={name:"DSB shoreline accessible coasts and exclusions",why:"regression: the loaded DSB desktop and phone scene preserves shallow wading, harbor and rear Olympus",run:dsbIslandShorelineBrowserCheck};
+const dsbIslandShorelineStep={name:"DSB shoreline accessible coasts and exclusions",why:"rule: the loaded DSB desktop and phone scene preserves shallow wading, harbor and rear Olympus",run:dsbIslandShorelineBrowserCheck};
 
 const dsbIntegrationCheckpoint={name:"dsb integration checkpoint",why:"contract: global account UI, venue zones and direct return survive desktop and mobile scene transitions",run:async b=>{
   const step=()=>b.evaluate('for(let i=0;i<36;i++)BL.scenes.dsb.update(1/60,i/60)');
