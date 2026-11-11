@@ -475,7 +475,8 @@
     return true;
   };
 
-  const onMessage = (e) => {
+  const onMessage = (e, socket) => {
+    if (ws !== socket) return;
     unanswered = 0;
     if (e.data instanceof ArrayBuffer) {
       if (e.data.byteLength >= 4 && new DataView(e.data).getUint32(0, true) === 0x315a4642) { for (const fn of bfFrameSubscribers) fn(e.data); return; }
@@ -528,7 +529,7 @@
     }
     if (msg && ["body-prepare", "body-grant", "body-active", "body-live", "body-motion-ack", "body-stop"].includes(msg.t)) {
       const active = bodyReclaim.active;
-      if (bodyReclaim.message(msg) && !active && bodyReclaim.active) {
+      if (bodyReclaim.message(msg) && ws === socket && !active && bodyReclaim.active) {
         const granted = bodyReclaim.state;
         if (granted.bodyId?.startsWith("player:")) {
           if (!hostCharacter(granted)) { bodyReclaim.suspend(); return; }
@@ -633,6 +634,7 @@
       bodyMotionAt = -Infinity;
       bodyReclaim.open(state.selfId, state.connectionToken, Array.isArray(msg.features) && msg.features.includes(BL.bodyReclaim.FEATURE),
         Array.isArray(msg.features) && msg.features.some(f => typeof f === "string" && f.startsWith("host-body-reclaim-")));
+      if (ws !== socket) return;
       state.cabinets = Array.isArray(msg.features) && msg.features.includes(BL.arcadeCabinets.FEATURE);
       state.cabinetsOutdoor = Array.isArray(msg.features) && msg.features.includes(BL.arcadeCabinets.OUTDOOR_FEATURE);
       state.hockey = Array.isArray(msg.features) && msg.features.includes("hockey-v4");
@@ -648,11 +650,16 @@
       state.voiceLinks = Array.isArray(msg.features) && msg.features.includes(LINK_FEATURE);
       // A room that keeps the chalkboard sends it next (chalk-board); an older one leaves the page its own board.
       if (state.chalk && !(Array.isArray(msg.features) && msg.features.includes(BL.chalkBoard.FEATURE))) { state.chalk = null; chalkEmit("board"); }
+      if (ws !== socket) return;
       remotes.clear();
       for (const p of msg.players) upsert(p);
       setRoom("live");
+      // Account/scene subscribers may dispose or replace the connection. Its
+      // welcome must not replay state or resume voice on the replacement.
+      if (ws !== socket) return;
       const transit = transitOf(msg.transit);
       if (transit && transit.actor !== state.selfId) doorHeard(transit);
+      if (ws !== socket) return;
       // A reconnect picks up where the page is: the actor still driven and where it stands, and voice,
       // whose sessions the room forgot with the old socket.
       sendBody();
@@ -680,6 +687,7 @@
       sendHub();
       sendVisible();
       BL.voice.restart(true);
+      if (ws !== socket) return;
       if (restoredPose) poseAt = performance.now();
       else { poseAt = 0; px = NaN; gKnown = poseHasG = false; }
     } else if (msg.t === "join") {
@@ -888,21 +896,24 @@
     retryTimer = 0;
     if (stopped || ws || !state.me) return;
     setRoom("connecting");
+    if (stopped || ws || !state.me) return;
     // A tab opened in the background has no visibility change to arm this.
     if (document.hidden && !hiddenTimer) armHidden();
-    ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room?npc-authority=${NPC_MIXED_PREVIEW ? 4 : 1}${BODY_PRESENCE_PREVIEW ? "&body-presence=1" : ""}${BODY_MIGRATION_PREVIEW ? "&body-migration=1" : ""}${BODY_MOVEMENT_PREVIEW ? "&body-reclaim=2&body-motion=1&ooga-motion=1" : ""}`);
-    ws.binaryType = "arraybuffer";
-    ws.onmessage = onMessage;
-    ws.onopen = () => {
+    const socket = ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room?npc-authority=${NPC_MIXED_PREVIEW ? 4 : 1}${BODY_PRESENCE_PREVIEW ? "&body-presence=1" : ""}${BODY_MIGRATION_PREVIEW ? "&body-migration=1" : ""}${BODY_MOVEMENT_PREVIEW ? "&body-reclaim=2&body-motion=1&ooga-motion=1" : ""}`);
+    socket.binaryType = "arraybuffer";
+    socket.onmessage = e => onMessage(e, socket);
+    socket.onopen = () => {
+      if (ws !== socket) return;
       unanswered = 0;
       pingTimer = window.setInterval(() => {
+        if (ws !== socket) return;
         // A half-open socket never closes by itself for minutes, while the room has long since evicted this page.
         if (unanswered >= PING_MISSES) { close("connecting"); return; }
         unanswered++;
         send("ping");
       }, PING_MS);
     };
-    ws.onclose = () => close("connecting");
+    socket.onclose = () => { if (ws === socket) close("connecting"); };
   };
 
   // One look at the account; true when it found a backend to join.

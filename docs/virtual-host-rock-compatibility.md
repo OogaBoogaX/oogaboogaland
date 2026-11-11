@@ -175,9 +175,109 @@ including shared accessor metadata and refused host possession/remote control.
 Focused files pass 12/12, 44/44 and 6/6 respectively. No runtime policy or
 assertion threshold changed in these fixture corrections.
 
+The resulting supporting head `7d47c4557c89bdaa363e3462e3252d391908f047`
+passed [CI run 42971596097](https://github.com/OogaBoogaX/oogaboogaland/actions/runs/42971596097):
+573 unit checks, site build and all 763 Worker checks. This is the baseline for
+subsequent integration work, not a provider or live-browser pass.
+
+## Client connection ownership
+
+A source-level live-routing check reproduced a disposed welcome restarting
+voice after a synchronous room subscriber closed the connection. Socket identity
+now fences message, open, keepalive and close callbacks. Welcome processing
+stops after callbacks that dispose or replace the connection; connecting
+subscribers can also cancel before socket creation. A retired public-body frame
+cannot acknowledge on or close a replacement socket. No protocol or preview
+switch changed. The actual Room/net file passes 45 checks, including disposal,
+replacement, late callbacks and unchanged normal reconnect behavior; syntax and
+the build pass. This is an isolated source fixture, not live browser evidence.
+
+## Current full-Hub rollback
+
+A finite current-source diagnostic found a correctness failure after eight
+successful ticks and an injected storage-write failure: reconstruction rejected
+a routed Ooga against an incidental prop. The source's fixed waypoint trips
+deliberately pass through those props, but recovery had reapplied the stricter
+ordinary placement check. The failed write left durable state unchanged.
+
+Crew recovery now passes its own fixed-trip predicate to placement. Only that
+exact passive-route case omits incidental-prop clearance; finite bounds, terrain,
+NPC land, structural beds, gates, altar and mirror admission remain. Controlled
+and non-fixed bodies retain their previous policy. No actor is relocated, no
+motion or checkpoint format changes, and no persisted flag grants this policy.
+
+The real-Hub regression advances the current 110-actor world, injects a failed
+write, and proves the retry commits exactly the discarded logical step. It also
+rejects the stale frame, confirms the new projection and reconstructs through a
+fresh adapter without rewriting durable state. Logical recovery still resets
+animation as designed; live and freshly reconstructed pose bytes are not claimed
+identical. Together with placement-policy and transaction-cache checks, the
+focused run passes nine checks.
+
+One coordinated, unprofiled local Node sample measured a 44,578-byte host record,
+455.27 ms rollback recovery and 310.09 ms for a fresh adapter's pose read. Eight
+warm ticks ranged from 31.47 to 72.07 ms. This uses in-memory transactional storage,
+no controlled player bodies or Room/network delivery, and a fresh adapter in the
+same process rather than a fresh provider isolate. These are individual timings,
+not percentiles. The 250 ms recovery target remains unmet. The old 106-actor
+measurements are not a matched baseline for this 110-actor source revision.
+
 ## Rescue integration
 
 A read-only application check of #579 at
 `86ed05e29d60c660ca5800919e39d607be8c8840` passes for its complete rescue source
 and renderer-test delta against this bridge. The patch has not been applied,
 its base has not been changed, and this does not supply live rescue transport.
+
+## Operational evidence still needed
+
+The current scene already has a controlled-body adapter, independent Ooga and
+Clanker registration, and remote body presentation. These are implemented seams,
+not absent features. Their real authenticated flow remains unverified and the
+browser reclaim preview stays disabled. The deployed Worker exports only Room
+and GameHost; neither deployment configuration binds the virtual-world receiver.
+Changing that is a separate activation step, not something a green source suite
+does implicitly.
+
+Public-body acknowledgements and census reconciliation also already exist.
+Room commits retained presentation before the host acknowledges a departure;
+the browser acknowledgement only returns socket delivery credit. The runner
+drains body events and checks the host revision around the Room census before
+tick/publication. Their representative cross-runtime execution remains a gate.
+
+Before a finite provider trial, the integration needs an explicit world label
+for recovery v8, a fresh-world or migration decision, an approved private pile
+source, a named test environment and a spending limit. The trial must count
+actual host/Room RPC sessions, alarm invocations, storage rows, WebSocket input
+and active duration across both objects, including retries and cleanup. A
+checkpoint-byte total or outbound frame count is not a bill estimate. Capture
+provider resource errors and retained/peak memory with the real roster, player
+bodies and Room together; a successful local workerd request does not certify
+the provider memory limit.
+
+Source bounds make a trial finite but do not establish affordability:
+
+- The host run limit is 900 seconds, or 3,600 simulation intervals at 250 ms.
+  The receiver separately caps scans at 3,600; this is not a cap on all RPCs,
+  early notifications, storage operations or recovery work.
+- A 32 KiB NPC packet sent every interval to all 32 followers would carry
+  3,774,873,600 payload bytes over that period. This is ceiling arithmetic,
+  not observed delivery, wire overhead or rescue/body traffic.
+- At the provider's allocated-memory rate, one continuously active object for
+  900 seconds represents 115.2 GB-s; two represent 230.4 GB-s. Startup and
+  cleanup outside that interval and other account usage are additional.
+
+[Cloudflare pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/)
+was checked November 11, 2026. Paid included usage is shared account-wide;
+billable overage rounds up to its billing unit. RPC sessions and alarms count
+as requests, incoming WebSocket messages use a 20:1 billing ratio, and outgoing
+messages have no request charge. SQLite puts/deletes and alarm updates incur
+row-write accounting. Duration uses 128 MB per active object regardless of
+measured heap. Consequently neither a small finite run nor spare included usage
+can be assumed free without the account's current totals.
+
+The strict delivery target and rollback target remain 250 ms. The older saved
+delivery trace contains work after the publication pacing gate and misses that
+target; source correctness and the offline browser hand-back pass do not replace
+a new end-to-end result. No cadence relaxation, enabled preview, deployment,
+paid run, migration or checkpoint deletion is included here.

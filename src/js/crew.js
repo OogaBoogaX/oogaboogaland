@@ -7088,7 +7088,9 @@
         if (invalid || !restored || !npcRecoveryPending) bad();
         invalid = true;
         // All actors in both streams and all equipment must already exist.
-        for (const cave of crewList) if (placement(cave, crewList) !== true) bad();
+        // The source owns this movement policy. A recovered fixed trip keeps
+        // the same incidental-prop pass-through as its live waypoint walk.
+        for (const cave of crewList) if (placement(cave, crewList, fixedTrip(cave)) !== true) bad();
         npcRecoveryPending = false; invalid = false;
       };
       return {

@@ -7,8 +7,9 @@ import { buildHubWorld } from '../src/hub-world.js';
 import { createHubWorldSimulation } from '../src/hub-world-simulation.js';
 import { HUB_WORLD_CHECKPOINT_VERSION } from '../src/hub-world-recovery.js';
 import * as M from '../src/ooga-crew.js';
-import { HOST } from '../src/virtual-host.js';
+import { HOST, VirtualHost } from '../src/virtual-host.js';
 import { BODY_STORAGE } from '../src/host-body-storage.js';
+import { createCheckpointPack } from '../src/checkpoint-pack.js';
 
 const NOW = Date.UTC(2026, 10, 6, 10, 0);
 const pile = (fields) => ({ v: 2, type: 'pile', bananas: 0, at: NOW, eatPerHour: 0, revision: 1, basis: 'credits',
@@ -145,4 +146,46 @@ test('complete Hub rejects pre-bridge recovery before constructing geometry or c
   // A stale envelope needs no valid actor payload: its schema is refused first.
   const saved = { v: 7, world: config.version };
   assert.throws(() => construct(config, saved, null), /migration required/);
+});
+
+test('real fixed-route Oogas recover a failed host write without changing the committed step', async () => {
+  const config = configuration(), simulation = createHubWorldSimulation(config);
+  let saved, attempted, now = NOW, failWrite = false;
+  const storage = { async transaction(run) {
+    let pending = structuredClone(saved);
+    const result = await run({ get: async () => structuredClone(pending), put: async (_, value) => {
+      if (failWrite) {
+        failWrite = false; attempted = structuredClone(value); throw Error('injected host write failure');
+      }
+      pending = structuredClone(value);
+    } });
+    saved = pending; return result;
+  } };
+  const options = { storage, clock: () => now,
+    sessionAdapter: { stepPassive() { throw Error('this fixture has no player bodies'); } } };
+  const host = new VirtualHost({ ...options, simulation });
+  const ticket = await host.begin('recovery-test', 60000);
+  for (let i = 0; i < 8; i++) {
+    now += HOST.stepMs;
+    const tick = await host.tick(ticket, []);
+    assert.equal(tick.steps, 1);
+    assert.equal(tick.snapshot.npcs.length, config.activity.rows.length * 2);
+  }
+  const before = structuredClone(saved), oldFrame = await host.poses(ticket, { format: 'mixed-3' });
+  const logical = createCheckpointPack(Math.min(config.checkpointBytes, 64 * 1024), { intern: true }).unpack(saved.simulation.ooga);
+  assert.ok(logical.actors.some(actor => actor.walk?.[5]?.length > 0 && actor.work.phase === ''),
+    'a routed slot walk is fixed even before a work phase begins');
+  now += HOST.stepMs; failWrite = true;
+  await assert.rejects(host.tick(ticket, []), /injected host write failure/);
+  assert.deepEqual(saved, before, 'the failed attempt leaves the durable record unchanged');
+  const recovered = await host.tick(ticket, []);
+  assert.equal(recovered.steps, 1);
+  assert.deepEqual(saved, attempted, 'reconstruction commits exactly the discarded logical step, without relocation');
+  assert.equal(await host.confirmPoses(ticket, oldFrame), false);
+  const frame = await host.poses(ticket, { format: 'mixed-3' });
+  assert.equal(await host.confirmPoses(ticket, frame), true);
+  const cold = new VirtualHost({ ...options, simulation: createHubWorldSimulation(config) });
+  const restored = await cold.poses(ticket, { format: 'mixed-3' });
+  assert.equal(await cold.confirmPoses(ticket, restored), true);
+  assert.deepEqual(saved, attempted, 'new-adapter reconstruction cannot rewrite the logical checkpoint');
 });
