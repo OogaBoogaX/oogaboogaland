@@ -1,6 +1,7 @@
-// HALLOWEEN: only the herald and the room's start/discovery hooks live in the arcade's ghost arena until a hunt is
-// wanted. A shot (or a click where `tapWakes`), a follower's start request or an active host snapshot loads the hunt once. Keep the latest snapshot and one start
-// while loading; disposal makes a late completion inert, and a failed load can be retried on the herald.
+// HALLOWEEN: only the herald and the arena's channel to the server's hunt live in the arcade's ghost arena until a hunt
+// is wanted. A shot (or a click where `tapWakes`) or an active hunt from the server loads the hunt once. Keep the latest
+// state and one start while loading; disposal makes a late completion inert, and a failed load can be retried on the
+// herald.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -80,26 +81,32 @@
     };
     return { herald, used, place };
   };
-  // The arcade's ghost arena keeps its hunt in step without the island's crew frames: a stand-in for `npcSync` with the
-  // `role`, `hostId` and `extra` the hunt reads, its host sending a snapshot four times a second while someone in the
-  // arena follows (`net.sendGhostState`), a follower taking each as it comes. `update(dt)` once a frame.
+  // The arcade's ghost arena keeps its hunt on the server (worker/src/games/ghost-hunt.js): while this page stands in
+  // the arena or its hallway, signed in and offered the game, it holds a socket to the hunt (game-net.js) and follows
+  // it, `role` "follow"; anywhere else, signed out or with no backend, it is "solo" and runs its own hunt. The hunt
+  // reads each state the server sends through `extra.read` and each motion frame through `onMotion`, and tells the
+  // server what its player does with `send`. `update()` once a frame opens and closes the socket as the page comes and
+  // goes.
+  const KIND = "ghost-hunt", VENUE = "arena", WATCH = new Set(["ghost-arena", "arcade-hunt", "arcade.arena", "arcade.haunt", "ghost-arena.haunt"]);
   const channel = () => {
-    const net = BL.net;
-    let extra = null, wait = 0;
-    const role = () => {
-      const st = net.state;
-      return st.room !== "live" || !st.ghostHostId ? "solo" : st.ghostHostId === st.selfId ? "host" : "follow";
+    const net = BL.net, gameNet = BL.gameNet;
+    let extra = null, motion = null, link = null;
+    const update = () => {
+      const want = gameNet.offers(KIND) && WATCH.has(net.state.zone);
+      if (want && !link) link = gameNet.open(KIND, VENUE, { state: (msg) => { if (extra) extra.read(msg.s); }, motion: (frame) => { if (motion) motion(frame); } });
+      else if (!want && link) { link.close(); link = null; }
     };
-    const unsubscribe = net.subscribeGhostState((snap) => { if (extra && role() === "follow") extra.read(snap); });
-    const update = (dt) => {
-      if ((wait -= dt) > 0) return;
-      wait = 0.25;
-      if (!extra || role() !== "host" || !net.state.ghostFollowers) return;
-      const snap = extra.write();
-      if (snap) net.sendGhostState(snap);
+    return {
+      update, dispose: () => { if (link) link.close(); link = extra = motion = null; },
+      // Following whenever the server offers the hunt to this signed-in page, socket open or not (out in the hall it hears
+      // nothing, and a hunt shown drifts away), unless the server refused this page (a newer tab, a full instance).
+      get role() { return gameNet.offers(KIND) && !(link && link.refused) ? "follow" : "solo"; },
+      get link() { return link; },
+      serverNow: () => link && link.synced ? link.serverNow() : net.serverNow(),
+      send: (msg) => !!link && link.send(msg),
+      get extra() { return extra; }, set extra(value) { extra = value; },
+      get onMotion() { return motion; }, set onMotion(value) { motion = value; }
     };
-    return { update, dispose: () => { unsubscribe(); extra = null; }, get role() { return role(); }, get hostId() { return net.state.ghostHostId; },
-      get extra() { return extra; }, set extra(value) { extra = value; } };
   };
   // The herald before its hunt has loaded, its foot at `heraldAt(now)` on the room's clock, `heraldHeight` tall, woken
   // by a shot and, where `tapWakes`, a click.
@@ -107,14 +114,11 @@
     const net = BL.net, group = createNode({ sightHidden: true });
     addChild(root, group);
     const { herald, used, place } = figure({ group, camera, fx, height: heraldHeight });
-    const hostOf = () => "hostId" in npcSync ? npcSync.hostId : net.state.hostId;
-    let disposed = false, removed = false, loading = false, failed = false, game = null, localStart = false;
-    let snapshot = null, snapshotHost = null, request = null, requestHost = null;
+    let disposed = false, removed = false, loading = false, failed = false, game = null, localStart = false, snapshot = null;
     const detach = () => {
       if (removed) return;
       removed = true;
       removeTarget(herald); removeChild(root, group);
-      unsubscribe();
       if (npcSync.extra === extra) npcSync.extra = null;
     };
     const complete = () => {
@@ -122,11 +126,10 @@
       game = attach();
       loading = false;
       detach();
-      // A follower elected host while loading inherits the last hunt it heard, just as an already-loaded page does.
-      if (snapshot && (npcSync.role === "host" || snapshotHost === hostOf() && npcSync.role === "follow")) game.restore(snapshot);
-      if (request && requestHost === hostOf()) game.receive(request);
+      // The last state the server sent while loading, as a page that had loaded would have it.
+      if (snapshot && npcSync.role === "follow") game.restore(snapshot);
       if (localStart) game.start();
-      snapshot = request = null;
+      snapshot = null;
     };
     const fail = () => {
       if (disposed) return;
@@ -145,18 +148,13 @@
     };
     // v1's first state slot is its phase (0 idle, 1..10 an active hunt or lobby). The full simulator validates
     // the snapshot before applying it; this listener only decides whether there is a hunt worth loading.
-    const extra = { write: () => null, read: snap => {
-      if (disposed || game || npcSync.role !== "follow" || snap.v !== 1 || !Array.isArray(snap.s)
+    const extra = { read: snap => {
+      if (disposed || game || npcSync.role !== "follow" || !snap || snap.v !== 1 || !Array.isArray(snap.s)
         || !Number.isInteger(snap.s[0]) || snap.s[0] < 0 || snap.s[0] > 10) return;
-      snapshot = snap; snapshotHost = hostOf();
+      snapshot = snap;
       if (snap.s[0] && !failed) wake();
     } };
     npcSync.extra = extra;
-    const unsubscribe = net.subscribeGhost(msg => {
-      if (disposed || game || npcSync.role !== "host" || msg.k !== "start" || !Number.isSafeInteger(msg.from) || msg.from <= 0) return;
-      if (!request || failed || requestHost !== hostOf()) { request = { k: "start", from: msg.from }; requestHost = hostOf(); }
-      wake();
-    });
     const owner = { kind: "halloween", role: "herald", priority: 3, weaponType: "object", active: true,
       tooltip: () => loading ? "The ghost hunt is loading…" : failed ? "Ghost hunt couldn't load · click to retry"
         : "A restless ghost · click it to start the ghost hunt",
@@ -168,7 +166,7 @@
       place(dt, at.x, at.y, at.z, now);
     };
     const hit = (byPlayer, shot) => { if (byPlayer && shot) wake(true); };
-    const dispose = () => { disposed = true; loading = false; detach(); snapshot = request = game = null; used.clear(); };
+    const dispose = () => { disposed = true; loading = false; detach(); snapshot = game = null; used.clear(); };
     return { update, hit, dispose, herald, liveGeometry: set => { if (!removed) for (const geo of used) set.add(geo); },
       debug: { herald, get state() { return game ? game.debug.state : "IDLE"; }, get loading() { return loading; },
         get loaded() { return !!game; }, start: () => wake(true) } };

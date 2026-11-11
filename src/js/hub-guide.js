@@ -26,10 +26,10 @@
     crew: "Every Ooga stands for one of the crew's contributors.",
     jumbotron: "The jumbotron shows the crew's activity, live.",
     totems: "The totems light up when Bitcoin Core, BTCPay, LND or CLN merge a PR.",
-    timechain: "Out west, the Timechain Sphere: nine rooms behind one door.",
-    timechainWalls: "Walk over the bridge and pick a room at the keypad: 1 to 3 are normal sized, 4 to 6 bigger, 7 to 9 biggest.",
-    timechainBoards: "Inside, a wall of live block and mining charts, and the holdings desk.",
-    timechainSani: "Sani's in every room in his recliner. Signed in, you share a room with whoever picks the same number.",
+    timechain: "Out west, the Timechain Sphere: ten rooms behind one door, from a planetarium to a movie theater.",
+    timechainWalls: "Walk over the bridge and pick a room at the keypad, 0 to 9: each number opens a different room.",
+    timechainBoards: "Room 1, the Conference Room, has the live block and mining charts and the holdings desk.",
+    timechainShare: "Signed in, you share a room with whoever picks the same number. Only the Conference Room locks.",
     bca: "B.C.A., Banana Certified Accounting: the island's own accounting office.",
     bcaInside: "Gorillas walk in through its veil, put on suits and count the bananas at two walnut desks.",
     bcaMotto: "Abacuses, ledger screens, filing cabinets. Their motto: count bananas, keep receipts, build in public.",
@@ -69,7 +69,8 @@
     resting: "I'm resting my voice until tomorrow. Ask me about a place!",
     slowDown: "One at a time! Ask me again in a minute.",
     newsKortik: "New in the Factory: Kortik's Switchboard, where a grumpy samurai routes Lightning by hand. Don't poke him!",
-    newsSphereRooms: "The Timechain Sphere has nine rooms now. Pick one at the keypad by its doors!",
+    newsSphereRooms: "The Timechain Sphere has rooms behind its doors now. Pick one at the keypad!",
+    newsSphereTen: "Every room in the Timechain Sphere is its own place now: a planetarium, a temple, a block party, a mining museum, a movie theater and more. Pick a number at the keypad!",
     newsBca: "New at 10 o'clock: B.C.A., Banana Certified Accounting. Suited gorillas count the bananas!",
     newsMainland: "You can tip from right here now, no trip to the Factory. Your bananas fly out of its roof tube onto the pile!",
     newsPanels: "The Bananas, Oogas and Chat panels have one new look, and the Bananas panel ranks the top donors.",
@@ -94,7 +95,7 @@
   const STOPS = [
     { id: "pile", title: "The pile", eye: [6, 8, 11], look: [0, 1.2, 0], lines: ["pile", "crew"] },
     { id: "totems", title: "Jumbotron and totems", eye: [7, 8, 7], look: [0, 5, 26], lines: ["jumbotron", "totems"] },
-    { id: "timechain", title: "Timechain Sphere", eye: [-15, 16, 4], look: [-42, 5, 17], lines: ["timechain", "timechainWalls", "timechainBoards", "timechainSani"] },
+    { id: "timechain", title: "Timechain Sphere", eye: [-15, 16, 4], look: [-42, 5, 17], lines: ["timechain", "timechainWalls", "timechainBoards", "timechainShare"] },
     { id: "bca", title: "B.C.A.", eye: [-11, 9.5, -6.5], look: [-19, 4.5, -11], lines: ["bca", "bcaInside", "bcaMotto"] },
     { id: "lab", title: "EntropyLab", eye: [-6.5, 9.5, -11], look: [-11, 4.5, -19], lines: ["lab", "labInside", "labCrew"] },
     { id: "bifrost", title: "₿IFRÖST", eye: [3, 11, -8], look: [0, 9, -34], lines: ["bifrost"] },
@@ -106,6 +107,7 @@
   // and her line. A new feature worth showing a returning visitor is one entry here, added at the top: a visitor's news
   // is everything listed above the newest entry they were last offered.
   const NEWS = [
+    { date: "2026-11-10", at: "timechain", line: "newsSphereTen" },
     { date: "2026-10-22", at: "factory", line: "newsKortik" },
     { date: "2026-10-19", at: "timechain", line: "newsSphereRooms" },
     { date: "2026-10-18", at: "bca", line: "newsBca" },
@@ -201,7 +203,7 @@
   const PLACES = {
     pile: ["pile", "banana pile", "bananas pile"],
     totems: ["jumbotron", "oogatron", "totem", "totems"],
-    timechain: ["timechain", "timechain sphere", "sphere", "sani"],
+    timechain: ["timechain", "timechain sphere", "sphere"],
     bca: ["bca", "b c a", "banana certified accounting", "accounting"],
     lab: ["lab", "entropylab", "entropy lab"],
     bifrost: ["bifrost", "dsb", "dsb land", "poker", "banana poker", "portal", "arch", "north pass"],

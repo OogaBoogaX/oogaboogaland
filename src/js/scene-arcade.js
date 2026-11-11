@@ -977,8 +977,9 @@
   };
 
   // HALLOWEEN: the ghost hunt in the arena (ghost-game.js), handed this adapter in place of the island's: the hunt works
-  // about the arena's middle (`origin`), with its herald floating there, ghosts coming in over the wall top (`ARENA_SPOTS`),
-  // the elixirs on the totems, no blight, at most four hunters, and those who wait walked out to the hallway. GAME
+  // about the arena's middle (`origin`), with its herald floating there, ghosts coming in over the wall top and the
+  // elixirs on the totems where the rules have them (ghost-sim.js `ARENA`, which the server's hunt runs too and the suite
+  // checks against this arena), no blight, at most four hunters, and those who wait walked out to the hallway. GAME
   // MODE turns combat on and raises the iron fence.
   const PARAMS = new URLSearchParams(location.search), DEBUG = PARAMS.get("debug") === "1";
   // The arena's zone, and its older names a page loaded before #422 may still report (`arcade-hunt`, `arcade.arena`).
@@ -1000,17 +1001,6 @@
   const ARENA_GROUND = {
     surfaceAt: () => 0, onLand: (x, z) => Math.hypot(x, z) < HAUNT.arena.r, isPath: () => false, mouths: []
   };
-  // Where ghosts come in: over the wall top all round but the hallway's mouth, as [x, y, z, bearing] about the middle
-  // (bearing from -z toward +x, rising).
-  const ARENA_SPOTS = (() => {
-    const out = [], mouth = 1.5 * Math.PI;
-    for (let i = 0; i < 90; i++) {
-      const a = i / 90 * Math.PI * 2;
-      if (Math.abs(((a - mouth + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.22) continue;
-      out.push(Math.sin(a) * (HAUNT.arena.r - 1), HAUNT.arena.wall + 1.2, -Math.cos(a) * (HAUNT.arena.r - 1), a);
-    }
-    return Float64Array.from(out);
-  })();
   const HERALD_AT = { x: 0, y: 0, z: 0 };
   const heraldAt = (now, x, y, z) => {
     HERALD_AT.x = x; HERALD_AT.y = y + HERALD_FLOAT + 0.12 * Math.sin(now / 1000 * 1.3); HERALD_AT.z = z;
@@ -1084,7 +1074,7 @@
     holdView: (on) => { pilot.setActive(!on); pilot.controls.reset(); input.reset(); pilot.setExternalControl(on); },
     heldAxes: () => pilot.controls.read(),
     ringRadius: HAUNT.arena.r - 2,
-    elixirSpots: totemsAt.map((t) => t.elixir),
+    elixirSpots: BL.ghostSim.ARENA.elixirs,
     pileRadius: () => GHOST_KEEP - 0.3,
     pileTop: () => HERALD_FLOAT + 0.9,
     // Nudges the driven Ooga along the floor (a ghost's knock, a wraith's pull) where it could walk.
@@ -1093,7 +1083,7 @@
       if (cave.health.stunned || !walkableFor(p.x, p.z, p.x + dx, p.z + dz, feet, cave.bodyHeight, cave)) return;
       p.x += dx; p.z += dz;
     },
-    origin: { x: HAUNT.arena.x, y: HAUNT.y, z: HAUNT.arena.z }, spots: ARENA_SPOTS, heraldAt: (now) => heraldAt(now, 0, 0, 0),
+    origin: { x: HAUNT.arena.x, y: HAUNT.y, z: HAUNT.arena.z }, spots: BL.ghostSim.ARENA.spots, heraldAt: (now) => heraldAt(now, 0, 0, 0),
     heraldHeight: HERALD_HEIGHT, inZone: (zone) => ARENA_ZONES.has(zone), arenaRadius: HAUNT.arena.r, maxPlayers: HUNTERS, gatherAt: "the ghost",
     hearing: () => huntHearing,
     tapWakes: true, blight: false, waitingToast: "A hunt is on · wait in the hallway until the arena opens"

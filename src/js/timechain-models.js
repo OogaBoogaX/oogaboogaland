@@ -1,4 +1,4 @@
-// Timechain Sphere: the painted ball off the southwest rim, its bridge, and the one doorway into its nine rooms. The
+// Timechain Sphere: the painted ball off the southwest rim, its bridge, and the one doorway into its ten rooms. The
 // island keeps only the outside: the shell, the doors whose outer faces carry the ball's turning bands and ₿ across
 // their seam, the keypad beside them, and a short dim passage behind them ending in a hanging curtain, which hides a
 // traveler before their room loads. The rooms themselves are a scene of their own (scene-timechain.js). A solid plug
@@ -303,7 +303,7 @@
     return geo;
   });
   // The keypad flat against the right-hand post: an iron plate, a dim display, 1–9 in a 3 by 3 grid with each number
-  // picked out in the signs' pixels, and Back and Enter under them. Each button stays a separate node so the island
+  // picked out in the signs' pixels, and Back, 0 and Enter under them. Each button stays a separate node so the island
   // can pick the real control. `KEYS` is where each number sits on it.
   const KEY_PITCH = 0.105, KEYS = Array.from({ length: 9 }, (_, i) => ({ x: (i % 3 - 1) * KEY_PITCH, y: 0.1 - Math.floor(i / 3) * KEY_PITCH }));
   const keypad = cached(() => {
@@ -340,6 +340,7 @@
   const ACT_KEYS = { LOCK: [keyFace(0.12, 0.07, "LOCK", 0.0066, "#5a4022", "#f2d39a"), keyFace(0.125, 0.075, "LOCK", 0.0066, "#ffbd53", "#17110a", 1)],
     UNLOCK: [keyFace(0.12, 0.07, "UNLOCK", 0.0046, "#5a4022", "#f2d39a"), keyFace(0.125, 0.075, "UNLOCK", 0.0046, "#ffbd53", "#17110a", 1)] };
   const ZERO_KEY = keyFace(0.085, 0.07, "0", 0.0105, "#3a3430", "#f2d39a");
+  const LIT_ZERO_KEY = keyFace(0.09, 0.075, "0", 0.0105, "#f7931a", "#17110a", 1);
   // A number over which a locked room's padlock hangs.
   const PADLOCK = [".###.", "#...#", "#...#", "#####", "##.##", "#####"];
   const LOCKED_KEY = merge(box({ w: 0.085, h: 0.085, d: 0.02, color: "#5a1c14", emissive: 0.35 }), (() => {
@@ -392,7 +393,7 @@
     paint(0);
     return { geometry, say, tick };
   };
-  // A keypad as a set of nodes, unplaced: the doorway's outside and the lock inside every room. 1–9, Back, 0 and Enter
+  // A keypad as a set of nodes, unplaced: the doorway's outside and the lock inside the Conference Room. 1–9, Back, 0 and Enter
   // are each a node the scene can pick; `choose` lights a number, `lock` hangs a padlock over one, `say` writes the window.
   const padRig = () => {
     const pad = createNode({ geometry: keypad(), sightHidden: true });
@@ -402,24 +403,25 @@
     const enter = { key: "enter", node: createNode({ geometry: ENTER_KEY, position: { x: 0.1125, y: -0.235, z: 0.033 }, sightHidden: true }) };
     const display = windowRig();
     const readout = createNode({ geometry: display.geometry, position: { x: 0, y: 0.25, z: 0.0365 }, visible: false, sightHidden: true });
-    readout.room = 0;
+    readout.room = -1;
     addChild(pad, readout, ...keys.map(key => key.node), back.node, zero.node, enter.node);
     const say = (text, ink) => { display.say(text, ink); readout.visible = !!text; };
     const locked = new Uint8Array(10);
-    // A key lit (1–9), or none (0); the selected number and ready Enter label turn black against amber.
-    let selected = 0;
-    const cap = (digit) => digit === selected ? LIT_DIGIT_KEYS[digit - 1] : locked[digit] ? LOCKED_KEY : DIGIT_KEYS[digit - 1];
+    // A key lit (0–9), or none (-1); the selected number and ready Enter label turn black against amber.
+    let selected = -1;
+    const keyOf = (digit) => digit === 0 ? zero : keys[digit - 1];
+    const cap = (digit) => digit === selected ? (digit ? LIT_DIGIT_KEYS[digit - 1] : LIT_ZERO_KEY) : locked[digit] ? LOCKED_KEY : digit ? DIGIT_KEYS[digit - 1] : ZERO_KEY;
     const choose = (digit) => {
       const was = selected;
-      selected = digit > 0 && digit <= 9 ? digit : 0;
-      if (was) keys[was - 1].node.geometry = cap(was);
-      if (selected) keys[selected - 1].node.geometry = cap(selected);
-      enter.node.geometry = selected ? READY_ENTER_KEY : ENTER_KEY;
+      selected = Number.isInteger(digit) && digit >= 0 && digit <= 9 ? digit : -1;
+      if (was >= 0) keyOf(was).node.geometry = cap(was);
+      if (selected >= 0) keyOf(selected).node.geometry = cap(selected);
+      enter.node.geometry = selected >= 0 ? READY_ENTER_KEY : ENTER_KEY;
       readout.room = selected;
     };
     const lock = (digit, on) => {
       locked[digit] = on ? 1 : 0;
-      keys[digit - 1].node.geometry = cap(digit);
+      keyOf(digit).node.geometry = cap(digit);
     };
     // What the Enter key reads on the room's lock, and whether it is ready to press.
     const actAs = (word, ready) => { enter.node.geometry = ACT_KEYS[word][ready ? 1 : 0]; };
