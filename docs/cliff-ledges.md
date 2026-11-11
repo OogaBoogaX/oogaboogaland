@@ -33,6 +33,11 @@ existing fall and return-to-island behavior. The ropes' on-screen help says so.
 scenes keep their original terrain. The terrain snapshot contains the same voxel
 and window data, so its existing queries serve both variants.
 
+The cliff mesh merges static rock faces beneath route ceilings only when their
+material, route key, ceiling and window ownership agree. It retains the original
+route metadata and every collision voxel; removable roofs and detailed room
+floors keep their original meshing. The snapshot face limit remains unchanged.
+
 `hub-cliffs.js` builds six bounded rope route records and their static meshes.
 `crew.js` uses the existing ladder controls, with an optional sloped route and
 outward departure before descending through a rock lip. No per-frame route

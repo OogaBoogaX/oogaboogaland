@@ -80,7 +80,7 @@
   };
   // Exposed grid faces, greedy-meshed one slice at a time.
   const DIR_BIT = 0x100, FLOOR_DETAIL_BIT = 0x4000;
-  const gridGeometrySteps = function* (grid, { unit, palette, origin = { x: 0, y: 0, z: 0 }, matrixCaves = null, floorRooms = [], cutawayPathKeys = null, cutawayPathBottoms = null, cutawayWindowMask = null, cutawayWindowTops = null, cutawayWindowCeilings = null }, slice = null) {
+  const gridGeometrySteps = function* (grid, { unit, palette, origin = { x: 0, y: 0, z: 0 }, matrixCaves = null, floorRooms = [], cutawayPathKeys = null, cutawayPathBottoms = null, cutawayWindowMask = null, cutawayWindowTops = null, cutawayWindowCeilings = null, mergeBuriedPaths = false }, slice = null) {
     if (slice && !slice.until) { slice.work = 0; slice.until = performance.now() + slice.budget; }
     const { data, sx, sy, sz } = grid;
     const dims = [sx, sy, sz], strides = [sy * sz, sz, 1];
@@ -90,6 +90,12 @@
     const pathBottomMask = cutawayPathBottoms ? new Float32Array(mask.length) : null;
     const windowMask = cutawayWindowMask ? new Uint8Array(mask.length) : null;
     const windowColumnMask = cutawayWindowMask ? new Uint32Array(mask.length) : null;
+    // Below-ceiling rock is always in createRampRoof's stable base mesh. The
+    // cliff variant can merge those cells, retaining their exact path metadata.
+    const buriedMask = mergeBuriedPaths && pathMask && pathBottomMask ? new Uint8Array(mask.length) : null;
+    const sameBuried = (a, b) => buriedMask[a] === buriedMask[b] && (!buriedMask[a]
+      || pathBottomMask[a] === pathBottomMask[b] && (!windowMask
+        || windowMask[a] === windowMask[b] && windowColumnMask[a] === windowColumnMask[b]));
     const floorDetails = floorRooms.map((room) => ({ ...room, cr: Math.cos(room.angle), sr: Math.sin(room.angle) }));
     // Rooms bucketed by the slice their floor lands on, so the y sweep never refilters the whole list.
     const floorsByRow = new Map();
@@ -164,6 +170,12 @@
             const dx = origin.x + (j + 0.5) * unit - room.x, dz = origin.z + (i + 0.5) * unit - room.z;
             if (Math.abs(dx * room.cr + dz * room.sr) < room.width / 2 + unit && Math.abs(dx * room.sr - dz * room.cr) < room.depth / 2 + unit) { mask[n] |= FLOOR_DETAIL_BIT; break; }
           }
+          if (buriedMask) {
+            const solid = a && !b ? base - sd : base;
+            const faceTop = origin.y + (d === 1 ? k : Math.floor(solid / sz) % sy + 1) * unit;
+            buriedMask[n] = pathMask[n] && !(mask[n] & FLOOR_DETAIL_BIT) && (!windowMask || !windowMask[n])
+              && faceTop <= pathBottomMask[n] ? 1 : 0;
+          }
         };
         if (d === 2) {
           // Rows run along z: one cell per row, in memory order.
@@ -197,13 +209,17 @@
             // Ramp-roof faces stay on their authored voxel cells. The render
             // cutaway can then remove the true curved ceiling footprint in
             // either renderer instead of approximating it with a rectangle.
-            const span = pathKey || windowKey ? 1 : c & FLOOR_DETAIL_BIT ? Math.max(1, Math.round(1 / unit)) : Infinity;
+            const span = pathKey && !(buriedMask && buriedMask[n]) || windowKey ? 1 : c & FLOOR_DETAIL_BIT ? Math.max(1, Math.round(1 / unit)) : Infinity;
             let w = 1;
-            while (w < span && i + w < nu && mask[n + w] === c && (!pathMask || pathMask[n + w] === pathKey)) { w++; }
+            while (w < span && i + w < nu && mask[n + w] === c && (!pathMask || pathMask[n + w] === pathKey)
+              && (!buriedMask || sameBuried(n, n + w))) { w++; }
             let h = 1;
             for (; h < span && j + h < nv; h++) {
               let same = true;
-              for (let x = 0; x < w && same; x++) { same = mask[n + x + h * nu] === c && (!pathMask || pathMask[n + x + h * nu] === pathKey); }
+              for (let x = 0; x < w && same; x++) {
+                const at = n + x + h * nu;
+                same = mask[at] === c && (!pathMask || pathMask[at] === pathKey) && (!buriedMask || sameBuried(n, at));
+              }
               if (!same) break;
             }
             // (d, u, v) is cyclic, so this vertex order faces +d.
@@ -212,6 +228,7 @@
             for (let y = 0; y < h; y++) {
               mask.fill(0, n + y * nu, n + y * nu + w);
               if (pathMask) pathMask.fill(0, n + y * nu, n + y * nu + w);
+              if (buriedMask) buriedMask.fill(0, n + y * nu, n + y * nu + w);
               if (windowMask) { windowMask.fill(0, n + y * nu, n + y * nu + w); windowColumnMask.fill(0, n + y * nu, n + y * nu + w); }
             }
             i += w;
@@ -2249,7 +2266,7 @@
     }
     const geometry = yield* gridGeometrySteps(grid, { unit: UNIT, palette: PALETTE, origin: ORIGIN, matrixCaves,
       floorRooms: [...headquartersRooms, ...basement.rooms], cutawayPathKeys, cutawayPathBottoms, cutawayWindowMask: birdseyeWindowMask,
-      cutawayWindowTops: birdseyeWindowTops, cutawayWindowCeilings: birdseyeWindowCeilings }, slice);
+      cutawayWindowTops: birdseyeWindowTops, cutawayWindowCeilings: birdseyeWindowCeilings, mergeBuriedPaths: cliffLedges }, slice);
     let roofOpening = null;
     const roofMouth = roofHole && mouths.find(m => m.id === roofHole.id);
     if (roofMouth) {

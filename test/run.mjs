@@ -30236,7 +30236,34 @@ const cliffLedgeChecks = (BL, baseline, baselineRestored) => {
   let restored;
   try { restored = BL.terrainSnapshot.create(structuredClone(step.value)); }
   catch (error) {
-    record(CLIFF_TERRAIN_CHECK, false, JSON.stringify({ error: error.message, faces: step.value.geometry?.faces?.length }));
+    // Diagnose the existing failed build, never run a replacement probe or
+    // loosen snapshot validation to get past its geometry limit.
+    const meshBreakdown = built => {
+      const geometry = built.geometry, gridEnd = built.cutawaySource.rampFaceOffset;
+      const windowStart = geometry.faces.length - built.headquarters.windowFaces;
+      const counts = { faces: geometry.faces.length, grid: gridEnd, ramps: windowStart - gridEnd,
+        windows: built.headquarters.windowFaces, buriedPathFaces: 0, buriedWindowFaces: 0,
+        gridPathFaces: 0, gridWindowFaces: 0, belowUpperFloor: 0, belowLowerFloor: 0, triangles: 0 };
+      for (let n = 0; n < geometry.faces.length; n++) {
+        const face = geometry.faces[n]; counts.triangles += face.i.length - 2;
+        if (n >= gridEnd) continue;
+        let top = -Infinity;
+        for (const i of face.i) top = Math.max(top, geometry.verts[i * 3 + 1]);
+        if (face.cutawayPathKey) {
+          counts.gridPathFaces++;
+          if (top <= face.cutawayPathBottom + 1e-7) {
+            if (face.cutawayWindowMask) counts.buriedWindowFaces++;
+            else counts.buriedPathFaces++;
+          }
+        }
+        if (face.cutawayWindowMask) counts.gridWindowFaces++;
+        if (top <= BL.terrain.CLIFF_LEDGES.levels[0].floor) counts.belowUpperFloor++;
+        if (top <= BL.terrain.CLIFF_LEDGES.levels[1].floor) counts.belowLowerFloor++;
+      }
+      return counts;
+    };
+    record(CLIFF_TERRAIN_CHECK, false, JSON.stringify({ error: error.message,
+      baseline: meshBreakdown(baseline), cliffs: meshBreakdown(island) }));
     return;
   }
   const failures = [];
@@ -30251,6 +30278,25 @@ const cliffLedgeChecks = (BL, baseline, baselineRestored) => {
         samples++;
         if ((Math.abs(floor - ledge.floor) > 1e-6 || !clear) && failures.length < 12) failures.push({ degrees, radius, floor, expected: ledge.floor, clear });
       }
+    }
+  }
+  // Enlarged route-tagged grid quads are the below-ceiling optimization. None
+  // may cross into a removable roof or a window-owned column, direct or cached.
+  let mergedPathFaces = 0, unsafeMergedPaths = 0;
+  for (const built of [island, restored]) {
+    const geometry = built.geometry, gridEnd = built.cutawaySource.rampFaceOffset;
+    for (let n = 0; n < gridEnd; n++) {
+      const face = geometry.faces[n];
+      if (!face.cutawayPathKey) continue;
+      let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      for (const i of face.i) {
+        const x = geometry.verts[i * 3], y = geometry.verts[i * 3 + 1], z = geometry.verts[i * 3 + 2];
+        minX = Math.min(minX, x); minY = Math.min(minY, y); minZ = Math.min(minZ, z);
+        maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); maxZ = Math.max(maxZ, z);
+      }
+      if (Math.max(maxX - minX, maxY - minY, maxZ - minZ) <= built.unit + 1e-7) continue;
+      mergedPathFaces++;
+      if (face.cutawayWindowMask || !Number.isFinite(face.cutawayPathBottom) || maxY > face.cutawayPathBottom + 1e-7) unsafeMergedPaths++;
     }
   }
   const a = baseline.cutawaySource, b = island.cutawaySource;
@@ -30276,8 +30322,10 @@ const cliffLedgeChecks = (BL, baseline, baselineRestored) => {
   // original island used by the remaining unit checks. Compare placements, not PATH_TILE.
   const originalPaths = paths(baselineRestored), samePaths = paths(island) === originalPaths && paths(restored) === originalPaths;
   record(CLIFF_TERRAIN_CHECK,
-    !failures.length && !topChanges && rooms(baseline) === rooms(island) && apertures(baseline) === apertures(island) && samePaths,
-    JSON.stringify({ samples, failures, topChanges, rooms: rooms(baseline) === rooms(island), apertures: apertures(baseline) === apertures(island), paths: samePaths }));
+    !failures.length && !topChanges && mergedPathFaces > 0 && !unsafeMergedPaths
+      && rooms(baseline) === rooms(island) && apertures(baseline) === apertures(island) && samePaths,
+    JSON.stringify({ samples, failures, topChanges, mergedPathFaces, unsafeMergedPaths, faces: island.geometry.faces.length,
+      rooms: rooms(baseline) === rooms(island), apertures: apertures(baseline) === apertures(island), paths: samePaths }));
 };
 const TERRAIN_GOLDEN = "7ceeb12cec5b0ec3";
 const terrainParityChecks = (BL, island) => {
