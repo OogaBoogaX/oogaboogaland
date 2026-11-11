@@ -151,7 +151,41 @@
     return b ? `${b.id}|${b.pool}|${CH.format.ago(now - b.time * 1000)}` : `none|${reader.status("recent")}`;
   };
 
+  // ---------- its door ----------
+  // A lecture hall's: oak leaves with a tall wired-glass light by the seam, a steel push bar and a brass kick plate, in
+  // an oak frame set in cream plaster, a clock on the wall to the right and a notice board over the Exit button.
+  const door = {
+    casing: "#e3dccb", frame: "#7a5432", header: "#5a3d24", word: "#3ddc84", strip: null, chain: false,
+    leaf: "#9a6c40", seam: "#4a321c", plate: "#5a3d24", face: "#3ddc84", mark: "#1f1f1f",
+    leafFace(side, H) {
+      for (let x = -0.7; x < 0.75; x += 0.1) H.rect(x, 0.32, x + 0.004, 3.15, "#8a5f37");
+      const g0 = H.inner + side * 0.12, g1 = H.inner + side * 0.34;
+      H.rect(g0, 1.7, g1, 2.95, "#b9d3dc", 0.25, 1);
+      for (let y = 1.75; y < 2.95; y += 0.1) H.rect(g0, y, g1, y + 0.004, "#8aa0a8", 0.1, 2);
+      H.rect(-0.62, 1.0, 0.62, 1.1, "#c9ccd2", 0.2, 1);
+      H.rect(-0.75, 0.04, 0.75, 0.3, "#b08a3a", 0.15, 1);
+    }
+  };
+  const doorTrim = (K, L) => {
+    const d = RM.doorway(L);
+    K.picture(0.5, 0.5, 200, 200, (c, w, h) => {
+      c.fillStyle = "#f4f1e8"; c.beginPath(); c.arc(w / 2, h / 2, 94, 0, Math.PI * 2); c.fill();
+      c.lineWidth = 8; c.strokeStyle = "#2a2a2a"; c.stroke();
+      c.fillStyle = "#2a2a2a";
+      for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; c.fillRect(w / 2 + Math.sin(a) * 76 - 3, h / 2 - Math.cos(a) * 76 - 3, 6, 6); }
+      c.lineWidth = 6; c.lineCap = "round"; c.beginPath(); c.moveTo(w / 2, h / 2); c.lineTo(w / 2 + 40, h / 2 - 28); c.moveTo(w / 2, h / 2); c.lineTo(w / 2 - 10, h / 2 - 64); c.stroke();
+    }, 2.25, 2.65, d.Z - 0.02, { ry: Math.PI, emissive: 0.4 });
+    K.picture(0.66, 0.5, 264, 200, (c, w, h) => {
+      c.fillStyle = "#b8865a"; c.fillRect(0, 0, w, h); c.strokeStyle = "#5a3d24"; c.lineWidth = 12; c.strokeRect(0, 0, w, h);
+      for (const [x, y, nw, nh, col] of [[24, 26, 90, 70, "#f4f1e8"], [130, 30, 100, 60, "#fff5a8"], [40, 112, 80, 62, "#d8ecff"], [140, 104, 96, 70, "#f4f1e8"]]) {
+        c.fillStyle = col; c.fillRect(x, y, nw, nh); c.fillStyle = "#c0392b"; c.fillRect(x + nw / 2 - 4, y + 2, 8, 8);
+        c.fillStyle = "#666"; for (let l = 0; l < 4; l++) c.fillRect(x + 8, y + 18 + l * 11, nw - 16, 3);
+      }
+    }, -2.22, 2.3, d.Z - 0.02, { ry: Math.PI, emissive: 0.35 });
+  };
+
   const plan = (K, L) => {
+    doorTrim(K, L);
     const R = L.rake, F = R.F, rows = R.rows;
     K.wallColor("#1c1a17");
     K.rakeColors({ terrace: ["#221f1c", "#161412"], nosing: C.ring, landing: "#1f1c1a" });
@@ -255,5 +289,5 @@
       }
     };
   };
-  BL.timechainRoomKinds.lecture = { plan, animate };
+  BL.timechainRoomKinds.lecture = { plan, animate, door };
 })();
