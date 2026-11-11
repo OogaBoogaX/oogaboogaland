@@ -144,12 +144,16 @@ activation claim is made. The outstanding integration/operational gates in
 
 ## Supporting-PR checks
 
-The first CI run on supporting PR #590 stopped before fixed-route assertions because
-the fixed-route fixture still extracted walker/work declarations from crew
+The first CI run on supporting PR #590 stopped before fixed-route assertions
+because the fixture still extracted walker/work declarations from crew
 after those functions moved to shared modules. Its source slices now use the
 production modules and verify their delimiters. The `fixed-routine-unit`
-selector runs the same unchanged check without other lanes; it passes locally.
-The ordinary unit lane still runs that check in its original order.
+selector runs the same unchanged check without other lanes. The next CI run
+reached a separate movement fixture with the same stale walker extraction and
+a missing crew source binding. That fixture now uses the shared walker source
+and supplies its browser context. Both unchanged checks pass through the focused
+selector. The ordinary unit lane still runs each in its original order. Static
+review found no further stale crew/walker/work extraction markers.
 
 A further static review found that crew capture accepted an already-null live
 reservation timestamp although the Worker work codec refused it. Crew capture

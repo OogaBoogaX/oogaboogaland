@@ -29462,6 +29462,7 @@ const shaderDerivationProof = async () => {
 // Exercise the production recovery and DSB support gates with a corner whose
 // final destination is across a wall, and with a level platform over deep water.
 const reviewMovementProof = async () => {
+  const crewSource = await readFile(join(root, "src/js/crew.js"), "utf8");
   const walkerSource = await readFile(join(root, "src/js/npc-walker.js"), "utf8");
   const recovery = walkerSource.slice(walkerSource.indexOf("    const recoverWalker ="), walkerSource.indexOf("    const jumpWalker ="));
   const jump = walkerSource.slice(walkerSource.indexOf("    const jumpWalker ="), walkerSource.indexOf("    const walkToward ="));
@@ -29517,13 +29518,13 @@ this.near = () => recoverWalker(cave, 0, 0.25, 0.1); this.search = () => searchW
   // fully blocking object and follows sloped terrain, never consulting the
   // object-supported floor (higher than the terrain here). An ordinary walker
   // still stops at the object and still stands on that object support.
-  const toward = crewSource.slice(crewSource.indexOf("    const walkToward ="), crewSource.indexOf("    const runBed ="));
+  const toward = walkerSource.slice(walkerSource.indexOf("    const walkToward ="), walkerSource.indexOf("    const walkWorkTo ="));
   const grounding = crewSource.slice(crewSource.indexOf("    const groundY ="), crewSource.indexOf("    const grounded ="));
   let fixed = true, clearCalls = 0, objectCalls = 0, terrainCalls = 0;
   const slope = x => 0.1 * x, objectFloor = 0.9;
   const walker = { baseY: 0, restLower: 0, root: { position: { x: 0, y: 0, z: 0 }, rotation: { y: 0 } }, traffic: { yielding: false, waiting: false },
     progress: { backoff: 0 }, avoidance: { active: false, side: 1, stalled: 0, navigation: { mode: 0 } }, shoulder: { prop: false } };
-  const passContext = { PLAYER_STEP: 0.05, NAV_STEP: 0.025, NPC_PASS_REACH: 2, cave: walker,
+  const passContext = { ctx: {}, PLAYER_STEP: 0.05, NAV_STEP: 0.025, NPC_PASS_REACH: 2, cave: walker,
     fixedTrip: () => fixed, walkerClear: () => (clearCalls++, false), shoulderStep: () => -1,
     fixedTerrainAt: x => (terrainCalls++, slope(x)), groundAt: () => (objectCalls++, objectFloor) };
   runInNewContext(`${grounding} ${toward} this.step = () => walkToward(cave, 2, 0, 1); this.ground = () => groundY(cave);`, passContext);
@@ -30355,8 +30356,13 @@ const fixedRoutineChecks = async () => {
     Object.values(fixedRoutine).every(Boolean), JSON.stringify(fixedRoutine));
 };
 
+const reviewMovementChecks = async () => {
+  const movementReview = await reviewMovementProof();
+  record("review movement: recovery follows the next lane bend, retains stalls on the same leg and resets on replans; solid platforms bypass terrain gates while walls and water remain blocked; a passive fixed meadow leg walks through a blocking object at terrain height while an ordinary walker still stops", Object.values(movementReview).every(Boolean), JSON.stringify(movementReview));
+};
+
 const unitChecks = async () => {
-  if (ARGS.includes("fixed-routine-unit")) { await fixedRoutineChecks(); return; }
+  if (ARGS.includes("fixed-routine-unit")) { await fixedRoutineChecks(); await reviewMovementChecks(); return; }
   const artifact = artifactUnitProof();
   record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
   const previewRange=await studioPreviewRangeProof();
@@ -30403,8 +30409,7 @@ const unitChecks = async () => {
   const passiveWeapons = await passiveWeaponTargetProof();
   record("passive weapon targets: a shot passes through a passive NPC to the body behind it, hover and carry picks still find the NPC, and a non-passive body takes the hit",
     Object.values(passiveWeapons).every(Boolean), JSON.stringify(passiveWeapons));
-  const movementReview = await reviewMovementProof();
-  record("review movement: recovery follows the next lane bend, retains stalls on the same leg and resets on replans; solid platforms bypass terrain gates while walls and water remain blocked; a passive fixed meadow leg walks through a blocking object at terrain height while an ordinary walker still stops", Object.values(movementReview).every(Boolean), JSON.stringify(movementReview));
+  await reviewMovementChecks();
 
   const waterProgram = selectedWaterProgramProof();
   record("DSB water: environment and sampler bindings follow the selected ordinary or rig shader while state replacement releases owned textures", waterProgram.cases === 2 && waterProgram.failures === 0, JSON.stringify(waterProgram));
