@@ -4331,7 +4331,7 @@ const orbitFlow = async (b) => {
 const SCENES = ["hub", "lab", "race", "drop", "block", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
-for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
+for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "fixed-routine-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
 const ONLY = process.env.ONLY || ""; // Optional comma-separated substrings within the requested scenes.
 const onlyMatches = value => ONLY.split(",").some(part => value.includes(part));
 const FULL = ARGS.includes("full");
@@ -29676,8 +29676,14 @@ const fixedRoutineProof = async () => {
   // planner to the pile slot, then to the chill spot. It never consults object
   // blocking or object floors and stays on (sloped) terrain throughout.
   const crewSource = await readFile(join(root, "src/js/crew.js"), "utf8");
-  const slice = (from, to) => crewSource.slice(crewSource.indexOf(from), crewSource.indexOf(to));
-  const chillCode = slice("    const groundY =", "    const grounded =") + slice("    const walkToward =", "    const runBed =")
+  const walkerSource = await readFile(join(root, "src/js/npc-walker.js"), "utf8"), workSource = await readFile(join(root, "src/js/npc-work.js"), "utf8");
+  const section = (source, from, to) => {
+    const start = source.indexOf(from), end = source.indexOf(to, start);
+    if (start < 0 || end < start) throw Error(`fixed routine source section missing: ${from}`);
+    return source.slice(start, end);
+  };
+  const slice = (from, to) => section(crewSource, from, to);
+  const chillCode = slice("    const groundY =", "    const grounded =") + section(walkerSource, "    const walkToward =", "    const walkWorkTo =")
     + slice("    const runRouteWalk =", "    const runWalk =");
   const route = [{ x: 20, z: 0 }, { x: 24, z: 2 }, { x: 26, z: 4 }], slot = { x: 0, z: -4 }, spot = { x: -3, z: 3 };
   const chillTrip = (phase, index, at, { slotless = false, noSpot = false } = {}) => {
@@ -29687,7 +29693,7 @@ const fixedRoutineProof = async () => {
       root: { position: { x: at.x, y: 0.02 * at.x, z: at.z }, rotation: { y: 0 } }, pathing: P.create({ island }).createState(),
       act: { spot: { x: 0, z: 0, ry: NaN }, trips: 0, kind: "work" }, work: { site: 0, phase, index, plannedSite: 0 },
       avoidance: { tx: 0 }, parts: { snack: { visible: true } }, bedTravel: { mode: "" } };
-    const ctx = { PLAYER_STEP: 0.05, WANDER_SPEED: 1, fixedPaths: fixed, workSites: [{ route }], cave: ooga,
+    const ctx = { ctx: {}, PLAYER_STEP: 0.05, WANDER_SPEED: 1, fixedPaths: fixed, workSites: [{ route }], cave: ooga,
       wantedFanRadius: () => 5, elapsed: 0, chillPause: () => 10,
       // Every grounded step lands where walkToward placed it; log those positions.
       fixedTrip: c => !!c.walk?.route, fixedTerrainAt: (x, z) => (steps.push([x, z]), 0.02 * x), groundAt: () => (objectFloorCalls++, 5),
@@ -29725,7 +29731,7 @@ const fixedRoutineProof = async () => {
   // which re-picks the nearest slot it can sweep to past props and the pile and leaves the ring planner, swinging the
   // walker to another slot. A fixed trip keeps its reserved slot on the planned path; an ordinary walker keeps the
   // direct approach and its switch.
-  const returnCode = slice("    const runWork =", "    const quoteFor =");
+  const returnCode = section(workSource, "    const runWork =", "    return { planWorkSite, selectWorkSite, runWork }");
   const pileReturn = (fixedLeg) => {
     let approaches = 0, followed = null, walkedTo = null;
     const reserved = { x: 0, z: -5 }, nearer = { x: 1, z: -4.9 };
@@ -29747,7 +29753,7 @@ const fixedRoutineProof = async () => {
   // Regression (#496 review): the pile grows while a passive Ooga walks its own one-leg route to its loading slot.
   // The real `updateFan` retargets through the real `walkToSlot`, and the real `runWalk`/`runRouteWalk` must arrive at
   // the newly assigned slot, not the snapshot taken when the leg was made. An authored route keeps its legs.
-  const slotWalkCode = chillCode + slice("    const walkToSlot =", "    const refreshStates =") + slice("    const runWalk =", "    const planWorkSite =");
+  const slotWalkCode = chillCode + slice("    const walkToSlot =", "    const refreshStates =") + slice("    const runWalk =", "    const { planWorkSite, selectWorkSite, runWork }");
   const growingWalk = (authored) => {
     let level = 0, meal = false, objectFloorCalls = 0;
     const slotFor = () => ({ x: 0, z: -(5 + level) });
@@ -29758,7 +29764,7 @@ const fixedRoutineProof = async () => {
     ooga.walk = { tx: ooga.slot.x, tz: ooga.slot.z, speed: 1.6, phase: 0, heading: 0, to: "slot" };
     const authoredLegs = authored ? [{ x: 2, z: -9, fixed: false }, { x: 0, z: -5, fixed: false }] : null;
     if (authored) ooga.walk.route = authoredLegs.map(leg => ({ ...leg }));
-    const ctx = { PLAYER_STEP: 0.05, WANDER_SPEED: 1, RUSH_SPEED: 2.8, fixedPaths: fixed, workSites: [], cave: ooga, elapsed: 0, chillPause: () => 10,
+    const ctx = { ctx: {}, PLAYER_STEP: 0.05, WANDER_SPEED: 1, RUSH_SPEED: 2.8, fixedPaths: fixed, workSites: [], cave: ooga, elapsed: 0, chillPause: () => 10,
       fanRadius: 5, wantedFanRadius: () => 5 + level, cavemen: new Map([["grower", ooga]]), assignFanSlots: () => {},
       atPile: c => c.act.kind === "eat" || c.act.kind === "rush", closestSlot: slotFor,
       fixedTrip: c => !!c.walk?.route, fixedTerrainAt: () => 0, groundAt: () => (objectFloorCalls++, 5), walkerClear: () => false,
@@ -30343,7 +30349,14 @@ const npcActivityRefreshProof = (BL) => {
   }
 };
 
+const fixedRoutineChecks = async () => {
+  const fixedRoutine = await fixedRoutineProof();
+  record("passive work legs: the authored fixed planner circles the real pile ring, follows one spoke out to the target, never crosses the pile, and replans rather than reuse a graph lane; a walker between spoke samples, or a goal between them, is never sent back to a sample behind it or past the goal; a passive return leg keeps its reserved pile slot on the planned path while an ordinary one keeps the direct pile approach; clanking to chilling from mid-outbound or mid-return walks back along the cave route to the pile slot, then to the chill spot, on terrain and ignoring objects; a passive gorilla's walk to its Ooga's pile slot goes straight over the pile while its work travel to a cave walks straight from another cave or the meadow, even when its origin is reset mid-walk, on terrain, still handing wall steps to the climber",
+    Object.values(fixedRoutine).every(Boolean), JSON.stringify(fixedRoutine));
+};
+
 const unitChecks = async () => {
+  if (ARGS.includes("fixed-routine-unit")) { await fixedRoutineChecks(); return; }
   const artifact = artifactUnitProof();
   record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
   const previewRange=await studioPreviewRangeProof();
@@ -30386,9 +30399,7 @@ const unitChecks = async () => {
   const statusBeams = await statusBeamProof();
   record("passive status beams: clanking to chilling in view walks without glyphs at 20 Hz steps, while a relocation to bed still beams",
     Object.values(statusBeams).every(Boolean), JSON.stringify(statusBeams));
-  const fixedRoutine = await fixedRoutineProof();
-  record("passive work legs: the authored fixed planner circles the real pile ring, follows one spoke out to the target, never crosses the pile, and replans rather than reuse a graph lane; a walker between spoke samples, or a goal between them, is never sent back to a sample behind it or past the goal; a passive return leg keeps its reserved pile slot on the planned path while an ordinary one keeps the direct pile approach; clanking to chilling from mid-outbound or mid-return walks back along the cave route to the pile slot, then to the chill spot, on terrain and ignoring objects; a passive gorilla's walk to its Ooga's pile slot goes straight over the pile while its work travel to a cave walks straight from another cave or the meadow, even when its origin is reset mid-walk, on terrain, still handing wall steps to the climber",
-    Object.values(fixedRoutine).every(Boolean), JSON.stringify(fixedRoutine));
+  await fixedRoutineChecks();
   const passiveWeapons = await passiveWeaponTargetProof();
   record("passive weapon targets: a shot passes through a passive NPC to the body behind it, hover and carry picks still find the NPC, and a non-passive body takes the hit",
     Object.values(passiveWeapons).every(Boolean), JSON.stringify(passiveWeapons));

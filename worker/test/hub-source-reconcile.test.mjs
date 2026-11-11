@@ -41,6 +41,23 @@ test('a changed pile applies to real geometry without advancing NPCs, keeps queu
   try {
     assert.ok(world.project().npcs.length > 0, 'real Oogas');
     assert.ok(world.capture().clankers, 'real Clanker logical state');
+    // Exercise the actual crew codec directly: a refused live value must not
+    // poison the enclosing world's recovery adapter or alter its reservation.
+    const { crew, bedId, bedFor } = world.actors, work = crew.list[0].work;
+    const logical = crew.createLogicalCheckpoint({ world: config.version, bedId, bedFor,
+      placement() { throw Error('capture must not perform restoration'); } });
+    const reservedAt = work.reservedAt;
+    try {
+      for (const invalid of [null, -1, NaN, -Infinity, '0']) {
+        work.reservedAt = invalid;
+        assert.throws(() => logical.capture(), /invalid logical Ooga checkpoint/);
+        assert.ok(Object.is(work.reservedAt, invalid), 'capture never repairs corrupt live state');
+      }
+      work.reservedAt = Infinity;
+      assert.equal(logical.capture().actors[0].work.reservedAt, null, 'only Infinity encodes the unreserved sentinel');
+      work.reservedAt = 0;
+      assert.equal(logical.capture().actors[0].work.reservedAt, 0, 'a finite reservation retains its timestamp');
+    } finally { work.reservedAt = reservedAt; }
     // Queued activity, accepted a second after the world's clock: an absolute
     // input that only a later tick applies.
     const queuedAt = NOW + 1000, initial = world.capture();

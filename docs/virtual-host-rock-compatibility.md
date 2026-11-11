@@ -142,6 +142,22 @@ No complete browser suite, provider-memory fit, delivery/cost headroom or live
 activation claim is made. The outstanding integration/operational gates in
 `virtual-host-review-status.md` still apply.
 
+## Supporting-PR checks
+
+The first CI run on supporting PR #590 stopped before fixed-route assertions because
+the fixed-route fixture still extracted walker/work declarations from crew
+after those functions moved to shared modules. Its source slices now use the
+production modules and verify their delimiters. The `fixed-routine-unit`
+selector runs the same unchanged check without other lanes; it passes locally.
+The ordinary unit lane still runs that check in its original order.
+
+A further static review found that crew capture accepted an already-null live
+reservation timestamp although the Worker work codec refused it. Crew capture
+now requires Infinity or a finite nonnegative timestamp before encoding. The
+real-Hub reconciliation file passes three checks, including invalid live values,
+Infinity/null encoding and finite timestamp retention. No gameplay path that
+produced the invalid null value was established.
+
 ## Rescue integration
 
 A read-only application check of #579 at

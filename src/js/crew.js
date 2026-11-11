@@ -7025,7 +7025,8 @@
         for (const cave of crewList) if (cave.humanControlled || cave.remoteControlled || cave.puppet || cave.build
           || cave.grabbedBy || cave.camp.seat || cave.camp.burning || cave.camp.rolling || cave.camp.panic.active
           || cave.ladder?.plane || cave.bedTravel.manual || cave.health.stunned || cave.health.recovering
-          || cave.health.value !== HEALTH_MAX || cave.stunGear.drops.some(drop => drop.active)) bad();
+          || cave.health.value !== HEALTH_MAX || cave.stunGear.drops.some(drop => drop.active)
+          || cave.work.reservedAt !== Infinity && (!number(cave.work.reservedAt) || cave.work.reservedAt < 0)) bad();
         for (const bullet of bulletPool) if (bullet.life > 0 && (bullet.tomato || bullet.visual
           || !crewList.includes(bullet.source))) bad();
       };
