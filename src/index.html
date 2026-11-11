@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' https://stream.noderunnersradio.com; connect-src 'self' https: wss:; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' https://stream.noderunnersradio.com https://s2.radio.co https://ice1.somafm.com; connect-src 'self' https: wss:; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -322,7 +322,6 @@
         </svg>
       </button>
       <nav class="presets" aria-label="Timechain Sphere room" data-scene="timechain" hidden>
-        <span class="sphere-mode" id="sphere-mode" role="status"></span>
         <button type="button" class="leave" data-action="leave">Leave<span> room</span></button>
       </nav>
       <nav class="presets" aria-label="₿IFRÖST" data-scene="bifrost" hidden>
@@ -629,6 +628,12 @@
 
     <div class="equipment-hud" id="equipment-hud">
       <div class="weapon-equipment-row">
+      <button type="button" class="leave-hud" id="leave-hud" data-action="leave" aria-label="Leave" title="Leave" hidden>
+        <svg class="leave-icon" viewBox="0 0 14 14" shape-rendering="crispEdges" aria-hidden="true">
+          <path fill="#e8891a" d="M1 1h7v2H1zM1 3h2v8H1zM1 11h7v2H1z" />
+          <path fill="#f2efe4" d="M4 6h6v2H4zM9 3h1v8H9zM10 4h1v6H10zM11 5h1v4H11zM12 6h1v2H12z" />
+        </svg>
+      </button>
       <button type="button" class="mode-hud" id="destination-hud" data-action="mode-preset" data-selected="false"
         aria-labelledby="detached-destination-name destination-hud-label" title="Map · cycle destinations" hidden>
         <img class="freeroam-icon" id="freeroam-icon" alt="" aria-hidden="true">
@@ -2023,6 +2028,31 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
       <p class="help" id="board-help"></p>
       <button type="button" class="board-resize" id="board-resize" aria-label="Resize Oogatron window; arrow keys adjust size" hidden></button>
     </dialog>
+    <dialog class="modal model-modal" id="model-modal" aria-labelledby="model-title">
+      <div class="panel-head">
+        <h2><span data-sign id="model-title">Up close</span></h2>
+        <button type="button" class="modal-close" id="model-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="model-body">
+        <div class="model-view">
+          <canvas class="model-canvas" id="model-canvas" tabindex="0" aria-label="The model, in 3D"></canvas>
+          <div class="board-nav">
+            <button type="button" class="board-page" id="model-prev" aria-label="Previous"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3"><path d="M15 6L9 12L15 18"/></svg></button>
+            <b class="board-caption" id="model-count">1 / 1</b>
+            <button type="button" class="board-page" id="model-next" aria-label="Next"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 6L15 12L9 18"/></svg></button>
+          </div>
+          <p class="help" id="model-help"></p>
+        </div>
+        <div class="model-info">
+          <p class="model-kicker" id="model-kicker"></p>
+          <h3 class="model-name" id="model-name"></h3>
+          <p class="model-text" id="model-text"></p>
+          <dl class="model-stats" id="model-stats"></dl>
+          <p class="board-note" id="model-note" hidden></p>
+          <div class="board-links" id="model-links" hidden></div>
+        </div>
+      </div>
+    </dialog>
     <dialog class="modal" id="ooga-portal-menu" aria-labelledby="ooga-portal-title" aria-describedby="ooga-portal-status">
       <div class="panel-head">
         <h2 id="ooga-portal-title">OOGA PORTAL DIALER</h2>
@@ -2221,9 +2251,12 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/voice-blend.js"></script>
   <script src="js/hockey-wire.js"></script>
   <script src="js/block-wire.js"></script>
+  <script src="js/game-wire.js"></script>
+  <script src="js/game-timeline.js"></script>
   <script src="js/arcade-cabinets.js"></script>
   <script src="js/arcade-popular.js"></script>
   <script src="js/net.js"></script>
+  <script src="js/game-net.js"></script>
   <script src="js/highscores.js"></script>
   <script src="js/cloud-hopper-replays.js"></script>
   <script src="js/voice.js"></script>
@@ -2455,6 +2488,18 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/timechain-blocks.js" data-defer="timechain"></script>
   <script src="js/timechain-charts.js" data-defer="timechain"></script>
   <script src="js/timechain-room-models.js" data-defer="timechain"></script>
+  <script src="js/model-viewer.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-planetarium.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-conference.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-temple.js" data-defer="timechain"></script>
+  <script src="js/timechain-party-radio.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-party.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-fireside.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-workout.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-observatory.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-mining.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-lecture.js" data-defer="timechain"></script>
+  <script src="js/timechain-room-theater.js" data-defer="timechain"></script>
   <script src="js/timechain-interior.js" data-defer="timechain"></script>
   <script src="js/routes.js"></script>
   <script src="js/router.js"></script>

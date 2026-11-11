@@ -8410,6 +8410,14 @@ const gameRulesChecks = async () => {
       && !!beside && beside[0] > H.x1 && beside[0] < H.x1 + 1.5 && beside[1] + 0.7 < 6 && !L.posters.some(p => p[2] === A.HALL.back + 0.1 && p[0] > H.x0 && p[0] < H.x1)
       && A.HAUNT.z0 === -22 && A.HAUNT.z1 === -18 && A.HAUNT.y === A.MEZZ.y && A.HAUNT.h === 4 && A.HAUNT.end === 34,
       JSON.stringify({ H, posters: rallyPosters }));
+    // HALLOWEEN: the hunt's own copy of the arena (ghost-sim.js `ARENA`, which the server's hunt runs too) is the arena the
+    // arcade builds: its radius, the wall top the ghosts come over and each elixir in front of its totem.
+    runInNewContext(await readFile(new URL("../src/js/ghost-sim.js", import.meta.url), "utf8"), context);
+    const GA = BL.ghostSim.ARENA, built = A.haunt().totems;
+    record("ghost arena: the hunt's arena, the server's too, is the one the arcade builds",
+      GA.r === A.HAUNT.arena.r && GA.wall === A.HAUNT.arena.wall && GA.spots[1] === A.HAUNT.arena.wall + 1.2 && built.length === GA.elixirs.length
+      && built.every((t, k) => t.elixir.x === GA.elixirs[k].x && t.elixir.y === GA.elixirs[k].y && t.elixir.z === GA.elixirs[k].z),
+      JSON.stringify({ r: GA.r, wall: GA.wall, built: built.map((t) => t.elixir), elixirs: GA.elixirs }));
     const racked = H.racks.flatMap(([, , rows]) => rows.map(([id]) => id));
     record("arcade block hall: three racks hold the game's nine weapons, each from its own held model",
       racked.length === 9 && racked.filter(Number.isInteger).every((i, k) => i === k) && racked.includes("hook") && racked.includes("wallet") && H.pictures.length === 4, JSON.stringify(racked));
@@ -8490,12 +8498,10 @@ const ghostEntryChecks = async () => {
   const BL = context.window.BL;
   BL.ghostHeraldData = { front: "", back: "", side: "" };
   const fixture = (role = "solo", portable = false) => {
-    const state = { loads: 0, made: 0, starts: 0, heard: [], snapshots: [], notices: [] }, pending = [], targets = new Map();
-    const rootNode = BL.scene.createNode(), npcSync = { role, extra: null };
-    let listener = null, sync = null;
-    const net = { state: { hostId: role === "follow" ? 2 : 1 }, serverNow: () => 1.7e12,
-      subscribeGhost(fn) { listener = fn; return () => { if (listener === fn) listener = null; }; }, sendGhost() {} };
-    BL.net = net;
+    const state = { loads: 0, made: 0, starts: 0, snapshots: [], notices: [] }, pending = [], targets = new Map();
+    const rootNode = BL.scene.createNode(), npcSync = { role, extra: null, onMotion: null, send: () => true };
+    let sync = null;
+    BL.net = { state: {}, serverNow: () => 1.7e12 };
     BL.deferred = { load: () => {
       state.loads++;
       return portable ? null : new Promise((resolve, reject) => pending.push({ resolve, reject }));
@@ -8504,11 +8510,10 @@ const ghostEntryChecks = async () => {
       heraldAt: () => ({ x: 0, y: 0, z: 0 }), npcSync, addTarget: (node, owner) => targets.set(node, owner), removeTarget: node => targets.delete(node),
       hud: { toast: text => state.notices.push(text) }, fx: { spawnParticle() {} }, attach: () => {
         state.made++;
-        sync = BL.ghostSync.create({ npcSync, write: () => null, onSnapshot: snap => state.snapshots.push(snap), onMessage: msg => state.heard.push(msg) });
-        return { start: () => state.starts++, receive: sync.receive, restore: snap => state.snapshots.push(snap), debug: { state: "IDLE" } };
+        sync = BL.ghostSync.create({ npcSync, onSnapshot: snap => state.snapshots.push(snap), onMotion: () => {} });
+        return { start: () => state.starts++, restore: snap => state.snapshots.push(snap), debug: { state: "IDLE" } };
       } });
-    return { entry, state, pending, targets, rootNode, npcSync, net, message: msg => listener && listener(msg),
-      dispose: () => { entry.dispose(); if (sync) sync.dispose(); }, listening: () => !!listener };
+    return { entry, state, pending, targets, rootNode, npcSync, dispose: () => { entry.dispose(); if (sync) sync.dispose(); } };
   };
   const rows = [], active = { k: "gh", v: 1, s: [10] }, latest = { k: "gh", v: 1, s: [1] };
   {
@@ -8522,7 +8527,7 @@ const ghostEntryChecks = async () => {
     f.pending[0].resolve(); await Promise.resolve();
     const handedOff = f.npcSync.extra;
     f.entry.dispose();
-    rows.push({ once: once && f.state.made === 1 && f.state.starts === 1, handoff: f.targets.size === 0 && f.rootNode.children.length === 0 && f.npcSync.extra === handedOff && f.listening() });
+    rows.push({ once: once && f.state.made === 1 && f.state.starts === 1, handoff: f.targets.size === 0 && f.rootNode.children.length === 0 && f.npcSync.extra === handedOff });
     f.dispose();
   }
   {
@@ -8537,7 +8542,7 @@ const ghostEntryChecks = async () => {
   {
     const f = fixture();
     f.entry.hit(true, true); f.dispose(); f.pending[0].resolve(); await Promise.resolve();
-    rows.push({ late: f.state.made === 0 && f.targets.size === 0 && f.rootNode.children.length === 0 && !f.listening() && f.npcSync.extra === null });
+    rows.push({ late: f.state.made === 0 && f.targets.size === 0 && f.rootNode.children.length === 0 && f.npcSync.extra === null });
   }
   {
     const f = fixture("follow");
@@ -8549,34 +8554,11 @@ const ghostEntryChecks = async () => {
     f.dispose();
   }
   {
-    const f = fixture("host");
-    f.message({ k: "start", from: -1 }); f.message({ k: "ready", from: 3 });
-    const ignored = f.state.loads === 0;
-    f.message({ k: "start", from: 3 }); f.message({ k: "start", from: 3 });
-    f.pending[0].resolve(); await Promise.resolve();
-    rows.push({ host: ignored && f.state.loads === 1 && f.state.made === 1 && f.state.heard.length === 1 && f.state.heard[0].from === 3 && f.state.heard[0].k === "start" });
-    f.dispose();
-  }
-  for (const role of ["host", "follow"]) {
-    const f = fixture(role);
-    if (role === "host") f.message({ k: "start", from: 3 }); else f.npcSync.extra.read(active);
-    f.net.state.hostId = 4; f.npcSync.role = "follow";
-    f.pending[0].resolve(); await Promise.resolve();
-    rows.push({ changedHost: f.state.heard.length === 0 && f.state.snapshots.length === 0 });
-    f.dispose();
-  }
-  {
+    // A page that stops following the server while the hunt loads (it walked out, or signed out) is not handed it.
     const f = fixture("follow");
-    f.npcSync.extra.read(active); f.net.state.hostId = 1; f.npcSync.role = "host";
+    f.npcSync.extra.read(active); f.npcSync.role = "solo";
     f.pending[0].resolve(); await Promise.resolve();
-    rows.push({ takeover: f.state.snapshots.length === 1 && f.state.snapshots[0] === active && f.state.starts === 0 });
-    f.dispose();
-  }
-  {
-    const f = fixture("host");
-    f.message({ k: "start", from: 3 }); f.pending[0].reject(new Error("offline")); await Promise.resolve();
-    f.message({ k: "start", from: 4 }); f.pending[1].resolve(); await Promise.resolve();
-    rows.push({ remoteRetry: f.state.loads === 2 && f.state.made === 1 && f.state.heard.length === 1 && f.state.heard[0].from === 4 });
+    rows.push({ leftFollow: f.state.made === 1 && f.state.snapshots.length === 0 });
     f.dispose();
   }
   {
@@ -8585,14 +8567,14 @@ const ghostEntryChecks = async () => {
     rows.push({ portable: f.state.loads === 1 && f.state.made === 1 && f.state.starts === 1 && !f.entry.debug.loading });
     f.dispose();
   }
-  record("ghost entry lifecycle: idle visits and melee load no hunt, concurrent starts attach once, failures retry, departures cancel, and current-host starts and latest snapshots survive the deferred handoff in hosted and portable builds",
+  record("ghost entry lifecycle: idle visits and melee load no hunt, concurrent starts attach once, failures retry, departures cancel, and the server's latest state survives the deferred handoff in hosted and portable builds",
     rows.every(row => Object.values(row).every(Boolean)), JSON.stringify(rows));
 };
 // HALLOWEEN: the hub's ghost hunt (ghost-sim.js), its rules run in Node with scripted players on a ring of crest spots.
 const ghostHuntChecks = async () => {
   await ghostEntryChecks();
   const context = { window: {} };
-  runInNewContext(await readFile(new URL("../src/js/ghost-sim.js", import.meta.url), "utf8"), context);
+  for (const name of ["ghost-sim", "game-timeline", "game-wire"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
   const G = context.window.BL.ghostSim, ST = G.STATE, T0 = 1.7e12, FRAME = 16;
   const spots = [];
   for (let i = 0; i < 120; i++) { const a = i / 120 * Math.PI * 2; spots.push(Math.sin(a) * 25.5, 4, -Math.cos(a) * 25.5, a); }
@@ -8796,14 +8778,66 @@ const ghostHuntChecks = async () => {
     let now = T0;
     const tick = () => { now += FRAME; z.beginPresence(); const p = z.present(1, 0, 0, 6); if (p) p.invulnUntil = z.state.now + 60000; z.advance(now); };
     while (now < T0 + 60000 && z.state.state !== ST.ACTIVE) tick();
-    const before = z.halving();
+    const full = z.shotDamage(), before = z.halving();
     z.debug.hourglass();
     const glass = z.brutes.find((b) => b.on && b.kind === 3);
     while (now < T0 + 120000 && glass.phase < G.BRUTE_PHASE.SHAKE) tick();
-    const halved = z.halving();
+    const halved = z.halving() && z.shotDamage() < full && z.shotDamage() >= 1;
     for (let i = 0; i < 400 && !glass.dying; i++) z.hit(glass.id, 5, 1);
-    const lifted = !z.halving();
+    const lifted = !z.halving() && z.shotDamage() === full;
     record("ghost hunt: a standing hourglass halves every rifle round until it dies", !before && halved && lifted, JSON.stringify({ before, halved, lifted }));
+  }
+  {
+    // The rules a shot is decided by, the server's and a page's alike: a line meets the target the rules lay out (one
+    // its page saw passing a little wide, too, when the page names it), and lands only for a hunter in the hunt and
+    // standing, never for a stranger or someone down.
+    const z = begin(29);
+    let now = T0;
+    const tick = () => { now += FRAME; z.beginPresence(); for (const id of [1, 2]) { const p = z.present(id, id * 3, 0, 6); if (p) p.invulnUntil = z.state.now + 60000; } z.advance(now); };
+    while (now < T0 + 90000 && !(z.state.state === ST.ACTIVE && z.ghosts.some((g) => g.on && !g.dying))) tick();
+    const W = G.TARGET_WIDTH, rows = z.targets(new Float64Array(G.TARGET_SLOTS * W)), out = {};
+    const slot = z.ghosts.findIndex((g) => g.on && !g.dying), g = z.ghosts[slot], o = slot * W, only = rows.slice();
+    for (let s = 0; s < G.TARGET_SLOTS; s++) if (s !== slot) only[s * W + 5] = 0;
+    const toward = (x, y, zz) => { const d = [x - 3, y - 1.2, zz - 6], l = Math.hypot(...d); return d.map((v) => v / l); };
+    const [dx, dy, dz] = toward(only[o + 1], only[o + 2], only[o + 3]);
+    const met = G.resolveShot(only, 3, 1.2, 6, dx, dy, dz, G.HIT.range, -1, 0, 0, out) && out.id === g.id;
+    const away = !G.resolveShot(only, 3, 1.2, 6, -dx, -dy, -dz, G.HIT.range, -1, 0, 0, out);
+    const flat = Math.hypot(only[o + 1] - 3, only[o + 3] - 6), e = only[o + 4] + 0.2;
+    const [wx, wy, wz] = toward(only[o + 1] - (only[o + 3] - 6) / flat * e, only[o + 2], only[o + 3] + (only[o + 1] - 3) / flat * e);
+    const wide = !G.resolveShot(only, 3, 1.2, 6, wx, wy, wz, G.HIT.range, -1, 0, 0.15, out);
+    const hinted = G.resolveShot(only, 3, 1.2, 6, wx, wy, wz, G.HIT.range, g.id, 0.3, 0.15, out) && out.id === g.id;
+    const hp = g.hp, stranger = z.hitBy(g.id, 2, 99) === "" && g.hp === hp;
+    z.playerById(2).frozenUntil = 1e12;
+    const down = z.hitBy(g.id, 2, 2) === "" && g.hp === hp;
+    const hunter = z.hitBy(g.id, 2, 1) !== "" && (g.dying > 0 || g.hp === hp - 2);
+    record("ghost hunt shots: a line meets the target the rules lay out, a hinted one a little wide too, and lands only for a hunter in the hunt and standing",
+      met && away && wide && hinted && stranger && down && hunter, JSON.stringify({ met, away, wide, hinted, stranger, down, hunter }));
+  }
+  {
+    // A hosted game's recent past (game-timeline.js) and its motion frame (game-wire.js), shared by the server and every
+    // page: a moment between two kept is eased between them where the same thing stands in a slot at both, else the
+    // nearer moment's; one outside them is the nearest kept; a frame comes back as it went, to a centimetre and a
+    // 256th of a turn, and one cut short or not a frame is refused.
+    const BL = context.window.BL, TL = BL.gameTimeline, WR = BL.gameWire;
+    const tl = TL.create({ slots: 2, width: 4, depth: 3, lerp: [1, 2] }), seen = new Float64Array(8);
+    tl.push(100, Float64Array.of(7, 0, 0, 1, 8, 5, 5, 1));
+    tl.push(200, Float64Array.of(7, 10, 20, 1, 9, 6, 6, 1));
+    const eased = tl.sample(150, seen) === 150 && seen[1] === 5 && seen[2] === 10 && seen[4] === 9 && seen[5] === 6;
+    const early = tl.sample(50, seen) === 100 && seen[1] === 0, late = tl.sample(900, seen) === 200 && seen[1] === 10;
+    tl.push(300, Float64Array.of(7, 20, 40, 1, 9, 7, 7, 1)); tl.push(400, Float64Array.of(7, 30, 60, 1, 9, 8, 8, 1));
+    const kept = tl.oldest === 200 && tl.newest === 400 && tl.count === 3;
+    const f = WR.frame(), back = WR.frame(), buf = new ArrayBuffer(WR.size(WR.MAX_ROWS, WR.MAX_CONFIRMS));
+    f.kind = 1; f.serverMs = T0 + 0.5; f.gameMs = 12345.25; f.count = 2; f.confirms = 1;
+    f.rows.set([0, 3, 70000, 1.234, -2.5, 300, Math.PI, 1, 2, 95, 5, -1, 0, 1, -0.1, 1]);
+    f.confirm.set([123456789, 7, 70000, 6, 3]);
+    const n = WR.encode(f, buf), whole = buf.slice(0, n), read = WR.decode(whole, back);
+    const same = read && back.kind === 1 && back.serverMs === f.serverMs && back.gameMs === f.gameMs && back.count === 2 && back.rows[1] === 3
+      && back.rows[2] === (70000 & 0xffff) && Math.abs(back.rows[3] - 1.234) <= 0.005 && back.rows[4] === -2.5 && back.rows[5] === 300
+      && Math.abs(back.rows[6] - Math.PI) <= Math.PI / 128 && back.rows[9] === 95 && back.confirms === 1 && back.confirm[0] === 123456789
+      && back.confirm[1] === 7 && back.confirm[2] === (70000 & 0xffff) && back.confirm[3] === 6 && back.confirm[4] === 3;
+    const refused = !WR.decode(whole.slice(0, n - 1), back) && !WR.decode(new ArrayBuffer(n), back) && back.count === 2;
+    record("game timeline and wire: the past eases between kept moments and clamps to them, and a motion frame comes back as it went or not at all",
+      eased && early && late && kept && same && refused, JSON.stringify({ eased, early, late, kept, same, refused }));
   }
 
   {
@@ -18759,23 +18793,28 @@ const arcadeHeraldClick = (view) => ({ name: "arcade herald click " + view, why:
   record("arcade herald click: clicking the ghost in " + view + " view opens the hunt's lobby", !!at && await b.evaluate(lobby), JSON.stringify(at));
 } });
 // #428: a hallway page receives the running hunt without becoming a hunter or borrowing arena ammunition.
-// A hunter gone down only follows the others: through the room's own snapshots from a host, with two other hunters in
+// A hunter gone down only follows the others: through the server's states (a fake hunt socket), with two other hunters in
 // the arena, the view rides behind one, Next moves on, one going down hands it to the other, and with nobody left it
 // holds still before the grave whatever is pressed; no view to pick, no free camera, and back whole at the round's end.
 const arcadeSpectateFollow = { name: "ghost hunt spectate follows", why: "rule: a downed hunter may only follow the hunters still standing, never roam the arena with a free or independent camera", run: async (b) => {
   await b.evaluate(`(async () => {
     const B = __ooga, N = BL.net, H = BL.arcadeModels.HAUNT, A = H.arena;
     const W = window.__follow = { fetch: window.fetch, WebSocket: window.WebSocket, sockets: [] };
-    window.fetch = (url, options) => String(url) === "/api/me" ? Promise.resolve({ ok: true, status: 200, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "portlandhodl", display: "portlandhodl" } }) }) : W.fetch(url, options);
-    window.WebSocket = class { static OPEN = 1; constructor() { this.readyState = 1; W.sockets.push(this); } send() {} close() { this.readyState = 3; } };
+    window.fetch = (url, options) => String(url) === "/api/me" ? Promise.resolve({ ok: true, status: 200, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "portlandhodl", display: "portlandhodl" }, games: ["ghost-hunt"] }) }) : W.fetch(url, options);
+    window.WebSocket = class { static OPEN = 1; constructor(url) { this.url = String(url); this.readyState = 1; W.sockets.push(this); } send() {} close() { this.readyState = 3; } };
+    // The hunt's own socket (game-net.js), opened in the arena or its hallway: the newest, welcomed as the server would.
+    Object.defineProperty(W, "game", { get: () => W.sockets.filter((s) => s.url.includes("/game/ghost-hunt/arena")).at(-1) });
+    W.welcome = () => W.game.onmessage({ data: JSON.stringify({ t: "welcome", you: 71, now: Date.now() }) });
+    W.state = () => W.game.onmessage({ data: JSON.stringify({ t: "state", now: Date.now(), s: W.host.snapshot() }) });
     N.state.started = true; N.state.resolved = false;
     await N.recheck();
     W.socket = W.sockets.at(-1);
-    W.socket.onmessage({ data: JSON.stringify({ t: "welcome", you: { id: 71 }, now: Date.now(), ghostHost: 2, ghostFollowers: 1, players: [] }) });
+    W.socket.onmessage({ data: JSON.stringify({ t: "welcome", you: { id: 71 }, now: Date.now(), players: [] }) });
     const a = B.cavemen.get("portlandhodl");
     if (B.crew.player !== a && B.crew.player?.npc !== a) B.pilot.possess(a);
     B.pilot.navigate({ position: { x: A.x, y: H.y, z: A.z + 8 }, yaw: 0, pitch: 0.18, dist: 4 });
     B.advance(0.5, 1 / 60);
+    W.welcome();
     await BL.deferred.load("halloween");
     const G = BL.ghostSim;
     // The host's hunt: this page (71) and two others (2, 3) readied in its lobby, then into a round.
@@ -18783,11 +18822,7 @@ const arcadeSpectateFollow = { name: "ghost hunt spectate follows", why: "rule: 
     W.host.start(N.serverNow(), 2);
     for (const id of [2, 71, 3]) W.host.ready(id);
     for (const p of W.host.players) if (p.on) p.inGame = 1;
-    W.frame = () => {
-      const bytes = new TextEncoder().encode(JSON.stringify(W.host.snapshot())), f = new Uint8Array(bytes.length + 4);
-      new DataView(f.buffer).setUint32(0, 0x54534847, true); f.set(bytes, 4);
-      W.socket.onmessage({ data: f.buffer });
-    };
+    W.frame = W.state;
     W.down = (id) => { const q = W.host.playerById(id); q.seg = 0; q.frozenUntil = G.CONFIG.DOWN_UNTIL; q.downAt = Math.max(1, W.host.state.now); q.downX = 0; q.downZ = 8; };
     // The other two, standing in the arena 12 m apart, as the room reports them.
     for (const [id, dx, name] of [[2, -6, "Hunter Two"], [3, 6, "Hunter Three"]])
@@ -18830,7 +18865,7 @@ const arcadeSpectateFollow = { name: "ghost hunt spectate follows", why: "rule: 
     W.host.jump(G.STATE.BREAK); for (let i = 0; i < 6; i++) { W.frame(); B.advance(0.25, 1 / 60); }
     const r = W.read();
     W.host.jump(G.STATE.DAWN); W.frame(); B.advance(0.2, 1 / 60);
-    W.socket.close(); BL.net.state.room = "off"; BL.net.remotes.delete(2); BL.net.remotes.delete(3);
+    W.socket.close(); W.game.close(); BL.net.state.room = "off"; BL.net.state.games = []; BL.net.remotes.delete(2); BL.net.remotes.delete(3);
     window.fetch = W.fetch; window.WebSocket = W.WebSocket;
     return r;
   })()`);
@@ -18850,16 +18885,27 @@ const arcadeSpectatorAmmo = { name: "arcade hallway ammunition", why: "regressio
   await b.evaluate(`(async () => {
     const B = __ooga, N = BL.net, H = BL.arcadeModels.HAUNT;
     const W = window.__hallAmmo = { fetch: window.fetch, WebSocket: window.WebSocket, sockets: [] };
-    window.fetch = (url, options) => String(url) === "/api/me" ? Promise.resolve({ ok: true, status: 200, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "portlandhodl", display: "portlandhodl" } }) }) : W.fetch(url, options);
-    window.WebSocket = class { static OPEN = 1; constructor() { this.readyState = 1; W.sockets.push(this); } send() {} close() { this.readyState = 3; } };
+    window.fetch = (url, options) => String(url) === "/api/me" ? Promise.resolve({ ok: true, status: 200, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "portlandhodl", display: "portlandhodl" }, games: ["ghost-hunt"] }) }) : W.fetch(url, options);
+    window.WebSocket = class { static OPEN = 1; constructor(url) { this.url = String(url); this.readyState = 1; W.sockets.push(this); } send() {} close() { this.readyState = 3; } };
+    // The hunt's own socket (game-net.js), opened in the arena or its hallway and closed in the hall: the newest, welcomed
+    // as the server would, and sent the hunt only while it is open.
+    Object.defineProperty(W, "game", { get: () => W.sockets.filter((s) => s.url.includes("/game/ghost-hunt/arena")).at(-1) });
+    W.welcome = () => { const g = W.game; g.welcomed = true; g.onmessage({ data: JSON.stringify({ t: "welcome", you: 71, now: Date.now() }) }); };
+    W.state = () => {
+      const g = W.game;
+      if (!g || !g.onmessage) return;
+      if (!g.welcomed) W.welcome();
+      g.onmessage({ data: JSON.stringify({ t: "state", now: Date.now(), s: W.host.snapshot() }) });
+    };
     N.state.started = true; N.state.resolved = false;
     await N.recheck();
     W.socket = W.sockets.at(-1);
-    W.socket.onmessage({ data: JSON.stringify({ t: "welcome", you: { id: 71 }, now: Date.now(), ghostHost: 2, ghostFollowers: 1, players: [] }) });
+    W.socket.onmessage({ data: JSON.stringify({ t: "welcome", you: { id: 71 }, now: Date.now(), players: [] }) });
     const a = B.cavemen.get("portlandhodl");
     if (B.crew.player !== a) B.pilot.possess(a);
     B.pilot.navigate({ position: { x: H.end - 4, y: H.y, z: (H.z0 + H.z1) / 2 }, yaw: -Math.PI / 2, pitch: 0.18, dist: 4 });
     B.advance(0.5, 1 / 60);
+    W.welcome();
     a.weapon.unlimited = false; a.weapon.ammo = 7;
     B.pilot.weaponMode(2);
     W.read = () => { const w = B.pilot.player.weapon, A = BL.scenes.arcade.debug.arena; return { unlimited: w.unlimited, ammo: w.ammo, equipped: w.equipped, aiming: w.aiming, armed: A.armed, zone: A.zone }; };
@@ -18870,9 +18916,7 @@ const arcadeSpectatorAmmo = { name: "arcade hallway ammunition", why: "regressio
     W.host.start(N.serverNow(), 2);
     W.send = (state) => {
       W.host.jump(G.STATE[state]);
-      const bytes = new TextEncoder().encode(JSON.stringify(W.host.snapshot())), frame = new Uint8Array(bytes.length + 4);
-      new DataView(frame.buffer).setUint32(0, 0x54534847, true); frame.set(bytes, 4);
-      W.socket.onmessage({ data: frame.buffer });
+      W.state();
     };
     W.send("LAP");
   })()`);
@@ -18908,18 +18952,14 @@ const arcadeSpectatorAmmo = { name: "arcade hallway ammunition", why: "regressio
     // A hunter hurt in the snapshots: this spectator, in no hunt, hears it once; the first sight of them sounds nothing.
     W.host.debug.results(2, { kills: 0, foes: 0 }, []);
     const q = W.host.players.find(p => p.on && p.id === 2);
-    const frame = () => {
-      const bytes = new TextEncoder().encode(JSON.stringify(W.host.snapshot())), f = new Uint8Array(bytes.length + 4);
-      new DataView(f.buffer).setUint32(0, 0x54534847, true); f.set(bytes, 4);
-      W.socket.onmessage({ data: f.buffer });
-    };
+    const frame = W.state;
     q.seg = 5; frame(); B.advance(0.2, 1 / 60);
     before = G.played; frame(); B.advance(0.2, 1 / 60); sounds.steady = G.played - before;
     q.seg = 4; before = G.played; frame(); B.advance(0.2, 1 / 60); sounds.hurt = G.played - before;
     W.send("DAWN"); B.advance(0.1, 1 / 60);
     return { rows, sounds };
   })()`);
-  await b.evaluate(`(() => { const W = __hallAmmo; W.socket.close(); BL.net.state.room = "off"; window.fetch = W.fetch; window.WebSocket = W.WebSocket; })()`);
+  await b.evaluate(`(() => { const W = __hallAmmo; W.socket.close(); W.game.close(); BL.net.state.room = "off"; BL.net.state.games = []; window.fetch = W.fetch; window.WebSocket = W.WebSocket; })()`);
   const kept = result.rows.every(r => !r.armed && r.zone === "ghost-arena.haunt" && r.received === r.state && !r.unlimited && r.ammo === result.before.ammo && r.equipped === result.before.equipped && r.aiming === result.before.aiming);
   record("arcade hallway ammunition: a signed-in hallway-only spectator keeps weapon state through every hunt phase, rejects firing and keeps the same ammunition policy at dawn",
     !result.before.armed && result.before.zone === "ghost-arena.haunt" && result.role === "follow" && !result.hunter && kept && after.fired.ammo === result.before.ammo && !after.fired.equipped && !after.fired.unlimited && !after.restored.unlimited,
@@ -20325,38 +20365,82 @@ const modelResidencyChecks = BL => {
     JSON.stringify({ kept, dropped, caught }));
 };
 
+// Regression: the Block Party's beat once came from a spectrum read once a drawn frame, and the hold of 60 frames a
+// second on a grid of 100 onsets a second favoured some tempos (a house track at 126 read as 150); a bassline's
+// off-beat figure read as 4/3 of the beat; and beatless noise could pass for one. Kicks at 128 BPM through the page's
+// own low-pass, meter and tracker lock to the same beat at 60 and 144 frames a second, and noise and silence never do.
+const partyRadioChecks = async () => {
+  const context = { window: { BL: {} } };
+  runInNewContext(await readFile(new URL("../src/js/timechain-party-radio.js", import.meta.url), "utf8"), context);
+  const P = context.window.BL.timechainPartyRadio, SR = 48000, BPM = 128, T0 = 0.2, SECS = 12;
+  let seed = 9; const rnd = () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  // A kick (a falling sine) on every beat over a steady bass tone, or the tone and noise alone, low-passed as the page's
+  // BiquadFilterNode is.
+  const track = (kicks, noise) => {
+    const x = new Float32Array(SECS * SR), beat = 60 / BPM, w = 2 * Math.PI * 150 / SR, al = Math.sin(w) / Math.SQRT2, c = Math.cos(w), a0 = 1 + al;
+    const b0 = (1 - c) / 2 / a0, b1 = (1 - c) / a0, a1 = -2 * c / a0, a2 = (1 - al) / a0;
+    let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+    for (let i = 0; i < x.length; i++) {
+      const t = i / SR, since = ((t - T0) % beat + beat) % beat;
+      const v = (kicks ? 0.8 * Math.sin(2 * Math.PI * (50 + 80 * Math.exp(-since / 0.02)) * since) * Math.exp(-since / 0.12) : 0) + 0.09 * Math.sin(2 * Math.PI * 110 * t) + noise * (rnd() * 2 - 1);
+      const y = b0 * v + b1 * x1 + b0 * x2 - a1 * y1 - a2 * y2; x2 = x1; x1 = v; y2 = y1; y1 = y; x[i] = y;
+    }
+    return x;
+  };
+  // The track delivered a frame at a time, as the page's analyser holds it, with what the room would read each frame.
+  const play = (pcm, fps) => {
+    const m = P.meter(SR), tr = P.tracker(SR / m.block), wave = new Float32Array(8192), out = {}, errs = [];
+    let firstLive = -1, live = 0, frames = 0;
+    for (let f = 1; f / fps * SR <= pcm.length; f++) {
+      const t = f / fps, end = Math.floor(t * SR);
+      for (let i = 0; i < wave.length; i++) { const k = end - wave.length + i; wave[i] = k >= 0 ? pcm[k] : 0; }
+      m.take(wave, end, tr); tr.read(t, out);
+      if (t < 6) continue;
+      frames++;
+      if (!out.live) continue;
+      live++; if (firstLive < 0) firstLive = t;
+      let e = out.phase - (((t - T0) * BPM / 60) % 1 + 1) % 1; e -= Math.round(e); errs.push(Math.abs(e) * 60000 / BPM);
+    }
+    return { live: live / frames, bpm: +out.bpm.toFixed(2), err: errs.length ? +(errs.reduce((a, b) => a + b, 0) / errs.length).toFixed(1) : null };
+  };
+  const kicks = track(true, 0.05), at60 = play(kicks, 60), at144 = play(kicks, 144), noise = play(track(false, 0.3), 60), silence = play(new Float32Array(SECS * SR), 60);
+  record("party radio: kicks lock at their tempo and on their beat alike at 60 and 144 frames a second, and noise and silence never lock",
+    at60.live === 1 && at144.live === 1 && Math.abs(at60.bpm - BPM) < 1 && Math.abs(at144.bpm - at60.bpm) < 0.3 && at60.err < 30 && at144.err < 30
+      && noise.live === 0 && silence.live === 0, JSON.stringify({ at60, at144, noise, silence }));
+};
+
 // Rule: a room id is validated at every boundary, and the three sizes are one design whose doorway, arrival, button and
 // chairs keep human size while the architecture scales and the table grows to seat 4, 8 and 12.
 const timechainRoomChecks = async () => {
   const context = { window: { BL: {} } };
   runInNewContext(await readFile(new URL("../src/js/timechain-rooms.js", import.meta.url), "utf8"), context);
   const R = context.window.BL.timechainRooms;
-  const good = [1, 9, "1", "5", "9"].every(v => R.parse(v) === Number(v));
-  const bad = [0, 10, 3.5, -1, "0", "03", "3a", " 3", "", "sphere-3", null, undefined, NaN, {}, [3]].every(v => R.parse(v) === null);
-  const zones = R.ROOMS.map(r => r.zone), scales = R.ROOMS.map(r => r.scale).join();
-  record("timechain rooms: only 1–9 resolve to rooms, each its own undotted zone, at 1× for 1–3, 1.5× for 4–6 and 2× for 7–9",
-    good && bad && new Set(zones).size === 9 && zones.every((z, i) => z === `sphere-${i + 1}` && !z.includes(".")) && scales === "1,1,1,1.5,1.5,1.5,2,2,2" && R.get("4").scale === 1.5 && R.get(12) === null,
-    JSON.stringify({ good, bad, zones, scales }));
-  const rows = R.SCALES.map(s => {
-    const L = R.layout(s), along = (a) => [L.doorZ - a.z, a.x];
+  const good = [0, 1, 9, "0", "5", "9"].every(v => R.parse(v) === Number(v));
+  const bad = [10, 3.5, -1, "03", "3a", " 3", "", "sphere-3", null, undefined, NaN, {}, [3]].every(v => R.parse(v) === null);
+  const zones = R.ROOMS.map(r => r.zone), kinds = R.ROOMS.map(r => r.kind).join();
+  record("timechain rooms: only 0–9 resolve to rooms, each its own kind and undotted zone, and only the Conference Room locks",
+    good && bad && new Set(zones).size === 10 && zones.every((z, i) => z === `sphere-${i}` && !z.includes(".")) && R.get(0).kind === "planetarium" && R.get("1").name === "Conference Room"
+      && kinds === "planetarium,conference,temple,party,fireside,workout,observatory,mining,lecture,theater" && R.LOCKABLE.join() === "1" && R.get(12) === null
+      && R.ROOMS.every(r => !!R.layout(r.id).lockPad === r.lockable), JSON.stringify({ good, bad, zones, kinds }));
+  const rows = R.ROOMS.map(({ id }) => {
+    const L = R.layout(id), along = (a) => [+(L.doorZ - a.z).toFixed(9), a.x];
     const guided = Array.from({ length: 40 }, (_, i) => L.threshold.z + (L.arrival.z - L.threshold.z) * i / 39).every(z => R.clearAt(L, 0, z, 0.45, true));
+    // Down the middle from the door to the front, no step is more than a walker's (pilot.js `WALK.step`).
+    let worst = 0, last = R.floorAt(L, 0.3, L.doorZ - 0.6);
+    for (let z = L.doorZ - 0.6; z > -L.R + 1; z -= 0.05) { const y = R.floorAt(L, 0.3, z); worst = Math.max(worst, Math.abs(y - last)); last = y; }
     return {
-      s, radius: L.radius, wall: L.wall, door: [L.door.halfW, L.door.height], arrival: along(L.arrival), heading: L.arrival.heading, button: [L.exitButton.y, L.doorZ - L.exitButton.z, L.exitButton.x],
-      table: [L.table.x, L.table.z, L.table.top], seats: L.chairs.length, screenW: L.screens[0].w,
-      // Evenly round the table and clear of it, far enough apart for the widest Ooga to pass between two, the aisle from
-      // the door between two of them.
-      chairs: L.chairs.every((c, i, all) => { const n = all[(i + 1) % all.length]; return Math.hypot(c.x, c.z) - 0.48 > L.table.r + 0.05 && Math.hypot(c.x - n.x, c.z - n.z) > 2.55 && !(c.z > 0 && Math.abs(c.x) < 0.43); }),
-      symmetric: Math.abs(L.screens.reduce((sum, p) => sum + p.x, 0)) < 1e-9 && Math.abs(L.ribbon.reduce((sum, p) => sum + p.x, 0)) < 1e-9 && L.screens.every((p, i) => Math.abs(p.x + L.screens[5 - i].x) < 1e-9),
-      front: L.screens.every(p => p.z < -L.radius * 0.5), doorBehind: L.doorZ > L.radius * 0.9, screensReach: Math.max(...L.screens.map(p => Math.abs(p.angle))),
-      arrivalClear: R.clearAt(L, L.arrival.x, L.arrival.z), buttonReach: R.clearAt(L, L.exitButton.x + 0.4, L.doorZ - 0.6) && Math.hypot(0.4, L.exitButton.z - L.doorZ + 0.6) < L.exitReach,
-      tableSolid: !R.clearAt(L, 0, 0) && R.clearAt(L, 0, 0, 0.35, false, L.table.top), doorShut: !R.clearAt(L, 0, L.doorZ + 1), doorGuided: R.clearAt(L, 0, L.doorZ + 1, 0.35, true), wallSolid: !R.clearAt(L, L.radius - 0.2, 0), guided
+      id, door: [L.door.halfW, L.door.height], arrival: along(L.arrival), heading: L.arrival.heading, button: [L.exitButton.y, +(L.doorZ - L.exitButton.z).toFixed(9), L.exitButton.x],
+      landing: R.floorAt(L, L.arrival.x, L.arrival.z) === 0 && R.floorAt(L, 0, L.doorZ - 0.5) === 0, worst: +worst.toFixed(3), front: last <= (L.rake ? L.yMin + 0.4 : 0),
+      inside: Math.hypot(L.doorZ, L.door.height - L.c) < L.R && L.doorZ > L.R * 0.85, arrivalClear: R.clearAt(L, L.arrival.x, L.arrival.z),
+      buttonReach: R.clearAt(L, L.exitButton.x + 0.4, L.doorZ - 0.6) && Math.hypot(0.4, L.exitButton.z - L.doorZ + 0.6) < L.exitReach,
+      doorShut: !R.clearAt(L, 0, L.doorZ + 1), doorGuided: R.clearAt(L, 0, L.doorZ + 1, 0.35, true), wallSolid: !R.clearAt(L, R.wallAt(L, 0) + 0.1, 0), guided,
+      ceiling: R.ceilingAt(L, 0, 0) > L.crown - L.R * 0.02 && R.ceilingAt(L, 0, L.doorZ - 1) > L.door.height
     };
   });
   const same = (k) => rows.every(r => JSON.stringify(r[k]) === JSON.stringify(rows[0][k]));
-  record("timechain rooms: rooms scale 1×, 1.5× and 2× around one centred doorway opposite the screens, with arrival, Exit button and chairs kept at human size, a table for 4, 8 and 12 that can be stood on, and every walk clear",
-    rows.every(r => r.radius === 9 * r.s && Math.abs(r.wall - 5.4 * r.s) < 1e-9 && Math.abs(r.screenW - 3 * r.s) < 1e-9 && r.heading === Math.PI && r.symmetric && r.front && r.doorBehind && r.screensReach < 1.4
-      && r.arrivalClear && r.buttonReach && r.tableSolid && r.doorShut && r.doorGuided && r.wallSolid && r.guided && r.chairs)
-      && rows.map(r => r.seats).join() === "4,8,12" && ["door", "arrival", "button", "table"].every(same), JSON.stringify(rows));
+  record("timechain rooms: every room has one centred doorway at the back with the arrival, Exit button and door at human size, a clear guided walk, a shut door, its wall, and no step down the middle over a walker's",
+    rows.every(r => r.heading === Math.PI && r.landing && r.worst <= 0.6 && r.front && r.inside && r.arrivalClear && r.buttonReach && r.doorShut && r.doorGuided && r.wallSolid && r.guided && r.ceiling)
+      && ["door", "arrival", "button"].every(same) && rows[8].worst > 0.3 && rows[9].worst > 0.3, JSON.stringify(rows));
   // Regression: a rejected hub build released guided control in the vestibule, outside ordinary room collision.
   // Exercise only the production recovery methods; no doorway animation or scene crossing runs in this fixture.
   const interior = await readFile(new URL("../src/js/timechain-interior.js", import.meta.url), "utf8");
@@ -20365,11 +20449,11 @@ const timechainRoomChecks = async () => {
     return interior.slice(start, interior.indexOf(`    const ${next} =`, start));
   }).join("\n");
   const recovery = [];
-  for (const scale of R.SCALES) for (const shared of [false, true]) for (const walking of [false, true]) {
-    const L = R.layout(scale), calls = [], guide = { stage: walking ? "out" : null }, doors = { want: walking ? 1 : 0 }, zones = [];
+  for (const { id } of R.ROOMS) for (const shared of [false, true]) for (const walking of [false, true]) {
+    const L = R.layout(id), calls = [], guide = { stage: walking ? "out" : null }, doors = { want: walking ? 1 : 0 }, zones = [];
     let destination = null, insideBeforeRelease = false, releasedInside = false;
     const fixture = {
-      L, shared, guide, doors, room: R.get(R.SCALES.indexOf(scale) * 3 + 1), world: { sphereExit: {} }, leaving: true, guided: walking, COARSE: false,
+      L, shared, guide, doors, room: R.get(id), world: { sphereExit: {} }, leaving: true, guided: walking, COARSE: false,
       BL: { net: { setZone: zone => zones.push(zone) } }, hud: { hint() {} },
       people: { steer(...axes) { calls.push("stop"); if (axes.some(Boolean)) throw new Error("recovery kept walking"); } },
       pilot: {
@@ -20379,7 +20463,7 @@ const timechainRoomChecks = async () => {
     };
     runInNewContext(`${methods}\nstay();`, fixture);
     const p = destination && destination.position;
-    recovery.push({ scale, shared, walking,
+    recovery.push({ id, shared, walking,
       restored: !fixture.leaving && fixture.world.sphereExit === null && zones.join() === (shared ? fixture.room.zone : ""),
       recovered: walking ? insideBeforeRelease && releasedInside && calls.join() === "arrive,stop,active"
         && p.x === L.doorStep.x && p.z === L.doorStep.z && p.y === 0 && destination.yaw === 0
@@ -20389,80 +20473,45 @@ const timechainRoomChecks = async () => {
   }
   record("timechain recovery: a rejected guided departure returns inside facing the room before closing doors and releasing control, while ordinary departures keep their pose",
     recovery.every(row => row.restored && row.recovered), JSON.stringify(recovery));
-  // These were untracked per-size Maps and eager module constants, retained even after a preview was cancelled.
+  // The shell's sphere, built for every room with its kind's own part set aside: the doorway's passage cut through wall
+  // and screen alike, and the screen in quads (Canvas 2D maps a picture over four corners) none of which crosses the
+  // dome canvas's seam over the door.
   for (const name of ["math", "scene", "models", "jumbotron", "timechain-room-models"])
     runInNewContext(await readFile(join(root, "src/js/" + name + ".js"), "utf8"), context);
-  const M = context.window.BL.models, RM = context.window.BL.timechainRoomModels;
-  // Exercise the real picture meshes and ray picker at every wall angle and room size.
-  const picking = { math: context.window.BL.math };
-  runInNewContext(interior.slice(interior.indexOf("  const INVERSE ="), interior.indexOf("  // What a screen or a ribbon card")) + "\nthis.pick = rectPick;", picking);
-  const curved = [], S = context.window.BL.scene, math = context.window.BL.math;
-  for (const scale of R.SCALES) {
-    const L = R.layout(scale);
-    for (const p of [...L.screens, ...L.ribbon]) {
-      const canvas = { width: 768, height: 512 }, geo = RM.picture(canvas, 768, 512, p.w, p.h, p.radius), v = geo.verts;
-      const node = S.createNode({ geometry: geo, position: { x: p.x, y: p.y, z: p.z }, rotation: { x: 0, y: -p.angle, z: 0 } });
-      S.updateWorld(node);
-      const world = [], uv = [], radii = [];
-      for (let i = 0; i < v.length; i += 3) {
-        math.mat4.transformPoint(world, node.world, v[i], v[i + 1], v[i + 2]);
-        radii.push(Math.hypot(world[0], world[2]));
-        uv.push(Math.atan2(v[i], p.radius - v[i + 2]) * p.radius);
-      }
-      const hit = picking.pick(node, p.w, p.h), samples = [0, Math.floor(geo.faces.length / 2), geo.faces.length - 1];
-      const hits = samples.every(index => {
-        const f = geo.faces[index], a = f.i[0] * 3, b = f.i[1] * 3;
-        math.mat4.transformPoint(world, node.world, (v[a] + v[b]) / 2, 0, (v[a + 2] + v[b + 2]) / 2);
-        const distance = Math.hypot(world[0], world[2]);
-        const ray = { ox: 0, oy: p.y, oz: 0, dx: world[0] / distance, dy: 0, dz: world[2] / distance };
-        return Math.abs(hit(ray) - distance) < 1e-4 && hit({ ...ray, oy: p.y + p.h }) === Infinity;
-      });
-      const outside = [-1, 1].every(side => {
-        const angle = p.angle + side * (p.w / (2 * p.radius) + 0.01);
-        return hit({ ox: 0, oy: p.y, oz: 0, dx: Math.sin(angle), dy: 0, dz: -Math.cos(angle) }) === Infinity;
-      });
-      curved.push({ scale, angle: p.angle, faces: geo.faces.length,
-        radius: Math.abs(p.radius - 8.7 * scale) < 1e-9 && radii.every(r => Math.abs(r - p.radius) < 1e-4),
-        texture: geo.imageSurface.canvas === canvas && geo.imageSurface.curve[0] === p.radius && geo.imageSurface.tessellated
-          && Math.abs(Math.min(...uv) + p.w / 2) < 1e-9 && Math.abs(Math.max(...uv) - p.w / 2) < 1e-9
-          && geo.faces.every(f => f.color.every(c => c === 255)), hits, outside });
-    }
-  }
-  record("timechain wall displays: every chart and block card follows its room radius with full-width canvas UVs and clickable centres and edges, rejecting clicks above or beside it",
-    curved.every(r => r.faces > 1 && r.faces <= 32 && r.radius && r.texture && r.hits && r.outside), JSON.stringify(curved));
-  const flat = RM.picture({}, 768, 512, 1.1, 0.68);
-  record("timechain desk and doorway pictures remain flat", flat.faces.length === 1 && !flat.imageSurface.curve && flat.verts.every((v, i) => i % 3 !== 2 || v === 0));
-  // V8's trigonometric results have different last bits on Linux and macOS; keep exact geometry oracles for both.
-  const expected = process.platform === "linux"
-    ? ["0fcf841a9e944a1f9a17bd48f6c8fc5c9fa10dc0cd4b0e3713b6eb414e934ff0", "e73d5825457ee1090da4236aad67ffc28f16e38112fc078a9731effd9ae7ad9b", "7a56d2bf8d784f1225e675aae19eeaa81fb0dbecc649d865f7b78d77d825c7c2"]
-    : ["8d1161649448e93ae5472241bf864e913ebddf5574e0030f7f4602bec6707fac", "82c0bb388e6dcfdbb816b1f8af7b4d434930eb649f03b10bd1ea73b8fc60d227", "8c1ac5769f20a049011de2b4a6163ec29bce0630320697afc8669d90a0d62b36"];
-  const hash = geos => createHash("sha256").update(JSON.stringify(geos.map(({ verts, faces, lines, normals }) => ({ verts, faces, lines, normals })))).digest("hex");
+  const M = context.window.BL.models, RM = context.window.BL.timechainRoomModels, S = context.window.BL.scene, math = context.window.BL.math;
+  for (const { kind } of R.ROOMS) RM.KINDS[kind] = { plan() {} };
   M.setScope("hub");
-  const meshes = R.SCALES.map(scale => RM.geometries(scale)), hashes = meshes.map(hash);
-  M.release("timechain", ["hub"]);
-  const rebuilt = R.SCALES.map(scale => RM.geometries(scale));
-  const released = rebuilt.every((geos, i) => geos.every((g, k) => g !== meshes[i][k]) && hash(geos) === hashes[i]);
-  record("timechain room caches: previews called from the hub release every size and prop without changing any geometry bytes", released, JSON.stringify({ released, hashes }));
-  const bezel = math.hexToRgb(RM.COLORS.bezel);
-  const frames = meshes.every((geos, i) => {
-    const radius = 8.7 * R.SCALES[i], hall = geos[0];
-    const faces = hall.faces.filter(f => f.color.every((c, k) => c === bezel[k]));
-    return faces.length > 100 && faces.every(f => f.i.every(index => {
-      const r = Math.hypot(hall.verts[index * 3], hall.verts[index * 3 + 2]);
-      return Math.min(Math.abs(r - radius - 0.01), Math.abs(r - radius - 0.11)) < 1e-8;
-    }));
+  const shells = R.ROOMS.map(({ id }) => {
+    const L = R.layout(id), sphere = RM.sphere(id), D = L.door;
+    let blocked = 0, notQuads = 0, seam = 0, uMin = Infinity, uMax = -Infinity, yLow = Infinity, yHigh = -Infinity;
+    for (const [geo, shift] of [[sphere.wall, 0], [sphere.screen, 1]]) for (const f of geo.faces) {
+      const v = geo.verts, pts = f.i.map(i => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2] - shift]);
+      const c = pts.reduce((a, p) => [a[0] + p[0] / pts.length, a[1] + p[1] / pts.length, a[2] + p[2] / pts.length], [0, 0, 0]);
+      if (c[2] > L.doorZ - 0.01 && c[2] < L.doorZ + D.vestibule && Math.abs(c[0]) < D.halfW - 0.01 && c[1] > 0.01 && c[1] < D.height - 0.01) blocked++;
+      if (!shift) continue;
+      if (f.i.length !== 4) notQuads++;
+      const us = pts.map(p => Math.atan2(p[0], -p[2]));
+      if (Math.max(...us) - Math.min(...us) > Math.PI) seam++;
+      for (const p of pts) { uMin = Math.min(uMin, Math.atan2(p[0], -p[2])); uMax = Math.max(uMax, Math.atan2(p[0], -p[2])); yLow = Math.min(yLow, p[1]); yHigh = Math.max(yHigh, p[1]); }
+    }
+    return { id, faces: sphere.wall.faces.length + sphere.screen.faces.length, blocked, notQuads, seam, wraps: uMin < -3.1 && uMax > 3.1, crown: Math.abs(yHigh - L.crown) < 1e-6, edge: yLow < L.c + L.R * Math.sin(R.edgeEl(L, Math.PI / 2)) + 0.5 };
   });
-  record("timechain bezels follow the same room centre just behind the curved pictures", frames);
-  // Keep the existing byte oracle for all unchanged architecture and props by substituting only the historical
-  // flat bezel in a separate fixture. The production curved bezels and displays are checked above.
-  const legacy = { window: { BL: {} } };
-  for (const name of ["timechain-rooms", "math", "scene", "models", "jumbotron", "timechain-room-models"]) {
-    let source = await readFile(join(root, "src/js/" + name + ".js"), "utf8");
-    if (name === "timechain-room-models") source = source.replace("panelArc(p.w + pad, p.h + pad, p.radius, 0.01, back + 0.01)", "box({ w: p.w + pad, h: p.h + pad, d: back, color: C.bezel, offset: { z: -back / 2 - 0.01 } })");
-    runInNewContext(source, legacy);
-  }
-  const unchanged = R.SCALES.map(scale => hash(legacy.window.BL.timechainRoomModels.geometries(scale)));
-  record("timechain room architecture and props retain their geometry bytes apart from the curved bezels", unchanged.every((h, i) => h === expected[i]), JSON.stringify(unchanged));
+  record("timechain shells: in every room the doorway's passage is cut through the sphere, and the screen wraps it in quads up to the crown without crossing the seam over the door",
+    shells.every(r => r.blocked === 0 && r.notQuads === 0 && r.seam === 0 && r.wraps && r.crown && r.edge && r.faces < 12000), JSON.stringify(shells));
+  // A live picture is picked on its own faces: a ray to its middle hits it at the dome, one beside or above it misses.
+  const picking = { math };
+  runInNewContext(interior.slice(interior.indexOf("  const INVERSE ="), interior.indexOf("  const TIPS =")) + "\nthis.pick = facePick;", picking);
+  const picks = [1, 9].map((id) => {
+    const L = R.layout(id), canvas = { width: 768, height: 512 }, spec = { az0: -20, az1: 20, el0: 10, el1: 30, w: 768, h: 512 };
+    const node = S.createNode({ geometry: RM.liveGeometry(L, spec, canvas), position: { x: 0, y: 0, z: -1 } });
+    S.updateWorld(node);
+    const hit = picking.pick(node), ray = (az, el) => ({ ox: 0, oy: L.c, oz: 0, dx: Math.sin(az) * Math.cos(el), dy: Math.sin(el), dz: -Math.cos(az) * Math.cos(el) });
+    const DEG = Math.PI / 180, middle = hit(ray(0, 20 * DEG));
+    return { id, middle: +middle.toFixed(4), beside: hit(ray(25 * DEG, 20 * DEG)), above: hit(ray(0, 35 * DEG)), curve: node.geometry.imageSurface.curve[0], canvas: node.geometry.imageSurface.canvas === canvas };
+  });
+  record("timechain live pictures: a patch of the dome is picked on its faces at the dome and nowhere beside or above it",
+    picks.every(p => Math.abs(p.middle - R.layout(p.id).R * 0.994) < 0.05 && p.beside === Infinity && p.above === Infinity && p.curve === 1 && p.canvas), JSON.stringify(picks));
+  M.release("timechain", ["hub"]);
   let serial = 0;
   const read = M.cached(() => ({ serial: ++serial })), outer = M.cached(() => ({})), first = outer(), failure = new Error("scope probe");
   let threw = false;
@@ -20575,38 +20624,39 @@ const timechainBlockChecks = async () => {
   record("timechain counters: elapsed ages keep seconds across minute and hour boundaries, floor partial seconds and clamp future header times",
     [-1000, 999, 59000, 60000, 61000, 3599000, 3600000, 3661000].map(CH.format.ago).join("|") === "0s ago|0s ago|59s ago|1:00 ago|1:01 ago|59:59 ago|1:00:00 ago|1:01:01 ago");
   const interior = await readFile(new URL("../src/js/timechain-interior.js", import.meta.url), "utf8");
-  const keys = interior.slice(interior.indexOf("  const screenKey ="), interior.indexOf("  const TIPS ="));
+  const conference = await readFile(new URL("../src/js/timechain-room-conference.js", import.meta.url), "utf8");
+  const keys = conference.slice(conference.indexOf("  const chartKey ="), conference.indexOf("  // The crown:"));
   const hang = interior.slice(interior.indexOf("  const hang ="), interior.indexOf("  // A ray against"));
-  const counters = { CH, RM: { picture: (canvas, pw, ph, w, h, radius) => ({ faces: [{ color: [0, 0, 0] }], imageSurface: { rect: [-1, -1, 2, 2], curve: [radius, 0, 0], tessellated: true } }) } };
-  runInNewContext(`${keys}\n${hang}\nthis.screenKey = screenKey; this.cardKey = cardKey; this.hang = hang;`, counters);
+  const counters = { CH, RM: { liveGeometry: (L, spec, canvas) => ({ faces: [{ color: [255, 255, 255], emissive: 0.9 }], imageSurface: { canvas, version: 0, rect: [-1, -1, 2, 2], curve: [1, 0, 0], tessellated: true } }) } };
+  runInNewContext(`${keys}\n${hang}\nthis.chartKey = chartKey; this.cardKey = cardKey; this.hang = hang;`, counters);
   const observed = 100000, block = { id: "block", pool: "pool", time: 40 };
   let status = "LIVE";
   const clockReader = { version: 0, summary: null, status: () => status, historyStatus: () => status, at: () => observed, value: () => [block] };
-  const liveKey = counters.screenKey(clockReader, 0, observed), blockKey = counters.cardKey(clockReader, 1, observed);
-  const ticking = counters.screenKey(clockReader, 0, observed + 1000) !== liveKey && counters.cardKey(clockReader, 1, observed + 1000) !== blockKey;
+  const liveKey = counters.chartKey(clockReader, 0, observed), blockKey = counters.cardKey(clockReader, 1, observed);
+  const ticking = counters.chartKey(clockReader, 0, observed + 1000) !== liveKey && counters.cardKey(clockReader, 1, observed + 1000) !== blockKey;
   status = "STALE";
-  const staleKey = counters.screenKey(clockReader, 0, observed + 1000);
-  const staleTicking = counters.screenKey(clockReader, 0, observed + 2000) !== staleKey;
+  const staleKey = counters.chartKey(clockReader, 0, observed + 1000);
+  const staleTicking = counters.chartKey(clockReader, 0, observed + 2000) !== staleKey;
   status = "PAUSED";
-  const pausedKey = counters.screenKey(clockReader, 0, observed);
-  record("timechain counters: live and stale readings age without a new fetch, while a paused panel and ribbon label do not repaint on the clock",
-    ticking && staleTicking && counters.screenKey(clockReader, 0, observed + 1000) === pausedKey
+  const pausedKey = counters.chartKey(clockReader, 0, observed);
+  record("timechain counters: live and stale readings age without a new fetch, while a paused chart and ribbon label do not repaint on the clock",
+    ticking && staleTicking && counters.chartKey(clockReader, 0, observed + 1000) === pausedKey
       && counters.cardKey(clockReader, 0, observed) === counters.cardKey(clockReader, 0, observed + 1000));
   let released = 0;
-  const slot = { node: { geometry: { imageSurface: {} } }, canvas: { width: 768, height: 512 }, w: 3, h: 2, radius: 8.7 }, renderer = { releaseGeometry() { released++; } };
+  const slot = { spec: { az0: -10, az1: 10, el0: 10, el1: 20 }, L: {}, node: { geometry: { imageSurface: {} } }, canvas: { width: 768, height: 512 } }, renderer = { releaseGeometry() { released++; } };
   counters.hang(renderer, slot);
   const geometry = slot.node.geometry, surface = geometry.imageSurface;
   counters.hang(renderer, slot); counters.hang(renderer, slot);
-  record("timechain counters: repainting reuses the canvas and geometry, bumps its texture version and releases the prepared image only once",
+  record("timechain counters: repainting reuses the canvas and geometry, bumps its texture version and releases the old picture only once",
     slot.node.geometry === geometry && geometry.imageSurface === surface && surface.canvas === slot.canvas && surface.version === 3 && released === 1 && !surface.asset
-      && surface.curve[0] === slot.radius && surface.tessellated && geometry.faces.every(face => face.emissive === 0.9 && face.color.every(value => value === 255)));
+      && surface.curve[0] === 1 && surface.tessellated && geometry.faces.every(face => face.emissive === 0.9 && face.color.every(value => value === 255)));
   // Run the room's paint scheduler on a clock, with no fetching or image decoding in the fixture.
   let now = observed, paints = 0;
-  const makeSlot = () => ({ key: "", canvas: { getContext: () => ({ drawImage() {} }) } });
-  const screens = CH.PANELS.map(makeSlot), cards = [makeSlot(), makeSlot()], terminal = makeSlot();
-  Object.assign(counters, { Date: { now: () => now }, reader: clockReader, screens, cards, terminal, all: [...screens, ...cards, terminal],
-    holdingsIndex: 0, holdingsKeys: [""], holdingsCanvases: [{}], holdingsDirty: false, chartVersion: 0,
-    CH: { ...CH, PANELS: CH.PANELS.map(p => ({ ...p, paint() {} })), card() {}, ribbonLabel() {} } });
+  const makeSlot = (key) => ({ key: "", canvas: { getContext: () => ({ drawImage() {} }) }, spec: { key, paint() {} } });
+  const feeds = { reader: clockReader, holdingsIndex: 0, holdingsKeys: [""], holdingsCanvases: [{}] };
+  const screens = CH.PANELS.map((p, i) => Object.assign(makeSlot((f, t) => counters.chartKey(f.reader, i, t)), { panel: i }));
+  const cards = [0, 1].map(i => makeSlot((f, t) => counters.cardKey(f.reader, i, t))), terminal = makeSlot((f) => `${f.holdingsIndex}|${f.holdingsKeys[f.holdingsIndex]}`);
+  Object.assign(counters, { Date: { now: () => now }, reader: clockReader, feeds, all: [...screens, ...cards, terminal], holdingsKeys: [""], holdingsCanvases: [{}], holdingsDirty: false, chartVersion: 0 });
   const scheduler = interior.slice(interior.indexOf("    let seenVersion ="), interior.indexOf("    const chartBoard ="));
   const painting = { ...counters, renderer, hang: () => { paints++; } };
   runInNewContext(`${scheduler}\nthis.paintNext = paintNext;`, painting);
@@ -20616,7 +20666,7 @@ const timechainBlockChecks = async () => {
   painting.paintNext();
   const quiet = paints === initialPaints, originalCard = cards[1].key;
   for (let i = 0; i < counters.all.length; i++) { now += 1000; painting.paintNext(); }
-  record("timechain counters: a quiet frame paints nothing, each slow frame paints at most one slot, and ticking screens cannot starve block cards",
+  record("timechain counters: a quiet frame paints nothing, each slow frame paints at most one picture, and ticking charts cannot starve block cards",
     quiet && paints - initialPaints === counters.all.length && cards[1].key !== originalCard && clockReader.version === 0);
 };
 const sphereLocal = `T = BL.scenes.hub.debug.timechainIsland, SP = BL.timechainModels.SPOTS, local = (p) => (p.x - T.place.x) * T.sin + (p.z - T.place.z) * T.cos`;
@@ -20827,7 +20877,8 @@ const sphereKeypad = { name: "timechain keypad", why: "rule: the keypad chooses 
     left.state === "idle" && !left.popup && !left.act && left.lens === null && left.one.join() === "58,52,48" && !left.readout && left.requests === 0 && left.read === 0 && left.visit === null && left.scene === "hub" && left.doors === 0, JSON.stringify(left));
 } };
 const sphereCrossing = { name: "timechain crossing", why: "playthrough: Enter walks the same Ooga through the doors into its room in first person, and Space at the Exit button walks it back out onto the bridge", run: async (b) => {
-  await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; ${sphereStand("0.7", "13.8")} })()`);
+  // In first person at the keypad, which the room keeps, so the walk out starts from the eyes too.
+  await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; ${sphereStand("0.7", "13.8")} B.pilot.enterClose(); B.advance(0.3, 1 / 60); })()`);
   await b.evaluate(sphereLog);
   await b.key(" ");
   await b.key("3");
@@ -20846,10 +20897,10 @@ const sphereCrossing = { name: "timechain crossing", why: "playthrough: Enter wa
     return { swapIn: H.swapIn, swapOut: H.swapOut, far: H.far, farAt: H.farAt, frames: H.frames, fadeMax: H.fadeMax, longest: H.longest, policy: __ooga.hubPolicy }; })()`);
   record("timechain crossing: Enter opens the doors, lifts the plug for the traveler alone and swoops into its eyes as it walks in",
     crossing && !passage.plug && !passage.popup && passage.lens === "eyes", JSON.stringify({ crossing, passage }));
-  record("timechain crossing: the same Ooga arrives in a solo Room 3 in first person, the doors close behind it and the address names the room",
+  record("timechain crossing: the same Ooga arrives in a solo Room 3 in the first person it had at the keypad, the doors close behind it and the address names the room",
     inside && room.room === 3 && room.mode === "solo" && room.player === "portlandhodl" && room.view === "first-person" && room.doors === 0 && room.atArrival < 0.4 && room.hash === "#/sphere-3" && room.zone === "none", JSON.stringify(room));
-  record("timechain crossing: Space at the Exit button walks it back out of the passage onto the bridge, the doors shut, the plug back and the view out of its eyes",
-    out && back.player === "portlandhodl" && back.fromDoors > 1 && back.doors === 0 && back.plug && back.view !== "first-person" && back.hash === "#/sphere" && back.head, JSON.stringify(back));
+  record("timechain crossing: Space at the Exit button walks it back out of the passage onto the bridge, the doors shut, the plug back and the view it had in the room kept, its head hidden only in first person",
+    out && back.player === "portlandhodl" && back.fromDoors > 1 && back.doors === 0 && back.plug && back.view === room.view && back.hash === "#/sphere" && back.head === (back.view !== "first-person"), JSON.stringify({ back, room: room.view }));
   // Under hubcache=release part of the island's rebuild still runs in the swap, so the walk-out fades over it rather than
   // freezing the room's last frame; the way in stays seamless.
   if (seams.policy === "keep") record("timechain crossing: from the keypad into the room and from the Exit button out to the bridge every frame is the Ooga's own eye, never faded to black, and each scene swap is the same view on both sides",
@@ -20960,13 +21011,13 @@ const timechainRoom = { name: "timechain room", why: "playthrough: a signed-out 
     const kept = P.player === cave;
     P.enterClose(); B.advance(1, 1 / 60);
     emptyViews &&= empty();
-    return { room: D.room.id, scale: D.room.scale, radius: D.layout.radius, mode: D.visit.mode, zone: BL.net.state.zone, body: BL.net.state.body, chip: document.getElementById("sphere-mode").textContent,
+    return { room: D.room.id, kind: D.room.kind, radius: D.layout.radius, lock: !!D.built.lockPad, mode: D.visit.mode, zone: BL.net.state.zone, body: BL.net.state.body, chip: !!document.getElementById("sphere-mode"),
       subtitle: document.getElementById("sphere-subtitle").textContent, before, shoulder, orbit, kept, after: P.mode, player: cave.traits.name, jet: !!cave.jet, jetHud: document.getElementById("jetpack-hud").hidden,
       emptyViews, deniedWeapons, requests: B.stats().requests, paused: D.reader.status("recent"), hash: location.hash, remotes: D.remotes === null };
   })()`);
-  record("timechain room: a signed-out arrival at /sphere-3 is a solo copy of Room 3 at 1× that publishes nothing, with its mode named and every screen painted",
-    painted && r.room === 3 && r.scale === 1 && r.radius === 9 && r.mode === "solo" && r.zone === "none" && r.body === null && r.chip.includes("Solo visit · not signed in") && r.subtitle === "TCS · Room 3"
-      && r.hash === "#/sphere-3" && r.requests === 0 && r.paused === "PAUSED" && r.remotes, JSON.stringify(r));
+  record("timechain room: a signed-out arrival at /sphere-1 is a solo copy of the Conference Room, with its lock, that publishes nothing, named only under the title, with every live picture painted",
+    painted && r.room === 1 && r.kind === "conference" && r.radius === 10.5 && r.lock && r.mode === "solo" && r.zone === "none" && r.body === null && !r.chip && r.subtitle === "TCS · Conference Room"
+      && r.hash === "#/sphere-1" && r.requests === 0 && r.paused === "PAUSED" && r.remotes, JSON.stringify(r));
   record("timechain room: scroll reaches shoulder and orbit, nothing lets go of the Ooga, and every view stays empty-handed with no jetpack",
     r.before === "first-person" && r.shoulder === "shoulder" && r.orbit === "orbit" && r.kept && r.after === "first-person"
       && r.player === "portlandhodl" && !r.jet && r.jetHud && r.emptyViews && r.deniedWeapons, JSON.stringify(r));
@@ -21012,27 +21063,27 @@ const timechainRoom = { name: "timechain room", why: "playthrough: a signed-out 
   })()`);
   record("timechain room: the controls reference omits intercepted R/F while retaining available movement controls", pitch.every(n => n === 0) && reference.open && reference.driven && !reference.keys.some(k => ["r", "f"].includes(k)) && reference.keys.includes("w") && !reference.text.includes("Tilt the view"), JSON.stringify({ pitch, reference }));
 } };
-const timechainSizes = { name: "timechain sizes", why: "rule: rooms 4–6 and 7–9 are the same design at 1.5× and 2×, with the doorway, arrival and Exit button at human size and a table for 8 and 12, each its own address", run: async (b) => {
-  const rows = [], bounds = [];
-  for (const room of [4, 7, 3]) {
+const timechainRooms = { name: "timechain rooms", why: "rule: every room 0–9 builds its own kind around the same doorway, arrival and Exit button, only the Conference Room has a lock, the camera stays inside every sphere, and the raked halls walk down to the front", run: async (b) => {
+  const rows = [], bounds = [], walks = [];
+  for (const room of [0, 2, 3, 4, 5, 6, 7, 8, 9, 1]) {
     await b.evaluate(roomGo(room));
     rows.push(await b.evaluate(`(() => { const B = __ooga, D = B.timechain, L = D.layout, a = B.pilot.player.root.position, w = B.pilot.player;
-      return { room: D.room.id, scale: D.room.scale, radius: L.radius, door: L.door.halfW, arrivalGap: +(L.doorZ - L.arrival.z).toFixed(6), at: +Math.hypot(a.x - L.arrival.x, a.z - L.arrival.z).toFixed(3),
-        button: [L.exitButton.y, +(L.doorZ - L.exitButton.z).toFixed(6), L.exitButton.x], table: B.timechain.built.table.position.z, chairs: B.timechain.built.chairs.length, screenW: L.screens[0].w, mode: D.visit.mode, hash: location.hash, view: B.pilot.mode, height: w.traits.height }; })()`));
-    bounds.push(await b.evaluate(`(() => {
-      const B = __ooga, P = B.pilot, L = B.timechain.layout, cave = P.player, modes = new Set();
+      return { room: D.room.id, kind: D.room.kind, radius: L.R, door: L.door.halfW, arrivalGap: +(L.doorZ - L.arrival.z).toFixed(6), at: +Math.hypot(a.x - L.arrival.x, a.z - L.arrival.z).toFixed(3),
+        button: [L.exitButton.y, +(L.doorZ - L.exitButton.z).toFixed(6), L.exitButton.x], lock: !!D.built.lockPad, seats: D.seats.length, mode: D.visit.mode, hash: location.hash, view: B.pilot.mode, height: w.traits.height }; })()`));
+    if ([0, 9, 1].includes(room)) bounds.push(await b.evaluate(`(() => {
+      const B = __ooga, P = B.pilot, L = B.timechain.layout, R = BL.timechainRooms, modes = new Set();
       let frames = 0, outside = 0;
       const sample = () => {
         for (let i = 0; i < 60; i++) {
           B.advance(1 / 60, 1 / 60);
           const p = B.camera.position;
           modes.add(P.mode); frames++;
-          if (!Number.isFinite(p.x + p.y + p.z) || Math.hypot(p.x, p.z) > L.radius - 0.2 + 1e-6
-            || p.z > L.doorZ - 0.2 + 1e-6 || p.y < 0.3 - 1e-6
-            || p.y > BL.timechainRooms.ceilingAt(L, p.x, p.z) - 0.2 + 1e-6) outside++;
+          if (!Number.isFinite(p.x + p.y + p.z) || Math.hypot(p.x, p.y - L.c, p.z) > L.R - 0.3 + 1e-6
+            || p.z > L.doorZ - 0.2 + 1e-6 || p.y < R.floorAt(L, p.x, p.z) + 0.3 - 1e-6
+            || p.y > R.ceilingAt(L, p.x, p.z) - 0.2 + 1e-6) outside++;
         }
       };
-      P.navigate({ position: { x: L.walkRadius - 0.6, y: 0, z: 0 }, yaw: Math.PI / 2, pitch: 0.05, dist: 4 });
+      P.navigate({ position: { x: R.wallAt(L, 0) - 0.6, y: 0, z: 0 }, yaw: Math.PI / 2, pitch: 0.05, dist: 4 });
       sample();
       P.hooks.onZoom(2, "wall-shoulder"); sample();
       P.hooks.onZoom(2, "wall-orbit"); sample();
@@ -21044,32 +21095,40 @@ const timechainSizes = { name: "timechain sizes", why: "rule: rooms 4–6 and 7�
       B.advance(0.3, 1 / 60);
       return { room: B.timechain.room.id, frames, outside, modes: [...modes] };
     })()`));
+    if (room === 8 || room === 9) {
+      // From the arrival straight down the aisle to the front, as a held key walks it.
+      await b.evaluate(`(() => { const B = __ooga, L = B.timechain.layout; B.pilot.navigate({ position: { x: 0.25, y: 0, z: L.arrival.z }, yaw: 0, pitch: 0.05, dist: 4 }); B.advance(0.2, 1 / 60); document.getElementById("scene").focus(); })()`);
+      await holdKey(b, "w", 5);
+      walks.push(await b.evaluate(`(() => { const B = __ooga, L = B.timechain.layout, a = B.pilot.player; return { room: L.id, feet: +(a.root.position.y - a.baseY).toFixed(3), yMin: L.yMin, z: +a.root.position.z.toFixed(2) }; })()`));
+    }
   }
   const same = (k) => rows.every(r => JSON.stringify(r[k]) === JSON.stringify(rows[0][k]));
-  record("timechain sizes: Rooms 4 and 7 build at 1.5× and 2× around the same doorway, arrival, Exit button, table and Ooga, seating 8 and 12, solo and first person, each at its own address",
-    rows[0].scale === 1.5 && rows[1].scale === 2 && rows[2].scale === 1 && rows.map(r => r.chairs).join() === "8,12,4" && rows.every(r => r.radius === 9 * r.scale && Math.abs(r.screenW - 3 * r.scale) < 1e-9 && r.at < 0.4 && r.mode === "solo" && r.view === "first-person" && r.hash === "#/sphere-" + r.room)
-      && ["door", "arrivalGap", "button", "table", "height"].every(same), JSON.stringify(rows));
-  record("timechain sizes: the final camera stays inside the walls, closed doors, floor and dome in every view and transition at all three room scales",
+  record("timechain rooms: rooms 0–9 each build their own kind around the same doorway, arrival, Exit button and Ooga, solo and first person, each at its own address, with seats but in the Block Party and the Mining Museum, and only the Conference Room locks",
+    rows.map(r => r.kind).join() === "planetarium,temple,party,fireside,workout,observatory,mining,lecture,theater,conference" && rows.every(r => r.at < 0.4 && r.mode === "solo" && r.view === "first-person" && r.hash === "#/sphere-" + r.room && (r.seats > 0) === (r.kind !== "party" && r.kind !== "mining") && r.lock === (r.room === 1))
+      && ["door", "arrivalGap", "button", "height"].every(same), JSON.stringify(rows));
+  record("timechain rooms: the final camera stays inside the sphere, the closed doors, the floor and the dome in every view and transition, in the smallest, the tallest raked and the conference room",
     bounds.every(r => r.frames >= 840 && r.outside === 0 && ["first-person", "shoulder", "orbit"].every(mode => r.modes.includes(mode))), JSON.stringify(bounds));
+  record("timechain rooms: in the Lecture Hall and the Movie Theater an Ooga walks from the doorway's landing down the aisle to the front",
+    walks.length === 2 && walks.every(w => w.feet < w.yMin + 0.7), JSON.stringify(walks));
 } };
 const timechainTrip = { name: "timechain round trip", why: "contract: a room left and entered again keeps nothing from the last visit, leaves no timer or request running, and takes a donation whenever one arrives", run: async (b) => {
   const laps = [];
   for (let i = 0; i < 2; i++) {
     await tourGo(b, "hub");
-    laps.push(await b.evaluate(roomGo(3)));
+    laps.push(await b.evaluate(roomGo(1)));
   }
   const grew = ["records", "nodes", "targets", "dom"].filter((k) => laps[1][k] > laps[0][k] * 1.02 + 4);
   const donated = await b.evaluate(`(() => { const B = window.__ooga, g = B.game.state, before = { donations: g.donations, sats: g.totalSats, bananas: g.bananas }; window.BL.scenes.timechain.onDonation({ id: "trip-timechain", sats: 2100, handle: "tester", message: "ooga", at: Date.now() }, { exact: 1.25, rounded: 1 }); B.advance(1, 1 / 30); return { scene: B.scene, donations: g.donations - before.donations, sats: g.totalSats - before.sats, bananas: g.bananas - before.bananas }; })()`);
   record("timechain round trip: leaving and entering twice keeps the leave contract and holds nothing the first visit did not, with no timer or request left, and a donation mid-visit is taken",
-    laps.every(l => l.scene === "timechain" && l.room === 3 && l.timers === 0 && l.requests === 0) && grew.length === 0 && donated.scene === "timechain" && donated.donations === 1 && donated.sats === 2100 && donated.bananas === 1.25,
+    laps.every(l => l.scene === "timechain" && l.room === 1 && l.timers === 0 && l.requests === 0) && grew.length === 0 && donated.scene === "timechain" && donated.donations === 1 && donated.sats === 2100 && donated.bananas === 1.25,
     JSON.stringify({ grew, donated, first: laps[0], second: laps[1] }));
 } };
-const timechainCanvas = { name: "timechain canvas2d", why: "rule: a room boots and paints its screens on Canvas 2D", run: async (b) => {
+const timechainCanvas = { name: "timechain canvas2d", why: "rule: a room boots and paints its dome and live pictures on Canvas 2D", run: async (b) => {
   const painted = await untilPage(b, 'B.scene === "timechain" && B.timechain.slots.every(s => s.shown)', 20000);
   const r = await b.evaluate(`({ kind: __ooga.renderer.kind, drawn: __ooga.renderer.stats.drawn, room: __ooga.timechain.room.id, view: __ooga.pilot.mode })`);
-  record("timechain canvas2d: Room 8 boots at 2× and paints every screen on Canvas 2D", painted && r.kind === "canvas2d" && r.room === 8 && r.view === "first-person", JSON.stringify(r));
+  record("timechain canvas2d: the Lecture Hall, a raked hall, boots and paints every live picture on Canvas 2D", painted && r.kind === "canvas2d" && r.room === 8 && r.view === "first-person", JSON.stringify(r));
 } };
-scene("timechain", { url: roomPage(3), steps: [timechainRoom, timechainSizes, timechainTrip] });
+scene("timechain", { url: roomPage(1), steps: [timechainRoom, timechainRooms, timechainTrip] });
 scene("timechain", { label: "canvas2d", url: roomPage(8, "canvas2d=1"), steps: [timechainCanvas] });
 scene("hub", { label: "chilling", query: "status=chillin&pos=0",
   // This placement order exhausted the old 36-point pool before the last Ooga could settle.
@@ -24272,15 +24331,15 @@ scene("hub", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("hub", { required
   const staged = readFileSync(join(root, "scripts/site.mjs"), "utf8").includes('rel="manifest" href="manifest.webmanifest"');
   record("hub home screen: the installed name is OogaBoogaLand, with a same-origin icon; the manifest link is added only for the hosted site", meta.title === "OogaBoogaLand" && meta.capable === "yes" && meta.icon === "apple-touch-icon.png" && !meta.manifestLink && meta.manifestSrc && manifest.short_name === "OogaBoogaLand" && manifest.display === "standalone" && staged, JSON.stringify({ meta, short: manifest.short_name, staged }));
 } }] });
-scene("lab", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("lab", { required: ["#joy-move", "#joy-look", ".leave"] })] });
-scene("race", { query: "pos=0&rain=0&draw=0", opts: PHONE_SIZE, steps: [phone("race", { card: '[data-intro="race"]', play: "window.__ooga.race.startRace()", required: ["#joy-move", "#act", "#item-btn", "#race-garage-btn", ".leave"] })] });
-scene("drop", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("drop", { card: '[data-intro="drop"]', play: "window.__ooga.drop.start()", required: ["#joy-move", "#joy-look", "#act", ".leave"] })] });
-scene("orbit", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("orbit", { card: '[data-intro="orbit"]', play: "window.__ooga.orbit.launch()", required: ["#joy-move", "#act", ".leave"] })] });
-scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: "#mine-intro", required: ["#joy-move", "#joy-look", "#act", "#mine-view-btn", "#mine-pause-btn", "#environment-sound", ".leave"] })] });
-scene("factory", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("factory", { required: ["#joy-move", "#joy-look", ".leave"] }), factoryGreeter] });
-scene("hangar", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("hangar", { required: ["#joy-move", "#joy-look", ".leave"] })] });
-scene("bifrost", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("bifrost", { required: ["#joy-move", "#joy-look", ".leave"] })] });
-scene("timechain", { url: roomPage(3), opts: PHONE_SIZE, steps: [phone("timechain", { required: ["#joy-move", "#joy-look", ".leave", "#sphere-mode"] })] });
+scene("lab", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("lab", { required: ["#joy-move", "#joy-look", "#leave-hud"] })] });
+scene("race", { query: "pos=0&rain=0&draw=0", opts: PHONE_SIZE, steps: [phone("race", { card: '[data-intro="race"]', play: "window.__ooga.race.startRace()", required: ["#joy-move", "#act", "#item-btn", "#race-garage-btn", "#leave-hud"] })] });
+scene("drop", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("drop", { card: '[data-intro="drop"]', play: "window.__ooga.drop.start()", required: ["#joy-move", "#joy-look", "#act", "#leave-hud"] })] });
+scene("orbit", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("orbit", { card: '[data-intro="orbit"]', play: "window.__ooga.orbit.launch()", required: ["#joy-move", "#act", "#leave-hud"] })] });
+scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: "#mine-intro", required: ["#joy-move", "#joy-look", "#act", "#mine-view-btn", "#mine-pause-btn", "#environment-sound", "#leave-hud"] })] });
+scene("factory", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("factory", { required: ["#joy-move", "#joy-look", "#leave-hud"] }), factoryGreeter] });
+scene("hangar", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("hangar", { required: ["#joy-move", "#joy-look", "#leave-hud"] })] });
+scene("bifrost", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("bifrost", { required: ["#joy-move", "#joy-look", "#leave-hud"] })] });
+scene("timechain", { url: roomPage(1), opts: PHONE_SIZE, steps: [phone("timechain", { required: ["#joy-move", "#joy-look", "#leave-hud"] })] });
 // The keypad's controls are its physical keys: from the first person a phone shows, each is on screen with nothing of
 // the page's over it (the hint over the view takes no pointer, so it is checked as text, not as a control).
 const sphereKeypadPhone = phone("hub", { play: `(() => { const B = __ooga, ${sphereLocal}; ${sphereStand("0.7", "13.8")} T.gate.engage(); B.advance(0.6, 1 / 60); })()`, required: [] });
@@ -24343,7 +24402,7 @@ scene("hub", { label: "sphere keypad", query: "solo=1&character=portlandhodl&vie
       return { key: k.key, x: Math.round(out.x), y: Math.round(out.y), on: out.x > 0 && out.x < innerWidth && out.y > 0 && out.y < innerHeight, free: !!hit && hit.id === "scene" }; }); })()`);
   record("timechain keypad phone: in first person every physical key, 1–9, 0, Back and Enter, is on screen with nothing over it", keys.length === 12 && keys.every((k) => k.on && k.free), JSON.stringify(keys));
 } }] });
-scene("arcade", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("arcade", { required: ["#joy-move", "#joy-look", ".leave"] })] });
+scene("arcade", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("arcade", { required: ["#joy-move", "#joy-look", "#leave-hud"] })] });
 
 // Focused component fixtures enter DSB directly with the selected Ooga.
 // The Bifrost entrance playthrough separately exercises the real travel windows.
@@ -24534,10 +24593,10 @@ scene("dsb", { label: "dsb feeds and audio", url: hubPage(src, "scene=dsb"), ste
   } finally { await b.evaluate(`__entranceAudio?.dispose(); delete window.__entranceAudio; AudioContext.prototype.createBufferSource = __dsbSoundProbe.original; delete window.__dsbSoundProbe;`); }
 } }] });
 scene("dsb", { label: "dsb shared player", url: hubPage(dist), steps: [{ name: "dsb shared player", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
-  record("dsb compatibility: built CSP preserves exactly the weather and DSB network permissions", await b.evaluate(`(() => {
+  record("dsb compatibility: built CSP preserves exactly the weather, DSB and Block Party network permissions", await b.evaluate(`(() => {
     const policy = document.querySelector('meta[http-equiv="Content-Security-Policy"]').content;
     const sources = name => policy.split(";").map(s => s.trim().split(/\\s+/)).find(s => s[0] === name).slice(1).sort().join("|");
-    return sources("connect-src") === ["'self'", "https:", "wss:"].sort().join("|") && sources("worker-src") === "'self'" && sources("media-src") === ["'self'", "https://stream.noderunnersradio.com"].sort().join("|") && !policy.includes("unsafe-");
+    return sources("connect-src") === ["'self'", "https:", "wss:"].sort().join("|") && sources("worker-src") === "'self'" && sources("media-src") === ["'self'", "https://stream.noderunnersradio.com", "https://s2.radio.co", "https://ice1.somafm.com"].sort().join("|") && !policy.includes("unsafe-");
   })()`));
   record("dsb registry: c10 is B.C.A.'s hub office and DSB is internally addressable without a cave", await b.evaluate(`(BL.caves.slots.find(s => s.id === "c10").status === "open" && BL.caves.slots.find(s => s.id === "c10").scene === null && BL.caves.slots.find(s => s.id === "c10").place === "bca") && !BL.caves.slots.some(s => s.scene === "dsb") && !!BL.scenes.dsb`));
   record("dsb compatibility: hub keeps the Agent module without spawning a standalone gorilla", await b.evaluate(`__ooga.scene === "hub" && !__ooga.agent && !!BL.agent && !!BL.characters.get("rules-without-rulers") && Object.hasOwn(__ooga, "agent") && Object.hasOwn(__ooga, "dsb") && !__ooga.dsb`));
@@ -30728,7 +30787,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
   await cloudHopperFailureChecks(BL);
-  await deferredLoadingChecks(); await doorReadyChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await mirrorRippleChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await hammockChecks(); await poolLayoutChecks(); await gameRulesChecks(); await highscoreClientChecks(); await ghostHuntChecks(); await donationClientChecks(); await donationResumeCheck(); await poolWildlifeChecks(); await totemFeedChecks();
+  await deferredLoadingChecks(); await doorReadyChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await mirrorRippleChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await partyRadioChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await hammockChecks(); await poolLayoutChecks(); await gameRulesChecks(); await highscoreClientChecks(); await ghostHuntChecks(); await donationClientChecks(); await donationResumeCheck(); await poolWildlifeChecks(); await totemFeedChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.

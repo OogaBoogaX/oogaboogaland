@@ -31,8 +31,8 @@ import { DurableObject } from "cloudflare:workers";
 import {
   CABINETS, hockey, block, BLOCK, CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
   NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
-  DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, ROOM_LOCK_FEATURE, PIN_PASS_MS, PIN_TRIES, PIN_WAIT_MS, CONTROL_FRAMES, CONTROL_HZ, CONTROL_BURST, GHOST_HZ, GHOST_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, REACT_FEATURE, HAND_EMOJI_FEATURE, REACT_HZ, REACT_BURST,
-  GHOST_MAGIC, GHOST_FRAME_MAX, GHOST_FRAME_HZ, GHOST_FRAME_BURST, inGhostArena, ghostCandidate, watchesGhost,
+  DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, ROOM_LOCK_FEATURE, PIN_PASS_MS, PIN_TRIES, PIN_WAIT_MS, CONTROL_FRAMES, CONTROL_HZ, CONTROL_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, REACT_FEATURE, HAND_EMOJI_FEATURE, REACT_HZ, REACT_BURST,
+  GHOST_MAGIC, inGhostArena, watchesGhost,
   CHALK, CHALK_HZ, CHALK_BURST, CHALK_IDLE_MS, CHALK_SAVE_MS, CHALK_TELL_MS, CHALK_FEATURE,
   WALLET_CAP, WALLET_HZ, WALLET_BURST,
   PM_FEATURE, PM_HZ, PM_BURST, PM_INVITE_HZ, PM_INVITE_BURST, PM_CONTROL_HZ, PM_CONTROL_BURST, PM_INVITES, PM_BLOCKS, PM_ACCOUNT_KEEP,
@@ -69,10 +69,6 @@ export class Room extends DurableObject {
     this.hostId = 0;
     this.followers = 0;
     this.lastNpc = null;
-    // The arcade's ghost arena: its own hunt's host, how many follow it, and its last state frame.
-    this.ghostHostId = 0;
-    this.ghostFollowers = 0;
-    this.lastGhost = null;
     this.chat = chatLog();
     this.chatId = 0;
     this.chatAccepted = new Map();
@@ -151,12 +147,10 @@ export class Room extends DurableObject {
     this.restoreDoor();
     this.hostId = electHost(this.players.values());
     this.followers = npcFollowers(this.players.values(), this.hostId);
-    this.ghostHostId = electHost(this.players.values(), 0, ghostCandidate);
-    this.ghostFollowers = npcFollowers(this.players.values(), this.ghostHostId, watchesGhost);
   }
 
   record(ws, a) {
-    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hand: false, handTone: 0, handEmoji: "", hp: 100, ko: false, g: null, j: 0, w: 0, v: null, va: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], roomLock: null, blendTo: null, blendK: 0, pm: { inv: [], open: 0, blocked: [] }, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, ghostBucket: { tokens: GHOST_BURST, at: Date.now() }, ghostFrameBucket: { tokens: GHOST_FRAME_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: a.joinedAt || Date.now() };
+    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hand: false, handTone: 0, handEmoji: "", hp: 100, ko: false, g: null, j: 0, w: 0, v: null, va: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], roomLock: null, blendTo: null, blendK: 0, pm: { inv: [], open: 0, blocked: [] }, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: a.joinedAt || Date.now() };
   }
 
   // Retain account debt across socket records, only while awake. Reclaim fully replenished
@@ -249,10 +243,10 @@ export class Room extends DurableObject {
     }
   }
 
-  // A numbered room's zone's number, or 0.
+  // A numbered room's zone's number (0–9), or -1.
   roomOf(zone) {
     const match = DOOR_ROOM.exec(zone);
-    return match ? Number(match[1]) : 0;
+    return match ? Number(match[1]) : -1;
   }
 
   lockedRooms() {
@@ -276,7 +270,7 @@ export class Room extends DurableObject {
 
   // Nobody left inside: the room opens by itself.
   freeEmptyRoom(room) {
-    if (!room || !this.roomLocks.has(room)) return;
+    if (room < 0 || !this.roomLocks.has(room)) return;
     for (const o of this.players.values()) if (this.roomOf(o.zone) === room) return;
     this.roomLocks.delete(room);
     this.broadcast({ t: "door", op: "locks", rooms: this.lockedRooms() });
@@ -284,7 +278,7 @@ export class Room extends DurableObject {
 
   // A pass is spent on walking in; the new occupant holds the lock with everyone else inside.
   roomZoneChanged(p, from) {
-    const entered = this.roomOf(p.zone), left = this.roomOf(from), lock = entered ? this.roomLocks.get(entered) : null;
+    const entered = this.roomOf(p.zone), left = this.roomOf(from), lock = entered >= 0 ? this.roomLocks.get(entered) : null;
     if (lock) {
       lock.passes.delete(p.id); p.roomLock = { room: entered, pin: lock.pin };
       this.send(p.ws, { t: "door", op: "room-pin", room: entered, pin: lock.pin });
@@ -480,7 +474,7 @@ export class Room extends DurableObject {
 
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, ghostHost: this.ghostHostId, ghostFollowers: this.ghostFollowers, locks: this.lockedRooms(), features: [CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE] });
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE] });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
     this.send(server, { t: "chat-history", messages: this.chat.list() });
     this.sendCabinets(server);
@@ -505,7 +499,7 @@ export class Room extends DurableObject {
     if (!ownedBody(CAST, p.login, p.contributor, p.id)) { this.evict(p, "revoked"); return; }
     if (typeof message !== "string") {
       if (message instanceof ArrayBuffer && message.byteLength >= 4 && new DataView(message).getUint32(0, true) === BLOCK.MAGIC) block.frame(this, p, message);
-      else if (message instanceof ArrayBuffer && message.byteLength >= 4 && new DataView(message).getUint32(0, true) === GHOST_MAGIC) this.ghostFrame(p, message);
+      else if (message instanceof ArrayBuffer && message.byteLength >= 4 && new DataView(message).getUint32(0, true) === GHOST_MAGIC) return; // HALLOWEEN: a page from before the hunt ran on the server (game-host.js)
       else this.npcFrame(p, message);
       return;
     }
@@ -549,18 +543,17 @@ export class Room extends DurableObject {
       // A page arriving on the island catches up with the NPCs at once rather than at the next frame.
       if (p.inHub && p.id !== this.hostId && this.lastNpc) this.send(p.ws, this.lastNpc);
     } else if (msg.t === "visible") {
-      // HALLOWEEN: a page hidden in the ghost arena hands its hosting on; shown again, it comes back a follower.
+      // A page hidden in a Block Frenzy match hands its hosting on; shown again, it comes back a guest (block.js).
       if (msg.on === p.visible) return;
       p.visible = msg.on;
-      this.electGhostHost();
       block.visibility(this, p);
     } else if (msg.t === "zone") {
       if (msg.name === p.zone) return;
       const room = this.roomOf(msg.name);
-      if (room && !this.mayEnter(p, room, Date.now())) { this.send(p.ws, { t: "door", op: "denied", reason: "locked" }); return; }
+      if (room >= 0 && !this.mayEnter(p, room, Date.now())) { this.send(p.ws, { t: "door", op: "denied", reason: "locked" }); return; }
       if (msg.name !== DOOR_ZONE) this.cancelDoor(p);
       if (msg.name !== p.zone) this.clearPasses(p);
-      const leavingStudio = p.zone === STUDIO_ZONE, watched = watchesGhost(p), from = p.zone;
+      const leavingStudio = p.zone === STUDIO_ZONE, from = p.zone;
       if (msg.name !== "arcade.hall") hockey.leave(this, p.id);
       if (msg.name !== BLOCK.ZONE) block.leave(this, p.id);
       p.zone = msg.name;
@@ -578,9 +571,6 @@ export class Room extends DurableObject {
         const across = p.blendTo && BLEND.place(p.zone) === BLEND.place(p.blendTo) && BLEND.STEPS - p.blendK > 0;
         p.blendTo = across ? BLEND.place(from) : null; p.blendK = across ? BLEND.STEPS - p.blendK : 0;
       }
-      this.electGhostHost();
-      // A page walking into the ghost arena or its hallway catches up with its hunt (a lobby open, a hunt on) at once.
-      if (watchesGhost(p) && !watched && p.id !== this.ghostHostId && this.lastGhost) this.send(p.ws, this.lastGhost);
       if (leavingStudio) this.leaveStudio(p);
       this.walletsArrive(p);
       if (p.zone === STUDIO_ZONE) { this.enforceStudio(); this.sendStudio(p); }
@@ -653,13 +643,6 @@ export class Room extends DurableObject {
     } else if (msg.t === "wallet") {
       // Nothing in the attachment changes: a room that sleeps forgets the wallets, which end within a minute anyway.
       return this.walletMessage(p, msg);
-    } else if (msg.t === "ghost") {
-      // HALLOWEEN: a follower in the ghost arena tells its hunt's host; nobody else hears it, nothing is kept.
-      if (!inGhostArena(p) || !p.body || p.id === this.ghostHostId) return;
-      if (!p.ghostBucket) p.ghostBucket = { tokens: GHOST_BURST, at: p.seenAt };
-      if (!takeToken(p.ghostBucket, GHOST_HZ, p.seenAt, GHOST_BURST)) return;
-      const host = this.players.get(this.ghostHostId);
-      if (host && inGhostArena(host)) this.send(host.ws, { ...msg, from: p.id });
     } else if (msg.t === "shot" || msg.t === "swing") {
       // A driven Ooga's own shot or strike, for the players in its zone to draw; nothing is hit and nothing is kept.
       if (!p.body || p.body.startsWith("gorilla:")) return;
@@ -766,7 +749,6 @@ export class Room extends DurableObject {
     this.freeEmptyRoom(lockedIn);
     this.broadcast({ t: "leave", id: p.id, reason });
     this.electHost();
-    this.electGhostHost();
     this.updateVoice();
     if (!this.players.size && this.flushTimer) {
       clearTimeout(this.flushTimer);
@@ -1059,30 +1041,6 @@ export class Room extends DurableObject {
     this.followers = followers;
     if (!id) this.lastNpc = null;
     this.broadcast({ t: "host", id, followers });
-  }
-
-  // The ghost arena's host, among the visible pages in it, by the NPC host's rule, followed by every other page in the
-  // arena or its hallway; every page hears who it is. The
-  // kept frame goes with a change of host, and when nobody follows, since the host then stops sending and the frame
-  // would hand the next page in a hunt that has moved on (it sends again within a quarter second of a follower).
-  electGhostHost() {
-    const id = electHost(this.players.values(), this.ghostHostId, ghostCandidate);
-    const followers = npcFollowers(this.players.values(), id, watchesGhost);
-    if (id !== this.ghostHostId || !followers) this.lastGhost = null;
-    if (id === this.ghostHostId && followers === this.ghostFollowers) return;
-    this.ghostHostId = id;
-    this.ghostFollowers = followers;
-    this.broadcast({ t: "ghost-host", id, followers });
-  }
-
-  // A binary frame led by GHOST_MAGIC is the arena hunt's state: taken only from its host while in the arena, capped
-  // in size and rate, kept for the next page to walk in, and relayed unchanged to every other page in the arena or its
-  // hallway.
-  ghostFrame(p, data) {
-    if (p.id !== this.ghostHostId || !inGhostArena(p) || data.byteLength > GHOST_FRAME_MAX) return;
-    if (!takeToken(p.ghostFrameBucket, GHOST_FRAME_HZ, Date.now(), GHOST_FRAME_BURST)) return;
-    if (this.ghostFollowers) this.lastGhost = data;
-    for (const q of this.players.values()) if (q !== p && watchesGhost(q)) this.send(q.ws, data);
   }
 
   // A binary frame is the NPC host's poses: taken only from the current host, capped in size and rate,

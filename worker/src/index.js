@@ -1,8 +1,9 @@
 // The Worker in front of Ooga Booga Land: the built page from static assets, GitHub sign-in under
 // /auth/*, the account API under /api/*, the totems' merge summaries under /api/totems/*, voice
-// signalling under /api/voice/*, Tess's answers at /api/tess, /room, the island's live socket, and
-// /donations/*, passed on to bananapayserver over the DONATIONS binding. Only those paths run this code
-// (`run_worker_first` in wrangler.<env>.jsonc); every other path is served straight from _site.
+// signalling under /api/voice/*, Tess's answers at /api/tess, /room, the island's live socket, /game/*, the sockets
+// of the games the Worker hosts itself (game-host.js), and /donations/*, passed on to bananapayserver over the
+// DONATIONS binding. Only those paths run this code (`run_worker_first` in wrangler.<env>.jsonc); every other path is
+// served straight from _site.
 
 import { handleApi } from "./api.js";
 import { handleAuth } from "./auth.js";
@@ -16,10 +17,24 @@ import { allowed, fromSite, getSessionFromRequest, readBody, text } from "./http
 import { handlePoker } from "./poker.js";
 import { handleTess, pruneTess } from "./tess.js";
 import { handleTotems } from "./totems.js";
+import { gameName } from "./games.js";
 
 export { Room } from "./room.js";
+export { GameHost } from "./game-host.js";
 
 const ROOM_NAME = "island";
+
+// The request passed on to a socket's object, with the player as the session says and nothing a client sent of its own.
+const asPlayer = (request, found, extra = null) => {
+  const headers = new Headers(request.headers);
+  for (const name of [...headers.keys()]) if (name.startsWith("x-player-") || name === "x-game-name") headers.delete(name);
+  headers.set("x-player-id", String(found.player.id));
+  headers.set("x-player-login", found.player.login);
+  headers.set("x-player-display", found.player.display || found.player.login);
+  headers.set("x-player-contributor", "1");
+  if (extra) for (const [name, value] of Object.entries(extra)) headers.set(name, value);
+  return new Request(request, { headers });
+};
 
 // Identity is decided here, once, from the session; the room trusts only the headers set below.
 const handleRoom = async (request, env) => {
@@ -28,13 +43,23 @@ const handleRoom = async (request, env) => {
   const found = await getSessionFromRequest(request, env);
   if (!found) return text("Sign in first", 401);
   if (!(await allowed(env.ROOM_LIMITER, String(found.player.id)))) return text("Too many reconnects", 429);
-  const headers = new Headers(request.headers);
-  for (const name of [...headers.keys()]) if (name.startsWith("x-player-")) headers.delete(name);
-  headers.set("x-player-id", String(found.player.id));
-  headers.set("x-player-login", found.player.login);
-  headers.set("x-player-display", found.player.display || found.player.login);
-  headers.set("x-player-contributor", "1");
-  return env.ROOM.getByName(ROOM_NAME).fetch(new Request(request, { headers }));
+  return env.ROOM.getByName(ROOM_NAME).fetch(asPlayer(request, found));
+};
+
+// A hosted game's socket, `/game/<kind>/<venue>` (game-host.js): only a game and venue the registry names (games.js)
+// reaches an object, so no page makes one; who the player is is decided here, as for the room. An object is made where
+// `GAME_LOCATION_HINT` says (a region such as "enam"), else near whoever first connects, and stays there.
+const handleGame = async (request, env, url) => {
+  if (request.headers.get("upgrade") !== "websocket") return text("Expected WebSocket", 426);
+  if (!fromSite(request, env.SITE_ORIGIN)) return text("Forbidden", 403);
+  const [, , kind = "", venue = "", rest] = url.pathname.split("/");
+  const name = rest === undefined ? gameName(kind, venue) : "";
+  if (!name || !env.GAMES) return text("No such game", 404);
+  const found = await getSessionFromRequest(request, env);
+  if (!found) return text("Sign in first", 401);
+  if (!(await allowed(env.GAME_LIMITER, String(found.player.id)))) return text("Too many reconnects", 429);
+  const hint = env.GAME_LOCATION_HINT;
+  return env.GAMES.get(env.GAMES.idFromName(name), hint ? { locationHint: hint } : undefined).fetch(asPlayer(request, found, { "x-game-name": name }));
 };
 
 // A voice call's body: a session description, however many tracks it carries.
@@ -69,6 +94,7 @@ export default {
     if (url.pathname.startsWith("/api/cloud-hopper-replays/")) return handleCloudHopperReplays(request, env, ctx);
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);
     if (url.pathname === "/room") return handleRoom(request, env);
+    if (url.pathname.startsWith("/game/")) return handleGame(request, env, url);
     if (url.pathname.startsWith("/donations/")) return handleDonations(request, env, url);
     return env.ASSETS.fetch(request);
   },

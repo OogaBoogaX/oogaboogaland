@@ -8,24 +8,25 @@ Frontend, implemented:
 
 | Part | Where |
 |---|---|
-| Nine rooms, `roomId` 1–9 validated at every boundary, 1× / 1.5× / 2× layouts with a fixed doorway, arrival, Exit button and chairs, and a table for 4, 8 or 12 | `src/js/timechain-rooms.js` |
-| The shared room design (screens centred opposite the one doorway, latest-blocks ribbon, the ribbed dome, charcoal tiles with the amber chain from the doorway's seam to the ring round the table and out to the wall a third of a turn either side, the table and its chairs, the holdings desk against the left wall, the doors under their EXIT header with the wall's strip carried across them as a chain, and the vestibule) | `src/js/timechain-room-models.js` |
+| Ten rooms, `roomId` 0–9 validated at every boundary, each its own kind and size: a true sphere whose dome over the screen's lower edge is all screen, with the doorway, arrival, Exit button and (in the Conference Room alone) the lock at human size, and the raked halls' rows and aisles | `src/js/timechain-rooms.js` |
+| The shell every room shares (the sphere's wall and its screen, one canvas wrapped round the dome; the floor's canvas or a raked hall's terraces; the doors under their EXIT header with an amber chain across them, the Exit button, the lock, the vestibule) and the kit each room builds with | `src/js/timechain-room-models.js` |
+| The ten rooms, one file each: 0 the Planetarium, 1 the Conference Room (the live charts round the dome, the latest blocks round its base, the next block at the crown, the table for eight and the holdings desk), 2 Satoshi's Temple (with the replica of Valentina Picozzi's Lugano Satoshi statue, made with her permission), 3 the Block Party, 4 the Fireside Lounge, 5 Proof of Work-out, 6 the Observatory, 7 the Mining Museum, 8 the Lecture Hall, 9 the Movie Theater | `src/js/timechain-room-<kind>.js` |
 | The room scene: first person, shoulder and orbit, no weapons or jetpack, guided first-person arrival and exit, shared presence (`sphere-<id>`) or a solo copy, a table to jump on and chairs to sit in, local ambience, complete disposal | `src/js/scene-timechain.js` (always loaded), `src/js/timechain-interior.js` (deferred) |
 | Block and mining data from mempool.space's public API: one in-flight request per dataset, backoff with Retry-After, hidden-tab pause, last good value kept as STALE, the 144-block window chained by parent hash, a page-wide cache shared by every room | `src/js/timechain-blocks.js` |
 | Native charts in the Timechain Blocks look, each naming its source, window and freshness; the six holdings readings at the desk | `src/js/timechain-charts.js` |
 | The exterior: doors whose outer faces carry the ball's turning pattern across their seam, the keypad, the dim passage and its curtain, the plug that stops tailgating | `src/js/timechain-models.js` |
 | Physical keypad engagement in the Ooga's own first person, single selection, account resolution (selected number retries / Enter continues solo), the room readied only after Enter and a slice a frame, the reservation client, the turn to the doors, the walk through and a hand over without a fade from the same eye, the first-person walk back out, spectator doors | `src/js/timechain-gate.js`, wired in `src/js/scene-hub.js` |
-| Routes `/sphere-1` … `/sphere-9`, reload and history (a stored visit repeats only as it was; a signed-in arrival without one goes to the keypad with the room chosen) | `src/js/routes.js`, `src/js/scene-timechain.js`, `prepare` in `src/js/director.js` |
+| Routes `/sphere-0` … `/sphere-9`, reload and history (a stored visit repeats only as it was; a signed-in arrival without one goes to the keypad with the room chosen) | `src/js/routes.js`, `src/js/scene-timechain.js`, `prepare` in `src/js/director.js` |
 | Hosted deferral: the interior's modules leave the hosted pages for one same-origin file fetched after Enter; the portable page keeps them inline | `data-defer` in `src/index.html`, `scripts/build.mjs`, `scripts/distribution-modules.mjs`, `src/js/deferred.js` |
 
-Backend, still to do: the doorway reservation and transit messages in [doorway-contract.md](doorway-contract.md) (until the room advertises them, crossings run on the traveler's page alone), and regression coverage for nine-way voice isolation, stale pulls and reconnects. An authorized Timechain Index data proxy only if a key is configured.
+Backend, still to do: the doorway reservation and transit messages in [doorway-contract.md](doorway-contract.md) (until the room advertises them, crossings run on the traveler's page alone), and regression coverage for ten-way voice isolation, stale pulls and reconnects. An authorized Timechain Index data proxy only if a key is configured.
 
 Byte-level exception: the portable single file (`oogaboogaland.html`) and the source tree carry the interior's code inline, about 125 KB, because a file:// page has no second file to fetch. Hosted pages (`npm run site`, `npm run build:site`) do not.
 
 ## Experience
 
 - Approach the physical keypad and press Space to focus it. Offer pointer/touch equivalents.
-- The 3×3 keypad has digits 1–9, Back and Enter. Exactly one digit can be selected; selecting another replaces it. Start unselected with Enter disabled. Back/Escape cancels before crossing.
+- The keypad has digits 1–9 in a 3×3 grid and Back, 0 and Enter under them; every digit is a room. Exactly one digit can be selected; selecting another replaces it. Start unselected with Enter disabled. Back/Escape cancels before crossing.
 - Enter prepares only the selected destination, turns the view to the door, slides both leaves sideways, and guides the character in. Reveal the selected interior to the traveler. Swoop into first person, close the doors when clear and return movement.
 - Every interior visit stays in first person and disables jetpack activation, including alternate controls and possession paths. Preserve gear/fuel and restore eligible exterior state on exit.
 - Press Space at the physical Exit button to use the reverse guided track. No walk-through entrance or exit trigger.
@@ -33,17 +34,22 @@ Byte-level exception: the portable single file (`oogaboogaland.html`) and the so
 - The shared entry/exit doorway is centered opposite the display wall, on the room's main axis. Entering players face the center of the screens, which wrap equally left and right. The doorway is behind them, never cut into the front display wall. The Exit button sits beside that centered doorway.
 - Slow or failed preparation holds safely before passage, offers retry/cancel, and restores controls. Respect reduced motion and both renderers.
 
-## Nine rooms and three sizes
+## Ten rooms
 
-| Rooms | Interior width, depth and height |
-|---|---|
-| 1–3 | 1× baseline |
-| 4–6 | 1.5× baseline |
-| 7–9 | 2× baseline |
+| Room | Kind | Sphere radius |
+|---|---|---|
+| 0 | Planetarium: tonight's sky over London from reclining seats round the star projector | 8 m |
+| 1 | Conference Room: the round table for eight under live block and mining charts; the one room that locks | 10.5 m |
+| 2 | Satoshi's Temple: a meditation temple round the Satoshi statue at half as large again as life; its bell, gong, singing bowl and wind bells are heard, its koi fed, its trees shaken, its lanterns put out or lit | 15 m |
+| 3 | Block Party: a floor of LED panels in a hash grid that re-hashes on the beat, wall to wall under a dome-wide light show, a truss of laser projectors over a DJ booth you can walk behind (and change the channel) or jump over, and the music's spectrum on the booth's screen and an LED wall all round the room, EDM Sessions or SomaFM playing live and all of it on its beat | 13.5 m |
+| 4 | Fireside Lounge: sofas round a fire pit under the Milky Way | 9 m |
+| 5 | Proof of Work-out: exercise bikes facing a mountain sunrise | 12 m |
+| 6 | The Observatory: a telescope under a slit to the night sky | 12 m |
+| 7 | The Mining Museum: miners from Satoshi's CPU (one high-end 2009 desktop, as Sergio Demian Lerner's Patoshi research reads it) to today's ASICs under the hashrate's history, each opening up close in 3D with all its stats and sources (`model-viewer.js`) | 15 m |
+| 8 | Lecture Hall: raked rows facing a stage, a slide on the dome | 15 m |
+| 9 | Movie Theater: recliners on a steep rake under a dome that is all picture | 20 m |
 
-Use one shared Timechain interior template. All nine may show the same data and reuse immutable assets; each signed-in room has independent membership, voice and soundscape lifecycle. Only the active room is instantiated. Keep exterior dimensions, avatars, eye height, movement speed, furniture and controls at their normal scale (the meeting table alone grows, to seat 4, 8 or 12). Larger variants expand the architecture and layout around a standard doorway and arrival area.
-
-Use charcoal/black panels, fine amber borders and labels, white values, green mining data, a latest-block ribbon and native line/bar/donut charts, following [Timechain Index Blocks](https://timechainindex.com/blocks). Preserve the existing distribution/holdings readings in useful secondary views. Chart text must remain readable in the existing close-up/source modal.
+Each room is its own kind of place, built on one shell (`timechain-room-models.js`): the doorway, its bay and vestibule, the Exit button, the arrival and everything a body touches keep human size in every room, and each room dresses its door in its own style (shōji in the Temple, red velvet in the Movie Theater, a bulkhead in the Observatory, and so on). Walkers step up onto anything low and shoulder round the rest, as on the island. Each signed-in room has independent membership, voice and soundscape lifecycle. Only the active room is instantiated. The Conference Room alone has the lock.
 
 ## Spectators and the shared doorway
 
@@ -59,9 +65,9 @@ For exit, publish exterior zone `sphere` with a valid exterior pose behind the o
 
 ## Solo guest visits
 
-Signed-out visitors get the same keypad, nine choices, sizes, camera rules and guided flow in a private local copy. The number chooses the template only. Two guests choosing 3, or a guest and a signed-in player choosing 3, never share occupancy.
+Signed-out visitors get the same keypad, ten choices, rooms, camera rules and guided flow in a private local copy. The number chooses the template only. Two guests choosing 3, or a guest and a signed-in player choosing 3, never share occupancy.
 
-Show “Solo visit · not signed in”. Do not register guest rooms, poses, transit events, occupancy, persistent identifiers, remote actors or voice; do not request a microphone. No `sphere-guest` network zone. Guest door cycles are local and do not contend with the shared doorway. Public charts and local ambience still work after entry.
+The banner names the room under its title and nothing more; the way out is the wordless exit button left of the Ooga's face, in every room. Do not register guest rooms, poses, transit events, occupancy, persistent identifiers, remote actors or voice; do not request a microphone. No `sphere-guest` network zone. Guest door cycles are local and do not contend with the shared doorway. Public charts and local ambience still work after entry.
 
 Wait for account resolution before choosing shared versus solo mode, then keep the choice for the visit. Pending authentication is not confirmed sign-out. Late authentication/reconnect cannot publish a solo room. Sign-in returns to the exterior keypad for deliberate shared entry. Logout or session revocation inside immediately removes shared presence/voice and returns safely outside.
 
@@ -69,7 +75,7 @@ Account lookup failure must not lock the exterior controls or wait forever. Afte
 
 ## Network and resource boundaries
 
-- Exterior zone: `sphere`; interior zones: `sphere-1` through `sphere-9`. Do not use dot suffixes: current grouping would merge their voice groups.
+- Exterior zone: `sphere`; interior zones: `sphere-0` through `sphere-9`. Do not use dot suffixes: current grouping would merge their voice groups.
 - Use `none` while handing off. Join a destination only with its valid arrival pose. Exact room filtering controls remote actors; stale SFU pulls must be rejected. Reconnect restores a shared active room only.
 - Ambient sound is client-owned, as in DSB venues. Dispose it on departure; it may share audio assets across replicas.
 - The hub owns shell, bridge, doors, keypad and bounded passage visuals. A separate interior scene owns its selected room, exclusive charts/data, audio, input and GPU resources.
@@ -83,7 +89,7 @@ See [data-contract.json](data-contract.json) for verified endpoint URLs, exact f
 
 The existing six `/OogaBooga/` endpoints describe holdings/distributions and cannot supply these block charts. Timechain Index's documented network API requires a key; never ship one in the client. Exact provider parity needs a confirmed public OogaBooga endpoint or a configured Worker secret/proxy and verified metric definitions.
 
-Use an interior-scoped adapter with bounded caches, one in-flight request per dataset, abort/dispose, visibility pause, retry/backoff and last-good stale values. Do not start nine pollers or expand hub-only requests for these charts. Reuse existing global summaries only when units, freshness and semantics match.
+Use an interior-scoped adapter with bounded caches, one in-flight request per dataset, abort/dispose, visibility pause, retry/backoff and last-good stale values. Do not start ten pollers or expand hub-only requests for these charts. Reuse existing global summaries only when units, freshness and semantics match.
 
 Last 144 blocks is not a 24-hour window. Verify contiguous height/hash coverage before aggregates; keep hashrate and difficulty units separate. Pool share is attributed block share. The weekly pools response has no actual per-pool reward total; show unavailable until a complete source exists. Do not invent reward totals, “Fee Pressure” thresholds, “Mining Pace” categories, or missing history.
 
@@ -91,7 +97,7 @@ Last 144 blocks is not a 24-hour window. Verify contiguous height/hash coverage 
 
 **Opus frontend:** native room design/charts, all scale variants, keypad and doors, camera/jetpack policies, guided tracks, spectator presentation and collision gate, solo policy, room scene/resource lifecycle, hosted deferral and routes. Implement the interior data consumer against the explicit source contract. Coordinate the doorway event interface before integrating shared transitions.
 
-**Backend:** implement the small authenticated reservation/transit contract and its expiration/reconnect behavior in the existing Durable Object; verify all nine voice groups and stale-pull authorization; document the guest non-registration rule. Add a credentialed data proxy only if an authorized Timechain Index source is configured. No idle server timers.
+**Backend:** implement the small authenticated reservation/transit contract and its expiration/reconnect behavior in the existing Durable Object; verify all ten voice groups and stale-pull authorization; document the guest non-registration rule. Add a credentialed data proxy only if an authorized Timechain Index source is configured. No idle server timers.
 
 ## Acceptance and verification
 
@@ -106,6 +112,8 @@ The issue body and latest comment contain the complete acceptance list. Also ver
 - Follow `AGENTS.md`: no dependencies or CSP weakening, no per-frame allocations. The explicit entry/exit camera animation is user-authorized. Default test mode is wait: build and syntax checks for runtime edits; run broader suites only when requested.
 
 ## Mockups
+
+The keypad, doorway and passage below still stand. The interiors shown predate the ten rooms: the single Timechain design they show became the Conference Room.
 
 These are screenshot-based concept edits, not rendered implementation or live measurements. The new Timechain versions supersede the earlier blue interior. The entry image is the traveler's view; spectators see the dim passage described above.
 
