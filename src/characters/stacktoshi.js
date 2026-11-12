@@ -29,7 +29,8 @@
     // glasses, a broad nose and a short lip, with dark brows under the fringe.
     look: {
       bald: true, hairless: true, cleanShaven: true, noBrow: true, noPupils: true,
-      face: "none", hatY: 11, height: 1.08, skin: "#d9a878", hair: "#8d939a", fur: "#a97f52",
+      // noFlaps: under the modelled look his shirt ends at the waist, with no ragged tail over his jeans.
+      noFlaps: true, face: "none", hatY: 11, height: 1.08, skin: "#d9a878", hair: "#8d939a", fur: "#a97f52",
       portrait: { min: [-2, -2, -3], max: [8, 10, 8] }
     },
     voice: {
