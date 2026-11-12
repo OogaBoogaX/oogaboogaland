@@ -229,6 +229,15 @@ Public domain under [The Ooga Booga License](LICENSE), a caveman-speak dedicatio
 
 Read [AGENTS.md](AGENTS.md) first: the module layout, the engine patterns, how to add things, and the checks every change must pass.
 
+Open your PR as a **draft** and tell your AI assistant to keep it draft while the
+work is in progress. Finish the implementation and authorized local checks, then
+update the description with the result, validation and any remaining acceptance
+work before selecting **Ready for review**. That signals a finished change for
+maintainers to review. If substantial new work is needed, return the PR to draft;
+small review fixes can stay ready. Batch related fixes before pushing, and let
+required CI pass before merging. Drafts can still run some CI; draft status keeps
+unfinished work out of the review queue and character intake.
+
 ## DSB Land
 
 Reached through **₿IFRÖST** beyond the north pass. Walk through the DSB window in its chamber. To come home, use the **DSB Dialer** beside the upright gate and walk back through it into ₿IFRÖST.

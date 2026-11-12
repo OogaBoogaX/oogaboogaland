@@ -18,6 +18,15 @@ submission to a reused daily placeholder starts its UTC day.
 
 ## Intake and ownership
 
+Open human- and AI-authored source PRs as **drafts**, and keep them draft while
+implementation is in progress. Mark them ready only after the work and authorized
+local checks are finished and the description records validation and remaining
+acceptance work. Return to draft for substantial additional development; small
+review fixes can stay ready. Batch related fixes before pushing. This applies to
+source submissions, not the automation-managed bundle placeholders above, whose
+review and merge gates follow their lane policy. Draft status does not disable
+all CI; it keeps unfinished submissions out of character intake and review.
+
 PR creation, new commits, reopening and ready-for-review events trigger trusted
 code from `rock`. Draft PRs wait. A read-only push signal covers repository branch
 commits without a PR; fork commits become visible through PRs. Periodic sweeps
@@ -95,6 +104,53 @@ path. They do not establish malicious intent. Timeouts, rate limits, truncated
 responses, changing heads and base conflicts fail the check but leave the PR open.
 A direct push to `rock` cannot be quarantined after the fact: the audit reports it,
 and branch rules must prevent ordinary contributors from taking that path.
+
+## Release-first admission and recovery
+
+`scripts/ci-priority.mjs` gives pending/running post-merge page builds on `rock`
+and manually requested staging/production deployments priority over new PR work.
+It recognizes fixed workflow paths and their events, not display titles. Waiting
+deployment approvals also hold lower-priority work. Deployment workflows and their
+manual triggers are unchanged; recovery cannot dispatch or approve a deployment.
+
+The unit job reads its admission gate from trusted `rock` before checking out PR
+code or running the expensive lane. A missing gate on `rock` lets this policy's
+initial PR run the full old lane; other API errors fail closed. Character
+inspection still completes ordinary PRs outside the shared lock. When inspection
+needs a writer, it checks release priority before queuing. The writer checks again
+after acquiring `character-bundles`, before obtaining its App token or mutating
+anything. A queued writer that finds release work yields the lock. A writer or
+test job already doing work finishes normally; nothing cancels an active write.
+Explicit manual CI/intake runs remain operator-controlled and do not defer.
+
+Deferral is an unsuccessful **Yield to release work** step, never a passing or
+skipped required test. **Resume deferred PR checks** runs after a release finishes
+(success, failure or cancellation), with recovery at minutes 7, 27 and 47 and a
+manual recovery button. It waits until no release remains active, then retries
+only jobs whose failure was that explicit yield step after a successful priority
+inspection. Actual test/build failures and completed checks are not retried.
+Successful jobs in the same run remain intact. PR checks resume only at the
+current head of an open, non-draft PR, and an older run cannot displace a newer
+run for that revision. Fresh PR and run-attempt reads precede each retry; a new
+release stops recovery. Character signals/sweeps re-read current state as usual;
+closed-source and merged-override recovery stays with the existing bundle sweep.
+
+Recovery reads GitHub metadata and one script from `rock`, never PR code, logs,
+artifacts or caches. Its only mutation is the Actions job-rerun endpoint. Scans
+are bounded at 1,000 rows per query and 30 days of failures (GitHub's rerun window),
+with at most 20 resumed jobs per pass and four total attempts per run (the initial
+run plus at most three automatic retries; manual reruns count toward this cap).
+After that, inspect the run and rerun it manually once release work is finished.
+This bounds runner use even if a PR imitates the yield step and always fails it.
+API failures and overflow require retry or manual investigation. A missed
+completion event or a job yielding just after it is recovered by the next
+scheduled pass. Deferred runs can appear red until then.
+
+This is cooperative priority, not GitHub runner preemption: already-queued writer
+jobs can briefly start and yield before the artifact job gets its turn. GitHub's
+runner availability and queue startup overhead still apply. Reserving release
+runner capacity would be a separate infrastructure change. Keep the shared writer
+lock: putting artifact and bundle writes in independent groups would allow races.
 
 ## Automatic data format
 
