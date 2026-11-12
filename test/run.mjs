@@ -19788,8 +19788,10 @@ const hubCatapultRide = { name: "hub catapult ride", why: "playthrough: the real
     board(); const prompt = document.getElementById("act").textContent;
     space(); const launched = H.catapult.flight.launches;
     space(true); const single = H.catapult.flight.launches === launched && a.camp.seat?.kind === "catapult";
-    let frames = 0, chute = false;
-    while (H.catapult.phase !== "idle" && frames++ < 600) { B.advance(1 / 30, 1 / 30); chute ||= H.catapult.chute; }
+    let frames = 0, chute = false, arms = true;
+    while (H.catapult.phase !== "idle" && frames++ < 600) { B.advance(1 / 30, 1 / 30); chute ||= H.catapult.chute;
+      if (H.catapult.phase !== "idle") arms &&= !a.parts.armR.quaternion && !a.parts.armL.quaternion && (!a.modelled || a.parts.forearmR.rotation.x === -a.elbow.rest && a.parts.forearmL.rotation.x === -a.elbow.rest);
+    }
     const p = a.root.position, landed = { phase: H.catapult.phase, seated: !!a.camp.seat, x: p.x, y: p.y - a.baseY, z: p.z, floor: B.headquarters.solids.supportAt(p.x, p.z, p.y - a.baseY, p.y - a.baseY, a), onLand: B.island.onLand(p.x, p.z), landings: H.catapult.flight.landings };
     board(); space(); B.advance(.5, 1 / 30);
     const again = H.catapult.phase !== "idle";
@@ -19797,10 +19799,10 @@ const hubCatapultRide = { name: "hub catapult ride", why: "playthrough: the real
     const ended = H.catapult.phase === "idle" && !a.camp.seat;
     board(); space(); const refused = H.catapult.phase === "idle";
     H.setGameMode(false); B.advance(.2, 1 / 30);
-    return { built: true, hidden: first.hidden, prompt, launched, single, frames, chute, landed, again, ended, refused, restored: !H.gameMode };
+    return { built: true, hidden: first.hidden, prompt, launched, single, frames, chute, arms, landed, again, ended, refused, restored: !H.gameMode };
   })()`);
   record("hub catapult: Space launches once, opens the parachute and lands on dry island ground; GAME MODE ends a second flight, refuses launches and restores normal play",
-    r.built && r.hidden.length === 0 && r.prompt === "LAUNCH!" && r.launched === 1 && r.single && r.chute && r.frames < 600
+    r.built && r.hidden.length === 0 && r.prompt === "LAUNCH!" && r.launched === 1 && r.single && r.chute && r.arms && r.frames < 600
       && r.landed.phase === "idle" && !r.landed.seated && r.landed.onLand && Math.abs(r.landed.y - r.landed.floor) < .15 && r.landed.landings === 1
       && r.again && r.ended && r.refused && r.restored, JSON.stringify(r));
 } };
