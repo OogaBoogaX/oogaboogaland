@@ -320,7 +320,7 @@
       subtitle: $("subtitle"),
       topbar: document.querySelector(".topbar"), brand: document.querySelector(".brand"),
       clock: $("world-clock"), block: $("world-block"),
-      equipment: $("equipment-hud"), equipmentRow: document.querySelector(".weapon-equipment-row"),
+      equipment: $("equipment-hud"), equipmentRow: document.querySelector(".weapon-equipment-row"), leave: $("leave-hud"),
       micNote: $("mic-note"),
       actions: [...document.querySelectorAll("[data-action]")],
       board: $("board-modal"), boardTitle: $("board-title"), boardScreen: $("board-screen"), boardCaption: $("board-caption"), boardNote: $("board-note"),
@@ -412,6 +412,14 @@
     // Fit each environment's controls between the title and clock when their actual visible widths allow it.
     // Observers only schedule a pass after layout or equipment changes; ammo and animation never poll it.
     const bannerScene = document.body.dataset.activeScene;
+    // The way out, left of the Ooga's face: where this place's banner has a Leave button, the wordless one stands in for
+    // it, named by it (`leaveTo` renames both), and the banner's own is kept out of sight (style.css).
+    {
+      const text = el.topbar.querySelector(`[data-scene="${bannerScene}"] [data-action="leave"], [data-scene="${bannerScene}"][data-action="leave"]`);
+      el.leave.hidden = !text;
+      if (text) { nameLeave(text.textContent); document.body.dataset.leaveHud = "true"; }
+      listeners.push(() => { el.leave.hidden = true; delete document.body.dataset.leaveHud; });
+    }
     {
       const presets = el.topbar.querySelector(`.presets[data-scene="${bannerScene}"]`);
       let bannerFrame = 0;
@@ -1423,7 +1431,14 @@
         paintBoardControls();
         scheduleBoardSave();
       };
-      on(el.boardScreen, "click", () => {
+      on(el.boardScreen, "click", (e) => {
+        // A board that takes picks (the Sphere's room directory) hears where on its picture the press landed, and
+        // answers "close" when that is done with it.
+        if (board?.pick) {
+          if (board.pick(e.offsetX * board.canvas.width / el.boardScreen.clientWidth, e.offsetY * board.canvas.height / el.boardScreen.clientHeight) === "close") closeBoard();
+          else updateBoard();
+          return;
+        }
         if (!board?.floating) return;
         toggleBoardControls();
         el.boardScreen.blur();
@@ -1660,6 +1675,7 @@
         el.board.classList.toggle("board-floating", !!board.floating);
         el.board.classList.toggle("board-caption-above", !!board.captionAbove);
         el.board.classList.toggle("board-carousel", !!board.carousel);
+        el.boardScreen.classList.toggle("board-pickable", !!board.pick && board.pickable);
         if (board.floating) {
           paintBoardControls();
           boardCenter.prepend(el.boardCaption);
@@ -1724,6 +1740,13 @@
         if (board?.update) board.update(elapsed);
         if (board && board.version !== boardShown) paintBoard();
       };
+      // A key a board takes for itself (the directory's numbers): true when it did, "close" when done with it too.
+      const boardKey = (key) => {
+        const took = board.key(key);
+        if (took === "close") closeBoard();
+        else if (took) updateBoard();
+        return !!took;
+      };
       const pageBoard = (step) => {
         if (!board) return;
         board.go((board.index + step + board.count) % board.count);
@@ -1741,7 +1764,7 @@
         }
         else if (e.key === "ArrowLeft") pageBoard(-1);
         else if (e.key === "ArrowRight") pageBoard(1);
-        else return;
+        else if (!(board?.key && !e.repeat && boardKey(e.key))) return;
         e.preventDefault();
         e.stopPropagation();
       });
@@ -2704,8 +2727,16 @@
     }
     if (name) list.append(rows.get(name).parentElement);
   };
+  // The wordless way out's name, from the banner's Leave button it stands in for: its words, or for a place's name alone
+  // ("Arcade", "Factory"), back to it.
+  const nameLeave = (words) => {
+    const button = document.getElementById("leave-hud"), text = words.trim(), name = /^(leave|back|exit)\b/i.test(text) ? text : `Back to the ${text}`;
+    button.setAttribute("aria-label", name);
+    button.title = name;
+  };
   // A game's exits say where they go: back to the arcade when one of its cabinets started it, else the island. A
-  // header button names the place in its span (a phone shows only "Back"); a card's button says it all.
+  // header button names the place in its span (a phone shows only "Back"); a card's button says it all; the wordless
+  // way out by the face takes the header's name.
   const leaveTo = (scene, home) => {
     const place = home === "arcade" ? "arcade" : "the island";
     for (const b of document.querySelectorAll(`[data-scene="${scene}"] [data-action="leave"]`)) {
@@ -2713,6 +2744,7 @@
       if (span) span.textContent = ` to ${place}`;
       else b.textContent = `Back to ${place}`;
     }
+    if (document.body.dataset.activeScene === scene) nameLeave(`Back to ${place}`);
   };
   BL.hud = { create, renderIcon, renderFaceIcon, renderBodyIcon, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor, voiceIcon, voiceWords };
 })();
