@@ -26,6 +26,29 @@ submissions require a verified signature with the same linked GitHub author and
 committer. A PR's authenticated author is its ownership authority; an arbitrary
 commit name or email is insufficient.
 
+Ordinary PRs first run a trusted inspection outside the shared writer queue. It
+checks the complete current diff (including the old path of a renamed file) and
+the signed bundle manifests. With no character changes and no queued entry from
+that PR, it publishes **Character intake** and **Character bundle safety** for
+the inspected head without creating, updating or merging bundles. Missing,
+truncated or untrusted data fails closed. A changing head, base or queue takes
+the serialized path. The separate **Character identity ownership** check and
+the full browser-free test, staged build and Worker lane remain required.
+
+Each PR or signal branch keeps its running event and only its newest pending
+event. A running writer is never cancelled; it re-reads current PR state when
+its turn arrives. Closed-PR events have a separate slot so an override's cleanup
+cannot be displaced by reopening it. Only reconciliation jobs and scheduled
+recovery share the artifact writer's `character-bundles` lock. Ordinary PR
+closures do not enter that queue. No submitted code is executed by inspection,
+and its token can read contents/PRs and publish statuses, but cannot edit either.
+
+For manual review, update only the next PR selected for merging to current
+`rock`; do not refresh every waiting branch after each merge. Finish its fixes
+before pushing and let its required checks complete before selecting the next.
+Branch freshness requirements and test coverage are unchanged. Pending-event
+coalescing reduces redundant work; it does not make character writes parallel.
+
 Every character-changing commit must link to that PR author or an OBL maintainer.
 Every changed character must belong to the submitting user, unless that user has
 Maintain/Admin permission. This includes appearance-only edits. Existing
