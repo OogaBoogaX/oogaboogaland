@@ -3,7 +3,7 @@
 This is an inactive compatibility draft, not approval to activate or deploy the
 virtual host. It combines contributor head
 `fffe3afedb57c56c88e6b5bca3073744b45df8b0` with rock
-`04524e75737f9344ee2e61395a54a0b7ceb6557f`, preserving both histories. No
+`7ce9ca2cccac0fdb5adf86b13407b12d6d7ce96e`, preserving both histories. No
 contributor branch is changed. #579 remains on its original contributor base.
 
 The supporting pull request targets upstream `codex/377-virtual-host` from a
@@ -13,10 +13,10 @@ competing virtual-host implementation or a replacement PR to rock. Neither
 
 ## Recovery compatibility
 
-The complete Hub recovery envelope is now version 8. Version 7 and earlier are
+The complete Hub recovery envelope is now version 9. Version 8 and earlier are
 rejected before geometry or controller construction. Current rock changes the
 terrain/dressing recipe, fixed paths, passive collision policy, work reservation
-order and routed chill walks. Those records must not be replayed under the new
+order and routed chill walks. Version 9 also includes Repo Island’s island and bridge solids and its approach claims in the private Hub. Those records must not be replayed under the new
 rules just because a caller supplied the same world label.
 
 Any eventual activation requires a new explicit world-version label and an
@@ -246,7 +246,7 @@ drains body events and checks the host revision around the Room census before
 tick/publication. Their representative cross-runtime execution remains a gate.
 
 Before a finite provider trial, the integration needs an explicit world label
-for recovery v8, a fresh-world or migration decision, an approved private pile
+for recovery v9, a fresh-world or migration decision, an approved private pile
 source, a named test environment and a spending limit. The trial must count
 actual host/Room RPC sessions, alarm invocations, storage rows, WebSocket input
 and active duration across both objects, including retries and cleanup. A
