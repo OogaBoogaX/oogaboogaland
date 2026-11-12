@@ -25358,6 +25358,40 @@ const tessAnswerChecks = (BL) => {
   record("tess answers: the page sends a typed question to a trip, an answer, the tour or nothing, follows \"take me there\" to the last place, leaves other follow-ups and Bitcoin questions that name a place's idea to the Worker, and answers every suggestion",
     !wrong.length && there === "trip:lab" && followUp === "none" && suggested && lines, JSON.stringify({ wrong, there, followUp, suggested, lines }));
 };
+// Shared Tess (#466) in Node: the real island guide under a stubbed room, its queue turns handed over as the Room
+// sends them. Under the shared guide her greeting offers Join queue, so news must come with the granted turn.
+const sharedTessNewsChecks = (BL) => {
+  const H = BL.hubGuide, N = BL.net, store = new Map(), visitKey = "ooga-tess-visits";
+  const savedStorage = globalThis.localStorage, savedState = { me: N.state.me, room: N.state.room, connectionToken: N.state.connectionToken, tessShared: N.state.tessShared, tessGuide: N.state.tessGuide }, savedSend = N.sendTess;
+  globalThis.localStorage = { getItem: (k) => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+  const size = { innerWidth: globalThis.innerWidth, innerHeight: globalThis.innerHeight };
+  Object.assign(globalThis, { innerWidth: 1280, innerHeight: 800 });
+  const calls = [], seen = () => JSON.parse(store.get(visitKey) || "{}")["news-fixture"] || null;
+  N.sendTess = (m) => { calls.push(m.op); return true; };
+  const v = (x, y, z) => ({ x, y, z });
+  const guide = H.create({ parent: BL.scene.createNode(), input: { add() {}, remove() {} }, fx: new Proxy({}, { get: () => () => {} }), camera: { position: v(0, 4, -12), target: v(0, 2, 0), fov: 1 },
+    pilot: { controls: { moving: () => false } }, visitor: () => null, world: {}, hud: {}, busy: () => false, coarse: false, quality: () => 1, landing: true });
+  const s = guide.state, turn = (token) => { N.state.tessGuide = { phase: "active", position: 0, token, count: 1, until: N.serverNow() + 60000, busy: true, pose: null }; guide.update(0.016, 1); };
+  try {
+    Object.assign(N.state, { me: { id: 902, login: "news-fixture", display: "News Fixture" }, room: "live", connectionToken: "news-fixture", tessShared: true, tessGuide: null });
+    // Before a turn her greeting only offers Join queue and reads no news as seen.
+    for (let i = 0; i < 400; i++) guide.update(0.016, i * 0.016);
+    const waitingUnread = s.kind !== "news" && seen() === null;
+    // A granted turn with unread news offers that news first, from the newest entry, and still leaves it unread.
+    turn("turn-1");
+    const offered = s.kind === "news" && s.newest?.line === H.NEWS[0].line && s.legs.length > 0 && s.login === "news-fixture" && /^Welcome back, News Fixture!/.test(s.welcome || "") && s.phase === "approach" && seen() === null;
+    // Not now on that offer records it as seen.
+    s.phase = "offer"; guide.escape();
+    const recorded = seen()?.line === H.NEWS[0].line && calls.includes("cancel");
+    // The next granted turn, nothing new: the island tour with no welcome.
+    turn("turn-2");
+    const toured = s.kind === "island" && s.welcome === null && s.login === null && s.phase === "approach";
+    record("shared Tess news (#466): a signed-in visitor's granted turn offers unread island news first and Not now records it as seen; waiting reads nothing, and with nothing new the turn offers the island tour",
+      waitingUnread && offered && recorded && toured, JSON.stringify({ waitingUnread, offered, recorded, toured, kind: s.kind, phase: s.phase }));
+  } finally {
+    guide.dispose(); globalThis.localStorage = savedStorage; Object.assign(N.state, savedState); N.sendTess = savedSend; Object.assign(globalThis, size);
+  }
+};
 // The Lightning Factory in Node: the feed's two contracts, the demo node that stands in for a real one, and the
 // walkable floor of the hall, each through the module's own functions.
 const factoryChecks = (BL) => {
@@ -30872,6 +30906,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   }
   factoryChecks(BL);
   tessAnswerChecks(BL);
+  sharedTessNewsChecks(BL);
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
   await cloudHopperFailureChecks(BL);
