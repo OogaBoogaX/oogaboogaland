@@ -31419,6 +31419,49 @@ record("character visibility source bakes: ownership wrappers share exact immuta
             following && handedBack.released && handedBack.state === "working" && handedBack.trip === "" && handedBack.bedFreed && handedBack.rifle && handedBack.act === "eat"
               && sleeper.bedTravel.mode === "rest", JSON.stringify({ following, handedBack, restored: sleeper.bedTravel.mode }));
         }
+        // Regression (#481): a sleeping host can be somewhere other than this page's old bed. Its position must
+        // not become a permanent local `rest` on takeover or a retained visit's suspension. No bed trip may exist
+        // locally at all when the host first puts the Ooga to sleep.
+        {
+          const rows = [];
+          crew.sleepDiagnostics(true);
+          for (const mode of ["rest", "waiting", ""]) for (const retained of [false, true]) {
+            sleeper.state = "away"; crew.refreshStates(true);
+            const held = sleeper.bedroll;
+            BL.net.state.hostId = BL.net.state.selfId = "host";
+            sync = BL.npcSync.create(options);
+            sleeper.state = "sleeping"; sr.quaternion = null;
+            Object.assign(sr.position, { x: 12, y: sleeper.baseY, z: 9 });
+            sync.update(0.3); const travelling = BL.net.npcFrame;
+            sync.dispose();
+            sleeper.state = "away"; crew.refreshStates(true);
+            sleeper.bedTravel.mode = mode;
+            if (!mode) { held.sleeper = null; sleeper.bedroll = null; }
+            BL.net.state.selfId = "follower";
+            sync = BL.npcSync.create(options); followSleeper(travelling);
+            const followed = sleeper.puppet && sr.position.x === 12 && sr.position.z === 9 && sleeper.state === "sleeping";
+            if (retained) sync.dispose(true);
+            else { BL.net.state.hostId = BL.net.state.selfId; sync.update(0.05); }
+            const bed = sleeper.bedroll, travel = sleeper.bedTravel;
+            const settled = !sleeper.puppet && sleeper.state === "sleeping" && travel.mode === "rest" && bed?.sleeper === sleeper
+              && sr.quaternion === sleeper.sleepRotation && sleeper.parts.head.geometry === sleeper.headClosed
+              && Math.hypot(sr.position.x - bed.x - Math.sin(bed.node.rotation.y) * travel.restZ,
+                sr.position.y - bed.y - travel.restY, sr.position.z - bed.z - Math.cos(bed.node.rotation.y) * travel.restZ) < 1e-5;
+            const trace = crew.sleepDiagnostics().history.filter(e => e.before.name === sleeper.traits.name).at(-1);
+            const captured = trace?.fromHost === "host" && trace.reason === (retained ? "retained-hub" : "host-change")
+              && trace.before.position.x === 12 && trace.before.travel.mode === mode && trace.after.travel.mode === "rest"
+              && trace.after.bed.owner === sleeper.traits.name;
+            rows.push({ mode, retained, followed, settled, captured });
+            sync.dispose();
+          }
+          record("NPC sync: sleeping handoff and retained-hub resume rebuild valid bed ownership and settled pose from stale rest, waiting or absent travel",
+            rows.every(row => row.followed && row.settled && row.captured), JSON.stringify(rows));
+          for (let i = 0; i < 70; i++) crew.resumeFromHost(sleeper, "bounded-test");
+          const bounded = crew.sleepDiagnostics().history.length === 64;
+          crew.sleepDiagnostics(false); crew.resumeFromHost(sleeper);
+          record("NPC sleep diagnostics: opt-in evidence is capped at 64 handoffs, copies the current pose and clears when disabled",
+            bounded && crew.sleepDiagnostics().history.length === 0 && crew.sleepDiagnostics().current.some(c => c.name === sleeper.traits.name));
+        }
         // Real host frames, applied by a real follower at the host's 4 Hz: a
         // same-status move under SNAP plays across, while a status change under
         // SNAP (a passive beam on the host) places the puppet at once, its pose

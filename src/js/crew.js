@@ -3037,13 +3037,34 @@
       }
     };
     // A page following the room's host takes its Oogas' status from the frames and leaves its own bed trip as it was.
-    // Handed back awake, that trip would hold the Ooga in `runBed`, rifle hidden and club in hand, with `applyState`
-    // seeing no change of status to end it. It takes up the host's status afresh, as `runBed` settles a trip begun
-    // before an Ooga became passive.
-    const resumeFromHost = (cave) => {
-      if (cave.state !== "working" && cave.state !== "chilling" || !cave.bedTravel.mode) return;
+    // Handed back awake, that trip would hold the Ooga in `runBed`, rifle hidden and club in hand. Still sleeping,
+    // a local `rest` could leave it at the host's travelling position forever. Reapply the host's status once at
+    // handoff, settling sleepers in this page's reserved bed just as at arrival; frames do not carry bed ownership.
+    // Opt-in, in-memory evidence for intermittent handoffs; no frame-loop work or persistent logging.
+    let sleepTracing = false;
+    const sleepHistory = [];
+    const sleepSnapshot = cave => {
+      const r = cave.root, t = cave.bedTravel, b = cave.bedroll;
+      return { name: cave.traits.name, state: cave.state, puppet: !!cave.puppet,
+        position: { ...r.position }, rotation: { ...r.rotation }, quaternion: r.quaternion ? Array.from(r.quaternion) : null,
+        bed: b ? { index: bedrolls?.indexOf(b) ?? -1, x: b.x, y: b.y, z: b.z, owner: b.sleeper?.traits.name || null } : null,
+        travel: { mode: t.mode, index: t.index, toBed: t.toBed, blocked: t.blocked, retry: t.retry, manual: !!t.manual } };
+    };
+    const sleepDiagnostics = enabled => {
+      if (typeof enabled === "boolean") { sleepTracing = enabled; if (!enabled) sleepHistory.length = 0; }
+      return { enabled: sleepTracing, hostId: BL.net?.state.hostId || null, selfId: BL.net?.state.selfId || null,
+        elapsed, history: sleepHistory.slice(), current: crewList.map(sleepSnapshot) };
+    };
+    const resumeFromHost = (cave, fromHost = null, reason = "handoff") => {
+      if (cave === player || cave.remoteControlled) return;
+      if (cave.state !== "sleeping" && ((cave.state !== "working" && cave.state !== "chilling") || !cave.bedTravel.mode)) return;
+      const before = sleepTracing ? sleepSnapshot(cave) : null;
       const state = cave.state;
       cave.state = "away"; applyState(cave, state, true);
+      if (before) {
+        if (sleepHistory.length === 64) sleepHistory.shift();
+        sleepHistory.push({ elapsed, reason, fromHost, hostId: BL.net?.state.hostId || null, before, after: sleepSnapshot(cave) });
+      }
     };
     const rush = () => {
       if (!wanderSpot) return;
@@ -8063,6 +8084,7 @@
     };
     const dispose = () => {
       pause();
+      sleepTracing = false; sleepHistory.length = 0;
       planQueue.length = 0;
       player = null;
       for (let i = members.length - 1; i >= 0; i--) if (members[i].npc) disposeBody(members[i]);
@@ -8112,7 +8134,7 @@
       showShot, setTint, spotOccupied, setCombatEnabled,
       get combatEnabled() { return combatEnabled; },
       get weaponsEnabled() { return weaponsEnabled; },
-      cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, refreshStates, resumeFromHost, refreshRosterRow, updateFan, rush, applyAllSwag, wornBy, renderLocker, pokeCave, idleSay, drawDrops,
+      cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, refreshStates, resumeFromHost, sleepDiagnostics, refreshRosterRow, updateFan, rush, applyAllSwag, wornBy, renderLocker, pokeCave, idleSay, drawDrops,
       throwTomato, clearProjectiles, control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, clearHeadLook, prepareDragged, recoverDragged, ignite, soot, dropRoll, damage, fireView, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, setJetpackOwnership, cutJet, thrust, holdRocketJump, update, pause, dispose, stats,
       actorClear, outsideSupportAt, builtInJetpack, toggleTint, twirl, pushPose, toggleWeapon, selectWeapon, configureWeapon, parkWeapons, unparkWeapons, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
       get sleeping() { return !!(player && player.bedTravel.manual && player.state === "sleeping"); },
