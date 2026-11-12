@@ -241,7 +241,6 @@
   const voiceFor = (name) => BL.characters.get(name)?.voice || null;
   const SKINS = ["#c98a5b", "#a9744c", "#8a5a3a", "#d9a06b", "#b58057"];
   const HAIRS = ["#2b1b10", "#4a2c14", "#151312", "#5c4425", "#7a2e12"];
-  const HAIRS_SLIM = ["#ece5d3", "#e0dac6", "#f2eee2", "#b9dcaa", "#a3d19a"];
   const FURS = ["#d98a2e", "#cc7f28", "#c98936", "#e09a40", "#c27a24", "#d4913a"];
   // A character's look overrides the hashed skin, hair and fur and carries its
   // flags into the traits; its dress hooks go to models.buildCaveman.
@@ -251,7 +250,8 @@
     const slim = look.build === "slim";
     const rand = mulberry32(fnv1a(name));
     const skin = SKINS[Math.floor(rand() * SKINS.length)];
-    const hashedHair = (slim ? HAIRS_SLIM : HAIRS)[Math.floor(rand() * HAIRS.length)];
+    // Either build's hashed hair is one of the same browns.
+    const hashedHair = HAIRS[Math.floor(rand() * HAIRS.length)];
     const traits = {
       ...look,
       name,
