@@ -212,7 +212,7 @@
       // The gun sits in the right hand, its muzzle along the arm; the caveman's own club stays home.
       let gun = null, gunL = null;
       if (cave) {
-        const h = cave.headOffset / 1.1, u = h / 16;
+        const h = cave.traits.height, u = h / 16;
         gun = createNode({ geometry: BM.gun(0), position: { x: 0, y: -10 * u, z: 0.03 }, rotation: { x: Math.PI / 2, y: 0, z: 0 }, scale: { x: h / 1.5, y: h / 1.5, z: h / 1.5 }, visible: false });
         addChild(cave.parts.armR, gun);
         // The left hand's golden AK, shown only with the pair.
@@ -1659,6 +1659,7 @@
         setVec(p.node.position, p.x, p.y + (p.air ? Math.sin(elapsed * 7) * 0.05 : 0), p.z);
         p.node.rotation.y = p.heading;
         p.node.rotation.z = 0;
+        if (p.node.legs) BL.crew.poseQuadruped(p.node, BL.crew.QUAD_GAIT.flyFront, BL.crew.QUAD_GAIT.flyHind, 0, 0, 0.35);
         p.node.visible = a.body.visible || i === 0;
         continue;
       }
@@ -1670,14 +1671,21 @@
         const step = Math.min(d, PET_SPEED * dt * Math.min(1, d / 1.2 + 0.25));
         p.x += dx / d * step; p.z += dz / d * step;
         p.heading = Math.atan2(dx, dz);
-        p.step += step * 9;
+        p.step += step * (p.node.legs ? BL.crew.QUAD_GAIT.stride : 9);
       } else p.heading = h;
       const ground = SIM.groundAt(p.x, p.z, s.y + 0.1, 0.15);
       p.y = damp(p.y, ground, 18, dt);
-      const moving = d > 0.15;
-      setVec(p.node.position, p.x, p.y + (moving ? Math.abs(Math.sin(p.step)) * 0.08 : 0), p.z);
+      const moving = d > 0.15, gait = BL.crew.QUAD_GAIT;
       p.node.rotation.y = p.heading;
-      p.node.rotation.z = moving ? Math.sin(p.step) * 0.08 : 0;
+      if (p.node.legs) {
+        // A four-legged companion walks as DSB's dogs do.
+        setVec(p.node.position, p.x, p.y + (moving ? Math.abs(Math.cos(p.step)) * gait.bob : 0), p.z);
+        p.node.rotation.z = 0;
+        BL.crew.poseQuadruped(p.node, 0, 0, moving ? Math.sin(p.step) * gait.swing : 0, Math.sin(elapsed * 7) * 0.25, 0);
+      } else {
+        setVec(p.node.position, p.x, p.y + (moving ? Math.abs(Math.sin(p.step)) * 0.08 : 0), p.z);
+        p.node.rotation.z = moving ? Math.sin(p.step) * 0.08 : 0;
+      }
       p.node.visible = a.body.visible || i === 0;
     }
   };
