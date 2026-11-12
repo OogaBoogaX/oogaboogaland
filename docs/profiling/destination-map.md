@@ -6,13 +6,17 @@ The atlas now includes upstream's Repo Island: its island footprint, stone bridg
 
 Selecting in the phone List now immediately updates the map pin's selected state while the atlas is hidden. The mobile preview scrolls in the normal flow so it cannot cover pins. Close remains sticky, and selecting a destination brings its confirmation into view.
 
-Build, changed JavaScript syntax and whitespace checks pass. The existing map/navigation browser flow passed 13/13 after the selection fix. Adding a stricter check of every pin's center exposed an unresolved 320px hit-target failure: the final run is **12/13**, with 390px, Map/List selection, touch guidance/cancellation, Repo Island View/Return and all other checks passing. Waiting for ResizeObserver did not resolve it. The repository's two-failure STOP rule was reached on that check (2026-11-11T23:56:04Z); further investigation requires explicit authorization. This is a local blocker, separate from deployed acceptance.
+Build, changed JavaScript syntax and whitespace checks pass. The authorized follow-up resolves the 320px pin failure: Repo Island could exhaust the radial placement candidates and fall back onto HQ. One bounded grid pass now redistributes the pins when that search fills up, preserving the 44px targets, 48px center spacing, origin clearance and callout lines to the real landmarks.
 
-Fresh normal-vsync diagnostics cover desktop, 390px, 320px, short-height, driven-gorilla and DSB layouts. All six report no horizontal overflow or console messages; phone touch Close passes, reduced motion disables the receipt/edge effects, gorilla confirmation moves to Lab and DSB Harbor preserves the actor position. These observations do not override the stricter 320px failure. The captures are local Chrome emulation, not real-device or staging evidence.
+Final focused map/navigation checks pass **13/13**. The phone check measures every pin and performs native touch activation of all thirteen at both 320px and 390px, verifying that the intended map pin and list row become selected. Map/List selection, touch guidance/cancellation, Repo Island View/Return and the desktop/navigation checks also pass. The user explicitly authorized continuing beyond the previous STOP; a successful run cleared that failing check's ledger entry naturally. Earlier Chrome-startup entries are unrelated and were not erased.
+
+[Corrected crowded 320px layout](world-map-480-packed-320.png) · [390px layout](world-map-480-packed-390.png). Captures use the same actual-player fixture as the regression. Set `MAP_PIN_SHOTS=untracked/performance/map-pins` on the focused browser command below to reproduce them.
+
+Fresh normal-vsync diagnostics cover desktop, 390px, 320px, short-height, driven-gorilla and DSB layouts. All six report no horizontal overflow or console messages; phone touch Close passes, reduced motion disables the receipt/edge effects, gorilla confirmation moves to Lab and DSB Harbor preserves the actor position. The captures are local Chrome emulation, not real-device or staging evidence.
 
 [Desktop](world-map-480-desktop.png) · [390px phone](world-map-480-phone.png) · [320px phone](world-map-480-narrow.png) · [DSB](world-map-480-dsb.png) · [Raw diagnostics](world-map-480.json)
 
-Remaining acceptance: resolve the 320px hit target, walk actual entrances/bridges on staging, real phones in both orientations, physical controllers/disconnect, screen readers, actual 200% zoom, pointer-lock denial and the historical broader-suite gates below. Keep this PR draft and all four issues open.
+Remaining acceptance: walk actual entrances/bridges on staging, real phones in both orientations, physical controllers/disconnect, screen readers, actual 200% zoom, pointer-lock denial and the historical broader-suite gates below. Keep this PR draft and all four issues open.
 
 ## Usability follow-up (November 11, 2026)
 

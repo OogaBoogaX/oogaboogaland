@@ -22,7 +22,7 @@
     };
     const project = p => ({ x: (p.x - bounds.minX) / (bounds.maxX - bounds.minX) * W, y: (p.z - bounds.minZ) / (bounds.maxZ - bounds.minZ) * H });
     const line = (a, b, cls) => overlay.append(svg("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: cls }));
-    const layout = () => {
+    const layout = (packed = false) => {
       if (!data || !bounds) return;
       overlay.replaceChildren();
       for (const m of markers) {
@@ -31,17 +31,35 @@
       }
       const width = pins.clientWidth;
       if (!width) return;
-      const gap = 48 * W / width, radius = gap / 2, placed = origin ? [project(origin)] : [];
+      const gap = 48 * W / width, radius = gap / 2, placed = origin ? [project(origin)] : [], cells = [];
+      // A crowded phone can exhaust the radial candidates despite having room for every target.
+      // Repack once into evenly spaced cells instead of putting an unplaced pin over another one.
+      if (packed) {
+        const cols = Math.floor(W / gap), rows = Math.floor(H / gap);
+        for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+          const p = { x: (W - (cols - 1) * gap) / 2 + x * gap, y: (H - (rows - 1) * gap) / 2 + y * gap };
+          if (placed.every(q => Math.hypot(p.x - q.x, p.y - q.y) >= gap)) cells.push(p);
+        }
+      }
       // Fanned callouts keep shared x/z floors and nearby mouths individually tappable at phone widths.
       for (const m of markers) {
         if (m.button.hidden) continue;
         const at = project(m.point);
         let spot = null;
-        for (let ring = 0; ring < 10 && !spot; ring++) for (let step = 0; step < (ring ? 16 : 1); step++) {
+        if (packed) {
+          let nearest = -1, distance = Infinity;
+          for (let i = 0; i < cells.length; i++) if (cells[i]) {
+            const d = Math.hypot(cells[i].x - at.x, cells[i].y - at.y);
+            if (d < distance) { nearest = i; distance = d; }
+          }
+          if (nearest >= 0) { spot = cells[nearest]; cells[nearest] = null; }
+        }
+        for (let ring = 0; !packed && ring < 10 && !spot; ring++) for (let step = 0; step < (ring ? 16 : 1); step++) {
           const angle = step * Math.PI / 8, reach = ring * gap * 0.55;
           const p = { x: Math.max(radius, Math.min(W - radius, at.x + Math.cos(angle) * reach)), y: Math.max(radius, Math.min(H - radius, at.y + Math.sin(angle) * reach)) };
           if (placed.every(q => Math.hypot(p.x - q.x, p.y - q.y) >= gap)) { spot = p; break; }
         }
+        if (!spot && !packed) { layout(true); return; }
         spot = spot || at; placed.push(spot);
         m.button.style.left = `${spot.x / W * 100}%`; m.button.style.top = `${spot.y / H * 100}%`;
         if (Math.hypot(spot.x - at.x, spot.y - at.y) > 4) line(at, spot, "atlas-callout");
@@ -61,7 +79,7 @@
         }
       }
     };
-    const resize = new ResizeObserver(layout); resize.observe(pins);
+    const resize = new ResizeObserver(() => layout()); resize.observe(pins);
     const clear = () => { data = bounds = origin = null; picked = ""; markers.length = 0; pins.replaceChildren(); overlay.replaceChildren(); ctx?.clearRect(0, 0, W, H); };
     const show = (next, names, label, select) => {
       clear(); data = next;

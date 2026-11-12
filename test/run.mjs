@@ -13210,7 +13210,7 @@ const hubDestinationNames = { name: "destination accessible names", why: "regres
   })()`);
   record("destination coaching: Controls replays a dismissible guide, actual movement advances it and a successful Arcade view completes it", Object.values(coaching).every(Boolean), JSON.stringify(coaching));
   // Real touch activation, including the scrolling needed to reach a narrow phone's controls.
-  const viewport = await b.evaluate(`({width:innerWidth,height:innerHeight,deviceScaleFactor:devicePixelRatio,mobile:false})`), phoneRows=[];
+  const viewport = await b.evaluate(`({width:innerWidth,height:innerHeight,deviceScaleFactor:devicePixelRatio,mobile:false})`), phoneRows=[], pinFailures=[];
   const tapMapControl = async selector => {
     const point=await b.evaluate(`(() => {const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:"center"});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),width:r.width,height:r.height};})()`);
     await b.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[{x:point.x,y:point.y,id:1,radiusX:5,radiusY:5,force:1}]});
@@ -13223,7 +13223,19 @@ const hubDestinationNames = { name: "destination accessible names", why: "regres
       await b.evaluate(`BL.destinationMap.close();__ooga.pilot.endLook();document.getElementById("destination-hud").click()`);
       // ResizeObserver lays out the newly shown atlas before its pins can be hit-tested.
       await b.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
-      const pins=await b.evaluate(`(() => {const pins=[...document.querySelectorAll('[data-map-destination]')];return pins.length===13&&pins.every(e=>{e.scrollIntoView({block:"center"});const r=e.getBoundingClientRect();return r.width>=44&&r.height>=44&&e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));});})()`);
+      const pinTargets=await b.evaluate(`[...document.querySelectorAll('[data-map-destination]')].map(e=>{e.scrollIntoView({block:"center"});const r=e.getBoundingClientRect(),atlas=document.getElementById("destination-atlas"),a=atlas.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {name:e.dataset.mapDestination,x:r.x-a.x,y:r.y-a.y,width:r.width,height:r.height,hit:e.contains(hit),coveredBy:hit?.closest('[data-map-destination]')?.dataset.mapDestination||hit?.id||hit?.tagName,atlas:[a.width,a.height,atlas.scrollLeft,atlas.scrollTop]};})`);
+      const badPins=pinTargets.filter(p=>p.width<44||p.height<44||!p.hit),pins=pinTargets.length===13&&!badPins.length;
+      if(badPins.length)pinFailures.push({width,pins:badPins,layout:pinTargets});
+      if(process.env.MAP_PIN_SHOTS){
+        mkdirSync(process.env.MAP_PIN_SHOTS,{recursive:true});await b.evaluate(`document.getElementById("destination-map").scrollTop=0`);
+        await b.screenshot(join(process.env.MAP_PIN_SHOTS,`map-${width}.png`));
+      }
+      let pinSelection=true;
+      for(const pin of pinTargets){
+        const tapped=await tapMapControl('[data-map-destination="'+pin.name+'"]');
+        const selected=await b.evaluate(`document.querySelector('[data-map-destination="${pin.name}"]').getAttribute("aria-pressed")==="true"&&document.querySelector('[data-destination="${pin.name}"]').getAttribute("aria-pressed")==="true"`);
+        pinSelection=tapped&&selected&&pinSelection;
+      }
       let targets=await tapMapControl("#destination-show-list");
       targets=await tapMapControl('[data-destination="basement"]')&&targets;
       const listed=await b.evaluate(`document.getElementById("destination-map").dataset.display==="list"&&getComputedStyle(document.getElementById("destination-map-list")).display!=="none"&&document.getElementById("destination-map-go").textContent==="View Basement"`);
@@ -13239,10 +13251,10 @@ const hubDestinationNames = { name: "destination accessible names", why: "regres
       const viewed=await b.evaluate(`(BL.destinationMap.update(),__ooga.pilot.looking&&!document.getElementById("destination-return").hidden)`);
       targets=await tapMapControl("#destination-return")&&targets;
       const returned=await b.evaluate(`!__ooga.pilot.looking&&document.documentElement.scrollWidth<=innerWidth`);
-      phoneRows.push({width,pins,targets,listed,mapped,guided,viewed,returned});
+      phoneRows.push({width,pins,pinSelection,targets,listed,mapped,guided,viewed,returned});
     }
   } finally {await b.send("Emulation.setDeviceMetricsOverride",viewport);await b.evaluate(`BL.destinationMap.close()`);}
-  record("destination phones: 320px and 390px touch targets switch Map/List without losing selection, start and stop guidance, and return from a Repo Island view",phoneRows.every(r=>Object.entries(r).every(([k,v])=>k==="width"||v===true)),JSON.stringify(phoneRows));
+  record("destination phones: 320px and 390px touch targets switch Map/List without losing selection, start and stop guidance, and return from a Repo Island view",phoneRows.every(r=>Object.entries(r).every(([k,v])=>k==="width"||v===true)),JSON.stringify({phoneRows,pinFailures}));
 } };
 const hubWalking = { name: "hub walking", why: "regression: steering keys came out mirrored, and the removed hub Agent could still be summoned", run: async (b) => {
   // Seeded scenery places a rock at the old (-8, 8) direction-check start.
