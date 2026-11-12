@@ -26,7 +26,7 @@ Byte-level exception: the portable single file (`oogaboogaland.html`) and the so
 ## Experience
 
 - Approach the physical keypad and press Space to focus it. Offer pointer/touch equivalents.
-- The keypad has digits 1–9 in a 3×3 grid and Back, 0 and Enter under them; every digit is a room. Exactly one digit can be selected; selecting another replaces it. Start unselected with Enter disabled. Back/Escape cancels before crossing.
+- The keypad has digits 1–9 in a 3×3 grid and Back, 0 and Enter under them; every digit is a room. Exactly one digit can be selected; selecting another replaces it. Start unselected with Enter disabled. Back/Escape cancels before crossing. A DIRECTORY button on a plate under the keypad (or D while at it) opens the room directory, every number and its room, in the board dialog; from beside the keypad a tap on a row or a number key there chooses that room as the keypad does. The keypad's window runs the chosen room's name across it. Coming back out of a room clears the keypad: no number lit, nothing chosen.
 - Enter prepares only the selected destination, turns the view to the door, slides both leaves sideways, and guides the character in. Reveal the selected interior to the traveler. Swoop into first person, close the doors when clear and return movement.
 - Every interior visit stays in first person and disables jetpack activation, including alternate controls and possession paths. Preserve gear/fuel and restore eligible exterior state on exit.
 - Press Space at the physical Exit button to use the reverse guided track. No walk-through entrance or exit trigger.

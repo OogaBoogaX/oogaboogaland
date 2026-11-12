@@ -26,7 +26,7 @@
   const scope = typeof window === "undefined" ? globalThis : window;
   const BL = scope.BL = scope.BL || {};
   const STEPS = 20;
-  const WORLD = ["outside", "between", "rainforest", "rainforest-under", "sphere", "bifrost", "hq", "hq-basement"];
+  const WORLD = ["outside", "between", "rainforest", "rainforest-under", "sphere", "bifrost", "repos", "hq", "hq-basement"];
   const SURFACE = "outside";
   // The levels below the world's surface, each with the level over it.
   const ABOVE = Object.freeze({ hq: SURFACE, "hq-basement": "hq", "rainforest-under": SURFACE });

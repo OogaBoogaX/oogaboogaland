@@ -1257,9 +1257,11 @@
     }
     return found;
   };
-  // `?debug=1&pos=x,y,z&body=0,yaw,0` starts the visitor there (feet on the deck when y is at its level).
+  // `?debug=1&pos=x,y,z&body=0,yaw,0` starts the visitor there (feet on the deck when y is at its level). Any other `pos`
+  // is no place (`pos=0` only hides the position readout, as on the island), and the arrival stands as it would.
   const debugSpawn = () => {
-    const [x, y, z] = PARAMS.get("pos").split(",").map(Number), yaw = Number((PARAMS.get("body") || "").split(",")[1]) || 0;
+    const parts = (PARAMS.get("pos") || "").split(","), [x, y, z] = parts.map(Number), yaw = Number((PARAMS.get("body") || "").split(",")[1]) || 0;
+    if (parts.length !== 3 || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
     return { x, z, facing: yaw, deck: y >= MEZZ.y - 0.5 };
   };
   const PROMPT_STALE = {}, PROMPT_ZIP = {}, BLOCK_SKY_CLEAR = [0.45, 0.68, 0.92], CAVE_CLEAR = RENDER_OPTS.clear, OPEN_SKY = [0.5, 0.55, 0.65], OPEN_GROUND = [0.3, 0.33, 0.4], CAVE_LIGHT = { sky: RENDER_OPTS.sky, ground: RENDER_OPTS.ground, direct: RENDER_OPTS.direct };
@@ -1941,6 +1943,8 @@
       carry: true,
       renderer, canvas: ctx.canvas, camera, hud, presets: views, landing: "entrance", pitch: PITCH, dist: DIST,
       follow: FOLLOW, clampTarget, clampCamera, ceilingAt: () => HALL.h - 1, coarse: COARSE, mayPossess, combatOnly: () => gameMode && armed,
+      // HALLOWEEN: a hunter in a hunt under way may take combat overhead, the one place that offers it.
+      birdsEye: () => gameMode && armed,
       // HALLOWEEN: in combat view a click on the herald under the dot wakes it, as a click does in carry; so does the
       // click that captures a free cursor on it.
       primaryAction: (down) => {
@@ -2051,7 +2055,8 @@
       avatar = people.cavemen.get(playerName);
       buildZipline(shared);
       // At a machine an Ooga plays, a step back from its spot, where that Ooga stands again.
-      const at = DEBUG && PARAMS.get("pos") ? debugSpawn() : fromBlockHall ? { x: BH.x, z: BH.z0 + 1, facing: 0 } : from >= 0 ? live.find((c) => c.game === from).play : retroFrom ? retroFrom.play : machineFrom ? (machineFrom.bot ? toHall({ x: machineFrom.play.x, z: machineFrom.play.z, turn: machineFrom.turn }, 0, 1.3, { facing: machineFrom.play.facing }) : machineFrom.play) : { x: 0, z: HALL.front - 1.5, facing: Math.PI };
+      const spawn = DEBUG ? debugSpawn() : null;
+      const at = spawn ? spawn : fromBlockHall ? { x: BH.x, z: BH.z0 + 1, facing: 0 } : from >= 0 ? live.find((c) => c.game === from).play : retroFrom ? retroFrom.play : machineFrom ? (machineFrom.bot ? toHall({ x: machineFrom.play.x, z: machineFrom.play.z, turn: machineFrom.turn }, 0, 1.3, { facing: machineFrom.play.facing }) : machineFrom.play) : { x: 0, z: HALL.front - 1.5, facing: Math.PI };
       Object.assign(avatar.root.position, { x: at.x, y: avatar.baseY + supportAt(at.x, at.z, fromBlockHall || at.deck || retroFrom || from >= 0 && live.find(c => c.game === from).y === MEZZ.y ? MEZZ.y : 1), z: at.z });
       avatar.root.rotation.y = at.facing;
       // Carry the view and record the outside loadout before parking its weapons for the visit.
