@@ -206,8 +206,13 @@
   const MEADOW_INNER = 5, MEADOW_OUTER = MEADOW - 1.5, CLIFF_INNER = MEADOW + 1.5, CLIFF_OUTER = RADIUS - 1;
   const LADDER_Z = -3.6, LADDER_LEAN = 0.65;
   // Two disjoint annuli keep sparse clouds around the horizon, passing below and above the bridges.
-  // Nine clouds per ring leave room for the widest mesh; each ring keeps its angular spacing.
+  // Nine clouds per ring leave room for the widest mesh; each ring keeps its angular spacing. CLOUD_CROSSINGS are the
+  // bridges' angles on the clouds' circle (from +x toward +z): ₿IFRÖST's to the north, the Mempool island's, Repo
+  // Island's to the south and the Timechain Sphere's.
   const CLOUDS_PER_TRACK = 9;
+  const CLOUD_CROSSINGS = [3.625 / 12 * Math.PI * 2 - Math.PI / 2, Math.PI / 2, 8.25 / 12 * Math.PI * 2 - Math.PI / 2, Math.PI * 1.5];
+  // The longest stretch between two crossings, the one swing that goes the whole way.
+  const CLOUD_SWING = CLOUD_CROSSINGS.reduce((most, a, i) => Math.max(most, ((CLOUD_CROSSINGS[(i + 1) % CLOUD_CROSSINGS.length] - a) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2)), 0);
   const CLOUD_TRACKS = [
     { radius: 36, speed: 0.48, phase: 0.1, baseY: -4, waveY: 1.5 },
     { radius: 40, speed: 0.56, phase: 0.6, baseY: 11, waveY: -2.25 }
@@ -560,7 +565,7 @@
   let poolEffectsActive = false, poolEffectsTime = 0;
   // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
   let footsteps = null, petReactions = null;
-  let weather = null, unsubscribeMempool = null, unsubscribeChain = null, mempoolIsland = null, timechainIsland = null, bifrostIsle = null;
+  let weather = null, unsubscribeMempool = null, unsubscribeChain = null, mempoolIsland = null, timechainIsland = null, bifrostIsle = null, repoIsland = null;
   // Decorative motion follows the view or the driven character, with room between waking and resting.
   const effectPointNear = (p, x, y, z, radius2) => (p.x - x) ** 2 + (p.y - y) ** 2 + (p.z - z) ** 2 <= radius2;
   const effectsActiveAt = (x, y, z, active, near, far) => {
@@ -2917,6 +2922,7 @@
       addProp(kind, node, worldX(x, z), worldZ(x, z), radius);
     }
     for (const key of site.keys) addTarget(key.node, { kind: "sphere-key", key: key.key, priority: 2 }, { radius: key.key.length === 1 ? 0.055 : 0.09 });
+    addTarget(site.directoryKey, { kind: "sphere-directory", priority: 2 }, { radius: 0.16 });
     // From the bridge, square to the doors with the keypad in view.
     presets.timechain = { yaw: p.ry, pitch: 0.1, dist: 9, target: { x: worldX(0.6, 13.2), y: p.y + 2.2, z: worldZ(0.6, 13.2) } };
     const claimGround = () => {
@@ -2976,6 +2982,26 @@
     };
     BL.bifrostIsle.update(site, 0, 0, NaN, NaN, NaN);
     return { site, group, claimGround, phase: null, window: null, heimdall: null, hum: 0, effectsActive: false, effectsTime: 0 };
+  };
+  // Repo Island off the south rim (repo-island.js): its rock, its stone bridge from the top of the south stairs and its
+  // section plaques now; its totems in idle time once the visit is ready (`start`). The rock and the bridge are solid,
+  // as each chunk of totems is once it joins; the bridge's lanterns are lamps. Canvas 2D gets the
+  // island and its bridge without the totems, which would cost it more faces than the rest of the island together.
+  const buildRepoIsland = function* (slice) {
+    yield* BL.repoIslandModels.rockSteps.steps(slice);
+    yield* pause(slice);
+    const site = BL.repoIsland.create({ island, renderer, hooks: {
+      addSolid: (node) => solids.add(node), addTarget, removeTarget,
+      visible: () => !document.hidden && !!repoIsland && !cloudPlaying() && renderer.kind === "webgl2",
+      near: () => !!pilot?.player && (() => { const p = pilot.player.root.position, feet = p.y - pilot.player.baseY; return site.onIsland(p.x, feet, p.z) || site.onBridge(p.x, feet, p.z); })(),
+      toast: (text) => hud.toast(text)
+    } });
+    addChild(root, site.group);
+    placed.push(site.group);
+    for (const node of site.solids) solids.add(node);
+    site.lamps.forEach((at, i) => { addLamp(i ? { glow: 0, flare: 0, visible: true } : site.glass, LAMP.lantern, at.x, at.y, at.z, true, lamps.length, `repo-island:${i}`).nightOnly = true; });
+    presets.repos = site.view;
+    return site;
   };
   // The ladder on the bluff; the former Cloud Hopper dock is retired.
   const buildRim = () => {
@@ -5046,6 +5072,19 @@
       break;
     }
   };
+  // Repo Island turns whoever stands on it with it (repo-island.js `carry`): the Ooga the visitor drives (a guest's own
+  // likeness is not on the crew's list), every other Ooga the crew moves itself and the visitor's gorilla. Another
+  // page's player is turned by their own page, and a puppet by the host's.
+  const carryRepoIsland = () => {
+    const driven = pilot.player;
+    if (driven) repoIsland.carry(driven.root.position, driven.root.position.y - driven.baseY);
+    for (let i = 0; i < crew.list.length; i++) {
+      const cave = crew.list[i];
+      if (cave !== driven && !cave.puppet) repoIsland.carry(cave.root.position, cave.root.position.y - cave.baseY);
+    }
+    const gorilla = clankerPlay.player;
+    if (gorilla) repoIsland.carry(gorilla.root.position, gorilla.root.position.y);
+  };
   const inBananas = (cave, x = cave.root.position.x, z = cave.root.position.z) => bananaCover.intersectsBody(x, cave.root.position.y - (cave.gorilla ? 0 : cave.baseY), z, cave.gorilla ? cave.gorilla.bodyHeight : cave.bodyHeight);
   const npcPileAt = (x, feet, z, height) => feet <= ALTAR_HEIGHT + STEP_MAX && feet + height > 0 && Math.hypot(x, z) < altar.platformRadius + PLAYER_RADIUS
     || bananaCover.intersectsBody(x, feet, z, height);
@@ -5247,10 +5286,16 @@
   const placeCloud = (cloud) => {
     const p = cloud.node.position;
     p.x = Math.cos(cloud.angle) * cloud.radius; p.z = Math.sin(cloud.angle) * cloud.radius;
-    // The inner lane dips below the bridges (-4..2m); the outer lane crests above them (2..11m).
-    // Broad crossing shoulders keep the full meshes clear, with continuous position and slope each lap.
-    const wave = 1 - Math.sin(cloud.angle * 3);
-    p.y = cloud.baseY + cloud.waveY * wave * wave;
+    // The inner lane dips below the bridges (-4..2m); the outer lane crests above them (2..11m). Between two
+    // crossings each lane swings out toward its far height and back, sin^3 of the way across, so it is flat and clear at
+    // every bridge (the shoulders broad enough for the full meshes) with continuous position and slope each lap. The
+    // longest swing goes the whole way and a shorter one that share of it, so every swing climbs at the same gentle
+    // rate, no faster than the three equal swings the lanes had before the fourth bridge.
+    const turn = Math.PI * 2, a = (cloud.angle % turn + turn) % turn;
+    let from = CLOUD_CROSSINGS[CLOUD_CROSSINGS.length - 1] - turn, to = CLOUD_CROSSINGS[0];
+    for (let i = 0; i < CLOUD_CROSSINGS.length && a >= to; i++) { from = to; to = i + 1 < CLOUD_CROSSINGS.length ? CLOUD_CROSSINGS[i + 1] : CLOUD_CROSSINGS[0] + turn; }
+    const swing = (to - from) / CLOUD_SWING * Math.sin(Math.PI * (a - from) / (to - from)) ** 3;
+    p.y = cloud.baseY + cloud.waveY * 4 * swing;
     cloud.node.rotation.y = -cloud.angle - Math.PI / 2;
   };
   const buildClouds = () => {
@@ -5649,8 +5694,14 @@
         return "Room sign · tap to copy hash";
       case "sphere-key":
         return o.key === "back" ? "Back · return to room choice" : o.key === "enter" ? "Enter · open selected room" : `Room ${o.key} · select`;
+      case "sphere-directory":
+        return "Directory · which room each number opens";
       case "lab-link":
         return "EntropyLab · open website in a new tab";
+      case "repo-totem":
+      case "repo-sign":
+      case "repo-bridge":
+        return repoIsland ? repoIsland.tip(o) : "";
       case "book":
         return `${BOOKS[o.index].title} · open it`;
       case "prop":
@@ -5764,7 +5815,7 @@
   };
   const reticleTarget = (hit) => {
     const o = hit.owner;
-    if (hit.node === mirrorCave.node || o.kind === "cave-sign" || o.kind === "room-sign" || o.kind === "sphere-key"
+    if (hit.node === mirrorCave.node || o.kind === "cave-sign" || o.kind === "room-sign" || o.kind === "sphere-key" || o.kind === "sphere-directory"
       || o.kind === "lab-link" || o.kind === "piece" || o.kind === "book") return "object";
     if (o.kind === "cave") return o.slot.status === "open" && !walkedInto(o.slot) ? "object" : "none";
     if (o.kind === "prop" && RETICLE_PROPS.has(o.prop)) return "object";
@@ -6500,8 +6551,18 @@
         }
         break;
       }
+      case "sphere-directory":
+        hud.openBoard(timechainIsland.site.directory);
+        break;
       case "lab-link":
         window.open("https://entropylab.online", "_blank", "noopener,noreferrer");
+        break;
+      case "repo-totem":
+        if (repoIsland) window.open(repoIsland.open(o), "_blank", "noopener,noreferrer");
+        break;
+      case "repo-sign":
+      case "repo-bridge":
+        hud.toast(tooltipFor(hit));
         break;
       case "book":
         openBook(o.index);
@@ -6906,6 +6967,13 @@
       setVec(target, M.worldX(0, M.layout.CHAMBER_R - 0.1), floor + 2.3, M.worldZ(0, M.layout.CHAMBER_R - 0.1));
       pitch = player ? 0.1 : 0.06;
       dist = player ? 5 : 7.5;
+    } else if (name === "repos" && repoIsland) {
+      // Off the bridge onto Repo Island, facing down the path to Bitcoin Core in the plaza; a look sees across it.
+      const a = repoIsland.arrival;
+      x = a.x; z = a.z; yaw = Math.PI;
+      setVec(target, a.x, a.y + (player ? 1.4 : 2.4), a.z + (player ? 4 : 10));
+      pitch = player ? 0.2 : 0.24;
+      dist = player ? 6 : 12;
     } else if (underground) {
       z = 6;
       setVec(target, 0, (basement ? island.headquarters.basement.floor : island.headquarters.floor) + 0.8, 0);
@@ -6927,9 +6995,9 @@
       else {
         p.x = x + Math.cos(yaw) * offset + Math.sin(yaw) * depth;
         p.z = z - Math.sin(yaw) * offset + Math.cos(yaw) * depth;
-        p.y = saved ? SPOT.y : name === "timechain" ? timechainIsland.place.y + BL.timechainModels.SITE.bridgeFloor : name === "mempool" ? mempoolIsland.place.y + mempoolIsland.layout.FLOOR : name === "bifrost" ? bifrostIsle.site.arrival.y : underground ? (basement ? island.headquarters.basement.floor : island.headquarters.floor) : island.surfaceAt(p.x, p.z);
+        p.y = saved ? SPOT.y : name === "repos" ? repoIsland.arrival.y : name === "timechain" ? timechainIsland.place.y + BL.timechainModels.SITE.bridgeFloor : name === "mempool" ? mempoolIsland.place.y + mempoolIsland.layout.FLOOR : name === "bifrost" ? bifrostIsle.site.arrival.y : underground ? (basement ? island.headquarters.basement.floor : island.headquarters.floor) : island.surfaceAt(p.x, p.z);
       }
-      if (!saved && name !== "timechain" && name !== "bifrost" && name !== "mempool" && !island.onLand(p.x, p.z)) continue;
+      if (!saved && name !== "timechain" && name !== "bifrost" && name !== "mempool" && name !== "repos" && !island.onLand(p.x, p.z)) continue;
       if (player) {
         const floor = gorilla ? clankerSupportAt(gorilla, p.x, p.z, p.y, STEP_MAX) : playerSupportAt(p.x, p.z, p.y, p.y, player);
         if (!Number.isFinite(floor) || Math.abs(floor - p.y) > STEP_MAX) continue;
@@ -7992,6 +8060,8 @@
     if (!cloudPlaying()) critters.update(dt, elapsed, RENDER_OPTS.day, RENDER_OPTS.stars, fire.k, 1);
     if (!gameMode && !cloudPlaying()) updateClouds(dt);
     updateGameRing(dt, elapsed);
+    // Repo Island turns before the solids are synced, so its ground and its riders move in the same frame.
+    if (repoIsland && !cloudPlaying() && repoIsland.turn()) carryRepoIsland();
     solids.sync();
     if (gameMode) updateRageThrowMap();
     updateSleepingSolids();
@@ -8008,6 +8078,7 @@
     if (factoryMouth && !cloudPlaying()) factoryShield(dt, elapsed);
     if (arcadeMouth && !cloudPlaying()) arcadeMouth.entrance.update(dt, elapsed, pilot.player);
     if (bifrostIsle && !cloudPlaying()) bifrostGate(dt, elapsed);
+    if (repoIsland && !cloudPlaying()) repoIsland.update(dt, elapsed, camera);
     if (bcaMouth) bcaVeil(dt, elapsed);
     if (factoryDeparting || bifrostDeparting) { npcGhosts.paint(dt); return; } // The Ooga through a shield and its camera hold through the director fade.
     if (gameMode) prepareClankerStrike();
@@ -8542,6 +8613,7 @@
       const site = bifrostIsle.site, w = site.walk, ground = site.groundAt(x, z), along = (x - w.x) * w.sr + (z - w.z) * w.cr;
       if (ground > -Infinity && feet > ground - 3 && along >= w.from && along <= w.to) return true;
     }
+    if (repoIsland && repoIsland.onBridge(x, feet, z)) return true;
     return false;
   };
   // Where the island's doors stand, for the live players tab's crosshair (players.js, `setDoors`): the door the route
@@ -8585,6 +8657,11 @@
       out.x = end.x; out.y = cloud.y + DOOR_Y; out.z = end.z;
       return true;
     }
+    if (zone === "repos" && repoIsland) {
+      const end = into ? repoIsland.bridgeEnds.to : repoIsland.bridgeEnds.from;
+      out.x = end.x; out.y = end.y + DOOR_Y; out.z = end.z;
+      return true;
+    }
     return false;
   };
   const doorToward = (from, step, out, nearX, nearZ) => {
@@ -8625,6 +8702,7 @@
     if (onSphere(p.x, p.z)) return "sphere";
     if (inRainforest(p.x, feet, p.z)) return levelOf(p.x, feet, p.z, "rainforest", LEVEL_AT) && LEVEL_AT.to === "rainforest-under" ? LEVEL_AT.to : "rainforest";
     if (onBifrostIsle(p.x, feet, p.z)) return "bifrost";
+    if (repoIsland && repoIsland.onIsland(p.x, feet, p.z)) return "repos";
     return island.onLand(p.x, p.z) ? "outside" : "between";
   };
   // A new zone holds ZONE_HOLD seconds before it is reported, so a bridge's foot does not flicker in the panels.
@@ -10873,6 +10951,7 @@
     unsubscribeChain(); unsubscribeChain = null;
     if (oogatronUnsub) oogatronUnsub(); oogatronUnsub = null;
     if (totemUnsub) totemUnsub(); totemUnsub = null;
+    if (repoIsland) repoIsland.pause();
     if (positionDebug) {
       positionDebug.removeEventListener("click", copyPositionDebug);
       positionDebug.hidden = true;
@@ -10949,6 +11028,7 @@
     unsubscribeMempool = mempool.subscribe(onMempool);
     oogatronUnsub = oogatronLive.subscribe(onOogatron);
     totemUnsub = BL.totemFeed.subscribe(onTotem);
+    if (repoIsland) repoIsland.start();
     BL.net.setHub(true);
     crew.refreshStates(true);
     restoreCloudYard(ctx);
@@ -11034,6 +11114,12 @@
       BL.solidProps.prepare(geometry);
     }
     if (BL.scenes.bifrost) yield* BL.bifrostIsle.prepareSteps();
+    // Repo Island's rock, then its walked shells' collision trees, a task each.
+    yield* BL.repoIslandModels.rockSteps.steps(slice);
+    for (const geometry of [BL.repoIslandModels.rockSteps().soil, BL.repoIslandModels.bridge().stone]) {
+      yield;
+      BL.solidProps.prepare(geometry);
+    }
     const roster = contributors.activeRoster, point = camera ? camera.position : PILE_VIEW.target;
     const requested = ctx.world.pilot || params.get("character")?.trim().toLowerCase();
     const distance = contributor => {
@@ -11234,6 +11320,8 @@
     yield* pause(slice);
     timechainIsland = yield* buildTimechainIsland(slice);
     bifrostIsle = BL.scenes.bifrost ? yield* buildBifrostIsle(archLamp, slice) : null;
+    yield* pause(slice);
+    repoIsland = yield* buildRepoIsland(slice);
     cloudRememberNodes(cloudNodeStart);
     const firePos = buildFire();
     yield* pause(slice);
@@ -11286,6 +11374,7 @@
     mempoolIsland.claimGround();
     timechainIsland.claimGround();
     if (bifrostIsle) bifrostIsle.claimGround();
+    for (const [x, z, r] of repoIsland.claims) claim(x, z, r);
     clearFireBush(firePos);
     buildLawn();
     reflowScenery();
@@ -11631,6 +11720,8 @@
     // Signed-in visitors elsewhere, as the Oogas they drive; the crew walks round them.
     shared.outsideActors = () => cloudPlaying() ? CLOUD_NO_ACTORS : remotes.actors();
     shared.outsideActorHeight = REMOTE_BODY_HEIGHT;
+    // At the Timechain Sphere's keypad and through its doors the Ooga keeps its place; others walk through it instead.
+    shared.holdsPlace = () => !!timechainIsland?.gate?.busy;
     shared.characterModel = takePreparedCharacter;
     // Hub NPCs pass through each other and players, and beam between routines.
     shared.npcPassive = true;
@@ -11758,7 +11849,7 @@
         return rendered;
       }, keep: keepGeometry });
     // A room's address opened signed in, with no visit of this tab's own to repeat, comes here with the room chosen.
-    if (timechainIsland.gate.preselected) hud.toast(`Room ${timechainIsland.gate.preselected} is chosen at the keypad · walk up to it and press Enter to go in`);
+    if (timechainIsland.gate.preselected >= 0) hud.toast(`Room ${timechainIsland.gate.preselected} is chosen at the keypad · walk up to it and press Enter to go in`);
     clankerMeshes = BL.solidProps.create();
     clankerPartOwners = new WeakMap();
     headquarters.solids.companions = clankerMeshes;
@@ -12079,7 +12170,7 @@
         get shown() {
           return pile.shown;
         },
-        terrainSections, caveSections, cutawayPaths: CUTAWAY_PATH_STATE, terrainRampRoof, get cutawayTravelRamp() { return cutawayTravelRamp; }, get cutawayTravelChannel() { return cutawayTravelChannel; }, get cutawayTravelStation() { return cutawayTravelStation; }, island, mouths: island.mouths, labels, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, get hammock() { return hammock; }, altar, path: island.path.debug, headquarters, jumbotron, totems: { list: totems, flare: flareTotem }, get npcSync() { return npcSync; }, get npcGhosts() { return npcGhosts; }, claimOwnOoga: () => { ownOogaClaimed = false; return claimOwnOoga(); }, accountChanged: () => onAccountChange(), clankers, clankerPlay, rageThrowMap, rageEdgeGoal, rageLandAt, rageCaptureLandAt, rageMapRouteClear, rageCaptureEligible, rageApproach, rageWarpRequired, rageGrab, rageCaptive, rageRelease, rageThrow, rageDragClear,
+        terrainSections, caveSections, cutawayPaths: CUTAWAY_PATH_STATE, terrainRampRoof, get cutawayTravelRamp() { return cutawayTravelRamp; }, get cutawayTravelChannel() { return cutawayTravelChannel; }, get cutawayTravelStation() { return cutawayTravelStation; }, island, mouths: island.mouths, labels, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, get hammock() { return hammock; }, altar, path: island.path.debug, headquarters, jumbotron, totems: { list: totems, flare: flareTotem }, get repoIsland() { return repoIsland; }, get npcSync() { return npcSync; }, get npcGhosts() { return npcGhosts; }, claimOwnOoga: () => { ownOogaClaimed = false; return claimOwnOoga(); }, accountChanged: () => onAccountChange(), clankers, clankerPlay, rageThrowMap, rageEdgeGoal, rageLandAt, rageCaptureLandAt, rageMapRouteClear, rageCaptureEligible, rageApproach, rageWarpRequired, rageGrab, rageCaptive, rageRelease, rageThrow, rageDragClear,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -12189,6 +12280,8 @@
     yield* prepareCoveredView(ctx.overlay, slice);
     mark("covered-view");
     totemUnsub = BL.totemFeed.subscribe(onTotem);
+    // Repo Island's totems, in idle time from here on.
+    repoIsland.start();
     if ((ctx.from === "arcade" || ctx.from === "hub") && ctx.place === "cloud-hopper") { cloudYard = ctx.from === "hub" ? arcadeYard : null; ensureCloudHopper(ctx).launch(true); }
     if (DEBUG_GORILLA_MOVE) hud.toast("Gorilla movement debug · click a gorilla, then a destination");
   };
@@ -12404,6 +12497,8 @@
       totemUnsub = null;
     }
     totems.length = 0;
+    if (repoIsland) repoIsland.dispose();
+    repoIsland = null;
     if (jumbotron) {
       jumbotron.dispose(renderer);
       jumbotron = null;
@@ -12493,6 +12588,7 @@
     for (const cave of crew.cavemen.values()) set.add(cave.headOpen).add(cave.headClosed);
     remotes.liveGeometry(set);
     if (timechainIsland && timechainIsland.gate) timechainIsland.gate.liveGeometry(set);
+    if (repoIsland) repoIsland.liveGeometry(set);
   };
   const cachedGeometry = (set) => {
     if (!heldHub) return;

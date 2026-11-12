@@ -33,6 +33,8 @@
         description: "The live Bitcoin mempool as a rainforest lake: the backlog fills it, new blocks fall from it, and the chamber under it reads the chain out in paint." },
       { path: "bifrost", scene: "bifrost", title: "₿IFRÖST · Caves and lands",
         description: "Explore Ooga Booga Land's project caves, connected worlds and independent project sites from the Bifrost directory." },
+      { path: "repos", scene: "hub", place: "repos", title: "Repo Island",
+        description: "An island of carved totems off Ooga Booga Land's south rim, one for each of 170 open-source Bitcoin projects, sized by how much Bitcoin leans on it and lit for a day after it merges a pull request." },
       { path: "dsb", scene: "dsb", title: "DSB Land",
         description: "Walk through ₿IFRÖST to DSB Land: a river boat, the Bitcoin coaster riding the live price, the Meme Shop and NodeRunner TV." },
       { path: "entropylab", scene: "hub", place: "lab", image: "entropylab", title: "EntropyLab",
