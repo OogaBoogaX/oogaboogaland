@@ -982,6 +982,88 @@ const overrideFixture = () => {
   return f;
 };
 
+test("regression: ordinary PR checks bypass the writer queue only with complete current metadata and no queued work", async (t) => {
+  const fixture = () => {
+    const f = overrideFixture();
+    f.ordinary = f.addOverride(700, { "README.md": "updated readme\n" });
+    f.ordinary.head.ref = "feature/readme";
+    f.inspect = () => f.coordinator.needsWriter(700);
+    f.states = () => f.statuses.filter((row) => row.sha === f.ordinary.head.sha);
+    return f;
+  };
+  await t.test("unrelated hostile custom code stays unread; only the two intake statuses are written", async () => {
+    const f = fixture(), file = f.gh.file;
+    f.gh.file = async (ref, path) => { assert.ok(path.startsWith(".github/character-bundles/")); return file(ref, path); };
+    assert.equal(await f.inspect(), false);
+    for (const context of ["Character intake", "Character bundle safety"]) assert.equal(f.states().filter((row) => row.context === context).at(-1).state, "success");
+    assert.ok(f.calls.filter((row) => row.method !== "GET").every((row) => row.url.startsWith("statuses/")));
+    assert.equal(f.writes.length + f.updates.length, 0);
+  });
+  await t.test("new and renamed character paths, existing queued entries, bundles and overrides still use the writer", async () => {
+    const f = fixture();
+    f.ordinary.head.sha = f.commit([f.rock], { [f.char("new")]: f.custom("new") }, "maint", false);
+    assert.equal(await f.inspect(), true);
+    assert.equal(await f.coordinator.needsWriter(f.manual.number), true);
+    assert.equal(await f.coordinator.needsWriter(f.override.number), true);
+    const api = f.gh.api;
+    f.gh.api = async (url, ...args) => url.startsWith("compare/")
+      ? { merge_base_commit: { sha: f.rock }, files: [{ filename: "retired.js", previous_filename: f.char("new"), status: "renamed" }] }
+      : api(url, ...args);
+    assert.equal(await f.inspect(), true, "moving a character out of the directory is still a character change");
+    const queued = fixture(), entries = queued.manifest();
+    entries[0].pr = 700;
+    queued.manual.head.sha = queued.commit([queued.manual.head.sha], { [manifestPath("manual")]: JSON.stringify({ version: 1, lane: "manual", openedOn: "2026-11-03", entries }) });
+    assert.equal(await queued.inspect(), true, "a source that restored its character files still needs queue inspection");
+    assert.ok(queued.states().every((row) => row.state === "pending"));
+  });
+  await t.test("drafts wait and ordinary closures do not enqueue writes; merged overrides retain cleanup", async () => {
+    const f = fixture(); f.ordinary.draft = true;
+    assert.equal(await f.inspect(), false);
+    assert.ok(f.states().every((row) => row.state === "pending"));
+    f.ordinary.state = "closed";
+    assert.equal(await f.inspect(), false);
+    f.merge();
+    assert.equal(await f.coordinator.needsWriter(f.override.number), true);
+  });
+  await t.test("truncated comparisons, API failure and missing or untrusted manifests never pass", async () => {
+    for (const fault of ["truncated", "api", "missing", "unsigned", "malformed"]) {
+      const f = fixture(), api = f.gh.api, file = f.gh.file;
+      f.gh.api = async (url, ...args) => {
+        if (url.startsWith("compare/")) {
+          if (fault === "api") throw new Error("API unavailable");
+          if (fault === "truncated") return { merge_base_commit: { sha: f.rock }, files: Array.from({ length: 300 }, () => ({ filename: "README.md" })) };
+        }
+        return api(url, ...args);
+      };
+      if (fault === "missing") f.gh.file = async () => null;
+      if (fault === "malformed") f.gh.file = async () => ({ source: "not JSON" });
+      if (fault === "unsigned") f.commits.get(f.manual.head.sha).verified = false;
+      await assert.rejects(f.inspect());
+      assert.ok(!f.states().some((row) => row.state === "success"), fault);
+      for (const context of ["Character intake", "Character bundle safety"]) assert.equal(f.states().filter((row) => row.context === context).at(-1).state, "failure", fault);
+      assert.equal(f.writes.length, 0);
+      f.gh.file = file;
+    }
+  });
+  await t.test("a changed PR head, base or bundle head goes back through serialized inspection", async () => {
+    for (const moving of ["pr", "rock", "bundle"]) {
+      const f = fixture(), list = f.gh.list;
+      let lists = 0;
+      f.gh.list = async (url) => {
+        const rows = structuredClone(await list(url));
+        if (++lists === 1) {
+          if (moving === "pr") f.ordinary.head.sha = f.commit([f.rock], { [f.char("new")]: f.custom("new") });
+          if (moving === "rock") f.rock = f.commit([f.rock], { "README.md": "new base\n" });
+          if (moving === "bundle") f.manual.head.sha = f.commit([f.manual.head.sha], {});
+        }
+        return rows;
+      };
+      assert.equal(await f.inspect(), true, moving);
+      assert.ok(!f.statuses.some((row) => row.state === "success"), moving);
+    }
+  });
+});
+
 test("a maintainer override PR is verified and audited without parsing replaced sources or touching the queue before merge", async () => {
   const f = overrideFixture();
   // The queued Natalie revision is unreadable as an identity; ordinary readers still refuse it.
