@@ -1135,6 +1135,7 @@
 
   // Per frame, allocation-free: the flow, the game, the camera and the HUD.
   const update = (dt) => {
+    if (hockeyPlayers) hockeyPlayers.restore();
     T.elapsed += dt;
     if (kind === "hockey" && phase === "intro") joinHockey();
     if (phase === "intro" && introEl.hidden) {
@@ -1145,7 +1146,7 @@
     }
     if (kind === "hockey") {
       if (!hockeySession) BL.net.sendPose(HOCKEY_SEAT.x, 0, HOCKEY_SEAT.z, HOCKEY_SEAT.yaw);
-      hockeyRemotes.update(dt); hockeyAmbience.update(dt); hockeyPlayers.update(dt);
+      hockeyRemotes.update(dt); hockeyAmbience.update(dt);
       if (hockeySession) hockeySession.tick(dt, phase === "play" || phase === "pause");
     } else BL.net.sendPose(machine.play.x, machine.y || 0, machine.play.z, machine.play.facing);
     let dolly = 1;
@@ -1189,6 +1190,7 @@
     T.big = Math.max(0, T.big - dt);
     if (hockeySession?.follower) play.follow(dt);
     else if (phase !== "pause" || hockeySession) play.update(!hockeySession?.human && pace < 1 && !play.status.verb ? dt * pace : dt);
+    if (hockeyPlayers) hockeyPlayers.update(dt);
     audio.tick();
     if (rival) {
       const P = rival.parts, u = play.rivalU;

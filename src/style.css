@@ -5667,7 +5667,25 @@ body.tess-touring #joy-look {
 .chalk-pointer { position: absolute; display: none; width: 1px; height: 1px; pointer-events: none; z-index: 2; }
 .chalk-pointer.visible { display: block; }
 .chalk-pointer .chalk-held { position: absolute; left: -5px; top: -5px; width: 38px; height: 10px; border-radius: 4px; background: #e5e8d0; transform: rotate(-38deg) scale(2); transform-origin: 5px 5px; box-shadow: 0 2px 4px #061f18b0; }
-.chalk-pointer.eraser .chalk-held { left: -29px; top: -19px; width: 52px; height: 32px; border: 3px solid #b8a183; background: #44413c; transform: rotate(-18deg) scale(4); transform-origin: center; }
+/* A classic board eraser from above, lying sideways: a long pine block, grain running its length, a groove along each long side, and its thick black felt pad showing along the bottom edge. chalkboard.js sizes it to the eraser's footprint, and all its look stays inside that box. */
+.chalk-pointer.eraser .chalk-held {
+  left: 0; top: 0; box-sizing: border-box; border: 1px solid #8a6a3e; border-bottom-color: #121110; border-radius: 0;
+  background:
+    linear-gradient(180deg, #0000 0 74%, #8a6a3e 74% 77%, #3b3936 77%, #151413 86%, #1f1d1b),
+    linear-gradient(180deg, #0000 0 10%, #8f7043 10% 15%, #f4e4c0 15% 18%, #0000 18% 56%, #8f7043 56% 61%, #f4e4c0 61% 64%, #0000 64%),
+    repeating-linear-gradient(180deg, #a9855033 0 2%, #0000 2% 5%, #a9855022 5% 6%, #0000 6% 11%),
+    linear-gradient(90deg, #ecd8ae, #dfc794);
+  box-shadow: none; transform: translate(-50%, -50%);
+}
+/* Held upright: the same block turned, its felt along the right edge. */
+.chalk-pointer.eraser.upright .chalk-held {
+  border-bottom-color: #8a6a3e; border-right-color: #121110;
+  background:
+    linear-gradient(90deg, #0000 0 74%, #8a6a3e 74% 77%, #3b3936 77%, #151413 86%, #1f1d1b),
+    linear-gradient(90deg, #0000 0 10%, #8f7043 10% 15%, #f4e4c0 15% 18%, #0000 18% 56%, #8f7043 56% 61%, #f4e4c0 61% 64%, #0000 64%),
+    repeating-linear-gradient(90deg, #a9855033 0 2%, #0000 2% 5%, #a9855022 5% 6%, #0000 6% 11%),
+    linear-gradient(#ecd8ae, #dfc794);
+}
 
 @media (max-width: 600px) {
   .chalk-modal { width: 98vw; padding: 7px; border-width: 4px; }
