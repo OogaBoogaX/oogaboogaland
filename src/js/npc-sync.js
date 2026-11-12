@@ -515,11 +515,11 @@
     };
 
     // Hands the puppets back to their own AI. `resume` is false only when the crew is about to go with the visit.
-    const release = (resume = true) => {
+    const release = (resume = true, reason = "host-change") => {
       for (let i = 0; i < n; i++) {
         const cave = list[i], was = cave.puppet;
         cave.puppet = false;
-        if (was && resume) crew.resumeFromHost(cave);
+        if (was && resume) crew.resumeFromHost(cave, hostId, reason);
       }
       incompatible = false;
       have.fill(0);
@@ -596,7 +596,7 @@
 
     // `keepCrew`: a kept hub's suspension, whose crew runs on after it. Otherwise the scene's systems are already going.
     const dispose = (keepCrew = false) => {
-      release(keepCrew);
+      release(keepCrew, "retained-hub");
       role = "solo";
       resetEvents();
     };
