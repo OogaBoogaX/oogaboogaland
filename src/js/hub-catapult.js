@@ -406,6 +406,10 @@
       const p = cave.root.position, parts = cave.parts;
       p.x = f.x; p.y = f.y + cave.baseY; p.z = f.z;
       cave.root.rotation.y = f.heading;
+      // The seated modelled pose uses shoulder quaternions; release them before the flight's Euler pose.
+      parts.armR.quaternion = parts.armL.quaternion = null;
+      parts.armR.rotation.y = parts.armL.rotation.y = 0;
+      if (cave.modelled) parts.forearmR.rotation.x = parts.forearmL.rotation.x = -cave.elbow.rest;
       const swing = f.calm ? 0 : Math.sin(f.arm * 7) * 0.25;
       if (f.phase === CHUTE) {
         parts.armR.rotation.x = parts.armL.rotation.x = -2.95;
