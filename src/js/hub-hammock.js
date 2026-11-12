@@ -516,13 +516,16 @@
     };
     const parkPart = (gear, node, index, temporary = false) => {
       if (!node) return;
-      const saved = { node, index, parent: node.parent, position: { ...node.position }, rotation: { ...node.rotation },
+      const saved = { node, index, parent: node.parent, position: { ...node.position }, rotation: { ...node.rotation }, scale: 0,
         quaternion: node.quaternion, visible: node.visible, poseYaw: node.poseYaw, poseLean: node.poseLean, cameraHidden: node.cameraHidden, temporary,
         flat: { x: 0, y: 0, z: 0 }, ways: null };
       gear.parts.push(saved);
       if (node.parent) removeChild(node.parent, node);
       addChild(gear.holder, node);
       node.position.x = node.position.y = node.position.z = 0;
+      // A modelled body's club is scaled against its arm's own scale while the arm holds it: off the arm it is its true
+      // size, and `scale` is what to give it back.
+      if (gear.cave.modelled && node === gear.cave.parts.club) { saved.scale = node.scale.x; node.scale.x = node.scale.y = node.scale.z = 1; }
       // Long axis along the bed: the club's and pack's up (z turns it, applied first), the rifle's barrel (y turns it).
       node.rotation.x = node.rotation.y = 0; node.rotation.z = index === 1 ? 0 : Math.PI / 2;
       if (index === 1) node.rotation.y = Math.PI / 2;
@@ -693,6 +696,7 @@
       if (node.parent) removeChild(node.parent, node);
       if (!saved.temporary && saved.parent && (!pack || worn || node === cave.parts.jetpack || node === cave.presentationJet?.node)) addChild(saved.parent, node);
       for (const axis of AXES) { node.position[axis] = saved.position[axis]; node.rotation[axis] = saved.rotation[axis]; }
+      if (saved.scale) node.scale.x = node.scale.y = node.scale.z = saved.scale;
       node.quaternion = saved.quaternion;
       node.visible = pack ? worn && saved.visible : saved.visible && (saved.index === 0 ? !!cave.weapon?.primaryOwned : !!cave.weapon?.secondaryOwned);
       node.poseYaw = saved.poseYaw; node.poseLean = saved.poseLean; node.cameraHidden = saved.cameraHidden;
