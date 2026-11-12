@@ -444,6 +444,14 @@
     };
     // Who the visitor is, once the page knows: the signed-in account, or none.
     const account = () => DEBUG_NEWS ? { login: "you", display: "you" } : BL.net.state.me;
+    const newsOffer = (me) => {
+      const fresh = DEBUG_NEWS ? NEWS.filter((n) => n.date >= DEBUG_NEWS) : freshAfter(lastSeen(me.login));
+      if (!fresh.length) return false;
+      const count = fresh.length;
+      state.kind = "news"; state.legs = legsOf(fresh); state.login = DEBUG_NEWS ? null : me.login; state.newest = fresh[0];
+      state.welcome = `Welcome back, ${me.display || me.login}! ${count === 1 ? "One new thing" : `${count} new things`} since you were last here. Want to see?`;
+      return true;
+    };
     // The visit's one greeting: the island tour for a visitor who is not signed in, until this browser has answered it;
     // for a signed-in one, what is new since their last visit here, or no greeting at all when nothing is.
     const greet = () => {
@@ -451,12 +459,7 @@
       if (shared()) { queueShown = true; queueRoom = ""; return; }
       const me = G.news ? account() : null;
       if (!me) { if (toured(G.toured)) return; state.kind = "island"; state.legs = TOUR; state.welcome = null; notice(); return; }
-      const fresh = DEBUG_NEWS ? NEWS.filter((n) => n.date >= DEBUG_NEWS) : freshAfter(lastSeen(me.login));
-      if (!fresh.length) return;
-      const count = fresh.length;
-      state.kind = "news"; state.legs = legsOf(fresh); state.login = DEBUG_NEWS ? null : me.login; state.newest = fresh[0];
-      state.welcome = `Welcome back, ${me.display || me.login}! ${count === 1 ? "One new thing" : `${count} new things`} since you were last here. Want to see?`;
-      notice();
+      if (newsOffer(me)) notice();
     };
     const notice = () => { rig.flare(); show("notice"); state.timer = 1.1; };
     const approach = () => { placeBy(); flyTo(spot.x, spot.y, spot.z, pace(6, spot.x, spot.y, spot.z), true); show("approach"); };
@@ -652,6 +655,8 @@
       if (state.phase !== "work" || busy()) return;
       world[G.greeted] = true;
       state.kind = "island"; state.legs = TOUR; state.again = true;
+      state.welcome = state.login = null;
+      if (granted && G.news) newsOffer(account());
       rig.flare(); rig.nod();
       placeBy(); flyTo(spot.x, spot.y, spot.z, pace(6, spot.x, spot.y, spot.z), true);
       show("approach");
