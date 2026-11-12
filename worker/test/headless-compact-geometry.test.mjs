@@ -13,10 +13,10 @@ const source = readFileSync(new URL("../../src/js/compact-geometry.js", import.m
 test("headless import installs compact geometry before models, on by default", () => {
   assert.equal(typeof globalThis.window, "undefined", "no browser window headless");
   assert.equal(C?.enabled, true);
-  // A modelled Ooga keeps authored voxel accessories; the plain stock body has no voxel bake.
-  const roster = B.contributorRoster.create({ registry: B.characters, clock: () => 1700000000000,
-    repositoryOf: B.activityRepos.keyOf, normalizeStats: B.contributorIdentities.normalizeStats, slots: B.caves.slots });
-  const ooga = B.models.caveman(roster.traitsFor("w-s-bitcoin"));
+  // A modelled Ooga keeps an authored voxel head; the plain stock body's modelled parts are not voxel bakes.
+  const ooga = B.models.caveman({ name: "compact-fixture", skin: "#b08060", hair: "#38281c", fur: "#846040",
+    height: 1.4, belly: 1, rand: B.math.mulberry32(3),
+    dress: { skull(k, voxels) { voxels.fill(0, 6, 0, 7, 0, 5, k.skinJ); return true; } } });
   assert.equal(ooga.modelled, true);
   const packed = new Set();
   const visit = (node) => {
