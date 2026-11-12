@@ -234,7 +234,10 @@
         const fingers = k.vg(fingerVox(C), { x: -1.5 * u, y: -u, z: -1.5 * u });
         k.parts.fingersR.geometry = k.parts.fingersL.geometry = fingers;
       },
-      club: (k) => ({ voxels: handleVox(), palette: CHUK_PALETTE, goldPalette: GOLD_CHUK_PALETTE, rest: { x: 0.24, z: 0 }, carry: { x: 0.95, z: 0 } }),
+      // The modelled look holds a modelled nunchaku (heroBody.nunchaku), whose free stick hangs and
+      // swings from its chain in crew.js.
+      club: (k) => BL.models.STYLE === "R" ? { default: BL.heroBody.nunchaku(k.u).handle, gold: BL.heroBody.nunchaku(k.u, true).handle, rest: { x: 0.24, z: 0 }, carry: { x: 0.95, z: 0 } }
+        : { voxels: handleVox(), palette: CHUK_PALETTE, goldPalette: GOLD_CHUK_PALETTE, rest: { x: 0.24, z: 0 }, carry: { x: 0.95, z: 0 } },
       skull(k, v) {
         skullVox(v, colors(k));
         return true;
@@ -254,12 +257,14 @@
       // The second colourway: the same palette with every registered plate green.
       tint: (k, palette) => palette.map((rgb, i) => twins.has(i) ? hexToRgb(twins.get(i)) : rgb),
       extras(k) {
-        const u = k.u, origin = { x: -u, y: 0, z: -u };
-        const geometry = voxelGeometry(freeVox(), { unit: u, palette: CHUK_PALETTE, origin });
-        const gold = voxelGeometry(freeVox(), { unit: u, palette: GOLD_CHUK_PALETTE, origin });
-        k.parts.chuk = createNode({ position: { x: 0, y: CHAIN_Y * u, z: 0 }, geometry, skins: { default: geometry, gold } });
+        const u = k.u, origin = { x: -u, y: 0, z: -u }, turned = BL.models.STYLE === "R" ? BL.heroBody.nunchaku(u) : null, turnedGold = turned && BL.heroBody.nunchaku(u, true);
+        const geometry = turned ? turned.free : voxelGeometry(freeVox(), { unit: u, palette: CHUK_PALETTE, origin });
+        const gold = turned ? turnedGold.free : voxelGeometry(freeVox(), { unit: u, palette: GOLD_CHUK_PALETTE, origin });
+        k.parts.chuk = createNode({ position: { x: 0, y: turned ? turned.pivot : CHAIN_Y * u, z: 0 }, geometry, skins: { default: geometry, gold } });
+        // `swing` has crew.js hang the free stick from its chain as a weight; at rest it hangs down beside the handle.
+        if (turned) { k.parts.chuk.swing = turned.swing; k.parts.chuk.rotation.x = Math.PI - 0.38; }
         addChild(k.parts.club, k.parts.chuk);
-        const trail = voxelGeometry(pairVox(), { unit: u, palette: CHUK_PALETTE, origin: { x: -u, y: -u, z: -u } });
+        const trail = turned ? turned.pair : voxelGeometry(pairVox(), { unit: u, palette: CHUK_PALETTE, origin: { x: -u, y: -u, z: -u } });
         k.parts.chukTrail = [];
         for (let i = 0; i < CHUK_TRAIL; i++) {
           const ghost = createNode({ geometry: trail, visible: false });
@@ -267,7 +272,7 @@
           addChild(k.parts.armR, ghost);
         }
         // Both the held jump and an equipped jetpack use the same sole thrusters.
-        k.parts.jetpack = createNode({ position: { x: 0, y: -5 * u, z: 0 }, visible: false });
+        k.parts.jetpack = createNode({ position: { x: 0, y: -k.legH, z: 0 }, visible: false });
         k.parts.jetFlame = createNode({ geometry: voxelGeometry(flameVox(), { unit: u, palette: FLAME_PALETTE, origin: { x: -4.5 * u, y: 0, z: -u }, emissive: FLAME_GLOW }), visible: false });
         addChild(k.parts.jetpack, k.parts.jetFlame);
         addChild(k.root, k.parts.jetpack);
