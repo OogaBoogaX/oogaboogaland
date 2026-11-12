@@ -27,13 +27,14 @@
   // No GitHub login holds a slash, so his template in `models.caveman`'s cache never meets a contributor's.
   const NAME = "heimdall/bifrost";
   // His build in the caveman's own units, where 1 is his `HEIGHT` in metres before the root's `SCALE`: the hip `LEG`
-  // up, the shoulders `ARM_X` either side (buildCaveman's formula at his `BELLY`).
-  const HEIGHT = 1.1, BELLY = 1.08, SCALE = 1.35, LEG = 5 / 16, ARM_X = 0.29 * BELLY + 0.09, STATURE = HEIGHT * SCALE;
+  // up, the shoulders `ARM_X` either side (buildCaveman's formula at his `BELLY`), and the refined torso's `RISE`,
+  // which lifts his head and shoulders over where they were authored.
+  const HEIGHT = 1.1, BELLY = 1.08, SCALE = 1.35, LEG = models.BODY.hip, RISE = models.BODY.rise, ARM_X = 0.29 * BELLY + 0.09, STATURE = HEIGHT * SCALE;
   // The step he stands on, in metres: its radius and top, and the column of its collision shell round him, `column`
   // across and up to `crown`, so a walker bumps into him rather than through him but can still step onto the rim.
   const PLINTH = { r: 0.95, top: 0.24, column: 0.6, crown: 2.1 };
   // Above the ground under the step: his eyes, and where his bubbles hang, clear of the helmet's horns.
-  const EYE_Y = PLINTH.top + STATURE * (LEG + 0.5 + 0.19), SAY_Y = PLINTH.top + STATURE * (LEG + 0.5 + 0.9);
+  const EYE_Y = PLINTH.top + STATURE * (LEG + RISE + 0.5 + 0.19), SAY_Y = PLINTH.top + STATURE * (LEG + RISE + 0.5 + 0.9);
 
   const LOOK = {
     navy: "#1c2c6e", navyDk: "#131d4c", gold: "#e8b53a", goldLt: "#ffd66b", goldDk: "#b8791a", glove: "#3d2616",
@@ -52,7 +53,7 @@
   const STAFF = { x: -0.74, z: 0, lean: 0.05 };
   const GRIP = 10 / 16;
   // How far the staff reaches below the fist to stand on the step at rest, a hair into the stone.
-  const STAFF_BELOW = (0.46 - GRIP * Math.cos(STAFF.x) * Math.cos(STAFF.z) + LEG) / Math.cos(STAFF.lean) + 0.01;
+  const STAFF_BELOW = (0.46 + RISE - GRIP * Math.cos(STAFF.x) * Math.cos(STAFF.z) + LEG) / Math.cos(STAFF.lean) + 0.01;
 
   // A rotation matrix m[row][col] as a unit quaternion [x, y, z, w] with w >= 0, the way fromTQS reads one back.
   const quatOf = (m) => {
@@ -550,7 +551,8 @@
   const create = ({ parent, x, y, z, heading, fx }) => {
     const figure = models.caveman(traits()), parts = figure.parts, body = figure.root, q = parts.horn.quaternion;
     body.scale.x = body.scale.y = body.scale.z = SCALE;
-    body.position.y = SCALE * LEG * HEIGHT;
+    // His hip as built, scaled with him.
+    body.position.y *= SCALE;
     const root = createNode({ position: { x, y: y + PLINTH.top, z }, rotation: { x: 0, y: heading, z: 0 }, sightHidden: true });
     addChild(root, body);
     const step = createNode({ position: { x, y, z }, rotation: { x: 0, y: heading, z: 0 }, geometry: plinth() });

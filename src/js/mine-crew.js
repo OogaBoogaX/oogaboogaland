@@ -257,7 +257,7 @@
       club.position.y = (raised ? -0.625 : -0.62) * h;
       club.position.z = (raised ? 0.15 : 0.08) * h;
       club.rotation.x = raised ? 0 : c.clubRest.x;
-      club.rotation.y = 0;
+      club.rotation.y = raised ? 0 : c.clubRest.y || 0;
       club.rotation.z = raised ? Math.PI / 2 : c.clubRest.z;
     };
     const face = (op, dx, dz, dt) => {

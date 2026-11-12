@@ -210,6 +210,9 @@
   // neither read nor write it, so fixtures and the suite always start from the default view.
   const VIEW_KEY = "ooga-view", VIEWS = ["first-person", "shoulder", "birds-eye", "orbit"];
   const KEEP_VIEW = !new URLSearchParams(location.search).has("debug");
+  // Bird's-eye combat is a game's to offer (`birdsEye`, the ghost hunt's). A debug page's `birdseye=1` offers it in every
+  // scene that does not keep it out, for the checks of the overhead camera and the island's cutaway.
+  const BIRDS_EYE_FIXTURE = !KEEP_VIEW && new URLSearchParams(location.search).get("birdseye") === "1";
   const chosen = { view: "", combat: false, relYaw: 0, pitch: 0, distance: 0, height: 0, side: 1, held: 0 };
   const readView = () => {
     let v = null;
@@ -442,9 +445,10 @@
       const cave = player();
       return weaponViewReady(cave) && cave.weapon.aiming || restCombat(cave);
     };
-    // A scene may keep combat out of the overhead view (`noOverhead`, Cloud Hopper's): combat then keeps to the
-    // shoulder and first person, X entering it at the shoulder and nothing leaving the shoulder for overhead.
-    const noOverhead = () => !!ctx.noOverhead?.();
+    // Combat goes overhead only where the scene offers it (`birdsEye`, the ghost hunt's while it runs) and does not keep
+    // it out (`noOverhead`, Cloud Hopper's). Anywhere else combat keeps to the shoulder and first person: X enters it at
+    // the shoulder, nothing leaves the shoulder for overhead, and a double right-click there does nothing.
+    const noOverhead = () => !!ctx.noOverhead?.() || !(BIRDS_EYE_FIXTURE || ctx.birdsEye?.());
     const aimView = () => {
       const cave = player();
       return (weaponViewReady(cave) || restCombat(cave)) && (closeWanted || shoulderView);
@@ -1517,7 +1521,8 @@
       if (e.type === "pointerdown") {
         if (e.button === 2 && !(e.buttons & ~2) && aimView()) {
           const now = performance.now();
-          if (now - rightTapAt <= RIGHT_DOUBLE_TIME) {
+          // Combat's double right-click leaves for overhead, so where there is none it is an ordinary press.
+          if (now - rightTapAt <= RIGHT_DOUBLE_TIME && !(player().weapon.aiming && noOverhead())) {
             e.preventDefault(); e.stopImmediatePropagation();
             ads = false;
             shooterView(false);
@@ -2237,8 +2242,10 @@
     const takeView = (cave, incoming) => {
       centeredCarry = carrySelection = resumeSleepOverhead = false;
       const nextView = incoming.active ? incoming.view : "orbit";
+      // Combat that was overhead, or would go there, comes in at the shoulder where this scene offers no overhead.
+      const level = !!incoming.active && !!incoming.combat && nextView !== "first-person" && nextView !== "shoulder" && noOverhead();
       closeWanted = nextView === "first-person";
-      shoulderView = nextView === "shoulder";
+      shoulderView = nextView === "shoulder" || level;
       closeMix = closeWanted ? 1 : 0;
       closeVelocity = 0; closeCave = closeWanted ? cave : null;
       carryExitMode = carryFocusRemaining = 0;
@@ -2257,7 +2264,7 @@
       camera.fov = incoming.fov;
       syncAim();
       orbit.yaw = orbit.tYaw = incoming.yaw;
-      orbit.pitch = orbit.tPitch = incoming.pitch;
+      orbit.pitch = orbit.tPitch = level ? SHOULDER_PITCH : incoming.pitch;
       orbit.dist = orbit.tDist = incoming.distance;
       shoulderSide = shoulderSideTarget = incoming.side < 0 ? -SHOULDER_SIDE : SHOULDER_SIDE;
       aimAtCursor = aimPreserveFacing = false;
@@ -2373,8 +2380,10 @@
       const t = captureControl(arrivalTransition), feet = cave.root.position.y - cave.baseY, held = c.held, ammo = c.ammo, focused = c.focused;
       t.active = true; t.view = c.view; t.combat = c.combat; t.yaw = cave.root.rotation.y + c.relYaw; t.pitch = c.pitch;
       t.distance = c.distance; t.height = c.view === "birds-eye" ? feet + c.height : c.height; t.side = c.side; t.focused = false;
-      // Letting go of an Ooga already driven rewrites `carried`: the look the navigate keeps is copied first.
-      arrivalKeep.relYaw = c.relYaw; arrivalKeep.pitch = c.pitch; arrivalKeep.distance = c.distance;
+      // Letting go of an Ooga already driven rewrites `carried`: the look the navigate keeps is copied first. An overhead
+      // look comes in at the shoulder's pitch where this scene offers no overhead (`takeView`).
+      arrivalKeep.relYaw = c.relYaw; arrivalKeep.pitch = c.view === "birds-eye" && noOverhead() ? SHOULDER_PITCH : c.pitch;
+      arrivalKeep.distance = c.distance;
       if (!possess(cave, t)) return false;
       cave = player();
       // A scene load may finish after its input gesture. Restore mouse-look without requesting native lock;
@@ -3361,6 +3370,9 @@
       arriving = null;
       if (ctx.carry && player()) remember(player());
       if (externalControl) return;
+      // Overhead where the scene no longer offers it (a hunt that ended, a view left lying down) comes down to the
+      // shoulder, as a right-click there does. A held replay keeps its pose until it is resumed.
+      if (birdsEye() && noOverhead() && !restoredPose) shooterView(true, null, null, true);
       const blending = handoff.active;
       if (blending) { handoff.restore(); solvingHandoff = true; }
       updateCamera(dt);
@@ -4060,6 +4072,6 @@
       return viewPitch;
     } };
   };
-  BL.pilot = { get carried() { return carried; }, create, WALK, combatEntryView,
+  BL.pilot = { get carried() { return carried; }, create, WALK, combatEntryView, BIRDS_EYE_FIXTURE,
     turnToward: (x, y, z) => turnActive ? turnActive(x, y, z) : false };
 })();

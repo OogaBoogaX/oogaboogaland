@@ -1431,7 +1431,14 @@
         paintBoardControls();
         scheduleBoardSave();
       };
-      on(el.boardScreen, "click", () => {
+      on(el.boardScreen, "click", (e) => {
+        // A board that takes picks (the Sphere's room directory) hears where on its picture the press landed, and
+        // answers "close" when that is done with it.
+        if (board?.pick) {
+          if (board.pick(e.offsetX * board.canvas.width / el.boardScreen.clientWidth, e.offsetY * board.canvas.height / el.boardScreen.clientHeight) === "close") closeBoard();
+          else updateBoard();
+          return;
+        }
         if (!board?.floating) return;
         toggleBoardControls();
         el.boardScreen.blur();
@@ -1668,6 +1675,7 @@
         el.board.classList.toggle("board-floating", !!board.floating);
         el.board.classList.toggle("board-caption-above", !!board.captionAbove);
         el.board.classList.toggle("board-carousel", !!board.carousel);
+        el.boardScreen.classList.toggle("board-pickable", !!board.pick && board.pickable);
         if (board.floating) {
           paintBoardControls();
           boardCenter.prepend(el.boardCaption);
@@ -1732,6 +1740,13 @@
         if (board?.update) board.update(elapsed);
         if (board && board.version !== boardShown) paintBoard();
       };
+      // A key a board takes for itself (the directory's numbers): true when it did, "close" when done with it too.
+      const boardKey = (key) => {
+        const took = board.key(key);
+        if (took === "close") closeBoard();
+        else if (took) updateBoard();
+        return !!took;
+      };
       const pageBoard = (step) => {
         if (!board) return;
         board.go((board.index + step + board.count) % board.count);
@@ -1749,7 +1764,7 @@
         }
         else if (e.key === "ArrowLeft") pageBoard(-1);
         else if (e.key === "ArrowRight") pageBoard(1);
-        else return;
+        else if (!(board?.key && !e.repeat && boardKey(e.key))) return;
         e.preventDefault();
         e.stopPropagation();
       });

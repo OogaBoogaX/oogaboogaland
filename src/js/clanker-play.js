@@ -6,8 +6,11 @@
   const THROW_CHARGE_TIME = 1, THROW_MIN_POWER = 1 / 3, THROW_RESULT_TIME = 0.35;
   const PITCH_LIMIT = Math.PI / 2 - 0.0001, ZOOM_PAUSE = 220;
   const create = ({ canvas, camera, renderer, pilot, hud, clankers, input = null, constrainCamera = null,
-    reticleTarget = null, liveTarget = null, sightClear = null, aimCeiling = null, groundAt = null, grabOoga = null, releaseOoga = null, mayPossess = null, combatOnly = null, birdsEyeMin = 5, maxDistance = 32 }) => {
+    reticleTarget = null, liveTarget = null, sightClear = null, aimCeiling = null, groundAt = null, grabOoga = null, releaseOoga = null, mayPossess = null, combatOnly = null, birdsEye = null, birdsEyeMin = 5, maxDistance = 32 }) => {
     const orbit = pilot.orbit, cameraHandoff = pilot.cameraHandoff, target = { x: 0, y: 0, z: 0 };
+    // Combat goes overhead only where the scene offers it (`birdsEye`), as an Ooga's does (pilot.js `noOverhead`);
+    // elsewhere it keeps to the shoulder and first person, and a double right-click there does nothing.
+    const overheadOk = () => BL.pilot.BIRDS_EYE_FIXTURE || !!birdsEye?.();
     const smashMin = clankers.smashPower(0, true), smashBase = clankers.smashPower(0, false);
     const smashMax = clankers.smashPower(1, false), smashRate = (smashMax - smashBase) / POUND_CHARGE_TIME;
     const command = { x: 0, z: 0, climbAxis: 0, climbSide: 0, heading: NaN, jumpHeld: false, jumpPressed: false, run: false };
@@ -326,6 +329,9 @@
       combat = incoming.active && incoming.combat; focused = wasLocked = false;
       view = incoming.active ? incoming.view : "orbit";
       if (combat && view === "orbit") view = BL.pilot.combatEntryView(camera.position, entry.root.position);
+      // Overhead where none is offered comes in at the shoulder, at X's entry pitch.
+      const level = view === "birds-eye" && !overheadOk();
+      if (level) view = "shoulder";
       overheadEntry = false;
       shoulderSide = incoming.side < 0 ? -SHOULDER_SIDE : SHOULDER_SIDE;
       shoulder = view === "shoulder" ? shoulderSide : 0; peek = 0; actMode = -1;
@@ -352,7 +358,7 @@
         orbit.dist = orbit.tDist = Math.hypot(dx, dy, dz);
       } else {
         orbit.yaw = orbit.tYaw = incoming.yaw;
-        orbit.pitch = orbit.tPitch = view === "birds-eye" ? PITCH_LIMIT : incoming.pitch;
+        orbit.pitch = orbit.tPitch = view === "birds-eye" ? PITCH_LIMIT : level ? 0.42 : incoming.pitch;
         overheadHeight = Math.max(0.1, incoming.height - 0.15);
         orbit.dist = orbit.tDist = view === "first-person" ? 0 : view === "shoulder" ? SHOULDER_DISTANCE
           : view === "birds-eye" ? overheadHeight : Math.max(0.01, incoming.distance);
@@ -401,7 +407,7 @@
           // selection is still turning toward it. The camera's current aim
           // and pending orbit pitch do not change the elevation threshold.
           updateTarget();
-          entryView = BL.pilot.combatEntryView(camera.position, target);
+          entryView = overheadOk() ? BL.pilot.combatEntryView(camera.position, target) : "shoulder";
           captureControl(controlState);
           cameraHandoff.cancel();
           holdCamera(false);
@@ -613,7 +619,7 @@
         clearRight();
       } else if (recapture) focusCombat();
       else if (!(mouseButtons & ~2)) {
-        if (now - rightAt <= 350) {
+        if (now - rightAt <= 350 && (!combat || overheadOk())) {
           setView(combat ? "birds-eye" : "orbit");
           clearRight();
         } else { rightDownAt = now; rightTravel = 0; }
@@ -694,6 +700,8 @@
       let next = view, nextDistance = null;
       if (view === "first-person" && direction > 0) next = "shoulder";
       else if (view === "shoulder") {
+        // Combat that may not go overhead stops at the shoulder.
+        if (direction > 0 && combat && !overheadOk()) { zoomStopped = true; return true; }
         next = direction < 0 ? "first-person" : combat ? "birds-eye" : "orbit";
         if (direction > 0) nextDistance = clamp(Math.max(SHOULDER_DISTANCE, orbit.tDist) * factor, SHOULDER_DISTANCE, maxDistance);
       }
