@@ -100,8 +100,8 @@
     return v;
   };
   // The modelled look's bouquet, in units from the grip: a bound bundle of stems, a pink ribbon tied in a
-  // bow, a cream paper cone opening upward, leaves out past its rim, and seven blooms on a low dome over it, each six
-  // cupped petals round a golden heart. Its butt stays inside her fist.
+  // bow, a cream paper cone opening upward, leaves out past its rim, and seven full blooms on a low dome over it, each
+  // two rings of broad cupped petals round a golden heart. Its butt stays inside her fist.
   const bouquetGeometry = (h, gold) => {
     const H = BL.heroBody, geo = BL.models.geometry(), hex = (i) => { const c = (gold ? GOLD_BOUQUET : BOUQUET)[i]; return "#" + c.map((n) => Math.round(n).toString(16).padStart(2, "0")).join(""); };
     const stem = hex(STEM), leaf = hex(LEAF), petal = hex(PETAL), petalDk = hex(PETAL_DK), heart = hex(HEART), ribbon = hex(RIBBON), paper = hex(PAPER), paperDk = H.shade(paper, 0.86), ribbonDk = H.shade(ribbon, 0.8);
@@ -113,9 +113,10 @@
       H.both(geo, [[0.08 * s, 1.95, 0.66], [0.62 * s, 0.85, 0.72], [0.28 * s, 0.95, 0.72]], ribbonDk, ribbon);
     }
     H.slab(geo, H.rect(-0.2, 0.2, 1.9, 2.3, 0.63, 0.06), H.FRONT, 0.14, 0.8, ribbon, ribbonDk);
-    // The paper: a cone, its rim cut higher behind than ahead, with the green of the stems filling its mouth.
-    H.loft(geo, [[3.0, 0.72, 0.72, 0.25], [4.4, 1.55, 1.55, 0.5], [5.9, 2.5, 2.5, 0.85], [6.8, 3.05, 3.05, 1.05, 0, 0, null, -0.18]], [paperDk, paper, paper], [true, false]);
-    H.loft(geo, [[6.3, 2.6, 2.6, 0.9], [6.55, 2.7, 2.7, 0.95]], leaf, [false, true]);
+    // The paper: a cone, its rim cut a little higher behind than ahead and kept under the blooms' petals, which lie
+    // out over it; the green of the stems fills its mouth.
+    H.loft(geo, [[3.0, 0.72, 0.72, 0.25], [4.4, 1.55, 1.55, 0.5], [5.6, 2.35, 2.35, 0.8], [6.35, 2.85, 2.85, 1, 0, 0, null, -0.08]], [paperDk, paper, paper], [true, false]);
+    H.loft(geo, [[5.85, 2.42, 2.42, 0.85], [6.1, 2.55, 2.55, 0.9]], leaf, [false, true]);
     // A flat piece turned to face a way: `n` its facing, and two directions across it.
     const frame = (n) => {
       const l = Math.hypot(n[0], n[1], n[2]), N = [n[0] / l, n[1] / l, n[2] / l], up = Math.abs(N[1]) > 0.9 ? [0, 0, 1] : [0, 1, 0];
@@ -124,20 +125,29 @@
       a = [a[0] / al, a[1] / al, a[2] / al];
       return { N, a, b: [N[1] * a[2] - N[2] * a[1], N[2] * a[0] - N[0] * a[2], N[0] * a[1] - N[1] * a[0]] };
     };
+    const light = H.shade(petal, 1.14);
     const bloom = (c, n, r, salt) => {
       const { N, a, b } = frame(n), at = (ang, far, lift) => [0, 1, 2].map((i) => c[i] + (a[i] * Math.cos(ang) + b[i] * Math.sin(ang)) * far + N[i] * lift);
-      for (let p = 0; p < 6; p++) {
-        const ang = (p + salt * 0.37) / 6 * Math.PI * 2, tone = p % 2 ? petal : petalDk;
-        H.both(geo, [at(ang, r * 0.22, 0.12 * r), at(ang - 0.42, r * 0.72, 0.2 * r), at(ang, r, 0.42 * r), at(ang + 0.42, r * 0.72, 0.2 * r)], tone, H.shade(tone, 0.82));
-      }
-      // The heart: a low dome of eight sides.
-      const top = at(0, 0, 0.5 * r);
-      for (let p = 0; p < 8; p++) H.both(geo, [at(p / 8 * Math.PI * 2, r * 0.32, 0.22 * r), at((p + 1) / 8 * Math.PI * 2, r * 0.32, 0.22 * r), top], heart, H.shade(heart, 0.8));
+      // A ring of `count` petals out to `far`, each broad to near its tip and `w` wide either side of its middle, wider
+      // than its share of the ring, so each lies over its neighbours and nothing shows between them; every other one
+      // sits a little lower, so no two lie in one plane. `base` is the ring's height and `cup` how far its tips rise.
+      const ring = (count, turn, far, w, base, cup, tones) => {
+        for (let p = 0; p < count; p++) {
+          const ang = (p + turn) / count * Math.PI * 2, low = base + (p % 2) * 0.08 * r, tone = tones[p % 2];
+          H.both(geo, [at(ang, far * 0.1, low), at(ang - w, far * 0.62, low + cup * 0.45), at(ang - w * 0.62, far * 0.92, low + cup * 0.85), at(ang, far, low + cup),
+            at(ang + w * 0.62, far * 0.92, low + cup * 0.85), at(ang + w, far * 0.62, low + cup * 0.45)], tone, H.shade(tone, 0.82));
+        }
+      };
+      ring(8, salt * 0.37, r, 0.52, 0.08 * r, 0.34 * r, [petalDk, petal]);
+      ring(6, salt * 0.37 + 0.5, r * 0.62, 0.66, 0.3 * r, 0.3 * r, [petal, light]);
+      // The heart: a low dome of eight sides, over the inner ring.
+      const top = at(0, 0, 0.72 * r);
+      for (let p = 0; p < 8; p++) H.both(geo, [at(p / 8 * Math.PI * 2, r * 0.26, 0.46 * r), at((p + 1) / 8 * Math.PI * 2, r * 0.26, 0.46 * r), top], heart, H.shade(heart, 0.8));
     };
-    bloom([0, 8.0, 0], [0, 1, 0.12], 1.55, 0);
+    bloom([0, 8.0, 0], [0, 1, 0.12], 1.7, 0);
     for (let i = 0; i < 6; i++) {
       const ang = (i + 0.5) / 6 * Math.PI * 2, x = Math.sin(ang), z = Math.cos(ang);
-      bloom([x * 2.2, 7.15 + (i % 2) * 0.3, z * 2.2], [x, 0.95, z], 1.3, i + 1);
+      bloom([x * 2.25, 7.15 + (i % 2) * 0.3, z * 2.25], [x, 0.95, z], 1.45, i + 1);
       // A leaf between each pair of blooms, out past the paper's rim.
       const la = ang + Math.PI / 6, lx = Math.sin(la), lz = Math.cos(la), wx = lz * 0.5, wz = -lx * 0.5;
       H.both(geo, [[lx * 2.3, 6.5, lz * 2.3], [lx * 3.2 + wx, 6.95, lz * 3.2 + wz], [lx * 4.3, 7.5, lz * 4.3], [lx * 3.2 - wx, 6.95, lz * 3.2 - wz]], leaf, H.shade(leaf, 0.8));
