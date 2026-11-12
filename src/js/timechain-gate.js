@@ -38,10 +38,11 @@
   // the curtain behind the shut doors.
   const PICTURE_Z = P.curtain + 0.03, HAND_REACH = P.mouth - 1 - PICTURE_Z, OUT_Z = P.curtain + 0.55;
   const CURVE = 24;
-  // What the keypad's small window says while it is in use: the prompt until a number is pressed, then the room.
-  const SELECT_WORDS = "SELECT ROOM NUMBER", ROOM_WORDS = Array.from({ length: 10 }, (_, room) => `ROOM ${room}`);
+  // What the keypad's small window says while it is in use: the prompt until a number is pressed, then the room's
+  // name, running across it.
+  const SELECT_WORDS = "SELECT ROOM NUMBER", ROOM_WORDS = ROOMS.ROOMS.map((room) => room.name.replace(/^The /, "").toUpperCase());
   // No room chosen; the hint while choosing; a room as the hint names it.
-  const NONE = -1, CHOOSE = "Choose a room on the keypad · 0–9", roomWords = (id) => `Room ${id}, the ${ROOMS.ROOMS[id].name.replace(/^The /, "")}`;
+  const NONE = -1, CHOOSE = `Choose a room on the keypad · 0–9${window.matchMedia("(pointer: coarse)").matches ? "" : " · D for the directory"}`, roomWords = (id) => `Room ${id}, the ${ROOMS.ROOMS[id].name.replace(/^The /, "")}`;
   const ENTER_PIN_WORDS = "ENTER 4-DIGIT PIN", PIN_DOTS = ["", "*", "**", "***", "****"], WRONG_PIN_WORDS = "WRONG PIN", PIN_WAIT_WORDS = "TRY LATER";
   // Seconds a note stands in the window, and the longest a PIN waits on the room's answer.
   const NOTE_TIME = 1.8, PIN_ANSWER = 4;
@@ -65,6 +66,9 @@
     const g = {
       state: "idle", selection: NONE, room: null, mode: null, prep: 0, stage: null, prepared: null, picture: null, t: 0, ask: 0,
       cycle: null, exp: 0, starting: false, dir: null, open: 0, want: 0, remoteUntil: 0, hintAt: -Infinity, jetpack: null, exit: null, failures: 0, login: null,
+      // The view and mode (`pilot.viewState`) the visitor walked up to the keypad in, which the room gives back once its
+      // guided arrival is done, and the room's own on the way out, which the island gives back on the bridge.
+      view: null,
       // The view: null (the pilot's own), "eyes" (gliding into and held at the Ooga's eyes from engagement until the
       // crossing hands over, and coming back out) or "back" (gliding back to the pilot's, once free). `glide` runs 0
       // to 1 from the pose held in `from`; `pitch` is the eye's, easing toward `pitchTo`.
@@ -84,6 +88,8 @@
     // the panel, so every valid approach settles at the same readable distance and face-on angle.
     const KEYPAD_STAND = at({ x: S.KEYPAD.x, z: S.KEYPAD.z + 1.45 });
     const KEYPAD = { x: worldX(S.KEYPAD.x, S.KEYPAD.z), y: place.y + S.KEYPAD.y, z: worldZ(S.KEYPAD.x, S.KEYPAD.z) };
+    // The eye looks at the middle of the keypad and the directory button under it together.
+    const KEYPAD_AIM = (TM.DIRECTORY_PLATE.gap + TM.DIRECTORY_PLATE.h) / 2;
     // Facing the doors from the bridge, and out of them.
     const IN_HEADING = place.ry + Math.PI, OUT_HEADING = place.ry;
     const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -205,11 +211,12 @@
     const nearKeypad = (x, y, z) => g.state === "idle" && !!crew.player && Math.hypot(x - KEYPAD.x, z - KEYPAD.z) < S.KEYPAD_REACH && Math.abs(y - KEYPAD.y) < 2;
     const keypadPitch = () => {
       const cave = crew.player, p = cave.root.position;
-      return Math.atan2(KEYPAD.y - (p.y - cave.baseY + eyeRise(cave)), Math.max(0.3, Math.hypot(KEYPAD.x - p.x, KEYPAD.z - p.z) - 0.1));
+      return Math.atan2(KEYPAD.y - KEYPAD_AIM - (p.y - cave.baseY + eyeRise(cave)), Math.max(0.3, Math.hypot(KEYPAD.x - p.x, KEYPAD.z - p.z) - 0.1));
     };
     const engage = () => {
       if (g.state !== "idle" || !crew.player) return false;
       g.state = "keypad";
+      g.view = pilot.viewState();
       g.selection = preselect;
       preselect = NONE;
       g.pass = NONE; g.noteLeft = 0;
@@ -442,7 +449,7 @@
     const handOff = () => {
       const cave = crew.player, p = camera.position, t = camera.target, dx = t.x - p.x, dz = t.z - p.z;
       const entry = { x: localX(p.x, p.z), dz: localZ(p.x, p.z) - g.handZ, heading: wrap(Math.atan2(dx, dz) - IN_HEADING), pitch: Math.atan2(t.y - p.y, Math.hypot(dx, dz)) };
-      world.sphereVisit = { room: g.room.id, mode: g.mode, login: g.login, character: cave.traits.name, guided: true, jetpack: g.jetpack, prepared: g.prepared, entry };
+      world.sphereVisit = { room: g.room.id, mode: g.mode, login: g.login, character: cave.traits.name, guided: true, jetpack: g.jetpack, prepared: g.prepared, entry, view: g.view };
       world.sphereKeep = h.keep();
       world.pilot = cave.traits.name;
       if (go("timechain", String(g.room.id), true)) { g.prepared = null; g.state = "gone"; g.t = 0; }
@@ -457,10 +464,14 @@
     const arrive = (exit) => {
       const cave = crew.player;
       if (!cave) return false;
+      // Back out, the keypad starts over: the room gone into is no longer chosen.
+      g.selection = preselect = NONE;
+      site.choose(NONE);
       g.exit = exit;
       g.room = ROOMS.get(exit.room);
       g.mode = exit.mode;
       g.jetpack = exit.jetpack || null;
+      g.view = exit.view || null;
       const pose = exit.pose;
       if (pose) {
         const heading = OUT_HEADING + pose.heading, ahead = eyeAhead(cave, pose.pitch), lx = pose.x - Math.sin(pose.heading) * ahead, lz = OUT_Z + pose.dz - Math.cos(pose.heading) * ahead;
@@ -500,6 +511,9 @@
       // The pilot's own camera resumes behind the Ooga where it now stands on the bridge, not where it was left inside
       // the doors when the island opened.
       if (cave) pilot.navigate({ position: { x: cave.root.position.x, y: cave.root.position.y - cave.baseY, z: cave.root.position.z }, yaw: cave.root.rotation.y + Math.PI, pitch: 0.12, dist: 4.5 });
+      // In the view and mode the room was left in.
+      if (cave && g.view) pilot.adopt(g.view);
+      g.view = null;
       if (g.jetpack && g.jetpack.equipped && cave && h.equipJetpack(cave)) cave.jetFuel = g.jetpack.fuel;
       else if (g.jetpack && cave) cave.jetFuel = g.jetpack.fuel;
       g.jetpack = null;
@@ -628,10 +642,10 @@
       }
     };
     // From the keypad until the Ooga is through, the doorway has the keys: nothing reaches the Ooga, the camera or
-    // the hub's shortcuts (a chat line being typed still gets its own). Once committed only Back is heard, until the
-    // doors part.
+    // the hub's shortcuts (a chat line being typed, or the directory open over the keypad, still gets its own). D opens
+    // the directory. Once committed only Back is heard, until the doors part.
     const onKey = (e) => {
-      if (g.state === "idle" || e.metaKey || e.ctrlKey || e.altKey || e.target && e.target.closest && e.target.closest("input, textarea, [contenteditable]")) return false;
+      if (g.state === "idle" || e.metaKey || e.ctrlKey || e.altKey || e.target && e.target.closest && e.target.closest("input, textarea, [contenteditable], dialog")) return false;
       const k = keyOf(e);
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -644,10 +658,22 @@
         if (/^[0-9]$/.test(k)) press(k);
         else if (k === "Enter") press("enter");
         else if (k === "Escape" || k === "Backspace") press("back");
+        else if (k === "d") hud.openBoard(site.directory);
       } else if ((g.state === "preparing" || g.state === "waiting") && (k === "Escape" || k === "Backspace")) press("back");
       return true;
     };
     window.addEventListener("keydown", onKey, true);
+    // The directory's rows and number keys choose as the keypad's numbers do, from beside it: from there they engage the
+    // keypad first, and a locked room's PIN closes the directory so the keypad takes it.
+    const besideKeypad = () => { const cave = crew.player, p = cave && cave.root.position; return !!p && nearKeypad(p.x, p.y - cave.baseY + 1.1, p.z); };
+    const canChoose = () => g.state === "keypad" || g.state === "account" || besideKeypad();
+    const pickRoom = (room) => {
+      if (g.state === "idle" && !engage()) return false;
+      press(String(room));
+      return g.state === "pin" ? "close" : true;
+    };
+    const hookDirectory = (on) => { site.directory.onChoose = on ? pickRoom : null; site.directory.canChoose = on ? canChoose : null; };
+    hookDirectory(true);
     // A hidden tab can come back long after a grant ran out; a waiting request is then given up rather than kept.
     const onVisibility = () => {
       if (!document.hidden && g.state === "waiting" && g.ask && performance.now() - g.ask > 60000) fallBack("The wait ran out · press Enter to try again");
@@ -660,6 +686,7 @@
     };
     const dispose = () => {
       window.removeEventListener("keydown", onKey, true);
+      hookDirectory(false);
       document.removeEventListener("visibilitychange", onVisibility);
       if (unsubscribeDoor) unsubscribeDoor();
       unsubscribeDoor = null;
@@ -686,6 +713,7 @@
       showLocks();
       unsubscribeDoor = BL.net.subscribeDoor(onDoor);
       window.addEventListener("keydown", onKey, true);
+      hookDirectory(true);
       document.addEventListener("visibilitychange", onVisibility);
       show();
       return asked !== null;

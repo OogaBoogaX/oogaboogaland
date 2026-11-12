@@ -4878,7 +4878,7 @@ const hudNoticeChecks = async () => {
 const characterChecks = async () => {
   const context = { window: {}, URLSearchParams, location: { search: "" } };
   for (const name of CONTRIBUTOR_SOURCES) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
-  const BL = context.window.BL, all = BL.characters.all(), hooks = ["torso", "club", "gear", "skull", "crown", "eyes", "mark", "hatY", "headgear", "extras", "tint"], mirrorGeometries = new Set();
+  const BL = context.window.BL, all = BL.characters.all(), hooks = ["torso", "club", "gear", "skull", "crown", "eyes", "mark", "hatY", "headgear", "extras", "tint", "refine"], mirrorGeometries = new Set();
   const collect = node => {
     if (node.geometry) mirrorGeometries.add(node.geometry);
     if (node.skins) for (const skin of Object.values(node.skins)) mirrorGeometries.add(skin);
@@ -13390,7 +13390,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
     const offset = (s) => s.eye.map((n, i) => n - s.actor[i]);
     try {
       net.backend = true;
-      for (const signedIn of [false, true]) for (const mode of ["carry-orbit", "carry-shoulder", "carry-first-person", "combat-birds-eye", "combat-shoulder", "combat-first-person"]) {
+      for (const signedIn of [false, true]) for (const mode of ["carry-orbit", "carry-shoulder", "carry-first-person", "combat-shoulder", "combat-first-person"]) {
         net.me = signedIn ? { id: 72, login: character.github || character.handle, display: "Map fixture" } : null;
         P.endLook(); if (!drives()) P.possess(a); if (B.crew.sleeping) B.crew.wakePlayer();
         // An arrival keeps the view family (pilot.js \`navigate\`), so each row first goes back to carry orbit through the
@@ -13399,9 +13399,10 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
         if (P.closeWanted) P.exitClose(false);
         if (P.mode === "shoulder") P.hooks.onZoom(2, {});
         B.advance(0.5, 1 / 60);
-        P.navigate({ position: { x: -5, y: B.island.surfaceAt(-5, 5), z: 5 }, yaw: 0.4, pitch: mode.startsWith("combat") ? 1.1 : 0.3, dist: 10 });
-        if (P.aiming !== mode.startsWith("combat")) P.modeAction("mode-toggle");
-        if (mode.endsWith("shoulder") || mode.endsWith("first-person")) { P.hooks.onZoom(0.001, {}); B.advance(1, 1 / 60); }
+        P.navigate({ position: { x: -5, y: B.island.surfaceAt(-5, 5), z: 5 }, yaw: 0.4, pitch: 0.3, dist: 10 });
+        // Combat enters at the shoulder (the island offers no bird's-eye); carry scrolls in to it.
+        if (P.aiming !== mode.startsWith("combat")) { P.modeAction("mode-toggle"); B.advance(1, 1 / 60); }
+        if ((mode.endsWith("shoulder") || mode.endsWith("first-person")) && P.mode !== "shoulder") { P.hooks.onZoom(0.001, {}); B.advance(1, 1 / 60); }
         if (mode.endsWith("first-person")) P.hooks.onZoom(0.8, {});
         B.advance(1, 1 / 60); P.controls.reset(); H.setDetachedView("pile");
         const before = snapshot(), prepared = before.player && before.mode === mode.slice(mode.indexOf("-") + 1) && before.combat === mode.startsWith("combat");
@@ -13443,7 +13444,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
     return { rows, looking, departed };
   })()`);
   record("hub map: signed in or out, a Map click looks at the next destination while the visitor keeps their Ooga where it stands, and a movement gives back its own camera, carry or combat and view in that frame and walks it",
-    r.rows.length === 12 && r.rows.every(row => row.prepared && row.looked && row.moved > 1 && row.returned && row.walked > 0.3), JSON.stringify(r.rows));
+    r.rows.length === 10 && r.rows.every(row => row.prepared && row.looked && row.moved > 1 && row.returned && row.walked > 0.3), JSON.stringify(r.rows));
   record("hub reset: 0 resets framing without relocating the Ooga or changing its mode or view family", r.rows.every(row => row.resetKept && row.resetChanged), JSON.stringify(r.rows));
   record("hub map: looking keeps the destination's label, and walking off shows the Ooga's own area, HUB", r.looking && r.departed.driven && r.departed.distance > 1.5 && r.departed.label === "HUB" && r.departed.visible,
     JSON.stringify({ looking: r.looking, departed: r.departed }));
@@ -13849,7 +13850,7 @@ const hubNameplates = { name: "live nameplates", why: "rule: names over live pla
 // would, walks off it, then walks and jumps at the tall one, which no jump clears. Its gorilla, driven, then does the
 // same. The spot has nothing else to stand on near it: a tree's crown is a landing surface, and a rider lifted within
 // a step of one steps onto it.
-const hubPlayerStacking = { name: "players stand on players", why: "regression: landing on another player from above sank into their body, and a driven gorilla passed straight through them; their head holds the lander, Ooga or gorilla, carries it as they walk or fly and lets go when they leave, and a jump or fall into them is held off as a walk is", run: async (b) => {
+const hubPlayerStacking = { name: "players stand on players", why: "regression: landing on another player from above sank into their body, and a driven gorilla passed straight through them; their head holds the lander, Ooga or gorilla, carries it as they walk or fly and lets go when they leave, and a jump or fall into them is held off", run: async (b) => {
   const SHORT = "NickDaGreek", TALL = "rules-without-rulers";
   const drops = await b.evaluate(`(() => {
     const B = __ooga, npc = B.cavemen.get("portlandhodl"), net = BL.net;
@@ -13922,9 +13923,14 @@ const hubPlayerStacking = { name: "players stand on players", why: "regression: 
     const run = (jump) => {
       B.pilot.navigate({ position: { x: fromX, y: B.island.surfaceAt(fromX, fromZ), z: fromZ }, yaw: S.ang, pitch: 0.4, dist: 10 });
       const accepted = jump ? B.crew.jumpPlayer() : true;
-      let nearest = Infinity, peak = 0;
-      for (let i = 0; i < 90; i++) { B.advance(1 / 60, 1 / 60); nearest = Math.min(nearest, S.off()); peak = Math.max(peak, S.feet() - S.ground); }
-      return { accepted, nearest, peak };
+      let nearest = Infinity, air = Infinity, peak = 0;
+      for (let i = 0; i < 90; i++) {
+        B.advance(1 / 60, 1 / 60);
+        const off = S.off(), up = S.feet() - S.ground;
+        nearest = Math.min(nearest, off); peak = Math.max(peak, up);
+        if (up > 0.05) air = Math.min(air, off);
+      }
+      return { accepted, nearest, air, peak };
     };
     return { walk: run(false), jump: run(true) };
   })()`);
@@ -14030,10 +14036,11 @@ const hubPlayerStacking = { name: "players stand on players", why: "regression: 
   const kept = s => Math.abs(s.feet - ride.start.feet) < 0.03 && Math.abs(s.off - ride.start.off) < 0.05;
   record("players stand on players: standing on a player who walks, rises 3 m and comes down keeps the rider on their head, and walking off lands beside them",
     Math.abs(ride.start.feet - short.height) < 0.02 && kept(ride.walked) && kept(ride.up) && kept(ride.down)
-      && Math.abs(walkOff.feet) < 1e-3 && walkOff.off >= approach.walk.nearest - 0.02,
+      && Math.abs(walkOff.feet) < 1e-3 && walkOff.off >= approach.jump.air - 0.02,
     JSON.stringify({ ride, walkOff }));
-  record("players stand on players: a jump at a player too tall to clear is held off as far as a walk at them is",
-    approach.walk.nearest < 2 && approach.jump.accepted && approach.jump.peak > 0.5 && approach.jump.nearest >= approach.walk.nearest - 0.02,
+  // On foot players give way (crew.js PUSH_DEPTH): a walk presses into the gap a jump keeps.
+  record("players stand on players: a jump at a player too tall to clear is held off in the air, where a walk at them presses into their gap",
+    approach.jump.accepted && approach.jump.peak > 0.5 && approach.jump.air < 2 && approach.walk.nearest < approach.jump.air * 0.7,
     JSON.stringify(approach));
   record("players stand on players: the visitor's gorilla lands on a player's head at their height, rides them as they walk, rise 3 m and come down, and falls to the ground when they leave",
     driven.possessed && Math.abs(driven.landed.feet - driven.height) < 0.03 && driven.landed.off < 0.25
@@ -17071,7 +17078,7 @@ const hubCombatReplay = { name: "birds-eye combat replay", why: "contract: repla
   record("birds-eye combat: debug replay records explicit north-up intent, while a fresh orbit-to-birds-eye transition clears the old lock and preserves the orbit heading", northState.storedUnlocked === false && northState.stillUnlocked && northState.locked && northState.drift < 0.001 && Math.abs(northState.north) < 0.001
     && northState.reentry.mode === "birds-eye" && !northState.reentry.northUp && Math.abs(northState.reentry.orbit) > 0.1 && northState.reentry.error < 0.01, JSON.stringify(northState));
   const legacy = await b.evaluate(`(() => { const pose = JSON.parse(document.getElementById("position-debug").dataset.pose); __ooga.pilot.capturePose(pose); pose.mode = "orbit"; pose.battle = pose.combat; delete pose.combat; delete pose.birdsEyeNorthUp; return pose; })()`);
-  await b.open(hubPage(src, `solo=1&character=portlandhodl&pose=${encodeURIComponent(JSON.stringify(legacy))}`));
+  await b.open(hubPage(src, `solo=1&character=portlandhodl&birdseye=1&pose=${encodeURIComponent(JSON.stringify(legacy))}`));
   await untilReady(b);
   const replay = await b.evaluate(`(() => { const B = __ooga, pose = JSON.parse(document.getElementById("position-debug").dataset.pose), el = B.hud.el.mode; return { mode: B.pilot.mode, combat: B.pilot.aiming, northUp: pose.birdsEyeNorthUp, poseMode: pose.mode, poseCombat: pose.combat, legacyField: Object.hasOwn(pose, "battle"), attribute: el.dataset.combat, legacyAttribute: el.hasAttribute("data-battle"), label: el.getAttribute("aria-label") }; })()`);
   record("birds-eye combat: old pose links migrate once, and new pose and HUD state use only combat terminology", replay.mode === "birds-eye" && replay.combat && replay.northUp === false && replay.poseMode === "birds-eye" && replay.poseCombat && !replay.legacyField && replay.attribute === "true" && !replay.legacyAttribute && replay.label.includes("combat") && !replay.label.includes("battle"), JSON.stringify(replay));
@@ -17908,17 +17915,15 @@ const factoryWeapons = { name: "factory no weapons", why: "rule: the Lightning F
     press(); const carryButton = !P.aiming && reticle.hidden;
     press(); const combatButton = P.aiming && !reticle.hidden;
     P.hooks.onZoom(1.2, {}); B.advance(1.5, 1 / 60);
-    const overhead = P.mode === "birds-eye" && !reticle.hidden;
-    P.hooks.onZoom(0.001, {}); B.advance(2, 1 / 60);
     const shoulder = P.mode === "shoulder" && !reticle.hidden && !reticle.style.left && !reticle.style.top;
     P.hooks.onZoom(0.8, {}); B.advance(1, 1 / 60);
     const first = P.mode === "first-person" && !reticle.style.left && !reticle.style.top;
     P.hooks.onZoom(1.2, {}); B.advance(1, 1 / 60);
-    return { carryKey, centered, combatKey, carryButton, combatButton, overhead, shoulder, first, returned: P.mode === "shoulder" };
+    return { carryKey, centered, combatKey, carryButton, combatButton, shoulder, first, returned: P.mode === "shoulder" };
   })()`);
   record("factory weapons: the crosshair clears inherited birdseye coordinates and returns to the screen centre", views.centered, JSON.stringify(views));
-  record("factory views: X and the mode button share mainland cursor-look/drag-look behavior; zoom crosses birdseye, shoulder and first person with nothing in hand, and close views center the crosshair",
-    views.carryKey && views.combatKey && views.carryButton && views.combatButton && views.overhead && views.shoulder && views.first && views.returned, JSON.stringify(views));
+  record("factory views: X and the mode button share mainland cursor-look/drag-look behavior; with nothing in hand, zooming out stops at the shoulder (no bird's-eye here), zooming in crosses to first person, and close views center the crosshair",
+    views.carryKey && views.combatKey && views.carryButton && views.combatButton && views.shoulder && views.first && views.returned, JSON.stringify(views));
   const hits = await b.evaluate(`(() => {
     const B = __ooga, a = B.cavemen.get("portlandhodl"), s = B.factory.scene, rows = [];
     const hum = s.tunnels.map(t => t.hum), gateHum = s.gate.hum;
@@ -19790,7 +19795,7 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
       && animation.far.gorilla > 0 && animation.far.gorilla < 12 && animation.nearOoga.ooga >= 58 && animation.nearGorilla.gorilla >= 58
       && animation.host.ooga >= 58 && animation.host.gorilla >= 58 && animation.network && animation.controlled >= 58, JSON.stringify(animation));
 } };
-scene("hub", { label: "distant effects", query: "pos=0", steps: [hubDistantEffects] });
+scene("hub", { label: "distant effects", query: "pos=0&birdseye=1", steps: [hubDistantEffects] });
 // No other session's cast holds the default local Ooga or a server-vouched contributor: both join the roster before
 // the crew is built, as on a real arrival.
 scene("hub", { label: "guest likeness", query: "pos=0", opts: { initScript: GUEST_LIKENESS_INIT }, steps: [hubGuestLikeness] });
@@ -20392,6 +20397,50 @@ const modelResidencyChecks = BL => {
     JSON.stringify({ kept, dropped, caught }));
 };
 
+// Regression: the Block Party's beat once came from a spectrum read once a drawn frame, and the hold of 60 frames a
+// second on a grid of 100 onsets a second favoured some tempos (a house track at 126 read as 150); a bassline's
+// off-beat figure read as 4/3 of the beat; and beatless noise could pass for one. Kicks at 128 BPM through the page's
+// own low-pass, meter and tracker lock to the same beat at 60 and 144 frames a second, and noise and silence never do.
+const partyRadioChecks = async () => {
+  const context = { window: { BL: {} } };
+  runInNewContext(await readFile(new URL("../src/js/timechain-party-radio.js", import.meta.url), "utf8"), context);
+  const P = context.window.BL.timechainPartyRadio, SR = 48000, BPM = 128, T0 = 0.2, SECS = 12;
+  let seed = 9; const rnd = () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  // A kick (a falling sine) on every beat over a steady bass tone, or the tone and noise alone, low-passed as the page's
+  // BiquadFilterNode is.
+  const track = (kicks, noise) => {
+    const x = new Float32Array(SECS * SR), beat = 60 / BPM, w = 2 * Math.PI * 150 / SR, al = Math.sin(w) / Math.SQRT2, c = Math.cos(w), a0 = 1 + al;
+    const b0 = (1 - c) / 2 / a0, b1 = (1 - c) / a0, a1 = -2 * c / a0, a2 = (1 - al) / a0;
+    let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+    for (let i = 0; i < x.length; i++) {
+      const t = i / SR, since = ((t - T0) % beat + beat) % beat;
+      const v = (kicks ? 0.8 * Math.sin(2 * Math.PI * (50 + 80 * Math.exp(-since / 0.02)) * since) * Math.exp(-since / 0.12) : 0) + 0.09 * Math.sin(2 * Math.PI * 110 * t) + noise * (rnd() * 2 - 1);
+      const y = b0 * v + b1 * x1 + b0 * x2 - a1 * y1 - a2 * y2; x2 = x1; x1 = v; y2 = y1; y1 = y; x[i] = y;
+    }
+    return x;
+  };
+  // The track delivered a frame at a time, as the page's analyser holds it, with what the room would read each frame.
+  const play = (pcm, fps) => {
+    const m = P.meter(SR), tr = P.tracker(SR / m.block), wave = new Float32Array(8192), out = {}, errs = [];
+    let firstLive = -1, live = 0, frames = 0;
+    for (let f = 1; f / fps * SR <= pcm.length; f++) {
+      const t = f / fps, end = Math.floor(t * SR);
+      for (let i = 0; i < wave.length; i++) { const k = end - wave.length + i; wave[i] = k >= 0 ? pcm[k] : 0; }
+      m.take(wave, end, tr); tr.read(t, out);
+      if (t < 6) continue;
+      frames++;
+      if (!out.live) continue;
+      live++; if (firstLive < 0) firstLive = t;
+      let e = out.phase - (((t - T0) * BPM / 60) % 1 + 1) % 1; e -= Math.round(e); errs.push(Math.abs(e) * 60000 / BPM);
+    }
+    return { live: live / frames, bpm: +out.bpm.toFixed(2), err: errs.length ? +(errs.reduce((a, b) => a + b, 0) / errs.length).toFixed(1) : null };
+  };
+  const kicks = track(true, 0.05), at60 = play(kicks, 60), at144 = play(kicks, 144), noise = play(track(false, 0.3), 60), silence = play(new Float32Array(SECS * SR), 60);
+  record("party radio: kicks lock at their tempo and on their beat alike at 60 and 144 frames a second, and noise and silence never lock",
+    at60.live === 1 && at144.live === 1 && Math.abs(at60.bpm - BPM) < 1 && Math.abs(at144.bpm - at60.bpm) < 0.3 && at60.err < 30 && at144.err < 30
+      && noise.live === 0 && silence.live === 0, JSON.stringify({ at60, at144, noise, silence }));
+};
+
 // Rule: a room id is validated at every boundary, and the three sizes are one design whose doorway, arrival, button and
 // chairs keep human size while the architecture scales and the table grows to seat 4, 8 and 12.
 const timechainRoomChecks = async () => {
@@ -20860,7 +20909,8 @@ const sphereKeypad = { name: "timechain keypad", why: "rule: the keypad chooses 
     left.state === "idle" && !left.popup && !left.act && left.lens === null && left.one.join() === "58,52,48" && !left.readout && left.requests === 0 && left.read === 0 && left.visit === null && left.scene === "hub" && left.doors === 0, JSON.stringify(left));
 } };
 const sphereCrossing = { name: "timechain crossing", why: "playthrough: Enter walks the same Ooga through the doors into its room in first person, and Space at the Exit button walks it back out onto the bridge", run: async (b) => {
-  await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; ${sphereStand("0.7", "13.8")} })()`);
+  // In first person at the keypad, which the room keeps, so the walk out starts from the eyes too.
+  await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; ${sphereStand("0.7", "13.8")} B.pilot.enterClose(); B.advance(0.3, 1 / 60); })()`);
   await b.evaluate(sphereLog);
   await b.key(" ");
   await b.key("3");
@@ -20879,10 +20929,10 @@ const sphereCrossing = { name: "timechain crossing", why: "playthrough: Enter wa
     return { swapIn: H.swapIn, swapOut: H.swapOut, far: H.far, farAt: H.farAt, frames: H.frames, fadeMax: H.fadeMax, longest: H.longest, policy: __ooga.hubPolicy }; })()`);
   record("timechain crossing: Enter opens the doors, lifts the plug for the traveler alone and swoops into its eyes as it walks in",
     crossing && !passage.plug && !passage.popup && passage.lens === "eyes", JSON.stringify({ crossing, passage }));
-  record("timechain crossing: the same Ooga arrives in a solo Room 3 in first person, the doors close behind it and the address names the room",
+  record("timechain crossing: the same Ooga arrives in a solo Room 3 in the first person it had at the keypad, the doors close behind it and the address names the room",
     inside && room.room === 3 && room.mode === "solo" && room.player === "portlandhodl" && room.view === "first-person" && room.doors === 0 && room.atArrival < 0.4 && room.hash === "#/sphere-3" && room.zone === "none", JSON.stringify(room));
-  record("timechain crossing: Space at the Exit button walks it back out of the passage onto the bridge, the doors shut, the plug back and the view out of its eyes",
-    out && back.player === "portlandhodl" && back.fromDoors > 1 && back.doors === 0 && back.plug && back.view !== "first-person" && back.hash === "#/sphere" && back.head, JSON.stringify(back));
+  record("timechain crossing: Space at the Exit button walks it back out of the passage onto the bridge, the doors shut, the plug back and the view it had in the room kept, its head hidden only in first person",
+    out && back.player === "portlandhodl" && back.fromDoors > 1 && back.doors === 0 && back.plug && back.view === room.view && back.hash === "#/sphere" && back.head === (back.view !== "first-person"), JSON.stringify({ back, room: room.view }));
   // Under hubcache=release part of the island's rebuild still runs in the swap, so the walk-out fades over it rather than
   // freezing the room's last frame; the way in stays seamless.
   if (seams.policy === "keep") record("timechain crossing: from the keypad into the room and from the Exit button out to the bridge every frame is the Ooga's own eye, never faded to black, and each scene swap is the same view on both sides",
@@ -20993,12 +21043,12 @@ const timechainRoom = { name: "timechain room", why: "playthrough: a signed-out 
     const kept = P.player === cave;
     P.enterClose(); B.advance(1, 1 / 60);
     emptyViews &&= empty();
-    return { room: D.room.id, kind: D.room.kind, radius: D.layout.radius, lock: !!D.built.lockPad, mode: D.visit.mode, zone: BL.net.state.zone, body: BL.net.state.body, chip: document.getElementById("sphere-mode").textContent,
+    return { room: D.room.id, kind: D.room.kind, radius: D.layout.radius, lock: !!D.built.lockPad, mode: D.visit.mode, zone: BL.net.state.zone, body: BL.net.state.body, chip: !!document.getElementById("sphere-mode"),
       subtitle: document.getElementById("sphere-subtitle").textContent, before, shoulder, orbit, kept, after: P.mode, player: cave.traits.name, jet: !!cave.jet, jetHud: document.getElementById("jetpack-hud").hidden,
       emptyViews, deniedWeapons, requests: B.stats().requests, paused: D.reader.status("recent"), hash: location.hash, remotes: D.remotes === null };
   })()`);
-  record("timechain room: a signed-out arrival at /sphere-1 is a solo copy of the Conference Room, with its lock, that publishes nothing, with its mode named and every live picture painted",
-    painted && r.room === 1 && r.kind === "conference" && r.radius === 10.5 && r.lock && r.mode === "solo" && r.zone === "none" && r.body === null && r.chip.includes("Solo visit · not signed in") && r.subtitle === "TCS · Conference Room"
+  record("timechain room: a signed-out arrival at /sphere-1 is a solo copy of the Conference Room, with its lock, that publishes nothing, named only under the title, with every live picture painted",
+    painted && r.room === 1 && r.kind === "conference" && r.radius === 10.5 && r.lock && r.mode === "solo" && r.zone === "none" && r.body === null && !r.chip && r.subtitle === "TCS · Conference Room"
       && r.hash === "#/sphere-1" && r.requests === 0 && r.paused === "PAUSED" && r.remotes, JSON.stringify(r));
   record("timechain room: scroll reaches shoulder and orbit, nothing lets go of the Ooga, and every view stays empty-handed with no jetpack",
     r.before === "first-person" && r.shoulder === "shoulder" && r.orbit === "orbit" && r.kept && r.after === "first-person"
@@ -21085,8 +21135,8 @@ const timechainRooms = { name: "timechain rooms", why: "rule: every room 0–9 b
     }
   }
   const same = (k) => rows.every(r => JSON.stringify(r[k]) === JSON.stringify(rows[0][k]));
-  record("timechain rooms: rooms 0–9 each build their own kind around the same doorway, arrival, Exit button and Ooga, solo and first person, each at its own address, with seats, and only the Conference Room locks",
-    rows.map(r => r.kind).join() === "planetarium,temple,party,fireside,workout,observatory,mining,lecture,theater,conference" && rows.every(r => r.at < 0.4 && r.mode === "solo" && r.view === "first-person" && r.hash === "#/sphere-" + r.room && r.seats > 0 && r.lock === (r.room === 1))
+  record("timechain rooms: rooms 0–9 each build their own kind around the same doorway, arrival, Exit button and Ooga, solo and first person, each at its own address, with seats but in the Block Party and the Mining Museum, and only the Conference Room locks",
+    rows.map(r => r.kind).join() === "planetarium,temple,party,fireside,workout,observatory,mining,lecture,theater,conference" && rows.every(r => r.at < 0.4 && r.mode === "solo" && r.view === "first-person" && r.hash === "#/sphere-" + r.room && (r.seats > 0) === (r.kind !== "party" && r.kind !== "mining") && r.lock === (r.room === 1))
       && ["door", "arrivalGap", "button", "height"].every(same), JSON.stringify(rows));
   record("timechain rooms: the final camera stays inside the sphere, the closed doors, the floor and the dome in every view and transition, in the smallest, the tallest raked and the conference room",
     bounds.every(r => r.frames >= 840 && r.outside === 0 && ["first-person", "shoulder", "orbit"].every(mode => r.modes.includes(mode))), JSON.stringify(bounds));
@@ -22102,7 +22152,7 @@ scene("hub", { label: "gorilla lab carry jump", exclusive: true, query: "charact
       && state.smashUnchanged,
     JSON.stringify(state));
 } }].map(gameCombat) });
-scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1", steps: [{ name: "gorilla prop traversal", why: "regression: a box lost its supporting contact before the collision body cleared its side, low props interrupted the gallop, and a stale motion envelope trapped gorillas beneath trees", run: async (b) => {
+scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&birdseye=1", steps: [{ name: "gorilla prop traversal", why: "regression: a box lost its supporting contact before the collision body cleared its side, low props interrupted the gallop, and a stale motion envelope trapped gorillas beneath trees", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, S = BL.scene, root = BL.scenes.hub.root, C = B.clankers, npc = C.list.find(e => e.owner.traits.name === "portlandhodl"), solids = B.headquarters.solids.props;
     // \`e\` is the gorilla in hand: the driven body while one is taken (clankers.js separateBodies builds it where the NPC
@@ -23696,7 +23746,7 @@ scene("hub", { label: "weapons", query: "ooga=portlandhodl:clank:lab,obl,lf&char
 scene("hub", { label: "guide", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubGuide, hubAsk, hubTourInput] });
 // Native pointer-lock assertions need sole focus; another browser lane can
 // steal capture and spend this long scenario's deadline waiting for it back.
-scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", exclusive: true, steps: [hubBirdsEye] });
+scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1&birdseye=1", exclusive: true, steps: [hubBirdsEye] });
 const hubPlayersAim = { name: "players camera targeting", why: "regression: the Players crosshair aimed through the orbit avatar, hiding its target behind the head; shoulder and first person must still centre it", run: async (b) => {
   const rows = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, a = P.player || B.cavemen.get("portlandhodl"), rows = [];
@@ -23784,11 +23834,11 @@ const hubPlayersAim = { name: "players camera targeting", why: "regression: the 
   record("regression: live head look is published after the final pilot pose while idle in shoulder and first person",
     rows.every(row => Math.abs(row.head) > 0.01 && row.lookSample !== null && Math.abs(row.lookSample / 100 - row.head) <= 0.006), JSON.stringify(rows));
 } };
-scene("hub", { label: "birds-eye combat projection and targets", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeProjection, gameCombat(hubBirdsEyeTargets), hubCombatReplay] });
+scene("hub", { label: "birds-eye combat projection and targets", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1&birdseye=1", steps: [hubBirdsEyeProjection, gameCombat(hubBirdsEyeTargets), hubCombatReplay] });
 for (const character of ["portlandhodl", "w-s-bitcoin"]) for (const opts of [{ w: 1920, h: 1080 }, PHONE_SIZE]) {
-  scene("hub", { label: "players camera targeting " + character, query: "solo=1&character=" + character + "&weapon=1&mode=shoulder&combat=1", opts, steps: [hubPlayersAim] });
+  scene("hub", { label: "players camera targeting " + character, query: "solo=1&character=" + character + "&weapon=1&mode=shoulder&combat=1&birdseye=1", opts, steps: [hubPlayersAim] });
 }
-scene("hub", { label: "birds-eye lower floors", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeFloors] });
+scene("hub", { label: "birds-eye lower floors", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1&birdseye=1", steps: [hubBirdsEyeFloors] });
 scene("hub", { label: "mirror", query: "status=chillin", steps: [hubJumbotron, hubMirrorMedium, hubMirror] });
 scene("hub", { label: "matrix", steps: [hubMatrix] });
 scene("hub", { label: "oogatron popups", url: hubPage(dist, "pos=0"), steps: [oogatronPopups] });
@@ -24313,15 +24363,15 @@ scene("hub", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("hub", { required
   const staged = readFileSync(join(root, "scripts/site.mjs"), "utf8").includes('rel="manifest" href="manifest.webmanifest"');
   record("hub home screen: the installed name is OogaBoogaLand, with a same-origin icon; the manifest link is added only for the hosted site", meta.title === "OogaBoogaLand" && meta.capable === "yes" && meta.icon === "apple-touch-icon.png" && !meta.manifestLink && meta.manifestSrc && manifest.short_name === "OogaBoogaLand" && manifest.display === "standalone" && staged, JSON.stringify({ meta, short: manifest.short_name, staged }));
 } }] });
-scene("lab", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("lab", { required: ["#joy-move", "#joy-look", ".leave"] })] });
-scene("race", { query: "pos=0&rain=0&draw=0", opts: PHONE_SIZE, steps: [phone("race", { card: '[data-intro="race"]', play: "window.__ooga.race.startRace()", required: ["#joy-move", "#act", "#item-btn", "#race-garage-btn", ".leave"] })] });
-scene("drop", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("drop", { card: '[data-intro="drop"]', play: "window.__ooga.drop.start()", required: ["#joy-move", "#joy-look", "#act", ".leave"] })] });
-scene("orbit", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("orbit", { card: '[data-intro="orbit"]', play: "window.__ooga.orbit.launch()", required: ["#joy-move", "#act", ".leave"] })] });
-scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: "#mine-intro", required: ["#joy-move", "#joy-look", "#act", "#mine-view-btn", "#mine-pause-btn", "#environment-sound", ".leave"] })] });
-scene("factory", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("factory", { required: ["#joy-move", "#joy-look", ".leave"] }), factoryGreeter] });
-scene("hangar", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("hangar", { required: ["#joy-move", "#joy-look", ".leave"] })] });
-scene("bifrost", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("bifrost", { required: ["#joy-move", "#joy-look", ".leave"] })] });
-scene("timechain", { url: roomPage(1), opts: PHONE_SIZE, steps: [phone("timechain", { required: ["#joy-move", "#joy-look", ".leave", "#sphere-mode"] })] });
+scene("lab", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("lab", { required: ["#joy-move", "#joy-look", "#leave-hud"] })] });
+scene("race", { query: "pos=0&rain=0&draw=0", opts: PHONE_SIZE, steps: [phone("race", { card: '[data-intro="race"]', play: "window.__ooga.race.startRace()", required: ["#joy-move", "#act", "#item-btn", "#race-garage-btn", "#leave-hud"] })] });
+scene("drop", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("drop", { card: '[data-intro="drop"]', play: "window.__ooga.drop.start()", required: ["#joy-move", "#joy-look", "#act", "#leave-hud"] })] });
+scene("orbit", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("orbit", { card: '[data-intro="orbit"]', play: "window.__ooga.orbit.launch()", required: ["#joy-move", "#act", "#leave-hud"] })] });
+scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: "#mine-intro", required: ["#joy-move", "#joy-look", "#act", "#mine-view-btn", "#mine-pause-btn", "#environment-sound", "#leave-hud"] })] });
+scene("factory", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("factory", { required: ["#joy-move", "#joy-look", "#leave-hud"] }), factoryGreeter] });
+scene("hangar", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("hangar", { required: ["#joy-move", "#joy-look", "#leave-hud"] })] });
+scene("bifrost", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("bifrost", { required: ["#joy-move", "#joy-look", "#leave-hud"] })] });
+scene("timechain", { url: roomPage(1), opts: PHONE_SIZE, steps: [phone("timechain", { required: ["#joy-move", "#joy-look", "#leave-hud"] })] });
 // The keypad's controls are its physical keys: from the first person a phone shows, each is on screen with nothing of
 // the page's over it (the hint over the view takes no pointer, so it is checked as text, not as a control).
 const sphereKeypadPhone = phone("hub", { play: `(() => { const B = __ooga, ${sphereLocal}; ${sphereStand("0.7", "13.8")} T.gate.engage(); B.advance(0.6, 1 / 60); })()`, required: [] });
@@ -24380,11 +24430,11 @@ const hubHammockTap = { name: "hub hammock tap", why: "rule: on a phone one tap 
 scene("hub", { label: "sphere keypad", query: "solo=1&character=portlandhodl&view=timechain&pos=0", opts: PHONE_SIZE, steps: [hubHammockTap, { ...sphereKeypadPhone, name: "sphere keypad phone", run: async (b) => {
   await sphereKeypadPhone.run(b);
   const keys = await b.evaluate(`(() => { const B = __ooga, T = BL.scenes.hub.debug.timechainIsland, out = {};
-    return T.site.keys.map((k) => { const w = k.node.world; B.renderer.project(w[12], w[13], w[14], out); const hit = document.elementFromPoint(out.x, out.y);
+    return [...T.site.keys, { key: "directory", node: T.site.directoryKey }].map((k) => { const w = k.node.world; B.renderer.project(w[12], w[13], w[14], out); const hit = document.elementFromPoint(out.x, out.y);
       return { key: k.key, x: Math.round(out.x), y: Math.round(out.y), on: out.x > 0 && out.x < innerWidth && out.y > 0 && out.y < innerHeight, free: !!hit && hit.id === "scene" }; }); })()`);
-  record("timechain keypad phone: in first person every physical key, 1–9, 0, Back and Enter, is on screen with nothing over it", keys.length === 12 && keys.every((k) => k.on && k.free), JSON.stringify(keys));
+  record("timechain keypad phone: in first person every physical key, 1–9, 0, Back, Enter and Directory, is on screen with nothing over it", keys.length === 13 && keys.every((k) => k.on && k.free), JSON.stringify(keys));
 } }] });
-scene("arcade", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("arcade", { required: ["#joy-move", "#joy-look", ".leave"] })] });
+scene("arcade", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("arcade", { required: ["#joy-move", "#joy-look", "#leave-hud"] })] });
 
 // Focused component fixtures enter DSB directly with the selected Ooga.
 // The Bifrost entrance playthrough separately exercises the real travel windows.
@@ -24575,10 +24625,10 @@ scene("dsb", { label: "dsb feeds and audio", url: hubPage(src, "scene=dsb"), ste
   } finally { await b.evaluate(`__entranceAudio?.dispose(); delete window.__entranceAudio; AudioContext.prototype.createBufferSource = __dsbSoundProbe.original; delete window.__dsbSoundProbe;`); }
 } }] });
 scene("dsb", { label: "dsb shared player", url: hubPage(dist), steps: [{ name: "dsb shared player", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
-  record("dsb compatibility: built CSP preserves exactly the weather and DSB network permissions", await b.evaluate(`(() => {
+  record("dsb compatibility: built CSP preserves exactly the weather, DSB and Block Party network permissions", await b.evaluate(`(() => {
     const policy = document.querySelector('meta[http-equiv="Content-Security-Policy"]').content;
     const sources = name => policy.split(";").map(s => s.trim().split(/\\s+/)).find(s => s[0] === name).slice(1).sort().join("|");
-    return sources("connect-src") === ["'self'", "https:", "wss:"].sort().join("|") && sources("worker-src") === "'self'" && sources("media-src") === ["'self'", "https://stream.noderunnersradio.com"].sort().join("|") && !policy.includes("unsafe-");
+    return sources("connect-src") === ["'self'", "https:", "wss:"].sort().join("|") && sources("worker-src") === "'self'" && sources("media-src") === ["'self'", "https://stream.noderunnersradio.com", "https://s2.radio.co", "https://ice1.somafm.com"].sort().join("|") && !policy.includes("unsafe-");
   })()`));
   record("dsb registry: c10 is B.C.A.'s hub office and DSB is internally addressable without a cave", await b.evaluate(`(BL.caves.slots.find(s => s.id === "c10").status === "open" && BL.caves.slots.find(s => s.id === "c10").scene === null && BL.caves.slots.find(s => s.id === "c10").place === "bca") && !BL.caves.slots.some(s => s.scene === "dsb") && !!BL.scenes.dsb`));
   record("dsb compatibility: hub keeps the Agent module without spawning a standalone gorilla", await b.evaluate(`__ooga.scene === "hub" && !__ooga.agent && !!BL.agent && !!BL.characters.get("rules-without-rulers") && Object.hasOwn(__ooga, "agent") && Object.hasOwn(__ooga, "dsb") && !__ooga.dsb`));
@@ -26516,7 +26566,8 @@ const maxisChecks = BL => {
   C.setCombatEnabled(true);
   const A=C.cavemen.get("YellowBrokeIt");C.control(A);
   const clear=(ax,az,bx=ax,bz=az)=>I.walkable(ax,az,bx,bz,R.groundAt(ax,az),A.bodyHeight,A);
-  record("Maxis: 50 reusable seats fit measured Yellow scale",R.seats.length===50&&A.bodyHeight>1.3&&A.bodyHeight<1.5&&R.seats.every(s=>s.allowWeapons&&s.lockMovement&&clear(s.walkAt.x,s.walkAt.z)),JSON.stringify({height:A.bodyHeight,radius:A.bodyRadius,blocked:R.seats.map((s,i)=>!clear(s.walkAt.x,s.walkAt.z)?i:null).filter(i=>i!==null)}));
+  // The refined body stands Yellow at about 1.57 m (1.3 to 1.5 before the longer legs and torso).
+  record("Maxis: 50 reusable seats fit measured Yellow scale",R.seats.length===50&&A.bodyHeight>1.45&&A.bodyHeight<1.7&&R.seats.every(s=>s.allowWeapons&&s.lockMovement&&clear(s.walkAt.x,s.walkAt.z)),JSON.stringify({height:A.bodyHeight,radius:A.bodyRadius,blocked:R.seats.map((s,i)=>!clear(s.walkAt.x,s.walkAt.z)?i:null).filter(i=>i!==null)}));
   const seatResults=[];
   for(const [i,seat] of R.seats.entries()){
     Object.assign(A.root.position,{x:seat.walkAt.x,y:seat.floor+A.baseY,z:seat.walkAt.z});A.hop=A.hopV=0;
@@ -30250,6 +30301,60 @@ const terrainParityChecks = (BL, island) => {
   record("terrain collision: direct and Worker-restored voxel sweeps use caller-owned typed box queries instead of the allocating scalar adapter",
     voxelPaths.every(path => path.typed), JSON.stringify(voxelPaths));
 };
+// Repo Island (repo-island-data.js, repo-island-models.js, repo-feed.js): the list the page and the Worker share, the
+// island laid out from it, and the feed's boundary. The meadow's four totems are carved by the same kit at its full
+// detail, so their golden is the one they had before the island's details existed.
+const MEADOW_TOTEMS_GOLDEN = "8bdd4fca5a005b4f";
+const repoIslandChecks = (BL, island) => {
+  const D = BL.repoIslandData, M = BL.repoIslandModels, TM = BL.totemModels, H = BL.hubModels;
+  const sections = D.SECTIONS.map((s) => s.id), order = D.REPOS.map((r) => sections.indexOf(r.section));
+  const glyphs = (text) => [...text].every((ch) => ch === " " || ch === "M" || H.SIGN_GLYPHS[ch]);
+  let badges = true;
+  for (const s of D.SECTIONS) try { H.caveSign(s.name, s.badge); } catch { badges = false; }
+  const list = {
+    repos: new Set(D.REPOS.map((r) => r.repo.toLowerCase())).size === D.REPOS.length && D.REPOS.every((r) => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r.repo)),
+    words: new Set(D.REPOS.map((r) => r.word)).size === D.REPOS.length && D.REPOS.every((r) => /^[A-WYZ]{2,7}$/.test(r.word)),
+    sections: order.every((k, i) => k >= 0 && (!i || k >= order[i - 1])) && D.SECTIONS.every((s) => s.name.length <= 18 && glyphs(s.name)) && badges,
+    sized: D.REPOS.every((r) => r.importance >= 0.2 && r.importance <= 1 && r.name.length <= 28),
+    anchors: BL.totemFeed.REPOS.every((t) => D.REPOS.some((r) => r.repo === t.repo && r.importance === t.importance))
+  };
+  record("repo island list: every repository once under its canonical name, a carvable word of its own, its section in order, signs the carved alphabet can spell with a badge, heights a share of Core's and the meadow's four at their own",
+    Object.values(list).every(Boolean), JSON.stringify(list));
+  const P = M.plan(), spot = M.spot(island), seen = new Set(), signatures = new Set(), meadow = new Set(BL.totemFeed.REPOS.map((t) => t.repo));
+  let placed = true, own = true, tall = true, inside = true;
+  for (const t of P.totems) {
+    placed &&= !seen.has(t.index) && D.REPOS[t.index].repo === t.repo;
+    seen.add(t.index);
+    if (meadow.has(t.repo)) own &&= t.design === TM.DESIGNS[BL.totemFeed.REPOS.find((r) => r.repo === t.repo).word];
+    else { const key = JSON.stringify(t.design); own &&= !signatures.has(key); signatures.add(key); }
+    tall &&= Math.abs(t.L.apex - t.importance * TM.CORE_HEIGHT) < 1e-9;
+    inside &&= Math.hypot(t.x, t.z) + t.L.reach < M.PLAN.edge && (t.r === 0 || !M.pathAt(t.x, t.z, P.spokes));
+  }
+  const chunked = P.chunks.flat().sort((a, b) => a - b).every((at, k) => at === k) && P.chunks.flat().length === P.totems.length && P.chunks.every((c) => c.length <= M.CHUNK);
+  // The bridge leaves the south terrace level with it, past the rim, and the island's middle is a deck and its radius further.
+  const bridged = spot.y === island.surfaceAt(0, spot.rim - 0.3) && island.surfaceAt(0, spot.rim + 0.1) < 0.5 && spot.z === spot.rim + M.BRIDGE.span + M.ISLE.R;
+  record("repo island plan: every repository stands once, in its own carving (the meadow's four in theirs), as tall as its importance makes it, wholly inside the lip and off its paths, in chunks of up to four, past a bridge level with the south terrace",
+    placed && seen.size === D.REPOS.length && own && tall && inside && chunked && bridged, JSON.stringify({ placed, count: seen.size, own, tall, inside, chunked, bridged, spot }));
+  const h = createHash("sha256");
+  for (let i = 0; i < 4; i++) for (const g of [TM.body(i), TM.glyphs(i), TM.featureHighlights(i)]) h.update(JSON.stringify([g.verts, g.faces.map((f) => [f.i, f.color, f.emissive || 0])]));
+  const digest = h.digest("hex").slice(0, 16);
+  record("meadow totems: carved at full detail by the shared kit, the four keep their golden", digest === MEADOW_TOTEMS_GOLDEN, JSON.stringify({ digest, golden: MEADOW_TOTEMS_GOLDEN }));
+  // The feed's boundary, on the page's own module: a first reading celebrates nothing, a newer merge seen later does,
+  // a repository the page does not list is skipped, a merge older than the day is none, and a malformed reply refuses.
+  const F = BL.repoFeed, events = [], stop = F.subscribe((e) => events.push(e)), now = Date.now(), core = D.REPOS.findIndex((r) => r.repo === "bitcoin/bitcoin");
+  const lnd = D.REPOS.findIndex((r) => r.repo === "lightningnetwork/lnd");
+  F.apply({ at: now, merges: { "bitcoin/bitcoin": [now - 3600000, 5], "someone/else": [now, 9], "lightningnetwork/lnd": [now - 25 * 3600000, 7] } }, now);
+  const first = F.state.repos[core].number === 5 && F.state.repos[core].url === "https://github.com/bitcoin/bitcoin/pull/5" && F.state.repos[lnd].number === 0 && events.length === 1 && !events[0].fresh;
+  F.apply({ at: now, merges: { "bitcoin/bitcoin": [now - 60000, 6] } }, now);
+  const fresh = events.length === 2 && events[1].fresh && events[1].index === core;
+  let refused = false;
+  try { F.apply({ merges: { "bitcoin/bitcoin": ["soon", 6] } }, now); } catch { refused = true; }
+  F.apply({ merges: {} }, now);
+  const cleared = F.state.repos[core].number === 0 && F.state.repos[core].changedAt === 0;
+  stop();
+  record("repo feed: a first reading lights without celebrating, a newer merge is fresh, unknown repositories and merges older than the day are skipped, a malformed reply refuses and an empty one puts the totems out",
+    first && fresh && refused && cleared, JSON.stringify({ first, fresh, refused, cleared, events: events.length }));
+};
 const artifactUnitProof = () => {
   const workflow = readFileSync(join(root, ".github/workflows/pages.yml"), "utf8");
   const script = workflow.split("      - name: Commit the built page\n        run: |\n")[1]?.split("        env:\n")[0]?.replace(/^          /gm, "");
@@ -30770,7 +30875,7 @@ const unitChecks = async () => {
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
   await cloudHopperFailureChecks(BL);
-  await deferredLoadingChecks(); await doorReadyChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await mirrorRippleChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await hammockChecks(); await poolLayoutChecks(); await gameRulesChecks(); await highscoreClientChecks(); await ghostHuntChecks(); await donationClientChecks(); await donationResumeCheck(); await poolWildlifeChecks(); await totemFeedChecks();
+  await deferredLoadingChecks(); await doorReadyChecks(); await hudNoticeChecks(); await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await oogatronReplayChecks(); await mirrorRippleChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await partyRadioChecks(); await timechainBlockChecks(); await environmentSoundChecks(); await weatherStepChecks(); await hammockChecks(); await poolLayoutChecks(); await gameRulesChecks(); await highscoreClientChecks(); await ghostHuntChecks(); await donationClientChecks(); await donationResumeCheck(); await poolWildlifeChecks(); await totemFeedChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
@@ -30780,6 +30885,7 @@ const unitChecks = async () => {
 
   const island = BL.terrain.island({ seed: 1 });
   terrainParityChecks(BL, island);
+  repoIslandChecks(BL, island);
   await terrainCacheChecks();
   {
     // These real c3 roof poses must follow the same limb animation as open space.
