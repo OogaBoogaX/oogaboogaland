@@ -11,10 +11,12 @@
 // that goes together: a channel's liquidity beside the rebalancer's runs, the fees beside the fee policy, HTLCs beside
 // the forwarding log, the peer map beside the routing's success, the mempool beside the new channels, the routing
 // beside the fees; and on the Jet's side, its engines side by side, its wiring beside a unit's gauges, the static fire
-// log beside the chief engineer's orders.
+// log beside the chief engineer's orders. Standing at a desk, in front of its monitors, Space (the act button reads
+// NEXT SCREEN) turns one of them, picked at random each time, on to its next picture with a blink and a click; a tap
+// on a monitor from there turns that one.
 //
 // Space beside a terminal (the act button reads DISPLAY), or a tap on it from there, starts the show: the screen hung
-// from a gantry far down the runway unrolls, the old projector hung from a gantry over it nearer the door strikes its lamp
+// from the roof far down the runway unrolls, the old projector hung from the roof over it nearer the door strikes its lamp
 // and its reels turn, and down its beam through the hall's dust comes the film, from the repository's reading
 // (`jetFeed.reading()`): the countdown leader, the title card, the plebnet era before Jet, the month the repository
 // began, then a card for each year and that year's releases, oldest first, each with its date and a picture of what
@@ -280,6 +282,9 @@
   // of `LAYOUT.stations`), arranged so no two desks show one pair but for the moment they change over, each under its
   // own titles and from that desk's own numbers. DESK_PX pixels a metre.
   const DESK_HOLD = 20, DESK_STEP = 1, DESK_PX = 280;
+  // How near a desk's middle the Ooga stands to turn its monitors (m), in front of them; how long a monitor blinks
+  // blank as it turns (s); and its click's pitch (Hz) and length (s).
+  const DESK_REACH = 1.7, DESK_BLINK = 0.12, DESK_CLICK = [1250, 0.035];
   const PAIRS = {
     liquidity: [["channels", [0, 1, 2]], ["rebalance", [0, 1, 2]]], earnings: [["fees", [0, 1, 2]], ["policy", [0, 1, 2]]],
     payments: [["htlcs", [0, 1, 2]], ["forwards", [0, 1, 2]]], network: [["peers", [0, 1, 2]], ["routed", [2, 2, 2]]],
@@ -760,8 +765,9 @@
     });
     // The desks' monitors, each laid on its screen's face, and the pairs each desk turns through (`steps`, a kind and
     // its variant for each monitor) with their pictures, a geometry for each monitor; painted each desk's first pair
-    // at once and the rest a pair a frame (`toPaint`), in the order they come up; and which each desk shows (-1 none
-    // yet). `seen` counts each pair's desks so far, which picks its variants.
+    // at once and the rest a pair a frame (`toPaint`), in the order they come up; how far each monitor has been
+    // turned on past its pair (`turned`), which pair's picture it shows (`at`, -1 none yet) and its blink left.
+    // `seen` counts each pair's desks so far, which picks its variants.
     const D = HM.DESK, seen = {};
     const desks = L.stations.map(([x, z, turn], i) => {
       const c = Math.cos(turn), s = Math.sin(turn), face = 0.02 + LIFT;
@@ -775,9 +781,9 @@
         const k = seen[pair] = (seen[pair] ?? -1) + 1;
         return PAIRS[pair].map(([kind, variants]) => [kind, variants[k]]);
       });
-      return { nodes, steps, pics: steps.map(() => []), shown: -1, offset: i * DESK_STEP, seed: 977 + i * 13 };
+      return { nodes, steps, pics: steps.map(() => []), turned: [0, 0], at: [-1, -1], blink: [0, 0], offset: i * DESK_STEP, seed: 977 + i * 13 };
     });
-    const paintDesk = (d, n) => D.monitors.forEach(([, w], m) => {
+    const paintDesk = (d, n) => d.pics[n].length || D.monitors.forEach(([, w], m) => {
       const [kind, v] = d.steps[n][m], canvas = sheet(Math.round(w * DESK_PX), Math.round(D.h * DESK_PX));
       DESK_PAINT[kind](canvas.getContext("2d"), canvas.width, canvas.height, v, BL.math.mulberry32(d.seed + n * 2 + m));
       const geo = plane(canvas, w, D.h, 0.45);
@@ -799,7 +805,7 @@
     const cradle = createNode({ geometry: P.cradle });
     const beam = createNode({ position: { ...B.position }, rotation: { ...B.rotation }, geometry: B.geometry, sightHidden: true, visible: false });
     const SC = L.show.screen, frame = createNode({ position: { x: SC.x, y: SC.stow, z: SC.z }, geometry: S.frame });
-    const rods = createNode({ position: { x: SC.x, y: S.chord, z: SC.z }, scale: { x: 1, y: S.chord - SC.stow - 0.15, z: 1 }, geometry: S.rods });
+    const rods = createNode({ position: { x: SC.x, y: S.roof, z: SC.z }, scale: { x: 1, y: S.roof - SC.stow - 0.15, z: 1 }, geometry: S.rods });
     const cloth = createNode({ position: { x: SC.x, y: SC.stow - S.under, z: SC.z }, geometry: S.cloth, visible: false });
     const batten = createNode({ position: { x: SC.x, y: SC.stow - S.under, z: SC.z }, geometry: S.batten });
     const slide = createNode({ position: { x: pic.x, y: pic.y, z: pic.z }, geometry: X.light, sightHidden: true, visible: false });
@@ -814,7 +820,7 @@
     // showing and its time, a splice's flash left; where the next frames get painted; and the gate's weave, the
     // grain's and the flicker's clocks.
     let phase = "idle", t = 0, hoist = 0, hoistFrom = 0, unroll = 0, upFrom = 0, lamp = 0, motor = 0, film = null, index = 0, at = 0, splice = 0, painted = 0;
-    let weaveT = 0, grainT = 0, shownGrain = -1, wx = 0, wy = 0, flick = 0, clock = 0, near = -1, beep = false;
+    let weaveT = 0, grainT = 0, shownGrain = -1, wx = 0, wy = 0, flick = 0, clock = 0, near = -1, deskNear = -1, beep = false;
     // The light the picture throws on the floor now (`lights`).
     const light = { level: 0 };
     const running = () => phase === "lower" || phase === "down" || phase === "strike" || phase === "film";
@@ -850,8 +856,30 @@
       }
       return best;
     };
-    const useNear = (x, z, reach, feet) => reaches(x, z, feet) >= 0 && press();
-    const actLabel = () => (near < 0 ? null : phase === "idle" ? "DISPLAY" : running() ? "STOP" : null);
+    // The desk an Ooga standing at (x, z), its feet `feet` up, stands at in front of its monitors, or -1.
+    const deskReaches = (x, z, feet) => {
+      if (feet >= FEET) return -1;
+      let best = -1, bestD = DESK_REACH;
+      for (let i = 0; i < L.stations.length; i++) {
+        const [sx, sz, turn] = L.stations[i], dx = x - sx, dz = z - sz;
+        if (dx * Math.sin(turn) + dz * Math.cos(turn) <= 0) continue;
+        const d = Math.hypot(dx, dz);
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      return best;
+    };
+    // Desk `i`'s monitor `m` (one at random with none) on to its next picture, after a blink, with a click.
+    const turnMonitor = (i, m = Math.random() < 0.5 ? 0 : 1) => {
+      const d = desks[i], node = d.nodes[m];
+      d.turned[m]++;
+      d.blink[m] = DESK_BLINK;
+      audio.beep(node.position.x, node.position.y, node.position.z, DESK_CLICK[0], DESK_CLICK[1]);
+      return true;
+    };
+    const useNear = (x, z, reach, feet) => reaches(x, z, feet) >= 0 && press() || deskReaches(x, z, feet) >= 0 && turnMonitor(deskReaches(x, z, feet));
+    const actLabel = () => (near >= 0 ? (phase === "idle" ? "DISPLAY" : running() ? "STOP" : null) : deskNear >= 0 ? "NEXT SCREEN" : null);
+    // A tap on monitor `m` of desk `i`: turned on, from in front of that desk.
+    const tapMonitor = (i, m) => deskNear === i && turnMonitor(i, m);
 
     // The lamp striking: on, stuttering, then steady.
     const struck = (u) => { for (let i = 0; i < STRIKE.length; i++) if (u < STRIKE[i][0]) return STRIKE[i][1]; return 1; };
@@ -908,11 +936,11 @@
       for (let i = 0; i < reels.length; i++) reels[i].rotation.x -= SHOW.reel * motor * dt;
       glow.glow = 0.25 + 1.4 * lamp;
       beam.visible = lamp > 0.3 && unroll > 0.99;
-      // The screen: its case as far down as it is let, on its rods from the gantry, the cloth stretched under it as far
+      // The screen: its case as far down as it is let, on its rods from the roof, the cloth stretched under it as far
       // as it has unrolled, the batten at its foot.
       const caseY = SC.stow + (SC.y - SC.stow) * hoist, drop = SC.drop * unroll;
       frame.position.y = caseY;
-      rods.scale.y = S.chord - caseY - 0.15;
+      rods.scale.y = S.roof - caseY - 0.15;
       cloth.position.y = caseY - S.under;
       cloth.visible = drop > 0.02;
       cloth.scale.y = Math.max(0.001, drop);
@@ -952,15 +980,21 @@
         else { grain[shownGrain].position.x = pic.x + wx; grain[shownGrain].position.y = pic.y + wy; }
       }
       light.level = lit ? lamp * shine * (1 - flick) : 0;
-      // The desks: each its next picture once that has loaded, on both its monitors; and the next desk's painted.
+      // The desks: each monitor its pair's picture, turned on by however many presses it has had, once that has
+      // loaded, blank while it blinks; and the next desk's painted.
       for (let i = 0; i < desks.length; i++) {
-        const d = desks[i], n = Math.floor((clock + d.offset) / DESK_HOLD) % d.steps.length, next = d.pics[n];
-        if (n === d.shown || next.length < d.nodes.length) continue;
-        let loaded = true;
-        for (let m = 0; m < next.length; m++) loaded = loaded && ready(next[m]);
-        if (!loaded) continue;
-        d.shown = n;
-        for (let m = 0; m < d.nodes.length; m++) { d.nodes[m].geometry = next[m]; d.nodes[m].visible = true; }
+        const d = desks[i], n = Math.floor((clock + d.offset) / DESK_HOLD);
+        for (let m = 0; m < d.nodes.length; m++) {
+          const node = d.nodes[m];
+          if (d.blink[m] > 0) { d.blink[m] -= dt; node.visible = false; continue; }
+          const k = (n + d.turned[m]) % d.steps.length, pic = d.pics[k][m];
+          if (k === d.at[m] && node.visible) continue;
+          if (!pic) { paintDesk(d, k); continue; }
+          if (!ready(pic)) continue;
+          d.at[m] = k;
+          node.geometry = pic;
+          node.visible = true;
+        }
       }
       if (painting < toPaint.length) { paintDesk(toPaint[painting], toPaint[painting + 1]); painting += 2; }
       // The terminals: their pages in turn, or NOW SHOWING while the show runs.
@@ -981,7 +1015,8 @@
       if (driven) {
         const p = driven.root.position;
         near = reaches(p.x, p.z, p.y - driven.baseY);
-      } else near = -1;
+        deskNear = near < 0 ? deskReaches(p.x, p.z, p.y - driven.baseY) : -1;
+      } else near = deskNear = -1;
     };
 
     // The picture's light on the floor in front of it, first after the scene's fixed ones; how many it wrote.
@@ -995,13 +1030,15 @@
     const liveGeometry = (set) => { for (const g of live) set.add(g); };
 
     return {
-      update, useNear, actLabel, press, lights, liveGeometry, nodes: kiosks.map((k) => k.node), projector: head, screen: frame,
+      update, useNear, actLabel, press, tapMonitor, lights, liveGeometry, nodes: kiosks.map((k) => k.node), projector: head, screen: frame,
+      monitors: desks.map((d) => d.nodes),
       get near() { return near >= 0; },
       debug: {
         press, get phase() { return phase; }, get index() { return index; }, get frame() { return film && film[index] ? film[index].key : null; }, get film() { return film ? film.map((e) => e.key) : []; },
         // Skip to frame `i` of the film, or with none the next.
         skip: (i) => { if (phase === "film") { index = Math.max(0, Math.min(film.length - 1, i === undefined ? index + 1 : i)) - 1; advance(); } return index; },
-        get desks() { return desks.map((d) => (d.shown < 0 ? null : d.steps[d.shown].map(([kind, v]) => `${kind}:${v}`).join(" | "))); },
+        get desks() { return desks.map((d) => d.at.map((k, m) => (k < 0 ? null : d.steps[k][m].join(":"))).join(" | ")); },
+        get deskNear() { return deskNear; }, turnMonitor,
         get hoist() { return hoist; }, get unroll() { return unroll; }, get lamp() { return lamp; }, get light() { return light.level; }, get clock() { return clock; }, set clock(v) { clock = v; }
       }
     };

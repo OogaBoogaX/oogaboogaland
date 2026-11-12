@@ -17,9 +17,9 @@ spots, then, once the forest is full, onto the chamber floor under the lake,
 taken in one fixed order (the Nth overflow sleeper takes the Nth spot) and
 searched once a page only as far as sleepers need them. The search uses the
 rainforest's original scenery transforms, so passing players and shaking trees
-cannot change the cached order. Each visit keeps its own bed reservations. A signed-in visitor
-arrives awake beside the pile regardless of activity, without changing their
-contribution timestamps.
+cannot change the cached order. Each visit keeps its own bed reservations. A visitor
+arrives awake where they last stood in this browser, or round the pile on a first
+visit, regardless of activity and without changing their contribution timestamps.
 
 Roster activity labels use yellow **clankin**, orange **chillin**, and gray **sleepin**.
 A separate dot before the name is green when `cave.humanControlled` is true and gray

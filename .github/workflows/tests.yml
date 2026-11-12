@@ -32,5 +32,12 @@ jobs:
           CHARACTER_SNAPSHOT_BASE: ${{ github.event.pull_request.base.sha }}
       - name: Run the unit lane
         run: npm run test:unit
-      - name: Check shared Cloud Hopper replay publication and playback
-        run: node --test worker/test/cloud-hopper-replays.test.mjs worker/test/highscores.test.mjs
+      # The Worker's whole suite, as the Cloudflare deploys run it, so a break shows on the pull request rather than at
+      # deploy. Its checks import what build:site writes (the cast and Tess's fact sheet, worker/src/*.gen.json) and the
+      # Worker's own locked dependencies (the Anthropic SDK).
+      - name: Build and stage site
+        run: npm run build:site
+      - name: Install Worker dependencies
+        run: npm ci --prefix worker --omit=dev
+      - name: Worker checks
+        run: node --test "worker/test/*.test.mjs"

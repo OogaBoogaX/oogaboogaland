@@ -542,9 +542,8 @@
       result.x = Math.max(0, Math.min(width, result.x)); result.y = Math.max(0, Math.min(height, result.y));
       return result;
     };
-    // Warm small meshes within the idle budget. A large synchronous BVH build
-    // cannot be interrupted, so leave it to the exact on-demand path rather than
-    // starting seconds of work in an idle callback between scene frames.
+    // Optional warming shares the frame with input and rendering. Cap each
+    // callback's budget at two milliseconds; larger trees yield at checkpoints.
     let warming = 0, msPerTriangle = 0.01;
     const warm = () => {
       if (warming || typeof requestIdleCallback === "undefined") return;
@@ -558,7 +557,10 @@
       collect(root);
       const slice = (deadline) => {
         warming = 0;
+        const until = performance.now() + Math.min(2, deadline.timeRemaining());
         while (pending.length) {
+          const remaining = Math.min(deadline.timeRemaining(), until - performance.now());
+          if (remaining <= 0) break;
           const geometry = pending[pending.length - 1];
           if (meshes.has(geometry)) { pending.pop(); continue; }
           const existing = builds.get(geometry);
@@ -570,19 +572,17 @@
             }
           }
           const estimated = triangles * msPerTriangle + 1;
-          if (estimated > 8 || existing) {
+          if (estimated > remaining || existing) {
             // Ownership wrappers retain meshOf's exact source-sharing checks.
             if (geometry.matrixSourceGeometry) { pending.pop(); continue; }
-            if (deadline.timeRemaining() < 2) break;
             const work = startMesh(geometry);
             work.triangles = triangles;
-            work.slice.until = performance.now() + Math.min(4, deadline.timeRemaining() - 1);
+            work.slice.until = until;
             const next = work.steps.next();
             if (next.done) { meshes.set(geometry, next.value); builds.delete(geometry); pending.pop(); }
             else break;
             continue;
           }
-          if (estimated > deadline.timeRemaining()) break;
           const start = performance.now();
           meshOf(geometry);
           pending.pop();

@@ -52,9 +52,9 @@
   };
   // DSB Land's stray homes are the same on every visit: laid out on the first and kept for the page's life.
   let homes=null;
-  // `groundAt`, `walkable` and `flyable` are the scene's own queries, `reviewed` whether a restored login view already
-  // stands where a review link would put it.
-  const attach=({root,crew,input,hud,fx,pilot,interiors,vacancies,land,groundAt,walkable,flyable,camera,renderer,world,reviewed})=>{
+  // `groundAt`, `walkable` and `flyable` are the scene's own queries.
+  const attach=({root,crew,input,hud,fx,pilot,interiors,vacancies,land,groundAt,walkable,flyable,camera,renderer,world})=>{
+    let reviewed=false;
     const store=load(),DOG={bodyRadius:.3},LEVEL=BL.dsbCoast.LEVEL;
     const dry=(x,z)=>!!interiors.active||land.groundAt(x,z)>LEVEL+.05;
     const clear=(ax,az,bx,bz,y)=>dry(bx,bz)&&walkable(ax,az,bx,bz,y,.6,DOG);

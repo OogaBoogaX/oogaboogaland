@@ -360,7 +360,10 @@
       if (!panel.open) return;
       panel.close();
       panel.hidden = true;
-      if (previousFocus?.isConnected && typeof previousFocus.focus === "function") previousFocus.focus({ preventScroll: true });
+      // Starting a run hands the keyboard to the world. Restoring a sheet control here makes
+      // controls.uiKey consume Escape and movement throughout the ascent.
+      const focus = (phase === "lifting" || phase === "ready" || phase === "running" ? document.getElementById("scene") : null) || previousFocus;
+      if (focus?.isConnected && typeof focus.focus === "function") focus.focus({ preventScroll: true });
       previousFocus = null;
     };
     let sharedScores = null, submissions = [], sharedStatus = "loading", localScores = [], localLatest = null;

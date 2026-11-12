@@ -6,8 +6,11 @@
   const THROW_CHARGE_TIME = 1, THROW_MIN_POWER = 1 / 3, THROW_RESULT_TIME = 0.35;
   const PITCH_LIMIT = Math.PI / 2 - 0.0001, ZOOM_PAUSE = 220;
   const create = ({ canvas, camera, renderer, pilot, hud, clankers, input = null, constrainCamera = null,
-    reticleTarget = null, sightClear = null, aimCeiling = null, groundAt = null, grabOoga = null, releaseOoga = null, mayPossess = null, combatOnly = null, birdsEyeMin = 5, maxDistance = 32 }) => {
+    reticleTarget = null, liveTarget = null, sightClear = null, aimCeiling = null, groundAt = null, grabOoga = null, releaseOoga = null, mayPossess = null, combatOnly = null, birdsEye = null, birdsEyeMin = 5, maxDistance = 32 }) => {
     const orbit = pilot.orbit, cameraHandoff = pilot.cameraHandoff, target = { x: 0, y: 0, z: 0 };
+    // Combat goes overhead only where the scene offers it (`birdsEye`), as an Ooga's does (pilot.js `noOverhead`);
+    // elsewhere it keeps to the shoulder and first person, and a double right-click there does nothing.
+    const overheadOk = () => BL.pilot.BIRDS_EYE_FIXTURE || !!birdsEye?.();
     const smashMin = clankers.smashPower(0, true), smashBase = clankers.smashPower(0, false);
     const smashMax = clankers.smashPower(1, false), smashRate = (smashMax - smashBase) / POUND_CHARGE_TIME;
     const command = { x: 0, z: 0, climbAxis: 0, climbSide: 0, heading: NaN, jumpHeld: false, jumpPressed: false, run: false };
@@ -38,7 +41,7 @@
     let overheadEntry = false;
     let targetWait = 0, rightAt = -Infinity, rightDownAt = -Infinity, rightTravel = 0;
     let carryRight = false, rightPointer = -1, rightX = 0, rightY = 0, rightLastX = 0, rightLastY = 0;
-    let combatTooltipEntry = null, combatTooltipText = "";
+    let combatTooltipEntry = null, combatTooltipText = "", combatTooltipNoDot = false;
     let zoomAt = -Infinity, zoomDirection = 0, zoomStopped = false, zoomGesture = null;
     const clearRight = () => { rightAt = rightDownAt = -Infinity; rightTravel = 0; carryRight = false; rightPointer = -1; };
     // Keep the selected mode as intent while asleep; it becomes usable on wake.
@@ -48,10 +51,14 @@
       headHidden = null;
     };
     const setCombatTooltip = (entry) => {
+      // A ghost gorilla (npc-ghosts.js) shows its online dot, as its roster row does; one turning ghost or solid under
+      // the crosshair changes the dot without the target changing.
+      const noDot = !!entry && !entry.ghostTrack;
       if (entry !== combatTooltipEntry) combatTooltipText = entry ? `🦍 ${entry.owner.traits.display}` : "";
-      else if (!entry || !hud.el.tooltip.hidden && hud.el.tooltipText.textContent === combatTooltipText) return;
+      else if (!entry || noDot === combatTooltipNoDot && !hud.el.tooltip.hidden && hud.el.tooltipText.textContent === combatTooltipText) return;
       combatTooltipEntry = entry;
-      if (entry) hud.tooltip.show(combatTooltipText, 0, 0, entry, true);
+      combatTooltipNoDot = noDot;
+      if (entry) hud.tooltip.show(combatTooltipText, 0, 0, entry, noDot);
       else hud.tooltip.hide();
     };
     const resetReticle = () => {
@@ -111,16 +118,22 @@
       targetWait = 0.05;
       viewRay();
       let type = "none";
-      let tooltipEntry = null;
+      let tooltipEntry = null, limit = 60;
       if (input && input.weaponTargets.ray(hit, ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, 60, null, acceptTarget, true)) {
         const near = Math.max(0, hit.distance - 0.035);
+        limit = hit.distance;
         if (!sightClear || sightClear(ray.ox, ray.oy, ray.oz, ray.ox + ray.dx * near, ray.oy + ray.dy * near, ray.oz + ray.dz * near, hit.node, true)) {
           const kind = hit.owner.kind;
-          type = kind === "clanker" || kind === "agent" ? "friendly" : kind === "caveman" ? hit.type
+          // An NPC ghost track (npc-ghosts.js) is a roster NPC drawn while its player drives a separate body: never a target.
+          const ghost = (kind === "clanker" || kind === "caveman") && hit.owner.cave.ghostTrack;
+          type = ghost ? "none" : kind === "clanker" || kind === "agent" ? "friendly" : kind === "caveman" ? hit.type
             : kind === "crate" ? "object" : reticleTarget ? reticleTarget(hit) : "none";
           if (isCombat() && kind === "clanker") tooltipEntry = hit.owner.entry;
         }
       }
+      // A live remote player in front of what was found, or anywhere along the ray when nothing was (the scene's
+      // `liveTarget`, which never tests the visitor's own body), is a friend, and the name behind it goes.
+      if (liveTarget && liveTarget(ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, limit) < limit) { type = "friendly"; tooltipEntry = null; }
       setCombatTooltip(tooltipEntry);
       if (reticle.dataset.target !== type) reticle.dataset.target = type;
     };
@@ -297,13 +310,15 @@
     };
     const possess = (entry, atBoot = false, transition = null) => {
       if (disposed || !entry || !entry.active || !entry.root.visible) return false;
-      if (entry === player) { requireCombat(); return true; }
+      // A separate body (clankers.js `separateBodies`) stands for its NPC: asking for that NPC keeps it.
+      if (entry === player || player && player.npc === entry) { requireCombat(); return true; }
       const refusal = mayPossess && mayPossess(entry);
       if (refusal) { hud.toast(refusal); return false; }
       const incoming = transition || captureControl(controlState);
       if (!player) savedNear = camera.near;
       if (player) { blurCombat(); restoreHead(); }
       if (!clankers.possess(entry)) return false;
+      entry = clankers.player;
       cameraHandoff.cancel();
       pilot.release(true);
       rebasePilot();
@@ -314,6 +329,9 @@
       combat = incoming.active && incoming.combat; focused = wasLocked = false;
       view = incoming.active ? incoming.view : "orbit";
       if (combat && view === "orbit") view = BL.pilot.combatEntryView(camera.position, entry.root.position);
+      // Overhead where none is offered comes in at the shoulder, at X's entry pitch.
+      const level = view === "birds-eye" && !overheadOk();
+      if (level) view = "shoulder";
       overheadEntry = false;
       shoulderSide = incoming.side < 0 ? -SHOULDER_SIDE : SHOULDER_SIDE;
       shoulder = view === "shoulder" ? shoulderSide : 0; peek = 0; actMode = -1;
@@ -340,7 +358,7 @@
         orbit.dist = orbit.tDist = Math.hypot(dx, dy, dz);
       } else {
         orbit.yaw = orbit.tYaw = incoming.yaw;
-        orbit.pitch = orbit.tPitch = view === "birds-eye" ? PITCH_LIMIT : incoming.pitch;
+        orbit.pitch = orbit.tPitch = view === "birds-eye" ? PITCH_LIMIT : level ? 0.42 : incoming.pitch;
         overheadHeight = Math.max(0.1, incoming.height - 0.15);
         orbit.dist = orbit.tDist = view === "first-person" ? 0 : view === "shoulder" ? SHOULDER_DISTANCE
           : view === "birds-eye" ? overheadHeight : Math.max(0.01, incoming.distance);
@@ -379,7 +397,6 @@
           updateSmashGauge();
         }
       } else if (name === "gorilla-beat") clankers.chestBeat();
-      else if (name === "mode-release") release();
       else if (name === "mode-toggle") {
         const required = !!combatOnly?.();
         if (required && combat) return true;
@@ -390,7 +407,7 @@
           // selection is still turning toward it. The camera's current aim
           // and pending orbit pitch do not change the elevation threshold.
           updateTarget();
-          entryView = BL.pilot.combatEntryView(camera.position, target);
+          entryView = overheadOk() ? BL.pilot.combatEntryView(camera.position, target) : "shoulder";
           captureControl(controlState);
           cameraHandoff.cancel();
           holdCamera(false);
@@ -421,14 +438,15 @@
       else return false;
       return true;
     };
-    // Called after the scene and HUD have had a chance to close their UI.
+    // Called after the scene and HUD have had a chance to close their UI. It frees the cursor; it never lets go of the
+    // gorilla (T goes back to its Ooga).
     const escape = () => {
       if (!player) return false;
       if (focused || lockPending || document.pointerLockElement === canvas || performance.now() - unlockedAt < 100) {
         blurCombat();
         return true;
       }
-      return release();
+      return false;
     };
     const onKeyDown = (event) => {
       if (!player || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -601,7 +619,7 @@
         clearRight();
       } else if (recapture) focusCombat();
       else if (!(mouseButtons & ~2)) {
-        if (now - rightAt <= 350) {
+        if (now - rightAt <= 350 && (!combat || overheadOk())) {
           setView(combat ? "birds-eye" : "orbit");
           clearRight();
         } else { rightDownAt = now; rightTravel = 0; }
@@ -682,6 +700,8 @@
       let next = view, nextDistance = null;
       if (view === "first-person" && direction > 0) next = "shoulder";
       else if (view === "shoulder") {
+        // Combat that may not go overhead stops at the shoulder.
+        if (direction > 0 && combat && !overheadOk()) { zoomStopped = true; return true; }
         next = direction < 0 ? "first-person" : combat ? "birds-eye" : "orbit";
         if (direction > 0) nextDistance = clamp(Math.max(SHOULDER_DISTANCE, orbit.tDist) * factor, SHOULDER_DISTANCE, maxDistance);
       }
@@ -848,7 +868,8 @@
       const planted = shoulderCombat && axes.peek && !run;
       peek = damp(peek, planted ? axes.x * 0.34 : 0, 14, dt);
       const moveX = planted ? 0 : axes.x, moveY = planted ? 0 : axes.y;
-      const turn = isCombat() ? clamp(axes.yaw + axes.orbitYaw, -1, 1) : axes.yaw;
+      // A pad's look speed lets `axes.yaw` pass 1; Q and E take only the room left, as they did at 1.
+      const turnMax = Math.max(1, Math.abs(axes.yaw)), turn = isCombat() ? clamp(axes.yaw + axes.orbitYaw, -turnMax, turnMax) : axes.yaw;
       if (turn || axes.pitch || planted) viewChanged = true;
       moving = Math.hypot(moveX, moveY) > 0.05;
       if (turn || axes.pitch || planted || moving) shoulderPointActive = carryShoulderAim = false;
@@ -1102,7 +1123,7 @@
       }
       if (!touch) {
         if (isCombat()) rows.push(H.row(["tab"], "Release mouse cursor"));
-        rows.push(H.row(BL.controls.shortcutKeys("escape"), "Release cursor / let go"));
+        rows.push(H.row(BL.controls.shortcutKeys("escape"), "Release cursor"));
       }
       return { title: "Island · Controlling a gorilla", rows };
     };

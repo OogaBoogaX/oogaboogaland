@@ -184,7 +184,7 @@
   // what it missed after the last donation it played; a donation already played is skipped. `state.open` is the
   // API's last word on whether donations are open, and `state.network` the network it takes payments on, each null
   // before it has said. `state.tally` is its latest tally, null before the first.
-  const SOCKET_MIN = 1000, SOCKET_MAX = 60000, PLAYED = 64, RECENT_MAX = 10;
+  const SOCKET_MIN = 1000, SOCKET_MAX = 60000, PLAYED = 64, RECENT_MAX = 20, RECENT_KEEP = 2 * RECENT_MAX;
   const state = { open: null, network: null, connected: false, attempts: 0, donations: 0, tally: null, board: null, boardSats: null, recent: null, limits: null,
     accounting: null, pile: null, pileLive: false, recentReceipts: null, receiptCursor: null, caughtUp: false, resyncs: 0, account: null, history: null, receipts: 0 };
   const limitsOf = (v) => v && Number.isSafeInteger(v.minSats) && v.minSats > 0
@@ -211,13 +211,27 @@
     return { ...donation, bananas: d.bananas, verified: d.verified === true,
       seq: Number.isSafeInteger(d.seq) && d.seq > 0 ? d.seq : 0 };
   };
+  // The recent list shows `RECENT_MAX` rows, newest first. A list keeps the newest that many of every amount and the
+  // newest that many at or above the message bar, so it fills whichever way its checkbox is set: `RECENT_KEEP` at most.
+  // The API's and the demo's lists alike, trimmed in place.
+  const keepRecent = (list) => {
+    const bar = messageMinSats();
+    let every = 0, over = 0, kept = 0;
+    for (const item of list) {
+      const big = item.sats >= bar;
+      if (every < RECENT_MAX || big && over < RECENT_MAX) list[kept++] = item;
+      every++;
+      if (big) over++;
+    }
+    list.length = kept;
+  };
   const insertRecent = (list, entry) => {
     const old = list.findIndex((item) => item.id === entry.id);
     if (old >= 0) list.splice(old, 1);
     let at = 0;
     while (at < list.length && (entry.seq && list[at].seq ? list[at].seq > entry.seq : list[at].at > entry.at)) at++;
     list.splice(at, 0, entry);
-    if (list.length > RECENT_MAX) list.length = RECENT_MAX;
+    keepRecent(list);
   };
   const boardOf = (entries) => entries.slice(0, 256)
     .filter((e) => e && typeof e.handle === "string" && isNumber(e.bananas) && e.bananas >= 0)
@@ -664,7 +678,7 @@
           // First, so the stable sort keeps the newest ahead of rows from the same moment.
           rows.unshift(receiptRow(r, held));
           rows.sort(byReceived);
-          if (rows.length > RECENT_MAX) rows.length = RECENT_MAX;
+          keepRecent(rows);
         }
         state.recentReceipts = rows;
       }
@@ -721,7 +735,7 @@
       notify();
     } else if (data.type === "recent" && Array.isArray(data.entries)) {
       const recent = [];
-      for (const raw of data.entries.slice(0, RECENT_MAX)) {
+      for (const raw of data.entries.slice(0, RECENT_KEEP)) {
         const entry = recentOf(raw);
         if (entry) insertRecent(recent, entry);
       }
@@ -733,6 +747,9 @@
         if (entry.seq > newestSeq && !recent.some((item) => item.id === entry.id)) insertRecent(recent, entry);
       }
       state.recent = recent;
+      // Where a reconnect asks to resume from, even on a page that has heard no donation yet: a payment made while the
+      // socket was down (a phone away in its wallet app, a deploy) is then replayed to the kiosk waiting on it.
+      if (!after && recent.length) after = recent[0].id;
       notify();
     } else if (data.type === "pile") {
       // A receipt-era pile moves only forward by its revision, across reconnects too: an equal one confirms the pile
@@ -763,7 +780,7 @@
       // Only a receipt the snapshot shows already credited once is marked animated: one listed before any credit (none
       // is today; bananapayserver lists only receipts with a first credit) can still animate its live first credit.
       const rows = [], held = state.recentReceipts || [];
-      for (const raw of data.entries.slice(0, RECENT_MAX)) {
+      for (const raw of data.entries.slice(0, RECENT_KEEP)) {
         const r = receiptOf(raw);
         if (!r) continue;
         if (r.firstCreditedSeq !== null) {
@@ -778,7 +795,7 @@
         keep(revisions, r.id, r.revision, REVISIONS);
         if (listed(r)) rows.push(receiptRow(r, held.find((row) => row.id === r.id)));
       }
-      rows.sort(byReceived);
+      rows.sort(byReceived); keepRecent(rows);
       state.recentReceipts = rows;
       notify();
     } else if (data.type === "replay" && typeof data.complete === "boolean" && (data.through === null || isCount(data.through))
@@ -964,5 +981,5 @@
   };
   BL.donations = { config, get real() { return real; }, get testNetwork() { return testNetwork(); }, get messageMinSats() { return messageMinSats(); }, get generation() { return generation; },
     state, useOrigin, createRequest, invoice, note, onchain, waitFor, waitingOn, waited, receivedOwnInvoice, ownReceipt, subscribe, subscribeState,
-    view, refresh, more, reopen, historyPage, setAccount, showing, streamCurrent: freshNow, payingAddress, lightningCode, payableSats, sanitize, carried, HANDLE_MAX, MESSAGE_MAX, MESSAGE_MIN_SATS, RECENT_MAX };
+    view, refresh, more, reopen, historyPage, setAccount, showing, streamCurrent: freshNow, payingAddress, lightningCode, payableSats, sanitize, carried, keepRecent, HANDLE_MAX, MESSAGE_MAX, MESSAGE_MIN_SATS, RECENT_MAX, RECENT_KEEP };
 })();

@@ -2,7 +2,7 @@
 //
 // The registry behind every object outline. Camera silhouettes are baked once per vertex array and never
 // written again; the queries are exact local-space visibility, proximity, occlusion and actor tests:
-// `register`, `collect`, `refresh`, `cameraClear`, `perceptionClear`, `perceived`, `concealed`, `distance`,
+// `register`, `body`, `collect`, `refresh`, `cameraClear`, `perceptionClear`, `perceived`, `concealed`, `distance`,
 // `inView`, `actorVisible`, `ownerBoundaryAt`. Providers (the pile, the platform, the mirror) join the same
 // registry through `create({ providers })`. Faces tagged `visibility: false`
 // are render-only decoration, omitted from all registry queries. sight-guides.js draws the result.
@@ -13,7 +13,10 @@
   // A bake reads only verts and each face's index list and is never written after build; shared vertex arrays
   // reuse one bake per page instead of per registry.
   const bakes = new WeakMap();
-  const create = ({ roots, crew, actorRoots = [], exclude = [], providers = [], propsBlockActor = true, perceptionThrough = null }) => {
+  // Scene coordinates and transforms are bounded. The fixed-arity norm avoids
+  // the temporary numeric arguments in Chrome's variadic hypot hot path.
+  const length3 = (x, y, z) => Math.sqrt(x * x + y * y + z * z);
+  const create = ({ roots, crew, actorRoots = [], bodies: initialBodies = [], exclude = [], providers = [], propsBlockActor = true, perceptionThrough = null }) => {
     const excluded = new Set(exclude), geometries = new Map(), registered = [], seen = new Set(), entries = new Map(), ownerEntries = new Map(), ownerGroups = [];
     const aliases = new Map(), providerOwners = new Map(), descriptorUsers = new Map();
     for (const provider of providers) {
@@ -384,8 +387,9 @@
       }
       return group;
     };
-    const registerNode = (node, owner = node, character = -1) => {
-      if (node.sightHidden) return;
+    // `force` takes a separate body's own sightHidden root (and bed gear); its sightHidden effects below stay out.
+    const registerNode = (node, owner = node, character = -1, force = false) => {
+      if (node.sightHidden && !force) return;
       seen.add(node);
       if (aliases.has(node)) owner = aliases.get(node);
       if (character < 0 && characterRoots.has(owner)) character = characterRoots.get(owner);
@@ -486,10 +490,73 @@
       if (!characterRoots.has(node)) characterRoots.set(node, characterIndex++);
       registerNode(node, node, characterRoots.get(node));
     }
+    // Separate bodies (crew.js/clankers.js `separateBodies`): the driven Ooga or gorilla, a character as a roster one
+    // is, though never in the roster. Its root stays sightHidden so no scenery pass takes it; `body` registers it while
+    // it exists and forgets it before it is detached. A body made before this registry is passed in as `bodies`.
+    const bodies = new Set();
+    const registerBody = (body) => {
+      const root = body.root, character = characterRoots.get(root);
+      if (body.sleepWeapons) registerNode(body.sleepWeapons, root, character, true);
+      registerNode(root, root, character, true);
+      if (body.headOpen) reserveHead(body);
+    };
+    const addBody = (body) => {
+      if (!body || !body.root || bodies.has(body)) return false;
+      bodies.add(body);
+      if (!characterRoots.has(body.root)) characterRoots.set(body.root, characterIndex++);
+      registerBody(body);
+      return true;
+    };
+    for (const body of initialBodies) addBody(body);
     for (const node of roots) registerNode(node);
     for (const cave of crew.cavemen.values()) reserveHead(cave);
     resize();
     const register = (node, owner = node, character = -1) => { registerNode(node, owner, character); resize(); };
+    // Bakes count as they are made; after descriptors are pruned the metrics are taken again from those still held.
+    const measureBakes = () => {
+      stats.geometries = geometries.size; stats.triangles = stats.triangleBytes = stats.samples = 0;
+      for (const geometry of geometries.values()) if (geometry.ready) { stats.triangles += geometry.triangleIndices.length / 3; stats.triangleBytes += geometry.triangleIndices.byteLength; stats.samples += geometry.samples.length / 3; }
+    };
+    // Every entry the body's root owns goes, including one whose node left the body before this (only a refresh drops
+    // those otherwise). A descriptor stays while another entry or head still holds it, by identity: a ghost track's
+    // nodes wear their painted copies between frames, so their current geometry proves nothing.
+    const forgetBody = (body) => {
+      const root = body.root, dropped = new Set();
+      const unsee = (node) => { seen.delete(node); for (const child of node.children) unsee(child); };
+      unsee(root);
+      if (body.sleepWeapons) unsee(body.sleepWeapons);
+      if (body.headOpen) { dropped.add(geometries.get(body.headOpen)); dropped.add(geometries.get(body.headClosed)); }
+      let kept = 0;
+      for (let i = 0; i < registered.length; i++) {
+        const entry = registered[i];
+        if (entry.owner === root) {
+          dropped.add(entry.geometry); dropped.add(entry.boundsGeometry);
+          setEntryGeometry(entry, "geometry", null); setEntryGeometry(entry, "boundsGeometry", null);
+          entries.delete(entry.node); seen.delete(entry.node);
+        } else registered[kept++] = entry;
+      }
+      registered.length = kept;
+      for (let i = 0; i < kept; i++) { dropped.delete(registered[i].geometry); dropped.delete(registered[i].boundsGeometry); }
+      const keepHeads = (cave) => { dropped.delete(geometries.get(cave.headOpen)); dropped.delete(geometries.get(cave.headClosed)); };
+      for (const cave of crew.cavemen.values()) keepHeads(cave);
+      for (const other of bodies) if (other.headOpen) keepHeads(other);
+      for (const [geometry, descriptor] of geometries) if (dropped.has(descriptor)) {
+        descriptorUsers.get(descriptor)?.clear(); descriptorUsers.delete(descriptor); geometries.delete(geometry);
+      }
+      measureBakes();
+      const group = ownerEntries.get(root);
+      if (group) { ownerEntries.delete(root); ownerGroups.splice(ownerGroups.indexOf(group), 1); }
+      characterRoots.delete(root);
+      contoursPending = false; contourActor = contourRetained = null; contourRetainedCount = 0;
+      cameraPropEntry = cameraPropSource = null; cameraPropFace = cameraPropStamp = -1; cameraPropCount = 0;
+      emissionMembership.fill(null); emissionActor = null;
+    };
+    const body = (actor, on) => {
+      if (on ? !addBody(actor) : !actor || !bodies.delete(actor)) return false;
+      if (!on) forgetBody(actor);
+      resize();
+      return true;
+    };
     const visible = (node) => {
       if (!node.parent) return false;
       for (let p = node; p; p = p.parent) { if (!p.visible) return false; if (p === sceneRoot) return true; }
@@ -669,7 +736,7 @@
       if (camera) {
         BL.math.mat4.lookAt(cameraView, camera.position, camera.target, camera.up || worldUp);
         near = camera.near; far = camera.far; tanY = Math.tan(camera.fov / 2); tanX = tanY * aspect;
-        planeX = Math.hypot(1, tanX); planeY = Math.hypot(1, tanY);
+        planeX = Math.sqrt(1 + tanX * tanX); planeY = Math.sqrt(1 + tanY * tanY);
       }
       for (let n = 0; n < registered.length; n++) {
         const entry = registered[n], node = entry.node, geometry = geometries.get(node.geometry), w = node.world;
@@ -678,7 +745,7 @@
         let worldChanged = false;
         for (let i = 0; i < 16; i++) if (entry.world[i] !== w[i]) { worldChanged = true; entry.world[i] = w[i]; }
         // Scale and vertical bounds follow the matrix and geometry only; visibility is still read every frame.
-        if (worldChanged) { entry.scaleX = Math.hypot(w[0], w[1], w[2]); entry.scaleY = Math.hypot(w[4], w[5], w[6]); entry.scaleZ = Math.hypot(w[8], w[9], w[10]); }
+        if (worldChanged) { entry.scaleX = length3(w[0], w[1], w[2]); entry.scaleY = length3(w[4], w[5], w[6]); entry.scaleZ = length3(w[8], w[9], w[10]); }
         if (worldChanged || entry.boundsGeometry !== geometry) {
           const b = geometry && geometry.sphere, p = b && b.center;
           entry.centerY = b ? w[1] * p[0] + w[5] * p[1] + w[9] * p[2] + w[13] : 0;
@@ -718,7 +785,7 @@
             entry.hz = Math.abs(w[2]) * hx + Math.abs(w[6]) * hy + Math.abs(w[10]) * hz;
             if (worldMinY !== -Infinity || worldMaxY !== Infinity) {
               const low = Math.max(entry.y - entry.hy, worldMinY), high = Math.min(entry.y + entry.hy, worldMaxY);
-              entry.y = (low + high) / 2; entry.hy = (high - low) / 2; entry.radius = Math.hypot(entry.hx, entry.hy, entry.hz);
+              entry.y = (low + high) / 2; entry.hy = (high - low) / 2; entry.radius = length3(entry.hx, entry.hy, entry.hz);
             }
           }
         }
@@ -731,7 +798,10 @@
         const dx = entry.x - ex, dy = entry.y - ey, dz = entry.z - ez;
         const group = entry.group;
         group.active = true;
-        if (Math.hypot(dx, dy, dz) - entry.radius <= RANGE) group.near = true;
+        // Once one piece establishes relevance the owner's remaining pieces
+        // need no further range tests. Keep the exact norm at the boundary.
+        if (!group.near && Math.abs(dx) <= RANGE + entry.radius && Math.abs(dy) <= RANGE + entry.radius
+          && Math.abs(dz) <= RANGE + entry.radius && length3(dx, dy, dz) - entry.radius <= RANGE) group.near = true;
       }
       let nearCount = 0, nearChanged = false;
       for (let n = 0; n < ownerGroups.length; n++) {
@@ -749,7 +819,7 @@
       let guideRange = RANGE;
       for (let n = 0; n < occluderCount; n++) {
         const entry = occluders[n];
-        if (entry.group.near) guideRange = Math.max(guideRange, Math.hypot(entry.x - ex, entry.y - ey, entry.z - ez) + entry.radius);
+        if (entry.group.near) guideRange = Math.max(guideRange, length3(entry.x - ex, entry.y - ey, entry.z - ez) + entry.radius);
       }
       for (let n = 0; n < occluderCount; n++) {
         const entry = occluders[n];
@@ -912,8 +982,8 @@
         const e = group[n];
         if (!e.visible) continue;
         const dx = x - e.x, dy = y - e.y, dz = z - e.z;
-        const box = Math.hypot(Math.max(0, Math.abs(dx) - e.hx), Math.max(0, Math.abs(dy) - e.hy), Math.max(0, Math.abs(dz) - e.hz));
-        nearest = Math.min(nearest, Math.max(0, box, Math.hypot(dx, dy, dz) - e.radius));
+        const box = length3(Math.max(0, Math.abs(dx) - e.hx), Math.max(0, Math.abs(dy) - e.hy), Math.max(0, Math.abs(dz) - e.hz));
+        nearest = Math.min(nearest, Math.max(0, box, length3(dx, dy, dz) - e.radius));
       }
       if (group && group.providerActive) nearest = Math.min(nearest, group.provider.distance(x, y, z));
       return nearest;
@@ -1754,6 +1824,10 @@
         visit(cave.root);
         if (cave.sleepWeapons) visit(cave.sleepWeapons);
       }
+      for (const body of bodies) {
+        visit(body.root);
+        if (body.sleepWeapons) visit(body.sleepWeapons);
+      }
       for (let i = registered.length - 1; i >= 0; i--) if (!live.has(registered[i].node)) {
         const entry = registered[i];
         setEntryGeometry(entry, "geometry", null); setEntryGeometry(entry, "boundsGeometry", null);
@@ -1770,14 +1844,18 @@
         registerNode(cave.root, cave.root, characterRoots.get(cave.root));
         wanted.add(cave.headOpen); wanted.add(cave.headClosed);
       }
+      // A body's head keeps both its open and closed descriptors, as a roster head does.
+      for (const body of bodies) {
+        registerBody(body);
+        if (body.headOpen) { wanted.add(body.headOpen); wanted.add(body.headClosed); }
+      }
       for (const node of roots) registerNode(node);
       for (const cave of crew.cavemen.values()) reserveHead(cave);
       for (const geometry of geometries.keys()) if (!wanted.has(geometry)) {
         const descriptor = geometries.get(geometry);
         descriptorUsers.get(descriptor)?.clear(); descriptorUsers.delete(descriptor); geometries.delete(geometry);
       }
-      stats.geometries = geometries.size; stats.triangles = stats.triangleBytes = stats.samples = 0;
-      for (const geometry of geometries.values()) if (geometry.ready) { stats.triangles += geometry.triangleIndices.length / 3; stats.triangleBytes += geometry.triangleIndices.byteLength; stats.samples += geometry.samples.length / 3; }
+      measureBakes();
       resize();
       stats.candidates = stats.occluders = stats.cameraOccluders = stats.nearOwners = 0;
     };
@@ -1785,7 +1863,7 @@
       contoursPending = false; contourActor = contourRetained = null; contourRetainedCount = 0;
       for (const users of descriptorUsers.values()) users.clear();
       descriptorUsers.clear();
-      registered.length = ownerGroups.length = 0; seen.clear(); entries.clear(); ownerEntries.clear(); aliases.clear(); providerOwners.clear(); geometries.clear(); characterRoots.clear();
+      registered.length = ownerGroups.length = 0; seen.clear(); entries.clear(); ownerEntries.clear(); aliases.clear(); providerOwners.clear(); geometries.clear(); characterRoots.clear(); bodies.clear();
       cameraCoverEntry = cameraCoverSource = null; cameraCoverFace = -1;
       cameraPropEntry = cameraPropSource = null; cameraPropFace = cameraPropStamp = -1; cameraPropCount = 0;
       ignoredPerceptionOwner = null;
@@ -1796,7 +1874,7 @@
       stats.geometries = stats.registered = stats.candidates = stats.occluders = stats.cameraOccluders = stats.triangles = stats.triangleBytes = stats.samples = stats.owners = stats.nearOwners = 0;
       stats.boundaryGridBytes = stats.boundaryGridReferences = 0;
     };
-    return { collect, clear, perceptionClear, cameraClear, cameraBoundsState, perceived, concealed, distance, inView, getProvider, ownerClear, actorVisible, actorFullyVisible, ownerBoundaryAt, register, refresh, dispose, stats, result };
+    return { collect, clear, perceptionClear, cameraClear, cameraBoundsState, perceived, concealed, distance, inView, getProvider, ownerClear, actorVisible, actorFullyVisible, ownerBoundaryAt, register, body, refresh, dispose, stats, result };
   };
   BL.objectGuides = { create };
 })();

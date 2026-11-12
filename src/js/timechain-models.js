@@ -1,4 +1,4 @@
-// Timechain Sphere: the painted ball off the southwest rim, its bridge, and the one doorway into its nine rooms. The
+// Timechain Sphere: the painted ball off the southwest rim, its bridge, and the one doorway into its ten rooms. The
 // island keeps only the outside: the shell, the doors whose outer faces carry the ball's turning bands and ₿ across
 // their seam, the keypad beside them, and a short dim passage behind them ending in a hanging curtain, which hides a
 // traveler before their room loads. The rooms themselves are a scene of their own (scene-timechain.js). A solid plug
@@ -287,7 +287,8 @@
       facing(geo, [at(a0, y0), at(a1, y0), at(a1, y1), at(a0, y1)], "#c7680d", 0.3, out);
       facing(geo, [at(a0, y0, LEAF_R - 0.03), at(a1, y0, LEAF_R - 0.03), at(a1, y1, LEAF_R - 0.03), at(a0, y1, LEAF_R - 0.03)], "#1b1b1e", 0, [-out[0], 0, -out[2]]);
     }
-    const e = 0.003 * side, r = SHELL_R + 0.04;
+    // The seam stands over everything painted on the doors, the ₿ included, so the crack shows through it as it passes.
+    const e = 0.003 * side, r = SYMBOL_RADIUS + 0.02;
     for (let j = 0; j < rows; j++) {
       const y0 = DOOR_TOP * j / rows, y1 = DOOR_TOP * (j + 1) / rows;
       facing(geo, [at(0, y0, r), at(e, y0, r), at(e, y1, r), at(0, y1, r)], "#2a1606", 0, [0, 0, 1]);
@@ -302,13 +303,13 @@
     return geo;
   });
   // The keypad flat against the right-hand post: an iron plate, a dim display, 1–9 in a 3 by 3 grid with each number
-  // picked out in the signs' pixels, and Back and Enter under them. Each button stays a separate node so the island
+  // picked out in the signs' pixels, and Back, 0 and Enter under them. Each button stays a separate node so the island
   // can pick the real control. `KEYS` is where each number sits on it.
   const KEY_PITCH = 0.105, KEYS = Array.from({ length: 9 }, (_, i) => ({ x: (i % 3 - 1) * KEY_PITCH, y: 0.1 - Math.floor(i / 3) * KEY_PITCH }));
   const keypad = cached(() => {
     const parts = [
       box({ w: 0.44, h: 0.7, d: 0.05, color: "#2a2420" }),
-      box({ w: 0.36, h: 0.09, d: 0.012, color: "#1a120a", emissive: 0.35, offset: { y: 0.25, z: 0.03 } }),
+      box({ w: 0.39, h: 0.09, d: 0.012, color: "#1a120a", emissive: 0.35, offset: { y: 0.25, z: 0.03 } }),
       ...[[-1, 1], [1, 1], [-1, -1], [1, -1]].map(([x, y]) => box({ w: 0.03, h: 0.03, d: 0.012, color: "#8a7a6a", offset: { x: x * 0.19, y: y * 0.32, z: 0.03 } }))
     ];
     return merge(...parts);
@@ -332,10 +333,169 @@
   );
   const DIGIT_KEYS = Array.from({ length: 9 }, (_, i) => keyFace(0.085, 0.085, String(i + 1), 0.011, "#3a3430", "#f2d39a"));
   const LIT_DIGIT_KEYS = Array.from({ length: 9 }, (_, i) => keyFace(0.09, 0.09, String(i + 1), 0.011, "#f7931a", "#17110a", 1));
-  const BACK_KEY = keyFace(0.15, 0.07, "BACK", 0.0072, "#4a3a30", "#f2d39a");
-  const ENTER_KEY = keyFace(0.15, 0.07, "ENTER", 0.0062, "#5a4022", "#f2d39a");
-  const READY_ENTER_KEY = keyFace(0.155, 0.075, "ENTER", 0.0062, "#ffbd53", "#17110a", 1);
-  const ROOM_LABELS = Array.from({ length: 9 }, (_, i) => keyLabel(`ROOM ${i + 1}`, 0.007, "#f7931a", 1, 0));
+  const BACK_KEY = keyFace(0.12, 0.07, "BACK", 0.0066, "#4a3a30", "#f2d39a");
+  const ENTER_KEY = keyFace(0.12, 0.07, "ENTER", 0.0055, "#5a4022", "#f2d39a");
+  const READY_ENTER_KEY = keyFace(0.125, 0.075, "ENTER", 0.0055, "#ffbd53", "#17110a", 1);
+  // The same key on the lock inside a room: plain, then ready.
+  const ACT_KEYS = { LOCK: [keyFace(0.12, 0.07, "LOCK", 0.0066, "#5a4022", "#f2d39a"), keyFace(0.125, 0.075, "LOCK", 0.0066, "#ffbd53", "#17110a", 1)],
+    UNLOCK: [keyFace(0.12, 0.07, "UNLOCK", 0.0046, "#5a4022", "#f2d39a"), keyFace(0.125, 0.075, "UNLOCK", 0.0046, "#ffbd53", "#17110a", 1)] };
+  const ZERO_KEY = keyFace(0.085, 0.07, "0", 0.0105, "#3a3430", "#f2d39a");
+  const LIT_ZERO_KEY = keyFace(0.09, 0.075, "0", 0.0105, "#f7931a", "#17110a", 1);
+  // A number over which a locked room's padlock hangs.
+  const PADLOCK = [".###.", "#...#", "#...#", "#####", "##.##", "#####"];
+  const LOCKED_KEY = merge(box({ w: 0.085, h: 0.085, d: 0.02, color: "#5a1c14", emissive: 0.35 }), (() => {
+    const geo = { verts: [], faces: [], lines: [], castShadow: false }, pixel = 0.011, z = 0.0115;
+    PADLOCK.forEach((row, r) => { for (let c = 0; c < row.length; c++) if (row[c] === "#") {
+      const x = (c - 2.5) * pixel, y = (2 - r) * pixel;
+      facing(geo, [[x, y, z], [x + pixel, y, z], [x + pixel, y + pixel, z], [x, y + pixel, z]], "#ffbd53", 0.9, [0, 0, 1]);
+    } });
+    return geo;
+  })());
+  // The keypad's small window: one canvas in the signs' 3 by 5 pixels. Words that fit stand centred; longer ones run
+  // across it and round again, repainted only when they have moved a cell.
+  const WINDOW = { w: 0.39, h: 0.09, width: 140, height: 32, dot: 4, top: 6, speed: 14, gap: 10 };
+  // One hidden digit of a PIN.
+  const WINDOW_DOT = ["000", "111", "111", "111", "000"];
+  const windowRig = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = WINDOW.width; canvas.height = WINDOW.height;
+    const ctx = canvas.getContext("2d"), glyphs = BL.hubModels.SIGN_GLYPHS, cells = WINDOW.width / WINDOW.dot, W = WINDOW.w / 2, H = WINDOW.h / 2;
+    const geometry = { verts: [-W, -H, 0, W, -H, 0, W, H, 0, -W, H, 0], faces: [{ i: [0, 1, 2, 3], color: [255, 255, 255], emissive: 0.9 }], lines: [], castShadow: false };
+    geometry.imageSurface = { canvas, version: 0, rect: [-W, -H, WINDOW.w, WINDOW.h], background: [26, 18, 10] };
+    let words = "", ink = "#f7931a", wide = 0, clock = 0, drawn = -1;
+    const draw = (x) => {
+      for (let i = 0; i < words.length; i++) {
+        const glyph = words[i] === "*" ? WINDOW_DOT : glyphs[words[i]];
+        if (!glyph) continue;
+        for (let r = 0; r < glyph.length; r++) for (let c = 0; c < glyph[r].length; c++) if (glyph[r][c] === "1") ctx.fillRect((x + i * 4 + c) * WINDOW.dot, WINDOW.top + r * WINDOW.dot, WINDOW.dot, WINDOW.dot);
+      }
+    };
+    const paint = (offset) => {
+      drawn = offset;
+      ctx.fillStyle = "#1a120a"; ctx.fillRect(0, 0, WINDOW.width, WINDOW.height);
+      ctx.fillStyle = ink;
+      if (wide <= cells) draw(Math.floor((cells - wide) / 2));
+      else { draw(1 - offset); draw(1 - offset + wide + WINDOW.gap); }
+      geometry.imageSurface.version++;
+    };
+    const say = (text, color = "#f7931a") => {
+      if (text === words && color === ink) return;
+      words = text; ink = color; clock = 0;
+      wide = text.length ? text.length * 4 - 1 : 0;
+      paint(0);
+    };
+    const tick = (dt) => {
+      if (wide <= cells) return;
+      clock += dt;
+      const offset = Math.floor(clock * WINDOW.speed) % (wide + WINDOW.gap);
+      if (offset !== drawn) paint(offset);
+    };
+    paint(0);
+    return { geometry, say, tick };
+  };
+  // A keypad as a set of nodes, unplaced: the doorway's outside and the lock inside the Conference Room. 1–9, Back, 0 and Enter
+  // are each a node the scene can pick; `choose` lights a number, `lock` hangs a padlock over one, `say` writes the window.
+  const padRig = () => {
+    const pad = createNode({ geometry: keypad(), sightHidden: true });
+    const keys = KEYS.map((key, i) => ({ key: String(i + 1), node: createNode({ geometry: DIGIT_KEYS[i], position: { x: key.x, y: key.y, z: 0.033 }, sightHidden: true }) }));
+    const back = { key: "back", node: createNode({ geometry: BACK_KEY, position: { x: -0.1125, y: -0.235, z: 0.033 }, sightHidden: true }) };
+    const zero = { key: "0", node: createNode({ geometry: ZERO_KEY, position: { x: 0, y: -0.235, z: 0.033 }, sightHidden: true }) };
+    const enter = { key: "enter", node: createNode({ geometry: ENTER_KEY, position: { x: 0.1125, y: -0.235, z: 0.033 }, sightHidden: true }) };
+    const display = windowRig();
+    const readout = createNode({ geometry: display.geometry, position: { x: 0, y: 0.25, z: 0.0365 }, visible: false, sightHidden: true });
+    readout.room = -1;
+    addChild(pad, readout, ...keys.map(key => key.node), back.node, zero.node, enter.node);
+    const say = (text, ink) => { display.say(text, ink); readout.visible = !!text; };
+    const locked = new Uint8Array(10);
+    // A key lit (0–9), or none (-1); the selected number and ready Enter label turn black against amber.
+    let selected = -1;
+    const keyOf = (digit) => digit === 0 ? zero : keys[digit - 1];
+    const cap = (digit) => digit === selected ? (digit ? LIT_DIGIT_KEYS[digit - 1] : LIT_ZERO_KEY) : locked[digit] ? LOCKED_KEY : digit ? DIGIT_KEYS[digit - 1] : ZERO_KEY;
+    const choose = (digit) => {
+      const was = selected;
+      selected = Number.isInteger(digit) && digit >= 0 && digit <= 9 ? digit : -1;
+      if (was >= 0) keyOf(was).node.geometry = cap(was);
+      if (selected >= 0) keyOf(selected).node.geometry = cap(selected);
+      enter.node.geometry = selected >= 0 ? READY_ENTER_KEY : ENTER_KEY;
+      readout.room = selected;
+    };
+    const lock = (digit, on) => {
+      locked[digit] = on ? 1 : 0;
+      keyOf(digit).node.geometry = cap(digit);
+    };
+    // What the Enter key reads on the room's lock, and whether it is ready to press.
+    const actAs = (word, ready) => { enter.node.geometry = ACT_KEYS[word][ready ? 1 : 0]; };
+    return { pad, keys: [...keys, zero, back, enter], readout, say, tick: display.tick, choose, lock, actAs };
+  };
+  // Under the doorway's keypad, on a plate of its own, the DIRECTORY button, which opens the room directory.
+  const DIRECTORY_KEY = keyFace(0.3, 0.07, "DIRECTORY", 0.0066, "#5a4022", "#f2d39a");
+  const DIRECTORY_PLATE = { h: 0.11, gap: 0.015 };
+  const directoryPlate = cached(() => merge(
+    box({ w: 0.44, h: DIRECTORY_PLATE.h, d: 0.05, color: "#2a2420" }),
+    ...[-1, 1].map((x) => box({ w: 0.03, h: 0.03, d: 0.012, color: "#8a7a6a", offset: { x: x * 0.19, y: -0.025, z: 0.03 } }))
+  ));
+  // The room directory the button opens, in the shared board dialog: every number on the keypad and the room it
+  // opens, in the keypad window's pixels on the same dark glass, the chosen room's row lit as its key is and a locked
+  // room's padlocked. One canvas, repainted only when the choice or a lock changes. A tap on a row or a number key
+  // chooses that room as the keypad's number does, through `onChoose`, which the doorway sets ("close" when the
+  // directory should go, as for a PIN); `canChoose` says whether it would take one now (only beside the keypad).
+  const DIRECTORY = { dot: 4, margin: 3, gap: 2, pitch: 7, title: "ROOM DIRECTORY" };
+  const DIRECTORY_LOCK = ["010", "101", "111", "111", "111"];
+  const directoryBoard = () => {
+    const D = DIRECTORY, glyphs = BL.hubModels.SIGN_GLYPHS, rooms = BL.timechainRooms.ROOMS;
+    const names = rooms.map((room) => room.name.replace(/^The /, "").toUpperCase());
+    const wide = (text) => text.length * 4 - 1;
+    const nameAt = D.margin + 3 + D.gap, lockAt = nameAt + Math.max(...names.map(wide)) + D.gap;
+    const cols = lockAt + 3 + D.margin, top = D.margin + 5 + D.gap + 1 + D.gap + 1;
+    const rows = top + rooms.length * D.pitch - 2 + D.margin;
+    const canvas = document.createElement("canvas");
+    canvas.width = cols * D.dot; canvas.height = rows * D.dot;
+    const ctx = canvas.getContext("2d");
+    const text = (words, x, y, ink) => {
+      ctx.fillStyle = ink;
+      for (let i = 0; i < words.length; i++) {
+        const glyph = words[i] === "#" ? DIRECTORY_LOCK : glyphs[words[i]];
+        if (!glyph) continue;
+        for (let r = 0; r < 5; r++) for (let c = 0; c < 3; c++) if (glyph[r][c] === "1") ctx.fillRect((x + i * 4 + c) * D.dot, (y + r) * D.dot, D.dot, D.dot);
+      }
+    };
+    let chosen = -1;
+    const locked = new Uint8Array(rooms.length);
+    const board = {
+      title: "Room Directory", help: "Choose a room here or on the keypad, then press Enter at the keypad.", canvas, count: 1, index: 0, version: 0,
+      onChoose: null, canChoose: null,
+      get pickable() { return !!(board.canChoose && board.canChoose()); },
+      get caption() { return chosen >= 0 ? `Room ${chosen} selected` : board.pickable ? "Tap a room or press its number" : "Walk up to the keypad to choose"; },
+      get note() { return chosen >= 0 ? rooms[chosen].tag : ""; },
+      go() {},
+      // A point on the canvas, in its pixels: the row under it, each row's band running to the next's.
+      pick(x, y) {
+        const id = Math.floor((Math.floor(y / D.dot) - top + 1) / D.pitch);
+        return id >= 0 && id < rooms.length && board.pickable ? board.onChoose(id) : null;
+      },
+      key(k) {
+        if (!/^[0-9]$/.test(k)) return false;
+        return board.pickable && board.onChoose(Number(k)) || true;
+      }
+    };
+    const paint = () => {
+      ctx.fillStyle = "#1a120a"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      text(D.title, Math.floor((cols - wide(D.title)) / 2), D.margin, "#f7931a");
+      ctx.fillStyle = "#5a3a12"; ctx.fillRect(D.margin * D.dot, (D.margin + 5 + D.gap) * D.dot, (cols - 2 * D.margin) * D.dot, D.dot);
+      for (let id = 0; id < rooms.length; id++) {
+        const y = top + id * D.pitch, lit = id === chosen;
+        if (lit) { ctx.fillStyle = "#f7931a"; ctx.fillRect((D.margin - 1) * D.dot, (y - 1) * D.dot, (cols - 2 * D.margin + 2) * D.dot, 7 * D.dot); }
+        text(String(id), D.margin, y, lit ? "#17110a" : "#f7931a");
+        text(names[id], nameAt, y, lit ? "#17110a" : "#f2d39a");
+        if (locked[id]) text("#", lockAt, y, lit ? "#17110a" : "#ffbd53");
+      }
+      board.version++;
+    };
+    paint();
+    board.choose = (room) => { const next = room >= 0 && room < rooms.length ? room : -1; if (next !== chosen) { chosen = next; paint(); } };
+    board.lock = (room, on) => { if (locked[room] !== (on ? 1 : 0)) { locked[room] = on ? 1 : 0; paint(); } };
+    return board;
+  };
   const build = (island) => {
     let rim = 27.4;
     while (rim < 36 && island.surfaceAt(DIR.x * (rim + 0.1), DIR.z * (rim + 0.1)) > 0.5) rim += 0.1;
@@ -387,13 +547,11 @@
     addChild(entrance, createNode({ position: { x: 0, y: 5.6, z: 0 }, geometry: BL.hubModels.caveSign("TIMECHAIN SPHERE") }));
     const bridgeNode = createNode({ position: { x: 0, y: 0, z: bridgeZ }, geometry: bridge() });
     const plugNode = createNode({ geometry: plug(), sightHidden: true });
-    const K = SPOTS.KEYPAD, pad = createNode({ geometry: keypad(), position: { x: K.x, y: K.y, z: K.z }, sightHidden: true });
-    const keys = KEYS.map((key, i) => ({ key: String(i + 1), node: createNode({ geometry: DIGIT_KEYS[i], position: { x: key.x, y: key.y, z: 0.033 }, sightHidden: true }) }));
-    const back = { key: "back", node: createNode({ geometry: BACK_KEY, position: { x: -0.085, y: -0.235, z: 0.033 }, sightHidden: true }) };
-    const enter = { key: "enter", node: createNode({ geometry: ENTER_KEY, position: { x: 0.085, y: -0.235, z: 0.033 }, sightHidden: true }) };
-    const readout = createNode({ position: { x: 0, y: 0.25, z: 0.0365 }, visible: false, sightHidden: true });
-    readout.room = 0;
-    addChild(pad, readout, ...keys.map(key => key.node), back.node, enter.node);
+    const K = SPOTS.KEYPAD, rig = padRig(), pad = rig.pad;
+    pad.position.x = K.x; pad.position.y = K.y; pad.position.z = K.z;
+    const directory = directoryBoard(), plateY = -0.35 - DIRECTORY_PLATE.gap - DIRECTORY_PLATE.h / 2;
+    const directoryKey = createNode({ geometry: DIRECTORY_KEY, position: { x: 0, y: plateY, z: 0.033 }, sightHidden: true });
+    addChild(pad, createNode({ geometry: directoryPlate(), position: { x: 0, y: plateY, z: 0 }, sightHidden: true }), directoryKey);
     // The traveler's look into their room hangs here, just in front of the curtain, on their page alone.
     const picture = createNode({ position: { x: 0, y: PASSAGE.floor, z: PASSAGE.curtain + 0.03 }, sightHidden: true });
     const glow = createNode({ geometry: passageGlow(), sightHidden: true });
@@ -411,18 +569,8 @@
       // Canvas 2D sorts whole faces: pull the inner marks ahead of the larger tiles beneath them.
       for (const batch of logoBatches) batch.node.depthBias = inside ? -1.2 : 0;
     };
-    // A key lit (1–9), or none (0); the selected number and ready Enter label turn black against amber.
-    let selected = 0;
-    const choose = (digit) => {
-      if (selected) keys[selected - 1].node.geometry = DIGIT_KEYS[selected - 1];
-      selected = digit > 0 && digit <= 9 ? digit : 0;
-      if (selected) keys[selected - 1].node.geometry = LIT_DIGIT_KEYS[selected - 1];
-      enter.node.geometry = selected ? READY_ENTER_KEY : ENTER_KEY;
-      readout.room = selected;
-      readout.geometry = selected ? ROOM_LABELS[selected - 1] : null;
-      readout.visible = !!selected;
-    };
-    return { node, shell: shellNode, outer, turn, setDoors, view, screen, logoBatches, entrance, bridge: bridgeNode, doors, plug: plugNode, keypad: pad, keys: [...keys, back, enter], readout, choose, picture, place };
+    return { node, shell: shellNode, outer, turn, setDoors, view, screen, logoBatches, entrance, bridge: bridgeNode, doors, plug: plugNode, keypad: pad, keys: rig.keys, readout: rig.readout, say: rig.say, tick: rig.tick,
+      choose: (room) => { rig.choose(room); directory.choose(room); }, lock: (room, on) => { rig.lock(room, on); directory.lock(room, on); }, directory, directoryKey, picture, place };
   };
   // Most of the time the screen holds its picture; every minute or so it runs a seven-second show on the lunes'
   // `glow` and `highlight`, never the same one twice running, then settles back exactly. Some shows take the logos
@@ -505,5 +653,5 @@
     };
     return step;
   };
-  BL.timechainModels = { SITE, DIR, PASSAGE, SPOTS, HEARTBEAT, build, show };
+  BL.timechainModels = { SITE, DIR, PASSAGE, SPOTS, HEARTBEAT, DIRECTORY_PLATE, build, show, padRig };
 })();

@@ -283,5 +283,145 @@
     };
     return { createState, target, route, xAt, zAt, capacity: size, get nodes() { return count; }, buffers: xs.byteLength + zs.byteLength + centerX.byteLength + centerZ.byteLength + groups.byteLength + heads.byteLength + edges.byteLength + next.byteLength + costs.byteLength + parents.byteLength + distances.byteLength + heap.byteLength + heapIndex.byteLength + routeState.route.byteLength };
   };
-  BL.npcPaths = { create };
+  // Passive Hub work trips use only the authored mainland spokes and the pile
+  // ring: no graph, obstacle search, bed route or satellite crossing. Adapted
+  // from the virtual host's routine paths (697964fe). It shares `create`'s
+  // walker state; its own version stamp keeps either planner from reusing the
+  // other's lane. Null when the island's authored routes are unsupported.
+  const fixed = (island) => {
+    const path = island.path;
+    const lines = path.centerlines.filter(points => points.length > 1
+      && Math.hypot(points[0].x, points[0].z) < island.meadowRadius
+      && Math.hypot(points[points.length - 1].x, points[points.length - 1].z) <= island.meadowRadius + 0.01);
+    if (!lines.length || lines.length > 32 || lines.some(line => line.length > 256)) return null;
+    const stamp = () => -2 - path.version;
+    const nearest = (x, z, radius) => {
+      let result = null, distance = Infinity;
+      for (const line of lines) for (let i = 0; i < line.length; i++) {
+        const p = line[i];
+        if (Math.hypot(p.x, p.z) < radius) continue;
+        const d = Math.hypot(p.x - x, p.z - z);
+        if (d < distance) { distance = d; result = { line, i }; }
+      }
+      return result;
+    };
+    const append = (s, x, z) => {
+      if (s.count && Math.hypot(s.laneX[s.count - 1] - x, s.laneZ[s.count - 1] - z) < 0.01) return;
+      if (s.count === s.laneX.length) throw new Error("authored mainland route capacity");
+      s.laneX[s.count] = x; s.laneZ[s.count++] = z;
+    };
+    // Whether (x, z) lies past sample `q` toward its neighbour `n` along the spoke.
+    const past = (q, n, x, z) => (x - q.x) * (n.x - q.x) + (z - q.z) * (n.z - q.z) > 0;
+    // Whether the straight line from (ax, az) to (bx, bz) comes no nearer the pile's middle than its nearer end, less
+    // `SLACK` (under a body's breadth, so a line grazing the ring's own curve still counts as going straight on).
+    const SLACK = 0.25, JOIN = 0.75;
+    // Where the spoke runs from sample `q`, outside the ring, to `r`, inside it, across the ring itself: the ring meets
+    // the spoke there, not at `q`'s own bearing (an oblique spoke otherwise gets a short spur and a kink).
+    const meet = (q, r, radius) => {
+      const dx = r.x - q.x, dz = r.z - q.z, a = dx * dx + dz * dz, b = 2 * (q.x * dx + q.z * dz), c = q.x * q.x + q.z * q.z - radius * radius;
+      const t = a > 0 ? Math.max(0, Math.min(1, (-b - Math.sqrt(Math.max(0, b * b - 4 * a * c))) / (2 * a))) : 0;
+      return { x: q.x + dx * t, z: q.z + dz * t };
+    };
+    const wide = (ax, az, bx, bz) => {
+      const dx = bx - ax, dz = bz - az, length = dx * dx + dz * dz;
+      const t = length > 0 ? Math.max(0, Math.min(1, -(ax * dx + az * dz) / length)) : 0;
+      return Math.hypot(ax + dx * t, az + dz * t) >= Math.min(Math.hypot(ax, az), Math.hypot(bx, bz)) - SLACK;
+    };
+    const prepare = (s, p, tx, tz) => {
+      s.tx = tx; s.tz = tz; s.version = stamp(); s.count = s.index = 0; s.plans++;
+      let ringFrom = 0, ringTo = 0;
+      const radius = path.debug.ringTrafficRadius ?? path.debug.ringCenterRadius;
+      const from = Math.hypot(p.x, p.z) > radius + 0.5 ? nearest(p.x, p.z, radius) : null;
+      const to = Math.hypot(tx, tz) > radius + 0.5 ? nearest(tx, tz, radius) : null;
+      // The nearest sample to either end of a leg can lie behind the walker or beyond its goal: a walker between two
+      // samples (a leg begun from a route point, or replanned mid-spoke when its slot or the ring changes) would step
+      // back to it and turn round, and a goal between two samples would be overshot and walked back to. Start at the
+      // first sample ahead of the walker and stop at the last one short of the goal.
+      if (from && to && from.line === to.line) {
+        // Same-spoke travel follows its existing samples directly in either direction.
+        const line = from.line, step = from.i <= to.i ? 1 : -1;
+        let i = from.i, end = to.i;
+        // Each end is trimmed against the original bounds; two adjacent samples can both drop, leaving none between.
+        if (from.i !== to.i) {
+          if (past(line[from.i], line[from.i + step], p.x, p.z)) i += step;
+          if (past(line[to.i], line[to.i - step], tx, tz)) end -= step;
+        }
+        // One shared sample is on the way only when it lies between the two ends; crossed trims leave a direct leg.
+        if (from.i === to.i ? (p.x - line[i].x) * (tx - line[i].x) + (p.z - line[i].z) * (tz - line[i].z) <= 0
+          : (end - i) * step >= 0) {
+          for (; ; i += step) {
+            append(s, line[i].x, line[i].z);
+            if (i === end) break;
+          }
+        }
+      } else {
+        let x = p.x, z = p.z;
+        if (from) {
+          let i = from.i;
+          if (i > 0 && past(from.line[i], from.line[i - 1], p.x, p.z)) i--;
+          for (; i >= 0; i--) {
+            const q = from.line[i];
+            if (Math.hypot(q.x, q.z) < radius) break;
+            append(s, q.x, q.z); x = q.x; z = q.z;
+          }
+          if (i >= 0 && i + 1 < from.line.length && Math.hypot(x, z) >= radius) { const m = meet(from.line[i + 1], from.line[i], radius); x = m.x; z = m.z; }
+        }
+        let first = to ? to.i : 0;
+        while (to && first > 0 && Math.hypot(to.line[first - 1].x, to.line[first - 1].z) >= radius) first--;
+        // Below `first` the spoke runs inside the ring, so a goal short of `first` keeps no sample and the ring ends
+        // at the goal's own bearing.
+        let last = to ? to.i : 0;
+        if (to && last > 0 && past(to.line[last], to.line[last - 1], tx, tz)) last--;
+        const end = to && last >= first ? first > 0 ? meet(to.line[first], to.line[first - 1], radius) : to.line[first] : { x: tx, z: tz };
+        // Around the pile on the real ring, never across it.
+        const start = Math.atan2(x, z), finish = Math.atan2(end.x, end.z);
+        const angle = Math.atan2(Math.sin(finish - start), Math.cos(finish - start));
+        const steps = Math.max(1, Math.ceil(Math.abs(angle) * radius / 0.5));
+        ringFrom = s.count;
+        for (let i = 0; i <= steps; i++) {
+          const a = start + angle * i / steps;
+          append(s, Math.sin(a) * radius, Math.cos(a) * radius);
+        }
+        ringTo = s.count;
+        if (to) for (let i = first; i <= last; i++) append(s, to.line[i].x, to.line[i].z);
+      }
+      append(s, tx, tz);
+      // The ring is for going round the pile. Where a leg meets it beside a spoke's end (a loading slot or a walker
+      // near the junction), stepping out onto the ring at the leg's own bearing, along it and off again turned the
+      // walker away and back. The arc is left out whole when the straight line from the point before it (or the
+      // walker) to the point after it comes no nearer the pile than its own ends; a turn round the pile keeps all of it,
+      // so its curve stays even rather than bent at a shortcut's end.
+      if (ringTo > ringFrom && ringTo < s.count) {
+        const kx = ringFrom ? s.laneX[ringFrom - 1] : p.x, kz = ringFrom ? s.laneZ[ringFrom - 1] : p.z;
+        if (wide(kx, kz, s.laneX[ringTo], s.laneZ[ringTo])) {
+          const drop = ringTo - ringFrom;
+          for (let i = ringTo; i < s.count; i++) { s.laneX[i - drop] = s.laneX[i]; s.laneZ[i - drop] = s.laneZ[i]; }
+          s.count -= drop;
+        } else {
+          // Kept, the arc still joins each spoke where the drawn spoke bends to meet the ring: its last samples there and
+          // the arc's first or last points lie a few centimetres apart at sharp angles, which a walker overshoots and
+          // turns back to. Within `JOIN` of the join the corner is taken straight, by the same pile rule.
+          const jx = s.laneX[ringFrom], jz = s.laneZ[ringFrom], ex = s.laneX[ringTo - 1], ez = s.laneZ[ringTo - 1];
+          let kx2 = p.x, kz2 = p.z, kept = 0;
+          for (let i = 0; i < s.count; i++) {
+            const x = s.laneX[i], z = s.laneZ[i];
+            const near = Math.hypot(x - jx, z - jz) < JOIN || Math.hypot(x - ex, z - ez) < JOIN;
+            if (near && i + 1 < s.count && wide(kx2, kz2, s.laneX[i + 1], s.laneZ[i + 1])) continue;
+            s.laneX[kept] = x; s.laneZ[kept++] = z; kx2 = x; kz2 = z;
+          }
+          s.count = kept;
+        }
+      }
+    };
+    const target = (cave, tx, tz) => {
+      const s = cave.pathing, p = cave.root.position;
+      if (!Number.isFinite(tx) || !Number.isFinite(tz)) { s.tx = NaN; s.targetX = p.x; s.targetZ = p.z; return; }
+      if (s.tx !== tx || s.tz !== tz || s.version !== stamp()) prepare(s, p, tx, tz);
+      while (s.index < s.count && Math.hypot(s.laneX[s.index] - p.x, s.laneZ[s.index] - p.z) < 0.08) s.index++;
+      s.targetX = s.index < s.count ? s.laneX[s.index] : tx;
+      s.targetZ = s.index < s.count ? s.laneZ[s.index] : tz;
+    };
+    return { target, lines: lines.length };
+  };
+  BL.npcPaths = { create, fixed };
 })();
