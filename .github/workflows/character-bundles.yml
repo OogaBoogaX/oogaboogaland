@@ -43,6 +43,7 @@ jobs:
       contents: read
       pull-requests: read
       statuses: write
+      actions: read
     outputs:
       write: ${{ steps.route.outputs.write }}
     steps:
@@ -72,6 +73,17 @@ jobs:
           CHARACTER_APP_SLUG: ${{ steps.app.outputs.app-slug }}
           CHARACTER_BOT_LOGIN: ${{ vars.CHARACTER_BOT_LOGIN || 'github-actions[bot]' }}
           CHARACTER_ACCOUNT_RENAMES_ONLY: ${{ vars.CHARACTER_BUNDLES_ENABLED != 'true' && vars.CHARACTER_ACCOUNT_RENAMES_ENABLED == 'true' }}
+      - name: Inspect release priority
+        if: steps.route.outputs.write == 'true' && github.event_name != 'workflow_dispatch'
+        id: priority
+        run: node scripts/ci-priority.mjs --gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Yield to release work
+        if: steps.priority.outputs.deferred == 'true'
+        run: |
+          echo "::notice::Deferred for deployment/post-merge work; release completion or scheduled recovery retries this job."
+          exit 1
 
   bundle:
     needs: inspect
@@ -101,6 +113,19 @@ jobs:
         with:
           node-version: '22'
           package-manager-cache: false
+      # Recheck AFTER acquiring the shared writer lock, before creating a writer
+      # token or mutating anything. Already-queued jobs yield and release the lock.
+      - name: Inspect release priority
+        if: github.event_name != 'workflow_dispatch'
+        id: priority
+        run: node scripts/ci-priority.mjs --gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Yield to release work
+        if: steps.priority.outputs.deferred == 'true'
+        run: |
+          echo "::notice::Deferred for deployment/post-merge work; release completion or scheduled recovery retries this job."
+          exit 1
       - name: Repository-scoped character App token
         if: vars.CHARACTER_APP_CLIENT_ID != ''
         id: app
