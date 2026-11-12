@@ -46,6 +46,24 @@
       shell({ r: R + 0.012, cy: CY, a0: -57, a1: 57, e0: 33, e1: 59, sa: 8, se: 3, paint: (i, j) => j === 1 && i > 1 && i < 4 ? GLARE : VISOR })
     );
   });
+  // The modelled look keeps the same dome and fills the empty space inside it, so no hollow shows round
+  // his head. `helmetFloorGeometry` closes the dome's underside at its rim, in the helmet's own frame. `helmetPadGeometry`
+  // is the padding round his head, in the head's frame: the dome's own cross-section a little ahead of the head's
+  // middle, which his head comes through, so everything between his head and the shell is lined.
+  const helmetFloorGeometry = cached(() => {
+    const geo = geometry(), D = Math.PI / 180, y = CY + R * Math.sin(-15 * D), r = R * Math.cos(15 * D) - 0.004, ring = [];
+    for (let i = 0; i < 24; i++) ring.push(pushVert(geo, r * Math.sin(-i / 24 * Math.PI * 2), y, r * Math.cos(-i / 24 * Math.PI * 2)));
+    face(geo, ring, hexToRgb(LINING));
+    return geo;
+  });
+  // Where the tilted, pushed-back dome's middle lies in the head's frame, and the plane the padding stands in.
+  const PAD_Z = 0.03, DOME_Y = 0.05 + CY * Math.cos(0.55), DOME_Z = -0.1 - CY * Math.sin(0.55);
+  const helmetPadGeometry = cached(() => {
+    const geo = geometry(), r = Math.sqrt(R * R - (PAD_Z - DOME_Z) ** 2) - 0.004, ring = [];
+    for (let i = 0; i < 24; i++) { const a = i / 24 * Math.PI * 2; ring.push(pushVert(geo, r * Math.cos(a), Math.max(0.01, DOME_Y + r * Math.sin(a)), PAD_Z)); }
+    face(geo, ring, hexToRgb(LINING));
+    return geo;
+  });
   // The neck ring the helmet seats on, in root units: gunmetal, bolted, a cable to the pack.
   const neckRingGeometry = cached(() => {
     const bolts = [];
@@ -94,7 +112,8 @@
     joined: 1792114421,
     lastCommit: 1792114421,
     // Fur under the helmet; the dog face is drawn in skull, the laser eyes in eyes.
-    look: { skin: FUR, hair: FUR, fur: SUIT_DK, hairless: true, noBrow: true, noPupils: true, face: "none" },
+    // noFlaps: under the modelled look the suit ends at its belt, with no flaps over the legs.
+    look: { skin: FUR, hair: FUR, fur: SUIT_DK, hairless: true, noBrow: true, noPupils: true, face: "none", noFlaps: true },
     voice: {
       poke: "GM. Wen Omega?",
       idle: ["GM. Wen Omega?", "I habs humgry", "Laser eyes til MacDomalts fries"]
@@ -152,6 +171,9 @@
       headgear(k) {
         const h = k.h;
         addChild(k.parts.head, createNode({ position: { x: 0, y: 0.05 * h, z: -0.1 * h }, rotation: { x: -0.55, y: 0, z: 0 }, scale: { x: h, y: h, z: h }, geometry: helmetGeometry() }));
+        if (BL.models.STYLE !== "R") return;
+        addChild(k.parts.head, createNode({ position: { x: 0, y: 0.05 * h, z: -0.1 * h }, rotation: { x: -0.55, y: 0, z: 0 }, scale: { x: h, y: h, z: h }, geometry: helmetFloorGeometry() }));
+        addChild(k.parts.head, createNode({ scale: { x: h, y: h, z: h }, geometry: helmetPadGeometry() }));
       },
       // A small life-support pack on the back.
       extras(k) {

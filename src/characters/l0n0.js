@@ -1,7 +1,8 @@
 (() => {
   "use strict";
   const BL = window.BL;
-  const { makeVox } = BL.models;
+  const { makeVox, voxelGeometry } = BL.models;
+  const { createNode, addChild } = BL.scene;
   const { hexToRgb } = BL.math;
   const SHIELD_PALETTE = ["#513b2b", "#644a34", "#292c30", "#777b7d", "#a8aaab", "#d69b39"].map(hexToRgb);
   const GOLD_SHIELD_PALETTE = ["#8a602c", "#a57532", "#6b491e", "#ce9d45", "#efc96b", "#f7931a"].map(hexToRgb);
@@ -24,6 +25,23 @@
     v.set(-1, 3, 2, 5);
     return v;
   };
+  // The modelled look arms him as a Viking: the shield is strapped to his left forearm and a sword is
+  // his weapon. The sword is modelled, in units from the grip: a lobed pommel under the fist, a leather grip, a short
+  // guard, and a broad two-edged blade with a fuller down each face, its edges ahead and behind as he holds it.
+  const swordGeometry = (h, gold) => {
+    const H = BL.heroBody, geo = BL.models.geometry();
+    const steel = gold ? "#f0cf74" : "#c5c9ce", steelDk = gold ? "#c99c3e" : "#9a9fa6", groove = gold ? "#b0822c" : "#7b8189";
+    const bronze = gold ? "#f7931a" : "#b08a3e", leather = gold ? "#8a602c" : "#513b2b";
+    H.loft(geo, [[-2.8, 0.3, 0.5, 0.2], [-2.55, 0.55, 1, 0.26], [-2.05, 0.55, 1, 0.26], [-1.8, 0.36, 0.52, 0.18]], bronze);
+    H.loft(geo, [[-1.8, 0.48, 0.54, 0.2], [1.7, 0.48, 0.54, 0.2]], leather, [false, false]);
+    H.loft(geo, [[1.7, 0.4, 2, 0.18], [2.15, 0.4, 2, 0.18]], bronze);
+    H.loft(geo, [[2.15, 0.21, 0.85, 0.18], [9.8, 0.18, 0.72, 0.15], [12.4, 0.13, 0.46, 0.1], [13.8, 0.03, 0.05, 0.02]], [steel, steel, steelDk]);
+    for (const side of [-1, 1]) H.poly(geo, [[side * 0.216, 2.5, -0.22], [side * 0.216, 2.5, 0.22], [side * 0.186, 9.5, 0.15], [side * 0.186, 9.5, -0.15]], groove, [side, 0, 0]);
+    // Slung, it is turned a quarter about its own length, so the flat of its blade lies to his back, with its hilt up
+    // over his right shoulder and its point down by the other hip (see crew.js).
+    return Object.assign(H.scaled(geo, h / 16), { slingTurn: Math.PI / 2, slingHiltUp: true });
+  };
+  const modelled = () => BL.models.STYLE === "R";
   BL.characters.add({
     handle: "l0n0",
     // Initial local registration dates; Oogatron refreshes recorded contribution activity.
@@ -63,7 +81,19 @@
         v.fill(4, 5, 2, 3, 6, 6, iron);
         v.set(4, 3, 7, k.color("#d69b39"));
       },
-      club: () => ({ voxels: shieldVox(), palette: SHIELD_PALETTE, goldPalette: GOLD_SHIELD_PALETTE, rest: { x: 0, z: 0 }, carry: { x: 0.15, z: 0 } }),
+      club: (k) => modelled() ? { default: swordGeometry(k.h, false), gold: swordGeometry(k.h, true), rest: { x: 0.95, z: 0 }, carry: { x: 0.95, z: 0 } }
+        : { voxels: shieldVox(), palette: SHIELD_PALETTE, goldPalette: GOLD_SHIELD_PALETTE, rest: { x: 0, z: 0 }, carry: { x: 0.15, z: 0 } },
+      // The shield on his left forearm: its back to the arm and its boss outward, a little over halfway down from
+      // the elbow (`forearm`: a node hung on an arm rides the modelled forearm that far down it).
+      extras(k) {
+        if (!modelled()) return;
+        const u = k.u, shield = createNode({ position: { x: 1.5 * u, y: 0, z: 0 }, rotation: { x: 0, y: Math.PI / 2, z: 0 },
+          geometry: voxelGeometry(shieldVox(), { unit: u, palette: SHIELD_PALETTE, origin: { x: -1.5 * u, y: -4.5 * u, z: 0 } }) });
+        shield.forearm = 0.55;
+        addChild(k.parts.armL, shield);
+        // crew.js moves `parts.shield` onto his back, over the slung sword, while a gun is in his hands.
+        k.parts.shield = shield;
+      },
       gear(k) {
         const leather = k.color("#513b2b"), dark = k.color("#302720"), iron = k.color("#777b7d");
         // Keep the standard joints, hands and feet; dress their existing voxel shapes.
