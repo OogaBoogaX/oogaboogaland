@@ -14,7 +14,9 @@ test("headless import installs compact geometry before models, on by default", (
   assert.equal(typeof globalThis.window, "undefined", "no browser window headless");
   assert.equal(C?.enabled, true);
   // A modelled Ooga keeps authored voxel accessories; the plain stock body has no voxel bake.
-  const ooga = B.models.caveman(B.contributors.traitsFor("w-s-bitcoin"));
+  const roster = B.contributorRoster.create({ registry: B.characters, clock: () => 1700000000000,
+    repositoryOf: B.activityRepos.keyOf, normalizeStats: B.contributorIdentities.normalizeStats, slots: B.caves.slots });
+  const ooga = B.models.caveman(roster.traitsFor("w-s-bitcoin"));
   assert.equal(ooga.modelled, true);
   const packed = new Set();
   const visit = (node) => {
