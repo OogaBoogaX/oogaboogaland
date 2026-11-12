@@ -25704,6 +25704,108 @@ const portalChecks=(BL,el)=>{
 };
 
 // Rule: one support mesh, bounded water effects and the real crew must agree about immersion.
+// Island shoreline regressions live in the existing global ledger, not a second test runner.
+function dryFingerprint(land) {
+  let count=0,hash=2166136261;
+  const coast=land.coast,inside=(x,z)=>{
+    let hit=false;
+    for(let i=0,j=coast.length-1;i<coast.length;j=i++){
+      const a=coast[i],b=coast[j];
+      if((a[1]>z)!==(b[1]>z)&&x<(b[0]-a[0])*(z-a[1])/(b[1]-a[1])+a[0])hit=!hit;
+    }
+    return hit;
+  };
+  for(let z=-99;z<=99;z+=1.5)for(let x=-99;x<=99;x+=1.5){
+    if(!inside(x,z))continue;
+    count++;
+    const value=x+","+z+":"+land.heightAt(x,z).toFixed(4)+"|";
+    for(let i=0;i<value.length;i++)hash=Math.imul(hash^value.charCodeAt(i),16777619)>>>0;
+  }
+  return {count,hash:hash.toString(16).padStart(8,"0")};
+}
+function dsbIslandWadingChecks(BL) {
+  // The unit tier is Node-only. Load the real shoreline modules into the suite's VM,
+  // rather than relying on scene/browser globals which are not present here.
+  const triangle=()=>({verts:[0,0,0,1,0,0,0,0,1],faces:[{i:[0,1,2],color:[255,255,255]}]});
+  const context={window:{BL:{
+    math:{hexToRgb:()=>[255,255,255]},
+    scene:{createNode:(options={})=>({...options}),addChild(){}},
+    models:{track:()=>({use(){}}),box:triangle,bevelBox:triangle,lathe:triangle,moved:triangle,shaded:triangle,merge:triangle}
+  }}};
+  for(const name of ["dsb-coast.js","dsb-geography.js","dsb-water.js"]){
+    const file=readFileSync(new URL("../src/js/"+name,import.meta.url),"utf8");
+    runInNewContext(file,context,{filename:name,timeout:30000});
+  }
+  BL=context.window.BL;
+  const C=BL.dsbCoast,L=BL.dsbGeography.build(),actor={bodyHeight:1.370,bodyRadius:.697};
+  const BLOCKED=new Set([0,1,2,3,4,5,22,23,24,25,26,27,28,31,32,33]);
+  const at=(i,t=.5)=>{
+    const a=L.coast[i],b=L.coast[(i+1)%L.coast.length],x=a[0]+(b[0]-a[0])*t,z=a[1]+(b[1]-a[1])*t,near={};
+    C.nearest(L.coast,x,z,near);
+    return {x,z,near,point:d=>[x+near.nx*d,z+near.nz*d]};
+  };
+  const path=(s,retreat=true)=>{
+    let a=s.point(-3),y=L.groundAt(...a);
+    for(let k=1;k<=55;k++){
+      const b=s.point(-3+k*.2);
+      if(!L.walkable(a[0],a[1],b[0],b[1],y,actor.bodyHeight,actor))return "out "+k;
+      a=b;y=L.groundAt(...b);
+    }
+    if(!retreat)return null;
+    const deep=s.point(23);
+    if(L.walkable(a[0],a[1],deep[0],deep[1],y,actor.bodyHeight,actor))return "deep gate";
+    for(let k=54;k>=0;k--){
+      const b=s.point(-3+k*.2);
+      if(!L.walkable(a[0],a[1],b[0],b[1],y,actor.bodyHeight,actor))return "return "+k;
+      a=b;y=L.groundAt(...b);
+    }
+    return null;
+  };
+  let accessible=0,excluded=0,depthStops=0;
+  const errors=[],transitions=[];
+  for(let i=0;i<L.coast.length;i++){
+    const s=at(i),access=C.wade(L.coast,s.x,s.z);
+    if(BLOCKED.has(i)){
+      excluded++;
+      if(access!==0)errors.push("excluded "+i+" access");
+      const edge=s.point(3),offshore=s.point(7),ground=L.groundAt(...edge);
+      if(Math.abs(L.heightAt(...offshore)+5)>.03||L.walkable(edge[0],edge[1],offshore[0],offshore[1],ground,actor.bodyHeight,actor))errors.push("excluded "+i+" shelf/edge");
+    }else{
+      accessible++;
+      if(access<.99)errors.push("accessible "+i+" mask");
+      if(!(L.heightAt(...s.point(3))>C.LEVEL&&L.heightAt(...s.point(7))<C.LEVEL&&L.heightAt(...s.point(9))<L.heightAt(...s.point(7))))errors.push("accessible "+i+" shelf");
+      const issue=path(s);
+      if(issue)errors.push("accessible "+i+" "+issue);
+      else depthStops++;
+    }
+  }
+  record("DSB coastline: exactly 18 of 34 authored sectors admit gradual body-width wading, with 16 harbor/Olympus exclusions and safe deep-water stops",
+    L.coast.length===34&&accessible===18&&excluded===16&&depthStops===18&&!errors.length,JSON.stringify({accessible,excluded,depthStops,errors:errors.slice(0,16)}));
+  const dense=[];
+  for(let i=7;i<=20;i++)for(const t of [.2,.5,.8]){
+    const issue=path(at(i,t),false);
+    if(issue)dense.push([i,t,issue]);
+  }
+  record("DSB wading: 42 distributed rocky-sector footpaths remain walkable instead of only their midpoints",dense.length===0,JSON.stringify(dense.slice(0,12)));
+  for(const [i,t] of [[6,.01],[21,.99],[29,.01],[30,.99]]){
+    const s=at(i,t);transitions.push({sector:i,t,eligibility:C.wade(L.coast,s.x,s.z)});
+  }
+  const piers=[[-43,49],[-34,49],[-39,41.5]].map(([x,z])=>L.groundAt(x,z));
+  record("DSB shoreline limits: exclusion transitions taper, Chora retains beach swash, and harbor decks stay at 1.35m",
+    transitions.every(s=>s.eligibility<.05)&&C.beach(20,80)>.99&&piers.every(y=>Math.abs(y-1.35)<1e-8)
+      &&Math.abs(C.maxDepth(actor)-actor.bodyHeight*.98)<1e-8&&C.speed(1)<C.speed(.5)&&C.speed(.5)<C.speed(0),
+    JSON.stringify({transitions,piers}));
+  const dry=dryFingerprint(L);
+  record("DSB inland invariance: all 8,957 authored dry-land samples retain the approved geometry fingerprint",dry.count===8957&&dry.hash==="bc6a1a4f",JSON.stringify(dry));
+  const water=BL.dsbWater.create(L),texel=(x,z)=>{
+    const B=256,ix=Math.round((x/650+.5)*B-.5),iz=Math.round((z/650+.5)*B-.5);
+    return water.depths[(iz*B+ix)*4+1];
+  };
+  record("DSB water optics: original Chora sand stays strongest, eligible rocks shoal subtly, blocked coasts remain clear, and Canvas subdivision is bounded",
+    texel(20,81)===255&&texel(72,25)>0&&texel(-39,50)===0&&texel(-54,-93)===0
+      &&water.geometry.faces.length>4000&&water.geometry.faces.length<30000&&water.depths.length===256*256*4,
+    JSON.stringify({chora:texel(20,81),rocks:texel(72,25),harbor:texel(-39,50),olympus:texel(-54,-93),faces:water.geometry.faces.length}));
+}
 const waterWorld = BL => {
   const S=BL.scene,root=S.createNode(),land=BL.dsbGeography.build(),renderer={kind:"webgl2",quality:"high"},camera=S.createCamera();
   S.addChild(root,land.root);S.removeChild(land.root,land.sea);camera.position.x=20;camera.position.y=8;camera.position.z=83;
@@ -25721,10 +25823,11 @@ const waterWorld = BL => {
 };
 const waterGolden = W => {
   const hash=values=>{let h=2166136261;const text=JSON.stringify(values);for(let i=0;i<text.length;i++)h=Math.imul(h^text.charCodeAt(i),16777619);return (h>>>0).toString(16);};
-  const ground=[];for(let x=-96;x<=96;x+=1.5)for(let z=-96;z<=96;z+=1.5)if(!(x>-5&&x<55&&z>58))ground.push(W.land.heightAt(x,z));
+  // Wading legitimately changes offshore elevations; preserve a byte-checked dry-land fingerprint.
+  const ground=dryFingerprint(W.land).hash;
   const nodes=[];const visit=n=>{if(n.geometry)nodes.push(n.geometry.verts,n.geometry.faces.map(f=>f.i),n.position,n.rotation,n.scale);for(const c of n.children)visit(c);};visit(W.olympus.group);
   W.water.update(0);
-  return {ground:hash(ground),olympus:hash(nodes),bridges:hash(W.olympus.bridges),buildings:hash(W.land.buildings),fft:hash(Array.from(W.water.pixels))};
+  return {ground,olympus:hash(nodes),bridges:hash(W.olympus.bridges),buildings:hash(W.land.buildings),fft:hash(Array.from(W.water.pixels))};
 };
 // Regression: cached dressing shapes used by explicit fields and ordinary Olympus nodes must not
 // alias a renderer record. Exercise the real collector/uploader against a byte-bounded GL sink;
@@ -25819,7 +25922,7 @@ const waterChecks = BL => {
   const expression=BL.dsbWater.shader.match(/float foam=([^;]+);/)[1],smoothstep=(a,b,x)=>{const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t);};
   const foam=new Function("bed","depth","shoreWave","uDSBEnvironment","smoothstep","return "+expression),sampleFoam=(sand,depth,crest)=>foam({g:sand},depth,crest,{w:3},smoothstep);
   const mask=(x,z)=>water.depths[(Math.floor((z/650+.5)*256)*256+Math.floor((x/650+.5)*256))*4+1];
-  record("DSB coast foam: non-beach coasts and zero depth have no universal rim; sand shoals retain moving crests",[0,.04,.2,.6,1.2].every(d=>[0,.5,1].every(c=>sampleFoam(0,d,c)===0))&&sampleFoam(1,0,1)===0&&sampleFoam(1,.4,1)>0&&sampleFoam(1,.4,0)===0&&!/foam\s*\+=/.test(BL.dsbWater.shader)&&mask(20,80)>250&&[[-39,54],[85,14],[-55,-91]].every(p=>mask(...p)===0));
+  record("DSB coast foam: non-beach coasts and zero depth have no universal rim; sand shoals retain moving crests",[0,.04,.2,.6,1.2].every(d=>[0,.5,1].every(c=>sampleFoam(0,d,c)===0))&&sampleFoam(1,0,1)===0&&sampleFoam(1,.4,1)>0&&sampleFoam(1,.4,0)===0&&!/foam\s*\+=/.test(BL.dsbWater.shader)&&mask(20,80)>250&&mask(85,14)>0&&[[-39,54],[-55,-91]].every(p=>mask(...p)===0));
   const apronFaces=L.root.children.flatMap(n=>n.geometry?n.geometry.faces.filter(f=>f.i.every(i=>n.geometry.verts[i*3+1]>=-.29&&n.geometry.verts[i*3+1]<=-.26)):[]);
   record("DSB coast foam: no waterline strip traces the coast, white or dark; terrain meets the sea directly",apronFaces.length===0,JSON.stringify({faces:apronFaces.length}));
   const depths=[-.35,0,.12,.3,.5,.7,.87],positions=depths.map(r=>point(r)),routes=[];
@@ -25839,7 +25942,7 @@ const waterChecks = BL => {
   record("DSB wading: depth curve has no speed steps and stays above one-third walking speed",smooth&&last>=.33);
   const deep=point(1.05);crew.relocatePlayer(deep,0);I.clear();step(10,0,-1);
   record("DSB wading: a relocated over-depth actor can always retreat to shallower ground",A.root.position.z<deep.z-3&&I.stats.depth<A.bodyHeight,JSON.stringify({from:deep,to:A.root.position,depth:I.stats.depth}));
-  record("DSB coast types: only Chora sand has a shelf; rear Olympus, rocky east and harbor retain deep water",L.heightAt(-55,-91)===-5&&L.heightAt(92,14)===-5&&L.heightAt(-39,54)===-5&&C.beach(-55,-80)===0&&C.beach(-39,54)===0&&C.beach(85,14)===0&&!W.walkable(-39,54,-39,54,-5,A.bodyHeight,A));
+  record("DSB coast types: Chora and eligible rocky coasts have shallow shelves while rear Olympus and harbor remain deep",L.heightAt(-55,-91)===-5&&L.heightAt(92,14)>-5&&L.heightAt(92,14)<C.LEVEL&&L.heightAt(-39,54)===-5&&C.beach(-55,-80)===0&&C.beach(-39,54)===0&&C.beach(85,14)===0&&!W.walkable(-39,54,-39,54,-5,A.bodyHeight,A));
   const first=I.stats.emitted;locate(.5);const entries=I.stats.splashes;step(6);const idle=I.stats.emitted-first;step(2,1,0);const moving=I.stats.emitted-first-idle,wakes=I.stats.wakes;
   record("DSB ripples: idle disturbances are sparse; moving creates stronger trailing wakes",idle<10&&moving>idle&&wakes>0&&I.stats.player>0,JSON.stringify({idle,moving,wakes,stats:I.stats}));
   const splashes=I.stats.splashes;crew.jumpPlayer();step(2);
@@ -25899,8 +26002,11 @@ const waterChecks = BL => {
 // Recorded from f578f9cda6e77468049b5e000e3002ce9711809b before applying the water extension.
 // Upstream 822addee keeps leaf vertices/normals/fronts and placement, but anchors each reversed
 // back-face fan at the front's first vertex. Approved/merged/A-B geometry comparison and
-// Olympus renders are documented in docs/dsb-upstream-validation.md; all other hashes stay frozen.
-const WATER_GOLDEN = {ground:"69d81f3b",olympus:"7490fca7",bridges:"9164c056",buildings:"634c3799",fft:"aa331f6b"};
+// Olympus renders are documented in docs/dsb-upstream-validation.md; the new
+// eligible west-flank underwater shelf changes the full Olympus group (including
+// the stream's sea-facing geometry). The original dry-land fingerprint stays
+// separately fixed at bc6a1a4f, while the updated Olympus group is pinned below.
+const WATER_GOLDEN = {ground:"bc6a1a4f",olympus:"932687d1",bridges:"9164c056",buildings:"634c3799",fft:"aa331f6b"};
 
 // Rule: exterior addresses must survive registry reordering and preserve every established route/venue.
 const vacancyChecks = async BL => {
@@ -30425,6 +30531,7 @@ const npcActivityRefreshProof = (BL) => {
 };
 
 const unitChecks = async () => {
+  dsbIslandWadingChecks();
   const artifact = artifactUnitProof();
   record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
   const previewRange=await studioPreviewRangeProof();
@@ -32931,6 +33038,36 @@ const dsbSharedSessionCheckpoint={name:"dsb shared session checkpoint",why:"cont
 for(const fallback of [false,true])scene("dsb",{label:"shared session "+(fallback?"canvas2d":"webgl2"),query:"&overview=1&weather=clear&time=1200"+(fallback?"&canvas2d=1":""),exclusive:true,httpMedia:true,steps:[dsbSharedSessionCheckpoint]});
 scene("dsb",{label:"shared session phone",query:"&overview=1&weather=clear&time=1200",opts:{w:390,h:844,mobile:true},exclusive:true,httpMedia:true,steps:[dsbSharedSessionCheckpoint]});
 
+// Desktop and phone review uses the suite driver, watchdogs and failure ledger.
+function inspectDSBIslandPage() {
+  const B=window.__ooga,D=B?.dsb,C=window.BL?.dsbCoast,L=D?.land,canvas=document.getElementById("scene");
+  if(!D||!C||!L||!canvas||!D.water||!D.waterInteraction)return {ready:false};
+  const blocked=new Set([0,1,2,3,4,5,22,23,24,25,26,27,28,31,32,33]);
+  let accessible=0,excluded=0,stops=0;const errors=[];
+  for(let i=0;i<L.coast.length;i++){
+    const a=L.coast[i],b=L.coast[(i+1)%L.coast.length],x=(a[0]+b[0])/2,z=(a[1]+b[1])/2,near={};
+    const w=C.wade(L.coast,x,z,near);
+    if(blocked.has(i)){excluded++;if(w!==0)errors.push(i+" excluded");}
+    else{
+      accessible++;if(w<.99)errors.push(i+" access");
+      const sx=x+near.nx*7,sz=z+near.nz*7;
+      if(L.heightAt(sx,sz)>=C.LEVEL)errors.push(i+" dry shelf");
+      const px=x+near.nx*8,pz=z+near.nz*8,dx=x+near.nx*23,dz=z+near.nz*23;
+      if(!L.walkable(px,pz,dx,dz,L.heightAt(px,pz),D.avatar.bodyHeight,D.avatar))stops++;
+      else errors.push(i+" deep");
+    }
+  }
+  return {ready:true,accessible,excluded,stops,errors,frame:B.renderedFrames||0,kind:B.renderer?.kind,canvas:[canvas.width,canvas.height],rippleBudget:D.waterInteraction.stats.capacity};
+}
+
+async function dsbIslandShorelineBrowserCheck(b) {
+  const snapshot=await b.evaluate("("+inspectDSBIslandPage.toString()+")()");
+  record("DSB shoreline browser: built-page coast, depth gates, water interaction and renderer agree",
+    snapshot.ready&&snapshot.accessible===18&&snapshot.excluded===16&&snapshot.stops===18&&!snapshot.errors.length&&snapshot.canvas[0]>0&&snapshot.canvas[1]>0&&snapshot.rippleBudget===24,
+    JSON.stringify(snapshot));
+}
+const dsbIslandShorelineStep={name:"DSB shoreline accessible coasts and exclusions",why:"rule: the loaded DSB desktop and phone scene preserves shallow wading, harbor and rear Olympus",run:dsbIslandShorelineBrowserCheck};
+
 const dsbIntegrationCheckpoint={name:"dsb integration checkpoint",why:"contract: global account UI, venue zones and direct return survive desktop and mobile scene transitions",run:async b=>{
   const step=()=>b.evaluate('for(let i=0;i<36;i++)BL.scenes.dsb.update(1/60,i/60)');
   const read=()=>b.evaluate('({zone:BL.net.state.zone,body:__ooga.dsb?.presence.body,backend:BL.net.state.backend,room:BL.net.state.room,hidden:document.getElementById("sheet").hidden,open:document.getElementById("sheet").dataset.open})');
@@ -32980,8 +33117,8 @@ const dsbIntegrationCheckpoint={name:"dsb integration checkpoint",why:"contract:
   await b.evaluate('__ooga.dsb.entrance.skip();__ooga.advance(.1,.1)');
   record("DSB integration: arrival restores exterior and rectangular membrane",await b.evaluate('BL.net.state.zone==="dsb-outside"&&__ooga.dsb.gate.horizon.geometry.portalRect'));
 }};
-scene("dsb",{label:"integration checkpoint",query:"&weather=clear&time=1200",steps:[dsbIntegrationCheckpoint]});
-scene("dsb",{label:"integration checkpoint phone",query:"&weather=clear&time=1200",opts:{w:390,h:844,mobile:true},steps:[dsbIntegrationCheckpoint]});
+scene("dsb",{label:"integration checkpoint",query:"&weather=clear&time=1200",steps:[dsbIslandShorelineStep,dsbIntegrationCheckpoint]});
+scene("dsb",{label:"integration checkpoint phone",query:"&weather=clear&time=1200",opts:{w:390,h:844,mobile:true},steps:[dsbIslandShorelineStep,dsbIntegrationCheckpoint]});
 
 const runTasks = async () => {
   const picked = tasks.filter((t) => (t.perf ? PERF : PICKED.includes(t.scene)));
