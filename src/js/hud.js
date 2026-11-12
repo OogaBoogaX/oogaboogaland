@@ -2412,6 +2412,16 @@
   };
   // Detached panels can be visible together. Each has a view of the same account and voice state.
   const ROOM_WORDS = { replaced: "open in another tab", full: "island full" };
+  // What voice needs cannot change in a page's life: worked out once, so the button can name what this browser lacks
+  // before the visitor is asked to join.
+  let voiceSupportReason = null;
+  const voiceReason = () => {
+    if (voiceSupportReason === null) {
+      const support = BL.voice && BL.voice.support ? BL.voice.support() : { secure: true, webrtc: true, mic: true };
+      voiceSupportReason = !support.secure ? "Voice needs a secure page" : !support.webrtc ? "This browser has no WebRTC" : !support.mic ? "This browser has no microphone" : "";
+    }
+    return voiceSupportReason;
+  };
   const accountPrefixes = [""];
   for (const slot of document.querySelectorAll("[data-account-copy]")) {
     const prefix = slot.dataset.accountCopy + "-";
@@ -2442,10 +2452,19 @@
     writeAccount("account-room", "hidden", !me || !words);
     writeAccount("account-rejoin", "hidden", !me || !ROOM_WORDS[room]);
     const voice = BL.voice.stats;
-    const voiceFailure = voice.returning ? voice.micError : voice.enabled ? "" : voice.error || voice.micError;
-    const voiceWords = voice.joining ? "Joining voice" : voiceFailure ? `Voice: ${voiceFailure}` : !voice.enabled && !voice.returning ? "Join voice" : voice.muted ? "Unmute" : "Mute";
+    const iceBlocked = voice.error === BL.voice.ICE_BLOCKED;
+    const voiceFailure = iceBlocked ? voice.error : voice.returning ? voice.micError : voice.enabled ? "" : voice.error || voice.micError;
+    const reason = voiceReason();
+    const voiceWords = reason ? reason : voice.joining ? "Joining voice" : voiceFailure ? `Voice: ${voiceFailure}` : !voice.enabled && !voice.returning ? "Join voice" : voice.muted ? "Unmute" : "Mute";
     writeAccount("account-voice", "hidden", !live);
     writeAccount("account-voice", "textContent", voiceWords);
+    writeAccount("account-voice", "disabled", !!reason);
+    // A blocked WebRTC explains itself in a tooltip, and only while it is the reason: a VPN's leak protection is what
+    // usually does it, by turning off non-proxied UDP (Brave's "WebRTC IP handling policy").
+    const voiceTip = iceBlocked
+      ? "A VPN's leak protection can block WebRTC by setting the browser's IP handling policy to disable non-proxied UDP (Brave specific). Allow WebRTC for this site, or turn that protection off."
+      : "";
+    writeAccount("account-voice", "title", voiceTip);
     writeAccount("account-voice-leave", "hidden", !live || !voice.enabled && !voice.returning);
     const pressed = String(voice.enabled && !voice.muted), onlineDot = String(live);
     for (const row of fieldsFor("account")) if (row.dataset.live !== onlineDot) row.dataset.live = onlineDot;

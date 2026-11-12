@@ -26122,7 +26122,7 @@ const footstepChecks = BL => {
 const voiceAloneChecks = async () => {
   const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8"),ops=[],netMuted=[],emits=[];
   const track={enabled:true,stop(){}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
-  class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
+  class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
   class Audio {constructor(){this.muted=false;}pause(){}play(){return Promise.resolve();}}
   const fetch=async(url,o)=>{const op=url.split("/").pop(),body=JSON.parse(o.body);ops.push({op,mic:track.enabled});return {ok:true,json:async()=>op==="pull"?{tracks:body.ids.map((id,i)=>({id,mid:String(i+1)}))}:{sessionDescription:{}}};};
   const context={window:{BL:{net:{state:{connectionToken:"synthetic",me:{id:900,login:"listener"}},setMuted:on=>netMuted.push(on),remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{}}},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{createElement:()=>({})},localStorage:{getItem:()=>null,setItem(){}},navigator:{mediaDevices:{getUserMedia:async()=>stream}},RTCPeerConnection:Pc,Audio,MediaStream:class{},fetch,AbortController,Promise,JSON,Error,Map,Set,Float32Array,Math};
@@ -26159,7 +26159,7 @@ const voiceFailureChecks = async () => {
   const page=(joined=false,AudioContext=undefined)=>{
     const timers=[],calls=[],failing=new Set(),holds=new Map();let holdLeave=null;
     const track={enabled:true,stopped:false,stop(){this.stopped=true;}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
-    class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0"};}addTransceiver(){return {mid:"0"};}getTransceivers(){return [];}addEventListener(){}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}close(){this.connectionState="closed";}}
+    class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}getTransceivers(){return [];}addEventListener(){}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}close(){this.connectionState="closed";}}
     class Audio {pause(){}play(){return Promise.resolve();}}
     const fetch=async(url,o)=>{const op=url.split("/").pop();calls.push(op);if(op==="leave"&&holdLeave)await holdLeave;if(holds.has(op))await holds.get(op);return failing.has(op)?{ok:false,status:503,json:async()=>({error:"sfu"})}:{ok:true,status:200,json:async()=>({tracks:[],sessionDescription:{}})};};
     const context={window:{BL:{net:{state:{connectionToken:"synthetic",me:{id:900,login:"listener"},zone:"outside",self:{x:0,y:0,z:0,zone:"outside"},blendTo:null,blendT:0},setMuted(){},remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{}},voiceBlend:{}},setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout(){},setInterval:()=>1,clearInterval(){},addEventListener(){},removeEventListener(){},AudioContext},document:{createElement:()=>({volume:1})},navigator:{userActivation:{hasBeenActive:true},mediaDevices:{getUserMedia:async()=>stream}},localStorage:{getItem:k=>joined&&k.includes("voice-joined")?"1":null,setItem(){},removeItem(){}},fetch,RTCPeerConnection:Pc,MediaStream:class {},Audio,AudioContext,AbortController,console};
@@ -26224,7 +26224,7 @@ const voiceReturnChecks = async () => {
   const page=({active=false,zone="outside",denied=false}={})=>{
     const ops=[],told=[],presses=new Map();let mics=0;
     const track={enabled:true,stop(){}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
-    class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
+    class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
     class Audio {constructor(){this.muted=false;}pause(){}play(){return Promise.resolve();}}
     const fetch=async(url,o)=>{const op=url.split("/").pop(),body=JSON.parse(o.body);ops.push(op==="session"?`session:${body.kind}`:op);return {ok:true,json:async()=>({sessionDescription:{}})};};
     const userActivation={hasBeenActive:active};
@@ -26268,7 +26268,7 @@ const voiceHearingChecks = async () => {
     const remotes=new Map([[2,remote("near","factory",3,0)],[3,remote("mid","factory",0,15)],[4,remote("hall","factory.hall",1,0)],[5,remote("new","factory",2,0,false)]]);
     const state={connectionToken:"synthetic",me:{id:71,login:"listener"},zone:"factory",self:{x:0,y:0,z:0,zone:"factory"}};
     const track={enabled:true,stop(){}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
-    class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(k,fn){if(k==="track")onTrack=fn;}removeEventListener(){}getTransceivers(){return [];}close(){}}
+    class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(k,fn){if(k==="track")onTrack=fn;}removeEventListener(){}getTransceivers(){return [];}close(){}}
     // A real element throws on a volume outside 0..1 or not a number, and iOS's also ignores any it is given.
     const volume=o=>Object.defineProperty(o,"volume",{get(){return o.level;},set(v){if(!(v>=0&&v<=1))throw new TypeError(`volume ${v}`);if(!ios)o.level=v;}});
     class Audio {constructor(){this.muted=false;this.level=1;this.srcObject=null;volume(this);els.push(this);}pause(){}play(){return Promise.resolve();}}
@@ -30447,14 +30447,14 @@ const studioCatalogueProof = async () => {
 // Exercise the shipped voice lifecycle with deferred permissions/signaling and no real devices/network.
 const studioVoiceLifecycleProof = async () => {
   const source=await readFile(join(root,"src/js/voice.js"),"utf8");
-  const fixture=()=>{
-    const calls=[],streams=[],peers=[],elements=[],timers=new Map();let timerId=0,gum=0,permission=null,publishResponse=null,deferred=null;
+  const fixture=(gathering="complete",candidate=true,failFirstPeer=false)=>{
+    const calls=[],streams=[],peers=[],elements=[],timers=new Map();let timerId=0,gum=0,permission=null,publishResponse=null,deferred=null,peerAttempts=0;
     class Peer {
-      constructor(){peers.push(this);this.connectionState="connected";this.iceGatheringState="complete";this.localDescription=null;this.handlers=new Map();}
+      constructor(){if(++peerAttempts===1&&failFirstPeer)throw Error("probe construction failed");peers.push(this);this.connectionState="connected";this.iceGatheringState=gathering;this.localDescription=null;this.handlers=new Map();}
       addEventListener(k,fn){this.handlers.set(k,fn);}
       removeEventListener(k){this.handlers.delete(k);}
       addTransceiver(track){this.track=track;return {mid:"0"};}
-      createOffer(){return Promise.resolve({type:"offer",sdp:"synthetic"});}
+      createOffer(){return Promise.resolve({type:"offer",sdp:candidate?"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n":"v=0"});}
       setLocalDescription(d){this.localDescription=d;return Promise.resolve();}
       setRemoteDescription(){return Promise.resolve();}
       getTransceivers(){return [];}
@@ -30469,6 +30469,18 @@ const studioVoiceLifecycleProof = async () => {
     return {defer(op){let finish;const promise=new Promise(resolve=>{finish=resolve;});deferred={op,promise};return data=>{deferred=null;finish({ok:true,json:async()=>data});};},voice:win.BL.voice,calls,streams,peers,elements,timers,get gum(){return gum;},makeStream,denyPermission(){permission=Promise.reject(Object.assign(Error("denied"),{name:"NotAllowedError"}));},deferPermission(){permission=new Promise(resolve=>{this.resolvePermission=resolve;});},deferPublish(){publishResponse=new Promise(resolve=>{this.resolvePublish=()=>resolve({ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})});});}};
   };
   const drain=async()=>{for(let i=0;i<40;i++)await Promise.resolve();};
+  // A gather timeout is inconclusive; only a completed empty gather may refuse the listener.
+  const slow=fixture("gathering",false),slowJoin=slow.voice.listen();await drain();
+  for(const fn of [...slow.timers.values()])fn();await slowJoin;await drain();
+  const slowGatherJoins=slow.voice.stats.enabled&&slow.calls.some(c=>c.op==="session")&&slow.peers[0].connectionState==="closed";
+  slow.voice.dispose();await drain();
+  const blocked=fixture("complete",false);await blocked.voice.listen();
+  const emptyGatherRefuses=!blocked.voice.stats.enabled&&blocked.voice.stats.error===blocked.voice.ICE_BLOCKED&&!blocked.calls.some(c=>c.op==="session")&&blocked.peers[0].connectionState==="closed";
+  blocked.voice.dispose();await drain();
+  // Failure to construct the optional probe is inconclusive too; the normal connection may still work.
+  const unavailable=fixture("complete",true,true);await unavailable.voice.listen();
+  const unavailableProbeJoins=unavailable.voice.stats.enabled&&unavailable.calls.some(c=>c.op==="session")&&!unavailable.voice.stats.error;
+  unavailable.voice.dispose();await drain();
   const listener=fixture();await listener.voice.listen();await listener.voice.restart();await drain();
   const receiveOnly=listener.gum===0&&listener.voice.stats.enabled&&!listener.voice.stats.publishing&&listener.calls.filter(c=>c.op==="session").every(c=>c.body.kind==="sub");listener.voice.dispose();await drain();
   const audience=fixture();audience.voice.setPeers([],[],1);await audience.voice.enable();await drain();
@@ -30495,7 +30507,7 @@ const studioVoiceLifecycleProof = async () => {
   const latePreviewReleased=previewStream.track.stops===1&&!preview.voice.stats.preflight&&!preview.voice.stats.publishing;
   preview.voice.setReceiveLevel(2);const boundedLevel=preview.voice.stats.receiveLevel===1;preview.voice.setReceiveLevel(-1);const receiveLevel=boundedLevel&&preview.voice.stats.receiveLevel===0;preview.voice.dispose();await drain();
   const autoplay=fixture();await autoplay.voice.listen();autoplay.voice.setPeers([71,72]);await drain();
-  for(const id of [71,72])autoplay.peers[0].handlers.get("track")({transceiver:{mid:String(id)},track:{id,stop(){}}});
+  for(const id of [71,72])autoplay.peers.at(-1).handlers.get("track")({transceiver:{mid:String(id)},track:{id,stop(){}}});
   autoplay.elements[0].pending[0].reject(Error("gesture"));autoplay.elements[1].pending[0].resolve();await drain();
   const aggregateBlocked=autoplay.voice.stats.blocked&&autoplay.voice.stats.error.includes("Enable sound");
   await autoplay.voice.listen();for(const el of autoplay.elements)el.pending.at(-1).resolve();await drain();const retryClears=!autoplay.voice.stats.blocked&&!autoplay.voice.stats.error;
@@ -30508,7 +30520,7 @@ const studioVoiceLifecycleProof = async () => {
   replaced.voice.setPeers([71],[1]);await drain();replaced.voice.setPeers([71],[2]);finishPull({tracks:[{id:71,mid:"old"}]});await drain();
   const publicationReplaced=replaced.calls.some(c=>c.op==="close"&&c.body.mids.includes("old"))&&replaced.calls.filter(c=>c.op==="pull").length===2;replaced.voice.dispose();await drain();
   const leaving=fixture();await leaving.voice.listen();leaving.voice.setPeers([71],[1]);await drain();
-  const remoteTrack={stops:0,stop(){this.stops++;}};leaving.peers[0].handlers.get("track")({transceiver:{mid:"71"},track:remoteTrack});
+  const remoteTrack={stops:0,stop(){this.stops++;}};leaving.peers.at(-1).handlers.get("track")({transceiver:{mid:"71"},track:remoteTrack});
   const latePull=leaving.defer("pull");leaving.voice.setPeers([71,72],[1,1]);await drain();
   const finishLeave=leaving.defer("leave");leaving.voice.stop();latePull({tracks:[{id:72,mid:"72"}]});await drain();
   const leaveStopsAudio=!leaving.voice.stats.enabled&&remoteTrack.stops===1&&leaving.elements.length===1&&leaving.elements.every(el=>el.muted&&el.pauses===1&&el.srcObject===null)&&leaving.peers.every(pc=>pc.connectionState==="closed");
@@ -30516,7 +30528,7 @@ const studioVoiceLifecycleProof = async () => {
   const latePlaybackStaysOff=!leaving.voice.stats.enabled&&!leaving.voice.stats.hearing;leaving.voice.dispose();await drain();
   const restarting=fixture();await restarting.voice.listen();const finishRestart=restarting.defer("leave");const restart=restarting.voice.restart();await drain();restarting.voice.stop();finishRestart({ok:true});await restart;await drain();
   const leaveCancelsRestart=!restarting.voice.stats.enabled&&restarting.calls.filter(c=>c.op==="session").length===1;restarting.voice.dispose();await drain();
-  return {publicationReplaced,leaveStopsAudio,latePlaybackStaysOff,leaveCancelsRestart,receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied,replaced,leaving,restarting].every(f=>f.timers.size===0)};
+  return {slowGatherJoins,emptyGatherRefuses,unavailableProbeJoins,publicationReplaced,leaveStopsAudio,latePlaybackStaysOff,leaveCancelsRestart,receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[slow,blocked,unavailable,listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied,replaced,leaving,restarting].every(f=>f.timers.size===0)};
 };
 
 // The real controller runs against a bounded DOM/media double: no permission prompts or SFU.
@@ -30631,7 +30643,17 @@ const listenOnlyMicStatusProof = async () => {
   ctx.showMic({...base,micWanted:true,publishing:true,muted:true},true);const speakerMuted=note.textContent.startsWith("Mic muted")&&!note.hidden;
   ctx.showMic({...base,micWanted:true,publishing:true},true);const speakerOn=note.textContent==="Mic on";
   const back=quiet({});
-  return {listening,listeningAlone,listeningMuted,afterDrop,speakerAlone,speakerMuted,speakerOn,back};
+  // A returning listener's failed ICE probe must say why it failed instead of offering an unexplained Unmute.
+  const accountStart=source.indexOf("  const ROOM_WORDS"),accountEnd=source.indexOf("\n  // The microphone's note",accountStart);
+  const nodes=new Map(),element=id=>{if(!nodes.has(id))nodes.set(id,{dataset:{},getAttribute(){return "";},setAttribute(){}});return nodes.get(id);};
+  const voice={stats:{returning:true,muted:true,enabled:false,joining:false,micError:"",error:"WebRTC blocked"},ICE_BLOCKED:"WebRTC blocked",support:()=>({secure:true,webrtc:true,mic:true})};
+  const account={BL:{voice},document:{querySelectorAll:()=>[]},$:element};
+  runInNewContext(source.slice(accountStart,accountEnd)+";globalThis.showAccount=showAccount;",account);
+  const live={backend:true,me:{display:"Listener"},room:"live",online:1};account.showAccount(live);
+  const blockedReturn=element("account-voice").textContent==="Voice: WebRTC blocked"&&!element("account-voice").disabled&&!!element("account-voice").title;
+  voice.stats.error="";account.showAccount(live);
+  const clearedReturn=element("account-voice").textContent==="Unmute"&&element("account-voice").title==="";
+  return {listening,listeningAlone,listeningMuted,afterDrop,speakerAlone,speakerMuted,speakerOn,back,blockedReturn,clearedReturn};
 };
 
 // terrain-cache.js under an in-memory IndexedDB and a stand-in Worker: a boot miss must not wait on the Worker (it starts
