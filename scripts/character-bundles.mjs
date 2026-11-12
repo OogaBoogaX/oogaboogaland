@@ -1,5 +1,5 @@
 // Trusted-base GitHub Actions coordinator. No checkout/build of submitted code.
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createGitHub } from "./character-github.mjs";
 import { BOT, OPERATORS, isOperator } from "./character-operators.mjs";
@@ -41,6 +41,45 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
     await comment(pr.number, key, "Post-merge page build and contributor reconciliation dispatched.");
   };
   const openBundles = async () => (await gh.list("pulls?state=open&base=rock")).filter((pr) => isBundle(pr, bot));
+  // Ordinary PRs need statuses, not the repository-wide writer lock. Read only
+  // trusted manifests here; any queued work for this PR stays with the writer.
+  const needsWriter = async (number) => {
+    const pr = await gh.api(`pulls/${number}`);
+    if (pr.base.ref !== "rock") return false;
+    if (pr.state !== "open") return isBundle(pr, bot) || !!(pr.merged_at && isOverride(pr));
+    if (isBundle(pr, bot) || isOverride(pr)) return true;
+    if (pr.draft) {
+      for (const context of [STATUS, BUNDLE_STATUS]) await status(pr.head.sha, context, "pending", "Draft character submissions wait until ready for review");
+      return false;
+    }
+    try {
+      for (const context of [STATUS, BUNDLE_STATUS]) await status(pr.head.sha, context, "pending", "Checking whether character reconciliation is needed");
+      const rock = await ref("rock"), diff = await gh.api(`compare/${rock}...${pr.head.sha}`);
+      if (!diff.merge_base_commit?.sha || !Array.isArray(diff.files) || diff.files.length >= 300) throw new Error("Incomplete character comparison");
+      if (diff.files.some(touchesCharacters)) return true;
+      const bundles = await openBundles();
+      for (const bundle of bundles) {
+        const head = await gh.api(`commits/${bundle.head.sha}`);
+        if (head.author?.login !== bot || !head.commit.verification?.verified) throw new Error("Bundle head is not a verified commit by the trusted automation");
+        const lane = LANES.find((value) => bundle.head.ref.startsWith(branchPrefix(value)));
+        const manifest = await gh.file(bundle.head.sha, manifestPath(lane), 262144);
+        if (!manifest) throw new Error("Bundle provenance is missing");
+        if (readManifest(manifest.source, lane).entries.some((entry) => entry.pr === pr.number)) return true;
+      }
+      // Re-read mutable metadata before passing this exact head. A moving queue
+      // or base takes the serialized path, which inspects the latest PR again.
+      const latest = await gh.api(`pulls/${pr.number}`), currentBundles = await openBundles();
+      if (latest.state !== "open" || latest.draft || latest.head.sha !== pr.head.sha || latest.base.ref !== "rock"
+        || await ref("rock") !== rock || currentBundles.length !== bundles.length
+        || currentBundles.some((row) => !bundles.some((before) => before.number === row.number && before.head.sha === row.head.sha))) return true;
+      await status(pr.head.sha, STATUS, "success", "No character changes or queued submissions for this PR");
+      await status(pr.head.sha, BUNDLE_STATUS, "success", "No character bundle reconciliation needed");
+      return false;
+    } catch (error) {
+      for (const context of [STATUS, BUNDLE_STATUS]) await status(pr.head.sha, context, "failure", "Character inspection unavailable; retry or ask a maintainer");
+      throw error;
+    }
+  };
   const rejectSubmission = async (pr, submission, error) => {
     await status(submission.head, STATUS, "failure", error instanceof CharacterRejection ? error.message : "Scan unavailable or conflicted; retry or ask a maintainer");
     // A timeout, rate limit or base conflict is not evidence of malicious code.
@@ -437,7 +476,7 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
       throw new Error("Direct rock character changes cannot be quarantined after a push. Require PRs and the character checks in branch rules.");
     }
   };
-  return { ensure, intake, mergeDaily, refreshReviews, sweep, auditRock, deployMerged, accountRename, refreshAccountRenames, reconcileOverride };
+  return { ensure, intake, mergeDaily, refreshReviews, sweep, auditRock, deployMerged, accountRename, refreshAccountRenames, reconcileOverride, needsWriter };
 };
 
 export const runAccountRenameChecks = async (coordinator, event) => {
@@ -453,7 +492,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
   if (process.env.GITHUB_EVENT_NAME === "workflow_dispatch" && (!isOperator(event.sender)
     || !OPERATORS.some((operator) => operator.login === process.env.GITHUB_TRIGGERING_ACTOR))) throw new Error("Only w-s-bitcoin and 2140data may operate manual automation runs");
-  if (process.env.CHARACTER_ACCOUNT_RENAMES_ONLY === "true") {
+  if (process.argv.includes("--inspect")) {
+    const write = process.env.CHARACTER_ACCOUNT_RENAMES_ONLY === "true" || !event.pull_request
+      || await coordinator.needsWriter(event.pull_request.number);
+    appendFileSync(process.env.GITHUB_OUTPUT, `write=${write}\n`);
+  } else if (process.env.CHARACTER_ACCOUNT_RENAMES_ONLY === "true") {
     // Maintenance mode has no bundle creation, intake, merge, close, sweep or
     // page dispatch. Reviews still arrive through the unprivileged signal job.
     await runAccountRenameChecks(coordinator, event);

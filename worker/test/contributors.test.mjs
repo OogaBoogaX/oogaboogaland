@@ -15,10 +15,132 @@ import { inspectAccountRename, onlyAccountLoginChanged } from "../../scripts/cha
 import { createGitHub } from "../../scripts/character-github.mjs";
 import { snapshotRename, refreshRenameSnapshot } from "../../scripts/account-rename-snapshot.mjs";
 import { OVERRIDE_VERIFIED, overridePaths } from "../../scripts/character-override.mjs";
+import { createPriority, isRelease, DEFER_STEP } from "../../scripts/ci-priority.mjs";
 
 const NOW = Date.parse("2026-10-04T12:00:00Z");
 const person = (login, extra = {}) => ({ login, counts: { commits: 1 }, first_seen_at: "2026-09-01T00:00:00Z", last_seen_at: "2026-10-04T11:00:00Z", ...extra });
 const snapshot = (...rows) => ({ meta: { org: "OogaBoogaX", schema_version: 3, generated_at: new Date(NOW).toISOString() }, contributors: rows });
+
+test("release priority yields before work and resumes only deferred checks for current PR revisions", async (t) => {
+  const fixture = () => {
+    const f = { runs: [], prs: [], jobs: new Map(), writes: [] };
+    f.add = (id, workflow = "tests.yml", event = "pull_request") => {
+      const run = { id, path: `.github/workflows/${workflow}`, event, head_branch: `feature/${id}`, head_sha: String(id).padStart(40, "0"),
+        status: "completed", conclusion: "failure", run_attempt: 1 };
+      f.runs.push(run);
+      f.prs.push({ number: id, state: "open", draft: false, base: { ref: "rock" }, head: { sha: run.head_sha, ref: run.head_branch } });
+      f.jobs.set(id, [{ id: id * 100, conclusion: "failure", steps: [
+        { name: "Inspect release priority", conclusion: "success" }, { name: DEFER_STEP, conclusion: "failure" }
+      ] }]);
+      return run;
+    };
+    f.release = () => { const run = { id: 999, path: ".github/workflows/pages.yml", head_branch: "rock", event: "push", status: "pending" }; f.runs.push(run); return run; };
+    f.api = async (path, method = "GET") => {
+      const url = new URL(path, "https://example.invalid/"), p = url.pathname.slice(1), q = url.searchParams;
+      if (method === "POST") {
+        assert.match(p, /^actions\/jobs\/\d+\/rerun$/);
+        f.writes.push(p);
+        const run = f.runs.find((row) => row.id * 100 === Number(p.split("/")[2]));
+        run.status = "queued"; run.run_attempt++;
+        return null;
+      }
+      if (p === "pulls") return structuredClone(f.prs);
+      if (p.startsWith("pulls/")) return structuredClone(f.prs.find((pr) => pr.number === Number(p.split("/")[1])));
+      if (p.endsWith("/jobs")) {
+        const jobs = f.jobs.get(Number(p.split("/")[2])); return { total_count: jobs.length, jobs };
+      }
+      if (/^actions\/runs\/\d+$/.test(p)) return structuredClone(f.runs.find((row) => row.id === Number(p.split("/")[2])));
+      if (p === "actions/runs" || p.startsWith("actions/workflows/")) {
+        const rows = f.runs.filter((row) => {
+          if (p.startsWith("actions/workflows/") && row.path !== `.github/workflows/${p.split("/")[2]}`) return false;
+          for (const key of ["status", "head_sha", "event"]) if (q.has(key) && (key === "status" && q.get(key) === "failure" ? row.conclusion : row[key]) !== q.get(key)) return false;
+          return true;
+        });
+        return { total_count: rows.length, workflow_runs: structuredClone(rows) };
+      }
+      throw new Error(`Unexpected priority request ${method} ${path}`);
+    };
+    f.priority = createPriority((...args) => f.api(...args), () => NOW);
+    return f;
+  };
+  await t.test("only real release workflow paths and events get priority, including waiting deployments", async () => {
+    for (const [path, branch, event] of [["pages.yml", "rock", "push"], ["pages.yml", "rock", "workflow_dispatch"],
+      ["cloudflare-staging.yml", "feature/staging", "workflow_dispatch"], ["cloudflare-production.yml", "rock", "workflow_dispatch"]]) {
+      for (const status of ["pending", "queued", "in_progress", "waiting", "requested"]) assert.ok(isRelease({ path: `.github/workflows/${path}`, head_branch: branch, event, status }));
+      assert.ok(!isRelease({ path: `.github/workflows/${path}`, head_branch: branch, event, status: "completed" }));
+    }
+    assert.ok(!isRelease({ path: ".github/workflows/pages.yml", event: "pull_request", head_branch: "rock", status: "queued" }));
+    assert.ok(!isRelease({ path: ".github/workflows/cloudflare-production.yml", event: "workflow_dispatch", head_branch: "feature/x", status: "queued" }));
+    const f = fixture(); f.add(1); f.release();
+    assert.equal((await f.priority.releases()).length, 1);
+    assert.equal(await f.priority.resume(), 0);
+    assert.deepEqual(f.writes, []);
+  });
+  await t.test("resume the yielded job once, preserving successful jobs and rejecting actual failures", async () => {
+    const f = fixture(); f.add(1); f.add(2);
+    f.jobs.get(1).unshift({ id: 101, conclusion: "success", steps: [] });
+    f.jobs.get(2)[0].steps = [{ name: "Run the unit lane", conclusion: "failure" }];
+    assert.equal(await f.priority.resume(), 1);
+    assert.deepEqual(f.writes, ["actions/jobs/100/rerun"]);
+    assert.equal(await f.priority.resume(), 0);
+    // An imitated gate that fails on every attempt cannot consume runners on
+    // every scheduled recovery pass. Manual attempts count toward the cap too.
+    for (let attempt = 2; attempt <= 4; attempt++) {
+      f.runs[0].status = "completed";
+      assert.equal(f.runs[0].run_attempt, attempt);
+      assert.equal(await f.priority.resume(), attempt < 4 ? 1 : 0);
+    }
+    assert.equal(f.writes.length, 3);
+    assert.equal(await f.priority.resume(), 0, "later recovery passes preserve the exhausted limit");
+    for (const attempt of [undefined, 0, -1, 1.5]) {
+      f.runs[0].run_attempt = attempt;
+      assert.equal(await f.priority.resume(), 0, "invalid attempt metadata cannot reset the limit");
+    }
+  });
+  await t.test("stale heads, drafts, closed PRs and newer runs never resurrect old checks", async () => {
+    for (const condition of ["head", "draft", "closed", "newer"]) {
+      const f = fixture(), run = f.add(1);
+      if (condition === "head") f.prs[0].head.sha = "f".repeat(40);
+      if (condition === "draft") f.prs[0].draft = true;
+      if (condition === "closed") f.prs = [];
+      if (condition === "newer") f.runs.push({ ...run, id: 2, conclusion: "success" });
+      assert.equal(await f.priority.resume(), 0, condition);
+      assert.deepEqual(f.writes, []);
+    }
+  });
+  await t.test("head and run-attempt races are rechecked, and another release stops resumption", async () => {
+    for (const moving of ["head", "attempt", "release"]) {
+      const f = fixture(); f.add(1);
+      const api = f.api;
+      f.api = async (path, ...args) => {
+        if (path.includes("/jobs?")) {
+          if (moving === "head") f.prs[0].head.sha = "f".repeat(40);
+          if (moving === "attempt") f.runs[0].run_attempt++;
+          if (moving === "release") f.release();
+        }
+        return api(path, ...args);
+      };
+      assert.equal(await f.priority.resume(), 0, moving);
+      assert.deepEqual(f.writes, []);
+    }
+  });
+  await t.test("deferred character inspection, writers and recovery sweeps resume through their original jobs", async () => {
+    const f = fixture();
+    f.add(1, "character-bundles.yml", "pull_request_target");
+    f.add(2, "character-bundles.yml", "schedule");
+    f.add(3, "character-bundles.yml", "workflow_run");
+    f.add(4, "character-bundles.yml", "workflow_dispatch");
+    assert.equal(await f.priority.resume(), 3);
+    assert.deepEqual(f.writes, ["actions/jobs/100/rerun", "actions/jobs/200/rerun", "actions/jobs/300/rerun"]);
+  });
+  await t.test("unavailable or truncated metadata cannot admit work or launch recovery", async () => {
+    for (const api of [async () => { throw new Error("Unavailable"); }, async () => ({ workflow_runs: [], total_count: 1001 }), async () => ({})]) {
+      const priority = createPriority(api);
+      await assert.rejects(priority.releases());
+      await assert.rejects(priority.resume());
+    }
+  });
+});
 
 const accountRenameFixture = () => {
   const rock = "a".repeat(40), head = "b".repeat(40), path = "src/characters/Bitcoin-Bill.js", repo = "example/land";
@@ -982,6 +1104,88 @@ const overrideFixture = () => {
   return f;
 };
 
+test("regression: ordinary PR checks bypass the writer queue only with complete current metadata and no queued work", async (t) => {
+  const fixture = () => {
+    const f = overrideFixture();
+    f.ordinary = f.addOverride(700, { "README.md": "updated readme\n" });
+    f.ordinary.head.ref = "feature/readme";
+    f.inspect = () => f.coordinator.needsWriter(700);
+    f.states = () => f.statuses.filter((row) => row.sha === f.ordinary.head.sha);
+    return f;
+  };
+  await t.test("unrelated hostile custom code stays unread; only the two intake statuses are written", async () => {
+    const f = fixture(), file = f.gh.file;
+    f.gh.file = async (ref, path) => { assert.ok(path.startsWith(".github/character-bundles/")); return file(ref, path); };
+    assert.equal(await f.inspect(), false);
+    for (const context of ["Character intake", "Character bundle safety"]) assert.equal(f.states().filter((row) => row.context === context).at(-1).state, "success");
+    assert.ok(f.calls.filter((row) => row.method !== "GET").every((row) => row.url.startsWith("statuses/")));
+    assert.equal(f.writes.length + f.updates.length, 0);
+  });
+  await t.test("new and renamed character paths, existing queued entries, bundles and overrides still use the writer", async () => {
+    const f = fixture();
+    f.ordinary.head.sha = f.commit([f.rock], { [f.char("new")]: f.custom("new") }, "maint", false);
+    assert.equal(await f.inspect(), true);
+    assert.equal(await f.coordinator.needsWriter(f.manual.number), true);
+    assert.equal(await f.coordinator.needsWriter(f.override.number), true);
+    const api = f.gh.api;
+    f.gh.api = async (url, ...args) => url.startsWith("compare/")
+      ? { merge_base_commit: { sha: f.rock }, files: [{ filename: "retired.js", previous_filename: f.char("new"), status: "renamed" }] }
+      : api(url, ...args);
+    assert.equal(await f.inspect(), true, "moving a character out of the directory is still a character change");
+    const queued = fixture(), entries = queued.manifest();
+    entries[0].pr = 700;
+    queued.manual.head.sha = queued.commit([queued.manual.head.sha], { [manifestPath("manual")]: JSON.stringify({ version: 1, lane: "manual", openedOn: "2026-11-03", entries }) });
+    assert.equal(await queued.inspect(), true, "a source that restored its character files still needs queue inspection");
+    assert.ok(queued.states().every((row) => row.state === "pending"));
+  });
+  await t.test("drafts wait and ordinary closures do not enqueue writes; merged overrides retain cleanup", async () => {
+    const f = fixture(); f.ordinary.draft = true;
+    assert.equal(await f.inspect(), false);
+    assert.ok(f.states().every((row) => row.state === "pending"));
+    f.ordinary.state = "closed";
+    assert.equal(await f.inspect(), false);
+    f.merge();
+    assert.equal(await f.coordinator.needsWriter(f.override.number), true);
+  });
+  await t.test("truncated comparisons, API failure and missing or untrusted manifests never pass", async () => {
+    for (const fault of ["truncated", "api", "missing", "unsigned", "malformed"]) {
+      const f = fixture(), api = f.gh.api, file = f.gh.file;
+      f.gh.api = async (url, ...args) => {
+        if (url.startsWith("compare/")) {
+          if (fault === "api") throw new Error("API unavailable");
+          if (fault === "truncated") return { merge_base_commit: { sha: f.rock }, files: Array.from({ length: 300 }, () => ({ filename: "README.md" })) };
+        }
+        return api(url, ...args);
+      };
+      if (fault === "missing") f.gh.file = async () => null;
+      if (fault === "malformed") f.gh.file = async () => ({ source: "not JSON" });
+      if (fault === "unsigned") f.commits.get(f.manual.head.sha).verified = false;
+      await assert.rejects(f.inspect());
+      assert.ok(!f.states().some((row) => row.state === "success"), fault);
+      for (const context of ["Character intake", "Character bundle safety"]) assert.equal(f.states().filter((row) => row.context === context).at(-1).state, "failure", fault);
+      assert.equal(f.writes.length, 0);
+      f.gh.file = file;
+    }
+  });
+  await t.test("a changed PR head, base or bundle head goes back through serialized inspection", async () => {
+    for (const moving of ["pr", "rock", "bundle"]) {
+      const f = fixture(), list = f.gh.list;
+      let lists = 0;
+      f.gh.list = async (url) => {
+        const rows = structuredClone(await list(url));
+        if (++lists === 1) {
+          if (moving === "pr") f.ordinary.head.sha = f.commit([f.rock], { [f.char("new")]: f.custom("new") });
+          if (moving === "rock") f.rock = f.commit([f.rock], { "README.md": "new base\n" });
+          if (moving === "bundle") f.manual.head.sha = f.commit([f.manual.head.sha], {});
+        }
+        return rows;
+      };
+      assert.equal(await f.inspect(), true, moving);
+      assert.ok(!f.statuses.some((row) => row.state === "success"), moving);
+    }
+  });
+});
+
 test("a maintainer override PR is verified and audited without parsing replaced sources or touching the queue before merge", async () => {
   const f = overrideFixture();
   // The queued Natalie revision is unreadable as an identity; ordinary readers still refuse it.
@@ -1208,13 +1412,14 @@ test("the identity check lets a verified override delete a malformed character w
   t.after(() => { for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
   const removed = "src/characters/doggyballs.js", added = "src/characters/natalievarty.js";
   let permission = "admin", addedSource = 'BL.characters.add({ handle: "natalievarty", joined: 1, lastCommit: 2 });';
+  let files = [{ filename: removed, status: "removed" }, { filename: added, status: "added" }];
   const fetched = [];
   t.mock.method(globalThis, "fetch", async (url) => {
     const path = url.slice(`https://api.github.com/repos/${repo}/`.length);
     fetched.push(path);
     const file = (source) => ({ type: "file", encoding: "base64", size: source.length, content: Buffer.from(source).toString("base64") });
     let data;
-    if (path.startsWith("pulls/600/files")) data = [{ filename: removed, status: "removed" }, { filename: added, status: "added" }];
+    if (path.startsWith("pulls/600/files")) data = files;
     else if (path.startsWith("collaborators/")) data = { permission };
     else if (path === `contents/${removed}?ref=base`) data = file('BL.characters.add({ handle: "doggyballs", ...hostile });');
     else if (path === `contents/${added}?ref=head`) data = file(addedSource);
@@ -1232,4 +1437,10 @@ test("the identity check lets a verified override delete a malformed character w
   await assert.rejects(checkCharacterIdentities(pr("character-override/varty")), /character-override/);
   permission = "admin"; addedSource = 'BL.characters.add({ handle: "natalievarty", github: "w-s-bitcoin", joined: 1, lastCommit: 2 });';
   await assert.rejects(checkCharacterIdentities(pr("character-override/varty")), /duplicate character handle or GitHub owner/, "the resulting registry stays coherent");
+  for (const change of [{ filename: "scripts/ci-priority.mjs", status: "modified" },
+    { filename: "scripts/renamed.mjs", previous_filename: "scripts/ci-priority.mjs", status: "renamed" }]) {
+    files = [change];
+    await assert.rejects(checkCharacterIdentities(pr("priority-policy")), /operator authority/, "priority recovery is privileged policy, including renamed-away paths");
+    assert.deepEqual(await checkCharacterIdentities(pr("priority-policy", { user: { ...OPERATORS[0], type: "User" } })), []);
+  }
 });
