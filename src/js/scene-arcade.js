@@ -2174,6 +2174,7 @@
   // station, the lamps nearest the view, and the way out.
   let prefetchAt = 0;
   const update = (dt, elapsed) => {
+    if (hockeyPlayers) hockeyPlayers.restore();
     if (queuedCabinet) { const id = queuedCabinet; queuedCabinet = null; open(id); }
     // A scene handoff restores soft mouse-look only. Capture once when the hall
     // is playable again, after the cabinet's return zoom; Escape stays released.

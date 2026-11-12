@@ -13661,6 +13661,40 @@ const hubFall = { name: "hub fall", why: "rule: abyss falls return players and N
       && landed(row.reference) && row.landing.frames <= 8 && landed(row.landing)),
     JSON.stringify({ ...r, respawns }));
 } };
+// The eraser on the real board: the pixels are what the Node checks cannot see.
+const hubChalkboardEraser = { name: "chalkboard eraser", why: "rule: an eraser pass leaves writing illegible, touches nothing outside its footprint and repaints the same everywhere", run: async (b) => {
+  const standAtBoard = () => b.evaluate(`(() => {
+    const B = __ooga, a = B.cavemen.get("portlandhodl"), c = BL.scenes.hub.debug.chalkboardAt;
+    if (B.crew.player !== a) B.pilot.possess(a);
+    const x = c.x + c.frontX * 1.3 - c.rightX * 0.6, z = c.z + c.frontZ * 1.3 - c.rightZ * 0.6;
+    B.pilot.navigate({ position: { x, y: B.island.surfaceAt(x, z), z }, yaw: Math.atan2(c.frontX, c.frontZ), pitch: 0.15, dist: 4 });
+    B.advance(0.5, 1 / 60);
+    return B.project(c.x + c.rightX * 0.45, c.y + 1.25, c.z + c.rightZ * 0.45, {});
+  })()`);
+  const tapAt = async (point) => { await b.click(point.x, point.y); await b.sleep(50); };
+  await tapAt(await standAtBoard());
+  // A scrub over one digit of the message, in real pixels: the digit is gone, nothing outside the swept footprint
+  // changed, and the smudge repaints the same. The digit is the first row's sixth, centred at (600, 320) on the canvas.
+  await b.evaluate(`(() => { const c = document.getElementById("chalk-canvas"); window.__chalkPixels = () => c.getContext("2d").getImageData(0, 0, 1200, 750).data; window.__chalkBefore = __chalkPixels(); document.getElementById("chalk-eraser").click(); })()`);
+  await b.key("r");
+  const upright = await b.evaluate('document.getElementById("chalk-pointer").classList.contains("upright")');
+  await b.key("r");
+  const sideways = await b.evaluate('!document.getElementById("chalk-pointer").classList.contains("upright")');
+  const onBoard = await b.evaluate(`(() => { const r = document.getElementById("chalk-canvas").getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; })()`);
+  const boardAt = (x, y) => ({ x: onBoard.left + x / 1200 * onBoard.width, y: onBoard.top + y / 750 * onBoard.height });
+  await b.drag(boardAt(600, 287), boardAt(600, 353)); await b.sleep(50);
+  const scrub = await b.evaluate(`(() => { const now = __chalkPixels(), then = __chalkBefore, swept = (x, y) => x >= 570 && x < 630 && y >= 266 && y < 374; let outside = 0, ink = 0, left = 0, h = 2166136261;
+    for (let y = 0; y < 750; y++) for (let x = 0; x < 1200; x++) { const i = (y * 1200 + x) * 4; h = Math.imul(Math.imul(Math.imul(h ^ now[i], 16777619) ^ now[i + 1], 16777619) ^ now[i + 2], 16777619);
+      if (!swept(x, y) && (now[i] !== then[i] || now[i + 1] !== then[i + 1] || now[i + 2] !== then[i + 2])) outside++;
+      if (x >= 574 && x < 626 && y >= 276 && y < 364 && then[i] > 170) { ink++; if (now[i] > 130) left++; } }
+    return { outside, ink, left, hash: h >>> 0 }; })()`);
+  await b.evaluate(`document.getElementById("chalk-close").click()`);
+  await tapAt(await standAtBoard());
+  const repaint = await b.evaluate(`(() => { const now = __chalkPixels(); let h = 2166136261; for (let i = 0; i < now.length; i += 4) h = Math.imul(Math.imul(Math.imul(h ^ now[i], 16777619) ^ now[i + 1], 16777619) ^ now[i + 2], 16777619); return h >>> 0; })()`);
+  record("chalkboard eraser pixels: R turns the eraser both ways; a scrub leaves a digit illegible, changes nothing outside the swept footprint, and repaints identically",
+    upright && sideways && scrub.ink > 500 && scrub.left === 0 && scrub.outside === 0 && repaint === scrub.hash, JSON.stringify({ upright, sideways, scrub, repaint }));
+  await b.evaluate(`document.getElementById("chalk-close").click()`);
+} };
 // The chalkboard writes only for an Ooga standing at it (#391): a tap from afar or with no Ooga is refused with a
 // reason, Space and a tap work at the board, and moving the Ooga off closes it.
 const hubChalkboardReach = { name: "chalkboard reach", why: "rule: only an Ooga standing at the chalkboard may write on it; a tap from across the island opened it", run: async (b) => {
@@ -19343,11 +19377,12 @@ const hockeyHallSample = { name: "hockey hall sample", why: "rule: live table sn
     const collect=label=>new Promise(resolve=>{const values=[];let last=0,warm=20;const frame=t=>{if(last&&warm--<=0)values.push(t-last);last=t;if(values.length<120)requestAnimationFrame(frame);else{values.sort((a,b)=>a-b);rows.push({label,medianMs:values[60],p95Ms:values[114],maxMs:values[119],renderer:__ooga.renderer.kind,size:__ooga.renderer.size});resolve();}};requestAnimationFrame(frame);});
     await collect("idle hall");
     const host=B.arcadeGames.airHockey({node:B.scene.createNode(),aim:{x:0},best:0,onEnd:()=>{},burst:()=>{}});host.shared(true);host.multiplayer(true);host.start();
-    const names=B.contributors.activeRoster.map(r=>r.name).filter(n=>n!==B.net.state.body).slice(0,2);
+    const names=B.contributors.activeRoster.map(r=>r.name).filter(n=>n!==B.net.state.body).slice(0,2),tables=B.net.hockeyTables;
+    B.net.hockeyTables=[{s:"0123456789abcdef",ids:[901,902],phase:"play",e:0},null,null];
     for(let side=0;side<2;side++){const p=W.seat(0,side,0,{});B.net.remotes.set(901+side,{id:901+side,login:names[side],display:names[side],body:names[side],zone:W.ZONE,poseZone:W.ZONE,x:p.x,y:0,z:p.z,yaw:p.yaw,hp:100,ko:false,voice:false,muted:false,jet:0,weapon:0});}
     let running=true,last=performance.now(),sent=last,frames=0,bytes=0;
     const stream=t=>{if(!running)return;host.update(Math.min(.05,(t-last)/1000));last=t;if(t-sent>=100){sent=t;const a=host.capture();g.receive(a);frames++;bytes+=JSON.stringify(a).length;}requestAnimationFrame(stream);};requestAnimationFrame(stream);
-    await collect("one live table and two avatars");running=false;g.stop();host.stop();B.net.remotes.delete(901);B.net.remotes.delete(902);
+    await collect("one live table and two avatars");running=false;g.stop();host.stop();B.net.remotes.delete(901);B.net.remotes.delete(902);B.net.hockeyTables=tables;
     return {rows,frames,bytes};
   })()`);
   record("hockey hall sample: snapshots reached the actual hall nodes while rendered frames and avatars remained bounded",result.frames>0&&result.rows.length===2&&result.rows.every(r=>Number.isFinite(r.p95Ms)),JSON.stringify(result));
@@ -19461,14 +19496,88 @@ const hockeyPilot = { name: "hockey pilot", why: "rule: the real hockey physics 
     emit({k:"frame",i:0,s:"0123456789abcdef",q:1,a});const done=a.slice();done[9]=done[15]=7;done[16]=0;emit({k:"frame",i:0,s:"0123456789abcdef",q:2,a:done});emit({k:"frame",i:0,s:"0123456789abcdef",q:1,a:done});session.dispose();
     const lifecycle=starts===1&&ends===1&&side===1&&listeners.size===0&&sent.some(m=>m.k==="input"&&m.x===1000&&m.y===500)&&sent.at(-1).k==="leave";
     net.sendHockey=original.send;net.subscribeHockey=original.subscribe;net.sendPose=original.pose;net.state.selfId=original.id;net.state.room=original.room;
-    game.stop();remote.stop();
-    return {slowStrike,fastStrike,feedback,noReplay,invalid,frames,bytes,largest,physicsMs,positive,negative,halfway,final,mapped,geometry,seats,lifecycle,closed,watchers:__ooga.carnival.watchers,zone:net.state.zone};
+    // The real character rigs reach toward the displayed mallet, including local prediction and
+    // opposite ends. Releasing presentation must restore every joint before ordinary animation resumes.
+    const savedTables=net.hockeyTables, poseRoot=B.scene.createNode(), rigs=["portlandhodl","YellowBrokeIt"].map((name,i)=>B.models.caveman({...B.contributors.traitsFor(name),height:i?1.16:.92}));
+    // A character can stand higher on authored soles (Midy's model hook does this).
+    rigs[0].root.position.y+=.03;
+    const hips=rigs.map(r=>r.root.position.y);
+    for(const rig of rigs)B.scene.addChild(poseRoot,rig.root);
+    const poseNode=B.scene.createNode({position:{x:W.TABLES[0][0],y:0,z:W.TABLES[0][1]+.65+1.1*W.SCALE}});B.scene.addChild(poseRoot,poseNode);
+    const pointer={x:0,depth:0}, poseGame=B.arcadeGames.airHockey({node:poseNode,aim:pointer,best:0,onEnd(){},burst(){}});
+    poseGame.multiplayer(true,0);poseGame.start();
+    const table={s:"0123456789abcdef",ids:[101,102],phase:"play",e:0};net.hockeyTables=[table,null,null];
+    const presentation=B.hockeyPlayers.create({root:poseRoot,games:[poseGame],body:id=>rigs[id-101]});
+    const handles={x:0,y:0,z:0}, samples=[];
+    const pose=r=>JSON.stringify([r.root,...["torso","head","legL","legR","armL","armR","forearmL","forearmR","fingersL","fingersR"].map(k=>r.parts[k]).filter(Boolean)].map(n=>[n.position,n.rotation,n.quaternion,n.scale,n.poseYaw,n.poseLean]));
+    let poseRestored=true, lastPose=null;
+    for(const end of [0,1])for(const px of [-1,-.5,0,.5,1])for(const depth of [0,.25,.5,.75,1]) {
+      presentation.restore();
+      if(lastPose)poseRestored&&=rigs.every((r,i)=>pose(r)===lastPose[i]);
+      table.e=end;poseGame.orientation(end);pointer.x=px;pointer.depth=depth;poseGame.peerInput(-px,depth);poseGame.update(1/60);
+      rigs.forEach((r,side)=>{const at=W.seat(0,side^end,0,{});r.root.position.x=at.x;r.root.position.z=at.z;r.root.rotation.y=at.yaw;});
+      lastPose=rigs.map(pose);
+      presentation.update(1/60);B.scene.updateWorld(poseRoot);
+      for(let side=0;side<2;side++){
+        poseGame.mallet(side,handles);const r=rigs[side],m=r.parts.fingersR.world;
+        const error=Math.hypot(m[12]-handles.x,m[13]-handles.y,m[14]-handles.z);
+        const foot=r.root.world,leg=hips[side],fx=foot[12]-foot[4]*leg-W.TABLES[0][0],fz=foot[14]-foot[6]*leg-W.TABLES[0][1];
+        samples.push({end,px,depth,side,error,half:(side^end)?-fz:fz,outside:Math.abs(fx)>=B.arcadeModels.HOCKEY.d*W.SCALE/2||Math.abs(fz)>=B.arcadeModels.HOCKEY.w*W.SCALE/2,scale:r.parts.armR.scale.y,authoredScale:r.armScale,x:r.root.position.x,z:r.root.position.z});
+      }
+    }
+    let reversalStep=0,reversalError=0,previousFeet=null;
+    for(let frame=0;frame<24;frame++){
+      presentation.restore();table.e=0;poseGame.orientation(0);pointer.x=frame%2?.005:-.005;pointer.depth=0;poseGame.peerInput(-pointer.x,0);poseGame.update(1/60);
+      lastPose=rigs.map(pose);presentation.update(1/60);B.scene.updateWorld(poseRoot);
+      const feet=rigs.map((r,side)=>{
+        poseGame.mallet(side,handles);const m=r.parts.fingersR.world;
+        reversalError=Math.max(reversalError,Math.hypot(m[12]-handles.x,m[13]-handles.y,m[14]-handles.z));
+        const foot=r.root.world,leg=hips[side];return [foot[12]-foot[4]*leg,foot[14]-foot[6]*leg];
+      });
+      if(previousFeet)for(let side=0;side<2;side++)reversalStep=Math.max(reversalStep,Math.hypot(feet[side][0]-previousFeet[side][0],feet[side][1]-previousFeet[side][1]));
+      previousFeet=feet;
+    }
+    // A delayed leave acknowledgement must not pull the hall visitor back into a cached match.
+    presentation.restore();
+    const savedSelf=net.state.selfId, hallPose=pose(rigs[0]);
+    net.state.selfId=table.ids[0];presentation.update(1/60);
+    const hallReleased=pose(rigs[0])===hallPose;
+    presentation.restore();net.state.selfId=savedSelf;
+    if (${!!process.env.HOCKEY_SHOTS}) window.__hockeyCapture={poseRoot,rigs,poseGame,table};
+    presentation.dispose();
+    poseRestored&&=rigs.every((r,i)=>pose(r)===lastPose[i]);
+    net.hockeyTables=savedTables;poseGame.stop();game.stop();remote.stop();
+    return {samples,poseRestored,hallReleased,reversalStep,reversalError,slowStrike,fastStrike,feedback,noReplay,invalid,frames,bytes,largest,physicsMs,positive,negative,halfway,final,mapped,geometry,seats,lifecycle,closed,watchers:__ooga.carnival.watchers,zone:net.state.zone};
   })()`);
   record("hockey pilot: real two-human physics produces bounded compact frames and both directions of the far mallet", result.invalid===0&&result.frames>10&&result.largest<=256&&result.positive&&result.negative,JSON.stringify(result));
   record("hockey pilot: faster pointer strokes transfer more speed to the puck without a smash",result.slowStrike>0&&result.fastStrike>result.slowStrike&&result.fastStrike<=7501,JSON.stringify({slow:result.slowStrike,fast:result.fastStrike}));
+  record("hockey pilot: small and tall humans keep palm contact across both halves without arm stretch, stand outside their half and restore every joint",result.poseRestored&&result.samples.every(s=>s.error<.003&&s.half>=.17&&s.outside&&s.scale===s.authoredScale),JSON.stringify({restored:result.poseRestored,samples:result.samples}));
+  record("hockey pilot: rapid small reversals keep a continuous stance and immediate rigid palm contact",result.reversalStep<.05&&result.reversalError<.003,JSON.stringify({step:result.reversalStep,error:result.reversalError}));
+  record("hockey pilot: returning to the hall restores the walking body even while a cached table still owns its seat",result.hallReleased);
   record("hockey pilot: spectators interpolate two frames without extrapolation; sessions deliver one start and finish and release subscriptions",result.halfway===200&&result.final===400&&result.lifecycle&&result.feedback&&result.noReplay,JSON.stringify(result));
   record("hockey pilot: all three rendered table transforms match the enlarged hall contract, real seats straddle them, no roster audience and Arcade audio zone remains",result.mapped&&result.geometry.length===3&&result.seats[0].z>-4.75&&result.seats[1].z< -4.75&&result.watchers===0&&result.zone==="arcade.hall",JSON.stringify(result));
-  console.log("HOCKEY_MEASURE "+JSON.stringify(result));
+  if (process.env.HOCKEY_SHOTS) {
+    mkdirSync(process.env.HOCKEY_SHOTS,{recursive:true});
+    await b.evaluate(`(() => {
+      const C=window.__hockeyCapture,B=BL,W=B.hockeyWire,S=B.scene,c=W.TABLES[0],model=B.arcadeModels.airHockey();
+      S.addChild(C.poseRoot,S.createNode({geometry:model.body,position:{x:c[0],y:0,z:c[1]},rotation:{x:0,y:Math.PI/2,z:0},scale:{x:W.SCALE,y:1,z:W.SCALE}}));
+      S.addChild(C.poseRoot,S.createNode({geometry:model.lit,position:{x:c[0],y:0,z:c[1]},rotation:{x:0,y:Math.PI/2,z:0},scale:{x:W.SCALE,y:1,z:W.SCALE}}));
+      C.tables=B.net.hockeyTables;B.net.hockeyTables=[C.table,null,null];C.table.e=0;
+      C.hidden=[document.querySelector('[data-intro="hockey"]'),document.getElementById("carnival")].map(n=>[n,n.style.visibility]);for(const [n] of C.hidden)n.style.visibility="hidden";
+      C.players=B.hockeyPlayers.create({root:C.poseRoot,games:[C.poseGame],body:id=>C.rigs[id-101]});
+      C.camera=S.createCamera({orthoMix:1,orthoHeight:4.5});Object.assign(C.camera.position,{x:c[0]+3.5,y:3.4,z:c[1]+3.5});Object.assign(C.camera.target,{x:c[0],y:.55,z:c[1]});
+      C.render=__ooga.renderer.render;__ooga.renderer.render=(_root,_camera,opts)=>C.render(C.poseRoot,C.camera,opts);
+    })()`);
+    try {
+      for(const [name,x,depth] of [["center",0,1],["corner",1,0],["opposite",-1,1]]) {
+        await b.evaluate(`(() => {const C=window.__hockeyCapture;C.players.restore();C.poseGame.receive([0,660,0,0,${x*480},${70+depth*960},${-x*480},${2130-depth*960},0,0,-1,0,-1000,-1000,0,0,1,0]);C.poseGame.orientation(0);C.poseGame.follow(.2);C.players.update(1/60);BL.scene.updateWorld(C.poseRoot);__ooga.renderer.render(C.poseRoot,C.camera,__ooga.renderOpts);})()`);
+        await b.screenshot(join(process.env.HOCKEY_SHOTS,`hockey-${name}.png`));
+      }
+    } finally {
+      await b.evaluate(`(() => {const C=window.__hockeyCapture;__ooga.renderer.render=C.render;BL.net.hockeyTables=C.tables;C.players.dispose();for(const [n,v] of C.hidden)n.style.visibility=v;delete window.__hockeyCapture;})()`);
+    }
+  }
+  console.log("HOCKEY_MEASURE "+JSON.stringify({...result,samples:undefined,poseSamples:result.samples.length,maxHandError:Math.max(...result.samples.map(s=>s.error))}));
 } };
 const carnivalPlay = (kind, step) => ({ name: `${kind} playthrough`, why: "playthrough: the carnival game runs from its title card through its rounds to results, and saves its best and the tickets it paid", run: async (b) => {
   const before = await b.evaluate("window.__ooga.game.state.arcade.tickets");
@@ -21439,7 +21548,7 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
 } };
 // Sessions that need portlandhodl awake on the surface pin it (ooga=): by itself his state comes from the real activity snapshot, and once
 // it has aged he boots asleep in the headquarters, where jetpacks are refused and his gorilla is in bed.
-scene("hub", { label: "player stacking", query: "ooga=portlandhodl:clank:lab,obl,lf&solo=1&character=portlandhodl&pos=0", steps: [hubPlayerStacking, hubChalkboardReach, hubVoiceLevels] });
+scene("hub", { label: "player stacking", query: "ooga=portlandhodl:clank:lab,obl,lf&solo=1&character=portlandhodl&pos=0", steps: [hubPlayerStacking, hubChalkboardReach, hubChalkboardEraser, hubVoiceLevels] });
 // A fresh page, as the phone run has: after the steps above, the peer tooltip this check measures can read as hidden.
 scene("hub", { label: "live nameplates", query: "ooga=portlandhodl:clank:lab,obl,lf&solo=1&character=portlandhodl&pos=0", steps: [hubNameplates] });
 scene("hub", { label: "lab flask approach", query: "solo=1&character=portlandhodl&status=clankin", steps: [{ name: "gorilla lab exit through Oogas", why: "regression: Ooga occupancy, body sweeps and head support blocked gorillas leaving the lab", run: async (b) => {
@@ -27931,6 +28040,151 @@ const privatePadChecks = async () => {
   record("private pads: a record that can't be written, kept or read stops the pad, and so does a pad used up",
     unwritable.error === "storage" && dropped.error === "storage" && unreadable.error === "record" && usedUp === "exhausted", JSON.stringify({ unwritable, dropped, unreadable, usedUp }));
 };
+// Rule: what the eraser's cursor covers is what it erases, one footprint for a tap, the same ground whichever way it
+// travels, held to the smudge's floor and ceiling and the same on every repaint; and an eraser line stored before the
+// footprint draws as it always did.
+const chalkboardEraserChecks = async (BL) => {
+  const EW = 58, EH = 26, W = 1200, H = 750, nodes = new Map(), timers = [], C = BL.chalkBoard, tiles = new Map();
+  let stored = null, rect = { left: 0, top: 0, width: 800, height: 500 }, saved = null;
+  // A canvas that keeps what is filled and stroked, with the path each used.
+  const calls = [], state = { path: [] };
+  // Each smudge tile is its own pattern, known by the order it was made; the tiles draw on a canvas nobody records.
+  const inert = new Proxy({}, { get: (t, k) => k in t ? t[k] : () => {}, set: (t, k, v) => (t[k] = v, true) });
+  const ctx = new Proxy(state, { get: (t, k) => k in t ? t[k] : k === "createPattern" ? (tile) => { if (!tiles.has(tile)) tiles.set(tile, { tile: tiles.size }); return tiles.get(tile); } : k === "measureText" ? () => ({ width: 30 })
+    : k === "beginPath" ? () => { t.path = []; } : k === "moveTo" || k === "lineTo" ? (x, y) => { t.path.push([x, y]); }
+    : k === "fill" ? () => { calls.push({ op: "fill", style: t.fillStyle, blend: t.globalCompositeOperation, path: t.path }); }
+    : k === "stroke" ? () => { calls.push({ op: "stroke", style: t.strokeStyle, width: t.lineWidth, cap: t.lineCap, path: t.path }); } : () => {}, set: (t, k, v) => (t[k] = v, true) });
+  const element = () => { const classes = new Set(), attributes = {}; return { handlers: {}, style: {}, dataset: {}, hidden: false, disabled: false, value: "", textContent: "", attributes,
+    classList: { toggle(name, on) { if (on) classes.add(name); else classes.delete(name); }, add(name) { classes.add(name); }, remove(name) { classes.delete(name); }, contains: name => classes.has(name) },
+    setAttribute(name, value) { attributes[name] = value; }, focus() {}, blur() {}, addEventListener(type, fn) { this.handlers[type] = fn; } }; };
+  const document = { pointerLockElement: null, createElement: () => ({ getContext: () => inert }), getElementById(id) {
+    if (!nodes.has(id)) nodes.set(id, Object.assign(element(), id === "chalk-modal" ? { open: false, showModal() { this.open = true; }, close() { if (this.open) { this.open = false; this.handlers.close(); } } }
+      : id === "chalk-canvas" ? { getContext: () => ctx, getBoundingClientRect: () => rect, setPointerCapture() {}, hasPointerCapture: () => true, releasePointerCapture() {} } : {}));
+    return nodes.get(id);
+  } };
+  const f = netFixture(BL, () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "YellowBrokeIt", display: "Yellow" } }) }));
+  const window = { BL: { chalkBoard: C, net: f.net } };
+  // Boards kept from before the footprint: an eraser line at either stored width, over a line of chalk.
+  const old = [{ t: "c", s: 2, p: [0.1, 0.5, 0.9, 0.5] }, { t: "e", s: 4, p: [0.2, 0.4, 0.3, 0.6] }, { t: "e", p: [0.5, 0.4, 0.6, 0.6] }];
+  saved = JSON.stringify(old);
+  runInNewContext(await readFile(join(root, "src/js/chalkboard.js"), "utf8"), { window, document, AbortController, setTimeout: fn => timers.push(fn), clearTimeout() {},
+    requestAnimationFrame: () => 1, cancelAnimationFrame() {}, localStorage: { getItem: k => k === "ooga-chalkboard-v3" ? saved : null, setItem(k, v) { stored = JSON.parse(v); } } });
+  const board = window.BL.chalkboard.create({ renderer: {}, onOpen() {}, onClose() {}, onRefused() {} });
+  const dialog = document.getElementById("chalk-modal"), canvas = document.getElementById("chalk-canvas"), pointerNode = document.getElementById("chalk-pointer"), held = document.getElementById("chalk-held");
+  const pointer = (type, x, y) => canvas.handlers[type]({ isPrimary: true, button: 0, pointerId: 1, pointerType: "mouse", clientX: x, clientY: y, preventDefault() {} });
+  const stroke = (...points) => { pointer("pointerdown", ...points[0]); for (const p of points.slice(1)) pointer("pointermove", ...p); pointer("pointerup", ...points.at(-1)); };
+  const smudged = (c) => c.op === "fill" && c.style?.tile !== undefined;
+  // The pixels a set of fills covers, by pixel centre, on the smudge's fills only.
+  const covered = (from) => {
+    const cells = new Set();
+    for (const call of calls.slice(from)) {
+      if (!smudged(call)) continue;
+      const { path } = call;
+      const xs = path.map(p => p[0]), ys = path.map(p => p[1]);
+      for (let y = Math.min(...ys); y < Math.max(...ys); y++) for (let x = Math.min(...xs); x < Math.max(...xs); x++) {
+        let inside = false;
+        for (let i = 0, j = path.length - 1; i < path.length; j = i++) {
+          const [ax, ay] = path[i], [bx, by] = path[j];
+          if ((ay > y + 0.5) !== (by > y + 0.5) && x + 0.5 < (bx - ax) * (y + 0.5 - ay) / (by - ay) + ax) inside = !inside;
+        }
+        if (inside) cells.add(`${x},${y}`);
+      }
+    }
+    return cells;
+  };
+  const box = (l, t, w = EW, h = EH) => { const cells = new Set(); for (let y = t; y < t + h; y++) for (let x = l; x < l + w; x++) cells.add(`${x},${y}`); return cells; };
+  const same = (a, b) => a.size === b.size && [...a].every(c => b.has(c));
+  const holds = (a, b) => [...b].every(c => a.has(c));
+  const corner = (x, y) => [Math.round(Math.round(x / rect.width * 1000) / 1000 * W - EW / 2), Math.round(Math.round(y / rect.height * 1000) / 1000 * H - EH / 2)];
+  // Old marks: repainted at open, a 192 and a 48 wide band, butt-ended, with their smudges, and no bare-board fill.
+  board.open(null);
+  const bands = calls.filter(c => c.op === "stroke" && c.cap === "butt").map(c => [c.width, c.style]);
+  const oldDrawn = JSON.stringify(bands) === JSON.stringify([[192, "rgba(27,65,52,0.9)"], [128, "rgba(177,196,167,0.11)"], [48, "rgba(27,65,52,0.9)"], [32, "rgba(177,196,167,0.11)"]])
+    && !calls.some(smudged);
+  document.getElementById("chalk-eraser").handlers.click();
+  // The cursor is the footprint at this board's size on screen, centred where a press would erase, at any size.
+  const sizes = [];
+  for (const [width, height, x, y] of [[800, 500, 401, 251], [1200, 750, 333, 444], [360, 225, 100, 77]]) {
+    rect = { left: 10, top: 20, width, height };
+    pointer("pointermove", x + 10, y + 20);
+    const [l, t] = corner(x, y), near = (a, b) => Math.abs(parseFloat(a) - b) < 1e-6;
+    sizes.push(near(held.style.width, EW * width / W) && near(held.style.height, EH * height / H)
+      && near(pointerNode.style.left, (l + EW / 2) * width / W) && near(pointerNode.style.top, (t + EH / 2) * height / H));
+  }
+  rect = { left: 0, top: 0, width: 1200, height: 750 };
+  const cursor = sizes.every(Boolean);
+  // A tap erases exactly one footprint.
+  let from = calls.length; stroke([600, 300]);
+  const [tapL, tapT] = corner(600, 300), tap = same(covered(from), box(tapL, tapT));
+  // A drag covers the whole rectangle at both ends, and the same ground either way, whichever way it goes.
+  const directions = [];
+  for (const [ax, ay, bx, by] of [[300, 300, 500, 300], [300, 300, 300, 500], [300, 300, 500, 450], [500, 300, 300, 450], [300, 200, 301, 400]]) {
+    from = calls.length; stroke([ax, ay], [bx, by]); const forward = covered(from);
+    from = calls.length; stroke([bx, by], [ax, ay]); const backward = covered(from);
+    directions.push(same(forward, backward) && holds(forward, box(...corner(ax, ay))) && holds(forward, box(...corner(bx, by))));
+  }
+  const swept = directions.every(Boolean);
+  // A level drag covers its rectangle's height and nothing more: no band that widens with the line's direction.
+  from = calls.length; stroke([300, 300], [500, 300]);
+  const levelCells = covered(from), [levelL] = corner(300, 300), [levelR] = corner(500, 300), level = levelCells.size === (levelR - levelL + EW) * EH;
+  // A pointer that stops a little past the last point it laid still erases to where the cursor stands.
+  from = calls.length; stroke([700, 500], [800, 500], [802, 500]);
+  const [endL, endT] = corner(802, 500), reached = holds(covered(from), box(endL, endT));
+  // Clicking Eraser again turns the block upright, the cursor with it at once, and R turns it back; each line keeps
+  // the way it was held when drawn.
+  const eraserButton = document.getElementById("chalk-eraser"), hint = document.getElementById("chalk-hint"), heldIs = (w, h) => Math.abs(parseFloat(held.style.width) - w) < 1e-6 && Math.abs(parseFloat(held.style.height) - h) < 1e-6;
+  pointer("pointermove", 400, 600);
+  const sideways = heldIs(EW, EH) && eraserButton.attributes["aria-label"].includes("sideways") && hint.textContent.includes("press R");
+  eraserButton.handlers.click();
+  const clicked = heldIs(EH, EW) && pointerNode.classList.contains("upright") && eraserButton.attributes["aria-label"].includes("upright") && eraserButton.attributes["aria-pressed"] === "true";
+  from = calls.length; stroke([400, 600]);
+  const uprightTap = same(covered(from), box(387, 571, EH, EW));
+  let prevented = false;
+  dialog.handlers.keydown({ key: "R", preventDefault() { prevented = true; } });
+  const keyed = prevented && heldIs(EW, EH) && !pointerNode.classList.contains("upright");
+  dialog.handlers.keydown({ key: "r", ctrlKey: true, preventDefault() {} });
+  const chord = heldIs(EW, EH);
+  from = calls.length; stroke([800, 600]);
+  const sidewaysTap = same(covered(from), box(771, 587));
+  const turned = sideways && clicked && uprightTap && keyed && chord && sidewaysTap;
+  // Every step clamps down to the ceiling, then up to the floor, over the same path, and leaves normal drawing on.
+  const fills = calls.filter(smudged), erasers = fills.length;
+  const clamped = erasers > 0 && erasers % 2 === 0 && fills.every((c, i) => c.blend === (i % 2 ? "lighten" : "darken") && (i % 2 === 0 || (JSON.stringify(c.path) === JSON.stringify(fills[i - 1].path) && c.style !== fills[i - 1].style))) && state.globalCompositeOperation === "source-over";
+  dialog.close();
+  const kept = stored.slice(0, old.length), oldKept = JSON.stringify(kept) === JSON.stringify(old);
+  const newMarks = stored.slice(old.length), tagged = newMarks.length > 2 && newMarks.every((m, i) => m.t === "e" && m.s === 4 && m.f === (i === newMarks.length - 2 ? 2 : 1));
+  const tapMark = JSON.stringify(newMarks[0].p) === JSON.stringify([0.5, 0.4, 0.5, 0.4]);
+  record("chalkboard eraser: the cursor is the footprint at any board size, a tap erases one footprint, a drag sweeps the same ground either way and reaches where the pointer stopped, Eraser again or R turns the block and each line keeps how it was held; marks stored before it draw their old band and stay as stored",
+    oldDrawn && cursor && tap && swept && level && reached && turned && oldKept && tagged && tapMark && clamped, JSON.stringify({ oldDrawn, bands, sizes, tap, directions, level, reached, turn: { sideways, clicked, uprightTap, keyed, chord, sidewaysTap }, oldKept, tagged, tapMark, erasers, clamped }));
+  // A replay paints the same as the stroke did, draw for draw, and another's live edit paints the same footprint.
+  const drawn = (start) => JSON.stringify(calls.slice(start).filter(smudged).map(c => [c.style.tile, c.blend, c.path]));
+  from = calls.length; board.open(null); const replayed = covered(from), firstPaint = drawn(from); dialog.close();
+  from = calls.length; board.open(null); const repainted = drawn(from) === firstPaint && firstPaint.length > 2; dialog.close();
+  const seeded = !(await readFile(join(root, "src/js/chalkboard.js"), "utf8")).includes("Math.random");
+  await f.net.start(); const ws = f.sockets[0], room = v => ws.onmessage({ data: JSON.stringify(v) });
+  room({ t: "welcome", you: { id: 71 }, players: [{ id: 72, login: "peer", display: "Peer", body: "w-s-bitcoin", zone: "outside", x: 0, y: 0, z: 0, yaw: 0 }], now: Date.now(), features: [C.FEATURE] });
+  room({ t: "chalk-board", marks: [...old, { t: "e", s: 4, f: 1, p: [0.25, 0.25, 0.25, 0.25] }], editor: 72 });
+  const roomKept = f.net.state.chalk?.board.marks.at(-1).f === 1 && f.net.state.chalk.board.marks[1].f === undefined;
+  from = calls.length; room({ t: "chalk", id: 72, k: "line", m: "e", p: [500, 400, 500, 400] });
+  const live = same(covered(from), box(571, 287));
+  from = calls.length; room({ t: "chalk", id: 72, k: "more", p: [600, 400] });
+  const liveMore = same(covered(from), (() => { const cells = new Set(); for (let y = 287; y < 313; y++) for (let x = 571; x < 749; x++) cells.add(`${x},${y}`); return cells; })());
+  // The contract: a new line is told apart, the board reads back with it, nothing else may carry it.
+  const b = C.board([]), s = C.session(b); C.apply(b, { k: "line", m: "e", p: [10, 10, 20, 20] }, s); C.apply(b, { k: "line", m: "c", p: [10, 10, 20, 20] }, s);
+  C.apply(b, C.parse({ k: "line", m: "e", o: 2, p: [10, 10, 20, 20] }), s);
+  const applied = b.marks[0].f === 1 && b.marks[0].s === 4 && b.marks[1].f === undefined && b.marks[1].s === 2 && b.marks[2].f === 2 && b.marks[2].s === 4;
+  const edits = JSON.stringify(C.parse({ k: "line", m: "e", o: 2, p: [1, 1, 2, 2] })) === JSON.stringify({ k: "line", m: "e", o: 2, p: [1, 1, 2, 2] }) && C.parse({ k: "line", m: "e", o: 1, p: [1, 1, 2, 2] }).o === undefined
+    && [{ m: "e", o: 3 }, { m: "e", o: "2" }, { m: "c", o: 2 }].every(m => C.parse({ k: "line", p: [1, 1, 2, 2], ...m }) === null);
+  from = calls.length; room({ t: "chalk", id: 72, k: "line", m: "e", o: 2, p: [250, 400, 250, 400] });
+  const liveUpright = same(covered(from), box(287, 271, EH, EW)) && f.net.state.chalk.board.marks.at(-1).f === 2;
+  const line = (mark) => ({ p: [0, 0, 1, 1], ...mark });
+  const accepted = [{ t: "e", s: 4, f: 1 }, { t: "e", s: 4, f: 2 }, { t: "e", s: 4 }, { t: "e" }, { t: "c", s: 2 }].every(m => C.restore([line(m)]));
+  const refused = [{ t: "c", s: 2, f: 1 }, { t: "c", s: 2, f: 2 }, { t: "e", s: 4, f: 3 }, { t: "e", s: 4, f: "1" }].every(m => C.restore([line(m)]) === null);
+  const widened = C.widen([line({ t: "e", s: 4, f: 1 })])[0].f === 1;
+  record("chalkboard eraser marks: a replay paints the same smudge draw for draw from no random source, another's live edit paints the footprint; the contract tags new eraser lines sideways or upright, takes the edit's `o` and refuses a bad one, keeps their width for older readers, reads back old and new, and refuses a bad tag",
+    replayed.size > 0 && repainted && seeded && roomKept && live && liveMore && liveUpright && applied && edits && accepted && refused && widened, JSON.stringify({ replayed: replayed.size, repainted, seeded, roomKept, live, liveMore, liveUpright, applied, edits, accepted, refused, widened }));
+  board.dispose?.(); f.net.dispose();
+};
 // Rule (#391): the chalkboard on the page edits only through the shared contract. Alone it keeps the visitor's own
 // board; signed in to a room that shares it, it opens only once the room says this page holds it, sends what it
 // draws and types, follows another's writing, and shuts with a reason when the board is taken from it.
@@ -27940,7 +28194,7 @@ const chalkboardClientChecks = async (BL) => {
   const element = () => ({ handlers: {}, style: {}, dataset: {}, hidden: false, disabled: false, value: "", textContent: "",
     classList: { toggle() {}, add() {}, remove() {} }, setAttribute() {}, focus() {}, blur() {}, addEventListener(type, fn) { this.handlers[type] = fn; } });
   const ctx = new Proxy({}, { get: (t, k) => k in t ? t[k] : k === "measureText" ? () => ({ width: 30 }) : () => {}, set: (t, k, v) => (t[k] = v, true) });
-  const document = { pointerLockElement: null, getElementById(id) {
+  const document = { pointerLockElement: null, createElement: () => ({ getContext: () => ctx }), getElementById(id) {
     if (!nodes.has(id)) nodes.set(id, Object.assign(element(), id === "chalk-modal" ? { open: false, showModal() { this.open = true; }, close() { if (this.open) { this.open = false; this.handlers.close(); } } }
       : id === "chalk-canvas" ? { getContext: () => ctx, getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 500 }), setPointerCapture() {}, hasPointerCapture: () => true, releasePointerCapture() {} } : {}));
     return nodes.get(id);
@@ -30676,6 +30930,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   await reactionWireChecks(BL);
   await persistentSlotChecks(BL);
   await chalkboardClientChecks(BL);
+  await chalkboardEraserChecks(BL);
   await chatAccountChecks(BL);
   await rememberedCharacterChecks(BL);
   await playersTabChecks(BL);
