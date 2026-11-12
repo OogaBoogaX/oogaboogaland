@@ -4339,7 +4339,7 @@ const scene = (id, { query = "", steps, perf = false, opts = {}, label = "", url
   } });
 };
 // contributors.js reads the roster from the character files, which build on math, scene and models.
-const CONTRIBUTOR_SOURCES = ["math", "scene", "models", "caves", "contributor-identities", "activity-repos", "characters", "characters.gen", "contributors"];
+const CONTRIBUTOR_SOURCES = ["math", "scene", "models", "hero-body", "caves", "contributor-identities", "activity-repos", "characters", "characters.gen", "contributors"];
 const contributorActivityChecks = async () => {
   const context = { window: {}, URLSearchParams, location: { search: "" } };
   for (const name of CONTRIBUTOR_SOURCES) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
@@ -4853,7 +4853,7 @@ const hudNoticeChecks = async () => {
 const characterChecks = async () => {
   const context = { window: {}, URLSearchParams, location: { search: "" } };
   for (const name of CONTRIBUTOR_SOURCES) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
-  const BL = context.window.BL, all = BL.characters.all(), hooks = ["torso", "club", "gear", "skull", "crown", "eyes", "mark", "hatY", "headgear", "extras", "tint", "refine"], mirrorGeometries = new Set();
+  const BL = context.window.BL, all = BL.characters.all(), hooks = ["torso", "club", "gear", "skull", "crown", "eyes", "mark", "hatY", "headgear", "extras", "tint", "refine", "model"], mirrorGeometries = new Set();
   const collect = node => {
     if (node.geometry) mirrorGeometries.add(node.geometry);
     if (node.skins) for (const skin of Object.values(node.skins)) mirrorGeometries.add(skin);
@@ -6203,7 +6203,7 @@ const environmentSoundChecks = async () => {
 const hammockChecks = async () => {
   // The page's default: finished character bakes are packed compactly, as the live crew's are.
   const real = { window: { location: { search: "" } }, location: { search: "" }, URLSearchParams, document: { createElement: () => ({ getContext: () => null }) }, performance, console };
-  for (const name of ["math", "compact-geometry", "scene", "models", "hub-models", "convex", "solid-props", "hub-hammock"])
+  for (const name of ["math", "compact-geometry", "scene", "models", "hero-body", "hub-models", "convex", "solid-props", "hub-hammock"])
     runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), real);
   const R = real.window.BL, H = R.hubHammock, flat = () => 0, clear = (x, z, r) => z > 1 + r;
   const plan = (a, b, fits = clear) => H.plan({ a: { ...a, ground: 0 }, b: { ...b, ground: 0 }, clear: fits, surfaceAt: flat });
@@ -13364,7 +13364,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
     const offset = (s) => s.eye.map((n, i) => n - s.actor[i]);
     try {
       net.backend = true;
-      for (const signedIn of [false, true]) for (const mode of ["carry-orbit", "carry-shoulder", "carry-first-person", "combat-birds-eye", "combat-shoulder", "combat-first-person"]) {
+      for (const signedIn of [false, true]) for (const mode of ["carry-orbit", "carry-shoulder", "carry-first-person", "combat-shoulder", "combat-first-person"]) {
         net.me = signedIn ? { id: 72, login: character.github || character.handle, display: "Map fixture" } : null;
         P.endLook(); if (!drives()) P.possess(a); if (B.crew.sleeping) B.crew.wakePlayer();
         // An arrival keeps the view family (pilot.js \`navigate\`), so each row first goes back to carry orbit through the
@@ -13373,9 +13373,10 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
         if (P.closeWanted) P.exitClose(false);
         if (P.mode === "shoulder") P.hooks.onZoom(2, {});
         B.advance(0.5, 1 / 60);
-        P.navigate({ position: { x: -5, y: B.island.surfaceAt(-5, 5), z: 5 }, yaw: 0.4, pitch: mode.startsWith("combat") ? 1.1 : 0.3, dist: 10 });
-        if (P.aiming !== mode.startsWith("combat")) P.modeAction("mode-toggle");
-        if (mode.endsWith("shoulder") || mode.endsWith("first-person")) { P.hooks.onZoom(0.001, {}); B.advance(1, 1 / 60); }
+        P.navigate({ position: { x: -5, y: B.island.surfaceAt(-5, 5), z: 5 }, yaw: 0.4, pitch: 0.3, dist: 10 });
+        // Combat enters at the shoulder (the island offers no bird's-eye); carry scrolls in to it.
+        if (P.aiming !== mode.startsWith("combat")) { P.modeAction("mode-toggle"); B.advance(1, 1 / 60); }
+        if ((mode.endsWith("shoulder") || mode.endsWith("first-person")) && P.mode !== "shoulder") { P.hooks.onZoom(0.001, {}); B.advance(1, 1 / 60); }
         if (mode.endsWith("first-person")) P.hooks.onZoom(0.8, {});
         B.advance(1, 1 / 60); P.controls.reset(); H.setDetachedView("pile");
         const before = snapshot(), prepared = before.player && before.mode === mode.slice(mode.indexOf("-") + 1) && before.combat === mode.startsWith("combat");
@@ -13417,7 +13418,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
     return { rows, looking, departed };
   })()`);
   record("hub map: signed in or out, a Map click looks at the next destination while the visitor keeps their Ooga where it stands, and a movement gives back its own camera, carry or combat and view in that frame and walks it",
-    r.rows.length === 12 && r.rows.every(row => row.prepared && row.looked && row.moved > 1 && row.returned && row.walked > 0.3), JSON.stringify(r.rows));
+    r.rows.length === 10 && r.rows.every(row => row.prepared && row.looked && row.moved > 1 && row.returned && row.walked > 0.3), JSON.stringify(r.rows));
   record("hub reset: 0 resets framing without relocating the Ooga or changing its mode or view family", r.rows.every(row => row.resetKept && row.resetChanged), JSON.stringify(r.rows));
   record("hub map: looking keeps the destination's label, and walking off shows the Ooga's own area, HUB", r.looking && r.departed.driven && r.departed.distance > 1.5 && r.departed.label === "HUB" && r.departed.visible,
     JSON.stringify({ looking: r.looking, departed: r.departed }));
@@ -17051,7 +17052,7 @@ const hubCombatReplay = { name: "birds-eye combat replay", why: "contract: repla
   record("birds-eye combat: debug replay records explicit north-up intent, while a fresh orbit-to-birds-eye transition clears the old lock and preserves the orbit heading", northState.storedUnlocked === false && northState.stillUnlocked && northState.locked && northState.drift < 0.001 && Math.abs(northState.north) < 0.001
     && northState.reentry.mode === "birds-eye" && !northState.reentry.northUp && Math.abs(northState.reentry.orbit) > 0.1 && northState.reentry.error < 0.01, JSON.stringify(northState));
   const legacy = await b.evaluate(`(() => { const pose = JSON.parse(document.getElementById("position-debug").dataset.pose); __ooga.pilot.capturePose(pose); pose.mode = "orbit"; pose.battle = pose.combat; delete pose.combat; delete pose.birdsEyeNorthUp; return pose; })()`);
-  await b.open(hubPage(src, `solo=1&character=portlandhodl&pose=${encodeURIComponent(JSON.stringify(legacy))}`));
+  await b.open(hubPage(src, `solo=1&character=portlandhodl&birdseye=1&pose=${encodeURIComponent(JSON.stringify(legacy))}`));
   await untilReady(b);
   const replay = await b.evaluate(`(() => { const B = __ooga, pose = JSON.parse(document.getElementById("position-debug").dataset.pose), el = B.hud.el.mode; return { mode: B.pilot.mode, combat: B.pilot.aiming, northUp: pose.birdsEyeNorthUp, poseMode: pose.mode, poseCombat: pose.combat, legacyField: Object.hasOwn(pose, "battle"), attribute: el.dataset.combat, legacyAttribute: el.hasAttribute("data-battle"), label: el.getAttribute("aria-label") }; })()`);
   record("birds-eye combat: old pose links migrate once, and new pose and HUD state use only combat terminology", replay.mode === "birds-eye" && replay.combat && replay.northUp === false && replay.poseMode === "birds-eye" && replay.poseCombat && !replay.legacyField && replay.attribute === "true" && !replay.legacyAttribute && replay.label.includes("combat") && !replay.label.includes("battle"), JSON.stringify(replay));
@@ -17888,17 +17889,15 @@ const factoryWeapons = { name: "factory no weapons", why: "rule: the Lightning F
     press(); const carryButton = !P.aiming && reticle.hidden;
     press(); const combatButton = P.aiming && !reticle.hidden;
     P.hooks.onZoom(1.2, {}); B.advance(1.5, 1 / 60);
-    const overhead = P.mode === "birds-eye" && !reticle.hidden;
-    P.hooks.onZoom(0.001, {}); B.advance(2, 1 / 60);
     const shoulder = P.mode === "shoulder" && !reticle.hidden && !reticle.style.left && !reticle.style.top;
     P.hooks.onZoom(0.8, {}); B.advance(1, 1 / 60);
     const first = P.mode === "first-person" && !reticle.style.left && !reticle.style.top;
     P.hooks.onZoom(1.2, {}); B.advance(1, 1 / 60);
-    return { carryKey, centered, combatKey, carryButton, combatButton, overhead, shoulder, first, returned: P.mode === "shoulder" };
+    return { carryKey, centered, combatKey, carryButton, combatButton, shoulder, first, returned: P.mode === "shoulder" };
   })()`);
   record("factory weapons: the crosshair clears inherited birdseye coordinates and returns to the screen centre", views.centered, JSON.stringify(views));
-  record("factory views: X and the mode button share mainland cursor-look/drag-look behavior; zoom crosses birdseye, shoulder and first person with nothing in hand, and close views center the crosshair",
-    views.carryKey && views.combatKey && views.carryButton && views.combatButton && views.overhead && views.shoulder && views.first && views.returned, JSON.stringify(views));
+  record("factory views: X and the mode button share mainland cursor-look/drag-look behavior; with nothing in hand, zooming out stops at the shoulder (no bird's-eye here), zooming in crosses to first person, and close views center the crosshair",
+    views.carryKey && views.combatKey && views.carryButton && views.combatButton && views.shoulder && views.first && views.returned, JSON.stringify(views));
   const hits = await b.evaluate(`(() => {
     const B = __ooga, a = B.cavemen.get("portlandhodl"), s = B.factory.scene, rows = [];
     const hum = s.tunnels.map(t => t.hum), gateHum = s.gate.hum;
@@ -18663,10 +18662,11 @@ const arcadeHall = { name: "arcade hall", why: "regression: a jump in Ooga Arcad
   record("arcade hall: from the ghost arena a hall game under the pointer takes no tooltip and no tap through the rock, and a line said over the stage does not show",
     inArena.inArena && inArena.hidden === true && !!through && hovered === true && tapped.scene === "arcade" && !tapped.moving,
     JSON.stringify({ inArena, through, hovered, tapped }));
-  // Back in the hall facing the stage: a cabinet in sight shows its tooltip, and a line over the stage shows.
+  // Back in the hall facing the stage: a cabinet in sight shows its tooltip, and a line over the stage shows. The Ooga
+  // stands well off the front wall, so the view backs off it and the stage's cabinets stand clear of its body.
   const inHall = await b.evaluate(`(() => {
     const B = __ooga, S = BL.arcadeModels.STAGE;
-    B.pilot.navigate({ position: { x: 0, y: 0, z: 4 }, yaw: 0, pitch: 0.12, dist: 5 }); B.advance(0.5, 1 / 60);
+    B.pilot.navigate({ position: { x: 0, y: 0, z: 1 }, yaw: 0, pitch: 0.12, dist: 5 }); B.advance(0.5, 1 / 60);
     return { inArena: BL.scenes.arcade.debug.arena.inArena, hidden: B.arcade.pointHidden(S.x, 2.2, S.z) };
   })()`);
   const cabinet = await b.evaluate(findPick('["cabinet"]', true));
@@ -19770,7 +19770,7 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
       && animation.far.gorilla > 0 && animation.far.gorilla < 12 && animation.nearOoga.ooga >= 58 && animation.nearGorilla.gorilla >= 58
       && animation.host.ooga >= 58 && animation.host.gorilla >= 58 && animation.network && animation.controlled >= 58, JSON.stringify(animation));
 } };
-scene("hub", { label: "distant effects", query: "pos=0", steps: [hubDistantEffects] });
+scene("hub", { label: "distant effects", query: "pos=0&birdseye=1", steps: [hubDistantEffects] });
 // No other session's cast holds the default local Ooga or a server-vouched contributor: both join the roster before
 // the crew is built, as on a real arrival.
 scene("hub", { label: "guest likeness", query: "pos=0", opts: { initScript: GUEST_LIKENESS_INIT }, steps: [hubGuestLikeness] });
@@ -22126,7 +22126,7 @@ scene("hub", { label: "gorilla lab carry jump", exclusive: true, query: "charact
       && state.smashUnchanged,
     JSON.stringify(state));
 } }].map(gameCombat) });
-scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1", steps: [{ name: "gorilla prop traversal", why: "regression: a box lost its supporting contact before the collision body cleared its side, low props interrupted the gallop, and a stale motion envelope trapped gorillas beneath trees", run: async (b) => {
+scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&birdseye=1", steps: [{ name: "gorilla prop traversal", why: "regression: a box lost its supporting contact before the collision body cleared its side, low props interrupted the gallop, and a stale motion envelope trapped gorillas beneath trees", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, S = BL.scene, root = BL.scenes.hub.root, C = B.clankers, npc = C.list.find(e => e.owner.traits.name === "portlandhodl"), solids = B.headquarters.solids.props;
     // \`e\` is the gorilla in hand: the driven body while one is taken (clankers.js separateBodies builds it where the NPC
@@ -23720,7 +23720,7 @@ scene("hub", { label: "weapons", query: "ooga=portlandhodl:clank:lab,obl,lf&char
 scene("hub", { label: "guide", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubGuide, hubAsk, hubTourInput] });
 // Native pointer-lock assertions need sole focus; another browser lane can
 // steal capture and spend this long scenario's deadline waiting for it back.
-scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", exclusive: true, steps: [hubBirdsEye] });
+scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1&birdseye=1", exclusive: true, steps: [hubBirdsEye] });
 const hubPlayersAim = { name: "players camera targeting", why: "regression: the Players crosshair aimed through the orbit avatar, hiding its target behind the head; shoulder and first person must still centre it", run: async (b) => {
   const rows = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, a = P.player || B.cavemen.get("portlandhodl"), rows = [];
@@ -23808,11 +23808,11 @@ const hubPlayersAim = { name: "players camera targeting", why: "regression: the 
   record("regression: live head look is published after the final pilot pose while idle in shoulder and first person",
     rows.every(row => Math.abs(row.head) > 0.01 && row.lookSample !== null && Math.abs(row.lookSample / 100 - row.head) <= 0.006), JSON.stringify(rows));
 } };
-scene("hub", { label: "birds-eye combat projection and targets", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeProjection, gameCombat(hubBirdsEyeTargets), hubCombatReplay] });
+scene("hub", { label: "birds-eye combat projection and targets", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1&birdseye=1", steps: [hubBirdsEyeProjection, gameCombat(hubBirdsEyeTargets), hubCombatReplay] });
 for (const character of ["portlandhodl", "w-s-bitcoin"]) for (const opts of [{ w: 1920, h: 1080 }, PHONE_SIZE]) {
-  scene("hub", { label: "players camera targeting " + character, query: "solo=1&character=" + character + "&weapon=1&mode=shoulder&combat=1", opts, steps: [hubPlayersAim] });
+  scene("hub", { label: "players camera targeting " + character, query: "solo=1&character=" + character + "&weapon=1&mode=shoulder&combat=1&birdseye=1", opts, steps: [hubPlayersAim] });
 }
-scene("hub", { label: "birds-eye lower floors", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeFloors] });
+scene("hub", { label: "birds-eye lower floors", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1&birdseye=1", steps: [hubBirdsEyeFloors] });
 scene("hub", { label: "mirror", query: "status=chillin", steps: [hubJumbotron, hubMirrorMedium, hubMirror] });
 scene("hub", { label: "matrix", steps: [hubMatrix] });
 scene("hub", { label: "oogatron popups", url: hubPage(dist, "pos=0"), steps: [oogatronPopups] });
@@ -25198,7 +25198,7 @@ scene("dsb", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{
 } }] });
 
 scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{ name: "factory lifecycle", why: "contract: repeated factory visits, each left with a tip's show in the air, release the hall's listeners, nodes and GPU resources while retaining one bounded shared node", run: async (b) => {
-  const { rendered, settled, snapshot, travel, heapDetail, within, warmHubGeometry } = await dsbSoak(b, { geometry: true, factory: true });
+  const { until, rendered, settled, snapshot, travel, heapDetail, within, warmHubGeometry } = await dsbSoak(b, { geometry: true, factory: true });
   // Compare the same roster and work sites even when an activity expires during the soak.
   // Only classification uses this instant; scene animation and the Factory feed keep their clocks.
   await b.evaluate(`(() => {
@@ -25251,6 +25251,9 @@ scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps
   })()`);
   // Warm both scenes and the cooker's show, so the counts below start from a visit made after the instrumenting.
   await travel("factory"); await tip("soak-warm"); await travel("lab"); await travel("hub"); await settled(); await rendered(2);
+  // The Repo Island joins its chunks in idle time (repo-island.js). The baseline waits for the last of them: a hub that
+  // comes up sooner would otherwise count their nodes and uploads as the visits' own.
+  await until("(() => { const s = window.BL.scenes.hub.debug.repoIsland?.stats(); return !s || s.built >= s.chunks; })()", 60000);
   // Each visit's tip grows the shared pile, whose wider footprint culls scenery off the ring (a target fewer): the
   // closing count is taken at the opening pile, set back through the hub's own pile.
   const startLevel = await b.evaluate("__ooga.level");
@@ -28968,7 +28971,7 @@ ${extract("buildRigPart", "    const LINE_CORNERS =")}
 };
 const raceRigChecks = async () => {
   const context = { window: {}, location: { search: "?debug=1&rain=0" }, URLSearchParams, crypto: webcrypto };
-  for (const name of ["math", "scene", "models", "caves", "contributor-identities", "activity-repos", "characters"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+  for (const name of ["math", "scene", "models", "hero-body", "caves", "contributor-identities", "activity-repos", "characters"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
   for (const name of readdirSync(join(root, "src", "characters")).filter(name => name.endsWith(".js")).sort()) runInNewContext(readFileSync(join(root, "src", "characters", name), "utf8"), context);
   for (const name of ["contributors", "hub-models", "dressing", "daylight", "race-models", "race-track", "racers", "mirror-ripples", "mirror-body", "dsb-water", "gl-renderer"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
   const BL = context.window.BL, scene = BL.scene.createNode(), released = [];
