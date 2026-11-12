@@ -2314,7 +2314,7 @@
         if (key === "head") registerHead(cave.parts.head, owner);
         else { cave.hitNodes.push(cave.parts[key]); input.add(cave.parts[key], owner); }
       }
-      if (cave.modelled) {
+      if (!execution && cave.modelled) {
         const owner = { kind: "caveman", cave, priority: 1, hitRegion: "body" };
         for (const key of MODELLED_ARMS) { cave.hitNodes.push(cave.parts[key]); input.add(cave.parts[key], owner); }
       }

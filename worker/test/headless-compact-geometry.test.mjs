@@ -13,9 +13,9 @@ const source = readFileSync(new URL("../../src/js/compact-geometry.js", import.m
 test("headless import installs compact geometry before models, on by default", () => {
   assert.equal(typeof globalThis.window, "undefined", "no browser window headless");
   assert.equal(C?.enabled, true);
-  // The existing caveman path packs only its own completed voxel bakes, at 64-bit precision.
-  const ooga = B.models.caveman({ name: "compact-fixture", skin: "#b08060", hair: "#38281c", fur: "#846040",
-    height: 1.4, belly: 1, rand: B.math.mulberry32(3) });
+  // A modelled Ooga keeps authored voxel accessories; the plain stock body has no voxel bake.
+  const ooga = B.models.caveman(B.contributors.traitsFor("w-s-bitcoin"));
+  assert.equal(ooga.modelled, true);
   const packed = new Set();
   const visit = (node) => {
     if (node.geometry && C.storageOf(node.geometry)) packed.add(node.geometry);
