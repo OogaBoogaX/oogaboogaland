@@ -85,7 +85,7 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
     // A timeout, rate limit or base conflict is not evidence of malicious code.
     if (!(error instanceof CharacterRejection) || !pr) throw error;
     if ((await gh.api(`pulls/${pr.number}`)).head.sha !== submission.head) throw new Error("PR changed before rejection; retry");
-    await comment(pr.number, `rejected-${submission.head}`, `This character submission was not accepted: ${error.message}\n\nNo submitted code was executed. This is a policy finding, not a claim about intent. Correct the issue and reopen, or contact an OBL maintainer for security review.`);
+    await comment(pr.number, `rejected-${submission.head}`, `This character submission was not accepted: ${error.message}\n\nNo submitted code was executed. This is a policy finding, not a claim about intent. Correct the issue and reopen, or contact an OBL maintainer for security review.\n\nEvery commit is read, not only the last: if an earlier commit is what was refused (a copy of another character's file used as a starting point, say), open a new PR from a fresh branch off \`rock\` that adds only your own file. \`npm run character:check -- <handle>\` runs this screen on your machine, and docs/make-your-ooga.md explains what each lane takes.`);
     await gh.api(`pulls/${pr.number}`, "PATCH", { state: "closed" });
   };
   const ensure = async (lane) => {
@@ -392,7 +392,9 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
       if (additions.length) await intake({ pr: bundle.number });
     }
     if (pr) {
-      await comment(pr.number, `moved-${submission.head}`, `Your character changes from ${submission.head} have been copied to ${destinations.join(" and ")}.\n\n${inspected.mixed
+      // What sent a file to manual review, so its author can bring it back to plain data if they meant it to be.
+      const reasons = (inspected.reasons || []).map(({ path, why }) => `- \`${path}\`: ${why}`).join("\n");
+      await comment(pr.number, `moved-${submission.head}`, `Your character changes from ${submission.head} have been copied to ${destinations.join(" and ")}.\n\n${reasons ? `A maintainer reviews these, because the automatic lane takes only literal character data (docs/make-your-ooga.md lists it):\n${reasons}\n\n` : ""}${inspected.mixed
         ? "This PR remains open for the other work. Remove the copied character changes from this branch (restore those paths to the PR base); the Character intake check stays failing until they are removed. The bot does not rewrite your branch."
         : "This character-only PR is being closed because its changes are preserved in the bundle. Follow the linked bundle for review and merge progress."}`);
       if (!inspected.mixed && (await gh.api(`pulls/${pr.number}`)).head.sha === submission.head) await gh.api(`pulls/${pr.number}`, "PATCH", { state: "closed" });

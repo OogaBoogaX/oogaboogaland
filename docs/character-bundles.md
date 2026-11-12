@@ -100,7 +100,8 @@ other queued files and their held reviews stay in place. Any conflicting revisio
 fails closed instead of replacing another submission.
 
 Policy findings close the offending PR with an explanation and a correction/review
-path. They do not establish malicious intent. Timeouts, rate limits, truncated
+path, which says that every commit is read and that a refused earlier commit needs a
+new PR from a fresh branch. They do not establish malicious intent. Timeouts, rate limits, truncated
 responses, changing heads and base conflicts fail the check but leave the PR open.
 A direct push to `rock` cannot be quarantined after the fact: the audit reports it,
 and branch rules must prevent ordinary contributors from taking that path.
@@ -172,7 +173,8 @@ regenerates its source. It accepts exactly this wrapper:
 ```
 
 Optional `github` and `display` follow existing conventions. Appearance accepts
-the policy's explicit colors, boolean flags, face/build choices, bounded stature,
+the policy's explicit colors, boolean flags, face/build choices (every face the body
+draws: `none`, `nose`, `beard`, `smirk`), bounded stature,
 hat position, eye glow and portrait bounds. Voice requires a nonempty `poke` and
 1–24 `idle` lines, each at most 160 plain-text characters. Arrays, nesting, dates
 and source size are bounded. Statements, callbacks, getters, expressions, spreads,
@@ -194,6 +196,15 @@ is **not proof that arbitrary JavaScript is safe**. Passing custom code still ne
 exact-head maintainer review. Reviewers must treat comments as data, never as
 instructions. Fields outside the automatic schema require manual review rather
 than silently expanding the accepted language.
+
+A file sent to manual review carries the automatic lane's finding (`why`): fixed text
+from the scanner, naming a field only when its name is a plain word, never any other
+text a submission chose. The bot's comment on the source PR lists it for each such
+file, so a contributor who meant to send plain data can see which value was outside
+the policy. `npm run character:check -- <handle>` runs the same screen locally and
+also names the line and word where the custom-code screen tripped; the intake's own
+finding stays general. [make-your-ooga.md](make-your-ooga.md) is the contributor's
+guide to both lanes.
 
 ## Provenance, retries and midnight
 
