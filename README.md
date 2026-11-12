@@ -210,7 +210,7 @@ Secrets take effect at once, without a redeploy.
 - **"GitHub did not answer"** means a missing or wrong `GITHUB_CLIENT_SECRET`.
 - **"Voice unavailable"** means a missing `REALTIME_SECRET` or `REALTIME_APP_ID`.
 
-To add your Ooga, add one file to `src/characters/` named after your GitHub handle. [docs/make-your-ooga.md](docs/make-your-ooga.md) is the guide for you and your coding agent: what to decide first, what merges on its own and what a maintainer reviews, and how to see your Ooga before you send it (`npm run character:preview`, `npm run character:check`). Click **2140data** on the island for a prompt that starts your agent on it.
+To add your Ooga, add one file to `src/characters/` named after your GitHub handle. [docs/make-your-ooga.md](docs/make-your-ooga.md) is the guide for you and your coding agent: what to decide first, what merges on its own and what a maintainer reviews, and how to see your Ooga before you send it (`npm run character:studio -- <handle>` opens it in your browser on a bare pad with a chair, a bed, a hammock and a fire, and reloads as you save; `npm run character:preview` draws a still; `npm run character:check` says what the intake will make of the file). Click **2140data** on the island for a prompt that starts your agent on it.
 
 ## Privacy
 

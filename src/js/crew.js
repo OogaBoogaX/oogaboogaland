@@ -1437,10 +1437,13 @@
       parts.forearmR.rotation.x = parts.forearmL.rotation.x = lying && (travel.pose === "left" || travel.pose === "right") ? -cave.elbow.clear
         : lying ? -LYING_ELBOW : -cave.elbow.rest;
       // Sitting on the ground, the free arm props on it, out to the side and a little back: nearly straight, the
-      // fist resting on its own bottom edge with the thumb uppermost.
-      if (cave.restLower > 0 && !cave.camp.seat && !parts.snack.visible) {
+      // fist resting on its own bottom edge with the thumb uppermost. An idle Ooga sits so by a fire, and a player in a
+      // seat that is the ground itself (`seat.ground`, the character studio's places by its fire).
+      const seat = cave.camp ? cave.camp.seat : null;
+      const lowered = !seat ? cave.restLower : seat.ground ? Math.max(0, cave.baseY - h * 0.08) : 0;
+      if (lowered > 0 && !parts.snack.visible) {
         const left = parts.armL;
-        if (reachArm(cave, left, parts.forearmL, cave.reachL, left.position.x + SIT_HAND[0] * h, cave.restLower - HIP * h + SIT_HAND[1] * h, SIT_HAND[2] * h, 0.4, 0.3, -1))
+        if (reachArm(cave, left, parts.forearmL, cave.reachL, left.position.x + SIT_HAND[0] * h, lowered - HIP * h + SIT_HAND[1] * h, SIT_HAND[2] * h, 0.4, 0.3, -1))
           cave.handTurnL = handTurn(left, parts.forearmL, 0, 1, 0);
       }
       parts.forearmR.highlight = parts.armR.highlight;

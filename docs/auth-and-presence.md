@@ -303,3 +303,50 @@ cd worker
 npx wrangler d1 execute oogaboogaland --remote --command \
   "UPDATE players SET banned_at = unixepoch(), ban_reason = 'reason' WHERE login = 'someone'; DELETE FROM sessions WHERE player_id IN (SELECT id FROM players WHERE login = 'someone');"
 ```
+
+## Capturing a brief player dropout
+
+A remote Ooga disappearing and returning with an open microphone can still be a room reconnect. The client clears its remote roster on socket loss, then retries; an already enabled speaker keeps their microphone intent and mute state through voice restart. A fresh page's muted return is a different path. Late movement snapshots alone do not remove a remote Ooga.
+
+On a build containing #625, signed-in players can opt in under **Online Oogas → Advanced settings → Send dropout diagnostics this visit**. It starts unchecked on every page load and appears only when the backend advertises support. Consent is not persisted. Turning it off, signing out/changing accounts or disposing the page clears unsent data, unsubscribes the observer and aborts an in-flight upload. A request already accepted by the Worker remains until retention cleanup or account deletion.
+
+Automatic reports are deliberately narrow:
+- An unexpected socket close while the room was live, a live-room heartbeat timeout, or a stale/protocol kick.
+- Another player leaving for a closed/error/stale reason and returning within ten seconds while the observer stays connected. Their numeric ID is used only in a bounded in-memory matching map and is **never uploaded**.
+- Ordinary joins/leaves, movement, body/zone changes, visibility changes, user settings and generic JavaScript errors do not trigger uploads. A report can include up to 16 allowlisted lifecycle events around an incident, including visibility and recovery, to give that incident context.
+
+`src/js/connection-reports.js` coalesces for two seconds and waits for a live room before uploading to the same-origin `POST /api/connection-reports`. One incident can wait in memory for at most two minutes (discarded on the next event/send); there is no reconnect polling, unload upload or retry on an upload failure. Attempts are limited to one per minute and ten per page visit, including opt-out/opt-in cycles. A ten-second fetch timeout prevents a hung upload. The checkbox status reports a detected incident and whether the request succeeded.
+
+Uploaded fields are a fixed schema: incident category, peer-return gap, relative event/message/pong ages, room state, hidden-tab flag, counts of remotes/unanswered pings, voice-enabled/muted booleans, numeric close code/clean-close flag and allowlisted reasons. The hosted main-script hash identifies the client build (empty for an inline build). The Worker adds receive time, its deployment version and the authenticated reporter's numeric account ID. It accepts no arbitrary error strings, URLs, names, peer IDs, positions, voice content, chat, credentials or user agents. The reporter is account-linked, not anonymous. Close code 1006 and a preserved microphone flag are clues, not attribution.
+
+The Worker requires same-origin POST, explicit consent, an eligible session and the `CONNECTION_REPORT_LIMITER` binding. It bounds bodies to 8 KiB, rejects unknown fields and uses an atomic D1 insert with per-account limits of one per minute, six per hour and twenty per day, plus a 10,000-row global cap. Reports live in private D1 `connection_reports`, introduced by migration `0011_connection_reports.sql`; there is no public read endpoint. Uploads and the existing daily cron prune rows older than seven days (normally removed within eight days). Account deletion cascades to these rows. Operators must monitor cron health; failed cleanup can delay physical deletion. Deployment must apply the migration before the updated Worker, as the existing deployment commands already do. A missing migration fails with a private 503 and does not affect room traffic. No deployment is part of this investigation.
+
+For later analysis, use authorized D1 operator access and restrict queries to the seven-day analysis window, for example:
+
+```sql
+SELECT kind, worker_version, client_build, COUNT(*) AS reports
+FROM connection_reports
+WHERE created_at >= unixepoch() - 604800
+GROUP BY kind, worker_version, client_build
+ORDER BY reports DESC;
+```
+
+Inspect selected payloads and server receive times to correlate heartbeat gaps, rapid returns and deployment versions. These are sampled opt-in observations: no report is not evidence that no dropout occurred. An unrecovered connection may never upload, and avatar-only rendering faults or audio-only/WebRTC loss are outside these triggers.
+
+For a richer **local-only** play-test capture on a build containing the diagnostics, start in each participant's browser console:
+
+```js
+BL.net.connectionDiagnostics(true)
+```
+
+After a blink, read `BL.net.connectionDiagnostics()` and save the returned object before reloading. Repeat reads are detached snapshots; calling `true` again preserves the active history. Stop and erase the capture with `BL.net.connectionDiagnostics(false)`. It also disappears on page disposal/reload. No reload is needed to enable it on a build that already contains the function.
+
+The capture is off by default. It keeps only the latest 64 lifecycle/presence events in memory, with UTC epoch milliseconds (`at`) and monotonic milliseconds since capture (`elapsed`). It adds no requests, timers, console output or persistent storage. Movement messages update only message count/age, not the history. Snapshots include numeric player IDs, body presence, zones, poses and voice flags; they omit names, chat, credentials, connection tokens, SDP and raw close/error text. Share only the evidence needed for the report.
+
+- `socket-close` records the browser's code and clean-close flag; `clear` and `retry` show the local roster reset and retry delay. `welcome` marks recovery. Code 1006 is an abnormal close, not attribution to Cloudflare or a particular network.
+- `peer-leave` records the room's allowlisted reason while this client's room may remain live. `peer-join` marks the peer returning. Peer body, zone and voice changes are separate events.
+- `heartbeat-timeout` captures the unanswered-ping count before cleanup. `lastMessageAge` and `lastPongAge` describe the current connection since capture/connection start; null means none was observed. The existing watchdog accepts any incoming message as liveness, not just pong.
+- `visibility` distinguishes background/foreground changes. The existing five-minute hidden-tab pause and warnings are unchanged.
+- If presence remains stable, inspect scene visibility, frame time and console errors. If only audio cuts out, also inspect `BL.voice.inspect()`, hearing range and microphone/receive state. This room capture does not measure WebRTC packet loss, render culling or network RTT.
+
+Record both clients' exact event time, deployed build, browser/OS and whether the avatar, Online Oogas entry, audio or all three disappeared. Correlate with deployment history and operator logs. Ordinary [Durable Object hibernation](https://developers.cloudflare.com/durable-objects/best-practices/websockets/) preserves connections, whereas [Cloudflare network updates](https://developers.cloudflare.com/network/websockets/) can terminate WebSockets. A captured reconnect identifies a recovery path; its underlying cause still needs evidence. Do not deploy or reload an active player's session merely to collect this information.

@@ -958,9 +958,10 @@
   // Resting club angles: x tilts the head forward, z rolls it; carry is the working hang.
   const CLUB_REST = { x: 0.95, z: 0 };
   // ---- The refined body ----------------------------------------------------------------------------------------------
-  // The modelled look (hero-body.js) is every Ooga's: "R". ?oogastyle=0 builds the voxel bodies it replaced instead
-  // (""), to compare the two. Character files read it too, for what they change under it.
-  const STYLE = (() => { try { return new URLSearchParams(location.search).get("oogastyle") === "0" ? "" : "R"; } catch { return "R"; } })();
+  // The modelled look (hero-body.js) is every Ooga's: "R", always. The voxel bodies it replaced can no longer be
+  // shown: the switch that built them to compare the two is retired. Character files read this for what they build
+  // under the modelled look.
+  const STYLE = "R";
   // Every Ooga is authored on the sixteenths grid of `buildCaveman` (a character file's `u`) and drawn at FINE times that
   // detail. Once every hook has run, each authored part is drawn again on the fine grid: the head is the same head with
   // every cell split FINE ways each way, rounded behind its face, whose cells all stay, so no face changes; the torso

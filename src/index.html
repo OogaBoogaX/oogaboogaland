@@ -164,6 +164,7 @@
         <p data-scene="dsb" data-zone-line hidden>DSB LAND</p>
         <p data-scene="poker" data-zone-line hidden>EMBER DEN</p>
         <p data-scene="lab" data-zone-line hidden>EntropyLab cave</p>
+        <p data-scene="studio" hidden>Studio</p>
         <p data-scene="factory" data-zone-line hidden>Lightning Factory</p>
         <p data-scene="hangar" data-zone-line hidden>Lightning Jet Hangar</p>
         <p data-scene="bifrost" data-zone-line hidden>₿IFRÖST</p>
@@ -355,7 +356,24 @@
         <button type="button" data-action="mute" id="orbit-mute" aria-label="Mute sound" aria-pressed="false">Sound</button>
         <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
       </nav>
+      <!-- The character studio's quick pick (scene-studio.js): every Ooga by name, beside the controls button. -->
+      <select class="studio-pick" id="studio-pick" data-scene="studio" aria-label="Show another Ooga" title="Show another Ooga" hidden></select>
     </header>
+
+    <!-- The character studio's buttons (scene-studio.js), down the left side under the banner. -->
+    <nav class="presets studio-side" aria-label="Character Studio" data-scene="studio" hidden>
+      <button type="button" data-action="studio-stand">Stand</button>
+      <button type="button" data-action="studio-chair">Chair</button>
+      <button type="button" data-action="studio-bed">Bed</button>
+      <button type="button" data-action="studio-hammock">Hammock</button>
+      <button type="button" data-action="studio-fire">Fire</button>
+      <button type="button" data-action="studio-eyes" aria-pressed="false" title="Through the Ooga's own eyes">1st person</button>
+      <button type="button" data-action="studio-third" aria-pressed="false" title="From behind and a little above; in combat, over its shoulder">3rd person</button>
+      <button type="button" data-action="studio-free" aria-pressed="false" title="A camera of your own, flown anywhere round the Ooga">Free cam</button>
+      <button type="button" data-action="studio-night">Day</button>
+      <button type="button" data-action="studio-build" aria-pressed="false" title="A new Ooga's female build (reloads)">Female</button>
+      <button type="button" data-action="studio-speak" title="Say its voice lines in turn">Speak</button>
+    </nav>
 
     <aside class="sheet" id="sheet" data-open="false" data-dock="side" data-paired="false">
       <nav class="sheet-panels" role="tablist" aria-label="Island panels">
@@ -457,6 +475,11 @@
               <input type="range" id="players-hearing-range" min="1" max="61" step="1" value="61" aria-describedby="players-hearing-help" aria-valuetext="No limit">
               <output class="players-hearing-value" id="players-hearing-value" for="players-hearing-range">No limit</output>
               <span class="players-hearing-help" id="players-hearing-help">Voices at or beyond this range are automatically muted</span>
+            </div>
+            <div id="players-diagnostics" hidden>
+              <label class="players-speak"><input type="checkbox" id="players-diagnostics-input" aria-describedby="players-diagnostics-help"> Send dropout diagnostics this visit</label>
+              <p class="help" id="players-diagnostics-help">Optional: send notable connection dropouts to our Cloudflare service, linked to your signed-in account, for later analysis. No voice, chat, names or positions. Kept for up to 8 days; account deletion removes reports. Turning this off stops new reports.</p>
+              <p class="help" id="players-diagnostics-status" role="status">Off</p>
             </div>
             <label class="players-speak" id="players-speak" hidden><input type="checkbox" id="players-speak-input"> Read joins aloud</label>
           </div>
@@ -1968,7 +1991,7 @@ Do not write anything yet. Interview me, a few questions at a time: do I want a 
 
 Then sort my wishes into three lists and tell me before you build: plain data (it merges on its own the next day), custom code (a maintainer reviews it, which can take days), and what a character file cannot do (it needs a change to the game). Offer the nearest plain-data choice for anything that does not fit.
 
-Build it in one file, src/characters/&lt;my GitHub login&gt;.js, and change nothing else. After each round show me the picture from npm run character:preview and take my notes one at a time. Before the pull request, run npm run character:check, npm run build and npm run test:unit.
+Build it in one file, src/characters/&lt;my GitHub login&gt;.js, and change nothing else. Ask me whether you may open the character studio in my browser (npm run character:studio -- &lt;my GitHub login&gt;): it shows my Ooga standing, sitting, in bed and in a hammock, and reloads as you save. After each round take my notes one at a time. Before the pull request, run npm run character:check, npm run build and npm run test:unit.
 
 Open the pull request as a draft and keep it draft while building or debugging. Mark it ready for review only when the work and authorized checks are complete and its description records validation and any remaining acceptance work. Return it to draft for substantial new work, and batch related fixes before pushing.</pre>
       <div class="actions recipe-actions">
@@ -2268,6 +2291,7 @@ Open the pull request as a draft and keep it draft while building or debugging. 
   <script src="js/chat.js"></script>
   <script src="js/one-time-pad.js"></script>
   <script src="js/private-chat.js"></script>
+  <script src="js/connection-reports.js"></script>
   <script src="js/players.js"></script>
   <script src="js/reactions.js"></script>
   <script src="js/fx.js"></script>
@@ -2410,6 +2434,7 @@ Open the pull request as a draft and keep it draft while building or debugging. 
   <script src="js/rocket-hud.js" data-defer="orbit"></script>
   <script src="js/rocket-audio.js" data-defer="orbit"></script>
   <script src="js/scene-orbit.js" data-defer="orbit-scene"></script>
+  <script src="js/scene-studio.js" data-defer="studio-scene"></script>
   <script src="js/dsb-coast.js" data-defer="dsb"></script>
   <script src="js/dsb-geography.js" data-defer="dsb"></script>
   <script src="js/dsb-models.js" data-defer="dsb"></script>
