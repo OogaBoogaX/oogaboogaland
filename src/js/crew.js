@@ -151,6 +151,19 @@
   // Fuel limits range and altitude; releasing thrust falls back to ordinary gravity.
   const JET_ACCEL = 20, JET_RISE = 7, JET_SPEED = 6.4, JET_PUFF = 0.05;
   const COMPANION_FLIGHT = Object.freeze({ gain: 3, catchUp: 1.35, climbOver: 8 });
+  // The four-legged gait DSB Land's dogs walk with (`rescue-dogs.js` reads it from here), shared with a companion built
+  // with legs (a character's `parts.dog` whose node lists them as `legs`: fore left, fore right, hind left, hind right,
+  // each hinged at its hip, and an optional `tail` at its root): the legs swing in diagonal pairs, `swing` radians at
+  // `pace` metres a second, a stride `stride` radians a metre, the body bobbing `bob`; aloft they stretch fore and aft
+  // (`flyFront`, `flyHind`), touching down they tuck a little (`landFront`, `landHind`).
+  const QUAD_GAIT = Object.freeze({ swing: 0.65, pace: 1.4, stride: 11, bob: 0.018, flyFront: -1.05, flyHind: 1.1, landFront: -0.2, landHind: 0.2 });
+  // Sets a legged companion's legs (`front` and `hind` their set angles, `swing` this stride's) and its tail (`wag` its
+  // yaw, `droop` its pitch).
+  const poseQuadruped = (node, front, hind, swing, wag, droop) => {
+    const legs = node.legs;
+    for (let n = 0; n < 4; n++) legs[n].rotation.x = (n < 2 ? front : hind) + (n === 0 || n === 3 ? swing : -swing);
+    if (node.tail) { node.tail.rotation.y = wag; node.tail.rotation.x = droop; }
+  };
   // Shared dog flight steering, extracted from rescue-dogs.js. Both the authored
   // companion and DSB's adopted dog use this exact clearance/floor/speed path.
   // State and callbacks are retained by the caller; no per-frame objects are made.
@@ -323,12 +336,14 @@
       removeChild(cave.root, node);
       addChild(root, node);
       node.visible = false;
-      const pack = createNode({ geometry: BL.hubModels.jetpack(), rotation: { x: Math.PI / 2 }, scale: { x: 0.25, y: 0.25, z: 0.25 }, visible: false });
+      // The pack sits on top of the pet, or where the pet's file puts it (`packAt`: its height, how far along, its size).
+      const at = node.packAt, size = at ? at.scale : 0.25;
+      const pack = createNode({ geometry: BL.hubModels.jetpack(), rotation: { x: Math.PI / 2 }, scale: { x: size, y: size, z: size }, visible: false });
       const flame = createNode({ geometry: BL.hubModels.jetFlame(), visible: false });
       let top = 0;
       for (let i = 1; i < node.geometry.verts.length; i += 3) top = Math.max(top, node.geometry.verts[i]);
-      pack.position.y = top; addChild(pack, flame); addChild(node, pack);
-      const pet = cave.pet = { node, pack, flame, side: p.x, back: -p.z, lift: p.y, x: 0, y: 0, z: 0, feet: 0, heading: 0, step: 0,
+      pack.position.y = at ? at.y : top; pack.position.z = at ? at.z : 0; addChild(pack, flame); addChild(node, pack);
+      const pet = cave.pet = { node, pack, flame, side: p.x, back: -p.z, lift: p.y, x: 0, y: 0, z: 0, feet: 0, heading: 0, step: 0, wag: 0,
         speed: 0, phase: 0, mode: 0, fall: 0, stuck: 0, warm: false, ride: cave.traits.petRidesHat ? hatRide(cave) : null };
       pet.floorAt = (x, z, y) => groundAt(x, z, y, y, cave);
       pet.clear = (ax, az, bx, bz, y) => (ctx.flyable || walkable)(ax, az, bx, bz, y, PET_HEIGHT, cave);
@@ -448,6 +463,11 @@
         pet.flame.scale.y = 0.7 + Math.sin(pet.phase * 10) * 0.3;
         node.position.x = pet.x; node.position.z = pet.z; node.position.y = cave.baseY + pet.feet + pet.lift;
         node.rotation.y = pet.heading; node.rotation.z = 0;
+        if (node.legs) {
+          pet.wag += dt;
+          if (pet.mode === 1) poseQuadruped(node, QUAD_GAIT.flyFront, QUAD_GAIT.flyHind, 0, Math.sin(pet.wag * 7) * 0.25, 0.35);
+          else poseQuadruped(node, QUAD_GAIT.landFront, QUAD_GAIT.landHind, 0, 0, 0);
+        }
         return;
       }
       pet.flame.visible = false;
@@ -462,14 +482,26 @@
         if (Number.isFinite(floor) && Math.abs(floor - pet.feet) <= PET_STEP
           && walkable(pet.x, pet.z, nx, nz, pet.feet, PET_HEIGHT, cave)
           && walkable(nx, nz, nx, nz, floor, PET_HEIGHT, cave)) {
-          pet.x = nx; pet.z = nz; pet.step += step * 9; moving = true;
+          pet.x = nx; pet.z = nz; pet.step += step * (node.legs ? QUAD_GAIT.stride : 9); moving = true;
+          pet.speed = step / dt;
           pet.feet = floor;
         }
         pet.heading = Math.atan2(dx, dz);
       } else if (d <= PET_ARRIVE) pet.heading = h;
       node.position.x = pet.x; node.position.z = pet.z;
-      node.position.y = cave.baseY + pet.feet + pet.lift + (moving ? Math.abs(Math.sin(pet.step)) * 0.08 : 0);
       node.rotation.y = pet.heading;
+      if (node.legs) {
+        // On its four legs it walks as DSB's dogs do, rather than the legless pet's bob and roll. A frame with no time
+        // in it (a pause) holds the last pose rather than reading the pet as standing.
+        if (!(dt > 0)) return;
+        const walk = moving ? Math.min(1, pet.speed / QUAD_GAIT.pace) : 0;
+        pet.wag += dt;
+        node.position.y = cave.baseY + pet.feet + pet.lift + Math.abs(Math.cos(pet.step)) * QUAD_GAIT.bob * walk;
+        node.rotation.z = 0;
+        poseQuadruped(node, 0, 0, Math.sin(pet.step) * QUAD_GAIT.swing * walk, Math.sin(pet.wag * 7) * 0.25, 0);
+        return;
+      }
+      node.position.y = cave.baseY + pet.feet + pet.lift + (moving ? Math.abs(Math.sin(pet.step)) * 0.08 : 0);
       node.rotation.z = moving ? Math.sin(pet.step) * 0.08 : 0;
     };
     return { attach: attachPet, update: updatePet };
@@ -640,6 +672,11 @@
           src[i * 3 + 1] = m[1] * verts[v] + m[5] * verts[v + 1] + m[9] * verts[v + 2] + m[13] - frame.y;
           src[i * 3 + 2] = x * frame.sr + z * frame.cr;
         }
+        // Clipping only cuts between a face's corners, so a face whose lowest corner is no lower than the lowest point
+        // found so far cannot lower it.
+        let lowest = Infinity;
+        for (let i = 0; i < count; i++) lowest = Math.min(lowest, src[i * 3 + 1]);
+        if (lowest >= frame.minimum) continue;
         for (let edge = 0; edge < 4 && count >= 3; edge++) {
           const axis = edge < 2 ? 0 : 2, sign = edge & 1 ? -1 : 1;
           const bound = edge === 0 ? frame.maxX : edge === 1 ? frame.minX : edge === 2 ? frame.maxZ : frame.minZ;
@@ -1018,7 +1055,7 @@
         (slungClub ? slingY : raisedPrimary ? -0.625 : -0.62) * h,
         (slungClub ? -0.3 : raisedPrimary ? 0.15 : 0.08) * h);
       setVec(parts.club.rotation, slungClub ? cave.traits.stoneAxe ? 0 : CLUB_SLING_TILT : raisedPrimary ? 0 : cave.clubCarry.x,
-        0, slungClub ? CLUB_SLING_ANGLE : raisedPrimary ? Math.PI / 2 : cave.clubCarry.z);
+        slungClub || raisedPrimary ? 0 : cave.clubCarry.y || 0, slungClub ? CLUB_SLING_ANGLE : raisedPrimary ? Math.PI / 2 : cave.clubCarry.z);
     }
     if (parts.chukTrail && !twirling) {
       for (let i = 0; i < parts.chukTrail.length; i++) parts.chukTrail[i].visible = false;
@@ -1848,7 +1885,7 @@
       }
       parts.club.quaternion = null;
       setVec(parts.club.position, 0, -0.62 * cave.traits.height, 0.08 * cave.traits.height);
-      setVec(parts.club.rotation, cave.clubRest.x, 0, cave.clubRest.z);
+      setVec(parts.club.rotation, cave.clubRest.x, cave.clubRest.y || 0, cave.clubRest.z);
       rest.visible = false;
       if (ctx.refreshMirrorObject) ctx.refreshMirrorObject(cave.root);
     };
@@ -6791,7 +6828,6 @@
       parts.armR.position.y += delta;
       parts.armL.position.y += delta;
       parts.head.position.y += delta;
-      if (parts.lion) parts.lion.position.y += delta;
       if (cave.jet) cave.jet.node.position.y += delta;
       cave.viewLift = lift;
       parts.legR.scale.y = parts.legL.scale.y = (cave.baseY + lift) / cave.baseY;
@@ -7518,5 +7554,5 @@
       }
     };
   };
-  BL.crew = { create, createPets, hatRide, poseHatRide, poseStomachRide, HAT_RIDE, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, preparePresentation, poseEquipment, poseReload, captureMeleePose, bodyHeightOf, bodyRadiusOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, CHUK_FOLD, BURST_STEP, MELEE_TAP_TIME, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
+  BL.crew = { create, createPets, hatRide, poseHatRide, poseStomachRide, HAT_RIDE, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, preparePresentation, poseEquipment, poseReload, captureMeleePose, bodyHeightOf, bodyRadiusOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, QUAD_GAIT, poseQuadruped, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, CHUK_FOLD, BURST_STEP, MELEE_TAP_TIME, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
 })();
