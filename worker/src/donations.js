@@ -1,12 +1,17 @@
 // /donations/*: the page's donation calls, passed on over the DONATIONS service binding to bananapayserver's PageApi
-// entrypoint, as its docs/protocol.md ("How OBL's Worker passes them on") asks. Who is giving comes from this Worker's
-// GitHub sign-in, independently of the page's editable display handle; only the body and type go on, never its request, whose
+// entrypoint, as its docs/protocol.md ("How OBL's Worker passes them on") asks, and its receipt accounting v1's private
+// reads (`status`, `history`). Who is giving, or whose history is read, comes from this Worker's GitHub sign-in,
+// independently of the page's editable display handle; only the body and type go on, never its request, whose
 // cookies carry the session. The visitor's address goes beside each call for bananapayserver's rate limits. Without the
 // binding, or when bananapayserver throws, the page hears that donations are closed.
 
 import { clientIp, fromSite, getSessionFromRequest, json } from "./http.js";
 
-const CALLS = { "/donations/invoice": "invoice", "/donations/note": "note", "/donations/onchain": "onchain" };
+const CALLS = { "/donations/invoice": "invoice", "/donations/note": "note", "/donations/onchain": "onchain",
+  "/donations/status": "status", "/donations/history": "history" };
+// The calls bananapayserver answers for an account: an invoice made for it, and the private reads of receipt accounting
+// v1 (status by invoice id, and history), which it keys on the same stable id. Never the page's body or handle.
+const WITH_DONOR = new Set(["invoice", "status", "history"]);
 const SOCKET_HEADERS = ["upgrade", "connection", "sec-websocket-key", "sec-websocket-version"];
 const BODY_MAX = 1024;
 
@@ -34,10 +39,11 @@ export const handleDonations = async (request, env, url) => {
     const body = await request.arrayBuffer();
     if (body.byteLength > BODY_MAX) return json({ error: "too large" }, 413);
     const call = new Request(url, { method: "POST", headers: { "content-type": request.headers.get("content-type") || "" }, body });
-    if (method !== "invoice") return await env.DONATIONS[method](call, visitor);
-    // The donor: GitHub's numeric id, which survives a rename, and the login as GitHub gives it, or nobody.
+    if (!WITH_DONOR.has(method)) return await env.DONATIONS[method](call, visitor);
+    // The donor: GitHub's numeric id, which survives a rename, and the login as GitHub gives it, or nobody. It comes
+    // from this Worker's own session alone, so a page can't name an owner for the private reads.
     const found = await getSessionFromRequest(request, env);
-    return await env.DONATIONS.invoice(call, found ? { id: found.player.id, login: found.player.login } : null, visitor);
+    return await env.DONATIONS[method](call, found ? { id: found.player.id, login: found.player.login } : null, visitor);
   } catch {
     return closed();
   }

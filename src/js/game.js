@@ -217,9 +217,11 @@
     };
     const assignedTo = (entryId) => Object.keys(state.assignments).find((name) => state.assignments[name] === entryId) || null;
     // A donation, wherever it lands: the totals, and the donations board's tally of bananas made, the last tip and
-    // its day's sats and bananas. `counted` is the API's exact count in real mode; without it the game's own.
-    // A day already rolled out of the tally (a late replay) counts in the totals only.
+    // its day's sats and bananas. `counted` is an exact count; without it the game's own. A day already rolled out of
+    // the tally (a late replay) counts in the totals only. Real donations keep no ledger here: their totals, board and
+    // recent list are the API's, which corrections and reversals move and replays never add to.
     const recordDonation = (donation, counted = null) => {
+      if (BL.donations?.real) return;
       const bananas = counted === null ? bananasFor(donation.sats) : counted, day = dayOf(donation.at), days = state.tipDays;
       state.totalSats += donation.sats;
       state.donations += 1;

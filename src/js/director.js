@@ -154,14 +154,14 @@
   // let the scene record each tip when it arrives, so a boot tip is both shown and counted exactly once.
   let bootPending = true;
   const bootDonations = [];
-  const deliverDonation = (donation, bananas = null) => {
-    if (active) active.onDonation(donation, bananas);
-    else if (bootPending && bootDonations.length < 16) bootDonations.push({ donation, bananas });
+  const deliverDonation = (donation, bananas = null, receipt = undefined) => {
+    if (active) active.onDonation(donation, bananas, receipt);
+    else if (bootPending && bootDonations.length < 16) bootDonations.push({ donation, bananas, receipt });
     else game.recordDonation(donation, bananas && bananas.exact);
   };
   const finishBootDonations = () => {
     bootPending = false;
-    while (bootDonations.length) { const pending = bootDonations.shift(); active.onDonation(pending.donation, pending.bananas); }
+    while (bootDonations.length) { const pending = bootDonations.shift(); active.onDonation(pending.donation, pending.bananas, pending.receipt); }
   };
   const failBootDonations = () => {
     bootPending = false;
@@ -695,9 +695,11 @@
     if (!transition) holdInput(!!cabinetView.held);
     const sceneDt = cabinetView.held ? 0 : dt;
     sceneTime += sceneDt;
-    // In real mode the API owns the pile, so every browser shows the same one: its last count less what has been
-    // eaten since it arrived, in whole bananas.
-    if (pileFeed.at) world.level = Math.min(pileMod.MAX_BANANAS, Math.max(0, Math.floor(pileFeed.bananas - pileFeed.eatPerHour * (performance.now() - pileFeed.at) / 36e5)));
+    // In real mode the API owns the pile, so every browser shows the same one: its latest count in whole bananas, held
+    // as it is until the next one arrives (nothing decays with time). While it has no count the drawn pile stays as it
+    // is and the panels say the count is unavailable. Simulated, the page's own pile shows in the panel.
+    if (pileFeed.known) world.level = pileFeed.level;
+    else if (!donations.real && Math.floor(world.level) !== pileFeed.shown) window.BL.hud.setPileShown(pileFeed.shown = Math.floor(world.level));
     if (!panelHolds) active.update(sceneDt, sceneTime);
     showZoneLine();
     cabinetView.update(dt, active, !!openIntro() || !!active.cabinetMenu, !!transition);
@@ -911,21 +913,26 @@
   // waits for that look (bounded, as the boot's wait is) and a page about to go real never plays a simulated tip. A
   // donation pushed before the first scene is ready joins a bounded replay queue and counts once on arrival. An
   // on-chain tip the visitor left the kiosk waiting on says it was theirs, in whatever scene they are, in place of the scene's own toast.
-  const pileFeed = { bananas: 0, eatPerHour: 0, at: 0 };
-  let unsubscribeDonations = null;
+  // A receipt's first credit (`receipt` set) is matched to this page's invoice by the invoice it belongs to, while its
+  // own id keys everything else; a receipt never settles the kiosk, whose invoice status does.
+  const pileFeed = { known: false, level: 0, shown: -1 };
+  let unsubscribeDonations = null, unsubscribeDonationAccount = null;
   accountReady.then(() => {
     if (destroyed) return;
     if (net.state.donations) donations.useOrigin();
     // A Worker's page whose look went unanswered knows nothing of its API: no made-up tips under the visitor's own name.
     else if (net.state.started && !net.state.backend && document.documentElement.dataset.workerPage === "1") donations.config.simulate = false;
-    unsubscribeDonations = donations.subscribe((donation, bananas) => {
-      if (donations.receivedOwnInvoice(donation.id)) game.rememberHandle(donation.handle);
-      window.BL.donationPopup.receive(donation, bananas);
-      deliverDonation(donation, bananas);
+    // Private donation state belongs to the signed-in account: a sign-out or another account drops it.
+    donations.setAccount(net.state.me ? net.state.me.id : null);
+    unsubscribeDonationAccount = net.subscribe(() => donations.setAccount(net.state.me ? net.state.me.id : null));
+    unsubscribeDonations = donations.subscribe((donation, bananas, receipt) => {
+      if (receipt ? donations.ownReceipt(receipt.invoice) : donations.receivedOwnInvoice(donation.id)) game.rememberHandle(donation.handle);
+      if (!receipt) window.BL.donationPopup.receive(donation, bananas);
+      deliverDonation(donation, bananas, receipt);
       window.BL.hud.setDonationStats(game.state);
-      if (donations.waited(donation.id)) {
-        const n = bananas && bananas.rounded;
-        window.BL.hud.toast(`Your on-chain tip confirmed · ${gameMod.formatLarge(donation.sats)} sats${n ? ` · ${gameMod.formatLarge(n)} banana${n === 1 ? "" : "s"}` : ""}`);
+      const n = bananas && bananas.rounded;
+      if (receipt ? donations.waitingOn(receipt.invoice) : donations.waited(donation.id)) {
+        window.BL.hud.toast(`Your on-chain ${receipt ? "payment was credited" : "tip confirmed"} · ${gameMod.formatLarge(donation.sats)} sats${n ? ` · ${gameMod.formatLarge(n)} banana${n === 1 ? "" : "s"}` : ""}`);
       }
     }, {
       identity: () => game.state,
@@ -936,7 +943,10 @@
         if (active && active.onSeen && active.onSeen(id, sats, due, left, pricing)) return;
         if (donations.waitingOn(id)) window.BL.hud.toast(left ? `Your on-chain tip arrived short · send ${gameMod.formatLarge(left)} more sats to the same address` : "Your on-chain tip is on its way · waiting for a block");
       },
-      onPile: ({ bananas, eatPerHour }) => Object.assign(pileFeed, { bananas, eatPerHour, at: performance.now() })
+      onPile: (pile) => {
+        pileFeed.known = pile.bananas !== null;
+        if (pileFeed.known) pileFeed.level = Math.min(pileMod.MAX_BANANAS, Math.max(0, Math.floor(pile.bananas)));
+      }
     });
   });
   // The feed panel: the Konami code toggles a page-wide readout of the socket, its counters and its last events.
@@ -1179,6 +1189,7 @@
     window.clearTimeout(welcomeTimer);
     overlayObserver.disconnect();
     if (unsubscribeDonations) unsubscribeDonations();
+    if (unsubscribeDonationAccount) unsubscribeDonationAccount();
     unsubscribeBlockFeed();
     unsubscribeBlockHeight();
     feedPanel.close();

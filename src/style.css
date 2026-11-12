@@ -1076,7 +1076,7 @@ body[data-active-scene="block"] .mode-hud {
 
 .banana-totals {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin: 12px 0 0;
   padding-top: 10px;
@@ -1253,6 +1253,18 @@ body[data-active-scene="block"] .mode-hud {
   font-size: 10.5px;
   text-align: center;
 }
+
+.banana-pile-note {
+  margin: 6px 0 0;
+  color: rgba(243, 239, 228, 0.62);
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+.banana-pile-note[data-tone="warn"] { color: var(--accent-text); }
+.banana-history { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(0, 0, 0, 0.4); }
+.banana-history-pages { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px; font-size: 11px; }
+.banana-history-pages button[hidden], .banana-history[hidden], .banana-pile-note[hidden] { display: none; }
+.banana-history-row button { justify-self: end; }
 
 .banana-board-note {
   margin: auto 0 0;
@@ -1695,8 +1707,9 @@ body[data-active-scene="block"] .mode-hud {
   background: rgba(0, 0, 0, 0.6);
 }
 
+/* 400px of content: the kiosk's 400-pixel screen then shows pixel for pixel, so its one-pixel lettering keeps every row. */
 .donation-popup {
-  width: 440px;
+  width: 442px;
   max-height: calc(100dvh - 32px);
   overflow: auto;
 }
@@ -12058,6 +12071,8 @@ body[data-active-scene] #controls-help-button { display: flex; align-items: cent
 .stage.cabinet-display { position: absolute; overflow: hidden; isolation: isolate; background: #080604; container-type: inline-size; --safe-top: 0px; --safe-bottom: 0px; --safe-left: 0px; --safe-right: 0px; }
 .cabinet-display :is(.topbar, .bottom-bar, .joysticks, #equipment-hud, #mode-hud, #act, #position-debug) { visibility: hidden; }
 body[data-cabinet-phase]:not([data-cabinet-phase="idle"]):not([data-cabinet-phase="playing"]) :is(#position-debug, .equipment-hud, .mode-hud, .joysticks) { visibility: hidden; }
+/* The Lightning Factory's donation booth has the screen: the sticks, which lie over its buttons on a phone, stand aside. */
+body.booth-held .joysticks { visibility: hidden; }
 body[data-cabinet-phase]:not([data-cabinet-phase="idle"]):not([data-cabinet-phase="playing"]) .sheet { visibility: hidden; }
 .cabinet-display .race:has(.game-intro:not([hidden])) :is(.race-hud, .carnival-coach, .carnival-touch) { visibility: hidden; }
 .cabinet-display .game-intro:not([hidden]) {

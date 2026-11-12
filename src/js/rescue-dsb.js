@@ -94,7 +94,7 @@
     };
     const onRelease=entry=>{for(const who of Object.keys(store.dogs))if(store.dogs[who]===entry)delete store.dogs[who];persist();line();};
     const menu=BL.rescueMenu.create({onAdopt:adopted,onOpen:on=>{pilot.setActive(!on&&!interiors.transitioning);pilot.controls.reset();input.reset();crew.setWeaponTrigger(false);}});
-    const dogs=D.create({root,crew,fx,hud,pile:{eat:()=>{if(world.level<1)return false;world.level=Math.max(0,world.level-1);return true;}},yard:BL.rescueRoom.YARD,door:[rescueDoor.x,rescueDoor.z],
+    const dogs=D.create({root,crew,fx,hud,pile:{eat:()=>{if(world.level<1)return false;if(!BL.donations.real)world.level=Math.max(0,world.level-1);return true;}},yard:BL.rescueRoom.YARD,door:[rescueDoor.x,rescueDoor.z],
       ground:(x,z,feet)=>groundAt(x,z,feet,undefined,DOG),standable,flyClear,addTarget:(node,owner,opts)=>input.add(node,owner,opts),removeTarget:node=>input.remove(node),pickGeometry:BL.rescueRoom.PICK,
       strays:{homes,renderer,clearSegment:clear},camera,store,onRelease});
     const button=BL.rescueMenu.createButton({onFeed:()=>dogs.feedOwn(),onRelease:()=>dogs.releaseOwn()});

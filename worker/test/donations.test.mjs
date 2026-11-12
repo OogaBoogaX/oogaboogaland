@@ -18,7 +18,7 @@ const binding = (fail = false) => {
     if (fail) throw new Error("unreachable");
     return Response.json({ from: name }, { status: name === "fetch" ? 200 : 201 });
   };
-  return { calls, invoice: answer("invoice"), note: answer("note"), onchain: answer("onchain"), fetch: answer("fetch") };
+  return { calls, invoice: answer("invoice"), note: answer("note"), onchain: answer("onchain"), status: answer("status"), history: answer("history"), fetch: answer("fetch") };
 };
 // D1 holding one signed-in player under any session token.
 const db = { prepare: () => ({ bind: () => ({ first: async () => ({ token_hash: "h", expires_at: FAR, last_used_at: FAR, id: 4242, login: "ooga-dev", banned_at: null }), run: async () => ({}) }) }), batch: async () => [] };
@@ -108,5 +108,43 @@ test("custom display handles and 280-character messages pass separately from acc
     const [passed, donor] = DONATIONS.calls[0].args;
     assert.deepEqual(await passed.json(), body);
     assert.deepEqual(donor, cookie ? { id: 4242, login: "ooga-dev" } : null);
+  }
+});
+
+test("private status and history carry the session's stable donor and the page's body alone, never a donor the page names", async () => {
+  for (const path of ["/donations/status", "/donations/history"]) for (const cookie of ["", "__Host-obl_session=tok"]) {
+    const DONATIONS = binding();
+    // A body that tries to name an owner goes on as data; ownership comes from the session only.
+    const body = path.endsWith("status") ? "{\"invoice\":\"inv-1\",\"donor\":{\"id\":1,\"login\":\"someone-else\"}}" : "{\"cursor\":\"c1\",\"donor\":1}";
+    const [request, url] = call(path, { headers: { ...json, cookie, "x-client": "1.1.1.1", authorization: "Bearer page" }, body });
+    const res = await handleDonations(request, { SITE_ORIGIN: SITE, DONATIONS, DB: db }, url);
+    assert.equal(res.status, 201);
+    const { name, args } = DONATIONS.calls[0];
+    assert.equal(name, path.slice("/donations/".length));
+    assert.equal(args.length, 3);
+    const [passed, donor, visitor] = args;
+    assert.deepEqual([...passed.headers.keys()], ["content-type"]);
+    assert.equal(await passed.text(), body);
+    assert.deepEqual(donor, cookie ? { id: 4242, login: "ooga-dev" } : null);
+    assert.equal(visitor, "203.0.113.7");
+  }
+});
+
+test("private reads refuse other sites, GETs and oversized bodies, and an older bananapayserver without them reads as closed", async () => {
+  const answer = async (path, env, { method = "POST", headers = {}, body = "{}" } = {}) => {
+    const [request, url] = call(path, { method, headers: { ...json, ...headers }, body: method === "GET" ? undefined : body });
+    const res = await handleDonations(request, { SITE_ORIGIN: SITE, DB: db, ...env }, url);
+    return [res.status, (await res.json()).error];
+  };
+  for (const path of ["/donations/status", "/donations/history"]) {
+    const DONATIONS = binding();
+    assert.deepEqual(await answer(path, { DONATIONS }, { headers: { origin: "https://evil.test" } }), [403, "forbidden"]);
+    assert.deepEqual(await answer(path, { DONATIONS }, { method: "GET" }), [404, "not found"]);
+    assert.deepEqual(await answer(path, { DONATIONS }, { body: "x".repeat(1025) }), [413, "too large"]);
+    assert.equal(DONATIONS.calls.length, 0);
+    const older = binding();
+    delete older.status; delete older.history;
+    assert.deepEqual(await answer(path, { DONATIONS: older }), [503, "closed"]);
+    assert.deepEqual(await answer(path, {}), [503, "closed"]);
   }
 });

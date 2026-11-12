@@ -351,7 +351,8 @@
     if (BL.controls.matches(e, "attack")) pilot.weaponAction("weapon-fire");
     if (e.key === "b" || e.key === "B") addTestBananas(testBananas);
     if (e.key === "l" || e.key === "L") demoTip(120000);
-    if (e.key === "p" || e.key === "P") {
+    // P fills the page's own pile; a real one is the API's.
+    if ((e.key === "p" || e.key === "P") && !BL.donations.real) {
       world.level = Math.max(world.level, pile.slots.length);
       pile.syncPile(true);
     }

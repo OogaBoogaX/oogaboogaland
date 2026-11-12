@@ -777,7 +777,8 @@
   const onDonation = (donation, counted = null) => {
     game.recordDonation(donation, counted && counted.exact);
     const bananas = gameMod.bananasFor(donation.sats), shown = counted ? counted.rounded : bananas;
-    world.level = Math.min(pileMod.MAX_BANANAS, world.level + (counted ? counted.exact : bananas));
+    // Simulated only: a real pile is the API's, and a delivery adds nothing to it.
+    if (!BL.donations.real) world.level = Math.min(pileMod.MAX_BANANAS, world.level + (counted ? counted.exact : bananas));
     const who = donation.handle ? `@${donation.handle}` : "anon";
     const loot = lootEnabled ? game.lootFor(donation) : null;
     hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}${loot ? ` · ${loot.tier} ${loot.item.name}` : ""}`);
@@ -812,7 +813,7 @@
     if (BL.controls.matches(e, "start") && (phase === "board" || phase === "results")) startFlight();
     if (BL.controls.matches(e, "resetView")) cam.offset = cam.tilt = 0;
     if (e.key === "b" || e.key === "B") {
-      world.level = Math.min(pileMod.MAX_BANANAS, world.level + testBananas);
+      if (!BL.donations.real) world.level = Math.min(pileMod.MAX_BANANAS, world.level + testBananas);
       hud.toast(`+${testBananas} test bananas`);
     }
     if (e.key === "l" || e.key === "L") demoTip(120000);
