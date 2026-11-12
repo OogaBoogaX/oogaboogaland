@@ -43,6 +43,7 @@ anthropic = class { constructor() { throw new Error("Unexpected Claude call"); }
   const highscores = load("highscores", { ...http, ...highscoreStore, ...replayStore }, ["handleHighscores", "createHighscoreHandler", "readScores", "improve"]);
   const replays = load("cloud-hopper-replays", { ...http, ...replayStore, ...highscores }, ["handleCloudHopperReplays", "createReplayHandler"]);
   const plays = load("arcade-plays", http, ["handleArcadePlays", "createPlaysHandler", "countPlay", "readPlays"]);
-  const main = load("index", { ...http, ...db, ...auth, ...api, ...donations, ...tess, ...highscores, ...replays, ...replayStore, ...plays, gameName }, ["worker"]);
-  return { ...http, ...auth, ...api, ...donations, ...tess, ...highscores, ...replays, ...replayStore, ...plays, ...main };
+  const reports = load("connection-reports", http, ["handleConnectionReports", "createConnectionReportHandler", "validConnectionReport", "pruneConnectionReports"]);
+  const main = load("index", { ...http, ...db, ...auth, ...api, ...donations, ...tess, ...highscores, ...replays, ...replayStore, ...plays, ...reports, gameName }, ["worker"]);
+  return { ...http, ...auth, ...api, ...donations, ...tess, ...highscores, ...replays, ...replayStore, ...plays, ...reports, ...main };
 };

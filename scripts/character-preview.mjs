@@ -5,7 +5,7 @@
 // from the front, three-quarter, side and back, then its head, trunk, legs, what it holds and its pet where it has
 // one. A name with no file is drawn as the hashed Ooga a new contributor gets, and `<name>:slim` as that Ooga in
 // the female build, so a player can see both before choosing. The poses the crew gives an Ooga (walking, a slung
-// weapon, the hammock) are seen in the game itself: src/index.html?debug=1&solo=1&character=<handle>.
+// weapon, a seat, the bed, the hammock) are seen in the studio: npm run character:studio -- <handle>.
 // It runs the character files: use it on your own work. Needs Chrome, as the suite does.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

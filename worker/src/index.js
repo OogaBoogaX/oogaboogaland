@@ -5,6 +5,7 @@
 // DONATIONS binding. Only those paths run this code (`run_worker_first` in wrangler.<env>.jsonc); every other path is
 // served straight from _site.
 
+import { handleConnectionReports, pruneConnectionReports } from "./connection-reports.js";
 import { handleApi } from "./api.js";
 import { handleAuth } from "./auth.js";
 import { purgeExpiredSessions } from "./db.js";
@@ -93,6 +94,7 @@ export default {
     if (url.pathname.startsWith("/api/highscores/")) return handleHighscores(request, env, ctx);
     if (url.pathname === "/api/arcade-plays" || url.pathname.startsWith("/api/arcade-plays/")) return handleArcadePlays(request, env);
     if (url.pathname.startsWith("/api/cloud-hopper-replays/")) return handleCloudHopperReplays(request, env, ctx);
+    if (url.pathname === "/api/connection-reports") return handleConnectionReports(request, env);
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);
     if (url.pathname === "/room") return handleRoom(request, env);
     if (url.pathname.startsWith("/game/")) return handleGame(request, env, url);
@@ -106,5 +108,6 @@ export default {
     ctx.waitUntil(purgeExpiredSessions(env.DB));
     ctx.waitUntil(pruneTess(env.DB));
     ctx.waitUntil(pruneCloudHopperReplays(env));
+    ctx.waitUntil(pruneConnectionReports(env.DB));
   },
 };

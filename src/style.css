@@ -11661,6 +11661,41 @@ body[data-active-scene] .topbar > .presets button { flex: 0 0 auto; }
 .topbar .presets :is([data-action="mute"], [data-action$="-mute"]):not([data-action="hangar-mute"]) { display: none; }
 body[data-active-scene] #environment-sound { display: flex; align-items: center; justify-content: center; }
 
+/* The character studio (scene-studio.js): the banner holds the title, the game's own equipment buttons and the controls
+   button, and the studio's buttons run down the left side under it, one width, lit while switched on. The title reads
+   OBL. The sound button is left out, and the clock and block height are kept out of sight but in place, since hud.js
+   fits the banner's row up to the clock's edge. */
+.studio-side {
+  position: absolute;
+  top: calc(var(--banner-controls-bottom, calc(68px + var(--safe-top))) + 6px);
+  left: calc(12px + var(--safe-left));
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+}
+.studio-side button { flex: 0 0 auto; padding: 0 10px; }
+/* Its quick pick of every Ooga, in the banner where the controls button stands elsewhere, in the equipment buttons' look. */
+.studio-pick {
+  position: absolute;
+  top: var(--hub-banner-button-top, calc(10px + var(--safe-top)));
+  right: calc(var(--hub-banner-button-right, calc(var(--hub-banner-gutter) + var(--safe-right))) + var(--hub-banner-button, 36px) + var(--hub-banner-button-gap, 8px));
+  width: min(190px, 42vw);
+  height: var(--hub-banner-button, 36px);
+  padding: 0 8px;
+  background: var(--slab-dark);
+  border: 2px solid #221f1c;
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), inset 0 -2px 0 rgba(0, 0, 0, 0.35), 0 2px 0 rgba(0, 0, 0, 0.4);
+  color: var(--paper);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.studio-side [aria-pressed="true"] { border-color: var(--accent); color: var(--accent-text); }
+body[data-active-scene="studio"] #environment-sound { display: none; }
+body[data-active-scene="studio"] .controls-help-button { right: var(--hub-banner-button-right, calc(var(--hub-banner-gutter) + var(--safe-right))); }
+body[data-active-scene="studio"] :is(.world-clock, .world-block) { visibility: hidden; }
+
 /* Cave stations cycle through the OBL land button instead of a second camera toolbar. */
 .topbar .presets:is([data-scene="lab"], [data-scene="factory"], [data-scene="hangar"], [data-scene="bifrost"], [data-scene="arcade"]) [data-preset] { display: none; }
 body[data-active-scene="arcade"] #destination-hud:not([hidden]) { display: flex; }
