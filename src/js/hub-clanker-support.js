@@ -25,6 +25,8 @@
     const island = getIsland(), solids = getSolids(), altar = getAltar(), mempoolIsland = getMempool();
     // Tree tops are landing surfaces for the driven gorilla, not floors for a roaming one (as for Oogas).
     const accept = entry.controlled ? null : npcTreeSupportAllowed;
+    // Passive gorillas use terrain alone, never scenery or another body.
+    if (entry.nonInteractive) props = false;
     const padSupportAt = entry.rage.active ? clankerRagePadSupportAt : clankerPadSupportAt;
     if (!entry.motion.lab && !entry.planningLab) {
       const terrainStep = step >= STEP_MAX && BL.wallPanels.rampAt(island.surfaceAt, x, y, z, heading, CLANKER_TERRAIN_RAMP)
@@ -93,6 +95,7 @@
   };
   // The scene's support, and other players' tops for the gorilla the visitor drives.
   const clankerSupportAt = (entry, x, z, y, step, heading = entry.heading, props = true) => {
+    if (entry.nonInteractive) props = false;
     const floor = clankerSceneSupportAt(entry, x, z, y, step, heading, props);
     return props ? Math.max(floor, clankerPlayersSupportAt(entry, x, z, y, step)) : floor;
   };
@@ -310,6 +313,7 @@
     minContactAcross: 0, maxContactAcross: 0
   };
   const clankerTallObstacleAhead = (entry, dx, dz) => {
+    if (entry.nonInteractive) return false;
     const solids = getSolids();
     const p = entry.root.position, step = BL.clankers.PROP_STEP, aboveStep = p.y + step + 0.02;
     return solids.shoulderAt(p.x, aboveStep, p.z, dx, dz, 0.025,

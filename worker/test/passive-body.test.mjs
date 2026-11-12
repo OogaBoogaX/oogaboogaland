@@ -114,6 +114,9 @@ test('grace and pending handoff views keep the free arm and red indicator until 
   assert.equal(B.hostPresence.colorFor(clanker),'#ef4444');
   assert.equal(clanker.labItem,flask);assert.equal(flask.parent,clanker.parts.armL);assert.equal(JSON.stringify(views.map(v=>v.equipment)),equipmentBefore);
   assert.ok(clanker.parts.armR.world[5]<0,'raised arm points its down-axis up');
+  assert.equal(ooga.modelled,true);
+  const hand=ooga.parts.fingersL.world,indicator=root.children.at(-1).children.find(n=>n.matrixNative&&n.visible);
+  assert.ok(indicator&&Math.hypot(indicator.position.x-hand[12],indicator.position.y-hand[13]-.1,indicator.position.z-hand[14])<1e-6,'offline glyph follows the articulated hand, not the elbow');
   assert.ok(ooga.parts.armL.world[5]<0);assert.throws(()=>presence.render({now:100050,views,departures:[]}),/presentation/,'prepare must precede the next pose');
   presence.prepare();assert.deepEqual({...ooga.parts.armL.rotation},beforeOoga);
   assert.equal(B.hostPresence.colorFor(ooga),'#ef4444','pose preparation cannot flash the name green');

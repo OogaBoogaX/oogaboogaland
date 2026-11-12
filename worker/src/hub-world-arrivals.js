@@ -1,3 +1,4 @@
+import { HOST } from './virtual-host.js';
 // Fresh login positions over the actual private Hub actors. This is read-only:
 // arriving players never wake, relocate or possess their independent NPC track.
 import '../../src/js/hub-arrival.js';
@@ -9,7 +10,7 @@ const finitePosition = p => p && [p.x, p.y, p.z, p.yaw].every(Number.isFinite);
 
 export function createHubWorldArrivals({ geometry, crew, clankers, npcIdFor, placement }) {
   if (!geometry?.altar || !geometry?.island || crew?.authoritative !== true
-    || !Array.isArray(crew.list) || crew.list.length > 53 || !Array.isArray(clankers?.list)
+    || !Array.isArray(crew.list) || crew.list.length > HOST.maxOogas || !Array.isArray(clankers?.list)
     || clankers.list.length !== crew.list.length
     || typeof npcIdFor !== 'function' || typeof placement !== 'function')
     fail('actual Hub arrival providers required');

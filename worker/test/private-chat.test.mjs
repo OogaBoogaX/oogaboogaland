@@ -138,6 +138,16 @@ test("room: a decline and a block answer the inviter, a block refuses them both 
   h.leave(b);
   assert.deepEqual(last(a), { t: "pm", op: "closed", from: 2, reason: "left" });
   assert.equal(h.room.players.get(1).pm.open, 0);
+  // A leave is not a no: an invite to or from someone who left says so, both ways.
+  const d = await h.join(4, "a"), e = await h.join(5, "b"), f = await h.join(6, "c");
+  h.send(d, { t: "pm", op: "invite", to: 5 });
+  h.leave(e);
+  assert.deepEqual(last(d), { t: "pm", op: "declined", from: 5, reason: "left" });
+  h.send(f, { t: "pm", op: "invite", to: 4 });
+  h.leave(f);
+  assert.deepEqual(last(d), { t: "pm", op: "withdrawn", from: 6, reason: "left" });
+  h.send(d, { t: "pm", op: "accept", to: 6 });
+  assert.equal(last(d).reason, "offline", "an accept that arrives after the inviter left says they are gone");
 });
 
 test("room: a block and a spent invite rate stay with the account across its reconnects while the room is awake", async () => {

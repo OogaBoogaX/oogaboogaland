@@ -126,7 +126,7 @@
     }
   };
   const plantHammock = ({ island, root, solids, claimed, claim, nearPath, entranceClear,
-    nearMouth, arcadeMouth, meadowPalms, hammockClaims }, offRuns, planting) => {
+    nearMouth, arcadeMouth, meadowPalms, hammockClaims, bumpSlots = 64 }, offRuns, planting) => {
     if (!arcadeMouth) return;
     const H = BL.hubHammock, lines = island.path.centerlines;
     let spoke = null, best = Infinity;
@@ -179,15 +179,31 @@
       consider(a, { owner }, true);
     }
     if (!chosen) return;
-    // Keep the near palm; move its companion toward the Arcade, beside the berry bush.
-    // This authored spot uses actual trunk, path and stair clearance instead of the
+    // Step the near palm NEAR_NORTH metres north of its meadow spot and move its companion toward the Arcade, beside the berry bush.
+    // These authored spots use actual trunk, path and stair clearance instead of the
     // random meadow planting's broad exclusion around the clankers' bed approach.
-    const companionX = 13.5, companionZ = 4.75;
+    const NEAR_NORTH = 1, companionX = 13.5, companionZ = 2.75;
     if (chosen.extra && planting.stands(companionX, companionZ)
       && entranceClear(companionX, companionZ, 1.2) && offRuns(companionX, companionZ) && !nearMouth(companionX, companionZ, 6)) {
       const x = companionX, z = companionZ;
       const owner = { x, z, variant: planting.variant(), node: { position: { x, y: island.surfaceAt(x, z), z }, rotation: { y: 0 } } };
-      consider(chosen.a, { owner }, true);
+      const near = chosen.a.owner, reservation = meadowPalms.find((entry) => entry.owner === near).reservation;
+      const nearZ = near.z - NEAR_NORTH, fallback = chosen, fallbackMid = nearest;
+      claimed.splice(claimed.indexOf(reservation), 1);
+      const nearFits = planting.stands(near.x, nearZ) && entranceClear(near.x, nearZ, 1.2) && offRuns(near.x, nearZ);
+      claimed.push(reservation);
+      if (nearFits) {
+        const fromZ = near.z;
+        near.z = reservation.z = near.node.position.z = nearZ;
+        near.node.position.y = island.surfaceAt(near.x, nearZ);
+        chosen = null; nearest = Infinity;
+        consider(fallback.a, { owner }, true);
+        if (!chosen) {
+          near.z = reservation.z = near.node.position.z = fromZ;
+          near.node.position.y = island.surfaceAt(near.x, fromZ);
+          chosen = fallback; nearest = fallbackMid;
+        }
+      }
     }
     if (chosen.extra) {
       const entry = planting.plant(chosen.b.owner.x, chosen.b.owner.z, 0);
@@ -195,7 +211,7 @@
       meadowPalms.push(entry); chosen.b.owner = entry.owner;
     }
     const { plan } = chosen;
-    const hammock = H.create({ plan, root, solids, ra: chosen.ta.r, rb: chosen.tb.r, seed: fnv1a("hammock"), anchors: [chosen.a.owner, chosen.b.owner] });
+    const hammock = H.create({ plan, root, solids, ra: chosen.ta.r, rb: chosen.tb.r, seed: fnv1a("hammock"), anchors: [chosen.a.owner, chosen.b.owner], bumpSlots });
     hammock.anchors = [chosen.a.owner, chosen.b.owner];
     // Three circles along the bed's swing (its `envelope`), each covering a third of its length and its whole width.
     const { half, across } = plan.envelope, cover = Math.hypot(half / 3, across);
@@ -344,7 +360,7 @@
       const board = chalkboardClearance, dx = o.x - board.x, dz = o.z - board.z;
       const across = dx * board.rightX + dz * board.rightZ, front = dx * board.frontX + dz * board.frontZ;
       // Keep the board's face and both edges clear without moving the seeded meadow scatter.
-      if (Math.abs(across) < 1.8 * BL.hubMouthDressing.chalkboard.scale + o.footprint && front > 0 && front < 2.4 + o.footprint) return 3;
+      if (Math.abs(across) < 2.2 * BL.hubMouthDressing.chalkboard.scale + o.footprint && front > 0 && front < 2.4 + o.footprint) return 3;
     }
     if (Math.hypot(o.x, o.z) - o.footprint < clearance - 1e-9) return 1;
     if (island.path.overlaps(o.x, o.z, o.footprint) || island.overlapsStairs(o.x, o.z, o.footprint)) return 2;

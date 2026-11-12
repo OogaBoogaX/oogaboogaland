@@ -14,6 +14,7 @@ import { createHubWorldPlacement } from './hub-world-placement.js';
 import { hubNpcFor } from './hub-world-identity.js';
 import { createHubBodyPlacement } from './hub-body-placement.js';
 import { validateHubLayout, assertHubLayout } from './hub-layout-history.js';
+import { HUB_WORLD_CHECKPOINT_VERSION } from './hub-world-recovery.js';
 
 const fail = () => { throw Error('invalid complete Hub construction'); };
 export function* buildHubWorld(config, saved = null, now = null) {
@@ -21,6 +22,9 @@ export function* buildHubWorld(config, saved = null, now = null) {
     || !Number.isInteger(config.seed) || config.seed < 0 || config.seed > 0xffffffff
     || !Number.isSafeInteger(config.checkpointBytes) || config.checkpointBytes < 256
     || config.checkpointBytes > HOST.checkpointBytes - HOST.metadataBytes - HOST.sessionSlotBytes) fail();
+  // Reject stale world semantics before constructing controllers or geometry.
+  if (saved !== null && saved.v !== HUB_WORLD_CHECKPOINT_VERSION)
+    throw Error("Hub packed logical recovery migration required");
   boundedJSON(config, 32 * 1024, 4096);
   if (saved !== null) boundedJSON(saved, config.checkpointBytes, HOST.simulationNodes);
   else if (!Number.isSafeInteger(now) || now < 1) fail();
@@ -37,9 +41,6 @@ export function* buildHubWorld(config, saved = null, now = null) {
   // Explicit trusted activity is required at first boot; never start all NPCs
   // from a viewer's local activity snapshot or silently use stale bundled dates.
   roster.restore(saved === null ? config.activity : saved.activity);
-  // Earlier world records include shared water or different route semantics.
-  // Refuse them explicitly; never silently reinterpret retained actor state.
-  if (saved !== null && saved.v !== 7) throw Error('Hub packed logical recovery migration required');
   const layout = validateHubLayout(saved === null
     ? { v: 1, level: state.world.level, count: roster.activeRoster.length, ring: 0 } : saved.layout);
   let geometry = null, actors = null, completed = false, disposed = false;

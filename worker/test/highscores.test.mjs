@@ -11,11 +11,11 @@ import { routeFixture } from "./routes.mjs";
 import { deliverHighscores } from "../src/highscore-store.js";
 
 const SITE = "https://site.test", RULES = globalThis.BL.highscoreRules;
-const { createHighscoreHandler } = routeFixture();
+const { createHighscoreHandler, createPlaysHandler, readPlays, countPlay } = routeFixture();
 const database = (runs = true, cabinets = true, guard = runs && cabinets) => {
   const sql = new DatabaseSync(":memory:");
   sql.exec("PRAGMA foreign_keys = ON");
-  for (const name of ["0001_init.sql", "0002_tess.sql", "0003_highscores.sql", "0004_highscore_notifications.sql", "0005_cloud_hopper_levels.sql", "0006_cloud_hopper_replays.sql", ...(runs ? ["0007_cloud_hopper_runs.sql"] : []), ...(cabinets ? ["0008_cabinet_runs.sql"] : []), ...(guard ? ["0009_identity_collision_guard.sql"] : [])]) {
+  for (const name of ["0001_init.sql", "0002_tess.sql", "0003_highscores.sql", "0004_highscore_notifications.sql", "0005_cloud_hopper_levels.sql", "0006_cloud_hopper_replays.sql", ...(runs ? ["0007_cloud_hopper_runs.sql"] : []), ...(cabinets ? ["0008_cabinet_runs.sql"] : []), ...(guard ? ["0009_identity_collision_guard.sql"] : []), "0010_cabinet_plays.sql"]) {
     sql.exec(readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
   }
   const statement = (query, args = []) => {
@@ -655,4 +655,46 @@ test("cabinet migration leaves unattributed historical records intact and starts
   const board = await scores(handler, { DB }, "mine");
   assert.deepEqual(board.highscores, { "mine-1": 15000 });
   assert.deepEqual(board.runs, []);
+});
+
+// #554: the cave's cabinets and the hall's are one game's two machines, played at once on one shared board.
+test("players finishing the same game on its hall and cave cabinets at once both land on the one shared board", async (t) => {
+  const { DB, handler, env } = await setup(t, 1, "hall-player");
+  const other = await authenticated(DB, await player(DB, 2, "cave-player"));
+  const before = (await scores(handler, env, "invaders")).revision;
+  // Both reach the Worker together, the slower one first; a retried upload of either must not count twice.
+  await Promise.all([
+    other(write("invaders", "invaders-1", 900, { playerId: 2, runId: runId(21) }), env),
+    handler(write("invaders", "invaders-1", 1500, { runId: runId(22) }), env),
+    other(write("invaders", "invaders-1", 900, { playerId: 2, runId: runId(21) }), env)
+  ]);
+  const board = await scores(handler, env, "invaders");
+  assert.deepEqual(board.runs.map(r => [r.username, r.score]), [["hall-player", 1500], ["cave-player", 900]]);
+  assert.equal(board.highscores["invaders-1"], 1500);
+  assert.equal(board.revision > before, true);
+});
+
+const plays = (game = "", method = game ? "POST" : "GET", headers = { "sec-fetch-site": "same-origin" }) => new Request(`${SITE}/api/arcade-plays${game ? `/${game}` : ""}`, { method, headers });
+const playsHandler = () => createPlaysHandler(() => null);
+
+test("cabinet plays count every opening atomically, read as the last 30 days and refuse anything else", async (t) => {
+  const { DB, env } = await setup(t), handler = playsHandler();
+  await Promise.all(Array.from({ length: 12 }, () => handler(plays("mine"), env)));
+  assert.equal((await handler(plays("drop"), env)).status, 204);
+  const body = await (await handler(plays(), env)).json();
+  assert.deepEqual(body.plays, { mine: 12, drop: 1 });
+  assert.equal(body.windowDays, 30);
+  // Nothing about who played is stored.
+  assert.deepEqual(DB.sql.prepare("PRAGMA table_info(cabinet_plays)").all().map(c => c.name), ["game", "day", "plays"]);
+  // A day past the window leaves the reading, and the next play drops it.
+  const today = Math.floor(Date.now() / 86400000);
+  await countPlay(DB, "orbit", today - 31);
+  assert.equal((await readPlays(DB, today)).orbit, undefined);
+  await countPlay(DB, "drop", today);
+  assert.equal(DB.sql.prepare("SELECT count(*) AS n FROM cabinet_plays WHERE game = 'orbit'").get().n, 0);
+  for (const [request, status] of [[plays("not-a-game"), 404], [plays("mine@out"), 404], [plays("mine", "GET"), 405], [plays("", "POST"), 405],
+    [new Request(`${SITE}/api/arcade-plays?x=1`), 404], [plays("mine", "POST", { "sec-fetch-site": "cross-site" }), 403]]) {
+    assert.equal((await handler(request, env)).status, status);
+  }
+  assert.equal((await handler(plays(), { SITE_ORIGIN: SITE })).status, 503);
 });

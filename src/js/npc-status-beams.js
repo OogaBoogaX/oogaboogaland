@@ -37,7 +37,9 @@
           // state relocation. Controlled/remote player bodies are never included.
           const eligible = row.external || a.nonInteractive;
           const visible = eligible && r.visible && state !== 'away';
-          if (row.warm && visible && (row.state !== state || !row.visible)) {
+          // Working to chilling is a visible walk, not a relocation.
+          const walked = !row.external && row.visible && row.state === 'working' && state === 'chilling';
+          if (row.warm && visible && (row.state !== state || !row.visible) && !walked) {
             cancel(row);
             row.fromX = row.x; row.fromY = row.y; row.fromZ = row.z; row.fromYaw = row.yaw;
             row.departure = row.visible; row.pending = true; row.time = 0;

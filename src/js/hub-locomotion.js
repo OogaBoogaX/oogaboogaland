@@ -23,7 +23,7 @@
   };
   const create = ({ worldBound, crossesSealedCave, playerSupportAt, characterClankerSupportAt,
     ceilingAt, physicalClearAt, propSegmentClear, matrixGateSegmentClear,
-    mirrorActorSegmentClear, playerEscapeClear, bedSegmentClear, getDefaultActor,
+    mirrorActorSegmentClear, playerEscapeClear, bedSegmentClear, getDefaultActor, getHammock = () => null,
     radius: PLAYER_RADIUS, step: STEP_MAX }) => {
     if (![worldBound, crossesSealedCave, playerSupportAt, characterClankerSupportAt,
       ceilingAt, physicalClearAt, propSegmentClear, matrixGateSegmentClear,
@@ -31,6 +31,8 @@
       || !Number.isFinite(PLAYER_RADIUS) || PLAYER_RADIUS <= 0 || !Number.isFinite(STEP_MAX) || STEP_MAX < 0)
       throw Error("complete Hub locomotion providers required");
   const walkable = (fromX, fromZ, toX, toZ, y, height = 1.5, actor = getDefaultActor()) => {
+    const hammock = getHammock();
+    if (hammock && hammock.blocks(toX, y, toZ, PLAYER_RADIUS) && !hammock.blocks(fromX, y, fromZ, PLAYER_RADIUS)) return false;
     if (Math.hypot(toX, toZ) > worldBound() || crossesSealedCave(fromX, fromZ, toX, toZ, y)) return false;
     const floor = playerSupportAt(toX, toZ, y, y, actor), feet = Math.max(y, floor);
     if (floor - y > STEP_MAX && floor !== characterClankerSupportAt(toX, toZ, y, STEP_MAX, actor)) return false;

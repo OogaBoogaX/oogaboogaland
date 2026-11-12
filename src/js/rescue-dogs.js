@@ -54,6 +54,7 @@
   // Its Ooga down, it lands within LAND_REACH of it on dry open ground; the jetpack sits on its back at JET_SCALE.
   // Held up in the air longer than HELD_UP with no way on (a canopy over it, a wall ahead), it turns up where it is
   // going.
+  const GAIT = BL.crew.QUAD_GAIT;
   const LIFT = 1.2, FLY_SIDE = 1.2, FLY_UP = 0.4, FLY_GAIN = BL.crew.COMPANION_FLIGHT.gain, FLY_FAR = 30, LAND_REACH = 14, JET_SCALE = 0.55, HELD_UP = 1.5;
   const FREE = 0, KENNEL = 1, FOLLOW = 2, SIT = 3, EAT = 4, SQUAT = 5, NAP = 6, HOME = 7, STRAY = 8, FLY = 9, LAND = 10;
   const STATE_NAMES = ["free", "kennel", "follow", "sit", "eat", "poop", "sleep", "home", "stray", "fly", "land"];
@@ -670,7 +671,7 @@
         px[i] += Math.sin(yaw[i]) * go;
         pz[i] += Math.cos(yaw[i]) * go;
         py[i] = floorOf(i);
-        phase[i] += speed[i] * dt * 11;
+        phase[i] += speed[i] * dt * GAIT.stride;
       }
       return d < 0.25;
     };
@@ -689,7 +690,7 @@
           return BLOCKED;
         }
         px[i] = nx; pz[i] = nz; py[i] = floorOf(i);
-        phase[i] += speed[i] * dt * 11;
+        phase[i] += speed[i] * dt * GAIT.stride;
       }
       return d < 0.25 ? ARRIVED : WALKED;
     };
@@ -966,20 +967,21 @@
     // Whether dog i is in the visitor's space and drawn this frame.
     const shown = (i) => state[i] !== FREE && state[i] !== NAP && (space[i] === WITH || space[i] === here);
     // Legs swing in diagonal pairs while walking; sitting folds the hind legs, napping lays all four flat, flying
-    // stretches them fore and aft under the jetpack. `near` is whether its shadow is worth drawing.
+    // stretches them fore and aft under the jetpack (the gait is `BL.crew.QUAD_GAIT`, shared with legged companions).
+    // `near` is whether its shadow is worth drawing.
     const draw = (i, elapsed, near, dt) => {
       const b = breedOf[i], L = layouts[b], s = (spotOf[i] >= 0 || state[i] === HOME ? 0.88 : state[i] === STRAY ? 0.94 : 1) * (0.2 + 0.8 * grow[i]);
       const st = state[i] === STRAY ? MOOD_POSE[mood[i]] : state[i], hunger = entries[i] ? entries[i].hunger : 0, aloft = st === FLY || st === LAND, powered = st === FLY || st === LAND && landingHover;
       let pitch = 0, lift = 0, front = 0, hind = 0;
-      const walk = aloft ? 0 : Math.min(1, speed[i] / 1.4), swing = Math.sin(phase[i]) * 0.65 * walk;
-      let y = py[i] + Math.abs(Math.cos(phase[i])) * 0.018 * walk;
+      const walk = aloft ? 0 : Math.min(1, speed[i] / GAIT.pace), swing = Math.sin(phase[i]) * GAIT.swing * walk;
+      let y = py[i] + Math.abs(Math.cos(phase[i])) * GAIT.bob * walk;
       if (st === SIT) { pitch = -0.42; front = 0.42; hind = -1.25; y += L.leg * U * 0.1; }
       else if (st === NAP && speed[i] < 0.05) { lift = -L.leg * U * 0.92; front = -1.5; hind = 1.5; }
       else if (st === EAT && (i !== own || timer[i] < EAT_SECONDS - FOOD_DROP_SECONDS)) { pitch = 0.32 + Math.sin(elapsed * 14) * 0.05; front = -0.32; hind = -0.32; }
       else if (st === SQUAT) { pitch = -0.22; front = 0.22; hind = -0.75; lift = -0.035; }
       else if (st === KENNEL && speed[i] < 0.05 && (i & 1)) { pitch = -0.42; front = 0.42; hind = -1.25; y += L.leg * U * 0.1; }
-      else if (st === LAND && !landingHover) { front = -0.2; hind = 0.2; }
-      else if (aloft) { pitch = Math.sin(phase[i]) * 0.04; front = -1.05; hind = 1.1; y += Math.sin(elapsed * 3 + i) * 0.03; }
+      else if (st === LAND && !landingHover) { front = GAIT.landFront; hind = GAIT.landHind; }
+      else if (aloft) { pitch = Math.sin(phase[i]) * 0.04; front = GAIT.flyFront; hind = GAIT.flyHind; y += Math.sin(elapsed * 3 + i) * 0.03; }
       else if (i === own && lookUp && speed[i] < 0.05) pitch = -0.3;
       y += lift * s;
       // Nearby strays emit the same rising Z as sleeping Oogas, only once settled at home.

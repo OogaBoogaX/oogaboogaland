@@ -87,7 +87,7 @@ test("headless projection is canonical after recovery, bounded and excludes malf
   assert.deepEqual(project([]), createNpcPose(123, 128)([]));
 });
 
-test("actual browser host and worker use the same pose record and preserve the driven-body exclusion", () => {
+test("browser host and worker share pose records with explicit protocol versions and driven-body exclusion", () => {
   const a = rig("a"), b = rig("b"), sent = [];
   const BL = { npcPose: pose, math: { quat: { create: () => new Float32Array([0, 0, 0, 1]) }, fnv1a: () => 123 },
     scene: { addChild() {}, removeChild() {} }, net: { state: { room: "live", selfId: 1, hostId: 1, followers: 1 }, sendNpc: bytes => sent.push(bytes.slice().buffer) } };
@@ -96,7 +96,10 @@ test("actual browser host and worker use the same pose record and preserve the d
   const sync = BL.npcSync.create({ crew: { list: [a, b], player: b }, fx: {} });
   sync.update(.25);
   assert.equal(sent.length, 1);
-  assert.deepEqual(Buffer.from(sent[0]), Buffer.from(createNpcPose(123, 2)([{ index: 0, actor: a }])));
+  const server = createNpcPose(123, 2)([{ index: 0, actor: a }]);
+  assert.equal(new Uint32Array(sent[0], 0, 1)[0], 3, 'browser-host frames use current rock FORMAT3');
+  assert.equal(new Uint32Array(server, 0, 1)[0], 2, 'negotiated server projection keeps FORMAT2');
+  assert.deepEqual(Buffer.from(sent[0]).subarray(4), Buffer.from(server).subarray(4), 'signature, count and complete pose bytes match');
   sync.dispose();
 });
 

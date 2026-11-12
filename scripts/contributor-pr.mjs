@@ -5,13 +5,14 @@ import { fileURLToPath } from "node:url";
 import { EXCLUDED, LOGIN } from "../worker/src/contributor-policy.js";
 import { declaredIdentity, mayAuthorIdentity } from "./character-identity.mjs";
 import { isOperator } from "./character-operators.mjs";
+import { isOverride } from "./character-override.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Attribution changes transfer stats/eligibility and are not self-service profile edits.
 const POLICY_FILES = new Set(["src/js/contributor-identities.js", "scripts/contributor-pr.mjs",
   "scripts/character-identity.mjs", "worker/src/contributor-policy.js", ".github/workflows/character-identities.yml",
   "scripts/character-safety.mjs", "scripts/character-submissions.mjs", "scripts/character-github.mjs", "scripts/character-bundles.mjs",
-  "scripts/character-operators.mjs", "scripts/character-account-rename.mjs", "scripts/sync-characters.mjs",
+  "scripts/character-operators.mjs", "scripts/character-account-rename.mjs", "scripts/character-override.mjs", "scripts/sync-characters.mjs",
   ".github/workflows/character-bundles.yml", ".github/workflows/character-push.yml"]);
 const github = async (path, missing = false) => {
   const repo = process.env.GITHUB_REPOSITORY;
@@ -78,11 +79,19 @@ export const checkCharacterIdentities = async (pr, apply = false) => {
   const permission = await github(`collaborators/${encodeURIComponent(pr.user.login)}/permission`, true);
   const maintainer = permission?.permission === "admin" || permission?.role_name === "maintain";
   if (policyChanged && (!maintainer || !isOperator(pr.user))) throw new Error("Changing automation policy requires operator authority from w-s-bitcoin or 2140data");
+  // A maintainer override may replace a malformed or hostile file, so the sources
+  // it replaces are never read; its new sources and the registry still must parse.
+  const override = isOverride(pr);
+  if (override && (policyChanged || !maintainer || pr.user?.type !== "User" || pr.head.repo?.full_name !== pr.base.repo?.full_name)) {
+    throw new Error("A character-override/ PR must be a character-only branch of this repository opened by a current Maintain/Admin user");
+  }
   if (!files.length) return changed;
+  const replaced = new Set(files.flatMap((file) => [file.filename, file.previous_filename]).filter(Boolean));
   const rows = [];
   // Local source is the trusted base checkout for PR checks and the merged checkout
   // for reconciliation. Only declarations are parsed; no character code is executed.
   for (const file of readdirSync(join(root, "src", "characters")).filter((file) => file.endsWith(".js"))) {
+    if (override && replaced.has(`src/characters/${file}`)) continue;
     rows.push({ file, character: declaredIdentity(readFileSync(join(root, "src", "characters", file), "utf8")) });
   }
   const sources = new Map(), previous = new Map();
@@ -93,7 +102,7 @@ export const checkCharacterIdentities = async (pr, apply = false) => {
   };
   for (const file of files) {
     const name = file.filename.slice("src/characters/".length), oldPath = file.previous_filename || file.filename;
-    if (file.status !== "added") {
+    if (file.status !== "added" && !override) {
       const old = declaredIdentity(await readAt(oldPath, pr.base.sha));
       previous.set(name, old);
       // Unrelated appearance edits may be reviewed normally; identity transfers and

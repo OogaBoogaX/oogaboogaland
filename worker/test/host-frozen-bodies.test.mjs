@@ -20,7 +20,7 @@ function fixture(views, { missingNpc = false, hostCharacterFor = null } = {}) {
   B.characters = { all: () => [], get: () => null, ownedBy: () => null };
   B.caves = { slots: [] };
   const context = { window: { BL: B, matchMedia: () => ({ matches: false }) }, TextEncoder, URLSearchParams, location: { search: '' } };
-  for (const name of ['contributor-identities', 'activity-repos', 'contributors', 'walk-rules', 'crew', 'body-presence', 'host-actor-bindings', 'host-frozen-bodies'])
+  for (const name of ['contributor-identities', 'activity-repos', 'contributors', 'walk-rules', 'crew', 'weapon-targets', 'body-presence', 'host-actor-bindings', 'host-frozen-bodies'])
     runInNewContext(readFileSync(new URL(`../../src/js/${name}.js`, import.meta.url), 'utf8'), context);
   const source = { sample: () => connected ? { frame: snapshot, now, stale: now >= snapshot.expiresAt } : null };
   const npc = new Map();

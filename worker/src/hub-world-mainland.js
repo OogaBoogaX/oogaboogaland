@@ -4,7 +4,7 @@ import { hubScene, hubSlots, hubGroundLayout as L, hubMainlandPlanting as planti
   hubPoolModels, hubTimechainModels, hubLibrary } from './ooga-crew.js';
 
 export function* buildHubMainland({ island, root, solids, placed, targets, props, addProp,
-  claimed, claim, free, nearPath, getRosterCount, layout, chalkboardClearance, mempool, timechain, bifrost, firePosition }) {
+  claimed, claim, free, nearPath, getRosterCount, layout, chalkboardClearance, mempool, timechain, bifrost, repoIsland, firePosition }) {
   const { createNode, addChild, removeChild } = hubScene;
   const meadowPalms = [], hammockClaims = [], scenery = [], sceneryClaims = [];
   const workZones = [], entranceZones = [];
@@ -79,6 +79,7 @@ export function* buildHubMainland({ island, root, solids, placed, targets, props
     for (let r = timechain.place.approachFrom - 1; r <= timechain.place.rim; r += 1)
       claim(T.DIR.x * r, T.DIR.z * r, T.SITE.width / 2 + 0.9);
     for (const [x, z, r] of bifrost.claims) claim(x, z, r);
+    for (const [x, z, r] of repoIsland.claims) claim(x, z, r);
     let nearest = null, distance = Infinity;
     for (const o of scenery) {
       if (o.prop !== 'bush' || o.node.position.y !== 0 || reason(o)) continue;

@@ -364,9 +364,12 @@
           continue;
         }
         const y = p.y + p.t * 0.45;
-        if (zzzVisible && !zzzVisible(p.cave, p.x, y, p.z, p)) continue;
         const pos = project(p.x, y, p.z);
-        if (!pos) continue;
+        // A drifting z is at most 23 px tall plus its 6 px sway. Do not run
+        // exact room/terrain sight sweeps for marks wholly outside the canvas.
+        // Its lifetime still advances so turning back never replays old marks.
+        if (!pos || pos.x < -32 || pos.x > w + 32 || pos.y < -32 || pos.y > h + 32) continue;
+        if (zzzVisible && !zzzVisible(p.cave, p.x, y, p.z, p)) continue;
         ctx.globalAlpha = (1 - p.t / 2.4) * 0.8;
         ctx.font = ZZZ_FONTS[Math.round(11 + p.t * 5)];
         ctx.fillText("z", pos.x + Math.sin(p.t * 3) * 6, pos.y);
@@ -445,6 +448,8 @@
     const stats = () => ({ particles: particles.length, pool: particlePool.length, bubbles: bubbles.length, zzz: zzz.length, damageNumbers: damageCount });
     return {
       spawnParticle, burst, puff, clearParticles, say, sayAt, next, more, said, hush, speech: bubbleOf, zzzAt, damageNumber, showTicker, drawOverlay, warmVisibility, warmBlockers: visibility.warm, update: stepParticles, trimPool, reset, dispose, stats,
+      // The overlay's projection without the scene's visibility gate, into one reused point (remote-players.js nameplates).
+      projectRaw,
       get inMotion() {
         return particles.length > 0 || damageCount > 0;
       }

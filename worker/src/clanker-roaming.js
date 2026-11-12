@@ -1,6 +1,6 @@
 // Restricted actual-controller recovery: roaming meadow or static terrain
 // support for player bodies. No jobs, occupancy, climbing or live scene activation.
-import { createClankerBufferCheckpoint, CLANKER_BUFFER_FIELDS } from "./clanker-buffers.js";
+import { createClankerBufferCheckpoint, CLANKER_BUFFER_FIELDS, CLANKER_FIXED_PATH_CAPACITY } from "./clanker-buffers.js";
 import { createCheckpointPack } from "./checkpoint-pack.js";
 import { restoreNpcRandom } from "./npc-random.js";
 import "../../src/js/clanker-body-transfer.js";
@@ -108,7 +108,22 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget, logical = false)
   if (new Set(referenced).size !== referenced.length || referenced.length > entries.length + 256) bad();
   const references = new Map(referenced.map((e, i) => [e, i]));
   const omitted = logical ? new Set([...excluded, "animation", "fireFX"]) : excluded;
-  const buffers = createClankerBufferCheckpoint(world, ids, identity), pack = createCheckpointPack(budget, { intern: true });
+  const fixedPaths = logical && entries.every(e => e.pathing != null);
+  if (entries.some(e => e.pathing != null) && !fixedPaths) bad();
+  const pathValid = e => {
+    if (!fixedPaths) return;
+    const p = e.pathing, coordinate = n => Number.isFinite(n) && Math.abs(n) <= 10000;
+    if (!p || Object.keys(p).sort().join() !== "count,index,laneX,laneZ,plans,targetX,targetZ,tx,tz,version"
+      || !Number.isSafeInteger(p.version) || p.version > -1 || p.version < -Number.MAX_SAFE_INTEGER
+      || !Number.isSafeInteger(p.plans) || p.plans < 0
+      || !Number.isInteger(p.count) || p.count < 0 || p.count > CLANKER_FIXED_PATH_CAPACITY
+      || !Number.isInteger(p.index) || p.index < 0 || p.index > p.count
+      || ![p.targetX, p.targetZ].every(coordinate)
+      || ![p.tx, p.tz].every(n => Number.isNaN(n) || coordinate(n))
+      || ![p.laneX, p.laneZ].every(a => ArrayBuffer.isView(a) && a.length === CLANKER_FIXED_PATH_CAPACITY
+        && a.every(coordinate))) bad();
+  };
+  const buffers = createClankerBufferCheckpoint(world, ids, identity, fixedPaths), pack = createCheckpointPack(budget, { intern: true });
   const rigs = logical ? null : entries.map(e => e.gorilla.createManagedCheckpoint(world));
   const token = value => {
     if (value === missing) return [-6];
@@ -158,6 +173,7 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget, logical = false)
   const compatible = (field, value) => field.kind === "optional" ? value === missing || typeof value === "string" && value.length <= 80
     : field.kind === "reference" ? value === null || references.has(value) : typeof value === field.kind;
   const values = entry => {
+    pathValid(entry);
     const out = [];
     const walk = (value, node, root = false) => {
       if (node.buffer) return;
@@ -236,6 +252,7 @@ function createCheckpoint(sim, world, rigCodec, bridge, budget, logical = false)
           if (value === missing) delete object[key]; else object[key] = value;
         }
         for (const [group, members] of Object.entries(arrays[i])) Object.assign(e[group], members);
+        pathValid(e);
         e.random = decoded[i].random;
         if (logical) {
           const p = e.root.position; [p.x, p.y, p.z, e.root.visible] = poses[i];

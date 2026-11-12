@@ -131,7 +131,7 @@
       const identity = (item, index) => `${index}:${item.kind}:${item.station}`;
       const validate = saved => {
         const items = getLab().equipment, actors = getClankers().list;
-        if (items.length > 128 || actors.length > 53 || !saved || Object.keys(saved).sort().join() !== "items,v,world"
+        if (items.length > 128 || actors.length > (BL.npcAuthority?.MAX_OOGAS ?? 64) || !saved || Object.keys(saved).sort().join() !== "items,v,world"
           || saved.v !== 1 || saved.world !== world || !dense(saved.items, items.length)) fail();
         const holders = new Set();
         for (let i = 0; i < items.length; i++) {

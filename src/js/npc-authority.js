@@ -4,7 +4,8 @@
   "use strict";
   const scope = typeof window === "undefined" ? globalThis : window;
   const BL = scope.BL = scope.BL || {};
-  const MAGIC = 0x4150434e, HEADER = 32, MAX = 16 + 128 * 112 * 4;
+  const MAX_NPCS = 128, MAX_OOGAS = MAX_NPCS / 2;
+  const MAGIC = 0x4150434e, HEADER = 32, MAX = 16 + MAX_NPCS * 112 * 4;
   const integer = n => Number.isSafeInteger(n) && n >= 0;
   // Mixed format is opt-in. Loading its codec must never upgrade an existing
   // browser before both actor families obey the server ownership fence.
@@ -74,5 +75,5 @@
       },
     };
   };
-  BL.npcAuthority = { MAGIC, MAX, descriptor, poses, posesFor, pack, create };
+  BL.npcAuthority = { MAGIC, MAX, MAX_NPCS, MAX_OOGAS, descriptor, poses, posesFor, pack, create };
 })();
