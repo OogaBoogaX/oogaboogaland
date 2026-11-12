@@ -4303,7 +4303,7 @@ const orbitFlow = async (b) => {
 // perf floor; `perf` runs the perf floor alone; `unit` (or nothing) runs only the global tier.
 // Two lanes limit concurrent WebGL boot pressure; four produced long startups
 // and a GPU context loss during the full suite.
-const SCENES = ["hub", "lab", "race", "drop", "block", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
+const SCENES = ["hub", "lab", "studio", "race", "drop", "block", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
 for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
@@ -23323,6 +23323,113 @@ scene("hub", { label: "mirror clanker", query: "solo=1&character=portlandhodl&st
 } }] });
 scene("hub", { perf: true, query: "bananas=1000", opts: { w: 1920, h: 1080, perf: true, motion: true }, steps: [{ name: "wall movement performance", why: "regression: frame rate fell moving behind cave walls during a donation", run: wallPerformance }] });
 scene("lab", { steps: [donation("lab"), labWalking, labKeys, trip("lab")] });
+// The character studio (scene-studio.js): one Ooga on a bare pad, and every place it rests, through the game's own
+// seats, bed and hammock. The fixture is a slim Ooga with a legged pet and a blade to sling.
+const STUDIO_OOGA = "midy-machete";
+const studioPlaces = { name: "studio places", why: "playthrough: the studio is where a player looks at the Ooga they are making, so it must show that one Ooga walking, sitting, asleep and at rest in the hammock, with its rifle out and its jetpack on, and any other Ooga in its place", run: async (b) => {
+  const walk = await walkKeys(b, STUDIO_OOGA, 0, 1.2, [0, 2.2], 0.5);
+  const alone = await b.evaluate(`(() => { const B = window.__ooga, shown = (el) => el.getClientRects().length > 0 && el.checkVisibility({ visibilityProperty: true }), r = (el) => el.getBoundingClientRect();
+    const side = r(document.querySelector(".studio-side")), brand = r(document.querySelector(".brand")), row = r([...document.querySelectorAll("#equipment-hud .weapon-equipment-row > *")].find(shown));
+    const pick = document.getElementById("studio-pick"), names = [...pick.options].map((o) => o.textContent), help = r(document.getElementById("controls-help-button"));
+    return { one: B.crew.list.length === 1 && B.studio.cave.traits.name === "${STUDIO_OOGA}", banner: document.getElementById("equipment-hud").dataset.banner !== "below" && row.left > brand.right && row.top < brand.bottom, side: side.left < 40 && side.top > brand.bottom && side.height > side.width * 2,
+      bare: !["sheet-bananas", "sheet-toggle", "environment-sound", "world-clock", "world-block"].some((id) => shown(document.getElementById(id))) && !document.querySelector('[data-action="studio-blocks"]'),
+      title: document.querySelector(".home-link [data-sign]").getAttribute("aria-label"),
+      pick: { n: names.length, sorted: names.every((name, i) => !i || names[i - 1].localeCompare(name, "en", { sensitivity: "base" }) <= 0), value: pick.value, beside: shown(pick) && r(pick).right <= help.left && r(pick).top < brand.bottom },
+      stays: (document.querySelector(".home-link svg").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })), B.advance(0.3, 1 / 60), B.scene === "studio" && !B.transitioning) }; })()`);
+  record("studio places: W A S D walk the one Ooga on the pad its way on screen from two camera angles; the banner reads OBL with the game's equipment buttons beside it and every Ooga listed A to Z beside the controls button, the studio's buttons run down the left side, there is no Bananas panel, Oogas panel, sound button, clock, block height or block look, and the title's link home stays in the studio",
+    allWalk(walk) && alone.one && alone.banner && alone.side && alone.bare && alone.stays && alone.title === "OBL" && alone.pick.n > 50 && alone.pick.sorted && alone.pick.value === STUDIO_OOGA && alone.pick.beside, JSON.stringify({ walk, alone }));
+  const space = await b.evaluate(`(() => {
+    const B = window.__ooga, S = B.studio, P = B.pilot, C = S.cave, act = () => document.getElementById("act").textContent, out = {};
+    const at = (x, z) => { P.navigate({ position: { x, y: 0, z }, yaw: 0, pitch: 0.2, dist: 5 }); B.advance(0.3, 1 / 60); return act(); };
+    const chair = S.seats[0], ground = S.seats[1], bed = S.hammock.seats[0];
+    out.sit = at(chair.walkAt.x, chair.walkAt.z); P.action(); B.advance(0.5, 1 / 60);
+    out.sat = C.camp.seat === chair && act(); P.action(); B.advance(1, 1 / 60); out.stood = !C.camp.seat;
+    // By the fire the seat is the ground, as the island's Oogas sit: the hip a hand over it, the free arm propped.
+    out.fire = at(ground.walkAt.x, ground.walkAt.z); P.action(); B.advance(0.8, 1 / 60);
+    out.grounded = !!C.camp.seat && C.camp.seat.ground === true && C.root.position.y < 0.2 && !!C.parts.armL.quaternion; P.action(); B.advance(1, 1 / 60); out.rose = !C.camp.seat;
+    out.sleep = at(S.bed.walkAt.x, S.bed.walkAt.z); P.action(); B.advance(1.5, 1 / 60);
+    out.slept = B.crew.sleeping && C.bedTravel.mode === "rest" && act(); P.action(); B.advance(0.5, 1 / 60); out.woke = !B.crew.sleeping;
+    out.rest = at(bed.walkAt.x, bed.walkAt.z); P.action(); B.advance(2.5, 1 / 60);
+    out.rested = C.camp.seat === bed; out.pet = C.pet ? +C.pet.down.toFixed(2) : null; P.action(); B.advance(1.5, 1 / 60); out.up = !C.camp.seat;
+    return out;
+  })()`);
+  record("studio places: beside the chair, the fire, the mattress and the hammock the act button names each, Space takes it through the game's own seat, bed and hammock (by the fire on the ground with the free arm propped, the legged pet lying down by the hammock), and Space gives the Ooga back on its feet", space.sit === "SIT" && space.sat === "STAND UP!" && space.stood && space.fire === "SIT" && space.grounded && space.rose && space.sleep === "SLEEP" && space.slept === "WAKE UP!" && space.woke && space.rest === "REST" && space.rested && space.pet > 0.5 && space.up, JSON.stringify(space));
+  const places = await b.evaluate(`(() => {
+    const B = window.__ooga, C = B.studio.cave, press = (name) => document.querySelector('.studio-side [data-action="studio-' + name + '"]').click();
+    const says = () => document.querySelector('.studio-side [data-action="studio-night"]').textContent, O = BL.scenes.studio.renderOpts, stars = () => O.stars, moon = () => [O.moon.x, O.moon.y, O.moon.z].map((v) => v.toFixed(4)).join();
+    const went = ["chair", "bed", "hammock", "fire", "stand"].map((id) => { press(id); B.advance(id === "stand" ? 0.3 : 1.5, 1 / 60); return id === "bed" ? B.crew.sleeping : id === "stand" ? !C.camp.seat && !B.crew.sleeping : id === "fire" ? !!C.camp.seat && C.camp.seat.ground === true : !!C.camp.seat; });
+    const day = says() === "Day" && stars() < 0.5, byDay = moon();
+    press("night"); B.advance(0.1, 1 / 60);
+    const night = says() === "Night" && stars() > 0.5, moonStays = moon() === byDay && O.moon.y > 0;
+    press("night"); B.advance(0.1, 1 / 60);
+    return { went, day: day && says() === "Day" && stars() < 0.5, night, moonStays };
+  })()`);
+  await b.key("2");
+  const rifle = await b.evaluate(`(() => { const B = window.__ooga, C = B.studio.cave; B.advance(0.6, 1 / 60); return C.weapon.equipped && C.parts.gun.visible; })()`);
+  await b.key("j");
+  const jetpack = await b.evaluate(`(() => { const B = window.__ooga, C = B.studio.cave; B.advance(0.3, 1 / 60); const on = !!C.jet; B.studio.toggle("jetpack", false); B.studio.toggle("rifle", false); B.advance(0.3, 1 / 60); return on && !C.jet && !C.weapon.equipped; })()`);
+  record("studio places: the studio's buttons put the Ooga in every place without the walk, its day button brings the night and says which it is with the moon keeping its place in the sky, 2 takes the rifle out and J puts the jetpack on", places.went.every(Boolean) && places.day && places.night && places.moonStays && rifle && jetpack, JSON.stringify({ places, rifle, jetpack }));
+  // The views by their buttons, one lit at a time: its own eyes and the third person, which carrying is from behind
+  // and a little above with the Ooga in the middle, and in combat is combat's own, over the shoulder.
+  const views = await b.evaluate(`(() => { const B = window.__ooga, C = B.studio.cave, c = B.camera, click = (name) => { document.querySelector('.studio-side [data-action="studio-' + name + '"]').click(); B.advance(1.4, 1 / 60); };
+    const lit = (name) => document.querySelector('[data-action="studio-' + name + '"]').getAttribute("aria-pressed") === "true", mode = () => { B.pilot.modeAction("mode-toggle"); B.advance(1.2, 1 / 60); };
+    const at = () => { const h = C.root.rotation.y, dx = c.position.x - C.root.position.x, dz = c.position.z - C.root.position.z;
+      return { view: B.pilot.view, aiming: !!C.weapon.aiming, behind: +(dx * Math.sin(h) + dz * Math.cos(h)).toFixed(2), side: +Math.abs(dx * Math.cos(h) - dz * Math.sin(h)).toFixed(2), up: +(c.position.y - C.root.position.y + C.baseY).toFixed(2) }; };
+    const out = {};
+    click("third"); out.carry = at(); out.carryLit = lit("third") && !lit("eyes");
+    click("eyes"); out.eyes = B.pilot.view; out.eyesLit = lit("eyes") && !lit("third");
+    click("eyes"); out.back = at();
+    mode(); click("third"); out.combat = at();
+    mode(); click("third"); out.again = at();
+    return out; })()`);
+  const centred = (v) => v.view === "orbit" && !v.aiming && v.behind < -2.5 && v.side < 0.05 && v.up > 1.2;
+  record("studio places: 1st person and 3rd person are lit one at a time; carrying, the 3rd person is from behind and a little above with the Ooga in the middle, in combat it is combat's own over the shoulder, and leaving the 1st person comes back to it",
+    centred(views.carry) && views.carryLit && views.eyes === "first-person" && views.eyesLit && centred(views.back) && views.combat.view === "shoulder" && views.combat.aiming && views.combat.side > 0.5 && centred(views.again), JSON.stringify(views));
+  // The free camera: the visitor's own, flown by the movement keys while the Ooga keeps what it is doing.
+  const freed = await b.evaluate(`(() => { const B = window.__ooga, S = B.studio, C = S.cave, F = S.free;
+    S.place("chair"); B.advance(0.5, 1 / 60);
+    document.querySelector('.studio-side [data-action="studio-free"]').click(); B.advance(0.2, 1 / 60);
+    window.__free = { x: F.x, z: F.z, ooga: C.root.position.x + "," + C.root.position.z };
+    return { on: F.on, lit: document.querySelector('[data-action="studio-free"]').getAttribute("aria-pressed") === "true", seated: !!C.camp.seat }; })()`);
+  await holdKey(b, "w", 0.5);
+  const flown = await b.evaluate(`(() => { const B = window.__ooga, S = B.studio, C = S.cave, F = S.free, from = window.__free;
+    const out = { moved: +Math.hypot(F.x - from.x, F.z - from.z).toFixed(2), kept: !!C.camp.seat && C.root.position.x + "," + C.root.position.z === from.ooga };
+    F.pitch = -1.4; F.y = 0.05; F.dist = 8; B.advance(0.2, 1 / 60);
+    out.eye = +B.camera.position.y.toFixed(3);
+    document.querySelector('.studio-side [data-action="studio-free"]').click(); B.advance(0.4, 1 / 60);
+    out.back = !F.on && !!C.camp.seat;
+    B.pilot.action(); B.advance(1, 1 / 60);
+    out.drives = !C.camp.seat;
+    return out; })()`);
+  record("studio places: the free camera flies by the movement keys while the Ooga keeps its seat, its eye never goes under the ground, and its button gives the view and the Ooga back", freed.on && freed.lit && freed.seated && flown.moved > 0.5 && flown.kept && flown.eye >= 0.2 - 1e-6 && flown.back && flown.drives, JSON.stringify({ freed, flown }));
+  const other = "w-s-bitcoin";
+  const swap = await b.evaluate(`(async () => {
+    const B = window.__ooga, pick = document.getElementById("studio-pick");
+    window.__studioPage = 1;
+    B.studio.place("chair"); B.advance(0.5, 1 / 60);
+    B.pilot.orbit.yaw = B.pilot.orbit.tYaw = 1.3; B.advance(0.3, 1 / 60);
+    pick.value = "${other}"; pick.dispatchEvent(new Event("change", { bubbles: true }));
+    const t0 = performance.now();
+    while ((B.transitioning || !B.studio || B.studio.cave.traits.name !== "${other}") && performance.now() - t0 < 15000) { B.advance(1 / 30, 1 / 30); await new Promise((r) => setTimeout(r, 0)); }
+    B.advance(0.5, 1 / 60);
+    const S = B.studio, C = S && S.cave;
+    return { who: C && C.traits.name, same: window.__studioPage === 1, seat: !!C && C.camp.seat === S.seats[0], yaw: +B.pilot.orbit.yaw.toFixed(2), pick: document.getElementById("studio-pick").value, address: new URLSearchParams(location.search).get("character"), tab: document.title };
+  })()`);
+  record("studio places: the list beside the controls button puts another Ooga on the pad with no reload, in the same place and view, and the address and the tab follow it", swap.who === other && swap.same && swap.seat && Math.abs(swap.yaw - 1.3) < 0.05 && swap.pick === other && swap.address === other && swap.tab === `Studio · ${other}`, JSON.stringify(swap));
+  // Regression: restoring the bed before the rifle made the crew refuse the saved weapon selection.
+  const reloadUrl = await b.evaluate(`(() => { const B = window.__ooga;
+    B.studio.place("stand"); B.advance(0.5, 1 / 60); B.studio.toggle("rifle", true);
+    B.studio.place("bed"); B.advance(2, 1 / 60); return location.href; })()`);
+  await b.open("about:blank");
+  await b.open(reloadUrl);
+  await untilReady(b);
+  const reloaded = await b.evaluate(`(() => { const B = window.__ooga; B.advance(2, 1 / 60);
+    const C = B.studio.cave, asleep = B.crew.sleeping && C.bedTravel.mode === "rest", kept = C.weapon.equipped;
+    B.studio.place("stand"); B.advance(1, 1 / 60);
+    return { asleep, kept, standing: !B.crew.sleeping && C.weapon.equipped && C.parts.gun.visible }; })()`);
+  record("studio places: reloading an Ooga in bed preserves its rifle selection and waking restores the held rifle", reloaded.asleep && reloaded.kept && reloaded.standing, JSON.stringify(reloaded));
+} };
+scene("studio", { query: `character=${STUDIO_OOGA}`, steps: [studioPlaces, trip("studio")] });
 scene("race", { label:"optional rig link fallback",url:hubPage(src, "scene=hub"),steps:[{name:"race optional rig link fallback",why:"regression: an optional uniform-limited rig must preserve WebGL and every original CPU driver",run:async b=>{
   await b.evaluate(`(()=>{
     const gl=document.getElementById("scene").getContext("webgl2"),create=gl.createProgram,parameter=gl.getProgramParameter,pending=new Set();
@@ -24378,6 +24485,7 @@ scene("hub", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("hub", { required
   record("hub home screen: the installed name is OogaBoogaLand, with a same-origin icon; the manifest link is added only for the hosted site", meta.title === "OogaBoogaLand" && meta.capable === "yes" && meta.icon === "apple-touch-icon.png" && !meta.manifestLink && meta.manifestSrc && manifest.short_name === "OogaBoogaLand" && manifest.display === "standalone" && staged, JSON.stringify({ meta, short: manifest.short_name, staged }));
 } }] });
 scene("lab", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("lab", { required: ["#joy-move", "#joy-look", "#leave-hud"] })] });
+scene("studio", { query: `pos=0&character=${STUDIO_OOGA}`, opts: PHONE_SIZE, steps: [phone("studio", { required: ["#joy-move", "#joy-look", "#act"] })] });
 scene("race", { query: "pos=0&rain=0&draw=0", opts: PHONE_SIZE, steps: [phone("race", { card: '[data-intro="race"]', play: "window.__ooga.race.startRace()", required: ["#joy-move", "#act", "#item-btn", "#race-garage-btn", "#leave-hud"] })] });
 scene("drop", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("drop", { card: '[data-intro="drop"]', play: "window.__ooga.drop.start()", required: ["#joy-move", "#joy-look", "#act", "#leave-hud"] })] });
 scene("orbit", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("orbit", { card: '[data-intro="orbit"]', play: "window.__ooga.orbit.launch()", required: ["#joy-move", "#act", "#leave-hud"] })] });
@@ -27451,6 +27559,98 @@ const netFixture=(BL,response,step=200,cookie="")=>{
   runInNewContext(source,context);
   return {net:context.window.BL.net,document:context.document,voice,sockets,sent,events,location,navigations,timers,intervals,advance(ms){tick+=ms;},get calls(){return calls;},get savedViews(){return savedViews;}};
 };
+const connectionReportChecks = async () => {
+  const source = readFileSync(join(root, "src/js/connection-reports.js"), "utf8");
+  const fixture = () => {
+    let now = 1000, next = 0, response = { ok: true, status: 201 };
+    const timers = new Map(), observers = new Set(), updates = [], requests = [];
+    const input = { checked: false, addEventListener: (_kind, fn) => { input.change = fn; } };
+    const box = { hidden: true }, status = { textContent: "" };
+    const state = { backend: true, connectionReports: true, me: { id: 71 }, room: "live" };
+    const net = { state, subscribe: fn => updates.push(fn), subscribeConnection: fn => {
+      observers.add(fn); return () => observers.delete(fn);
+    } };
+    const context = { BL: { net }, document: {
+      currentScript: { src: "https://site.test/js/main-1234abcd.js" },
+      getElementById: id => ({ "players-diagnostics": box, "players-diagnostics-input": input,
+        "players-diagnostics-status": status })[id],
+    }, window: { setTimeout: (fn, ms) => { const id = ++next; timers.set(id, { fn, at: now + ms }); return id; },
+      clearTimeout: id => timers.delete(id) }, performance: { now: () => now }, AbortController,
+      fetch: async (url, options) => { requests.push({ url, ...options }); return typeof response === "function" ? response(options) : response; } };
+    runInNewContext(source, context);
+    return { state, input, box, status, requests, observers, timers,
+      response: value => { response = value; },
+      opt: on => { input.checked = on; input.change(); },
+      update: () => updates.forEach(fn => fn()),
+      emit: (kind, extra = {}) => [...observers].forEach(fn => fn({ kind, room: state.room,
+        hidden: false, remotes: 2, unanswered: 0, voiceEnabled: true, voiceMuted: false,
+        lastMessageAge: 10, lastPongAge: 50, ...extra })),
+      advance: ms => { now += ms; },
+      flush: async (ms = 2000) => {
+        now += ms;
+        for (const [id, timer] of [...timers]) if (timer.at <= now && timers.delete(id)) await timer.fn();
+      },
+      fire: () => { now += 2000; const entry = [...timers].find(([, t]) => t.at <= now); if (!entry) return;
+        timers.delete(entry[0]); return entry[1].fn(); },
+    };
+  };
+  const off = fixture();
+  off.emit("socket-close", { code: 1006, clean: false }); await off.flush();
+  record("dropout reports: default off, no observer, timer or network request", !off.input.checked &&
+    !off.box.hidden && off.observers.size === 0 && off.timers.size === 0 && off.requests.length === 0);
+  off.opt(true);
+  for (let id = 1; id <= 80; id++) { off.emit("peer-join", { id }); off.emit("peer-leave", { id, reason: "replaced" }); }
+  off.emit("peer-body", { id: 3, body: false }); off.emit("peer-zone", { to: "private-zone" });
+  off.emit("welcome"); await off.flush();
+  record("dropout reports: normal joins, replacements, body/zone changes and welcome do not upload", off.requests.length === 0);
+  off.emit("peer-leave", { id: 99, reason: "closed", login: "private-name" });
+  off.advance(350); off.emit("peer-join", { id: 99, login: "private-name", x: 123 });
+  await off.flush();
+  const report = JSON.parse(off.requests[0].body), wire = off.requests[0].body;
+  record("dropout reports: rapid peer return sends only allowlisted context after explicit opt-in",
+    report.kind === "peer-return" && report.gapMs === 350 && report.clientBuild === "1234abcd" &&
+    report.consent === true && report.events.at(-1).voiceEnabled && !report.events.at(-1).voiceMuted &&
+    !/private|login|position|\\"id\\"|\\"x\\"/.test(wire) && off.requests[0].credentials === "same-origin", wire);
+  off.emit("socket-close", { code: 1006, clean: false }); await off.flush();
+  record("dropout reports: one attempt per minute across incidents", off.requests.length === 1);
+  const reconnect = fixture(); reconnect.opt(true);
+  reconnect.emit("heartbeat-timeout", { unanswered: 3, lastPongAge: 45000 });
+  reconnect.state.room = "connecting"; reconnect.emit("clear"); await reconnect.flush();
+  const held = reconnect.requests.length === 0;
+  reconnect.advance(500); reconnect.state.room = "live"; reconnect.emit("welcome"); await reconnect.flush();
+  const recovered = JSON.parse(reconnect.requests[0].body);
+  record("dropout reports: reconnect uploads wait for welcome and include heartbeat/recovery context", held &&
+    recovered.kind === "heartbeat-timeout" && recovered.events.some(e => e.unanswered === 3) &&
+    recovered.events.at(-1).kind === "welcome");
+  const cancelled = fixture(); cancelled.opt(true); cancelled.emit("socket-close", { code: 1006, clean: false });
+  cancelled.opt(false); await cancelled.flush(); cancelled.opt(true); await cancelled.flush();
+  cancelled.emit("socket-close", { code: 1006, clean: false }); cancelled.state.me = { id: 72 }; cancelled.update(); await cancelled.flush();
+  record("dropout reports: opt-out and account changes discard queued data and disable observation",
+    cancelled.requests.length === 0 && cancelled.observers.size === 0 && !cancelled.input.checked);
+  const inflight = fixture(); inflight.opt(true);
+  inflight.response(options => new Promise((_resolve, reject) => options.signal.addEventListener("abort", () => reject(new Error("aborted")))));
+  inflight.emit("socket-close", { code: 1006, clean: false });
+  const sending = inflight.fire(); inflight.opt(false); await sending;
+  record("dropout reports: opting out aborts an in-flight request and does not restore stale status",
+    inflight.requests[0].signal.aborted && inflight.status.textContent === "Off" && inflight.timers.size === 0);
+  const expired = fixture(); expired.opt(true);
+  expired.emit("socket-close", { code: 1006, clean: false }); expired.state.room = "connecting"; await expired.flush();
+  expired.advance(120001); expired.state.room = "live"; expired.emit("welcome"); await expired.flush();
+  expired.emit("peer-leave", { id: 80, reason: "closed" }); expired.advance(10001); expired.emit("peer-join", { id: 80 }); await expired.flush();
+  record("dropout reports: expired incidents and slow returns are discarded", expired.requests.length === 0);
+  const bounded = fixture(); bounded.opt(true); bounded.response({ ok: false, status: 503 });
+  for (let i = 0; i < 12; i++) {
+    for (let j = 0; j < 30; j++) bounded.emit("visibility");
+    bounded.emit("socket-close", { code: 1006, clean: false }); await bounded.flush(); bounded.advance(60000);
+  }
+  record("dropout reports: failures never retry, history stays bounded and attempts stop at ten per visit",
+    bounded.requests.length === 10 && bounded.requests.every(r => JSON.parse(r.body).events.length <= 16) && bounded.timers.size === 0);
+  const disposed = fixture(); disposed.opt(true); disposed.emit("socket-close", { code: 1006, clean: false });
+  disposed.emit("dispose"); await disposed.flush();
+  record("dropout reports: disposal stops observation and clears pending uploads",
+    disposed.requests.length === 0 && disposed.observers.size === 0 && !disposed.input.checked && disposed.box.hidden);
+};
+
 const roomSocketChecks = async BL => {
   const reply = () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "YellowBrokeIt", display: "Yellow" } }) });
   const f = netFixture(BL, reply);
@@ -27462,6 +27662,87 @@ const roomSocketChecks = async BL => {
   const heard = ws.readyState === 1 && f.sockets.length === 1;
   tick();
   record("room socket: pings that go unanswered end a half-open socket, and any answer resets the count", heard && ws.readyState === 3 && f.net.state.room === "connecting" && timers.length > 0, JSON.stringify({ ready: ws.readyState, room: f.net.state.room }));
+  // Regression #624: the old path discarded close/leave reasons, so a brief removal could not be classified.
+  const capture = netFixture(BL, reply, 0);
+  const D = capture.net, observed = [];
+  D.subscribeConnection(event => { observed.push(event); });
+  D.subscribeConnection(() => { throw new Error("observer must not affect recovery"); });
+  const empty = D.connectionDiagnostics();
+  await D.start();
+  let socket = capture.sockets[0];
+  socket.onopen();
+  const deliver = value => socket.onmessage({ data: JSON.stringify(value) });
+  const player = { id: 72, login: "private-login", display: "private-display", body: "YellowBrokeIt", zone: "outside", x: 1, y: 2, z: 3, voice: true, muted: false };
+  const welcome = () => deliver({ t: "welcome", you: { id: 71 }, players: [player], now: Date.now(), features: [], connectionToken: "private-token" });
+  welcome();
+  record("room observer: receives lifecycle events without enabling console capture",
+    observed.some(event => event.kind === "welcome") && !D.connectionDiagnostics().enabled);
+  const beforeCapture = [capture.sent.length, capture.calls, capture.timers.length, capture.intervals.length];
+  capture.voice.stats = { enabled: true, muted: false, publishing: true };
+  D.connectionDiagnostics(true);
+  const noWork = beforeCapture.join() === [capture.sent.length, capture.calls, capture.timers.length, capture.intervals.length].join();
+  capture.advance(20); socket.onmessage({ data: "pong" }); capture.advance(30);
+  const timing = D.connectionDiagnostics();
+  // A peer departure does not mean this observer lost the room.
+  deliver({ t: "leave", id: 72, reason: "closed" });
+  const left = D.connectionDiagnostics(), departure = left.events.at(-1);
+  const peerLeft = departure.kind === "peer-leave" && departure.id === 72 && departure.reason === "closed" && left.room === "live" && !D.remotes.has(72);
+  deliver({ t: "join", p: player });
+  deliver({ t: "body", id: 72, name: null });
+  deliver({ t: "zone", id: 72, name: "factory.hall" });
+  deliver({ t: "vstate", id: 72, voice: true, muted: true });
+  const presence = D.connectionDiagnostics();
+  const changes = ["peer-join", "peer-body", "peer-zone", "peer-voice"].every(kind => presence.events.some(e => e.kind === kind));
+  const beforeCopy = D.connectionDiagnostics();
+  beforeCopy.events[0].kind = "tampered"; beforeCopy.peers[0].zone = "tampered"; beforeCopy.voice.enabled = false;
+  const copied = D.connectionDiagnostics();
+  const detached = copied.events[0].kind === "capture" && copied.peers[0].zone === "factory.hall" && copied.voice.enabled;
+  // An abnormal local close clears all peers and schedules the ordinary retry, retaining speaker intent.
+  socket.onerror();
+  socket.onclose({ code: 1006, wasClean: false, reason: "private-close-text" });
+  const closed = D.connectionDiagnostics(), closeEvent = closed.events.find(e => e.kind === "socket-close");
+  record("room observer: close includes message/pong ages, and failing observers cannot break cleanup",
+    observed.some(event => event.kind === "socket-close" && event.code === 1006 && event.lastMessageAge !== null &&
+      event.lastPongAge !== null) && D.state.room === "connecting");
+  const localClosed = closed.room === "connecting" && closed.peers.length === 0 && closeEvent.code === 1006 && !closeEvent.clean
+    && closeEvent.remotes === 1 && closeEvent.voiceEnabled && !closeEvent.voiceMuted
+    && closed.events.some(e => e.kind === "socket-error") && closed.events.some(e => e.kind === "retry" && e.wait >= 375 && e.wait <= 625);
+  capture.timers.at(-1).fn(); socket = capture.sockets.at(-1); socket.onopen(); welcome();
+  const restored = D.connectionDiagnostics();
+  const rejoined = restored.room === "live" && restored.peers.length === 1 && restored.events.some(e => e.kind === "connect") && restored.events.at(-1).kind === "welcome";
+  const beat = capture.intervals.at(-1).fn;
+  beat(); beat(); beat(); beat();
+  const timeout = D.connectionDiagnostics().events.find(e => e.kind === "heartbeat-timeout");
+  const timedOut = timeout?.unanswered === 3 && D.state.room === "connecting";
+  capture.timers.at(-1).fn(); socket = capture.sockets.at(-1); socket.onopen(); welcome();
+  capture.document.hidden = true; capture.events.get("visibilitychange")();
+  const hiddenEvent = D.connectionDiagnostics().events.at(-1);
+  capture.document.hidden = false; capture.events.get("visibilitychange")();
+  deliver({ t: "leave", id: 72, reason: "private-leave-text" }); deliver({ t: "join", p: player });
+  deliver({ t: "kick", reason: "private-kick-text" });
+  const safe = JSON.stringify(D.connectionDiagnostics());
+  record("room diagnostics: opt-in capture adds no traffic/timers and snapshots are detached", !empty.enabled && !empty.events.length && noWork && detached);
+  record("room diagnostics: peer departure, body/zone/voice changes and local reconnect remain distinguishable",
+    peerLeft && changes && localClosed && rejoined && hiddenEvent.kind === "visibility" && hiddenEvent.hidden, JSON.stringify({peerLeft,changes,localClosed,rejoined}));
+  record("room diagnostics: last-message/pong ages and heartbeat timeout retain evidence without payloads",
+    timing.messages === 1 && timing.lastMessageAge === 30 && timing.lastPongAge === 30 && timedOut
+      && !["private-login", "private-display", "private-token", "private-close-text", "private-leave-text", "private-kick-text"].some(value => safe.includes(value)));
+  // Re-enabling an active capture preserves it; ring wrap preserves order and disabling clears it.
+  const ring = netFixture(BL, reply, 0); await ring.net.start(); ring.sockets[0].onopen();
+  ring.net.connectionDiagnostics(true);
+  // Local console capture must retain timing evidence even with no upload observer subscribed.
+  ring.sockets[0].onmessage({ data: "pong" }); ring.advance(30);
+  for (let i = 0; i < 90; i++) { ring.advance(1); ring.document.hidden = false; ring.events.get("visibilitychange")(); }
+  const bounded = ring.net.connectionDiagnostics(true);
+  record("room diagnostics: local-only lifecycle events retain message and pong ages without an upload observer",
+    bounded.events.at(-1).lastMessageAge === 120 && bounded.events.at(-1).lastPongAge === 120);
+  const ordered = bounded.events.every((e, i) => e.kind === "visibility" && (i === 0 || e.elapsed > bounded.events[i - 1].elapsed));
+  ring.net.connectionDiagnostics(false); ring.events.get("visibilitychange")();
+  const disabled = ring.net.connectionDiagnostics();
+  ring.net.connectionDiagnostics(true); const fresh = ring.net.connectionDiagnostics(); ring.net.dispose();
+  record("room diagnostics: history is bounded, ordered, reset on disable and released on disposal",
+    bounded.events.length === 64 && ordered && !disabled.enabled && !disabled.events.length && fresh.events.length === 1 && !ring.net.connectionDiagnostics().enabled);
+  capture.net.dispose();
   // Fires the timers a hidden tab has armed, in order, as the clock reaches each.
   const run = (f, marks) => { for (let i = 0; i < 12; i++) { const t = f.timers.find(t => !t.ran && marks.includes(t.ms)); if (!t) break; t.ran = true; t.fn(); } };
   const hidden = netFixture(BL, reply);
@@ -30610,6 +30891,7 @@ const npcActivityRefreshProof = (BL) => {
 };
 
 const unitChecks = async () => {
+  await connectionReportChecks();
   const artifact = artifactUnitProof();
   record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
   const previewRange=await studioPreviewRangeProof();
