@@ -182,8 +182,12 @@
   // with legs (a character's `parts.dog` whose node lists them as `legs`: fore left, fore right, hind left, hind right,
   // each hinged at its hip, and an optional `tail` at its root): the legs swing in diagonal pairs, `swing` radians at
   // `pace` metres a second, a stride `stride` radians a metre, the body bobbing `bob`; aloft they stretch fore and aft
-  // (`flyFront`, `flyHind`), touching down they tuck a little (`landFront`, `landHind`).
-  const QUAD_GAIT = Object.freeze({ swing: 0.65, pace: 1.4, stride: 11, bob: 0.018, flyFront: -1.05, flyHind: 1.1, landFront: -0.2, landHind: 0.2 });
+  // (`flyFront`, `flyHind`), touching down they tuck a little (`landFront`, `landHind`). A companion whose Ooga rests
+  // in the hammock keeps off the bed: its spot is the ground close beside it that the scene names (`ctx.petLanding`
+  // with `lying`), and there it lies down, its legs out fore and aft (`lieFront`, `lieHind`) and its body down onto
+  // them, three quarters of its hips' height, eased at `settle` a second; it gets up as it moves or its Ooga does.
+  const QUAD_GAIT = Object.freeze({ swing: 0.65, pace: 1.4, stride: 11, bob: 0.018, flyFront: -1.05, flyHind: 1.1, landFront: -0.2, landHind: 0.2,
+    lieFront: -1.5, lieHind: 1.5, settle: 5 });
   // Sets a legged companion's legs (`front` and `hind` their set angles, `swing` this stride's) and its tail (`wag` its
   // yaw, `droop` its pitch).
   const poseQuadruped = (node, front, hind, swing, wag, droop) => {
@@ -371,7 +375,10 @@
       for (let i = 1; i < node.geometry.verts.length; i += 3) top = Math.max(top, node.geometry.verts[i]);
       pack.position.y = at ? at.y : top; pack.position.z = at ? at.z : 0; addChild(pack, flame); addChild(node, pack);
       const pet = cave.pet = { node, pack, flame, side: p.x, back: -p.z, lift: p.y, x: 0, y: 0, z: 0, feet: 0, heading: 0, step: 0, wag: 0,
-        speed: 0, phase: 0, mode: 0, fall: 0, stuck: 0, warm: false, ride: cave.traits.petRidesHat ? hatRide(cave) : null };
+        speed: 0, phase: 0, mode: 0, fall: 0, stuck: 0, warm: false, ride: cave.traits.petRidesHat ? hatRide(cave) : null,
+        // How far it has lain down (0 standing, 1 down), how far its body comes down when it has, and how long a step
+        // it could not take has kept it from its spot by the bed.
+        down: 0, drop: node.legs ? 0.75 * node.legs[0].position.y * node.scale.y : 0, wait: 0 };
       pet.floorAt = (x, z, y) => groundAt(x, z, y, y, cave);
       pet.clear = (ax, az, bx, bz, y) => (ctx.flyable || walkable)(ax, az, bx, bz, y, PET_HEIGHT, cave);
     };
@@ -454,7 +461,10 @@
         return;
       }
       const h = r.rotation.y, sh = Math.sin(h), ch = Math.cos(h);
-      const tx = r.position.x - sh * pet.back + ch * pet.side, tz = r.position.z - ch * pet.back - sh * pet.side;
+      let tx = r.position.x - sh * pet.back + ch * pet.side, tz = r.position.z - ch * pet.back - sh * pet.side;
+      // A legged companion keeps off the bed its Ooga is in: its spot is the ground beside the bed.
+      const beside = node.legs && !pet.ride && ctx.petLanding && (resting || seat?.kind === "hammock") ? ctx.petLanding(r.position.x, r.position.z, true) : null;
+      if (beside) { tx = beside.x; tz = beside.z; }
       const feet = r.position.y - cave.baseY;
       const equipped = !!cave.jet, powered = equipped && !cave.jetRecovering && cave.jetFuel > 0 && (cave.jet.thrust || cave.jet.power > 0);
       const ownerFloor = groundAt(r.position.x, r.position.z, feet, feet, cave);
@@ -466,6 +476,7 @@
       else if (pet.mode === 1) { pet.mode = 2; pet.fall = Math.min(0, cave.hopV); }
       if (pet.mode && !(dt > 0)) return;
       if (pet.mode && dt > 0) {
+        pet.down = 0;
         if (!pet.warm) {
           if (!pet.clear(r.position.x, r.position.z, tx, tz, feet + 0.4)) { node.visible = false; return; }
           pet.x = tx; pet.z = tz; pet.feet = feet + 0.4; pet.warm = true;
@@ -515,6 +526,9 @@
         }
         pet.heading = Math.atan2(dx, dz);
       } else if (d <= PET_ARRIVE) pet.heading = h;
+      // Kept from its spot by the bed (up on the cloth, a step too high to come down), it turns up there.
+      pet.wait = beside && !moving && d > PET_ARRIVE ? pet.wait + Math.max(0, dt) : 0;
+      if (pet.wait > 0.6 && placePet(cave, tx, tz, feet, h)) pet.wait = 0;
       node.position.x = pet.x; node.position.z = pet.z;
       node.rotation.y = pet.heading;
       if (node.legs) {
@@ -523,9 +537,12 @@
         if (!(dt > 0)) return;
         const walk = moving ? Math.min(1, pet.speed / QUAD_GAIT.pace) : 0;
         pet.wag += dt;
-        node.position.y = cave.baseY + pet.feet + pet.lift + Math.abs(Math.cos(pet.step)) * QUAD_GAIT.bob * walk;
+        // Beside its Ooga at rest in the hammock it lies down, its tail still wagging a little.
+        pet.down += ((resting && !moving ? 1 : 0) - pet.down) * Math.min(1, dt * QUAD_GAIT.settle);
+        const down = pet.down;
+        node.position.y = cave.baseY + pet.feet + pet.lift + Math.abs(Math.cos(pet.step)) * QUAD_GAIT.bob * walk - down * pet.drop;
         node.rotation.z = 0;
-        poseQuadruped(node, 0, 0, Math.sin(pet.step) * QUAD_GAIT.swing * walk, Math.sin(pet.wag * 7) * 0.25, 0);
+        poseQuadruped(node, QUAD_GAIT.lieFront * down, QUAD_GAIT.lieHind * down, Math.sin(pet.step) * QUAD_GAIT.swing * walk * (1 - down), Math.sin(pet.wag * 7) * 0.25 * (1 - 0.6 * down), 0);
         return;
       }
       node.position.y = cave.baseY + pet.feet + pet.lift + (moving ? Math.abs(Math.sin(pet.step)) * 0.08 : 0);
