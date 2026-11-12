@@ -7,7 +7,7 @@ import { contributorRows, createContributorLookup, createOwnedCharacterLookup } 
 import { missingCharacters, characterSource, retiredCharacters, queuedDefaults } from "../../scripts/sync-characters.mjs";
 import { checkCharacterIdentities, identityAdvice } from "../../scripts/contributor-pr.mjs";
 import { declaredIdentity, mayAuthorIdentity } from "../../scripts/character-identity.mjs";
-import { CharacterRejection, parseSafeCharacter, scanCharacter, safeCharacterSource, checkOwner, isGitHubDisplayRename } from "../../scripts/character-safety.mjs";
+import { CharacterRejection, parseSafeCharacter, scanCharacter, screenFinding, safeCharacterSource, checkOwner, isGitHubDisplayRename } from "../../scripts/character-safety.mjs";
 import { LANES, digest, due, inspectSubmission, manifestPath, readManifest, queuedCharacters, reviewDecision } from "../../scripts/character-submissions.mjs";
 import { createCoordinator, runAccountRenameChecks } from "../../scripts/character-bundles.mjs";
 import { BOT, OPERATORS, isOperator } from "../../scripts/character-operators.mjs";
@@ -353,6 +353,17 @@ test("daily character intake accepts only bounded data and never executes source
   const custom = source.replace('lastCommit: 2', 'lastCommit: 2, dress: { crown(k, v) { v.set(0, 0, 0, k.P.black); } }');
   assert.equal(scanCharacter(custom).lane, "manual");
   assert.equal(globalThis.stolen, undefined);
+  // Every face the body draws is plain data, and a file sent to manual review says why, naming a field only when
+  // its name is a plain word: the finding is posted on the PR.
+  const looked = (look) => scanCharacter(source.replace('lastCommit: 2', `lastCommit: 2, look: ${look}`));
+  for (const face of ["none", "nose", "beard", "smirk"]) assert.equal(looked(`{ face: "${face}" }`).lane, "daily");
+  assert.equal(scanCharacter(source).why, undefined);
+  assert.match(scanCharacter(custom).why, /executable code is not eligible/);
+  assert.match(looked('{ height: 2 }').why, /`height` exceeds its safe range, 0\.8 to 1\.3/);
+  assert.match(looked('{ tail: true }').why, /Unknown appearance field `tail`/);
+  assert.match(looked('{ "@everyone [x](y)": true }').why, /Unknown appearance field an unnamed field/);
+  assert.deepEqual(screenFinding('const a = 1;\n// a function here\n'), { line: 2, text: "function" });
+  assert.equal(screenFinding(source), null);
   assert.throws(() => safeCharacterSource({ handle: "owner", joined: 1, lastCommit: 2, voice: { poke: "hi", idle: [] } }), CharacterRejection);
 });
 
