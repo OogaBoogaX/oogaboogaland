@@ -55,6 +55,31 @@
     cave.weapon.bashOffset = 0;
   };
   const AXE_STICK_DELAY = 1, AXE_STICK_BLEND = 0.3, AXE_STICK_ARM = -1.5;
+  // The modelled look: a modelled body (models' `modelled`) holds its axe square to its forearm at every
+  // moment, so the two move as one, and plants it as a resting stick once still: the upper arm a little forward of
+  // the shoulder (STICK_RAISE) and the elbow bent until the forearm points straight ahead, the haft upright through
+  // the fist with its butt on the ground. Its weapon's `stick` is how far through that move it is: planted in
+  // STICK_PLANT seconds, and carried again in STICK_AWAY once it sets off. Through the move the upper arm swings
+  // forward (STICK_LIFT, or as far as carries the butt STICK_CLEAR over the ground) with the elbow nearly straight
+  // (STICK_STRAIGHT), and comes back as the elbow bends and sets the butt down.
+  // Carrying it, the weight draws the elbow nearly straight (STICK_HANG).
+  const STICK_RAISE = -0.3, STICK_LIFT = 0.7, STICK_CLEAR = 0.6 / 16, STICK_STRAIGHT = 0.05, STICK_HANG = 0.175, STICK_PLANT = 0.6, STICK_AWAY = 0.3;
+  // SIT_HAND is where the free fist rests on the ground when its body sits there: out from the shoulder, over the
+  // ground, and back from it, in the body's heights. It is far enough out that the arm is nearly straight.
+  const AXE_BUTT = 3 / 16, HIP = 7 / 16, LYING_ELBOW = 0.1, SIT_HAND = [0.34, 0.1, -0.25], BACK_MIDDLE = 0.28;
+  // How far into the back of the head a slung weapon may reach before it counts as in it, in the body's heights,
+  // and the most it is turned about its own length to clear the head: twenty-one degrees, and no further.
+  const SLING_SLACK = 0.02, SLING_TURN = 21 * Math.PI / 180;
+  // Half the depth of a rifle lying flat on a back, and how far beside a pack it lies, in the body's heights; the
+  // most a rifle leans across the back to pass the head (forty-five degrees), and the most a primary leans out
+  // beside a pack.
+  const GUN_FLAT = 0.047, GUN_BESIDE = 0.07, GUN_LEAN_EASY = 0.8, GUN_LEAN_MOST = Math.PI / 4;
+  // How far into a palm the rifle's wood is sunk where a hand holds it, of the palm's own distance from the middle
+  // of its fist: the stock's neck a little, and the handguard to a little past the middle of the fist.
+  const STOCK_SINK = 0.6, GUARD_SINK = 1.2;
+  // Where a rifle's handguard ends and the barrel begins, and the furthest back a hand holds it, along the rifle
+  // in the body's heights.
+  const GUARD_END = 0.35, GUARD_MIDDLE = 0.19;
   // A body built with a second colourway changes between the two on its own,
   // never sooner than TINT_MIN and never later than TINT_MAX.
   // A maintainer runs the whole island's circuit, so it stands at the pile for a
@@ -104,6 +129,8 @@
     models.box({ w: 0.12, h: 0.035, d: 0.045, color: "#f2b83b", emissive: 0.6, offset: { x: 0.085, y: 0.035 } })
   );
   const BODY_PARTS = ["torso", "head", "legR", "legL", "armR", "armL"];
+  // A modelled arm is the upper arm alone: its forearm and hand are nodes of their own under it.
+  const MODELLED_ARMS = ["forearmR", "forearmL", "fingersR", "fingersL"], MODELLED_BODY_PARTS = [...BODY_PARTS, "forearmL", "fingersL"];
   const SWAG_ANCHORS = ["hat", "face"];
   const FAN_STANDOFF = 1.1;
   const FAN_ARC = 2.2;
@@ -803,7 +830,9 @@
   // reach for a held weapon. Its standing envelope is stable through a walk.
   const bodyRadiusOf = (cave) => {
     let radius2 = 0;
-    for (const key of BODY_PARTS) {
+    // A modelled body's empty left forearm and hand hang as the body's own does, and count; the right forearm is bent
+    // to what it holds, which is the weapon's reach.
+    for (const key of cave.modelled ? MODELLED_BODY_PARTS : BODY_PARTS) {
       const part = cave.parts[key], verts = part.geometry.verts, m = part.world;
       for (let i = 0; i < verts.length; i += 3) {
         const x = m[0] * verts[i] + m[4] * verts[i + 1] + m[8] * verts[i + 2] + m[12] - cave.root.position.x;
@@ -920,20 +949,400 @@
     if (controlled) return cave.twirlUntil > elapsed && !cave.weapon.aiming && cave.weapon.meleeTime <= 0;
     return cave.meleeOut && cave.work.phase !== "station" && cave.work.phase !== "shoot" && !cave.build;
   };
-  const poseFingers = (arm, fingers, held, side) => {
+  // The modelled look: a modelled arm reaches for a point. The rotation whose rows are given, as a quaternion.
+  const basisQuat = (q, m00, m01, m02, m10, m11, m12, m20, m21, m22) => {
+    const t = m00 + m11 + m22;
+    if (t > 0) { const s = Math.sqrt(t + 1) * 2; q[3] = s / 4; q[0] = (m21 - m12) / s; q[1] = (m02 - m20) / s; q[2] = (m10 - m01) / s; }
+    else if (m00 > m11 && m00 > m22) { const s = Math.sqrt(1 + m00 - m11 - m22) * 2; q[3] = (m21 - m12) / s; q[0] = s / 4; q[1] = (m01 + m10) / s; q[2] = (m02 + m20) / s; }
+    else if (m11 > m22) { const s = Math.sqrt(1 + m11 - m00 - m22) * 2; q[3] = (m02 - m20) / s; q[0] = (m01 + m10) / s; q[1] = s / 4; q[2] = (m12 + m21) / s; }
+    else { const s = Math.sqrt(1 + m22 - m00 - m11) * 2; q[3] = (m10 - m01) / s; q[0] = (m02 + m20) / s; q[1] = (m12 + m21) / s; q[2] = s / 4; }
+  };
+  // Turns `arm` at the shoulder (into `out`) and bends its forearm so the hand lies at (tx, ty, tz), in the frame
+  // the arm hangs in, with the elbow out toward the pole (px, py, pz). A point out of reach is reached toward.
+  const reachArm = (cave, arm, forearm, out, tx, ty, tz, px, py, pz) => {
+    const e = cave.elbow, upper = Math.hypot(e.y, e.z) * cave.armScale, lean = Math.atan2(-e.z, -e.y), fore = e.length * cave.armScale;
+    let vx = tx - arm.position.x, vy = ty - arm.position.y, vz = tz - arm.position.z, d = Math.hypot(vx, vy, vz);
+    if (d < 1e-6) return false;
+    vx /= d; vy /= d; vz /= d;
+    d = clamp(d, Math.abs(upper - fore) + 1e-4, (upper + fore) * 0.9995);
+    // The elbow's bend for a hand that far from the shoulder, then the hand's own line in the arm's frame, in
+    // which the arm bends in its y-z plane.
+    const flex = Math.acos(clamp((d * d - upper * upper - fore * fore) / (2 * upper * fore), -1, 1)) - lean;
+    const hy = e.y - e.length * Math.cos(flex), hz = e.z + e.length * Math.sin(flex), hl = Math.hypot(hy, hz), h1 = hy / hl, h2 = hz / hl;
+    // The elbow stands off that line on one side of it, and that side is turned to the pole.
+    const side = e.z * h1 - e.y * h2 < 0 ? -1 : 1, along = px * vx + py * vy + pz * vz;
+    let nx = px - along * vx, ny = py - along * vy, nz = pz - along * vz;
+    const nl = Math.hypot(nx, ny, nz);
+    if (nl < 1e-6) return false;
+    nx *= side / nl; ny *= side / nl; nz *= side / nl;
+    const xx = vy * nz - vz * ny, xy = vz * nx - vx * nz, xz = vx * ny - vy * nx;
+    basisQuat(out, xx, vx * h1 - nx * h2, vx * h2 + nx * h1, xy, vy * h1 - ny * h2, vy * h2 + ny * h1, xz, vz * h1 - nz * h2, vz * h2 + nz * h1);
+    forearm.rotation.x = -flex;
+    arm.quaternion = out;
+    return true;
+  };
+  // The turn of a hand about its forearm that lays what it holds along (ax, ay, az), given in the frame the arm
+  // hangs in: the hand closes round that line, its thumb at the far end of it for a right hand.
+  const handTurn = (arm, forearm, ax, ay, az) => {
+    const q = arm.quaternion, flex = -forearm.rotation.x, c = Math.cos(flex), sn = Math.sin(flex);
+    FINGER_INVERSE[0] = -q[0]; FINGER_INVERSE[1] = -q[1]; FINGER_INVERSE[2] = -q[2]; FINGER_INVERSE[3] = q[3];
+    math.quat.rotateVec(MUZZLE, FINGER_INVERSE, ax, ay, az);
+    return Math.atan2(-(MUZZLE[1] * sn + MUZZLE[2] * c), MUZZLE[0]);
+  };
+  // A modelled nunchaku's free stick, hung from the chain at the top of the held one. Stowed, it folds against the
+  // handle as before. Flung (a cut, a wound-up hold or a spin), it flies out in line with the handle. Otherwise it is
+  // a weight on the chain: it keeps the way it was moving, falls under its own weight, loses a little of its swing
+  // each moment, and is held to the chain's length from the pivot, so it hangs when the hand is still and swings
+  // behind when the hand moves. It cannot come nearer the handle than CHUK_CLEAR, so it hangs beside the fist, not
+  // through it. The club's place in the world is last frame's, which is near enough. State is kept on the cave.
+  const CHUK_FALL = 9.8, CHUK_DRAG = 2.4, CHUK_CLEAR = 0.38, CHUK_STEP = 1 / 30;
+  const swingNunchaku = (cave, dt, held, flung) => {
+    const parts = cave.parts, chuk = parts.chuk, W = parts.club.world;
+    const at = cave.chukSwing || (cave.chukSwing = new Float64Array(7)), turn = cave.chukTurn || (cave.chukTurn = math.quat.create());
+    if (!held) {
+      cave.chukAngle = damp(cave.chukAngle, CHUK_FOLD, 12, dt);
+      chuk.quaternion = null;
+      chuk.rotation.x = cave.chukAngle;
+      at[6] = 0;
+      return;
+    }
+    // The club's own axes in the world, and the pivot at the top of the handle.
+    const sx = Math.hypot(W[0], W[1], W[2]) || 1, sy = Math.hypot(W[4], W[5], W[6]) || 1, sz = Math.hypot(W[8], W[9], W[10]) || 1;
+    const ax = W[4] / sy, ay = W[5] / sy, az = W[6] / sy, reach = chuk.position.y, length = chuk.swing * sy;
+    const px = W[12] + W[4] * reach, py = W[13] + W[5] * reach, pz = W[14] + W[6] * reach;
+    let dx, dy, dz;
+    if (flung) {
+      dx = ax; dy = ay; dz = az;
+      at[3] = at[0] = px + dx * length; at[4] = at[1] = py + dy * length; at[5] = at[2] = pz + dz * length;
+    } else {
+      // Begun, or left far behind by a jump in place: it starts hanging straight down, at rest.
+      if (!at[6] || Math.hypot(at[0] - px, at[1] - py, at[2] - pz) > length * 3) { at[3] = at[0] = px; at[4] = at[1] = py - length; at[5] = at[2] = pz; }
+      const step = Math.min(dt, CHUK_STEP), keep = Math.max(0, 1 - CHUK_DRAG * step);
+      const nx = at[0] + (at[0] - at[3]) * keep, ny = at[1] + (at[1] - at[4]) * keep - CHUK_FALL * step * step, nz = at[2] + (at[2] - at[5]) * keep;
+      dx = nx - px; dy = ny - py; dz = nz - pz;
+      const far = Math.hypot(dx, dy, dz) || 1;
+      dx /= far; dy /= far; dz /= far;
+      // Kept off the handle: no nearer its own line, down from the pivot, than CHUK_CLEAR.
+      const along = -(dx * ax + dy * ay + dz * az), most = Math.cos(CHUK_CLEAR);
+      if (along > most) {
+        let ox = dx + ax * along, oy = dy + ay * along, oz = dz + az * along, off = Math.hypot(ox, oy, oz);
+        if (off < 1e-4) { ox = W[8] / sz; oy = W[9] / sz; oz = W[10] / sz; off = 1; }
+        const side = Math.sin(CHUK_CLEAR) / off;
+        dx = -ax * most + ox * side; dy = -ay * most + oy * side; dz = -az * most + oz * side;
+      }
+      at[3] = at[0]; at[4] = at[1]; at[5] = at[2];
+      at[0] = px + dx * length; at[1] = py + dy * length; at[2] = pz + dz * length;
+    }
+    at[6] = 1;
+    // The way it hangs, in the club's own frame, and the turn that lays the stick's length along it.
+    const lx = (dx * W[0] + dy * W[1] + dz * W[2]) / sx, ly = dx * ax + dy * ay + dz * az, lz = (dx * W[8] + dy * W[9] + dz * W[10]) / sz, flat = Math.hypot(lx, lz);
+    if (flat < 1e-6) math.quat.fromAxisAngle(turn, 1, 0, 0, ly > 0 ? 0 : Math.PI);
+    else math.quat.fromAxisAngle(turn, lz / flat, 0, -lx / flat, Math.atan2(flat, ly));
+    chuk.quaternion = turn;
+  };
+  // A skater's board (`parts.board` with a `ride`, on a modelled body). Running, he rides it: the board comes off
+  // his back and under his feet, its wheels on the ground, and he stands on its deck, side on to the way he is
+  // going with his feet apart along it and his arms out, looking ahead. The deck's height goes onto `baseY`, the
+  // hip's height over the ground, so the ground and everything measured from it stay where they are while his
+  // body stands that much higher. He is turned by `poseYaw`, as a shoulder squeezing past a wall is, so his heading
+  // is still the way he goes. The wheels turn by the ground covered, and he carves a little from side to side.
+  // `riding` is whether he should be on it; it eases on and off, and `cave.skate` is how far on he is.
+  const SKATE_ON = 0.22, SKATE_OFF = 0.3, SKATE_YAW = -1.15, SKATE_HEAD = 0.3, SKATE_STANCE = 0.09, SKATE_APART = 0.035, SKATE_FOOT = 1.9 / 16, SKATE_CARVE = 0.07;
+  const skateLeg = (leg, side, e, h) => {
+    if (leg.skateX === undefined) leg.skateX = leg.position.x;
+    leg.rotation.x = lerp(leg.rotation.x, 0, e);
+    leg.rotation.z = side * SKATE_STANCE * e;
+    leg.position.x = leg.skateX + side * SKATE_APART * h * e;
+  };
+  const skateArm = (arm, out, e) => {
+    if (arm.quaternion) return;
+    arm.rotation.x = lerp(arm.rotation.x, -0.12, e);
+    arm.rotation.z = out;
+  };
+  const rideBoard = (cave, dt, riding, moved) => {
+    const parts = cave.parts, board = parts.board, ride = board.ride, h = cave.traits.height, was = cave.skate || 0;
+    const on = cave.skate = riding ? Math.min(1, was + dt / SKATE_ON) : Math.max(0, was - dt / SKATE_OFF);
+    if (!on && !was) return;
+    const e = ease.inOutQuad(on), p = cave.root.position, rest = ride.rest;
+    // The feet stand a little apart on the deck, leaning out, so the inner edge of each sole is its lowest point.
+    const legs = cave.baseY - (cave.skateLift || 0), lift = e * (ride.deck + legs * (Math.cos(SKATE_STANCE) - 1) + SKATE_FOOT * h * Math.sin(SKATE_STANCE)), change = lift - (cave.skateLift || 0);
+    cave.skateLift = lift; cave.baseY += change; p.y += change;
+    cave.skateRoll = ((cave.skateRoll || 0) + moved * 0.9) % TAU;
+    const carve = Math.sin(cave.skateRoll) * SKATE_CARVE * e;
+    for (let i = 0; i < cave.root.children.length; i++) {
+      const part = cave.root.children[i];
+      if (part !== board) part.poseYaw = (part === parts.head ? 0 : cave.shoulder.yaw) + (SKATE_YAW + carve) * e * (part === parts.head ? SKATE_HEAD : 1);
+    }
+    // Under his feet it lies along the way he goes, its wheels on the ground; it swings out behind him on its way there.
+    board.poseYaw = 0;
+    setVec(board.position, lerp(rest.x, 0, e), lerp(rest.y, ride.under - cave.baseY, e), lerp(rest.z, 0, e) - Math.sin(Math.PI * e) * 0.3 * h);
+    setVec(board.rotation, -Math.PI / 2 * e, carve * 0.6, rest.turn * (1 - e));
+    if (parts.boardWheels) for (let i = 0; i < parts.boardWheels.length; i++) parts.boardWheels[i].rotation.x = (parts.boardWheels[i].rotation.x + moved / ride.wheel * (on > 0.5 ? 1 : 0)) % TAU;
+    skateLeg(parts.legL, 1, e, h); skateLeg(parts.legR, -1, e, h);
+    // His arms are out for balance, the one that leads a little more.
+    skateArm(parts.armL, 0.5 * e, e); skateArm(parts.armR, -0.32 * e, e);
+  };
+  // A shield worn on the left forearm (`parts.shield`) goes onto the back while the weapon is slung there: over the
+  // weapon, flat to the back and facing behind, its middle on the middle of the back. With the weapon back in the
+  // hand it is on the forearm again, where it was hung.
+  const stowShield = (cave, stow, h) => {
+    const shield = cave.parts.shield, parent = stow ? cave.root : cave.parts.forearmL;
+    if (!shield.worn) shield.worn = { x: shield.position.x, y: shield.position.y, z: shield.position.z, turn: shield.rotation.y };
+    if (shield.parent !== parent) {
+      removeChild(shield.parent, shield);
+      addChild(parent, shield);
+    }
+    if (stow) {
+      // Clear of the thickest part of the weapon under it, as that lies on the back.
+      const profile = cave.clubSlingProfile, quarter = cave.parts.club.geometry.slingTurn !== undefined;
+      let thick = 0;
+      for (let k = 0; k < profile.length; k += 6) thick = Math.max(thick, quarter ? profile[k + 1] - profile[k] : profile[k + 5] - profile[k + 4]);
+      setVec(shield.position, 0, BACK_MIDDLE * h, -cave.back - thick - 0.012 * h);
+      shield.rotation.y = Math.PI;
+    } else {
+      setVec(shield.position, shield.worn.x, shield.worn.y, shield.worn.z);
+      shield.rotation.y = shield.worn.turn;
+    }
+  };
+  // A modelled arm's guard. The rig's ready stance turns the whole arm a quarter turn about its own length to turn
+  // the grip, which on an arm with an elbow bows the elbow out to the side. Here the hand stays exactly where that
+  // stance has it and the arm keeps the bend it has there, the one it hangs and carries with; only the elbow is
+  // brought round under the arm, as near the body as it is in the carry (TUCK_POLE: down, and out by as much as
+  // the stance holds the hand in across the body, so the elbow stays under the shoulder), and the weapon turns the
+  // least it must to stand square to the forearm in the fist. `t` blends from the rig's stance (0) to this (1), so
+  // a cut still winds up and lands as the rig has it.
+  const TUCK_POLE = [-0.45, -0.9, -0.15];
+  const TUCK_FROM = math.quat.create(), TUCK_CLUB = math.quat.create(), TUCK_TURN = math.quat.create(), TUCK_A = new Float64Array(3), TUCK_F = new Float64Array(3);
+  const tuckElbow = (cave, t) => {
+    const parts = cave.parts, arm = parts.armR, fore = parts.forearmR, club = parts.club, e = cave.elbow, k = cave.armScale, q = arm.quaternion;
+    if (t <= 0 || !q) return;
+    const flex0 = -fore.rotation.x;
+    // Where the stance has the hand, from the shoulder, and how the weapon lies, both in the frame the arm hangs in.
+    math.quat.rotateVec(TUCK_A, q, 0, (e.y - e.length * Math.cos(flex0)) * k, (e.z + e.length * Math.sin(flex0)) * k);
+    const hx = TUCK_A[0], hy = TUCK_A[1], hz = TUCK_A[2];
+    if (club.quaternion) TUCK_CLUB.set(club.quaternion);
+    else math.quat.fromEuler(TUCK_CLUB, club.rotation.x, club.rotation.y, club.rotation.z);
+    math.quat.multiply(TUCK_CLUB, q, TUCK_CLUB);
+    TUCK_FROM.set(q);
+    if (!reachArm(cave, arm, fore, cave.reachR, arm.position.x + hx, arm.position.y + hy, arm.position.z + hz, TUCK_POLE[0], TUCK_POLE[1], TUCK_POLE[2])) return;
+    const flex1 = -fore.rotation.x, reached = cave.reachR;
+    // The forearm's line from the elbow to the hand, and the weapon's own line turned square to it.
+    math.quat.rotateVec(TUCK_F, reached, 0, -Math.cos(flex1), Math.sin(flex1));
+    math.quat.rotateVec(TUCK_A, TUCK_CLUB, 0, 1, 0);
+    const along = TUCK_A[0] * TUCK_F[0] + TUCK_A[1] * TUCK_F[1] + TUCK_A[2] * TUCK_F[2];
+    let bx = TUCK_A[0] - along * TUCK_F[0], by = TUCK_A[1] - along * TUCK_F[1], bz = TUCK_A[2] - along * TUCK_F[2];
+    const bl = Math.hypot(bx, by, bz);
+    if (bl < 1e-4) { bx = TUCK_A[0]; by = TUCK_A[1]; bz = TUCK_A[2]; } else { bx /= bl; by /= bl; bz /= bl; }
+    const cx = TUCK_A[1] * bz - TUCK_A[2] * by, cy = TUCK_A[2] * bx - TUCK_A[0] * bz, cz = TUCK_A[0] * by - TUCK_A[1] * bx, cl = Math.hypot(cx, cy, cz);
+    if (cl > 1e-5) {
+      math.quat.fromAxisAngle(TUCK_TURN, cx / cl, cy / cl, cz / cl, Math.atan2(cl, TUCK_A[0] * bx + TUCK_A[1] * by + TUCK_A[2] * bz) * t);
+      math.quat.multiply(TUCK_CLUB, TUCK_TURN, TUCK_CLUB);
+    }
+    const turn = handTurn(arm, fore, bx, by, bz);
+    math.quat.slerpTo(TUCK_FROM, reached, t);
+    reached.set(TUCK_FROM);
+    const flex = lerp(flex0, flex1, t);
+    fore.rotation.x = -flex;
+    cave.handTurnR = turn * t;
+    // The weapon goes with the hand: at the hand point, and turned as worked out, in the arm's own frame.
+    FINGER_INVERSE[0] = -reached[0]; FINGER_INVERSE[1] = -reached[1]; FINGER_INVERSE[2] = -reached[2]; FINGER_INVERSE[3] = reached[3];
+    math.quat.multiply(cave.axeRotation, FINGER_INVERSE, TUCK_CLUB);
+    club.quaternion = cave.axeRotation;
+    setVec(club.position, 0, e.y - e.length * Math.cos(flex), e.z + e.length * Math.sin(flex));
+  };
+  // How far a modelled body's slung weapon is turned about its own length: not at all, or a little at a time, the
+  // side of it nearest the head swinging out behind, and only until none of it lies in the head. Worked out once a
+  // body, from where the middle of the weapon's length sits and how far behind the body's middle the weapon lies.
+  // The head is taken as its own outline from every side: its reach along each of the SLING directions (the six
+  // axes and every diagonal between them), which follows the cut edges and corners of a blocky head.
+  const SLING = [];
+  for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) if (x || y || z) { const l = Math.hypot(x, y, z); SLING.push(x / l, y / l, z / l); }
+  const SLING_REACH = new Float64Array(SLING.length / 3);
+  const slingRoll = (cave, middle, z) => {
+    if (cave.slingRoll !== undefined) return cave.slingRoll;
+    // A weapon with a turn of its own (`slingTurn`) always lies at that turn about its length.
+    if (cave.parts.club.geometry.slingTurn !== undefined) return cave.slingRoll = cave.parts.club.geometry.slingTurn;
+    const club = cave.parts.club.geometry.verts, head = cave.parts.head.position, skull = cave.parts.head.geometry.verts, h = cave.traits.height;
+    const lean = Math.sin(CLUB_SLING_ANGLE), rise = Math.cos(CLUB_SLING_ANGLE), slack = SLING_SLACK * h;
+    SLING_REACH.fill(-Infinity);
+    for (let i = 0; i < skull.length; i += 3) {
+      const x = skull[i] + head.x, y = skull[i + 1] + head.y, at = skull[i + 2] + head.z;
+      for (let k = 0; k < SLING_REACH.length; k++) SLING_REACH[k] = Math.max(SLING_REACH[k], x * SLING[k * 3] + y * SLING[k * 3 + 1] + at * SLING[k * 3 + 2]);
+    }
+    let roll = 0;
+    for (; skull.length && roll > -SLING_TURN; roll -= 0.05) {
+      const sin = Math.sin(roll), cos = Math.cos(roll);
+      let inside = false;
+      for (let i = 0; i < club.length && !inside; i += 3) {
+        // The point turned about the weapon's length, then leaned across the back.
+        const lx = club[i] * cos + club[i + 2] * sin, ly = club[i + 1] - middle, x = lx * rise - ly * lean, y = BACK_MIDDLE * h + lx * lean + ly * rise;
+        const at = z - club[i] * sin + club[i + 2] * cos;
+        inside = true;
+        for (let k = 0; k < SLING_REACH.length && inside; k++) inside = x * SLING[k * 3] + y * SLING[k * 3 + 1] + at * SLING[k * 3 + 2] < SLING_REACH[k] - slack;
+      }
+      if (!inside) break;
+    }
+    return cave.slingRoll = Math.max(roll, -SLING_TURN);
+  };
+  // Points along every edge of a mesh, no further apart than `step`: enough to find where it would lie in something.
+  const edgePoints = (g, step) => {
+    const v = g.verts, out = [], cursor = g.compactGeometry ? BL.compactGeometry.createCursor(g) : null;
+    for (let f = 0; f < g.faces.length; f++) {
+      const ids = (cursor ? BL.compactGeometry.readFace(g, f, cursor) : g.faces[f]).i;
+      for (let k = 0; k < ids.length; k++) {
+        const a = ids[k] * 3, b = ids[(k + 1) % ids.length] * 3, n = Math.max(1, Math.ceil(Math.hypot(v[b] - v[a], v[b + 1] - v[a + 1], v[b + 2] - v[a + 2]) / step));
+        for (let i = 0; i < n; i++) out.push(lerp(v[a], v[b], i / n), lerp(v[a + 1], v[b + 1], i / n), lerp(v[a + 2], v[b + 2], i / n));
+      }
+    }
+    return new Float32Array(out);
+  };
+  // A modelled body's head, hair and all, as triangles in the body's frame (kept once a body, with `low`, the height
+  // of its underside), and whether a point lies in it: where the head has a face both ahead of the point and behind
+  // it, on the line through it from front to back, each by more than `slack`.
+  const headTriangles = (cave) => {
+    if (cave.headTriangles) return cave.headTriangles;
+    const head = cave.parts.head, g = head.geometry, v = g.verts, p = head.position, out = [];
+    const cursor = g.compactGeometry ? BL.compactGeometry.createCursor(g) : null;
+    let low = Infinity;
+    for (let f = 0; f < g.faces.length; f++) {
+      const ids = (cursor ? BL.compactGeometry.readFace(g, f, cursor) : g.faces[f]).i, first = ids[0] * 3;
+      for (let k = 1; k + 1 < ids.length; k++) {
+        const b = ids[k] * 3, c = ids[k + 1] * 3;
+        out.push(v[first] + p.x, v[first + 1] + p.y, v[first + 2] + p.z, v[b] + p.x, v[b + 1] + p.y, v[b + 2] + p.z, v[c] + p.x, v[c + 1] + p.y, v[c + 2] + p.z);
+        low = Math.min(low, v[first + 1] + p.y, v[b + 1] + p.y, v[c + 1] + p.y);
+      }
+    }
+    const tris = cave.headTriangles = new Float32Array(out);
+    tris.low = low;
+    return tris;
+  };
+  const inHead = (tris, x, y, z, slack) => {
+    let ahead = false, behind = false;
+    for (let i = 0; i < tris.length; i += 9) {
+      const ax = tris[i], ay = tris[i + 1], bx = tris[i + 3], by = tris[i + 4], cx = tris[i + 6], cy = tris[i + 7];
+      if (x < ax && x < bx && x < cx || x > ax && x > bx && x > cx || y < ay && y < by && y < cy || y > ay && y > by && y > cy) continue;
+      const d = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
+      if (Math.abs(d) < 1e-12) continue;
+      const u = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / d, w = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / d;
+      if (u < 0 || w < 0 || u + w > 1) continue;
+      const at = u * tris[i + 2] + w * tris[i + 5] + (1 - u - w) * tris[i + 8];
+      if (at > z + slack) ahead = true; else if (at < z - slack) behind = true;
+      if (ahead && behind) return true;
+    }
+    return false;
+  };
+  // How far a modelled body's slung rifle leans across its back when it lies on it at (x, z): as every rifle does
+  // (`from`), or further, a little at a time, until its barrel passes beside the head and no part of it is in the
+  // head; and never past GUN_LEAN_MOST, where it stays up on the back and its barrel passes through whatever hair
+  // hangs that low. Worked out once a body for each place it is slung.
+  const slungLean = (cave, x, z, from, key) => {
+    if (cave[key] !== undefined) return cave[key];
+    const h = cave.traits.height, tris = headTriangles(cave), y = 0.24 * h, slack = SLING_SLACK * h;
+    const points = cave.gunPoints || (cave.gunPoints = edgePoints(cave.parts.gunBody.geometry, 0.03 * h));
+    let clear = 0;
+    for (let lean = from; lean <= GUN_LEAN_MOST + 1e-9 && !clear; lean += 0.05) {
+      math.quat.fromEuler(GUN_ARM, 0, 0, -lean);
+      math.quat.fromEuler(GUN_GRIP, -Math.PI / 2, Math.PI, -Math.PI / 2);
+      math.quat.multiply(GUN_SIGHT, GUN_ARM, GUN_GRIP);
+      let inside = false;
+      for (let i = 0; i < points.length && !inside; i += 3) {
+        math.quat.rotateVec(MUZZLE, GUN_SIGHT, points[i], points[i + 1], points[i + 2]);
+        inside = y + MUZZLE[1] > tris.low && inHead(tris, x + MUZZLE[0], y + MUZZLE[1], z + MUZZLE[2], slack);
+      }
+      if (!inside) clear = lean;
+    }
+    return cave[key] = clear || GUN_LEAN_MOST;
+  };
+  // How far a modelled body's slung primary leans out when it hangs beside its pack, the middle of its length at
+  // (x, the middle of the back, z): nearly upright, or further out a little at a time until none of it is in the
+  // head. Worked out once a body; 0 when no lean clears the head, and it lies on the pack instead.
+  const besideLean = (cave, x, z, middle) => {
+    if (cave.clubLeanPacked !== undefined) return cave.clubLeanPacked;
+    const h = cave.traits.height, tris = headTriangles(cave), y = BACK_MIDDLE * h, slack = SLING_SLACK * h, points = edgePoints(cave.parts.club.geometry, 0.08 * h);
+    let clear = 0;
+    for (let lean = 0.05; lean <= GUN_LEAN_EASY + 1e-9 && !clear; lean += 0.05) {
+      const sin = Math.sin(lean), cos = Math.cos(lean);
+      let inside = false;
+      for (let i = 0; i < points.length && !inside; i += 3) {
+        const along = points[i + 1] - middle, up = y - points[i] * sin + along * cos;
+        inside = up > tris.low && inHead(tris, x + points[i] * cos + along * sin, up, z + points[i + 2], slack);
+      }
+      if (!inside) clear = lean;
+    }
+    return cave.clubLeanPacked = clear;
+  };
+  // Puts a modelled arm's hand on the rifle's wood: the wood's middle at (tx, ty, tz), running along (ax, ay, az),
+  // halfX and halfY its half width and half height in the rifle's frame (whose turn is g), the elbow toward the pole.
+  // The wood is about as thick as a fist, so a fist closed round it would have the wood showing through it. The
+  // hand holds it in its palm instead: it lies against the wood on the side its palm faces, with the wood sunk
+  // into the palm, so the hand overlaps the wood and covers it there. `sink` is how far, of the palm's distance from
+  // the middle of its fist: at 1 the wood reaches the middle of the fist, and past that only the back of the hand
+  // stands out of the wood. The palm faces square to the wood and the forearm, so the arm is placed again from
+  // where the first placing left the forearm, twice. It returns the hand's turn about its forearm.
+  const holdPart = (cave, arm, forearm, out, g, tx, ty, tz, ax, ay, az, halfX, halfY, sink, px, py, pz) => {
+    reachArm(cave, arm, forearm, out, tx, ty, tz, px, py, pz);
+    for (let pass = 0; pass < 2; pass++) {
+      const flex = -forearm.rotation.x;
+      math.quat.rotateVec(MUZZLE, out, 0, Math.cos(flex), -Math.sin(flex));
+      let zx = ay * MUZZLE[2] - az * MUZZLE[1], zy = az * MUZZLE[0] - ax * MUZZLE[2], zz = ax * MUZZLE[1] - ay * MUZZLE[0];
+      const zl = Math.hypot(zx, zy, zz) || 1;
+      zx /= zl; zy /= zl; zz /= zl;
+      // How far the part reaches toward the palm: its half width and half height along that line.
+      FINGER_INVERSE[0] = -g[0]; FINGER_INVERSE[1] = -g[1]; FINGER_INVERSE[2] = -g[2]; FINGER_INVERSE[3] = g[3];
+      math.quat.rotateVec(MUZZLE, FINGER_INVERSE, zx, zy, zz);
+      const d = halfX * Math.abs(MUZZLE[0]) + halfY * Math.abs(MUZZLE[1]) + cave.fist.palm * (1 - sink);
+      reachArm(cave, arm, forearm, out, tx - zx * d, ty - zy * d, tz - zz * d, px, py, pz);
+    }
+    return handTurn(arm, forearm, ax, ay, az);
+  };
+  // A modelled body's hands on its rifle, wherever the rifle has been put. Aiming, the right is round the pistol
+  // grip, and with `straight` that arm is held straight out, the rifle going out along it to the end of its reach.
+  // Carrying (`both`), the right holds the neck of the stock just behind the grip and the left the handguard,
+  // elbows down and out, each fist's thumb toward the muzzle.
+  const gripRifle = (cave, both, straight) => {
+    const parts = cave.parts, gun = parts.gun, g = gun.quaternion, h = cave.traits.height, p = gun.position;
+    math.quat.rotateVec(MUZZLE, g, 0, -0.14 * h, -0.184 * h);
+    let rx = p.x + MUZZLE[0], ry = p.y + MUZZLE[1], rz = p.z + MUZZLE[2];
+    if (straight) {
+      const e = cave.elbow, s = parts.armR.position, d = Math.hypot(rx - s.x, ry - s.y, rz - s.z), k = (Math.hypot(e.y, e.z) + e.length) * cave.armScale * 0.999 / d - 1;
+      const dx = (rx - s.x) * k, dy = (ry - s.y) * k, dz = (rz - s.z) * k;
+      p.x += dx; p.y += dy; p.z += dz; rx += dx; ry += dy; rz += dz;
+      reachArm(cave, parts.armR, parts.forearmR, cave.reachR, rx, ry, rz, -0.8, -1, -0.4);
+    }
+    if (both) {
+      math.quat.rotateVec(MUZZLE, g, 0, 0, 1);
+      const bx = MUZZLE[0], by = MUZZLE[1], bz = MUZZLE[2];
+      math.quat.rotateVec(MUZZLE, g, 0, -0.02 * h, -0.29 * h);
+      cave.handTurnR = holdPart(cave, parts.armR, parts.forearmR, cave.reachR, g, p.x + MUZZLE[0], p.y + MUZZLE[1], p.z + MUZZLE[2], -bx, -by, -bz, 0.0385 * h, 0.047 * h, STOCK_SINK, -0.8, -1, -0.4);
+      // The top hand is on the handguard's wood, as far up it as keeps the thumb's side of the fist off the barrel.
+      math.quat.rotateVec(MUZZLE, g, 0, -0.012 * h, Math.max(GUARD_MIDDLE * h, GUARD_END * h - cave.fist.span));
+      cave.handTurnL = holdPart(cave, parts.armL, parts.forearmL, cave.reachL, g, p.x + MUZZLE[0], p.y + MUZZLE[1], p.z + MUZZLE[2], bx, by, bz, 0.045 * h, 0.061 * h, GUARD_SINK, 0.8, -1, -0.3);
+      return;
+    }
+    math.quat.rotateVec(MUZZLE, g, 0, -0.97, -0.26);
+    cave.handTurnR = handTurn(parts.armR, parts.forearmR, MUZZLE[0], MUZZLE[1], MUZZLE[2]);
+  };
+  const poseFingers = (arm, fingers, held, side, turn = null) => {
     fingers.highlight = arm.highlight;
     // Select a square side with an exact quarter turn about the palm. The
     // pair keeps its spacing and follows every rotation of the hand.
     // Weapon grips already roll the whole wrist inward, using the front side.
-    math.quat.fromEuler(fingers.quaternion, 0, held && arm.quaternion ? 0 : side * Math.PI / 2, 0);
+    math.quat.fromEuler(fingers.quaternion, 0, turn !== null ? turn : held && arm.quaternion ? 0 : side * Math.PI / 2, 0);
   };
   const poseHands = (cave, leftSupportsGun = false) => {
     const parts = cave.parts, drawn = cave.weapon.carry === "hands";
     const rightHeld = parts.club.visible && parts.club.parent === parts.armR || drawn || (cave.weapon.reloadSpare && cave.weapon.spareAmmo.length > 0);
     const leftHeld = parts.snack.visible || cave.traits.cigarette || leftSupportsGun
       || parts.club.visible && parts.club.parent === parts.armL;
-    poseFingers(parts.armR, parts.fingersR, rightHeld, 1);
-    poseFingers(parts.armL, parts.fingersL, leftHeld, -1);
+    // A modelled body with a relaxed bend of its own lets an empty hand hang by it, down at its side, wherever
+    // nothing else has placed that arm.
+    if (cave.modelled && cave.elbow.relaxed !== undefined && !cave.weapon.reloading && !cave.weapon.reloadHandoff && !cave.weapon.swapTime) {
+      const rest = -cave.elbow.rest;
+      if (!rightHeld && !parts.armR.quaternion && parts.forearmR.rotation.x === rest) parts.forearmR.rotation.x = -cave.elbow.relaxed;
+      if (!leftHeld && !parts.armL.quaternion && parts.forearmL.rotation.x === rest) parts.forearmL.rotation.x = -cave.elbow.relaxed;
+    }
+    poseFingers(parts.armR, parts.fingersR, rightHeld, 1, cave.handTurnR);
+    poseFingers(parts.armL, parts.fingersL, leftHeld, -1, cave.handTurnL);
   };
   const reloadHandoffBlend = (w) => ease.inOutQuad(1 - Math.abs(1 - 2 * Math.min(RELOAD_HANDOFF_TIME, w.reloadHandoffTime) / RELOAD_HANDOFF_TIME));
   const poseEquipment = (cave, controlled, elapsed, hooks = null, sightCamera = null, sightMix = 0, primaryViewMix = 0) => {
@@ -948,6 +1357,7 @@
     if (controlled || w.spareAmmo.length) { if (hooks) hooks.syncMagazine(cave); else poseMagazineSlots(cave); }
     let leftSupportsGun = false;
     parts.armL.quaternion = parts.armR.quaternion = null;
+    cave.handTurnR = cave.handTurnL = null;
     for (let i = 0; i < parts.gunBananas.length; i++) {
       const banana = parts.gunBananas[i], visible = !cave.gunSkin && w.ammo > (i + 1) * BURST_ROUNDS;
       if (visible && !banana.visible && (w.reloading || gun.ammoReloading)) banana.ammoPopAt = elapsed;
@@ -989,6 +1399,9 @@
     if (parts.club.parent !== clubParent) {
       removeChild(parts.club.parent, parts.club);
       addChild(clubParent, parts.club);
+      // A modelled arm drawn at a scale carries what it holds at that scale too: the weapon is scaled back to size
+      // in the hand, and is its own size on the back.
+      if (cave.modelled) parts.club.scale.x = parts.club.scale.y = parts.club.scale.z = clubParent === cave.root ? 1 : 1 / cave.armScale;
     }
     // The trail follows the hand the weapon is in, on the few frames it changes.
     if (parts.chukTrail && clubParent !== cave.root && parts.chukTrail[0].parent !== clubParent) {
@@ -999,7 +1412,51 @@
       }
     }
     parts.club.quaternion = null;
-    if (primaryCarry) {
+    if (cave.modelled) {
+      // The elbows rest at their own bend. Lying down they are nearly straight, so the arms lie along the body; on its
+      // side, where the arms come across it, they bend until the fists rest in front of it and not in it. The
+      // forearms light up with their arms.
+      const travel = cave.bedTravel, lying = travel.mode === "rest" || travel.mode === "lie";
+      parts.forearmR.rotation.x = parts.forearmL.rotation.x = lying && (travel.pose === "left" || travel.pose === "right") ? -cave.elbow.clear
+        : lying ? -LYING_ELBOW : -cave.elbow.rest;
+      // Sitting on the ground, the free arm props on it, out to the side and a little back: nearly straight, the
+      // fist resting on its own bottom edge with the thumb uppermost.
+      if (cave.restLower > 0 && !cave.camp.seat && !parts.snack.visible) {
+        const left = parts.armL;
+        if (reachArm(cave, left, parts.forearmL, cave.reachL, left.position.x + SIT_HAND[0] * h, cave.restLower - HIP * h + SIT_HAND[1] * h, SIT_HAND[2] * h, 0.4, 0.3, -1))
+          cave.handTurnL = handTurn(left, parts.forearmL, 0, 1, 0);
+      }
+      parts.forearmR.highlight = parts.armR.highlight;
+      parts.forearmL.highlight = parts.armL.highlight;
+    }
+    if (primaryCarry && cave.modelled) {
+      // Walking, the axe swings with the arm, its head ahead. Standing still he plants it in one move: the forearm
+      // comes up from its carry to level, the haft turning upright with it, and the hand slides along the haft to
+      // where it rests on it. A remote copy has no `stick` and goes by its idle time.
+      const move = w.stick === undefined ? clamp((w.axeIdle - AXE_STICK_DELAY) / AXE_STICK_BLEND, 0, 1) : w.stick, stick = ease.inOutQuad(move);
+      // The shoulder's height over the ground, less what a body sitting on the ground is lowered by.
+      const elbow = cave.elbow, arm = parts.armR.rotation, shoulder = HIP * h - (cave.restLower || 0) + parts.armR.position.y;
+      // The elbow's distance from the shoulder, and how far behind straight down it hangs.
+      const armK = cave.armScale, reach = Math.hypot(elbow.y, elbow.z) * armK, fore = elbow.length * armK, lean = Math.atan2(-elbow.z, -elbow.y);
+      const pitch = lerp(STICK_HANG, Math.PI / 2, stick);
+      const grip = lerp(7 / 16 * h, shoulder - reach * Math.cos(-STICK_RAISE - lean) - AXE_BUTT * h, stick), length = grip + AXE_BUTT * h;
+      // The upper arm swings forward and back to its rest: along its own path, or further where the butt needs it
+      // to pass over the ground. It leaves its walking swing for that over the first third of the move, so posing
+      // twice in a frame changes nothing.
+      const room = shoulder - fore * Math.cos(pitch) - length * Math.sin(pitch) - STICK_CLEAR * h * (1 - stick);
+      const forward = Math.max(-STICK_RAISE * stick + STICK_LIFT * Math.sin(Math.PI * stick), room < reach ? lean + Math.acos(Math.max(-1, room / reach)) : 0);
+      arm.x = lerp(arm.x, -forward, Math.min(1, move * 3));
+      arm.y = arm.z = 0;
+      const flex = Math.max(STICK_STRAIGHT, pitch - forward);
+      parts.forearmR.rotation.x = -flex;
+      // The haft stands square to the forearm, a quarter turn from upright when the forearm hangs.
+      math.quat.fromEuler(AXE_ARM_INVERSE, Math.PI / 2 - flex, 0, 0);
+      math.quat.multiply(cave.axeRotation, AXE_ARM_INVERSE, AXE_UPRIGHT_ROTATION);
+      math.quat.rotateVec(MUZZLE, cave.axeRotation, 0, grip, 0);
+      setVec(parts.club.position, -MUZZLE[0] / armK, elbow.y - elbow.length * Math.cos(flex) - MUZZLE[1] / armK, elbow.z + elbow.length * Math.sin(flex) - MUZZLE[2] / armK);
+      setVec(parts.club.rotation, 0, 0, 0);
+      parts.club.quaternion = cave.axeRotation;
+    } else if (primaryCarry) {
       const stick = cave.catchT > 0 || cave.yawn > 0 ? 0
         : ease.inOutQuad(clamp((w.axeIdle - AXE_STICK_DELAY) / AXE_STICK_BLEND, 0, 1));
       // While walking, local +Y points straight ahead. Once still, raise
@@ -1056,19 +1513,62 @@
         (slungClub ? -0.3 : raisedPrimary ? 0.15 : 0.08) * h);
       setVec(parts.club.rotation, slungClub ? cave.traits.stoneAxe ? 0 : CLUB_SLING_TILT : raisedPrimary ? 0 : cave.clubCarry.x,
         slungClub || raisedPrimary ? 0 : cave.clubCarry.y || 0, slungClub ? CLUB_SLING_ANGLE : raisedPrimary ? Math.PI / 2 : cave.clubCarry.z);
+      if (cave.modelled && !slungClub && !raisedPrimary && clubParent === parts.armR) {
+        // A modelled arm bends at the elbow until the forearm is square to what the hand carries, and the grip goes
+        // with the hand. A forearm that leans further than that at rest stays there, and what it carries leans
+        // less to stay square to the fist.
+        // A carry already turned a quarter about the haft (its `y`) holds its lean as z.
+        const elbow = cave.elbow, carry = cave.clubCarry, lean = carry.y ? carry.z : carry.x, flex = clamp(Math.PI / 2 - lean, elbow.rest, 1.5);
+        parts.forearmR.rotation.x = -flex;
+        parts.club.rotation.x = Math.min(lean, Math.PI / 2 - flex);
+        // An axe, or any stick held as one, keeps its head ahead in the hand, never across.
+        if (cave.traits.stoneAxe || carry.y) setVec(parts.club.rotation, 0, Math.PI / 2, parts.club.rotation.x);
+        setVec(parts.club.position, 0, elbow.y - elbow.length * Math.cos(flex), elbow.z + elbow.length * Math.sin(flex));
+      }
     }
     if (parts.chukTrail && !twirling) {
       for (let i = 0; i < parts.chukTrail.length; i++) parts.chukTrail[i].visible = false;
     }
     parts.club.poseYaw = slungClub ? parts.torso.poseYaw : 0;
+    if (parts.shield && cave.modelled) stowShield(cave, slungClub && !sideSling, h);
     if (slungClub) {
+      // A modelled body's slung weapon lies on its back, whatever its head overhangs or its belt stands out: the
+      // middle of its length crosses the middle of the back (BACK_MIDDLE of its height over the hip), and it is
+      // as far behind the body's middle as the back is, plus half its own depth where it crosses. It is flat
+      // against the back unless that would put it in the head, when it is turned about its own length.
+      const flat = cave.modelled && !sideSling;
+      if (flat) {
+        const profile = cave.clubSlingProfile, middle = (profile[2] + profile[profile.length - 3]) / 2, k = (CLUB_SLICES >> 1) * 6;
+        // Half its depth where it crosses the back: across it, for a weapon slung a quarter turned.
+        const quarter = parts.club.geometry.slingTurn !== undefined;
+        const depth = (quarter ? profile[k + 1] - profile[k] : profile[k + 5] - profile[k + 4]) / 2, packed = backPack(cave) && cave.jet.side;
+        // With a pack on, it hangs beside the pack against the back, leaning out past the head.
+        const besideX = packed ? cave.jet.side + GUN_BESIDE * h : 0, beside = packed ? besideLean(cave, besideX, -cave.back - depth, middle) : 0;
+        // A weapon slung hilt up (`slingHiltUp`) lies the other way up along the same slant, mirrored, so its grip
+        // comes up over the drawing hand's shoulder.
+        const roll = beside ? 0 : slingRoll(cave, middle, -cave.back - depth), lean = beside ? -beside : CLUB_SLING_ANGLE;
+        const angle = parts.club.geometry.slingHiltUp ? Math.PI - lean : lean;
+        parts.club.rotation.x = 0;
+        parts.club.rotation.z = angle;
+        parts.club.position.x = besideX * (beside ? 1 : 0) + Math.sin(angle) * middle;
+        parts.club.position.y = BACK_MIDDLE * h - Math.cos(angle) * middle;
+        // Where no lean beside the pack clears the head, it lies across the pack.
+        parts.club.position.z = -cave.back - (packed && !beside ? cave.jet.depth : 0) - depth;
+        if (roll) {
+          // Turned about its own length first, then leaned across the back.
+          math.quat.fromEuler(GUN_ARM, 0, 0, angle);
+          math.quat.fromEuler(GUN_GRIP, 0, roll, 0);
+          math.quat.multiply(cave.axeRotation, GUN_ARM, GUN_GRIP);
+          parts.club.quaternion = cave.axeRotation;
+        }
+      }
       clubSlingAxes(parts.club);
       if (cave.traits.nunchaku) {
         // Fit along the hip instead of letting a fixed offset enter a tilted torso.
         const hip = clubRearContact(cave, parts.torso, cave.clubTorsoBounds, true);
         if (hip !== Infinity) parts.club.position.x = hip;
       }
-      const contact = Math.min(clubRearContact(cave, parts.head, cave.gunHeadBounds),
+      const contact = flat ? Infinity : Math.min(clubRearContact(cave, parts.head, cave.gunHeadBounds),
         sideSling ? parts.club.position.z : clubRearContact(cave, parts.torso, cave.clubTorsoBounds));
       if (contact !== Infinity) parts.club.position.z = contact;
     }
@@ -1183,6 +1683,9 @@
         parts.armR.position.x += dx; parts.armR.position.y += dy; parts.armR.position.z += dz;
       }
       parts.armR.quaternion = cave.gunHandRotation;
+      // A modelled arm stands ready with its elbow in by the body, and takes the rig's stance again as a cut
+      // winds up or the weapon goes back to its carry.
+      if (cave.modelled) tuckElbow(cave, (1 - wind) * (returningPrimary ? ease.inOutQuad(clamp(w.meleeReadyTime / MELEE_CARRY_BLEND, 0, 1)) : 1));
     } else if (primaryCarry) {
       // The pose above preserves the anatomical right arm's walking sway.
     } else if (primaryHeld) parts.armR.rotation.y = 0;
@@ -1225,7 +1728,9 @@
       // During reload, rest the grip against the upper finger edge so
       // the rifle sits inward without burying its receiver in the hand.
       math.quat.rotateVec(MUZZLE, cave.gunHandRotation, 0, (w.reloading ? -0.58 : -0.625) * h, (w.reloading ? 0.25 : 0.15) * h);
-      const palmX = arm.position.x + MUZZLE[0], palmY = arm.position.y + MUZZLE[1], palmZ = arm.position.z + MUZZLE[2];
+      // A modelled arm drawn at a scale has its palm that much nearer the shoulder (ARM is 1 for every other body).
+      const ARM = cave.modelled ? cave.armScale : 1;
+      const palmX = arm.position.x + MUZZLE[0] * ARM, palmY = arm.position.y + MUZZLE[1] * ARM, palmZ = arm.position.z + MUZZLE[2] * ARM;
       // Solve the carry's lower wrist from the raised left hand. Reload
       // holds the rifle upright in the extended right hand.
       if (w.reloading) math.quat.fromEuler(gun.quaternion, -Math.PI / 2, Math.PI / 2, 0);
@@ -1252,7 +1757,7 @@
         math.quat.multiply(cave.gunSupportRotation, GUN_ARM, GUN_GRIP);
         rightArm.quaternion = cave.gunSupportRotation;
         math.quat.rotateVec(MUZZLE, rightArm.quaternion, 0, -0.625 * h, 0.15 * h);
-        const rightX = rightArm.position.x + MUZZLE[0], rightY = rightArm.position.y + MUZZLE[1], rightZ = rightArm.position.z + MUZZLE[2];
+        const rightX = rightArm.position.x + MUZZLE[0] * ARM, rightY = rightArm.position.y + MUZZLE[1] * ARM, rightZ = rightArm.position.z + MUZZLE[2] * ARM;
         // Carry stock-down from the right hand toward the raised left palm.
         math.quat.fromEuler(gun.quaternion, -0.53, Math.PI - 2.23, 0);
         math.quat.rotateVec(MUZZLE, gun.quaternion, 0, -0.14 * h, -0.184 * h);
@@ -1287,7 +1792,11 @@
         FINGER_TARGET[3] = cornerReach2 * h * h + MUZZLE[0] * bx + MUZZLE[1] * by + MUZZLE[2] * bz;
         math.quat.normalize(FINGER_TARGET);
         math.quat.multiply(cave.gunHandRotation, FINGER_TARGET, q);
-      }
+        // A modelled body takes the rifle where that leaves it, in both hands.
+        if (cave.modelled) gripRifle(cave, true);
+      // Aiming it, the arm is straight out to it (but left as it is under the first-person sights, which place
+      // the arm themselves).
+      } else if (cave.modelled && !w.reloading) gripRifle(cave, false, !(controlled && sightMix > 0));
       if (!celebrating && (w.swapTime > 0 || w.reloadHandoff)) {
         // Lower the right hand diagonally across the body, bringing the
         // rifle's magazine toward the spare on the anatomical left hip.
@@ -1309,7 +1818,7 @@
         }
         math.quat.slerpTo(gun.quaternion, GUN_SWAP_TARGET, blend);
         math.quat.rotateVec(MUZZLE, right.quaternion, 0, (w.reloading ? lerp(-0.58, -0.625, blend) : -0.625) * h, (w.reloading ? lerp(0.25, 0.15, blend) : 0.15) * h);
-        const handX = right.position.x + MUZZLE[0], handY = right.position.y + MUZZLE[1], handZ = right.position.z + MUZZLE[2];
+        const handX = right.position.x + MUZZLE[0] * ARM, handY = right.position.y + MUZZLE[1] * ARM, handZ = right.position.z + MUZZLE[2] * ARM;
         math.quat.rotateVec(MUZZLE, gun.quaternion, 0, -0.14 * h, -0.184 * h);
         setVec(gun.position, handX - MUZZLE[0], handY - MUZZLE[1], handZ - MUZZLE[2]);
       }
@@ -1320,8 +1829,17 @@
       const q = head.quaternion || GUN_ARM, x = q[0], y = q[1], z = q[2], qw = q[3];
       const zx = 2 * (x * z - y * qw) * head.scale.x, zy = 2 * (y * z + x * qw) * head.scale.y, zz = (1 - 2 * (x * x + y * y)) * head.scale.z;
       const rear = head.position.z + zx * (zx < 0 ? bounds.max[0] : bounds.min[0]) + zy * (zy < 0 ? bounds.max[1] : bounds.min[1]) + zz * (zz < 0 ? bounds.max[2] : bounds.min[2]);
-      setVec(gun.position, (sideCarry ? 0.34 : 0.06) * h, 0.24 * h + cave.viewLift, Math.min(-0.245 * h, rear - 0.055 * h));
-      math.quat.fromEuler(GUN_ARM, 0, 0, sideCarry ? -0.05 : -0.45);
+      let gunX = (sideCarry ? 0.34 : 0.06) * h, gunZ = Math.min(-0.245 * h, rear - 0.055 * h), lean = sideCarry ? 0.05 : 0.45;
+      if (cave.modelled) {
+        // A modelled body's slung rifle lies flat on its back, or beside its pack against the back, leaning as far
+        // as takes its barrel past the head, up to forty-five degrees.
+        const packed = sideCarry && cave.jet && cave.jet.side;
+        if (packed) gunX = cave.jet.side + GUN_BESIDE * h;
+        gunZ = -cave.back - GUN_FLAT * h;
+        lean = slungLean(cave, gunX, gunZ, lean, packed ? "gunLeanPacked" : sideCarry ? "gunLeanSide" : "gunLean");
+      }
+      setVec(gun.position, gunX, 0.24 * h + cave.viewLift, gunZ);
+      math.quat.fromEuler(GUN_ARM, 0, 0, -lean);
       math.quat.fromEuler(GUN_GRIP, -Math.PI / 2, Math.PI, -Math.PI / 2);
       math.quat.multiply(gun.quaternion, GUN_ARM, GUN_GRIP);
       if (spareLoading) {
@@ -1461,6 +1979,7 @@
       work: { phase: "" }, viewLift: 0, catchT: 0, pushT: 0, yawn: 0, cheer: 0, phase: 0,
       twirlUntil: 0, twirlHand: 0, meleeOut: false, chukAngle: CHUK_FOLD,
       axeRotation: math.quat.create(), gunHandRotation: math.quat.create(), gunSupportRotation: math.quat.create(),
+      reachR: math.quat.create(), reachL: math.quat.create(), handTurnR: null, handTurnL: null,
       gunSightArmOffset: { x: 0, y: 0, z: 0 }, clubSlingProfile: clubSlingProfile(cave.parts.club.geometry),
       clubTorsoBounds: BL.scene.boundsOf(cave.parts.torso.geometry), magazineModels: [null, null], jet: null, jetpackOwned: false
     });
@@ -1629,6 +2148,7 @@
       weapon.bashTime = 0;
       weapon.bashOffset = 0;
       weapon.axeIdle = cave.traits.stoneAxe ? AXE_STICK_DELAY + AXE_STICK_BLEND : 0;
+      weapon.stick = cave.traits.stoneAxe ? 1 : 0;
       Object.assign(cave, {
         weapon,
         tintTime: cave.tint ? tintWait() : 0, tintState: 0, tintHold: 0,
@@ -1650,6 +2170,7 @@
         axeRotation: math.quat.create(),
         gunHandRotation: math.quat.create(),
         gunSupportRotation: math.quat.create(),
+        reachR: math.quat.create(), reachL: math.quat.create(), handTurnR: null, handTurnL: null,
         gunSightArmOffset: { x: 0, y: 0, z: 0 },
         gunSightCamera: null,
         gunSightMix: 0,
@@ -1782,6 +2303,10 @@
         // Register its actual surfaces, sharing the head's damage region.
         if (key === "head") registerHead(cave.parts.head, owner);
         else { cave.hitNodes.push(cave.parts[key]); input.add(cave.parts[key], owner); }
+      }
+      if (cave.modelled) {
+        const owner = { kind: "caveman", cave, priority: 1, hitRegion: "body" };
+        for (const key of MODELLED_ARMS) { cave.hitNodes.push(cave.parts[key]); input.add(cave.parts[key], owner); }
       }
       return cave;
     };
@@ -2926,6 +3451,7 @@
       cave.weapon.meleePower = 1;
       cave.weapon.bashTime = 0;
       cave.weapon.axeIdle = slot === 1 && cave.traits.stoneAxe ? AXE_STICK_DELAY + AXE_STICK_BLEND : 0;
+      cave.weapon.stick = slot === 1 && cave.traits.stoneAxe ? 1 : 0;
       cave.parts.armR.rotation.y = cave.parts.armL.rotation.y = 0;
       poseWeapon(cave);
       return true;
@@ -3041,6 +3567,12 @@
     // Two states only, so nothing can wind up out of step: folded against the
     // handle while the weapon is stowed, out in line with it while it is in hand.
     const poseNunchaku = (cave, dt) => {
+      // A modelled nunchaku's free stick is a weight on its chain while the pair is in the hand (see swingNunchaku).
+      if (cave.modelled && cave.parts.chuk.swing) {
+        const w = cave.weapon, held = cave.parts.club.parent === cave.parts.armR;
+        swingNunchaku(cave, dt, held, held && (w.meleeTime > 0 || w.meleeHeld || meleeDrawn(cave)));
+        return;
+      }
       const out = cave.parts.club.parent === cave.parts.armR && (cave.weapon.primaryEquipped || meleeDrawn(cave));
       cave.chukAngle = damp(cave.chukAngle, out ? 0 : CHUK_FOLD, 12, dt);
       cave.parts.chuk.rotation.x = cave.chukAngle;
@@ -3776,6 +4308,8 @@
         standPose(cave);
         parts.legR.rotation.x = parts.legL.rotation.x = -Math.PI / 2;
         parts.armR.rotation.x = parts.armL.rotation.x = -0.75;
+        // A modelled body lying in its seat has its elbows nearly straight, so its arms rest at its sides.
+        if (cave.modelled) parts.forearmR.rotation.x = parts.forearmL.rotation.x = c.seat.lying ? -LYING_ELBOW : -cave.elbow.rest;
         parts.snack.visible = false;
         return true;
       }
@@ -3878,6 +4412,7 @@
         }
         const fingers = part === cave.parts.armR ? cave.parts.fingersR : part === cave.parts.armL ? cave.parts.fingersL : null;
         if (fingers) { fingers.ember = part.ember; fingers.scorch = part.scorch; }
+        if (fingers && cave.modelled) { const fore = fingers.parent; fore.ember = part.ember; fore.scorch = part.scorch; }
         c.soot = Math.max(c.soot, c.scorch[i]);
       }
       c.smokeTime = Math.max(0, c.smokeTime - dt);
@@ -5969,7 +6504,9 @@
         && !cave.camp.seat && !cave.camp.burning && !cave.camp.rolling && !cave.camp.panic.active
         && cave.cheer <= 0 && cave.catchT <= 0 && cave.yawn <= 0 && !cave.traits.nunchaku
         && !w.reloading && !w.reloadHandoff && !w.swapTime && !w.burstRemaining && !w.recoil
-        && !w.meleeTime && !w.bashTime && !cave.shoulder.attempted && Math.abs(cave.shoulder.yaw) < 1e-5;
+        && !w.meleeTime && !w.bashTime && !cave.shoulder.attempted && Math.abs(cave.shoulder.yaw) < 1e-5
+        // A modelled body planting its axe moves every frame until it rests on it.
+        && !(cave.modelled && w.stick < 1 && w.axeIdle > 0);
       const interval = quiet && ctx.animationInterval ? ctx.animationInterval(cave) : 0;
       const changed = a.state !== cave.state || a.kind !== cave.act.kind || a.bed !== bed.mode;
       a.pending += dt;
@@ -5994,6 +6531,7 @@
       }
       cave.highlight = damp(cave.highlight, cave.highlightTarget, 12, dt);
       for (let i = 0; i < BODY_PARTS.length; i++) parts[BODY_PARTS[i]].highlight = cave.highlight;
+      if (cave.modelled) for (let i = 0; i < MODELLED_ARMS.length; i++) parts[MODELLED_ARMS[i]].highlight = cave.highlight;
       // A carved head breathes its candlelight from dim to bright
       if (cave.animation.due && cave.traits.pumpkin) parts.head.glow = 0.62 + 0.38 * Math.sin(elapsed * 2.1 + cave.phase);
       if (cave.traits.nunchaku && (cave.meleeSwap -= dt) <= 0) {
@@ -6388,6 +6926,13 @@
     const makeJetpack = (cave, geometry, flameGeometry) => {
       const node = jetpackNode(cave.root, cave.traits.height, cave.viewLift, geometry, flameGeometry);
       cave.jet = { node, flame: node.children[0], thrust: false, spending: false, power: 0, puff: 0 };
+      if (cave.modelled) {
+        // On a modelled body the pack sits on the back itself; `side` and `depth` are how far it reaches to either
+        // side and behind, for what is slung beside it and over it.
+        const bounds = BL.scene.boundsOf(geometry), h = cave.traits.height;
+        node.position.z = -cave.back - bounds.max[2] * h;
+        cave.jet.side = bounds.max[0] * h; cave.jet.depth = (bounds.max[2] - bounds.min[2]) * h;
+      }
       return node;
     };
     const builtInJetpack = (cave) => !!cave.parts.jetpack;
@@ -7278,11 +7823,17 @@
       const axeMoving = Math.hypot(p.x - x, p.z - z) > 1e-5 || cave.hop > 1e-4 || Math.abs(cave.hopV) > 1e-4
         || cave.catchT > 0 || cave.yawn > 0;
       w.axeIdle = carryingStoneAxe(cave) && !axeMoving ? Math.min(AXE_STICK_DELAY + AXE_STICK_BLEND, w.axeIdle + dt) : 0;
+      // A modelled body's move between carrying its axe and resting on it.
+      if (cave.modelled) w.stick = w.axeIdle >= AXE_STICK_DELAY ? Math.min(1, w.stick + dt / STICK_PLANT) : Math.max(0, w.stick - dt / STICK_AWAY);
       if (cave.animation.due) {
         poseShoulder(cave, cave.animation.dt);
         if (cave.parts.chuk) poseNunchaku(cave, cave.animation.dt);
         if (cave === player) posePeek(cave, cave.animation.dt);
         poseWeapon(cave);
+        // A skater rides his board while he runs on the ground: the visitor's own sprint.
+        if (cave.modelled && cave.parts.board && cave.parts.board.ride) rideBoard(cave, cave.animation.dt, cave === player && steer.speed > 1.05
+          && Math.hypot(p.x - x, p.z - z) > 1e-5 && !cave.camp.seat && !cave.bedTravel.mode && !(cave.ladder && cave.ladder.plane) && !w.aiming && !(cave.jet && cave.jet.thrust)
+          && p.y - groundY(cave) < 0.8, Math.hypot(p.x - x, p.z - z));
       }
       if (cave.ladder && cave.ladder.plane) ladderPose(cave);
       if (weaponContactsEnabled() && bashBefore > GUN_BASH_IMPACT && w.bashTime <= GUN_BASH_IMPACT && cave === player && w.equipped && !w.reloading && !w.swapTime && !w.reloadHandoff && !cave.health.stunned && !cave.camp.seat && !cave.bedTravel.mode) {
@@ -7487,6 +8038,7 @@
           }
         }
         cave.parts.fingersR.ember = cave.parts.fingersR.scorch = cave.parts.fingersL.ember = cave.parts.fingersL.scorch = 0;
+        if (cave.modelled) cave.parts.forearmR.ember = cave.parts.forearmR.scorch = cave.parts.forearmL.ember = cave.parts.forearmL.scorch = 0;
         camp.panic.memory.fill(0); camp.panic.gorillaMemory.fill(0); camp.panic.remembered = false;
         if (camp.panic.active) finishPanic(cave);
         camp.panic.threat = null;
