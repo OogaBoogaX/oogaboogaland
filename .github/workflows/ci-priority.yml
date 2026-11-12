@@ -1,0 +1,41 @@
+name: Resume deferred PR checks
+
+on:
+  workflow_run:
+    workflows: [Commit the built page, Deploy Cloudflare staging, Deploy Cloudflare production]
+    types: [completed]
+  # Recover delayed completion events, late-yielding jobs and interrupted recovery.
+  schedule:
+    - cron: '7,27,47 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: write
+
+concurrency:
+  group: ci-priority-recovery
+  cancel-in-progress: false
+  queue: single
+
+jobs:
+  resume:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Read trusted priority coordinator
+        # Fetch one file from rock; no PR checkout, artifacts or cache inputs.
+        run: |
+          set -o pipefail
+          gh api "repos/$GITHUB_REPOSITORY/contents/scripts/ci-priority.mjs?ref=rock" --jq .content | base64 --decode > "$RUNNER_TEMP/ci-priority.mjs"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Resume only jobs that yielded to a release
+        run: node "$RUNNER_TEMP/ci-priority.mjs" --resume
+        env:
+          GH_TOKEN: ${{ github.token }}
