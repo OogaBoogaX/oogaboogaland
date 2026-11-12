@@ -5,9 +5,9 @@ import { boundedJSON, HOST } from './virtual-host.js';
 import { createClankerLogicalCheckpoint } from './clanker-roaming.js';
 import { createCheckpointPack } from './checkpoint-pack.js';
 
-// The rock compatibility bridge changes geometry, fixed lanes and reservation state.
+// Repo Island adds walking solids and approach claims to the rock compatibility bridge.
 // Older complete worlds require an explicit migration, never an implicit replay.
-export const HUB_WORLD_CHECKPOINT_VERSION = 8;
+export const HUB_WORLD_CHECKPOINT_VERSION = 9;
 
 export function createHubWorldRecovery({ version, checkpointBytes, crew, clankers, roster,
   labEquipment, offices, inputs, bedId, bedFor, placement, worldState, layoutState, validateWorld, syncWorld, disposeWorld }) {

@@ -33,11 +33,12 @@
 // glowing copy of one. Nothing here runs per frame.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { models, math } = BL;
   const { box, bevelBox, merge, moved, turnedX, turnedY, turn, noShadow, cachedSteps, cached } = models;
   const { hexToRgb, fnv1a, mulberry32 } = math;
-  const { pause, due } = BL.buildTasks;
+  const { pause = function* () {}, due = () => false } = BL.buildTasks || {};
   const TAU = Math.PI * 2;
 
   // The island: its radius to the lip's outer edge and its top, a half-metre lattice `soil` deep. The lip: its width, how far its top stands over the island's (a kerb's step), how far

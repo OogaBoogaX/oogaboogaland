@@ -33,9 +33,10 @@
 // `repo-bridge`, which the hub's tooltip and tap answer with `tip(owner)` and `open(owner)`.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const { createNode, addChild, removeChild, updateWorld } = BL.scene;
-  const params = new URLSearchParams(location.search), DEBUG_GLOW = params.get("debug") === "1" && params.get("totemglow") === "1";
+  const params = new URLSearchParams(typeof location === "undefined" ? "" : location.search), DEBUG_GLOW = params.get("debug") === "1" && params.get("totemglow") === "1";
   const STILL = params.get("debug") === "1" && params.get("repospin") === "0";
   // A turn every TURN seconds; a frame turning further than MAX_TURN (the page was away) carries nobody.
   const TURN = 480, MAX_TURN = 0.05;
@@ -56,11 +57,18 @@
   const RHYTHM_OF = { core: "blocks", nodes: "blocks", mining: "blocks", layers: "blocks", lightning: "strike", "lightning-tools": "strike",
     "software-wallets": "flow", "hardware-wallets": "flow", payments: "flow" };
 
-  const create = ({ island, renderer, hooks }) => {
+  const create = ({ island, renderer, hooks, presentation = true }) => {
     const M = BL.repoIslandModels, D = BL.repoIslandData, P = M.plan(), spot = M.spot(island), feed = BL.repoFeed;
-    const rock = M.rockSteps(), bridge = M.bridge(), signs = M.signs();
+    const rock = M.rockSteps(), bridge = M.bridge();
     const group = createNode({ position: { x: spot.x, y: spot.y, z: spot.z }, sightHidden: true }), spin = createNode({ sightHidden: true });
     const soil = createNode({ geometry: rock.soil, sightHidden: true, sightSolid: true }), lip = createNode({ geometry: rock.lip, sightHidden: true });
+    const claims = [[0, spot.rim - 0.5, bridge.width / 2 + 0.9], [0, spot.rim - 2, bridge.width / 2 + 0.6]];
+    if (!presentation) {
+      const stone = createNode({ geometry: bridge.stone, sightHidden: true, sightSolid: true });
+      addChild(group, soil, stone);
+      return { spot, group, solids: [soil, stone], claims };
+    }
+    const signs = M.signs();
     const pavement = createNode({ geometry: rock.pavement, sightHidden: true }), crystals = createNode({ geometry: rock.crystals, sightHidden: true });
     const crystalBase = createNode({ geometry: rock.crystalBase, sightHidden: true }), carpet = createNode({ geometry: rock.carpet, sightHidden: true });
     const stone = createNode({ geometry: bridge.stone, sightHidden: true, sightSolid: true }), glass = createNode({ geometry: bridge.glass, glow: 0, sightHidden: true });
@@ -85,8 +93,6 @@
     };
     if (!canvas) for (const s of signs.picks) target({ x: s.x, y: s.y, z: s.z }, { kind: "repo-sign", section: sections.get(s.id), count: P.wedges.find((w) => w.id === s.id)?.count || 0 }, s.radius);
     target(world(0, 0.6, (bridge.from + bridge.to) / 2), { kind: "repo-bridge" }, bridge.width / 2 + 0.3, false);
-    // The ground the main island's scatter keeps off: the bridge head on the south terrace.
-    const claims = [[0, spot.rim - 0.5, bridge.width / 2 + 0.9], [0, spot.rim - 2, bridge.width / 2 + 0.6]];
     // The lanterns at either end of the bridge, for the hub's dusk lamps.
     const lamps = bridge.lamps.map((l) => world(l.x, l.y, l.z));
     // Arriving: on the lip at the bridge's end, facing in toward Bitcoin Core.

@@ -42,6 +42,19 @@ test('a changed pile applies to real geometry without advancing NPCs, keeps queu
   try {
     assert.ok(world.project().npcs.length > 0, 'real Oogas');
     assert.ok(world.capture().clankers, 'real Clanker logical state');
+    const { repoIsland, solids, claimed, free } = world.geometry, spot = repoIsland.spot;
+    assert.equal(repoIsland.solids.length, 2, 'island soil and bridge are both solid');
+    for (const [x, z, r] of repoIsland.claims) {
+      assert.ok(claimed.some(c => c.x === x && c.z === z && c.r === r), 'browser bridge approach claim is present');
+      assert.equal(free(x, z, 0.1), false, 'later placements cannot occupy the approach');
+    }
+    for (const [x, z, node] of [[spot.x, spot.z, repoIsland.solids[0]], [spot.x, spot.rim + 2, repoIsland.solids[1]]]) {
+      const hit = {};
+      const y = solids.supportAt(x, z, spot.y + 1, 0, 0.2, null, hit);
+      assert.ok(Number.isFinite(y) && Math.abs(y - spot.y) < 0.3, 'a player has floor on the island and bridge');
+      assert.equal(hit.node, node, 'support comes from the registered Repo Island solid');
+    }
+
     // Exercise the actual crew codec directly: a refused live value must not
     // poison the enclosing world's recovery adapter or alter its reservation.
     const { crew, bedId, bedFor } = world.actors, work = crew.list[0].work;
@@ -140,11 +153,11 @@ test('the transaction adapter commits a reconciliation atomically and leaves the
 });
 
 
-test('complete Hub rejects pre-bridge recovery before constructing geometry or controllers', () => {
-  assert.equal(HUB_WORLD_CHECKPOINT_VERSION, 8);
+test('complete Hub rejects pre-Repo-Island recovery before constructing geometry or controllers', () => {
+  assert.equal(HUB_WORLD_CHECKPOINT_VERSION, 9);
   const config = configuration();
   // A stale envelope needs no valid actor payload: its schema is refused first.
-  const saved = { v: 7, world: config.version };
+  const saved = { v: 8, world: config.version };
   assert.throws(() => construct(config, saved, null), /migration required/);
 });
 
