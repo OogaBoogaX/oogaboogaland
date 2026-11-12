@@ -1399,6 +1399,18 @@
     };
     const tease = () => { I.boost = 1; I.dv = P.v < L / 2 ? Math.abs(I.dv) : -Math.abs(I.dv); clack(); };
     return {
+      // The rendered handle includes local pointer prediction and spectator interpolation. Presentation must
+      // follow it, not the previous authoritative frame. Walk the short transform chain without scratch nodes.
+      mallet(side, out) {
+        out.x = 0; out.y = 0.105; out.z = 0;
+        for (let n = side ? theirs : mine; n; n = n.parent) {
+          BL.scene.updateLocal(n);
+          const m = n.local, x = out.x, y = out.y, z = out.z;
+          out.x = m[0] * x + m[4] * y + m[8] * z + m[12];
+          out.y = m[1] * x + m[5] * y + m[9] * z + m[13];
+          out.z = m[2] * x + m[6] * y + m[10] * z + m[14];
+        }
+      },
       capture, receive, follow, orientation: side => { flipped = side === 1; place3(); }, remoteAct: () => out.cue("throw"),
       shared: on => { shared = !!on; },
       multiplayer: (on, side = 0) => { clearHostPath(); clearPeerPath(); peer.on = !!on; localSide = on ? side : -1; peer.x = 0; peer.depth = (REST - MR) / (L / 2 - 2 * MR); },
