@@ -4,19 +4,27 @@
 
 const BASE = "https://rtc.live.cloudflare.com/v1/apps";
 
-export const sfuClient = (env) => {
+// `measured(ms, failed)`, when given, hears how long each call took and whether it failed (the inspector's counts).
+export const sfuClient = (env, measured = null) => {
   if (!env.REALTIME_APP_ID || !env.REALTIME_SECRET) return null;
   const base = `${BASE}/${env.REALTIME_APP_ID}`;
   const headers = { authorization: `Bearer ${env.REALTIME_SECRET}`, "content-type": "application/json" };
   // Leave time for a bounded error response before the browser's 10 s signalling deadline.
   const call = async (method, path, body) => {
-    const res = await fetch(base + path, { method, headers, signal: AbortSignal.timeout(5000), body: body ? JSON.stringify(body) : undefined });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.errorCode) {
-      const error = new Error(`SFU request failed: ${res.status} ${data.errorCode || ""}`.trim());
-      error.status = res.status; error.code = data.errorCode; throw error;
+    const started = Date.now();
+    let failed = true;
+    try {
+      const res = await fetch(base + path, { method, headers, signal: AbortSignal.timeout(5000), body: body ? JSON.stringify(body) : undefined });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.errorCode) {
+        const error = new Error(`SFU request failed: ${res.status} ${data.errorCode || ""}`.trim());
+        error.status = res.status; error.code = data.errorCode; throw error;
+      }
+      failed = false;
+      return data;
+    } finally {
+      if (measured) measured(Date.now() - started, failed);
     }
-    return data;
   };
   return {
     getSession: (sessionId) => call("GET", `/sessions/${sessionId}`),

@@ -207,6 +207,10 @@
   // The room's last word on whom to hear, for what a move to another place keeps.
   let peersHeard = [], gensHeard = null;
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, unanswered = 0, hiddenTimer = 0, stopped = false;
+  // The Durable Object inspector (worker/src/inspect-report.js), only while the room's welcome names its feature: why
+  // this page's last socket ended (`ended`: why, the browser's close code, clean, when), said on the close frame and,
+  // after the next welcome, in one `back` message, so a drop's cause reaches the inspector's log.
+  let inspectOn = false, ended = null;
   // Opt-in local evidence for a brief disappearance; never retain payloads, names, tokens or raw close reasons.
   // No timers or network traffic. Only lifecycle events enter the bounded history, not pose snapshots.
   const DIAGNOSTIC_KEEP = 64;
@@ -558,6 +562,9 @@
       if (changed) moved();
     } else if (msg.t === "welcome") {
       retry = 0;
+      inspectOn = Array.isArray(msg.features) && msg.features.includes("inspect-v1");
+      if (inspectOn && ended) send(JSON.stringify({ t: "back", why: ended.why, code: ended.code, clean: ended.clean, down: Math.min(86400000, Math.max(0, Math.round(Date.now() - ended.at))) }));
+      ended = null;
       clockKnown = false;
       clockSample(msg.now);
       state.loopEpoch = typeof msg.loopEpoch === "number" ? msg.loopEpoch : 0;
@@ -779,17 +786,22 @@
       if (msg.reason === "revoked") { state.me = null; state.hand = false; }
       // replaced and full stop here; stale reconnects like any drop.
       if (msg.reason !== "stale") stopped = true;
-      close(msg.reason === "stale" ? "connecting" : msg.reason);
+      close(msg.reason === "stale" ? "connecting" : msg.reason, "kicked");
     }
   };
 
-  const close = (room) => {
+  // `why`, `code` and `clean`: what ended the socket, for the inspector (the browser's close code only when it closed).
+  const close = (room, why = "other", code = 0, clean = false) => {
     if (diagnostic || connectionSubscribers.size) traceConnection("clear", { next: diagnosticRoom(room) });
     window.clearInterval(pingTimer);
     pingTimer = 0;
     if (ws) {
+      if (inspectOn) ended = { why, code, clean, at: Date.now() };
       ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
-      if (ws.readyState <= WebSocket.OPEN) ws.close(1000);
+      if (ws.readyState <= WebSocket.OPEN) {
+        if (inspectOn) ws.close(1000, why);
+        else ws.close(1000);
+      }
       ws = null;
     }
     remotes.clear();
@@ -838,7 +850,7 @@
       unanswered = 0;
       pingTimer = window.setInterval(() => {
         // A half-open socket never closes by itself for minutes, while the room has long since evicted this page.
-        if (unanswered >= PING_MISSES) { traceConnection("heartbeat-timeout"); close("connecting"); return; }
+        if (unanswered >= PING_MISSES) { traceConnection("heartbeat-timeout"); close("connecting", "heartbeat"); return; }
         unanswered++;
         send("ping");
       }, PING_MS);
@@ -846,7 +858,7 @@
     ws.onerror = () => traceConnection("socket-error");
     ws.onclose = (event) => {
       if (diagnostic || connectionSubscribers.size) traceConnection("socket-close", { code: Number.isInteger(event?.code) ? event.code : 0, clean: event?.wasClean === true });
-      close("connecting");
+      close("connecting", "socket", Number.isInteger(event?.code) ? event.code : 0, event?.wasClean === true);
     };
   };
 
@@ -917,7 +929,7 @@
     state.me = null;
     state.hand = false;
     state.logoutEpoch++;
-    close("off");
+    close("off", "signout");
   };
 
   // Existing account API; rejoin with fresh authenticated headers so future lines use the new name.
@@ -1048,7 +1060,7 @@
     if (!document.hidden || stopped || !state.me) return;
     stopped = true;
     window.clearTimeout(retryTimer);
-    close("paused");
+    close("paused", "paused");
   };
   document.addEventListener("visibilitychange", onVisibility);
 

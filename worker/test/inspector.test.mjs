@@ -1,20 +1,28 @@
-// The Durable Object inspector, part 1 of 2: the allowlist, the reporter, and the Inspector's rules and object, with
-// the Cloudflare host mocked as the room tests do. Part 2 (#640) adds the room's lines and the routes.
+// The Durable Object inspector: the allowlist, the reporter, the Inspector's rules and object, the room's lines and the
+// two routes, with the Cloudflare host mocked as the other room tests do.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { DatabaseSync } from "node:sqlite";
+import * as protocol from "../src/protocol.js";
+import * as studioPolicy from "../src/studio-policy.js";
+import { sha256Hex } from "../src/crypto.js";
+import { getPlayer } from "../src/db.js";
 import { listed, listedIds } from "../src/allowlist.js";
-import { inspectorAllowed, inspectorOn, inspectReporter } from "../src/inspect-report.js";
-import { absorb, cleanReport, KEEP_MS, LOG_KEEP, nextAlarm, pruneCount, STALE_MS, sweep } from "../src/inspector-logic.js";
+import { inspectorAllowed, inspectorOn, inspectReporter, INSPECT_FEATURE } from "../src/inspect-report.js";
+import { absorb, cleanReport, KEEP_MS, LOG_KEEP, nextAlarm, expiredEvents, STALE_MS, sweep } from "../src/inspector-logic.js";
+import { routeFixture } from "./routes.mjs";
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 // An INSPECTOR binding that keeps every report it is sent and answers as the Inspector would.
 const binding = (watchUntil = 0) => {
   const reports = [];
-  return { reports, getByName: () => ({ report: async (r) => { reports.push(structuredClone(r)); return { watchUntil }; } }) };
+  return { reports, getByName: () => ({ report: async (r) => {
+    assert.equal(Object.getPrototypeOf(r.counters), Object.prototype, "RPC counters must have the ordinary object prototype");
+    assert.equal(Object.getPrototypeOf(r.peaks), Object.prototype, "RPC peaks must have the ordinary object prototype");
+    reports.push(structuredClone(r)); return { watchUntil }; } }) };
 };
 
 test("the allowlist names accounts by id, and one malformed value lets nobody in", () => {
@@ -27,6 +35,7 @@ test("the allowlist names accounts by id, and one malformed value lets nobody in
   assert.ok(!inspectorOn({ INSPECTOR_IDS: "12" }), "off without the binding");
   assert.ok(inspectorOn({ INSPECTOR, INSPECTOR_IDS: "12" }));
   assert.ok(inspectorAllowed({ INSPECTOR, INSPECTOR_IDS: "12" }, 12) && !inspectorAllowed({ INSPECTOR, INSPECTOR_IDS: "12" }, 7));
+  assert.ok(studioPolicy.studioHostAllowed({ STUDIO_HOST_IDS: "5" }, 5) && !studioPolicy.studioHostAllowed({ STUDIO_HOST_IDS: "5,x" }, 5), "the Studio reads the same rule");
 });
 
 test("a reporter switched off sends nothing and costs nothing", async () => {
@@ -97,8 +106,120 @@ test("busy rows go stale after five quiet minutes, the rest leave after a day, a
   assert.equal(nextAlarm([live], [], 10), STALE_MS);
   assert.equal(nextAlarm([], [], 10), null);
   const events = Array.from({ length: LOG_KEEP + 3 }, (_, i) => ({ at: i }));
-  assert.equal(pruneCount(events, 0), 3);
-  assert.equal(pruneCount([{ at: 0 }, { at: KEEP_MS }], KEEP_MS + 1), 1, "a day old goes");
+  assert.equal(expiredEvents(events, 0).length, 3);
+  assert.equal(expiredEvents([{ at: 0 }, { at: KEEP_MS }], KEEP_MS).length, 1, "a day old goes at its deadline");
+  const delayed = [{ id: 1, at: KEEP_MS }, { id: 2, at: 0 }, { id: 3, at: KEEP_MS + 1 }];
+  assert.deepEqual(expiredEvents(delayed, KEEP_MS).map(e => e.id), [2], "late reports expire without deleting newer ones");
+  assert.equal(nextAlarm([], delayed, 1), KEEP_MS, "the earliest event can be behind a newer one");
+});
+
+// The real room, as doorway.test.mjs runs it, with the inspector on.
+const roomHost = ({ sfu = null, inspector = true } = {}) => {
+  let now = 100000;
+  const accepted = [];
+  const socket = () => ({
+    sent: [], closed: null, store: null,
+    send(text) { this.sent.push(JSON.parse(text)); },
+    close(code, reason) { this.closed = { code, reason }; },
+    serializeAttachment(value) { this.store = JSON.parse(JSON.stringify(value)); },
+    deserializeAttachment() { return this.store; },
+  });
+  class WebSocketPair { constructor() { this[0] = socket(); this[1] = socket(); } }
+  class Response {
+    constructor(body, init = {}) { this.body = body; this.status = init.status ?? 200; this.webSocket = init.webSocket; }
+    clone() { return this; }
+    async json() { return JSON.parse(this.body); }
+  }
+  class Clock extends Date {
+    constructor(...args) { super(...(args.length ? args : [now])); }
+    static now() { return now; }
+  }
+  const source = readFileSync(new URL("../src/room.js", import.meta.url), "utf8")
+    .replace(/import\s+[\s\S]*?from\s+"[^"]+";/g, "")
+    .replace("export class Room", "class Room") + "\nglobalThis.Room = Room;";
+  const context = {
+    ...protocol, ...studioPolicy, sha256Hex, getPlayer, sfuClient: () => sfu,
+    CAST_ROWS: [{ handle: "a", github_login: "a" }, { handle: "b", github_login: "b" }],
+    DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } },
+    WebSocketPair, Response, WebSocketRequestResponsePair: class {}, URL, crypto, Date: Clock, Map, Set, setTimeout, clearTimeout, console,
+  };
+  runInNewContext(source, context);
+  const stored = new Map(), INSPECTOR = binding();
+  const ctx = {
+    id: { name: "island" }, waitUntil: () => {},
+    setWebSocketAutoResponse() {}, blockConcurrencyWhile: (fn) => fn(), acceptWebSocket: (ws) => accepted.push(ws),
+    getWebSockets: () => accepted.filter((ws) => !ws.closed), getWebSocketAutoResponseTimestamp: () => null,
+    storage: {
+      get: async (key) => Array.isArray(key) ? new Map(key.filter((k) => stored.has(k)).map((k) => [k, stored.get(k)])) : stored.get(key),
+      put: async (key, value) => { stored.set(key, value); }, getAlarm: async () => null, setAlarm: async () => {},
+    },
+  };
+  const room = new context.Room(ctx, inspector ? { INSPECTOR, INSPECTOR_IDS: "1" } : {});
+  const join = async (id, login) => {
+    const before = accepted.length;
+    await room.fetch({ url: "https://island.invalid/room", headers: new Headers({ upgrade: "websocket", "x-player-id": String(id), "x-player-login": login, "x-player-contributor": "0" }) });
+    return accepted[before];
+  };
+  const events = () => INSPECTOR.reports.flatMap((r) => r.events);
+  return { room, join, events, INSPECTOR, advance: (ms) => { now += ms; } };
+};
+
+test("the room tells the inspector who joined, moved and dropped, with what the close said", async () => {
+  const { room, join, events, advance } = roomHost();
+  const a = await join(1, "a"), b = await join(2, "b");
+  assert.ok(a.sent[0].features.includes(INSPECT_FEATURE), "pages hear the inspector is on");
+  room.webSocketMessage(a, JSON.stringify({ t: "zone", name: "factory" }));
+  room.webSocketMessage(b, JSON.stringify({ t: "visible", on: false }));
+  advance(65000);
+  room.webSocketClose(a, 1006, "", false);
+  room.webSocketClose(b, 1000, "paused", true);
+  await flush();
+  const lines = events();
+  assert.deepEqual(lines.filter((e) => e.kind === "join").map((e) => e.login), ["a", "b"]);
+  assert.deepEqual(lines.find((e) => e.kind === "zone").fields, { from: "outside", to: "factory" });
+  assert.deepEqual(lines.find((e) => e.kind === "visible").fields, { visible: false });
+  const [first, second] = lines.filter((e) => e.kind === "leave");
+  assert.deepEqual([first.login, first.fields.reason, first.fields.code, first.fields.clean, first.fields.zone, first.fields.on], ["a", "closed", 1006, false, "factory", 65000]);
+  assert.deepEqual([second.fields.code, second.fields.said, second.fields.clean], [1000, "paused", true]);
+});
+
+test("a page back from a drop says why, once a connection; a stale eviction names its kick", async () => {
+  const { room, join, events, advance } = roomHost();
+  const a = await join(1, "a");
+  const back = { t: "back", why: "heartbeat", code: 1006, clean: false, down: 4200 };
+  room.webSocketMessage(a, JSON.stringify(back));
+  room.webSocketMessage(a, JSON.stringify(back));
+  assert.equal(protocol.parseClientMessage(JSON.stringify({ ...back, why: "made-up" })), null);
+  assert.equal(protocol.parseClientMessage(JSON.stringify({ ...back, down: -1 })), null);
+  advance(protocol.STALE_MS + protocol.SWEEP_MS + 1);
+  await room.alarm();
+  await flush();
+  const lines = events();
+  assert.deepEqual(lines.filter((e) => e.kind === "back").map((e) => e.fields), [{ why: "heartbeat", code: 1006, clean: false, down: 4200 }]);
+  const leave = lines.find((e) => e.kind === "leave");
+  assert.deepEqual([leave.fields.reason, leave.fields.code], ["stale", protocol.CLOSE_KICK]);
+});
+
+test("a failed SFU call is logged with its status and code, never its session", async () => {
+  const failure = Object.assign(new Error("SFU request failed: 410 session_error"), { status: 410, code: "session_error" });
+  const sfu = { newSession: async () => { throw failure; } };
+  const { room, join, events } = roomHost({ sfu });
+  const a = await join(1, "a");
+  const token = a.sent[0].connectionToken;
+  const res = await room.voiceRequest("session", { headers: new Headers({ "x-player-id": "1", "x-room-token": token }), json: async () => ({ kind: "sub" }) });
+  assert.equal(res.status, 502);
+  await flush();
+  const line = events().find((e) => e.kind === "voice-fail");
+  assert.deepEqual([line.fields.op, line.fields.status, line.fields.code], ["session", 410, "session_error"]);
+  assert.ok(!JSON.stringify(events()).includes(token), "no connection token in the log");
+});
+
+test("with the inspector off the room reports nothing and keeps its welcome as before", async () => {
+  const { join, INSPECTOR } = roomHost({ inspector: false });
+  const a = await join(1, "a");
+  await flush();
+  assert.ok(!a.sent[0].features.includes(INSPECT_FEATURE));
+  assert.equal(INSPECTOR.reports.length, 0);
 });
 
 // The Inspector object over node:sqlite, as the runtime's ctx.storage.sql answers it.
@@ -122,7 +243,7 @@ const inspectorHost = (db = new DatabaseSync(":memory:"), env = {}) => {
   }
   const source = readFileSync(new URL("../src/inspector.js", import.meta.url), "utf8")
     .replace(/import\s+[\s\S]*?from\s+"[^"]+";/g, "").replace("export class Inspector", "class Inspector") + "\nglobalThis.Inspector = Inspector;";
-  const context = { inspectorAllowed, LIMITS: {}, RECENT_MS: 120000, WATCH_MS: 90000, absorb, cleanReport, nextAlarm, pruneCount, sweep,
+  const context = { inspectorAllowed, LIMITS: {}, RECENT_MS: 120000, WATCH_MS: 90000, absorb, cleanReport, nextAlarm, expiredEvents, sweep,
     DurableObject: class { constructor(c, e) { this.ctx = c; this.env = e; } }, WebSocketPair, WebSocketRequestResponsePair: class {}, Response, JSON, Date, Map, Set, Number, setTimeout, clearTimeout };
   runInNewContext(source, context);
   const envFull = { INSPECTOR: {}, INSPECTOR_IDS: "1", ...env };
@@ -139,6 +260,14 @@ test("the Inspector keeps rows and the log across a restart, and tells objects w
   assert.equal(again.object.rows.get("Room:island").status, "live");
   assert.deepEqual([...again.object.events.map((e) => e.kind)], ["join"]);
 
+  const now = Date.now();
+  await again.object.report({ ...room, events: [{ at: now, kind: "join", id: 1, login: "fresh" }, { at: now - KEEP_MS, kind: "leave", id: 2, login: "expired" }] });
+  assert.ok(!again.object.events.some(e => e.login === "expired"), "delayed old lines are removed even behind fresh lines");
+  assert.ok(!again.object.added.some(e => e.login === "expired"), "expired lines cannot escape in a pending update");
+  const restored = inspectorHost(first.db);
+  assert.ok(!restored.object.events.some(e => e.login === "expired"), "expired lines are removed from SQLite too");
+  assert.ok(restored.object.events.some(e => e.login === "fresh"), "newer lines survive");
+
   const viewer = (id) => again.object.fetch({ headers: new Headers({ upgrade: "websocket", "x-viewer-id": String(id), "x-viewer-login": "admin" }) });
   assert.equal((await viewer(9)).status, 404, "only an allowlisted account");
   assert.equal((await viewer(1)).status, 101);
@@ -150,4 +279,33 @@ test("the Inspector keeps rows and the log across a restart, and tells objects w
   again.env.INSPECTOR_IDS = "2";
   again.object.flush();
   assert.equal(ws.closed.code, 4000, "taken off the allowlist, the page is closed");
+});
+
+test("the page and its feed are a 404 to everyone the allowlist does not name", async () => {
+  const SITE = "https://site.test", FAR = 4102444800;
+  const database = (login, id) => {
+    const player = { id, login, banned_at: null, created_at: 1, token_hash: "h", expires_at: FAR, last_used_at: FAR };
+    return { prepare: () => ({ bind: () => ({ first: async () => player, run: async () => ({}) }) }), batch: async () => [] };
+  };
+  const request = (path, headers = {}) => new Request(SITE + path, { headers: { origin: SITE, cookie: "__Host-obl_session=held", ...headers } });
+  let forwarded = null;
+  const INSPECTOR = { getByName: () => ({ fetch: async (r) => { forwarded = r; return new Response("feed"); } }) };
+  const { worker } = routeFixture();
+  const env = { SITE_ORIGIN: SITE, DB: database("ooga-dev", 7), INSPECTOR, INSPECTOR_IDS: "7" };
+  const ws = { upgrade: "websocket" };
+  assert.equal((await worker.fetch(request("/inspect"), { ...env, INSPECTOR_IDS: "8" })).status, 404, "another account");
+  assert.equal((await worker.fetch(request("/inspect"), { ...env, INSPECTOR_IDS: "" })).status, 404, "switched off");
+  assert.equal((await worker.fetch(new Request(SITE + "/inspect"), env)).status, 404, "signed out");
+  const page = await worker.fetch(request("/inspect"), env);
+  assert.equal(page.status, 200);
+  const html = await page.text(), nonce = /script-src 'nonce-([^']+)'/.exec(page.headers.get("content-security-policy"))[1];
+  assert.ok(html.includes(`<script nonce="${nonce}">`) && !html.includes("__NONCE__"));
+  assert.equal(page.headers.get("cache-control"), "no-store");
+  assert.equal((await worker.fetch(request("/api/inspect/ws", ws), { ...env, INSPECTOR_IDS: "8" })).status, 404);
+  assert.equal((await worker.fetch(request("/api/inspect/ws", { ...ws, origin: "https://evil.test" }), env)).status, 403);
+  assert.equal((await worker.fetch(request("/api/inspect/ws"), env)).status, 426);
+  assert.equal((await worker.fetch(request("/api/inspect/ws", ws), { ...env, ROOM_LIMITER: { limit: async () => ({ success: false }) } })).status, 429);
+  assert.equal(forwarded, null);
+  assert.equal((await worker.fetch(request("/api/inspect/ws", { ...ws, "x-viewer-id": "1" }), env)).status, 200);
+  assert.equal(forwarded.headers.get("x-viewer-id"), "7", "the viewer is who the session says");
 });

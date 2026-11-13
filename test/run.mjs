@@ -13124,6 +13124,112 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels
   }) && ["left", "right", "bottom"].every(dock => [false, true].every(open => motions.some(m => m.dock === dock && m.open === open))), JSON.stringify(motions));
   } finally { await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] }); }
 } };
+// Inspector protocol acceptance in Chrome; transport/media failures are deterministic, with no live SFU or microphone.
+const inspectorRecovery = { name: "inspector recovery", why: "rule: reconnect evidence is feature gated and sent once, and failed or disconnected voice restarts preserve mute and microphone intent", run: async (b) => {
+  const netSource = readFileSync(join(root, "src/js/net.js"), "utf8");
+  await b.evaluate(`(() => {
+    BL.net.dispose(); BL.voice.dispose();
+    const F = window.__inspectFixture = { realNet: BL.net, realVoice: BL.voice, sockets: [], timers: [], intervals: [], sent: [], realFetch: window.fetch,
+      realSocket: window.WebSocket, timeout: window.setTimeout, interval: window.setInterval, clearTimeout: window.clearTimeout, clearInterval: window.clearInterval };
+    window.fetch = async () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "fixture" } }) });
+    window.WebSocket = class { static OPEN = 1; constructor() { this.readyState = 1; F.sockets.push(this); } send(v) { F.sent.push(v === "ping" ? v : JSON.parse(v)); } close(code, reason) { this.readyState = 3; this.closed = { code, reason }; } };
+    window.setTimeout = (fn, ms) => { F.timers.push({ fn, ms }); return F.timers.length; };
+    window.setInterval = (fn, ms) => { F.intervals.push({ fn, ms }); return F.intervals.length; };
+    window.clearTimeout = window.clearInterval = () => {};
+    BL.voice = { ...F.realVoice, restart() {}, stop() {}, setPeers() {} };
+  })()`);
+  await b.evaluate(netSource);
+  const net = await b.evaluate(`(async () => {
+    const F = __inspectFixture, N = BL.net;
+    await N.start();
+    const welcome = (features) => { const ws = F.sockets.at(-1); ws.onopen(); ws.onmessage({ data: JSON.stringify({ t: "welcome", you: { id: 71 }, players: [], now: Date.now(), features }) }); return ws; };
+    const recover = features => { F.timers.at(-1).fn(); return welcome(features); };
+    let ws = welcome([]); ws.onclose({ code: 1006, wasClean: false }); ws = recover([]);
+    const older = F.sent.every(m => m.t !== "back");
+    ws.onmessage({ data: JSON.stringify({ t: "welcome", you: { id: 71 }, players: [], now: Date.now(), features: ["inspect-v1"] }) });
+    ws.onclose({ code: 1006, wasClean: false }); ws = recover(["inspect-v1"]);
+    const back = F.sent.filter(m => m.t === "back");
+    welcome(["inspect-v1"]);
+    const once = F.sent.filter(m => m.t === "back").length === 1;
+    const beat = F.intervals.at(-1).fn; beat(); beat(); beat(); beat();
+    const heartbeat = ws.closed?.reason === "heartbeat";
+    ws = recover(["inspect-v1"]);
+    const recovered = F.sent.filter(m => m.t === "back").at(-1);
+    ws.onclose({ code: 1001, wasClean: true }); recover([]);
+    const off = F.sent.filter(m => m.t === "back").length === 2;
+    N.dispose();
+    Object.assign(window, { fetch: F.realFetch, WebSocket: F.realSocket, setTimeout: F.timeout, setInterval: F.interval, clearTimeout: F.clearTimeout, clearInterval: F.clearInterval });
+    return { older, once, heartbeat, off, back, recovered };
+  })()`);
+  record("inspector reconnect: old rooms send no evidence; socket and heartbeat recovery send one bounded report after welcome", net.older && net.once && net.heartbeat && net.off && net.back[0]?.why === "socket" && net.back[0]?.code === 1006 && net.back[0]?.clean === false && net.back[0]?.down >= 0 && net.recovered?.why === "heartbeat", JSON.stringify(net));
+  await b.evaluate(`(() => {
+    const F = __inspectFixture; F.pcs = []; F.ops = []; F.timers = []; F.mics = 0;
+    F.realPc = window.RTCPeerConnection; F.gum = navigator.mediaDevices.getUserMedia;
+    window.RTCPeerConnection = class {
+      constructor() { this.connectionState = "connected"; this.iceGatheringState = "complete"; this.localDescription = { sdp: "v=0\\r\\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\\r\\n" }; this.handlers = {}; F.pcs.push(this); }
+      addEventListener(k, fn) { this.handlers[k] = fn; } removeEventListener(k) { delete this.handlers[k]; }
+      addTransceiver() { return { mid: "0" }; } getTransceivers() { return []; }
+      async createOffer() { return this.localDescription; } async createAnswer() { return {}; } async setLocalDescription() {} async setRemoteDescription() {}
+      close() { this.connectionState = "closed"; }
+    };
+    navigator.mediaDevices.getUserMedia = async () => { F.mics++; return new MediaStream(); };
+    window.fetch = async (url, options) => { F.ops.push({ op: String(url).split("/").pop(), body: JSON.parse(options.body) }); return { ok: true, json: async () => ({ tracks: [], sessionDescription: {} }) }; };
+    window.setTimeout = (fn, ms) => { const t = { fn, ms }; F.timers.push(t); return t; };
+    window.clearTimeout = t => { if (t) t.cancelled = true; };
+    BL.net = { ...F.realNet, state: { ...F.realNet.state, connectionToken: "synthetic", me: { id: 71, login: "fixture" } }, remotes: new Map(), voiceLink: () => "none", setMuted() {}, subscribe: () => () => {} };
+  })()`);
+  await b.evaluate(readFileSync(join(root, "src/js/voice.js"), "utf8"));
+  await b.click(720, 450); // Voice is entered through a real user gesture in the app.
+  const voice = await b.evaluate(`(async () => {
+    const F = __inspectFixture, V = BL.voice, drain = async () => { for (let i = 0; i < 100; i++) await Promise.resolve(); };
+    await V.listen(); V.setMuted(true);
+    const fail = why => { const pc = F.pcs.filter(p => p.connectionState !== "closed").at(-1); pc.connectionState = why; pc.handlers.connectionstatechange(); };
+    fail("failed"); await drain();
+    const failed = V.stats.enabled && V.stats.muted && !V.stats.publishing && F.ops.some(o => o.op === "leave" && o.body.why === "failed");
+    fail("disconnected"); const timer = F.timers.filter(t => !t.cancelled).at(-1); timer.fn(); await drain();
+    const disconnected = V.stats.enabled && V.stats.muted && !V.stats.publishing && F.ops.some(o => o.op === "leave" && o.body.why === "disconnected");
+    const mics = F.mics;
+    V.dispose();
+    Object.assign(window, { fetch: F.realFetch, RTCPeerConnection: F.realPc, setTimeout: F.timeout, clearTimeout: F.clearTimeout }); navigator.mediaDevices.getUserMedia = F.gum;
+    BL.net = F.realNet; BL.voice = F.realVoice;
+    return { failed, disconnected, mics, ops: F.ops };
+  })()`);
+  record("inspector voice: failed and sustained disconnected receivers report why and return muted without opening a microphone", voice.failed && voice.disconnected && voice.mics === 0, JSON.stringify(voice));
+} };
+scene("hub", { label: "inspector recovery", query: "pos=0&net=0", httpMedia: true, steps: [inspectorRecovery] });
+
+// Optional acceptance against an isolated wrangler dev, with a synthetic session seeded in its local D1 only.
+if (process.env.INSPECTOR_RUNTIME === "1") scene("hub", { label: "inspector runtime", query: "pos=0&net=0", steps: [{
+  name: "inspector runtime", why: "contract: the real Cloudflare runtime reports the named island, and its gated page displays live join, zone, close and return evidence", run: async b => {
+    const url = new URL(process.env.INSPECTOR_TEST_ORIGIN || "http://127.0.0.1:8640");
+    if (url.protocol !== "http:" || url.hostname !== "127.0.0.1") throw Error("Inspector runtime check requires an isolated loopback Worker");
+    const anonymous = await fetch(url.origin + "/inspect");
+    record("inspector runtime: anonymous page access stays hidden", anonymous.status === 404);
+    await b.send("Network.setCookie", { name: "obl_session", value: "inspector-local-test", url: url.origin, httpOnly: true });
+    await b.open(url.origin + "/inspect");
+    const lines = await b.evaluate(`(async () => {
+      const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+      const join = () => new Promise((resolve, reject) => {
+        const ws = new WebSocket("ws://" + location.host + "/room"), timer = setTimeout(() => reject(Error("room welcome timed out")), 8000);
+        ws.onmessage = e => { const m = JSON.parse(e.data); if (m.t === "welcome") { clearTimeout(timer); resolve(ws); } };
+      });
+      const first = await join(); first.send(JSON.stringify({ t: "zone", name: "factory" }));
+      await pause(300); first.close(1000, "heartbeat");
+      await pause(300); const second = await join(); second.send(JSON.stringify({ t: "back", why: "heartbeat", code: 1006, clean: false, down: 4800 }));
+      let text = "";
+      for (let i = 0; i < 80; i++) { text = document.body.innerText; if (text.includes("page says heartbeat") && text.includes("island : Room") && document.querySelector(".sock.you")) break; await pause(100); }
+      const result = { text, live: document.getElementById("feed").textContent, own: !!document.querySelector(".sock.you"), overflow: document.documentElement.scrollWidth > innerWidth };
+      window.__runtimeRoom = second;
+      return result;
+    })()`);
+    record("inspector runtime: island card, own socket, zone, close code and reconnect appear on the live page", lines.live === "Live" && lines.own && lines.text.includes("island : Room") && lines.text.includes("outside → factory") && lines.text.includes("1000, clean") && lines.text.includes("page says heartbeat") && !lines.overflow, JSON.stringify(lines));
+    await b.evaluate('document.getElementById("filter").value="heartbeat";document.getElementById("filter").dispatchEvent(new Event("input"))');
+    record("inspector runtime: filtering keeps matching drop and return evidence", await b.evaluate('[...document.querySelectorAll("#log .text")].length===2 && [...document.querySelectorAll("#log .text")].every(e=>e.textContent.includes("heartbeat"))'));
+    await b.screenshot(join(root, "untracked/inspector-runtime.png"));
+    await b.evaluate('window.__runtimeRoom.close(1000,"paused")');
+  }
+}] });
+
 const hubMuteKey = { name: "voice mute key", why: "regression: M reserves voice mute across canvas, panel and dialog focus, preserves typing, and falls back to environment sound only when voice is off", run: async (b) => {
   const r = await b.evaluate(`(() => {
     const V = BL.voice, sound = BL.sound, saved = { ...V.stats }, environment = sound.muted, focus = document.activeElement;
@@ -26906,15 +27012,15 @@ const voiceAloneChecks = async () => {
 const voiceFailureChecks = async () => {
   const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8");
   const page=(joined=false,AudioContext=undefined)=>{
-    const timers=[],calls=[],failing=new Set(),holds=new Map();let holdLeave=null;
+    const timers=[],calls=[],bodies=[],pcs=[],failing=new Set(),holds=new Map();let holdLeave=null;
     const track={enabled:true,stopped:false,stop(){this.stopped=true;}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
-    class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}getTransceivers(){return [];}addEventListener(){}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}close(){this.connectionState="closed";}}
+    class Pc {constructor(){this.handlers={};pcs.push(this);this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}getTransceivers(){return [];}addEventListener(k,fn){this.handlers[k]=fn;}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}close(){this.connectionState="closed";}}
     class Audio {pause(){}play(){return Promise.resolve();}}
-    const fetch=async(url,o)=>{const op=url.split("/").pop();calls.push(op);if(op==="leave"&&holdLeave)await holdLeave;if(holds.has(op))await holds.get(op);return failing.has(op)?{ok:false,status:503,json:async()=>({error:"sfu"})}:{ok:true,status:200,json:async()=>({tracks:[],sessionDescription:{}})};};
+    const fetch=async(url,o)=>{const op=url.split("/").pop();calls.push(op);bodies.push({op,body:JSON.parse(o.body)});if(op==="leave"&&holdLeave)await holdLeave;if(holds.has(op))await holds.get(op);return failing.has(op)?{ok:false,status:503,json:async()=>({error:"sfu"})}:{ok:true,status:200,json:async()=>({tracks:[],sessionDescription:{}})};};
     const context={window:{BL:{net:{state:{connectionToken:"synthetic",me:{id:900,login:"listener"},zone:"outside",self:{x:0,y:0,z:0,zone:"outside"},blendTo:null,blendT:0},setMuted(){},remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{}},voiceBlend:{}},setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout(){},setInterval:()=>1,clearInterval(){},addEventListener(){},removeEventListener(){},AudioContext},document:{createElement:()=>({volume:1})},navigator:{userActivation:{hasBeenActive:true},mediaDevices:{getUserMedia:async()=>stream}},localStorage:{getItem:k=>joined&&k.includes("voice-joined")?"1":null,setItem(){},removeItem(){}},fetch,RTCPeerConnection:Pc,MediaStream:class {},Audio,AudioContext,AbortController,console};
     context.window.navigator=context.navigator;context.window.document=context.document;context.window.localStorage=context.localStorage;
     runInNewContext(source,context);
-    return {V:context.window.BL.voice,timers,calls,failing,holds,track,hold:p=>{holdLeave=p;}};
+    return {V:context.window.BL.voice,timers,calls,bodies,pcs,failing,holds,track,hold:p=>{holdLeave=p;}};
   };
   const settle=async()=>{for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r));};
   // The retry's new receive session is refused, so there is no receiver at all: the next change must open one, or say so.
@@ -26934,6 +27040,15 @@ const voiceFailureChecks = async () => {
   speaker.hold(null);release();await settle();
   const after={publishing:speaker.V.stats.publishing,muted:speaker.V.stats.muted,returning:speaker.V.stats.returning,mic:!speaker.track.stopped};
   record("voice recovery: a room welcome during a connection restart leaves a speaker publishing and unmuted",after.publishing&&!after.muted&&!after.returning,JSON.stringify(after));
+  for (const why of ["failed", "disconnected"]) {
+    const recovery=page(); await recovery.V.enable(); recovery.V.setMuted(true); await settle();
+    const pc=recovery.pcs.filter(p=>p.connectionState!=="closed").at(-1);
+    pc.connectionState=why;pc.handlers.connectionstatechange();
+    if(why==="disconnected")recovery.timers.at(-1).fn();
+    await settle();
+    record("voice inspector: "+why+" reports its cause and restores a muted publisher",recovery.bodies.some(r=>r.op==="leave"&&r.body.why===why)&&recovery.V.stats.publishing&&recovery.V.stats.muted,JSON.stringify({bodies:recovery.bodies,publishing:recovery.V.stats.publishing,muted:recovery.V.stats.muted}));
+    recovery.V.dispose();
+  }
   // Someone who leaves while a pull is on its way is no failed pull: every other voice this listener hears stays put.
   const racer=page();
   await racer.V.listen();await settle();
