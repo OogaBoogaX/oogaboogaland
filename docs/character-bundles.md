@@ -124,28 +124,54 @@ anything. A queued writer that finds release work yields the lock. A writer or
 test job already doing work finishes normally; nothing cancels an active write.
 Explicit manual CI/intake runs remain operator-controlled and do not defer.
 
-Deferral is an unsuccessful **Yield to release work** step, never a passing or
-skipped required test. **Resume deferred PR checks** runs after a release finishes
-(success, failure or cancellation), with recovery at minutes 7, 27 and 47 and a
-manual recovery button. It waits until no release remains active, then retries
-only jobs whose failure was that explicit yield step after a successful priority
-inspection. Actual test/build failures and completed checks are not retried.
-Successful jobs in the same run remain intact. PR checks resume only at the
-current head of an open, non-draft PR, and an older run cannot displace a newer
-run for that revision. Fresh PR and run-attempt reads precede each retry; a new
-release stops recovery. Character signals/sweeps re-read current state as usual;
-closed-source and merged-override recovery stays with the existing bundle sweep.
+Deferral completes the **Yield to release work** step normally and skips the
+expensive work. The PR stays blocked by a **pending required status**, rather than
+showing a red test failure. Character inspection publishes pending **Character
+intake** and **Character bundle safety** statuses before queuing a writer,
+including bundle/override PRs and the open bundles inspected by a sweep. Deferred
+writers skip App-token creation and reconciliation and release the shared lock.
 
-Recovery reads GitHub metadata and one script from `rock`, never PR code, logs,
-artifacts or caches. Its only mutation is the Actions job-rerun endpoint. Scans
-are bounded at 1,000 rows per query and 30 days of failures (GitHub's rerun window),
-with at most 20 resumed jobs per pass and four total attempts per run (the initial
-run plus at most three automatic retries; manual reruns count toward this cap).
-After that, inspect the run and rerun it manually once release work is finished.
-This bounds runner use even if a PR imitates the yield step and always fails it.
-API failures and overflow require retry or manual investigation. A missed
-completion event or a job yielding just after it is recovered by the next
-scheduled pass. Deferred runs can appear red until then.
+For units, the trusted **Resume deferred PR checks** workflow publishes a commit
+status named **Unit · the browser-free lane**, matching the existing required
+Actions check. GitHub requires **both** the check and the commit status to pass
+when they share a required name ([GitHub documentation](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks)).
+No branch-protection change is needed. The reporter runs on unit-workflow start
+and completion, reads only GitHub metadata and the coordinator from `rock`, and
+holds the status pending through deferral. Only successful unit, site-build,
+dependency-installation and Worker steps together produce success. Actual failed,
+cancelled or incomplete validation produces failure. Older heads, runs and
+attempts cannot overwrite newer validation. The PR job keeps its read-only token;
+only the separate reporter has `statuses: write`, and it never checks out PR code.
+
+Before skipping tests, the gate waits up to one minute for the reporter's pending
+status on this exact head, run and attempt, from `github-actions[bot]`. During
+rollout, if the old coordinator is still on `rock`, or if reporting is unavailable,
+the yield step still fails closed. Thus a missing reporter can never turn skipped
+tests into merge approval. A normal run with no release does all its checks as
+before. Workflows still based on the old implementation may show red deferrals
+until their branch includes the updated workflow.
+
+Recovery runs after release completion (success, failure or cancellation), at
+minutes 7, 27 and 47, and through the manual recovery button. It waits until no
+release remains active and reruns only a job with the explicit yield step after a
+successful priority inspection: successful deferrals and legacy failing deferrals
+are both recognized. Real test/build failures and fully completed validation are
+not retried. Successful sibling jobs remain intact. PR checks resume only at the
+current head of an open, non-draft PR, and only its latest run; a fresh head,
+run-attempt and latest-run read precede each retry. A new release stops recovery.
+The scheduled/manual reporter also repairs missed status events, without
+reposting unchanged statuses. Deployment triggers remain manual.
+
+Recovery reads the latest run for each current PR head and the latest character
+schedule/signal run, rather than scanning thousands of historical successes.
+Metadata lists remain bounded at 1,000 rows, runs must be within GitHub's 30-day
+rerun window, and each pass resumes at most 20 jobs. A run gets at most four total
+attempts (the initial run plus three retries; manual retries count too). After
+that, inspect it and rerun manually once release work finishes. API failures and
+incomplete metadata fail closed. A late yield or missed release event is picked
+up by the next scheduled pass. Recovery only calls the job-rerun endpoint; status
+reporting only writes the unit context. Neither reads PR code, logs, artifacts or
+caches, dispatches a deployment, or cancels an active writer.
 
 This is cooperative priority, not GitHub runner preemption: already-queued writer
 jobs can briefly start and yield before the artifact job gets its turn. GitHub's

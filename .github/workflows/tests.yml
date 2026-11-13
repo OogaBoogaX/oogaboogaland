@@ -45,35 +45,48 @@ jobs:
       - name: Inspect release priority
         if: steps.trusted.outputs.available == 'true'
         id: priority
-        run: node "$RUNNER_TEMP/ci-priority.mjs" --gate
+        run: node "$RUNNER_TEMP/ci-priority.mjs" --gate --unit
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Yield to release work
         if: steps.priority.outputs.deferred == 'true'
         run: |
           echo "::notice::Deferred for deployment/post-merge work; release completion or scheduled recovery retries this job."
-          exit 1
+          # Old rock coordinators, missing status reporters and forks without a
+          # posted pending status must still block merging during rollout.
+          if [ "$PENDING_STATUS" != true ]; then
+            echo "::error::Pending validation status unavailable; refusing to skip required tests."
+            exit 1
+          fi
+        env:
+          PENDING_STATUS: ${{ steps.priority.outputs.pending }}
       - uses: actions/checkout@v6
+        if: steps.priority.outputs.deferred != 'true'
         with:
           persist-credentials: false
           fetch-depth: 0
       - uses: actions/setup-node@v6
+        if: steps.priority.outputs.deferred != 'true'
         with:
           node-version: '22'
           package-manager-cache: false
       - name: Refresh the deployment snapshot for a pinned account rename
-        if: github.event_name == 'pull_request'
+        if: steps.priority.outputs.deferred != 'true' && github.event_name == 'pull_request'
         run: node scripts/account-rename-snapshot.mjs
         env:
           CHARACTER_SNAPSHOT_BASE: ${{ github.event.pull_request.base.sha }}
       - name: Run the unit lane
+        if: steps.priority.outputs.deferred != 'true'
         run: npm run test:unit
       # The Worker's whole suite, as the Cloudflare deploys run it, so a break shows on the pull request rather than at
       # deploy. Its checks import what build:site writes (the cast and Tess's fact sheet, worker/src/*.gen.json) and the
       # Worker's own locked dependencies (the Anthropic SDK).
       - name: Build and stage site
+        if: steps.priority.outputs.deferred != 'true'
         run: npm run build:site
       - name: Install Worker dependencies
+        if: steps.priority.outputs.deferred != 'true'
         run: npm ci --prefix worker --omit=dev
       - name: Worker checks
+        if: steps.priority.outputs.deferred != 'true'
         run: node --test "worker/test/*.test.mjs"
