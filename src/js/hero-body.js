@@ -1,4 +1,4 @@
-// The modelled look, every Ooga's (?oogastyle=0 builds the voxel bodies it replaced): a body modelled from scratch after the reference art, in place of the
+// The modelled look, every Ooga's: a body modelled from scratch after the reference art, in place of the
 // one drawn from a character's block maps. Flat planes with crisp bevels: every limb is a loft of eight-sided rings
 // (a rectangle with its corners cut), plates and features are slabs stood on them, and fur is flat pointed shards.
 // Nothing here is smooth shaded, and a head keeps its authored blocks where its character has them. Units are a sixteenth of the
@@ -331,10 +331,12 @@
       forearm: [[0.9, 0.6, 0.65, 0.28], [0.5, 0.85, 0.9, 0.3], [-0.5, 0.9, 0.95, 0.3], [-3.4, 0.75, 0.78, 0.3], [-4.45, 0.68, 0.7, 0.28]],
       // An empty hand of hers hangs relaxed at her side: `relaxed` is that arm's bend at the elbow.
       elbow: [-6.1, -0.75], relaxed: 0.16, sleeve: 5, wrist: [-3.5, 0.8, 0.82],
-      // Her chest swells and falls in many short steps, so from the side it is a curve and not a ledge.
+      // Her chest swells and falls in many short steps, so from the side it is a curve and not a ledge. Her shoulders
+      // run nearly level in from her arms to the foot of her neck (the ring over `shoulder`), and her neck stands on
+      // them as a column, drawing in only a little to her chin.
       torso: [[-0.4, 2.9, 1.9, 0.6], [1.2, 3.1, 2.05, 0.6], [2.6, 2.25, 1.6, 0.5], [4.2, 2.55, 1.7, 0.55], [4.75, 2.72, 1.8, 0.6, 0, 0.03], [5.05, 2.85, 1.95, 0.68, 0, 0.16],
         [5.4, 2.95, 2.15, 0.76, 0, 0.35], [5.75, 3, 2.2, 0.8, 0, 0.4], [6.2, 3, 2.215, 0.8, 0, 0.415], [6.6, 3, 2.19, 0.78, 0, 0.39], [6.95, 3, 2.09, 0.74, 0, 0.29],
-        [7.25, 3, 1.93, 0.7, 0, 0.13], [7.8, 2.8, 1.65, 0.7], [9.05, 1.4, 1.3, 0.5]],
+        [7.25, 3, 1.93, 0.7, 0, 0.13], [7.8, 2.85, 1.65, 0.7], [8.1, 1.7, 1.38, 0.54], [9.05, 1.4, 1.3, 0.5]],
       chest: [5.45, 6.65, 2.56, 2.62], belt: [1.4, 2.7, 3.08, 2.14]
     }
   };
@@ -682,7 +684,9 @@
     return { headOpen: whole(false), headClosed: whole(true) };
   };
   // The trunk's surface for a build, in units, for anything laid on it or hung from it: `ring(y)` its half width,
-  // half depth, corner cut and middle at a height, `front(y)` and `back(y)` where its front and back stand there,
+  // half depth, corner cut and middle at a height, `heights` the heights its own rings stand at (it runs straight
+  // between them, so a garment with a ring at each follows it exactly; over the shoulders the first is the foot of
+  // the neck, where a build has one), `front(y)` and `back(y)` where its front and back stand there,
   // `rise(row)` the height an authored row of the trunk's blocks begins at, and `low`, `belt` and `top`, the heights
   // of its bottom edge, its belt's foot and its shoulders. For a garment that stands off it: `side(y, z)` is where
   // its side is at a place along it and `face(x, y, way)` its front (way 1) or back (-1) at a place across it, round
@@ -729,7 +733,7 @@
       }
       return q;
     };
-    return { low, belt, top, at, ring, front: (y) => at(y, 5) + at(y, 2), back: (y) => at(y, 5) - at(y, 2), side, face, over, clear, lift,
+    return { low, belt, top, at, ring, heights: rings.map((r) => r[0]), front: (y) => at(y, 5) + at(y, 2), back: (y) => at(y, 5) - at(y, 2), side, face, over, clear, lift,
       rise: (y) => y >= 8 ? top + y - 8 : y >= 3 ? belt + (y - 3) / 5 * (top - belt) : y >= 0 ? low + y / 3 * (belt - low) : low + y };
   };
   // A body for an Ooga that models none of its own: the regular or the slim build, wearing what its authored blocks

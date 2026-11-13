@@ -114,8 +114,10 @@ export class Room extends DurableObject {
       const stored = await ctx.storage.get(["loopEpoch", "sweepAt"]);
       this.loopEpoch = stored.get("loopEpoch") || Date.now();
       this.sweepAt = stored.get("sweepAt") || Date.now() + SWEEP_MS;
-      await ctx.storage.put("loopEpoch", this.loopEpoch);
-      await ctx.storage.put("sweepAt", this.sweepAt);
+      // Restore without rewriting unchanged values on every hibernation wake. The alarm persists
+      // a new sweep deadline when it actually advances; the pile loop's phase is initialized once.
+      if (!stored.get("loopEpoch")) await ctx.storage.put("loopEpoch", this.loopEpoch);
+      if (!stored.get("sweepAt")) await ctx.storage.put("sweepAt", this.sweepAt);
       if (this.studio.hostId && (!this.players.has(this.studio.hostId) || this.players.get(this.studio.hostId).zone !== STUDIO_ZONE || !studioHostAllowed(env, this.studio.hostId))) this.suspendStudio();
       // Stored cleanup retries from an alarm due now, never inside this block: several bounded SFU calls can accumulate, and a
       // block past 30 s resets the island's only room, presence and voice with it.

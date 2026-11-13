@@ -107,7 +107,7 @@
   // One visit's state: made in enter, dropped in leave.
   // Where the game exits to: back to Ooga Arcade when a cabinet started it, otherwise the island.
   let home = "hub";
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, hud, rhud, hooks, input, fx, controls, audio, clock, spot, planet, flight, view, passenger, canopy, heatShell, smoke, plasma, splashNode;
+  let renderer, game, world, go, testBananas, root, camera, island, hud, rhud, hooks, input, fx, controls, audio, clock, spot, planet, flight, view, passenger, canopy, heatShell, smoke, plasma, splashNode;
   let astro, astroStick, astroLight, rockNode, tetherNode, agent;
   // The rock's place in the pod's frame is drawn per launch (rockE, rockU, rockF), so the walk is a small hunt.
   const eva = { measured: false, back: false, reeling: false, measuring: 0, reading: 0, drift: 0, tumble: 0, spin: 0, e: 0, u: 0, f: 0, ve: 0, vu: 0, vf: 0, yaw: 0, pitch: 0, near: "", puff: 0, air: EVA_AIR, bonus: 0, out: false, rockE: EVA.rockE, rockU: EVA.rockU, rockF: EVA.rockF };
@@ -1828,25 +1828,14 @@
     const bananas = gameMod.bananasFor(donation.sats), shown = counted ? counted.rounded : bananas;
     world.level = Math.min(pileMod.MAX_BANANAS, world.level + (counted ? counted.exact : bananas));
     const who = donation.handle ? `@${donation.handle}` : "anon";
-    const loot = lootEnabled ? game.lootFor(donation) : null;
-    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}${loot ? ` · ${loot.tier} ${loot.item.name}` : ""}`);
+    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}`);
     fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${gameMod.formatLarge(shown)} BANANAS`, 4.5);
     const p = flight ? flight.state.p : EYE;
     if (!flight) padBase();
     fx.burst(p.x, p.y + 2, p.z, 20, CONFETTI, 2.2);
-    if (loot) {
-      game.addItem({ item: loot.item, tier: loot.tier, donationId: donation.id });
-      renderLocker();
-    }
     hud.setStats(game.state);
   };
-  const renderLocker = () => hud.renderInventory(game.state.inventory, game.assignedTo, () => null);
 
-  const onLootCleared = () => {
-    if (!lootEnabled) return;
-    renderLocker();
-    hud.toast("Loot locker cleared");
-  };
   // A demo tip is the simulation's alone: in real mode it would count a tip nobody paid.
   const demoTip = (sats) => {
     if (!donations.real) onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
@@ -1892,7 +1881,7 @@
   };
 
   const enter = (ctx) => {
-    ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
+    ({ renderer, game, world, go, testBananas } = ctx);
     home = ctx.from === "arcade" ? "arcade" : "hub";
     hudMod.leaveTo("orbit", home);
     camera = createCamera({ fov: 50, near: 0.3, far: 1600 });
@@ -1900,7 +1889,7 @@
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     island = terrain.island({ seed: SEED });
     spot = rocketModels.siteSpot(island, {});
-    hud = hudMod.create({ signal: ctx.signal, roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.roster });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, overlay: ctx.overlay, tickerAt: TICKER_AT });
@@ -1970,13 +1959,6 @@
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
     window.addEventListener("pointerdown", onGesture, { signal: ctx.signal });
     window.addEventListener("keydown", onGesture, { signal: ctx.signal });
-    hud.onAssign((entryId, name) => {
-      if (game.assign(entryId, name)) renderLocker();
-    });
-    hud.onUnassign((name) => {
-      game.unassign(name);
-      renderLocker();
-    });
     Object.assign(hooks, {
       onHover: (hit, p) => {
         if (hit && phase === "build") hud.tooltip.show(tooltipFor(hit), p.x, p.y);
@@ -2014,16 +1996,12 @@
       else if (action === "leave") go(home);
       else if (action === "act") act();
       else if (action === "mute") toggleMute();
-      else if (action === "clear-loot") {
-        game.clearLoot();
-        onLootCleared();
-      } else if (action === "reset") {
+      else if (action === "reset") {
         game.resetAll();
         location.reload();
       }
     });
     for (const c of contributors.roster) hud.setRosterRow(c.name, contributors.stateFor(c), contributors.ageLabel(c));
-    if (lootEnabled) renderLocker();
     hud.setStats(game.state);
     rhud.el.help.textContent = controlCopy(COARSE);
     document.getElementById("orbit-help").textContent = COARSE ? "Tap a part to add it · hold and drag it onto the rocket" : "Tap or drag a part onto the rocket · drag a row off to remove it";
@@ -2039,7 +2017,7 @@
     Object.assign(orbitScene, {
       root, camera, input,
       debug: {
-        hud, demoTip, trimPool: fx.trimPool, camera, controls, island, cavemen: null, crates: null, agent: agent.debug,
+        hud, demoTip, trimPool: fx.trimPool, camera, controls, island, cavemen: null, agent: agent.debug,
         get audio() {
           return audio;
         },
@@ -2148,7 +2126,7 @@
   };
   const orbitScene = BL.deferred.scene("orbit", {
     id: "orbit", padContext: "orbit", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
-    enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry,
+    enter, update, overlay, onDonation, onKey, leave, stats, liveGeometry,
     get inMotion() {
       return (phase !== "build" && phase !== "results") || fx.inMotion || smoke.count > 0;
     }
