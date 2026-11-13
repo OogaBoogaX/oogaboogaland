@@ -1515,7 +1515,8 @@
   let hookBusy = false;
   // The weapons bar: bottom right unless moved, minimized or not, remembered for this visitor. Touch keeps its safe
   // default spot (no dragging) so the bar never sits under the sticks.
-  const BAR_KEY = "ooga-block-bar", bar = { x: null, y: null, min: false };
+  // Keep nullable UI coordinates off the numeric { x, y, z } shape: an x/y prefix makes V8 box scene vectors.
+  const BAR_KEY = "ooga-block-bar", bar = { min: false, x: null, y: null };
   const saveBar = () => { try { localStorage.setItem(BAR_KEY, JSON.stringify(bar)); } catch { /* kept this visit */ } };
   const placeBar = () => {
     const t = el.toolBar;

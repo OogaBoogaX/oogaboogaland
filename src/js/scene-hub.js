@@ -219,7 +219,7 @@
   const WANDER_COUNT = 36, WANDER_INNER = 5.5;
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
-  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", poolbridge: "Vine bridge · to the Mempool island", poolsign: "Mempool Rainforest · the way down is through the hill", poolpainting: "Wall painting · tap to read it closely", chainsign: "The chain, at a glance · tap to read it", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", jumbotron: "Oogatron · OogaBoogaX on the big screen · tap the screen for a close-up", palm: "Palm · shake it", bifrostbridge: "Bifröst · the bridge to ₿IFRÖST", bifrostgate: "₿IFRÖST · walk an Ooga through the field", heimdall: "Heimdall · keeper of the bridge", gate: null };
+  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", poolbridge: "Vine bridge · to the Mempool island", poolsign: "Mempool Rainforest · the way down is through the hill", poolpainting: "Wall painting · tap to read it closely", chainsign: "The chain, at a glance · tap to read it", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", jumbotron: "Oogatron · OogaBoogaX on the big screen · tap the screen for a close-up", palm: "Palm · shake it", catapult: "Catapult · stand on its board, then Space flies you to the Mempool Rainforest", bifrostbridge: "Bifröst · the bridge to ₿IFRÖST", bifrostgate: "₿IFRÖST · walk an Ooga through the field", heimdall: "Heimdall · keeper of the bridge", gate: null };
   const RETICLE_PROPS = new Set(["tree", "bush", "flower", "torch", "firepit", "ladder", "poolsign", "poolpainting", "chainsign", "weathersign", "poolfern", "poollog", "jaguar", "monkey", "toucan", "canopy", "jumbotron", "palm", "timechainentrance", "timechainkeypad", "bifrostgate", "heimdall"]);
   const workCave = (slot) => slot.repo && (slot.status === "open" || slot.status === "mirror");
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
@@ -531,6 +531,8 @@
   let factoryReady = null;
   // Tess, the island's guide, for the visit (`hub-guide.js`).
   let islandGuide = null;
+  // The catapult on the B.C.A. hill (`hub-catapult.js`), for the build: null where `plan` finds no place for it.
+  let catapult = null;
   let reuseHub = false, heldHub = false, heldDebug = null;
   let stateTimer = 0, now = 0, hour = 12, unsubscribeActivity = null, unsubscribeAccount = null, ownOogaClaimed = false, claimView = false, claimArrival = false;
   // Where the visitor last stood on the island in this browser (localStorage SPOT_KEY): the feet and heading of the Ooga
@@ -5850,6 +5852,46 @@
     });
     return true;
   };
+  const catapultCalm = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+  // The catapult (`hub-catapult.js`): placed by `plan` on the B.C.A. hill from the island and the claims as they stand,
+  // after every seeded placement and claim, on a place clear of all of them: it claims nothing, so nothing the island
+  // has moves or is hidden (`catapultHidden`, for the debug handle, stays empty), and where nothing fits there is no
+  // catapult. Its frame is solid and taps like a prop. Its flights go through the crew's seat, read lazily so a
+  // rebuilt crew is the one used.
+  const CATAPULT_CREW = { sitPlayer: (seat) => crew.sitPlayer(seat), standPlayer: (cave, animate) => crew.standPlayer(cave, animate) };
+  const CATAPULT_DUST = [DUST];
+  // What the canopy comes down on: the driven Ooga's own support under it (the island, the bridge's deck, the
+  // rainforest's terraces, crowns and props; none over the sea), and whether it holds there: not water (the lakes and
+  // the flood float a swimmer) and a body may stand there (`walkable`).
+  const CATAPULT_PROBE = {
+    ground: (x, z, y) => { const floor = playerSupportAt(x, z, y, y); return floor <= ABYSS_FLOOR ? -Infinity : floor; },
+    ok: (x, z, floor) => !(waterSupportAt(x, z, floor, STEP_MAX, pilot.player) >= floor - 0.02) && walkable(x, z, x, z, floor)
+  };
+  // Any scenery standing on the frame's footprint, active or not (debug): always none, since `plan` keeps clear of it.
+  const catapultHidden = () => catapult ? scenery.filter((o) => BL.hubCatapult.overlaps(catapult.debug.site, { x: o.x, z: o.z, r: o.footprint })).map((o) => [o.prop, o.x, o.z]) : [];
+  const catapultDust = (x, y, z, kind) => {
+    if (catapultCalm && catapultCalm.matches) return;
+    fx.burst(x, y + 0.15, z, kind === "land" ? 10 : 14, CATAPULT_DUST, kind === "land" ? 1.3 : 1.8);
+  };
+  const buildCatapult = function* (slice) {
+    const site = yield* BL.hubCatapult.planSteps({ island, claims: claimed }, slice);
+    if (!site) return;
+    catapult = BL.hubCatapult.create({ parent: root, site, crew: CATAPULT_CREW, probe: CATAPULT_PROBE, calm: () => !!(catapultCalm && catapultCalm.matches), burst: catapultDust });
+    placed.push(catapult.node);
+    solids.add(catapult.frame);
+    addProp("catapult", catapult.frame, site.x, site.z, 2.2);
+  };
+  // Once a frame after the crew has moved: under the canopy the move keys or stick steer it, turned by the view as a
+  // walk is (`pilot.readInput`), and nothing else does.
+  const updateCatapult = (dt) => {
+    let sx = 0, sz = 0;
+    if (catapult.flying && !chalkboard.openNow) {
+      const a = pilot.controls.axes, yaw = pilot.orbit.yaw;
+      sx = -Math.sin(yaw) * a.y + Math.cos(yaw) * a.x;
+      sz = -Math.cos(yaw) * a.y - Math.sin(yaw) * a.x;
+    }
+    catapult.update(dt, sx, sz);
+  };
   const dropBanana = (o, chance) => {
     if (now < o.ripe || Math.random() > chance) return false;
     o.ripe = now + RIPEN;
@@ -5913,6 +5955,9 @@
       case "ladder":
         if (!wobble(o.lean, 0.05)) return;
         hud.toast("Wobbly. Ooga does not climb.");
+        break;
+      case "catapult":
+        hud.toast(gameMode ? "Put away for the game." : "Stand an Ooga on the board behind the arm, then Space: off to the Mempool Rainforest.");
         break;
       case "dock":
         hud.toast("The planks creak over the drop.");
@@ -6015,6 +6060,8 @@
   const nearbyAction = (x, y, z, reach) => {
     if (cloudHopper?.active) return null;
     const player = pilot.player;
+    // In the catapult's flight the act does nothing (its seat takes it); the prompt says how to steer.
+    if (player && catapult && catapult.flying) return catapult.flightAction;
     if (player && player.camp.burning) return ROLL_ACTION;
     if (player && player.camp.seat) return STAND_ACTION;
     if (player && crew.sleeping) return WAKE_ACTION;
@@ -6044,10 +6091,13 @@
     if (arcadeMouth) { const near = arcadeMouth.entrance.nearby(x, y, z, player); if (near) return near; }
     if (player && timechainIsland.gate && timechainIsland.gate.nearKeypad(x, y, z)) return timechainIsland.gate.action;
     if (player && nearChalkboard(x, y, z)) return CHALK_ACTION;
+    if (player && catapult && catapult.ready(player)) return catapult.action;
     return null;
   };
   const useNearbyAction = (action) => {
-    if (action === cloudHopper?.action) cloudHopper.launch();
+    if (catapult && action === catapult.action) catapult.launch(pilot.player);
+    else if (catapult && action === catapult.flightAction) return;
+    else if (action === cloudHopper?.action) cloudHopper.launch();
     else if (action === WAKE_ACTION) crew.wakePlayer();
     else if (action === ROLL_ACTION) crew.dropRoll();
     else if (action === STAND_ACTION) crew.standPlayer(pilot.player, true);
@@ -6782,6 +6832,12 @@
       } else if (action === CHALK_ACTION) {
         hud.hint(COARSE ? "Tap WRITE to use the chalkboard" : "Press Space to write on the chalkboard");
         hud.setAct("WRITE");
+      } else if (catapult && action === catapult.action) {
+        hud.hint(COARSE ? "Tap LAUNCH! to fly to the Mempool Rainforest" : "Space · Catapult over the island to the Mempool Rainforest");
+        hud.setAct("LAUNCH!");
+      } else if (catapult && action === catapult.flightAction) {
+        hud.hint(COARSE ? "The parachute opens at the top · the stick steers it, on into the rainforest if you like" : "The parachute opens at the top · W A S D steer it, on into the rainforest if you like");
+        hud.setAct("WHEE!");
       } else arcadeMouth.entrance.prompt(action, hud, COARSE);
     } else if (hadPlayerPrompt || player) pilot.showAct();
   };
@@ -8088,6 +8144,7 @@
     // The visitor's separate body swims as any roster Ooga does.
     const ownBody = crew.player?.npc ? crew.player : null;
     if (ownBody && ownBody.root.visible) floatPose(ownBody, ownBody.root.position.y - ownBody.baseY, ownBody.bodyHeight, ownBody.phase, elapsed);
+    if (catapult) updateCatapult(dt);
     footsteps.update(crew.player);
     if (!cloudPlaying()) npcSync.update(dt);
     if (!cloudPlaying()) npcStatusBeams?.update(dt);
@@ -8369,6 +8426,8 @@
     weather.hold(on);
     updatePoolEffectsActivity();
     mempoolIsland.site.node.visible = !on;
+    // The catapult is put away for the game, and a flight comes down at the bridge's end at once.
+    if (catapult) catapult.setGameMode(on);
   };
   // GAME MODE's ring: a wall round the meadow well inside the foot of the bluff (the ground starts up it about 19.5 m
   // from the middle), so nobody playing climbs the cliffs and a shoulder camera behind someone at the wall stays out of
@@ -8620,6 +8679,8 @@
     if (inRainforest(p.x, feet, p.z)) return levelOf(p.x, feet, p.z, "rainforest", LEVEL_AT) && LEVEL_AT.to === "rainforest-under" ? LEVEL_AT.to : "rainforest";
     if (onBifrostIsle(p.x, feet, p.z)) return "bifrost";
     if (repoIsland && repoIsland.onIsland(p.x, feet, p.z)) return "repos";
+    // Under the catapult's canopy over open water the visitor is between places, not gone: the zone holds.
+    if (!gorilla && catapult && catapult.flying && cave === pilot.player && !island.onLand(p.x, p.z)) return BL.net.state.zone || "outside";
     return island.onLand(p.x, p.z) ? "outside" : "between";
   };
   // A new zone holds ZONE_HOLD seconds before it is reported, so a bridge's foot does not flicker in the panels.
@@ -10819,6 +10880,8 @@
     stopLazyBedding();
     // A kept hammock stays hung; its sitter gets up to go.
     if (hammock) vacateHammock();
+    // A flight comes down at the bridge's end; the kept catapult stays built.
+    if (catapult) catapult.end();
     // A kept island ends its game as a full leave does, and lowers the ring at once.
     setGameMode(false);
     gameRingK = gameRingWait = ringPulseWait = 0; gameRing.visible = false;
@@ -11296,6 +11359,8 @@
     reflowScenery();
     buildSpots();
     buildClouds();
+    // The catapult after every seeded placement and ground claim (`buildCatapult`).
+    yield* buildCatapult(slice);
     // The ring's veils are laid in a group of their own before it joins the island, so each one's ripples, which read
     // their veil's place once, walk only the group to find it.
     gameRing = createNode({ visible: false, sightHidden: true });
@@ -12057,6 +12122,7 @@
         get factory() { return factoryMouth && factoryMouth.hall ? factoryMouth.hall.debug : null; },
         get bifrost() { return bifrostIsle; },
         get footsteps() { return footsteps; },
+        get catapult() { return catapult ? { ...catapult.debug, hidden: catapultHidden() } : null; },
         get chalkboardAt() { return chalkboardClearance; },
         slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, delivery: pile.delivery, spillEffect: pile.spillEffect, cavemen: crew.cavemen, lab: null, hud, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
         get shown() {
@@ -12122,6 +12188,11 @@
     });
     pilot.update(0);
     if (ctx.from === null && !signedInArrival && !initialGorilla) restorePositionDebug();
+    // Debug: `catapult=1` stands the driven Ooga on the catapult's board, facing its throw, wherever `plan` put it.
+    if (DEBUG && params.get("catapult") === "1" && catapult && crew.player) {
+      const site = catapult.debug.site;
+      cloudMove({ x: site.padX, y: site.padY, z: site.padZ }, site.ry);
+    }
     if (initialGorilla) {
       const entry = clankers.list.find(entry => entry.owner === initialGorilla);
       if (clankerPlay.possess(entry, true)) {
@@ -12257,6 +12328,7 @@
     selectDebugGorilla(null);
     islandGuide.dispose();
     islandGuide = null;
+    if (catapult) { catapult.dispose(); catapult = null; }
     // GAME MODE ends with the visit; the island comes back built afresh.
     gameMode = gameCombatOnly = clankerOnPlayer = false;
     for (const node of ringPanels) { node.mirrorRipples.dispose(); if (node.mirrorBody) node.mirrorBody.dispose(); }

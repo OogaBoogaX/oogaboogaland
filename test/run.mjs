@@ -8,6 +8,7 @@ import { dirname, extname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { createHash, webcrypto } from "node:crypto";
+import { getHeapSpaceStatistics } from "node:v8";
 import { externalizeAudio } from "../scripts/distribution-audio.mjs";
 import { PICTURE_MODULES, externalizeModules, externalizePage, externalizePictures } from "../scripts/distribution-modules.mjs";
 import { launch, acquire, dispose, driverError } from "./browser.mjs";
@@ -4306,7 +4307,7 @@ const orbitFlow = async (b) => {
 const SCENES = ["hub", "lab", "studio", "race", "drop", "block", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
-for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
+for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "transport-unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
 const ONLY = process.env.ONLY || ""; // Optional comma-separated substrings within the requested scenes.
 const onlyMatches = value => ONLY.split(",").some(part => value.includes(part));
 const FULL = ARGS.includes("full");
@@ -20194,6 +20195,36 @@ scene("hub", { label: "distant effects", query: "pos=0&birdseye=1", steps: [hubD
 // the crew is built, as on a real arrival.
 scene("hub", { label: "guest likeness", query: "pos=0", opts: { initScript: GUEST_LIKENESS_INIT }, steps: [hubGuestLikeness] });
 scene("hub", { label: "outdoor travel", opts: { initScript: `window.BL={};let outdoorCrew;Object.defineProperty(BL,"crew",{configurable:true,get:()=>outdoorCrew,set:value=>{outdoorCrew=value;const create=value.create;value.create=ctx=>{window.__outdoorTravelContext=ctx;return create(ctx);};}});` }, steps: [hubOutdoorTravel] });
+const hubCatapultRide = { name: "hub catapult ride", why: "playthrough: the real hub action launches once, lands on dry ground, and GAME MODE interrupts a second flight safely", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, H = BL.scenes.hub.debug, first = H.catapult;
+    if (!first) return { built: false };
+    B.pilot.possess(B.cavemen.get("portlandhodl"));
+    if (B.crew.sleeping) B.crew.wakePlayer();
+    const a = B.pilot.player, site = first.site;
+    const space = (repeat = false) => { for (const type of ["keydown", "keyup"]) window.dispatchEvent(new KeyboardEvent(type, { key: " ", code: "Space", repeat, bubbles: true, cancelable: true })); };
+    const board = () => { B.pilot.navigate({ position: { x: site.padX, y: site.padY, z: site.padZ }, yaw: site.ry, pitch: .5, dist: 7 }); B.advance(.3, 1 / 30); };
+    board(); const prompt = document.getElementById("act").textContent;
+    space(); const launched = H.catapult.flight.launches;
+    space(true); const single = H.catapult.flight.launches === launched && a.camp.seat?.kind === "catapult";
+    let frames = 0, chute = false, arms = true;
+    while (H.catapult.phase !== "idle" && frames++ < 600) { B.advance(1 / 30, 1 / 30); chute ||= H.catapult.chute;
+      if (H.catapult.phase !== "idle") arms &&= !a.parts.armR.quaternion && !a.parts.armL.quaternion && (!a.modelled || a.parts.forearmR.rotation.x === -a.elbow.rest && a.parts.forearmL.rotation.x === -a.elbow.rest);
+    }
+    const p = a.root.position, landed = { phase: H.catapult.phase, seated: !!a.camp.seat, x: p.x, y: p.y - a.baseY, z: p.z, floor: B.headquarters.solids.supportAt(p.x, p.z, p.y - a.baseY, p.y - a.baseY, a), onLand: B.island.onLand(p.x, p.z), landings: H.catapult.flight.landings };
+    board(); space(); B.advance(.5, 1 / 30);
+    const again = H.catapult.phase !== "idle";
+    H.setGameMode(true);
+    const ended = H.catapult.phase === "idle" && !a.camp.seat;
+    board(); space(); const refused = H.catapult.phase === "idle";
+    H.setGameMode(false); B.advance(.2, 1 / 30);
+    return { built: true, hidden: first.hidden, prompt, launched, single, frames, chute, arms, landed, again, ended, refused, restored: !H.gameMode };
+  })()`);
+  record("hub catapult: Space launches once, opens the parachute and lands on dry island ground; GAME MODE ends a second flight, refuses launches and restores normal play",
+    r.built && r.hidden.length === 0 && r.prompt === "LAUNCH!" && r.launched === 1 && r.single && r.chute && r.arms && r.frames < 600
+      && r.landed.phase === "idle" && !r.landed.seated && r.landed.onLand && Math.abs(r.landed.y - r.landed.floor) < .15 && r.landed.landings === 1
+      && r.again && r.ended && r.refused && r.restored, JSON.stringify(r));
+} };
 scene("hub", { label: "walk-through totems", query: "pos=0&totemglow=1&repospin=0", steps: [{
   name: "walk-through totems: first-person overlap hides one carving and its effects, restores it on exit, and distant views keep all eye fires",
   why: "regression: solid totems blocked walkers, the eye could enter their carving, and distance extinguished their effects",
@@ -20440,7 +20471,7 @@ scene("hub", { label: "Merge Rock", query: "hour=0&pos=0", steps: [{
       JSON.stringify(result));
   }
 }] });
-scene("hub", { opts: !ONLY || onlyMatches(hubArrival.name) ? { initScript: `(${hubSleepWire.toString()})()` } : {}, steps: [hubArrival, { name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hudVisit, hubKeptDelivery, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, hubCloudCamera, hubCloudFraming, hubKeypadRedirect, trip("hub"), factoryActivityRouting, hubLiveWake, hubSeparateBodies] });
+scene("hub", { opts: !ONLY || onlyMatches(hubArrival.name) ? { initScript: `(${hubSleepWire.toString()})()` } : {}, steps: [hubArrival, hubCatapultRide, { name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hudVisit, hubKeptDelivery, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, hubCloudCamera, hubCloudFraming, hubKeypadRedirect, trip("hub"), factoryActivityRouting, hubLiveWake, hubSeparateBodies] });
 // The same ownership contract exercises complete destruction on memory-limited devices.
 // A released hub's return enters in slices (`enterSteps`), one at boot or with no slicing in one go (`enter`): the same
 // statements in the same order, so the island it builds, its targets, rock guides and outline registry must be equal.
@@ -20949,6 +20980,234 @@ const tessCacheChecks = async BL => {
 };
 
 // Regression: one hub variant pinned every other index built by a later scene.
+const catapultChecks = (BL, island) => {
+  const C = BL.hubCatapult, M = BL.hubCatapultModels, hub = readFileSync(join(root, "src/js/scene-hub.js"), "utf8");
+  const section = (start, end) => { const at = hub.indexOf(start); return hub.slice(at, hub.indexOf(end, at)); };
+  const code = section("  const claim = (x, z, r) => {", "  const nearPath = ") + section("  const nearMouth = ", "  // A repository's crowd")
+    + section("  const WORK_CLEAR_ROWS", "  // Bushes stand back") + section("  const ENTRANCE_HALF", "  // Keep fixed stores")
+    + section("  const SPREAD_CANDIDATES", "  const sceneryReason = ");
+  const names = ["claimed", "sceneryClaims", "scenery", "props", "island", "mulberry32", "SEED", "PLAYER_RADIUS", "hubModels", "BL", "place", "MATRIX_LIVING_PROPS",
+    "polar", "lerp", "MEADOW_INNER", "MEADOW_OUTER", "CLIFF_INNER", "CLIFF_OUTER", "workZones", "entranceZones", "contributors", "pause"];
+  const build = new Function(`"use strict"; return (deps) => { const { ${names.join(", ")} } = deps; ${code}; return scatter; };`)();
+  const DEG = Math.PI / 180, MEADOW = 22, RADIUS = 30;
+  const zone = (m) => ({ x: m.x, z: m.z, sr: Math.sin(m.ry), cr: Math.cos(m.ry) });
+  const slotOf = (m) => BL.caves.slots.find((s) => s.id === m.id);
+  const workZones = island.mouths.filter((m) => slotOf(m)?.repo).map(zone);
+  const entranceZones = island.mouths.filter((m) => ["open", "mirror", "headquarters"].includes(slotOf(m)?.status)).map(zone);
+  const firstClaims = () => [{ x: 0, z: 28.5, r: 3.8, scenery: null }, ...[[7.8, 18.5], [-8.1, 18.6], [-4.7, 19.5], [4.1, 19.9]].map(([x, z]) => ({ x, z, r: 2.4, scenery: null }))];
+  const scatterWith = (claimed, before) => {
+    const deps = { claimed, sceneryClaims: [], scenery: [], props: [], island, mulberry32: BL.math.mulberry32, SEED: 1, PLAYER_RADIUS: 0.3, hubModels: BL.hubModels, BL,
+      MATRIX_LIVING_PROPS: new Set(), polar: (deg, r) => ({ x: Math.sin(deg * DEG) * r, z: -Math.cos(deg * DEG) * r }), lerp: BL.math.lerp,
+      MEADOW_INNER: 5, MEADOW_OUTER: MEADOW - 1.5, CLIFF_INNER: MEADOW + 1.5, CLIFF_OUTER: RADIUS - 1, workZones, entranceZones,
+      contributors: { activeRoster: { length: 8 } }, pause: function* () {} };
+    deps.place = (geometry, x, z, ry, y, kind, radius) => {
+      const node = { geometry, visible: true, position: { x, y, z }, rotation: { y: ry } };
+      if (kind) deps.props.push({ kind: "prop", prop: kind, node, x, z, ripe: 0, pickRadius: radius, active: true });
+      return node;
+    };
+    const site = before ? before(claimed) : null;
+    const steps = build(deps)(null);
+    while (!steps.next().done);
+    return { site, scenery: deps.scenery, rows: JSON.stringify(deps.scenery.map((o) => [o.prop, o.x, o.z, o.node.position.y, o.node.rotation.y, o.footprint])) };
+  };
+  // With and without the catapult: `plan` run before the scatter (worse than the hub, which plans after it) neither
+  // claims ground nor draws on the seeded stream, so every tree, bush, flower and tuft stands as it
+  // did; and in the hub it is built after the scatter and every claim, and its build claims nothing.
+  const plain = scatterWith(firstClaims());
+  let claimsTouched = false;
+  const withCatapult = scatterWith(firstClaims(), (claimed) => { const before = JSON.stringify(claimed), site = C.plan({ island, claims: claimed }); claimsTouched = JSON.stringify(claimed) !== before; return site; });
+  const enter = section("  const enterSteps = function* (ctx) {", "\n  };\n"), builder = section("  const buildCatapult = function* (slice) {", "\n  };\n");
+  const after = enter.indexOf("yield* buildCatapult(slice);") > Math.max(enter.indexOf("yield* scatter(slice);"), enter.indexOf("mempoolIsland.claimGround();"), enter.indexOf("reflowScenery();"));
+  const seeded = { same: plain.rows === withCatapult.rows, placed: plain.scenery.length > 100, trees: plain.scenery.filter((o) => o.prop === "tree").length,
+    claimsTouched, after, unclaimed: !!builder && !/\bclaim\(/.test(builder) };
+  record("hub catapult placement: planning it moves no seeded tree, bush, flower or tuft and claims no ground; the hub builds it after every seeded placement and claim, and its build claims nothing",
+    seeded.same && seeded.placed && seeded.trees > 10 && !claimsTouched && after && seeded.unclaimed, JSON.stringify(seeded));
+
+  // Its footprint, measured here and not through `plan`'s own sums: on the B.C.A. hill's rock, off every path and stair,
+  // clear of every first claim and every scattered tree, bush, flower and tuft (what the hub's debug `catapult.hidden`
+  // lists stays empty), high over the B.C.A. mouth and far from the arcade's hammock. A claim laid on its footprint
+  // moves it elsewhere, and a hill with no clear place gets none: nothing existing is ever hidden or moved for it.
+  const scattered = plain.scenery.map((o) => ({ x: o.x, z: o.z, r: o.footprint, scenery: o })), allClaims = [...firstClaims(), ...scattered];
+  const site = C.plan({ island, claims: allClaims });
+  const foot = { site: !!site };
+  if (site) {
+    const corner = (lx, lz) => [site.x + (lx * site.cos + lz * site.sin) * site.scale, site.z + (-lx * site.sin + lz * site.cos) * site.scale];
+    let paths = 0, rock = 0, props = 0, low = Infinity;
+    for (let lx = -M.FOOTPRINT.half; lx <= M.FOOTPRINT.half + 1e-9; lx += 0.1) for (let lz = M.FOOTPRINT.back; lz <= M.FOOTPRINT.front + 1e-9; lz += 0.1) {
+      const [x, z] = corner(lx, lz), y = island.surfaceAt(x, z);
+      low = Math.min(low, y);
+      if (island.path.overlaps(x, z, 0.05) || island.overlapsStairs(x, z, 0.05)) paths++;
+      if (!island.onLand(x, z) || !island.solidAt(x, y - 0.5, z)) rock++;
+      for (const o of allClaims) if (Math.hypot(o.x - x, o.z - z) < o.r) { props++; break; }
+    }
+    const hidden = scattered.filter((o) => C.overlaps(site, o));
+    // A claim on the frame's own footprint (its middle) is refused there: the plan with it stands clear of it.
+    const blocker = { x: site.x, z: site.z, r: 0.2 }, moved = C.plan({ island, claims: [...allClaims, blocker] });
+    const refused = C.overlaps(site, blocker) && (!moved || !C.overlaps(moved, blocker) && (moved.padX !== site.padX || moved.padZ !== site.padZ || moved.scale !== site.scale || moved.ry !== site.ry));
+    // Claims over both hills leave no place at all: no catapult rather than anything hidden.
+    const smothered = C.plan({ island, claims: [...allClaims, ...C.HILLS.map((h) => ({ x: h.x, z: h.z, r: 9 }))] }) === null;
+    const bca = island.mouths.find((m) => m.id === "c10"), arcade = island.mouths.find((m) => m.id === "c3");
+    Object.assign(foot, { at: [site.x, site.y, site.z].map((v) => +v.toFixed(2)), board: [site.padX, site.padY, site.padZ].map((v) => +v.toFixed(2)), scale: site.scale, turn: site.turn,
+      paths, rock, props, hidden: hidden.length, refused, smothered, low, hill: Math.hypot(site.x - bca.x, site.z - bca.z) < 6 && low > bca.floorY + 5.5,
+      hammock: Math.hypot(site.x - arcade.x, site.z - arcade.z) > 30, clock: +((Math.atan2(site.x, -site.z) / (Math.PI * 2) * 12 + 12) % 12).toFixed(2) });
+  }
+  record("hub catapult footprint: on the B.C.A. hill at 10 o'clock, its whole frame and board on the hill's rock, off every path and stair, clear of every tree, bush, prop and claim (none hidden), a footprint over anything refused and no catapult where nothing is clear, high over the B.C.A. mouth and far from the hammock",
+    foot.site && foot.paths === 0 && foot.rock === 0 && foot.props === 0 && foot.hidden === 0 && foot.refused && foot.smothered && foot.hill && foot.hammock && foot.clock > 9.5 && foot.clock < 10.5, JSON.stringify(foot));
+  if (!site) return;
+
+  // The launch rule: feet on the board, standing; not beside it, over it, seated, or in GAME MODE.
+  const at = (dx, dz, feet = site.padY, over = {}) => C.canLaunch(site, { gameMode: false, busy: false, grounded: true, seated: false, x: site.padX + dx, feet, z: site.padZ + dz, ...over });
+  const rule = { board: at(0, 0), edge: at(0.5 * site.cos, -0.5 * site.sin), beside: !at(1.4 * site.cos, -1.4 * site.sin), behind: !at(-1.2 * site.sin, -1.2 * site.cos),
+    over: !at(0, 0, site.padY + 1), air: !at(0, 0, site.padY, { grounded: false }), seated: !at(0, 0, site.padY, { seated: true }), game: !at(0, 0, site.padY, { gameMode: true }), none: !C.canLaunch(null, {}) };
+  record("hub catapult launch: only an Ooga standing on its board launches, never one beside or behind it, over it, in the air, seated or in GAME MODE", Object.values(rule).every(Boolean), JSON.stringify(rule));
+
+  // The throw, normal and Calm: the canopy opens at the arc's top, right over the bridge's end, after passing high
+  // over the middle of the island and clear of the ground; Calm is lower and over sooner.
+  const fly = (calm, dt, steer, probe = null) => {
+    const f = C.flight(); C.start(site, f, site.padX, site.padY, site.padZ, calm);
+    const out = { opened: null, centre: Infinity, centreHigh: 0, ground: Infinity, seconds: 0, top: -Infinity };
+    let phase = 1, frame = 0;
+    while (phase !== 4 && out.seconds < 30) {
+      const [sx, sz] = steer(frame++, out.seconds);
+      phase = C.step(site, f, dt, sx, sz, probe);
+      out.seconds += dt; out.top = Math.max(out.top, f.y);
+      if (phase === 3 && !out.opened) out.opened = { x: f.x, y: f.y, z: f.z, t: f.t };
+      if (phase === 2) {
+        const d = Math.hypot(f.x, f.z), floor = island.surfaceAt(f.x, f.z);
+        if (d < out.centre) { out.centre = d; out.centreHigh = f.y - floor; }
+        out.ground = Math.min(out.ground, f.y - floor);
+      }
+    }
+    return { ...out, x: f.x, y: f.y, z: f.z, phase, rescued: f.rescue };
+  };
+  const still = () => [0, 0];
+  const arcs = [false, true].map((calm) => {
+    const r = fly(calm, 1 / 60, still), o = r.opened, T = C.arcSeconds(site, calm), apex = calm ? site.calmApexY : site.apexY;
+    // The arc in closed form (`arcAt`) at its end is the apex over the aim; stepped, the canopy opens within a frame of it.
+    const end = C.arcAt(site, T, calm, {});
+    return { calm, seconds: +r.seconds.toFixed(2), apex, centre: +r.centre.toFixed(2), centreHigh: +r.centreHigh.toFixed(1), ground: +r.ground.toFixed(2),
+      overAim: Math.hypot(end.x - site.aimX, end.z - site.aimZ) < 1e-9 && Math.abs(end.y - apex) < 1e-9,
+      opened: !!o && Math.hypot(o.x - site.aimX, o.z - site.aimZ) < 0.05 && Math.abs(o.y - apex) < 0.1 && r.top <= apex + 1e-9,
+      landed: r.phase === 4 && Math.hypot(r.x - site.aimX, r.z - site.aimZ) < 0.3 };
+  });
+  const [normal, calm] = arcs;
+  record("hub catapult arc: the throw passes high over the middle of the island, clear of the ground, and its top, where the parachute opens, stands over the bridge's island end, where it lands; Calm's is lower and over sooner",
+    arcs.every((a) => a.overAim && a.opened && a.landed && a.centre < 4 && a.centreHigh > 8 && a.ground > 2) && calm.apex < normal.apex && calm.seconds < normal.seconds, JSON.stringify(arcs));
+
+  // The landing: however the stick steers under the canopy (held hard each way, zigzagged, wandering, at any frame
+  // rate), the Ooga comes down exactly on a checked spot at the bridge's island end: on the island's own ground, inside
+  // the rim, its body's ring within a step, rock-free above, within reach of the aim.
+  const spots = [];
+  for (let i = 0; i < site.spotCount; i++) spots.push([site.spots[i * 3], site.spots[i * 3 + 1], site.spots[i * 3 + 2]]);
+  const checked = spots.map(([x, y, z]) => island.onLand(x, z) && island.surfaceAt(x, z) === y && Math.hypot(x, z) < 29.5 && Math.hypot(x - site.aimX, z - site.aimZ) <= 1.41
+    && y > 5 && island.clearAt(x, y + 0.55, z, 0.35, 10) && [0, 1, 2, 3, 4, 5, 6, 7].every((k) => { const a = k * Math.PI / 4, rx = x + Math.cos(a) * 0.45, rz = z + Math.sin(a) * 0.45; return island.onLand(rx, rz) && Math.abs(island.surfaceAt(rx, rz) - y) <= 0.5; }));
+  const random = BL.math.mulberry32(77);
+  const sticks = [still, ...[0, 1, 2, 3, 4, 5, 6, 7].map((k) => () => [Math.sin(k * Math.PI / 4), Math.cos(k * Math.PI / 4)]),
+    (n) => [n % 40 < 20 ? 1 : -1, 0.3], () => [random() * 2 - 1, random() * 2 - 1]];
+  const landings = [];
+  for (const calmFlight of [false, true]) for (const dt of [1 / 30, 1 / 60, 1 / 144]) for (const stick of sticks) {
+    const r = fly(calmFlight, dt, stick), hit = spots.findIndex(([x, y, z]) => x === r.x && y === r.y && z === r.z);
+    landings.push({ calm: calmFlight, dt: +dt.toFixed(4), hit, ok: r.phase === 4 && hit >= 0 && checked[hit] });
+  }
+  const moved = new Set(landings.map((l) => l.hit)).size;
+  record("hub catapult landing: steered any way at any frame rate, normal or Calm, the Ooga comes down exactly on a checked spot of the island's own ground at the bridge's island end, and steering does choose among them",
+    spots.length >= 3 && checked.every(Boolean) && landings.every((l) => l.ok) && moved >= 3, JSON.stringify({ spots: spots.length, checked: checked.filter(Boolean).length, moved, failed: landings.filter((l) => !l.ok) }));
+
+  // Past the bridge's mouth: under the canopy the stick takes the Ooga back onto the island, along the bridge or on over
+  // the water into the rainforest, and it comes down on whatever holds it there (here the island's ground, the
+  // bridge's deck and the rainforest's terraces, as the hub's probe finds them); over the lake or the sea it turns for
+  // the nearest ground that holds it, never landing in water.
+  const P = BL.poolModels, L = BL.poolLayout, isle = P.spot(island, {}), icos = Math.cos(isle.ry), isin = Math.sin(isle.ry);
+  const localX = (x, z) => (x - isle.x) * icos - (z - isle.z) * isin, localZ = (x, z) => (x - isle.x) * isin + (z - isle.z) * icos;
+  const lake = (x, z) => Math.hypot(localX(x, z), localZ(x, z)) < L.LAKE_R + 0.6;
+  const deck = (x, z) => { const along = localZ(x, z) - isle.bridgeLocalZ; return Math.abs(localX(x, z)) <= P.SITE.width / 2 && along >= P.SITE.deckStart && along <= P.SITE.span ? isle.y + P.deckY(along / P.SITE.span) : -Infinity; };
+  const forest = (x, z) => { const g = L.groundAt(localX(x, z), localZ(x, z)); return g > -50 ? isle.y + g : -Infinity; };
+  const probe = {
+    ground: (x, z, y) => { let g = island.onLand(x, z) ? island.surfaceAt(x, z) : -Infinity; g = Math.max(g, deck(x, z), lake(x, z) ? isle.y : forest(x, z)); return g; },
+    ok: (x, z, floor) => floor > -Infinity && !lake(x, z)
+  };
+  const where = (r) => lake(r.x, r.z) ? "lake" : deck(r.x, r.z) > -Infinity && Math.abs(deck(r.x, r.z) - r.y) < 1e-9 ? "deck" : forest(r.x, r.z) > -Infinity && Math.abs(forest(r.x, r.z) - r.y) < 1e-9 ? "rainforest"
+    : island.onLand(r.x, r.z) && Math.abs(island.surfaceAt(r.x, r.z) - r.y) < 1e-9 ? "island" : "nowhere";
+  const toward = (tx, tz, until = Infinity) => (n, t) => { if (t > until) return [0, 0]; const dx = tx - site.aimX, dz = tz - site.aimZ, d = Math.hypot(dx, dz); return [dx / d, dz / d]; };
+  const isleCentre = [isle.x, isle.z], bridgeMid = [site.aimX + site.dirX * 12, site.aimZ + site.dirZ * 12];
+  const flights = {
+    stillIsland: fly(false, 1 / 60, still, probe),
+    onward: fly(false, 1 / 60, toward(isle.x + (isle.x - site.aimX) * 0.2, isle.z + (isle.z - site.aimZ) * 0.2), probe),
+    deck: fly(false, 1 / 60, toward(...bridgeMid, 3.6), probe),
+    lake: fly(false, 1 / 60, toward(...isleCentre), probe),
+    sea: fly(false, 1 / 60, toward(site.aimX + site.dirX * 9 - site.dirZ * 8, site.aimZ + site.dirZ * 9 + site.dirX * 8, 3.6), probe),
+    back: fly(false, 1 / 60, (n) => [-site.dirX, -site.dirZ], probe),
+    calmOnward: fly(true, 1 / 30, toward(isle.x, isle.z + 6), probe)
+  };
+  const glide = {};
+  for (const [name, r] of Object.entries(flights)) glide[name] = { at: where(r), landed: r.phase === 4, rescued: r.rescued, x: +r.x.toFixed(2), z: +r.z.toFixed(2), y: +r.y.toFixed(2) };
+  const dry = Object.values(glide).every((g) => g.landed && g.at !== "lake" && g.at !== "nowhere");
+  record("hub catapult glide: under the canopy the Ooga steers on past the bridge's mouth, along the deck and into the rainforest, landing on whatever holds it there; steered over the lake or the sea it turns for the nearest dry ground, and back it lands on the island",
+    dry && glide.stillIsland.at === "island" && glide.onward.at === "rainforest" && glide.deck.at === "deck" && glide.lake.rescued && glide.sea.rescued && glide.back.at === "island" && glide.calmOnward.at === "rainforest", JSON.stringify(glide));
+
+  // A visit's catapult through its own controls, with the crew's seat contract as the hub's crew keeps it.
+  const S = BL.scene, parent = S.createNode(), parts = {};
+  for (const name of ["armR", "armL", "legR", "legL"]) parts[name] = S.createNode();
+  const cave = { root: S.createNode(), parts, camp: { seat: null, burning: false }, hop: 0, hopV: 0, baseY: 0.1, bodyHeight: 1.4, grabbedBy: null, traits: { name: "tester" } };
+  const crew = {
+    sitPlayer: (seat) => { if (cave.camp.seat) return false; cave.camp.seat = seat; seat.sitter = cave; return true; },
+    standPlayer: (c) => { const seat = c.camp.seat; if (!seat) return false; seat.sitter = null; c.camp.seat = null; c.root.position.x = seat.walkAt.x; c.root.position.y = seat.floor + c.baseY; c.root.position.z = seat.walkAt.z; return true; }
+  };
+  const onBoard = () => { cave.root.position.x = site.padX; cave.root.position.y = site.padY + cave.baseY; cave.root.position.z = site.padZ; };
+  const landedOn = () => spots.some(([x, y, z]) => x === cave.root.position.x && Math.abs(y + cave.baseY - cave.root.position.y) < 1e-9 && z === cave.root.position.z);
+  const K = C.create({ parent, site, crew });
+  onBoard();
+  const game = { ready: K.ready(cave) };
+  K.setGameMode(true);
+  Object.assign(game, { away: !K.node.visible, refused: !K.ready(cave) && !K.launch(cave) });
+  K.setGameMode(false);
+  Object.assign(game, { back: K.node.visible && K.ready(cave), launched: K.launch(cave), seated: cave.camp.seat !== null, flying: K.flying });
+  for (let i = 0; i < 90; i++) K.update(1 / 60);
+  K.setGameMode(true);
+  Object.assign(game, { ended: !K.flying && cave.camp.seat === null && landedOn(), chute: !K.debug.chute, hidden: !K.node.visible });
+  K.setGameMode(false);
+  onBoard();
+  for (let i = 0; i < 200; i++) K.update(1 / 60);
+  game.again = K.launch(cave);
+  let frames = 0;
+  while (K.flying && frames < 2000) { K.update(1 / 60, 0.4, -0.2); frames++; }
+  for (let i = 0; i < 120; i++) K.update(1 / 60);
+  Object.assign(game, { home: landedOn() && cave.camp.seat === null, wound: Math.abs(K.debug.arm - M.REST) < 1e-9, frames });
+  record("hub catapult GAME MODE: the catapult is put away and refuses to launch, a flight under way comes down at once on a checked spot at the bridge's end, and it is back after the game; a whole flight lands there and the arm winds back",
+    Object.values(game).every(Boolean), JSON.stringify(game));
+
+  // Its frames allocate nothing. V8 boxes a double crossing a call it did not inline, so the young generation grows a
+  // little under any frame code; the measure is the controller's frames against `step` alone, the same flight's bare
+  // arithmetic, both warmed until optimised: the frames may add the node writes' boxing (about 22 bytes a frame here)
+  // but not one object or array a frame (an object a frame adds about 48 more).
+  const stick = new Float64Array(600);
+  for (let i = 0; i < stick.length; i++) stick[i] = Math.sin(i * 0.05);
+  const bare = C.flight(), young = () => getHeapSpaceStatistics().find((s) => s.space_name === "new_space").space_used_size;
+  const flown = () => { onBoard(); for (let i = 0; i < 200; i++) K.update(1 / 60); K.launch(cave); for (let i = 0; K.flying && i < 600; i++) K.update(1 / 60, stick[i], -stick[i]); };
+  const stepped = () => { C.start(site, bare, site.padX, site.padY, site.padZ, false); for (let i = 0; i < 400; i++) C.step(site, bare, 1 / 60, stick[i], -stick[i]); };
+  for (let k = 0; k < 60; k++) { flown(); stepped(); }
+  // Warm the same fixed-length call sites that are measured below. The whole-flight helper exits on a getter,
+  // while these loops cross the controller and bare arithmetic with the same 400 changing input pairs.
+  const frames400 = () => { for (let i = 0; i < 400; i++) K.update(1 / 60, stick[i], -stick[i]); };
+  const steps400 = () => { for (let i = 0; i < 400; i++) C.step(site, bare, 1 / 60, stick[i], -stick[i]); };
+  for (let k = 0; k < 100; k++) {
+    onBoard(); for (let i = 0; i < 200; i++) K.update(1 / 60); K.launch(cave); frames400(); K.end();
+    C.start(site, bare, site.padX, site.padY, site.padZ, false); steps400();
+  }
+  let extra = Infinity;
+  for (let round = 0; round < 3; round++) {
+    onBoard(); for (let i = 0; i < 200; i++) K.update(1 / 60); K.launch(cave);
+    let from = young();
+    frames400();
+    const frames = young() - from;
+    C.start(site, bare, site.padX, site.padY, site.padZ, false); from = young();
+    steps400();
+    extra = Math.min(extra, (frames - (young() - from)) / 400);
+    K.end();
+  }
+  K.dispose();
+  record("hub catapult frames: a flight's frame updates allocate nothing", extra < 36 && parent.children.length === 0, JSON.stringify({ extraBytesPerFrame: +extra.toFixed(1), children: parent.children.length }));
+};
 const variantCacheChecks = BL => {
   const M = BL.models, builds = new Map(), read = M.variants(i => ({ i, serial: builds.set(i, (builds.get(i) || 0) + 1).get(i) }));
   M.setScope("hub"); const hub = read();
@@ -31655,7 +31914,7 @@ const npcActivityRefreshProof = (BL) => {
   }
 };
 
-const unitChecks = async () => {
+const unitPreludeChecks = async () => {
   await connectionReportChecks();
   const artifact = artifactUnitProof();
   record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
@@ -31751,6 +32010,9 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   record("visibility separate bodies (#501): a driven Ooga or gorilla body is a registry character from before the registry exists, reads in sight in the open and covered behind a blocker, keeps both head states through refreshes with its sightHidden effects left out, and is forgotten before it is detached with nothing left take after take",
     Object.values(separateBodies).every(Boolean), JSON.stringify(separateBodies));
   await distributionAudioChecks();
+};
+const unitChecks = async () => {
+  if (!ARGS.includes("transport-unit")) await unitPreludeChecks();
   const canvasStub = () => ({
     width: 0, height: 0,
     getContext: () => ({
@@ -31810,6 +32072,12 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   }
   process.off("unhandledRejection", rejected);
   const BL = globalThis.BL;
+  // Focused post-fix validation still loads the whole page, so shared shape changes cannot escape the allocation checks.
+  if (ARGS.includes("transport-unit")) {
+    if (typeof catapultChecks === "function") catapultChecks(BL, BL.terrain.island({ seed: 1 }));
+    if (typeof ziplineChecks === "function") ziplineChecks(BL);
+    return;
+  }
   if (ARGS.includes("cloud-hopper-controller")) { await cloudHopperFailureChecks(BL); return; }
   await tessCacheChecks(BL);
   variantCacheChecks(BL);
@@ -32073,6 +32341,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
 
   const island = BL.terrain.island({ seed: 1 });
   terrainParityChecks(BL, island);
+  catapultChecks(BL, island);
   repoIslandChecks(BL, island);
   await terrainCacheChecks();
   {
