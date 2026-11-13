@@ -1033,6 +1033,8 @@
       update, useNear, actLabel, press, tapMonitor, lights, liveGeometry, nodes: kiosks.map((k) => k.node), projector: head, screen: frame,
       monitors: desks.map((d) => d.nodes),
       get near() { return near >= 0; },
+      // Whether the film show is on, from the screen winding down to it winding back up.
+      get showing() { return phase !== "idle"; },
       debug: {
         press, get phase() { return phase; }, get index() { return index; }, get frame() { return film && film[index] ? film[index].key : null; }, get film() { return film ? film.map((e) => e.key) : []; },
         // Skip to frame `i` of the film, or with none the next.
