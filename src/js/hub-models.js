@@ -201,8 +201,8 @@
   // cached version leaves small gaps between square letter cells for close views. `lit` makes the name and the
   // badge glow outright, as the island's cave mouths hang them. The front face sits at SIGN_FRONT and nothing reaches behind
   // z = -0.07, so it hangs where the old board did.
-  const caveSign = (text = "EntropyLab", iconName = null, pixels = false, lit = false) => {
-    const key = `${text}|${iconName || ""}|${pixels ? "pixels" : "solid"}${lit ? "|lit" : ""}`;
+  const caveSign = (text = "EntropyLab", iconName = null, pixels = false, lit = false, endPad = 0) => {
+    const key = `${text}|${iconName || ""}|${pixels ? "pixels" : "solid"}${lit ? "|lit" : ""}${endPad ? `|pad:${endPad}` : ""}`;
     const hit = SIGN_CACHE.get(key);
     if (hit) return hit;
     let cells = -1;
@@ -214,7 +214,7 @@
     }
     const textW = cells * SIGN_CELL;
     const iconW = iconName ? BADGE_CELL * BADGE_CELLS : 0;
-    const width = Math.max(CAVE_SIGN_WIDTH, textW + SIGN_PAD + (iconName ? iconW + BADGE_GAP : 0));
+    const width = Math.max(CAVE_SIGN_WIDTH, textW + SIGN_PAD + (iconName ? iconW + BADGE_GAP : 0)) + endPad * 2;
     // The badge leads the name; the pair is centred together, so the name moves right by half the badge and its gap.
     const shift = iconName ? (iconW + BADGE_GAP) * 0.5 : 0;
     const half = CAVE_SIGN_HEIGHT * 0.5, plankH = (CAVE_SIGN_HEIGHT - 0.04) / 3, depth = 0.3, mid = SIGN_FRONT - depth / 2;
@@ -225,8 +225,8 @@
       geos.push(bevelBox({ w: width + grow, h: plankH, d: depth, color: SIGN_PLANKS[k], bevel: 0.05, offset: { x: shift, y: half - plankH * (k + 0.5) - 0.02 * k, z: mid } }));
     });
     // One continuous dark panel backs the badge and name, with a glyph cell added above and below for descenders.
-    geos.push(bevelBox({ w: textW + (iconName ? iconW + BADGE_GAP : 0) + 0.14, h: 0.52 + 2 * SIGN_CELL, d: 0.035,
-      color: "#3f2513", bevel: 0.012, offset: { x: 0, y: 0, z: SIGN_FRONT + 0.0125 } }));
+    geos.push(bevelBox({ w: textW + (iconName ? iconW + BADGE_GAP : 0) + 0.14 + endPad, h: 0.52 + 2 * SIGN_CELL, d: 0.035,
+      color: "#3f2513", bevel: 0.012, offset: { x: endPad / 2, y: 0, z: SIGN_FRONT + 0.0125 } }));
     // Letters as solid horizontal runs of whole cells, touching row to row, so a glyph is one clean shape.
     const run = (x0, y, n) => geos.push(box({ w: SIGN_CELL * n, h: SIGN_CELL, d: 0.07, color: SIGN_INK, emissive: ink, offset: { x: x0 + SIGN_CELL * (n - 1) * 0.5, y, z: SIGN_FRONT + 0.03 } }));
     let cursor = shift - textW * 0.5;

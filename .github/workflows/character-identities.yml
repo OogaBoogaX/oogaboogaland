@@ -9,6 +9,10 @@ permissions:
   contents: read
   pull-requests: read
 
+concurrency:
+  group: character-identities-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   identities:
     name: Character identity ownership

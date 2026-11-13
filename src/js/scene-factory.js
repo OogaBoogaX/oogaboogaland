@@ -1323,7 +1323,6 @@
   };
   // An on-chain payment seen before its block: true when the kiosk holding its invoice shows it.
   const onSeen = (id, sats, due, left, pricing) => !!(scene.booth.flow && scene.booth.flow.seen(id, sats, due, left, pricing));
-  const onLootCleared = () => {};
 
   const build = () => {
     const L = LAYOUT, s = {
@@ -1812,7 +1811,7 @@
     ({ renderer, game, world, go, agentPlay } = ctx);
     camera = createCamera({ fov: 55, near: 0.3, far: 150 });
     root = createNode();
-    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled, escapeHeld: () => !!scene.booth.mode });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, escapeHeld: () => !!scene.booth.mode });
     hud.setAreaLabel("LF");
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
@@ -2594,7 +2593,7 @@
     // Voice zone: the Factory group, which its tunnel on the island shares (`factory`).
     voiceZone: "factory.hall",
     micKey: true,
-    id: "factory", prepare, buildSteps: () => FM.buildSteps(), warmSteps, enter, update, overlay, onDonation, previewDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, allGeometry, hallGeometry,
+    id: "factory", prepare, buildSteps: () => FM.buildSteps(), warmSteps, enter, update, overlay, onDonation, previewDonation, onSeen, onKey, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, allGeometry, hallGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     // Diagnostics observe the existing detached owner without reading model caches.
     get retainedGeometry() { return world ? world.factoryKeep : null; },

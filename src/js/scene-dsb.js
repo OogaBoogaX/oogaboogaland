@@ -236,7 +236,7 @@
     // A page that prepared none (debug) keeps its old default.
     const assigned=BL.net.preferredCharacter()?.handle;
     const name=own?.handle||BL.contributors.roster.find(c=>c.name===carried&&allowed(c))?.name||assigned||(!BL.net.state.backend?"YellowBrokeIt":BL.contributors.roster.find(allowed)?.name||"YellowBrokeIt");world.pilot=null;
-    hud=BL.hud.create({signal:ctx.signal,roster:BL.contributors.roster,catalog:BL.models.SWAG,tierColors:BL.models.TIER_COLORS,renderIcon:BL.hud.renderIcon,lootEnabled:false});
+    hud=BL.hud.create({signal:ctx.signal,roster:BL.contributors.roster});
     hud.setDestinations(Object.keys(VIEW_NAMES),VIEW_NAMES);
     hud.setAreaLabel("CHORA");
     hud.el.modeDestination.title="DSB island · cycle views";
