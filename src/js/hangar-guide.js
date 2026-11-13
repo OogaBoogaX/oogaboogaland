@@ -13,8 +13,8 @@
 // and goes back to work.
 //
 // When the faint shape in the hangar's air (`hangar-shimmer.js`) shows near her, in her sight, and she is free to notice
-// it, the scene lends her to `unsettled`: most times she stops and glances at it a few seconds; otherwise she edges in
-// to hang at its side and watches it, backs off as it comes apart, and goes back to work.
+// it, the scene lends her to `unsettled`: most times she stops and glances at it a few seconds; otherwise she comes over
+// unhurried to look it over from a few metres off, then goes back to work.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -223,13 +223,13 @@
 
   // Lent while the faint shape in the hangar's air shows (`hangar-shimmer.js`). A moment after it has formed she
   // notices it. Most times she only glances at it: she stops where she is, turns to face it, perhaps drifting a little
-  // toward it or aside, watches it a few seconds and goes back to work. Otherwise she stops where she is, facing it, a
-  // beat; then she edges in at an angle, in two hesitant moves rising over what stands between, to hang at its side
-  // (so the view sees them both), facing it, her rings spinning up faster and faster as she comes; halfway in, pausing,
-  // she flips over backwards in the air. There she watches it. As it comes apart her rings wind down and she backs off
-  // and watches it go; a moment after it has gone she goes back to work, or sooner if anything ended it early. Under
-  // reduced motion she still comes over and watches, her rings only a little quicker, without the flip. `shimmer` is the
-  // shape, read live, and `camera` the view, so she keeps to its side of it.
+  // toward it or aside, watches it a few seconds and goes back to work. Otherwise, with time enough left, she looks it
+  // over: she stops where she is, facing it, a beat; then comes over unhurried, in two moves rising over what stands
+  // between, the second slower, to hang a few metres off to its side (so the view sees them both), facing it, her rings
+  // turning a little quicker; there she watches it, moving a little round it once or twice. As it comes apart she
+  // watches it start to go and eases back a touch, or, still on her way, stops where she is, and watches it go; a
+  // moment after it has gone she goes back to work, or sooner if anything ended it early. `shimmer` is the shape, read
+  // live, and `camera` the view, so she keeps to its side of it.
   const UNEASY = {
     // When she notices it, as a share of its forming, at random between; none if less than `least` s of it would be
     // left; and only within `reach` m of it, across the floor, with it in her sight, which she looks for every `look` s.
@@ -238,48 +238,58 @@
     // while she does, and how far, m, toward it or up to `aside` rad off that, rising up to `climb` m, at `driftSpeed`
     // m/s, where the air is open.
     glance: 0.65, glanceFor: [1.6, 3.4], drifts: 0.7, drift: [0.2, 0.7], aside: 0.7, climb: 0.25, driftSpeed: 0.35,
-    // How long she holds still facing it once she has noticed it, before she comes over, s.
-    stare: 0.6,
-    // Where she hangs: `side` m to its side, `toward` m toward the view, `y` m up, `margin` m inside the hall's walls.
-    side: 2.6, toward: 0.2, y: 2.3, margin: 1.5,
-    // Her two moves in: the first, over `quick` s however far (at `speed[0]` m/s at least), to `last` m short of where
-    // she hangs (or `first` of the way when that is nearer), on the line from where she came or `rise` m over where she
-    // hangs if that is higher; the pause between them, s; and the last, hesitant, at `speed[1]` m/s.
-    quick: 1.1, last: 2.5, first: 0.55, rise: 0.6, speed: [2.6, 1.4], pause: 1.1,
-    // How fast her rings spin on top of their own in each stage, times, eased up slowly (`up`, the share a second) so
-    // they go faster and faster, and down quicker (`down`). She flips over backwards once, as she pauses on her way in.
-    whirl: { glance: 0, notice: 0, edge: 3, pause: 5, near: 8, study: 13, recoil: 2, settle: 0, over: 0 }, up: 0.8, down: 2,
-    // Backing off as it comes apart: how far back and up, m, how fast, m/s.
-    back: 1.1, lift: 0.4, backSpeed: 0.8,
+    // Otherwise, how long she holds still facing it before she comes over, s, at random between; she comes over only
+    // with at least `stay` s of it left before it comes apart, and glances at it instead.
+    stare: [0.4, 0.9], stay: 5,
+    // Where she hangs: `dist` m from it, off to its side as the view sees it and turned `turn` rad toward the view,
+    // `y` m up, each at random between; and `margin` m inside the hall's walls.
+    dist: [3.8, 5], turn: [0.05, 0.5], y: [2, 2.7], margin: 1.5,
+    // Her two moves in, unhurried: the first at `speed[0]` m/s (no faster than she flies about her work) to `last` m
+    // short of where she hangs (or `first` of the way when that is nearer), on the line from where she came or `rise` m
+    // over where she hangs if that is higher; a pause, s; and the last, slower, at `speed[1]` m/s; each at random
+    // between.
+    last: 1.5, first: 0.55, rise: 0.5, speed: [[2.2, 3], [0.8, 1.1]], pause: [0.4, 0.9],
+    // Once there, one to `shifts` small moves round it, `shiftGap` s apart at random between: each `shift` rad round it
+    // either way at random between, up or down `bob` m at most, at `shiftSpeed` m/s, where the air is open.
+    shifts: 2, shiftGap: [0.9, 1.8], shift: [0.2, 0.45], bob: 0.25, shiftSpeed: 0.5,
+    // How fast her rings spin on top of their own in each stage, times, eased up (`up`, the share a second) and down
+    // (`down`): a little quicker while she looks it over.
+    whirl: { glance: 0, notice: 0, edge: 0.5, pause: 1, near: 1.5, study: 2, recoil: 1, settle: 0, over: 0 }, up: 0.8, down: 2,
+    // As it comes apart, still on her way she stops where she is; there, she watches it start to go, `linger` of the
+    // way through its coming apart, then eases back a touch: how far back and up, m, how fast, m/s.
+    linger: 0.5, back: 0.4, lift: 0.15, backSpeed: 0.4,
     // After it has gone: how long she still hangs there, s, before she goes back to work (`cut` if it ended early).
     after: 0.6, done: 1, cut: 0.7
   };
   const unsettled = (shimmer, camera) => {
-    const at = shimmer.at, spot = { x: 0, y: 0, z: 0 }, mid = { x: 0, y: 0, z: 0 }, back = { x: 0, y: 0, z: 0 }, still = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const at = shimmer.at, spot = { x: 0, y: 0, z: 0 }, mid = { x: 0, y: 0, z: 0 }, back = { x: 0, y: 0, z: 0 };
     // The rig she is lent as; whether she glances at it or comes over (`kind`); her stage and how long she has been in
-    // it, s; how long she glances, s; the shape she is on (its `shows`) and the one whose noticing is drawn, when, and
-    // when she next looks for it; and whether this one ended early.
-    let rig = null, kind = "", stage = "idle", t = 0, glanceFor = 0, shape = -1, drawn = -1, noticeAt = 0, lookAt = 0, cut = false;
+    // it, s; how long she glances, holds still before coming over and pauses on the way, s; the moves round it still to
+    // make, how long until the next, s, and whether she is making one; the shape she is on (its `shows`) and the one
+    // whose noticing is drawn, when, and when she next looks for it; and whether this one ended early.
+    let rig = null, kind = "", stage = "idle", t = 0, glanceFor = 0, stareFor = 0, pauseFor = 0, shiftsLeft = 0, shiftIn = 0, moving = false;
+    let shape = -1, drawn = -1, noticeAt = 0, lookAt = 0, cut = false;
     const between = ([a, b]) => a + Math.random() * (b - a);
     // Whether (x, y, z) is open air for her: inside the hall and nothing standing there up to near her height.
     const open = (x, y, z) => {
       const HM = BL.hangarModels, H = HM.LAYOUT.HALL, m = UNEASY.margin;
       return x > H.x0 + m && x < H.x1 - m && z > H.back + m && z < HM.LAYOUT.runway.z0 - m && HM.supportAt(x, z, y) < y - 0.9 && HM.clearAt(x, z, y - 0.4, 0.5, x + 1e3, z, false);
     };
-    // Where she hangs by it: to its side as the view sees it, the side nearer her where both are open, else in front of it
-    // and a little aside.
+    // Where she hangs by it: a few metres off to its side as the view sees it, turned a little toward the view, the
+    // side nearer her where both are open, else in front of it and a little aside.
     const place = (r) => {
       const c = camera.position, vx = at.x - c.x, vz = at.z - c.z, l = Math.hypot(vx, vz) || 1, ux = vx / l, uz = vz / l, U = UNEASY;
-      const ax = at.x + uz * U.side - ux * U.toward, az = at.z - ux * U.side - uz * U.toward;
-      const bx = at.x - uz * U.side - ux * U.toward, bz = at.z + ux * U.side - uz * U.toward, p = r.root.position;
-      const aOk = open(ax, U.y, az), bOk = open(bx, U.y, bz);
+      const d = between(U.dist), q = between(U.turn), side = Math.cos(q) * d, toward = Math.sin(q) * d, y = between(U.y);
+      const ax = at.x + uz * side - ux * toward, az = at.z - ux * side - uz * toward;
+      const bx = at.x - uz * side - ux * toward, bz = at.z + ux * side - uz * toward, p = r.root.position;
+      const aOk = open(ax, y, az), bOk = open(bx, y, bz);
       const useA = aOk && (!bOk || Math.hypot(ax - p.x, az - p.z) < Math.hypot(bx - p.x, bz - p.z));
       if (useA || bOk) { spot.x = useA ? ax : bx; spot.z = useA ? az : bz; }
-      else { spot.x = at.x - ux * 3.2 + uz * 1.2; spot.z = at.z - uz * 3.2 - ux * 1.2; }
-      spot.y = U.y;
+      else { spot.x = at.x - ux * d + uz * 1.2; spot.z = at.z - uz * d - ux * 1.2; }
+      spot.y = y;
     };
     const go = (r, x, y, z, speed, corner) => { r.clearPath(speed, corner); r.push(x, y, z); };
-    // Backing off from it, as it comes apart.
+    // Easing back a touch from it, as it comes apart.
     const backOff = (r) => {
       const p = r.root.position, dx = p.x - at.x, dz = p.z - at.z, l = Math.hypot(dx, dz) || 1;
       back.x = p.x + dx / l * UNEASY.back; back.y = p.y + UNEASY.lift; back.z = p.z + dz / l * UNEASY.back;
@@ -305,7 +315,7 @@
         rig = r; shape = shimmer.shows; cut = false; r.whirl = 0;
         r.clearPath(0, 0);
         r.hush();
-        if (Math.random() < U.glance) {
+        if (Math.random() < U.glance || at.held - shimmer.t < U.stay) {
           kind = "glance"; glanceFor = between(U.glanceFor);
           if (Math.random() < U.drifts) {
             const a = Math.atan2(at.x - p.x, at.z - p.z) + (Math.random() * 2 - 1) * U.aside, d = between(U.drift);
@@ -314,7 +324,7 @@
           }
           enter("glance");
         } else {
-          kind = "approach";
+          kind = "approach"; stareFor = between(U.stare); pauseFor = between(U.pause); moving = false;
           place(r);
           enter("notice");
         }
@@ -326,32 +336,41 @@
       r.watching = true; r.watch.x = at.x; r.watch.z = at.z;
       r.watch.y = stage === "recoil" ? 2.2 + Math.min(1.4, (shimmer.t - at.held) * 0.6) : 2.9;
       r.mode = 0; r.aims = null;
-      // It coming apart, wherever she has got to on her way in, she backs off.
-      if ((stage === "edge" || stage === "pause" || stage === "near" || stage === "study") && shimmer.t >= at.held) backOff(r);
+      // It coming apart: still on her way in, she stops where she is; looking it over, she watches it start to go, then
+      // eases back a touch.
+      if ((stage === "edge" || stage === "pause" || stage === "near") && shimmer.t >= at.held) { r.clearPath(0, 0); enter("recoil"); }
+      else if (stage === "study" && shimmer.t >= at.held + (at.gone - at.held) * U.linger) backOff(r);
       switch (stage) {
         case "glance":
           r.steer(dt);
           if (t >= glanceFor) enter("over");
           break;
         case "notice":
-          if (t >= U.stare) {
+          if (t >= stareFor) {
             const dx = p.x - spot.x, dy = p.y - spot.y, dz = p.z - spot.z, d = Math.hypot(dx, dy, dz), k = d > U.last / (1 - U.first) ? U.last / d : 1 - U.first;
             mid.x = spot.x + dx * k; mid.z = spot.z + dz * k; mid.y = Math.max(spot.y + U.rise, spot.y + dy * k);
-            go(r, mid.x, mid.y, mid.z, Math.max(U.speed[0], d * (1 - k) / U.quick), 0.5);
+            go(r, mid.x, mid.y, mid.z, between(U.speed[0]), 0.5);
             enter("edge");
           }
           break;
         case "edge":
-          if (r.steer(dt)) {
-            enter("pause");
-            if (!still.matches) r.flip();
-          }
+          if (r.steer(dt)) enter("pause");
           break;
         case "pause":
-          if (t >= U.pause) { go(r, spot.x, spot.y, spot.z, U.speed[1], 0.4); enter("near"); }
+          if (t >= pauseFor) { go(r, spot.x, spot.y, spot.z, between(U.speed[1]), 0.4); enter("near"); }
           break;
         case "near":
-          if (r.steer(dt)) enter("study");
+          if (r.steer(dt)) { shiftsLeft = 1 + Math.floor(Math.random() * U.shifts); shiftIn = between(U.shiftGap); enter("study"); }
+          break;
+        case "study":
+          // Looking it over: a little move round it now and then.
+          if (moving) { if (r.steer(dt)) { moving = false; shiftIn = between(U.shiftGap); } }
+          else if (shiftsLeft > 0 && (shiftIn -= dt) <= 0) {
+            shiftsLeft--;
+            const d = Math.hypot(p.x - at.x, p.z - at.z), a = Math.atan2(p.x - at.x, p.z - at.z) + (Math.random() < 0.5 ? -1 : 1) * between(U.shift);
+            const x = at.x + Math.sin(a) * d, y = p.y + (Math.random() * 2 - 1) * U.bob, z = at.z + Math.cos(a) * d;
+            if (open(x, y, z)) { go(r, x, y, z, U.shiftSpeed, 0.3); moving = true; } else shiftIn = between(U.shiftGap);
+          }
           break;
         case "recoil":
           r.steer(dt);
@@ -361,8 +380,8 @@
           if (t >= (cut ? U.cut : U.done)) enter("over");
           break;
       }
-      // Her rings spinning up faster and faster as she comes, winding down as it goes.
-      const spin = U.whirl[stage] * (still.matches ? 0.25 : 1);
+      // Her rings turning a little quicker as she looks it over, winding down as it goes.
+      const spin = U.whirl[stage];
       r.whirl += (spin - r.whirl) * Math.min(1, dt * (spin > r.whirl ? U.up : U.down));
     };
     // Given back: her rings back to their own pace, ready for the next.
