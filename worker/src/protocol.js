@@ -281,10 +281,14 @@ export const sanitizeChat = (text) => globalThis.BL.chatPolicy.error(text) ? "" 
 
 const finite = (v) => typeof v === "number" && Number.isFinite(v);
 const round = (v) => Math.round(v * 1000) / 1000;
-// pose.v: centiradian head/aim angles, ownership/action flags and millisecond animation phases.
-export const VISUAL_LIMITS = [157, 157, 314, 8191, 240, 1200, 560, 440, 320, 1240, 100, 750, 1300, 280, 2000, 31, 31];
-export const validVisual = (v) => Array.isArray(v) && v.length === VISUAL_LIMITS.length
-  && v.every((n, i) => Number.isInteger(n) && n >= (i < 3 ? -VISUAL_LIMITS[i] : 0) && n <= VISUAL_LIMITS[i]);
+// pose.v: centiradian head/aim angles, ownership/action flags and millisecond animation phases, then the body's own
+// pose (its gait, the peek's lean, a close walk's step sideways and back, the shoulder's turn, how far onto a ladder),
+// each between its low and high. A page from before the body's pose sends the first VISUAL_BODY numbers alone.
+export const VISUAL_LOWS = [-157, -157, -314, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -50, -100, 0, -157, 0];
+export const VISUAL_LIMITS = [157, 157, 314, 8191, 240, 1200, 560, 440, 320, 1240, 100, 750, 1300, 280, 2000, 31, 31, 2628, 50, 100, 1, 157, 100];
+export const VISUAL_BODY = 17;
+export const validVisual = (v) => Array.isArray(v) && (v.length === VISUAL_LIMITS.length || v.length === VISUAL_BODY)
+  && v.every((n, i) => Number.isInteger(n) && n >= VISUAL_LOWS[i] && n <= VISUAL_LIMITS[i]);
 
 // pose.r: no rest (0), or seat, phase (entry/rest/exit), progress byte and the body's
 // signed quaternion xyz at 1/1000; nonnegative w is reconstructed by the renderer.

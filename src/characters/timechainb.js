@@ -4,25 +4,17 @@
   const { makeVox, voxelGeometry } = BL.models;
   const { createNode, addChild } = BL.scene;
   const { hexToRgb } = BL.math;
-  // Under the modelled look the staff is held and treated as MrHodlX's hockey stick is: stood beside him
-  // at rest, carried head first, slung flat on the back (look.stoneAxe).
   const AXE = BL.models.STYLE === "R";
   const staffVoxels = (rand) => {
     const v = makeVox();
     const woodJ = () => rand() < 0.2 ? 1 : 0;
     v.fill(0, 0, -2, 15, 0, 0, woodJ);
     for (const y of [3, 8, 12]) v.set(rand() < 0.5 ? -1 : 1, y, 0, 1);
-    // The crook curls ahead of him. The modelled look holds the staff as an axe is held, turned a quarter about its
-    // length, so there the crook is drawn out to -x, which that turn brings ahead.
     for (const [y, z] of [[16, 0], [17, 1], [17, 2], [16, 3], [15, 3]]) v.set(AXE ? -z : 0, y, AXE ? 0 : z, woodJ());
     return v;
   };
   const LION_PALETTE = [hexToRgb("#d4a04a"), hexToRgb("#bd8b38"), hexToRgb("#a5602a"), hexToRgb("#7d4520"), hexToRgb("#ecc98a"), hexToRgb("#141414"),
     hexToRgb("#f2b33d"), hexToRgb("#3b241a")];
-  // The lion cub walks on all four legs at timechainb's heel and flies beside him with its own little jetpack, as DSB
-  // Land's dogs do: it is his pet (`parts.dog`), so the crew's pet code moves it and swings its legs in the dogs' gait
-  // (crew.js's `QUAD_GAIT`). Its body (torso, head, mane and muzzle) stands with its origin on the ground under its middle
-  // and faces +z, in cells LION_U across; each leg hangs from its hip at its node and the tail grows back from its root.
   const LION_U = 0.04, L = { fur: 0, furDk: 1, mane: 2, maneDk: 3, cream: 4, black: 5, amber: 6, nose: 7 };
   const lionBody = (rand) => {
     const v = makeVox();
@@ -30,8 +22,6 @@
     const mane = () => rand() < 0.35 ? L.maneDk : L.mane;
     v.fill(-4, 3, 6, 12, -7, 7, fur);
     v.fill(-2, 1, 6, 6, -5, 5, L.cream);
-    // A broad, square head under a full mane that frames the face: round the back of the head, out past the cheeks and
-    // over the brow beside it, and down under the chin.
     v.fill(-4, 3, 10, 16, 6, 11, fur);
     v.fill(-7, 6, 6, 20, 4, 10, (x, y, z) => {
       const dx = (x + 0.5) / 7.2, dy = (y - 13) / 7.2, ring = dx * dx + dy * dy <= 1;
@@ -40,7 +30,6 @@
       return face && z > 7 ? null : mane();
     });
     v.fill(-3, 2, 7, 9, 9, 11, mane);
-    // The face: a heavy brow over amber eyes, a broad flat muzzle with a wide nose narrowing to a split lip, a cream chin.
     v.fill(-3, 2, 15, 15, 11, 11, L.furDk);
     for (const [x, pupil] of [[-3, -2], [2, 1]]) { v.set(x, 14, 11, L.amber); v.set(pupil, 14, 11, L.black); }
     v.fill(-3, 2, 10, 12, 12, 12, L.cream);
@@ -51,7 +40,6 @@
     v.set(1, 10, 12, L.nose);
     for (const x of [-3, 2]) v.set(x, 11, 12, L.furDk);
     v.fill(-2, 1, 9, 9, 11, 12, L.cream);
-    // Small round ears just showing over the mane, dark inside.
     for (const x of [-5, 3]) {
       v.fill(x, x + 1, 19, 20, 9, 10, fur);
       v.fill(x, x + 1, 19, 19, 10, 10, L.maneDk);
@@ -80,21 +68,18 @@
     });
     node.tail = createNode({ position: { x: 0, y: 11 * U, z: -7.5 * U }, geometry: voxelGeometry(lionTail(), { unit: U, palette: LION_PALETTE, origin: { x: -U / 2, y: -U / 2, z: -U / 2 } }) });
     addChild(node, node.tail);
-    node.packAt = { y: 13 * U, z: -1 * U, scale: 0.32 };
+    node.packAt = { y: 13 * U, z: -5.5 * U, scale: 0.56 };
     return node;
   };
   BL.characters.add({
     handle: "timechainb",
     joined: 1788800921,
     lastCommit: 1788171200,
-    look: { portrait: { min: [-1, -2, 0], max: [7, 11, 8] }, stoneAxe: AXE, hairless: true, hatY: 12, skin: "#b8703c", hair: "#33200f" },
+    look: { portrait: { min: [-1, -2, 0], max: [7, 11, 8] }, stoneAxe: AXE, hairless: true, skin: "#b8703c", hair: "#33200f" },
     dress: {
-      // The staff stands upright in the grip.
       club: (k) => AXE ? { voxels: staffVoxels(k.rand), rest: { x: 0.24, z: 0 }, carry: { x: 0.95, z: 0 } } : { voxels: staffVoxels(k.rand), rest: { x: 0.2, z: 0 } },
-      // The Anunnaki: a gold banded cap over the brow, hair curling down the back and sides, a full beard to the chest
       crown(k, v) {
         const P = k.P, gold = k.color("#d4a83a"), goldDk = k.color("#9c7a22");
-        // The curls in their own copy of the hair's two colours, so the head's ragged-hair pass leaves them whole.
         const hair = k.color("#33200f"), hairDk = k.color("#2b1b0d");
         const curl = (x, y, z) => (x + y + z) % 2 ? hairDk : hair;
         v.fill(-1, 7, -4, 5, -2, -1, curl);
@@ -110,7 +95,6 @@
         v.fill(1, 5, 10, 10, 1, 4, goldDk);
         v.fill(2, 4, 11, 11, 2, 3, gold);
       },
-      // His lion cub at his heel, on its four legs (see lionCub)
       extras(k) {
         k.parts.dog = lionCub(k);
         addChild(k.root, k.parts.dog);

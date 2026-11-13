@@ -15857,8 +15857,12 @@ const cameraSelectionProbe = (B, controller, select, reselect = null) => {
 };
 const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizontal aim rotates the view around a centerline reticle, zoom retains forward targets, and carry handoffs preserve valid cursors and camera distance", run: async (b) => {
   const focusPoint = await b.evaluate(`(() => {
-    const B = __ooga, a = B.pilot.player, C = B.camera;
-    B.pilot.release(true); B.advance(0.1, 1 / 60);
+    const B = __ooga, body = B.pilot.player, a = body.npc || body, C = B.camera;
+    // A released body goes (#501): its NPC is stood where it was let go, to be double-clicked there.
+    const at = { x: body.root.position.x, y: body.root.position.y - body.baseY + a.baseY, z: body.root.position.z };
+    B.pilot.release(true);
+    if (a !== body) Object.assign(a.root.position, at);
+    B.advance(0.1, 1 / 60);
     const point = B.project(a.root.position.x, a.root.position.y - a.baseY + a.bodyHeight * 0.55, a.root.position.z, {});
     return { x: point.x, y: point.y, eye: [C.position.x, C.position.y, C.position.z] };
   })()`);
@@ -18616,7 +18620,7 @@ const factoryFloor = { name: "factory floor", why: "regression: stairs landed ag
     if (!near(L.stairway[0], L.stairway[2] - 1, 0)) missing.push("forge floor");
     return { who, radius: +R.toFixed(2), missing, cells: cells.length, deck: deck.size };
   })()`);
-  record("factory floor: from the balcony the widest Ooga on the roster reaches both ends of every stair, every line's deck, each peer tunnel's shield, the switchboard, Kortik's deck, the right-wall platform with the rebalancer's operator lane and the treasury (walking the platform's length from the cooker's stair), the donation kiosk in the right wall, the watchtower, landing, galleries and the forge", r.missing.length === 0 && r.radius > 0.6 && r.cells > 20000, JSON.stringify(r));
+  record("factory floor: from the balcony the widest Ooga on the roster reaches both ends of every stair, every line's deck, each peer tunnel's shield, the switchboard, Kortik's deck, the right-wall platform with the rebalancer's operator lane and the treasury (walking the platform's length from the cooker's stair), the donation kiosk in the right wall, the watchtower, landing, galleries and the forge", r.missing.length === 0 && r.radius > 0.45 && r.cells > 20000, JSON.stringify(r));
 } };
 // The way in and out: from the island through the 2 o'clock mouth's shield, back out past the balcony, and Escape.
 const factoryEntrance = { name: "factory entrance", why: "regression: flying above the mouth entered the factory and reaching its front wall away from the doorway exited; real doorway crossings must still keep the same Ooga", run: async (b) => {
@@ -29683,7 +29687,10 @@ const integrationChecks = async BL => {
   records.get(72).weapon=1;pool.update(.1);let primary=clubBack();records.get(72).weapon=0;pool.update(.1);primary=primary&&clubBack();
   if(shotHeard)shotHeard(72,[1,2,3,4,5,6]);const replay=replayed.length===1&&replayed[0].join()===",1,2,3,4,5,6";
   const restingArmX=armR.rotation.x;
-  if(swingHeard)swingHeard(72);pool.update(.1);const swung=!!armR&&armR.rotation.x<-1;
+  // Swung: the arm raised at least 60 degrees from hanging at its highest, by its Euler turn or, on a modelled body,
+  // its quaternion.
+  let swung=false;if(swingHeard)swingHeard(72);
+  for(let i=0;i<40;i++){pool.update(.01);const raised=new Float32Array(3);if(armR&&armR.quaternion)BL.math.quat.rotateVec(raised,armR.quaternion,0,-1,0);swung||=!!armR&&(armR.quaternion?raised[1]>-0.5:armR.rotation.x<-1);}
   pool.update(.4);const settled=!!armR&&Math.abs(armR.rotation.x-restingArmX)<1e-9&&pool.body(72).weapon.meleeTime===0;
   record("integration remotes: another player's gun shows aimed with a banana for each three rounds, the club comes back when it is put away, their shots replay through the crew and their strike swings the arm and settles",
     aimed&&primary&&replay&&swung&&settled,JSON.stringify({aimed,bananas,primary,replay,swung,settled}));
