@@ -353,7 +353,7 @@
     // for a moment and place again, s; how long the hall is still held for its other events after it, s; how loud it is;
     // and how long it has been due without a place, s.
     let state = "wait", t = 0, fadeAt = -1, due = auto ? (gap !== null ? gap : between(GAP.first)) : Infinity;
-    let calm = 0, look = 0, after = 0, loud = 0, waited = 0, overdue = 0;
+    let calm = 0, look = 0, after = 0, loud = 0, waited = 0, overdue = 0, shows = 0;
     const sphere = new Float32Array(4);
     for (const node of nodes) node.cullSphere = sphere;
     // The bars: whether each shows, how long until it next changes, s, and, while it shows, its height (model units),
@@ -455,7 +455,7 @@
       at.mirror = Math.random() < 0.5 ? -1 : 1; at.slow = Math.random() * Math.PI * 2;
       const form = between(SHOW.form), dissolve = between(SHOW.dissolve), hold = clamp(between(SHOW.total) - form - dissolve, SHOW.hold[0], SHOW.hold[1]);
       at.formed = form; at.held = form + hold; at.gone = at.held + dissolve; at.end = at.gone + between(RESIDUE.life);
-      state = "show"; t = 0; fadeAt = -1; loud = 0; waited = 0; overdue = 0;
+      state = "show"; t = 0; fadeAt = -1; loud = 0; waited = 0; overdue = 0; shows++;
       // Every bar away to start with, each coming at its own moment once it is forming.
       for (let b = 0; b < TEARS.n; b++) { tear.on[b] = 0; tear.next[b] = form * 0.6 + between(TEARS.off); }
       show(true);
@@ -711,6 +711,9 @@
     };
     return {
       update, liveGeometry, dispose, debug,
+      // What the hangar may read of it: whether it shows (`state`), its clock, s, where it stands and its timeline (`at`,
+      // not to be changed), whether it is clearing away early, how many bars tear across it now, and how many have come.
+      at, get state() { return state; }, get t() { return t; }, get fading() { return fadeAt >= 0; }, get bands() { return bands; }, get shows() { return shows; },
       // Whether the events that come by themselves should wait: while it shows, for AFTER s after, and for CLAIM s once
       // one is due.
       get holding() { return state !== "wait" || after > 0 || auto && due <= 0 && overdue < CLAIM; }
