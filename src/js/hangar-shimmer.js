@@ -15,7 +15,7 @@
 //
 // The first comes 30 to 60 s into a visit and each next 3 to 5 minutes after the last has gone (`GAP`), counted while
 // the hangar is up. When one is due it waits for a good moment and place: none of the hangar's other events for `CALM`
-// s (`busy`), the visitor's Ooga on foot, no dialog open, and a spot in good view (`pick`: on
+// s (`busy`), the visitor's Ooga on foot, no dialog open, the view not turning fast, and a spot in good view (`pick`: on
 // screen, clear of the buttons and sticks on a coarse pointer, not behind the visitor's own Ooga, in sight past walls,
 // boxes and the Jet, 7 to 18 m off, or 14 on a coarse pointer, and clear of the guide and anything that walks), looking
 // again every `LOOK` s, a few frames to a search, and further out and across, and less strictly, once it has looked for
@@ -107,8 +107,9 @@
   // toward its edge (falling over `edge` to `edgeLeast` as likely), less so further than `far[0]` m (falling to
   // `farLeast` as likely by `far[1]`), and `neon` as likely where the launch tunnel's mouth, bright with neon all the way
   // down, stands behind it; and away from the last `recent` it came to this page life (`least` as likely right where
-  // one came, back to as likely `apart` m off), so it comes somewhere new each time.
-  const CHOOSE = { aside: [0.04, 0.14], edge: [0.26, 0.38], edgeLeast: 0.45, far: [11, 18], farLeast: 0.45, neon: 0.3, recent: 4, apart: 8, least: 0.05 };
+  // one came, back to as likely `apart` m off), so it comes somewhere new each time. None begins while the view turns
+  // faster than `turn` rad/s, which would soon take it out of view.
+  const CHOOSE = { aside: [0.04, 0.14], edge: [0.26, 0.38], edgeLeast: 0.45, far: [11, 18], farLeast: 0.45, neon: 0.3, recent: 4, apart: 8, least: 0.05, turn: 0.6 };
   // How many spots the search for a place looks at a frame.
   const SCAN = 120;
   function smooth(t) { return t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t); }
@@ -629,9 +630,18 @@
       loud = shown;
     };
 
+    // Which way the view faces on the ground, rad, and how fast it turns, rad/s, eased.
+    let facing = NaN, turning = 0;
     const update = (dt, elapsed) => {
       if (after > 0) after -= dt;
       calm = busy() ? 0 : calm + dt;
+      const heading = Math.atan2(camera.target.x - camera.position.x, camera.target.z - camera.position.z);
+      if (facing === facing && dt > 0) {
+        let turn = heading - facing;
+        turn -= Math.round(turn / (Math.PI * 2)) * Math.PI * 2;
+        turning += (Math.abs(turn) / dt - turning) * Math.min(1, dt * 8);
+      }
+      facing = heading;
       if (state === "wait") {
         due -= dt;
         if (due <= 0) overdue += dt;
@@ -642,7 +652,7 @@
         if (cursor < 0) {
           if ((look -= dt) > 0) return;
           look = LOOK;
-          if (document.querySelector("dialog[open]")) return;
+          if (document.querySelector("dialog[open]") || turning > CHOOSE.turn) return;
           cursor = 0; n = 0; total = 0; wideSearch = waited > VIEW.relax;
         }
         const who = guide(), stop = Math.min(spots.length, cursor + SCAN * 2);
@@ -652,7 +662,7 @@
         cursor = -1;
         // The one chosen, checked again as the view stands now, which may have moved during the search.
         const i = chosen();
-        if (i >= 0 && fits(i, wideSearch, me, who)) begin(i);
+        if (i >= 0 && turning <= CHOOSE.turn && fits(i, wideSearch, me, who)) begin(i);
         return;
       }
       if (calm === 0) abort(false);
