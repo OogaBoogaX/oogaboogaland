@@ -1,4 +1,5 @@
 import "../../src/js/studio-catalogue.js";
+import { listed } from "./allowlist.js";
 // Studio permissions are independent of the NPC simulation host. Only approved account IDs host.
 export const STUDIO_ZONE = "dsb-studio";
 // The reviewed catalogue is shared with the classic-script client; callers cannot supply URLs.
@@ -6,14 +7,7 @@ export const validateStudioCatalogue = globalThis.BL.studioMedia.validate;
 export const STUDIO_SOURCES = validateStudioCatalogue(globalThis.BL && globalThis.BL.studioMedia && globalThis.BL.studioMedia.sources);
 export const studioSource = (id) => STUDIO_SOURCES.find(row => row.id === id) || null;
 export const studioState = (now = Date.now()) => ({ hostId: 0, mode: "suspended", revision: 0, playbackRevision: 0, epoch: 0, source: STUDIO_SOURCES.length ? STUDIO_SOURCES[0].id : null, playing: false, position: 0, at: now, volume: .65, hands: [], invited: [] });
-export const studioHostAllowed = (env, id) => {
-  if (!Number.isSafeInteger(id) || id <= 0) return false;
-  const configured = env && env.STUDIO_HOST_IDS;
-  if (typeof configured !== "string" || !configured.trim()) return false;
-  const values = configured.split(",").map(value => value.trim());
-  if (values.some(value => !/^[1-9][0-9]*$/.test(value) || !Number.isSafeInteger(Number(value)))) return false;
-  return values.some(value => Number(value) === id);
-};
+export const studioHostAllowed = (env, id) => listed(env && env.STUDIO_HOST_IDS, id);
 export const studioPosition = (s, now) => Math.min((studioSource(s.source) || {}).duration || 0, Math.max(0, s.position + (s.playing ? (now - s.at) / 1000 : 0)));
 export const studioCanSpeak = (s, p) => !!s && p.zone === STUDIO_ZONE && !p.studioRevoked && !(s.restrictedIds || []).includes(p.id) && (p.id === s.hostId || (!!p.body && Number.isInteger(p.studioSeat) && (s.mode === "discussion" || (s.mode === "qa" && (s.invited || []).includes(p.id)))));
 // Keep these anchors in the same order as dsb-studio.js: audience, galleries, host, guests.

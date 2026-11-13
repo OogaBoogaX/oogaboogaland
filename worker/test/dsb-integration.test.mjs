@@ -28,6 +28,9 @@ const roomClass = (extra = {}) => {
     .replace("export class Room", "class Room") + "\nglobalThis.Room = Room;";
   const context = { ...protocol, ...studio, getPlayer, DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }, WebSocketRequestResponsePair: class {}, sfuClient, CAST_ROWS: [{ handle: "YellowBrokeIt", github_login: "YellowBrokeIt" }], Date, Map, Set, Response, Promise, setTimeout, clearTimeout, ...extra };
   runInNewContext(source, context);
+  // Rooms built here without the constructor (Object.create) take the inspector's reporter switched off, as the
+  // constructor gives one without INSPECTOR_IDS.
+  context.Room.prototype.inspect = protocol.inspectReporter(null, {}, "Room", () => "", () => null);
   return context.Room;
 };
 test("room broadcasts DSB zone changes, persists them and keeps ownership enforcement", () => {

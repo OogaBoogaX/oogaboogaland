@@ -17,7 +17,7 @@
     "html_handling": "drop-trailing-slash",
     "not_found_handling": "404-page",
     // Only these paths run the Worker (worker/src/index.js); every other path is served straight from _site.
-    "run_worker_first": ["/auth/*", "/api/*", "/poker/*", "/room", "/game/*", "/donations/*"]
+    "run_worker_first": ["/auth/*", "/api/*", "/poker/*", "/room", "/game/*", "/donations/*", "/inspect"]
   },
   "vars": {
     // Optional poker: set POKER_SERVICE_URL to the HTTPS service origin and POKER_SERVICE_TOKEN as a secret.
@@ -34,6 +34,8 @@
     // Secrets, never here: `wrangler secret put GITHUB_CLIENT_SECRET --config wrangler.production.jsonc`, and REALTIME_SECRET.
     // Optional, for the games the Worker hosts: GAME_DEBUG_IDS, account ids, comma-separated, that may pause a hosted
     // game or start it past its first round (staging).
+    // Optional, for the Durable Object inspector at /inspect (worker/src/inspect.js): INSPECTOR_IDS, account ids,
+    // comma-separated, that may open it; unset, it is off and no object reports anything.
   },
   // Private production replay storage; public reads are served through the Worker.
   // See docs/cloud-hopper-replays.md for validation and bounded retention.

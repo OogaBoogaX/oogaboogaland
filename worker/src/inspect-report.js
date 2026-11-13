@@ -37,7 +37,8 @@ export const inspectReporter = (ctx, env, cls, nameOf, stateOf) => {
     if (!name) return;
     const now = Date.now(), detail = watched(now);
     const report = { cls, name, at: now, span: lastSent ? now - lastSent : 0, version, wake, state: stateOf(detail),
-      counters, peaks, events: queue.splice(0), dropped, failed };
+      // RPC refuses null-prototype dictionaries; keep those local and send plain value objects.
+      counters: { ...counters }, peaks: { ...peaks }, events: queue.splice(0), dropped, failed };
     counters = Object.create(null); peaks = Object.create(null);
     wake = null; dropped = 0; lastSent = now;
     ctx.waitUntil(env.INSPECTOR.getByName(INSPECTOR_NAME).report(report).then((answer) => {

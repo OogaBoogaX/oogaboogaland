@@ -108,16 +108,15 @@ export const sweep = (rows, now) => {
   return { stale, removed };
 };
 
-// The log's lines to drop: everything past LOG_KEEP and anything older than KEEP_MS. `events` is oldest first.
-export const pruneCount = (events, now) => {
-  let n = Math.max(0, events.length - LOG_KEEP);
-  while (n < events.length && events[n].at < now - KEEP_MS) n++;
-  return n;
+// Reports from different objects can arrive out of order. Expire every old line, not just a prefix.
+export const expiredEvents = (events, now) => {
+  const overflow = Math.max(0, events.length - LOG_KEEP);
+  return events.filter((e, i) => i < overflow || e.at <= now - KEEP_MS);
 };
 
 export const nextAlarm = (rows, events, now) => {
   let next = Infinity;
   for (const row of rows) next = Math.min(next, deadline(row));
-  if (events.length) next = Math.min(next, events[0].at + KEEP_MS);
+  for (const event of events) next = Math.min(next, event.at + KEEP_MS);
   return finite(next) ? Math.max(next, now) : null;
 };

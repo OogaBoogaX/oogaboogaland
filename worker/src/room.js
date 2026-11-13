@@ -26,6 +26,9 @@
 // attachment, so a woken room still shows it, and goes to everyone on a change. One bucket a record limits both.
 // Voice links: each account's asks live in the room's storage, so a link outlives reconnects, sleep and deploys (see
 // Voice links in protocol.js). Nothing runs for them while idle.
+// The inspector (inspect-report.js): while INSPECTOR_IDS names an account, the room reports joins, drops with what
+// caused them, zone and host changes and voice failures as they happen, and its state with the time since its last
+// report, riding snapshots and the sweep; it adds no timer. Off, every call returns at once.
 
 import { DurableObject } from "cloudflare:workers";
 import {
@@ -38,7 +41,7 @@ import {
   PM_FEATURE, PM_HZ, PM_BURST, PM_INVITE_HZ, PM_INVITE_BURST, PM_CONTROL_HZ, PM_CONTROL_BURST, PM_INVITES, PM_BLOCKS, PM_ACCOUNT_KEEP,
   LINK_FEATURE, LINK_HZ, LINK_BURST, LINK_WANTS, LINK_ACCOUNTS, voiceLinked, restoreLinks, storedLinks, linkView, inVoice,
   chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
-  BLEND, BLEND_HZ, seenTogether,
+  BLEND, BLEND_HZ, seenTogether, inspectReporter, INSPECT_FEATURE,
 } from "./protocol.js";
 import { sha256Hex } from "./crypto.js";
 import { getPlayer } from "./db.js";
@@ -52,6 +55,8 @@ const CAST = castIndex(CAST_ROWS);
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    this.inspect = inspectReporter(ctx, env, "Room", () => ctx.id.name, (detail) => this.inspectState(detail));
+    this.flushDue = 0;
     this.players = new Map();
     this.highscoreRevisions = new Map();
     this.studio = studioState();
@@ -65,7 +70,12 @@ export class Room extends DurableObject {
     this.spawnSlot = 0;
     this.dirty = false;
     this.flushTimer = 0;
-    this.sfu = sfuClient(env);
+    this.sfu = sfuClient(env, (ms, failed) => {
+      this.inspect.count("sfu");
+      this.inspect.count("sfuMs", ms);
+      this.inspect.peak("sfuMax", ms);
+      if (failed) this.inspect.count("sfuFail");
+    });
     this.hostId = 0;
     this.followers = 0;
     this.lastNpc = null;
@@ -149,6 +159,7 @@ export class Room extends DurableObject {
     this.restoreDoor();
     this.hostId = electHost(this.players.values());
     this.followers = npcFollowers(this.players.values(), this.hostId);
+    this.inspect.woke(this.players.size);
   }
 
   record(ws, a) {
@@ -187,7 +198,10 @@ export class Room extends DurableObject {
 
   broadcast(msg, except = null) {
     const text = JSON.stringify(msg);
-    for (const p of this.players.values()) if (p.ws !== except) this.send(p.ws, text);
+    let sent = 0;
+    for (const p of this.players.values()) if (p.ws !== except) { this.send(p.ws, text); sent++; }
+    this.inspect.count("out", sent);
+    this.inspect.count("outBytes", sent * text.length);
   }
 
   broadcastZone(zone, msg) {
@@ -459,6 +473,7 @@ export class Room extends DurableObject {
     const older = this.players.get(who.id);
     if (older) this.evict(older, "replaced");
     if (this.players.size >= MAX_PLAYERS) {
+      this.inspect.event("full", who);
       this.send(server, { t: "kick", reason: "full" });
       server.close(CLOSE_KICK, "full");
       return new Response(null, { status: 101, webSocket: client });
@@ -473,10 +488,11 @@ export class Room extends DurableObject {
     const own = ownedBody(CAST, p.login, p.contributor, p.id);
     if (own) for (const o of this.players.values()) if (o.body && bodyName(o.body).toLowerCase() === own) this.release(o, "owner-here");
     this.players.set(p.id, p);
+    if (this.inspect.on) this.inspect.event("join", p, { replaced: !!older });
 
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE] });
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE, ...(this.inspect.on ? [INSPECT_FEATURE] : [])] });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
     this.send(server, { t: "chat-history", messages: this.chat.list() });
     this.sendCabinets(server);
@@ -498,6 +514,8 @@ export class Room extends DurableObject {
   webSocketMessage(ws, message) {
     const p = this.byWs(ws);
     if (!p) return;
+    this.inspect.count("in");
+    this.inspect.count("inBytes", typeof message === "string" ? message.length : message.byteLength);
     if (!ownedBody(CAST, p.login, p.contributor, p.id)) { this.evict(p, "revoked"); return; }
     if (typeof message !== "string") {
       if (message instanceof ArrayBuffer && message.byteLength >= 4 && new DataView(message).getUint32(0, true) === BLOCK.MAGIC) block.frame(this, p, message);
@@ -507,12 +525,17 @@ export class Room extends DurableObject {
     }
     const msg = parseClientMessage(typeof message === "string" ? message : "");
     if (msg === false) {
-      this.drop(p, "protocol");
+      this.drop(p, "protocol", { code: CLOSE_PROTOCOL });
       ws.close(CLOSE_PROTOCOL, "unreadable message");
       return;
     }
     p.seenAt = Date.now();
     if (!msg) return;
+    // Once a connection, after a rejoin: why the page's last socket ended, as the page saw it (net.js).
+    if (msg.t === "back") {
+      if (!p.backSaid) { p.backSaid = true; this.inspect.event("back", p, { why: msg.why, code: msg.code, clean: msg.clean, down: msg.down }); }
+      return;
+    }
     if (msg.t === "cabinet") { this.cabinetMessage(p, msg); return; }
     // While playing, the room owns the floor pose and body, regardless of game-scene reports.
     if (p.cabinet && ["pose", "zone", "body", "blend", "hp", "shot", "swing", "hockey", "bf"].includes(msg.t)) return;
@@ -548,6 +571,7 @@ export class Room extends DurableObject {
       // A page hidden in a Block Frenzy match hands its hosting on; shown again, it comes back a guest (block.js).
       if (msg.on === p.visible) return;
       p.visible = msg.on;
+      this.inspect.event("visible", p, { visible: msg.on });
       block.visibility(this, p);
     } else if (msg.t === "zone") {
       if (msg.name === p.zone) return;
@@ -559,6 +583,7 @@ export class Room extends DurableObject {
       if (msg.name !== "arcade.hall") hockey.leave(this, p.id);
       if (msg.name !== BLOCK.ZONE) block.leave(this, p.id);
       p.zone = msg.name;
+      this.inspect.event("zone", p, { from, to: p.zone });
       this.roomZoneChanged(p, from);
       hockey.arrive(this, p);
       block.arrive(this, p);
@@ -685,14 +710,14 @@ export class Room extends DurableObject {
   }
 
   // The prototype's note stands: on this compatibility date close handlers must not call ws.close().
-  webSocketClose(ws) {
+  webSocketClose(ws, code, reason, wasClean) {
     const p = this.byWs(ws);
-    if (p) this.drop(p, "closed");
+    if (p) this.drop(p, "closed", { code, said: reason, clean: wasClean });
   }
 
-  webSocketError(ws) {
+  webSocketError(ws, error) {
     const p = this.byWs(ws);
-    if (p) this.drop(p, "error");
+    if (p) this.drop(p, "error", { error: String((error && error.message) || error || "") });
   }
 
   sendCabinets(ws = null) {
@@ -733,8 +758,10 @@ export class Room extends DurableObject {
     reply(null);
   }
 
-  drop(p, reason) {
+  // `detail`: what the close said, for the inspector's line (a close code, its reason, whether it was clean).
+  drop(p, reason, detail = null) {
     if (this.players.get(p.id) !== p) return;
+    if (this.inspect.on) this.inspect.event("leave", p, { reason, ...detail, zone: p.zone, on: Date.now() - p.joinedAt, heard: Date.now() - this.heardAt(p), voice: inVoice(p) });
     this.releaseCabinet(p);
     hockey.leave(this, p.id);
     block.leave(this, p.id);
@@ -777,7 +804,7 @@ export class Room extends DurableObject {
 
   // An explicit kick before the close: a server-initiated close alone can leave the client in CLOSING.
   evict(p, reason) {
-    this.drop(p, reason);
+    this.drop(p, reason, { code: CLOSE_KICK });
     this.send(p.ws, { t: "kick", reason });
     try {
       p.ws.serializeAttachment(null);
@@ -791,15 +818,20 @@ export class Room extends DurableObject {
   // room can hibernate between bursts (a running interval would keep it awake, and billed, for good).
   scheduleFlush() {
     if (this.flushTimer) return;
+    this.flushDue = Date.now() + 1000 / TICK_HZ;
     this.flushTimer = setTimeout(() => {
       this.flushTimer = 0;
+      // How late the timer fired: the room's one sign of being too busy to keep its own pace.
+      this.inspect.peak("late", Date.now() - this.flushDue);
       this.snapshot();
+      this.inspect.tick();
     }, 1000 / TICK_HZ);
   }
 
   snapshot() {
     if (!this.dirty) return;
     this.dirty = false;
+    this.inspect.count("snapshots");
     const ps = [], gs = [], js = [], weapons = [], visuals = [], rests = [];
     for (const p of this.players.values()) {
       ps.push(p.id, p.x, p.y, p.z, p.yaw);
@@ -1039,6 +1071,7 @@ export class Room extends DurableObject {
     const id = electHost(this.players.values(), this.hostId);
     const followers = npcFollowers(this.players.values(), id);
     if (id === this.hostId && followers === this.followers) return;
+    if (this.inspect.on && id !== this.hostId) this.inspect.event("host", null, { login: id ? this.players.get(id).login : "", followers });
     this.hostId = id;
     this.followers = followers;
     if (!id) this.lastNpc = null;
@@ -1105,6 +1138,14 @@ export class Room extends DurableObject {
     if (!p) return new Response(JSON.stringify({ error: "join the island first" }), { status: 409, headers: { "content-type": "application/json" } });
     if (!p.connectionToken || request.headers.get("x-room-token") !== p.connectionToken) return new Response(JSON.stringify({ error: "connection replaced" }), { status: 409, headers: { "content-type": "application/json" } });
     const result = (p.voiceQueue || Promise.resolve()).catch(() => {}).then(() => this.voiceOperation(op, request, p));
+    if (this.inspect.on) result.then((res) => {
+      this.inspect.count("voiceOps");
+      // A failed SFU call has its own line (`voice-fail`); refusals by the room are counted and logged here.
+      if (res.status >= 400 && res.status !== 502) {
+        this.inspect.count("voiceRefused");
+        if (res.status !== 409) res.clone().json().then((data) => this.inspect.event("voice-refused", p, { op, status: res.status, error: String(data.error || "") })).catch(() => {});
+      }
+    }, () => {});
     p.voiceQueue = result.then(() => {}, () => {});
     // A browser timeout must not cancel the work that later requests are queued behind.
     this.background(p.voiceQueue);
@@ -1113,6 +1154,7 @@ export class Room extends DurableObject {
 
   async voiceOperation(op, request, expected) {
     const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
+    const started = Date.now();
     if (!this.sfu) return json({ error: "voice is not configured" }, 503);
     const p = this.players.get(Number(request.headers.get("x-player-id")));
     if (!p || p !== expected) return json({ error: "connection replaced" }, 409);
@@ -1251,6 +1293,8 @@ export class Room extends DurableObject {
         return json({ ok: true });
       }
       if (op === "leave") {
+        // A page restarting its voice says why (voice.js), so a dropped connection is told from someone leaving voice.
+        if (body.why === "failed" || body.why === "disconnected") this.inspect.event("voice-restart", p, { why: body.why });
         await this.clearVoice(p);
         p.ws.serializeAttachment(this.attachment(p));
         this.updateVoice();
@@ -1259,7 +1303,9 @@ export class Room extends DurableObject {
       }
       return json({ error: "unknown voice op" }, 404);
     } catch (err) {
-      // Return a bounded public error; SDP and upstream session identifiers never enter logs.
+      // Return a bounded public error; SDP and upstream session identifiers never enter logs, nor the inspector's line,
+      // which keeps the SFU's status and error code alone.
+      if (this.inspect.on) this.inspect.event("voice-fail", p, { op, status: Number.isInteger(err && err.status) ? err.status : 0, code: String((err && err.code) || (err && err.name) || ""), ms: Date.now() - started });
       return json({ error: "the voice service did not answer" }, 502);
     }
   }
@@ -1716,5 +1762,43 @@ export class Room extends DurableObject {
     }
     const next = this.nextAlarm();
     if (next !== null) await this.ctx.storage.setAlarm(next);
+    this.inspect.tick();
+  }
+
+  // When the room last heard from a player: a message, or a ping the runtime answered without waking it.
+  heardAt(p) {
+    const pinged = this.ctx.getWebSocketAutoResponseTimestamp(p.ws);
+    return Math.max(p.seenAt, pinged ? pinged.getTime() : 0);
+  }
+
+  // The room as the inspector shows it; `detail` adds a row per player while someone watches. No positions, chat,
+  // tokens, session descriptions or SFU ids.
+  inspectState(detail) {
+    const zones = {}, rows = detail ? [] : undefined;
+    let hub = 0, hidden = 0, driving = 0, speaking = 0, listening = 0, pulled = 0, maxPulled = 0, attachMax = 0;
+    for (const p of this.players.values()) {
+      zones[p.zone] = (zones[p.zone] || 0) + 1;
+      if (p.inHub) hub++;
+      if (!p.visible) hidden++;
+      if (p.body) driving++;
+      const hears = Object.keys(p.voice.mids || {}).length, voice = p.voice.track ? "speaking" : p.voice.sub ? "listening" : "off";
+      if (voice === "speaking") speaking++; else if (voice === "listening") listening++;
+      pulled += hears;
+      maxPulled = Math.max(maxPulled, hears);
+      if (!detail) continue;
+      attachMax = Math.max(attachMax, JSON.stringify(this.attachment(p)).length);
+      rows.push({ id: p.id, login: p.login, zone: p.zone, body: p.body || null, hub: p.inHub, visible: p.visible, since: p.joinedAt,
+        heard: this.heardAt(p), voice, muted: p.muted, pulled: hears, host: p.id === this.hostId });
+    }
+    const host = this.players.get(this.hostId);
+    return { status: this.players.size ? "live" : "empty", players: this.players.size, maxPlayers: MAX_PLAYERS, sockets: this.ctx.getWebSockets().length,
+      zones, hub, hidden, driving, host: host ? host.login : null, followers: this.followers, speaking, listening, pulled, maxPulled, pullCap: 64,
+      cleanup: this.cleanupJobs.length, cleanupCap: 64, doors: this.doorQueue.length + (this.doorActive ? 1 : 0), tickHz: TICK_HZ,
+      flushPending: !!this.flushTimer, alarmAt: this.nextAlarm(), attachMax: detail ? attachMax : undefined, rows };
+  }
+
+  // The Inspector, when a viewer connects: report now, with the rows.
+  inspectWatch(until) {
+    this.inspect.watch(until);
   }
 }
