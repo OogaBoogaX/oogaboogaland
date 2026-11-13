@@ -224,11 +224,13 @@
   // Lent while the faint shape in the hangar's air shows (`hangar-shimmer.js`), which unsettles her. A moment after it
   // has formed she notices it and jolts, her rings stopping dead, hopping back from it; she stares a beat, then edges in
   // at an angle, in two hesitant moves rising over what stands between, to hang at its side (so the view sees them both),
-  // facing it. There she studies it, trembling with her rings faltering out of step and her eye dim and narrow, a thin
-  // beam sweeping it head to chest and back that keeps cutting out, and flinching when a bar of light tears across it.
-  // As it comes apart she backs off and watches it go; once it has gone she shakes it off and, now and then, makes light
-  // of it, then goes back to work. Anything ending it early has her shake it off at once. Under reduced motion she still
-  // comes over and looks, without jolts, flinches, trembling or shaking it off. `shimmer` is the shape, read live, and
+  // facing it, her rings, stopped dead by the jolt, spinning up again as she comes and faster and faster, brighter and
+  // throwing motes off; halfway in, pausing, she flips over backwards in the air. There she studies it, trembling with her eye
+  // dim and narrow, a thin beam sweeping it head to chest and back that keeps cutting out, and flinching when a bar of
+  // light tears across it, once more flipping over at one. As it comes apart her rings wind down and she backs off and
+  // watches it go; once it has gone she shakes it off and, now and then, makes light of it, then goes back to work.
+  // Anything ending it early has her shake it off at once. Under reduced motion she still comes over and looks, her rings
+  // only a little quicker, without jolts, flips, flinches, trembling or shaking it off. `shimmer` is the shape, read live, and
   // `camera` the view, so she keeps to its side of it.
   const UNEASY = {
     // When she notices it, as a share of its forming, at random between; and none if less than `least` s of it would be
@@ -242,10 +244,14 @@
     // she hangs (or `first` of the way when that is nearer), on the line from where she came or `rise` m over where she
     // hangs if that is higher; the pause between them, s; and the last, hesitant, at `speed[1]` m/s, her beam already on
     // it.
-    quick: 1.1, last: 2.5, first: 0.55, rise: 0.6, speed: [2.6, 1.4], pause: 0.5,
+    quick: 1.1, last: 2.5, first: 0.55, rise: 0.6, speed: [2.6, 1.4], pause: 1.1,
     // Her beam: from `scan[0]` m up to `scan[1]` m and back each `period` s; on for `on` s and off for `off` s by turns,
     // at random between. She flinches at a bar tearing across it at most once every `flinch` s.
     scan: [3.1, 2], period: 3.4, on: [0.25, 0.7], off: [0.06, 0.2], flinch: 1.6,
+    // How fast her rings spin on top of their own in each stage, times, eased up slowly (`up`, the share a second) so
+    // they go faster and faster, and down quicker (`down`); and her flips over backwards: one as she pauses on her way in,
+    // then at a bar tearing across it, `flips` in all at most, `flipGap` s apart at least.
+    whirl: { jolt: 0, edge: 3, pause: 5, near: 8, study: 13, recoil: 2, shake: 0, over: 0 }, up: 0.8, down: 2, flips: 2, flipGap: 2.5,
     // Backing off as it comes apart: how far back and up, m, how fast, m/s.
     back: 1.1, lift: 0.4, backSpeed: 0.8,
     // After it has gone: how long before she shakes it off, s; how likely she says something then; and how long after
@@ -258,7 +264,7 @@
     // The rig she is lent as; her stage and how long she has been in it, s; the shape she is on (its `shows`) and the one
     // whose noticing is drawn, and when; her beam's countdown and whether it is on; her flinch's countdown; the bars
     // last frame; and whether this one ended early.
-    let rig = null, stage = "idle", t = 0, shape = -1, drawn = -1, noticeAt = 0, beamIn = 0, beamOn = false, flinchIn = 0, bars = 0, cut = false;
+    let rig = null, stage = "idle", t = 0, shape = -1, drawn = -1, noticeAt = 0, beamIn = 0, beamOn = false, flinchIn = 0, bars = 0, cut = false, flips = 0, flipAgo = 0;
     const between = ([a, b]) => a + Math.random() * (b - a);
     // Whether (x, y, z) is open air for her: inside the hall and nothing standing there up to near her height.
     const open = (x, y, z) => {
@@ -299,6 +305,7 @@
       const U = UNEASY, p = r.root.position, gone = shimmer.state !== "show" || shimmer.fading || shimmer.shows !== shape && rig === r;
       if (r !== rig) {
         rig = r; shape = shimmer.shows; cut = false; beamOn = false; beamIn = 0; flinchIn = U.flinch; bars = shimmer.bands;
+        r.whirl = 0; flips = 0; flipAgo = U.flipGap;
         // The jolt: back from it where she is, a little up.
         const dx = p.x - at.x, dz = p.z - at.z, l = Math.hypot(dx, dz) || 1;
         go(r, p.x + dx / l * U.hop, p.y + 0.15, p.z + dz / l * U.hop, U.hopSpeed, 0.3);
@@ -330,7 +337,10 @@
           break;
         case "edge":
           uneasy = 0.7;
-          if (r.steer(dt)) enter("pause");
+          if (r.steer(dt)) {
+            enter("pause");
+            if (!still.matches) { r.flip(); flips++; flipAgo = 0; }
+          }
           break;
         case "pause":
           uneasy = 0.8;
@@ -342,7 +352,7 @@
           if (stage === "near" && r.steer(dt)) enter("study");
           // The beam sweeping it, cutting out now and then.
           if ((beamIn -= dt) <= 0) { beamOn = !beamOn; beamIn = between(beamOn ? U.on : U.off); }
-          if (beamOn) {
+          if (beamOn && !r.flipping) {
             r.mode = 2; r.aim.x = at.x; r.aim.z = at.z;
             r.aim.y = (U.scan[0] + U.scan[1]) / 2 + (U.scan[0] - U.scan[1]) / 2 * Math.cos(shimmer.t * Math.PI * 2 / U.period);
           }
@@ -359,15 +369,22 @@
           if (t >= (cut ? U.cut : U.done)) enter("over");
           break;
       }
-      // A bar tearing across it makes her flinch, now and then.
-      flinchIn -= dt;
-      if (showing && stage !== "jolt" && shimmer.bands > bars && flinchIn <= 0 && !still.matches) { r.startle(); flinchIn = U.flinch; }
+      // A bar tearing across it makes her flinch now and then, or, while she studies it, flip over once more.
+      flinchIn -= dt; flipAgo += dt;
+      if (showing && stage !== "jolt" && shimmer.bands > bars && flinchIn <= 0 && !still.matches && !r.flipping) {
+        if (stage === "study" && flips < U.flips && flipAgo >= U.flipGap) { r.flip(); flips++; flipAgo = 0; }
+        else r.startle();
+        flinchIn = U.flinch;
+      }
       bars = shimmer.bands;
       if (still.matches) uneasy *= 0.3;
       r.uneasy += (uneasy - r.uneasy) * Math.min(1, dt * (uneasy > r.uneasy ? 4 : 1.5));
+      // Her rings spinning up faster and faster as she comes, winding down as it goes.
+      const spin = U.whirl[stage] * (still.matches ? 0.25 : 1);
+      r.whirl += (spin - r.whirl) * Math.min(1, dt * (spin > r.whirl ? U.up : U.down));
     };
     // Given back: her unease gone, ready for the next.
-    const reset = () => { if (rig) { rig.uneasy = 0; rig.steady = false; } rig = null; stage = "idle"; };
+    const reset = () => { if (rig) { rig.uneasy = 0; rig.whirl = 0; rig.steady = false; } rig = null; stage = "idle"; };
     return { due, drive, reset, get over() { return stage === "over"; }, get stage() { return stage; } };
   };
 
