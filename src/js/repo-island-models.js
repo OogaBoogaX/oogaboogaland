@@ -693,33 +693,53 @@
   });
 
   // ---- the totems ----------------------------------------------------------------------------------------------
-  // A totem's name board, lighter than the meadow's (`hubModels.postSign`) at the same size: a plank with a dark
-  // panel, the word's letters in the carved signs' alphabet as flat cream strips a hair proud of it, on two pegs.
+  // Name plaques spell the GitHub repository name, independent of the short rune word. Only names over 32
+  // characters use the catalog's readable project name. Wrap to two centered rows, preferably at a separator,
+  // and cap the plank's width so long names do not reach into neighbouring carvings.
   const CELL = 0.024, PEG = 0.18, PLANK = "#b27a43", PANEL = "#3a2a1c", INK = hexToRgb("#f6ecd2");
+  const UNDERSCORE = ["000", "000", "000", "000", "111"];
+  const boardGlyph = ch => ch === "M" ? BL.hubModels.CARVED_M : ch === "_" ? UNDERSCORE : BL.hubModels.SIGN_GLYPHS[ch];
+  const boardCells = text => [...text].reduce((sum, ch) => sum + (ch === " " ? 3 : boardGlyph(ch)[0].length) + 1, -1);
+  const boardLines = (repo) => {
+    const name = repo.repo.slice(repo.repo.indexOf("/") + 1), text = (name.length > 32 ? repo.name : name).toUpperCase();
+    if (boardCells(text) <= 43) return [text];
+    let split = 1, best = Infinity;
+    for (let i = 1; i < text.length; i++) {
+      const left = boardCells(text.slice(0, i).trim()), right = boardCells(text.slice(i).trim());
+      if (left < 0 || right < 0) continue;
+      const score = Math.max(left, right) + (/[-_. ]/.test(text[i - 1]) ? 0 : 8);
+      if (score < best) { best = score; split = i; }
+    }
+    return [text.slice(0, split).trim(), text.slice(split).trim()];
+  };
   const boards = models.scopedMap();
-  const nameBoard = (word) => {
-    let geo = boards.get(word);
+  const nameBoard = (repo) => {
+    let geo = boards.get(repo.repo);
     if (geo) return geo;
-    const glyphs = [...word].map((ch) => ch === "M" ? BL.hubModels.CARVED_M : BL.hubModels.SIGN_GLYPHS[ch]);
-    const cells = glyphs.reduce((sum, g) => sum + g[0].length + 1, -1), w = cells * CELL + 0.08, h = 5 * CELL + 0.07, y = PEG + h / 2 + 0.02;
+    const rows = boardLines(repo), widths = rows.map(boardCells), cells = Math.max(...widths), cell = Math.min(CELL, 1.25 / cells);
+    const height = 5 + (rows.length - 1) * 7, w = cells * cell + 0.08, h = height * cell + 0.07, y = PEG + h / 2 + 0.02;
     geo = merge(bevelBox({ w: w + 0.04, h: h + 0.03, d: 0.05, color: PLANK, offset: { y } }), box({ w, h, d: 0.056, color: PANEL, offset: { y } }),
       ...[-1, 1].map((side) => bevelBox({ w: 0.05, h: PEG + 0.12, d: 0.05, color: "#5c4425", offset: { x: side * (w / 2 - 0.03), y: (PEG + 0.12) / 2 - 0.06, z: -0.01 } })));
-    let x = -cells * CELL / 2;
-    for (const g of glyphs) {
-      g.forEach((row, r) => {
-        for (let c = 0; c < row.length;) {
-          if (row[c] !== "1") { c++; continue; }
-          let n = 1;
-          while (row[c + n] === "1") n++;
-          const x0 = x + c * CELL, top = y + 2.5 * CELL - r * CELL, z = 0.03, at = geo.verts.length / 3;
-          geo.verts.push(x0, top - CELL, z, x0 + n * CELL, top - CELL, z, x0 + n * CELL, top, z, x0, top, z);
-          geo.faces.push({ i: [at, at + 1, at + 2, at + 3], color: INK, emissive: 0.15 });
-          c += n;
-        }
-      });
-      x += (g[0].length + 1) * CELL;
-    }
-    boards.set(word, geo);
+    rows.forEach((text, line) => {
+      let x = -widths[line] * cell / 2;
+      for (const ch of text) {
+        if (ch === " ") { x += 4 * cell; continue; }
+        const g = boardGlyph(ch);
+        g.forEach((row, r) => {
+          for (let c = 0; c < row.length;) {
+            if (row[c] !== "1") { c++; continue; }
+            let n = 1;
+            while (row[c + n] === "1") n++;
+            const x0 = x + c * cell, top = y + height * cell / 2 - (line * 7 + r) * cell, z = 0.03, at = geo.verts.length / 3;
+            geo.verts.push(x0, top - cell, z, x0 + n * cell, top - cell, z, x0 + n * cell, top, z, x0, top, z);
+            geo.faces.push({ i: [at, at + 1, at + 2, at + 3], color: INK, emissive: 0.15 });
+            c += n;
+          }
+        });
+        x += (g[0].length + 1) * cell;
+      }
+    });
+    boards.set(repo.repo, geo);
     return geo;
   };
   // A chunk's carvings at one detail, a totem a step, placed in the island's frame and merged into one packed mesh. The
@@ -732,7 +752,7 @@
       for (const at of list) {
         const t = P.totems[at], L = t.L, c = Math.cos(t.ry), s = Math.sin(t.ry);
         const place = (g) => moved(turnedY(g, t.ry), t.x, 0, t.z);
-        const opts = tier === "near" ? { detail: TIERS.near, highlights: true, board: nameBoard(t.word), leanStones: true } : { detail: TIERS[tier], highlights: true, board: false };
+        const opts = tier === "near" ? { detail: TIERS.near, highlights: true, board: nameBoard(t), leanStones: true } : { detail: TIERS[tier], highlights: true, board: false };
         const geo = TM.carve(L, t.word, t.seed, opts);
         features.push(place(geo.featureHighlights));
         parts.push(place(geo));
@@ -773,5 +793,5 @@
     return result;
   };
 
-  BL.repoIslandModels = { ISLE, LIP, BRIDGE, PLAN, TIERS, CHUNK, STYLES, GROUND, CRYSTAL, crystals, gem, plan, designFor, pathAt, spot, rockSteps, bridge, signs, chunkSteps, without };
+  BL.repoIslandModels = { ISLE, LIP, BRIDGE, PLAN, TIERS, CHUNK, STYLES, GROUND, CRYSTAL, crystals, gem, plan, designFor, pathAt, spot, rockSteps, bridge, signs, boardLines, nameBoard, chunkSteps, without };
 })();
