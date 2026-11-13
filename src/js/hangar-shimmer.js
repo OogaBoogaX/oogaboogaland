@@ -10,11 +10,12 @@
 // its sparks drift apart, rising; then streaks of light stand where it stood,
 // shimmering, with motes drifting in them, a faint afterimage for 15 to 20 seconds (`RESIDUE`), before it is gone. It
 // faces the view, one way or mirrored. Now and then, with the visitor's own Ooga a few metres off, a few runs of its
-// line hold whole and still a moment and it brightens a touch (`NEAR`), then it goes on as before; it lasts no longer for
-// it. A very faint shimmer of sound comes with the figure, not the afterimage
-// (`hangarAudio.glint`). Under reduced motion nothing gathers, drifts or falls, its sparks glint slowly and no bars
-// tear across it. It lights nothing and leaves nothing behind; Tess, if she is near it, in sight of it and free to
-// notice it, comes over to watch it (`hangarGuide.unsettled`), and nobody else in the hangar reacts.
+// line hold whole and still a moment and it brightens a touch (`NEAR`), then it goes on as before; closer still, a few
+// fragments may catch for an instant and break apart again (`CATCH`). It lasts no longer for it. A very faint shimmer of
+// sound comes with the figure, not the afterimage (`hangarAudio.glint`). Under reduced motion nothing gathers, drifts or
+// falls, its sparks glint slowly and no bars tear across it. It lights nothing and leaves nothing behind; Tess, if she
+// is near it, in sight of it and free to notice it, comes over to watch it (`hangarGuide.unsettled`), and nobody else
+// in the hangar reacts.
 //
 // The first comes 30 to 60 s into a visit and each next 3 to 5 minutes after the last has gone (`GAP`), counted while
 // the hangar is up. When one is due it waits for a good moment and place: none of the hangar's other events for `CALM`
@@ -106,6 +107,12 @@
   // for it, and answers nobody else.
   const NEAR = { chance: 0.7, reach: [5, 6.5], delay: [0, 0.6], share: [0.25, 0.45], still: 0.7, bright: 0.18, calms: 0.5,
     rise: 0.7, hold: [0.8, 1.8], fall: 1.4, strength: [0.5, 1], times: 2, again: 0.6 };
+  // Closer still it may catch for an instant: only some showings (`chance`); once the Ooga comes within `close` m of it
+  // (drawn each showing between), after `delay` s, a share (`share`, drawn each showing) of its outline's runs hold
+  // whole, still and up to `bright` brighter for `hold` s, then break apart over `fall` s, dimming by up to `dim` and
+  // straying up to `scatter` times as far again as they do, now and then (`tears`) with a bar tearing across it as they
+  // do; once a showing at most, only while it holds.
+  const CATCH = { chance: 0.55, close: [2, 3], delay: [0.1, 0.5], share: [0.2, 0.4], hold: [0.15, 0.4], bright: 0.25, fall: 0.3, dim: 0.6, scatter: 4, tears: 0.5 };
   // Where a spot may be: from the camera, m (nearer on a coarse pointer, where the screen is small), and on screen
   // (within `x` either side of centre across, `top` to `bottom` down, as fractions, `coarseTop` to `coarseBottom` on a
   // coarse pointer, and not behind the visitor's own Ooga); how far from the visitor's Ooga, from the guide and from
@@ -380,8 +387,11 @@
     // Steadying near the visitor's Ooga (`NEAR`): whether this showing may, how near, which share of its runs, how
     // strongly and its seed for picking them, drawn as it begins; how many times are left, whether the Ooga stood within
     // reach last frame; whether one is under way, how far into it, s (less than 0 while it waits), how long it holds and
-    // how strong it is; and how steady it is now, 0 to 1.
-    const near = { on: false, reach: 0, share: 0, peak: 0, seed: 0, left: 0, inside: false, active: false, t: 0, hold: 0, strength: 0, k: 0 };
+    // how strong it is; and how steady it is now, 0 to 1. Its catch closer in (`CATCH`), likewise: whether this showing
+    // may, how near, which share of its runs and their seed; whether it has come, how far into it, s, and how long it
+    // holds, s; how much it holds now and how much it is breaking apart, 0 to 1; and whether a bar is to tear across.
+    const near = { on: false, reach: 0, share: 0, peak: 0, seed: 0, left: 0, inside: false, active: false, t: 0, hold: 0, strength: 0, k: 0,
+      catchOn: false, close: 0, catchShare: 0, catchSeed: 0, caught: false, ct: 0, catchLen: 0, c: 0, b: 0, tear: false };
 
 
     const SCREEN = { x: 0, y: 0, depth: 0 }, FOOT = { x: 0, y: 0, depth: 0 }, still = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -477,6 +487,8 @@
       for (let b = 0; b < TEARS.n; b++) { tear.on[b] = 0; tear.next[b] = form * 0.6 + between(TEARS.off); }
       near.on = Math.random() < NEAR.chance; near.reach = between(NEAR.reach); near.share = between(NEAR.share); near.peak = between(NEAR.strength);
       near.seed = Math.floor(Math.random() * 1e6); near.left = NEAR.times; near.inside = false; near.active = false; near.k = 0;
+      near.catchOn = Math.random() < CATCH.chance; near.close = between(CATCH.close); near.catchShare = between(CATCH.share);
+      near.catchSeed = Math.floor(Math.random() * 1e6); near.caught = false; near.c = near.b = 0; near.tear = false;
       show(true);
       sphere[0] = at.x; sphere[1] = TOP * SCALE * 0.55; sphere[2] = at.z; sphere[3] = TOP * SCALE + 2;
     };
@@ -542,8 +554,9 @@
       // gap between, then goes for a while; none under reduced motion, nor once it has started to dissolve.
       bands = 0;
       if (!rest && shown > 0.01) for (let b = 0; b < TEARS.n; b++) {
+        if (near.tear && !tear.on[b]) { tear.next[b] = 0; near.tear = false; }
         if ((tear.next[b] -= dt) <= 0) {
-          tear.on[b] = tear.on[b] || t < formed * 0.6 || t > at.held + dissolve * 0.3 || Math.random() < near.k * NEAR.calms ? 0 : 1;
+          tear.on[b] = tear.on[b] || t < formed * 0.6 || t > at.held + dissolve * 0.3 || Math.random() < Math.max(near.k * NEAR.calms, near.c) ? 0 : 1;
           tear.next[b] = between(tear.on[b] ? TEARS.on : TEARS.off);
           if (tear.on[b]) {
             const range = TEARS.heights[b], y = range[0] + Math.random() * (range[1] - range[0]), k = Math.min(RC.hi.length - 1, Math.floor(y / REACH));
@@ -574,16 +587,20 @@
           if (fade <= 0) continue;
           const arrive = smooth((t - E.delay[i] * formed) / (formed * 0.45));
           if (arrive <= 0) continue;
-          // A run steadied near the visitor's Ooga glints whole and nearly still.
-          const steady = near.k > 0 && hash(Math.floor(E.runPhase[i] * 1000) + near.seed) < near.share ? near.k : 0;
+          // A run steadied near the visitor's Ooga glints whole and nearly still; one caught closer in holds whole, still and
+          // brighter for an instant, then breaks apart, dimming and straying.
+          const mine = near.c > 0 || near.b > 0 ? hash(Math.floor(E.runPhase[i] * 1000) + near.catchSeed) < near.catchShare : false;
+          const caught = mine ? near.c : 0, broke = mine ? near.b : 0;
+          const steady = Math.max(near.k > 0 && hash(Math.floor(E.runPhase[i] * 1000) + near.seed) < near.share ? near.k : 0, caught);
           const glint = rest ? 1 : EDGE.gap + (1 - EDGE.gap) * smooth((Math.sin(elapsed * E.runRate[i] + E.runPhase[i]) + 1 - 2 * EDGE.on) / 0.4 + 0.5);
           const run = glint + (1 - glint) * steady;
-          const base = fade * height(y) * arrive * bits * breath * run * (1 + NEAR.bright * near.k);
+          const base = fade * height(y) * arrive * bits * breath * run * (1 + NEAR.bright * near.k + CATCH.bright * caught) * (1 - CATCH.dim * broke);
           if (base <= 0.01) continue;
-          const apart = rest ? 0 : 1 - arrive, j = i * 2, jitter = EDGE.jitter * (1 - NEAR.still * steady) * Math.sin(E.phase[i] + elapsed * 0.7 * slowly);
+          const stray = (1 - NEAR.still * steady) * (1 - 0.3 * caught) * (1 + (rest ? 0 : CATCH.scatter) * broke);
+          const apart = rest ? 0 : 1 - arrive, j = i * 2, jitter = EDGE.jitter * stray * Math.sin(E.phase[i] + elapsed * 0.7 * slowly);
           const x0 = E.x[i] + E.nx[i] * jitter + E.from[j] * apart + E.to[j] * drift, y0 = y + E.ny[i] * jitter + E.from[j + 1] * apart + E.to[j + 1] * drift;
           if (i % (EDGE.every * step) === 0) {
-            const twinkle = 0.45 + 0.55 * Math.pow(0.5 + 0.5 * Math.sin(elapsed * E.rate[i] * slowly + E.phase[i]), 2);
+            const flicker = 0.45 + 0.55 * Math.pow(0.5 + 0.5 * Math.sin(elapsed * E.rate[i] * slowly + E.phase[i]), 2), twinkle = flicker + (1 - flicker) * caught;
             place(x0, y0);
             sprite(sparks, ns++, P.x, P.y, P.z, E.size[i], E.size[i], 0, EDGE.sparkGlow * base * twinkle * (1 + 1.5 * spread));
           }
@@ -701,7 +718,17 @@
     // The visitor's Ooga coming within reach while it holds: now and then, after a moment, it steadies a little, then
     // lets go again even if the Ooga stays; it never waits or lasts longer for it.
     const steadyNear = (dt) => {
-      const me = ooga(), inside = !!me && Math.hypot(me.root.position.x - at.x, me.root.position.z - at.z) < near.reach;
+      const me = ooga(), d = me ? Math.hypot(me.root.position.x - at.x, me.root.position.z - at.z) : Infinity, inside = d < near.reach;
+      // Closer still, once a showing at most: a moment later a few fragments catch for an instant, then break apart.
+      if (!near.caught && near.catchOn && d < near.close && fadeAt < 0 && t > at.formed && t < at.held - 0.6) {
+        near.caught = true; near.ct = -between(CATCH.delay); near.catchLen = between(CATCH.hold);
+      }
+      if (near.caught && near.ct < near.catchLen + CATCH.fall && fadeAt < 0) {
+        const T = (near.ct += dt), L = near.catchLen;
+        near.c = T < 0 || T >= L ? 0 : Math.min(1, T / 0.05);
+        near.b = T < L ? 0 : 1 - smooth((T - L) / CATCH.fall);
+        if (T >= L && T - dt < L && Math.random() < CATCH.tears) near.tear = true;
+      } else near.c = near.b = 0;
       if (inside && !near.inside && near.on && near.left > 0 && fadeAt < 0 && t > at.formed && t < at.held - NEAR.rise) {
         near.active = true; near.t = -between(NEAR.delay); near.hold = between(NEAR.hold);
         near.strength = near.peak * (near.left === NEAR.times ? 1 : NEAR.again); near.left--;
@@ -746,7 +773,7 @@
       get due() { return due; }, get calm() { return calm; }, get after() { return after; }, get t() { return t; },
       get count() { return sparks.instanceCount + lines.instanceCount + bars.instanceCount + glow.instanceCount; },
       get loud() { return loud; },
-      get near() { return { on: near.on, reach: +near.reach.toFixed(2), left: near.left, k: +near.k.toFixed(3) }; }
+      get near() { return { on: near.on, reach: +near.reach.toFixed(2), left: near.left, k: +near.k.toFixed(3), catchOn: near.catchOn, close: +near.close.toFixed(2), caught: near.caught, c: +near.c.toFixed(2), b: +near.b.toFixed(2) }; }
     };
     return {
       update, liveGeometry, dispose, debug,
