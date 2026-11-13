@@ -442,19 +442,21 @@
     // each cell a fifth of a metre across, each pebble a rounded stone of seven to nine sides set a little off its
     // cell, turned its own way, a darker rim round its pale top, in bone and pale ochre; a few dark pebbles pressed
     // into the earth round them; and a kerb of eighteen bevelled stones round it all.
-    const MZ = MEDALLION.z, IN = MEDALLION.r - 0.28, CELL = 0.19, trand = mulberry32(3330), earth = geometry();
-    const letter = (col, row) => col >= 0 && col < 15 && row >= 0 && row < 5 && col % 4 < 3 && BL.hubModels.SIGN_GLYPHS["OOGA"[col >> 2]][row][col % 4] === "1";
+    const letters = Array.from({ length: 5 }, (_, row) => [..."OOGA"].map(ch => BL.hubModels.SIGN_GLYPHS[ch][row]).join("0"));
+    const cols = letters[0].length, mid = (cols - 1) / 2;
+    const MZ = MEDALLION.z, IN = MEDALLION.r - 0.28, CELL = 0.19 * 15 / cols, trand = mulberry32(3330), earth = geometry();
+    const letter = (col, row) => col >= 0 && col < cols && row >= 0 && row < 5 && letters[row][col] === "1";
     const pebble = (x, z, r, tone, e) => {
       const n = 7 + Math.floor(trand() * 3), turn = trand() * 3, squash = 0.78 + trand() * 0.18;
       daubDot(earth, x, -z, r, r * squash, tint(tone, 0.68), e * 0.5, turn, 0.0012, n);
       daubDot(earth, x - r * 0.06, -z + r * 0.06, r * 0.8, r * squash * 0.78, tone, e, turn, 0.0024, n);
     };
     daubDot(earth, 0, -MZ, IN + 0.03, IN + 0.03, EARTH[3], 0.03, 0, 0, 36);
-    for (let row = 0; row < 5; row++) { for (let col = 0; col < 15; col++) { if (letter(col, row)) {
-      pebble((col - 7) * CELL + (trand() - 0.5) * 0.04, MZ + (row - 2) * CELL + (trand() - 0.5) * 0.04, 0.088 + trand() * 0.018, trand() < 0.6 ? BONE : "#e8c890", 0.2);
+    for (let row = 0; row < 5; row++) { for (let col = 0; col < cols; col++) { if (letter(col, row)) {
+      pebble((col - mid) * CELL + (trand() - 0.5) * 0.04, MZ + (row - 2) * CELL + (trand() - 0.5) * 0.04, (0.088 + trand() * 0.018) * 15 / cols, trand() < 0.6 ? BONE : "#e8c890", 0.2);
     } } }
     for (let k = 0, n = 0; k < 120 && n < 26; k++) { yield* pause(slice);
-      const a = trand() * Math.PI * 2, d = Math.sqrt(trand()) * (IN - 0.12), x = Math.cos(a) * d, z = Math.sin(a) * d, col = Math.round(x / CELL + 7), row = Math.round(z / CELL + 2);
+      const a = trand() * Math.PI * 2, d = Math.sqrt(trand()) * (IN - 0.12), x = Math.cos(a) * d, z = Math.sin(a) * d, col = Math.round(x / CELL + mid), row = Math.round(z / CELL + 2);
       if ([-1, 0, 1].some((dc) => [-1, 0, 1].some((dr) => letter(col + dc, row + dr)))) continue;
       pebble(x, MZ + z, 0.035 + trand() * 0.025, FLAGS[3 - (n % 2) * 2], 0.03);
       n++;
@@ -1044,7 +1046,7 @@
     return [f * 0.075, y * c - z * sn + 0.3, y * sn + z * c - 0.12];
   });
   const gargoyleLaser = cached(() => unshadowed(box({ w: 0.035, h: 0.035, d: 1, color: HAUNT_GLOW, emissive: 1, offset: { z: 0.5 } })));
-  // A white letter on a gargoyle's chest, in the signs' 3x5 alphabet, each block set on the curve of its breast and
+  // A white letter on a gargoyle's chest, in the signs' five-row alphabet, each block set on the curve of its breast and
   // belly as they lean with it; the gargoyles spell `GARGOYLE_WORDS` round the wall from the one over the mouth. The M
   // is the carved signs' five-wide one, centred as the others are, since a three-wide M reads as an H (#420).
   const GARGOYLE_WORDS = "FREE SAMOURAI", GARGOYLE_CELL = 0.045;
@@ -2132,7 +2134,7 @@
   // ---- the retro games' loops -----------------------------------------------------------------------------
   // The mezzanine's cabinets loop their retro games as the stage's loop theirs: the same grid, frame count and PRESS
   // START blink, the best under the loop. Their names are too long for the 5x7 font, so the title is lettered in the
-  // carved signs' 3x5 alphabet. Every palette shares its first five inks (the glass, the cabinet's trim, bone, and the
+  // carved signs' five-row alphabet. Every palette shares its first five inks (the glass, the cabinet's trim, bone, and the
   // banana coin and its mark); each game's own follow.
   const RETRO_INKS = {
     invaders: ["#b98cff", "#c8ff5a", "#c68642", "#3a2414", "#8a5a2c", "#8e8e96", "#ff8a2a"],
@@ -2147,12 +2149,15 @@
   const retroPalette = (r) => ["#07080d", CABINETS.find((c) => c.retro === r).trim, BONE, BANANA, "#8a5210", ...RETRO_INKS[RETRO[r].id]];
   const smallCentred = (g, s, y, c) => {
     const G = BL.hubModels.SIGN_GLYPHS;
-    let x = Math.floor((g.w - (s.length * 4 - 1)) / 2);
+    let width = -1;
+    for (const ch of s) width += G[ch] ? G[ch][0].length + 1 : 4;
+    let x = Math.floor((g.w - width) / 2);
     for (const ch of s) {
       const rows = G[ch];
       if (rows) for (let row = 0; row < rows.length; row++) for (let k = 0; k < rows[row].length; k++) if (rows[row][k] === "1") at(g, x + k, y + row, c);
-      x += 4;
+      x += rows ? rows[0].length + 1 : 4;
     }
+    return width;
   };
   // A triangle wave over `n` frames, 0 at f = 0 and 1 half way.
   const tri = (f, n = FRAMES) => { const k = (f % n) / n; return k < 0.5 ? k * 2 : 2 - k * 2; };
@@ -2320,14 +2325,14 @@
       }
     }
   };
-  // A retro game's loop, by its index in RETRO: its title between two bones, then the anim box.
+  // A retro game's loop, by its index in RETRO: its title, flanked by bones when there is room, then the anim box.
   const retroFrames = variants((r) => {
     const game = RETRO[r], palette = retroPalette(r), frames = [];
     for (let f = 0; f < FRAMES; f++) {
       const g = grid(GRID_W, GRID_H);
-      smallCentred(g, game.title, 2, 1);
+      const width = smallCentred(g, game.title, 2, 1);
       RETRO_DRAW[game.id](g, f);
-      titleBones(g, 2);
+      if (width <= GRID_W - 10) titleBones(g, 2);
       frames.push(bake(g, palette, PIXEL, 0.45));
     }
     return frames;
@@ -2337,8 +2342,8 @@
     const game = RETRO[r], palette = retroPalette(r);
     return [true, false].map((lit) => {
       const g = grid(GRID_W, GRID_H);
-      smallCentred(g, game.title, 2, 1);
-      titleBones(g, 2);
+      const width = smallCentred(g, game.title, 2, 1);
+      if (width <= GRID_W - 10) titleBones(g, 2);
       rect(g, 33, 21, 5, 5, 3); rect(g, 34, 20, 3, 7, 3); at(g, 35, 22, 4);
       if (lit) { centred(g, "PRESS", 10, 2); centred(g, "START", 18, 2); }
       return bake(g, palette, PIXEL, 0.45);
