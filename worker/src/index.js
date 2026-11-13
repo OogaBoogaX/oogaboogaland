@@ -23,6 +23,9 @@ import { gameName } from "./games.js";
 
 export { Room } from "./room.js";
 export { GameHost } from "./game-host.js";
+// The Durable Object inspector's object (inspector.js). Part 1 of 2: nothing reaches it until part 2 adds the routes
+// and the reporting (#640).
+export { Inspector } from "./inspector.js";
 
 const ROOM_NAME = "island";
 
