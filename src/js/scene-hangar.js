@@ -1695,8 +1695,10 @@
     const glints = DEBUG ? Number(params.get("shimmer")) : NaN;
     scene.shimmer = BL.hangarShimmer.create({ root, audio, camera, renderer, coarse: COARSE, auto: !params.has("nosim") || glints > 0, gap: glints > 0 ? glints : null,
       busy: () => leaving || scene.anomaly.playing || scene.fire.t >= 0 || scene.meltdown.active || scene.roomFire.burning || scene.sis.rampaging || scene.sis.brawling
-        || scene.guide.lent || scene.guide.holding || scene.guide.state.phase !== "work" || scene.terminals.showing || scene.keypad.open >= 0,
+        || scene.tessFor !== "shimmer" && (scene.guide.lent || scene.guide.holding || scene.guide.state.phase !== "work") || scene.terminals.showing || scene.keypad.open >= 0,
       ooga: () => people && people.player, guide: () => scene.guide.root.position, clear: clearOf });
+    // The shape unsettles Tess: she comes over to it if she is free when she would notice it.
+    scene.unsettled = BL.hangarGuide.unsettled(scene.shimmer, camera);
     // The repository's reading: read from GitHub on the first visit a page life, unless the cache holds a fresh one.
     unsubscribeFeed = BL.jetFeed.subscribe(() => { boardsDirty = true; });
     if (!params.has("nosim") && params.get("jet") !== "0") BL.jetFeed.load();
@@ -1867,6 +1869,10 @@
     s.sisHead.x = sp.x; s.sisHead.y = sp.y + 0.9; s.sisHead.z = sp.z;
     if (s.sis.rampaging && !s.guide.lent) { s.guide.lend(s.distraction.drive); s.tessFor = "sis"; s.sis.distract(s.guide.root.position); }
     else if (!s.sis.rampaging && s.tessFor === "sis") { s.distraction.done(); s.guide.lend(null); s.tessFor = null; s.sis.distract(null); }
+    // The faint shape in the air unsettles her: lent to it while it shows, if she is free to notice it, back once she
+    // has shaken it off.
+    if (!s.guide.lent && !s.guide.holding && s.guide.state.phase === "work" && s.unsettled.due()) { s.guide.lend(s.unsettled.drive); s.tessFor = "shimmer"; }
+    else if (s.tessFor === "shimmer" && s.unsettled.over) { s.unsettled.reset(); s.guide.lend(null); s.tessFor = null; }
     seatViewBack(drivenHere);
     pilot.update(dt);
     s.guide.update(dt, elapsed);

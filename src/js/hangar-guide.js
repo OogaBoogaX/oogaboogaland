@@ -11,6 +11,10 @@
 // whatever she was doing, a tour too, flies to Sis and buzzes round her head, flaring and calling to her, and Sis,
 // distracted (`sis.distract`), swings slower and turns on her now and then. When the rampage ends Tess says her piece
 // and goes back to work.
+//
+// When the faint shape in the hangar's air (`hangar-shimmer.js`) shows and she is free to notice it, the scene lends her
+// to `unsettled`: it unsettles her. She jolts, stares, edges in to hang at its side, studies it with a faltering beam,
+// flinches, backs off as it comes apart, then shakes it off and goes back to work.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -217,5 +221,155 @@
     return { drive, done };
   };
 
-  BL.hangarGuide = { create, distraction, LINES, STOPS, answer, SUGGESTIONS };
+  // Lent while the faint shape in the hangar's air shows (`hangar-shimmer.js`), which unsettles her. A moment after it
+  // has formed she notices it and jolts, her rings stopping dead, hopping back from it; she stares a beat, then edges in
+  // at an angle, in two hesitant moves rising over what stands between, to hang at its side (so the view sees them both),
+  // facing it. There she studies it, trembling with her rings faltering out of step and her eye dim and narrow, a thin
+  // beam sweeping it head to chest and back that keeps cutting out, and flinching when a bar of light tears across it.
+  // As it comes apart she backs off and watches it go; once it has gone she shakes it off and, now and then, makes light
+  // of it, then goes back to work. Anything ending it early has her shake it off at once. Under reduced motion she still
+  // comes over and looks, without jolts, flinches, trembling or shaking it off. `shimmer` is the shape, read live, and
+  // `camera` the view, so she keeps to its side of it.
+  const UNEASY = {
+    // When she notices it, as a share of its forming, at random between; and none if less than `least` s of it would be
+    // left.
+    notice: [0.5, 0.9], least: 3,
+    // The jolt: how far she hops back from it, m, how fast, m/s; and how long she stares after it, s.
+    hop: 0.6, hopSpeed: 2.4, stare: 0.6,
+    // Where she hangs: `side` m to its side, `toward` m toward the view, `y` m up, `margin` m inside the hall's walls.
+    side: 2.6, toward: 0.2, y: 2.3, margin: 1.5,
+    // Her two moves in: the first, over `quick` s however far (at `speed[0]` m/s at least), to `last` m short of where
+    // she hangs (or `first` of the way when that is nearer), on the line from where she came or `rise` m over where she
+    // hangs if that is higher; the pause between them, s; and the last, hesitant, at `speed[1]` m/s, her beam already on
+    // it.
+    quick: 1.1, last: 2.5, first: 0.55, rise: 0.6, speed: [2.6, 1.4], pause: 0.5,
+    // Her beam: from `scan[0]` m up to `scan[1]` m and back each `period` s; on for `on` s and off for `off` s by turns,
+    // at random between. She flinches at a bar tearing across it at most once every `flinch` s.
+    scan: [3.1, 2], period: 3.4, on: [0.25, 0.7], off: [0.06, 0.2], flinch: 1.6,
+    // Backing off as it comes apart: how far back and up, m, how fast, m/s.
+    back: 1.1, lift: 0.4, backSpeed: 0.8,
+    // After it has gone: how long before she shakes it off, s; how likely she says something then; and how long after
+    // the shake before she goes back to work, s (`cut` if it ended early).
+    after: 0.6, say: 0.55, done: 1.8, cut: 0.7
+  };
+  const SHRUGS = ["...Huh.", "Must be the air handlers.", "I'm calling that a sensor glitch.", "Nope. Not today.", "Note to self: recalibrate everything."];
+  const unsettled = (shimmer, camera) => {
+    const at = shimmer.at, spot = { x: 0, y: 0, z: 0 }, mid = { x: 0, y: 0, z: 0 }, back = { x: 0, y: 0, z: 0 }, still = window.matchMedia("(prefers-reduced-motion: reduce)");
+    // The rig she is lent as; her stage and how long she has been in it, s; the shape she is on (its `shows`) and the one
+    // whose noticing is drawn, and when; her beam's countdown and whether it is on; her flinch's countdown; the bars
+    // last frame; and whether this one ended early.
+    let rig = null, stage = "idle", t = 0, shape = -1, drawn = -1, noticeAt = 0, beamIn = 0, beamOn = false, flinchIn = 0, bars = 0, cut = false;
+    const between = ([a, b]) => a + Math.random() * (b - a);
+    // Whether (x, y, z) is open air for her: inside the hall and nothing standing there up to near her height.
+    const open = (x, y, z) => {
+      const HM = BL.hangarModels, H = HM.LAYOUT.HALL, m = UNEASY.margin;
+      return x > H.x0 + m && x < H.x1 - m && z > H.back + m && z < HM.LAYOUT.runway.z0 - m && HM.supportAt(x, z, y) < y - 0.9 && HM.clearAt(x, z, y - 0.4, 0.5, x + 1e3, z, false);
+    };
+    // Where she hangs by it: to its side as the view sees it, the side nearer her where both are open, else in front of it
+    // and a little aside.
+    const place = (r) => {
+      const c = camera.position, vx = at.x - c.x, vz = at.z - c.z, l = Math.hypot(vx, vz) || 1, ux = vx / l, uz = vz / l, U = UNEASY;
+      const ax = at.x + uz * U.side - ux * U.toward, az = at.z - ux * U.side - uz * U.toward;
+      const bx = at.x - uz * U.side - ux * U.toward, bz = at.z + ux * U.side - uz * U.toward, p = r.root.position;
+      const aOk = open(ax, U.y, az), bOk = open(bx, U.y, bz);
+      const useA = aOk && (!bOk || Math.hypot(ax - p.x, az - p.z) < Math.hypot(bx - p.x, bz - p.z));
+      if (useA || bOk) { spot.x = useA ? ax : bx; spot.z = useA ? az : bz; }
+      else { spot.x = at.x - ux * 3.2 + uz * 1.2; spot.z = at.z - uz * 3.2 - ux * 1.2; }
+      spot.y = U.y;
+    };
+    const go = (r, x, y, z, speed, corner) => { r.clearPath(speed, corner); r.push(x, y, z); };
+    // Backing off from it, as it comes apart.
+    const backOff = (r) => {
+      const p = r.root.position, dx = p.x - at.x, dz = p.z - at.z, l = Math.hypot(dx, dz) || 1;
+      back.x = p.x + dx / l * UNEASY.back; back.y = p.y + UNEASY.lift; back.z = p.z + dz / l * UNEASY.back;
+      go(r, back.x, back.y, back.z, UNEASY.backSpeed, 0.3);
+      enter("recoil");
+    };
+    // Whether she should be lent now: the shape shows and has been formed a moment, she has not had this one, and enough
+    // of it is left to be worth it.
+    const due = () => {
+      if (shimmer.state !== "show" || shimmer.fading || shimmer.shows === shape) return false;
+      if (shimmer.shows !== drawn) { drawn = shimmer.shows; noticeAt = between(UNEASY.notice); }
+      if (shimmer.t < at.formed * noticeAt) return false;
+      if (shimmer.t > at.held - UNEASY.least) { shape = shimmer.shows; return false; }
+      return true;
+    };
+    const enter = (next) => { stage = next; t = 0; };
+    const drive = (r, dt) => {
+      const U = UNEASY, p = r.root.position, gone = shimmer.state !== "show" || shimmer.fading || shimmer.shows !== shape && rig === r;
+      if (r !== rig) {
+        rig = r; shape = shimmer.shows; cut = false; beamOn = false; beamIn = 0; flinchIn = U.flinch; bars = shimmer.bands;
+        // The jolt: back from it where she is, a little up.
+        const dx = p.x - at.x, dz = p.z - at.z, l = Math.hypot(dx, dz) || 1;
+        go(r, p.x + dx / l * U.hop, p.y + 0.15, p.z + dz / l * U.hop, U.hopSpeed, 0.3);
+        if (!still.matches) r.startle();
+        r.hush();
+        place(r);
+        enter("jolt");
+      }
+      t += dt;
+      // Something ended it early: she shakes it off at once.
+      if (gone && stage !== "shake" && stage !== "over") { cut = true; if (!still.matches) r.shake(); enter("shake"); }
+      const showing = stage !== "shake" && stage !== "over";
+      r.calm = false; r.steady = showing;
+      r.watching = true; r.watch.x = at.x; r.watch.z = at.z;
+      r.watch.y = stage === "recoil" ? 2.2 + Math.min(1.4, (shimmer.t - at.held) * 0.6) : 2.9;
+      r.mode = 0; r.aims = null;
+      // It coming apart, wherever she has got to on her way in, she backs off.
+      if ((stage === "edge" || stage === "pause" || stage === "near" || stage === "study") && shimmer.t >= at.held) backOff(r);
+      let uneasy = 0.6;
+      switch (stage) {
+        case "jolt":
+          r.steer(dt);
+          if (t >= U.stare) {
+            const dx = p.x - spot.x, dy = p.y - spot.y, dz = p.z - spot.z, d = Math.hypot(dx, dy, dz), k = d > U.last / (1 - U.first) ? U.last / d : 1 - U.first;
+            mid.x = spot.x + dx * k; mid.z = spot.z + dz * k; mid.y = Math.max(spot.y + U.rise, spot.y + dy * k);
+            go(r, mid.x, mid.y, mid.z, Math.max(U.speed[0], d * (1 - k) / U.quick), 0.5);
+            enter("edge");
+          }
+          break;
+        case "edge":
+          uneasy = 0.7;
+          if (r.steer(dt)) enter("pause");
+          break;
+        case "pause":
+          uneasy = 0.8;
+          if (t >= U.pause) { go(r, spot.x, spot.y, spot.z, U.speed[1], 0.4); enter("near"); }
+          break;
+        case "near":
+        case "study": {
+          uneasy = stage === "near" ? 0.85 : 1;
+          if (stage === "near" && r.steer(dt)) enter("study");
+          // The beam sweeping it, cutting out now and then.
+          if ((beamIn -= dt) <= 0) { beamOn = !beamOn; beamIn = between(beamOn ? U.on : U.off); }
+          if (beamOn) {
+            r.mode = 2; r.aim.x = at.x; r.aim.z = at.z;
+            r.aim.y = (U.scan[0] + U.scan[1]) / 2 + (U.scan[0] - U.scan[1]) / 2 * Math.cos(shimmer.t * Math.PI * 2 / U.period);
+          }
+          break;
+        }
+        case "recoil":
+          uneasy = 0.9;
+          r.steer(dt);
+          if (shimmer.t >= at.gone + U.after) { if (!still.matches) r.shake(); enter("shake"); }
+          break;
+        case "shake":
+          uneasy = 0;
+          if (!cut && t >= U.done * 0.4 && t - dt < U.done * 0.4 && Math.random() < U.say) r.say(SHRUGS[Math.floor(Math.random() * SHRUGS.length)]);
+          if (t >= (cut ? U.cut : U.done)) enter("over");
+          break;
+      }
+      // A bar tearing across it makes her flinch, now and then.
+      flinchIn -= dt;
+      if (showing && stage !== "jolt" && shimmer.bands > bars && flinchIn <= 0 && !still.matches) { r.startle(); flinchIn = U.flinch; }
+      bars = shimmer.bands;
+      if (still.matches) uneasy *= 0.3;
+      r.uneasy += (uneasy - r.uneasy) * Math.min(1, dt * (uneasy > r.uneasy ? 4 : 1.5));
+    };
+    // Given back: her unease gone, ready for the next.
+    const reset = () => { if (rig) { rig.uneasy = 0; rig.steady = false; } rig = null; stage = "idle"; };
+    return { due, drive, reset, get over() { return stage === "over"; }, get stage() { return stage; } };
+  };
+
+  BL.hangarGuide = { create, distraction, unsettled, LINES, STOPS, answer, SUGGESTIONS };
 })();
