@@ -13,7 +13,8 @@
 // without the walk (`studio-<place>`) and choose the view (the first person, the third person from behind and a
 // little above, or in combat over its shoulder, and a free camera flown anywhere over the ground), the night and,
 // for an Ooga with no file, its build; Speak says its voice lines in turn. Beside the controls button a list of every Ooga by name (`#studio-pick`)
-// shows another in the same place, gear and view. The title reads OBL, and the Bananas and Oogas panels, the sound
+// shows another in the same place, gear and view. Down the right side the This Ooga panel (`#studio-features`) lists
+// what the Ooga's file gives it and how much of the intake's 32,768 bytes it takes. The title reads OBL, and the Bananas and Oogas panels, the sound
 // button, the clock and the block height are left out: there is one Ooga here, nobody to feed and no island to tell
 // the time on. `__ooga.studio` does the same for a script (`place(id)`, `toggle(name)` with the rifle and the jetpack
 // too, `show(handle)`, `state`).
@@ -363,6 +364,216 @@
   // A sign's words, lettered as the banner's are (hud.js).
   const letter = (el, words) => { el.setAttribute("aria-label", words); el.replaceChildren(hudMod.signLettering(words)); };
 
+  // ---- the This Ooga panel ----
+  // What the file of the Ooga on the pad gives it (`#studio-features`, down the right side): its look and voice, which
+  // are plain data; each hook in its `dress`, which is custom code, with the bytes of that hook's own source; and the
+  // parts its build carries. Over them, from the studio's server (`/__studio/reading`), the whole file's bytes of the
+  // intake's limit and the lane it lands in. Filled as a visit enters, so a saved file (which reloads the page) and
+  // another Ooga from the list are each read afresh. Code a file's hooks share is counted with its look and voice.
+  const LIMIT = 32768; // the intake's (scripts/character-safety.mjs SOURCE_LIMIT), until the server names it
+  const PANEL_STORE = "ooga-studio-panel";
+  const HOOKS = {
+    torso: "Paints the chest, belt and hips", gear: "Paints the arms, legs and feet", club: "The weapon it holds first, drawn by its club hook",
+    skull: "Its own head shape", crown: "Hair, or a crown", eyes: "Eyes of its own", mark: "Marks on the face",
+    hatY: "Does nothing: it placed the loot crates' hats, which are gone", headgear: "A hat or a helmet", extras: "Pieces of its own: a pet, a bag, a pack",
+    tint: "A second colourway, changing with the day's price", model: "A modelled body of its own", refine: "Fine detail painted on the body"
+  };
+  // A hook whose name in the file would mislead a player is shown by what the game calls it: `club` draws whatever the
+  // Ooga holds as its first weapon (an axe, a staff, a bouquet), the slot the controls call the primary.
+  const HOOK_NAMES = { club: "Primary weapon" };
+  const COLOURS = { skin: "Skin", hair: "Hair", fur: "Fur", eyeColor: "Eyes" };
+  const FLAGS = {
+    bald: "Bald", hairless: "Hairless", cleanShaven: "Clean-shaven", noBrow: "No brow", wideEyes: "Wide eyes", noPupils: "No pupils",
+    cigarette: "Smokes", gasMask: "Breathes through a gas mask", stoneAxe: "Holds its weapon as an axe", skater: "Rides its board at a run",
+    pumpkin: "A pumpkin head", nunchaku: "Swings a nunchaku", petRidesHat: "Its pet rides its hat", footRockets: "Rockets in its soles",
+    noFlaps: "No loincloth flaps", snout: "A pig's snout", noTeeth: "A beard with no teeth", recipe: "Hands out the Add an Ooga prompt"
+  };
+  // `hatY` placed the loot crates' hats, which are gone; a file that still sets it shows nothing for it.
+  const LOOK_KEYS = new Set(["build", "height", "face", "eyeGlow", "hatY", "portrait", ...Object.keys(COLOURS), ...Object.keys(FLAGS)]);
+  const BUILDS = [["dog", "A pet"], ["jetpack", "A jetpack of its own, always on"], ["board", "A board to ride"], ["shield", "A shield"], ["chuk", "A nunchaku"]];
+  let panel = null, panelFill = 0;
+  const keepFold = () => { try { sessionStorage.setItem(PANEL_STORE, panel.root.dataset.folded); } catch { /* A private window keeps nothing. */ } };
+  // Its width, dragged by the grip on its left edge (or, from the keyboard, a press of the grip widening it a step and
+  // going back to the narrowest past the widest), kept for the tab. `gap` is the room left for the studio's buttons,
+  // as the stylesheet's max-width leaves it.
+  const WIDTH_STORE = "ooga-studio-panel-width", WIDTH = { min: 200, step: 70, gap: 140 };
+  let resizing = null;
+  const widest = () => Math.max(WIDTH.min, window.innerWidth - WIDTH.gap);
+  const setWidth = (width, keep) => {
+    const px = Math.round(clamp(width, WIDTH.min, widest()));
+    panel.root.style.width = `${px}px`;
+    if (keep) try { sessionStorage.setItem(WIDTH_STORE, String(px)); } catch { /* A private window keeps nothing. */ }
+  };
+  const gripDown = (e) => {
+    if (e.button !== 0 || resizing) return;
+    e.preventDefault();
+    panel.grip.setPointerCapture(e.pointerId);
+    resizing = { id: e.pointerId, x: e.clientX, width: panel.root.getBoundingClientRect().width };
+    panel.root.dataset.resizing = "true";
+  };
+  const gripMove = (e) => { if (resizing && e.pointerId === resizing.id) setWidth(resizing.width + resizing.x - e.clientX, false); };
+  const gripUp = (e) => {
+    if (!resizing || e.pointerId !== resizing.id) return;
+    setWidth(resizing.width + resizing.x - e.clientX, true);
+    resizing = null;
+    delete panel.root.dataset.resizing;
+  };
+  // A click from a pointer is the end of a drag; only the keyboard's press steps it.
+  const gripPress = (e) => {
+    if (e.detail !== 0) return;
+    const width = panel.root.getBoundingClientRect().width;
+    setWidth(width + 1 >= widest() ? WIDTH.min : width + WIDTH.step, true);
+  };
+  const make = (tag, cls, text) => {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  const sizeBar = (part, whole) => {
+    const bar = make("div", "studio-bar"), fill = make("span");
+    fill.style.width = `${clamp(part / whole * 100, 0, 100).toFixed(1)}%`;
+    if (part > whole) bar.dataset.state = "full";
+    bar.append(fill);
+    return bar;
+  };
+  const bytes = (n) => `${n.toLocaleString("en")} byte${n === 1 ? "" : "s"}`;
+  // A row: a small label over its value, and anything else under them. A row with no label is its value alone; `aside`
+  // stands at the end of the label's line (a hook's bytes).
+  const item = (key, value, aside, ...more) => {
+    const li = make("li");
+    if (key) {
+      const head = make("span", "studio-head");
+      head.append(make("span", "studio-key", key));
+      if (aside) head.append(make("span", "studio-note", aside));
+      li.append(head);
+    }
+    if (value !== undefined) li.append(value instanceof Node ? value : make("span", "studio-value", String(value)));
+    li.append(...more);
+    return li;
+  };
+  // A hook's row: its name, with what that hook does as the name's tooltip, its bytes, and anything under them.
+  const hookItem = (name, tip, aside, ...more) => {
+    const li = item(name, undefined, aside, ...more);
+    li.querySelector(".studio-key").title = tip;
+    return li;
+  };
+  // A colour chip copies its value, which is also its tooltip: through the clipboard, or, where a browser refuses that
+  // (an embedded one may deny the permission), the older copy command on a field kept out of sight.
+  const copyOld = (text) => {
+    const field = make("textarea", "studio-copy");
+    field.value = text;
+    field.readOnly = true;
+    document.body.append(field);
+    field.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch { ok = false; }
+    field.remove();
+    return ok;
+  };
+  const copyColour = (e) => {
+    const chip = e.currentTarget, value = chip.dataset.colour;
+    chip.blur();
+    const said = (ok) => hudMod.toast(ok ? `Copied ${value}` : `Could not copy ${value} here`);
+    if (navigator.clipboard) navigator.clipboard.writeText(value).then(() => said(true), () => said(copyOld(value)));
+    else said(copyOld(value));
+  };
+  // The look's colours in one row, each a chip named for what it colours.
+  const swatches = (look) => {
+    const value = make("span", "studio-value studio-colours");
+    for (const key of Object.keys(COLOURS)) {
+      if (look[key] === undefined) continue;
+      const one = make("button", "studio-chip", COLOURS[key]), chip = make("i", "studio-swatch");
+      one.type = "button";
+      one.dataset.colour = String(look[key]);
+      one.title = String(look[key]);
+      one.addEventListener("click", copyColour);
+      chip.style.background = String(look[key]);
+      one.prepend(chip);
+      value.append(one);
+    }
+    return value.childNodes.length ? value : null;
+  };
+  const group = (title, rows) => {
+    if (!rows.length) return [];
+    const list = make("ul", "studio-list");
+    list.append(...rows);
+    return [make("h3", "section-head", title), list];
+  };
+  // The file's size and lane, as the server read it, with how much of it the hooks take.
+  const showSize = (r, hooked) => {
+    if (!r || r.file !== true || !Number.isFinite(r.bytes)) {
+      panel.size.textContent = "No file yet";
+      panel.note.textContent = "This is the Ooga this login gets by default. Plain data merges on its own the next day.";
+      return;
+    }
+    const limit = Number.isFinite(r.limit) && r.limit > 0 ? r.limit : LIMIT;
+    panel.fill.style.width = `${clamp(r.bytes / limit * 100, 0, 100).toFixed(1)}%`;
+    if (r.bytes > limit) panel.bar.dataset.state = "full"; else delete panel.bar.dataset.state;
+    panel.size.textContent = `${bytes(r.bytes)} of ${limit.toLocaleString("en")} · ${Math.round(r.bytes / limit * 100)}%`;
+    // A file with hooks says nothing more here; why one without is custom code is news: a plain-data field it got wrong.
+    const why = typeof r.why === "string" ? r.why : "", at = r.finding && Number.isInteger(r.finding.line) ? ` (line ${r.finding.line}: "${r.finding.text}")` : "";
+    panel.note.textContent = r.refused ? `The intake would refuse it: ${why}${at}` : r.lane === "daily" ? "Plain data: it merges on its own with the next daily bundle."
+      : hooked ? "" : why;
+    panel.note.hidden = !panel.note.textContent;
+    if (r.refused) panel.note.dataset.state = "bad"; else delete panel.note.dataset.state;
+    if (hooked) panel.parts.replaceChildren(item("Appearance & equipment code", undefined, bytes(hooked)), item("Settings, dialog, & other code", undefined, bytes(Math.max(0, r.bytes - hooked))));
+  };
+  const fillPanel = (name, built, signal) => {
+    const fill = ++panelFill, row = BL.characters.get(name) || {}, look = row.look || {}, dress = row.dress || {};
+    panel.who.textContent = row.studio ? `${name} · no file yet` : `${row.display || name} · src/characters/${name}.js`;
+    panel.fill.style.width = "0%";
+    panel.size.textContent = "";
+    panel.note.textContent = "";
+    panel.note.hidden = false;
+    delete panel.note.dataset.state;
+    panel.parts.replaceChildren();
+    // Plain data: the look and the voice.
+    const looks = [];
+    if (row.display) looks.push(item("Name shown", row.display));
+    if (look.build) looks.push(item("Build", look.build === "slim" ? "Female (slim)" : "Male"));
+    const colours = swatches(look);
+    if (colours) looks.push(item("Colours", colours));
+    if (look.eyeGlow !== undefined) looks.push(item("Eye glow", look.eyeGlow));
+    if (look.height !== undefined) looks.push(item("Height", `${look.height} m`));
+    if (look.face !== undefined) looks.push(item("Face", look.face));
+    if (look.portrait) looks.push(item("Portrait", "Framed by hand"));
+    const flags = Object.keys(look).filter((key) => key in FLAGS && look[key]).map((key) => FLAGS[key]);
+    if (flags.length) looks.push(item("Also", flags.join(" · ")));
+    for (const key of Object.keys(look)) if (!LOOK_KEYS.has(key)) looks.push(item(key, JSON.stringify(look[key])));
+    if (!looks.length) looks.push(item("", "Hashed from its login: nothing set by hand"));
+    const voice = row.voice;
+    const lines = voice ? [item("Poked", voice.poke), item("Idle lines", voice.idle.length)] : [item("", "The default lines")];
+    // Custom code: each hook, with the bytes of its own source. Hooks that are one function count it once.
+    const encoder = new TextEncoder(), counted = new Map();
+    let hooked = 0;
+    const hooks = Object.keys(dress).map((key) => {
+      const hook = dress[key], same = counted.get(hook), name = HOOK_NAMES[key] || key;
+      if (typeof hook !== "function") return hookItem(name, HOOKS[key] || "A value of its own");
+      if (same) return hookItem(name, HOOKS[key] || "A hook of its own", `the same code as ${HOOK_NAMES[same] || same}`);
+      const size = encoder.encode(String(hook)).length;
+      counted.set(hook, key);
+      hooked += size;
+      return hookItem(name, HOOKS[key] || "A hook of its own", bytes(size), sizeBar(size, LIMIT));
+    });
+    // What its build carries, as the game builds it.
+    const builds = [];
+    if (built) {
+      for (const [part, words] of BUILDS) if (built.parts[part]) builds.push(item("", part === "dog" && built.parts.dog.legs ? "A pet that walks on four legs" : words));
+    } else builds.push(item("", "Its build threw: the foot of the page says where"));
+    panel.groups.replaceChildren(...group("Look", looks), ...group("Voice", lines), ...group("Custom code", hooks), ...group("Builds", builds));
+    if (row.studio) { showSize(null, 0); return; }
+    if (!WATCH) {
+      panel.size.textContent = "Size unknown here";
+      panel.note.textContent = `npm run character:studio -- ${name} shows how much of the ${LIMIT.toLocaleString("en")} bytes the file takes.`;
+      return;
+    }
+    fetch(`/__studio/reading?character=${encodeURIComponent(name)}`, { cache: "no-store", signal })
+      .then((reply) => reply.json())
+      .then((reply) => { if (!signal.aborted && fill === panelFill) showSize(reply, hooked); })
+      .catch(() => { if (!signal.aborted && fill === panelFill) panel.size.textContent = "The studio's server did not answer"; });
+  };
+
   // ---- reload on save ----
   const watch = async (signal) => {
     let reply = null;
@@ -427,7 +638,8 @@
     // A file whose hooks throw as its Ooga is built cannot be shown: say what threw, and stand the default Ooga in
     // until the file is mended.
     broken = "";
-    try { models.caveman(contributors.traitsFor(entry.name)); } catch (error) {
+    let built = null;
+    try { built = models.caveman(contributors.traitsFor(entry.name)); } catch (error) {
       const hook = /at (?:Object\.)?(\w+) \(/.exec(String(error.stack || ""));
       broken = `${entry.name}.js threw as its Ooga was built${hook ? `, in ${hook[1]}` : ""}: ${error.message}`;
       console.error(error);
@@ -437,7 +649,7 @@
     camera = createCamera({ fov: 42, near: 0.1, far: 120 });
     root = createNode();
     addChild(root, createNode({ geometry: pad() }));
-    hud = hudMod.create({ signal: ctx.signal, roster: [entry], catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: false });
+    hud = hudMod.create({ signal: ctx.signal, roster: [entry] });
     hud.setAreaLabel("Studio");
     // The studio stands alone: the title's link, which goes back to the island from every other place, stays here and
     // stands the Ooga at home, and the tab says where this is.
@@ -459,6 +671,24 @@
     fillPick();
     pick.addEventListener("change", picked, { signal: ctx.signal });
     document.addEventListener("pointerdown", letGo, { capture: true, signal: ctx.signal });
+    const $ = (id) => document.getElementById(id);
+    panel = { root: $("studio-features"), grip: $("studio-resize"), who: $("studio-who"), bar: $("studio-size-bar"), fill: $("studio-size-fill"), size: $("studio-size"), note: $("studio-size-note"), parts: $("studio-size-parts"), groups: $("studio-groups") };
+    // As wide as the visitor last dragged it in this tab, else the stylesheet's width.
+    let width = NaN;
+    try { width = Number(sessionStorage.getItem(WIDTH_STORE) || NaN); } catch { /* A private window keeps nothing. */ }
+    if (Number.isFinite(width)) setWidth(width, false); else panel.root.style.width = "";
+    panel.grip.addEventListener("pointerdown", gripDown, { signal: ctx.signal });
+    panel.grip.addEventListener("pointermove", gripMove, { signal: ctx.signal });
+    panel.grip.addEventListener("pointerup", gripUp, { signal: ctx.signal });
+    panel.grip.addEventListener("pointercancel", gripUp, { signal: ctx.signal });
+    panel.grip.addEventListener("click", gripPress, { signal: ctx.signal });
+    // The panel is folded or open as the visitor last left it in this tab; at first, open, but folded on a touch
+    // screen, where the sticks need the room. The hud's own fold handler has run by the time this one keeps it.
+    let folded = null;
+    try { folded = sessionStorage.getItem(PANEL_STORE); } catch { /* A private window keeps nothing; the panel opens. */ }
+    panel.root.dataset.folded = String(folded === null ? COARSE : folded === "true");
+    for (const b of document.querySelectorAll('[data-fold="studio-features"]')) b.addEventListener("click", keepFold, { signal: ctx.signal });
+    fillPanel(state.name, built, ctx.signal);
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets: { studio: { ...VIEW, target: { x: HOME.x, y: 1, z: HOME.z } } }, landing: "studio", pitch: [-0.1, 1.3], dist: [1.5, 14],
@@ -617,7 +847,12 @@
     homeLink.title = homeTitle;
     letter(homeLink.querySelector("[data-sign]"), homeWords);
     pick.replaceChildren();
-    homeLink = pick = null;
+    panel.groups.replaceChildren();
+    panel.parts.replaceChildren();
+    delete panel.root.dataset.resizing;
+    resizing = null;
+    panelFill++;
+    homeLink = pick = panel = null;
     remember();
     free.on = false;
     getUp();

@@ -11,29 +11,32 @@ import { CharacterRejection, SOURCE_LIMIT, characterPath, scanCharacter, screenF
 const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "characters");
 
 // One file's reading: `refused`, the lines that say its lane, why, and how full it is, and `brief`, the same in a
-// few words.
+// few words; and the same as data for the studio's panel: `bytes` of `limit`, `lane` ("daily", "manual", or "" when
+// refused), `why` (what keeps it out of the automatic lane, or why it is refused) and `finding` (the screen's
+// line and text, or null).
 export const describe = (file) => {
   const name = basename(file);
-  if (!existsSync(file)) return { refused: true, brief: `${name}: no such file`, lines: [`${name}: no such file in src/characters.`] };
+  if (!existsSync(file)) return { refused: true, brief: `${name}: no such file`, lines: [`${name}: no such file in src/characters.`], bytes: 0, limit: SOURCE_LIMIT, lane: "", why: "no such file", finding: null };
   const source = readFileSync(file, "utf8"), bytes = Buffer.byteLength(source), full = Math.round(bytes / SOURCE_LIMIT * 100);
-  const size = `${bytes} of ${SOURCE_LIMIT} bytes (${full}%)`;
+  const size = `${bytes} of ${SOURCE_LIMIT} bytes (${full}%)`, data = { bytes, limit: SOURCE_LIMIT, finding: null };
   if (!characterPath(`src/characters/${name}`)) {
-    return { refused: true, brief: `${name}: refused, a file is named for its handle`, lines: [`${name}: refused. A character file is named for its handle: letters, digits and hyphens, 39 at most, then .js.`] };
+    return { refused: true, brief: `${name}: refused, a file is named for its handle`, lines: [`${name}: refused. A character file is named for its handle: letters, digits and hyphens, 39 at most, then .js.`],
+      ...data, lane: "", why: "A character file is named for its handle." };
   }
   try {
     const scanned = scanCharacter(source), row = scanned.row;
     const who = row.github && row.github.toLowerCase() !== row.handle.toLowerCase() ? `${row.handle}, owned by ${row.github}` : row.handle;
     if (scanned.lane === "daily") {
       return { refused: false, brief: `${name}: plain data, the automatic lane · ${full}% of the size limit`,
-        lines: [`${name}: automatic lane, for ${who}. Plain data: it merges with the next daily bundle, rewritten from its data (comments are not kept). ${size}.`] };
+        lines: [`${name}: automatic lane, for ${who}. Plain data: it merges with the next daily bundle, rewritten from its data (comments are not kept). ${size}.`], ...data, lane: "daily", why: "" };
     }
     return { refused: false, brief: `${name}: custom code, a maintainer's review · ${full}% of the size limit`,
-      lines: [`${name}: manual review, for ${who}. Custom code: a maintainer reads and merges it. ${size}.`, `  Not plain data because: ${scanned.why}`] };
+      lines: [`${name}: manual review, for ${who}. Custom code: a maintainer reads and merges it. ${size}.`, `  Not plain data because: ${scanned.why}`], ...data, lane: "manual", why: scanned.why };
   } catch (error) {
     if (!(error instanceof CharacterRejection)) throw error;
     const hit = screenFinding(source), lines = [`${name}: refused. ${error.message} ${size}.`];
     if (hit) lines.push(`  Line ${hit.line}: "${hit.text}". The screen reads comments and strings as well as code.`);
-    return { refused: true, brief: `${name}: the intake would refuse this${hit ? ` · line ${hit.line}: "${hit.text}"` : ""} · ${error.message}`, lines };
+    return { refused: true, brief: `${name}: the intake would refuse this${hit ? ` · line ${hit.line}: "${hit.text}"` : ""} · ${error.message}`, lines, ...data, lane: "", why: error.message, finding: hit };
   }
 };
 

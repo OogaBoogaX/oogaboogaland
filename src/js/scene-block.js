@@ -2600,7 +2600,7 @@
     unfeed = BL.mempool.subscribe(onFeed);
     root = createNode();
     clock = daylight.createClock({ hour: hourParam, day: dayParam, now: new Date() });
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: false });
+    hud = hudMod.create({ roster: contributors.activeRoster });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, camera, hud, overlay: ctx.overlay, tickerAt: { x: 0, y: 8, z: 0 } });
@@ -2973,7 +2973,7 @@
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), phase };
   };
-  Object.assign(blockScene, { enter, update, overlay, onDonation, onKey, leave, stats, liveGeometry, onLootCleared: () => { } });
+  Object.assign(blockScene, { enter, update, overlay, onDonation, onKey, leave, stats, liveGeometry });
   BL.scenes = BL.scenes || {};
   BL.scenes.block = blockScene;
 })();

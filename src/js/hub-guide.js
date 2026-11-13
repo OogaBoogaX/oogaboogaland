@@ -89,16 +89,16 @@
     newsArcade: "Ooga Arcade opened: games, tickets and prizes.",
     newsFactory: "The Lightning Factory opened: a Lightning node at work.",
     newsTimechain: "The Timechain Sphere opened out west. Walk inside!",
-    repos: "Over the stone bridge past the Oogatron: Repo Island, slowly turning, a carved totem for each of 170 open-source Bitcoin projects, sorted by kind.",
+    repos: "Over the stone bridge past the Oogatron: Merge Rock, slowly turning, a carved totem for each of 170 open-source Bitcoin projects, sorted by kind.",
     reposLit: "Each stands as tall as Bitcoin leans on its project, and lights up for a day after its repo merges a pull request.",
-    newsRepos: "Repo Island opened off the south rim: 170 totems, one for each open-source Bitcoin project. They light up when their repos merge."
+    newsRepos: "Merge Rock opened off the south rim: 170 totems, one for each open-source Bitcoin project. They light up when their repos merge."
   };
   // The island tour, one stop a landmark: where the view looks from (`eye`) and at (`look`), and the lines she says
   // there. She hovers between the view and the landmark, off to its right, and her beam lands on `look`.
   const STOPS = [
     { id: "pile", title: "The pile", eye: [6, 8, 11], look: [0, 1.2, 0], lines: ["pile", "crew"] },
     { id: "totems", title: "Jumbotron and totems", eye: [7, 8, 7], look: [0, 5, 26], lines: ["jumbotron", "totems"] },
-    { id: "repos", title: "Repo Island", eye: [7, 12, 26], look: [0, 3, 62], lines: ["repos", "reposLit"] },
+    { id: "repos", title: "Merge Rock", eye: [7, 12, 26], look: [0, 3, 62], lines: ["repos", "reposLit"] },
     { id: "timechain", title: "Timechain Sphere", eye: [-15, 16, 4], look: [-42, 5, 17], lines: ["timechain", "timechainWalls", "timechainBoards", "timechainShare"] },
     { id: "bca", title: "B.C.A.", eye: [-11, 9.5, -6.5], look: [-19, 4.5, -11], lines: ["bca", "bcaInside", "bcaMotto"] },
     { id: "lab", title: "EntropyLab", eye: [-6.5, 9.5, -11], look: [-11, 4.5, -19], lines: ["lab", "labInside", "labCrew"] },
@@ -208,7 +208,7 @@
   const PLACES = {
     pile: ["pile", "banana pile", "bananas pile"],
     totems: ["jumbotron", "oogatron", "totem", "totems"],
-    repos: ["repo island", "repos island", "repos", "repo", "repositories", "repository", "totem island", "stone bridge", "open source"],
+    repos: ["merge rock", "repo island", "repos island", "repos", "repo", "repositories", "repository", "totem island", "stone bridge", "open source"],
     timechain: ["timechain", "timechain sphere", "sphere"],
     bca: ["bca", "b c a", "banana certified accounting", "accounting"],
     lab: ["lab", "entropylab", "entropy lab"],

@@ -389,7 +389,6 @@
     game.recordDonation(donation, counted && counted.exact);
     world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats)));
   };
-  const onLootCleared = () => {};
 
   // The chamber for a visit: the hall, the mechanism and the tunnel from the cached builds, then each window by the
   // kind its row resolves to now: a travel window whose world is not open is a mirror instead.
@@ -615,7 +614,7 @@
     pictureWait = PICTURE_DELAY;
     camera = createCamera({ fov: 55, near: 0.3, far: 700 });
     root = createNode();
-    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster });
     hooks = {};
     input = interactMod.create({ canvas, renderer, camera, hooks });
     const inTunnel = (p) => p.z > HALL.r - 1.5 && Math.abs(p.x) < ENTRY.halfW;
@@ -1092,7 +1091,7 @@
     // Voice zone: the Bifrost group, which the isle and its bridge share (`bifrost`).
     voiceZone: "bifrost.chamber",
     micKey: true,
-    id: "bifrost", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
+    id: "bifrost", enter, update, overlay, onDonation, onKey, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
       return !!scene;

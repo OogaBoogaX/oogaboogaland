@@ -24,7 +24,6 @@
     return online ? "online" : actor.state === "away" ? "chilling" : actor.state;
   };
   const $ = (id) => document.getElementById(id);
-  const TIER_RANK = { legendary: 0, epic: 1, rare: 2, common: 3 };
   const BANANA_COUNT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
   const DONATED_COUNT = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const DONOR_BANANAS = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -299,7 +298,7 @@
   // The sheet belongs to the page. Reuse attached rows across visits; only current roster names stay in this map.
   const rosterNodes = new Map();
   let rosterAway = null, donorRows = null, donationRows = null;
-  const create = ({ roster, catalog, tierColors, renderIcon, lootEnabled = false, healthEnabled = false, signal = null, escapeHeld = null }) => {
+  const create = ({ roster, healthEnabled = false, signal = null, escapeHeld = null }) => {
     const lifetime = signal ? null : new AbortController();
     signal = signal || lifetime.signal;
     const el = {
@@ -315,8 +314,6 @@
       bananaPanel: $("bananas-panel"), bananaBtcRate: $("banana-btc-rate"),
       bananaBtcSats: $("banana-btc-sats"), bananaBtcPrice: $("banana-btc-price"), bananaExchange: $("banana-exchange"),
       donorUnits: [...document.querySelectorAll("[data-donor-unit]")],
-      lootTab: $("loot-tab"),
-      worldLootHint: $("world-loot-hint"),
       subtitle: $("subtitle"),
       topbar: document.querySelector(".topbar"), brand: document.querySelector(".brand"),
       clock: $("world-clock"), block: $("world-block"),
@@ -369,8 +366,6 @@
       hint: $("hint"),
       sheet: $("sheet"),
       presets: [...document.querySelectorAll("[data-preset]")],
-      inventory: $("inventory"),
-      inventoryEmpty: $("inventory-empty"),
       recipe: $("recipe"),
       recipeText: $("recipe-text")
     };
@@ -392,9 +387,7 @@
       el.modeFree.src = canvas.toDataURL("image/png");
     };
     favicon.src = document.querySelector('link[rel="icon"][sizes="64x64"]').href;
-    el.lootTab.hidden = !lootEnabled;
-    el.worldLootHint.hidden = !lootEnabled;
-    const sheet = BL.sheet.create({ lootEnabled, signal });
+    const sheet = BL.sheet.create({ signal });
     sheet.setPlaying(document.body.classList.contains("arcade-game"));
     el.primary.hidden = true;
     el.gorillaSmash.hidden = true;
@@ -2249,114 +2242,6 @@
     const onPreset = (fn) => {
       presetHandler = fn;
     };
-    let assignHandler = null, unassignHandler = null;
-    const onAssign = (fn) => {
-      assignHandler = fn;
-    };
-    const onUnassign = (fn) => {
-      unassignHandler = fn;
-    };
-    const iconCache = new Map();
-    const iconFor = (item) => {
-      let icon = iconCache.get(item.id);
-      if (!icon && renderIcon) {
-        icon = renderIcon(item);
-        iconCache.set(item.id, icon);
-      }
-      return icon;
-    };
-    const groupEntries = (entries) => {
-      const groups = new Map();
-      for (const entry of entries) {
-        const item = catalog.find((c) => c.id === entry.itemId);
-        if (!item) continue;
-        let group = groups.get(item.id);
-        if (!group) {
-          group = { item, tier: entry.tier, entries: [] };
-          groups.set(item.id, group);
-        }
-        group.entries.push(entry);
-      }
-      return [...groups.values()].sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier] || a.item.name.localeCompare(b.item.name));
-    };
-    const renderInventory = (entries, assignedTo, wornBy = () => null) => {
-      el.inventory.replaceChildren();
-      el.inventoryEmpty.hidden = entries.length > 0;
-      sheet.setLootCount(entries.length);
-      for (const group of groupEntries(entries)) {
-        const { item } = group;
-        const worn = group.entries.map((e) => ({ entry: e, name: assignedTo(e.id) })).filter((w) => w.name);
-        const free = group.entries.filter((e) => !assignedTo(e.id));
-        const li = document.createElement("li");
-        li.className = "loot-row";
-        li.style.setProperty("--tier", tierColors[group.tier]);
-        const icon = iconFor(item);
-        if (icon) {
-          const canvas = document.createElement("canvas");
-          canvas.className = "loot-icon";
-          canvas.width = icon.width;
-          canvas.height = icon.height;
-          canvas.getContext("2d").drawImage(icon, 0, 0);
-          li.append(canvas);
-        }
-        const main = document.createElement("div");
-        main.className = "loot-main";
-        const title = document.createElement("div");
-        title.className = "loot-title";
-        const name = document.createElement("span");
-        name.className = "loot-name";
-        name.textContent = item.name;
-        const badge = document.createElement("span");
-        badge.className = "loot-tier";
-        badge.textContent = group.tier;
-        title.append(name, badge);
-        if (group.entries.length > 1) {
-          const count = document.createElement("span");
-          count.className = "loot-count";
-          count.textContent = `×${group.entries.length}`;
-          title.append(count);
-        }
-        main.append(title);
-        if (worn.length) {
-          const chips = document.createElement("div");
-          chips.className = "loot-worn";
-          for (const w of worn) {
-            const chip = document.createElement("button");
-            chip.type = "button";
-            chip.className = "chip";
-            chip.title = `Take ${item.name} off ${BL.characters.displayOf(w.name)}`;
-            chip.textContent = BL.characters.displayOf(w.name);
-            chip.addEventListener("click", () => unassignHandler && unassignHandler(w.name), { signal });
-            chips.append(chip);
-          }
-          main.append(chips);
-        }
-        li.append(main);
-        const select = document.createElement("select");
-        select.className = "loot-assign";
-        select.setAttribute("aria-label", `Give ${item.name} to a caveman`);
-        const placeholder = document.createElement("option");
-        placeholder.value = "";
-        placeholder.textContent = free.length ? `Give one to… (${free.length} free)` : "All worn";
-        select.append(placeholder);
-        select.disabled = free.length === 0;
-        for (const contributor of roster) {
-          const opt = document.createElement("option");
-          opt.value = contributor.name;
-          const wearing = wornBy(contributor.name);
-          opt.textContent = wearing ? `${contributor.display} · ${wearing}` : `${contributor.display} · no swag`;
-          select.append(opt);
-        }
-        select.addEventListener("change", () => {
-          const target = select.value;
-          select.value = "";
-          select.blur();
-          if (target && free.length) assignHandler && assignHandler(free[0].id, target);
-        }, { signal });
-        li.append(select);
-        el.inventory.append(li);
-      }
-    };
     // End this visit; the attached sheet rows belong to the page.
     const dispose = () => {
       delete document.body.dataset.bannerOogas;
@@ -2373,7 +2258,6 @@
       if (liveRows === rosterRows) liveRows = liveOnline = null;
       if (liveDonors === refreshDonors) liveDonors = null;
       // Page-owned roster and donation rows remain attached; the next visit reconciles their contents.
-      el.inventory.replaceChildren();
       el.toast.classList.remove("show");
       el.toast.hidden = true;
       el.hint.classList.remove("show");
@@ -2402,13 +2286,13 @@
     return {
       // Engines keep this facade while a retained scene takes a fresh visit signal and sheet state.
       renew(signal) {
-        const next = create({ roster, catalog, tierColors, renderIcon, lootEnabled, healthEnabled, signal, escapeHeld });
+        const next = create({ roster, healthEnabled, signal, escapeHeld });
         next.tooltip.setVisibility(this.tooltip.visibility);
-        next.onAction(actionHandler); next.onPreset(presetHandler); next.onAssign(assignHandler); next.onUnassign(unassignHandler);
+        next.onAction(actionHandler); next.onPreset(presetHandler);
         Object.defineProperties(this, Object.getOwnPropertyDescriptors(next));
         return this;
       },
-      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setWeaponSkin, setDestinations, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
+      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setWeaponSkin, setDestinations, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, setPileValueVisible, dispose };
   };
   // Detached panels can be visible together. Each has a view of the same account and voice state.
   const ROOM_WORDS = { replaced: "open in another tab", full: "island full" };

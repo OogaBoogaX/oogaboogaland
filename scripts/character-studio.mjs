@@ -11,7 +11,8 @@
 // The studio stands alone there: every page address the server answers opens it, never the island, and the address
 // is no more than `?scene=studio&character=<handle>`.
 // On each save it joins src/characters into the page's bundle again and says, here and in the page, what the
-// intake's screen makes of the file (scripts/character-check.mjs). A file that no longer parses is reported and the
+// intake's screen makes of the file (scripts/character-check.mjs); `/__studio/reading` gives the same, as data, of the
+// file of whichever Ooga stands on the pad, for the page's This Ooga panel. A file that no longer parses is reported and the
 // page is left as it was. The file is read as text here and run only by the browser. Stop it with Ctrl+C.
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync, watch } from "node:fs";
@@ -54,6 +55,15 @@ const read = (file) => {
   const reading = describe(file);
   for (const line of reading.lines) console.log(line);
   note = reading.brief;
+};
+// What the page's This Ooga panel shows of a character's file, by handle, any letter case: its size of the limit, the
+// lane the intake puts it in and why, or `file: false` when it has none yet. The file is read as text, as above.
+const reading = (name) => {
+  if (!/^[A-Za-z0-9-]{1,39}$/.test(name)) return { file: false };
+  const found = readdirSync(characters).find((file) => file.toLowerCase() === `${name.toLowerCase()}.js`);
+  if (!found) return { file: false };
+  const { refused, bytes, limit, lane, why, finding } = describe(join(characters, found));
+  return { file: true, refused, bytes, limit, lane, why, finding };
 };
 const rebuild = (changed) => {
   const files = readdirSync(characters).filter((name) => name.endsWith(".js"));
@@ -121,6 +131,7 @@ const server = createServer((req, res) => {
   let url, path;
   try { url = new URL(req.url, `http://${HOST}`); path = decodeURIComponent(url.pathname); } catch { return send(res, 400, "text/plain; charset=utf-8", "Bad request"); }
   if (path === "/__studio/version") return send(res, 200, TYPES[".json"], JSON.stringify({ version: `${started}-${edits}`, error, note, count }));
+  if (path === "/__studio/reading") return send(res, 200, TYPES[".json"], JSON.stringify(reading(url.searchParams.get("character") || "")));
   if (path === "/__studio/boot.js") return send(res, 200, TYPES[".js"], boot);
   // Every page address is the studio: the bare one is answered with the page, whatever its query, and the page's
   // file by name or a path with no file type (as the island's routes are) is sent on to it.
