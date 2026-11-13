@@ -15278,6 +15278,29 @@ const hubAk = { name: "hub ak", why: "regression: R did nothing unless the playe
   await b.evaluate(`window.__ooga.advance(0.8, 1 / 60)`);
   const swapped = await b.evaluate(AK_STATE);
   record("hub ak: V fires a burst of three from the magazine, an empty magazine fires nothing, the bananas hit, and R swaps in the full spare without aiming", aimed && start.ammo === 6 && one.ammo === 3 && two.ammo === 0 && dry.shots === two.shots && hit && !swapped.aiming && swapped.ammo === 30 && swapped.spares.every((n) => n === 0), JSON.stringify({ aimed, start, one, two, dry, hit, swapped }));
+  const heldAim = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, cave = P.player, w = cave.weapon, button = document.getElementById('weapon-hud');
+    const press = () => button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse', pointerId: 95, button: 0, buttons: 1 }));
+    const release = () => button.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'mouse', pointerId: 95, button: 0, buttons: 0 }));
+    B.advance(1, 1 / 60);
+    press(); release(); B.advance(0.2, 1 / 60);
+    const waiting = w.cooldown > 0 && !w.burstRemaining, before = w.shotsFired;
+    cave.root.rotation.y += 1.2;
+    press();
+    const target = { ...w.burstTarget }, captured = !w.burstPlayerAim;
+    let frames = 0;
+    while (w.shotsFired === before && frames++ < 30) B.advance(1 / 60, 1 / 60);
+    const first = { shots: w.shotsFired - before, playerAim: w.burstPlayerAim, target: { ...w.burstTarget } };
+    release(); B.advance(0.6, 1 / 60);
+    // A later mouse hold must return to camera aim instead of retaining the HUD's facing target.
+    B.crew.setWeaponTrigger(true);
+    const mouseAim = w.burstPlayerAim;
+    B.crew.setWeaponTrigger(false); B.crew.stopBurst(cave);
+    return { waiting, captured, first, target, mouseAim };
+  })()`);
+  record("hub ak: a HUD hold begun during cooldown keeps facing aim for its first delayed round, and a mouse hold restores camera aim",
+    heldAim.waiting && heldAim.captured && heldAim.first.shots === 1 && !heldAim.first.playerAim && heldAim.mouseAim
+      && Math.hypot(heldAim.first.target.x - heldAim.target.x, heldAim.first.target.z - heldAim.target.z) < 0.01, JSON.stringify(heldAim));
   await b.evaluate(removeWeaponTarget);
 } };
 const JET_STATE = `(() => { const c = window.__ooga.crew.player, J = window.__ooga.jetpack; return { worn: !!c.jet, owned: J.owned, fuel: +c.jetFuel.toFixed(3), feet: +(c.root.position.y - c.baseY).toFixed(2), pickup: !!(J.pickup && J.pickup.host), toast: (document.getElementById("toast") || {}).textContent }; })()`;
