@@ -21,7 +21,8 @@
       if (value[i] === " ") continue;
       const glyph = BL.hubModels.SIGN_GLYPHS[value[i]] || BL.hubModels.SIGN_GLYPHS[value[i].toLowerCase()] || PUNCTUATION[value[i]];
       if (!glyph) throw new Error(`Missing DSB glyph ${value[i]}`);
-      for (let r = 0; r < glyph.length; r++) for (let c = 0; c < 3; c++) if (glyph[r][c] === "1") bits.push(box({ w: 0.135, h: 0.135, d: 0.12, color, emissive: 0.6, offset: { x: i * 4 * cell + c * cell - width / 2, y: (4 - r) * cell } }));
+      const sx = 3 / glyph[0].length;
+      for (let r = 0; r < glyph.length; r++) for (let c = 0; c < glyph[r].length; c++) if (glyph[r][c] === "1") bits.push(box({ w: 0.135 * sx, h: 0.135, d: 0.12, color, emissive: 0.6, offset: { x: (i * 4 + (c + 0.5) * sx - 0.5) * cell - width / 2, y: (4 - r) * cell } }));
     }
     return merge(...bits);
   });
