@@ -1,4 +1,4 @@
-// Repo Island's geometry, off the main island's south rim: a small round floating island of voxel stone, a stone lip
+// Merge Rock's geometry, off the main island's south rim: a small round floating island of voxel stone, a stone lip
 // round its edge, a stone bridge to the lip from the top of the south stairs (where the Oogatron arches over the path),
 // and a carved totem for every repository `repo-island-data.js` lists, each from the meadow totems' own kit
 // (`totem-models.js`) and standing that repository's importance times Bitcoin Core's height.
@@ -22,14 +22,14 @@
 //
 // Geometry, each cached for the page and released with the hub's caches: `rockSteps` (the top a half-metre lattice
 // painted with the plaza's bed, the paths' grout and the ground, its `collisionGeometry` a closed turned shell whose top
-// is the island's top and the lip's, the lip's stonework (`lip`), the paths' cobbles, kerbs and the plaza's flags
+// is the island's top and the lip's, the lip's stonework (`lip`), the paths' cobbles, kerbs and the plaza's cobbles
 // (`pavement`), and the crystals hanging under every totem in place of a rock keel (`crystals`)), `bridge()` (stone in
 // island coordinates: a flagged deck whose end follows the lip's round edge, a stepped arch under it, parapets and pillars, and four lanterns
 // whose glass is `glass`, with their glow points in `lamps`), `signs()` (every section's sign laid flat in the lip, never
 // solid), and `chunkSteps(k, tier)`: a chunk's carvings merged at one of three details (`near`, `far`
-// for across the island, `distant` for across the water) as `mesh`, all three sharing one collision shell; the distant
-// build also gives each totem's runes with an ember in each crest eye (`glyphs`, for the lit bands) and those two eyes
-// (`eyes`); `crystals()` is the cluster under the island, each crystal with the totems over it, and `gem(k)` the
+// for across the island, `distant` for across the water) as `mesh`, the carvings walk-through; the distant
+// build also gives each totem's runes (`glyphs`, for the lit bands) and all eye sockets
+// (`eyes`); every detail carries its matching painted surfaces (`features`); `crystals()` is the cluster under the island, each crystal with the totems over it, and `gem(k)` the
 // glowing copy of one. Nothing here runs per frame.
 (() => {
   "use strict";
@@ -60,18 +60,17 @@
   // How far the island keeps from the other islets.
   const CLEAR = 8;
   // The ground's own look, moss and cobble: the ground's three tones, the grout the paths' cobbles are set in (two
-  // tones) and the cobbles' and kerbs' own, the plaza's flags over its bed and its ring, and the lip's flags, grout,
+  // tones) and the cobbles' and kerbs' own, and the lip's flags, grout,
   // coping, wall stones and plinth.
   const GROUND = {
     ground: ["#4e7c3a", "#5a8a44", "#41692f"], path: ["#6c675f", "#645f58"], grout: "#55524c",
     cobbles: ["#a7a195", "#948e83", "#b5afa3", "#837e74", "#9c968a"], kerbs: ["#7f7b73", "#8a867e", "#77736b"],
-    plaza: ["#cbbfa4", "#b9ad92"], flags: ["#d3c8ae", "#c2b69b", "#dbd1b9", "#b6aa8f"], ring: "#f7931a",
     lip: ["#9a9892", "#8b8983", "#a6a49e", "#7f7d77"], coping: ["#706d67", "#67645e", "#78756f"], wall: ["#7b776f", "#6e6a63", "#857f77", "#736f68"], plinth: "#5e5a54"
   };
   const P = BL.terrain.PALETTE.length;
   // The terrain's palette, then the island's own: its ground, paths, plaza and lip.
-  const PALETTE = [...BL.terrain.PALETTE, ...[...GROUND.ground, ...GROUND.path, GROUND.grout, ...GROUND.plaza, GROUND.ring, "#6a625b"].map(hexToRgb)];
-  const C = { stone: 5, stoneDark: 6, dirt: 8, ground: P, groundLight: P + 1, groundDark: P + 2, path: P + 3, path2: P + 4, edge: P + 5, flag: P + 6, flagLight: P + 7, orange: P + 8, kerb: P + 9 };
+  const PALETTE = [...BL.terrain.PALETTE, ...[...GROUND.ground, ...GROUND.path, GROUND.grout, "#6a625b"].map(hexToRgb)];
+  const C = { stone: 5, stoneDark: 6, dirt: 8, ground: P, groundLight: P + 1, groundDark: P + 2, path: P + 3, path2: P + 4, edge: P + 5, kerb: P + 6 };
 
   // ---- designs -------------------------------------------------------------------------------------------------
   // Each section's crests and paints; a carving's paint and second paint are drawn from these, never the same.
@@ -129,7 +128,7 @@
       };
       const key = signature(d);
       if (taken.has(key) && attempt < 64) continue;
-      if (taken.has(key)) throw new Error(`Repo Island: no design of its own for ${repo.repo}`);
+      if (taken.has(key)) throw new Error(`Merge Rock: no design of its own for ${repo.repo}`);
       taken.add(key);
       return d;
     }
@@ -203,7 +202,7 @@
     const ring = core.totems.filter((t) => t !== centre);
     // Spread evenly all the way round: the arc runs one gap past a full turn, so the gap across its ends is the others'.
     const ringNeed = ring.reduce((sum, t) => sum + 2 * t.L.reach + PLAN.gap, 0), ringGap = (TAU * PLAN.coreRing - ringNeed) / ring.length;
-    if (ringGap < 0) throw new Error("Repo Island: the Core ring is overfull");
+    if (ringGap < 0) throw new Error("Merge Rock: the Core ring is overfull");
     const ringRow = [];
     spread(ring, PLAN.coreRing, 0, TAU + ringGap / PLAN.coreRing, 0, ringRow);
     for (const t of ringRow) placed.push({ ...t, ry: outward(t.x, t.z) });
@@ -233,7 +232,7 @@
       need.forEach((n, k) => { need[k] = n * Math.max(0.5, packed[k].fill) ** 0.7; });
     }
     for (const { s, from, to, out, left } of best) {
-      if (left) throw new Error(`Repo Island: the ${s.name} wedge has no room for ${left} more`);
+      if (left) throw new Error(`Merge Rock: the ${s.name} wedge has no room for ${left} more`);
       wedges.push({ id: s.id, name: s.name, badge: s.badge, from, to, count: s.totems.length });
       spokes.push(from);
       const sp = polar((from + to) / 2, PLAN.sign);
@@ -261,9 +260,9 @@
       const t = placed[a];
       for (let b = a + 1; b < placed.length; b++) {
         const u = placed[b];
-        if (Math.hypot(t.x - u.x, t.z - u.z) < t.L.reach + u.L.reach + PLAN.gap * 0.5) throw new Error(`Repo Island: ${t.repo} and ${u.repo} stand too close`);
+        if (Math.hypot(t.x - u.x, t.z - u.z) < t.L.reach + u.L.reach + PLAN.gap * 0.5) throw new Error(`Merge Rock: ${t.repo} and ${u.repo} stand too close`);
       }
-      if (t.r && pathAt(t.x, t.z, spokes, t.L.reach * 0.5)) throw new Error(`Repo Island: ${t.repo} stands on a path`);
+      if (t.r && pathAt(t.x, t.z, spokes, t.L.reach * 0.5)) throw new Error(`Merge Rock: ${t.repo} stands on a path`);
     }
     return { totems: placed, chunks, bounds, signs, spokes, wedges, byIndex: D.REPOS.map((_, i) => placed.find((t) => t.index === i)) };
   });
@@ -291,20 +290,19 @@
     const pool = BL.poolModels.spot(island, {}), T = BL.timechainModels, out = Math.max(0, z * T.DIR.z);
     for (const [name, ox, oz, r] of [["Mempool island", pool.x, pool.z, BL.poolModels.SITE.reach], ["Timechain Sphere", T.DIR.x * out, T.DIR.z * out, T.SITE.radius]]) {
       const apart = Math.hypot(ox, z - oz) - r - ISLE.R;
-      if (apart < CLEAR) throw new Error(`Repo Island comes within ${apart.toFixed(1)} m of the ${name}`);
+      if (apart < CLEAR) throw new Error(`Merge Rock comes within ${apart.toFixed(1)} m of the ${name}`);
     }
     return { x: 0, y, z, rim };
   };
 
   // ---- the rock ------------------------------------------------------------------------------------------------
   const noise = (x, z) => Math.sin(x * 0.41 + 1.3) * Math.cos(z * 0.37 - 0.7) + 0.5 * Math.sin((x + z) * 0.23 + 2.1);
-  // The colour of the top at (x, z), the lattice cell (ix, iz): the plaza's bed inside its orange ring, the grout the
+  // The colour of the top at (x, z), the lattice cell (ix, iz): the plaza's cobble bed, the grout the
   // paths' cobbles are set in, and the ground.
   const topAt = (x, z, ix, iz, spokes) => {
     const r = Math.hypot(x, z);
     if (r > PLAN.edge) return C.kerb;
-    if (r < PLAN.plaza) return r > PLAN.plaza - 0.5 ? C.orange : (ix + iz) % 2 ? C.flag : C.flagLight;
-    if (pathAt(x, z, spokes)) return (ix + iz) % 2 ? C.path2 : C.path;
+    if (r < PLAN.plaza || pathAt(x, z, spokes)) return (ix + iz) % 2 ? C.path2 : C.path;
     const n = noise(x, z);
     return n > 0.75 ? C.groundLight : n < -0.75 ? C.groundDark : C.ground;
   };
@@ -375,10 +373,10 @@
   };
 
   // The paths' paving: cobbles in staggered rows set in the lattice's grout, kerbstones along both edges of every path
-  // (the ring path's outer kerb broken where a spoke leaves it), and the plaza's flags in rings round Bitcoin Core.
+  // (the ring path's outer kerb broken where a spoke leaves it), and the plaza's matching cobbles round Bitcoin Core.
   const COBBLE = 0.26, KERB = 0.07;
   const paveSteps = function* (slice, spokes) {
-    const g = { verts: [], faces: [], lines: [] }, rand = mulberry32(0xc0bb1e), cobble = shades(rand, GROUND.cobbles), kerb = shades(rand, GROUND.kerbs), flag = shades(rand, GROUND.flags);
+    const g = { verts: [], faces: [], lines: [] }, rand = mulberry32(0xc0bb1e), cobble = shades(rand, GROUND.cobbles), kerb = shades(rand, GROUND.kerbs);
     const lay = (x, z, dx, dz, size) => {
       const turn = (rand() - 0.5) * 0.18, c = Math.cos(turn), sn = Math.sin(turn), k = 0.92 + rand() * 0.08;
       stone(g, x, z, dx * c - dz * sn, dz * c + dx * sn, size / 2 * k, size / 2 * (0.92 + rand() * 0.08), -0.01, 0.024 + rand() * 0.014, 0.8, cobble());
@@ -418,13 +416,12 @@
       }
       yield* pause(slice);
     }
-    // The plaza: rings of flags, each ring's joints between the last's.
-    for (let r = 0.25, ring = 0; r < PLAN.plaza - 0.55; r += 0.42, ring++) {
-      const r2 = Math.min(r + 0.42, PLAN.plaza - 0.5), count = Math.max(5, Math.round(TAU * (r + r2) / 2 / 0.55));
-      for (let k = 0; k < count; k++) {
-        const a0 = (k + (ring % 2) * 0.5) / count * TAU, a1 = a0 + TAU / count, gap = 0.012 / r2;
-        block(g, r + 0.012, r2 - 0.012, a0 + gap, a1 - gap, -0.02, 0.018 + rand() * 0.006, flag());
+    // The same staggered cobbles as the paths, right out to the plaza's edge.
+    for (let row = 0, z = -PLAN.plaza + COBBLE / 2; z < PLAN.plaza; z += COBBLE, row++) {
+      for (let x = -PLAN.plaza + (row % 2 ? COBBLE : COBBLE / 2); x < PLAN.plaza; x += COBBLE) {
+        if (Math.hypot(x, z) < PLAN.plaza - COBBLE / 2) lay(x, z, 1, 0, COBBLE - 0.03);
       }
+      yield* pause(slice);
     }
     return g;
   };
@@ -439,11 +436,11 @@
   // sunflower's spiral, the middle's longest and thickest; each grows mostly down and a little out along the rock, so
   // the ceiling's silhouette is one rounded mass, lowest under Bitcoin Core. Each cluster stands under the totems
   // nearer it than any other (`crystals()`'s `totems`, places in `plan().totems`); while they are lit the runtime lays
-  // a glowing core (`gem(k)`) inside each of its crystals, which shows through the glass.
+  // luminous facets (`gem(k, band)`) over each shell, tinted by smoothly tapering light from nearby lit totems.
   const CRYSTAL = {
-    hues: [["#3b1d5e", "#6e3fae", "#b48ae0", "#e4d0f7"], ["#47185a", "#8a3a9e", "#cf7fd6", "#f3d2f0"], ["#26245e", "#4d4fae", "#8f97e2", "#d6dcf8"]],
+    hues: [["#291738", "#49305f", "#79618f", "#a38cb5"], ["#321a3b", "#57305f", "#8e5f94", "#b58fb5"], ["#202137", "#383b61", "#646c98", "#949dbb"]],
     core: ["#ff5ad2", "#7a8cff", "#ffc2ee"], rock: ["#2b2430", "#342b3a", "#251f2a", "#3d3244"],
-    depth: 3, clusters: 150, satellites: [4, 8], carpet: 1800, glass: 0.6, carpetGlass: 0.72
+    depth: 3, clusters: 150, satellites: [4, 8], carpet: 1800, glass: 0.86, carpetGlass: 0.93, lightRange: 4.5, lightBands: 8
   };
   const BASE_R = PLAN.edge + 0.4, HUES = CRYSTAL.hues.map((h) => h.map(hexToRgb)), CORE = CRYSTAL.core.map(hexToRgb), ROCK = CRYSTAL.rock.map(hexToRgb);
   // The rock's underside at (x, z): deepest under the middle, lumpy, rising to the soil's underside at the rim.
@@ -491,9 +488,9 @@
       const x = Math.sin(a) * at, z = -Math.cos(a) * at, [nx, ny, nz] = rockNormal(x, z), f = 1 - Math.min(1, at / BASE_R) ** 1.6;
       const len = 1 + 7.5 * f ** 1.3 * (0.85 + rand() * 0.25), r = 0.1 + 0.28 * f * (0.85 + rand() * 0.3);
       const dx = nx * 0.35 + (rand() - 0.5) * 0.18, dy = ny * 0.35 - 0.65, dz = nz * 0.35 + (rand() - 0.5) * 0.18;
-      const hue = HUES[Math.floor(rand() * HUES.length)], site = { x, z, totems: [] };
+      const hue = HUES[Math.floor(rand() * HUES.length)], site = { x, z, totems: [], neighbours: [] };
       sites.push(site);
-      const grow = (px, pz, ax, ay, az, w, l) => list.push({ x: px, y: rockY(px, pz), z: pz, ax, ay, az, r: w, len: l, hue, seed: fnv1a(`crystal/${list.length}`), totems: site.totems });
+      const grow = (px, pz, ax, ay, az, w, l) => list.push({ x: px, y: rockY(px, pz), z: pz, ax, ay, az, r: w, len: l, hue, seed: fnv1a(`crystal/${list.length}`), totems: site.totems, neighbours: site.neighbours });
       grow(x, z, dx, dy, dz, r, len);
       for (let m = 0, [few, most] = CRYSTAL.satellites, count = few + Math.floor(rand() * (most - few + 1)); m < count; m++) {
         const turn = rand() * TAU, off = r * (0.9 + rand() * 0.8), ox = Math.cos(turn), oz = Math.sin(turn), tilt = 0.25 + rand() * 0.45;
@@ -504,18 +501,42 @@
       let best = sites[0], near = Infinity;
       for (const s of sites) { const d = (s.x - t.x) ** 2 + (s.z - t.z) ** 2; if (d < near) { near = d; best = s; } }
       best.totems.push(at);
+      for (const site of sites) if ((site.x - t.x) ** 2 + (site.z - t.z) ** 2 < CRYSTAL.lightRange ** 2) site.neighbours.push(at);
     });
+    // The short crystals belong to the same lighting map as the large clusters. Each follows its nearest
+    // totem directly and catches a weaker wash from other lit totems within the neighbouring patch.
+    const rand = mulberry32(0xd5e5), count = CRYSTAL.carpet, carpetSpread = BASE_R * 0.985, step = Math.sqrt(Math.PI * carpetSpread * carpetSpread / count);
+    for (let k = 0; k < count; k++) {
+      const r0 = carpetSpread * Math.sqrt((k + 0.5) / count), a = k * golden;
+      const x = Math.sin(a) * r0 + (rand() - 0.5) * step * 0.4, z = -Math.cos(a) * r0 + (rand() - 0.5) * step * 0.4;
+      const [nx, ny, nz] = rockNormal(x, z), f = 1 - Math.min(1, r0 / BASE_R) ** 1.6, r = step * 0.62 * (0.85 + rand() * 0.3);
+      const c = { x, y: rockY(x, z), z, ax: nx * 0.6 + (rand() - 0.5), ay: ny * 0.6 - 0.4, az: nz * 0.6 + (rand() - 0.5),
+        r, len: r * (2 + rand() * 2) * (1 + 1.2 * f), hue: HUES[Math.floor(rand() * HUES.length)], seed: fnv1a(`crystal-carpet/${k}`), short: true, totems: [], neighbours: [] };
+      let nearest = 0, distance = Infinity;
+      P.totems.forEach((t, at) => {
+        const d = (t.x - x) ** 2 + (t.z - z) ** 2;
+        if (d < distance) { nearest = at; distance = d; }
+        if (d < CRYSTAL.lightRange ** 2) c.neighbours.push(at);
+      });
+      c.totems.push(nearest);
+      list.push(c);
+    }
     return list;
   });
-  // A crystal's glowing core, inside it, for the runtime's lit bands.
+  // A crystal's luminous facets, with a baked tint and emission level for the runtime's source-totem groups.
   const gems = models.scopedMap();
-  const gem = (k) => {
-    let g = gems.get(k);
+  const gem = (k, band = CRYSTAL.lightBands - 1) => {
+    const key = k * CRYSTAL.lightBands + band;
+    let g = gems.get(key);
     if (!g) {
       const c = crystals()[k];
       g = { verts: [], faces: [], lines: [] };
-      quartz(g, c.x, c.y, c.z, c.ax, c.ay, c.az, c.r * 0.42, c.len * 0.82, [CORE[0], CORE[0], CORE[2], CORE[1]], mulberry32(c.seed ^ 0x5bd1), 6, 1);
-      gems.set(k, g);
+      // The outer facets carry a tint proportional to local light, rather than switching to a
+      // bright shell as soon as any neighbour is lit. Keep the original crystal colors at the dim edge.
+      const level = (band + 1) / CRYSTAL.lightBands, light = [CORE[1], CORE[0], CORE[2], CORE[1]];
+      const colors = c.hue.map((color, i) => color.map((v, channel) => v + (light[i][channel] - v) * level * 0.65));
+      quartz(g, c.x, c.y, c.z, c.ax, c.ay, c.az, c.r, c.len, colors, mulberry32(c.seed), 6, level, !c.short);
+      gems.set(key, g);
     }
     return g;
   };
@@ -528,17 +549,8 @@
       facet(rock, [a, c, d], 0, 5, 0, tone(0));
       if (i) facet(rock, [a, d, b], 0, 5, 0, tone(1));
     }
-    // The carpet: on a sunflower's spiral, each a little wider than the spiral's spacing so the roots touch, leaning
-    // every way off the rock, longer the nearer the middle.
-    const rand = mulberry32(0xd5e5), n = CRYSTAL.carpet, spread = BASE_R * 0.985, step = Math.sqrt(Math.PI * spread * spread / n), golden = Math.PI * (3 - Math.sqrt(5));
-    for (let k = 0; k < n; k++) {
-      const r0 = spread * Math.sqrt((k + 0.5) / n), a = k * golden, x = Math.sin(a) * r0 + (rand() - 0.5) * step * 0.4, z = -Math.cos(a) * r0 + (rand() - 0.5) * step * 0.4;
-      const [nx, ny, nz] = rockNormal(x, z), f = 1 - Math.min(1, r0 / BASE_R) ** 1.6, r = step * 0.62 * (0.85 + rand() * 0.3);
-      quartz(carpet, x, rockY(x, z), z, nx * 0.6 + (rand() - 0.5), ny * 0.6 - 0.4, nz * 0.6 + (rand() - 0.5), r, r * (2 + rand() * 2) * (1 + 1.2 * f), HUES[Math.floor(rand() * HUES.length)], rand, 6, 0, false);
-      if (due(slice, 31)) yield* pause(slice);
-    }
     for (const c of crystals()) {
-      quartz(glass, c.x, c.y, c.z, c.ax, c.ay, c.az, c.r, c.len, c.hue, mulberry32(c.seed));
+      quartz(c.short ? carpet : glass, c.x, c.y, c.z, c.ax, c.ay, c.az, c.r, c.len, c.hue, mulberry32(c.seed), 6, 0, !c.short);
       if (due(slice, 31)) yield* pause(slice);
     }
     glass.glass = CRYSTAL.glass;
@@ -575,7 +587,7 @@
   // ---- the bridge ----------------------------------------------------------------------------------------------
   const STONES = ["#8b837b", "#7a716a", "#958d84", "#857c74"];
   const bridge = cached(() => {
-    const parts = [], solid = [], glass = [], frame = [], lamps = [];
+    const parts = [], glass = [], frame = [], lamps = [];
     // The deck ends a few centimetres off the lip's round edge, clear of its stones and under its coping: at its middle
     // (`to`) and, a flag at a time, on toward it where the edge curves away, so no gap shows beside the turning lip.
     const end = ISLE.R + 0.06, from = -(ISLE.R + BRIDGE.span) - 0.6, to = -end, W = BRIDGE.width, rand = mulberry32(0x6b1d);
@@ -601,23 +613,23 @@
     for (const side of [-1, 1]) {
       parts.push(box({ w: BRIDGE.wall, h: BRIDGE.parapet, d: p1 - p0, color: "#7a716a", offset: { x: side * x, y: BRIDGE.parapet / 2, z: (p0 + p1) / 2 } }));
       parts.push(box({ w: BRIDGE.wall + 0.1, h: 0.1, d: p1 - p0 + 0.1, color: "#958d84", offset: { x: side * x, y: BRIDGE.parapet + 0.05, z: (p0 + p1) / 2 } }));
-      solid.push(box({ w: BRIDGE.wall + 0.1, h: BRIDGE.parapet + 0.1, d: p1 - p0 + 0.1, color: "#000000", offset: { x: side * x, y: (BRIDGE.parapet + 0.1) / 2, z: (p0 + p1) / 2 } }));
       const pillars = Math.round((p1 - p0) / BRIDGE.pillarStep);
       for (let k = 0; k <= pillars; k++) {
         const z = p0 + (p1 - p0) * k / pillars, end = k === 0 || k === pillars, h = end ? BRIDGE.pillarH + 0.2 : BRIDGE.pillarH;
         parts.push(bevelBox({ w: BRIDGE.pillar, h, d: BRIDGE.pillar, color: "#857c74", offset: { x: side * x, y: h / 2, z } }));
         parts.push(box({ w: BRIDGE.pillar + 0.12, h: 0.12, d: BRIDGE.pillar + 0.12, color: "#958d84", offset: { x: side * x, y: h + 0.06, z } }));
-        solid.push(box({ w: BRIDGE.pillar + 0.12, h: h + 0.12, d: BRIDGE.pillar + 0.12, color: "#000000", offset: { x: side * x, y: (h + 0.12) / 2, z } }));
         if (end) {
           models.lanternParts(1.1, side * x, h + 0.12, z, frame, glass);
           lamps.push({ x: side * x, y: h + 0.5, z });
         }
       }
     }
-    solid.push(box({ w: W, h: BRIDGE.slab, d: length, color: "#000000", offset: { y: -BRIDGE.slab / 2, z: (from + to) / 2 } }));
+    // One uninterrupted walking slab across the full deck. Decorative rails and posts never snag a
+    // walker; the slab reaches beneath the curved lip even at the outermost flagstones.
+    const deckTo = edgeAt(W / 2) + 0.12;
     const stone = merge(...parts, ...frame);
-    stone.collisionGeometry = merge(...solid);
-    return { stone, glass: noShadow(merge(...glass)), lamps, from, to, width: W, walk: W / 2 - BRIDGE.wall - 0.05 };
+    stone.collisionGeometry = box({ w: W, h: BRIDGE.slab, d: deckTo - from, color: "#000000", offset: { y: -BRIDGE.slab / 2, z: (from + deckTo) / 2 } });
+    return { stone, glass: noShadow(merge(...glass)), lamps, from, to, width: W, walk: W / 2 };
   });
 
   // ---- the section plaques ----
@@ -625,84 +637,161 @@
   // thickness and set a little into the flags, its letters upright to someone on the lip looking in. A few centimetres
   // proud, it is never in anyone's way.
   const PLAQUE_SCALE = 0.5, PLAQUE_DEPTH = 0.4, PLAQUE_SINK = 0.02;
+  // Split long board faces before bending: moving only their corners would leave a straight chord
+  // under curved lettering. The relief and badge follow the same arc as the board, at the lip's radius.
+  const curvedPlaque = (flat, radius) => {
+    const result = { verts: [], faces: [], lines: [] }, step = 0.18;
+    const clip = (points, edge, side) => {
+      const out = [];
+      for (let k = 0; k < points.length; k++) {
+        const a = points[k], b = points[(k + 1) % points.length], inside = side * (a[0] - edge) >= 0;
+        if (inside) out.push(a);
+        if (inside !== (side * (b[0] - edge) >= 0)) {
+          const t = (edge - a[0]) / (b[0] - a[0]);
+          out.push([edge, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]);
+        }
+      }
+      return out;
+    };
+    const vertex = (x, y, z) => {
+      const at = result.verts.length / 3, angle = x / radius;
+      result.verts.push(Math.sin(angle) * (radius + z), y, Math.cos(angle) * (radius + z) - radius);
+      return at;
+    };
+    for (const face of flat.faces) {
+      const points = face.i.map(i => flat.verts.slice(i * 3, i * 3 + 3));
+      const low = Math.min(...points.map(p => p[0])), high = Math.max(...points.map(p => p[0]));
+      const count = Math.max(1, Math.ceil((high - low) / step));
+      for (let k = 0; k < count; k++) {
+        const part = clip(clip(points, low + (high - low) * k / count, 1), low + (high - low) * (k + 1) / count, -1);
+        if (part.length >= 3) result.faces.push({ ...face, i: part.map(p => vertex(...p)) });
+      }
+    }
+    for (const line of flat.lines) {
+      const a = flat.verts.slice(line.i[0] * 3, line.i[0] * 3 + 3), b = flat.verts.slice(line.i[1] * 3, line.i[1] * 3 + 3);
+      const count = Math.max(1, Math.ceil(Math.abs(b[0] - a[0]) / step));
+      let previous = vertex(...a);
+      for (let k = 1; k <= count; k++) {
+        const t = k / count, next = vertex(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t);
+        result.lines.push({ ...line, i: [previous, next] }); previous = next;
+      }
+    }
+    return result;
+  };
   const signs = cached(() => {
     const parts = [], picks = [];
     for (const s of plan().signs) {
-      const board = BL.hubModels.caveSign(s.name, s.badge), w = board.signWidth * PLAQUE_SCALE;
+      const board = BL.hubModels.caveSign(s.name, s.badge, false, false, 0.24), w = board.signWidth * PLAQUE_SCALE;
       const flat = turnedX({ verts: board.verts.map((v) => v * PLAQUE_SCALE), faces: board.faces, lines: board.lines }, -Math.PI / 2), v = flat.verts;
       let low = Infinity;
       for (let k = 1; k < v.length; k += 3) low = Math.min(low, v[k]);
       for (let k = 1; k < v.length; k += 3) v[k] = (v[k] - low) * PLAQUE_DEPTH + LIP.rise - PLAQUE_SINK;
-      parts.push(moved(turnedY(flat, s.ry), s.x, 0, s.z));
+      parts.push(moved(turnedY(curvedPlaque(flat, Math.hypot(s.x, s.z)), s.ry), s.x, 0, s.z));
       picks.push({ id: s.id, name: s.name, x: s.x, y: LIP.rise, z: s.z, radius: Math.max(0.6, w / 2) });
     }
     return { geometry: merge(...parts), picks };
   });
 
   // ---- the totems ----------------------------------------------------------------------------------------------
-  // A totem's name board, lighter than the meadow's (`hubModels.postSign`) at the same size: a plank with a dark
-  // panel, the word's letters in the carved signs' alphabet as flat cream strips a hair proud of it, on two pegs.
+  // Name plaques spell the GitHub repository name, independent of the short rune word. Only names over 32
+  // characters use the catalog's readable project name. Wrap to two centered rows, preferably at a separator,
+  // and cap the plank's width so long names do not reach into neighbouring carvings.
   const CELL = 0.024, PEG = 0.18, PLANK = "#b27a43", PANEL = "#3a2a1c", INK = hexToRgb("#f6ecd2");
+  const UNDERSCORE = ["000", "000", "000", "000", "111"];
+  const boardGlyph = ch => ch === "M" ? BL.hubModels.CARVED_M : ch === "_" ? UNDERSCORE : BL.hubModels.SIGN_GLYPHS[ch];
+  const boardCells = text => [...text].reduce((sum, ch) => sum + (ch === " " ? 3 : boardGlyph(ch)[0].length) + 1, -1);
+  const boardLines = (repo) => {
+    const name = repo.repo.slice(repo.repo.indexOf("/") + 1), text = (name.length > 32 ? repo.name : name).toUpperCase();
+    if (boardCells(text) <= 43) return [text];
+    let split = 1, best = Infinity;
+    for (let i = 1; i < text.length; i++) {
+      const left = boardCells(text.slice(0, i).trim()), right = boardCells(text.slice(i).trim());
+      if (left < 0 || right < 0) continue;
+      const score = Math.max(left, right) + (/[-_. ]/.test(text[i - 1]) ? 0 : 8);
+      if (score < best) { best = score; split = i; }
+    }
+    return [text.slice(0, split).trim(), text.slice(split).trim()];
+  };
   const boards = models.scopedMap();
-  const nameBoard = (word) => {
-    let geo = boards.get(word);
+  const nameBoard = (repo) => {
+    let geo = boards.get(repo.repo);
     if (geo) return geo;
-    const glyphs = [...word].map((ch) => ch === "M" ? BL.hubModels.CARVED_M : BL.hubModels.SIGN_GLYPHS[ch]);
-    const cells = glyphs.reduce((sum, g) => sum + g[0].length + 1, -1), w = cells * CELL + 0.08, h = 5 * CELL + 0.07, y = PEG + h / 2 + 0.02;
+    const rows = boardLines(repo), widths = rows.map(boardCells), cells = Math.max(...widths), cell = Math.min(CELL, 1.25 / cells);
+    const height = 5 + (rows.length - 1) * 7, w = cells * cell + 0.08, h = height * cell + 0.07, y = PEG + h / 2 + 0.02;
     geo = merge(bevelBox({ w: w + 0.04, h: h + 0.03, d: 0.05, color: PLANK, offset: { y } }), box({ w, h, d: 0.056, color: PANEL, offset: { y } }),
       ...[-1, 1].map((side) => bevelBox({ w: 0.05, h: PEG + 0.12, d: 0.05, color: "#5c4425", offset: { x: side * (w / 2 - 0.03), y: (PEG + 0.12) / 2 - 0.06, z: -0.01 } })));
-    let x = -cells * CELL / 2;
-    for (const g of glyphs) {
-      g.forEach((row, r) => {
-        for (let c = 0; c < row.length;) {
-          if (row[c] !== "1") { c++; continue; }
-          let n = 1;
-          while (row[c + n] === "1") n++;
-          const x0 = x + c * CELL, top = y + 2.5 * CELL - r * CELL, z = 0.03, at = geo.verts.length / 3;
-          geo.verts.push(x0, top - CELL, z, x0 + n * CELL, top - CELL, z, x0 + n * CELL, top, z, x0, top, z);
-          geo.faces.push({ i: [at, at + 1, at + 2, at + 3], color: INK, emissive: 0.15 });
-          c += n;
-        }
-      });
-      x += (g[0].length + 1) * CELL;
-    }
-    boards.set(word, geo);
+    rows.forEach((text, line) => {
+      let x = -widths[line] * cell / 2;
+      for (const ch of text) {
+        if (ch === " ") { x += 4 * cell; continue; }
+        const g = boardGlyph(ch);
+        g.forEach((row, r) => {
+          for (let c = 0; c < row.length;) {
+            if (row[c] !== "1") { c++; continue; }
+            let n = 1;
+            while (row[c + n] === "1") n++;
+            const x0 = x + c * cell, top = y + height * cell / 2 - (line * 7 + r) * cell, z = 0.03, at = geo.verts.length / 3;
+            geo.verts.push(x0, top - cell, z, x0 + n * cell, top - cell, z, x0 + n * cell, top, z, x0, top, z);
+            geo.faces.push({ i: [at, at + 1, at + 2, at + 3], color: INK, emissive: 0.15 });
+            c += n;
+          }
+        });
+        x += (g[0].length + 1) * cell;
+      }
+    });
+    boards.set(repo.repo, geo);
     return geo;
   };
   // A chunk's carvings at one detail, a totem a step, placed in the island's frame and merged into one packed mesh. The
-  // distant build comes first and carries the collision every detail shares, each totem's runes and its crest eyes.
+  // distant build comes first and carries each totem's runes and all its eye sockets.
   const chunks = new Map();
   const chunkSteps = (k, tier) => {
     const key = `${k}|${tier}`;
     if (!chunks.has(key)) chunks.set(key, cachedSteps(function* (slice) {
-      const TM = BL.totemModels, P = plan(), list = P.chunks[k], parts = [], collision = [], glyphs = [], eyes = [];
+      const TM = BL.totemModels, P = plan(), list = P.chunks[k], parts = [], glyphs = [], eyes = [], features = [];
       for (const at of list) {
         const t = P.totems[at], L = t.L, c = Math.cos(t.ry), s = Math.sin(t.ry);
         const place = (g) => moved(turnedY(g, t.ry), t.x, 0, t.z);
-        const opts = tier === "near" ? { detail: TIERS.near, highlights: false, board: nameBoard(t.word), leanStones: true } : { detail: TIERS[tier], highlights: false, board: false };
+        const opts = tier === "near" ? { detail: TIERS.near, highlights: true, board: nameBoard(t), leanStones: true } : { detail: TIERS[tier], highlights: true, board: false };
         const geo = TM.carve(L, t.word, t.seed, opts);
+        features.push(place(geo.featureHighlights));
         parts.push(place(geo));
         if (tier === "distant") {
-          collision.push(place(geo.collisionGeometry));
-          // The eyes nearest the crest, where the fires burn while it is lit; every detail puts them in the same place.
-          // Its runes carry an ember in each, which is what a lit totem shows from across the water, where no fire is lit.
-          const top = L.eyes.slice().sort((a, b) => b[1] - a[1]).slice(0, 2);
-          eyes.push(top.map(([x, y, z, size]) => [t.x + x * c + z * s, y, t.z - x * s + z * c, size]));
-          glyphs.push(place(merge(TM.glyphsOf(L, t.word), ...top.map(([x, y, z, size]) => box({ w: size * 0.3, h: size * 0.22, d: 0.02, color: "#ff7a1e", emissive: 1, offset: { x, y, z } })))));
+          // Every face has eye fires; every detail puts them in the same sockets.
+          const sockets = L.eyes;
+          eyes.push(sockets.map(([x, y, z, size]) => [t.x + x * c + z * s, y, t.z - x * s + z * c, size]));
+          glyphs.push(place(TM.glyphsOf(L, t.word)));
         }
         yield* pause(slice);
       }
+      let face = 0, line = 0;
+      const ranges = parts.map(g => {
+        const range = [face, face + g.faces.length, line, line + g.lines.length];
+        face = range[1]; line = range[3];
+        return range;
+      });
       const mesh = merge(...parts);
       mesh.smooth = true;
       // Packing is the longest single step: it gets an idle slice of its own.
       yield;
-      // The distant mesh carries the collision; the hub's solids keep the mesh a chunk's node joined with.
-      if (tier === "distant") mesh.collisionGeometry = merge(...collision);
       if (BL.compactGeometry?.enabled) BL.compactGeometry.pack(mesh, { immutable: true, renderOnly: true });
-      return tier === "distant" ? { mesh, glyphs, eyes } : { mesh };
+      return tier === "distant" ? { mesh, glyphs, eyes, features, ranges } : { mesh, features, ranges };
     }));
     return chunks.get(key);
   };
 
-  BL.repoIslandModels = { ISLE, LIP, BRIDGE, PLAN, TIERS, CHUNK, STYLES, GROUND, CRYSTAL, crystals, gem, plan, designFor, pathAt, spot, rockSteps, bridge, signs, chunkSteps };
+  // A camera-overlapped carving is omitted from its chunk without hiding its neighbours. Vertices stay shared;
+  // only the visible faces and lines are copied on an overlap/detail change, never on an ordinary frame.
+  const without = (mesh, ranges, mask) => {
+    const result = { verts: mesh.verts, faces: [], lines: [], smooth: true };
+    for (let slot = 0; slot < ranges.length; slot++) {
+      if (mask & (1 << slot)) continue;
+      const [from, to, lineFrom, lineTo] = ranges[slot];
+      for (let f = from; f < to; f++) result.faces.push(BL.compactGeometry ? BL.compactGeometry.copyFace(mesh, f) : mesh.faces[f]);
+      for (let l = lineFrom; l < lineTo; l++) result.lines.push(mesh.lines[l]);
+    }
+    return result;
+  };
+
+  BL.repoIslandModels = { ISLE, LIP, BRIDGE, PLAN, TIERS, CHUNK, STYLES, GROUND, CRYSTAL, crystals, gem, plan, designFor, pathAt, spot, rockSteps, bridge, signs, boardLines, nameBoard, chunkSteps, without };
 })();

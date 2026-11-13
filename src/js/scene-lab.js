@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod } = BL;
+  const { math, models, contributors, donations, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod } = BL;
   const { clamp, lerp, ease, fnv1a, randomInt } = math;
   const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { DROP_HEIGHT } = pileMod;
@@ -59,7 +59,7 @@
   const STATE_LED = { working: 0, chilling: 3, sleeping: 1 };
 
   // One visit's state: made in enter(), dropped in leave().
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, lab, hud, hooks, input, pilot, fx, pile, crew, crates, pulseNodes, agent, agentPlay;
+  let renderer, game, world, go, testBananas, root, camera, lab, hud, hooks, input, pilot, fx, pile, crew, pulseNodes, agent, agentPlay;
   let stateTimer = 0, unsubscribeActivity = null, dust = null, remotes = null, footsteps = null;
   const NO_ACTORS = [];
   const propTargets = [];
@@ -94,10 +94,8 @@
     const bananas = gameMod.bananasFor(donation.sats), shown = counted ? counted.rounded : bananas;
     pile.deliverBananas(bananas);
     celebrate(donation, shown);
-    const loot = lootEnabled ? game.lootFor(donation) : null;
     const who = donation.handle ? `@${donation.handle}` : "anon";
-    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}${loot ? ` · ${loot.tier} crate!` : ""}`);
-    if (loot) crates.spawnCrate(donation, loot, 0.9 + Math.min(1.5, bananas / pileMod.DROP_RATE));
+    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}`);
     hud.setStats(game.state);
   };
 
@@ -189,8 +187,6 @@
         return "Card · tap to flip";
       case "abacus":
         return `Abacus · counting ${pile.shown} bananas`;
-      case "crate":
-        return `${o.crate.loot.tier} crate · tap to open`;
       default:
         return "";
     }
@@ -244,9 +240,6 @@
       case "card":
         flipCard(o.node);
         break;
-      case "crate":
-        crates.openCrate(o.crate);
-        break;
       case "rack":
         hud.toast(rackInfo(o.rack));
         for (const led of o.rack.leds) led.flicker = 0.6;
@@ -291,7 +284,6 @@
         node.highlight = Math.max(0, node.pulse);
       }
     }
-    crates.update(dt, elapsed);
     fx.update(dt);
     stepTweens(dt);
     pilot.update(dt);
@@ -314,16 +306,6 @@
   };
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
-  const onLootCleared = () => {
-    if (!lootEnabled) return;
-    crew.applyAllSwag();
-    crew.renderLocker();
-    hud.toast("Loot locker cleared");
-  };
-  const clearLoot = () => {
-    game.clearLoot();
-    onLootCleared();
-  };
   // A demo tip is the simulation's alone: in real mode it would count a tip nobody paid.
   const demoTip = (sats) => {
     if (!donations.real) onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
@@ -368,7 +350,7 @@
   };
 
   const enter = (ctx) => {
-    ({ renderer, game, world, go, lootEnabled, testBananas, agentPlay } = ctx);
+    ({ renderer, game, world, go, testBananas, agentPlay } = ctx);
     camera = createCamera({ fov: 48, near: 0.25, far: 60 });
     root = createNode();
     lab = models.labRoom({ half: ROOM_HALF });
@@ -378,7 +360,7 @@
     dust = BL.dressing.motes({ count: 160, span: 16, low: 0.5, high: 4.2 });
     addChild(lab.room, dust.node);
     mark("room");
-    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster });
     hud.setAreaLabel("LAB");
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
@@ -415,26 +397,7 @@
     // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     footsteps = BL.footsteps.create();
     mark("cavemen");
-    crates = shared.crates = cratesMod.create(shared);
     pilot.bind(shared);
-
-    hud.onAssign((entryId, name) => {
-      if (game.assign(entryId, name)) {
-        crew.applyAllSwag();
-        crew.renderLocker();
-        const cave = crew.cavemen.get(name);
-        const item = game.itemOf(entryId);
-        if (cave && item) {
-          fx.say(cave, `Ooga! ${item.name}!`);
-          hud.toast(`${item.name} → ${name}`);
-        }
-      }
-    });
-    hud.onUnassign((name) => {
-      game.unassign(name);
-      crew.applyAllSwag();
-      crew.renderLocker();
-    });
 
     Object.assign(hooks, {
       onHover: (hit, p) => {
@@ -467,8 +430,7 @@
     };
     hud.onPreset(presetView);
     hud.onAction((action, value) => {
-      if (action === "clear-loot") clearLoot();
-      else if (action === "reset") resetDemo();
+      if (action === "reset") resetDemo();
       else if (action === "act") pilot.action();
       else if (action === "mode-preset") presetView(value);
       else if (action.startsWith("mode-")) pilot.modeAction(action);
@@ -503,10 +465,6 @@
       fx.trimPool();
     }, 6e4);
     for (const cave of crew.cavemen.values()) crew.refreshRosterRow(cave);
-    if (lootEnabled) {
-      crew.applyAllSwag();
-      crew.renderLocker();
-    }
     hud.setStats(game.state);
     pile.syncPile(true);
     // The lab has no Agent until Shift+A calls one in, so a lab visit holds no
@@ -515,7 +473,7 @@
     Object.assign(labScene, {
       root, camera, input,
       debug: {
-        slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, delivery: pile.delivery, cavemen: crew.cavemen, crates: crates.list, lab, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
+        slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, delivery: pile.delivery, cavemen: crew.cavemen, lab, hud, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
         get shown() {
           return pile.shown;
         },
@@ -533,7 +491,6 @@
     window.clearInterval(stateTimer);
     unsubscribeActivity();
     unsubscribeActivity = null;
-    crates.dispose();
     pile.dispose();
     remotes.dispose();
     remotes = null;
@@ -549,7 +506,7 @@
     const targets = input.targetCount;
     input.dispose();
     hud.dispose();
-    lab = hud = hooks = input = pilot = fx = pile = crew = crates = pulseNodes = agent = agentPlay = dust = null;
+    lab = hud = hooks = input = pilot = fx = pile = crew = pulseNodes = agent = agentPlay = dust = null;
     labScene.input = labScene.debug = labScene.agent = labScene.agentView = labScene.agentControls = labScene.agentHandoff = labScene.summonAgent = null;
     return { targets };
   };
@@ -563,13 +520,13 @@
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...(remotes ? remotes.stats() : {}) };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crew.stats(), ...pile.stats(), ...(remotes ? remotes.stats() : {}) };
   };
   const labScene = {
     // Voice zone: the EntropyLab group, which its cave on the island shares (`lab`).
     voiceZone: "lab.hall",
     micKey: true,
-    id: "lab", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
+    id: "lab", enter, update, overlay, onDonation, onKey, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null, summonAgent: null,
     get inMotion() {
       return pile.inMotion || fx.inMotion;
