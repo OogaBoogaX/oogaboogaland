@@ -396,20 +396,18 @@
   const BEAMS = 4;
   // Her sparks and motes at once, at most: a working beam keeps about 13 in the air and a fast flight about 10.
   const FLECKS = 24;
-  // How long a jolt lasts (`startle`), a shake to shake something off (`shake`) and a flip over backwards (`flip`), s;
-  // and how high a flip lifts her, m.
-  const STARTLE = 0.7, SHAKE = 0.9, FLIP = 0.95, FLIP_HOP = 0.35;
+  // How long a flip over backwards lasts (`flip`), s, and how high it lifts her, m.
+  const FLIP = 0.95, FLIP_HOP = 0.35;
   // One Tess for a visit, under `parent`, picked as `kind`. The place she guides moves her through this rig: a flight
   // path she steers along (`clearPath`, `push`, `steer`, the last point following someone while `track`ed), her beam
   // (`mode` 1 working, 2 pointing, landing on `aim`, or split to each of up to BEAMS `aims` round the `aim` she
   // faces), whom she watches when she is not flying or beaming (`watching`
   // and `watch`), and her moods: `calm` while she talks, `steady` while she keeps by someone, so she does not turn to
   // her flight. Outline registries walk past her, as she moves every frame. A place may unsettle her (`uneasy`, 0 to 1:
-  // her rings falter and stutter out of step, her eye narrows and dims and she trembles), jolt her (`startle`: her
-  // rings stop dead, her eye shrinks to a point, her head jerks back and she flinches back) and have her shake it off
-  // (`shake`: a quick twist back and forth with her rings whirling), spin her rings up (`whirl`: that many times more
-  // turns on top of her own, brighter the faster, throwing motes off once fast, which the place eases up and down) and
-  // flip her over backwards in the air (`flip`, `flipping`); none of it moves her body, which the place flies.
+  // her rings falter and stutter out of step, her eye narrows and dims and she trembles), spin her rings up (`whirl`:
+  // that many times more turns on top of her own, brighter the faster, throwing motes off once fast, which the place
+  // eases up and down) and flip her over backwards in the air (`flip`, `flipping`); none of it moves her body, which the
+  // place flies.
   // Hub scope survives scene changes, but Tess's meshes need survive only while a Tess owns them. The director leaves
   // one scene and enters the next in one task, so the caches go only once that task ends with no Tess: the Factory's
   // greeter entered as the hub's guide leaves reuses every tier rather than rebuilding them in the swap frame.
@@ -430,7 +428,7 @@
     // Her bubble stands over her eye, not the rings, whose top moves as they tumble.
     const figure = { root: body, parts: { head } }, rings = [], pivots = [], orientations = [], turnQ = quat.create();
     const tumbles = Float64Array.from(RINGS, (_, i) => i * 2.1);
-    let greetingT = 0, speakingT = 0, lookYaw = 0, lookPitch = 0, tempo = 1, flare = 0, trailT = 0, sparkT = 0, litGain = 1, shown = 0, startleT = 0, shakeT = 0, flipT = 0, whirlT = 0;
+    let greetingT = 0, speakingT = 0, lookYaw = 0, lookPitch = 0, tempo = 1, flare = 0, trailT = 0, sparkT = 0, litGain = 1, shown = 0, flipT = 0, whirlT = 0;
     body.sightHidden = true;
     hover.scale.x = hover.scale.y = hover.scale.z = SCALE;
     addChild(body, hover); addChild(hover, head);
@@ -553,8 +551,6 @@
       // A greeting's tilt of the eye, and the rings' flare when she notices someone.
       nod() { greetingT = 1.4; },
       flare() { flare = 1; },
-      startle() { startleT = STARTLE; },
-      shake() { shakeT = SHAKE; },
       flip() { flipT = FLIP; },
       get flipping() { return flipT > 0; },
       // The beam she shows: the mode she asked for, once she faces where it lands.
@@ -584,9 +580,9 @@
         } else if (mode) lookAt(aim.x, aim.y, aim.z);
         else if (rig.watching) lookAt(rig.watch.x, rig.watch.y, rig.watch.z);
         greetingT = Math.max(0, greetingT - dt); speakingT = Math.max(0, speakingT - dt);
-        // Unsettled, jolted and shaking it off: how much of each now (the jolt and the shake easing out as they end).
-        startleT = Math.max(0, startleT - dt); shakeT = Math.max(0, shakeT - dt); flipT = Math.max(0, flipT - dt);
-        const uneasy = rig.uneasy, jolt = startleT > 0 ? Math.pow(startleT / STARTLE, 1.5) : 0, shaking = shakeT / SHAKE, whirl = rig.whirl;
+        // Unsettled, spun up and flipping: how much of each now.
+        flipT = Math.max(0, flipT - dt);
+        const uneasy = rig.uneasy, whirl = rig.whirl;
         // A flip: once over backwards, eased in and out, lifting her as she goes over.
         const flipped = flipT > 0 ? 1 - flipT / FLIP : 0, over = flipped * flipped * (3 - 2 * flipped);
         const turnBy = Math.atan2(Math.sin(lookYaw - body.rotation.y), Math.cos(lookYaw - body.rotation.y));
@@ -595,21 +591,18 @@
         head.rotation.z = damp(head.rotation.z, Math.sin(greetingT * 7) * greetingT * 0.06
           - (cruising ? Math.max(-0.35, Math.min(0.35, turnBy * 0.3)) : 0), 6, dt);
         hover.position.y = Math.sin(elapsed * 1.7) * 0.018 * SCALE + uneasy * Math.sin(elapsed * 47) * 0.004 * SCALE + Math.sin(flipped * Math.PI) * FLIP_HOP;
-        // A jolt throws her head back and her back a little, a tremble shakes it, and a shake twists her to and fro.
-        hover.rotation.x = -jolt * 0.32 + uneasy * Math.sin(elapsed * 37) * 0.025 - over * TAU;
+        // A tremble shakes her and a flip turns her over.
+        hover.rotation.x = uneasy * Math.sin(elapsed * 37) * 0.025 - over * TAU;
         hover.rotation.z = uneasy * Math.sin(elapsed * 41 + 1) * 0.035;
-        hover.rotation.y = shaking * Math.sin((SHAKE - shakeT) * 31) * 0.5;
-        hover.position.z = -jolt * 0.09 * SCALE;
         // Each ring tumbles about its own diameter, at her pace: brisk in flight, busy at work, slow while she talks,
         // and a flare when she notices someone. Quaternions keep three-axis turns stable; the angles stay bounded.
-        // Unsettled, each ring moves in fits and starts, out of step with the others, and twitches; jolted, they stop
-        // dead; shaking it off, they whirl.
+        // Unsettled, each ring moves in fits and starts, out of step with the others, and twitches.
         const pace = cruising ? 1.8 : rig.calm ? 0.5 : working ? 1.25 : 1;
         tempo = damp(tempo, pace, 2, dt); flare = Math.max(0, flare - dt * 0.9);
         const flicker = 1 - uneasy * (0.35 + 0.25 * Math.sin(elapsed * 17) * Math.sin(elapsed * 6.3));
         for (let i = 0; i < rings.length; i++) {
           const spec = RINGS[i], fits = 1 - uneasy * (Math.sin(elapsed * (4.3 + i * 1.7) + i * 2.1) > 0 ? 0.9 : 0.15);
-          tumbles[i] = (tumbles[i] + spec.tumble * (tempo * fits * (1 - jolt) + flare * 2.5 + shaking * 5 + whirl) * dt) % TAU;
+          tumbles[i] = (tumbles[i] + spec.tumble * (tempo * fits + flare * 2.5 + whirl) * dt) % TAU;
           quat.fromAxisAngle(turnQ, spec.axis[0], spec.axis[1], spec.axis[2], tumbles[i] + uneasy * Math.sin(elapsed * 29 + i * 2.3) * 0.1);
           quat.multiply(pivots[i].quaternion, orientations[i], turnQ);
           rings[i].rotation.z = (elapsed * spec.spin) % TAU;
@@ -618,10 +611,9 @@
         optics.position.x = damp(optics.position.x, Math.sin(turnBy) * 0.004, 9, dt);
         optics.position.y = damp(optics.position.y, -Math.sin(head.rotation.x) * 0.004, 9, dt);
         blades.rotation.z = Math.sin(elapsed * 0.4) * 0.05;
-        // Her eye: dimmer and flickering while unsettled, a flash as she jolts; its pupil narrowing, to a point as she
-        // jolts, and blinking.
-        iris.glow = (1 + Math.sin(speakingT * 18) * speakingT * 0.15) * flicker + jolt * 1.2;
-        const blink = Math.pow(Math.max(0, Math.cos(elapsed * TAU / 7.3)), 80), narrow = 1 - Math.min(0.85, uneasy * 0.45 + jolt * 0.7);
+        // Her eye: dimmer and flickering while unsettled, its pupil narrowing, and blinking.
+        iris.glow = (1 + Math.sin(speakingT * 18) * speakingT * 0.15) * flicker;
+        const blink = Math.pow(Math.max(0, Math.cos(elapsed * TAU / 7.3)), 80), narrow = 1 - Math.min(0.85, uneasy * 0.45);
         pupil.scale.x = narrow;
         pupil.scale.y = (1 - blink * 0.85) * narrow;
 
