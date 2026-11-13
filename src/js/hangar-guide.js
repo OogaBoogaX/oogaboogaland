@@ -14,7 +14,8 @@
 //
 // When the faint shape in the hangar's air (`hangar-shimmer.js`) shows near her, in her sight, and she is free to notice
 // it, the scene lends her to `unsettled`: most times she stops and glances at it a few seconds; otherwise she comes over
-// unhurried to look it over from a few metres off, then goes back to work.
+// unhurried to look it over from a few metres off; and rarely it puzzles her, and she keeps watching where it stood
+// after it has gone; then she goes back to work.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -228,16 +229,21 @@
   // between, the second slower, to hang a few metres off to its side (so the view sees them both), facing it, her rings
   // turning a little quicker; there she watches it, moving a little round it once or twice. As it comes apart she
   // watches it start to go and eases back a touch, or, still on her way, stops where she is, and watches it go; a
-  // moment after it has gone she goes back to work, or sooner if anything ended it early. `shimmer` is the shape, read
-  // live, and `camera` the view, so she keeps to its side of it.
+  // moment after it has gone she goes back to work, or sooner if anything ended it early. Rarely it puzzles her: she
+  // comes over or watches it from where she is, her rings quickening, and once makes a small, uncertain movement (a
+  // tilt to one side, a tip back or her rings faltering); as it comes apart she hesitates, edging toward it, and once
+  // it has gone she keeps watching where it stood a few seconds, looking about it, before she drifts back to work.
+  // `shimmer` is the shape, read live, and `camera` the view, so she keeps to its side of it.
   const UNEASY = {
     // When she notices it, as a share of its forming, at random between; none if less than `least` s of it would be
     // left; and only within `reach` m of it, across the floor, with it in her sight, which she looks for every `look` s.
     notice: [0.5, 0.9], least: 3, reach: 14, look: 0.25,
-    // How likely she only glances at it; how long she watches it then, s, at random between; how likely she drifts
-    // while she does, and how far, m, toward it or up to `aside` rad off that, rising up to `climb` m, at `driftSpeed`
-    // m/s, where the air is open.
-    glance: 0.65, glanceFor: [1.6, 3.4], drifts: 0.7, drift: [0.2, 0.7], aside: 0.7, climb: 0.25, driftSpeed: 0.35,
+    // How likely, of those she notices, it puzzles her (rarely) or she comes over to look it over; the rest she only
+    // glances at, as she does when too little of it is left to come over.
+    puzzle: 0.12, approach: 0.3,
+    // Glancing: how long she watches it, s, at random between; how likely she drifts while she does, and how far, m,
+    // toward it or up to `aside` rad off that, rising up to `climb` m, at `driftSpeed` m/s, where the air is open.
+    glanceFor: [1.6, 3.4], drifts: 0.7, drift: [0.2, 0.7], aside: 0.7, climb: 0.25, driftSpeed: 0.35,
     // Otherwise, how long she holds still facing it before she comes over, s, at random between; she comes over only
     // with at least `stay` s of it left before it comes apart, and glances at it instead.
     stare: [0.4, 0.9], stay: 5,
@@ -258,16 +264,29 @@
     // As it comes apart, still on her way she stops where she is; there, she watches it start to go, `linger` of the
     // way through its coming apart, then eases back a touch: how far back and up, m, how fast, m/s.
     linger: 0.5, back: 0.4, lift: 0.15, backSpeed: 0.4,
+    // Puzzled by it: how likely she comes over first (with time enough), else she watches it from where she is; how
+    // fast her rings spin in each stage then (`puzzled`, as `whirl`), quickening as she watches; `odd` s after she
+    // starts watching, at random between, one small, uncertain movement held about `oddFor` s: a tilt to one side,
+    // `tilt` rad; a tip back, `tip` of a turn; or her rings faltering, `falter` (`uneasy`), as they slow; as it comes
+    // apart she hesitates, edging `inch` m toward it at `inchSpeed` m/s; once it has gone she keeps watching where it
+    // stood `lingerFor` s, looking up to `search` m to either side of it, now and then (`again`) tilting once more.
+    // Under reduced motion her one movement is only half a tilt.
+    comes: 0.5, odd: [0.8, 1.6], oddFor: [0.9, 1.4], tilt: 0.3, tip: [0.1, 0.16], falter: 0.5,
+    inch: [0.3, 0.6], inchSpeed: 0.3, lingerFor: [2.5, 4], search: 0.9, again: 0.4,
+    puzzled: { notice: 0, edge: 0.5, pause: 1, near: 2, study: 5, watch: 5, hesitate: 0.5, linger: 0, settle: 0, over: 0 },
     // After it has gone: how long she still hangs there, s, before she goes back to work (`cut` if it ended early).
     after: 0.6, done: 1, cut: 0.7
   };
   const unsettled = (shimmer, camera) => {
-    const at = shimmer.at, spot = { x: 0, y: 0, z: 0 }, mid = { x: 0, y: 0, z: 0 }, back = { x: 0, y: 0, z: 0 };
+    const at = shimmer.at, spot = { x: 0, y: 0, z: 0 }, mid = { x: 0, y: 0, z: 0 }, back = { x: 0, y: 0, z: 0 }, still = window.matchMedia("(prefers-reduced-motion: reduce)");
     // The rig she is lent as; whether she glances at it or comes over (`kind`); her stage and how long she has been in
     // it, s; how long she glances, holds still before coming over and pauses on the way, s; the moves round it still to
     // make, how long until the next, s, and whether she is making one; the shape she is on (its `shows`) and the one
-    // whose noticing is drawn, when, and when she next looks for it; and whether this one ended early.
+    // whose noticing is drawn, when, and when she next looks for it; and whether this one ended early. Puzzled: how
+    // long she has watched it, s, when her one movement comes and how long it is held, s, which it is, how long into it
+    // she is, s, which side she tilts to, and how long she lingers once it has gone, s.
     let rig = null, kind = "", stage = "idle", t = 0, glanceFor = 0, stareFor = 0, pauseFor = 0, shiftsLeft = 0, shiftIn = 0, moving = false;
+    let puzzling = 0, oddAt = 0, oddLen = 0, odd = "", oddT = 0, side = 1, lingerLen = 0;
     let shape = -1, drawn = -1, noticeAt = 0, lookAt = 0, cut = false;
     const between = ([a, b]) => a + Math.random() * (b - a);
     // Whether (x, y, z) is open air for her: inside the hall and nothing standing there up to near her height.
@@ -308,14 +327,36 @@
       return shimmer.seen(from.x, from.y, from.z);
     };
     const enter = (next) => { stage = next; t = 0; };
+    // Coming over to look it over.
+    const comeOver = (r) => {
+      stareFor = between(UNEASY.stare); pauseFor = between(UNEASY.pause); moving = false;
+      place(r);
+      enter("notice");
+    };
+    // Puzzled, as it comes apart: she hesitates, edging a little toward it.
+    const hesitate = (r) => {
+      const p = r.root.position, dx = at.x - p.x, dz = at.z - p.z, l = Math.hypot(dx, dz) || 1, d = between(UNEASY.inch);
+      const x = p.x + dx / l * d, z = p.z + dz / l * d;
+      if (open(x, p.y, z)) go(r, x, p.y, z, UNEASY.inchSpeed, 0.3); else r.clearPath(0, 0);
+      enter("hesitate");
+    };
+    const ODD = ["tilt", "tip", "falter"];
     const drive = (r, dt) => {
       const U = UNEASY, p = r.root.position, gone = shimmer.state !== "show" || shimmer.fading || shimmer.shows !== shape && rig === r;
       if (r !== rig) {
-        // Noticing it: she stops where she is, and either glances at it, drifting a little or not, or will come over.
-        rig = r; shape = shimmer.shows; cut = false; r.whirl = 0;
+        // Noticing it: she stops where she is, and either it puzzles her, she will come over, or she glances at it,
+        // drifting a little or not.
+        rig = r; shape = shimmer.shows; cut = false; r.whirl = 0; odd = "";
         r.clearPath(0, 0);
         r.hush();
-        if (Math.random() < U.glance || at.held - shimmer.t < U.stay) {
+        const roll = Math.random(), time = at.held - shimmer.t >= U.stay;
+        if (roll < U.puzzle) {
+          kind = "puzzle"; puzzling = 0; oddAt = between(U.odd); oddLen = between(U.oddFor); side = Math.random() < 0.5 ? -1 : 1;
+          if (time && Math.random() < U.comes) comeOver(r); else enter("watch");
+        } else if (roll < U.puzzle + U.approach && time) {
+          kind = "approach";
+          comeOver(r);
+        } else {
           kind = "glance"; glanceFor = between(U.glanceFor);
           if (Math.random() < U.drifts) {
             const a = Math.atan2(at.x - p.x, at.z - p.z) + (Math.random() * 2 - 1) * U.aside, d = between(U.drift);
@@ -323,22 +364,24 @@
             if (open(x, y, z)) go(r, x, y, z, U.driftSpeed, 0.3);
           }
           enter("glance");
-        } else {
-          kind = "approach"; stareFor = between(U.stare); pauseFor = between(U.pause); moving = false;
-          place(r);
-          enter("notice");
         }
       }
       t += dt;
       // Something ended it early: she goes back to work soon.
-      if (gone && stage !== "settle" && stage !== "over") { cut = true; enter("settle"); }
+      if (gone && stage !== "settle" && stage !== "over") { cut = true; odd = ""; enter("settle"); }
       r.calm = false; r.steady = stage !== "settle" && stage !== "over";
+      // Whom she watches: it, rising as it comes apart; once it has gone, where it stood, looking to either side of it.
       r.watching = true; r.watch.x = at.x; r.watch.z = at.z;
-      r.watch.y = stage === "recoil" ? 2.2 + Math.min(1.4, (shimmer.t - at.held) * 0.6) : 2.9;
+      r.watch.y = stage === "recoil" || stage === "hesitate" ? 2.2 + Math.min(1.4, (shimmer.t - at.held) * 0.6) : stage === "linger" ? 1.8 : 2.9;
+      if (stage === "linger") {
+        const dx = at.x - p.x, dz = at.z - p.z, l = Math.hypot(dx, dz) || 1, off = U.search * Math.sin(t / lingerLen * Math.PI * 2);
+        r.watch.x += dz / l * off; r.watch.z -= dx / l * off;
+      }
       r.mode = 0; r.aims = null;
-      // It coming apart: still on her way in, she stops where she is; looking it over, she watches it start to go, then
-      // eases back a touch.
-      if ((stage === "edge" || stage === "pause" || stage === "near") && shimmer.t >= at.held) { r.clearPath(0, 0); enter("recoil"); }
+      // It coming apart: still on her way in, she stops where she is (and, puzzled, hesitates there); puzzled, watching
+      // it, she hesitates; looking it over, she watches it start to go, then eases back a touch.
+      if ((stage === "edge" || stage === "pause" || stage === "near") && shimmer.t >= at.held) { r.clearPath(0, 0); enter(kind === "puzzle" ? "hesitate" : "recoil"); }
+      else if (kind === "puzzle" && (stage === "watch" || stage === "study") && shimmer.t >= at.held) hesitate(r);
       else if (stage === "study" && shimmer.t >= at.held + (at.gone - at.held) * U.linger) backOff(r);
       switch (stage) {
         case "glance":
@@ -360,7 +403,7 @@
           if (t >= pauseFor) { go(r, spot.x, spot.y, spot.z, between(U.speed[1]), 0.4); enter("near"); }
           break;
         case "near":
-          if (r.steer(dt)) { shiftsLeft = 1 + Math.floor(Math.random() * U.shifts); shiftIn = between(U.shiftGap); enter("study"); }
+          if (r.steer(dt)) { shiftsLeft = kind === "approach" ? 1 + Math.floor(Math.random() * U.shifts) : 0; shiftIn = between(U.shiftGap); enter("study"); }
           break;
         case "study":
           // Looking it over: a little move round it now and then.
@@ -376,17 +419,45 @@
           r.steer(dt);
           if (shimmer.t >= at.gone + U.after) enter("settle");
           break;
+        case "hesitate":
+          r.steer(dt);
+          if (shimmer.t >= at.gone) {
+            lingerLen = between(U.lingerFor);
+            // Now and then she tilts once more as she lingers, a while in.
+            if (Math.random() < U.again) { odd = "tilt"; oddT = -lingerLen * 0.3; oddLen = between(U.oddFor); side = Math.random() < 0.5 ? -1 : 1; }
+            enter("linger");
+          }
+          break;
+        case "linger":
+          if (t >= lingerLen) enter("over");
+          break;
         case "settle":
           if (t >= (cut ? U.cut : U.done)) enter("over");
           break;
       }
-      // Her rings turning a little quicker as she looks it over, winding down as it goes.
-      const spin = U.whirl[stage];
+      // Puzzled, watching it (not while she flies over): once, a moment after she starts, one small uncertain movement,
+      // eased in and out.
+      if (kind === "puzzle") {
+        if (stage !== "notice" && stage !== "edge" && stage !== "linger" && stage !== "settle" && !odd && (puzzling += dt) >= oddAt) {
+          odd = still.matches ? "tilt" : ODD[Math.floor(Math.random() * ODD.length)]; oddT = 0;
+          if (odd === "tip") r.flip(between(U.tip));
+        }
+        if (odd) oddT += dt;
+      }
+      const hold = odd ? Math.max(0, Math.min(1, oddT / 0.35, (oddLen - oddT) / 0.45)) : 0;
+      r.tilt = odd === "tilt" ? side * U.tilt * hold * (still.matches ? 0.5 : 1) : 0;
+      const uneasy = odd === "falter" ? U.falter * hold : 0;
+      r.uneasy += (uneasy - r.uneasy) * Math.min(1, dt * 4);
+      // Her rings turning a little quicker as she looks it over (faster and faster, puzzled, slowing as they falter),
+      // winding down as it goes.
+      let spin = (kind === "puzzle" ? U.puzzled : U.whirl)[stage];
+      if (odd === "falter" && hold > 0) spin = 0.5;
+      if (still.matches) spin *= 0.25;
       r.whirl += (spin - r.whirl) * Math.min(1, dt * (spin > r.whirl ? U.up : U.down));
     };
-    // Given back: her rings back to their own pace, ready for the next.
-    const reset = () => { if (rig) { rig.whirl = 0; rig.steady = false; } rig = null; stage = "idle"; };
-    return { due, drive, reset, get over() { return stage === "over"; }, get stage() { return stage; }, get kind() { return kind; } };
+    // Given back: her rings back to their own pace, upright and steady, ready for the next.
+    const reset = () => { if (rig) { rig.whirl = 0; rig.tilt = 0; rig.uneasy = 0; rig.steady = false; } rig = null; stage = "idle"; odd = ""; };
+    return { due, drive, reset, get over() { return stage === "over"; }, get stage() { return stage; }, get kind() { return kind; }, get odd() { return odd; } };
   };
 
   BL.hangarGuide = { create, distraction, unsettled, LINES, STOPS, answer, SUGGESTIONS };
