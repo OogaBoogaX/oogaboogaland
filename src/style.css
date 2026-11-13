@@ -5188,20 +5188,54 @@ body.dsb-menu-open .rescue-equipment { visibility: hidden; pointer-events: none;
 }
 
 /* While her tour holds the view the look stick does nothing and steps aside; the move stick stays, since moving ends
-   the tour and walks the Ooga, and on a touch screen her panel rises clear of the sticks. */
+   the tour and walks the Ooga. */
 body.tess-touring #joy-look {
   visibility: hidden;
 }
 
+/* Each stop's view puts its landmark in the middle of the screen, and on a touch screen the sticks and an open drawer
+   would lift the panel onto it. So her panel takes the equipment's slot under the top bar instead, matching its top in
+   every layout below, and the equipment, which does nothing on tour, steps aside for it. */
 @media (pointer: coarse) {
-  body.tess-touring .greeter-menu.greeter-tour {
-    bottom: calc(max(48px, var(--stick-inset) - var(--home-chrome)) + var(--stick-size) + 12px + var(--safe-bottom));
+  body.tess-touring .equipment-hud {
+    visibility: hidden;
+    /* Equipped readouts set their own visibility; fade the whole group out too. */
+    opacity: 0;
   }
 
-  /* With the bottom drawer open the sticks ride up on it (`--drawer-lift`), and the panel rises over them. The panel
-     stands on the stage, so a resized drawer's --drawer-height, which sheet.js writes there, reaches it too. */
-  body.tess-touring:has(.sheet[data-dock="bottom"][data-sticks="true"][data-open="true"]:not([hidden])) .greeter-menu.greeter-tour {
-    bottom: calc(var(--drawer-height) + var(--drawer-clear) + var(--stick-size) + 12px);
+  body.tess-touring .greeter-menu.greeter-tour {
+    top: calc(62px + var(--safe-top));
+    bottom: auto;
+  }
+}
+
+@media (pointer: coarse) and (max-width: 720px) {
+  body.tess-touring .greeter-menu.greeter-tour {
+    top: calc(98px + var(--safe-top));
+  }
+
+  body.tess-touring .topbar:not(:has(.presets:not([hidden])))~.greeter-menu.greeter-tour {
+    top: calc(55px + var(--safe-top));
+  }
+}
+
+/* A short landscape screen has no room over the middle for both the panel and her bubble. She always flies to the
+   view's right, so the panel docks at the left, beside the move stick (#joy-move), which an open drawer lifts to it. */
+@media (pointer: coarse) and (max-height: 500px) and (orientation: landscape) {
+  body.tess-touring .greeter-menu.greeter-tour {
+    top: calc(62px + var(--safe-top));
+    left: calc(32px + var(--stick-size) + var(--safe-left));
+    transform: none;
+  }
+}
+
+@media (pointer: coarse) and (max-width: 720px) and (max-height: 500px) and (orientation: landscape) {
+  body.tess-touring .greeter-menu.greeter-tour {
+    top: calc(64px + var(--safe-top));
+  }
+
+  body.tess-touring .topbar:has(.presets[data-scene="hub"]:not([hidden]))~.greeter-menu.greeter-tour {
+    top: calc(96px + var(--safe-top));
   }
 }
 
