@@ -1130,11 +1130,16 @@
     for (const t of TEAMS) { const z = ARENA.zips[t]; if (Math.hypot(a.x - z.ax, a.z - z.az) < CONFIG.ZIP_R) return t; }
     return null;
   };
+  // True when grabbing `line` would spring its trap door on `a`: the other side's line, with `a`'s own block not home.
+  // Checked only at the grab; a rider already sliding rides on whatever happens to their block meanwhile.
+  const zipSprings = (sim, a, line) => line !== a.team && sim.flags[a.team].state !== "home";
   const zip = (sim, id = 0) => {
     use(sim);
     const a = sim.actors[id];
     const line = sim.over || a.riding || a.splat > 0 || a.trapped > 0 ? null : nearZip(sim, a);
     if (!line) return false;
+    // The rivals' line is a trap door to a rider whose own block isn't home: it throws them off the island instead.
+    if (zipSprings(sim, a, line)) { const z = ARENA.zips[line]; flingOff(sim, a, z.ax, z.az, "ziptrap", line); return true; }
     a.zipLine = line;
     a.riding = true;
     a.zipT = 0;
@@ -1181,21 +1186,22 @@
   };
   // It throws you backward, off the back of the island past the rim, no parachute: jetpack or hook back, or fall. A
   // block in hand stays there for the whole flight (`flung`): landed back on the island it's still yours; fallen all
-  // the way, it falls with you and goes home (`respawn`).
-  const flingOff = (sim, a) => {
-    const [x, z] = ARENA.catapults[other(a.team)][0], len = Math.hypot(x, z) || 1, ox = x / len, oz = z / len;
+  // the way, it falls with you and goes home (`respawn`). The same throw, outward from (`x`, `z`), springs a rivals'
+  // zipline's trap door (`ziptrap`), `team` the side whose catapult or line it was.
+  const flingOff = (sim, a, x, z, ev = "enemycat", team = other(a.team)) => {
+    const len = Math.hypot(x, z) || 1, ox = x / len, oz = z / len;
     let edge = 0;
     while (onIsland(x + ox * edge, z + oz * edge) && edge < 200) edge += 2;
     a.vy = CONFIG.ENEMY_CAT_UP;
     const t = 2 * a.vy / CONFIG.FALL, speed = (edge + CONFIG.ENEMY_CAT_PAST) / t;
     a.vx = ox * speed; a.vz = oz * speed;
-    a.grounded = false; a.jumps = 0; a.crouch = false; a.route = ""; a.heading = Math.atan2(ox, oz); a.knock = t * 0.85; a.flung = !!a.carrying;
-    emit(sim, "enemycat", other(a.team), a.id, x, a.y, z);
+    a.grounded = false; a.jumps = 0; a.crouch = false; a.climbing = false; a.flight = 0; a.route = ""; a.heading = Math.atan2(ox, oz); a.knock = t * 0.85; a.flung = !!a.carrying;
+    emit(sim, ev, team, a.id, x, a.y, z);
   };
   const launch = (sim, id = 0) => {
     use(sim);
     const a = sim.actors[id];
-    if (!sim.over && a.splat <= 0 && a.trapped <= 0 && a.burnt <= 0 && a.slip <= 0 && nearEnemyCatapult(sim, a)) { flingOff(sim, a); return true; }
+    if (!sim.over && a.splat <= 0 && a.trapped <= 0 && a.burnt <= 0 && a.slip <= 0 && nearEnemyCatapult(sim, a)) { const [x, z] = ARENA.catapults[other(a.team)][0]; flingOff(sim, a, x, z); return true; }
     if (sim.over || a.splat > 0 || a.trapped > 0 || a.burnt > 0 || a.slip > 0 || !nearCatapult(sim, a)) return false;
     const [tx, tz] = ARENA.drops[a.team], dx = tx - a.x, dz = tz - a.z, d = Math.hypot(dx, dz);
     // Straight up to `LAUNCH_H` and over the drop spot at the top of the arc.
@@ -2135,7 +2141,9 @@
     if (a.route && (a.routeT -= dt) <= 0) { a.route = ""; a.routeBan = 20; }
     if (a.carrying) {
       // Their block in hand, deep in their end: their tower's zipline drops it in our fort, if that's much quicker.
-      if (!a.route && a.routeBan <= 0 && mine < -8) {
+      // Only with our own block home: otherwise their line is a trap door (`zipSprings`), so a route already chosen is dropped.
+      if (a.route === "zipHome" && own.state !== "home") a.route = "";
+      if (!a.route && a.routeBan <= 0 && mine < -8 && own.state === "home") {
         const L = ARENA.ladders[rival], stand = ARENA.stands[a.team];
         const fx = (L.zone[0] + L.zone[1]) / 2 - L.dx * 0.75, fz = (L.zone[2] + L.zone[3]) / 2 - L.dz * 0.75;
         const viaZip = Math.hypot(fx - a.x, fz - a.z) + 6;
@@ -3008,7 +3016,7 @@
     v.second = second; v.boots = boots; v.laser = laser; v.monkeys = monkeys; v.halving = halving; v.cold = cold;
     return true;
   };
-  BL.blockSim = { WIELD, wield, heldOf, worth, mvp, tallyOf, ARSENAL, slotState, slotCount, splat, aimRise, flatPitch, settleHooks, parachuteIn, LEAF_TOP, stripView, stripChanged, hopOn, callRide, CONFIG, TOOLS, KINDS, SKILLS, POWERS, ARENAS, MAPS, TEAMS, other, create, reset, step, tick, setLive, newBlock, launch, nearCatapult, nearEnemyCatapult, fire, drop, pass, build, grab, zip, nearZip, onTower, escape, clearLine, solidAt, resolve, groundAt, onIsland, isleDepth, grapple, restSpot, edgeDist, cutChute, inGrave, inGraveOf, GRAVE_Y };
+  BL.blockSim = { WIELD, wield, heldOf, worth, mvp, tallyOf, ARSENAL, slotState, slotCount, splat, aimRise, flatPitch, settleHooks, parachuteIn, LEAF_TOP, stripView, stripChanged, hopOn, callRide, CONFIG, TOOLS, KINDS, SKILLS, POWERS, ARENAS, MAPS, TEAMS, other, create, reset, step, tick, setLive, newBlock, launch, nearCatapult, nearEnemyCatapult, zipSprings, fire, drop, pass, build, grab, zip, nearZip, onTower, escape, clearLine, solidAt, resolve, groundAt, onIsland, isleDepth, grapple, restSpot, edgeDist, cutChute, inGrave, inGraveOf, GRAVE_Y };
   // The map last stepped (or reset), for the scene's and models' reads.
   Object.defineProperty(BL.blockSim, "ARENA", { get: () => ARENA, enumerable: true });
 })();
