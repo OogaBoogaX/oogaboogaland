@@ -11,11 +11,11 @@
 // shimmering, with motes drifting in them, a faint afterimage for 15 to 20 seconds (`RESIDUE`), before it is gone. It
 // faces the view, one way or mirrored. Now and then, with the visitor's own Ooga a few metres off, a few runs of its
 // line hold whole and still a moment and it brightens a touch (`NEAR`), then it goes on as before; closer still, a few
-// fragments may catch for an instant and break apart again (`CATCH`). It lasts no longer for it. A very faint shimmer of
-// sound comes with the figure, not the afterimage (`hangarAudio.glint`). Under reduced motion nothing gathers, drifts or
-// falls, its sparks glint slowly and no bars tear across it. It lights nothing and leaves nothing behind; Tess, if she
-// is near it, in sight of it and free to notice it, comes over to watch it (`hangarGuide.unsettled`), and nobody else
-// in the hangar reacts.
+// fragments may catch for an instant and break apart again (`CATCH`); and its afterimage stirs a little as the Ooga
+// passes (`STIR`). It lasts no longer for it. A very faint shimmer of sound comes with the figure, not the afterimage
+// (`hangarAudio.glint`). Under reduced motion nothing gathers, drifts or falls, its sparks glint slowly and no bars
+// tear across it. It lights nothing and leaves nothing behind; Tess, if she is near it, in sight of it and free to
+// notice it, comes over to watch it (`hangarGuide.unsettled`), and nobody else in the hangar reacts.
 //
 // The first comes 30 to 60 s into a visit and each next 3 to 5 minutes after the last has gone (`GAP`), counted while
 // the hangar is up. When one is due it waits for a good moment and place: none of the hangar's other events for `CALM`
@@ -113,6 +113,11 @@
   // straying up to `scatter` times as far again as they do, now and then (`tears`) with a bar tearing across it as they
   // do; once a showing at most, only while it holds.
   const CATCH = { chance: 0.55, close: [2, 3], delay: [0.1, 0.5], share: [0.2, 0.4], hold: [0.15, 0.4], bright: 0.25, fall: 0.3, dim: 0.6, scatter: 4, tears: 0.5 };
+  // Its afterimage stirs a little as the visitor's Ooga passes: only some showings (`chance`); within `reach` m of where
+  // it stood (drawn each showing between, as is its `strength`), more the nearer, eased up at `up` and back down at
+  // `down` (shares a second), its streaks and motes up to `bright` brighter, their shimmer up to `quicken` times as fast
+  // again and its motes pushed up to `push` model units aside, away from the Ooga. Nothing of the figure comes back.
+  const STIR = { chance: 0.75, reach: [3, 4.5], strength: [0.5, 1], up: 2, down: 0.6, bright: 0.3, quicken: 1.5, push: 0.08 };
   // Where a spot may be: from the camera, m (nearer on a coarse pointer, where the screen is small), and on screen
   // (within `x` either side of centre across, `top` to `bottom` down, as fractions, `coarseTop` to `coarseBottom` on a
   // coarse pointer, and not behind the visitor's own Ooga); how far from the visitor's Ooga, from the guide and from
@@ -390,8 +395,11 @@
     // how strong it is; and how steady it is now, 0 to 1. Its catch closer in (`CATCH`), likewise: whether this showing
     // may, how near, which share of its runs and their seed; whether it has come, how far into it, s, and how long it
     // holds, s; how much it holds now and how much it is breaking apart, 0 to 1; and whether a bar is to tear across.
+    // Its afterimage's stir (`STIR`): whether this showing may, how near and how strongly; how much now, 0 to 1, which
+    // side the Ooga is on (+1 the view's right); and the clock its streaks and motes shimmer by, quickened as it stirs.
     const near = { on: false, reach: 0, share: 0, peak: 0, seed: 0, left: 0, inside: false, active: false, t: 0, hold: 0, strength: 0, k: 0,
-      catchOn: false, close: 0, catchShare: 0, catchSeed: 0, caught: false, ct: 0, catchLen: 0, c: 0, b: 0, tear: false };
+      catchOn: false, close: 0, catchShare: 0, catchSeed: 0, caught: false, ct: 0, catchLen: 0, c: 0, b: 0, tear: false,
+      stirOn: false, stirReach: 0, stirPeak: 0, s: 0, side: 1, clock: 0 };
 
 
     const SCREEN = { x: 0, y: 0, depth: 0 }, FOOT = { x: 0, y: 0, depth: 0 }, still = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -489,6 +497,7 @@
       near.seed = Math.floor(Math.random() * 1e6); near.left = NEAR.times; near.inside = false; near.active = false; near.k = 0;
       near.catchOn = Math.random() < CATCH.chance; near.close = between(CATCH.close); near.catchShare = between(CATCH.share);
       near.catchSeed = Math.floor(Math.random() * 1e6); near.caught = false; near.c = near.b = 0; near.tear = false;
+      near.stirOn = Math.random() < STIR.chance; near.stirReach = between(STIR.reach); near.stirPeak = between(STIR.strength); near.s = 0;
       show(true);
       sphere[0] = at.x; sphere[1] = TOP * SCALE * 0.55; sphere[2] = at.z; sphere[3] = TOP * SCALE + 2;
     };
@@ -642,17 +651,17 @@
           sprite(sparks, ns++, P.x, P.y, P.z, FL.size[i], FL.size[i], 0, opacity);
         }
       }
-      // The motes, drifting up round it while it shows and through the afterimage.
-      const mote = shown * 0.8 + lasting;
+      // The motes, drifting up round it while it shows and through the afterimage, stirred aside as the Ooga passes.
+      const mote = shown * 0.8 + lasting, stirred = 1 + STIR.bright * near.s, push = rest ? 0 : -near.side * at.mirror * near.s * STIR.push;
       if (mote > 0.01) for (let i = 0; i < MO.n; i += step) {
-        const y = (MO.y[i] + (rest ? 0 : elapsed * MO.rise[i] / H)) % 1.9, opacity = MOTES.glow * mote * smooth(y / 0.2) * smooth((1.9 - y) / 0.3) * (0.4 + 0.6 * Math.pow(0.5 + 0.5 * Math.sin(elapsed * 2.3 * slowly + MO.phase[i]), 2));
+        const y = (MO.y[i] + (rest ? 0 : elapsed * MO.rise[i] / H)) % 1.9, opacity = MOTES.glow * mote * stirred * smooth(y / 0.2) * smooth((1.9 - y) / 0.3) * (0.4 + 0.6 * Math.pow(0.5 + 0.5 * Math.sin(near.clock * 2.3 * slowly + MO.phase[i]), 2));
         if (opacity <= 0.01) continue;
-        place(MO.x[i] + (rest ? 0 : 0.03 * Math.sin(elapsed * 0.6 + MO.phase[i])), y);
+        place(MO.x[i] + (rest ? 0 : 0.03 * Math.sin(elapsed * 0.6 + MO.phase[i])) + push * smooth(y / 0.6), y);
         sprite(sparks, ns++, P.x, P.y, P.z, MO.size[i], MO.size[i], 0, opacity);
       }
       // The afterimage's streaks, standing where it stood and shimmering.
       if (lasting > 0.01) for (let i = 0; i < SK.n; i++) {
-        const opacity = RESIDUE.streakGlow * lasting * (0.35 + 0.65 * Math.pow(0.5 + 0.5 * Math.sin(elapsed * 1.3 * slowly + SK.phase[i]), 2));
+        const opacity = RESIDUE.streakGlow * lasting * stirred * (0.35 + 0.65 * Math.pow(0.5 + 0.5 * Math.sin(near.clock * 1.3 * slowly + SK.phase[i]), 2));
         if (opacity <= 0.01) continue;
         place(SK.x[i], SK.y[i] + SK.length[i] / H / 2);
         sprite(lines, nl++, P.x, P.y, P.z, SK.length[i], RESIDUE.streakWidth, Math.PI / 2, opacity);
@@ -719,6 +728,11 @@
     // lets go again even if the Ooga stays; it never waits or lasts longer for it.
     const steadyNear = (dt) => {
       const me = ooga(), d = me ? Math.hypot(me.root.position.x - at.x, me.root.position.z - at.z) : Infinity, inside = d < near.reach;
+      // Its afterimage stirring as the Ooga passes, more the nearer, settling again once it has gone by.
+      const stir = near.stirOn && t > at.gone && fadeAt < 0 ? near.stirPeak * smooth((near.stirReach - d) / 1.5) : 0;
+      near.s += (stir - near.s) * Math.min(1, dt * (stir > near.s ? STIR.up : STIR.down));
+      if (me) near.side = (me.root.position.x - at.x) * rx + (me.root.position.z - at.z) * rz < 0 ? -1 : 1;
+      near.clock += dt * (1 + (still.matches ? 0 : STIR.quicken) * near.s);
       // Closer still, once a showing at most: a moment later a few fragments catch for an instant, then break apart.
       if (!near.caught && near.catchOn && d < near.close && fadeAt < 0 && t > at.formed && t < at.held - 0.6) {
         near.caught = true; near.ct = -between(CATCH.delay); near.catchLen = between(CATCH.hold);
@@ -773,7 +787,7 @@
       get due() { return due; }, get calm() { return calm; }, get after() { return after; }, get t() { return t; },
       get count() { return sparks.instanceCount + lines.instanceCount + bars.instanceCount + glow.instanceCount; },
       get loud() { return loud; },
-      get near() { return { on: near.on, reach: +near.reach.toFixed(2), left: near.left, k: +near.k.toFixed(3), catchOn: near.catchOn, close: +near.close.toFixed(2), caught: near.caught, c: +near.c.toFixed(2), b: +near.b.toFixed(2) }; }
+      get near() { return { on: near.on, reach: +near.reach.toFixed(2), left: near.left, k: +near.k.toFixed(3), catchOn: near.catchOn, close: +near.close.toFixed(2), caught: near.caught, c: +near.c.toFixed(2), b: +near.b.toFixed(2), stirOn: near.stirOn, stirReach: +near.stirReach.toFixed(2), s: +near.s.toFixed(3) }; }
     };
     return {
       update, liveGeometry, dispose, debug,
