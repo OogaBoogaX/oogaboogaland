@@ -396,8 +396,9 @@
   const BEAMS = 4;
   // Her sparks and motes at once, at most: a working beam keeps about 13 in the air and a fast flight about 10.
   const FLECKS = 24;
-  // How long a flip over backwards lasts (`flip`), s, and how high it lifts her, m.
-  const FLIP = 0.95, FLIP_HOP = 0.35;
+  // How long a flip over backwards lasts (`flip`), s; how high a whole one lifts her, m; and how quickly she leans into
+  // a tilt, a share a second.
+  const FLIP = 0.95, FLIP_HOP = 0.35, TILT_RATE = 4;
   // One Tess for a visit, under `parent`, picked as `kind`. The place she guides moves her through this rig: a flight
   // path she steers along (`clearPath`, `push`, `steer`, the last point following someone while `track`ed), her beam
   // (`mode` 1 working, 2 pointing, landing on `aim`, or split to each of up to BEAMS `aims` round the `aim` she
@@ -406,8 +407,9 @@
   // her flight. Outline registries walk past her, as she moves every frame. A place may unsettle her (`uneasy`, 0 to 1:
   // her rings falter and stutter out of step, her eye narrows and dims and she trembles), spin her rings up (`whirl`:
   // that many times more turns on top of her own, brighter the faster, throwing motes off once fast, which the place
-  // eases up and down) and flip her over backwards in the air (`flip`, `flipping`); none of it moves her body, which the
-  // place flies.
+  // eases up and down), tilt her to one side (`tilt`, rad, which she leans into) and flip her over backwards in the air
+  // (`flip`, `flipping`; a share of a turn only tips her back that far and back again); none of it moves her body,
+  // which the place flies.
   // Hub scope survives scene changes, but Tess's meshes need survive only while a Tess owns them. The director leaves
   // one scene and enters the next in one task, so the caches go only once that task ends with no Tess: the Factory's
   // greeter entered as the hub's guide leaves reuses every tier rather than rebuilding them in the swap frame.
@@ -428,7 +430,7 @@
     // Her bubble stands over her eye, not the rings, whose top moves as they tumble.
     const figure = { root: body, parts: { head } }, rings = [], pivots = [], orientations = [], turnQ = quat.create();
     const tumbles = Float64Array.from(RINGS, (_, i) => i * 2.1);
-    let greetingT = 0, speakingT = 0, lookYaw = 0, lookPitch = 0, tempo = 1, flare = 0, trailT = 0, sparkT = 0, litGain = 1, shown = 0, flipT = 0, whirlT = 0;
+    let greetingT = 0, speakingT = 0, lookYaw = 0, lookPitch = 0, tempo = 1, flare = 0, trailT = 0, sparkT = 0, litGain = 1, shown = 0, flipT = 0, flipShare = 1, whirlT = 0, tilted = 0;
     body.sightHidden = true;
     hover.scale.x = hover.scale.y = hover.scale.z = SCALE;
     addChild(body, hover); addChild(hover, head);
@@ -515,7 +517,7 @@
     };
     const rig = {
       root: body, figure, position, vel,
-      mode: 0, aim: { x: 0, y: 0, z: 0 }, aims: null, calm: false, steady: false, watching: false, watch: { x: 0, y: 0, z: 0 }, uneasy: 0, whirl: 0,
+      mode: 0, aim: { x: 0, y: 0, z: 0 }, aims: null, calm: false, steady: false, watching: false, watch: { x: 0, y: 0, z: 0 }, uneasy: 0, whirl: 0, tilt: 0,
       clearPath(speed, corner) { pathCount = pathAt = 0; pathSpeed = speed; pathCorner = corner; tracking = false; },
       push(x, y, z) { const o = pathCount++ * 3; path[o] = x; path[o + 1] = y; path[o + 2] = z; },
       // The last point follows someone: she never settles on it, and `steer` never reports arriving.
@@ -551,7 +553,7 @@
       // A greeting's tilt of the eye, and the rings' flare when she notices someone.
       nod() { greetingT = 1.4; },
       flare() { flare = 1; },
-      flip() { flipT = FLIP; },
+      flip(share = 1) { flipT = FLIP; flipShare = share; },
       get flipping() { return flipT > 0; },
       // The beam she shows: the mode she asked for, once she faces where it lands.
       get shown() { return shown; },
@@ -583,17 +585,19 @@
         // Unsettled, spun up and flipping: how much of each now.
         flipT = Math.max(0, flipT - dt);
         const uneasy = rig.uneasy, whirl = rig.whirl;
-        // A flip: once over backwards, eased in and out, lifting her as she goes over.
-        const flipped = flipT > 0 ? 1 - flipT / FLIP : 0, over = flipped * flipped * (3 - 2 * flipped);
+        // A flip: once over backwards, eased in and out, lifting her as she goes over; a share of one only tips her back
+        // that far and back again, lifting her less. A tilt she leans into.
+        const flipped = flipT > 0 ? 1 - flipT / FLIP : 0, over = flipShare < 1 ? Math.sin(flipped * Math.PI) * flipShare : flipped * flipped * (3 - 2 * flipped);
+        tilted = damp(tilted, rig.tilt, TILT_RATE, dt);
         const turnBy = Math.atan2(Math.sin(lookYaw - body.rotation.y), Math.cos(lookYaw - body.rotation.y));
         body.rotation.y = (body.rotation.y + damp(0, turnBy, 8, dt)) % TAU;
         head.rotation.x = damp(head.rotation.x, lookPitch + Math.sin(greetingT * 9) * greetingT * 0.05, 8, dt);
         head.rotation.z = damp(head.rotation.z, Math.sin(greetingT * 7) * greetingT * 0.06
           - (cruising ? Math.max(-0.35, Math.min(0.35, turnBy * 0.3)) : 0), 6, dt);
-        hover.position.y = Math.sin(elapsed * 1.7) * 0.018 * SCALE + uneasy * Math.sin(elapsed * 47) * 0.004 * SCALE + Math.sin(flipped * Math.PI) * FLIP_HOP;
-        // A tremble shakes her and a flip turns her over.
+        hover.position.y = Math.sin(elapsed * 1.7) * 0.018 * SCALE + uneasy * Math.sin(elapsed * 47) * 0.004 * SCALE + Math.sin(flipped * Math.PI) * FLIP_HOP * Math.min(1, flipShare * 2);
+        // A tremble shakes her, a flip turns her over and a tilt leans her to one side.
         hover.rotation.x = uneasy * Math.sin(elapsed * 37) * 0.025 - over * TAU;
-        hover.rotation.z = uneasy * Math.sin(elapsed * 41 + 1) * 0.035;
+        hover.rotation.z = tilted + uneasy * Math.sin(elapsed * 41 + 1) * 0.035;
         // Each ring tumbles about its own diameter, at her pace: brisk in flight, busy at work, slow while she talks,
         // and a flare when she notices someone. Quaternions keep three-axis turns stable; the angles stay bounded.
         // Unsettled, each ring moves in fits and starts, out of step with the others, and twitches.
