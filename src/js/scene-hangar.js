@@ -1869,9 +1869,9 @@
     s.sisHead.x = sp.x; s.sisHead.y = sp.y + 0.9; s.sisHead.z = sp.z;
     if (s.sis.rampaging && !s.guide.lent) { s.guide.lend(s.distraction.drive); s.tessFor = "sis"; s.sis.distract(s.guide.root.position); }
     else if (!s.sis.rampaging && s.tessFor === "sis") { s.distraction.done(); s.guide.lend(null); s.tessFor = null; s.sis.distract(null); }
-    // The faint shape in the air unsettles her: lent to it while it shows, if she is free to notice it, back once she
-    // has shaken it off.
-    if (!s.guide.lent && !s.guide.holding && s.guide.state.phase === "work" && s.unsettled.due()) { s.guide.lend(s.unsettled.drive); s.tessFor = "shimmer"; }
+    // The faint shape in the air unsettles her: lent to it while it shows, if it is near her, in her sight, and she is
+    // free to notice it, back once she has shaken it off.
+    if (!s.guide.lent && !s.guide.holding && s.guide.state.phase === "work" && s.unsettled.due(s.guide.root.position)) { s.guide.lend(s.unsettled.drive); s.tessFor = "shimmer"; }
     else if (s.tessFor === "shimmer" && s.unsettled.over) { s.unsettled.reset(); s.guide.lend(null); s.tessFor = null; }
     seatViewBack(drivenHere);
     pilot.update(dt);

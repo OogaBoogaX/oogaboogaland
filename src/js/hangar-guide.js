@@ -12,9 +12,9 @@
 // distracted (`sis.distract`), swings slower and turns on her now and then. When the rampage ends Tess says her piece
 // and goes back to work.
 //
-// When the faint shape in the hangar's air (`hangar-shimmer.js`) shows and she is free to notice it, the scene lends her
-// to `unsettled`: it unsettles her. She jolts, stares, edges in to hang at its side, studies it with a faltering beam,
-// flinches, backs off as it comes apart, then shakes it off and goes back to work.
+// When the faint shape in the hangar's air (`hangar-shimmer.js`) shows near her, in her sight, and she is free to notice
+// it, the scene lends her to `unsettled`: it unsettles her. She jolts, stares, edges in to hang at its side, studies it
+// with a faltering beam, flinches, backs off as it comes apart, then shakes it off and goes back to work.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -233,9 +233,9 @@
   // only a little quicker, without jolts, flips, flinches, trembling or shaking it off. `shimmer` is the shape, read live, and
   // `camera` the view, so she keeps to its side of it.
   const UNEASY = {
-    // When she notices it, as a share of its forming, at random between; and none if less than `least` s of it would be
-    // left.
-    notice: [0.5, 0.9], least: 3,
+    // When she notices it, as a share of its forming, at random between; none if less than `least` s of it would be
+    // left; and only within `reach` m of it, across the floor, with it in her sight, which she looks for every `look` s.
+    notice: [0.5, 0.9], least: 3, reach: 14, look: 0.25,
     // The jolt: how far she hops back from it, m, how fast, m/s; and how long she stares after it, s.
     hop: 0.6, hopSpeed: 2.4, stare: 0.6,
     // Where she hangs: `side` m to its side, `toward` m toward the view, `y` m up, `margin` m inside the hall's walls.
@@ -264,7 +264,7 @@
     // The rig she is lent as; her stage and how long she has been in it, s; the shape she is on (its `shows`) and the one
     // whose noticing is drawn, and when; her beam's countdown and whether it is on; her flinch's countdown; the bars
     // last frame; and whether this one ended early.
-    let rig = null, stage = "idle", t = 0, shape = -1, drawn = -1, noticeAt = 0, beamIn = 0, beamOn = false, flinchIn = 0, bars = 0, cut = false, flips = 0, flipAgo = 0;
+    let rig = null, stage = "idle", t = 0, shape = -1, drawn = -1, noticeAt = 0, lookAt = 0, beamIn = 0, beamOn = false, flinchIn = 0, bars = 0, cut = false, flips = 0, flipAgo = 0;
     const between = ([a, b]) => a + Math.random() * (b - a);
     // Whether (x, y, z) is open air for her: inside the hall and nothing standing there up to near her height.
     const open = (x, y, z) => {
@@ -291,14 +291,16 @@
       go(r, back.x, back.y, back.z, UNEASY.backSpeed, 0.3);
       enter("recoil");
     };
-    // Whether she should be lent now: the shape shows and has been formed a moment, she has not had this one, and enough
-    // of it is left to be worth it.
-    const due = () => {
+    // Whether she should be lent now, from where she is (`from`): the shape shows and has been formed a moment, she has
+    // not had this one, enough of it is left to be worth it, and it is near her and in her sight, never across the hall.
+    const due = (from) => {
       if (shimmer.state !== "show" || shimmer.fading || shimmer.shows === shape) return false;
-      if (shimmer.shows !== drawn) { drawn = shimmer.shows; noticeAt = between(UNEASY.notice); }
+      if (shimmer.shows !== drawn) { drawn = shimmer.shows; noticeAt = between(UNEASY.notice); lookAt = 0; }
       if (shimmer.t < at.formed * noticeAt) return false;
       if (shimmer.t > at.held - UNEASY.least) { shape = shimmer.shows; return false; }
-      return true;
+      if (Math.hypot(from.x - at.x, from.z - at.z) > UNEASY.reach || shimmer.t < lookAt) return false;
+      lookAt = shimmer.t + UNEASY.look;
+      return shimmer.seen(from.x, from.y, from.z);
     };
     const enter = (next) => { stage = next; t = 0; };
     const drive = (r, dt) => {
