@@ -43,6 +43,89 @@
     SPOT_SCRATCH.set(spot);
     return SPOT_SCRATCH;
   };
+  // The passes a frame's draws are counted under in `stats.info`: shadow map, reflection captures (mirror, glossy
+  // reflectors, environment cube), the camera's own pass, and the fullscreen passes after it (bloom, composite).
+  const INFO_PASSES = ["shadow", "capture", "main", "post"];
+  const GPU_QUERIES = 4, GPU_WINDOW = 60;
+  // Debug-only GL call counts and GPU frame time (`?debug=1&glstats=1`). The context's own methods are wrapped, which
+  // costs a little on every call, so this never runs on the ordinary debug path the frame-rate floor measures.
+  const createGlStats = (gl) => {
+    const KEYS = ["programs", "vaoBinds", "attribPointers", "fbBinds", "texBinds", "blits", "bufferData", "bufferSubData", "texUploads", "uniforms", "uploadBytes"];
+    const live = {}, last = {};
+    for (const key of KEYS) live[key] = last[key] = 0;
+    const count = (key, name) => {
+      const original = gl[name];
+      gl[name] = function () { live[key]++; return original.apply(gl, arguments); };
+    };
+    count("programs", "useProgram");
+    count("vaoBinds", "bindVertexArray");
+    count("attribPointers", "vertexAttribPointer");
+    count("attribPointers", "vertexAttribIPointer");
+    count("fbBinds", "bindFramebuffer");
+    count("texBinds", "bindTexture");
+    count("blits", "blitFramebuffer");
+    for (const name of ["texImage2D", "texSubImage2D", "texImage3D", "texSubImage3D"]) count("texUploads", name);
+    for (const name of Object.getOwnPropertyNames(WebGL2RenderingContext.prototype)) if (/^uniform(\d|Matrix)/.test(name)) count("uniforms", name);
+    const bufferData = gl.bufferData, bufferSubData = gl.bufferSubData;
+    gl.bufferData = function (target, data) {
+      live.bufferData++;
+      live.uploadBytes += typeof data === "number" ? data : data ? data.byteLength : 0;
+      return bufferData.apply(gl, arguments);
+    };
+    gl.bufferSubData = function (target, offset, data, srcOffset, length) {
+      live.bufferSubData++;
+      const bytes = data.BYTES_PER_ELEMENT || 1;
+      live.uploadBytes += length ? length * bytes : data.byteLength - (srcOffset || 0) * bytes;
+      return bufferSubData.apply(gl, arguments);
+    };
+    // Frame time on the GPU from a small ring of timer queries, read a few frames late; absent where the extension is.
+    let ext = null, queries = null, pending = null, write = 0, read = 0, active = false, samples = 0;
+    const recent = new Float64Array(GPU_WINDOW);
+    const reset = () => {
+      ext = gl.getExtension("EXT_disjoint_timer_query_webgl2");
+      queries = ext ? Array.from({ length: GPU_QUERIES }, () => gl.createQuery()) : null;
+      pending = new Uint8Array(GPU_QUERIES);
+      write = read = samples = 0;
+      active = false;
+      stats.gpuMs = stats.gpuMsMean = null;
+    };
+    const stats = {
+      last, gpuMs: null, gpuMsMean: null,
+      begin: () => {
+        if (active) stats.end();
+        if (!ext || pending[write]) return;
+        gl.beginQuery(ext.TIME_ELAPSED_EXT, queries[write]);
+        active = true;
+      },
+      end: () => {
+        if (!active) return;
+        gl.endQuery(ext.TIME_ELAPSED_EXT);
+        pending[write] = 1;
+        write = (write + 1) % GPU_QUERIES;
+        active = false;
+      },
+      publish: () => {
+        for (const key of KEYS) { last[key] = live[key]; live[key] = 0; }
+        while (ext && pending[read] && gl.getQueryParameter(queries[read], gl.QUERY_RESULT_AVAILABLE)) {
+          if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) {
+            const ms = gl.getQueryParameter(queries[read], gl.QUERY_RESULT) / 1e6;
+            recent[samples % GPU_WINDOW] = ms;
+            samples++;
+            let sum = 0;
+            const n = Math.min(samples, GPU_WINDOW);
+            for (let i = 0; i < n; i++) sum += recent[i];
+            stats.gpuMs = ms;
+            stats.gpuMsMean = sum / n;
+          }
+          pending[read] = 0;
+          read = (read + 1) % GPU_QUERIES;
+        }
+      },
+      reset
+    };
+    reset();
+    return stats;
+  };
   // MAX_PIXELS caps the pixel ratio to bound buffer memory.
   const MAX_PIXELS = 2.6e6;
   const DEFAULT_LIGHT = { x: 0.45, y: 0.85, z: 0.3 };
@@ -1829,6 +1912,33 @@ void main() {
     const FRUSTUM = new Float32Array(24), LIGHT_FRUSTUM = new Float32Array(24), MIRROR_FRUSTUM = new Float32Array(24);
     const CENTER = new Float32Array(3), CULL = new Float64Array(4);
     let culled = 0, drawn = 0, suppressed = 0, smallCulled = 0, shadowPassCount = 0, rippleSurfaces = 0, rippleWaves = 0;
+    // Frame counters in the manner of Three.js's renderer.info: draw calls, triangles and instances per pass, counted
+    // where each draw is issued, published whole at the next frame's start and read through `stats.info`.
+    // `?debug=1&glstats=1` adds GL call counts and a GPU frame timer; both wrap the context, so they stay opt-in.
+    const infoLive = new Float64Array(INFO_PASSES.length * 3);
+    let infoPass = 0;
+    const infoPassOf = () => ({ calls: 0, triangles: 0, instances: 0 });
+    const info = { calls: 0, triangles: 0, instances: 0, passes: {}, gl: null, gpuMs: null, gpuMsMean: null };
+    for (const name of INFO_PASSES) info.passes[name] = infoPassOf();
+    const countDraw = (corners, instances) => {
+      const o = infoPass * 3;
+      infoLive[o]++;
+      infoLive[o + 1] += corners / 3 * instances;
+      infoLive[o + 2] += instances;
+    };
+    const glStats = pageParams.has("debug") && pageParams.get("glstats") === "1" ? createGlStats(gl) : null;
+    if (glStats) info.gl = glStats.last;
+    const publishInfo = () => {
+      info.calls = info.triangles = info.instances = 0;
+      for (let p = 0; p < INFO_PASSES.length; p++) {
+        const out = info.passes[INFO_PASSES[p]], o = p * 3;
+        out.calls = infoLive[o]; out.triangles = infoLive[o + 1]; out.instances = infoLive[o + 2];
+        info.calls += out.calls; info.triangles += out.triangles; info.instances += out.instances;
+      }
+      infoLive.fill(0);
+      infoPass = 0;
+      if (glStats) { glStats.publish(); info.gpuMs = glStats.gpuMs; info.gpuMsMean = glStats.gpuMsMean; }
+    };
     // Static casters live in a cached depth map (res.shadow.staticFb) baked under shadowBaked; the working map
     // starts each frame as a copy of it and takes only the moving casters.
     let shadowFrame = 0, shadowBake = 0, shadowBakedCount = 0, shadowStaticValid = false, shadowSubset = 0, shadowDraws = 0, shadowStaticRebuilds = 0;
@@ -2508,6 +2618,7 @@ void main() {
     };
     // Triangles `first` to `first + count` (in corners) of a part, `instances` times.
     const drawPart = (part, first, count, instances) => {
+      countDraw(count, instances);
       if (part.index) gl.drawElementsInstanced(gl.TRIANGLES, count, part.index, first * part.indexSize, instances);
       else gl.drawArraysInstanced(gl.TRIANGLES, first, count, instances);
     };
@@ -3363,6 +3474,7 @@ void main() {
       res.shadow = null;
       res.matrixTexture = null;
       init();
+      glStats?.reset();
       lost = false;
     };
     canvas.addEventListener("webglcontextlost", onLost);
@@ -3592,6 +3704,7 @@ void main() {
           if (visible && start < 0) start = i;
           if (!visible && start >= 0) {
             bindInstanceAttribs(rec.instanceBuffer, rec.instanceFirst + start, false);
+            countDraw(count, i - start);
             // Indexed parts arrive with the open GPU-packing PR; CPU geometry and uploads remain unchanged here.
             if (part.index) gl.drawElementsInstanced(gl.TRIANGLES, count, part.index, first * part.indexSize, i - start);
             else gl.drawArraysInstanced(gl.TRIANGLES, first, count, i - start);
@@ -3673,6 +3786,7 @@ void main() {
           gl.uniform4fv(p.u.uObjectClip, objectClip);
           bindCanvasSurface(rec, p);
           gl.bindVertexArray(part.vao);
+          countDraw(count, n);
           if (part.index) gl.drawElementsInstanced(gl.TRIANGLES, count, part.index, first * part.indexSize, n);
           else gl.drawArraysInstanced(gl.TRIANGLES, first, count, n);
           gl.useProgram(program.prog);
@@ -3851,6 +3965,7 @@ void main() {
       gl.depthFunc(gl.LEQUAL);
       gl.depthMask(false);
       gl.bindVertexArray(res.quadVao);
+      countDraw(3, 1);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.depthMask(true);
       gl.depthFunc(gl.LESS);
@@ -4218,6 +4333,7 @@ void main() {
       gl.viewport(0, 0, w, h);
       gl.useProgram(program.prog);
       gl.bindVertexArray(res.quadVao);
+      countDraw(3, 1);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     };
     let collectForRender = collect, cullForRender = writeCullSphere, uploadForRender = uploadInstances;
@@ -4241,6 +4357,9 @@ void main() {
       cullForRender = rigMode ? writeRigCullSphere : writeCullSphere;
       uploadForRender = rigMode ? uploadRigInstances : uploadInstances;
       cutawayMaxY = opts.cutawayMaxY ?? 1e6;
+      // This frame draws: last frame's counts are complete.
+      publishInfo();
+      glStats?.begin();
       cutawayFade = Math.max(0, Math.min(1, Number.isFinite(opts.cutawayFade) ? opts.cutawayFade : opts.birdsEyeCutaway ? 1 : 0));
       cutawayCloudY = opts.cutawayCloudY || 0;
       cutawayCloudMix = Math.max(0, Math.min(1, opts.cutawayCloudMix || 0));
@@ -4392,6 +4511,7 @@ void main() {
         if (lightViewProj[i] !== shadowBaked[i]) baked = false;
       }
       shadowPrev.set(lightViewProj);
+      infoPass = 0;
       gl.bindFramebuffer(gl.FRAMEBUFFER, sh.fb);
       gl.viewport(0, 0, sh.size, sh.size);
       gl.useProgram(pg.shadow.prog);
@@ -4434,6 +4554,7 @@ void main() {
       }
       gl.cullFace(gl.BACK);
       shadowPassCount++;
+      infoPass = 1;
       if (mirror.node) {
         updateMirrorSide(camera);
         if (mirror.portal) {
@@ -4527,6 +4648,7 @@ void main() {
           updateWorld(viewActor.root, viewActor.root.parent?.world || null);
         }
       }
+      infoPass = 2;
       gl.bindFramebuffer(gl.FRAMEBUFFER, f.scene);
       gl.viewport(0, 0, pw, ph);
       gl.clearColor(clear[0], clear[1], clear[2], 1);
@@ -4633,6 +4755,7 @@ void main() {
       gl.disable(gl.CULL_FACE);
       drawParts("line", "line", false, true);
       gl.enable(gl.CULL_FACE);
+      infoPass = 3;
       if (f.samples > 0) blit(f);
       gl.disable(gl.DEPTH_TEST);
       const bw = f.bloomW, bh = f.bloomH;
@@ -4702,6 +4825,7 @@ void main() {
       fullscreen(pg.composite, null, pw, ph);
       gl.activeTexture(gl.TEXTURE0);
       gl.enable(gl.DEPTH_TEST);
+      glStats?.end();
       return true;
     };
     // Screen position of a world point, written into out.
@@ -4828,7 +4952,7 @@ void main() {
       get stats() {
         let shadowFinite = true;
         for (let i = 0; i < 16; i++) if (!Number.isFinite(lightViewProj[i])) shadowFinite = false;
-        return { instanceStreamCPUBytes: instanceStream.data ? instanceStream.data.byteLength : 0, instanceStreamGPUBytes: instanceStream.buffer ? instanceStream.capacity * 4 * 6 : 0, waterTextures: dsbGPU?2:0, records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, imageTextures, rippleBodyTextures, shadowResources: res.shadow ? 4 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, shadowDraws, shadowStatic: shadowStaticValid ? shadowBakedCount : 0, shadowStaticRebuilds, culled, drawn, suppressed, smallCulled, rippleSurfaces, rippleWaves };
+        return { instanceStreamCPUBytes: instanceStream.data ? instanceStream.data.byteLength : 0, instanceStreamGPUBytes: instanceStream.buffer ? instanceStream.capacity * 4 * 6 : 0, waterTextures: dsbGPU?2:0, records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, imageTextures, rippleBodyTextures, shadowResources: res.shadow ? 4 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, shadowDraws, shadowStatic: shadowStaticValid ? shadowBakedCount : 0, shadowStaticRebuilds, culled, drawn, suppressed, smallCulled, rippleSurfaces, rippleWaves, info };
       },
       get mirror() {
         return mirrorDebug;
