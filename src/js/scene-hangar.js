@@ -235,6 +235,13 @@
   const roomBody = (rec) => {
     if (!nearHit && rec.body && rec.zone === hangarScene.voiceZone && nearTest(rec.x, rec.z, rec.y, BODY.height, BODY.radius)) nearHit = true;
   };
+  // Whether nothing that walks the hall (as `nearJet` counts them) stands within `r` of (x, z); `CLEAR` its question.
+  const CLEAR = { x: 0, z: 0, r: 0 };
+  const clearTest = (x, z) => Math.hypot(x - CLEAR.x, z - CLEAR.z) < CLEAR.r;
+  const clearOf = (x, z, r) => {
+    CLEAR.x = x; CLEAR.z = z; CLEAR.r = r;
+    return !nearJet(clearTest);
+  };
   const nearJet = (test) => {
     const d = people && people.player, others = remotes ? remotes.actors() : NO_ACTORS, sis = scene.sis.actor;
     if (d && test(d.root.position.x, d.root.position.z, d.root.position.y - d.baseY, BODY.height, d.bodyRadius || BODY.radius)) return true;
@@ -1631,7 +1638,7 @@
     // on the right wall, whose operators' posts come just before it.
     const side = HM.sideRooms(), first = LAYOUT.crew.length - 1 - side.length;
     scene.roomFire = BL.hangarRoomFire.create({ root, fx, audio, rooms: [{ spots: HM.controlRoom().spots, gorilla: scene.crew[LAYOUT.crew.length - 1] }, ...side.map((r, i) => ({ spots: r.spots, gorilla: scene.crew[first + i] }))] });
-    scene.anomaly = BL.hangarAnomaly.create({ root, fire: scene.fire, sis: scene.sis, fx, audio, jet: scene.jet, stage: JET_STAGE, room: scene.roomFire, auto: !params.has("nosim") || every > 0, gap: every > 0 ? every : null, riders: () => jetRidden(), near: (test) => nearJet(test), busy: () => scene.meltdown.active });
+    scene.anomaly = BL.hangarAnomaly.create({ root, fire: scene.fire, sis: scene.sis, fx, audio, jet: scene.jet, stage: JET_STAGE, room: scene.roomFire, auto: !params.has("nosim") || every > 0, gap: every > 0 ? every : null, riders: () => jetRidden(), near: (test) => nearJet(test), busy: () => scene.meltdown.active || !!scene.shimmer && scene.shimmer.holding });
     // Now and then a worker in one of the crew's rooms has had enough, and runs down to pound on the Jet
     // (`hangar-meltdown.js`), with nothing else going on: not on a test page unless `meltdown=` asks, which under debug
     // also sets the wait between them, s.
@@ -1639,7 +1646,7 @@
     scene.meltdown = BL.hangarMeltdown.create({ root, fx, audio, sis: scene.sis, rooms: side.map((r, i) => ({ spots: r.spots, gorilla: scene.crew[first + i], door: scene.roomDoors[i], shut: r.door.turn })),
       // Tess, to break up the fight, when nobody else has her.
       tess: { free: () => !scene.guide.lent && !scene.guide.holding, lend: (drive) => { scene.guide.lend(drive); scene.tessFor = drive ? "meltdown" : null; } },
-      busy: () => leaving || scene.anomaly.playing || scene.fire.t >= 0 || scene.roomFire.burning || scene.sis.rampaging || scene.guide.lent,
+      busy: () => leaving || scene.anomaly.playing || scene.fire.t >= 0 || scene.roomFire.burning || scene.sis.rampaging || scene.guide.lent || !!scene.shimmer && scene.shimmer.holding,
       blocker: () => people && people.player, auto: !params.has("nosim") || fed > 0, gap: fed > 0 ? fed : null });
     // The terminals by the runway and the film show they start (`hangar-terminals.js`), its mood page reading hers.
     scene.terminals = BL.hangarTerminals.create({ root, audio, mood: () => scene.sis.mood, toast: hud.toast });
@@ -1682,6 +1689,14 @@
       targets: { sis: [scene.sisHead], show: [HM.projector().lens, HM.filmScreen().picture] }
     });
     scene.distraction = BL.hangarGuide.distraction(scene.sis);
+    // Now and then, a faint shape gathering and coming apart in the air where the visitor is looking
+    // (`hangar-shimmer.js`), which the anomalies and a worker's meltdown wait on: not on a test page unless `shimmer=`
+    // asks, which under debug also sets the wait before each, s.
+    const glints = DEBUG ? Number(params.get("shimmer")) : NaN;
+    scene.shimmer = BL.hangarShimmer.create({ root, audio, camera, renderer, coarse: COARSE, auto: !params.has("nosim") || glints > 0, gap: glints > 0 ? glints : null,
+      busy: () => leaving || scene.anomaly.playing || scene.fire.t >= 0 || scene.meltdown.active || scene.roomFire.burning || scene.sis.rampaging || scene.sis.brawling
+        || scene.guide.lent || scene.guide.holding || scene.guide.state.phase !== "work" || scene.terminals.showing || scene.keypad.open >= 0,
+      ooga: () => people && people.player, guide: () => scene.guide.root.position, clear: clearOf });
     // The repository's reading: read from GitHub on the first visit a page life, unless the cache holds a fresh one.
     unsubscribeFeed = BL.jetFeed.subscribe(() => { boardsDirty = true; });
     if (!params.has("nosim") && params.get("jet") !== "0") BL.jetFeed.load();
@@ -1742,7 +1757,7 @@
     hangarScene.input = input;
     hangarScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
-      hangar: { layout: LAYOUT, feed: BL.jetFeed, get scene() { return scene; }, get avatar() { return avatar; }, get audio() { return audio; }, get fire() { return scene && scene.fire; }, get sis() { return scene && scene.sis && scene.sis.debug; }, get anomaly() { return scene && scene.anomaly && scene.anomaly.debug; }, get roomFire() { return scene && scene.roomFire && scene.roomFire.debug; }, get meltdown() { return scene && scene.meltdown && scene.meltdown.debug; }, get terminals() { return scene && scene.terminals && scene.terminals.debug; }, get keypad() { return scene && scene.keypad && scene.keypad.debug; }, get crane() { return scene && scene.crane && scene.crane.debug; }, get guide() { return scene && scene.guide; } }
+      hangar: { layout: LAYOUT, feed: BL.jetFeed, get scene() { return scene; }, get avatar() { return avatar; }, get audio() { return audio; }, get fire() { return scene && scene.fire; }, get sis() { return scene && scene.sis && scene.sis.debug; }, get anomaly() { return scene && scene.anomaly && scene.anomaly.debug; }, get roomFire() { return scene && scene.roomFire && scene.roomFire.debug; }, get meltdown() { return scene && scene.meltdown && scene.meltdown.debug; }, get shimmer() { return scene && scene.shimmer && scene.shimmer.debug; }, get terminals() { return scene && scene.terminals && scene.terminals.debug; }, get keypad() { return scene && scene.keypad && scene.keypad.debug; }, get crane() { return scene && scene.crane && scene.crane.debug; }, get guide() { return scene && scene.guide; } }
     };
   };
   const feetOf = () => avatar ? avatar.root.position.y - avatar.baseY : 0;
@@ -1857,6 +1872,7 @@
     s.guide.update(dt, elapsed);
     s.fire.view(camera);
     if (s.window) s.window.update(camera);
+    s.shimmer.update(dt, elapsed);
     // The hall's hum hears from the Ooga driven here, or from the view's target.
     const ear = people && people.player, at = ear ? ear.root.position : pilot.orbit.target;
     audio.listen(at.x, ear ? at.y - ear.baseY + 1.4 : at.y, at.z, camera.target.x - camera.position.x, camera.target.z - camera.position.z);
@@ -1985,6 +2001,7 @@
     if (scene.window) scene.window.dispose();
     scene.anomaly.dispose();
     scene.meltdown.dispose();
+    scene.shimmer.dispose();
     scene.roomFire.dispose();
     scene.fire.dispose();
     scene.keypad.dispose();
@@ -2017,6 +2034,7 @@
       scene.gate.phase.liveGeometry(set); scene.launch.phase.liveGeometry(set);
       scene.sis.liveGeometry(set);
       scene.anomaly.liveGeometry(set);
+      scene.shimmer.liveGeometry(set);
       scene.terminals.liveGeometry(set);
       scene.keypad.liveGeometry(set);
       scene.guide.liveGeometry(set);
