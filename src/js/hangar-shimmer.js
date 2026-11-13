@@ -17,7 +17,7 @@
 // the hangar is up. When one is due it waits for a good moment and place: none of the hangar's other events for `CALM`
 // s (`busy`), the visitor's Ooga on foot, no dialog open, the view not turning fast, and a spot in good view (`pick`: on
 // screen, clear of the buttons and sticks on a coarse pointer, not behind the visitor's own Ooga, in sight past walls,
-// boxes and the Jet, 7 to 18 m off, or 14 on a coarse pointer, and clear of the guide and anything that walks), looking
+// boxes and the Jet, 7 to 22 m off, or 16 on a coarse pointer, and clear of the guide and anything that walks), looking
 // again every `LOOK` s, a few frames to a search, and further out and across, and less strictly, once it has looked for
 // `VIEW.relax` s. Of the spots that will do it takes one at random, more likely one a visitor would notice (off the
 // screen's middle but not at its edge, nearer, not over the launch tunnel's neon) and away from where the last few came
@@ -100,7 +100,7 @@
   // anything else that walks, m. One due that has found nowhere for
   // `relax` s looks `wider` further out and across, lets its lower part stand behind the Ooga's head, and keeps to `top`
   // and `bottom` on a coarse pointer too.
-  const VIEW = { near: 7, far: 18, coarse: 14, x: 0.38, top: 0.06, bottom: 0.95, coarseTop: 0.15, coarseBottom: 0.74, relax: 30, wider: 4, wideX: 0.42 };
+  const VIEW = { near: 7, far: 22, coarse: 16, x: 0.38, top: 0.06, bottom: 0.95, coarseTop: 0.15, coarseBottom: 0.74, relax: 30, wider: 4, wideX: 0.42 };
   const AWAY = { ooga: 4, guide: 9, body: 2.5 };
   // How a spot is chosen among those that fit: at random, but more likely where a visitor would notice it: off the
   // middle of the screen (coming in from `aside[0]` to `aside[1]` of its width off centre, as fractions), less so out
@@ -109,7 +109,7 @@
   // down, stands behind it; and away from the last `recent` it came to this page life (`least` as likely right where
   // one came, back to as likely `apart` m off), so it comes somewhere new each time. None begins while the view turns
   // faster than `turn` rad/s, which would soon take it out of view.
-  const CHOOSE = { aside: [0.04, 0.14], edge: [0.26, 0.38], edgeLeast: 0.45, far: [11, 18], farLeast: 0.45, neon: 0.3, recent: 4, apart: 8, least: 0.05, turn: 0.6 };
+  const CHOOSE = { aside: [0.04, 0.14], edge: [0.26, 0.38], edgeLeast: 0.45, far: [13, 22], farLeast: 0.4, neon: 0.3, recent: 4, apart: 10, least: 0.05, turn: 0.6 };
   // How many spots the search for a place looks at a frame.
   const SCAN = 120;
   function smooth(t) { return t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t); }
