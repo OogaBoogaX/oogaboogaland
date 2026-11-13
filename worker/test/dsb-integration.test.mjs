@@ -225,9 +225,11 @@ test("voice lists survive the room sleeping and follow a microphone published ag
   assert.deepEqual(last(1), { t: "voice", peers: [2], gens: [99] }, "the tunnel and the hall share voice");
 });
 
-test("SFU stays unavailable without secrets and uses bounded upstream calls with mocked transport", async () => {
+test("SFU stays unavailable without secrets and uses bounded upstream calls with mocked transport", async t => {
   assert.equal(sfuClient({}), null);
   const original = globalThis.fetch, calls = [];
+  const deadlines = [];
+  t.mock.method(AbortSignal, "timeout", ms => { deadlines.push(ms); return new AbortController().signal; });
   globalThis.fetch = async (url, options) => { calls.push({ url, options }); return { ok: true, json: async () => ({ sessionId: "fixture" }) }; };
   try {
     const client = sfuClient({ REALTIME_APP_ID: "fixture-app", REALTIME_SECRET: "fixture-only" });
@@ -236,6 +238,14 @@ test("SFU stays unavailable without secrets and uses bounded upstream calls with
     assert.deepEqual(calls.map(c => c.options.method), ["POST", "POST", "PUT", "PUT"]);
     assert.ok(calls.every(c => c.url.startsWith("https://rtc.live.cloudflare.com/v1/apps/fixture-app/sessions/")));
     assert.equal(JSON.parse(calls[3].options.body).force, true);
+    await client.getSession("fixture");
+    assert.deepEqual(deadlines, [5000, 5000, 5000, 5000, 5000], "request-path SFU calls keep their existing deadlines");
+    await client.closeTracks("fixture", ["0"], true); await client.getSession("fixture", true);
+    assert.ok(deadlines[5] > 5000 && deadlines[5] < 10000 && deadlines[6] > 5000 && deadlines[6] < 10000,
+      "only background cleanup allows the longer transport response deadline");
+    globalThis.fetch = async () => ({ ok: false, status: 410, json: async () => ({ errorCode: "session_error" }) });
+    await assert.rejects(client.getSession("fixture"), err => err.status === 410 && err.code === "session_error",
+      "a terminal upstream response reaches cleanup instead of being obscured as a local timeout");
   } finally { globalThis.fetch = original; }
 });
 
@@ -442,6 +452,24 @@ test("an inspection timeout still closes known tracks and retains unknown alloca
   assert.equal(room.cleanupJobs.length, 0);
 });
 
+test("cleanup retires confirmed expired SFU sessions but keeps other failures", async () => {
+  const { room, storage } = studioRoom();
+  const fail = (status, code) => async () => { const error = new Error("fixture"); error.status = status; error.code = code; throw error; };
+  for (const inspect of [true, false]) {
+    room.sfu.getSession = fail(410, "session_error");
+    room.sfu.closeTracks = fail(410, "session_error");
+    await room.queueClose("expired", ["0"], inspect);
+    assert.equal(room.cleanupJobs.length, 0, "both inspection and close can confirm a retired session");
+    assert.deepEqual(storage.get("voiceCleanup"), []);
+  }
+  for (const [status, code] of [[410, "other"], [425, "session_error"], [503, "session_error"]]) {
+    room.sfu.getSession = fail(status, code); room.sfu.closeTracks = fail(status, code);
+    await room.queueClose("unresolved", ["0"], true);
+    assert.equal(room.cleanupJobs.length, 1, "an unrelated status/code must not release ownership");
+    assert.deepEqual([...room.cleanupJobs[0].mids], ["0"]);
+  }
+});
+
 test("receive-only Studio departure forcibly closes subscriptions and moderation survives reentry", async () => {
   const { room, add, pending } = studioRoom(), host = add(1), listener = add(2, { body: null });
   room.studio.hostId = 1; room.studio.mode = "discussion";
@@ -643,7 +671,10 @@ test("a pull keeps still-eligible tracks, closes the rest through cleanup and re
   b.voice = { ...b.voice, pub: "pub-b", track: "mic", gen: 1 };
   c.voice = { ...c.voice, pub: "pub-c", track: "mic", gen: 1 };
   let answer; room.sfu.newTracks = () => new Promise(resolve => { answer = resolve; });
-  const closed = []; room.sfu.closeTracks = async (session, mids) => { closed.push([session, [...mids]]); return { tracks: mids.map(mid => ({ mid })) }; };
+  const closed = []; room.sfu.closeTracks = async (session, mids, background) => {
+    assert.equal(background, false, "a pull's inline close must not take the longer background deadline");
+    closed.push([session, [...mids]]); return { tracks: mids.map(mid => ({ mid })) };
+  };
   const request = call(listener, "pull", { ids: [1, 3, 4, 3] });
   await new Promise(resolve => setImmediate(resolve));
   b.pokerVoice = 2; // moved to another table while the SFU answered
@@ -715,6 +746,43 @@ test("the alarm wakes at the earliest of sweep, door expiry and cleanup retry, a
   await room.alarm();
   assert.equal(attempts, 1); assert.equal(room.cleanupJobs.length, 0); assert.equal(room.cleanupAt, 0);
   assert.equal(alarms.at(-1), room.sweepAt);
+});
+
+test("a new cleanup repairs an overdue registered alarm without postponing a healthy earlier wake", async () => {
+  const { room } = studioRoom(), writes = [];
+  const now = Date.now();
+  let registered = now - protocol.SWEEP_MS - 1;
+  room.ctx.storage.getAlarm = async () => registered;
+  room.ctx.storage.setAlarm = async at => { registered = at; writes.push(at); };
+  room.sfu.getSession = async () => { throw new Error("upstream unavailable"); };
+  await room.queueClose("uncertain", [], true);
+  assert.ok(writes[0] >= now, "a stale platform deadline is explicitly rearmed");
+  assert.equal(room.cleanupJobs.length, 1, "repairing the alarm never discards unresolved resources");
+  registered = Date.now() + 1000;
+  room.cleanupAt = Date.now() + protocol.SWEEP_MS;
+  writes.length = 0;
+  await room.scheduleAlarm();
+  assert.equal(writes.length, 0, "an earlier pending wake is preserved");
+});
+
+test("a slow cleanup pass advances the sweep from completion instead of scheduling another overdue alarm", async t => {
+  const { room, add } = studioRoom();
+  let now = Date.now(), registered;
+  t.mock.method(Date, "now", () => now);
+  add(1, { login: "YellowBrokeIt", body: "YellowBrokeIt" });
+  room.ctx.getWebSocketAutoResponseTimestamp = () => null;
+  room.ctx.storage.setAlarm = async at => { registered = at; };
+  room.sweepAt = now;
+  room.cleanupJobs = [{ session: "slow", at: now, mids: ["0"], revision: 0, midVersions: { 0: 0 } }];
+  room.sfu.closeTracks = async (_session, mids, background) => {
+    assert.equal(background, true, "the alarm's cleanup uses the longer background deadline");
+    now += protocol.SWEEP_MS + 1000;
+    return { tracks: mids.map(mid => ({ mid })) };
+  };
+  await room.alarm();
+  assert.equal(room.cleanupJobs.length, 0);
+  assert.equal(room.sweepAt, now + protocol.SWEEP_MS);
+  assert.equal(registered, room.sweepAt, "the next alarm is in the future after a long pass");
 });
 
 // Regression (#193 review): stored cleanup made SFU calls inside the constructor's blockConcurrencyWhile, where two
@@ -852,7 +920,10 @@ test("leave persists cleanup and notifies peers before its own SFU close complet
   listener.voice = { sub: "listener", mids: {} };
   room.updateVoice();
   let release; const blocked = new Promise(resolve => { release = resolve; });
-  room.sfu.closeTracks = async (_session, mids) => { await blocked; return { tracks: mids.map(mid => ({ mid })) }; };
+  room.sfu.closeTracks = async (_session, mids, background) => {
+    assert.equal(background, true, "deferred departure cleanup uses the longer background deadline");
+    await blocked; return { tracks: mids.map(mid => ({ mid })) };
+  };
   try {
     assert.equal((await call(player, "leave", {})).status, 200);
     assert.equal(listener.ws.sent.filter(m => m.t === "voice").at(-1).peers.length, 0);
