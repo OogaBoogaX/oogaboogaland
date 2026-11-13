@@ -8,6 +8,9 @@
   const FEATURE = "block-v1", ZONE = "block-frenzy", WIRE = 5;
   // The `place` that arrives on the watch deck to spectate, for a portal or anything else that opens the game to watch.
   const WATCH_DECK_PLACE = "watch-deck";
+  // The `place`s the chairs send a viewer back to the arcade with when they came by its watch door: in front of it, or
+  // turned back there because the chairs are full. Here, not in the arcade's deferred group, as Block Frenzy reads them.
+  const DOOR_PLACE = "block-watch", DOOR_FULL_PLACE = "block-watch-full";
   // The most a side may hold: change this one number to change the cap on the page and in the Worker.
   const MAX_SIDE = 4, MIN_SIDE = 2, MAX_PLAYERS = MAX_SIDE * 2;
   // The viewing chairs: at most this many viewers a match, enforced by the room. Bounds their share of the frames.
@@ -82,5 +85,5 @@
     }
     return null;
   };
-  BL.blockWire = { FEATURE, ZONE, WATCH_DECK_PLACE, WIRE, MAX_SIDE, MAX_VIEWERS, MIN_SIDE, MAX_PLAYERS, HZ, INPUT_HZ, IDLE_MS, COUNTDOWN_MS, MAGIC, FRAME_HEADER, FRAME_MAX, FRAME_HZ, MAPS, FIRST_MAP, playable, plannedSize, ACTIONS, KINDS, parse, eligible, sizeFor, split, RULES, ruleFor, allReady, canStart, canStartAlone, seatOf, canEnter, watching, canRegister };
+  BL.blockWire = { FEATURE, ZONE, WATCH_DECK_PLACE, DOOR_PLACE, DOOR_FULL_PLACE, WIRE, MAX_SIDE, MAX_VIEWERS, MIN_SIDE, MAX_PLAYERS, HZ, INPUT_HZ, IDLE_MS, COUNTDOWN_MS, MAGIC, FRAME_HEADER, FRAME_MAX, FRAME_HZ, MAPS, FIRST_MAP, playable, plannedSize, ACTIONS, KINDS, parse, eligible, sizeFor, split, RULES, ruleFor, allReady, canStart, canStartAlone, seatOf, canEnter, watching, canRegister };
 })();

@@ -8662,8 +8662,45 @@ const gameRulesChecks = async () => {
     // The jackpot wheel, from arcade-models.js and its scene half on the builders they load with: the house wins slowly, and every
     // wedge, from a turn at rest and one far round after many spins, stops under the clapper wherever in it the spin
     // aims, after its whole turns and less than one more.
-    for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "hockey-wire", "arcade-models", "haunt-models", "arcade-scene-models", "zipline-models", "zipline"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+    for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "hockey-wire", "arcade-models", "haunt-models", "ooga-portal-models", "ooga-portal", "arcade-block-watch", "arcade-scene-models", "zipline-models", "zipline"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
     runInNewContext(await readFile(new URL("../src/js/arcade-games.js", import.meta.url), "utf8"), context);
+    // The Block Frenzy watch door: signed-in only, it opens Block Frenzy's watch deck, the real portal is crossed from the
+    // hall's side within the opening, and the door opens no new way out of the hall.
+    {
+      const W = BL.arcadeBlockWatch, D = W.DOOR, H = BL.arcadeModels.BLOCK_HALL;
+      const opened = [], sentGo = (id, place) => opened.push(id, place), savedLive = BL.blockLive; BL.blockLive = { openWatchDeck: (g) => { g("block", "watch-deck"); return true; } };
+      const left = W.goToWatchDeck(sentGo); BL.blockLive = savedLive;
+      const sb = await readFile(new URL("../src/js/scene-block.js", import.meta.url), "utf8");
+      const wayBack = sb.includes('go(home, doorVisit ? WIRE.DOOR_PLACE : undefined)') && sb.includes("go(home, WIRE.DOOR_FULL_PLACE)") && /watchVisit = ctx\.place === WIRE\.WATCH_DECK_PLACE;\s+if \(watchVisit\) showDeck\(\);/.test(sb) && W.PLACE === "block-watch" && W.PLACE_FULL === "block-watch-full";
+      const menu = { querySelector: () => ({}), addEventListener() {}, removeEventListener() {} };
+      context.document = context.document || { getElementById: () => menu }; context.matchMedia = context.matchMedia || (() => ({ matches: true }));
+      const gate = BL.oogaPortal.create({ radius: 1.6, outerRadius: 1.8, aperture: W.APERTURE, position: { x: D.plane, y: D.y + D.h / 2, z: D.z }, rotation: { x: Math.PI / 2, y: -Math.PI / 2, z: 0 }, receiving: true, reducedMotion: true, now: () => 0 });
+      gate.update();
+      const shown = gate.state === "ACTIVE" && gate.horizon.visible, trigger = W.atPortal(D.plane, D.z, D.y) && W.atPortal(D.plane + 0.02, D.z, D.y + 0.3) && !W.atPortal(D.plane - 0.2, D.z, D.y) && !W.atPortal(D.plane, D.z0 - 0.1, D.y) && !W.atPortal(D.plane, D.z, D.y + 1);
+      const R = 0.4, sees = (x, z, feet = D.y) => W.doorDepth(x, z, R, feet) < 0;
+      const reach = D.reach - R, rock = !sees(reach + 0.05, D.z), crosses = reach > D.plane && sees(reach - 0.01, D.z), onlyOpening = !sees(D.plane, D.z0 + R - 0.05) && !sees(D.plane, D.z1 - R + 0.05);
+      let seamless = true; for (let x = H.x1 - 2; x <= reach; x += 0.01) if (!sees(x, D.z)) seamless = false;
+      const levels = !sees(D.plane - 0.5, D.z, D.y - 1.5) && !sees(D.plane - 0.5, D.z, D.y + D.h + 0.1);
+      const clearDoor = D.z0 - 0.38 > BL.arcadeModels.BLOCK_HALL.pictures[3][0] + 0.91 && D.z1 + 0.38 < H.torches[3][1] - 0.07;
+      const back = W.ARRIVAL.x > H.x0 && W.ARRIVAL.x < D.plane - 1 && W.ARRIVAL.z === D.z;
+      record("arcade watch door: signed-in only, sends the viewer to the chairs and back in front of the door, the portal zone is the opening only, no new way out",
+        !W.mayWatch(null, false) && !!W.mayWatch({ id: 1 }, false) && !!W.mayWatch(null, true) && left === true && opened.join() === "block,watch-deck" && wayBack
+        && shown && trigger && rock && crosses && seamless && onlyOpening && levels && clearDoor && back,
+        JSON.stringify({ left, opened, wayBack, shown, trigger, rock, crosses, seamless, onlyOpening, levels, clearDoor, back }));
+      // The scene's own full-chairs answer and update bounce, run with a director that refuses `go` while the arrival fades in.
+      const fullAnswer = sb.match(/onChairsFull: (\(\) => \{.*\}) \}\);/)?.[1], bounceLine = sb.match(/^ {4}if \(chairsBounce\b.*$/m)?.[0];
+      if (!fullAnswer || !bounceLine) throw Error("block chairs bounce anchors missing");
+      let busy = true; const goes = [];
+      const visit = new Function("go", "WIRE", `let chairsFull = false, doorVisit = true, chairsBounce = false; const home = "arcade", round = null, onDeck = () => true, showBoard = () => {}, renderLive = () => {};
+        const onChairsFull = ${fullAnswer}; const update = () => { ${bounceLine} return "frame"; };
+        return { onChairsFull, update, pending: () => chairsBounce };`)((id, place) => { goes.push(id, place); return !busy; }, BL.blockWire);
+      visit.onChairsFull();
+      const refused = visit.update() === "frame" && visit.update() === "frame" && visit.pending() && goes.length === 4;
+      busy = false;
+      const bounced = visit.update() === undefined && !visit.pending() && goes.slice(-2).join() === "arcade,block-watch-full", once = visit.update() === "frame" && goes.length === 6;
+      record("regression: full chairs answered while the arrival still fades in keep the bounce pending until the director takes `go`, then send the viewer back to the door once",
+        refused && bounced && once, JSON.stringify({ refused, bounced, once, goes }));
+    }
     // Solo smash assistance must never send an out-of-bounds authoritative frame at a rail.
     const soloAim={x:1}, solo=BL.arcadeGames.airHockey({node:BL.scene.createNode(),aim:soloAim,onEnd(){},burst(){}});
     solo.shared(true);solo.multiplayer(false);solo.start();let soloInvalid=0,soloEdge=false;
