@@ -9,7 +9,9 @@
 // it forms, the head first, its line showing as each part arrives; as it dissolves its line crumbles a run at a time and
 // its sparks drift apart, rising; then streaks of light stand where it stood,
 // shimmering, with motes drifting in them, a faint afterimage for 15 to 20 seconds (`RESIDUE`), before it is gone. It
-// faces the view, one way or mirrored. A very faint shimmer of sound comes with the figure, not the afterimage
+// faces the view, one way or mirrored. Now and then, with the visitor's own Ooga a few metres off, a few runs of its
+// line hold whole and still a moment and it brightens a touch (`NEAR`), then it goes on as before; it lasts no longer for
+// it. A very faint shimmer of sound comes with the figure, not the afterimage
 // (`hangarAudio.glint`). Under reduced motion nothing gathers, drifts or falls, its sparks glint slowly and no bars
 // tear across it. It lights nothing and leaves nothing behind; Tess, if she is near it, in sight of it and free to
 // notice it, comes over to watch it (`hangarGuide.unsettled`), and nobody else in the hangar reacts.
@@ -95,6 +97,15 @@
   // The afterimage: how long, s, at random between; how fast it rises, m/s, and how far up at most, m; and the streaks of
   // light standing where it stood (how many, how long, m, at random between, how wide, m, and how strong).
   const RESIDUE = { life: [15, 20], rise: 0.04, most: 0.5, streaks: 26, streak: [0.6, 2.6], streakWidth: 0.04, streakGlow: 0.6 };
+  // Near the visitor's own Ooga it may steady a little, never for long: only some showings (`chance`); once the Ooga
+  // comes within `reach` m of it (drawn each showing between), after `delay` s, a share (`share`, drawn each showing) of
+  // its outline's runs glint whole and nearly still (losing `still` of their stray), the outline brightens up to
+  // `bright` more and fewer bars tear across it (`calms`, the chance one coming is skipped), eased in over `rise` s,
+  // held `hold` s and eased out over `fall` s, at a `strength` drawn each showing, wavering a little; at most `times`
+  // times a showing, each coming back nearer, the later ones `again` as strong; only while it holds. It lasts no longer
+  // for it, and answers nobody else.
+  const NEAR = { chance: 0.7, reach: [5, 6.5], delay: [0, 0.6], share: [0.25, 0.45], still: 0.7, bright: 0.18, calms: 0.5,
+    rise: 0.7, hold: [0.8, 1.8], fall: 1.4, strength: [0.5, 1], times: 2, again: 0.6 };
   // Where a spot may be: from the camera, m (nearer on a coarse pointer, where the screen is small), and on screen
   // (within `x` either side of centre across, `top` to `bottom` down, as fractions, `coarseTop` to `coarseBottom` on a
   // coarse pointer, and not behind the visitor's own Ooga); how far from the visitor's Ooga, from the guide and from
@@ -366,6 +377,11 @@
     // The camera's horizontal right, and the way back toward the camera from the figure, for turning the pictures to it.
     // How far off the view is, m, and so how wide a stroke of the outline is drawn, never thinner on screen than `EDGE.thin`.
     let rx = 1, rz = 0, vx = 0, vy = 0, vz = 1, stroke = EDGE.stroke;
+    // Steadying near the visitor's Ooga (`NEAR`): whether this showing may, how near, which share of its runs, how
+    // strongly and its seed for picking them, drawn as it begins; how many times are left, whether the Ooga stood within
+    // reach last frame; whether one is under way, how far into it, s (less than 0 while it waits), how long it holds and
+    // how strong it is; and how steady it is now, 0 to 1.
+    const near = { on: false, reach: 0, share: 0, peak: 0, seed: 0, left: 0, inside: false, active: false, t: 0, hold: 0, strength: 0, k: 0 };
 
 
     const SCREEN = { x: 0, y: 0, depth: 0 }, FOOT = { x: 0, y: 0, depth: 0 }, still = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -459,6 +475,8 @@
       state = "show"; t = 0; fadeAt = -1; loud = 0; waited = 0; overdue = 0; shows++;
       // Every bar away to start with, each coming at its own moment once it is forming.
       for (let b = 0; b < TEARS.n; b++) { tear.on[b] = 0; tear.next[b] = form * 0.6 + between(TEARS.off); }
+      near.on = Math.random() < NEAR.chance; near.reach = between(NEAR.reach); near.share = between(NEAR.share); near.peak = between(NEAR.strength);
+      near.seed = Math.floor(Math.random() * 1e6); near.left = NEAR.times; near.inside = false; near.active = false; near.k = 0;
       show(true);
       sphere[0] = at.x; sphere[1] = TOP * SCALE * 0.55; sphere[2] = at.z; sphere[3] = TOP * SCALE + 2;
     };
@@ -525,7 +543,7 @@
       bands = 0;
       if (!rest && shown > 0.01) for (let b = 0; b < TEARS.n; b++) {
         if ((tear.next[b] -= dt) <= 0) {
-          tear.on[b] = tear.on[b] || t < formed * 0.6 || t > at.held + dissolve * 0.3 ? 0 : 1;
+          tear.on[b] = tear.on[b] || t < formed * 0.6 || t > at.held + dissolve * 0.3 || Math.random() < near.k * NEAR.calms ? 0 : 1;
           tear.next[b] = between(tear.on[b] ? TEARS.on : TEARS.off);
           if (tear.on[b]) {
             const range = TEARS.heights[b], y = range[0] + Math.random() * (range[1] - range[0]), k = Math.min(RC.hi.length - 1, Math.floor(y / REACH));
@@ -556,10 +574,13 @@
           if (fade <= 0) continue;
           const arrive = smooth((t - E.delay[i] * formed) / (formed * 0.45));
           if (arrive <= 0) continue;
-          const run = rest ? 1 : EDGE.gap + (1 - EDGE.gap) * smooth((Math.sin(elapsed * E.runRate[i] + E.runPhase[i]) + 1 - 2 * EDGE.on) / 0.4 + 0.5);
-          const base = fade * height(y) * arrive * bits * breath * run;
+          // A run steadied near the visitor's Ooga glints whole and nearly still.
+          const steady = near.k > 0 && hash(Math.floor(E.runPhase[i] * 1000) + near.seed) < near.share ? near.k : 0;
+          const glint = rest ? 1 : EDGE.gap + (1 - EDGE.gap) * smooth((Math.sin(elapsed * E.runRate[i] + E.runPhase[i]) + 1 - 2 * EDGE.on) / 0.4 + 0.5);
+          const run = glint + (1 - glint) * steady;
+          const base = fade * height(y) * arrive * bits * breath * run * (1 + NEAR.bright * near.k);
           if (base <= 0.01) continue;
-          const apart = rest ? 0 : 1 - arrive, j = i * 2, jitter = EDGE.jitter * Math.sin(E.phase[i] + elapsed * 0.7 * slowly);
+          const apart = rest ? 0 : 1 - arrive, j = i * 2, jitter = EDGE.jitter * (1 - NEAR.still * steady) * Math.sin(E.phase[i] + elapsed * 0.7 * slowly);
           const x0 = E.x[i] + E.nx[i] * jitter + E.from[j] * apart + E.to[j] * drift, y0 = y + E.ny[i] * jitter + E.from[j + 1] * apart + E.to[j + 1] * drift;
           if (i % (EDGE.every * step) === 0) {
             const twinkle = 0.45 + 0.55 * Math.pow(0.5 + 0.5 * Math.sin(elapsed * E.rate[i] * slowly + E.phase[i]), 2);
@@ -672,8 +693,24 @@
       // Turned to the view: the camera's horizontal right, and the way back to it from where it stands.
       const c = camera.position, bx = c.x - at.x, by = c.y - TOP * SCALE * 0.5, bz = c.z - at.z, bl = Math.hypot(bx, by, bz) || 1, hl = Math.hypot(bx, bz) || 1;
       vx = bx / bl; vy = by / bl; vz = bz / bl; rx = bz / hl; rz = -bx / hl; stroke = Math.max(EDGE.stroke, bl * EDGE.thin);
+      steadyNear(dt);
       draw(elapsed, dt);
       if (audio) audio.glint(at.x, TOP * SCALE * 0.55, at.z, loud);
+    };
+
+    // The visitor's Ooga coming within reach while it holds: now and then, after a moment, it steadies a little, then
+    // lets go again even if the Ooga stays; it never waits or lasts longer for it.
+    const steadyNear = (dt) => {
+      const me = ooga(), inside = !!me && Math.hypot(me.root.position.x - at.x, me.root.position.z - at.z) < near.reach;
+      if (inside && !near.inside && near.on && near.left > 0 && fadeAt < 0 && t > at.formed && t < at.held - NEAR.rise) {
+        near.active = true; near.t = -between(NEAR.delay); near.hold = between(NEAR.hold);
+        near.strength = near.peak * (near.left === NEAR.times ? 1 : NEAR.again); near.left--;
+      }
+      near.inside = inside;
+      if (!near.active) { near.k = 0; return; }
+      const T = (near.t += dt), R = NEAR.rise, env = T < 0 ? 0 : T < R ? smooth(T / R) : T < R + near.hold ? 1 : 1 - smooth((T - R - near.hold) / NEAR.fall);
+      near.k = env * near.strength * (0.85 + 0.15 * Math.sin(t * 2.3 + near.seed)) * (1 - smooth((t - at.held) / 0.4)) * (fadeAt < 0 ? 1 : 0);
+      if (T > R + near.hold + NEAR.fall || t > at.held + 0.4 || fadeAt >= 0) { near.active = false; near.k = 0; }
     };
 
     const onVisibility = () => { if (document.hidden) abort(true); };
@@ -708,7 +745,8 @@
       get timeline() { return state === "wait" ? null : [at.formed, at.held, at.gone, at.end].map((v) => +v.toFixed(2)); },
       get due() { return due; }, get calm() { return calm; }, get after() { return after; }, get t() { return t; },
       get count() { return sparks.instanceCount + lines.instanceCount + bars.instanceCount + glow.instanceCount; },
-      get loud() { return loud; }
+      get loud() { return loud; },
+      get near() { return { on: near.on, reach: +near.reach.toFixed(2), left: near.left, k: +near.k.toFixed(3) }; }
     };
     return {
       update, liveGeometry, dispose, debug,
