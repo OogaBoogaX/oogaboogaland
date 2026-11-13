@@ -10,9 +10,11 @@
 // of floats per Ooga, then the events since the last frame as UTF-8 JSON. A record carries what shows:
 // the body (root transform and visibility, legs, arms, head and eyes, torso), the gear (where the club and
 // rifle hang and how, the rifle's bananas, the flash, the snack, the bed's weapons), status (stun birds,
-// fire embers and scorch, colourway, a built-in jetpack's flame) and the work the gorillas follow (state,
-// phase, cave, planned cave). Events are what happens once: speech, sleep marks, dust and sparks, every
-// shot's flight, and the gorillas' plan and hit, so each page's gorillas react to the host's crew.
+// fire embers and scorch, colourway, a built-in jetpack's flame and how hard its jetpack burns, from which every
+// page makes its sparks itself) and the work the gorillas follow (state, phase, cave, planned cave). Events are
+// what happens once: speech, sleep marks, dust, every shot's flight, and the gorillas' plan and hit, so each
+// page's gorillas react to the host's crew. A host from before the jetpack's burn rode the record still sends
+// its sparks as events, which a follower replays.
 // Pages built from a different cast, work-site order (signature) or format ignore each other's frames.
 // Cost: the host sends only while the room reports followers (`net.state.followers`), and a frame whose
 // records match the last one sent, with no events, waits up to KEEP_S before it goes again.
@@ -70,6 +72,8 @@
     const out = new Float32Array(HEADER + n * RECORD), outHeader = new Uint32Array(out.buffer, 0, HEADER);
     const target = new Float32Array(n * RECORD), sent = new Float32Array(HEADER + n * RECORD);
     const have = new Uint8Array(n), fresh = new Uint8Array(n);
+    // Each puppet's time to its jetpack's next puff of sparks.
+    const puffs = new Float32Array(n);
     // Playback's frames: SLOTS of every Ooga's record, which Oogas each carries, when it arrived, its events,
     // and the slots in use oldest first (`order`, `kept`). Each slot's events are a list reused for the page
     // life, at most SLOT_EVENTS long; `due` holds the events the playhead reached this update, at most
@@ -154,11 +158,12 @@
       }
       return fx.zzzAt(x, y, z, cave);
     };
-    recordingFx.burst = (x, y, z, count, geos, speed) => {
-      const kind = geos === BL.crew.LAND_DUST ? "dust" : geos === BL.crew.JET_SPARKS ? "sparks" : "";
-      if (kind) {
+    // Dust is passed on. Sparks never are: every page makes a jetpack's sparks from how hard it burns, an NPC's
+    // from its record, a player's from their pose (remote-players.js).
+    recordingFx.burst = (x, y, z, count, geos, speed, cave = null) => {
+      if (geos === BL.crew.LAND_DUST && !(cave && npcIndex(cave) < 0)) {
         const e = record("b");
-        if (e) { e.kind = kind; e.x = x; e.y = y; e.z = z; e.count = count; e.speed = speed; }
+        if (e) { e.kind = "dust"; e.x = x; e.y = y; e.z = z; e.count = count; e.speed = speed; }
       }
       return fx.burst(x, y, z, count, geos, speed);
     };
@@ -244,6 +249,7 @@
       out[o + 98] = cave.work.site;
       out[o + 99] = cave.work.plannedSite;
       out[o + 100] = cave.tintState || 0;
+      out[o + 101] = cave.jet ? cave.jet.power : 0;
       out[o + 1] = flags;
     };
     const encode = () => {
@@ -507,6 +513,12 @@
       if (p.jetFlame) {
         p.jetFlame.visible = (flags & F_FLAME) !== 0;
         p.jetFlame.scale.y = A[ao + 95];
+      }
+      // Its jetpack's sparks, as hard as it burns on the host's page.
+      const burn = A[ao + 101];
+      if (burn > 0 && r.visible && (puffs[i] -= dt) <= 0) {
+        puffs[i] = BL.crew.JET_PUFF;
+        BL.crew.jetSparks(fx, cave, burn);
       }
       cave.stunBirds.visible = crew.combatEnabled !== false && (flags & F_STUNNED) !== 0;
       if (cave.stunBirds.visible) cave.stunBirds.rotation.y += dt * 4;

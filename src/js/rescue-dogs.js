@@ -46,7 +46,10 @@
   const EAT_SECONDS = 2.6, FOOD_DROP_SECONDS = 0.4, SQUAT_SECONDS = 1.4, RESTOCK_SECONDS = 4;
   // A dog stopped by a wall further than LEFT_BEHIND from its Ooga, or whose Ooga moved more than MOVED in one frame
   // (a door, the deep-water return), turns up beside it; a hungry one trots after an Ooga further off than TROT.
-  const WALK = 2.2, RUN = 4.6, FED_RUN = 6.9, LEFT_BEHIND = 2.5, MOVED = 3, TROT = 4;
+  // The adopted dog follows by the crew's companion rules (`BL.crew.COMPANION_FOLLOW`), which a character's own pet
+  // shares, so the two follow alike.
+  const FOLLOW_RULES = BL.crew.COMPANION_FOLLOW;
+  const WALK = 2.2, RUN = 4.6, FED_RUN = FOLLOW_RULES.run, LEFT_BEHIND = FOLLOW_RULES.behind, MOVED = FOLLOW_RULES.moved, TROT = 4;
   // Flight: the dog takes off once its Ooga thrusts off the ground or is LIFT above what lies under it and flies next to
   // it, FLY_SIDE out on its own side and FLY_UP over its feet, at up to CATCH_UP times a jetpack's speed (`flyTo` closes
   // FLY_GAIN times the gap a second, so to keep abreast at speed it aims a second's FLY_GAIN-th of its Ooga's way ahead,
@@ -55,7 +58,7 @@
   // Held up in the air longer than HELD_UP with no way on (a canopy over it, a wall ahead), it turns up where it is
   // going.
   const GAIT = BL.crew.QUAD_GAIT;
-  const LIFT = 1.2, FLY_SIDE = 1.2, FLY_UP = 0.4, FLY_GAIN = BL.crew.COMPANION_FLIGHT.gain, FLY_FAR = 30, LAND_REACH = 14, JET_SCALE = 0.55, HELD_UP = 1.5;
+  const LIFT = 1.2, FLY_SIDE = FOLLOW_RULES.side, FLY_UP = FOLLOW_RULES.up, FLY_GAIN = BL.crew.COMPANION_FLIGHT.gain, FLY_FAR = FOLLOW_RULES.far, LAND_REACH = 14, JET_SCALE = 0.55, HELD_UP = FOLLOW_RULES.held;
   const FREE = 0, KENNEL = 1, FOLLOW = 2, SIT = 3, EAT = 4, SQUAT = 5, NAP = 6, HOME = 7, STRAY = 8, FLY = 9, LAND = 10;
   const STATE_NAMES = ["free", "kennel", "follow", "sit", "eat", "poop", "sleep", "home", "stray", "fly", "land"];
   // Where a dog is: the Chora, the rescue's yard, or with its Ooga. `update` takes the visitor's as CHORA, YARD or ROOM
@@ -680,9 +683,9 @@
     const WALKED = 0, ARRIVED = 1, BLOCKED = 2;
     const walkTo = (i, tx, tz, top, dt) => {
       const dx = tx - px[i], dz = tz - pz[i], d = Math.sqrt(dx * dx + dz * dz);
-      const want = d < 0.12 ? 0 : Math.min(top, (d - 0.08) * 2.6);
-      speed[i] += (want - speed[i]) * Math.min(1, dt * 6);
-      if (d > 0.12) turn(i, Math.atan2(dx, dz), dt * 7);
+      const want = d < 0.12 ? 0 : Math.min(top, (d - 0.08) * FOLLOW_RULES.ease);
+      speed[i] += (want - speed[i]) * Math.min(1, dt * FOLLOW_RULES.accel);
+      if (d > 0.12) turn(i, Math.atan2(dx, dz), dt * FOLLOW_RULES.turn);
       if (speed[i] > 0.01) {
         const go = Math.min(speed[i] * dt, d), nx = px[i] + Math.sin(yaw[i]) * go, nz = pz[i] + Math.cos(yaw[i]) * go;
         if (!strays.clearSegment(px[i], pz[i], nx, nz, py[i])) {
@@ -847,12 +850,12 @@
         return;
       }
       state[i] = FOLLOW;
-      const step = walkTo(i, p.x - sh * 0.95 + ch * side[i], p.z - ch * 0.95 - sh * side[i], hungry ? WALK : FED_RUN, dt);
+      const step = walkTo(i, p.x - sh * FOLLOW_RULES.back + ch * side[i], p.z - ch * FOLLOW_RULES.back - sh * side[i], hungry ? WALK : FED_RUN, dt);
       // Stopped by a wall with its Ooga out of reach on its own level, it turns up beside it; an Ooga up on a roof
       // it waits under, looking up.
       if (step === BLOCKED) {
         if (feet - py[i] > LIFT) lookUp = d < LAND_REACH;
-        else if ((stuck[i] += dt) > 0.4 && d > LEFT_BEHIND) beside(i, p, feet, h);
+        else if ((stuck[i] += dt) > FOLLOW_RULES.stuck && d > LEFT_BEHIND) beside(i, p, feet, h);
       } else stuck[i] = 0;
       if (step === ARRIVED && speed[i] < 0.2) turn(i, h, dt * 3);
       if (!hungry && here === CHORA && (poopTimer[i] -= dt) <= 0 && speed[i] < 0.6) {

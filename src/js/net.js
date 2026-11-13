@@ -261,11 +261,15 @@
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
   const gSent = new Float64Array(6);
   let gKnown = false, poseHasG = false, jetSent = 0, weaponSent = 0, visualKnown = false;
-  const visualSent = new Int16Array(17);
-  const VISUAL_LIMITS = [157, 157, 314, 8191, 240, 1200, 560, 440, 320, 1240, 100, 750, 1300, 280, 2000, 31, 31];
+  // A pose's visual state (crew.js `visualState`), each number between its low and high; an older page sends the
+  // first 17 alone, without the body's own pose (`VISUAL_BODY` on).
+  const VISUAL_LOWS = [-157, -157, -314, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -50, -100, 0, -157, 0];
+  const VISUAL_LIMITS = [157, 157, 314, 8191, 240, 1200, 560, 440, 320, 1240, 100, 750, 1300, 280, 2000, 31, 31, 2628, 50, 100, 1, 157, 100];
+  const VISUAL_SIZE = VISUAL_LIMITS.length, VISUAL_BODY = 17;
+  const visualSent = new Int16Array(VISUAL_SIZE);
   const validVisual = (v) => {
-    if (!v || v.length !== 17) return false;
-    for (let i = 0; i < 17; i++) if (!Number.isInteger(v[i]) || v[i] < (i < 3 ? -VISUAL_LIMITS[i] : 0) || v[i] > VISUAL_LIMITS[i]) return false;
+    if (!v || v.length !== VISUAL_SIZE && v.length !== VISUAL_BODY) return false;
+    for (let i = 0; i < v.length; i++) if (!Number.isInteger(v[i]) || v[i] < VISUAL_LOWS[i] || v[i] > VISUAL_LIMITS[i]) return false;
     return true;
   };
   const restSent = new Int16Array(6);
@@ -288,8 +292,10 @@
   const readVisual = (rec, v, at) => {
     rec.visual = null;
     if (!validVisual(v) || !Number.isFinite(at)) return;
-    if (!rec.visualData) rec.visualData = new Int16Array(17);
-    rec.visualData.set(v); rec.visual = rec.visualData; rec.visualAt = at;
+    if (!rec.visualData) rec.visualData = new Int16Array(VISUAL_SIZE);
+    rec.visualData.fill(0); rec.visualData.set(v); rec.visual = rec.visualData; rec.visualAt = at;
+    // Whether it carries the body's own pose, or came from an older page without it.
+    rec.visualBody = v.length === VISUAL_SIZE;
   };
   let clockOffset = 0, clockKnown = false;
   let pokerVoice = null;
@@ -539,7 +545,7 @@
       }
       const vs = msg.vs;
       if (Array.isArray(vs)) for (const row of vs) {
-        if (!Array.isArray(row) || row.length !== 19) continue;
+        if (!Array.isArray(row) || row.length !== VISUAL_SIZE + 2 && row.length !== VISUAL_BODY + 2) continue;
         const rec = remotes.get(row[0]);
         if (rec) readVisual(rec, row.slice(2), row[1]);
       }
@@ -589,7 +595,7 @@
       if (restoredPose) {
         // Cached equipment/look survive reconnect; transient actions are reconciled by the next
         // live sample rather than replayed with a fresh room timestamp.
-        if (visualKnown) { visualSent[3] &= 7; for (let i = 4; i < 15; i++) visualSent[i] = 0; }
+        if (visualKnown) { visualSent[3] &= 7; for (let i = 4; i < 15; i++) visualSent[i] = 0; for (let i = VISUAL_BODY; i < VISUAL_SIZE; i++) visualSent[i] = 0; }
         const extra = state.bodyKind === "gorilla" && poseHasG ? `,"g":[${gSent[0]},${gSent[1].toFixed(3)},${gSent[2].toFixed(3)},${gSent[3].toFixed(3)},${gSent[4].toFixed(3)},${gSent[5].toFixed(3)}]`
           : (jetSent ? `,"j":${jetSent}` : "") + (weaponSent ? `,"w":${weaponSent}` : "") + (visualKnown ? `,"v":[${visualSent.join(",")}]` : "")
             + (restKnown ? restActive ? `,"r":[${restSent.join(",")}]` : ',"r":0' : "");
@@ -1207,7 +1213,7 @@
     let changed = !!g && !gKnown || jet !== jetSent || weapon !== weaponSent || !!visual !== visualKnown
       || state.bodyKind !== "gorilla" && (!restKnown || !!rest !== restActive);
     if (rest && !changed) for (let i = 0; i < 6; i++) if (rest[i] !== restSent[i]) { changed = true; break; }
-    if (visual && !changed) for (let i = 0; i < 17; i++) if (visual[i] !== visualSent[i]) { changed = true; break; }
+    if (visual && !changed) for (let i = 0; i < visual.length; i++) if (visual[i] !== visualSent[i]) { changed = true; break; }
     // A held wind-up can outlast its last changing sample. A bounded heartbeat keeps it live, and
     // lets a silent/disconnected action expire without an extra timer or a new message type.
     if (visual && (visual[3] & 40 || visual[14] > 0) && now - poseAt >= 300) changed = true;

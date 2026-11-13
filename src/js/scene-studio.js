@@ -20,8 +20,8 @@
 // too, `show(handle)`, `state`).
 //
 // Opened by the studio command (`watch=1`) the page asks its server once a second whether a character file changed,
-// and reloads when one has, coming back to the same place, gear and view (sessionStorage `ooga-studio`, checked on
-// load). A file that no longer parses is reported in a toast and the Ooga on screen stays as it was.
+// and reloads when one has, coming back to the same place, gear and view. Those are kept for each Ooga, and for the
+// next session too (localStorage `ooga-studio`, checked on load), as is the panel's fold and width. A file that no longer parses is reported in a toast and the Ooga on screen stays as it was.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -41,7 +41,7 @@
   const BED = { x: -4.9, z: 0.6 }, HAMMOCK = { z: -5, half: 2.7, post: 0.13, tall: 3.5, wide: 0.575, reach: 0.3 };
   const DAY = 13, NIGHT = 22.5, DAY_OF_YEAR = 80;
   const PLACES = ["stand", "chair", "bed", "hammock", "fire"];
-  const TOGGLES = ["rifle", "jetpack", "eyes", "third", "free", "night"];
+  const TOGGLES = ["rifle", "jetpack", "eyes", "third", "combat", "free", "night"];
   // The third person while carrying: combat's shoulder distance (pilot.js `SHOULDER_DISTANCE`), looking a little down.
   const THIRD = { dist: 3.6, pitch: 0.4 };
   // The free camera: how fast its point flies (faster the further out it looks from), climbs and turns by the keys,
@@ -85,7 +85,7 @@
   let renderer, game, go, root, camera, hud, hooks, input, pilot, fx, crew, footsteps, cave, entry, hammock, bed, fire, embers, seats, blocks, buttons;
   // Who is wanted on the pad: the address's Ooga as the page loads, then whoever the list or a script asks for.
   let asked = (params.get("character") || "").trim();
-  let night = false, nearKey = "", spoken = 0, watchTimer = 0, watchVersion = null, watchError = "", broken = "", homeLink = null, homeTitle = "", homeWords = "", pick = null, titled = false;
+  let night = false, combatShown = null, nearKey = "", spoken = 0, watchTimer = 0, watchVersion = null, watchError = "", broken = "", homeLink = null, homeTitle = "", homeWords = "", pick = null, titled = false;
 
   // What stands in a walker's way: the chair, the fire and the hammock's posts, each a circle.
   const blocked = (x, z, r) => {
@@ -208,6 +208,7 @@
     const p = cave.sleepHead && (crew.sleeping || cave.camp.seat && cave.camp.seat.lying) ? cave.sleepHead : cave.root.position;
     free.x = p.x; free.z = p.z; free.y = p === cave.root.position ? p.y - cave.baseY + cave.traits.height * 0.55 : p.y;
   };
+  let freeMode = false;
   const setFree = (on) => {
     on = !!on;
     if (on === free.on) return;
@@ -225,11 +226,17 @@
       }
       pilot.setActive(false);
       pilot.setExternalControl(true);
+      // The weapon buttons and the mode's switch still work for the Ooga meanwhile.
+      pilot.setButtonsHeld(true);
+      freeMode = !!cave.weapon.aiming;
       hud.setAct("UP");
       say(COARSE ? "Free camera · the left stick flies it, the right stick turns it, UP lifts it" : "Free camera · W A S D fly it, Space up, X down, drag to turn, wheel in and out");
     } else {
+      pilot.setButtonsHeld(false);
       pilot.setExternalControl(false);
       pilot.setActive(true);
+      // Changed from carry to combat or back under it, the view becomes that mode's own now.
+      if (!!cave.weapon.aiming !== freeMode) thirdPerson();
       pilot.showAct();
       nearKey = "";
     }
@@ -257,27 +264,44 @@
   };
 
   // ---- gear, view and look ----
-  const state = { name: "", place: "stand", x: HOME.x, z: HOME.z, heading: 0, rifle: false, jetpack: false, eyes: false, night: false, yaw: VIEW.yaw, pitch: VIEW.pitch, dist: VIEW.dist, free: null };
+  const state = { name: "", place: "stand", x: HOME.x, z: HOME.z, heading: 0, rifle: false, held: 0, jetpack: false, eyes: false, night: false, yaw: VIEW.yaw, pitch: VIEW.pitch, dist: VIEW.dist, view: null, free: null };
+  // The most Oogas whose last place, gear and view are kept.
+  const KEPT = 24;
   // Where the Ooga is as it stands now (walked there or put there), its gear and the view, kept for the next load.
   const remember = (as = asked) => {
     if (!pilot) return;
     const seat = cave.camp.seat, p = cave.root.position;
     state.place = crew.sleeping ? "bed" : !seat ? "stand" : seat.kind === "hammock" ? "hammock" : seat === seats[0] ? "chair" : "fire";
     state.x = p.x; state.z = p.z; state.heading = cave.root.rotation.y;
-    state.rifle = !!cave.weapon.equipped; state.jetpack = !!cave.jet; state.eyes = pilot.view === "first-person"; state.night = night;
+    state.rifle = !!cave.weapon.equipped; state.held = cave.weapon.equipped ? 2 : cave.weapon.primaryEquipped ? 1 : 0;
+    state.jetpack = !!cave.jet; state.eyes = pilot.view === "first-person"; state.night = night;
     state.yaw = pilot.orbit.yaw; state.pitch = pilot.orbit.pitch; state.dist = pilot.orbit.dist;
+    // The view and its mode as the pilot keeps them (carry or combat, the camera's angles): under the free camera,
+    // the one it gives back to.
+    state.view = pilot.viewState();
     state.free = free.on ? [free.x, free.y, free.z, free.yaw, free.pitch, free.dist] : null;
-    try { sessionStorage.setItem(STORE, JSON.stringify(as === state.name ? state : { ...state, name: as })); } catch { /* A private window keeps nothing; the studio works without it. */ }
+    try {
+      // Kept under the Ooga it is for (`as`, the one taking this one's place in a swap), the most recent KEPT of them.
+      let kept = JSON.parse(localStorage.getItem(STORE));
+      if (!kept || typeof kept !== "object" || Array.isArray(kept)) kept = {};
+      kept[as] = { ...state, name: as, at: Date.now() };
+      const names = Object.keys(kept).sort((a, b) => (kept[b].at || 0) - (kept[a].at || 0));
+      for (const name of names.slice(KEPT)) delete kept[name];
+      localStorage.setItem(STORE, JSON.stringify(kept));
+    } catch { /* A private window keeps nothing; the studio works without it. */ }
   };
   // The last visit's place, gear and view for this Ooga, each piece checked; null when there is none.
   const remembered = () => {
     let saved = null;
-    try { saved = JSON.parse(sessionStorage.getItem(STORE)); } catch { return null; }
+    try { saved = (JSON.parse(localStorage.getItem(STORE)) || {})[state.name]; } catch { return null; }
     if (!saved || typeof saved !== "object" || saved.name !== state.name || !PLACES.includes(saved.place)) return null;
     const number = (value, low, high, fallback) => Number.isFinite(value) ? clamp(value, low, high) : fallback;
     return { place: saved.place, x: number(saved.x, -WALL, WALL, HOME.x), z: number(saved.z, -WALL, WALL, HOME.z), heading: number(saved.heading, -1e3, 1e3, 0),
-      rifle: saved.rifle === true, jetpack: saved.jetpack === true, eyes: saved.eyes === true, night: saved.night === true,
+      rifle: saved.rifle === true, held: [0, 1, 2].includes(saved.held) ? saved.held : saved.rifle === true ? 2 : 0, jetpack: saved.jetpack === true, eyes: saved.eyes === true, night: saved.night === true,
       yaw: number(saved.yaw, -1e3, 1e3, VIEW.yaw), pitch: number(saved.pitch, -1.2, 1.3, VIEW.pitch), dist: number(saved.dist, 1.5, 14, VIEW.dist),
+      view: saved.view && typeof saved.view === "object" && typeof saved.view.view === "string" ? { view: saved.view.view, combat: saved.view.combat === true,
+        relYaw: number(saved.view.relYaw, -1e3, 1e3, Math.PI), pitch: number(saved.view.pitch, -1.6, 1.6, VIEW.pitch), distance: number(saved.view.distance, 0, 60, VIEW.dist),
+        height: number(saved.view.height, -20, 80, 1), side: saved.view.side === -1 ? -1 : 1 } : null,
       free: Array.isArray(saved.free) && saved.free.length === 6 && saved.free.every(Number.isFinite) ? saved.free : null };
   };
   const toggle = (name, on) => {
@@ -292,7 +316,11 @@
       else if (!want && cave.jet) crew.removeJetpack(cave);
       pilot.showAct();
     } else if (name === "free") setFree(on === undefined ? !free.on : on);
-    else if (name === "eyes" && (on === undefined ? free.on || pilot.view !== "first-person" : on)) {
+    else if (name === "combat") {
+      // Carry or combat, as X changes it. Under the free camera the Ooga changes mode and the camera stays where it is:
+      // the mode's own view comes when the free camera is let go.
+      if (on === undefined || !!on !== !!cave.weapon.aiming) pilot.modeAction("mode-toggle", free.on);
+    } else if (name === "eyes" && (on === undefined ? free.on || pilot.view !== "first-person" : on)) {
       // The Ooga's own eyes are the pilot's view, so the free camera lets go first.
       setFree(false);
       pilot.enterClose();
@@ -301,10 +329,13 @@
       // the shoulder. Carrying, it is the view from behind and a little above, as far off as that one, the Ooga in
       // the middle of it.
       setFree(false);
-      const view = pilot.viewState(), combat = !!cave.weapon.aiming;
-      if (view) pilot.adopt({ view: combat ? "shoulder" : "orbit", combat, relYaw: Math.PI, pitch: THIRD.pitch, distance: THIRD.dist, height: view.height, side: view.side });
+      thirdPerson();
     }
     remember();
+  };
+  const thirdPerson = () => {
+    const view = pilot.viewState(), combat = !!cave.weapon.aiming;
+    if (view) pilot.adopt({ view: combat ? "shoulder" : "orbit", combat, relYaw: Math.PI, pitch: THIRD.pitch, distance: THIRD.dist, height: view.height, side: view.side });
   };
   // Its voice, a line a press: the poke line, then each idle line in turn.
   const speak = () => {
@@ -392,7 +423,7 @@
   const LOOK_KEYS = new Set(["build", "height", "face", "eyeGlow", "hatY", "portrait", ...Object.keys(COLOURS), ...Object.keys(FLAGS)]);
   const BUILDS = [["dog", "A pet"], ["jetpack", "A jetpack of its own, always on"], ["board", "A board to ride"], ["shield", "A shield"], ["chuk", "A nunchaku"]];
   let panel = null, panelFill = 0;
-  const keepFold = () => { try { sessionStorage.setItem(PANEL_STORE, panel.root.dataset.folded); } catch { /* A private window keeps nothing. */ } };
+  const keepFold = () => { try { localStorage.setItem(PANEL_STORE, panel.root.dataset.folded); } catch { /* A private window keeps nothing. */ } };
   // Its width, dragged by the grip on its left edge (or, from the keyboard, a press of the grip widening it a step and
   // going back to the narrowest past the widest), kept for the tab. `gap` is the room left for the studio's buttons,
   // as the stylesheet's max-width leaves it.
@@ -402,7 +433,7 @@
   const setWidth = (width, keep) => {
     const px = Math.round(clamp(width, WIDTH.min, widest()));
     panel.root.style.width = `${px}px`;
-    if (keep) try { sessionStorage.setItem(WIDTH_STORE, String(px)); } catch { /* A private window keeps nothing. */ }
+    if (keep) try { localStorage.setItem(WIDTH_STORE, String(px)); } catch { /* A private window keeps nothing. */ }
   };
   const gripDown = (e) => {
     if (e.button !== 0 || resizing) return;
@@ -659,11 +690,14 @@
     homeWords = homeLink.querySelector("[data-sign]").getAttribute("aria-label");
     letter(homeLink.querySelector("[data-sign]"), "OBL");
     document.addEventListener("click", stayHome, { capture: true, signal: ctx.signal });
+    // Kept as the page goes, however it goes (a reload, the tab closed, the studio's server stopped).
+    window.addEventListener("pagehide", () => remember(), { signal: ctx.signal });
     titled = false;
     // One Ooga and nobody to feed: the Bananas and Oogas panels stay away.
     hud.setPanelsHidden(true);
     buttons = {};
     for (const b of document.querySelectorAll('.studio-side [data-action^="studio-"]')) { buttons[b.dataset.action.slice(7)] = b; b.lit = null; }
+    combatShown = null;
     // The build is a file's own to say: the switch is for an Ooga with no file.
     buttons.build.hidden = !(BL.characters.get(state.name) || {}).studio;
     press("build", params.get("build") === "slim");
@@ -675,7 +709,7 @@
     panel = { root: $("studio-features"), grip: $("studio-resize"), who: $("studio-who"), bar: $("studio-size-bar"), fill: $("studio-size-fill"), size: $("studio-size"), note: $("studio-size-note"), parts: $("studio-size-parts"), groups: $("studio-groups") };
     // As wide as the visitor last dragged it in this tab, else the stylesheet's width.
     let width = NaN;
-    try { width = Number(sessionStorage.getItem(WIDTH_STORE) || NaN); } catch { /* A private window keeps nothing. */ }
+    try { width = Number(localStorage.getItem(WIDTH_STORE) || NaN); } catch { /* A private window keeps nothing. */ }
     if (Number.isFinite(width)) setWidth(width, false); else panel.root.style.width = "";
     panel.grip.addEventListener("pointerdown", gripDown, { signal: ctx.signal });
     panel.grip.addEventListener("pointermove", gripMove, { signal: ctx.signal });
@@ -685,7 +719,7 @@
     // The panel is folded or open as the visitor last left it in this tab; at first, open, but folded on a touch
     // screen, where the sticks need the room. The hud's own fold handler has run by the time this one keeps it.
     let folded = null;
-    try { folded = sessionStorage.getItem(PANEL_STORE); } catch { /* A private window keeps nothing; the panel opens. */ }
+    try { folded = localStorage.getItem(PANEL_STORE); } catch { /* A private window keeps nothing; the panel opens. */ }
     panel.root.dataset.folded = String(folded === null ? COARSE : folded === "true");
     for (const b of document.querySelectorAll('[data-fold="studio-features"]')) b.addEventListener("click", keepFold, { signal: ctx.signal });
     fillPanel(state.name, built, ctx.signal);
@@ -774,7 +808,7 @@
       else if (action === "studio-build") rebuild();
       else if (action.startsWith("studio-")) { const id = action.slice(7); if (PLACES.includes(id)) place(id); else toggle(id); }
       else if (action === "jetpack-toggle") toggle("jetpack");
-      else if (action.startsWith("mode-")) pilot.modeAction(action);
+      else if (action.startsWith("mode-")) pilot.modeAction(action, free.on);
       else if (action.startsWith("weapon-") || action === "magazine-swap") pilot.weaponAction(action);
       else if (action === "reset-view") pilot.resetCamera();
     });
@@ -787,14 +821,16 @@
     night = !!(saved && saved.night);
     light();
     // Restore the held weapon while standing: the crew refuses weapon changes once in bed or a hammock.
-    if (saved && saved.rifle) toggle("rifle", true);
+    if (saved && saved.held) pilot.weaponMode(saved.held);
     // On its feet it stands where it stood, if that spot is still clear.
     if (saved && saved.place === "stand" && walkable(saved.x, saved.z, saved.x, saved.z, 0, cave.bodyHeight, cave)) stand(saved.x, saved.z, saved.heading);
     else place(saved ? saved.place : "stand");
     if (saved) {
       if (saved.jetpack) toggle("jetpack", true);
       Object.assign(pilot.orbit, { yaw: saved.yaw, tYaw: saved.yaw, pitch: saved.pitch, tPitch: saved.pitch, dist: saved.dist, tDist: saved.dist });
-      if (saved.eyes) toggle("eyes", true);
+      // The view and its mode, as kept; a record from before views were kept has only the first person to say.
+      if (saved.view) pilot.adopt(saved.view);
+      else if (saved.eyes) toggle("eyes", true);
       if (saved.free) { setFree(true); [free.x, free.y, free.z, free.yaw, free.pitch, free.dist] = saved.free; }
     }
     nearKey = ""; spoken = 0;
@@ -834,6 +870,12 @@
     // One of the three views is lit: its own eyes, the third person, or the free camera.
     press("eyes", !free.on && pilot.view === "first-person");
     press("third", !free.on && pilot.view !== "first-person");
+    // The mode's button says which the Ooga is in now, and a press brings the other.
+    if (combatShown !== !!cave.weapon.aiming) {
+      combatShown = !!cave.weapon.aiming;
+      buttons.combat.textContent = combatShown ? "Combat" : "Carry";
+      buttons.combat.title = combatShown ? "In combat: press for carry" : "In carry: press for combat";
+    }
     fx.update(dt, elapsed);
     stepTweens(dt);
     pilot.update(dt);
