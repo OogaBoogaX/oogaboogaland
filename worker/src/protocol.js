@@ -4,6 +4,9 @@ export { hockey } from "./hockey.js";
 import "../../src/js/hockey-wire.js";
 export const HOCKEY = globalThis.BL.hockeyWire;
 export { block } from "./block.js";
+// The Durable Object inspector's reporter (inspect-report.js), here so the room and game host take it with the rest.
+export { inspectReporter, INSPECT_FEATURE } from "./inspect-report.js";
+import { BACK_WHY } from "./inspect-report.js";
 import "../../src/js/block-wire.js";
 export const BLOCK = globalThis.BL.blockWire;
 import { parseStudioCommand, studioCanSpeak, STUDIO_ZONE } from "./studio-policy.js";
@@ -437,6 +440,10 @@ export const parseClientMessage = (text) => {
     }
     return PM_OPS.includes(op) ? { t: "pm", op, to } : null;
   }
+  // After a rejoin, while the inspector is on (INSPECT_FEATURE): why the page's last socket ended, the close code its
+  // browser saw (0 when there was none) and how long it was out of the room.
+  if (msg.t === "back") return BACK_WHY.includes(msg.why) && Number.isInteger(msg.code) && msg.code >= 0 && msg.code <= 4999 && typeof msg.clean === "boolean"
+    && Number.isInteger(msg.down) && msg.down >= 0 && msg.down <= 86400000 ? { t: "back", why: msg.why, code: msg.code, clean: msg.clean, down: msg.down } : null;
   if (msg.t === "poker-voice") return msg.table === null || Number.isInteger(msg.table) && msg.table >= 0 && msg.table < 10 ? { t: "poker-voice", table: msg.table } : null;
   return null;
 };

@@ -9,7 +9,7 @@
     "binding": "ASSETS",
     "html_handling": "drop-trailing-slash",
     "not_found_handling": "404-page",
-    "run_worker_first": ["/auth/*", "/api/*", "/room", "/game/*", "/donations/*"]
+    "run_worker_first": ["/auth/*", "/api/*", "/room", "/game/*", "/donations/*", "/inspect"]
   },
   "vars": {
     "SITE_ORIGIN": "http://localhost:8787",

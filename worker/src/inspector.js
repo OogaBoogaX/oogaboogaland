@@ -10,7 +10,7 @@
 // for viewers after a report, and its alarm runs only to mark rows stale and age the log.
 import { DurableObject } from "cloudflare:workers";
 import { inspectorAllowed } from "./inspect-report.js";
-import { LIMITS, RECENT_MS, WATCH_MS, absorb, cleanReport, nextAlarm, pruneCount, sweep } from "./inspector-logic.js";
+import { LIMITS, RECENT_MS, WATCH_MS, absorb, cleanReport, nextAlarm, expiredEvents, sweep } from "./inspector-logic.js";
 
 const BATCH_MS = 250;
 const CLOSE_KICK = 4000;
@@ -62,10 +62,12 @@ export class Inspector extends DurableObject {
   }
 
   prune(now) {
-    const n = pruneCount(this.events, now);
-    if (!n) return;
-    this.ctx.storage.sql.exec("delete from event where id <= ?", this.events[n - 1].id);
-    this.events.splice(0, n);
+    const expired = expiredEvents(this.events, now);
+    if (!expired.length) return;
+    const ids = new Set(expired.map((e) => e.id));
+    for (const id of ids) this.ctx.storage.sql.exec("delete from event where id = ?", id);
+    this.events = this.events.filter((e) => !ids.has(e.id));
+    this.added = this.added.filter((e) => !ids.has(e.id));
   }
 
   // A viewer: the Worker checked the session and the allowlist and names them in the headers it set.
@@ -78,6 +80,7 @@ export class Inspector extends DurableObject {
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({ id, login });
     const now = Date.now();
+    this.prune(now);
     server.send(JSON.stringify({ t: "snapshot", now, you: { id, login }, limits: LIMITS, objects: [...this.rows.values()], events: this.events }));
     // Ask every object heard from lately for its detail now, rather than at its next report.
     for (const row of this.rows.values()) {
