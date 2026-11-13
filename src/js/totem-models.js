@@ -20,7 +20,7 @@
 // it cuts, and is reached by the hub at run time only.
 //
 // Repo Island's carvings (`repo-island-models.js`) come from the same kit through `layoutOf(design, importance)`,
-// `carve(L, word, seed, opts)` and `glyphsOf(L, word)`, a design spelled out rather than looked up by index. `opts.detail`
+// `carve(L, word, seed, opts)`, `glyphsOf(L, word)` and `ringSectorOf(L)`, a design spelled out rather than looked up by index. `opts.detail`
 // (1 by default, which builds exactly what the four meadow totems have always been) scales every turned part's segments
 // down; under 0.45 it also leaves out the small carvings and thins the foot stones, and under 0.2 keeps only the masks,
 // eyes, bands and crest, a stand-in for seeing the island from across the water;
@@ -413,11 +413,12 @@
   };
 
   // A carved band round the pole at y, painted between dark rims, beaded with bone studs when `studs`.
+  // Keep its facets at every detail so the shared traveling glow sits on the painted stripe.
   const band = (c, y) => {
     const d = c.d;
     const profile = bare() ? [[R + 0.03, 0], [R + 0.03, 0.1]] : lite() ? [[R * 0.98, 0], [R + 0.03, 0.012], [R + 0.03, 0.088], [R * 0.98, 0.1]]
       : [[R * 0.98, 0], [R + 0.03, 0.012], [R + 0.03, 0.028], [R + 0.022, 0.03], [R + 0.022, 0.07], [R + 0.03, 0.072], [R + 0.03, 0.088], [R * 0.98, 0.1]];
-    c.round.push(moved(turn(profile, sg(RING_SEGMENTS), (t) => lite() ? t < 0.2 || t > 0.8 ? d.dk : d.paint : t < 0.3 || t > 0.7 ? d.dk : d.paint), 0, y - 0.05, 0));
+    c.round.push(moved(turn(profile, RING_SEGMENTS, (t) => lite() ? t < 0.2 || t > 0.8 ? d.dk : d.paint : t < 0.3 || t > 0.7 ? d.dk : d.paint), 0, y - 0.05, 0));
     if (d.studs && !lite()) for (let k = 0; k < 10; k++) {
       const a = (k + 0.5) / 10 * Math.PI * 2;
       c.round.push(moved(turnedY(dome(0, 0, 0, 0.026, 0.025, BONE, 8), a), Math.sin(a) * (R + 0.02), y, Math.cos(a) * (R + 0.02)));
@@ -432,11 +433,12 @@
 
   // One facet of the painted stripe, just proud of the band. Copies stay aligned with its carved facets,
   // so the traveling light hugs the wood rather than floating as a rotating hoop. All rings on a pole share it.
-  const ringSector = variants((i) => {
-    const L = layout(i), g = turn([[R + 0.023, -0.019], [R + 0.023, 0.019]], RING_SEGMENTS, L.design.paint, 1);
+  const ringSectorOf = (L) => {
+    const g = turn([[R + 0.023, -0.019], [R + 0.023, 0.019]], RING_SEGMENTS, L.design.paint, 1);
     const f = g.faces[0];
     return noShadow(scaled({ verts: f.i.flatMap((k) => g.verts.slice(k * 3, k * 3 + 3)), faces: [{ ...f, i: [0, 1, 2, 3] }], lines: [], depthOffset: true, surfaceOverlay: true }, L.w, L.s));
-  });
+  };
+  const ringSector = variants((i) => ringSectorOf(layout(i)));
 
   // A totem's carving at its layout L: the wood, stone, paint and board of the totem whose name board reads `word`,
   // its foot stones drawn from `seed`. See the header for `opts`.
@@ -544,6 +546,16 @@
     }
     return near <= far && far >= 0 ? near : Infinity;
   };
+  // Fade smoothly over the last metre of a first-person approach, fully gone before the near plane
+  // enters the carving. Distance is to the closest authored box, including wings, feet and crest.
+  const eyeOpacity = (L, x, y, z) => {
+    let distance = Infinity;
+    for (const [hx, y0, y1, hz] of L.boxes) {
+      distance = Math.min(distance, Math.hypot(Math.max(0, Math.abs(x) - hx), Math.max(0, y0 - y, y - y1), Math.max(0, Math.abs(z) - hz)));
+    }
+    const t = Math.max(0, Math.min(1, (distance - 0.25) / 0.95));
+    return t * t * (3 - 2 * t);
+  };
   const hitOf = (L, ox, oy, oz, dx, dy, dz) => {
     let t = Infinity;
     for (const [hx, y0, y1, hz] of L.boxes) t = Math.min(t, slab(ox, oy, oz, dx, dy, dz, hx, y0, y1, hz));
@@ -551,5 +563,5 @@
   };
   const hit = (i, ox, oy, oz, dx, dy, dz) => hitOf(layout(i), ox, oy, oz, dx, dy, dz);
 
-  BL.totemModels = { body, glyphs, ringSector, featureHighlights, layout, hit, layoutOf, carve, glyphsOf, hitOf, DESIGNS, KINDS: Object.keys(KINDS), CRESTS: Object.keys(CRESTS), CORE_HEIGHT, RING_SEGMENTS };
+  BL.totemModels = { body, glyphs, ringSector, ringSectorOf, featureHighlights, layout, hit, layoutOf, carve, glyphsOf, hitOf, eyeOpacity, DESIGNS, KINDS: Object.keys(KINDS), CRESTS: Object.keys(CRESTS), CORE_HEIGHT, RING_SEGMENTS };
 })();

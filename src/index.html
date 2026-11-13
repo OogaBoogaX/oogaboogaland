@@ -374,6 +374,28 @@
       <button type="button" data-action="studio-build" aria-pressed="false" title="A new Ooga's female build (reloads)">Female</button>
       <button type="button" data-action="studio-speak" title="Say its voice lines in turn">Speak</button>
     </nav>
+    <!-- The studio's This Ooga panel (scene-studio.js), down the right side: what the character's file gives its Ooga,
+         and how much of the intake's 32,768 bytes it takes. It stands against the right edge, its left edge a grip
+         that drags it wider or narrower, and it folds to a tab on the edge. -->
+    <section class="studio-features fold-panel fold-right" id="studio-features" aria-label="This Ooga" data-scene="studio" hidden>
+      <button type="button" class="studio-resize" id="studio-resize" aria-label="Resize this panel: drag it, or press to widen it" title="Drag to resize"></button>
+      <div class="panel-head">
+        <h3>This Ooga</h3>
+        <button type="button" class="panel-fold" data-fold="studio-features" aria-label="Fold this panel away">&rsaquo;</button>
+      </div>
+      <div class="studio-scroll" id="studio-scroll">
+        <p class="studio-who" id="studio-who"></p>
+        <h3 class="section-head">File</h3>
+        <div class="studio-file">
+          <div class="studio-bar" id="studio-size-bar"><span id="studio-size-fill"></span></div>
+          <p class="studio-size" id="studio-size"></p>
+          <p class="studio-note" id="studio-size-note"></p>
+          <ul class="studio-list" id="studio-size-parts"></ul>
+        </div>
+        <div id="studio-groups"></div>
+      </div>
+    </section>
+    <button type="button" class="panel-edge panel-edge-right studio-features-edge" data-fold="studio-features" data-scene="studio" hidden>This Ooga</button>
 
     <aside class="sheet" id="sheet" data-open="false" data-dock="side" data-paired="false">
       <nav class="sheet-panels" role="tablist" aria-label="Island panels">
@@ -409,17 +431,6 @@
           </svg><span class="tab-count" hidden></span>
           </span>
         </button>
-        <button type="button" class="sheet-toggle sheet-toggle-loot" role="tab" data-tab="loot"
-          aria-selected="false" id="loot-tab" aria-controls="loot-panel" aria-label="Swag locker" hidden>
-          <span class="sheet-tab-face">
-          <svg viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
-            <path fill="#2b1b10" d="M0 2h9v7H0zM1 0h7v2H1z" />
-            <path fill="#d6a45f" d="M1 3h7v5H1zM2 1h5v1H2z" />
-            <path fill="#5c4425" d="M1 4h7v1H1zM4 3h1v5H4z" />
-            <path fill="#f3efe4" d="M4 4h1v2H4z" />
-          </svg><span class="tab-count" id="loot-count" hidden></span>
-          </span>
-        </button>
         <button type="button" class="sheet-toggle sheet-toggle-chat" role="tab" data-tab="chat"
           aria-selected="false" id="chat-tab" aria-controls="chat-panel" aria-label="Ooga Chat" hidden>
           <span class="sheet-tab-face">
@@ -447,7 +458,6 @@
           </select>
         </div>
         <ul id="roster" class="roster slab" aria-label="Contributing Oogas"></ul>
-        <p class="help roster-hint" data-scene="hub"><span id="world-loot-hint" hidden>Something is hidden out there.</span></p>
         <div class="account" id="account" hidden>
           <button type="button" class="panel-primary" data-action="account-login" id="account-login" aria-label="Contributor sign-in with GitHub" title="Contributors can sign in with GitHub to control their own Ooga and gorilla."><span data-sign>Contributor sign-in</span></button>
           <span class="account-who">
@@ -539,14 +549,6 @@
           <p class="banana-board-note" id="banana-board-note">Demo donations saved in this browser.</p>
         </div>
         <button type="button" class="panel-primary feed-open" data-action="feed"><span data-sign>Feed the Oogas</span></button>
-      </section>
-      <section class="panel" data-panel="loot" id="loot-panel" role="tabpanel" aria-labelledby="loot-tab" hidden>
-        <header class="panel-title">
-          <h2><span data-sign>Swag locker</span></h2>
-          <button type="button" class="link" data-action="clear-loot">Clear</button>
-        </header>
-        <p class="help empty" id="inventory-empty">Open a loot crate to earn swag, then assign it to a caveman.</p>
-        <ul id="inventory" class="loot"></ul>
       </section>
       <section class="panel" data-panel="chat" id="chat-panel" role="tabpanel" aria-labelledby="chat-tab" hidden>
         <header class="panel-title">
@@ -1987,16 +1989,18 @@
         <h2><span data-sign>Add an Ooga</span></h2>
         <button type="button" class="modal-close" data-action="recipe-close" aria-label="Close">&times;</button>
       </div>
-      <p class="help">2140data hands you the prompt. Paste it to your coding agent: it will ask what you want first.</p>
-      <pre class="recipe" id="recipe-text">Help me add my Ooga to Ooga Booga Land. Read docs/make-your-ooga.md in the repository first, and follow it.
+      <p class="help">2140data hands you the prompt. Paste it to an AI coding agent on your computer: it signs you in with GitHub, asks what you want, and shows you your Ooga as it builds it.</p>
+      <pre class="recipe" id="recipe-text">Make me a character in Ooga Booga Land. Read docs/make-your-ooga.md in https://github.com/OogaBoogaX/oogaboogaland first, and follow it in order.
 
-Do not write anything yet. Interview me, a few questions at a time: do I want a male or a female Ooga; my skin, hair and fur colours; my face and eyes; what I wear; what I hold; whether I have a pet; my voice lines; and whether I have a reference picture. Show me both builds with npm run character:preview -- &lt;my GitHub login&gt; &lt;my GitHub login&gt;:slim.
+Get me set up first: check I have a GitHub account, sign me in on this computer with gh (I will approve it in my browser), fork the repository, and make the clone's commits mine with my GitHub no-reply address. Ask me before installing anything or opening my browser.
 
-Then sort my wishes into three lists and tell me before you build: plain data (it merges on its own the next day), custom code (a maintainer reviews it, which can take days), and what a character file cannot do (it needs a change to the game). Offer the nearest plain-data choice for anything that does not fit.
+Open the character studio (npm run character:studio -- &lt;my GitHub login&gt;) and keep it open, so I can watch my Ooga while you work: it shows it standing, sitting, in bed and in a hammock, and reloads as you save.
 
-Build it in one file, src/characters/&lt;my GitHub login&gt;.js, and change nothing else. Ask me whether you may open the character studio in my browser (npm run character:studio -- &lt;my GitHub login&gt;): it shows my Ooga standing, sitting, in bed and in a hammock, and reloads as you save. After each round take my notes one at a time. Before the pull request, run npm run character:check, npm run build and npm run test:unit.
+Do not write the file yet. Ask me for a picture or two to work from, then interview me, a few questions at a time: a male or a female Ooga; my skin, hair and fur colours; my face and eyes; what I wear; what I hold; whether I have a pet; what I say. Then sort my wishes into three lists and tell me before you build: plain data (it merges on its own the next day), custom code (a maintainer reviews it, which can take days), and what a character file cannot do (it needs a change to the game). Offer the nearest plain-data choice for anything that does not fit, and wait for my yes.
 
-Open the pull request as a draft and keep it draft while building or debugging. Mark it ready for review only when the work and authorized checks are complete and its description records validation and any remaining acceptance work. Return it to draft for substantial new work, and batch related fixes before pushing.</pre>
+Build it in one file, src/characters/&lt;my GitHub login&gt;.js, and change nothing else. After each round take my notes one at a time. Before the pull request, run npm run character:check, npm run build and npm run test:unit, and ask me before pushing.
+
+Open the pull request from my fork as a draft and keep it draft while building or debugging. Mark it ready for review only when the work and authorized checks are complete and its description records validation and any remaining acceptance work. Return it to draft for substantial new work, and batch related fixes before pushing.</pre>
       <div class="actions recipe-actions">
         <button type="button" data-action="recipe-copy">Copy prompt</button>
       </div>
@@ -2306,7 +2310,6 @@ Open the pull request as a draft and keep it draft while building or debugging. 
   <script src="js/pile-guides.js"></script>
   <script src="js/banana-cover.js"></script>
   <script src="js/mirror-guides.js"></script>
-  <script src="js/crates.js"></script>
   <script src="js/critters.js"></script>
   <script src="js/weather.js"></script>
   <script src="js/race-models.js"></script>

@@ -2055,7 +2055,7 @@
     phase = s.over ? "results" : s.time > 0 ? "run" : "intro";
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
 
-    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     // Space and the WORK button both come through the pilot's action: whatever is beside the Ooga.
@@ -2377,7 +2377,7 @@
     },
     controlsHelpHold() { pilot.controls.reset(); },
     get cabinetMenu() { return phase === "intro"; },
-    id: "mine", padContext: "mine", enter, update, overlay, onDonation, onKey, onLootCleared: () => {}, renderOpts: RENDER_OPTS,
+    id: "mine", padContext: "mine", enter, update, overlay, onDonation, onKey, renderOpts: RENDER_OPTS,
     leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     get inMotion() {

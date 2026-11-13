@@ -186,7 +186,7 @@ with the shared refined body (see `FINE` in `src/js/models.js`): a head rounded
 behind its unchanged face, a longer torso, narrow at the waist and full through the
 chest into the shoulders, a hip band fitted to the thighs with a close loincloth
 wrap, even rounded limbs and plain block fists and feet. The automatic data format
-is unchanged: head cells, `hatY` and `portrait` bounds stay on the authored grid.
+is unchanged: head cells and `portrait` bounds stay on the authored grid.
 Painting at the finer detail itself is a `refine` dress hook, which is custom code.
 
 Custom `dress` hooks and drawing helpers go to manual review. A conservative screen

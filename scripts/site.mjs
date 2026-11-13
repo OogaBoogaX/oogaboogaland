@@ -3,8 +3,8 @@
 // route in src/js/routes.js gets a real page of its own: oogarally.html answers /oogarally with a 200, its own
 // title, description, canonical address and preview card, and the router opens the rally from the path.
 // Each is the whole built page with its own head. 404.html sends a miscased or slash-ended route
-// (/OogaRally/) to its address and anything else home; sitemap.xml and robots.txt list the routes, and
-// cards/ holds the card images from `npm run cards`; a route without an `image` uses home's. Modules tagged
+// (/OogaRally/) to its address and anything else home; sitemap.xml and robots.txt list the routes, llms.txt
+// points an AI asked to make someone a character to docs/make-your-ooga.md, and cards/ holds the card images from `npm run cards`; a route without an `image` uses home's. Modules tagged
 // `data-defer` move out of the pages into js/<group>-<hash>.js (scripts/distribution-modules.mjs), fetched when needed.
 // `--audio-assets` and `--image-assets` write the DSB entrance recordings and the pictures in PICTURE_MODULES (the DSB
 // rooms', Cloud Hopper's art) as same-origin files under audio/ and art/; `npm run build:site` and `npm run serve` pass both, and the portable page stays whole.
@@ -111,6 +111,20 @@ ${list.map((entry) => `  <url><loc>${urlOf(entry)}</loc></url>`).join("\n")}
 </urlset>
 `);
 writeFileSync(join(out, "robots.txt"), `User-agent: *\nAllow: /\nSitemap: ${site}/sitemap.xml\n`);
+const repo = "https://github.com/OogaBoogaX/oogaboogaland";
+writeFileSync(join(out, "llms.txt"), `# ${name}
+
+> A floating island in the browser where cavemen, the Oogas, stand for the contributors of OogaBoogaX, with caves of projects and an arcade of games. Its source is ${repo}.
+
+## Make a character
+
+Anyone can have an Ooga of their own. If someone asks you to make them a character in ${name}, follow this guide in order: ${repo}/blob/rock/docs/make-your-ooga.md (as plain text: https://raw.githubusercontent.com/OogaBoogaX/oogaboogaland/rock/docs/make-your-ooga.md). It covers signing in with GitHub, the questions to ask and the pictures to ask for, showing the Ooga on their own computer in the character studio, and sending it as a pull request from their own account.
+
+## More
+
+- [The repository](${repo})
+- [Rules for agents changing the game](${repo}/blob/rock/AGENTS.md)
+`);
 const headers = process.argv.indexOf("--headers");
 if (headers > 0) {
   const files = ["js", "css"].flatMap((dir) => existsSync(join(out, dir)) ? readdirSync(join(out, dir)).sort().map((file) => `/${dir}/${file}`) : []);
@@ -120,4 +134,4 @@ if (headers > 0) {
   writeFileSync(join(out, "_headers"), `${rules}\n${files.map((path) => `\n${path}\n  Cache-Control: public, max-age=31536000, immutable`).join("")}\n`);
 }
 const kb = (n) => `${(n / 1024).toFixed(0)} KB`;
-console.log(`staged ${out}: ${list.length} pages of ${kb(shell.length)}, ${list.filter((entry) => entry.image).length} cards, sitemap.xml, robots.txt`);
+console.log(`staged ${out}: ${list.length} pages of ${kb(shell.length)}, ${list.filter((entry) => entry.image).length} cards, sitemap.xml, robots.txt, llms.txt`);
