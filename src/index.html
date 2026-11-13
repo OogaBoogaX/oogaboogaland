@@ -477,9 +477,12 @@
               <span class="players-hearing-help" id="players-hearing-help">Voices at or beyond this range are automatically muted</span>
             </div>
             <div id="players-diagnostics" hidden>
-              <label class="players-speak"><input type="checkbox" id="players-diagnostics-input" aria-describedby="players-diagnostics-help"> Send dropout diagnostics this visit</label>
-              <p class="help" id="players-diagnostics-help">Optional: send notable connection dropouts to our Cloudflare service, linked to your signed-in account, for later analysis. No voice, chat, names or positions. Kept for up to 8 days; account deletion removes reports. Turning this off stops new reports.</p>
-              <p class="help" id="players-diagnostics-status" role="status">Off</p>
+              <div class="diagnostics-label">
+                <label class="players-speak"><input type="checkbox" id="players-diagnostics-input" aria-describedby="players-diagnostics-help"> Report dropout diagnostics</label>
+                <button type="button" id="players-diagnostics-info" aria-label="About dropout diagnostics" aria-expanded="false" aria-controls="players-diagnostics-help" aria-describedby="players-diagnostics-help">?</button>
+              </div>
+              <p class="help" id="players-diagnostics-help" role="tooltip" hidden>Optional: send notable connection dropouts to our Cloudflare service, linked to your signed-in account, for later analysis. No voice, chat, names or positions. Kept for up to 8 days; account deletion removes reports. Your choice is remembered for this account in this browser. Turning this off stops new reports.</p>
+              <p class="help" id="players-diagnostics-status">Off</p>
             </div>
             <label class="players-speak" id="players-speak" hidden><input type="checkbox" id="players-speak-input"> Read joins aloud</label>
           </div>
@@ -2088,6 +2091,7 @@ Open the pull request as a draft and keep it draft while building or debugging. 
       <button type="button" class="act" id="act" data-action="act" hidden>JUMP!</button>
       <div class="message-stack" id="message-stack">
         <output class="toast" id="reload-notice" data-reload="true" hidden></output>
+        <output class="toast show" id="diagnostics-notice" data-diagnostics="true" role="status" aria-live="polite" hidden></output>
         <output class="toast" id="toast" hidden></output>
         <div class="hint" id="hint" hidden></div>
       </div>

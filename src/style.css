@@ -2680,6 +2680,39 @@ body[data-active-scene="block"] .mode-hud {
   .reaction-heart { width: 32px; height: 32px; font-size: 18px; }
 }
 
+/* Dropout consent stays compact; its explanation opens from the adjacent question mark. */
+#players-diagnostics { position: relative; }
+.diagnostics-label { display: flex; align-items: center; gap: 6px; }
+.diagnostics-label .players-speak { flex: 0 1 auto; white-space: normal; }
+.diagnostics-label input { flex: none; }
+#players-diagnostics-info {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--muted);
+  border-radius: 50%;
+  background: var(--slab-dark);
+  color: #fff;
+  cursor: pointer;
+}
+#players-diagnostics-info:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#players-diagnostics-help {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  margin: 0;
+  padding: 10px;
+  background: #171b1a;
+  border: 1px solid var(--muted);
+  border-radius: 6px;
+  color: #fff;
+}
+
+#players-diagnostics-help.diagnostics-help-above { top: auto; bottom: 100%; }
+
 /* Native disclosure keeps advanced settings together on every panel layout. */
 .players-settings { flex: none; }
 .players-settings:not(:has(.players-settings-content > :not([hidden]))) { display: none; }
@@ -3206,6 +3239,8 @@ body[data-active-scene="block"] .mode-hud {
   font-size: 11px;
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
 }
+
+.toast[data-diagnostics] { bottom: calc(80px + var(--safe-bottom)); }
 
 .toast[data-reload] {
   pointer-events: auto;
