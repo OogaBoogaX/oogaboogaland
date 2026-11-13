@@ -11797,7 +11797,6 @@ const donation = (id, { stat = "dropsLanded", seconds = 6, where = "lands its ba
   if (id === "hub") {
     const lights = await b.evaluate(`(() => {
       const B = window.__ooga, level = B.level, hour = B.daylight.hour;
-      const repos = BL.totemFeed.state.repos, changedAt = repos.map(r => r.changedAt);
       const camera = JSON.stringify([B.camera.position, B.camera.target]);
       const sample = () => B.lamps.filter(l => l.pileProfile).map(l => {
         const index = B.lighting.selectedIds.indexOf(l.id), o = index * 8;
@@ -11812,30 +11811,15 @@ const donation = (id, { stat = "dropsLanded", seconds = 6, where = "lands its ba
         const grown = sample();
         B.setPileLevel(100); B.advance(0.1);
         const shrunk = sample();
-        B.setHour(12);
-        for (const repo of repos) repo.changedAt = Date.now();
-        const sampleTotems = () => B.totems.list.map(o => {
-          const index = B.lighting.selectedIds.indexOf(o.lamp.id), at = index * 8;
-          return { r: o.light.r, selected: index >= 0, full: o.lamp.k === 1 && o.lamp.gain === 1,
-            error: Math.hypot(o.light.radius - B.renderOpts.lights[at + 3], o.light.r - B.renderOpts.lights[at + 4],
-              o.light.g - B.renderOpts.lights[at + 5], o.light.b - B.renderOpts.lights[at + 6]) };
-        });
-        B.advance(0.2); const lit = sampleTotems();
-        B.advance(0.2); const pulsed = sampleTotems();
-        for (const repo of repos) repo.changedAt = 0;
-        B.advance(0.1); const expired = B.totems.list.every(o => !B.lighting.selectedIds.includes(o.lamp.id));
-        return { before, grown, shrunk, lit, pulsed, expired, still: camera === JSON.stringify([B.camera.position, B.camera.target]) };
+        return { before, grown, shrunk, still: camera === JSON.stringify([B.camera.position, B.camera.target]) };
       } finally {
-        repos.forEach((r, i) => { r.changedAt = changedAt[i]; });
         B.setPileLevel(level); B.setHour(hour); B.advance(0.1);
       }
     })()`);
     record("hub donation: stationary night lighting follows pile posts through growth and shrinkage", lights.still
       && [lights.before, lights.grown, lights.shrunk].every(rows => rows.length === 3 && rows.every(l => l.selected && l.error < 1e-5))
       && lights.grown.every((l, i) => Math.hypot(...l.position.map((v, axis) => v - lights.before[i].position[axis])) > 1), JSON.stringify(lights));
-    record("hub donation: stationary lighting follows totem color, reach and expiry", lights.still && lights.expired
-      && [lights.lit, lights.pulsed].every(rows => rows.length === 4 && rows.every(l => l.selected && l.full && l.error < 1e-5))
-      && lights.pulsed.some((l, i) => Math.abs(l.r - lights.lit[i].r) > 1e-4), JSON.stringify(lights));
+
   }
 } });
 // Every track of the cup under the autopilot: all racers finish in order, the points and the cup medal
@@ -19853,11 +19837,11 @@ scene("hub", { label: "walk-through totems", query: "pos=0&totemglow=1&repospin=
       site.update(1 / 60, 4, far); site.afterCamera(far, true);
       const distant = site.stats(), expected = P.totems.reduce((n, t) => n + t.L.eyes.length, 0);
       return { exact, beside, fading, hidden: hidden.hidden, removed: partial.faces.length < original.faces.length, neighbours: partial.faces.length > 0,
-        restored, walkThrough: !solids.isActive(node) && h.totems.list.every(o => !solids.isActive(o.owner.node)),
+        restored, walkThrough: !solids.isActive(node), mainlandRemoved: !h.props.some(o => o.prop === "totem") && !h.lamps.some(l => l.id.startsWith("totem:")),
         groundSolid: site.solids.every(n => solids.isActive(n)), distant, expected };
     })()`);
     record("walk-through totems: only the overlapping carving disappears, terrain stays solid, and all distant eye flames and rings stay lit",
-      result.exact && !result.beside && result.fading && result.hidden === 1 && result.removed && result.neighbours && result.restored && result.walkThrough && result.groundSolid && result.distant.flames === result.expected && result.distant.rings > 0,
+      result.exact && !result.beside && result.fading && result.hidden === 1 && result.removed && result.neighbours && result.restored && result.walkThrough && result.mainlandRemoved && result.groundSolid && result.distant.flames === result.expected && result.distant.rings > 0,
       JSON.stringify(result));
   }
 }] });
@@ -19930,16 +19914,22 @@ scene("hub", { label: "Merge Rock combat", query: "pos=0&repospin=0", steps: [{
       const canvas = document.getElementById('scene'), tip = document.getElementById('tooltip');
       const actor = B.cavemen.get('portlandhodl'); P.possess(actor);
       const saved = { update: P.update, open: window.open, lock: canvas.requestPointerLock, swing: B.crew.swingWeapon, trigger: B.crew.setWeaponTrigger };
-      const calls = [], rows = []; let swings = 0, triggers = 0, locks = 0, miss = false;
+      const calls = [], rows = []; let swings = 0, triggers = 0, locks = 0, miss = false, pointerTime = 0;
       const pose = () => {
         C.up = null;
         C.position.x = site.spot.x + t.x; C.position.y = site.spot.y + t.L.apex * 0.78; C.position.z = site.spot.z + t.z + 4;
         C.target.x = C.position.x + (miss ? 20 : 0); C.target.y = C.position.y; C.target.z = site.spot.z + t.z;
       };
-      const pointer = (type, x = B.renderer.size.width / 2, y = B.renderer.size.height / 2, modifiers = {}) => canvas.dispatchEvent(new PointerEvent(type, {
-        bubbles: true, cancelable: true, pointerType: 'mouse', pointerId: 91, isPrimary: true, button: type === 'pointermove' ? -1 : 0,
-        buttons: type === 'pointerdown' ? 1 : 0, clientX: x, clientY: y, ...modifiers
-      }));
+      const pointer = (type, x = B.renderer.size.width / 2, y = B.renderer.size.height / 2, modifiers = {}) => {
+        const event = new PointerEvent(type, {
+          bubbles: true, cancelable: true, pointerType: 'mouse', pointerId: 91, isPrimary: true, button: type === 'pointermove' ? -1 : 0,
+          buttons: type === 'pointerdown' ? 1 : 0, clientX: x, clientY: y, ...modifiers
+        });
+        // Separate independent taps without turning this synchronous regression into double taps.
+        pointerTime += type === 'pointerdown' ? 500 : 10;
+        Object.defineProperty(event, 'timeStamp', { value: pointerTime });
+        return canvas.dispatchEvent(event);
+      };
       try {
         // A denied capture settles inline so each click must independently choose whether to retry it.
         canvas.requestPointerLock = () => { locks++; throw new Error('Capture unavailable'); };
@@ -19988,17 +19978,35 @@ scene("hub", { label: "Merge Rock combat", query: "pos=0&repospin=0", steps: [{
         miss = false; P.navigate({ position: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0.1, dist: 4 }); P.focusAim(false); B.advance(0.1, 1 / 60);
         const outsideHover = tip.hidden, before = calls.length;
         pointer('pointerdown'); pointer('pointerup');
-        return { aiming: P.aiming, focused: P.aimFocused, rows, cancelled, freeClicks, missed, outsideHover, outsideClick: calls.length === before,
+        const combat = { aiming: P.aiming, focused: P.aimFocused, outsideClick: calls.length === before };
+        P.modeAction('mode-toggle');
+        const carry = [];
+        for (const inside of [false, true]) {
+          P.navigate({ position: inside ? { x: site.spot.x, y: site.spot.y, z: site.spot.z + 12 } : { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0.1, dist: 4 });
+          B.advance(0.1, 1 / 60); pointer('pointermove'); B.advance(0.1, 1 / 60);
+          const hover = !tip.hidden && tip.textContent.includes('Bitcoin Core'), count = calls.length;
+          pointer('pointerdown'); pointer('pointerup');
+          carry.push({ inside, hover, opened: calls.length === count + 1, blocked: calls.length === count, carryMode: !P.aiming });
+        }
+        pointer('pointermove'); B.advance(0.1, 1 / 60);
+        const carryHovered = !tip.hidden && tip.textContent.includes('Bitcoin Core'), beforeLeave = calls.length;
+        pointer('pointerdown');
+        P.navigate({ position: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0.1, dist: 4 }); B.advance(0.1, 1 / 60);
+        const carryCleared = tip.hidden;
+        pointer('pointerup');
+        return { ...combat, rows, cancelled, freeClicks, missed, outsideHover, carry, carryHovered, carryCleared, carryReleaseBlocked: calls.length === beforeLeave,
           links: calls.every(args => args[0].startsWith('https://github.com/bitcoin/bitcoin') && args[1] === '_blank' && args[2] === 'noopener,noreferrer') };
       } finally {
         P.update = saved.update; window.open = saved.open; canvas.requestPointerLock = saved.lock;
         B.crew.swingWeapon = saved.swing; B.crew.setWeaponTrigger = saved.trigger;
       }
     })()`);
-    record("Merge Rock combat: exact crosshair hover and link clicks replace both attacks, and stop off the totem or off the island",
+    record("Merge Rock combat: exact crosshair hover and link clicks replace both attacks, and carry hover/clicks also stop off the island",
       result.aiming && result.focused && result.rows.every(r => r.hover && r.held && r.opened && r.consumed && r.nativeUp && r.nativeModified)
         && result.cancelled && result.freeClicks.every(r => r.held && r.opened && r.consumed && r.nativeUp && r.nativeModified)
-        && result.missed && result.outsideHover && result.outsideClick && result.links,
+        && result.missed && result.outsideHover && result.outsideClick && result.links
+        && result.carry.every(r => r.carryMode && r.hover === r.inside && (r.inside ? r.opened : r.blocked))
+        && result.carryHovered && result.carryCleared && result.carryReleaseBlocked,
       JSON.stringify(result));
   }
 }] });
@@ -20091,8 +20099,8 @@ const hubSlicedReturn = { name: "hub sliced return", why: "rule: a released hub 
 const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub accepted HUD actions, canvas capture and bubbling keys before its sliced visit was ready", run: async (b) => {
   await tourGo(b, "lab");
   await b.evaluate(`(() => {
-    const H = BL.scenes.hub, createHud = BL.hud.create, createPilot = BL.pilot.create, subscribe = BL.totemFeed.subscribe, steps = H.enterSteps;
-    const S = window.__entryHold = { released: false, paused: false, callbacks: new Set(), captures: 0, touchLeaks: 0, actions: 0, registered: false };
+    const H = BL.scenes.hub, createHud = BL.hud.create, createPilot = BL.pilot.create, steps = H.enterSteps;
+    const S = window.__entryHold = { released: false, paused: false, captures: 0, touchLeaks: 0, actions: 0, registered: false };
     BL.hud.create = (...args) => {
       const hud = createHud(...args), onAction = hud.onAction;
       hud.onAction = fn => {
@@ -20104,11 +20112,6 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
       return hud;
     };
     BL.pilot.create = (...args) => S.pilot = createPilot(...args);
-    BL.totemFeed.subscribe = fn => {
-      S.callbacks.add(fn);
-      const off = subscribe(fn);
-      return () => { S.callbacks.delete(fn); off(); };
-    };
     H.enterSteps = function* (ctx) {
       S.signal = ctx.signal;
       // This capture listener is registered with the scene's first slice, as the real carry cursor is.
@@ -20122,7 +20125,7 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
         }
       } finally { it.return(); }
     };
-    S.restore = () => { S.released = true; S.restorePad?.(); H.enterSteps = steps; BL.hud.create = createHud; BL.pilot.create = createPilot; BL.totemFeed.subscribe = subscribe; };
+    S.restore = () => { S.released = true; S.restorePad?.(); H.enterSteps = steps; BL.hud.create = createHud; BL.pilot.create = createPilot; };
     __ooga.go("hub");
   })()`);
   let held, pressed, resumed;
@@ -20154,8 +20157,7 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
       const touchCancelled = ["touchstart", "touchmove"].map(type => {
         const event = new Event(type, { bubbles: true, cancelable: true }); canvas.dispatchEvent(event); return event.defaultPrevented;
       });
-      for (const fn of S.callbacks) fn({ type: "change", index: 0, fresh: true, changedAt: Date.now() });
-      return { scene: __ooga.scene, transitioning: __ooga.transitioning, captures: S.captures, actions: S.actions, subscriptions: S.callbacks.size,
+      return { scene: __ooga.scene, transitioning: __ooga.transitioning, captures: S.captures, actions: S.actions,
         touchLeaks: S.touchLeaks, touchCancelled, padConnected: pad.connected, padReads: S.padReads,
         padNeutral: !(pad.lx || pad.ly || pad.rx || pad.ry || pad.held || pad.pressed || pad.released),
         inert: [...document.querySelectorAll('[data-scene="hub"], #sheet, #equipment-hud, .joysticks, #act')].every(el => el.inert) };
@@ -20175,17 +20177,15 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
     resumed = await b.evaluate(`(() => {
       const S = __entryHold, map = document.getElementById("destination-hud"), pad = BL.gamepad.state, axes = S.pilot.controls.read();
       map.click();
-      for (const fn of S.callbacks) fn({ type: "change", index: 0, fresh: true, changedAt: Date.now() });
       return { scene: __ooga.scene, live: !document.getElementById("equipment-hud").inert, actions: S.actions,
-        subscriptions: S.callbacks.size, flare: __ooga.totems.list[0].flare, toast: document.getElementById("toast").textContent,
         padNoReplay: S.pad.buttons[0].pressed && pad.connected && !(pad.held || pad.pressed || pad.released),
         padQuiet: axes.x === 0 && axes.y === 0 && axes.up === 0 && axes.yaw === 0 && axes.pitch === 0 };
     })()`);
   } finally { await b.evaluate(`__entryHold.restore()`); }
-  record("hub entry hold: the real released visit refuses map/mode, canvas capture, Space/W and early totem callbacks, then restores its HUD and merge celebration when ready",
-    held.scene === null && held.transitioning && held.inert && held.captures === 0 && held.actions === 0 && held.subscriptions === 0
+  record("hub entry hold: the real released visit refuses map/mode, canvas capture, Space/W, then restores its HUD when ready",
+    held.scene === null && held.transitioning && held.inert && held.captures === 0 && held.actions === 0
       && held.passiveTouch && held.touchLeaks === 0 && held.touchCancelled.every(cancelled => !cancelled) && pressed.quiet && pressed.unchanged
-      && resumed.scene === "hub" && resumed.live && resumed.actions === 1 && resumed.subscriptions === 1 && resumed.flare === 1 && resumed.toast.includes("Bitcoin Core just merged")
+      && resumed.scene === "hub" && resumed.live && resumed.actions === 1
       && held.padConnected && held.padReads >= 3 && held.padNeutral && resumed.padNoReplay && resumed.padQuiet, JSON.stringify({ held, pressed, resumed }));
 } };
 scene("hub", { label: "release policy", query: "hubcache=release", steps: [hudVisit, hubEntryHold, hubSlicedReturn, trip("hub")] });
@@ -25691,7 +25691,7 @@ const tessAnswerChecks = (BL) => {
   const H = BL.hubGuide, place = (id) => H.STOPS.findIndex((stop) => stop.id === id);
   const route = (q, last = null) => { const a = H.answer(q, last); return a === null ? "none" : a.tour ? "tour" : a.go !== null ? `trip:${H.STOPS[a.go].id}` : `say:${a.lines[0]}`; };
   const cases = [
-    ["Take me to the games", "trip:arcade"], ["where's B.C.A.?", "trip:bca"], ["how do I get to the factory", "trip:factory"], ["hello, where is the arcade?", "trip:arcade"],
+    ["Take me to the games", "trip:arcade"], ["where are the totems?", "trip:repos"], ["take me to the Oogatron", "trip:jumbotron"], ["where's B.C.A.?", "trip:bca"], ["how do I get to the factory", "trip:factory"], ["hello, where is the arcade?", "trip:arcade"],
     ["What's the Mempool island?", "say:mempool"], ["tell me about ₿IFRÖST", "say:bifrost"], ["How do I donate?", "say:donate"], ["how do I move", "say:controls"],
     ["how do I sign in", "say:signIn"], ["what's new?", "say:newsIntro"], ["who are you?", "say:whoAmI"], ["hi tess", "say:hello"],
     ["can you show me around?", "tour"], ["what is bitcoin", "none"], ["   ", "none"], ["take me to the mempool", "trip:mempool"],
@@ -31070,6 +31070,18 @@ const repoIslandChecks = (BL, island) => {
   };
   record("repo island list: every repository once under its canonical name, a carvable word of its own, its section in order, signs the carved alphabet can spell with a badge, heights a share of Core's and the meadow's four at their own",
     Object.values(list).every(Boolean), JSON.stringify(list));
+  const plaques = D.REPOS.map(repo => {
+    const lines = M.boardLines(repo), board = M.nameBoard(repo), name = repo.repo.split("/")[1];
+    const expected = (name.length > 32 ? repo.name : name).toUpperCase().replace(/ /g, "");
+    const bounds = BL.scene.boundsOf(board);
+    return { name, lines, full: lines.join("").replace(/ /g, "") === expected,
+      bounded: bounds.max[0] - bounds.min[0] <= 1.371 && board.verts.every(Number.isFinite) && board.faces.length > 0 };
+  });
+  record("Merge Rock plaques: GitHub names retain every letter, digit and separator, wrap into at most two rows, and fit bounded planks; only exceptionally long names use a readable project name",
+    plaques.every(p => p.full && p.bounded && p.lines.length >= 1 && p.lines.length <= 2)
+      && plaques.find(p => p.name === "rbitcoin").lines.join("") === "RBITCOIN"
+      && plaques.find(p => p.name === "lightning-browser-extension").lines.length === 2,
+    JSON.stringify(plaques.filter(p => !p.full || !p.bounded)));
   const P = M.plan(), spot = M.spot(island), seen = new Set(), signatures = new Set(), meadow = new Set(BL.totemFeed.REPOS.map((t) => t.repo));
   let placed = true, own = true, tall = true, inside = true;
   for (const t of P.totems) {
