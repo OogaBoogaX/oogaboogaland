@@ -337,6 +337,93 @@ const sleepBeamPoolProof = () => {
   beam.dispose(); beam.dispose(); const released = new Set(); beam.liveGeometry(released);
   return { compacted, bounded, calm, deterministic, clean, disposed: !sceneRoot.children.length && !released.size };
 };
+// Regression: Map's window capture listener is registered first, so a pad's Escape (pad-focus.js `back`, B or Menu)
+// over another menu layer reached it before that layer's own handler and was swallowed. It must pass through.
+const destinationMapPadEscapeProof = () => {
+  const els = new Map(), listeners = new Map(), state = { layer: false, otherDialog: null, shown: 0 };
+  const el = id => {
+    if (!els.has(id)) els.set(id, { id, hidden: false, disabled: false, open: false, textContent: "", dataset: {}, attrs: {}, children: [],
+      addEventListener() {}, removeEventListener() {}, setAttribute(k, v) { this.attrs[k] = v; }, focus() {}, click() {}, append(...nodes) { this.children.push(...nodes); },
+      replaceChildren(...nodes) { this.children = nodes; }, querySelectorAll(tag) { return this.children.flatMap(n => [...(n.tagName === tag.toUpperCase() ? [n] : []), ...n.querySelectorAll(tag)]); }, showModal() { this.open = true; state.shown++; }, close() { this.open = false; } });
+    return els.get(id);
+  };
+  const document = { getElementById: el, querySelector: sel => sel === "dialog:modal, dialog[open]:not(.board-floating)" ? (el("destination-map").open ? el("destination-map") : state.otherDialog && !state.otherDialog.floating ? state.otherDialog : null) : null, pointerLockElement: null,
+    createElement: tag => Object.assign(el("row" + els.size), { tagName: tag.toUpperCase() }) };
+  const window = { BL: { controls: { resetAll() {} }, gamepad: { requireNeutral() {} }, padFocus: { open: () => state.layer } },
+    matchMedia: () => ({ matches: false }), addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener() {} };
+  const context = { window, document, localStorage: { getItem: () => "1", setItem() {} } };
+  runInNewContext(readFileSync(join(root, "src/js/destination-map.js"), "utf8"), context);
+  const scene = { id: "hub" }, map = window.BL.destinationMap.create({ current: () => scene, ready: () => true });
+  let available = true;
+  map.connect({ available: () => available, travels: () => true, selected: () => null, names: () => ["pile"], label: n => n, travel: () => true });
+  const press = (key, pad) => { const e = { key, code: key, pad, prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; } }; listeners.get("keydown")(e); return e; };
+  const dialog = el("destination-map");
+  // The Controls panel (or a board, Add an Ooga, the donation popup) is the open layer: B's Escape is its own.
+  state.layer = true; state.otherDialog = el("controls-help");
+  const overDialog = press("Escape", true), passedDialog = !overDialog.prevented && !overDialog.stopped && !dialog.open && state.shown === 0;
+  // A card such as the ghost lobby or #hangar-sound is a layer with no dialog: B is still its Escape, not Map.
+  state.otherDialog = null;
+  const overCard = press("Escape", true), passedCard = !overCard.prevented && !overCard.stopped && !dialog.open && state.shown === 0;
+  // On foot with no layer open, Menu's Escape still opens Map, and B inside Map still closes it.
+  state.layer = false;
+  const onFoot = press("Escape", true), opened = onFoot.prevented && onFoot.stopped && dialog.open && state.shown === 1;
+  state.layer = true;
+  const inside = press("Escape", true), closed = inside.prevented && !dialog.open;
+  // A keyboard Escape on foot is never Map's.
+  state.layer = false;
+  const keyboard = press("Escape", false), keyboardPassed = !keyboard.prevented && !dialog.open;
+  // The floating Oogatron board is a non-modal dialog that padFocus does not see: it must not block Map.
+  state.otherDialog = Object.assign(el("board"), { open: true, floating: true });
+  const shownBefore = state.shown, overBoard = press("Escape", true), floatingOpens = overBoard.prevented && overBoard.stopped && dialog.open && state.shown === shownBefore + 1;
+  press("Escape", true); state.otherDialog = null;
+  // A refused Map (a modal dialog padFocus misses, or Map unavailable) must not swallow Menu's Escape.
+  state.otherDialog = Object.assign(el("modal"), { open: true, floating: false });
+  const refused = press("Escape", true), refusedPassed = !refused.prevented && !refused.stopped && !dialog.open;
+  state.otherDialog = null; available = false;
+  const unavailable = press("Escape", true), unavailablePassed = !unavailable.prevented && !unavailable.stopped && !dialog.open;
+  available = true;
+  map.dispose();
+  return { passedDialog, passedCard, opened, closed, keyboardPassed, floatingOpens, refusedPassed, unavailablePassed };
+};
+const destinationMapCoachingHintProof = () => {
+  const els = new Map(), state = { otherDialog: null };
+  const el = id => {
+    if (!els.has(id)) els.set(id, { id, hidden: id === "explore-coach", disabled: false, open: false, textContent: "", dataset: {}, attrs: {}, children: [],
+      addEventListener() {}, removeEventListener() {}, setAttribute(k, v) { this.attrs[k] = v; }, focus() {}, click() {}, append(...nodes) { this.children.push(...nodes); },
+      replaceChildren(...nodes) { this.children = nodes; }, querySelectorAll(tag) { return this.children.flatMap(n => [...(n.tagName === tag.toUpperCase() ? [n] : []), ...n.querySelectorAll(tag)]); }, showModal() { this.open = true; }, close() { this.open = false; } });
+    return els.get(id);
+  };
+  const querySelector = sel => {
+    const open = [el("destination-map"), state.otherDialog].find(d => d && d.open) || null;
+    if (!open) return null;
+    if (sel === "dialog[open]") return open;
+    if (sel === "dialog:modal, dialog[open]:not(.board-floating)") return open.floating ? null : open;
+    return null;
+  };
+  const document = { getElementById: el, querySelector, pointerLockElement: null, createElement: tag => Object.assign(el("row" + els.size), { tagName: tag.toUpperCase() }) };
+  const window = { BL: { controls: { resetAll() {} }, gamepad: { requireNeutral() {}, state: { connected: false } }, padFocus: { open: () => false } },
+    matchMedia: () => ({ matches: false }), addEventListener() {}, removeEventListener() {} };
+  const context = { window, document, localStorage: { getItem: () => null, setItem() {} } };
+  runInNewContext(readFileSync(join(root, "src/js/destination-map.js"), "utf8"), context);
+  const scene = { id: "hub" }, map = window.BL.destinationMap.create({ current: () => scene, ready: () => true });
+  map.connect({ available: () => true, travels: () => true, selected: () => null, names: () => ["pile"], label: n => n, travel: () => true, controlled: () => false, position: () => null });
+  const coach = el("explore-coach");
+  map.update();
+  const offered = !coach.hidden;
+  // A floating Oogatron board is a non-modal dialog: it must not hide the coaching hint.
+  state.otherDialog = Object.assign(el("board"), { open: true, floating: true });
+  map.update();
+  const floatingShows = !coach.hidden;
+  // A modal or other non-floating dialog still hides the hint.
+  state.otherDialog = Object.assign(el("controls-help"), { open: true, floating: false });
+  map.update();
+  const modalHides = coach.hidden;
+  state.otherDialog = null;
+  map.update();
+  const restored = !coach.hidden;
+  map.dispose();
+  return { offered, floatingShows, modalHides, restored };
+};
 // Rule: exercise the actual bounded rage state machine with a small physical
 // adapter. Collision and the rendered carry are covered by the hub regressions.
 const gorillaRageProof = async () => {
@@ -10452,6 +10539,14 @@ const gamepadHoldProof = async () => {
   const disconnected = !S.connected && neutral();
   connected = true; G.poll(); G.hold(false); G.poll();
   const reconnected = S.connected && !(S.held | S.pressed | S.released);
+  // Map asks for neutral sticks as it closes (`requireNeutral`): a stick still deflected from the menu moves nothing
+  // until both have rested inside the dead zone, while buttons keep working; one stick resting is not enough.
+  buttons[1].pressed = false; G.poll(); G.requireNeutral(); buttons[0].pressed = true; G.poll();
+  const mapInput = !!(S.pressed & B.a) && !S.lx && !S.ly && !S.rx && !S.ry;
+  hardware.axes[0] = 0; G.poll(); const mapHeld = !S.lx && !S.ly && !S.rx && !S.ry;
+  hardware.axes.fill(0); G.poll(); hardware.axes[0] = 0.6; G.poll();
+  const mapReleased = S.lx > 0;
+  buttons[0].pressed = false; G.poll();
   context.window.removeEventListener = () => {};
   for (const name of ["math", "controls"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
   buttons[1].pressed = false; G.poll();
@@ -10468,7 +10563,7 @@ const gamepadHoldProof = async () => {
   const pilot = await readFile(join(root, "src/js/pilot.js"), "utf8");
   const reset = new Function("pad", `let padFrame = -1, padFire = true, padAds = true, mouseAds = true, ads = true; ${pilot.match(/const resetPad = [^\n]+/)[0]} resetPad(); return { padFrame, padFire, padAds, mouseAds, ads };`)(S);
   const pilotReset = reset.padFrame === S.frame && !reset.padFire && !reset.padAds && !reset.mouseAds && !reset.ads;
-  return { initiallyLive: !!initiallyLive, synchronous, heldNeutral, noReplay, fresh, idempotent, betweenFrames, afterRelease, disconnected, reconnected, controlsResume, pilotReset };
+  return { initiallyLive: !!initiallyLive, synchronous, heldNeutral, noReplay, fresh, idempotent, betweenFrames, afterRelease, disconnected, reconnected, mapInput, mapHeld, mapReleased, controlsResume, pilotReset };
 };
 // The real gamepad and controls modules against stub pads: what a button does comes from the bindings, so a remap
 // reaches a reader and survives a reload, the pad last pressed is the one read, a game's context delivers its keys,
@@ -11185,7 +11280,7 @@ const hubGuestLikeness = { name: "hub guest likeness", why: "regression: a guest
   const arcadeLook = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, a = P.player, map = document.getElementById("destination-hud");
     const name = a ? a.traits.name : null, p = a ? { x: a.root.position.x, z: a.root.position.z } : null, mode = P.mode;
-    map.click(); B.advance(0.1, 1 / 60);
+    map.click(); document.querySelector("#destination-map [data-destination]").click(); document.getElementById("destination-map-go").click(); B.advance(0.1, 1 / 60);
     const looked = !!a && P.looking && P.player === a && Math.hypot(a.root.position.x - p.x, a.root.position.z - p.z) < 1e-6;
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "w", code: "KeyW" })); B.advance(1 / 60, 1 / 60);
     const back = !P.looking && P.player === a && P.mode === mode;
@@ -12805,9 +12900,11 @@ const sharedPanelBuildings = { name: "shared panel buildings", why: "regression:
     for (const id of ids) {
       const r = await b.evaluate(`(() => { const I = __ooga.dsb.interiors; I.review(${JSON.stringify(id)}, true); __ooga.advance(.5,1/60);
         const s = document.getElementById("sheet"), inside = I.active?.definition.id, shown = !s.hidden && getComputedStyle(s).display !== "none", open = s.dataset.open;
-        I.request(I.active.room.exit); __ooga.advance(.5,1/60); return { inside, shown, open, exited: !I.active, after: s.dataset.open, panels: document.querySelectorAll(".sheet").length }; })()`);
+        document.getElementById("destination-hud").click();
+        const map = document.getElementById("destination-map"), entries = map.querySelectorAll("[data-destination]"), outside = map.open && entries.length === 1 && entries[0].dataset.destination === "outside";
+        entries[0]?.click(); document.getElementById("destination-map-go").click(); __ooga.advance(.5,1/60); return { inside, shown, open, outside, exited: !I.active && !map.open, after: s.dataset.open, panels: document.querySelectorAll(".sheet").length }; })()`);
       rows.push(r);
-      record("shared panel: " + id + " preserves " + (pass ? "closed" : "open") + " state on entry and exit", r.inside === id && r.shown && r.open === String(!pass) && r.after === r.open && r.exited && r.panels === 1, JSON.stringify(r));
+      record("shared panel: " + id + " preserves " + (pass ? "closed" : "open") + " state on entry and exit", r.inside === id && r.shown && r.open === String(!pass) && r.after === r.open && r.outside && r.exited && r.panels === 1, JSON.stringify(r));
     }
   }
   await tourGo(b, "bifrost");
@@ -13409,26 +13506,217 @@ const hubBlockHeight = { name: "header clock and block height", why: "rule: the 
   const after = await b.evaluate(`(() => { const height = document.getElementById("world-block-height"), block = document.getElementById("world-block"); const shown = height.textContent; return { shown, label: block.getAttribute("aria-label"), bananas: !!document.getElementById("world-banana-count"), icon: !!block.querySelector(".banana-icon") }; })()`);
   record("header: a single-digit clock is centered from its displayed time and local zone, while the chain feed paints block height below it", before.height === "\u2014" && before.namedImage && !before.bananas && before.text === `9:00 AM ${before.zone}` && before.viewWidth === before.cells && Math.abs(before.cssWidth - before.cells / 6) < 1e-6 && after.shown === "900,123" && after.label === "Bitcoin block height 900123" && !after.bananas && !after.icon, JSON.stringify({ before, after }));
 } };
-const hubDestinationNames = { name: "destination accessible names", why: "regression: each visible destination label must occur in the button's accessible name", run: async (b) => {
+const hubDestinationNames = { name: "destination accessible names", why: "regression: destinations need explicit accessible actions without moving the player when the map opens", run: async (b) => {
   await b.send("Accessibility.enable");
-  await b.evaluate(`__ooga.pilot.release(true); __ooga.hud.setDetachedView("pile", true)`);
-  const expected = ["Lab", "Mirror", "HQ", "Basement", "Mempool", "LN Factory", "Ooga Arcade", "B.C.A.", "North gate", "₿IFRÖST", "TC Sphere", "Pile"], rows = [];
-  for (const label of expected) {
-    const row = await b.evaluate(`(() => {
-      const map = document.getElementById("destination-hud"); map.click();
-      return { label: document.getElementById("detached-destination-name").textContent, action: map.dataset.action,
-        detached: !__ooga.pilot.player && !__ooga.clankerPlay.active,
-        removed: !document.getElementById("destination-picker") && !document.getElementById("reset-camera-hud"),
-        noPopup: !map.hasAttribute("aria-haspopup") && !map.hasAttribute("aria-controls") };
-    })()`);
-    const tree = await b.send("Accessibility.getFullAXTree");
-    rows.push({ ...row, expected: label, named: tree.result.nodes.some(node => node.role?.value === "button"
-      // CSS paints the destination in uppercase; Chrome's labelled-by name
-      // contains that rendered text rather than the title-case DOM source.
-      && node.name?.value.includes(label.toUpperCase()) && /map/i.test(node.name.value)) });
+  await b.evaluate(`__ooga.pilot.endLook(); __ooga.hud.setDetachedView("pile", true); document.getElementById("destination-hud").click()`);
+  const tree = await b.send("Accessibility.getFullAXTree");
+  const names = ["Pile", "Lab", "Mirror", "HQ", "Basement", "Mempool", "LN Factory", "Ooga Arcade", "B.C.A.", "North gate", "₿IFRÖST", "TC Sphere", "Repo Island"];
+  const opened = await b.evaluate(`(() => {
+    const dialog = document.getElementById("destination-map"), map = document.getElementById("destination-hud");
+    return { open: dialog.open, count: dialog.querySelectorAll("[data-destination]").length,
+      stayed: document.getElementById("detached-destination-name").textContent === "Pile",
+      focus: document.activeElement.id === "destination-map-close", expanded: map.getAttribute("aria-expanded"),
+      current: dialog.querySelector('[aria-current="true"]')?.dataset.destination };
+  })()`);
+  const preview = await b.evaluate(`(() => {
+    const P = __ooga.pilot, actor = P.player, at = actor && { ...actor.root.position }, camera = { ...__ooga.camera.position };
+    const pin = document.querySelector('[data-map-destination="mempool"]'); pin.click();
+    const points = BL.scenes.hub.navigationMap().points, hq = points.find(p => p.name === "underground"), basement = points.find(p => p.name === "basement");
+    return { stayed: (!actor || Math.hypot(actor.root.position.x - at.x, actor.root.position.z - at.z) < 1e-6) && Math.hypot(__ooga.camera.position.x - camera.x, __ooga.camera.position.z - camera.z) < 1e-6,
+      open: document.getElementById("destination-map").open, selected: pin.getAttribute("aria-pressed") === "true",
+      confirmation: document.getElementById("destination-map-go").textContent === "View Mempool",
+      underground: document.getElementById("destination-map-detail").textContent.includes("beneath the lake"),
+      layers: hq.x === basement.x && hq.z === basement.z && hq.level !== basement.level,
+      pins: document.querySelectorAll("[data-map-destination]").length === 13 };
+  })()`);
+  record("destinations: a real-world map pin previews without moving camera or actor, requires confirmation, and distinguishes underground floors", Object.values(preview).every(Boolean), JSON.stringify(preview));
+  const usability = await b.evaluate(`(() => {
+    const D=BL.destinationMap,H=BL.scenes.hub,P=__ooga.pilot,dialog=document.getElementById("destination-map"),list=document.getElementById("destination-map-list");
+    const layers=document.getElementById("destination-map-layers"), pins=()=>[...document.querySelectorAll("[data-map-destination]")].filter(p=>!p.hidden).map(p=>p.dataset.mapDestination);
+    layers.querySelector('[data-map-layer="hq"]').click();const hq=pins().join()==="underground";
+    layers.querySelector('[data-map-layer="basement"]').click();const basement=pins().join()==="basement";
+    layers.querySelector('[data-map-layer="surface"]').click();const surface=!pins().includes("underground")&&!pins().includes("basement")&&pins().length===11;
+    layers.querySelector('[data-map-layer="all"]').click();
+    document.getElementById("destination-show-list").click();const listMode=dialog.dataset.display==="list"&&getComputedStyle(list).display!=="none";
+    document.getElementById("destination-show-map").click();const mapMode=dialog.dataset.display==="map";
+    P.possess(__ooga.cavemen.get("portlandhodl")); if(__ooga.crew.sleeping)__ooga.crew.wakePlayer(); P.endLook();
+    const p=P.player?.root.position, before=p&&JSON.stringify(p), point={};
+    const doors=!!p&&["pile","lab","underground","basement","factory","arcade","bca","mirror","mempool","timechain","bifrost","gate","repos"].every(n=>H.navigationWaypoint(n,point)&&[point.x,point.y,point.z].every(Number.isFinite));
+    document.querySelector('[data-map-destination="lab"]').click();document.getElementById("destination-map-guide").click();D.update();
+    const guided=!dialog.open&&!document.getElementById("destination-waypoint").hidden&&JSON.stringify(p)===before&&!P.looking;
+    document.getElementById("destination-waypoint-stop").click();const stopped=document.getElementById("destination-waypoint").hidden;
+    document.getElementById("destination-hud").click();document.querySelector('[data-map-destination="lab"]').click();document.getElementById("destination-map-go").click();D.update();
+    const returnShown=P.looking&&!document.getElementById("destination-return").hidden;
+    document.getElementById("destination-return").click();const returned=!P.looking&&JSON.stringify(p)===before;
+    document.getElementById("destination-hud").click();
+    const status=H.navigationStatus;H.navigationStatus=()=>"Finish carrying first.";document.querySelector('[data-map-destination="lab"]').click();
+    const refusal=document.getElementById("destination-map-go").disabled&&document.getElementById("destination-map-detail").textContent.includes("Finish carrying first.");H.navigationStatus=status;
+    return {hq,basement,surface,listMode,mapMode,doors,guided,stopped,returnShown,returned,refusal};
+  })()`);
+  record("destinations: floor filters, phone Map/List, entrance bearings, touch return and early refusals preserve the actor",Object.values(usability).every(Boolean),JSON.stringify(usability));
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+  const closed = await b.evaluate(`!document.getElementById("destination-map").open && document.activeElement.id === "destination-hud" && __ooga.scene === "hub"`);
+  const buttonClosed = await b.evaluate(`(() => { document.getElementById("destination-hud").click(); document.getElementById("destination-map-close").click(); return !document.getElementById("destination-map").open && document.activeElement.id === "destination-hud"; })()`);
+  record("destinations: Map lists all thirteen named actions with current location, opens without travelling and Escape restores its focus",
+    opened.open && opened.count === 13 && opened.stayed && opened.focus && opened.expanded === "true" && opened.current === "pile" && closed && buttonClosed
+      && names.every(name => tree.result.nodes.some(node => node.role?.value === "button" && node.name?.value.startsWith("Preview " + name))), JSON.stringify({ opened, closed, buttonClosed }));
+  await b.evaluate(`document.getElementById("destination-hud").click(); window.__mapElapsed = BL.scenes.hub.elapsed`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW" });
+  const held = await b.evaluate(`(__ooga.advance(.2, 1/60), { quiet: __ooga.pilot.controls.read().y === 0, moving: BL.scenes.hub.elapsed > __mapElapsed })`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+  await b.evaluate(`document.getElementById("scene").focus()`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW", autoRepeat: true });
+  const noReplay = await b.evaluate(`__ooga.pilot.controls.read().y === 0`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW" });
+  const resumed = await b.evaluate(`__ooga.pilot.controls.read().y !== 0`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
+  await b.evaluate(`delete window.__mapElapsed`);
+  record("destination controls: the world advances behind Map, held movement stays quiet after Escape and a fresh press resumes it", held.quiet && held.moving && noReplay && resumed, JSON.stringify({ held, noReplay, resumed }));
+  const gamepad = await b.evaluate(`(async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, "getGamepads"), P = BL.gamepad;
+    // Named as Chrome names an Xbox pad: the gamepad picks its controller family from the id.
+    const pad = { index:0, id:"Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 02fd)", connected:true, mapping:"standard", axes:[0,0,0,0], buttons:Array.from({length:16},()=>({pressed:false,value:0})) };
+    const event = type => { const e = new Event(type); Object.defineProperty(e,"gamepad",{value:pad}); window.dispatchEvent(e); };
+    let now = performance.now();
+    // The pad reaches the open Map through the menus layer (pad-focus.js), whose view of the dialog settles on a microtask.
+    const poll = () => { P.poll(); BL.destinationMap.update(now += 20); };
+    const tick = async () => { poll(); await new Promise(r => setTimeout(r)); };
+    const press = async i => { pad.buttons[i].pressed=true; await tick(); pad.buttons[i].pressed=false; await tick(); };
+    Object.defineProperty(navigator,"getGamepads",{configurable:true,value:()=>[pad]}); event("gamepadconnected");
+    try {
+      await press(9); const opened = document.getElementById("destination-map").open;
+      // pad-focus.js moves to the nearest control below the Close button: a destination, whichever column is nearer.
+      await press(13); const ordered = !!(document.activeElement.dataset.destination || document.activeElement.dataset.mapDestination || document.activeElement.dataset.mapLayer || document.activeElement.id === "destination-show-map");
+      pad.axes[0]=1; await press(1); const closed = !document.getElementById("destination-map").open;
+      await tick(); const quiet = P.state.lx === 0;
+      pad.axes[0]=0; await tick(); pad.axes[0]=1; await tick(); const resumed = P.state.lx > 0;
+      await press(9); pad.axes[2]=1; pad.buttons[2].pressed=true; await tick();
+      pad.connected=false; event("gamepaddisconnected"); await tick();
+      const disconnected = !P.state.connected && !P.state.held && !P.state.lx && !P.state.rx;
+      pad.connected=true; event("gamepadconnected"); await tick(); await press(1); await tick();
+      const reconnectHeld = !document.getElementById("destination-map").open && !P.state.lx && !P.state.rx && !(P.state.held & P.BUTTON.x);
+      await press(9); pad.connected=false; event("gamepaddisconnected"); await tick();
+      BL.destinationMap.close(); await tick();
+      pad.connected=true; event("gamepadconnected"); await tick();
+      const closeAbsent = !document.getElementById("destination-map").open && !P.state.lx && !P.state.rx;
+      // The neutral requirement also survives an absence after the dialog closes.
+      pad.connected=false; event("gamepaddisconnected"); await tick();
+      pad.connected=true; event("gamepadconnected"); await tick();
+      const reconnectClosed = !P.state.lx && !P.state.rx;
+      pad.axes[0]=0; await tick(); const bothRequired = !P.state.rx;
+      pad.axes[2]=0; pad.buttons[2].pressed=false; await tick();
+      // A press edge lasts one poll and the page's frames poll too, so read it right after our own poll.
+      pad.axes[0]=pad.axes[2]=1; pad.buttons[2].pressed=true; poll();
+      const neutralRelease = P.state.lx > 0 && P.state.rx > 0 && !!(P.state.pressed & P.BUTTON.x); await tick();
+      pad.connected=false; event("gamepaddisconnected"); await tick();
+      // Losing the controller publishes neutral input (gamepad.js disconnected()), not a release edge.
+      const ordinaryDisconnect = !P.state.connected && !P.state.lx && !P.state.rx && !P.state.held;
+      pad.buttons[2].pressed=false; pad.connected=true; event("gamepadconnected"); await tick();
+      const ordinaryReconnect = P.state.connected && P.state.lx > 0 && P.state.rx > 0;
+      // Map's capture listener runs first, but a pad's B or Menu over another menu layer is that layer's Escape:
+      // it closes the Controls panel and never opens Map.
+      pad.axes[0]=pad.axes[2]=0; pad.buttons[2].pressed=false; await tick(); await tick();
+      const help = document.getElementById("controls-help"), map = document.getElementById("destination-map");
+      const otherLayer = [];
+      for (const button of [1, 9]) {
+        document.getElementById("controls-help-button").click(); await tick();
+        const shown = help.open && BL.padFocus.open();
+        await press(button); await tick();
+        otherLayer.push({ button, shown, closed: !help.open, map: map.open });
+        if (help.open) document.getElementById("controls-help-close").click();
+        BL.destinationMap.close(); await tick();
+      }
+      const otherLayerEscape = otherLayer.every(r => r.shown && r.closed && !r.map);
+      return {opened,ordered,closed,quiet,resumed,disconnected,reconnectHeld,closeAbsent,reconnectClosed,bothRequired,neutralRelease,ordinaryDisconnect,ordinaryReconnect,otherLayerEscape,otherLayer:JSON.stringify(otherLayer)};
+    } finally {
+      BL.destinationMap.close(); event("gamepaddisconnected");
+      if(descriptor)Object.defineProperty(navigator,"getGamepads",descriptor);else delete navigator.getGamepads;
+      P.poll();
+    }
+  })()`);
+  record("destination gamepad: Menu opens Map, Down moves focus into the destinations, B closes, a held stick waits for neutral, and B or Menu over the Controls panel closes it without opening Map", Object.values(gamepad).every(Boolean), JSON.stringify(gamepad));
+  const keyboardReplay = [];
+  for (const [key, code] of [["Enter", "Enter"], [" ", "Space"]]) {
+    await b.evaluate(`document.getElementById("controls-help-button").click(); document.getElementById("controls-learn").focus()`);
+    const keyCode = key === "Enter" ? 13 : 32;
+    await b.send("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: keyCode, text: key === "Enter" ? "\r" : " " });
+    await b.send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: keyCode });
+    keyboardReplay.push(await b.evaluate(`(() => {
+      const replayed = !document.getElementById("controls-help").open && BL.destinationMap.coaching;
+      document.getElementById("explore-coach-skip").click(); return replayed;
+    })()`));
   }
-  record("destinations: each Map click advances through all twelve places and wraps to Pile, with matching accessible labels including LN Factory and TC Sphere and no picker or reset button",
-    rows.every(row => row.label === row.expected && row.action === "mode-preset" && row.detached && row.removed && row.noPopup && row.named), JSON.stringify(rows));
+  record("destination coaching: Enter and Space activate the Controls replay button", keyboardReplay.every(Boolean), JSON.stringify(keyboardReplay));
+  const coaching = await b.evaluate(`(() => {
+    const start = document.getElementById("explore-coach-start"), skip = document.getElementById("explore-coach-skip");
+    document.getElementById("controls-help-button").click(); document.getElementById("controls-learn").click();
+    const offered = BL.destinationMap.coaching;
+    skip.click(); const dismissed = !BL.destinationMap.coaching && document.getElementById("explore-coach").hidden;
+    // The guide's movement step is about the visitor's own Ooga, so one is driven first, as a visitor would have taken one.
+    const a = __ooga.cavemen.get("portlandhodl"); if (!(__ooga.pilot.player === a || __ooga.pilot.player?.npc === a)) __ooga.pilot.possess(a);
+    __ooga.pilot.navigate({ position: { x: -5, y: __ooga.island.surfaceAt(-5, 5), z: 5 }, yaw: 0, pitch: 0.4, dist: 10 }); __ooga.advance(.5,1/60);
+    document.getElementById("controls-help-button").click(); document.getElementById("controls-learn").click();
+    start.click(); document.getElementById("scene").focus();
+    __ooga.advance(.1,1/60);
+    window.dispatchEvent(new KeyboardEvent("keydown", {key:"w",code:"KeyW"})); __ooga.advance(1,1/60);
+    window.dispatchEvent(new KeyboardEvent("keyup", {key:"w",code:"KeyW"})); __ooga.advance(.1,1/60);
+    const moved = start.textContent === "Open Map";
+    start.click(); document.querySelector('[data-destination="arcade"]')?.click(); document.getElementById("destination-map-go").click();
+    const completed = start.textContent === "Done" && localStorage.getItem("ooga-explore-coach-v1") === "1";
+    __ooga.advance(.1,1/60);
+    const receiptClear = !document.getElementById("destination-map-receipt").hidden && document.getElementById("explore-coach").hidden;
+    start.click(); return {offered,dismissed,moved,completed,receiptClear};
+  })()`);
+  record("destination coaching: Controls replays a dismissible guide, actual movement advances it and a successful Arcade view completes it", Object.values(coaching).every(Boolean), JSON.stringify(coaching));
+  // Real touch activation, including the scrolling needed to reach a narrow phone's controls.
+  const viewport = await b.evaluate(`({width:innerWidth,height:innerHeight,deviceScaleFactor:devicePixelRatio,mobile:false})`), phoneRows=[], pinFailures=[];
+  const tapMapControl = async selector => {
+    const point=await b.evaluate(`(() => {const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:"center"});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),width:r.width,height:r.height};})()`);
+    await b.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[{x:point.x,y:point.y,id:1,radiusX:5,radiusY:5,force:1}]});
+    await b.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
+    return point.hit&&point.width>=44&&point.height>=44;
+  };
+  try {
+    for(const width of [320,390]){
+      await b.send("Emulation.setDeviceMetricsOverride",{width,height:width===320?640:844,deviceScaleFactor:1,mobile:true});
+      await b.evaluate(`BL.destinationMap.close();__ooga.pilot.endLook();document.getElementById("destination-hud").click()`);
+      // ResizeObserver lays out the newly shown atlas before its pins can be hit-tested.
+      await b.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+      const pinTargets=await b.evaluate(`[...document.querySelectorAll('[data-map-destination]')].map(e=>{e.scrollIntoView({block:"center"});const r=e.getBoundingClientRect(),atlas=document.getElementById("destination-atlas"),a=atlas.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {name:e.dataset.mapDestination,x:r.x-a.x,y:r.y-a.y,width:r.width,height:r.height,hit:e.contains(hit),coveredBy:hit?.closest('[data-map-destination]')?.dataset.mapDestination||hit?.id||hit?.tagName,atlas:[a.width,a.height,atlas.scrollLeft,atlas.scrollTop]};})`);
+      const badPins=pinTargets.filter(p=>p.width<44||p.height<44||!p.hit),pins=pinTargets.length===13&&!badPins.length;
+      if(badPins.length)pinFailures.push({width,pins:badPins,layout:pinTargets});
+      if(process.env.MAP_PIN_SHOTS){
+        mkdirSync(process.env.MAP_PIN_SHOTS,{recursive:true});await b.evaluate(`document.getElementById("destination-map").scrollTop=0`);
+        await b.screenshot(join(process.env.MAP_PIN_SHOTS,`map-${width}.png`));
+      }
+      let pinSelection=true;
+      for(const pin of pinTargets){
+        const tapped=await tapMapControl('[data-map-destination="'+pin.name+'"]');
+        const selected=await b.evaluate(`document.querySelector('[data-map-destination="${pin.name}"]').getAttribute("aria-pressed")==="true"&&document.querySelector('[data-destination="${pin.name}"]').getAttribute("aria-pressed")==="true"`);
+        pinSelection=tapped&&selected&&pinSelection;
+      }
+      let targets=await tapMapControl("#destination-show-list");
+      targets=await tapMapControl('[data-destination="basement"]')&&targets;
+      const listed=await b.evaluate(`document.getElementById("destination-map").dataset.display==="list"&&getComputedStyle(document.getElementById("destination-map-list")).display!=="none"&&document.getElementById("destination-map-go").textContent==="View Basement"`);
+      targets=await tapMapControl("#destination-show-map")&&targets;
+      const mapped=await b.evaluate(`document.getElementById("destination-map").dataset.display==="map"&&document.querySelector('[data-map-destination="basement"]').getAttribute("aria-pressed")==="true"`);
+      targets=await tapMapControl("#destination-map-guide")&&targets;
+      const guided=await b.evaluate(`(BL.destinationMap.update(),!document.getElementById("destination-map").open&&!document.getElementById("destination-waypoint").hidden&&!__ooga.pilot.looking)`);
+      targets=await tapMapControl("#destination-waypoint-stop")&&targets;
+      await b.evaluate(`document.getElementById("destination-hud").click()`);
+      targets=await tapMapControl("#destination-show-list")&&targets;
+      targets=await tapMapControl('[data-destination="repos"]')&&targets;
+      targets=await tapMapControl("#destination-map-go")&&targets;
+      const viewed=await b.evaluate(`(BL.destinationMap.update(),__ooga.pilot.looking&&!document.getElementById("destination-return").hidden)`);
+      targets=await tapMapControl("#destination-return")&&targets;
+      const returned=await b.evaluate(`!__ooga.pilot.looking&&document.documentElement.scrollWidth<=innerWidth`);
+      phoneRows.push({width,pins,pinSelection,targets,listed,mapped,guided,viewed,returned});
+    }
+  } finally {await b.send("Emulation.setDeviceMetricsOverride",viewport);await b.evaluate(`BL.destinationMap.close()`);}
+  record("destination phones: 320px and 390px touch targets switch Map/List without losing selection, start and stop guidance, and return from a Repo Island view",phoneRows.every(r=>Object.entries(r).every(([k,v])=>k==="width"||v===true)),JSON.stringify({phoneRows,pinFailures}));
 } };
 const hubWalking = { name: "hub walking", why: "regression: steering keys came out mirrored, and the removed hub Agent could still be summoned", run: async (b) => {
   // Seeded scenery places a rock at the old (-8, 8) direction-check start.
@@ -13813,6 +14101,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
   const r = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, H = B.hud, a = B.cavemen.get("portlandhodl");
     const map = document.getElementById("destination-hud"), label = document.getElementById("detached-destination-name");
+    const choose = name => { if (!document.getElementById("destination-map").open) map.click(); document.querySelector('[data-destination="' + name + '"]')?.click(); document.getElementById("destination-map-go").click(); };
     const rows = [], net = BL.net.state, account = net.me, backend = net.backend;
     const character = BL.characters.get(a.traits.name), xyz = p => [p.x, p.y, p.z];
     // The driven Ooga is its own body standing for the roster's (crew.js \`separateBodies\`): read that body.
@@ -13844,7 +14133,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
         const before = snapshot(), prepared = before.player && before.mode === mode.slice(mode.indexOf("-") + 1) && before.combat === mode.startsWith("combat");
         // Use the native keyboard/assistive activation path. A lone detail-one
         // click has no matching pointer press and can be a suppressed compatibility event.
-        map.click();
+        choose("lab");
         const after = snapshot();
         // The view goes to the place; the Ooga stays where it stands, still the visitor's.
         const looked = P.looking && label.textContent === "Lab" && after.player && error(after.actor, before.actor) < 1e-6;
@@ -13869,7 +14158,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
     P.endLook(); if (!drives()) P.possess(a); if (B.crew.sleeping) B.crew.wakePlayer();
     if (P.aiming) P.modeAction("mode-toggle"); B.advance(1, 1 / 60);
     // Frames go by while the look holds (camera input would end it, pilot.js \`look\`), and the label stays the place's.
-    H.setDetachedView("pile"); map.click(); B.advance(0.5, 1 / 60);
+    H.setDetachedView("pile"); choose("lab"); B.advance(0.5, 1 / 60);
     const looking = P.looking && label.textContent === "Lab" && label.classList.contains("show");
     const lab = B.mouths.find(mouth => mouth.id === "c11");
     P.orbit.yaw = P.orbit.tYaw = lab.ry;
@@ -13879,7 +14168,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
     const departed = { distance: Math.hypot(at().x - start.x, at().z - start.z), label: label.textContent, visible: label.classList.contains("show"), driven: drives() && !P.looking };
     return { rows, looking, departed };
   })()`);
-  record("hub map: signed in or out, a Map click looks at the next destination while the visitor keeps their Ooga where it stands, and a movement gives back its own camera, carry or combat and view in that frame and walks it",
+  record("hub map: signed in or out, a Map choice looks at the selected destination while the visitor keeps their Ooga where it stands, and a movement gives back its own camera, carry or combat and view in that frame and walks it",
     r.rows.length === 8 && r.rows.every(row => row.prepared && row.looked && row.moved > 1 && row.returned && row.walked > 0.3), JSON.stringify(r.rows));
   record("hub reset: 0 resets framing without relocating the Ooga or changing its mode or view family", r.rows.every(row => row.resetKept && row.resetChanged), JSON.stringify(r.rows));
   record("hub map: looking keeps the destination's label, and walking off shows the Ooga's own area, HUB", r.looking && r.departed.driven && r.departed.distance > 1.5 && r.departed.label === "HUB" && r.departed.visible,
@@ -20658,7 +20947,7 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
     await untilPage(b, 'B.scene === "hub" && !B.transitioning', 20000);
     resumed = await b.evaluate(`(() => {
       const S = __entryHold, map = document.getElementById("destination-hud"), pad = BL.gamepad.state, axes = S.pilot.controls.read();
-      map.click();
+      map.click(); document.querySelector('[data-destination="lab"]')?.click();
       return { scene: __ooga.scene, live: !document.getElementById("equipment-hud").inert, actions: S.actions,
         padNoReplay: S.pad.buttons[0].pressed && pad.connected && !(pad.held || pad.pressed || pad.released),
         padQuiet: axes.x === 0 && axes.y === 0 && axes.up === 0 && axes.yaw === 0 && axes.pitch === 0 };
@@ -20735,7 +21024,7 @@ const hubBootHold = { name: "hub boot hold", why: "regression: sliced cold boot 
   await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
   await b.evaluate(`__bootHold.released=true`);
   const resumed = await untilPage(b, 'B.scene==="hub"', 20000);
-  const live = await b.evaluate(`(()=>{const map=document.getElementById("destination-hud");map.click();return {live:!document.getElementById("equipment-hud").inert,actions:__bootHold.actions};})()`);
+  const live = await b.evaluate(`(()=>{const map=document.getElementById("destination-hud");map.click();document.querySelector('[data-destination="lab"]')?.click();return {live:!document.getElementById("equipment-hud").inert,actions:__bootHold.actions};})()`);
   record("hub boot hold: cold construction refuses HUD, wheel, canvas and Space/W input, then restores a live island", paused && held.scene === null && held.actions === 0 && held.inert && held.quiet && held.unchanged && resumed && live.live && live.actions === 1, JSON.stringify({ held, resumed, live, before }));
 } };
 const hubBootFailure = { name: "hub boot failure", why: "regression: a sliced cold-boot exception left a spinning curtain and live partial controls without recovery", run: async (b) => {
@@ -23450,6 +23739,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
         BL.scenes.hub.debug.setGameMode(false);
       }
       const mapRows = [], mapCrowds = [], map = document.getElementById("destination-hud"), label = document.getElementById("detached-destination-name");
+      const choose = name => { if (!document.getElementById("destination-map").open) map.click(); document.querySelector('[data-destination="' + name + '"]')?.click(); document.getElementById("destination-map-go").click(); };
       // Camera-only updates above do not finish the preceding charged smash.
       // Travel is tested from an idle body, after the world advances its recovery.
       P.cancelInput(); B.advance(2, 1 / 60);
@@ -23474,7 +23764,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
             if (view !== "shoulder") { P.zoom(view === "first-person" ? 0.5 : 2, {}); P.update(2); }
           }
           B.hud.setDetachedView(mapRows.length % 2 ? "pile" : "lab");
-          const before = mapState(); map.click();
+          const before = mapState(); choose(mapRows.length % 2 ? "lab" : "mirror");
           const after = mapState(), delta = after.actor.map((n, i) => n - before.actor[i]);
           const arrived = label.textContent === (mapRows.length % 2 ? "Lab" : "Mirror") && after.controlled && after.view === view && after.combat === combat
             && Math.hypot(...delta) > 1 && error(after.eye.map((n, i) => n - before.eye[i]), delta) < 1e-5
@@ -23489,7 +23779,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
             delta, resetKept, resetChanged: error(keyboard.eye.concat(keyboard.target), keyboardBefore.eye.concat(keyboardBefore.target)) > 1e-5 });
         }
         // Start away from the Lab so a successful arrival has visible travel.
-        B.hud.setDetachedView("lab"); map.click();
+        B.hud.setDetachedView("lab"); choose("mirror");
         // Fill the arrivals the real Map chooses, without copying its search
         // geometry. Real crew bodies eventually occupy every available spot.
         for (const signedIn of [false, true]) {
@@ -23497,13 +23787,13 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
           const origin = { ...g().root.position };
           let blockers = 0, refused = false, unchanged = false, restored = true;
           for (const [cave] of mapTraffic) {
-            B.hud.setDetachedView("pile"); const before = mapState(); map.click();
+            B.hud.setDetachedView("pile"); const before = mapState(); choose("lab");
             const after = mapState(), moved = error(after.actor, before.actor) > 1;
             if (!moved) {
               refused = document.getElementById("toast").textContent === "That arrival is blocked. Choose another destination.";
               unchanged = after.controlled && after.view === before.view && after.combat === before.combat
                 && error(after.actor.concat(after.eye, after.target), before.actor.concat(before.eye, before.target)) < 1e-6
-                && label.textContent === "Lab";
+                && document.getElementById("destination-map").open;
               break;
             }
             Object.assign(cave.root.position, { x: g().root.position.x, y: g().root.position.y + cave.baseY, z: g().root.position.z });
@@ -23511,9 +23801,9 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
             restored = P.travel(origin) && restored;
           }
           for (const [cave, , position] of mapTraffic) { cave.root.visible = false; Object.assign(cave.root.position, position); }
-          B.hud.setDetachedView("pile"); const before = mapState(); map.click(); const after = mapState();
+          B.hud.setDetachedView("pile"); const before = mapState(); choose("lab"); const after = mapState();
           const reopened = after.controlled && after.view === before.view && after.combat === before.combat
-            && error(after.actor, before.actor) > 1 && label.textContent === "Lab";
+            && error(after.actor, before.actor) > 1 && label.textContent === "Lab" && !document.getElementById("destination-map").open;
           mapCrowds.push({ signedIn, blockers, refused, unchanged, restored, reopened });
           P.travel(origin);
         }
@@ -23770,7 +24060,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
     state.gestures.every(row => row.nativeTab && row.tabs.rows.length === 2
       && row.tabs.rows.every((r, i) => r.view === (i ? "birds-eye" : "shoulder") && Object.entries(r).every(([key, value]) => key === "kind" || key === "view" || value === true))
       && row.tabs.ui.length === 4 && row.tabs.ui.every(r => r.native && r.stopped)), JSON.stringify(state.gestures.map(({ signedIn, tabs }) => ({ signedIn, tabs }))));
-  record("gorilla map: signed in or out, one Map click travels to the next destination while retaining the gorilla, mode and view family and translating the camera", state.mapRows.length === 10
+  record("gorilla map: signed in or out, a chosen Map destination travels directly while retaining the gorilla, mode and view family and translating the camera", state.mapRows.length === 10
     && state.mapRows.every(row => row.prepared && row.arrived)
     && state.mapCrowds.length === 2 && state.mapCrowds.every(row => row.blockers > 0 && row.refused && row.unchanged && row.restored && row.reopened),
     JSON.stringify({ arrivals: state.mapRows, crowds: state.mapCrowds }));
@@ -25524,7 +25814,7 @@ scene("dsb", { label: "dsb shared player", url: hubPage(dist), steps: [{ name: "
   record("dsb shared player: DSB Land leaves the Ooga with no weapon in hand, on its body or as a button", await b.evaluate(unarmedInPage("__ooga.pilot.player")));
   const move = await b.evaluate(`(() => { const c = __ooga.pilot.player, z = c.root.position.z; window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); __ooga.advance(0.3); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); return Math.abs(c.root.position.z - z); })()`);
   record("dsb shared player: shared walking moves the actor", move > 0.2, String(move));
-  await b.evaluate(`document.getElementById("destination-hud").click(); __ooga.advance(0.4)`);
+  await b.evaluate(`document.getElementById("destination-hud").click(); document.querySelector('#destination-map [data-destination="overview"]').click(); document.getElementById("destination-map-go").click(); __ooga.advance(0.4)`);
   record("dsb shared player: the island view selector looks at the overview, keeping its CHORA label, while the visitor keeps their Ooga", await b.evaluate('__ooga.pilot.player === __ooga.dsb.avatar && __ooga.pilot.looking && __ooga.camera.position.y > 5 && document.getElementById("detached-destination-name").textContent === "CHORA"'));
   const resumed = await b.evaluate(`(() => {
     const B = __ooga, a = B.dsb.avatar, p = { ...a.root.position };
@@ -31781,6 +32071,10 @@ const unitChecks = async () => {
   record("gorilla re-sleep regression: waking remembers its former bed; the same bed keeps its return leg and a changed bed chooses the nearest waypoint on its own path", sleepRoutes.every(row => row.ok), JSON.stringify(sleepRoutes));
   const sleepLandingPlayers = sleepLandingPlayersProof();
   record("gorilla sleep landing: the real hub predicate protects local and remote players while allowing vertically clear beds", Object.values(sleepLandingPlayers).every(Boolean), JSON.stringify(sleepLandingPlayers));
+  const mapPadEscape = destinationMapPadEscapeProof();
+  record("destination map pad regression: a pad's B or Menu over another dialog or card is that layer's Escape and never opens Map; on foot it opens Map and inside Map it closes it; a floating board does not block Map and a refused Map never swallows Menu's Escape", Object.values(mapPadEscape).every(Boolean), JSON.stringify(mapPadEscape));
+  const mapCoachingHint = destinationMapCoachingHintProof();
+  record("destination map coaching hint: a floating board does not hide the island coaching hint, while a non-floating dialog still does", Object.values(mapCoachingHint).every(Boolean), JSON.stringify(mapCoachingHint));
   const sleepBeamPool = sleepBeamPoolProof();
   record("gorilla sleep beam: fixed pool, slot isolation, live reduced motion and scene cleanup", Object.values(sleepBeamPool).every(Boolean), JSON.stringify(sleepBeamPool));
   const sleepStalls = gorillaSleepStallProof();
@@ -33561,7 +33855,16 @@ scene("dsb",{label:"wallets",query:"&view=wallets-door&weather=clear&time=1200",
   const taken=await b.evaluate('(()=>{const D=__ooga.dsb,t=document.getElementById("toast");return {open:D.walletsMenu.isOpen,list:D.wallets.list().map(d=>d.look+":"+d.state).join(),line:D.walletLine,shown:!document.querySelector(".wallet-carry").hidden,toast:t&&!t.hidden?t.textContent:null};})()');
   record("Wallets browser: Space at the machine offers all six wallets by picture and name alone; Take hands over the Rektdger with its countdown line and, on a desktop, Y and the ground",dialog.open&&dialog.engaged&&dialog.names==="ClownCard,Rektdger,BrickBox02,Passpoor,Jaded,SeedSnitcher"&&dialog.said==="clowncard rektdger brickbox02 passpoor jaded seedsnitcher take"&&!taken.open&&taken.list==="rektdger:carried"&&taken.line==="Carrying Rektdger · 21 s · Click the ground to place ·"&&taken.shown&&taken.toast==="Press Y to throw · Click the ground to place",JSON.stringify({dialog,taken}));
   await b.evaluate('__ooga.pilot.navigate(__ooga.dsb.interiors.active.room.reviews["wallets-wide"])');await walletsStep(b);
-  const spot=await b.evaluate(WALLETS_SPOT);await walletsTap(b,spot.x,spot.y,spot.z);const walked=await walletsUntil(b,"!__ooga.dsb.walletWalk");
+  const spot=await b.evaluate(WALLETS_SPOT);await walletsTap(b,spot.x,spot.y,spot.z);
+  const mapHold=await b.evaluate(`(()=>{
+    const B=__ooga,D=B.dsb,walking=!!D.walletWalk,p={...D.avatar.root.position};
+    document.getElementById("destination-hud").click();const opened=document.getElementById("destination-map").open;
+    B.advance(.3,1/60);const held=!D.walletWalk&&Math.hypot(D.avatar.root.position.x-p.x,D.avatar.root.position.z-p.z)<1e-6&&D.wallets.list()[0].state==="carried";
+    document.getElementById("destination-map-close").click();B.advance(.3,1/60);
+    return {walking,opened,held,closed:!document.getElementById("destination-map").open,stopped:!D.walletWalk&&Math.hypot(D.avatar.root.position.x-p.x,D.avatar.root.position.z-p.z)<1e-6&&D.wallets.list()[0].state==="carried"};
+  })()`);
+  record("Wallets browser: Map cancels a click-to-place walk without moving or placing the device behind the dialog, and closing does not resume it",Object.values(mapHold).every(Boolean),JSON.stringify(mapHold));
+  await walletsTap(b,spot.x,spot.y,spot.z);const walked=await walletsUntil(b,"!__ooga.dsb.walletWalk");
   const placed=await b.evaluate(`(()=>{const D=__ooga.dsb,d=D.wallets.list()[0];return {state:d.state,off:Math.hypot(d.x-(${spot.x}),d.z-(${spot.z})),y:d.y,line:D.walletLine};})()`);
   record("Wallets browser: a real click on the store floor walks the Ooga there and sets the device down exactly where clicked",walked&&placed.state==="dropped"&&placed.off<.06&&Math.abs(placed.y)<1e-6&&placed.line===null,JSON.stringify(placed));
   await walletsStep(b,200);await b.evaluate('__ooga.pilot.navigate(__ooga.dsb.interiors.active.room.reviews["wallets-machine"])');await walletsStep(b);await b.key(" ");await walletsStep(b);

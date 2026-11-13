@@ -1998,18 +1998,19 @@
     });
     hud.setDestinations(Object.keys(VIEW_NAMES), VIEW_NAMES);
     hud.setAreaLabel("Ooga Arcade");
-    hud.el.modeDestination.title = "Ooga Arcade · cycle stations";
-    hud.el.modeDestinationLabel.textContent = "Ooga Arcade views. Press to cycle stations";
+    hud.el.modeDestination.title = "Ooga Arcade · choose a viewpoint";
+    hud.el.modeDestinationLabel.textContent = "Ooga Arcade views. Open Map to choose a viewpoint";
     const presetView = (name) => {
-      if (leaving || !VIEW_NAMES[name]) return;
+      if (leaving || !VIEW_NAMES[name]) return false;
       pilot.goPreset(name);
       hud.setDetachedView(name, true);
+      return true;
     };
     hud.onPreset(presetView);
     hud.onAction((action, value) => {
       if (action === "leave") leaveCave();
       else if (action === "reset-view") pilot.resetCamera();
-      else if (action === "mode-preset") presetView(value);
+      else if (action === "mode-preset") return presetView(value);
       else if (action === "arcade-mute") toggleMute();
       else if (action === "ghost-exit" && ghosts) { ghosts.quit(); sendToHallway(); }
       else if (action.startsWith("mode-")) pilot.modeAction(action);

@@ -10911,7 +10911,7 @@
     heldDebug = null;
     hud.renew(ctx.signal);
     hud.restoreBoards(jumbotronBoard);
-    hud.setDestinations(["pile", "lab", "mirror", "underground", "basement", "mempool", "factory", "arcade", "bca", "gate", "bifrost", "timechain"]);
+    hud.setDestinations(["pile", "lab", "mirror", "underground", "basement", "mempool", "factory", "arcade", "bca", "gate", "bifrost", "timechain", "repos"]);
     input.resume(); pilot.resume(); clankerPlay.resume(); chalkboard.resume();
     islandGuide.resume();
     if (timechainIsland.gate.resume()) hud.toast(`Room ${timechainIsland.gate.preselected} is chosen at the keypad · walk up to it and press Enter to go in`);
@@ -11926,7 +11926,7 @@
     now = 0;
     hud.onPreset(name => { if (!cloudHopper?.active && !factoryDeparting && !bifrostDeparting && !islandGuide.holding) navigate(name, false, true, true); });
     hud.setDetachedView("pile");
-    hud.setDestinations(["pile", "lab", "mirror", "underground", "basement", "mempool", "factory", "arcade", "bca", "gate", "bifrost", "timechain"]);
+    hud.setDestinations(["pile", "lab", "mirror", "underground", "basement", "mempool", "factory", "arcade", "bca", "gate", "bifrost", "timechain", "repos"]);
     hud.onAction((action, value) => {
       if (cloudHopper?.active) {
         if (cloudHopper.held) return false;
@@ -12146,7 +12146,7 @@
     islandGuide = BL.hubGuide.create({
       parent: root, input, fx, camera, pilot, visitor: () => crew.player, world, hud, coarse: COARSE,
       landing: !ctx.place && !preloadedView && !returningCharacter && ctx.from !== "bifrost",
-      quality: () => renderer.quality, busy: () => chalkboard.openNow || clankerPlay.active || factoryDeparting || bifrostDeparting,
+      quality: () => renderer.quality, busy: () => BL.destinationMap?.coaching || chalkboard.openNow || clankerPlay.active || factoryDeparting || bifrostDeparting,
     });
     yield* pause(slice);
     cloudRememberNodes(cloudNodeStart);
@@ -12532,6 +12532,79 @@
     }
     if (!gorilla) help.title = "Island · " + help.title; return help;
   };
+  // The map reads this visit's real terrain and door coordinates; it never builds another island.
+  hubScene.navigationMap = () => {
+    if (!island || !mempoolIsland) return null;
+    const M = mempoolIsland, T = timechainIsland, B = bifrostIsle, R = repoIsland, source = island.cutawaySource;
+    const bounds = { minX: source.origin.x, minZ: source.origin.z, maxX: source.origin.x + source.sx * source.unit, maxZ: source.origin.z + source.sz * source.unit };
+    const include = (x, z, r) => { bounds.minX = Math.min(bounds.minX, x - r); bounds.maxX = Math.max(bounds.maxX, x + r); bounds.minZ = Math.min(bounds.minZ, z - r); bounds.maxZ = Math.max(bounds.maxZ, z + r); };
+    include(M.place.x, M.place.z, poolModels.SITE.reach);
+    if (T) include(T.place.x, T.place.z, BL.timechainModels.SITE.radius);
+    if (B) include(B.site.cloud.x, B.site.cloud.z, B.site.cloud.r);
+    if (R) include(R.spot.x, R.spot.z, BL.repoIslandModels.ISLE.R);
+    const points = [{ name: "pile", x: 0, z: 0 }, { name: "gate", x: island.gate.x, z: island.gate.z },
+      { name: "underground", layer: "hq", x: 0, z: 6, level: "HQ · below ground" }, { name: "basement", layer: "basement", x: 0, z: 6, level: "Basement · lower floor" },
+      { name: "mempool", x: M.worldX(0, 7.4), z: M.worldZ(0, 7.4), level: "Chamber · beneath the lake" }];
+    for (const [id, name] of Object.entries(CAVE_ZONES)) {
+      const mouth = island.mouths.find(m => m.id === id);
+      if (mouth) points.push({ name, x: mouth.x, z: mouth.z, level: "Cave entrance" });
+    }
+    if (T) points.push({ name: "timechain", x: T.worldX(0.4, 12.7), z: T.worldZ(0.4, 12.7), level: "Doorway · choose a room at the keypad" });
+    if (B) points.push({ name: "bifrost", x: B.site.portal.x, z: B.site.portal.z });
+    if (R) points.push({ name: "repos", x: R.arrival.x, z: R.arrival.z, level: "Open-source Bitcoin projects" });
+    const repoBridge = (x, z) => !!R && Math.abs(x - R.spot.x) <= BL.repoIslandModels.BRIDGE.width / 2 && z >= R.bridgeEnds.from.z && z <= R.bridgeEnds.to.z;
+    const poolBridge = (x, z) => {
+      const across = M.localX(x, z), along = M.localZ(x, z) - M.place.bridgeLocalZ, S = poolModels.SITE;
+      return Math.abs(across) <= S.width / 2 && along >= S.deckStart && along <= S.span ? along : -Infinity;
+    };
+    return { title: "The Island of Caves", bounds, points, origin: { x: pilot.orbit.target.x, z: pilot.orbit.target.z },
+      surfaceAt: (x, z) => {
+        if (!island || !mempoolIsland) return NaN;
+        if (R && (Math.hypot(x - R.spot.x, z - R.spot.z) <= BL.repoIslandModels.ISLE.R || repoBridge(x, z))) return R.spot.y;
+        const land = rageLandAt(x, z);
+        if (land) return rageExteriorFloor(land, x, z);
+        const along = poolBridge(x, z);
+        if (Number.isFinite(along)) return M.place.y + poolModels.deckY(along / poolModels.SITE.span);
+        if (T && onSphere(x, z)) return T.place.y + BL.timechainModels.SITE.bridgeFloor;
+        return B ? B.site.groundAt(x, z) : NaN;
+      },
+      isPath: (x, z) => !!island && (island.onLand(x, z) && island.isPath(x, z) || repoBridge(x, z) || Number.isFinite(poolBridge(x, z)) || !!T && onSphere(x, z) && Math.hypot(x - T.place.x, z - T.place.z) >= BL.timechainModels.SITE.radius)
+    };
+  };
+  hubScene.navigationLooking = () => !clankerPlay?.active && !!pilot?.looking;
+  hubScene.navigationReturn = () => pilot?.endLook();
+  hubScene.navigationStatus = name => {
+    if (!hubScene.navigationReady) return "Finish the current interaction first.";
+    return clankerPlay?.active ? clankerPlay.travelRefusal() : "";
+  };
+  const MAP_ZONES = { pile: "outside", gate: "outside", lab: "lab", mirror: "mirror", factory: "factory.hall", arcade: "arcade.hall", bca: "bca", underground: "hq", basement: "hq", mempool: "rainforest", bifrost: "bifrost.chamber", timechain: "sphere", repos: "repos" };
+  // Bearings lead to authored doors and bridge ends. They are not a collision-free walking path or auto-walk.
+  hubScene.navigationWaypoint = (name, out) => {
+    const actor = clankerPlay?.active ? clankerPlay.player : pilot?.player;
+    if (!actor || !island || !Object.hasOwn(MAP_ZONES, name)) return false;
+    const p = actor.root.position, from = zoneOf(actor, !!clankerPlay?.active), to = MAP_ZONES[name], step = BL.zoneMap.next(from, to);
+    out.note = "Entrance reached · use the on-screen action";
+    if (step && doorToward(from, step, out, p.x, p.z)) return true;
+    if (to === "hq") {
+      if (BL.zoneMap.routeFrom(from) === "hq") { out.x = p.x; out.y = p.y; out.z = p.z; out.note = name === "basement" ? "Inside HQ · follow the stairs down to the basement" : "You are inside HQ"; return true; }
+      return mouthDoor("hq", out, p.x, p.z);
+    }
+    if (["lab", "mirror", "bca"].includes(name)) return mouthDoor(to, out, p.x, p.z);
+    if (name === "mempool" && mempoolIsland) {
+      const M = mempoolIsland, R = M.layout.RAMP, x = Math.sin(R.start) * R.r, z = Math.cos(R.start) * R.r;
+      out.x = M.worldX(x, z); out.y = M.place.y + DOOR_Y; out.z = M.worldZ(x, z); out.note = "Tunnel entrance · follow the descent beneath the lake"; return true;
+    }
+    if (name === "repos") return bridgeDoor("repos", true, out);
+    if (name === "timechain") return bridgeDoor("sphere", true, out);
+    if (name === "bifrost") return doorToward("bifrost", "bifrost.chamber", out, p.x, p.z);
+    if (name === "factory" || name === "arcade") return doorToward(name, to, out, p.x, p.z);
+    if (name === "gate") { out.x = island.gate.x; out.y = island.surfaceAt(out.x, island.gate.z) + DOOR_Y; out.z = island.gate.z; return true; }
+    if (name === "pile") { out.x = 0; out.y = ALTAR_HEIGHT + DOOR_Y; out.z = Math.max(5, altar.platformRadius + 1.3); out.note = "You reached the pile"; return true; }
+    return false;
+  };
+  hubScene.beginCoaching = () => islandGuide.escape();
+  Object.defineProperty(hubScene, "coachingReady", { get: () => islandGuide?.state.phase === "work" && !gameMode });
+  Object.defineProperty(hubScene, "navigationReady", { get: () => !!islandGuide && !islandGuide.holding && !cloudHopper?.active && !factoryDeparting && !bifrostDeparting && !timechainIsland?.gate.busy });
   hubScene.controlsHelpHold = on => { clankerPlay?.cancelInput(); if (on) clankerPlay?.freeCursor(); cloudHopper?.controlsHelpHold(on); pilot.controls.reset(); pilot.setMenuOpen(on, false); };
   BL.scenes.hub = hubScene;
 })();

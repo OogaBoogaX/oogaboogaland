@@ -156,9 +156,9 @@
       if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) { clear(); return; }
       if (e.key !== "Tab" && e.key !== "Enter" && e.key !== " ") e.preventDefault();
       if (e.key === "Tab") { clear(); return; }
-      // Space on the close button remains native keyboard activation. Other
+      // Dialog buttons keep native keyboard activation. Other
       // practice keys still light while that initial focus stays accessible.
-      if ((e.key === " " || e.key === "Enter") && e.target !== closeButton) e.preventDefault();
+      if ((e.key === " " || e.key === "Enter") && !e.target?.closest?.("button")) e.preventDefault();
       setMode("keyboard");
       const key = e.key.toLowerCase();
       if (held.size < 64) held.set(physical, key === "shift" ? e.code === "ShiftRight" ? "shiftright" : "shiftleft" : key);
@@ -169,7 +169,7 @@
       down.delete(physical);
       if (swallowed.delete(physical) || dialog.open) {
         e.stopImmediatePropagation();
-        if (!dialog.open || e.target !== closeButton) e.preventDefault();
+        if (!dialog.open || !e.target?.closest?.("button")) e.preventDefault();
       }
       held.delete(physical); paint();
     };

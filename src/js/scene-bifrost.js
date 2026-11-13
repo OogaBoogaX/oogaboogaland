@@ -677,18 +677,19 @@
     });
     hud.setDestinations(Object.keys(VIEW_NAMES), VIEW_NAMES);
     hud.setAreaLabel("₿IFRÖST");
-    hud.el.modeDestination.title = "₿IFRÖST · cycle stations";
-    hud.el.modeDestinationLabel.textContent = "₿IFRÖST views. Press to cycle stations";
+    hud.el.modeDestination.title = "₿IFRÖST · choose a viewpoint";
+    hud.el.modeDestinationLabel.textContent = "₿IFRÖST views. Open Map to choose a viewpoint";
     const presetView = (name) => {
-      if (leaving || !VIEW_NAMES[name]) return;
+      if (leaving || !VIEW_NAMES[name]) return false;
       pilot.goPreset(name);
       hud.setDetachedView(name, true);
+      return true;
     };
     hud.onPreset(presetView);
     hud.onAction((action, value) => {
       if (action === "leave") leaveChamber();
       else if (action === "reset-view") pilot.resetCamera();
-      else if (action === "mode-preset") presetView(value);
+      else if (action === "mode-preset") return presetView(value);
       else if (!leaving && action.startsWith("mode-")) pilot.modeAction(action);
     });
     fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 7, z: 0 } });

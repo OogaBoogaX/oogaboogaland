@@ -12455,6 +12455,105 @@ body[data-cabinet-phase="menu"] .cloud-hopper-intro .cloud-hopper-scores-title {
 /* Arcade player controls remain reachable above game cards, including Cloud Hopper. */
 body.arcade-game .cloud-hopper-panel { z-index: 40; }
 
+/* A destination is a named action using the scene's existing travel rules. */
+.destination-map { width: min(1120px, calc(100vw - 24px)); max-height: calc(100dvh - 24px - var(--safe-top) - var(--safe-bottom)); overflow: auto; overscroll-behavior: contain; padding: 18px; border: 1px solid #9e8959; border-radius: 18px; background: #192a29; color: #f2eddd; box-shadow: 0 24px 90px #000b; }
+.destination-map::backdrop { background: #061314c9; }
+.destination-map .panel-head { position: sticky; top: -18px; z-index: 4; margin: -1px 0 0; padding: 10px 0; background: #192a29; }
+.destination-map .panel-head h2 { color: #f2eddd; font-size: clamp(18px, 2.4vw, 26px); }
+.destination-map-mode { color: #c3d6ca; font-size: 12px; line-height: 1.5; margin: 0 0 14px; letter-spacing: .06em; }
+.destination-map-layout { display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 18px; align-items: start; }
+.destination-map-survey { min-width: 0; }
+.destination-atlas { width: min(100%, calc((100dvh - 275px) * 1.2)); margin-inline: auto; position: relative; aspect-ratio: 6 / 5; overflow: hidden; border: 1px solid #52706b; border-radius: 12px; background: #112d35; isolation: isolate; }
+.destination-atlas[hidden] { display: none; }
+.destination-atlas canvas, .destination-atlas svg, #destination-atlas-pins { position: absolute; inset: 0; width: 100%; height: 100%; }
+.destination-atlas svg { pointer-events: none; }
+.destination-atlas-marker { position: absolute; transform: translate(-50%, -50%); width: 44px; height: 44px; min-width: 44px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; color: #fff7de; font-size: 14px; line-height: 1; cursor: pointer; }
+.destination-atlas-marker[hidden] { display: none; }
+.destination-atlas-marker svg { position: static; width: 28px; height: 28px; padding: 4px; background: #203e3b; border: 1px solid #dcceaa; border-radius: 50%; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.destination-atlas-marker small { position: absolute; right: 0; bottom: 0; font-size: 10px; background: #203e3b; color: #fff7de; padding: 1px 3px; border-radius: 4px; }
+.destination-pin-label { display: none; position: absolute; top: 43px; max-width: 100px; width: max-content; padding: 3px 5px; font-size: 11px; line-height: 1.2; background: #102e39; border-radius: 4px; color: #fff7de; pointer-events: none; }
+.destination-atlas-marker:is(:hover,:focus-visible,[aria-pressed="true"]) .destination-pin-label { display: block; }
+.destination-atlas-marker:hover, .destination-atlas-marker[aria-pressed="true"] { background: #efd17e; color: #182d2a; border-color: #fff2c8; z-index: 1; }
+.destination-atlas-marker:is(:hover,[aria-pressed="true"]) svg { background: #efd17e; border-color: #182d2a; }
+.atlas-callout { stroke: #f1e7c8; stroke-width: 1.5; }
+.atlas-anchor { fill: #fff2c8; }
+.atlas-route { stroke: #f5d47a; stroke-width: 2.5; stroke-dasharray: 6 7; }
+.atlas-selected { fill: #e8cc5622; stroke: #f6d67d; stroke-width: 3; }
+.atlas-origin { fill: #102e39; stroke: #9de9eb; stroke-width: 3; }
+.atlas-origin-core { fill: #9de9eb; }
+.destination-map-key { display: flex; flex-wrap: wrap; gap: 5px 14px; margin: 10px 0 6px; color: #d3ddcf; font-size: 11px; line-height: 1.5; }
+.destination-map-key span:first-child { color: #9de9eb; }.destination-map-key span:nth-child(2) { color: #f6d67d; }
+.destination-map-mapnote { margin: 0; font-size: 11px; line-height: 1.5; color: #b6c9be; }
+#destination-map-list { display: grid; gap: 8px; max-height: 590px; overflow-y: auto; scrollbar-width: thin; padding: 3px; }
+#destination-map-list section { min-width: 0; }
+#destination-map-list h3 { color: #d9c28c; margin: 2px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .12em; }
+#destination-map-list button { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; width: 100%; min-height: 52px; padding: 9px 12px; margin-bottom: 5px; text-align: left; white-space: normal; color: #f2eddd; background: #233a35; border: 1px solid #496158; border-radius: 8px; }
+#destination-map-list button:hover, #destination-map-list button:focus-visible { background: #345145; }
+#destination-map-list button strong { font-size: 13px; }
+#destination-map-list button span { color: #c2d0bd; font-size: 11px; line-height: 1.4; font-weight: normal; }
+#destination-map-list button[aria-current] { border-color: #85aca0; }
+#destination-map-list button[aria-pressed="true"] { background: #435342; border-color: #f4d687; box-shadow: inset 3px 0 #f4d687; }
+.destination-map-preview { position: sticky; bottom: -18px; z-index: 3; display: flex; align-items: center; gap: 18px; justify-content: space-between; margin: 16px -1px 0; padding: 15px 0 12px; border-top: 1px solid #658072; background: #192a29; }
+.destination-map-tools, #destination-map-layers, .destination-map-tabs, .destination-map-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.destination-map-tools { justify-content: space-between; margin-bottom: 10px; }
+.destination-map-tools button, #destination-map-guide { min-height: 44px; min-width: 44px; margin: 0; padding: 8px 12px; color: #f2eddd; background: #233a35; border: 1px solid #658072; border-radius: 8px; }
+.destination-map-tools button[aria-pressed="true"] { outline: 2px solid #f6d67d; outline-offset: -2px; }
+.destination-map-tabs { display: none; }
+#destination-map-layers[hidden], #destination-map-list button[hidden], #destination-map-list section[hidden] { display: none; }
+#destination-return, #destination-waypoint { position: fixed; z-index: 46; left: 50%; transform: translateX(-50%); max-width: calc(100vw - 24px); padding: 8px 12px; border: 1px solid #d9c28c; border-radius: 10px; background: #192a29f5; color: #fff1cc; }
+#destination-return { top: calc(132px + var(--safe-top)); min-height: 44px; }
+#destination-waypoint { top: calc(185px + var(--safe-top)); display: flex; align-items: center; gap: 10px; width: max-content; font-size: 12px; }
+#destination-waypoint-arrow { display: inline-block; font-size: 28px; }
+#destination-waypoint-stop { min-width: 44px; min-height: 44px; margin: 0; }
+#destination-return[hidden], #destination-waypoint[hidden], #destination-waypoint-arrow[hidden] { display: none; }
+.destination-map-preview > div { min-width: 0; }
+.destination-map-eyebrow { margin: 0 0 5px; font-size: 10px; letter-spacing: .14em; color: #e8cc8d; }
+#destination-map-selection { margin: 0 0 4px; font-size: 19px; color: #fff1cc; }
+#destination-map-detail { margin: 0; max-width: 650px; line-height: 1.5; color: #c7d6c7; font-size: 12px; }
+#destination-map-go { flex-shrink: 0; max-width: 260px; min-height: 48px; white-space: normal; padding: 12px 18px; border: 1px solid #fce4a0; border-radius: 9px; background: #ead08c; color: #192a29; font-size: 14px; font-weight: bold; }
+#destination-map-go:disabled { opacity: .5; }
+#destination-map-status { min-height: 1.5em; margin: 8px 0 0; color: #e4dcc5; font-size: 12px; line-height: 1.5; }
+.destination-map button:focus-visible, .explore-coach button:focus-visible { outline: 3px solid #b3f3ff; outline-offset: 3px; }
+#destination-map-close, #controls-learn { min-width: 44px; min-height: 44px; }
+.destination-map-receipt { position: fixed; z-index: 46; top: calc(68px + var(--safe-top)); left: 50%; transform: translateX(-50%); width: max-content; max-width: min(470px, calc(100vw - 32px)); padding: 13px 18px; border: 1px solid #e9d189; border-radius: 12px; background: #192a29ed; color: #fff1ce; box-shadow: 0 5px 24px #0008; font-size: 13px; line-height: 1.5; pointer-events: none; animation: map-arrival .32s ease-out; }
+.destination-map-receipt[hidden] { display: none; }
+.destination-map-receipt[data-kind="warp"] { border-color: #a7efd8; box-shadow: 0 0 0 6px #8ad7c61a, 0 5px 24px #0008; }
+#destination-map-effect { position: fixed; inset: 0; z-index: 44; pointer-events: none; animation: map-warp-settle .45s ease-out both; }
+#destination-map-effect[hidden] { display: none; }
+@keyframes map-warp-settle { from { box-shadow: inset 0 0 100px 20px #79c9b54d; } to { box-shadow: inset 0 0 0 0 #79c9b500; } }
+@keyframes map-arrival { from { opacity: 0; translate: 0 6px; } to { opacity: 1; translate: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .destination-map-receipt { animation: none; } #destination-map-effect { display: none; animation: none; } }
+@media (max-width: 760px) {
+  .destination-map-tools button { padding: 6px; font-size: 11px; }
+  #destination-map-guide { font-size: 13px; }
+  .destination-map-tabs { display: flex; }
+  .destination-map[data-display="map"] #destination-map-list, .destination-map[data-display="list"] .destination-map-survey { display: none; }
+  .destination-map-actions { width: 100%; flex-wrap: nowrap; }
+  .destination-map-actions button { flex: 1; }
+  .destination-map { padding: 12px; }.destination-map .panel-head { top: -12px; }
+  .destination-map-layout { grid-template-columns: 1fr; gap: 12px; }
+  #destination-map-list { max-height: none; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  #destination-map-list section[data-group="Play"] { grid-column: 1 / -1; }
+  .destination-map-preview { position: static; gap: 10px; flex-direction: column; align-items: stretch; }
+  #destination-map-go { max-width: none; width: 100%; }
+  #destination-map-detail { font-size: 11px; }
+}
+@media (max-height: 540px) {
+  .destination-atlas { width: 100%; }
+  .destination-map-preview { position: static; }
+  .destination-map-layout { grid-template-columns: minmax(0, 1fr) 230px; }
+  #destination-map-list { grid-template-columns: 1fr; max-height: none; }
+}
+@media (max-height: 540px) and (max-width: 520px) { .destination-map-layout { grid-template-columns: 1fr; } }
+@media (max-width: 380px) { #destination-map-list { grid-template-columns: 1fr; } }
+.explore-coach { position: fixed; z-index: 45; top: calc(64px + var(--safe-top)); left: 50%; transform: translateX(-50%); width: min(340px, calc(100vw - 32px)); padding: 12px; border: 2px solid var(--accent-text); border-radius: 12px; background: #30271f; color: var(--paper); box-shadow: 0 4px 16px #0008; }
+.explore-coach[hidden] { display: none; }
+.explore-coach p { margin: 0 0 10px; line-height: 1.5; font-size: 13px; }
+.explore-coach div { display: flex; flex-wrap: wrap; gap: 8px; }
+.explore-coach button { min-height: 44px; white-space: normal; flex: 1; }
+
+.destination-map-label { position: absolute; bottom: 1px; left: 0; right: 0; font-size: 10px; line-height: 12px; color: var(--accent-text); text-shadow: 0 1px 2px #000; }
+
 /* Block Frenzy's menu: dark backing behind every line of text on the wood, so it reads. */
 #block-board .garage-head,
 #block-board .garage-col {

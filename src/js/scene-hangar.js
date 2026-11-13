@@ -1578,18 +1578,19 @@
     });
     hud.setDestinations(Object.keys(VIEW_NAMES), VIEW_NAMES);
     hud.setAreaLabel("Lightning Jet Hangar");
-    hud.el.modeDestination.title = "Lightning Jet Hangar · cycle stations";
-    hud.el.modeDestinationLabel.textContent = "Lightning Jet Hangar views. Press to cycle stations";
+    hud.el.modeDestination.title = "Lightning Jet Hangar · choose a viewpoint";
+    hud.el.modeDestinationLabel.textContent = "Lightning Jet Hangar views. Open Map to choose a viewpoint";
     const presetView = (name) => {
-      if (leaving || scene.guide.holding || !VIEW_NAMES[name]) return;
+      if (leaving || scene.guide.holding || !VIEW_NAMES[name]) return false;
       pilot.goPreset(name);
       hud.setDetachedView(name, true);
+      return true;
     };
     hud.onPreset(presetView);
     hud.onAction((action, value) => {
       if (action === "leave") leaveHangar();
       else if (action === "reset-view") pilot.resetCamera();
-      else if (action === "mode-preset") presetView(value);
+      else if (action === "mode-preset") return presetView(value);
       else if (action === "act") pilot.action();
       else if (action === "hangar-mute") soundPanel.toggle();
       else if (!leaving && action.startsWith("mode-")) pilot.modeAction(action);

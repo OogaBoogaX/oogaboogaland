@@ -1889,13 +1889,14 @@
     });
     hud.setDestinations(Object.keys(VIEW_NAMES), VIEW_NAMES);
     hud.setAreaLabel("Lightning Factory");
-    hud.el.modeDestination.title = "Lightning Factory · cycle stations";
-    hud.el.modeDestinationLabel.textContent = "Lightning Factory views. Press to cycle stations";
+    hud.el.modeDestination.title = "Lightning Factory · choose a viewpoint";
+    hud.el.modeDestinationLabel.textContent = "Lightning Factory views. Open Map to choose a viewpoint";
     const presetView = (name) => {
-      if (leaving || !VIEW_NAMES[name]) return;
+      if (leaving || !VIEW_NAMES[name]) return false;
       endBooth(scene);
       pilot.goPreset(name);
       hud.setDetachedView(name, true);
+      return true;
     };
     hud.onPreset(presetView);
     hud.onAction((action, value) => {
@@ -1903,7 +1904,7 @@
       else if (action === "leave") leaveCave();
       else if (action === "factory-mute") hud.toast(audio.setMuted(!audio.muted) ? "Sound off" : "Sound on");
       else if (action === "reset-view") pilot.resetCamera();
-      else if (action === "mode-preset") presetView(value);
+      else if (action === "mode-preset") return presetView(value);
       else if (action === "act") { if (!greeter || !greeter.act()) pilot.action(); }
       else if (action.startsWith("mode-")) pilot.modeAction(action);
     });
