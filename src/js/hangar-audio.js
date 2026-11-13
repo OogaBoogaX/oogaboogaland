@@ -4,7 +4,8 @@
 //
 // The bed is the hangar humming: everywhere the mains' low hum, a deep drone that beats and swells slowly, and the
 // vast hall's air breathing; and, louder as the visitor nears each, the launch tunnel's neon buzzing all round them
-// inside it, and the shimmer of each shield, the launch shield's at the tunnel's end and the door's. `listen` says
+// inside it, and the shimmer of each shield, the launch shield's at the tunnel's end and the door's; and a faint breath
+// of air where the hangar's air shimmers (`hangar-shimmer.js`), as loud as `glint(x, y, z, level)` last asked. `listen` says
 // where the visitor hears from and which way the view faces, and `update(dt)` levels the bed from there ten times a
 // second. It honours the page-wide mute (`oogaboogaland.audio`), keeps sounding in the background, and `dispose` closes it.
 //
@@ -53,8 +54,8 @@
   const NOISE_SECONDS = 2, MASTER = 0.5, VOLUME_KEY = "ooga-hangar-volume", PAN = 0.75;
   // How loud each part of the bed sits: the hum, the drone and the air everywhere, more air inside the tunnel, the
   // neon at its loudest inside it, and each shield close to; and at how many metres each of those last falls to half.
-  const LEVEL = { mains: 0.05, drone: 0.08, air: 0.045, tunnelAir: 0.035, neon: 0.05, launch: 0.11, door: 0.06 };
-  const REF = { neon: 5, launch: 9, door: 5 };
+  const LEVEL = { mains: 0.05, drone: 0.08, air: 0.045, tunnelAir: 0.035, neon: 0.05, launch: 0.11, door: 0.06, glint: 0.04 };
+  const REF = { neon: 5, launch: 9, door: 5, glint: 8 };
 
   // How loud the test's voices peak: the siren, the whine and its whoosh, the whoomph, the roar's body, crackle and
   // rumble, a clank, the alarm, the boom's sweep, its rumble and its crack, the ringing, and the anomalies' hum.
@@ -130,7 +131,7 @@
     // How much of the hall's electrical hum (the mains and the neon) has power, 0 to 1.
     let power = 1;
     // Where the visitor hears from and the way the view faces on the ground, and where the last spot was placed.
-    const ear = { x: 0, y: 0, z: 0, fx: 0, fz: -1 }, AT = { level: 0, pan: 0 };
+    const ear = { x: 0, y: 0, z: 0, fx: 0, fz: -1 }, AT = { level: 0, pan: 0 }, glinting = { x: 0, y: 0, z: 0, level: 0 };
 
     const gain = (value, to) => {
       const g = ctx.createGain();
@@ -217,6 +218,14 @@
       // The launch shield's shimmer, lower than the door's.
       bed.launch = shimmer(174.6);
       bed.door = shimmer(196);
+      // The glint where the air shimmers: soft air, the noise through a broad band round 1.2 kHz and a thinner one over
+      // it, breathing a little; no tone, nothing low (a rising electrical hum is the engines' own).
+      bed.glintPan = panner();
+      bed.glintGain = gain(0, bed.glintPan);
+      const breath = gain(1, bed.glintGain);
+      bed.glintAir = hissOf(filter("bandpass", 1200, 0.8, breath));
+      bed.glintThin = hissOf(filter("bandpass", 2600, 1.6, gain(0.35, breath)));
+      bed.glintBreath = wobble(breath.gain, 0.6, 0.25);
       initTest();
       initProjector();
       initForklift();
@@ -825,6 +834,10 @@
       AT.level = 1 / (1 + r * r);
       AT.pan = flat > 0.5 ? clamp((dx * -ear.fz + dz * ear.fx) / flat, -1, 1) * PAN * Math.min(1, flat / 3) : 0;
     };
+    // The glint where the air shimmers at (x, y, z), `level` 0 (silent) to 1.
+    const glint = (x, y, z, level) => {
+      glinting.x = x; glinting.y = y; glinting.z = z; glinting.level = level;
+    };
     const listen = (x, y, z, fx, fz) => {
       const l = Math.hypot(fx, fz) || 1;
       ear.x = x; ear.y = y; ear.z = z; ear.fx = fx / l; ear.fz = fz / l;
@@ -854,6 +867,9 @@
       place(D.x, D.y, D.z, REF.door);
       set(bed.door.gain.gain, LEVEL.door * AT.level, now);
       set(bed.door.pan.pan, AT.pan, now);
+      place(glinting.x, glinting.y, glinting.z, REF.glint);
+      set(bed.glintGain.gain, LEVEL.glint * glinting.level * AT.level, now);
+      set(bed.glintPan.pan, AT.pan, now);
       place(spots.booth.x, spots.booth.y, spots.booth.z, 1);
       set(test.boothPan.pan, AT.pan, now);
       const E = spots.engines;
@@ -1311,7 +1327,7 @@
     };
 
     return {
-      listen, update, setMuted, setVolume, test: play, misfire, revs, zap, blackout, lowrider, shuffle, power: setPower, clang, voice, boot, poke, beep, denied, forklift, forkliftWork, horn, projector, clunk, roll, watchCrane, craneCue, watchRoom, roomCue, dispose,
+      listen, update, setMuted, setVolume, glint, test: play, misfire, revs, zap, blackout, lowrider, shuffle, power: setPower, clang, voice, boot, poke, beep, denied, forklift, forkliftWork, horn, projector, clunk, roll, watchCrane, craneCue, watchRoom, roomCue, dispose,
       get muted() { return muted; },
       get volume() { return volume; },
       get ready() { return ready; },
