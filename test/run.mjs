@@ -7390,8 +7390,8 @@ const gameRulesChecks = async () => {
     outGuest.gorillas.length = 0;
     const framedOut = L.validFrame(outFrame, outGuest, L.seatMap(2, 0)) && !L.validFrame(new DataView(outBuf.buffer.slice(0, outLen + 1)), outGuest, L.seatMap(2, 0)); L.decode(outFrame, outGuest, L.seatMap(2, 0), new Float32Array(16));
     const guests = { away: guestAway.r && guestAway.g.gold && !guestAway.h.gold, out: guestOut.r && guestOut.h.hook === 1 && guestOut.g.hook === 0, refused, framed: framedOut, agrees: outGuest.actors[0].hook === 1 && outGuest.actors[2].hook === 0 && outGuest.hooks[0].holder === 0,
-      events: ["goldhook", "hooksteal", "goldsteal", "gold"].every((t) => L.EVENT_TYPES.includes(t)) && !["golddrop", "goldget", "goldback", "hookdrop", "hookback"].some((t) => L.EVENT_TYPES.includes(t)), wire: W.WIRE === 4 };
-    record("block steals live: a guest's wield on the host decides what a hook or Golden AK fire can take, an unowned tool is refused, the frame carries the result to a guest exactly, and the drop events are gone (WIRE 4)",
+      events: ["goldhook", "hooksteal", "goldsteal", "gold"].every((t) => L.EVENT_TYPES.includes(t)) && !["golddrop", "goldget", "goldback", "hookdrop", "hookback"].some((t) => L.EVENT_TYPES.includes(t)), wire: W.WIRE === 5 };
+    record("block steals live: a guest's wield on the host decides what a hook or Golden AK fire can take, an unowned tool is refused, the frame carries the result to a guest exactly, and the drop events are gone (WIRE 5)",
       Object.values(guests).every(Boolean), JSON.stringify(guests));
     // Shots through the sim itself: bots meet a crouched, a higher and a lower target; no round passes a thin wall.
     const shootAt = (kind, setup) => { const s = S.create({ team: "blue", seed: 6, size: 2, map: "town", prep: 0 }), a = s.actors[0], t = s.actors[2]; for (const q of s.actors) { q.bot = false; q.guard = 0; } s.gorillas.length = 0; a.x = 6; a.z = -20; a.y = 0; t.x = 6; t.z = -8; t.y = 0; s.actors[1].x = s.actors[3].x = 200; setup(s, a, t);
@@ -8372,6 +8372,63 @@ const gameRulesChecks = async () => {
         rows.enemyCatBot = !S.nearEnemyCatapult(bot, bv);
       }
       record("block frenzy grapple: a hook found at a hidden spot bites rock and reels its Ooga in, yanks a block off a rival carrier but not a teammate, a mined block takes no hook, and a hook lost over the edge goes back into hiding", Object.values(rows).every(Boolean), JSON.stringify(rows));
+      {
+        // The rivals' zipline only carries a rider whose own block is home; grabbed with it gone, a trap door throws them
+        // off the island as the enemy catapult does. Checked only at the grab, never on your own line, and bots know it.
+        const zr = {};
+        // (`flight` 2: still under a parachute when they reach the handle; the throw takes over from it.)
+        const atLine = (line, ownAway, carrying = null, flight = 0) => {
+          const q = fresh(), v = q.actors[0], Z = S.ARENA.zips[line];
+          Object.assign(v, { x: Z.ax, z: Z.az, y: S.CONFIG.TOWER_TOP, grounded: true, carrying, flight });
+          if (carrying) Object.assign(q.flags[carrying], { state: "carried", carrier: 0 });
+          if (ownAway) Object.assign(q.flags.blue, { state: "dropped", carrier: null, x: 4, y: 0, z: 0, homeT: 1e9 });
+          return [q, v, S.zip(q, 0), q.events.slice(0, q.eventCount).map((e) => e.type)];
+        };
+        let [q, v, took, ev] = atLine("red", false, "red");
+        zr.homeRides = took && v.riding && v.zipLine === "red" && ev.includes("zip") && !ev.includes("ziptrap") && !S.zipSprings(q, v, "red");
+        [q, v, took, ev] = atLine("red", true, "red", 2);
+        zr.awaySprings = took && !v.riding && v.flung && !v.flight && ev.includes("ziptrap") && !ev.includes("zip") && S.zipSprings(q, v, "red") && v.vy > 0;
+        // An opposing client's local actor indices differ: the trap still names the right rider and line.
+        const L = BL.blockLive, W = BL.blockWire, hm = L.seatMap(q.size, 0), gm = L.seatMap(q.size, q.size);
+        const guest = S.create({ team: "red", size: q.size, map: "fort", prep: 0 }), buffer = new DataView(new ArrayBuffer(W.FRAME_MAX));
+        const bytes = L.encode(q, hm, 1, 1, 1, buffer);
+        L.decode(new DataView(buffer.buffer.slice(0, bytes)), guest, gm, new Float32Array(q.actors.length * 4));
+        const event = guest.events.slice(0, guest.eventCount).find(e => e.type === "ziptrap");
+        zr.wireRider = event?.actor === gm.toLocal[0] && event.team === "red" && !guest.actors[gm.toLocal[0]].riding && guest.flags.red.state === "carried";
+        const trapLog = run(q, 12, still, () => v.falls > 0);
+        zr.awayFalls = v.falls === 1 && !v.carrying && q.flags.red.state === "home" && !trapLog.edgedrop && !!trapLog.return;
+        [q, v, took, ev] = atLine("blue", true);
+        zr.ownNever = took && v.riding && v.zipLine === "blue" && !ev.includes("ziptrap") && !S.zipSprings(q, v, "blue");
+        // Already sliding when their own block is taken, the rider rides on to the end of the line.
+        [q, v, took] = atLine("red", false, "red");
+        Object.assign(q.flags.blue, { state: "carried", carrier: 2 }); q.actors[2].carrying = "blue";
+        const rideLog = run(q, 6, still, () => !v.riding);
+        zr.midRide = took && !rideLog.ziptrap && !!rideLog.unzip && !v.flung && v.zipT === 1;
+        // An expert carrying their block by the rivals' tower takes the zip home only with its own block home, and
+        // drops that route the moment its block goes.
+        const botAt = (ownAway) => {
+          const r = S.create({ seed: 5, prep: 0, map: "fort", skill: "expert" }); Object.assign(r.weather, { left: 1e9 }); for (const g of r.gorillas) { g.state = 3; g.t = 1e9; }
+          for (const o of r.actors) if (o.id !== 1) { o.bot = false; o.y = -100; }
+          const b = r.actors[1], L = S.ARENA.ladders.red; b.bot = true;
+          Object.assign(b, { x: (L.zone[0] + L.zone[1]) / 2 - L.dx * 3, z: (L.zone[2] + L.zone[3]) / 2, y: 0, grounded: true, carrying: "red", guard: 99 }); Object.assign(r.flags.red, { state: "carried", carrier: 1 });
+          if (ownAway) Object.assign(r.flags.blue, { state: "dropped", carrier: null, x: 4, y: 0, z: 0, homeT: 1e9 });
+          return [r, b];
+        };
+        let [br, bb] = botAt(false), botLog = run(br, 8, still, () => bb.riding);
+        zr.botRidesHome = bb.riding && bb.zipLine === "red" && !botLog.ziptrap;
+        [br, bb] = botAt(true); let routed = false;
+        botLog = run(br, 8, still, () => { routed ||= bb.route === "zipHome" || bb.riding; return false; });
+        zr.botStaysOff = !routed && !botLog.ziptrap;
+        [br, bb] = botAt(false); run(br, 8, still, () => bb.route === "zipHome");
+        const chose = bb.route === "zipHome";
+        Object.assign(br.flags.blue, { state: "dropped", carrier: null, x: 4, y: 0, z: 0, homeT: 1e9 });
+        botLog = run(br, 6, still, () => bb.riding);
+        zr.botDrops = chose && bb.route !== "zipHome" && !bb.riding && !botLog.ziptrap;
+        // The event crosses the wire, an Ooga's own.
+        zr.wire = BL.blockLive.EVENT_TYPES.at(-1) === "ziptrap" && BL.blockLive.ACTOR_EVENTS.includes("ziptrap") && BL.blockWire.WIRE === 5;
+        record("block frenzy zipline trap: the rivals' line carries a rider whose own block is home and throws one whose block isn't off the island, a carried block going home with a fall; a rider already sliding rides on, your own line never springs, and expert bots only take the zip home with their block home",
+          Object.values(zr).every(Boolean), JSON.stringify(zr));
+      }
       {
         // wicked's gorillas: a charge and grab dropping the block where it was grabbed, a drag by the feet to the nearest
         // edge, a throw off it, a jetpack back, breaking free by mashing, and the hook stunning a gorilla to free its
@@ -12477,6 +12534,19 @@ const blockPoses = { name: "block modelled poses", why: "regression: old straigh
           }
           rows.push({ name, kind, gap, visible: actor.gun.visible, modelled: cave.modelled, own: cave.traits.name === name });
         }
+        const actor = D.actors[0], hip = actor.cave.root.position.y;
+        a.riding = true; a.crouch = true; update(0, 0); BL.scene.updateWorld(S.root);
+        const ends = [-.3, .3].map(x => { const v = new Float64Array(3); BL.math.mat4.transformPoint(v, actor.trolley.world, x, -.15, 0); return v; });
+        const dx = ends[1][0] - ends[0][0], dy = ends[1][1] - ends[0][1], dz = ends[1][2] - ends[0][2], len2 = dx * dx + dy * dy + dz * dz;
+        let gap = 0;
+        for (const hand of [actor.cave.parts.fingersR, actor.cave.parts.fingersL]) {
+          const x = hand.world[12] - ends[0][0], y = hand.world[13] - ends[0][1], z = hand.world[14] - ends[0][2];
+          const t = Math.max(0, Math.min(1, (x * dx + y * dy + z * dz) / len2));
+          gap = Math.max(gap, Math.hypot(x - t * dx, y - t * dy, z - t * dz));
+        }
+        const hiddenGuns = !actor.gun.visible && !actor.gunL.visible;
+        a.riding = a.crouch = false; update(0, 0);
+        rows.push({ name, zip: true, gap, restored: actor.cave.root.position.y === hip && !actor.trolley.visible, hiddenGuns });
         D.sim.over = true; D.sim.winner = D.sim.team; D.sim.actors[0].captures = 3; D.simulate(.1); update(0, 0); BL.scene.updateWorld(S.root);
         const p = D.actors[0].cave.parts, gold = S.root.children.find(n => n.geometry === BL.blockModels.goldBlock() && n.visible);
         rows.push({ name, trophy: D.phase === "results", gap: Math.abs(gold.world[13] - .465 - (p.fingersR.world[13] + p.fingersL.world[13]) / 2) });
@@ -12484,7 +12554,35 @@ const blockPoses = { name: "block modelled poses", why: "regression: old straigh
     } finally { S.update = update; D.showBoard(); }
     return rows;
   })()`);
-  record("block modelled poses: regular, slim and wide Oogas grip every weapon and both Golden AKs, and their trophy rests on their raised fists", rows.length === 27 && rows.every(r => r.trophy ? r.gap < .03 : r.visible && r.modelled && r.own && r.gap < .001), JSON.stringify(rows));
+  record("block modelled poses: regular, slim and wide Oogas grip every weapon and both Golden AKs, and their trophy rests on their raised fists", rows.filter(r => !r.zip).length === 27 && rows.filter(r => !r.zip).every(r => r.trophy ? r.gap < .03 : r.visible && r.modelled && r.own && r.gap < .001), JSON.stringify(rows));
+  record("block modelled poses: both fists meet the zipline bar even while crouch is held, weapons are stowed, and letting go restores each Ooga's hip", rows.filter(r => r.zip).length === 3 && rows.filter(r => r.zip).every(r => r.gap < .001 && r.restored && r.hiddenGuns), JSON.stringify(rows.filter(r => r.zip)));
+} };
+const blockZipline = { name: "block zipline controls", why: "rule: the ride control and warning lamps must agree about a rival zipline's trap for either team", run: async b => {
+  const rows = await b.evaluate(`(() => {
+    const D = __ooga.block, S = BL.scenes.block, M = BL.blockSim, rows = [], update = S.update;
+    S.update = () => {};
+    try {
+      for (const team of M.TEAMS) for (const away of [false, true]) {
+        D.showBoard(); D.chooseTeam(team); D.start(631); D.sim.prep = 0;
+        // Give the new round its spawn frame before moving to a handle, as a real approach does.
+        update(0, 0);
+        const a = D.sim.actors[0], line = M.ARENA.zips[D.sim.rival];
+        Object.assign(a, { x: line.ax, z: line.az, y: M.CONFIG.TOWER_TOP, flight: 0, grounded: true });
+        if (away) Object.assign(D.sim.flags[team], { state: "dropped", x: 0, y: 0, z: 0, homeT: 999 });
+        update(0, 0);
+        const lamps = S.root.children.flatMap(n => n.children).concat(S.root.children).filter(n => n.geometry === BL.blockModels.zipLight(0) || n.geometry === BL.blockModels.zipLight(1));
+        const reds = lamps.filter(n => n.geometry === BL.blockModels.zipLight(1));
+        const button = document.querySelector('#block-tools [data-tool="zip"]'), enabled = !button.disabled;
+        button.click(); update(0, 0);
+        rows.push({ team, away, enabled, lamps: lamps.length, red: reds.length, correctLamp: !away || reds[0]?.position.x === line.ax,
+          acted: away ? !a.riding && a.vy > 0 && !a.flight && !D.actors[0].trolley.visible : a.riding && D.actors[0].trolley.visible });
+        D.sim.flags[team].state = "home"; update(0, 0);
+        rows.at(-1).reset = lamps.every(n => n.geometry === BL.blockModels.zipLight(0));
+      }
+    } finally { S.update = update; D.showBoard(); }
+    return rows;
+  })()`);
+  record("block zipline controls: each team's lamps warn when its own block is away, Ride springs the trap or boards the trolley accordingly, and a return clears the warning", rows.length === 4 && rows.every(r => r.enabled && r.lamps === 2 && r.red === (r.away ? 1 : 0) && r.correctLamp && r.acted && r.reset), JSON.stringify(rows));
 } };
 const dropStart = { name: "drop start", why: "regression: Space on the title card also launched the flight", run: async (b) => {
   const st = () => b.evaluate(`({ phase: window.__ooga.drop.phase, card: !document.querySelector('[data-intro="drop"]').hidden })`);
@@ -24075,7 +24173,7 @@ scene("race", { label:"optional rig link fallback",url:hubPage(src, "scene=hub")
 }}]});
 scene("race", { query: "rain=0&draw=0", steps: [raceStart, raceOwn, raceBench, { name: "race tracks", why: "regression: the 12-slot grid spawned a free banana on Banana Bay", run: async (b) => { await b.evaluate(`window.__ooga.race.toGarage()`); await raceTracks[1](b); } }, raceRigs, raceRigContext, racePause, play("race", "a whole cup under the autopilot: one drawn field of fifteen runs every race and finishes in order, the cup medal and every track's best are saved", cupRun), raceMirror, raceAgain, trip("race")] });
 scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on the target, scores its own medal and is saved as the best", dropRun), dropCrash, trip("drop"), dropOwn] });
-scene("block", { steps: [blockStart, blockWalk, blockQuiz, play("block", "a round on autopilot reaches three captures, shows its results and saves the round", blockRun), blockPoses, trip("block")] });
+scene("block", { steps: [blockStart, blockWalk, blockQuiz, play("block", "a round on autopilot reaches three captures, shows its results and saves the round", blockRun), blockPoses, blockZipline, trip("block")] });
 scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit"), orbitOwn] });
 scene("mine", { steps: [mineResume, trip("mine"), mineControls, mineOwn] });
 // ---- The Lightning Jet Hangar ----

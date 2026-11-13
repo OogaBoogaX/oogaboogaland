@@ -109,7 +109,7 @@
   // touch or debug call reaches it, so nothing acts while paused. Resume, Board and Sound stay open while paused.
   const inRound = () => phase === "play" && !paused;
   let sim = null, phase = "board", sceneTime = 0, stateTimer = 0, hintTimer = 0, lineN = 0, result = null;
-  let actors = null, blocks = null, shots = null, splats = null, splatNext = 0, ticks = null, pads = null, crates = null, rain = null, caches = null, fpGun = null, fpGunL = null, fpFlash = null, fpFlashL = null, zipNear = false, trampNodes = null, trampSeen = false, powerNodes = null;
+  let actors = null, blocks = null, shots = null, splats = null, splatNext = 0, ticks = null, pads = null, crates = null, rain = null, caches = null, fpGun = null, fpGunL = null, fpFlash = null, fpFlashL = null, zipNear = false, zipLights = null, zipLit = [-1, -1], trampNodes = null, trampSeen = false, powerNodes = null;
   let mapRoot = null, fireNode = null, dancers = null, burnSeen = false, peelNodes = null, catapults = null, catNear = false;
   const iceNodes = {};
   let tool = "paint", flash = 0, flashT = 0, audio = null, unfeed = null;
@@ -204,6 +204,11 @@
       const netted = createNode({ geometry: BM.draped(), visible: false });
       const held = createNode({ geometry: BM.crate(0), position: { x: 0, y: 1.95, z: 0.1 }, visible: false });
       const trolley = createNode({ geometry: BM.trolley(), position: { x: 0, y: C.ZIP_HANG + 0.15, z: 0 }, visible: false });
+      // Keep the shared ride physics, but fit the hanging body and bar to this Ooga's shoulders and reach.
+      const hip = cave ? cave.root.position.y : 0, armZ = cave ? cave.parts.armR.rotation.z : 0;
+      const hang = cave ? { angle: Math.atan2(-cave.elbow.z, cave.elbow.y - cave.elbow.length),
+        hip: C.ZIP_HANG - cave.parts.armR.position.y - Math.hypot(cave.elbow.y - cave.elbow.length, cave.elbow.z) * cave.armScale } : null;
+      if (cave) trolley.scale.x = Math.max(1, (Math.abs(cave.parts.armR.position.x - cave.parts.armL.position.x) + 0.16) / 0.6);
       const chute = createNode({ geometry: BM.chute(0), visible: false });
       // The jetpack on the back, its flames lit while it thrusts.
       const jet = createNode({ geometry: BM.jetpack(0), position: { x: 0, y: 0.78, z: -0.3 } });
@@ -252,7 +257,7 @@
       const hookHead = place(createNode({ geometry: BM.hookHead(), visible: false, sightHidden: true }));
       const hookHip = createNode({ geometry: BM.hookHead(), visible: false, position: { x: 0.3, y: 0.85, z: -0.18 }, rotation: { x: 1.2, y: 0, z: 0 }, scale: { x: 0.45, y: 0.45, z: 0.45 } });
       addChild(body, hookHip);
-      return { body, cave, ring, blob, bubble, netted, held, trolley, chute, monkeys, jet, jetFlame, gun, gunL, flash, flashL, shot: SHOT_IDLE, kick: 0, pet, eyes, beam, rope, hookHead, hookHip, phase: 0, name };
+      return { body, cave, hip, armZ, hang, ring, blob, bubble, netted, held, trolley, chute, monkeys, jet, jetFlame, gun, gunL, flash, flashL, shot: SHOT_IDLE, kick: 0, pet, eyes, beam, rope, hookHead, hookHip, phase: 0, name };
     });
   };
   const disposeActors = () => {
@@ -903,6 +908,7 @@
       if (dual) a.gun.geometry = a.gunL.geometry = BM.gun(GUN_OF.gold * 2 + ti);
       if (!a.cave) continue;
       const p = a.cave.parts, w = CLOUD_CALM ? 0 : Math.sin(elapsed * 6 + k * 2.3), kick = hop > 0.05 ? 0.55 : 0;
+      a.cave.root.position.y = a.hip;
       p.armL.quaternion = null;
       p.armL.rotation.z = p.armR.rotation.z = 0;
       p.forearmL.rotation.x = p.forearmR.rotation.x = 0;
@@ -1055,6 +1061,7 @@
     else if (t === "edgedrop") feed(`The ${TEAM_NAME[e.team]} block dropped at the edge`, e.team);
     else if (t === "gorillahit" && e.actor >= 0) feed(`${nameOf(e.actor)} stunned a gorilla`, sim.actors[e.actor].team);
     else if (t === "gold") feed(e.by >= 0 && e.by !== e.actor ? `${nameOf(e.by)} mined a block: ${who} gets the Golden Dual AKs!` : `${who} won the Golden Dual AKs!`, e.team);
+    else if (t === "ziptrap") feed(`${who} grabbed the rivals' zipline with ${e.actor === 0 ? "your" : "their"} own block gone · trap door! Into the water!`, sim.actors[e.actor].team);
     else if (t === "enemycat") feed(`${who} tried the enemy catapult and was flung off the island!`, sim.actors[e.actor].team);
     else if (t === "launch") feed(`${who} catapulted toward the ${TEAM_NAME[SIM.other(e.team)]} fort!`, e.team);
     else if (t === "goldsteal") feed(`A mined block: ${who} gets ${e.by === 0 ? "your" : `${nameOf(e.by)}'s`} Golden Dual AKs!`, e.team);
@@ -1256,6 +1263,10 @@
         for (const c of catapults) if (c.team === e.team) c.at = sceneTime;
         audio.cues.boing(1);
         if (me) { center("WRONG CATAPULT!", 1100); notice("Jetpack back (Space), hook the rim, or fall and respawn at home", 2600); }
+      } else if (e.type === "ziptrap") {
+        fx.burst(e.x, e.y + 0.4, e.z, 14, WOOD_BITS, 2.4);
+        audio.cues.boing(1);
+        if (me) { center("TRAP DOOR!", 1100); notice("Their zipline only carries you while your own block is home · jetpack back (Space), hook the rim, or fall", 3200); }
       } else if (e.type === "launch") {
         for (const c of catapults) if (c.team === e.team) c.at = sceneTime;
         fx.burst(e.x, 1, e.z, 14, WOOD_BITS, 2.4);
@@ -1822,11 +1833,11 @@
       if (s.boots > 0 && s.moving > 1 && Math.random() < dt * 14) fx.burst(s.x, s.y + 0.2, s.z, 2, ORANGE_BITS, 0.8);
       // On the board only the Ooga on show stands in view.
       a.body.visible = !(i === 0 && (cam.first || cam.close) && phase === "play") && !(phase === "board" && preview.wide && i > 0);
-      a.body.scale.y = s.crouch ? 0.66 : 1;
+      a.body.scale.y = s.crouch && !s.riding ? 0.66 : 1;
       // Dragged by a gorilla: facing it, pitched over so the feet are in its hand and the head trails along the ground (as
       // wicked's hub capture holds an Ooga: `grabbedOogaPose`). Otherwise upright, turning to the heading.
       const dragged = s.grabbed ? sim.gorillas[s.grabbed - 1] : null;
-      a.body.rotation.x = damp(a.body.rotation.x, dragged ? -1.25 : 0, dragged ? 18 : 12, dt);
+      a.body.rotation.x = s.riding ? 0 : damp(a.body.rotation.x, dragged ? -1.25 : 0, dragged ? 18 : 12, dt);
       a.body.rotation.y = dragged ? dragged.heading : damp(a.body.rotation.y, a.body.rotation.y + wrap(s.heading - a.body.rotation.y), 14, dt);
       a.ring.visible = s.grounded;
       a.bubble.visible = s.trapped > 0;
@@ -1881,8 +1892,16 @@
       if (s.trapped > 0) a.bubble.rotation.y = elapsed * 0.8;
       if (!a.cave) continue;
       const p = a.cave.parts;
+      a.cave.root.position.y = s.riding ? a.hang.hip : a.hip;
       p.armL.quaternion = null;
+      p.armR.rotation.z = s.riding ? 0 : a.armZ; p.armL.rotation.z = -p.armR.rotation.z;
       p.forearmL.rotation.x = p.forearmR.rotation.x = -a.cave.elbow.rest;
+      if (s.riding) {
+        p.forearmL.rotation.x = p.forearmR.rotation.x = 0;
+        p.armL.rotation.x = p.armR.rotation.x = a.hang.angle;
+        p.legL.rotation.x = 0.3; p.legR.rotation.x = -0.2;
+        continue;
+      }
       if (s.splat > 0) {
         // Splatted: arms up, wobbling, feet together.
         const w = Math.sin(elapsed * 9 + i) * 0.15;
@@ -1932,8 +1951,8 @@
         p.legL.rotation.x = p.legR.rotation.x = -1.2;
         continue;
       }
-      if (s.riding || s.climbing || s.flight === 2) {
-        // Hanging from the trolley, or hand over hand up a ladder.
+      if (s.climbing || s.flight === 2) {
+        // Under a parachute, or hand over hand up a ladder.
         const k = s.climbing ? Math.sin(elapsed * 9) * 0.4 : 0;
         p.armL.rotation.x = -2.9 + k; p.armR.rotation.x = -2.9 - k;
         p.legL.rotation.x = s.climbing ? -k : 0.3; p.legR.rotation.x = s.climbing ? k : -0.2;
@@ -2078,6 +2097,8 @@
     }
     // An ammo cache glows while it's ready and goes grey while it rests.
     for (let i = 0; i < caches.length; i++) caches[i].geometry = BM.cache(sim.caches[i].dark > 0 ? 1 : 0);
+    // The zipline lamps, repainted only when the visitor's own block comes or goes.
+    for (let i = 0; i < zipLights.length; i++) { const lit = SIM.zipSprings(sim, sim.actors[0], SIM.TEAMS[i]) ? 1 : 0; if (lit !== zipLit[i]) { zipLit[i] = lit; zipLights[i].geometry = BM.zipLight(lit); } }
     // A catapult's arm whips over when it throws, then winds back down.
     for (const c of catapults) {
       const t = elapsed - c.at, up = t < 0.15 ? t / 0.15 : Math.max(0, 1 - (t - 0.15) / 1.4);
@@ -2099,8 +2120,8 @@
       zipNear = near;
       updateTools();
       if (near) {
-        const home = SIM.nearZip(sim, sim.actors[0]) !== sim.team;
-        notice(`${COARSE ? "Zip" : "Space"} rides the zipline ${home ? "home to our fort" : "into their fort"}`, 2200);
+        const line = SIM.nearZip(sim, sim.actors[0]), home = line !== sim.team;
+        notice(SIM.zipSprings(sim, sim.actors[0], line) ? "Trap door! Our block isn't home · their zipline would throw you off the island" : `${COARSE ? "Zip" : "Space"} rides the zipline ${home ? "home to our fort" : "into their fort"}`, 2200);
       }
     }
   };
@@ -2129,7 +2150,7 @@
     cam.yaw = cam.first || !cam.warm ? want : wrap(cam.yaw + wrap(want - cam.yaw) * Math.min(1, dt * (cam.island ? 9 : 7)));
     if (cam.first && me) {
       // The eye at the Ooga's eyes (lower when crouched), looking along the aim.
-      const eye = y + actors[0].cave.headOffset * 0.95 * (me.crouch ? 0.66 : 1), up = lookUp(), c = Math.cos(up);
+      const a = actors[0], eye = y + (a.cave.headOffset * 0.95 + (me.riding ? a.hang.hip - a.hip : 0)) * (me.crouch && !me.riding ? 0.66 : 1), up = lookUp(), c = Math.cos(up);
       cam.close = false;
       if (me.grabbed) {
         // Dragged by a leg: on the back, looking up at the sky.
@@ -2580,6 +2601,9 @@
       add(createNode({ geometry: BM.rack(i), position: { x: l.dx < 0 ? x0 + 0.7 : x1 - 0.7, y: C.TOWER_TOP, z: (z0 + z1) / 2 }, rotation: { x: 0, y: Math.PI / 2, z: 0 } }));
       add(createNode({ geometry: BM.zipline(mapIndex * 2 + i) }));
     }
+    // A lamp just over each zipline's handle: green when the visitor may take it, red when it would throw them off.
+    zipLights = SIM.TEAMS.map((t) => { const z = A.zips[t]; return add(createNode({ geometry: BM.zipLight(0), position: { x: z.ax, y: z.ay + 0.3, z: z.az } })); });
+    zipLit[0] = zipLit[1] = 0;
     pads = A.traps.map(([x, z]) => add(createNode({ geometry: BM.pad(), position: { x, y: 0, z } })));
     powerNodes = A.powers.map(([x, z]) => add(createNode({ geometry: BM.power(0), position: { x, y: 0, z } })));
     trampNodes = A.tramps.map(([x, z]) => add(createNode({ geometry: BM.tramp(), position: { x, y: 0, z } })));
@@ -3118,7 +3142,7 @@
     hud.dispose();
     phase = "board";
     skyClouds = []; skyPerch = null; trophy = trophyNodes = null;
-    sim = blocks = shots = splats = ticks = pads = crates = rain = caches = fpGun = fpGunL = fpFlash = fpFlashL = trampNodes = powerNodes = result = null;
+    sim = blocks = shots = splats = ticks = pads = crates = rain = caches = zipLights = fpGun = fpGunL = fpFlash = fpFlashL = trampNodes = powerNodes = result = null;
     mapRoot = fireNode = dancers = peelNodes = catapults = boltNode = boltRing = null;
     hookNodes = []; ghostNodes = [];
     catNear = false;

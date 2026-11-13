@@ -818,6 +818,10 @@
       box({ w: 0.16, h: z.by + 0.4, d: 0.16, color: "#5a3a22", offset: { x: z.bx, y: (z.by + 0.4) / 2, z: z.bz } }),
       box({ w: 0.3, h: 0.3, d: 0.3, color: c.paint, emissive: 0.6, offset: { x: z.ax, y: z.ay + 0.15, z: z.az } }));
   });
+  // The lamp on a zipline's handle, from the visitor's side: green (0) when they may ride it, red (1) when grabbing it
+  // would spring its trap door (`blockSim.zipSprings`).
+  // On a short dark stalk, so it reads apart from the handle's team colour.
+  const zipLight = variants((i) => merge(box({ w: 0.06, h: 0.3, d: 0.06, color: DARK, offset: { y: 0.15 } }), box({ w: 0.22, h: 0.22, d: 0.22, color: i ? "#ff3b30" : "#34e05a", emissive: 1, offset: { y: 0.41 } })));
   // A rider's trolley: a pulley block on the cable with a hand bar under it.
   const trolley = cached(() => merge(box({ w: 0.14, h: 0.18, d: 0.3, color: METAL, offset: { y: 0.1 } }), box({ w: 0.6, h: 0.05, d: 0.05, color: DARK, offset: { y: -0.15 } }), box({ w: 0.04, h: 0.3, d: 0.04, color: DARK, offset: { y: 0 } })));
   // A trampoline flush with the ground: a dark frame ring on stubby legs, springs, and an orange-and-black mat.
@@ -1016,5 +1020,5 @@
     for (const s of [-1, 1]) parts.push(box({ w: 0.36, h: 0.14, d: 0.16, color: sheet, emissive: 0.5, offset: { x: s * 0.6, y: 0.08, z: 0.12 } }));
     return merge(...parts);
   });
-  BL.blockModels = { hookHead, rope, goldBlock, trophyRays, muzzleFlash, isle, keel, puddle, bolt, hauntDress, beam, laserEyes, ghost, net2, jetpack, jetFlames, monkey, catapult, catapultArm, chute, goldBall, banana, bananaPile, peel, firePit, flames, potato, potatoArm, power, ice, tramp, TEAM, ORANGE, GUNS, arena, stand, block, tick, ball, splat, ring, pad, bubble, crate, grenade, rocket, net, draped, streak, gun, ladder, rack, zipline, trolley, cache, SPLATS: 6 };
+  BL.blockModels = { hookHead, rope, goldBlock, trophyRays, muzzleFlash, isle, keel, puddle, bolt, hauntDress, beam, laserEyes, ghost, net2, jetpack, jetFlames, monkey, catapult, catapultArm, chute, goldBall, banana, bananaPile, peel, firePit, flames, potato, potatoArm, power, ice, tramp, TEAM, ORANGE, GUNS, arena, stand, block, tick, ball, splat, ring, pad, bubble, crate, grenade, rocket, net, draped, streak, gun, ladder, rack, zipline, zipLight, trolley, cache, SPLATS: 6 };
 })();
