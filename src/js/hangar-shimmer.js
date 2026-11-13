@@ -12,7 +12,7 @@
 // faces the view, one way or mirrored. A very faint shimmer of sound comes with the figure, not the afterimage
 // (`hangarAudio.glint`). Under reduced motion nothing gathers, drifts or falls, its sparks glint slowly and no bars
 // tear across it. It lights nothing and leaves nothing behind; Tess, if she is near it, in sight of it and free to
-// notice it, comes over unsettled (`hangarGuide.unsettled`), and nobody else in the hangar reacts.
+// notice it, comes over to watch it (`hangarGuide.unsettled`), and nobody else in the hangar reacts.
 //
 // The first comes 30 to 60 s into a visit and each next 3 to 5 minutes after the last has gone (`GAP`), counted while
 // the hangar is up. When one is due it waits for a good moment and place: none of the hangar's other events for `CALM`

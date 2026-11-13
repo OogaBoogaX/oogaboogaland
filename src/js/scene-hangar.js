@@ -1697,7 +1697,7 @@
       busy: () => leaving || scene.anomaly.playing || scene.fire.t >= 0 || scene.meltdown.active || scene.roomFire.burning || scene.sis.rampaging || scene.sis.brawling
         || scene.tessFor !== "shimmer" && (scene.guide.lent || scene.guide.holding || scene.guide.state.phase !== "work") || scene.terminals.showing || scene.keypad.open >= 0,
       ooga: () => people && people.player, guide: () => scene.guide.root.position, clear: clearOf });
-    // The shape unsettles Tess: she comes over to it if she is free when she would notice it.
+    // Tess comes over to watch the shape if she is near it and free when she would notice it.
     scene.unsettled = BL.hangarGuide.unsettled(scene.shimmer, camera);
     // The repository's reading: read from GitHub on the first visit a page life, unless the cache holds a fresh one.
     unsubscribeFeed = BL.jetFeed.subscribe(() => { boardsDirty = true; });
@@ -1869,8 +1869,8 @@
     s.sisHead.x = sp.x; s.sisHead.y = sp.y + 0.9; s.sisHead.z = sp.z;
     if (s.sis.rampaging && !s.guide.lent) { s.guide.lend(s.distraction.drive); s.tessFor = "sis"; s.sis.distract(s.guide.root.position); }
     else if (!s.sis.rampaging && s.tessFor === "sis") { s.distraction.done(); s.guide.lend(null); s.tessFor = null; s.sis.distract(null); }
-    // The faint shape in the air unsettles her: lent to it while it shows, if it is near her, in her sight, and she is
-    // free to notice it, back once she has shaken it off.
+    // The faint shape in the air draws her over: lent to it while it shows, if it is near her, in her sight, and she is
+    // free to notice it, back once she has watched it go.
     if (!s.guide.lent && !s.guide.holding && s.guide.state.phase === "work" && s.unsettled.due(s.guide.root.position)) { s.guide.lend(s.unsettled.drive); s.tessFor = "shimmer"; }
     else if (s.tessFor === "shimmer" && s.unsettled.over) { s.unsettled.reset(); s.guide.lend(null); s.tessFor = null; }
     seatViewBack(drivenHere);
