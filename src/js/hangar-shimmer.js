@@ -715,6 +715,8 @@
       // What the hangar may read of it: whether it shows (`state`), its clock, s, where it stands and its timeline (`at`,
       // not to be changed), whether it is clearing away early, how many bars tear across it now, and how many have come.
       at, get state() { return state; }, get t() { return t; }, get fading() { return fadeAt >= 0; }, get bands() { return bands; }, get shows() { return shows; },
+      // Whether, while it shows, its middle or its head is in sight from (x, y, z), past walls, boxes and the Jet.
+      seen: (x, y, z) => state === "show" && (sightClear(x, y, z, at.x, TOP * SCALE * 0.55, at.z) || sightClear(x, y, z, at.x, TOP * SCALE * 0.9, at.z)),
       // Whether the events that come by themselves should wait: while it shows, for AFTER s after, and for CLAIM s once
       // one is due.
       get holding() { return state !== "wait" || after > 0 || auto && due <= 0 && overdue < CLAIM; }
