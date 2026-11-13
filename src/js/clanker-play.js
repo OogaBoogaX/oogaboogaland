@@ -21,7 +21,6 @@
     const acquiredEye = { x: 0, y: 0, z: 0 };
     const previousEye = { x: 0, y: 0, z: 0 };
     const shoulderPoint = { x: 0, y: 0, z: 0 };
-    const carryTarget = { kind: "facing", x: 0, y: 0, z: 0, dx: 0, dy: 0, dz: 0 };
     const eye = new Float64Array(3), rayView = mat4.create(), cameraUp = { x: 0, y: 1, z: 0 };
     const ray = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
     const hit = { node: null, owner: null, x: 0, y: 0, z: 0, distance: 0, type: "object" };
@@ -36,14 +35,13 @@
     let actMode = -1;
     let handoffBefore = false, holdingFollow = false, pinnedFollow = false, viewChanged = false, moving = false;
     let acquisitionHold = false;
-    let shoulderPointActive = false, carryShoulderAim = false;
+    let shoulderPointActive = false;
     let shoulderSide = SHOULDER_SIDE, peek = 0, orbitPitch = 0.42, overheadHeight = 14, headHidden = null, savedHeadHidden = false;
     let overheadEntry = false;
     let targetWait = 0, rightAt = -Infinity, rightDownAt = -Infinity, rightTravel = 0;
-    let carryRight = false, rightPointer = -1, rightX = 0, rightY = 0, rightLastX = 0, rightLastY = 0;
     let combatTooltipEntry = null, combatTooltipText = "", combatTooltipNoDot = false;
     let zoomAt = -Infinity, zoomDirection = 0, zoomStopped = false, zoomGesture = null;
-    const clearRight = () => { rightAt = rightDownAt = -Infinity; rightTravel = 0; carryRight = false; rightPointer = -1; };
+    const clearRight = () => { rightAt = rightDownAt = -Infinity; rightTravel = 0; };
     // Keep the selected mode as intent while asleep; it becomes usable on wake.
     const isCombat = () => !!player && combat && !clankers.sleeping(player);
     const restoreHead = () => {
@@ -77,7 +75,7 @@
     const setView = (next, zoomDistance = null) => {
       if (next === view) return;
       clearRight();
-      shoulderPointActive = carryShoulderAim = false;
+      shoulderPointActive = false;
       if (view !== "birds-eye") orbitPitch = orbit.tPitch;
       view = next; viewChanged = true;
       overheadEntry = false;
@@ -192,7 +190,6 @@
     };
     const cancelInput = () => {
       clearRight();
-      carryShoulderAim = false;
       jumpKey = jumpTap = run = grabHeld = grabSpent = false;
       mouseButtons = 0;
       blockedButtons = 0;
@@ -265,7 +262,7 @@
       hud.setAct(mode === 6 ? "WAKE UP!" : mode === 5 ? "IN AIR" : mode === 4 ? "JUMP OFF" : mode === 3 ? "ROLLING!" : mode === 2 ? "DROP & ROLL" : mode === 1 ? "DOUBLE JUMP" : "JUMP");
     };
     const beginJump = () => {
-      shoulderPointActive = carryShoulderAim = false;
+      shoulderPointActive = false;
       if (clankers.wake()) { jumpTap = false; syncCursor(); }
       else if (player.fire.burning) {
         jumpTap = false;
@@ -293,7 +290,7 @@
       restoreHead(); resetReticle();
       clankers.release();
       player = null; combat = false; wasLocked = false;
-      shoulderPointActive = carryShoulderAim = false;
+      shoulderPointActive = false;
       holdingFollow = handoffBefore = pinnedFollow = viewChanged = moving = false;
       acquisitionHold = false;
       overheadEntry = false;
@@ -323,12 +320,14 @@
       pilot.release(true);
       rebasePilot();
       player = entry;
-      shoulderPointActive = carryShoulderAim = false;
+      shoulderPointActive = false;
       smashMeter = smashBase;
       pilot.setExternalControl(true, isCombat);
       combat = incoming.active && incoming.combat; focused = wasLocked = false;
       view = incoming.active ? incoming.view : "orbit";
       if (combat && view === "orbit") view = BL.pilot.combatEntryView(camera.position, entry.root.position);
+      // Carry has no shoulder view: a carried one comes in as the orbit.
+      if (!combat && view === "shoulder") view = "orbit";
       // Overhead where none is offered comes in at the shoulder, at X's entry pitch.
       const level = view === "birds-eye" && !overheadOk();
       if (level) view = "shoulder";
@@ -414,7 +413,7 @@
           if (entryView === "shoulder") orbit.tPitch = 0.42;
         }
         combat = !combat;
-        shoulderPointActive = carryShoulderAim = false;
+        shoulderPointActive = false;
         if (!combat) setCombatTooltip(null);
         targetWait = 0;
         cancelInput();
@@ -422,7 +421,7 @@
         else if (view === "birds-eye" && !combat) {
           orbitPitch = orbit.pitch;
           setView("orbit");
-        }
+        } else if (view === "shoulder" && !combat) setView("orbit", SHOULDER_DISTANCE);
         // Carry shares the Ooga's native cursor; only combat captures mouse look.
         if (combat) focusCombat();
         else blurCombat();
@@ -565,52 +564,16 @@
         orbit.tx = p.x; orbit.ty = height; orbit.tz = p.z; shoulder = side;
       }
     };
-    const shoulderAt = (clientX, clientY) => {
-      const rect = canvas.getBoundingClientRect(), size = renderer.size;
-      const p = player.root.position, height = shoulderHeight(), side = shoulderSide;
-      pilot.pickCarryTarget(carryTarget, (clientX - rect.left) * size.width / rect.width,
-        (clientY - rect.top) * size.height / rect.height, player, height, Math.abs(side) * 2);
-      setView("shoulder");
-      let yaw = player.heading - Math.PI, pitch = 0;
-      if (carryTarget.kind === "point") {
-        shoulderPoint.x = carryTarget.x; shoulderPoint.y = carryTarget.y; shoulderPoint.z = carryTarget.z;
-        shoulderPointActive = true;
-        const x = shoulderPoint.x - p.x, z = shoulderPoint.z - p.z, horizontal = Math.hypot(x, z);
-        yaw = Math.atan2(-x, -z) + Math.asin(side / horizontal);
-        pitch = Math.atan2(height - shoulderPoint.y, Math.sqrt(horizontal * horizontal - side * side));
-      } else if (carryTarget.kind === "direction") {
-        const horizontal = Math.hypot(carryTarget.dx, carryTarget.dz);
-        if (horizontal > 1e-6) yaw = Math.atan2(-carryTarget.dx, -carryTarget.dz);
-        pitch = Math.atan2(-carryTarget.dy, horizontal);
-      }
-      orbit.tYaw = orbit.yaw + Math.atan2(Math.sin(yaw - orbit.yaw), Math.cos(yaw - orbit.yaw));
-      orbitPitch = orbit.tPitch = clamp(pitch, -PITCH_LIMIT, PITCH_LIMIT);
-      carryShoulderAim = true;
-      peek = 0;
-      followOffset.x = followOffset.y = followOffset.z = 0;
-      pinnedFollow = false;
-      holdingFollow = handoffBefore || climbHandoff();
-      if (holdingFollow) {
-        orbit.tx = p.x; orbit.ty = height; orbit.tz = p.z; shoulder = side;
-      }
-    };
     const rightPress = (event) => {
       if (clankers.sleeping(player)) { clearRight(); return; }
+      // Carry has no shoulder view: the right button changes no view there.
+      if (!combat) { clearRight(); return; }
       const recapture = isCombat() && !focused;
       // Restoring combat focus consumes this press, including its release;
       // it cannot become the first half of a double-click.
       if (recapture) { clearRight(); blockedButtons |= mouseButtons; }
       if (mouseButtons & ~2) clearRight();
       const now = performance.now();
-      if (!combat && view === "orbit") {
-        // Wait for an exclusive click: adding the other mouse button belongs
-        // to walking, in either press order, and must leave the view alone.
-        if (mouseButtons !== 2) return;
-        carryRight = true; rightPointer = event.pointerId;
-        rightX = rightLastX = event.clientX; rightY = rightLastY = event.clientY;
-        rightDownAt = now; rightTravel = 0; rightAt = -Infinity;
-        return;
-      }
       if (view === "birds-eye" || view === "orbit") {
         const overhead = view === "birds-eye";
         setView("shoulder");
@@ -619,8 +582,8 @@
         clearRight();
       } else if (recapture) focusCombat();
       else if (!(mouseButtons & ~2)) {
-        if (now - rightAt <= 350 && (!combat || overheadOk())) {
-          setView(combat ? "birds-eye" : "orbit");
+        if (now - rightAt <= 350 && overheadOk()) {
+          setView("birds-eye");
           clearRight();
         } else { rightDownAt = now; rightTravel = 0; }
       }
@@ -672,7 +635,7 @@
     };
     const moveView = (dx, dy) => {
       if (!player) return false;
-      if (dx || dy) shoulderPointActive = carryShoulderAim = false;
+      if (dx || dy) shoulderPointActive = false;
       if (view === "birds-eye") {
         if (dx) { orbit.tYaw -= dx * 0.004; viewChanged = true; }
         return true;
@@ -695,10 +658,10 @@
       if (fresh) zoomStopped = false;
       if (zoomStopped) return true;
       clearRight();
-      shoulderPointActive = carryShoulderAim = false;
+      shoulderPointActive = false;
       viewChanged = true;
       let next = view, nextDistance = null;
-      if (view === "first-person" && direction > 0) next = "shoulder";
+      if (view === "first-person" && direction > 0) next = combat ? "shoulder" : "orbit";
       else if (view === "shoulder") {
         // Combat that may not go overhead stops at the shoulder.
         if (direction > 0 && combat && !overheadOk()) { zoomStopped = true; return true; }
@@ -710,23 +673,18 @@
         if (direction < 0 && overheadHeight <= SHOULDER_DISTANCE) next = "shoulder";
       } else if (view === "orbit") {
         orbit.tDist = clamp(orbit.tDist * factor, Math.min(orbit.tDist, SHOULDER_DISTANCE), Math.max(orbit.tDist, maxDistance));
-        if (direction < 0 && orbit.tDist <= SHOULDER_DISTANCE) next = "shoulder";
+        if (direction < 0 && orbit.tDist <= SHOULDER_DISTANCE) next = "first-person";
       }
       if (next !== view) {
-        // Shoulder is the mandatory stop in either direction. Once a fresh
-        // gesture leaves it, outward travel continues through distant views.
-        if (next === "shoulder") zoomStopped = true;
+        // Combat stops at the shoulder in either direction, carry at its near orbit out of first person. Once a fresh
+        // gesture leaves it, outward travel continues through distant views; carry's orbit goes on into the eyes.
+        if (next === "shoulder" || next === "orbit" && view === "first-person") zoomStopped = true;
         setView(next, nextDistance);
       }
       return true;
     };
     const onMove = (event) => {
       if (!player || event.pointerType === "touch") return;
-      if (carryRight && event.pointerId !== rightPointer) clearRight();
-      if (carryRight && event.pointerId === rightPointer) {
-        rightTravel += Math.hypot(event.clientX - rightLastX, event.clientY - rightLastY);
-        rightLastX = event.clientX; rightLastY = event.clientY;
-      }
       const pressed = event.buttons & ~mouseButtons & ~blockedButtons;
       const released = mouseButtons & ~event.buttons;
       mouseButtons = event.buttons;
@@ -752,17 +710,6 @@
     };
     const releaseRight = (event) => {
       const now = performance.now();
-      if (carryRight) {
-        const x = rightX, y = rightY, rect = canvas.getBoundingClientRect();
-        const clicked = event.target === canvas && event.pointerId === rightPointer && event.button === 2 && !event.buttons
-          && !combat && view === "orbit" && !clankers.sleeping(player) && now - rightDownAt <= 350
-          && x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
-          && event.clientX >= rect.left && event.clientX < rect.right && event.clientY >= rect.top && event.clientY < rect.bottom
-          && rightTravel + Math.hypot(event.clientX - rightLastX, event.clientY - rightLastY) <= 8;
-        clearRight(); consume(event);
-        if (clicked) shoulderAt(event.clientX, event.clientY);
-        return;
-      }
       rightAt = event.target === canvas && !clankers.sleeping(player) && now - rightDownAt <= 350 && rightTravel <= 8 ? now : -Infinity;
       rightDownAt = -Infinity;
     };
@@ -819,7 +766,7 @@
     on(window, "pointermove", onMove, true);
     on(window, "pointerup", onUp, true);
     on(window, "mousemove", (event) => {
-      if (player && !carryRight && Number.isFinite(rightDownAt)) rightTravel += Math.hypot(event.movementX || 0, event.movementY || 0);
+      if (player && Number.isFinite(rightDownAt)) rightTravel += Math.hypot(event.movementX || 0, event.movementY || 0);
       if (player && isCombat() && focused && (event.target === canvas || document.pointerLockElement === canvas)) {
         consume(event);
         moveView(event.movementX || 0, event.movementY || 0);
@@ -864,7 +811,7 @@
       updateSmashGauge();
       const axes = pilot.controls.read();
       const shoulderCombat = isCombat() && view === "shoulder";
-      if (shoulderCombat && axes.shiftTap) { shoulderSide = -shoulderSide; shoulderPointActive = carryShoulderAim = false; viewChanged = true; }
+      if (shoulderCombat && axes.shiftTap) { shoulderSide = -shoulderSide; shoulderPointActive = false; viewChanged = true; }
       const planted = shoulderCombat && axes.peek && !run;
       peek = damp(peek, planted ? axes.x * 0.34 : 0, 14, dt);
       const moveX = planted ? 0 : axes.x, moveY = planted ? 0 : axes.y;
@@ -872,7 +819,7 @@
       const turnMax = Math.max(1, Math.abs(axes.yaw)), turn = isCombat() ? clamp(axes.yaw + axes.orbitYaw, -turnMax, turnMax) : axes.yaw;
       if (turn || axes.pitch || planted) viewChanged = true;
       moving = Math.hypot(moveX, moveY) > 0.05;
-      if (turn || axes.pitch || planted || moving) shoulderPointActive = carryShoulderAim = false;
+      if (turn || axes.pitch || planted || moving) shoulderPointActive = false;
       orbit.tYaw += turn * 1.7 * dt;
       if (view === "birds-eye") {
         const delta = Math.atan2(Math.sin(orbit.tYaw - orbit.yaw), Math.cos(orbit.tYaw - orbit.yaw));
@@ -885,7 +832,7 @@
       const sy = Math.sin(movementYaw), cy = Math.cos(movementYaw);
       command.x = moveX * cy - moveY * sy;
       command.z = -moveX * sy - moveY * cy;
-      command.heading = isCombat() || view === "first-person" ? movementYaw + Math.PI : carryShoulderAim ? orbit.tYaw + Math.PI
+      command.heading = isCombat() || view === "first-person" ? movementYaw + Math.PI
         : Math.hypot(command.x, command.z) > 0.01 ? Math.atan2(command.x, command.z) : NaN;
       command.climbAxis = axes.y;
       command.climbSide = -axes.x;
@@ -1060,7 +1007,7 @@
       if (!player || clankers.player !== player || !player.active || !player.root.visible) return false;
       cameraHandoff.cancel();
       clearRight();
-      shoulderPointActive = carryShoulderAim = false;
+      shoulderPointActive = false;
       const first = view === "first-person", overhead = view === "birds-eye";
       acquisitionHold = pinnedFollow = handoffBefore = overheadEntry = false;
       holdingFollow = climbHandoff();
