@@ -416,6 +416,32 @@ test("failed and uncertain closures retain durable cleanup ownership for retry",
   room.cleanupJobs[0].inspectUntil = 0; await room.retryCleanup(); assert.equal(room.cleanupJobs.length, 0);
 });
 
+test("an inspection timeout still closes known tracks and retains unknown allocations for recovery", async () => {
+  const { room, storage } = studioRoom(), closed = [];
+  room.sfu.getSession = async () => { throw new DOMException("Timed out", "TimeoutError"); };
+  room.sfu.closeTracks = async (_session, mids) => {
+    closed.push([...mids]);
+    return { tracks: mids.map(mid => ({ mid, errorCode: "close_track_error" })) };
+  };
+  await room.queueClose("uncertain", ["0"], true);
+  assert.deepEqual(closed, [["0"]], "a failed inspection cannot starve a known close");
+  assert.deepEqual(storage.get("voiceCleanup")[0].mids, [], "already-closed MIDs are not retried");
+  room.cleanupJobs[0].inspectUntil = 0;
+  await room.retryCleanup();
+  assert.equal(room.cleanupJobs.length, 1, "the elapsed inspection window does not make a timeout proof of absence");
+  assert.equal(closed.length, 1, "only the unresolved inspection is retried");
+  room.sfu.getSession = async () => ({ tracks: [{ mid: "late", status: "active" }] });
+  room.sfu.closeTracks = async (_session, mids) => { closed.push([...mids]); return { tracks: mids.map(mid => ({ mid })) }; };
+  await room.retryCleanup();
+  assert.deepEqual(closed, [["0"], ["late"]], "recovered inspection accounts for the late allocation");
+  assert.deepEqual(storage.get("voiceCleanup"), []);
+
+  room.sfu.getSession = async () => { const error = new Error("gone"); error.status = 404; throw error; };
+  await room.queueClose("gone", ["1"], true);
+  assert.equal(closed.length, 2, "an explicitly absent session needs no close");
+  assert.equal(room.cleanupJobs.length, 0);
+});
+
 test("receive-only Studio departure forcibly closes subscriptions and moderation survives reentry", async () => {
   const { room, add, pending } = studioRoom(), host = add(1), listener = add(2, { body: null });
   room.studio.hostId = 1; room.studio.mode = "discussion";
@@ -470,7 +496,7 @@ test("inspection retention never closes successful MIDs twice and partial result
     return { tracks: mids.map(mid => {
       assert.ok(active.has(mid), "must not close an already inactive MID");
       if (mid === "1" && first) return { mid, errorCode: "retry" };
-      active.delete(mid); return { mid };
+      active.delete(mid); return mid === "0" ? { mid, errorCode: "close_track_error" } : { mid };
     }) };
   };
   await room.queueClose("synthetic", ["0", "1"], true);
