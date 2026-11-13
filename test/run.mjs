@@ -27561,24 +27561,29 @@ const netFixture=(BL,response,step=200,cookie="")=>{
 };
 const connectionReportChecks = async () => {
   const source = readFileSync(join(root, "src/js/connection-reports.js"), "utf8");
-  const fixture = () => {
+  const fixture = (storage = new Map(), player = { id: 71 }) => {
     let now = 1000, next = 0, response = { ok: true, status: 201 };
     const timers = new Map(), observers = new Set(), updates = [], requests = [];
     const input = { checked: false, addEventListener: (_kind, fn) => { input.change = fn; } };
-    const box = { hidden: true }, status = { textContent: "" };
-    const state = { backend: true, connectionReports: true, me: { id: 71 }, room: "live" };
+    const element = () => ({ events: new Map(), addEventListener(type, fn) { this.events.set(type, fn); } });
+    const box = { ...element(), hidden: true }, status = { textContent: "" }, notice = { hidden: true, textContent: "" };
+    const help = { hidden: true, classList: { remove() {}, add() {} }, getBoundingClientRect: () => ({ bottom: 100 }) };
+    const helpButton = { ...element(), setAttribute() {}, matches: () => false };
+    const listeners = new Map();
+    const state = { backend: true, connectionReports: true, me: player, room: "live" };
     const net = { state, subscribe: fn => updates.push(fn), subscribeConnection: fn => {
       observers.add(fn); return () => observers.delete(fn);
     } };
     const context = { BL: { net }, document: {
       currentScript: { src: "https://site.test/js/main-1234abcd.js" },
       getElementById: id => ({ "players-diagnostics": box, "players-diagnostics-input": input,
-        "players-diagnostics-status": status })[id],
-    }, window: { setTimeout: (fn, ms) => { const id = ++next; timers.set(id, { fn, at: now + ms }); return id; },
+        "players-diagnostics-status": status, "diagnostics-notice": notice, "players-diagnostics-help": help, "players-diagnostics-info": helpButton })[id],
+    }, localStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) },
+      window: { innerHeight: 844, addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener: type => listeners.delete(type), setTimeout: (fn, ms) => { const id = ++next; timers.set(id, { fn, at: now + ms }); return id; },
       clearTimeout: id => timers.delete(id) }, performance: { now: () => now }, AbortController,
       fetch: async (url, options) => { requests.push({ url, ...options }); return typeof response === "function" ? response(options) : response; } };
     runInNewContext(source, context);
-    return { state, input, box, status, requests, observers, timers,
+    return { state, input, box, status, notice, help, helpButton, requests, observers, timers, storage, listeners,
       response: value => { response = value; },
       opt: on => { input.checked = on; input.change(); },
       update: () => updates.forEach(fn => fn()),
@@ -27598,6 +27603,16 @@ const connectionReportChecks = async () => {
   off.emit("socket-close", { code: 1006, clean: false }); await off.flush();
   record("dropout reports: default off, no observer, timer or network request", !off.input.checked &&
     !off.box.hidden && off.observers.size === 0 && off.timers.size === 0 && off.requests.length === 0);
+  off.helpButton.events.get("click")({ pointerType: "touch" });
+  off.box.events.get("pointerleave")({ pointerType: "touch" });
+  const touchStays = !off.help.hidden;
+  off.helpButton.events.get("click")({ pointerType: "touch" });
+  const tapCloses = off.help.hidden;
+  off.helpButton.events.get("pointerenter")({ pointerType: "mouse" });
+  let stopped = false, prevented = false;
+  off.listeners.get("keydown")({ key: "Escape", preventDefault: () => { prevented = true; }, stopImmediatePropagation: () => { stopped = true; } });
+  record("dropout tooltip: touch leave preserves the explanation for a second-tap dismissal, and Escape consumes the key before the panel",
+    touchStays && tapCloses && off.help.hidden && stopped && prevented && !off.input.checked);
   off.opt(true);
   for (let id = 1; id <= 80; id++) { off.emit("peer-join", { id }); off.emit("peer-leave", { id, reason: "replaced" }); }
   off.emit("peer-body", { id: 3, body: false }); off.emit("peer-zone", { to: "private-zone" });
@@ -27605,10 +27620,11 @@ const connectionReportChecks = async () => {
   record("dropout reports: normal joins, replacements, body/zone changes and welcome do not upload", off.requests.length === 0);
   off.emit("peer-leave", { id: 99, reason: "closed", login: "private-name" });
   off.advance(350); off.emit("peer-join", { id: 99, login: "private-name", x: 123 });
+  const detected = !off.notice.hidden && off.notice.textContent.includes("Dropout detected");
   await off.flush();
   const report = JSON.parse(off.requests[0].body), wire = off.requests[0].body;
   record("dropout reports: rapid peer return sends only allowlisted context after explicit opt-in",
-    report.kind === "peer-return" && report.gapMs === 350 && report.clientBuild === "1234abcd" &&
+    detected && off.notice.textContent === "Dropout diagnostics sent to Cloudflare." && report.kind === "peer-return" && report.gapMs === 350 && report.clientBuild === "1234abcd" &&
     report.consent === true && report.events.at(-1).voiceEnabled && !report.events.at(-1).voiceMuted &&
     !/private|login|position|\\"id\\"|\\"x\\"/.test(wire) && off.requests[0].credentials === "same-origin", wire);
   off.emit("socket-close", { code: 1006, clean: false }); await off.flush();
@@ -27616,7 +27632,7 @@ const connectionReportChecks = async () => {
   const reconnect = fixture(); reconnect.opt(true);
   reconnect.emit("heartbeat-timeout", { unanswered: 3, lastPongAge: 45000 });
   reconnect.state.room = "connecting"; reconnect.emit("clear"); await reconnect.flush();
-  const held = reconnect.requests.length === 0;
+  const held = reconnect.requests.length === 0 && reconnect.notice.textContent.includes("waiting for connection");
   reconnect.advance(500); reconnect.state.room = "live"; reconnect.emit("welcome"); await reconnect.flush();
   const recovered = JSON.parse(reconnect.requests[0].body);
   record("dropout reports: reconnect uploads wait for welcome and include heartbeat/recovery context", held &&
@@ -27630,9 +27646,11 @@ const connectionReportChecks = async () => {
   const inflight = fixture(); inflight.opt(true);
   inflight.response(options => new Promise((_resolve, reject) => options.signal.addEventListener("abort", () => reject(new Error("aborted")))));
   inflight.emit("socket-close", { code: 1006, clean: false });
-  const sending = inflight.fire(); inflight.opt(false); await sending;
+  const sending = inflight.fire();
+  const sendingNotice = !inflight.notice.hidden && inflight.notice.textContent === "Sending dropout diagnostics to Cloudflare…";
+  inflight.opt(false); await sending;
   record("dropout reports: opting out aborts an in-flight request and does not restore stale status",
-    inflight.requests[0].signal.aborted && inflight.status.textContent === "Off" && inflight.timers.size === 0);
+    sendingNotice && inflight.notice.hidden && inflight.requests[0].signal.aborted && inflight.status.textContent === "Off" && inflight.timers.size === 0);
   const expired = fixture(); expired.opt(true);
   expired.emit("socket-close", { code: 1006, clean: false }); expired.state.room = "connecting"; await expired.flush();
   expired.advance(120001); expired.state.room = "live"; expired.emit("welcome"); await expired.flush();
@@ -27643,12 +27661,42 @@ const connectionReportChecks = async () => {
     for (let j = 0; j < 30; j++) bounded.emit("visibility");
     bounded.emit("socket-close", { code: 1006, clean: false }); await bounded.flush(); bounded.advance(60000);
   }
+  const failedNotice = bounded.notice.textContent === "Dropout diagnostics could not be sent; no retry.";
+  await bounded.flush(6000);
   record("dropout reports: failures never retry, history stays bounded and attempts stop at ten per visit",
-    bounded.requests.length === 10 && bounded.requests.every(r => JSON.parse(r.body).events.length <= 16) && bounded.timers.size === 0);
+    failedNotice && bounded.notice.hidden && bounded.requests.length === 10 && bounded.requests.every(r => JSON.parse(r.body).events.length <= 16) && bounded.timers.size === 0);
   const disposed = fixture(); disposed.opt(true); disposed.emit("socket-close", { code: 1006, clean: false });
   disposed.emit("dispose"); await disposed.flush();
   record("dropout reports: disposal stops observation and clears pending uploads",
-    disposed.requests.length === 0 && disposed.observers.size === 0 && !disposed.input.checked && disposed.box.hidden);
+    disposed.requests.length === 0 && disposed.observers.size === 0 && !disposed.input.checked && disposed.box.hidden && !disposed.listeners.has("storage") && disposed.timers.size === 0);
+  const saved = new Map(), first = fixture(saved);
+  first.opt(true); first.emit("socket-close", { code: 1006, clean: false });
+  first.emit("dispose");
+  const restored = fixture(saved), other = fixture(saved, { id: 72 }), signedOut = fixture(saved, null);
+  await restored.flush(); await other.flush();
+  const restoredClean = restored.input.checked && restored.observers.size === 1 && restored.requests.length === 0 && restored.notice.hidden;
+  restored.state.me = null; restored.update();
+  const signedOutStopped = !restored.input.checked && restored.observers.size === 0;
+  restored.state.me = { id: 71 }; restored.update();
+  const signedBackIn = restored.input.checked && restored.observers.size === 1;
+  restored.state.connectionReports = false; restored.update();
+  const unavailable = !restored.input.checked && restored.observers.size === 0;
+  restored.state.connectionReports = true; restored.update();
+  restored.opt(false);
+  const next = fixture(saved);
+  record("dropout reports: opt-in survives visits only for its account, never restores an incident, and opt-out survives too",
+    restoredClean && !other.input.checked && !signedOut.input.checked && signedOut.box.hidden && signedOutStopped &&
+    signedBackIn && unavailable && !next.input.checked && next.observers.size === 0);
+  const tabs = fixture(saved); tabs.opt(true); tabs.emit("socket-close", { code: 1006, clean: false });
+  saved.set("ooga-dropout-diagnostics:71", "off"); tabs.listeners.get("storage")({ key: "ooga-dropout-diagnostics:71" });
+  await tabs.flush();
+  record("dropout reports: another tab's opt-out stops observation and discards its unsent incident",
+    !tabs.input.checked && !tabs.observers.size && tabs.requests.length === 0 && tabs.notice.hidden);
+  const blocked = fixture({ get() { throw Error("blocked"); }, set() { throw Error("blocked"); } });
+  blocked.opt(true); blocked.emit("socket-close", { code: 1006, clean: false }); await blocked.flush();
+  blocked.opt(false);
+  record("dropout reports: unavailable storage keeps explicit opt-in usable for this visit",
+    blocked.requests.length === 1 && !blocked.input.checked && blocked.observers.size === 0);
 };
 
 const roomSocketChecks = async BL => {
