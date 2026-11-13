@@ -1636,27 +1636,35 @@ export class Room extends DurableObject {
         tasks.set(job.session, new Promise(resolve => { finished = resolve; }));
         try {
           const revision = job.revision || 0;
+          let inspected = !job.inspect;
           if (job.inspect) {
             const priorVersions = { ...(job.midVersions || {}) };
-            const state = await this.sfu.getSession(job.session);
-            const inactive = new Set((state.tracks || []).filter(t => t.status === "inactive").map(t => t.mid));
-            job.mids = job.mids.filter(mid => !inactive.has(mid) || (job.midVersions || {})[mid] !== priorVersions[mid]);
-            // Only a session nobody holds any more is swept for what is left. On a live one that would close every voice
-            // it still receives, with no page any the wiser: one listener gone deaf to everybody.
-            const held = [...this.players.values()].some(p => p.voice.sub === job.session || p.voice.pub === job.session);
-            if (!held) job.mids = [...new Set(job.mids.concat((state.tracks || []).filter(t => t.status !== "inactive" && typeof t.mid === "string").map(t => t.mid)))];
+            try {
+              const state = await this.sfu.getSession(job.session);
+              const inactive = new Set((state.tracks || []).filter(t => t.status === "inactive").map(t => t.mid));
+              job.mids = job.mids.filter(mid => !inactive.has(mid) || (job.midVersions || {})[mid] !== priorVersions[mid]);
+              // Only a session nobody holds any more is swept for what is left. On a live one that would close every voice
+              // it still receives, with no page any the wiser: one listener gone deaf to everybody.
+              const held = [...this.players.values()].some(p => p.voice.sub === job.session || p.voice.pub === job.session);
+              if (!held) job.mids = [...new Set(job.mids.concat((state.tracks || []).filter(t => t.status !== "inactive" && typeof t.mid === "string").map(t => t.mid)))];
+              inspected = true;
+            } catch (err) {
+              if (err.status === 404) throw err;
+              // An inspection timeout must not prevent closing MIDs we already own. Keep the inspection pending,
+              // even if those closes succeed: the timed-out allocation may still have left other tracks behind.
+            }
           }
           const mids = job.mids.slice();
           const versions = { ...(job.midVersions || {}) };
           const res = mids.length ? await this.sfu.closeTracks(job.session, mids) : { tracks: [] };
-          // Only explicit per-track successes relinquish ownership. Missing/malformed rows retry.
-          const succeeded = new Set((Array.isArray(res.tracks) ? res.tracks : []).filter(t => t && typeof t.mid === "string" && !t.errorCode).map(t => t.mid));
+          // Cloudflare's close_track_error confirms an absent/already-closed track. Other errors and missing rows retry.
+          const succeeded = new Set((Array.isArray(res.tracks) ? res.tracks : []).filter(t => t && typeof t.mid === "string" && (!t.errorCode || t.errorCode === "close_track_error")).map(t => t.mid));
           job.mids = job.mids.filter(mid => !succeeded.has(mid) || (job.midVersions || {})[mid] !== versions[mid]);
           for (const mid of succeeded) if (!job.mids.includes(mid) && job.midVersions) delete job.midVersions[mid];
           // A close this pass sent that the SFU did not confirm; a mid queued while it was on its way is simply next.
           if (mids.some(mid => job.mids.includes(mid))) job.inspect = true;
           // A concurrent queue may have appended/reallocated owned MIDs while upstream was pending.
-          if ((job.revision || 0) !== revision || job.mids.length || (job.inspect && Date.now() < job.inspectUntil)) continue;
+          if (!inspected || (job.revision || 0) !== revision || job.mids.length || (job.inspect && Date.now() < job.inspectUntil)) continue;
           this.cleanupJobs.splice(this.cleanupJobs.indexOf(job), 1);
         } catch (err) {
           // A confirmed absent upstream session owns no tracks and needs no further retry.
