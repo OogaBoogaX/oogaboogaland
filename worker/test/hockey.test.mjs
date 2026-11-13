@@ -329,7 +329,7 @@ test("shared hockey presentation derives one solo Clanker and head scores from t
   const cave=()=>{const r=node(),head=node();head.geometry={};addChild(r,head);return {root:r,parts:{head,armR:node()},headOpen:{},headClosed:{}};};
   const humans=new Map([[1,cave()],[2,cave()]]);
   let now=10000;
-  const BL={hockeyWire:W,net:{state:{me:{id:1},body:"a",selfId:1},hockeyTables:tables,serverNow:()=>now},
+  const BL={hockeyWire:W,net:{state:{me:{id:3},body:"c",selfId:3},hockeyTables:tables,serverNow:()=>now},
     scene:{addChild,removeChild,createNode:opts=>Object.assign(node(),opts),boundsOf:()=>({min:[-.2,0,-.2],max:[.2,1,.2]})},
     models:{caveman:cave},contributors:{traitsFor:()=>({})},crew:{bodyHeightOf:()=>2},arcadeModels:{staffHat:()=>({})},
     agent:{create:()=>{const r=cave();r.poseManaged=(dt,x,y,z,yaw,speed)=>{Object.assign(r.root.position,{x,y,z});r.speed=speed;};r.dispose=()=>removeChild(root,r.root);r.liveGeometry=()=>{};rigs.push(r);return r;}}};
@@ -341,6 +341,10 @@ test("shared hockey presentation derives one solo Clanker and head scores from t
   now+=2400;view.update(.1);assert.equal(rigs[0].root.position.x,W.TABLES[0][0]);assert.equal(rigs[0].speed,0);
   const a=frame();a[8]=a[14]=2;a[9]=a[15]=3;tables[0].a=a;
   const scores=[],ctx={save(){},restore(){},strokeText(){},fillText:s=>scores.push(s)};view.draw(ctx,(x,y)=>({x,y}));assert.deepEqual(scores,["2","3"]);
+  // The hall visitor has already left even when the cached table still owns their old seat.
+  BL.net.state.selfId=1;scores.length=0;view.draw(ctx,(x,y)=>({x,y}));
+  assert.deepEqual(scores,["3"],"a stale seat cannot attach a hockey score to the returning visitor");
+  BL.net.state.selfId=3;
   tables[0].ids=[1,2];view.update(.1);assert.equal(root.children.length,0,"two humans never retain a Clanker");
   tables[0].ids=[1,0];view.update(.1);assert.equal(rigs[1].root.position.x,W.TABLES[0][0],"late viewers use server start time rather than replaying the approach");
   tables[0]=null;view.update(.1);assert.equal(root.children.length,0);

@@ -13,23 +13,30 @@ const text = (value, max) => typeof value === "string" && value.length > 0 && va
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const keys = (value, allowed) => object(value) && Object.keys(value).every((key) => allowed.includes(key));
 const login = (value) => typeof value === "string" && LOGIN.test(value) && !value.includes("--");
+// A field's own name in a finding, when it is a plain word. Anything else a submission chose is never echoed: a
+// finding is posted on its PR.
+const named = (key) => typeof key === "string" && /^[A-Za-z]{1,24}$/.test(key) ? `\`${key}\`` : "an unnamed field";
+const unknown = (value, allowed) => Object.keys(value).find((key) => !allowed.includes(key));
 
 export const validateCharacterData = (row, now = Date.now()) => {
-  if (!keys(row, ["handle", "github", "display", "joined", "lastCommit", "look", "voice"])) reject("Only documented character data fields may be automatically bundled; executable dress hooks require maintainer review.");
+  const fields = ["handle", "github", "display", "joined", "lastCommit", "look", "voice"];
+  if (!keys(row, fields)) reject(`Only documented character data fields may be automatically bundled; executable dress hooks require maintainer review.${object(row) ? ` Found ${named(unknown(row, fields))}.` : ""}`);
   if (!login(row.handle) || row.github !== undefined && !login(row.github)) reject("Invalid character handle or GitHub owner.");
   if (row.display !== undefined && !text(row.display, 39)) reject("Invalid display text.");
   for (const field of ["joined", "lastCommit"]) if (!Number.isSafeInteger(row[field]) || row[field] <= 0 || row[field] * 1000 > now) reject("Character dates must be valid past Unix seconds.");
   if (row.look !== undefined) {
     const colors = ["skin", "hair", "fur", "eyeColor"];
     const flags = ["bald", "cleanShaven", "hairless", "noBrow", "wideEyes", "noPupils", "cigarette", "gasMask", "stoneAxe", "skater", "pumpkin"];
-    if (!keys(row.look, [...colors, ...flags, "face", "build", "height", "hatY", "eyeGlow", "portrait"])) reject("Unknown appearance field.");
+    const looks = [...colors, ...flags, "face", "build", "height", "eyeGlow", "portrait"];
+    if (!keys(row.look, looks)) reject(`Unknown appearance field${object(row.look) ? ` ${named(unknown(row.look, looks))}` : ""}.`);
     for (const [key, value] of Object.entries(row.look)) {
-      if (colors.includes(key) && (typeof value !== "string" || !/^#[a-f0-9]{6}$/i.test(value))) reject("Colors must be six-digit hex values.");
-      if (flags.includes(key) && typeof value !== "boolean") reject("Appearance flags must be boolean.");
-      if (key === "face" && !["none", "beard", "smirk"].includes(value)) reject("Unsupported face.");
-      if (key === "build" && !["slim", "normal"].includes(value)) reject("Unsupported build.");
-      const ranges = { height: [0.8, 1.3], hatY: [-4, 20], eyeGlow: [0, 1] };
-      if (ranges[key] && (!Number.isFinite(value) || value < ranges[key][0] || value > ranges[key][1])) reject("Appearance value exceeds its safe range.");
+      if (colors.includes(key) && (typeof value !== "string" || !/^#[a-f0-9]{6}$/i.test(value))) reject(`Colors must be six-digit hex values (\`${key}\`).`);
+      if (flags.includes(key) && typeof value !== "boolean") reject(`Appearance flags must be boolean (\`${key}\`).`);
+      // The faces models.js draws: "nose" is the one a slim or clean-shaven Ooga gets when it names none.
+      if (key === "face" && !["none", "nose", "beard", "smirk"].includes(value)) reject("Unsupported face: use none, nose, beard or smirk.");
+      if (key === "build" && !["slim", "normal"].includes(value)) reject("Unsupported build: use slim or normal.");
+      const ranges = { height: [0.8, 1.3], eyeGlow: [0, 1] };
+      if (ranges[key] && (!Number.isFinite(value) || value < ranges[key][0] || value > ranges[key][1])) reject(`Appearance value \`${key}\` exceeds its safe range, ${ranges[key][0]} to ${ranges[key][1]}.`);
       if (key === "portrait") {
         if (!keys(value, ["min", "max"]) || ![value.min, value.max].every((v) => Array.isArray(v) && v.length === 3 && v.every((n) => Number.isFinite(n) && Math.abs(n) <= 32))
           || !value.min.every((n, i) => n < value.max[i])) reject("Invalid portrait bounds.");
@@ -141,13 +148,24 @@ export const isGitHubDisplayRename = (previous, source) => {
   } catch { return false; }
 };
 
+export const SOURCE_LIMIT = 32768;
+// The screen's two patterns. They read comments and strings too: a word in a comment trips them as code does.
+const AMBIENT = /\b(?:eval|Function|fetch|XMLHttpRequest|WebSocket|import|require|process|globalThis|document|localStorage|sessionStorage|navigator|location|constructor|__proto__|prototype|setTimeout|setInterval|Worker|atob)\b|\\x[0-9a-f]{2}|\\u[0-9a-f{]|https?:\/\//i;
+const WINDOW = /\bwindow\b(?!\s*\.\s*BL\b)/;
+// Where the screen first trips in a source, for a contributor's local check: the line and the text that tripped it,
+// or null. The intake itself reports only that it tripped.
+export const screenFinding = (source) => {
+  const hit = AMBIENT.exec(source) || WINDOW.exec(source);
+  return hit ? { line: source.slice(0, hit.index).split("\n").length, text: hit[0] } : null;
+};
+
 export const scanCharacter = (source) => {
-  if (typeof source !== "string" || Buffer.byteLength(source) > 32768) reject("Character source exceeds 32 KiB.");
+  if (typeof source !== "string" || Buffer.byteLength(source) > SOURCE_LIMIT) reject("Character source exceeds 32 KiB.");
   // This screen is deliberately conservative. Passing it does NOT make custom
   // code safe: it goes exclusively to a human-reviewed bundle, never auto-merge.
   if (instruction.test(source) || /[\u0000\u202a-\u202e\u2066-\u2069]/.test(source)) reject("Suspicious instructions or invisible direction controls found.");
-  if (/\b(?:eval|Function|fetch|XMLHttpRequest|WebSocket|import|require|process|globalThis|document|localStorage|sessionStorage|navigator|location|constructor|__proto__|prototype|setTimeout|setInterval|Worker|atob)\b|\\x[0-9a-f]{2}|\\u[0-9a-f{]|https?:\/\//i.test(source)) reject("Network, dynamic execution, ambient access, encoded code or prototype access requires a separate security review.");
-  if (/\bwindow\b(?!\s*\.\s*BL\b)/.test(source)) reject("Custom code may not access window outside BL.");
+  if (AMBIENT.test(source)) reject("Network, dynamic execution, ambient access, encoded code or prototype access requires a separate security review.");
+  if (WINDOW.test(source)) reject("Custom code may not access window outside BL.");
   try { const row = parseSafeCharacter(source); return { lane: "daily", row, source: safeCharacterSource(row) }; }
   catch (error) {
     if (!(error instanceof CharacterRejection)) throw error;
@@ -155,7 +173,8 @@ export const scanCharacter = (source) => {
     // syntax is not silently accepted by the automatic lane.
     let row;
     try { row = declaredIdentity(source); } catch { reject("Cannot establish a single literal character identity."); }
-    return { lane: "manual", row, source };
+    // `why` is the automatic lane's own finding: fixed text from this file, with at most a plain field name.
+    return { lane: "manual", row, source, why: error.message };
   }
 };
 

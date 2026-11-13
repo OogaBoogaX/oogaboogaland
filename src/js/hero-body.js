@@ -1,4 +1,4 @@
-// The modelled look, every Ooga's (?oogastyle=0 builds the voxel bodies it replaced): a body modelled from scratch after the reference art, in place of the
+// The modelled look, every Ooga's: a body modelled from scratch after the reference art, in place of the
 // one drawn from a character's block maps. Flat planes with crisp bevels: every limb is a loft of eight-sided rings
 // (a rectangle with its corners cut), plates and features are slabs stood on them, and fur is flat pointed shards.
 // Nothing here is smooth shaded, and a head keeps its authored blocks where its character has them. Units are a sixteenth of the

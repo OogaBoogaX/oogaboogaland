@@ -68,7 +68,7 @@ export const inspectSubmission = async (gh, submission, rock) => {
       touched.add(file.filename);
     }
   }
-  const entries = [];
+  const entries = [], reasons = [];
   for (const file of changed) {
     if (!touched.has(file.filename)) reject("Cannot attribute the character change to a submitted commit.");
     const original = await gh.file(submission.head, file.filename), scanned = scanCharacter(original.source);
@@ -86,8 +86,11 @@ export const inspectSubmission = async (gh, submission, rock) => {
     if ((current?.sha || null) !== (base?.sha || null)) throw new Error("Character changed on rock since this submission; rebase before extraction");
     entries.push({ pr: pr?.number || null, head: submission.head, author, path: file.filename,
       base: current?.sha || null, hash: digest(source), lane, source });
+    // Why a file needs a maintainer, for the comment on its PR: the automatic lane's own finding, never the
+    // submission's text. Kept beside the entries, which are saved to the manifest as they are.
+    if (lane === "manual") reasons.push({ path: file.filename, why: scanned.why || "An earlier commit in this submission held code that needs review, and a file enters one lane for all its revisions." });
   }
-  return { entries, hasCharacters: true, mixed: comparison.files.some((file) => !touchesCharacters(file)), author };
+  return { entries, reasons, hasCharacters: true, mixed: comparison.files.some((file) => !touchesCharacters(file)), author };
 };
 
 export const readManifest = (source, lane) => {

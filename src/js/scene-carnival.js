@@ -1027,7 +1027,7 @@
     leaving = false;
     camera = createCamera({ fov: 52, near: 0.1, far: 50 });
     root = createNode();
-    hud = hudMod.create({ signal: ctx.signal, roster: BL.contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: BL.contributors.activeRoster });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 4, z: -4 } });
@@ -1135,6 +1135,7 @@
 
   // Per frame, allocation-free: the flow, the game, the camera and the HUD.
   const update = (dt) => {
+    if (hockeyPlayers) hockeyPlayers.restore();
     T.elapsed += dt;
     if (kind === "hockey" && phase === "intro") joinHockey();
     if (phase === "intro" && introEl.hidden) {
@@ -1145,7 +1146,7 @@
     }
     if (kind === "hockey") {
       if (!hockeySession) BL.net.sendPose(HOCKEY_SEAT.x, 0, HOCKEY_SEAT.z, HOCKEY_SEAT.yaw);
-      hockeyRemotes.update(dt); hockeyAmbience.update(dt); hockeyPlayers.update(dt);
+      hockeyRemotes.update(dt); hockeyAmbience.update(dt);
       if (hockeySession) hockeySession.tick(dt, phase === "play" || phase === "pause");
     } else BL.net.sendPose(machine.play.x, machine.y || 0, machine.play.z, machine.play.facing);
     let dolly = 1;
@@ -1189,6 +1190,7 @@
     T.big = Math.max(0, T.big - dt);
     if (hockeySession?.follower) play.follow(dt);
     else if (phase !== "pause" || hockeySession) play.update(!hockeySession?.human && pace < 1 && !play.status.verb ? dt * pace : dt);
+    if (hockeyPlayers) hockeyPlayers.update(dt);
     audio.tick();
     if (rival) {
       const P = rival.parts, u = play.rivalU;
@@ -1377,7 +1379,7 @@
   BL.scenes = BL.scenes || {};
   for (const id of Object.keys(KINDS)) {
     SCENES[id] = BL.scenes[id] = {
-      id, padContext: "arcade", voiceZone: "arcade.hall", prepare: () => { const loading = BL.deferred.load("arcade"); return loading ? loading.then(() => null) : null; }, enter: (ctx) => enter(ctx, id), update, overlay, onDonation, onKey, onLootCleared: () => {}, renderOpts: RENDER_OPTS,
+      id, padContext: "arcade", voiceZone: "arcade.hall", prepare: () => { const loading = BL.deferred.load("arcade"); return loading ? loading.then(() => null) : null; }, enter: (ctx) => enter(ctx, id), update, overlay, onDonation, onKey, renderOpts: RENDER_OPTS,
       leave: leaveScene, stats, liveGeometry, root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
       controlsHelp(touch) {
         const H = BL.controlsHelp, rows = H.fromCopy((play.coach || COACH[kind])[touch ? 1 : 0], touch);
