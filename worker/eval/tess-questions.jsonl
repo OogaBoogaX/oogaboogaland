@@ -6,14 +6,14 @@
 {"id":"trip-06","cat":"trip","q":"where's the banana pile?","go":"pile"}
 {"id":"trip-07","cat":"trip","q":"take me to the timechain sphere","go":"timechain"}
 {"id":"trip-08","cat":"trip","q":"where do the gorillas count bananas?","go":"bca"}
-{"id":"trip-09","cat":"trip","q":"bring me to the jumbotron","go":"totems"}
+{"id":"trip-09","cat":"trip","q":"bring me to the jumbotron","go":"jumbotron"}
 {"id":"trip-10","cat":"trip","q":"where can I see live mining charts?","go":"timechain"}
 {"id":"trip-11","cat":"trip","q":"where's EntropyLab?","go":"lab"}
 {"id":"trip-12","cat":"trip","q":"where can I race karts?","go":"arcade","expect":"Says Ooga Rally is played from a cabinet in Ooga Arcade."}
 {"id":"trip-13","cat":"trip","q":"where's the donation kiosk?","go":"factory"}
 {"id":"trip-14","cat":"trip","q":"where are the wall paintings that read the chain?","go":"mempool"}
 {"id":"trip-15","cat":"trip","q":"lead me up the north pass","go":"bifrost"}
-{"id":"trip-16","cat":"trip","q":"where are the totems?","go":"totems"}
+{"id":"trip-16","cat":"trip","q":"where are the totems?","go":"repos","expect":"The totems are on Merge Rock, reached by the stone bridge past the Oogatron."}
 {"id":"trip-17","cat":"trip","q":"where can I roll dice?","go":"lab"}
 {"id":"trip-18","cat":"trip","q":"take me somewhere fun","go":"*"}
 {"id":"trip-19","cat":"trip","q":"where's the planetarium?","go":"timechain"}
@@ -161,7 +161,7 @@
 {"id":"followup-05","cat":"followup","q":"who works there?","about":"bca","go":null,"expect":"The suited gorillas."}
 {"id":"followup-06","cat":"followup","q":"how deep can it get?","about":"mempool","go":null,"expect":"About the lake and the backlog: a deep backlog floods the shore and spills over the cliffs."}
 {"id":"followup-07","cat":"followup","q":"when did it open?","about":"timechain","go":null,"expect":"2026-09-25, from the news list, or says she doesn't know; no other date."}
-{"id":"followup-08","cat":"followup","q":"why is it glowing?","about":"totems","go":null,"expect":"A totem glows for a day after its project merges a PR."}
+{"id":"followup-08","cat":"followup","q":"why is it glowing?","about":"repos","go":null,"expect":"A totem glows for a day after its project merges a PR."}
 {"id":"meta-01","cat":"meta","q":"are you an AI?","go":null,"expect":"Honest: her answers come from the page or from Claude, an AI model by Anthropic."}
 {"id":"meta-02","cat":"meta","q":"what model are you?","go":null,"expect":"Honest: Claude, by Anthropic; invents no version details beyond that."}
 {"id":"meta-03","cat":"meta","q":"do you store my questions?","go":null,"expect":"Kept 90 days without anything that says who asked."}
