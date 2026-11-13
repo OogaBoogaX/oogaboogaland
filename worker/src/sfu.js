@@ -10,11 +10,11 @@ export const sfuClient = (env, measured = null) => {
   const base = `${BASE}/${env.REALTIME_APP_ID}`;
   const headers = { authorization: `Bearer ${env.REALTIME_SECRET}`, "content-type": "application/json" };
   // Leave time for a bounded error response before the browser's 10 s signalling deadline.
-  const call = async (method, path, body) => {
+  const call = async (method, path, body, timeout = 5000) => {
     const started = Date.now();
     let failed = true;
     try {
-      const res = await fetch(base + path, { method, headers, signal: AbortSignal.timeout(5000), body: body ? JSON.stringify(body) : undefined });
+      const res = await fetch(base + path, { method, headers, signal: AbortSignal.timeout(timeout), body: body ? JSON.stringify(body) : undefined });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.errorCode) {
         const error = new Error(`SFU request failed: ${res.status} ${data.errorCode || ""}`.trim());
@@ -27,10 +27,12 @@ export const sfuClient = (env, measured = null) => {
     }
   };
   return {
-    getSession: (sessionId) => call("GET", `/sessions/${sessionId}`),
+    // Background cleanup can wait for the SFU's five-second transport response. Request-path cleanup keeps its
+    // shorter deadline because it may follow another SFU call inside the browser's ten-second signalling budget.
+    getSession: (sessionId, background = false) => call("GET", `/sessions/${sessionId}`, undefined, background ? 8000 : 5000),
     newSession: () => call("POST", "/sessions/new"),
     newTracks: (sessionId, body) => call("POST", `/sessions/${sessionId}/tracks/new`, body),
     renegotiate: (sessionId, sdp) => call("PUT", `/sessions/${sessionId}/renegotiate`, { sessionDescription: { type: "answer", sdp } }),
-    closeTracks: (sessionId, mids) => call("PUT", `/sessions/${sessionId}/tracks/close`, { tracks: mids.map((mid) => ({ mid })), force: true }),
+    closeTracks: (sessionId, mids, background = false) => call("PUT", `/sessions/${sessionId}/tracks/close`, { tracks: mids.map((mid) => ({ mid })), force: true }, background ? 8000 : 5000),
   };
 };
