@@ -55,7 +55,8 @@ const CAST = castIndex(CAST_ROWS);
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
-    this.inspect = inspectReporter(ctx, env, "Room", () => ctx.id.name, (detail) => this.inspectState(detail));
+    // Every Room entry point uses the one name "island" (index.js). Do not depend on runtime id metadata for reporting.
+    this.inspect = inspectReporter(ctx, env, "Room", () => "island", (detail) => this.inspectState(detail));
     this.flushDue = 0;
     this.players = new Map();
     this.highscoreRevisions = new Map();

@@ -146,7 +146,7 @@ const roomHost = ({ sfu = null, inspector = true } = {}) => {
   runInNewContext(source, context);
   const stored = new Map(), INSPECTOR = binding();
   const ctx = {
-    id: { name: "island" }, waitUntil: () => {},
+    id: {}, waitUntil: () => {},
     setWebSocketAutoResponse() {}, blockConcurrencyWhile: (fn) => fn(), acceptWebSocket: (ws) => accepted.push(ws),
     getWebSockets: () => accepted.filter((ws) => !ws.closed), getWebSocketAutoResponseTimestamp: () => null,
     storage: {
@@ -165,7 +165,7 @@ const roomHost = ({ sfu = null, inspector = true } = {}) => {
 };
 
 test("the room tells the inspector who joined, moved and dropped, with what the close said", async () => {
-  const { room, join, events, advance } = roomHost();
+  const { room, join, events, advance, INSPECTOR } = roomHost();
   const a = await join(1, "a"), b = await join(2, "b");
   assert.ok(a.sent[0].features.includes(INSPECT_FEATURE), "pages hear the inspector is on");
   room.webSocketMessage(a, JSON.stringify({ t: "zone", name: "factory" }));
@@ -175,6 +175,7 @@ test("the room tells the inspector who joined, moved and dropped, with what the 
   room.webSocketClose(b, 1000, "paused", true);
   await flush();
   const lines = events();
+  assert.ok(INSPECTOR.reports.length && INSPECTOR.reports.every(r => r.name === "island"), "routing name survives missing ctx.id.name metadata");
   assert.deepEqual(lines.filter((e) => e.kind === "join").map((e) => e.login), ["a", "b"]);
   assert.deepEqual(lines.find((e) => e.kind === "zone").fields, { from: "outside", to: "factory" });
   assert.deepEqual(lines.find((e) => e.kind === "visible").fields, { visible: false });
