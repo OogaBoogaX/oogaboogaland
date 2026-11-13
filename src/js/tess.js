@@ -396,12 +396,17 @@
   const BEAMS = 4;
   // Her sparks and motes at once, at most: a working beam keeps about 13 in the air and a fast flight about 10.
   const FLECKS = 24;
+  // How long a jolt lasts (`startle`) and a shake to shake something off (`shake`), s.
+  const STARTLE = 0.7, SHAKE = 0.9;
   // One Tess for a visit, under `parent`, picked as `kind`. The place she guides moves her through this rig: a flight
   // path she steers along (`clearPath`, `push`, `steer`, the last point following someone while `track`ed), her beam
   // (`mode` 1 working, 2 pointing, landing on `aim`, or split to each of up to BEAMS `aims` round the `aim` she
   // faces), whom she watches when she is not flying or beaming (`watching`
   // and `watch`), and her moods: `calm` while she talks, `steady` while she keeps by someone, so she does not turn to
-  // her flight. Outline registries walk past her, as she moves every frame.
+  // her flight. Outline registries walk past her, as she moves every frame. A place may unsettle her (`uneasy`, 0 to 1:
+  // her rings falter and stutter out of step, her eye narrows and dims and she trembles), jolt her (`startle`: her
+  // rings stop dead, her eye shrinks to a point, her head jerks back and she flinches back) and have her shake it off
+  // (`shake`: a quick twist back and forth with her rings whirling); none of it moves her body, which the place flies.
   // Hub scope survives scene changes, but Tess's meshes need survive only while a Tess owns them. The director leaves
   // one scene and enters the next in one task, so the caches go only once that task ends with no Tess: the Factory's
   // greeter entered as the hub's guide leaves reuses every tier rather than rebuilding them in the swap frame.
@@ -422,7 +427,7 @@
     // Her bubble stands over her eye, not the rings, whose top moves as they tumble.
     const figure = { root: body, parts: { head } }, rings = [], pivots = [], orientations = [], turnQ = quat.create();
     const tumbles = Float64Array.from(RINGS, (_, i) => i * 2.1);
-    let greetingT = 0, speakingT = 0, lookYaw = 0, lookPitch = 0, tempo = 1, flare = 0, trailT = 0, sparkT = 0, litGain = 1, shown = 0;
+    let greetingT = 0, speakingT = 0, lookYaw = 0, lookPitch = 0, tempo = 1, flare = 0, trailT = 0, sparkT = 0, litGain = 1, shown = 0, startleT = 0, shakeT = 0;
     body.sightHidden = true;
     hover.scale.x = hover.scale.y = hover.scale.z = SCALE;
     addChild(body, hover); addChild(hover, head);
@@ -509,7 +514,7 @@
     };
     const rig = {
       root: body, figure, position, vel,
-      mode: 0, aim: { x: 0, y: 0, z: 0 }, aims: null, calm: false, steady: false, watching: false, watch: { x: 0, y: 0, z: 0 },
+      mode: 0, aim: { x: 0, y: 0, z: 0 }, aims: null, calm: false, steady: false, watching: false, watch: { x: 0, y: 0, z: 0 }, uneasy: 0,
       clearPath(speed, corner) { pathCount = pathAt = 0; pathSpeed = speed; pathCorner = corner; tracking = false; },
       push(x, y, z) { const o = pathCount++ * 3; path[o] = x; path[o + 1] = y; path[o + 2] = z; },
       // The last point follows someone: she never settles on it, and `steer` never reports arriving.
@@ -545,6 +550,8 @@
       // A greeting's tilt of the eye, and the rings' flare when she notices someone.
       nod() { greetingT = 1.4; },
       flare() { flare = 1; },
+      startle() { startleT = STARTLE; },
+      shake() { shakeT = SHAKE; },
       // The beam she shows: the mode she asked for, once she faces where it lands.
       get shown() { return shown; },
       update(dt, elapsed) {
@@ -572,30 +579,44 @@
         } else if (mode) lookAt(aim.x, aim.y, aim.z);
         else if (rig.watching) lookAt(rig.watch.x, rig.watch.y, rig.watch.z);
         greetingT = Math.max(0, greetingT - dt); speakingT = Math.max(0, speakingT - dt);
+        // Unsettled, jolted and shaking it off: how much of each now (the jolt and the shake easing out as they end).
+        startleT = Math.max(0, startleT - dt); shakeT = Math.max(0, shakeT - dt);
+        const uneasy = rig.uneasy, jolt = startleT > 0 ? Math.pow(startleT / STARTLE, 1.5) : 0, shaking = shakeT / SHAKE;
         const turnBy = Math.atan2(Math.sin(lookYaw - body.rotation.y), Math.cos(lookYaw - body.rotation.y));
         body.rotation.y = (body.rotation.y + damp(0, turnBy, 8, dt)) % TAU;
         head.rotation.x = damp(head.rotation.x, lookPitch + Math.sin(greetingT * 9) * greetingT * 0.05, 8, dt);
         head.rotation.z = damp(head.rotation.z, Math.sin(greetingT * 7) * greetingT * 0.06
           - (cruising ? Math.max(-0.35, Math.min(0.35, turnBy * 0.3)) : 0), 6, dt);
-        hover.position.y = Math.sin(elapsed * 1.7) * 0.018 * SCALE;
+        hover.position.y = Math.sin(elapsed * 1.7) * 0.018 * SCALE + uneasy * Math.sin(elapsed * 47) * 0.004 * SCALE;
+        // A jolt throws her head back and her back a little, a tremble shakes it, and a shake twists her to and fro.
+        hover.rotation.x = -jolt * 0.32 + uneasy * Math.sin(elapsed * 37) * 0.025;
+        hover.rotation.z = uneasy * Math.sin(elapsed * 41 + 1) * 0.035;
+        hover.rotation.y = shaking * Math.sin((SHAKE - shakeT) * 31) * 0.5;
+        hover.position.z = -jolt * 0.09 * SCALE;
         // Each ring tumbles about its own diameter, at her pace: brisk in flight, busy at work, slow while she talks,
         // and a flare when she notices someone. Quaternions keep three-axis turns stable; the angles stay bounded.
+        // Unsettled, each ring moves in fits and starts, out of step with the others, and twitches; jolted, they stop
+        // dead; shaking it off, they whirl.
         const pace = cruising ? 1.8 : rig.calm ? 0.5 : working ? 1.25 : 1;
         tempo = damp(tempo, pace, 2, dt); flare = Math.max(0, flare - dt * 0.9);
+        const flicker = 1 - uneasy * (0.35 + 0.25 * Math.sin(elapsed * 17) * Math.sin(elapsed * 6.3));
         for (let i = 0; i < rings.length; i++) {
-          const spec = RINGS[i];
-          tumbles[i] = (tumbles[i] + spec.tumble * (tempo + flare * 2.5) * dt) % TAU;
-          quat.fromAxisAngle(turnQ, spec.axis[0], spec.axis[1], spec.axis[2], tumbles[i]);
+          const spec = RINGS[i], fits = 1 - uneasy * (Math.sin(elapsed * (4.3 + i * 1.7) + i * 2.1) > 0 ? 0.9 : 0.15);
+          tumbles[i] = (tumbles[i] + spec.tumble * (tempo * fits * (1 - jolt) + flare * 2.5 + shaking * 5) * dt) % TAU;
+          quat.fromAxisAngle(turnQ, spec.axis[0], spec.axis[1], spec.axis[2], tumbles[i] + uneasy * Math.sin(elapsed * 29 + i * 2.3) * 0.1);
           quat.multiply(pivots[i].quaternion, orientations[i], turnQ);
           rings[i].rotation.z = (elapsed * spec.spin) % TAU;
-          rings[i].glow = 1 + flare * 1.6 + (working ? 0.3 + Math.sin(elapsed * 11 + i * 2) * 0.2 : 0);
+          rings[i].glow = (1 + flare * 1.6 + (working ? 0.3 + Math.sin(elapsed * 11 + i * 2) * 0.2 : 0)) * flicker;
         }
         optics.position.x = damp(optics.position.x, Math.sin(turnBy) * 0.004, 9, dt);
         optics.position.y = damp(optics.position.y, -Math.sin(head.rotation.x) * 0.004, 9, dt);
         blades.rotation.z = Math.sin(elapsed * 0.4) * 0.05;
-        iris.glow = 1 + Math.sin(speakingT * 18) * speakingT * 0.15;
-        const blink = Math.pow(Math.max(0, Math.cos(elapsed * TAU / 7.3)), 80);
-        pupil.scale.y = 1 - blink * 0.85;
+        // Her eye: dimmer and flickering while unsettled, a flash as she jolts; its pupil narrowing, to a point as she
+        // jolts, and blinking.
+        iris.glow = (1 + Math.sin(speakingT * 18) * speakingT * 0.15) * flicker + jolt * 1.2;
+        const blink = Math.pow(Math.max(0, Math.cos(elapsed * TAU / 7.3)), 80), narrow = 1 - Math.min(0.85, uneasy * 0.45 + jolt * 0.7);
+        pupil.scale.x = narrow;
+        pupil.scale.y = (1 - blink * 0.85) * narrow;
 
         // The beam, once she faces where it lands: a working one is bright, throws sparks and carries her light onto
         // what she works; a pointing one is thin and soft. Her own show only: it never touches what it lands on.
