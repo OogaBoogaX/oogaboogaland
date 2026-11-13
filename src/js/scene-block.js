@@ -594,6 +594,7 @@
     you = 0; watchVisit = false; chairsGreeted = false;
     if (kept) { Object.assign(selection, kept); kept = null; liveCast = null; if (sim) { const was = sim.map; recast(); if (was !== selection.map) { buildMap(); mapBase = null; } } }
     phase = "board";
+    trophyEnd();
     followMatchMap();
     if (el.againBtn) el.againBtn.textContent = "Again";
     el.board.hidden = false;
@@ -624,6 +625,7 @@
     for (const s of splats) s.visible = false;
     phase = "play";
     result = null;
+    trophyEnd();
     closeQuiz();
     el.board.hidden = el.results.hidden = true;
     try { mapHidden = localStorage.getItem(MAP_KEY) === "1"; } catch { mapHidden = false; }
@@ -663,33 +665,161 @@
     el.center.hidden = el.notice.hidden = true;
     hud.el.act.hidden = el.paintBtn.hidden = el.cross.hidden = true;
     if (document.pointerLockElement === el.canvas) document.exitPointerLock();
-    el.resultTitle.textContent = won ? "Blocks mined!" : "Rivals mined it";
+    // The match's result is the sim's, so every page in a live round names the same winners; only "you" differs.
+    const winner = sim.winner || sim.team;
+    el.resultTitle.textContent = `${TEAM_NAME[winner]} wins!`;
+    el.results.dataset.team = winner;
+    el.results.dataset.won = String(won);
     (won ? audio.cues.win : audio.cues.lose)();
     audio.state.zip = 0;
-    el.summary.textContent = `${sim.score[sim.team]} to ${sim.score[sim.rival]} in ${fmt(ms)} · first to ${sim.target}${best ? " · fastest win yet!" : ""}`;
+    el.trophyTime.textContent = fmt(ms);
+    el.summary.textContent = `${won ? "Your side mined it" : "The rivals mined it this time · here's to the next round"} · first to ${sim.target}${best ? " · fastest win yet!" : ""}`;
     const me = sim.actors[0];
     el.stats.innerHTML = "";
-    // The round's highlights: its most valuable Ooga, the sharpest shot, the longest sniper hit.
-    let mvp = 0, shooter = 0, sniper = 0;
+    // The round's highlights: its most valuable Ooga (the winners' best, who tops the podium), the sharpest shot, the
+    // longest sniper hit.
+    let mvp = sim.actors.findIndex((a) => a.team === winner), shooter = 0, sniper = 0;
     const worth = (a) => a.captures * 3 + a.rescues * 2 + a.hits;
     for (let i = 1; i < sim.actors.length; i++) {
       const a = sim.actors[i];
-      if (worth(a) > worth(sim.actors[mvp])) mvp = i;
+      if (a.team === winner && worth(a) > worth(sim.actors[mvp])) mvp = i;
       if (a.hits > sim.actors[shooter].hits) shooter = i;
       if (a.longShot > sim.actors[sniper].longShot) sniper = i;
     }
-    const rows = [["Round MVP", `${nameOf(mvp)} · ${sim.actors[mvp].captures} mined, ${sim.actors[mvp].hits} splats`], ["Most splats", `${nameOf(shooter)} · ${sim.actors[shooter].hits}`]];
+    const rows = [["Round MVP", `${nameOf(mvp)} · ${sim.actors[mvp].captures} mined · ${sim.actors[mvp].hits} splats`], ["Most splats", `${nameOf(shooter)} · ${sim.actors[shooter].hits}`]];
     if (sim.actors[sniper].longShot > 0) rows.push(["Longest sniper shot", `${nameOf(sniper)} · ${Math.round(sim.actors[sniper].longShot)} m`]);
-    rows.push(["Your captures", me.captures], ["Your splats", me.hits], ["Times splatted", me.splats], ["Fastest win", game.state.block.best ? fmt(game.state.block.best) : "—"], ["Rounds won", `${game.state.block.wins} of ${game.state.block.games}`]);
-    for (const [label, value] of rows) {
-      const li = document.createElement("li"), span = document.createElement("span"), b = document.createElement("b");
+    rows.push(["Your round", `${me.captures} mined · ${me.hits} splats · ${me.splats} splatted`], ["Fastest win", game.state.block.best ? fmt(game.state.block.best) : "—"], ["Rounds won", `${game.state.block.wins} of ${game.state.block.games}`]);
+    // Each highlight a medal: gold for the MVP, silver and bronze for the shots, the visitor's own in plain wood.
+    const MEDALS = ["gold", "silver", "bronze"];
+    for (let k = 0; k < rows.length; k++) {
+      const [label, value] = rows[k], li = document.createElement("li"), span = document.createElement("span"), b = document.createElement("b");
+      li.className = "block-badge";
+      li.dataset.medal = k < rows.length - 3 ? MEDALS[Math.min(k, 2)] : "wood";
       span.textContent = label;
       b.textContent = String(value);
       li.append(span, b);
       el.stats.append(li);
     }
+    // The sides, every Ooga and bot on each, best first: blocks mined and splats; the visitor's row and the MVP marked.
+    for (const t of SIM.TEAMS) {
+      const list = t === "blue" ? el.sideBlue : el.sideRed, ids = [];
+      for (let i = 0; i < sim.actors.length; i++) if (sim.actors[i].team === t) ids.push(i);
+      ids.sort((a, b) => worth(sim.actors[b]) - worth(sim.actors[a]) || a - b);
+      list.textContent = "";
+      for (const i of ids) {
+        const li = document.createElement("li"), name = document.createElement("span"), mined = document.createElement("b"), hits = document.createElement("b");
+        name.textContent = nameOf(i);
+        mined.textContent = String(sim.actors[i].captures);
+        hits.textContent = String(sim.actors[i].hits);
+        li.classList.toggle("you", i === 0 && !onDeck());
+        li.classList.toggle("mvp", i === mvp);
+        li.append(name, mined, hits);
+        list.append(li);
+      }
+      list.closest("[data-team]").classList.toggle("won", t === winner);
+    }
     el.results.hidden = false;
-    if (won) for (const a of actors.slice(0, 2)) if (a.cave) fx.burst(a.body.position.x, 1.5, a.body.position.z, 24, ORANGE_BITS, 3);
+    trophyShow(winner, worth, mvp);
+  };
+
+  // The trophy stage (`finish`): up in the board's sky on its cloud, the winners stand on a heap of mined blocks in their
+  // colour round the best of them, who hoists the golden block; the sunburst turns behind them and confetti falls. The
+  // camera frames it in the results card's open window (`#block-trophy-stage`), measured when the card shows and on a
+  // resize, never per frame. `HEAP`: [x, tier, z] per block; `PODIUM`: [x, feet height, z, turn] per winner, the MVP first.
+  // The frame takes in `TROPHY_H` by `TROPHY_W` round `TROPHY_FOCUS` above the cloud: the Oogas and the golden block, the
+  // heap's foot running out under the banner.
+  const TROPHY_K = 1.2, TROPHY_S = 0.62 * TROPHY_K, TROPHY_H = 3.4, TROPHY_W = 4.2, TROPHY_FOCUS = 3.45, TROPHY_COUNT_S = 0.9;
+  const HEAP = [[-1.6, 0, 0.3], [-0.8, 0, 0.45], [0, 0, 0.5], [0.8, 0, 0.45], [1.6, 0, 0.3], [-1.2, 1, 0.1], [-0.4, 1, 0.2], [0.4, 1, 0.2], [1.2, 1, 0.1], [-0.4, 2, -0.1], [0.4, 2, -0.1]];
+  const PODIUM = [[0, 3 * TROPHY_S, -0.1, 0], [-1.2, 2 * TROPHY_S, 0.1, 0.3], [1.2, 2 * TROPHY_S, 0.1, -0.3], [2.25, 0, 0.7, -0.5]];
+  const DIGITS = Array.from({ length: 21 }, (_, n) => String(n));
+  let trophy = null, trophyNodes = null;
+  const buildTrophy = () => {
+    const heap = HEAP.map(([x, tier, z], k) => place(createNode({ geometry: BM.block(0), position: { x, y: CLOUD_Y + (tier + 0.5) * TROPHY_S, z }, rotation: { x: 0, y: (k * 0.37) % 0.5 - 0.25, z: 0 }, scale: { x: TROPHY_K, y: TROPHY_K, z: TROPHY_K }, sightHidden: true, visible: false })));
+    trophyNodes = { heap, gold: place(createNode({ geometry: BM.goldBlock(), scale: { x: 1.5, y: 1.5, z: 1.5 }, sightHidden: true, visible: false })),
+      rays: place(createNode({ geometry: BM.trophyRays(0), position: { x: 0, y: CLOUD_Y + 2.9, z: -3.5 }, sightHidden: true, visible: false })) };
+  };
+  const trophyVisible = (on) => {
+    if (!trophyNodes) return;
+    for (const n of trophyNodes.heap) n.visible = on;
+    trophyNodes.gold.visible = trophyNodes.rays.visible = on;
+  };
+  // The open window's place on the screen, as the camera needs it: its centre in normalized device coordinates and its
+  // share of the view's height and width.
+  const measureTrophy = () => {
+    if (!trophy || !el.trophyStage) return;
+    // The banner across the window's foot is left out, so it never covers the heap.
+    const r = el.trophyStage.getBoundingClientRect(), c = el.canvas.getBoundingClientRect(), banner = el.resultTitle.offsetHeight + 10, h = r.height - banner;
+    if (!c.width || !c.height || !r.width || h <= 0) return;
+    trophy.nx = ((r.left + r.width / 2 - c.left) / c.width) * 2 - 1;
+    trophy.ny = 1 - ((r.top + h / 2 - c.top) / c.height) * 2;
+    trophy.fh = h / c.height; trophy.fw = r.width / c.width; trophy.aspect = c.width / c.height;
+  };
+  const onTrophyResize = () => measureTrophy();
+  const trophyShow = (winner, worth, mvp) => {
+    const order = [];
+    for (let i = 0; i < sim.actors.length; i++) if (sim.actors[i].team === winner) order.push(i);
+    order.sort((a, b) => (b === mvp) - (a === mvp) || worth(sim.actors[b]) - worth(sim.actors[a]) || a - b);
+    order.length = Math.min(order.length, PODIUM.length);
+    const spot = sim.actors.map(() => -1);
+    for (let k = 0; k < order.length; k++) spot[order[k]] = k;
+    trophy = { team: winner, order, spot, t: 0, burst: 0, count: 0, nx: 0, ny: 0.3, fh: 0.4, fw: 0.8, aspect: 16 / 9, score: [sim.score.blue, sim.score.red], shown: [-1, -1] };
+    const ti = TEAM_INDEX[winner];
+    for (const n of trophyNodes.heap) n.geometry = BM.block(ti);
+    trophyNodes.rays.geometry = BM.trophyRays(ti);
+    trophyVisible(true);
+    if (fpGun) fpGun.visible = fpGunL.visible = false;
+    measureTrophy();
+    window.requestAnimationFrame(measureTrophy);
+  };
+  const trophyEnd = () => { trophy = null; trophyVisible(false); };
+  const trophyView = () => {
+    const T = trophy, fov = 38 * Math.PI / 180, tan = Math.tan(fov / 2);
+    camera.fov = fov;
+    // Back far enough that the group fills the window, then shifted so it stands in the window's middle, looking a
+    // little up at it.
+    const d = Math.max(TROPHY_H / (Math.max(0.15, T.fh) * 2 * tan), TROPHY_W / (Math.max(0.2, T.fw) * 2 * tan * T.aspect));
+    const cy = CLOUD_Y + TROPHY_FOCUS, ox = -T.nx * d * tan * T.aspect, oy = -T.ny * d * tan;
+    setVec(camera.position, ox, cy + oy - d * 0.17, d);
+    setVec(camera.target, ox, cy + oy, 0);
+  };
+  const poseTrophy = (dt, elapsed) => {
+    const T = trophy, base = CLOUD_Y, ti = TEAM_INDEX[T.team];
+    T.t += dt;
+    for (let i = 0; i < actors.length; i++) {
+      const a = actors[i], k = T.spot[i];
+      if (k < 0) { a.body.visible = false; continue; }
+      const s = PODIUM[k], hop = k === 0 || CLOUD_CALM ? 0 : Math.abs(Math.sin(elapsed * 4.2 + k * 1.9)) * 0.5;
+      a.body.visible = true;
+      setVec(a.body.position, s[0], base + s[1] + hop, s[2]);
+      a.body.rotation.x = 0; a.body.rotation.y = s[3]; a.body.scale.y = 1;
+      a.ring.visible = a.blob.visible = a.chute.visible = a.bubble.visible = a.netted.visible = a.held.visible = a.trolley.visible = a.jetFlame.visible = a.rope.visible = a.hookHead.visible = false;
+      // The two beside the MVP wave the Golden Dual AKs; the MVP's hands are full of the golden block.
+      const dual = k === 1 || k === 2;
+      a.gun.visible = a.gunL.visible = dual;
+      if (dual) a.gun.geometry = a.gunL.geometry = BM.gun(GUN_OF.gold * 2 + ti);
+      if (!a.cave) continue;
+      const p = a.cave.parts, w = CLOUD_CALM ? 0 : Math.sin(elapsed * 6 + k * 2.3), kick = hop > 0.05 ? 0.55 : 0;
+      if (k === 0) p.armL.rotation.x = p.armR.rotation.x = -3.05;
+      else { p.armR.rotation.x = -2.7 + w * 0.35; p.armL.rotation.x = -2.3 - w * 0.35; }
+      p.legL.rotation.x = kick; p.legR.rotation.x = -kick;
+    }
+    const top = PODIUM[0], mvp = actors[T.order[0]], head = mvp && mvp.cave && mvp.cave.headOffset || 1.3;
+    setVec(trophyNodes.gold.position, top[0], base + top[1] + head + 1.05 + (CLOUD_CALM ? 0 : Math.sin(elapsed * 3) * 0.06), top[2]);
+    trophyNodes.gold.rotation.y = CLOUD_CALM ? 0.6 : elapsed * 0.9;
+    trophyNodes.rays.rotation.z = CLOUD_CALM ? 0 : elapsed * 0.12;
+    // Confetti in the team's colours and gold, a burst every so often (once, for reduced motion).
+    if (!CLOUD_CALM || T.count < 1) {
+      T.burst -= dt;
+      if (T.burst <= 0) {
+        T.burst = T.count < 3 ? 0.18 : 0.5; T.count++;
+        fx.burst(((T.count * 37) % 7 - 3) * 0.7, base + TROPHY_H, 0.6, T.count < 3 ? 40 : 18, T.count & 1 ? PAINT_BITS[T.team] : ORANGE_BITS, 2.8);
+      }
+    }
+    // The final score counts up once.
+    for (let s = 0; s < 2; s++) {
+      const n = CLOUD_CALM ? T.score[s] : Math.min(T.score[s], Math.floor(T.score[s] * Math.min(1, T.t / TROPHY_COUNT_S) + 0.0001));
+      if (n !== T.shown[s]) { T.shown[s] = n; (s ? el.finalRed : el.finalBlue).textContent = DIGITS[n] || String(n); }
+    }
   };
 
   let centerTimer = 0, noticeTimer = 0;
@@ -2173,16 +2303,18 @@
 
   const update = (dt, elapsed) => {
     sceneTime = elapsed;
-    if (skyPerch) skyPerch.visible = phase === "board";
+    const onTrophy = phase === "results" && !!trophy;
+    if (skyPerch) skyPerch.visible = phase === "board" || onTrophy;
     for (let i = 0; i < skyClouds.length; i++) {
       const n = skyClouds[i];
-      n.visible = phase === "board";
+      n.visible = phase === "board" || onTrophy;
       if (n.visible && !CLOUD_CALM && (n.position.x += dt * CLOUD_DRIFT) > CLOUD_SPAN) n.position.x -= 2 * CLOUD_SPAN;
     }
     // Each map's own time of day; Haunted Hollow is night and keeps its stars.
     const mapHour = MAP_HOUR[SIM.ARENA.id];
     // The start menu is up in the clouds at noon, whatever the map's own hour.
-    daylight.sample(phase === "board" ? 12 : mapHour, RENDER_OPTS, clock.dayOfYear, daylight.ISLAND_LATITUDE_DEG, clock.continuousDay, clock.utcMs);
+    // The trophy stands in warm light: a sunset sky behind Blue so the team's colour stands out, an afternoon one behind Red.
+    daylight.sample(phase === "board" ? 12 : onTrophy ? (trophy.team === "blue" ? 17 : 15.5) : mapHour, RENDER_OPTS, clock.dayOfYear, daylight.ISLAND_LATITUDE_DEG, clock.continuousDay, clock.utcMs);
     RENDER_OPTS.time = elapsed;
     if (round === null && BL.net.state.blockLive) openRound();
     if (round) round.lobbyTick(dt);
@@ -2230,8 +2362,10 @@
     if (sim && actors) poseBeams(elapsed);
     poseShots();
     poseWallets(elapsed);
+    if (onTrophy) poseTrophy(dt, elapsed);
     if (phase === "board") boardView(elapsed, dt);
     else if (onDeck()) deckView(dt);
+    else if (onTrophy) trophyView();
     else updateCamera(dt);
     if (!onDeck()) poseWeather(dt);
     if (phase === "play") drawMap(dt, elapsed);
@@ -2604,7 +2738,7 @@
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, camera, hud, overlay: ctx.overlay, tickerAt: { x: 0, y: 8, z: 0 } });
-    for (const id of ["board", "results", "strip", "center", "struggle", "struggle-fill", "struggle-left", "struggle-meter", "struggle-word", "notice", "best", "record", "score-blue", "score-red", "own", "theirs", "time", "drop", "summary", "stats", "result-title", "quiz", "quiz-q", "quiz-note", "quiz-fill"]) {
+    for (const id of ["board", "results", "strip", "center", "struggle", "struggle-fill", "struggle-left", "struggle-meter", "struggle-word", "notice", "best", "record", "score-blue", "score-red", "own", "theirs", "time", "drop", "summary", "stats", "result-title", "trophy-stage", "final-blue", "final-red", "trophy-time", "side-blue", "side-red", "quiz", "quiz-q", "quiz-note", "quiz-fill"]) {
       el[id.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = document.getElementById(`block-${id}`);
     }
     el.struggleWord.textContent = COARSE ? "Tap fast!" : "Mash SPACE!";
@@ -2651,6 +2785,7 @@
     el.barGrip.addEventListener("pointerup", onBarUp);
     el.barGrip.addEventListener("pointercancel", onBarUp);
     window.addEventListener("resize", placeBar);
+    window.addEventListener("resize", onTrophyResize);
     el.passBtn = document.querySelector('#block-tools [data-tool="pass"]');
     el.tools = [...el.toolBar.querySelectorAll("[data-tool]")];
     el.onTool = (e) => { const k = e.currentTarget.dataset.tool; e.currentTarget.blur(); if (!inRound()) return; if (k === "crate") buildCrate(); else if (k === "grab") grabCrate(); else if (k === "pass") passBlock(); else if (k === "zip") zipNow(); else chooseTool(k); };
@@ -2750,6 +2885,7 @@
     sim = SIM.create({ team: selection.team, seed: 1, size: selection.size, skill: selection.skill, target: selection.target, map: selection.map });
     buildMap();
     buildSkyClouds();
+    buildTrophy();
     buildActors(castNames());
     for (let i = 0; i < actors.length; i++) sim.actors[i].name = actors[i].name;
     paintTeams();
@@ -2919,6 +3055,7 @@
     el.barGrip.removeEventListener("pointerup", onBarUp);
     el.barGrip.removeEventListener("pointercancel", onBarUp);
     window.removeEventListener("resize", placeBar);
+    window.removeEventListener("resize", onTrophyResize);
     document.removeEventListener("mousemove", onLockedMove);
     window.removeEventListener("keydown", onArrow);
     window.removeEventListener("keyup", onArrow);
@@ -2951,7 +3088,7 @@
     input.dispose();
     hud.dispose();
     phase = "board";
-    skyClouds = []; skyPerch = null;
+    skyClouds = []; skyPerch = null; trophy = trophyNodes = null;
     sim = blocks = shots = splats = ticks = pads = crates = rain = caches = fpGun = fpGunL = trampNodes = powerNodes = result = null;
     mapRoot = fireNode = dancers = peelNodes = catapults = walletNodes = vendNodes = boltNode = boltRing = null;
     hookNodes = []; ghostNodes = [];

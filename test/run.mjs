@@ -8421,6 +8421,14 @@ const gameRulesChecks = async () => {
     const racked = H.racks.flatMap(([, , rows]) => rows.map(([id]) => id));
     record("arcade block hall: three racks hold the game's nine weapons, each from its own held model",
       racked.length === 9 && racked.filter(Number.isInteger).every((i, k) => i === k) && racked.includes("hook") && racked.includes("wallet") && H.pictures.length === 4, JSON.stringify(racked));
+    {
+      // Block Frenzy's trophy stage: the golden block is the teams' cube in gold, and each side's sunburst glows in its own colour.
+      for (const name of ["block-sim", "block-models"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+      const T = BL.blockModels, gold = T.goldBlock(), rays = [T.trophyRays(0), T.trophyRays(1)];
+      record("block frenzy trophy: the golden block and each side's sunburst build, the rays glowing in that side's colour",
+        gold.faces.length === T.block(0).faces.length && rays.every((r) => r.faces.length > 0 && r.faces.every((f) => f.emissive === 1)) && rays[0].faces[0].color.join() !== rays[1].faces[0].color.join(),
+        JSON.stringify({ gold: gold.faces.length, rays: rays.map((r) => r.faces.length) }));
+    }
     // The zipline off the ledge: the survey over the scene's world, ledge to island, is clean and the ride ends on the island's top.
     const Z = BL.zipline, far = (z) => z <= H.stop.z + 1;
     const q = { support: (x, z) => far(z) ? H.cloudY : z >= H.ledge - 0.5 ? H.y : NaN, clear: () => true, landable: (x, y, z) => far(z) };
@@ -12105,7 +12113,10 @@ const blockQuiz = { name: "block quiz", why: "rule: a quiz trap holds the visito
   const f = await b.evaluate(`(() => { const B = window.__ooga, D = B.block, a = D.sim.actors[0]; const fresh = !D.quiz.locked && D.quiz.asked === 2; D.answer(D.quiz.right); B.advance(0.1, 1 / 60); return { fresh, free: a.trapped === 0 && !D.quiz.open && document.getElementById("block-quiz").hidden }; })()`);
   record("block quiz: a trap opens the question, a wrong answer locks the card and brings another, a right answer breaks the bubble", r.open && r.locked && f.fresh && f.free, JSON.stringify({ ...r, ...f }));
 } };
-const blockRun = `(() => { const B = window.__ooga, D = B.block; D.start(); for (let i = 0; i < 80 && D.phase === "play"; i++) D.simulate(15, true); B.advance(0.3, 1 / 30); const save = B.game.state.block; return { ok: D.phase === "results" && !document.getElementById("block-results").hidden && save.games === 1 && save.wins === (D.result.won ? 1 : 0), phase: D.phase, result: D.result, save }; })()`;
+// The results are the trophy screen: the winning side named on its banner and its colour, and every Ooga of both sides in the tables.
+const blockRun = `(() => { const B = window.__ooga, D = B.block; D.start(); for (let i = 0; i < 80 && D.phase === "play"; i++) D.simulate(15, true); B.advance(0.3, 1 / 30); const save = B.game.state.block, card = document.getElementById("block-results"), w = D.sim.winner;
+  const trophy = card.dataset.team === w && document.getElementById("block-result-title").textContent === (w === "blue" ? "Blue" : "Red") + " wins!" && document.querySelectorAll("#block-side-blue li, #block-side-red li").length === D.sim.actors.length && card.querySelector('[data-team="' + w + '"].won') !== null;
+  return { ok: D.phase === "results" && !card.hidden && trophy && save.games === 1 && save.wins === (D.result.won ? 1 : 0), phase: D.phase, result: D.result, save, trophy }; })()`;
 const dropStart = { name: "drop start", why: "regression: Space on the title card also launched the flight", run: async (b) => {
   const st = () => b.evaluate(`({ phase: window.__ooga.drop.phase, card: !document.querySelector('[data-intro="drop"]').hidden })`);
   const fresh = await st();

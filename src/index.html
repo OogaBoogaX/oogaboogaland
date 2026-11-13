@@ -1208,14 +1208,37 @@
           <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
-      <section class="race-results" id="block-results" hidden aria-label="Block Frenzy results">
-        <h2><span data-sign id="block-result-title">Blocks mined!</span></h2>
-        <p class="help" id="block-summary"></p>
-        <ul class="race-podium drop-rows" id="block-stats"></ul>
-        <div class="actions">
-          <button type="button" data-action="block-again">Again</button>
-          <button type="button" data-action="block-board">Main menu</button>
-          <button type="button" data-action="leave">Back to the island</button>
+      <section class="race-results block-trophy" id="block-results" hidden aria-label="Block Frenzy results" data-team="blue">
+        <header class="block-trophy-head">
+          <p class="game-intro-kicker">Ooga Arcade</p>
+          <h2 class="game-intro-title"><span data-sign>Block Frenzy</span></h2>
+        </header>
+        <div class="block-trophy-stage" id="block-trophy-stage">
+          <i class="block-trophy-sparkles" aria-hidden="true"></i>
+          <p class="block-trophy-banner" id="block-result-title" role="status">Blue wins!</p>
+        </div>
+        <div class="block-trophy-board">
+          <div class="block-trophy-tally">
+            <p class="block-trophy-score" aria-label="Final score"><b class="block-final" data-team="blue" id="block-final-blue">0</b><i aria-hidden="true">–</i><b class="block-final" data-team="red" id="block-final-red">0</b></p>
+            <p class="block-trophy-time" id="block-trophy-time" aria-label="Round time">0:00</p>
+          </div>
+          <p class="help" id="block-summary"></p>
+          <div class="block-trophy-sides">
+            <section class="block-side-panel" data-team="blue" aria-label="Blue side">
+              <h3><span>Blue</span><small>Mined</small><small>Splats</small></h3>
+              <ol id="block-side-blue"></ol>
+            </section>
+            <section class="block-side-panel" data-team="red" aria-label="Red side">
+              <h3><span>Red</span><small>Mined</small><small>Splats</small></h3>
+              <ol id="block-side-red"></ol>
+            </section>
+          </div>
+          <ul class="block-badges" id="block-stats" aria-label="Highlights"></ul>
+          <div class="actions">
+            <button type="button" data-action="block-again" data-role="go">Again</button>
+            <button type="button" data-action="block-board" data-role="choose">Main menu</button>
+            <button type="button" data-action="leave" data-role="leave">Back to the island</button>
+          </div>
         </div>
       </section>
     </div>

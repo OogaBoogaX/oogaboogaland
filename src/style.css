@@ -12397,3 +12397,174 @@ body.arcade-game .cloud-hopper-panel { z-index: 40; }
 .block-board-mid { display: flex; flex-direction: column; align-items: center; gap: 2px; color: #f4f4f0; }
 .block-board-mid small { font-size: clamp(13px, 1.5vw, 16px); }
 .block-board-mid small:last-child { font-size: clamp(18px, 2.2vw, 24px); font-variant-numeric: tabular-nums; }
+
+/* Block Frenzy's trophy screen (`finish` in scene-block.js). The card is a frame round an open window: the scene's
+   camera frames the winners' 3D podium in `#block-trophy-stage`, so the wood boards sit above and below it and the cave
+   dims round the card. Cloud Hopper's results look: the gold pixel-block title, big glowing numbers, buttons coloured by
+   what they do. The winning side's colour comes from `data-team`. */
+#block-results.block-trophy {
+  --trophy: #3a8dff;
+  --trophy-light: #9cc8ff;
+  display: flex;
+  flex-direction: column;
+  width: min(760px, calc(100vw - 20px - var(--safe-left) - var(--safe-right)));
+  height: min(900px, calc(100dvh - 20px - var(--safe-top) - var(--safe-bottom)));
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: 0 0 0 100vmax rgba(8, 6, 4, 0.42);
+  text-align: center;
+}
+#block-results.block-trophy[data-team="red"] { --trophy: #ff4a3a; --trophy-light: #ffb0a6; }
+#block-results.block-trophy[hidden] { display: none; }
+.block-trophy-head, .block-trophy-board {
+  position: relative;
+  border: 3px solid var(--wood-edge);
+  background: var(--planks);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+.block-trophy-head { flex: none; padding: 10px 14px 8px; border-bottom: 0; border-radius: var(--radius) var(--radius) 0 0; }
+.block-trophy-head .game-intro-kicker { margin: 0 0 4px; }
+.block-trophy-head .game-intro-title {
+  margin: 0;
+  color: #f5c542;
+  font-size: 46px;
+  filter: drop-shadow(0 3px 0 #7a3f0c) drop-shadow(0 3px 0 #4a2306) drop-shadow(0 0 16px rgba(255, 200, 60, 0.7));
+  animation: block-trophy-drop 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.35) both;
+}
+/* The open window: only its sides are wood, so the podium shows through between the boards. */
+.block-trophy-stage {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 150px;
+  border-left: 3px solid var(--wood-edge);
+  border-right: 3px solid var(--wood-edge);
+  /* A warm vignette over the view: the light reads as sunset gold and the sky darkens at the edges against either side. */
+  background: radial-gradient(ellipse at 50% 52%, transparent 30%, rgba(120, 48, 6, 0.35) 72%, rgba(60, 20, 4, 0.7) 100%);
+  box-shadow: inset 0 0 0 2px rgba(255, 216, 74, 0.35), inset 0 0 40px rgba(255, 200, 60, 0.25);
+  pointer-events: none;
+  overflow: hidden;
+}
+/* Gold sparkles twinkling over the podium: one layer of small dots, nothing repaints but its opacity. */
+.block-trophy-sparkles {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 14% 24%, #fff6c8 0 2px, transparent 3px),
+    radial-gradient(circle at 82% 18%, #ffd84a 0 3px, transparent 4px),
+    radial-gradient(circle at 26% 70%, #ffd84a 0 2px, transparent 3px),
+    radial-gradient(circle at 72% 62%, #fff6c8 0 2px, transparent 3px),
+    radial-gradient(circle at 90% 44%, #ffe9a0 0 2px, transparent 3px),
+    radial-gradient(circle at 8% 52%, #ffe9a0 0 3px, transparent 4px);
+  animation: block-trophy-twinkle 1.6s ease-in-out infinite alternate;
+}
+.block-trophy-banner {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  margin: 0;
+  padding: 6px 22px 7px;
+  border: 3px solid rgba(0, 0, 0, 0.45);
+  border-radius: 4px;
+  background: linear-gradient(var(--trophy-light), var(--trophy) 55%);
+  color: #fff;
+  font-size: 26px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 22px var(--trophy);
+  transform: translateX(-50%) rotate(-2deg);
+  animation: block-trophy-pop 0.5s 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.5) both;
+}
+.block-trophy-board {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 14px 14px;
+  border-top: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
+  animation: block-trophy-rise 0.4s 0.1s ease-out both;
+}
+/* The score and the round's time share one row. */
+.block-trophy-tally { display: flex; align-items: center; justify-content: center; gap: 28px; flex-wrap: wrap; }
+.block-trophy-score { display: flex; align-items: baseline; justify-content: center; gap: 14px; margin: 0; line-height: 1; }
+.block-trophy-score i { color: var(--paper); font-size: 34px; font-style: normal; opacity: 0.7; }
+.block-final { font-size: 64px; font-variant-numeric: tabular-nums; text-shadow: 0 3px 0 rgba(0, 0, 0, 0.55), 0 0 18px currentColor; }
+.block-final[data-team="blue"] { color: #58b4ff; }
+.block-final[data-team="red"] { color: #ff7a5c; }
+.block-trophy-time { margin: 4px 0 2px; color: #f5c542; font-size: 34px; font-variant-numeric: tabular-nums; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5), 0 0 12px rgba(255, 200, 60, 0.45); }
+.block-trophy-board .help { margin: 0 0 8px; text-wrap: balance; }
+/* The two sides, styled as Cloud Hopper's shared top 10; the winners' panel lit in gold. */
+.block-trophy-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; text-align: left; }
+.block-side-panel { padding: 4px 8px 6px; border: 2px solid var(--stone-dk); border-radius: 9px 7px 10px 8px; background: var(--tablet); box-shadow: var(--tablet-shadow); }
+.block-side-panel.won { border-color: #f5c542; box-shadow: var(--tablet-shadow), 0 0 0 2px rgba(245, 197, 66, 0.35), 0 0 18px rgba(245, 197, 66, 0.35); }
+.block-side-panel h3, .block-side-panel li { display: grid; grid-template-columns: minmax(0, 1fr) 7ch 7ch; align-items: baseline; gap: 4px; }
+.block-side-panel h3 { margin: 2px 0 4px; font-size: 14px; }
+.block-side-panel[data-team="blue"] h3 span { color: #58b4ff; }
+.block-side-panel[data-team="red"] h3 span { color: #ff7a5c; }
+.block-side-panel.won h3 span::after { content: " ★"; color: #f5c542; }
+.block-side-panel h3 small { color: var(--muted); font-size: 10px; text-align: right; text-transform: uppercase; }
+.block-side-panel ol { margin: 0; padding: 0; list-style: none; }
+.block-side-panel li { padding: 3px 4px; border-top: 1px solid rgba(255, 255, 255, 0.08); font-size: 13px; }
+.block-side-panel li span { overflow-wrap: break-word; }
+.block-side-panel li b { text-align: right; font-variant-numeric: tabular-nums; }
+.block-side-panel li.you { background: rgba(245, 197, 66, 0.16); border-radius: 4px; }
+.block-side-panel li.mvp span::before { content: "♛ "; color: #f5c542; }
+/* The highlights as medals. */
+.block-badges { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px; margin: 10px 0 0; padding: 0; list-style: none; text-align: left; }
+.block-badge { display: grid; grid-template-columns: 22px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 8px; align-items: center; padding: 4px 8px; border: 2px solid rgba(0, 0, 0, 0.35); border-radius: 8px; background: rgba(0, 0, 0, 0.22); }
+.block-badge::before { content: ""; grid-row: 1 / 3; width: 18px; height: 18px; border: 2px solid rgba(0, 0, 0, 0.45); border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff6c8, #f5c542 45%, #a8720f); box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35); }
+.block-badge[data-medal="silver"]::before { background: radial-gradient(circle at 35% 30%, #ffffff, #c9ced6 45%, #7c8290); }
+.block-badge[data-medal="bronze"]::before { background: radial-gradient(circle at 35% 30%, #ffe1c2, #d0874a 45%, #7d4618); }
+.block-badge[data-medal="wood"]::before { border-radius: 4px; background: linear-gradient(#b98a52, #6f4a25); }
+.block-badge span { color: var(--accent-text); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+.block-badge b { font-size: 13px; overflow-wrap: anywhere; }
+.block-trophy-board .actions { margin-top: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.block-trophy-board .actions button[data-role="go"] { background: linear-gradient(#ffe27a, #f0b62a); color: var(--ink); }
+.block-trophy-board .actions button[data-role="go"]:hover, .block-trophy-board .actions button[data-role="go"].virtual-hover { background: linear-gradient(#fff0a8, #ffe27a); }
+.block-trophy-board .actions button[data-role="choose"] { background: linear-gradient(#a6d97f, #5f9e3f); color: #13260b; }
+.block-trophy-board .actions button[data-role="choose"]:hover, .block-trophy-board .actions button[data-role="choose"].virtual-hover { background: linear-gradient(#c2e8a3, #a6d97f); }
+.block-trophy-board .actions button[data-role="leave"] { background: linear-gradient(#77706a, #4a4541); color: var(--paper); }
+.block-trophy-board .actions button[data-role="leave"]:hover, .block-trophy-board .actions button[data-role="leave"].virtual-hover { background: linear-gradient(#8a837c, #77706a); }
+@keyframes block-trophy-drop { from { transform: translateY(-60px) scale(1.25); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes block-trophy-pop { from { transform: translateX(-50%) rotate(-2deg) scale(0.2); opacity: 0; } to { transform: translateX(-50%) rotate(-2deg); opacity: 1; } }
+@keyframes block-trophy-rise { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes block-trophy-twinkle { from { opacity: 0.25; } to { opacity: 1; } }
+/* Wide screens: the sides and the medals side by side under the score, so the window keeps its height. */
+@media (min-width: 980px) and (min-height: 600px) {
+  #block-results.block-trophy { width: min(1000px, calc(100vw - 40px)); }
+  .block-trophy-board { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); column-gap: 12px; align-items: start; }
+  .block-trophy-tally, .block-trophy-board .help, .block-trophy-board .actions { grid-column: 1 / -1; }
+  .block-badges { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
+}
+/* Phones and short screens: smaller numbers and rows, so the card fits without scrolling where it can. */
+@media (max-width: 560px), (max-height: 700px) {
+  #block-results.block-trophy { height: calc(100dvh - 12px - var(--safe-top) - var(--safe-bottom)); }
+  .block-trophy-head { padding: 6px 10px 4px; }
+  .block-trophy-head .game-intro-title { font-size: 32px; }
+  .block-trophy-stage { min-height: 120px; }
+  .block-trophy-tally { gap: 16px; }
+  .block-trophy-banner { font-size: 18px; padding: 4px 14px 5px; }
+  .block-trophy-board { padding: 6px 8px 10px; }
+  .block-final { font-size: 44px; }
+  .block-trophy-score i { font-size: 24px; }
+  .block-trophy-time { font-size: 24px; margin: 2px 0; }
+  .block-trophy-board .help { font-size: 11px; margin-bottom: 6px; }
+  .block-trophy-sides { gap: 6px; }
+  .block-side-panel { padding: 3px 5px 4px; }
+  .block-side-panel h3, .block-side-panel li { grid-template-columns: minmax(0, 1fr) 3.5ch 3.5ch; gap: 2px; }
+  .block-side-panel h3 small { font-size: 8px; }
+  .block-side-panel li { font-size: 10.5px; padding: 2px; }
+  .block-badges { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin-top: 6px; }
+  .block-badge { grid-template-columns: 14px minmax(0, 1fr); column-gap: 5px; padding: 3px 5px; }
+  .block-badge::before { width: 12px; height: 12px; }
+  .block-badge span { font-size: 8px; }
+  .block-badge b { font-size: 11px; }
+  .block-trophy-board .actions { margin-top: 8px; gap: 6px; }
+  .block-trophy-board .actions button { min-height: 38px; padding: 4px; font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .block-trophy-head .game-intro-title, .block-trophy-banner, .block-trophy-board, .block-trophy-sparkles { animation: none; }
+}
