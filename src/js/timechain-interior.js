@@ -288,7 +288,7 @@
     const room = ROOMS.get(visit.room), L = ROOMS.layout(room.id), shared = visit.mode === "shared", kind = RM.KINDS[room.kind];
     const camera = createCamera({ fov: 58, near: 0.12, far: L.R * 3 + 20 });
     const root = createNode();
-    const hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    const hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster });
     const hooks = {};
     const input = interactMod.create({ canvas, renderer, camera, hooks });
     // A room the island's doorway prepared for this visit (`prepare`) is taken as it stands: built, painted and already

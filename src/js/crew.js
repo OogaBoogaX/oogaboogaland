@@ -1,5 +1,5 @@
 // The cavemen from the roster: activity and presence, repository work trips, weapons and magazines, pile
-// reloading, sleep, grounded cheers, strolls, possession and jetpack flight, swag and pokes.
+// reloading, sleep, grounded cheers, strolls, possession, jetpack flight and pokes.
 //
 // A character with a `tint` pair wears its second colourway while the coin is up on the day
 // (`chain.snapshot.priceUsd` against `priceOpenUsd`) and its first while it is down, on the old timer when
@@ -131,7 +131,6 @@
   const BODY_PARTS = ["torso", "head", "legR", "legL", "armR", "armL"];
   // A modelled arm is the upper arm alone: its forearm and hand are nodes of their own under it.
   const MODELLED_ARMS = ["forearmR", "forearmL", "fingersR", "fingersL"], MODELLED_BODY_PARTS = [...BODY_PARTS, "forearmL", "fingersL"];
-  const SWAG_ANCHORS = ["hat", "face"];
   const FAN_STANDOFF = 1.1;
   const FAN_ARC = 2.2;
   // FAN_SPREAD is the widest the fan opens, keeping the near side clear however many eat.
@@ -182,8 +181,12 @@
   // with legs (a character's `parts.dog` whose node lists them as `legs`: fore left, fore right, hind left, hind right,
   // each hinged at its hip, and an optional `tail` at its root): the legs swing in diagonal pairs, `swing` radians at
   // `pace` metres a second, a stride `stride` radians a metre, the body bobbing `bob`; aloft they stretch fore and aft
-  // (`flyFront`, `flyHind`), touching down they tuck a little (`landFront`, `landHind`).
-  const QUAD_GAIT = Object.freeze({ swing: 0.65, pace: 1.4, stride: 11, bob: 0.018, flyFront: -1.05, flyHind: 1.1, landFront: -0.2, landHind: 0.2 });
+  // (`flyFront`, `flyHind`), touching down they tuck a little (`landFront`, `landHind`). A companion whose Ooga rests
+  // in the hammock keeps off the bed: its spot is the ground close beside it that the scene names (`ctx.petLanding`
+  // with `lying`), and there it lies down, its legs out fore and aft (`lieFront`, `lieHind`) and its body down onto
+  // them, three quarters of its hips' height, eased at `settle` a second; it gets up as it moves or its Ooga does.
+  const QUAD_GAIT = Object.freeze({ swing: 0.65, pace: 1.4, stride: 11, bob: 0.018, flyFront: -1.05, flyHind: 1.1, landFront: -0.2, landHind: 0.2,
+    lieFront: -1.5, lieHind: 1.5, settle: 5 });
   // Sets a legged companion's legs (`front` and `hind` their set angles, `swing` this stride's) and its tail (`wag` its
   // yaw, `droop` its pitch).
   const poseQuadruped = (node, front, hind, swing, wag, droop) => {
@@ -371,7 +374,10 @@
       for (let i = 1; i < node.geometry.verts.length; i += 3) top = Math.max(top, node.geometry.verts[i]);
       pack.position.y = at ? at.y : top; pack.position.z = at ? at.z : 0; addChild(pack, flame); addChild(node, pack);
       const pet = cave.pet = { node, pack, flame, side: p.x, back: -p.z, lift: p.y, x: 0, y: 0, z: 0, feet: 0, heading: 0, step: 0, wag: 0,
-        speed: 0, phase: 0, mode: 0, fall: 0, stuck: 0, warm: false, ride: cave.traits.petRidesHat ? hatRide(cave) : null };
+        speed: 0, phase: 0, mode: 0, fall: 0, stuck: 0, warm: false, ride: cave.traits.petRidesHat ? hatRide(cave) : null,
+        // How far it has lain down (0 standing, 1 down), how far its body comes down when it has, and how long a step
+        // it could not take has kept it from its spot by the bed.
+        down: 0, drop: node.legs ? 0.75 * node.legs[0].position.y * node.scale.y : 0, wait: 0 };
       pet.floorAt = (x, z, y) => groundAt(x, z, y, y, cave);
       pet.clear = (ax, az, bx, bz, y) => (ctx.flyable || walkable)(ax, az, bx, bz, y, PET_HEIGHT, cave);
     };
@@ -454,7 +460,10 @@
         return;
       }
       const h = r.rotation.y, sh = Math.sin(h), ch = Math.cos(h);
-      const tx = r.position.x - sh * pet.back + ch * pet.side, tz = r.position.z - ch * pet.back - sh * pet.side;
+      let tx = r.position.x - sh * pet.back + ch * pet.side, tz = r.position.z - ch * pet.back - sh * pet.side;
+      // A legged companion keeps off the bed its Ooga is in: its spot is the ground beside the bed.
+      const beside = node.legs && !pet.ride && ctx.petLanding && (resting || seat?.kind === "hammock") ? ctx.petLanding(r.position.x, r.position.z, true) : null;
+      if (beside) { tx = beside.x; tz = beside.z; }
       const feet = r.position.y - cave.baseY;
       const equipped = !!cave.jet, powered = equipped && !cave.jetRecovering && cave.jetFuel > 0 && (cave.jet.thrust || cave.jet.power > 0);
       const ownerFloor = groundAt(r.position.x, r.position.z, feet, feet, cave);
@@ -466,6 +475,7 @@
       else if (pet.mode === 1) { pet.mode = 2; pet.fall = Math.min(0, cave.hopV); }
       if (pet.mode && !(dt > 0)) return;
       if (pet.mode && dt > 0) {
+        pet.down = 0;
         if (!pet.warm) {
           if (!pet.clear(r.position.x, r.position.z, tx, tz, feet + 0.4)) { node.visible = false; return; }
           pet.x = tx; pet.z = tz; pet.feet = feet + 0.4; pet.warm = true;
@@ -515,6 +525,9 @@
         }
         pet.heading = Math.atan2(dx, dz);
       } else if (d <= PET_ARRIVE) pet.heading = h;
+      // Kept from its spot by the bed (up on the cloth, a step too high to come down), it turns up there.
+      pet.wait = beside && !moving && d > PET_ARRIVE ? pet.wait + Math.max(0, dt) : 0;
+      if (pet.wait > 0.6 && placePet(cave, tx, tz, feet, h)) pet.wait = 0;
       node.position.x = pet.x; node.position.z = pet.z;
       node.rotation.y = pet.heading;
       if (node.legs) {
@@ -523,9 +536,12 @@
         if (!(dt > 0)) return;
         const walk = moving ? Math.min(1, pet.speed / QUAD_GAIT.pace) : 0;
         pet.wag += dt;
-        node.position.y = cave.baseY + pet.feet + pet.lift + Math.abs(Math.cos(pet.step)) * QUAD_GAIT.bob * walk;
+        // Beside its Ooga at rest in the hammock it lies down, its tail still wagging a little.
+        pet.down += ((resting && !moving ? 1 : 0) - pet.down) * Math.min(1, dt * QUAD_GAIT.settle);
+        const down = pet.down;
+        node.position.y = cave.baseY + pet.feet + pet.lift + Math.abs(Math.cos(pet.step)) * QUAD_GAIT.bob * walk - down * pet.drop;
         node.rotation.z = 0;
-        poseQuadruped(node, 0, 0, Math.sin(pet.step) * QUAD_GAIT.swing * walk, Math.sin(pet.wag * 7) * 0.25, 0);
+        poseQuadruped(node, QUAD_GAIT.lieFront * down, QUAD_GAIT.lieHind * down, Math.sin(pet.step) * QUAD_GAIT.swing * walk * (1 - down), Math.sin(pet.wag * 7) * 0.25 * (1 - 0.6 * down), 0);
         return;
       }
       node.position.y = cave.baseY + pet.feet + pet.lift + (moving ? Math.abs(Math.sin(pet.step)) * 0.08 : 0);
@@ -1369,7 +1385,6 @@
     if (cave.restEquipment) { parts.gunFlash.visible = false; w.carry = "rest"; return; }
     if (cave.sleepWeapons.visible || gun.parent === cave.sleepWeapons) {
       cave.sleepWeapons.visible = cave.root.visible && !cave.bedroll?.outdoor;
-      if (cave.bedroll?.outdoor) for (const node of cave.swagNodes) node.visible = false;
       parts.gunFlash.visible = false;
       w.carry = "bed";
       return;
@@ -1420,10 +1435,13 @@
       parts.forearmR.rotation.x = parts.forearmL.rotation.x = lying && (travel.pose === "left" || travel.pose === "right") ? -cave.elbow.clear
         : lying ? -LYING_ELBOW : -cave.elbow.rest;
       // Sitting on the ground, the free arm props on it, out to the side and a little back: nearly straight, the
-      // fist resting on its own bottom edge with the thumb uppermost.
-      if (cave.restLower > 0 && !cave.camp.seat && !parts.snack.visible) {
+      // fist resting on its own bottom edge with the thumb uppermost. An idle Ooga sits so by a fire, and a player in a
+      // seat that is the ground itself (`seat.ground`, the character studio's places by its fire).
+      const seat = cave.camp ? cave.camp.seat : null;
+      const lowered = !seat ? cave.restLower : seat.ground ? Math.max(0, cave.baseY - h * 0.08) : 0;
+      if (lowered > 0 && !parts.snack.visible) {
         const left = parts.armL;
-        if (reachArm(cave, left, parts.forearmL, cave.reachL, left.position.x + SIT_HAND[0] * h, cave.restLower - HIP * h + SIT_HAND[1] * h, SIT_HAND[2] * h, 0.4, 0.3, -1))
+        if (reachArm(cave, left, parts.forearmL, cave.reachL, left.position.x + SIT_HAND[0] * h, lowered - HIP * h + SIT_HAND[1] * h, SIT_HAND[2] * h, 0.4, 0.3, -1))
           cave.handTurnL = handTurn(left, parts.forearmL, 0, 1, 0);
       }
       parts.forearmR.highlight = parts.armR.highlight;
@@ -2262,8 +2280,7 @@
         grabbedBy: null,
         viewLift: 0,
         peek: 0,
-        act: { kind: "eat", until: 0, trips: 0, sayAt: 0, said: true, phase: 0, spot: { x: 0, z: 0, ry: NaN, sit: false } },
-        swagNodes: []
+        act: { kind: "eat", until: 0, trips: 0, sayAt: 0, said: true, phase: 0, spot: { x: 0, z: 0, ry: NaN, sit: false } }
       });
       // Non-enumerable policy stays out of saved state. The driven Ooga (control()
       // marks it humanControlled before it becomes the player) and any
@@ -2483,7 +2500,6 @@
       cave.parts.torso.scale.y = 1;
       cave.parts.club.visible = cave.weapon.primaryOwned;
       for (const node of cave.sleepParts.equipment) node.visible = true;
-      for (const node of cave.swagNodes) node.visible = true;
       if (builtInJetpack(cave)) cave.parts.jetpack.visible = !!cave.jet || cave.rocketJumpTime > 0;
       cave.parts.snack.visible = false;
       cave.parts.gun.visible = false;
@@ -3020,13 +3036,34 @@
       }
     };
     // A page following the room's host takes its Oogas' status from the frames and leaves its own bed trip as it was.
-    // Handed back awake, that trip would hold the Ooga in `runBed`, rifle hidden and club in hand, with `applyState`
-    // seeing no change of status to end it. It takes up the host's status afresh, as `runBed` settles a trip begun
-    // before an Ooga became passive.
-    const resumeFromHost = (cave) => {
-      if (cave.state !== "working" && cave.state !== "chilling" || !cave.bedTravel.mode) return;
+    // Handed back awake, that trip would hold the Ooga in `runBed`, rifle hidden and club in hand. Still sleeping,
+    // a local `rest` could leave it at the host's travelling position forever. Reapply the host's status once at
+    // handoff, settling sleepers in this page's reserved bed just as at arrival; frames do not carry bed ownership.
+    // Opt-in, in-memory evidence for intermittent handoffs; no frame-loop work or persistent logging.
+    let sleepTracing = false;
+    const sleepHistory = [];
+    const sleepSnapshot = cave => {
+      const r = cave.root, t = cave.bedTravel, b = cave.bedroll;
+      return { name: cave.traits.name, state: cave.state, puppet: !!cave.puppet,
+        position: { ...r.position }, rotation: { ...r.rotation }, quaternion: r.quaternion ? Array.from(r.quaternion) : null,
+        bed: b ? { index: bedrolls?.indexOf(b) ?? -1, x: b.x, y: b.y, z: b.z, owner: b.sleeper?.traits.name || null } : null,
+        travel: { mode: t.mode, index: t.index, toBed: t.toBed, blocked: t.blocked, retry: t.retry, manual: !!t.manual } };
+    };
+    const sleepDiagnostics = enabled => {
+      if (typeof enabled === "boolean") { sleepTracing = enabled; if (!enabled) sleepHistory.length = 0; }
+      return { enabled: sleepTracing, hostId: BL.net?.state.hostId || null, selfId: BL.net?.state.selfId || null,
+        elapsed, history: sleepHistory.slice(), current: crewList.map(sleepSnapshot) };
+    };
+    const resumeFromHost = (cave, fromHost = null, reason = "handoff") => {
+      if (cave === player || cave.remoteControlled) return;
+      if (cave.state !== "sleeping" && ((cave.state !== "working" && cave.state !== "chilling") || !cave.bedTravel.mode)) return;
+      const before = sleepTracing ? sleepSnapshot(cave) : null;
       const state = cave.state;
       cave.state = "away"; applyState(cave, state, true);
+      if (before) {
+        if (sleepHistory.length === 64) sleepHistory.shift();
+        sleepHistory.push({ elapsed, reason, fromHost, hostId: BL.net?.state.hostId || null, before, after: sleepSnapshot(cave) });
+      }
     };
     const rush = () => {
       if (!wanderSpot) return;
@@ -3727,7 +3764,9 @@
       if (!w.unlimited && !w.ammo) w.triggerHeld = false;
       return true;
     };
-    const setWeaponTrigger = (held, single = false) => {
+    // `target`, when given, is the point the held trigger fires at (the carry view's facing) in place of the player's
+    // aim; `aimTrigger` moves it while the trigger stays held.
+    const setWeaponTrigger = (held, single = false, target = null) => {
       if (held && !weaponsEnabled) return false;
       if (!player) return false;
       const w = player.weapon;
@@ -3743,10 +3782,14 @@
         w.triggerSingle = single;
         w.reloadFire = w.reloadFireHeld = true;
         w.reloadFireRounds = single ? 1 : BURST_ROUNDS;
-        w.burstPlayerAim = true;
+        w.burstPlayerAim = !target;
+        if (target) setVec(w.burstTarget, target.x, target.y, target.z);
         return true;
       }
       if (!weaponReady(player)) return false;
+      // Keep the press's aim even when the shot must wait for the previous cooldown.
+      w.burstPlayerAim = !target;
+      if (target) setVec(w.burstTarget, target.x, target.y, target.z);
       if (w.triggerHeld) return true;
       w.triggerSingle = single;
       w.triggerHeld = true;
@@ -3755,7 +3798,7 @@
         // A fresh press may wait out the previous shot's cooldown. It never
         // resumes automatically after reload, stow or another cancellation.
         w.burstTimer = 0;
-        if (!fireWeapon(player, null, single ? 1 : BURST_ROUNDS) && single && w.cooldown > 0) {
+        if (!fireWeapon(player, target, single ? 1 : BURST_ROUNDS) && single && w.cooldown > 0) {
           // Preserve each distinct semi-automatic press until the mechanical
           // shot clock allows it. Pointer release must not erase a fast second
           // click; cancellation paths clear the queue through stopBurst.
@@ -3763,6 +3806,15 @@
         }
       }
       return true;
+    };
+    // Re-aim a held trigger: at `target` (the carry view's facing, followed as the Ooga turns), or with null at the
+    // player's own aim again. Nothing while no trigger is held.
+    const aimTrigger = (target) => {
+      if (!player) return;
+      const w = player.weapon;
+      if (!w.triggerHeld && !w.reloadFireHeld) return;
+      w.burstPlayerAim = !target;
+      if (target) setVec(w.burstTarget, target.x, target.y, target.z);
     };
     const updateWeapon = (cave, dt) => {
       const w = cave.weapon;
@@ -3815,7 +3867,7 @@
       if (w.triggerQueued && !w.burstRemaining && w.cooldown <= 0) {
         if (!weaponReady(cave)) { stopBurst(cave); return; }
         w.triggerQueued--;
-        fireWeapon(cave, null, 1);
+        fireWeapon(cave, w.burstPlayerAim ? null : w.burstTarget, 1);
         return;
       }
       if (!w.burstRemaining && !w.triggerHeld) return;
@@ -3829,7 +3881,7 @@
         stopBurst(cave);
         return;
       }
-      if (w.triggerHeld && !w.burstTimer && w.triggerHeldTime < FOCUSED_AUTO_HOLD) { fireWeapon(cave); return; }
+      if (w.triggerHeld && !w.burstTimer && w.triggerHeldTime < FOCUSED_AUTO_HOLD) { fireWeapon(cave, w.burstPlayerAim ? null : w.burstTarget); return; }
       w.burstTimer -= dt;
       // Finish a tapped burst; holding continues on the same shot clock.
       // Keep the normal magazine-sized catch-up bound in unlimited debug mode.
@@ -4404,9 +4456,10 @@
         // Each limb heats from when the fire front reaches it; older flames brighten, then cool into char in a roll.
         const temperature = 0.22 + 0.78 * c.burnTime[i] / EMBER_HEAT_SECONDS;
         part.ember = c.spread[i] * temperature * heat * (0.96 + Math.sin(elapsed * 11 + cave.phase + i * 1.7) * 0.025 + Math.sin(elapsed * 23 + i) * 0.015);
-        // Fixed head surfaces such as the gas mask share the head's heat and char; removable hat and face do not.
+        // Fixed head surfaces such as the gas mask share the head's heat and char; what is worn on the face anchor
+        // (Cloud Hopper's goggles) does not.
         if (part === cave.parts.head) for (const child of part.children) {
-          if (child === cave.parts.hat || child === cave.parts.face) continue;
+          if (child === cave.parts.face) continue;
           child.ember = part.ember;
           child.scorch = part.scorch;
         }
@@ -4609,10 +4662,7 @@
       resetPose(cave);
       cave.parts.club.visible = false;
       for (const node of cave.sleepParts.equipment) node.visible = false;
-      if (cave.bedroll.outdoor) {
-        for (const node of cave.swagNodes) node.visible = false;
-        for (const model of cave.magazineModels) if (model) model.node.visible = false;
-      }
+      if (cave.bedroll.outdoor) for (const model of cave.magazineModels) if (model) model.node.visible = false;
       stopBurst(cave);
       stopReload(cave, true);
       putBedWeapons(cave);
@@ -6584,11 +6634,6 @@
       if (cave.cheer > 0) cave.cheer -= dt;
       if (cave.yawn > 0) cave.yawn -= dt;
       if (cave.catchT > 0) cave.catchT = Math.max(0, cave.catchT - dt * 1.6);
-      if (cave.animation.due) for (let i = 0; i < cave.swagNodes.length; i++) {
-        const node = cave.swagNodes[i];
-        if (node.swag.float) node.position.y = (node.swag.offset ? node.swag.offset.y : 0) + Math.sin(elapsed * 2.5 + cave.phase) * 0.04;
-        for (let c = 0; c < node.children.length; c++) if (node.children[c].spin) node.children[c].rotation.y += cave.animation.dt * 9;
-      }
       if (cave.bedTravel.mode) { runBed(cave, dt); return; }
       if (cave.state !== "working" && cave.state !== "chilling") {
         if (cave.state === "sleeping" && cave.bedroll && !cave.bedroll.hidden) {
@@ -7436,48 +7481,6 @@
       // Let the held Space reach the rocket jump after the initial press.
       return !(jumped && player.traits.footRockets && !player.jet && jetpackRefills(player));
     };
-    const applySwag = (cave) => {
-      for (const anchorKey of SWAG_ANCHORS) {
-        const anchor = cave.parts[anchorKey];
-        for (const child of anchor.children.slice()) removeChild(anchor, child);
-        anchor.visible = false;
-      }
-      cave.swagNodes.length = 0;
-      cave.parts.club.geometry = cave.skins.club.default;
-      if (cave.parts.chuk) cave.parts.chuk.geometry = cave.parts.chuk.skins.default;
-      cave.parts.gunBody.geometry = cave.skins.gun.default;
-      const entryId = game.state.assignments[cave.traits.name];
-      const item = entryId ? game.itemOf(entryId) : null;
-      if (!item) return;
-      if (item.skin) {
-        const target = item.skin === "club" ? cave.parts.club : cave.parts.gunBody;
-        target.geometry = cave.skins[item.skin].gold;
-        // A weapon that carries a second stick takes the same skin.
-        if (item.skin === "club" && cave.parts.chuk) cave.parts.chuk.geometry = cave.parts.chuk.skins.gold;
-        return;
-      }
-      const anchor = item.slot === "face" ? cave.parts.face : cave.parts.hat;
-      const node = item.buildNode();
-      if (item.offset) Object.assign(node.position, item.offset);
-      if (item.rotation) Object.assign(node.rotation, item.rotation);
-      node.swag = item;
-      addChild(anchor, node);
-      anchor.visible = true;
-      cave.swagNodes.push(node);
-    };
-    const applyAllSwag = () => {
-      for (let i = 0; i < members.length; i++) {
-        const cave = members[i];
-        applySwag(cave);
-        if (ctx.refreshMirrorObject) ctx.refreshMirrorObject(cave.root);
-      }
-      if (ctx.onModelChange) ctx.onModelChange();
-    };
-    const wornBy = (name) => {
-      const item = game.itemOf(game.state.assignments[name] || "");
-      return item ? item.name : null;
-    };
-    const renderLocker = () => hud.renderInventory(game.state.inventory, game.assignedTo, wornBy);
     // The first tap of a double-tap takes an Ooga, so the prompt waits out that
     // window: a modal opening under the second tap would swallow it.
     const openRecipeSoon = (cave) => {
@@ -8034,7 +8037,7 @@
           const part = cave.parts[key];
           part.ember = part.scorch = 0;
           if (part === cave.parts.head) for (const child of part.children) {
-            if (child !== cave.parts.hat && child !== cave.parts.face) child.ember = child.scorch = 0;
+            if (child !== cave.parts.face) child.ember = child.scorch = 0;
           }
         }
         cave.parts.fingersR.ember = cave.parts.fingersR.scorch = cave.parts.fingersL.ember = cave.parts.fingersL.scorch = 0;
@@ -8046,6 +8049,7 @@
     };
     const dispose = () => {
       pause();
+      sleepTracing = false; sleepHistory.length = 0;
       planQueue.length = 0;
       player = null;
       for (let i = members.length - 1; i >= 0; i--) if (members[i].npc) disposeBody(members[i]);
@@ -8095,9 +8099,9 @@
       showShot, setTint, spotOccupied, setCombatEnabled,
       get combatEnabled() { return combatEnabled; },
       get weaponsEnabled() { return weaponsEnabled; },
-      cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, refreshStates, resumeFromHost, refreshRosterRow, updateFan, rush, applyAllSwag, wornBy, renderLocker, pokeCave, idleSay, drawDrops,
+      cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, refreshStates, resumeFromHost, sleepDiagnostics, refreshRosterRow, updateFan, rush, pokeCave, idleSay, drawDrops,
       throwTomato, clearProjectiles, control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, clearHeadLook, prepareDragged, recoverDragged, ignite, soot, dropRoll, damage, fireView, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, setJetpackOwnership, cutJet, thrust, holdRocketJump, update, pause, dispose, stats,
-      actorClear, outsideSupportAt, builtInJetpack, toggleTint, twirl, pushPose, toggleWeapon, selectWeapon, configureWeapon, parkWeapons, unparkWeapons, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
+      actorClear, outsideSupportAt, builtInJetpack, toggleTint, twirl, pushPose, toggleWeapon, selectWeapon, configureWeapon, parkWeapons, unparkWeapons, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, aimTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
       get sleeping() { return !!(player && player.bedTravel.manual && player.state === "sleeping"); },
       // The driven Ooga's steering as last set, the world direction in `x` and `z`; live, not a copy.
       get steering() { return steer; },
@@ -8106,5 +8110,5 @@
       }
     };
   };
-  BL.crew = { create, createPets, hatRide, poseHatRide, poseStomachRide, HAT_RIDE, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, preparePresentation, poseEquipment, poseReload, captureMeleePose, bodyHeightOf, bodyRadiusOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, QUAD_GAIT, poseQuadruped, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, CHUK_FOLD, BURST_STEP, MELEE_TAP_TIME, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
+  BL.crew = { create, createPets, hatRide, poseHatRide, poseStomachRide, HAT_RIDE, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, preparePresentation, poseEquipment, poseReload, reachArm, captureMeleePose, bodyHeightOf, bodyRadiusOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, QUAD_GAIT, poseQuadruped, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, CHUK_FOLD, BURST_STEP, MELEE_TAP_TIME, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
 })();

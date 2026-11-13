@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, terrain, hubModels, headquartersModels, poolModels, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod, weather: weatherMod, chain, mempool, oogatronLive } = BL;
+  const { math, models, contributors, donations, terrain, hubModels, headquartersModels, poolModels, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, critters: crittersMod, weather: weatherMod, chain, mempool, oogatronLive } = BL;
   const { clamp, lerp, ease, fnv1a, mulberry32 } = math;
   const { createNode, addChild, removeChild, updateWorld, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS } = crewMod;
@@ -15,7 +15,6 @@
   // Debug-only clock params: hour pins the hour, daylen is the day length in seconds.
   const DEBUG = params.has("debug");
   const DEBUG_POOL_BLOCK = DEBUG && params.get("poolblock") === "1";
-  const DEBUG_TOTEM_GLOW = DEBUG && params.get("totemglow") === "1";
   const DEBUG_GORILLA_MOVE = DEBUG && (params.get("gorillamove") === "1" || params.get("climbers") === "1");
   const DEBUG_GORILLA_RAGE = DEBUG && params.get("gorillarage") === "1";
   const timeParam = DEBUG ? params.get("time") : null;
@@ -221,11 +220,11 @@
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
   const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", poolbridge: "Vine bridge · to the Mempool island", poolsign: "Mempool Rainforest · the way down is through the hill", poolpainting: "Wall painting · tap to read it closely", chainsign: "The chain, at a glance · tap to read it", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", jumbotron: "Oogatron · OogaBoogaX on the big screen · tap the screen for a close-up", palm: "Palm · shake it", bifrostbridge: "Bifröst · the bridge to ₿IFRÖST", bifrostgate: "₿IFRÖST · walk an Ooga through the field", heimdall: "Heimdall · keeper of the bridge", gate: null };
-  const RETICLE_PROPS = new Set(["tree", "bush", "flower", "torch", "firepit", "totem", "ladder", "poolsign", "poolpainting", "chainsign", "weathersign", "poolfern", "poollog", "jaguar", "monkey", "toucan", "canopy", "jumbotron", "palm", "timechainentrance", "timechainkeypad", "bifrostgate", "heimdall"]);
+  const RETICLE_PROPS = new Set(["tree", "bush", "flower", "torch", "firepit", "ladder", "poolsign", "poolpainting", "chainsign", "weathersign", "poolfern", "poollog", "jaguar", "monkey", "toucan", "canopy", "jumbotron", "palm", "timechainentrance", "timechainkeypad", "bifrostgate", "heimdall"]);
   const workCave = (slot) => slot.repo && (slot.status === "open" || slot.status === "mirror");
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
   const SCREEN_CULL_PROPS = new Set(["tree", "bush", "rock", "crate", "barrel", "flower", "grass", "palm", "poolrock", "poolfern", "poollog", "canopy", "magazine"]);
-  const SOLID_PROPS = new Set(["tree", "firepit", "dock", "jumbotron", "totem", "poolbridge", "poolsign", "poolrock", "canopy"]);
+  const SOLID_PROPS = new Set(["tree", "firepit", "dock", "jumbotron", "poolbridge", "poolsign", "poolrock", "canopy"]);
   const CLANKER_STEP_PROPS = new Set(["poolrock"]);
   const BUSH_WORDS = ["Something rustles.", "A beetle. Ooga leaves it.", "Just a bush."];
   const PALM_WORDS = ["Coconuts. Ooga wanted bananas.", "A coconut thuds down. Ooga dodges.", "The fronds swish."];
@@ -260,7 +259,7 @@
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, jumbotron, positionDebug, remotes, npcSync, npcStatusBeams, npcGhosts;
+  let oogatronUnsub, renderer, game, world, go, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, totemSolids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, jumbotron, positionDebug, remotes, npcSync, npcStatusBeams, npcGhosts;
   // GAME MODE (`setGameMode`): an island event holds the island still for play while it runs.
   let gameMode = false, gameCombatOnly = false;
   let cloudHopper = null, cloudIsland = null, cloudPile = null, cloudPileSolids = null, cloudFinishFruit = null;
@@ -497,7 +496,6 @@
     if (!RENDER_OPTS.birdsEyeCutaway || RENDER_OPTS.cutawayMaxY >= 1e5 && !RENDER_OPTS.cutawayRegionCount && !cutawayPathsActive()) return;
     for (let i = 0; i < crew.list.length; i++) hideNodeIfCut(crew.list[i].root);
     for (let i = 0; i < props.length; i++) hideNodeIfCut(props[i].node);
-    for (let i = 0; i < crates.list.length; i++) hideNodeIfCut(crates.list[i].node);
     for (let i = 0; i < clankers.list.length; i++) hideNodeIfCut(clankers.list[i].root);
     for (let i = 0; i < clankerEquipment.length; i++) hideNodeIfCut(clankerEquipment[i].node);
     for (let i = 0; i < headquarters.mattresses.length; i++) hideNodeIfCut(headquarters.mattresses[i].node);
@@ -1691,7 +1689,7 @@
   // every crown on its own phase for three draws; each claims its own slot, so nothing else stands in its trunk or
   // crown. The meadow's keep out of every open cave's doorway, off every gorilla's run between caves (the straight
   // line one walks from a work cave's doorway to another's apron), off the foot of the Mempool island's stair, where
-  // every bedtime walk ends, and out of the south, where the totems and the Oogatron face the pile; the first frame
+  // every bedtime walk ends, and out of the south, where the Oogatron faces the pile; the first frame
   // the north pass, one each side where it fits. A trunk stands PALM_PATH off every path; one the pile's ring path
   // grows to is removed.
   const PALM_COUNT = 8, PALM_CANDIDATES = 400, PALM_GAP = 5, PALM_INNER = 6, PALM_OUTER = MEADOW_OUTER - 2.5;
@@ -1757,7 +1755,7 @@
       return true;
     };
     // Nothing within PALM_SOUTH of due south, the meadow between the Headquarters mouths: the clearing before the
-    // totems and the Oogatron's board.
+    // Oogatron's board.
     const meadowFits = (x, z) => island.surfaceAt(x, z) === 0 && !nearMouth(x, z, 6) && entranceClear(x, z, 1.2) && offRuns(x, z)
       && Math.hypot(x - footX, z - footZ) >= PALM_STAIR_CLEAR && Math.atan2(Math.abs(x), z) >= PALM_SOUTH && stands(x, z);
     // The north end: a palm either side of the pass, from the meadow's edge, the only ground there beyond the runs.
@@ -2984,14 +2982,21 @@
     return { site, group, claimGround, phase: null, window: null, heimdall: null, hum: 0, effectsActive: false, effectsTime: 0 };
   };
   // Repo Island off the south rim (repo-island.js): its rock, its stone bridge from the top of the south stairs and its
-  // section plaques now; its totems in idle time once the visit is ready (`start`). The rock and the bridge are solid,
-  // as each chunk of totems is once it joins; the bridge's lanterns are lamps. Canvas 2D gets the
+  // section plaques now; its totems in idle time once the visit is ready (`start`). The rock and the bridge are solid;
+  // the totems are walk-through and the bridge's lanterns are lamps. Canvas 2D gets the
   // island and its bridge without the totems, which would cost it more faces than the rest of the island together.
   const buildRepoIsland = function* (slice) {
     yield* BL.repoIslandModels.rockSteps.steps(slice);
     yield* pause(slice);
     const site = BL.repoIsland.create({ island, renderer, hooks: {
-      addSolid: (node) => solids.add(node), addTarget, removeTarget,
+      addTarget, removeTarget, addTotemSolid: node => totemSolids.add(node),
+      addTotemLight: (index) => addLamp({ glow: 0, flare: 0, visible: true }, { r: 0, g: 0, b: 0, radius: 0, glow: 0, hide: false }, 0, 0, 0, true, Infinity, `repo-totem:${index}`),
+      updateTotemLight: (lamp, x, y, z, power, radius) => {
+        const light = lamp.kind, always = power > 0;
+        if (lamp.x !== x || lamp.y !== y || lamp.z !== z || lamp.always !== always || light.r !== power || light.radius !== radius) lampSelValid = false;
+        lamp.x = x; lamp.y = y; lamp.z = z; lamp.always = always;
+        light.r = power; light.g = 0.62 * power; light.b = 0.3 * power; light.radius = radius;
+      },
       visible: () => !document.hidden && !!repoIsland && !cloudPlaying() && renderer.kind === "webgl2",
       near: () => !!pilot?.player && (() => { const p = pilot.player.root.position, feet = p.y - pilot.player.baseY; return site.onIsland(p.x, feet, p.z) || site.onBridge(p.x, feet, p.z); })(),
       toast: (text) => hud.toast(text)
@@ -4395,9 +4400,19 @@
   const npcTreeSupportAllowed = (node) => !node.npcTreeSupport;
   const npcPassesPlayer = (actor, other) => actor?.nonInteractive || other.nonInteractive
     || actor?.contributor && !actor.humanControlled && !actor.remoteControlled && (other.humanControlled || other.remoteControlled);
+  // Totems are permeable from the ground, but become landing surfaces and obstacles in the air.
+  // Standing on a totem stays above the ordinary floor, so landing does not turn its support off.
+  const airborneTotems = actor => {
+    if (!actor?.root || !totemSolids || cloudPlaying()) return false;
+    const p = actor.root.position, feet = p.y - (actor.baseY || 0);
+    if (actor.hop > 0 || actor.hopV > 0) return true;
+    const ground = Math.max(island.supportAt(p.x, p.z, feet, 0, ABYSS_FLOOR, PLAYER_RADIUS), solids.supportAt(p.x, p.z, feet, 0, PLAYER_RADIUS));
+    return feet > ground + 0.08;
+  };
   const propSupportAt = (x, z, y, rise, actor, ignoreClanker = false, passTraffic = false) => {
     const npc = actor?.contributor && actor !== pilot?.player;
     let floor = solids ? solids.supportAt(x, z, y, rise, PLAYER_RADIUS, null, null, passTraffic, npc ? npcTreeSupportAllowed : null, passTraffic) : -Infinity;
+    if (airborneTotems(actor)) floor = Math.max(floor, totemSolids.supportAt(x, z, y, 0, PLAYER_RADIUS));
     if (!ignoreClanker) floor = Math.max(floor, characterClankerSupportAt(x, z, y, rise, actor));
     if (altar && ALTAR_HEIGHT <= y + rise + 1e-7 && Math.hypot(x, z) < altar.platformRadius + PLAYER_RADIUS - 1e-7) floor = Math.max(floor, ALTAR_HEIGHT);
     if (crew && !passTraffic) for (let i = 0; i < crew.list.length; i++) {
@@ -4413,6 +4428,7 @@
   const propCeilingAt = (x, z, y, radius, actor) => {
     const passTraffic = rageThrown(actor);
     let ceiling = solids ? solids.ceilingAt(x, z, y, radius, null, passTraffic, passTraffic) : Infinity;
+    if (airborneTotems(actor)) ceiling = Math.min(ceiling, totemSolids.ceilingAt(x, z, y, radius));
     if (altar && y < ALTAR_HEIGHT - 1e-7 && Math.hypot(x, z) < altar.platformRadius + radius - 1e-7) ceiling = Math.min(ceiling, 0);
     if (crew && !passTraffic) for (let i = 0; i < crew.list.length; i++) {
       const other = crew.list[i];
@@ -4446,6 +4462,7 @@
     passTraffic = rageThrown(actor), passRageProps = passTraffic) => {
     if (solids && !(escaping ? solids.segmentClear(x, y, z, toX, toY, toZ, radius, height, null, radius, height, false, false, true, passRageProps)
       : solids.segmentClear(x, y, z, toX, toY, toZ, radius, height, null, toRadius, toHeight, passTraffic, false, false, passRageProps))) return false;
+    if (airborneTotems(actor) && !totemSolids.segmentClear(x, y, z, toX, toY, toZ, radius, height, null, toRadius, toHeight, false, false, escaping)) return false;
     radius = Math.max(radius, toRadius); height = Math.max(height, toHeight);
     if (altar && !cylinderSegmentClear(x, y, z, toX, toY, toZ, radius, height, 0, 0, 0, ALTAR_HEIGHT, altar.platformRadius)) return false;
     if (crew && !passTraffic) for (let otherIndex = 0; otherIndex < crew.list.length; otherIndex++) {
@@ -4649,7 +4666,8 @@
     return true;
   };
   const physicalClearAt = (x, y, z, radius, height, actor = pilot?.player) => island.clearAt(x, y, z, radius, height) && y + height <= Math.min(entranceCeilingAt(x, z, y, radius), bedCeilingAt(x, z, y, radius), propCeilingAt(x, z, y, radius, actor)) + 1e-7
-    && (!solids || solids.segmentClear(x, y, z, x, y, z, radius, height, null, radius, height, rageThrown(actor), false, false, rageThrown(actor)));
+    && (!solids || solids.segmentClear(x, y, z, x, y, z, radius, height, null, radius, height, rageThrown(actor), false, false, rageThrown(actor)))
+    && (!airborneTotems(actor) || totemSolids.clearAt(x, y, z, radius, height));
   const JETPACK_COLUMN = { caveIndex: 0, floor: 0, ceiling: 0 };
   const jetpackAllowed = (cave) => {
     if (cloudHopper?.active) return !cloudHopper.held && cave === cloudHopper.actor;
@@ -5664,10 +5682,8 @@
     const bananas = gameMod.bananasFor(donation.sats), shown = counted ? counted.rounded : bananas;
     pile.deliverBananas(bananas);
     celebrate(donation, shown);
-    const loot = lootEnabled ? game.lootFor(donation) : null;
     const who = donation.handle ? `@${donation.handle}` : "anon";
-    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}${loot ? ` · ${loot.tier} crate!` : ""}`);
-    if (loot) crates.spawnCrate(donation, loot, 0.9 + Math.min(1.5, bananas / pileMod.DROP_RATE));
+    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}`);
     hud.setStats(game.state);
   };
 
@@ -5680,8 +5696,6 @@
         return o.cave.traits.display;
       case "clanker":
         return `🦍 ${o.entry.owner.traits.display}`;
-      case "crate":
-        return `${o.crate.loot.tier} crate · tap to open`;
       case "cave":
         return o.slot.status === "open" ? o.slot.scene === "lab" ? `${o.slot.name} · island workshop` : o.slot.title ? `${o.slot.name} · ${o.slot.title}` : walkedInto(o.slot) ? `${o.slot.name} · walk in through the cave` : `${o.slot.name} · tap to enter` : o.slot.status === "headquarters" ? "Headquarters · walk down the ramp" : o.slot.status === "mirror" ? `${o.slot.name} · mirror` : o.slot.status === "sleeping" ? "A project sleeps here · zzz" : o.slot.soon ? `${o.slot.name} · coming soon` : "An empty cave";
       case "arcade-cabinet":
@@ -5708,7 +5722,6 @@
         if (o.prop === "timechainentrance") return "Timechain Sphere · ten rooms, chosen at the keypad";
         if (o.prop === "timechainbridge") return "Wooden bridge · to Timechain Sphere";
         if (o.prop === "timechainkeypad") return COARSE ? "Room keypad · walk up and tap to choose a room" : "Room keypad · walk up and press Space to choose a room";
-        if (o.prop === "totem") return totemTip(o.totem);
         return PROP_TIPS[o.prop] || "";
       case "piece":
         if (o.piece === "chalkboard" && chalkboard.writer) return `Chalkboard · ${chalkboard.writer} is writing`;
@@ -5796,6 +5809,8 @@
     hud.tooltip.show(ghostHoverText, GHOST_POINTER.x, GHOST_POINTER.y, actor, false);
   };
   const showHoverTooltip = (hit, p) => {
+    if (hit?.owner.kind === "repo-totem" ? !onMergeRock() : pilot?.aiming) hit = null;
+    carryTotemHovered = !pilot?.aiming && hit?.owner.kind === "repo-totem";
     if (hit && (hit.owner.kind === "cave" || hit.owner.kind === "cave-sign")) BL.deferred.prefetchScene(hit.owner.slot.scene);
     pileHovered = hit?.owner.kind === "pile";
     if (!pileHovered) hud.setPileValueVisible(false);
@@ -5815,7 +5830,7 @@
   };
   const reticleTarget = (hit) => {
     const o = hit.owner;
-    if (hit.node === mirrorCave.node || o.kind === "cave-sign" || o.kind === "room-sign" || o.kind === "sphere-key" || o.kind === "sphere-directory"
+    if (hit.node === mirrorCave.node || o.kind === "repo-totem" && onMergeRock() || o.kind === "cave-sign" || o.kind === "room-sign" || o.kind === "sphere-key" || o.kind === "sphere-directory"
       || o.kind === "lab-link" || o.kind === "piece" || o.kind === "book") return "object";
     if (o.kind === "cave") return o.slot.status === "open" && !walkedInto(o.slot) ? "object" : "none";
     if (o.kind === "prop" && RETICLE_PROPS.has(o.prop)) return "object";
@@ -5857,9 +5872,6 @@
         if (!wobble(o.node, 0.25)) return;
         fx.burst(x, w[13] + 0.7, z, 6, [LEAF], 1.2);
         if (!foundMagazine && !dropBanana(o, BUSH_CHANCE)) hud.toast(BUSH_WORDS[fnv1a(`${o.x}/${o.z}/${Math.floor(now)}`) % BUSH_WORDS.length]);
-        break;
-      case "totem":
-        pokeTotem(o);
         break;
       case "palm":
         if (!wobble(o.node, 0.05)) return;
@@ -6402,8 +6414,8 @@
   };
   // Whoever the visitor is playing goes in with them, as world.pilot; a scene that has a use for it
   // takes it on the way in.
-  // The Lightning Factory has no door to tap: its shield is walked through (`factoryShield`).
-  const walkedInto = (slot) => slot.scene === "factory";
+  // The Factory shield is walked through; Arcade entry uses the nearby action key/button, never a cave tap.
+  const walkedInto = (slot) => slot.scene === "factory" || slot.scene === "arcade";
   const enterCave = (slot) => {
     if (slot.scene === "lab") return;
     if (!slot.scene) { if (slot.place) navigate(slot.place); return; }
@@ -6522,9 +6534,6 @@
       case "clanker":
         hud.toast(tooltipFor(hit));
         break;
-      case "crate":
-        crates.openCrate(o.crate);
-        break;
       case "cave":
         if (o.slot.status === "open" && !walkedInto(o.slot)) enterCave(o.slot);
         else hud.toast(tooltipFor(hit));
@@ -6558,7 +6567,7 @@
         window.open("https://entropylab.online", "_blank", "noopener,noreferrer");
         break;
       case "repo-totem":
-        if (repoIsland) window.open(repoIsland.open(o), "_blank", "noopener,noreferrer");
+        if (onMergeRock()) window.open(repoIsland.open(o), "_blank", "noopener,noreferrer");
         break;
       case "repo-sign":
       case "repo-bridge":
@@ -6573,6 +6582,54 @@
       default:
         break;
     }
+  };
+
+  // Only a player on Merge Rock can hover or open its totems, in carry or combat mode. Combat uses
+  // the same precise ray, at the free cursor or the locked crosshair, with no aim assistance.
+  const COMBAT_POINTER = { x: -1, y: -1 }, COMBAT_RAY = {}, COMBAT_HIT = {};
+  const COMBAT_VIEW = math.mat4.create(), COMBAT_UP = { x: 0, y: 1, z: 0 };
+  let carryTotemHovered = false, combatTotemHovered = false, combatTotemLink = null;
+  const onMergeRock = () => {
+    const player = pilot?.player;
+    if (!player || !repoIsland || clankerPlay?.active || cloudHopper?.active || factoryDeparting || bifrostDeparting || islandGuide?.holding) return false;
+    const p = player.root.position;
+    return repoIsland.onIsland(p.x, p.y - player.baseY, p.z);
+  };
+  const combatTotemAt = (x, y) => {
+    if (!onMergeRock() || x < 0 || y < 0 || x > renderer.size.width || y > renderer.size.height) return null;
+    math.mat4.lookAt(COMBAT_VIEW, camera.position, camera.target, camera.up || COMBAT_UP);
+    math.mat4.rayFromView(COMBAT_RAY, COMBAT_VIEW, renderer.size.width, renderer.size.height, camera.fov, camera.position, x, y, camera.orthoMix, camera.orthoHeight);
+    const r = COMBAT_RAY, hit = COMBAT_HIT;
+    if (!input.weaponTargets.ray(hit, r.ox, r.oy, r.oz, r.dx, r.dy, r.dz, camera.far, pilot.player, null, true)
+      || hit.owner.kind !== "repo-totem"
+      || liveTarget(r.ox, r.oy, r.oz, r.dx, r.dy, r.dz, hit.distance) < hit.distance) return null;
+    return hit;
+  };
+  const combatTotemClick = (x, y) => {
+    const hit = combatTotemAt(x, y);
+    // Take the attack on press; open on release, like carry clicks, so native tab modifiers work.
+    combatTotemLink = hit ? repoIsland.open(hit.owner) : null;
+    return !!combatTotemLink;
+  };
+  const combatPointer = (x, y) => {
+    const rect = glCanvas.getBoundingClientRect();
+    COMBAT_POINTER.x = (x - rect.left) * renderer.size.width / rect.width;
+    COMBAT_POINTER.y = (y - rect.top) * renderer.size.height / rect.height;
+    return COMBAT_POINTER;
+  };
+  const combatTotemPress = (event) => {
+    if (pilot.aimFocused) return combatTotemClick(renderer.size.width / 2, renderer.size.height / 2);
+    const p = combatPointer(event.clientX, event.clientY);
+    return combatTotemClick(p.x, p.y);
+  };
+  const updateCombatTotemHover = () => {
+    // Carry hover normally refreshes only on pointer movement; leaving the island must clear it too.
+    if (carryTotemHovered && !onMergeRock()) { hud.tooltip.hide(); carryTotemHovered = false; }
+    const focused = pilot?.aimFocused;
+    const x = focused ? renderer.size.width / 2 : COMBAT_POINTER.x, y = focused ? renderer.size.height / 2 : COMBAT_POINTER.y;
+    const hit = pilot?.aiming && onMergeRock() ? combatTotemAt(x, y) : null;
+    if (hit) { COMBAT_POINTER.x = x; COMBAT_POINTER.y = y; showHoverTooltip(hit, COMBAT_POINTER); combatTotemHovered = true; }
+    else if (combatTotemHovered) { hud.tooltip.hide(); combatTotemHovered = false; }
   };
 
   const CAMERA_RADIUS = 0.3, CAMERA_FLOOR = 0.55, CAMERA_STEP_FLOOR = CAMERA_RADIUS + 0.02, CAMERA_VERTICAL_RATE = 3.2, CAMERA_HORIZONTAL_RATE = 8;
@@ -7761,149 +7818,6 @@
     go: (i) => jumbotron.goToView(i)
   };
   const openJumbotron = () => hud.openBoard(jumbotronBoard);
-  // The four repository totems stand in two pairs beside the jumbotron approach, each with its faces toward the
-  // pile. Fire burns in their eyes, each flame a node on the arcade's one `blaze` geometry. For a day after a PR
-  // merges into main or master (`totemFeed`, `totemGlow.RECENT`), the repository's own pattern moves over the runes
-  // cut into TOTEM_SLICE m slices up the pole and the eyes at their heights, waning to 60% by the day's end; light
-  // circles the carved bands between heads, and painted details pulse softly. A merge seen during the visit flares
-  // them brightest for TOTEM_FLARE seconds. Outside that day the eyes and all glow go out.
-  // Each also casts a soft warm light from its middle that follows them, its own lamp kind so the tiers'
-  // nearest-first choice treats it like any other lamp.
-  // Each stands as tall and wide as its repository's importance (`totemModels.layout`); TOTEM_ROOM past its reach
-  // keeps the scattered props off its stones and name board. Fixed feet keep both pairs in their meadow clearings.
-  const TOTEM_SPOTS = [[7.8, 18.5], [-8.1, 18.6], [-4.7, 19.5], [4.1, 19.9]], TOTEM_ROOM = 2.4;
-  const TOTEM_SLICE = 0.3, TOTEM_FLARE = 6, TOTEM_CHEER = 14;
-  const totems = [];
-  let totemUnsub = null;
-  const totemAge = (i) => {
-    const changed = BL.totemFeed.state.repos[i].changedAt;
-    if (!changed) return "";
-    const minutes = Math.max(0, Math.round((Date.now() - changed) / 60000));
-    return minutes < 60 ? `${minutes} min ago` : minutes < 2880 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} days ago`;
-  };
-  // A merge landing during the visit: the eyes and runes flare, the Oogas awake within TOTEM_CHEER cheer
-  // and show its word in speech bubbles (never the one being driven), and one notice names the repository.
-  const flareTotem = (i) => {
-    const o = totems[i], p = o.owner.node.position, repo = BL.totemFeed.REPOS[i];
-    o.flare = 1;
-    for (const cave of crew.cavemen.values()) {
-      if (cave === pilot.player || cave.build || cave.state === "sleeping") continue;
-      const c = cave.root.position;
-      if (Math.hypot(c.x - p.x, c.z - p.z) > TOTEM_CHEER) continue;
-      cave.cheer = 1.6;
-      fx.say(cave, fnv1a(`${repo.word}/${cave.traits.name}`) % 2 ? `${repo.word}!` : "OOGA!", 1.8);
-    }
-    hud.toast(`${repo.name} just merged · the ${repo.word} totem blazes`);
-  };
-  const buildTotems = () => {
-    const M = BL.totemModels, feed = BL.totemFeed;
-    TOTEM_SPOTS.forEach(([x, z], i) => {
-      const L = M.layout(i), spot = { x, z };
-      const ry = Math.atan2(-spot.x, -spot.z);
-      claim(spot.x, spot.z, L.reach + TOTEM_ROOM);
-      const node = place(M.body(i), spot.x, spot.z, ry);
-      // A pattern runs over u from the lowest lit thing on the pole (a slice of runes or an eye) to the highest.
-      const slices = BL.totemGlow.bands(M.glyphs(i), TOTEM_SLICE);
-      let lo = Infinity, hi = -Infinity;
-      for (const { y } of slices) { lo = Math.min(lo, y); hi = Math.max(hi, y); }
-      for (const [, y] of L.eyes) { lo = Math.min(lo, y); hi = Math.max(hi, y); }
-      const u = (y) => (y - lo) / (hi - lo);
-      const runes = slices.map(({ geometry, y }) => {
-        const band = createNode({ geometry, glow: 0, sightHidden: true });
-        addChild(node, band);
-        return { node: band, u: u(y) };
-      });
-      const features = createNode({ geometry: M.featureHighlights(i), glow: 0, visible: false, sightHidden: true });
-      addChild(node, features);
-      const rings = [];
-      L.rings.forEach((y, level) => {
-        for (let k = 0; k < M.RING_SEGMENTS; k++) {
-          const arc = createNode({ geometry: M.ringSector(i), position: { x: 0, y, z: 0 }, rotation: { x: 0, y: -k / M.RING_SEGMENTS * Math.PI * 2, z: 0 }, glow: 0, visible: false, sightHidden: true });
-          addChild(node, arc);
-          // Start at the front (+z); keep the geometry aligned to the painted band's existing facets.
-          rings.push({ node: arc, a: ((k - M.RING_SEGMENTS / 4 + M.RING_SEGMENTS) % M.RING_SEGMENTS + 0.5) / M.RING_SEGMENTS, level });
-        }
-      });
-      const flames = L.eyes.map(([x, y, z, size]) => {
-        const flame = createNode({ position: { x, y, z }, scale: { x: size, y: size, z: size }, geometry: BL.arcadeModels.blaze(), visible: false, sightHidden: true });
-        addChild(node, flame);
-        return { node: flame, size, u: u(y) };
-      });
-      const owner = addProp("totem", node, spot.x, spot.z, 0);
-      // The broad sphere would take in half the meadow; a tap counts only on the stones, the pole or the wings.
-      const P = node.position, cos = Math.cos(ry), sin = Math.sin(ry);
-      owner.totem = i;
-      owner.pickRay = (ray) => {
-        const ox = ray.ox - P.x, oz = ray.oz - P.z;
-        return M.hit(i, ox * cos - oz * sin, ray.oy - P.y, ox * sin + oz * cos, ray.dx * cos - ray.dz * sin, ray.dy, ray.dx * sin + ray.dz * cos);
-      };
-      const light = { r: 0, g: 0, b: 0, radius: 0, glow: 0, hide: false };
-      const lamp = addLamp({ glow: 0, flare: 0, visible: true }, light, spot.x, L.apex * 0.35, spot.z, true, Infinity, `totem:${i}`);
-      totems.push({ owner, runes, rings, features, flames, light, lamp, flare: 0, live: 0, pattern: BL.totemGlow.pattern(feed.REPOS[i].word), eyeTop: Math.max(...L.eyes.map((e) => e[1])) });
-    });
-  };
-  const updateTotems = (dt, elapsed) => {
-    const at = Date.now(), repos = BL.totemFeed.state.repos;
-    for (let i = 0; i < totems.length; i++) {
-      const o = totems[i], age = at - repos[i].changedAt;
-      const live = DEBUG_TOTEM_GLOW ? 1 : repos[i].changedAt && age >= 0 && age < BL.totemGlow.RECENT ? 1 - 0.4 * age / BL.totemGlow.RECENT : 0;
-      o.live = live ? o.live + (live - o.live) * Math.min(1, dt * 1.5) : 0;
-      if (o.live < 0.002) o.live = 0;
-      o.flare = live ? Math.max(0, o.flare - dt / TOTEM_FLARE) : 0;
-      const glowPower = Math.max(o.live, o.flare);
-      const breath = 0.5 + 0.5 * Math.sin(elapsed * 1.8 + i * 1.7), t = elapsed + i * 3.1;
-      // Each slice of runes lights where the pattern stands at its height. Highlight past 2.4 would carry the warm
-      // tint beyond its colour, so the flare tops out there.
-      let sum = 0;
-      for (let k = 0; k < o.runes.length; k++) {
-        const r = o.runes[k], v = o.live ? o.pattern(r.u, t, i) : 0, lit = Math.max(o.live * (0.25 + 0.75 * v), o.flare);
-        sum += v;
-        r.node.glow = (0.45 + 0.55 * lit) * glowPower;
-        r.node.highlight = (0.45 + 1.6 * lit + 0.35 * o.flare) * glowPower;
-      }
-      // Let the painted details breathe gently, leaving their carved colors and shapes readable at the peak.
-      const featurePulse = 0.5 + 0.5 * Math.sin(elapsed * 2.2 + i * 1.7);
-      const featureGlow = glowPower * 0.38 * featurePulse * featurePulse;
-      o.features.visible = featureGlow > 0.02;
-      o.features.glow = featureGlow;
-      o.features.highlight = 0.55 * featureGlow;
-      // A bright front and fading wake now circle every separating band without stopping.
-      const ringPower = glowPower;
-      for (let k = 0; k < o.rings.length; k++) {
-        const r = o.rings[k], lit = ringPower ? ringPower * BL.totemGlow.ring(r.a, t, r.level) : 0;
-        r.node.visible = lit > 0.01;
-        r.node.glow = lit;
-        r.node.highlight = lit * 2.2;
-      }
-      const lit = Math.max(o.live * (0.3 + 0.7 * sum / o.runes.length), o.flare), power = (0.45 + 0.1 * breath + 0.8 * lit) * glowPower;
-      const always = glowPower > 0, radius = always ? 4 + 2.5 * glowPower : 0;
-      // Animated light inputs can change under a stationary camera, including when a merge's glow expires.
-      if (o.lamp.always !== always || o.light.radius !== radius || o.light.r !== power) lampSelValid = false;
-      o.lamp.always = always;
-      o.light.radius = radius;
-      o.light.r = power; o.light.g = 0.62 * power; o.light.b = 0.3 * power;
-      // The eye fires leap as the pattern passes their height, taller still in a flare; they go out between merges.
-      for (let k = 0; k < o.flames.length; k++) {
-        const f = o.flames[k], flick = Math.sin(elapsed * 11 + k * 2.3 + i) * 0.08 + Math.sin(elapsed * 17.3 + k * 1.1) * 0.05;
-        const fire = o.live * (0.75 + 0.75 * o.pattern(f.u, t, i)) + 0.3 * o.flare;
-        f.node.visible = o.lamp.always;
-        f.node.scale.x = f.node.scale.z = f.size * fire;
-        f.node.scale.y = f.size * fire * (1 + flick);
-      }
-    }
-  };
-  const totemTip = (i) => {
-    const age = totemAge(i), repo = BL.totemFeed.REPOS[i];
-    return age ? `${repo.name} totem · merged ${age} · tap to see the PR` : `${repo.name} totem · tap to see its PRs`;
-  };
-  // A tap opens the repository's latest recent merge on GitHub in a new tab, as the lab's link opens its site.
-  const pokeTotem = (o) => {
-    const p = o.node.position;
-    fx.burst(p.x, p.y + 1.6, p.z, 8, [DUST], 1.2);
-    // Straight to the latest recent merge once GitHub has answered, the repository's PRs until then.
-    const repo = BL.totemFeed.REPOS[o.totem], url = BL.totemFeed.state.repos[o.totem].url;
-    window.open(url || `https://github.com/${repo.repo}/pulls?q=is%3Apr+is%3Amerged`, "_blank", "noopener,noreferrer");
-  };
   let prefetchAt = 0;
   let lazyBedJob = null;
   const stopLazyBedding = () => {
@@ -8036,7 +7950,6 @@
       mempoolIsland.water.update(dt, poolEffectsTime, Date.now());
       mempoolIsland.paintings.update(dt);
     }
-    updateTotems(dt, elapsed);
     if (coilCharge) updateCoilCharge(elapsed);
     // A fire rig pauses with the view: its own clock advances only while its pit is near, so a distant pit
     // freezes its flame and resumes without a catch-up jump.
@@ -8047,6 +7960,11 @@
       if (!near) continue;
       rig.time = (rig.time || 0) + dt;
       rig.update(dt, rig.time);
+    }
+    // Merge Rock's geometry, riders and warm lights all follow this frame's turn before lamp selection and solid sync.
+    if (repoIsland && !cloudPlaying()) {
+      if (repoIsland.turn()) carryRepoIsland();
+      repoIsland.update(dt, elapsed, camera);
     }
     updateLamps(dt, elapsed, phase !== null);
     if (jumbotron) {
@@ -8060,9 +7978,7 @@
     if (!cloudPlaying()) critters.update(dt, elapsed, RENDER_OPTS.day, RENDER_OPTS.stars, fire.k, 1);
     if (!gameMode && !cloudPlaying()) updateClouds(dt);
     updateGameRing(dt, elapsed);
-    // Repo Island turns before the solids are synced, so its ground and its riders move in the same frame.
-    if (repoIsland && !cloudPlaying() && repoIsland.turn()) carryRepoIsland();
-    solids.sync();
+    solids.sync(); totemSolids.sync();
     if (gameMode) updateRageThrowMap();
     updateSleepingSolids();
     if (!chalkboard.openNow) {
@@ -8078,7 +7994,6 @@
     if (factoryMouth && !cloudPlaying()) factoryShield(dt, elapsed);
     if (arcadeMouth && !cloudPlaying()) arcadeMouth.entrance.update(dt, elapsed, pilot.player);
     if (bifrostIsle && !cloudPlaying()) bifrostGate(dt, elapsed);
-    if (repoIsland && !cloudPlaying()) repoIsland.update(dt, elapsed, camera);
     if (bcaMouth) bcaVeil(dt, elapsed);
     if (factoryDeparting || bifrostDeparting) { npcGhosts.paint(dt); return; } // The Ooga through a shield and its camera hold through the director fade.
     if (gameMode) prepareClankerStrike();
@@ -8235,7 +8150,6 @@
         fx.zzzAt(s.x, s.y, s.z);
       }
     }
-    crates.update(dt, elapsed);
     fx.update(dt);
     stepTweens(dt);
     if (hammock) hammock.syncRopes(RENDER_OPTS.windTime, renderer.kind === "webgl2");
@@ -8252,6 +8166,9 @@
     if (!cloudHopper?.active) islandGuide.update(dt, elapsed);
     shareDrivenPose();
     timechainIsland.site.view(camera.position);
+    const firstPerson = clankerPlay.active ? clankerPlay.firstPerson : pilot.closeMix > 0.8 || pilot.mode === "eye-level";
+    if (repoIsland && !cloudPlaying()) repoIsland.afterCamera(camera, firstPerson);
+    updateCombatTotemHover();
     for (let i = 0; i < signDetails.length; i++) {
       const sign = signDetails[i], dx = camera.position.x - sign.x, dy = camera.position.y - sign.y, dz = camera.position.z - sign.z;
       const limit = sign.node.geometry === sign.pixels ? 20 : 16;
@@ -10819,16 +10736,6 @@
     drawFirstPersonFire(crew.player);
   };
 
-  const onLootCleared = () => {
-    if (!lootEnabled) return;
-    crew.applyAllSwag();
-    crew.renderLocker();
-    hud.toast("Loot locker cleared");
-  };
-  const clearLoot = () => {
-    game.clearLoot();
-    onLootCleared();
-  };
   // A demo tip is the simulation's alone: in real mode it would count a tip nobody paid.
   const demoTip = (sats) => {
     if (!donations.real) onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
@@ -10908,7 +10815,6 @@
       if (jumbotron) jumbotron.refreshData(event.stats);
     }
   };
-  const onTotem = (event) => { if (event.fresh) flareTotem(event.index); };
   const suspendHub = () => {
     stopLazyBedding();
     // A kept hammock stays hung; its sitter gets up to go.
@@ -10950,7 +10856,6 @@
     unsubscribeMempool(); unsubscribeMempool = null;
     unsubscribeChain(); unsubscribeChain = null;
     if (oogatronUnsub) oogatronUnsub(); oogatronUnsub = null;
-    if (totemUnsub) totemUnsub(); totemUnsub = null;
     if (repoIsland) repoIsland.pause();
     if (positionDebug) {
       positionDebug.removeEventListener("click", copyPositionDebug);
@@ -10992,7 +10897,7 @@
     return { targets: input.targetCount };
   };
   const resumeHub = (ctx) => {
-    ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
+    ({ renderer, game, world, go, testBananas } = ctx);
     glCanvas = ctx.canvas; overlayCanvas = ctx.overlay;
     heldHub = false;
     listenHammockShots();
@@ -11027,7 +10932,6 @@
     unsubscribeChain = chain.subscribe(onChain);
     unsubscribeMempool = mempool.subscribe(onMempool);
     oogatronUnsub = oogatronLive.subscribe(onOogatron);
-    totemUnsub = BL.totemFeed.subscribe(onTotem);
     if (repoIsland) repoIsland.start();
     BL.net.setHub(true);
     crew.refreshStates(true);
@@ -11069,7 +10973,6 @@
     if (donate) hud.openFeed();
     clankers.sync(); clankerMeshes.sync();
     for (let i = 0; i < crew.list.length; i++) crew.refreshRosterRow(crew.list[i]);
-    if (lootEnabled) { crew.applyAllSwag(); crew.renderLocker(); }
     hud.setStats(game.state); pile.syncPile(true);
     stateTimer = window.setInterval(() => { crew.refreshStates(); fx.trimPool(); }, 6e4);
     lampSelValid = false; sampledDay = 0;
@@ -11159,7 +11062,7 @@
     prefetchAt = 0;
     reuseHub = ctx.hubPolicy === "keep";
     if (heldHub) { resumeHub(ctx); return; }
-    ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
+    ({ renderer, game, world, go, testBananas } = ctx);
     poolEffectsActive = false; poolEffectsTime = 0;
     glCanvas = ctx.canvas;
     factoryDeparting = bifrostDeparting = factoryHeld = false;
@@ -11182,6 +11085,7 @@
     positionDebugState = "";
     if (POSITION_DEBUG) positionDebug.addEventListener("click", copyPositionDebug, { signal: ctx.signal });
     solids = BL.solidProps.create();
+    totemSolids = BL.solidProps.create();
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     phase = null;
     const factorySlot = caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
@@ -11211,11 +11115,24 @@
       CAMERA_OPENINGS.push({ id: m.id, caveIndex: i + 1, mouth: m, sr, cr, minX: PORTAL_MIN_X, maxX: PORTAL_MAX_X, minY: PORTAL_MIN_Y, maxY: PORTAL_MAX_Y, planeZ: PORTAL_Z, blocked, headquarters: slot.status === "headquarters", ramp: slot.status === "headquarters" ? island.headquarters.ramps.find((entry) => entry.id === m.id) : null, stopZ: blocked ? 0.53 + hubModels.sealedCaveFace(sealedCaveVariant(slot.id)).frontZ : PORTAL_Z, rim: hubModels.caveMouthRim().openingBounds });
     }
     mark("island");
-    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks, preciseHover: true });
+    COMBAT_POINTER.x = COMBAT_POINTER.y = -1; carryTotemHovered = combatTotemHovered = false; combatTotemLink = null;
+    ctx.canvas.addEventListener("pointerleave", () => { COMBAT_POINTER.x = COMBAT_POINTER.y = -1; }, { signal: ctx.signal });
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
-    pilot = pilotMod.create({ carry: true, renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, clampTarget, clampCamera, observeOrbit: (position, dt) => clampCamera(position, 0, CLEARANCE, false, dt), ceilingAt: (x, z, y, cave) => cloudPlaying() ? Infinity : ceilingAt(x, z, y, cave), birdsEyeMin: BIRDS_EYE_MIN, birdsEyeCeiling, releaseView: releaseCameraView, coarse: COARSE, jetpackStatus: jetpackHudStatus, mayPossess: mayDriveOoga, combatOnly: () => gameCombatOnly || !!cloudHopper?.playing, noOverhead: () => !!cloudHopper?.active, primaryAction: (down) => !!cloudHopper?.hookAction(down), cameraTargets: () => !cloudPlaying(), fixedFollow: cloudPlaying, close: { ...CLOSE_VIEW, maxStep: STEP_MAX, groundAt: playerSupportAt, visualGroundAt: visualSupportAt, sleepEyeFloorAt, zone: () => playerCaveIndex } });
+    pilot = pilotMod.create({ carry: true, renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, clampTarget, clampCamera, observeOrbit: (position, dt) => clampCamera(position, 0, CLEARANCE, false, dt), ceilingAt: (x, z, y, cave) => cloudPlaying() ? Infinity : ceilingAt(x, z, y, cave), birdsEyeMin: BIRDS_EYE_MIN, birdsEyeCeiling, releaseView: releaseCameraView, coarse: COARSE, jetpackStatus: jetpackHudStatus, mayPossess: mayDriveOoga, combatOnly: () => gameCombatOnly || !!cloudHopper?.playing, noOverhead: () => !!cloudHopper?.active, primaryAction: (down, event) => {
+        if (!down && combatTotemLink) {
+          const link = combatTotemLink; combatTotemLink = null;
+          if (event && onMergeRock()) window.open(link, "_blank", "noopener,noreferrer");
+          return true;
+        }
+        if (cloudHopper?.hookAction(down)) return true;
+        if (!down || !event) return false;
+        return combatTotemPress(event);
+      },
+      modifiedClick: combatTotemPress,
+      aimPointer: combatPointer, captureClick: (x, y) => { const p = combatPointer(x, y); return combatTotemClick(p.x, p.y); }, cameraTargets: () => !cloudPlaying(), fixedFollow: cloudPlaying, close: { ...CLOSE_VIEW, maxStep: STEP_MAX, groundAt: playerSupportAt, visualGroundAt: visualSupportAt, sleepEyeFloorAt, zone: () => playerCaveIndex } });
     chalkboard = BL.chalkboard.create({
       renderer,
       onOpen: () => { pilot.setActive(false); pilot.controls.reset(); input.reset(); hud.tooltip.hide(); },
@@ -11342,6 +11259,7 @@
         position: { x: jx, y: island.surfaceAt(jx, jz) + (legDrop - jSink) * jScale + jLift, z: jz },
         ry: jry,
         scale: jScale,
+        width: 1.25, // Keep the posts outside the full bridge deck plus a walking body's radius.
         curved: true
       });
       addChild(root, jumbotron.node);
@@ -11354,8 +11272,6 @@
       // walks idled Oogas down to bed).
       oogatronUnsub = oogatronLive.subscribe(onOogatron);
     }
-    yield* pause(slice);
-    buildTotems();
     yield* pause(slice);
     addDressingLights();
     buildPilePosts();
@@ -11405,7 +11321,7 @@
     critters = crittersMod.create({ root, renderer, flowers: scenery.filter((o) => o.prop === "flower" && o.active), fire: firePos, secondaryFire: { x: 0, y: island.headquarters.floor, z: 0 }, meadowRadius: MEADOW, heightAt: island.surfaceAt, activeAt: effectsActiveAt });
     cloudRememberNodes(cloudNodeStart);
     mark("props");
-    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, zzzVisible: sleepMarksVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, matrixLivingPile: true, onLayout: layoutPile, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: playerSupportAt, petLanding: (x, z) => hammock ? hammock.landing(x, z) : null, ceilingAt, wanderSpot, walkable, flyable, glideJetCeiling, useNear, abyssAt, abyssRespawnY: ABYSS_RESPAWN_Y, seaY: SEA_Y, jetpackAllowed, reticleTarget, phase: () => phase };
+    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, zzzVisible: sleepMarksVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, matrixLivingPile: true, onLayout: layoutPile, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: playerSupportAt, petLanding: (x, z, lying) => hammock ? hammock.landing(x, z, lying) : null, ceilingAt, wanderSpot, walkable, flyable, glideJetCeiling, useNear, abyssAt, abyssRespawnY: ABYSS_RESPAWN_Y, seaY: SEA_Y, jetpackAllowed, reticleTarget, phase: () => phase };
     shared.weaponsEnabled = true;
     shared.jetpackRefills = cave => !(cloudHopper?.active && cave === cloudHopper.actor);
     shared.jetpackLiftOnly = cave => !!cloudHopper?.active && cave === cloudHopper.actor;
@@ -11835,7 +11751,6 @@
     shared.addSolid = solids.add;
     shared.removeSolid = solids.remove;
     mark("cavemen");
-    crates = shared.crates = cratesMod.create(shared);
     pilot.bind(shared);
     // The doorway draws the island once from inside the passage for the way back out (`renderView`), sets the
     // sphere's heartbeat going while a room readies slowly (`show`), and hands a crossing the island's own meshes to
@@ -11977,24 +11892,6 @@
     clankers.clear = clankerClear;
     if (DEBUG) { clankers.supportAt = clankerSupportAt; clankers.restFootingClear = clankerRestFootingClear; }
 
-    hud.onAssign((entryId, name) => {
-      if (game.assign(entryId, name)) {
-        crew.applyAllSwag();
-        crew.renderLocker();
-        const cave = crew.cavemen.get(name);
-        const item = game.itemOf(entryId);
-        if (cave && item) {
-          fx.say(cave, `Ooga! ${item.name}!`);
-          hud.toast(`${item.name} → ${name}`);
-        }
-      }
-    });
-    hud.onUnassign((name) => {
-      game.unassign(name);
-      crew.applyAllSwag();
-      crew.renderLocker();
-    });
-
     Object.assign(hooks, {
       onHover: showHoverTooltip,
       onHoverMove: showHoverTooltip,
@@ -12040,8 +11937,7 @@
       }
       if (factoryDeparting || bifrostDeparting || islandGuide.holding) return false;
       if (clankerPlay.active && clankerPlay.action(action)) return;
-      if (action === "clear-loot") clearLoot();
-      else if (action === "reset") resetDemo();
+      if (action === "reset") resetDemo();
       else if (action === "act") pilot.action();
       else if (action === "mode-preset") {
         (clankerPlay.active ? clankerPlay : pilot).freeCursor();
@@ -12124,10 +12020,6 @@
       fx.trimPool();
     }, 6e4);
     for (let i = 0; i < crew.list.length; i++) crew.refreshRosterRow(crew.list[i]);
-    if (lootEnabled) {
-      crew.applyAllSwag();
-      crew.renderLocker();
-    }
     hud.setStats(game.state);
     pile.syncPile(true);
     pileGuides = headquarters.pileGuides = BL.pileGuides.create({
@@ -12166,11 +12058,11 @@
         get bifrost() { return bifrostIsle; },
         get footsteps() { return footsteps; },
         get chalkboardAt() { return chalkboardClearance; },
-        slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, delivery: pile.delivery, spillEffect: pile.spillEffect, cavemen: crew.cavemen, crates: crates.list, lab: null, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
+        slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, delivery: pile.delivery, spillEffect: pile.spillEffect, cavemen: crew.cavemen, lab: null, hud, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
         get shown() {
           return pile.shown;
         },
-        terrainSections, caveSections, cutawayPaths: CUTAWAY_PATH_STATE, terrainRampRoof, get cutawayTravelRamp() { return cutawayTravelRamp; }, get cutawayTravelChannel() { return cutawayTravelChannel; }, get cutawayTravelStation() { return cutawayTravelStation; }, island, mouths: island.mouths, labels, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, get hammock() { return hammock; }, altar, path: island.path.debug, headquarters, jumbotron, totems: { list: totems, flare: flareTotem }, get repoIsland() { return repoIsland; }, get npcSync() { return npcSync; }, get npcGhosts() { return npcGhosts; }, claimOwnOoga: () => { ownOogaClaimed = false; return claimOwnOoga(); }, accountChanged: () => onAccountChange(), clankers, clankerPlay, rageThrowMap, rageEdgeGoal, rageLandAt, rageCaptureLandAt, rageMapRouteClear, rageCaptureEligible, rageApproach, rageWarpRequired, rageGrab, rageCaptive, rageRelease, rageThrow, rageDragClear,
+        terrainSections, caveSections, cutawayPaths: CUTAWAY_PATH_STATE, terrainRampRoof, get cutawayTravelRamp() { return cutawayTravelRamp; }, get cutawayTravelChannel() { return cutawayTravelChannel; }, get cutawayTravelStation() { return cutawayTravelStation; }, island, mouths: island.mouths, labels, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, get hammock() { return hammock; }, altar, path: island.path.debug, headquarters, jumbotron, get repoIsland() { return repoIsland; }, get npcSync() { return npcSync; }, get npcGhosts() { return npcGhosts; }, claimOwnOoga: () => { ownOogaClaimed = false; return claimOwnOoga(); }, accountChanged: () => onAccountChange(), clankers, clankerPlay, rageThrowMap, rageEdgeGoal, rageLandAt, rageCaptureLandAt, rageMapRouteClear, rageCaptureEligible, rageApproach, rageWarpRequired, rageGrab, rageCaptive, rageRelease, rageThrow, rageDragClear,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -12255,8 +12147,6 @@
       parent: root, input, fx, camera, pilot, visitor: () => crew.player, world, hud, coarse: COARSE,
       landing: !ctx.place && !preloadedView && !returningCharacter && ctx.from !== "bifrost",
       quality: () => renderer.quality, busy: () => chalkboard.openNow || clankerPlay.active || factoryDeparting || bifrostDeparting,
-      // What her beam sweeps across on the totems' line: their eyes, west to east.
-      targets: { totems: totems.map((t) => { const p = t.owner.node.position; return { x: p.x, y: p.y + t.eyeTop, z: p.z }; }).sort((a, b) => a.x - b.x) }
     });
     yield* pause(slice);
     cloudRememberNodes(cloudNodeStart);
@@ -12279,8 +12169,7 @@
     mark("covered-view-start");
     yield* prepareCoveredView(ctx.overlay, slice);
     mark("covered-view");
-    totemUnsub = BL.totemFeed.subscribe(onTotem);
-    // Repo Island's totems, in idle time from here on.
+    // Merge Rock's totems, in idle time from here on.
     repoIsland.start();
     if ((ctx.from === "arcade" || ctx.from === "hub") && ctx.place === "cloud-hopper") { cloudYard = ctx.from === "hub" ? arcadeYard : null; ensureCloudHopper(ctx).launch(true); }
     if (DEBUG_GORILLA_MOVE) hud.toast("Gorilla movement debug · click a gorilla, then a destination");
@@ -12435,7 +12324,6 @@
     clankerPlay.dispose();
     remotes.dispose();
     muteHammockShots();
-    crates.dispose();
     pile.dispose();
     npcStatusBeams?.dispose(); npcStatusBeams = null;
     for (const entry of clankers.list) returnLabEquipment(entry);
@@ -12458,7 +12346,7 @@
     fx.dispose();
     cameraCover.dispose();
     bananaCover.dispose();
-    solids.dispose();
+    solids.dispose(); totemSolids.dispose();
     if (rockGuides) rockGuides.dispose();
     delete headquarters.rockGuides;
     sightGuides.dispose();
@@ -12492,11 +12380,6 @@
       oogatronUnsub();
       oogatronUnsub = null;
     }
-    if (totemUnsub) {
-      totemUnsub();
-      totemUnsub = null;
-    }
-    totems.length = 0;
     if (repoIsland) repoIsland.dispose();
     repoIsland = null;
     if (jumbotron) {
@@ -12543,7 +12426,7 @@
     CLANKER_HIT.node = CLANKER_HIT.owner = null;
     viewPoseActor = grabSupportEntry = clankerSupportActor = clankerPassingEntry = preparingGuideActor = null;
     // Drop every per-visit ref but the cached island.
-    terrainRampRoof = pathNode = altar = lawn = life = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = mirrorCave = matrixCave = matrixControl = fire = headquarters = positionDebug = overlayCanvas = null;
+    terrainRampRoof = pathNode = altar = lawn = life = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = totemSolids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = critters = clock = presets = mirrorCave = matrixCave = matrixControl = fire = headquarters = positionDebug = overlayCanvas = null;
     beasts.clear();
     magazine = magazineState = weather = footsteps = petReactions = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
     hubScene.input = hubScene.debug = null;
@@ -12599,14 +12482,14 @@
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...mempoolIsland.water.stats(), ...weather.stats(), ...remotes.stats() };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...mempoolIsland.water.stats(), ...weather.stats(), ...remotes.stats() };
   };
   const hubScene = {
     // The island reports its own zone as soon as an Ooga is driven (see `zoneOf`); until then it is nowhere.
     voiceZone: "none",
     micKey: true,
     get cabinetMenu() { return cloudHopper && cloudHopper.phase === "intro"; },
-    id: "hub", enter, enterSteps, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, cachedGeometry, islandGeometry, libraryNook: LIBRARY,
+    id: "hub", enter, enterSteps, update, overlay, onDonation, previewDonation, onKey, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, cachedGeometry, islandGeometry, libraryNook: LIBRARY,
     get retained() { return heldHub; }, get elapsed() { return now; },
     get retainedRoot() { return heldHub ? root : null; },
     // Readying the hall takes a slice of frames that are otherwise the island's; the tier does not judge them.
