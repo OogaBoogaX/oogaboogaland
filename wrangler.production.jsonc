@@ -9,6 +9,7 @@
   // apex, so it never reaches the Worker. Sign-in works only on SITE_ORIGIN; workers.dev serves the page signed out.
   "routes": [{ "pattern": "oogabooga.land", "custom_domain": true }],
   "observability": { "enabled": true },
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
   "assets": {
     // `npm run build:site` stages the pages here, with worker/_headers.
     "directory": "./_site",
@@ -53,8 +54,10 @@
   },
   // v2: one GameHost a hosted game's instance (worker/src/games.js names them), apart from the island's Room.
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }, { "tag": "v2", "new_sqlite_classes": ["GameHost"] }],
-  // Namespaces are per account: production counts in 1001-1007, staging in 2001-2007.
+  // Namespaces are per account: production counts in 1001-1008, staging in 2001-2008.
   "ratelimits": [
+    // Opt-in dropout reports per signed-in account, with additional D1 retention and volume caps.
+    { "name": "CONNECTION_REPORT_LIMITER", "namespace_id": "1008", "simple": { "limit": 6, "period": 60 } },
     // Poker API and worker delivery per signed-in account.
     { "name": "POKER_LIMITER", "namespace_id": "1004", "simple": { "limit": 240, "period": 60 } },
     // Sign-in starts per IP.

@@ -4,5 +4,5 @@
 (() => {
   "use strict";
   const WIP = [];
-  for (const id of ["factory", "hangar", "arcade", "race", "drop", "mine", "orbit"]) window.BL.deferred.scene(id, null, WIP.includes(id));
+  for (const id of ["factory", "hangar", "arcade", "race", "drop", "mine", "orbit", "studio"]) window.BL.deferred.scene(id, null, WIP.includes(id));
 })();

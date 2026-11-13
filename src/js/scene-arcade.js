@@ -829,7 +829,6 @@
     game.recordDonation(donation, counted && counted.exact);
     world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats)));
   };
-  const onLootCleared = () => {};
 
   // Point lights, most important first so the lowest tier (ten) keeps them, warm lamp light first and the games'
   // colours small: the big sign, the fire baskets' glow on the stage, the four live screens, the wheel, the snack bar
@@ -1884,7 +1883,7 @@
     cabinetView = ctx.cabinet;
     camera = createCamera({ fov: 55, near: 0.2, far: 60 });
     root = createNode();
-    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster });
     hooks = {};
     sceneCanvas = ctx.canvas;
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
@@ -2174,6 +2173,7 @@
   // station, the lamps nearest the view, and the way out.
   let prefetchAt = 0;
   const update = (dt, elapsed) => {
+    if (hockeyPlayers) hockeyPlayers.restore();
     if (queuedCabinet) { const id = queuedCabinet; queuedCabinet = null; open(id); }
     // A scene handoff restores soft mouse-look only. Capture once when the hall
     // is playable again, after the cabinet's return zoom; Escape stays released.
@@ -2446,7 +2446,7 @@
   const arcadeScene = BL.deferred.scene("arcade", {
     // Voice zone: the Arcade group, which its mouth on the island shares (`arcade`).
     voiceZone: "arcade.hall",
-    id: "arcade", buildSteps: () => AM.buildSteps(), enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
+    id: "arcade", buildSteps: () => AM.buildSteps(), enter, update, overlay, onDonation, onKey, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
       return !!(ghosts && ghosts.inMotion);
