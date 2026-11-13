@@ -31053,8 +31053,8 @@ const terrainParityChecks = (BL, island) => {
 };
 // Repo Island (repo-island-data.js, repo-island-models.js, repo-feed.js): the list the page and the Worker share, the
 // island laid out from it, and the feed's boundary. The meadow's four totems are carved by the same kit at its full
-// detail, so their golden is the one they had before the island's details existed.
-const MEADOW_TOTEMS_GOLDEN = "8bdd4fca5a005b4f";
+// detail. The golden includes the shared name-board lettering, updated for the readable N and R.
+const MEADOW_TOTEMS_GOLDEN = "f22e865e938044c5";
 const repoIslandChecks = (BL, island) => {
   const D = BL.repoIslandData, M = BL.repoIslandModels, TM = BL.totemModels, H = BL.hubModels;
   const sections = D.SECTIONS.map((s) => s.id), order = D.REPOS.map((r) => sections.indexOf(r.section));
