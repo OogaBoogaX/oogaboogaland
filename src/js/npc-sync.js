@@ -493,7 +493,6 @@
       const outdoor = (flags & F_OUTDOOR_SLEEP) !== 0;
       if (outdoor || cave.remoteOutdoorSleep) {
         for (const node of cave.sleepParts.equipment) node.visible = state !== "sleeping";
-        for (const node of cave.swagNodes) node.visible = !outdoor;
         for (const model of cave.magazineModels) if (model) model.node.visible = !outdoor;
         if (cave.jet) cave.jet.node.visible = !outdoor;
       }

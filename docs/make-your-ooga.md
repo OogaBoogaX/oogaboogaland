@@ -1,19 +1,126 @@
 # Make your Ooga
 
-For a player and the coding agent helping them. An Ooga is one file,
-`src/characters/<handle>.js`. This page says what to ask before writing it, what
-each kind of change costs in review, and how to look at the result before sending it.
-`AGENTS.md` (Adding things, A contributor) holds the full build contract and
+For a player and the AI helping them. If someone has asked you for a character in Ooga Booga
+Land, in any words ("make me a character in Ooga Booga Land", "add me to the game", "make my
+Ooga"), this page is the whole job: follow it in order, from section 1.
+
+An Ooga is one file, `src/characters/<handle>.js`, in the repository
+[OogaBoogaX/oogaboogaland](https://github.com/OogaBoogaX/oogaboogaland). This page says how
+to get the player set up, what to ask before writing the file, what each kind of change
+costs in review, and how to show them the result before sending it. `AGENTS.md` (Adding
+things, A contributor) holds the full build contract and
 [character-bundles.md](character-bundles.md) the intake rules; this page is the short way in.
 
-## 1. Interview first
+Tell the player at the start what it takes from them, and do the rest yourself:
 
-Do not write the file from one sentence. Ask, and wait for the answers:
+- make a GitHub account, if they have none, and approve one sign-in in their browser;
+- answer a few questions at a time, and send a picture or two if they have them;
+- look at their Ooga in the studio, a page on their own computer, and say what to change;
+- say yes before anything is sent.
 
-- **Build.** A male or a female Ooga? (`build: "normal"` or `build: "slim"`.) Show both:
-  `npm run character:preview -- <login> <login>:slim` draws the Ooga that login gets with no
-  file at all, in each build, and the studio (section 6) switches between them with its
-  Female button.
+## 1. Get set up
+
+Do this first, before the file. Every step runs on the player's own computer. Ask before
+installing anything and before opening their browser. Never ask for a password, a token or
+a code: the player types those into GitHub themselves.
+
+**An agent that runs commands.** The studio, the check and the PR all run on the player's
+computer. A chat assistant that cannot run commands there can still hold the interview
+(section 2) and write the file, but say so plainly and offer the easy way on: a coding agent
+that works on their computer (Claude Code, Codex or another), started in an empty folder with
+the same request. A player who wants only plain data (section 4) can also send it from the
+browser without seeing it first: on GitHub, in the repository's `src/characters` folder,
+**Add file**, **Create new file** named `<login>.js`, paste the file, **Propose changes**, and
+open the pull request. GitHub makes the fork and the PR in their name.
+
+**A GitHub account.** The Ooga belongs to one: its handle is the account's login, only that
+account (or a maintainer) can change it, and signing in on the island with it is what hands
+the player their own Ooga to drive. Ask whether they have one. If not, they make it
+themselves at [github.com/signup](https://github.com/signup): it is free, with their own
+email and password, and the email confirmed. The login is their Ooga's name on the island
+(a display name can differ), so suggest one they are happy to be called.
+
+**Sign in on this computer.** GitHub's own tool, `gh`, signs them in once for everything
+after:
+
+```bash
+gh auth status
+```
+
+If `gh` is missing, install it with their OK (`brew install gh` on a Mac,
+`winget install --id GitHub.cli` on Windows, [cli.github.com](https://cli.github.com) for
+the rest). If it says they are not signed in:
+
+```bash
+gh auth login --hostname github.com --git-protocol https --web
+gh auth setup-git
+```
+
+Tell them what happens: a one-time code shows here, a page opens on github.com, and they
+sign in there and type the code. That is all. If your shell cannot wait on a prompt, ask
+them to run those two lines in their own terminal. Then ask GitHub who they are:
+
+```bash
+gh api user --jq .login
+```
+
+That answer is the handle. Use it, never a login typed in the chat, and show it to them to
+check it is the account they mean: the intake takes the PR's author as the character's
+owner, and refuses a file named for anyone else.
+
+**The tools.** `git --version`, and `node --version` for Node 22 or newer. Install what is
+missing with their OK (Node from [nodejs.org](https://nodejs.org), or `brew install node`).
+Nothing else: there is no `npm install`.
+
+**Their copy of the repository.** Players cannot push to OogaBoogaX's repository; every Ooga
+arrives as a PR from the player's own fork:
+
+```bash
+gh repo fork OogaBoogaX/oogaboogaland --clone --default-branch-only
+cd oogaboogaland
+git switch -c ooga/<login>
+```
+
+A player who already has the clone: `git switch rock`, `gh repo sync`, `git pull`, then the
+branch.
+
+**Commits in their name.** The intake reads every commit that changes the file, and each
+must belong on GitHub to the account that opens the PR; a commit whose author GitHub cannot
+match to an account is refused. Set this clone, and not the computer's other settings, to
+their GitHub no-reply address, which always matches:
+
+```bash
+git config user.name "$(gh api user --jq .login)"
+git config user.email "$(gh api user --jq '"\(.id)+\(.login)@users.noreply.github.com"')"
+```
+
+**Open the studio now.** With their OK, start it and leave it running in the background for
+the whole session (section 7 says what it shows):
+
+```bash
+npm run character:studio -- <login>
+```
+
+With no file yet it shows the Ooga their login already gets, which is the place to start
+the interview: this is you today; what should change?
+
+## 2. Interview first
+
+Do not write the file from one sentence. Ask a few questions at a time, in plain words,
+never as a form, and wait for the answers.
+
+**Pictures first.** Ask for anything to work from: a photo of themselves, their avatar, a
+drawing, a character or an outfit they like. Several help, and front, side and back help
+most. If you can see images, say back what you take from each (colours, hair, clothes, what
+they hold, a pet) and check it with them; if you cannot, ask them to describe it. Without a
+picture, offer the Oogas already on the island: the studio's list at the top right puts any
+of them on the pad, and "like that one, but" is a good start.
+
+Then, part by part, with the picture beside you:
+
+- **Build.** A male or a female Ooga? (`build: "normal"` or `build: "slim"`.) The studio's
+  **Female** button shows a file-less Ooga in the other build, and
+  `npm run character:preview -- <login> <login>:slim` draws both as a still.
 - **Body.** Skin, hair and fur colours; taller or shorter; a beard, a smirk, a plain nose or
   no face feature; bald or not; eye colour, and whether the eyes glow.
 - **Outfit.** What they wear on the chest, hips, legs and feet.
@@ -21,26 +128,29 @@ Do not write the file from one sentence. Ask, and wait for the answers:
 - **In the hand.** A club is the default. A sword, an axe, a staff, a guitar, a bouquet?
 - **Company.** A pet at their heel? A bag, a shield, a pack?
 - **Voice.** One line for when they are poked and up to 24 idle lines, 160 characters each.
-- **Name.** The handle is their GitHub login. A `display` name is cosmetic.
-- **A reference picture**, if they have one. Work from it part by part.
+  Ask what they are like and what they would say: a catchphrase, a joke, how they talk.
+- **Name.** The handle is their GitHub login (section 1). A `display` name is cosmetic.
 - **How long they will wait.** Plain data merges on its own the next day. Anything
   drawn in code waits for a maintainer.
 
-## 2. Sort every wish before you build
+Before building, say the whole plan back in a few lines, sorted as section 3 sorts it, and
+wait for a yes.
+
+## 3. Sort every wish before you build
 
 Tell the player which column each wish falls in, and offer the nearest plain-data choice
 where a wish does not fit.
 
 | | What it covers | What happens to the PR |
 |---|---|---|
-| **Plain data** | Colours, build, height, face, eyes, voice (section 3) | Merges automatically with the next daily bundle, at or after the following midnight UTC |
-| **Custom code** | Any shape the stock Ooga does not have: clothes, hair, a hat, a held item, a pet, a bag (section 4) | A maintainer reads the exact file and merges it by hand. It can take days and rounds of notes |
-| **Not from a character file** | Anything that happens over time or that the game must know about (section 5) | Needs a change to the game itself: ask a maintainer first |
+| **Plain data** | Colours, build, height, face, eyes, voice (section 4) | Merges automatically with the next daily bundle, at or after the following midnight UTC |
+| **Custom code** | Any shape the stock Ooga does not have: clothes, hair, a hat, a held item, a pet, a bag (section 5) | A maintainer reads the exact file and merges it by hand. It can take days and rounds of notes |
+| **Not from a character file** | Anything that happens over time or that the game must know about (section 6) | Needs a change to the game itself: ask a maintainer first |
 
 One line of code moves the whole file to custom review. If the player wants to be in the
 game tomorrow, send the plain-data Ooga first and the custom work as a second PR.
 
-## 3. Plain data
+## 4. Plain data
 
 The automatic lane takes exactly this wrapper and nothing beside it: no code, no
 comments you need kept (the bundle rewrites the file from its data).
@@ -70,8 +180,7 @@ comments you need kept (the bundle rewrites the file from its data).
   - `height` from 0.8 to 1.3 (a hashed Ooga is 0.92 to 1.16);
   - `eyeGlow` from 0 to 1, with `eyeColor`, for eyes that shine;
   - true or false: `bald`, `hairless`, `cleanShaven`, `noBrow`, `wideEyes`, `noPupils`;
-  - `hatY` (-4 to 20) and `portrait` (`min` and `max` corners), which only place a hat and
-    frame the face icon.
+  - `portrait` (`min` and `max` corners), which only frames the face icon.
 - `voice` is `poke` and 1 to 24 `idle` lines, plain text, 160 characters at most.
 
 `cigarette`, `gasMask`, `stoneAxe`, `skater` and `pumpkin` are also accepted as true or
@@ -81,7 +190,7 @@ ride, a mask to breathe through). On a plain-data Ooga they add nothing to see.
 A value outside these sends the file to custom review even though it holds no code.
 `npm run character:check` says so and names the field.
 
-## 4. Custom code
+## 5. Custom code
 
 Custom code is a `dress` object of hooks beside the data. `AGENTS.md` lists them and what
 each means under the modelled look. In short: `torso` and `gear` paint blocks that the
@@ -104,6 +213,9 @@ The limits a maintainer cannot waive:
   copy of another character's file: a commit that holds someone else's handle closes the PR.
 - **Nothing else in the PR.** A character PR changes its one file.
 
+Leave comments out. They count toward the 32,768 bytes, the screen reads them, and they ship
+in every visitor's page. Say what each part is for in the PR's description instead.
+
 What tends to go wrong, from the Oogas already here:
 
 - **Clothes floating or cut by the body.** A garment is a piece of its own that follows the
@@ -121,7 +233,7 @@ What tends to go wrong, from the Oogas already here:
   drawing from `k.rand` out of turn.
 - **Rounded, bubbly shapes.** The look is flat planes with crisp bevels.
 
-## 5. What a character file cannot do
+## 6. What a character file cannot do
 
 A character file builds a shape once. It has no say in what happens afterwards. These need
 a change to the game, reviewed as ordinary code, so ask a maintainer before promising them:
@@ -134,9 +246,10 @@ a change to the game, reviewed as ordinary code, so ask a maintainer before prom
 
 If the wish is close to something an Ooga already does, say which one, and build on that.
 
-## 6. Show, check, repeat
+## 7. Show, check, repeat
 
-**The studio.** Ask the player first: it opens a page in their browser.
+**The studio.** Opened in section 1, with the player's OK, since it opens a page in their
+browser:
 
 ```bash
 npm run character:studio -- <handle>
@@ -165,10 +278,22 @@ and `<handle>:slim` its female build.
 - The player can walk it too: W A S D, Space beside a place to sit, sleep or rest and again
   to get up, the wheel to zoom in to its own eyes, a drag to look round it. Asleep, the
   movement keys turn it over.
+- **This Ooga**, the panel on the right, lists everything the file gives the Ooga on the
+  pad: its plain-data look and voice (a click on a colour copies its value), each custom
+  hook (its name's tooltip says what such a hook does), and the parts it builds (a pet, its
+  own jetpack, a board, a shield). Under them it shows how much of the
+  32,768 bytes the file takes, with each hook's share, and the lane the intake puts it in.
+  It is read again on every save. It stands against the right edge: drag its left edge to
+  make it wider or narrower, and its arrow folds it to a tab on the edge.
 - Each reload says what the intake's screen makes of the file (its lane, how full it is,
   or what would be refused). A file that no longer parses is named with its line and the
   page stays as it was; a hook that throws is named at the foot of the page, with the
   default Ooga standing in until it is mended.
+
+**Taking notes.** Tell the player how to give them: say what to change in plain words and
+where they saw it ("in the chair, the skirt cuts through her legs"), or send a screenshot of
+the studio. Take one note at a time, save, let the page reload in front of them, and ask
+whether it is right before the next.
 
 Look at every round in each place, because each shows something else: standing from all
 round; the rifle out, for how the held thing lies on the back; the jetpack on, for the
@@ -202,7 +327,19 @@ npm run test:unit
 
 must pass before the PR. It builds every Ooga and checks their stowed gear.
 
-## 7. The PR, and what the bot does
+## 8. The PR, and what the bot does
+
+Ask the player before pushing: it puts their file on GitHub, in public. From their branch:
+
+```bash
+git add src/characters/<login>.js
+git commit -m "Add <login>'s Ooga"
+git push -u origin ooga/<login>
+gh pr create --repo OogaBoogaX/oogaboogaland --base rock --head <login>:ooga/<login> --draft \
+  --title "<login>'s Ooga" --body "<the plan from section 2, sorted as section 3 sorts it, and what was checked>"
+```
+
+`gh pr ready` marks it ready once the work and the checks are done.
 
 - Open the PR against `rock` as a **draft** with the one file. Keep it draft while
   building or debugging. Mark it **ready for review** only after the work and authorized
@@ -219,3 +356,6 @@ must pass before the PR. It builds every Ooga and checks their stowed gear.
   or, when an earlier commit is what was refused, open a new PR from a fresh branch that
   adds only the file.
 - Only the GitHub owner of a character, or a maintainer, can change it.
+- Once it is merged and the site next deploys, the player signs in on
+  [oogabooga.land](https://oogabooga.land) with GitHub (**Contributor sign-in**, in the
+  Contributing Oogas panel), and the island hands them their own Ooga to drive.

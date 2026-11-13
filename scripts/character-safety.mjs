@@ -27,7 +27,7 @@ export const validateCharacterData = (row, now = Date.now()) => {
   if (row.look !== undefined) {
     const colors = ["skin", "hair", "fur", "eyeColor"];
     const flags = ["bald", "cleanShaven", "hairless", "noBrow", "wideEyes", "noPupils", "cigarette", "gasMask", "stoneAxe", "skater", "pumpkin"];
-    const looks = [...colors, ...flags, "face", "build", "height", "hatY", "eyeGlow", "portrait"];
+    const looks = [...colors, ...flags, "face", "build", "height", "eyeGlow", "portrait"];
     if (!keys(row.look, looks)) reject(`Unknown appearance field${object(row.look) ? ` ${named(unknown(row.look, looks))}` : ""}.`);
     for (const [key, value] of Object.entries(row.look)) {
       if (colors.includes(key) && (typeof value !== "string" || !/^#[a-f0-9]{6}$/i.test(value))) reject(`Colors must be six-digit hex values (\`${key}\`).`);
@@ -35,7 +35,7 @@ export const validateCharacterData = (row, now = Date.now()) => {
       // The faces models.js draws: "nose" is the one a slim or clean-shaven Ooga gets when it names none.
       if (key === "face" && !["none", "nose", "beard", "smirk"].includes(value)) reject("Unsupported face: use none, nose, beard or smirk.");
       if (key === "build" && !["slim", "normal"].includes(value)) reject("Unsupported build: use slim or normal.");
-      const ranges = { height: [0.8, 1.3], hatY: [-4, 20], eyeGlow: [0, 1] };
+      const ranges = { height: [0.8, 1.3], eyeGlow: [0, 1] };
       if (ranges[key] && (!Number.isFinite(value) || value < ranges[key][0] || value > ranges[key][1])) reject(`Appearance value \`${key}\` exceeds its safe range, ${ranges[key][0]} to ${ranges[key][1]}.`);
       if (key === "portrait") {
         if (!keys(value, ["min", "max"]) || ![value.min, value.max].every((v) => Array.isArray(v) && v.length === 3 && v.every((n) => Number.isFinite(n) && Math.abs(n) <= 32))

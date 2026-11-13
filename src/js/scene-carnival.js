@@ -1027,7 +1027,7 @@
     leaving = false;
     camera = createCamera({ fov: 52, near: 0.1, far: 50 });
     root = createNode();
-    hud = hudMod.create({ signal: ctx.signal, roster: BL.contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: BL.contributors.activeRoster });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 4, z: -4 } });
@@ -1379,7 +1379,7 @@
   BL.scenes = BL.scenes || {};
   for (const id of Object.keys(KINDS)) {
     SCENES[id] = BL.scenes[id] = {
-      id, padContext: "arcade", voiceZone: "arcade.hall", prepare: () => { const loading = BL.deferred.load("arcade"); return loading ? loading.then(() => null) : null; }, enter: (ctx) => enter(ctx, id), update, overlay, onDonation, onKey, onLootCleared: () => {}, renderOpts: RENDER_OPTS,
+      id, padContext: "arcade", voiceZone: "arcade.hall", prepare: () => { const loading = BL.deferred.load("arcade"); return loading ? loading.then(() => null) : null; }, enter: (ctx) => enter(ctx, id), update, overlay, onDonation, onKey, renderOpts: RENDER_OPTS,
       leave: leaveScene, stats, liveGeometry, root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
       controlsHelp(touch) {
         const H = BL.controlsHelp, rows = H.fromCopy((play.coach || COACH[kind])[touch ? 1 : 0], touch);

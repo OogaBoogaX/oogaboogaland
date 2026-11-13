@@ -537,8 +537,10 @@
       rightTravel = 0;
       rightExitHeld = false;
     };
+    let primaryTaken = false;
     const unlockAim = (preserveZoom = false) => {
       if (externalControl && !disposed) return;
+      if (primaryTaken) { primaryTaken = false; ctx.primaryAction(false); }
       lockCancelled = true;
       aimLocked = false;
       unlockedAt = -Infinity;
@@ -1463,9 +1465,25 @@
       }
       // Carry leaves the buttons alone: the right one changes no view there, and both together walk.
       if (!armed()) return;
+      if (e.type === "pointermove") ctx.aimPointer?.(e.clientX, e.clientY);
       if (birdsEye() && rightPress) {
         e.preventDefault(); e.stopImmediatePropagation();
         shooterView(true, renderer.size.width / 2, renderer.size.height / 2);
+        return;
+      }
+      // A modified scene link is a native click, as in carry: do not capture the
+      // mouse or cancel its default. Still take the press away from weapons.
+      const leftPress = e.button === 0 && (e.type === "pointerdown" || e.type === "pointermove" && (e.buttons & 1));
+      if (leftPress && (e.metaKey || e.ctrlKey) && ctx.modifiedClick?.(e)) {
+        primaryTaken = true;
+        e.stopImmediatePropagation();
+        return;
+      }
+      if (e.button === 0 && primaryTaken && (e.type === "pointerup" || e.type === "pointermove" && !(e.buttons & 1))) {
+        primaryTaken = false;
+        e.stopImmediatePropagation();
+        // Open within the uncancelled native release, preserving the browser's tab modifiers.
+        ctx.primaryAction(false, e);
         return;
       }
       e.preventDefault(); e.stopImmediatePropagation();
@@ -1491,13 +1509,13 @@
           lockAim();
           if (!alreadyFocused) {
             // The capturing click never attacks, but a scene may answer what the free cursor was on.
-            if (e.button === 0) ctx.captureClick?.(e.clientX, e.clientY);
+            if (e.button === 0 && ctx.captureClick?.(e.clientX, e.clientY) && ctx.primaryAction) primaryTaken = true;
             return;
           }
         }
         resumePose();
         // A scene may take the left button first (`primaryAction`, Cloud Hopper's grappling hook), and then its release.
-        if (e.button === 0 && ctx.primaryAction?.(true)) primaryTaken = true;
+        if (e.button === 0 && ctx.primaryAction?.(true, e)) primaryTaken = true;
         else if (e.button === 0) {
           attackReleaseBlocked = !crew.weaponsEnabled;
           if (player().weapon.primaryEquipped) crew.swingWeapon(player(), true, ads);
@@ -1513,8 +1531,7 @@
           if (!attackReleaseBlocked && e.buttons & 1 && !player().weapon.primaryEquipped && crew.setWeaponTrigger(true, true)) aimLeftAccepted = true;
         }
       } else if (e.type === "pointerup" || e.type === "pointermove") {
-        if (e.button === 0 && primaryTaken) { primaryTaken = false; ctx.primaryAction(false); }
-        else if (e.button === 0) {
+        if (e.button === 0) {
           releaseAimAttack(e);
           releasePrimary(player(), ads);
         }
@@ -1574,6 +1591,8 @@
     };
     const aimMouseUp = (e) => {
       if (externalControl) return;
+      // A scene-owned press released away from the canvas is cancelled, never fired.
+      if (e.button === 0 && primaryTaken) { primaryTaken = false; ctx.primaryAction(false); return; }
       if (e.button === 2) {
         mouseAds = false;
         ads = padAds;
@@ -1593,6 +1612,7 @@
       if (aimLocked && !locked) unlockedAt = performance.now();
       aimLocked = locked;
       if (!locked) {
+        if (primaryTaken) { primaryTaken = false; ctx.primaryAction(false); }
         clearRightGesture();
         ads = false;
         aimLeftAccepted = aimLeftFocused = false;
@@ -1660,7 +1680,7 @@
       }
       for (const child of node.children) includeHeadPart(child);
     };
-    // Distance past which hiding work is provably idle: hats and floating swag
+    // Distance past which hiding work is provably idle: hats and headgear
     // keep the head subtree within ~3.5 m of the root even on the tallest Ooga
     // (height 1.16) under step lift, and the widest near-plane corner (near
     // 0.5 m at MAX_FOV on an ultrawide) reaches ~1.3 m beyond the eye, so
@@ -2595,7 +2615,7 @@
     // Each press is acted on once; a trigger held when the pilot lets go of input is let go of with it, and LT also
     // when combat ends. Letting go of LT leaves a right-click aim held with the mouse.
     // `primaryTaken` and `padPrimary`: a scene's `primaryAction` took the mouse's left press or the pad's RT.
-    let padFrame = -1, padFire = false, padAds = false, padPrimary = false, primaryTaken = false;
+    let padFrame = -1, padFire = false, padAds = false, padPrimary = false;
     const resetPad = () => { padFrame = pad.frame; padFire = padAds = mouseAds = ads = false; };
     const readPad = () => {
       const live = active && !externalControl && !menuOpen;
@@ -3939,6 +3959,7 @@
       // The first person's field of view at this canvas's shape (unaimed), for a view held from outside to match it.
       eyeFov: () => Math.min(MAX_FOV, Math.max(BASE_FOV, 2 * Math.atan(Math.tan(MIN_HFOV / 2) / (renderer.size.width / Math.max(1, renderer.size.height))))),
       get poseHeld() { return !!restoredPose; }, get aiming() { return armed(); },
+      get aimFocused() { return softAimFocused || document.pointerLockElement === canvas; },
       // Scenery follows the displayed blend, not the entry's local clock:
       // carry/shoulder exits and mid-transition reversals retain this value.
       get birdsEye() { return birdsEye(); }, get birdsEyeMix() { return camera.orthoMix || 0; }, get birdsEyeHeight() { return overheadHeight; }, get birdsEyeNorthUp() { return overheadNorthUp; },

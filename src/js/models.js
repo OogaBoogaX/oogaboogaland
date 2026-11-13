@@ -1,4 +1,4 @@
-// Procedural geometry: the lab room (`labRoom`), cavemen (`caveman`), props, crates, the `SWAG` catalog, and
+// Procedural geometry: the lab room (`labRoom`), cavemen (`caveman`), props, and
 // the shared builders (`box`, `bevelBox`, `lathe`, `tube`, `ring`, `polyline`, `merge`, `makeVox`, `voxCoords`,
 // `voxelGeometry`, `cached`).
 //
@@ -810,9 +810,9 @@
     return v;
   };
   const CLUB_PALETTE = [hexToRgb("#5c4425"), hexToRgb("#3f2e18")];
+  // Kept for a character file that still paints its own gold variant from it; nothing in the game draws gold now.
   const GOLD_CLUB_PALETTE = [hexToRgb("#e0b53a"), hexToRgb("#c99a2e")];
   const GUN_PALETTE = { body: "#3a3a3a", stock: "#5c4425", barrel: "#2b2b2b", emissive: 0 };
-  const GOLD_GUN_PALETTE = { body: "#e0b53a", stock: "#5c4425", barrel: "#f0c95a", emissive: 0.25 };
   const appendMagazineShell = (pieces, h, pal) => {
     // Thin curved shell, with broad side cheeks framing a narrow window. The
     // large banana marks overlap inside it; the casing hides their cropped tips.
@@ -1261,13 +1261,13 @@
   //   torso(k, v)  before the belly holes       club(k)      the left-hand item
   //   gear(k)      arm and body attachments      skull(k, v)  replaces the head block
   //   crown(k, v)  hats and hair over the head    eyes(k, v)   replaces the eyes
-  //   mark(k, v)   face paint after the pupils    hatY(k)      where swag hats sit
+  //   mark(k, v)   face paint after the pupils
   //   headgear(k)  nodes on the head              extras(k)    nodes on the root, last
   //   tint(k, palette)  a second colourway: return an alternate palette and every
   //                     voxel part is baked again under it, paired in `tint`
   //   refine(k, part, v, side)  paints a part's fine map before it bakes (see FINE)
   // `look` flags read here: slim, bald, cleanShaven, wideEyes, hairless, noBrow, noPupils,
-  // face ("nose" | "smirk" | "beard" | "none"), eyeColor, eyeGlow, hatY.
+  // face ("nose" | "smirk" | "beard" | "none"), eyeColor, eyeGlow.
   // A character file may keep the slot numbers its first build was given; every later build registers that
   // character's colours in the same order first, so after a released cache rebuilds the model those numbers
   // still name the same colours. The base palette ahead of them comes from the same traits every time.
@@ -1426,7 +1426,7 @@
     };
     parts.armR = arm(-1);
     parts.armL = arm(1);
-    // club(k) returns { voxels, palette, goldPalette } for a voxel item, or { default, gold }
+    // club(k) returns { voxels, palette } for a voxel item, or { default }
     // geometry, plus optional rest and carry angles ({ x, y, z } in the rotation's YXZ order, y 0
     // when left out: a quarter turn in y with the tilt in z turns a blade about its haft).
     const club = dress.club ? dress.club(k) : {};
@@ -1435,10 +1435,10 @@
     const clubRest = club.rest || CLUB_REST, clubCarry = club.carry || clubRest;
     const skins = {
       // The modelled look's default club is turned from wood (heroBody.club) in place of the block one.
-      club: club.default ? { default: club.default, gold: club.gold }
-        : STYLE === "R" && !club.voxels ? { default: BL.heroBody.club(u, club.palette || CLUB_PALETTE, !!traits.slim), gold: BL.heroBody.club(u, club.goldPalette || GOLD_CLUB_PALETTE, !!traits.slim) }
-        : { default: voxelGeometry(clubV, { unit: u, palette: club.palette || CLUB_PALETTE, origin: clubOrigin }), gold: voxelGeometry(clubV, { unit: u, palette: club.goldPalette || GOLD_CLUB_PALETTE, origin: clubOrigin }) },
-      gun: { default: gunGeometry(h, GUN_PALETTE), gold: gunGeometry(h, GOLD_GUN_PALETTE) }
+      club: club.default ? { default: club.default }
+        : STYLE === "R" && !club.voxels ? { default: BL.heroBody.club(u, club.palette || CLUB_PALETTE, !!traits.slim) }
+        : { default: voxelGeometry(clubV, { unit: u, palette: club.palette || CLUB_PALETTE, origin: clubOrigin }) },
+      gun: { default: gunGeometry(h, GUN_PALETTE) }
     };
     parts.club = createNode({
       position: { x: 0, y: -0.62 * h, z: 0.08 * h },
@@ -1561,11 +1561,8 @@
     for (const [x, y] of eyeCells) closedVox.set(x, y, 5, k.lid !== null ? k.lid : y === 2 ? P.skinDk : P.skin);
     let headClosed = vg(closedVox, headOrigin, k.headEmissive);
     parts.head = createNode({ position: { x: 0, y: 0.5 * h, z: 0.02 * h }, geometry: headOpen });
-    const hatY = dress.hatY ? dress.hatY(k) : (traits.hatY || (traits.bald ? 6 : 9)) * u;
-    parts.hat = createNode({ position: { x: 0, y: hatY, z: 0 }, scale: { x: h, y: h, z: h }, visible: false });
-    parts.hat.portraitHidden = true;
     parts.face = createNode({ position: { x: 0, y: 0, z: 0 }, scale: { x: h, y: h, z: h }, visible: false });
-    addChild(parts.head, parts.hat, parts.face);
+    addChild(parts.head, parts.face);
     if (dress.headgear) dress.headgear(k);
     addChild(root, parts.legR, parts.legL, parts.torso, parts.armR, parts.armL, parts.head);
     if (dress.extras) dress.extras(k);
@@ -2544,79 +2541,6 @@
       return geometry;
     })
   ];
-  const TIER_COLORS = { common: "#9aa0a6", rare: "#6f9fca", epic: "#b16fd6", legendary: "#d8892b" };
-  const crateCache = scopedMap();
-  const crate = (tier) => {
-    let geos = crateCache.get(tier);
-    if (!geos) {
-      const stripe = TIER_COLORS[tier] || TIER_COLORS.common;
-      geos = {
-        body: merge(
-          box({ w: 0.7, h: 0.5, d: 0.7, color: "#6b4a26", offset: { y: 0.25 } }),
-          box({ w: 0.74, h: 0.08, d: 0.74, color: "#4c3a20", offset: { y: 0.06 } }),
-          box({ w: 0.74, h: 0.1, d: 0.16, color: stripe, emissive: 0.6, offset: { y: 0.3 } }),
-          box({ w: 0.16, h: 0.1, d: 0.74, color: stripe, emissive: 0.6, offset: { y: 0.3 } })
-        ),
-        lid: merge(box({ w: 0.76, h: 0.1, d: 0.76, color: "#7a5630", offset: { x: 0.38, y: 0.05 } }), box({ w: 0.2, h: 0.06, d: 0.2, color: stripe, emissive: 0.8, offset: { x: 0.38, y: 0.12 } }))
-      };
-      crateCache.set(tier, geos);
-    }
-    const node = createNode();
-    const lid = createNode({ position: { x: -0.38, y: 0.5, z: 0 }, geometry: geos.lid });
-    addChild(node, createNode({ geometry: geos.body }), lid);
-    return { node, lid };
-  };
-  const swagCache = scopedMap();
-  const swagGeo = (id, build) => {
-    let geo = swagCache.get(id);
-    if (!geo) {
-      geo = characterGeometry(build());
-      swagCache.set(id, geo);
-    }
-    return geo;
-  };
-  // Head anchor and swag sizes are fractions of caveman height.
-  const SWAG = [
-    { id: "party-hat", name: "Party Hat", tier: "common", slot: "head", offset: { y: -0.03 }, build: () => lathe({ profile: [[0.36, 0], [0.26, 0.2], [0.14, 0.42], [0.0, 0.62]], segments: 8, color: (t) => t < 0.34 ? "#d8892b" : t < 0.67 ? "#f3efe4" : "#22c55e" }) },
-    { id: "bandana", name: "Bandana", tier: "common", slot: "head", offset: { y: -0.16 }, build: () => merge(ring({ r: 0.4, thickness: 0.045, segments: 10, color: "#c8342a" }), box({ w: 0.1, h: 0.04, d: 0.26, color: "#c8342a", offset: { x: 0.06, y: -0.03, z: -0.5 } }), box({ w: 0.1, h: 0.04, d: 0.2, color: "#a82a22", offset: { x: -0.08, y: -0.05, z: -0.46 } })) },
-    {
-      id: "banana-peel", name: "Banana Peel Hat", tier: "common", slot: "head", offset: { y: -0.06 }, build: () => merge(
-        lathe({ profile: [[0.23, 0], [0.22, 0.08], [0.16, 0.16], [0.07, 0.22], [0, 0.24]], segments: 8, color: "#f5c542" }),
-        box({ w: 0.05, h: 0.09, d: 0.05, color: "#5a3a1a", offset: { y: 0.27 } }),
-        ...[0, 1, 2, 3].map((i) => {
-          const a = i / 4 * Math.PI * 2 + Math.PI / 4;
-          return tube({
-            rings: 6,
-            segments: 5,
-            path: (t) => ({ x: Math.cos(a) * (0.08 + t * 0.34), y: 0.14 - t * t * 0.42, z: Math.sin(a) * (0.08 + t * 0.34) }),
-            radius: (t) => 0.065 - t * 0.02,
-            colorFn: (t) => t > 0.8 ? "#5a3a1a" : t > 0.55 ? "#e0b53a" : "#f5c542"
-          });
-        })
-      )
-    },
-    { id: "miner-helmet", name: "Miner Helmet", tier: "rare", slot: "head", offset: { y: -0.12 }, build: () => merge(lathe({ profile: [[0.42, 0], [0.41, 0.12], [0.32, 0.26], [0.14, 0.36], [0, 0.38]], segments: 10, color: "#e0b53a" }), box({ w: 0.14, h: 0.12, d: 0.1, color: "#fff2b0", emissive: 1, offset: { y: 0.18, z: 0.4 } })) },
-    { id: "tinfoil-hat", name: "Tinfoil Hat", tier: "rare", slot: "head", offset: { y: -0.04 }, build: () => lathe({ profile: [[0.38, 0], [0.27, 0.2], [0.14, 0.38], [0.02, 0.56]], segments: 5, color: "#c9ccd2" }) },
-    { id: "golden-club", name: "Golden Club", tier: "rare", slot: "hand", skin: "club", build: () => voxelGeometry(clubVoxels(BL.math.mulberry32(7)), { unit: 1 / 16, palette: GOLD_CLUB_PALETTE, origin: { x: -1 / 16, y: -1 / 16, z: -1 / 16 } }) },
-    { id: "crown", name: "Crown", tier: "epic", slot: "head", offset: { y: -0.06 }, build: () => merge(ring({ r: 0.38, thickness: 0.05, y: 0.05, segments: 8, color: "#f0c95a", emissive: 0.3 }), ...[0, 1, 2, 3, 4, 5, 6, 7].map((i) => box({ w: 0.07, h: 0.18, d: 0.07, color: "#f0c95a", emissive: 0.3, offset: { x: Math.cos(i / 8 * Math.PI * 2) * 0.38, y: 0.19, z: Math.sin(i / 8 * Math.PI * 2) * 0.38 } }))) },
-    { id: "golden-ak", name: "Golden AK", tier: "epic", slot: "gun", skin: "gun", build: () => gunGeometry(1, GOLD_GUN_PALETTE) },
-    { id: "propeller-beanie", name: "Propeller Beanie", tier: "epic", slot: "head", spin: true, offset: { y: -0.1 }, build: () => merge(lathe({ profile: [[0.4, 0], [0.37, 0.14], [0.22, 0.28], [0, 0.32]], segments: 8, color: (t) => t < 0.5 ? "#6f9fca" : "#c8342a" }), box({ w: 0.03, h: 0.1, d: 0.03, color: "#c9ccd2", offset: { y: 0.36 } })) },
-    { id: "halo", name: "Halo", tier: "legendary", slot: "head", float: true, offset: { y: 0.3 }, build: () => ring({ r: 0.26, thickness: 0.03, segments: 14, color: "#fff2b0", emissive: 1 }) },
-    { id: "laser-eyes", name: "Laser Eyes", tier: "legendary", slot: "face", build: () => merge(...[-0.125, 0.125].map((x) => polyline({ points: [{ x, y: 0.16, z: 0.19 }, { x, y: 0.16, z: 1.0 }], color: "#ff2d20", emissive: 1 }))) }
-  ];
-  for (const item of SWAG) {
-    if (item.slot === "head" && item.spin) {
-      item.buildNode = () => {
-        const node = createNode({ geometry: swagGeo(item.id, item.build) });
-        const prop = createNode({ position: { x: 0, y: 0.42, z: 0 }, geometry: swagGeo(`${item.id}/prop`, () => box({ w: 0.44, h: 0.02, d: 0.06, color: "#f3efe4" })) });
-        prop.spin = true;
-        addChild(node, prop);
-        return node;
-      };
-    } else {
-      item.buildNode = () => createNode({ geometry: swagGeo(item.id, item.build) });
-    }
-  }
   // ---- the interior kit ---------------------------------------------------------------------------------
   // Timber structure, turned parts, chains and lanterns shared by the cave interiors (the Lightning Factory, Ooga
   // Arcade), in the warm timber and black iron those caves are built of.
@@ -2935,5 +2859,5 @@
     for (const geo of set) if (geo.foliageLods?.owner === geo) { set.add(geo.foliageLods.medium); set.add(geo.foliageLods.far); }
     return set;
   };
-  BL.models = { STYLE, GUN_BANANA_SCALE, BODY, characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
+  BL.models = { STYLE, GUN_BANANA_SCALE, BODY, characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, die, dieRotationFor };
 })();
