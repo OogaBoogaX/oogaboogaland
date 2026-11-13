@@ -15,11 +15,13 @@
 //
 // The first comes 30 to 60 s into a visit and each next 3 to 5 minutes after the last has gone (`GAP`), counted while
 // the hangar is up. When one is due it waits for a good moment and place: none of the hangar's other events for `CALM`
-// s (`busy`), the visitor's Ooga on foot, no dialog open, and a spot in good view (`pick`: on screen, clear of the
-// buttons and sticks on a coarse pointer, off its middle where it can be, not behind the visitor's own Ooga, in sight
-// past walls, boxes and the Jet, 7 to 18 m off, or 14 on a coarse pointer, and clear of the guide and anything that
-// walks), looking again every `LOOK` s, a few frames to a search, and further out and across, and less strictly, once it
-// has looked for `VIEW.relax` s. While it shows, for `AFTER` s after and for up to `CLAIM` s while one is due (`holding`)
+// s (`busy`), the visitor's Ooga on foot, no dialog open, and a spot in good view (`pick`: on
+// screen, clear of the buttons and sticks on a coarse pointer, not behind the visitor's own Ooga, in sight past walls,
+// boxes and the Jet, 7 to 18 m off, or 14 on a coarse pointer, and clear of the guide and anything that walks), looking
+// again every `LOOK` s, a few frames to a search, and further out and across, and less strictly, once it has looked for
+// `VIEW.relax` s. Of the spots that will do it takes one at random, more likely one a visitor would notice (off the
+// screen's middle but not at its edge, nearer, not over the launch tunnel's neon) and away from where the last few came
+// (`CHOOSE`), so it turns up somewhere new each time. While it shows, for `AFTER` s after and for up to `CLAIM` s while one is due (`holding`)
 // the engine anomalies and a worker's meltdown wait. Anything else starting, the tab hiding or leaving the hangar ends it
 // at once. Each page has its own: nothing of it is sent, so two visitors side by side see it at different times.
 //
@@ -93,13 +95,20 @@
   // light standing where it stood (how many, how long, m, at random between, how wide, m, and how strong).
   const RESIDUE = { life: [15, 20], rise: 0.04, most: 0.5, streaks: 26, streak: [0.6, 2.6], streakWidth: 0.04, streakGlow: 0.6 };
   // Where a spot may be: from the camera, m (nearer on a coarse pointer, where the screen is small), and on screen
-  // (within `x` either side of centre across, but not within `ahead` of it while anywhere else will do, `top` to `bottom`
-  // down, as fractions, `coarseTop` to `coarseBottom` on a coarse pointer, and not behind the visitor's own Ooga); how
-  // far from the visitor's Ooga, from the guide and from anything else that walks, m. One due that has found nowhere for
+  // (within `x` either side of centre across, `top` to `bottom` down, as fractions, `coarseTop` to `coarseBottom` on a
+  // coarse pointer, and not behind the visitor's own Ooga); how far from the visitor's Ooga, from the guide and from
+  // anything else that walks, m. One due that has found nowhere for
   // `relax` s looks `wider` further out and across, lets its lower part stand behind the Ooga's head, and keeps to `top`
   // and `bottom` on a coarse pointer too.
-  const VIEW = { near: 7, far: 18, coarse: 14, x: 0.38, ahead: 0.08, top: 0.06, bottom: 0.95, coarseTop: 0.15, coarseBottom: 0.74, relax: 30, wider: 4, wideX: 0.42 };
+  const VIEW = { near: 7, far: 18, coarse: 14, x: 0.38, top: 0.06, bottom: 0.95, coarseTop: 0.15, coarseBottom: 0.74, relax: 30, wider: 4, wideX: 0.42 };
   const AWAY = { ooga: 4, guide: 9, body: 2.5 };
+  // How a spot is chosen among those that fit: at random, but more likely where a visitor would notice it: off the
+  // middle of the screen (coming in from `aside[0]` to `aside[1]` of its width off centre, as fractions), less so out
+  // toward its edge (falling over `edge` to `edgeLeast` as likely), less so further than `far[0]` m (falling to
+  // `farLeast` as likely by `far[1]`), and `neon` as likely where the launch tunnel's mouth, bright with neon all the way
+  // down, stands behind it; and away from the last `recent` it came to this page life (`least` as likely right where
+  // one came, back to as likely `apart` m off), so it comes somewhere new each time.
+  const CHOOSE = { aside: [0.04, 0.14], edge: [0.26, 0.38], edgeLeast: 0.45, far: [11, 18], farLeast: 0.45, neon: 0.3, recent: 4, apart: 8, least: 0.05 };
   // How many spots the search for a place looks at a frame.
   const SCAN = 120;
   function smooth(t) { return t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t); }
@@ -273,6 +282,9 @@
   // it below its head, out to the launch tunnel's mouth but off the door's landing, and clear of the booth, the laydown
   // stands and the terminals.
   let spots = null;
+  // Where the last `CHOOSE.recent` came this page life, (x, z) a pair, the newest at `lastAt - 1`; and how many.
+  const last = new Float32Array(CHOOSE.recent * 2);
+  let lastAt = 0, lastN = 0;
   const makeSpots = () => {
     const out = [], R = 1.1, H = TOP * SCALE + 0.4, far = 1e3, F = LAYOUT.fireTest;
     for (let x = HALL.x0 + 3; x <= HALL.x1 - 3; x += 1) {
@@ -362,11 +374,10 @@
     const top = coarse ? VIEW.coarseTop : VIEW.top, bottom = coarse ? VIEW.coarseBottom : VIEW.bottom;
     // The margins the search in hand keeps to (the desktop's once it looks wide).
     let lo = top, hi = bottom;
-    // Whether (x, y, z) is on screen, between `top` and `bottom` down and, with `across`, within it either side of centre
-    // and not within `ahead` of it.
-    const inView = (x, y, z, across = 1, ahead = 0) => {
+    // Whether (x, y, z) is on screen, between `top` and `bottom` down and, with `across`, within it either side of centre.
+    const inView = (x, y, z, across = 1) => {
       const p = renderer.project(x, y, z, SCREEN), w = renderer.size.width, h = renderer.size.height, off = Math.abs(p ? p.x / w - 0.5 : 1);
-      return !!p && off < across && off >= ahead && p.y / h > lo && p.y / h < hi;
+      return !!p && off < across && p.y / h > lo && p.y / h < hi;
     };
     // Where the visitor's own Ooga stands on screen, which in the third person often fills its middle: its middle
     // across, half its width, its head and its feet down the screen, px (`OOGA.ok` false with none on screen).
@@ -387,8 +398,15 @@
       if (!renderer.project(x, TOP * SCALE * 0.97, z, SCREEN)) return false;
       return Math.abs(across - OOGA.x) < OOGA.half + renderer.size.width * 0.05 && low > OOGA.top - (wide ? 40 : 20) && SCREEN.y < OOGA.bottom;
     };
-    // Whether the shape could stand at spot `i` (an index into `spots`) now: 0 if not, 1 if so, 2 if so and off the
-    // middle of the screen; `wide` looks further out and across, for one that has waited long. `placeOoga` first.
+    // Whether the launch tunnel's mouth stands behind (x, y, z) as seen from the camera at `c`.
+    const T = LAYOUT.tunnel;
+    const overNeon = (c, x, y, z) => {
+      if (z - c.z > -0.5) return false;
+      const k = (T.z0 - c.z) / (z - c.z);
+      return Math.hypot(c.x + (x - c.x) * k, c.y + (y - c.y) * k - T.y) < T.r + 0.5;
+    };
+    // Whether the shape could stand at spot `i` (an index into `spots`) now: 0 if not, else how likely it is chosen
+    // (`CHOOSE`); `wide` looks further out and across, for one that has waited long. `placeOoga` first.
     const fits = (i, wide, me, who) => {
       const c = camera.position, H = TOP * SCALE, x = spots[i], z = spots[i + 1], d = Math.hypot(x - c.x, H * 0.5 - c.y, z - c.z), across = wide ? VIEW.wideX : VIEW.x;
       if (d < VIEW.near || d > far + (wide ? VIEW.wider : 0)) return 0;
@@ -398,21 +416,32 @@
       if (!inView(x, H * 0.5, z, across) || !inView(x, H * 0.97, z) || !inView(x, 0.15, z) || behindOoga(x, z, wide)) return 0;
       if (!clear(x, z, AWAY.body)) return 0;
       if (!sightClear(c.x, c.y, c.z, x, H * 0.55, z) || !sightClear(c.x, c.y, c.z, x, H * 0.9, z)) return 0;
-      return inView(x, H * 0.5, z, across, VIEW.ahead) ? 2 : 1;
+      const C = CHOOSE, off = Math.abs(renderer.project(x, H * 0.5, z, SCREEN).x / renderer.size.width - 0.5);
+      let w = Math.max(0.03, smooth((off - C.aside[0]) / (C.aside[1] - C.aside[0]))) * (1 - (1 - C.edgeLeast) * smooth((off - C.edge[0]) / (C.edge[1] - C.edge[0])));
+      w *= 1 - (1 - C.farLeast) * smooth((d - C.far[0]) / (C.far[1] - C.far[0]));
+      if (overNeon(c, x, H * 0.55, z) || overNeon(c, x, H * 0.9, z)) w *= C.neon;
+      for (let k = 0; k < lastN; k++) w *= C.least + (1 - C.least) * smooth(Math.hypot(x - last[k * 2], z - last[k * 2 + 1]) / C.apart);
+      return w;
     };
     // The search for a spot, `SCAN` spots a frame so no one frame pays for them all: where it has got to in `spots` (-1
-    // between searches), whether it looks wide, and how many it has found, those off the middle first in `found`.
-    let cursor = -1, wideSearch = false, n = 0, aside = 0;
-    const keep = (i, fit) => {
-      if (fit === 2) { found[n++] = found[aside]; found[aside++] = i; } else if (fit) found[n++] = i;
+    // between searches), whether it looks wide, and how many it has found (in `found`, each as likely as its `weight`,
+    // `total` all told).
+    const weight = new Float32Array(spots.length / 2);
+    let cursor = -1, wideSearch = false, n = 0, total = 0;
+    const keep = (i, w) => {
+      if (w > 0) { found[n] = i; weight[n++] = w; total += w; }
     };
-    // One of those found, at random among those off the middle where there are any, else among the rest, or -1.
-    const chosen = () => n ? found[Math.floor(Math.random() * (aside || n))] : -1;
+    // One of those found, at random as likely as its weight, or -1.
+    const chosen = () => {
+      let r = Math.random() * total;
+      for (let k = 0; k < n; k++) if ((r -= weight[k]) <= 0) return found[k];
+      return n ? found[n - 1] : -1;
+    };
     // A spot in good view, the whole search at once (`play`).
     const pick = (wide) => {
       const me = ooga(), who = guide();
       placeOoga(me);
-      cursor = -1; n = aside = 0;
+      cursor = -1; n = 0; total = 0;
       for (let i = 0; i < spots.length; i += 2) keep(i, fits(i, wide, me, who));
       return chosen();
     };
@@ -421,6 +450,7 @@
     const show = (on) => { for (const node of nodes) { node.visible = on; if (!on) node.instanceCount = 0; } };
     const begin = (i) => {
       at.x = spots[i]; at.z = spots[i + 1];
+      last[lastAt * 2] = at.x; last[lastAt * 2 + 1] = at.z; lastAt = (lastAt + 1) % CHOOSE.recent; lastN = Math.min(lastN + 1, CHOOSE.recent);
       at.mirror = Math.random() < 0.5 ? -1 : 1; at.slow = Math.random() * Math.PI * 2;
       const form = between(SHOW.form), dissolve = between(SHOW.dissolve), hold = clamp(between(SHOW.total) - form - dissolve, SHOW.hold[0], SHOW.hold[1]);
       at.formed = form; at.held = form + hold; at.gone = at.held + dissolve; at.end = at.gone + between(RESIDUE.life);
@@ -613,7 +643,7 @@
           if ((look -= dt) > 0) return;
           look = LOOK;
           if (document.querySelector("dialog[open]")) return;
-          cursor = 0; n = aside = 0; wideSearch = waited > VIEW.relax;
+          cursor = 0; n = 0; total = 0; wideSearch = waited > VIEW.relax;
         }
         const who = guide(), stop = Math.min(spots.length, cursor + SCAN * 2);
         placeOoga(me);
