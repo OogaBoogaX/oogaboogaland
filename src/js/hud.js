@@ -1028,6 +1028,15 @@
       if (pointer >= 0 && el.primary.hasPointerCapture(pointer)) el.primary.releasePointerCapture(pointer);
       if (actionHandler) actionHandler(cancel ? "weapon-primary-cancel" : "weapon-primary-up");
     };
+    // The AK button's press, held from its pointer's down to its up (its handlers are with the primary's).
+    let weaponPointer = -1;
+    const finishWeapon = (cancel) => {
+      if (weaponPointer < 0) return;
+      const pointer = weaponPointer;
+      weaponPointer = -1;
+      if (el.weapon.hasPointerCapture(pointer)) el.weapon.releasePointerCapture(pointer);
+      if (actionHandler) actionHandler(cancel ? "weapon-secondary-cancel" : "weapon-secondary-up");
+    };
     const setPrimary = (available, selected, geometry, charge = 0, held = false, power = 1, aiming = false, ownerName = "") => {
       if (!available || !selected && primarySelected || geometry !== primaryGeometry) finishPrimary(true);
       if (available !== primaryShown) {
@@ -1137,6 +1146,7 @@
         weaponShown = available;
       }
       if (el.weapon.hidden !== (!available || !!gorillaEntry)) el.weapon.hidden = !available || !!gorillaEntry;
+      if (el.weapon.hidden) finishWeapon(true);
       if (equipped !== weaponEquipped) {
         weaponEquipped = equipped;
         el.weapon.dataset.equipped = String(equipped);
@@ -1241,7 +1251,7 @@
     };
     const setGorilla = (entry, view = "orbit", combat = false, combatEnabled = true) => {
       if (entry === gorillaEntry && view === gorillaView && combat === gorillaCombat && combatEnabled === gorillaCombatEnabled) return;
-      if (entry !== gorillaEntry) finishPrimary(true);
+      if (entry !== gorillaEntry) { finishPrimary(true); finishWeapon(true); }
       gorillaEntry = entry;
       gorillaView = view;
       gorillaCombat = combat;
@@ -1994,6 +2004,32 @@
     on(window, "blur", () => finishPrimary(true));
     on(document, "visibilitychange", () => { if (document.hidden) finishPrimary(true); });
     on(el.primary, "contextmenu", (e) => e.preventDefault());
+    // The AK button fires while it is held: a press pulls the trigger (or, with the AK put away, takes it out) and
+    // letting go releases it, so a held press is full auto. A keyboard press is still one burst, through the click.
+    const weaponPointerEvent = (e) => {
+      if (e.button !== 0) return;
+      // As the primary's: a press or release under another held button arrives as a pointermove.
+      const down = e.type === "pointerdown" || e.type === "pointermove" && (e.buttons & 1);
+      if (down) {
+        if (weaponPointer >= 0 || el.weapon.hidden) return;
+        e.preventDefault(); e.stopPropagation();
+        weaponPointer = e.pointerId;
+        if (e.isTrusted && !document.pointerLockElement) el.weapon.setPointerCapture(e.pointerId);
+        if (actionHandler) actionHandler("weapon-secondary-down");
+      } else if (e.pointerId === weaponPointer) {
+        e.preventDefault(); e.stopPropagation();
+        finishWeapon(false);
+        el.weapon.blur();
+      }
+    };
+    on(el.weapon, "pointerdown", weaponPointerEvent);
+    on(el.weapon, "pointerup", weaponPointerEvent);
+    on(el.weapon, "pointermove", weaponPointerEvent);
+    on(el.weapon, "pointercancel", (e) => { if (e.pointerId === weaponPointer) finishWeapon(true); });
+    on(el.weapon, "lostpointercapture", (e) => { if (e.pointerId === weaponPointer) finishWeapon(true); });
+    on(window, "blur", () => finishWeapon(true));
+    on(document, "visibilitychange", () => { if (document.hidden) finishWeapon(true); });
+    on(el.weapon, "contextmenu", (e) => e.preventDefault());
     const pressMode = () => {
       if (modeSelected) { if (actionHandler) actionHandler("mode-toggle"); }
       else {
@@ -2024,6 +2060,7 @@
       // Native and virtual pointer clicks already completed their press/release.
       // A detail-zero click is an assistive or programmatic tap without a hold.
       if (b === el.primary && (e.detail !== 0 || primaryPointer >= 0 || primaryKey)) return;
+      if (b === el.weapon && (e.detail !== 0 || weaponPointer >= 0)) return;
       if (b === el.mode && e.detail !== 0) return;
       b.blur();
       if (b.dataset.action === "feed") openFeed();
@@ -2247,6 +2284,7 @@
       delete document.body.dataset.bannerOogas;
       sheet.dispose();
       finishPrimary(true);
+      finishWeapon(true);
       window.clearTimeout(toastTimer);
       window.clearTimeout(toastHideTimer);
       window.clearTimeout(hintTimer);
