@@ -1203,7 +1203,7 @@
     const sized = (g, k) => { const c = merge(g); for (let v = 0; v < c.verts.length; v++) c.verts[v] *= k; return c; };
     const centredX = (g) => moved(g, -boundsOf(g).center[0], 0, 0);
     const alongRack = (i, turn = Math.PI / 2) => centredX(turnedY(merge(BM.gun(i * 2)), turn));
-    const weapon = (id, label) => id === "hook" ? [centredX(sized(BM.hookHead(), 1.4))] : id === "wallet" ? [centredX(sized(BM.walletDevice(0), 1.6))]
+    const weapon = (id, label) => id === "hook" ? [centredX(sized(BM.hookHead(), 1.4))]
       : label === "GOLD AKS" ? [moved(alongRack(id), -0.58, 0, 0), moved(alongRack(id, -Math.PI / 2), 0.58, 0, 0)] : [alongRack(id)];
     for (const [z, side, rows] of BLOCK_HALL.racks) {
       const wall = side < 0 ? X0 + 0.1 : X1 - 0.1, turn = side < 0 ? Math.PI / 2 : -Math.PI / 2, at = (g) => moved(turnedY(g, turn), wall, Y, z), inRack = [box({ w: RACK_W, h: 2.3, d: 0.05, color: TIMBER_DK, offset: { y: 1.45 } })];
