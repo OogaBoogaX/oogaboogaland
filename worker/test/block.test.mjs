@@ -44,7 +44,7 @@ const harness = t => {
     await h.room.fetch({ url: "https://island.invalid/room", headers: new Headers({ upgrade: "websocket", "x-player-id": String(id), "x-player-login": login, "x-player-contributor": "0" }) });
     return accepted[before];
   };
-  const send = (ws, msg) => h.room.webSocketMessage(ws, JSON.stringify(msg.t === "bf" ? { v: 1, ...msg } : msg));
+  const send = (ws, msg) => h.room.webSocketMessage(ws, JSON.stringify(msg.t === "bf" ? { v: W.WIRE, ...msg } : msg));
   h.join=join;h.send=send;h.wake=async()=>{if(h.room.flushTimer)clearTimeout(h.room.flushTimer);h.room=new context.Room(ctx,{});await initialized;return h.room;};
   return h;
 };
@@ -64,17 +64,73 @@ const frame = (m, q = 1, size = 64) => { const b = new ArrayBuffer(size), v = ne
 
 test("the page and the Worker share one cap of four a side", () => {
   assert.equal(W.MAX_SIDE, 4); assert.equal(W.MAX_PLAYERS, 8);
-  const base = { t: "bf", v: 1, k: "opt", n: 4, m: 0 };
+  const base = { t: "bf", v: W.WIRE, k: "opt", n: 4, m: 1 };
   assert.ok(protocol.parseClientMessage(JSON.stringify(base)));
   for (const n of [0, 5, 1.5, "2", null]) assert.equal(protocol.parseClientMessage(JSON.stringify({ ...base, n })), null, String(n));
-  for (const m of [-1, W.MAPS.length, null]) assert.equal(protocol.parseClientMessage(JSON.stringify({ ...base, m })), null);
-  assert.equal(W.sizeFor(1, 8), 4); assert.equal(W.sizeFor(1, 3), 2); assert.equal(W.sizeFor(4, 1), 4); assert.equal(W.sizeFor(1, 1), 1);
+  for (const m of [-1, 0, W.MAPS.length, null]) assert.equal(protocol.parseClientMessage(JSON.stringify({ ...base, m })), null, "Fort Chaos is retired");
+  assert.equal(W.sizeFor(1, 8), 4); assert.equal(W.sizeFor(1, 3), 2); assert.equal(W.sizeFor(4, 1), 4); assert.equal(W.sizeFor(1, 1), 2, "never a 1v1");
+  assert.equal(W.ruleFor(-1, 2), 1, "two people, unpicked: doesn't need to be home"); assert.equal(W.ruleFor(-1, 1), 0); assert.equal(W.ruleFor(-1, 3), 0); assert.equal(W.ruleFor(0, 2), 0, "a pick stands"); assert.equal(W.ruleFor(1, 4), 1);
+  for (const r of [0, 1]) assert.equal(protocol.parseClientMessage(JSON.stringify({ ...base, r })).r, r);
+  for (const r of [2, -1, 0.5, "1", null]) assert.equal(protocol.parseClientMessage(JSON.stringify({ ...base, r })), null, "rule " + String(r));
+  assert.equal("r" in protocol.parseClientMessage(JSON.stringify(base)), false, "left out, no pick");
+});
+test("the first in picks the scoring rule; unpicked, two people play doesn't-need-to-be-home and others classic", async (t) => {
+  const h = harness(t), [a, b, c] = await crowd(h, 3);
+  send(h, a, "reg");
+  assert.equal(last(a.ws).rule, 0, "one person: classic");
+  send(h, b, "reg");
+  assert.equal(last(b.ws).rule, 1, "two people, nothing picked: doesn't need to be home");
+  send(h, c, "reg");
+  assert.equal(last(c.ws).rule, 0, "three: classic again");
+  send(h, b, "opt", { n: 2, m: 2, r: 1 });
+  assert.equal(h.room.blockMatch.pick, -1, "only the first in picks");
+  send(h, a, "opt", { n: 2, m: 2, r: 1 });
+  assert.equal(last(c.ws).rule, 1, "the first in's pick is everyone's");
+  send(h, a, "opt", { n: 2, m: 3 });
+  assert.equal(last(c.ws).rule, 1, "an opt without a rule leaves it");
+  assert.equal(last(c.ws).map, 3);
+  send(h, a, "opt", { n: 2, m: 3, r: 0 }); send(h, c, "unreg");
+  assert.equal(last(b.ws).rule, 0, "two people, classic picked: classic");
+  send(h, a, "unreg");
+  assert.equal(h.room.blockMatch.pick, -1, "the pick leaves with the first in");
+  send(h, a, "reg");
+  assert.equal(last(a.ws).rule, 1, "two again, nobody has picked");
+  send(h, b, "opt", { n: 2, m: 2, r: 0 });
+  for (const p of [a, b]) send(h, p, "ready", { r: 1 });
+  let m = h.room.blockMatch;
+  assert.equal(m.phase, "countdown"); assert.equal(m.rule, 0, "fixed as the round is dealt"); assert.equal(last(a.ws).rule, 0);
+  h.advance(W.COUNTDOWN_MS); send(h, a, "go", { s: m.s });
+  m = h.room.blockMatch;
+  assert.equal(m.phase, "play"); assert.equal(last(b.ws).rule, 0, "the round keeps its rule with the lobby empty");
+  assert.equal("duel" in last(b.ws), false);
+});
+test("the scoring pick leaves with whoever chose it: a picker who gives up their seat mid-round takes it with them", async (t) => {
+  const h = harness(t), [a, b, c] = await crowd(h, 3);
+  send(h, a, "reg"); send(h, b, "reg");
+  send(h, a, "opt", { n: 2, m: 2, r: 0 });
+  assert.equal(last(b.ws).rule, 0, "the first in picked classic");
+  for (const p of [a, b]) send(h, p, "ready", { r: 1 });
+  let m = h.room.blockMatch;
+  h.advance(W.COUNTDOWN_MS); send(h, a, "go", { s: m.s });
+  m = h.room.blockMatch;
+  assert.equal(m.phase, "play"); assert.equal(m.rule, 0);
+  send(h, a, "unreg");
+  m = h.room.blockMatch;
+  assert.equal(m.host, b.id, "the round goes on with b hosting");
+  send(h, b, "over", { s: m.s, w: 0 });
+  send(h, c, "reg");
+  m = h.room.blockMatch;
+  assert.equal(m.phase, "lobby");
+  assert.notEqual(m.reg[0], a.id);
+  assert.equal(last(c.ws).rule, 1, "two people again, and the one who picked has gone: doesn't need to be home");
+  send(h, m.reg[0] === b.id ? b : c, "opt", { n: 2, m: 2, r: 0 });
+  assert.equal(last(c.ws).rule, 0, "the new first in can pick");
 });
 test("the input message is bounded and its widest form fits the room's frame limit", () => {
-  const input = { t: "bf", v: 1, k: "input", s: "0123456789abcdef", q: 2147483647, x: -1000, z: -1000, f: -7000, b: 15, a: Array(4).fill([14, -7000, -2000, 7]).flat() };
+  const input = { t: "bf", v: W.WIRE, k: "input", s: "0123456789abcdef", q: 2147483647, x: -1000, z: -1000, f: -7000, b: 15, a: Array(4).fill([W.ACTIONS.length - 1, -7000, -2000, W.KINDS.length - 1]).flat() };
   assert.ok(protocol.parseClientMessage(JSON.stringify(input)));
   assert.ok(JSON.stringify(input).length <= protocol.MESSAGE_MAX);
-  for (const patch of [{ x: 1001 }, { b: 16 }, { q: -1 }, { s: "x" }, { f: 7001 }, { a: [] }, { a: [1, 0, 0] }, { a: [99, 0, 0, 0] }, { a: Array(20).fill(0) }, { v: 2 }]) assert.equal(protocol.parseClientMessage(JSON.stringify({ ...input, ...patch })), null, JSON.stringify(patch));
+  for (const patch of [{ x: 1001 }, { b: 16 }, { q: -1 }, { s: "x" }, { f: 7001 }, { a: [] }, { a: [1, 0, 0] }, { a: [99, 0, 0, 0] }, { a: Array(20).fill(0) }, { v: W.WIRE + 1 }, { v: W.WIRE - 1 }]) assert.equal(protocol.parseClientMessage(JSON.stringify({ ...input, ...patch })), null, JSON.stringify(patch));
 });
 test("random teams are as even as can be, and every empty seat is an NPC", () => {
   const rand = (seed => () => (seed = seed * 16807 % 2147483647) / 2147483647)(7);
@@ -88,10 +144,11 @@ test("random teams are as even as can be, and every empty seat is an NPC", () =>
   }
 });
 test("the first to register brings the map picked on the board: bounded, and theirs alone", async t => {
-  const base = { t: "bf", v: 1, k: "reg" };
+  const base = { t: "bf", v: W.WIRE, k: "reg" };
   assert.deepEqual(protocol.parseClientMessage(JSON.stringify(base)), { t: "bf", k: "reg" }, "the map is optional");
   assert.equal(protocol.parseClientMessage(JSON.stringify({ ...base, m: 1 })).m, 1);
   for (const m of [-1, W.MAPS.length, 1.5, "1", null]) assert.equal(protocol.parseClientMessage(JSON.stringify({ ...base, m })), null, String(m));
+  assert.deepEqual(protocol.parseClientMessage(JSON.stringify({ ...base, m: 0 })), { t: "bf", k: "reg" }, "a retired map is no pick");
   const h = harness(t), [a, b] = await crowd(h, 2);
   send(h, a, "reg", { m: 1 });
   assert.equal(h.room.blockMatch.map, 1, "Town, from the board");
@@ -165,10 +222,11 @@ test("a round starts only when everyone registered is ready, and alone at once",
 test("only the first registered picks the map and size, and the size grows to seat everyone", async t => {
   const h = harness(t), [a, b, c] = await crowd(h, 3);
   send(h, a, "reg"); send(h, b, "reg"); send(h, c, "reg");
-  send(h, b, "opt", { n: 4, m: 3 }); assert.equal(h.room.blockMatch.size, 2); assert.equal(h.room.blockMatch.map, 0);
-  send(h, a, "opt", { n: 1, m: 2 }); assert.equal(h.room.blockMatch.size, 1); assert.equal(h.room.blockMatch.map, 2);
+  send(h, b, "opt", { n: 4, m: 3 }); assert.equal(h.room.blockMatch.size, 2); assert.equal(h.room.blockMatch.map, W.FIRST_MAP);
+  send(h, a, "opt", { n: 1, m: 3 }); assert.equal(h.room.blockMatch.map, W.FIRST_MAP, "a size of one is refused");
+  send(h, a, "opt", { n: 2, m: 2 }); assert.equal(h.room.blockMatch.size, 2); assert.equal(h.room.blockMatch.map, 2);
   for (const x of [a, b, c]) send(h, x, "ready", { r: 1 });
-  assert.equal(h.room.blockMatch.size, 2, "three players need two a side");
+  assert.equal(h.room.blockMatch.size, 2, "three players fit two a side");
 });
 test("waiting alone stays open, a second player's ready starts it, and Start alone works only alone", async t => {
   const h = harness(t), [a, b, c] = await crowd(h, 3);

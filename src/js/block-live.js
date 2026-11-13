@@ -8,17 +8,18 @@
   "use strict";
   const BL = window.BL, W = BL.blockWire, SIM = BL.blockSim;
   // Every event block-sim emits, by index on the wire. An unlisted one is dropped; the suite checks the list is whole.
-  const EVENT_TYPES = ["blast", "boing", "bolt", "boltwarn", "boo", "build", "burn", "cache", "callride", "capture", "chute", "chuteoff", "clean", "climbed", "cooled", "edgedrop", "enemycat", "ghostback", "ghostpop", "go", "gold", "goldsteal", "gorillahit", "gorillahooked", "grab", "homers", "hookbite", "hookbounce", "hookget", "hookhide", "hookrelease", "hooksteal", "hookthrow", "hookwarn", "hopoff", "hopon", "jump", "jump2", "land", "landed", "laseroff", "laseron", "launch", "lift", "mined", "miss", "net", "netsteal", "newblock", "pass", "pickup", "power", "puddle", "refill", "rekt", "reload", "reloaded", "rescue", "respawn", "return", "set", "slip", "smash", "splat", "steady", "struggle", "stuck", "thrown", "touchdown", "trap", "unnet", "unzip", "waiting", "wallet", "wbounce", "wdrop", "weather", "win", "winded", "windup", "wthrow", "yank", "zip", "fire", "throw", "bonk", "boom", "pop", "breakfree", "letgo", "netmiss", "rifle", "unrifle", "drop", "knock", "escape", "timeout", "hookmiss"];
+  // `rifle` and `unrifle` are no longer raised (the sniper rifle is always in hand); they keep their places.
+  const EVENT_TYPES = ["goldhook", "gunfire", "boing", "bolt", "boltwarn", "boo", "build", "burn", "cache", "callride", "capture", "chute", "chuteoff", "clean", "climbed", "cooled", "edgedrop", "enemycat", "ghostback", "ghostpop", "go", "gold", "goldsteal", "gorillahit", "gorillahooked", "grab", "homers", "hookbite", "hookbounce", "hookget", "hookhide", "hookrelease", "hooksteal", "hookthrow", "hookwarn", "hopoff", "hopon", "jump", "jump2", "land", "landed", "laseroff", "laseron", "launch", "lift", "mined", "miss", "net", "netsteal", "newblock", "pass", "pickup", "power", "puddle", "refill", "reload", "reloaded", "rescue", "respawn", "return", "set", "slip", "smash", "splat", "steady", "struggle", "thrown", "touchdown", "trap", "unnet", "unzip", "waiting", "weather", "win", "winded", "windup", "yank", "zip", "fire", "throw", "bonk", "boom", "pop", "breakfree", "letgo", "netmiss", "rifle", "unrifle", "drop", "knock", "escape", "timeout", "hookmiss"];
   const EVENT_INDEX = new Map(EVENT_TYPES.map((t, i) => [t, i]));
   // Events the rules only ever raise for a real Ooga; the suite checks the list against block-sim.js.
-  const ACTOR_EVENTS = ["boing", "boltwarn", "boo", "build", "burn", "cache", "callride", "capture", "chute", "chuteoff", "clean", "climbed", "cooled", "edgedrop", "enemycat", "gold", "gorillahooked", "grab", "homers", "hookbite", "hookbounce", "hookget", "hookrelease", "hookthrow", "hopoff", "hopon", "jump", "jump2", "land", "laseroff", "laseron", "launch", "lift", "netsteal", "pass", "pickup", "power", "puddle", "refill", "rekt", "reload", "reloaded", "rescue", "respawn", "slip", "steady", "struggle", "thrown", "touchdown", "trap", "unnet", "unzip", "waiting", "wallet", "wdrop", "win", "winded", "windup", "wthrow", "yank", "zip"];
+  const ACTOR_EVENTS = ["goldhook", "boing", "boltwarn", "boo", "build", "burn", "cache", "callride", "capture", "chute", "chuteoff", "clean", "climbed", "cooled", "edgedrop", "enemycat", "gold", "gorillahooked", "grab", "homers", "hookbite", "hookbounce", "hookget", "hookrelease", "hookthrow", "hopoff", "hopon", "jump", "jump2", "land", "laseroff", "laseron", "launch", "lift", "netsteal", "pass", "pickup", "power", "puddle", "refill", "reload", "reloaded", "rescue", "respawn", "slip", "steady", "struggle", "thrown", "touchdown", "trap", "unnet", "unzip", "waiting", "win", "winded", "windup", "yank", "zip"];
   const NEEDS_ACTOR = EVENT_TYPES.map(t => ACTOR_EVENTS.includes(t));
   const SHOT_KINDS = ["paint", "grenade", "rocket", "net", "sniper", "ak", "gold", "crate", "homer"];
   const FLAG_STATES = ["home", "carried", "dropped", "flying"];
   const WEATHER = ["clear", "rain", "wind", "snow", "storm", "fog"];
   const NUMBERS = [["x", 64, 2], ["z", 64, 2], ["y", 64, 2], ["heading", 1000, 2], ["vx", 6, 1], ["vz", 6, 1], ["vy", 6, 1], ["moving", 20, 0],
-    ["splat", 10, 0], ["guard", 10, 0], ["trapped", 10, 0], ["netted", 10, 0], ["boots", 10, 0], ["laser", 10, 0], ["monkeys", 10, 0], ["knock", 10, 0], ["soot", 10, 0], ["spooked", 10, 0], ["slip", 10, 0], ["beam", 10, 0], ["cooldown", 20, 0], ["stamina", 20, 0], ["fuel", 20, 0], ["akReload", 20, 0], ["grabFill", 8, 0],
-    ["flight", 1, 0], ["jumps", 1, 0], ["hk", 1, 0], ["hookT", 100, 0], ["hookLen", 4, 0], ["hook", 1, 0], ["grabbed", 1, 0], ["burnt", 1, 0], ["akMag", 1, 0], ["grenade", 1, 0], ["rocket", 1, 0], ["net", 1, 0], ["sniper", 1, 0], ["crates", 1, 0], ["wallet", 1, 1],
+    ["splat", 10, 0], ["guard", 10, 0], ["trapped", 10, 0], ["netted", 10, 0], ["boots", 10, 0], ["laser", 10, 0], ["monkeys", 10, 0], ["knock", 10, 0], ["spooked", 10, 0], ["slip", 10, 0], ["beam", 10, 0], ["cooldown", 20, 0], ["stamina", 20, 0], ["fuel", 20, 0], ["akReload", 20, 0], ["grabFill", 8, 0],
+    ["flight", 1, 0], ["jumps", 1, 0], ["hk", 1, 0], ["hookT", 100, 0], ["hookLen", 4, 0], ["hook", 1, 0], ["grabbed", 1, 0], ["burnt", 1, 0], ["akMag", 1, 0], ["grenade", 1, 0], ["rocket", 1, 0], ["net", 1, 0], ["sniper", 1, 0], ["crates", 1, 0],
     ["captures", 1, 0], ["splats", 1, 0], ["hits", 1, 0], ["longShot", 1, 0], ["rescues", 1, 0]];
   const SWITCHES = ["crouch", "grounded", "jetting", "sprinting", "riding", "climbing", "holding", "tired", "gold", "bonked", "flung", "waiting"];
   const TEAM_CODE = t => t === "blue" ? 1 : t === "red" ? 2 : 0, TEAM_NAME = [null, "blue", "red"];
@@ -48,7 +49,9 @@
   const seatRef = (v, map) => u8(v == null || v < 0 ? 255 : map.toSeat[v]);
   const localRef = (map) => { const v = r8(); return v === 255 ? -1 : map.toLocal[v]; };
   const BUDGET = W.FRAME_MAX - 64, MAX_SHOTS = 32, MAX_EVENTS = 24;
-  const ACTOR_BYTES = NUMBERS.reduce((n, f) => n + (f[2] === 2 ? 2 : 1), 0) + 2 + 2 + 12;
+  // Each actor: its numbers, two bytes of switches, its ride and rider, the hook's tip and end, and one byte for what
+  // is in hand (`HELD`).
+  const ACTOR_BYTES = NUMBERS.reduce((n, f) => n + (f[2] === 2 ? 2 : 1), 0) + 2 + 2 + 12 + 1;
   const ACTOR_AT = {}; NUMBERS.reduce((n, f) => { ACTOR_AT[f[0]] = n; return n + (f[2] === 2 ? 2 : 1); }, 0);
   const SWITCH_AT = NUMBERS.reduce((n, f) => n + (f[2] === 2 ? 2 : 1), 0);
   // A frame is the host's word: every count, enum and seat is checked against this page's pools before anything is
@@ -61,9 +64,10 @@
     for (let i = 0; i < 2; i++) { if (o + 8 > len || v.getUint8(o) >= FLAG_STATES.length || !seatOk(v.getUint8(o + 7))) return false; o += 8; }
     for (let s = 0; s < seats; s++) {
       if (o + ACTOR_BYTES > len) return false;
-      const wallet = v.getInt8(o + ACTOR_AT.wallet), grabbed = v.getUint8(o + ACTOR_AT.grabbed), hk = v.getUint8(o + ACTOR_AT.hk), flight = v.getUint8(o + ACTOR_AT.flight);
+      const grabbed = v.getUint8(o + ACTOR_AT.grabbed), hk = v.getUint8(o + ACTOR_AT.hk), flight = v.getUint8(o + ACTOR_AT.flight);
       const ride = v.getUint8(o + SWITCH_AT + 2), rider = v.getUint8(o + SWITCH_AT + 3), carried = v.getUint16(o + SWITCH_AT, true) >> 14;
-      if (wallet < -1 || wallet >= sim.wallets.length || grabbed > sim.gorillas.length || hk > 5 || flight > 2 || ride > seats || rider > seats || carried > 2) return false;
+      const held = v.getUint8(o + ACTOR_BYTES - 1);
+      if (grabbed > sim.gorillas.length || hk > 5 || flight > 2 || ride > seats || rider > seats || carried > 2 || (held >> 4) > SIM.WIELD.length || (held & 15) >= SIM.WIELD.length) return false;
       o += ACTOR_BYTES;
     }
     if (o + 4 > len) return false;
@@ -74,15 +78,11 @@
     let n = v.getUint8(o++);
     if (n > sim.shots.length) return false;
     for (let i = 0; i < n; i++) { if (o + 15 > len || v.getUint8(o) >= SHOT_KINDS.length || !teamOk(v.getUint8(o + 1)) || !seatOk(v.getUint8(o + 2))) return false; o += 15; }
-    if (o + 1 > len) return false;
-    n = v.getUint8(o++);
-    if (n > sim.wallets.length) return false;
-    for (let i = 0; i < n; i++) { if (o + 13 > len || v.getUint8(o) >= sim.wallets.length || !seatOk(v.getUint8(o + 2)) || !teamOk(v.getUint8(o + 3)) || !seatOk(v.getUint8(o + 12))) return false; if (v.getUint8(o + 1) === 0 && v.getUint8(o + 2) === 255 || v.getUint8(o + 1) === 3 && v.getUint8(o + 12) === 255) return false; o += 13; }
     if (o + sim.gorillas.length * 10 + sim.ghosts.length * 9 + sim.hooks.length * 8 > len) return false;
     for (let i = 0; i < sim.gorillas.length; i++) { if (!seatOk(v.getUint8(o + 9))) return false; o += 10; }
     o += sim.ghosts.length * 9;
     for (let i = 0; i < sim.hooks.length; i++) { if (!seatOk(v.getUint8(o + 7))) return false; o += 8; }
-    o += sim.traps.length + sim.caches.length + sim.peels.length + sim.puddles.length + sim.vends.length + sim.powers.length * 2;
+    o += sim.traps.length + sim.caches.length + sim.peels.length + sim.puddles.length + sim.powers.length * 2;
     if (o + 1 > len) return false;
     n = v.getUint8(o++);
     if (n > MAX_EVENTS || o + n * 10 !== len) return false;
@@ -106,6 +106,9 @@
       dv.setUint16(at, bits, true); at += 2;
       u8(a.ride ? map.toSeat[a.ride - 1] + 1 : 0); u8(a.rider ? map.toSeat[a.rider - 1] + 1 : 0);
       pos(a.hookTip); pos(a.hookEnd);
+      // What is in hand (`HELD`): the tool chosen, plus one (0 for none, a bot's), over the last one fired. Guests draw
+      // it, and a page that takes over as host decides steals by it (`blockSim.heldOf`).
+      u8((SIM.WIELD.indexOf(a.wield) + 1) << 4 | Math.max(0, SIM.WIELD.indexOf(a.lastKind)));
     }
     let mask = 0;
     for (let i = 0; i < sim.crates.length; i++) if (sim.crates[i].live) mask |= 1 << i;
@@ -119,18 +122,10 @@
       count++;
     }
     dv.setUint8(countAt, count);
-    countAt = at; count = 0; at++;
-    for (let i = 0; i < sim.wallets.length; i++) {
-      const w = sim.wallets[i];
-      if (!w.live) continue;
-      u8(i); u8(w.state); seatRef(w.owner, map); u8(TEAM_CODE(w.team)); u8(w.look); pos(w); u8(w.fuse * 20); seatRef(w.stuck, map);
-      count++;
-    }
-    dv.setUint8(countAt, count);
     for (let i = 0; i < sim.gorillas.length; i++) { const g = sim.gorillas[i]; pos(g); i16(g.heading * 1000); u8(g.state); seatRef(g.holding, map); }
     for (let i = 0; i < sim.ghosts.length; i++) { const g = sim.ghosts[i]; pos(g); i16(g.heading * 1000); u8(g.state); }
     for (let i = 0; i < sim.hooks.length; i++) { const h = sim.hooks[i]; u8(h.state); pos(h); seatRef(h.holder, map); }
-    dark(sim.traps); dark(sim.caches); dark(sim.peels); dark(sim.puddles); dark(sim.vends);
+    dark(sim.traps); dark(sim.caches); dark(sim.peels); dark(sim.puddles);
     for (let i = 0; i < sim.powers.length; i++) { u8(sim.powers[i].dark * 4); u8(sim.powers[i].kind); }
     countAt = at; count = 0; at++;
     for (let i = 0; i < eventCount && count < MAX_EVENTS && at < W.FRAME_MAX - 12; i++) {
@@ -162,17 +157,17 @@
       const ride = r8(), rider = r8();
       a.ride = ride ? map.toLocal[ride - 1] + 1 : 0; a.rider = rider ? map.toLocal[rider - 1] + 1 : 0;
       readPos(a.hookTip); readPos(a.hookEnd);
+      const held = r8();
+      a.wield = held >> 4 ? SIM.WIELD[(held >> 4) - 1] : ""; a.lastKind = SIM.WIELD[held & 15];
     }
     const mask = r32();
     for (let i = 0; i < sim.crates.length; i++) { const c = sim.crates[i]; c.live = !!(mask >>> i & 1); if (c.live) { c.team = TEAM_NAME[r8()]; readPos(c); } }
     for (let i = 0; i < sim.shots.length; i++) sim.shots[i].live = false;
     for (let i = 0, n = r8(); i < n; i++) { const s = sim.shots[i]; s.live = true; s.kind = SHOT_KINDS[r8()]; s.team = TEAM_NAME[r8()]; s.owner = localRef(map); readPos(s); s.vx = r16() / 16; s.vy = r16() / 16; s.vz = r16() / 16; }
-    for (let i = 0; i < sim.wallets.length; i++) sim.wallets[i].live = false;
-    for (let i = 0, n = r8(); i < n; i++) { const w = sim.wallets[r8()]; w.live = true; w.state = r8(); w.owner = localRef(map); w.team = TEAM_NAME[r8()]; w.look = r8(); readPos(w); w.fuse = r8() / 20; w.stuck = localRef(map); }
     for (let i = 0; i < sim.gorillas.length; i++) { const g = sim.gorillas[i]; readPos(g); g.heading = r16() / 1000; g.state = r8(); g.holding = localRef(map); }
     for (let i = 0; i < sim.ghosts.length; i++) { const g = sim.ghosts[i]; readPos(g); g.heading = r16() / 1000; g.state = r8(); }
     for (let i = 0; i < sim.hooks.length; i++) { const h = sim.hooks[i]; h.state = r8(); readPos(h); h.holder = localRef(map); }
-    readDark(sim.traps); readDark(sim.caches); readDark(sim.peels); readDark(sim.puddles); readDark(sim.vends);
+    readDark(sim.traps); readDark(sim.caches); readDark(sim.peels); readDark(sim.puddles);
     for (let i = 0; i < sim.powers.length; i++) { sim.powers[i].dark = r8() / 4; sim.powers[i].kind = r8(); }
     for (let i = 0, n = r8(); i < n; i++) {
       if (sim.eventCount >= sim.events.length) { at += 10; continue; }
@@ -185,7 +180,7 @@
   const ACTION_CALLS = {
     fire: (s, id, y, p, k) => SIM.fire(s, id, y, p, W.KINDS[k]), grapple: (s, id, y, p) => SIM.grapple(s, id, y, p), build: (s, id, y) => SIM.build(s, id, y), grab: (s, id, y) => SIM.grab(s, id, y),
     pass: (s, id, y) => SIM.pass(s, id, y), launch: (s, id) => SIM.launch(s, id), zip: (s, id, y) => SIM.zip(s, id, y), hopOn: (s, id) => SIM.hopOn(s, id), callRide: (s, id) => SIM.callRide(s, id),
-    drop: (s, id) => SIM.drop(s, id), dropWallet: (s, id) => SIM.dropWallet(s, id), throwWallet: (s, id, y, p) => SIM.throwWallet(s, id, y, p), takeWallet: (s, id, y) => SIM.takeWallet(s, id, Math.round(y)), escape: (s, id) => SIM.escape(s, id), cutChute: (s, id) => SIM.cutChute(s, id)
+    drop: (s, id) => SIM.drop(s, id), wield: (s, id, y, p, k) => SIM.wield(s, id, k), escape: (s, id) => SIM.escape(s, id), cutChute: (s, id) => SIM.cutChute(s, id)
   };
   const blankInput = () => ({ x: 0, z: 0, sprint: 0, jump: 0, jet: 0, crouch: 0, face: 0 });
   const STALE_MS = 500;
@@ -275,8 +270,11 @@
     // frame says so. Returns what the scene would branch on: true on a page that decides, true-ish for a guest.
     const act = (name, id, a = 0, b = 0, c) => {
       if (role !== "host" && role !== "guest") return false;
-      if (role !== "guest") return ACTION_CALLS[name](sim, id, a, b, c === undefined ? 0 : W.KINDS.indexOf(c) >= 0 ? W.KINDS.indexOf(c) : 0);
-      if (actions.length < 16) actions.push(W.ACTIONS.indexOf(name), Math.round(a * 1000), Math.round(b * 1000), c === undefined ? 0 : Math.max(0, W.KINDS.indexOf(c)));
+      // The kind slot (0 to `KINDS.length - 1`) carries a shot's kind, or for `wield` the tool's own index (`SIM.WIELD`,
+      // as many), never the yaw slot, whose range a tool's index times 1000 would pass.
+      const k = name === "wield" ? Math.round(a) : c === undefined ? 0 : Math.max(0, W.KINDS.indexOf(c));
+      if (role !== "guest") return ACTION_CALLS[name](sim, id, a, b, k);
+      if (actions.length < 16) actions.push(W.ACTIONS.indexOf(name), name === "wield" ? 0 : Math.round(a * 1000), Math.round(b * 1000), k);
       return true;
     };
     const INPUT_MSG = { t: "bf", v: W.WIRE, k: "input", s: "", q: 0, x: 0, z: 0, f: 0, b: 0, a: undefined };
@@ -321,7 +319,7 @@
     const predict = (dt, move) => {
       const a = sim.actors[0], C = SIM.CONFIG;
       const free = a.splat <= 0 && a.trapped <= 0 && !a.grabbed && !a.ride && !a.riding && !a.flight && a.slip <= 0 && a.knock <= 0;
-      if (free) { const speed = C.SPEED * (a.carrying ? C.CARRY : 1) * (move.sprint && !a.tired ? C.SPRINT : 1) * (a.netted > 0 ? C.NET_SLOW : 1); a.x += move.x * speed * dt; a.z += move.z * speed * dt; a.heading = move.face; }
+      if (free) { const speed = C.SPEED * (move.sprint && !a.tired ? C.SPRINT : 1) * (a.netted > 0 ? C.NET_SLOW : 1); a.x += move.x * speed * dt; a.z += move.z * speed * dt; a.heading = move.face; }
       resolveBody(a, C.BODY_R);
       const dx = next[0] - a.x, dz = next[1] - a.z, far = Math.abs(dx) > 3 || Math.abs(dz) > 3, k = far ? 1 : Math.min(1, dt * 8);
       a.x += dx * k; a.z += dz * k;
@@ -356,7 +354,7 @@
       watchNow() { if (match && match.phase === "play") { startedTag = -1; beginRound(); } },
       watchFeed: (on) => command("watch", { on: on ? 1 : 0 }),
       hello: () => command("hello"), register: (m) => command("reg", { m }), unregister: () => command("unreg"), setReady: (r) => command("ready", { r: r ? 1 : 0 }), startAlone: () => command("alone"),
-      setOptions: (n, m) => command("opt", { n, m }),
+      setOptions: (n, m, r) => command("opt", r === undefined ? { n, m } : { n, m, r }),
       dispose() { endRound(); offs.forEach(off => off()); }
     };
   };
