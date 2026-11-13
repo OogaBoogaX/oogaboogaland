@@ -51,6 +51,8 @@ import { STUDIO_TRANSPORT, STUDIO_ZONE, studioState, studioHostAllowed, studioCa
 import CAST_ROWS from "./characters.gen.json";
 
 const CAST = castIndex(CAST_ROWS);
+// A retired SFU session cannot own usable tracks. Other 410 responses are not proof of session expiry.
+const sfuSessionGone = err => err.status === 404 || (err.status === 410 && err.code === "session_error");
 
 export class Room extends DurableObject {
   constructor(ctx, env) {
@@ -133,8 +135,7 @@ export class Room extends DurableObject {
       // block past 30 s resets the island's only room, presence and voice with it.
       if (this.sfu && this.cleanupJobs.length) {
         this.cleanupAt = Date.now();
-        const set = await ctx.storage.getAlarm();
-        if (set === null || set > this.cleanupAt) await ctx.storage.setAlarm(this.cleanupAt);
+        await this.scheduleAlarm();
       }
     });
     // A woken room rebuilds its roster from the attachments its sockets carry. The runtime still lists a socket that is
@@ -1616,11 +1617,11 @@ export class Room extends DurableObject {
     // Persist and arm the retry before upstream I/O. Retired sessions never hold up a new one.
     if (!this.cleanupAt) this.cleanupAt = Date.now() + SWEEP_MS;
     if (this.ctx && this.ctx.storage) await this.ensureSweep();
-    if (deferred) this.background(this.retryCleanup(session));
+    if (deferred) this.background(this.retryCleanup(session, true));
     else await this.retryCleanup(session);
   }
 
-  async retryCleanup(session = null) {
+  async retryCleanup(session = null, background = !session) {
     if (!this.sfu || !this.cleanupJobs || !this.cleanupJobs.length) return;
     if (!session && this.cleanupRunning) return this.cleanupRunning;
     const tasks = this.cleanupTasks ||= new Map();
@@ -1634,13 +1635,15 @@ export class Room extends DurableObject {
         if (Date.now() - (job.at ??= Date.now()) > CLEANUP_MS) { this.cleanupJobs.splice(this.cleanupJobs.indexOf(job), 1); continue; }
         let finished;
         tasks.set(job.session, new Promise(resolve => { finished = resolve; }));
+        this.cleanupAttempt = { at: Date.now(), operation: job.inspect ? "inspect" : "close", finished: 0, status: 0 };
+        const attempt = this.cleanupAttempt;
         try {
           const revision = job.revision || 0;
           let inspected = !job.inspect;
           if (job.inspect) {
             const priorVersions = { ...(job.midVersions || {}) };
             try {
-              const state = await this.sfu.getSession(job.session);
+              const state = await this.sfu.getSession(job.session, background);
               const inactive = new Set((state.tracks || []).filter(t => t.status === "inactive").map(t => t.mid));
               job.mids = job.mids.filter(mid => !inactive.has(mid) || (job.midVersions || {})[mid] !== priorVersions[mid]);
               // Only a session nobody holds any more is swept for what is left. On a live one that would close every voice
@@ -1649,14 +1652,16 @@ export class Room extends DurableObject {
               if (!held) job.mids = [...new Set(job.mids.concat((state.tracks || []).filter(t => t.status !== "inactive" && typeof t.mid === "string").map(t => t.mid)))];
               inspected = true;
             } catch (err) {
-              if (err.status === 404) throw err;
+              attempt.status = Number(err.status) || 0;
+              if (sfuSessionGone(err)) throw err;
               // An inspection timeout must not prevent closing MIDs we already own. Keep the inspection pending,
               // even if those closes succeed: the timed-out allocation may still have left other tracks behind.
             }
           }
           const mids = job.mids.slice();
           const versions = { ...(job.midVersions || {}) };
-          const res = mids.length ? await this.sfu.closeTracks(job.session, mids) : { tracks: [] };
+          if (mids.length) attempt.operation = "close";
+          const res = mids.length ? await this.sfu.closeTracks(job.session, mids, background) : { tracks: [] };
           // Cloudflare's close_track_error confirms an absent/already-closed track. Other errors and missing rows retry.
           const succeeded = new Set((Array.isArray(res.tracks) ? res.tracks : []).filter(t => t && typeof t.mid === "string" && (!t.errorCode || t.errorCode === "close_track_error")).map(t => t.mid));
           job.mids = job.mids.filter(mid => !succeeded.has(mid) || (job.midVersions || {})[mid] !== versions[mid]);
@@ -1667,10 +1672,11 @@ export class Room extends DurableObject {
           if (!inspected || (job.revision || 0) !== revision || job.mids.length || (job.inspect && Date.now() < job.inspectUntil)) continue;
           this.cleanupJobs.splice(this.cleanupJobs.indexOf(job), 1);
         } catch (err) {
+          attempt.status = Number(err.status) || 0;
           // A confirmed absent upstream session owns no tracks and needs no further retry.
-          if (err.status === 404) this.cleanupJobs.splice(this.cleanupJobs.indexOf(job), 1);
+          if (sfuSessionGone(err)) this.cleanupJobs.splice(this.cleanupJobs.indexOf(job), 1);
           // Other failures retain ownership for the existing room alarm.
-        } finally { tasks.delete(job.session); finished(); }
+        } finally { attempt.finished = Date.now(); tasks.delete(job.session); finished(); }
       }
       // Remaining jobs retry at the next wake: at most a sweep interval away, and sooner if another wake comes first.
       if (!this.cleanupJobs.length) this.cleanupAt = 0;
@@ -1722,7 +1728,14 @@ export class Room extends DurableObject {
     const next = this.nextAlarm();
     if (next === null) return;
     const set = await this.ctx.storage.getAlarm();
-    if (set === null || set > next) await this.ctx.storage.setAlarm(next);
+    this.alarmRegisteredAt = set;
+    const now = Date.now();
+    // An old registered deadline is not proof that its callback will run: platform retries are finite. A wake or
+    // new cleanup job repairs an alarm overdue by a sweep interval instead of preserving that stale deadline forever.
+    if (set === null || set > next || set < now - SWEEP_MS) {
+      this.alarmRegisteredAt = Math.max(next, now);
+      await this.ctx.storage.setAlarm(this.alarmRegisteredAt);
+    }
   }
 
   expireDoors(now) {
@@ -1740,11 +1753,13 @@ export class Room extends DurableObject {
 
   // Sockets silent past STALE_MS, auto-answered pings included, are evicted as stale.
   async alarm() {
+    this.alarmStarted = Date.now();
     hockey.sweep(this);
     block.sweep(this);
-    const now = Date.now();
     // Cleanup retries run on every wake, not only at sweep time.
     await this.retryCleanup();
+    // A full retry pass can outlast a sweep interval. Advance from completion, not the old start time.
+    const now = Date.now();
     const sweepDue = !this.sweepAt || now >= this.sweepAt;
     this.expireDoors(now);
     // A cancelled lease can leave its earlier alarm in place. Before the recorded sweep deadline that wake only
@@ -1769,7 +1784,8 @@ export class Room extends DurableObject {
       await this.ctx.storage.put("sweepAt", this.sweepAt);
     }
     const next = this.nextAlarm();
-    if (next !== null) await this.ctx.storage.setAlarm(next);
+    if (next !== null) { await this.ctx.storage.setAlarm(next); this.alarmRegisteredAt = next; }
+    this.alarmFinished = Date.now();
     this.inspect.tick();
   }
 
@@ -1802,6 +1818,9 @@ export class Room extends DurableObject {
     return { status: this.players.size ? "live" : "empty", players: this.players.size, maxPlayers: MAX_PLAYERS, sockets: this.ctx.getWebSockets().length,
       zones, hub, hidden, driving, host: host ? host.login : null, followers: this.followers, speaking, listening, pulled, maxPulled, pullCap: 64,
       cleanup: this.cleanupJobs.length, cleanupCap: 64, doors: this.doorQueue.length + (this.doorActive ? 1 : 0), tickHz: TICK_HZ,
+      cleanupAttempt: this.cleanupAttempt || null, cleanupBusy: this.cleanupTasks ? this.cleanupTasks.size : 0,
+      alarmStarted: this.alarmStarted || 0, alarmFinished: this.alarmFinished || 0,
+      alarmRegisteredAt: this.alarmRegisteredAt || 0,
       flushPending: !!this.flushTimer, alarmAt: this.nextAlarm(), attachMax: detail ? attachMax : undefined, rows };
   }
 
