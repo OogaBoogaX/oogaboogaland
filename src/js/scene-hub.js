@@ -830,6 +830,8 @@
   // What each piece says when poked: its tooltip, the particles it throws and the lines it answers with.
   const PIECES = {
     lanternPost: ["Lantern post", "spark", ["The lantern swings. Ooga squints.", "Warm glass. Ooga licks a finger."]],
+    zipPost: ["Zipline · Space at the bar rides it", "dust", ["Ooga sees the whole island from up here.", "The rope creaks. Ooga trusts it."]],
+    zipStake: ["Zipline stake", "chip", ["Driven deep. Ooga tugs it. It holds."]],
     crate: ["Crate", "dust", ["Nailed shut. Ooga knocks anyway.", "Something rattles inside."]],
     coalCrate: ["Coal crate", "dust", ["Coal for the Lightning Factory.", "Ooga gets coal on its nose."]],
     barrel: ["Barrel", "dust", ["Sloshes. Ooga drank half.", "Smells like banana brew."]],
@@ -2034,6 +2036,35 @@
   };
   const listenHammockShots = () => { if (!unshotHammock) unshotHammock = BL.net.subscribeShots(hammockShotHeard); };
   const muteHammockShots = () => { if (unshotHammock) { unshotHammock(); unshotHammock = null; } };
+  // The zipline from a Mempool rainforest treetop back over the water to the Headquarters ramp beside the BTCPay totem
+  // (hub-zipline.js picks the spot, zipline.js rides it). It is planned once the crew stands, after every seeded and
+  // claimed placement on both islands, from read-only queries: it claims no ground, so not a plant or prop moves for it.
+  // Its drop-off is terrain, level, off the stairs and clear of the hammock; its line keeps 2 m off every totem.
+  let zipline = null;
+  const zipQueries = {
+    support: (x, z, y) => playerSupportAt(x, z, y, y, null),
+    clear: (x, y, z, r, h) => island.clearAt(x, y, z, r, h) && solids.clearAt(x, y, z, r, h),
+    landable: (x, y, z) => {
+      if (y <= ABYSS_FLOOR + 1 || island.overlapsStairs(x, z, 0.6) || hammock && hammock.reachable(x, y, z, 2)) return false;
+      for (let k = 0; k < 9; k++) {
+        const a = k * Math.PI / 4, d = k < 8 ? 0.5 : 0;
+        if (Math.abs(island.supportAt(x + Math.sin(a) * d, z + Math.cos(a) * d, y + 0.3, STEP_MAX, ABYSS_FLOOR, PLAYER_RADIUS) - y) > 0.12) return false;
+      }
+      return true;
+    }
+  };
+  const buildZipline = () => {
+    const Z = BL.hubZipline, spot = Z.plan(island, zipQueries, TOTEM_SPOTS.map(([x, z]) => [x, z, 2]), Z.crowns(mempoolIsland));
+    if (!spot) return;
+    zipline = BL.zipline.create({ root, plan: spot.layout, crew, calm: matchMedia("(prefers-reduced-motion: reduce)").matches, landYaw: spot.downYaw, speed: Z.SPEED, brake: Z.BRAKE });
+    // Registered and placed now, not at the next frame's sync, so the survey stands the bar on the step itself.
+    solids.add(zipline.top); solids.add(zipline.deck); solids.sync();
+    if (!zipline.survey(zipQueries)) { solids.remove(zipline.top); solids.remove(zipline.deck); zipline.dispose(); zipline = null; return; }
+    // Cloud Hopper hides the Mempool island, so the line (deck, post and cable) goes with it.
+    cloudOffMap.push(zipline.group);
+    const t = zipline.top.position, b = zipline.bottom.position;
+    addPieceTargets(["zipPost", 0, t.x, t.y + 1.6, t.z, 1.3, "zipStake", 0, b.x, b.y, b.z, 0.5], (x, y, z) => ({ x, y, z }));
+  };
   // The sea far below and the islands on it, standing well out past the clouds.
   const SEA_Y = -70;
   const raiseIslets = () => {
@@ -2842,7 +2873,7 @@
     // Sync once; later searches must not observe visitors, tree animations or this visit's visibility changes.
     sleepSolids.sync();
     const sleepClear = (x, y, z) => sleepSolids.segmentClear(x, y, z, x, y, z, 0.15, 1.5);
-    return { site, place, centre, groundAt, rainAt, rainHit, wake, worldX, worldZ, localX, localZ, cos, sin, claimGround, wildlife, water, paintings, overAt, coveredAt, billboardOccludes, sightClear, solidAt, rockMaterialAt, boxSolid, boxClear, floatAt, afloat, walked, sleepClear, layout: L, preview,
+    return { site, place, centre, trees, groundAt, rainAt, rainHit, wake, worldX, worldZ, localX, localZ, cos, sin, claimGround, wildlife, water, paintings, overAt, coveredAt, billboardOccludes, sightClear, solidAt, rockMaterialAt, boxSolid, boxClear, floatAt, afloat, walked, sleepClear, layout: L, preview,
       get effectsActive() { return poolEffectsActive; } };
   };
   const nearPoolEffects = (p, radius) => {
@@ -6015,10 +6046,13 @@
   const nearbyAction = (x, y, z, reach) => {
     if (cloudHopper?.active) return null;
     const player = pilot.player;
+    if (player && zipline && zipline.riding === player) return zipline.actionFor(player, x, y - 1.1, z);
     if (player && player.camp.burning) return ROLL_ACTION;
     if (player && player.camp.seat) return STAND_ACTION;
     if (player && crew.sleeping) return WAKE_ACTION;
     if (player && pilot.moving) return null;
+    const zip = zipline && zipline.actionFor(player, x, y - 1.1, z);
+    if (zip) return zip;
     if (player && player.hop < 0.03 && player.hopV <= 0 && headquarters) {
       const feet = player.root.position.y - player.baseY;
       const floor = bedSupportAt(x, z, feet + 0.04, 0, PLAYER_RADIUS);
@@ -6047,7 +6081,8 @@
     return null;
   };
   const useNearbyAction = (action) => {
-    if (action === cloudHopper?.action) cloudHopper.launch();
+    if (action.kind === "zipline") { if (!zipline.use(action, pilot.player)) hud.toast(zipline.hint(action, COARSE, "")); }
+    else if (action === cloudHopper?.action) cloudHopper.launch();
     else if (action === WAKE_ACTION) crew.wakePlayer();
     else if (action === ROLL_ACTION) crew.dropRoll();
     else if (action === STAND_ACTION) crew.standPlayer(pilot.player, true);
@@ -6782,6 +6817,9 @@
       } else if (action === CHALK_ACTION) {
         hud.hint(COARSE ? "Tap WRITE to use the chalkboard" : "Press Space to write on the chalkboard");
         hud.setAct("WRITE");
+      } else if (action.kind === "zipline") {
+        hud.hint(zipline.hint(action, COARSE, "down to Headquarters"));
+        hud.setAct(zipline.label(action));
       } else arcadeMouth.entrance.prompt(action, hud, COARSE);
     } else if (hadPlayerPrompt || player) pilot.showAct();
   };
@@ -8369,6 +8407,7 @@
     weather.hold(on);
     updatePoolEffectsActivity();
     mempoolIsland.site.node.visible = !on;
+    if (zipline) zipline.setGameMode(on);
   };
   // GAME MODE's ring: a wall round the meadow well inside the foot of the bluff (the ground starts up it about 19.5 m
   // from the middle), so nobody playing climbs the cliffs and a shoulder camera behind someone at the wall stays out of
@@ -10819,6 +10858,7 @@
     stopLazyBedding();
     // A kept hammock stays hung; its sitter gets up to go.
     if (hammock) vacateHammock();
+    if (zipline) zipline.suspend();
     // A kept island ends its game as a full leave does, and lowers the ring at once.
     setGameMode(false);
     gameRingK = gameRingWait = ringPulseWait = 0; gameRing.visible = false;
@@ -11631,7 +11671,7 @@
     shared.workHit = (cave) => clankers && clankers.hit(cave);
     shared.workPlanned = (cave, site) => clankers && clankers.plan(cave, site);
     mark("pile");
-    shared.residentPose = (cave) => grabbedOogaPose(cave);
+    shared.residentPose = (cave, dt) => grabbedOogaPose(cave) || !!zipline && zipline.pose(cave, dt);
     shared.releaseGrabbed = (cave) => cave.grabbedBy && finishClankerRider(cave.grabbedBy, false);
     // Signed-in visitors elsewhere, as the Oogas they drive; the crew walks round them.
     shared.outsideActors = () => cloudPlaying() ? CLOUD_NO_ACTORS : remotes.actors();
@@ -11672,6 +11712,7 @@
     };
     yield* pause(slice);
     crew = shared.crew = crewMod.create(shared);
+    buildZipline();
     // A signed-in player's driven body stands apart from their NPC, which keeps its track as a ghost (npc-ghosts.js).
     npcGhosts = BL.npcGhosts.create({ renderer });
     shared.shotLook = npcGhosts.shotLook;
@@ -11692,6 +11733,7 @@
         floatPose(cave, feet, height, 0, now);
         if (hammock) hammock.poseRemote(cave, feet, rec, remoteShown(rec) && cave.root.visible);
         if (poolEffectsActive) mempoolIsland.wake(cave.root, p.x, feet, p.z, height, 0.35);
+        if (zipline) zipline.poseRemote(cave, feet);
       }
     });
     // Signed-in pages keep the crew in step: one runs it for everyone, the others follow its frames. The
@@ -12057,6 +12099,7 @@
         get factory() { return factoryMouth && factoryMouth.hall ? factoryMouth.hall.debug : null; },
         get bifrost() { return bifrostIsle; },
         get footsteps() { return footsteps; },
+        get zipline() { return zipline; },
         get chalkboardAt() { return chalkboardClearance; },
         slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, delivery: pile.delivery, spillEffect: pile.spillEffect, cavemen: crew.cavemen, lab: null, hud, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
         get shown() {
@@ -12238,6 +12281,7 @@
     factoryWarm.clear();
     if (reuseHub && !destroy) return suspendHub();
     if (hammock) removeHammock();
+    if (zipline) { zipline.dispose(); zipline = null; }
     heldHub = false; heldDebug = null;
     cloudHopper?.dispose(); cloudIsland?.dispose();
     cloudPileSolids?.dispose();

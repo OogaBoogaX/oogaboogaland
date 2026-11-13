@@ -7,6 +7,7 @@ import { runInNewContext } from "node:vm";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
+import { GCProfiler, getHeapSpaceStatistics } from "node:v8";
 import { createHash, webcrypto } from "node:crypto";
 import { externalizeAudio } from "../scripts/distribution-audio.mjs";
 import { PICTURE_MODULES, externalizeModules, externalizePage, externalizePictures } from "../scripts/distribution-modules.mjs";
@@ -4306,7 +4307,7 @@ const orbitFlow = async (b) => {
 const SCENES = ["hub", "lab", "studio", "race", "drop", "block", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
-for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
+for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "transport-unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
 const ONLY = process.env.ONLY || ""; // Optional comma-separated substrings within the requested scenes.
 const onlyMatches = value => ONLY.split(",").some(part => value.includes(part));
 const FULL = ARGS.includes("full");
@@ -20948,6 +20949,284 @@ const tessCacheChecks = async BL => {
     JSON.stringify({ shared, held, reused, rebuilt, tiers: before.size, children: parent.children.length }));
 };
 
+// Ziplines (zipline.js): the grab, the ride down the sagging cable, the drop-off on checked ground, letting go early,
+// GAME MODE and reduced motion on a made-up line; then the island's and DSB Land's own lines in their places.
+const ziplineRide = (id) => ({ name: id + " zipline ride", why: "playthrough: the scene's real action rides its surveyed line, refuses an unsafe drop and returns control on dry ground", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, hub = ${id == "hub"}, D = hub ? BL.scenes.hub.debug : B.dsb, z = D.zipline;
+    if (!z) return { built: false };
+    if (hub) B.pilot.possess(B.cavemen.get("portlandhodl"));
+    if (B.crew.sleeping) B.crew.wakePlayer();
+    const a = B.pilot.player;
+    const space = () => { for (const type of ["keydown", "keyup"]) window.dispatchEvent(new KeyboardEvent(type, { key: " ", code: "Space", bubbles: true, cancelable: true })); };
+    B.pilot.navigate({ position: { x: z.plan.stand.x, y: z.standFloor, z: z.plan.stand.z }, yaw: z.plan.line.yaw, pitch: .5, dist: 7 }); B.advance(.2, 1 / 30);
+    const offered = z.actionFor(a, a.root.position.x, a.root.position.y - a.baseY, a.root.position.z) === z.GRAB;
+    space(); const grabbed = z.riding === a;
+    space(); const held = z.riding === a;
+    let frames = 0, travelled = 0;
+    while (z.riding && frames++ < 1500) { B.advance(1 / 30, 1 / 30); travelled = Math.max(travelled, z.s - z.plan.grabS); }
+    const p = a.root.position, landing = z.surveyed.landing;
+    const landed = !z.riding && B.pilot.player === a && Math.hypot(p.x - landing.x, p.z - landing.z) < .15 && Math.abs(p.y - a.baseY - landing.y) < .15;
+    B.advance(.3, 1 / 30);
+    const stable = Math.abs(a.root.position.y - a.baseY - landing.y) < .2;
+    let mode = true;
+    if (hub) { D.setGameMode(true); mode = !z.group.visible && z.actionFor(a, z.plan.stand.x, z.standFloor, z.plan.stand.z) === null; D.setGameMode(false); mode &&= z.group.visible; }
+    return { built: true, offered, grabbed, held, frames, travelled, landed, stable, mode, phase: z.phase, at: [p.x, p.y - a.baseY, p.z], landing };
+  })()`);
+  record(id + " zipline: the scene's Space action grabs, holds on above unsafe ground and finishes on its surveyed dry landing with control restored",
+    r.built && r.offered && r.grabbed && r.held && r.frames < 1500 && r.travelled > 60 && r.landed && r.stable && r.mode, JSON.stringify(r));
+} });
+scene("hub", { label: "zipline", query: "solo=1&character=portlandhodl&pos=0", steps: [ziplineRide("hub"), trip("hub")] });
+scene("dsb", { label: "zipline", query: "weather=clear&time=1200", steps: [ziplineRide("dsb"), trip("dsb")] });
+const ziplineChecks = BL => {
+  const S = BL.scene, Z = BL.zipline, P = Z.PHASES;
+  // A made-up island to ride: a hilltop 8 m up for x > 20, a meadow at 0, a wall from x 8 to 9 standing 3 m (rides
+  // pass over it, drops never land by it), and a building between x 4 and 6 that nothing may land on.
+  const support = (x, z, y) => x > 20 ? 8 : 0;
+  const q = {
+    support,
+    clear: (x, y, z, r, h) => !(x + r > 8 && x - r < 9 && y < 3) && !(x > 20 - r && y < 8),
+    landable: (x, y) => !(x > 3 && x < 7) && !(x > 7.5 && x < 9.5) && y === support(x, 0, 99)
+  };
+  const fakeCave = () => {
+    const part = () => S.createNode();
+    return { root: S.createNode({ position: { x: 0, y: 0, z: 0 } }), baseY: 0.3, bodyHeight: 1.37, hop: 0, hopV: 0,
+      parts: { armL: part(), armR: part(), legL: part(), legR: part(), head: part() } };
+  };
+  const world = (calm = false) => {
+    const root = S.createNode(), cave = fakeCave(), landed = [];
+    S.addChild(root, cave.root);
+    const crew = { player: cave, relocatePlayer: (p, yaw) => { landed.push([p.x, p.y, p.z, yaw]); cave.root.position.x = p.x; cave.root.position.y = p.y + cave.baseY; cave.root.position.z = p.z; } };
+    const plan = Z.layout("chora", { x: 22, y: 8, z: 0 }, -10, 0, 1, { bottomGap: 3, bottomGround: () => 0 });
+    const zip = Z.create({ root, plan, crew, calm });
+    const ok = zip.survey(q);
+    const standAt = () => { cave.root.position.x = plan.stand.x; cave.root.position.z = plan.stand.z; cave.root.position.y = 8 + cave.baseY; };
+    return { root, cave, crew, plan, zip, ok, landed, standAt };
+  };
+  const feet = (cave) => cave.root.position.y - cave.baseY;
+  const ride = (w, dt = 1 / 60, each = null) => { let frames = 0; while (w.zip.riding && frames < 20000) { w.zip.pose(w.cave, dt); if (each) each(frames); frames++; } return frames; };
+  {
+    const w = world(), { zip, cave, plan } = w;
+    w.standAt();
+    const at = zip.actionFor(cave, plan.stand.x, 8, plan.stand.z);
+    const far = zip.actionFor(cave, plan.stand.x + 2, 8, plan.stand.z);
+    cave.hop = 1.5; const airborne = zip.actionFor(cave, plan.stand.x, 9.5, plan.stand.z); cave.hop = 0;
+    const low = zip.actionFor(cave, plan.stand.x, 7, plan.stand.z);
+    const none = zip.actionFor(null, plan.stand.x, 8, plan.stand.z);
+    zip.setGameMode(true); const game = zip.actionFor(cave, plan.stand.x, 8, plan.stand.z), hidden = !zip.group.visible; zip.setGameMode(false);
+    const grabbed = zip.use(at, cave), again = zip.use(zip.GRAB, fakeCave()), lifting = zip.actionFor(cave, 0, 0, 0);
+    record("zipline grab: Space at the parked bar grabs it, nowhere else, never in the air, below the top or in GAME MODE, and one rider at a time",
+      w.ok && at === zip.GRAB && far === null && airborne === null && low === null && none === null && game === null && hidden && grabbed && !again && lifting === zip.HOLD && zip.riding === cave,
+      JSON.stringify({ ok: w.ok, at: at?.use, far, airborne, low, game, hidden, grabbed, again, lifting: lifting?.use }));
+  }
+  // Regression: Billy stood on the rainforest deck behind the post (pos=54.61083,17.99748,9.52503, root height, his
+  // Ooga's base 0.33890) with the island's real top at (52.814, 17.632, 9.231) and got no prompt: the bar answered only
+  // within a metre of the step. Anywhere on the footing, jetpack on or off, standing or a hop up, takes the bar, and the
+  // grab steps the Ooga onto the step first.
+  {
+    const root2 = S.createNode(), cave = fakeCave(), landed = [];
+    cave.baseY = 0.3389043303439394;
+    S.addChild(root2, cave.root);
+    const crew = { player: cave, relocatePlayer: (p, yaw) => { landed.push([p.x, p.y, p.z, yaw]); cave.root.position.x = p.x; cave.root.position.y = p.y + cave.baseY; cave.root.position.z = p.z; } };
+    const top = { x: 52.81397167832577, y: 17.632255554199215, z: 9.231171751994875 }, deckAt = (x, z) => Math.hypot(x - top.x, z - top.z) < 2.5;
+    const plan = Z.layout("jungle", top, -11.114623885102453, 16.583529828668294, 1.2, { bottomEye: { x: -13.5, y: 4.2, z: 16.86 } });
+    const zip = Z.create({ root: root2, plan, crew });
+    const ok = zip.survey({ support: (x, z, y) => deckAt(x, z) ? top.y + 0.22 : 0, clear: () => true, landable: (x, y) => y === 0 });
+    const feet = 17.99748 - cave.baseY, ask = () => zip.actionFor(cave, 54.61083, feet, 9.52503);
+    const standing = ask();
+    cave.jet = { thrust: false }; const jetpack = ask();
+    cave.hop = 0.4; const hopping = zip.actionFor(cave, 54.61083, feet + 0.4, 9.52503); cave.hop = 0;
+    const offDeck = zip.actionFor(cave, 57.5, feet, 9.6), below = zip.actionFor(cave, 54.61083, feet - 1, 9.52503);
+    const grabbed = zip.use(standing, cave), first = landed[0] || [];
+    record("zipline grab on the rainforest deck (regression): at Billy's spot behind the post, jetpack on or off and a hop up, Space takes the bar, stepping the Ooga to the step first; off the deck or below it does not",
+      Math.abs(plan.line.yaw + 1.4562905065940843) < 1e-4 && ok && standing === zip.GRAB && jetpack === zip.GRAB && hopping === zip.GRAB && offDeck === null && below === null && grabbed
+        && Math.abs(first[0] - plan.stand.x) < 1e-9 && Math.abs(first[2] - plan.stand.z) < 1e-9 && Math.abs(first[1] - zip.standFloor) < 1e-9 && zip.standFloor === top.y + 0.22,
+      JSON.stringify({ ok, standing: standing?.use, jetpack: jetpack?.use, hopping: hopping?.use, offDeck, below, grabbed, first, standFloor: zip.standFloor }));
+  }
+  {
+    const w = world(), { zip, cave, plan } = w, l = plan.line, c = { x: 0, y: 0, z: 0 };
+    w.standAt(); zip.use(zip.GRAB, cave);
+    let onCable = true, worst = 0, maxV = 0, rising = true, prevV = 0, t1 = 0, hold = 0, letGo = 0, overWall = null, armsUp = true, midSag = 0, lastV = Infinity;
+    ride(w, 1 / 60, (f) => {
+      if (zip.phase === P.RIDE) {
+        Z.cableAt(l, zip.s / l.len, c);
+        const hands = feet(cave) + Math.min(Z.HANG_MAX, cave.bodyHeight * Z.REACH);
+        worst = Math.max(worst, Math.abs(hands - (c.y - BL.ziplineModels.TROLLEY)));
+        onCable = onCable && Math.abs(cave.root.position.x - c.x) < 1e-9 && Math.abs(cave.root.position.z - c.z) < 1e-9;
+        if (t1 < 60) { rising = rising && zip.speed >= prevV - 1e-9; t1++; }
+        prevV = zip.speed; maxV = Math.max(maxV, zip.speed); lastV = zip.speed;
+        armsUp = armsUp && cave.parts.armL.rotation.x < -2.5 && cave.parts.armR.rotation.x < -2.5;
+        const a = zip.actionFor(cave, 0, 0, 0);
+        if (a === zip.HOLD) hold++; else if (a === zip.LETGO) letGo++;
+        if (cave.root.position.x > 8 && cave.root.position.x < 9 && overWall === null) overWall = a === zip.HOLD;
+        const tm = zip.s / l.len; if (Math.abs(tm - 0.5) < 0.01) midSag = (l.ay + (l.by - l.ay) * tm) - c.y;
+      }
+    });
+    const [lx, ly, lz, yaw] = w.landed[1] || [];
+    record("zipline ride: the Ooga hangs from the bar on the sagging cable, eases up to speed, brakes into the end and drops onto the surveyed floor at the drop-off, turned along the line",
+      onCable && worst < 1e-9 && rising && maxV <= 12 + 1e-9 && maxV > 8 && lastV < 2.5 && midSag > 0.9 && armsUp && w.landed.length === 2 && ly === 0 && Math.abs(lx + 10) < 0.6 && Math.abs(lz) < 1e-6
+        && yaw === l.yaw && !zip.riding && zip.phase === P.IDLE && hold > 0 && letGo > 0 && overWall === true,
+      JSON.stringify({ onCable, worst, rising, maxV, lastV, midSag, armsUp, landed: w.landed, hold, letGo, overWall }));
+  }
+  {
+    const w = world(), { zip, cave } = w;
+    w.standAt(); zip.use(zip.GRAB, cave);
+    let refused = null, dropped = null, from = null;
+    ride(w, 1 / 60, () => {
+      if (zip.phase !== P.RIDE) return;
+      const x = cave.root.position.x;
+      if (refused === null && x > 8 && x < 9) refused = !zip.use(zip.LETGO, cave) && zip.phase === P.RIDE;
+      if (refused !== null && dropped === null && x < 2.5 && zip.actionFor(cave, 0, 0, 0) === zip.LETGO) { from = [x, feet(cave)]; dropped = zip.use(zip.LETGO, cave); }
+    });
+    const [lx, ly] = w.landed[1] || [];
+    record("zipline let go: early only over safe ground (refused over the wall and its building), falling straight down onto the checked floor there",
+      refused === true && dropped === true && w.landed.length === 2 && ly === 0 && Math.abs(lx - from[0]) <= Z.SAMPLE / 2 + 1e-6 && !(lx > 3 && lx < 7),
+      JSON.stringify({ refused, dropped, from, landed: w.landed }));
+  }
+  {
+    const w = world(), { zip, cave } = w;
+    w.standAt(); zip.use(zip.GRAB, cave);
+    for (let i = 0; i < 90; i++) zip.pose(cave, 1 / 60);
+    const mid = zip.phase === P.RIDE;
+    zip.setGameMode(true);
+    const set = w.landed.length === 2 && Math.abs(w.landed[1][0] + 10) < 0.6 && w.landed[1][1] === 0 && !zip.riding;
+    const away = !zip.group.visible && zip.actionFor(cave, w.plan.stand.x, 8, w.plan.stand.z) === null;
+    zip.setGameMode(false); w.standAt();
+    const back = zip.group.visible && zip.actionFor(cave, w.plan.stand.x, 8, w.plan.stand.z) === zip.GRAB;
+    record("zipline GAME MODE: the whole line is put away, a rider is set down at the drop-off and nobody may ride until it ends",
+      mid && set && away && back, JSON.stringify({ mid, set, away, back, landed: w.landed }));
+  }
+  {
+    const calm = world(true), brisk = world();
+    let calmMax = 0, calmMid = [], frames = [], legs = new Set();
+    for (const w of [calm, brisk]) { w.standAt(); w.zip.use(w.zip.GRAB, w.cave); }
+    frames.push(ride(calm, 1 / 60, () => { if (calm.zip.phase === P.RIDE) { calmMax = Math.max(calmMax, calm.zip.speed); if (calm.zip.s > 10 && calm.zip.s < 25) { calmMid.push(calm.zip.speed); legs.add(calm.cave.parts.legL.rotation.x); } } }));
+    frames.push(ride(brisk));
+    const steady = Math.max(...calmMid) - Math.min(...calmMid);
+    record("zipline reduced motion: a slower ride at a steady speed, without the legs swinging",
+      calmMax <= 5 + 1e-9 && steady < 1e-6 && legs.size === 1 && frames[0] > frames[1] * 1.3 && calm.landed.length === 2, JSON.stringify({ calmMax, steady, frames }));
+  }
+  {
+    // A frame of riding allocates nothing: forty whole rides, posing and asking what Space does, leave the young
+    // generation as it was (measured once the code is warm and between collections; a run a collection cuts into is
+    // tried again).
+    const w = world();
+    // Warm the measured pose/action loop, not just the different 60 Hz ride helper.
+    for (let warm = 0; warm < 80; warm++) {
+      w.standAt(); w.zip.use(w.zip.GRAB, w.cave);
+      while (w.zip.riding && w.zip.phase !== P.FALL) { w.zip.pose(w.cave, 1 / 240); w.zip.actionFor(w.cave, 0, 0, 0); }
+      w.zip.setGameMode(true); w.zip.setGameMode(false); w.landed.length = 0;
+    }
+    const young = () => getHeapSpaceStatistics().find((space) => space.space_name === "new_space").space_used_size;
+    let frames = 0, grew = Infinity, tries = 0;
+    for (; tries < 6 && grew === Infinity; tries++) {
+      const profiler = new GCProfiler();
+      profiler.start();
+      const from = young();
+      frames = 0;
+      for (let k = 0; k < 40; k++) {
+        w.standAt(); w.zip.use(w.zip.GRAB, w.cave); w.landed.length = 0;
+        while (w.zip.riding && w.zip.phase !== P.FALL) { w.zip.pose(w.cave, 1 / 240); w.zip.actionFor(w.cave, 0, 0, 0); frames++; }
+        w.zip.setGameMode(true); w.zip.setGameMode(false);
+      }
+      const to = young();
+      if (!profiler.stop().statistics.length && tries > 0) grew = to - from;
+    }
+    record("zipline frames allocate nothing: forty rides of posing and asking what Space does leave the young generation as it was", frames > 10000 && grew < 65536, JSON.stringify({ frames, grew, tries }));
+  }
+  // The island's line where Billy put it, from a Mempool rainforest treetop back to the Headquarters ramp, planned on the
+  // hub's own terrain (seed 1, the Factory's roof hole and the library's nook, as scene-hub.js builds it), the Mempool
+  // island's ground where pool-models.js places it, and the crown Billy stood on (its top 17.98 m up at his spot, as
+  // his position readout gave it); the browser's hub plans it again with every real tree, prop and palm.
+  {
+    const factory = BL.caves.slots.find((slot) => slot.scene === "factory"), bearing = 227 * Math.PI / 180;
+    const nook = { x: Math.sin(bearing) * 20.75, z: -Math.cos(bearing) * 20.75, ry: Math.PI / 2 - 10.25 / 12 * Math.PI * 2, floor: 0.25, width: 5.4, depth: 0.78, height: 3.3, entry: 1.1, reach: 3.25 };
+    const island = BL.terrain.island({ seed: 1, roofHole: { id: factory.id, ...BL.factoryModels.ROOF_TUBE }, nook });
+    const place = BL.poolModels.spot(island, {}), PL = BL.poolLayout, pc = Math.cos(place.ry), ps = Math.sin(place.ry);
+    const pool = (x, z) => {
+      const lx = (x - place.x) * pc - (z - place.z) * ps, lz = (x - place.x) * ps + (z - place.z) * pc, g = Math.hypot(lx, lz) < PL.R ? PL.groundAt(lx, lz) : NaN;
+      return Number.isFinite(g) ? place.y + g : -Infinity;
+    };
+    const crown = { x: BL.hubZipline.NEAR.x, z: BL.hubZipline.NEAR.z, y: 17.98, r: 1.8 }, inCrown = (x, z, r) => Math.hypot(x - crown.x, z - crown.z) < crown.r + r;
+    const support = (x, z, y) => Math.max(island.supportAt(x, z, y, 0.6, -120, 0.3), pool(x, z) <= y + 0.6 ? pool(x, z) : -Infinity, inCrown(x, z, 0) && y >= crown.y - 0.6 ? crown.y : -Infinity);
+    const level = (x, y, z) => { for (let k = 0; k < 9; k++) { const a = k * Math.PI / 4, d = k < 8 ? 0.5 : 0; if (Math.abs(island.supportAt(x + Math.sin(a) * d, z + Math.cos(a) * d, y + 0.3, 0.6, -120, 0.3) - y) > 0.12) return false; } return true; };
+    const reads = { support: 0, clear: 0, landable: 0 };
+    const hq = { support: (x, z, y) => (reads.support++, support(x, z, y)),
+      clear: (x, y, z, r, h) => (reads.clear++, island.clearAt(x, y, z, r, h) && pool(x, z) <= y && !(inCrown(x, z, r) && y < crown.y)),
+      landable: (x, y, z) => (reads.landable++, y > -100 && !island.overlapsStairs(x, z, 0.6) && level(x, y, z)) };
+    const totems = [[7.8, 18.5], [-8.1, 18.6], [-4.7, 19.5], [4.1, 19.9]];
+    const random = Math.random, mulberry = BL.math.mulberry32;
+    let draws = 0;
+    Math.random = () => { draws++; return random(); };
+    BL.math.mulberry32 = (seed) => { draws++; return mulberry(seed); };
+    const spot = BL.hubZipline.plan(island, hq, totems.map(([x, z]) => [x, z, 2]), [crown, { x: 50, z: 5, y: 12 }]);
+    Math.random = random; BL.math.mulberry32 = mulberry;
+    const L = spot && spot.layout, l = L && L.line, ramp = island.headquarters.ramps.find((r) => r.id === "c730");
+    const gap = l ? Math.min(...totems.map(([x, z]) => Math.abs((x - l.ax) * l.uz - (z - l.az) * l.ux))) : 0;
+    const land = spot && spot.survey.landing, past = l && island.solidAt(l.bx + l.ux * 0.1, l.by, l.bz + l.uz * 0.1);
+    const nextIn = ramp.samples[1], downYaw = Math.atan2(nextIn.x - ramp.from.x, nextIn.z - ramp.from.z);
+    record("hub zipline spot: from the rainforest treetop Billy stood on, a long ride back over the water to level ground by the head of the Headquarters ramp, turned down the ramp, the rope ending in rock and 2 m off every totem",
+      !!spot && spot.survey.ok && L.top.x === crown.x && L.top.z === crown.z && L.top.y > 18 && l.len > 60 && l.ay - land.y > 18 && Math.hypot(land.x - ramp.from.x, land.z - ramp.from.z) < 5
+        && land.y === 0 && level(land.x, land.y, land.z) && past && gap >= 2 && spot.downYaw === downYaw,
+      JSON.stringify({ top: L && L.top, land, gap, past, len: l && l.len }));
+    // The seeded scatter (scene-hub.js `scatter`) runs before the crew; the zipline is planned after it, from these reads
+    // alone: no random number, no seeded stream, no claim. Its source names none of the hub's claim lists either.
+    const hub = readFileSync(join(root, "src/js/scene-hub.js"), "utf8"), enter = hub.slice(hub.indexOf("const enterSteps = function*"));
+    const order = ["mempoolIsland = yield* buildMempoolIsland(slice);", "yield* scatter(slice);", "plantPalms();", "buildLibrary();", "reflowScenery();", "crew = shared.crew = crewMod.create(shared);"].map((m) => enter.indexOf(m));
+    const built = enter.indexOf("buildZipline();"), body = hub.slice(hub.indexOf("  let zipline = null;"), hub.indexOf("  const buildZipline = () => {") + 900);
+    const sources = ["zipline.js", "hub-zipline.js", "zipline-models.js"].map((f) => readFileSync(join(root, "src/js", f), "utf8")).join("\n") + body;
+    const claims = /\bclaim\(|claimed|sceneryClaims|Math\.random/.test(sources);
+    record("hub zipline placement moves nothing seeded: it is planned after the Mempool rainforest, the scatter, palms, library and reflow, draws no random number or seeded stream, and claims no ground",
+      order.every((at) => at > 0 && at < built) && draws === 0 && !claims && reads.support > 0 && reads.clear > 0 && reads.landable > 0, JSON.stringify({ order, built, draws, claims, reads }));
+  }
+  // DSB Land's line: long and steep from the summit's entry down to the Noderunner by the water, on the scene's own
+  // geography and its one collision set, its seeded dressing the same with and without it.
+  {
+    const S2 = BL.scene, hashOf = (v) => createHash("sha1").update(JSON.stringify(v)).digest("hex");
+    const seeded = (W) => hashOf([W.nature.placements, W.detail.placements, W.enrichment.placements.map((p) => ({ ...p, node: undefined })), W.olympus.group.children.map((n) => [n.position, n.rotation, n.scale])]);
+    const build = () => {
+      const W = waterWorld(BL), noderunner = BL.dsbNoderunner.create({ root: W.root, land: W.land }), vacancies = BL.dsbVacancies.create({ root: W.root, land: W.land, olympus: W.olympus });
+      return { W, noderunner, vacancies };
+    };
+    const A = build(), before = seeded(A.W), D = Z.DSB, land = A.W.land, structures = [];
+    const plan = Z.layout("chora", { x: D.top.x, y: land.groundAt(D.top.x, D.top.z), z: D.top.z }, D.drop.x, D.drop.z, D.sag, { bottomGap: D.gap, bottomGround: land.groundAt });
+    const zip = Z.create({ root: A.W.root, plan, crew: A.W.crew, speed: D.speed, brake: D.brake });
+    structures.push(zip.top, zip.bottom);
+    const bare = BL.dsbCollision.create({ land, nature: A.W.nature, detail: A.W.detail, enrichment: A.W.enrichment, town: A.W.town, olympus: A.W.olympus, noderunner: A.noderunner, vacancies: A.vacancies, structures: [] });
+    const collision = BL.dsbCollision.create({ land, nature: A.W.nature, detail: A.W.detail, enrichment: A.W.enrichment, town: A.W.town, olympus: A.W.olympus, noderunner: A.noderunner, vacancies: A.vacancies, structures });
+    const ok = zip.survey(Z.dsbQueries(land, collision.solids, BL.pilot.WALK.step)), after = seeded(A.W);
+    const B = build(), fresh = seeded(B.W);
+    record("DSB zipline placement moves nothing seeded: the island's plants, dressing and Olympus are the same before and after it stands, and in a fresh build",
+      before === after && after === fresh, JSON.stringify({ before, after, fresh }));
+    // The trail from the Portara, the arrival spot, the dialer and every lane keep their room.
+    const dist = (lines, x, z) => { let best = Infinity; for (const ln of lines) for (let i = 1; i < ln.length; i++) { const [ax, az] = ln[i - 1], [bx, bz] = ln[i], dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz))); best = Math.min(best, Math.hypot(x - ax - dx * t, z - az - dz * t)); } return best; };
+    let walks = 0, changed = 0;
+    for (const ln of [land.trail, ...land.lanes, land.waterfront]) for (let i = 1; i < ln.length; i++) {
+      const [ax, az] = ln[i - 1], [bx, bz] = ln[i], n = Math.ceil(Math.hypot(bx - ax, bz - az) / 0.5);
+      for (let k = 0; k <= n; k++) { const x = ax + (bx - ax) * k / n, z = az + (bz - az) * k / n, y = land.groundAt(x, z) + 0.6; walks++; if (bare.solids.clearAt(x, y, z, 0.4, 1.2) !== collision.solids.clearAt(x, y, z, 0.4, 1.2)) changed++; }
+    }
+    const t = zip.top.position, b = zip.bottom.position;
+    const apart = dist([land.trail], t.x, t.z) >= 3 && Math.hypot(t.x + 45, t.z + 43) >= 4 && Math.hypot(t.x + 40, t.z + 43) >= 3 && Math.hypot(t.x + 45, t.z + 48) >= 6
+      && dist([...land.lanes, land.waterfront], b.x, b.z) >= 2;
+    record("DSB zipline ends block no walk: the launch post stands off the Portara's arrival, the dialer and the trail, the bollard off every lane, and no point of the trail, the lanes or the waterfront loses room",
+      ok && apart && walks > 500 && changed === 0, JSON.stringify({ ok, apart, walks, changed, top: t, bottom: b }));
+    // Ride it with the scene's own crew: Space at the launch step, down the face, onto the waterfront by the Noderunner.
+    const avatar = A.W.avatar, s = zip.surveyed, l = plan.line, noderunnerAt = land.buildings.find((x) => x.name.startsWith("Noderunner"));
+    A.W.crew.relocatePlayer({ x: plan.stand.x, y: zip.top.position.y + 0.22, z: plan.stand.z }, 0);
+    const grab = zip.actionFor(avatar, plan.stand.x, zip.top.position.y + 0.22, plan.stand.z) === zip.GRAB && zip.use(zip.GRAB, avatar);
+    let frames = 0, top = 0;
+    while (zip.riding && frames < 4000) { zip.pose(avatar, 1 / 60); top = Math.max(top, zip.speed); frames++; }
+    const p = avatar.root.position, feet = p.y - avatar.baseY;
+    record("DSB zipline ride: long and steep, from the summit's entry it runs at speed down to dry, checked ground by the Noderunner and stands the Ooga there",
+      ok && grab && !zip.riding && l.len > 70 && l.ay - s.landing.y > 30 && top > 14 && Math.hypot(p.x - s.landing.x, p.z - s.landing.z) < 1e-6 && Math.abs(feet - land.groundAt(p.x, p.z)) < 1e-6
+        && feet > BL.dsbCoast.LEVEL + 0.3 && Math.hypot(p.x - noderunnerAt.x, p.z - noderunnerAt.z) < 15,
+      JSON.stringify({ ok, grab, frames, top, len: l.len, landing: s.landing, at: [p.x, feet, p.z] }));
+    zip.dispose(); collision.dispose(); bare.dispose();
+    for (const w of [A, B]) { w.vacancies.dispose(); w.noderunner.dispose(); w.W.dispose(); }
+  }
+};
+
+
 // Regression: one hub variant pinned every other index built by a later scene.
 const variantCacheChecks = BL => {
   const M = BL.models, builds = new Map(), read = M.variants(i => ({ i, serial: builds.set(i, (builds.get(i) || 0) + 1).get(i) }));
@@ -31655,7 +31934,7 @@ const npcActivityRefreshProof = (BL) => {
   }
 };
 
-const unitChecks = async () => {
+const unitPreludeChecks = async () => {
   await connectionReportChecks();
   const artifact = artifactUnitProof();
   record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
@@ -31751,6 +32030,9 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   record("visibility separate bodies (#501): a driven Ooga or gorilla body is a registry character from before the registry exists, reads in sight in the open and covered behind a blocker, keeps both head states through refreshes with its sightHidden effects left out, and is forgotten before it is detached with nothing left take after take",
     Object.values(separateBodies).every(Boolean), JSON.stringify(separateBodies));
   await distributionAudioChecks();
+};
+const unitChecks = async () => {
+  if (!ARGS.includes("transport-unit")) await unitPreludeChecks();
   const canvasStub = () => ({
     width: 0, height: 0,
     getContext: () => ({
@@ -31810,6 +32092,12 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   }
   process.off("unhandledRejection", rejected);
   const BL = globalThis.BL;
+  // Focused post-fix validation still loads the whole page, so shared shape changes cannot escape the allocation checks.
+  if (ARGS.includes("transport-unit")) {
+    if (typeof catapultChecks === "function") catapultChecks(BL, BL.terrain.island({ seed: 1 }));
+    if (typeof ziplineChecks === "function") ziplineChecks(BL);
+    return;
+  }
   if (ARGS.includes("cloud-hopper-controller")) { await cloudHopperFailureChecks(BL); return; }
   await tessCacheChecks(BL);
   variantCacheChecks(BL);
@@ -32060,6 +32348,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   }
   factoryChecks(BL);
   tessAnswerChecks(BL);
+  ziplineChecks(BL);
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
   await cloudHopperFailureChecks(BL);
