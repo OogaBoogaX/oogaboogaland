@@ -1,6 +1,7 @@
 // Sign-in helpers and real routes with fixture D1 and identity responses: no network.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 import { cookieNames, parseCookies, serializeCookie } from "../src/cookies.js";
 import { randomToken, sameString, sha256Hex } from "../src/crypto.js";
 import { isExpired, needsTouch, publicPlayer, sanitizeDisplay, TOUCH_SECONDS } from "../src/db.js";
@@ -193,6 +194,20 @@ test("TURN capability and the dedicated mint limit apply only to eligible sessio
   assert.equal((await me({ ...env, DB: database("visitor") })).voiceTurn, undefined);
   assert.equal((await worker.fetch(requestFor("/api/voice/ice", "POST"), env)).status, 429);
   assert.deepEqual(keys, ["123"]);
+});
+
+test("regression: no two rate limiters share a namespace, in a Worker or across the account's Workers", () => {
+  // Limiters with one namespace_id share counters: the TURN mint limiter once took CONNECTION_REPORT_LIMITER's.
+  const root = new URL("../../", import.meta.url), owner = new Map();
+  const files = readdirSync(root).filter((f) => /^wrangler\..+\.jsonc$/.test(f));
+  assert.ok(files.includes("wrangler.staging.jsonc") && files.includes("wrangler.production.jsonc"));
+  for (const file of files) {
+    const config = JSON.parse(readFileSync(new URL(file, root), "utf8").replace(/^\s*\/\/.*$/gm, ""));
+    for (const { name, namespace_id: id } of config.ratelimits || []) {
+      assert.ok(!owner.has(id), `${file} ${name} reuses namespace ${id} of ${owner.get(id)}`);
+      owner.set(id, `${file} ${name}`);
+    }
+  }
 });
 
 test("eligible sessions share one character check with the API and strip forged room identity headers", async () => {

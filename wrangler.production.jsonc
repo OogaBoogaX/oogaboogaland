@@ -69,7 +69,7 @@
     // Voice signalling per player: a join is four calls, each change of who is near one or two more.
     { "name": "VOICE_LIMITER", "namespace_id": "1003", "simple": { "limit": 120, "period": 60 } },
     // Short-lived TURN credentials per player; independent of game and voice signalling limits.
-    { "name": "VOICE_ICE_LIMITER", "namespace_id": "1008", "simple": { "limit": 6, "period": 60 } },
+    { "name": "VOICE_ICE_LIMITER", "namespace_id": "1009", "simple": { "limit": 6, "period": 60 } },
     // Questions to Tess per IP, the address used only for this count: the page answers most by itself.
     { "name": "TESS_LIMITER", "namespace_id": "1005", "simple": { "limit": 5, "period": 60 } },
     // Public high-score reads per IP; signed-in submissions per account, on separate keys.
