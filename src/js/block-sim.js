@@ -45,7 +45,7 @@
     MAX_SHOTS: 96, MAX_EVENTS: 48, STEP: 1 / 120,
     TRAP_R: 0.95, TRAP_MAX_S: 25, TRAP_REARM_S: 8, BOT_THINK: [3.5, 8], MIN_SIDE: 2, MAX_SIDE: 5,
     PREP_S: 20, CRATE_HALF: 0.6, CRATE_H: 1.1, MAX_CRATES: 32, CRATE_STOCK: 3, PUSH: 0.55, STAND_CLEAR: 2.4,
-    NET_S: 4, NET_SLOW: 0.4, PASS_SPEED: 13, PASS_LIFT: 5, PASS_GRAVITY: 13, PASS_SAFE: 0.45, CATCH_R: 1.5,
+    NET_S: 4, NET_SLOW: 0.4, PASS_SPEED: 13, PASS_LIFT: 5, PASS_GRAVITY: 13, PASS_SAFE: 0.45, CATCH_R: 1.5, LOOSE_TOP: 7,
     WEATHER_S: [24, 42],
     TRAMP_R: 1.0, BOUNCE: 13.5, STEP_UP: 0.45, FIRE_R: 0.95, BURN_HOPS: 3, BURN_SLOW: 0.25,
     // The jetpack matches the island's: `JET_ACCEL` against `FALL` nets its +11 m/s² up to its 7 m/s, and `JET_FUEL` is
@@ -597,8 +597,11 @@
   };
   // Where a loose block may come to rest: open ground the bots can walk to. A flood at ground level from the side's
   // start, through the map's fixed blocks (`resolve`, a body's own collision), worked out once a map, on the same
-  // half-metre grid as the terrain. `restSpot` writes the nearest such spot to (x, z) into REST.
-  const REST_CELL = 0.5, REST = { x: 0, z: 0 }, REST_BODY = { x: 0, y: 0, z: 0, crouch: false }, restCache = {};
+  // half-metre grid as the terrain. `restSpot` writes the nearest such spot to (x, z) into REST. A block coming down
+  // from a height `y` never passes through what it came down on: a spot under a floor or a roof lower than `y`
+  // (`roof`, the lowest floating block over each cell) is no place for it, so it goes to the nearest open ground
+  // beside, not into the cave or under the deck below. `restOn` is where a loose block lies, a top first.
+  const REST_CELL = 0.5, REST = { x: 0, y: 0, z: 0 }, REST_BODY = { x: 0, y: 0, z: 0, crouch: false }, restCache = {};
   // Graves are widened by a body's radius in `clearLine`, so a block resting nearer than that could never be walked to;
   // half a cell more because `restSpot` keeps the exact point of any cell it accepts.
   const GRAVE_REST_M = CONFIG.BODY_R + REST_CELL * 0.5 + 0.01;
@@ -613,7 +616,7 @@
   const restFor = () => {
     let G = restCache[ARENA.id];
     if (G) return G;
-    const nx = Math.round(2 * ARENA.W / REST_CELL) + 1, nz = Math.round(2 * ARENA.L / REST_CELL) + 1, walk = new Uint8Array(nx * nz), keep = CRATES;
+    const nx = Math.round(2 * ARENA.W / REST_CELL) + 1, nz = Math.round(2 * ARENA.L / REST_CELL) + 1, walk = new Uint8Array(nx * nz), roof = new Float32Array(nx * nz), keep = CRATES;
     CRATES = [];
     const clear = (i, j) => {
       const x = i * REST_CELL - ARENA.W, z = j * REST_CELL - ARENA.L;
@@ -624,33 +627,78 @@
     };
     const si = Math.round((0.25 + ARENA.W) / REST_CELL), sj = Math.round((ARENA.spawnZ + 0.25 + ARENA.L) / REST_CELL), stack = [si * nz + sj];
     walk[si * nz + sj] = 1;
+    roof[si * nz + sj] = ceilingAt(si * REST_CELL - ARENA.W, sj * REST_CELL - ARENA.L, 0, REST_CELL * 0.5);
     while (stack.length) {
       const k = stack.pop(), i = Math.floor(k / nz), j = k % nz;
       for (let d = 0; d < 4; d++) {
         const ni = i + (d === 0 ? 1 : d === 1 ? -1 : 0), nj = j + (d === 2 ? 1 : d === 3 ? -1 : 0);
         if (ni < 0 || nj < 0 || ni >= nx || nj >= nz || walk[ni * nz + nj] || !clear(ni, nj)) continue;
         walk[ni * nz + nj] = 1;
+        roof[ni * nz + nj] = ceilingAt(ni * REST_CELL - ARENA.W, nj * REST_CELL - ARENA.L, 0, REST_CELL * 0.5);
         stack.push(ni * nz + nj);
       }
     }
     CRATES = keep;
-    G = restCache[ARENA.id] = { walk, nx, nz };
+    G = restCache[ARENA.id] = { walk, roof, nx, nz };
     return G;
   };
-  const restSpot = (x, z) => {
-    const G = restFor(), { walk, nx, nz } = G;
+  const restSpot = (x, z, y = 0) => {
+    const G = restFor(), { walk, roof, nx, nz } = G;
     const i0 = Math.max(0, Math.min(nx - 1, Math.round((x + ARENA.W) / REST_CELL))), j0 = Math.max(0, Math.min(nz - 1, Math.round((z + ARENA.L) / REST_CELL)));
-    if (walk[i0 * nz + j0]) { REST.x = x; REST.z = z; return REST; }
+    if (walk[i0 * nz + j0] && roof[i0 * nz + j0] >= y) { REST.x = x; REST.z = z; return REST; }
     for (let r = 1, top = Math.max(nx, nz); r < top; r++) {
       let best = -1, bd = Infinity;
       for (let i = i0 - r; i <= i0 + r; i++) for (let j = j0 - r; j <= j0 + r; j++) {
-        if ((i !== i0 - r && i !== i0 + r && j !== j0 - r && j !== j0 + r) || i < 0 || j < 0 || i >= nx || j >= nz || !walk[i * nz + j]) continue;
+        if ((i !== i0 - r && i !== i0 + r && j !== j0 - r && j !== j0 + r) || i < 0 || j < 0 || i >= nx || j >= nz || !walk[i * nz + j] || roof[i * nz + j] < y) continue;
         const d = (i - i0) ** 2 + (j - j0) ** 2;
         if (d < bd) { bd = d; best = i * nz + j; }
       }
       if (best >= 0) { REST.x = Math.floor(best / nz) * REST_CELL - ARENA.W; REST.z = (best % nz) * REST_CELL - ARENA.L; return REST; }
     }
     throw new Error(`${ARENA.id}: no walkable ground for a loose block`);
+  };
+  // Where a body sets off from to reach a block lying up at (x, y, z), coming from (ax, az): the first open ground on
+  // the straight line from the block toward it, so on its own side of the rock; with none on that line (it is under
+  // the block's own roof), the open ground nearest the block.
+  const launchSpot = (x, z, y, ax, az) => {
+    const G = restFor(), { walk, roof, nx, nz } = G, dx = ax - x, dz = az - z, d = Math.hypot(dx, dz);
+    for (let t = REST_CELL; t <= d; t += REST_CELL) {
+      const px = x + dx / d * t, pz = z + dz / d * t, i = Math.round((px + ARENA.W) / REST_CELL), j = Math.round((pz + ARENA.L) / REST_CELL);
+      if (i < 0 || j < 0 || i >= nx || j >= nz || !walk[i * nz + j] || roof[i * nz + j] < y) continue;
+      // The cell's own middle, where a body is clear of the rock beside it.
+      REST.x = i * REST_CELL - ARENA.W; REST.z = j * REST_CELL - ARENA.L;
+      return REST;
+    }
+    return restSpot(x, z, y);
+  };
+  // True where a body can stand at height y: on a top there, with headroom, clear of every wall and crate round it.
+  const standsAt = (x, y, z) => {
+    if (groundAt(x, z, y + 0.01, 0) !== y || ceilingAt(x, z, y) - y < CONFIG.HEIGHT) return false;
+    REST_BODY.x = x; REST_BODY.y = y; REST_BODY.z = z;
+    resolve(REST_BODY, CONFIG.BODY_R * 0.95, 0.05);
+    return REST_BODY.x === x && REST_BODY.z === z;
+  };
+  // Where a loose block coming down at (x, z) from height `y` lies, into REST: on the top it came down onto (a cave's
+  // roof, a floor, a deck, a wall, a crate) where a body can stand, within the loose-block placement limit
+  // (`LOOSE_TOP`, kept at 7 m after the jetpack upgrade); at the nearest such spot on that same top when it can't lie
+  // where it fell (against a parapet, in a window); and otherwise on the open ground beside (`restSpot`), never under what it came down on.
+  const restOn = (x, z, y) => {
+    const top = groundAt(x, z, y, 0.2);
+    if (top > 0 && top <= CONFIG.LOOSE_TOP) {
+      REST.y = top;
+      if (standsAt(x, top, z)) { REST.x = x; REST.z = z; return REST; }
+      for (let r = 1; r <= 4; r++) {
+        let bd = Infinity;
+        for (let i = -r; i <= r; i++) for (let j = -r; j <= r; j++) {
+          if ((i !== -r && i !== r && j !== -r && j !== r) || i * i + j * j >= bd || !standsAt(x + i * REST_CELL, top, z + j * REST_CELL)) continue;
+          bd = i * i + j * j; REST.x = x + i * REST_CELL; REST.z = z + j * REST_CELL;
+        }
+        if (bd < Infinity) return REST;
+      }
+    }
+    restSpot(x, z, Math.max(0, top));
+    REST.y = 0;
+    return REST;
   };
   const crateBox = (c) => { CB[0] = c.x - CONFIG.CRATE_HALF; CB[1] = c.x + CONFIG.CRATE_HALF; CB[2] = c.z - CONFIG.CRATE_HALF; CB[3] = c.z + CONFIG.CRATE_HALF; CB[4] = c.y + CONFIG.CRATE_H; CB[5] = c.y; return CB; };
   const boxCount = () => BLOCKS.length + CRATES.length;
@@ -783,7 +831,7 @@
       blocked: null, stuck: 0, lastX: 0, lastZ: 0, detour: 0, aim: 0, trapped: 0, think: 0, grounded: true, jumps: 0, crouch: false,
       waiting: false, stamina: 4, tired: false, sprinting: false, rest: 0, botJump: false, jump2At: 0, tries: 0, progT: 0, lastD: 0, netted: 0, grenade: 0, rocket: 0, net: 0, sniper: 1, crates: 0, holding: false, bonked: false,
       climbing: false, riding: false, zipT: 0, flight: 0, zipLine: "blue", lastKind: "paint", wield: "", grabbed: 0, grabFill: 0, flung: false, fuel: CONFIG.JET_FUEL, jetting: false, boots: 0, laser: 0, burnt: 0, slip: 0, gold: false, akMag: 30, akReload: 0, monkeys: 0, monkeyCool: 0,
-      knock: 0, spooked: 0, beam: 0, beamLen: 0, ride: 0, rider: 0, calling: 0, navI: -1, navT: 0, route: "", routeT: 0, botClimb: false, botStop: false, botStraight: false, crateGo: 0, crateX: 0, crateZ: 0, routeBan: 0, jetT: 0, hopT: 0, crateT: 0, stacks: 0,
+      knock: 0, spooked: 0, beam: 0, beamLen: 0, ride: 0, rider: 0, calling: 0, navI: -1, navT: 0, route: "", routeT: 0, botClimb: false, botStop: false, botStraight: false, lift: false, crateGo: 0, crateX: 0, crateZ: 0, routeBan: 0, jetT: 0, hopT: 0, crateT: 0, stacks: 0,
       detourX: 0, detourZ: 0, painted: 0, captures: 0, splats: 0, hits: 0, longShot: 0, rescues: 0, edgeX: 0, edgeY: 0, edgeZ: 0, falls: 0,
       boltCool: 0, hook: 0, hk: 0, hookT: 0, hookLen: 0, hookWait: 0, hookTarget: -1, hookTip: { x: 0, y: 0, z: 0 }, hookEnd: { x: 0, y: 0, z: 0 }, hookHold: false, flingT: 0
     }));
@@ -864,7 +912,7 @@
       a.sniper = 1; a.climbing = a.riding = false; a.zipT = 0; a.flight = 0; a.boots = a.laser = a.beam = a.burnt = a.slip = 0; a.gold = false; a.akMag = CONFIG.AK_MAG; a.akReload = 0; a.monkeys = 0;
       a.knock = 0; a.wield = ""; a.ride = a.rider = a.calling = 0;
       a.hook = a.hk = a.hookT = a.hookLen = a.hookWait = a.flingT = 0; a.hookTarget = -1; a.hookHold = false;
-      a.route = ""; a.routeT = a.jetT = a.hopT = a.crateT = a.stacks = a.crateGo = a.routeBan = 0; a.botClimb = false;
+      a.route = ""; a.routeT = a.jetT = a.hopT = a.crateT = a.stacks = a.crateGo = a.routeBan = 0; a.botClimb = a.lift = false;
       refill(a);
       a.crates = CONFIG.CRATE_STOCK;
     }
@@ -925,15 +973,15 @@
   const dropFlag = (sim, a, why) => {
     const f = a.carrying && sim.flags[a.carrying];
     if (!f) return false;
-    // It comes to rest on open ground under or nearest the carrier (`restSpot`), never up on a roof the bots can't reach.
+    // It lies on what is under the carrier (`restOn`): the ground, or the roof, floor or deck they stand on or are over.
     f.state = "dropped";
     f.carrier = null;
     a.blocked = f.team;
     a.carrying = null;
     if (onIsland(a.x, a.z) && (a.y >= -CONFIG.RIM || inGrave(a.x, a.z))) {
-      const at = restSpot(a.x, a.z);
-      f.x = at.x; f.y = 0; f.z = at.z;
-      emit(sim, why, f.team, a.id, f.x, 0, f.z);
+      const at = restOn(a.x, a.z, a.y + 0.01);
+      f.x = at.x; f.y = at.y; f.z = at.z;
+      emit(sim, why, f.team, a.id, f.x, f.y, f.z);
       return true;
     }
     // Over the open edge: it drops at the edge, where its carrier last stood on the island, and goes home soon after.
@@ -975,14 +1023,17 @@
     const outside = !isleIn(nx, nz, 0.4);
     if (outside || (ny > 0 && solidAt(nx, ny, nz))) { f.vx = f.vz = 0; f.vy = Math.min(f.vy, 0); }
     else { f.x = nx; f.z = nz; }
+    // What it lands on is a top it came down onto, one at or under where it was a step ago: struck from underneath (a
+    // ceiling, a hut's floor), a slab's own top is over it and no landing, and it falls back.
+    const was = f.y;
     f.y = Math.max(ny, -1);
-    const ground = groundAt(f.x, f.z, f.y + 0.3, 0.2);
+    const ground = groundAt(f.x, f.z, Math.max(was, f.y), 0.2);
     // Falling below the surface (only an open grave lets it) always ends the flight, whichever way it went in.
     if (f.y <= ground || (f.y < 0 && f.vy <= 0)) {
-      // Wherever it fell (a roof, the centre deck), it comes to rest on the nearest ground the bots can reach.
-      const at = restSpot(f.x, f.z);
+      // It lies where it came down (a roof, the centre deck, the ground), or as near as a body can stand (`restOn`).
+      const at = restOn(f.x, f.z, Math.max(was, f.y));
       f.state = "dropped";
-      f.x = at.x; f.y = 0; f.z = at.z;
+      f.x = at.x; f.y = at.y; f.z = at.z;
       if (f.thrower >= 0) sim.actors[f.thrower].blocked = f.team;
       emit(sim, "landed", f.team, f.thrower, f.x, f.y, f.z);
     }
@@ -1641,8 +1692,8 @@
       a.carrying = f.team; a.blocked = null;
       emit(sim, "pickup", f.team, a.id, f.x, 0, f.z);
     } else {
-      const at = restSpot(reached ? a.x + Math.sin(a.heading) * 1.2 : f.x, reached ? a.z + Math.cos(a.heading) * 1.2 : f.z);
-      f.state = "dropped"; f.x = at.x; f.y = 0; f.z = at.z; f.thrower = -1;
+      const at = restOn(reached ? a.x + Math.sin(a.heading) * 1.2 : f.x, reached ? a.z + Math.cos(a.heading) * 1.2 : f.z, (reached ? a.y : f.y) + 0.01);
+      f.state = "dropped"; f.x = at.x; f.y = at.y; f.z = at.z; f.thrower = -1;
       emit(sim, "landed", f.team, a.id, f.x, f.y, f.z);
     }
   };
@@ -2244,6 +2295,43 @@
       return;
     }
   };
+  // A block lying up on a top (a roof, a deck, a wall, a crate), and this bot's goal: it runs to the open ground beside
+  // it on its own side (`launchSpot`), waits there for a full jetpack, jumps and jets up until its feet clear
+  // the top and whatever stands in its way, and goes straight at the block. 1 on the way to that ground, 2 in the air
+  // or up on the top (no steering round what is below), 0 when its goal is no such block.
+  const fetchUp = (sim, a) => {
+    if (a.grounded) a.lift = false;
+    for (let i = 0; i < TEAMS.length; i++) {
+      const f = sim.flags[TEAMS[i]];
+      if (f.state !== "dropped" || f.y < 0.5 || goal.x !== f.x || goal.z !== f.z) continue;
+      const dx = f.x - a.x, dz = f.z - a.z, d = Math.hypot(dx, dz), low = a.y < f.y - 0.4;
+      const blocked = d > 0.4 && solidAt(a.x + dx / d * 0.8, a.y + 0.1, a.z + dz / d * 0.8);
+      if (low && !a.lift) {
+        // Below it and not on the way up: to the open ground on its side, a step further out while under an edge.
+        const at = launchSpot(f.x, f.z, f.y, a.x, a.z), under = ceilingAt(a.x, a.z, a.y) <= f.y;
+        if (!a.grounded || under || (at.x - a.x) ** 2 + (at.z - a.z) ** 2 > 0.7 * 0.7) {
+          const ox = at.x - f.x, oz = at.z - f.z, o = Math.hypot(ox, oz), k = under && o > 1e-6 ? 0.8 / o : 0;
+          goal.x = at.x + ox * k; goal.z = at.z + oz * k;
+          return 1;
+        }
+        if (a.fuel < CONFIG.JET_FUEL - 0.05) { a.botStop = true; return 1; }
+        a.botJump = a.lift = true;
+      } else if (!low && d > 10) return 0;
+      // Up at its height with rock between them: over it on the jetpack, from a full tank.
+      else if (!low && a.grounded && blocked) {
+        if (a.fuel < CONFIG.JET_FUEL - 0.05) { a.botStop = true; return 1; }
+        a.botJump = a.lift = true;
+      }
+      if (!a.grounded && (a.y < f.y + 1 || blocked)) a.jetT = 0.1;
+      // Straight up until its feet are level with the top, so the jump never carries it in under the edge.
+      if (low) a.botStop = true;
+      // Standing on something over it: on past it, off the edge and down beside it.
+      else if (a.grounded && a.y > f.y + 1) { goal.x = f.x + Math.sin(a.heading) * 1.5; goal.z = f.z + Math.cos(a.heading) * 1.5; }
+      a.botStraight = true;
+      return 2;
+    }
+    return 0;
+  };
   const thinkBot = (sim, a, dt) => {
     if (a.splat > 0 || a.trapped > 0) { a.botClimb = false; return; }
     // On its own rope a bot goes where the rope takes it.
@@ -2326,7 +2414,8 @@
       const f = sim.flags[a.blocked];
       if (f.state === "dropped" && (f.x - a.x) ** 2 + (f.z - a.z) ** 2 < (CONFIG.PICK_R + 0.3) ** 2) { goal.x = f.x + (a.x > f.x ? 2.5 : -2.5); goal.z = f.z + (a.z > f.z ? 2.5 : -2.5); }
     }
-    if (a.detour <= 0 && !a.botClimb) navigate(sim, a, dt);
+    const up = a.detour <= 0 && !a.botClimb && sim.prep <= 0 ? fetchUp(sim, a) : 0;
+    if (a.detour <= 0 && !a.botClimb && up < 2) navigate(sim, a, dt);
     const d = Math.hypot(goal.x - a.x, goal.z - a.z);
     // An autopiloted player (`auto`, the suite's and the debug handle's) runs at the player's sprint.
     // A bot with the rivals' block sprints for home, as a visitor would.
@@ -2354,7 +2443,7 @@
     a.progT += dt;
     if (a.progT >= 1) {
       a.progT = 0;
-      const stalled = d > 1.5 && d > a.lastD - 0.4 && a.detour <= 0;
+      const stalled = d > 1.5 && d > a.lastD - 0.4 && a.detour <= 0 && up < 2;
       a.lastD = d;
       if (stalled && a.grounded && a.tries < 2 && a.netted <= 0 && !a.botClimb && !a.botStop) {
         a.tries++;
@@ -2929,6 +3018,8 @@
       if (f.state === "flying") flyFlag(sim, f, dt);
       // A block dropped at the edge goes home by itself.
       else if (f.state === "dropped" && f.homeT > 0 && (f.homeT -= dt) <= 0) { homeFlag(f); emit(sim, "return", f.team, -1, f.x, 0, f.z); }
+      // A block lying on a crate that is lifted or broken from under it falls to what is below.
+      else if (f.state === "dropped" && f.y > 0 && groundAt(f.x, f.z, f.y + 0.01, 0.2) < f.y) { f.state = "flying"; f.thrower = -1; f.t = 0; f.vx = f.vy = f.vz = 0; }
     }
     settleCrates(sim, dt);
     // Throws in flight: gravity, then a rival in the way or anything solid.
@@ -3020,7 +3111,7 @@
     v.second = second; v.boots = boots; v.laser = laser; v.monkeys = monkeys; v.halving = halving; v.cold = cold;
     return true;
   };
-  BL.blockSim = { WIELD, wield, heldOf, worth, mvp, tallyOf, ARSENAL, slotState, slotCount, splat, aimRise, flatPitch, settleHooks, parachuteIn, LEAF_TOP, stripView, stripChanged, hopOn, callRide, CONFIG, TOOLS, KINDS, SKILLS, POWERS, ARENAS, MAPS, TEAMS, other, create, reset, step, tick, setLive, newBlock, launch, nearCatapult, nearEnemyCatapult, zipSprings, fire, drop, pass, build, grab, zip, nearZip, onTower, escape, clearLine, solidAt, resolve, groundAt, onIsland, isleDepth, grapple, restSpot, edgeDist, cutChute, inGrave, inGraveOf, GRAVE_Y };
+  BL.blockSim = { WIELD, wield, heldOf, worth, mvp, tallyOf, ARSENAL, slotState, slotCount, splat, aimRise, flatPitch, settleHooks, parachuteIn, LEAF_TOP, stripView, stripChanged, hopOn, callRide, CONFIG, TOOLS, KINDS, SKILLS, POWERS, ARENAS, MAPS, TEAMS, other, create, reset, step, tick, setLive, newBlock, launch, nearCatapult, nearEnemyCatapult, zipSprings, fire, drop, pass, build, grab, zip, nearZip, onTower, escape, clearLine, solidAt, resolve, groundAt, onIsland, isleDepth, grapple, restSpot, restOn, edgeDist, cutChute, inGrave, inGraveOf, GRAVE_Y };
   // The map last stepped (or reset), for the scene's and models' reads.
   Object.defineProperty(BL.blockSim, "ARENA", { get: () => ARENA, enumerable: true });
 })();
