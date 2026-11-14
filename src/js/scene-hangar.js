@@ -115,6 +115,9 @@
   // The emergency lights while the hall's power seems out (`hangar-network.js`), in the fixed lights' slots of the work
   // lights at the booth and over the desks: [slot, r, g, b] each, at full.
   const EMERGENCY_LIGHTS = [8, 0.5, 0.07, 0.03, 9, 0.55, 0.2, 0.04];
+  // The hall's own light while the network stands in the dark: its sky, ground and haze turned to the network's blue,
+  // and lifted by `lift` of itself.
+  const CAST = { sky: [0.3, 0.42, 0.85], ground: [0.1, 0.16, 0.38], fog: [0.03, 0.06, 0.16], lift: 0.7 };
   // The floor lamps breathe a little, each at its own pace, and every `LAMP_STUTTER` seconds one stutters, failing four
   // times in half a second (`LAMP_FAILS`, from and to, s, at `LAMP_DIM` of its light); and every `RABBIT` seconds a
   // pulse runs down the runway's marker lamps toward the launch tunnel at `RABBIT_SPEED` m/s, each brightening by up to
@@ -1045,7 +1048,7 @@
   // The hangar for a visit: the hall and everything standing in it from the cached builds, the signs, the boards, the
   // Jet at its dock, the door back to the hall with its shield, the launch shield and space past it.
   const build = () => {
-    const L = LAYOUT, s = { crew: [], dimmed: 1, ambient: 1, emergency: 0 }, shell = HM.shell(), runway = HM.runway(), tunnel = HM.tunnel(), fixtures = HM.fixtures(), frames = HM.boardFrames();
+    const L = LAYOUT, s = { crew: [], dimmed: 1, ambient: 1, emergency: 0, cast: 0 }, shell = HM.shell(), runway = HM.runway(), tunnel = HM.tunnel(), fixtures = HM.fixtures(), frames = HM.boardFrames();
     // The fixtures' glass and the vault's light slots, which an anomaly dims with the hall's lights.
     s.glass = [createNode({ geometry: fixtures.glow, sightHidden: true }), createNode({ geometry: fixtures.glass, sightHidden: true }), createNode({ geometry: shell.slots, sightHidden: true })];
     addChild(root, createNode({ geometry: shell.floor, depthBias: SHELL_BIAS }), createNode({ geometry: shell.walls, depthBias: SHELL_BIAS }), createNode({ geometry: shell.front, depthBias: SHELL_BIAS }),
@@ -1967,21 +1970,26 @@
     // The hall's lights as dim as an anomaly and the network have them: the door's above, the other fixed ones (the
     // tunnel mouth's goes with the neon), the hall's own light as its `ambient` says, and the lanterns' and fixtures'
     // glass.
-    const emergency = s.network.env.emergency;
-    if (dim !== s.dimmed || amb !== s.ambient || emergency !== s.emergency) {
-      s.dimmed = dim; s.ambient = amb; s.emergency = emergency;
+    const emergency = s.network.env.emergency, cast = s.network.env.cast;
+    if (dim !== s.dimmed || amb !== s.ambient || emergency !== s.emergency || cast !== s.cast) {
+      s.dimmed = dim; s.ambient = amb; s.emergency = emergency; s.cast = cast;
       const F = HM.fixedLights();
       for (let i = 1; i < FIXED; i++) if (i !== MOUTH_SLOT) { const l = F[i], o = i * 8; Lt[o + 4] = l[4] * dim; Lt[o + 5] = l[5] * dim; Lt[o + 6] = l[6] * dim; }
       // With the power out, the work lights' pools at the booth and the desks are the emergency lights', red and amber.
       for (let j = 0; j < EMERGENCY_LIGHTS.length; j += 4) { const o = EMERGENCY_LIGHTS[j] * 8; for (let c = 0; c < 3; c++) Lt[o + 4 + c] += EMERGENCY_LIGHTS[j + 1 + c] * emergency; }
       for (let i = 0; i < 3; i++) RENDER_OPTS.spotLight[8 + i] = KEY.color[i] * dim;
-      for (let i = 0; i < 3; i++) { RENDER_OPTS.sky[i] = SKY[i] * amb; RENDER_OPTS.ground[i] = GROUND[i] * amb; RENDER_OPTS.fog[i] = HAZE[i] * amb; }
+      // The hall's own light, taking the network's blue while it stands (`CAST`).
+      const lift = 1 + CAST.lift * cast;
+      for (let i = 0; i < 3; i++) {
+        RENDER_OPTS.sky[i] = (SKY[i] + (CAST.sky[i] - SKY[i]) * cast) * amb * lift; RENDER_OPTS.ground[i] = (GROUND[i] + (CAST.ground[i] - GROUND[i]) * cast) * amb * lift;
+        RENDER_OPTS.fog[i] = (HAZE[i] + (CAST.fog[i] - HAZE[i]) * cast) * amb * lift;
+      }
       RENDER_OPTS.directStrength = DIRECT * amb; RENDER_OPTS.ambientFloor = FLOOR * amb;
       for (const g of s.glass) g.glow = dim;
     }
-    // The network's haze and its dimming of the screens and boards' pictures.
+    // The network's haze, its dimming of the screens and boards' pictures, and its stronger bloom.
     RENDER_OPTS.fogNear = s.network.env.fogNear; RENDER_OPTS.fogFar = s.network.env.fogFar;
-    RENDER_OPTS.pictureDim = s.network.env.screens;
+    RENDER_OPTS.pictureDim = s.network.env.screens; RENDER_OPTS.bloomStrength = s.network.env.bloom;
     hum(s.gate, OPENING, dt, elapsed, 0.12 * (1 - 0.65 * s.gate.near));
     hum(s.launch, LAUNCH, dt, elapsed, 0.18);
     // Walked up to the hold-short bar, the launch shield ripples where they stand and says, once an approach, that it is
