@@ -2,7 +2,7 @@
 
 Capture the flag, Bitcoin themed, reached down Ooga Arcade's upper hall, by zipline (and directly at `/blockfrenzy`).
 Each side guards its Bitcoin block, a glowing cube in its team's colour on a stand inside its fort. Steal the other
-side's block, carry it home and touch your own stand while your own block is home. Two Oogas a side: the visitor and
+side's block, carry it home and touch your own stand, or throw it down into your capture zone, while your own block is home. Two Oogas a side: the visitor and
 a teammate against two rivals, the three bots run by the rules module. First to three captures wins. Nobody dies,
 nobody loses health and nobody is removed: paint wears off.
 
@@ -49,9 +49,15 @@ card), `src/style.css` (the game's panels, appended), `test/run.mjs` (rules in t
   block, plays "doesn't need to be home" and any other count plays classic (`blockWire.ruleFor`); the pick leaves with
   whoever made it, however they stop being first in (the Worker keeps who picked, `picker`, and `pickOf` counts it only
   while they are `reg[0]`). The first in waiting through a round can pick for the next. The lobby's status line, the start of the round, the status strip and the help card all name the rule.
+  A throw scores too, by the same rule: their block coming down in your capture zone (within `STAND_R` of your stand, or
+  `GOAL_R` of a map's own scoring spot, on the ground rather than a roof over it, including falling there off a wall) is
+  a capture for whoever threw it, and wins the Golden AKs as a carried one does. Under classic, if your own block isn't
+  home the same banner says so and the block lies where it landed. A side can't score by throwing its own block, and a
+  block off a hook's rope is not a throw.
 - **Passing.** `Tab` (or `T`, or the Pass button) throws the carried block about 12 m ahead in an arc. Anyone who
   could pick it up can catch it in the air, so a teammate can take a pass and a rival can intercept. Uncaught, it
-  lands and lies as a dropped block. Bots pass when a rival closes in and a free teammate stands nearer home.
+  lands and lies as a dropped block, unless it comes down in the thrower's capture zone (Scoring, above); caught, it is
+  carried as usual and scores nothing by the throw. Bots pass when a rival closes in and a free teammate stands nearer home.
 - **Flight.** Paint and the AKs fly nearly straight (`TOOLS`, `flatPitch` cancels what lob and fall remain), as the Ghost Hunter's rounds do. Carrying a block costs a player no speed; bots still carry at their old pace (`BOT_CARRY`). Rounds move in pieces no longer than `SHOT_STEP`, so a fast one can't pass through a thin wall.
 - **Tools.** Paint without end; three paint grenades (lobbed, burst on landing), one paint rocket (straight, bigger
   burst) and three nets (slow a rival and stop their jumps for 4 s). A paint hit or burst splats a rival for 2 s, then
@@ -277,8 +283,9 @@ raised hands using that body's hip, shoulders and arm length.
 
 The global tier plays the rules through the sim's own calls: pickup, a drop held until you step out, scoring only
 with your own block home, a splat dropping the carrier's block, which stays until its own side carries it home, a
-quiz trap holding and shielding, a net slowing and grounding, a crate pushed, a pass caught, a crate lifted, stacked
-and thrown to stun, and a seeded round on
+quiz trap holding and shielding, a net slowing and grounding, a crate pushed, a pass caught, a throw home (scoring and crediting the thrower at a stand and a map's own spot, with no score with
+your own block away, for a side's own block, just outside the zone, when caught, or off a hook; ending the round at
+its target), a crate lifted, stacked and thrown to stun, and a seeded round on
 autopilot replaying exactly to three captures. The `block` scene runs the title card and Escape, W S and A D on screen,
 a quiz trap through a wrong and a right answer, an autopilot round to its saved results, and the round trip.
 
@@ -326,7 +333,7 @@ Signed-in Oogas only, on a Worker that lists `block-v1` in welcome; anywhere els
 
 - **Registry** (`worker/src/block.js`, contract in `block-wire.js`): one match a room. `reg`/`unreg`/`ready`/`opt` in the lobby; the first in picks the map, size and scoring rule (2v2 to 4v4, `MIN_SIDE` to `MAX_SIDE`; NPCs fill any empty seat, so there is never a 1v1); `reg` carries the map already picked on their board, and registered players' boards follow the match's map, grown if more have registered than it seats. With two or more registered, everyone ready starts a 3 s countdown. One person alone chooses: Start with NPCs (`alone`, at once with NPCs) or Wait for players (marks them ready, which starts nothing until someone else registers and readies). If the others leave, the choice comes back.
 - **Teams:** random and as even as can be (`split`); empty seats are NPCs.
-- **Host:** one seated page runs `block-sim.js`, chosen by the room (longest in the room, a visible page first). If it leaves, the next seated page continues from its last snapshot; if no seated human is left, the round ends. A leaver's seat goes to an NPC.
+- **Host:** one seated page runs `block-sim.js`, chosen by the room (longest in the room, a visible page first). If it leaves, the next seated page continues from its last snapshot, and a block in the air at that handover lands without scoring, since frames don't say who threw it; if no seated human is left, the round ends. A leaver's seat goes to an NPC.
 - **No joining mid-round.** Late arrivals sit in the viewing chairs (`block-viewer.js`, `phase === "watch"`), a row of plain chairs in a blank white space above the game, as do visitors sent by `BL.blockLive.openWatchDeck(go)`. A viewer has no body, sends no input or position and is local to its page; it asks for the feed (`watch`) and receives every other frame, drawn smoothly between them, and only the match draws. The wheel, a pinch or the scope's +/- keys zoom the view (local only, stopping at the default view); a dark sports-style scoreboard in the corner, with a small table per player of blocks mined, stolen (counted on the viewer from who starts carrying the other side's block) and splats landed and the block-mined sound (once per capture, read from the score) come from the same match state. It has no voice in this version. It can register for the next round from there.
 - **Wire:** binary frames (`"BFZ1"`, round tag, host epoch, sequence, at most 2048 bytes, 12/s), JSON inputs (20/s, at most four actions a message). Nothing reaches storage: the match rides one socket attachment.
 - **Voice:** zone `block-frenzy`, its own voice group, blended in from the arcade down the zipline (`voice-blend.js`), isolated on arrival.
