@@ -1,54 +1,5 @@
-:root {
-  color-scheme: dark;
-  --bg: #0a0a0b;
-  --fg: #ededea;
-  --muted: #a6a6a2;
-  --faint: #6f6f6c;
-  --border: rgba(255, 255, 255, 0.09);
-  --accent: #d8892b;
-  --accent-text: #ffd9a0;
-  --ok: #22c55e;
-  --warn: #c9a44a;
-  --danger: #e5533d;
-  --paper: #f3efe4;
-  --wood: #8a6236;
-  --wood-dk: #5c4425;
-  --plank: #a9773f;
-  --wood-edge: #4a3319;
-  --nail: #3a2a18;
-  --stone: #3a3734;
-  --stone-dk: #2d2b28;
-  --stone-lt: #45413d;
-  --ink: #2a1a0c;
-  --ink-muted: rgba(42, 26, 12, 0.72);
-  --ink-faint: rgba(42, 26, 12, 0.5);
-  --planks: radial-gradient(circle at 9px 9px, var(--nail) 2.5px, transparent 3px), radial-gradient(circle at calc(100% - 9px) 9px, var(--nail) 2.5px, transparent 3px), radial-gradient(circle at 9px calc(100% - 9px), var(--nail) 2.5px, transparent 3px), radial-gradient(circle at calc(100% - 9px) calc(100% - 9px), var(--nail) 2.5px, transparent 3px), repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.05) 0 2px, transparent 2px 11px), repeating-linear-gradient(180deg, var(--plank) 0 34px, var(--wood-edge) 34px 36px, var(--wood) 36px 70px, var(--wood-edge) 70px 72px);
-  /* The panels' dark sections, the reaction card, the banner's HUD buttons and every "tablet" box (tooltips, notes,
-     fields, the games' HUDs), one near-black. */
-  --slab-dark: #161412;
-  --tablet: var(--slab-dark);
-  --tablet-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -2px 0 rgba(0, 0, 0, 0.35), 0 2px 0 rgba(0, 0, 0, 0.4);
-  --radius: 8px;
-  --mono: ui-monospace, "Cascadia Code", Menlo, Consolas, "DejaVu Sans Mono", monospace;
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --safe-left: env(safe-area-inset-left, 0px);
-  --safe-right: env(safe-area-inset-right, 0px);
-  /* An installed web app has no browser toolbar. --home-chrome is how far the touch cluster can drop. */
-  --home-chrome: 0px;
-  --stick-inset: 96px;
-  --stick-size: 112px;
-  --act-inset: 64px;
-  /* A touch drawer's default height in percent of the screen; sheet.js reads it. */
-  --drawer-share: 24;
-}
-
 @media (display-mode: standalone) {
   :root { --home-chrome: 36px; }
-}
-
-* {
-  box-sizing: border-box;
 }
 
 html,
@@ -68,35 +19,6 @@ body {
 @media (display-mode: standalone) {
   html,
   body { height: 100vh; }
-}
-
-button,
-input,
-select {
-  font: inherit;
-  color: inherit;
-}
-
-/* A carved title stays hidden until hud.js swaps its text for lettering (and labels it), so the
-   fallback font never flashes while the page's scripts load. If the scripts never run, the plain
-   text shows after a few seconds rather than never. */
-[data-sign]:not([aria-label]) {
-  visibility: hidden;
-  animation: sign-fallback 0s 4s forwards;
-}
-
-@keyframes sign-fallback {
-  to {
-    visibility: visible;
-  }
-}
-
-.sign {
-  display: inline-block;
-  height: 1em;
-  width: auto;
-  overflow: visible;
-  vertical-align: -0.2em;
 }
 
 .stage {
@@ -864,40 +786,6 @@ body[data-active-scene="block"] .mode-hud {
   letter-spacing: 0;
 }
 
-/* The island's panels share one shape: a carved title with a status chip, one stone slab that scrolls and
-   takes every extra pixel of the drawer's height, and the panel's action pinned under it. The panel itself
-   scrolls only when the drawer is shorter than its fixed parts (a phone's keyboard up). */
-.panel {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  overflow: auto;
-  padding: 12px 14px 10px;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.35) transparent;
-}
-
-.panel > .help { flex: none; margin: 0; }
-
-.panel-title {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 22px;
-}
-
-.panel .panel-title h2 {
-  margin: 0 auto 0 0;
-  font-size: 13px;
-  line-height: 1;
-  white-space: nowrap;
-  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.6));
-}
-
 .sheet-notifications { position: relative; flex: none; }
 .sheet-bell {
   position: relative;
@@ -935,64 +823,6 @@ body[data-active-scene="block"] .mode-hud {
 }
 @media (pointer: coarse) {
   .sheet-bell { width: 40px; height: 40px; }
-}
-
-.panel-chip {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 7px;
-  border: 1px solid rgba(243, 239, 228, 0.22);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.28);
-  color: rgba(243, 239, 228, 0.72);
-  font-size: 9px;
-  line-height: 14px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.panel-chip:empty { display: none; }
-
-.panel-chip[data-tone="live"]::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--ok);
-  box-shadow: 0 0 5px rgba(34, 197, 94, 0.55);
-}
-
-.panel-chip[data-tone="live"] { color: #bfeccb; border-color: rgba(34, 197, 94, 0.38); }
-.panel-chip[data-tone="test"] { color: #ffd84a; border-color: rgba(255, 216, 74, 0.45); background: rgba(255, 216, 74, 0.08); }
-.panel-chip[data-tone="wait"] { color: var(--accent-text); border-color: rgba(216, 137, 43, 0.42); }
-.panel-chip[data-tone="closed"] { color: #ffb4a6; border-color: rgba(229, 83, 61, 0.45); }
-
-.slab {
-  background: var(--slab-dark);
-  border: 2px solid var(--stone-dk);
-  border-radius: 9px 7px 10px 8px;
-  box-shadow: var(--tablet-shadow);
-}
-
-.panel > .slab {
-  flex: 1 1 auto;
-  min-height: 96px;
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(243, 239, 228, 0.2) transparent;
-}
-
-.slab-head {
-  margin: 0;
-  color: var(--accent-text);
-  font-size: 10px;
-  line-height: 1;
-  white-space: nowrap;
-  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.6));
 }
 
 .roster-hint:not(:has(> :not([hidden]))) { display: none; }
@@ -1621,41 +1451,6 @@ body[data-active-scene="block"] .mode-hud {
   font-size: 10.5px;
   line-height: 1.5;
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
-}
-
-.feed-open,
-.panel-primary {
-  display: block;
-  width: 100%;
-  margin-top: 14px;
-  min-height: 44px;
-  padding: 0 12px;
-  border: 2px solid var(--wood-edge);
-  border-radius: 6px;
-  background: linear-gradient(#e2a04a, var(--accent));
-  color: var(--ink);
-  font-size: 15px;
-  box-shadow: 0 3px 0 var(--nail);
-  cursor: pointer;
-  transition: background-color 0.15s ease;
-}
-
-.panel-primary { flex: none; margin: 0; }
-
-.feed-open .sign path,
-.panel-primary .sign path {
-  stroke: currentColor;
-  stroke-width: 0.3;
-}
-
-.feed-open:hover,
-.feed-open.virtual-hover,
-.feed-open:focus-visible,
-.panel-primary:hover,
-.panel-primary.virtual-hover,
-.panel-primary:focus-visible {
-  background: linear-gradient(#f0b05a, #e2a04a);
-  outline: none;
 }
 
 .modal {

@@ -17,6 +17,7 @@ if (scripts["build:ooga-chat"]) {
   console.log(`untracked/ooga-chat already staged; no app build on this branch yet (#651)`);
 } else {
   mkdirSync(out, { recursive: true });
+  // scripts/ooga-chat.mjs `PLACEHOLDER` knows this page byte for byte, so its build may stage over it.
   const page = '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
     + "<title>Ooga Chat</title><p>Ooga Chat is on its way.</p></html>\n";
   writeFileSync(join(out, "index.html"), page);
