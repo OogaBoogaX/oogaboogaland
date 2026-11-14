@@ -33,7 +33,8 @@ export const turnCredentials = async (env) => {
   return null;
 };
 
-// `measured(ms, failed)`, when given, hears how long each call took and whether it failed (the inspector's counts).
+// `measured(ms, failed, status)`, when given, hears how long each call took, whether it failed and its HTTP status (0
+// for no answer: a timeout or the network), for the inspector's counts.
 export const sfuClient = (env, measured = null) => {
   if (!env.REALTIME_APP_ID || !env.REALTIME_SECRET) return null;
   const base = `${BASE}/${env.REALTIME_APP_ID}`;
@@ -41,9 +42,10 @@ export const sfuClient = (env, measured = null) => {
   // Leave time for a bounded error response before the browser's 10 s signalling deadline.
   const call = async (method, path, body, timeout = 5000) => {
     const started = Date.now();
-    let failed = true;
+    let failed = true, status = 0;
     try {
       const res = await fetch(base + path, { method, headers, signal: AbortSignal.timeout(timeout), body: body ? JSON.stringify(body) : undefined });
+      status = res.status;
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.errorCode) {
         const error = new Error(`SFU request failed: ${res.status} ${data.errorCode || ""}`.trim());
@@ -52,7 +54,7 @@ export const sfuClient = (env, measured = null) => {
       failed = false;
       return data;
     } finally {
-      if (measured) measured(Date.now() - started, failed);
+      if (measured) measured(Date.now() - started, failed, status);
     }
   };
   return {

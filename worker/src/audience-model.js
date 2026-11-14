@@ -21,6 +21,12 @@ import { freeSeat } from "./cloud-seats.js";
 
 export const ZONES = ["main", "dsb"];
 export const DEFAULT_LIMITS = Object.freeze({ listeners: 500, chatSpeakers: 8, connectionsPerIdentity: 3, connections: 1200 });
+// A zone's reactions fan out to everyone in it, so its limit shrinks as it fills (#669): at most FANOUT_DEFAULT frames a
+// second a zone (`AUDIENCE_FANOUT` sets it), 30 a second up to about 160 people and 10 at 500, never under one; the
+// Audience's burst is twice the rate. The figure is the staging matrix's to confirm (docs/ooga-chat-operations.md).
+export const ZONE_REACT_HZ = 30;
+export const FANOUT_DEFAULT = 5000;
+export const zoneReactHz = (people, fanout = FANOUT_DEFAULT) => Math.max(1, Math.min(ZONE_REACT_HZ, fanout / Math.max(1, people)));
 export const ID = /^(gh|x):[1-9][0-9]{0,19}$/;
 export const isZone = (zone) => ZONES.includes(zone);
 

@@ -6,7 +6,8 @@
 // off rather than offering a button that fails. Nothing here names a binding, a secret, an account id or a database id.
 
 import { BRIDGE_VERSION } from "../../src/chat-bridge-protocol.js";
-import { bridgeHello } from "./bridge.js";
+import { bridgeHello, bridgeReadiness } from "./bridge.js";
+import { publicState } from "./public.js";
 
 export const FLAGS = ["github", "x", "listen", "speak", "feed", "commons", "cloud"];
 // The protocol revisions this deployment's server speaks, which the page checks against its own.
@@ -16,6 +17,7 @@ export const PATHS = {
   logout: "/api/chat/logout",
   login: { github: "/auth/github", x: "/auth/x" },
   audience: "/api/chat/audience",
+  commons: "/api/chat/commons",
 };
 export const BOOTSTRAP_VERSION = 1;
 
@@ -58,7 +60,8 @@ export const bootstrap = async (env) => {
   const login = {};
   if (features.github) login.github = PATHS.login.github;
   if (features.x) login.x = PATHS.login.x;
-  const paths = { login, ...(env.DB ? { session: PATHS.session, logout: PATHS.logout } : {}), ...(features.listen ? { audience: PATHS.audience } : {}) };
+  const paths = { login, ...(env.DB ? { session: PATHS.session, logout: PATHS.logout } : {}), ...(features.listen ? { audience: PATHS.audience } : {}),
+    ...(features.commons ? { commons: PATHS.commons } : {}) };
   return {
     version: BOOTSTRAP_VERSION,
     build: await appBuild(env),
@@ -88,9 +91,15 @@ export const health = async (env, now = Date.now()) => {
     assets, database: db, bridge: features.bridge,
     auth: { github: features.github, x: features.x },
     voice: features.listen, speak: features.speak, feed: features.feed, commons: features.commons,
+    // #669: the island's media (`off` while listening is) and the public panels' data as this isolate last read it.
+    media: features.listen ? await bridgeReadiness(env, now) : "off",
+    publicData: publicState(env, now),
   };
-  // Assets and the database are what every visitor needs; the rest can be off on purpose.
-  const status = assets && db && features.bridge === "ok" ? "ok" : assets ? "degraded" : "down";
+  // Assets and the database are what every visitor needs; the rest can be off on purpose, but what is on must be well:
+  // listening's media (the SFU, the cleanup queue) and the public panels' data once read.
+  const mediaWell = checks.media === "off" || (checks.media !== "unavailable" && checks.media.sfu === "ok" && checks.media.cleanup === "ok");
+  const dataWell = checks.publicData === "ok" || checks.publicData === "unknown";
+  const status = assets && db && features.bridge === "ok" && mediaWell && dataWell ? "ok" : assets ? "degraded" : "down";
   return { schema: 1, environment: env.ENVIRONMENT || "", status, checks };
 };
 

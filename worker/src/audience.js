@@ -20,7 +20,7 @@
 // tabs, 4400 an unreadable frame. The Room relays the same roster to the island's panel in its own shape (room-audience.js).
 
 import { DurableObject } from "cloudflare:workers";
-import { appRow, createAudience, DEFAULT_LIMITS, ID, isZone, ZONES } from "./audience-model.js";
+import { appRow, createAudience, DEFAULT_LIMITS, FANOUT_DEFAULT, ID, isZone, ZONES, zoneReactHz } from "./audience-model.js";
 import { decideCapability } from "./chat-capability.js";
 import { contributorFor } from "./contributor-access.js";
 import { readContributorSnapshot } from "./contributor-policy.js";
@@ -28,7 +28,8 @@ import { bridgeFeatures } from "./chat-bridge-protocol.js";
 import { SEAT_REVISION } from "./cloud-seats.js";
 import "../../src/js/emoji-data.js";
 import "../../src/js/reaction-policy.js";
-import { createMediaBroker, MEDIA_BODY_MAX } from "./audience-media.js";
+import { CLEANUP_BACKLOG_MAX, createMediaBroker, MEDIA_BODY_MAX } from "./audience-media.js";
+import { inspectReporter } from "./inspect-report.js";
 
 export const AUDIENCE_NAME = "audience";
 export const AUDIENCE_PROTOCOL = 1;
@@ -36,14 +37,17 @@ export const AUDIENCE_FEATURES = ["roles-v1", "reactions-v1", "hand-emoji-v1"];
 // A transient reaction's life on every client (players.js shows the island's for the same time), and the limits on
 // sending them: per identity across its tabs (as the island's room has it) and per zone, which bounds any zone's fanout.
 export const REACTION_MS = 2600;
-export const REACT_HZ = 3, REACT_BURST = 6, ZONE_REACT_HZ = 30, ZONE_REACT_BURST = 60;
+export const REACT_HZ = 3, REACT_BURST = 6;
 export const FRAME_MAX = 4096;
 export const PENDING_MS = 30 * 1000;
 export const REAUTH_MS = 60 * 60 * 1000;
-export const CLOSE = { bad: 4400, auth: 4401, protocol: 4426, full: 4429 };
+export const CLOSE = { bad: 4400, auth: 4401, protocol: 4426, full: 4429, off: 4503 };
 const MSG_HZ = 10, MSG_BURST = 20;
 const REPLIES_KEPT = 16;
 const CONTRIBUTIONS_MS = 10 * 60 * 1000;
+// Readiness (#669): the SFU reads `degraded` after this many failures within the window with no success since, and the
+// cleanup queue `backlog` once a job has waited this long.
+const SFU_FAILS_KEPT = 16, SFU_WINDOW_MS = 5 * 60 * 1000, SFU_DEGRADED = 3, CLEANUP_STUCK_MS = 10 * 60 * 1000;
 const PRINCIPAL = /^pr_[A-Za-z0-9_-]{22}$/;
 const LOGIN = /^[\w.-]{1,39}$/;
 const PATH = /^\/api\/chat\/avatar\/pr_[A-Za-z0-9_-]{22}\/[0-9a-f]{16}$/;
@@ -95,6 +99,11 @@ export class Audience extends DurableObject {
     this.contributions = { at: 0, map: null, pending: null };
     // The island's contributor lookup (contributor-access.js), on the instance so a check can stand in its own.
     this.contributorFor = contributorFor;
+    // The owner's private Inspector (#669): aggregate counts and this object's state, nothing per person. Off, every call
+    // returns at once, unless INSPECTOR_IDS names an account; it rides the calls the object already makes, no timer.
+    this.inspect = inspectReporter(ctx, env, "Audience", () => AUDIENCE_NAME, () => this.inspectState());
+    this.sfuFails = [];
+    this.sfuOkAt = 0;
     this.media = createMediaBroker(this);
     this.sourcesSig = "";
     // #667: retirements the Room waits on, and whether each zone had listeners when the Room was last told.
@@ -138,12 +147,57 @@ export class Audience extends DurableObject {
         await this.media.prune();
       }
       this.pendingWas = this.media.pending();
+      // The whole bridge off (the kill switch, deployed): no socket that survived the restart keeps the audience or its
+      // media (#669's rollback). Each closes as unavailable and its sessions join the cleanup queue.
+      if (!bridgeFeatures(env).bridge && this.sockets.size) {
+        for (const connId of [...this.sockets.keys()]) this.close(connId, CLOSE.off, "unavailable");
+        await this.flush();
+      }
       this.sourcesChanged();
       // The clouds the Room was last told, kept as the sources are: a wake sends only a change. Never told, the Room has
       // none, as an empty list.
       this.cloudsSig = (await ctx.storage.get("cloudsSig")) ?? "[]";
       this.cloudsChanged();
+      this.inspect.woke(this.sockets.size);
     });
+  }
+
+  /** An SFU call's outcome (sfu.js `measured`): counted by status class, and remembered for `readiness`. */
+  sfuMeasured(ms, failed, status) {
+    this.inspect.count("sfu");
+    this.inspect.count("sfuMs", ms);
+    this.inspect.peak("sfuMsMax", ms);
+    if (!failed) { this.sfuOkAt = Date.now(); return; }
+    this.inspect.count(status === 429 ? "sfu429" : status >= 500 ? "sfu5xx" : status ? "sfu4xx" : "sfuTimeout");
+    this.sfuFails.push(Date.now());
+    if (this.sfuFails.length > SFU_FAILS_KEPT) this.sfuFails.shift();
+  }
+
+  /**
+   * What the public health view may say of media (#669), since this object last woke: `sfu` is `degraded` after
+   * SFU_DEGRADED failures within SFU_WINDOW_MS with none succeeding since the last, `off` with no SFU configured; `cleanup`
+   * is `backlog` while the queue is half full or a job has waited CLEANUP_STUCK_MS. No count, id or setting beyond that.
+   */
+  readiness(now = Date.now()) {
+    const recent = this.sfuFails.filter((at) => now - at < SFU_WINDOW_MS);
+    const configured = !!(this.env.REALTIME_APP_ID && this.env.REALTIME_SECRET);
+    const sfu = !configured ? "off" : recent.length >= SFU_DEGRADED && recent[recent.length - 1] > this.sfuOkAt ? "degraded" : "ok";
+    const { jobs, oldestMs } = this.media.backlog(now);
+    return { sfu, cleanup: jobs >= CLEANUP_BACKLOG_MAX / 2 || oldestMs >= CLEANUP_STUCK_MS ? "backlog" : "ok" };
+  }
+
+  /** This object's state for the owner's Inspector: counts, caps, flags and the cleanup queue; never a person. */
+  inspectState() {
+    const zones = {};
+    for (const zone of ZONES) {
+      const counts = this.model.counts(zone);
+      zones[zone] = { listeners: counts.listeners, chatSpeakers: counts.chatSpeakers, worldSpeakers: this.island.speakers.filter((s) => s.zone === zone).length,
+        rows: this.model.zones[zone].rows.size, rev: this.model.zones[zone].rev };
+    }
+    const limits = limitsOf(this.env);
+    return { status: this.sockets.size ? "serving" : "idle", sockets: this.sockets.size, connections: this.model.conns.size, zones,
+      limits: { listeners: limits.listeners, chatSpeakers: limits.chatSpeakers, connections: limits.connections },
+      flags: bridgeFeatures(this.env), cleanup: this.media.backlog(), media: this.readiness(), panels: this.watching.size };
   }
 
   background(task) { if (this.ctx.waitUntil) this.ctx.waitUntil(task); else task.catch(() => {}); }
@@ -174,6 +228,7 @@ export class Audience extends DurableObject {
         if (c.zone !== delta.zone) continue;
         const ws = this.sockets.get(c.connId);
         if (!ws) continue;
+        this.inspect.count("deltaFrames");
         if (!own.has(c.id)) { this.send(ws, common); continue; }
         this.send(ws, { type: "delta", zone: delta.zone, epoch: delta.epoch, base: delta.base, revision: delta.rev,
           upsert: delta.upsert.map((row) => appRow(row, c.id)), remove: delta.remove });
@@ -246,6 +301,12 @@ export class Audience extends DurableObject {
     }
   }
 
+  /** A token from the zone's reaction bucket, at the rate its fan-out budget allows for the people in it now. */
+  zoneReaction(zone, now) {
+    const hz = zoneReactHz(this.model.zones[zone].rows.size, positive(this.env.AUDIENCE_FANOUT, FANOUT_DEFAULT, 50000));
+    return this.bucket(this.zoneBuckets, zone, hz, Math.max(2, Math.round(2 * hz)), now);
+  }
+
   bucket(map, key, hz, burst, now) {
     for (const [k, b] of map) if (map.size > 4096 && b.tokens + (now - b.at) * hz / 1000 >= burst) map.delete(k);
     let b = map.get(key);
@@ -262,8 +323,11 @@ export class Audience extends DurableObject {
     if (!c.zone) return { ok: false, code: "zone_required" };
     if (!globalThis.BL.reactionPolicy.valid(emoji)) return { ok: false, code: "malformed" };
     const now = Date.now();
-    if (!this.bucket(this.reactBuckets, c.id, REACT_HZ, REACT_BURST, now) || !this.bucket(this.zoneBuckets, c.zone, ZONE_REACT_HZ, ZONE_REACT_BURST, now))
+    if (!this.bucket(this.reactBuckets, c.id, REACT_HZ, REACT_BURST, now) || !this.zoneReaction(c.zone, now)) {
+      this.inspect.count("reactionsLimited");
       return { ok: false, code: "rate_limited", retryable: true };
+    }
+    this.inspect.count("reactions");
     this.reactSeq = Math.max(now, this.reactSeq + 1);
     this.fanReaction({ type: "reaction", eventId: `r${this.reactSeq}`, participantId: c.id, zone: c.zone, epoch: this.model.epoch, emoji, at: now, expiresAt: now + REACTION_MS });
     return { ok: true };
@@ -317,6 +381,8 @@ export class Audience extends DurableObject {
     await this.flush();
     if (this.media.cleanup.length) await this.media.runCleanup();
     this.confirmRetired();
+    this.inspect.peak("cleanupJobs", this.media.cleanup.length);
+    this.inspect.tick();
     await this.scheduleAlarm();
   }
 
@@ -355,6 +421,7 @@ export class Audience extends DurableObject {
 
   close(connId, code, reason) {
     const ws = this.sockets.get(connId);
+    this.inspect.count(code === CLOSE.auth ? "closeAuth" : code === CLOSE.full ? "closeFull" : code === CLOSE.protocol ? "closeProtocol" : code === CLOSE.off ? "closeOff" : "closeBad");
     this.drop(connId);
     if (ws) { try { ws.serializeAttachment(null); ws.close(code, reason); } catch { /* already closed */ } }
   }
@@ -375,7 +442,7 @@ export class Audience extends DurableObject {
     if (url.pathname !== "/connect") return new Response("Not found", { status: 404 });
     if (request.headers.get("upgrade") !== "websocket") return new Response("Expected WebSocket", { status: 426 });
     const who = readPrincipal(request.headers.get("x-audience-principal"));
-    if (!who) return new Response("Forbidden", { status: 403 });
+    if (!who) { this.inspect.count("refusePrincipal"); return new Response("Forbidden", { status: 403 }); }
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     const connId = crypto.randomUUID();
@@ -383,11 +450,16 @@ export class Audience extends DurableObject {
     const { id, principal, providerUserId, eligible, authUntil, provider, login, display, avatar, character } = who;
     const res = this.model.connect({ connId, id, principal, providerUserId, eligible, authUntil }, { provider, login, display, avatar, character });
     if (!res.ok) {
+      this.inspect.count(res.code === "audience_full" ? "refuseFull" : "refuseIdentity");
+      this.inspect.tick();
       server.close(CLOSE.full, res.code);
       return new Response(null, { status: 101, webSocket: client });
     }
     this.sockets.set(connId, server);
     this.save(connId);
+    this.inspect.count(who.provider === "x" ? "admitX" : "admitGithub");
+    this.inspect.peak("connections", this.model.conns.size);
+    this.inspect.tick();
     await this.scheduleAlarm();
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -405,6 +477,8 @@ export class Audience extends DurableObject {
     const conn = body && typeof body.connection === "string" ? this.model.conns.get(body.connection) : null;
     if (!conn || conn.principal !== who.principal) return json("stale_epoch", 409);
     const res = await this.media.request(op, conn, body);
+    this.inspect.count(res.status < 400 ? "media" : res.status === 429 || res.status === 503 ? "mediaBusy" : "mediaRefused");
+    this.inspect.tick();
     await this.scheduleAlarm();
     return res;
   }
@@ -421,9 +495,11 @@ export class Audience extends DurableObject {
     if (c.authUntil <= now) { this.close(c.connId, CLOSE.auth, "auth_required"); return; }
     let bucket = this.buckets.get(c.connId);
     if (!bucket) this.buckets.set(c.connId, bucket = { tokens: MSG_BURST, at: now });
-    if (!take(bucket, now)) { if (msg.requestId !== undefined) this.result(c.connId, msg.requestId, { ok: false, code: "rate_limited", retryable: true }); return; }
+    this.inspect.tick();
+    if (!take(bucket, now)) { this.inspect.count("rateLimited"); if (msg.requestId !== undefined) this.result(c.connId, msg.requestId, { ok: false, code: "rate_limited", retryable: true }); return; }
     if (msg.type === "join") return this.onJoin(c, msg);
-    if (msg.type === "resync") { if (c.zone && msg.zone === c.zone) this.send(ws, this.snapshotFor(c)); return; }
+    // A client that saw a revision gap asks again: counted, the one sign of a gap the server can see.
+    if (msg.type === "resync") { if (c.zone && msg.zone === c.zone) { this.inspect.count("resync"); this.sendSnapshot(ws, c); } return; }
     if (msg.type === "setRole" || msg.type === "setMic" || msg.type === "reaction" || msg.type === "hand") return this.onRequest(c, msg);
   }
 
@@ -441,7 +517,16 @@ export class Audience extends DurableObject {
     // The old zone's voices are no longer this connection's to hear: closed now, not at its next sync.
     if (r.changed) await this.media.prune();
     const ws = this.sockets.get(c.connId);
-    if (ws) this.send(ws, this.snapshotFor(c));
+    if (ws) this.sendSnapshot(ws, c);
+  }
+
+  /** A zone's snapshot to one connection, its size counted for the owner (the largest frame the audience sends). */
+  sendSnapshot(ws, c) {
+    const text = JSON.stringify(this.snapshotFor(c));
+    this.inspect.count("snapshots");
+    this.inspect.count("snapshotBytes", text.length);
+    this.inspect.peak("snapshotBytesMax", text.length);
+    this.send(ws, text);
   }
 
   result(connId, requestId, outcome) {
@@ -464,7 +549,7 @@ export class Audience extends DurableObject {
     else if (msg.type === "reaction") outcome = typeof msg.emoji === "string" && msg.emoji.length <= 32 ? this.react(c, msg.emoji) : { ok: false, code: "malformed" };
     else if (msg.type === "hand") outcome = this.hand(c, msg);
     else if (msg.role === "listener") { const lease = this.model.endLease(c.connId); if (lease) this.leaseEnded(c.connId, lease, "listener"); outcome = { ok: true }; }
-    else if (msg.role === "speaker") outcome = await this.requestSpeaker(c);
+    else if (msg.role === "speaker") { outcome = await this.requestSpeaker(c); this.inspect.count(outcome.ok ? "speakerGranted" : "speakerRefused"); }
     else outcome = { ok: false, code: "malformed" };
     if (this.model.conns.get(c.connId) !== c) return;
     this.save(c.connId);
@@ -497,8 +582,10 @@ export class Audience extends DurableObject {
     const a = ws.deserializeAttachment();
     const connId = a && a.conn && a.conn.connId;
     if (!connId || this.sockets.get(connId) !== ws) return;
+    this.inspect.count("gone");
     this.drop(connId);
     await this.flush();
+    this.inspect.tick();
   }
 
   // --- the Room's and the bridge's calls (RPC) ---
@@ -537,7 +624,7 @@ export class Audience extends DurableObject {
   islandReaction(event) {
     if (!event || !ID.test(event.participantId) || !isZone(event.zone) || !globalThis.BL.reactionPolicy.valid(event.emoji)) return { ok: false };
     const now = Date.now();
-    if (!this.bucket(this.zoneBuckets, event.zone, ZONE_REACT_HZ, ZONE_REACT_BURST, now)) return { ok: false };
+    if (!this.zoneReaction(event.zone, now)) return { ok: false };
     const text = JSON.stringify({ type: "reaction", eventId: String(event.eventId).slice(0, 64), participantId: event.participantId, zone: event.zone,
       epoch: this.model.epoch, emoji: event.emoji, at: now, expiresAt: now + REACTION_MS });
     for (const c of this.model.conns.values()) if (c.zone === event.zone) { const ws = this.sockets.get(c.connId); if (ws) this.send(ws, text); }

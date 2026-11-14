@@ -10,7 +10,9 @@
   // then it moves to staging.ooga.chat with a custom-domain route and SITE_ORIGIN, and its OAuth callbacks with it.
   "workers_dev": true,
   "preview_urls": false,
-  "observability": { "enabled": true },
+  // Invocation logs off: they would hold each request's URL (an OAuth callback's code and state). The edge writes its own
+  // fixed-schema lines instead (worker/chat/src/metrics.js, docs/ooga-chat-operations.md).
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
   "assets": {
     // `npm run build:ooga-chat` stages the app here (#651), with its own _headers and 404.html.

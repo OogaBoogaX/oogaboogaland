@@ -21,7 +21,10 @@ export const closedSocket = (code, reason) => {
   const [client, server] = Object.values(pair);
   server.accept();
   server.close(code, reason);
-  return new Response(null, { status: 101, webSocket: client });
+  const res = new Response(null, { status: 101, webSocket: client });
+  // For the edge's metric line alone (metrics.js): which refusal this was.
+  res.closeCode = code;
+  return res;
 };
 
 /** What the edge tells the island about a session's principal: written here, from its own rows, never from a request. */

@@ -8,7 +8,7 @@ import { memoryD1, readJsonc } from "./cloudflare-host.mjs";
 const { BRIDGE_VERSION, ENVELOPE_MAX, makeEnvelope, readReply } = await import("../src/chat-bridge-protocol.js");
 const { BASE_OPS, BridgeRefusal, ChatBridge, bridgeFeatures, handleEnvelope } = await import("../src/chat-bridge.js");
 const { bootstrap, effective, flagsOf, health, version } = await import("../chat/src/config.js");
-const { forgetHello } = await import("../chat/src/bridge.js");
+const { forgetHello, forgetReadiness } = await import("../chat/src/bridge.js");
 const { route } = await import("../chat/src/index.js");
 const { scrubbed } = await import("../chat/src/http.js");
 
@@ -21,6 +21,7 @@ const assets = (build = "e310d64685e87b14") => ({ fetch: async (request) => new 
   : new Response("<!doctype html>app", { headers: { "content-type": "text/html" } }) });
 const edge = (vars = {}) => {
   forgetHello();
+  forgetReadiness();
   return { ENVIRONMENT: "staging", SITE_ORIGIN: "https://chat.example", ASSETS: assets(), DB: memoryD1(new URL("../chat/migrations/", import.meta.url)),
     GITHUB_CLIENT_ID: "gh-id", GITHUB_CLIENT_SECRET: SECRETS.GITHUB_CLIENT_SECRET, X_CLIENT_ID: "x-id", X_CLIENT_SECRET: SECRETS.X_CLIENT_SECRET,
     OBL: bound(island({ OOGA_CHAT_FEATURES: "bridge,outdoor,cloud,commons" })), DONATIONS: {}, FEATURES: "github,x,listen,speak,feed,commons,cloud", ...vars };
@@ -31,14 +32,15 @@ test("the bridge answers hello always and every other operation only with its `b
   const env = island();
   const ok = await handleEnvelope(env, makeEnvelope("staging", "hello"));
   assert.equal(ok.ok, true);
-  assert.deepEqual(ok.result, { version: BRIDGE_VERSION, environment: "staging", features: { bridge: false, outdoor: false, cloud: false, commons: false }, voice: true });
+  assert.deepEqual(ok.result, { version: BRIDGE_VERSION, environment: "staging", features: { bridge: false, outdoor: false, cloud: false, commons: false, commonsSend: false }, voice: true });
   const ops = { ...BASE_OPS, echo: { run: (_env, envelope) => envelope.payload } };
   assert.deepEqual((await handleEnvelope(env, makeEnvelope("staging", "echo", { a: 1 }), ops)).error, { code: "disabled", retryable: false });
   const on = island({ OOGA_CHAT_FEATURES: " bridge , nonsense,commons" });
-  assert.deepEqual(bridgeFeatures(on), { bridge: true, outdoor: false, cloud: false, commons: true });
+  assert.deepEqual(bridgeFeatures(on), { bridge: true, outdoor: false, cloud: false, commons: true, commonsSend: false });
   assert.deepEqual((await handleEnvelope(on, makeEnvelope("staging", "echo", { a: 1 }), ops)).result, { a: 1 });
   // A sub-feature named without `bridge` stays off: the kill switch is one word.
-  assert.deepEqual(bridgeFeatures(island({ OOGA_CHAT_FEATURES: "outdoor,cloud,commons" })), { bridge: false, outdoor: false, cloud: false, commons: false });
+  assert.deepEqual(bridgeFeatures(island({ OOGA_CHAT_FEATURES: "outdoor,cloud,commons,commons-send" })), { bridge: false, outdoor: false, cloud: false, commons: false, commonsSend: false });
+  assert.equal(bridgeFeatures(island({ OOGA_CHAT_FEATURES: "bridge,commons-send" })).commonsSend, false, "sending needs `commons`");
 });
 
 test("the bridge refuses a wrong version, another environment, a bad id, an unknown operation and an oversized envelope", async () => {
@@ -110,7 +112,8 @@ test("the bootstrap is the app's contract: version 1, its protocols, flags, same
   assert.equal(body.build, "e310d64685e87b14");
   assert.deepEqual(body.protocols, { identity: [1], audience: [1], media: [1] });
   assert.deepEqual(body.features, { github: true, x: true, voice: true, feed: true, speak: true, commons: true, cloud: true });
-  assert.deepEqual(body.paths, { login: { github: "/auth/github", x: "/auth/x" }, session: "/api/chat/me", logout: "/api/chat/logout", audience: "/api/chat/audience" });
+  assert.deepEqual(body.paths, { login: { github: "/auth/github", x: "/auth/x" }, session: "/api/chat/me", logout: "/api/chat/logout", audience: "/api/chat/audience",
+    commons: "/api/chat/commons" });
   const flat = (value) => typeof value === "string" ? [value] : value && typeof value === "object" ? Object.values(value).flatMap(flat) : [];
   for (const path of flat(body.paths)) assert.match(path, /^\/(?!\/)[\w\-./]*$/, path);
   const text = JSON.stringify(body);
@@ -128,9 +131,17 @@ test("the bootstrap is the app's contract: version 1, its protocols, flags, same
 });
 
 test("health says what is off without naming anyone; version names the deployment", async () => {
-  const good = await (await get(edge(), "/api/chat/health")).json();
+  const audience = (sfu) => ({ getByName: () => ({ readiness: async () => ({ sfu, cleanup: "ok" }) }) });
+  const withMedia = (sfu) => edge({ OBL: bound(island({ OOGA_CHAT_FEATURES: "bridge,outdoor,cloud,commons", AUDIENCE: audience(sfu) })) });
+  const good = await (await get(withMedia("ok"), "/api/chat/health")).json();
   assert.deepEqual(good, { schema: 1, environment: "staging", status: "ok",
-    checks: { assets: true, database: true, bridge: "ok", auth: { github: true, x: true }, voice: true, speak: true, feed: true, commons: true } });
+    checks: { assets: true, database: true, bridge: "ok", auth: { github: true, x: true }, voice: true, speak: true, feed: true, commons: true,
+      media: { sfu: "ok", cleanup: "ok" }, publicData: "unknown" } });
+  // #669: a degraded SFU degrades the whole, and listening off leaves media out of it.
+  const sfuDown = await (await get(withMedia("degraded"), "/api/chat/health")).json();
+  assert.deepEqual([sfuDown.status, sfuDown.checks.media.sfu], ["degraded", "degraded"]);
+  const quiet = await (await get(edge({ FEATURES: "github", OBL: bound(island({ OOGA_CHAT_FEATURES: "bridge" })) }), "/api/chat/health")).json();
+  assert.deepEqual([quiet.status, quiet.checks.media], ["ok", "off"]);
   const noBridge = await (await get(edge({ OBL: undefined }), "/api/chat/health")).json();
   assert.equal(noBridge.status, "degraded");
   assert.equal(noBridge.checks.bridge, "unbound");

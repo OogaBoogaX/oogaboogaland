@@ -58,13 +58,24 @@ export const revokeOps = {
     always: true,
     run: async (env, envelope) => {
       const reason = envelope.payload && typeof envelope.payload.reason === "string" ? envelope.payload.reason.slice(0, 32) : "";
-      if (!env.AUDIENCE || !envelope.principal) return { revoked: 0 };
-      return env.AUDIENCE.getByName(AUDIENCE_NAME).revoke({ id: envelope.principal.id }, reason);
+      if (!envelope.principal) return { revoked: 0 };
+      const p = envelope.principal;
+      const audience = env.AUDIENCE ? await env.AUDIENCE.getByName(AUDIENCE_NAME).revoke({ id: p.id }, reason) : { revoked: 0 };
+      // The Commons is a GitHub contributor's alone: its sockets close too (#670).
+      const github = p.provider === "github" && /^[1-9][0-9]{0,15}$/.test(String(p.providerUserId)) ? Number(p.providerUserId) : 0;
+      const commons = github && env.ROOM ? await env.ROOM.getByName("island").communityRevoke(github, reason).catch(() => ({ revoked: 0 })) : { revoked: 0 };
+      return { revoked: audience.revoked + commons.revoked };
     },
   },
 };
 
-export const OPS = { ...BASE_OPS, ...capabilityOps({ contributorFor }), ...publicOps({ cast: CAST_ROWS }), ...revokeOps };
+// The public health view's media states (#669): the Audience's own word since it last woke, `sfu` ok, degraded or off
+// and `cleanup` ok or backlog, nothing more (no count, id or setting).
+export const readinessOps = {
+  readiness: { run: async (env) => env.AUDIENCE ? env.AUDIENCE.getByName(AUDIENCE_NAME).readiness() : { sfu: "off", cleanup: "ok" } },
+};
+
+export const OPS = { ...BASE_OPS, ...capabilityOps({ contributorFor }), ...publicOps({ cast: CAST_ROWS }), ...revokeOps, ...readinessOps };
 
 const SOCKET_HEADERS = ["upgrade", "connection", "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions"];
 /**
@@ -73,9 +84,29 @@ const SOCKET_HEADERS = ["upgrade", "connection", "sec-websocket-key", "sec-webso
  * identity it reads. Nothing a browser sent passes: the edge built this request, and only the WebSocket headers go on.
  */
 const MEDIA_OP = /^(ice|renegotiate|leave|receive\/(open|sync|close)|publish\/(open|offer|ready|close))$/;
+/**
+ * The Commons through the bridge (#670): only a GitHub principal the edge found eligible, and only with the island's
+ * `commons` switch; handed to the island's Room as a community member (`x-community-member`), never a player.
+ */
+export const commonsFetch = async (env, request) => {
+  if (request.headers.get("upgrade") !== "websocket") return new Response("Expected WebSocket", { status: 426 });
+  let assertion;
+  try { assertion = JSON.parse(request.headers.get("x-ooga-chat-assertion") || ""); } catch { assertion = null; }
+  if (!assertion || assertion.v !== BRIDGE_VERSION || assertion.env !== env.ENVIRONMENT || !assertion.principal || assertion.principal.provider !== "github" || assertion.eligible !== true)
+    return new Response("Forbidden", { status: 403 });
+  if (!bridgeFeatures(env).commons || !env.ROOM) return new Response("Unavailable", { status: 503 });
+  const headers = new Headers();
+  for (const name of SOCKET_HEADERS) { const value = request.headers.get(name); if (value !== null) headers.set(name, value); }
+  const p = assertion.principal;
+  headers.set("x-community-member", JSON.stringify({ principal: p.id, provider: "github", providerUserId: p.providerUserId, login: p.login, display: p.display,
+    eligible: true, sessionExpiresAt: assertion.sessionExpiresAt }));
+  return env.ROOM.getByName("island").fetch(new Request("https://room.invalid/community", { headers }));
+};
+
 export const bridgeFetch = async (env, request) => {
   const url = new URL(request.url);
   const media = url.pathname.startsWith("/media/") ? url.pathname.slice(7) : null;
+  if (url.pathname === "/commons") return commonsFetch(env, request);
   if (url.pathname !== "/audience" && !(media && MEDIA_OP.test(media))) return new Response("Not found", { status: 404 });
   if (!media && request.headers.get("upgrade") !== "websocket") return new Response("Expected WebSocket", { status: 426 });
   if (media && request.method !== "POST") return new Response("Method not allowed", { status: 405 });
@@ -98,7 +129,7 @@ export const bridgeFetch = async (env, request) => {
 
 export class ChatBridge extends WorkerEntrypoint {
   async call(envelope) { return handleEnvelope(this.env, envelope, OPS, this.ctx); }
-  // Sockets and media calls arrive here as fetches through the same binding: the audience (#665) and its media
-  // (#666); the Commons (#670) later.
+  // Sockets and media calls arrive here as fetches through the same binding: the audience (#665), its media (#666)
+  // and the Commons (#670).
   async fetch(request) { return bridgeFetch(this.env, request); }
 }

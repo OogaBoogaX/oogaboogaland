@@ -33,3 +33,16 @@ export const bridgeHello = async (env, now = Date.now()) => {
   return value;
 };
 export const forgetHello = () => { hello = null; helloAt = 0; };
+
+let ready = null, readyAt = 0;
+const MEDIA_STATES = { sfu: ["ok", "degraded", "off"], cleanup: ["ok", "backlog"] };
+/** The island's media readiness for the health view (#669), cached as `hello` is; `unavailable` when it can't be read. */
+export const bridgeReadiness = async (env, now = Date.now()) => {
+  if (ready && now - readyAt < HELLO_MS && ready.env === env) return ready.value;
+  const reply = await bridgeCall(env, "readiness", {}, null, 2000);
+  const r = reply.ok && reply.result && typeof reply.result === "object" ? reply.result : null;
+  const value = r && MEDIA_STATES.sfu.includes(r.sfu) && MEDIA_STATES.cleanup.includes(r.cleanup) ? { sfu: r.sfu, cleanup: r.cleanup } : "unavailable";
+  ready = { env, value }; readyAt = now;
+  return value;
+};
+export const forgetReadiness = () => { ready = null; readyAt = 0; };

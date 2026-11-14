@@ -63,6 +63,16 @@ const hex = async (text) => {
 // Per isolate: the last good of each source and when it was last asked for, keyed to the env it was read for.
 let memory = null;
 export const forgetPublic = () => { memory = null; };
+/**
+ * The public panels' data as this isolate last read it, for the health view (#669), without reading it again: `ok`,
+ * `stale` (a kept copy after a failed look), `unavailable`, or `unknown` when this isolate has not read it yet.
+ */
+export const publicState = (env, now = Date.now()) => {
+  if (!memory || memory.env !== env) return "unknown";
+  const stats = memory.stats && now - memory.stats.generatedAt < STATS_KEEP_MS ? memory.stats : null;
+  if (!stats || !memory.cast) return "unavailable";
+  return memory.statsOk && memory.castOk && now - stats.generatedAt < STALE_AFTER_MS ? "ok" : "stale";
+};
 
 export const contributorsSnapshot = async (env, { fetcher = fetch, now = Date.now() } = {}) => {
   if (!memory || memory.env !== env) memory = { env, cast: null, castAt: -Infinity, castOk: false, stats: null, statsAt: -Infinity, statsOk: false };

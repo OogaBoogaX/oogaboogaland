@@ -46,7 +46,8 @@ export const emptyMedia = () => ({ sub: null, mids: {}, pub: null, pubMid: null,
 /** The media half of an Audience object; `aud` is the object, whose model, storage and sockets it uses. */
 export const createMediaBroker = (aud) => {
   const env = aud.env;
-  const sfu = sfuClient(env);
+  // Every SFU call counted for the owner's Inspector and the readiness answer (#669): its time and its status class.
+  const sfu = sfuClient(env, (ms, failed, status) => aud.sfuMeasured(ms, failed, status));
   const states = new Map();
   const queues = new Map();
   let cleanup = [];
@@ -84,12 +85,13 @@ export const createMediaBroker = (aud) => {
   };
   // Two runs can hold the same job at once (the alarm's, and `queueClose`'s after a merge: an SFU call opens the object's
   // input gate), so a job leaves the queue only if it is still there, never by a stale index.
-  const removeJob = (job) => { const i = cleanup.indexOf(job); if (i >= 0) cleanup.splice(i, 1); };
+  const removeJob = (job) => { const i = cleanup.indexOf(job); if (i < 0) return false; cleanup.splice(i, 1); return true; };
   const runCleanup = async (only = null) => {
     for (const job of [...cleanup]) {
       if (only && job !== only) continue;
       if (!cleanup.includes(job)) continue;
-      if (Date.now() - job.at > CLEANUP_MS) { removeJob(job); continue; }
+      // Given up after an hour: the one cleanup outcome that is an incident (docs/ooga-chat-operations.md, alerts).
+      if (Date.now() - job.at > CLEANUP_MS) { if (removeJob(job)) aud.inspect.count("cleanupExpired"); continue; }
       job.tries++;
       const v = job.v || 0;
       try {
@@ -104,9 +106,9 @@ export const createMediaBroker = (aud) => {
         const done = new Set((res.tracks || []).filter((t) => t && typeof t.mid === "string" && (!t.errorCode || t.errorCode === "close_track_error")).map((t) => t.mid));
         job.mids = [...new Set(job.mids.concat(mids))].filter((mid) => !done.has(mid));
         // Merged into meanwhile (its version moved): the run `queueClose` started finishes it, with `all` as asked.
-        if ((job.v || 0) === v) { if (!job.mids.length) removeJob(job); else job.all = false; }
+        if ((job.v || 0) === v) { if (!job.mids.length) { if (removeJob(job)) aud.inspect.count("cleanupDone"); } else job.all = false; }
       } catch (err) {
-        if (sfuSessionGone(err)) removeJob(job);
+        if (sfuSessionGone(err) && removeJob(job)) aud.inspect.count("cleanupDone");
       }
     }
     await persistCleanup();
@@ -326,6 +328,8 @@ export const createMediaBroker = (aud) => {
 
   return {
     request, restore, retirePublication, releaseAll, prune, chatSources, authorizedFor, runCleanup,
+    /** The cleanup queue as the owner sees it: how many jobs and the oldest one's age. */
+    backlog: (now = Date.now()) => ({ jobs: cleanup.length, oldestMs: cleanup.reduce((age, job) => Math.max(age, now - job.at), 0) }),
     get cleanup() { return cleanup; }, get states() { return states; }, get configured() { return !!sfu; },
     /** Speakers some outdoor subscription to whom is not yet confirmed closed at the SFU. */
     pending: () => new Set(cleanup.flatMap((job) => job.participants || [])),

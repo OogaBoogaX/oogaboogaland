@@ -8,6 +8,8 @@ export const HOCKEY = globalThis.BL.hockeyWire;
 export { block } from "./block.js";
 import { audienceRoom } from "./room-audience.js";
 export { audienceRoom };
+import { commonsRoom } from "./room-commons.js";
+export { commonsRoom };
 // The Durable Object inspector's reporter (inspect-report.js), here so the room and game host take it with the rest.
 export { inspectReporter, INSPECT_FEATURE } from "./inspect-report.js";
 import { BACK_WHY } from "./inspect-report.js";

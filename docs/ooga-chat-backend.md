@@ -4,6 +4,8 @@ Ooga Chat (#650) is a standalone app at `ooga.chat`: authenticated listeners hea
 conversation, and verified GitHub contributors can speak from a cloud. The app itself, its build and its browser
 contracts are `docs/ooga-chat-app.md`. This document is the server side: the Cloudflare resources, the edge Worker that
 serves the app, the private bridge into the island's Worker, the feature flags, secrets, deployment order and rollback.
+Measuring, watching, releasing and rolling it back (caps, metrics, alerts, the load matrix, the cost model, the release
+runbook and the incident drill) are `docs/ooga-chat-operations.md` (#669).
 Its sections grow with the backend issues: infrastructure (#662), sign-in (#663), public data and donations (#664), the
 audience (#665), media (#666), private-room exclusion (#667), reactions and clouds (#668), the Commons (#670) and the
 release (#669).
@@ -101,7 +103,7 @@ flag counts only when what it needs is there too (`effective` in `worker/chat/sr
 
 **The island's `OOGA_CHAT_FEATURES`** (in `wrangler.<env>.jsonc`): `bridge` turns on every operation but `hello`;
 `outdoor` (island voices heard by Ooga Chat's audience), `cloud` (Ooga Chat speakers on clouds) and `commons` (The
-Commons from Ooga Chat) each need `bridge`. This end is the authority: whatever the edge's flags say, an island deployed
+Commons from Ooga Chat, read) each need `bridge`, and `commons-send` (members may also send lines) needs `commons`. This end is the authority: whatever the edge's flags say, an island deployed
 with `OOGA_CHAT_FEATURES` empty refuses every outward operation, so redeploying it empty is the kill switch for the
 whole path. A media feature switched off this way also runs its cleanup (#666, #667): it is not a hidden button.
 
@@ -112,7 +114,7 @@ The app's own contract (`docs/ooga-chat-app.md`) is the source of truth for shap
 | Route | Answer |
 |---|---|
 | `GET /api/bootstrap` (also `/api/chat/config`) | `{ version: 1, build, environment, protocols: { identity: [1], audience: [1], media: [1] }, features: { github, x, voice, feed, speak, commons, cloud }, paths: { login: { github?, x? }, session?, logout?, audience? } }`. `build` is the staged app's (its `build.json`), so an open page hears of a newer one. `voice` is `listen`. A provider's login path appears only when it is on, the audience path only while listening is. `no-store`; rate-limited per IP |
-| `GET /api/chat/health` | `{ schema: 1, environment, status, checks: { assets, database, bridge, auth: { github, x }, voice, speak, feed, commons } }`. `status` is `ok` (assets, D1 and bridge), `degraded` (assets serve, something else is off) or `down` (no staged app). `bridge` is `ok`, `mismatch` (another environment or version), `unavailable` or `unbound` |
+| `GET /api/chat/health` | `{ schema: 1, environment, status, checks: { assets, database, bridge, auth: { github, x }, voice, speak, feed, commons, media, publicData } }`. `status` is `ok` (assets, D1 and bridge, and whatever is on is well), `degraded` (assets serve, something else is off or unwell) or `down` (no staged app). `bridge` is `ok`, `mismatch` (another environment or version), `unavailable` or `unbound`; `media` is `off` or `{ sfu: ok\|degraded\|off, cleanup: ok\|backlog }`; `publicData` is `ok`, `stale`, `unavailable` or `unknown` (#669, `docs/ooga-chat-operations.md`) |
 | `GET /api/chat/version` | `{ schema: 1, environment, worker, build, protocols, bridge }`: the Worker version id, the app build and the bridge version, for correlating a report with a deployment |
 | `GET /auth/github`, `GET /auth/x` | starts a sign-in (below); 302 to the provider, or 303 home with the result when it cannot start |
 | `GET /auth/<provider>/callback` | finishes it: 303 to `/?signin=<ok\|denied\|failed\|unavailable\|rate-limited>&provider=<provider>`, nothing else in the address |
@@ -124,6 +126,7 @@ The app's own contract (`docs/ooga-chat-app.md`) is the source of truth for shap
 | `POST /donations/invoice`, `/note`, `/onchain`; `GET /donations/socket` | the native Feed the Oogas popup, through to bananapayserver (below) |
 | `GET /api/chat/audience`, upgraded | the audience socket (#665, below), from the app's own page with a session |
 | `POST /api/chat/media/<op>` | media signalling (#666, below), from the app's own page with a session; `publish/*` needs `speak` and GitHub |
+| `GET /api/chat/commons`, upgraded | The Commons and Online Oogas (#670, below), from the app's own page, for an eligible GitHub contributor |
 | any other `/api/*`, `/auth/*`, `/donations/*` | a JSON 404 (`{ error: { code: "not_found" } }`), never the app's HTML |
 
 Every other path is served from the staged app. Only `/api/*`, `/auth/*` and `/donations/*` run the Worker
@@ -467,8 +470,9 @@ its own event, even the same emoji twice:
 
 Each lives 2,600 ms on its own (`REACTION_MS`, the island's own display time), so a new one never ends an earlier one or
 the hand beneath it. A retried `requestId` gets its first answer and no second event. Limits: 3 a second with a burst
-of 6 per identity across its tabs (the island's room's own), and 30 a second with a burst of 60 per zone, which bounds
-any zone's fanout. Nothing is kept: a snapshot or reconnect carries hands, never past reactions. The island's panels on
+of 6 per identity across its tabs (the island's room's own), and per zone 30 a second with a burst of 60 while the zone
+holds up to about 160 people, shrinking as it fills so its fan-out stays within `AUDIENCE_FANOUT` frames a second (5,000:
+10 a second at 500 people, never under one; #669, `zoneReactHz` in `audience-model.js`). Nothing is kept: a snapshot or reconnect carries hands, never past reactions. The island's panels on
 a zone get each as `{ t: "audience", kind: "react", id, e, rid }`; an island player with an open outdoor grant gets a
 GitHub account's as the bridge's `{ t: "outdoor", op: "react", rid, id, e, speaker }` (an X id does not fit the bridge's
 account id, so those show in the panel alone). Both carry the event's id, so a page that hears both shows it once.
@@ -494,6 +498,69 @@ leaving never un-ghosts a character still driven elsewhere. Clouds need the isla
 and the welcome omits `cloud-seats-v1`. Ending a lease ends its cloud. No cloud takes a game slot or names a private
 room.
 
+## The Commons and Online Oogas (#670)
+
+The Commons is the island's one Ooga Chat conversation, and Online Oogas its live players, shown in the app to a GitHub
+contributor who is eligible now. Nothing is copied: `GET /api/chat/commons` (upgraded, from the app's own page) goes
+through the private bridge (`ChatBridge.fetch /commons`) to the island's `Room` as a **community member**, a second kind
+of socket beside its players (`worker/src/room-commons.js`). The edge refuses with a closed socket: 4401 signed out,
+4403 an X account or a contributor answer that is not eligible and fresh, 4429 too many sockets lately (the shared
+`CHAT_SOCKET_LIMITER`), 4503 the Commons is off. The bridge checks the assertion again (this environment, this version,
+GitHub, eligible) and needs the island's `commons` switch; the Room checks the account against its own cast and
+contributor rule and its ban list before accepting, as it does a player.
+
+**One conversation.** A member's `{ t: "chat", text, clientId }` goes through the Room's own `say`: the same ring of the
+last 100 lines, ids, order and timestamps, the same Unicode policy (`chat-unicode-v1`), the same retry dedupe and the
+same rate bucket by account, so a contributor's island tabs and Ooga Chat tabs together keep to 3 lines and 1 a second.
+Every line reaches every player and member once, with the island's own `{ t: "chat", ... }` frame; the member gets its
+`chat-ack` or `chat-rejected` as a player does. Retention is the island's: in memory, gone on a wake. The display name is
+the island's for that account when it has one, so a line reads the same from either app.
+
+**Online Oogas, without positions.** The member's welcome is `{ t: "community", v: 1, op: "welcome", epoch, send, you:
+{ id, login, display }, players: [...], features: ["chat-unicode-v1", "commons-v1"] }` then `chat-history`. A player is `{ id, login,
+display, body, zone, voice, muted, hand, handTone, handEmoji }`, and after that only the Room's `join`, `leave`, `body`,
+`zone`, `vstate`, `hand`, `chat` and `clouds` broadcasts are relayed. No pose, snapshot, distance, NPC frame, SFU id,
+voice link, private-conversation frame, reaction over a body, game state or chalk ever reaches a member.
+
+**The contract names (#670), over the island's own frames.** No second chat format: `communitySnapshot` is the welcome,
+`commonsHistory` the `chat-history` after it, `onlineDelta` the relayed `join`, `leave`, `body`, `zone`, `vstate` and
+`hand` (and `clouds` for cloud speakers), `commonsMessage` the island's `chat` line `{ t: "chat", id, at, login, name,
+text }`, and the acknowledgement and refusal its `chat-ack { clientId }` and `chat-rejected { clientId, reason }`
+(`rate`, `conflict`, `read_only`; a line the Unicode policy refuses is dropped unanswered, as the island's is). **Reconnects:** history is the ring as it stands, merged by `id`, which
+follows the Room's clock; `epoch` is the life of the Room's memory, so a welcome with a new `epoch` says the Room woke or
+restarted and whatever was said meanwhile is gone (never stored anywhere, attachments included), not that it was quiet.
+A socket kept open across a hibernation misses nothing and gets no second welcome.
+
+**The capability matrix.**
+
+| | Signed out | X account | GitHub, not a contributor | GitHub contributor (eligible) | Island player |
+|---|---|---|---|---|---|
+| Public panels, Feed the Oogas (#664) | yes | yes | yes | yes | yes |
+| Listen in the audience (#665) | no | yes | yes | yes | in its own world |
+| Reactions, hand in the audience (#668) | no | reactions | reactions | reactions; a hand as a speaker | island reactions |
+| Speak from a cloud (#666, #668) | no | no | no | yes, with `speak` and `cloud` | its own voice |
+| The Commons: read and send lines | no | no | no | yes, with `commons` | yes |
+| Online Oogas: who is here, zone, voice, hand | no | no | no | yes, without positions | yes, with distances |
+| Private conversations, voice links | no | no | no | no (island only) | yes |
+| A body, poses, NPC host, games, chalk | no | no | no | no | yes |
+| Edit the display name | no | no | no | on the island (`PATCH /api/me`); shown in both | yes |
+
+**Access ends.** Signing out, deleting the account or losing eligibility (the edge's `revoke`, #663) closes every member
+socket of that account at once (`communityRevoke`); the Room's minute sweep closes one past its hourly re-authentication
+deadline (`authUntil`, never past the session's own), no longer a contributor, banned, or silent past `STALE_MS` with its
+auto-answered pings. A Room wake restores members from their attachments as members, never as players.
+
+**Bounds and cost.** At most 128 members a Room and 3 an account (`COMMUNITY_MAX`, `COMMUNITY_PER_ACCOUNT`); the next is
+closed 4429. A member holds no player slot (`MAX_PLAYERS` is the island's alone), voice or NPC follower count. While any
+member is connected the Room keeps its once-a-minute sweep, as it does for a player, and nothing else: a member is
+relayed only what the Room already broadcasts. With the island's `commons` switch off nobody new connects; members
+already in leave at their next sweep or reconnect.
+
+**Rollout.** Reading first: `commons` alone lets members in with `send: false`, and a line gets `chat-rejected` with
+`read_only` (the app keeps the draft); `commons-send` then opens sending, staging before production. Private text stays
+the island's: the standalone app gets no private-conversation or voice-link capability until a reviewed origin-safe
+design exists (a pad must never be used independently from two origins).
+
 ## Secrets and variables
 
 Names only; values live in Workers secrets and the owner's password manager (`worker/chat/dev.vars.example`).
@@ -508,6 +575,7 @@ Names only; values live in Workers secrets and the owner's password manager (`wo
 | `GITHUB_CLIENT_SECRET` | secret | edge | that app's secret |
 | `X_CLIENT_ID` | var | edge | the X app's OAuth 2.0 client id (confidential web app) |
 | `X_CLIENT_SECRET` | secret | edge | that app's secret |
+| `AUDIENCE_LISTENERS`, `AUDIENCE_SPEAKERS`, `AUDIENCE_FANOUT` | var | island | the audience's caps a zone and its reaction fan-out budget (`docs/ooga-chat-operations.md`) |
 | `REALTIME_APP_ID`, `REALTIME_SECRET` | var, secret | island only | the environment's one SFU app, shared with Ooga Chat through the bridge; never on the edge |
 
 CI deploys with the repository's account-owned `CLOUDFLARE_API_TOKEN` (Workers Scripts and D1 edit). Frontend
@@ -560,7 +628,7 @@ instead, so the edge still deploys and answers its API, and health says `down` f
 
 Order: additive D1 migrations and the island's bridge entrypoint (with `OOGA_CHAT_FEATURES` off) first; then the edge
 with every `FEATURES` flag off; then the app's compatible build; then each capability, staging before production,
-public browsing before sign-in before listening before speaking (#669's runbook).
+public browsing before sign-in before listening before speaking (the release runbook in `docs/ooga-chat-operations.md`).
 
 Rollback: turn new admissions off (the edge's `FEATURES`, or the island's `OOGA_CHAT_FEATURES` for anything outward),
 let the media cleanup (#667) retire what is open, then redeploy the previous compatible Worker version
