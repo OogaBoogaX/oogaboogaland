@@ -30,10 +30,8 @@
 // answering a Bitcoin question (the scene asks it and calls `escape`), or the bubble wears off after `TRAP_MAX_S`.
 // Bots "work the question" for a seeded few seconds. A sprung pad goes dark for `TRAP_REARM_S`.
 //
-// Weather: the sky turns from clear to stormy and back on a seeded schedule; a storm brings rain and lightning.
-//
 // Every number lives in CONFIG. The arena, its blocks and the stands live in ARENA. Actors, flags, shots, crates and
-// the event ring are preallocated in `create`; `step` allocates nothing. Bots and weather draw from the run's seeded
+// the event ring are preallocated in `create`; `step` allocates nothing. Bots draw from the run's seeded
 // `rng`, so a seed replays a round.
 (() => {
   "use strict";
@@ -47,7 +45,6 @@
     TRAP_R: 0.95, TRAP_MAX_S: 25, TRAP_REARM_S: 8, BOT_THINK: [3.5, 8], MIN_SIDE: 2, MAX_SIDE: 5,
     PREP_S: 20, CRATE_HALF: 0.6, CRATE_H: 1.1, MAX_CRATES: 32, CRATE_STOCK: 3, PUSH: 0.55, STAND_CLEAR: 2.4,
     NET_S: 4, NET_SLOW: 0.4, PASS_SPEED: 13, PASS_LIFT: 5, PASS_GRAVITY: 13, PASS_SAFE: 0.45, CATCH_R: 1.5, LOOSE_TOP: 7,
-    WEATHER_S: [24, 42],
     TRAMP_R: 1.0, BOUNCE: 13.5, STEP_UP: 0.45, FIRE_R: 0.95, BURN_HOPS: 3, BURN_SLOW: 0.25,
     // The jetpack matches the island's: `JET_ACCEL` against `FALL` nets its +11 m/s² up to its 7 m/s, and `JET_FUEL` is
     // seconds of thrust. Within `JET_RISE / JET_EASE` of `JET_CEILING` the top speed eases to nothing, so it arrives and hovers.
@@ -58,7 +55,7 @@
     // and thrown off at `GORILLA_THROW`, up at `GORILLA_THROW_UP`, its steering knocked out for `THROWN_S`.
     GORILLA_DRAG: 7.5, GORILLA_DRAG_R: 0.5, GORILLA_THROW_S: 0.45, GORILLA_THROW: 11, GORILLA_THROW_UP: 9, THROWN_S: 0.5, DRAG_BACK: 1.3, DRAG_EDGE: 1.2,
     SHOT_STEP: 0.12, BOT_CARRY: 0.88, GOLD_GUNS: 2, AK_MAG: 30, GOLD_SIDE: 0.3, AK_RELOAD: 1.4, MONKEYS_S: 12, MONKEY_SIDE: 0.8, MONKEY_COOL: 1, HOMER_TURN: 9, HOMER_SEEK: 34, CATAPULT_R: 1.0, LAUNCH_H: 13, CHUTE_FALL: 2.8, DROP_IN_H: 14, CHUTE_SPEED: 3.4, PEEL_R: 0.55, SLIP_S: 1.5, SLIP_SPIN: 13, PEEL_REARM: 8,
-    POWER_R: 1.1, POWER_RESPAWN: 20, BOOTS_S: 6, BOOTS: 1.5, HALVING_S: 12, COLD_S: 12, LASER_S: 25, BEAM_S: 3, BEAM_LEN: 30, BEAM_R: 0.45,
+    POWER_R: 1.1, POWER_RESPAWN: 20, BOOTS_S: 6, BOOTS: 1.5, HALVING_S: 12, COLD_S: 12,
     // Haunted Hollow's ghosts: they drift through walls round their haunt, chase an Ooga that comes within
     // `GHOST_SIGHT`, and a touch (`GHOST_R`) spooks it stiff for `SPOOK_S` (dropping a crate, not a block); then the ghost fades
     // and comes back after `GHOST_BACK`. Paint or a blast pops one sooner.
@@ -69,9 +66,7 @@
     // edge (it no longer stands on the island and is kept out of its rock); one that falls past `FALL_FLOOR` comes back
     // in its own block zone. A block carried over the edge drops at the edge and goes home after `EDGE_HOME_S`. The
     // rock under the island is `ISLE_EDGE` deep at the edge and deepens toward the middle, `ISLE_DEPTH` at most.
-    // Lightning in a storm: every `BOLT_S` or so a spot under a seeded Ooga is warned (`BOLT_WARN`), then struck; anyone
-    // still within `BOLT_R` is splatted (no more than once per `BOLT_COOL` each).
-    BOLT_S: [7, 13], BOLT_WARN: 1.4, BOLT_R: 1.8, BOLT_COOL: 18, PUDDLE_R: 0.9, PUDDLE_REARM: 6,
+    PUDDLE_R: 0.9, PUDDLE_REARM: 6,
     RIM: 0.6, RESPAWN_GUARD: 0.4, ENEMY_CAT_UP: 17, ENEMY_CAT_PAST: 9, FALL_FLOOR: -40, EDGE_HOME_S: 3, ISLE_EDGE: 2.5, ISLE_DEPTH: 14,
     // The grappling hook (Cloud Hopper's, a special weapon here): `HOOKS` a map, hidden at seeded spots from the map's
     // hand-checked `hookSpots`. It flies out at `HOOK_FLY`, up to `HOOK_RANGE`; a bite on rock pulls the Ooga toward it at
@@ -588,10 +583,10 @@
   // The map being stepped: every world query below reads it (`use` sets it from the sim, as it does the crates).
   let ARENA = ARENAS.fort, BLOCKS = ARENA.BLOCKS, LEDGES = ARENA.ledges || [];
   const MAPS = Object.keys(ARENAS);
-  // The power-ups: lightning boots (a burst of speed), the halving (your side's splats last half as long), cold
-  // storage (your block can't be lifted off its stand) and laser eyes (one long beam from the eyes, `BEAM_S`).
+  // The power-ups: lightning boots (a burst of speed), the halving (your side's splats last half as long) and cold
+  // storage (your block can't be lifted off its stand).
   // The monkeys (the ghost hunt's drop): one at each hip, firing with every shot you take.
-  const POWERS = ["boots", "halving", "cold", "laser", "monkeys"];
+  const POWERS = ["boots", "halving", "cold", "monkeys"];
   const other = (team) => team === "blue" ? "red" : "blue";
   // The bots' skill: easy bots aim wider, wait longer before throwing, throw less often, run slower and see less far;
   // hard ones the other way. "normal" is the CONFIG values.
@@ -872,7 +867,7 @@
     return true;
   };
 
-  // A round. `team` is the player's colour; `seed` seeds the bots and the weather; `prep` the fortifying seconds.
+  // A round. `team` is the player's colour; `seed` seeds the bots; `prep` the fortifying seconds.
   // `names` names the four Oogas: the player first, then their teammate, then the two rivals (only carried for the
   // scene).
   // `size` Oogas a side (`MIN_SIDE` to `MAX_SIDE`; never one against one, NPCs filling any empty place): the player first, then their teammates, then the rivals. `skill` picks the
@@ -887,10 +882,10 @@
       x: 0, z: 0, y: 0, vx: 0, vz: 0, vy: 0, heading: 0, moving: 0, carrying: null, splat: 0, guard: 0, cooldown: 0,
       blocked: null, stuck: 0, lastX: 0, lastZ: 0, detour: 0, aim: 0, trapped: 0, think: 0, grounded: true, jumps: 0, crouch: false,
       waiting: false, stamina: 4, tired: false, sprinting: false, rest: 0, botJump: false, jump2At: 0, tries: 0, progT: 0, lastD: 0, netted: 0, grenade: 0, rocket: 0, net: 0, sniper: 1, crates: 0, holding: false, bonked: false,
-      climbing: false, riding: false, zipT: 0, flight: 0, zipLine: "blue", lastKind: "paint", wield: "", grabbed: 0, grabFill: 0, flung: false, fuel: CONFIG.JET_FUEL, jetting: false, boots: 0, laser: 0, burnt: 0, slip: 0, gold: false, akMag: 30, akReload: 0, monkeys: 0, monkeyCool: 0,
-      knock: 0, spooked: 0, beam: 0, beamLen: 0, ride: 0, rider: 0, calling: 0, navI: -1, navT: 0, route: "", routeT: 0, botClimb: false, botStop: false, botStraight: false, lift: false, crateGo: 0, crateX: 0, crateZ: 0, routeBan: 0, jetT: 0, hopT: 0, crateT: 0, stacks: 0,
+      climbing: false, riding: false, zipT: 0, flight: 0, zipLine: "blue", lastKind: "paint", wield: "", grabbed: 0, grabFill: 0, flung: false, fuel: CONFIG.JET_FUEL, jetting: false, boots: 0, burnt: 0, slip: 0, gold: false, akMag: 30, akReload: 0, monkeys: 0, monkeyCool: 0,
+      knock: 0, spooked: 0, ride: 0, rider: 0, calling: 0, navI: -1, navT: 0, route: "", routeT: 0, botClimb: false, botStop: false, botStraight: false, lift: false, crateGo: 0, crateX: 0, crateZ: 0, routeBan: 0, jetT: 0, hopT: 0, crateT: 0, stacks: 0,
       detourX: 0, detourZ: 0, painted: 0, captures: 0, splats: 0, hits: 0, longShot: 0, rescues: 0, edgeX: 0, edgeY: 0, edgeZ: 0, falls: 0,
-      boltCool: 0, hook: 0, hk: 0, hookT: 0, hookLen: 0, hookWait: 0, hookTarget: -1, hookTip: { x: 0, y: 0, z: 0 }, hookEnd: { x: 0, y: 0, z: 0 }, hookHold: false, flingT: 0
+      hook: 0, hk: 0, hookT: 0, hookLen: 0, hookWait: 0, hookTarget: -1, hookTip: { x: 0, y: 0, z: 0 }, hookEnd: { x: 0, y: 0, z: 0 }, hookHold: false, flingT: 0
     }));
     const flags = {};
     for (const t of TEAMS) flags[t] = { team: t, state: "home", x: ARENA.stands[t].x, y: 0, z: ARENA.stands[t].z, carrier: null, vx: 0, vy: 0, vz: 0, thrower: -1, t: 0, homeT: 0, hookedBy: -1, graceT: 0 };
@@ -905,9 +900,8 @@
     const ghosts = (A.ghosts || []).map(([x, z, r]) => ({ hx: x, hz: z, leash: r, x, y: 1, z, heading: 0, state: 0, t: 0, wx: x, wz: z, phase: x * 0.7 + z }));
     const hooks = Array.from({ length: CONFIG.HOOKS }, () => ({ state: 0, x: 0, y: 0, z: 0, holder: -1 }));
     const events = Array.from({ length: CONFIG.MAX_EVENTS }, () => ({ type: "", team: null, actor: -1, by: -1, x: 0, y: 0, z: 0 }));
-    const weather = { kind: "clear", left: 0, strength: 0, boltT: 0, boltWarn: 0, boltX: 0, boltZ: 0 };
     const puddles = (A.puddles || []).map(([x, z]) => ({ x, z, dark: 0 }));
-    const sim = { goldLeft: CONFIG.GOLD_GUNS, map, live: null, team, rival, seed, target, size, skill, bots: SKILLS[skill] || SKILLS.normal, prepS: prep, prep: 0, rng: mulberry32(seed), actors, flags, shots, crates, traps, caches, powers, peels, puddles, gorillas, ghosts, hooks, halving: { blue: 0, red: 0 }, cold: { blue: 0, red: 0 }, events, weather, eventCount: 0, score: { blue: 0, red: 0 }, time: 0, flip: false, over: false, winner: null, acc: 0 };
+    const sim = { goldLeft: CONFIG.GOLD_GUNS, map, team, rival, seed, target, size, skill, bots: SKILLS[skill] || SKILLS.normal, prepS: prep, prep: 0, rng: mulberry32(seed), actors, flags, shots, crates, traps, caches, powers, peels, puddles, gorillas, ghosts, hooks, halving: { blue: 0, red: 0 }, cold: { blue: 0, red: 0 }, events, eventCount: 0, score: { blue: 0, red: 0 }, time: 0, flip: false, over: false, winner: null, acc: 0 };
     reset(sim);
     return sim;
   };
@@ -966,7 +960,7 @@
       a.stamina = CONFIG.SPRINT_S; a.tired = a.sprinting = a.waiting = a.holding = a.bonked = false; a.rest = 0;
       a.captures = a.splats = a.hits = a.longShot = a.rescues = 0;
       a.fuel = CONFIG.JET_FUEL; a.jetting = false; a.grabbed = a.grabFill = 0; a.flung = false;
-      a.sniper = 1; a.climbing = a.riding = false; a.zipT = 0; a.flight = 0; a.boots = a.laser = a.beam = a.burnt = a.slip = 0; a.gold = false; a.akMag = CONFIG.AK_MAG; a.akReload = 0; a.monkeys = 0;
+      a.sniper = 1; a.climbing = a.riding = false; a.zipT = 0; a.flight = 0; a.boots = a.burnt = a.slip = 0; a.gold = false; a.akMag = CONFIG.AK_MAG; a.akReload = 0; a.monkeys = 0;
       a.knock = 0; a.wield = ""; a.ride = a.rider = a.calling = 0;
       a.hook = a.hk = a.hookT = a.hookLen = a.hookWait = a.flingT = 0; a.hookTarget = -1; a.hookHold = false;
       a.route = ""; a.routeT = a.jetT = a.hopT = a.crateT = a.stacks = a.crateGo = a.routeBan = 0; a.botClimb = a.lift = false;
@@ -987,8 +981,6 @@
     for (const c of sim.caches) c.dark = 0;
     for (const p of sim.peels) p.dark = 0;
     for (const p of sim.puddles) p.dark = 0;
-    sim.weather.boltT = CONFIG.BOLT_S[0]; sim.weather.boltWarn = 0;
-    for (const a of sim.actors) a.boltCool = 0;
     for (const g of sim.ghosts) { g.x = g.wx = g.hx; g.z = g.wz = g.hz; g.state = 0; g.t = 0; }
     if (sim.hooks.length && ARENA.hookSpots.length) {
       // One hook hidden in each half, at the same seeded spot turned half round, so neither side is favoured.
@@ -997,12 +989,10 @@
     }
     for (const g of sim.gorillas) { g.x = g.wx = g.hx; g.z = g.wz = g.hz; g.vx = g.vz = 0; g.state = G_ROAM; g.t = 0; g.holding = -1; g.held = 0; g.hookCool = 0; g.ex = g.ez = g.stall = g.throwT = 0; }
     sim.goldLeft = CONFIG.GOLD_GUNS;
-    // Each pair of spots starts with the same power (boots, laser eyes, then the halving or cold storage by the seed);
+    // Each pair of spots starts with the same power (boots, the monkeys, then the halving or cold storage by the seed);
     // after that each draws from the seed, so a seed replays the round's power-ups too.
     for (let i = 0; i < sim.powers.length; i++) { const p = sim.powers[i]; p.dark = 0; p.kind = [0, 3, seed & 1 ? 2 : 1][(i >> 1) % 3]; }
     for (const t of TEAMS) sim.halving[t] = sim.cold[t] = 0;
-    const w = sim.weather;
-    w.kind = "clear"; w.left = CONFIG.WEATHER_S[0]; w.strength = 0;
     sim.score.blue = sim.score.red = 0;
     sim.time = sim.acc = 0;
     sim.prep = sim.prepS;
@@ -1384,15 +1374,7 @@
   // Throw tool `kind` from actor `id` along `yaw` (radians, 0 toward +z) with an upward `pitch` added to the lob.
   const fire = (sim, id, yaw, pitch = 0, kind = "paint") => {
     use(sim);
-    // Laser eyes ready: the trigger fires them instead, one long beam (`stepBeam`).
-    const la = sim.actors[id];
-    if (la.laser > 0 && la.beam <= 0 && (kind === "paint" || kind === "ak" || kind === "gold") && !sim.over && la.splat <= 0 && la.trapped <= 0 && !la.grabbed) {
-      la.laser = 0; la.beam = CONFIG.BEAM_S; la.heading = yaw; la.beamLen = 0;
-      emit(sim, "laseron", la.team, id, la.x, la.y + 1.5, la.z);
-      return true;
-    }
-    if (la.beam > 0) return false;
-    const a = la, tool = TOOLS[kind];
+    const a = sim.actors[id], tool = TOOLS[kind];
     if (sim.over || !tool || a.splat > 0 || a.trapped > 0 || a.cooldown > 0 || (tool.max && a[kind] <= 0) || (kind === "crate") !== a.holding || a.burnt > 0 || a.slip > 0 || a.grabbed || (kind === "gold" && !a.gold) || (kind === "ak" && (a.akMag <= 0 || a.akReload > 0))) return false;
     let s = null;
     for (let i = 0; i < sim.shots.length && !s; i++) if (!sim.shots[i].live) s = sim.shots[i];
@@ -1956,40 +1938,6 @@
       h.state = 1; h.holder = a.id; a.hook = i + 1; a.hk = 0;
       emit(sim, "hookget", a.team, a.id, h.x, h.y, h.z);
       return;
-    }
-  };
-  // ---- Laser eyes ----
-  // The beam: from the eyes straight along the Ooga's heading, as far as the first solid thing (`BEAM_LEN` at most);
-  // every rival it touches is splatted, every gorilla stunned, every ghost popped. It lasts `BEAM_S`.
-  const BEAM_SHOT = { kind: "laser", owner: -1, team: null, ox: 0, oz: 0 };
-  const stepBeam = (sim, a, dt) => {
-    if ((a.beam -= dt) <= 0 || a.splat > 0 || a.trapped > 0 || a.grabbed) {
-      a.beam = 0; a.beamLen = 0;
-      emit(sim, "laseroff", a.team, a.id, a.x, a.y + 1.5, a.z);
-      return;
-    }
-    const ey = a.y + (a.crouch ? CONFIG.CROUCH_H - 0.15 : 1.5), dx = Math.sin(a.heading), dz = Math.cos(a.heading);
-    let len = 0.4;
-    for (; len < CONFIG.BEAM_LEN; len += 0.25) if (solidAt(a.x + dx * len, ey, a.z + dz * len)) break;
-    a.beamLen = len;
-    const R = CONFIG.BEAM_R;
-    for (const b of sim.actors) {
-      if (b.team === a.team || !open(b)) continue;
-      const rx = b.x - a.x, rz = b.z - a.z, along = rx * dx + rz * dz;
-      if (along < 0 || along > len) continue;
-      const side = Math.abs(rx * dz - rz * dx);
-      if (side < R + CONFIG.BODY_R * 0.5 && ey > b.y - 0.1 && ey < b.y + heightOf(b) + 0.2) {
-        BEAM_SHOT.owner = a.id; BEAM_SHOT.team = a.team; BEAM_SHOT.ox = a.x; BEAM_SHOT.oz = a.z;
-        splat(sim, b, false, BEAM_SHOT);
-      }
-    }
-    for (const g of sim.gorillas) {
-      const rx = g.x - a.x, rz = g.z - a.z, along = rx * dx + rz * dz;
-      if (g.state !== G_STUN && along > 0 && along < len && Math.abs(rx * dz - rz * dx) < 1) stunGorilla(sim, g, a.id);
-    }
-    for (const g of sim.ghosts) {
-      const rx = g.x - a.x, rz = g.z - a.z, along = rx * dx + rz * dz;
-      if (g.state !== 2 && along > 0 && along < len && Math.abs(rx * dz - rz * dx) < 0.8 && Math.abs(g.y - ey) < 1.2) popGhost(sim, g, a.id);
     }
   };
   // ---- Ghosts ----
@@ -2559,20 +2507,6 @@
     // Throw at the nearest open rival in range, after holding them in sight for `BOT_AIM` (so a rival who runs past
     // gets a moment, and a bot just back from a splat can't throw at once): a net at a carrier, now and then a grenade
     // or a rocket, otherwise paint, leading the run a little with a seeded wobble.
-    // Beaming: swing the laser toward the nearest rival in sight, at a turn a visitor could match.
-    if (a.beam > 0) {
-      let t = null, best = CONFIG.BEAM_LEN * CONFIG.BEAM_LEN;
-      for (const b of sim.actors) {
-        if (b.team === a.team || !open(b)) continue;
-        const dd = (b.x - a.x) ** 2 + (b.z - a.z) ** 2;
-        if (dd < best && clearLine(a.x, a.z, b.x, b.z, 0.05, 1.5)) { best = dd; t = b; }
-      }
-      if (t) {
-        const want = Math.atan2(t.x - a.x, t.z - a.z), diff = Math.atan2(Math.sin(want - a.heading), Math.cos(want - a.heading));
-        a.heading += Math.max(-2.2 * dt, Math.min(2.2 * dt, diff));
-      }
-      return;
-    }
     if (a.hook && !a.hk && a.hookWait <= 0 && sim.prep <= 0) botHook(sim, a);
     // A gorilla charging this Ooga: a splat of paint stuns it (the hook, above, frees a teammate from one).
     if (a.cooldown <= 0 && sim.prep <= 0 && !a.holding && sim.rng() < dt * 1.2) {
@@ -2668,7 +2602,6 @@
       if (p.dark > 0 || a.y > 1.2 || (a.x - p.x) ** 2 + (a.z - p.z) ** 2 > CONFIG.POWER_R * CONFIG.POWER_R) continue;
       const kind = POWERS[p.kind];
       if (kind === "boots") a.boots = CONFIG.BOOTS_S;
-      else if (kind === "laser") a.laser = CONFIG.LASER_S;
       else if (kind === "monkeys") a.monkeys = CONFIG.MONKEYS_S;
       else if (kind === "halving") sim.halving[a.team] = CONFIG.HALVING_S;
       else sim.cold[a.team] = CONFIG.COLD_S;
@@ -2755,60 +2688,6 @@
       if (!ok) { c.x = ox; c.z = oz; } else if (Math.abs(c.x - ox) + Math.abs(c.z - oz) > 1e-6) a.pushing = true;
     }
   };
-  // The weather: a seeded run of clear and stormy spells, `strength` easing in and out of a storm (0 to 1).
-  // Each map's chance of a stormy spell.
-  const MAP_WEATHER = { fort: 0.2, town: 0.15, jungle: 0.4, haunted: 0.3 };
-  const stepBolt = (sim, w, dt) => {
-    if (w.boltWarn > 0) {
-      if ((w.boltWarn -= dt) > 0) return;
-      w.boltWarn = 0;
-      emit(sim, "bolt", null, -1, w.boltX, 0, w.boltZ);
-      for (const a of sim.actors) {
-        if (!open(a) || a.boltCool > 0 || a.grabbed || (a.x - w.boltX) ** 2 + (a.z - w.boltZ) ** 2 > CONFIG.BOLT_R * CONFIG.BOLT_R) continue;
-        a.boltCool = CONFIG.BOLT_COOL;
-        splat(sim, a, false, null);
-      }
-      return;
-    }
-    if (w.kind !== "storm" || (w.boltT -= dt) > 0) return;
-    let n = 0;
-    for (const a of sim.actors) if (open(a) && a.boltCool <= 0 && !a.grabbed && onIsland(a.x, a.z) && a.y > -0.5) n++;
-    if (!n) { w.boltT = 2; return; }
-    let k = Math.floor(sim.rng() * n);
-    for (const a of sim.actors) {
-      if (!open(a) || a.boltCool > 0 || a.grabbed || !onIsland(a.x, a.z) || a.y <= -0.5 || k--) continue;
-      w.boltX = a.x; w.boltZ = a.z;
-      emit(sim, "boltwarn", a.team, a.id, a.x, 0, a.z);
-      break;
-    }
-    w.boltWarn = CONFIG.BOLT_WARN;
-    w.boltT = CONFIG.BOLT_S[0] + sim.rng() * (CONFIG.BOLT_S[1] - CONFIG.BOLT_S[0]);
-  };
-  const stepWeather = (sim, dt) => {
-    const w = sim.weather;
-    w.left -= dt;
-    if (w.left <= 0) {
-      // Live weather (`setLive`) holds its kind; otherwise each spell is a seeded draw.
-      // Its own mix on each map; a busy network still makes a storm.
-      const r = sim.rng();
-      w.kind = sim.live === "storm" || r < MAP_WEATHER[sim.map] ? "storm" : "clear";
-      w.left = CONFIG.WEATHER_S[0] + sim.rng() * (CONFIG.WEATHER_S[1] - CONFIG.WEATHER_S[0]);
-      emit(sim, "weather", null, -1, 0, 0, 0);
-    }
-    w.strength += ((w.kind === "storm" ? 1 : 0) - w.strength) * Math.min(1, dt * 0.4);
-    stepBolt(sim, w, dt);
-  };
-
-  // A busy Bitcoin network (`kind` "storm") brings a storm over a map's own seeded weather at once; anything else leaves
-  // that weather alone.
-  const setLive = (sim, kind) => {
-    // Only a busy network (storm) overrides a map's own weather; calmer fees say nothing.
-    kind = kind === "storm" ? "storm" : null;
-    if (kind === sim.live) return false;
-    sim.live = kind;
-    if (kind && kind !== sim.weather.kind) sim.weather.left = 0;
-    return true;
-  };
   // A real Bitcoin block was just found: every quiz pad and ammo cache is ready again.
   const newBlock = (sim, height = 0) => {
     for (const t of sim.traps) t.dark = 0;
@@ -2843,7 +2722,6 @@
       sim.prep = Math.max(0, sim.prep - dt);
       if (prepWas > 0 && sim.prep === 0) emit(sim, "go", null, -1, 0, 0, 0);
     }
-    stepWeather(sim, dt);
     // Each step takes the four in the other order from the last, so neither side always moves, picks up or reaches a
     // dropped block first.
     sim.flip = !sim.flip;
@@ -2853,15 +2731,12 @@
       const input = (sim.inputs && sim.inputs[a.id]) || given;
       if (a.cooldown > 0) a.cooldown -= dt;
       if (a.monkeyCool > 0) a.monkeyCool -= dt;
-      if (a.boltCool > 0) a.boltCool -= dt;
       if (a.hookWait > 0) a.hookWait -= dt;
       if (a.flingT > 0) a.flingT = a.grounded ? 0 : a.flingT - dt;
       if (a.hk) { a.hookHold = !a.bot && !!input.crouch; stepHook(sim, a, dt); }
       // Status clocks belong to every actor, including mounted riders and grabbed actors that return early.
       if (a.knock > 0) a.knock = Math.max(0, a.knock - dt);
       if (a.boots > 0) a.boots = Math.max(0, a.boots - dt);
-      if (a.laser > 0) a.laser = Math.max(0, a.laser - dt);
-      if (a.beam > 0) stepBeam(sim, a, dt);
       if (a.monkeys > 0) a.monkeys = Math.max(0, a.monkeys - dt);
       if (a.akReload > 0 && (a.akReload -= dt) <= 0) { a.akReload = 0; a.akMag = CONFIG.AK_MAG; emit(sim, "reloaded", a.team, a.id, a.x, a.y, a.z); }
       if (a.netted > 0) { a.netted -= dt; if (a.netted <= 0) { a.netted = 0; emit(sim, "unnet", a.team, a.id, a.x, a.y, a.z); } }
@@ -3084,7 +2959,7 @@
       // where they run, unless they just threw.
       if (a.slip > 0) { /* spinning: the heading turns by itself */ }
       else if (!a.bot && free && input.face !== undefined) a.heading = input.face;
-      else if (sp > 0.5 && a.beam <= 0 && a.cooldown <= (a.bot ? sim.bots.cool : TOOLS.paint.cool) - 0.25) a.heading = Math.atan2(a.vx, a.vz);
+      else if (sp > 0.5 && a.cooldown <= (a.bot ? sim.bots.cool : TOOLS.paint.cool) - 0.25) a.heading = Math.atan2(a.vx, a.vz);
       if (a.carrying) { const f = sim.flags[a.carrying]; f.x = a.x; f.z = a.z; }
     }
     for (let n = 0; n < N; n++) touchFlags(sim, sim.actors[sim.flip ? N - 1 - n : n]);
@@ -3185,20 +3060,20 @@
   // clock the strip prints, and the whole seconds left on each power-up it lists. `stripChanged` reads them from the
   // sim and returns true, keeping the new values, only when one differs from the last call, so the scene touches the
   // strip only then; clearing `view.shown` makes the next call true (a new round, a new visit). Allocates nothing.
-  const stripView = () => ({ shown: false, blue: 0, red: 0, own: "", theirs: "", carrying: false, holding: false, splat: false, second: 0, boots: 0, laser: 0, monkeys: 0, halving: 0, cold: 0 });
+  const stripView = () => ({ shown: false, blue: 0, red: 0, own: "", theirs: "", carrying: false, holding: false, splat: false, second: 0, boots: 0, monkeys: 0, halving: 0, cold: 0 });
   const left = (s) => s > 0 ? Math.ceil(s) : 0;
   const stripChanged = (sim, v) => {
     const me = sim.actors[0], own = sim.flags[sim.team].state, theirs = sim.flags[sim.rival].state;
     const blue = sim.score.blue, red = sim.score.red, carrying = !!me.carrying, holding = !!me.holding, splatted = me.splat > 0;
-    const second = Math.floor(sim.time), boots = left(me.boots), laser = left(me.laser), monkeys = left(me.monkeys);
+    const second = Math.floor(sim.time), boots = left(me.boots), monkeys = left(me.monkeys);
     const halving = left(sim.halving[sim.team]), cold = left(sim.cold[sim.team]);
     if (v.shown && v.blue === blue && v.red === red && v.own === own && v.theirs === theirs && v.carrying === carrying && v.holding === holding
-      && v.splat === splatted && v.second === second && v.boots === boots && v.laser === laser && v.monkeys === monkeys && v.halving === halving && v.cold === cold) return false;
+      && v.splat === splatted && v.second === second && v.boots === boots && v.monkeys === monkeys && v.halving === halving && v.cold === cold) return false;
     v.shown = true; v.blue = blue; v.red = red; v.own = own; v.theirs = theirs; v.carrying = carrying; v.holding = holding; v.splat = splatted;
-    v.second = second; v.boots = boots; v.laser = laser; v.monkeys = monkeys; v.halving = halving; v.cold = cold;
+    v.second = second; v.boots = boots; v.monkeys = monkeys; v.halving = halving; v.cold = cold;
     return true;
   };
-  BL.blockSim = { WIELD, wield, heldOf, worth, mvp, tallyOf, ARSENAL, slotState, slotCount, splat, aimRise, flatPitch, settleHooks, parachuteIn, LEAF_TOP, stripView, stripChanged, hopOn, callRide, CONFIG, TOOLS, KINDS, SKILLS, POWERS, ARENAS, MAPS, TEAMS, other, create, reset, step, tick, setLive, newBlock, launch, nearCatapult, nearEnemyCatapult, zipSprings, fire, drop, pass, build, grab, zip, nearZip, onTower, escape, clearLine, solidAt, resolve, groundAt, onIsland, isleDepth, grapple, restSpot, restOn, edgeDist, cutChute, inGrave, inGraveOf, GRAVE_Y };
+  BL.blockSim = { WIELD, wield, heldOf, worth, mvp, tallyOf, ARSENAL, slotState, slotCount, splat, aimRise, flatPitch, settleHooks, parachuteIn, LEAF_TOP, stripView, stripChanged, hopOn, callRide, CONFIG, TOOLS, KINDS, SKILLS, POWERS, ARENAS, MAPS, TEAMS, other, create, reset, step, tick, newBlock, launch, nearCatapult, nearEnemyCatapult, zipSprings, fire, drop, pass, build, grab, zip, nearZip, onTower, escape, clearLine, solidAt, resolve, groundAt, onIsland, isleDepth, grapple, restSpot, restOn, edgeDist, cutChute, inGrave, inGraveOf, GRAVE_Y };
   // The map last stepped (or reset), for the scene's and models' reads.
   Object.defineProperty(BL.blockSim, "ARENA", { get: () => ARENA, enumerable: true });
 })();

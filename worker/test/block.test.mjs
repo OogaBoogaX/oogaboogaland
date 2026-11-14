@@ -344,6 +344,15 @@ test("the registry survives hibernation in one attachment under the socket limit
   await h.wake();
   const again = h.room.blockMatch;
   assert.equal(again.s, s); assert.equal(again.phase, "play"); assert.deepEqual([...again.seats], seats); assert.equal(again.host, host.id);
+  // A deployment that changes the frame layout must not revive the previous wire's live round.
+  host.ws.store.block.wire = W.WIRE - 1;
+  await h.wake();
+  assert.equal(h.room.blockMatch, null, "an older wire's saved round is discarded");
+  h.send(host.ws, { t: "bf", v: W.WIRE - 1, k: "reg", m: W.FIRST_MAP });
+  assert.equal(h.room.blockMatch, null, "an older page cannot register again");
+  h.send(host.ws, { t: "bf", k: "reg", m: W.FIRST_MAP });
+  assert.equal(h.room.blockMatch.wire, W.WIRE);
+  assert.notEqual(h.room.blockMatch.s, s, "a reloaded page gets a fresh round");
 });
 test("a new page hears the current match on arrival; an older page is never told of the feature it lacks", async t => {
   const h = harness(t), [a] = await crowd(h, 1);

@@ -1,6 +1,6 @@
 // Block Frenzy's sound, all synthesized: one AudioContext made on the first gesture, a fixed pool of tone voices
-// gated by gain, two noise bursts (a wet splat and a deep boom) shaped from one looping noise buffer, and three
-// held layers only ever shaped by gain: the rain, which follows the weather, and the zipline's whir.
+// gated by gain, two noise bursts (a wet splat and a deep boom) shaped from one looping noise buffer, and two
+// held layers only ever shaped by gain: the zipline's whir and the jetpack.
 //
 // The drop's pattern (`drop-audio.js`): nothing is built per cue, a cue only schedules automation on a pooled voice,
 // and it shares the island's mute key. Cues take a level from 0 to 1 so far-off sounds play quieter.
@@ -17,8 +17,8 @@
     let ctx = null, master = null, ready = false, muted = BL.sound.muted;
     const voices = [];
     let voiceNext = 0;
-    const layers = { rain: null, jet: null, zip: null, zipFilter: null, splat: null, splatFilter: null, boom: null, boomFilter: null };
-    const state = { rain: 0, zip: 0, jet: 0 };
+    const layers = { jet: null, zip: null, zipFilter: null, splat: null, splatFilter: null, boom: null, boomFilter: null };
+    const state = { zip: 0, jet: 0 };
     const init = () => {
       if (ctx || typeof AudioContext === "undefined") return;
       ctx = new AudioContext();
@@ -60,7 +60,6 @@
         noise.connect(f);
         if (keyFilter) layers[keyFilter] = f;
       };
-      tap("highpass", 3200, 0.4, "rain");
       tap("bandpass", 900, 6, "zip", "zipFilter");
       tap("lowpass", 520, 1.2, "jet");
       tap("bandpass", 1300, 1.2, "splat", "splatFilter");
@@ -156,7 +155,6 @@
       rifle: () => { blip("square", 220, 220, 0.002, 0.02, 0.04, 0.16); blip("square", 330, 330, 0.002, 0.02, 0.06, 0.16, 0.08); },
       zipOn: () => blip("triangle", 500, 900, 0.01, 0.05, 0.1, 0.14),
       zipOff: () => blip("triangle", 900, 400, 0.01, 0.05, 0.12, 0.14),
-      thunder: () => { boomNoise(0.8, 2.6); boomNoise(0.5, 1.8); },
       block: () => { chord([12, 7, 12, 19], 0.11, "square", 0.08, 0.2); boomNoise(0.35, 1.2); },
       power: () => chord([0, 7, 12, 19, 24], 0.04, "square", 0.04, 0.16),
       slip: (k = 1) => { blip("sine", 1200, 180, 0.005, 0.05, 0.6, 0.22 * k); blip("triangle", 300, 600, 0.005, 0.05, 0.15, 0.1 * k, 0.45); },
@@ -172,13 +170,6 @@
       grunt: (k = 1) => blip("triangle", 170, 140, 0.01, 0.05, 0.08, 0.12 * k),
       yelp: (k = 1) => blip("triangle", 520, 780, 0.005, 0.05, 0.12, 0.14 * k),
       free: () => chord([0, 7, 12], 0.05, "triangle", 0.05, 0.18),
-      // Laser eyes, the Ooga way: a soft "ooo-GA!" (a low hoot sliding up, then down), then silly boings, up and down
-      // by turns, through the beam's three seconds. Seven voices at most, as before, so other cues are not cut off.
-      laser: (k = 1) => {
-        blip("triangle", 170, 250, 0.02, 0.12, 0.06, 0.13 * k);
-        blip("triangle", 300, 160, 0.01, 0.1, 0.14, 0.13 * k, 0.2);
-        for (let i = 0; i < 5; i++) blip("sine", i % 2 ? 520 : 300, i % 2 ? 300 : 520, 0.01, 0.1, 0.12, 0.06 * k, 0.55 + i * 0.5);
-      },
       // A ghost: a wavering whoo, falling; a pop when it's painted away.
       boo: (k = 1) => { for (let i = 0; i < 3; i++) blip("sine", 620 - i * 60, 240, 0.08, 0.25, 0.4, 0.14 * k, i * 0.12); },
       ghostPop: (k = 1) => { blip("triangle", 900, 1800, 0.005, 0.04, 0.15, 0.14 * k); splatNoise(0.3 * k, 0.2); },
@@ -189,11 +180,10 @@
       hookOff: (k = 1) => { blip("triangle", 900, 1500, 0.01, 0.04, 0.08, 0.1 * k); },
       hookMiss: (k = 1) => { blip("triangle", 2200, 300, 0.02, 0.25, 0.4, 0.1 * k); }
     };
-    // The held layers follow `state` each frame: rain from the weather (0 to 1), the whir from the zipline.
+    // The held layers follow `state` each frame: the whir from the zipline, the jetpack's roar.
     const update = () => {
       if (!ready) return;
       const now = ctx.currentTime;
-      layers.rain.gain.setTargetAtTime(clamp(state.rain, 0, 1) * 0.05, now, 0.4);
       layers.zip.gain.setTargetAtTime(clamp(state.zip, 0, 1) * 0.12, now, 0.08);
       layers.jet.gain.setTargetAtTime(clamp(state.jet, 0, 1) * 0.22, now, 0.05);
       layers.zipFilter.frequency.setTargetAtTime(700 + clamp(state.zip, 0, 1) * 900, now, 0.1);
@@ -201,7 +191,7 @@
     const quiet = () => {
       if (!ready) return;
       const now = ctx.currentTime;
-      for (const k of ["rain", "zip", "jet", "splat", "boom"]) {
+      for (const k of ["zip", "jet", "splat", "boom"]) {
         layers[k].gain.cancelScheduledValues(now);
         layers[k].gain.setTargetAtTime(0, now, 0.05);
       }

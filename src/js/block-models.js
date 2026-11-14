@@ -811,12 +811,6 @@
     geo.castShadow = false;
     return geo;
   });
-  // A rain streak, a thin pale bar.
-  const streak = cached(() => {
-    const geo = box({ w: 0.025, h: 0.5, d: 0.025, color: "#c8d8ff", emissive: 0.4 });
-    geo.castShadow = false;
-    return geo;
-  });
   // The arsenal: every gun and held tool, the throws in flight, the monkey, the ammo box and the crate, each one merged
   // static mesh a team. The guns share a frame: the grip at the origin, the muzzle along +z, an Ooga's right toward -x.
   // The Ooga AK and the Golden AKs are Block Frenzy's own builds in the island rifle's frame and size (`gunGeometry`).
@@ -1138,8 +1132,7 @@
     return merge(...parts);
   });
   // The power-ups, each a floating glowing token over a little plinth: a lightning bolt (boots), a coin cut in half
-  // (the halving), an ice cube (cold storage) and a visor with two red eyes (laser eyes); and the ice over a frozen
-  // block.
+  // (the halving), an ice cube (cold storage) and a monkey (the monkeys); and the ice over a frozen block.
   const power = variants((i) => {
     const parts = [box({ w: 0.7, h: 0.12, d: 0.7, color: "#3a3430", offset: { y: 0.06 } })], y = 1.1;
     if (i === 0) {
@@ -1150,11 +1143,8 @@
     } else if (i === 2) {
       parts.push(bevelBox({ w: 0.5, h: 0.5, d: 0.5, color: "#bfe8ff", emissive: 0.7, offset: { y } }));
       parts.push(box({ w: 0.3, h: 0.06, d: 0.52, color: "#ffffff", emissive: 1, offset: { y: y + 0.1 } }));
-    } else if (i === 4) {
-      parts.push(moved(monkey(), 0, y - 0.35, 0));
     } else {
-      parts.push(box({ w: 0.6, h: 0.18, d: 0.14, color: "#24242a", offset: { y } }));
-      for (const x of [-0.15, 0.15]) parts.push(box({ w: 0.14, h: 0.1, d: 0.16, color: "#ff2a1a", emissive: 1, offset: { x, y } }));
+      parts.push(moved(monkey(), 0, y - 0.35, 0));
     }
     return merge(...parts);
   });
@@ -1266,10 +1256,8 @@
     for (let y = 0.15; y <= top; y += 0.3) parts.push(box({ w, h: 0.05, d: 0.05, color: "#b0905a", offset: { y } }));
     return merge(...parts);
   });
-  // A rain puddle: a flat dark pool (Gorilla Jungle's).
+  // A puddle: a flat dark pool (Gorilla Jungle's).
   const puddle = cached(() => box({ w: 1.6, h: 0.02, d: 1.3, color: "#3a5a78", emissive: 0.05, offset: { y: 0.015 } }));
-  // The lightning bolt's column, a tall thin white box with its foot at y 0.
-  const bolt = cached(() => box({ w: 0.28, h: 40, d: 0.28, color: "#eaf4ff", emissive: 1, offset: { y: 20 } }));
   // Haunted Hollow's dressing, one merged mesh, behind the Detail setting: an epitaph on each face of every tomb, a
   // skeleton in each open grave, and at each cellar's back door its plank door swung open flat against the wall
   // outside, with a lantern on the wall beside it. Glow is emissive faces only.
@@ -1309,20 +1297,6 @@
     geo.glass = 0.06; geo.castShadow = false;
     return geo;
   });
-  // The laser-eyes beam: a white-hot core in a red glow, one metre long along +z from the origin (the scene stretches
-  // it to the beam's length), in two strands a hand apart, one from each eye.
-  const beam = cached(() => {
-    const parts = [];
-    for (const x of [-0.07, 0.07]) {
-      parts.push(box({ w: 0.035, h: 0.035, d: 1, color: "#fff4f0", emissive: 1, offset: { x, z: 0.5 } }));
-      parts.push(box({ w: 0.09, h: 0.09, d: 1, color: "#ff2a1a", emissive: 1, offset: { x, z: 0.5 } }));
-    }
-    const geo = merge(...parts);
-    geo.castShadow = false;
-    return geo;
-  });
-  // Laser eyes lit: two glowing red eyes, set over the Ooga's own.
-  const laserEyes = cached(() => merge(box({ w: 0.1, h: 0.07, d: 0.06, color: "#ff3a1a", emissive: 1, offset: { x: -0.07 } }), box({ w: 0.1, h: 0.07, d: 0.06, color: "#ff3a1a", emissive: 1, offset: { x: 0.07 } })));
   // A ghost: a pale glowing sheet, round on top and flaring to a ragged hem, two dark eyes and an open mouth, its arms
   // out. Faces +z, its middle at y 0.
   const ghost = cached(() => {
@@ -1336,5 +1310,5 @@
     for (const s of [-1, 1]) parts.push(box({ w: 0.36, h: 0.14, d: 0.16, color: sheet, emissive: 0.5, offset: { x: s * 0.6, y: 0.08, z: 0.12 } }));
     return merge(...parts);
   });
-  BL.blockModels = { hookHead, rope, goldBlock, trophyRays, muzzleFlash, isle, keel, puddle, bolt, hauntDress, hauntMoon, mist, townDress, jungleRing, beam, laserEyes, ghost, net2, jetpack, jetFlames, monkey, catapult, catapultArm, chute, goldBall, banana, bananaPile, peel, firePit, flames, potato, potatoArm, power, ice, tramp, TEAM, ORANGE, GUNS, arena, stand, block, tick, ball, splat, ring, pad, bubble, crate, grenade, rocket, net, draped, streak, gun, ladder, rack, zipline, zipLight, trolley, cache, SPLATS: 6 };
+  BL.blockModels = { hookHead, rope, goldBlock, trophyRays, muzzleFlash, isle, keel, puddle, hauntDress, hauntMoon, mist, townDress, jungleRing, ghost, net2, jetpack, jetFlames, monkey, catapult, catapultArm, chute, goldBall, banana, bananaPile, peel, firePit, flames, potato, potatoArm, power, ice, tramp, TEAM, ORANGE, GUNS, arena, stand, block, tick, ball, splat, ring, pad, bubble, crate, grenade, rocket, net, draped, gun, ladder, rack, zipline, zipLight, trolley, cache, SPLATS: 6 };
 })();
