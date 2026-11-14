@@ -277,9 +277,15 @@ other gate, the other porch.
 - **The block** is in the cellar, one room at ground level, and shows on the mini-map as on every map. Ways in: up the
   porch stairs, through the front door and down the stairs inside; the side door at ground level; the back door, a
   2.4 m doorway in the back wall right behind the block (a timber frame, its plank door swung open and a lantern
-  beside it), straight in from the ground behind the house; or the jetpack or the catapult onto the upper floor. The
-  zipline comes down beside the porch. The cellar's front windows are barred, open at chest height only: the block's
-  glow shows through them and so does paint.
+  beside it), straight in from the ground behind the house; or the jetpack, the catapult or the zipline onto the upper
+  floor. The cellar's front windows are barred, open at chest height only: the block's glow shows through them and so
+  does paint.
+- **The zipline** rides into the rivals' house, not its yard. In the front corner by the stairs, past that side's
+  window, the upper floor's front wall is open above a 0.6 m sill, under the gable's first course (`ZIP_GAP`, 1.65 m
+  wide); the cable comes in through that gap and ends over the upper floor (`zipEnd`, whose fourth number is the
+  floor its pole stands on), so the rider drops 0.75 m onto the boards beside the top of the stairs down. Both houses
+  have the gap, red's turned half round with the rest. The sill keeps walkers and bots in; paint passes over it. The
+  trap rule is as on every map.
 - **Scoring.** A stolen block is mined in the ring out behind your own house, three steps from the back door.
 - **The graveyard.** A low iron fence across each half with the gate in it (two stone pillars, an arch reading REST IN
   PROFIT, a lantern on each pillar, a gargoyle on top); the defenders plug the gate with crates, and the way round is
@@ -355,7 +361,9 @@ quiz trap holding and shielding, a net slowing and grounding, a crate pushed, a 
 your own block away, for a side's own block, just outside the zone, when caught, or off a hook; ending the round at
 its target), a crate lifted, stacked and thrown to stun, a seeded round on
 autopilot replaying exactly to three captures, and two minutes of seeded play on every map raising no storm, rain or
-lightning. The `block` scene runs the title card and Escape, W S and A D on screen,
+lightning. Haunted Hollow's ziplines are checked to end over the rivals' upper floor, the rider and cable clear of
+every box through the gap, the rider standing on that floor after letting go, the two lines mirrored, and a bot
+taking the block or scoring from the landing. The `block` scene runs the title card and Escape, W S and A D on screen,
 a quiz trap through a wrong and a right answer, an autopilot round to its saved results, and the round trip.
 
 The entry hall's Node checks cover the stage's four cabinets, the hall reaching the ledge, the zipline's survey and the Rally poster's move; the `arcade` step walks it. The Block Frenzy browser checks also measure each weapon's

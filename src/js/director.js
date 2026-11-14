@@ -901,6 +901,9 @@
     scopeMe = me;
     window.BL.outdoorScope.reset();
   });
+  // Ooga Chat's outdoor voice bridge (outdoor-voice.js): the scope's transport, after the reset above so a reconnect's
+  // new epoch is the one it asks for. Without the room's feature it keeps the page out of every public audience.
+  const outdoorBridge = window.BL.outdoorVoice.attach();
   const unsubscribeVoice = window.BL.voice.subscribe(() => window.BL.hud.showAccount(net.state));
   // The roster's host dot and voice marks follow the room and voice, on whichever scene's roster is up.
   const unsubscribeRosterMarks = net.subscribeRoster(window.BL.hud.showVoices);
@@ -1028,7 +1031,7 @@
         const factory = first.id === "hub" && window.BL.caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
         const roofHole = factory ? { id: factory.id, ...window.BL.factoryModels.ROOF_TUBE } : null;
         const nook = first.id === "hub" ? first.libraryNook || null : null;
-        await window.BL.terrainCache.prepare({ seed: 1, roofHole, nook, cliffLedges: first.id === "hub" }, first.id, terrainController.signal);
+        await window.BL.terrainCache.prepare({ seed: 1, roofHole, nook }, first.id, terrainController.signal);
       } catch { /* A rejected opt-in build uses the ordinary path unless this page was destroyed. */ }
       if (destroyed) { models.release(first.id, []); return; }
     }
@@ -1197,6 +1200,7 @@
     window.BL.oogatronLive.dispose();
     unsubscribeAccount();
     unsubscribeScope();
+    outdoorBridge.dispose();
     unsubscribeVoice();
     unsubscribeRosterMarks();
     unsubscribeVoiceMarks();

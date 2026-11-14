@@ -124,24 +124,8 @@
   const { lettering: signLettering, letter: letterSign } = BL.signGlyphs;
   for (const el of document.querySelectorAll("[data-sign]")) letterSign(el);
   BL.nativeIcons.fill(document);
-  // The roster's voice mark, a 9x9 pixel speaker; the stylesheet shows the parts each state needs.
-  const VOICE_PARTS = [
-    ["voice-speaker", "M0 3h2v3H0zM2 2h1v5H2zM3 1h1v7H3z"],
-    ["voice-near", "M5 3h1v3H5z"],
-    ["voice-far", "M7 2h1v5H7z"],
-    ["voice-cross", "M5 3h1v1H5zM7 3h1v1H7zM6 4h1v1H6zM5 5h1v1H5zM7 5h1v1H7z"],
-    ["voice-slash", "M0 0h1v1H0zM1 1h1v1H1zM2 2h1v1H2zM3 3h1v1H3zM4 4h1v1H4zM5 5h1v1H5zM6 6h1v1H6zM7 7h1v1H7zM8 8h1v1H8z"],
-  ];
-  const voiceIcon = document.createElementNS(SIGN_NS, "svg");
-  voiceIcon.setAttribute("viewBox", "0 0 9 9");
-  voiceIcon.setAttribute("aria-hidden", "true");
-  for (const [part, d] of VOICE_PARTS) {
-    const path = document.createElementNS(SIGN_NS, "path");
-    path.setAttribute("class", part);
-    path.setAttribute("d", d);
-    path.setAttribute("fill", "currentColor");
-    voiceIcon.append(path);
-  }
+  // The roster's voice mark, a 9x9 pixel speaker shared with Ooga Chat; the stylesheet shows the parts each state needs.
+  const voiceIcon = BL.nativeIcons.voice();
   // The Bananas panel's banana (its glyph is in the panel's markup) before each amount its two lists show: every row
   // clones it, and the stylesheet hides it while the lists count sats.
   const amountBanana = document.createElementNS(SIGN_NS, "svg");
@@ -350,6 +334,8 @@
       }
       ctx.putImageData(image, 0, 0);
       el.modeFree.src = canvas.toDataURL("image/png");
+      // Ooga Chat's Main Island button shows the same island.
+      for (const img of document.querySelectorAll("img[data-island-icon]")) img.src = el.modeFree.src;
     };
     favicon.src = document.querySelector('link[rel="icon"][sizes="64x64"]').href;
     const sheet = BL.sheet.create({ signal });
@@ -2358,7 +2344,8 @@
     for (const button of fieldsFor("account-voice")) if (button.getAttribute("aria-pressed") !== pressed) button.setAttribute("aria-pressed", pressed);
   };
   // The microphone's note (#181), page-level as the account line is: muted in voice, it stays until unmuted;
-  // alone in voice (nobody here to hear, so the microphone is held off), it says so until someone comes;
+  // alone in voice (nobody here to hear, so the microphone is held off), it says so until someone comes; held (Ooga Chat's
+  // public audience is still being cut off after leaving the outdoors, outdoor-voice.js), it says so until the room confirms;
   // unmuting, or someone coming, says "Mic on" for MIC_ON_MS, then it goes. A mute outranks alone.
   // `keyed` is whether the page reserves M for voice mute outside editable fields.
   const MIC_ON_MS = 1500, MIC_COARSE = window.matchMedia("(pointer: coarse)").matches;
@@ -2366,8 +2353,8 @@
   const showMic = (voice, keyed) => {
     // Listen-only visitors (never opted in to speak, unlike one back from an earlier session) see no microphone status at all.
     const speaker = !!voice.micWanted || !!voice.returning;
-    const muted = speaker && voice.muted && (voice.publishing || voice.joining || voice.returning), alone = !muted && speaker && voice.alone;
-    const shown = muted ? keyed && !MIC_COARSE ? "Mic muted \u00b7 M to unmute" : "Mic muted \u00b7 Unmute in the panel" : alone ? "Alone \u00b7 mic off" : speaker && voice.publishing ? "Mic on" : "";
+    const muted = speaker && voice.muted && (voice.publishing || voice.joining || voice.returning), alone = !muted && speaker && (voice.alone || voice.held);
+    const shown = muted ? keyed && !MIC_COARSE ? "Mic muted \u00b7 M to unmute" : "Mic muted \u00b7 Unmute in the panel" : alone ? voice.held ? "Leaving public voice \u00b7 mic held" : "Alone \u00b7 mic off" : speaker && voice.publishing ? "Mic on" : "";
     if (shown === micShown) return;
     const note = $("mic-note"), was = micShown;
     micShown = shown;

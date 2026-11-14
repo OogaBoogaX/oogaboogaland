@@ -62,7 +62,11 @@
   // page donations are on. Deploy bananapayserver-staging first.
   "services": [{ "binding": "DONATIONS", "service": "bananapayserver-staging", "entrypoint": "PageApi" }],
   "durable_objects": {
-    "bindings": [{ "name": "ROOM", "class_name": "Room" }, { "name": "GAMES", "class_name": "GameHost" }, { "name": "INSPECTOR", "class_name": "Inspector" }, { "name": "AUDIENCE", "class_name": "Audience" }]
+    "bindings": [{ "name": "ROOM", "class_name": "Room" }, { "name": "GAMES", "class_name": "GameHost" }, { "name": "INSPECTOR", "class_name": "Inspector" }, { "name": "AUDIENCE", "class_name": "Audience" }],
+    // Every active object takes new code the moment a deploy lands, dropping its sockets (pages reconnect on their own),
+    // rather than Cloudflare's default of running old code for up to 5 minutes while it waits to hibernate: a fix reaches
+    // the room at once, and no Worker on new code talks to a Room, GameHost, Inspector or Audience still on the old.
+    "code_update_strategy": { "mode": "immediate" }
   },
   // v2: one GameHost a hosted game's instance (worker/src/games.js names them), apart from the island's Room.
   // v4: Ooga Chat's Audience (worker/src/audience.js), one named `audience`, reached only through ChatBridge and the Room.
