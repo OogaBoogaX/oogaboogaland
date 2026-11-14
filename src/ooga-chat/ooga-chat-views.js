@@ -100,15 +100,11 @@
       make("div", "oc-note", make("strong", "", "Everyone can listen."),
         make("span", "", "Team Ooga Booga contributors signed in with GitHub can also speak from a cloud.")),
       make("p", "oc-foot", "X accounts join as listeners."));
-    // The space: for now the visitor alone, as a listener; the zone roster (#653) fills it.
-    const space = make("h2", "slab-head oc-space-head", "Outdoor audio");
-    space.tabIndex = -1;
-    const name = make("span", "oc-person-name"), self = make("figure", "oc-person", make("span", "oc-face"),
-      make("figcaption", "", name, make("span", "oc-person-role", "Listener")));
-    const signedIn = make("div", "oc-space", space, make("div", "oc-people", self));
+    const space = audience(actions);
+    const signedIn = space.node;
     const slab = make("div", "slab oc-slab", make("p", "oc-status-line", status, reload), alert.el, signedOut, signedIn);
     const node = make("div", "oc-chat", slab);
-    let principal = null, avatar = null, refocus = false;
+    let principal = null, refocus = false;
     const update = (state) => {
       const { mode, boot, session, auth, notice: shown, busy } = state;
       const live = mode === "live", who = live && session;
@@ -133,7 +129,7 @@
       const was = principal;
       if (!who) {
         if (was) refocus = true;
-        principal = avatar = null;
+        principal = null;
         const first = Object.values(providers).find((el) => !el.disabled);
         if (refocus && first) {
           refocus = false;
@@ -142,41 +138,167 @@
         return;
       }
       refocus = false;
-      const identity = session.identity;
-      if (identity.principal !== principal || identity.avatar !== avatar) {
-        self.firstChild.replaceWith(face(identity));
-        principal = identity.principal;
-        avatar = identity.avatar;
-      }
-      // A rename changes the words only; the face and anything keyed by the principal stay.
-      if (name.textContent !== identity.display) {
-        name.textContent = identity.display;
-        self.title = identity.display;
-        self.setAttribute("aria-label", `${identity.display}, listening (you)`);
-      }
+      principal = session.identity.principal;
+      space.update(state);
       if (was !== principal && lost) space.focus();
     };
     const dispose = () => {
       listeners.abort();
+      space.dispose();
       node.remove();
     };
     return { node, update, dispose };
   };
-  // The account footer under every tab while signed in, and nothing while signed out: the name (a purple dot only while
-  // speaking from the app), the fixed-width microphone (off for a listener), Join Voice where the server allows
-  // speaking and the voice seam is ready, and Sign out. A disabled button says why on itself.
+  // The space a signed-in account listens in: the two zone buttons, a status line only when the list is not simply
+  // live, and one continuous four-column list of everyone the server reports there, speakers first (ooga-chat-roster.js
+  // orders it). Tiles are keyed by participant and source generation and reused, so an update moves and changes only
+  // what changed, coalesced to one pass a frame, and focus stays on the tile that had it. Arrow keys, Home and End move
+  // through the list from its one tab stop.
+  const ZONE_BUTTONS = { main: "Main Island", dsb: "DSB Land" };
+  const HEARD = {
+    connecting: () => "Connecting…",
+    joining: (zone) => `Joining ${ZONE_BUTTONS[zone]}…`,
+    reconnecting: () => "Reconnecting… this list may be out of date.",
+    full: (zone) => `${ZONE_BUTTONS[zone]} is full right now. Ooga Chat will try again.`,
+    unavailable: () => "Live audio isn't open here yet.",
+    stale: () => "This page is older than Ooga Chat's service. Reload to keep listening."
+  };
+  const audience = (actions) => {
+    const listeners = new AbortController(), { signal } = listeners;
+    const zones = make("div", "oc-zones");
+    zones.setAttribute("role", "group");
+    zones.setAttribute("aria-label", "Outdoor zone");
+    const zoneButtons = Object.entries(ZONE_BUTTONS).map(([id, label]) => {
+      let icon;
+      if (id === "main") {
+        icon = make("img", "oc-zone-icon");
+        icon.src = "art/main-island.png";
+        icon.width = icon.height = 64;
+        icon.alt = "";
+      } else icon = BL.nativeIcons.svg("dsb");
+      icon.classList.add("oc-zone-icon");
+      const el = make("button", "oc-zone", icon, make("span", "", label));
+      el.type = "button";
+      el.dataset.zone = id;
+      el.addEventListener("click", () => actions.zone(id), { signal });
+      zones.append(el);
+      return el;
+    });
+    const heard = make("p", "oc-heard");
+    heard.setAttribute("role", "status");
+    const grid = make("ul", "oc-people");
+    const node = make("div", "oc-space", zones, heard, grid);
+    const tiles = new Map();
+    let pending = null, frame = 0, version = -1, current = null, self = null;
+    const keyOf = (p) => `${p.id}:${p.generation}`;
+    const tile = (p) => {
+      const li = make("li", "oc-person"), dot = make("span", "oc-source-dot"), text = make("span", "oc-person-text"), voice = BL.nativeIcons.voice();
+      voice.setAttribute("class", "oc-voice");
+      const role = make("span", "oc-person-role", voice, make("span", ""));
+      li.tabIndex = -1;
+      li.dataset.key = keyOf(p);
+      li.append(make("span", "oc-face"), make("span", "oc-person-name", dot, text), role);
+      return { li, text, role, face: undefined, shown: "" };
+    };
+    // A tile's words, ring and face, changed only where they differ from what it shows.
+    const dress = (t, p) => {
+      const speaker = p.role === "speaker", you = p.id === self;
+      const words = `${p.display}|${p.role}|${p.source}|${p.muted}|${you}`;
+      if (t.face !== p.face) {
+        t.li.firstChild.replaceWith(face({ avatar: p.face }));
+        t.face = p.face;
+      }
+      if (t.shown === words) return;
+      t.shown = words;
+      t.li.dataset.role = p.role;
+      t.li.dataset.source = p.source;
+      t.li.dataset.muted = String(speaker && p.muted);
+      t.text.textContent = p.display;
+      t.li.title = p.display;
+      t.role.lastChild.textContent = speaker ? "Speaker" : "Listener";
+      const where = speaker ? p.source === "world" ? "speaking from the island" : "speaking from Ooga Chat" : "listening";
+      t.li.setAttribute("aria-label", `${p.display}${you ? " (you)" : ""}, ${where}${speaker && p.muted ? ", muted" : ""}`);
+    };
+    // One pass: tiles for the list in order, reused by key, moved only when out of place; the rest go.
+    const render = () => {
+      frame = 0;
+      const list = pending;
+      pending = null;
+      if (!list) return;
+      const doc = node.ownerDocument, held = doc.activeElement?.parentElement === grid ? doc.activeElement.dataset.key : null;
+      const keep = new Set();
+      list.forEach((p, i) => {
+        const key = keyOf(p);
+        keep.add(key);
+        let t = tiles.get(key);
+        if (!t) tiles.set(key, t = tile(p));
+        dress(t, p);
+        if (grid.children[i] !== t.li) grid.insertBefore(t.li, grid.children[i] || null);
+      });
+      for (const [key, t] of tiles) if (!keep.has(key)) {
+        t.li.remove();
+        tiles.delete(key);
+      }
+      if (!tiles.has(current)) current = list.length ? keyOf(list[0]) : null;
+      for (const [key, t] of tiles) t.li.tabIndex = key === current ? 0 : -1;
+      if (held && tiles.has(held) && doc.activeElement !== tiles.get(held).li) tiles.get(held).li.focus({ preventScroll: true });
+    };
+    grid.addEventListener("keydown", (event) => {
+      const items = [...grid.children], at = items.indexOf(event.target);
+      if (at < 0) return;
+      const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -4, ArrowDown: 4 }[event.key];
+      const to = step ? items[Math.max(0, Math.min(items.length - 1, at + step))] : event.key === "Home" ? items[0] : event.key === "End" ? items.at(-1) : null;
+      if (!to) return;
+      event.preventDefault();
+      event.target.tabIndex = -1;
+      to.tabIndex = 0;
+      current = to.dataset.key;
+      to.focus();
+    }, { signal });
+    grid.addEventListener("focusin", (event) => {
+      if (event.target.parentElement === grid) current = event.target.dataset.key;
+    }, { signal });
+    const update = (state) => {
+      const { audience: heardState, zone } = state;
+      self = state.session.identity.principal;
+      for (const el of zoneButtons) el.setAttribute("aria-pressed", String(el.dataset.zone === zone));
+      grid.setAttribute("aria-label", `People in ${ZONE_BUTTONS[zone]}`);
+      const words = HEARD[heardState.status]?.(zone) || "";
+      if (heard.textContent !== words) heard.textContent = words;
+      heard.hidden = !words;
+      node.dataset.audience = heardState.status;
+      if (heardState.version === version) return;
+      version = heardState.version;
+      pending = heardState.list;
+      if (!frame) frame = requestAnimationFrame(render);
+    };
+    const focus = () => (zoneButtons.find((el) => el.getAttribute("aria-pressed") === "true") || zoneButtons[0]).focus();
+    const dispose = () => {
+      listeners.abort();
+      cancelAnimationFrame(frame);
+      tiles.clear();
+      node.remove();
+    };
+    return { node, update, focus, dispose };
+  };
+  // The account footer under every tab while signed in, and nothing while signed out: the reactions slot (#655 fills
+  // it; empty until then) left of the account where there is room and above it where not, then the name (a purple dot
+  // only while speaking from the app), the fixed-width microphone, always first and off for a listener, Join Voice for
+  // a listener the server allows to speak (Leave Voice for a speaker), and Sign out. A disabled button says why on
+  // itself. The voice state is the seam's (`state.voice`); nothing here opens a microphone.
   const account = ({ actions, media }) => {
     const listeners = new AbortController(), { signal } = listeners;
     const name = make("span", "oc-account-name"), dot = make("span", "oc-speaker-dot");
     dot.hidden = true;
     const mute = button("oc-foot-button oc-mute", "Unmute"), join = button("oc-foot-button oc-join", "Join voice"), out = button("oc-signout link", "Sign out");
     const muteWhy = explain(mute), joinWhy = explain(join);
-    mute.disabled = true;
-    muteWhy.textContent = "Join voice first to unmute.";
-    join.addEventListener("click", () => actions.joinVoice(), { signal });
+    mute.addEventListener("click", () => actions.mute(), { signal });
+    join.addEventListener("click", () => (join.dataset.voice === "speaker" ? actions.leaveVoice() : actions.joinVoice()), { signal });
     out.addEventListener("click", () => actions.signOut(), { signal });
-    const node = make("footer", "oc-account", make("p", "oc-account-who", dot, name),
-      make("div", "oc-account-actions", mute, join, out, muteWhy, joinWhy));
+    const reactions = make("div", "oc-reactions");
+    reactions.hidden = true;
+    const node = make("footer", "oc-account", reactions, make("div", "oc-account-main", make("p", "oc-account-who", dot, name),
+      make("div", "oc-account-actions", mute, join, out, muteWhy, joinWhy)));
     node.hidden = true;
     const update = (state) => {
       const who = state.mode === "live" && state.session;
@@ -188,9 +310,16 @@
         name.textContent = who.identity.display;
         name.title = who.identity.display;
       }
-      const allowed = gates(state, Date.now());
-      join.disabled = !allowed.joinVoice || !media.available || !!state.busy;
-      const why = allowed.why || (media.available ? "" : "Voice opens here soon.");
+      const speaker = state.voice.role === "speaker", allowed = gates(state, Date.now());
+      dot.hidden = !speaker;
+      mute.disabled = !speaker || !!state.busy;
+      mute.textContent = speaker && !state.voice.muted ? "Mute" : "Unmute";
+      mute.setAttribute("aria-pressed", String(speaker && state.voice.muted));
+      muteWhy.textContent = speaker ? "" : "Join voice first to unmute.";
+      join.dataset.voice = speaker ? "speaker" : "listener";
+      join.textContent = speaker ? "Leave voice" : "Join voice";
+      join.disabled = speaker ? !!state.busy : !allowed.joinVoice || !media.available || !!state.busy;
+      const why = speaker ? "" : allowed.why || (media.available ? "" : "Voice opens here soon.");
       joinWhy.textContent = why;
       join.title = why;
     };

@@ -4812,7 +4812,7 @@ const hudNoticeChecks = async () => {
     };
     const nodes = Object.fromEntries(["toast", "reload-notice", "message-stack"].map(id => [id, element()]));
     nodes["message-stack"].children = [nodes["reload-notice"], nodes.toast];
-    const BL = { game: {}, scene: {}, signGlyphs: { lettering() {}, letter() {} }, nativeIcons: { fill() {} } };
+    const BL = { game: {}, scene: {}, signGlyphs: { lettering() {}, letter() {} }, nativeIcons: { fill() {}, voice: () => ({ cloneNode: () => ({}) }) } };
     runInNewContext(source, {
       window: { BL, matchMedia: () => ({ matches: false }), setTimeout: (fn, ms) => { timers.set(++serial, { fn, ms }); return serial; }, clearTimeout: id => timers.delete(id) },
       document: { getElementById: id => nodes[id], querySelectorAll: () => [], createElement: element,
@@ -10504,7 +10504,7 @@ const donationClientChecks = async () => {
     JSON.stringify({ sharedRate, validRate, hiddenRate, retainedRate, waiting, reused, pendingClosed, listeners: priceListeners.size, timers: priceTimers.size }));
 
   // Regression: the pile showed whole gameplay stock (79) beside a panel valued at 77.97.
-  const valueBL = { game: {}, scene: {}, signGlyphs: { lettering() {}, letter() {} }, nativeIcons: { fill() {} }, donationRate: { current: null }, donations: { real: true,
+  const valueBL = { game: {}, scene: {}, signGlyphs: { lettering() {}, letter() {} }, nativeIcons: { fill() {}, voice: () => ({ cloneNode: () => ({}) }) }, donationRate: { current: null }, donations: { real: true,
     state: { tally: { sats: 96458, rate: { usdPerBtc: 80832.63, at: 10 } } } } };
   runInNewContext(await readFile(new URL("../src/js/hud.js", import.meta.url), "utf8"), {
     window: { BL: valueBL, matchMedia: () => ({ matches: false }) },
@@ -32599,6 +32599,45 @@ const oogaChatChecks = async () => {
   record("Ooga Chat account: every sign-in lands as a listener with gates only the server's answer opens, a stale window or failed check closes them, sign-out releases capture before the request and offers a retry when unconfirmed, and another principal or an expired session releases and says so",
     Object.values(flow).every(Boolean), JSON.stringify(flow));
 
+  // The audience roster (audience protocol 1): the space's one order, and a snapshot and deltas applied whole or not at
+  // all, by participant and generation, with stale ones dropped and gaps found.
+  const R = load(["src/ooga-chat/ooga-chat-config.js", "src/ooga-chat/ooga-chat-roster.js"], { window: {}, URLSearchParams }).oogaChatRoster;
+  const who = (id, source, role, login, extra = {}) => ({ id, generation: 1, source, role, login, ...extra });
+  const cast = [who("l-zed", "app", "listener", "zed"), who("w-b", "world", "speaker", "Bea", { contributions: 9 }), who("me", "app", "listener", "me"),
+    who("w-a", "world", "speaker", "abe", { contributions: 9 }), who("a-y", "app", "speaker", "yan"), who("w-n", "world", "speaker", "nil"),
+    who("w-0", "world", "speaker", "zero", { contributions: 0 }), who("a-b", "app", "speaker", "bo"), who("l-amy", "app", "listener", "Amy"),
+    who("w-top", "world", "speaker", "top", { contributions: 120 }), who("l-amy", "app", "listener", "Amy", { display: "Amy, again" })];
+  const ids = (list) => list.map((p) => p.id).join();
+  const roster = R.create();
+  roster.expect("main");
+  const snap = (epoch, revision, participants, zone = "main") => roster.apply({ type: "snapshot", zone, epoch, revision, participants });
+  const delta = (epoch, revision, upsert = [], remove = []) => roster.apply({ type: "delta", zone: "main", epoch, revision, upsert, remove });
+  const first = snap(3, 10, cast), deduped = first === "applied" && roster.size === 10 && roster.get("l-amy").display === "Amy";
+  const ordered = ids(roster.list("me")), asSpeaker = (snap(3, 11, cast.map((p) => p.id === "me" ? { ...p, role: "speaker" } : p)), ids(roster.list("me")));
+  snap(3, 12, cast);
+  const results = [delta(3, 12), delta(2, 99), delta(3, 14), delta(3, 13, [who("l-new", "app", "listener", "new"), { id: "bad id" }])];
+  const atomic = !roster.get("l-new") && roster.revision === 12;
+  const renamed = delta(3, 13, [{ ...cast[0], display: "Zed, renamed" }]) === "applied" && roster.get("l-zed").display === "Zed, renamed" && ids(roster.list("me")) === ordered;
+  const olderGen = delta(3, 14, [], [{ id: "w-top", generation: 0 }]) === "applied" && !!roster.get("w-top");
+  const newerGen = delta(3, 15, [{ ...cast[0], generation: 2 }], [{ id: "a-b", generation: 1 }]) === "applied" && roster.get("l-zed").generation === 2 && !roster.get("a-b");
+  const crowd = R.create();
+  crowd.expect("dsb");
+  const many = Array.from({ length: 600 }, (_, i) => who(`l-${i}`, "app", "listener", `listener-${String(i).padStart(3, "0")}`));
+  crowd.apply({ type: "snapshot", zone: "dsb", epoch: 1, revision: 1, participants: many });
+  const audience = {
+    order: ordered === "w-top,w-a,w-b,w-0,w-n,a-b,a-y,me,l-amy,l-zed",
+    selfAmongApp: asSpeaker === "w-top,w-a,w-b,w-0,w-n,me,a-b,a-y,l-amy,l-zed",
+    deduped,
+    stale: results[0] === "stale" && results[1] === "stale",
+    gap: results[2] === "gap" && results[3] === "gap" && atomic,
+    renamed, olderGen, newerGen,
+    otherZone: snap(9, 1, cast, "dsb") === "ignored" && snap(2, 99, cast) === "stale",
+    crowd: crowd.list(null).length === 600 && crowd.list(null)[599].id === "l-599",
+    restarted: (roster.expect("dsb"), !roster.ready && roster.list("me").length === 0)
+  };
+  record("Ooga Chat roster: world speakers by contribution total then name with a missing total after zero, then app speakers with the visitor first, then listeners with the visitor first; snapshots dedupe by id, stale or other-zone messages drop, a gap or bad delta changes nothing, generations decide removals, and hundreds of listeners all stay",
+    Object.values(audience).every(Boolean), JSON.stringify(audience));
+
   // The production adapter against a stand-in fetch: every failure is an explicit unavailable mode, and dispose aborts.
   const answer = (status, type, body) => async () => ({ ok: status < 400, status, headers: { get: () => type }, json: async () => body });
   const adapterWith = (fetch) => load(["src/ooga-chat/ooga-chat-config.js", "src/ooga-chat/ooga-chat-http.js"],
@@ -32682,6 +32721,25 @@ const oogaChatChecks = async () => {
     record("Ooga Chat build: one hashed same-origin script and stylesheet holding only the app's and the shared modules, no fixture code unless asked, its pictures renamed by hash, its policy in _headers, and never staged over the island's folders or a folder it did not make",
       Object.values(build).every(Boolean), JSON.stringify(build));
   } finally { rmSync(out, { recursive: true, force: true }); }
+
+  // Ooga Chat's zone marks are the island's own: DSB Land's paths as the island draws them, Main Island's mark the
+  // island's 64px favicon keyed as hud.js keys it for its destination button.
+  const islandHtml = readFileSync(join(root, "src/index.html"), "utf8");
+  const icons = load(["src/js/native-icons.js"], { window: {} }).nativeIcons;
+  const inline = [...islandHtml.match(/<svg class="dsb-island-icon"[\s\S]*?<\/svg>/)[0].matchAll(/<path fill="([^"]+)" d="([^"]+)"\/>/g)].map((m) => `${m[1]} ${m[2]}`);
+  const { decode } = await import(pathToFileURL(join(root, "scripts/distribution-icons.mjs")).href);
+  const favicon = decode(Buffer.from(islandHtml.match(/<link rel="icon" type="image\/png" sizes="64x64" href="data:image\/png;base64,([^"]+)">/)[1], "base64"));
+  for (let i = 0; i < favicon.px.length; i += 4) {
+    const alpha = Math.max(0, Math.min(1, (Math.max(favicon.px[i], favicon.px[i + 1], favicon.px[i + 2]) - 24) / 56));
+    favicon.px[i + 3] = Math.round(alpha * 255);
+    if (alpha > 0 && alpha < 1) for (let c = 0; c < 3; c++) favicon.px[i + c] = Math.min(255, Math.round(favicon.px[i + c] / alpha));
+  }
+  const keyed = decode(readFileSync(join(root, "src/ooga-chat/art/main-island.png")));
+  const marks = { dsb: inline.join("|") === icons.ICONS.dsb[3].map(([fill, d]) => `${fill} ${d}`).join("|") && inline.length === 8,
+    island: keyed.w === favicon.w && keyed.h === favicon.h && keyed.px.equals(favicon.px),
+    voice: /BL\.nativeIcons\.voice\(\)/.test(readFileSync(join(root, "src/js/hud.js"), "utf8")) && icons.VOICE_PARTS.length === 5 };
+  record("Ooga Chat zone marks: DSB Land's is the island's own paths, Main Island's is the island's favicon keyed as its destination button keys it, and the voice mark is the one the island's roster draws",
+    Object.values(marks).every(Boolean), JSON.stringify(marks));
 
   // The island's tabs draw from the same icons, and every icon slot names one that exists.
   const I = load(["src/js/native-icons.js"], { window: {} }).nativeIcons;

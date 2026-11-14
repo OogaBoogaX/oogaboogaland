@@ -5,7 +5,8 @@ conversation in Ooga Booga Land, and verified GitHub contributors can speak from
 as its own entry, build and output, and shares the island's native look and components without loading the island.
 
 This document covers the foundation (#651): the entry, the build, the shell, the configuration contract and the
-fixture entry; and sign-in (#652): the session contract, the sign-in return and the account lifecycle. The roster and controls (#653), voice (#654), reactions (#655), the shared panels and
+fixture entry; sign-in (#652): the session contract, the sign-in return and the account lifecycle; and the space
+(#653): the zones, the audience contract, the roster's order and the footer's controls. The roster and controls (#653), voice (#654), reactions (#655), the shared panels and
 Feed the Oogas (#656) and the installable app (#657) build on it. Nothing here deploys anything: Cloudflare resources,
 the domain, bindings and secrets belong to #662 and its owner.
 
@@ -31,12 +32,13 @@ is unchanged and never stages the app.
 | `src/ooga-chat/ooga-chat.css` | the app's layout; the look comes from `src/native.css` |
 | `src/ooga-chat/ooga-chat-config.js` | `BL.oogaChatConfig`: the bootstrap and session contracts and their parsers, the sign-in return, zones, storage keys and their sweep, the build identity |
 | `src/ooga-chat/ooga-chat-auth.js` | `BL.oogaChatAuth`: the account lifecycle (`create`) and what an account may do (`gates`) |
+| `src/ooga-chat/ooga-chat-roster.js` | `BL.oogaChatRoster`: one zone's audience from snapshots and deltas, and the space's order |
 | `src/ooga-chat/ooga-chat-shell.js` | `BL.oogaChatShell`: the tabs and the views they keep |
-| `src/ooga-chat/ooga-chat-views.js` | `BL.oogaChatViews`: the Ooga Chat view, the account footer, faces and the stand-ins for the shared panels |
+| `src/ooga-chat/ooga-chat-views.js` | `BL.oogaChatViews`: the Ooga Chat view (sign-in, or the zones and the roster), the account footer, faces and the stand-ins for the shared panels |
 | `src/ooga-chat/ooga-chat-http.js` | `BL.oogaChatHttp`: the production adapter |
 | `src/ooga-chat/ooga-chat-fixtures.js` | `BL.oogaChatFixtures`: the offline adapter, review only |
 | `src/ooga-chat/ooga-chat-app.js` | startup, loaded last |
-| `src/ooga-chat/art/` | pictures the views show, staged under their hash |
+| `src/ooga-chat/art/` | pictures the views show, staged under their hash. `main-island.png` is Main Island's destination mark: the island's 64px favicon keyed as `hud.js` keys it for its destination button (the suite holds the two equal) |
 | `scripts/ooga-chat.mjs` | the build, the guards and `--serve` |
 
 Shared with the island, one copy each:
@@ -45,7 +47,7 @@ Shared with the island, one copy each:
 |---|---|
 | `src/native.css` | the tokens, cave-sign lettering, panel title, status chip, stone slab and amber primary button. The island links it before `style.css`; `scripts/build.mjs` joins both into its one style block |
 | `src/js/sign-glyphs.js` | `BL.signGlyphs`: the cave-sign alphabet (`SIGN_GLYPHS`, which `hub-models.js` re-exports) and its DOM lettering (`lettering`, `letter`), which `hud.js` uses |
-| `src/js/native-icons.js` | `BL.nativeIcons`: the panel tabs' pixel icons (`bananas`, `roster`, `players`, `chat`) and Ooga Chat's outlined `cloud`. `hud.js` fills the island's tab slots (`data-native-icon`) from it |
+| `src/js/native-icons.js` | `BL.nativeIcons`: the panel tabs' pixel icons (`bananas`, `roster`, `players`, `chat`), Ooga Chat's outlined `cloud`, DSB Land's destination mark `dsb` (the island's `dsb-island-icon` paths, held equal by the suite) and `voice()`, the roster's voice mark. `hud.js` fills the island's tab slots (`data-native-icon`) from it and draws its roster's voice mark with it |
 
 A module the app may load is either `src/ooga-chat/ooga-chat-*.js` or named in `SHARED` in `scripts/ooga-chat.mjs`;
 the build fails on anything else, so a renderer, scene, socket or game cannot reach the app by accident. A shared
@@ -53,23 +55,27 @@ module reads nothing at load but `window.BL` and the document.
 
 ## Load order and contracts
 
-`sign-glyphs.js`, `native-icons.js`, `ooga-chat-config.js`, `ooga-chat-auth.js`, `ooga-chat-shell.js`, `ooga-chat-views.js`,
+`sign-glyphs.js`, `native-icons.js`, `ooga-chat-config.js`, `ooga-chat-auth.js`, `ooga-chat-roster.js`, `ooga-chat-shell.js`,
+`ooga-chat-views.js`,
 `ooga-chat-http.js`, then (fixture entry only) `ooga-chat-fixtures.js`, then `ooga-chat-app.js`. The build checks that
 `fixture.html` loads exactly `index.html`'s files plus the fixtures, just before the app.
 
-**Adapter.** `{ kind, bootstrap(), session(boot), signIn(boot, provider), signOut(boot), dispose() }`. `bootstrap`
+**Adapter.** `{ kind, bootstrap(), session(boot), signIn(boot, provider), signOut(boot), audience(boot, handlers), dispose() }`. `bootstrap`
 resolves to a parsed bootstrap (below), never throws. `session` resolves to a parsed session or `null` for signed
 out, and throws for any other failure, which the app shows as a recoverable error. `signIn` navigates (production)
 or returns a session (fixtures). `signOut` resolves only when the server confirms and throws otherwise. `dispose`
-aborts what is still in flight.
+aborts what is still in flight. `audience` opens the audience feed (below) and returns `{ zone(id), resync(), dispose() }`.
 
 **Shell.** `create({ root, tabs, ctx, selected, onSelect })` returns `{ update(state), select(id), dispose() }`. A
 tab is `{ id, label, icon, visible(state), view }`. A view is `view(ctx)` returning `{ node, update(state), dispose() }`:
 built the first time its tab is chosen, then kept. Switching tabs hides it, and `update` passes it the new state, so
 a view's own nodes and listeners (a sort, a draft, a voice control) survive both. `dispose` is the only teardown.
 
-**State.** `{ mode, boot, session, auth, notice, busy, zone }`, `mode` being `loading`, `live`, `unavailable` or
-`stale`, and `auth`, `notice` and `busy` the account's (below). `zone` is the saved outdoor zone, `main` or `dsb`.
+**State.** `{ mode, boot, session, auth, notice, busy, zone, voice, audience }`, `mode` being `loading`, `live`,
+`unavailable` or `stale`, and `auth`, `notice` and `busy` the account's (below). `zone` is the outdoor zone, `main` or
+`dsb`, saved. `voice` is the voice seam's `{ role, muted }`. `audience` is `{ status, zone, list, version }`: the feed's
+status (`off`, `connecting`, `joining`, `live`, `reconnecting`, `full`, `unavailable`, `stale`) and the list in the
+space's order.
 Public tabs: Ooga Chat, Bananas, Contributing Oogas. Online Oogas and The Commons show only while `gates` says
 `contributor`. Choosing a tab never signs in, signs out, changes the zone or touches voice. The account footer sits
 under every tab while signed in, and not at all while signed out.
@@ -187,6 +193,58 @@ app's prefix and any older unversioned `ooga-chat.` key, so no saved screen, rol
 person's picture, and never retried. A rename changes the words, not the face. Full names stay in the title and the
 accessible name when the line is cut short.
 
+## The space (#653)
+
+**Zones.** Two buttons, Main Island and DSB Land, each with the island's own destination mark left of its name; the
+chosen one is the native dark slab with a gold label. The server's zone policy decides who is in a zone (the outdoor
+boundaries are #658's and the backend's); choosing one here never moves a character or opens an interior. The zone
+already chosen changes nothing, so the microphone, the hand and any pending media stay as they are. Another zone
+saves the choice, hands the voice lease to the seam (`media.zone`), empties the list and shows "Joining…" until that
+zone's snapshot arrives, so no stale person or role from the old zone shows in the new one.
+
+**The audience feed (audience protocol 1).** `paths.audience` in the bootstrap (optional: without it the space says
+live audio isn't open yet and shows no one). One same-origin WebSocket; the page sends
+`{ "type": "join", "zone": "main", "protocol": 1 }` (again on every zone change) and `{ "type": "resync", "zone" }`
+after a gap. The server sends:
+
+```json
+{ "type": "snapshot", "zone": "main", "epoch": 7, "revision": 120, "participants": [ … ] }
+{ "type": "delta", "zone": "main", "epoch": 7, "revision": 121, "upsert": [ … ], "remove": [ { "id": "…", "generation": 3 } ] }
+```
+
+A participant is `{ id, generation, source, role, login, display, face, contributions, muted }`: `id` the server's
+opaque identity (the principal; the visitor is the participant whose `id` is their session's `principal`),
+`generation` the source generation (an integer that rises when the same person comes back from a new source),
+`source` `world` (speaking from the island) or `app` (Ooga Chat), `role` `speaker` or `listener`, `face` a same-origin
+path (a world speaker's native Ooga portrait, an app participant's profile picture) or nothing, `contributions` a world
+speaker's total or nothing (unknown, not zero), `muted` a speaker's source mute. A snapshot replaces the list; a
+delta must carry the next revision of the same epoch. An older epoch or revision is dropped; a later revision, a newer
+epoch or a delta that does not parse whole is a gap, applied not at all, and the page asks for a snapshot. A removal
+applies only to the generation it names or older. Close codes: 4401 the session ended (the page checks it again and
+marks the list reconnecting), 4426 another protocol revision (stale), 4429 the zone is full (the page waits 30 s).
+Otherwise it reconnects, backing off from 1 s to 30 s, and shows the list as reconnecting, never as live.
+
+**Order.** One continuous four-column list, speakers first, with no headings or gap between roles: world speakers by
+contribution total, most first, a missing total after every known one (zero included), ties alphabetical by login,
+case-insensitive, then by id; then app speakers, the visitor first among them and the rest alphabetical; then
+listeners, the visitor first and the rest alphabetical. The visitor never moves ahead of a world speaker. Totals sort;
+they grant nothing.
+
+**Tiles.** A face (world speakers their native Ooga portrait, everyone else their profile picture, the island's Ooga
+face when either is missing or fails), a speaker's 3px source ring outside a 3px dark gap (green `#22c55e` from the
+island, purple `#b18aff` from Ooga Chat; listeners neutral), the name without `@` on one line cut short with its
+whole self in the title and the accessible name, an app speaker's purple dot before it, and under it the native voice
+mark with Speaker (crossed and red when source-muted) or Listener. Tiles are keyed by `id` and `generation` and kept:
+an update changes and moves only what changed, once a frame, and focus stays on its tile. The list has one tab stop;
+arrow keys, Home and End move through every participant.
+
+**Footer.** The reactions slot (#655) left of the account where there is room and above it where not; then the name
+(a purple dot only while speaking from Ooga Chat), the microphone (always first, 84px wide whatever it says: a disabled
+Unmute for a listener, explaining voice must be joined first; Mute or Unmute for a speaker), Join Voice for a
+listener the server allows to speak (Leave Voice for a speaker), and Sign out as plain text. Buttons are 28px to see
+and 44px to touch, rows 16px apart so no touch band reaches another row. The seam (`media.state`) says who is a
+speaker; until #654 nobody is.
+
 ## Fixtures
 
 `fixture.html?state=` picks the canned answers: `signed-out`, `listener` (an X account, listening, whose handle and
@@ -195,6 +253,10 @@ answer both claim to be a contributor's), `contributor` (an eligible GitHub cont
 off), `expiring` (a contributor whose session ends 20 s after load), `signout-fails` (the server never confirms a
 sign-out), `demo-payment` (feed answered in demo mode) and `unavailable`. Signing in with GitHub lands on the state's
 own kind of account, and with X on the X listener. A return can be tried by adding `&signin=denied&provider=github`.
+`&roster=` picks what a signed-in account hears: `mixed` (the default: world and app speakers with a tie, a missing
+total and a source mute, listeners with a duplicate and a long name, then a join, a rename, a gap the page must
+resync over and a leave, one every 4 s), `empty`, `crowd` (300 listeners), `reconnecting` (drops after 6 s and comes
+back in a new epoch), `full` and `none` (no audience address).
 The accounts are named samples with no picture, never real people. Fixtures are isolated three ways:
 
 - a separate entry: `index.html` never loads `ooga-chat-fixtures.js`, and the build refuses one that does or that
@@ -232,8 +294,9 @@ to the page's own origin only.
 
 ## Size
 
-Measured from the staged app with sign-in (#652): a first visit is 4 requests (`index.html` 1.1 KB, script 51.3 KB,
-stylesheet 13.6 KB, sign-in picture 57.9 KB): about 124 KB, 78 KB gzipped (the foundation alone was 71 KB). For comparison, the island's portable page is about
+Measured from the staged app with the space (#653): a first visit is 5 requests (`index.html` 1.1 KB, script 70.8 KB,
+stylesheet 16.7 KB, sign-in picture 57.9 KB, Main Island's mark 3 KB): about 150 KB, 88 KB gzipped (the foundation
+alone was 71 KB, with sign-in 78 KB). For comparison, the island's portable page is about
 39.7 MB (23 MB gzipped). The app loads no 3D engine, terrain, cabinets, replays or live feeds. `FIRST_LOAD_BUDGET` in
 the build (96 KB gzipped) fails a build that grows past it; raise it deliberately, with the reason, when a later issue
 adds weight.
@@ -255,6 +318,9 @@ Each item is a proposal for the owner (`w-s-bitcoin`, #662, #663) to confirm or 
 - `GET paths.session` (proposed `/api/chat/me`): 401 signed out, or the identity protocol 1 answer above, with
   `Cache-Control: no-store`. The contributor policy decides `eligibility` and the capabilities; X is never eligible.
 - `POST paths.logout`: revokes the session and any media lease, answers 2xx only once done.
+- `paths.audience` and the audience feed (protocol 1, above, #665): authoritative membership by the zone policy,
+  roles from acknowledged leases, ids as principals, generations per source, world speakers' contribution totals and
+  same-origin native portraits, and the close codes. Listening never takes a world-player slot or makes a body.
 - Profile pictures on the app's origin (proxied or stored, `img-src 'self'`), at a path that changes when the picture
   does, so a face is never another principal's.
 

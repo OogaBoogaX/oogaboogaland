@@ -31,11 +31,12 @@
     const login = {};
     for (const provider of PROVIDERS) if (raw.features?.[provider] === true && pathOk(paths.login?.[provider])) login[provider] = paths.login[provider];
     const session = pathOk(paths.session) ? paths.session : null, logout = pathOk(paths.logout) ? paths.logout : null;
+    const audience = pathOk(paths.audience) ? paths.audience : null;
     const feed = raw.features?.feed === true ? "live" : options.fixture && raw.features?.feed === "demo" ? "demo" : "off";
     const features = { github: !!login.github, x: !!login.x, voice: raw.features?.voice === true, feed };
     // A newer deployment's build is worth a reload; an absent or matching one is not.
     const newer = typeof raw.build === "string" && raw.build.length <= 64 && build && raw.build !== build ? raw.build : null;
-    return { ok: true, mode: "live", features, paths: { login, session, logout }, protocols, newer };
+    return { ok: true, mode: "live", features, paths: { login, session, logout, audience }, protocols, newer };
   };
   // The signed-in account as the session address reports it (identity protocol 1, docs/ooga-chat-app.md); anything else
   // is signed out. `principal` is the server's opaque identity: equality, deduplication and every per-person state key
@@ -107,5 +108,5 @@
   };
   const appBuild = (doc) => doc.querySelector('meta[name="ooga-chat-build"]')?.content || "dev";
   BL.oogaChatConfig = { BOOTSTRAP_VERSION, BOOTSTRAP_PATH, PROTOCOLS, PROVIDERS, ELIGIBILITY, STALE_MAX_S, RETURNS, ZONES, STORED, pathOk,
-    parseBootstrap, parseSession, parseReturn, withoutReturn, parseZone, storageKey, sweep, appBuild };
+    clean, parseBootstrap, parseSession, parseReturn, withoutReturn, parseZone, storageKey, sweep, appBuild };
 })();
