@@ -290,6 +290,9 @@
     const next = scenes[id];
     if (!next) throw new Error(`Unknown scene "${id}"`);
     if (transition) return false;
+    // Leaving a scene leaves the public outdoor scope at once, before the fade, and stays out of it until the transition
+    // settles, whatever the old scene's last frames report (outdoor-scope.js `hold`); the next scene reports after.
+    window.BL.outdoorScope.hold(true);
     controlsHelp.close();
     transition = { next, place, out: true, t: 0, held: 0, instant, ready: true, redirect: null, failed: null, controller: new AbortController() };
     if (next.prepare) {
@@ -559,6 +562,7 @@
     const failed = transition.failed;
     transition.controller.abort();
     transition = null;
+    window.BL.outdoorScope.hold(false);
     if (active) holdInput(false);
     if (failed) cabinetView.failed();
     if (failed && active && active.stay) active.stay();
@@ -888,6 +892,15 @@
   // The account needs the Worker: without one /api/me finds nothing and the sheet shows no sign-in.
   const net = window.BL.net;
   const unsubscribeAccount = net.subscribe(window.BL.hud.showAccount);
+  // A new room connection or account reopens no earlier outdoor grant (outdoor-scope.js `reset`).
+  let scopeRoom = net.state.room, scopeMe = net.state.me?.id ?? 0;
+  const unsubscribeScope = net.subscribe((state) => {
+    const me = state.me?.id ?? 0;
+    if (state.room === scopeRoom && me === scopeMe) return;
+    scopeRoom = state.room;
+    scopeMe = me;
+    window.BL.outdoorScope.reset();
+  });
   const unsubscribeVoice = window.BL.voice.subscribe(() => window.BL.hud.showAccount(net.state));
   // The roster's host dot and voice marks follow the room and voice, on whichever scene's roster is up.
   const unsubscribeRosterMarks = net.subscribeRoster(window.BL.hud.showVoices);
@@ -1183,6 +1196,7 @@
     unsubscribeOogatron();
     window.BL.oogatronLive.dispose();
     unsubscribeAccount();
+    unsubscribeScope();
     unsubscribeVoice();
     unsubscribeRosterMarks();
     unsubscribeVoiceMarks();
