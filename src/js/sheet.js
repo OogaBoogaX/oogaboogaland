@@ -3,7 +3,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const KEY = "oogaboogaland.sheet.v1", NAMES = ["bananas", "roster", "players", "chat"], DOCKS = ["left", "right", "bottom"], TAB_EDGE = 41;
+  const KEY = "oogaboogaland.sheet.v1", NAMES = ["bananas", "roster", "players", "chat", "cloud"], DOCKS = ["left", "right", "bottom"], TAB_EDGE = 41;
   // A touch drawer's sticks need this much of the screen left over it.
   const STICK_ROOM = 320;
   // A phone's tabs start 16px in and stop short of the 44px chevron tab at the far right.
@@ -64,8 +64,10 @@
     }
     const saved = shared;
     folded = saved?.folded === true;
-    // Online Oogas and Ooga Chat are for signed-in visitors only.
-    const available = (name) => NAMES.includes(name) && (name !== "players" && name !== "chat" || !!BL.net.state.me);
+    // Online Oogas and The Commons (`chat`) are for signed-in visitors only; Ooga Chat (`cloud`, the last tab) only
+    // where the room speaks its audience protocol (cloud-panel.js), so an older backend keeps the panels it had.
+    const available = (name) => NAMES.includes(name) && (name === "cloud" ? !!BL.cloudPanel && BL.cloudPanel.available()
+      : name !== "players" && name !== "chat" || !!BL.net.state.me);
     const belled = () => !!BL.net.state.me;
     const isOpen = (w) => !folded && w.open && available(w.tab);
     // On a phone every tab folds into the main drawer; separate panels stay saved, hidden, for a larger screen.
@@ -220,7 +222,7 @@
       for (const item of notificationViews) if (!item.view.contains(e.target)) item.reset();
     }, { capture: true });
     const showCounts = () => {
-      const detail = `Online Oogas: ${badgeText(badges.players)} new\nOoga Chat: ${badgeText(badges.chat)} new`;
+      const detail = `Online Oogas: ${badgeText(badges.players)} new\nThe Commons: ${badgeText(badges.chat)} new`;
       for (const item of notificationViews) {
         if (item.detail.textContent !== detail) item.detail.textContent = detail;
         item.paint();
@@ -271,7 +273,7 @@
         w.body.inert = !open || w.node.hidden;
         w.body.setAttribute("aria-hidden", String(w.body.inert));
       }
-      // The bell counts Online Oogas and Ooga Chat, so it shows on every panel for signed-in contributors alone.
+      // The bell counts Online Oogas and The Commons, so it shows on every panel for signed-in contributors alone.
       const bell = belled();
       for (const item of notificationViews) {
         if (item.view.hidden === bell) item.view.hidden = !bell;
@@ -474,10 +476,10 @@
     on(window, "resize", layout); on(bottom, "change", layout); on(phone, "change", layout);
     if (window.visualViewport) { on(window.visualViewport, "resize", layout); on(window.visualViewport, "scroll", layout); }
     on(window, "pagehide", () => { finish(); save(); });
-    let signedIn = !!BL.net.state.me;
+    let signedIn = !!BL.net.state.me, cloud = available("cloud");
     const unsubscribe = BL.net.subscribe(() => {
-      if (signedIn === !!BL.net.state.me) return;
-      signedIn = !!BL.net.state.me;
+      if (signedIn === !!BL.net.state.me && cloud === available("cloud")) return;
+      signedIn = !!BL.net.state.me; cloud = available("cloud");
       finish();
       refresh(); save();
     });

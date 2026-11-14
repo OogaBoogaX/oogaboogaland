@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0a0a0b">
+  <meta name="ooga-chat-build" content="dev">
+  <title>Ooga Chat</title>
+  <link rel="stylesheet" href="../native.css">
+  <link rel="stylesheet" href="ooga-chat.css">
+</head>
+
+<body>
+  <main class="oc" id="ooga-chat" data-mode="loading">
+    <nav class="oc-tabs" role="tablist" aria-label="Ooga Chat panels"></nav>
+    <div class="oc-frame">
+      <header class="oc-title"><h1><span data-sign>Ooga Chat</span></h1></header>
+      <div class="oc-views"></div>
+    </div>
+    <p class="oc-error" role="alert" hidden></p>
+  </main>
+  <script src="../js/sign-glyphs.js"></script>
+  <script src="../js/native-icons.js"></script>
+  <script src="ooga-chat-config.js"></script>
+  <script src="ooga-chat-shell.js"></script>
+  <script src="ooga-chat-views.js"></script>
+  <script src="ooga-chat-http.js"></script>
+  <script src="ooga-chat-app.js"></script>
+</body>
+
+</html>
