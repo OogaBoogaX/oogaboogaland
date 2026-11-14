@@ -20,7 +20,7 @@
   const AM = BL.arcadeModels;
   const { clamp } = math;
   const { createNode, addChild, removeChild, createCamera, stepTweens, tweenCount, traverseVisible, boundsOf } = BL.scene;
-  const { HALL, STAGE, MEZZ, HAUNT, GAMES, LAYOUT, CAB, SCREEN, FRAMES, FPS, BLOCK_HALL: BH } = AM;
+  const { HALL, STAGE, MEZZ, HAUNT, GAMES, LAYOUT, CAB, SCREEN, FRAMES, FPS, BLOCK_HALL: BH } = AM, AW = BL.arcadeBlockWatch;
 
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
   const REDUCED_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -99,6 +99,7 @@
   let stations = null, blocks = null, carnival = null, staff = null, orders = 0, ticketBoard = null, prizeUi = null;
   let crowd = null, spin = null;
   let unwatchHockey = null, hockeyPlayers = null;
+  let watchGate = null, watchSpent = false;
   let audio = null, bots = null, walkers = null, motes = null, power = null, disco = null, fame = null, shelf = null, lit = null;
   let ambientT = 0, wheelTick = 0, cheerT = 0, powerT = 99;
   // Who walked in, kept across a game so they come back out as themselves, and the ticket balance at the last visit,
@@ -261,6 +262,16 @@
     const bh = AM.blockHall(), bfSign = BL.hubModels.caveSign("Block Frenzy", "cube", false, true), bb = boundsOf(bfSign), bk = 3 / (bb.max[0] - bb.min[0]);
     addChild(root, createNode({ geometry: bh.rock }), createNode({ geometry: bh.ledge }), createNode({ geometry: bh.props, sightHidden: true }), bhSky = createNode({ geometry: bh.sky, sightHidden: true, visible: false }),
       createNode({ position: { x: BH.x, y: BH.y + BH.h + 0.62, z: HALL.back + 0.3 }, scale: { x: bk, y: bk, z: bk }, geometry: bfSign }));
+    // The doorway to watch Block Frenzy, in its entry hall's east wall: its timber set, the sign over it and the portal,
+    // always open, whose walk-through is `AW.atPortal`. Separate from the zipline.
+    // The sign hangs over the walker's head where the view can read it, and a blade sign out from the wall reads along the hall both ways.
+    const wd = AW.DOOR, watchSign = AM.watchSignBoard(), wb = boundsOf(watchSign), wk = 1, bladeK = 1.5 / (wb.max[0] - wb.min[0]);
+    const watchSignNode = (x, y, z, turn, k) => createNode({ position: { x, y: y - wb.center[1] * k, z }, rotation: { x: 0, y: turn, z: 0 }, scale: { x: k, y: k, z: k }, geometry: watchSign });
+    addChild(root, createNode({ geometry: AM.blockWatchDoor() }), watchSignNode(BH.x1 - 0.42, wd.y + AW.SIGN_Y, wd.z, -Math.PI / 2, wk),
+      watchSignNode(BH.x1 - 1.05, wd.y + AW.BLADE_Y, wd.z1 + 0.24, 0, bladeK), watchSignNode(BH.x1 - 1.05, wd.y + AW.BLADE_Y, wd.z1 + 0.2, Math.PI, bladeK));
+    watchGate = BL.oogaPortal.create({ radius: 1.6, outerRadius: 1.8, aperture: AW.APERTURE, position: { x: wd.plane, y: wd.y + wd.h / 2, z: wd.z }, rotation: { x: Math.PI / 2, y: -Math.PI / 2, z: 0 }, receiving: true });
+    watchGate.ring.visible = false;
+    addChild(root, watchGate.root);
     // The arena's steel doors, shut, each leaf a node of its own.
     const steel = AM.steelDoor();
     for (const d of haunt.doors) {
@@ -1118,7 +1129,7 @@
     const d = Math.hypot(x - ARENA.x, z - ARENA.z), fenced = fenceK > 0.15;
     let arena = Math.max(d + r - ARENA.r + ARENA_SIDE, gameMode ? -Infinity : GHOST_KEEP + r - d, fenced ? FENCE_X + FENCE_GAP + r - x : -Infinity);
     for (let i = 0; i < totemsAt.length; i++) arena = Math.max(arena, AM.ARENA_TOTEMS.keep + r - Math.hypot(x - totemsAt[i].x, z - totemsAt[i].z));
-    return Math.min(hall, Math.max(HALL.halfW - 2 + r - x, x + r - (fenced ? FENCE_X - FENCE_GAP : HAUNT.end + 2), HAUNT.z0 + HAUNT_SIDE + r - z, z + r - HAUNT.z1 + HAUNT_SIDE), arena, blockPass);
+    return Math.min(hall, Math.max(HALL.halfW - 2 + r - x, x + r - (fenced ? FENCE_X - FENCE_GAP : HAUNT.end + 2), HAUNT.z0 + HAUNT_SIDE + r - z, z + r - HAUNT.z1 + HAUNT_SIDE), arena, blockPass, AW.doorDepth(x, z, r, feet));
   };
   // Whether a body at (x, z) with its feet at `feet` is in the arena (the hunt's ground; its hallway is not).
   const inArenaRing = (x, z, feet) => feet > HAUNT.y - 1 && Math.hypot(x - ARENA.x, z - ARENA.z) < ARENA.r;
@@ -1279,6 +1290,13 @@
     zipline.bottom.visible = false;
     shared.residentPose = zipline.pose;
     promptZip = null;
+  };
+  // Walking into the Block Frenzy watch door: signed-in Oogas go to the chairs, anyone else is told why not, once, until
+  // they step back. The director refuses a change of scene during a fade, so the door keeps asking while they stand there.
+  const enterWatchDoor = () => {
+    if (!watchSpent && !AW.mayWatch(BL.net.state.me, DEBUG)) { hud.toast(AW.SIGN_IN); watchSpent = true; return; }
+    watchSpent = true;
+    if (AW.mayWatch(BL.net.state.me, DEBUG)) AW.goToWatchDeck(open);
   };
   const useNear = (x, z, reach) => {
     if (zipline && pilot.player) {
@@ -2028,7 +2046,7 @@
     // walked in comes through the doorway. A page that opens here takes `character=`
     // instead, as the island does. With nobody named, the visitor's own or assigned Ooga (`preferredCharacter`) walks
     // in, else the roster's default pick, so the arcade always has someone to play it.
-    const fromBlockHall = ctx.from === "block";
+    const fromBlockHall = ctx.from === "block", fromWatch = ctx.place === AW.PLACE || ctx.place === AW.PLACE_FULL;
     const from = GAMES.findIndex((g) => g.id === (ctx.place === "cloud-hopper-return" ? "cloud-hopper" : ctx.from)), machineFrom = stations.find((st) => st.kind === "machine" && st.game.kind === ctx.from && st.index === (ctx.place || 0));
     const retroFrom = stations.find((st) => st.kind === "retro" && st.id === ctx.from) || null;
     const asked = ctx.from === null ? new URLSearchParams(location.search).get("character")?.trim().toLowerCase() : null;
@@ -2055,7 +2073,7 @@
       buildZipline(shared);
       // At a machine an Ooga plays, a step back from its spot, where that Ooga stands again.
       const spawn = DEBUG ? debugSpawn() : null;
-      const at = spawn ? spawn : fromBlockHall ? { x: BH.x, z: BH.z0 + 1, facing: 0 } : from >= 0 ? live.find((c) => c.game === from).play : retroFrom ? retroFrom.play : machineFrom ? (machineFrom.bot ? toHall({ x: machineFrom.play.x, z: machineFrom.play.z, turn: machineFrom.turn }, 0, 1.3, { facing: machineFrom.play.facing }) : machineFrom.play) : { x: 0, z: HALL.front - 1.5, facing: Math.PI };
+      const at = fromWatch ? AW.ARRIVAL : spawn ? spawn : fromBlockHall ? { x: BH.x, z: BH.z0 + 1, facing: 0 } : from >= 0 ? live.find((c) => c.game === from).play : retroFrom ? retroFrom.play : machineFrom ? (machineFrom.bot ? toHall({ x: machineFrom.play.x, z: machineFrom.play.z, turn: machineFrom.turn }, 0, 1.3, { facing: machineFrom.play.facing }) : machineFrom.play) : { x: 0, z: HALL.front - 1.5, facing: Math.PI };
       Object.assign(avatar.root.position, { x: at.x, y: avatar.baseY + supportAt(at.x, at.z, fromBlockHall || at.deck || retroFrom || from >= 0 && live.find(c => c.game === from).y === MEZZ.y ? MEZZ.y : 1), z: at.z });
       avatar.root.rotation.y = at.facing;
       // Carry the view and record the outside loadout before parking its weapons for the visit.
@@ -2089,6 +2107,7 @@
       still = 1; stillHold = BL.factoryWindow.GLIDE.still;
     }
     unsubscribeAccount = BL.net.subscribe(accountChanged);
+    if (ctx.place === AW.PLACE_FULL) hud.toast(AW.FULL);
     crowd = []; walkers = [];
     // Other signed-in players keep their real Ooga or gorilla avatars; no simulated roster crowd is created.
     remotes = BL.remotePlayers.create({ root, crew: people, fx,
@@ -2162,7 +2181,7 @@
     arcadeScene.input = input;
     arcadeScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
-      arcade: { get zipline() { return zipline; }, screens, crowd, walkers, bots, spin, play, open, stations, carnival, nearStation, supportAt, slide: SLIDE, railSitter, walkable: walkableFor, flyable: flyableFor, sightClear, pointHidden, blocks, audio, staff, life, get frame() { return shownFrame; }, get doors() { return doors; }, get doorWalk() { return doorWalk; } },
+      arcade: { blockWatch: AW, get watchGate() { return watchGate; }, get zipline() { return zipline; }, screens, crowd, walkers, bots, spin, play, open, stations, carnival, nearStation, supportAt, slide: SLIDE, railSitter, walkable: walkableFor, flyable: flyableFor, sightClear, pointHidden, blocks, audio, staff, life, get frame() { return shownFrame; }, get doors() { return doors; }, get doorWalk() { return doorWalk; } },
       // HALLOWEEN: the arena's hunt (its herald's until it has loaded).
       get halloween() { return ghosts ? ghosts.debug : ghostEntry && ghostEntry.debug; },
       get arena() { return { armed, inArena, zone: zoneNow, fence: fenceK, gameMode, along: hallwayAlong, hearing: huntHearing, blendTo: BL.net.state.blendTo, blendT: BL.net.state.blendT }; }
@@ -2298,6 +2317,14 @@
     audio.tick(dt);
     // Into the clouds: the fade to Block Frenzy's start menu.
     if (zipline && !leaving && avatar && avatar.root.position.z < BH.fade) open("block", "zipline");
+    if (watchGate) {
+      watchGate.update();
+      if (avatar && !leaving && pilot.player === avatar) {
+        const p = avatar.root.position;
+        if (AW.atPortal(p.x, p.z, p.y - avatar.baseY)) { if (!watchSpent || AW.mayWatch(BL.net.state.me, DEBUG)) enterWatchDoor(); }
+        else if (p.x < AW.DOOR.plane - 0.8) watchSpent = false;
+      }
+    }
     if (pilot.player && !leaving) {
       const p = avatar.root.position, near = nearStation(p.x, p.z, INVITE, true);
       const cabinetId = near?.kind === "cabinet" ? GAMES[near.game].id : near?.kind === "retro" ? near.id : null;
@@ -2409,6 +2436,8 @@
     input.dispose();
     hud.dispose();
     SLIDE.rail = SLIDE.cave = SLIDE.seat.sitter = null;
+    if (watchGate) watchGate.dispose();
+    watchGate = null; watchSpent = false;
     hud = hooks = input = pilot = fx = agentPlay = people = avatar = playerWorld = screens = stations = blocks = carnival = staff = prompt = prizeUi = ticketBoard = crowd = spin = promptRail = null;
     audio = bots = walkers = motes = power = disco = fame = shelf = lit = life = invited = null;
     arcadeScene.input = arcadeScene.debug = null;
