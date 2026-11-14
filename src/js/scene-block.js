@@ -1,5 +1,5 @@
 // Block Frenzy: capture the flag, Bitcoin themed. Each side guards its Bitcoin block, a glowing cube in
-// its team's colour on a stand in its fort; steal the other side's, carry it home and touch your own stand while your own block is
+// its team's colour on a stand in its fort; steal the other side's, carry it home and touch your own stand, or throw it into your zone, while your own block is
 // home. Paint splats a rival for a moment (a carrier drops what they carry) and nobody dies. Two a side: the visitor
 // and a teammate against two rivals, the three bots run by `block-sim.js`. First to three captures.
 //
@@ -595,7 +595,7 @@
   const sizeOf = (m) => WIRE.plannedSize(m);
   const matchLine = (m) => `${sizeOf(m)}v${sizeOf(m)} on ${(el.maps.find((b) => b.dataset.map === WIRE.MAPS[m.map]) || { textContent: WIRE.MAPS[m.map] }).textContent} · ${RULE_WORDS[WIRE.RULES[m.rule] || "home"]}`;
   // The board's help line, for the rule and the captures in force.
-  const helpLine = (lead, rule, target) => `${lead} Steal the rivals' Bitcoin block (their colour), carry it to your own stand${rule === "any" ? " (your own block doesn't need to be home)" : " while your block is home"}. First to ${target} capture${target === 1 ? "" : "s"} wins.`;
+  const helpLine = (lead, rule, target) => `${lead} Steal the rivals' Bitcoin block (their colour), carry it to your own stand or throw it into your zone${rule === "any" ? " (your own block doesn't need to be home)" : " while your block is home"}. First to ${target} capture${target === 1 ? "" : "s"} wins.`;
   // In a match, the board's solo picks don't apply: they show what the match will play and are muted, all but the map
   // for whoever chooses it (and Detail, which is this page's own). Leaving, they go back to the visitor's picks.
   let boardInMatch = false;
@@ -1042,7 +1042,7 @@
     if ((t === "splat" || t === "bonk") && e.by >= 0) feed(`${nameOf(e.by)} ${t === "bonk" ? "bonked" : "splatted"} ${who}`, sim.actors[e.by].team);
     else if (t === "pickup") feed(`${who} grabbed the ${TEAM_NAME[e.team]} block`, sim.actors[e.actor].team);
     else if (t === "rescue") feed(`${who} sent the ${TEAM_NAME[e.team]} block home`, e.team);
-    else if (t === "capture") feed(`${who} mined a block! ${TEAM_NAME[e.team]} ${sim.score[e.team]}`, e.team);
+    else if (t === "capture") feed(`${who} ${e.y ? "threw it home" : "mined a block"}! ${TEAM_NAME[e.team]} ${sim.score[e.team]}`, e.team);
     else if (t === "power") feed(`${who} got ${({ boots: "lightning boots", halving: "the halving", cold: "cold storage", laser: "laser eyes", monkeys: "the monkeys" })[SIM.POWERS[e.y]]}`, e.team);
     else if (t === "zip") feed(`${who} took the zipline`, e.team);
     else if (t === "trap") feed(`${who} is stuck in a quiz`, e.team);
@@ -1202,7 +1202,7 @@
         if (me) { center("BACK HOME", 1000); notice(COARSE ? "You fell off the island · hold Jump in the air to jetpack back next time" : "You fell off the island · hold Space in the air to jetpack back next time", 2600); }
       } else if (e.type === "go") {
         center("GO!", 900);
-        notice(`First to ${sim.target} · steal the ${sim.rival} block · bring it home · ${COARSE ? "Pass" : "Tab"} throws it to a friend`, 4500);
+        notice(`First to ${sim.target} · steal the ${sim.rival} block · bring it home · ${COARSE ? "Pass" : "Tab"} throws it to a friend or into your zone`, 4500);
       } else if (e.type === "build") {
         fx.burst(e.x, 0.6, e.z, 8, WOOD_BITS, 1.6);
         if (me) updateTools();
@@ -1228,8 +1228,8 @@
       else if (e.type === "zip") { if (me) { center("ZIP!", 700); notice("Space lets go early", 1600); } }
       else if (e.type === "unzip") { if (me) updateTools(); }
       else if (e.type === "waiting") {
-        if (me) { center("NOT YET!", 1200); notice("Your own block isn't home, so you can't score. Hold on here while your team brings it back, or go get it", 4000); }
-        else if (mine) notice("Teammate is waiting at our stand · get our block home so they can score", 3000);
+        if (me) { center("NOT YET!", 1200); notice(e.y ? "Your own block isn't home, so that throw can't score. Theirs lies where it landed" : "Your own block isn't home, so you can't score. Hold on here while your team brings it back, or go get it", 4000); }
+        else if (mine) notice(e.y ? "Teammate's throw can't score · our block isn't home" : "Teammate is waiting at our stand · get our block home so they can score", 3000);
       } else if (e.type === "lift" || e.type === "set") {
         if (e.actor === you) updateTools();
         if (e.type === "set") fx.burst(e.x, e.y + 0.2, e.z, 6, WOOD_BITS, 1.2);
