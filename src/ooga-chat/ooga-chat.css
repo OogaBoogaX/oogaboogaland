@@ -1,0 +1,345 @@
+/* Ooga Chat's own layout. The look (tokens, sign lettering, slabs, chips, the amber button) comes from ../native.css,
+   which the island shares; this file only places it: native tabs on top of one plank frame, sized for a phone first
+   and centred on wider screens. */
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-text-size-adjust: 100%;
+}
+
+.oc [hidden] { display: none !important; }
+
+.oc {
+  max-width: 620px;
+  margin: 0 auto;
+  padding: calc(16px + var(--safe-top)) calc(16px + var(--safe-right)) calc(16px + var(--safe-bottom)) calc(16px + var(--safe-left));
+}
+
+.oc-tabs {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 6px;
+  padding: 0 6px;
+}
+
+.oc-tab {
+  width: 58px;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.oc-tab-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 6px 13px 4px;
+  border: 3px solid var(--wood-edge);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: linear-gradient(180deg, var(--wood), var(--wood-dk));
+  box-shadow: 0 -2px 0 rgba(0, 0, 0, 0.2) inset;
+}
+
+.oc-tab svg { display: block; width: 100%; height: auto; filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5)); }
+.oc-tab:hover .oc-tab-face { background: linear-gradient(180deg, var(--plank), var(--wood)); }
+/* The chosen tab's face runs on over the frame's top border, so it reads as part of the frame. */
+.oc-tab[aria-selected="true"] .oc-tab-face {
+  height: calc(100% + 3px);
+  background: linear-gradient(180deg, #b8844a, var(--plank));
+  box-shadow: none;
+}
+.oc-tab:focus-visible { outline: none; }
+.oc-tab:focus-visible .oc-tab-face { outline: 2px solid var(--accent); outline-offset: -3px; }
+
+.oc-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 18px;
+  border: 3px solid var(--wood-edge);
+  border-radius: var(--radius);
+  background: var(--planks);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
+}
+
+.oc-title h1 {
+  margin: 2px 0 0 4px;
+  font-size: 26px;
+  line-height: 1;
+  font-weight: 400;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.6));
+}
+
+.oc-slab { padding: 20px 22px; }
+.oc-chat > .oc-slab { display: flex; flex-direction: column; gap: 16px; }
+
+.oc-signin,
+.oc-space {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.oc-art {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 2;
+  border-radius: 6px;
+}
+
+.oc-lede,
+.oc-role,
+.oc-foot {
+  margin: 0;
+  color: rgba(243, 239, 228, 0.78);
+}
+
+.oc-foot { text-align: center; font-size: 12px; }
+
+.oc-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  color: var(--accent-text);
+}
+
+.oc .link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.oc-providers {
+  display: grid;
+  gap: 12px;
+}
+
+.oc-provider {
+  min-height: 48px;
+  padding: 0 14px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(#ae844f, var(--wood));
+  color: var(--paper);
+  font-weight: 700;
+  box-shadow: 0 3px 0 var(--nail);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+
+.oc-provider:hover:not(:disabled),
+.oc-provider:focus-visible { background: linear-gradient(#bf935b, var(--plank)); outline: none; }
+.oc-provider:focus-visible { box-shadow: 0 3px 0 var(--nail), 0 0 0 2px var(--accent); }
+.oc-provider:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.oc-note {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(243, 239, 228, 0.7);
+}
+
+.oc-note strong { color: var(--accent-text); }
+
+/* A notice that needs the visitor: an expired sign-in, a failed check, an unconfirmed sign-out, with its retry. */
+.oc-notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(216, 137, 43, 0.42);
+  border-radius: 6px;
+  background: rgba(216, 137, 43, 0.08);
+  color: var(--paper);
+}
+
+/* Read by assistive technology only: why a disabled control is off. */
+.oc-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* The two zones: Main Island and DSB Land, each with the island's own destination mark left of its name. The chosen one
+   is the native dark slab with a gold label and border; the other keeps the wood. */
+.oc-zones { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.oc-zone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(#ae844f, var(--wood));
+  color: var(--paper);
+  font-weight: 700;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.oc-zone[aria-pressed="true"] { border-color: var(--accent); background: var(--slab-dark); color: var(--accent-text); text-shadow: none; }
+.oc-zone:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.oc-zone-icon { display: block; flex: none; width: 28px; height: auto; }
+img.oc-zone-icon { width: 24px; image-rendering: pixelated; }
+
+.oc-heard { margin: 0; color: var(--accent-text); }
+
+/* People: one continuous four-column list, speakers first. A face keeps its circle while its picture loads; a speaker's
+   carries a 3px ring in its source's colour (green from the island, purple from Ooga Chat) outside a 3px dark gap. The
+   name sits under it on one line, cut short with its whole self in the title, then the role 2px below. */
+.oc-space { --face: 56px; }
+.oc-people { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 8px; margin: 0; padding: 0; list-style: none; }
+.oc-space[data-audience="reconnecting"] .oc-people { opacity: 0.6; }
+.oc-person { display: flex; flex-direction: column; align-items: center; min-width: 0; padding: 6px 0 2px; border-radius: 6px; }
+.oc-person:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.oc-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--face);
+  height: var(--face);
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--stone-dk);
+  box-shadow: 0 0 0 2px var(--stone-lt);
+}
+.oc-person .oc-face { margin-bottom: 10px; }
+.oc-person[data-role="speaker"] .oc-face { box-shadow: 0 0 0 3px var(--slab-dark), 0 0 0 6px #22c55e; }
+.oc-person[data-role="speaker"][data-source="app"] .oc-face { box-shadow: 0 0 0 3px var(--slab-dark), 0 0 0 6px #b18aff; }
+.oc-face img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.oc-face svg { display: block; width: 62%; height: auto; }
+.oc-person-name { display: flex; align-items: center; justify-content: center; gap: 4px; max-width: 100%; color: var(--paper); font-weight: 700; }
+.oc-person-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-source-dot { display: none; flex: none; width: 6px; height: 6px; border-radius: 50%; background: #b18aff; }
+.oc-person[data-role="speaker"][data-source="app"] .oc-source-dot { display: block; }
+.oc-person-role { display: flex; align-items: center; gap: 4px; margin-top: 2px; color: rgba(243, 239, 228, 0.62); font-size: 11px; }
+.oc-voice { display: none; flex: none; width: 9px; height: 9px; color: var(--paper); shape-rendering: crispEdges; }
+.oc-person[data-role="speaker"] .oc-voice { display: block; }
+.oc-voice .voice-far,
+.oc-voice .voice-cross,
+.oc-voice .voice-slash,
+.oc-person[data-muted="true"] .oc-voice .voice-near { display: none; }
+.oc-person[data-muted="true"] .oc-voice { color: var(--danger); }
+.oc-person[data-muted="true"] .oc-voice .voice-cross { display: inline; }
+
+/* The footer: the reactions slot left of the account where there is room, above it where not. */
+.oc-account {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  margin-top: 12px;
+  padding: 14px 16px;
+  background: var(--slab-dark);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
+}
+
+.oc-reactions { flex: 1 1 240px; min-width: 0; }
+.oc-account-main { display: flex; flex: 0 1 auto; flex-direction: column; align-items: flex-end; gap: 16px; min-width: 0; max-width: 100%; }
+
+.oc-account-who {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin: 0;
+  font-weight: 700;
+}
+
+.oc-account-name { overflow-wrap: anywhere; }
+.oc-speaker-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #b18aff; }
+
+.oc-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px 14px;
+}
+
+/* Compact like the island's footer buttons: 28px to see, 44px to touch through an invisible band of hit area, and rows
+   16px apart so no band reaches the next row. The microphone keeps one width whatever it says. */
+.oc-foot-button {
+  position: relative;
+  height: 28px;
+  padding: 0 12px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 5px;
+  background: linear-gradient(var(--plank), var(--wood));
+  color: var(--paper);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.oc-foot-button::before { content: ""; position: absolute; inset: -8px -2px; }
+.oc-foot-button:disabled { opacity: 0.5; cursor: not-allowed; }
+.oc-foot-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.oc-mute { flex: 0 0 84px; width: 84px; min-width: 84px; padding: 0; }
+.oc-signout { position: relative; min-height: 28px; text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px; }
+.oc-signout::before { content: ""; position: absolute; inset: -8px -4px; }
+
+.oc-panel { padding: 0; overflow: visible; }
+.oc-pending p { margin: 0; color: rgba(243, 239, 228, 0.7); }
+
+.oc-error {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: #241810;
+  color: var(--paper);
+}
+
+.oc-fixture-note { margin: 12px 4px 0; color: var(--faint); font-size: 11px; }
+
+@media (max-width: 420px) {
+  .oc { padding: calc(8px + var(--safe-top)) calc(8px + var(--safe-right)) calc(8px + var(--safe-bottom)) calc(8px + var(--safe-left)); }
+  .oc-tabs { gap: 4px; padding: 0 4px; }
+  .oc-tab { width: 52px; height: 42px; }
+  .oc-tab-face { padding: 6px 11px 4px; }
+  .oc-frame { padding: 12px 10px 14px; }
+  .oc-title h1 { font-size: 22px; }
+  .oc-slab { padding: 14px 16px; }
+  .oc-space { --face: 44px; }
+  .oc-people { gap: 14px 6px; }
+  .oc-zone { gap: 4px; padding: 0 5px; }
+  .oc-zone-icon { width: 24px; }
+  img.oc-zone-icon { width: 20px; }
+}

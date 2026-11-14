@@ -23,7 +23,7 @@ const chunk = (kind, data) => {
 };
 
 // An 8-bit RGBA, non-interlaced PNG (the only kind the favicons are) as its pixels.
-const decode = (png) => {
+export const decode = (png) => {
   if (!png.subarray(0, 8).equals(SIGNATURE)) throw new Error("favicon: not a PNG");
   let w = 0, h = 0;
   const idat = [];
@@ -49,7 +49,7 @@ const decode = (png) => {
   }
   return { w, h, px };
 };
-const encode = (w, h, px) => {
+export const encode = (w, h, px) => {
   const raw = Buffer.alloc(h * (w * 4 + 1)), ihdr = Buffer.alloc(13);
   for (let y = 0; y < h; y++) px.copy(raw, y * (w * 4 + 1) + 1, y * w * 4, (y + 1) * w * 4);
   ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 6;

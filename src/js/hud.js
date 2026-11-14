@@ -118,66 +118,14 @@
         lastWidth: Number.isFinite(state.lastWidth) && state.lastWidth > 0 ? state.lastWidth : 440 };
     } catch { return null; }
   };
-  // Sign headings: one pixel path per element, scaled by that element's CSS height.
+  // Sign headings and the panel tabs' icons: sign-glyphs.js and native-icons.js draw them, shared with the Ooga Chat
+  // app. The tabs fill before sheet.js copies them for its windows.
   const SIGN_NS = "http://www.w3.org/2000/svg";
-  // Collapse whitespace: markup may wrap a sign across lines but the lettering needs one run of words.
-  const signText = (raw) => raw.replace(/\s+/g, " ").trim();
-  const signLettering = (raw) => {
-    const { SIGN_GLYPHS } = BL.hubModels;
-    const text = signText(raw);
-    let cells = -1;
-    for (const ch of text) cells += ch === " " ? 2 : 4;
-    const svg = document.createElementNS(SIGN_NS, "svg");
-    svg.setAttribute("viewBox", `0 0 ${cells} 6`);
-    svg.setAttribute("class", "sign");
-    svg.setAttribute("aria-hidden", "true");
-    const path = document.createElementNS(SIGN_NS, "path");
-    let d = "", cursor = 0;
-    for (const ch of text) {
-      if (ch === " ") {
-        cursor += 2;
-        continue;
-      }
-      const glyph = SIGN_GLYPHS[ch];
-      if (!glyph) throw new Error(`No cave-sign glyph for "${ch}"`);
-      const sx = 3 / glyph[0].length, pixel = 0.82 * sx;
-      for (let row = 0; row < glyph.length; row++) {
-        for (let col = 0; col < glyph[row].length; col++) {
-          if (glyph[row][col] === "1") d += `M${cursor + col * sx} ${row}h${pixel}v.82h-${pixel}z`;
-        }
-      }
-      cursor += 4;
-    }
-    path.setAttribute("d", d);
-    path.setAttribute("fill", "currentColor");
-    svg.append(path);
-    return svg;
-  };
-  // Letters a sign; a scene calls it again when a sign's words change (a drop that was lost, not landed).
-  const letterSign = (el, words = el.textContent) => {
-    const text = signText(words);
-    el.setAttribute("aria-label", text);
-    el.replaceChildren(signLettering(text));
-  };
+  const { lettering: signLettering, letter: letterSign } = BL.signGlyphs;
   for (const el of document.querySelectorAll("[data-sign]")) letterSign(el);
-  // The roster's voice mark, a 9x9 pixel speaker; the stylesheet shows the parts each state needs.
-  const VOICE_PARTS = [
-    ["voice-speaker", "M0 3h2v3H0zM2 2h1v5H2zM3 1h1v7H3z"],
-    ["voice-near", "M5 3h1v3H5z"],
-    ["voice-far", "M7 2h1v5H7z"],
-    ["voice-cross", "M5 3h1v1H5zM7 3h1v1H7zM6 4h1v1H6zM5 5h1v1H5zM7 5h1v1H7z"],
-    ["voice-slash", "M0 0h1v1H0zM1 1h1v1H1zM2 2h1v1H2zM3 3h1v1H3zM4 4h1v1H4zM5 5h1v1H5zM6 6h1v1H6zM7 7h1v1H7zM8 8h1v1H8z"],
-  ];
-  const voiceIcon = document.createElementNS(SIGN_NS, "svg");
-  voiceIcon.setAttribute("viewBox", "0 0 9 9");
-  voiceIcon.setAttribute("aria-hidden", "true");
-  for (const [part, d] of VOICE_PARTS) {
-    const path = document.createElementNS(SIGN_NS, "path");
-    path.setAttribute("class", part);
-    path.setAttribute("d", d);
-    path.setAttribute("fill", "currentColor");
-    voiceIcon.append(path);
-  }
+  BL.nativeIcons.fill(document);
+  // The roster's voice mark, a 9x9 pixel speaker shared with Ooga Chat; the stylesheet shows the parts each state needs.
+  const voiceIcon = BL.nativeIcons.voice();
   // The Bananas panel's banana (its glyph is in the panel's markup) before each amount its two lists show: every row
   // clones it, and the stylesheet hides it while the lists count sats.
   const amountBanana = document.createElementNS(SIGN_NS, "svg");
