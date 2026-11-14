@@ -5,7 +5,9 @@
   "account_id": "1e5c1e8f7c343bf6cabced151b1ae2c6",
   "workers_dev": true,
   "preview_urls": false,
-  "observability": { "enabled": true },
+  // Invocation logs off: they would keep every request's URL, a sign-in callback's GitHub code and state among them. The
+  // Worker's own console lines stay in Workers Logs; request counts, errors and CPU stay in the Worker's metrics.
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
   "assets": {
     // `npm run build:site` stages the pages here, with worker/_headers.
