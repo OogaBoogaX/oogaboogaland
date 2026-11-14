@@ -461,7 +461,6 @@
     game.recordDonation(donation, counted && counted.exact);
     world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats)));
   };
-  const onLootCleared = () => {};
 
   // A label at (x, y, z) facing `turn`, its board behind its face.
   const sign = (parent, l, x, y, z, turn = 0) => {
@@ -1551,7 +1550,7 @@
     ctx2canvas = ctx.canvas;
     camera = createCamera({ fov: 55, near: 0.3, far: 700 });
     root = createNode();
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = hudMod.create({ roster: contributors.activeRoster });
     hud.setAreaLabel("LF");
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
@@ -2146,7 +2145,7 @@
       const help = pilot.controlsHelp(touch); help.title = "Lightning Jet Hangar · " + help.title; return help;
     },
     controlsHelpHold: on => { pilot.controls.reset(); pilot.setMenuOpen(on, false); },
-    id: "hangar", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
+    id: "hangar", enter, update, overlay, onDonation, onKey, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
       return !!scene;

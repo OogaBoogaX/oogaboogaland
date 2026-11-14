@@ -207,15 +207,73 @@
   // The room's last word on whom to hear, for what a move to another place keeps.
   let peersHeard = [], gensHeard = null;
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, unanswered = 0, hiddenTimer = 0, stopped = false;
+  // The Durable Object inspector (worker/src/inspect-report.js), only while the room's welcome names its feature: why
+  // this page's last socket ended (`ended`: why, the browser's close code, clean, when), said on the close frame and,
+  // after the next welcome, in one `back` message, so a drop's cause reaches the inspector's log.
+  let inspectOn = false, ended = null;
+  // Opt-in local evidence for a brief disappearance; never retain payloads, names, tokens or raw close reasons.
+  // No timers or network traffic. Only lifecycle events enter the bounded history, not pose snapshots.
+  const DIAGNOSTIC_KEEP = 64;
+  const diagnosticReason = value => ["closed", "error", "stale", "replaced", "full", "revoked", "protocol"].includes(value) ? value : "other";
+  const diagnosticRoom = value => ["off", "connecting", "live", "paused", "replaced", "full", "revoked", "protocol"].includes(value) ? value : "other";
+  let diagnostic = null;
+  const connectionSubscribers = new Set();
+  let observedMessage = -1, observedPong = -1;
+  const subscribeConnection = fn => {
+    if (!connectionSubscribers.size) observedMessage = observedPong = -1;
+    connectionSubscribers.add(fn);
+    return () => connectionSubscribers.delete(fn);
+  };
+  const traceConnection = (kind, detail = null) => {
+    if (!diagnostic && !connectionSubscribers.size) return;
+    const v = BL.voice.stats, now = performance.now();
+    const lastMessage = diagnostic ? diagnostic.lastMessage : observedMessage;
+    const lastPong = diagnostic ? diagnostic.lastPong : observedPong;
+    const event = { at: Date.now(), elapsed: diagnostic ? now - diagnostic.started : 0, kind,
+      room: diagnosticRoom(state.room), hidden: document.hidden, remotes: remotes.size, unanswered,
+      lastMessageAge: lastMessage < 0 ? null : now - lastMessage,
+      lastPongAge: lastPong < 0 ? null : now - lastPong,
+      voiceEnabled: !!v?.enabled, voiceMuted: !!v?.muted, ...detail };
+    if (diagnostic) {
+      if (diagnostic.events.length === DIAGNOSTIC_KEEP) diagnostic.events.shift();
+      diagnostic.events.push(event);
+    }
+    // A diagnostics observer must never interrupt room cleanup or recovery.
+    for (const fn of connectionSubscribers) { try { fn({ ...event }); } catch {} }
+  };
+  const connectionDiagnostics = (on) => {
+    if (on === false) diagnostic = null;
+    if (on === true && !diagnostic) {
+      diagnostic = { started: performance.now(), lastMessage: -1, lastPong: -1, messages: 0, events: [] };
+      traceConnection("capture");
+    }
+    if (!diagnostic) return { enabled: false, events: [] };
+    const now = performance.now(), v = BL.voice.stats;
+    return { enabled: true, at: Date.now(), room: diagnosticRoom(state.room), hidden: document.hidden,
+      socketState: ws ? ws.readyState : null, unanswered, retry,
+      lastMessageAge: diagnostic.lastMessage < 0 ? null : now - diagnostic.lastMessage,
+      lastPongAge: diagnostic.lastPong < 0 ? null : now - diagnostic.lastPong, messages: diagnostic.messages,
+      voice: { enabled: !!v?.enabled, muted: !!v?.muted, joining: !!v?.joining, publishing: !!v?.publishing },
+      // Copies contain only room presence and numeric poses, never references into the live records.
+      peers: Array.from(remotes.values(), p => ({ id: p.id, body: !!p.body, zone: p.zone.slice(0, 64),
+        poseZone: p.poseZone ? p.poseZone.slice(0, 64) : null, x: p.x, y: p.y, z: p.z,
+        voice: p.voice, muted: p.muted })),
+      events: diagnostic.events.map(event => ({ ...event })) };
+  };
+
   let npcFrame = null, inHub = false, hubSent = null, visibleSent = null;
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
   const gSent = new Float64Array(6);
   let gKnown = false, poseHasG = false, jetSent = 0, weaponSent = 0, visualKnown = false;
-  const visualSent = new Int16Array(17);
-  const VISUAL_LIMITS = [157, 157, 314, 8191, 240, 1200, 560, 440, 320, 1240, 100, 750, 1300, 280, 2000, 31, 31];
+  // A pose's visual state (crew.js `visualState`), each number between its low and high; an older page sends the
+  // first 17 alone, without the body's own pose (`VISUAL_BODY` on).
+  const VISUAL_LOWS = [-157, -157, -314, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -50, -100, 0, -157, 0];
+  const VISUAL_LIMITS = [157, 157, 314, 8191, 240, 1200, 560, 440, 320, 1240, 100, 750, 1300, 280, 2000, 31, 31, 2628, 50, 100, 1, 157, 100];
+  const VISUAL_SIZE = VISUAL_LIMITS.length, VISUAL_BODY = 17;
+  const visualSent = new Int16Array(VISUAL_SIZE);
   const validVisual = (v) => {
-    if (!v || v.length !== 17) return false;
-    for (let i = 0; i < 17; i++) if (!Number.isInteger(v[i]) || v[i] < (i < 3 ? -VISUAL_LIMITS[i] : 0) || v[i] > VISUAL_LIMITS[i]) return false;
+    if (!v || v.length !== VISUAL_SIZE && v.length !== VISUAL_BODY) return false;
+    for (let i = 0; i < v.length; i++) if (!Number.isInteger(v[i]) || v[i] < VISUAL_LOWS[i] || v[i] > VISUAL_LIMITS[i]) return false;
     return true;
   };
   const restSent = new Int16Array(6);
@@ -238,8 +296,10 @@
   const readVisual = (rec, v, at) => {
     rec.visual = null;
     if (!validVisual(v) || !Number.isFinite(at)) return;
-    if (!rec.visualData) rec.visualData = new Int16Array(17);
-    rec.visualData.set(v); rec.visual = rec.visualData; rec.visualAt = at;
+    if (!rec.visualData) rec.visualData = new Int16Array(VISUAL_SIZE);
+    rec.visualData.fill(0); rec.visualData.set(v); rec.visual = rec.visualData; rec.visualAt = at;
+    // Whether it carries the body's own pose, or came from an older page without it.
+    rec.visualBody = v.length === VISUAL_SIZE;
   };
   let clockOffset = 0, clockKnown = false;
   let pokerVoice = null;
@@ -404,6 +464,14 @@
     ? { t: "transit", cycle: m.cycle, actor: m.actor, door: m.door, dir: m.dir, at: m.at, exp: m.exp } : null;
 
   const onMessage = (e) => {
+    if (connectionSubscribers.size) {
+      observedMessage = performance.now();
+      if (e.data === "pong") observedPong = observedMessage;
+    }
+    if (diagnostic) {
+      diagnostic.lastMessage = performance.now(); diagnostic.messages++;
+      if (e.data === "pong") diagnostic.lastPong = diagnostic.lastMessage;
+    }
     unanswered = 0;
     if (e.data instanceof ArrayBuffer) {
       if (e.data.byteLength >= 4 && new DataView(e.data).getUint32(0, true) === 0x315a4642) { for (const fn of bfFrameSubscribers) fn(e.data); return; }
@@ -481,7 +549,7 @@
       }
       const vs = msg.vs;
       if (Array.isArray(vs)) for (const row of vs) {
-        if (!Array.isArray(row) || row.length !== 19) continue;
+        if (!Array.isArray(row) || row.length !== VISUAL_SIZE + 2 && row.length !== VISUAL_BODY + 2) continue;
         const rec = remotes.get(row[0]);
         if (rec) readVisual(rec, row.slice(2), row[1]);
       }
@@ -494,6 +562,9 @@
       if (changed) moved();
     } else if (msg.t === "welcome") {
       retry = 0;
+      inspectOn = Array.isArray(msg.features) && msg.features.includes("inspect-v1");
+      if (inspectOn && ended) send(JSON.stringify({ t: "back", why: ended.why, code: ended.code, clean: ended.clean, down: Math.min(86400000, Math.max(0, Math.round(Date.now() - ended.at))) }));
+      ended = null;
       clockKnown = false;
       clockSample(msg.now);
       state.loopEpoch = typeof msg.loopEpoch === "number" ? msg.loopEpoch : 0;
@@ -519,6 +590,7 @@
       remotes.clear();
       for (const p of msg.players) upsert(p);
       setRoom("live");
+      traceConnection("welcome");
       const transit = transitOf(msg.transit);
       if (transit && transit.actor !== state.selfId) doorHeard(transit);
       // A reconnect picks up where the page is: the actor still driven and where it stands, and voice,
@@ -530,7 +602,7 @@
       if (restoredPose) {
         // Cached equipment/look survive reconnect; transient actions are reconciled by the next
         // live sample rather than replayed with a fresh room timestamp.
-        if (visualKnown) { visualSent[3] &= 7; for (let i = 4; i < 15; i++) visualSent[i] = 0; }
+        if (visualKnown) { visualSent[3] &= 7; for (let i = 4; i < 15; i++) visualSent[i] = 0; for (let i = VISUAL_BODY; i < VISUAL_SIZE; i++) visualSent[i] = 0; }
         const extra = state.bodyKind === "gorilla" && poseHasG ? `,"g":[${gSent[0]},${gSent[1].toFixed(3)},${gSent[2].toFixed(3)},${gSent[3].toFixed(3)},${gSent[4].toFixed(3)},${gSent[5].toFixed(3)}]`
           : (jetSent ? `,"j":${jetSent}` : "") + (weaponSent ? `,"w":${weaponSent}` : "") + (visualKnown ? `,"v":[${visualSent.join(",")}]` : "")
             + (restKnown ? restActive ? `,"r":[${restSent.join(",")}]` : ',"r":0' : "");
@@ -555,15 +627,18 @@
       upsert(msg.p);
       setRoom("live");
       const rec = fresh && remotes.get(msg.p.id);
+      if (rec && (diagnostic || connectionSubscribers.size)) traceConnection("peer-join", { id: rec.id });
       if (rec) for (const fn of presenceSubscribers) fn(rec, true);
     } else if (msg.t === "leave") {
       const rec = remotes.get(msg.id);
+      if (rec && (diagnostic || connectionSubscribers.size)) traceConnection("peer-leave", { id: rec.id, reason: diagnosticReason(msg.reason) });
       remotes.delete(msg.id);
       setRoom("live");
       if (rec) for (const fn of presenceSubscribers) fn(rec, false);
     } else if (msg.t === "body") {
       const rec = remotes.get(msg.id);
       if (rec) {
+        if (diagnostic || connectionSubscribers.size) traceConnection("peer-body", { id: rec.id, body: typeof msg.name === "string" });
         rec.body = typeof msg.name === "string" ? msg.name : null;
         rec.bodyKind = bodyKind(rec.body);
         rec.bodyName = bodyName(rec.body);
@@ -578,6 +653,7 @@
     } else if (msg.t === "vstate") {
       const rec = remotes.get(msg.id);
       if (!rec) return;
+      if (diagnostic || connectionSubscribers.size) traceConnection("peer-voice", { id: rec.id, voice: msg.voice === true, muted: msg.muted === true });
       rec.voice = msg.voice === true;
       rec.muted = msg.muted === true;
       rosterChanged();
@@ -589,6 +665,7 @@
     } else if (msg.t === "zone") {
       const rec = remotes.get(msg.id);
       if (rec && typeof msg.name === "string") {
+        if (diagnostic || connectionSubscribers.size) traceConnection("peer-zone", { id: rec.id, from: rec.zone.slice(0, 64), to: msg.name.slice(0, 64) });
         // A position stays where it stood across zones of one scene's coordinates (the arcade's hallway halves, #422).
         if (rec.poseZone && BLEND.sameFrame(rec.poseZone, msg.name)) rec.poseZone = msg.name;
         // Into the place it was crossing into, its crossing turns round as the room turns it (the room's `blend` after
@@ -704,20 +781,27 @@
       state.released = { name: String(msg.name), reason: String(msg.reason) };
       emit();
     } else if (msg.t === "kick") {
+      if (diagnostic || connectionSubscribers.size) traceConnection("kick", { reason: diagnosticReason(msg.reason) });
       // Revoked access stops reconnecting; the operator may later restore access.
       if (msg.reason === "revoked") { state.me = null; state.hand = false; }
       // replaced and full stop here; stale reconnects like any drop.
       if (msg.reason !== "stale") stopped = true;
-      close(msg.reason === "stale" ? "connecting" : msg.reason);
+      close(msg.reason === "stale" ? "connecting" : msg.reason, "kicked");
     }
   };
 
-  const close = (room) => {
+  // `why`, `code` and `clean`: what ended the socket, for the inspector (the browser's close code only when it closed).
+  const close = (room, why = "other", code = 0, clean = false) => {
+    if (diagnostic || connectionSubscribers.size) traceConnection("clear", { next: diagnosticRoom(room) });
     window.clearInterval(pingTimer);
     pingTimer = 0;
     if (ws) {
+      if (inspectOn) ended = { why, code, clean, at: Date.now() };
       ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
-      if (ws.readyState <= WebSocket.OPEN) ws.close(1000);
+      if (ws.readyState <= WebSocket.OPEN) {
+        if (inspectOn) ws.close(1000, why);
+        else ws.close(1000);
+      }
       ws = null;
     }
     remotes.clear();
@@ -745,6 +829,7 @@
   const schedule = () => {
     window.clearTimeout(retryTimer);
     const wait = Math.min(BACKOFF_MAX_MS, BACKOFF_MS * 1.7 ** retry++) * (0.75 + Math.random() * 0.5);
+    if (diagnostic || connectionSubscribers.size) traceConnection("retry", { wait });
     retryTimer = window.setTimeout(connect, wait);
   };
 
@@ -752,21 +837,29 @@
     retryTimer = 0;
     if (stopped || ws || !state.me) return;
     setRoom("connecting");
+    observedMessage = observedPong = -1;
+    if (diagnostic) diagnostic.lastMessage = diagnostic.lastPong = -1;
+    traceConnection("connect");
     // A tab opened in the background has no visibility change to arm this.
     if (document.hidden && !hiddenTimer) armHidden();
     ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room`);
     ws.binaryType = "arraybuffer";
     ws.onmessage = onMessage;
     ws.onopen = () => {
+      traceConnection("open");
       unanswered = 0;
       pingTimer = window.setInterval(() => {
         // A half-open socket never closes by itself for minutes, while the room has long since evicted this page.
-        if (unanswered >= PING_MISSES) { close("connecting"); return; }
+        if (unanswered >= PING_MISSES) { traceConnection("heartbeat-timeout"); close("connecting", "heartbeat"); return; }
         unanswered++;
         send("ping");
       }, PING_MS);
     };
-    ws.onclose = () => close("connecting");
+    ws.onerror = () => traceConnection("socket-error");
+    ws.onclose = (event) => {
+      if (diagnostic || connectionSubscribers.size) traceConnection("socket-close", { code: Number.isInteger(event?.code) ? event.code : 0, clean: event?.wasClean === true });
+      close("connecting", "socket", Number.isInteger(event?.code) ? event.code : 0, event?.wasClean === true);
+    };
   };
 
   // One look at the account; true when it found a backend to join.
@@ -786,6 +879,7 @@
       state.highscores = data.highscores === true;
       state.highscoreSnapshots = data.highscoreSnapshots === true;
       state.arcadePlays = data.arcadePlays === true;
+      state.connectionReports = data.connectionReports === true;
       // The games the Worker hosts itself (worker/src/games.js), each followed over its own socket (game-net.js).
       state.games = Array.isArray(data.games) ? data.games.filter((g) => typeof g === "string").slice(0, 8) : [];
       state.resolved = data.player === null || !!state.me;
@@ -835,7 +929,7 @@
     state.me = null;
     state.hand = false;
     state.logoutEpoch++;
-    close("off");
+    close("off", "signout");
   };
 
   // Existing account API; rejoin with fresh authenticated headers so future lines use the new name.
@@ -931,6 +1025,7 @@
   };
   // Hidden long enough, the tab leaves the room; shown again, it rejoins as a fresh connection.
   const onVisibility = () => {
+    traceConnection("visibility");
     sendHub();
     sendVisible();
     window.clearTimeout(hiddenTimer);
@@ -965,7 +1060,7 @@
     if (!document.hidden || stopped || !state.me) return;
     stopped = true;
     window.clearTimeout(retryTimer);
-    close("paused");
+    close("paused", "paused");
   };
   document.addEventListener("visibilitychange", onVisibility);
 
@@ -1130,7 +1225,7 @@
     let changed = !!g && !gKnown || jet !== jetSent || weapon !== weaponSent || !!visual !== visualKnown
       || state.bodyKind !== "gorilla" && (!restKnown || !!rest !== restActive);
     if (rest && !changed) for (let i = 0; i < 6; i++) if (rest[i] !== restSent[i]) { changed = true; break; }
-    if (visual && !changed) for (let i = 0; i < 17; i++) if (visual[i] !== visualSent[i]) { changed = true; break; }
+    if (visual && !changed) for (let i = 0; i < visual.length; i++) if (visual[i] !== visualSent[i]) { changed = true; break; }
     // A held wind-up can outlast its last changing sample. A bounded heartbeat keeps it live, and
     // lets a silent/disconnected action expire without an extra timer or a new message type.
     if (visual && (visual[3] & 40 || visual[14] > 0) && now - poseAt >= 300) changed = true;
@@ -1349,6 +1444,8 @@
   };
 
   const dispose = () => {
+    traceConnection("dispose");
+    connectionSubscribers.clear();
     document.removeEventListener("visibilitychange", onVisibility);
     stopped = true;
     window.clearTimeout(retryTimer);
@@ -1365,7 +1462,8 @@
     presenceSubscribers.clear();
     doorSubscribers.clear();
     close("off");
+    diagnostic = null;
   };
 
-  BL.net = { lockRoom, unlockRoom, tryRoomPin, voiceLink, toggleVoiceLink, linkEveryone, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeBf, subscribeBfFrame, sendBf, sendBfInput, sendBfFrame, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendReaction, subscribeReactions, setHand, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { connectionDiagnostics, subscribeConnection, lockRoom, unlockRoom, tryRoomPin, voiceLink, toggleVoiceLink, linkEveryone, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeBf, subscribeBfFrame, sendBf, sendBfInput, sendBfFrame, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendReaction, subscribeReactions, setHand, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

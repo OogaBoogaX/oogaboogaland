@@ -81,10 +81,12 @@ test("the page never receives the avatar url or ban fields", () => {
 
 test("the page takes real donations only from a Worker with the bananapayserver binding, asks Tess's questions only of one with her key, and follows hosted games only on one with GAMES", async () => {
   const me = async (env) => (await handleApi(new Request("https://site.test/api/me"), { SITE_ORIGIN: "https://site.test", ...env }, new URL("https://site.test/api/me"))).json();
-  assert.deepEqual(await me({}), { player: null, character: null, donations: false, tess: false, highscores: false, highscoreSnapshots: false, arcadePlays: false, games: [] });
-  assert.deepEqual(await me({ DONATIONS: {} }), { player: null, character: null, donations: true, tess: false, highscores: false, highscoreSnapshots: false, arcadePlays: false, games: [] });
-  assert.deepEqual(await me({ ANTHROPIC_API_KEY: "sk-test" }), { player: null, character: null, donations: false, tess: true, highscores: false, highscoreSnapshots: false, arcadePlays: false, games: [] });
+  assert.deepEqual(await me({}), { player: null, character: null, donations: false, tess: false, highscores: false, highscoreSnapshots: false, arcadePlays: false, connectionReports: false, games: [] });
+  assert.deepEqual(await me({ DONATIONS: {} }), { player: null, character: null, donations: true, tess: false, highscores: false, highscoreSnapshots: false, arcadePlays: false, connectionReports: false, games: [] });
+  assert.deepEqual(await me({ ANTHROPIC_API_KEY: "sk-test" }), { player: null, character: null, donations: false, tess: true, highscores: false, highscoreSnapshots: false, arcadePlays: false, connectionReports: false, games: [] });
   assert.equal((await me({ DB: {} })).highscores, true);
+  assert.equal((await me({ DB: {}, CONNECTION_REPORT_LIMITER: {} })).connectionReports, true, "reports require both storage and a limiter");
+  assert.equal((await me({ DB: {} })).connectionReports, false, "reports fail closed without a limiter");
   assert.deepEqual((await me({ GAMES: {} })).games, ["ghost-hunt"], "a Worker with the GAMES binding names the games it hosts");
 });
 
@@ -169,7 +171,7 @@ test("old nonowner sessions receive no identity and cannot reach account, room o
   for (const login of ["visitor", "cave-name"]) {
     const DB = database(login), env = { SITE_ORIGIN: SITE, DB,
       ROOM: { getByName: () => { throw new Error("Ineligible session reached the room binding"); } } };
-    assert.deepEqual(await (await worker.fetch(requestFor("/api/me"), env)).json(), { player: null, character: null, donations: false, tess: false, highscores: true, highscoreSnapshots: true, arcadePlays: true, games: [] });
+    assert.deepEqual(await (await worker.fetch(requestFor("/api/me"), env)).json(), { player: null, character: null, donations: false, tess: false, highscores: true, highscoreSnapshots: true, arcadePlays: true, connectionReports: false, games: [] });
     assert.equal((await worker.fetch(requestFor("/api/me", "PATCH"), env)).status, 401);
     assert.equal((await worker.fetch(requestFor("/room", "GET", { upgrade: "websocket", "x-player-contributor": "1" }), env)).status, 401);
     assert.equal((await worker.fetch(requestFor("/api/voice/publish", "POST"), env)).status, 401);

@@ -24,7 +24,6 @@
     return online ? "online" : actor.state === "away" ? "chilling" : actor.state;
   };
   const $ = (id) => document.getElementById(id);
-  const TIER_RANK = { legendary: 0, epic: 1, rare: 2, common: 3 };
   const BANANA_COUNT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
   const DONATED_COUNT = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const DONOR_BANANAS = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -141,9 +140,10 @@
       }
       const glyph = SIGN_GLYPHS[ch];
       if (!glyph) throw new Error(`No cave-sign glyph for "${ch}"`);
+      const sx = 3 / glyph[0].length, pixel = 0.82 * sx;
       for (let row = 0; row < glyph.length; row++) {
         for (let col = 0; col < glyph[row].length; col++) {
-          if (glyph[row][col] === "1") d += `M${cursor + col} ${row}h.82v.82h-.82z`;
+          if (glyph[row][col] === "1") d += `M${cursor + col * sx} ${row}h${pixel}v.82h-${pixel}z`;
         }
       }
       cursor += 4;
@@ -299,7 +299,7 @@
   // The sheet belongs to the page. Reuse attached rows across visits; only current roster names stay in this map.
   const rosterNodes = new Map();
   let rosterAway = null, donorRows = null, donationRows = null;
-  const create = ({ roster, catalog, tierColors, renderIcon, lootEnabled = false, healthEnabled = false, signal = null, escapeHeld = null }) => {
+  const create = ({ roster, healthEnabled = false, signal = null, escapeHeld = null }) => {
     const lifetime = signal ? null : new AbortController();
     signal = signal || lifetime.signal;
     const el = {
@@ -315,8 +315,6 @@
       bananaPanel: $("bananas-panel"), bananaBtcRate: $("banana-btc-rate"),
       bananaBtcSats: $("banana-btc-sats"), bananaBtcPrice: $("banana-btc-price"), bananaExchange: $("banana-exchange"),
       donorUnits: [...document.querySelectorAll("[data-donor-unit]")],
-      lootTab: $("loot-tab"),
-      worldLootHint: $("world-loot-hint"),
       subtitle: $("subtitle"),
       topbar: document.querySelector(".topbar"), brand: document.querySelector(".brand"),
       clock: $("world-clock"), block: $("world-block"),
@@ -369,8 +367,6 @@
       hint: $("hint"),
       sheet: $("sheet"),
       presets: [...document.querySelectorAll("[data-preset]")],
-      inventory: $("inventory"),
-      inventoryEmpty: $("inventory-empty"),
       recipe: $("recipe"),
       recipeText: $("recipe-text")
     };
@@ -392,9 +388,7 @@
       el.modeFree.src = canvas.toDataURL("image/png");
     };
     favicon.src = document.querySelector('link[rel="icon"][sizes="64x64"]').href;
-    el.lootTab.hidden = !lootEnabled;
-    el.worldLootHint.hidden = !lootEnabled;
-    const sheet = BL.sheet.create({ lootEnabled, signal });
+    const sheet = BL.sheet.create({ signal });
     sheet.setPlaying(document.body.classList.contains("arcade-game"));
     el.primary.hidden = true;
     el.gorillaSmash.hidden = true;
@@ -1035,6 +1029,15 @@
       if (pointer >= 0 && el.primary.hasPointerCapture(pointer)) el.primary.releasePointerCapture(pointer);
       if (actionHandler) actionHandler(cancel ? "weapon-primary-cancel" : "weapon-primary-up");
     };
+    // The AK button's press, held from its pointer's down to its up (its handlers are with the primary's).
+    let weaponPointer = -1;
+    const finishWeapon = (cancel) => {
+      if (weaponPointer < 0) return;
+      const pointer = weaponPointer;
+      weaponPointer = -1;
+      if (el.weapon.hasPointerCapture(pointer)) el.weapon.releasePointerCapture(pointer);
+      if (actionHandler) actionHandler(cancel ? "weapon-secondary-cancel" : "weapon-secondary-up");
+    };
     const setPrimary = (available, selected, geometry, charge = 0, held = false, power = 1, aiming = false, ownerName = "") => {
       if (!available || !selected && primarySelected || geometry !== primaryGeometry) finishPrimary(true);
       if (available !== primaryShown) {
@@ -1144,6 +1147,7 @@
         weaponShown = available;
       }
       if (el.weapon.hidden !== (!available || !!gorillaEntry)) el.weapon.hidden = !available || !!gorillaEntry;
+      if (el.weapon.hidden) finishWeapon(true);
       if (equipped !== weaponEquipped) {
         weaponEquipped = equipped;
         el.weapon.dataset.equipped = String(equipped);
@@ -1248,7 +1252,7 @@
     };
     const setGorilla = (entry, view = "orbit", combat = false, combatEnabled = true) => {
       if (entry === gorillaEntry && view === gorillaView && combat === gorillaCombat && combatEnabled === gorillaCombatEnabled) return;
-      if (entry !== gorillaEntry) finishPrimary(true);
+      if (entry !== gorillaEntry) { finishPrimary(true); finishWeapon(true); }
       gorillaEntry = entry;
       gorillaView = view;
       gorillaCombat = combat;
@@ -2001,6 +2005,32 @@
     on(window, "blur", () => finishPrimary(true));
     on(document, "visibilitychange", () => { if (document.hidden) finishPrimary(true); });
     on(el.primary, "contextmenu", (e) => e.preventDefault());
+    // The AK button fires while it is held: a press pulls the trigger (or, with the AK put away, takes it out) and
+    // letting go releases it, so a held press is full auto. A keyboard press is still one burst, through the click.
+    const weaponPointerEvent = (e) => {
+      if (e.button !== 0) return;
+      // As the primary's: a press or release under another held button arrives as a pointermove.
+      const down = e.type === "pointerdown" || e.type === "pointermove" && (e.buttons & 1);
+      if (down) {
+        if (weaponPointer >= 0 || el.weapon.hidden) return;
+        e.preventDefault(); e.stopPropagation();
+        weaponPointer = e.pointerId;
+        if (e.isTrusted && !document.pointerLockElement) el.weapon.setPointerCapture(e.pointerId);
+        if (actionHandler) actionHandler("weapon-secondary-down");
+      } else if (e.pointerId === weaponPointer) {
+        e.preventDefault(); e.stopPropagation();
+        finishWeapon(false);
+        el.weapon.blur();
+      }
+    };
+    on(el.weapon, "pointerdown", weaponPointerEvent);
+    on(el.weapon, "pointerup", weaponPointerEvent);
+    on(el.weapon, "pointermove", weaponPointerEvent);
+    on(el.weapon, "pointercancel", (e) => { if (e.pointerId === weaponPointer) finishWeapon(true); });
+    on(el.weapon, "lostpointercapture", (e) => { if (e.pointerId === weaponPointer) finishWeapon(true); });
+    on(window, "blur", () => finishWeapon(true));
+    on(document, "visibilitychange", () => { if (document.hidden) finishWeapon(true); });
+    on(el.weapon, "contextmenu", (e) => e.preventDefault());
     const pressMode = () => {
       if (modeSelected) { if (actionHandler) actionHandler("mode-toggle"); }
       else {
@@ -2031,6 +2061,7 @@
       // Native and virtual pointer clicks already completed their press/release.
       // A detail-zero click is an assistive or programmatic tap without a hold.
       if (b === el.primary && (e.detail !== 0 || primaryPointer >= 0 || primaryKey)) return;
+      if (b === el.weapon && (e.detail !== 0 || weaponPointer >= 0)) return;
       if (b === el.mode && e.detail !== 0) return;
       b.blur();
       if (b.dataset.action === "feed") openFeed();
@@ -2249,119 +2280,12 @@
     const onPreset = (fn) => {
       presetHandler = fn;
     };
-    let assignHandler = null, unassignHandler = null;
-    const onAssign = (fn) => {
-      assignHandler = fn;
-    };
-    const onUnassign = (fn) => {
-      unassignHandler = fn;
-    };
-    const iconCache = new Map();
-    const iconFor = (item) => {
-      let icon = iconCache.get(item.id);
-      if (!icon && renderIcon) {
-        icon = renderIcon(item);
-        iconCache.set(item.id, icon);
-      }
-      return icon;
-    };
-    const groupEntries = (entries) => {
-      const groups = new Map();
-      for (const entry of entries) {
-        const item = catalog.find((c) => c.id === entry.itemId);
-        if (!item) continue;
-        let group = groups.get(item.id);
-        if (!group) {
-          group = { item, tier: entry.tier, entries: [] };
-          groups.set(item.id, group);
-        }
-        group.entries.push(entry);
-      }
-      return [...groups.values()].sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier] || a.item.name.localeCompare(b.item.name));
-    };
-    const renderInventory = (entries, assignedTo, wornBy = () => null) => {
-      el.inventory.replaceChildren();
-      el.inventoryEmpty.hidden = entries.length > 0;
-      sheet.setLootCount(entries.length);
-      for (const group of groupEntries(entries)) {
-        const { item } = group;
-        const worn = group.entries.map((e) => ({ entry: e, name: assignedTo(e.id) })).filter((w) => w.name);
-        const free = group.entries.filter((e) => !assignedTo(e.id));
-        const li = document.createElement("li");
-        li.className = "loot-row";
-        li.style.setProperty("--tier", tierColors[group.tier]);
-        const icon = iconFor(item);
-        if (icon) {
-          const canvas = document.createElement("canvas");
-          canvas.className = "loot-icon";
-          canvas.width = icon.width;
-          canvas.height = icon.height;
-          canvas.getContext("2d").drawImage(icon, 0, 0);
-          li.append(canvas);
-        }
-        const main = document.createElement("div");
-        main.className = "loot-main";
-        const title = document.createElement("div");
-        title.className = "loot-title";
-        const name = document.createElement("span");
-        name.className = "loot-name";
-        name.textContent = item.name;
-        const badge = document.createElement("span");
-        badge.className = "loot-tier";
-        badge.textContent = group.tier;
-        title.append(name, badge);
-        if (group.entries.length > 1) {
-          const count = document.createElement("span");
-          count.className = "loot-count";
-          count.textContent = `×${group.entries.length}`;
-          title.append(count);
-        }
-        main.append(title);
-        if (worn.length) {
-          const chips = document.createElement("div");
-          chips.className = "loot-worn";
-          for (const w of worn) {
-            const chip = document.createElement("button");
-            chip.type = "button";
-            chip.className = "chip";
-            chip.title = `Take ${item.name} off ${BL.characters.displayOf(w.name)}`;
-            chip.textContent = BL.characters.displayOf(w.name);
-            chip.addEventListener("click", () => unassignHandler && unassignHandler(w.name), { signal });
-            chips.append(chip);
-          }
-          main.append(chips);
-        }
-        li.append(main);
-        const select = document.createElement("select");
-        select.className = "loot-assign";
-        select.setAttribute("aria-label", `Give ${item.name} to a caveman`);
-        const placeholder = document.createElement("option");
-        placeholder.value = "";
-        placeholder.textContent = free.length ? `Give one to… (${free.length} free)` : "All worn";
-        select.append(placeholder);
-        select.disabled = free.length === 0;
-        for (const contributor of roster) {
-          const opt = document.createElement("option");
-          opt.value = contributor.name;
-          const wearing = wornBy(contributor.name);
-          opt.textContent = wearing ? `${contributor.display} · ${wearing}` : `${contributor.display} · no swag`;
-          select.append(opt);
-        }
-        select.addEventListener("change", () => {
-          const target = select.value;
-          select.value = "";
-          select.blur();
-          if (target && free.length) assignHandler && assignHandler(free[0].id, target);
-        }, { signal });
-        li.append(select);
-        el.inventory.append(li);
-      }
-    };
     // End this visit; the attached sheet rows belong to the page.
     const dispose = () => {
       delete document.body.dataset.bannerOogas;
       sheet.dispose();
       finishPrimary(true);
+      finishWeapon(true);
       window.clearTimeout(toastTimer);
       window.clearTimeout(toastHideTimer);
       window.clearTimeout(hintTimer);
@@ -2373,7 +2297,6 @@
       if (liveRows === rosterRows) liveRows = liveOnline = null;
       if (liveDonors === refreshDonors) liveDonors = null;
       // Page-owned roster and donation rows remain attached; the next visit reconciles their contents.
-      el.inventory.replaceChildren();
       el.toast.classList.remove("show");
       el.toast.hidden = true;
       el.hint.classList.remove("show");
@@ -2402,16 +2325,26 @@
     return {
       // Engines keep this facade while a retained scene takes a fresh visit signal and sheet state.
       renew(signal) {
-        const next = create({ roster, catalog, tierColors, renderIcon, lootEnabled, healthEnabled, signal, escapeHeld });
+        const next = create({ roster, healthEnabled, signal, escapeHeld });
         next.tooltip.setVisibility(this.tooltip.visibility);
-        next.onAction(actionHandler); next.onPreset(presetHandler); next.onAssign(assignHandler); next.onUnassign(unassignHandler);
+        next.onAction(actionHandler); next.onPreset(presetHandler);
         Object.defineProperties(this, Object.getOwnPropertyDescriptors(next));
         return this;
       },
-      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setWeaponSkin, setDestinations, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
+      el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setPanelsHidden, foldPanels, setRosterRow, setStats, setAct, setMode, setWeaponSkin, setDestinations, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, setPileValueVisible, dispose };
   };
   // Detached panels can be visible together. Each has a view of the same account and voice state.
   const ROOM_WORDS = { replaced: "open in another tab", full: "island full" };
+  // What voice needs cannot change in a page's life: worked out once, so the button can name what this browser lacks
+  // before the visitor is asked to join.
+  let voiceSupportReason = null;
+  const voiceReason = () => {
+    if (voiceSupportReason === null) {
+      const support = BL.voice && BL.voice.support ? BL.voice.support() : { secure: true, webrtc: true, mic: true };
+      voiceSupportReason = !support.secure ? "Voice needs a secure page" : !support.webrtc ? "This browser has no WebRTC" : !support.mic ? "This browser has no microphone" : "";
+    }
+    return voiceSupportReason;
+  };
   const accountPrefixes = [""];
   for (const slot of document.querySelectorAll("[data-account-copy]")) {
     const prefix = slot.dataset.accountCopy + "-";
@@ -2442,10 +2375,19 @@
     writeAccount("account-room", "hidden", !me || !words);
     writeAccount("account-rejoin", "hidden", !me || !ROOM_WORDS[room]);
     const voice = BL.voice.stats;
-    const voiceFailure = voice.returning ? voice.micError : voice.enabled ? "" : voice.error || voice.micError;
-    const voiceWords = voice.joining ? "Joining voice" : voiceFailure ? `Voice: ${voiceFailure}` : !voice.enabled && !voice.returning ? "Join voice" : voice.muted ? "Unmute" : "Mute";
+    const iceBlocked = voice.error === BL.voice.ICE_BLOCKED;
+    const voiceFailure = iceBlocked ? voice.error : voice.returning ? voice.micError : voice.enabled ? "" : voice.error || voice.micError;
+    const reason = voiceReason();
+    const voiceWords = reason ? reason : voice.joining ? "Joining voice" : voiceFailure ? `Voice: ${voiceFailure}` : !voice.enabled && !voice.returning ? "Join voice" : voice.muted ? "Unmute" : "Mute";
     writeAccount("account-voice", "hidden", !live);
     writeAccount("account-voice", "textContent", voiceWords);
+    writeAccount("account-voice", "disabled", !!reason);
+    // A blocked WebRTC explains itself in a tooltip, and only while it is the reason: a VPN's leak protection is what
+    // usually does it, by turning off non-proxied UDP (Brave's "WebRTC IP handling policy").
+    const voiceTip = iceBlocked
+      ? "A VPN's leak protection can block WebRTC by setting the browser's IP handling policy to disable non-proxied UDP (Brave specific). Allow WebRTC for this site, or turn that protection off."
+      : "";
+    writeAccount("account-voice", "title", voiceTip);
     writeAccount("account-voice-leave", "hidden", !live || !voice.enabled && !voice.returning);
     const pressed = String(voice.enabled && !voice.muted), onlineDot = String(live);
     for (const row of fieldsFor("account")) if (row.dataset.live !== onlineDot) row.dataset.live = onlineDot;

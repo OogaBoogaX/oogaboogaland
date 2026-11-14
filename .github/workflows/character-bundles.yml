@@ -19,27 +19,90 @@ on:
         required: false
 
 permissions:
-  contents: write
-  pull-requests: write
-  statuses: write
-  checks: read
-  actions: write
+  contents: read
+  pull-requests: read
 
 concurrency:
-  group: character-bundles
+  # Keep the running event (it may be writing), but replace an older pending
+  # event for this PR/branch with its latest state. Closed overrides keep their
+  # own slot so a reopen cannot displace required post-merge reconciliation.
+  group: character-events-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.workflow_run.head_branch || inputs.override_pr || 'sweep' }}-${{ github.event.action == 'closed' && 'closed' || 'update' }}
   cancel-in-progress: false
-  # Shared with the Pages artifact writer; preserve pending artifact commits.
-  queue: max
+  queue: single
 
 jobs:
-  bundle:
+  inspect:
     if: >-
       (vars.CHARACTER_BUNDLES_ENABLED == 'true' || vars.CHARACTER_ACCOUNT_RENAMES_ENABLED == 'true') &&
       (github.event_name != 'workflow_dispatch' ||
        ((github.actor_id == '95375789' || github.actor_id == '72945059') &&
         (github.triggering_actor == 'w-s-bitcoin' || github.triggering_actor == '2140data')))
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+      actions: read
+    outputs:
+      write: ${{ steps.route.outputs.write }}
+      deferred: ${{ steps.priority.outputs.deferred }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: rock
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Repository-scoped inspection token
+        if: vars.CHARACTER_APP_CLIENT_ID != ''
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.CHARACTER_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CHARACTER_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-pull-requests: read
+          permission-statuses: write
+      - name: Inspect current PR without entering the writer queue
+        id: route
+        run: node scripts/character-bundles.mjs --inspect
+        env:
+          CHARACTER_TOKEN: ${{ steps.app.outputs.token || github.token }}
+          CHARACTER_APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          CHARACTER_BOT_LOGIN: ${{ vars.CHARACTER_BOT_LOGIN || 'github-actions[bot]' }}
+          CHARACTER_ACCOUNT_RENAMES_ONLY: ${{ vars.CHARACTER_BUNDLES_ENABLED != 'true' && vars.CHARACTER_ACCOUNT_RENAMES_ENABLED == 'true' }}
+      - name: Inspect release priority
+        if: steps.route.outputs.write == 'true' && github.event_name != 'workflow_dispatch'
+        id: priority
+        run: node scripts/ci-priority.mjs --gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Yield to release work
+        if: steps.priority.outputs.deferred == 'true'
+        run: |
+          echo "::notice::Deferred for deployment/post-merge work; release completion or scheduled recovery retries this job."
+          echo "Required character statuses remain pending until reconciliation runs."
+
+  bundle:
+    needs: inspect
+    if: needs.inspect.outputs.write == 'true' && needs.inspect.outputs.deferred != 'true'
+    runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Only actual reconciliation shares the artifact writer's lock. Never
+    # cancel an active writer or allow two bundle/artifact writers to overlap.
+    concurrency:
+      group: character-bundles
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: write
+      pull-requests: write
+      statuses: write
+      checks: read
+      actions: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -51,8 +114,21 @@ jobs:
         with:
           node-version: '22'
           package-manager-cache: false
+      # Recheck AFTER acquiring the shared writer lock, before creating a writer
+      # token or mutating anything. Already-queued jobs yield and release the lock.
+      - name: Inspect release priority
+        if: github.event_name != 'workflow_dispatch'
+        id: priority
+        run: node scripts/ci-priority.mjs --gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Yield to release work
+        if: steps.priority.outputs.deferred == 'true'
+        run: |
+          echo "::notice::Deferred for deployment/post-merge work; release completion or scheduled recovery retries this job."
+          echo "Required character statuses remain pending until reconciliation runs."
       - name: Repository-scoped character App token
-        if: vars.CHARACTER_APP_CLIENT_ID != ''
+        if: steps.priority.outputs.deferred != 'true' && vars.CHARACTER_APP_CLIENT_ID != ''
         id: app
         uses: actions/create-github-app-token@v3
         with:
@@ -63,6 +139,7 @@ jobs:
           permission-statuses: write
           permission-checks: read
       - name: Scan, route and reconcile character submissions
+        if: steps.priority.outputs.deferred != 'true'
         run: node scripts/character-bundles.mjs
         env:
           CHARACTER_TOKEN: ${{ steps.app.outputs.token || github.token }}

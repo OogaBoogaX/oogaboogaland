@@ -9,10 +9,7 @@
   const VISOR = "#2a0d0a", GLARE = "#5c2a20", FRAME = "#161412", LASER = "#ff5a1f", HOT = "#ffb070";
   const SUIT = "#e0a020", SUIT_DK = "#a86a14", OLIVE = "#8c873c", GLYPH = "#dfe8f0";
   const METAL = "#3d4248", BOLT = "#9aa0a6", CABLE = "#1d1f22", GLOVE = "#4a4d52";
-  // Hashed from the cell, never drawn from rand: weathering that stays put.
   const grit = (x, y, z) => ((Math.imul(x + 11, 73856093) ^ Math.imul(y + 7, 19349663) ^ Math.imul(z + 5, 83492791)) >>> 0) % 13;
-  // A patch of sphere about (0, cy, 0) in degrees: azimuth from the front (+z) toward +x, elevation up.
-  // `paint(i, j)` names each cell's colour, null leaves a hole; `inside` turns the faces inward.
   const shell = ({ r, cy, a0, a1, e0, e1, sa, se, paint, inside = false }) => {
     const geo = geometry(), rows = [], D = Math.PI / 180;
     for (let j = 0; j <= se; j++) {
@@ -31,12 +28,8 @@
     }
     return geo;
   };
-  // The space helmet in head units of height, pushed back off the face: a weathered mustard
-  // dome with a wide-open front, its dark visor flipped up onto the crown in a thin frame.
   const R = 0.4, CY = 0.2;
   const helmetGeometry = cached(() => {
-    // 15-degree cells; the face opening is three cells either side of the front, up to the brow.
-    // The rim stops higher than on the closed helmet, so the tilted dome clears the shoulders.
     const open = (i, j) => Math.abs(i - 12 + 0.5) < 3 && j < 3;
     const dome = (i, j) => open(i, j) ? null : j === 0 ? GRIME : grit(i, j, 0) < 2 ? WORN : grit(i, j, 1) < 1 ? GRIME : HELMET;
     return merge(
@@ -46,7 +39,19 @@
       shell({ r: R + 0.012, cy: CY, a0: -57, a1: 57, e0: 33, e1: 59, sa: 8, se: 3, paint: (i, j) => j === 1 && i > 1 && i < 4 ? GLARE : VISOR })
     );
   });
-  // The neck ring the helmet seats on, in root units: gunmetal, bolted, a cable to the pack.
+  const helmetFloorGeometry = cached(() => {
+    const geo = geometry(), D = Math.PI / 180, y = CY + R * Math.sin(-15 * D), r = R * Math.cos(15 * D) - 0.004, ring = [];
+    for (let i = 0; i < 24; i++) ring.push(pushVert(geo, r * Math.sin(-i / 24 * Math.PI * 2), y, r * Math.cos(-i / 24 * Math.PI * 2)));
+    face(geo, ring, hexToRgb(LINING));
+    return geo;
+  });
+  const PAD_Z = 0.03, DOME_Y = 0.05 + CY * Math.cos(0.55), DOME_Z = -0.1 - CY * Math.sin(0.55);
+  const helmetPadGeometry = cached(() => {
+    const geo = geometry(), r = Math.sqrt(R * R - (PAD_Z - DOME_Z) ** 2) - 0.004, ring = [];
+    for (let i = 0; i < 24; i++) { const a = i / 24 * Math.PI * 2; ring.push(pushVert(geo, r * Math.cos(a), Math.max(0.01, DOME_Y + r * Math.sin(a)), PAD_Z)); }
+    face(geo, ring, hexToRgb(LINING));
+    return geo;
+  });
   const neckRingGeometry = cached(() => {
     const bolts = [];
     for (let i = 0; i < 8; i++) {
@@ -57,7 +62,6 @@
       path: (t) => ({ x: 0.36 - 0.12 * t, y: 0.48 - 0.1 * t + 0.06 * Math.sin(t * Math.PI), z: -0.3 * t }) });
     return merge(ring({ r: 0.35, thickness: 0.032, y: 0.5, segments: 16, color: METAL }), ring({ r: 0.33, thickness: 0.02, y: 0.45, segments: 16, color: CABLE }), ...bolts, cable);
   });
-  // A Bitcoin sign from 0.018-high cells, centred on its own origin.
   const coinGeometry = cached(() => {
     const rows = [" # # ", "#### ", "#   #", "#### ", "#   #", "#### ", " # # "], c = 0.018, cells = [];
     rows.forEach((row, j) => [...row].forEach((ch, i) => {
@@ -93,21 +97,18 @@
     display: "Doggo",
     joined: 1792114421,
     lastCommit: 1792114421,
-    // Fur under the helmet; the dog face is drawn in skull, the laser eyes in eyes.
-    look: { skin: FUR, hair: FUR, fur: SUIT_DK, hairless: true, noBrow: true, noPupils: true, face: "none" },
+    look: { skin: FUR, hair: FUR, fur: SUIT_DK, hairless: true, noBrow: true, noPupils: true, face: "none", noFlaps: true },
     voice: {
       poke: "GM. Wen Omega?",
       idle: ["GM. Wen Omega?", "I habs humgry", "Laser eyes til MacDomalts fries"]
     },
     dress: {
-      // A bulky yellow-orange suit: shaded sides, a gunmetal belt, olive grime on the front.
       torso(k, v) {
         const C = colors(k);
         v.fill(0, 8, 0, 7, 0, 5, (x, y, z) => C[y === 2 ? METAL : x === 0 || x === 8 || z === 0 ? SUIT_DK : z === 5 && grit(x, y, z) < 2 ? OLIVE : SUIT]);
         v.set(4, 2, 5, k.color(BOLT));
         k.loin = [C[SUIT_DK], C[OLIVE]];
       },
-      // Suit sleeves and legs with gloves and boots; the neck ring and a Bitcoin sign on each side of the chest.
       gear(k) {
         const C = colors(k), u = k.u, h = k.h, glove = makeVox();
         k.parts.armR.geometry = k.parts.armL.geometry = k.vg(armVox(C), { x: -1.5 * u, y: -11 * u, z: -1.5 * u });
@@ -118,8 +119,6 @@
         addChild(k.root, createNode({ scale: { x: h, y: h, z: h }, geometry: neckRingGeometry() }));
         for (const x of [-0.14, 0.14]) addChild(k.parts.torso, createNode({ position: { x: x * h, y: 0.3 * h, z: 3.05 * u }, scale: { x: h, y: h, z: h }, geometry: coinGeometry() }));
       },
-      // A bulldog head: broad cream skull and cheeks, a short muzzle with heavy jowls,
-      // a big black nose and a small dark mouth line. No ears: the helmet still covers them.
       skull(k, v) {
         const P = k.P, muzzle = k.color(MUZZLE), nose = k.color(NOSE), mouth = k.color(MOUTH);
         v.fill(0, 6, 0, 5, 0, 5, (x, y, z) => grit(x, y, z) < 1 ? P.skinDk : P.skin);
@@ -137,7 +136,6 @@
         v.fill(2, 4, 0, 0, 8, 8, mouth);
         return true;
       },
-      // Laser eyes, red-orange with a hot centre; closed, the lids are fur.
       eyes(k, v) {
         const laser = k.color(LASER), hot = k.color(HOT);
         for (const [x, c] of [[0, laser], [1, hot], [5, hot], [6, laser]]) {
@@ -148,12 +146,13 @@
         k.lid = k.P.skinDk;
         return true;
       },
-      hatY: (k) => 0.64 * k.h,
       headgear(k) {
         const h = k.h;
         addChild(k.parts.head, createNode({ position: { x: 0, y: 0.05 * h, z: -0.1 * h }, rotation: { x: -0.55, y: 0, z: 0 }, scale: { x: h, y: h, z: h }, geometry: helmetGeometry() }));
+        if (BL.models.STYLE !== "R") return;
+        addChild(k.parts.head, createNode({ position: { x: 0, y: 0.05 * h, z: -0.1 * h }, rotation: { x: -0.55, y: 0, z: 0 }, scale: { x: h, y: h, z: h }, geometry: helmetFloorGeometry() }));
+        addChild(k.parts.head, createNode({ scale: { x: h, y: h, z: h }, geometry: helmetPadGeometry() }));
       },
-      // A small life-support pack on the back.
       extras(k) {
         const h = k.h;
         addChild(k.parts.torso, createNode({ position: { x: 0, y: 0.33 * h, z: -3 * k.u - 0.05 * h }, scale: { x: h, y: h, z: h }, geometry: packGeometry() }));

@@ -320,10 +320,11 @@
     for (let i = 0; i < text.length; i++) {
       const glyph = glyphs[text[i]];
       if (!glyph) continue;
+      const sx = 3 / glyph[0].length;
       for (let r = 0; r < glyph.length; r++) for (let c = 0; c < glyph[r].length; c++) {
         if (glyph[r][c] !== "1") continue;
-        const x = left + (i * 4 + c) * pixel, y = (2 - r - 0.5) * pixel, z = front;
-        facing(geo, [[x, y, z], [x + pixel, y, z], [x + pixel, y + pixel, z], [x, y + pixel, z]], color, emissive, [0, 0, 1]);
+        const x = left + (i * 4 + c * sx) * pixel, y = (2 - r - 0.5) * pixel, z = front;
+        facing(geo, [[x, y, z], [x + pixel * sx, y, z], [x + pixel * sx, y + pixel, z], [x, y + pixel, z]], color, emissive, [0, 0, 1]);
       }
     }
     return geo;
@@ -351,7 +352,7 @@
     } });
     return geo;
   })());
-  // The keypad's small window: one canvas in the signs' 3 by 5 pixels. Words that fit stand centred; longer ones run
+  // The keypad's small window: one canvas in the signs' five-row pixels. Words that fit stand centred; longer ones run
   // across it and round again, repainted only when they have moved a cell.
   const WINDOW = { w: 0.39, h: 0.09, width: 140, height: 32, dot: 4, top: 6, speed: 14, gap: 10 };
   // One hidden digit of a PIN.
@@ -364,10 +365,12 @@
     geometry.imageSurface = { canvas, version: 0, rect: [-W, -H, WINDOW.w, WINDOW.h], background: [26, 18, 10] };
     let words = "", ink = "#f7931a", wide = 0, clock = 0, drawn = -1;
     const draw = (x) => {
+      let cursor = x;
       for (let i = 0; i < words.length; i++) {
         const glyph = words[i] === "*" ? WINDOW_DOT : glyphs[words[i]];
-        if (!glyph) continue;
-        for (let r = 0; r < glyph.length; r++) for (let c = 0; c < glyph[r].length; c++) if (glyph[r][c] === "1") ctx.fillRect((x + i * 4 + c) * WINDOW.dot, WINDOW.top + r * WINDOW.dot, WINDOW.dot, WINDOW.dot);
+        if (!glyph) { cursor += 4; continue; }
+        for (let r = 0; r < glyph.length; r++) for (let c = 0; c < glyph[r].length; c++) if (glyph[r][c] === "1") ctx.fillRect((cursor + c) * WINDOW.dot, WINDOW.top + r * WINDOW.dot, WINDOW.dot, WINDOW.dot);
+        cursor += glyph[0].length + 1;
       }
     };
     const paint = (offset) => {
@@ -381,7 +384,11 @@
     const say = (text, color = "#f7931a") => {
       if (text === words && color === ink) return;
       words = text; ink = color; clock = 0;
-      wide = text.length ? text.length * 4 - 1 : 0;
+      wide = text.length ? -1 : 0;
+      for (const ch of text) {
+        const glyph = ch === "*" ? WINDOW_DOT : glyphs[ch];
+        wide += glyph ? glyph[0].length + 1 : 4;
+      }
       paint(0);
     };
     const tick = (dt) => {
@@ -444,7 +451,11 @@
   const directoryBoard = () => {
     const D = DIRECTORY, glyphs = BL.hubModels.SIGN_GLYPHS, rooms = BL.timechainRooms.ROOMS;
     const names = rooms.map((room) => room.name.replace(/^The /, "").toUpperCase());
-    const wide = (text) => text.length * 4 - 1;
+    const wide = (text) => {
+      let cells = -1;
+      for (const ch of text) cells += glyphs[ch] ? glyphs[ch][0].length + 1 : 4;
+      return cells;
+    };
     const nameAt = D.margin + 3 + D.gap, lockAt = nameAt + Math.max(...names.map(wide)) + D.gap;
     const cols = lockAt + 3 + D.margin, top = D.margin + 5 + D.gap + 1 + D.gap + 1;
     const rows = top + rooms.length * D.pitch - 2 + D.margin;
@@ -453,10 +464,12 @@
     const ctx = canvas.getContext("2d");
     const text = (words, x, y, ink) => {
       ctx.fillStyle = ink;
+      let cursor = x;
       for (let i = 0; i < words.length; i++) {
         const glyph = words[i] === "#" ? DIRECTORY_LOCK : glyphs[words[i]];
-        if (!glyph) continue;
-        for (let r = 0; r < 5; r++) for (let c = 0; c < 3; c++) if (glyph[r][c] === "1") ctx.fillRect((x + i * 4 + c) * D.dot, (y + r) * D.dot, D.dot, D.dot);
+        if (!glyph) { cursor += 4; continue; }
+        for (let r = 0; r < 5; r++) for (let c = 0; c < glyph[r].length; c++) if (glyph[r][c] === "1") ctx.fillRect((cursor + c) * D.dot, (y + r) * D.dot, D.dot, D.dot);
+        cursor += glyph[0].length + 1;
       }
     };
     let chosen = -1;

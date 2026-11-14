@@ -10,7 +10,7 @@ import { getPlayer } from "../src/db.js";
 
 const host = () => {
   let now = 100000;
-  const accepted = [], alarms = [], runtime = { listed: null, pinged: null };
+  const accepted = [], alarms = [], writes = [], runtime = { listed: null, pinged: null };
   const socket = () => ({
     sent: [], closed: null, store: null,
     send(text) { this.sent.push(JSON.parse(text)); },
@@ -44,7 +44,7 @@ const host = () => {
     storage: {
       // As Cloudflare's storage: an array of keys answers a Map of those found.
       get: async (key) => Array.isArray(key) ? new Map(key.filter((k) => stored.has(k)).map((k) => [k, stored.get(k)])) : stored.get(key),
-      put: async (key, value) => stored.set(key, value), getAlarm: async () => alarms.length ? alarms.at(-1) : null,
+      put: async (key, value) => { writes.push({ key, value }); stored.set(key, value); }, getAlarm: async () => alarms.length ? alarms.at(-1) : null,
       setAlarm: async (at) => alarms.push(at),
     },
   };
@@ -60,7 +60,7 @@ const host = () => {
     await send(r, ws, { t: "pose", x: 1, y: 2, z: 3, yaw: 0 });
     await send(r, ws, { t: "zone", name: zone });
   };
-  return { room, join, send, enter, accepted, alarms, runtime, advance: (ms) => { now += ms; }, now: () => now };
+  return { room, join, send, enter, accepted, alarms, writes, stored, runtime, advance: (ms) => { now += ms; }, now: () => now };
 };
 
 const messages = (ws, t, op) => ws.sent.filter((m) => m.t === t && (op === undefined || m.op === op));
@@ -205,18 +205,52 @@ test("a cancelled door alarm does not pull the ordinary account sweep forward", 
   assert.equal(r.sweepAt, sweepAt);
 });
 
-test("a woken room keeps the pile loop's phase and the account sweep it stored", async () => {
+test("a woken room keeps the stored pile phase and sweep without redundant writes", async () => {
   const settle = () => new Promise(setImmediate);
   const h = host(), r = h.room();
   await settle();
   const born = r.loopEpoch;
   assert.ok(born > 0);
   assert.equal(r.sweepAt, born + protocol.SWEEP_MS);
-  h.advance(30000);
-  const woken = h.room();
+  const writes = () => h.writes.filter(({ key }) => key === "loopEpoch" || key === "sweepAt");
+  assert.deepEqual(writes(), [{ key: "loopEpoch", value: born }, { key: "sweepAt", value: born + protocol.SWEEP_MS }], "a fresh room initializes both keys once");
+  h.writes.length = 0;
+  for (let i = 0; i < 3; i++) {
+    h.advance(10000);
+    const woken = h.room();
+    await settle();
+    assert.equal(woken.loopEpoch, born, "every page keeps hearing the same crackle");
+    assert.equal(woken.sweepAt, born + protocol.SWEEP_MS, "a wake does not push the sweep out");
+  }
+  assert.deepEqual(writes(), [], "restoring existing timing creates no storage writes");
+
+  // A partially initialized/older room fills only the absent key, without moving the other one.
+  for (const key of ["loopEpoch", "sweepAt"]) {
+    h.stored.delete(key);
+    h.writes.length = 0;
+    const other = key === "loopEpoch" ? "sweepAt" : "loopEpoch", kept = h.stored.get(other);
+    h.advance(1000);
+    const woken = h.room();
+    await settle();
+    assert.equal(woken[other], kept);
+    assert.equal(woken[key], h.now() + (key === "sweepAt" ? protocol.SWEEP_MS : 0));
+    assert.deepEqual(writes(), [{ key, value: woken[key] }], "only the missing key is initialized");
+  }
+
+  // Suppressing constructor writes must not suppress the alarm's real deadline update.
+  const beforeSweep = h.room();
   await settle();
-  assert.equal(woken.loopEpoch, born, "every page keeps hearing the same crackle");
-  assert.equal(woken.sweepAt, born + protocol.SWEEP_MS, "a wake does not push the sweep out");
+  h.writes.length = 0;
+  h.advance(protocol.SWEEP_MS);
+  await beforeSweep.alarm();
+  const due = h.now() + protocol.SWEEP_MS;
+  assert.deepEqual(writes(), [{ key: "sweepAt", value: due }]);
+  h.writes.length = 0;
+  const afterSweep = h.room();
+  await settle();
+  assert.equal(afterSweep.sweepAt, due);
+  assert.equal(afterSweep.loopEpoch, beforeSweep.loopEpoch);
+  assert.deepEqual(writes(), [], "the advanced deadline survives another wake without a rewrite");
 });
 
 test("a hibernated room reconstructs its active lease and in-flight room transit", async () => {

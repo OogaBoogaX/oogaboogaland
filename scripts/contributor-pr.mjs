@@ -12,7 +12,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const POLICY_FILES = new Set(["src/js/contributor-identities.js", "scripts/contributor-pr.mjs",
   "scripts/character-identity.mjs", "worker/src/contributor-policy.js", ".github/workflows/character-identities.yml",
   "scripts/character-safety.mjs", "scripts/character-submissions.mjs", "scripts/character-github.mjs", "scripts/character-bundles.mjs",
-  "scripts/character-operators.mjs", "scripts/character-account-rename.mjs", "scripts/character-override.mjs", "scripts/sync-characters.mjs",
+  "scripts/character-operators.mjs", "scripts/character-account-rename.mjs", "scripts/character-override.mjs", "scripts/sync-characters.mjs", "scripts/ci-priority.mjs",
   ".github/workflows/character-bundles.yml", ".github/workflows/character-push.yml"]);
 const github = async (path, missing = false) => {
   const repo = process.env.GITHUB_REPOSITORY;

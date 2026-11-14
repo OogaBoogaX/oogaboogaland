@@ -25,7 +25,6 @@
     pile: "This is the pile. Donations become bananas for the crew.",
     crew: "Every Ooga stands for one of the crew's contributors.",
     jumbotron: "The jumbotron shows the crew's activity, live.",
-    totems: "The totems light up when Bitcoin Core, BTCPay, LND or CLN merge a PR.",
     timechain: "Out west, the Timechain Sphere: ten rooms behind one door, from a planetarium to a movie theater.",
     timechainWalls: "Walk over the bridge and pick a room at the keypad, 0 to 9: each number opens a different room.",
     timechainBoards: "Room 1, the Conference Room, has the live block and mining charts and the holdings desk.",
@@ -77,7 +76,6 @@
     newsOnchain: "The kiosk takes tips on-chain now, as well as over Lightning, and tells you when yours confirms.",
     newsDonations: "New in the Factory: a donation kiosk. Your sats come out as bananas!",
     newsArcadeFront: "Ooga Arcade has a brand-new front.",
-    newsTotems: "The totems now light up for a day after Bitcoin Core, BTCPay, LND or CLN merge a PR.",
     newsChat: "Ooga Chat is open: it's the last pull tab on the island's drawer.",
     newsTess: "And me! I fly round the Factory now, and give tours there.",
     newsVoice: "Voice now follows you into every cave, with health bars and online dots.",
@@ -89,16 +87,16 @@
     newsArcade: "Ooga Arcade opened: games, tickets and prizes.",
     newsFactory: "The Lightning Factory opened: a Lightning node at work.",
     newsTimechain: "The Timechain Sphere opened out west. Walk inside!",
-    repos: "Over the stone bridge past the Oogatron: Repo Island, slowly turning, a carved totem for each of 170 open-source Bitcoin projects, sorted by kind.",
+    repos: "Over the stone bridge past the Oogatron: Merge Rock, slowly turning, a carved totem for each of 170 open-source Bitcoin projects, sorted by kind.",
     reposLit: "Each stands as tall as Bitcoin leans on its project, and lights up for a day after its repo merges a pull request.",
-    newsRepos: "Repo Island opened off the south rim: 170 totems, one for each open-source Bitcoin project. They light up when their repos merge."
+    newsRepos: "Merge Rock opened off the south rim: 170 totems, one for each open-source Bitcoin project. They light up when their repos merge."
   };
   // The island tour, one stop a landmark: where the view looks from (`eye`) and at (`look`), and the lines she says
   // there. She hovers between the view and the landmark, off to its right, and her beam lands on `look`.
   const STOPS = [
     { id: "pile", title: "The pile", eye: [6, 8, 11], look: [0, 1.2, 0], lines: ["pile", "crew"] },
-    { id: "totems", title: "Jumbotron and totems", eye: [7, 8, 7], look: [0, 5, 26], lines: ["jumbotron", "totems"] },
-    { id: "repos", title: "Repo Island", eye: [7, 12, 26], look: [0, 3, 62], lines: ["repos", "reposLit"] },
+    { id: "jumbotron", title: "Jumbotron", eye: [7, 8, 7], look: [0, 5, 26], lines: ["jumbotron"] },
+    { id: "repos", title: "Merge Rock", eye: [7, 12, 26], look: [0, 3, 62], lines: ["repos", "reposLit"] },
     { id: "timechain", title: "Timechain Sphere", eye: [-15, 16, 4], look: [-42, 5, 17], lines: ["timechain", "timechainWalls", "timechainBoards", "timechainShare"] },
     { id: "bca", title: "B.C.A.", eye: [-11, 9.5, -6.5], look: [-19, 4.5, -11], lines: ["bca", "bcaInside", "bcaMotto"] },
     { id: "lab", title: "EntropyLab", eye: [-6.5, 9.5, -11], look: [-11, 4.5, -19], lines: ["lab", "labInside", "labCrew"] },
@@ -121,7 +119,6 @@
     { date: "2026-10-16", at: "factory", line: "newsOnchain" },
     { date: "2026-10-15", at: "factory", line: "newsDonations" },
     { date: "2026-10-13", at: "arcade", line: "newsArcadeFront" },
-    { date: "2026-10-12", at: "totems", line: "newsTotems" },
     { date: "2026-10-12", at: null, line: "newsChat" },
     { date: "2026-10-10", at: "factory", line: "newsTess" },
     { date: "2026-10-07", at: null, line: "newsVoice" },
@@ -179,7 +176,7 @@
     lineAt: ids.flatMap((id) => BL.fx.beatsOf(lines[id]).map(() => id)) });
   // Lines about something beside a stop's landmark: while she says one she faces the middle of what the place hands
   // her under that name (`targets`) and points a beam at each of them at once, then goes back to the landmark.
-  const POINT_AT = { totems: "totems", newsTotems: "totems" };
+  const POINT_AT = {};
   // What is new after `seen`, the newest entry last answered (its `line` and `date`; null for none yet, which gets the
   // newest few): every entry listed above it, so one added later the same day still counts. If that entry has left the
   // list, every entry dated after it.
@@ -207,8 +204,8 @@
   // stands for the last place only in a trip ("take me there").
   const PLACES = {
     pile: ["pile", "banana pile", "bananas pile"],
-    totems: ["jumbotron", "oogatron", "totem", "totems"],
-    repos: ["repo island", "repos island", "repos", "repo", "repositories", "repository", "totem island", "stone bridge", "open source"],
+    jumbotron: ["jumbotron", "oogatron"],
+    repos: ["merge rock", "repo island", "repos island", "repos", "repo", "repositories", "repository", "totem", "totems", "totem island", "stone bridge", "open source"],
     timechain: ["timechain", "timechain sphere", "sphere"],
     bca: ["bca", "b c a", "banana certified accounting", "accounting"],
     lab: ["lab", "entropylab", "entropy lab"],

@@ -17,9 +17,6 @@
   const RALLY_TEST = DEBUG && WIP === "race";
   for (const id of Object.keys(scenes)) if (scenes[id].wip && WIP !== "1" && WIP !== id) delete scenes[id];
   for (const slot of window.BL.caves.slots) if (slot.scene && !scenes[slot.scene]) Object.assign(slot, { scene: null, status: "dark" });
-  // Loot crates, locker tab and worn swag; the suite turns them on with ?debug=1&loot=1
-  const LOOT_DEFAULT = false;
-  const LOOT_ENABLED = DEBUG && params.has("loot") ? params.get("loot") === "1" : LOOT_DEFAULT;
   const requestedBananas = Number(params.get("bananas"));
   const START_BANANAS = DEBUG && params.has("bananas") && Number.isFinite(requestedBananas) && requestedBananas >= 0
     ? Math.min(pileMod.MAX_BANANAS, Math.floor(requestedBananas))
@@ -137,7 +134,7 @@
     }
   }
   mark("renderer");
-  const game = gameMod.create({ catalog: models.SWAG });
+  const game = gameMod.create();
   window.BL.donationPopup = window.BL.donationPopup.create(game, (donation) => {
     if (donations.real) return;
     deliverDonation(donation);
@@ -255,7 +252,8 @@
       }
       const glyph = window.BL.hubModels.SIGN_GLYPHS[ch];
       if (!glyph) throw new Error(`No clock glyph for "${ch}"`);
-      for (let row = 0; row < glyph.length; row++) for (let col = 0; col < glyph[row].length; col++) if (glyph[row][col] === "1") d += `M${cursor + col} ${row}h.82v.82h-.82z`;
+      const sx = 3 / glyph[0].length, pixel = 0.82 * sx;
+      for (let row = 0; row < glyph.length; row++) for (let col = 0; col < glyph[row].length; col++) if (glyph[row][col] === "1") d += `M${cursor + col * sx} ${row}h${pixel}v.82h-${pixel}z`;
       cursor += 4;
     }
     const cells = cursor - 1;
@@ -310,7 +308,7 @@
     if (active && active.id !== "hub") go("hub");
   });
   const agentPlay = BL.agent.createPlay();
-  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, agentPlay, hubPolicy: KEEP_HUB ? "keep" : "release", from: null, place: null, signal: null };
+  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, testBananas: TEST_BANANAS, agentPlay, hubPolicy: KEEP_HUB ? "keep" : "release", from: null, place: null, signal: null };
   cabinetView = window.BL.arcadeView.create({ canvas: sceneCanvas, renderer, go });
   ctx.cabinet = cabinetView;
   const sceneSections = [...document.querySelectorAll("[data-scene]")];
@@ -805,12 +803,6 @@
         : active.previewDonation ? "Waiting for the local donation backend" : "Enter the mainland or Lightning Factory to preview a donation");
       return;
     }
-    if (LOOT_ENABLED && e.shiftKey && (e.key === "Delete" || e.key === "Backspace")) {
-      e.preventDefault();
-      game.clearLoot();
-      active.onLootCleared();
-      return;
-    }
     // Game scenes can expose a dedicated Agent. Hub companions are selected
     // directly; Right Shift+A never creates another gorilla there. Left Shift+A runs left.
     if ((active.agent || active.summonAgent) && e.shiftKey && rightShift
@@ -886,8 +878,7 @@
     if (event.type === "stats") window.BL.contributors.applySnapshot(event.stats);
   });
   if (!params.has("nosim") && params.get("oogatron") !== "0") window.BL.oogatronLive.start();
-  if (!params.has("nosim") && params.get("totems") !== "0") window.BL.totemFeed.start();
-  // Repo Island's merges: one request every few minutes for all its totems (repo-feed.js).
+  // Merge Rock's merges: one request every few minutes for all its totems (repo-feed.js).
   if (!params.has("nosim") && params.get("repos") !== "0") window.BL.repoFeed.start();
   // `?chain=esplora` or `?chain=https://host/api` pins the provider; otherwise mempool.space leads
   // and three consecutive failures hand the session to Esplora on its own.
@@ -992,9 +983,10 @@
   })();
   const housekeepTimer = window.setInterval(housekeep, 6e4);
   // EntropyLab currently lives in its island cave; retain the isolated scene for debug checks only.
+  // The character studio (scene-studio.js) is a debug page too.
   const routed = router.current();
   const requestedScene = (routed && routed.scene) || params.get("scene") || (WIP !== "1" ? WIP : null);
-  const sceneId = requestedScene === "race" && !RALLY_TEST ? "arcade" : requestedScene === "lab" && !DEBUG ? null : requestedScene;
+  const sceneId = requestedScene === "race" && !RALLY_TEST ? "arcade" : (requestedScene === "lab" || requestedScene === "studio") && !DEBUG ? null : requestedScene;
   // Building the first scene holds the main thread with nothing painted yet.
   // Run boot from a task after the first frame so the leaf curtain is on screen, not the previous page.
   let destroyed = false;
@@ -1115,7 +1107,6 @@
       renderer,
       startLevel: START_BANANAS,
       hubPolicy: ctx.hubPolicy,
-      lootEnabled: LOOT_ENABLED,
       testBananas: TEST_BANANAS,
       project: renderer.project,
       housekeep,
@@ -1160,7 +1151,7 @@
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "drop", "diver", "plane", "course", "jumbotron", "totems", "repoIsland", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "block", "dsb", "clankers", "clankerPlay", "factory", "hangar", "bifrost", "arcade", "carnival", "npcSync", "footsteps", "timechain", "halloween" /* HALLOWEEN */]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "lab", "headquarters", "hud", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "drop", "diver", "plane", "course", "jumbotron", "repoIsland", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "block", "dsb", "clankers", "clankerPlay", "factory", "hangar", "bifrost", "arcade", "carnival", "npcSync", "footsteps", "timechain", "studio", "halloween" /* HALLOWEEN */]) {
       Object.defineProperty(ooga, key, { get: () => active && active.debug && active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;
@@ -1188,7 +1179,6 @@
     chain.dispose();
     unsubscribeOogatron();
     window.BL.oogatronLive.dispose();
-    window.BL.totemFeed.dispose();
     unsubscribeAccount();
     unsubscribeVoice();
     unsubscribeRosterMarks();

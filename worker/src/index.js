@@ -1,10 +1,11 @@
 // The Worker in front of Ooga Booga Land: the built page from static assets, GitHub sign-in under
 // /auth/*, the account API under /api/*, the totems' merge summaries under /api/totems/* and Repo Island's at /api/repo-totems, voice
 // signalling under /api/voice/*, Tess's answers at /api/tess, /room, the island's live socket, /game/*, the sockets
-// of the games the Worker hosts itself (game-host.js), and /donations/*, passed on to bananapayserver over the
-// DONATIONS binding. Only those paths run this code (`run_worker_first` in wrangler.<env>.jsonc); every other path is
+// of the games the Worker hosts itself (game-host.js), /donations/*, passed on to bananapayserver over the
+// DONATIONS binding, and /inspect with its feed /api/inspect/ws, the Durable Object inspector (inspect.js). Only those paths run this code (`run_worker_first` in wrangler.<env>.jsonc); every other path is
 // served straight from _site.
 
+import { handleConnectionReports, pruneConnectionReports } from "./connection-reports.js";
 import { handleApi } from "./api.js";
 import { handleAuth } from "./auth.js";
 import { purgeExpiredSessions } from "./db.js";
@@ -19,9 +20,12 @@ import { handleTess, pruneTess } from "./tess.js";
 import { handleTotems } from "./totems.js";
 import { handleRepoTotems } from "./repo-totems.js";
 import { gameName } from "./games.js";
+import { handleInspect } from "./inspect.js";
+import { inspectEdge } from "./inspect-report.js";
 
 export { Room } from "./room.js";
 export { GameHost } from "./game-host.js";
+export { Inspector } from "./inspector.js";
 
 const ROOM_NAME = "island";
 
@@ -38,19 +42,22 @@ const asPlayer = (request, found, extra = null) => {
 };
 
 // Identity is decided here, once, from the session; the room trusts only the headers set below.
-const handleRoom = async (request, env) => {
+const handleRoom = async (request, env, ctx) => {
   if (request.headers.get("upgrade") !== "websocket") return text("Expected WebSocket", 426);
   if (!fromSite(request, env.SITE_ORIGIN)) return text("Forbidden", 403);
   const found = await getSessionFromRequest(request, env);
   if (!found) return text("Sign in first", 401);
-  if (!(await allowed(env.ROOM_LIMITER, String(found.player.id)))) return text("Too many reconnects", 429);
+  if (!(await allowed(env.ROOM_LIMITER, String(found.player.id)))) {
+    inspectEdge(env, ctx, "limited", found.player, { which: "room" });
+    return text("Too many reconnects", 429);
+  }
   return env.ROOM.getByName(ROOM_NAME).fetch(asPlayer(request, found));
 };
 
 // A hosted game's socket, `/game/<kind>/<venue>` (game-host.js): only a game and venue the registry names (games.js)
 // reaches an object, so no page makes one; who the player is is decided here, as for the room. An object is made where
 // `GAME_LOCATION_HINT` says (a region such as "enam"), else near whoever first connects, and stays there.
-const handleGame = async (request, env, url) => {
+const handleGame = async (request, env, url, ctx) => {
   if (request.headers.get("upgrade") !== "websocket") return text("Expected WebSocket", 426);
   if (!fromSite(request, env.SITE_ORIGIN)) return text("Forbidden", 403);
   const [, , kind = "", venue = "", rest] = url.pathname.split("/");
@@ -58,7 +65,10 @@ const handleGame = async (request, env, url) => {
   if (!name || !env.GAMES) return text("No such game", 404);
   const found = await getSessionFromRequest(request, env);
   if (!found) return text("Sign in first", 401);
-  if (!(await allowed(env.GAME_LIMITER, String(found.player.id)))) return text("Too many reconnects", 429);
+  if (!(await allowed(env.GAME_LIMITER, String(found.player.id)))) {
+    inspectEdge(env, ctx, "limited", found.player, { which: "game" });
+    return text("Too many reconnects", 429);
+  }
   const hint = env.GAME_LOCATION_HINT;
   return env.GAMES.get(env.GAMES.idFromName(name), hint ? { locationHint: hint } : undefined).fetch(asPlayer(request, found, { "x-game-name": name }));
 };
@@ -66,12 +76,15 @@ const handleGame = async (request, env, url) => {
 // A voice call's body: a session description, however many tracks it carries.
 const VOICE_BODY_MAX = 256 * 1024;
 // Voice signalling: the room validates ownership and talks to the SFU with the secret.
-const handleVoice = async (request, env, url) => {
+const handleVoice = async (request, env, url, ctx) => {
   if (request.method !== "POST") return text("Method not allowed", 405);
   if (!fromSite(request, env.SITE_ORIGIN)) return text("Forbidden", 403);
   const found = await getSessionFromRequest(request, env);
   if (!found) return text("Sign in first", 401);
-  if (!(await allowed(env.VOICE_LIMITER, String(found.player.id)))) return text("Too many voice requests", 429);
+  if (!(await allowed(env.VOICE_LIMITER, String(found.player.id)))) {
+    inspectEdge(env, ctx, "limited", found.player, { which: "voice" });
+    return text("Too many voice requests", 429);
+  }
   // Read here, and bounded, so a huge body can never reach the island's only room.
   const body = await readBody(request, VOICE_BODY_MAX);
   if (body === null) return text("Too large", 413);
@@ -88,14 +101,16 @@ export default {
     if (url.pathname.startsWith("/auth/")) return handleAuth(request, env, url);
     if (url.pathname.startsWith("/api/totems/")) return handleTotems(request, url, env, ctx);
     if (url.pathname === "/api/repo-totems") return handleRepoTotems(request, url, env, ctx);
-    if (url.pathname.startsWith("/api/voice/")) return handleVoice(request, env, url);
+    if (url.pathname.startsWith("/api/voice/")) return handleVoice(request, env, url, ctx);
+    if (url.pathname === "/inspect" || url.pathname === "/api/inspect/ws") return handleInspect(request, env, url);
     if (url.pathname === "/api/tess") return handleTess(request, env);
     if (url.pathname.startsWith("/api/highscores/")) return handleHighscores(request, env, ctx);
     if (url.pathname === "/api/arcade-plays" || url.pathname.startsWith("/api/arcade-plays/")) return handleArcadePlays(request, env);
     if (url.pathname.startsWith("/api/cloud-hopper-replays/")) return handleCloudHopperReplays(request, env, ctx);
+    if (url.pathname === "/api/connection-reports") return handleConnectionReports(request, env);
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);
-    if (url.pathname === "/room") return handleRoom(request, env);
-    if (url.pathname.startsWith("/game/")) return handleGame(request, env, url);
+    if (url.pathname === "/room") return handleRoom(request, env, ctx);
+    if (url.pathname.startsWith("/game/")) return handleGame(request, env, url, ctx);
     if (url.pathname.startsWith("/donations/")) return handleDonations(request, env, url);
     return env.ASSETS.fetch(request);
   },
@@ -106,5 +121,6 @@ export default {
     ctx.waitUntil(purgeExpiredSessions(env.DB));
     ctx.waitUntil(pruneTess(env.DB));
     ctx.waitUntil(pruneCloudHopperReplays(env));
+    ctx.waitUntil(pruneConnectionReports(env.DB));
   },
 };

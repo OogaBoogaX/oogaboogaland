@@ -7,8 +7,6 @@
   const GREEN = "#1bcd6e", DARK = "#080a0e", CHARCOAL = "#161b28";
   const CLUB_PALETTE = ["#38291f", "#594231", "#947657"].map(hexToRgb);
 
-  // A white/cyan faceted fist: palm, four folded fingers and a crossing thumb.
-  // Opaque facets keep the diamond readable in both renderers without a new material.
   const diamondFist = (u) => {
     const pieces = [];
     const gem = (x, y, z, w, h, d, color) => {
@@ -38,7 +36,6 @@
     return merge(...pieces);
   };
 
-  // Sampled from the supplied logo: the inner curl and detached tongues stay intact.
   const LOGO = [
     "000000000000000000000000",
     "000000000000000000000000",
@@ -95,7 +92,6 @@
       height: 1.08,
       eyeColor: "#e8eaf0",
       face: "beard",
-      hatY: 19,
       portrait: { min: [-2, -2, -1], max: [8, 18, 8] }
     },
     voice: {
@@ -113,16 +109,13 @@
         const green = k.color(GREEN), shade = k.color("#13a356");
         const bone = k.color("#e8e5d5"), leather = k.color("#38291f");
         k.loin = [charcoal, dark];
-        // Clear the stock diagonal strap: the exposed chest is plain skin.
         v.fill(1, 7, 3, 7, 1, 4, k.skinJ);
         v.fill(0, 8, 0, 2, 0, 5, (x, y, z) => (x + z) % 4 === 0 ? dark : charcoal);
         v.fill(0, 8, 3, 3, 0, 5, leather);
-        // Green hide over the anatomical left shoulder, front and back.
         for (let x = 6; x <= 9; x++) for (let z = 0; z <= 5; z++) {
           const hem = 5 + (x + z) % 2;
           v.fill(x, x, hem, 8, z, z, (a, y) => (a + y + z) % 5 === 0 ? shade : green);
         }
-        // Eighth-size cells retain the original badge size with a 24x40 logo.
         const badge = makeVox();
         badge.fill(0, 35, 0, 43, 0, 1, bone);
         badge.fill(2, 33, 2, 41, 2, 2, green);
@@ -146,19 +139,15 @@
           unit: u, palette: CLUB_PALETTE, origin: { x: -u, y: -u, z: -u }
         });
         const geo = merge(handle, diamondFist(u));
-        // Swag keeps the crystal fist instead of replacing it with a gold club.
-        return { voxels: v, default: geo, gold: geo,
+        return { voxels: v, default: geo,
           rest: { x: 0.2, z: -0.05 }, carry: { x: 0.35, z: 0 } };
       },
       crown(k, v) {
-        // Keep the brow close to the head; the fine carved flames live above it.
         v.fill(-1, 7, 6, 7, -1, 6, k.color(CHARCOAL));
       },
       headgear(k) {
         const dark = k.color(CHARCOAL);
         const green = k.color(GREEN), light = k.color("#2ee085"), shade = k.color("#13a356");
-        // Half-size cells give each tongue a curled tip, broad belly and tapered
-        // root instead of a rectangular post. Green fills both faces and the sides.
         const outline = [
           "000000100", "000001100", "000011100", "000111000",
           "001111000", "001111100", "011111110", "011111110",
@@ -187,16 +176,24 @@
       },
       mark(k, v) {
         const green = k.color(GREEN);
-        // Below the eyes and clear of the blink cells.
         for (const x of [0, 1, 5, 6]) v.set(x, 1, 7, green);
       },
       gear(k) {
-        // Bone wrist bands follow each animated arm.
-        const v = makeVox(), bone = k.color("#e8e5d5");
-        v.fill(-2, 4, 2, 3, -2, 4, (x, y, z) =>
-          x === -2 || x === 4 || z === -2 || z === 4 ? bone : null);
-        const geometry = k.vg(v, { x: -1.5 * k.u, y: -11 * k.u, z: -1.5 * k.u });
-        for (const arm of [k.parts.armR, k.parts.armL]) addChild(arm, createNode({ geometry }));
+        if (BL.models.STYLE !== "R") return;
+        const H = BL.heroBody, band = BL.models.geometry();
+        H.loft(band, [[0.5, 1.7, 1.76, 0.52], [0.36, 1.78, 1.84, 0.55], [-0.36, 1.72, 1.78, 0.53], [-0.5, 1.6, 1.66, 0.5]], ["#d6d2c0", "#e8e5d5", "#d6d2c0"]);
+        const geometry = H.scaled(band, k.u);
+        for (const arm of [k.parts.armR, k.parts.armL]) { const worn = createNode({ geometry }); worn.forearm = 0.84; addChild(arm, worn); }
+      },
+      refine(k, part, v) {
+        if (part !== "arm") return;
+        const bone = k.color("#e8e5d5"), band = [];
+        const f = k.fine;
+        for (let y = 3 * f; y < 5 * f; y++) for (let x = -2 * f; x <= 5 * f; x++) for (let z = -2 * f; z <= 5 * f; z++) {
+          if (v.has(x, y, z)) continue;
+          if (v.has(x + 1, y, z) || v.has(x - 1, y, z) || v.has(x, y, z + 1) || v.has(x, y, z - 1)) band.push(x, y, z);
+        }
+        for (let i = 0; i < band.length; i += 3) v.set(band[i], band[i + 1], band[i + 2], bone);
       }
     }
   });

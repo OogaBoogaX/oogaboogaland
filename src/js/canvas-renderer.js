@@ -150,6 +150,10 @@
     let cutawayCloudY = 0, cutawayCloudMix = 0;
     const pool = [];
     let poolUsed = 0, suppressed = 0, rippleSurfaces = 0, rippleWaves = 0;
+    // The WebGL renderer's `stats.info`, in the same shape: here a call is one painted polygon, all in the main pass.
+    // Triangles, instances, GL calls and GPU time do not apply to Canvas 2D and stay null.
+    const info = { calls: 0, triangles: null, instances: null, passes: {}, gl: null, gpuMs: null, gpuMsMean: null };
+    for (const name of ["shadow", "capture", "main", "post"]) info.passes[name] = { calls: 0, triangles: null, instances: null };
     let matrixActive = 0, matrixRadius = 0, matrixTime = 0, matrixDensity = 0, matrixOriginX = 0, matrixOriginZ = 0, matrixSurfaces = 0, matrixLivingSurfaces = 0, matrixArea = 0, matrixSamples = 0, matrixSampleStep = 1, matrixCulled = 0;
     let matrixCaves = null, matrixCaveBounds = null, matrixCaveNear = Infinity, matrixPermanentCave = 0, matrixPermanentPlane = null, matrixAperture = DEFAULT_MATRIX_APERTURE, matrixLivingGlobal = 1, matrixPointX = 0, matrixPointY = 0;
     const MATRIX_MASKS = new Int32Array([630678, 497559, 988959, 495513, 1009263, 288049, 456438, 616809]);
@@ -2050,6 +2054,7 @@
       }
       sortByKey(sortIds, 0, poolUsed, sortKeys, 1, 0, sortWork);
       for (let i = 0; i < poolUsed; i++) active[i] = pool[sortIds[i]];
+      info.calls = info.passes.main.calls = poolUsed;
       matrixSampleStep = Math.max(1, Math.ceil(Math.sqrt(matrixArea / MATRIX_SAMPLE_BUDGET)));
       if (matrixArea) {
         let samples;
@@ -2308,7 +2313,7 @@
         return "low";
       },
       get stats() {
-        return { waterTextures: 0, records: 0, active: 0, mirrorResources: mirrorDebug.resources, imageTextures: 0, rippleBodyTextures: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: matrixCulled, drawn: 0, suppressed, rippleSurfaces, rippleWaves, matrixSurfaces, matrixLivingSurfaces, matrixSamples, matrixSampleStep, matrixSampleBudget: MATRIX_SAMPLE_BUDGET, matrixTileBytes: matrixPixels.byteLength };
+        return { waterTextures: 0, records: 0, active: 0, mirrorResources: mirrorDebug.resources, imageTextures: 0, rippleBodyTextures: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: matrixCulled, drawn: 0, suppressed, rippleSurfaces, rippleWaves, matrixSurfaces, matrixLivingSurfaces, matrixSamples, matrixSampleStep, matrixSampleBudget: MATRIX_SAMPLE_BUDGET, matrixTileBytes: matrixPixels.byteLength, info };
       },
       get mirror() {
         return mirrorDebug;

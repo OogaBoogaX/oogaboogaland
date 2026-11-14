@@ -477,6 +477,20 @@ Free roaming without a character is removed in every walking scene (hub, lab, Li
 - Game cameras keep their own rules: the ghost hunt's spectator views and grave hold, Cloud Hopper's run camera, Ooga Mine's camera-only pilot (which still flies, pans and uses Space as WORK), the Factory kiosk glide and the cabinet zoom.
 - A `?debug=1` page that names no character still starts with no Ooga, as a stationary fixture for checks; it is not a visitor feature. The sign-in view snapshot (`saveLoginView`), which kept only a view with no Ooga, is removed: sign-in returns to the pile with the visitor's own Ooga.
 
+## Agreed change: carry has no shoulder view (November 2026)
+
+The shoulder view is combat's alone. Carry keeps first person and the orbit, for Oogas and gorillas alike, signed in or out, in every scene.
+
+| Action | Carry now | Combat (unchanged) |
+|---|---|---|
+| Scroll/pinch in | From the orbit straight on into the eyes: the orbit's own dolly along the view's ray, with no stop | Bird's-eye, shoulder, then first person, stopping at the shoulder |
+| Scroll/pinch out of first person | Back along the view's ray to the near orbit, `SHOULDER_DISTANCE` off (3.6 m for an Ooga, 3.8 m for a gorilla), where that gesture stops | To the shoulder, stopping there |
+| X | From combat at the shoulder, out to carry's orbit at the shoulder's distance | From the orbit to the shoulder (or bird's-eye from a high eye where offered) |
+| Right-click | Changes no view; both buttons together still walk | Unchanged |
+| A carried or saved carry shoulder | Comes in as the orbit | Unchanged |
+
+The carry right-click's targeted shoulder entry (`pickCarryTarget`) went with the view.
+
 ## Validation and play-test queue
 
 The pile hover label and Bananas panel now display the same current donation value to two decimals. Previously the pile label rounded the remaining gameplay stock, while the panel converted all donated sats at the latest BTCUSD price; the screenshot's 79 versus 77.97 came from those different sources. Both labels now share the panel's calculation and missing-price behavior. Hovering the visible pile also watches the existing shared price feed, released when neither the pile label nor panel is visible. Gameplay stock and donor receipt values retain their existing meanings.

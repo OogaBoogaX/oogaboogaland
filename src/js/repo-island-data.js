@@ -5,8 +5,8 @@
 // `SECTIONS` in the order their wedges run clockwise round the island from the bridge, related ones side by side: each
 // `id`, the `name` on its carved sign (up to 18 characters), a `blurb` and the sign's `badge` (hubModels.SIGN_BADGES).
 // `REPOS` rows are [repo, name, word, section, importance]: `repo` GitHub's canonical owner/name; `name` the project's
-// own (up to 28 characters); `word` the 2 to 7 letters carved on its name board and in runes, A to Z without X, never
-// another's; and `importance` its totem's height as a share of Bitcoin Core's, as the meadow's four are sized
+// own (up to 28 characters); `word` the 2 to 7 letters carved in runes, A to Z without X, never
+// another's (name plaques use the GitHub repository name, or `name` if it exceeds 32 characters); and `importance` its totem's height as a share of Bitcoin Core's, as the meadow's four are sized
 // (`totemFeed.REPOS`: Core 1, LND 0.7, CLN 0.62, BTCPay Server 0.52, the same here). A totem lights for a day after a
 // pull request merges into its repository's default branch, whatever that branch is called.
 //

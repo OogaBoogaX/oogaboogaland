@@ -136,6 +136,30 @@ test("room: a board stored before the board grew loads in the middle of the new 
   assert.deepEqual(woken.chalk.marks, h.saved.get("chalk").marks, "a board saved in the new layout is not widened again");
 });
 
+// The eraser's footprint: a new line is told apart by `f`, stored and handed on with it; one stored before it stays as it was.
+test("room: a new eraser line is kept with its footprint tag, and an older one is left as stored", async () => {
+  const h = host(), older = [{ t: "e", s: 4, p: [0.1, 0.1, 0.2, 0.2] }, { t: "e", p: [0.3, 0.3, 0.4, 0.4] }];
+  h.saved.set("chalk", { marks: older, v: CHALK.VERSION });
+  const r = await h.room(), a = await h.join(r, 1, "ooga"), b = await h.join(r, 2, "booga");
+  assert.deepEqual(heard(a, "chalk-board").at(-1).marks, older, "an older eraser line loads untouched");
+  send(r, a, { t: "pose", ...at(1) });
+  send(r, a, { t: "chalk", k: "take" });
+  send(r, a, { t: "chalk", k: "line", m: "e", p: [500, 400, 500, 400] });
+  assert.deepEqual(heard(b, "chalk").at(-1), { t: "chalk", k: "line", m: "e", p: [500, 400, 500, 400], id: 1 }, "a tap's one-point line is relayed");
+  send(r, a, { t: "chalk", k: "line", m: "e", o: 2, p: [250, 400, 250, 400] });
+  assert.deepEqual(heard(b, "chalk").at(-1), { t: "chalk", k: "line", m: "e", o: 2, p: [250, 400, 250, 400], id: 1 }, "an upright eraser's line is relayed as held");
+  const relayed = heard(b, "chalk").length;
+  send(r, a, { t: "chalk", k: "line", m: "e", o: 3, p: [1, 1, 2, 2] });
+  send(r, a, { t: "chalk", k: "line", m: "c", o: 2, p: [1, 1, 2, 2] });
+  assert.equal(heard(b, "chalk").length, relayed, "a bad orientation is refused");
+  send(r, a, { t: "chalk", k: "drop" });
+  await h.settle();
+  const marks = [...older, { t: "e", s: 4, f: 1, p: [0.5, 0.4, 0.5, 0.4] }, { t: "e", s: 4, f: 2, p: [0.25, 0.4, 0.25, 0.4] }];
+  assert.deepEqual(h.saved.get("chalk"), { marks, v: CHALK.VERSION }, "stored with its tag, beside the older lines");
+  const woken = await h.room();
+  assert.deepEqual(woken.chalk.marks, marks, "and it reads back after the room sleeps");
+});
+
 test("room: the board lets go when its writer walks off, changes body or zone, leaves, or sits idle while another waits", async () => {
   const h = host(), r = await h.room();
   const a = await h.join(r, 1, "ooga"), b = await h.join(r, 2, "booga");

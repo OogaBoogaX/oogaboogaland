@@ -7,7 +7,7 @@ import { contributorRows, createContributorLookup, createOwnedCharacterLookup } 
 import { missingCharacters, characterSource, retiredCharacters, queuedDefaults } from "../../scripts/sync-characters.mjs";
 import { checkCharacterIdentities, identityAdvice } from "../../scripts/contributor-pr.mjs";
 import { declaredIdentity, mayAuthorIdentity } from "../../scripts/character-identity.mjs";
-import { CharacterRejection, parseSafeCharacter, scanCharacter, safeCharacterSource, checkOwner, isGitHubDisplayRename } from "../../scripts/character-safety.mjs";
+import { CharacterRejection, parseSafeCharacter, scanCharacter, screenFinding, safeCharacterSource, checkOwner, isGitHubDisplayRename } from "../../scripts/character-safety.mjs";
 import { LANES, digest, due, inspectSubmission, manifestPath, readManifest, queuedCharacters, reviewDecision } from "../../scripts/character-submissions.mjs";
 import { createCoordinator, runAccountRenameChecks } from "../../scripts/character-bundles.mjs";
 import { BOT, OPERATORS, isOperator } from "../../scripts/character-operators.mjs";
@@ -15,10 +15,201 @@ import { inspectAccountRename, onlyAccountLoginChanged } from "../../scripts/cha
 import { createGitHub } from "../../scripts/character-github.mjs";
 import { snapshotRename, refreshRenameSnapshot } from "../../scripts/account-rename-snapshot.mjs";
 import { OVERRIDE_VERIFIED, overridePaths } from "../../scripts/character-override.mjs";
+import { createPriority, isRelease, DEFER_STEP, UNIT_STATUS } from "../../scripts/ci-priority.mjs";
 
 const NOW = Date.parse("2026-10-04T12:00:00Z");
 const person = (login, extra = {}) => ({ login, counts: { commits: 1 }, first_seen_at: "2026-09-01T00:00:00Z", last_seen_at: "2026-10-04T11:00:00Z", ...extra });
 const snapshot = (...rows) => ({ meta: { org: "OogaBoogaX", schema_version: 3, generated_at: new Date(NOW).toISOString() }, contributors: rows });
+
+test("release priority yields before work and resumes only deferred checks for current PR revisions", async (t) => {
+  const fixture = () => {
+    const f = { runs: [], prs: [], jobs: new Map(), writes: [], statuses: [] };
+    f.add = (id, workflow = "tests.yml", event = "pull_request") => {
+      const run = { id, path: `.github/workflows/${workflow}`, event, head_branch: `feature/${id}`, head_sha: String(id).padStart(40, "0"),
+        status: "completed", conclusion: "failure", run_attempt: 1, created_at: new Date(NOW).toISOString() };
+      f.runs.push(run);
+      f.prs.push({ number: id, state: "open", draft: false, base: { ref: "rock" }, head: { sha: run.head_sha, ref: run.head_branch } });
+      f.jobs.set(id, [{ id: id * 100, name: UNIT_STATUS, conclusion: "failure", steps: [
+        { name: "Inspect release priority", conclusion: "success" }, { name: DEFER_STEP, conclusion: "failure" }
+      ] }]);
+      return run;
+    };
+    f.release = () => { const run = { id: 999, path: ".github/workflows/pages.yml", head_branch: "rock", event: "push", status: "pending" }; f.runs.push(run); return run; };
+    f.api = async (path, method = "GET", data) => {
+      const url = new URL(path, "https://example.invalid/"), p = url.pathname.slice(1), q = url.searchParams;
+      if (method === "POST") {
+        if (p.startsWith("statuses/")) { f.statuses.unshift({ ...data, creator: { login: "github-actions[bot]" } }); return null; }
+        assert.match(p, /^actions\/jobs\/\d+\/rerun$/);
+        f.writes.push(p);
+        const run = f.runs.find((row) => row.id * 100 === Number(p.split("/")[2]));
+        run.status = "queued"; run.run_attempt++;
+        return null;
+      }
+      if (p.startsWith("commits/") && p.endsWith("/statuses")) return structuredClone(f.statuses);
+      if (p === "pulls") return structuredClone(f.prs);
+      if (p.startsWith("pulls/")) return structuredClone(f.prs.find((pr) => pr.number === Number(p.split("/")[1])));
+      if (p.endsWith("/jobs")) {
+        const jobs = f.jobs.get(Number(p.split("/")[2])); return { total_count: jobs.length, jobs };
+      }
+      if (/^actions\/runs\/\d+$/.test(p)) return structuredClone(f.runs.find((row) => row.id === Number(p.split("/")[2])));
+      if (p === "actions/runs" || p.startsWith("actions/workflows/")) {
+        const rows = f.runs.filter((row) => {
+          if (p.startsWith("actions/workflows/") && row.path !== `.github/workflows/${p.split("/")[2]}`) return false;
+          if (q.has("branch") && row.head_branch !== q.get("branch")) return false;
+          for (const key of ["status", "head_sha", "event"]) if (q.has(key) && (key === "status" && q.get(key) === "failure" ? row.conclusion : row[key]) !== q.get(key)) return false;
+          return true;
+        });
+        return { total_count: rows.length, workflow_runs: structuredClone(rows.sort((a, b) => b.id - a.id).slice(0, Number(q.get("per_page")) || 100)) };
+      }
+      throw new Error(`Unexpected priority request ${method} ${path}`);
+    };
+    f.priority = createPriority((...args) => f.api(...args), () => NOW);
+    return f;
+  };
+  await t.test("only real release workflow paths and events get priority, including waiting deployments", async () => {
+    for (const [path, branch, event] of [["pages.yml", "rock", "push"], ["pages.yml", "rock", "workflow_dispatch"],
+      ["cloudflare-staging.yml", "feature/staging", "workflow_dispatch"], ["cloudflare-production.yml", "rock", "workflow_dispatch"]]) {
+      for (const status of ["pending", "queued", "in_progress", "waiting", "requested"]) assert.ok(isRelease({ path: `.github/workflows/${path}`, head_branch: branch, event, status }));
+      assert.ok(!isRelease({ path: `.github/workflows/${path}`, head_branch: branch, event, status: "completed" }));
+    }
+    assert.ok(!isRelease({ path: ".github/workflows/pages.yml", event: "pull_request", head_branch: "rock", status: "queued" }));
+    assert.ok(!isRelease({ path: ".github/workflows/cloudflare-production.yml", event: "workflow_dispatch", head_branch: "feature/x", status: "queued" }));
+    const f = fixture(); f.add(1); f.release();
+    assert.equal((await f.priority.releases()).length, 1);
+    assert.equal(await f.priority.resume(), 0);
+    assert.deepEqual(f.writes, []);
+  });
+  await t.test("resume the yielded job once, preserving successful jobs and rejecting actual failures", async () => {
+    const f = fixture(); f.add(1); f.add(2);
+    f.jobs.get(1).unshift({ id: 101, conclusion: "success", steps: [] });
+    f.jobs.get(2)[0].steps = [{ name: "Run the unit lane", conclusion: "failure" }];
+    assert.equal(await f.priority.resume(), 1);
+    assert.deepEqual(f.writes, ["actions/jobs/100/rerun"]);
+    assert.equal(await f.priority.resume(), 0);
+    // An imitated gate that fails on every attempt cannot consume runners on
+    // every scheduled recovery pass. Manual attempts count toward the cap too.
+    for (let attempt = 2; attempt <= 4; attempt++) {
+      f.runs[0].status = "completed";
+      assert.equal(f.runs[0].run_attempt, attempt);
+      assert.equal(await f.priority.resume(), attempt < 4 ? 1 : 0);
+    }
+    assert.equal(f.writes.length, 3);
+    assert.equal(await f.priority.resume(), 0, "later recovery passes preserve the exhausted limit");
+    for (const attempt of [undefined, 0, -1, 1.5]) {
+      f.runs[0].run_attempt = attempt;
+      assert.equal(await f.priority.resume(), 0, "invalid attempt metadata cannot reset the limit");
+    }
+  });
+  await t.test("stale heads, drafts, closed PRs and newer runs never resurrect old checks", async () => {
+    for (const condition of ["head", "draft", "closed", "newer"]) {
+      const f = fixture(), run = f.add(1);
+      if (condition === "head") f.prs[0].head.sha = "f".repeat(40);
+      if (condition === "draft") f.prs[0].draft = true;
+      if (condition === "closed") f.prs = [];
+      if (condition === "newer") { f.runs.push({ ...run, id: 2, conclusion: "success" }); f.jobs.set(2, [{ id: 200, conclusion: "success", steps: [] }]); }
+      assert.equal(await f.priority.resume(), 0, condition);
+      assert.deepEqual(f.writes, []);
+    }
+  });
+  await t.test("head and run-attempt races are rechecked, and another release stops resumption", async () => {
+    for (const moving of ["head", "attempt", "release"]) {
+      const f = fixture(); f.add(1);
+      const api = f.api;
+      f.api = async (path, ...args) => {
+        if (path.includes("/jobs?")) {
+          if (moving === "head") f.prs[0].head.sha = "f".repeat(40);
+          if (moving === "attempt") f.runs[0].run_attempt++;
+          if (moving === "release") f.release();
+        }
+        return api(path, ...args);
+      };
+      assert.equal(await f.priority.resume(), 0, moving);
+      assert.deepEqual(f.writes, []);
+    }
+  });
+  await t.test("deferred character inspection, writers and recovery sweeps resume through their original jobs", async () => {
+    const f = fixture();
+    f.add(1, "character-bundles.yml", "pull_request_target");
+    f.add(2, "character-bundles.yml", "schedule");
+    f.add(3, "character-bundles.yml", "workflow_run");
+    f.add(4, "character-bundles.yml", "workflow_dispatch");
+    assert.equal(await f.priority.resume(), 3);
+    assert.deepEqual(f.writes, ["actions/jobs/100/rerun", "actions/jobs/200/rerun", "actions/jobs/300/rerun"]);
+  });
+  await t.test("successful deferrals stay pending, resume without repeating completed work, and legacy failures still recover", async () => {
+    const f = fixture(), run = f.add(1), job = f.jobs.get(1)[0];
+    run.conclusion = job.conclusion = job.steps[1].conclusion = "success";
+    assert.equal(await f.priority.report(1, "example/land"), true);
+    assert.equal(f.statuses[0].state, "pending");
+    assert.match(f.statuses[0].description, /Deferred/);
+    assert.equal(await f.priority.pendingUnit(1, 1, run.head_sha, "example/land"), true);
+    assert.equal(await f.priority.resume(), 1);
+    assert.deepEqual(f.writes, ["actions/jobs/100/rerun"]);
+    assert.equal(await f.priority.pendingUnit(1, 2, run.head_sha, "example/land"), false, "old pending status cannot admit a new attempt");
+    f.add(2);
+    assert.equal(await f.priority.resume(), 1, "old failing deferrals remain recoverable during rollout");
+  });
+  await t.test("only complete validation passes the required status; genuine failures, cancelled or skipped tests block", async () => {
+    for (const condition of ["passed", "failed", "skipped", "cancelled", "running", "missing", "forged-source"]) {
+      const f = fixture(), run = f.add(1), job = f.jobs.get(1)[0];
+      run.conclusion = job.conclusion = "success";
+      job.steps = ["Run the unit lane", "Build and stage site", "Install Worker dependencies", "Worker checks"].map(name => ({ name, conclusion: "success" }));
+      if (condition === "failed") { run.conclusion = job.conclusion = "failure"; job.steps[3].conclusion = "failure"; }
+      if (condition === "skipped") job.steps[3].conclusion = "skipped";
+      if (condition === "cancelled") run.conclusion = job.conclusion = "cancelled";
+      if (condition === "running") { run.status = "in_progress"; run.conclusion = null; }
+      if (condition === "missing") f.jobs.set(1, []);
+      if (condition === "forged-source") run.path = ".github/workflows/not-tests.yml";
+      await f.priority.report(1, "example/land");
+      if (condition === "forged-source") assert.deepEqual(f.statuses, []);
+      else assert.equal(f.statuses[0].state, condition === "passed" ? "success" : condition === "running" ? "pending" : "failure", condition);
+      if (condition === "passed") assert.equal(await f.priority.resume(), 0, "completed validation is not a deferral");
+    }
+  });
+  await t.test("pending status must belong to the trusted reporter and exact run attempt; stale reports do not overwrite current heads", async () => {
+    const f = fixture(), run = f.add(1);
+    assert.equal(await f.priority.pendingUnit(1, 1, run.head_sha, "example/land"), false);
+    await f.priority.report(1, "example/land");
+    f.statuses[0].creator.login = "someone-else";
+    assert.equal(await f.priority.pendingUnit(1, 1, run.head_sha, "example/land"), false);
+    f.statuses[0].creator.login = "github-actions[bot]";
+    f.statuses[0].state = "success";
+    assert.equal(await f.priority.pendingUnit(1, 1, run.head_sha, "example/land"), false);
+    for (const condition of ["head", "closed", "newer", "attempt-race", "status-race"]) {
+      const f = fixture(), run = f.add(1);
+      if (condition === "head") f.prs[0].head.sha = "f".repeat(40);
+      if (condition === "closed") f.prs = [];
+      if (condition === "newer") f.runs.push({ ...run, id: 2 });
+      if (condition === "attempt-race") { const api = f.api; f.api = async (...args) => { if (args[0].includes("/jobs?")) run.run_attempt++; return api(...args); }; }
+      if (condition === "status-race") f.statuses.push({ context: UNIT_STATUS, state: "pending", creator: { login: "github-actions[bot]" }, target_url: "https://github.com/example/land/actions/runs/2/attempts/1" });
+      const before = structuredClone(f.statuses);
+      assert.equal(await f.priority.report(1, "example/land"), false, condition);
+      assert.deepEqual(f.statuses, before);
+    }
+  });
+  await t.test("recovery reads current heads instead of thousands of historical successes, and rejects expired runs", async () => {
+    const f = fixture(), run = f.add(1);
+    for (let id = 2; id < 1200; id++) f.runs.push({ ...run, id, head_sha: String(id).padStart(40, "0"), head_branch: `old/${id}`, conclusion: "success" });
+    assert.equal(await f.priority.resume(), 1);
+    run.status = "completed"; run.created_at = new Date(NOW - 31 * 86400000).toISOString();
+    assert.equal(await f.priority.resume(), 0);
+  });
+  await t.test("scheduled reporting repairs missed events without repeating identical statuses", async () => {
+    const f = fixture(); f.add(1);
+    assert.equal(await f.priority.reportCurrent("example/land"), 1);
+    assert.equal(f.statuses.length, 1);
+    assert.equal(f.statuses[0].state, "pending");
+    assert.equal(await f.priority.reportCurrent("example/land"), 1);
+    assert.equal(f.statuses.length, 1);
+  });
+  await t.test("unavailable or truncated metadata cannot admit work or launch recovery", async () => {
+    for (const api of [async () => { throw new Error("Unavailable"); }, async () => ({ workflow_runs: [], total_count: 1001 }), async () => ({})]) {
+      const priority = createPriority(api);
+      await assert.rejects(priority.releases());
+      await assert.rejects(priority.resume());
+    }
+  });
+});
 
 const accountRenameFixture = () => {
   const rock = "a".repeat(40), head = "b".repeat(40), path = "src/characters/Bitcoin-Bill.js", repo = "example/land";
@@ -231,6 +422,17 @@ test("daily character intake accepts only bounded data and never executes source
   const custom = source.replace('lastCommit: 2', 'lastCommit: 2, dress: { crown(k, v) { v.set(0, 0, 0, k.P.black); } }');
   assert.equal(scanCharacter(custom).lane, "manual");
   assert.equal(globalThis.stolen, undefined);
+  // Every face the body draws is plain data, and a file sent to manual review says why, naming a field only when
+  // its name is a plain word: the finding is posted on the PR.
+  const looked = (look) => scanCharacter(source.replace('lastCommit: 2', `lastCommit: 2, look: ${look}`));
+  for (const face of ["none", "nose", "beard", "smirk"]) assert.equal(looked(`{ face: "${face}" }`).lane, "daily");
+  assert.equal(scanCharacter(source).why, undefined);
+  assert.match(scanCharacter(custom).why, /executable code is not eligible/);
+  assert.match(looked('{ height: 2 }').why, /`height` exceeds its safe range, 0\.8 to 1\.3/);
+  assert.match(looked('{ tail: true }').why, /Unknown appearance field `tail`/);
+  assert.match(looked('{ "@everyone [x](y)": true }').why, /Unknown appearance field an unnamed field/);
+  assert.deepEqual(screenFinding('const a = 1;\n// a function here\n'), { line: 2, text: "function" });
+  assert.equal(screenFinding(source), null);
   assert.throws(() => safeCharacterSource({ handle: "owner", joined: 1, lastCommit: 2, voice: { poke: "hi", idle: [] } }), CharacterRejection);
 });
 
@@ -982,6 +1184,137 @@ const overrideFixture = () => {
   return f;
 };
 
+test("regression: ordinary PR checks bypass the writer queue only with complete current metadata and no queued work", async (t) => {
+  const fixture = () => {
+    const f = overrideFixture();
+    f.ordinary = f.addOverride(700, { "README.md": "updated readme\n" });
+    f.ordinary.head.ref = "feature/readme";
+    f.inspect = () => f.coordinator.needsWriter(700);
+    f.states = () => f.statuses.filter((row) => row.sha === f.ordinary.head.sha);
+    return f;
+  };
+  await t.test("unrelated hostile custom code stays unread; only the two intake statuses are written", async () => {
+    const f = fixture(), file = f.gh.file;
+    f.gh.file = async (ref, path) => { assert.ok(path.startsWith(".github/character-bundles/")); return file(ref, path); };
+    assert.equal(await f.inspect(), false);
+    for (const context of ["Character intake", "Character bundle safety"]) assert.equal(f.states().filter((row) => row.context === context).at(-1).state, "success");
+    assert.ok(f.calls.filter((row) => row.method !== "GET").every((row) => row.url.startsWith("statuses/")));
+    assert.equal(f.writes.length + f.updates.length, 0);
+  });
+  await t.test("new and renamed character paths, existing queued entries, bundles and overrides still use the writer", async () => {
+    const f = fixture();
+    f.ordinary.head.sha = f.commit([f.rock], { [f.char("new")]: f.custom("new") }, "maint", false);
+    assert.equal(await f.inspect(), true);
+    assert.equal(await f.coordinator.needsWriter(f.manual.number), true);
+    assert.equal(await f.coordinator.needsWriter(f.override.number), true);
+    const api = f.gh.api;
+    f.gh.api = async (url, ...args) => url.startsWith("compare/")
+      ? { merge_base_commit: { sha: f.rock }, files: [{ filename: "retired.js", previous_filename: f.char("new"), status: "renamed" }] }
+      : api(url, ...args);
+    assert.equal(await f.inspect(), true, "moving a character out of the directory is still a character change");
+    const queued = fixture(), entries = queued.manifest();
+    entries[0].pr = 700;
+    queued.manual.head.sha = queued.commit([queued.manual.head.sha], { [manifestPath("manual")]: JSON.stringify({ version: 1, lane: "manual", openedOn: "2026-11-03", entries }) });
+    assert.equal(await queued.inspect(), true, "a source that restored its character files still needs queue inspection");
+    assert.ok(queued.states().every((row) => row.state === "pending"));
+  });
+  await t.test("writers leave required intake and bundle statuses pending while deferred, including sweeps and overrides", async () => {
+    const f = fixture();
+    for (const pr of [f.manual, f.override, f.ordinary]) {
+      await f.coordinator.holdForWriter({ pull_request: { number: pr.number } });
+      for (const context of ["Character intake", "Character bundle safety"]) {
+        assert.equal(f.statuses.filter(row => row.sha === pr.head.sha && row.context === context).at(-1).state, "pending");
+      }
+    }
+    const count = f.statuses.length;
+    f.ordinary.state = "closed";
+    await f.coordinator.holdForWriter({ pull_request: { number: f.ordinary.number } });
+    assert.equal(f.statuses.length, count);
+    await f.coordinator.holdForWriter({});
+    const held = f.statuses.slice(count);
+    assert.equal(held.length, 6, "the three open automation bundles are held by a sweep");
+    assert.ok(held.every(row => row.state === "pending"));
+    assert.equal(f.writes.length + f.updates.length, 0, "holding a writer never mutates code or PRs");
+  });
+  await t.test("push signals hold only their open rock PRs and leave unrelated green bundles mergeable", async () => {
+    const f = fixture(), list = f.gh.list;
+    const contexts = ["Character intake", "Character bundle safety"];
+    for (const pr of f.prs.filter(pr => pr.head.ref.startsWith("automation/characters-"))) {
+      for (const context of contexts) f.statuses.push({ sha: pr.head.sha, context, state: "success" });
+    }
+    const green = structuredClone(f.statuses);
+    const run = { event: "push", head_branch: f.ordinary.head.ref, head_sha: f.ordinary.head.sha, head_repository: { full_name: f.repo } };
+    const closed = { ...f.ordinary, state: "closed", head: { sha: "closed" } };
+    const otherBase = { ...f.ordinary, base: { ref: "other" }, head: { sha: "other-base" } };
+    f.gh.list = async url => url === `commits/${run.head_sha}/pulls` ? [f.ordinary, closed, otherBase] : list(url);
+    await f.coordinator.holdForWriter({ workflow_run: run });
+    assert.deepEqual(f.statuses.slice(0, green.length), green);
+    assert.deepEqual(f.statuses.slice(green.length).map(row => [row.sha, row.context, row.state]),
+      contexts.map(context => [f.ordinary.head.sha, context, "pending"]));
+    const held = structuredClone(f.statuses);
+    for (const signal of [
+      { ...run, head_branch: "rock" },
+      { ...run, head_branch: "automation/characters-daily-round" },
+      { ...run, head_repository: { full_name: "someone/fork" } },
+      { ...run, event: "pull_request" }
+    ]) await f.coordinator.holdForWriter({ workflow_run: signal });
+    f.gh.list = async url => url === `commits/${run.head_sha}/pulls` ? [] : list(url);
+    await f.coordinator.holdForWriter({ workflow_run: run });
+    await f.coordinator.holdForWriter({ inputs: { override_pr: "600" } });
+    assert.deepEqual(f.statuses, held, "audits, ignored signals, standalone pushes and targeted recovery do not hold bundles");
+    await f.coordinator.holdForWriter({ workflow_run: { event: "pull_request_review" } });
+    assert.deepEqual(f.statuses.slice(held.length).map(row => [row.sha, row.context, row.state]),
+      green.map(row => [row.sha, row.context, "pending"]), "review refreshes still hold every bundle they revalidate");
+    assert.equal(f.writes.length + f.updates.length, 0);
+  });
+  await t.test("drafts wait and ordinary closures do not enqueue writes; merged overrides retain cleanup", async () => {
+    const f = fixture(); f.ordinary.draft = true;
+    assert.equal(await f.inspect(), false);
+    assert.ok(f.states().every((row) => row.state === "pending"));
+    f.ordinary.state = "closed";
+    assert.equal(await f.inspect(), false);
+    f.merge();
+    assert.equal(await f.coordinator.needsWriter(f.override.number), true);
+  });
+  await t.test("truncated comparisons, API failure and missing or untrusted manifests never pass", async () => {
+    for (const fault of ["truncated", "api", "missing", "unsigned", "malformed"]) {
+      const f = fixture(), api = f.gh.api, file = f.gh.file;
+      f.gh.api = async (url, ...args) => {
+        if (url.startsWith("compare/")) {
+          if (fault === "api") throw new Error("API unavailable");
+          if (fault === "truncated") return { merge_base_commit: { sha: f.rock }, files: Array.from({ length: 300 }, () => ({ filename: "README.md" })) };
+        }
+        return api(url, ...args);
+      };
+      if (fault === "missing") f.gh.file = async () => null;
+      if (fault === "malformed") f.gh.file = async () => ({ source: "not JSON" });
+      if (fault === "unsigned") f.commits.get(f.manual.head.sha).verified = false;
+      await assert.rejects(f.inspect());
+      assert.ok(!f.states().some((row) => row.state === "success"), fault);
+      for (const context of ["Character intake", "Character bundle safety"]) assert.equal(f.states().filter((row) => row.context === context).at(-1).state, "failure", fault);
+      assert.equal(f.writes.length, 0);
+      f.gh.file = file;
+    }
+  });
+  await t.test("a changed PR head, base or bundle head goes back through serialized inspection", async () => {
+    for (const moving of ["pr", "rock", "bundle"]) {
+      const f = fixture(), list = f.gh.list;
+      let lists = 0;
+      f.gh.list = async (url) => {
+        const rows = structuredClone(await list(url));
+        if (++lists === 1) {
+          if (moving === "pr") f.ordinary.head.sha = f.commit([f.rock], { [f.char("new")]: f.custom("new") });
+          if (moving === "rock") f.rock = f.commit([f.rock], { "README.md": "new base\n" });
+          if (moving === "bundle") f.manual.head.sha = f.commit([f.manual.head.sha], {});
+        }
+        return rows;
+      };
+      assert.equal(await f.inspect(), true, moving);
+      assert.ok(!f.statuses.some((row) => row.state === "success"), moving);
+    }
+  });
+});
+
 test("a maintainer override PR is verified and audited without parsing replaced sources or touching the queue before merge", async () => {
   const f = overrideFixture();
   // The queued Natalie revision is unreadable as an identity; ordinary readers still refuse it.
@@ -1208,13 +1541,14 @@ test("the identity check lets a verified override delete a malformed character w
   t.after(() => { for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
   const removed = "src/characters/doggyballs.js", added = "src/characters/natalievarty.js";
   let permission = "admin", addedSource = 'BL.characters.add({ handle: "natalievarty", joined: 1, lastCommit: 2 });';
+  let files = [{ filename: removed, status: "removed" }, { filename: added, status: "added" }];
   const fetched = [];
   t.mock.method(globalThis, "fetch", async (url) => {
     const path = url.slice(`https://api.github.com/repos/${repo}/`.length);
     fetched.push(path);
     const file = (source) => ({ type: "file", encoding: "base64", size: source.length, content: Buffer.from(source).toString("base64") });
     let data;
-    if (path.startsWith("pulls/600/files")) data = [{ filename: removed, status: "removed" }, { filename: added, status: "added" }];
+    if (path.startsWith("pulls/600/files")) data = files;
     else if (path.startsWith("collaborators/")) data = { permission };
     else if (path === `contents/${removed}?ref=base`) data = file('BL.characters.add({ handle: "doggyballs", ...hostile });');
     else if (path === `contents/${added}?ref=head`) data = file(addedSource);
@@ -1232,4 +1566,10 @@ test("the identity check lets a verified override delete a malformed character w
   await assert.rejects(checkCharacterIdentities(pr("character-override/varty")), /character-override/);
   permission = "admin"; addedSource = 'BL.characters.add({ handle: "natalievarty", github: "w-s-bitcoin", joined: 1, lastCommit: 2 });';
   await assert.rejects(checkCharacterIdentities(pr("character-override/varty")), /duplicate character handle or GitHub owner/, "the resulting registry stays coherent");
+  for (const change of [{ filename: "scripts/ci-priority.mjs", status: "modified" },
+    { filename: "scripts/renamed.mjs", previous_filename: "scripts/ci-priority.mjs", status: "renamed" }]) {
+    files = [change];
+    await assert.rejects(checkCharacterIdentities(pr("priority-policy")), /operator authority/, "priority recovery is privileged policy, including renamed-away paths");
+    assert.deepEqual(await checkCharacterIdentities(pr("priority-policy", { user: { ...OPERATORS[0], type: "User" } })), []);
+  }
 });

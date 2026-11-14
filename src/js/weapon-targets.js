@@ -87,6 +87,7 @@
     const verticalTriangle = new Float64Array(9), verticalSegment = new Float64Array(6);
     const verticalHit = { node: null, owner: null, type: "none", distance: Infinity, x: 0, y: 0, z: 0 };
     const stats = { queries: 0, candidates: 0, triangleTests: 0, transforms: 0 };
+    const authoredRay = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
     let generation = 0, originX = 0, originY = 0, originZ = 0;
     let contactDistance = Infinity, contactTriangle = Infinity, contactX = 0, contactY = 0, contactZ = 0;
     const transformState = () => ({ stamp: 0, active: false, version: 0, parent: null, parentVersion: -1, values: new Float64Array(16) });
@@ -173,8 +174,12 @@
             m[8] * m[8] + m[9] * m[9] + m[10] * m[10]));
           const along = px * dx + py * dy + pz * dz, side = px * px + py * py + pz * pz - along * along;
           if (along >= 0 && side <= radius * radius) {
-            const found = Math.max(0, along - Math.sqrt(Math.max(0, radius * radius - side)));
-            if (found < nearest) { nearest = found; hit(out, target, found, ox + dx * found, oy + dy * found, oz + dz * found); }
+            // Procedural controls refine their broad proxy to the visible surface for hover too.
+            authoredRay.ox = ox; authoredRay.oy = oy; authoredRay.oz = oz;
+            authoredRay.dx = dx; authoredRay.dy = dy; authoredRay.dz = dz;
+            const found = target.owner.pickRay ? target.owner.pickRay(authoredRay)
+              : Math.max(0, along - Math.sqrt(Math.max(0, radius * radius - side)));
+            if (found >= 0 && found < nearest) { nearest = found; hit(out, target, found, ox + dx * found, oy + dy * found, oz + dz * found); }
           }
           continue;
         }

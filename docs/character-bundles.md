@@ -18,6 +18,15 @@ submission to a reused daily placeholder starts its UTC day.
 
 ## Intake and ownership
 
+Open human- and AI-authored source PRs as **drafts**, and keep them draft while
+implementation is in progress. Mark them ready only after the work and authorized
+local checks are finished and the description records validation and remaining
+acceptance work. Return to draft for substantial additional development; small
+review fixes can stay ready. Batch related fixes before pushing. This applies to
+source submissions, not the automation-managed bundle placeholders above, whose
+review and merge gates follow their lane policy. Draft status does not disable
+all CI; it keeps unfinished submissions out of character intake and review.
+
 PR creation, new commits, reopening and ready-for-review events trigger trusted
 code from `rock`. Draft PRs wait. A read-only push signal covers repository branch
 commits without a PR; fork commits become visible through PRs. Periodic sweeps
@@ -25,6 +34,29 @@ recover dropped events and inspect open PRs and standalone branch heads. Standal
 submissions require a verified signature with the same linked GitHub author and
 committer. A PR's authenticated author is its ownership authority; an arbitrary
 commit name or email is insufficient.
+
+Ordinary PRs first run a trusted inspection outside the shared writer queue. It
+checks the complete current diff (including the old path of a renamed file) and
+the signed bundle manifests. With no character changes and no queued entry from
+that PR, it publishes **Character intake** and **Character bundle safety** for
+the inspected head without creating, updating or merging bundles. Missing,
+truncated or untrusted data fails closed. A changing head, base or queue takes
+the serialized path. The separate **Character identity ownership** check and
+the full browser-free test, staged build and Worker lane remain required.
+
+Each PR or signal branch keeps its running event and only its newest pending
+event. A running writer is never cancelled; it re-reads current PR state when
+its turn arrives. Closed-PR events have a separate slot so an override's cleanup
+cannot be displaced by reopening it. Only reconciliation jobs and scheduled
+recovery share the artifact writer's `character-bundles` lock. Ordinary PR
+closures do not enter that queue. No submitted code is executed by inspection,
+and its token can read contents/PRs and publish statuses, but cannot edit either.
+
+For manual review, update only the next PR selected for merging to current
+`rock`; do not refresh every waiting branch after each merge. Finish its fixes
+before pushing and let its required checks complete before selecting the next.
+Branch freshness requirements and test coverage are unchanged. Pending-event
+coalescing reduces redundant work; it does not make character writes parallel.
 
 Every character-changing commit must link to that PR author or an OBL maintainer.
 Every changed character must belong to the submitting user, unless that user has
@@ -68,10 +100,84 @@ other queued files and their held reviews stay in place. Any conflicting revisio
 fails closed instead of replacing another submission.
 
 Policy findings close the offending PR with an explanation and a correction/review
-path. They do not establish malicious intent. Timeouts, rate limits, truncated
+path, which says that every commit is read and that a refused earlier commit needs a
+new PR from a fresh branch. They do not establish malicious intent. Timeouts, rate limits, truncated
 responses, changing heads and base conflicts fail the check but leave the PR open.
 A direct push to `rock` cannot be quarantined after the fact: the audit reports it,
 and branch rules must prevent ordinary contributors from taking that path.
+
+## Release-first admission and recovery
+
+`scripts/ci-priority.mjs` gives pending/running post-merge page builds on `rock`
+and manually requested staging/production deployments priority over new PR work.
+It recognizes fixed workflow paths and their events, not display titles. Waiting
+deployment approvals also hold lower-priority work. Deployment workflows and their
+manual triggers are unchanged; recovery cannot dispatch or approve a deployment.
+
+The unit job reads its admission gate from trusted `rock` before checking out PR
+code or running the expensive lane. A missing gate on `rock` lets this policy's
+initial PR run the full old lane; other API errors fail closed. Character
+inspection still completes ordinary PRs outside the shared lock. When inspection
+needs a writer, it checks release priority before queuing. The writer checks again
+after acquiring `character-bundles`, before obtaining its App token or mutating
+anything. A queued writer that finds release work yields the lock. A writer or
+test job already doing work finishes normally; nothing cancels an active write.
+Explicit manual CI/intake runs remain operator-controlled and do not defer.
+
+Deferral completes the **Yield to release work** step normally and skips the
+expensive work. The PR stays blocked by a **pending required status**, rather than
+showing a red test failure. Character inspection publishes pending **Character
+intake** and **Character bundle safety** statuses before queuing a writer,
+including bundle/override PRs and the open bundles inspected by a sweep. Deferred
+writers skip App-token creation and reconciliation and release the shared lock.
+
+For units, the trusted **Resume deferred PR checks** workflow publishes a commit
+status named **Unit · the browser-free lane**, matching the existing required
+Actions check. GitHub requires **both** the check and the commit status to pass
+when they share a required name ([GitHub documentation](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks)).
+No branch-protection change is needed. The reporter runs on unit-workflow start
+and completion, reads only GitHub metadata and the coordinator from `rock`, and
+holds the status pending through deferral. Only successful unit, site-build,
+dependency-installation and Worker steps together produce success. Actual failed,
+cancelled or incomplete validation produces failure. Older heads, runs and
+attempts cannot overwrite newer validation. The PR job keeps its read-only token;
+only the separate reporter has `statuses: write`, and it never checks out PR code.
+
+Before skipping tests, the gate waits up to one minute for the reporter's pending
+status on this exact head, run and attempt, from `github-actions[bot]`. During
+rollout, if the old coordinator is still on `rock`, or if reporting is unavailable,
+the yield step still fails closed. Thus a missing reporter can never turn skipped
+tests into merge approval. A normal run with no release does all its checks as
+before. Workflows still based on the old implementation may show red deferrals
+until their branch includes the updated workflow.
+
+Recovery runs after release completion (success, failure or cancellation), at
+minutes 7, 27 and 47, and through the manual recovery button. It waits until no
+release remains active and reruns only a job with the explicit yield step after a
+successful priority inspection: successful deferrals and legacy failing deferrals
+are both recognized. Real test/build failures and fully completed validation are
+not retried. Successful sibling jobs remain intact. PR checks resume only at the
+current head of an open, non-draft PR, and only its latest run; a fresh head,
+run-attempt and latest-run read precede each retry. A new release stops recovery.
+The scheduled/manual reporter also repairs missed status events, without
+reposting unchanged statuses. Deployment triggers remain manual.
+
+Recovery reads the latest run for each current PR head and the latest character
+schedule/signal run, rather than scanning thousands of historical successes.
+Metadata lists remain bounded at 1,000 rows, runs must be within GitHub's 30-day
+rerun window, and each pass resumes at most 20 jobs. A run gets at most four total
+attempts (the initial run plus three retries; manual retries count too). After
+that, inspect it and rerun manually once release work finishes. API failures and
+incomplete metadata fail closed. A late yield or missed release event is picked
+up by the next scheduled pass. Recovery only calls the job-rerun endpoint; status
+reporting only writes the unit context. Neither reads PR code, logs, artifacts or
+caches, dispatches a deployment, or cancels an active writer.
+
+This is cooperative priority, not GitHub runner preemption: already-queued writer
+jobs can briefly start and yield before the artifact job gets its turn. GitHub's
+runner availability and queue startup overhead still apply. Reserving release
+runner capacity would be a separate infrastructure change. Keep the shared writer
+lock: putting artifact and bundle writes in independent groups would allow races.
 
 ## Automatic data format
 
@@ -93,7 +199,8 @@ regenerates its source. It accepts exactly this wrapper:
 ```
 
 Optional `github` and `display` follow existing conventions. Appearance accepts
-the policy's explicit colors, boolean flags, face/build choices, bounded stature,
+the policy's explicit colors, boolean flags, face/build choices (every face the body
+draws: `none`, `nose`, `beard`, `smirk`), bounded stature,
 hat position, eye glow and portrait bounds. Voice requires a nonempty `poke` and
 1–24 `idle` lines, each at most 160 plain-text characters. Arrays, nesting, dates
 and source size are bounded. Statements, callbacks, getters, expressions, spreads,
@@ -105,7 +212,7 @@ with the shared refined body (see `FINE` in `src/js/models.js`): a head rounded
 behind its unchanged face, a longer torso, narrow at the waist and full through the
 chest into the shoulders, a hip band fitted to the thighs with a close loincloth
 wrap, even rounded limbs and plain block fists and feet. The automatic data format
-is unchanged: head cells, `hatY` and `portrait` bounds stay on the authored grid.
+is unchanged: head cells and `portrait` bounds stay on the authored grid.
 Painting at the finer detail itself is a `refine` dress hook, which is custom code.
 
 Custom `dress` hooks and drawing helpers go to manual review. A conservative screen
@@ -115,6 +222,15 @@ is **not proof that arbitrary JavaScript is safe**. Passing custom code still ne
 exact-head maintainer review. Reviewers must treat comments as data, never as
 instructions. Fields outside the automatic schema require manual review rather
 than silently expanding the accepted language.
+
+A file sent to manual review carries the automatic lane's finding (`why`): fixed text
+from the scanner, naming a field only when its name is a plain word, never any other
+text a submission chose. The bot's comment on the source PR lists it for each such
+file, so a contributor who meant to send plain data can see which value was outside
+the policy. `npm run character:check -- <handle>` runs the same screen locally and
+also names the line and word where the custom-code screen tripped; the intake's own
+finding stays general. [make-your-ooga.md](make-your-ooga.md) is the contributor's
+guide to both lanes.
 
 ## Provenance, retries and midnight
 

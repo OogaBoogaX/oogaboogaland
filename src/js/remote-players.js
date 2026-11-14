@@ -93,7 +93,7 @@
   const create = ({ root, crew = null, fx = null, player = null, posed = null, visible = sameZone, hide = null, createGorilla = null, hideGorilla = null, ghost = null, unarmed = false }) => {
     const net = BL.net;
     const bodies = new Map();
-    const pets = crew?.pets || BL.crew.createPets({}, root);
+    const pets = crew?.pets || BL.crew.createPets({ fx }, root);
     // The chat subscription, taken on the first update and again after a kept hub's suspend disposed it; the
     // shot and strike subscriptions the same way.
     let unheard = null, unshot = null, unswung = null, unreacted = null;
@@ -201,7 +201,9 @@
           cave.pet.node.sightHidden = true;
         }
       }
-      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0, jetNode: null, jetFlame: null, swing: 0, shotAt: -Infinity, lastHeld: 0, lastMode: 0, lastMelee: 0, sampleAt: 0, sampleMelee: 0, sampleFlags: 0, sampleSwap: 0, sampleSwapIndex: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, ghosted: null, label: "", labelW: 0,
+      const entry = { id: rec.id, body: rec.body, name, gorilla, cave, motion, baseY: gorilla ? 0 : cave.root.position.y, height, top: NaN, dTop: 0,
+        // The walk's step from the last sample, when it came and how fast it turned since the one before.
+        gaitAt: NaN, gaitPhase: 0, gaitRate: 0, puff: 0, jetNode: null, jetFlame: null, swing: 0, shotAt: -Infinity, lastHeld: 0, lastMode: 0, lastMelee: 0, sampleAt: 0, sampleSwap: 0, sampleSwapIndex: 0, x: rec.x, y: rec.y, z: rec.z, yaw: rec.yaw, phase: 0, hidden: null, hiddenOverride: null, ghosted: null, label: "", labelW: 0,
         react: "", reactT: 0, screenX: NaN, plateLeft: NaN, plateTop: NaN, plateW: 0, plateH: 0, plateTextX: NaN, plateBaseline: NaN, plateBarLeft: NaN, plateBarTop: NaN, pickOwner: { kind: "player", id: rec.id, cave, weaponType: "none" } };
       bodies.set(rec.id, entry);
       hideLocal(entry);
@@ -223,26 +225,47 @@
       bodies.delete(entry.id);
     };
 
-    const pose = (entry, dt) => {
-      const { cave } = entry;
-      const parts = cave.parts;
-      parts.armL.rotation.y = parts.armR.rotation.y = 0;
-      parts.armL.rotation.z = 0.12; parts.armR.rotation.z = -0.12;
-      const moved = Math.hypot(entry.dx, entry.dz) / Math.max(dt, 1e-3);
-      if (moved > WALK_SPEED) {
-        entry.phase += dt * 10;
-        const swing = Math.sin(entry.phase);
-        parts.legL.rotation.x = swing * 0.55;
-        parts.legR.rotation.x = -swing * 0.55;
-        parts.armL.rotation.x = -0.2 - swing * 0.3;
-        parts.armR.rotation.x = -0.2 + swing * 0.3;
+    // The body as its own page poses it, through the crew's own poses (`poseGait`, `poseCloseWalk`): its gait, a
+    // close walk's step sideways and back, the shoulder's turn and the peek's lean (`shownLean`, which the weapon
+    // pose applies) from the pose's visual state. A walk goes on from its last sample at the rate it turned between
+    // the last two. An older page's pose has none of it: that body walks at its own step while it moves.
+    const pose = (entry, rec, dt) => {
+      const { cave } = entry, gaits = BL.crew, GAIT = gaits.GAIT;
+      const parts = cave.parts, v = rec.visual;
+      if (v && rec.visualBody) {
+        const gait = v[17], ladder = gait >= 2000;
+        if (gait >= 1 && gait <= 629 || ladder) {
+          const phase = (ladder ? gait - 2000 : gait - 1) / 100;
+          if (rec.visualAt !== entry.gaitAt) {
+            const gap = (rec.visualAt - entry.gaitAt) / 1000, turn = Math.atan2(Math.sin(phase - entry.gaitPhase), Math.cos(phase - entry.gaitPhase));
+            entry.gaitRate = gap > 0.02 && gap < 0.5 ? turn / gap : 10;
+            entry.gaitPhase = phase; entry.gaitAt = rec.visualAt;
+          }
+          gaits.poseGait(cave, ladder ? GAIT.ladder : GAIT.walk, entry.gaitPhase + entry.gaitRate * Math.min(0.3, Math.max(0, (net.serverNow() - entry.gaitAt) / 1000)), v[22] / 100);
+          if (!ladder && (v[19] || v[20])) gaits.poseCloseWalk(cave, v[19] / 100, v[20] === 1);
+        } else {
+          gaits.poseGait(cave, gait === 1000 ? GAIT.fly : gait === 1001 ? GAIT.fall : GAIT.stand);
+          entry.gaitAt = NaN; entry.gaitPhase = entry.gaitRate = 0;
+        }
+        const turn = v[21] / 100;
+        for (let i = 0; i < cave.root.children.length; i++) {
+          const part = cave.root.children[i];
+          part.poseYaw = part === parts.head ? 0 : turn;
+        }
+        cave.shownLean = v[18] / 100;
       } else {
-        entry.phase = 0;
-        parts.legL.rotation.x = parts.legR.rotation.x = 0;
-        parts.armL.rotation.x = parts.armR.rotation.x = -0.2;
+        const moved = Math.hypot(entry.dx, entry.dz) / Math.max(dt, 1e-3);
+        if (moved > WALK_SPEED) {
+          entry.phase += dt * 10;
+          gaits.poseGait(cave, GAIT.walk, entry.phase);
+        } else {
+          entry.phase = 0;
+          gaits.poseGait(cave, GAIT.stand);
+        }
+        cave.shownLean = 0;
       }
       cave.root.position.x = entry.x;
-      cave.root.position.y = entry.y + entry.baseY + Math.abs(Math.sin(entry.phase)) * 0.04;
+      cave.root.position.y = entry.y + entry.baseY;
       cave.root.position.z = entry.z;
       cave.root.rotation.y = entry.yaw;
     };
@@ -268,9 +291,9 @@
     // The visitor's own reaction over their head, and the body whose chat bubble their raised hand lifts.
     let selfReact = "", selfReactT = 0, lifted = null;
     // Their jetpack from the room's `jet` (net.js): the character's built-in one, or the hub's model, put on as the
-    // crew puts one on (`crew.jetpackNode`) the first time it shows. The flame flickers as the crew's does.
+    // crew puts one on (`crew.jetpackNode`) the first time it shows. The flame flickers and sparks as the crew's do.
     let jetClock = 0;
-    const showJet = (entry, rec) => {
+    const showJet = (entry, rec, dt) => {
       const jet = rec.jet, owned = rec.visual && (rec.visual[3] & 4);
       const cave = entry.cave, parts = cave.parts;
       if (!entry.jetNode) {
@@ -278,6 +301,8 @@
         entry.jetNode = parts.jetpack || BL.crew.jetpackNode(cave.root, cave.traits.height, 0, BL.hubModels.jetpack(), BL.hubModels.jetFlame());
         entry.jetFlame = parts.jetpack ? parts.jetFlame : entry.jetNode.children[0];
         cave.presentationJet = { node: entry.jetNode, flame: entry.jetFlame, power: 0 };
+        // Seated on a modelled back as its own page seats it, so what is slung beside it hangs alike.
+        if (!parts.jetpack) BL.crew.seatJetpack(cave, entry.jetNode, BL.hubModels.jetpack(), cave.presentationJet);
       }
       const power = jet >> 1, flame = entry.jetFlame;
       cave.presentationJet.power = power;
@@ -285,6 +310,11 @@
       entry.jetNode.visible = (jet & 1) === 1;
       flame.visible = entry.jetNode.visible && power > 0;
       if (flame.visible) flame.scale.y = (0.7 + Math.sin(jetClock * 40 + entry.id) * 0.3) * power / 2;
+      // Its sparks, as its own page sparks them (`crew.jetSparks`), only while its body shows here.
+      if (flame.visible && cave.root.visible && fx && (entry.puff -= dt) <= 0) {
+        entry.puff = BL.crew.JET_PUFF;
+        BL.crew.jetSparks(fx, cave, power);
+      }
     };
     // The same third-person grip, sling, recoil and reload poses as the local crew. Timers are sampled
     // state, aged on the room's clock; a late join never starts an obsolete action from its beginning.
@@ -326,18 +356,14 @@
       }
       entry.sampleSwap = v ? v[7] : 0; entry.sampleSwapIndex = w.swapMagazine;
       const melee = held === 1 && v ? Math.max(0, v[8] / 1000 - age * (cave.traits.nunchaku ? 1.9 : 1)) : 0;
-      if (held === 1 && v && rec.visualAt !== entry.sampleAt && (v[8] > entry.sampleMelee + 30 || (flags & 128) !== (entry.sampleFlags & 128) || flags & 32 && !w.meleeHeld)) {
-        BL.crew.captureMeleePose(cave);
-      }
       entry.lastMelee = melee;
-      entry.sampleAt = rec.visualAt; entry.sampleMelee = v ? v[8] : 0; entry.sampleFlags = flags;
+      entry.sampleAt = rec.visualAt;
       w.meleeTime = melee;
       w.meleeHeld = held === 1 && fresh && !!(flags & 32);
       if (w.meleeHeld) w.meleeTime = Math.max(0.24, w.meleeTime);
-      w.meleeQuick = !!(flags & 64); w.meleeSide = flags & 128 ? -1 : 1;
       w.meleeHeldTime = v ? Math.min(1.24, v[9] / 1000 + (w.meleeHeld ? age : 0)) : 0;
       w.meleeCharge = v ? v[10] / 100 : 0;
-      w.meleeStrikeTime = w.meleeQuick ? 0.09 : 0.128 * (1 + w.meleeCharge * 0.5);
+      w.meleeStrikeTime = BL.crew.strikeTime();
       w.meleeReadyTime = v ? Math.max(0, v[11] / 1000 - age) : 0;
       w.axeIdle = v ? v[12] / 1000 : 1.3;
       w.bashTime = held === 2 && v ? Math.max(0, v[13] / 1000 - age) : 0;
@@ -413,8 +439,8 @@
         entry.cave.root.visible = visible(rec) && !(!entry.gorilla && crew && crew.player && crew.player.traits.name === entry.name);
         if (entry.gorilla) poseGorilla(entry, rec, dt);
         else {
-          pose(entry, dt);
-          showJet(entry, rec);
+          pose(entry, rec, dt);
+          showJet(entry, rec, dt);
           showWeapon(entry, rec, dt);
           if (unarmed) {
             const { club, gun } = entry.cave.parts;

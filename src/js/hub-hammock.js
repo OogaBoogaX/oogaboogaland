@@ -21,8 +21,9 @@
   // then getting up where it landed; the roll turns the body FALL_TURN about the bed's long axis, toward the side it falls to, and it lies
   // FALL_LIE_Y of its height over the ground.
   const FALL_SECONDS = 1.5, FALL_ROLL = 0.4, FALL_LIE = 0.62, FALL_TURN = Math.PI * 0.9, FALL_LIE_Y = 0.14;
-  // Where an Ooga stands up: STAND past the bed's swing (`envelope`'s `across`), room for the widest Ooga.
-  const STAND = 0.6;
+  // Where an Ooga stands up: STAND past the bed's swing (`envelope`'s `across`), room for the widest Ooga. A legged
+  // pet lies on the ground beside its Ooga's bed nearer than that, PET_LIE past the swing.
+  const STAND = 0.6, PET_LIE = 0.2;
   // The swing: the bed's angle about the virtual swing axis is `amp` sin(phase), the phase turning at OMEGA, `amp` easing toward
   // REST (or REST_HELD with anyone in it) at DECAY a second and never past SWAY_MAX; a sitter's landing and a shaken palm add KICK.
   // Pushes and bananas climb it in steps that the bed remembers: every hit adds to one `count` shared by everyone (a run or a
@@ -227,7 +228,8 @@
     p.seatRy = p.yaw + Math.PI / 2;
     p.seats = SEAT_AT.map((at) => {
       const wx = p.x + ux * at + nx * side * out, wz = p.z + uz * at + nz * side * out;
-      return { at, y: clothY(p, at, 0) + SEAT_LIFT, walkAt: { x: wx, z: wz }, floor: surfaceAt(wx, wz) };
+      const near = p.envelope.across + PET_LIE;
+      return { at, y: clothY(p, at, 0) + SEAT_LIFT, walkAt: { x: wx, z: wz }, petAt: { x: p.x + ux * at + nx * side * near, z: p.z + uz * at + nz * side * near }, floor: surfaceAt(wx, wz) };
     });
     // The whole swing the pushes give it (SWAY_MAX), which pushes, rounds and a tipped Ooga's landing spot go by.
     p.swing = envelope(p, SWAY_MAX);
@@ -359,7 +361,7 @@
     const bedRotation = quat.create(), restRotation = quat.create(), bodyRotation = quat.create(), limbTarget = quat.create();
     // A bed sleeper lies on their back. Turn their long axis along the hammock's +x.
     quat.fromEuler(restRotation, -Math.PI / 2, -Math.PI / 2, 0);
-    const seats = p.seats.map((s, index) => ({ kind: "hammock", lying: true, keepEquipment: true, index, x: 0, y: 0, z: 0, ry: p.seatRy, floor: s.floor, walkAt: { x: s.walkAt.x, z: s.walkAt.z }, sitter: null, remote: 0, restX: 0, restY: 0, restZ: 0, wire: new Int16Array(6) }));
+    const seats = p.seats.map((s, index) => ({ kind: "hammock", lying: true, keepEquipment: true, index, x: 0, y: 0, z: 0, ry: p.seatRy, floor: s.floor, walkAt: { x: s.walkAt.x, z: s.walkAt.z }, petAt: s.petAt, sitter: null, remote: 0, restX: 0, restY: 0, restZ: 0, wire: new Int16Array(6) }));
     let amp = REST, angle = 0, phase = 0, lean = 0, leanIn = 0, leanInT = LEAN_RISE, count = 0, sinceHit = 0, sinceRound = 1e9, wasHeld = false, fallSide = 0;
     const occupied = () => { for (const seat of seats) if (seat.sitter || seat.remote) return true; return false; };
     // A seat's place for an angle of swing: the bed turns about the virtual swing axis (+x in its frame), so a point `drop`
@@ -516,13 +518,16 @@
     };
     const parkPart = (gear, node, index, temporary = false) => {
       if (!node) return;
-      const saved = { node, index, parent: node.parent, position: { ...node.position }, rotation: { ...node.rotation },
+      const saved = { node, index, parent: node.parent, position: { ...node.position }, rotation: { ...node.rotation }, scale: 0,
         quaternion: node.quaternion, visible: node.visible, poseYaw: node.poseYaw, poseLean: node.poseLean, cameraHidden: node.cameraHidden, temporary,
         flat: { x: 0, y: 0, z: 0 }, ways: null };
       gear.parts.push(saved);
       if (node.parent) removeChild(node.parent, node);
       addChild(gear.holder, node);
       node.position.x = node.position.y = node.position.z = 0;
+      // A modelled body's club is scaled against its arm's own scale while the arm holds it: off the arm it is its true
+      // size, and `scale` is what to give it back.
+      if (gear.cave.modelled && node === gear.cave.parts.club) { saved.scale = node.scale.x; node.scale.x = node.scale.y = node.scale.z = 1; }
       // Long axis along the bed: the club's and pack's up (z turns it, applied first), the rifle's barrel (y turns it).
       node.rotation.x = node.rotation.y = 0; node.rotation.z = index === 1 ? 0 : Math.PI / 2;
       if (index === 1) node.rotation.y = Math.PI / 2;
@@ -693,6 +698,7 @@
       if (node.parent) removeChild(node.parent, node);
       if (!saved.temporary && saved.parent && (!pack || worn || node === cave.parts.jetpack || node === cave.presentationJet?.node)) addChild(saved.parent, node);
       for (const axis of AXES) { node.position[axis] = saved.position[axis]; node.rotation[axis] = saved.rotation[axis]; }
+      if (saved.scale) node.scale.x = node.scale.y = node.scale.z = saved.scale;
       node.quaternion = saved.quaternion;
       node.visible = pack ? worn && saved.visible : saved.visible && (saved.index === 0 ? !!cave.weapon?.primaryOwned : !!cave.weapon?.secondaryOwned);
       node.poseYaw = saved.poseYaw; node.poseLean = saved.poseLean; node.cameraHidden = saved.cameraHidden;
@@ -1046,13 +1052,14 @@
       return best;
     };
     // The stand-up spot nearest (x, z): the ground `plan` checked clear of the bed's whole swing, where a pet leaving a body at rest lands.
-    const landing = (x, z) => {
+    // With `lying`, the nearer spot beside the bed where a legged pet lies down while its Ooga rests.
+    const landing = (x, z, lying) => {
       let best = seats[0], distance = Infinity;
       for (const seat of seats) {
         const d = Math.hypot(seat.walkAt.x - x, seat.walkAt.z - z);
         if (d < distance) { best = seat; distance = d; }
       }
-      return best.walkAt;
+      return lying ? best.petAt : best.walkAt;
     };
     // Reach the whole cloth from either side or end, including while standing on its shell.
     const near = (x, z, reach) => {

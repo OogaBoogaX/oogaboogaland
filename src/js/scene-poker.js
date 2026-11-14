@@ -235,7 +235,7 @@
     seatTable = session.tables.findIndex(t => t.snapshot().seats.some(s => s?.id === HERO));
     if (seatTable >= 0) selected = seatTable;
     root = S.createNode(); camera = S.createCamera({ fov: 55, near: 0.2, far: 110 });
-    hud = BL.hud.create({ signal: ctx.signal, roster: BL.contributors.activeRoster, catalog: BL.models.SWAG, tierColors: BL.models.TIER_COLORS, renderIcon: BL.hud.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud = BL.hud.create({ signal: ctx.signal, roster: BL.contributors.activeRoster });
     const hooks = {};
     input = BL.interact.create({ canvas: ctx.canvas, renderer: ctx.renderer, camera, hooks });
     pilot = BL.pilot.create({ renderer: ctx.renderer, canvas: ctx.canvas, camera, hud, presets, landing: "entrance", pitch: [-0.1, 1.3], dist: [3, 32],
@@ -407,7 +407,7 @@
     onDonation(donation, counted = null) {
       game.recordDonation(donation, counted && counted.exact);
       world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats)));
-    }, onLootCleared() {}, root: null, camera: null, input: null, debug: null,
+    }, root: null, camera: null, input: null, debug: null,
     agent: null, agentView: null, agentControls: null, agentHandoff: null, get inMotion() { return !!room; } };
   scene.prepare = () => { const loading = BL.deferred.load("poker"); return loading ? loading.then(() => null) : null; };
   scene.controlsHelp = touch => { const help = pilot.controlsHelp(touch); help.title = "The Ember Den · " + help.title; return help; };

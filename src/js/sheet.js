@@ -3,7 +3,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const KEY = "oogaboogaland.sheet.v1", NAMES = ["bananas", "roster", "players", "loot", "chat"], DOCKS = ["left", "right", "bottom"], TAB_EDGE = 41;
+  const KEY = "oogaboogaland.sheet.v1", NAMES = ["bananas", "roster", "players", "chat"], DOCKS = ["left", "right", "bottom"], TAB_EDGE = 41;
   // A touch drawer's sticks need this much of the screen left over it.
   const STICK_ROOM = 320;
   // A phone's tabs start 16px in and stop short of the 44px chevron tab at the far right.
@@ -14,7 +14,7 @@
   };
   const tabFor = (panel) => panel.closest(".sheet")?.querySelector(`[data-tab="${panel.dataset.panel}"]`);
   // Unread counts on the players and chat tabs (#430) belong to the page, not to one scene's sheet: players.js and
-  // chat.js keep them, and whichever sheet is up paints them beside the locker's count.
+  // chat.js keep them, and whichever sheet is up paints them.
   const badges = { players: 0, chat: 0 };
   let paintBadges = null;
   const setBadge = (name, count) => {
@@ -35,7 +35,7 @@
   // A first visit is a readable storage holding no saved layout, judged once a page. The director asks `welcome`
   // a beat after the world shows; any panel choice before then, here or by a shortcut, wins instead.
   let firstVisit = null, live = null;
-  const create = ({ lootEnabled, signal }) => {
+  const create = ({ signal }) => {
     const root = document.getElementById("sheet"), parent = root.parentElement;
     const content = root.querySelector(".sheet-content"), nav = root.querySelector(".sheet-panels");
     const panels = [...content.children], templates = [...nav.children].map((tab) => tab.cloneNode(true));
@@ -51,7 +51,7 @@
     // the untouched drawer the same), its saved size untouched for the other tabs.
     const BANANA_DRAWER = 200, shortLandscape = window.matchMedia("(pointer: coarse) and (orientation: landscape) and (max-height: 500px)");
     const bananaTall = (w) => w.node === root && w.tab === "bananas" && shortLandscape.matches;
-    let serial = 0, gesture = null, mergeTarget = null, suppressClick = false, hidden = false, folded = false, disposed = false, lootCount = 0, saveTimer = 0;
+    let serial = 0, gesture = null, mergeTarget = null, suppressClick = false, hidden = false, folded = false, disposed = false, saveTimer = 0;
     if (!shared) {
       try {
         const raw = localStorage.getItem(KEY);
@@ -65,8 +65,7 @@
     const saved = shared;
     folded = saved?.folded === true;
     // Online Oogas and Ooga Chat are for signed-in visitors only.
-    const available = (name) => NAMES.includes(name) && (name !== "loot" || lootEnabled)
-      && (name !== "players" && name !== "chat" || !!BL.net.state.me);
+    const available = (name) => NAMES.includes(name) && (name !== "players" && name !== "chat" || !!BL.net.state.me);
     const belled = () => !!BL.net.state.me;
     const isOpen = (w) => !folded && w.open && available(w.tab);
     // On a phone every tab folds into the main drawer; separate panels stay saved, hidden, for a larger screen.
@@ -228,10 +227,10 @@
       }
       for (const w of windows) for (const badge of w.nav.querySelectorAll(".tab-count")) {
         const tab = badge.closest("[data-tab]"), name = tab.dataset.tab;
-        const count = name === "loot" ? lootCount : isOpen(w) ? 0 : badges[name] || 0;
+        const count = isOpen(w) ? 0 : badges[name] || 0;
         showBadge(badge, count);
         const label = tab.dataset.label || (tab.dataset.label = tab.getAttribute("aria-label"));
-        if (name !== "loot") tab.setAttribute("aria-label", count ? `${label}, ${badgeText(count)} new` : label);
+        tab.setAttribute("aria-label", count ? `${label}, ${badgeText(count)} new` : label);
       }
     };
     const expand = root.querySelector(".sheet-expand");
@@ -513,7 +512,6 @@
         return true;
       },
       setPlaying,
-      setLootCount(count) { lootCount = count; showCounts(); },
       selectTab(name) { select(ownerOf(name) || main, name); },
       fold() { finish(); firstVisit = false; folded = true; if (document.activeElement?.closest(".sheet")) document.activeElement.blur(); refresh(); save(); },
       escape() {

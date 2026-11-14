@@ -1,30 +1,9 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { fnv1a } = BL.math;
   const { HANDLE_MAX, MESSAGE_MAX } = BL.donations;
   const STORAGE_KEY = "oogaboogaland.v1";
-  const INVENTORY_MAX = 200;
-  const STACK_MAX = 9;
-  const LOOT_TIERS = [
-    { tier: "legendary", minSats: 100000 },
-    { tier: "epic", minSats: 21000 },
-    { tier: "rare", minSats: 5000 },
-    { tier: "common", minSats: 1000 }
-  ];
   const SATS_PER_BANANA = 400;
-  const tierFor = (sats) => {
-    const found = LOOT_TIERS.find((t) => sats >= t.minSats);
-    return found ? found.tier : null;
-  };
-  // Same donation id always yields the same item.
-  const lootFor = (donation, catalog) => {
-    const tier = tierFor(donation.sats);
-    if (!tier) return null;
-    const pool = catalog.filter((item) => item.tier === tier);
-    if (!pool.length) return null;
-    return { tier, item: pool[fnv1a(`${donation.id}/loot`) % pool.length] };
-  };
   const bananasFor = (sats) => Math.max(1, Math.min(12, Math.round(sats / SATS_PER_BANANA)));
   // The donations board's tally keeps the sats and bananas of each of the last TIP_DAYS local days, by day number.
   const TIP_DAYS = 7, DAY_MS = 864e5, DONOR_MAX = 256, RECENT_HANDLES = 12;
@@ -58,8 +37,7 @@
     list.unshift(handle);
     if (list.length > RECENT_HANDLES) list.length = RECENT_HANDLES;
   };
-  const isEntry = (e, catalog) => e && typeof e === "object" && isString(e.id, 40) && catalog.some((c) => c.id === e.itemId) && LOOT_TIERS.some((t) => t.tier === e.tier) && isString(e.donationId, 64) && Number.isFinite(e.at);
-  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, cloudHopper: { unlocked: 1, last: 0, players: [] }, block: { wins: 0, games: 0, best: 0 }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, machines: {}, tickets: 0, prizes: [] } });
+  const defaults = () => ({ handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, cloudHopper: { unlocked: 1, last: 0, players: [] }, block: { wins: 0, games: 0, best: 0, mined: 0, home: 0, splats: 0, splatted: 0, mvps: 0 }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, machines: {}, tickets: 0, prizes: [] } });
   // Ooga Arcade's carnival bests, each capped past the most its game can score (nine doubled 100s; the round games
   // run on), the retro cabinets' bests (`retro-games.js`, capped past any run), the ticket balance, and the prizes
   // (`ARCADE_PRIZES` ids) redeemed at the counter.
@@ -76,18 +54,14 @@
   // recently played first, at most CLOUD_PLAYERS of them.
   const CLOUD_LEVELS = 8, CLOUD_PLAYERS = 8, CLOUD_LOGIN = /^(?:github:[1-9][0-9]{0,15}|[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?)?$/i;
   const isTime = (v) => Number.isFinite(v) && v > 0 && v < 36e5;
-  const load = (catalog) => {
+  // A save from before the loot crates were removed carries an inventory and who wore what; neither is read, and the
+  // next save leaves them out.
+  const load = () => {
     const state = defaults();
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return state;
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed.inventory)) state.inventory = parsed.inventory.filter((e) => isEntry(e, catalog)).slice(0, INVENTORY_MAX);
-      if (parsed.assignments && typeof parsed.assignments === "object") {
-        for (const [name, entryId] of Object.entries(parsed.assignments)) {
-          if (isString(name, 40) && state.inventory.some((e) => e.id === entryId)) state.assignments[name] = entryId;
-        }
-      }
       if (isString(parsed.handle, HANDLE_MAX)) state.handle = parsed.handle;
       if (isString(parsed.message, MESSAGE_MAX)) state.message = parsed.message;
       for (const key of ["handFed", "totalSats", "donations", "lastTip"]) {
@@ -132,10 +106,14 @@
       if (d && Number.isFinite(d.score) && d.score >= 0 && d.score < 1e6 && Number.isFinite(d.rings) && d.rings >= 0 && Number.isFinite(d.ringTotal) && d.ringTotal >= d.rings && d.ringTotal <= 99 && LANDINGS.includes(d.landing)) {
         state.drop.best = { score: Math.floor(d.score), rings: Math.floor(d.rings), ringTotal: Math.floor(d.ringTotal), landing: d.landing };
       }
-      // Block Frenzy: rounds played and won, and the fastest win in milliseconds (0 until one is won).
+      // Block Frenzy: rounds played and won, the fastest win in milliseconds (0 until one is won), and the visitor's own
+      // running tally over every finished round: blocks mined, blocks brought home, splats landed, times splatted and
+      // rounds as the most valuable Ooga. A save from before the tally keeps its rounds and best and starts the rest at 0;
+      // a count that isn't a sane number starts at 0 by itself.
       const b = parsed.block;
       if (b && Number.isFinite(b.games) && b.games >= 0 && b.games < 1e7 && Number.isFinite(b.wins) && b.wins >= 0 && b.wins <= b.games && Number.isFinite(b.best) && b.best >= 0 && b.best < 864e5) {
-        state.block = { wins: Math.floor(b.wins), games: Math.floor(b.games), best: Math.floor(b.best) };
+        const count = (v) => Number.isFinite(v) && v >= 0 && v < 1e9 ? Math.floor(v) : 0;
+        state.block = { wins: Math.floor(b.wins), games: Math.floor(b.games), best: Math.floor(b.best), mined: count(b.mined), home: count(b.home), splats: count(b.splats), splatted: count(b.splatted), mvps: Math.min(count(b.mvps), Math.floor(b.games)) };
       }
       const o = parsed.orbit;
       if (o && o.best && Number.isFinite(o.best.score) && o.best.score >= 0 && o.best.score < 1e6 && typeof o.best.orbit === "boolean" && ORBIT_LANDINGS.includes(o.best.landing)) {
@@ -182,40 +160,8 @@
       // Storage may be unavailable; keep going in memory.
     }
   };
-  const create = ({ catalog }) => {
-    const state = load(catalog);
-    let seq = state.inventory.length;
-    const countOf = (itemId) => state.inventory.reduce((n, e) => n + (e.itemId === itemId), 0);
-    // Full stacks never roll: a crate only carries an item the locker still has room for.
-    const lootForVisitor = (donation) => lootFor(donation, catalog.filter((item) => countOf(item.id) < STACK_MAX));
-    const addItem = ({ item, tier, donationId }) => {
-      if (countOf(item.id) >= STACK_MAX) return null;
-      const entry = { id: `${donationId}/${seq++}`, itemId: item.id, tier, donationId, at: Date.now() };
-      state.inventory.push(entry);
-      if (state.inventory.length > INVENTORY_MAX) {
-        const dropped = state.inventory.shift();
-        for (const [name, id] of Object.entries(state.assignments)) if (id === dropped.id) delete state.assignments[name];
-      }
-      save(state);
-      return entry;
-    };
-    const assign = (entryId, name) => {
-      if (!state.inventory.some((e) => e.id === entryId)) return false;
-      // One item per caveman, so drop the previous wearer.
-      for (const [other, id] of Object.entries(state.assignments)) if (id === entryId) delete state.assignments[other];
-      state.assignments[name] = entryId;
-      save(state);
-      return true;
-    };
-    const unassign = (name) => {
-      delete state.assignments[name];
-      save(state);
-    };
-    const itemOf = (entryId) => {
-      const entry = state.inventory.find((e) => e.id === entryId);
-      return entry ? catalog.find((c) => c.id === entry.itemId) : null;
-    };
-    const assignedTo = (entryId) => Object.keys(state.assignments).find((name) => state.assignments[name] === entryId) || null;
+  const create = () => {
+    const state = load();
     // A donation, wherever it lands: the totals, and the donations board's tally of bananas made, the last tip and
     // its day's sats and bananas. `counted` is the API's exact count in real mode; without it the game's own.
     // A day already rolled out of the tally (a late replay) counts in the totals only.
@@ -272,11 +218,6 @@
         // Storage unavailable, but the reload still resets.
       }
     };
-    const clearLoot = () => {
-      state.inventory.length = 0;
-      for (const name of Object.keys(state.assignments)) delete state.assignments[name];
-      save(state);
-    };
     // A track's best keeps its best medal too: the medal is earned by place as well as time, so it is
     // not something the times alone can say.
     const recordRace = (track, lap, race, medal = null) => {
@@ -314,10 +255,13 @@
       save(state);
       return true;
     };
-    // A finished Block Frenzy round: every one counts, a win counts as a win, and the fastest win is the best.
-    const recordBlock = ({ won, ms }) => {
-      const b = state.block;
+    // A finished Block Frenzy round: every one counts, a win counts as a win, the fastest win is the best, and the
+    // visitor's own counts in it join their running tally. This browser's only: nothing is sent anywhere.
+    const recordBlock = ({ won, ms, mined = 0, home = 0, splats = 0, splatted = 0, mvp = false }) => {
+      const b = state.block, add = (v) => Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
       b.games++;
+      b.mined += add(mined); b.home += add(home); b.splats += add(splats); b.splatted += add(splatted);
+      if (mvp) b.mvps++;
       const best = won && ms > 0 && (b.best === 0 || ms < b.best);
       if (won) b.wins++;
       if (best) b.best = Math.floor(ms);
@@ -440,7 +384,7 @@
       if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
       return `${(seconds / 3600).toFixed(1)}h`;
     };
-    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordBlock, recordMine, recordCloudHopper, playCloudHopper, cloudHopperBest, cloudHopperPlayer, recordArcade, arcadeBest, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
+    return { state, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordBlock, recordMine, recordCloudHopper, playCloudHopper, cloudHopperBest, cloudHopperPlayer, recordArcade, arcadeBest, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
   };
-  BL.game = { create, ARCADE_KINDS: Object.keys(ARCADE_MAX), LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, tierFor, lootFor, bananasFor, formatLarge, formatThree, formatFeeRate };
+  BL.game = { create, ARCADE_KINDS: Object.keys(ARCADE_MAX), SATS_PER_BANANA, bananasFor, formatLarge, formatThree, formatFeeRate };
 })();

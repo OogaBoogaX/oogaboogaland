@@ -1,4 +1,4 @@
-// Procedural geometry: the lab room (`labRoom`), cavemen (`caveman`), props, crates, the `SWAG` catalog, and
+// Procedural geometry: the lab room (`labRoom`), cavemen (`caveman`), props, and
 // the shared builders (`box`, `bevelBox`, `lathe`, `tube`, `ring`, `polyline`, `merge`, `makeVox`, `voxCoords`,
 // `voxelGeometry`, `cached`).
 //
@@ -810,9 +810,9 @@
     return v;
   };
   const CLUB_PALETTE = [hexToRgb("#5c4425"), hexToRgb("#3f2e18")];
+  // Kept for a character file that still paints its own gold variant from it; nothing in the game draws gold now.
   const GOLD_CLUB_PALETTE = [hexToRgb("#e0b53a"), hexToRgb("#c99a2e")];
   const GUN_PALETTE = { body: "#3a3a3a", stock: "#5c4425", barrel: "#2b2b2b", emissive: 0 };
-  const GOLD_GUN_PALETTE = { body: "#e0b53a", stock: "#5c4425", barrel: "#f0c95a", emissive: 0.25 };
   const appendMagazineShell = (pieces, h, pal) => {
     // Thin curved shell, with broad side cheeks framing a narrow window. The
     // large banana marks overlap inside it; the casing hides their cropped tips.
@@ -958,6 +958,10 @@
   // Resting club angles: x tilts the head forward, z rolls it; carry is the working hang.
   const CLUB_REST = { x: 0.95, z: 0 };
   // ---- The refined body ----------------------------------------------------------------------------------------------
+  // The modelled look (hero-body.js) is every Ooga's: "R", always. The voxel bodies it replaced can no longer be
+  // shown: the switch that built them to compare the two is retired. Character files read this for what they build
+  // under the modelled look.
+  const STYLE = "R";
   // Every Ooga is authored on the sixteenths grid of `buildCaveman` (a character file's `u`) and drawn at FINE times that
   // detail. Once every hook has run, each authored part is drawn again on the fine grid: the head is the same head with
   // every cell split FINE ways each way, rounded behind its face, whose cells all stay, so no face changes; the torso
@@ -1257,13 +1261,13 @@
   //   torso(k, v)  before the belly holes       club(k)      the left-hand item
   //   gear(k)      arm and body attachments      skull(k, v)  replaces the head block
   //   crown(k, v)  hats and hair over the head    eyes(k, v)   replaces the eyes
-  //   mark(k, v)   face paint after the pupils    hatY(k)      where swag hats sit
+  //   mark(k, v)   face paint after the pupils
   //   headgear(k)  nodes on the head              extras(k)    nodes on the root, last
   //   tint(k, palette)  a second colourway: return an alternate palette and every
   //                     voxel part is baked again under it, paired in `tint`
   //   refine(k, part, v, side)  paints a part's fine map before it bakes (see FINE)
   // `look` flags read here: slim, bald, cleanShaven, wideEyes, hairless, noBrow, noPupils,
-  // face ("nose" | "smirk" | "beard" | "none"), eyeColor, eyeGlow, hatY.
+  // face ("nose" | "smirk" | "beard" | "none"), eyeColor, eyeGlow.
   // A character file may keep the slot numbers its first build was given; every later build registers that
   // character's colours in the same order first, so after a released cache rebuilds the model those numbers
   // still name the same colours. The base palette ahead of them comes from the same traits every time.
@@ -1422,7 +1426,7 @@
     };
     parts.armR = arm(-1);
     parts.armL = arm(1);
-    // club(k) returns { voxels, palette, goldPalette } for a voxel item, or { default, gold }
+    // club(k) returns { voxels, palette } for a voxel item, or { default }
     // geometry, plus optional rest and carry angles ({ x, y, z } in the rotation's YXZ order, y 0
     // when left out: a quarter turn in y with the tilt in z turns a blade about its haft).
     const club = dress.club ? dress.club(k) : {};
@@ -1430,9 +1434,11 @@
     const clubOrigin = { x: -1 * u, y: -1 * u, z: -1 * u };
     const clubRest = club.rest || CLUB_REST, clubCarry = club.carry || clubRest;
     const skins = {
-      club: club.default ? { default: club.default, gold: club.gold }
-        : { default: voxelGeometry(clubV, { unit: u, palette: club.palette || CLUB_PALETTE, origin: clubOrigin }), gold: voxelGeometry(clubV, { unit: u, palette: club.goldPalette || GOLD_CLUB_PALETTE, origin: clubOrigin }) },
-      gun: { default: gunGeometry(h, GUN_PALETTE), gold: gunGeometry(h, GOLD_GUN_PALETTE) }
+      // The modelled look's default club is turned from wood (heroBody.club) in place of the block one.
+      club: club.default ? { default: club.default }
+        : STYLE === "R" && !club.voxels ? { default: BL.heroBody.club(u, club.palette || CLUB_PALETTE, !!traits.slim) }
+        : { default: voxelGeometry(clubV, { unit: u, palette: club.palette || CLUB_PALETTE, origin: clubOrigin }) },
+      gun: { default: gunGeometry(h, GUN_PALETTE) }
     };
     parts.club = createNode({
       position: { x: 0, y: -0.62 * h, z: 0.08 * h },
@@ -1555,11 +1561,8 @@
     for (const [x, y] of eyeCells) closedVox.set(x, y, 5, k.lid !== null ? k.lid : y === 2 ? P.skinDk : P.skin);
     let headClosed = vg(closedVox, headOrigin, k.headEmissive);
     parts.head = createNode({ position: { x: 0, y: 0.5 * h, z: 0.02 * h }, geometry: headOpen });
-    const hatY = dress.hatY ? dress.hatY(k) : (traits.hatY || (traits.bald ? 6 : 9)) * u;
-    parts.hat = createNode({ position: { x: 0, y: hatY, z: 0 }, scale: { x: h, y: h, z: h }, visible: false });
-    parts.hat.portraitHidden = true;
     parts.face = createNode({ position: { x: 0, y: 0, z: 0 }, scale: { x: h, y: h, z: h }, visible: false });
-    addChild(parts.head, parts.hat, parts.face);
+    addChild(parts.head, parts.face);
     if (dress.headgear) dress.headgear(k);
     addChild(root, parts.legR, parts.legL, parts.torso, parts.armR, parts.armL, parts.head);
     if (dress.extras) dress.extras(k);
@@ -1568,11 +1571,21 @@
     // head's three faces), "torso", "arm", "fingers" and "leg" (with its side), in fine cells of the part's own frame,
     // `k.fine` of them to an authored unit.
     const weaves = new Map(), refinedSources = new Set();
+    // What a modelled body hands the crew: that it is one, its elbow, how far behind its middle its back is, the
+    // scale its arms are drawn at, and its fist.
+    let modelled = false, elbow = null, back = 0, armScale = 1, fist = null;
     // The face button's head, built the first time something shows it (only a face icon does).
     let facePending = null;
+    // A modelled body dressed from its authored blocks, and how to dress it again from another palette (see tint).
+    let worn = null, rewear = null, wearing = null;
     {
       const F = FINE, fineU = u / F, bakeOf = new Map(), done = new Map();
       for (const bake of bakes) bakeOf.set(bake.geo, bake);
+      // What each body part was authored as, before anything is refined: a modelled body wears these blocks
+      // (heroBody.wear). A part a character gave a mesh of its own has none.
+      const blocksOf = (node) => bakeOf.get(node.geometry)?.v || null;
+      const authored = { torso: blocksOf(parts.torso), armR: blocksOf(parts.armR), armL: blocksOf(parts.armL), legR: blocksOf(parts.legR), legL: blocksOf(parts.legL),
+        lit: bakeOf.get(parts.torso.geometry)?.emissive };
       const fineBake = (v, origin, emissive) => {
         v.trim();
         const geo = voxelGeometry(v, { unit: fineU, palette, origin, emissive, rects: true });
@@ -1958,12 +1971,107 @@
       parts.armR.position.y += rise;
       parts.armL.position.y += rise;
       const previousHead = headOpen;
+      // The modelled look: a body modelled from scratch (see hero-body.js) stands in for the refined one: a
+      // character's own (`dress.model`), or the regular or slim build wearing what its authored blocks wore. Its head
+      // stays its authored blocks unless it models its own.
+      if (STYLE === "R" && !dress.model) rewear = (colours) => BL.heroBody.wear(k, { ...authored, palette: colours, P, loin: k.loin, strap: !traits.slim });
+      if (STYLE === "R" && dress.model) wearing = () => BL.heroBody.wear(k, { ...authored, palette, P, loin: k.loin, strap: !traits.slim });
+      const model = STYLE !== "R" ? null : dress.model ? dress.model(k, wearing) : worn = rewear(palette);
+      // One that draws no head of its own gets the modelled body's head too.
+      if (model && !model.headOpen && !(dress.skull || dress.crown || dress.eyes || dress.mark || dress.refine)) Object.assign(model, BL.heroBody.head(k, { palette, P }));
+      if (model) {
+        parts.torso.geometry = model.torso;
+        parts.torso.scale.x = parts.torso.scale.z = 1;
+        for (const [key, side] of [["armR", -1], ["armL", 1]]) {
+          parts[key].geometry = side < 0 ? model.arm : model.armL || model.arm;
+          parts[key].position.x = side * model.armX;
+          parts[key].position.y -= model.armDrop || 0;
+          // A shorter arm is the rig's arm scaled, with everything on it; what it holds is scaled back to size.
+          parts[key].scale.x = parts[key].scale.y = parts[key].scale.z = model.armScale;
+        }
+        // Its hands are whole hands on the rig's finger nodes, which turn them in toward the body at rest. Each hangs
+        // from a forearm of its own, jointed to the upper arm at the elbow (`elbow`: where, the forearm's length to the
+        // hand, and its lean at rest), so the hand point stays where the rig has it while the arm bends.
+        parts.fingersR.geometry = model.handR;
+        parts.fingersL.geometry = model.handL;
+        for (const [key, side] of [["armR", -1], ["armL", 1]]) {
+          const fingers = parts[side < 0 ? "fingersR" : "fingersL"];
+          // The left hand is empty at rest, and hangs by the body's relaxed bend where it has one.
+          const bend = side > 0 && model.elbow.relaxed !== undefined ? model.elbow.relaxed : model.elbow.rest;
+          const fore = createNode({ position: { x: 0, y: model.elbow.y, z: model.elbow.z }, rotation: { x: -bend, y: 0, z: 0 }, geometry: side < 0 ? model.forearm : model.forearmL || model.forearm });
+          parts[side < 0 ? "forearmR" : "forearmL"] = fore;
+          addChild(parts[key], fore);
+          BL.scene.removeChild(parts[key], fingers);
+          addChild(fore, fingers);
+          fingers.position.x = fingers.position.z = 0;
+          fingers.position.y = -model.elbow.length;
+          // What a character hung on the arm to be worn on the forearm (`forearm`: how far down it, 0 at the elbow to
+          // 1 at the wrist) rides the forearm from there: its own position is an offset in the forearm's frame.
+          // What it hung there to be held in the hand (`hand`) rides the hand, placed in the hand's own frame.
+          for (const worn of parts[key].children.slice()) {
+            if (worn.forearm === undefined && !worn.hand) continue;
+            BL.scene.removeChild(parts[key], worn);
+            addChild(worn.hand ? fingers : fore, worn);
+            if (!worn.hand) worn.position.y -= worn.forearm * model.elbow.length;
+          }
+        }
+        // What a character stood on the front or the back of the authored trunk (three units out from its middle)
+        // stands on the modelled trunk's own front or back at that height, so it lies on the surface.
+        {
+          const surface = BL.heroBody.trunk(!!traits.slim);
+          for (const laid of parts.torso.children) {
+            const y = laid.position.y / u, z = laid.position.z / u;
+            if (Math.abs(z) >= 2.5 && !laid.surface) laid.position.z = (z > 0 ? surface.front(y) + z - 3 : surface.back(y) + z + 3) * u;
+          }
+        }
+        // At rest the right forearm comes up square to the club in its hand, which is gripped at the hand point. A
+        // forearm that already leans further than that at rest stays there, and the club leans less to stay
+        // square to it, so its butt does not come out of the side of the fist.
+        {
+          // A rest already turned a quarter about the haft (its `y`) carries its lean as z.
+          const lean = clubRest.y ? clubRest.z : clubRest.x, flex = Math.max(model.elbow.rest, Math.min(1.5, Math.PI / 2 - lean));
+          parts.forearmR.rotation.x = -flex;
+          parts.club.rotation.x = Math.min(lean, Math.PI / 2 - flex);
+          // An axe, or any stick held as one, is turned a quarter about its haft: its head ahead, never across.
+          if (traits.stoneAxe || clubRest.y) { parts.club.rotation.z = parts.club.rotation.x; parts.club.rotation.x = 0; parts.club.rotation.y = Math.PI / 2; }
+          parts.club.position.x = 0;
+          parts.club.position.y = model.elbow.y - model.elbow.length * Math.cos(flex);
+          parts.club.position.z = model.elbow.z + model.elbow.length * Math.sin(flex);
+        }
+        elbow = model.elbow;
+        back = model.back;
+        armScale = model.armScale;
+        fist = model.fist;
+        parts.club.scale.x = parts.club.scale.y = parts.club.scale.z = 1 / armScale;
+        modelled = true;
+        for (const key of ["legR", "legL"]) {
+          parts[key].geometry = key === "legL" && model.legL || model.leg;
+          // What a character hung on a leg goes down the longer leg with it.
+          for (const child of parts[key].children) if (child.geometry) child.geometry = stretch(child.geometry, child.position.y);
+        }
+        if (model.legX) { parts.legR.position.x = -model.legX; parts.legL.position.x = model.legX; }
+        if (model.headOpen) {
+          headOpen = model.headOpen; headClosed = model.headClosed || model.headOpen; portraitHead = model.portrait || model.headOpen; parts.head.geometry = headOpen;
+          const face = portraitHead;
+          facePending = () => face;
+        }
+      }
+      if (model && !model.headOpen) {
+        // A modelled body that keeps its character's block head keeps it as it was authored, in blocks a unit across
+        // (as w-s-bitcoin's apple is), not in the refined body's fine cells. Its face button is the authored one too,
+        // whose bake the second colourway's twin is made from.
+        const face = portraitHead, bake = bakeOf.get(face);
+        facePending = () => { if (bake) bakes.push(bake); return face; };
+      }
+      if (!model) {
       headOpen = head(headOpen, "head");
       headClosed = head(headClosed, "closed");
       const authoredPortrait = portraitHead;
       if (bakeOf.has(authoredPortrait)) refinedSources.add(authoredPortrait);
       facePending = () => portrait(authoredPortrait);
       parts.head.geometry = parts.head.geometry === previousHead ? headOpen : head(parts.head.geometry, "head");
+      }
+      if (!model) {
       parts.torso.geometry = torso(parts.torso.geometry);
       for (const key of ["armR", "armL"]) parts[key].geometry = arm(parts[key].geometry);
       for (const key of ["fingersR", "fingersL"]) parts[key].geometry = fingers(parts[key].geometry);
@@ -1971,6 +2079,7 @@
         const node = parts[key], geo = node.geometry;
         node.geometry = bakeOf.has(geo) ? leg(geo, side) : stretch(geo);
         for (const child of node.children) if (child.geometry) child.geometry = stretch(child.geometry, child.position.y);
+      }
       }
       // The rounded heads are not kept: the face button, when it comes, rounds its own again.
       roundedHeads.clear();
@@ -2010,6 +2119,14 @@
         if (!live.has(bake.geo) || tint.has(bake.geo)) continue;
         const twin = voxelGeometry(bake.v, { unit: bake.unit, palette: alt, origin: bake.origin, emissive: bake.emissive, rects: bake.rects });
         tint.set(bake.geo, twin).set(twin, bake.geo);
+      }
+      // A modelled body is no bake: it is dressed again from the second palette, and its parts paired one for one.
+      if (worn) {
+        const again = rewear(alt);
+        for (const key of ["torso", "arm", "armL", "forearm", "forearmL", "leg", "legL", "handR", "handL"]) {
+          const a = worn[key], b = again[key];
+          if (a && b && live.has(a) && !tint.has(a)) tint.set(a, b).set(b, a);
+        }
       }
     }
     // A reflection keeps characters whatever their size: the renderer's reduced capture otherwise drops small parts.
@@ -2057,7 +2174,7 @@
       }
       return face;
     };
-    return { root, parts, traits, headOffset: 1.1 * h + legH + TORSO_RISE * u - 5 * u, headOpen, headClosed, get portraitHead() { return faceHead(); }, skins, clubRest, clubCarry, tint, gunHeadBounds: BL.scene.boundsOf(headOpen) };
+    return { root, parts, traits, modelled, elbow, back, armScale, fist, headOffset: 1.1 * h + legH + TORSO_RISE * u - 5 * u, headOpen, headClosed, get portraitHead() { return faceHead(); }, skins, clubRest, clubCarry, tint, gunHeadBounds: BL.scene.boundsOf(headOpen) };
   };
   // Traits hash from the handle, so one handle always builds the same voxels.
   // Callers get fresh nodes over shared geometry: one build per contributor, GPU records survive a scene swap.
@@ -2085,7 +2202,7 @@
     const skins = { club: { ...template.skins.club }, gun: { ...template.skins.gun } };
     // The face button's head is the template's, built when first read; a clone swapping colourways may set its own.
     let face;
-    return { root, parts, traits, headOffset: template.headOffset, headOpen: template.headOpen, headClosed: template.headClosed,
+    return { root, parts, traits, modelled: template.modelled, elbow: template.elbow, back: template.back, armScale: template.armScale, fist: template.fist, headOffset: template.headOffset, headOpen: template.headOpen, headClosed: template.headClosed,
       get portraitHead() { return face === undefined ? template.portraitHead : face; }, set portraitHead(geometry) { face = geometry; },
       skins, clubRest: template.clubRest, clubCarry: template.clubCarry, tint: template.tint, gunHeadBounds: template.gunHeadBounds };
   };
@@ -2424,79 +2541,6 @@
       return geometry;
     })
   ];
-  const TIER_COLORS = { common: "#9aa0a6", rare: "#6f9fca", epic: "#b16fd6", legendary: "#d8892b" };
-  const crateCache = scopedMap();
-  const crate = (tier) => {
-    let geos = crateCache.get(tier);
-    if (!geos) {
-      const stripe = TIER_COLORS[tier] || TIER_COLORS.common;
-      geos = {
-        body: merge(
-          box({ w: 0.7, h: 0.5, d: 0.7, color: "#6b4a26", offset: { y: 0.25 } }),
-          box({ w: 0.74, h: 0.08, d: 0.74, color: "#4c3a20", offset: { y: 0.06 } }),
-          box({ w: 0.74, h: 0.1, d: 0.16, color: stripe, emissive: 0.6, offset: { y: 0.3 } }),
-          box({ w: 0.16, h: 0.1, d: 0.74, color: stripe, emissive: 0.6, offset: { y: 0.3 } })
-        ),
-        lid: merge(box({ w: 0.76, h: 0.1, d: 0.76, color: "#7a5630", offset: { x: 0.38, y: 0.05 } }), box({ w: 0.2, h: 0.06, d: 0.2, color: stripe, emissive: 0.8, offset: { x: 0.38, y: 0.12 } }))
-      };
-      crateCache.set(tier, geos);
-    }
-    const node = createNode();
-    const lid = createNode({ position: { x: -0.38, y: 0.5, z: 0 }, geometry: geos.lid });
-    addChild(node, createNode({ geometry: geos.body }), lid);
-    return { node, lid };
-  };
-  const swagCache = scopedMap();
-  const swagGeo = (id, build) => {
-    let geo = swagCache.get(id);
-    if (!geo) {
-      geo = characterGeometry(build());
-      swagCache.set(id, geo);
-    }
-    return geo;
-  };
-  // Head anchor and swag sizes are fractions of caveman height.
-  const SWAG = [
-    { id: "party-hat", name: "Party Hat", tier: "common", slot: "head", offset: { y: -0.03 }, build: () => lathe({ profile: [[0.36, 0], [0.26, 0.2], [0.14, 0.42], [0.0, 0.62]], segments: 8, color: (t) => t < 0.34 ? "#d8892b" : t < 0.67 ? "#f3efe4" : "#22c55e" }) },
-    { id: "bandana", name: "Bandana", tier: "common", slot: "head", offset: { y: -0.16 }, build: () => merge(ring({ r: 0.4, thickness: 0.045, segments: 10, color: "#c8342a" }), box({ w: 0.1, h: 0.04, d: 0.26, color: "#c8342a", offset: { x: 0.06, y: -0.03, z: -0.5 } }), box({ w: 0.1, h: 0.04, d: 0.2, color: "#a82a22", offset: { x: -0.08, y: -0.05, z: -0.46 } })) },
-    {
-      id: "banana-peel", name: "Banana Peel Hat", tier: "common", slot: "head", offset: { y: -0.06 }, build: () => merge(
-        lathe({ profile: [[0.23, 0], [0.22, 0.08], [0.16, 0.16], [0.07, 0.22], [0, 0.24]], segments: 8, color: "#f5c542" }),
-        box({ w: 0.05, h: 0.09, d: 0.05, color: "#5a3a1a", offset: { y: 0.27 } }),
-        ...[0, 1, 2, 3].map((i) => {
-          const a = i / 4 * Math.PI * 2 + Math.PI / 4;
-          return tube({
-            rings: 6,
-            segments: 5,
-            path: (t) => ({ x: Math.cos(a) * (0.08 + t * 0.34), y: 0.14 - t * t * 0.42, z: Math.sin(a) * (0.08 + t * 0.34) }),
-            radius: (t) => 0.065 - t * 0.02,
-            colorFn: (t) => t > 0.8 ? "#5a3a1a" : t > 0.55 ? "#e0b53a" : "#f5c542"
-          });
-        })
-      )
-    },
-    { id: "miner-helmet", name: "Miner Helmet", tier: "rare", slot: "head", offset: { y: -0.12 }, build: () => merge(lathe({ profile: [[0.42, 0], [0.41, 0.12], [0.32, 0.26], [0.14, 0.36], [0, 0.38]], segments: 10, color: "#e0b53a" }), box({ w: 0.14, h: 0.12, d: 0.1, color: "#fff2b0", emissive: 1, offset: { y: 0.18, z: 0.4 } })) },
-    { id: "tinfoil-hat", name: "Tinfoil Hat", tier: "rare", slot: "head", offset: { y: -0.04 }, build: () => lathe({ profile: [[0.38, 0], [0.27, 0.2], [0.14, 0.38], [0.02, 0.56]], segments: 5, color: "#c9ccd2" }) },
-    { id: "golden-club", name: "Golden Club", tier: "rare", slot: "hand", skin: "club", build: () => voxelGeometry(clubVoxels(BL.math.mulberry32(7)), { unit: 1 / 16, palette: GOLD_CLUB_PALETTE, origin: { x: -1 / 16, y: -1 / 16, z: -1 / 16 } }) },
-    { id: "crown", name: "Crown", tier: "epic", slot: "head", offset: { y: -0.06 }, build: () => merge(ring({ r: 0.38, thickness: 0.05, y: 0.05, segments: 8, color: "#f0c95a", emissive: 0.3 }), ...[0, 1, 2, 3, 4, 5, 6, 7].map((i) => box({ w: 0.07, h: 0.18, d: 0.07, color: "#f0c95a", emissive: 0.3, offset: { x: Math.cos(i / 8 * Math.PI * 2) * 0.38, y: 0.19, z: Math.sin(i / 8 * Math.PI * 2) * 0.38 } }))) },
-    { id: "golden-ak", name: "Golden AK", tier: "epic", slot: "gun", skin: "gun", build: () => gunGeometry(1, GOLD_GUN_PALETTE) },
-    { id: "propeller-beanie", name: "Propeller Beanie", tier: "epic", slot: "head", spin: true, offset: { y: -0.1 }, build: () => merge(lathe({ profile: [[0.4, 0], [0.37, 0.14], [0.22, 0.28], [0, 0.32]], segments: 8, color: (t) => t < 0.5 ? "#6f9fca" : "#c8342a" }), box({ w: 0.03, h: 0.1, d: 0.03, color: "#c9ccd2", offset: { y: 0.36 } })) },
-    { id: "halo", name: "Halo", tier: "legendary", slot: "head", float: true, offset: { y: 0.3 }, build: () => ring({ r: 0.26, thickness: 0.03, segments: 14, color: "#fff2b0", emissive: 1 }) },
-    { id: "laser-eyes", name: "Laser Eyes", tier: "legendary", slot: "face", build: () => merge(...[-0.125, 0.125].map((x) => polyline({ points: [{ x, y: 0.16, z: 0.19 }, { x, y: 0.16, z: 1.0 }], color: "#ff2d20", emissive: 1 }))) }
-  ];
-  for (const item of SWAG) {
-    if (item.slot === "head" && item.spin) {
-      item.buildNode = () => {
-        const node = createNode({ geometry: swagGeo(item.id, item.build) });
-        const prop = createNode({ position: { x: 0, y: 0.42, z: 0 }, geometry: swagGeo(`${item.id}/prop`, () => box({ w: 0.44, h: 0.02, d: 0.06, color: "#f3efe4" })) });
-        prop.spin = true;
-        addChild(node, prop);
-        return node;
-      };
-    } else {
-      item.buildNode = () => createNode({ geometry: swagGeo(item.id, item.build) });
-    }
-  }
   // ---- the interior kit ---------------------------------------------------------------------------------
   // Timber structure, turned parts, chains and lanterns shared by the cave interiors (the Lightning Factory, Ooga
   // Arcade), in the warm timber and black iron those caves are built of.
@@ -2815,5 +2859,5 @@
     for (const geo of set) if (geo.foliageLods?.owner === geo) { set.add(geo.foliageLods.medium); set.add(geo.foliageLods.far); }
     return set;
   };
-  BL.models = { GUN_BANANA_SCALE, BODY, characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
+  BL.models = { STYLE, GUN_BANANA_SCALE, BODY, characterGeometry, foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, deckRailSpans, stairParts, stairTreads, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, cachedSteps, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, die, dieRotationFor };
 })();
