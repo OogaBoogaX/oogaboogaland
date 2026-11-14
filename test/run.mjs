@@ -32720,7 +32720,84 @@ const oogaChatChecks = async () => {
     };
     record("Ooga Chat build: one hashed same-origin script and stylesheet holding only the app's and the shared modules, no fixture code unless asked, its pictures renamed by hash, its policy in _headers, and never staged over the island's folders or a folder it did not make",
       Object.values(build).every(Boolean), JSON.stringify(build));
+
+    // The installable app: a manifest the production entry alone links, the native cloud at each icon size (the
+    // maskable one inside the safe circle), and a worker that keeps only this build's public files.
+    const { decode } = await import(pathToFileURL(join(root, "scripts/distribution-icons.mjs")).href);
+    const appManifest = JSON.parse(readFileSync(join(staged, "manifest.webmanifest"), "utf8")), shellPage = readFileSync(join(staged, "index.html"), "utf8");
+    const iconOk = (icon) => {
+      const [w, h] = icon.sizes.split("x").map(Number), { w: pw, h: ph, px } = decode(readFileSync(join(staged, icon.src.slice(1))));
+      let x0 = pw, x1 = -1, y0 = ph, y1 = -1;
+      for (let y = 0; y < ph; y++) for (let x = 0; x < pw; x++) if (px[(y * pw + x) * 4] > 200) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+      const corners = [[x0, y0], [x1, y0], [x0, y1], [x1, y1]].map(([x, y]) => Math.hypot(x - pw / 2, y - ph / 2));
+      return pw === w && ph === h && x1 > x0 && (icon.purpose !== "maskable" || Math.max(...corners) <= pw * 0.4);
+    };
+    const swSource = readFileSync(join(staged, "sw.js"), "utf8"), shellList = JSON.parse(swSource.match(/const SHELL = (\[.*\]);/)[1]);
+    const installable = {
+      manifest: appManifest.name === "Ooga Chat" && appManifest.id === "/" && appManifest.start_url === "/" && appManifest.scope === "/" && appManifest.display === "standalone"
+        && appManifest.icons.length === 3 && appManifest.icons.some((icon) => icon.purpose === "maskable") && appManifest.icons.every(iconOk),
+      linked: shellPage.includes('<link rel="manifest" href="/manifest.webmanifest">') && /<link rel="apple-touch-icon" sizes="180x180" href="\/icons\/ooga-chat-180-[0-9a-f]{16}\.png">/.test(shellPage)
+        && !readFileSync(join(staged, "fixture.html"), "utf8").includes('rel="manifest"'),
+      shell: swSource.includes(`const VERSION = "${withFixtures.build}";`) && shellList[0] === "/" && shellList.slice(1).every((path) => /^\/(js|css|art|icons)\/[\w.-]+-[0-9a-f]{16}\.[a-z]+$/.test(path))
+        && !shellList.some((path) => /fixture|api|auth|manifest|404/.test(path)) && shellList.length === withFixtures.files.filter((file) => /^(js|css|art|icons)\//.test(file.path) && !file.path.includes("fixture")).length + 1,
+      headers: B.headersFor(headers, "/sw.js")["Cache-Control"] === "no-cache" && B.POLICY.includes("manifest-src 'self'") && B.POLICY.includes("worker-src 'self'")
+        && B.headersFor(readFileSync(join(staged, "_headers"), "utf8"), "/manifest.webmanifest")["Content-Type"] === "application/manifest+json"
+    };
+    record("Ooga Chat install: the manifest names the standalone app at /, its icons are the native cloud at their sizes with the maskable one inside the safe circle, only the production entry links it, and the worker's shell is this build's hashed public files and the page",
+      Object.values(installable).every(Boolean), JSON.stringify(installable));
+
+    // The worker against stand-in caches and network: it keeps the shell, answers hashed files from the cache and the
+    // page from the network first, passes every API, sign-in, write and unknown request untouched, refuses a no-store
+    // shell, and taking over deletes only older Ooga Chat caches.
+    const worker = (net) => {
+      const on = {}, store = new Map(), log = { skipped: 0 };
+      const caches = { open: async (name) => { if (!store.has(name)) store.set(name, new Map()); const m = store.get(name); return { put: async (k, v) => { m.set(k, v); }, match: async (k) => m.get(k) }; },
+        keys: async () => [...store.keys()], delete: async (k) => store.delete(k) };
+      const self = { location: { origin: "https://ooga.chat" }, addEventListener: (type, fn) => { on[type] = fn; }, skipWaiting: () => { log.skipped++; }, clients: { claim: async () => {} } };
+      runInNewContext(swSource, { self, caches, URL, Response: { error: () => "network error" },
+        fetch: async (request) => { const answer = net.fn(typeof request === "string" ? request : new URL(request.url).pathname); if (answer instanceof Error) throw answer; return answer; } });
+      const event = async (type, data = {}) => { let wait; on[type]({ ...data, waitUntil: (p) => { wait = p; } }); return wait; };
+      const request = async (path, { method = "GET", mode = "cors" } = {}) => {
+        let answer;
+        on.fetch({ request: { url: `https://ooga.chat${path}`, method, mode }, respondWith: (p) => { answer = p; } });
+        return answer && await answer;
+      };
+      return { on, store, log, event, request };
+    };
+    const reply = (body, cc = "public, max-age=31536000, immutable") => ({ ok: true, status: 200, type: "basic", body, headers: { get: (k) => k === "cache-control" ? cc : null } });
+    const net = { fn: (path) => reply(path, path === "/" ? "no-cache" : undefined) };
+    const sw = worker(net), hashedJs = shellList.find((path) => path.startsWith("/js/"));
+    await sw.event("install");
+    const kept = shellList.every((path) => sw.store.get(`ooga-chat-${withFixtures.build}`).has(path));
+    sw.store.set("ooga-chat-0000000000000000", new Map());
+    sw.store.set("someone-else", new Map());
+    await sw.event("activate");
+    const passes = (await Promise.all([sw.request("/api/session"), sw.request("/auth/github", { mode: "navigate" }), sw.request("/api/logout", { method: "POST" }),
+      sw.request(hashedJs, { method: "POST" }), sw.request(`${hashedJs}?v=1`), sw.request("/fixture.html"), sw.request("/build.json"), sw.request("/manifest.webmanifest")])).every((answer) => answer === undefined);
+    net.fn = (path) => path === "/" ? reply("fresh page", "no-cache") : new Error("offline");
+    const online = (await sw.request("/", { mode: "navigate" }))?.body === "fresh page";
+    net.fn = () => new Error("offline");
+    const offline = (await sw.request("/", { mode: "navigate" }))?.body === "/" && (await sw.request(hashedJs))?.body === hashedJs;
+    sw.on.message({ data: { type: "other" } });
+    sw.on.message({ data: { type: "skip-waiting" } });
+    const strict = worker({ fn: (path) => reply(path, path === "/" ? "no-store" : undefined) });
+    let refused = false;
+    try { await strict.event("install"); } catch { refused = true; }
+    const lifecycle = { kept, passes, online, offline, refused,
+      cleaned: !sw.store.has("ooga-chat-0000000000000000") && sw.store.has("someone-else") && sw.store.has(`ooga-chat-${withFixtures.build}`), skipped: sw.log.skipped === 1 };
+    record("Ooga Chat worker: keeps the shell, answers hashed files from the cache and the page from the network first with the cache only offline, passes API, sign-in, writes and anything unlisted untouched, refuses a no-store shell, waits for the page to take over, and deletes only older Ooga Chat caches",
+      Object.values(lifecycle).every(Boolean), JSON.stringify(lifecycle));
   } finally { rmSync(out, { recursive: true, force: true }); }
+
+  // M mutes only a plain press outside a field, composition, modifier or repeat.
+  const D = load(["src/ooga-chat/ooga-chat-device.js"], { window: {} }).oogaChatDevice;
+  const key = (extra = {}) => ({ key: "m", target: { tagName: "BUTTON", closest: () => null }, ...extra });
+  const keys = { plain: D.isMuteKey(key()) && D.isMuteKey(key({ key: "M" })) && D.isMuteKey(key({ target: null })),
+    refused: [{ repeat: true }, { isComposing: true }, { keyCode: 229 }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { key: "n" },
+      { target: { tagName: "INPUT" } }, { target: { tagName: "TEXTAREA" } }, { target: { tagName: "DIV", isContentEditable: true } },
+      { target: { tagName: "SPAN", closest: () => ({}) } }].every((extra) => !D.isMuteKey(key(extra))) };
+  record("Ooga Chat M key: a plain M mutes, never while typing in a field or editable text, composing, holding a modifier or repeating",
+    Object.values(keys).every(Boolean), JSON.stringify(keys));
 
   // Ooga Chat's zone marks are the island's own: DSB Land's paths as the island draws them, Main Island's mark the
   // island's 64px favicon keyed as hud.js keys it for its destination button.

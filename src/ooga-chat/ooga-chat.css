@@ -318,6 +318,9 @@ img.oc-zone-icon { width: 24px; image-rendering: pixelated; }
 .oc-panel { padding: 0; overflow: visible; }
 .oc-pending p { margin: 0; color: rgba(243, 239, 228, 0.7); }
 
+.oc-device { display: grid; gap: 6px; margin: 12px 4px 0; color: rgba(243, 239, 228, 0.78); font-size: 12px; }
+.oc-device-line { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0; }
+
 .oc-error {
   margin: 12px 0 0;
   padding: 8px 12px;

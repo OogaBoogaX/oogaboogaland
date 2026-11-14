@@ -6,7 +6,8 @@ as its own entry, build and output, and shares the island's native look and comp
 
 This document covers the foundation (#651): the entry, the build, the shell, the configuration contract and the
 fixture entry; sign-in (#652): the session contract, the sign-in return and the account lifecycle; and the space
-(#653): the zones, the audience contract, the roster's order and the footer's controls. The roster and controls (#653), voice (#654), reactions (#655), the shared panels and
+(#653): the zones, the audience contract, the roster's order and the footer's controls; and the installable app
+(#657): the manifest, the service worker's cache contract, offline and update behaviour, and the release runbook. The roster and controls (#653), voice (#654), reactions (#655), the shared panels and
 Feed the Oogas (#656) and the installable app (#657) build on it. Nothing here deploys anything: Cloudflare resources,
 the domain, bindings and secrets belong to #662 and its owner.
 
@@ -33,6 +34,8 @@ is unchanged and never stages the app.
 | `src/ooga-chat/ooga-chat-config.js` | `BL.oogaChatConfig`: the bootstrap and session contracts and their parsers, the sign-in return, zones, storage keys and their sweep, the build identity |
 | `src/ooga-chat/ooga-chat-auth.js` | `BL.oogaChatAuth`: the account lifecycle (`create`) and what an account may do (`gates`) |
 | `src/ooga-chat/ooga-chat-roster.js` | `BL.oogaChatRoster`: one zone's audience from snapshots and deltas, and the space's order |
+| `src/ooga-chat/ooga-chat-device.js` | `BL.oogaChatDevice`: the network, install help, a waiting update, the worker's registration and the M key |
+| `src/ooga-chat/service-worker.js` | the service worker, staged as `/sw.js` with its build and file list filled in |
 | `src/ooga-chat/ooga-chat-shell.js` | `BL.oogaChatShell`: the tabs and the views they keep |
 | `src/ooga-chat/ooga-chat-views.js` | `BL.oogaChatViews`: the Ooga Chat view (sign-in, or the zones and the roster), the account footer, faces and the stand-ins for the shared panels |
 | `src/ooga-chat/ooga-chat-http.js` | `BL.oogaChatHttp`: the production adapter |
@@ -55,8 +58,8 @@ module reads nothing at load but `window.BL` and the document.
 
 ## Load order and contracts
 
-`sign-glyphs.js`, `native-icons.js`, `ooga-chat-config.js`, `ooga-chat-auth.js`, `ooga-chat-roster.js`, `ooga-chat-shell.js`,
-`ooga-chat-views.js`,
+`sign-glyphs.js`, `native-icons.js`, `ooga-chat-config.js`, `ooga-chat-auth.js`, `ooga-chat-roster.js`, `ooga-chat-device.js`,
+`ooga-chat-shell.js`, `ooga-chat-views.js`,
 `ooga-chat-http.js`, then (fixture entry only) `ooga-chat-fixtures.js`, then `ooga-chat-app.js`. The build checks that
 `fixture.html` loads exactly `index.html`'s files plus the fixtures, just before the app.
 
@@ -274,9 +277,12 @@ The accounts are named samples with no picture, never real people. Fixtures are 
 | `index.html` | the entry, its build identity filled in |
 | `js/ooga-chat-<hash>.js`, `css/ooga-chat-<hash>.css` | every module and stylesheet in order, one file each |
 | `art/<name>-<hash>.<ext>` | each picture under `src/ooga-chat/art/` that a view shows (the build fails on an unshown one) |
+| `manifest.webmanifest` | the installable app's manifest (below), linked by `index.html` only |
+| `icons/ooga-chat-<size>[-maskable]-<hash>.png` | the native cloud at 180 (Apple touch), 192, 512 and 512 maskable |
+| `sw.js` | the service worker, its build and shell list filled in |
 | `fixture.html`, `js/ooga-chat-fixture-<hash>.js` | with `--fixtures` only |
 | `404.html` | sends any unknown address home, without script |
-| `_headers` | the policy and security headers on every path, `no-cache` on the entry, a year on every hashed file |
+| `_headers` | the policy and security headers on every path, `no-cache` on the entry, the worker and the manifest (with its media type), a year on every hashed file |
 | `build.json` | the build identity, the script list, every file's bytes and gzipped bytes, and the first-load total |
 
 It refuses to stage into the repository root, `src/`, `_site/`, `untracked/site/`, `cards/`, `worker/`, `scripts/`,
@@ -285,8 +291,8 @@ cannot overwrite one another.
 
 ## Content policy
 
-`default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none';
-form-action 'none'`, with `frame-ancestors 'none'` added in `_headers`. The page has no inline script, style or
+`default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self';
+worker-src 'self'; base-uri 'none'; form-action 'none'`, with `frame-ancestors 'none'` added in `_headers`. The page has no inline script, style or
 handler (the build checks), no remote font, script or CDN, and uses the native monospace stack. `connect-src 'self'`
 covers the same-origin API and a same-origin WebSocket. WebRTC media is not governed by `connect-src`; the SFU is
 reached through the backend's same-origin paths, as the island's voice is. `Permissions-Policy` allows the microphone
@@ -294,9 +300,10 @@ to the page's own origin only.
 
 ## Size
 
-Measured from the staged app with the space (#653): a first visit is 5 requests (`index.html` 1.1 KB, script 70.8 KB,
-stylesheet 16.7 KB, sign-in picture 57.9 KB, Main Island's mark 3 KB): about 150 KB, 88 KB gzipped (the foundation
-alone was 71 KB, with sign-in 78 KB). For comparison, the island's portable page is about
+Measured from the staged installable app (#657): a first visit is 5 requests (`index.html` 1.2 KB, script 77.6 KB,
+stylesheet 16.9 KB, sign-in picture 57.9 KB, Main Island's mark 3 KB): about 157 KB, 90 KB gzipped (the foundation
+alone was 71 KB, with sign-in 78 KB, with the space 88 KB). The manifest and icons are fetched by the browser when it
+considers installing, and the worker then keeps the same files once more in its cache, off the first paint. For comparison, the island's portable page is about
 39.7 MB (23 MB gzipped). The app loads no 3D engine, terrain, cabinets, replays or live feeds. `FIRST_LOAD_BUDGET` in
 the build (96 KB gzipped) fails a build that grows past it; raise it deliberately, with the reason, when a later issue
 adds weight.
@@ -305,6 +312,83 @@ adds weight.
 
 `src/ooga-chat/art/sign-in-island.jpg` (430x287, 3:2) is a stand-in cropped from the issue's design capture. Replace
 it with the approved original under the same name; the build re-hashes it and the views need no change.
+
+## The installable app (#657)
+
+The first release is the web app at `ooga.chat`, not a store binary. Installing changes nothing about identity,
+zones, roles or privacy, grants no background microphone, and never gates listening or the public panels.
+
+**Manifest.** `manifest.webmanifest`: `id` and `start_url` `/`, `scope` `/`, `display` `standalone`, name and short
+name Ooga Chat, background and theme `#0a0a0b`, icons at 192, 512 and 512 maskable, plus a 180px Apple touch icon
+linked from the page. Every icon is the native cloud (`nativeIcons.cloud`) drawn pixel for pixel by whole-number
+scaling on the theme colour, the maskable one inside the platform's safe circle; approved artwork can replace
+`cloudIcon` in the build without touching the page. Direct navigation, reload and an installed launch all land on `/`;
+an unknown path gets `404.html`, which sends it home. The sign-in return is `/` with a result code, so it works from
+the browser and from the installed app alike (on iOS an installed app may finish OAuth in its own browser sheet).
+
+**Install help** follows what the browser offers: Install Ooga Chat (the browser's own prompt) where it sends
+`beforeinstallprompt`, a one-line Share then Add to Home Screen hint on Safari for iOS, and nothing elsewhere or once
+installed.
+
+**The cache contract** (`service-worker.js`, registered as `/sw.js` with scope `/`, only by the production entry of a
+staged build on a secure origin, `updateViaCache: "none"`):
+
+| Request | What the worker does |
+|---|---|
+| a hashed file of this build (`/js/`, `/css/`, `/art/`, `/icons/`) | from its cache, kept at install |
+| the page (`/` or `/index.html`, a navigation) | from the network; from its cache only when the network fails |
+| anything else: `/api/*`, sign-in and its return's server routes, logout, session, the audience WebSocket, media and SDP, donations and invoices, `fixture.html`, `manifest.webmanifest`, `build.json`, any query string, any other origin | untouched: the browser asks the network as if there were no worker |
+| anything that is not a GET | untouched, never replayed |
+
+It keeps only responses that are OK, same-origin and not marked `no-store` or `private`, and an install fails whole if
+any shell file cannot be kept, leaving the previous version in place. It holds no account data, so nothing private is
+cached for another account to see, and sign-out has no cache to clear. Each version's cache is
+`ooga-chat-<build>`; taking over deletes every older one, and nothing else.
+
+**Offline** shows the shell with "You're offline. Ooga Chat reconnects when you're back.", sign-in and Join Voice
+off, and the list marked reconnecting rather than live: no saved state claims a current list, a speaker seat, a raised
+hand, live audio or a valid session. Back online, the session and capabilities are checked again, the audience feed
+rejoins and sends a fresh snapshot, and voice returns only through the voice client's own lifecycle, never unmuted by
+itself.
+
+**Updates.** A new version installs in the background and waits. The page says "A newer Ooga Chat is ready" with
+Reload, which hands over to the new worker and reloads once; while the visitor speaks, Reload waits until they leave
+voice. Nothing reloads by itself, so an open page keeps its own compatible files until it reloads, and the bootstrap's
+protocol list keeps an old page from speaking to a server that has moved on (it goes stale instead).
+
+**The M key** mutes or unmutes a speaker's own microphone, and does nothing while typing in a field or editable
+text, composing with an IME, holding a modifier or repeating.
+
+**Background and interruptions.** Mobile browsers and installed web apps may suspend JavaScript, playback and capture
+when the screen locks, the app goes to the background, a call comes in or the audio device changes. Ooga Chat does not
+try to keep running there. On return it checks the session (`visibilitychange`, the page cache's `pageshow`), the feed
+reconnects and resyncs, and nothing shows as live until the server says so again. Observed behaviour per platform
+belongs in the matrix below.
+
+**Release runbook.**
+
+1. Stage with `npm run build:ooga-chat`; `build.json` names the build, every file and the first-load total.
+2. The owner deploys the staged folder to staging (#662) and runs the acceptance below against the real backend.
+3. Production rollout is the bootstrap's `features` (server-side): turn providers and voice on in stages (#669).
+4. Rollback: redeploy the previous staged folder. Its `sw.js` differs, so open pages see an update and new visits get
+   the old version; nothing is pinned in a cache beyond one reload online, because the page is always asked of the
+   network first.
+
+**Supported-browser matrix** (to fill in from real devices; nothing here is assumed):
+
+| Platform | Browser | Version | Install | Sign-in return | Offline shell | Update | Background, lock, call |
+|---|---|---|---|---|---|---|---|
+| Android | Chrome | not yet tested | | | | | |
+| iOS / iPadOS | Safari | not yet tested | | | | | |
+| macOS | Safari | not yet tested | | | | | |
+| Windows, macOS | Chrome, Edge | not yet tested | | | | | |
+| Windows, macOS, Linux | Firefox | not yet tested (no install) | | | | | |
+
+**Acceptance evidence** to record here, without credentials, tokens, private SDP or payment control tokens in any
+capture: 320, 390 and 1024px captures of sign-in, listener, speaker, Bananas, the full contributor list and each
+donation stage; keyboard and screen-reader passes over the tabs, the roster, the footer and the panels; offline,
+reconnect and update runs showing the excluded requests never cached; background and interruption runs; and startup
+requests, bytes and time to useful content on a representative phone.
 
 ## What the backend owner provides
 
@@ -321,6 +405,9 @@ Each item is a proposal for the owner (`w-s-bitcoin`, #662, #663) to confirm or 
 - `paths.audience` and the audience feed (protocol 1, above, #665): authoritative membership by the zone policy,
   roles from acknowledged leases, ids as principals, generations per source, world speakers' contribution totals and
   same-origin native portraits, and the close codes. Listening never takes a world-player slot or makes a body.
+- Serving the staged folder on `ooga.chat` over HTTPS with its `_headers` (#662): `sw.js` and `manifest.webmanifest`
+  at the root with `no-cache`, the manifest as `application/manifest+json`, and every API answer `no-store`, so no
+  cache between the page and the server keeps one either.
 - Profile pictures on the app's origin (proxied or stored, `img-src 'self'`), at a path that changes when the picture
   does, so a face is never another principal's.
 

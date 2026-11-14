@@ -26,6 +26,7 @@
     unavailable: "Ooga Chat can't reach its service from here right now.",
     stale: "This page is older than Ooga Chat's service."
   };
+  const OFFLINE = "You're offline. Ooga Chat reconnects when you're back.";
   const PROVIDERS = { github: ["Continue with GitHub", "Opening GitHub…", "GitHub sign-in is unavailable"], x: ["Continue with X", "Opening X…", "X sign-in is unavailable"] };
   const { gates } = BL.oogaChatAuth;
   // A visually hidden explanation a control names with aria-describedby.
@@ -113,13 +114,14 @@
       let line = STATUS[mode] || "";
       if (live && auth === "checking") line = "Checking your sign-in…";
       if (live && boot.newer) line = "A newer Ooga Chat is out.";
+      if (!state.device.online) line = OFFLINE;
       if (status.textContent !== line) status.textContent = line;
       status.parentElement.hidden = !line;
       reload.hidden = mode !== "stale" && !(live && boot.newer);
       alert.update(live ? shown : null, busy);
       for (const [provider, el] of Object.entries(providers)) {
         const on = live && boot.features[provider], [label, opening, off] = PROVIDERS[provider];
-        el.disabled = !on || auth === "checking" || !!busy;
+        el.disabled = !on || auth === "checking" || !!busy || !state.device.online;
         el.textContent = busy === provider ? opening : on || !live ? label : off;
         el.setAttribute("aria-busy", String(busy === provider));
       }
@@ -318,10 +320,38 @@
       muteWhy.textContent = speaker ? "" : "Join voice first to unmute.";
       join.dataset.voice = speaker ? "speaker" : "listener";
       join.textContent = speaker ? "Leave voice" : "Join voice";
-      join.disabled = speaker ? !!state.busy : !allowed.joinVoice || !media.available || !!state.busy;
-      const why = speaker ? "" : allowed.why || (media.available ? "" : "Voice opens here soon.");
+      join.disabled = speaker ? !!state.busy : !allowed.joinVoice || !media.available || !!state.busy || !state.device.online;
+      const why = speaker ? "" : !state.device.online ? OFFLINE : allowed.why || (media.available ? "" : "Voice opens here soon.");
       joinWhy.textContent = why;
       join.title = why;
+    };
+    const dispose = () => {
+      listeners.abort();
+      node.remove();
+    };
+    return { node, update, dispose };
+  };
+  // Under the frame: install help the browser actually offers (its own prompt, or Safari's Share menu), and a waiting
+  // update, which never reloads by itself and waits while the visitor speaks.
+  const device = ({ install, reload }) => {
+    const listeners = new AbortController(), { signal } = listeners;
+    const offer = button("link", "Install Ooga Chat"), hint = make("span", "", "To install Ooga Chat, tap Share, then Add to Home Screen.");
+    const fresh = make("span", ""), take = button("link", "Reload");
+    offer.addEventListener("click", () => install(), { signal });
+    take.addEventListener("click", () => reload(), { signal });
+    const installLine = make("p", "oc-device-line", offer, hint), updateLine = make("p", "oc-device-line", fresh, take);
+    updateLine.setAttribute("role", "status");
+    const node = make("div", "oc-device", updateLine, installLine);
+    const update = (state) => {
+      const { install: way, update: waiting } = state.device, speaking = state.voice.role === "speaker";
+      offer.hidden = way !== "prompt";
+      hint.hidden = way !== "ios";
+      installLine.hidden = !way;
+      updateLine.hidden = !waiting;
+      const words = speaking ? "A newer Ooga Chat is ready. Reload once you've left voice." : "A newer Ooga Chat is ready.";
+      if (fresh.textContent !== words) fresh.textContent = words;
+      take.disabled = speaking;
+      node.hidden = installLine.hidden && updateLine.hidden;
     };
     const dispose = () => {
       listeners.abort();
@@ -338,5 +368,5 @@
       make("div", "slab oc-slab oc-pending", make("p", "", note)));
     return { node, update() {}, dispose() { node.remove(); } };
   };
-  BL.oogaChatViews = { chat, account, pending, face, make };
+  BL.oogaChatViews = { chat, account, device, pending, face, make };
 })();
