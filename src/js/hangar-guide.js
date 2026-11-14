@@ -230,7 +230,8 @@
   // the view sees them both), facing it, her rings turning a little quicker; there she watches it, moving a little
   // round it once or twice. As it comes apart she
   // watches it start to go and eases back a touch, or, still on her way, stops where she is, and watches it go; a
-  // moment after it has gone she goes back to work, or sooner if anything ended it early. Rarely it puzzles her: she
+  // moment after it has gone she goes back to work, or sooner if anything ended it early (a tap on her ends it at once,
+  // the scene giving her back to answer it). Rarely it puzzles her: she
   // comes over or watches it from where she is, her rings quickening, and once makes a small, uncertain movement (a
   // tilt to one side, a tip back or her rings faltering); as it comes apart she hesitates, edging toward it, and once
   // it has gone she keeps watching where it stood a few seconds, looking about it, before she drifts back to work.

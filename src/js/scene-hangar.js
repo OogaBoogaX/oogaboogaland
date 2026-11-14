@@ -1566,7 +1566,8 @@
       onTap: (hit) => {
         if (!hit) return;
         const o = hit.owner;
-        if (o.kind === "tess") return scene.guide.tap();
+        // A tap on Tess while she watches the faint shape: she leaves it be and answers as she would at work.
+        if (o.kind === "tess") { if (scene.tessFor === "shimmer") { scene.unsettled.reset(); scene.guide.lend(null); scene.tessFor = null; } return scene.guide.tap(); }
         if (scene.guide.holding) return;
         if (o.kind === "exit") return leaveHangar();
         if (o.kind === "stats" || o.kind === "timeline") return hud.openBoard(scene.boardViews[o.kind]);
