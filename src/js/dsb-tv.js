@@ -36,10 +36,10 @@
       const value = lines[row].slice(0, 25), color = row === 0 ? [73, 221, 217] : row === 2 ? [255, 223, 56] : [193, 221, 211];
       for (let i = 0; i < value.length; i++) {
         if (value[i] === " ") continue;
-        const glyph = glyphs[value[i]] || glyphs[value[i].toLowerCase()] || glyphs["0"];
-        for (let y = 0; y < 5; y++) for (let x = 0; x < 3; x++) if (glyph[y][x] === "1") {
-          const a = -2.85 + (i * 4 + x) * cell, b = 1.36 - row * 0.4 - y * cell, n = geo.verts.length / 3;
-          geo.verts.push(a, b, 0, a + cell * 0.85, b, 0, a + cell * 0.85, b + cell * 0.85, 0, a, b + cell * 0.85, 0);
+        const glyph = glyphs[value[i]] || glyphs[value[i].toLowerCase()] || glyphs["0"], sx = 3 / glyph[0].length;
+        for (let y = 0; y < 5; y++) for (let x = 0; x < glyph[y].length; x++) if (glyph[y][x] === "1") {
+          const a = -2.85 + (i * 4 + x * sx) * cell, b = 1.36 - row * 0.4 - y * cell, n = geo.verts.length / 3;
+          geo.verts.push(a, b, 0, a + cell * sx * 0.85, b, 0, a + cell * sx * 0.85, b + cell * 0.85, 0, a, b + cell * 0.85, 0);
           geo.faces.push({ i: [n, n + 1, n + 2, n + 3], color, emissive: 0.8 });
         }
       }

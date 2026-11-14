@@ -443,16 +443,18 @@
 
   // Either connection failing, or staying disconnected past DROP_GRACE_MS, after it was up: start voice over, which
   // publishes the microphone again (a new count, so every listener pulls it anew) and pulls every voice again.
+  // Why the restart: said with its `leave`, for the room's inspector (worker/src/inspect-report.js).
+  let dropWhy = "";
   const watch = (pc) => {
     pc.addEventListener("connectionstatechange", () => {
       if (pc !== pubPc && pc !== subPc) return;
       if (pc === subPc) { stats.receiveState = pc.connectionState; emit(); }
       window.clearTimeout(dropTimers.get(pc));
       dropTimers.delete(pc);
-      if (pc.connectionState === "failed") restart();
+      if (pc.connectionState === "failed") { dropWhy = "failed"; restart(); }
       else if (pc.connectionState === "disconnected") dropTimers.set(pc, window.setTimeout(() => {
         dropTimers.delete(pc);
-        if ((pc === pubPc || pc === subPc) && pc.connectionState !== "connected") restart();
+        if ((pc === pubPc || pc === subPc) && pc.connectionState !== "connected") { dropWhy = "disconnected"; restart(); }
       }, DROP_GRACE_MS));
     });
   };
@@ -885,6 +887,8 @@
   // `welcomed`: the room has just let this page in, which puts a visitor out of voice back in if they were.
   let restarting = false;
   const restart = async (welcomed = false, preparedRelay = null) => {
+    const why = dropWhy;
+    dropWhy = "";
     // A welcome during a restart is the same blip: it must not put a speaker back in as a muted listener.
     if (!stats.enabled) { if (welcomed && !restarting) resume(); return; }
     const wanted = microphoneWanted, muted = stats.muted;
@@ -896,7 +900,7 @@
     }
     restarting = true;
     try {
-      cleanup = api("leave", null, token).catch(() => {});
+      cleanup = api("leave", why ? { why } : null, token).catch(() => {});
       await cleanup;
       if (token !== lifecycle) return;
       if (!wanted || !microphoneWanted) { await listen(); return; }

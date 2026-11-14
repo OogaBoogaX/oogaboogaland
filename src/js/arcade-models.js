@@ -86,7 +86,7 @@
     torches: [[8, -27.6, 1], [12, -28.5, -1], [8, -32.2, 1], [12, -33.6, -1], [8, -39.2, 1]],
     // The hall's walls: the four maps, [z, side], and three racks of the game's weapons, each a row [`gun` index, label].
     pictures: [[-26, -1], [-31, 1], [-34, -1], [-38, 1]],
-    racks: [[-30, -1, [[0, "PAINT"], [1, "GRENADE"], [2, "ROCKET"]]], [-26.4, 1, [[3, "NET"], [4, "SNIPER"], [5, "GOLD AKS"]]], [-37.5, -1, [[6, "OOGA AK"], ["hook", "HOOK"], ["wallet", "WALLET"]]]] };
+    racks: [[-30, -1, [[0, "PAINT"], [1, "GRENADE"], [2, "ROCKET"]]], [-26.4, 1, [[3, "NET"], [4, "SNIPER"], [5, "GOLD AKS"]]], [-37.5, -1, [[6, "OOGA AK"], ["hook", "HOOK"], [7, "HOOK GUN"]]]] };
   // The games with cabinets, as the island names them: scene id, name, the marquee's words and badge, and the
   // colour of its screen's light.
   const GAMES = [

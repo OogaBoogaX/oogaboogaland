@@ -123,6 +123,9 @@
       count: () => blip("square", NOTE(3), NOTE(3), 0.01, 0.07, 0.06, 0.14),
       go: () => chord([0, 7, 12], 0.09, "square", 0.08, 0.18),
       fire: (k = 1) => { blip("triangle", 420, 160, 0.003, 0.02, 0.06, 0.22 * k); splatNoise(0.25 * k, 0.06); },
+      // A round from an AK, the Ghost Hunter's rifle shot (ghost-audio.js `shot`): a short dull crack of low-passed noise
+      // over a low thump.
+      gun: (k = 1) => { burst("splat", "splatFilter", 0.55 * k, 0.003, 0.14, 1800, 260); blip("sine", 150, 55, 0.002, 0.03, 0.1, 0.4 * k); },
       throw: (k = 1) => blip("sine", 260, 110, 0.005, 0.03, 0.12, 0.2 * k),
       sniper: (k = 1) => { blip("square", 1800, 300, 0.001, 0.01, 0.09, 0.16 * k); burst("splat", "splatFilter", 0.6 * k, 0.002, 0.18, 5000, 900); },
       rocket: (k = 1) => { blip("sawtooth", 90, 260, 0.02, 0.2, 0.2, 0.16 * k); burst("splat", "splatFilter", 0.3 * k, 0.05, 0.5, 600, 2400); },
@@ -184,9 +187,7 @@
       hookThrow: (k = 1) => { blip("triangle", 500, 2600, 0.01, 0.1, 0.17, 0.12 * k); },
       hookBite: (k = 1) => { blip("sine", 140, 60, 0.01, 0.1, 0.2, 0.28 * k); splatNoise(0.15 * k, 0.12); },
       hookOff: (k = 1) => { blip("triangle", 900, 1500, 0.01, 0.04, 0.08, 0.1 * k); },
-      hookMiss: (k = 1) => { blip("triangle", 2200, 300, 0.02, 0.25, 0.4, 0.1 * k); },
-      // A wallet's fuse: a short beep, higher (`urgency` 0 to 2) as it runs out.
-      beep: (k = 1, urgency = 0) => blip("square", 1400 + urgency * 500, 1400 + urgency * 500, 0.002, 0.03, 0.03, 0.08 * k)
+      hookMiss: (k = 1) => { blip("triangle", 2200, 300, 0.02, 0.25, 0.4, 0.1 * k); }
     };
     // The held layers follow `state` each frame: rain from the weather (0 to 1), the whir from the zipline.
     const update = () => {

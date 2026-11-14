@@ -7308,26 +7308,288 @@ const gameRulesChecks = async () => {
       return deck.actors[deckMap.toLocal[3]].captures === 2;
     })(), `max ${biggest}, avg ${Math.round(total / frames)} bytes`);
     context.blockFrameBytes = { biggest, average: Math.round(total / frames) };
-    // 1v1 is a real match with bots and flags, and a solo step is untouched by the new input table.
+    // A size under the minimum is grown to two a side (never a 1v1), a real match with bots and flags, and a solo step
+    // is untouched by the new input table.
     const one = S.create({ team: "blue", seed: 9, size: 1, map: "fort", prep: 0 });
     one.actors[1].bot = true;
     for (let i = 0; i < 1200; i++) S.tick(one, S.CONFIG.STEP, still());
     const solo = (t) => { const s = S.create({ team: "blue", seed: 77, size: 3, map: "town", prep: 1 }); if (t) s.inputs = null; for (let i = 0; i < 1800; i++) S.tick(s, S.CONFIG.STEP, still()); return s.actors.map(a => a.x + a.z).join(","); };
-    record("block live: 1v1 runs, and a solo round is unchanged", one.actors.length === 2 && one.time > 9 && solo(false) === solo(true));
+    record("block live: there is no 1v1 (a size of one runs two a side), and a solo round is unchanged", one.size === 2 && one.actors.length === 4 && one.time > 9 && solo(false) === solo(true));
+    // Paint and the AKs go where they are aimed.
+    const flat = ["paint", "ak", "gold"].map((kind) => { const T = S.TOOLS[kind], d = 20, t = d / T.speed, p = S.flatPitch(d, T), y = (T.lift + Math.sin(p) * T.speed) * t - 0.5 * T.gravity * t * t; return Math.abs(y) < 0.1 && T.speed * T.life >= 25 && T.gravity <= 1.5; });
+    record("block shots: paint and the AKs arrive within 10 cm of the aim at 20 m with about their old reach", flat.every(Boolean), JSON.stringify(flat));
+
+    // The round's scoring rule, one flag set as it starts: classic waits for your own block to be home (and says so
+    // once), "doesn't need to be home" scores at once, for a bot as for a person; a reset keeps the round's rule.
+    const scoring = (anyTime, bot = false) => {
+      const s = S.create({ team: "blue", seed: 3, size: 2, map: "fort", prep: 0 }), a = s.actors[0], st = S.ARENA.stands.blue;
+      s.anyTime = anyTime; S.reset(s, 3); a.bot = bot;
+      s.flags.blue.state = "dropped"; s.flags.blue.x = 0; s.flags.blue.z = 0; s.flags.red.state = "carried"; s.flags.red.carrier = 0; a.carrying = "red"; a.x = st.x; a.z = st.z; a.y = 0;
+      S.tick(s, S.CONFIG.STEP, still());
+      let waited = false; for (let i = 0; i < s.eventCount; i++) waited = waited || s.events[i].type === "waiting";
+      const first = a.captures;
+      // Classic: the carrier who waits scores the moment its own block is home again.
+      if (!anyTime) { s.flags.blue.state = "home"; s.flags.blue.x = st.x; s.flags.blue.z = st.z; S.tick(s, S.CONFIG.STEP, still()); }
+      return { first, waited, later: a.captures, kept: s.anyTime, score: s.score.blue };
+    };
+    const rules = { any: scoring(true), classic: scoring(false), anyBot: scoring(true, true), classicBot: scoring(false, true), fresh: S.create({ team: "blue", seed: 3, size: 2, map: "fort", prep: 0 }).anyTime, duel: "duel" in S.create({ team: "blue", seed: 3, size: 2, map: "fort", prep: 0 }) || "duel" in W };
+    const optBase = { t: "bf", v: W.WIRE, k: "opt", n: 2, m: W.FIRST_MAP }, ruleWire = { rules: W.RULES.join(), none: W.ruleFor(-1, 1) + "" + W.ruleFor(-1, 2) + W.ruleFor(-1, 3) + W.ruleFor(-1, 8), picked: W.ruleFor(0, 2) + "" + W.ruleFor(1, 5),
+      plain: JSON.stringify(W.parse(optBase)), home: W.parse({ ...optBase, r: 0 })?.r, any: W.parse({ ...optBase, r: 1 })?.r, bad: [2, -1, 0.5, "1", null, true].map((r) => W.parse({ ...optBase, r })).every((v) => v === null), old: W.parse({ ...optBase, v: W.WIRE - 1, r: 1 }) };
+    record("block scoring rule: classic needs your own block home, says so once and scores the moment it returns; doesn't-need-to-be-home scores at once; bots the same; a reset keeps the round's rule and a new sim is classic; the duel rule is gone",
+      rules.any.first === 1 && !rules.any.waited && rules.any.kept === true && rules.classic.first === 0 && rules.classic.waited && rules.classic.later === 1 && rules.classic.kept === false
+      && rules.anyBot.first === 1 && rules.classicBot.first === 0 && rules.classicBot.later === 1 && rules.fresh === false && !rules.duel, JSON.stringify(rules));
+    record("block scoring rule on the wire: opt may carry the rule, 0 or 1, and nothing else; left out, no pick; unpicked, two people play doesn't-need-to-be-home and any other count classic; a pick always stands; an older page's message is refused",
+      ruleWire.rules === "home,any" && ruleWire.none === "0100" && ruleWire.picked === "01" && ruleWire.plain === JSON.stringify({ t: "bf", k: "opt", n: 2, m: W.FIRST_MAP }) && ruleWire.home === 0 && ruleWire.any === 1 && ruleWire.bad && ruleWire.old === null && W.WIRE >= 3, JSON.stringify(ruleWire));
+
+    // Each block mined wins one pair of Golden AKs, never more than `GOLD_GUNS` in the round: for the miner, else the
+    // nearest teammate without a pair; from the pool, else from a rival by the sim's seeded pick; a side holding every
+    // pair wins nothing more. The wallets and their machines are gone.
+    const mine = (setup, seed = 3, left = S.CONFIG.GOLD_GUNS) => { const s = S.create({ team: "blue", seed, size: 3, map: "town", prep: 0 }), a = s.actors[0], st = S.ARENA.stands.blue; for (const q of s.actors) { q.bot = false; q.x = 200 + q.id * 3; q.z = 200; } s.gorillas.length = 0; s.goldLeft = left; setup(s, a); s.flags.red.state = "carried"; s.flags.red.carrier = 0; a.carrying = "red"; a.x = st.x; a.z = st.z; a.y = 0; S.tick(s, S.CONFIG.STEP, still()); return s; };
+    const pairs = (s) => s.goldLeft + s.actors.filter((b) => b.gold).length, held = (s) => s.actors.filter((b) => b.gold).map((b) => b.id).join();
+    const evOf = (s, type) => { for (let i = 0; i < s.eventCount; i++) if (s.events[i].type === type) return s.events[i]; return null; };
+    const toMiner = mine(() => {}), toMate = mine((s, a) => { a.gold = true; s.goldLeft = 1; s.actors[1].x = 60; s.actors[2].x = 30; }), both = mine((s, a) => { a.gold = s.actors[1].gold = true; s.goldLeft = 0; });
+    const fromRival = mine((s) => { s.actors[3].gold = s.actors[4].gold = true; s.goldLeft = 0; }), mateFromRival = mine((s, a) => { a.gold = s.actors[4].gold = true; s.goldLeft = 0; s.actors[1].x = 30; s.actors[2].x = 60; });
+    const whoLost = (seed) => { const s = mine((q) => { q.actors[3].gold = q.actors[4].gold = true; q.goldLeft = 0; }, seed); return s.actors[3].gold ? 4 : 3; };
+    const seeds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(whoLost), mateEv = evOf(toMate, "gold");
+    const mining = { miner: held(toMiner) === "0" && toMiner.goldLeft === 1 && evOf(toMiner, "gold")?.actor === 0, mate: held(toMate) === "0,2" && toMate.goldLeft === 0 && mateEv?.actor === 2 && mateEv?.by === 0,
+      both: held(both) === "0,1" && !evOf(both, "gold") && !evOf(both, "goldsteal"), rival: fromRival.actors[0].gold && held(fromRival).split(",").length === 2 && evOf(fromRival, "goldsteal")?.actor === 0,
+      mateRival: held(mateFromRival) === "0,1" && evOf(mateFromRival, "goldsteal")?.actor === 1, seeded: seeds.includes(3) && seeds.includes(4) && seeds.every((v, i) => v === whoLost(i + 1)),
+      two: S.CONFIG.GOLD_GUNS === 2 && [toMiner, toMate, both, fromRival, mateFromRival].every((s) => pairs(s) === 2), noHook: [toMiner, fromRival].every((s) => s.actors.every((b) => !b.hook)), noDrops: !("drops" in toMiner) && !("DROP_BACK_S" in S.CONFIG) };
+    record("block mining wins Golden AKs: each block mined wins one pair, for the miner or else the nearest teammate without one; from the pool, else from a rival by the seeded pick; a side holding both wins nothing; two pairs in all, and mining takes no hook",
+      Object.values(mining).every(Boolean), JSON.stringify({ ...mining, seeds }));
+    const stolen = mine((s) => { s.actors[3].gold = s.actors[4].gold = true; s.goldLeft = 0; }), stolenMap = L.seatMap(3, 0), buf3 = new DataView(new ArrayBuffer(W.FRAME_MAX)), len3 = L.encode(stolen, stolenMap, 1, 1, 1, buf3), guest3 = S.create({ team: "blue", seed: 3, size: 3, map: "town", prep: 0 }), frame3 = new DataView(buf3.buffer.slice(0, len3));
+    guest3.gorillas.length = 0;
+    const gone = { sim: !("wallets" in stolen) && !("vends" in stolen) && !S.nearVend && !S.takeWallet && !S.WALLETS && !S.ARENA.vends && !Object.keys(S.CONFIG).some((k) => /WALLET|VEND/.test(k)), actor: !("wallet" in stolen.actors[0]) && !("soot" in stolen.actors[0]) && !("vendGo" in stolen.actors[0]), wire: !W.ACTIONS.some((k) => /wallet/i.test(k)) && !L.EVENT_TYPES.some((k) => ["wallet", "wthrow", "wdrop", "wbounce", "stuck", "rekt", "blast"].includes(k)), frame: L.validFrame(frame3, guest3, stolenMap) && !L.validFrame(new DataView(buf3.buffer.slice(0, len3 + 1)), guest3, stolenMap) };
+    L.decode(frame3, guest3, stolenMap, new Float32Array(32));
+    gone.guestAgrees = guest3.actors.map((b) => +b.gold).join("") === stolen.actors.map((b) => +b.gold).join("") && guest3.actors[0].gold;
+    // The two special weapons take each other, and only each other, out of a rival's hands: a hook that reaches a rival
+    // with the Golden AKs out takes the pair; Golden AK fire that splats a rival with the hook out takes the hook. Put
+    // away, nothing is taken; no other shot, burst, beam or bonk takes either; a taker never holds two.
+    const duel = (setup) => { const s = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }), a = s.actors[0], b = s.actors[2]; for (const q of s.actors) { q.bot = false; q.guard = 0; q.x = 300 + q.id * 5; q.z = 300; q.y = 0; } s.gorillas.length = 0; a.x = 8; a.z = 9; b.x = 8; b.z = 3; setup(s, a, b); s.goldLeft = S.CONFIG.GOLD_GUNS - s.actors.filter((q) => q.gold).length; return { s, a, b }; };
+    const hold = (s, a, k = 0) => { a.hook = k + 1; s.hooks[k].state = 1; s.hooks[k].holder = a.id; };
+    const quiet = (s, t) => { for (let i = 0; i < Math.ceil(t / S.CONFIG.STEP); i++) { for (const q of s.actors) q.guard = 0; S.tick(s, S.CONFIG.STEP, still()); } };
+    const hookAt = (setup) => { const d = duel((s, a, b) => { hold(s, a); b.gold = true; setup(s, a, b); }); S.grapple(d.s, 0, Math.PI, Math.atan2(1 - S.CONFIG.SHOT_Y, 6)); quiet(d.s, 1); return d; };
+    const hookIn = hookAt((s, a, b) => { b.wield = "gold"; }), hookAway = hookAt((s, a, b) => { b.wield = "paint"; }), hookBotFired = hookAt((s, a, b) => { b.wield = ""; b.lastKind = "gold"; }), hookArmed = hookAt((s, a, b) => { a.gold = true; b.wield = "gold"; });
+    const shotAt = (kind, wield = "hook", setup = () => {}) => { const d = duel((s, a, b) => { a.gold = true; hold(s, b); b.wield = wield; setup(s, a, b); }); S.fire(d.s, 0, Math.PI, S.flatPitch(6, S.TOOLS[kind]), kind); quiet(d.s, 1); return d; };
+    const goldIn = shotAt("gold"), goldAway = shotAt("gold", "paint"), goldInUse = shotAt("gold", "paint", (s, a, b) => { b.hk = 4; }), goldOwn = shotAt("gold", "hook", (s, a) => hold(s, a, 1)), akIn = shotAt("ak");
+    const splatBy = (kind) => { const d = duel((s, a, b) => { a.gold = true; hold(s, b); b.wield = "hook"; }); S.splat(d.s, d.b, kind === "bonk", kind === "bonk" ? null : { kind, owner: 0, team: "blue", ox: d.a.x, oz: d.a.z }); return d.b.hook === 1 && d.a.hook === 0; };
+    const goldSplat = (() => { const d = duel((s, a, b) => { b.gold = true; b.wield = "gold"; hold(s, a); }); for (const k of ["paint", "ak", "sniper", "rocket", "grenade", "net", "crate", "homer", "laser"]) { d.b.splat = 0; S.splat(d.s, d.b, false, { kind: k, owner: 0, team: "blue", ox: 0, oz: 0 }); } S.splat(d.s, d.b, true); return d.b.gold && !d.a.gold; })();
+    const steals = { hookTakes: hookIn.a.gold && !hookIn.b.gold && hookIn.a.hook === 1, hookAway: !hookAway.a.gold && hookAway.b.gold, botFired: hookBotFired.a.gold && !hookBotFired.b.gold, hookArmed: hookArmed.a.gold && hookArmed.b.gold,
+      goldTakes: goldIn.a.hook === 1 && goldIn.b.hook === 0 && goldIn.s.hooks[0].holder === 0 && goldIn.b.splats === 1, goldAway: goldAway.b.hook === 1 && goldAway.a.hook === 0 && goldAway.b.splats === 1, inUse: goldInUse.a.hook === 1 && goldInUse.b.hook === 0,
+      ownHook: goldOwn.a.hook === 2 && goldOwn.b.hook === 1, akKeeps: akIn.b.hook === 1 && akIn.a.hook === 0 && akIn.b.splats === 1,
+      othersKeep: ["paint", "ak", "sniper", "rocket", "grenade", "net", "crate", "homer", "laser", "bonk"].every(splatBy), goldKept: goldSplat, pairs: [hookIn, goldIn].every((d) => d.s.goldLeft + d.s.actors.filter((q) => q.gold).length === 2) };
+    record("block special-weapon steals: a hook takes a rival's Golden AKs only while they're in hand (a bot's last fired counts), to a thrower with none; Golden AK fire takes a rival's hook only while it's in hand or out, to a shooter with none; the Ooga AK, paint, the sniper, rockets, grenades, nets, crates, monkeys, laser eyes and bonks take neither",
+      Object.values(steals).every(Boolean), JSON.stringify(steals));
+    // A guest's tool is the host's word through `wield`: a guest who puts the AKs away keeps them from a hook, one who
+    // holds the hook out loses it to Golden AK fire; a tool they don't own is refused. The frame carries the result.
+    const asGuest = (wieldKind, give, setup) => { const s = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }), h = s.actors[0], g = s.actors[2]; for (const q of s.actors) { q.bot = false; q.guard = 0; q.x = 300 + q.id * 5; q.z = 300; q.y = 0; } s.gorillas.length = 0; h.x = 8; h.z = 9; g.x = 8; g.z = 3; give(s, h, g); g.lastKind = "paint"; const r = S.wield(s, 2, S.WIELD.indexOf(wieldKind)); setup(s, h, g); quiet(s, 1); return { s, h, g, r }; };
+    const guestAway = asGuest("paint", (s, h, g) => { hold(s, h); g.gold = true; g.lastKind = "gold"; }, (s) => S.grapple(s, 0, Math.PI, Math.atan2(1 - S.CONFIG.SHOT_Y, 6)));
+    const guestOut = asGuest("hook", (s, h, g) => { h.gold = true; hold(s, g); }, (s) => S.fire(s, 0, Math.PI, S.flatPitch(6, S.TOOLS.gold), "gold"));
+    const refused = (() => { const s = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }), g = s.actors[1]; g.wield = "paint"; return !S.wield(s, 1, S.WIELD.indexOf("gold")) && !S.wield(s, 1, S.WIELD.indexOf("hook")) && !S.wield(s, 1, 99) && !S.wield(s, 1, -1) && g.wield === "paint" && W.ACTIONS.includes("wield"); })();
+    const outMap = L.seatMap(2, 1), outBuf = new DataView(new ArrayBuffer(W.FRAME_MAX)), outLen = L.encode(guestOut.s, L.seatMap(2, 0), 1, 1, 1, outBuf), outGuest = S.create({ team: "red", seed: 4, size: 2, map: "town", prep: 0 }), outFrame = new DataView(outBuf.buffer.slice(0, outLen));
+    outGuest.gorillas.length = 0;
+    const framedOut = L.validFrame(outFrame, outGuest, L.seatMap(2, 0)) && !L.validFrame(new DataView(outBuf.buffer.slice(0, outLen + 1)), outGuest, L.seatMap(2, 0)); L.decode(outFrame, outGuest, L.seatMap(2, 0), new Float32Array(16));
+    const guests = { away: guestAway.r && guestAway.g.gold && !guestAway.h.gold, out: guestOut.r && guestOut.h.hook === 1 && guestOut.g.hook === 0, refused, framed: framedOut, agrees: outGuest.actors[0].hook === 1 && outGuest.actors[2].hook === 0 && outGuest.hooks[0].holder === 0,
+      events: ["goldhook", "hooksteal", "goldsteal", "gold"].every((t) => L.EVENT_TYPES.includes(t)) && !["golddrop", "goldget", "goldback", "hookdrop", "hookback"].some((t) => L.EVENT_TYPES.includes(t)), wire: W.WIRE === 5 };
+    record("block steals live: a guest's wield on the host decides what a hook or Golden AK fire can take, an unowned tool is refused, the frame carries the result to a guest exactly, and the drop events are gone (WIRE 5)",
+      Object.values(guests).every(Boolean), JSON.stringify(guests));
+    // Shots through the sim itself: bots meet a crouched, a higher and a lower target; no round passes a thin wall.
+    // The pair stand on the first open lane of Ooga Town with nothing built on or across it.
+    const shootAt = (kind, setup) => { const s = S.create({ team: "blue", seed: 6, size: 2, map: "town", prep: 0 }), a = s.actors[0], t = s.actors[2]; for (const q of s.actors) { q.bot = false; q.guard = 0; } s.gorillas.length = 0; a.x = t.x = [6, 8, 2, 0].find((x) => S.clearLine(x, -20, x, -8, 0.4) && S.groundAt(x, -20, 3, 0.2) === 0); a.z = -20; a.y = 0; t.z = -8; t.y = 0; s.actors[1].x = s.actors[3].x = 200; setup(s, a, t);
+      const ty = t.y, ay = a.y, tc = t.crouch, d = Math.hypot(t.x - a.x, t.z - a.z); S.fire(s, 0, Math.atan2(t.x - a.x, t.z - a.z), S.flatPitch(d, S.TOOLS[kind]) + S.aimRise(a, t, d), kind);
+      for (let i = 0; i < 150 && t.splat <= 0; i++) { t.y = ty; t.vy = 0; t.crouch = tc; a.y = ay; a.vy = 0; S.tick(s, S.CONFIG.STEP, still()); } return t.splat > 0; };
+    const aims = {};
+    for (const kind of ["paint", "ak", "gold"]) { aims[kind + "Crouch"] = shootAt(kind, (s, a, t) => { a.gold = true; t.crouch = true; }); aims[kind + "High"] = shootAt(kind, (s, a, t) => { a.gold = true; t.y = 2; }); aims[kind + "Low"] = shootAt(kind, (s, a, t) => { a.gold = true; a.y = 1.2; }); }
+    const through = (kind) => { let passed = 0; for (let k = 0; k < 40; k++) { const s = S.create({ team: "blue", seed: 6, size: 2, map: "haunted", prep: 0 }), a = s.actors[0]; for (const q of s.actors) { q.bot = false; q.x = 200; q.z = 200; } s.gorillas.length = 0; s.ghosts.length = 0; a.x = -1.8 + k * 0.09; a.z = 21.5 + (k % 7) * 0.031; a.y = 0; a.gold = true;
+      S.fire(s, 0, 0, S.flatPitch(5, S.TOOLS[kind]), kind); const q = s.shots.find((v) => v.live); if (!q) return -1; for (let i = 0; i < 40 && q.live; i++) { a.y = 0; a.vy = 0; S.tick(s, S.CONFIG.STEP, still()); } if (q.z > 24.7) passed++; } return passed; };
+    aims.wall = { paint: through("paint"), ak: through("ak"), gold: through("gold") };
+    record("block shots through the sim: bots hit a crouched, a higher and a lower target with paint and both AKs, and no round passes Haunted Hollow's 0.2 m gate", Object.entries(aims).every(([k, v]) => k === "wall" ? v.paint === 0 && v.ak === 0 && v.gold === 0 : v), JSON.stringify(aims));
+    // A guest hears an AK as an AK: the host's round goes out as its own event and arrives as one.
+    const gunHost = S.create({ team: "blue", seed: 2, size: 2, map: "town", prep: 0 }), gunGuest = S.create({ team: "blue", seed: 2, size: 2, map: "town", prep: 0 }), gunMap = L.seatMap(2, 0), gunBuf = new DataView(new ArrayBuffer(W.FRAME_MAX));
+    gunHost.gorillas.length = gunGuest.gorillas.length = 0; gunHost.eventCount = 0; S.fire(gunHost, 1, 0, 0, "ak"); const gunLen = L.encode(gunHost, gunMap, 1, 1, 1, gunBuf); gunGuest.eventCount = 0; L.decode(new DataView(gunBuf.buffer.slice(0, gunLen)), gunGuest, gunMap, new Float32Array(16));
+    const heard = [...gunGuest.events.slice(0, gunGuest.eventCount)].map((e) => e.type), cue = readFileSync(join(root, "src/js/scene-block.js"), "utf8").includes('else if (t === "gunfire") { c.gun(k);');
+    const panelChecks = { fort: !W.playable("fort") && W.playable("town") && W.playable("clank") === (W.MAPS.indexOf("clank") > 0), five: W.plannedSize({ size: 2, reg: [1, 2, 3, 4, 5] }) === 3, two: W.plannedSize({ size: 3, reg: [1, 2] }) === 3, retiredReg: !!W.parse({ v: W.WIRE, k: "reg", m: 0 }) && W.parse({ v: W.WIRE, k: "reg", m: 0 }).m === undefined, strictOpt: W.parse({ v: W.WIRE, k: "opt", n: 2, m: 0 }) === null };
+    record("block lobby and guest cue: a guest hears an AK round as gunfire, a saved Fort Chaos pick isn't playable, the panel's size counts everyone who has joined, and a retired map on Register is no pick while Options stays strict", heard.includes("gunfire") && !heard.includes("fire") && cue && Object.values(panelChecks).every(Boolean), JSON.stringify({ heard, cue, ...panelChecks }));
+    record("block wallets removed: no wallet or vending state in the sim, an actor or the wire, and a frame's length is exact", Object.values(gone).every(Boolean), JSON.stringify(gone));
+    // The sniper rifle is every Ooga's from the start, on every map, and fires and hits from open ground, no tower near.
+    const rifle = S.MAPS.map((map) => {
+      const s = S.create({ team: "blue", seed: 4, size: 2, map, prep: 0 }), a = s.actors[0], b = s.actors[2], armed = s.actors.every((q) => q.sniper === 1);
+      for (const q of s.actors) { q.bot = false; q.guard = 0; q.x = 200; q.z = 200; } s.gorillas.length = 0;
+      // Down the first lane across the middle with nothing standing in it: a map may put a tomb or a wall on any one line.
+      a.x = b.x = [8, 12, 4, 16, 0].find((x) => S.clearLine(x, 9, x, -9, 0.4)); a.y = b.y = 0; a.z = 9; b.z = -9;
+      const off = a.y === 0 && S.TEAMS.every((k) => { const [x0, x1, z0, z1] = S.ARENA.towers[k]; return !(a.x > x0 && a.x < x1 && a.z > z0 && a.z < z1); }), fired = S.fire(s, 0, Math.PI, 0, "sniper"), shot = s.shots.some((x) => x.live && x.kind === "sniper" && x.owner === 0);
+      const soon = !S.fire(s, 0, Math.PI, 0, "sniper");
+      for (let n = 0; n < 120 && b.splat <= 0; n++) { for (const q of s.actors) q.guard = 0; S.tick(s, S.CONFIG.STEP, still()); }
+      const hit = b.splat > 0, far = a.longShot, hits = a.hits;
+      S.reset(s, 9);
+      return { map, armed, off, fired, shot, soon, hit, far: +far.toFixed(1), hits, again: s.actors.every((q) => q.sniper === 1) };
+    });
+    record("block sniper: the rifle is in every Ooga's arsenal at the start of a round and after a reset on every map, fires from open ground with no tower near, keeps its cooldown, splats a rival 18 m off and counts the long shot",
+      rifle.length === S.MAPS.length && rifle.every((r) => r.armed && r.off && r.fired && r.shot && r.soon && r.hit && r.far > 17 && r.far < 19 && r.hits === 1 && r.again)
+      && S.TOOLS.sniper.max === 0 && S.TOOLS.sniper.cool === 0.35 && S.TOOLS.sniper.speed === 160, JSON.stringify(rifle));
+    // The results' line-up and its most valuable Ooga are the rules' word, so every page agrees: the winning side in seat
+    // order, and of it the most worth (three a block mined, two a block brought home, one a splat landed), a tie to
+    // more mined, then more brought home, then the lower seat, whatever a page's own numbering.
+    {
+      const mk = (winner, stats) => { const s = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }); s.over = true; s.winner = winner; stats.forEach(([c, r, h], i) => Object.assign(s.actors[i], { captures: c, rescues: r, hits: h })); return s; };
+      const teams = mk("blue", []).actors.map((a) => a.team).join();
+      const plain = mk("blue", [[1, 0, 2], [2, 0, 0], [3, 3, 9], [0, 0, 0]]), red = mk("red", [[3, 0, 0], [0, 0, 0], [0, 1, 1], [1, 0, 1]]);
+      const tieWorth = mk("blue", [[0, 3, 0], [2, 0, 0], [0, 0, 0], [0, 0, 0]]), tieMined = mk("blue", [[1, 0, 3], [1, 1, 1], [0, 0, 0], [0, 0, 0]]), tieAll = mk("blue", [[1, 1, 1], [1, 1, 1], [0, 0, 0], [0, 0, 0]]);
+      const none = mk(null, [[0, 0, 1], [0, 0, 0], [2, 0, 0], [0, 0, 0]]);
+      // A guest's page numbers its own Ooga 0: the seat map turns its numbering back to seats.
+      const guestMap = L.seatMap(2, 1), guestSeat = (i) => guestMap.toSeat[i], hostMap = L.seatMap(2, 0), hostSeat = (i) => hostMap.toSeat[i];
+      const hostPick = hostMap.toSeat[S.mvp(tieAll, hostSeat)], guestPick = guestMap.toSeat[S.mvp(tieAll, guestSeat)];
+      const out = { teams, worth: S.worth({ captures: 2, rescues: 1, hits: 4 }), plain: S.mvp(plain), red: S.mvp(red), tieWorth: S.mvp(tieWorth), tieMined: S.mvp(tieMined), tieAll: S.mvp(tieAll), none: S.mvp(none), hostPick, guestPick };
+      const page = readFileSync(new URL("../src/index.html", import.meta.url), "utf8"), sc = readFileSync(new URL("../src/js/scene-block.js", import.meta.url), "utf8"), trophyCss = readFileSync(new URL("../src/style.css", import.meta.url), "utf8");
+      record("block trophy MVP: the winning side's most valuable Ooga is the most worth, a tie to more mined, then more brought home, then the lower seat, the same on a host's and a guest's page; with no winner, of everyone; the trophy's podium, tables and medal use it and break ties by seat; the card has one picture of the winners, its stage, and no portrait row",
+        out.teams === "blue,blue,red,red" && out.worth === 12 && out.plain === 1 && out.red === 3 && out.tieWorth === 1 && out.tieMined === 1 && out.tieAll === 0 && out.none === 2 && out.hostPick === 0 && out.guestPick === 0
+        && /const mvp = SIM\.mvp\(sim, seatOfActor\);/.test(sc) && /trophyShow\(winner, worth, mvp\)/.test(sc) && (sc.match(/\|\| seatOfActor\(a\) - seatOfActor\(b\)\)/g) || []).length === 2
+        && !/lineup|renderFaceIcon|posePodium|podiumView|BM\.crown/i.test(sc) && !/block-lineup|block-crown/.test(page + trophyCss) && !("lineup" in S)
+        // The card shows what the MVP's worth counts (blocks brought home too), keeps names readable and its buttons in view.
+        && /\$\{sim\.actors\[mvp\]\.captures\} mined · \$\{sim\.actors\[mvp\]\.rescues\} brought home · \$\{sim\.actors\[mvp\]\.hits\} splats/.test(sc) && /home\.textContent = String\(sim\.actors\[i\]\.rescues\);/.test(sc)
+        && (page.match(/<small title="Blocks brought home">Home<\/small>/g) || []).length === 2 && /\.block-side-panel li span \{ overflow-wrap: anywhere; \}/.test(trophyCss)
+        && /\.block-trophy-board \.actions \{ position: sticky; bottom: 0;/.test(trophyCss) && /grid-template-columns: minmax\(0, 1fr\) 6ch 6ch 6ch;/.test(trophyCss), JSON.stringify(out));
+    }
+    // The hook takes the rivals' block off its stand wherever on it the hook is aimed, low or high, from the open side,
+    // on every map: a hook aimed low once bit the stand under the block and pulled the Ooga in instead.
+    {
+      const pulls = S.MAPS.map((map) => {
+        const row = { map, low: 0, mid: 0, high: 0, own: 0 };
+        for (const [key, aimY] of [["low", 0.3], ["mid", 0.9], ["high", 1.5], ["own", 0.5]]) for (let k = 0; k < 8; k++) {
+          const s = S.create({ team: "blue", seed: 4, size: 2, map, prep: 0 }), a = s.actors[0], f = s.flags[key === "own" ? "blue" : "red"], d = 6, ang = k / 8 * Math.PI * 2;
+          for (const q of s.actors) { q.bot = false; q.guard = 0; if (q !== a) { q.x = 300; q.z = 300; } } s.gorillas.length = 0;
+          a.x = f.x + Math.sin(ang) * d; a.z = f.z + Math.cos(ang) * d; a.y = 0; a.hook = 1; s.hooks[0].state = 1; s.hooks[0].holder = 0;
+          S.grapple(s, 0, Math.atan2(f.x - a.x, f.z - a.z), Math.atan2(aimY - S.CONFIG.SHOT_Y, d));
+          let took = false, bit = false;
+          for (let n = 0; n < 240 && !took && !bit; n++) { S.tick(s, S.CONFIG.STEP, still()); for (let i = 0; i < s.eventCount; i++) { took = took || s.events[i].type === "yank"; bit = bit || s.events[i].type === "hookbite"; } }
+          if (key === "own" ? bit && s.flags.blue.state === "home" : took) row[key]++;
+        }
+        return row;
+      });
+      record("block hook: the rivals' block comes off its stand to a hook aimed low or at its middle wherever one aimed high takes it (bar a low wall in the way), on every map; your own block at home is never pulled, the stand bites",
+        pulls.every((r) => r.high >= 2 && r.low >= 2 && r.low >= r.high - 1 && r.mid >= r.high - 1 && r.own >= 2) && S.CONFIG.HOOK_STAND_R ** 2 > 1.2 && S.CONFIG.HOOK_RANGE === 24, JSON.stringify(pulls));
+    }
+    // No recharge: a hook fires again the moment it is back in the hand, after a miss and after pulling a block in, and
+    // never while it is still out; a bot alone waits between throws.
+    {
+      const mk = () => { const s = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }), a = s.actors[0]; for (const q of s.actors) { q.bot = false; q.guard = 0; if (q !== a) { q.x = 300; q.z = 300; } } s.gorillas.length = 0; a.hook = 1; s.hooks[0].state = 1; s.hooks[0].holder = 0; return { s, a }; };
+      const until = (s, done, max = 600) => { let n = 0; for (; n < max && !done(); n++) S.tick(s, S.CONFIG.STEP, still()); return n; };
+      const m = mk(); m.a.x = 8; m.a.z = 9; m.a.y = 0;
+      const first = S.grapple(m.s, 0, 0, 1.2), whileOut = S.grapple(m.s, 0, 0, 1.2), flew = until(m.s, () => m.a.hk === 0), second = S.grapple(m.s, 0, 0, 1.2); until(m.s, () => m.a.hk === 0); const third = S.grapple(m.s, 0, 0, 1.2);
+      const b = mk(), f = b.s.flags.red; b.a.x = f.x; b.a.z = f.z + 6; b.a.y = 0; if (S.ARENA.stands.red.z > 0) b.a.z = f.z - 6;
+      const took = S.grapple(b.s, 0, Math.atan2(f.x - b.a.x, f.z - b.a.z), Math.atan2(1.5 - S.CONFIG.SHOT_Y, 6)); until(b.s, () => b.a.hk === 0);
+      const carrying = b.a.carrying === "red"; S.drop(b.s, 0); const afterBlock = S.grapple(b.s, 0, 0, 1.2);
+      const bot = mk(); bot.a.bot = true; bot.a.x = 8; bot.a.z = 9; S.grapple(bot.s, 0, 0, 1.2); until(bot.s, () => bot.a.hk === 0);
+      const out = { first, whileOut, flew, second, third, took, carrying, afterBlock, botWaits: bot.a.hookWait > 0, playerWaits: m.a.hookWait, cool: "HOOK_COOL" in S.CONFIG || "HOOK_YANK_COOL" in S.CONFIG || "hCool" in m.a };
+      record("block hook: no recharge: a hook that missed fires again the moment it is back, and again, and after pulling a block in; never while it is still out; only a bot waits between throws",
+        first && !whileOut && flew > 5 && flew < 240 && second && third && took && carrying && afterBlock && out.botWaits && out.playerWaits === 0 && !out.cool, JSON.stringify(out));
+    }
+    // The visitor's own running tally, this browser's: a finished round adds their counts once, solo or live; it adds up
+    // over rounds, survives a reload, takes in a save from before the tally without losing its rounds and best, and a
+    // round left early (not over) or only watched adds nothing.
+    {
+      const KEY = "oogaboogaland.v1", was = store.get(KEY);
+      store.set(KEY, JSON.stringify({ block: { wins: 2, games: 5, best: 61000 } }));
+      const g1 = BL.game.create({ catalog: [] }), old = { ...g1.state.block };
+      const round = (winner, time, stats, target = S.CONFIG.CAPTURES) => { const s = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0, target }); s.winner = winner; s.over = winner !== undefined; s.time = time; Object.assign(s.actors[0], stats); return s; };
+      const first = round("blue", 50, { captures: 2, rescues: 1, hits: 4, splats: 3 }), second = round("red", 70, { captures: 1, rescues: 0, hits: 2, splats: 5 }), left = round(undefined, 30, { captures: 2, rescues: 2, hits: 9, splats: 1 });
+      const t1 = S.tallyOf(first, 0, 0), t2 = S.tallyOf(second, 0, 3), t3 = S.tallyOf(left, 0, 0), longer = S.tallyOf(round("blue", 20, {}, 5), 0, 1);
+      const fastest = g1.recordBlock(t1), slower = g1.recordBlock(t2); if (t3) g1.recordBlock(t3);
+      const after = { ...g1.state.block }, reloaded = { ...BL.game.create({ catalog: [] }).state.block };
+      store.set(KEY, JSON.stringify({ block: { wins: 1, games: 2, best: 0, mined: -4, home: 7, splats: "x", splatted: 2.9, mvps: 9 } }));
+      const mended = { ...BL.game.create({ catalog: [] }).state.block };
+      if (was === undefined) store.delete(KEY); else store.set(KEY, was);
+      const want = JSON.stringify({ wins: 3, games: 7, best: 50000, mined: 3, home: 1, splats: 6, splatted: 8, mvps: 1 });
+      const sceneSrc = readFileSync(new URL("../src/js/scene-block.js", import.meta.url), "utf8"), pageSrc = readFileSync(new URL("../src/index.html", import.meta.url), "utf8");
+      record("block record: a finished round adds the visitor's own counts to a running tally once, two rounds add up, a reload keeps it, a save from before the tally keeps its rounds and best, bad counts start at 0, and a round left early or watched from the chairs adds nothing; the board and the trophy card show it",
+        JSON.stringify(old) === JSON.stringify({ wins: 2, games: 5, best: 61000, mined: 0, home: 0, splats: 0, splatted: 0, mvps: 0 }) && JSON.stringify(t1) === JSON.stringify({ won: true, ms: 50000, mined: 2, home: 1, splats: 4, splatted: 3, mvp: true })
+        && t2.won === false && t2.mvp === false && t3 === null && longer.ms === 0 && fastest === true && slower === false && JSON.stringify(after) === want && JSON.stringify(reloaded) === want
+        && JSON.stringify(mended) === JSON.stringify({ wins: 1, games: 2, best: 0, mined: 0, home: 7, splats: 0, splatted: 2, mvps: 2 })
+        && /const tally = onDeck\(\) \? null : SIM\.tallyOf\(sim, 0, mvp\), best = tally \? game\.recordBlock\(tally\) : false;/.test(sceneSrc) && (sceneSrc.match(/recordBlock\(/g) || []).length === 1
+        && ["mined", "home", "splats", "splatted", "mvps"].every((k) => pageSrc.includes(`id="block-rec-${k}"`)), JSON.stringify({ old, t1, t2, t3, after, reloaded, mended }));
+    }
+    // The controls list: five whole groups, each row key caps and a short action, no key twice in a group, and every
+    // key it names is one the scene handles (its key handler, the tool keys, the shared controls and the pointer);
+    // every key the handler takes is in it.
+    {
+      const src = readFileSync(new URL("../src/js/scene-block.js", import.meta.url), "utf8"), cssSrc = readFileSync(new URL("../src/style.css", import.meta.url), "utf8");
+      const groups = new Function(`return ${src.match(/const CONTROL_GROUPS = (\[[\s\S]*?\n  \]);/)[1]}`)();
+      const handled = new Set([...src.matchAll(/e\.key === "([^"]+)"/g)].map((m) => m[1].toUpperCase()));
+      for (const k of Object.keys(JSON.parse(src.match(/const TOOL_KEYS = (\{[^}]+\});/)[1].replace(/(\d):/g, '"$1":')))) handled.add(k);
+      if (/e\.code !== "KeyB"/.test(src)) handled.add("B");
+      if (/e\.key === "c" \|\| e\.key === "C"/.test(src)) handled.add("C");
+      const shared = ["W", "A", "S", "D", "Q", "E", "Shift", "Space", "Click", "Right click", "Wheel", "Esc", "Tab", "+", "−", "–", "Enter", "1", "2", "3", "4"];
+      const named = groups.flatMap(([, rows]) => rows.flatMap(([keys]) => keys)), words = groups.flatMap(([, rows]) => rows.map(([keys, what]) => keys.join(" ") + " " + what)).join(" | ");
+      const unknown = named.filter((k) => !shared.includes(k) && !handled.has(k.toUpperCase()));
+      const missing = [...handled].filter((k) => k.length === 1 && /[A-Z0-9?]/.test(k) && k !== "/" && !named.includes(k) && !named.includes(k.toLowerCase()) && !new RegExp(`\\(or ${k}\\)`).test(words) && !/^[1-8]$/.test(k) && k !== "_" && k !== "=");
+      const dupes = groups.filter(([, rows]) => new Set(rows.map(([keys]) => keys.join(" "))).size !== rows.length).map(([n]) => n);
+      const longest = Math.max(...groups.flatMap(([, rows]) => rows.map(([, what]) => what.length)));
+      const ctl = { names: groups.map(([n]) => n).join(), unknown, missing, dupes, longest, sniper: /Right click.*sniper scope/.test(words), hook: /R Fire, or let go/.test(words), drop: /K Drop the block/.test(words), bar: /U Hide the weapons bar/.test(words),
+        grid: /\.block-keys \{\s*display: grid;\s*grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 230px\), 1fr\)\);/.test(cssSrc) && !/column-count: 3/.test(cssSrc.slice(cssSrc.indexOf("Block Frenzy's controls list"))), summary: /paintSummary\(el\.help\)/.test(src) && !/wallets/.test(src.match(/const TOUCH_GROUPS = [^\n]*/)[0]) };
+      record("block controls: five whole groups (Move, Weapons, Hook, Block and crates, View and game) laid out as a grid, no key twice in a group, short actions, every key named is one the scene handles and every key it handles is named (the sniper scope, the hook's R, K, U among them)",
+        ctl.names === "Move,Weapons,Hook,Block and crates,View and game" && !unknown.length && !missing.length && !dupes.length && longest <= 34 && ctl.sniper && ctl.hook && ctl.drop && ctl.bar && ctl.grid && ctl.summary, JSON.stringify(ctl));
+    }
+    // The weapons bar: what a slot shows is the rules' word (not yours yet, yours and out, ready, and the count beside
+    // it), and the page's eight slots stand in key order, each named, the sniper rifle always among them.
+    {
+      const s = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }), a = s.actors[0], st = (k) => S.slotState(a, k), n = (k) => S.slotCount(a, k);
+      const fresh = { paint: [st("paint"), n("paint")], sniper: [st("sniper"), n("sniper")], ak: [st("ak"), n("ak")], grenade: [st("grenade"), n("grenade")], gold: [st("gold"), n("gold")], hook: [st("hook"), n("hook")], crate: n("crate") };
+      a.grenade = a.rocket = a.net = 0; const out = ["grenade", "rocket", "net"].map((k) => st(k) + n(k));
+      a.gold = true; a.hook = 1; a.hk = 1; a.akReload = 1; const owned = [st("gold"), n("gold"), st("hook"), n("hook"), n("ak")];
+      a.hk = 0; a.akReload = 0; a.akMag = 7; const settled = [n("hook"), n("ak")];
+      const html = readFileSync(new URL("../src/index.html", import.meta.url), "utf8"), bar = html.slice(html.indexOf('<div class="block-slots">'), html.indexOf('<div class="block-actions">'));
+      const slots = [...bar.matchAll(/<button type="button" data-tool="(\w+)" aria-pressed="\w+" aria-label="([^"]+)" title="([^"]+)"[^>]*><kbd>(\d)<\/kbd><svg class="block-slot-icon" viewBox="0 0 16 12"[^>]*>(.*?)<\/svg><b><\/b><\/button>/g)];
+      const keys = JSON.parse(readFileSync(new URL("../src/js/scene-block.js", import.meta.url), "utf8").match(/const TOOL_KEYS = (\{[^}]+\});/)[1].replace(/(\d):/g, '"$1":'));
+      const css = readFileSync(new URL("../src/style.css", import.meta.url), "utf8");
+      // The board's weapons preview: one entry a tool in key order, named as its slot is, each with a line whose numbers
+      // are the rules' own, and a previous and a next button; reduced motion neither turns nor steps it.
+      const scene = readFileSync(new URL("../src/js/scene-block.js", import.meta.url), "utf8"), AR = S.ARSENAL;
+      const preview = { tools: AR.map(([k]) => k).join() === S.WIELD.filter((k) => k !== "grab").join() && AR.every(([k], i) => keys[i + 1] === k), names: AR.every(([, name], i) => slots[i] && slots[i][2] === name),
+        blurbs: AR.every(([, , b]) => b.length >= 30 && b.length <= 80 && b.endsWith(".")), numbers: S.TOOLS.grenade.max === 3 && S.TOOLS.net.max === 3 && S.TOOLS.rocket.max === 1 && S.CONFIG.AK_MAG === 30 && S.CONFIG.HOOKS === 2 && S.TOOLS.paint.max === 0 && S.TOOLS.gold.max === 0,
+        board: /const showing = preview\.wide && el\.intro\.hidden;/.test(scene) && /show\.node\.visible = showing;/.test(scene) && /el\.weaponCard\.hidden = !showing;/.test(scene) && html.includes('id="block-intro" data-intro="block"'),
+        clear: /right: max\(12px, min\(9vw, calc\(50vw - 46vh - 250px\)\)\);/.test(css) && /if \(SHOW_AT\.x > edge\) \{\s*renderer\.ray\(edge, SHOW_AT\.y, camera, SHOW_RAY\);/.test(scene),
+        buttons: /data-weapon-step="-1" aria-label="Previous weapon"/.test(html) && /data-weapon-step="1" aria-label="Next weapon"/.test(html) && html.includes('id="block-weapon-blurb"'),
+        calm: /if \(!CLOUD_CALM && showing\) \{\s*show\.spin = [^}]*showWeapon\(show\.i \+ 1\);\s*\}/.test(scene), hidden: /#block-board\[hidden\] ~ \.block-weapon-card \{\s*display: none/.test(css.replace(/#block-board\[hidden\] ~ \.block-preview-name,\s*/, "")) };
+      record("block board: no Ooga picker, only the Ooga's name; the cast still starts from the visitor's own Ooga, then the one driven in, then the roster's first",
+        !/<select[^>]*id="block-ooga"/.test(html) && !html.includes("block-preview-pick") && /<p class="block-ooga" id="block-ooga"><\/p>/.test(html) && !/oogaPick|previewPick/.test(scene)
+        && /const first = own \|\| selection\.ooga \|\| names\[0\] \|\| null;/.test(scene) && /el\.previewName\.firstChild\.textContent = el\.oogaName\.textContent = /.test(scene), "");
+      record("block weapons preview: the board's list covers every tool of the arsenal in key order under its slot's name, each with a short line whose numbers are the rules', with previous and next buttons, hidden with the board and still under reduced motion",
+        Object.values(preview).every(Boolean), JSON.stringify({ preview, arsenal: AR.map(([k, n]) => k + ":" + n) }));
+      const named = slots.every((m, i) => Number(m[4]) === i + 1 && keys[i + 1] === m[1] && m[2].length > 4 && m[3] === `${m[2]} (${i + 1})` && (m[5].match(/<path/g) || []).length >= 5);
+      record("block weapons bar: a slot is locked until its tool is owned, empty with a 0 when it runs out and ready otherwise, counts show only where a tool runs out or reloads, and the eight named slots stand in key order with detailed icons, the selected one grown in place and still under reduced motion",
+        fresh.paint.join() === "ready," && fresh.sniper.join() === "ready," && fresh.ak.join() === "ready,30" && fresh.grenade.join() === "ready,3" && fresh.gold.join() === "locked," && fresh.hook.join() === "locked," && fresh.crate === "3"
+        && out.join() === "empty0,empty0,empty0" && owned.join() === "ready,,ready,…,…" && settled.join() === ",7"
+        && slots.length === 8 && named && slots[4][1] === "sniper" && !/data-tool="sniper"[^>]*disabled/.test(bar) && html.includes('id="block-tool-name"')
+        && /\.block-slots button\[aria-pressed="true"\] \{[^}]*transform: translateY\(-4px\) scale\(1\.22\)/.test(css)
+        // The chosen weapon's name stays up over its slot: no timer hides it, and it moves with the choice.
+        && !/nameTimer|setTimeout\(hideToolName/.test(scene) && /tool = k;\s*showToolName\(k\);/.test(scene) && /placeBar\(\);\s*\/\/ The chosen weapon's name stands over its slot from the round's start\.\s*showToolName\(tool\);/.test(scene) && /n\.dataset\.at = "slot"; n\.style\.left = `\$\{x\}px`;/.test(scene)
+        && /prefers-reduced-motion: reduce\) \{[^@]*\.block-tool-name\[data-at="slot"\] \{\s*transition: none;/.test(css) && /prefers-reduced-motion: reduce\) \{\s*\.block-slots button,\s*\.block-tool-name \{\s*transition: none/.test(css),
+        JSON.stringify({ fresh, out, owned, settled, slots: slots.map((m) => m[1]), named }));
+    }
     // The session over a fake room: a guest's input moves its actor on the host, a leaver becomes an NPC, the host hands over.
     const session = (selfId) => {
       const subs = new Set(), frames_ = new Set(), sent = [], bins = [];
-      const net = { state: { selfId }, serverNow: () => context.clock + (context.skew || 0), subscribeBf: f => { subs.add(f); return () => subs.delete(f); }, subscribeBfFrame: f => { frames_.add(f); return () => frames_.delete(f); }, sendBf: m => { sent.push(m); return true; }, sendBfInput: m => { sent.push({ ...m }); return true; }, sendBfFrame: b => { bins.push(b.slice().buffer); } };
+      const net = { state: { selfId }, serverNow: () => context.clock + (context.skew || 0), subscribeBf: f => { subs.add(f); return () => subs.delete(f); }, subscribeBfFrame: f => { frames_.add(f); return () => frames_.delete(f); }, sendBf: m => { sent.push(m); return true; }, sendBfInput: m => { sent.push({ ...m, a: m.a && m.a.slice() }); return true; }, sendBfFrame: b => { bins.push(b.slice().buffer); } };
       const seen = { sim: null, started: 0 }, live = L.create({ net, now: () => context.clock, resolveBody: () => {}, onMatch: () => {}, onHost: () => { seen.tookOver = true; },
-        onStart: (m, role, map) => { seen.started++; seen.role = role; const s = S.create({ team: map.team, seed: m.seed, size: m.size, map: "fort", prep: 0 }); seen.sim = s; S.reset(s, m.seed); live.bind(s); } });
+        onStart: (m, role, map) => { seen.started++; seen.role = role; const s = S.create({ team: map.team, seed: m.seed, size: m.size, map: "fort", prep: 0 }); seen.sim = s; s.anyTime = W.RULES[m.rule] === "any"; S.reset(s, m.seed); live.bind(s); } });
       return { live, sent, bins, seen, tell: m => { for (const f of subs) f({ k: "match", ...m }); }, input: m => { for (const f of subs) f({ k: "input", ...m }); }, frame: b => { for (const f of frames_) f(b); } };
     };
     { const a = session(1); a.live.register(1); record("block live: registering sends the map picked on the board", a.sent.length === 1 && a.sent[0].k === "reg" && a.sent[0].m === 1, JSON.stringify(a.sent)); a.live.dispose?.(); }
     context.clock = 1000;
-    const match = { s: "0123456789abcdef", phase: "play", size: 2, map: 0, reg: [], ready: [], seats: [10, 20, 30, 0], host: 10, epoch: 1, tag: 99, seed: 5 };
+    const match = { s: "0123456789abcdef", phase: "play", size: 2, map: 0, rule: 1, reg: [], ready: [], seats: [10, 20, 30, 0], host: 10, epoch: 1, tag: 99, seed: 5 };
     const A = session(10), B = session(20), D = session(40);
     A.tell(match); B.tell(match); D.tell(match);
     const a = A.seen.sim, b = B.seen.sim, dk = D.seen.sim;
+    {
+      // The match's rule is every page's: host, guest and viewer start the round under it; a match without one is classic.
+      const C2 = session(10), D2 = session(20), plainMatch = { ...match, s: "fedcba9876543210", tag: 98 }; delete plainMatch.rule; C2.tell(plainMatch); D2.tell(plainMatch);
+      const sceneSrc = readFileSync(new URL("../src/js/scene-block.js", import.meta.url), "utf8"), pageSrc = readFileSync(new URL("../src/index.html", import.meta.url), "utf8");
+      record("block scoring rule in a live round: host, guest and viewer all start under the match's rule, and classic when it names none; the board has both choices in the owner's words, the scene fixes the rule as the round starts and sends the first in's pick",
+        a.anyTime === true && b.anyTime === true && dk.anyTime === true && C2.seen.sim.anyTime === false && D2.seen.sim.anyTime === false
+        && /data-rule="home" aria-pressed="true" aria-label="Block must be home \(classic\)"/.test(pageSrc) && /data-rule="any" aria-pressed="false" aria-label="Block doesn't need to be home"/.test(pageSrc)
+        && /sim\.anyTime = selection\.rule === "any";\s*SIM\.reset\(sim, seed\);/.test(sceneSrc) && /round\.setOptions\(round\.match\.size, WIRE\.MAPS\.indexOf\(selection\.map\), WIRE\.RULES\.indexOf\(k\)\)/.test(sceneSrc) && !/\bduel\b/.test(sceneSrc),
+        JSON.stringify({ host: a.anyTime, guest: b.anyTime, viewer: dk.anyTime, plain: [C2.seen.sim.anyTime, D2.seen.sim.anyTime] }));
+    }
     record("block live: roles and NPC fill from the seats", A.seen.role === "host" && B.seen.role === "guest" && D.seen.role === "watch" && a.actors[3].bot === true && !a.actors[0].bot && !b.actors[0].bot);
     const mv = A.live.map.toLocal[1], before = a.actors[mv].x;
     A.input({ from: 1, s: match.s, q: 1, x: 1000, z: 0, f: 0, b: 1 });
@@ -7342,6 +7604,66 @@ const gameRulesChecks = async () => {
     record("block live: no game action works from the chairs", D.live.act("drop", 0) === false && D.sent.filter(m => m.k === "input").length === 0);
     B.live.after(1, still());
     record("block live: a guest sends bounded input", B.sent.some(m => m.k === "input" && m.q === 0 && m.s === match.s));
+    // A guest picks the sniper rifle and fires it from the ground: both go to the host as actions, which the wire takes
+    // and the host's rules allow.
+    {
+      const g = a.actors[mv]; g.cooldown = g.splat = g.trapped = g.guard = 0; g.y = 0; g.wield = "paint";
+      const asked = B.live.act("wield", 0, S.WIELD.indexOf("sniper")) && B.live.act("fire", 0, 0.5, 0, "sniper");
+      B.live.after(1, still());
+      const msg = B.sent.filter(m => m.k === "input" && m.a).pop(), parsed = msg ? W.parse({ ...msg, v: W.WIRE }) : null;
+      if (parsed) { A.input({ ...parsed, from: 1, s: match.s, q: 1000 }); A.live.hostStep(); }
+      const shot = a.shots.find(x => x.live && x.kind === "sniper" && x.owner === mv);
+      record("block sniper: a guest's pick and shot reach the host as wield and fire actions the wire accepts, and the host fires the rifle for it off any tower",
+        asked === true && !!parsed && parsed.a.length === 8 && W.ACTIONS[parsed.a[0]] === "wield" && W.ACTIONS[parsed.a[4]] === "fire" && W.KINDS[parsed.a[7]] === "sniper"
+        && g.wield === "sniper" && !!shot && g.y < S.CONFIG.TOWER_TOP - 1 && g.lastKind === "sniper", JSON.stringify({ asked, msg, wield: g.wield, shot: !!shot }));
+    }
+    // A guest's every tool choice, Lift (the last) included, reaches the host in the action's kind slot with a fire
+    // beside it: the whole message passes the wire's check and both act on the host's sim.
+    {
+      const g = a.actors[mv], q0 = B.sent.length;
+      g.gold = true; g.hook = 1; a.hooks[0].state = 1; a.hooks[0].holder = mv; g.cooldown = g.splat = g.trapped = 0; g.y = 0;
+      const reached = S.WIELD.map((kind, idx) => {
+        B.live.act("wield", 0, idx); B.live.act("fire", 0, 0.4, 0, "paint");
+        B.live.after(1, still());
+        const msg = B.sent.slice(q0).filter(m => m.k === "input" && m.a).pop(), parsed = msg ? W.parse({ ...msg, v: W.WIRE }) : null;
+        g.cooldown = 0; const shots = a.shots.filter(x => x.live && x.owner === mv).length;
+        if (parsed) { A.input({ ...parsed, from: 1, s: match.s, q: 2000 + idx }); A.live.hostStep(); }
+        return { kind, parsed: !!parsed, slot: parsed ? parsed.a[3] : -1, yaw: parsed ? parsed.a[1] : null, wield: g.wield, fired: a.shots.filter(x => x.live && x.owner === mv).length > shots || g.lastKind === "paint" };
+      });
+      record("block live wield: every tool a guest can choose, Lift included, goes in the action's kind slot (never the yaw's), passes the wire's check with a fire beside it, and sets the guest's tool on the host",
+        reached.length === 9 && reached.every((r, idx) => r.parsed && r.slot === idx && r.yaw === 0 && r.wield === r.kind && r.fired) && S.WIELD.length <= W.KINDS.length, JSON.stringify(reached));
+      g.wield = "paint";
+    }
+    // What is in hand travels in the frame: a guest draws each Ooga's tool, and a page that takes over as host keeps it,
+    // so a hook still takes Golden AKs held out after a handover; a bot's (no choice) stays its last fired.
+    {
+      const hostSim = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }), hmap = L.seatMap(2, 0), gmap = L.seatMap(2, 1);
+      for (const q of hostSim.actors) { q.x = 300 + q.id * 5; q.z = 300; q.y = 0; } hostSim.gorillas.length = 0;
+      const r1 = hostSim.actors[2], bot = hostSim.actors[3];
+      r1.gold = true; r1.wield = "gold"; r1.lastKind = "ak"; bot.bot = true; bot.wield = ""; bot.lastKind = "net"; hostSim.actors[1].wield = "grab"; hostSim.actors[1].lastKind = "sniper";
+      const buf = new DataView(new ArrayBuffer(W.FRAME_MAX)), len = L.encode(hostSim, hmap, 1, 1, 1, buf), frame = new DataView(buf.buffer.slice(0, len));
+      const guest = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }); guest.gorillas.length = 0;
+      const ok = L.validFrame(frame, guest, gmap); L.decode(frame, guest, gmap, new Float32Array(16));
+      const onGuest = (seat) => guest.actors[gmap.toLocal[seat]];
+      const seen = { valid: ok, rival: onGuest(2).wield === "gold" && S.heldOf(onGuest(2)) === "gold", bot: onGuest(3).wield === "" && S.heldOf(onGuest(3)) === "net", lift: onGuest(1).wield === "grab" };
+      // Now the guest's page hosts: its own Ooga (the old seat 1, local 0) hooks the rival who has the AKs out.
+      const me = guest.actors[0], rv = onGuest(2);
+      for (const q of guest.actors) { q.guard = 0; q.bot = q !== me && q.bot; } me.x = 8; me.z = 9; rv.x = 8; rv.z = 3; me.hook = 1; guest.hooks[0].state = 1; guest.hooks[0].holder = 0; me.gold = false;
+      S.grapple(guest, 0, Math.PI, Math.atan2(1 - S.CONFIG.SHOT_Y, 6));
+      for (let i = 0; i < 120; i++) { for (const q of guest.actors) q.guard = 0; S.tick(guest, S.CONFIG.STEP, still()); }
+      seen.handover = me.gold && !rv.gold;
+      const sceneSrc = readFileSync(new URL("../src/js/scene-block.js", import.meta.url), "utf8");
+      seen.drawn = /const held = i === 0 \? tool : SIM\.heldOf\(s\) \|\| "paint"/.test(sceneSrc) && !/s\.lastKind \|\| "paint"/.test(sceneSrc);
+      // The results count seats by the round's own map, kept until the board shows again, never a page's own numbering.
+      seen.seats = /liveSeats = map;/.test(sceneSrc) && /const showBoard = \(\) => \{\s*liveSeats = null;/.test(sceneSrc) && /const seatOfActor = \(i\) => liveSeats \? liveSeats\.toSeat\[i\] : i;/.test(sceneSrc) && !/round\.map/.test(sceneSrc);
+      const tie = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }); tie.over = true; tie.winner = "blue"; for (const q of tie.actors) Object.assign(q, { captures: 1, rescues: 0, hits: 1 });
+      seen.sameMvp = hmap.toSeat[S.mvp(tie, (i) => hmap.toSeat[i])] === gmap.toSeat[S.mvp(tie, (i) => gmap.toSeat[i])] && hmap.toSeat[S.mvp(tie, (i) => hmap.toSeat[i])] === 0;
+      // The first waiter's Scoring pick goes to the match with their board's map, in a round as in the lobby.
+      seen.rule = /if \(firstRegistered\(\)\) round\.setOptions\(round\.match\.size, WIRE\.MAPS\.indexOf\(selection\.map\), WIRE\.RULES\.indexOf\(k\)\);\s*if \(boardInMatch\) return;/.test(sceneSrc);
+      seen.defaultMap = S.create().map === "town" || S.ARENA.id === "town";
+      record("block live held tools: the frame carries what each Ooga has in hand, a guest draws it and keeps a bot's last fired, a page that takes over hosts with it (a hook still takes AKs held out), the results count seats by the round's own map to the board (the same MVP on host and guest in a tie), the first waiter's Scoring pick is sent in a round, and a new sim is on Ooga Town",
+        Object.values(seen).every(Boolean), JSON.stringify(seen));
+    }
     const leftA = { ...match, seats: [10, 0, 30, 0] };
     A.tell(leftA); record("block live: a leaver's seat falls back to an NPC", a.actors[mv].bot === true);
     const handed = { ...match, seats: [0, 20, 30, 0], host: 20, epoch: 2 };
@@ -7401,9 +7723,8 @@ const gameRulesChecks = async () => {
       record("block live: events the wire demands an actor for are only ever raised with a real Ooga", odd.length === 0, odd.join(","));
       const frameOf = (fix) => { const h = S.create({ team: "blue", seed: 1, size: 2, map: "fort", prep: 0 }), m = L.seatMap(2, 0), b = new DataView(new ArrayBuffer(W.FRAME_MAX)); fix(h); return new DataView(b.buffer.slice(0, L.encode(h, m, 1, 1, 1, b))); };
       const viewS = S.create({ team: "blue", seed: 1, size: 2, map: "fort", prep: 0 }), viewM = L.seatMap(2, 0);
-      const wallet = (state, owner, stuck) => (h) => { Object.assign(h.wallets[0], { live: true, state, owner, stuck, team: "blue", look: 0, x: 0, y: 0, z: 0, fuse: 1 }); };
       const event = (type, actor) => (h) => { h.eventCount = 1; Object.assign(h.events[0], { type, team: "blue", actor, by: -1, x: 0, y: 0, z: 0 }); };
-      record("block live: a frame naming no Ooga where one is required is refused; legal no-Ooga events pass", !L.validFrame(frameOf(wallet(0, -1, -1)), viewS, viewM) && !L.validFrame(frameOf(wallet(3, 0, -1)), viewS, viewM) && L.validFrame(frameOf(wallet(1, -1, -1)), viewS, viewM) && !L.validFrame(frameOf(event("pickup", -1)), viewS, viewM) && L.validFrame(frameOf(event("go", -1)), viewS, viewM));
+      record("block live: a frame naming no Ooga where one is required is refused; legal no-Ooga events pass", !L.validFrame(frameOf(event("pickup", -1)), viewS, viewM) && L.validFrame(frameOf(event("go", -1)), viewS, viewM));
       record("regression: Enter, Space and Play share one menu helper that does nothing from the chairs and leaves a live results screen for the shared menu", scene.includes('if (e.key === "Enter" && phase !== "play") beginFromMenu();') && scene.includes('return beginFromMenu();') && /beginFromMenu = \(\) => \{\s*if \(onDeck\(\)\) return false;\s*if \(phase === "results" && kept\) \{ showBoard\(\); return true; \}/.test(scene));
       record("regression: the zoom keys work from the chairs, ahead of the check that ends key handling outside play", scene.indexOf('if (onDeck()) { if (e.key === "+"') > 0 && scene.indexOf('if (onDeck()) { if (e.key === "+"') < scene.indexOf('if (phase !== "play" || e.repeat'));
       record("regression: the last frame's winning capture is heard before the reset, and a thrown event can't leave the queue full", /renderLive = \(m\) => \{[\s\S]{0,200}hearCaptures\(\)/.test(scene) && scene.includes("} finally { sim.eventCount = 0; }"));
@@ -7493,7 +7814,7 @@ const gameRulesChecks = async () => {
     // own side carries it back, a quiz trap that holds and protects until answered, a net that slows and grounds, a
     // crate pushed by walking into it, and three captures deciding the round. Nothing here repeats a formula.
     const S = BL.blockSim, A = S.ARENA, still = { x: 0, z: 0, sprint: 0, jump: 0 };
-    const sim = S.create({ team: "blue", seed: 7, prep: 0 });
+    const sim = S.create({ map: "fort", team: "blue", seed: 7, prep: 0 });
     for (const a of sim.actors) if (a.id) a.bot = false;
     // Still air, so nothing drifts.
     Object.assign(sim.weather, { left: 1e9 });
@@ -7507,12 +7828,16 @@ const gameRulesChecks = async () => {
     put(me, theirs.x + 4, theirs.z);
     put(me, sim.flags.red.x, sim.flags.red.z);
     const regrab = me.carrying === "red";
+    // The feed and notices tell a carry from a throw by the event's y: 0 for a carry.
+    const carried = (type) => { for (let i = 0; i < sim.eventCount; i++) if (sim.events[i].type === type) return sim.events[i].y === 0; return false; };
     sim.flags.blue.state = "carried"; sim.flags.blue.carrier = 2;
+    sim.eventCount = 0;
     put(me, mine.x, mine.z);
-    const noScoreAway = sim.score.blue === 0 && me.carrying === "red";
+    const noScoreAway = sim.score.blue === 0 && me.carrying === "red" && carried("waiting");
     sim.flags.blue.state = "home"; sim.flags.blue.carrier = null;
+    sim.eventCount = 0;
     put(me, mine.x + 0.2, mine.z);
-    const scored = sim.score.blue === 1 && sim.flags.red.state === "home" && !me.carrying;
+    const scored = sim.score.blue === 1 && sim.flags.red.state === "home" && !me.carrying && carried("capture");
     put(me, theirs.x, theirs.z);
     put(me, theirs.x + 4, theirs.z + 3);
     const rival = sim.actors[2];
@@ -7570,9 +7895,241 @@ const gameRulesChecks = async () => {
     record("block frenzy rules: pickup, a drop held until you step out, scoring only with your own block home, a splat drops the carrier's block, which stays until its side touches it home, a quiz trap holds and shields, a net slows and grounds, a crate pushes, a pass is caught, a crate stacks and a thrown one stuns",
       picked && dropped && held && regrab && noScoreAway && scored && splatted && stays && rescued && returned && trapped && frozen && shielded && freed && netted && pushed && caught && bonked,
       JSON.stringify({ picked, dropped, held, regrab, noScoreAway, scored, splatted, stays, rescued, returned, trapped, frozen, shielded, freed, netted, pushed, caught, lifted, stacked, bonked }));
+    {
+      // A throw home: the rivals' block coming down in the thrower's capture zone is a capture for the thrower, on the
+      // same terms as carrying it in. `lob` throws through `pass`, then sets where the block comes down from.
+      const C = S.CONFIG, R2 = (e, c) => Math.hypot(e.x - c.x, e.z - c.z);
+      const fresh = (map, target = C.CAPTURES) => {
+        const r = S.create({ team: "blue", seed: 7, prep: 0, map, target });
+        r.actors.forEach((a, i) => { a.bot = false; a.x = i * 2 - 3; a.z = 0; a.y = 0; });
+        return r;
+      };
+      const settle = (r, more = 0) => {
+        const seen = [];
+        const look = () => { S.tick(r, C.STEP, still); for (let i = 0; i < r.eventCount; i++) seen.push({ ...r.events[i] }); r.eventCount = 0; };
+        for (let t = 0; t < 3 && (r.flags.red.state === "flying" || r.flags.blue.state === "flying"); t += C.STEP) look();
+        for (let t = 0; t < more; t += C.STEP) look();
+        return seen;
+      };
+      const hold = (r, id, team) => { const f = r.flags[team]; f.state = "carried"; f.carrier = id; r.actors[id].carrying = team; return f; };
+      const lob = (r, id, team, x, z, y = 0.8, vx = 0, vz = 0) => {
+        const f = hold(r, id, team);
+        r.eventCount = 0;
+        S.pass(r, id, 0);
+        f.x = x; f.y = y; f.z = z; f.vx = vx; f.vy = 0; f.vz = vz;
+        return settle(r);
+      };
+      const scoredBy = (r, seen, id, team, c, radius) => {
+        const e = seen.find((k) => k.type === "capture"), a = r.actors[id];
+        return !!e && e.actor === id && e.team === team && e.y === 1 && R2(e, c) < radius && r.score[team] === 1 && a.captures === 1 && a.gold && r.goldLeft === C.GOLD_GUNS - 1 &&
+          r.actors.every((k) => k === a || k.captures === 0) && r.flags.red.state === "home" && r.flags.blue.state === "home" && r.flags.red.thrower === -1 && !seen.some((k) => k.type === "landed");
+      };
+      const noScore = (r, f) => r.score.blue === 0 && r.score.red === 0 && r.actors.every((k) => k.captures === 0) && f.state === "dropped";
+      const rows = {};
+      for (const map of S.MAPS) {
+        const I = S.ARENAS[map], blue = I.stands.blue, red = I.stands.red, row = rows[map] = {};
+        let r = fresh(map), seen = lob(r, 1, "red", blue.x + 0.5, blue.z);
+        row.stand = scoredBy(r, seen, 1, "blue", blue, C.STAND_R);
+        r = fresh(map); seen = lob(r, 2, "blue", red.x - 0.5, red.z);
+        row.redStand = scoredBy(r, seen, 2, "red", red, C.STAND_R);
+        r = fresh(map); seen = lob(r, 1, "red", blue.x + C.STAND_R - 0.05, blue.z);
+        row.justInside = r.score.blue === 1;
+        r = fresh(map); seen = lob(r, 1, "red", blue.x + C.STAND_R + 0.05, blue.z);
+        row.justOutside = noScore(r, r.flags.red) && !seen.some((k) => k.type === "capture") && seen.some((k) => k.type === "landed");
+        // Your own block away: no score, the block lies there, and the thrower is told.
+        r = fresh(map);
+        const away = S.restSpot(10, 10), clear = r.actors.every((k) => Math.hypot(k.x - away.x, k.z - away.z) > C.PICK_R * 2);
+        Object.assign(r.flags.blue, { state: "dropped", x: away.x, z: away.z, y: 0 });
+        seen = lob(r, 1, "red", blue.x + 0.5, blue.z);
+        row.ownAway = clear && r.flags.blue.state === "dropped" && noScore(r, r.flags.red) && seen.some((k) => k.type === "waiting" && k.actor === 1 && k.team === "blue" && k.y === 1) && seen.some((k) => k.type === "landed");
+        // The alternate rule permits exactly the same throw with the team's own block away.
+        r = fresh(map); r.anyTime = true;
+        Object.assign(r.flags.blue, { state: "dropped", x: away.x, z: away.z, y: 0 });
+        seen = lob(r, 1, "red", blue.x + 0.5, blue.z);
+        row.anyTime = scoredBy(r, seen, 1, "blue", blue, C.STAND_R) && !seen.some(k => k.type === "waiting");
+        // A side's own block, into the rivals' zone or its own.
+        r = fresh(map); lob(r, 0, "blue", red.x + 0.5, red.z);
+        row.ownBlockThere = noScore(r, r.flags.blue);
+        r = fresh(map); seen = lob(r, 0, "blue", blue.x + 0.5, blue.z);
+        row.ownBlockHome = noScore(r, r.flags.blue) && !seen.some((k) => k.type === "waiting");
+        // The rivals' block landing in the rivals' own zone is no capture for the thrower either.
+        r = fresh(map); lob(r, 1, "red", red.x + 0.5, red.z);
+        row.theirZone = noScore(r, r.flags.red);
+      }
+      // A map with its own scoring spot counts there as well as at the stand, to `GOAL_R`, and not on the roof over a stand.
+      const H = S.ARENAS.haunted, goal = H.goals.blue, stand = H.stands.blue;
+      let r = fresh("haunted"), seen = lob(r, 1, "red", goal.x + 0.5, goal.z);
+      const goalSpot = scoredBy(r, seen, 1, "blue", goal, C.GOAL_R);
+      r = fresh("haunted"); lob(r, 1, "red", goal.x + C.GOAL_R - 0.05, goal.z);
+      const goalInside = r.score.blue === 1;
+      r = fresh("haunted"); lob(r, 1, "red", goal.x + C.GOAL_R + 0.05, goal.z);
+      const goalOutside = noScore(r, r.flags.red);
+      r = fresh("haunted"); lob(r, 1, "red", stand.x, stand.z, 3.2);
+      const roof = noScore(r, r.flags.red);
+      // Struck cover inside the zone: at 6 m/s it would have flown past the ring, but it falls where it hit.
+      // The rebuilt house leaves the ring clear, so place real buildable cover instead of relying on an old wall.
+      r = fresh("haunted");
+      Object.assign(r.actors[0], { x: goal.x, z: goal.z + 0.6, y: 0, grounded: true, flight: 0 });
+      const builtCover = S.build(r, 0, 0);
+      Object.assign(r.actors[0], { x: -3, z: 0 });
+      S.tick(r, C.STEP, still);
+      let wall = null;
+      for (let k = 0; k < 72 && !wall; k++) for (let d = 1; d < C.GOAL_R - 0.1 && !wall; d += 0.05) {
+        const th = k / 72 * Math.PI * 2;
+        if (S.solidAt(goal.x + Math.sin(th) * d, 0.65, goal.z + Math.cos(th) * d)) wall = { th, d };
+      }
+      seen = wall ? lob(r, 1, "red", goal.x + Math.sin(wall.th) * (wall.d - 0.6), goal.z + Math.cos(wall.th) * (wall.d - 0.6), 0.7, Math.sin(wall.th) * 6, Math.cos(wall.th) * 6) : [];
+      const hit = seen.find((k) => k.type === "capture"), offWall = builtCover && !!wall && !!hit && r.score.blue === 1 && Math.abs(R2(hit, goal) - wall.d) < 0.15;
+      // A real arc through `pass` alone, from just the throw's range out, in by the gate.
+      const arcFrom = (r) => { const a = r.actors[1], s = S.ARENAS.fort.stands.blue; a.x = s.x; a.z = s.z - 13.7; a.y = 0; a.vx = a.vz = 0; hold(r, 1, "red"); r.eventCount = 0; return S.pass(r, 1, 0); };
+      r = fresh("fort");
+      const arcThrew = arcFrom(r); seen = settle(r);
+      const arc = arcThrew && scoredBy(r, seen, 1, "blue", S.ARENAS.fort.stands.blue, C.STAND_R);
+      // Caught short of the zone: the catcher carries it, and the throw scores nothing.
+      r = fresh("fort"); arcFrom(r);
+      const catcher = r.actors[0], fs = S.ARENAS.fort.stands.blue; catcher.x = fs.x; catcher.z = fs.z - 2.6;
+      for (let t = 0; t < 1.5 && r.flags.red.state === "flying"; t += C.STEP) S.tick(r, C.STEP, still);
+      const caught = catcher.carrying === "red" && r.flags.red.state === "carried" && r.score.blue === 0 && r.actors[1].captures === 0;
+      // A block off a hook's rope never lands as a throw: on the rope it doesn't fall, a promoted host forgets any thrower.
+      r = fresh("fort");
+      const hooked = hold(r, 1, "red"), bs = S.ARENAS.fort.stands.blue;
+      S.pass(r, 1, 0); hooked.x = bs.x; hooked.y = 0.8; hooked.z = bs.z; hooked.vx = hooked.vy = hooked.vz = 0; hooked.hookedBy = 1;
+      for (let t = 0; t < 0.5; t += C.STEP) S.tick(r, C.STEP, still);
+      const onRope = hooked.state === "flying" && r.score.blue === 0;
+      hooked.hookedBy = -1; S.settleHooks(r); settle(r);
+      const offRope = noScore(r, hooked);
+      // Three throws home end the round, for the thrower's side, with a Golden AK only the first time.
+      r = fresh("fort");
+      let ended = true;
+      for (let n = 1; n <= C.CAPTURES; n++) { seen = lob(r, 1, "red", bs.x, bs.z); ended = ended && r.score.blue === n && r.over === (n === C.CAPTURES) && seen.some((k) => k.type === "win") === (n === C.CAPTURES); }
+      ended = ended && r.winner === "blue" && r.actors[1].captures === C.CAPTURES && r.actors[1].gold && r.goldLeft === C.GOLD_GUNS - r.actors.filter((k) => k.gold).length && !r.actors.some((k) => k.gold && k.team !== "blue");
+      const out = { goalSpot, goalInside, goalOutside, roof, offWall, arc, caught, onRope, offRope, ended };
+      record("block frenzy throw home: a rival block landing in the thrower's zone scores and credits the thrower at every map's stand and a map's own spot, off a wall too; with your own block away only under the alternate rule, never for a side's own block, just outside, on a roof, caught or off a hook; and it ends the round",
+        Object.values(out).every(Boolean) && Object.values(rows).every((v) => Object.values(v).every(Boolean)), JSON.stringify({ out, rows }));
+    }
+    {
+      // A loose block lies on what it came down onto, never under it. On every map, over every floating slab (a cave's
+      // roof, a hut's or the deck's floor, a tower's platform): a block coming down onto it, and one let go by a
+      // carrier standing on it, lies on that slab's top where a body can stand (or, on a top above the loose-block placement limit,
+      // on open ground beside it and not underneath); a block thrown up into it from underneath never gets over it and
+      // falls back to where it was thrown from. On a cave's roof on every map: a body coming down stands on it, a real
+      // throw from the air lands on it, a carrier splatted up there leaves the block up there, a bot fetches it from
+      // there, and a real throw inside the tunnel stays in the cave. A block on a crate falls when the crate is lifted.
+      const roofStats = {}, roofFails = [];
+      for (const map of S.MAPS) {
+        const r = S.create({ team: "blue", seed: 7, prep: 0, map });
+        for (const a of r.actors) a.bot = false;
+        Object.assign(r.weather, { left: 1e9 });
+        for (const g of r.gorillas) { g.state = 3; g.t = 1e9; }
+        S.tick(r, S.CONFIG.STEP, still);
+        const M = S.ARENA, f = r.flags.red, body = r.actors[0], count = roofStats[map] = { slabs: 0, caves: 0, under: 0, high: 0, fetch: 0 };
+        // The lowest floating bottom over a point, read off the map's own boxes: what a block there would have fallen through.
+        const lowest = (x, z) => M.BLOCKS.reduce((low, b) => b[5] > 0 && x > b[0] && x < b[1] && z > b[2] && z < b[3] ? Math.min(low, b[5]) : low, Infinity);
+        const park = () => { for (const a of r.actors) Object.assign(a, { x: 0.25 + a.id * 0.9, z: a.team === "blue" ? M.spawnZ : -M.spawnZ, y: 0, vx: 0, vy: 0, vz: 0, carrying: null, grounded: true, splat: 0, guard: 0, blocked: null }); };
+        const fly = (x, y, z, vy) => {
+          park();
+          Object.assign(f, { state: "flying", x, y, z, vx: 0, vy, vz: 0, carrier: null, thrower: -1, t: 0, hookedBy: -1 });
+          let peak = y;
+          for (let t = 0; t < 4 && f.state === "flying"; t += S.CONFIG.STEP) { S.tick(r, S.CONFIG.STEP, still); peak = Math.max(peak, f.y); }
+          return peak;
+        };
+        const fail = (what, b) => { if (roofFails.length < 4) roofFails.push(`${map} ${what} [${b.join(",")}] -> ${f.state} ${f.x.toFixed(2)},${f.y},${f.z.toFixed(2)}`); };
+        // Lying on the slab `b` where a body stands, or off a top too high to reach and not under it.
+        const stand = { x: 0, y: 0, z: 0, crouch: false };
+        const rests = (b) => {
+          if (f.state !== "dropped") return false;
+          if (b[4] > S.CONFIG.LOOSE_TOP) return f.y === 0 && lowest(f.x, f.z) >= b[4];
+          Object.assign(stand, { x: f.x, y: f.y, z: f.z });
+          S.resolve(stand, S.CONFIG.BODY_R * 0.95);
+          return f.y === b[4] && f.x >= b[0] && f.x <= b[1] && f.z >= b[2] && f.z <= b[3] && stand.x === f.x && stand.z === f.z;
+        };
+        let caveRoof = null;
+        for (const b of M.BLOCKS) {
+          if (!(b[5] > 0) || b[1] - b[0] < 1 || b[3] - b[2] < 1) continue;
+          const x = (b[0] + b[1]) / 2, z = (b[2] + b[3]) / 2, top = b[4];
+          if (S.groundAt(x, z, 99, 0.2) !== top) continue;
+          count.slabs++;
+          if (top > S.CONFIG.LOOSE_TOP) count.high++;
+          if (M.rockKind.get(b) === "cave") { count.caves++; caveRoof = caveRoof || b; }
+          // Coming down onto it.
+          fly(x, top + 2, z, 0);
+          if (!rests(b)) fail("landing", b);
+          // Let go by a carrier standing on it.
+          park();
+          Object.assign(body, { x, z, y: top, carrying: "red" });
+          Object.assign(f, { state: "carried", carrier: 0 });
+          if (!S.drop(r, 0) || !rests(b)) fail("drop", b);
+          // Thrown up into it from the ground underneath, where there is ground to stand on.
+          const at = S.restSpot(x, z);
+          if (at.x !== x || at.z !== z || b[5] > 2.5 || lowest(x, z) !== b[5]) continue;
+          count.under++;
+          const peak = fly(x, 1.6, z, S.CONFIG.PASS_LIFT);
+          if (!(f.state === "dropped" && f.x === x && f.z === z && f.y === 0 && peak < top)) fail("from under", b);
+        }
+        // A body coming down on a cave's roof stands on it.
+        const x = (caveRoof[0] + caveRoof[1]) / 2, z = (caveRoof[2] + caveRoof[3]) / 2, top = caveRoof[4];
+        park();
+        Object.assign(body, { x, z, y: top + 2, grounded: false });
+        for (let i = 0; i < 180; i++) S.tick(r, S.CONFIG.STEP, still);
+        if (!(body.grounded && body.y === top)) fail("body y " + body.y, caveRoof);
+        // A real throw from the air beside the roof, across it: the block comes down on the roof and lies there.
+        park();
+        Object.assign(body, { x, z: caveRoof[2] - 1.5, y: top + 1.5, grounded: false, carrying: "red" });
+        Object.assign(f, { state: "carried", carrier: 0 });
+        const span = caveRoof[3] - caveRoof[2], lift = S.CONFIG.PASS_LIFT, g = S.CONFIG.PASS_GRAVITY, air = (lift + Math.sqrt(lift * lift + 2 * g * 3.1)) / g;
+        const thrown = S.pass(r, 0, 0);
+        // Slowed so it comes down mid-roof whatever the roof's length.
+        f.vz = (1.5 + span / 2 - 0.6) / air;
+        body.y = 0; body.x = 0.25; body.z = M.spawnZ; body.grounded = true;
+        for (let t = 0; t < 4 && f.state === "flying"; t += S.CONFIG.STEP) S.tick(r, S.CONFIG.STEP, still);
+        if (!(thrown && rests(caveRoof))) fail("throw", caveRoof);
+        // A carrier splatted on the roof by a rival beside them leaves the block on the roof.
+        park();
+        const rival = r.actors.find((a) => a.team === "red");
+        Object.assign(body, { x, z, y: top, carrying: "red" });
+        Object.assign(f, { state: "carried", carrier: 0 });
+        Object.assign(rival, { x, z: z - 0.9, y: top, cooldown: 0 });
+        S.tick(r, S.CONFIG.STEP, still);
+        S.fire(r, rival.id, 0);
+        for (let t = 0; t < 1 && body.splat <= 0; t += S.CONFIG.STEP) S.tick(r, S.CONFIG.STEP, still);
+        if (!(body.splat > 0 && !body.carrying && rests(caveRoof))) fail("splat " + body.splat, caveRoof);
+        // A bot on the field beside the cave fetches it from the roof: up on the jetpack and onto the block.
+        fly(x, top + 2, z, 0);
+        const bot = r.actors[1];
+        Object.assign(bot, { x: x - Math.sign(x) * 9, z, bot: true, role: "attack" });
+        let took = 0;
+        for (; took < 30 && f.state !== "carried"; took += S.CONFIG.STEP) S.tick(r, S.CONFIG.STEP, still);
+        count.fetch = Math.round(took);
+        if (!(f.state === "carried" && f.carrier === bot.id)) fail("bot fetch, bot at " + [bot.x, bot.y, bot.z].map((v) => v.toFixed(1)), caveRoof);
+        bot.bot = false;
+        // A real throw down the flank tunnel from inside it: the ceiling stops it and it stays in the cave.
+        const spot = M.hookSpots.find((h) => h[1] === 0 && lowest(h[0], h[2]) === 2.5 && h[0] > M.fieldW);
+        park();
+        Object.assign(body, { x: spot[0], z: spot[2] - 4, y: 0, carrying: "red" });
+        Object.assign(f, { state: "carried", carrier: 0 });
+        const inside = S.pass(r, 0, 0);
+        body.x = 0.25; body.z = M.spawnZ;
+        let peak = 0;
+        for (let t = 0; t < 4 && f.state === "flying"; t += S.CONFIG.STEP) { S.tick(r, S.CONFIG.STEP, still); peak = Math.max(peak, f.y); }
+        if (!(inside && f.state === "dropped" && f.y === 0 && peak < top && lowest(f.x, f.z) === 2.5 && f.z > spot[2] - 4)) fail("in cave peak " + peak, caveRoof);
+        // On the top crate of one of the map's own stacks the block lies on the crate; lift the crate and it falls to
+        // what was under it.
+        const crate = r.crates.find((c) => c.live && !r.crates.some((o) => o.live && o !== c && o.x === c.x && o.z === c.z && o.y > c.y));
+        fly(crate.x, crate.y + S.CONFIG.CRATE_H + 2, crate.z, 0);
+        const on = f.state === "dropped" && f.y === crate.y + S.CONFIG.CRATE_H && f.x === crate.x && f.z === crate.z;
+        Object.assign(body, { x: crate.x, z: crate.z - 1.3, y: crate.y });
+        const lifted = S.grab(r, 0, 0);
+        body.x = 0.25; body.z = M.spawnZ; body.y = 0;
+        for (let t = 0; t < 2 && (f.state === "flying" || f.y > crate.y); t += S.CONFIG.STEP) S.tick(r, S.CONFIG.STEP, still);
+        if (!(on && lifted && f.state === "dropped" && f.y === crate.y)) fail("crate on " + on + " lifted " + lifted, [crate.x, crate.y, crate.z]);
+        body.holding = false;
+      }
+      record("block frenzy roofs: on every map a block landing on, or dropped on, a cave's roof, a floor or a platform lies on it and never underneath, one thrown up from underneath falls back, a body stands on the same roof, a splatted carrier leaves the block up there, a bot fetches it from a cave's roof, and a block on a lifted crate falls",
+        !roofFails.length && S.MAPS.every((m) => roofStats[m].caves > 0 && roofStats[m].under > 0), JSON.stringify({ roofStats, roofFails }));
+    }
     // An expert that loses its crate target must free its hands so it can rescue a block.
     const expertFixture = () => {
-      const r = S.create({ skill: "expert", prep: 0 }), bot = r.actors[1];
+      const r = S.create({ map: "fort", skill: "expert", prep: 0 }), bot = r.actors[1];
       for (const actor of r.actors) { actor.bot = false; actor.x = 18; actor.z = -35; }
       Object.assign(bot, { x: 0, z: 20, y: 0, bot: true });
       Object.assign(r.weather, { left: 1e9 });
@@ -7604,6 +8161,77 @@ const gameRulesChecks = async () => {
       record("block frenzy jungle: an Ooga coming down on a tree lands on its leaves' top, one under the leaves stands on the ground, and the top stops nobody rising through it",
         landed.grounded && Math.abs(landed.y - landed.top) < 0.05 && under < 0.05 && open, JSON.stringify({ landed, under, open, tree: { x: tree.x, z: tree.z, y: tree.y, r: tree.r } }));
     }
+    {
+      // Gorilla Jungle's treetop walkway and temples. The walkway is level from one tree house to the other by way of
+      // the Great Tree; a net reaches it; a gorilla takes an Ooga on the ground under it and leaves one up on it alone;
+      // the temple gate is walked through under the stone head, which is somewhere to stand; and the map keeps the
+      // other maps' size, its four gorillas and a mirrored layout.
+      const J = S.ARENAS.jungle, F = S.ARENAS.fort, idle = { x: 0, z: 0, sprint: 0, jump: 0, jet: 0, crouch: 0, face: 0 }, out = {};
+      const make = () => { const r = S.create({ seed: 5, prep: 0, map: "jungle" }); for (const o of r.actors) o.bot = false; Object.assign(r.weather, { left: 1e9 }); for (const g of r.gorillas) { g.x = g.wx = g.hx = 100; g.z = g.wz = g.hz = 100; g.state = 3; g.t = 1e9; } for (const k of r.crates) k.live = false; for (const t of r.traps) t.dark = 1e9; return r; };
+      const go = (r, secs, input = idle, until = () => false) => { for (let t = 0; t < secs && !until(); t += S.CONFIG.STEP) { S.tick(r, S.CONFIG.STEP, input); r.eventCount = 0; } };
+      const high = J.caches[0][1];
+      S.create({ map: "jungle" });
+      out.size = J.fieldW === F.fieldW && J.fieldL === F.fieldL && J.W === F.W && J.L === F.L && J.gorillas.length === 4 && J.stands.blue.z === F.stands.blue.z;
+      out.mirrored = J.BLOCKS.every((b) => J.rocks.has(b) || J.BLOCKS.some((c) => c[0] === -b[1] && c[1] === -b[0] && c[2] === -b[3] && c[3] === -b[2] && c[4] === b[4] && c[5] === b[5]))
+        && J.ledges.every((b) => J.ledges.some((c) => c[0] === -b[1] && c[2] === -b[3] && c[4] === b[4]));
+      // Level all the way: down the centre line, and round the Great Tree's trunk.
+      let level = true;
+      for (let z = -16.5; z <= 16.5; z += 0.5) if (Math.abs(z) > 1.2) level &&= S.groundAt(0, z, high + 0.2) === high;
+      for (let z = -3; z <= 3; z += 0.5) for (const x of [-2, 2]) level &&= S.groundAt(x, z, high + 0.2) === high;
+      out.level = level;
+      // On foot from blue's tree house along the bridge onto the Great Tree's platform, never leaving the planks.
+      {
+        const r = make(), a = r.actors[0];
+        Object.assign(a, { x: 0, z: 16, y: high, vx: 0, vy: 0, vz: 0, grounded: true });
+        let fell = false;
+        go(r, 4, { ...idle, z: -1 }, () => { if (a.y < high - 0.01) fell = true; return fell || a.z < 2; });
+        out.bridge = !fell && a.z < 2 && a.y === high;
+      }
+      // Up a net from the ground, pushing into it.
+      {
+        const r = make(), a = r.actors[0], n = J.nets[0], [x0, x1, z0, z1] = n.zone;
+        Object.assign(a, { x: (x0 + x1) / 2 - n.dx * 0.6, z: (z0 + z1) / 2, y: 0, vx: 0, vy: 0, vz: 0, grounded: true });
+        go(r, 3, { ...idle, x: n.dx, z: n.dz }, () => a.grounded && a.y === high);
+        out.net = a.y === high && Math.abs(a.x) < 3.5;
+      }
+      // The gorillas' ground: one beside the bridge leaves an Ooga up on it alone, and takes the same Ooga on the grass.
+      {
+        const r = make(), a = r.actors[0], g = r.gorillas[0];
+        Object.assign(g, { x: 1.6, z: 7, wx: 1.6, wz: 7, hx: 1.6, hz: 7, state: 0, t: 0 });
+        Object.assign(a, { x: 0, z: 7, y: high, vx: 0, vy: 0, vz: 0, grounded: true });
+        go(r, 3);
+        const safe = !a.grabbed && a.y === high;
+        Object.assign(a, { x: 0, z: 7, y: 0, guard: 0, grounded: true });
+        go(r, 3, idle, () => a.grabbed);
+        out.gorillas = safe && !!a.grabbed;
+      }
+      // The temple gate: open under the stone head at walking and jumping height, the pillars solid either side, the
+      // head solid over it and stood on; an Ooga walks in through it on either side.
+      S.create({ map: "jungle" });
+      out.gate = [1, -1].every((s) => [0.2, 1, 1.7, 3.2].every((y) => [-2, 0, 2].every((x) => !S.solidAt(x, y, s * 23.5))) && S.solidAt(3.1, 3, s * 23.5) && S.solidAt(-3.1, 3, s * 23.5) && S.solidAt(0, 4.2, s * 23.5) && S.groundAt(0, s * 23.5, 6) === 5);
+      {
+        const r = make(), a = r.actors[0];
+        Object.assign(a, { x: 0, z: 20, y: 0, vx: 0, vy: 0, vz: 0, grounded: true });
+        go(r, 1.2, { ...idle, z: 1 });
+        out.walkIn = a.z > 24.5 && a.y === 0;
+      }
+      // The models draw the nets and puddles into the map's one mesh; the map says so, and names each of its own boxes.
+      out.kinds = J.drawn.nets && J.drawn.puddles && J.BLOCKS.filter((b) => J.kinds.has(b)).length >= 60 && J.ledges.length === J.decor.filter((d) => d.kind === "canopy").length && J.ledges.length <= 15;
+      record("block frenzy jungle walkway: the treetop walkway is level from tree house to Great Tree to tree house and walked without a fall, a net climbs to it, a gorilla takes an Ooga on the ground beside it and leaves one up on it alone, the temple gate is open under the stone head, and the map keeps the other maps' size, four gorillas and its mirrored halves", Object.values(out).every(Boolean), JSON.stringify(out));
+      // Raids from every start, on both sides: the two spawns, the centre lane, either side line, both flanks, beside
+      // the rivals' temple, the raider's own corner and its own alley. A raider bot takes the rivals' block within 30 s.
+      // The raider has a hook in hand, so none lying in a cave round the field calls it aside.
+      const raids = {};
+      for (const [team, s] of [["blue", 1], ["red", -1]]) for (const [sx, sz] of [[-1.2, -26], [1.2, -26], [0, -8], [-18, 0], [18, 0], [-16, -12], [16, 12], [12, -30], [-12, 30], [0, -36]]) {
+        const r = make(), a = r.actors.find((o) => o.team !== team);
+        for (const pw of r.powers) pw.dark = 1e9;
+        Object.assign(a, { bot: true, role: "attack", x: s * sx, z: s * sz, y: 0, hook: 1 });
+        let t = 0;
+        for (; t < 30 && a.carrying !== team; t += S.CONFIG.STEP) { S.tick(r, S.CONFIG.STEP, idle); r.eventCount = 0; }
+        raids[`${team}@${s * sx},${s * sz}`] = a.carrying === team ? +t.toFixed(1) : `fail at ${a.x.toFixed(1)},${a.z.toFixed(1)}`;
+      }
+      record("block frenzy jungle raids: from the spawns, the centre lane, the side lines, the flanks, beside the temple and the far alley, on both sides, a raider bot takes the rivals' block within 30 s", Object.values(raids).every((v) => typeof v === "number"), JSON.stringify(raids));
+    }
     record("block frenzy expert: after losing a crate target, wait three seconds, set it down and rescue the dropped home block",
       lost.lifted && waits && !lost.bot.holding && lost.r.flags.blue.state === "home",
       JSON.stringify({ lifted: lost.lifted, waits, holding: lost.bot.holding, flag: lost.r.flags.blue.state }));
@@ -7631,7 +8259,7 @@ const gameRulesChecks = async () => {
       JSON.stringify({ blockedWait, holding: blockedCrate.bot.holding }));
     // Piggyback: a fixture with the visitor and one bot teammate on Fort Chaos, the rivals out of the way.
     const piggy = () => {
-      const r = S.create({ team: "blue", seed: 2, prep: 0, size: 3 });
+      const r = S.create({ map: "fort", team: "blue", seed: 2, prep: 0, size: 3 });
       for (const b of r.actors) { b.x = 18; b.z = -35; b.bot = false; }
       Object.assign(r.weather, { left: 1e9 });
       const run = (s, input = still) => { for (let n = 0; n < Math.round(s / S.CONFIG.STEP); n++) S.tick(r, S.CONFIG.STEP, { ...input }); };
@@ -7654,13 +8282,13 @@ const gameRulesChecks = async () => {
       const { r, me, b1, run } = piggy();
       Object.assign(me, { x: 0, z: 10 }); Object.assign(b1, { x: 0.9, z: 10 });
       const on = S.hopOn(r, 0);
-      me.knock = me.soot = 1;
+      me.knock = 1;
       run(0.5);
-      const halfway = me.ride === b1.id + 1 && me.knock > 0.49 && me.knock < 0.51 && me.soot > 0.49 && me.soot < 0.51;
+      const halfway = me.ride === b1.id + 1 && me.knock > 0.49 && me.knock < 0.51;
       run(1.5);
       record("block frenzy piggyback: mounted riders' knockback and soot expire without ending the ride",
-        on && halfway && me.ride === b1.id + 1 && me.knock === 0 && me.soot === 0,
-        JSON.stringify({ on, halfway, ride: me.ride, knock: me.knock, soot: me.soot }));
+        on && halfway && me.ride === b1.id + 1 && me.knock === 0,
+        JSON.stringify({ on, halfway, ride: me.ride, knock: me.knock }));
     }
     {
       // J: a closer teammate that can't come (splatted) doesn't stop a healthy one answering.
@@ -7683,20 +8311,7 @@ const gameRulesChecks = async () => {
       record("block frenzy piggyback: a rider beside a wall or post sits clear of it, not inside it",
         on && me.ride === 2 && clear, JSON.stringify({ on, ride: me.ride, rider: [me.x, me.z], gap: Math.hypot(me.x - cx, me.z - cz) }));
     }
-    {
-      // The machine's picker: the device chosen is the one taken; a pick out of range falls back to a random one.
-      const pickAt = (look) => {
-        const r = S.create({ team: "blue", seed: 5 }), me = r.actors[0], v = r.vends[0];
-        r.prep = 0; Object.assign(me, { x: v.x + 0.4, z: v.z, y: 0 });
-        const ok = S.takeWallet(r, 0, look);
-        return { ok, look: ok ? r.wallets[me.wallet].look : -1 };
-      };
-      const picked = [0, 1, 2, 3, 4, 5].map(pickAt), stray = pickAt(9), none = pickAt(-1);
-      record("block frenzy wallets: the device picked at the machine is the one taken, and a pick out of range gets one of the six",
-        picked.every((p, i) => p.ok && p.look === i) && stray.ok && stray.look >= 0 && stray.look < S.WALLETS.length && none.ok && none.look >= 0 && none.look < S.WALLETS.length,
-        JSON.stringify({ picked, stray, none }));
-    }
-    const round = (seed) => { const r = S.create({ team: "red", seed }); r.actors[0].bot = "auto"; for (let t = 0; t < 900 && !r.over; t += 1 / 30) S.step(r, 1 / 30, still), r.eventCount = 0; return JSON.stringify({ over: r.over, winner: r.winner, score: r.score, time: Math.round(r.time) }); };
+    const round = (seed) => { const r = S.create({ map: "fort", team: "red", seed }); r.actors[0].bot = "auto"; for (let t = 0; t < 900 && !r.over; t += 1 / 30) S.step(r, 1 / 30, still), r.eventCount = 0; return JSON.stringify({ over: r.over, winner: r.winner, score: r.score, time: Math.round(r.time) }); };
     const a = round(3), b = round(3);
     record("block frenzy rounds: a seeded round replays exactly and reaches three captures", a === b && JSON.parse(a).over && Math.max(...Object.values(JSON.parse(a).score)) === S.CONFIG.CAPTURES, JSON.stringify({ a, b }));
     {
@@ -7738,6 +8353,38 @@ const gameRulesChecks = async () => {
       }
       record("block frenzy island: on every map an Ooga walks off the open edge and, fallen all the way, is back in its own block zone; a block carried over drops at the edge and goes home; the rock under the rim holds a body out; the jetpack brings the visitor and a bot back after a throw",
         Object.values(rows).every((v) => Object.values(v).every(Boolean)), JSON.stringify(rows));
+      // The jetpack's power is the island's, on the timer it always had: held, it reaches its top speed, climbs (the old
+      // gate pinned it near 1.5 m/s, about 2.1 m in 1.5 s), a full tank from a jump empties about 4.7 s after the press
+      // as it did, it settles at the ceiling without a bounce, leaves a faster throw alone, and a roof stops it.
+      {
+        const C = S.CONFIG, idle = { x: 0, z: 0, jump: 0, jet: 0 }, held = { ...idle, jet: 1 };
+        const air = (y, vy = 0, map = "fort", x = 0, z = 12) => { const r = fresh(map), o = r.actors[0]; o.x = x; o.z = z; o.y = y; o.vy = vy; o.grounded = false; return [r, o]; };
+        const clear = S.ARENAS.fort.BLOCKS.every((b) => 0 < b[0] - 1 || 0 > b[1] + 1 || 12 < b[2] - 1 || 12 > b[3] + 1);
+        let [r, o] = air(3), peak = 0;
+        for (let t = 0; t < 1.5; t += C.STEP) { S.tick(r, C.STEP, held); peak = Math.max(peak, o.vy); }
+        const out = { clear, peak, climb: o.y - 3 };
+        r = fresh(); o = r.actors[0]; o.x = 0; o.z = 12;
+        const press = { ...held, jump: 1 };
+        r.inputs = [press];
+        out.tank = 0;
+        for (; out.tank < 8 && o.fuel > 0; out.tank += C.STEP) S.tick(r, C.STEP, idle);
+        [r, o] = air(9); o.fuel = 99;
+        let top = 0, settled = Infinity;
+        for (let t = 0; t < 6; t += C.STEP) { S.tick(r, C.STEP, held); top = Math.max(top, o.y); if (t > 4) settled = Math.min(settled, o.y); }
+        Object.assign(out, { top, settled });
+        [r, o] = air(3, 9); o.jetting = true;
+        S.tick(r, C.STEP, held);
+        out.thrown = o.vy;
+        const roofs = [["fort", 2, 0, 2.2], ["town", 0, 32.25, 2.7], ["haunted", 0, 30.5, 2.7]];
+        out.roofs = roofs.map(([map, x, z, roof]) => {
+          const [q, a] = air(Math.max(0, roof - C.HEIGHT - 0.5), C.JET_RISE, map, x, z);
+          let head = 0;
+          for (let t = 0; t < 1.5; t += C.STEP) { S.tick(q, C.STEP, held); head = Math.max(head, a.y + C.HEIGHT); }
+          return head <= roof + 1e-6 && head > roof - 0.05;
+        });
+        record("block frenzy jetpack: held it reaches the island's top speed and climbs, a full tank lasts its old held time, it settles at the ceiling with no bounce, a faster throw keeps its speed, and a roof stops it",
+          out.clear && out.peak >= C.JET_RISE * 0.9 && out.climb > 6 && Math.abs(out.tank - 4.7) < 0.15 && out.top <= C.JET_CEILING + 1e-6 && out.settled > C.JET_CEILING - 0.05 && out.thrown > C.JET_RISE && out.roofs.every(Boolean), JSON.stringify(out));
+      }
     }
     {
       // Hub-style terrain on every map: the boxes come in turned pairs, stand clear of the buildings and every spot the
@@ -7755,7 +8402,7 @@ const gameRulesChecks = async () => {
         const others = I.BLOCKS.filter((b) => !I.rocks.has(b));
         const clearOfBuildings = rocks.every((b) => others.every((o) => b[0] >= o[1] || b[1] <= o[0] || b[2] >= o[3] || b[3] <= o[2] || b[5] >= o[4] || b[4] <= o[5]));
         const spots = [];
-        for (const list of [I.traps, I.powers, I.tramps, I.vends, I.peels, [I.fire], I.catapults.blue, I.catapults.red, I.crates.blue, I.crates.red, I.plug.blue, I.plug.red, I.alley.blue, I.alley.red, I.gorillas]) spots.push(...list);
+        for (const list of [I.traps, I.powers, I.tramps, I.peels, [I.fire], I.catapults.blue, I.catapults.red, I.crates.blue, I.crates.red, I.plug.blue, I.plug.red, I.alley.blue, I.alley.red, I.gorillas]) spots.push(...list);
         for (const s of I.caches) spots.push([s[0], s[2]]);
         for (const t of S.TEAMS) spots.push([I.stands[t].x, I.stands[t].z]);
         const clearOfSpots = spots.every(([x, z]) => rocks.every((b) => b[5] > 0.05 || x <= b[0] - 0.4 || x >= b[1] + 0.4 || z <= b[2] - 0.4 || z >= b[3] + 0.4));
@@ -7779,20 +8426,29 @@ const gameRulesChecks = async () => {
         const hidden = I.hookSpots.length >= 3 && I.hookSpots.every(([x, y, z]) => y < 0.5 ? reached(x, z) : Math.abs(S.groundAt(x, z, y + 0.1) - y) < 0.05);
         rows[map] = { mirrored, clearOfBuildings, clearOfSpots, walked, ladders, caves, hidden };
         // Loose blocks, through the same flood: dropped from the top of every fixed block, and landing from the air on it.
-        const cr = r.actors[0], red = r.flags.red, rests = (f) => f.state === "dropped" && f.y === 0 && reached(f.x, f.z);
+        // Each lies on a top in a jetpack's reach where a body stands, or on ground walked to that is not under a floor
+        // or roof lower than the top it came from.
+        const cr = r.actors[0], red = r.flags.red, stood = { x: 0, y: 0, z: 0, crouch: false };
+        const rests = (f, top) => {
+          if (f.state !== "dropped") return false;
+          if (f.y === 0) return reached(f.x, f.z) && I.BLOCKS.every((c) => !(c[5] > 0 && c[5] < top && f.x > c[0] && f.x < c[1] && f.z > c[2] && f.z < c[3]));
+          Object.assign(stood, { x: f.x, y: f.y, z: f.z });
+          S.resolve(stood, S.CONFIG.BODY_R * 0.95);
+          return f.y <= S.CONFIG.LOOSE_TOP && S.groundAt(f.x, f.z, f.y + 0.01, 0) === f.y && stood.x === f.x && stood.z === f.z;
+        };
         let dropped = true, landed = true;
         for (const b of I.BLOCKS) {
           const x = (b[0] + b[1]) / 2, z = (b[2] + b[3]) / 2;
           Object.assign(cr, { x, z, y: b[4], vx: 0, vy: 0, vz: 0, splat: 0, trapped: 0, carrying: "red", blocked: null, grounded: true });
           Object.assign(red, { state: "carried", carrier: 0, homeT: 0 });
-          dropped &&= S.drop(r, 0) && rests(red);
+          dropped &&= S.drop(r, 0) && rests(red, b[4]);
           cr.carrying = null;
           Object.assign(red, { state: "flying", carrier: null, thrower: -1, t: 1, x, y: b[4] + 1.2, z, vx: 0, vy: -2, vz: 0 });
           Object.assign(cr, { x: 0, z: I.spawnZ, y: 0 });
           r.prep = 1;
           for (let t = 0; t < 2 && red.state === "flying"; t += S.CONFIG.STEP) S.tick(r, S.CONFIG.STEP, still);
           r.eventCount = 0;
-          landed &&= rests(red);
+          landed &&= rests(red, b[4]);
         }
         // A gorilla's grab on the mound's lower tier.
         const mound = rocks.find((b) => I.rockKind.get(b) === "mound" && b[4] === 1 && b[0] < 0 && b[2] > 0), g = r.gorillas[0], tierX = mound[1] - 0.3, tierZ = (mound[2] + mound[3]) / 2;
@@ -7801,16 +8457,54 @@ const gameRulesChecks = async () => {
         Object.assign(g, { x: tierX + 1, z: tierZ, wx: tierX + 1, wz: tierZ, hx: tierX + 1, hz: tierZ, state: 0, t: 0, holding: -1 });
         r.prep = 0;
         S.tick(r, S.CONFIG.STEP, still);
-        loose[map] = { dropped, landed, grabbed: cr.grabbed > 0 && rests(red) };
+        loose[map] = { dropped, landed, grabbed: cr.grabbed > 0 && rests(red, 1) };
       }
-      record("block frenzy loose blocks: on every map a block dropped from the top of any block, landing on it from the air, or dropped by a gorilla's grab on a mound comes to rest on ground the bots can walk to",
+      record("block frenzy loose blocks: on every map a block dropped from the top of any block, landing on it from the air, or dropped by a gorilla's grab on a mound lies on a top where a body can stand or on ground the bots can walk to, never under what it came down on",
         Object.values(loose).every((v) => Object.values(v).every(Boolean)), JSON.stringify(loose));
       record("block frenzy terrain: on every map the mounds, caves and outcrops are mirrored half round, clear of the buildings and every spot in use, and the forts, stands, catapults, ladders and hiding spots stay reachable on foot",
         Object.values(rows).every((v) => Object.values(v).every(Boolean)), JSON.stringify(rows));
+      {
+        // Ooga Town: no building is a dead end. Each bank's front doors, back door and the hole in its side wall, and
+        // each shop's front, back and side doors are open at walking height on both sides, with wall beside them;
+        // every box of the town is named for the models; and a catapult's Ooga comes down on the hall's floor.
+        const fresh = () => { const r = S.create({ seed: 5, prep: 0, map: "town" }); for (const o of r.actors) o.bot = false; Object.assign(r.weather, { left: 1e9 }); for (const g of r.gorillas) { g.state = 3; g.t = 1e9; } for (const k of r.crates) k.live = false; return r; };
+        fresh();
+        const T = S.ARENAS.town, open = (x, z) => !S.solidAt(x, 0.4, z) && !S.solidAt(x, 1.6, z);
+        const town = { doors: true, walls: true };
+        for (const s of [1, -1]) {
+          for (const [x, z] of [[0, 24.5], [0, 34.5], [-8.5, 26], [10.3, 8.2], [-10.3, 8.2], [10.3, 14.8], [-10.3, 14.8], [9.2, 11.4], [-9.2, 11.4]]) town.doors &&= open(s * x, s * z);
+          for (const [x, z] of [[5, 24.5], [-8.5, 30], [8.5, 26], [13, 8.2], [-13, 8.2], [13, 14.8], [-13, 14.8], [5, 34.5]]) town.walls &&= S.solidAt(s * x, 1.6, s * z);
+        }
+        town.named = T.BLOCKS.filter((b) => T.kinds.has(b)).length === T.kinds.size && T.kinds.size === T.BLOCKS.length - T.rocks.size - 20 && [...T.steps].every((b) => T.kinds.get(b) === "step");
+        town.drops = S.TEAMS.every((t) => S.groundAt(T.drops[t][0], T.drops[t][1], 9) === 0 && Math.abs(T.drops[t][1]) > 25 && Math.abs(T.drops[t][1]) < 30);
+        // A raider bot reaches the rivals' block from the spawns, the street, the side lines, beside and behind the
+        // shops and behind its own bank, on both sides (on rock before the shops had back doors, the side-line and
+        // shop-side starts ended inside a shop). The raider has a hook in hand, so none lying in a cave calls it aside.
+        // And a bot with the block runs it home down the street without meeting a quiz pad.
+        const raids = {};
+        for (const [team, s] of [["blue", 1], ["red", -1]]) {
+          for (const [sx, sz] of [[-1.2, -26], [0, -8], [-18, 0], [18, 0], [16, -4], [-12, 13], [12, 6], [12, -18], [0, -36]]) {
+            const rq = fresh(), a = rq.actors.find((o) => o.team !== team);
+            Object.assign(a, { bot: true, role: "attack", x: s * sx, z: s * sz, y: 0, hook: 1 });
+            let t = 0;
+            for (; t < 30 && a.carrying !== team; t += S.CONFIG.STEP) { S.tick(rq, S.CONFIG.STEP, still); rq.eventCount = 0; }
+            raids[`${team}@${s * sx},${s * sz}`] = a.carrying === team ? +t.toFixed(1) : `fail at ${a.x.toFixed(1)},${a.z.toFixed(1)}`;
+          }
+          const rq = fresh(), a = rq.actors.find((o) => o.team !== team), st = T.stands[team], was = rq.score[a.team];
+          Object.assign(a, { bot: true, role: "attack", x: st.x, z: st.z - s * 2.2, y: 0, hook: 1 });
+          let t = 0, quizzed = false;
+          for (; t < 20 && rq.score[a.team] === was; t += S.CONFIG.STEP) { S.tick(rq, S.CONFIG.STEP, still); rq.eventCount = 0; quizzed ||= a.trapped > 0; }
+          raids[`${team} home`] = rq.score[a.team] > was && !quizzed ? +t.toFixed(1) : `fail at ${a.x.toFixed(1)},${a.z.toFixed(1)}${quizzed ? ", quizzed" : ""}`;
+        }
+        record("block frenzy ooga town: each bank's doors and the hole in its side and each shop's three doors are open on both sides with wall beside them, every box is named, and a catapult lands in the hall",
+          Object.values(town).every(Boolean), JSON.stringify(town));
+        record("block frenzy ooga town raids: from the spawns, the street, the side lines, round the shops and behind its own bank, on both sides, a raider bot reaches the rivals' block within 30 s, and a carrier bot is home within 20 s without meeting a quiz pad",
+          Object.values(raids).every((v) => typeof v === "number"), JSON.stringify(raids));
+      }
     }
     {
       // The grappling hook, played through the sim's own calls: a hook found at its hiding spot, a bite on rock reeling the
-      // Ooga in, a block yanked off a rival carrier (nothing from a teammate), and a wallet bomb taking a held hook as it
+      // Ooga in, a block yanked off a rival carrier (nothing from a teammate), and a mined block taking a held hook as it
       // takes the Golden AKs. A hook lost over the edge goes back into hiding.
       const fresh = (map = "fort", seed = 5) => {
         const r = S.create({ seed, prep: 0, map });
@@ -7830,7 +8524,8 @@ const gameRulesChecks = async () => {
       run(r, 0.5, still, () => o.hk === 2);
       const bx = o.x, bz = o.z;
       run(r, 1.5);
-      rows.pull = bit && Math.hypot(o.x - bx, o.z - bz) > 2 && o.hCool > 0 && !S.grapple(r, 0, yaw, 0);
+      run(r, 2, still, () => o.hk === 0);
+      rows.pull = bit && Math.hypot(o.x - bx, o.z - bz) > 2 && o.hk === 0 && S.grapple(r, 0, yaw, 0) && !S.grapple(r, 0, yaw + 3, 0.4);
       r = fresh(); o = r.actors[0];
       const c = r.actors[2];
       o.hook = 1; o.x = -17; o.z = -1; c.x = -17; c.z = 10; r.flags.blue.state = "carried"; r.flags.blue.carrier = 2; c.carrying = "blue";
@@ -7845,9 +8540,8 @@ const gameRulesChecks = async () => {
       r = fresh(); o = r.actors[0];
       const holder = r.actors[2];
       holder.hook = 1; r.hooks[0].state = 1; r.hooks[0].holder = 2; o.x = -17; o.z = 0; holder.x = -17; holder.z = 2.5; o.guard = holder.guard = 9;
-      const w = r.wallets.find((v) => !v.live);
-      Object.assign(w, { live: true, state: 3, owner: 0, team: o.team, look: 0, x: holder.x, y: holder.y + 1, z: holder.z, fuse: 0.01, stuck: 2 });
-      rows.steal = !!run(r, 0.2).hooksteal && o.hook === 1 && holder.hook === 0 && r.hooks[0].holder === 0;
+      r.goldLeft = 0; r.flags[holder.team].state = "carried"; r.flags[holder.team].carrier = 0; o.carrying = holder.team; o.x = S.ARENA.stands[o.team].x; o.z = S.ARENA.stands[o.team].z; o.y = 0;
+      rows.steal = !run(r, 0.2).hooksteal && o.hook === 0 && holder.hook === 1 && r.hooks[0].holder === 2;
       r = fresh(); o = r.actors[0]; o.hook = 2; r.hooks[1].state = 1; r.hooks[1].holder = 0; o.y = S.CONFIG.FALL_FLOOR - 1; o.x = 40; o.grounded = false;
       const fell = run(r, S.CONFIG.STEP * 2);
       rows.rehide = !!fell.hookhide && o.hook === 0 && r.hooks[1].state === 0;
@@ -7866,7 +8560,7 @@ const gameRulesChecks = async () => {
           return { m, u };
         };
         let hooked = hookAt((m, u) => { u.x = 0; u.z = -20; u.aim0 = Math.PI; });
-        rows.stand = hooked.u.carrying === "red" && hooked.m.flags.red.state === "carried" && hooked.m.flags.red.carrier === 0 && hooked.u.hCool > 2.5;
+        rows.stand = hooked.u.carrying === "red" && hooked.m.flags.red.state === "carried" && hooked.m.flags.red.carrier === 0;
         hooked = hookAt((m) => Object.assign(m.flags.red, { state: "dropped", x: -17, y: 0, z: 8, homeT: 0 }));
         rows.loose = hooked.u.carrying === "red" && hooked.m.flags.red.state === "carried";
         hooked = hookAt((m) => Object.assign(m.flags.blue, { state: "dropped", x: -17, y: 0, z: 8, homeT: 0 }));
@@ -7886,7 +8580,7 @@ const gameRulesChecks = async () => {
         rows.chuteHook = S.grapple(cut.m, 0, 0, 0.1) && cut.u.flight === 0 && cut.u.hk === 1;
         const cm = fresh("jungle"), cu = cm.actors[0];
         for (const k of cm.crates) k.live = false;
-        Object.assign(cu, { hook: 1, x: 5, z: 10, y: 0 });
+        Object.assign(cu, { hook: 1, x: 10, z: 8, y: 0 });
         S.grapple(cm, 0, 0, Math.atan2(5.2, 7));
         run(cm, 0.6, still, () => cu.hk === 2);
         rows.canopy = cu.hk === 2;
@@ -7941,7 +8635,7 @@ const gameRulesChecks = async () => {
       {
         const f1 = fresh("haunted"), a1 = f1.actors[0], c1 = f1.actors[2];
         for (const k of f1.crates) k.live = false;
-        Object.assign(a1, { hook: 1, x: -16, z: 23.9, y: 0 }); Object.assign(c1, { x: -16, z: 25.75, y: 0, carrying: "blue" });
+        Object.assign(a1, { hook: 1, x: -6, z: 12.8, y: 0 }); Object.assign(c1, { x: -6, z: 14.55, y: 0, carrying: "blue" });
         Object.assign(f1.flags.blue, { state: "carried", carrier: 2 });
         S.grapple(f1, 0, 0, -0.12);
         const fence = run(f1, 0.6);
@@ -7969,17 +8663,19 @@ const gameRulesChecks = async () => {
         const kinds = new Set();
         for (let n = 0; n < 40; n++) { calm.weather.left = 0; S.tick(calm, S.CONFIG.STEP, still); calm.eventCount = 0; kinds.add(calm.weather.kind); }
         rows.noWind = cu.x === 3 && cu.z === 3 && S.CONFIG.WIND === undefined && [...kinds].every((k) => k === "clear" || k === "storm") && kinds.size === 2;
-        // The tall iron gate is solid, with the way round either end of it open, and the block zones are at the back.
+        // Haunted Hollow's graveyard gate is walked through under its arch, the iron fence either side of it is solid, and
+        // the block zones are at the back; the map is the size of the others.
         const hg = fresh("haunted"), hu = hg.actors[0], hI = S.ARENAS.haunted;
         for (const k of hg.crates) k.live = false;
-        Object.assign(hu, { x: 0, z: 26, y: 0, grounded: true });
+        Object.assign(hu, { x: 0, z: 16, y: 0, grounded: true });
         run(hg, 1, { x: 0, z: -1 });
-        const stopped = hu.z > 24.5;
-        Object.assign(hu, { x: 3.2, z: 26, y: 0, vx: 0, vz: 0, grounded: true });
+        const through = hu.z < 13;
+        Object.assign(hu, { x: 6, z: 16, y: 0, vx: 0, vz: 0, grounded: true });
         run(hg, 1, { x: 0, z: -1 });
-        rows.gateSolid = stopped && hu.z < 23.5 && S.solidAt(0, 1.5, 24.5) && S.solidAt(0, 1.5, -24.5) && !S.solidAt(3.2, 1.5, 24.5);
-        const twn = S.ARENAS.town;
-        rows.blockZones = twn.stands.blue.z === 32.2 && twn.stands.red.z === -32.2 && hI.goals.blue.z === 52.5 && hI.goals.red.z === -52.5;
+        rows.gateSolid = through && hu.z > 14.1 && S.solidAt(6, 0.6, 14) && S.solidAt(-6, 0.6, -14) && !S.solidAt(0, 1.5, 14) && S.solidAt(0, 3.7, 14);
+        const twn = S.ARENAS.town, frt = S.ARENAS.fort;
+        rows.blockZones = twn.stands.blue.z === 32.2 && twn.stands.red.z === -32.2 && hI.goals.blue.z === 36 && hI.goals.red.z === -36;
+        rows.hauntedSize = hI.fieldW === frt.fieldW && hI.fieldL === frt.fieldL && hI.W === frt.W && hI.L === frt.L;
         rows.feeStorm = liveTry("storm") === "storm" && (() => { fees.weather.left = 0; S.tick(fees, S.CONFIG.STEP, still); return fees.weather.kind === "storm"; })();
         rows.feeNone = liveTry(null) === null;
         // An open grave: fall in, one jump can't clear the rim, a double jump does, a block can't rest inside, and a
@@ -7987,7 +8683,8 @@ const gameRulesChecks = async () => {
         const g = fresh("haunted"), gu = g.actors[0], I = S.ARENAS.haunted, [gx0, gx1, gz0, gz1] = I.graves[0], cx = (gx0 + gx1) / 2, cz = (gz0 + gz1) / 2;
         for (const k of g.crates) k.live = false;
         for (const o of g.actors) if (o.id) o.bot = true;
-        Object.assign(gu, { x: cx, z: cz, y: 0, grounded: true });
+        // Fresh paint keeps the ghost that haunts this grave off the Ooga while it climbs.
+        Object.assign(gu, { x: cx, z: cz, y: 0, grounded: true, guard: 9 });
         run(g, 0.7, still, () => gu.grounded && gu.y === S.GRAVE_Y);
         rows.graveFall = gu.y === S.GRAVE_Y && S.inGrave(gu.x, gu.z);
         const climb = { x: 0, z: 1, jump: 1 };
@@ -8065,7 +8762,133 @@ const gameRulesChecks = async () => {
         bv.bot = true; Object.assign(bv, { x: bx, z: bz, y: 0, grounded: true });
         rows.enemyCatBot = !S.nearEnemyCatapult(bot, bv);
       }
-      record("block frenzy grapple: a hook found at a hidden spot bites rock and reels its Ooga in, yanks a block off a rival carrier but not a teammate, a wallet bomb steals a held hook, and a hook lost over the edge goes back into hiding", Object.values(rows).every(Boolean), JSON.stringify(rows));
+      record("block frenzy grapple: a hook found at a hidden spot bites rock and reels its Ooga in, yanks a block off a rival carrier but not a teammate, a mined block takes no hook, and a hook lost over the edge goes back into hiding", Object.values(rows).every(Boolean), JSON.stringify(rows));
+      {
+        // Haunted Hollow's houses. The back door: each cellar's doorway is open at walking height under the upper floor,
+        // with the wall either side; a raider coming round the house takes the block through it on either side, and a
+        // defender at the stand chases a thief out through it. The other ways in: the side door, the porch stairs and
+        // the front door up to the upper floor, the stairs down from it into the cellar, and the cellar's front windows,
+        // open at chest height only. The scoring ring behind the house has nothing standing in it.
+        const hI = S.ARENAS.haunted, R = S.CONFIG.BODY_R, out = {};
+        S.create({ map: "haunted" });
+        out.open = hI.backDoors.every(([x0, x1, z0, z1]) => {
+          const xm = (x0 + x1) / 2, zm = (z0 + z1) / 2, s = Math.sign(zm);
+          return [0.2, 1, 1.7, 2.3].every((y) => [x0 + R, xm, x1 - R].every((x) => !S.solidAt(x, y, zm))) && S.solidAt(x0 - 0.5, 1, zm) && S.solidAt(x1 + 0.5, 1, zm) &&
+            S.solidAt(xm, 2.85, zm) && S.clearLine(xm, zm + s * 1.5, xm, zm - s * 1.5, R) && S.clearLine(xm, zm + s * 1.5, hI.goals[s > 0 ? "blue" : "red"].x, hI.goals[s > 0 ? "blue" : "red"].z, R);
+        });
+        out.ring = S.TEAMS.every((t) => { const g = hI.goals[t]; return [[0, 0], [2, 0], [-2, 0], [0, 2], [0, -2], [1.5, 1.5], [-1.5, -1.5]].every(([dx, dz]) => { const p = { x: g.x + dx, z: g.z + dz, y: 0 }; S.resolve(p, R, 0.05); return p.x === g.x + dx && p.z === g.z + dz && S.groundAt(p.x, p.z, 0.3) === 0; }); });
+        out.windows = [[-4.7, 23.2], [4.7, 23.2], [4.7, -23.2], [-4.7, -23.2]].every(([x, z]) => S.solidAt(x, 0.5, z) && !S.solidAt(x, 1.45, z) && S.solidAt(x, 2.3, z));
+        const nav = hI.nav, nn = nav.blue.length;
+        out.navLinks = nav.red.length === nn && nav.links.every(([i, j]) => i >= 0 && j >= 0 && i < nn * 2 && j < nn * 2 && (i < nn) === (j < nn));
+        // On foot through the house, either side: up the porch and in at the front door, down the stairs inside to the
+        // cellar floor, and out by the side door.
+        for (const [team, s] of [["blue", 1], ["red", -1]]) {
+          const q = fresh("haunted"), a = q.actors[0];
+          for (const k of q.crates) k.live = false;
+          const walk = (x, z, y, dx, dz, secs) => { Object.assign(a, { x: s * x, z: s * z, y, vx: 0, vy: 0, vz: 0, grounded: true, guard: 9 }); const mv = { x: s * dx, z: s * dz, sprint: 0, jump: 0 }; for (let t = 0; t < secs; t += S.CONFIG.STEP) { S.tick(q, S.CONFIG.STEP, mv); q.eventCount = 0; } return [s * a.x, s * a.z, a.y]; };
+          const up = walk(0, 18.5, 0, 0, 1, 1.4), down = walk(4.5, 25.4, 3, 0, 1, 1.2), side = walk(6.5, 25.5, 0, 1, 0, 0.8);
+          out[team + "Ways"] = up[2] === 3 && up[1] > 23.5 && down[2] === 0 && down[1] > 28.7 && side[0] > 8.4 && side[2] === 0;
+        }
+        const through = (a, [x0, x1, z0, z1], pz) => a.x > x0 && a.x < x1 && (pz - (z0 + z1) / 2) * (a.z - (z0 + z1) / 2) <= 0;
+        for (const [team, door, sx, sz] of [["blue", hI.backDoors[0], -13, 30], ["red", hI.backDoors[1], 13, -30]]) {
+          const q = fresh("haunted"), a = q.actors.find((o) => o.team !== team);
+          for (const k of q.crates) k.live = false;
+          Object.assign(a, { bot: true, role: "attack", x: sx, z: sz, y: 0 });
+          let via = false, t = 0;
+          for (; t < 10 && a.carrying !== team; t += S.CONFIG.STEP) { const pz = a.z; S.tick(q, S.CONFIG.STEP, still); q.eventCount = 0; if (through(a, door, pz)) via = true; }
+          out[team + "Steal"] = a.carrying === team && via;
+        }
+        const q = fresh("haunted"), d = q.actors[1], c = q.actors[2], st = hI.stands.blue;
+        for (const k of q.crates) k.live = false;
+        Object.assign(d, { bot: true, role: "defend", x: st.x, z: st.z - 1, y: 0 }); Object.assign(c, { x: -1.5, z: 37, y: 0, carrying: "blue" });
+        Object.assign(q.flags.blue, { state: "carried", carrier: 2 });
+        let chased = false;
+        for (let t = 0; t < 4 && !chased; t += S.CONFIG.STEP) { const pz = d.z; S.tick(q, S.CONFIG.STEP, still); q.eventCount = 0; if (through(d, hI.backDoors[0], pz)) chased = true; }
+        out.defend = chased;
+        // Regression: red's ghosts had no reach (the turned copies dropped it), so they never left their haunts. One in
+        // each half's graveyard now spooks an Ooga standing in its haunt.
+        out.ghosts = hI.ghosts.length === 4 && [2, 3].every((i) => {
+          const gq = fresh("haunted"), u = gq.actors[0], [gx, gz] = hI.ghosts[i];
+          for (const k of gq.crates) k.live = false;
+          Object.assign(u, { x: gx + 2.5, z: gz, y: 0, grounded: true });
+          let boo = false;
+          for (let t = 0; t < 6 && !boo; t += S.CONFIG.STEP) { S.tick(gq, S.CONFIG.STEP, still); for (let k = 0; k < gq.eventCount; k++) if (gq.events[k].type === "boo") boo = true; gq.eventCount = 0; }
+          return boo && gq.ghosts.every((g) => Number.isFinite(g.x + g.z));
+        });
+        record("block frenzy haunted house: each cellar's back door is open at walking height under the upper floor, walled either side and clear to the scoring ring, which stands empty; the porch, the front door, the stairs down, the side door and the barred windows are as built; a raider round the house takes the block through the back door on both sides, a defender at the stand chases a thief out through it, and a ghost in either half spooks whoever stands in its haunt", Object.values(out).every(Boolean), JSON.stringify(out));
+        // Raids from every start, on both sides: the two spawns, the avenue, either side line, beside the rivals' house
+        // and the raider's own scoring ring. A raider bot reaches the rivals' block in its cellar, by whichever way,
+        // and never stands stuck up on the house's floor (the nav once saw the cellar's walls under it, and a bot in
+        // the house lost its way for the rest of the round). Inside the house is its upper floor within its walls. The
+        // raider has a hook in hand, so none lying in a cave calls it aside.
+        const raids = {};
+        for (const [team, s] of [["blue", 1], ["red", -1]]) for (const [sx, sz] of [[-1.2, -17.6], [1.2, -16.4], [0, -8], [-18, 0], [16, -4], [-16, -6], [18, 10], [12, -30], [0, -36]]) {
+          const rq = fresh("haunted"), a = rq.actors.find((o) => o.team !== team);
+          for (const k of rq.crates) k.live = false;
+          Object.assign(a, { bot: true, role: "attack", x: s * sx, z: s * sz, y: 0, hook: 1 });
+          let t = 0, up = 0;
+          for (; t < 30 && a.carrying !== team; t += S.CONFIG.STEP) { S.tick(rq, S.CONFIG.STEP, still); rq.eventCount = 0; if (a.y > 2.5 && Math.abs(a.x) < 8 && Math.abs(a.z) > 23 && Math.abs(a.z) < 33) up += S.CONFIG.STEP; }
+          raids[`${team}@${s * sx},${s * sz}`] = a.carrying === team && up < 8 ? +t.toFixed(1) : `fail ${t.toFixed(1)}s, ${up.toFixed(1)}s in the house`;
+        }
+        record("block frenzy haunted raids: from the spawns, the avenue, the side lines, beside the house and the far ring, on both sides, a raider bot reaches the rivals' block within 30 s and never stands stuck on the house's floor", Object.values(raids).every((v) => typeof v === "number"), JSON.stringify(raids));
+      }
+      {
+        // The rivals' zipline only carries a rider whose own block is home; grabbed with it gone, a trap door throws them
+        // off the island as the enemy catapult does. Checked only at the grab, never on your own line, and bots know it.
+        const zr = {};
+        // (`flight` 2: still under a parachute when they reach the handle; the throw takes over from it.)
+        const atLine = (line, ownAway, carrying = null, flight = 0) => {
+          const q = fresh(), v = q.actors[0], Z = S.ARENA.zips[line];
+          Object.assign(v, { x: Z.ax, z: Z.az, y: S.CONFIG.TOWER_TOP, grounded: true, carrying, flight });
+          if (carrying) Object.assign(q.flags[carrying], { state: "carried", carrier: 0 });
+          if (ownAway) Object.assign(q.flags.blue, { state: "dropped", carrier: null, x: 4, y: 0, z: 0, homeT: 1e9 });
+          return [q, v, S.zip(q, 0), q.events.slice(0, q.eventCount).map((e) => e.type)];
+        };
+        let [q, v, took, ev] = atLine("red", false, "red");
+        zr.homeRides = took && v.riding && v.zipLine === "red" && ev.includes("zip") && !ev.includes("ziptrap") && !S.zipSprings(q, v, "red");
+        [q, v, took, ev] = atLine("red", true, "red", 2);
+        zr.awaySprings = took && !v.riding && v.flung && !v.flight && ev.includes("ziptrap") && !ev.includes("zip") && S.zipSprings(q, v, "red") && v.vy > 0;
+        // An opposing client's local actor indices differ: the trap still names the right rider and line.
+        const L = BL.blockLive, W = BL.blockWire, hm = L.seatMap(q.size, 0), gm = L.seatMap(q.size, q.size);
+        const guest = S.create({ team: "red", size: q.size, map: "fort", prep: 0 }), buffer = new DataView(new ArrayBuffer(W.FRAME_MAX));
+        const bytes = L.encode(q, hm, 1, 1, 1, buffer);
+        L.decode(new DataView(buffer.buffer.slice(0, bytes)), guest, gm, new Float32Array(q.actors.length * 4));
+        const event = guest.events.slice(0, guest.eventCount).find(e => e.type === "ziptrap");
+        zr.wireRider = event?.actor === gm.toLocal[0] && event.team === "red" && !guest.actors[gm.toLocal[0]].riding && guest.flags.red.state === "carried";
+        const trapLog = run(q, 12, still, () => v.falls > 0);
+        zr.awayFalls = v.falls === 1 && !v.carrying && q.flags.red.state === "home" && !trapLog.edgedrop && !!trapLog.return;
+        [q, v, took, ev] = atLine("blue", true);
+        zr.ownNever = took && v.riding && v.zipLine === "blue" && !ev.includes("ziptrap") && !S.zipSprings(q, v, "blue");
+        // Already sliding when their own block is taken, the rider rides on to the end of the line.
+        [q, v, took] = atLine("red", false, "red");
+        Object.assign(q.flags.blue, { state: "carried", carrier: 2 }); q.actors[2].carrying = "blue";
+        const rideLog = run(q, 6, still, () => !v.riding);
+        zr.midRide = took && !rideLog.ziptrap && !!rideLog.unzip && !v.flung && v.zipT === 1;
+        // An expert carrying their block by the rivals' tower takes the zip home only with its own block home, and
+        // drops that route the moment its block goes.
+        const botAt = (ownAway) => {
+          const r = S.create({ seed: 5, prep: 0, map: "fort", skill: "expert" }); Object.assign(r.weather, { left: 1e9 }); for (const g of r.gorillas) { g.state = 3; g.t = 1e9; }
+          for (const o of r.actors) if (o.id !== 1) { o.bot = false; o.y = -100; }
+          const b = r.actors[1], L = S.ARENA.ladders.red; b.bot = true;
+          Object.assign(b, { x: (L.zone[0] + L.zone[1]) / 2 - L.dx * 3, z: (L.zone[2] + L.zone[3]) / 2, y: 0, grounded: true, carrying: "red", guard: 99 }); Object.assign(r.flags.red, { state: "carried", carrier: 1 });
+          if (ownAway) Object.assign(r.flags.blue, { state: "dropped", carrier: null, x: 4, y: 0, z: 0, homeT: 1e9 });
+          return [r, b];
+        };
+        let [br, bb] = botAt(false), botLog = run(br, 8, still, () => bb.riding);
+        zr.botRidesHome = bb.riding && bb.zipLine === "red" && !botLog.ziptrap;
+        [br, bb] = botAt(true); let routed = false;
+        botLog = run(br, 8, still, () => { routed ||= bb.route === "zipHome" || bb.riding; return false; });
+        zr.botStaysOff = !routed && !botLog.ziptrap;
+        [br, bb] = botAt(false); run(br, 8, still, () => bb.route === "zipHome");
+        const chose = bb.route === "zipHome";
+        Object.assign(br.flags.blue, { state: "dropped", carrier: null, x: 4, y: 0, z: 0, homeT: 1e9 });
+        botLog = run(br, 6, still, () => bb.riding);
+        zr.botDrops = chose && bb.route !== "zipHome" && !bb.riding && !botLog.ziptrap;
+        // The event crosses the wire, an Ooga's own.
+        zr.wire = BL.blockLive.EVENT_TYPES.at(-1) === "ziptrap" && BL.blockLive.ACTOR_EVENTS.includes("ziptrap") && BL.blockWire.WIRE === 5;
+        record("block frenzy zipline trap: the rivals' line carries a rider whose own block is home and throws one whose block isn't off the island, a carried block going home with a fall; a rider already sliding rides on, your own line never springs, and expert bots only take the zip home with their block home",
+          Object.values(zr).every(Boolean), JSON.stringify(zr));
+      }
       {
         // wicked's gorillas: a charge and grab dropping the block where it was grabbed, a drag by the feet to the nearest
         // edge, a throw off it, a jetpack back, breaking free by mashing, and the hook stunning a gorilla to free its
@@ -8167,7 +8990,7 @@ const gameRulesChecks = async () => {
       // The play strip repaints only when something it shows moved (`stripChanged`, the scene's own test before it
       // touches the DOM): never on an unchanged frame or inside a clock second, on every input it shows, and afresh for
       // a new round or visit (`shown` cleared, as `start` does).
-      const sim = S.create({ seed: 5, prep: 0 }), me = sim.actors[0], view = S.stripView(), changed = () => S.stripChanged(sim, view);
+      const sim = S.create({ map: "fort", seed: 5, prep: 0 }), me = sim.actors[0], view = S.stripView(), changed = () => S.stripChanged(sim, view);
       const first = changed(), quiet = [changed(), changed(), changed()].every((c) => !c);
       sim.time = 0.4; const subSecond = !changed(); sim.time = 1; const second = changed() && !changed();
       const misses = [];
@@ -8418,9 +9241,37 @@ const gameRulesChecks = async () => {
       GA.r === A.HAUNT.arena.r && GA.wall === A.HAUNT.arena.wall && GA.spots[1] === A.HAUNT.arena.wall + 1.2 && built.length === GA.elixirs.length
       && built.every((t, k) => t.elixir.x === GA.elixirs[k].x && t.elixir.y === GA.elixirs[k].y && t.elixir.z === GA.elixirs[k].z),
       JSON.stringify({ r: GA.r, wall: GA.wall, built: built.map((t) => t.elixir), elixirs: GA.elixirs }));
+    // Block Frenzy's models on the builders they load with: everything its scene and the hall's racks place is built here,
+    // and each tool's gun is one cached mesh a team, kept modest.
+    let modelsLoad = "";
+    try { runInNewContext(await readFile(new URL("../src/js/block-models.js", import.meta.url), "utf8"), context); } catch (e) { modelsLoad = String(e); }
+    {
+      const BM = BL.blockModels || {}, sources = ["scene-block.js", "arcade-scene-models.js"].map(f => readFileSync(new URL(`../src/js/${f}`, import.meta.url), "utf8")).join("\n");
+      const placed = [...new Set([...sources.matchAll(/\bBM\.(\w+)/g)].map(m => m[1]))], absent = placed.filter(n => BM[n] === undefined);
+      const guns = (BM.GUNS || []).map((kind, i) => { const blue = BM.gun(i * 2), red = BM.gun(i * 2 + 1); return { kind, faces: blue.faces.length, shared: BM.gun(i * 2) === blue, teams: blue !== red && red.faces.length === blue.faces.length }; });
+      const held = ["hookHead", "rope", "monkey"].map(n => BM[n]().faces.length), thrown = [BM.rocket(0), BM.grenade(1), BM.cache(0), BM.cache(1), BM.crate(0), BM.rack(1), BM.power(4)].map(g => g.faces.length);
+      // The file loads, every name it exports is defined, and the scene asks the models and the sim for nothing they lack.
+      const undefinedNames = Object.keys(BM).filter(n => BM[n] === undefined), simAsked = [...new Set([...sources.matchAll(/\bSIM\.(\w+)/g)].map(m => m[1]))].filter(n => !(n in BL.blockSim));
+      record("block models: the file loads with every exported name defined, and the scene reads nothing the models or the sim lack",
+        modelsLoad === "" && Object.keys(BM).length > 40 && undefinedNames.length === 0 && absent.length === 0 && simAsked.length === 0, JSON.stringify({ modelsLoad, undefinedNames, absent, simAsked }));
+      record("block models: each tool's gun, the hook launcher among them, is one cached mesh a team of at most 400 faces",
+        placed.length > 40 && BL.blockSim.ARSENAL.every(([k]) => BM.GUNS.includes(k)) && guns.length === 8 && guns[7].kind === "hook" && guns.every(g => g.shared && g.teams && g.faces > 100 && g.faces <= 400)
+        && held.every(n => n > 0 && n <= 400) && thrown.every(n => n > 0 && n <= 400), JSON.stringify({ absent, guns, held, thrown }));
+    }
     const racked = H.racks.flatMap(([, , rows]) => rows.map(([id]) => id));
-    record("arcade block hall: three racks hold the game's nine weapons, each from its own held model",
-      racked.length === 9 && racked.filter(Number.isInteger).every((i, k) => i === k) && racked.includes("hook") && racked.includes("wallet") && H.pictures.length === 4, JSON.stringify(racked));
+    // Every gun the game holds hangs there by its own `GUNS` index (the sniper rifle, the Golden AK and the hook's
+    // launcher among them), with the hook's head, and each row has a peg height on its rack.
+    const hung = racked.filter(Number.isInteger), hallGuns = BL.blockModels.GUNS;
+    record("arcade block hall: three racks hold the game's nine weapons, each from its own held model: every gun in the game's list once, the hook launcher among them, and the hook's head",
+      racked.length === 9 && hung.length === hallGuns.length && hung.every((i, k) => i === k && BL.blockModels.gun(i * 2).faces.length > 0) && ["sniper", "gold", "hook"].every((k) => hung.includes(hallGuns.indexOf(k)))
+      && racked.includes("hook") && H.racks.every(([, , rows]) => rows.length <= 3) && /BM\.gun\(i \* 2\)/.test(readFileSync(new URL("../src/js/arcade-scene-models.js", import.meta.url), "utf8")) && H.pictures.length === 4, JSON.stringify(racked));
+    {
+      // Block Frenzy's trophy stage: the golden block is the teams' cube in gold, and each side's sunburst glows in its own colour.
+      const T = BL.blockModels, gold = T.goldBlock(), rays = [T.trophyRays(0), T.trophyRays(1)];
+      record("block frenzy trophy: the golden block and each side's sunburst build, the rays glowing in that side's colour",
+        gold.faces.length === T.block(0).faces.length && rays.every((r) => r.faces.length > 0 && r.faces.every((f) => f.emissive === 1)) && rays[0].faces[0].color.join() !== rays[1].faces[0].color.join(),
+        JSON.stringify({ gold: gold.faces.length, rays: rays.map((r) => r.faces.length) }));
+    }
     // The zipline off the ledge: the survey over the scene's world, ledge to island, is clean and the ride ends on the island's top.
     const Z = BL.zipline, far = (z) => z <= H.stop.z + 1;
     const q = { support: (x, z) => far(z) ? H.cloudY : z >= H.ledge - 0.5 ? H.y : NaN, clear: () => true, landable: (x, y, z) => far(z) };
@@ -12046,7 +12897,7 @@ const blockStart = { name: "block start", why: "rule: Space only closes the titl
     s.prep = 0; a.cooldown = 0; a.crates = 3; a.splat = a.trapped = 0;
     for (const o of s.actors) if (o.id) { o.x = 20; o.z = o.team === s.team ? 34 : -34; }
     B.block.chooseTool("paint");
-    Object.assign(a, { x: -14, y: 0, z: s.team === "blue" ? 6 : -6, vx: 0, vy: 0, vz: 0, grounded: true, holding: false, riding: false });
+    Object.assign(a, { x: -14, y: 0, z: s.team === "blue" ? 6 : -6, vx: 0, vy: 0, vz: 0, grounded: true, holding: false, riding: false, flight: 0 });
     const fired = shots(); document.getElementById("block-paint").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
     window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     const crates = a.crates; press("crate");
@@ -12095,17 +12946,185 @@ const blockWalk = { name: "block walk", why: "rule: W A S D move the visitor's O
   record("block walk: W and S run the Ooga forward and back on screen, A and D step it left and right, Q turns it and the camera left and E right", ok, JSON.stringify(rows));
 } };
 const blockQuiz = { name: "block quiz", why: "rule: a quiz trap holds the visitor until a right answer, a wrong one locks the answers, and a right one frees them", run: async (b) => {
+  // Release any native lock from the preceding walk before installing the deterministic lock fixture.
+  // Otherwise Chrome still routes a real answer click to the locked canvas despite the mocked getter.
+  await b.evaluate(`document.exitPointerLock()`);
+  for (let i = 0; i < 40 && await b.evaluate(`!!document.pointerLockElement`); i++) await b.sleep(25);
+  // A captured mouse, stood in for (a headless page can't hold one): the trap must let it go, and a right answer take it back.
+  await b.evaluate(`(() => { const c = document.getElementById("scene"); window.__lock = { el: c, exits: 0, takes: 0, was: c.requestPointerLock };
+    Object.defineProperty(document, "pointerLockElement", { configurable: true, get: () => window.__lock.el });
+    document.exitPointerLock = () => { window.__lock.el = null; window.__lock.exits++; };
+    c.requestPointerLock = () => { window.__lock.el = c; window.__lock.takes++; }; })()`);
   const r = await b.evaluate(`(() => { const B = window.__ooga, D = B.block, s = D.sim, a = s.actors[0], t = s.traps[2];
     a.x = t.x; a.z = t.z + 0.5; B.advance(0.2, 1 / 60);
-    const open = D.quiz.open && !document.getElementById("block-quiz").hidden && a.trapped > 0;
+    const open = D.quiz.open && !document.getElementById("block-quiz").hidden && a.trapped > 0 && window.__lock.exits === 1 && document.pointerLockElement === null;
     D.answer((D.quiz.right + 1) % 4);
     const locked = D.quiz.locked && a.trapped > 0;
     return { open, locked }; })()`);
   await b.evaluate(`new Promise((resolve) => setTimeout(resolve, 2700))`);
-  const f = await b.evaluate(`(() => { const B = window.__ooga, D = B.block, a = D.sim.actors[0]; const fresh = !D.quiz.locked && D.quiz.asked === 2; D.answer(D.quiz.right); B.advance(0.1, 1 / 60); return { fresh, free: a.trapped === 0 && !D.quiz.open && document.getElementById("block-quiz").hidden }; })()`);
-  record("block quiz: a trap opens the question, a wrong answer locks the card and brings another, a right answer breaks the bubble", r.open && r.locked && f.fresh && f.free, JSON.stringify({ ...r, ...f }));
+  // The right answer, clicked with the real mouse at the free cursor.
+  const at = await b.evaluate(`(() => { const D = window.__ooga.block, q = document.querySelectorAll("#block-quiz [data-answer]")[D.quiz.right].getBoundingClientRect(); return { fresh: !D.quiz.locked && D.quiz.asked === 2, x: q.left + q.width / 2, y: q.top + q.height / 2 }; })()`);
+  await b.click(at.x, at.y);
+  const f = await b.evaluate(`(() => { const B = window.__ooga, D = B.block, a = D.sim.actors[0]; B.advance(0.1, 1 / 60); const back = window.__lock.takes === 1 && document.pointerLockElement === document.getElementById("scene");
+    const c = document.getElementById("scene"); delete document.pointerLockElement; delete document.exitPointerLock; c.requestPointerLock = window.__lock.was; if (!window.__lock.was) delete c.requestPointerLock; delete window.__lock;
+    return { back, free: a.trapped === 0 && !D.quiz.open && document.getElementById("block-quiz").hidden }; })()`);
+  record("block quiz: a trap frees a captured mouse and opens the question, a wrong answer locks the card and brings another, a right answer clicked at the free cursor breaks the bubble and captures the mouse again", r.open && r.locked && at.fresh && f.free && f.back, JSON.stringify({ ...r, ...at, ...f }));
 } };
-const blockRun = `(() => { const B = window.__ooga, D = B.block; D.start(); for (let i = 0; i < 80 && D.phase === "play"; i++) D.simulate(15, true); B.advance(0.3, 1 / 30); const save = B.game.state.block; return { ok: D.phase === "results" && !document.getElementById("block-results").hidden && save.games === 1 && save.wins === (D.result.won ? 1 : 0), phase: D.phase, result: D.result, save }; })()`;
+// The results are the trophy screen: the winning side named on its banner and its colour, and every Ooga of both sides in the tables.
+const blockRun = `(() => { const B = window.__ooga, D = B.block; D.start(); for (let i = 0; i < 80 && D.phase === "play"; i++) D.simulate(15, true); B.advance(0.3, 1 / 30); const save = B.game.state.block, card = document.getElementById("block-results"), w = D.sim.winner;
+  const trophy = card.dataset.team === w && document.getElementById("block-result-title").textContent === (w === "blue" ? "Blue" : "Red") + " wins!" && document.querySelectorAll("#block-side-blue li, #block-side-red li").length === D.sim.actors.length && card.querySelector('[data-team="' + w + '"].won') !== null;
+  return { ok: D.phase === "results" && !card.hidden && trophy && save.games === 1 && save.wins === (D.result.won ? 1 : 0), phase: D.phase, result: D.result, save, trophy }; })()`;
+const blockPoses = { name: "block modelled poses", why: "regression: old straight-arm weapon offsets missed the modelled fists and the trophy block floated above slim Oogas", run: async b => {
+  const rows = await b.evaluate(`(() => {
+    const B = __ooga, D = B.block, S = BL.scenes.block, rows = [], update = S.update;
+    S.update = () => {};
+    try {
+      for (const name of ["w-s-bitcoin", "tiffanyvarty", "portlandhodl"]) {
+        D.showBoard(); D.chooseOoga(name); D.chooseOoga(name); D.start(604);
+        const a = D.sim.actors[0];
+        Object.assign(a, { flight: 0, y: 0, x: -7, z: 4, grounded: true, gold: true, hook: 1 });
+        D.sim.prep = 0;
+        for (const kind of ["paint", "grenade", "rocket", "net", "sniper", "ak", "gold", "hook"]) {
+          D.chooseTool(kind); update(0, 0); BL.scene.updateWorld(S.root);
+          const actor = D.actors[0], cave = actor.cave, p = cave.parts;
+          let gap = 0;
+          for (const [gun, hand] of [[actor.gun, p.fingersR], ...(kind === "gold" ? [[actor.gunL, p.fingersL]] : [])]) {
+            const point = new Float64Array(3); BL.math.mat4.transformPoint(point, gun.world, 0, -.08, -.03);
+            gap = Math.max(gap, Math.hypot(point[0] - hand.world[12], point[1] - hand.world[13], point[2] - hand.world[14]));
+          }
+          rows.push({ name, kind, gap, visible: actor.gun.visible, modelled: cave.modelled, own: cave.traits.name === name });
+        }
+        const actor = D.actors[0], hip = actor.cave.root.position.y;
+        const pack = actor.jet, cave = actor.cave, bounds = BL.scene.boundsOf(pack.geometry), front = new Float64Array(3), back = new Float64Array(3);
+        BL.math.mat4.transformPoint(front, pack.world, 0, 0, bounds.max[2]);
+        BL.math.mat4.transformPoint(back, cave.root.world, 0, .06 * cave.traits.height, -cave.back);
+        rows.push({ name, jet: true, gap: Math.hypot(...front.map((v, i) => v - back[i])), attached: pack.parent === cave.root, scale: pack.scale.x / cave.traits.height });
+        a.riding = true; a.crouch = true; update(0, 0); BL.scene.updateWorld(S.root);
+        const ends = [-.3, .3].map(x => { const v = new Float64Array(3); BL.math.mat4.transformPoint(v, actor.trolley.world, x, -.15, 0); return v; });
+        const dx = ends[1][0] - ends[0][0], dy = ends[1][1] - ends[0][1], dz = ends[1][2] - ends[0][2], len2 = dx * dx + dy * dy + dz * dz;
+        let gap = 0;
+        for (const hand of [actor.cave.parts.fingersR, actor.cave.parts.fingersL]) {
+          const x = hand.world[12] - ends[0][0], y = hand.world[13] - ends[0][1], z = hand.world[14] - ends[0][2];
+          const t = Math.max(0, Math.min(1, (x * dx + y * dy + z * dz) / len2));
+          gap = Math.max(gap, Math.hypot(x - t * dx, y - t * dy, z - t * dz));
+        }
+        const hiddenGuns = !actor.gun.visible && !actor.gunL.visible;
+        a.riding = a.crouch = false; update(0, 0);
+        rows.push({ name, zip: true, gap, restored: actor.cave.root.position.y === hip && !actor.trolley.visible, hiddenGuns });
+        D.sim.over = true; D.sim.winner = D.sim.team; D.sim.actors[0].captures = 3; D.simulate(.1); update(0, 0); BL.scene.updateWorld(S.root);
+        const p = D.actors[0].cave.parts, gold = S.root.children.find(n => n.geometry === BL.blockModels.goldBlock() && n.visible);
+        rows.push({ name, trophy: D.phase === "results", gap: Math.abs(gold.world[13] - .465 - (p.fingersR.world[13] + p.fingersL.world[13]) / 2) });
+      }
+    } finally { S.update = update; D.showBoard(); }
+    return rows;
+  })()`);
+  record("block modelled poses: regular, slim and wide Oogas grip every weapon and both Golden AKs, and their trophy rests on their raised fists", rows.filter(r => !r.zip && !r.jet).length === 27 && rows.filter(r => !r.zip && !r.jet).every(r => r.trophy ? r.gap < .03 : r.visible && r.modelled && r.own && r.gap < .001), JSON.stringify(rows));
+  record("block modelled poses: both fists meet the zipline bar even while crouch is held, weapons are stowed, and letting go restores each Ooga's hip", rows.filter(r => r.zip).length === 3 && rows.filter(r => r.zip).every(r => r.gap < .001 && r.restored && r.hiddenGuns), JSON.stringify(rows.filter(r => r.zip)));
+  record("block modelled jetpacks: regular, slim and wide Oogas carry a body-sized pack seated on their actual back", rows.filter(r => r.jet).length === 3 && rows.filter(r => r.jet).every(r => r.attached && r.gap < .001 && Math.abs(r.scale - 1) < .001), JSON.stringify(rows.filter(r => r.jet)));
+} };
+const blockThrowScore = { name: "block throw scoring controls", why: "rule: keyboard and touch throws must score under the selected rule and show the correct throw feedback on the new Oogas", run: async b => {
+  const rows = [], touch = await b.evaluate('matchMedia("(pointer: coarse)").matches');
+  // A focused run may reach this check before blockStart dismisses the title card.
+  if (await b.evaluate(`!document.querySelector('[data-intro="block"]').hidden`)) await b.key(" ");
+  await b.evaluate('window.__throwUpdate = BL.scenes.block.update; BL.scenes.block.update = () => {}');
+  try {
+    for (const name of ["w-s-bitcoin", "tiffanyvarty", "portlandhodl"]) for (const mode of ["home", "away", "any"]) {
+      const setup = await b.evaluate(`(() => {
+        const D = __ooga.block, S = BL.blockSim;
+        D.showBoard(); document.querySelector('#block-board [data-map="town"]').click(); D.selection.rule = "home"; D.chooseTeam(${JSON.stringify(name === "tiffanyvarty" ? "red" : "blue")}); D.chooseOoga(${JSON.stringify(name)}); D.chooseOoga(${JSON.stringify(name)}); D.start(583);
+        const sim = D.sim, a = sim.actors[0], stand = S.ARENA.stands[a.team], sign = a.team === "blue" ? 1 : -1, other = S.other(a.team);
+        sim.prep = 0; sim.anyTime = ${mode === "any"}; sim.weather.left = 1e9;
+        for (const p of sim.actors) Object.assign(p, { bot: false, flight: 0, x: 18, z: p.id * 3, y: 0, grounded: true, guard: 60 });
+        for (const g of sim.gorillas) { g.state = 3; g.t = 1e9; }
+        Object.assign(a, { x: stand.x, z: stand.z - sign * 13.7, vx: 0, vz: 0, y: 0, vy: 0, carrying: other });
+        Object.assign(sim.flags[other], { state: "carried", carrier: 0 });
+        if (${mode !== "home"}) Object.assign(sim.flags[a.team], { state: "dropped", x: -18, y: 0, z: 0 });
+        D.cam.face = sign === 1 ? 0 : Math.PI; __throwUpdate(0, 0);
+        const e = document.querySelector('#block-tools [data-tool="pass"]'), r = e.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2, enabled: !e.disabled, hit: document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('[data-tool="pass"]') === e, modelled: D.actors[0].cave.modelled };
+      })()`);
+      if (touch) {
+        await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: setup.x, y: setup.y }] });
+        await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      } else await b.key("t");
+      const result = await b.evaluate(`(() => {
+        const D = __ooga.block, a = D.sim.actors[0], f = D.sim.flags[BL.blockSim.other(a.team)], threw = f.state === "flying";
+        D.simulate(2); __throwUpdate(0, 0);
+        return { threw, score: D.sim.score[a.team], captures: a.captures, gold: a.gold, state: f.state, feed: document.getElementById("block-feed").textContent, notice: document.getElementById("block-notice").textContent };
+      })()`);
+      rows.push({ name, mode, setup, result });
+    }
+  } finally { await b.evaluate('BL.scenes.block.update = __throwUpdate; delete window.__throwUpdate; __ooga.block.showBoard()'); }
+  record("block throw controls: regular/slim/wide Oogas throw from keyboard or touch; classic scores only with their block home, alternate scores while away, and the feed and waiting hint explain the result", rows.length === 9 && rows.every(({ mode, setup, result: r }) => setup.modelled && setup.enabled && (!touch || setup.hit) && r.threw && (mode === "away" ? r.score === 0 && r.captures === 0 && r.state === "dropped" && r.notice.includes("that throw can't score") : r.score === 1 && r.captures === 1 && r.gold && r.state === "home" && r.feed.includes("threw it home"))), JSON.stringify({ touch, rows }));
+} };
+const blockRoofs = { name: "block roof presentation", why: "regression: a loose block fell through a cave roof; the drawn block, modelled feet and retrieving bot must agree on its surface", run: async b => {
+  const rows = await b.evaluate(`(() => {
+    const D = __ooga.block, S = BL.blockSim, scene = BL.scenes.block, update = scene.update, rows = [];
+    scene.update = () => {};
+    try {
+      for (const name of ["w-s-bitcoin", "tiffanyvarty", "portlandhodl"]) for (const [map, surface] of [["town", "cave"], ["jungle", "cave"], ["jungle", "bridge"], ["jungle", "floor"], ["jungle", "head"]]) {
+        D.showBoard(); document.querySelector('#block-board [data-map="' + map + '"]').click(); D.chooseTeam("blue"); D.chooseOoga(name); D.chooseOoga(name); D.start(602); D.sim.prep = 0;
+        const sim = D.sim, body = sim.actors[0], f = sim.flags.red;
+        for (const a of sim.actors) Object.assign(a, { bot: false, flight: 0, x: 0.25 + a.id, z: S.ARENA.spawnZ, y: 0, grounded: true, guard: 60 });
+        sim.weather.left = 1e9;
+        for (const g of sim.gorillas) { g.state = 3; g.t = 1e9; }
+        const roof = S.ARENA.BLOCKS.find(b => surface === "cave"
+          ? S.ARENA.rockKind.get(b) === "cave" && b[5] > 0 && b[1] - b[0] >= 1 && b[3] - b[2] >= 1 && S.groundAt((b[0] + b[1]) / 2,(b[2] + b[3]) / 2, 99, 0.2) === b[4]
+          : S.ARENA.kinds.get(b) === surface && b[2] > 0);
+        const x = (roof[0] + roof[1]) / 2, z = (roof[2] + roof[3]) / 2, top = roof[4];
+        Object.assign(f, { state: "flying", x, z, y: top + 2, vx: 0, vz: 0, vy: 0, carrier: null, thrower: -1, hookedBy: -1 });
+        // A player below the roof cannot take the falling block through it.
+        Object.assign(body, { x, z, y: 0 }); D.simulate(1.5); update(0, 0); BL.scene.updateWorld(scene.root);
+        const block = scene.root.children.find(n => n.geometry === BL.blockModels.block(1));
+        const landed = f.state === "dropped" && f.y === top && !body.carrying;
+        const drawn = block.visible && Math.abs(block.world[13] - top - .5) < .07;
+        // Land the actual chosen model beside the block, then measure both soles in world space.
+        Object.assign(body, { x: x + (surface === "head" || surface === "floor" ? 2 : 0), z: z + (surface === "head" || surface === "floor" ? 0 : 2), y: top + 2, grounded: false, vy: 0 }); D.simulate(1.5); update(0, 0); BL.scene.updateWorld(scene.root);
+        const cave = D.actors[0].cave, feet = [];
+        for (const leg of [cave.parts.legL, cave.parts.legR]) {
+          const box = BL.scene.boundsOf(leg.geometry), p = new Float64Array(3); let low = Infinity;
+          for (const x of [box.min[0], box.max[0]]) for (const y of [box.min[1], box.max[1]]) for (const z of [box.min[2], box.max[2]]) { BL.math.mat4.transformPoint(p, leg.world, x, y, z); low = Math.min(low, p[1]); }
+          feet.push(low - top);
+        }
+        const stood = body.grounded && body.y === top && cave.modelled;
+        Object.assign(body, { x: .25, z: S.ARENA.spawnZ, y: 0 });
+        const bot = sim.actors[1]; Object.assign(bot, { x: surface === "cave" ? x - Math.sign(x) * 9 : surface === "head" ? x : x + 6, z: z + (surface === "head" ? 3 : 0), y: 0, bot: true, role: "attack", fuel: S.CONFIG.JET_FUEL });
+        let seconds = 0, flame = false;
+        while (seconds < 30 && f.state !== "carried") { D.simulate(.1); update(0, 0); flame ||= D.actors[bot.id].jetFlame.visible; seconds += .1; }
+        rows.push({ name, map, surface, landed, drawn, stood, feet, flame, seconds, fetched: f.state === "carried" && f.carrier === bot.id });
+      }
+    } finally { scene.update = update; D.showBoard(); }
+    return rows;
+  })()`);
+  record("block roofs: blocks stay visible above the roof, cannot be picked up below it, regular/slim/wide Oogas land with their feet on it, and bots retrieve them using the upgraded jetpack", rows.length === 15 && rows.every(r => r.landed && r.drawn && r.stood && r.feet.every(y => Math.abs(y) < .1) && r.flame && r.fetched), JSON.stringify(rows));
+} };
+const blockZipline = { name: "block zipline controls", why: "rule: the ride control and warning lamps must agree about a rival zipline's trap for either team", run: async b => {
+  const rows = await b.evaluate(`(() => {
+    const D = __ooga.block, S = BL.scenes.block, M = BL.blockSim, rows = [], update = S.update;
+    S.update = () => {};
+    try {
+      for (const team of M.TEAMS) for (const away of [false, true]) {
+        D.showBoard(); D.chooseTeam(team); D.start(631); D.sim.prep = 0;
+        // Give the new round its spawn frame before moving to a handle, as a real approach does.
+        update(0, 0);
+        const a = D.sim.actors[0], line = M.ARENA.zips[D.sim.rival];
+        Object.assign(a, { x: line.ax, z: line.az, y: M.CONFIG.TOWER_TOP, flight: 0, grounded: true });
+        if (away) Object.assign(D.sim.flags[team], { state: "dropped", x: 0, y: 0, z: 0, homeT: 999 });
+        update(0, 0);
+        const lamps = S.root.children.flatMap(n => n.children).concat(S.root.children).filter(n => n.geometry === BL.blockModels.zipLight(0) || n.geometry === BL.blockModels.zipLight(1));
+        const reds = lamps.filter(n => n.geometry === BL.blockModels.zipLight(1));
+        const button = document.querySelector('#block-tools [data-tool="zip"]'), enabled = !button.disabled;
+        button.click(); update(0, 0);
+        rows.push({ team, away, enabled, lamps: lamps.length, red: reds.length, correctLamp: !away || reds[0]?.position.x === line.ax,
+          acted: away ? !a.riding && a.vy > 0 && !a.flight && !D.actors[0].trolley.visible : a.riding && D.actors[0].trolley.visible });
+        D.sim.flags[team].state = "home"; update(0, 0);
+        rows.at(-1).reset = lamps.every(n => n.geometry === BL.blockModels.zipLight(0));
+      }
+    } finally { S.update = update; D.showBoard(); }
+    return rows;
+  })()`);
+  record("block zipline controls: each team's lamps warn when its own block is away, Ride springs the trap or boards the trolley accordingly, and a return clears the warning", rows.length === 4 && rows.every(r => r.enabled && r.lamps === 2 && r.red === (r.away ? 1 : 0) && r.correctLamp && r.acted && r.reset), JSON.stringify(rows));
+} };
 const dropStart = { name: "drop start", why: "regression: Space on the title card also launched the flight", run: async (b) => {
   const st = () => b.evaluate(`({ phase: window.__ooga.drop.phase, card: !document.querySelector('[data-intro="drop"]').hidden })`);
   const fresh = await st();
@@ -12646,6 +13665,112 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels
   }) && ["left", "right", "bottom"].every(dock => [false, true].every(open => motions.some(m => m.dock === dock && m.open === open))), JSON.stringify(motions));
   } finally { await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] }); }
 } };
+// Inspector protocol acceptance in Chrome; transport/media failures are deterministic, with no live SFU or microphone.
+const inspectorRecovery = { name: "inspector recovery", why: "rule: reconnect evidence is feature gated and sent once, and failed or disconnected voice restarts preserve mute and microphone intent", run: async (b) => {
+  const netSource = readFileSync(join(root, "src/js/net.js"), "utf8");
+  await b.evaluate(`(() => {
+    BL.net.dispose(); BL.voice.dispose();
+    const F = window.__inspectFixture = { realNet: BL.net, realVoice: BL.voice, sockets: [], timers: [], intervals: [], sent: [], realFetch: window.fetch,
+      realSocket: window.WebSocket, timeout: window.setTimeout, interval: window.setInterval, clearTimeout: window.clearTimeout, clearInterval: window.clearInterval };
+    window.fetch = async () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "fixture" } }) });
+    window.WebSocket = class { static OPEN = 1; constructor() { this.readyState = 1; F.sockets.push(this); } send(v) { F.sent.push(v === "ping" ? v : JSON.parse(v)); } close(code, reason) { this.readyState = 3; this.closed = { code, reason }; } };
+    window.setTimeout = (fn, ms) => { F.timers.push({ fn, ms }); return F.timers.length; };
+    window.setInterval = (fn, ms) => { F.intervals.push({ fn, ms }); return F.intervals.length; };
+    window.clearTimeout = window.clearInterval = () => {};
+    BL.voice = { ...F.realVoice, restart() {}, stop() {}, setPeers() {} };
+  })()`);
+  await b.evaluate(netSource);
+  const net = await b.evaluate(`(async () => {
+    const F = __inspectFixture, N = BL.net;
+    await N.start();
+    const welcome = (features) => { const ws = F.sockets.at(-1); ws.onopen(); ws.onmessage({ data: JSON.stringify({ t: "welcome", you: { id: 71 }, players: [], now: Date.now(), features }) }); return ws; };
+    const recover = features => { F.timers.at(-1).fn(); return welcome(features); };
+    let ws = welcome([]); ws.onclose({ code: 1006, wasClean: false }); ws = recover([]);
+    const older = F.sent.every(m => m.t !== "back");
+    ws.onmessage({ data: JSON.stringify({ t: "welcome", you: { id: 71 }, players: [], now: Date.now(), features: ["inspect-v1"] }) });
+    ws.onclose({ code: 1006, wasClean: false }); ws = recover(["inspect-v1"]);
+    const back = F.sent.filter(m => m.t === "back");
+    welcome(["inspect-v1"]);
+    const once = F.sent.filter(m => m.t === "back").length === 1;
+    const beat = F.intervals.at(-1).fn; beat(); beat(); beat(); beat();
+    const heartbeat = ws.closed?.reason === "heartbeat";
+    ws = recover(["inspect-v1"]);
+    const recovered = F.sent.filter(m => m.t === "back").at(-1);
+    ws.onclose({ code: 1001, wasClean: true }); recover([]);
+    const off = F.sent.filter(m => m.t === "back").length === 2;
+    N.dispose();
+    Object.assign(window, { fetch: F.realFetch, WebSocket: F.realSocket, setTimeout: F.timeout, setInterval: F.interval, clearTimeout: F.clearTimeout, clearInterval: F.clearInterval });
+    return { older, once, heartbeat, off, back, recovered };
+  })()`);
+  record("inspector reconnect: old rooms send no evidence; socket and heartbeat recovery send one bounded report after welcome", net.older && net.once && net.heartbeat && net.off && net.back[0]?.why === "socket" && net.back[0]?.code === 1006 && net.back[0]?.clean === false && net.back[0]?.down >= 0 && net.recovered?.why === "heartbeat", JSON.stringify(net));
+  await b.evaluate(`(() => {
+    const F = __inspectFixture; F.pcs = []; F.ops = []; F.timers = []; F.mics = 0;
+    F.realPc = window.RTCPeerConnection; F.gum = navigator.mediaDevices.getUserMedia;
+    window.RTCPeerConnection = class {
+      constructor() { this.connectionState = "connected"; this.iceGatheringState = "complete"; this.localDescription = { sdp: "v=0\\r\\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\\r\\n" }; this.handlers = {}; F.pcs.push(this); }
+      addEventListener(k, fn) { this.handlers[k] = fn; } removeEventListener(k) { delete this.handlers[k]; }
+      addTransceiver() { return { mid: "0" }; } getTransceivers() { return []; }
+      async createOffer() { return this.localDescription; } async createAnswer() { return {}; } async setLocalDescription() {} async setRemoteDescription() {}
+      close() { this.connectionState = "closed"; }
+    };
+    navigator.mediaDevices.getUserMedia = async () => { F.mics++; return new MediaStream(); };
+    window.fetch = async (url, options) => { F.ops.push({ op: String(url).split("/").pop(), body: JSON.parse(options.body) }); return { ok: true, json: async () => ({ tracks: [], sessionDescription: {} }) }; };
+    window.setTimeout = (fn, ms) => { const t = { fn, ms }; F.timers.push(t); return t; };
+    window.clearTimeout = t => { if (t) t.cancelled = true; };
+    BL.net = { ...F.realNet, state: { ...F.realNet.state, connectionToken: "synthetic", me: { id: 71, login: "fixture" } }, remotes: new Map(), voiceLink: () => "none", setMuted() {}, subscribe: () => () => {} };
+  })()`);
+  await b.evaluate(readFileSync(join(root, "src/js/voice.js"), "utf8"));
+  await b.click(720, 450); // Voice is entered through a real user gesture in the app.
+  const voice = await b.evaluate(`(async () => {
+    const F = __inspectFixture, V = BL.voice, drain = async () => { for (let i = 0; i < 100; i++) await Promise.resolve(); };
+    await V.listen(); V.setMuted(true);
+    const fail = why => { const pc = F.pcs.filter(p => p.connectionState !== "closed").at(-1); pc.connectionState = why; pc.handlers.connectionstatechange(); };
+    fail("failed"); await drain();
+    const failed = V.stats.enabled && V.stats.muted && !V.stats.publishing && F.ops.some(o => o.op === "leave" && o.body.why === "failed");
+    fail("disconnected"); const timer = F.timers.filter(t => !t.cancelled).at(-1); timer.fn(); await drain();
+    const disconnected = V.stats.enabled && V.stats.muted && !V.stats.publishing && F.ops.some(o => o.op === "leave" && o.body.why === "disconnected");
+    const mics = F.mics;
+    V.dispose();
+    Object.assign(window, { fetch: F.realFetch, RTCPeerConnection: F.realPc, setTimeout: F.timeout, clearTimeout: F.clearTimeout }); navigator.mediaDevices.getUserMedia = F.gum;
+    BL.net = F.realNet; BL.voice = F.realVoice;
+    return { failed, disconnected, mics, ops: F.ops };
+  })()`);
+  record("inspector voice: failed and sustained disconnected receivers report why and return muted without opening a microphone", voice.failed && voice.disconnected && voice.mics === 0, JSON.stringify(voice));
+} };
+scene("hub", { label: "inspector recovery", query: "pos=0&net=0", httpMedia: true, steps: [inspectorRecovery] });
+
+// Optional acceptance against an isolated wrangler dev, with a synthetic session seeded in its local D1 only.
+if (process.env.INSPECTOR_RUNTIME === "1") scene("hub", { label: "inspector runtime", query: "pos=0&net=0", steps: [{
+  name: "inspector runtime", why: "contract: the real Cloudflare runtime reports the named island, and its gated page displays live join, zone, close and return evidence", run: async b => {
+    const url = new URL(process.env.INSPECTOR_TEST_ORIGIN || "http://127.0.0.1:8640");
+    if (url.protocol !== "http:" || url.hostname !== "127.0.0.1") throw Error("Inspector runtime check requires an isolated loopback Worker");
+    const anonymous = await fetch(url.origin + "/inspect");
+    record("inspector runtime: anonymous page access stays hidden", anonymous.status === 404);
+    await b.send("Network.setCookie", { name: "obl_session", value: "inspector-local-test", url: url.origin, httpOnly: true });
+    await b.open(url.origin + "/inspect");
+    const lines = await b.evaluate(`(async () => {
+      const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+      const join = () => new Promise((resolve, reject) => {
+        const ws = new WebSocket("ws://" + location.host + "/room"), timer = setTimeout(() => reject(Error("room welcome timed out")), 8000);
+        ws.onmessage = e => { const m = JSON.parse(e.data); if (m.t === "welcome") { clearTimeout(timer); resolve(ws); } };
+      });
+      const first = await join(); first.send(JSON.stringify({ t: "zone", name: "factory" }));
+      await pause(300); first.close(1000, "heartbeat");
+      await pause(300); const second = await join(); second.send(JSON.stringify({ t: "back", why: "heartbeat", code: 1006, clean: false, down: 4800 }));
+      let text = "";
+      for (let i = 0; i < 80; i++) { text = document.body.innerText; if (text.includes("page says heartbeat") && text.includes("island : Room") && document.querySelector(".sock.you")) break; await pause(100); }
+      const result = { text, live: document.getElementById("feed").textContent, own: !!document.querySelector(".sock.you"), overflow: document.documentElement.scrollWidth > innerWidth };
+      window.__runtimeRoom = second;
+      return result;
+    })()`);
+    record("inspector runtime: island card, own socket, zone, close code and reconnect appear on the live page", lines.live === "Live" && lines.own && lines.text.includes("island : Room") && lines.text.includes("outside → factory") && lines.text.includes("1000, clean") && lines.text.includes("page says heartbeat") && !lines.overflow, JSON.stringify(lines));
+    await b.evaluate('document.getElementById("filter").value="heartbeat";document.getElementById("filter").dispatchEvent(new Event("input"))');
+    record("inspector runtime: filtering keeps matching drop and return evidence", await b.evaluate('[...document.querySelectorAll("#log .text")].length===2 && [...document.querySelectorAll("#log .text")].every(e=>e.textContent.includes("heartbeat"))'));
+    await b.screenshot(join(root, "untracked/inspector-runtime.png"));
+    await b.evaluate('window.__runtimeRoom.close(1000,"paused")');
+  }
+}] });
+
 const hubMuteKey = { name: "voice mute key", why: "regression: M reserves voice mute across canvas, panel and dialog focus, preserves typing, and falls back to environment sound only when voice is off", run: async (b) => {
   const r = await b.evaluate(`(() => {
     const V = BL.voice, sound = BL.sound, saved = { ...V.stats }, environment = sound.muted, focus = document.activeElement;
@@ -15477,8 +16602,12 @@ const cameraSelectionProbe = (B, controller, select, reselect = null) => {
 };
 const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizontal aim rotates the view around a centerline reticle, zoom retains forward targets, and carry handoffs preserve valid cursors and camera distance", run: async (b) => {
   const focusPoint = await b.evaluate(`(() => {
-    const B = __ooga, a = B.pilot.player, C = B.camera;
-    B.pilot.release(true); B.advance(0.1, 1 / 60);
+    const B = __ooga, body = B.pilot.player, a = body.npc || body, C = B.camera;
+    // A released body goes (#501): its NPC is stood where it was let go, to be double-clicked there.
+    const at = { x: body.root.position.x, y: body.root.position.y - body.baseY + a.baseY, z: body.root.position.z };
+    B.pilot.release(true);
+    if (a !== body) Object.assign(a.root.position, at);
+    B.advance(0.1, 1 / 60);
     const point = B.project(a.root.position.x, a.root.position.y - a.baseY + a.bodyHeight * 0.55, a.root.position.z, {});
     return { x: point.x, y: point.y, eye: [C.position.x, C.position.y, C.position.z] };
   })()`);
@@ -18236,7 +19365,7 @@ const factoryFloor = { name: "factory floor", why: "regression: stairs landed ag
     if (!near(L.stairway[0], L.stairway[2] - 1, 0)) missing.push("forge floor");
     return { who, radius: +R.toFixed(2), missing, cells: cells.length, deck: deck.size };
   })()`);
-  record("factory floor: from the balcony the widest Ooga on the roster reaches both ends of every stair, every line's deck, each peer tunnel's shield, the switchboard, Kortik's deck, the right-wall platform with the rebalancer's operator lane and the treasury (walking the platform's length from the cooker's stair), the donation kiosk in the right wall, the watchtower, landing, galleries and the forge", r.missing.length === 0 && r.radius > 0.6 && r.cells > 20000, JSON.stringify(r));
+  record("factory floor: from the balcony the widest Ooga on the roster reaches both ends of every stair, every line's deck, each peer tunnel's shield, the switchboard, Kortik's deck, the right-wall platform with the rebalancer's operator lane and the treasury (walking the platform's length from the cooker's stair), the donation kiosk in the right wall, the watchtower, landing, galleries and the forge", r.missing.length === 0 && r.radius > 0.45 && r.cells > 20000, JSON.stringify(r));
 } };
 // The way in and out: from the island through the 2 o'clock mouth's shield, back out past the balcony, and Escape.
 const factoryEntrance = { name: "factory entrance", why: "regression: flying above the mouth entered the factory and reaching its front wall away from the doorway exited; real doorway crossings must still keep the same Ooga", run: async (b) => {
@@ -19101,7 +20230,7 @@ const arcadeBlockHall = { name: "arcade block hall", why: "rule: an Ooga walks t
     let ok = true, x = H.x - 0.6, z = -20;
     while (z > H.ledge + 0.8) { const nz = z - 0.2; ok = ok && B.arcade.walkable(x, z, x, nz, H.y, actor.bodyHeight, actor) && B.arcade.supportAt(x, nz, H.y) === H.y; z = nz; }
     const past = B.arcade.walkable(x, H.ledge + 0.5, x, H.ledge - 0.6, H.y, actor.bodyHeight, actor);
-    return { ok, z, past, wall: B.arcade.walkable(H.x0 - 0.3, -28, H.x0 - 0.3, -28.2, H.y, actor.bodyHeight, actor) };
+    return { ok, z, past, wall: B.arcade.walkable(H.x, -28, H.x0 - 0.3, -28, H.y, actor.bodyHeight, actor) };
   })()`);
   record("arcade block hall: walkable from the deck to the ledge, held by its railing and walls", r.ok && !r.past && !r.wall, JSON.stringify(r));
 } };
@@ -23675,6 +24804,97 @@ const studioPlaces = { name: "studio places", why: "playthrough: the studio is w
   record("studio places: reloading an Ooga in bed preserves its rifle selection and waking restores the held rifle", reloaded.asleep && reloaded.kept && reloaded.standing, JSON.stringify(reloaded));
 } };
 scene("studio", { query: `character=${STUDIO_OOGA}`, steps: [studioPlaces, trip("studio")] });
+const modelledCarryPoses = { name: "modelled Heimdall and axe poses", why: "regression: Heimdall's props followed the old straight arms and planting an axe lifted the whole arm before bending its elbow", run: async b => {
+  const result = await b.evaluate(`(() => {
+    const S = BL.scene, M = BL.models, C = BL.crew, stage = S.createNode(), rows = [], shots = [];
+    const point = (node, x = 0, y = 0, z = 0) => { const p = new Float64Array(3); BL.math.mat4.transformPoint(p, node.world, x, y, z); return p; };
+    const distance = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
+    let figure; const original = M.caveman;
+    M.caveman = traits => (figure = original(traits));
+    let keeper;
+    try { keeper = BL.bifrostHeimdall.create({ parent: stage, x: 0, y: 0, z: 0, heading: 0, fx: { sayAt() {}, burst() {} } }); }
+    finally { M.caveman = original; }
+    const P = figure.parts;
+    let time = 0, maxGrip = 0, finite = true;
+    const sample = () => {
+      S.updateWorld(stage);
+      maxGrip = Math.max(maxGrip, distance(point(P.staff), point(P.fingersR)), distance(point(P.horn), point(P.fingersL)));
+      for (const n of [P.staff, P.horn, P.cape, P.forearmL, P.forearmR]) finite &&= Array.from(n.world).every(Number.isFinite);
+    };
+    const advance = (seconds, near) => { for (let i = 0; i < Math.round(seconds * 60); i++) { time += 1 / 60; keeper.update(1 / 60, time, 0, 0, near ? 4 : 30, near); sample(); } };
+    let renderer, host, camera, light;
+    const capture = (label, target, reach, side = 1) => {
+      if (!${!!process.env.POSE_SHOTS}) return;
+      if (!renderer) {
+        host = document.createElement("canvas"); host.style.cssText = "position:fixed;left:0;top:0;width:600px;height:650px;z-index:99999"; document.body.appendChild(host);
+        renderer = BL.glRenderer.createRenderer(host, { quality: "high" }); renderer.resize();
+        camera = S.createCamera({ fov: 30, near: .1, far: 60 });
+        light = { clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3), light: { x: .55, y: .78, z: -.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, moonSun: { x: 0, y: -1, z: 0 }, celestialPole: { x: 0, y: .34, z: -.94 }, starMatrix: new Float32Array(9), stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, sunStrength: 1, moonStrength: 0, moonIllumination: 1, moonPhase: .5, ambientFloor: .18, diffuseFloor: 0, shadowStrength: 1, shadowFloor: 0, shadowBias: .002, time: 0, bloomStrength: .5, shadowCenter: { x: 0, y: 1, z: 0 }, shadowExtent: 3 };
+        BL.daylight.sample(15, light, 80);
+      }
+      Object.assign(camera.target, { x: 0, y: target, z: 0 }); Object.assign(camera.position, { x: -reach * .7, y: target + reach * .3, z: reach * side });
+      S.updateWorld(stage); renderer.render(stage, camera, light); shots.push({ label, png: host.toDataURL("image/png") });
+    };
+    try {
+      advance(.2, false); capture("heimdall-rest", 1.6, 6); capture("heimdall-back", 1.6, 6, -1);
+      const rest = P.armR.rotation.x;
+      advance(.6, true); capture("heimdall-hail", 2.2, 8.5);
+      const hailed = P.armR.rotation.x < -2 && P.forearmR.rotation.x > -.5;
+      advance(3, false); const returned = Math.abs(P.armR.rotation.x - rest) < .01;
+      const poked = keeper.poke(), refused = !keeper.poke(); advance(.7, false); capture("heimdall-horn", 1.6, 6);
+      const hornUp = point(P.horn)[1] > point(P.head)[1] && P.forearmL.rotation.x < -1;
+      advance(3.2, false); const lowered = P.forearmL.rotation.x > -.8;
+      rows.push({ kind: "heimdall", maxGrip, finite, hailed, returned, poked, refused, hornUp, lowered });
+      keeper.root.visible = keeper.plinth.visible = false;
+      const axeDress = BL.contributors.traitsFor("w-s-bitcoin").dress;
+      for (const [name, owner] of [["regular", "w-s-bitcoin"], ["slim", "tiffanyvarty"], ["wide", "portlandhodl"]]) {
+        // Keep each character's actual body hook; setting slim on a regular custom model does not change its rig.
+        const base = BL.contributors.traitsFor(owner);
+        const traits = { ...base, name: "fixture/axe-" + name, stoneAxe: true, nunchaku: false, dress: { ...base.dress, club: axeDress.club } };
+        const cave = M.caveman(traits); C.preparePresentation(cave); S.addChild(stage, cave.root);
+        const p = cave.parts, club = p.club, h = cave.traits.height;
+        for (const remote of [false, true]) {
+          let minY = Infinity, gripGap = 0, maxArm = 0, endY = 0;
+          for (let frame = 0; frame <= 120; frame++) {
+            const move = frame <= 60 ? frame / 60 : (120 - frame) / 60;
+            if (remote) { delete cave.weapon.stick; cave.weapon.axeIdle = 1 + move * .3; } else cave.weapon.stick = move;
+            p.armR.rotation.x = .2 * Math.sin(frame * .2); C.poseEquipment(cave, true, frame / 60); S.updateWorld(stage);
+            const hand = point(p.fingersR), origin = point(club), axis = point(club, 0, 1, 0).map((v, i) => v - origin[i]);
+            const len = Math.hypot(...axis); for (let i = 0; i < 3; i++) axis[i] /= len;
+            const along = hand.reduce((sum, v, i) => sum + (v - origin[i]) * axis[i], 0);
+            gripGap = Math.max(gripGap, distance(hand, origin.map((v, i) => v + along * axis[i])));
+            const butt = point(club, 0, S.boundsOf(club.geometry).min[1], 0)[1]; minY = Math.min(minY, butt);
+            if (frame === 60) endY = butt;
+            maxArm = Math.max(maxArm, Math.abs(p.armR.rotation.x));
+            if (!remote && [0, 30, 60, 90, 120].includes(frame)) capture("axe-" + name + "-" + frame, .8 * h, 3.5 * h);
+          }
+          rows.push({ kind: "axe", name, remote, modelled: cave.modelled, armScale: cave.armScale, minY, endY, gripGap, maxArm });
+        }
+        S.removeChild(stage, cave.root);
+      }
+    } finally { keeper.dispose(); if (renderer) renderer.dispose(); if (host) host.remove(); }
+    return { rows, shots };
+  })()`);
+  const keeper = result.rows[0], axes = result.rows.slice(1);
+  record("modelled Heimdall: rest, hail, repeat tap, horn and return keep both props in the fists with finite clothes and arm transforms", keeper.maxGrip < .001 && keeper.finite && keeper.hailed && keeper.returned && keeper.poked && keeper.refused && keeper.hornUp && keeper.lowered, JSON.stringify(keeper));
+  record("modelled axe: regular, slim and wide bodies, local and remote transitions keep the haft in the fist, its butt above the floor until planted, and the upper arm below its old lifted pose", axes.length === 6 && axes.filter(r => r.name === "slim").every(r => r.armScale < 1) && axes.every(r => r.modelled && r.gripGap < .001 && r.minY > -.005 && Math.abs(r.endY) < .005 && r.maxArm < .4), JSON.stringify(axes));
+  if (process.env.POSE_SHOTS) {
+    mkdirSync(process.env.POSE_SHOTS, { recursive: true });
+    for (const shot of result.shots) writeFileSync(join(process.env.POSE_SHOTS, shot.label + ".png"), Buffer.from(shot.png.split(",")[1], "base64"));
+    writeFileSync(join(process.env.POSE_SHOTS, "measurements.json"), JSON.stringify(result.rows, null, 2));
+  }
+  await b.evaluate('__ooga.studio.place("stand"); __ooga.advance(.5, 1 / 60)');
+  await holdKey(b, "w", .5);
+  const walking = await b.evaluate('__ooga.studio.cave.weapon.stick');
+  await b.evaluate('__ooga.advance(1.8, 1 / 60)');
+  const planted = await b.evaluate('__ooga.studio.cave.weapon.stick');
+  if (process.env.POSE_SHOTS) await b.screenshot(join(process.env.POSE_SHOTS, "studio-axe-planted.png"));
+  await holdKey(b, "w", .5);
+  const away = await b.evaluate('__ooga.studio.cave.weapon.stick');
+  record("modelled axe controls: walking carries the axe, stopping plants it, and walking off releases it again", walking === 0 && planted === 1 && away === 0, JSON.stringify({ walking, planted, away }));
+} };
+scene("studio", { label: "modelled carry poses", query: "character=w-s-bitcoin", steps: [modelledCarryPoses] });
+
 scene("race", { label:"optional rig link fallback",url:hubPage(src, "scene=hub"),steps:[{name:"race optional rig link fallback",why:"regression: an optional uniform-limited rig must preserve WebGL and every original CPU driver",run:async b=>{
   await b.evaluate(`(()=>{
     const gl=document.getElementById("scene").getContext("webgl2"),create=gl.createProgram,parameter=gl.getProgramParameter,pending=new Set();
@@ -23691,7 +24911,7 @@ scene("race", { label:"optional rig link fallback",url:hubPage(src, "scene=hub")
 }}]});
 scene("race", { query: "rain=0&draw=0", steps: [raceStart, raceOwn, raceBench, { name: "race tracks", why: "regression: the 12-slot grid spawned a free banana on Banana Bay", run: async (b) => { await b.evaluate(`window.__ooga.race.toGarage()`); await raceTracks[1](b); } }, raceRigs, raceRigContext, racePause, play("race", "a whole cup under the autopilot: one drawn field of fifteen runs every race and finishes in order, the cup medal and every track's best are saved", cupRun), raceMirror, raceAgain, trip("race")] });
 scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on the target, scores its own medal and is saved as the best", dropRun), dropCrash, trip("drop"), dropOwn] });
-scene("block", { steps: [blockStart, blockWalk, blockQuiz, play("block", "a round on autopilot reaches three captures, shows its results and saves the round", blockRun), trip("block")] });
+scene("block", { steps: [blockStart, blockWalk, blockQuiz, play("block", "a round on autopilot reaches three captures, shows its results and saves the round", blockRun), blockPoses, blockRoofs, blockThrowScore, blockZipline, trip("block")] });
 scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit"), orbitOwn] });
 scene("mine", { steps: [mineResume, trip("mine"), mineControls, mineOwn] });
 // ---- The Lightning Jet Hangar ----
@@ -24680,9 +25900,9 @@ scene("hub", { label: "clock and block height", query: "pos=0&time=0900", steps:
 // Rally is out of order for visitors; the tour still boots it on Canvas 2D through its retained maintenance opt-in
 // (`wip=race` alone would land the page in Rally, so it names the island).
 scene("hub", { label: "canvas2d", query: "canvas2d=1&scene=hub&wip=race", steps: [hubMatrix, canvasTour] });
-// On a phone the move stick stays on screen through Tess's tour, her panel clear of it, and a real touch on it ends the
-// tour and walks the same Ooga from its own view.
-const hubTourTouch = { name: "hub tour touch", why: "regression: the touch sticks hid through Tess's tour, so a phone had no movement to end it with", run: async (b) => {
+// On a phone the move stick stays on screen through Tess's tour, her panel clear of it and of the screen's middle, where
+// each stop's view puts its landmark, and a real touch on it ends the tour and walks the same Ooga from its own view.
+const hubTourTouch = { name: "hub tour touch", why: "regression: the touch sticks hid through Tess's tour, so a phone had no movement to end it with; then the panel, lifted over the sticks and an open drawer, stood on each stop's landmark", run: async (b) => {
   const rows = [];
   // With the bottom drawer closed, open, and open but resized taller while it still leaves the sticks room over it
   // (sheet.js writes that height on the stage, and the sticks ride up on it), through the real touch path.
@@ -24701,6 +25921,7 @@ const hubTourTouch = { name: "hub tour touch", why: "regression: the touch stick
         inStage: !!document.getElementById("stage").querySelector(".greeter-menu"),
         shown: getComputedStyle(j).visibility === "visible" && getComputedStyle(j).display !== "none" && r.width > 0,
         clear: m.bottom <= r.top || m.top >= r.bottom || m.right <= r.left || m.left >= r.right, onScreen: m.top >= 0 && r.bottom <= innerHeight,
+        middle: m.bottom <= innerHeight / 3 || m.top >= innerHeight * 2 / 3,
         x: r.x + r.width / 2 + r.width * 0.3, y: r.y + r.height / 2 }; })()`);
     await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: layout.x, y: layout.y }] });
     let byTouch;
@@ -24711,8 +25932,8 @@ const hubTourTouch = { name: "hub tour touch", why: "regression: the touch stick
   // A double-click on the drag bar resets the resized drawer (and its saved rectangle) before it closes.
   await b.evaluate(`(() => { const s = document.getElementById("sheet"); s.querySelector(".sheet-drag").dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); if (s.dataset.open === "true") document.getElementById("sheet-toggle").click(); })()`);
   const resized = rows.find(r => r.drawer === "resized");
-  record("hub tour touch: with the drawer closed, open, or resized taller with the sticks still over it, the move stick stays on screen clear of Tess's tour panel, and a touch on it ends the tour at once and walks the same Ooga from its own view",
-    rows.length === 3 && rows.every(r => r.touring && r.layout.inStage && r.layout.shown && r.layout.clear && r.layout.onScreen && r.byTouch.ended && r.byTouch.walked > 0.3)
+  record("hub tour touch: with the drawer closed, open, or resized taller with the sticks still over it, the move stick stays on screen clear of Tess's tour panel, the panel stays out of the middle third of the screen where each stop's landmark stands, and a touch on it ends the tour at once and walks the same Ooga from its own view",
+    rows.length === 3 && rows.every(r => r.touring && r.layout.inStage && r.layout.shown && r.layout.clear && r.layout.middle && r.layout.onScreen && r.byTouch.ended && r.byTouch.walked > 0.3)
       && !!resized && resized.sized.sized === "true" && resized.sized.to > resized.sized.from && Math.abs(parseFloat(resized.sized.written) - (resized.layout.sheet.bottom - resized.layout.sheet.top)) <= 1
       && resized.layout.sticks === "true" && resized.layout.stick.bottom <= resized.layout.sheet.top && resized.layout.panel.bottom <= resized.layout.stick.top, JSON.stringify(rows));
 } };
@@ -24733,6 +25954,45 @@ scene("lab", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("lab", { required
 scene("studio", { query: `pos=0&character=${STUDIO_OOGA}`, opts: PHONE_SIZE, steps: [phone("studio", { required: ["#joy-move", "#joy-look", "#act"] })] });
 scene("race", { query: "pos=0&rain=0&draw=0", opts: PHONE_SIZE, steps: [phone("race", { card: '[data-intro="race"]', play: "window.__ooga.race.startRace()", required: ["#joy-move", "#act", "#item-btn", "#race-garage-btn", "#leave-hud"] })] });
 scene("drop", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("drop", { card: '[data-intro="drop"]', play: "window.__ooga.drop.start()", required: ["#joy-move", "#joy-look", "#act", "#leave-hud"] })] });
+scene("block", { label: "block phone", opts: PHONE_SIZE, steps: [phone("block", { card: '[data-intro="block"]', play: "__ooga.block.start()", required: ["#joy-move", "#joy-look", "#act", "#block-paint", "#block-tools [data-tool=paint]"] }), {
+  name: "block phone actions and results", why: "regression: Throw overlapped Jump and the sticks, and small results cards clipped names and action labels", run: async b => {
+    if (await b.evaluate(`!document.querySelector('[data-intro="block"]').hidden`)) await b.key(" ");
+    const rows = [];
+    for (const [map, flightX, flightZ] of [["town", 0, 6], ["jungle", 18, 0], ["haunted", 20, 0]]) for (const [width, height] of [[390,844],[844,390],[320,568]]) {
+      await b.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: true });
+      await b.sleep(100);
+      await b.evaluate(`__ooga.block.showBoard();document.querySelector('#block-board [data-map="${map}"]').click();new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+      rows.push({ map, width, phase: "board", bad: await b.evaluate(PHONE(['#block-board [data-action="block-start"]'])) });
+      await b.evaluate(`(() => { const D=__ooga.block;D.start(604);D.sim.prep=0;Object.assign(D.sim.actors[0],{flight:0,grounded:true,x:-7,z:4,y:0,vy:0,guard:30}); })()`);
+      rows.push({ map, width, phase: "play", bad: await b.evaluate(PHONE(["#joy-move", "#joy-look", "#act", "#block-paint", "#block-tools [data-tool=paint]"])) });
+      // Hold simulation time while the native touch crosses CDP: a short shot cooldown can expire between calls.
+      const at = await b.evaluate(`(() => { const scene=BL.scenes.block;window.__blockPhoneUpdate=scene.update;scene.update=()=>{};const r=document.getElementById("block-paint").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
+      let fired;
+      try {
+        await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [at] });
+        await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        fired = await b.evaluate(`(() => { const s=__ooga.block.sim;return s.actors[0].lastKind === "paint" && s.actors[0].cooldown > 0 && s.shots.some(p=>p.live&&p.owner===0&&p.kind==="paint"); })()`);
+      } finally { await b.evaluate(`BL.scenes.block.update=window.__blockPhoneUpdate;delete window.__blockPhoneUpdate`); }
+      rows.push({ map, width, fired });
+      // Hold the actual touch Jump control through the jump's apex, then release and cancel a fresh hold.
+      // Spawn protection keeps a gorilla or a bot from interrupting this input check.
+      await b.evaluate(`(() => { const D=__ooga.block;D.cam.first=D.cam.close=D.cam.island=false;if(!BL.blockSim.ARENA.BLOCKS.every(b=>${flightX}<b[0]-1||${flightX}>b[1]+1||${flightZ}<b[2]-1||${flightZ}>b[3]+1))throw Error("Jetpack flight column is obstructed");Object.assign(D.sim.actors[0],{x:${flightX},z:${flightZ},y:0,vy:0,grounded:true,flight:0,grabbed:0,guard:30,fuel:BL.blockSim.CONFIG.JET_FUEL});__ooga.advance(.1,1/60); })()`);
+      const jump = await b.evaluate(`(() => { const r=document.getElementById("act").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
+      await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [jump] });
+      const flight = await b.evaluate(`(() => { __ooga.advance(1.8,1/60);const D=__ooga.block,a=D.sim.actors[0];return {map:D.sim.map,y:a.y,vy:a.vy,fuel:a.fuel,jet:a.jetting,flame:D.actors[0].jetFlame.visible}; })()`);
+      if (process.env.BLOCK_JET_SHOTS) { mkdirSync(process.env.BLOCK_JET_SHOTS,{recursive:true});await b.screenshot(join(process.env.BLOCK_JET_SHOTS,"jet-phone-"+width+".png")); }
+      await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      const released = await b.evaluate(`(() => { __ooga.advance(.1,1/60);const D=__ooga.block;return !D.sim.actors[0].jetting&&!D.actors[0].jetFlame.visible; })()`);
+      await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [jump] });
+      await b.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+      const cancelled = await b.evaluate(`(() => { __ooga.advance(.1,1/60);return !__ooga.block.sim.actors[0].jetting; })()`);
+      rows.push({ map, width, flight, released, cancelled, fired: flight.map === map && flight.y > 6 && flight.vy > 6 && flight.fuel > 0 && flight.fuel < 4.4 && flight.jet && flight.flame && released && cancelled });
+      await b.evaluate(`(() => { const D=__ooga.block;D.sim.over=true;D.sim.winner=D.sim.team;D.simulate(.1);__ooga.advance(.1); })()`);
+      rows.push({ map, width, phase: "results", bad: await b.evaluate(PHONE(['#block-results [data-action="block-again"]','#block-results [data-action="block-board"]','#block-results [data-role="leave"]'])) });
+    }
+    record("block phone: portrait, landscape and narrow screens keep the controls reachable, real Throw taps fire, held Jump climbs with flame and fuel use, release/cancel cuts thrust, and the results names and actions fit", rows.every(r => r.bad ? !r.bad.length : r.fired), JSON.stringify(rows));
+  }
+}, blockThrowScore] });
 scene("orbit", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("orbit", { card: '[data-intro="orbit"]', play: "window.__ooga.orbit.launch()", required: ["#joy-move", "#act", "#leave-hud"] })] });
 scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: "#mine-intro", required: ["#joy-move", "#joy-look", "#act", "#mine-view-btn", "#mine-pause-btn", "#environment-sound", "#leave-hud"] })] });
 scene("factory", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("factory", { required: ["#joy-move", "#joy-look", "#leave-hud"] }), factoryGreeter] });
@@ -26402,15 +27662,15 @@ const voiceAloneChecks = async () => {
 const voiceFailureChecks = async () => {
   const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8");
   const page=(joined=false,AudioContext=undefined)=>{
-    const timers=[],calls=[],failing=new Set(),holds=new Map();let holdLeave=null;
+    const timers=[],calls=[],bodies=[],pcs=[],failing=new Set(),holds=new Map();let holdLeave=null;
     const track={enabled:true,stopped:false,stop(){this.stopped=true;}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
-    class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}getTransceivers(){return [];}addEventListener(){}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}close(){this.connectionState="closed";}}
+    class Pc {constructor(){this.handlers={};pcs.push(this);this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}getTransceivers(){return [];}addEventListener(k,fn){this.handlers[k]=fn;}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}close(){this.connectionState="closed";}}
     class Audio {pause(){}play(){return Promise.resolve();}}
-    const fetch=async(url,o)=>{const op=url.split("/").pop();calls.push(op);if(op==="leave"&&holdLeave)await holdLeave;if(holds.has(op))await holds.get(op);return failing.has(op)?{ok:false,status:503,json:async()=>({error:"sfu"})}:{ok:true,status:200,json:async()=>({tracks:[],sessionDescription:{}})};};
+    const fetch=async(url,o)=>{const op=url.split("/").pop();calls.push(op);bodies.push({op,body:JSON.parse(o.body)});if(op==="leave"&&holdLeave)await holdLeave;if(holds.has(op))await holds.get(op);return failing.has(op)?{ok:false,status:503,json:async()=>({error:"sfu"})}:{ok:true,status:200,json:async()=>({tracks:[],sessionDescription:{}})};};
     const context={window:{BL:{net:{state:{connectionToken:"synthetic",me:{id:900,login:"listener"},zone:"outside",self:{x:0,y:0,z:0,zone:"outside"},blendTo:null,blendT:0},setMuted(){},remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{}},voiceBlend:{}},setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout(){},setInterval:()=>1,clearInterval(){},addEventListener(){},removeEventListener(){},AudioContext},document:{createElement:()=>({volume:1})},navigator:{userActivation:{hasBeenActive:true},mediaDevices:{getUserMedia:async()=>stream}},localStorage:{getItem:k=>joined&&k.includes("voice-joined")?"1":null,setItem(){},removeItem(){}},fetch,RTCPeerConnection:Pc,MediaStream:class {},Audio,AudioContext,AbortController,console};
     context.window.navigator=context.navigator;context.window.document=context.document;context.window.localStorage=context.localStorage;
     runInNewContext(source,context);
-    return {V:context.window.BL.voice,timers,calls,failing,holds,track,hold:p=>{holdLeave=p;}};
+    return {V:context.window.BL.voice,timers,calls,bodies,pcs,failing,holds,track,hold:p=>{holdLeave=p;}};
   };
   const settle=async()=>{for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r));};
   // The retry's new receive session is refused, so there is no receiver at all: the next change must open one, or say so.
@@ -26430,6 +27690,15 @@ const voiceFailureChecks = async () => {
   speaker.hold(null);release();await settle();
   const after={publishing:speaker.V.stats.publishing,muted:speaker.V.stats.muted,returning:speaker.V.stats.returning,mic:!speaker.track.stopped};
   record("voice recovery: a room welcome during a connection restart leaves a speaker publishing and unmuted",after.publishing&&!after.muted&&!after.returning,JSON.stringify(after));
+  for (const why of ["failed", "disconnected"]) {
+    const recovery=page(); await recovery.V.enable(); recovery.V.setMuted(true); await settle();
+    const pc=recovery.pcs.filter(p=>p.connectionState!=="closed").at(-1);
+    pc.connectionState=why;pc.handlers.connectionstatechange();
+    if(why==="disconnected")recovery.timers.at(-1).fn();
+    await settle();
+    record("voice inspector: "+why+" reports its cause and restores a muted publisher",recovery.bodies.some(r=>r.op==="leave"&&r.body.why===why)&&recovery.V.stats.publishing&&recovery.V.stats.muted,JSON.stringify({bodies:recovery.bodies,publishing:recovery.V.stats.publishing,muted:recovery.V.stats.muted}));
+    recovery.V.dispose();
+  }
   // Someone who leaves while a pull is on its way is no failed pull: every other voice this listener hears stays put.
   const racer=page();
   await racer.V.listen();await settle();
@@ -29281,7 +30550,10 @@ const integrationChecks = async BL => {
   records.get(72).weapon=1;pool.update(.1);let primary=clubBack();records.get(72).weapon=0;pool.update(.1);primary=primary&&clubBack();
   if(shotHeard)shotHeard(72,[1,2,3,4,5,6]);const replay=replayed.length===1&&replayed[0].join()===",1,2,3,4,5,6";
   const restingArmX=armR.rotation.x;
-  if(swingHeard)swingHeard(72);pool.update(.1);const swung=!!armR&&armR.rotation.x<-1;
+  // Swung: the arm raised at least 60 degrees from hanging at its highest, by its Euler turn or, on a modelled body,
+  // its quaternion.
+  let swung=false;if(swingHeard)swingHeard(72);
+  for(let i=0;i<40;i++){pool.update(.01);const raised=new Float32Array(3);if(armR&&armR.quaternion)BL.math.quat.rotateVec(raised,armR.quaternion,0,-1,0);swung||=!!armR&&(armR.quaternion?raised[1]>-0.5:armR.rotation.x<-1);}
   pool.update(.4);const settled=!!armR&&Math.abs(armR.rotation.x-restingArmX)<1e-9&&pool.body(72).weapon.meleeTime===0;
   record("integration remotes: another player's gun shows aimed with a banana for each three rounds, the club comes back when it is put away, their shots replay through the crew and their strike swings the arm and settles",
     aimed&&primary&&replay&&swung&&settled,JSON.stringify({aimed,bananas,primary,replay,swung,settled}));
@@ -30705,7 +31977,7 @@ const studioVideoSecurityProof = async () => {
     drawArraysInstanced:(...args)=>{calls.draws++;calls.arrays.push(args);},drawElementsInstanced:(...args)=>{calls.draws++;calls.elements.push(args);},
     texImage2D:()=>{calls.uploads++;if(failure)throw Object.assign(Error("synthetic upload failure"),{name:failure});},texSubImage2D:()=>{calls.uploads++;if(failure)throw Object.assign(Error("synthetic update failure"),{name:failure});}};
   const context={gl,programs:{image:{prog:"image",u:{uReady:"ready"}},mesh:{prog:"mesh"}},res:{matrixTexture:"fallback"},viewProj:[],mirrorViewProj:[],applyCutaway:noop,cutawayMaxY:1e6};
-  runInNewContext("let imageTextures=0,blendPass=false;"+source.slice(partStart,partEnd)+source.slice(start,end)+";globalThis.draw=(rec,count,cameraPass)=>drawImageSurface(rec,count,cameraPass,programs.mesh);globalThis.partDraw=drawPart;globalThis.textures=()=>imageTextures;globalThis.resetTextureCount=()=>{imageTextures=0;};",context);
+  runInNewContext("let imageTextures=0,blendPass=false;const countDraw=()=>{};"+source.slice(partStart,partEnd)+source.slice(start,end)+";globalThis.draw=(rec,count,cameraPass)=>drawImageSurface(rec,count,cameraPass,programs.mesh);globalThis.partDraw=drawPart;globalThis.textures=()=>imageTextures;globalThis.resetTextureCount=()=>{imageTextures=0;};",context);
   let image={readyState:2,seeking:false,videoWidth:320,videoHeight:180,currentTime:0,currentSrc:"file:///synthetic.mp4"};const surface={dynamic:true,asset:{load:()=>image},rect:[0,0,7,3.5]},rec={geometry:{imageSurface:surface},mesh:{vao:{},count:6}};
   context.draw(rec,1,true);const fallback=rec.imageTexture===null&&context.textures()===0&&calls.deletes===1&&calls.draws===1&&calls.ready.at(-1)===0&&surface.mediaErrorCode==="video-security";
   context.draw(rec,1,true);const suppressed=calls.uploads===1&&calls.draws===2;
@@ -31090,8 +32362,8 @@ const terrainParityChecks = (BL, island) => {
 };
 // Repo Island (repo-island-data.js, repo-island-models.js, repo-feed.js): the list the page and the Worker share, the
 // island laid out from it, and the feed's boundary. The meadow's four totems are carved by the same kit at its full
-// detail, so their golden is the one they had before the island's details existed.
-const MEADOW_TOTEMS_GOLDEN = "8bdd4fca5a005b4f";
+// detail. The golden includes the shared name-board lettering, updated for the readable N and R.
+const MEADOW_TOTEMS_GOLDEN = "f22e865e938044c5";
 const repoIslandChecks = (BL, island) => {
   const D = BL.repoIslandData, M = BL.repoIslandModels, TM = BL.totemModels, H = BL.hubModels;
   const sections = D.SECTIONS.map((s) => s.id), order = D.REPOS.map((r) => sections.indexOf(r.section));
