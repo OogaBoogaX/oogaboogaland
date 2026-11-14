@@ -187,11 +187,76 @@ moment `go` starts a transition. A change of scope moves `epoch`.
 A scope is `public` only when something acknowledges that exact `epoch` and scope (`acknowledge(epoch, scope)`), and
 only while a transport says it can carry the handshake (`setSupported`). A stale epoch, another scope, an excluded
 state or no transport is refused. `reset()` moves the epoch, so no older acknowledgement, promise or snapshot reopens a
-scope. The director calls it whenever the room connection or the signed-in account changes. Today nothing acknowledges
-and no transport attaches, so `public` is always false. That is the safe default until the backend's two-zone presence
-and revocation (#665, #667) and the client's voice bridge (#661) agree the wire fields; the record's own field names
-(`version`, `scope`, `reason`, `epoch`, `acknowledged`, `public`, `supported`) are a proposal for that conversation, not
-yet sent anywhere. The panel's choice of which audience to browse (#660) never moves the body or its scope.
+scope. The director calls it whenever the room connection or the signed-in account changes. The one transport is the
+voice bridge below (#661), and it says it is there only while the room advertises `outdoor-voice-v1`; until the backend's
+two-zone presence and revocation (#665, #667) do, nothing acknowledges and `public` is always false. The panel's choice of
+which audience to browse (#660) never moves the body or its scope.
+
+### Outdoor voice bridge (Ooga Chat, #661)
+
+`src/js/outdoor-voice.js` is the scope's transport. It lets Ooga Chat's public audience hear the voice this page already
+publishes while, and only while, the body stands in a public scope, and it keeps that audience from ever hearing anything
+said elsewhere. It never asks for a microphone, joins voice or unmutes: an OBL player who joined voice and stands outdoors
+becomes a public source with no second button, a voice-off player stays off and a muted one stays muted. M, the account's
+button and the visitor's own roster row still mute their microphone; another player's row still mutes only this
+visitor's playback (voice.js `muteLocal`, by stable id, for public speakers too). Local spatial voice, the hearing range,
+voice links, crossings and private rooms are unchanged: everything the bridge does to voice goes through
+`voice.setOutdoor(held, audience, sources)`, which only holds the microphone track off, counts listeners and plays listed
+public speakers at full.
+
+**Capability.** The room lists `outdoor-voice-v1` in its `welcome` `features` (`net.OUTDOOR_FEATURE`,
+`net.state.outdoorVoice`). Without it, or with no live room, `sendOutdoor` sends nothing, the bridge calls
+`outdoorScope.setSupported(false)`, `public` stays false and the bridge's `stats.status` reads `unavailable`. There is no
+fallback: a page on an older room is never public.
+
+**Frames, page to room** (`t: "outdoor"`, `v: 1`; epochs are outdoor-scope.js's, page-wide and only rising):
+
+| Frame | When | Meaning |
+|---|---|---|
+| `{ op: "enter", epoch, scope }` | the scope becomes `main` or `dsb`, after any `reset` or `setSupported`, and on every new connection (the bridge moves the epoch there itself) | admit this connection's current voice publication, if any, to that scope's public audience for this epoch |
+| `{ op: "leave", epoch, reason }` | the instant the scope leaves (before the zone, pose or anything private is sent), or before a new `enter`; repeated up to 3 times 3 s apart until answered | revoke every public grant of this connection at or below `epoch`; `reason` is the scope's (`interior`, `descending`, `scene`, ...) |
+
+**Frames, room to page:**
+
+| Frame | Meaning |
+|---|---|
+| `{ op: "open", epoch, scope, listeners, sources? }` | granted: the publication is subscribable by `scope`'s public audience. Only ever for the latest `enter` not yet left, echoing its `scope`; anything else is ignored, and a mismatched scope is given up with `leave` |
+| `{ op: "audience", epoch, listeners, sources? }` | the open grant's audience changed |
+| `{ op: "closed", epoch, reason? }` | the room holds no public grant of this connection at or below `epoch` (cumulative): every external subscription to the publication is retired at the SFU and no new one is allowed. In answer to `leave`, or unprompted for the open grant when the room revokes it (role or lease loss, another tab or the app taking the source, #667); after a revocation the page asks again only after its next move |
+| `{ op: "refused", epoch, reason }` | not admitted (not eligible, full); no grant exists at or below `epoch` |
+| `{ op: "react", epoch, rid, id, e, speaker }` | a public reaction while open: `rid` unique per accepted event (`[\w-]{1,64}`), `id` the account, `e` valid under reaction-policy.js, `speaker` true for an active speaker |
+
+`listeners` is how many public listeners the room admitted to the scope; it keeps an outdoor speaker with nobody else
+near from being "alone" (voice.js), so the microphone stays on for them. `sources` lists the account ids (64 at most) of
+bodyless public speakers, Ooga Chat app speakers, whom the room also lists in this page's `voice` peers while open; they
+play at full whatever the hearing range or a crossing, since they have no place on the island. The room still decides
+who is pulled; the page never takes a track id or a source as authority.
+
+**What the page guarantees.** A `leave` goes out, and the microphone track is held off (`voice.stats.held`, the mic note
+"Leaving public voice · mic held"), synchronously as the scope leaves, before the frame publishes its zone or pose. The
+hold lasts until a `closed` covers every epoch left, so nothing said in a cave, below ground, in a DSB room or in another
+scene is captured into a publication someone outside may still hold. A dropped answer keeps the hold (after the retries,
+until the next connection); the mute, the room and the publication are untouched, so the voice returns the instant the
+room confirms. Only an `open` for the current request acknowledges (`outdoorScope.acknowledge`), so a stale epoch, a
+reconnect, an old promise or a replayed frame opens nothing. Reactions are deduplicated by `rid` (the last 64) and handed
+to `subscribeReactions` for the audience panel (#660), which shows them and expires each on its own; `fn(null)` clears
+them when the scope stops being public. The bridge's `stats` (`status`: `unavailable`, `excluded`, `requesting`,
+`public`, `closing`, `refused`; `reason`, `scope`, `epoch`, `public`, `held`, `audience`, `sources`, `refused`) are for
+that panel. The director builds the bridge once (`attach`), after its reset subscription, and disposes it.
+
+**What the room must guarantee** (#665, #666, #667, #668):
+
+1. Frames from one connection are processed and answered in order.
+2. An epoch is opened only in answer to its `enter`, never after its `leave`, and only for the scope asked.
+3. `closed` is sent only once revocation has finished at the SFU; a failed cleanup is retried there and stays unanswered,
+   which keeps the page held, never public.
+4. A socket's close retires all of its grants before the account's next connection is sent `welcome`.
+5. The grant covers the connection's existing `/api/voice/*` publication, including one published again (`live`) while
+   open; no second copy is captured or published for the audience.
+6. Which of two sources for one identity (OBL and the app, two tabs) wins is the room's lease policy, recorded there; the
+   losing connection gets `closed` with `reason: "lease"` before the winner's `open`.
+7. Reactions are rate-limited and deduplicated by the room, each accepted event with its own `rid`; persistent hands for
+   active speakers are not in this version (#668 with the panel, #660).
 
 ### Who drives which Ooga
 

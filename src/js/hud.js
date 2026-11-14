@@ -2394,7 +2394,8 @@
     for (const button of fieldsFor("account-voice")) if (button.getAttribute("aria-pressed") !== pressed) button.setAttribute("aria-pressed", pressed);
   };
   // The microphone's note (#181), page-level as the account line is: muted in voice, it stays until unmuted;
-  // alone in voice (nobody here to hear, so the microphone is held off), it says so until someone comes;
+  // alone in voice (nobody here to hear, so the microphone is held off), it says so until someone comes; held (Ooga Chat's
+  // public audience is still being cut off after leaving the outdoors, outdoor-voice.js), it says so until the room confirms;
   // unmuting, or someone coming, says "Mic on" for MIC_ON_MS, then it goes. A mute outranks alone.
   // `keyed` is whether the page reserves M for voice mute outside editable fields.
   const MIC_ON_MS = 1500, MIC_COARSE = window.matchMedia("(pointer: coarse)").matches;
@@ -2402,8 +2403,8 @@
   const showMic = (voice, keyed) => {
     // Listen-only visitors (never opted in to speak, unlike one back from an earlier session) see no microphone status at all.
     const speaker = !!voice.micWanted || !!voice.returning;
-    const muted = speaker && voice.muted && (voice.publishing || voice.joining || voice.returning), alone = !muted && speaker && voice.alone;
-    const shown = muted ? keyed && !MIC_COARSE ? "Mic muted \u00b7 M to unmute" : "Mic muted \u00b7 Unmute in the panel" : alone ? "Alone \u00b7 mic off" : speaker && voice.publishing ? "Mic on" : "";
+    const muted = speaker && voice.muted && (voice.publishing || voice.joining || voice.returning), alone = !muted && speaker && (voice.alone || voice.held);
+    const shown = muted ? keyed && !MIC_COARSE ? "Mic muted \u00b7 M to unmute" : "Mic muted \u00b7 Unmute in the panel" : alone ? voice.held ? "Leaving public voice \u00b7 mic held" : "Alone \u00b7 mic off" : speaker && voice.publishing ? "Mic on" : "";
     if (shown === micShown) return;
     const note = $("mic-note"), was = micShown;
     micShown = shown;

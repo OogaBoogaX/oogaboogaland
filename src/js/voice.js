@@ -54,8 +54,14 @@
 // ended. The microphone stays closed (`stats.returning`, a listening connection) until they unmute, which opens it inside
 // that press. Browsers hold sound until a first click or key, so that press connects them, or the room's welcome on a page
 // that has had one. DSB Studio's sound and microphone stay its own choices, there and on the way in.
+// Ooga Chat's outdoor audience (outdoor-voice.js, #661) reaches this module through `setOutdoor(held, audience, sources)`
+// alone, and never acquires, publishes or unmutes anything: `held` keeps the microphone track off while a publication the
+// public audience may still hold is being revoked (`stats.held`; the mute, the room and the publication are untouched, so
+// the voice comes back the moment the room confirms), `audience` counts the public listeners the room admitted, who keep
+// an outdoor speaker from being alone with no other player near, and `sources` names the bodyless public speakers the room
+// lists to be heard, who play at full whatever the hearing range or a crossing, as a voice link does.
 // Exports support, probe, ICE_BLOCKED, enable, listen, dropMic, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, setMuted, toggle, leave, restart, stop,
-// setPeers, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, setRadius, falloff, fades,
+// setPeers, setOutdoor, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, setRadius, falloff, fades,
 // RADIUS_MIN, RADIUS_MAX and stats.
 (() => {
   "use strict";
@@ -80,12 +86,15 @@
   const subs = new Map();
   // Each wanted voice's publication count from the room: a new count is a microphone published again.
   const wantedGen = new Map();
-  const stats = { enabled: false, muted: false, alone: false, micWanted: false, returning: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "", micError: "", publishing: false, blocked: false, ready: false, preflight: false, preflightPending: false, permission: "unknown", deviceId: "", receiveLevel: 1, micLevel: 0, receiveState: "off", radius: 0 };
+  const stats = { enabled: false, muted: false, alone: false, micWanted: false, returning: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "", micError: "", publishing: false, blocked: false, ready: false, preflight: false, preflightPending: false, permission: "unknown", deviceId: "", receiveLevel: 1, micLevel: 0, receiveState: "off", radius: 0, held: false };
   const samples = new Float32Array(SAMPLES);
   const preferences = new Map();
   let preferenceOwner = 0;
   let mic = null, pubPc = null, subPc = null, desired = [], queue = Promise.resolve();
   let listenerCount = null;
+  // The outdoor bridge's word (setOutdoor): the microphone held off, public listeners, public speakers to play at full.
+  let outdoorHeld = false, outdoorAudience = 0, outdoorSources = null;
+  const outdoorSource = (id) => !!outdoorSources && outdoorSources.has(id);
   let lifecycle = 0, micGeneration = 0, microphoneWanted = stats.micWanted = false;
   let cleanup = Promise.resolve(), receiverOpening = null;
   // A returning visitor: waiting for a first press, connecting, and an Unmute pressed while that connects.
@@ -252,7 +261,7 @@
   const nearness = (id) => {
     const s = BL.net.state, zone = s.zone, rec = BL.net.remotes.get(id);
     let share = 1;
-    if ((s.blendTo || rec && rec.blendTo) && BL.net.voiceLink(id) !== "linked") {
+    if ((s.blendTo || rec && rec.blendTo) && BL.net.voiceLink(id) !== "linked" && !outdoorSource(id)) {
       if (!rec) return 0;
       share = BL.voiceBlend.gain(zone, s.blendTo, s.blendT, rec.zone, rec.blendTo, rec.blendK / BL.voiceBlend.STEPS);
     }
@@ -260,7 +269,7 @@
   };
   // Two zones a crossing joins share coordinates, so a voice across it is measured too.
   const withinRange = (id) => {
-    if (!stats.radius || BL.net.voiceLink(id) === "linked") return 1;
+    if (!stats.radius || BL.net.voiceLink(id) === "linked" || outdoorSource(id)) return 1;
     const s = BL.net.state, zone = s.zone, me = s.self, rec = BL.net.remotes.get(id);
     if (me.zone !== zone) return 1;
     const frame = BL.voiceBlend.sameFrame;
@@ -271,7 +280,7 @@
   // Whether this visitor could hear player `id` where both stand now: a voice link, or one place by the room's rule
   // (`sharesPlace` in worker/src/protocol.js) and inside the hearing range. For the Online Oogas panel's faded mark.
   const inEarshot = (id) => {
-    if (BL.net.voiceLink(id) === "linked") return true;
+    if (BL.net.voiceLink(id) === "linked" || outdoorSource(id)) return true;
     const s = BL.net.state, rec = BL.net.remotes.get(id), B = BL.voiceBlend;
     if (!rec || !withinRange(id)) return false;
     const k = s.blendTo ? Math.max(1, Math.min(B.STEPS, Math.round(s.blendT * B.STEPS))) : 0;
@@ -310,7 +319,7 @@
     readMeter(micMeter);
     subs.forEach(listenSub);
     subs.forEach(nearSub);
-    const self = stats.publishing && !!(micMeter && micMeter.speaking) && !stats.muted && !stats.alone;
+    const self = stats.publishing && !!(micMeter && micMeter.speaking) && !stats.muted && !stats.alone && !outdoorHeld;
     if (self !== stats.speaking) {
       stats.speaking = self;
       changed = true;
@@ -706,12 +715,24 @@
     });
   };
 
-  // The microphone sends only when this visitor has not muted it and the room lists someone to hear it.
+  // The microphone sends only when this visitor has not muted it, the room lists someone to hear it (a player, or the
+  // public audience out of doors), and no public publication is still being revoked.
   const gate = () => {
     // Only a visitor who opted in to speak (passed the mic test and permission step) is ever "alone";
     // a listen-only visitor has no microphone to hold off.
-    stats.alone = microphoneWanted && (stats.publishing || stats.joining) && (listenerCount ?? desired.length) === 0;
-    if (mic) for (const t of mic.getAudioTracks()) t.enabled = !stats.muted && !stats.alone;
+    stats.alone = microphoneWanted && (stats.publishing || stats.joining) && (listenerCount ?? desired.length) === 0 && !outdoorAudience;
+    stats.held = microphoneWanted && outdoorHeld;
+    if (mic) for (const t of mic.getAudioTracks()) t.enabled = !stats.muted && !stats.alone && !outdoorHeld;
+  };
+  // The outdoor bridge's whole word, applied at once (synchronously, so a hold lands before the next private word).
+  const setOutdoor = (held, audience, sources) => {
+    const was = stats.alone, wasHeld = stats.held;
+    outdoorHeld = !!held;
+    outdoorAudience = Number.isSafeInteger(audience) && audience > 0 ? audience : 0;
+    outdoorSources = sources && sources.size ? sources : null;
+    gate();
+    subs.forEach(nearSub);
+    if (stats.alone !== was || stats.held !== wasHeld) emit();
   };
 
   const setMuted = (on) => {
@@ -801,7 +822,7 @@
     if (audio) audio.close().catch(() => {});
     audio = null;
     cueOsc = cueGain = null;
-    stats.muted = stats.alone = false; stats.micError = "";
+    stats.muted = stats.alone = stats.held = false; stats.micError = "";
     BL.net.setMuted(false);
     desired = [];
     listenerCount = null;
@@ -819,7 +840,7 @@
     if (micMeter) micMeter.source.disconnect();
     micMeter = null;
     if (pubPc) pubPc.close();
-    pubPc = null; stats.publishing = false; stats.speaking = false; stats.alone = false;
+    pubPc = null; stats.publishing = false; stats.speaking = false; stats.alone = stats.held = false;
     stats.muted = true; BL.net.setMuted(true);
     cleanup = api("unpublish").catch(() => {});
     emit();
@@ -1011,5 +1032,5 @@
   const inspect = () => ({ desired: desired.slice(), pulled: [...subs.keys()], publish: pubPc ? pubPc.connectionState : "none", receive: subPc ? subPc.connectionState : "none",
     playback: GAIN_PLAY ? "gain" : "element", context: audio ? audio.state : "none" });
 
-  BL.voice = { support, probe, ICE_BLOCKED, warnLeaving, hangUp, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, leave, restart, stop, setPeers, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
+  BL.voice = { support, probe, ICE_BLOCKED, warnLeaving, hangUp, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, leave, restart, stop, setPeers, setOutdoor, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
 })();

@@ -27673,6 +27673,19 @@ const voiceAloneChecks = async () => {
     is(rows.joinedAlone,true,false,false)&&rows.joinSends.split(",").every(s=>s.endsWith(":false"))&&is(rows.oneOther,false,false,true)&&is(rows.aloneAgain,true,false,false)&&
     is(rows.mutedAlone,true,true,false)&&is(rows.mutedWithOther,false,true,false)&&is(rows.unmutedAlone,true,false,false)&&is(rows.twoOthers,false,false,true)&&
     rows.netMuted==="false,true,false"&&rows.emitted&&!rows.stopped.alone&&!rows.stopped.muted,JSON.stringify(rows));
+  // Ooga Chat's outdoor bridge (setOutdoor): public listeners keep an otherwise alone speaker on; a hold keeps the track
+  // off through a mute and an unmute without telling the room anything new, and lets go back to the voice as it was.
+  const out={};netMuted.length=0;
+  await V.enable();await settle();out.alone=read();
+  V.setOutdoor(false,2,new Set());out.audience=read();
+  V.setOutdoor(true,2,new Set());out.held={...read(),held:V.stats.held};
+  V.toggle();V.toggle();out.heldToggled={...read(),held:V.stats.held};
+  V.setOutdoor(false,0,new Set());out.released={...read(),held:V.stats.held};
+  V.setPeers([72],[7]);await settle();out.peer=read();
+  out.netMuted=netMuted.join(",");V.stop();
+  record("voice outdoor: public listeners keep an alone speaker's mic on, a revocation hold keeps it off through mute and unmute without telling the room, and release restores alone and peers as before",
+    is(out.alone,true,false,false)&&is(out.audience,false,false,true)&&is(out.held,false,false,false)&&out.held.held&&is(out.heldToggled,false,false,false)&&out.heldToggled.held&&
+    is(out.released,true,false,false)&&!out.released.held&&is(out.peer,false,false,true)&&out.netMuted==="false,true,false",JSON.stringify(out));
 };
 // A fresh fixture of voice.js for the failure paths: whatever the SFU refuses is named in `failing`, and timers are held.
 const voiceFailureChecks = async () => {
@@ -32585,9 +32598,146 @@ const outdoorScopeChecks = () => {
   record("outdoor scope epochs: nothing is public without a transport; an acknowledgement opens only the current epoch and scope, so leaving, backtracking, a reset or a lost transport closes it and no late answer reopens it; repeats are silent and verdicts must agree with their reason",
     Object.values(seq).every(Boolean), JSON.stringify(seq));
 };
+// The outdoor voice bridge (outdoor-voice.js, #661) against a fake room: the real scope record, a transport whose frames
+// are delivered, delayed, dropped or replayed by hand, held timers and a voice that can only be told `setOutdoor`, so any
+// attempt to acquire, join or unmute would throw. Every row is an ordering a real socket can produce.
+const outdoorVoiceChecks = () => {
+  const context = { window: {} };
+  runInNewContext(readFileSync(join(root, "src/js/outdoor-scope.js"), "utf8"), context);
+  runInNewContext(readFileSync(join(root, "src/js/outdoor-voice.js"), "utf8"), context);
+  const { outdoorScope: O, outdoorVoice: V } = context.window.BL;
+  const page = (features = true) => {
+    const log = [], timers = new Map(), watchers = new Set(), frames = new Set(), reactions = [];
+    let live = true, timerId = 0;
+    const T = { live: () => live, available: () => live && features, send: (msg) => { if (!live || !features) return false; log.push(msg); return true; },
+      watch: (fn) => { watchers.add(fn); return () => watchers.delete(fn); }, subscribe: (fn) => { frames.add(fn); return () => frames.delete(fn); } };
+    const voice = { told: [], setOutdoor(held, audience, sources) { this.told.push({ held, audience, sources: [...sources] }); log.push({ op: "voice", held, audience }); } };
+    const scope = O.create();
+    const B = V.create({ scope, transport: T, voice, validEmoji: (e) => e === "👍" || e === "🔥",
+      setTimeout: (fn, ms) => { timers.set(++timerId, { fn, ms }); return timerId; }, clearTimeout: (id) => timers.delete(id) });
+    B.subscribeReactions((r) => reactions.push(r));
+    const room = (msg) => { for (const fn of [...frames]) fn({ v: 1, ...msg }); };
+    const setLive = (on) => { live = on; if (!on) for (const fn of [...frames]) fn({ op: "lost" }); for (const fn of [...watchers]) fn(); };
+    const fire = () => { const all = [...timers]; timers.clear(); for (const [, t] of all) t.fn(); };
+    const last = (op) => log.filter((m) => m.op === op).at(-1);
+    const held = () => voice.told.at(-1)?.held === true;
+    return { B, S: scope.state, scope, log, room, setLive, fire, timers, last, held, voice, reactions, watchers, frames };
+  };
+  const rows = {};
+  // No capability: nothing is sent and nothing is ever public.
+  {
+    const p = page(false);
+    p.scope.report("main", "outdoor");
+    p.room({ op: "open", epoch: p.S.epoch, scope: "main", listeners: 5 });
+    rows.unadvertised = !p.S.public && !p.S.supported && p.log.every((m) => m.op === "voice") && p.B.stats.status === "unavailable";
+  }
+  // Admission, audience, and the instant leave: the hold and the leave land inside the report, before anything after it.
+  {
+    const p = page();
+    p.scope.report("main", "outdoor");
+    const enter = p.last("enter");
+    rows.enters = enter && enter.epoch === p.S.epoch && enter.scope === "main" && !p.S.public && p.B.stats.status === "requesting";
+    p.room({ op: "open", epoch: enter.epoch, scope: "main", listeners: 3, sources: [41, -1, 42] });
+    rows.opens = p.S.public && p.B.stats.status === "public" && p.voice.told.at(-1).audience === 3 && p.B.source(41) && p.B.source(42) && !p.B.source(-1);
+    p.room({ op: "react", epoch: enter.epoch, rid: "r1", id: 7, e: "👍" });
+    p.room({ op: "react", epoch: enter.epoch, rid: "r1", id: 7, e: "👍" });
+    p.room({ op: "react", epoch: enter.epoch, rid: "r2", id: 7, e: "👍" });
+    p.room({ op: "react", epoch: enter.epoch, rid: "r3", id: 7, e: "<script>" });
+    p.room({ op: "react", epoch: enter.epoch - 1, rid: "r4", id: 7, e: "🔥" });
+    rows.reactions = p.reactions.length === 2 && p.reactions[0].rid === "r1" && p.reactions[1].rid === "r2";
+    p.scope.report(null, "interior"); p.log.push({ op: "zone" });
+    const i = p.log.length;
+    rows.leaveFirst = p.log[i - 2].op === "voice" && p.log[i - 2].held && p.log[i - 2].audience === 0 && p.log[i - 3].op === "leave" && p.log[i - 3].epoch === enter.epoch && p.log[i - 3].reason === "interior"
+      && !p.S.public && p.B.stats.status === "closing" && !p.B.source(41) && p.reactions.at(-1) === null;
+    // The grant's answer, delayed past the leave, opens nothing; only the revocation's confirmation lets the mic back.
+    p.room({ op: "open", epoch: enter.epoch, scope: "main", listeners: 9 });
+    rows.delayedAck = !p.S.public && p.held();
+    p.room({ op: "closed", epoch: enter.epoch });
+    rows.confirmed = !p.held() && p.B.stats.status === "excluded" && p.timers.size === 0;
+  }
+  // Rapid backtracking with nothing answered: each epoch is left before the next is asked, stale opens are refused and
+  // the mic stays held until a confirmation covers the last epoch left, even once the current one is open.
+  {
+    const p = page();
+    const epochs = [];
+    for (let k = 0; k < 3; k++) { p.scope.report("main", "outdoor"); epochs.push(p.S.epoch); if (k < 2) p.scope.report(null, "descending"); }
+    const ops = p.log.filter((m) => m.op === "enter" || m.op === "leave").map((m) => `${m.op}${m.epoch}`).join(",");
+    rows.backtrackOrder = ops === `enter${epochs[0]},leave${epochs[0]},enter${epochs[1]},leave${epochs[1]},enter${epochs[2]}`;
+    p.room({ op: "open", epoch: epochs[0], scope: "main" }); p.room({ op: "open", epoch: epochs[1], scope: "main" });
+    rows.backtrackStale = !p.S.public;
+    p.room({ op: "open", epoch: epochs[2], scope: "main" });
+    rows.backtrackHeld = p.S.public && p.held() && p.B.stats.status === "closing";
+    p.room({ op: "closed", epoch: epochs[1] });
+    rows.backtrackOpen = p.S.public && !p.held() && p.B.stats.status === "public";
+  }
+  // A dropped confirmation: the leave goes again a bounded number of times, the mic stays held, and nothing keeps running.
+  {
+    const p = page();
+    p.scope.report("main", "outdoor"); const e = p.S.epoch;
+    p.room({ op: "open", epoch: e, scope: "main" });
+    p.scope.report(null, "scene");
+    for (let k = 0; k < V.RETRY_MAX + 2; k++) p.fire();
+    rows.dropped = p.log.filter((m) => m.op === "leave" && m.epoch === e).length === V.RETRY_MAX + 1 && p.held() && p.timers.size === 0;
+  }
+  // Reconnect and replacement: the lost room closes the scope at once; leaving while offline holds; the new connection
+  // (whose welcome follows the old grants' retirement) releases it and asks again on a later epoch, and an answer meant
+  // for the old connection opens nothing.
+  {
+    const p = page();
+    p.scope.report("main", "outdoor"); const old = p.S.epoch;
+    p.room({ op: "open", epoch: old, scope: "main", listeners: 2 });
+    p.setLive(false);
+    rows.lost = !p.S.public && p.voice.told.at(-1).audience === 0 && p.B.stats.status === "unavailable";
+    p.scope.report(null, "interior");
+    rows.offlineHeld = p.held() && p.B.stats.status === "closing";
+    p.scope.report("main", "outdoor");
+    const before = p.log.length;
+    p.setLive(true);
+    const enter = p.last("enter");
+    rows.reconnect = !p.held() && enter.epoch > old && p.log.length > before && !p.S.public;
+    p.room({ op: "open", epoch: old, scope: "main" });
+    rows.oldPromise = !p.S.public;
+    p.room({ op: "open", epoch: enter.epoch, scope: "main" });
+    rows.reopened = p.S.public;
+    p.setLive(false);
+    p.room({ op: "open", epoch: enter.epoch, scope: "main" });
+    rows.replaced = !p.S.public && p.B.stats.status !== "public";
+  }
+  // The room's own word: a revocation closes the grant and is not answered by asking again until the next move; a
+  // refusal holds nothing; a grant for another scope is given up.
+  {
+    const p = page();
+    p.scope.report("main", "outdoor"); const e = p.S.epoch;
+    p.room({ op: "open", epoch: e, scope: "main" });
+    const enters = p.log.filter((m) => m.op === "enter").length;
+    p.room({ op: "closed", epoch: e, reason: "lease" });
+    rows.revoked = !p.S.public && !p.held() && p.B.stats.status === "refused" && p.B.stats.refused === "lease" && p.log.filter((m) => m.op === "enter").length === enters;
+    p.scope.report(null, "interior"); p.scope.report("main", "outdoor");
+    rows.revokedMove = p.last("enter").epoch === p.S.epoch && p.S.epoch > e;
+    p.room({ op: "refused", epoch: p.S.epoch, reason: "not-eligible" });
+    p.fire();
+    rows.refused = !p.S.public && !p.held() && p.B.stats.status === "refused" && p.last("enter").epoch === p.S.epoch && p.log.filter((m) => m.op === "enter" && m.epoch === p.S.epoch).length === 1;
+    p.scope.reset();
+    const wrong = p.last("enter").epoch;
+    p.room({ op: "open", epoch: wrong, scope: "dsb" });
+    rows.wrongScope = !p.S.public && p.held() && p.last("leave").epoch === wrong;
+  }
+  // Dispose: a last leave, no transport, nothing subscribed or pending, and later frames do nothing.
+  {
+    const p = page();
+    p.scope.report("main", "outdoor"); const e = p.S.epoch;
+    p.room({ op: "open", epoch: e, scope: "main" });
+    p.B.dispose();
+    p.room({ op: "open", epoch: p.S.epoch, scope: "main" });
+    rows.dispose = p.last("leave").epoch === e && !p.S.supported && !p.S.public && !p.held() && p.watchers.size === 0 && p.frames.size === 0 && p.timers.size === 0;
+  }
+  record("outdoor voice bridge: public only on the room's capability and an open for the current request; leaving sends leave and holds the mic synchronously until the room confirms, through delayed and stale acks, rapid backtracking, dropped answers, reconnect, replacement, revocation, refusal and dispose; reactions deduplicated and cleared",
+    Object.values(rows).every(Boolean), JSON.stringify(rows));
+};
 const unitChecks = async () => {
   await connectionReportChecks();
   outdoorScopeChecks();
+  outdoorVoiceChecks();
   const artifact = artifactUnitProof();
   record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
   const previewRange=await studioPreviewRangeProof();
