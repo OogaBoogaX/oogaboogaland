@@ -210,16 +210,19 @@
         hip: C.ZIP_HANG - cave.parts.armR.position.y - Math.hypot(cave.elbow.y - cave.elbow.length, cave.elbow.z) * cave.armScale } : null;
       if (cave) trolley.scale.x = Math.max(1, (Math.abs(cave.parts.armR.position.x - cave.parts.armL.position.x) + 0.16) / 0.6);
       const chute = createNode({ geometry: BM.chute(0), visible: false });
-      // The jetpack on the back, its flames lit while it thrusts.
-      const jet = createNode({ geometry: BM.jetpack(0), position: { x: 0, y: 0.78, z: -0.3 } });
-      const jetFlame = createNode({ geometry: BM.jetFlames(), visible: false });
-      addChild(jet, jetFlame);
+      // Fit the team pack to the same body-relative back as the island's, including shorter/slim Oogas and ride poses.
+      const jetGeometry = BM.jetpack(0);
+      const jet = cave ? BL.crew.jetpackNode(cave.root, cave.traits.height, 0, jetGeometry, BM.jetFlames())
+        : createNode({ geometry: jetGeometry, position: { x: 0, y: 0.78, z: -0.3 } });
+      const jetFlame = cave ? jet.children[0] : createNode({ geometry: BM.jetFlames(), visible: false });
+      if (cave) BL.crew.seatJetpack(cave, jet, jetGeometry, {});
+      else { addChild(jet, jetFlame); addChild(body, jet); }
       // The monkeys at the hips, shown while the power-up lasts.
       const monkeys = [-1, 1].map((side) => createNode({ geometry: BM.monkey(), position: { x: side * 0.62, y: 0.82, z: 0.08 }, scale: { x: 0.9, y: 0.9, z: 0.9 }, visible: false }));
       // Laser eyes: the lit eyes on the face, and the beam, placed in the world each frame (`poseBeams`).
       const eyes = createNode({ geometry: BM.laserEyes(), position: { x: 0, y: 1.5, z: 0.24 }, visible: false });
       const beam = place(createNode({ geometry: BM.beam(), visible: false }));
-      addChild(body, ring, blob, bubble, netted, held, trolley, chute, jet, eyes, ...monkeys);
+      addChild(body, ring, blob, bubble, netted, held, trolley, chute, eyes, ...monkeys);
       // The gun sits in the right hand, its muzzle along the arm; the caveman's own club stays home.
       let gun = null, gunL = null;
       const flash = createNode({ geometry: BM.muzzleFlash(), position: { ...MUZZLE }, visible: false }), flashL = createNode({ geometry: BM.muzzleFlash(), position: { ...MUZZLE }, visible: false });
