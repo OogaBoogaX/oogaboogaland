@@ -7427,8 +7427,8 @@ const gameRulesChecks = async () => {
     outGuest.gorillas.length = 0;
     const framedOut = L.validFrame(outFrame, outGuest, L.seatMap(2, 0)) && !L.validFrame(new DataView(outBuf.buffer.slice(0, outLen + 1)), outGuest, L.seatMap(2, 0)); L.decode(outFrame, outGuest, L.seatMap(2, 0), new Float32Array(16));
     const guests = { away: guestAway.r && guestAway.g.gold && !guestAway.h.gold, out: guestOut.r && guestOut.h.hook === 1 && guestOut.g.hook === 0, refused, framed: framedOut, agrees: outGuest.actors[0].hook === 1 && outGuest.actors[2].hook === 0 && outGuest.hooks[0].holder === 0,
-      events: ["goldhook", "hooksteal", "goldsteal", "gold"].every((t) => L.EVENT_TYPES.includes(t)) && !["golddrop", "goldget", "goldback", "hookdrop", "hookback"].some((t) => L.EVENT_TYPES.includes(t)), wire: W.WIRE === 6 };
-    record("block steals live: a guest's wield on the host decides what a hook or Golden AK fire can take, an unowned tool is refused, the frame carries the result to a guest exactly, and the drop events are gone (WIRE 6)",
+      events: ["goldhook", "hooksteal", "goldsteal", "gold"].every((t) => L.EVENT_TYPES.includes(t)) && !["golddrop", "goldget", "goldback", "hookdrop", "hookback"].some((t) => L.EVENT_TYPES.includes(t)), wire: W.WIRE === 7 };
+    record("block steals live: a guest's wield on the host decides what a hook or Golden AK fire can take, an unowned tool is refused, the frame carries the result to a guest exactly, and the drop events are gone (WIRE 7)",
       Object.values(guests).every(Boolean), JSON.stringify(guests));
     // Shots through the sim itself: bots meet a crouched, a higher and a lower target; no round passes a thin wall.
     // The pair stand on the first open lane of Ooga Town with nothing built on or across it.
@@ -7494,7 +7494,8 @@ const gameRulesChecks = async () => {
         const row = { map, low: 0, mid: 0, high: 0, own: 0 };
         for (const [key, aimY] of [["low", 0.3], ["mid", 0.9], ["high", 1.5], ["own", 0.5]]) for (let k = 0; k < 8; k++) {
           const s = S.create({ team: "blue", seed: 4, size: 2, map, prep: 0 }), a = s.actors[0], f = s.flags[key === "own" ? "blue" : "red"], d = 6, ang = k / 8 * Math.PI * 2;
-          for (const q of s.actors) { q.bot = false; q.guard = 0; if (q !== a) { q.x = 300; q.z = 300; } } s.gorillas.length = 0;
+          // The round's starting crates are put away: Clanktown stands two by each room's door, on a low hook's line.
+          for (const q of s.actors) { q.bot = false; q.guard = 0; if (q !== a) { q.x = 300; q.z = 300; } } s.gorillas.length = 0; for (const c of s.crates) c.live = false;
           a.x = f.x + Math.sin(ang) * d; a.z = f.z + Math.cos(ang) * d; a.y = 0; a.hook = 1; s.hooks[0].state = 1; s.hooks[0].holder = 0;
           S.grapple(s, 0, Math.atan2(f.x - a.x, f.z - a.z), Math.atan2(aimY - S.CONFIG.SHOT_Y, d));
           let took = false, bit = false;
@@ -7604,11 +7605,11 @@ const gameRulesChecks = async () => {
         JSON.stringify({ fresh, out, owned, settled, slots: slots.map((m) => m[1]), named }));
     }
     // The session over a fake room: a guest's input moves its actor on the host, a leaver becomes an NPC, the host hands over.
-    const session = (selfId) => {
+    const session = (selfId, arena = "fort") => {
       const subs = new Set(), frames_ = new Set(), sent = [], bins = [];
       const net = { state: { selfId }, serverNow: () => context.clock + (context.skew || 0), subscribeBf: f => { subs.add(f); return () => subs.delete(f); }, subscribeBfFrame: f => { frames_.add(f); return () => frames_.delete(f); }, sendBf: m => { sent.push(m); return true; }, sendBfInput: m => { sent.push({ ...m, a: m.a && m.a.slice() }); return true; }, sendBfFrame: b => { bins.push(b.slice().buffer); } };
       const seen = { sim: null, started: 0 }, live = L.create({ net, now: () => context.clock, resolveBody: () => {}, onMatch: () => {}, onHost: () => { seen.tookOver = true; },
-        onStart: (m, role, map) => { seen.started++; seen.role = role; const s = S.create({ team: map.team, seed: m.seed, size: m.size, map: "fort", prep: 0 }); seen.sim = s; s.anyTime = W.RULES[m.rule] === "any"; S.reset(s, m.seed); live.bind(s); } });
+        onStart: (m, role, map) => { seen.started++; seen.role = role; const s = S.create({ team: map.team, seed: m.seed, size: m.size, map: arena, prep: 0 }); seen.sim = s; s.anyTime = W.RULES[m.rule] === "any"; S.reset(s, m.seed); live.bind(s); } });
       return { live, sent, bins, seen, tell: m => { for (const f of subs) f({ k: "match", ...m }); }, input: m => { for (const f of subs) f({ k: "input", ...m }); }, frame: b => { for (const f of frames_) f(b); } };
     };
     { const a = session(1); a.live.register(1); record("block live: registering sends the map picked on the board", a.sent.length === 1 && a.sent[0].k === "reg" && a.sent[0].m === 1, JSON.stringify(a.sent)); a.live.dispose?.(); }
@@ -7766,6 +7767,128 @@ const gameRulesChecks = async () => {
       record("regression: the zoom keys work from the chairs, ahead of the check that ends key handling outside play", scene.indexOf('if (onDeck()) { if (e.key === "+"') > 0 && scene.indexOf('if (onDeck()) { if (e.key === "+"') < scene.indexOf('if (phase !== "play" || e.repeat'));
       record("regression: the last frame's winning capture is heard before the reset, and a thrown event can't leave the queue full", /renderLive = \(m\) => \{[\s\S]{0,200}hearCaptures\(\)/.test(scene) && scene.includes("} finally { sim.eventCount = 0; }"));
       record("regression: chairs-full clears out of play and a no-room visit has no dead Register button", scene.includes("if (!play) chairsFull = false;") && scene.includes("el.watchReg.hidden = !round;"));
+    }
+    {
+      // Clanktown: its data, the miner walls, the Mainframe's decoys, the firewall's timing, the mirage and the bots' way round.
+      const CK = S.ARENAS.clank, C2 = S.CONFIG, step = C2.STEP, calm = (r) => { for (const g of r.gorillas) { g.state = 3; g.t = 1e9; } return r; };
+      const fresh = (opts = {}) => calm(S.create({ map: "clank", seed: 7, prep: 0, ...opts }));
+      const key = (b) => b.slice(0, 6).map((v) => v.toFixed(2)).join(), keys = new Set(CK.BLOCKS.map(key));
+      const mirrored = CK.BLOCKS.every((b) => keys.has(key([-b[1], -b[0], -b[3], -b[2], b[4], b[5]])));
+      const room = (t) => t === "blue" ? [-6.5, 6.5, 22.5, 33.5] : [-6.5, 6.5, -33.5, -22.5], inside = ([x0, x1, z0, z1], x, z, m = 0) => x > x0 - m && x < x1 + m && z > z0 - m && z < z1 + m;
+      const miners = CK.BLOCKS.filter((b) => (b[5] || 0) === 0 && Math.abs(b[4] - S.MINER_H) < 0.01);
+      const apex = 2 * C2.JUMP * C2.JUMP / (2 * C2.FALL);
+      record("clanktown map: listed in the rules, the wire and the board; mirrored; each block's stand inside its miner-walled server room",
+        S.MAPS.includes("clank") && W.MAPS[4] === "clank" && CK.name === "Clanktown" && mirrored && miners.length >= 12
+        && S.TEAMS.every((t) => inside(room(t), CK.stands[t].x, CK.stands[t].z)) && miners.every((b) => S.TEAMS.some((t) => inside(room(t), (b[0] + b[1]) / 2, (b[2] + b[3]) / 2, 0.1))),
+        JSON.stringify({ mirrored, miners: miners.length }));
+      // A double jump at the front wall, from a standing start right up against it, never gets over.
+      const jr = fresh(), ja = jr.actors[0];
+      for (const c of jr.crates) c.live = false;
+      for (const o of jr.actors) o.bot = false;
+      ja.x = 0; ja.z = 21.9; ja.y = 0;
+      let peak = 0;
+      S.tick(jr, step, { ...still(), z: 1, jump: 1 });
+      for (let t = 0; t < 1.6; t += step) { S.tick(jr, step, { ...still(), z: 1, jump: ja.vy < 0.5 && ja.jumps > 0 ? 1 : 0 }); peak = Math.max(peak, ja.y); }
+      record("clanktown miners: walls too tall for a double jump (the apex " + apex.toFixed(2) + " m under " + S.MINER_H + " m); a double jump against one stays outside",
+        S.MINER_H > apex + 0.6 && ja.z < 22.5 && peak < S.MINER_H, JSON.stringify({ peak: +peak.toFixed(2), z: +ja.z.toFixed(2) }));
+      // On foot there is always a way in: the rest flood from the side's start reaches the far stand's room, round
+      // through a side door; the zipline's end and the catapult's drop land inside the rival room; the walls keep
+      // clear of the stands, towers and ladders.
+      fresh();
+      const walk = (x, z) => { const p = S.restSpot(x, z); return Math.abs(p.x - x) < 0.3 && Math.abs(p.z - z) < 0.3; };
+      const routes = { blueRoom: walk(0, 25.5), blueDoor: walk(-7.6, 29.4), redRoom: walk(0, -25.5), redDoor: walk(7.6, -29.4), field: walk(0, 12) };
+      const zip = CK.zips.blue, drop = CK.drops.blue;
+      const shortcuts = inside(room("red"), zip.bx, zip.bz, 1) && inside(room("red"), drop[0], drop[1]);
+      const clear = miners.every((b) => S.TEAMS.every((t) => { const st = CK.stands[t], [x0, x1, z0, z1] = CK.towers[t]; return Math.hypot(Math.max(b[0], Math.min(st.x, b[1])) - st.x, Math.max(b[2], Math.min(st.z, b[3])) - st.z) > C2.STAND_R + 1 && (b[0] >= x1 || b[1] <= x0 || b[2] >= z1 || b[3] <= z0); }));
+      record("clanktown miners: a walking route into each server room by its side doors; the zipline and catapult land inside the rival room; the walls stay clear of stands and towers",
+        Object.values(routes).every(Boolean) && shortcuts && clear, JSON.stringify({ routes, shortcuts, clear }));
+      // The firewall: off while fortifying, then off 3.2 s, flickering 0.8 s, on 3 s, on the shared clock; never a block.
+      const fr = fresh(), seq = [];
+      for (let t = 0; t < 7; t += 0.25) { fr.time = t; seq.push(S.firewallState(fr)); }
+      const cycleOk = seq.join("") === "0000000000000111222222222222".slice(0, seq.length);
+      const prepped = S.create({ map: "clank", seed: 7 });
+      prepped.time = 5;
+      const offInPrep = S.firewallState(prepped) === 0;
+      const halves = CK.firewall.halves, gapAtMainframe = halves.every(([x0, x1]) => Math.min(Math.abs(x0), Math.abs(x1)) >= 1.6 + C2.BODY_R * 2) && halves[0][0] === -halves[1][1];
+      const notSolid = !S.solidAt(8, 1, 0) && !S.solidAt(-8, 1, 0);
+      record("clanktown firewall: on the clock, off while fortifying, a gap either side of the Mainframe, mirrored, and never a solid block", cycleOk && offInPrep && gapAtMainframe && notSolid, seq.join(""));
+      const zapAt = (fix) => { const r = fresh(); for (const o of r.actors) o.bot = false; const a = r.actors[0]; a.x = 8; a.z = 0.3; a.y = 0; a.guard = 0; fix(r, a); S.tick(r, step, still()); return a.splat > 0; };
+      const zap = { on: zapAt((r) => { r.time = 5.5; }), off: !zapAt((r) => { r.time = 1; }), over: !zapAt((r, a) => { r.time = 5.5; a.y = 2.6; a.grounded = false; }), riding: !zapAt((r, a) => { r.time = 5.5; a.flight = 2; a.y = 1; }), gap: !zapAt((r, a) => { r.time = 5.5; a.x = 2.2; }) };
+      record("clanktown firewall: touched while on it splats as paint does; off, over its top, under a parachute or in the gap it doesn't", Object.values(zap).every(Boolean), JSON.stringify(zap));
+      // The decoys: 2 or 3 of each colour, turned pairs, on walkable ground, never at a stand; a touch glitches one and
+      // staggers the toucher, the real blocks untouched; untouched ones fade.
+      const dr = fresh(), real0 = JSON.stringify(dr.flags);
+      for (const o of dr.actors) { o.bot = false; o.x = 0; o.z = 0.6; }
+      dr.halluT = step / 2; dr.actors[0].x = 30; dr.actors[0].z = 0;
+      S.tick(dr, step, still());
+      const live = dr.decoys.filter((d) => d.live), red = live.filter((d) => d.team === "red"), blue = live.filter((d) => d.team === "blue");
+      const pairs = red.length >= 2 && red.length <= 3 && blue.length === red.length && red.every((d) => blue.some((b) => Math.abs(b.x + d.x) < 0.6 && Math.abs(b.z + d.z) < 0.6));
+      const placed = live.every((d) => S.TEAMS.every((t) => Math.hypot(d.x - CK.stands[t].x, d.z - CK.stands[t].z) > C2.STAND_R + 2) && walk(d.x, d.z));
+      const d0 = red[0], toucher = dr.actors[0];
+      toucher.x = d0.x; toucher.z = d0.z; toucher.y = 0; toucher.grounded = true;
+      dr.eventCount = 0; S.tick(dr, step, still());
+      let glitched = false;
+      for (let i = 0; i < dr.eventCount; i++) if (dr.events[i].type === "glitch") glitched = true;
+      const touched = glitched && !d0.live && toucher.knock > 0 && !toucher.carrying && JSON.stringify(dr.flags) === real0;
+      for (let t = 0; t < C2.DECOY_S + 0.5; t += step) S.tick(dr, step, still());
+      const faded = dr.decoys.every((d) => !d.live) && JSON.stringify(dr.flags) === real0;
+      record("clanktown decoys: 2 or 3 of each side's block in turned pairs on open ground, away from the stands; a touch glitches one and staggers, the real blocks untouched; the rest fade",
+        pairs && placed && touched && faded, JSON.stringify({ red: red.length, blue: blue.length, pairs, placed, touched, faded }));
+      // Bots fall for decoys by skill: easy ones often, experts rarely.
+      const fooledBy = (skill) => { let n = 0, of = 0; for (let seed = 1; seed <= 30; seed++) { const r = calm(S.create({ map: "clank", seed, prep: 0, skill, size: 3 })); r.halluT = step / 2; S.tick(r, step, still()); for (const a of r.actors) if (a.bot) { of++; if (a.fooled >= 0) n++; } } return n / of; };
+      const rates = { easy: fooledBy("easy"), expert: fooledBy("expert") };
+      record("clanktown decoys: bots fall for them by skill, easy ones far more often than experts", rates.easy > 0.5 && rates.expert < 0.2 && rates.easy > rates.expert * 3, JSON.stringify(rates));
+      // The mirage: round the middle, the same for both sides; a bot taken in only changes where it runs.
+      const mirror = [[0, 4], [3, -7], [8.5, 1], [-12, 0], [5, 9]].every(([x, z]) => S.inMirage(x, z, CK) === S.inMirage(-x, -z, CK)) && S.inMirage(0, 3, CK) && !S.inMirage(0, 12, CK) && !S.inMirage(0, 3, S.ARENAS.fort);
+      const mr = calm(S.create({ map: "clank", seed: 4, prep: 0, skill: "easy" })), bot = mr.actors[1], real1 = JSON.stringify(mr.flags);
+      let taken = 0;
+      for (let k = 0; k < 40; k++) { bot.x = 0; bot.z = 3.5; bot.inMirage = false; bot.mirageCool = 0; bot.mirageT = 0; mr.time = 1; S.tick(mr, step, still()); if (bot.mirageT > 0) taken++; }
+      record("clanktown mirage: round the Mainframe, mirrored, none on other maps; an easy bot is taken in by phantoms there without touching a real block",
+        mirror && taken > 10 && JSON.stringify(mr.flags) === real1, JSON.stringify({ mirror, taken }));
+      // The phantoms are the page's own: the scene never writes the shared sim from the mirage.
+      const sceneSrc = await readFile(new URL("../src/js/scene-block.js", import.meta.url), "utf8"), mir = sceneSrc.slice(sceneSrc.indexOf("const poseMirage = "), sceneSrc.indexOf("// The gorillas follow the sim"));
+      record("clanktown mirage: phantoms and the drift live in the scene alone, gated on being inside the zone, and never write the shared sim",
+        mir.length > 500 && /SIM\.inMirage\(me\.x, me\.z\)/.test(mir) && !/\bsim\.[a-zA-Z]+(\[[^\]]+\])?(\.[a-zA-Z]+)?\s*=[^=]/.test(mir) && !/SIM\.(fire|drop|pass|tick|step|grab|escape)\(/.test(mir));
+      // The bots find the way: an attacker alone walks from its room, round the rival room to a side door, takes the
+      // block and brings it home, timing the firewall.
+      // (There is no 1v1: the smallest round is two a side, so its teammate and both rivals stand aside.)
+      const br = fresh({ size: 2 }), att = br.actors[0], aside = () => { for (const q of br.actors) if (q !== att) { q.x = 20 + q.id * 2; q.z = -36; q.vx = q.vz = 0; } };
+      att.bot = "auto"; for (const q of br.actors) if (q !== att) q.bot = false; aside();
+      let zaps = 0;
+      for (let t = 0; t < 150 && !br.score.blue; t += step) { S.tick(br, step, still()); aside(); for (let i = 0; i < br.eventCount; i++) if (br.events[i].type === "zap") zaps++; br.eventCount = 0; }
+      record("clanktown bots: an attacker walks round to the rival room's door, takes the block, brings it home and scores, timing the firewall", br.score.blue === 1 && zaps <= 1, JSON.stringify({ score: br.score, t: Math.round(br.time), zaps }));
+      // Live: the decoys ride the frame.
+      const lh = fresh({ size: 2 }), lm = L.seatMap(2, 0), buf = new DataView(new ArrayBuffer(W.FRAME_MAX));
+      Object.assign(lh.decoys[0], { live: true, team: "red", x: 5, z: 7 }); Object.assign(lh.decoys[4], { live: true, team: "blue", x: -5, z: -7 });
+      const fr2 = new DataView(buf.buffer.slice(0, L.encode(lh, lm, 1, 1, 1, buf))), guest = fresh({ size: 2 }), next = new Float64Array(16);
+      const okFrame = L.validFrame(fr2, guest, lm);
+      L.decode(fr2, guest, lm, next);
+      record("clanktown live: the decoys ride the host's frame, colour and place", okFrame && guest.decoys[0].live && guest.decoys[0].team === "red" && Math.abs(guest.decoys[0].x - 5) < 0.05 && guest.decoys[4].team === "blue" && !guest.decoys[1].live);
+      const tail = lh.hooks.length * 8 + lh.traps.length + lh.caches.length + lh.peels.length + lh.puddles.length + lh.powers.length * 2 + 1;
+      const waveAt = fr2.byteLength - tail - lh.decoys.length * 8 - 1;
+      const malformed = [[waveAt, 255], [waveAt + 1, 3], [waveAt + 8, 255]].map(([at, value]) => {
+        const bad = new DataView(fr2.buffer.slice(0)); bad.setUint8(at, value); return !L.validFrame(bad, guest, lm);
+      });
+      record("clanktown live: malformed wave timers, decoy teams and lifetimes are refused before decode", malformed.every(Boolean));
+      // A real client handover must keep live decoys and the next wave's timer, rather than expiring them on the first tick.
+      const ch = session(10, "clank"), cg = session(20, "clank"), cm = { ...match, map: W.MAPS.indexOf("clank"), tag: 701 };
+      ch.tell(cm); cg.tell(cm);
+      const hs = ch.seen.sim; hs.halluT = 12.5;
+      Object.assign(hs.decoys[0], { live: true, team: "red", x: 5, y: 0, z: 7, t: 4.2 });
+      ch.live.after(.2, still()); cg.frame(ch.bins.at(-1));
+      cg.tell({ ...cm, host: 20, epoch: 2 });
+      const gs = cg.seen.sim;
+      for (const a of gs.actors) a.bot = false;
+      for (const g of gs.gorillas) { g.state = 3; g.t = 100; }
+      const continued = cg.live.role === "host" && gs.decoys[0].live && gs.decoys[0].t === 4.2 && gs.halluT === 12.5;
+      S.tick(gs, step, still());
+      const held = gs.decoys[0].live && gs.decoys[0].t > 4.1 && gs.halluT > 12.4;
+      for (let t = 0; t < 4.3; t += step) S.tick(gs, step, still());
+      record("regression: Clanktown host migration preserves decoy lifetimes and the next wave, then expires them on schedule",
+        continued && held && !gs.decoys[0].live && gs.halluT > 8, JSON.stringify({continued, held, live:gs.decoys[0].live, next:gs.halluT}));
+      ch.live.dispose(); cg.live.dispose();
+      // Leave the rules pointed at Fort Chaos again, as the checks after this read `S.ARENA` before making their own round.
+      S.create({ map: "fort" });
     }
     const wentTo = []; L.openWatchDeck((scene, place) => wentTo.push(scene, place));
     const idle = session(50); idle.tell({ phase: "empty" }); idle.live.after(0.2, still());
@@ -8900,7 +9023,7 @@ const gameRulesChecks = async () => {
         botLog = run(br, 6, still, () => bb.riding);
         zr.botDrops = chose && bb.route !== "zipHome" && !bb.riding && !botLog.ziptrap;
         // The event crosses the wire, an Ooga's own.
-        zr.wire = BL.blockLive.EVENT_TYPES.at(-1) === "ziptrap" && BL.blockLive.ACTOR_EVENTS.includes("ziptrap") && BL.blockWire.WIRE === 6;
+        zr.wire = BL.blockLive.EVENT_TYPES.includes("ziptrap") && BL.blockLive.ACTOR_EVENTS.includes("ziptrap") && BL.blockWire.WIRE === 7;
         record("block frenzy zipline trap: the rivals' line carries a rider whose own block is home and throws one whose block isn't off the island, a carried block going home with a fall; a rider already sliding rides on, your own line never springs, and expert bots only take the zip home with their block home",
           Object.values(zr).every(Boolean), JSON.stringify(zr));
       }
@@ -13026,6 +13149,34 @@ const blockQuiz = { name: "block quiz", why: "rule: a quiz trap holds the visito
 const blockRun = `(() => { const B = window.__ooga, D = B.block; D.start(); for (let i = 0; i < 80 && D.phase === "play"; i++) D.simulate(15, true); B.advance(0.3, 1 / 30); const save = B.game.state.block, card = document.getElementById("block-results"), w = D.sim.winner;
   const trophy = card.dataset.team === w && document.getElementById("block-result-title").textContent === (w === "blue" ? "Blue" : "Red") + " wins!" && document.querySelectorAll("#block-side-blue li, #block-side-red li").length === D.sim.actors.length && card.querySelector('[data-team="' + w + '"].won') !== null;
   return { ok: D.phase === "results" && !card.hidden && trophy && save.games === 1 && save.wins === (D.result.won ? 1 : 0), phase: D.phase, result: D.result, save, trophy }; })()`;
+const blockMirage = { name: "block clank mirage", why: "regression: phantom carriers copied a rival's firing pose and held a block above the modelled hands", run: async b => {
+  if (await b.evaluate(`!document.querySelector('[data-intro="block"]').hidden`)) await b.key(" ");
+  const proof = await b.evaluate(`(() => {
+    const D = __ooga.block, S = BL.scenes.block, update = S.update;
+    S.update = () => {};
+    try {
+      D.showBoard(); document.querySelector('#block-board [data-map="clank"]').click(); D.start(567); D.sim.prep = 0;
+      for (const a of D.sim.actors) { a.bot = false; a.guard = 30; }
+      for (const g of D.sim.gorillas) { g.state = 3; g.t = 100; }
+      Object.assign(D.sim.actors[0], { x: 5, z: 2, y: 0, flight: 0, grounded: true }); D.sim.time = 1;
+      update(0, 1); BL.scene.updateWorld(S.root);
+      const rivals = D.actors.filter((a, i) => D.sim.actors[i].team !== D.sim.team);
+      const overlay = !document.getElementById("block-mirage").hidden;
+      const phantoms = D.clank.phantoms.map((p, k) => {
+        const a = rivals[k % rivals.length], hands = p.list.filter(n => n.geometry === a.cave.parts.fingersR.geometry || n.geometry === a.cave.parts.fingersL.geometry), visible = [];
+        BL.scene.traverseVisible(p.root, n => visible.push(n));
+        return { hands: hands.length, gap: hands.length ? Math.abs(p.block.world[13] - .48 - hands.reduce((v, n) => v + n.world[13], 0) / hands.length) : 99,
+          gun: visible.some(n => n.geometry === a.gun.geometry || n.geometry === a.gunL.geometry) };
+      });
+      Object.assign(D.sim.actors[0], { x: 20, z: 4 }); update(0, 2);
+      const cleared = document.getElementById("block-mirage").hidden && D.clank.phantoms.every(p => !p.root.visible);
+      D.showBoard(); document.querySelector('#block-board [data-map="town"]').click(); update(0, 3);
+      return { overlay, phantoms, cleared, switched: D.sim.map === "town" && !D.clank && document.getElementById("block-mirage").hidden };
+    } finally { S.update = update; D.showBoard(); }
+  })()`);
+  record("block mirage: phantom carriers hold the block on both modelled fists without a gun, and the effect clears outside the zone and on another map",
+    proof.overlay && proof.phantoms.length === 3 && proof.phantoms.every(p => p.hands === 2 && p.gap < .03 && !p.gun) && proof.cleared && proof.switched, JSON.stringify(proof));
+} };
 const blockPoses = { name: "block modelled poses", why: "regression: old straight-arm weapon offsets missed the modelled fists and the trophy block floated above slim Oogas", run: async b => {
   const rows = await b.evaluate(`(() => {
     const B = __ooga, D = B.block, S = BL.scenes.block, rows = [], update = S.update;
@@ -24972,7 +25123,8 @@ scene("race", { label:"optional rig link fallback",url:hubPage(src, "scene=hub")
 }}]});
 scene("race", { query: "rain=0&draw=0", steps: [raceStart, raceOwn, raceBench, { name: "race tracks", why: "regression: the 12-slot grid spawned a free banana on Banana Bay", run: async (b) => { await b.evaluate(`window.__ooga.race.toGarage()`); await raceTracks[1](b); } }, raceRigs, raceRigContext, racePause, play("race", "a whole cup under the autopilot: one drawn field of fifteen runs every race and finishes in order, the cup medal and every track's best are saved", cupRun), raceMirror, raceAgain, trip("race")] });
 scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on the target, scores its own medal and is saved as the best", dropRun), dropCrash, trip("drop"), dropOwn] });
-scene("block", { steps: [blockStart, blockWalk, blockQuiz, play("block", "a round on autopilot reaches three captures, shows its results and saves the round", blockRun), blockPoses, blockRoofs, blockThrowScore, blockZipline, trip("block")] });
+
+scene("block", { steps: [blockStart, blockWalk, blockQuiz, play("block", "a round on autopilot reaches three captures, shows its results and saves the round", blockRun), blockPoses, blockMirage, blockRoofs, blockThrowScore, blockZipline, trip("block")] });
 scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit"), orbitOwn] });
 scene("mine", { steps: [mineResume, trip("mine"), mineControls, mineOwn] });
 // ---- The Lightning Jet Hangar ----
@@ -26019,7 +26171,7 @@ scene("block", { label: "block phone", opts: PHONE_SIZE, steps: [phone("block", 
   name: "block phone actions and results", why: "regression: Throw overlapped Jump and the sticks, and small results cards clipped names and action labels", run: async b => {
     if (await b.evaluate(`!document.querySelector('[data-intro="block"]').hidden`)) await b.key(" ");
     const rows = [];
-    for (const [map, flightX, flightZ] of [["town", 0, 6], ["jungle", 18, 0], ["haunted", 20, 0]]) for (const [width, height] of [[390,844],[844,390],[320,568]]) {
+    for (const [map, flightX, flightZ] of [["town", 0, 6], ["jungle", 18, 0], ["haunted", 20, 0], ["clank", 20, 0]]) for (const [width, height] of [[390,844],[844,390],[320,568]]) {
       await b.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: true });
       await b.sleep(100);
       await b.evaluate(`__ooga.block.showBoard();document.querySelector('#block-board [data-map="${map}"]').click();new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
@@ -26053,7 +26205,7 @@ scene("block", { label: "block phone", opts: PHONE_SIZE, steps: [phone("block", 
     }
     record("block phone: portrait, landscape and narrow screens keep the controls reachable, real Throw taps fire, held Jump climbs with flame and fuel use, release/cancel cuts thrust, and the results names and actions fit", rows.every(r => r.bad ? !r.bad.length : r.fired), JSON.stringify(rows));
   }
-}, blockThrowScore] });
+}, blockThrowScore, blockMirage] });
 scene("orbit", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("orbit", { card: '[data-intro="orbit"]', play: "window.__ooga.orbit.launch()", required: ["#joy-move", "#act", "#leave-hud"] })] });
 scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: "#mine-intro", required: ["#joy-move", "#joy-look", "#act", "#mine-view-btn", "#mine-pause-btn", "#environment-sound", "#leave-hud"] })] });
 scene("factory", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("factory", { required: ["#joy-move", "#joy-look", "#leave-hud"] }), factoryGreeter] });

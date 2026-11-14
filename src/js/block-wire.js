@@ -5,7 +5,7 @@
   "use strict";
   const scope = typeof window === "undefined" ? globalThis : window;
   const BL = scope.BL = scope.BL || {};
-  const FEATURE = "block-v1", ZONE = "block-frenzy", WIRE = 6;
+  const FEATURE = "block-v1", ZONE = "block-frenzy", WIRE = 7;
   // The `place` that arrives on the watch deck to spectate, for a portal or anything else that opens the game to watch.
   const WATCH_DECK_PLACE = "watch-deck";
   // The `place`s the chairs send a viewer back to the arcade with when they came by its watch door: in front of it, or
@@ -21,7 +21,7 @@
   // Indexes on the wire; the sim's ARENAS keys are checked against these in the suite.
   // The wire numbers the maps by this list. Fort Chaos (0) is retired from play and keeps its number, so no other map's
   // changes: a round is on `FIRST_MAP` or later.
-  const MAPS = ["fort", "town", "jungle", "haunted"];
+  const MAPS = ["fort", "town", "jungle", "haunted", "clank"];
   const FIRST_MAP = 1;
   // A map still offered for play, by id (a saved pick of a retired one is ignored).
   const playable = (id) => MAPS.indexOf(id) >= FIRST_MAP;

@@ -59,10 +59,14 @@
   const GHOST_BITS = ["#e8eefc", "#b9a8ff"].map((c) => models.particleGeometry(c, 0.1, 1));
   const SMOKE_BITS = ["#3d3d44", "#6a6a72"].map((c) => models.particleGeometry(c, 0.12, 0));
   const STAR_BITS = ["#ffe066", "#fff3d6"].map((c) => models.particleGeometry(c, 0.09, 1));
+  // Clanktown: a hallucination glitching apart (pink and teal pixels), steam off the vents, the firewall's sparks.
+  const GLITCH_BITS = ["#ff4fd8", "#38f5e0", "#ffffff"].map((c) => models.particleGeometry(c, 0.11, 1));
+  const STEAM_BITS = ["#c9d4d0", "#9aa8a4"].map((c) => models.particleGeometry(c, 0.13, 0.2));
+  const ZAP_BITS = ["#ff4fd8", "#ffc0f0"].map((c) => models.particleGeometry(c, 0.08, 1));
   const TOOL_KEYS = { 1: "paint", 2: "grenade", 3: "rocket", 4: "net", 5: "sniper", 6: "gold", 7: "ak", 8: "hook" };
   // Each tool's gun (`BM.gun` takes the gun's index times two plus the team's; the hook's is its launcher); Lift shows none.
   const GUN_OF = { paint: 0, grenade: 1, rocket: 2, net: 3, sniper: 4, gold: 5, ak: 6, crate: 0, grab: -1, hook: 7 };
-  const MAP_HOUR = { fort: 17.7, town: 12.5, jungle: 11, haunted: 0.8 }, MAP_CLOUDS = { fort: 0.3, town: 0.15, jungle: 0.85, haunted: 0.25 };
+  const MAP_HOUR = { fort: 17.7, town: 12.5, jungle: 11, haunted: 0.8, clank: 23.4 }, MAP_CLOUDS = { fort: 0.3, town: 0.15, jungle: 0.85, haunted: 0.25, clank: 0.6 };
   // Sky, light and haze from the island's clock, as the drop's.
   const RENDER_OPTS = {
     clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
@@ -719,6 +723,7 @@
     for (const s of splats) s.visible = false;
     phase = "play";
     result = null;
+    if (clankNodes && clankNodes.phantoms) { for (const P of clankNodes.phantoms) removeChild(mapRoot, P.root); clankNodes.phantoms = null; }
     trophyEnd();
     closeQuiz();
     el.board.hidden = el.results.hidden = true;
@@ -1044,6 +1049,8 @@
     else if (t === "breakfree") feed(`${who} wriggled free of a gorilla`, e.team);
     else if (t === "netsteal") feed(`${who} took the block off ${e.by === 0 ? "you" : nameOf(e.by)} in the net`, e.team);
     else if (t === "thrown") feed(`A gorilla threw ${e.actor === 0 ? "you" : who} off the island`, e.team);
+    else if (t === "glitch") feed(`${e.actor === 0 ? "You" : who} grabbed a hallucinated block`, e.team);
+    else if (t === "zap") feed(`The firewall zapped ${e.actor === 0 ? "you" : who}`, e.team);
     else if (t === "respawn") feed(`${who} fell off the island`, e.team);
     else if (t === "hookget") feed(`${who} found a grappling hook`, e.team);
     else if (t === "hooksteal") feed(`${who} shot ${e.by === 0 ? "your" : `${nameOf(e.by)}'s`} grappling hook away with the Golden AKs`, e.team);
@@ -1107,7 +1114,23 @@
     mapT = 0.1;
     if (!mapBase || mapBase.key !== sim.team + sim.map) { drawMapBase(); mapBase.key = sim.team + sim.map; }
     const g = el.mapCtx;
+    // In the mirage the whole map drifts slowly round its middle, and the own-stand marker jitters.
+    const drift = MIRAGE.spin !== 0;
+    if (drift) { g.clearRect(0, 0, el.map.width, el.map.height); g.save(); g.translate(el.map.width / 2, el.map.height / 2); g.rotate(Math.sin(MIRAGE.spin) * 0.6); g.translate(-el.map.width / 2, -el.map.height / 2); }
     g.drawImage(mapBase, 0, 0);
+    if (MIRAGE.on) { const st = SIM.ARENA.stands[sim.team]; g.strokeStyle = BM.TEAM[sim.team].light; g.lineWidth = 1; g.strokeRect(mapX(st.x) - 4 + MIRAGE.jx, mapY(st.z) - 4 + MIRAGE.jz, 8, 8); }
+    // Clanktown's decoys, marked as a loose block is.
+    for (const d of sim.decoys) {
+      if (!d.live || Math.sin(elapsed * 10) < 0) continue;
+      g.fillStyle = BM.ORANGE; g.fillRect(mapX(d.x) - 3, mapY(d.z) - 3, 6, 6);
+      g.fillStyle = BM.TEAM[d.team].paint; g.fillRect(mapX(d.x) - 2, mapY(d.z) - 2, 4, 4);
+    }
+    // Phantom carriers, only for the one inside the mirage: as a rival carrying your block.
+    if (MIRAGE.on && clankNodes && clankNodes.phantoms) for (const P of clankNodes.phantoms) {
+      if (!P.root.visible) continue;
+      g.fillStyle = BM.TEAM[sim.rival].light; g.fillRect(mapX(P.x) - 2, mapY(P.z) - 2, 4, 4);
+      g.fillStyle = BM.TEAM[sim.team].paint; g.fillRect(mapX(P.x) - 2, mapY(P.z) - 6, 4, 3);
+    }
     for (const t of SIM.TEAMS) {
       const f = sim.flags[t];
       if (f.state === "dropped" && Math.sin(elapsed * 10) < 0) continue;
@@ -1124,6 +1147,7 @@
       const r = i === 0 ? 3 : 2;
       g.fillRect(mapX(a.x) - r, mapY(a.z) - r, r * 2, r * 2);
     }
+    if (drift) g.restore();
   };
   const readEvents = () => {
     try {
@@ -1294,8 +1318,21 @@
         if (me) { center("BOO!", 900); notice(sim.actors[0].carrying ? "Spooked stiff!" : "Spooked stiff! Shoot ghosts to pop them", 1600); }
         else say(e.actor, ["Eek!", "A g-g-ghost!", "Nope nope nope"], 1.3);
       } else if (e.type === "ghostpop") fx.burst(e.x, e.y, e.z, 16, GHOST_BITS, 2.6);
+      else if (e.type === "decoy") {
+        if (sim.time - decoyNoticeAt > 5) { decoyNoticeAt = sim.time; notice("The Mainframe is hallucinating · some loose blocks aren't real", 2600); }
+      } else if (e.type === "glitch") {
+        glitchAt(e.x, e.y, e.z, clankSaid++);
+        audio.cues.bonk(me ? 1 : 0.5);
+        if (me) { center("GLITCH!", 800); notice("A hallucination! That block was never there", 1800); }
+      } else if (e.type === "decoyfade") fx.burst(e.x, 0.6, e.z, 10, GLITCH_BITS, 1.2);
+      else if (e.type === "zap") {
+        fx.burst(e.x, e.y, e.z, 18, ZAP_BITS, 2.4);
+        audio.cues.splat(me ? 1 : 0.4);
+        if (me) notice("Zapped by the firewall! Cross while it's off, or go round", 1800);
+      }
       else if (e.type === "grab") {
         fx.burst(e.x, 1.6, e.z, 12, WOOD_BITS, 2.2);
+        if (clankNodes) fx.sayAt(e.x, 3.3, e.z, CLANK_GRAB[clankSaid++ % CLANK_GRAB.length], 2.2);
         gorillaPoke(e.actor);
         if (me) {
           center("GRABBED!", 1000);
@@ -1305,7 +1342,7 @@
       else if (e.type === "letgo") { if (me) notice("The gorilla got bored and dropped you", 1500); }
       else if (e.type === "puddle") { if (me) notice("Slipped in a puddle!", 900); }
       else if (e.type === "windup") { if (me) notice("It's swinging you! Mash!", 900); }
-      else if (e.type === "thrown") { if (me) { center("THROWN!", 1000); notice(COARSE ? "Hold Jump to jetpack back over the edge" : "Hold Space to jetpack back over the edge", 2800); } }
+      else if (e.type === "thrown") { if (clankNodes) fx.sayAt(e.x, 3.3, e.z, CLANK_THROW[clankSaid++ % CLANK_THROW.length], 2.2); if (me) { center("THROWN!", 1000); notice(COARSE ? "Hold Jump to jetpack back over the edge" : "Hold Space to jetpack back over the edge", 2800); } }
       else if (e.type === "gorillahit") fx.burst(e.x, e.y, e.z, 10, STAR_BITS, 2);
       else if (e.type === "steady") { if (me) notice("Back on your feet", 900); }
       else if (e.type === "burn") {
@@ -2011,7 +2048,7 @@
   // Each map's own sky: its cloud cover, and the light floor (Haunted Hollow's night a little brighter to play in).
   const poseSky = () => {
     RENDER_OPTS.clouds = MAP_CLOUDS[SIM.ARENA.id];
-    RENDER_OPTS.ambientFloor = SIM.ARENA.id === "haunted" ? 0.42 : 0.22;
+    RENDER_OPTS.ambientFloor = (SIM.ARENA.id === "haunted" || SIM.ARENA.id === "clank") ? 0.42 : 0.22;
     RENDER_OPTS.bloomStrength = 0.6;
   };
   // The sprint gauge: full, draining while Shift is held, orange while it refills after running dry.
@@ -2307,6 +2344,7 @@
     // The start menu is up in the clouds at noon, whatever the map's own hour.
     // The trophy stands in warm light: a sunset sky behind Blue so the team's colour stands out, an afternoon one behind Red.
     daylight.sample(phase === "board" ? 12 : onTrophy ? (trophy.team === "blue" ? 17 : 15.5) : mapHour, RENDER_OPTS, clock.dayOfYear, daylight.ISLAND_LATITUDE_DEG, clock.continuousDay, clock.utcMs);
+    if (phase !== "board" && !onTrophy && SIM.ARENA.sky === "smog") smogSky(RENDER_OPTS);
     RENDER_OPTS.time = elapsed;
     if (round === null && BL.net.state.blockLive) openRound();
     if (round) round.lobbyTick(dt);
@@ -2350,6 +2388,7 @@
     poseHaunt(elapsed);
     poseShots();
     if (onTrophy) poseTrophy(dt, elapsed);
+    if (clankNodes) poseClank(dt, elapsed);
     if (phase === "board") boardView(elapsed, dt);
     else if (onDeck()) deckView(dt);
     else if (onTrophy) trophyView();
@@ -2489,7 +2528,7 @@
   // A few themed plants and rocks round the island's outer ring: shared geometry, placed once a map, mirrored half
   // round. Haunted Hollow gets its own dressing, banks of mist over the graveyard and one of the Ghost Hunter's
   // gargoyles on each gate pillar, looking out over the graves.
-  const MAP_DECOR = { fort: ["rock", "bush", "tree"], town: ["tree", "bush", "bush"], jungle: ["tree", "tree", "bush"], haunted: ["rock", "rock", "bush"] };
+  const MAP_DECOR = { fort: ["rock", "bush", "tree"], town: ["tree", "bush", "bush"], jungle: ["tree", "tree", "bush"], haunted: ["rock", "rock", "bush"], clank: ["rock", "rock", "rock"] };
   const buildDecor = (A, add) => {
     const kinds = MAP_DECOR[A.id], H = BL.hubModels;
     // Gorilla Jungle's ring of trees is one mesh of its own.
@@ -2577,7 +2616,7 @@
     zipLit[0] = zipLit[1] = 0;
     pads = A.traps.map(([x, z]) => add(createNode({ geometry: BM.pad(), position: { x, y: 0, z } })));
     powerNodes = A.powers.map(([x, z]) => add(createNode({ geometry: BM.power(0), position: { x, y: 0, z } })));
-    trampNodes = A.tramps.map(([x, z]) => add(createNode({ geometry: BM.tramp(), position: { x, y: 0, z } })));
+    trampNodes = A.tramps.map(([x, z]) => add(createNode({ geometry: A.id === "clank" ? BM.vent() : BM.tramp(), position: { x, y: 0, z } })));
     caches = A.caches.map(([x, y, z]) => add(createNode({ geometry: BM.cache(0), position: { x, y, z } })));
     // Each side's catapult, aimed at the other end; its arm swings when it throws.
     catapults = SIM.TEAMS.map((t) => {
@@ -2588,7 +2627,7 @@
       return { team: t, arm, at: -10 };
     });
     const [fx, fz] = A.fire;
-    add(createNode({ geometry: BM.firePit(), position: { x: fx, y: 0, z: fz } }));
+    add(createNode({ geometry: A.id === "clank" ? BM.gpuPile() : BM.firePit(), position: { x: fx, y: 0, z: fz } }));
     fireNode = add(createNode({ geometry: BM.flames(), position: { x: fx, y: 0.05, z: fz } }));
     // A heap of bananas by the fire, and each dancer with one in hand; the peels they've dropped round it.
     add(createNode({ geometry: BM.bananaPile(), position: { x: fx + 1.2, y: 0, z: fz + 0.2 } }));
@@ -2618,8 +2657,174 @@
     gorillaRigs = A.gorillas.map(([x, z]) => {
       const rig = BL.agent.create({ managed: true, groundAt: () => 0, x, z, scale: GORILLA_SCALE });
       add(rig.root);
+      // Clanktown's Clankrillas: the same rig with a chrome forearm, a red visor band and an antenna added on.
+      if (A.id === "clank") {
+        addChild(rig.parts.armR, createNode({ geometry: BM.clankArm(9) }));
+        addChild(rig.parts.head, createNode({ geometry: BM.clankVisor(9) }));
+      }
       return rig;
     });
+    buildClank(A, add);
+  };
+  // ---- Clanktown ----
+  // The smog: the night sky's colours pulled toward a sickly green.
+  const SMOG = { clear: [0.16, 0.24, 0.12], horizon: [0.3, 0.44, 0.2], zenith: [0.05, 0.09, 0.05], sky: [0.2, 0.3, 0.14] }, SMOG_KEYS = ["clear", "horizon", "zenith", "sky"];
+  const smogSky = (opts) => {
+    for (let i = 0; i < SMOG_KEYS.length; i++) {
+      const c = opts[SMOG_KEYS[i]], m = SMOG[SMOG_KEYS[i]];
+      if (!c) continue;
+      for (let k = 0; k < 3; k++) c[k] = c[k] * 0.35 + m[k] * 0.65;
+    }
+  };
+  // What a gorilla says on Clanktown when it grabs, and when it throws; what a hallucination says glitching apart.
+  const CLANK_GRAB = ["Great question!", "You're absolutely right!", "I've optimized your route", "Happy to help!"];
+  const CLANK_THROW = ["Happy to help you... off the island", "As an AI, I must throw you now", "Task complete!"];
+  const APOLOGY = ["I apologize for the confusion", "You're right, that wasn't the block", "Let me try again"];
+  let clankNodes = null, clankSaid = 0, decoyNoticeAt = -99;
+  // The map's own nodes: the firewall's two halves, the decoys (each the block's own geometry and ring of ticks, so
+  // they look exactly like a loose block), the moon, and on Full detail the miners' fans and lights and the dressing.
+  const buildClank = (A, add) => {
+    clankNodes = null;
+    if (A.id !== "clank") return;
+    const F = A.firewall, beams = F.halves.map(([x0, x1]) => add(createNode({ geometry: BM.firewallBeams(x1 - x0), position: { x: x0, y: 0, z: 0 }, visible: false, sightHidden: true })));
+    const decoys = [];
+    for (let i = 0; i < C.MAX_DECOYS; i++) {
+      const node = add(createNode({ geometry: BM.block(0), visible: false })), tickRoot = add(createNode({ visible: false })), list = [];
+      for (let k = 0; k < 12; k++) { const n = createNode({ geometry: BM.tick(), rotation: { x: 0, y: k / 12 * Math.PI * 2, z: 0 } }); addChild(tickRoot, n); list.push(n); }
+      decoys.push({ node, tickRoot });
+    }
+    add(createNode({ geometry: BM.smogMoon(), position: { x: -55, y: 62, z: -92 }, rotation: { x: 0, y: Math.atan2(55, 92), z: 0 }, sightHidden: true }));
+    const fans = [], leds = [], stacks = [], miners = [];
+    for (const b of A.BLOCKS) {
+      if ((b[5] || 0) === 0 && b[4] >= 7 && b[4] < 8 && b[1] - b[0] <= 1.5) stacks.push([(b[0] + b[1]) / 2, b[4], (b[2] + b[3]) / 2]);
+      if ((b[5] || 0) !== 0 || Math.abs(b[4] - SIM.MINER_H) > 0.01 || Math.min(b[1] - b[0], b[3] - b[2]) > 0.85) continue;
+      miners.push(b);
+    }
+    if (detail.full) {
+      add(createNode({ geometry: BM.clankDress(), sightHidden: true }));
+      for (let k = 0; k < 2; k++) leds.push(add(createNode({ geometry: BM.minerLeds(k), sightHidden: true, visible: k === 0 })));
+      // A fan on every other miner of two rows, on each face of each wall.
+      for (const b of miners) {
+        const along = b[1] - b[0] >= b[3] - b[2], len = along ? b[1] - b[0] : b[3] - b[2], n = Math.max(1, Math.round(len / 1.25)), step = len / n, thin = along ? b[3] - b[2] : b[1] - b[0];
+        for (let i = 0; i < n; i++) for (const j of [1, 4]) for (const s of [-1, 1]) {
+          const c = (along ? b[0] : b[2]) + (i + 0.5) * step, y = (j + 0.5) * 0.6;
+          const x = along ? c : (b[0] + b[1]) / 2 + s * (thin / 2 + 0.05), z = along ? (b[2] + b[3]) / 2 + s * (thin / 2 + 0.05) : c;
+          fans.push(add(createNode({ geometry: BM.minerFan(), position: { x, y, z }, rotation: { x: 0, y: along ? (s > 0 ? 0 : Math.PI) : (s > 0 ? Math.PI / 2 : -Math.PI / 2), z: (i + j) * 0.7 }, sightHidden: true })));
+        }
+      }
+    }
+    // The mirage's phantom landmarks: stacks of miners that shimmer in and out (seen only from inside the mirage).
+    const M = A.mirage, props = [[-5.5, 3.5, 0.6], [6, -4.5, -0.9], [2.5, 6.8, 2.1]].map(([x, z, turn]) => add(createNode({ geometry: BM.minerStack(), position: { x: M.x + x, y: 0, z: M.z + z }, rotation: { x: 0, y: turn, z: 0 }, visible: false, sightHidden: true })));
+    clankNodes = { beams, decoys, fans, leds, stacks, miners, props, phantoms: null };
+  };
+  // The firewall, the decoys, the miners' fans and lights, smoke and steam; and the mirage, every frame (allocates nothing).
+  const poseClank = (dt, elapsed) => {
+    const N = clankNodes, st = SIM.firewallState(sim), calm = hookStill || !detail.full;
+    // Off: no beams. The warning flickers at a steady three a second; on, the beams glow.
+    for (const n of N.beams) { n.visible = st === 2 || (st === 1 && Math.sin(elapsed * Math.PI * 6) > 0); n.glow = st === 2 ? 0.9 + 0.1 * Math.sin(elapsed * 9) : 0.6; }
+    for (let i = 0; i < N.decoys.length; i++) {
+      const d = sim.decoys[i], D = N.decoys[i];
+      D.node.visible = D.tickRoot.visible = !!d && d.live;
+      if (!D.node.visible) continue;
+      D.node.geometry = BM.block(TEAM_INDEX[d.team]);
+      setVec(D.node.position, d.x, d.y + 0.5 + Math.sin(elapsed * 3) * 0.06, d.z);
+      D.node.rotation.y = elapsed * 0.9;
+      D.node.glow = 0.7 + 0.3 * Math.sin(elapsed * 8);
+      setVec(D.tickRoot.position, d.x, d.y + 0.05, d.z);
+      D.tickRoot.rotation.y = elapsed * 1.5;
+    }
+    if (detail.full) {
+      if (!hookStill) for (let i = 0; i < N.fans.length; i++) N.fans[i].rotation.z += dt * (9 + (i % 3));
+      const on = Math.floor(elapsed / 0.7) % 2;
+      if (N.leds.length) { N.leds[0].visible = on === 0; N.leds[1].visible = on === 1; }
+      if (Math.random() < dt * 3 && N.stacks.length) { const s = N.stacks[Math.floor(Math.random() * N.stacks.length)]; fx.burst(s[0], s[1] + 0.3, s[2], 3, SMOKE_BITS, 0.7); }
+      if (Math.random() < dt * 2) { const v = SIM.ARENA.tramps[Math.floor(Math.random() * SIM.ARENA.tramps.length)]; fx.burst(v[0], 0.3, v[1], 2, STEAM_BITS, 0.6); }
+      // Hot air off the miners' exhaust side, now and then.
+      if (!hookStill && Math.random() < dt * 4 && N.miners.length) { const b = N.miners[Math.floor(Math.random() * N.miners.length)]; fx.burst(b[0] + Math.random() * (b[1] - b[0]), 2 + Math.random() * 1.4, b[2] + Math.random() * (b[3] - b[2]), 1, STEAM_BITS, 0.4); }
+    }
+    poseMirage(dt, elapsed, calm);
+  };
+  // ---- The mirage: per player, never in the sim ----
+  // Inside the zone round the Mainframe the view takes a pink-and-teal glitch tint (`#block-mirage`), phantom rivals
+  // run about carrying what looks like your block (on the mini-map too), phantom stacks of miners shimmer, and the
+  // mini-map drifts and its own-stand marker jitters. None of it touches the shared state: a phantom shot or touched
+  // only glitches away. Reduced motion and Low detail keep the tint and the phantoms but drop the drift and the jitter.
+  const MIRAGE = { on: false, spin: 0, jx: 0, jz: 0 };
+  const PHANTOMS = 3;
+  // A copy of an Ooga's built body, sharing its geometry, every node in `list` (to flicker them).
+  const ghostCopy = (src, list, copies) => {
+    const n = createNode({ geometry: src.geometry, position: { x: src.position.x, y: src.position.y, z: src.position.z }, rotation: { x: src.rotation.x, y: src.rotation.y, z: src.rotation.z }, scale: { x: src.scale.x, y: src.scale.y, z: src.scale.z }, sightHidden: true });
+    if (src.quaternion) n.quaternion = src.quaternion.slice ? src.quaternion.slice() : src.quaternion;
+    n.visible = src.visible;
+    list.push(n); copies.set(src, n);
+    for (const c of src.children) if (c.visible) addChild(n, ghostCopy(c, list, copies));
+    return n;
+  };
+  const buildPhantoms = () => {
+    const out = [], rivals = [];
+    for (let i = 0; i < actors.length; i++) if (sim.actors[i].team !== sim.team && actors[i].cave) rivals.push(i);
+    if (!rivals.length) return out;
+    for (let k = 0; k < PHANTOMS; k++) {
+      const actor = actors[rivals[k % rivals.length]], cave = actor.cave, list = [], copies = new Map(), root = createNode();
+      const body = ghostCopy(cave.root, list, copies), parts = cave.parts;
+      body.position.y = actor.hip; body.rotation.x = body.rotation.z = 0; body.quaternion = null;
+      // A phantom carries a block, never a copied gun, jetpack, splat or mid-shot arm pose.
+      for (const part of [parts.club, parts.gun, actor.gun, actor.gunL, actor.jet]) if (copies.has(part)) copies.get(part).visible = false;
+      for (const part of [parts.armL, parts.armR]) { const n = copies.get(part); n.quaternion = null; n.rotation.x = -Math.PI; n.rotation.z = 0; }
+      for (const part of [parts.forearmL, parts.forearmR]) copies.get(part).rotation.x = 0;
+      const legL = copies.get(parts.legL), legR = copies.get(parts.legR);
+      legL.rotation.z = legR.rotation.z = 0;
+      addChild(root, body); root.visible = false;
+      const block = createNode({ geometry: BM.block(TEAM_INDEX[sim.team]), sightHidden: true });
+      block.position.y = actor.hip + parts.armR.position.y + (cave.elbow.length - cave.elbow.y) * cave.armScale + 0.48;
+      block.position.z = -cave.elbow.z * cave.armScale;
+      addChild(root, block); list.push(block);
+      addChild(mapRoot, root);
+      out.push({ root, list, legL, legR, block, r: 3 + k * 1.9, speed: 3.6 + k * 0.5, ang: k * 2.1, gone: 0, x: 0, z: 0 });
+    }
+    return out;
+  };
+  const glitchAt = (x, y, z, line) => {
+    fx.burst(x, y, z, 26, GLITCH_BITS, 2.6);
+    fx.sayAt(x, y + 0.8, z, APOLOGY[line % APOLOGY.length], 1.8);
+  };
+  const poseMirage = (dt, elapsed, calm) => {
+    const N = clankNodes, A = SIM.ARENA, M = A.mirage, me = sim.actors[0];
+    const inside = phase === "play" && !onDeck() && SIM.inMirage(me.x, me.z);
+    if (inside !== MIRAGE.on) {
+      MIRAGE.on = inside;
+      if (el.mirage) { el.mirage.hidden = !inside; el.mirage.dataset.calm = String(calm); }
+      if (inside) notice("You've walked into the Mainframe's mirage · not everything here is real", 2600);
+    }
+    MIRAGE.spin = inside && !calm ? MIRAGE.spin + dt * 0.22 : MIRAGE.spin * Math.max(0, 1 - dt * 2);
+    if (inside && !calm && Math.random() < dt * 8) { MIRAGE.jx = (Math.random() - 0.5) * 6; MIRAGE.jz = (Math.random() - 0.5) * 6; }
+    else if (!inside || calm) MIRAGE.jx = MIRAGE.jz = 0;
+    for (let i = 0; i < N.props.length; i++) {
+      const p = N.props[i];
+      p.visible = inside;
+      if (inside) p.smokeOpacity = calm ? 0.35 : 0.2 + 0.35 * (0.5 + 0.5 * Math.sin(elapsed * 0.9 + i * 2));
+    }
+    if (inside && !N.phantoms) N.phantoms = buildPhantoms();
+    if (!N.phantoms) return;
+    for (let k = 0; k < N.phantoms.length; k++) {
+      const P = N.phantoms[k];
+      if (P.gone > 0) P.gone -= dt;
+      P.root.visible = inside && P.gone <= 0;
+      if (!P.root.visible) continue;
+      P.ang += dt * P.speed / P.r * (k % 2 ? -1 : 1);
+      P.x = M.x + Math.sin(P.ang) * P.r; P.z = M.z + Math.cos(P.ang) * P.r;
+      setVec(P.root.position, P.x, Math.abs(Math.sin(elapsed * 9 + k)) * 0.12, P.z);
+      P.root.rotation.y = P.ang + (k % 2 ? -Math.PI / 2 : Math.PI / 2);
+      const stride = calm ? 0 : Math.sin(elapsed * 9 + k) * 0.6;
+      P.legL.rotation.x = stride; P.legR.rotation.x = -stride;
+      // The tell: a faint scan-line flicker in its body.
+      const o = 0.86 + 0.1 * Math.sin(elapsed * 11 + k * 3);
+      for (let i = 0; i < P.list.length; i++) P.list[i].smokeOpacity = o;
+      // Touched, or a shot through it: it glitches away with an apology and comes back somewhere else later.
+      let hit = (me.x - P.x) ** 2 + (me.z - P.z) ** 2 < 1.3;
+      if (!hit) for (const s of sim.shots) if (s.live && (s.x - P.x) ** 2 + (s.z - P.z) ** 2 < 0.8 && s.y < 2.6) { hit = true; break; }
+      if (hit) { glitchAt(P.x, 1, P.z, clankSaid++); P.gone = 5; P.ang += 2.4; }
+    }
   };
   // The gorillas follow the sim: walking or charging, standing still holding an Ooga up, or dazed when painted.
 
@@ -2747,7 +2952,7 @@
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     fx = fxMod.create({ root, renderer, camera, hud, overlay: ctx.overlay, tickerAt: { x: 0, y: 8, z: 0 } });
-    for (const id of ["board", "results", "strip", "center", "struggle", "struggle-fill", "struggle-left", "struggle-meter", "struggle-word", "notice", "best", "record", "score-blue", "score-red", "own", "theirs", "time", "drop", "summary", "stats", "result-title", "rec-mined", "rec-home", "rec-splats", "rec-splatted", "rec-mvps", "trophy-stage", "final-blue", "final-red", "trophy-time", "side-blue", "side-red", "quiz", "quiz-q", "quiz-note", "quiz-fill"]) {
+    for (const id of ["board", "results", "strip", "center", "struggle", "struggle-fill", "struggle-left", "struggle-meter", "struggle-word", "notice", "best", "record", "score-blue", "score-red", "own", "theirs", "time", "drop", "summary", "stats", "result-title", "mirage", "rec-mined", "rec-home", "rec-splats", "rec-splatted", "rec-mvps", "trophy-stage", "final-blue", "final-red", "trophy-time", "side-blue", "side-red", "quiz", "quiz-q", "quiz-note", "quiz-fill"]) {
       el[id.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = document.getElementById(`block-${id}`);
     }
     el.struggleWord.textContent = COARSE ? "Tap fast!" : "Mash SPACE!";
@@ -2988,6 +3193,7 @@
       debug: {
         hud, camera, controls, cavemen: null, crates: null,
         block: {
+          get clank() { return clankNodes; },
           get phase() { return phase; },
           get paused() { return paused; },
           get sim() { return sim; },
@@ -3092,7 +3298,8 @@
     input.dispose();
     hud.dispose();
     phase = "board";
-    skyClouds = []; skyPerch = null; trophy = trophyNodes = null;
+    skyClouds = []; skyPerch = null; trophy = trophyNodes = null; clankNodes = null; MIRAGE.on = false;
+    if (el.mirage) el.mirage.hidden = true;
     sim = blocks = shots = splats = ticks = pads = crates = caches = zipLights = fpGun = fpGunL = fpFlash = fpFlashL = trampNodes = powerNodes = result = null;
     mapRoot = fireNode = dancers = peelNodes = catapults = null;
     hookNodes = []; ghostNodes = []; mistNodes = []; moonNode = null;

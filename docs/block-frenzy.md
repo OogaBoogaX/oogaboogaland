@@ -103,7 +103,7 @@ Each map has its own fixed time of day and sky (`MAP_HOUR`, `MAP_CLOUDS` in the 
   trapped. A lamp on each handle shows it from your side, green to ride, red when it would spring. Bots only choose
   the zip home with their own block home, and drop that route if it goes. The event appended to `EVENT_TYPES` made
   `WIRE` 5. Taking the weather and laser events (`bolt`, `boltwarn`, `laseroff`, `laseron`, `weather`) out of `EVENT_TYPES` moved
-  every later index, so `WIRE` is 6.
+  every later index, so `WIRE` became 6. Clanktown appends `decoy`, `decoyfade`, `glitch`, `zap` and `mirage` after `ziptrap` and adds decoys to the frame, so `WIRE` is 7.
 - **Ammo caches.** Five on Fort Chaos (each stilt hut's floor and the centre deck; the other maps place their own).
   Walking onto one refills grenades, rockets, nets and the crate stock as your stand does, then it goes dark for 15 s
   (`CACHE_S`). A real Bitcoin block found while you play makes every cache and quiz pad ready again.
@@ -382,6 +382,48 @@ per frame. The winner is the sim's, so every page in a live round shows the same
 winners celebrate with a line for the next round. The title drops in, the score counts up and the confetti bursts;
 with reduced motion the picture holds still and nothing animates. No raster art: all of it is the game's own models.
 
+## Clanktown
+
+The fifth map (`clank`), a server-farm city on the floating island played for dark comedy: night under a sickly green
+smog sky (the scene pulls the sky's colours toward green, `smogSky`) with a pale green moon striped by smog, server
+towers with teal and red lights, smokestacks puffing, cables slung to the Mainframe, scrap heaps, racks of servers for
+cover, and neon billboards with sycophantic slogans written in a 3 x 5 pixel font (`blockModels.SLOGANS`). The potato
+Oogas dance round a burning pile of old GPUs (`gpuPile`), same peels, same rule. The trampolines are steaming cooling
+vents (`vent`). Its sky stays fixed, with no storms or power surges. Detail Low
+drops the dressing (slogans, cables, the miners' fans, status LEDs and hot air, smoke and steam); the walls stay.
+
+- **Server rooms.** Each block's stand sits in a room walled by stacked Bitcoin miners, `MINER_H` (3.6 m) high, over a
+  double jump's apex. The ways in: the jetpack over the top, the catapult (its drop lands inside the rival room), the
+  zipline (its end is inside too), or on foot through a door in each side wall, the long way round. Bots use the
+  map's `nav` nodes for the long way, and experts hop the walls on the jetpack. The hook bites the walls as any wall.
+- **The Mainframe hallucinates.** From about 40 s (seeded), and every 32 to 46 s after, it lays 2 or 3 decoys of each
+  side's block, red's on blue's half and blue's turned onto red's, at seeded open spots (`decoySpots`, snapped to
+  walkable ground). They look exactly like a loose block, ticks and all, and the mini-map marks them as one. A touch
+  glitches one apart in pink and teal pixels with an apology ("I apologize for the confusion") and staggers the
+  toucher for `DECOY_STAGGER`; untouched, one fades after `DECOY_S`. The real blocks and stands are never touched.
+  Bots fall for a decoy by skill (`SKILLS[...].fool`: easy 0.75, normal 0.45, hard 0.2, expert 0.06).
+- **Clankrillas.** The hub gorilla rig with a chrome forearm, a red visor band and an antenna added on
+  (`clankArm`, `clankVisor`); the same rules as every gorilla. Grabbing and throwing, they talk: "Great question!",
+  "You're absolutely right!", "Happy to help you... off the island", "As an AI, I must throw you now".
+- **The firewall.** A pink laser fence across the halfway line in two halves, a gap either side of the Mainframe and
+  at each side line. On the shared clock it is off for 3.2 s, flickers its warning for 0.8 s (three times a second,
+  never faster) and is on for 3 s; off while fortifying. Touched while on, it splats as paint does; riders, the
+  catapult's throw, the parachute and anyone over its 2.2 m top pass. It is no block. Bots time it: across while it's
+  safely off, otherwise round by a gap, stepping off the line if it comes on (`dodgeFirewall`).
+- **The mirage.** Round the Mainframe, radius 9 m, the same for both sides. Inside it each player sees their own
+  hallucinations, drawn by the scene alone (`poseMirage`): phantom rivals running about carrying what looks like your
+  block (on the mini-map too, while you're inside), with a faint scan-line flicker as the tell, which glitch away
+  with an apology when shot or touched; phantom stacks of miners shimmering in and out; the mini-map drifting round
+  and its own-stand marker jittering; and a pink-and-teal tint with slow scan lines and an edge ring (`#block-mirage`).
+  The keys are never touched. Reduced motion and Low detail keep the tint and the phantoms and drop the drift, the
+  jitter and the moving lines. The shared sim only knows that a bot inside may chase a phantom for a moment, by its
+  skill (`mirageBot`).
+
+Live rounds carry the decoys in the host's frame (colour, place and remaining lifetime, plus the next wave's timer so a new host continues them); the firewall runs on the frame's clock, and the
+mirage is each page's own. The suite checks the map's data, the walls against a double jump, a walking route into
+each room, the decoys, the firewall's timing and touch, the mirage's symmetry, that the scene's mirage never writes
+the shared sim, an attacker bot's way round to a capture, and the decoys in a live frame.
+
 ## High scores
 
 Rock's shared high-score registry (`highscore-rules.js` and the Worker) does not know Block Frenzy, so it submits nothing. Its best stays local through
@@ -400,7 +442,7 @@ physical touch controls and browser performance still require verification.
 ## Live rounds
 Signed-in Oogas only, on a Worker that lists `block-v1` in welcome; anywhere else the game is solo as before.
 
-The weather and laser removal changes the frame layout and event indexes to `WIRE` 6. Deploy the site and Worker together. Pages left open on wire 5 must reload before joining or watching a live round; the Worker refuses their control messages and discards saved rounds from the older wire on wake.
+Clanktown extends the frame layout and event list to `WIRE` 7. Deploy the site and Worker together. Pages left open on wire 6 or earlier must reload before joining or watching a live round; the Worker refuses their control messages and discards saved rounds from the older wire on wake.
 
 - **Registry** (`worker/src/block.js`, contract in `block-wire.js`): one match a room. `reg`/`unreg`/`ready`/`opt` in the lobby; the first in picks the map, size and scoring rule (2v2 to 4v4, `MIN_SIDE` to `MAX_SIDE`; NPCs fill any empty seat, so there is never a 1v1); `reg` carries the map already picked on their board, and registered players' boards follow the match's map, grown if more have registered than it seats. With two or more registered, everyone ready starts a 3 s countdown. One person alone chooses: Start with NPCs (`alone`, at once with NPCs) or Wait for players (marks them ready, which starts nothing until someone else registers and readies). If the others leave, the choice comes back.
 - **Teams:** random and as even as can be (`split`); empty seats are NPCs.

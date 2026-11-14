@@ -9,10 +9,10 @@
   const BL = window.BL, W = BL.blockWire, SIM = BL.blockSim;
   // Every event block-sim emits, by index on the wire. An unlisted one is dropped; the suite checks the list is whole.
   // `rifle` and `unrifle` are no longer raised (the sniper rifle is always in hand); they keep their places.
-  const EVENT_TYPES = ["goldhook", "gunfire", "boing", "boo", "build", "burn", "cache", "callride", "capture", "chute", "chuteoff", "clean", "climbed", "cooled", "edgedrop", "enemycat", "ghostback", "ghostpop", "go", "gold", "goldsteal", "gorillahit", "gorillahooked", "grab", "homers", "hookbite", "hookbounce", "hookget", "hookhide", "hookrelease", "hooksteal", "hookthrow", "hookwarn", "hopoff", "hopon", "jump", "jump2", "land", "landed", "launch", "lift", "mined", "miss", "net", "netsteal", "newblock", "pass", "pickup", "power", "puddle", "refill", "reload", "reloaded", "rescue", "respawn", "return", "set", "slip", "smash", "splat", "steady", "struggle", "thrown", "touchdown", "trap", "unnet", "unzip", "waiting", "win", "winded", "windup", "yank", "zip", "fire", "throw", "bonk", "boom", "pop", "breakfree", "letgo", "netmiss", "rifle", "unrifle", "drop", "knock", "escape", "timeout", "hookmiss", "ziptrap"];
+  const EVENT_TYPES = ["goldhook", "gunfire", "boing", "boo", "build", "burn", "cache", "callride", "capture", "chute", "chuteoff", "clean", "climbed", "cooled", "edgedrop", "enemycat", "ghostback", "ghostpop", "go", "gold", "goldsteal", "gorillahit", "gorillahooked", "grab", "homers", "hookbite", "hookbounce", "hookget", "hookhide", "hookrelease", "hooksteal", "hookthrow", "hookwarn", "hopoff", "hopon", "jump", "jump2", "land", "landed", "launch", "lift", "mined", "miss", "net", "netsteal", "newblock", "pass", "pickup", "power", "puddle", "refill", "reload", "reloaded", "rescue", "respawn", "return", "set", "slip", "smash", "splat", "steady", "struggle", "thrown", "touchdown", "trap", "unnet", "unzip", "waiting", "win", "winded", "windup", "yank", "zip", "fire", "throw", "bonk", "boom", "pop", "breakfree", "letgo", "netmiss", "rifle", "unrifle", "drop", "knock", "escape", "timeout", "hookmiss", "ziptrap", "decoy", "decoyfade", "glitch", "zap", "mirage"];
   const EVENT_INDEX = new Map(EVENT_TYPES.map((t, i) => [t, i]));
   // Events the rules only ever raise for a real Ooga; the suite checks the list against block-sim.js.
-  const ACTOR_EVENTS = ["goldhook", "boing", "boo", "build", "burn", "cache", "callride", "capture", "chute", "chuteoff", "clean", "climbed", "cooled", "edgedrop", "enemycat", "gold", "gorillahooked", "grab", "homers", "hookbite", "hookbounce", "hookget", "hookrelease", "hookthrow", "hopoff", "hopon", "jump", "jump2", "land", "launch", "lift", "netsteal", "pass", "pickup", "power", "puddle", "refill", "reload", "reloaded", "rescue", "respawn", "slip", "steady", "struggle", "thrown", "touchdown", "trap", "unnet", "unzip", "waiting", "win", "winded", "windup", "yank", "zip", "ziptrap"];
+  const ACTOR_EVENTS = ["goldhook", "boing", "boo", "build", "burn", "cache", "callride", "capture", "chute", "chuteoff", "clean", "climbed", "cooled", "edgedrop", "enemycat", "gold", "gorillahooked", "grab", "homers", "hookbite", "hookbounce", "hookget", "hookrelease", "hookthrow", "hopoff", "hopon", "jump", "jump2", "land", "launch", "lift", "netsteal", "pass", "pickup", "power", "puddle", "refill", "reload", "reloaded", "rescue", "respawn", "slip", "steady", "struggle", "thrown", "touchdown", "trap", "unnet", "unzip", "waiting", "win", "winded", "windup", "yank", "zip", "ziptrap", "glitch", "zap", "mirage"];
   const NEEDS_ACTOR = EVENT_TYPES.map(t => ACTOR_EVENTS.includes(t));
   const SHOT_KINDS = ["paint", "grenade", "rocket", "net", "sniper", "ak", "gold", "crate", "homer"];
   const FLAG_STATES = ["home", "carried", "dropped", "flying"];
@@ -77,9 +77,11 @@
     let n = v.getUint8(o++);
     if (n > sim.shots.length) return false;
     for (let i = 0; i < n; i++) { if (o + 15 > len || v.getUint8(o) >= SHOT_KINDS.length || !teamOk(v.getUint8(o + 1)) || !seatOk(v.getUint8(o + 2))) return false; o += 15; }
-    if (o + sim.gorillas.length * 10 + sim.ghosts.length * 9 + sim.hooks.length * 8 > len) return false;
+    if (o + sim.gorillas.length * 10 + sim.ghosts.length * 9 + sim.decoys.length * 8 + (sim.decoys.length ? 1 : 0) + sim.hooks.length * 8 > len) return false;
     for (let i = 0; i < sim.gorillas.length; i++) { if (!seatOk(v.getUint8(o + 9))) return false; o += 10; }
     o += sim.ghosts.length * 9;
+    if (sim.decoys.length) { if (v.getUint8(o++) > SIM.CONFIG.HALLU_GAP[1] * 4) return false; }
+    for (let i = 0; i < sim.decoys.length; i++) { if (!teamOk(v.getUint8(o)) || v.getUint8(o + 7) > SIM.CONFIG.DECOY_S * 10) return false; o += 8; }
     for (let i = 0; i < sim.hooks.length; i++) { if (!seatOk(v.getUint8(o + 7))) return false; o += 8; }
     o += sim.traps.length + sim.caches.length + sim.peels.length + sim.puddles.length;
     if (o + sim.powers.length * 2 + 1 > len) return false;
@@ -123,6 +125,9 @@
     dv.setUint8(countAt, count);
     for (let i = 0; i < sim.gorillas.length; i++) { const g = sim.gorillas[i]; pos(g); i16(g.heading * 1000); u8(g.state); seatRef(g.holding, map); }
     for (let i = 0; i < sim.ghosts.length; i++) { const g = sim.ghosts[i]; pos(g); i16(g.heading * 1000); u8(g.state); }
+    // Keep the next wave and each decoy's remaining lifetime when a guest takes over hosting.
+    if (sim.decoys.length) u8(sim.halluT * 4);
+    for (let i = 0; i < sim.decoys.length; i++) { const d = sim.decoys[i]; u8(d.live ? TEAM_CODE(d.team) : 0); pos(d); u8(d.live ? d.t * 10 : 0); }
     for (let i = 0; i < sim.hooks.length; i++) { const h = sim.hooks[i]; u8(h.state); pos(h); seatRef(h.holder, map); }
     dark(sim.traps); dark(sim.caches); dark(sim.peels); dark(sim.puddles);
     for (let i = 0; i < sim.powers.length; i++) { u8(sim.powers[i].dark * 4); u8(sim.powers[i].kind); }
@@ -164,6 +169,8 @@
     for (let i = 0, n = r8(); i < n; i++) { const s = sim.shots[i]; s.live = true; s.kind = SHOT_KINDS[r8()]; s.team = TEAM_NAME[r8()]; s.owner = localRef(map); readPos(s); s.vx = r16() / 16; s.vy = r16() / 16; s.vz = r16() / 16; }
     for (let i = 0; i < sim.gorillas.length; i++) { const g = sim.gorillas[i]; readPos(g); g.heading = r16() / 1000; g.state = r8(); g.holding = localRef(map); }
     for (let i = 0; i < sim.ghosts.length; i++) { const g = sim.ghosts[i]; readPos(g); g.heading = r16() / 1000; g.state = r8(); }
+    if (sim.decoys.length) sim.halluT = r8() / 4;
+    for (let i = 0; i < sim.decoys.length; i++) { const d = sim.decoys[i], c = r8(); d.live = c > 0; d.team = TEAM_NAME[c]; readPos(d); d.t = r8() / 10; }
     for (let i = 0; i < sim.hooks.length; i++) { const h = sim.hooks[i]; h.state = r8(); readPos(h); h.holder = localRef(map); }
     readDark(sim.traps); readDark(sim.caches); readDark(sim.peels); readDark(sim.puddles);
     for (let i = 0; i < sim.powers.length; i++) { sim.powers[i].dark = r8() / 4; sim.powers[i].kind = r8(); }

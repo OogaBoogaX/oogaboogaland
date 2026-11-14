@@ -60,6 +60,14 @@
     // `GHOST_SIGHT`, and a touch (`GHOST_R`) spooks it stiff for `SPOOK_S` (dropping a crate, not a block); then the ghost fades
     // and comes back after `GHOST_BACK`. Paint or a blast pops one sooner.
     GHOST_SPEED: 1.4, GHOST_CHASE: 3, GHOST_SIGHT: 6, GHOST_R: 0.7, SPOOK_S: 1.2, GHOST_BACK: 14, GHOST_POP: 10,
+    // Clanktown's Mainframe hallucinates: from `HALLU_FIRST` (plus up to `HALLU_JITTER`, seeded) and every `HALLU_GAP`
+    // after, it lays 2 or 3 decoys of each side's block at seeded open spots. A touch glitches one apart and staggers the
+    // toucher for `DECOY_STAGGER`; one untouched fades after `DECOY_S`. Its firewall is on for `FIREWALL_ON`, off for
+    // `FIREWALL_OFF`, flickering a warning for the last `FIREWALL_WARN` before it comes on; touched while on, it splats
+    // an Ooga whose feet are under its top. A bot in the mirage round the Mainframe may chase a phantom for `MIRAGE_S`,
+    // and not again for `MIRAGE_COOL`.
+    HALLU_FIRST: 40, HALLU_JITTER: 6, HALLU_GAP: [32, 46], DECOY_S: 15, DECOY_STAGGER: 0.9, MAX_DECOYS: 6,
+    FIREWALL_ON: 3, FIREWALL_OFF: 4, FIREWALL_WARN: 0.8, MIRAGE_S: 2.5, MIRAGE_COOL: 15,
     GOAL_R: 2.4, HOP_R: 1.8, RIDE_UP: 0.55, RIDE_BACK: 0.42, MOUNT_SLOW: 0.85, CALL_S: 6, CALL_R: 12,
     TOWER_TOP: 6.4, CLIMB: 3.6, ZIP_SPEED: 15, ZIP_HANG: 1.9, ZIP_R: 1.6, CACHE_S: 15, CACHE_R: 1.2,
     // The floating island: its edges are open. A body whose feet are more than `RIM` under the top has gone over the
@@ -539,7 +547,70 @@
       ghosts: [[1, 27, 5], [-8, 7, 7]].flatMap(([x, z, r]) => [[x, z, r], [-x, -z, r]])
     };
   };
-  const ARENAS = { fort: fortChaos(), town: oogaTown(), jungle: gorillaJungle(), haunted: hauntedHollow() };
+  // Clanktown: a server-farm city under green smog. Each side's block sits in a server room walled by stacked Bitcoin
+  // miners, `MINER_H` high (over a double jump): in by the jetpack over the top, a catapult drop, the zipline, or on foot
+  // through the doors in its side walls, the long way round. Server towers and racks for cover, smokestacks behind
+  // the rooms, billboards on posts (their boards over head height) and the Mainframe in the middle, its firewall
+  // across the field either side of it and its mirage all round it. `nav` is the way round the rooms, for the bots.
+  const MINER_H = 3.6;
+  const clankTown = () => {
+    const half = [], decor = [];
+    // The server room: front and back walls of miners, the side walls each leaving a door.
+    half.push([-6.5, 6.5, 22.5, 23.3, MINER_H, 0], [-6.5, 6.5, 32.7, 33.5, MINER_H, 0]);
+    for (const s of [-1, 1]) {
+      const x0 = s > 0 ? 5.7 : -6.5, x1 = s > 0 ? 6.5 : -5.7;
+      half.push([x0, x1, 23.3, 28.2, MINER_H, 0], [x0, x1, 30.6, 32.7, MINER_H, 0]);
+    }
+    // Server towers: tall blocks to break the long lanes; racks of servers as low cover.
+    half.push(at(-12, 15, 2.4, 2.4, 6), at(13, 9, 2.4, 2.4, 5.2));
+    half.push(at(-4.2, 14.2, 2.4, 0.8, 1.6), at(4.6, 18.6, 2.4, 0.8, 1.6), at(-9.5, 7.5, 0.8, 2.4, 1.6), at(9.5, 15.5, 0.8, 2.4, 1.6), at(0, 19.5, 3, 0.8, 1.2));
+    // Scrap heaps by the side lines, low enough to stand on.
+    half.push(at(-18, 12, 2, 2, 1), at(17.5, 18, 2, 1.6, 1));
+    // Smokestacks behind the room's back corners.
+    half.push(at(-10, 35, 1.4, 1.4, 7.5), at(10, 35, 1.4, 1.4, 7.5));
+    // Billboards on two posts, their boards up over head height (walked under); each one's slogan is the scene's.
+    const board = (x, z, w = 4) => { half.push(at(x - w / 2 + 0.2, z, 0.3, 0.3, 4.6), at(x + w / 2 - 0.2, z, 0.3, 0.3, 4.6), [x - w / 2, x + w / 2, z - 0.12, z + 0.12, 4.6, 2.9]); decor.push({ kind: "billboard", x, z, y: 3.75, w }); };
+    board(-14, 21); board(15, 3.5); board(-16.5, 31);
+    // The Mainframe, put in once: a tall server tower in the middle of the field.
+    const middle = [at(0, 0, 3.2, 3.2, 8.5)];
+    decor.push({ kind: "mainframe", x: 0, z: 0, y: 8.5, middle: true });
+    const { BLOCKS, steps: stepSet } = turnedMap(half, middle, []);
+    const allDecor = [];
+    for (const d of decor) { allDecor.push(d); if (!d.middle) allDecor.push({ ...d, x: -d.x, z: -d.z, turned: true }); }
+    const two = (list) => [...list, ...flip(list)];
+    // The way round the server room: outside and inside each door, the room's outer corners, and across the field.
+    const navHalf = [[-7.6, 29.4], [-4.7, 29.4], [7.6, 29.4], [4.7, 29.4], [-7.7, 21.6], [7.7, 21.6], [-7.7, 34.6], [7.7, 34.6],
+      [0, 21.2], [-10, 18.5], [10, 18.5], [-2.9, 3], [2.9, 3], [-19, 2.5], [19, 2.5], [0, 12], [-15, 9], [15, 13]];
+    return {
+      id: "clank", name: "Clanktown", BLOCKS, steps: stepSet, decor: allDecor,
+      gorillas: [[-14, 2.5], [14, -2.5], [8.5, 20], [-8.5, -20]],
+      terrain: [...cave(16.5, 21.5, 24, 28), ...mound(-21.5, -17.5, 4, 9), ...outcrop(6, 8, 6, 7.5)],
+      hookSpots: [[19, 0, 26], [-19.5, 2, 6.5], [7, 0, 8.4]],
+      stands: { blue: { x: 0, z: 28 }, red: { x: 0, z: -28 } },
+      showcase: { blue: { x: 0, z: 20 }, red: { x: 0, z: -20 } },
+      guard: { blue: { x: 0, z: 21.2 }, red: { x: 0, z: -21.2 } },
+      traps: [[-10, 12], [10, -12], [10.5, 12.5], [-10.5, -12.5], [-17, 5], [17, -5], [-6, 6], [6, -6]],
+      crates: both([[-3.6, 25], [3.6, 25], [-2.2, 31.6], [2.2, 31.6]]),
+      // The defender stacks a barricade before the room's front wall; the doors stay open, the long way round.
+      plug: both([[-1.4, 21.5], [1.4, 21.5], [0, 20.3]]),
+      alley: both([[-3, 35.4], [3, 35.4]]),
+      caches: [[-12.5, 0, 11.8], [12.5, 0, -11.8], [13, 0, 12.4], [-13, 0, -12.4], [0, 0, 9.8], [0, 0, -9.8]],
+      // The cooling vents: trampolines, steaming.
+      tramps: [[-15, 17], [15, -17], [11, 4.5], [-11, -4.5]],
+      powers: [[-6.5, 18], [6.5, -18], [17, 11], [-17, -11], [-4, 10], [4, -10]],
+      fire: [-20, -1.5],
+      catapults: both([[-3.6, 31]]),
+      // The firewall: two halves across the halfway line, a gap either side of the Mainframe and at each side line.
+      firewall: { halves: [[3, 16.5], [-16.5, -3]], top: 2.2, half: 0.12 },
+      // The mirage round the Mainframe, the same reach for both sides.
+      mirage: { x: 0, z: 0, r: 9 },
+      // Where the Mainframe's decoys may lie: open ground on blue's half, turned for red's.
+      decoySpots: [[-7.5, 11], [8, 8], [-15, 23], [3.5, 16], [17, 14], [-3, 6.5], [11, 21]],
+      nav: { blue: navHalf, red: navHalf.map(([x, z]) => [-x, -z]) },
+      sky: "smog"
+    };
+  };
+  const ARENAS = { fort: fortChaos(), town: oogaTown(), jungle: gorillaJungle(), haunted: hauntedHollow(), clank: clankTown() };
   // What every map shares: its size, the stands, the towers with their ladders and ziplines.
   // The banana peels the potato Oogas drop round their fire, offsets from it toward the field.
   const PEELS = [[3, 1.5], [2.2, -2.6], [0.6, 3.2], [0.8, -3.3]];
@@ -591,12 +662,13 @@
   // The bots' skill: easy bots aim wider, wait longer before throwing, throw less often, run slower and see less far;
   // hard ones the other way. "normal" is the CONFIG values.
   const SKILLS = {
-    easy: { spread: 0.36, aim: 1.1, cool: 2.1, speed: 4.8, range: 10, gorilla: { sight: 6, charge: 6.5, reach: 1.05, drag: 6, rest: 9, need: 6, drain: 0.8, mash: 3.5, dodge: 0 } },
-    normal: { spread: CONFIG.BOT_SPREAD, aim: CONFIG.BOT_AIM, cool: CONFIG.BOT_COOLDOWN, speed: CONFIG.BOT_SPEED, range: CONFIG.BOT_RANGE, gorilla: { sight: CONFIG.GORILLA_SIGHT, charge: CONFIG.GORILLA_CHARGE, reach: CONFIG.GORILLA_GRAB_R, drag: CONFIG.GORILLA_DRAG, rest: CONFIG.GORILLA_REST, need: CONFIG.GRAB_NEED, drain: CONFIG.GRAB_DRAIN, mash: CONFIG.GRAB_MASH, dodge: 0.15 } },
-    hard: { spread: 0.1, aim: 0.35, cool: 0.95, speed: 6, range: 15, gorilla: { sight: 10, charge: 9.5, reach: 1.35, drag: 8.5, rest: 4, need: 15, drain: 2, mash: 6.5, dodge: 0.35 } },
+    // `fool`: how often a bot falls for Clanktown's decoys and phantoms.
+    easy: { fool: 0.75, spread: 0.36, aim: 1.1, cool: 2.1, speed: 4.8, range: 10, gorilla: { sight: 6, charge: 6.5, reach: 1.05, drag: 6, rest: 9, need: 6, drain: 0.8, mash: 3.5, dodge: 0 } },
+    normal: { fool: 0.45, spread: CONFIG.BOT_SPREAD, aim: CONFIG.BOT_AIM, cool: CONFIG.BOT_COOLDOWN, speed: CONFIG.BOT_SPEED, range: CONFIG.BOT_RANGE, gorilla: { sight: CONFIG.GORILLA_SIGHT, charge: CONFIG.GORILLA_CHARGE, reach: CONFIG.GORILLA_GRAB_R, drag: CONFIG.GORILLA_DRAG, rest: CONFIG.GORILLA_REST, need: CONFIG.GRAB_NEED, drain: CONFIG.GRAB_DRAIN, mash: CONFIG.GRAB_MASH, dodge: 0.15 } },
+    hard: { fool: 0.2, spread: 0.1, aim: 0.35, cool: 0.95, speed: 6, range: 15, gorilla: { sight: 10, charge: 9.5, reach: 1.35, drag: 8.5, rest: 4, need: 15, drain: 2, mash: 6.5, dodge: 0.35 } },
     // Expert bots play the whole game: they ride the catapult and the ziplines, climb ladders and nets, hop walls on the
     // jetpack, stack crates at the gate and throw them, and spray the AK in bursts (`akCool` between rounds).
-    expert: { spread: 0.06, aim: 0.22, cool: 0.7, speed: 6.4, range: 18, akCool: 0.16, expert: true, gorilla: { sight: 12, charge: 11, reach: 1.5, drag: 9.5, rest: 2.5, need: 22, drain: 2.4, mash: 9, dodge: 0.55 } }
+    expert: { fool: 0.06, spread: 0.06, aim: 0.22, cool: 0.7, speed: 6.4, range: 18, akCool: 0.16, expert: true, gorilla: { sight: 12, charge: 11, reach: 1.5, drag: 9.5, rest: 2.5, need: 22, drain: 2.4, mash: 9, dodge: 0.55 } }
   };
   // Where the k-th of `size` Oogas a side starts, across the inside of its fort (red's turned half round).
   const startAt = (team, k, size) => {
@@ -884,7 +956,7 @@
       waiting: false, stamina: 4, tired: false, sprinting: false, rest: 0, botJump: false, jump2At: 0, tries: 0, progT: 0, lastD: 0, netted: 0, grenade: 0, rocket: 0, net: 0, sniper: 1, crates: 0, holding: false, bonked: false,
       climbing: false, riding: false, zipT: 0, flight: 0, zipLine: "blue", lastKind: "paint", wield: "", grabbed: 0, grabFill: 0, flung: false, fuel: CONFIG.JET_FUEL, jetting: false, boots: 0, burnt: 0, slip: 0, gold: false, akMag: 30, akReload: 0, monkeys: 0, monkeyCool: 0,
       knock: 0, spooked: 0, ride: 0, rider: 0, calling: 0, navI: -1, navT: 0, route: "", routeT: 0, botClimb: false, botStop: false, botStraight: false, lift: false, crateGo: 0, crateX: 0, crateZ: 0, routeBan: 0, jetT: 0, hopT: 0, crateT: 0, stacks: 0,
-      detourX: 0, detourZ: 0, painted: 0, captures: 0, splats: 0, hits: 0, longShot: 0, rescues: 0, edgeX: 0, edgeY: 0, edgeZ: 0, falls: 0,
+      detourX: 0, detourZ: 0, fooled: -1, inMirage: false, mirageT: 0, mirageCool: 0, mirageX: 0, mirageZ: 0, painted: 0, captures: 0, splats: 0, hits: 0, longShot: 0, rescues: 0, edgeX: 0, edgeY: 0, edgeZ: 0, falls: 0,
       hook: 0, hk: 0, hookT: 0, hookLen: 0, hookWait: 0, hookTarget: -1, hookTip: { x: 0, y: 0, z: 0 }, hookEnd: { x: 0, y: 0, z: 0 }, hookHold: false, flingT: 0
     }));
     const flags = {};
@@ -901,7 +973,9 @@
     const hooks = Array.from({ length: CONFIG.HOOKS }, () => ({ state: 0, x: 0, y: 0, z: 0, holder: -1 }));
     const events = Array.from({ length: CONFIG.MAX_EVENTS }, () => ({ type: "", team: null, actor: -1, by: -1, x: 0, y: 0, z: 0 }));
     const puddles = (A.puddles || []).map(([x, z]) => ({ x, z, dark: 0 }));
-    const sim = { goldLeft: CONFIG.GOLD_GUNS, map, team, rival, seed, target, size, skill, bots: SKILLS[skill] || SKILLS.normal, prepS: prep, prep: 0, rng: mulberry32(seed), actors, flags, shots, crates, traps, caches, powers, peels, puddles, gorillas, ghosts, hooks, halving: { blue: 0, red: 0 }, cold: { blue: 0, red: 0 }, events, eventCount: 0, score: { blue: 0, red: 0 }, time: 0, flip: false, over: false, winner: null, acc: 0 };
+    // Clanktown's decoy blocks, the Mainframe's hallucinations (none on other maps).
+    const decoys = A.decoySpots ? Array.from({ length: CONFIG.MAX_DECOYS }, () => ({ live: false, team: null, x: 0, y: 0, z: 0, t: 0 })) : [];
+    const sim = { goldLeft: CONFIG.GOLD_GUNS, map, team, rival, seed, target, size, skill, bots: SKILLS[skill] || SKILLS.normal, prepS: prep, prep: 0, rng: mulberry32(seed), actors, flags, shots, crates, traps, caches, powers, peels, puddles, decoys, halluT: 0, gorillas, ghosts, hooks, halving: { blue: 0, red: 0 }, cold: { blue: 0, red: 0 }, events, eventCount: 0, score: { blue: 0, red: 0 }, time: 0, flip: false, over: false, winner: null, acc: 0 };
     reset(sim);
     return sim;
   };
@@ -982,6 +1056,8 @@
     for (const p of sim.peels) p.dark = 0;
     for (const p of sim.puddles) p.dark = 0;
     for (const g of sim.ghosts) { g.x = g.wx = g.hx; g.z = g.wz = g.hz; g.state = 0; g.t = 0; }
+    for (const d of sim.decoys) d.live = false;
+    for (const a of sim.actors) { a.fooled = -1; a.inMirage = false; a.mirageT = a.mirageCool = 0; }
     if (sim.hooks.length && ARENA.hookSpots.length) {
       // One hook hidden in each half, at the same seeded spot turned half round, so neither side is favoured.
       const k = Math.floor(sim.rng() * ARENA.hookSpots.length);
@@ -989,6 +1065,7 @@
     }
     for (const g of sim.gorillas) { g.x = g.wx = g.hx; g.z = g.wz = g.hz; g.vx = g.vz = 0; g.state = G_ROAM; g.t = 0; g.holding = -1; g.held = 0; g.hookCool = 0; g.ex = g.ez = g.stall = g.throwT = 0; }
     sim.goldLeft = CONFIG.GOLD_GUNS;
+    if (sim.decoys.length) sim.halluT = CONFIG.HALLU_FIRST + sim.rng() * CONFIG.HALLU_JITTER;
     // Each pair of spots starts with the same power (boots, the monkeys, then the halving or cold storage by the seed);
     // after that each draws from the seed, so a seed replays the round's power-ups too.
     for (let i = 0; i < sim.powers.length; i++) { const p = sim.powers[i]; p.dark = 0; p.kind = [0, 3, seed & 1 ? 2 : 1][(i >> 1) % 3]; }
@@ -2000,6 +2077,122 @@
     }
   };
 
+  // ---- Clanktown's Mainframe ----
+  // The firewall's state at the sim's clock: 0 off, 1 flickering its warning, 2 on. Off while fortifying, and on no
+  // map without one. A pure function of the clock, so a live round's pages all see the same.
+  const firewallState = (sim) => {
+    if (!ARENAS[sim.map].firewall || sim.prep > 0) return 0;
+    const cycle = CONFIG.FIREWALL_ON + CONFIG.FIREWALL_OFF, t = sim.time % cycle;
+    return t >= CONFIG.FIREWALL_OFF ? 2 : t >= CONFIG.FIREWALL_OFF - CONFIG.FIREWALL_WARN ? 1 : 0;
+  };
+  // Seconds until the firewall next comes on (0 while it is on).
+  const firewallIn = (sim) => {
+    const cycle = CONFIG.FIREWALL_ON + CONFIG.FIREWALL_OFF, t = sim.time % cycle;
+    return t >= CONFIG.FIREWALL_OFF ? 0 : CONFIG.FIREWALL_OFF - t;
+  };
+  // True when (x, z) is in the firewall's footprint, widened by r.
+  const inFirewall = (x, z, r = 0) => {
+    const F = ARENA.firewall;
+    if (!F || Math.abs(z) > F.half + r) return false;
+    for (const [x0, x1] of F.halves) if (x > x0 - r && x < x1 + r) return true;
+    return false;
+  };
+  // In the mirage round the Mainframe (`A.mirage`), on a map that has one.
+  const inMirage = (x, z, A = ARENA) => !!A.mirage && (x - A.mirage.x) ** 2 + (z - A.mirage.z) ** 2 < A.mirage.r * A.mirage.r;
+  // The firewall on: anyone whose feet are under its top and whose body touches it is splatted, as a paint hit does.
+  // Riders, flights, the parachute and anything over the top pass.
+  const stepFirewall = (sim) => {
+    if (firewallState(sim) !== 2) return;
+    const F = ARENA.firewall;
+    for (const a of sim.actors) {
+      if (!open(a) || a.grabbed || a.riding || a.flight || a.y >= F.top || !inFirewall(a.x, a.z, CONFIG.BODY_R)) continue;
+      emit(sim, "zap", a.team, a.id, a.x, a.y + 1, a.z);
+      splat(sim, a, false, null);
+    }
+  };
+  // The Mainframe hallucinates: 2 or 3 decoys of each side's block, red's on blue's half and blue's turned onto red's,
+  // so neither side is favoured. Bots that see one of the block they're after may run for it, by their skill.
+  const hallucinate = (sim) => {
+    const spots = ARENA.decoySpots, n = 2 + (sim.rng() < 0.5 ? 1 : 0), half = sim.decoys.length >> 1;
+    let k = Math.floor(sim.rng() * spots.length);
+    for (let i = 0; i < half; i++) { sim.decoys[i].live = false; sim.decoys[i + half].live = false; }
+    for (let i = 0; i < n && i < half; i++, k += 3) {
+      const [sx, sz] = spots[k % spots.length], p = restSpot(sx, sz), px = p.x, pz = p.z;
+      const q = restSpot(-px, -pz), a = sim.decoys[i], b = sim.decoys[i + half];
+      a.live = true; a.team = "red"; a.x = px; a.z = pz; a.y = 0; a.t = CONFIG.DECOY_S;
+      b.live = true; b.team = "blue"; b.x = q.x; b.z = q.z; b.y = 0; b.t = CONFIG.DECOY_S;
+      emit(sim, "decoy", a.team, -1, a.x, 0, a.z); emit(sim, "decoy", b.team, -1, b.x, 0, b.z);
+    }
+    for (const bot of sim.actors) {
+      if (!bot.bot || bot.carrying || sim.rng() >= sim.bots.fool) continue;
+      let best = -1, bd = Infinity;
+      for (let i = 0; i < sim.decoys.length; i++) {
+        const d = sim.decoys[i];
+        if (!d.live || d.team === bot.team) continue;
+        const dd = (d.x - bot.x) ** 2 + (d.z - bot.z) ** 2;
+        if (dd < bd) { bd = dd; best = i; }
+      }
+      bot.fooled = best;
+    }
+  };
+  // A decoy touched glitches apart and staggers its toucher; one left alone fades. Real blocks are never touched here.
+  const stepDecoys = (sim, dt) => {
+    if (sim.prep > 0) return;
+    if ((sim.halluT -= dt) <= 0) {
+      hallucinate(sim);
+      sim.halluT = CONFIG.HALLU_GAP[0] + sim.rng() * (CONFIG.HALLU_GAP[1] - CONFIG.HALLU_GAP[0]);
+    }
+    for (let i = 0; i < sim.decoys.length; i++) {
+      const d = sim.decoys[i];
+      if (!d.live) continue;
+      if ((d.t -= dt) <= 0) { d.live = false; emit(sim, "decoyfade", d.team, -1, d.x, 0, d.z); continue; }
+      for (const a of sim.actors) {
+        if (a.splat > 0 || a.trapped > 0 || a.grabbed || a.riding || a.flight || a.y > 1.4 || (a.x - d.x) ** 2 + (a.z - d.z) ** 2 >= CONFIG.PICK_R * CONFIG.PICK_R) continue;
+        d.live = false;
+        a.knock = Math.max(a.knock, CONFIG.DECOY_STAGGER); a.vx *= 0.2; a.vz *= 0.2;
+        emit(sim, "glitch", d.team, a.id, d.x, 0.5, d.z);
+        break;
+      }
+    }
+    for (const a of sim.actors) if (a.fooled >= 0 && !sim.decoys[a.fooled].live) a.fooled = -1;
+  };
+  // A bot crossing the halfway line times the firewall: across while it is safely off, otherwise round by the gap at
+  // the Mainframe or the side line, or back off it.
+  const dodgeFirewall = (sim, a) => {
+    const F = ARENA.firewall;
+    if (!F || a.y > 0.5 || a.riding || a.flight) return;
+    const hot = firewallState(sim) !== 0 || firewallIn(sim) < 1.6, side = a.z >= 0 ? 1 : -1;
+    // On the line while it's on or about to be: step off it to the nearer side.
+    if (hot && Math.abs(a.z) < F.half + CONFIG.BODY_R + 0.6 && inFirewall(a.x, 0, CONFIG.BODY_R + 0.3)) { goal.x = a.x; goal.z = side * 2.2; return; }
+    if (!hot || Math.abs(a.z) > 4 || Math.sign(goal.z) === side && Math.abs(goal.z) > 0.6) return;
+    const dz = goal.z - a.z, cx = Math.abs(dz) > 1e-6 ? a.x + (goal.x - a.x) * (0 - a.z) / dz : a.x;
+    if (!inFirewall(cx, 0, CONFIG.BODY_R + 0.3)) return;
+    // Round it: the gap beside the Mainframe or past the half's outer end, whichever is nearer; wait short of the line.
+    for (const [x0, x1] of F.halves) {
+      if (cx <= x0 - CONFIG.BODY_R - 0.3 || cx >= x1 + CONFIG.BODY_R + 0.3) continue;
+      const inner = Math.abs(x0) < Math.abs(x1) ? x0 : x1, outer = inner === x0 ? x1 : x0, out = Math.sign(outer - inner);
+      const gx = Math.abs(a.x - inner) < Math.abs(a.x - outer) ? inner - out * 0.75 : outer + out * 1.2;
+      if (Math.abs(a.x - gx) < 1.2) { goal.x = gx; goal.z = -side * 1.5; } else { goal.x = gx; goal.z = side * 1.6; }
+      return;
+    }
+  };
+  // A bot wandering into the mirage may fall for a phantom carrier (by its skill), and chase it about for a moment.
+  const mirageBot = (sim, a, dt) => {
+    if (!ARENA.mirage) return;
+    if (a.mirageCool > 0) a.mirageCool -= dt;
+    const inside = inMirage(a.x, a.z) && !a.carrying;
+    if (inside && !a.inMirage && a.mirageCool <= 0 && sim.prep <= 0 && sim.rng() < sim.bots.fool * 0.5) {
+      const M = ARENA.mirage, ang = sim.rng() * Math.PI * 2, rr = M.r * (0.4 + 0.5 * sim.rng());
+      a.mirageT = CONFIG.MIRAGE_S; a.mirageX = M.x + Math.sin(ang) * rr; a.mirageZ = M.z + Math.cos(ang) * rr;
+      emit(sim, "mirage", a.team, a.id, a.x, 1, a.z);
+    }
+    a.inMirage = inside;
+    if (a.mirageT > 0) {
+      if ((a.mirageT -= dt) <= 0 || a.carrying) { a.mirageT = 0; a.mirageCool = CONFIG.MIRAGE_COOL; return; }
+      goal.x = a.mirageX; goal.z = a.mirageZ;
+    }
+  };
+
   // The bots: an attacker goes for the flag and a defender waits at its gate, both breaking off to send a dropped
   // flag of theirs home or to chase the Ooga carrying it, and both throw at the nearest rival in range.
   const goal = { x: 0, z: 0 };
@@ -2024,6 +2217,8 @@
       return;
     }
     if (a.carrying) { const gl = ARENA.goals ? ARENA.goals[a.team] : stand; goal.x = gl.x; goal.z = gl.z; return; }
+    // Taken in by a decoy: off after it, till it glitches or fades.
+    if (a.fooled >= 0 && sim.decoys[a.fooled] && sim.decoys[a.fooled].live) { const d = sim.decoys[a.fooled]; goal.x = d.x; goal.z = d.z; return; }
     // Our block out of its stand: the defenders go for it, and so does whoever is near it or the nearest attacker; the
     // other attackers keep going for theirs, so a side doesn't all pile onto one spot.
     const ownOut = own.state === "dropped" || own.state === "flying" || (own.state === "carried" && sim.actors[own.carrier].team !== a.team);
@@ -2459,8 +2654,10 @@
       const f = sim.flags[a.blocked];
       if (f.state === "dropped" && (f.x - a.x) ** 2 + (f.z - a.z) ** 2 < (CONFIG.PICK_R + 0.3) ** 2) { goal.x = f.x + (a.x > f.x ? 2.5 : -2.5); goal.z = f.z + (a.z > f.z ? 2.5 : -2.5); }
     }
+    if (a.detour <= 0 && !a.botClimb) mirageBot(sim, a, dt);
     const up = a.detour <= 0 && !a.botClimb && sim.prep <= 0 ? fetchUp(sim, a) : 0;
     if (a.detour <= 0 && !a.botClimb && up < 2) navigate(sim, a, dt);
+    if (!a.botClimb) dodgeFirewall(sim, a);
     const d = Math.hypot(goal.x - a.x, goal.z - a.z);
     // An autopiloted player (`auto`, the suite's and the debug handle's) runs at the player's sprint.
     // A bot with the rivals' block sprints for home, as a visitor would.
@@ -2966,6 +3163,8 @@
     for (const t of sim.traps) if (t.dark > 0) t.dark -= dt;
     if (sim.gorillas.length) stepGorillas(sim, dt);
     if (sim.ghosts.length) stepGhosts(sim, dt);
+    if (ARENA.firewall) stepFirewall(sim);
+    if (sim.decoys.length) stepDecoys(sim, dt);
     for (const c of sim.caches) if (c.dark > 0) c.dark = Math.max(0, c.dark - dt);
     for (const p of sim.powers) if (p.dark > 0) p.dark = Math.max(0, p.dark - dt);
     for (const p of sim.peels) if (p.dark > 0) p.dark = Math.max(0, p.dark - dt);
@@ -3073,7 +3272,7 @@
     v.second = second; v.boots = boots; v.monkeys = monkeys; v.halving = halving; v.cold = cold;
     return true;
   };
-  BL.blockSim = { WIELD, wield, heldOf, worth, mvp, tallyOf, ARSENAL, slotState, slotCount, splat, aimRise, flatPitch, settleHooks, parachuteIn, LEAF_TOP, stripView, stripChanged, hopOn, callRide, CONFIG, TOOLS, KINDS, SKILLS, POWERS, ARENAS, MAPS, TEAMS, other, create, reset, step, tick, newBlock, launch, nearCatapult, nearEnemyCatapult, zipSprings, fire, drop, pass, build, grab, zip, nearZip, onTower, escape, clearLine, solidAt, resolve, groundAt, onIsland, isleDepth, grapple, restSpot, restOn, edgeDist, cutChute, inGrave, inGraveOf, GRAVE_Y };
+  BL.blockSim = { WIELD, wield, heldOf, worth, mvp, tallyOf, ARSENAL, slotState, slotCount, splat, aimRise, flatPitch, settleHooks, parachuteIn, LEAF_TOP, stripView, stripChanged, hopOn, callRide, CONFIG, TOOLS, KINDS, SKILLS, POWERS, ARENAS, MAPS, TEAMS, other, create, reset, step, tick, newBlock, launch, nearCatapult, nearEnemyCatapult, zipSprings, fire, drop, pass, build, grab, zip, nearZip, onTower, escape, clearLine, solidAt, resolve, groundAt, onIsland, isleDepth, grapple, restSpot, restOn, edgeDist, cutChute, inGrave, inGraveOf, GRAVE_Y, MINER_H, firewallState, firewallIn, inFirewall, inMirage };
   // The map last stepped (or reset), for the scene's and models' reads.
   Object.defineProperty(BL.blockSim, "ARENA", { get: () => ARENA, enumerable: true });
 })();
