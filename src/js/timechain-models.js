@@ -12,10 +12,11 @@
   const { createNode, addChild } = BL.scene;
   // The bridge deck meets the portal at its full outer width, so the approach does not pinch down before the doors.
   const PORTAL_WIDTH = 6;
-  const SITE = { bearing: BL.terrain.TIMECHAIN.bearing, radius: 13, depth: 12, span: 18, width: PORTAL_WIDTH, bridgeFloor: 0.07 };
+  const SITE = { bearing: BL.terrain.TIMECHAIN.bearing, radius: 13, depth: 12, span: 18, width: PORTAL_WIDTH, bridgeFloor: 0.07, shellY: 3 };
   const DIR = { x: Math.sin(SITE.bearing), z: -Math.cos(SITE.bearing) };
   const UNIT = 0.5, WOOD = "#795335", PLANK = "#8b6340", POST = "#5e3f27", ORANGE = "#f7931a";
-  const SHELL_R = 13, SHELL_SKIN = 0.16, SHELL_CY = 3;
+  // The ball: its radius and centre height are SITE's, which the hub's outdoor scope reads as the Sphere's inside.
+  const SHELL_R = SITE.radius, SHELL_SKIN = 0.16, SHELL_CY = SITE.shellY;
   // Where the shell's inner skin meets a height: the floor must stay inside it, underside included.
   const innerReach = (y) => Math.sqrt((SHELL_R - SHELL_SKIN) ** 2 - (SHELL_CY - y) ** 2);
   const ground = cached(() => {

@@ -22787,7 +22787,7 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
     const B = __ooga, D = BL.scenes.hub.debug, net = BL.net.state, T = D.timechainIsland, M = __ooga.poolIsland, F = D.bifrost;
     B.pilot.possess(B.cavemen.get("portlandhodl"));
     // A point short of a bridge stands on the island's own ground.
-    const at = (p, wait) => { if (!Number.isFinite(p.y)) p.y = D.island.heightAt(p.x, p.z); B.pilot.navigate({ position: p, yaw: 0, pitch: 0.4, dist: 6 }); B.advance(wait, 1 / 60); return { to: net.blendTo, t: +net.blendT.toFixed(2), zone: net.zone }; };
+    const at = (p, wait) => { if (!Number.isFinite(p.y)) p.y = D.island.heightAt(p.x, p.z); B.pilot.navigate({ position: p, yaw: 0, pitch: 0.4, dist: 6 }); B.advance(wait, 1 / 60); return { to: net.blendTo, t: +net.blendT.toFixed(2), zone: net.zone, scope: BL.outdoorScope.state.scope, reason: BL.outdoorScope.state.reason }; };
     // Each bridge as points from its island end (0) to where its land's zone begins (1), and a step onto the land.
     const sphereNear = T.place.bridgeZ + BL.timechainModels.SITE.span + 0.5, porch = BL.timechainModels.SPOTS.WAIT.z + 5;
     const pool = M.place, poolNear = pool.bridgeLocalZ + BL.poolModels.SITE.span, S = BL.poolModels.SITE;
@@ -22806,19 +22806,32 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
       row.bridge = at(point(0.5), 0.5);
       row.land = at(point(1.4), 0.5);
     }
-    const lab = D.island.mouths.find((m) => m.id === "c11").inside;
+    const labMouth = D.island.mouths.find((m) => m.id === "c11"), lab = labMouth.inside;
     out.mouth = at({ x: lab.x, y: 0, z: lab.z }, 0.5);
+    const outX = labMouth.x + (labMouth.apron.x - labMouth.x) * 2.5, outZ = labMouth.z + (labMouth.apron.z - labMouth.z) * 2.5;
+    out.apron = at({ x: outX, y: D.island.surfaceAt(outX, outZ), z: outZ }, 0.5);
     out.air = at({ x: 53.7, y: 8, z: -31 }, 0.5);
+    // Inside the Sphere's shell, down its passage short of the curtain, and Merge Rock, which has no public scope yet.
+    const passage = BL.timechainModels.PASSAGE.curtain + 0.5;
+    out.passage = at({ x: T.worldX(0, passage), y: T.place.y + BL.timechainModels.SITE.bridgeFloor, z: T.worldZ(0, passage) }, 0.5);
+    const rock = D.repoIsland && D.repoIsland.arrival;
+    out.repos = rock ? at({ x: rock.x, y: rock.y, z: rock.z }, 0.5) : null;
     return out;
   })()`);
   const lands = ["sphere", "rainforest", "bifrost"];
   record("voice levels: the bridges and the air off the edge are the land between, the cave entrances the island, and none of them is a crossing",
     lands.every((land) => !r[land].home.to && r[land].home.zone === "outside" && !r[land].bridge.to && r[land].bridge.zone === "between" && !r[land].land.to && r[land].land.zone === land)
       && r.mouth.zone === "outside" && r.air.zone === "between" && !r.air.to, JSON.stringify(r));
+  // The outdoor scope (outdoor-scope.js) goes by entrances, not the panels' zone names: the lab's room reads `outside`
+  // as a zone but is a cave, and the Sphere's passage is the way into its rooms.
+  record("outdoor scope: the island, its apron, bridges, air and the three bridged lands' tops are Main Island, while a cave's room, the Sphere's passage and Merge Rock are not",
+    lands.every((land) => r[land].home.scope === "main" && r[land].bridge.scope === "main" && r[land].land.scope === "main")
+      && r.apron.scope === "main" && r.air.scope === "main" && r.mouth.scope === null && r.mouth.reason === "interior"
+      && r.passage.scope === null && r.passage.reason === "interior" && (!r.repos || r.repos.scope === null && r.repos.reason === "unscoped"), JSON.stringify(r));
   // Levels: by height off the island's edge, and down HQ's ramps, its basement's and the rainforest's descent.
   const lv = await b.evaluate(`(() => {
     const B = __ooga, D = BL.scenes.hub.debug, H = D.island.headquarters, M = __ooga.poolIsland, L = BL.poolLayout, net = BL.net.state;
-    const at = (x, y, z) => { B.pilot.navigate({ position: { x, y, z }, yaw: 0, pitch: 0.4, dist: 6 }); B.advance(0.6, 1 / 60); return { to: net.blendTo, t: +net.blendT.toFixed(2), zone: net.zone }; };
+    const at = (x, y, z) => { B.pilot.navigate({ position: { x, y, z }, yaw: 0, pitch: 0.4, dist: 6 }); B.advance(0.6, 1 / 60); return { to: net.blendTo, t: +net.blendT.toFixed(2), zone: net.zone, scope: BL.outdoorScope.state.scope, reason: BL.outdoorScope.state.reason }; };
     const air = (feet) => { const o = { to: "", t: 0 }; return D.levelOf(53.7, feet, -31, "between", o) ? { to: o.to, t: +o.t.toFixed(2) } : null; };
     const near = (samples, y) => samples.reduce((best, p) => Math.abs(p.y - y) < Math.abs(best.y - y) ? p : best);
     const world = (lx, ly, lz) => [M.worldX(lx, lz), M.place.y + ly, M.worldZ(lx, lz)], down = L.rampPoint(50), room = H.basement.rooms[0];
@@ -22840,6 +22853,9 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
       && lv.descent.to === "rainforest-under" && Math.abs(lv.descent.t - lv.depth) <= 0.05 && lv.descent.zone === "rainforest-under"
       && lv.chamber.to === "rainforest-under" && lv.chamber.t === 1 && lv.chamber.zone === "rainforest-under" && !lv.court.to && lv.court.zone === "rainforest" && !lv.lake.to,
     JSON.stringify(lv));
+  record("outdoor scope: part way down HQ's ramp or the rainforest's descent is already out of Main Island, however much surface the voice blend keeps, as are HQ, its basement and the chamber; the rainforest's top is in",
+    [lv.entrance, lv.floor, lv.stair, lv.basement, lv.backUp, lv.descent, lv.chamber].every((p) => p.scope === null && (p.reason === "interior" || p.reason === "descending"))
+      && lv.descent.reason === "descending" && lv.descent.t < 1 && lv.court.scope === "main", JSON.stringify(lv));
 } };
 // Sessions that need portlandhodl awake on the surface pin it (ooga=): by itself his state comes from the real activity snapshot, and once
 // it has aged he boots asleep in the headquarters, where jetpacks are refused and his gorilla is in bed.
@@ -27657,6 +27673,19 @@ const voiceAloneChecks = async () => {
     is(rows.joinedAlone,true,false,false)&&rows.joinSends.split(",").every(s=>s.endsWith(":false"))&&is(rows.oneOther,false,false,true)&&is(rows.aloneAgain,true,false,false)&&
     is(rows.mutedAlone,true,true,false)&&is(rows.mutedWithOther,false,true,false)&&is(rows.unmutedAlone,true,false,false)&&is(rows.twoOthers,false,false,true)&&
     rows.netMuted==="false,true,false"&&rows.emitted&&!rows.stopped.alone&&!rows.stopped.muted,JSON.stringify(rows));
+  // Ooga Chat's outdoor bridge (setOutdoor): public listeners keep an otherwise alone speaker on; a hold keeps the track
+  // off through a mute and an unmute without telling the room anything new, and lets go back to the voice as it was.
+  const out={};netMuted.length=0;
+  await V.enable();await settle();out.alone=read();
+  V.setOutdoor(false,2,new Set());out.audience=read();
+  V.setOutdoor(true,2,new Set());out.held={...read(),held:V.stats.held};
+  V.toggle();V.toggle();out.heldToggled={...read(),held:V.stats.held};
+  V.setOutdoor(false,0,new Set());out.released={...read(),held:V.stats.held};
+  V.setPeers([72],[7]);await settle();out.peer=read();
+  out.netMuted=netMuted.join(",");V.stop();
+  record("voice outdoor: public listeners keep an alone speaker's mic on, a revocation hold keeps it off through mute and unmute without telling the room, and release restores alone and peers as before",
+    is(out.alone,true,false,false)&&is(out.audience,false,false,true)&&is(out.held,false,false,false)&&out.held.held&&is(out.heldToggled,false,false,false)&&out.heldToggled.held&&
+    is(out.released,true,false,false)&&!out.released.held&&is(out.peer,false,false,true)&&out.netMuted==="false,true,false",JSON.stringify(out));
 };
 // A fresh fixture of voice.js for the failure paths: whatever the SFU refuses is named in `failing`, and timers are held.
 const voiceFailureChecks = async () => {
@@ -32518,8 +32547,197 @@ const npcActivityRefreshProof = (BL) => {
   }
 };
 
+// The outdoor scope (outdoor-scope.js, #658): which public Ooga Chat audience the visitor's body stands in. The policy
+// names every public hub zone, and an acknowledgement opens only the exact epoch it answers.
+const outdoorScopeChecks = () => {
+  const context = { window: {} };
+  runInNewContext(readFileSync(join(root, "src/js/outdoor-scope.js"), "utf8"), context);
+  const O = context.window.BL.outdoorScope, Z = context.window.BL;
+  runInNewContext(readFileSync(join(root, "src/js/zone-map.js"), "utf8"), context);
+  const hub = (zone, inside = false, descending = false) => O.hubReason(zone, inside, descending);
+  const policy = {
+    outdoors: ["outside", "between", "sphere", "rainforest", "bifrost"].every((zone) => hub(zone) === "outdoor"),
+    entrances: ["outside", "sphere", "rainforest", "bifrost"].every((zone) => hub(zone, true) === "interior"),
+    under: ["rainforest-under", "hq", "hq-basement"].every((zone) => hub(zone) === "descending") && hub("outside", false, true) === "descending"
+      && hub("sphere", false, true) === "descending" && hub("outside", true, true) === "interior",
+    unscoped: hub("repos") === "unscoped",
+    // Grouped with the island by the panels (zone-map.js), but never public by that.
+    grouped: ["lab", "bca", "factory", "arcade", "mirror", "cave-3"].every((zone) => Z.zoneMap.groupOf(zone) === "outside" && hub(zone) === "unknown"),
+    elsewhere: ["", "none", "scene-transition", "lab.hall", "bifrost.chamber", "sphere-0", "sphere-1", "dsb-outside", "block-frenzy"].every((zone) => hub(zone) === "unknown"),
+    dsb: O.dsbReason(false, false, false) === "outdoor" && O.dsbReason(true, false, false) === "transit" && O.dsbReason(false, true, false) === "entering"
+      && O.dsbReason(false, true, true) === "entering" && O.dsbReason(false, false, true) === "interior"
+  };
+  record("outdoor scope policy: only the island's outdoors, bridges and air and the Sphere's, rainforest's and Bifrost's tops are Main Island; cave and shell interiors, any descent, Merge Rock, the panels' island groupings and every other zone are not; DSB Land is outdoors only with no room, no fade and no arrival under way",
+    Object.values(policy).every(Boolean), JSON.stringify(policy));
+  // A transport's acknowledgements against moves, backtracking, resets and a lost transport.
+  const T = O.create(), S = T.state, heard = [];
+  T.subscribe(() => heard.push(S.epoch));
+  const seq = {};
+  T.report("main", "outdoor"); const first = S.epoch;
+  seq.unsupported = !T.acknowledge(first, "main") && !S.public;
+  T.setSupported(true); const supported = S.epoch;
+  seq.staleAfterSupport = !T.acknowledge(first, "main") && T.acknowledge(supported, "main") && S.public;
+  T.report(null, "interior");
+  seq.leaving = !S.public && S.scope === null;
+  T.report("main", "outdoor");
+  seq.backtrack = !T.acknowledge(supported, "main") && !S.public && S.epoch > supported;
+  const current = S.epoch;
+  seq.wrongScope = !T.acknowledge(current, "dsb") && !T.acknowledge(current, null);
+  T.reset();
+  seq.reset = !T.acknowledge(current, "main") && T.acknowledge(S.epoch, "main");
+  const before = heard.length;
+  seq.quiet = !T.report("main", "outdoor") && heard.length === before;
+  T.report(null, "descending"); const out = S.epoch; T.report(null, "interior");
+  seq.reasonOnly = S.epoch === out && S.reason === "interior";
+  T.report("main", "outdoor"); T.setSupported(false);
+  seq.lost = !S.public && !T.acknowledge(S.epoch, "main");
+  let threw = 0;
+  for (const [scope, reason] of [["main", "interior"], [null, "outdoor"], ["dsb-outside", "outdoor"], [null, "nowhere"]]) { try { T.report(scope, reason); } catch { threw++; } }
+  seq.contract = threw === 4;
+  seq.monotonic = heard.every((epoch, i) => i === 0 || epoch >= heard[i - 1]);
+  record("outdoor scope epochs: nothing is public without a transport; an acknowledgement opens only the current epoch and scope, so leaving, backtracking, a reset or a lost transport closes it and no late answer reopens it; repeats are silent and verdicts must agree with their reason",
+    Object.values(seq).every(Boolean), JSON.stringify(seq));
+};
+// The outdoor voice bridge (outdoor-voice.js, #661) against a fake room: the real scope record, a transport whose frames
+// are delivered, delayed, dropped or replayed by hand, held timers and a voice that can only be told `setOutdoor`, so any
+// attempt to acquire, join or unmute would throw. Every row is an ordering a real socket can produce.
+const outdoorVoiceChecks = () => {
+  const context = { window: {} };
+  runInNewContext(readFileSync(join(root, "src/js/outdoor-scope.js"), "utf8"), context);
+  runInNewContext(readFileSync(join(root, "src/js/outdoor-voice.js"), "utf8"), context);
+  const { outdoorScope: O, outdoorVoice: V } = context.window.BL;
+  const page = (features = true) => {
+    const log = [], timers = new Map(), watchers = new Set(), frames = new Set(), reactions = [];
+    let live = true, timerId = 0;
+    const T = { live: () => live, available: () => live && features, send: (msg) => { if (!live || !features) return false; log.push(msg); return true; },
+      watch: (fn) => { watchers.add(fn); return () => watchers.delete(fn); }, subscribe: (fn) => { frames.add(fn); return () => frames.delete(fn); } };
+    const voice = { told: [], setOutdoor(held, audience, sources) { this.told.push({ held, audience, sources: [...sources] }); log.push({ op: "voice", held, audience }); } };
+    const scope = O.create();
+    const B = V.create({ scope, transport: T, voice, validEmoji: (e) => e === "👍" || e === "🔥",
+      setTimeout: (fn, ms) => { timers.set(++timerId, { fn, ms }); return timerId; }, clearTimeout: (id) => timers.delete(id) });
+    B.subscribeReactions((r) => reactions.push(r));
+    const room = (msg) => { for (const fn of [...frames]) fn({ v: 1, ...msg }); };
+    const setLive = (on) => { live = on; if (!on) for (const fn of [...frames]) fn({ op: "lost" }); for (const fn of [...watchers]) fn(); };
+    const fire = () => { const all = [...timers]; timers.clear(); for (const [, t] of all) t.fn(); };
+    const last = (op) => log.filter((m) => m.op === op).at(-1);
+    const held = () => voice.told.at(-1)?.held === true;
+    return { B, S: scope.state, scope, log, room, setLive, fire, timers, last, held, voice, reactions, watchers, frames };
+  };
+  const rows = {};
+  // No capability: nothing is sent and nothing is ever public.
+  {
+    const p = page(false);
+    p.scope.report("main", "outdoor");
+    p.room({ op: "open", epoch: p.S.epoch, scope: "main", listeners: 5 });
+    rows.unadvertised = !p.S.public && !p.S.supported && p.log.every((m) => m.op === "voice") && p.B.stats.status === "unavailable";
+  }
+  // Admission, audience, and the instant leave: the hold and the leave land inside the report, before anything after it.
+  {
+    const p = page();
+    p.scope.report("main", "outdoor");
+    const enter = p.last("enter");
+    rows.enters = enter && enter.epoch === p.S.epoch && enter.scope === "main" && !p.S.public && p.B.stats.status === "requesting";
+    p.room({ op: "open", epoch: enter.epoch, scope: "main", listeners: 3, sources: [41, -1, 42] });
+    rows.opens = p.S.public && p.B.stats.status === "public" && p.voice.told.at(-1).audience === 3 && p.B.source(41) && p.B.source(42) && !p.B.source(-1);
+    p.room({ op: "react", epoch: enter.epoch, rid: "r1", id: 7, e: "👍" });
+    p.room({ op: "react", epoch: enter.epoch, rid: "r1", id: 7, e: "👍" });
+    p.room({ op: "react", epoch: enter.epoch, rid: "r2", id: 7, e: "👍" });
+    p.room({ op: "react", epoch: enter.epoch, rid: "r3", id: 7, e: "<script>" });
+    p.room({ op: "react", epoch: enter.epoch - 1, rid: "r4", id: 7, e: "🔥" });
+    rows.reactions = p.reactions.length === 2 && p.reactions[0].rid === "r1" && p.reactions[1].rid === "r2";
+    p.scope.report(null, "interior"); p.log.push({ op: "zone" });
+    const i = p.log.length;
+    rows.leaveFirst = p.log[i - 2].op === "voice" && p.log[i - 2].held && p.log[i - 2].audience === 0 && p.log[i - 3].op === "leave" && p.log[i - 3].epoch === enter.epoch && p.log[i - 3].reason === "interior"
+      && !p.S.public && p.B.stats.status === "closing" && !p.B.source(41) && p.reactions.at(-1) === null;
+    // The grant's answer, delayed past the leave, opens nothing; only the revocation's confirmation lets the mic back.
+    p.room({ op: "open", epoch: enter.epoch, scope: "main", listeners: 9 });
+    rows.delayedAck = !p.S.public && p.held();
+    p.room({ op: "closed", epoch: enter.epoch });
+    rows.confirmed = !p.held() && p.B.stats.status === "excluded" && p.timers.size === 0;
+  }
+  // Rapid backtracking with nothing answered: each epoch is left before the next is asked, stale opens are refused and
+  // the mic stays held until a confirmation covers the last epoch left, even once the current one is open.
+  {
+    const p = page();
+    const epochs = [];
+    for (let k = 0; k < 3; k++) { p.scope.report("main", "outdoor"); epochs.push(p.S.epoch); if (k < 2) p.scope.report(null, "descending"); }
+    const ops = p.log.filter((m) => m.op === "enter" || m.op === "leave").map((m) => `${m.op}${m.epoch}`).join(",");
+    rows.backtrackOrder = ops === `enter${epochs[0]},leave${epochs[0]},enter${epochs[1]},leave${epochs[1]},enter${epochs[2]}`;
+    p.room({ op: "open", epoch: epochs[0], scope: "main" }); p.room({ op: "open", epoch: epochs[1], scope: "main" });
+    rows.backtrackStale = !p.S.public;
+    p.room({ op: "open", epoch: epochs[2], scope: "main" });
+    rows.backtrackHeld = p.S.public && p.held() && p.B.stats.status === "closing";
+    p.room({ op: "closed", epoch: epochs[1] });
+    rows.backtrackOpen = p.S.public && !p.held() && p.B.stats.status === "public";
+  }
+  // A dropped confirmation: the leave goes again a bounded number of times, the mic stays held, and nothing keeps running.
+  {
+    const p = page();
+    p.scope.report("main", "outdoor"); const e = p.S.epoch;
+    p.room({ op: "open", epoch: e, scope: "main" });
+    p.scope.report(null, "scene");
+    for (let k = 0; k < V.RETRY_MAX + 2; k++) p.fire();
+    rows.dropped = p.log.filter((m) => m.op === "leave" && m.epoch === e).length === V.RETRY_MAX + 1 && p.held() && p.timers.size === 0;
+  }
+  // Reconnect and replacement: the lost room closes the scope at once; leaving while offline holds; the new connection
+  // (whose welcome follows the old grants' retirement) releases it and asks again on a later epoch, and an answer meant
+  // for the old connection opens nothing.
+  {
+    const p = page();
+    p.scope.report("main", "outdoor"); const old = p.S.epoch;
+    p.room({ op: "open", epoch: old, scope: "main", listeners: 2 });
+    p.setLive(false);
+    rows.lost = !p.S.public && p.voice.told.at(-1).audience === 0 && p.B.stats.status === "unavailable";
+    p.scope.report(null, "interior");
+    rows.offlineHeld = p.held() && p.B.stats.status === "closing";
+    p.scope.report("main", "outdoor");
+    const before = p.log.length;
+    p.setLive(true);
+    const enter = p.last("enter");
+    rows.reconnect = !p.held() && enter.epoch > old && p.log.length > before && !p.S.public;
+    p.room({ op: "open", epoch: old, scope: "main" });
+    rows.oldPromise = !p.S.public;
+    p.room({ op: "open", epoch: enter.epoch, scope: "main" });
+    rows.reopened = p.S.public;
+    p.setLive(false);
+    p.room({ op: "open", epoch: enter.epoch, scope: "main" });
+    rows.replaced = !p.S.public && p.B.stats.status !== "public";
+  }
+  // The room's own word: a revocation closes the grant and is not answered by asking again until the next move; a
+  // refusal holds nothing; a grant for another scope is given up.
+  {
+    const p = page();
+    p.scope.report("main", "outdoor"); const e = p.S.epoch;
+    p.room({ op: "open", epoch: e, scope: "main" });
+    const enters = p.log.filter((m) => m.op === "enter").length;
+    p.room({ op: "closed", epoch: e, reason: "lease" });
+    rows.revoked = !p.S.public && !p.held() && p.B.stats.status === "refused" && p.B.stats.refused === "lease" && p.log.filter((m) => m.op === "enter").length === enters;
+    p.scope.report(null, "interior"); p.scope.report("main", "outdoor");
+    rows.revokedMove = p.last("enter").epoch === p.S.epoch && p.S.epoch > e;
+    p.room({ op: "refused", epoch: p.S.epoch, reason: "not-eligible" });
+    p.fire();
+    rows.refused = !p.S.public && !p.held() && p.B.stats.status === "refused" && p.last("enter").epoch === p.S.epoch && p.log.filter((m) => m.op === "enter" && m.epoch === p.S.epoch).length === 1;
+    p.scope.reset();
+    const wrong = p.last("enter").epoch;
+    p.room({ op: "open", epoch: wrong, scope: "dsb" });
+    rows.wrongScope = !p.S.public && p.held() && p.last("leave").epoch === wrong;
+  }
+  // Dispose: a last leave, no transport, nothing subscribed or pending, and later frames do nothing.
+  {
+    const p = page();
+    p.scope.report("main", "outdoor"); const e = p.S.epoch;
+    p.room({ op: "open", epoch: e, scope: "main" });
+    p.B.dispose();
+    p.room({ op: "open", epoch: p.S.epoch, scope: "main" });
+    rows.dispose = p.last("leave").epoch === e && !p.S.supported && !p.S.public && !p.held() && p.watchers.size === 0 && p.frames.size === 0 && p.timers.size === 0;
+  }
+  record("outdoor voice bridge: public only on the room's capability and an open for the current request; leaving sends leave and holds the mic synchronously until the room confirms, through delayed and stale acks, rapid backtracking, dropped answers, reconnect, replacement, revocation, refusal and dispose; reactions deduplicated and cleared",
+    Object.values(rows).every(Boolean), JSON.stringify(rows));
+};
 const unitChecks = async () => {
   await connectionReportChecks();
+  outdoorScopeChecks();
+  outdoorVoiceChecks();
   const artifact = artifactUnitProof();
   record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
   const previewRange=await studioPreviewRangeProof();
@@ -35092,8 +35310,15 @@ const dsbIntegrationCheckpoint={name:"dsb integration checkpoint",why:"contract:
   const walking=await b.evaluate('({x:__ooga.dsb.avatar.root.position.x,z:__ooga.dsb.avatar.root.position.z,open:document.getElementById("sheet").dataset.open})');
   record("DSB integration: pressing outside the global sheet restores WASD and character movement with the sheet still open",resumed.focused&&resumed.keys==='[[0,1],[-1,0],[0,-1],[1,0]]'&&Math.hypot(walking.x-moved.x,walking.z-moved.z)>.01&&walking.open==="true",JSON.stringify({resumed,moved,walking}));
   const zones={"dsb-studio":"dsb-studio","maxis-club":"dsb-maxis","without-rulers":"dsb-without-rulers","proof-of-ink":"dsb-proof-of-ink","big-bitcoin":"dsb-big-bitcoin","meme-factory":"dsb-meme-factory","stackchain-magazine":"dsb-stackchain","svrn-society":"dsb-svrn"};
+  // The outdoor scope (outdoor-scope.js) leaves DSB Land at the entry's request, before the room swaps in, and returns
+  // only once the exit has finished, under a new epoch, so no earlier acknowledgement could reopen it.
+  const scopes=[];
   for(const [id,zone] of Object.entries(zones)){
-    await b.evaluate(`__ooga.dsb.interiors.review(${JSON.stringify(id)},true)`);await step();state=await read();
+    const outside=await b.evaluate('({scope:BL.outdoorScope.state.scope,epoch:BL.outdoorScope.state.epoch})');
+    const entering=await b.evaluate(`(()=>{__ooga.dsb.interiors.review(${JSON.stringify(id)},true);const S=BL.outdoorScope.state;return {scope:S.scope,reason:S.reason,epoch:S.epoch,active:!!__ooga.dsb.interiors.active,public:S.public};})()`);
+    await step();state=await read();
+    const inside=await b.evaluate('({scope:BL.outdoorScope.state.scope,reason:BL.outdoorScope.state.reason})');
+    scopes.push({id,outside,entering,inside});
     record("DSB integration: "+id+" immediately selects its voice zone",state.zone===zone&&!!state.body,JSON.stringify(state));
     if(id==="proof-of-ink"||id==="svrn-society"){
       const menu=id==="proof-of-ink"?"inkMenu":"svrnMenu",selector=id==="proof-of-ink"?"#ink-catalog":".svrn-menu";
@@ -35104,18 +35329,22 @@ const dsbIntegrationCheckpoint={name:"dsb integration checkpoint",why:"contract:
       await b.key("Escape");
       record("DSB integration: closing "+id+" restores global menu without changing saved state",await b.evaluate('!document.getElementById("sheet").closest("[inert]")&&document.getElementById("sheet").dataset.open==="true"&&BL.dsbMenuShell.count===0'));
     }
-    await b.evaluate('__ooga.dsb.interiors.request(__ooga.dsb.interiors.active.room.exit)');await step();
+    const leaving=await b.evaluate('(()=>{__ooga.dsb.interiors.request(__ooga.dsb.interiors.active.room.exit);return {scope:BL.outdoorScope.state.scope,reason:BL.outdoorScope.state.reason};})()');await step();
+    scopes.at(-1).leaving=leaving;scopes.at(-1).back=await b.evaluate('({scope:BL.outdoorScope.state.scope,epoch:BL.outdoorScope.state.epoch})');
     record("DSB integration: exit "+id+" restores exterior voice",await b.evaluate('BL.net.state.zone==="dsb-outside"&&!__ooga.dsb.interiors.active'));
   }
+  record("DSB outdoor scope: every room's entry leaves DSB Land's public scope at its request, before the room swaps in, stays out inside and through the exit's fade, and comes back outside only under a new epoch",
+    scopes.length===8&&scopes.every(r=>r.outside.scope==="dsb"&&r.entering.scope===null&&r.entering.reason==="entering"&&!r.entering.active&&!r.entering.public&&r.entering.epoch>r.outside.epoch
+      &&r.inside.scope===null&&r.inside.reason==="interior"&&r.leaving.scope===null&&r.leaving.reason==="entering"&&r.back.scope==="dsb"&&r.back.epoch>r.entering.epoch),JSON.stringify(scopes));
   await b.evaluate('__ooga.go("bifrost");__ooga.advance(.6,.3)');
-  record("DSB integration: short direct return clears DSB presence and keeps global sheet",await b.evaluate('__ooga.scene==="bifrost"&&BL.net.state.zone==="bifrost.chamber"&&!document.querySelector(".dsb-entry")&&document.getElementById("sheet").dataset.open==="true"'));
+  record("DSB integration: short direct return clears DSB presence and keeps global sheet",await b.evaluate('__ooga.scene==="bifrost"&&BL.net.state.zone==="bifrost.chamber"&&!document.querySelector(".dsb-entry")&&document.getElementById("sheet").dataset.open==="true"&&BL.outdoorScope.state.scope===null&&BL.outdoorScope.state.reason==="scene"'));
   await b.evaluate('document.getElementById("sheet-toggle").focus()');
   const returned=await resumeCanvas();
   record("DSB integration: the same canvas focus handoff restores WASD after returning to Bifrost",returned.focused&&returned.keys==='[[0,1],[-1,0],[0,-1],[1,0]]',JSON.stringify(returned));
   await b.evaluate('__ooga.go("dsb");__ooga.advance(.6,.3)');
-  record("DSB integration: outbound Bifrost journey uses special tunnel without island voice",await b.evaluate('__ooga.dsb.entrance.phase==="tunnel"&&BL.net.state.zone==="dsb-transit"&&document.getElementById("sheet").dataset.open==="true"'));
+  record("DSB integration: outbound Bifrost journey uses special tunnel without island voice",await b.evaluate('__ooga.dsb.entrance.phase==="tunnel"&&BL.net.state.zone==="dsb-transit"&&document.getElementById("sheet").dataset.open==="true"&&BL.outdoorScope.state.scope===null&&BL.outdoorScope.state.reason==="transit"'));
   await b.evaluate('__ooga.dsb.entrance.skip();__ooga.advance(.1,.1)');
-  record("DSB integration: arrival restores exterior and rectangular membrane",await b.evaluate('BL.net.state.zone==="dsb-outside"&&__ooga.dsb.gate.horizon.geometry.portalRect'));
+  record("DSB integration: arrival restores exterior and rectangular membrane",await b.evaluate('BL.net.state.zone==="dsb-outside"&&__ooga.dsb.gate.horizon.geometry.portalRect&&BL.outdoorScope.state.scope==="dsb"'));
 }};
 scene("dsb",{label:"integration checkpoint",query:"&weather=clear&time=1200",steps:[dsbIntegrationCheckpoint]});
 scene("dsb",{label:"integration checkpoint phone",query:"&weather=clear&time=1200",opts:{w:390,h:844,mobile:true},steps:[dsbIntegrationCheckpoint]});

@@ -289,6 +289,8 @@
     const next = scenes[id];
     if (!next) throw new Error(`Unknown scene "${id}"`);
     if (transition) return false;
+    // Leaving a scene leaves the public outdoor scope at once, before the fade (outdoor-scope.js); the next scene reports.
+    window.BL.outdoorScope.report(null, "scene");
     controlsHelp.close();
     transition = { next, place, out: true, t: 0, held: 0, instant, ready: true, redirect: null, failed: null, controller: new AbortController() };
     if (next.prepare) {
@@ -886,6 +888,18 @@
   // The account needs the Worker: without one /api/me finds nothing and the sheet shows no sign-in.
   const net = window.BL.net;
   const unsubscribeAccount = net.subscribe(window.BL.hud.showAccount);
+  // A new room connection or account reopens no earlier outdoor grant (outdoor-scope.js `reset`).
+  let scopeRoom = net.state.room, scopeMe = net.state.me?.id ?? 0;
+  const unsubscribeScope = net.subscribe((state) => {
+    const me = state.me?.id ?? 0;
+    if (state.room === scopeRoom && me === scopeMe) return;
+    scopeRoom = state.room;
+    scopeMe = me;
+    window.BL.outdoorScope.reset();
+  });
+  // Ooga Chat's outdoor voice bridge (outdoor-voice.js): the scope's transport, after the reset above so a reconnect's
+  // new epoch is the one it asks for. Without the room's feature it keeps the page out of every public audience.
+  const outdoorBridge = window.BL.outdoorVoice.attach();
   const unsubscribeVoice = window.BL.voice.subscribe(() => window.BL.hud.showAccount(net.state));
   // The roster's host dot and voice marks follow the room and voice, on whichever scene's roster is up.
   const unsubscribeRosterMarks = net.subscribeRoster(window.BL.hud.showVoices);
@@ -1180,6 +1194,8 @@
     unsubscribeOogatron();
     window.BL.oogatronLive.dispose();
     unsubscribeAccount();
+    unsubscribeScope();
+    outdoorBridge.dispose();
     unsubscribeVoice();
     unsubscribeRosterMarks();
     unsubscribeVoiceMarks();
