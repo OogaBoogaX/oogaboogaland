@@ -12025,6 +12025,9 @@ const hubOutdoorTravel = { name: "hub outdoor travel", why: "rule: passive Hub N
 // and the second visit may hold no more GPU records, nodes, input targets or DOM than the first.
 const trip = (id) => ({ name: `${id} round trip`, why: "contract: a scene left and entered again keeps nothing from the last visit, and takes a donation whenever one arrives", run: async (b) => {
   const away = id === "hub" ? "lab" : "hub", laps = [], beds = [];
+  // Merge Rock carves its totems in idle time, a few chunks a visit, and each finished chunk adds its pick targets;
+  // let that build finish first, so the laps compare what a visit keeps, not how far the carving got.
+  if (id === "hub") await untilPage(b, "(() => { const s = BL.scenes.hub.debug.repoIsland?.stats(); return !s || s.built === s.chunks; })()", 60000);
   for (let i = 0; i < 2; i++) {
     await tourGo(b, away);
     laps.push(await tourGo(b, id));
