@@ -17,8 +17,9 @@ export const turnCredentials = async (env) => {
   // Staging can exercise an allocation renewal in five minutes. Production defaults to two hours.
   const configured = Number(env.REALTIME_TURN_TTL);
   const ttl = Number.isInteger(configured) && configured >= 300 && configured <= TURN_TTL ? configured : TURN_TTL;
+  // "manual": a redirect is a 3xx, not `ok`, so it reads as no relay (Workers' fetch has no "error" mode).
   const res = await fetch(`${TURN_BASE}/${key}/credentials/generate-ice-servers`, {
-    method: "POST", redirect: "error", signal: AbortSignal.timeout(5000),
+    method: "POST", redirect: "manual", signal: AbortSignal.timeout(5000),
     headers: { authorization: `Bearer ${env.REALTIME_TURN_TOKEN}`, "content-type": "application/json" },
     body: JSON.stringify({ ttl }),
   });
@@ -33,7 +34,8 @@ export const turnCredentials = async (env) => {
   return null;
 };
 
-// `measured(ms, failed)`, when given, hears how long each call took and whether it failed (the inspector's counts).
+// `measured(ms, failed, status)`, when given, hears how long each call took, whether it failed and its HTTP status (0
+// for no answer: a timeout or the network), for the inspector's counts.
 export const sfuClient = (env, measured = null) => {
   if (!env.REALTIME_APP_ID || !env.REALTIME_SECRET) return null;
   const base = `${BASE}/${env.REALTIME_APP_ID}`;
@@ -41,9 +43,10 @@ export const sfuClient = (env, measured = null) => {
   // Leave time for a bounded error response before the browser's 10 s signalling deadline.
   const call = async (method, path, body, timeout = 5000) => {
     const started = Date.now();
-    let failed = true;
+    let failed = true, status = 0;
     try {
       const res = await fetch(base + path, { method, headers, signal: AbortSignal.timeout(timeout), body: body ? JSON.stringify(body) : undefined });
+      status = res.status;
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.errorCode) {
         const error = new Error(`SFU request failed: ${res.status} ${data.errorCode || ""}`.trim());
@@ -52,7 +55,7 @@ export const sfuClient = (env, measured = null) => {
       failed = false;
       return data;
     } finally {
-      if (measured) measured(Date.now() - started, failed);
+      if (measured) measured(Date.now() - started, failed, status);
     }
   };
   return {

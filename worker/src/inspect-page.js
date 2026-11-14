@@ -143,6 +143,32 @@ function gameCard(row) {
     + '<div class="bars">' + bar("sockets", st.sockets, st.maxSockets, (st.sockets || 0) + " / " + st.maxSockets)
     + bar("messages in", r.in || 0, S.limits.requestsPerSecond, num(r.in, 1) + "/s") + "</div>";
 }
+// Ooga Chat's audience (#669): one object for both zones, its counts and caps, and the media cleanup it owes.
+function audienceCard(row) {
+  var st = row.state || {}, r = row.rates || {}, pk = row.peaks || {}, z = st.zones || {}, lim = st.limits || {}, cl = st.cleanup || {}, md = st.media || {};
+  var fl = st.flags || {}, on = Object.keys(fl).filter(function (k) { return fl[k]; }).join(", ");
+  var sfuAvg = r.sfu ? (r.sfuMs || 0) / r.sfu : 0;
+  var fails = (r.sfu429 || 0) + (r.sfu5xx || 0) + (r.sfu4xx || 0) + (r.sfuTimeout || 0);
+  var body = fields([["connections", (st.connections || 0) + " / " + (lim.connections || 0)], ["switches", on || "none"],
+    ["media", "sfu " + (md.sfu || "—") + " · cleanup " + (md.cleanup || "—")], ["island panels watching", st.panels || 0],
+    ["admitted", num(r.admitGithub, 2) + "/s GitHub · " + num(r.admitX, 2) + "/s X"],
+    ["refused", num(r.refuseFull, 2) + "/s full · " + num(r.refuseIdentity, 2) + "/s too many tabs · " + num(r.refusePrincipal, 2) + "/s bad principal"],
+    ["closed", num(r.closeAuth, 2) + "/s auth · " + num(r.closeBad, 2) + "/s bad · " + num(r.closeProtocol, 2) + "/s protocol · " + num(r.closeOff, 2) + "/s switched off · " + num(r.gone, 2) + "/s by clients"],
+    ["speakers", num(r.speakerGranted, 2) + "/s granted · " + num(r.speakerRefused, 2) + "/s refused"],
+    ["reactions", num(r.reactions, 2) + "/s · " + num(r.reactionsLimited, 2) + "/s over the limit"],
+    ["resyncs", num(r.resync, 2) + "/s"], ["reports lost", row.failed || 0]]);
+  var bars = "";
+  ["main", "dsb"].forEach(function (k) {
+    var q = z[k] || {};
+    bars += bar(k + " listeners", q.listeners || 0, lim.listeners, (q.listeners || 0) + " / " + lim.listeners + " · rev " + (q.rev || 0))
+      + bar(k + " speakers", q.chatSpeakers || 0, lim.chatSpeakers, (q.chatSpeakers || 0) + " / " + lim.chatSpeakers + " cloud · " + (q.worldSpeakers || 0) + " island");
+  });
+  bars += bar("sent", r.deltaFrames || 0, S.limits.requestsPerSecond * 4, num(r.deltaFrames, 1) + " deltas/s · " + num(r.snapshots, 2) + " snapshots/s · largest " + num((pk.snapshotBytesMax || 0) / 1024, 1) + " KB")
+    + bar("sfu", sfuAvg, 5000, num(r.sfu, 2) + " calls/s · avg " + num(sfuAvg) + " ms · worst " + num(pk.sfuMsMax) + " ms · " + num(fails, 2) + " failed/s (" + num(r.sfu429, 2) + " 429)")
+    + bar("media cleanup", cl.jobs || 0, 64, (cl.jobs || 0) + " / 64 · oldest " + dur(cl.oldestMs || 0) + " · " + num(r.cleanupExpired, 3) + " given up/s")
+    + bar("media requests", r.mediaRefused || 0, Math.max((r.media || 0) + (r.mediaRefused || 0) + (r.mediaBusy || 0), 0.01), num(r.media, 2) + "/s · " + num(r.mediaBusy, 2) + " busy/s · " + num(r.mediaRefused, 2) + " refused/s");
+  return body + '<div class="bars">' + bars + "</div>";
+}
 function edgeCard(row) {
   var since = now() - 3600000, n = 0;
   for (var i = 0; i < S.events.length; i++) if (S.events[i].key === row.key && S.events[i].at >= since) n++;
@@ -155,7 +181,7 @@ function renderCards() {
   var html = "";
   for (var i = 0; i < rows.length; i++) {
     var row = rows[i], t = now();
-    var inner = row.cls === "Room" ? roomCard(row) : row.cls === "GameHost" ? gameCard(row) : edgeCard(row);
+    var inner = row.cls === "Room" ? roomCard(row) : row.cls === "GameHost" ? gameCard(row) : row.cls === "Audience" ? audienceCard(row) : edgeCard(row);
     html += '<article class="card' + (BUSY[row.status] ? " busy" : row.status === "stale" ? " stale" : "") + '"><h3><span>' + esc(label(row.key)) + "</span>" + statusPill(row) + "</h3>" + inner
       + '<div class="foot">seen ' + dur(t - row.lastSeen) + " ago · known for " + dur(t - row.firstSeen)
       + (row.wakes ? " · woke " + row.wakes + "×, last after " + dur(row.slept) + " asleep" : "") + (row.version ? " · version " + esc(row.version.slice(0, 8)) : "") + "</div></article>";

@@ -6,6 +6,10 @@ export { hockey } from "./hockey.js";
 import "../../src/js/hockey-wire.js";
 export const HOCKEY = globalThis.BL.hockeyWire;
 export { block } from "./block.js";
+import { audienceRoom } from "./room-audience.js";
+export { audienceRoom };
+import { commonsRoom } from "./room-commons.js";
+export { commonsRoom };
 // The Durable Object inspector's reporter (inspect-report.js), here so the room and game host take it with the rest.
 export { inspectReporter, INSPECT_FEATURE } from "./inspect-report.js";
 import { BACK_WHY } from "./inspect-report.js";
@@ -239,7 +243,7 @@ export const SWING_HZ = 4;
 export const SWING_BURST = 4;
 // The frames that change who sees and hears whom, each fanned out to the whole room: well over anything a page sends,
 // and low enough that one account cannot saturate the island's only room.
-export const CONTROL_FRAMES = new Set(["hub", "visible", "zone", "poker-voice", "mute", "body"]);
+export const CONTROL_FRAMES = new Set(["hub", "visible", "zone", "poker-voice", "mute", "body", "audience-view", "audience-resync"]);
 export const CONTROL_HZ = 8;
 export const CONTROL_BURST = 20;
 // Chalkboard: the EntropyLab board on the island, kept for good. One page at a time holds it, and only while its
@@ -326,6 +330,10 @@ export const parseClientMessage = (text) => {
     return Number.isInteger(msg.slot) && CABINETS.slot(msg.slot) ? { t: "cabinet", op: msg.op, id: msg.id, q: msg.q, slot: msg.slot } : null;
   }
   if (msg.t === "tess-guide") return tessQueue.parse(msg);
+  // Ooga Chat's panel (#665, room-audience.js): a zone to see, or a fresh snapshot of it.
+  if (msg.t === "audience-view" || msg.t === "audience-resync") return audienceRoom.parse(msg);
+  // Ooga Chat's outdoor handshake (#667): `enter` and `leave`, an epoch each.
+  if (msg.t === "outdoor") return audienceRoom.parseOutdoor(msg);
   if (msg.t === "hockey") return HOCKEY.parse(msg);
   if (msg.t === "bf") return BLOCK.parse(msg);
   if (msg.t === "studio") return parseStudioCommand(msg);

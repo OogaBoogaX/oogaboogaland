@@ -1,7 +1,7 @@
 // The Inspector's rules (inspector.js), pure so the tests run them in Node: what a report may hold, how a report
 // becomes an object's row and log lines, and when rows go stale or are dropped.
 
-export const CLASSES = ["Room", "GameHost", "Worker"];
+export const CLASSES = ["Room", "GameHost", "Worker", "Audience"];
 export const KINDS = ["wake-lost", "join", "full", "leave", "zone", "visible", "host", "back", "kick",
   "voice-fail", "voice-refused", "voice-restart", "limited", "dropped"];
 // Statuses that mean someone is there: a row that says so and then goes quiet this long is marked stale. The room
