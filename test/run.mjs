@@ -25430,9 +25430,9 @@ const bellState = `(() => {
     dx: drawn ? Math.abs(icon.left + icon.width / 2 - (r.left + bell.clientLeft + bell.clientWidth / 2)) : null,
     dy: drawn ? Math.abs(icon.top + icon.height / 2 - (r.top + bell.clientTop + bell.clientHeight / 2)) : null };
 })()`;
-const BELL_PANELS = "bananas,chat,players,roster";
+const BELL_PANELS = "bananas,chat,cloud,players,roster";
 // Every panel's bell shows, closed, with the drawn bell within half a pixel of its circle's middle at the pointer's size.
-const bellsCentred = (s) => s.panels === BELL_PANELS && s.shown === 4 && s.expanded === 0 && s.size === (s.coarse ? "40x40" : "26x26") && s.dx <= 0.5 && s.dy <= 0.5;
+const bellsCentred = (s) => s.panels === BELL_PANELS && s.shown === 5 && s.expanded === 0 && s.size === (s.coarse ? "40x40" : "26x26") && s.dx <= 0.5 && s.dy <= 0.5;
 // #430: joins named and counted, chat lines counted, each count cleared only by looking at its tab, joins read aloud on request.
 const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes online is named on screen and counted on the Players tab, new chat lines are counted on the Ooga Chat tab, each count clears only when its tab is looked at, and joins are read aloud only when asked", run: async (b) => {
   // The Players panel is the saved selection, so it shows as soon as the visitor is signed in, without being looked at.
@@ -25575,8 +25575,8 @@ const hubJoinAlerts = { name: "join alerts", why: "rule: a player who comes onli
       && spoken.said.join("|") === "Joins will be read aloud|Eve is online|Fay and Gus are online|Hal is online|Ivy is online|Joins will be read aloud|Lou is online"
       && spoken.muted.toast === "Dee, Eve, Fay and 3 others are online" && out.players === "" && out.chat === "" && out.stoppedWithoutNewBadge, JSON.stringify({ box, spoken, out }));
   const { pinned, out: bellsOut, back: bellsBack, again } = out.bells;
-  record("join alerts: signing out hides and closes every panel's bell, even one tapped open, and signing back in returns all four closed and centred",
-    pinned.expanded === 1 && pinned.shown === 4 && bellsOut.shown === 0 && bellsOut.expanded === 0 && out.bells.me && bellsCentred(bellsBack) && again.shown === 0, JSON.stringify(out.bells));
+  record("join alerts: signing out hides and closes every panel's bell, even one tapped open, and signing back in returns all five closed and centred",
+    pinned.expanded === 1 && pinned.shown === 5 && bellsOut.shown === 0 && bellsOut.expanded === 0 && out.bells.me && bellsCentred(bellsBack) && again.shown === 0, JSON.stringify(out.bells));
   await b.open(hubPage(src, "pos=0")); await untilReady(b);
   record("join alerts: the enabled reading choice survives reload", await b.evaluate('BL.players.stats.speakOn&&document.getElementById("players-speak-input").checked'));
 
