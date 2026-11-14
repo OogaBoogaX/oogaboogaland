@@ -1236,6 +1236,7 @@ uniform bool uCutout;
 uniform bool uSoft;
 uniform bool uBlend;
 uniform float uBright;
+uniform float uDim;
 uniform float uClipMaxY;
 ${CUTAWAY_GLSL}
 layout(location=0) out vec4 oColor;
@@ -1251,14 +1252,14 @@ void main() {
   if (uBlend) {
     if (cutaway(vWorld)) discard;
     float alpha = texel.a * vOpacity;
-    oColor = vec4(texel.rgb, alpha);
-    oBright = vec4(texel.rgb * uBright, alpha);
+    oColor = vec4(texel.rgb * uDim, alpha);
+    oBright = vec4(texel.rgb * uBright * uDim, alpha);
     return;
   }
   if (uCutout && !uSoft && texel.a < 0.5) discard;
   if (cutaway(vWorld, uCutout ? (uSoft ? texel.a : 1.0) * vOpacity : 1.0)) discard;
-  oColor = vec4(texel.rgb, 1.0);
-  oBright = vec4(texel.rgb * uBright, 1.0);
+  oColor = vec4(texel.rgb * uDim, 1.0);
+  oBright = vec4(texel.rgb * uBright * uDim, 1.0);
 }`;
   const MIRROR_VS = `#version 300 es
 precision highp float;
@@ -1876,6 +1877,7 @@ void main() {
     // PROTOTYPE: a scene at sea level can switch off the hub's dropped haze horizon (`hazeDrop: 0`).
     let skyHaze=1;
     const canvasSurfaces = new WeakMap();
+    let pictureDim = 1;
     let canvasSurfaceSerial = 0;
     const res = { programs: {}, fbo: null, shadow: null, bloom: null, quadVao: null, matrixTexture: null };
     const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, width: 0, height: 0, renderWidth: 0, renderHeight: 0, capturedWidth: 0, capturedHeight: 0, portal: false, reveal: 0, frontFacing: false, walkThrough: false, captureValid: false, readable: false, bodyTex: null, bodyState: null, bodyVersion: -1, shards: 0, query: null, queryPending: false, occluded: false, frame: 0, cadence: 1 };
@@ -1979,7 +1981,7 @@ void main() {
       const matrixSampling = gl.getExtension("OES_shader_multisample_interpolation");
       const meshFragment = matrixSampling ? ORDINARY_MESH_FS.replace("#version 300 es", "#version 300 es\n#extension GL_OES_shader_multisample_interpolation : require\n#define MATRIX_SAMPLE_INTERPOLATION") : ORDINARY_MESH_FS;
       res.programs = {
-        image: compile(IMAGE_VS, IMAGE_FS, ["uViewProj", "uRect", "uImage", "uReady", "uCutout", "uSoft", "uBlend", "uBright", "uClipMaxY"]),
+        image: compile(IMAGE_VS, IMAGE_FS, ["uViewProj", "uRect", "uImage", "uReady", "uCutout", "uSoft", "uBlend", "uBright", "uDim", "uClipMaxY"]),
         mesh: compile(ORDINARY_MESH_VS, meshFragment, MESH_UNIFORMS),
         depth: compile(ORDINARY_MESH_VS, DEPTH_MESH_FS, MESH_UNIFORMS),
         plain: compile(ORDINARY_MESH_VS, meshFragment.replace("#version 300 es", "#version 300 es\n#define PLAIN"), MESH_UNIFORMS),
@@ -3518,6 +3520,8 @@ void main() {
       gl.uniform1i(p.u.uBlend, blendPass ? 1 : 0);
       if (blendPass) gl.blendFunc(gl.SRC_ALPHA, surface.blend === "add" ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);
       gl.uniform1f(p.u.uBright, surface.bright || 0);
+      // Pictures, all but light added to the view, as dim as the scene asks (`pictureDim`).
+      gl.uniform1f(p.u.uDim, surface.blend === "add" ? 1 : pictureDim);
       applyCutaway(p, rec.geometry);
       gl.uniform1f(p.u.uClipMaxY, Math.min(rec.geometry.cutawayPreserve ? 1e6 : cutawayMaxY, rec.geometry.clipMaxY ?? 1e6));
       gl.bindVertexArray(rec.mesh.vao);
@@ -4228,6 +4232,7 @@ void main() {
       if (lost && ++lostFrames > LOST_FRAMES && !failure) failure = new Error("WebGL context lost and not restored");
       if (lost || !pollPrograms()) return false;
       collectNear = camera.near;
+      pictureDim = opts.pictureDim === undefined ? 1 : opts.pictureDim;
       // The scene's ancestor flags (matrix modes, camera/cutaway hides) were settled by the scene's update.
       memoFrame++;
       rigMode = !!meshRigs && !!rigPrograms && !rigFailure;

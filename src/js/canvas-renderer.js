@@ -1906,6 +1906,7 @@
           (imageVertices[10] - imageVertices[0]) * scale / imageHeight,
           -(imageVertices[11] - imageVertices[1]) * scale / imageHeight, x, y);
         ctx.drawImage(image, 0, 0);
+        dimPicture(surface);
         ctx.restore();
         return;
       }
@@ -1914,10 +1915,23 @@
         drawImageTriangle(image, imageVertices, a, b, d, 0, 0, width, height);
         drawImageTriangle(image, imageVertices, a, d, c, 0, 0, width, height);
       }
+      dimPicture(surface);
       ctx.restore();
     };
+    // A picture, all but light added to the view, as dim as the scene asks (`pictureDim`): darkened inside its clip.
+    const dimPicture = (surface) => {
+      if (pictureDim >= 1 || surface.blend === "add") return;
+      const alpha = ctx.globalAlpha;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = alpha * (1 - pictureDim);
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      ctx.globalAlpha = alpha;
+    };
+    let pictureDim = 1;
     const render = (root, camera, opts = {}) => {
       canvasShades.frame();
+      pictureDim = opts.pictureDim === undefined ? 1 : Math.max(0, Math.min(1, opts.pictureDim));
       cutawayMaxY = opts.cutawayMaxY < 1e6 ? opts.cutawayMaxY : Infinity;
       cutawayFade = Math.max(0, Math.min(1, Number.isFinite(opts.cutawayFade) ? opts.cutawayFade : opts.birdsEyeCutaway ? 1 : 0));
       cutawayCloudY = opts.cutawayCloudY || 0;
