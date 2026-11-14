@@ -9,7 +9,7 @@
 // keepOff, tops)` picks the spot with the hub's own queries (zipline.js `survey`'s `support`, `clear`, `landable`),
 // all read-only: of `tops`, nearest Billy's spot (`NEAR`) first and only crowns at least `TOP_MIN` high, the first whose
 // deck and post stand clear; then the nearest `DROPS` place round the ramp's head that is level, checked ground, keeps
-// `keepOff` (the totems: x, z and a gap) that far from the line, and whose whole ride the survey finds clear. It runs
+// `keepOff` (x, z and a gap each; the hub passes none since the totems moved to Merge Rock) that far from the line, and whose whole ride the survey finds clear. It runs
 // after the Mempool island's and the home island's seeded scatter and claims nothing, so not a plant moves for it;
 // null when no spot fits.
 (() => {
