@@ -25033,6 +25033,73 @@ const hangarShuffleSafety = { name: "hangar shuffle safety", why: "rule: the Jet
 } };
 scene("hangar", { query: "character=portlandhodl", steps: [hangarWalking, hangarDoor, hangarFire, hangarAnomalies, hangarShuffleSafety, trip("hangar")] });
 scene("factory", { label: "canvas2d", query: "canvas2d=1&character=portlandhodl", steps: [factoryCanvas, factoryGreeter] });
+const caveDirectory = (mobile = false) => ({ name: "cave directory", why: "rule: browsing connected projects loads no external code, holds movement, closes safely and disposes on travel; external travel sends no OBL payload or referrer", run: async (b) => {
+  const click = async selector => {
+    await b.evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: "center", behavior: "instant" })`);
+    await b.sleep(80);
+    const point = await b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)}), r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    if (mobile) { await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] }); await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); }
+    else await b.click(point.x, point.y);
+  };
+  await click("#cave-directory-button");
+  if (!await untilPage(b, 'document.getElementById("cave-directory").open', 3000)) throw Error("Cave directory did not open after its pointer activation");
+  const shown = await b.evaluate(`(() => {
+    const d = document.getElementById("cave-directory"), a = d.querySelector("[data-external-land]"), r = d.getBoundingClientRect(), p = __ooga.pilot.player.root.position;
+    window.__directoryStart = { x:p.x, y:p.y, z:p.z };
+    return { open:d.open, modal:d.matches(":modal"), count:document.querySelectorAll("#cave-directory").length, href:a.href, referrer:a.referrerPolicy, rel:a.rel, target:a.target,
+      fit:r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight, overflow:d.scrollWidth<=d.clientWidth,
+      focus:d.contains(document.activeElement), integrated:d.textContent.includes("Mainland caves") && d.textContent.includes("DSB Land"), requests:performance.getEntriesByType("resource").filter(r=>r.name.startsWith("https://entropylab.online/")).length };
+  })()`);
+  await b.key("w");
+  const held = await b.evaluate(`(() => { __ooga.advance(.5,1/60); const p=__ooga.pilot.player.root.position, a=__directoryStart; return Math.hypot(p.x-a.x,p.z-a.z)<.01; })()`);
+  await b.key("Escape");
+  await b.sleep(50);
+  const cancelled = await b.evaluate(`!document.getElementById("cave-directory").open && document.activeElement.id === "cave-directory-button" && __ooga.scene === "bifrost"`);
+  await click("#cave-directory-button");
+  // A native close event is queued: reopening before it arrives must not close the new view.
+  const repeated = await b.evaluate(`(() => { const d=document.getElementById("cave-directory"); d.querySelector(".modal-close").click(); document.getElementById("cave-directory-button").click(); document.getElementById("cave-directory-button").click(); return d.open; })()`);
+  await b.sleep(50);
+  const staysOpen = await b.evaluate(`document.getElementById("cave-directory").open && document.querySelectorAll("#cave-directory").length===1`);
+  record("cave directory: modal keyboard/touch entry, bounded layout and safe links, movement hold, Escape focus and immediate reopen", shown.open && shown.modal && shown.count===1 && shown.href==="https://entropylab.online/" && shown.referrer==="no-referrer" && shown.rel.includes("noopener") && !shown.target && shown.fit && shown.overflow && shown.focus && shown.integrated && shown.requests===0 && held && cancelled && repeated && staysOpen, JSON.stringify({shown,held,cancelled,repeated,staysOpen}));
+  mkdirSync(join(root,"untracked"),{recursive:true});
+  await b.screenshot(join(root,"untracked",mobile?"cave-directory-phone.png":"cave-directory-desktop.png"));
+  await tourGo(b,"lab");
+  const disposed=await b.evaluate(`!document.getElementById("cave-directory") && document.getElementById("cave-directory-button").getAttribute("aria-expanded")==="false"`);
+  await tourGo(b,"bifrost");
+  await click("#cave-directory-button");
+  await untilPage(b, 'document.getElementById("cave-directory").open', 3000);
+  const restored=await b.evaluate(`document.querySelectorAll("#cave-directory").length===1 && document.getElementById("cave-directory").open`);
+  record("cave directory: scene departure removes the modal and the next visit owns exactly one working directory",disposed&&restored,JSON.stringify({disposed,restored}));
+  if (!mobile) {
+    let request = null, interceptionError = null;
+    b.on("Fetch.requestPaused", event => {
+      request = event.request;
+      b.send("Fetch.fulfillRequest",{requestId:event.requestId,responseCode:200,responseHeaders:[{name:"Content-Type",value:"text/html"}],body:Buffer.from('<!doctype html><title>Local external-land fixture</title><p id="land-fixture">Independent document</p>').toString("base64")}).catch(error=>{interceptionError=String(error);});
+    });
+    await b.send("Fetch.enable",{patterns:[{urlPattern:"https://entropylab.online/*",resourceType:"Document",requestStage:"Request"}]});
+    await b.evaluate(`(() => { let voice=0,net=0; const v=BL.voice.dispose,n=BL.net.dispose; BL.voice.dispose=()=>{voice++;v();}; BL.net.dispose=()=>{net++;n();}; addEventListener("pagehide",e=>sessionStorage.setItem("cave-directory-departure",JSON.stringify({persisted:e.persisted,voice,net})),{once:true}); })()`);
+    await click("[data-external-land='entropylab']");
+    for(let n=0;n<100;n++){if(await b.evaluate(`!!document.getElementById("land-fixture")`).catch(()=>false))break;await b.sleep(50);}
+    const away=await b.evaluate(`({fixture:!!document.getElementById("land-fixture"),url:location.href,referrer:document.referrer,obl:!!window.BL})`);
+    await b.evaluate("history.back()"); await b.sleep(200); await untilReady(b);
+    const back=await b.evaluate(`({scene:__ooga.scene,departure:JSON.parse(sessionStorage.getItem("cave-directory-departure")),count:document.querySelectorAll("#cave-directory").length})`);
+    await b.send("Fetch.disable"); b.on("Fetch.requestPaused",null);
+    record("cave directory: same-tab cross-origin navigation carries only the registered URL, suppresses referrer, leaves the old runtime and supports browser Back",!interceptionError&&request?.url==="https://entropylab.online/"&&!Object.keys(request.headers).some(k=>k.toLowerCase()==="referer")&&away.fixture&&!away.referrer&&!away.obl&&back.scene==="bifrost"&&back.count===1&&back.departure&&(back.departure.persisted||back.departure.voice===1&&back.departure.net===1),JSON.stringify({away,back,interceptionError}));
+  }
+  if (!mobile) {
+    // Visit in OBL on a hub cave hands the Ooga back to the island at that cave's mouth, not at the bridge.
+    await click("#cave-directory-button");
+    await untilPage(b, 'document.getElementById("cave-directory").open', 3000);
+    await b.evaluate(`[...document.querySelectorAll("#cave-directory li")].find(li => li.querySelector("strong")?.textContent === "EntropyLab").querySelector("button").click()`);
+    await untilPage(b, '__ooga.scene === "hub" && !__ooga.transitioning', 20000);
+    const arrival = await b.evaluate(`(() => { const B = __ooga, p = B.pilot.player.root.position, m = B.island.mouths.find(m => m.id === "c11");
+      return { scene: B.scene, path: location.pathname + location.hash, lab: Math.round(Math.hypot(p.x - m.x, p.z - m.z) * 10) / 10 }; })()`);
+    record("cave directory: Visit in OBL on a hub cave brings the driven Ooga back to the island at that cave's mouth, not the bridge", arrival.scene === "hub" && arrival.path.endsWith("/entropylab") && arrival.lab < 12, JSON.stringify(arrival));
+  }
+  await b.evaluate(`document.getElementById("cave-directory")?.close()`);
+} });
+scene("bifrost", { label: "cave directory", query: "solo=1&character=portlandhodl", steps: [caveDirectory()] });
+scene("bifrost", { label: "cave directory phone", query: "solo=1&character=portlandhodl", opts: PHONE_SIZE, steps: [caveDirectory(true)] });
 scene("bifrost", { url: hubPage(src, "solo=1&character=portlandhodl"), steps: [bifrostEntrance, bifrostWalking, bifrostExit, trip("bifrost")] });
 scene("bifrost", { label: "dsb round trip", query: "character=portlandhodl", steps: [bifrostDsb] });
 scene("bifrost", { label: "poker round trip", query: "character=portlandhodl", steps: [bifrostPoker] });
@@ -32518,7 +32585,61 @@ const npcActivityRefreshProof = (BL) => {
   }
 };
 
+const caveDirectoryProof = () => {
+  const context = { window: {}, URL };
+  runInNewContext(readFileSync(join(root, "src/js/cave-directory.js"), "utf8"), context);
+  const api = context.window.BL.caveDirectory, data = api.registry, row = data.entries[0];
+  const invalid = [null, { ...data, schema: 2 }, { ...data, extra: true }, { ...data, entries: [row, row] },
+    { ...data, entries: Array(65).fill(row) }, ...[
+      { id: "../land" }, { name: "<script>".repeat(10) }, { description: "\nsecret" }, { repository: "owner/repo/tree/main" },
+      { status: "enabled" }, { extra: true }, { url: "http://example.invalid/" }, { url: "javascript:alert(1)" },
+      { url: "https://user:secret@example.invalid/" }, { url: "https://example.invalid/?token=secret" },
+      { url: "https://example.invalid/#identity" }, { url: "https://example.invalid:8443/" }, { url: " https://example.invalid/" }
+    ].map(change => ({ ...data, entries: [{ ...row, ...change }] }))];
+  const rejected = invalid.every(value => { try { api.validate(value); return false; } catch { return true; } });
+  const tasks = [], nodes = [], holds = [];
+  const document = { activeElement:null, pointerLockElement:null, querySelector:()=>nodes.find(node=>node.tag==="dialog"&&node.open)||null };
+  const make = tag => {
+    const node = { tag, children:[], dataset:{}, attributes:{}, listeners:{}, open:false, isConnected:true,
+      append(child){this.children.push(child);child.parent=this;}, replaceChildren(){this.children=[];},
+      setAttribute(k,v){this.attributes[k]=v;}, focus(){document.activeElement=this;},
+      addEventListener(k,fn,options){(this.listeners[k]||=[]).push(fn);options?.signal?.addEventListener("abort",()=>this.listeners[k]=this.listeners[k].filter(f=>f!==fn),{once:true});},
+      emit(k,event={}){for(const fn of this.listeners[k]||[])fn(event);}, showModal(){this.open=true;},
+      close(){if(!this.open)return;this.open=false;tasks.push(()=>this.emit("close"));},
+      remove(){this.isConnected=false;this.parent.children=this.parent.children.filter(c=>c!==this);} };
+    nodes.push(node);return node;
+  };
+  document.createElement=make;document.body=make("body");
+  Object.assign(context,{document,AbortController});
+  Object.assign(context.window.BL,{controls:{resetAll(){}},caves:{slots:[]},routes:{list:[]},bifrostModels:{WINDOWS:[]},scenes:{}});
+  const button=make("button"), ui=api.create({button,hold:on=>holds.push(on),travel:()=>true});
+  const first=ui.open(),duplicate=ui.open(),dialog=document.body.children[0];
+  let prevented=false;
+  dialog.emit("keydown",{key:"Escape",preventDefault(){prevented=true;},stopPropagation(){}});
+  const escape=prevented&&!dialog.open&&!ui.opened&&document.activeElement===button;
+  const reopen=ui.open();while(tasks.length)tasks.shift()();
+  const staleClose=dialog.open&&ui.opened;
+  ui.dispose();ui.dispose();while(tasks.length)tasks.shift()();
+  const lifecycle=first&&!duplicate&&escape&&reopen&&staleClose&&!document.body.children.length&&!ui.open()&&holds.join(",")==="true,false,true,false";
+  // Visit in OBL hands each mainland row's own hub place to travel: the lab and B.C.A. through their routes, the
+  // mirror (no route of its own) by its navigation name, so none falls back to a bare hub arrival at the bridge.
+  Object.assign(context.window.BL,{caves:{slots:[{name:"EntropyLab",status:"open",scene:"lab"},{name:"B.C.A.",status:"open",scene:null,place:"bca"},
+    {name:"Ooga Booga Land",status:"mirror",scene:null},{name:"Lightning Factory",status:"open",scene:"factory"}]},
+    routes:{list:[{scene:"hub",place:"lab"},{scene:"hub",place:"bca"},{scene:"factory",place:null}]},scenes:{lab:{},factory:{}}});
+  const trips=[], placesUi=api.create({button:make("button"),hold:()=>{},travel:(id,place)=>{trips.push(`${id}:${place}`);return false;}});
+  placesUi.open();
+  for(const node of nodes.filter(node=>node.tag==="button"&&node.textContent==="Visit in OBL"&&node.isConnected))node.emit("click");
+  const mainlandPlaces=trips.slice(0,4).join(",")==="hub:lab,hub:bca,hub:mirror,factory:null";
+  placesUi.dispose();while(tasks.length)tasks.shift()();
+  const empty = api.validate({ schema: 1, entries: [] }).entries.length === 0;
+  const statuses = ["open", "unavailable", "retired"].every(status => api.validate({ schema: 1, entries: [{ ...row, status }] }).entries[0].status === status);
+  return { rejected, empty, statuses, lifecycle, mainlandPlaces, existingDestination: row.url === "https://entropylab.online/" && row.repository === "OogaBoogaX/entropylab",
+    immutable: Object.isFrozen(api) && Object.isFrozen(data) && Object.isFrozen(data.entries) && data.entries.every(Object.isFrozen) };
+};
+
 const unitChecks = async () => {
+  const caves = caveDirectoryProof();
+  record("cave directory: bounded immutable reviewed destinations reject duplicate identities, unknown schemas and credentials or payload-bearing URLs", Object.values(caves).every(Boolean), JSON.stringify(caves));
   await connectionReportChecks();
   const artifact = artifactUnitProof();
   record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));

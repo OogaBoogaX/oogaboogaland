@@ -3,6 +3,7 @@
 // which scripts/site.mjs moves out of the hosted pages into one same-origin file that loads only when needed.
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
+import { runInNewContext } from "node:vm";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +12,9 @@ import { writeCharacters } from "./characters.mjs";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (path) => readFileSync(join(root, "src", path), "utf8");
 const sha256 = (text) => `'sha256-${createHash("sha256").update(text, "utf8").digest("base64")}'`;
+
+// Refuse an invalid destination registry before it can be staged or published. No page or network is needed.
+runInNewContext(read("js/cave-directory.js"), { window: {}, URL });
 
 writeCharacters();
 let html = read("index.html");

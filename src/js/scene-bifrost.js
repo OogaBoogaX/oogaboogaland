@@ -139,7 +139,7 @@
   let pictureEpoch = 0, pictureJob = 0, pictureIdle = false, pictureLoading = false, pictureIndex = 0;
   // DSB Land's geography (about 350 ms whole) is built for its picture in small slices during play, not in one task.
   const PLAY_SLICE_MS = 8;
-  let preparedDsb = null, pictureAbort = null, pictureShot = null;
+  let preparedDsb = null, pictureAbort = null, pictureShot = null, directory = null;
   const NO_ACTORS = [];
   // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
   // room every frame, so signed-in players in the chamber hear each other (voice needs a driven Ooga).
@@ -686,7 +686,8 @@
     };
     hud.onPreset(presetView);
     hud.onAction((action, value) => {
-      if (action === "leave") leaveChamber();
+      if (action === "cave-directory" && !leaving) directory.open();
+      else if (action === "leave") leaveChamber();
       else if (action === "reset-view") pilot.resetCamera();
       else if (action === "mode-preset") presetView(value);
       else if (!leaving && action.startsWith("mode-")) pilot.modeAction(action);
@@ -735,6 +736,16 @@
     footsteps = BL.footsteps.create();
     lightUp(scene);
     leaving = false;
+    directory = BL.caveDirectory.create({
+      button: document.getElementById("cave-directory-button"),
+      hold: on => { pilot.controls.reset(); pilot.setMenuOpen(on, false); },
+      travel: (id, place) => {
+        if (leaving) return false;
+        world.pilot = pilot.player ? pilot.player.traits.name : null;
+        leaving = go(id, place);
+        return leaving;
+      }
+    });
 
     bifrostScene.root = root;
     bifrostScene.camera = camera;
@@ -1035,6 +1046,7 @@
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
   const leave = () => {
+    directory.dispose(); directory = null;
     stopPictures();
     // Left by Back or Forward rather than by a way out of its own, the chamber hands the Ooga on, so the next scene
     // plays the same one; the way out to the island and a window have handed theirs over already.
