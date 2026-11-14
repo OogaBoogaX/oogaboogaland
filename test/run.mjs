@@ -7415,7 +7415,8 @@ const gameRulesChecks = async () => {
     const rifle = S.MAPS.map((map) => {
       const s = S.create({ team: "blue", seed: 4, size: 2, map, prep: 0 }), a = s.actors[0], b = s.actors[2], armed = s.actors.every((q) => q.sniper === 1);
       for (const q of s.actors) { q.bot = false; q.guard = 0; q.x = 200; q.z = 200; } s.gorillas.length = 0;
-      a.x = b.x = 8; a.y = b.y = 0; a.z = 9; b.z = -9;
+      // Down the first lane across the middle with nothing standing in it: a map may put a tomb or a wall on any one line.
+      a.x = b.x = [8, 12, 4, 16, 0].find((x) => S.clearLine(x, 9, x, -9, 0.4)); a.y = b.y = 0; a.z = 9; b.z = -9;
       const off = a.y === 0 && S.TEAMS.every((k) => { const [x0, x1, z0, z1] = S.ARENA.towers[k]; return !(a.x > x0 && a.x < x1 && a.z > z0 && a.z < z1); }), fired = S.fire(s, 0, Math.PI, 0, "sniper"), shot = s.shots.some((x) => x.live && x.kind === "sniper" && x.owner === 0);
       const soon = !S.fire(s, 0, Math.PI, 0, "sniper");
       for (let n = 0; n < 120 && b.splat <= 0; n++) { for (const q of s.actors) q.guard = 0; S.tick(s, S.CONFIG.STEP, still()); }
@@ -8155,6 +8156,77 @@ const gameRulesChecks = async () => {
       record("block frenzy jungle: an Ooga coming down on a tree lands on its leaves' top, one under the leaves stands on the ground, and the top stops nobody rising through it",
         landed.grounded && Math.abs(landed.y - landed.top) < 0.05 && under < 0.05 && open, JSON.stringify({ landed, under, open, tree: { x: tree.x, z: tree.z, y: tree.y, r: tree.r } }));
     }
+    {
+      // Gorilla Jungle's treetop walkway and temples. The walkway is level from one tree house to the other by way of
+      // the Great Tree; a net reaches it; a gorilla takes an Ooga on the ground under it and leaves one up on it alone;
+      // the temple gate is walked through under the stone head, which is somewhere to stand; and the map keeps the
+      // other maps' size, its four gorillas and a mirrored layout.
+      const J = S.ARENAS.jungle, F = S.ARENAS.fort, idle = { x: 0, z: 0, sprint: 0, jump: 0, jet: 0, crouch: 0, face: 0 }, out = {};
+      const make = () => { const r = S.create({ seed: 5, prep: 0, map: "jungle" }); for (const o of r.actors) o.bot = false; Object.assign(r.weather, { left: 1e9 }); for (const g of r.gorillas) { g.x = g.wx = g.hx = 100; g.z = g.wz = g.hz = 100; g.state = 3; g.t = 1e9; } for (const k of r.crates) k.live = false; for (const t of r.traps) t.dark = 1e9; return r; };
+      const go = (r, secs, input = idle, until = () => false) => { for (let t = 0; t < secs && !until(); t += S.CONFIG.STEP) { S.tick(r, S.CONFIG.STEP, input); r.eventCount = 0; } };
+      const high = J.caches[0][1];
+      S.create({ map: "jungle" });
+      out.size = J.fieldW === F.fieldW && J.fieldL === F.fieldL && J.W === F.W && J.L === F.L && J.gorillas.length === 4 && J.stands.blue.z === F.stands.blue.z;
+      out.mirrored = J.BLOCKS.every((b) => J.rocks.has(b) || J.BLOCKS.some((c) => c[0] === -b[1] && c[1] === -b[0] && c[2] === -b[3] && c[3] === -b[2] && c[4] === b[4] && c[5] === b[5]))
+        && J.ledges.every((b) => J.ledges.some((c) => c[0] === -b[1] && c[2] === -b[3] && c[4] === b[4]));
+      // Level all the way: down the centre line, and round the Great Tree's trunk.
+      let level = true;
+      for (let z = -16.5; z <= 16.5; z += 0.5) if (Math.abs(z) > 1.2) level &&= S.groundAt(0, z, high + 0.2) === high;
+      for (let z = -3; z <= 3; z += 0.5) for (const x of [-2, 2]) level &&= S.groundAt(x, z, high + 0.2) === high;
+      out.level = level;
+      // On foot from blue's tree house along the bridge onto the Great Tree's platform, never leaving the planks.
+      {
+        const r = make(), a = r.actors[0];
+        Object.assign(a, { x: 0, z: 16, y: high, vx: 0, vy: 0, vz: 0, grounded: true });
+        let fell = false;
+        go(r, 4, { ...idle, z: -1 }, () => { if (a.y < high - 0.01) fell = true; return fell || a.z < 2; });
+        out.bridge = !fell && a.z < 2 && a.y === high;
+      }
+      // Up a net from the ground, pushing into it.
+      {
+        const r = make(), a = r.actors[0], n = J.nets[0], [x0, x1, z0, z1] = n.zone;
+        Object.assign(a, { x: (x0 + x1) / 2 - n.dx * 0.6, z: (z0 + z1) / 2, y: 0, vx: 0, vy: 0, vz: 0, grounded: true });
+        go(r, 3, { ...idle, x: n.dx, z: n.dz }, () => a.grounded && a.y === high);
+        out.net = a.y === high && Math.abs(a.x) < 3.5;
+      }
+      // The gorillas' ground: one beside the bridge leaves an Ooga up on it alone, and takes the same Ooga on the grass.
+      {
+        const r = make(), a = r.actors[0], g = r.gorillas[0];
+        Object.assign(g, { x: 1.6, z: 7, wx: 1.6, wz: 7, hx: 1.6, hz: 7, state: 0, t: 0 });
+        Object.assign(a, { x: 0, z: 7, y: high, vx: 0, vy: 0, vz: 0, grounded: true });
+        go(r, 3);
+        const safe = !a.grabbed && a.y === high;
+        Object.assign(a, { x: 0, z: 7, y: 0, guard: 0, grounded: true });
+        go(r, 3, idle, () => a.grabbed);
+        out.gorillas = safe && !!a.grabbed;
+      }
+      // The temple gate: open under the stone head at walking and jumping height, the pillars solid either side, the
+      // head solid over it and stood on; an Ooga walks in through it on either side.
+      S.create({ map: "jungle" });
+      out.gate = [1, -1].every((s) => [0.2, 1, 1.7, 3.2].every((y) => [-2, 0, 2].every((x) => !S.solidAt(x, y, s * 23.5))) && S.solidAt(3.1, 3, s * 23.5) && S.solidAt(-3.1, 3, s * 23.5) && S.solidAt(0, 4.2, s * 23.5) && S.groundAt(0, s * 23.5, 6) === 5);
+      {
+        const r = make(), a = r.actors[0];
+        Object.assign(a, { x: 0, z: 20, y: 0, vx: 0, vy: 0, vz: 0, grounded: true });
+        go(r, 1.2, { ...idle, z: 1 });
+        out.walkIn = a.z > 24.5 && a.y === 0;
+      }
+      // The models draw the nets and puddles into the map's one mesh; the map says so, and names each of its own boxes.
+      out.kinds = J.drawn.nets && J.drawn.puddles && J.BLOCKS.filter((b) => J.kinds.has(b)).length >= 60 && J.ledges.length === J.decor.filter((d) => d.kind === "canopy").length && J.ledges.length <= 15;
+      record("block frenzy jungle walkway: the treetop walkway is level from tree house to Great Tree to tree house and walked without a fall, a net climbs to it, a gorilla takes an Ooga on the ground beside it and leaves one up on it alone, the temple gate is open under the stone head, and the map keeps the other maps' size, four gorillas and its mirrored halves", Object.values(out).every(Boolean), JSON.stringify(out));
+      // Raids from every start, on both sides: the two spawns, the centre lane, either side line, both flanks, beside
+      // the rivals' temple, the raider's own corner and its own alley. A raider bot takes the rivals' block within 30 s.
+      // The raider has a hook in hand, so none lying in a cave round the field calls it aside.
+      const raids = {};
+      for (const [team, s] of [["blue", 1], ["red", -1]]) for (const [sx, sz] of [[-1.2, -26], [1.2, -26], [0, -8], [-18, 0], [18, 0], [-16, -12], [16, 12], [12, -30], [-12, 30], [0, -36]]) {
+        const r = make(), a = r.actors.find((o) => o.team !== team);
+        for (const pw of r.powers) pw.dark = 1e9;
+        Object.assign(a, { bot: true, role: "attack", x: s * sx, z: s * sz, y: 0, hook: 1 });
+        let t = 0;
+        for (; t < 30 && a.carrying !== team; t += S.CONFIG.STEP) { S.tick(r, S.CONFIG.STEP, idle); r.eventCount = 0; }
+        raids[`${team}@${s * sx},${s * sz}`] = a.carrying === team ? +t.toFixed(1) : `fail at ${a.x.toFixed(1)},${a.z.toFixed(1)}`;
+      }
+      record("block frenzy jungle raids: from the spawns, the centre lane, the side lines, the flanks, beside the temple and the far alley, on both sides, a raider bot takes the rivals' block within 30 s", Object.values(raids).every((v) => typeof v === "number"), JSON.stringify(raids));
+    }
     record("block frenzy expert: after losing a crate target, wait three seconds, set it down and rescue the dropped home block",
       lost.lifted && waits && !lost.bot.holding && lost.r.flags.blue.state === "home",
       JSON.stringify({ lifted: lost.lifted, waits, holding: lost.bot.holding, flag: lost.r.flags.blue.state }));
@@ -8503,7 +8575,7 @@ const gameRulesChecks = async () => {
         rows.chuteHook = S.grapple(cut.m, 0, 0, 0.1) && cut.u.flight === 0 && cut.u.hk === 1;
         const cm = fresh("jungle"), cu = cm.actors[0];
         for (const k of cm.crates) k.live = false;
-        Object.assign(cu, { hook: 1, x: 5, z: 10, y: 0 });
+        Object.assign(cu, { hook: 1, x: 10, z: 8, y: 0 });
         S.grapple(cm, 0, 0, Math.atan2(5.2, 7));
         run(cm, 0.6, still, () => cu.hk === 2);
         rows.canopy = cu.hk === 2;
@@ -12875,12 +12947,14 @@ const blockPoses = { name: "block modelled poses", why: "regression: old straigh
 } };
 const blockThrowScore = { name: "block throw scoring controls", why: "rule: keyboard and touch throws must score under the selected rule and show the correct throw feedback on the new Oogas", run: async b => {
   const rows = [], touch = await b.evaluate('matchMedia("(pointer: coarse)").matches');
+  // A focused run may reach this check before blockStart dismisses the title card.
+  if (await b.evaluate(`!document.querySelector('[data-intro="block"]').hidden`)) await b.key(" ");
   await b.evaluate('window.__throwUpdate = BL.scenes.block.update; BL.scenes.block.update = () => {}');
   try {
     for (const name of ["w-s-bitcoin", "tiffanyvarty", "portlandhodl"]) for (const mode of ["home", "away", "any"]) {
       const setup = await b.evaluate(`(() => {
         const D = __ooga.block, S = BL.blockSim;
-        D.showBoard(); D.selection.map = "town"; D.selection.rule = "home"; D.chooseTeam(${JSON.stringify(name === "tiffanyvarty" ? "red" : "blue")}); D.chooseOoga(${JSON.stringify(name)}); D.chooseOoga(${JSON.stringify(name)}); D.start(583);
+        D.showBoard(); document.querySelector('#block-board [data-map="town"]').click(); D.selection.rule = "home"; D.chooseTeam(${JSON.stringify(name === "tiffanyvarty" ? "red" : "blue")}); D.chooseOoga(${JSON.stringify(name)}); D.chooseOoga(${JSON.stringify(name)}); D.start(583);
         const sim = D.sim, a = sim.actors[0], stand = S.ARENA.stands[a.team], sign = a.team === "blue" ? 1 : -1, other = S.other(a.team);
         sim.prep = 0; sim.anyTime = ${mode === "any"}; sim.weather.left = 1e9;
         for (const p of sim.actors) Object.assign(p, { bot: false, flight: 0, x: 18, z: p.id * 3, y: 0, grounded: true, guard: 60 });
@@ -12911,13 +12985,15 @@ const blockRoofs = { name: "block roof presentation", why: "regression: a loose 
     const D = __ooga.block, S = BL.blockSim, scene = BL.scenes.block, update = scene.update, rows = [];
     scene.update = () => {};
     try {
-      for (const name of ["w-s-bitcoin", "tiffanyvarty", "portlandhodl"]) {
-        D.showBoard(); D.selection.map = "town"; D.chooseOoga(name); D.chooseOoga(name); D.start(602); D.sim.prep = 0;
+      for (const name of ["w-s-bitcoin", "tiffanyvarty", "portlandhodl"]) for (const [map, surface] of [["town", "cave"], ["jungle", "cave"], ["jungle", "bridge"], ["jungle", "floor"], ["jungle", "head"]]) {
+        D.showBoard(); document.querySelector('#block-board [data-map="' + map + '"]').click(); D.chooseTeam("blue"); D.chooseOoga(name); D.chooseOoga(name); D.start(602); D.sim.prep = 0;
         const sim = D.sim, body = sim.actors[0], f = sim.flags.red;
         for (const a of sim.actors) Object.assign(a, { bot: false, flight: 0, x: 0.25 + a.id, z: S.ARENA.spawnZ, y: 0, grounded: true, guard: 60 });
         sim.weather.left = 1e9;
         for (const g of sim.gorillas) { g.state = 3; g.t = 1e9; }
-        const roof = S.ARENA.BLOCKS.find(b => S.ARENA.rockKind.get(b) === "cave" && b[5] > 0 && b[1] - b[0] >= 1 && b[3] - b[2] >= 1 && S.groundAt((b[0] + b[1]) / 2,(b[2] + b[3]) / 2, 99, 0.2) === b[4]);
+        const roof = S.ARENA.BLOCKS.find(b => surface === "cave"
+          ? S.ARENA.rockKind.get(b) === "cave" && b[5] > 0 && b[1] - b[0] >= 1 && b[3] - b[2] >= 1 && S.groundAt((b[0] + b[1]) / 2,(b[2] + b[3]) / 2, 99, 0.2) === b[4]
+          : S.ARENA.kinds.get(b) === surface && b[2] > 0);
         const x = (roof[0] + roof[1]) / 2, z = (roof[2] + roof[3]) / 2, top = roof[4];
         Object.assign(f, { state: "flying", x, z, y: top + 2, vx: 0, vz: 0, vy: 0, carrier: null, thrower: -1, hookedBy: -1 });
         // A player below the roof cannot take the falling block through it.
@@ -12926,7 +13002,7 @@ const blockRoofs = { name: "block roof presentation", why: "regression: a loose 
         const landed = f.state === "dropped" && f.y === top && !body.carrying;
         const drawn = block.visible && Math.abs(block.world[13] - top - .5) < .07;
         // Land the actual chosen model beside the block, then measure both soles in world space.
-        Object.assign(body, { x, z: z + 2, y: top + 2, grounded: false, vy: 0 }); D.simulate(1.5); update(0, 0); BL.scene.updateWorld(scene.root);
+        Object.assign(body, { x: x + (surface === "head" || surface === "floor" ? 2 : 0), z: z + (surface === "head" || surface === "floor" ? 0 : 2), y: top + 2, grounded: false, vy: 0 }); D.simulate(1.5); update(0, 0); BL.scene.updateWorld(scene.root);
         const cave = D.actors[0].cave, feet = [];
         for (const leg of [cave.parts.legL, cave.parts.legR]) {
           const box = BL.scene.boundsOf(leg.geometry), p = new Float64Array(3); let low = Infinity;
@@ -12935,15 +13011,15 @@ const blockRoofs = { name: "block roof presentation", why: "regression: a loose 
         }
         const stood = body.grounded && body.y === top && cave.modelled;
         Object.assign(body, { x: .25, z: S.ARENA.spawnZ, y: 0 });
-        const bot = sim.actors[1]; Object.assign(bot, { x: x - Math.sign(x) * 9, z, y: 0, bot: true, role: "attack", fuel: S.CONFIG.JET_FUEL });
+        const bot = sim.actors[1]; Object.assign(bot, { x: surface === "cave" ? x - Math.sign(x) * 9 : surface === "head" ? x : x + 6, z: z + (surface === "head" ? 3 : 0), y: 0, bot: true, role: "attack", fuel: S.CONFIG.JET_FUEL });
         let seconds = 0, flame = false;
         while (seconds < 30 && f.state !== "carried") { D.simulate(.1); update(0, 0); flame ||= D.actors[bot.id].jetFlame.visible; seconds += .1; }
-        rows.push({ name, landed, drawn, stood, feet, flame, seconds, fetched: f.state === "carried" && f.carrier === bot.id });
+        rows.push({ name, map, surface, landed, drawn, stood, feet, flame, seconds, fetched: f.state === "carried" && f.carrier === bot.id });
       }
     } finally { scene.update = update; D.showBoard(); }
     return rows;
   })()`);
-  record("block roofs: blocks stay visible above the roof, cannot be picked up below it, regular/slim/wide Oogas land with their feet on it, and bots retrieve them using the upgraded jetpack", rows.length === 3 && rows.every(r => r.landed && r.drawn && r.stood && r.feet.every(y => Math.abs(y) < .1) && r.flame && r.fetched), JSON.stringify(rows));
+  record("block roofs: blocks stay visible above the roof, cannot be picked up below it, regular/slim/wide Oogas land with their feet on it, and bots retrieve them using the upgraded jetpack", rows.length === 15 && rows.every(r => r.landed && r.drawn && r.stood && r.feet.every(y => Math.abs(y) < .1) && r.flame && r.fetched), JSON.stringify(rows));
 } };
 const blockZipline = { name: "block zipline controls", why: "rule: the ride control and warning lamps must agree about a rival zipline's trap for either team", run: async b => {
   const rows = await b.evaluate(`(() => {
@@ -25804,21 +25880,21 @@ scene("drop", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("drop", { card: 
 scene("block", { label: "block phone", opts: PHONE_SIZE, steps: [phone("block", { card: '[data-intro="block"]', play: "__ooga.block.start()", required: ["#joy-move", "#joy-look", "#act", "#block-paint", "#block-tools [data-tool=paint]"] }), {
   name: "block phone actions and results", why: "regression: Throw overlapped Jump and the sticks, and small results cards clipped names and action labels", run: async b => {
     const rows = [];
-    for (const [width, height] of [[390,844],[844,390],[320,568]]) {
+    for (const [map, flightX, flightZ] of [["town", 0, 6], ["jungle", 18, 0]]) for (const [width, height] of [[390,844],[844,390],[320,568]]) {
       await b.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: true });
       await b.sleep(100);
-      await b.evaluate(`__ooga.block.showBoard();document.querySelector('#block-board [data-map="town"]').click();new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
-      rows.push({ width, phase: "board", bad: await b.evaluate(PHONE(['#block-board [data-action="block-start"]'])) });
+      await b.evaluate(`__ooga.block.showBoard();document.querySelector('#block-board [data-map="${map}"]').click();new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+      rows.push({ map, width, phase: "board", bad: await b.evaluate(PHONE(['#block-board [data-action="block-start"]'])) });
       await b.evaluate(`(() => { const D=__ooga.block;D.start(604);D.sim.prep=0;Object.assign(D.sim.actors[0],{flight:0,grounded:true,x:-7,z:4,y:0,vy:0}); })()`);
-      rows.push({ width, phase: "play", bad: await b.evaluate(PHONE(["#joy-move", "#joy-look", "#act", "#block-paint", "#block-tools [data-tool=paint]"])) });
+      rows.push({ map, width, phase: "play", bad: await b.evaluate(PHONE(["#joy-move", "#joy-look", "#act", "#block-paint", "#block-tools [data-tool=paint]"])) });
       const at = await b.evaluate(`(() => { const r=document.getElementById("block-paint").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
       await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [at] });
       await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
       const fired = await b.evaluate(`__ooga.block.sim.actors[0].lastKind === "paint" && __ooga.block.sim.actors[0].cooldown > 0`);
-      rows.push({ width, fired });
+      rows.push({ map, width, fired });
       // Hold the actual touch Jump control through the jump's apex, then release and cancel a fresh hold.
       // Spawn protection keeps a gorilla or a bot from interrupting this input check.
-      await b.evaluate(`(() => { const D=__ooga.block;D.cam.first=D.cam.close=D.cam.island=false;if(!BL.blockSim.ARENA.BLOCKS.every(b=>0<b[0]-1||0>b[1]+1||6<b[2]-1||6>b[3]+1))throw Error("Jetpack flight column is obstructed");Object.assign(D.sim.actors[0],{x:0,z:6,y:0,vy:0,grounded:true,flight:0,grabbed:0,guard:30,fuel:BL.blockSim.CONFIG.JET_FUEL});__ooga.advance(.1,1/60); })()`);
+      await b.evaluate(`(() => { const D=__ooga.block;D.cam.first=D.cam.close=D.cam.island=false;if(!BL.blockSim.ARENA.BLOCKS.every(b=>${flightX}<b[0]-1||${flightX}>b[1]+1||${flightZ}<b[2]-1||${flightZ}>b[3]+1))throw Error("Jetpack flight column is obstructed");Object.assign(D.sim.actors[0],{x:${flightX},z:${flightZ},y:0,vy:0,grounded:true,flight:0,grabbed:0,guard:30,fuel:BL.blockSim.CONFIG.JET_FUEL});__ooga.advance(.1,1/60); })()`);
       const jump = await b.evaluate(`(() => { const r=document.getElementById("act").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
       await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [jump] });
       const flight = await b.evaluate(`(() => { __ooga.advance(1.8,1/60);const D=__ooga.block,a=D.sim.actors[0];return {map:D.sim.map,y:a.y,vy:a.vy,fuel:a.fuel,jet:a.jetting,flame:D.actors[0].jetFlame.visible}; })()`);
@@ -25828,9 +25904,9 @@ scene("block", { label: "block phone", opts: PHONE_SIZE, steps: [phone("block", 
       await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [jump] });
       await b.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
       const cancelled = await b.evaluate(`(() => { __ooga.advance(.1,1/60);return !__ooga.block.sim.actors[0].jetting; })()`);
-      rows.push({ width, flight, released, cancelled, fired: flight.map === "town" && flight.y > 6 && flight.vy > 6 && flight.fuel > 0 && flight.fuel < 4.4 && flight.jet && flight.flame && released && cancelled });
+      rows.push({ map, width, flight, released, cancelled, fired: flight.map === map && flight.y > 6 && flight.vy > 6 && flight.fuel > 0 && flight.fuel < 4.4 && flight.jet && flight.flame && released && cancelled });
       await b.evaluate(`(() => { const D=__ooga.block;D.sim.over=true;D.sim.winner=D.sim.team;D.simulate(.1);__ooga.advance(.1); })()`);
-      rows.push({ width, phase: "results", bad: await b.evaluate(PHONE(['#block-results [data-action="block-again"]','#block-results [data-action="block-board"]','#block-results [data-role="leave"]'])) });
+      rows.push({ map, width, phase: "results", bad: await b.evaluate(PHONE(['#block-results [data-action="block-again"]','#block-results [data-action="block-board"]','#block-results [data-role="leave"]'])) });
     }
     record("block phone: portrait, landscape and narrow screens keep the controls reachable, real Throw taps fire, held Jump climbs with flame and fuel use, release/cancel cuts thrust, and the results names and actions fit", rows.every(r => r.bad ? !r.bad.length : r.fired), JSON.stringify(rows));
   }

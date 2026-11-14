@@ -248,6 +248,23 @@ side of each half (a floor at 2 m, walls with a window band at eye height, open 
 deck with gaps in its parapets. Blocks carry `[x0, x1, z0, z1, top, bottom]`, so floors, roofs and upper wall bands
 float and anything whose top an Ooga reaches is somewhere to stand.
 
+## Gorilla Jungle
+
+The same 44 by 74 m field, halves turned half round. The floor belongs to the gorillas and the trees to the Oogas: a
+treetop walkway runs down the middle 3.2 m up, from each half's tree house (four trunks under one crown, a cargo net up
+each side) along a rope bridge to the Great Tree's ring platform (a net up its east and west sides). A gorilla takes
+nobody above 1.4 m, so the walkway is safe from them and in plain view of both sniper towers; the ground lanes either
+side run past the gorillas' homes and the banana hoard at the Great Tree's foot. Each end is a ruined temple: Fort
+Chaos's 2.4 m walls, and over the gate a stone gorilla head on two pillars (a block from 3.4 to 5 m: walking in and
+a single jump pass under it, and its top is somewhere to stand), eyes in its team's colour. A fallen log crosses each
+ground lane and bushes stand before each gate. Hook spots: behind the log (the only one on the ground, in the open),
+on the mound, up a tree and on a tree house's crown.
+
+`kinds` in the map's data names each of its own boxes for the models (`jungleBlock`), and `drawn` says the models put
+its cargo nets and puddles into the map's one mesh (`jungleDress`, with the crowns, the hoard and the signs), so the
+scene places no node for them. The trees round the rim are one mesh too (`jungleRing`, Detail: Full) in place of the
+hub's trees. Nothing on the map is lit or animated beyond what every map has.
+
 ## Controls
 
 The keys follow the island's (README, Controls) through the shared `controls.js`, and the sound follows the
