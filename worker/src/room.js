@@ -46,7 +46,7 @@ import {
 import { sha256Hex } from "./crypto.js";
 import { getPlayer } from "./db.js";
 import { deliverHighscores } from "./highscore-store.js";
-import { sfuClient } from "./sfu.js";
+import { sfuClient, turnCredentials } from "./sfu.js";
 import { STUDIO_TRANSPORT, STUDIO_ZONE, studioState, studioHostAllowed, studioCanSpeak, studioPosition, studioSeatAllowed, studioSource } from "./studio-policy.js";
 import CAST_ROWS from "./characters.gen.json";
 
@@ -1138,6 +1138,20 @@ export class Room extends DurableObject {
     const p = this.players.get(Number(request.headers.get("x-player-id")));
     if (!p) return new Response(JSON.stringify({ error: "join the island first" }), { status: 409, headers: { "content-type": "application/json" } });
     if (!p.connectionToken || request.headers.get("x-room-token") !== p.connectionToken) return new Response(JSON.stringify({ error: "connection replaced" }), { status: 409, headers: { "content-type": "application/json" } });
+    if (op === "ice") {
+      if (!ownedBody(CAST, p.login, p.contributor, p.id)) {
+        this.evict(p, "revoked");
+        return new Response(JSON.stringify({ error: "contributors with an Ooga only" }), { status: 403, headers: { "cache-control": "no-store", "content-type": "application/json" } });
+      }
+      // Authenticated and rate-limited at the Worker, then bound to the current room connection.
+      // Keep minting out of the SFU operation queue so a relay outage cannot hold up voice signalling.
+      const data = await turnCredentials(this.env).catch(() => null);
+      if (this.players.get(p.id) !== p || p.connectionToken !== request.headers.get("x-room-token"))
+        return new Response(null, { status: 409, headers: { "cache-control": "no-store" } });
+      return new Response(JSON.stringify(data || {}), { headers: {
+        "cache-control": "no-store", "content-type": "application/json", "x-content-type-options": "nosniff",
+      } });
+    }
     const result = (p.voiceQueue || Promise.resolve()).catch(() => {}).then(() => this.voiceOperation(op, request, p));
     if (this.inspect.on) result.then((res) => {
       this.inspect.count("voiceOps");

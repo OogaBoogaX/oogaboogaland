@@ -61,7 +61,8 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const ICE = { iceServers: [{ urls: "stun:stun.cloudflare.com:3478" }], bundlePolicy: "max-bundle" };
-  const ICE_GATHER_MS = 1500, CONNECT_MS = 10000, RETRY_MS = 2000, SLOW_RETRY_MS = 15000, RESTART_TRIES = 3, RESTART_WAIT_MS = 3000;
+  const TURN_TLS = "turns:turn.cloudflare.com:443?transport=tcp";
+  const ICE_GATHER_MS = 1500, RELAY_GATHER_MS = 3500, CONNECT_MS = 10000, RETRY_MS = 2000, SLOW_RETRY_MS = 15000, RESTART_TRIES = 3, RESTART_WAIT_MS = 3000;
   // A connection that drops after it was up gets this long to come back on its own before voice starts over.
   const DROP_GRACE_MS = 5000;
   // Speaking: RMS over SPEAK_ON starts it at once; SPEAK_HOLD quiet reads in a row end it, so words do not flicker.
@@ -157,7 +158,7 @@
   });
   const supportError = (s) => !s.secure ? "voice needs a secure page (https)" : !s.webrtc ? "this browser has no WebRTC" : !s.mic ? "this browser has no microphone API" : "";
 
-  const gathered = (pc) => new Promise((resolve) => {
+  const gathered = (pc, relay = false) => new Promise((resolve) => {
     if (pc.iceGatheringState === "complete") return resolve();
     const done = () => {
       window.clearTimeout(timer);
@@ -167,7 +168,7 @@
     const onChange = () => {
       if (pc.iceGatheringState === "complete") done();
     };
-    const timer = window.setTimeout(done, ICE_GATHER_MS);
+    const timer = window.setTimeout(done, relay ? RELAY_GATHER_MS : ICE_GATHER_MS);
     pc.addEventListener("icegatheringstatechange", onChange);
   });
 
@@ -178,6 +179,9 @@
   const ICE_BLOCKED = "WebRTC blocked";
   let iceProbe = null;
   const probe = () => {
+    // A STUN-only probe cannot rule out the configured TLS relay on a UDP-blocked network.
+    // Let the normal connection gather with its short-lived TURN credentials instead.
+    if (BL.net.state.voiceTurn) return Promise.resolve({ ok: false, candidates: 0, blocked: false });
     if (iceProbe) return iceProbe;
     const run = (async () => {
       if (typeof RTCPeerConnection !== "function") return { ok: false, candidates: 0, blocked: false };
@@ -390,6 +394,53 @@
     } finally { window.clearTimeout(timeout); requests.delete(controller); }
   };
 
+  // Keep the direct candidates. A configured Worker can add a short-lived TLS relay to both peers.
+  let relayConfig = ICE, relayRequest = null, relayTimer = 0, relayProbe = null;
+  const relayRenewals = [];
+  const scheduleRelay = (token, ttl) => {
+    window.clearTimeout(relayTimer);
+    relayTimer = window.setTimeout(() => token === lifecycle ? renewRelay(token, true) : undefined, (ttl - 60) * 1000);
+  };
+  const clearRelay = () => {
+    window.clearTimeout(relayTimer);
+    relayTimer = 0; relayRequest = null; relayConfig = ICE; relayProbe = null;
+  };
+  const renewRelay = (token, renewal = false) => {
+    if (token !== lifecycle) return;
+    const sample = renewal ? { startedAt: Date.now(), credentialsMs: null, rebuildAt: null, rebuildMs: null, firstTrackMs: null,
+      status: "fetching", peers: desired.length, muted: stats.muted } : null;
+    if (sample) { if (relayRenewals.length === 8) relayRenewals.shift(); relayRenewals.push(sample); }
+    const refresh = async () => {
+      const data = await api("ice", null, token).catch(() => null);
+      current(token);
+      if (relayRequest !== pending) return ICE;
+      const server = data?.iceServers?.[0], ttl = data?.ttl;
+      if (!server || server.urls !== TURN_TLS || !server.username || !server.credential || !Number.isInteger(ttl) || ttl < 120 || ttl > 172800) {
+        if (sample) sample.status = "credentials-unavailable";
+        if (relayConfig !== ICE) relayTimer = window.setTimeout(() => renewRelay(token, true), 60000);
+        return relayConfig;
+      }
+      const config = { ...ICE, iceServers: [...ICE.iceServers, server] };
+      // setConfiguration alone does not replace an established TURN allocation. Rebuild both
+      // connections before expiry. Mint credentials while the old audio still runs, then use
+      // the ordinary recovery path (one publication per account) with its preserved mute.
+      if (sample) {
+        sample.credentialsMs = Date.now() - sample.startedAt; sample.rebuildAt = Date.now(); sample.status = "rebuilding";
+        await restart(false, { config, ttl, sample });
+        sample.rebuildMs = Date.now() - sample.rebuildAt; sample.status = stats.enabled ? "rebuilt" : "stopped";
+      } else { relayConfig = config; scheduleRelay(token, ttl); }
+      return config;
+    };
+    const pending = refresh().catch(() => { if (sample) sample.status = "cancelled"; return ICE; });
+    relayRequest = pending;
+    return pending;
+  };
+  const iceFor = (token) => {
+    if (!BL.net.state.voiceTurn) return ICE;
+    if (!relayRequest) renewRelay(token);
+    return relayRequest;
+  };
+
   // Either connection failing, or staying disconnected past DROP_GRACE_MS, after it was up: start voice over, which
   // publishes the microphone again (a new count, so every listener pulls it anew) and pulls every voice again.
   // Why the restart: said with its `leave`, for the room's inspector (worker/src/inspect-report.js).
@@ -415,15 +466,16 @@
     const valid = () => { current(token); if (!microphoneWanted || generation !== micGeneration) throw new Error("microphone cancelled"); };
     for (let attempt = 0; ; attempt++) {
       valid();
+      const config = await iceFor(token); valid();
       let pc = null;
       try {
         await api("session", { kind: "pub" }, token); valid();
-        pc = new RTCPeerConnection(ICE);
+        pc = new RTCPeerConnection(config);
         pubPc = pc;
         const tx = pc.addTransceiver(mic.getAudioTracks()[0], { direction: "sendonly" });
         const offer = await pc.createOffer(); valid();
         await pc.setLocalDescription(offer); valid();
-        await gathered(pc); valid();
+        await gathered(pc, config !== ICE); valid();
         const pub = await api("publish", { sdp: pc.localDescription.sdp, mid: tx.mid }, token); valid();
         await pc.setRemoteDescription(pub.sessionDescription); valid();
         await connected(pc); valid();
@@ -439,6 +491,7 @@
   };
 
   const teardown = () => {
+    clearRelay();
     window.clearTimeout(retryTimer);
     retried = false;
     for (const timer of dropTimers.values()) window.clearTimeout(timer);
@@ -631,7 +684,7 @@
     stats.joining = true; stats.micError = ""; stats.error = ""; microphoneWanted = stats.micWanted = true; stats.permission = "requesting"; stats.preflight = false; stats.preflightPending = false;
     if (!preserveMute) stats.muted = false;
     emit();
-    let openingReceiver = false;
+    let openingReceiver = false, openingPublisher = false;
     try {
       const stream = mic || await navigator.mediaDevices.getUserMedia(micConstraints());
       if (token !== lifecycle || generation !== micGeneration || !microphoneWanted) { for (const track of stream.getTracks()) track.stop(); return; }
@@ -644,7 +697,9 @@
       const ice = await probe();
       if (token !== lifecycle || generation !== micGeneration || !microphoneWanted) return;
       if (ice.blocked) { stats.error = ICE_BLOCKED; dropMic(); return; }
+      openingPublisher = true;
       await publish(token, generation);
+      openingPublisher = false;
       if (token !== lifecycle || generation !== micGeneration || !microphoneWanted) return;
       stats.publishing = true;
       if (!subPc) { openingReceiver = true; await openReceiver(token); }
@@ -656,9 +711,11 @@
       schedule();
     } catch (err) {
       if (token === lifecycle && generation === micGeneration) {
-        stats.permission = err.name === "NotAllowedError" ? "denied" : "unknown";
-        if (openingReceiver) stats.error = "voice unavailable";
-        else stats.micError = err.name === "NotAllowedError" ? "microphone blocked" : "microphone unavailable or not permitted";
+        if (openingReceiver || openingPublisher) stats.error = "voice connection unavailable";
+        else {
+          stats.permission = err.name === "NotAllowedError" ? "denied" : "unknown";
+          stats.micError = err.name === "NotAllowedError" ? "microphone blocked" : "microphone unavailable or not permitted";
+        }
         dropMic();
       }
     } finally {
@@ -684,9 +741,10 @@
     subs.clear();
     if (subPc) subPc.close();
     subPc = null;
+    const config = await iceFor(token); current(token);
     await api("session", { kind: "sub" }, token);
     current(token);
-    const pc = new RTCPeerConnection(ICE);
+    const pc = new RTCPeerConnection(config);
     subPc = pc; stats.receiveState = "idle";
     watch(pc);
     pc.addEventListener("track", (e) => {
@@ -694,6 +752,7 @@
       syncPreferences();
       for (const [id, s] of subs) {
         if (s.mid !== e.transceiver.mid) continue;
+        if (relayProbe?.token === token && relayProbe.sample.firstTrackMs === null) relayProbe.sample.firstTrackMs = Date.now() - relayProbe.sample.rebuildAt;
         // A track landing again for the same voice replaces its nodes, so it never plays twice.
         unplug(s);
         s.near = nearness(id); s.inRange = withinRange(id); hear(s, heard(id) && s.gen === wantedGen.get(id)); setLevel(s, true);
@@ -813,6 +872,7 @@
   // Revocation releases hardware while keeping receive-only audio available.
   const dropMic = () => {
     micGeneration++; microphoneWanted = stats.micWanted = false; stats.joining = false;
+    if (!stats.enabled) clearRelay();
     if (mic) for (const track of mic.getTracks()) track.stop();
     mic = null; stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
@@ -826,7 +886,7 @@
   };
   // `welcomed`: the room has just let this page in, which puts a visitor out of voice back in if they were.
   let restarting = false;
-  const restart = async (welcomed = false) => {
+  const restart = async (welcomed = false, preparedRelay = null) => {
     const why = dropWhy;
     dropWhy = "";
     // A welcome during a restart is the same blip: it must not put a speaker back in as a muted listener.
@@ -834,6 +894,10 @@
     const wanted = microphoneWanted, muted = stats.muted;
     const token = ++lifecycle; micGeneration++; abortRequests();
     teardown(); stats.joining = false;
+    if (preparedRelay) {
+      relayConfig = preparedRelay.config; relayRequest = Promise.resolve(relayConfig);
+      relayProbe = { token, sample: preparedRelay.sample }; scheduleRelay(token, preparedRelay.ttl);
+    }
     restarting = true;
     try {
       cleanup = api("leave", why ? { why } : null, token).catch(() => {});
@@ -938,7 +1002,7 @@
         await pc.setRemoteDescription(res.sessionDescription); valid();
         const answer = await pc.createAnswer(); valid();
         await pc.setLocalDescription(answer); valid();
-        await gathered(pc); valid();
+        await gathered(pc, relayConfig !== ICE); valid();
         await api("renegotiate", { sdp: pc.localDescription.sdp }, token); valid();
       }
       // Against the list as it stands now: someone who left while this pull was out is no failure, and must not cost the listener every other voice.
@@ -1009,7 +1073,8 @@
   // For the feed panel and debugging: whom the room wants heard, whom this page pulled, both connections, where voices play
   // and the context's state.
   const inspect = () => ({ desired: desired.slice(), pulled: [...subs.keys()], publish: pubPc ? pubPc.connectionState : "none", receive: subPc ? subPc.connectionState : "none",
-    playback: GAIN_PLAY ? "gain" : "element", context: audio ? audio.state : "none" });
+    playback: GAIN_PLAY ? "gain" : "element", context: audio ? audio.state : "none",
+    relayRenewals: relayRenewals.map(sample => ({ ...sample })) });
 
   BL.voice = { support, probe, ICE_BLOCKED, warnLeaving, hangUp, preflight, cancelPreflight, devices, selectDevice, setReceiveLevel, enable, listen, dropMic, setMuted, toggle, leave, restart, stop, setPeers, subscribe, dispose, inspect, speaking, inEarshot, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, setRadius, falloff, fades: ELEMENT_VOLUME || GAIN_PLAY, RADIUS_MIN, RADIUS_MAX, stats };
 })();
