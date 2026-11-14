@@ -795,6 +795,15 @@
       // What the hangar may read of it: whether it shows (`state`), its clock, s, where it stands and its timeline (`at`,
       // not to be changed), whether it is clearing away early, how many bars tear across it now, and how many have come.
       at, get state() { return state; }, get t() { return t; }, get fading() { return fadeAt >= 0; }, get bands() { return bands; }, get shows() { return shows; },
+      // Start dissolving `lead` s from now (or keep on, if it already is), leaving only a short afterimage; returns how
+      // long until it starts dissolving, s.
+      dissolveSoon: (lead) => {
+        if (state !== "show") return 0;
+        const len = at.gone - at.held;
+        if (t < at.held - lead) { at.held = Math.max(at.formed, t + lead); at.gone = at.held + len; at.end = at.gone + 1.2; }
+        else at.end = Math.max(t + 0.8, Math.min(at.end, at.gone + 1.2));
+        return Math.max(0, at.held - t);
+      },
       // Whether, while it shows, its middle or its head is in sight from (x, y, z), past walls, boxes and the Jet.
       seen: (x, y, z) => state === "show" && (sightClear(x, y, z, at.x, TOP * SCALE * 0.55, at.z) || sightClear(x, y, z, at.x, TOP * SCALE * 0.9, at.z)),
       // Whether the events that come by themselves should wait: while it shows, for AFTER s after, and for CLAIM s once
