@@ -1,14 +1,17 @@
-// A Lightning network of nodes and channels filling the Lightning Jet Hangar for a few seconds while the hall dims, a
-// first draft shown only on a debug page (`network=`, Shift+N in the hangar). Nodes stand at real depths round where it
+// A Lightning network of nodes and channels filling the Lightning Jet Hangar for a few seconds, a first draft shown
+// only on a debug page (`network=`, Shift+N in the hangar). It comes as the hall's power seems to go: the lights dip
+// twice, irregularly, then the ordinary lights, screens and neon go out and only the emergency lights stay on (`POWER`,
+// `EMERGENCY`, and under reduced motion one smooth fade instead of the dips). Nodes stand at real depths round where it
 // starts: a few near ones (small cubes stood on a corner, turning, in a soft halo), more at middle distance, more again
 // far off through the hall and down the launch tunnel, and many faint points (`DENSITY`, `LAYERS`, `DUST`), arriving far
 // first. Channels grow between linked pairs only, every node joined into one network; payments run hop by hop along
 // routes of two to four linked channels, a glint at each node they pass and a faint glow back along the route once
-// they settle (`PULSE`). Then each layer slips its own way and the channels shrink to a point and fade (`T.breakup`).
-// The hall dims meanwhile (`env`, which the scene applies: its lights, its own light, its pictures, the runway's
-// markers, and with `fog` its haze pulled in) and comes back after. The graph is an illustration laid out each time
-// from a seed: no live data, names or amounts. Additive sprites and ribbons turned to the view, written in place into
-// fixed batches; on Canvas 2D, plain diamonds without the halos. Nothing allocates a frame.
+// they settle (`PULSE`). A few of the near nodes light what is round them (`GLOW`). Then each layer slips its own way,
+// the channels shrink to a point and fade (`T.breakup`), and the power comes smoothly back. `env` is what the scene
+// applies: its lights, its own light, its pictures, the runway's markers, the emergency lights, the hall's hum, and with
+// `fog` its haze pulled in. The graph is an illustration laid out each time from a seed: no live data, names or amounts.
+// Additive sprites and ribbons turned to the view, written in place into fixed batches; on Canvas 2D, plain diamonds
+// without the halos. Nothing allocates a frame.
 (() => {
   "use strict";
   const BL = window.BL;
@@ -33,12 +36,23 @@
     { r: [16, 90], y: [1.5, 16], core: [0.07, 0.11], halo: [0.6, 0.95], reach: 22 }
   ];
   const DUST = { size: [0.05, 0.1], glow: [0.25, 0.6], least: 10 };
-  // The timeline, s from the shape's early dissolve (or a play's start): the hall dimming, each layer arriving (far
-  // first), each node fading in, each channel growing, payments, the breakup and its length, the hall coming back.
-  const T = { dimIn: 2, far: [0.8, 1.8], mid: [1.3, 2.4], near: [1.9, 2.9], dust: [0.6, 2.2], fade: 0.7, grow: [0.8, 1.3],
-    growWait: [0.1, 0.6], pulses: [3, 9.4], breakup: 10, breakLen: 2.4, restore: 11.4, restoreLen: 2, end: 13.6 };
-  // How far the hall dims at its darkest: its lights, its own light, the screens and the runway's markers.
-  const DIM = { lights: 0.3, hall: 0.4, screens: 0.35, markers: 0.5 };
+  // The timeline, s from a play's start: the shape steadying from `cohere`, holding `hold` s and dissolving over
+  // `dissolve` s; each layer arriving (far first) once the power has gone, each node fading in, each channel waiting
+  // before it grows, payments, the breakup and its length, the power coming back and its length, the end, and how long
+  // after it the hall's other events still wait (`quiet`).
+  const T = { cohere: 0.15, hold: 0.85, dissolve: 1.4, far: [2.4, 3.3], mid: [2.8, 3.8], near: [3.2, 4.1], dust: [2.3, 3.9], fade: 0.7,
+    growWait: [0.1, 0.6], pulses: [4.4, 10.8], breakup: 11, breakLen: 2.2, restore: 12.6, restoreLen: 2, end: 14.8, quiet: 15 };
+  // The power faltering: two dips, each [when, s, how low, how long it holds there, s, where it comes back to], falling
+  // over `drop` s and coming back over `back` s; then the cut at `cut` s, the lights dying over `cutLen` s, and the
+  // emergency lights coming on `backup` s after it over `backupLen` s. Under reduced motion one smooth fade from `fade`
+  // over `fadeLen` s instead, the emergency lights coming on as it ends.
+  const POWER = { dips: [[1, 0.62, 0.08, 0.94], [1.58, 0.45, 0.11, 0.8]], drop: 0.05, back: 0.14, cut: 2.05, cutLen: 0.28, backup: 0.2, backupLen: 0.45,
+    fade: 1, fadeLen: 1.4 };
+  // How much stays on with the power out: the hall's lights, its own light, the screens, the runway's markers (steady,
+  // as emergency lights) and the hall's hum.
+  const EMERGENCY = { lights: 0.03, hall: 0.16, screens: 0.04, markers: 0.45, hum: 0.12 };
+  // The near nodes that light what is round them: how many, how far, m, and their colour.
+  const GLOW = { n: 3, reach: 5.5, color: [0.22, 0.5, 0.85] };
   // A payment's speed, m/s, how long a hop takes at the least and most, s, its trail, and its settle glint, s.
   const PULSE = { speed: 7, hop: [0.45, 1.6], trail: 3, gap: 0.06, settle: 0.6, back: 1.6, every: [0.25, 0.7] };
   // The hall's haze, near and far, m, as it is and pulled in while the hall is dimmest (with `fog`).
@@ -106,7 +120,7 @@
   const inHall = (x, y, z) => x > HALL.x0 + 0.8 && x < HALL.x1 - 0.8 && z > HALL.back + 0.6 && z < HALL.front - 1 && y > 0.4 && y < HALL.h - 1.6;
   const inTunnel = (x, y, z) => z < HALL.back - 0.5 && z > TUN.z1 + 1.5 && Math.hypot(x, y - TUN.y) < TUN.r - 1.4 && y > 0.5;
 
-  const create = ({ root, renderer, camera }) => {
+  const create = ({ root, renderer, camera, onStop = null }) => {
     const flat = renderer.kind === "canvas2d";
     const cap = DENSITY.b, maxNodes = cap.near + cap.mid + cap.far, maxChannels = maxNodes * 4;
     const batch = (geometry, capacity, flatGeometry) => {
@@ -139,8 +153,15 @@
     const P = { route: new Int16Array(cap.pulses), hop: new Uint8Array(cap.pulses), at: new Float32Array(cap.pulses), dur: new Float32Array(cap.pulses), back: new Uint8Array(cap.pulses), on: new Uint8Array(cap.pulses), settle: new Float32Array(cap.pulses) };
     const layerDrift = new Float32Array(9);
 
-    let active = false, t = 0, density = "a", fogged = false, anchorX = 0, anchorZ = 0, nextPulse = 0, still = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const env = { dim: 1, ambient: 1, screens: 1, markers: 1, fogNear: FOG.near[0], fogFar: FOG.far[0] };
+    // Whether it plays, its clock, s, and how long since it last ended, s.
+    let active = false, t = 0, since = Infinity, density = "a", fogged = false, anchorX = 0, anchorZ = 0, nextPulse = 0, still = window.matchMedia("(prefers-reduced-motion: reduce)");
+    // What the scene applies: how lit the hall's lights, its own light, the screens and the runway's markers are, how
+    // much the emergency lights are on, how much of itself the hall's hum plays and how far its pitch has sagged, and its
+    // haze.
+    const env = { dim: 1, ambient: 1, screens: 1, markers: 1, emergency: 0, hum: 1, sag: 0, fogNear: FOG.near[0], fogFar: FOG.far[0] };
+    // The near nodes that light what is round them, and their lights as the frame has them, 8 floats each.
+    const lit = new Int16Array(GLOW.n), glowLights = new Float32Array(GLOW.n * 8);
+    let litN = 0, glowN = 0;
 
     const edgeKey = new Set();
     const link = (i, j) => {
@@ -205,6 +226,13 @@
           else if (adjacency[i].includes(j)) made++;
         }
       }
+      // The near nodes with the biggest halos light what is round them.
+      litN = 0;
+      for (let k = 0; k < GLOW.n; k++) {
+        let best = -1;
+        for (let i = 0; i < N.n; i++) if (N.layer[i] === 0 && (best < 0 || N.halo[i] > N.halo[best]) && !lit.subarray(0, litN).includes(i)) best = i;
+        if (best >= 0) lit[litN++] = best;
+      }
       // The busiest: a few long links each.
       for (let h = 0; h < Dn.hubs; h++) {
         const i = Math.floor(r() * N.n);
@@ -267,9 +295,33 @@
       for (const n of nodes) n.visible = true;
     };
     const stop = () => {
-      active = false;
+      const was = active;
+      active = false; glowN = 0;
+      if (was) since = 0;
       for (const n of nodes) { n.visible = false; n.instanceCount = 0; }
-      env.dim = env.ambient = env.screens = env.markers = 1; env.fogNear = FOG.near[0]; env.fogFar = FOG.far[0];
+      env.dim = env.ambient = env.screens = env.markers = env.hum = 1; env.emergency = env.sag = 0; env.fogNear = FOG.near[0]; env.fogFar = FOG.far[0];
+      if (was && onStop) onStop();
+    };
+    // A hidden tab ends it at once, the hall back as it was.
+    const onVisibility = () => { if (document.hidden && active) stop(); };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    // How much power the hall's lights have at `t`, 0 to 1 (`POWER`), and how much the emergency lights are on.
+    const powerAt = (rest) => {
+      if (t >= T.restore) return smooth((t - T.restore) / T.restoreLen);
+      if (rest) return 1 - smooth((t - POWER.fade) / POWER.fadeLen);
+      let p = 1;
+      for (const [at, low, hold, back] of POWER.dips) {
+        if (t < at) break;
+        const u = t - at, from = p;
+        p = u < POWER.drop ? from + (low - from) * (u / POWER.drop) : low + (back - low) * smooth((u - POWER.drop - hold) / POWER.back);
+      }
+      if (t >= POWER.cut) { const u = (t - POWER.cut) / POWER.cutLen; p *= u >= 1 ? 0 : 1 - u * u; }
+      return p;
+    };
+    const emergencyAt = (rest, p) => {
+      const on = rest ? smooth((t - POWER.fade - POWER.fadeLen * 0.7) / POWER.backupLen) : smooth((t - POWER.cut - POWER.backup) / POWER.backupLen);
+      return Math.min(on, 1 - p);
     };
 
     // The view's basis, for pictures turned square to it.
@@ -340,14 +392,16 @@
     };
 
     const update = (dt, elapsed) => {
-      if (!active) return;
+      if (!active) { since += dt; return; }
       t += dt;
       if (t >= T.end) { stop(); return; }
       const rest = still.matches;
       basis();
-      // The hall.
-      const k = smooth(t / T.dimIn) * (1 - smooth((t - T.restore) / T.restoreLen));
-      env.dim = 1 - k * (1 - DIM.lights); env.ambient = 1 - k * (1 - DIM.hall); env.screens = 1 - k * (1 - DIM.screens); env.markers = 1 - k * (1 - DIM.markers);
+      // The hall: its power faltering and going, the emergency lights, and its power back.
+      const p = powerAt(rest), e = emergencyAt(rest, p), k = 1 - p;
+      env.dim = EMERGENCY.lights + (1 - EMERGENCY.lights) * p; env.ambient = EMERGENCY.hall + (1 - EMERGENCY.hall) * p;
+      env.screens = EMERGENCY.screens + (1 - EMERGENCY.screens) * p; env.markers = Math.max(p, EMERGENCY.markers * e);
+      env.emergency = e; env.hum = EMERGENCY.hum + (1 - EMERGENCY.hum) * p; env.sag = k;
       env.fogNear = fogged ? FOG.near[0] + (FOG.near[1] - FOG.near[0]) * k : FOG.near[0];
       env.fogFar = fogged ? FOG.far[0] + (FOG.far[1] - FOG.far[0]) * k : FOG.far[0];
       // The breakup: each layer slipping its own way, a share of the way so far.
@@ -404,6 +458,15 @@
         sprite(cores, nc++, x, y, z, Math.min(N.core[i] * (1 + N.flash[i] * 0.6) * Math.max(1, dc / 14), dc * 0.05), shown * near * Math.min(1, 0.85 * twinkle * lift));
         if (N.cube[i] > 0) cube(nq++, x, y, z, N.cube[i], (rest ? 0 : elapsed * N.spin[i]) + N.phase[i], (0.55 + N.flash[i] * 0.6) * shown, shown * near);
       }
+      // The near nodes' light on what is round them, while the hall's own is out.
+      glowN = 0;
+      for (let j = 0; j < litN; j++) {
+        const i = lit[j], shown = smooth((t - N.arrive[i]) / T.fade) * (1 - smooth((t - T.breakup - N.lose[i]) / (T.breakLen - N.lose[i] * 0.5))) * k;
+        if (shown <= 0.01) continue;
+        const o = glowN++ * 8, g = shown * (1 + N.flash[i] * 0.4);
+        glowLights[o] = N.x[i] + N.dx[i]; glowLights[o + 1] = N.y[i] + N.dy[i]; glowLights[o + 2] = N.z[i] + N.dz[i]; glowLights[o + 3] = GLOW.reach;
+        glowLights[o + 4] = GLOW.color[0] * g; glowLights[o + 5] = GLOW.color[1] * g; glowLights[o + 6] = GLOW.color[2] * g; glowLights[o + 7] = 0;
+      }
       // The faint points.
       for (let i = 0; i < D.n; i++) {
         const shown = smooth((t - D.arrive[i]) / T.fade) * (1 - smooth((t - T.breakup - D.lose[i]) / T.breakLen));
@@ -433,21 +496,29 @@
       for (const n of nodes) n.instanceVersion++;
     };
 
-    const dispose = () => stop();
+    // The near nodes' lights into `Lt` from light `slot` on; how many.
+    const lights = (Lt, slot) => {
+      for (let i = 0; i < glowN * 8; i++) Lt[slot * 8 + i] = glowLights[i];
+      return glowN;
+    };
+    const dispose = () => { document.removeEventListener("visibilitychange", onVisibility); stop(); };
     const liveGeometry = (set) => { for (const n of nodes) set.add(n.geometry); };
     const debug = {
       play: (x, z, seed) => play(x, z, seed), stop, get anchor() { return [anchorX, anchorZ]; },
       get density() { return density; }, set density(v) { density = v === "b" ? "b" : "a"; },
       get fog() { return fogged; }, set fog(v) { fogged = !!v; },
-      get t() { return t; }, get active() { return active; },
+      get t() { return t; }, get active() { return active; }, get quiet() { return active || since < T.quiet; }, get env() { return { ...env }; },
       get counts() { return { nodes: N.n, near: Array.from(N.layer.subarray(0, N.n)).filter((l) => l === 0).length, channels: C.n, dust: D.n, routes: routes.length,
         drawn: { halos: halos.instanceCount, cores: cores.instanceCount, channels: channels.instanceCount, pulses: pulses.instanceCount, cubes: cubes.instanceCount } }; }
     };
-    return { update, play, stop, dispose, liveGeometry, debug, env, T,
-      get active() { return active; }, get t() { return t; },
+    return { update, play, stop, dispose, lights, liveGeometry, debug, env, T,
+      // Whether it plays, and whether the hall's other events should still wait: while it plays and `T.quiet` s after.
+      get active() { return active; }, get quiet() { return active || since < T.quiet; }, get t() { return t; },
+      // Whether the hall's power seems out, for what runs on it (the crane, the fan): from the cut until it is halfway back.
+      get out() { return active && t >= (still.matches ? POWER.fade + POWER.fadeLen * 0.5 : POWER.cut) && t < T.restore + T.restoreLen * 0.5; },
       get density() { return density; }, set density(v) { density = v === "b" ? "b" : "a"; },
       get fog() { return fogged; }, set fog(v) { fogged = !!v; } };
   };
 
-  BL.hangarNetwork = { create, DENSITY, T, DIM };
+  BL.hangarNetwork = { create, DENSITY, T, POWER, EMERGENCY };
 })();
