@@ -180,6 +180,7 @@
   const inHall = (x, y, z) => x > HALL.x0 + 0.8 && x < HALL.x1 - 0.8 && z > HALL.back + 0.6 && z < HALL.front - 1 && y > 0.4 && y < HALL.h - 1.6;
   const inTunnel = (x, y, z) => z < HALL.back - 0.5 && z > TUN.z1 + 1.5 && Math.hypot(x, y - TUN.y) < TUN.r - 1.4 && y > 0.5;
 
+  // `onStop(early)` hears it end, `early` when something ended it before its time.
   const create = ({ root, renderer, camera, onStop = null }) => {
     const flat = renderer.kind === "canvas2d";
     const cap = DENSITY.b, maxNodes = cap.near + cap.mid + cap.far, maxBalls = cap.near + cap.mid, maxChannels = maxNodes * 4;
@@ -386,7 +387,7 @@
       if (was) since = 0;
       for (const n of nodes) { n.visible = false; n.instanceCount = 0; }
       env.dim = env.ambient = env.screens = env.markers = env.hum = env.bloom = 1; env.emergency = env.sag = env.cast = 0; env.fogNear = FOG.near[0]; env.fogFar = FOG.far[0];
-      if (was && onStop) onStop();
+      if (was && onStop) onStop(t < T.end);
     };
     // A hidden tab ends it at once, the hall back as it was.
     const onVisibility = () => { if (document.hidden && active) stop(); };
@@ -605,6 +606,12 @@
       for (const n of nodes) n.instanceVersion++;
     };
 
+    // The power's times for the hall's sound (`hangarAudio.outage`), s from its start: when its lamps start to strain,
+    // its dips (none under reduced motion), the cut (under reduced motion, halfway through the fade) and the restore.
+    const cues = () => {
+      const rest = still.matches;
+      return { from: T.cohere, dips: rest ? [] : POWER.dips, cut: rest ? POWER.fade + POWER.fadeLen * 0.5 : POWER.cut, restore: T.restore };
+    };
     // The near nodes' lights into `Lt` from light `slot` on; how many.
     const lights = (Lt, slot) => {
       for (let i = 0; i < glowN * 8; i++) Lt[slot * 8 + i] = glowLights[i];
@@ -621,7 +628,7 @@
         drawn: { halos: halos.instanceCount, cores: cores.instanceCount, balls: balls.instanceCount, embers: embers.instanceCount, stars: stars.instanceCount + violets.instanceCount,
           channels: channels.instanceCount, beads: beads.instanceCount, pulses: pulses.instanceCount, clouds: clouds.instanceCount } }; }
     };
-    return { update, play, stop, dispose, lights, liveGeometry, debug, env, T,
+    return { update, play, stop, dispose, lights, cues, liveGeometry, debug, env, T,
       // Whether it plays, and whether the hall's other events should still wait: while it plays and `T.quiet` s after.
       get active() { return active; }, get quiet() { return active || since < T.quiet; }, get t() { return t; },
       // Whether the hall's power seems out, for what runs on it (the crane, the fan): from the cut until it is halfway back.

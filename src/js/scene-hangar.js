@@ -420,6 +420,7 @@
     const x = sh.state === "show" && !anywhere ? (at.x + sh.at.x) / 2 : at.x, z = sh.state === "show" && !anywhere ? (at.z + sh.at.z) / 2 : at.z;
     if (sh.state === "show") sh.cohere(NT.cohere, NT.hold, NT.dissolve);
     s.network.play(x, z);
+    if (audio) audio.outage(s.network.cues());
     s.netDefer = between(NET_DEFER);
   };
   const netLife = (s, dt, elapsed) => {
@@ -1747,7 +1748,7 @@
       ooga: () => people && people.player, guide: () => scene.guide.root.position, clear: clearOf });
     // The network, on a debug page: walked up to with `network=a` or `b` (its density), its haze pulled in with
     // `netfog=1`, or played with Shift+N.
-    scene.network = BL.hangarNetwork.create({ root, renderer, camera, onStop: () => audio && audio.strain(1, 0) });
+    scene.network = BL.hangarNetwork.create({ root, renderer, camera, onStop: (early) => { if (audio) { audio.strain(1, 0); if (early) audio.outage(null); } } });
     scene.netDefer = 0;
     if (DEBUG && params.get("network") === "b") scene.network.density = "b";
     if (DEBUG && params.get("netfog") === "1") scene.network.fog = true;
