@@ -28,8 +28,9 @@
     // Redirects, cookies, OAuth callbacks and the Origin check all use this origin.
     "SITE_ORIGIN": "https://ooga-chat-staging.wickedsmartbitcoin.workers.dev",
     // Comma-separated: github, x, listen, speak, feed, commons, cloud. Empty: the app browses its public panels only.
-    // A flag counts only when what it needs is configured too (worker/chat/src/config.js `effective`).
-    "FEATURES": "",
+    // A flag counts only when what it needs is configured too (worker/chat/src/config.js `effective`). Turned on in the
+    // release runbook's order (docs/ooga-chat-operations.md): GitHub sign-in first, before anything else.
+    "FEATURES": "github",
     // OogaBoogaX's "Ooga Chat (staging)" OAuth App (callback <SITE_ORIGIN>/auth/github/callback). A client id is public.
     "GITHUB_CLIENT_ID": "Ov23limsSaK7tng3ziBP",
     // @w_s_bitcoin's "Ooga Chat" X app, OAuth 2.0 confidential client (callbacks for both environments). Public.
