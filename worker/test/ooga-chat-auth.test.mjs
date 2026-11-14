@@ -111,7 +111,7 @@ test("GitHub: starts with a bound single-use state, ends home with the result al
   const view = await (await s.me()).json();
   assert.equal(view.schema, 1);
   assert.match(view.identity.principal, /^pr_[A-Za-z0-9_-]{22}$/);
-  assert.deepEqual({ ...view.identity, principal: "x" }, { principal: "x", provider: "github", providerUserId: "583231", login: "ooga-dev", display: "Ooga Dev",
+  assert.deepEqual({ ...view.identity, principal: "x" }, { principal: "x", participant: "gh:583231", provider: "github", providerUserId: "583231", login: "ooga-dev", display: "Ooga Dev",
     avatar: `/api/chat/avatar/${view.identity.principal}/${view.identity.avatar.split("/").pop()}` });
   assert.deepEqual(view.capabilities, { listen: true, react: true, speak: true, contributor: true, raiseHand: true });
   assert.equal(view.eligibility.state, "eligible");

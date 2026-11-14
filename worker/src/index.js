@@ -28,6 +28,8 @@ export { GameHost } from "./game-host.js";
 export { Inspector } from "./inspector.js";
 // Ooga Chat's private door (docs/ooga-chat-backend.md): reachable only through a service binding that names it.
 export { ChatBridge } from "./chat-bridge.js";
+// Ooga Chat's audience (#665): both outdoor zones' listeners and speakers, apart from the Room's 32 players.
+export { Audience } from "./audience.js";
 
 const ROOM_NAME = "island";
 

@@ -76,7 +76,8 @@ anything is handed on, and the bridge never reads a browser header at all.
 | `hello` | nothing | `{ version, environment, features, voice }`: what the bridge can do now, with no binding, secret or account id |
 | `capability` | `bridge`; a GitHub principal | `{ state, character, reason, policy, checkedAt }` from the island's contributor policy (`chat-capability.js`): `eligible` (a bundled owner, or an unbundled contributor Oogatron vouches for), `ineligible` (a verified snapshot said no, the island banned the account, or `identity-collision`: another GitHub id holds that login on the island, by its own `players_identity_insert` rule) or `unknown` (the island's D1 or the snapshot could not be read). An X principal is refused (`capability_required`) |
 | `cast` | nothing (public browsing stays up under the kill switch) | `{ rows, revision, count }`: the registered Oogas from the island's build (`chat-public.js`), each `{ handle, github, display, joinedAt, lastCommitAt }`, sorted by join then handle, `revision` the hash of exactly those rows |
-| `revoke` | `bridge` | ends whatever the principal holds live (leases, publications, a cloud); added by #665, and until then the edge treats `unknown_operation` as nothing to end |
+| `revoke` | nothing (cleanup works while admissions are off) | `{ revoked }`: the Audience closes every socket of that principal with 4401 (`logout`, `logout-all`, `deleted`), or for `eligibility` ends its lease and its right to ask again while it keeps listening |
+| socket `/audience` (`ChatBridge.fetch`) | `bridge`, the `AUDIENCE` binding | the audience socket (#665, below), handed to the Audience object with the edge's assertion as `x-audience-principal`, and only the WebSocket headers |
 
 Later issues add their operations here.
 
@@ -120,6 +121,7 @@ The app's own contract (`docs/ooga-chat-app.md`) is the source of truth for shap
 | `GET /api/chat/avatar/<principal>/<key>` | the principal's picture on this origin (below) |
 | `GET /api/chat/public/contributors` | the native Contributing Oogas panel's data for anyone (below); `public, max-age=30` with an ETag |
 | `POST /donations/invoice`, `/note`, `/onchain`; `GET /donations/socket` | the native Feed the Oogas popup, through to bananapayserver (below) |
+| `GET /api/chat/audience`, upgraded | the audience socket (#665, below), from the app's own page with a session |
 | any other `/api/*`, `/auth/*`, `/donations/*` | a JSON 404 (`{ error: { code: "not_found" } }`), never the app's HTML |
 
 Every other path is served from the staged app. Only `/api/*`, `/auth/*` and `/donations/*` run the Worker
@@ -253,6 +255,72 @@ Browsing them never changes a voice role, zone, microphone or hand.
   payments, settlement, prices, `network` labels (signet on staging), `minSats` and `messageMinSats` are
   bananapayserver's, unchanged; its read socket's tally, recent list and leaderboard are the same public events the
   island hears, with its own ids and `seq` for resuming and deduplicating. No second ledger, processor or relay.
+
+## The audience (#665)
+
+Who listens and who speaks in each outdoor zone, `main` (Main Island) and `dsb` (DSB Land), is one Durable Object in the
+island's Worker: `Audience` (binding `AUDIENCE`, migration `v4`, one object named `audience`, `worker/src/audience.js`
+with its model in `audience-model.js`). It is apart from the island's `Room`: listeners never take one of its 32 player
+slots or receive its poses and NPC frames. One object for both zones serializes each identity's sources and leases in
+one place.
+
+**Who is listed.** One row a person a zone, keyed by public provider id (`gh:<github id>`, `x:<x id>`), never by login
+and never twice, however many tabs or sources they have. In precedence: a **world speaker** (the island reports them
+publishing outdoors in that zone), a **chat speaker** (one of their Ooga Chat sockets there holds an active lease), a
+**listener** (one of their Ooga Chat sockets is there). Island players who are not speaking outdoors are not listed, and
+nothing about interiors, private rooms or positions reaches a row. The session's `identity.participant` is the same id,
+so the app finds its own row.
+
+**Roles and leases.** Every socket joins as a listener. `setRole: speaker` asks the island's contributor policy afresh
+(not the edge's cached answer), then grants a **pending** lease (still a listener; `you.speak: "pending"`) that the
+microphone's publication must acknowledge within 30 s (#666) to become an **active**, muted speaker. One lease an
+identity across both zones and every tab; none while the island reports the identity in its own voice anywhere (its
+source wins, and its arrival ends a chat lease first: `source_in_use`); at most `AUDIENCE_SPEAKERS` (8) chat speakers a
+zone and `AUDIENCE_LISTENERS` (500) listeners, proposals for #669 to measure, never satisfied by demoting an island
+speaker. Leaving speaking, a real zone change, an expiry, a revocation or a closed socket end the lease and the hand.
+Choosing the zone already chosen changes nothing. A listener's `setMic` is refused.
+
+**The app's protocol** (audience protocol 1). Page: `{ type: "join", zone, protocol: 1 }`, `{ type: "resync", zone }`,
+`{ type: "setRole", requestId, role }`, `{ type: "setMic", requestId, muted }`. Server:
+
+```json
+{ "type": "snapshot", "zone": "main", "epoch": 1763120000000, "revision": 41,
+  "participants": [ { "id": "gh:583231", "generation": 1763121000000, "source": "app", "role": "listener", "login": "someone",
+                      "display": "Someone", "face": "/api/chat/avatar/pr_…/…", "contributions": null, "muted": true,
+                      "provider": "github", "character": null, "mic": "off", "speaking": false, "hand": "", "self": true } ],
+  "you": { "id": "gh:583231", "speak": "eligible" }, "limits": { "listeners": 500, "chatSpeakers": 8 }, "features": ["roles-v1"] }
+{ "type": "delta", "zone": "main", "epoch": 1763120000000, "base": 41, "revision": 42, "upsert": [ … ], "remove": [ { "id": "x:9", "generation": 1763120500000 } ] }
+{ "type": "you", "zone": "main", "you": { "id": "gh:583231", "speak": "pending" } }
+{ "type": "result", "requestId": 3, "ok": false, "error": { "code": "source_in_use", "retryable": false }, "you": { … } }
+```
+
+`you.speak` is `eligible`, `pending`, `active`, `denied` (eligible, but the island has this identity) or `none`. A
+delta's `revision` is always `base + 1` within an epoch; the epoch is fixed for the object's life (it changes only if its
+storage is reset), and each zone's revision is stored, so an object woken from hibernation carries on where it was and
+clients never resync for a nap. Generations follow the clock and only rise. A request repeated with the same
+`requestId` gets its first answer again. Close codes: 4401 (signed out, deleted, or the hourly re-authentication: the
+app checks its session and reconnects), 4426 (another protocol), 4429 (full, too many tabs, or too many sockets
+lately), 4400 (an unreadable frame), 4503 (listening is off).
+
+**The island's panel** (`audience-v1`, advertised in the Room's `welcome` only with the bridge on and the binding): the
+page's `audience-view` and `audience-resync` (`{ v: 1, zone }`) are answered by the Room (`room-audience.js`) with
+`{ t: "audience", v: 1, kind: "snapshot", epoch, rev, zone, part, parts, you, rows }` in parts of 100 rows, and then
+`kind: "delta"` with `base`, relayed from the Audience in order for the zones a panel is open on (`watch`). Rows there
+use the panel's shape (`source` `world` or `chat` on speakers only, `mic` `on`/`muted`/`off`, `avatar`, `self`). An
+island player's `you.speak` is `active` while they speak outdoors, else `eligible`.
+
+**The island's word.** The Room calls `world(seq, speakers, active)` whenever who publishes outdoors (players the
+outdoor handshake has opened, #667) or who is in its voice at all changes, newest `seq` winning; the Audience stores it.
+A world speaker's `contributions` (for ordering only) are Oogatron's counts, read by the Audience at most every ten
+minutes; an unknown total sorts last and is never shown as zero.
+
+**For the clients (hotpixelgroup).** Two notes from wiring this to #675 and #677. First, the app keys its own row on the
+session's `principal`. The audience ids are `gh:`/`x:` ids, as the island panel's contract already has them, so the app
+should find itself by `self: true`, `you.id` or the session's new `identity.participant`. Second, after an ordinary
+reconnect, a snapshot can carry the same epoch and revision the app already holds. The fix is the app's: take an equal
+snapshot after a reconnect as a confirmation (the review on #677). The two clients' row shapes differ (`source`
+`app`/`chat`, `face`/`avatar`, `muted`/`mic`). The server sends each client its own shape from one model, and a single
+shape later is welcome.
 
 ## Secrets and variables
 

@@ -81,7 +81,9 @@ export const sessionView = (found, capability) => {
   const p = found.principal, eligible = p.provider === "github" && capability.state === "eligible" && capability.fresh;
   return {
     schema: IDENTITY_SCHEMA,
-    identity: { principal: p.id, provider: p.provider, providerUserId: p.provider_user_id, login: p.login, display: p.display || p.login, avatar: avatarPath(p) },
+    // `participant` is how the audience lists this account (gh:<id> or x:<id>, #665): one row a person, whichever app.
+    identity: { principal: p.id, participant: `${p.provider === "github" ? "gh" : "x"}:${p.provider_user_id}`, provider: p.provider,
+      providerUserId: p.provider_user_id, login: p.login, display: p.display || p.login, avatar: avatarPath(p) },
     capabilities: { listen: true, react: true, speak: eligible, contributor: eligible, raiseHand: eligible },
     eligibility: { state: p.provider === "github" ? capability.state : "ineligible", checkedAt: capability.checkedAt, staleAfter: STALE_MS / 1000, policy: capability.policy },
     character: eligible && capability.character ? { handle: capability.character } : null,

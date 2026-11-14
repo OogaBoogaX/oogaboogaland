@@ -19,6 +19,15 @@ export class BridgeRefusal extends Error {
   }
 }
 
+// The island's switch for the bridge (`OOGA_CHAT_FEATURES`, comma-separated): `bridge` turns every operation on but
+// those marked always-on; `outdoor`, `cloud` and `commons` each also need `bridge`.
+export const FEATURES = ["bridge", "outdoor", "cloud", "commons"];
+export const bridgeFeatures = (env) => {
+  const named = new Set(String(env.OOGA_CHAT_FEATURES || "").split(",").map((name) => name.trim()).filter((name) => FEATURES.includes(name)));
+  const bridge = named.has("bridge");
+  return { bridge, outdoor: bridge && named.has("outdoor"), cloud: bridge && named.has("cloud"), commons: bridge && named.has("commons") };
+};
+
 export const newRequestId = () => crypto.randomUUID().replaceAll("-", "");
 
 export const makeEnvelope = (environment, op, payload = {}, principal = null, requestId = newRequestId()) =>
