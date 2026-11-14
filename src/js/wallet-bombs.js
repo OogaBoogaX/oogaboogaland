@@ -101,7 +101,8 @@
     const shell=(color,w,h,d,bevel)=>parts.push(M.bevelBox({color,w,h,d,bevel,offset:{y:h/2}}));
     const pixels=(text,x,y,z,px,color)=>{
       [...text].forEach((ch,i)=>BL.hubModels.SIGN_GLYPHS[ch].forEach((row,r)=>[...row].forEach((on,c)=>{
-        if(on==="1")b(color,x+(i*4+c-(text.length*4-2)/2)*px,y,z+(r-2)*px,px,.004,px,1);
+        const sx=3/row.length;
+        if(on==="1")b(color,x+(i*4+(c+.5)*sx-.5-(text.length*4-2)/2)*px,y,z+(r-2)*px,px*sx,.004,px,1);
       })));
     };
     if(look===0){

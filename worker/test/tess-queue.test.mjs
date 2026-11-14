@@ -102,6 +102,8 @@ test("real Room sockets bind Tess turns to the account, reject replaced connecti
     .replace("export class Room", "class Room") + "\nglobalThis.Room = Room;";
   const context = { ...protocol, CAST_ROWS: [{ handle: "one" }, { handle: "two" }], DurableObject: class {}, Date, Map, Set, ArrayBuffer };
   runInNewContext(source, context);
+  // Rooms built here without the constructor (Object.create) take the inspector's reporter switched off.
+  context.Room.prototype.inspect = protocol.inspectReporter(null, {}, "Room", () => "", () => null);
   const room = Object.create(context.Room.prototype);
   let alarm = null;
   room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.doorPasses = new Map();

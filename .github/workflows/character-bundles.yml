@@ -46,6 +46,7 @@ jobs:
       actions: read
     outputs:
       write: ${{ steps.route.outputs.write }}
+      deferred: ${{ steps.priority.outputs.deferred }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -83,11 +84,11 @@ jobs:
         if: steps.priority.outputs.deferred == 'true'
         run: |
           echo "::notice::Deferred for deployment/post-merge work; release completion or scheduled recovery retries this job."
-          exit 1
+          echo "Required character statuses remain pending until reconciliation runs."
 
   bundle:
     needs: inspect
-    if: needs.inspect.outputs.write == 'true'
+    if: needs.inspect.outputs.write == 'true' && needs.inspect.outputs.deferred != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Only actual reconciliation shares the artifact writer's lock. Never
@@ -125,9 +126,9 @@ jobs:
         if: steps.priority.outputs.deferred == 'true'
         run: |
           echo "::notice::Deferred for deployment/post-merge work; release completion or scheduled recovery retries this job."
-          exit 1
+          echo "Required character statuses remain pending until reconciliation runs."
       - name: Repository-scoped character App token
-        if: vars.CHARACTER_APP_CLIENT_ID != ''
+        if: steps.priority.outputs.deferred != 'true' && vars.CHARACTER_APP_CLIENT_ID != ''
         id: app
         uses: actions/create-github-app-token@v3
         with:
@@ -138,6 +139,7 @@ jobs:
           permission-statuses: write
           permission-checks: read
       - name: Scan, route and reconcile character submissions
+        if: steps.priority.outputs.deferred != 'true'
         run: node scripts/character-bundles.mjs
         env:
           CHARACTER_TOKEN: ${{ steps.app.outputs.token || github.token }}

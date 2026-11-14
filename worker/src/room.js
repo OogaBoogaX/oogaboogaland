@@ -26,6 +26,9 @@
 // attachment, so a woken room still shows it, and goes to everyone on a change. One bucket a record limits both.
 // Voice links: each account's asks live in the room's storage, so a link outlives reconnects, sleep and deploys (see
 // Voice links in protocol.js). Nothing runs for them while idle.
+// The inspector (inspect-report.js): while INSPECTOR_IDS names an account, the room reports joins, drops with what
+// caused them, zone and host changes and voice failures as they happen, and its state with the time since its last
+// report, riding snapshots and the sweep; it adds no timer. Off, every call returns at once.
 
 import { DurableObject } from "cloudflare:workers";
 import {
@@ -38,7 +41,7 @@ import {
   PM_FEATURE, PM_HZ, PM_BURST, PM_INVITE_HZ, PM_INVITE_BURST, PM_CONTROL_HZ, PM_CONTROL_BURST, PM_INVITES, PM_BLOCKS, PM_ACCOUNT_KEEP,
   LINK_FEATURE, LINK_HZ, LINK_BURST, LINK_WANTS, LINK_ACCOUNTS, voiceLinked, restoreLinks, storedLinks, linkView, inVoice,
   chatLog, castIndex, bodyName, ownedBody, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
-  BLEND, BLEND_HZ, seenTogether,
+  BLEND, BLEND_HZ, seenTogether, inspectReporter, INSPECT_FEATURE,
 } from "./protocol.js";
 import { sha256Hex } from "./crypto.js";
 import { getPlayer } from "./db.js";
@@ -48,10 +51,14 @@ import { STUDIO_TRANSPORT, STUDIO_ZONE, studioState, studioHostAllowed, studioCa
 import CAST_ROWS from "./characters.gen.json";
 
 const CAST = castIndex(CAST_ROWS);
+// A retired SFU session cannot own usable tracks. Other 410 responses are not proof of session expiry.
+const sfuSessionGone = err => err.status === 404 || (err.status === 410 && err.code === "session_error");
 
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    this.inspect = inspectReporter(ctx, env, "Room", () => ctx.id.name, (detail) => this.inspectState(detail));
+    this.flushDue = 0;
     this.players = new Map();
     this.highscoreRevisions = new Map();
     this.studio = studioState();
@@ -65,7 +72,12 @@ export class Room extends DurableObject {
     this.spawnSlot = 0;
     this.dirty = false;
     this.flushTimer = 0;
-    this.sfu = sfuClient(env);
+    this.sfu = sfuClient(env, (ms, failed) => {
+      this.inspect.count("sfu");
+      this.inspect.count("sfuMs", ms);
+      this.inspect.peak("sfuMax", ms);
+      if (failed) this.inspect.count("sfuFail");
+    });
     this.hostId = 0;
     this.followers = 0;
     this.lastNpc = null;
@@ -124,8 +136,7 @@ export class Room extends DurableObject {
       // block past 30 s resets the island's only room, presence and voice with it.
       if (this.sfu && this.cleanupJobs.length) {
         this.cleanupAt = Date.now();
-        const set = await ctx.storage.getAlarm();
-        if (set === null || set > this.cleanupAt) await ctx.storage.setAlarm(this.cleanupAt);
+        await this.scheduleAlarm();
       }
     });
     // A woken room rebuilds its roster from the attachments its sockets carry. The runtime still lists a socket that is
@@ -150,6 +161,7 @@ export class Room extends DurableObject {
     this.restoreDoor();
     this.hostId = electHost(this.players.values());
     this.followers = npcFollowers(this.players.values(), this.hostId);
+    this.inspect.woke(this.players.size);
   }
 
   record(ws, a) {
@@ -188,7 +200,10 @@ export class Room extends DurableObject {
 
   broadcast(msg, except = null) {
     const text = JSON.stringify(msg);
-    for (const p of this.players.values()) if (p.ws !== except) this.send(p.ws, text);
+    let sent = 0;
+    for (const p of this.players.values()) if (p.ws !== except) { this.send(p.ws, text); sent++; }
+    this.inspect.count("out", sent);
+    this.inspect.count("outBytes", sent * text.length);
   }
 
   broadcastZone(zone, msg) {
@@ -460,6 +475,7 @@ export class Room extends DurableObject {
     const older = this.players.get(who.id);
     if (older) this.evict(older, "replaced");
     if (this.players.size >= MAX_PLAYERS) {
+      this.inspect.event("full", who);
       this.send(server, { t: "kick", reason: "full" });
       server.close(CLOSE_KICK, "full");
       return new Response(null, { status: 101, webSocket: client });
@@ -474,10 +490,11 @@ export class Room extends DurableObject {
     const own = ownedBody(CAST, p.login, p.contributor, p.id);
     if (own) for (const o of this.players.values()) if (o.body && bodyName(o.body).toLowerCase() === own) this.release(o, "owner-here");
     this.players.set(p.id, p);
+    if (this.inspect.on) this.inspect.event("join", p, { replaced: !!older });
 
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [tessQueue.FEATURE, CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE] });
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [tessQueue.FEATURE, CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE, ...(this.inspect.on ? [INSPECT_FEATURE] : [])] });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
     this.send(server, { t: "chat-history", messages: this.chat.list() });
     this.sendCabinets(server);
@@ -499,6 +516,8 @@ export class Room extends DurableObject {
   webSocketMessage(ws, message) {
     const p = this.byWs(ws);
     if (!p) return;
+    this.inspect.count("in");
+    this.inspect.count("inBytes", typeof message === "string" ? message.length : message.byteLength);
     if (!ownedBody(CAST, p.login, p.contributor, p.id)) { this.evict(p, "revoked"); return; }
     if (typeof message !== "string") {
       if (message instanceof ArrayBuffer && message.byteLength >= 4 && new DataView(message).getUint32(0, true) === BLOCK.MAGIC) block.frame(this, p, message);
@@ -508,12 +527,17 @@ export class Room extends DurableObject {
     }
     const msg = parseClientMessage(typeof message === "string" ? message : "");
     if (msg === false) {
-      this.drop(p, "protocol");
+      this.drop(p, "protocol", { code: CLOSE_PROTOCOL });
       ws.close(CLOSE_PROTOCOL, "unreadable message");
       return;
     }
     p.seenAt = Date.now();
     if (!msg) return;
+    // Once a connection, after a rejoin: why the page's last socket ended, as the page saw it (net.js).
+    if (msg.t === "back") {
+      if (!p.backSaid) { p.backSaid = true; this.inspect.event("back", p, { why: msg.why, code: msg.code, clean: msg.clean, down: msg.down }); }
+      return;
+    }
     if (msg.t === "cabinet") { this.cabinetMessage(p, msg); return; }
     // While playing, the room owns the floor pose and body, regardless of game-scene reports.
     if (p.cabinet && ["pose", "zone", "body", "blend", "hp", "shot", "swing", "hockey", "bf"].includes(msg.t)) return;
@@ -552,6 +576,7 @@ export class Room extends DurableObject {
       if (msg.on === p.visible) return;
       p.visible = msg.on;
       tessQueue.presence(this, p);
+      this.inspect.event("visible", p, { visible: msg.on });
       block.visibility(this, p);
     } else if (msg.t === "zone") {
       if (msg.name === p.zone) return;
@@ -564,6 +589,7 @@ export class Room extends DurableObject {
       if (msg.name !== BLOCK.ZONE) block.leave(this, p.id);
       p.zone = msg.name;
       tessQueue.presence(this, p);
+      this.inspect.event("zone", p, { from, to: p.zone });
       this.roomZoneChanged(p, from);
       hockey.arrive(this, p);
       block.arrive(this, p);
@@ -690,14 +716,14 @@ export class Room extends DurableObject {
   }
 
   // The prototype's note stands: on this compatibility date close handlers must not call ws.close().
-  webSocketClose(ws) {
+  webSocketClose(ws, code, reason, wasClean) {
     const p = this.byWs(ws);
-    if (p) this.drop(p, "closed");
+    if (p) this.drop(p, "closed", { code, said: reason, clean: wasClean });
   }
 
-  webSocketError(ws) {
+  webSocketError(ws, error) {
     const p = this.byWs(ws);
-    if (p) this.drop(p, "error");
+    if (p) this.drop(p, "error", { error: String((error && error.message) || error || "") });
   }
 
   sendCabinets(ws = null) {
@@ -738,8 +764,10 @@ export class Room extends DurableObject {
     reply(null);
   }
 
-  drop(p, reason) {
+  // `detail`: what the close said, for the inspector's line (a close code, its reason, whether it was clean).
+  drop(p, reason, detail = null) {
     if (this.players.get(p.id) !== p) return;
+    if (this.inspect.on) this.inspect.event("leave", p, { reason, ...detail, zone: p.zone, on: Date.now() - p.joinedAt, heard: Date.now() - this.heardAt(p), voice: inVoice(p) });
     this.releaseCabinet(p);
     hockey.leave(this, p.id);
     block.leave(this, p.id);
@@ -783,7 +811,7 @@ export class Room extends DurableObject {
 
   // An explicit kick before the close: a server-initiated close alone can leave the client in CLOSING.
   evict(p, reason) {
-    this.drop(p, reason);
+    this.drop(p, reason, { code: CLOSE_KICK });
     this.send(p.ws, { t: "kick", reason });
     try {
       p.ws.serializeAttachment(null);
@@ -797,15 +825,20 @@ export class Room extends DurableObject {
   // room can hibernate between bursts (a running interval would keep it awake, and billed, for good).
   scheduleFlush() {
     if (this.flushTimer) return;
+    this.flushDue = Date.now() + 1000 / TICK_HZ;
     this.flushTimer = setTimeout(() => {
       this.flushTimer = 0;
+      // How late the timer fired: the room's one sign of being too busy to keep its own pace.
+      this.inspect.peak("late", Date.now() - this.flushDue);
       this.snapshot();
+      this.inspect.tick();
     }, 1000 / TICK_HZ);
   }
 
   snapshot() {
     if (!this.dirty) return;
     this.dirty = false;
+    this.inspect.count("snapshots");
     const ps = [], gs = [], js = [], weapons = [], visuals = [], rests = [];
     for (const p of this.players.values()) {
       ps.push(p.id, p.x, p.y, p.z, p.yaw);
@@ -1045,6 +1078,7 @@ export class Room extends DurableObject {
     const id = electHost(this.players.values(), this.hostId);
     const followers = npcFollowers(this.players.values(), id);
     if (id === this.hostId && followers === this.followers) return;
+    if (this.inspect.on && id !== this.hostId) this.inspect.event("host", null, { login: id ? this.players.get(id).login : "", followers });
     this.hostId = id;
     this.followers = followers;
     if (!id) this.lastNpc = null;
@@ -1111,6 +1145,14 @@ export class Room extends DurableObject {
     if (!p) return new Response(JSON.stringify({ error: "join the island first" }), { status: 409, headers: { "content-type": "application/json" } });
     if (!p.connectionToken || request.headers.get("x-room-token") !== p.connectionToken) return new Response(JSON.stringify({ error: "connection replaced" }), { status: 409, headers: { "content-type": "application/json" } });
     const result = (p.voiceQueue || Promise.resolve()).catch(() => {}).then(() => this.voiceOperation(op, request, p));
+    if (this.inspect.on) result.then((res) => {
+      this.inspect.count("voiceOps");
+      // A failed SFU call has its own line (`voice-fail`); refusals by the room are counted and logged here.
+      if (res.status >= 400 && res.status !== 502) {
+        this.inspect.count("voiceRefused");
+        if (res.status !== 409) res.clone().json().then((data) => this.inspect.event("voice-refused", p, { op, status: res.status, error: String(data.error || "") })).catch(() => {});
+      }
+    }, () => {});
     p.voiceQueue = result.then(() => {}, () => {});
     // A browser timeout must not cancel the work that later requests are queued behind.
     this.background(p.voiceQueue);
@@ -1119,6 +1161,7 @@ export class Room extends DurableObject {
 
   async voiceOperation(op, request, expected) {
     const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
+    const started = Date.now();
     if (!this.sfu) return json({ error: "voice is not configured" }, 503);
     const p = this.players.get(Number(request.headers.get("x-player-id")));
     if (!p || p !== expected) return json({ error: "connection replaced" }, 409);
@@ -1257,6 +1300,8 @@ export class Room extends DurableObject {
         return json({ ok: true });
       }
       if (op === "leave") {
+        // A page restarting its voice says why (voice.js), so a dropped connection is told from someone leaving voice.
+        if (body.why === "failed" || body.why === "disconnected") this.inspect.event("voice-restart", p, { why: body.why });
         await this.clearVoice(p);
         p.ws.serializeAttachment(this.attachment(p));
         this.updateVoice();
@@ -1265,7 +1310,9 @@ export class Room extends DurableObject {
       }
       return json({ error: "unknown voice op" }, 404);
     } catch (err) {
-      // Return a bounded public error; SDP and upstream session identifiers never enter logs.
+      // Return a bounded public error; SDP and upstream session identifiers never enter logs, nor the inspector's line,
+      // which keeps the SFU's status and error code alone.
+      if (this.inspect.on) this.inspect.event("voice-fail", p, { op, status: Number.isInteger(err && err.status) ? err.status : 0, code: String((err && err.code) || (err && err.name) || ""), ms: Date.now() - started });
       return json({ error: "the voice service did not answer" }, 502);
     }
   }
@@ -1576,11 +1623,11 @@ export class Room extends DurableObject {
     // Persist and arm the retry before upstream I/O. Retired sessions never hold up a new one.
     if (!this.cleanupAt) this.cleanupAt = Date.now() + SWEEP_MS;
     if (this.ctx && this.ctx.storage) await this.ensureSweep();
-    if (deferred) this.background(this.retryCleanup(session));
+    if (deferred) this.background(this.retryCleanup(session, true));
     else await this.retryCleanup(session);
   }
 
-  async retryCleanup(session = null) {
+  async retryCleanup(session = null, background = !session) {
     if (!this.sfu || !this.cleanupJobs || !this.cleanupJobs.length) return;
     if (!session && this.cleanupRunning) return this.cleanupRunning;
     const tasks = this.cleanupTasks ||= new Map();
@@ -1594,35 +1641,48 @@ export class Room extends DurableObject {
         if (Date.now() - (job.at ??= Date.now()) > CLEANUP_MS) { this.cleanupJobs.splice(this.cleanupJobs.indexOf(job), 1); continue; }
         let finished;
         tasks.set(job.session, new Promise(resolve => { finished = resolve; }));
+        this.cleanupAttempt = { at: Date.now(), operation: job.inspect ? "inspect" : "close", finished: 0, status: 0 };
+        const attempt = this.cleanupAttempt;
         try {
           const revision = job.revision || 0;
+          let inspected = !job.inspect;
           if (job.inspect) {
             const priorVersions = { ...(job.midVersions || {}) };
-            const state = await this.sfu.getSession(job.session);
-            const inactive = new Set((state.tracks || []).filter(t => t.status === "inactive").map(t => t.mid));
-            job.mids = job.mids.filter(mid => !inactive.has(mid) || (job.midVersions || {})[mid] !== priorVersions[mid]);
-            // Only a session nobody holds any more is swept for what is left. On a live one that would close every voice
-            // it still receives, with no page any the wiser: one listener gone deaf to everybody.
-            const held = [...this.players.values()].some(p => p.voice.sub === job.session || p.voice.pub === job.session);
-            if (!held) job.mids = [...new Set(job.mids.concat((state.tracks || []).filter(t => t.status !== "inactive" && typeof t.mid === "string").map(t => t.mid)))];
+            try {
+              const state = await this.sfu.getSession(job.session, background);
+              const inactive = new Set((state.tracks || []).filter(t => t.status === "inactive").map(t => t.mid));
+              job.mids = job.mids.filter(mid => !inactive.has(mid) || (job.midVersions || {})[mid] !== priorVersions[mid]);
+              // Only a session nobody holds any more is swept for what is left. On a live one that would close every voice
+              // it still receives, with no page any the wiser: one listener gone deaf to everybody.
+              const held = [...this.players.values()].some(p => p.voice.sub === job.session || p.voice.pub === job.session);
+              if (!held) job.mids = [...new Set(job.mids.concat((state.tracks || []).filter(t => t.status !== "inactive" && typeof t.mid === "string").map(t => t.mid)))];
+              inspected = true;
+            } catch (err) {
+              attempt.status = Number(err.status) || 0;
+              if (sfuSessionGone(err)) throw err;
+              // An inspection timeout must not prevent closing MIDs we already own. Keep the inspection pending,
+              // even if those closes succeed: the timed-out allocation may still have left other tracks behind.
+            }
           }
           const mids = job.mids.slice();
           const versions = { ...(job.midVersions || {}) };
-          const res = mids.length ? await this.sfu.closeTracks(job.session, mids) : { tracks: [] };
-          // Only explicit per-track successes relinquish ownership. Missing/malformed rows retry.
-          const succeeded = new Set((Array.isArray(res.tracks) ? res.tracks : []).filter(t => t && typeof t.mid === "string" && !t.errorCode).map(t => t.mid));
+          if (mids.length) attempt.operation = "close";
+          const res = mids.length ? await this.sfu.closeTracks(job.session, mids, background) : { tracks: [] };
+          // Cloudflare's close_track_error confirms an absent/already-closed track. Other errors and missing rows retry.
+          const succeeded = new Set((Array.isArray(res.tracks) ? res.tracks : []).filter(t => t && typeof t.mid === "string" && (!t.errorCode || t.errorCode === "close_track_error")).map(t => t.mid));
           job.mids = job.mids.filter(mid => !succeeded.has(mid) || (job.midVersions || {})[mid] !== versions[mid]);
           for (const mid of succeeded) if (!job.mids.includes(mid) && job.midVersions) delete job.midVersions[mid];
           // A close this pass sent that the SFU did not confirm; a mid queued while it was on its way is simply next.
           if (mids.some(mid => job.mids.includes(mid))) job.inspect = true;
           // A concurrent queue may have appended/reallocated owned MIDs while upstream was pending.
-          if ((job.revision || 0) !== revision || job.mids.length || (job.inspect && Date.now() < job.inspectUntil)) continue;
+          if (!inspected || (job.revision || 0) !== revision || job.mids.length || (job.inspect && Date.now() < job.inspectUntil)) continue;
           this.cleanupJobs.splice(this.cleanupJobs.indexOf(job), 1);
         } catch (err) {
+          attempt.status = Number(err.status) || 0;
           // A confirmed absent upstream session owns no tracks and needs no further retry.
-          if (err.status === 404) this.cleanupJobs.splice(this.cleanupJobs.indexOf(job), 1);
+          if (sfuSessionGone(err)) this.cleanupJobs.splice(this.cleanupJobs.indexOf(job), 1);
           // Other failures retain ownership for the existing room alarm.
-        } finally { tasks.delete(job.session); finished(); }
+        } finally { attempt.finished = Date.now(); tasks.delete(job.session); finished(); }
       }
       // Remaining jobs retry at the next wake: at most a sweep interval away, and sooner if another wake comes first.
       if (!this.cleanupJobs.length) this.cleanupAt = 0;
@@ -1674,7 +1734,14 @@ export class Room extends DurableObject {
     const next = this.nextAlarm();
     if (next === null) return;
     const set = await this.ctx.storage.getAlarm();
-    if (set === null || set > next) await this.ctx.storage.setAlarm(next);
+    this.alarmRegisteredAt = set;
+    const now = Date.now();
+    // An old registered deadline is not proof that its callback will run: platform retries are finite. A wake or
+    // new cleanup job repairs an alarm overdue by a sweep interval instead of preserving that stale deadline forever.
+    if (set === null || set > next || set < now - SWEEP_MS) {
+      this.alarmRegisteredAt = Math.max(next, now);
+      await this.ctx.storage.setAlarm(this.alarmRegisteredAt);
+    }
   }
 
   expireDoors(now) {
@@ -1692,12 +1759,14 @@ export class Room extends DurableObject {
 
   // Sockets silent past STALE_MS, auto-answered pings included, are evicted as stale.
   async alarm() {
+    this.alarmStarted = Date.now();
     hockey.sweep(this);
     block.sweep(this);
     tessQueue.sweep(this);
-    const now = Date.now();
     // Cleanup retries run on every wake, not only at sweep time.
     await this.retryCleanup();
+    // A full retry pass can outlast a sweep interval. Advance from completion, not the old start time.
+    const now = Date.now();
     const sweepDue = !this.sweepAt || now >= this.sweepAt;
     this.expireDoors(now);
     // A cancelled lease can leave its earlier alarm in place. Before the recorded sweep deadline that wake only
@@ -1722,6 +1791,48 @@ export class Room extends DurableObject {
       await this.ctx.storage.put("sweepAt", this.sweepAt);
     }
     const next = this.nextAlarm();
-    if (next !== null) await this.ctx.storage.setAlarm(next);
+    if (next !== null) { await this.ctx.storage.setAlarm(next); this.alarmRegisteredAt = next; }
+    this.alarmFinished = Date.now();
+    this.inspect.tick();
+  }
+
+  // When the room last heard from a player: a message, or a ping the runtime answered without waking it.
+  heardAt(p) {
+    const pinged = this.ctx.getWebSocketAutoResponseTimestamp(p.ws);
+    return Math.max(p.seenAt, pinged ? pinged.getTime() : 0);
+  }
+
+  // The room as the inspector shows it; `detail` adds a row per player while someone watches. No positions, chat,
+  // tokens, session descriptions or SFU ids.
+  inspectState(detail) {
+    const zones = {}, rows = detail ? [] : undefined;
+    let hub = 0, hidden = 0, driving = 0, speaking = 0, listening = 0, pulled = 0, maxPulled = 0, attachMax = 0;
+    for (const p of this.players.values()) {
+      zones[p.zone] = (zones[p.zone] || 0) + 1;
+      if (p.inHub) hub++;
+      if (!p.visible) hidden++;
+      if (p.body) driving++;
+      const hears = Object.keys(p.voice.mids || {}).length, voice = p.voice.track ? "speaking" : p.voice.sub ? "listening" : "off";
+      if (voice === "speaking") speaking++; else if (voice === "listening") listening++;
+      pulled += hears;
+      maxPulled = Math.max(maxPulled, hears);
+      if (!detail) continue;
+      attachMax = Math.max(attachMax, JSON.stringify(this.attachment(p)).length);
+      rows.push({ id: p.id, login: p.login, zone: p.zone, body: p.body || null, hub: p.inHub, visible: p.visible, since: p.joinedAt,
+        heard: this.heardAt(p), voice, muted: p.muted, pulled: hears, host: p.id === this.hostId });
+    }
+    const host = this.players.get(this.hostId);
+    return { status: this.players.size ? "live" : "empty", players: this.players.size, maxPlayers: MAX_PLAYERS, sockets: this.ctx.getWebSockets().length,
+      zones, hub, hidden, driving, host: host ? host.login : null, followers: this.followers, speaking, listening, pulled, maxPulled, pullCap: 64,
+      cleanup: this.cleanupJobs.length, cleanupCap: 64, doors: this.doorQueue.length + (this.doorActive ? 1 : 0), tickHz: TICK_HZ,
+      cleanupAttempt: this.cleanupAttempt || null, cleanupBusy: this.cleanupTasks ? this.cleanupTasks.size : 0,
+      alarmStarted: this.alarmStarted || 0, alarmFinished: this.alarmFinished || 0,
+      alarmRegisteredAt: this.alarmRegisteredAt || 0,
+      flushPending: !!this.flushTimer, alarmAt: this.nextAlarm(), attachMax: detail ? attachMax : undefined, rows };
+  }
+
+  // The Inspector, when a viewer connects: report now, with the rows.
+  inspectWatch(until) {
+    this.inspect.watch(until);
   }
 }

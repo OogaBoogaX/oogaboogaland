@@ -1,6 +1,3 @@
-// Midy-Machete: a Bitcoin warrior queen with Junior at her side. A gold crown with a ₿ coin over dark curls, red
-// laser eyes, gold hoops; a black crop top with a gold ₿, a belt, shorts, knee boots, gold cuffs, a ₿ money bag and a
-// black machete edged in steel. Junior is a cream and caramel spaniel in a black ₿ bandana.
 (() => {
   "use strict";
   const BL = window.BL;
@@ -9,51 +6,34 @@
   const SKIN = "#d98b47", RED = "#ff2438", RED_CORE = "#fff4ee", WHITE = "#fff3f0", PINK = "#ffb3b6", LID = "#a8643a";
   const GOLD = "#f2b523", GOLD_HI = "#ffd768", GOLD_DK = "#c4861a", ORANGE = "#f7931a";
   const TOP = "#1a171b", SHORTS = "#2f3a3a", LEATHER = "#6a4424", BOOT = "#17131a", SOLE = "#8a4f1c";
-  // The hair's three tones, none of them the look's own hair colour, so the head's ragged-hair pass leaves them whole.
   const HAIR = ["#241612", "#33211a", "#4a3024"];
   const BROW = "#2a1610", LIPS = "#5a2a1c", BLUSH = "#d47b40";
-  // ₿, five across and seven down, from the top.
   const BTC = ["01010", "11110", "10001", "11110", "10001", "11110", "01010"];
   const eachMark = (fn) => BTC.forEach((row, r) => { for (let c = 0; c < 5; c++) if (row[c] === "1") fn(c, r); });
-  // A cell's own small number, for the curls' tones and their ragged edge; nothing here draws from k.rand.
   const mix = (x, y, z) => ((Math.imul(x + 11, 73856093) ^ Math.imul(y + 29, 19349663) ^ Math.imul(z + 7, 83492791)) >>> 0) % 100;
   const modelled = () => BL.models.STYLE === "R";
-  // Her head under the modelled look, as a share of the blocks' own size: her face's features keep theirs. And how
-  // far it is raised off her shoulders, in units, on a neck of its own that length.
   const HEAD = 0.85, NECK = 0.7;
-  // How much thicker than a boot's own her soles are, in units: she stands that much taller on them.
   const SOLES = 0.45;
-  // Her hair in the head's cells (x 0 to 6 across her face, z 5 its front, y 0 her chin): curls over the top of her
-  // head and up inside the crown, a fringe parted over her forehead, locks down both sides of her face, a mane at
-  // her sides, and at the back a layer close on her head that goes on down round her neck and over her shoulders.
-  // `put(x, y, z, tone)` sets a cell to one of the three tones; `bare` leaves one her skin.
   const mane = (put, bare) => {
     const tone = (x, y, z) => { const n = mix(x, y, z); return n < 34 ? 0 : n < 74 ? 1 : 2; };
     const hair = (x, y, z) => put(x, y, z, tone(x, y, z));
-    // A curl at the mane's edge now and then left out, so its outline is ragged, never a hole inside it.
     const gap = (x, y, z) => mix(x, y, z) < 24;
     for (let x = -1; x <= 7; x++) for (let z = -1; z <= 5; z++) { hair(x, 7, z); hair(x, 6, z); if (x >= 0 && x <= 6 && z >= 0 && z <= 4) { hair(x, 8, z); hair(x, 9, z); } }
-    // The parting: her forehead bare between the two halves of the fringe, which hang lower at her temples.
     for (let x = 2; x <= 4; x++) for (const z of [4, 5]) bare(x, 6, z);
     for (const x of [0, 6]) hair(x, 5, 5);
-    // Her bangs stand out a block in front of her face: along her hairline, and down each temple.
     for (let x = -1; x <= 7; x++) { hair(x, 7, 6); if (x <= 1 || x >= 5) hair(x, 6, 6); }
     for (const x of [-1, 0, 6, 7]) hair(x, 5, 6);
     for (const x of [-1, 7]) hair(x, 4, 6);
-    // The sides, over her ears, a lock either side of her face, and on down beside her neck onto her shoulders.
     for (const x of [-1, 7]) {
       for (let y = -2; y <= 5; y++) for (let z = -1; z <= (y < 0 ? 1 : 4); z++) hair(x, y, z);
       for (let y = 3; y <= 6; y++) hair(x, y, 5);
     }
-    // The mane: full at the sides from the crown down to her jaw, and behind her shoulders below that.
     for (const x of [-2, 8]) for (let y = -4; y <= 7; y++) for (let z = -2; z <= 3; z++) {
       if (y < 0 && z > -1) continue;
       const edge = y === -4 || y === 7 || z === -2 || z === 3 || (y < 0 && z === -1);
       if (!(edge && gap(x, y, z))) hair(x, y, z);
     }
     for (const x of [-3, 9]) for (let y = 1; y <= 6; y++) for (let z = -1; z <= 2; z++) if (!gap(x, y, z) || (y > 2 && y < 6 && z === 0)) hair(x, y, z);
-    // The back: a layer close on her head and one over it, both on down her back, longest in the middle, the hem and
-    // the outer layer ragged; and one more right behind her neck, so nothing is open between it and her hair.
     for (let x = -1; x <= 7; x++) {
       const long = x <= -1 || x >= 7 ? -3 : x <= 0 || x >= 6 ? -4 : x <= 1 || x >= 5 ? -5 : -6;
       for (let y = long; y <= 7; y++) {
@@ -64,8 +44,6 @@
     }
   };
 
-  // The crown, in half units in the head's frame: a band round the top of her hair set with red gems, and merlons
-  // with a gem in each. Its ₿ coin is a piece of its own, finer still (coinGeometry).
   const crownGeometry = (u) => {
     const v = makeVox(), X0 = -2, X1 = 15, Z0 = -2, Z1 = 12, Y0 = 16, Y1 = 19, ring = [];
     for (let x = X0; x <= X1; x++) ring.push([x, Z1]);
@@ -79,7 +57,6 @@
     });
     return voxelGeometry(v, { unit: u / 2, palette: [GOLD, GOLD_HI, GOLD_DK, "#d61f2c"], origin: { x: -3.5 * u, y: 0, z: -3 * u } });
   };
-  // The crown's ₿ coin, in quarter units: a gold disc on the front of the band, taller than it, the ₿ standing on it.
   const coinGeometry = (u) => {
     const v = makeVox(), R = 7.6;
     for (let x = -8; x <= 8; x++) for (let y = -8; y <= 8; y++) {
@@ -89,8 +66,6 @@
     eachMark((c, r) => v.set(c - 2, 3 - r, 2, 1));
     return voxelGeometry(v, { unit: u / 4, palette: [ORANGE, GOLD_HI, GOLD_DK], origin: { x: 0, y: 0, z: 0 } });
   };
-  // The ₿ money bag, in quarter units: a leather sack tied with gold cord, a flared top and the ₿ on its front. Its
-  // origin is the cord, where it hangs from the belt.
   const bagGeometry = (u) => {
     const v = makeVox();
     for (let x = -6; x <= 6; x++) for (let y = -14; y <= -2; y++) for (let z = -4; z <= 4; z++) {
@@ -103,36 +78,24 @@
     return voxelGeometry(v, { unit: u / 4, palette: ["#8a5a32", "#6e4524", "#a8703f", GOLD, GOLD_DK], origin: { x: 0, y: 0, z: 0 } });
   };
 
-  // Junior, in half units, facing +z with his paws at y 0, built as DSB Land's dogs are: his body, and with a `part`
-  // one of his legs or his tail, each a piece of its own for the crew to swing and wag. A cream spaniel, caramel
-  // over his eyes, along his back and on his long ears and toes. His face and bandana are finer work (dogDetail).
   const DOG_INK = ["#f8e8c8", "#ead0a2", "#c98146", "#a8642f"];
   const dogGeometry = (u, part) => {
     const v = makeVox(), CREAM = 0, CREAM_DK = 1, TAN = 2, TAN_DK = 3;
     const fur = (x, y, z) => mix(x, y, z) < 18 ? CREAM_DK : CREAM, tan = (x, y, z) => mix(x, y, z) < 28 ? TAN_DK : TAN;
-    // A leg, hung from its hip: cream, with caramel toes. And his tail from its root, a cream plume curling up.
     if (part === "leg") { v.fill(-1, 0, -3, -1, -1, 0, fur); v.fill(-1, 0, -4, -4, -1, 0, TAN); }
     if (part === "tail") { v.fill(-1, 0, 0, 2, -1, -1, fur); v.fill(-1, 0, 2, 5, -2, -2, fur); v.fill(-1, 0, 5, 6, -1, -1, CREAM); }
     if (part) return voxelGeometry(v, { unit: u / 2, palette: DOG_INK });
     v.fill(-2, 2, 4, 8, -6, 3, (x, y, z) => (y >= 7 && z >= -4 && z <= -1) || (Math.abs(x) === 2 && y >= 5 && z >= -5 && z <= -3) ? tan(x, y, z) : fur(x, y, z));
     v.fill(-2, 2, 4, 7, 4, 4, fur);
-    // His head: cream, with caramel round each eye and over his crown either side of a blaze, its top a block
-    // smaller all round, and a cream muzzle.
     const coat = (x, y, z) => x !== 0 && y >= 11 && (z >= 6 || y >= 13 || Math.abs(x) === 3) ? tan(x, y, z) : fur(x, y, z);
     v.fill(-3, 3, 8, 13, 1, 7, coat); v.fill(-2, 2, 14, 14, 2, 6, coat);
     v.fill(-2, 2, 8, 10, 8, 9, fur);
-    // The ears hang long and wide from the sides of his crown, down past his jaw.
     for (const s of [-1, 1]) {
       v.fill(4 * s, 4 * s, 6, 13, 2, 5, (x, y, z) => y === 6 && mix(x, y, z) < 45 ? null : y <= 7 || z === 2 ? TAN_DK : TAN);
       v.fill(5 * s, 5 * s, 7, 11, 3, 4, tan);
     }
     return voxelGeometry(v, { unit: u / 2, palette: DOG_INK, origin: { x: -u / 4, y: 0, z: 0 } });
   };
-  // The fine work on him. In eighths of a unit: his eyes, a dark caramel block of brow across each; his nose, on
-  // the top front of his muzzle; a line down to his mouth, turned up at its corners; and a thin tongue. And his
-  // bandana, no blocks in it: a triangle of cloth round his neck, on his chest down to a point with the gold ₿ on
-  // it, its ends back round his sides. `hem` is its lower edge's height at a distance round him from mid chest (A
-  // at his chest's corner, L where an end runs out).
   const dogDetail = (u) => {
     const H = BL.heroBody, v = makeVox(), g = BL.models.geometry();
     v.fill(6, 11, 46, 52, 32, 32, 0); v.fill(-12, -7, 46, 52, 32, 32, 0);
@@ -152,22 +115,16 @@
     return BL.models.merge(voxelGeometry(v, { unit: u / 8, palette: ["#1b1210", "#ec6f86", DOG_INK[3]] }), H.scaled(g, u));
   };
 
-  // Her machete under the modelled look, in sixteenths of her height from the grip: a black grip, pommel and
-  // crossguard and a broad blade, black flats inside a steel edge, a gold ₿ on each. Short in the grip, for her fist.
-  const swordGeometry = (h, gold) => {
+  const swordGeometry = (h) => {
     const H = BL.heroBody, geo = BL.models.geometry();
-    const steel = gold ? "#ffe07a" : "#dcd9d2", steelDk = gold ? "#e0a92a" : "#a9a69f", flat = gold ? "#d9a12a" : "#1d171c";
-    const dark = gold ? "#b8862c" : "#262024", mark = gold ? "#fff2b0" : GOLD;
+    const steel = "#dcd9d2", steelDk = "#a9a69f", flat = "#1d171c";
+    const dark = "#262024", mark = GOLD;
     H.loft(geo, [[-2.1, 0.42, 0.52, 0.16], [-1.4, 0.42, 0.52, 0.16]], dark);
-    H.loft(geo, [[-1.4, 0.34, 0.4, 0.14], [1.2, 0.34, 0.4, 0.14]], gold ? "#8a602c" : "#17131a", [false, false]);
+    H.loft(geo, [[-1.4, 0.34, 0.4, 0.14], [1.2, 0.34, 0.4, 0.14]], "#17131a", [false, false]);
     H.loft(geo, [[1.2, 0.46, 2.15, 0.2], [1.72, 0.46, 2.15, 0.2]], dark);
-    // The steel, edge to edge and up to the point, the black flats a little proud of it. The blade starts narrow
-    // above the guard, then steps out square to its full width; the step is all steel, the black one width.
     H.loft(geo, [[1.72, 0.17, 1.24, 0.12], [3, 0.17, 1.24, 0.12]], [steel, steelDk], [false, false]);
     H.loft(geo, [[2.95, 0.17, 1.8, 0.15], [9.6, 0.17, 1.8, 0.15], [12.3, 0.03, 0.05, 0.02]], [steel, steelDk]);
     H.loft(geo, [[1.72, 0.25, 1.06, 0.1], [9.5, 0.25, 1.06, 0.1], [11.6, 0.06, 0.08, 0.03]], flat);
-    // The ₿ on each flat, its foot level with the blade's shoulder. Seen from its own side a flat's right is -z on
-    // +x and +z on -x, so it reads true on both.
     const pw = 0.25, ph = 0.3, top = 5.1;
     for (const side of [-1, 1]) eachMark((c, r) => {
       const x = side * 0.262, z = -side * (c - 2) * pw, y = top - r * ph;
@@ -175,7 +132,6 @@
     });
     return Object.assign(H.scaled(geo, h / 16), { slingTurn: Math.PI / 2, slingHiltUp: true });
   };
-  // Her machete in blocks, for the voxel look: the same black blade in a steel edge.
   const swordVox = () => {
     const v = makeVox();
     v.fill(-1, 1, -6, -1, 0, 1, 2);
@@ -194,7 +150,7 @@
     joined: 1794434196,
     lastCommit: 1794435352,
     look: {
-      build: "slim", height: 1.04, hatY: 13, face: "none", hairless: true, noBrow: true, noPupils: true, noFlaps: true,
+      build: "slim", height: 1.04, face: "none", hairless: true, noBrow: true, noPupils: true, noFlaps: true,
       skin: SKIN, hair: "#1d1420", fur: "#c58b55",
       portrait: { min: [-3, -2, -3], max: [9, 9, 7] }
     },
@@ -209,9 +165,6 @@
       ]
     },
     dress: {
-      // Shorts on her hips, a belt, her midriff bare and a black crop top. In blocks the belt is a row of leather,
-      // its buckle and the top's ₿ a gold block each; modelled, the belt's row is her bare waist and each of those
-      // is drawn on her (see model).
       torso(k, v) {
         const shorts = k.color(SHORTS), belt = k.color(LEATHER), gold = k.color(GOLD), top = k.color(TOP), skin = k.skinJ;
         v.fill(0, 8, 0, 2, 0, 5, shorts);
@@ -220,8 +173,6 @@
         v.fill(0, 8, 6, 7, 0, 5, top);
         if (!modelled()) { v.set(4, 3, 5, gold); v.set(4, 6, 5, gold); }
       },
-      // Bare thighs over black knee boots with leather soles (in blocks her shorts reach a third of the way down
-      // them). A gold cuff at each wrist.
       gear(k) {
         const u = k.u, skin = k.skinJ, shorts = k.color(SHORTS), boot = k.color(BOOT), sole = k.color(SOLE), gold = k.color(GOLD);
         const leg = (side) => {
@@ -244,21 +195,12 @@
         k.parts.armR.geometry = k.parts.armL.geometry = k.vg(arm, { x: -1.5 * u, y: -11 * u, z: -1.5 * u });
       },
       club: (k) => modelled()
-        ? { default: swordGeometry(k.h, false), gold: swordGeometry(k.h, true), rest: { x: 0.95, z: 0 }, carry: { x: 0.95, z: 0 } }
-        : { default: blockSword(k, ["#1d171c", "#dcd9d2", "#262024"]), gold: blockSword(k, ["#d9a12a", "#ffe07a", "#b8862c"]), rest: { x: 0.95, z: 0 }, carry: { x: 0.95, z: 0 } },
-      // The modelled look: the female build, with her own head and the pieces blocks cannot say.
+        ? { default: swordGeometry(k.h), rest: { x: 0.95, z: 0 }, carry: { x: 0.95, z: 0 } }
+        : { default: blockSword(k, ["#1d171c", "#dcd9d2", "#262024"]), rest: { x: 0.95, z: 0 }, carry: { x: 0.95, z: 0 } },
       model(k, wear) {
         const H = BL.heroBody, M = BL.models, u = k.u, body = wear(), S = H.trunk(true);
-        // Her shorts' front follows the front of her thighs: the front half of her trunk is drawn in from her waist
-        // down, most at her hips' foot. `tuck` is the share of its depth kept at a height; `shell` fits to it.
         const tuck = (y) => y >= 2.6 ? 1 : (y < 1.2 ? 1.5 + (y + 0.4) / 1.6 * 0.25 : 1.75 - (y - 1.2) / 1.4 * 0.15) / S.ring(y)[1];
         for (let v = body.torso.verts, i = 0; i < v.length; i += 3) if (v[i + 2] > 0) v[i + 2] *= tuck(v[i + 1] / u);
-        // Her head: blocks HEAD of their size, with a face modelled on them at its own size, and an ear either side
-        // with a gold hoop under it. Her face is five rows (`low` brings all over the sixth down one) and half a
-        // row under them. Of the mane this head `keeps`, at her sides: not the opening for her ear and its hoop;
-        // one lock before the ear; at her jaw and under, only what is behind her ears; the outermost layer from her
-        // ears up. Her skin is its own piece in half blocks, a hair off the hair's grid, so it takes no block
-        // detail and is the one flat colour her body is.
         const hu = u * HEAD, hair = makeVox(), skin = makeVox(), low = (y) => y > 0 ? y - 1 : y, at = { x: -3.5 * hu, y: NECK * u, z: -3 * hu };
         const flesh = (x, y, z) => skin.fill(2 * x, 2 * x + 1, 2 * y, 2 * y + 1, 2 * z, 2 * z + 1, 0);
         const keeps = (x, y, z) => y && !((x < 0 || x > 6) && (y < 5 && z > 4 || y < 3 && (z > 1 || x < -2 || x > 8) || (y === 3 || y === 4) && (z === 2 || z === 3)));
@@ -280,8 +222,6 @@
               H.slab(g, H.rect(ex0, ex1, 2.6, 3.95, z, 0.2), F, 0.05, 1, LID);
               H.slab(g, H.rect(ex0, ex1, 2.66, 2.86, z + 0.05, 0.05), F, 0.04, 1, liner);
             } else {
-              // A glow round it; the white of her eye; her iris, a square of red light toward her nose with a white-hot
-              // core; a blush of the light on the white; and her eyeliner along its top, out past its corner.
               H.slab(g, H.rect(ex0 - 0.16, ex1 + 0.16, 2.44, 4.0, z, 0.24), F, 0.02, 1, "#c7401f", "#c7401f", 0.35);
               H.slab(g, H.rect(ex0, ex1, 2.6, 3.95, z + 0.02, 0.1), F, 0.04, 1, WHITE, "#e8c9c6", 0.85);
               const [ix0, ix1] = X(0.78, 1.8);
@@ -295,12 +235,8 @@
             }
             const [kx0, kx1] = X(1.65, 2.85);
             H.slab(g, H.rect(kx0, kx1, 1.65, 2.3, z, 0.22), F, 0.01, 1, BLUSH);
-            // The smile turns up at each end.
             const [mx0, mx1] = X(0.5, 0.86);
             H.slab(g, H.rect(mx0, mx1, 1.5, 1.64, z, 0.03, 0.5 * side), F, 0.04, 1, LIPS);
-            // Her ear stands out from the side of her head and faces forward, its hollow on its front, so from her
-            // side only its edge shows; lit a little of itself, to read as skin in her hair's shade. A chunky gold
-            // hoop hangs side on from its lobe, its hole through from side to side.
             const sx = side * 3.5 * HEAD, out = (pts, ez) => pts.map(([o, y]) => [sx + o * side, y, ez]);
             const ear = out([[0, 2.95], [0.4, 2.95], [0.62, 3.2], [0.62, 3.95], [0.4, 4.2], [0, 4.2]], -0.34);
             H.slab(g, ear, F, 0.44, 0.86, SKIN, SKIN, 0.45);
@@ -316,23 +252,15 @@
             }
           }
           H.slab(g, H.rect(-0.56, 0.56, 1.4, 1.54, z, 0.04), F, 0.04, 1, LIPS);
-          // All of it is set out for the blocks' own six rows of face, and comes down the one row with them.
           M.moved(g, 0, NECK - HEAD, 0);
-          // Her neck, on up from where her shoulders' own ends (a little behind her head's middle) into her chin.
           return H.loft(g, [[0, 1.4, 1.3, 0.5, 0, -0.32], [NECK - 0.2, 1.4, 1.3, 0.5, 0, -0.32]], SKIN, [false, false]);
         };
         const head = (shut) => M.merge(blocks, H.scaled(face(shut), u));
-        // Her top is painted on up to her shoulder line. A shell of its cloth goes on over her shoulders to the foot
-        // of her neck (`foot`, on a build that says where in `heights`; else part way up the slope), and another is
-        // its hem, a band round her ribs; her neckline is cut square and wide out of its front, in her skin, so the
-        // straps are thin; and the ₿ is on her chest. Each is lifted a little off her trunk.
         const g = M.geometry(), OFF = 0.07, WIDE = 1.6, foot = (S.heights || []).find((y) => y > 7.85 && y < 8.72), HIGH = foot ? foot + 0.05 : 8.72;
         const on = (x, y, way, d = OFF) => S.lift([x, y, S.face(x, y, way)], [0, y >= 7.6 ? 0.5 : 0, way], d);
         const shell = (y, d = OFF) => { const [hx, hz, cut, cz] = S.ring(y), f = hz * tuck(y); return [y, hx + d, (f + hz) / 2 + d, cut + d * 0.5, 0, cz + (f - hz) / 2]; };
         H.loft(g, [7.74, 7.8, ...(foot ? [foot] : []), HIGH].map((y) => shell(y)), TOP, [false, false]);
         H.loft(g, [shell(4.3, 0), shell(4.34), shell(4.75), shell(5.05), shell(5.28), shell(5.32, 0)], TOP, [false, false]);
-        // The cut keeps its width up her neck, where her front narrows: `flat` is how much of it lies on the flat
-        // of her front at a height, the rest of it on the corners either side, and a row is drawn where that begins.
         const flat = (y) => { const [hx, , cut] = S.ring(y); return Math.min(WIDE, hx - cut); };
         const end = foot || HIGH, f0 = S.ring(7.8), f1 = S.ring(end), w0 = f0[0] - f0[2], w1 = f1[0] - f1[2];
         const ROWS = [7.12, 7.25, 7.8, ...(w0 > WIDE && WIDE > w1 ? [7.8 + (w0 - WIDE) / (w0 - w1) * (end - 7.8)] : []), ...(foot ? [foot] : []), HIGH + 0.02], lift = OFF + 0.05;
@@ -346,11 +274,7 @@
           const x0 = (c - 2.5) * pw, y1 = top - r * ph;
           H.poly(g, [on(x0, y1 - ph, 1, d), on(x0 + pw, y1 - ph, 1, d), on(x0 + pw, y1, 1, d), on(x0, y1, 1, d)], GOLD, [0, 0, 1]);
         });
-        // Her shorts draw in under her hips to their legs' own width, so no ledge stands over her thighs.
         H.loft(g, [shell(S.low + 0.02, 0.015), [S.low - 0.24, 2.9, 1.53, 0.5, 0, -0.03]], SHORTS, [false, true]);
-        // Her belt follows her trunk up from the widest of her hips (B0), a little off it all the way: tight, and
-        // cutting into nothing. Under it her hips go straight down, so no slope there reads as bunched cloth. Its
-        // buckle lies on its sloping front (`out`): a square gold frame round dark leather, a gold stud in it.
         const B0 = 1.2, B1 = 2.5, BY = (B0 + B1) / 2;
         H.loft(g, [shell(B0 - 0.02, 0), shell(B0, 0.1), shell(B1, 0.1), shell(B1 + 0.02, 0)], LEATHER, [false, false]);
         const z0 = S.face(0, B0, 1) * tuck(B0) + 0.1, lean = (S.face(0, B1, 1) * tuck(B1) + 0.1 - z0) / (B1 - B0), nl = Math.hypot(lean, 1), out = [0, -lean / nl, 1 / nl];
@@ -359,9 +283,6 @@
         plate(0.55, 0.47, 0.06, 0.22, 0.02, 1, "#3b2413");
         plate(0.22, 0.19, 0.04, 0.24, 0.07, 0.9, GOLD_HI, GOLD);
         body.torso = M.merge(body.torso, H.scaled(g, u));
-        // A gold cuff on each wrist; a short leg of her shorts on each thigh, its hem turned in; and each boot: two
-        // heavy bands, the boot's own leg orange round her ankle between them, a gold buckle on the lower, and a
-        // thick sole.
         const cuff = M.geometry(), bands = M.geometry();
         H.loft(cuff, [[-3.92, 0.84, 0.86, 0.3], [-3.76, 1.03, 1.05, 0.36], [-3.02, 1.07, 1.09, 0.36], [-2.86, 0.92, 0.95, 0.32]], [GOLD_DK, GOLD, GOLD_HI]);
         const band = "#2a242c";
@@ -371,15 +292,12 @@
         H.loft(bands, [[-5.55, 1.31, 1.45, 0.4, 0, -0.03], [-5.05, 1.31, 1.43, 0.4]], band);
         H.loft(bands, [[-5.05, 1.21, 1.31, 0.355], [-4.5, 1.21, 1.31, 0.355]], "#e0851c", [false, false]);
         H.slab(bands, H.rect(-0.4, 0.4, -5.48, -5.12, 1.44, 0.05), H.FRONT, 0.12, 0.9, GOLD, GOLD_DK);
-        // A thick leather sole under each boot, no wider than the boot over it, SOLES deeper than her foot.
         H.loft(bands, [[-7 - SOLES, 1.26, 2.16, 0.35, 0, 0.6], [-6.68, 1.26, 2.16, 0.37, 0, 0.6]], [SOLE]);
-        // `scaled` sizes a mesh in place: each is sized once, then worn on both sides.
         H.scaled(cuff, u); H.scaled(bands, u);
         for (const key of ["forearm", "forearmL"]) if (body[key]) body[key] = M.merge(body[key], cuff);
         for (const key of ["leg", "legL"]) if (body[key]) body[key] = M.merge(body[key], bands);
         return { ...body, headOpen: head(false), headClosed: head(true) };
       },
-      // Her hair and face in blocks, for the voxel look.
       crown(k, v) {
         const tones = HAIR.map((hex) => k.color(hex));
         mane((x, y, z, t) => v.set(x, y, z, tones[t]), (x, y, z) => v.set(x, y, z, k.P.skin));
@@ -401,17 +319,12 @@
         for (const x of [-1, 7]) v.set(x, 1, 5, gold);
       },
       headgear(k) {
-        // Both sit on her hair, so they are her head's size, a row lower where her face is a row shorter, and raised
-        // with her head.
         const u = k.u, s = modelled() ? HEAD : 1, low = modelled() ? u * (s - NECK) : 0, size = { x: s, y: s, z: s };
         addChild(k.parts.head, createNode({ position: { x: 0, y: -low, z: 0 }, scale: size, geometry: crownGeometry(u) }));
         addChild(k.parts.head, createNode({ position: { x: 0, y: 9.7 * u * s - low, z: 3.5 * u * s }, scale: size, geometry: coinGeometry(u) }));
       },
       extras(k) {
         const h = k.h, u = k.u, bag = 0.67, big = 1.2;
-        // Junior, beside and a little behind her, with what DSB Land's dogs have: four legs hung from their hips (fore
-        // left, fore right, hind left, hind right) and a tail, which the crew walks and wags, and a place for his
-        // jetpack. Her root is raised by her soles, which every user of her model stands her by.
         const up = modelled() ? SOLES * u : 0;
         k.root.position.y += up;
         const dog = k.parts.dog = createNode({ position: { x: 0.58 * h, y: -k.legH - up, z: -0.25 * h }, scale: { x: big, y: big, z: big }, geometry: dogGeometry(u) });
@@ -421,8 +334,6 @@
         dog.tail = limb("tail", 0, 3.5, -3);
         dog.packAt = { y: 4.5 * u, z: -1.5 * u, scale: 0.25 };
         addChild(k.root, dog);
-        // The money bag, hung from her belt at the middle of the side of her right hip, its ₿ turned out, sunk part
-        // way into her hip.
         addChild(k.parts.torso, createNode({ position: { x: -3.25 * u, y: 1.9 * u, z: -0.25 * u }, rotation: { x: 0, y: -1.62, z: 0.12 }, scale: { x: bag, y: bag, z: bag }, geometry: bagGeometry(u) }));
       }
     }

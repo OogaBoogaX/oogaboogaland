@@ -3,7 +3,6 @@
   const BL = window.BL;
   const { makeVox } = BL.models;
   const { createNode, addChild, removeChild } = BL.scene;
-  // The island's 3x5 alphabet, inlined so the embroidery needs nothing outside this file.
   const GLYPH = {
     T: ["111", "010", "010", "010", "010"],
     A: ["010", "101", "111", "101", "101"],
@@ -17,7 +16,6 @@
   };
   const BITCOIN = "#f7931a";
   const hash = (x, y, z) => (Math.imul(x + 11, 73856093) ^ Math.imul(y + 17, 19349663) ^ Math.imul(z + 29, 83492791)) >>> 0;
-  // Stamp a word from the alphabet; put maps each lit cell.
   const stamp = (v, word, put) => {
     let pen = 0;
     for (const ch of word) {
@@ -37,21 +35,15 @@
     github: "LiranCohen",
     display: "Liran",
     joined: 1792641623,
-    // Until live oogatron stats refresh it: recent enough to show as working.
     lastCommit: 1792641623,
     look: {
       bald: true,
       face: "beard",
       skin: "#d9a06b",
-      // The beard takes its colour from `hair`, so this is the beard, not scalp.
       hair: "#3d2a1a",
       eyeColor: "#6e4a26",
-      // Pupils live in the dress.eyes hook below; the default would double-draw them.
       noPupils: true,
       height: 1.04,
-      // Locker hats clear the cap's top button (cell y9 reaches 10u).
-      hatY: 11,
-      // Keep the whole cap and visor in the roster face crop.
       portrait: { min: [-1, -2, -1], max: [7, 9, 11] }
     },
     voice: {
@@ -59,31 +51,25 @@
       idle: ["Nice weather for bananas.", "Ooga.", "Just strolling through.", "Someone left the pile full again."]
     },
     dress: {
-      // The Taproot snapback: digital desert camo crown, curved visor with its
-      // dark underside, the embroidered front, the side badge and the rear strap.
       crown(k, v) {
         const cream = k.color("#ded4b8"), sand = k.color("#c9bb98"), khaki = k.color("#ab9d74");
         const olive = k.color("#8a7f5c"), brown = k.color("#6a5f44"), dark = k.color("#4a4234");
         const tones = [cream, sand, khaki, olive, brown, dark];
         const slots = [0, 1, 2, 1, 0, 3, 2, 1, 4, 0, 2, 3, 5, 1, 2, 4];
-        // Mostly 2-cell digital blocks, speckled with single cells every so often.
         const camo = (x, y, z) => {
           const coarse = hash(x >> 1, y >> 1, z >> 1), fine = hash(x, y, z);
           return tones[slots[(fine % 7 === 0 ? fine : coarse) % slots.length]];
         };
-        // Crown over the bald dome; full ring through the front wall the text sits on.
         v.fill(-1, 7, 5, 7, -1, 6, camo);
         v.fill(0, 6, 8, 8, 0, 5, camo);
-        v.fill(3, 4, 9, 9, 2, 3, khaki); // top button
+        v.fill(3, 4, 9, 9, 2, 3, khaki);
         const under = k.color("#2e261c");
-        v.fill(1, 5, 5, 5, -1, -1, k.color("#55493a")); // rear snap strap
-        // Visor: camo top at y5, dark underside at y4, five rows to the tip.
+        v.fill(1, 5, 5, 5, -1, -1, k.color("#55493a"));
         for (const [z, x0, x1] of [[7, -1, 7], [8, -1, 7], [9, 0, 6], [10, 0, 6], [11, 1, 5]]) {
           v.fill(x0, x1, 5, 5, z, z, camo);
           v.fill(x0, x1, 4, 4, z, z, under);
         }
       },
-      // The electric rod: a 2x2 shaft with glowing rings, collar and live tip.
       club(k) {
         const rod = (body, chrome, grip, energy, energyHi) => {
           const v = makeVox();
@@ -99,10 +85,8 @@
           return k.vg(v, { x: -1 * k.u, y: -1 * k.u, z: -1 * k.u }, { [energy]: 0.85, [energyHi]: 1 });
         };
         const standard = rod(k.color("#2b2e36"), k.color("#9aa1aa"), k.color("#141518"), k.color("#ff8c1a"), k.color("#ffd27a"));
-        const gold = rod(k.color("#8a6a2e"), k.color("#e3c06a"), k.color("#3b2a10"), k.color("#ffb52e"), k.color("#fff0c2"));
-        return { default: standard, gold, rest: { x: 0.24, z: 0 }, carry: { x: 0.95, z: 0 } };
+        return { default: standard, rest: { x: 0.24, z: 0 }, carry: { x: 0.95, z: 0 } };
       },
-      // Black tee, dark blue jeans, black sneakers; the slung rifle becomes a keyboard.
       gear(k) {
         const shirt = k.color("#141519"), shirtHi = k.color("#1b1d22");
         const denim = k.color("#2c3e63"), denimDk = k.color("#22304d");
@@ -126,7 +110,6 @@
         torso.fill(0, 8, 2, 2, 0, 5, belt);
         torso.set(4, 2, 5, buckle);
         torso.fill(1, 7, 3, 7, 1, 4, shirtAt);
-        // The keyboard's sling: the shoulder strap the bare caveman wore, now webbing.
         for (let y = 4; y <= 7; y++) {
           const x = 7 - Math.round((y - 4) * 1.6);
           for (const z of [1, 4]) for (const dx of [0, 1]) if (x + dx >= 1 && x + dx <= 7) torso.set(x + dx, y, z, strap);
@@ -149,7 +132,6 @@
         const red = k.color("#b9695f");
         const keys = makeVox();
         keys.fill(-1, 0, -1, 14, 0, 45, caseC);
-        // Double-sided HHKB Pro 2: the same keys on both faces, mirrored.
         const placeRow = (y0, spec, x, flip) => {
           const total = spec.reduce((n, [w]) => n + w, 0) + spec.length - 1;
           let col = 1 + Math.floor((44 - total) / 2);
@@ -172,7 +154,6 @@
           placeRow(y0, spec, 1, false);
           placeRow(y0, spec, -2, true);
         }
-        // The gun hangs clear of the hat's rear strap; pull the board back to the torso.
         const belly = k.traits.belly;
         const headRear = 0.02 * k.h - 4 * k.u;
         const gunZ = Math.min(-0.245 * k.h, headRear - 0.055 * k.h);
@@ -187,7 +168,6 @@
           scale: { x: BOARD_SCALE, y: BOARD_SCALE, z: BOARD_SCALE }
         }));
       },
-      // TAPROOT across the front panel: 27 half-scale cells over the wall at z6.
       headgear(k) {
         const v = makeVox(), ink = k.color("#4e3520");
         stamp(v, "TAPROOT", (x, r) => v.set(x, 4 - r, 0, ink));
@@ -196,8 +176,6 @@
           geometry: k.vg(v, { x: -13.5 * k.u, y: -2.5 * k.u, z: 0 }),
           scale: { x: 0.25, y: 0.25, z: 0.25 }
         }));
-        // Roundel on +x (anatomical left). Glyph columns map to decreasing z so
-        // the B reads correctly when the face is viewed from +x looking in -x.
         const plate = makeVox();
         const btc = k.color(BITCOIN), btcHi = k.color("#fff1d0");
         plateCells(5, 7, (z, y) => plate.set(0, y, z, btc));
@@ -207,7 +185,6 @@
           geometry: k.vg(plate, { x: 0, y: -3.5 * k.u, z: -2.5 * k.u }),
           scale: { x: 0.35, y: 0.35, z: 0.35 }
         }));
-        // LOT=1 badge on -x; columns run +z, the viewer's right.
         const tag = k.color("#26241f"), tagIn = k.color("#d9d2c0"), tagHi = k.color("#f5efe0");
         const badge = makeVox();
         for (let y = 0; y <= 8; y++) for (let z = 0; z <= 22; z++) {
@@ -222,8 +199,6 @@
           scale: { x: 0.28, y: 0.28, z: 0.28 }
         }));
       },
-      // Sclera/iris/pupil per eye; every painted cell is registered in eyeCells
-      // so the closed-eye blink repaints the whole eye, not just the default 2x2.
       eyes(k, v) {
         const white = k.P.white, pupil = k.P.black;
         const iris = k.traits.eyeColor ? k.color(k.traits.eyeColor) : white;
