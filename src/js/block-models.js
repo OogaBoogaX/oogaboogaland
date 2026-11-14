@@ -249,18 +249,11 @@
       // The island's own rock (mounds, caves, outcrops) is the island's mesh (`isle`), not a building.
       if (M.rocks && M.rocks.has(b)) continue;
       const w = b[1] - b[0], d = b[3] - b[2], bottom = b[5] || 0, h = b[4] - bottom, x = (b[0] + b[1]) / 2, z = (b[2] + b[3]) / 2, y = bottom + h / 2;
+      if (town && townBlock(parts, b, M.kinds.get(b), w, d, h, x, y, z, bottom)) continue;
       if (M.steps.has(b)) {
         // A stair: stone with a worn lip.
         parts.push(bevelBox({ w, h, d, color: "#8a8178", offset: { x, y, z } }));
         parts.push(box({ w: w + 0.02, h: 0.05, d: 0.12, color: "#b0a698", offset: { x, y: b[4] - 0.02, z: z - d / 2 + 0.06 * Math.sign(z || 1) } }));
-        continue;
-      }
-      if (town && bottom === 0 && h >= 2.9 && !(w < 1 && d < 1) && !(b[4] > TOP - 0.5)) {
-        // A town wall: sandstone with a darker plinth, the banks banded in their team's colour under the top.
-        const bank = Math.abs(z) > 22 || Math.abs(b[2]) > 33;
-        parts.push(bevelBox({ w, h, d, color: "#c4a676", offset: { x, y, z } }));
-        parts.push(box({ w: w + 0.03, h: 0.5, d: d + 0.03, color: "#8a7350", offset: { x, y: 0.25, z } }));
-        parts.push(box({ w: w + 0.04, h: 0.2, d: d + 0.04, color: bank ? TEAM[z > 0 ? "blue" : "red"].paint : "#7a5a3a", emissive: bank ? 0.15 : 0, offset: { x, y: b[4] - 0.25, z } }));
         continue;
       }
       if (haunted && hauntedBlock(parts, b, w, d, h, x, y, z, bottom)) continue;
@@ -333,6 +326,140 @@
     );
     geo.castShadow = false;
     return geo;
+  });
+  // Ooga Town's own boxes, by what the map says each is (`kinds`): the banks in cream stone banded in their team's
+  // colour under a stepped pediment with a clock stopped at noon, the red saloon and the teal general store with a
+  // sign board over each front door, plank floors, steps and the footbridge, the market stalls under striped awnings,
+  // the cart of banknotes, and the fountain with its gold coin. Plain boxes, a few trims each: nothing here is
+  // bevelled, so the town draws in a fraction of the faces. False for anything else (the sniper towers and the wallet
+  // machines), which is drawn as on the other maps.
+  const TOWN = { stone: "#f1e6cc", plinth: "#6b6259", cream: "#fff3d6", timber: "#8a5a34", plank: "#a9743f", dark: "#3a2418", gold: "#f7b733", board: "#1f4a3a", saloon: "#b5442e", saloonDark: "#7c2c1e", store: "#2f8f83", storeDark: "#1d5f58" };
+  const townBlock = (parts, b, kind, w, d, h, x, y, z, bottom) => {
+    if (!kind) return false;
+    const top = b[4], s = Math.sign(z) || 1, team = TEAM[s > 0 ? "blue" : "red"].paint, out = s > 0 ? b[2] : b[3];
+    const put = (color, bw, bh, bd, bx, by, bz, emissive = 0) => parts.push(box({ w: bw, h: bh, d: bd, color, emissive, offset: { x: bx, y: by, z: bz } }));
+    if (kind === "bank") {
+      put(TOWN.stone, w, h, d, x, y, z);
+      if (bottom === 0) put(TOWN.plinth, w + 0.04, 0.5, d + 0.04, x, 0.25, z);
+      put(team, w + 0.04, 0.25, d + 0.04, x, top - 0.3, z, 0.15);
+      // The front, either side of the doors: two pilasters each, standing a little proud of the wall.
+      if (bottom === 0 && d === 1 && Math.abs(z) < 25) for (const px of [b[0] + 0.9, b[1] - 0.9]) put(TOWN.cream, 0.6, h - 0.5, 0.12, px, h / 2 + 0.25, out - s * 0.06);
+    } else if (kind === "pediment") {
+      put(TOWN.stone, w, h, d, x, y, z);
+      put(team, w + 0.3, 0.14, d + 0.2, x, top + 0.07, z, 0.15);
+      // The lower tier carries the name board; the upper one the clock, its hands together at noon.
+      if (bottom < 3.5) put(TOWN.board, w - 0.5, 0.62, 0.06, x, y, out - s * 0.03);
+      else {
+        put(TOWN.gold, 0.72, 0.72, 0.06, x, y, out - s * 0.03, 0.2);
+        put(TOWN.cream, 0.56, 0.56, 0.06, x, y, out - s * 0.05, 0.3);
+        put(TOWN.dark, 0.05, 0.24, 0.06, x, y + 0.1, out - s * 0.07);
+      }
+    } else if (kind === "saloon" || kind === "store") {
+      put(TOWN[kind], w, h, d, x, y, z);
+      if (bottom === 0) put(TOWN[kind + "Dark"], w + 0.04, 0.4, d + 0.04, x, 0.2, z);
+      put(TOWN.cream, w + 0.04, 0.14, d + 0.04, x, top - 0.07, z);
+    } else if (kind === "saloonSign" || kind === "storeSign") {
+      // The board over the front door, standing proud of the wall it shares, under a cream cornice.
+      put(TOWN.dark, w, h, d + 0.08, x, y, z);
+      put(TOWN.cream, w + 0.3, 0.16, d + 0.3, x, top + 0.08, z);
+      put(TOWN[kind === "saloonSign" ? "saloon" : "store"], w + 0.1, 0.1, d + 0.12, x, bottom + 0.05, z);
+    } else if (kind === "floor" || kind === "bridge") put(TOWN.plank, w, h, d, x, y, z);
+    else if (kind === "rail" || kind === "bridgeRail") put(TOWN.cream, w, h, d, x, y, z);
+    else if (kind === "step") put(Math.round(top * 7 / 3) % 2 ? TOWN.plank : TOWN.timber, w, h, d, x, y, z);
+    else if (kind === "post") put(TOWN.timber, w, h, d, x, y, z);
+    else if (kind === "stall") {
+      // A counter with a paler top and three heaps of fruit on it.
+      put(TOWN.timber, w, h - 0.08, d, x, (h - 0.08) / 2, z);
+      put(TOWN.cream, w + 0.1, 0.08, d + 0.1, x, h - 0.04, z);
+      ["#f7931a", "#ffd84a", "#d94a3a"].forEach((color, k) => put(color, 0.6, 0.22, 0.5, x + (k - 1) * 0.9, h + 0.11, z));
+    } else if (kind === "awning") {
+      // Five stripes on four thin posts.
+      const stripe = x * s > 0 ? "#2f8f83" : "#f7931a";
+      for (let k = 0; k < 5; k++) put(k % 2 ? TOWN.cream : stripe, w / 5, h, d, b[0] + (k + 0.5) * w / 5, y, z);
+      for (const px of [b[0] + 0.1, b[1] - 0.1]) for (const pz of [b[2] + 0.1, b[3] - 0.1]) put(TOWN.dark, 0.08, bottom, 0.08, px, bottom / 2, pz);
+    } else if (kind === "cart") {
+      // A cart: a red bed on four wheels, a shaft, and bales of banknotes heaped to its top.
+      put(TOWN.saloon, w, 0.6, d, x, 0.85, z);
+      for (const wx of [-0.85, 0.85]) for (const wz of [-1, 1]) put(TOWN.dark, 0.7, 0.7, 0.12, x + wx, 0.35, z + wz * (d / 2 + 0.07));
+      put(TOWN.timber, 1.3, 0.1, 0.12, x + Math.sign(x) * (w / 2 + 0.6), 0.6, z);
+      put("#5d9a4e", w - 0.3, 0.3, d - 0.3, x, 1.3, z);
+      put("#77b866", w - 1.1, 0.16, d - 0.6, x, 1.52, z);
+    } else if (kind === "basin") {
+      // The fountain's basin, brimming.
+      put("#b9b2a6", w, h, d, x, y, z);
+      put("#3fb6e0", w - 0.5, 0.04, d - 0.5, x, top + 0.005, z, 0.25);
+    } else if (kind === "column") {
+      put("#b9b2a6", w, h, d, x, y, z);
+      put(TOWN.cream, w + 0.3, 0.2, d + 0.3, x, top - 0.1, z);
+    } else if (kind === "coin") {
+      // The gold coin: a disc on its edge across the street, a ₿ standing proud on both faces, each row's runs merged.
+      const R = w / 2, u = 0.2;
+      parts.push(moved(turnedX(lathe({ profile: [[0, -d / 2], [R, -d / 2], [R, d / 2], [0, d / 2]], segments: 16, color: TOWN.gold, emissive: 0.3 }), Math.PI / 2), x, y, z));
+      parts.push(moved(turnedX(lathe({ profile: [[R - 0.16, d / 2], [R - 0.16, d / 2 + 0.03], [R - 0.3, d / 2 + 0.03], [R - 0.3, d / 2]], segments: 16, color: "#c9820f" }), Math.PI / 2), x, y, z));
+      parts.push(moved(turnedX(lathe({ profile: [[R - 0.3, -d / 2], [R - 0.3, -d / 2 - 0.03], [R - 0.16, -d / 2 - 0.03], [R - 0.16, -d / 2]], segments: 16, color: "#c9820f" }), Math.PI / 2), x, y, z));
+      for (const f of [1, -1]) for (let r = 0; r < GLYPH.length; r++) for (let c = 0, run = -1; c <= 7; c++) {
+        const lit = GLYPH[r][c] === "#";
+        if (lit && run < 0) run = c;
+        else if (!lit && run >= 0) { put("#a35c08", (c - run) * u, u, 0.04, x - f * ((run + c) / 2 - 3.5) * u, y + (4 - r) * u, z + f * (d / 2 + 0.02)); run = -1; }
+      }
+    } else return false;
+    return true;
+  };
+  // Ooga Town's letters, the jumbotron's 5 x 7 alphabet in flat pixels, each line's lit pixels merged into as few
+  // rectangles as a greedy pass finds (a stroke is one quad, not seven): lines split by "|", centred at (x, y, z)
+  // inside `w` by `h`, on a face looking out along `nx`, `nz` (one of them 1 or -1, the other 0), reading left to
+  // right from in front of it.
+  const lettering = (geo, text, x, y, z, w, h, nx, nz, color, emissive = 0) => {
+    const glyphOf = BL.jumbotron.text.glyphOf, lines = text.split("|"), cols = Math.max(...lines.map((l) => l.length)) * 6 - 1, rows = lines.length * 9 - 2;
+    const px = Math.min(w / cols, h / rows), rgb = hexToRgb(color), opts = { emissive }, ux = nz, uz = -nx, fx = x + nx * 0.035, fz = z + nz * 0.035;
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li], lw = line.length * 6 - 1, lit = new Uint8Array(lw * 7);
+      for (let r = 0; r < 7; r++) for (let c = 0; c < lw; c++) lit[r * lw + c] = c % 6 < 5 && (glyphOf(line[Math.floor(c / 6)])[r] >> (4 - c % 6)) & 1;
+      for (let r = 0; r < 7; r++) for (let c = 0; c < lw; c++) {
+        if (!lit[r * lw + c]) continue;
+        let c1 = c, r1 = r + 1;
+        while (c1 < lw && lit[r * lw + c1]) c1++;
+        for (; r1 < 7; r1++) { let full = true; for (let k = c; k < c1; k++) if (!lit[r1 * lw + k]) { full = false; break; } if (!full) break; }
+        for (let j = r; j < r1; j++) for (let k = c; k < c1; k++) lit[j * lw + k] = 0;
+        const a = (c - lw / 2) * px, e = (c1 - lw / 2) * px, y1 = y + (rows / 2 - li * 9 - r) * px, y0 = y1 - (r1 - r) * px;
+        face(geo, [pushVert(geo, fx + ux * a, y0, fz + uz * a), pushVert(geo, fx + ux * e, y0, fz + uz * e), pushVert(geo, fx + ux * e, y1, fz + uz * e), pushVert(geo, fx + ux * a, y1, fz + uz * a)], rgb, opts);
+      }
+    }
+  };
+  // Ooga Town's dressing, one merged mesh behind the Detail setting: the names and jokes on its boards (the banks, the
+  // saloon and the store, both sides of the footbridge, over the hole where each bank's cash machine was, the fountain
+  // and the cart), a wanted poster by each shop door, the saloon's swing doors and the store's awning. No lights and
+  // nothing that moves.
+  const TOWN_SIGNS = { bank: { blue: "BANK OF OOGA", red: "BOOGA RESERVE" }, saloon: "LAST HODL|SALOON", store: "GENERAL STORE|WE TAKE SATS", bridgeOut: "NO FIAT BEYOND THIS POINT", bridgeIn: "TICK TOCK NEXT BLOCK",
+    atm: "ATM|OUT OF FIAT", fountain: "IN MATH WE TRUST", cart: "FIAT|1 SAT A TON", wanted: { saloon: "WANTED|PAPER|HANDS", store: "NO SATS|NO|SERVICE" } };
+  const townDress = cached(() => {
+    const M = SIM.ARENAS.town, parts = [], ink = geometry(), T = TOWN_SIGNS;
+    const put = (color, w, h, d, x, y, z, emissive = 0) => parts.push(box({ w, h, d, color, emissive, offset: { x, y, z } }));
+    for (const b of M.BLOCKS) {
+      const kind = M.kinds.get(b);
+      if (!kind) continue;
+      const x = (b[0] + b[1]) / 2, z = (b[2] + b[3]) / 2, w = b[1] - b[0], s = Math.sign(z) || 1, out = s > 0 ? b[2] : b[3], bottom = b[5] || 0, y = (b[4] + bottom) / 2;
+      if (kind === "pediment" && bottom < 3.5) lettering(ink, T.bank[s > 0 ? "blue" : "red"], x, y, out - s * 0.06, w - 1, 0.5, 0, -s, TOWN.gold, 0.35);
+      else if (kind === "saloonSign" || kind === "storeSign") {
+        // The door is under the board's street end; a poster on the wall beside it.
+        const shop = kind === "saloonSign" ? "saloon" : "store", dir = -Math.sign(x), door = x + dir * 1.3, wall = x - dir * 0.9;
+        lettering(ink, T[shop], x, (b[4] + 3) / 2, out - s * 0.04, w - 0.5, b[4] - 3.3, 0, -s, TOWN.gold, 0.35);
+        put(TOWN.cream, 0.95, 1.2, 0.04, wall, 1.7, out - s * 0.02);
+        lettering(ink, T.wanted[shop], wall, 1.7, out - s * 0.04, 0.8, 1.05, 0, -s, TOWN.dark);
+        if (shop === "saloon") for (const e of [-1, 1]) put(TOWN.plank, 0.82, 0.9, 0.06, door + e * 0.46, 1.25, z);
+        else for (let k = 0; k < 4; k++) put(k % 2 ? TOWN.cream : "#f7931a", 0.5, 0.08, 0.9, door + (k - 1.5) * 0.5, 2.36, out - s * 0.45);
+      } else if (kind === "bridgeRail") {
+        const outer = Math.abs(out) < 13;
+        lettering(ink, outer ? T.bridgeOut : T.bridgeIn, x, y, outer ? out : (s > 0 ? b[3] : b[2]), w - 2, 0.5, 0, outer ? -s : s, TOWN.dark);
+      } else if (kind === "bank" && bottom > 2 && w === 1 && Math.abs(x) > 8) {
+        // Over the hole in the bank's side: what used to be there.
+        const nx = Math.sign(x);
+        put(TOWN.board, 0.05, 1.1, 1.8, x + nx * 0.52, y, z);
+        lettering(ink, T.atm, x + nx * 0.53, y, z, 1.6, 0.9, nx, 0, TOWN.gold, 0.35);
+      } else if (kind === "basin") for (const f of [1, -1]) lettering(ink, T.fountain, x, 0.42, z + f * 1.5, 2.6, 0.3, 0, f, TOWN.dark);
+      else if (kind === "cart") for (const f of [1, -1]) lettering(ink, T.cart, x, 0.87, z + f * 0.7, 2.2, 0.5, 0, f, TOWN.cream);
+    }
+    return merge(...parts, ink);
   });
   // A potato Ooga that dances round the fire: an egg-shaped tan body speckled darker, a leopard-spot loincloth, two
   // stubby legs, two little arms (separate, so the scene waves them), big dark eyes and brows, and an open mouth.
@@ -1020,5 +1147,5 @@
     for (const s of [-1, 1]) parts.push(box({ w: 0.36, h: 0.14, d: 0.16, color: sheet, emissive: 0.5, offset: { x: s * 0.6, y: 0.08, z: 0.12 } }));
     return merge(...parts);
   });
-  BL.blockModels = { hookHead, rope, goldBlock, trophyRays, muzzleFlash, isle, keel, puddle, bolt, hauntDress, beam, laserEyes, ghost, net2, jetpack, jetFlames, monkey, catapult, catapultArm, chute, goldBall, banana, bananaPile, peel, firePit, flames, potato, potatoArm, power, ice, tramp, TEAM, ORANGE, GUNS, arena, stand, block, tick, ball, splat, ring, pad, bubble, crate, grenade, rocket, net, draped, streak, gun, ladder, rack, zipline, zipLight, trolley, cache, SPLATS: 6 };
+  BL.blockModels = { hookHead, rope, goldBlock, trophyRays, muzzleFlash, isle, keel, puddle, bolt, hauntDress, townDress, beam, laserEyes, ghost, net2, jetpack, jetFlames, monkey, catapult, catapultArm, chute, goldBall, banana, bananaPile, peel, firePit, flames, potato, potatoArm, power, ice, tramp, TEAM, ORANGE, GUNS, arena, stand, block, tick, ball, splat, ring, pad, bubble, crate, grenade, rocket, net, draped, streak, gun, ladder, rack, zipline, zipLight, trolley, cache, SPLATS: 6 };
 })();

@@ -218,6 +218,25 @@ Three or four on every map (`gorillas`): wicked's hub gorilla (`BL.agent.create`
 | hard | 10 | 9.5 | 1.35 | 8.5 | 4 | 15 | 2 | 6.5 |
 | expert | 12 | 11 | 1.5 | 9.5 | 2.5 | 22 | 2.4 | 9 |
 
+## Ooga Town
+
+High noon on Main Street, 44 by 74 m, red's half blue's turned half round. A bank at each end, cream stone banded in
+its team's colour under a stepped pediment with a clock stopped at noon (BANK OF OOGA, BOOGA RESERVE): the block's
+stand at the back of its hall under a mezzanine reached by stairs. Three ways in: the front doors, the back door
+behind the stand, and the hole in the side wall where the cash machine was. A saloon and a general store in each
+half, each walked straight through (a front and a back door at its street end, a side door onto the street; no
+building is a dead end, so the bots find their way by steering alone), their upper floors joined by a footbridge
+over the street, each front door under a solid sign board. Two market stalls before the bank, a counter under an
+awning a double jump reaches; a cart for cover in the square; and in the middle the fountain with a gold coin on a
+column, edge-on to the street, which also breaks the sight line from footbridge to footbridge. A trampoline behind
+each saloon reaches its upper floor and one in the square reaches the footbridge. No quiz pad lies on the straight
+line between the stands. A catapult drops its Ooga into the other bank's hall.
+
+`kinds` in the map's data names each box (`bank`, `pediment`, `saloon`, `store`, `saloonSign`, `storeSign`, `floor`,
+`rail`, `step`, `bridge`, `bridgeRail`, `post`, `stall`, `awning`, `cart`, `basin`, `column`, `coin`) and `townBlock`
+draws by name in plain boxes. The lettering, posters, swing doors and the store's awning are one merged mesh
+(`townDress`) behind the Detail setting: no lights, nothing animated.
+
 ## Fort Chaos
 
 Retired from play: no longer offered on the board or accepted on the wire (`blockWire.FIRST_MAP`). Its map stays in the sim for the rules' tests.
