@@ -9063,6 +9063,50 @@ const gameRulesChecks = async () => {
           raids[`${team}@${s * sx},${s * sz}`] = a.carrying === team && up < 8 ? +t.toFixed(1) : `fail ${t.toFixed(1)}s, ${up.toFixed(1)}s in the house`;
         }
         record("block frenzy haunted raids: from the spawns, the avenue, the side lines, beside the house and the far ring, on both sides, a raider bot reaches the rivals' block within 30 s and never stands stuck on the house's floor", Object.values(raids).every((v) => typeof v === "number"), JSON.stringify(raids));
+        // The ziplines ride into the rivals' house: each ends over its upper floor, inside its walls and clear of the
+        // stairwell, its rail and the quiz pad; the rider's whole body and the cable miss every box on the way, through
+        // the gap in the front wall (solid either side of it, a sill under it, the gable over it); a rider lets go and
+        // stands on that floor; red's line is blue's turned half round; and a raider bot set down by the ride takes
+        // the block, a carrier riding home scores.
+        const zipIn = {}, HANG = S.CONFIG.ZIP_HANG, UP = 3;
+        S.create({ map: "haunted" });
+        zipIn.mirror = ["ax", "az", "bx", "bz"].every((k) => hI.zips.red[k] === -hI.zips.blue[k]) && ["ay", "by", "floor", "len"].every((k) => hI.zips.red[k] === hI.zips.blue[k]);
+        zipIn.others = S.MAPS.every((m) => m === "haunted" || S.ARENAS[m].zips.blue.floor === 0) && S.ARENAS.fort.zips.blue.bz === -28.5;
+        for (const team of S.TEAMS) {
+          const z = hI.zips[team], rival = team === "blue" ? "red" : "blue", s = Math.sign(z.bz), feet = z.by - HANG;
+          S.create({ map: "haunted" });
+          const landing = z.floor === UP && Math.abs(z.bx) < 7.6 - R && s * z.bz > 23.4 + R && s * z.bz < 32.6 - R && S.groundAt(z.bx, z.bz, feet, R) === UP && feet - UP > 0.3 && feet - UP <= 1.2 &&
+            [[0, 0], [R, 0], [-R, 0], [0, R], [0, -R]].every(([dx, dz]) => [0.05, 0.9, 1.7].every((y) => !S.solidAt(z.bx + dx, UP + y, z.bz + dz)) && S.groundAt(z.bx + dx, z.bz + dz, UP + 0.04, 0) === UP) &&
+            hI.traps.every(([x, tz]) => Math.hypot(x - z.bx, tz - z.bz) > S.CONFIG.TRAP_R + 1);
+          let clear = true, low = Infinity;
+          for (let k = 60; k <= 1000 && clear; k++) {
+            const u = k / 1000, x = z.ax + (z.bx - z.ax) * u, zz = z.az + (z.bz - z.az) * u, hy = z.ay + (z.by - z.ay) * u;
+            clear = [[0, 0], [R, 0], [-R, 0], [0, R], [0, -R]].every(([dx, dz]) => [0.02 - HANG, 0.6 - HANG, 1.2 - HANG, -0.2, 0, 0.2].every((dy) => !S.solidAt(x + dx, hy + dy, zz + dz)));
+            low = Math.min(low, hy - HANG - S.groundAt(x, zz, hy - HANG + 0.04, R));
+          }
+          const gz = s * 23.2;
+          const gap = [6.1, 6.775, 7.45].every((gx) => S.solidAt(s * gx, UP + 0.3, gz) && [0.7, 1.5, 2.4, 3.1].every((y) => !S.solidAt(s * gx, UP + y, gz))) && S.solidAt(s * 6.3, UP + 3.5, gz) && S.solidAt(s * 5.8, UP + 1.5, gz) && S.solidAt(s * 7.8, UP + 1.5, gz);
+          const q = fresh("haunted"), a = q.actors.find((o) => o.team === team);
+          for (const k of q.crates) k.live = false;
+          Object.assign(a, { x: z.ax, z: z.az, y: S.CONFIG.TOWER_TOP, vy: 0, grounded: true });
+          const took = S.zip(q, a.id);
+          for (let t = 0; t < 6 && a.riding; t += S.CONFIG.STEP) { S.tick(q, S.CONFIG.STEP, still); q.eventCount = 0; }
+          const letGo = [a.x, a.y, a.z];
+          for (let t = 0; t < 1.5; t += S.CONFIG.STEP) { S.tick(q, S.CONFIG.STEP, still); q.eventCount = 0; }
+          const stands = took && Math.hypot(letGo[0] - z.bx, letGo[2] - z.bz) < 0.3 && letGo[1] > UP && letGo[1] <= feet + 1e-9 && a.grounded && a.y === UP && Math.hypot(a.x - z.bx, a.z - z.bz) < 1 && !(a.trapped > 0) && !(a.splat > 0);
+          Object.assign(a, { bot: true, role: "attack", hook: 1 });
+          let t = 0;
+          for (; t < 12 && a.carrying !== rival; t += S.CONFIG.STEP) { S.tick(q, S.CONFIG.STEP, still); q.eventCount = 0; }
+          const h = fresh("haunted"), c = h.actors.find((o) => o.team === rival), before = h.score[rival];
+          for (const k of h.crates) k.live = false;
+          Object.assign(c, { bot: true, role: "attack", x: z.ax, z: z.az, y: S.CONFIG.TOWER_TOP, vy: 0, grounded: true, carrying: team });
+          Object.assign(h.flags[team], { state: "carried", carrier: c.id });
+          const rode = S.zip(h, c.id);
+          let t2 = 0;
+          for (; t2 < 20 && h.score[rival] === before; t2 += S.CONFIG.STEP) { S.tick(h, S.CONFIG.STEP, still); h.eventCount = 0; }
+          zipIn[team] = landing && clear && low > 0.15 && gap && stands && a.carrying === rival && rode && h.score[rival] === before + 1 ? [+low.toFixed(2), +t.toFixed(1), +t2.toFixed(1)] : JSON.stringify({ landing, clear, low, gap, took, stands, letGo, steal: a.carrying, rode, home: h.score[rival] - before });
+        }
+        record("block frenzy haunted ziplines: each line ends over the rivals' upper floor inside its walls, clear of the stairwell, the rail and the quiz pad; the rider and the cable miss every box through the gap in the front wall, over its sill and under the gable; a rider lets go and stands on that floor; the two lines are each other's turned half round and the other maps' end on the ground; a raider bot set down by the ride takes the block and a carrier riding home scores", zipIn.mirror && zipIn.others && S.TEAMS.every((t) => Array.isArray(zipIn[t])), JSON.stringify(zipIn));
       }
       {
         // The rivals' zipline only carries a rider whose own block is home; grabbed with it gone, a trap door throws them
