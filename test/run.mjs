@@ -4906,7 +4906,7 @@ const hudNoticeChecks = async () => {
     };
     const nodes = Object.fromEntries(["toast", "reload-notice", "message-stack"].map(id => [id, element()]));
     nodes["message-stack"].children = [nodes["reload-notice"], nodes.toast];
-    const BL = { game: {}, scene: {}, signGlyphs: { lettering() {}, letter() {} }, nativeIcons: { fill() {} } };
+    const BL = { game: {}, scene: {}, signGlyphs: { lettering() {}, letter() {} }, nativeIcons: { fill() {}, voice: () => ({ cloneNode: () => ({}) }) } };
     runInNewContext(source, {
       window: { BL, matchMedia: () => ({ matches: false }), setTimeout: (fn, ms) => { timers.set(++serial, { fn, ms }); return serial; }, clearTimeout: id => timers.delete(id) },
       document: { getElementById: id => nodes[id], querySelectorAll: () => [], createElement: element,
@@ -10836,7 +10836,7 @@ const donationClientChecks = async () => {
     JSON.stringify({ subscribed, sharedRate, validRate, hiddenRate, retainedRate, waiting, reused, pendingClosed, fellBack, rateWaited, preferred, held, retried, fallbackClosed, listeners: priceListeners.size, timers: priceTimers.size }));
 
   // Regression: the pile showed whole gameplay stock (79) beside a panel valued at 77.97.
-  const valueBL = { game: {}, scene: {}, signGlyphs: { lettering() {}, letter() {} }, nativeIcons: { fill() {} }, donationRate: { current: null }, donations: { real: true,
+  const valueBL = { game: {}, scene: {}, signGlyphs: { lettering() {}, letter() {} }, nativeIcons: { fill() {}, voice: () => ({ cloneNode: () => ({}) }) }, donationRate: { current: null }, donations: { real: true,
     state: { tally: { sats: 96458, rate: { usdPerBtc: 80832.63, at: 10 } } } } };
   runInNewContext(await readFile(new URL("../src/js/hud.js", import.meta.url), "utf8"), {
     window: { BL: valueBL, matchMedia: () => ({ matches: false }) },
@@ -32442,7 +32442,7 @@ const outdoorScopeChecks = () => {
 // shell's lifecycle on a small DOM stand-in, and the build's guards, all in Node.
 const oogaChatChecks = async () => {
   const load = (names, context) => { for (const name of names) runInNewContext(readFileSync(join(root, name), "utf8"), context); return context.window.BL; };
-  const C = load(["src/ooga-chat/ooga-chat-config.js"], { window: {} }).oogaChatConfig;
+  const C = load(["src/ooga-chat/ooga-chat-config.js"], { window: {}, URLSearchParams }).oogaChatConfig;
   const valid = (extra = {}) => ({ version: 1, protocols: { identity: [1], audience: [1, 2], media: [1] }, features: { github: true, x: true, voice: false, feed: "demo" },
     paths: { session: "/api/session", logout: "/api/logout", login: { github: "/auth/github", x: "//evil.example/x" } }, ...extra });
   const live = C.parseBootstrap(valid(), "b1"), review = C.parseBootstrap(valid(), "b1", { fixture: true });
@@ -32454,13 +32454,177 @@ const oogaChatChecks = async () => {
     foreignPath: !live.features.x && !live.paths.login.x,
     noDemoInProduction: live.features.feed === "off" && review.features.feed === "demo",
     newer: C.parseBootstrap(valid({ build: "b2" }), "b1").newer === "b2" && C.parseBootstrap(valid({ build: "b1" }), "b1").newer === null,
-    xListens: C.parseSession({ identity: { provider: "x", login: "someone" }, capabilities: { speak: true, contributor: true } }).capabilities.speak === false,
-    githubSpeaks: C.parseSession({ identity: { provider: "github", login: "someone" }, capabilities: { speak: true, contributor: true } }).capabilities.contributor === true,
-    badLogin: C.parseSession({ identity: { provider: "github", login: "../x" } }) === null,
     storage: C.storageKey("fixture", "tab") !== C.storageKey("http", "tab")
   };
-  record("Ooga Chat bootstrap: a missing or foreign answer is unavailable, another revision or protocol is stale, paths stay same-origin, production never takes demo payments, and only a GitHub account the server names may speak",
+  record("Ooga Chat bootstrap: a missing or foreign answer is unavailable, another revision or protocol is stale, paths stay same-origin and production never takes demo payments",
     Object.values(contract).every(Boolean), JSON.stringify(contract));
+
+  // The session (identity protocol 1) and the sign-in return: only a GitHub account the server reports eligible may
+  // speak or see the contributor tabs; X never does, whatever its answer or handle claims; identity is the principal.
+  const NOW = 1_800_000_000_000, all = { speak: true, contributor: true };
+  const account = (provider, login, state, extra = {}) => ({ identity: { principal: `p:${provider}:${login}`, provider, login, display: login, ...extra.identity },
+    capabilities: all, eligibility: { state, ...extra.eligibility }, expiresAt: extra.expiresAt ?? NOW + 3_600_000 });
+  const parse = (raw) => C.parseSession(raw, NOW);
+  const big = "1790000000000000001", stored = new Map([["ooga-chat.v1.tab", "chat"], ["ooga-chat.v1.zone", "dsb"], ["ooga-chat.v1.screen", "choice"],
+    ["ooga-chat.v1.speaker", "true"], ["ooga-chat.role", "speaker"], ["ooga-chat.fixture.v1.tab", "bananas"], ["other", "1"]]);
+  const storage = { get length() { return stored.size; }, key: (i) => [...stored.keys()][i] ?? null, removeItem: (key) => stored.delete(key) };
+  C.sweep(storage, "http");
+  const session = {
+    eligible: parse(account("github", "someone", "eligible")).capabilities.speak === true && parse(account("github", "someone", "eligible")).capabilities.contributor === true,
+    xNeverSpeaks: (({ capabilities, eligibility }) => !capabilities.speak && !capabilities.contributor && eligibility.state === "ineligible")(parse(account("x", "someone", "eligible"))),
+    notEligible: ["ineligible", "unknown", "revoked", "nonsense"].every((state) => !parse(account("github", "someone", state)).capabilities.speak),
+    unknownByDefault: parse({ ...account("github", "someone", "eligible"), eligibility: undefined }).eligibility.state === "unknown",
+    principal: parse({ ...account("github", "someone", "eligible"), identity: { provider: "github", login: "someone" } }) === null,
+    badLogin: parse(account("github", "../x", "eligible")) === null,
+    expired: parse(account("github", "someone", "eligible", { expiresAt: NOW - 1 })) === null,
+    idString: parse(account("x", "someone", "ineligible", { identity: { providerUserId: big } })).identity.providerUserId === big
+      && parse(account("x", "someone", "ineligible", { identity: { providerUserId: 17 } })).identity.providerUserId === null,
+    // How the audience lists the account (gh:<id>, x:<id>), only for its own provider; anything else lists no one.
+    participant: parse(account("github", "someone", "eligible", { identity: { participant: "gh:583231" } })).identity.participant === "gh:583231"
+      && parse(account("x", "someone", "ineligible", { identity: { participant: `x:${big}` } })).identity.participant === `x:${big}`
+      && ["x:583231", "gh:0", "gh:1 ", "pr_7f3a", 583231].every((participant) => parse(account("github", "someone", "eligible", { identity: { participant } })).identity.participant === null),
+    display: parse(account("github", "someone", "eligible", { identity: { display: "\u202eevil\u0007 name" } })).identity.display === "evil name",
+    avatar: parse(account("github", "someone", "eligible", { identity: { avatar: "https://evil.example/a.png" } })).identity.avatar === null,
+    staleBounded: parse(account("github", "someone", "eligible", { eligibility: { checkedAt: NOW, staleAfter: 999999 } })).eligibility.staleAfter === C.STALE_MAX_S,
+    returned: C.parseReturn("?state=x&signin=denied&provider=github").result === "denied" && C.parseReturn("?signin=code123&provider=evil").result === "failed"
+      && C.parseReturn("?signin=code123&provider=evil").provider === null && C.parseReturn("?state=x") === null,
+    dropped: C.withoutReturn("?state=listener&signin=ok&provider=x&reason=y") === "?state=listener" && C.withoutReturn("?signin=ok") === "",
+    swept: [...stored.keys()].join() === "ooga-chat.v1.tab,ooga-chat.v1.zone,ooga-chat.fixture.v1.tab,other",
+    zone: C.parseZone("dsb") === "dsb" && C.parseZone("interior") === "main"
+  };
+  record("Ooga Chat session: only a GitHub account the server reports eligible speaks or sees contributor tabs, X never does whatever it claims, unknown is not eligible, identity needs the opaque principal, an X id stays a string, names and pictures are cleaned, and a sign-in return or saved screen or speaker flag cannot survive",
+    Object.values(session).every(Boolean), JSON.stringify(session));
+
+  // The account lifecycle against a stand-in adapter, clock and voice seam: every sign-in lands as a listener, capture
+  // is released before the logout request and on every downgrade, and a failed or expired session says which.
+  const A = load(["src/ooga-chat/ooga-chat-config.js", "src/ooga-chat/ooga-chat-auth.js"], { window: {}, URLSearchParams }).oogaChatAuth;
+  const boot = { paths: { session: "/s", logout: "/l", login: { github: "/g", x: "/x" } } };
+  const signedIn = async (first, extra = {}) => {
+    let clock = NOW, answer = first, failLogout = extra.failLogout, timers = [];
+    const log = [];
+    const adapter = { session: async () => { log.push("session"); if (answer instanceof Error) throw answer; return answer && parse(answer); },
+      signIn: (b, provider) => { log.push(`signIn:${provider}`); return parse(account(provider, `fresh-${provider}`, "eligible")); },
+      signOut: async () => { log.push("logout"); if (failLogout) throw new Error("offline"); } };
+    const media = { available: true, release: (why) => log.push(`release:${why}`) };
+    const auth = A.create({ adapter, media, now: () => clock, timers: { set: (fn, ms) => (timers.push({ fn, at: clock + ms }), timers.length), clear: (id) => { timers[id - 1] = null; } } });
+    await auth.start(boot, extra.back || null);
+    return { auth, log, set answer(value) { answer = value; }, set failLogout(value) { failLogout = value; },
+      advance: async (ms) => { clock += ms; for (const timer of timers) if (timer && timer.at <= clock) { timers[timers.indexOf(timer)] = null; await timer.fn(); } },
+      gates: () => A.gates(auth.state, clock), get timers() { return timers.filter(Boolean); } };
+  };
+  const eligible = await signedIn(account("github", "speaker", "eligible", { eligibility: { checkedAt: NOW, staleAfter: 600 } }));
+  const opened = eligible.auth.state.auth === "eligible" && eligible.gates().joinVoice && eligible.gates().contributor && eligible.timers.length === 1;
+  await eligible.advance(600_000);
+  const stale = eligible.log.includes("release:stale") && !A.gates({ ...eligible.auth.state, session: eligible.auth.state.session }, NOW + 600_000).joinVoice;
+  const x = await signedIn(account("x", "speaker", "eligible"));
+  const ineligible = await signedIn(account("github", "visitor", "ineligible")), unknown = await signedIn(account("github", "unchecked", "unknown"));
+  const revoked = await signedIn(account("github", "revoked", "revoked"));
+  const gated = { x: x.auth.state.auth === "listener" && !x.gates().joinVoice && !x.gates().contributor && x.gates().why === A.WHY.x,
+    ineligible: ineligible.auth.state.auth === "listener" && !ineligible.gates().joinVoice && ineligible.gates().why === A.WHY.listener,
+    unknown: unknown.auth.state.auth === "unknown" && !unknown.gates().joinVoice && !unknown.gates().contributor && unknown.gates().why === A.WHY.unknown,
+    revoked: !revoked.gates().joinVoice && !revoked.gates().contributor && revoked.gates().why === A.WHY.revoked };
+  // Sign out with the network down: capture goes first, the page is signed out, and the retry reaches the server.
+  const leaving = await signedIn(account("github", "speaker", "eligible"), { failLogout: true });
+  leaving.auth.signOut();
+  const releasedFirst = leaving.log.indexOf("release:signout") >= 0 && leaving.log.indexOf("release:signout") < leaving.log.indexOf("logout") && leaving.auth.state.session === null;
+  await new Promise((resolve) => setImmediate(resolve));
+  const uncertain = leaving.auth.state.auth === "signed-out" && leaving.auth.state.notice?.kind === "signout" && !!leaving.auth.state.notice.action;
+  // The server still holds the session: the network's return finds it, and the page stays signed out and says so.
+  await leaving.advance(A.RECHECK_MIN_MS);
+  await leaving.auth.check("online");
+  const outKept = leaving.auth.state.session === null && leaving.auth.state.auth === "signed-out" && leaving.auth.state.notice === A.NOTICE.held
+    && !leaving.gates().joinVoice && !leaving.gates().contributor;
+  leaving.failLogout = false;
+  await leaving.auth.retry();
+  const retried = leaving.log.filter((entry) => entry === "logout").length === 2 && leaving.auth.state.notice === null && leaving.auth.state.session === null
+    && leaving.auth.state.auth === "signed-out" && !leaving.gates().contributor;
+  // A check that finds the session gone after all is the server's confirmation: the notice goes.
+  const confirmed = await signedIn(account("github", "speaker", "eligible"), { failLogout: true });
+  await confirmed.auth.signOut();
+  confirmed.answer = null;
+  await confirmed.advance(A.RECHECK_MIN_MS);
+  await confirmed.auth.check("online");
+  const outConfirmed = confirmed.auth.state.notice === null && confirmed.auth.state.auth === "signed-out" && !confirmed.log.includes("release:expired");
+  // Another principal, an expired session and a failed check each release; the check says which.
+  const swap = await signedIn(account("github", "speaker", "eligible"));
+  swap.answer = account("github", "someone-else", "eligible");
+  await swap.auth.check("retry");
+  swap.answer = null;
+  await swap.auth.check("retry");
+  const expiredNotice = swap.auth.state.notice?.kind === "expired";
+  const broken = await signedIn(account("github", "speaker", "eligible"));
+  broken.answer = new Error("offline");
+  await broken.auth.check("retry");
+  const throttled = await signedIn(account("github", "speaker", "eligible"));
+  await throttled.auth.check("visible");
+  // A denied return names its provider and retries it; a GitHub sign-in lands eligible but closed until Join Voice.
+  const denied = await signedIn(null, { back: { result: "denied", provider: "github" } });
+  const deniedNotice = denied.auth.state.notice?.kind === "signin" && denied.auth.state.notice.provider === "github" && denied.auth.state.auth === "signed-out";
+  await denied.auth.retry();
+  const flow = { opened, stale, ...gated, releasedFirst, uncertain, outKept, retried, outConfirmed,
+    identity: swap.log.includes("release:identity") && swap.log.includes("release:expired") && expiredNotice,
+    error: broken.auth.state.auth === "error" && broken.log.includes("release:error") && broken.auth.state.notice?.kind === "check" && !broken.gates().joinVoice,
+    throttled: throttled.log.filter((entry) => entry === "session").length === 1,
+    denied: deniedNotice && denied.log.includes("signIn:github") && denied.auth.state.auth === "eligible" && !denied.log.some((entry) => entry.startsWith("release")) };
+  record("Ooga Chat account: every sign-in lands as a listener with gates only the server's answer opens, a stale window or failed check closes them, sign-out releases capture before the request and offers a retry when unconfirmed, a session the server still holds after it is never adopted again, and another principal or an expired session releases and says so",
+    Object.values(flow).every(Boolean), JSON.stringify(flow));
+
+  // The audience roster (audience protocol 1): the space's one order, and a snapshot and deltas applied whole or not at
+  // all, by participant and generation, with stale ones dropped and gaps found.
+  const R = load(["src/ooga-chat/ooga-chat-config.js", "src/ooga-chat/ooga-chat-roster.js"], { window: {}, URLSearchParams }).oogaChatRoster;
+  const who = (id, source, role, login, extra = {}) => ({ id, generation: 1, source, role, login, ...extra });
+  const cast = [who("l-zed", "app", "listener", "zed"), who("w-b", "world", "speaker", "Bea", { contributions: 9 }), who("me", "app", "listener", "me"),
+    who("w-a", "world", "speaker", "abe", { contributions: 9 }), who("a-y", "app", "speaker", "yan"), who("w-n", "world", "speaker", "nil"),
+    who("w-0", "world", "speaker", "zero", { contributions: 0 }), who("a-b", "app", "speaker", "bo"), who("l-amy", "app", "listener", "Amy"),
+    who("w-top", "world", "speaker", "top", { contributions: 120 }), who("l-amy", "app", "listener", "Amy", { display: "Amy, again" })];
+  const ids = (list) => list.map((p) => p.id).join();
+  const roster = R.create();
+  roster.expect("main");
+  const snap = (epoch, revision, participants, zone = "main") => roster.apply({ type: "snapshot", zone, epoch, revision, participants });
+  const delta = (epoch, revision, upsert = [], remove = []) => roster.apply({ type: "delta", zone: "main", epoch, revision, upsert, remove });
+  const first = snap(3, 10, cast), deduped = first === "applied" && roster.size === 10 && roster.get("l-amy").display === "Amy";
+  const ordered = ids(roster.list("me")), asSpeaker = (snap(3, 11, cast.map((p) => p.id === "me" ? { ...p, role: "speaker" } : p)), ids(roster.list("me")));
+  snap(3, 12, cast);
+  const results = [delta(3, 12), delta(2, 99), delta(3, 14), delta(3, 13, [who("l-new", "app", "listener", "new"), { id: "bad id" }])];
+  const atomic = !roster.get("l-new") && roster.revision === 12;
+  const renamed = delta(3, 13, [{ ...cast[0], display: "Zed, renamed" }]) === "applied" && roster.get("l-zed").display === "Zed, renamed" && ids(roster.list("me")) === ordered;
+  const olderGen = delta(3, 14, [], [{ id: "w-top", generation: 0 }]) === "applied" && !!roster.get("w-top");
+  const newerGen = delta(3, 15, [{ ...cast[0], generation: 2 }], [{ id: "a-b", generation: 1 }]) === "applied" && roster.get("l-zed").generation === 2 && !roster.get("a-b");
+  const crowd = R.create();
+  crowd.expect("dsb");
+  const many = Array.from({ length: 600 }, (_, i) => who(`l-${i}`, "app", "listener", `listener-${String(i).padStart(3, "0")}`));
+  crowd.apply({ type: "snapshot", zone: "dsb", epoch: 1, revision: 1, participants: many });
+  // The fixture lists the visitor as the edge does, by provider id, and the visitor is found by the session's
+  // `participant`, never by its principal: first among the listeners, for GitHub and X alike.
+  const ticks = [];
+  const F = load(["src/ooga-chat/ooga-chat-config.js", "src/ooga-chat/ooga-chat-fixtures.js"], { window: {}, URLSearchParams, setTimeout: (fn) => ticks.push(fn), clearTimeout() {} }).oogaChatFixtures;
+  const visitorFirst = [];
+  for (const state of ["contributor", "listener"]) {
+    const fixture = F.create({ state }), fixtureBoot = await fixture.bootstrap(), me = await fixture.session(fixtureBoot), heard = R.create();
+    heard.expect("main");
+    ticks.length = 0;
+    fixture.audience(fixtureBoot, { message: (msg) => heard.apply(msg), status() {} }).zone("main");
+    ticks[0]();
+    const first = heard.list(me.identity.participant).find((p) => p.role === "listener");
+    visitorFirst.push(!!first && first.login === me.identity.login && first.id === `${me.identity.provider === "github" ? "gh" : "x"}:${me.identity.providerUserId}`);
+    fixture.dispose();
+  }
+  const audience = {
+    visitorFirst: visitorFirst.join() === "true,true",
+    order: ordered === "w-top,w-a,w-b,w-0,w-n,a-b,a-y,me,l-amy,l-zed",
+    selfAmongApp: asSpeaker === "w-top,w-a,w-b,w-0,w-n,me,a-b,a-y,l-amy,l-zed",
+    deduped,
+    stale: results[0] === "stale" && results[1] === "stale",
+    gap: results[2] === "gap" && results[3] === "gap" && atomic,
+    renamed, olderGen, newerGen,
+    // A reconnect to an unchanged zone answers with the revision already held: that snapshot confirms the list.
+    confirms: snap(3, roster.revision, cast) === "applied" && snap(3, roster.revision - 1, cast) === "stale",
+    otherZone: snap(9, 1, cast, "dsb") === "ignored" && snap(2, 99, cast) === "stale",
+    crowd: crowd.list(null).length === 600 && crowd.list(null)[599].id === "l-599",
+    restarted: (roster.expect("dsb"), !roster.ready && roster.list("me").length === 0)
+  };
+  record("Ooga Chat roster: world speakers by contribution total then name with a missing total after zero, then app speakers with the visitor first, then listeners with the visitor first; snapshots dedupe by id, stale or other-zone messages drop, a gap or bad delta changes nothing, generations decide removals, and hundreds of listeners all stay",
+    Object.values(audience).every(Boolean), JSON.stringify(audience));
 
   // The production adapter against a stand-in fetch: every failure is an explicit unavailable mode, and dispose aborts.
   const answer = (status, type, body) => async () => ({ ok: status < 400, status, headers: { get: () => type }, json: async () => body });
@@ -32477,10 +32641,38 @@ const oogaChatChecks = async () => {
   // Sign-out ends only when the server confirms it; a refused one throws, so the app keeps the session and says so.
   const outWith = async (status) => { try { await adapterWith(answer(status, "application/json", {})).signOut({ paths: { logout: "/api/logout" } }); return "ok"; } catch { return "threw"; } };
   const signOut = [await outWith(204), await outWith(401), await outWith(500)].join();
+  // The audience feed against a stand-in socket and clock. The edge refuses by opening a socket and closing it at once,
+  // so only a frame resets the backoff: refusals back off to 30 s, 4503 (listening off) waits long with its own status.
+  const waits = [], feedHeard = [], sockets = [];
+  class Socket {
+    constructor() { this.readyState = 0; this.on = {}; sockets.push(this); }
+    addEventListener(type, fn) { this.on[type] = fn; }
+    send() {}
+    close() {}
+  }
+  const feedAdapter = load(["src/ooga-chat/ooga-chat-config.js", "src/ooga-chat/ooga-chat-http.js"], { window: {}, AbortController,
+    setTimeout: (fn, ms) => waits.push({ fn, ms }), clearTimeout() {} }).oogaChatHttp.create({ fetch: answer(500), location: { protocol: "https:", host: "chat.test" }, doc: {}, WebSocket: Socket });
+  const refused = (code, frame) => {
+    const socket = sockets.at(-1);
+    socket.readyState = 1;
+    socket.on.open();
+    if (frame) socket.on.message({ data: frame });
+    socket.readyState = 3;
+    socket.on.close({ code });
+    const wait = waits.at(-1);
+    wait.fn();
+    return wait.ms;
+  };
+  feedAdapter.audience({ paths: { audience: "/api/chat/audience" } }, { message() {}, status: (next) => feedHeard.push(next) }).zone("main");
+  const backoff = [1013, 1006, 1013, 1006, 1013, 1006].map((code) => refused(code));
+  const off = refused(4503), offHeard = feedHeard.at(-2);
+  const afterFrame = refused(1006, JSON.stringify({ type: "snapshot" }));
+  const feed = { backoff: backoff[0] <= 1250 && backoff[3] >= 6000 && backoff[5] >= 22500 && backoff[5] <= 37500, off: off >= 60000 && offHeard === "closed",
+    reset: afterFrame <= 1250 && feedHeard.at(-2) === "reconnecting" };
   const adapter = { modes: modes.join() === "unavailable,unavailable,unavailable,live", held, released: hanging.pending === 0 && ended.mode === "unavailable" && ended.reason === "disposed",
-    signOut: signOut === "ok,threw,threw" };
-  record("Ooga Chat adapter: a 404, a non-JSON page or an unreachable service each leave the app unavailable rather than invented, disposing aborts what is still asking, and a sign-out the server refuses throws instead of signing out",
-    adapter.modes && adapter.held === 1 && adapter.released && adapter.signOut, JSON.stringify({ ...adapter, signOut }));
+    signOut: signOut === "ok,threw,threw", ...feed };
+  record("Ooga Chat adapter: a 404, a non-JSON page or an unreachable service each leave the app unavailable rather than invented, disposing aborts what is still asking, a sign-out the server refuses throws instead of signing out, and an audience socket the edge refuses backs off until a frame arrives, longest while listening is off",
+    adapter.modes && adapter.held === 1 && adapter.released && adapter.signOut && adapter.backoff && adapter.off && adapter.reset, JSON.stringify({ ...adapter, signOut, waits: [...backoff, off, afterFrame].map(Math.round) }));
 
   // The shell over a minimal DOM: views build on first visit, are kept across tab switches and updates, and dispose once.
   const node = (tag, doc) => {
@@ -32553,7 +32745,103 @@ const oogaChatChecks = async () => {
     };
     record("Ooga Chat build: one hashed same-origin script and stylesheet holding only the app's and the shared modules, no fixture code unless asked, its pictures renamed by hash, its policy in _headers, and never staged over the island's folders or a folder it did not make",
       Object.values(build).every(Boolean), JSON.stringify(build));
+
+    // The installable app: a manifest the production entry alone links, the native cloud at each icon size (the
+    // maskable one inside the safe circle), and a worker that keeps only this build's public files.
+    const { decode } = await import(pathToFileURL(join(root, "scripts/distribution-icons.mjs")).href);
+    const appManifest = JSON.parse(readFileSync(join(staged, "manifest.webmanifest"), "utf8")), shellPage = readFileSync(join(staged, "index.html"), "utf8");
+    const iconOk = (icon) => {
+      const [w, h] = icon.sizes.split("x").map(Number), { w: pw, h: ph, px } = decode(readFileSync(join(staged, icon.src.slice(1))));
+      let x0 = pw, x1 = -1, y0 = ph, y1 = -1;
+      for (let y = 0; y < ph; y++) for (let x = 0; x < pw; x++) if (px[(y * pw + x) * 4] > 200) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+      const corners = [[x0, y0], [x1, y0], [x0, y1], [x1, y1]].map(([x, y]) => Math.hypot(x - pw / 2, y - ph / 2));
+      return pw === w && ph === h && x1 > x0 && (icon.purpose !== "maskable" || Math.max(...corners) <= pw * 0.4);
+    };
+    const swSource = readFileSync(join(staged, "sw.js"), "utf8"), shellList = JSON.parse(swSource.match(/const SHELL = (\[.*\]);/)[1]);
+    const installable = {
+      manifest: appManifest.name === "Ooga Chat" && appManifest.id === "/" && appManifest.start_url === "/" && appManifest.scope === "/" && appManifest.display === "standalone"
+        && appManifest.icons.length === 3 && appManifest.icons.some((icon) => icon.purpose === "maskable") && appManifest.icons.every(iconOk),
+      linked: shellPage.includes('<link rel="manifest" href="/manifest.webmanifest">') && /<link rel="apple-touch-icon" sizes="180x180" href="\/icons\/ooga-chat-180-[0-9a-f]{16}\.png">/.test(shellPage)
+        && !readFileSync(join(staged, "fixture.html"), "utf8").includes('rel="manifest"'),
+      shell: swSource.includes(`const VERSION = "${withFixtures.build}";`) && shellList[0] === "/" && shellList.slice(1).every((path) => /^\/(js|css|art|icons)\/[\w.-]+-[0-9a-f]{16}\.[a-z]+$/.test(path))
+        && !shellList.some((path) => /fixture|api|auth|manifest|404/.test(path)) && shellList.length === withFixtures.files.filter((file) => /^(js|css|art|icons)\//.test(file.path) && !file.path.includes("fixture")).length + 1,
+      headers: B.headersFor(headers, "/sw.js")["Cache-Control"] === "no-cache" && B.POLICY.includes("manifest-src 'self'") && B.POLICY.includes("worker-src 'self'")
+        && B.headersFor(readFileSync(join(staged, "_headers"), "utf8"), "/manifest.webmanifest")["Content-Type"] === "application/manifest+json"
+    };
+    record("Ooga Chat install: the manifest names the standalone app at /, its icons are the native cloud at their sizes with the maskable one inside the safe circle, only the production entry links it, and the worker's shell is this build's hashed public files and the page",
+      Object.values(installable).every(Boolean), JSON.stringify(installable));
+
+    // The worker against stand-in caches and network: it keeps the shell, answers hashed files from the cache and the
+    // page from the network first, passes every API, sign-in, write and unknown request untouched, refuses a no-store
+    // shell, and taking over deletes only older Ooga Chat caches.
+    const worker = (net) => {
+      const on = {}, store = new Map(), log = { skipped: 0 };
+      const caches = { open: async (name) => { if (!store.has(name)) store.set(name, new Map()); const m = store.get(name); return { put: async (k, v) => { m.set(k, v); }, match: async (k) => m.get(k) }; },
+        keys: async () => [...store.keys()], delete: async (k) => store.delete(k) };
+      const self = { location: { origin: "https://ooga.chat" }, addEventListener: (type, fn) => { on[type] = fn; }, skipWaiting: () => { log.skipped++; }, clients: { claim: async () => {} } };
+      runInNewContext(swSource, { self, caches, URL, Response: { error: () => "network error" },
+        fetch: async (request) => { const answer = net.fn(typeof request === "string" ? request : new URL(request.url).pathname); if (answer instanceof Error) throw answer; return answer; } });
+      const event = async (type, data = {}) => { let wait; on[type]({ ...data, waitUntil: (p) => { wait = p; } }); return wait; };
+      const request = async (path, { method = "GET", mode = "cors" } = {}) => {
+        let answer;
+        on.fetch({ request: { url: `https://ooga.chat${path}`, method, mode }, respondWith: (p) => { answer = p; } });
+        return answer && await answer;
+      };
+      return { on, store, log, event, request };
+    };
+    const reply = (body, cc = "public, max-age=31536000, immutable") => ({ ok: true, status: 200, type: "basic", body, headers: { get: (k) => k === "cache-control" ? cc : null } });
+    const net = { fn: (path) => reply(path, path === "/" ? "no-cache" : undefined) };
+    const sw = worker(net), hashedJs = shellList.find((path) => path.startsWith("/js/"));
+    await sw.event("install");
+    const kept = shellList.every((path) => sw.store.get(`ooga-chat-${withFixtures.build}`).has(path));
+    sw.store.set("ooga-chat-0000000000000000", new Map());
+    sw.store.set("someone-else", new Map());
+    await sw.event("activate");
+    const passes = (await Promise.all([sw.request("/api/session"), sw.request("/auth/github", { mode: "navigate" }), sw.request("/api/logout", { method: "POST" }),
+      sw.request(hashedJs, { method: "POST" }), sw.request(`${hashedJs}?v=1`), sw.request("/fixture.html"), sw.request("/build.json"), sw.request("/manifest.webmanifest")])).every((answer) => answer === undefined);
+    net.fn = (path) => path === "/" ? reply("fresh page", "no-cache") : new Error("offline");
+    const online = (await sw.request("/", { mode: "navigate" }))?.body === "fresh page";
+    net.fn = () => new Error("offline");
+    const offline = (await sw.request("/", { mode: "navigate" }))?.body === "/" && (await sw.request(hashedJs))?.body === hashedJs;
+    sw.on.message({ data: { type: "other" } });
+    sw.on.message({ data: { type: "skip-waiting" } });
+    const strict = worker({ fn: (path) => reply(path, path === "/" ? "no-store" : undefined) });
+    let refused = false;
+    try { await strict.event("install"); } catch { refused = true; }
+    const lifecycle = { kept, passes, online, offline, refused,
+      cleaned: !sw.store.has("ooga-chat-0000000000000000") && sw.store.has("someone-else") && sw.store.has(`ooga-chat-${withFixtures.build}`), skipped: sw.log.skipped === 1 };
+    record("Ooga Chat worker: keeps the shell, answers hashed files from the cache and the page from the network first with the cache only offline, passes API, sign-in, writes and anything unlisted untouched, refuses a no-store shell, waits for the page to take over, and deletes only older Ooga Chat caches",
+      Object.values(lifecycle).every(Boolean), JSON.stringify(lifecycle));
   } finally { rmSync(out, { recursive: true, force: true }); }
+
+  // M mutes only a plain press outside a field, composition, modifier or repeat.
+  const D = load(["src/ooga-chat/ooga-chat-device.js"], { window: {} }).oogaChatDevice;
+  const key = (extra = {}) => ({ key: "m", target: { tagName: "BUTTON", closest: () => null }, ...extra });
+  const keys = { plain: D.isMuteKey(key()) && D.isMuteKey(key({ key: "M" })) && D.isMuteKey(key({ target: null })),
+    refused: [{ repeat: true }, { isComposing: true }, { keyCode: 229 }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { key: "n" },
+      { target: { tagName: "INPUT" } }, { target: { tagName: "TEXTAREA" } }, { target: { tagName: "DIV", isContentEditable: true } },
+      { target: { tagName: "SPAN", closest: () => ({}) } }].every((extra) => !D.isMuteKey(key(extra))) };
+  record("Ooga Chat M key: a plain M mutes, never while typing in a field or editable text, composing, holding a modifier or repeating",
+    Object.values(keys).every(Boolean), JSON.stringify(keys));
+
+  // Ooga Chat's zone marks are the island's own: DSB Land's paths as the island draws them, Main Island's mark the
+  // island's 64px favicon keyed as hud.js keys it for its destination button.
+  const islandHtml = readFileSync(join(root, "src/index.html"), "utf8");
+  const icons = load(["src/js/native-icons.js"], { window: {} }).nativeIcons;
+  const inline = [...islandHtml.match(/<svg class="dsb-island-icon"[\s\S]*?<\/svg>/)[0].matchAll(/<path fill="([^"]+)" d="([^"]+)"\/>/g)].map((m) => `${m[1]} ${m[2]}`);
+  const { decode } = await import(pathToFileURL(join(root, "scripts/distribution-icons.mjs")).href);
+  const favicon = decode(Buffer.from(islandHtml.match(/<link rel="icon" type="image\/png" sizes="64x64" href="data:image\/png;base64,([^"]+)">/)[1], "base64"));
+  for (let i = 0; i < favicon.px.length; i += 4) {
+    const alpha = Math.max(0, Math.min(1, (Math.max(favicon.px[i], favicon.px[i + 1], favicon.px[i + 2]) - 24) / 56));
+    favicon.px[i + 3] = Math.round(alpha * 255);
+    if (alpha > 0 && alpha < 1) for (let c = 0; c < 3; c++) favicon.px[i + c] = Math.min(255, Math.round(favicon.px[i + c] / alpha));
+  }
+  const keyed = decode(readFileSync(join(root, "src/ooga-chat/art/main-island.png")));
+  const marks = { dsb: inline.join("|") === icons.ICONS.dsb[3].map(([fill, d]) => `${fill} ${d}`).join("|") && inline.length === 8,
+    island: keyed.w === favicon.w && keyed.h === favicon.h && keyed.px.equals(favicon.px),
+    voice: /BL\.nativeIcons\.voice\(\)/.test(readFileSync(join(root, "src/js/hud.js"), "utf8")) && icons.VOICE_PARTS.length === 5 };
+  record("Ooga Chat zone marks: DSB Land's is the island's own paths, Main Island's is the island's favicon keyed as its destination button keys it, and the voice mark is the one the island's roster draws",
+    Object.values(marks).every(Boolean), JSON.stringify(marks));
 
   // The island's tabs draw from the same icons, and every icon slot names one that exists.
   const I = load(["src/js/native-icons.js"], { window: {} }).nativeIcons;
