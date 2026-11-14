@@ -12800,3 +12800,17 @@ body.arcade-game .cloud-hopper-panel { z-index: 40; }
 @media (prefers-reduced-motion: reduce) {
   .block-trophy-head .game-intro-title, .block-trophy-banner, .block-trophy-board, .block-trophy-sparkles { animation: none; }
 }
+
+/* Directory text and links only: no external world is loaded to browse its entry. */
+.cave-directory { width: min(560px, calc(100vw - 24px)); max-height: calc(100dvh - 32px - var(--safe-top) - var(--safe-bottom)); overflow-y: auto; overscroll-behavior: contain; }
+.cave-directory p { font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.cave-directory h3 { font-size: 14px; margin: 20px 0 8px; color: var(--gold, #ffd84a); }
+.cave-directory ul { padding: 0; list-style: none; }
+.cave-directory li { padding: 12px 0; border-top: 1px solid #f3efe424; }
+.cave-directory-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.cave-directory-actions :is(button, a) { display: inline-flex; align-items: center; min-height: 44px; padding: 8px 12px; border: 1px solid var(--wood-edge); border-radius: 6px; background: var(--slab-dark); color: #f3efe4; font: inherit; font-size: 12px; cursor: pointer; }
+.cave-directory-actions :is(button, a):focus-visible { outline: 3px solid #ffd84a; outline-offset: 2px; }
+
+.cave-directory .modal-close { width: 44px; height: 44px; }
+
+body[data-active-scene] #cave-directory-button { min-height: 44px; }

@@ -10968,7 +10968,7 @@
     else if (returningCharacter && arcadeYard && pilot.player && arcadeMouth) arcadeMouth.entrance.standAt(arcadeYard.slot);
     else if (returningCharacter && arcadeCrossing && pilot.player && arcadeMouth) { arcadeMouth.entrance.arrive(arcadeCrossing); factoryWalk.still = 1; factoryWalk.hold = BL.factoryWindow.GLIDE.still; }
     else if (returningCharacter && ctx.from === "arcade" && pilot.player && arcadeMouth) arriveFromArcade();
-    else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile", false, false);
+    else if (returningCharacter) navigate(routedPlace || (ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile"), false, false);
     else navigate(routedPlace || (ctx.from === "bifrost" ? "bifrost" : "pile"), false, false);
     if (donate) hud.openFeed();
     clankers.sync(); clankerMeshes.sync();
@@ -12006,7 +12006,7 @@
     else if (returningCharacter && arcadeYard && pilot.player && arcadeMouth) arcadeMouth.entrance.standAt(arcadeYard.slot);
     else if (returningCharacter && arcadeCrossing && pilot.player && arcadeMouth) { arcadeMouth.entrance.arrive(arcadeCrossing); factoryWalk.still = 1; factoryWalk.hold = BL.factoryWindow.GLIDE.still; }
     else if (returningCharacter && ctx.from === "arcade" && pilot.player && arcadeMouth) arriveFromArcade();
-    else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile", false, false);
+    else if (returningCharacter) navigate(routedPlace || (ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile"), false, false);
     else if (ctx.from === "bifrost" && !routedPlace) navigate("bifrost", false, false);
     else if (!signedInArrival && !crew.sleeping && !initialGorilla && (routedPlace || preloadedView || initialCharacter || initialFirstPerson)) navigate(routedPlace || preloadedView || "pile", false, false);
     if (donate) hud.openFeed();
