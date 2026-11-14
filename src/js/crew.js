@@ -60,15 +60,15 @@
     cave.weapon.bashOffset = 0;
   };
   const AXE_STICK_DELAY = 1, AXE_STICK_BLEND = 0.3, AXE_STICK_ARM = -1.5;
-  // The modelled look: a modelled body (models' `modelled`) holds its axe square to its forearm at every
-  // moment, so the two move as one, and plants it as a resting stick once still: the upper arm a little forward of
-  // the shoulder (STICK_RAISE) and the elbow bent until the forearm points straight ahead, the haft upright through
-  // the fist with its butt on the ground. Its weapon's `stick` is how far through that move it is: planted in
-  // STICK_PLANT seconds, and carried again in STICK_AWAY once it sets off. Through the move the upper arm swings
-  // forward (STICK_LIFT, or as far as carries the butt STICK_CLEAR over the ground) with the elbow nearly straight
-  // (STICK_STRAIGHT), and comes back as the elbow bends and sets the butt down.
+  // The modelled look: a modelled body (models' `modelled`) holds its axe square to its forearm, so the two move as
+  // one, and plants it as a resting stick once still: the upper arm a little forward of the shoulder (STICK_RAISE) and
+  // the elbow bent until the forearm points straight ahead, the haft upright through the fist with its butt on the
+  // ground. Its weapon's `stick` is how far through that move it is: planted in STICK_PLANT seconds, and carried again
+  // in STICK_AWAY once it sets off. The move is the elbow's: the upper arm only eases to its small lean forward while
+  // the elbow bends from the carry to the plant, never swinging the arm up, and on the way the wrist holds the haft
+  // back from square only as far as keeps its butt STICK_CLEAR over the ground.
   // Carrying it, the weight draws the elbow nearly straight (STICK_HANG).
-  const STICK_RAISE = -0.3, STICK_LIFT = 0.7, STICK_CLEAR = 0.6 / 16, STICK_STRAIGHT = 0.05, STICK_HANG = 0.175, STICK_PLANT = 0.6, STICK_AWAY = 0.3;
+  const STICK_RAISE = -0.3, STICK_CLEAR = 0.6 / 16, STICK_STRAIGHT = 0.05, STICK_HANG = 0.175, STICK_PLANT = 0.6, STICK_AWAY = 0.3;
   // SIT_FIST is how high the free fist's middle rests over the ground when its body sits there, in the body's heights.
   const AXE_BUTT = 3 / 16, HIP = 7 / 16, LYING_ELBOW = 0.1, SIT_FIST = 0.1, BACK_MIDDLE = 0.28;
   // How far into the back of the head a slung weapon may reach before it counts as in it, in the body's heights,
@@ -1616,9 +1616,9 @@
       parts.forearmL.highlight = parts.armL.highlight;
     }
     if (primaryCarry && cave.modelled) {
-      // Walking, the axe swings with the arm, its head ahead. Standing still he plants it in one move: the forearm
-      // comes up from its carry to level, the haft turning upright with it, and the hand slides along the haft to
-      // where it rests on it. A remote copy has no `stick` and goes by its idle time.
+      // Walking, the axe swings with the arm, its head ahead. Standing still he plants it in one move: the elbow
+      // bends the forearm up from its carry to level, the haft turning upright with it, and the hand slides along the
+      // haft to where it rests on it. A remote copy has no `stick` and goes by its idle time.
       const move = w.stick === undefined ? clamp((w.axeIdle - AXE_STICK_DELAY) / AXE_STICK_BLEND, 0, 1) : w.stick, stick = ease.inOutQuad(move);
       // The shoulder's height over the ground, less what a body sitting on the ground is lowered by.
       const elbow = cave.elbow, arm = parts.armR.rotation, shoulder = HIP * h - (cave.restLower || 0) + parts.armR.position.y;
@@ -1626,17 +1626,20 @@
       const armK = cave.armScale, reach = Math.hypot(elbow.y, elbow.z) * armK, fore = elbow.length * armK, lean = Math.atan2(-elbow.z, -elbow.y);
       const pitch = lerp(STICK_HANG, Math.PI / 2, stick);
       const grip = lerp(7 / 16 * h, shoulder - reach * Math.cos(-STICK_RAISE - lean) - AXE_BUTT * h, stick), length = grip + AXE_BUTT * h;
-      // The upper arm swings forward and back to its rest: along its own path, or further where the butt needs it
-      // to pass over the ground. It leaves its walking swing for that over the first third of the move, so posing
-      // twice in a frame changes nothing.
-      const room = shoulder - fore * Math.cos(pitch) - length * Math.sin(pitch) - STICK_CLEAR * h * (1 - stick);
-      const forward = Math.max(-STICK_RAISE * stick + STICK_LIFT * Math.sin(Math.PI * stick), room < reach ? lean + Math.acos(Math.max(-1, room / reach)) : 0);
+      // The upper arm only eases to its small lean forward. It leaves its walking swing for that over the first third
+      // of the move, so posing twice in a frame changes nothing.
+      const forward = -STICK_RAISE * stick;
       arm.x = lerp(arm.x, -forward, Math.min(1, move * 3));
       arm.y = arm.z = 0;
       const flex = Math.max(STICK_STRAIGHT, pitch - forward);
       parts.forearmR.rotation.x = -flex;
-      // The haft stands square to the forearm, a quarter turn from upright when the forearm hangs.
-      math.quat.fromEuler(AXE_ARM_INVERSE, Math.PI / 2 - flex, 0, 0);
+      // The haft stands square to the forearm, a quarter turn from upright when the forearm hangs, unless that would
+      // put its butt under STICK_CLEAR over the ground: then the wrist holds it back toward level until the fist has
+      // risen far enough, as it has by the end, where the butt rests on the ground. `raised` is the forearm's pitch
+      // from hanging and `fist` the fist's height over the ground.
+      const raised = flex - arm.x, fist = shoulder - reach * Math.cos(-arm.x - lean) - fore * Math.cos(raised);
+      const tilt = Math.min(raised, Math.asin(clamp((fist - STICK_CLEAR * h * (1 - stick)) / length, -1, 1)));
+      math.quat.fromEuler(AXE_ARM_INVERSE, Math.PI / 2 - tilt - arm.x, 0, 0);
       math.quat.multiply(cave.axeRotation, AXE_ARM_INVERSE, AXE_UPRIGHT_ROTATION);
       math.quat.rotateVec(MUZZLE, cave.axeRotation, 0, grip, 0);
       setVec(parts.club.position, -MUZZLE[0] / armK, elbow.y - elbow.length * Math.cos(flex) - MUZZLE[1] / armK, elbow.z + elbow.length * Math.sin(flex) - MUZZLE[2] / armK);

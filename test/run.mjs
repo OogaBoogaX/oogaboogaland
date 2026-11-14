@@ -24263,6 +24263,97 @@ const studioPlaces = { name: "studio places", why: "playthrough: the studio is w
   record("studio places: reloading an Ooga in bed preserves its rifle selection and waking restores the held rifle", reloaded.asleep && reloaded.kept && reloaded.standing, JSON.stringify(reloaded));
 } };
 scene("studio", { query: `character=${STUDIO_OOGA}`, steps: [studioPlaces, trip("studio")] });
+const modelledCarryPoses = { name: "modelled Heimdall and axe poses", why: "regression: Heimdall's props followed the old straight arms and planting an axe lifted the whole arm before bending its elbow", run: async b => {
+  const result = await b.evaluate(`(() => {
+    const S = BL.scene, M = BL.models, C = BL.crew, stage = S.createNode(), rows = [], shots = [];
+    const point = (node, x = 0, y = 0, z = 0) => { const p = new Float64Array(3); BL.math.mat4.transformPoint(p, node.world, x, y, z); return p; };
+    const distance = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
+    let figure; const original = M.caveman;
+    M.caveman = traits => (figure = original(traits));
+    let keeper;
+    try { keeper = BL.bifrostHeimdall.create({ parent: stage, x: 0, y: 0, z: 0, heading: 0, fx: { sayAt() {}, burst() {} } }); }
+    finally { M.caveman = original; }
+    const P = figure.parts;
+    let time = 0, maxGrip = 0, finite = true;
+    const sample = () => {
+      S.updateWorld(stage);
+      maxGrip = Math.max(maxGrip, distance(point(P.staff), point(P.fingersR)), distance(point(P.horn), point(P.fingersL)));
+      for (const n of [P.staff, P.horn, P.cape, P.forearmL, P.forearmR]) finite &&= Array.from(n.world).every(Number.isFinite);
+    };
+    const advance = (seconds, near) => { for (let i = 0; i < Math.round(seconds * 60); i++) { time += 1 / 60; keeper.update(1 / 60, time, 0, 0, near ? 4 : 30, near); sample(); } };
+    let renderer, host, camera, light;
+    const capture = (label, target, reach, side = 1) => {
+      if (!${!!process.env.POSE_SHOTS}) return;
+      if (!renderer) {
+        host = document.createElement("canvas"); host.style.cssText = "position:fixed;left:0;top:0;width:600px;height:650px;z-index:99999"; document.body.appendChild(host);
+        renderer = BL.glRenderer.createRenderer(host, { quality: "high" }); renderer.resize();
+        camera = S.createCamera({ fov: 30, near: .1, far: 60 });
+        light = { clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3), light: { x: .55, y: .78, z: -.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, moonSun: { x: 0, y: -1, z: 0 }, celestialPole: { x: 0, y: .34, z: -.94 }, starMatrix: new Float32Array(9), stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, sunStrength: 1, moonStrength: 0, moonIllumination: 1, moonPhase: .5, ambientFloor: .18, diffuseFloor: 0, shadowStrength: 1, shadowFloor: 0, shadowBias: .002, time: 0, bloomStrength: .5, shadowCenter: { x: 0, y: 1, z: 0 }, shadowExtent: 3 };
+        BL.daylight.sample(15, light, 80);
+      }
+      Object.assign(camera.target, { x: 0, y: target, z: 0 }); Object.assign(camera.position, { x: -reach * .7, y: target + reach * .3, z: reach * side });
+      S.updateWorld(stage); renderer.render(stage, camera, light); shots.push({ label, png: host.toDataURL("image/png") });
+    };
+    try {
+      advance(.2, false); capture("heimdall-rest", 1.6, 6); capture("heimdall-back", 1.6, 6, -1);
+      const rest = P.armR.rotation.x;
+      advance(.6, true); capture("heimdall-hail", 2.2, 8.5);
+      const hailed = P.armR.rotation.x < -2 && P.forearmR.rotation.x > -.5;
+      advance(3, false); const returned = Math.abs(P.armR.rotation.x - rest) < .01;
+      const poked = keeper.poke(), refused = !keeper.poke(); advance(.7, false); capture("heimdall-horn", 1.6, 6);
+      const hornUp = point(P.horn)[1] > point(P.head)[1] && P.forearmL.rotation.x < -1;
+      advance(3.2, false); const lowered = P.forearmL.rotation.x > -.8;
+      rows.push({ kind: "heimdall", maxGrip, finite, hailed, returned, poked, refused, hornUp, lowered });
+      keeper.root.visible = keeper.plinth.visible = false;
+      const axeDress = BL.contributors.traitsFor("w-s-bitcoin").dress;
+      for (const [name, owner] of [["regular", "w-s-bitcoin"], ["slim", "tiffanyvarty"], ["wide", "portlandhodl"]]) {
+        // Keep each character's actual body hook; setting slim on a regular custom model does not change its rig.
+        const base = BL.contributors.traitsFor(owner);
+        const traits = { ...base, name: "fixture/axe-" + name, stoneAxe: true, nunchaku: false, dress: { ...base.dress, club: axeDress.club } };
+        const cave = M.caveman(traits); C.preparePresentation(cave); S.addChild(stage, cave.root);
+        const p = cave.parts, club = p.club, h = cave.traits.height;
+        for (const remote of [false, true]) {
+          let minY = Infinity, gripGap = 0, maxArm = 0, endY = 0;
+          for (let frame = 0; frame <= 120; frame++) {
+            const move = frame <= 60 ? frame / 60 : (120 - frame) / 60;
+            if (remote) { delete cave.weapon.stick; cave.weapon.axeIdle = 1 + move * .3; } else cave.weapon.stick = move;
+            p.armR.rotation.x = .2 * Math.sin(frame * .2); C.poseEquipment(cave, true, frame / 60); S.updateWorld(stage);
+            const hand = point(p.fingersR), origin = point(club), axis = point(club, 0, 1, 0).map((v, i) => v - origin[i]);
+            const len = Math.hypot(...axis); for (let i = 0; i < 3; i++) axis[i] /= len;
+            const along = hand.reduce((sum, v, i) => sum + (v - origin[i]) * axis[i], 0);
+            gripGap = Math.max(gripGap, distance(hand, origin.map((v, i) => v + along * axis[i])));
+            const butt = point(club, 0, S.boundsOf(club.geometry).min[1], 0)[1]; minY = Math.min(minY, butt);
+            if (frame === 60) endY = butt;
+            maxArm = Math.max(maxArm, Math.abs(p.armR.rotation.x));
+            if (!remote && [0, 30, 60, 90, 120].includes(frame)) capture("axe-" + name + "-" + frame, .8 * h, 3.5 * h);
+          }
+          rows.push({ kind: "axe", name, remote, modelled: cave.modelled, armScale: cave.armScale, minY, endY, gripGap, maxArm });
+        }
+        S.removeChild(stage, cave.root);
+      }
+    } finally { keeper.dispose(); if (renderer) renderer.dispose(); if (host) host.remove(); }
+    return { rows, shots };
+  })()`);
+  const keeper = result.rows[0], axes = result.rows.slice(1);
+  record("modelled Heimdall: rest, hail, repeat tap, horn and return keep both props in the fists with finite clothes and arm transforms", keeper.maxGrip < .001 && keeper.finite && keeper.hailed && keeper.returned && keeper.poked && keeper.refused && keeper.hornUp && keeper.lowered, JSON.stringify(keeper));
+  record("modelled axe: regular, slim and wide bodies, local and remote transitions keep the haft in the fist, its butt above the floor until planted, and the upper arm below its old lifted pose", axes.length === 6 && axes.filter(r => r.name === "slim").every(r => r.armScale < 1) && axes.every(r => r.modelled && r.gripGap < .001 && r.minY > -.005 && Math.abs(r.endY) < .005 && r.maxArm < .4), JSON.stringify(axes));
+  if (process.env.POSE_SHOTS) {
+    mkdirSync(process.env.POSE_SHOTS, { recursive: true });
+    for (const shot of result.shots) writeFileSync(join(process.env.POSE_SHOTS, shot.label + ".png"), Buffer.from(shot.png.split(",")[1], "base64"));
+    writeFileSync(join(process.env.POSE_SHOTS, "measurements.json"), JSON.stringify(result.rows, null, 2));
+  }
+  await b.evaluate('__ooga.studio.place("stand"); __ooga.advance(.5, 1 / 60)');
+  await holdKey(b, "w", .5);
+  const walking = await b.evaluate('__ooga.studio.cave.weapon.stick');
+  await b.evaluate('__ooga.advance(1.8, 1 / 60)');
+  const planted = await b.evaluate('__ooga.studio.cave.weapon.stick');
+  if (process.env.POSE_SHOTS) await b.screenshot(join(process.env.POSE_SHOTS, "studio-axe-planted.png"));
+  await holdKey(b, "w", .5);
+  const away = await b.evaluate('__ooga.studio.cave.weapon.stick');
+  record("modelled axe controls: walking carries the axe, stopping plants it, and walking off releases it again", walking === 0 && planted === 1 && away === 0, JSON.stringify({ walking, planted, away }));
+} };
+scene("studio", { label: "modelled carry poses", query: "character=w-s-bitcoin", steps: [modelledCarryPoses] });
+
 scene("race", { label:"optional rig link fallback",url:hubPage(src, "scene=hub"),steps:[{name:"race optional rig link fallback",why:"regression: an optional uniform-limited rig must preserve WebGL and every original CPU driver",run:async b=>{
   await b.evaluate(`(()=>{
     const gl=document.getElementById("scene").getContext("webgl2"),create=gl.createProgram,parameter=gl.getProgramParameter,pending=new Set();
