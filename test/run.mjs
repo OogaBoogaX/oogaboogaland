@@ -14421,6 +14421,59 @@ const TOUR_ENDED = `(() => {
   B.advance(0.5, 1 / 60);
   return { ended, walked: +Math.hypot(body.root.position.x - f.x, body.root.position.z - f.z).toFixed(3) };
 })()`;
+const hubSharedGuide = { name: "hub shared guide", why: "rule: visitors opt into Tess's queue, accept their turn, keep conversations private and retain their own camera while another visitor uses the guide", run: async b => {
+  const result = await b.evaluate(`(() => {
+    const N=BL.net,G=BL.scenes.hub.debug.tess,s=G.state,camera=__ooga.camera;
+    const saved={me:N.state.me,room:N.state.room,connectionToken:N.state.connectionToken,tessShared:N.state.tessShared,tessGuide:N.state.tessGuide},send=N.sendTess,calls=[];
+    const visitKey="ooga-tess-visits",savedVisits=localStorage.getItem(visitKey);
+    let elapsed=0;const step=(n=1)=>{for(let i=0;i<n;i++){elapsed+=1/30;G.update(1/30,elapsed);}};
+    const receive=(phase,position=0,token="")=>{N.state.tessGuide={phase,position,token,count:position?2:0,until:N.serverNow()+60000,busy:phase==="wait"||phase==="active",pose:null};step();};
+    const view=()=>JSON.stringify([camera.position,camera.target]);
+    try {
+      localStorage.setItem(visitKey,"{}");
+      N.sendTess=m=>{calls.push(JSON.parse(JSON.stringify(m)));return true;};
+      Object.assign(N.state,{me:{id:901,login:"queue-fixture"},room:"live",connectionToken:"queue-fixture",tessShared:true,tessGuide:null});
+      receive("none");G.tap();step();
+      const panel=document.querySelector(".greeter-menu"),go=panel.querySelector(".greeter-row button:first-child"),skip=panel.querySelector(".greeter-row button:last-child");
+      const optIn=!panel.hidden&&go.textContent==="Join queue"&&!calls.some(m=>m.op==="join");
+      const fits=()=>{const r=panel.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1&&r.top>=0&&r.bottom<=innerHeight+1;};
+      let contained=fits();
+      N.state.tessGuide={...N.state.tessGuide,count:32};step();
+      const full=go.disabled&&panel.textContent.includes("queue is full");
+      const announced=panel.querySelector(".greeter-menu-help").getAttribute("aria-live")==="polite";
+      receive("none");
+      go.click();const joined=calls.at(-1).op==="join";
+      receive("wait",2,"mine");const before=view();
+      N.state.tessGuide.pose=[3,2,4,1,0,0,0,0,0,0,0,0];step(60);
+      const observer=before===view()&&!s.holding&&go.hidden&&panel.textContent.includes("2 of 2")&&Math.hypot(G.root.position.x-3,G.root.position.y-2,G.root.position.z-4)<.01;
+      receive("ready",1,"mine");contained&&=fits();const ready=go.textContent==="Talk to Tess"&&!go.hidden&&!s.holding;
+      go.click();const accepted=calls.at(-1).op==="accept"&&calls.at(-1).token==="mine";
+      receive("active",1,"mine");for(let i=0;i<450&&s.phase!=="offer";i++)step();
+      contained&&=fits();const offered=s.phase==="offer"&&!panel.querySelector("form").hidden;
+      const unreadNews=s.kind==="news"&&s.newest.line===BL.hubGuide.NEWS[0].line&&s.legs.length>0&&!JSON.parse(localStorage.getItem(visitKey))["queue-fixture"];
+      const field=panel.querySelector("input");field.value="How do I donate?";panel.querySelector("form").requestSubmit();step();
+      const privateReply=String(JSON.stringify(G.speech?.beats)).includes("Feed the Oogas")&&calls.every(m=>!["question","say","answer"].some(k=>k in m));
+      const boundedWire=calls.filter(m=>m.op==="pose").length>0&&calls.every(m=>JSON.stringify({t:"tess-guide",...m}).length<=256);
+      go.click();step();const touring=s.holding;
+      const newsRecorded=JSON.parse(localStorage.getItem(visitKey))["queue-fixture"]?.line===BL.hubGuide.NEWS[0].line;
+      N.state.room="connecting";N.state.tessGuide=null;step();
+      const disconnected=!s.holding&&!G.speech&&go.disabled&&panel.textContent.includes("15 seconds");
+      N.state.room="live";N.state.connectionToken="reconnected";receive("wait",2,"mine");skip.click();
+      const cancelled=calls.at(-1).op==="cancel"&&panel.hidden;
+      // Leaving the shared feature during a tour must return the pilot, not leave a hidden guide holding it.
+      let availabilityReleased=true;
+      for(const reason of ["signout","feature"]){
+        N.state.me={id:901,login:"queue-fixture"};N.state.tessShared=true;
+        receive("active",1,reason);for(let i=0;i<450&&s.phase!=="offer";i++)step();
+        go.click();step();const held=s.holding;
+        if(reason==="signout")N.state.me=null;else N.state.tessShared=false;
+        step();availabilityReleased&&=held&&!s.holding&&!G.speech&&!document.body.classList.contains("tess-touring");
+      }
+      return {optIn,full,announced,contained,joined,observer,ready,accepted,offered,unreadNews,newsRecorded,privateReply,boundedWire,touring,disconnected,cancelled,availabilityReleased};
+    } finally {if(savedVisits===null)localStorage.removeItem(visitKey);else localStorage.setItem(visitKey,savedVisits);Object.assign(N.state,saved);N.sendTess=send;step();}
+  })()`);
+  record("hub shared guide: explicit join/accept, queue position, private answers, observer camera independence, disconnect release and cancellation",Object.values(result).every(Boolean),JSON.stringify(result));
+} };
 const hubGuide = { name: "hub guide", why: "regression: Tess's offer showed only its first speech bubble, she stopped shots aimed past her, an Ooga walking or flying as her tour began went on through it, and T before or during her tour let the gorilla and tour share control", run: async (b) => {
   const guide = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, a = B.cavemen.get("portlandhodl"), G = BL.scenes.hub.debug.tess, s = G.state;
@@ -25542,7 +25595,8 @@ scene("poker", { opts: PHONE_SIZE, steps: [phone("poker", { card: '[data-intro="
 scene("hub", { label: "gorilla population restoration", query: "status=clankin", exclusive: true, opts: { motion: true }, steps: [hubGorillaPopulation] });
 scene("hub", { label: "weapons", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1&gorillarage=1", steps: [hubCombatGate, ...[hubAk, hubMelee, hubJetpack].map(gameCombat)] });
 // Her greeting comes once a page, to a fresh landing nothing has moved, so the guide has its own page.
-scene("hub", { label: "guide", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubGuide, hubAsk, hubTourInput] });
+scene("hub", { label: "guide", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubGuide, hubAsk, hubTourInput, hubSharedGuide] });
+scene("hub", { label: "shared guide phone", opts: { w: 390, h: 844, mobile: true }, query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubSharedGuide] });
 // Native pointer-lock assertions need sole focus; another browser lane can
 // steal capture and spend this long scenario's deadline waiting for it back.
 scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1&birdseye=1", exclusive: true, steps: [hubBirdsEye] });
@@ -27178,6 +27232,43 @@ const tessAnswerChecks = (BL) => {
   const lines = cases.flatMap(([q]) => (H.answer(q) || { lines: [] }).lines).every((id) => typeof H.LINES[id] === "string");
   record("tess answers: the page sends a typed question to a trip, an answer, the tour or nothing, follows \"take me there\" to the last place, leaves other follow-ups and Bitcoin questions that name a place's idea to the Worker, and answers every suggestion",
     !wrong.length && there === "trip:lab" && followUp === "none" && suggested && lines, JSON.stringify({ wrong, there, followUp, suggested, lines }));
+};
+// Shared Tess (#466) in Node: the real island guide under a stubbed room, its queue turns handed over as the Room
+// sends them. Under the shared guide her greeting offers Join queue, so news must come with the granted turn.
+const sharedTessNewsChecks = (BL) => {
+  const H = BL.hubGuide, N = BL.net, store = new Map(), visitKey = "ooga-tess-visits";
+  const savedStorage = globalThis.localStorage, savedState = { me: N.state.me, room: N.state.room, connectionToken: N.state.connectionToken, tessShared: N.state.tessShared, tessGuide: N.state.tessGuide }, savedSend = N.sendTess;
+  globalThis.localStorage = { getItem: (k) => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+  const size = { innerWidth: globalThis.innerWidth, innerHeight: globalThis.innerHeight };
+  Object.assign(globalThis, { innerWidth: 1280, innerHeight: 800 });
+  const calls = [], seen = () => JSON.parse(store.get(visitKey) || "{}")["news-fixture"] || null;
+  N.sendTess = (m) => { calls.push({ ...m, a: m.a?.slice() }); return true; };
+  const v = (x, y, z) => ({ x, y, z });
+  const guide = H.create({ parent: BL.scene.createNode(), input: { add() {}, remove() {} }, fx: new Proxy({}, { get: () => () => {} }), camera: { position: v(0, 4, -12), target: v(0, 2, 0), fov: 1 },
+    pilot: { controls: { moving: () => false } }, visitor: () => null, world: {}, hud: {}, busy: () => false, coarse: false, quality: () => 1, landing: true });
+  const s = guide.state, turn = (token) => { N.state.tessGuide = { phase: "active", position: 0, token, count: 1, until: N.serverNow() + 60000, busy: true, pose: null }; guide.update(0.016, 1); };
+  try {
+    Object.assign(N.state, { me: { id: 902, login: "news-fixture", display: "News Fixture" }, room: "live", connectionToken: "news-fixture", tessShared: true, tessGuide: null });
+    // Before a turn her greeting only offers Join queue and reads no news as seen.
+    for (let i = 0; i < 400; i++) guide.update(0.016, i * 0.016);
+    const waitingUnread = s.kind !== "news" && seen() === null;
+    // A granted turn with unread news offers that news first, from the newest entry, and still leaves it unread.
+    turn("turn-1");
+    const offered = s.kind === "news" && s.newest?.line === H.NEWS[0].line && s.legs.length > 0 && s.login === "news-fixture" && /^Welcome back, News Fixture!/.test(s.welcome || "") && s.phase === "approach" && seen() === null;
+    // Not now on that offer records it as seen.
+    s.phase = "offer"; guide.escape();
+    const recorded = seen()?.line === H.NEWS[0].line && calls.some(m => m.op === "cancel");
+    // The next granted turn, nothing new: the island tour with no welcome.
+    turn("turn-2");
+    const toured = s.kind === "island" && s.welcome === null && s.login === null && s.phase === "approach";
+    record("shared Tess news (#466): a signed-in visitor's granted turn offers unread island news first and Not now records it as seen; waiting reads nothing, and with nothing new the turn offers the island tour",
+      waitingUnread && offered && recorded && toured, JSON.stringify({ waitingUnread, offered, recorded, toured, kind: s.kind, phase: s.phase }));
+    const poses = calls.filter(m => m.op === "pose");
+    record("shared Tess privacy: without a driven Ooga, the visual pose does not publish the private camera as a look target",
+      poses.length > 0 && poses.every(m => m.a[10] === 0 && m.a.slice(7, 10).some((n, i) => n !== [0, 4, -12][i])), JSON.stringify(poses));
+  } finally {
+    guide.dispose(); globalThis.localStorage = savedStorage; Object.assign(N.state, savedState); N.sendTess = savedSend; Object.assign(globalThis, size);
+  }
 };
 // The Lightning Factory in Node: the feed's two contracts, the demo node that stands in for a real one, and the
 // walkable floor of the hall, each through the module's own functions.
@@ -33173,6 +33264,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   }
   factoryChecks(BL);
   tessAnswerChecks(BL);
+  sharedTessNewsChecks(BL);
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
   await cloudHopperFailureChecks(BL);

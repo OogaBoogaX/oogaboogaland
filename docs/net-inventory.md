@@ -53,6 +53,8 @@ Caveats noted there: `webSocketClose` must not call `ws.close()` on its compatib
 - Gain per peer falls to silence at twice the fire radius.
 - Gap: nothing closes SFU sessions when a player leaves or a socket closes.
 
+Shared Tess adds bounded `tess-guide` messages on the existing room socket, with no new network endpoint; see [Shared Tess](shared-tess.md).
+
 The island's optional TURN fallback adds one same-origin route, `POST /api/voice/ice`. The Worker calls `https://rtc.live.cloudflare.com/v1/turn/keys/{id}/credentials/generate-ice-servers` with its own bearer token. The browser can then reach `turn.cloudflare.com:443` over TLS for WebRTC media. See [Voice](auth-and-presence.md#voice) for the gates and lifecycle.
 
 ## The campfire loop

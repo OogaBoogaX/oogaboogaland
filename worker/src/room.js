@@ -32,7 +32,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import {
-  CABINETS, hockey, block, BLOCK, CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
+  CABINETS, hockey, block, BLOCK, tessQueue, CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
   NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
   DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, ROOM_LOCK_FEATURE, PIN_PASS_MS, PIN_TRIES, PIN_WAIT_MS, CONTROL_FRAMES, CONTROL_HZ, CONTROL_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, REACT_FEATURE, HAND_EMOJI_FEATURE, REACT_HZ, REACT_BURST,
   GHOST_MAGIC, inGhostArena, watchesGhost,
@@ -106,6 +106,7 @@ export class Room extends DurableObject {
       await hockey.loadLimits(this);
       hockey.restore(this);
       block.restore(this);
+      await tessQueue.restore(this);
       this.studio = (await ctx.storage.get("studio")) || this.studio;
       if (!studioSource(this.studio.source)) { this.studio.source = studioState().source; this.studio.position = 0; this.studio.playing = false; this.studio.at = Date.now(); this.studio.revision++; this.studio.playbackRevision = (this.studio.playbackRevision || 0) + 1; await ctx.storage.put("studio", this.studio); }
       this.studio.position = studioPosition(this.studio, this.studio.at);
@@ -493,7 +494,7 @@ export class Room extends DurableObject {
 
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE, ...(this.inspect.on ? [INSPECT_FEATURE] : [])] });
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [tessQueue.FEATURE, CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE, ...(this.inspect.on ? [INSPECT_FEATURE] : [])] });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
     this.send(server, { t: "chat-history", messages: this.chat.list() });
     this.sendCabinets(server);
@@ -540,6 +541,7 @@ export class Room extends DurableObject {
     if (msg.t === "cabinet") { this.cabinetMessage(p, msg); return; }
     // While playing, the room owns the floor pose and body, regardless of game-scene reports.
     if (p.cabinet && ["pose", "zone", "body", "blend", "hp", "shot", "swing", "hockey", "bf"].includes(msg.t)) return;
+    if (msg.t === "tess-guide") { tessQueue.message(this, p, msg); return; }
     if (msg.t === "bf") { block.message(this, p, msg); return; }
     if (msg.t === "hockey") { hockey.message(this, p, msg); ws.serializeAttachment(this.attachment(p)); return; }
     if (CONTROL_FRAMES.has(msg.t)) {
@@ -565,6 +567,7 @@ export class Room extends DurableObject {
     } else if (msg.t === "hub") {
       if (msg.on === p.inHub) return;
       p.inHub = msg.on;
+      tessQueue.presence(this, p);
       this.electHost();
       // A page arriving on the island catches up with the NPCs at once rather than at the next frame.
       if (p.inHub && p.id !== this.hostId && this.lastNpc) this.send(p.ws, this.lastNpc);
@@ -572,6 +575,7 @@ export class Room extends DurableObject {
       // A page hidden in a Block Frenzy match hands its hosting on; shown again, it comes back a guest (block.js).
       if (msg.on === p.visible) return;
       p.visible = msg.on;
+      tessQueue.presence(this, p);
       this.inspect.event("visible", p, { visible: msg.on });
       block.visibility(this, p);
     } else if (msg.t === "zone") {
@@ -584,6 +588,7 @@ export class Room extends DurableObject {
       if (msg.name !== "arcade.hall") hockey.leave(this, p.id);
       if (msg.name !== BLOCK.ZONE) block.leave(this, p.id);
       p.zone = msg.name;
+      tessQueue.presence(this, p);
       this.inspect.event("zone", p, { from, to: p.zone });
       this.roomZoneChanged(p, from);
       hockey.arrive(this, p);
@@ -773,6 +778,7 @@ export class Room extends DurableObject {
     this.background(this.clearVoice(p));
     this.privateLeave(p);
     this.players.delete(p.id);
+    tessQueue.presence(this, p, true, reason === "revoked");
     // A dropped socket can come straight back in; the last one out frees the room.
     const lockedIn = this.roomOf(p.zone), held = this.roomLocks.get(lockedIn);
     if (held) held.passes.set(p.id, Date.now() + PIN_PASS_MS);
@@ -1734,7 +1740,7 @@ export class Room extends DurableObject {
   nextAlarm(now = Date.now()) {
     const here = this.players.size > 0;
     const cleanup = this.sfu && this.cleanupJobs && this.cleanupJobs.length ? (this.cleanupAt || now + SWEEP_MS) : Infinity;
-    const next = Math.min(here ? this.sweepAt || now + SWEEP_MS : Infinity, here ? this.nextDoorExpiry() : Infinity, cleanup);
+    const next = Math.min(here ? this.sweepAt || now + SWEEP_MS : Infinity, here ? this.nextDoorExpiry() : Infinity, cleanup, tessQueue.deadline(this));
     return Number.isFinite(next) ? next : null;
   }
 
@@ -1770,6 +1776,7 @@ export class Room extends DurableObject {
     this.alarmStarted = Date.now();
     hockey.sweep(this);
     block.sweep(this);
+    tessQueue.sweep(this);
     // Cleanup retries run on every wake, not only at sweep time.
     await this.retryCleanup();
     // A full retry pass can outlast a sweep interval. Advance from completion, not the old start time.
