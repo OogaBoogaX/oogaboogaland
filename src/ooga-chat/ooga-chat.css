@@ -1,0 +1,243 @@
+/* Ooga Chat's own layout. The look (tokens, sign lettering, slabs, chips, the amber button) comes from ../native.css,
+   which the island shares; this file only places it: native tabs on top of one plank frame, sized for a phone first
+   and centred on wider screens. */
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-text-size-adjust: 100%;
+}
+
+.oc [hidden] { display: none !important; }
+
+.oc {
+  max-width: 620px;
+  margin: 0 auto;
+  padding: calc(16px + var(--safe-top)) calc(16px + var(--safe-right)) calc(16px + var(--safe-bottom)) calc(16px + var(--safe-left));
+}
+
+.oc-tabs {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 6px;
+  padding: 0 6px;
+}
+
+.oc-tab {
+  width: 58px;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.oc-tab-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 6px 13px 4px;
+  border: 3px solid var(--wood-edge);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: linear-gradient(180deg, var(--wood), var(--wood-dk));
+  box-shadow: 0 -2px 0 rgba(0, 0, 0, 0.2) inset;
+}
+
+.oc-tab svg { display: block; width: 100%; height: auto; filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5)); }
+.oc-tab:hover .oc-tab-face { background: linear-gradient(180deg, var(--plank), var(--wood)); }
+/* The chosen tab's face runs on over the frame's top border, so it reads as part of the frame. */
+.oc-tab[aria-selected="true"] .oc-tab-face {
+  height: calc(100% + 3px);
+  background: linear-gradient(180deg, #b8844a, var(--plank));
+  box-shadow: none;
+}
+.oc-tab:focus-visible { outline: none; }
+.oc-tab:focus-visible .oc-tab-face { outline: 2px solid var(--accent); outline-offset: -3px; }
+
+.oc-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 18px;
+  border: 3px solid var(--wood-edge);
+  border-radius: var(--radius);
+  background: var(--planks);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
+}
+
+.oc-title h1 {
+  margin: 2px 0 0 4px;
+  font-size: 26px;
+  line-height: 1;
+  font-weight: 400;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.6));
+}
+
+.oc-slab { padding: 20px 22px; }
+
+.oc-signin,
+.oc-space {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.oc-art {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 2;
+  border-radius: 6px;
+}
+
+.oc-lede,
+.oc-role,
+.oc-foot {
+  margin: 0;
+  color: rgba(243, 239, 228, 0.78);
+}
+
+.oc-foot { text-align: center; font-size: 12px; }
+
+.oc-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  color: var(--accent-text);
+}
+
+.oc .link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.oc-providers {
+  display: grid;
+  gap: 12px;
+}
+
+.oc-provider {
+  min-height: 48px;
+  padding: 0 14px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(#ae844f, var(--wood));
+  color: var(--paper);
+  font-weight: 700;
+  box-shadow: 0 3px 0 var(--nail);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+
+.oc-provider:hover:not(:disabled),
+.oc-provider:focus-visible { background: linear-gradient(#bf935b, var(--plank)); outline: none; }
+.oc-provider:focus-visible { box-shadow: 0 3px 0 var(--nail), 0 0 0 2px var(--accent); }
+.oc-provider:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.oc-note {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(243, 239, 228, 0.7);
+}
+
+.oc-note strong { color: var(--accent-text); }
+
+.oc-space-head { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
+
+.oc-account {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 14px 16px;
+  background: var(--slab-dark);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
+}
+
+.oc-account-who {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin: 0;
+  font-weight: 700;
+}
+
+.oc-account-name { overflow-wrap: anywhere; }
+.oc-speaker-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #b18aff; }
+
+.oc-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px 14px;
+}
+
+/* Compact like the island's footer buttons, with the full 44px touch height kept by an invisible margin of hit area. */
+.oc-foot-button {
+  position: relative;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 5px;
+  background: linear-gradient(var(--plank), var(--wood));
+  color: var(--paper);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.oc-foot-button::before { content: ""; position: absolute; inset: -6px -2px; }
+.oc-foot-button:disabled { opacity: 0.5; cursor: not-allowed; }
+.oc-mute { width: 96px; }
+.oc-signout { min-height: 34px; text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px; }
+
+.oc-panel { padding: 0; overflow: visible; }
+.oc-pending p { margin: 0; color: rgba(243, 239, 228, 0.7); }
+
+.oc-error {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: #241810;
+  color: var(--paper);
+}
+
+.oc-fixture-note { margin: 12px 4px 0; color: var(--faint); font-size: 11px; }
+
+@media (max-width: 420px) {
+  .oc { padding: calc(8px + var(--safe-top)) calc(8px + var(--safe-right)) calc(8px + var(--safe-bottom)) calc(8px + var(--safe-left)); }
+  .oc-tabs { gap: 4px; padding: 0 4px; }
+  .oc-tab { width: 52px; height: 42px; }
+  .oc-tab-face { padding: 6px 11px 4px; }
+  .oc-frame { padding: 12px 10px 14px; }
+  .oc-title h1 { font-size: 22px; }
+  .oc-slab { padding: 14px 16px; }
+}

@@ -22,11 +22,17 @@ const touchTag = /<link rel="apple-touch-icon" sizes="180x180" href="apple-touch
 if (!touchTag.test(html)) throw new Error("index.html: apple-touch-icon link not found");
 html = html.replace(touchTag, () => `<link rel="apple-touch-icon" sizes="180x180" href="data:image/png;base64,${readFileSync(join(root, "src", "apple-touch-icon.png")).toString("base64")}">`);
 
-const cssTag = /<link rel="stylesheet" href="([^"]+)">/;
-const cssMatch = html.match(cssTag);
-if (!cssMatch) throw new Error("index.html: stylesheet link not found");
-const css = read(cssMatch[1]).trim().replace(/\r\n/g, "\n");
-html = html.replace(cssTag, `<style>\n${css}\n</style>`);
+// The stylesheets join in link order (native.css, the look the Ooga Chat app shares, then style.css) into one block.
+const cssTag = /^[ \t]*<link rel="stylesheet" href="([^"]+)">\r?\n/gm;
+const sheets = [...html.matchAll(cssTag)].map((m) => m[1]);
+if (!sheets.length) throw new Error("index.html: stylesheet link not found");
+const css = sheets.map((path) => read(path).trim().replace(/\r\n/g, "\n")).join("\n\n");
+let firstSheet = true;
+html = html.replace(cssTag, (tag) => {
+  if (!firstSheet) return "";
+  firstSheet = false;
+  return `${tag.match(/^[ \t]*/)[0]}<style>\n${css}\n</style>\n`;
+});
 
 const scriptTag = /^[ \t]*<script src="([^"]+)"(?: data-defer="([a-z-]+)")?><\/script>\r?\n/gm;
 const tags = [...html.matchAll(scriptTag)];
