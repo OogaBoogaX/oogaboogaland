@@ -446,6 +446,8 @@
     const YARD = 3, UNDER = 2.7, H = YARD + 3.2;
     // The back door's opening [x0, x1] in the back wall, 2.4 m wide, beside the block's stand.
     const DOOR = [-5.7, -3.3];
+    // The gap [x0, x1] in the upper floor's front wall, in the corner by the stairs, that the rivals' zipline rides in through.
+    const ZIP_GAP = [5.95, 7.6];
     // The upper floor over the cellar, with the stairwell's hole in it.
     put("floor", [-8, 8, 23, 26, YARD, UNDER], [-8, 8, 29.8, 33, YARD, UNDER], [-8, 3, 26, 29.8, YARD, UNDER], [6, 8, 26, 29.8, YARD, UNDER]);
     // The cellar's front wall: piers at the corners and behind the porch, and between them a window, a low band and a
@@ -466,7 +468,10 @@
     for (let k = 1; k <= 6; k++) { const b = [3, 6, 26 + (k - 1) * 0.45, 26 + k * 0.45, YARD - k * YARD / 7, 0]; half.push(b); steps.push(b); }
     put("rail", [2.8, 3, 26, 30, YARD + 0.9, YARD], [6, 6.2, 26, 30, YARD + 0.9, YARD], [3, 6, 29.8, 30, YARD + 0.9, YARD]);
     // The house's walls: the front with its door, the sides with a window band, the back.
-    put("house", [-8, -1.4, 23, 23.4, H, YARD], [1.4, 8, 23, 23.4, H, YARD], [-1.4, 1.4, 23, 23.4, H, YARD + 2.4], [-8, 8, 32.6, 33, H, YARD]);
+    // Past the window on the stairs' side the front is open above a low sill (`ZIP_GAP`), under the gable's first course: the
+    // rivals' zipline comes in through it.
+    put("house", [-8, -1.4, 23, 23.4, H, YARD], [1.4, ZIP_GAP[0], 23, 23.4, H, YARD], [ZIP_GAP[0], ZIP_GAP[1], 23, 23.4, YARD + 0.6, YARD], [ZIP_GAP[1], 8, 23, 23.4, H, YARD],
+      [-1.4, 1.4, 23, 23.4, H, YARD + 2.4], [-8, 8, 32.6, 33, H, YARD]);
     for (const [x0, x1] of [[-8, -7.6], [7.6, 8]]) put("house", [x0, x1, 23.4, 32.6, YARD + 1, YARD], [x0, x1, 23.4, 32.6, H, YARD + 2.2]);
     // The crooked gable over the front: four courses, each narrower and further to one side.
     for (let k = 1; k <= 4; k++) put("gable", [0.4 * k - 8 + 1.6 * k, 0.4 * k + 8 - 1.6 * k, 23, 23.4, H + k * 0.75, H + (k - 1) * 0.75]);
@@ -527,8 +532,10 @@
       showcase: { blue: { x: 3.5, z: 17 }, red: { x: -3.5, z: -17 } },
       // A catapult drops its Ooga onto the other house's upper floor, at the top of its stairs down.
       drops: { blue: [-4.5, -24.6], red: [4.5, 24.6] },
-      // A zipline comes down beside the other house's porch.
-      zipEnd: [-4.5, 3.1, -20.6],
+      // A zipline rides in through the gap in the other house's front wall (`ZIP_GAP`), over its sill and under the
+      // gable, and ends on the upper floor inside, beside the top of the stairs down (its pole stands on that floor,
+      // `YARD` up).
+      zipEnd: [-6.33, YARD + 2.65, -25.3, YARD],
       // Each cellar's back door [x0, x1, z0, z1], the opening through its back wall: blue's, then red's turned.
       backDoors: [[DOOR[0], DOOR[1], 32.6, 33], [-DOOR[1], -DOOR[0], -33, -32.6]],
       nav: { blue: navHalf, red: navHalf.map(([x, z, y]) => y ? [-x, -z, y] : [-x, -z]), links: [...linkHalf, ...linkHalf.map(([i, j]) => [i + navHalf.length, j + navHalf.length])] },
@@ -643,11 +650,12 @@
     A.rocks = new Set(); A.rockKind = new Map();
     for (const [kind, b] of A.terrain || []) for (const r of [b, turned(b)]) { A.BLOCKS.push(r); A.rocks.add(r); A.rockKind.set(r, kind); }
     A.decor = A.decor || [];
-    // A team's zipline: from its tower's gap (where the hands hang, `ZIP_HANG` over the feet) down into the other end.
+    // A team's zipline: from its tower's gap (where the hands hang, `ZIP_HANG` over the feet) down into the other end,
+    // `zipEnd` [x, y, z] for blue's, with the height of the floor its low end stands on if that isn't the ground.
     const zb = A.zipEnd || [-3.5, 3.1, -28.5], za = [tw[1] - 0.6, (gp[0] + gp[1]) / 2];
     A.zips = {
-      blue: { ax: za[0], ay: TOP + CONFIG.ZIP_HANG, az: za[1], bx: zb[0], by: zb[1], bz: zb[2] },
-      red: { ax: -za[0], ay: TOP + CONFIG.ZIP_HANG, az: -za[1], bx: -zb[0], by: zb[1], bz: -zb[2] }
+      blue: { ax: za[0], ay: TOP + CONFIG.ZIP_HANG, az: za[1], bx: zb[0], by: zb[1], bz: zb[2], floor: zb[3] || 0 },
+      red: { ax: -za[0], ay: TOP + CONFIG.ZIP_HANG, az: -za[1], bx: -zb[0], by: zb[1], bz: -zb[2], floor: zb[3] || 0 }
     };
     for (const t of TEAMS) { const z = A.zips[t]; z.len = Math.hypot(z.bx - z.ax, z.by - z.ay, z.bz - z.az); }
   }

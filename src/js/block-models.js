@@ -1186,13 +1186,14 @@
     box({ w: 0.8, h: 0.06, d: 0.1, color: "#8a6440", offset: { y: 0.6 } }),
     moved(turnedY(merge(gun(8 + i)), Math.PI / 2), 0, 0.7, 0)
   ));
-  // A zipline: a cable sagging a little between its anchors, in the team's colour, and a pole at the low end.
+  // A zipline: a cable sagging a little between its anchors, in the team's colour, and a pole at the low end, standing
+  // on the floor it ends over (`floor`).
   const zipline = variants((k) => {
     // Keyed by map and side: map index times two, plus the side.
     const i = k & 1, z = SIM.ARENAS[SIM.MAPS[k >> 1]].zips[SIM.TEAMS[i]], c = TEAM[SIM.TEAMS[i]];
     const cable = tube({ path: (t) => ({ x: z.ax + (z.bx - z.ax) * t, y: z.ay + (z.by - z.ay) * t + 0.15, z: z.az + (z.bz - z.az) * t }), radius: () => 0.04, rings: 24, segments: 4, colorFn: () => c.light, emissive: 0.5 });
     return merge(cable,
-      box({ w: 0.16, h: z.by + 0.4, d: 0.16, color: "#5a3a22", offset: { x: z.bx, y: (z.by + 0.4) / 2, z: z.bz } }),
+      box({ w: 0.16, h: z.by + 0.4 - z.floor, d: 0.16, color: "#5a3a22", offset: { x: z.bx, y: (z.by + 0.4 + z.floor) / 2, z: z.bz } }),
       box({ w: 0.3, h: 0.3, d: 0.3, color: c.paint, emissive: 0.6, offset: { x: z.ax, y: z.ay + 0.15, z: z.az } }));
   });
   // The lamp on a zipline's handle, from the visitor's side: green (0) when they may ride it, red (1) when grabbing it

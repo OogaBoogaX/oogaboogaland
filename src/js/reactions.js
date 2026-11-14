@@ -1,5 +1,6 @@
 // Reactions, on X Spaces' pattern: a dark card of ten emoji in two rows of five and, past a divider, the raised hand
-// pinned beside them, under Online Oogas' list and under Ooga Chat's input (two bars, the same state). A tap shows that
+// pinned beside them, under Online Oogas' list and under The Commons' input (two bars, the same state; `mount` adds
+// Ooga Chat's, under its roster, whose hand only an active speaker may raise). A tap shows that
 // emoji over the visitor's Ooga for everyone in their zone for a moment (`net.sendReaction`, drawn by remote-players.js);
 // the right slot stays up until tapped again (`net.setHand`), defaulting to the raised hand. A long press on any slot
 // (or a right click, the context-menu key or Shift+F10) opens the picker, floating in the middle of the screen: every emoji in
@@ -61,7 +62,7 @@
 
   // One bar: the grid of ten, the divider and the hand.
   const bars = [];
-  const makeBar = (host) => {
+  const makeBar = (host, handAllowed = null) => {
     const card = document.createElement("div"), grid = document.createElement("div"), divider = document.createElement("span"), hand = document.createElement("button");
     card.className = "reaction-bar"; card.setAttribute("role", "group"); card.setAttribute("aria-label", "Reactions");
     grid.className = "reaction-grid";
@@ -76,7 +77,7 @@
     hand.type = "button"; hand.className = "reaction reaction-hand"; hand.setAttribute("aria-pressed", "false");
     card.append(grid, divider, hand);
     host.append(card);
-    const bar = { host, card, buttons, hand };
+    const bar = { host, card, buttons, hand, handAllowed };
     bars.push(bar);
     return bar;
   };
@@ -105,7 +106,8 @@
     for (const bar of bars) {
       if (bar.host.hidden !== hide) bar.host.hidden = hide;
       for (const b of bar.buttons) b.disabled = !on;
-      bar.hand.disabled = !on;
+      // A bar may hold the hand to a rule of its own (Ooga Chat's panel: an active speaker only); it stays in view.
+      bar.hand.disabled = !on || !!bar.handAllowed && !bar.handAllowed();
     }
     if (available !== on) { available = on; if (!on) { cancelHold(); close(); } }
     paint();
@@ -345,8 +347,13 @@
   // The hand's key (H, director.js): false where there is no room to raise it in, so the key stays with the scene.
   const toggleHand = () => available && (setPersistent(!net.state.hand), true);
 
+  // Another panel's bar (cloud-panel.js), on the same state; `handAllowed` gates its hand, asked again on `refresh`.
+  const mount = (host, { handAllowed = null } = {}) => { wire(makeBar(host, handAllowed)); account(); };
+
   BL.reactions = {
     close,
+    mount,
+    refresh: account,
     toggleHand,
     get slots() { return slots.slice(); },
     get tone() { return tone; },

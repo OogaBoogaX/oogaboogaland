@@ -96,7 +96,13 @@
 // (the L key) has the room link this page with everyone here who has asked it or, with nobody waiting, take back all of
 // its asks; only the room knows who has asked. Moving to another place lets go of every voice but the linked ones, which
 // never drop.
-// Exports voiceLink, toggleVoiceLink, linkEveryone, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
+// Ooga Chat's outdoor bridge (outdoor-voice.js, #661): a room whose `features` hold OUTDOOR_FEATURE (`state.outdoorVoice`)
+// takes `sendOutdoor(msg)`, one `outdoor` frame of the handshake in docs/auth-and-presence.md (Outdoor voice bridge), and
+// `subscribeOutdoor` hears the room's `outdoor` frames as they come, `{ op: "lost" }` when the room stops being live and
+// `{ op: "placed" }` after each body, zone or crossing frame sent (counted in `state.placed`), which the room's own check
+// of an `enter` reads, so the bridge can ask again for an epoch refused before the room had them.
+// Without the feature both stay silent and the bridge keeps the page out of every public audience.
+// Exports voiceLink, toggleVoiceLink, linkEveryone, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeAudience, sendAudience, subscribePrivate, subscribeChalk, subscribeWallets, sendOutdoor, subscribeOutdoor, OUTDOOR_FEATURE, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
 // setMuted, setHealth, sendNpc, sendChat, sendPrivate, npcFrame, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
 // ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
 (() => {
@@ -188,11 +194,13 @@
   const chatSubscribers = new Set();
   const privateSubscribers = new Set();
   const privateHeard = (msg) => { for (const fn of privateSubscribers) fn(msg); };
+  const outdoorSubscribers = new Set();
+  const outdoorHeard = (msg) => { for (const fn of outdoorSubscribers) fn(msg); };
   // The shared chalkboard's listeners, and the page's own edits waiting to go (merged into frames of a few points).
   const chalkSubscribers = new Set(), chalkOut = [];
   const chalkEmit = (kind, detail) => { for (const fn of chalkSubscribers) fn(kind, detail); };
   const walletSubscribers = new Set();
-  const shotSubscribers = new Set(), swingSubscribers = new Set(), reactSubscribers = new Set();
+  const shotSubscribers = new Set(), swingSubscribers = new Set(), reactSubscribers = new Set(), audienceSubscribers = new Set();
   const presenceSubscribers = new Set();
   const remotes = new Map();
   // room: "off" (signed out or no backend), "connecting", "live", "paused" (hidden a while), or a kick that
@@ -202,8 +210,8 @@
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
     room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, npcVersion: 0, doorway: false, pokerVoice: null,
     self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, privateChat: false, chalk: null, blendTo: null, blendT: 0, reactions: false, customHand: false, hand: false, handTone: 0, handEmoji: "",
-    voiceLinks: false, linkWants: new Set(), linked: new Set() };
-  const REACT_FEATURE = "react-v1", LINK_FEATURE = "vlink-v1", LINK_MAX = 64;
+    voiceLinks: false, linkWants: new Set(), linked: new Set(), outdoorVoice: false, placed: 0, audience: false };
+  const REACT_FEATURE = "react-v1", LINK_FEATURE = "vlink-v1", LINK_MAX = 64, OUTDOOR_FEATURE = "outdoor-voice-v1";
   const linkIds = (list) => new Set(Array.isArray(list) ? list.filter((id) => Number.isSafeInteger(id) && id > 0).slice(0, LINK_MAX) : []);
   // The room's last word on whom to hear, for what a move to another place keeps.
   let peersHeard = [], gensHeard = null;
@@ -336,9 +344,11 @@
     state.room = room;
     if (room !== "live") { cabinetSeats.clear(); cabinetSeat = null; state.cabinets = false; finishCabinetRequest("Connection to the arcade was lost"); }
     if (room !== "live") state.tessGuide = null;
-    if (room !== "live") state.chatUnicode = state.privateChat = false;
+    if (room !== "live") state.chatUnicode = state.privateChat = state.audience = false;
     if (room !== "live") { state.voiceLinks = false; state.linkWants.clear(); state.linked.clear(); peersHeard = []; gensHeard = null; }
+    if (room !== "live") state.outdoorVoice = false;
     if (lost) privateHeard({ op: "lost" });
+    if (lost) outdoorHeard({ op: "lost" });
     if (room !== "live") { hockeyTables.fill(null); hockeyEmit({ k: "lost" }); state.hockey = false; }
     if (room !== "live") { for (const fn of bfSubscribers) fn({ k: "lost" }); state.blockLive = false; }
     if (room !== "live") { state.studio = null; state.connectionToken = ""; studioEmit({t:"studio-state",state:null}); }
@@ -350,8 +360,10 @@
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(text);
   };
 
-  const sendBody = () => send(JSON.stringify({ t: "body", name: body }));
-  const sendZone = () => send(JSON.stringify({ t: "zone", name: zone }));
+  const PLACED = { op: "placed" };
+  const placed = () => { state.placed++; if (state.outdoorVoice) outdoorHeard(PLACED); };
+  const sendBody = () => { send(JSON.stringify({ t: "body", name: body })); placed(); };
+  const sendZone = () => { send(JSON.stringify({ t: "zone", name: zone })); placed(); };
   // The crossing last sent (`to`/`k`), "" for none; null after a zone forces the next report, including a clear.
   const BLEND = BL.voiceBlend, BLEND_MS = 250;
   let blendSent = "", blendAt = -Infinity;
@@ -362,6 +374,7 @@
     if (key === blendSent || now - blendAt < BLEND_MS) return;
     blendSent = key; blendAt = now;
     send(JSON.stringify({ t: "blend", to: k ? state.blendTo : null, k }));
+    placed();
   };
   // Under half a step is no crossing, so a body a hair past a level's height never has the room pull the next place.
   const setBlend = (to, t) => {
@@ -591,6 +604,8 @@
       state.customHand = Array.isArray(msg.features) && msg.features.includes("hand-emoji-v1");
       if (!state.customHand) state.handEmoji = "";
       state.voiceLinks = Array.isArray(msg.features) && msg.features.includes(LINK_FEATURE);
+      state.outdoorVoice = Array.isArray(msg.features) && msg.features.includes(OUTDOOR_FEATURE);
+      state.audience = Array.isArray(msg.features) && msg.features.includes(BL.audience.FEATURE);
       // A room that keeps the chalkboard sends it next (chalk-board); an older one leaves the page its own board.
       if (state.chalk && !(Array.isArray(msg.features) && msg.features.includes(BL.chalkBoard.FEATURE))) { state.chalk = null; chalkEmit("board"); }
       remotes.clear();
@@ -700,12 +715,16 @@
         for (const fn of shotSubscribers) fn(msg.id, a);
     } else if (msg.t === "swing") {
       if (Number.isSafeInteger(msg.id)) for (const fn of swingSubscribers) fn(msg.id);
+    } else if (msg.t === "audience") {
+      if (state.audience) for (const fn of audienceSubscribers) fn(msg);
     } else if (msg.t === "chat") {
       const line = chatLine(msg);
       if (line) chatHeard([line], false);
     } else if (msg.t === "chat-ack" || msg.t === "chat-rejected") {
       if (chatIdValid(msg.clientId))
         chatHeard([], false, { clientId: msg.clientId, accepted: msg.t === "chat-ack", conflict: msg.reason === "conflict" });
+    } else if (msg.t === "outdoor") {
+      if (state.outdoorVoice && typeof msg.op === "string" && msg.op !== "lost") outdoorHeard(msg);
     } else if (msg.t === "pm") {
       if (typeof msg.op === "string" && msg.op !== "lost") privateHeard(msg);
     } else if (msg.t === "chalk-board") {
@@ -1375,6 +1394,17 @@
     chatSubscribers.add(fn);
     return () => chatSubscribers.delete(fn);
   };
+  // Ooga Chat's audience (audience.js, cloud-panel.js; docs/ooga-chat-app.md): the room's `audience` messages, and the
+  // page's own `audience-view` and `audience-resync`, only where welcome lists the audience feature.
+  const subscribeAudience = (fn) => {
+    audienceSubscribers.add(fn);
+    return () => audienceSubscribers.delete(fn);
+  };
+  const sendAudience = (type, fields) => {
+    if (state.room !== "live" || !state.audience || type !== "audience-view" && type !== "audience-resync") return false;
+    send(JSON.stringify({ ...fields, t: type, v: BL.audience.VERSION }));
+    return true;
+  };
   // The shared chalkboard (chalk-board.js): ask for it, let it go, and edit it while holding it. An edit applies to
   // the page's copy at once and waits in `chalkOut`, merged with the next of its kind, until `flushChalk` or an edit
   // of another kind sends it, so a line's points go a few to a frame. Each says whether it was sent, or why not.
@@ -1425,6 +1455,16 @@
     walletSubscribers.add(fn);
     return () => walletSubscribers.delete(fn);
   };
+  // One frame of the outdoor bridge's handshake (outdoor-voice.js); false unless the room is live and advertises it.
+  const sendOutdoor = (msg) => {
+    if (!state.outdoorVoice || state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN) return false;
+    send(JSON.stringify({ ...msg, t: "outdoor" }));
+    return true;
+  };
+  const subscribeOutdoor = (fn) => {
+    outdoorSubscribers.add(fn);
+    return () => outdoorSubscribers.delete(fn);
+  };
   const subscribeShots = (fn) => {
     shotSubscribers.add(fn);
     return () => shotSubscribers.delete(fn);
@@ -1465,12 +1505,13 @@
     chatSubscribers.clear();
     chalkSubscribers.clear();
     walletSubscribers.clear();
-    shotSubscribers.clear(); swingSubscribers.clear(); reactSubscribers.clear();
+    outdoorSubscribers.clear();
+    shotSubscribers.clear(); swingSubscribers.clear(); reactSubscribers.clear(); audienceSubscribers.clear();
     presenceSubscribers.clear();
     doorSubscribers.clear();
     close("off");
     diagnostic = null;
   };
 
-  BL.net = { sendTess, connectionDiagnostics, subscribeConnection, lockRoom, unlockRoom, tryRoomPin, voiceLink, toggleVoiceLink, linkEveryone, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeBf, subscribeBfFrame, sendBf, sendBfInput, sendBfFrame, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendReaction, subscribeReactions, setHand, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { sendTess, connectionDiagnostics, subscribeConnection, lockRoom, unlockRoom, tryRoomPin, voiceLink, toggleVoiceLink, linkEveryone, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeBf, subscribeBfFrame, sendBf, sendBfInput, sendBfFrame, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeAudience, sendAudience, subscribePrivate, subscribeChalk, subscribeWallets, sendOutdoor, subscribeOutdoor, OUTDOOR_FEATURE, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendReaction, subscribeReactions, setHand, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();
