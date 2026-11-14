@@ -176,7 +176,7 @@
   // `fx` for her lines and sparks, `audio` for her voice, her boots and her hammer's clang, `fire` the static fire test
   // she freaks out at, `jet` the Jet's node, which her rampage rocks, `toast` for what the visitor should know, `blocks`
   // the circles she walks round, and `avoid(x, z, feet, height, radius)`, where she must not step into now.
-  const create = ({ fx, audio, fire, jet, toast, blocks = null, avoid = null }) => {
+  const create = ({ fx, audio, fire, jet, toast, blocks = null, avoid = null, quieted = () => false }) => {
     const S = HM.LAYOUT.sis, k = SM.rig(), P = k.parts, H = k.heads, rand = BL.math.mulberry32(0x5153), B = HM.blast(), SPARK = B.spark, IRON = B.iron;
     // The Jet's paint flying off it: its white and its livery's blue.
     const CHIPS = [BL.models.particleGeometry("#eeeae2", 0.1, 0), BL.models.particleGeometry("#2a4fb8", 0.1, 0)];
@@ -352,7 +352,7 @@
       const style = STYLE[pool] === "yell" && rand() < SCREAM ? "scream" : STYLE[pool];
       say(one(LINES[rare ? "rare" : pool]), style, dur);
     };
-    const maybeSay = (pool, chance) => { if (quiet <= 0 && rand() < chance) sayFrom(pool); };
+    const maybeSay = (pool, chance) => { if (quiet <= 0 && !quieted() && rand() < chance) sayFrom(pool); };
     // The static fire's hold on her: whether she is in it, its line at the malfunction said, how far down she is (0
     // standing, 1 flat), which way the blast slides her, her soot and when she last smoked.
     const A = BL.hangarFire.AT;
@@ -408,7 +408,7 @@
       if (brawlAt) return brawlSpot;
       if (rampage) return smashSpot(false);
       if (storming) return doorSpot || spots[0];
-      if (driven && clock - visitedAt > VISIT.every && rand() < VISIT.chance) {
+      if (driven && !quieted() && clock - visitedAt > VISIT.every && rand() < VISIT.chance) {
         const s = visit(driven);
         if (s) return s;
       }
@@ -438,6 +438,7 @@
     const arrive = () => {
       last = spot;
       doing = rampage && spot.kind === "fix" ? "smash" : spot.kind;
+      if (doing === "fix" && quieted()) doing = "inspect";
       if (doing === "fix" && !storming && (forceHush || clock >= hushNext && rand() < HUSH.chance)) { doing = "hush"; hushNext = clock + HUSH.every; forceHush = false; hushBlows = 0; hushed = 0; }
       t = 0;
       spot.dur = storming && doing === "glare" ? POKE.sulk : doing === "hush" ? 60 : pick(TIMES[doing][0], TIMES[doing][1]);
@@ -559,7 +560,7 @@
     const RIVALRY = BL.kortik.RIVALRY, D = HM.LAYOUT.door, DOOR_AT = { x: D.x, y: D.y + 0.5, z: D.z - 0.6 }, HEARD = RIVALRY.map(([his]) => "KORTIK: " + his);
     let quarrelIn = pick(QUARREL.first[0], QUARREL.first[1]), quarrel = 0, answerIn = 0;
     // Whether she is free to hear him, or to answer: none of her fits, tempers, trips at the visitor or the static fire.
-    const free = () => !panicking && !rampage && !storming && !brawlAt && fitT <= 0 && doing !== "chase" && doing !== "hush" && spot !== visitorSpot && !scare && talk <= 0;
+    const free = () => !panicking && !rampage && !storming && !brawlAt && fitT <= 0 && doing !== "chase" && doing !== "hush" && spot !== visitorSpot && !scare && talk <= 0 && !quieted();
     const hearKortik = () => {
       quarrel = Math.floor(rand() * RIVALRY.length);
       fx.sayAt(DOOR_AT.x, D.y + 3.6, DOOR_AT.z, HEARD[quarrel], 3.2);
@@ -739,6 +740,8 @@
       t += dt;
       quiet -= dt;
       talk = Math.max(0, talk - dt);
+      // Quieted (`quieted`), she puts the hammer down for a look instead.
+      if (doing === "fix" && quieted()) { doing = "inspect"; t = 0; spot.dur = pick(TIMES.inspect[0], TIMES.inspect[1]); }
       stand();
       let face = H.open, wantYaw = yaw, stepping = false, glareAt = null, swingNow = -1, swingLen = SWING, hop = 0;
       slowLook = null;

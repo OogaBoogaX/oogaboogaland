@@ -4,7 +4,8 @@
 //
 // The bed is the hangar humming: everywhere the mains' low hum, a deep drone that beats and swells slowly, and the
 // vast hall's air breathing; and, louder as the visitor nears each, the launch tunnel's neon buzzing all round them
-// inside it, and the shimmer of each shield, the launch shield's at the tunnel's end and the door's. `listen` says
+// inside it, and the shimmer of each shield, the launch shield's at the tunnel's end and the door's; and a faint breath
+// of air where the hangar's air shimmers (`hangar-shimmer.js`), as loud as `glint(x, y, z, level)` last asked. `listen` says
 // where the visitor hears from and which way the view faces, and `update(dt)` levels the bed from there ten times a
 // second. It honours the page-wide mute (`oogaboogaland.audio`), keeps sounding in the background, and `dispose` closes it.
 //
@@ -53,8 +54,17 @@
   const NOISE_SECONDS = 2, MASTER = 0.5, VOLUME_KEY = "ooga-hangar-volume", PAN = 0.75;
   // How loud each part of the bed sits: the hum, the drone and the air everywhere, more air inside the tunnel, the
   // neon at its loudest inside it, and each shield close to; and at how many metres each of those last falls to half.
-  const LEVEL = { mains: 0.05, drone: 0.08, air: 0.045, tunnelAir: 0.035, neon: 0.05, launch: 0.11, door: 0.06 };
-  const REF = { neon: 5, launch: 9, door: 5 };
+  const LEVEL = { mains: 0.05, drone: 0.08, air: 0.045, tunnelAir: 0.035, neon: 0.05, launch: 0.11, door: 0.06, glint: 0.04 };
+  // How far the mains' pitch sags at most as the power falters (`strain`), a share of it.
+  const SAG = 0.14;
+  // The hall losing its power and getting it back (`outage`), on voices of its own, none of the engine blackout's: how
+  // loud the lamps' ballasts buzz as the power falters, their ticks, the breaker's click and its knock, the air
+  // handling's motors and their air as they wind down (`spin`, Hz, from and to, over `down` s, and back up over `up` s),
+  // the lamps' pings as they cool, the emergency lights' faint whine, the transformers' hum surging back, and how many
+  // of the lamps' starters tick as they come back on.
+  const OUT = { buzz: 0.035, tick: 0.12, trip: 0.35, knock: 0.12, motor: 0.05, whirr: 0.07, ping: 0.02, whine: 0.004, inrush: 0.09,
+    spin: [190, 26], down: 5, up: 3, starters: [10, 14] };
+  const REF = { neon: 5, launch: 9, door: 5, glint: 8 };
 
   // How loud the test's voices peak: the siren, the whine and its whoosh, the whoomph, the roar's body, crackle and
   // rumble, a clank, the alarm, the boom's sweep, its rumble and its crack, the ringing, and the anomalies' hum.
@@ -118,7 +128,7 @@
       const saved = localStorage.getItem(VOLUME_KEY), v = Number(saved);
       if (saved !== null && v >= 0 && v <= 1) volume = v;
     } catch {}
-    const bed = {}, test = {}, sis = {}, proj = {}, fork = {}, crane = {}, room = {};
+    const bed = {}, test = {}, sis = {}, proj = {}, fork = {}, crane = {}, room = {}, out = {};
     // The crane's state, read live: { x, y, z, travel, hoist, alarm } (`watchCrane`).
     let craneState = null;
     // The control room's fire, read live: { x, y, z, level, spray } (`watchRoom`).
@@ -129,8 +139,11 @@
     const sisVoice = { pos: null, until: 0, least: 0 };
     // How much of the hall's electrical hum (the mains and the neon) has power, 0 to 1.
     let power = 1;
+    // The hall's hum straining (`strain`): how much of itself the bed plays, 0 to 1, how far the mains' pitch has sagged,
+    // 0 to 1 of `SAG`, and until when the bed follows it quickly.
+    let strained = 1, sagged = 0, quickUntil = 0;
     // Where the visitor hears from and the way the view faces on the ground, and where the last spot was placed.
-    const ear = { x: 0, y: 0, z: 0, fx: 0, fz: -1 }, AT = { level: 0, pan: 0 };
+    const ear = { x: 0, y: 0, z: 0, fx: 0, fz: -1 }, AT = { level: 0, pan: 0 }, glinting = { x: 0, y: 0, z: 0, level: 0 };
 
     const gain = (value, to) => {
       const g = ctx.createGain();
@@ -217,11 +230,20 @@
       // The launch shield's shimmer, lower than the door's.
       bed.launch = shimmer(174.6);
       bed.door = shimmer(196);
+      // The glint where the air shimmers: soft air, the noise through a broad band round 1.2 kHz and a thinner one over
+      // it, breathing a little; no tone, nothing low (a rising electrical hum is the engines' own).
+      bed.glintPan = panner();
+      bed.glintGain = gain(0, bed.glintPan);
+      const breath = gain(1, bed.glintGain);
+      bed.glintAir = hissOf(filter("bandpass", 1200, 0.8, breath));
+      bed.glintThin = hissOf(filter("bandpass", 2600, 1.6, gain(0.35, breath)));
+      bed.glintBreath = wobble(breath.gain, 0.6, 0.25);
       initTest();
       initProjector();
       initForklift();
       initCrane();
       initRoom();
+      initOutage();
       ready = true;
     };
 
@@ -703,6 +725,110 @@
       return true;
     };
 
+    // The voices of the hall losing its power and getting it back (`OUT`): the ballasts' buzz, a mains-rate saw and its
+    // octave through a band; ticks and pings, each panned where it comes from; the breaker's click, a burst through a
+    // band, and its knock; the motors, a saw and its octave through a lowpass, and their air through a band; the
+    // transformers' hum surging; and the emergency lights' whine, high and faint.
+    const initOutage = () => {
+      out.buzzGain = gain(0, mix);
+      const band = filter("bandpass", 1800, 1.2, out.buzzGain);
+      out.buzz = osc("sawtooth", 120, band); out.buzz2 = osc("square", 240, gain(0.3, band));
+      out.tickPan = panner(); out.tickGain = gain(0, out.tickPan); out.tickBand = filter("bandpass", 3200, 3, out.tickGain); out.tick = hissOf(out.tickBand);
+      out.pingPan = panner(); out.pingGain = gain(0, out.pingPan); out.ping = osc("sine", 3400, out.pingGain);
+      out.tripGain = gain(0, mix); out.tripBand = filter("bandpass", 2600, 1.5, out.tripGain); out.trip = hissOf(out.tripBand);
+      out.knockGain = gain(0, mix); out.knock = osc("triangle", 620, out.knockGain);
+      out.motorGain = gain(0, mix);
+      const motor = filter("lowpass", 900, 0.9, out.motorGain);
+      out.motor = osc("sawtooth", OUT.spin[0], motor); out.motor2 = osc("sine", OUT.spin[0] * 2, gain(0.4, motor));
+      out.whirrGain = gain(0, mix); out.whirrBand = filter("bandpass", 600, 0.9, out.whirrGain); out.whirr = hissOf(out.whirrBand);
+      out.inrushGain = gain(0, mix); out.inrush = osc("sawtooth", 50, filter("lowpass", 320, 0.7, out.inrushGain)); out.inrush2 = osc("sine", 100, gain(0.5, out.inrushGain));
+      out.whineGain = gain(0, mix); out.whine = osc("sine", 2150, out.whineGain); out.whine2 = osc("sine", 4300, gain(0.25, out.whineGain));
+    };
+    // The hall's power faltering, going and coming back from now, on the times `O` (s from now: `from`, when its lamps
+    // start to strain; `dips`, each [when, how low, how long it holds there, where it comes back to]; `cut`; `restore`):
+    // the ballasts buzzing up as it falters, ticking and crackling at each dip; at the cut a breaker's light click, the
+    // buzz dying, the motors and their air winding down, the lamps pinging now and then as they cool and the emergency
+    // lights' faint whine; then a breaker closing, the transformers' hum surging back, the lamps' starters ticking each on
+    // with a blip of buzz, and the motors spinning back up. With null, or muted, quiet at once.
+    const outage = (O) => {
+      if (!ready) return false;
+      const now = ctx.currentTime, voices = [out.buzzGain, out.tickGain, out.pingGain, out.tripGain, out.knockGain, out.motorGain, out.whirrGain, out.inrushGain, out.whineGain];
+      for (const g of voices) { g.gain.cancelScheduledValues(now); g.gain.setTargetAtTime(0, now, 0.04); }
+      if (!O || muted) return false;
+      const t0 = now + 0.05, at = (s) => t0 + s, C = O.cut, R = O.restore, rand = (a, b) => a + Math.random() * (b - a);
+      for (const g of voices) g.gain.setValueAtTime(0, t0);
+      const ticks = [];
+      // The ballasts straining, then buzzing up at each dip with a tick and a crackle or two; flaring and dying at the cut.
+      const B = out.buzzGain.gain, rest = OUT.buzz * 0.25;
+      B.linearRampToValueAtTime(rest, at(O.from + 0.6));
+      for (const [s, low, hold] of O.dips) {
+        const loud = OUT.buzz * (0.4 + 1.6 * (1 - low));
+        B.setValueAtTime(rest, at(s)); B.linearRampToValueAtTime(loud, at(s + 0.03));
+        B.setValueAtTime(loud, at(s + 0.05 + hold)); B.linearRampToValueAtTime(rest * 1.4, at(s + 0.2 + hold));
+        ticks.push([s, 1, 3200, rand(-0.6, 0.6)]);
+        for (let k = 0; k < 2; k++) ticks.push([s + rand(0.02, hold + 0.08), rand(0.35, 0.7), rand(2400, 4200), rand(-0.8, 0.8)]);
+      }
+      B.setValueAtTime(rest * 1.4, at(C)); B.linearRampToValueAtTime(OUT.buzz * 0.9, at(C + 0.04)); B.exponentialRampToValueAtTime(0.0005, at(C + 0.3)); B.setValueAtTime(0, at(C + 0.31));
+      // A breaker's click and its knock, at the cut and, heavier, at the restore.
+      const click = (s, level, hz, knockHz) => {
+        const G = out.tripGain.gain, K = out.knockGain.gain;
+        out.tripBand.frequency.setValueAtTime(hz, at(s));
+        G.setValueAtTime(0, at(s)); G.linearRampToValueAtTime(level, at(s + 0.002)); G.exponentialRampToValueAtTime(0.0005, at(s + 0.05)); G.setValueAtTime(0, at(s + 0.051));
+        out.knock.frequency.setValueAtTime(knockHz, at(s));
+        K.setValueAtTime(0, at(s)); K.linearRampToValueAtTime(OUT.knock, at(s + 0.003)); K.exponentialRampToValueAtTime(0.0005, at(s + 0.12)); K.setValueAtTime(0, at(s + 0.121));
+      };
+      click(C, OUT.trip, 2600, 620);
+      click(R, OUT.trip * 0.8, 1900, 520);
+      // The motors and their air winding down from the cut, and back up from just after the restore.
+      const M = out.motorGain.gain, W = out.whirrGain.gain, f1 = out.motor.frequency, f2 = out.motor2.frequency, wf = out.whirrBand.frequency, [hi, lo] = OUT.spin, up = R + 0.2;
+      M.setValueAtTime(OUT.motor, at(C)); M.exponentialRampToValueAtTime(0.0008, at(C + OUT.down)); M.setValueAtTime(0, at(C + OUT.down + 0.01));
+      W.setValueAtTime(OUT.whirr, at(C)); W.exponentialRampToValueAtTime(0.0008, at(C + OUT.down * 0.85)); W.setValueAtTime(0, at(C + OUT.down * 0.85 + 0.01));
+      f1.setValueAtTime(hi, at(C)); f1.exponentialRampToValueAtTime(lo, at(C + OUT.down));
+      f2.setValueAtTime(hi * 2, at(C)); f2.exponentialRampToValueAtTime(lo * 2, at(C + OUT.down));
+      wf.setValueAtTime(600, at(C)); wf.exponentialRampToValueAtTime(110, at(C + OUT.down));
+      M.setValueAtTime(0.0008, at(up)); M.exponentialRampToValueAtTime(OUT.motor, at(up + OUT.up)); M.linearRampToValueAtTime(0, at(up + OUT.up + 1.2));
+      W.setValueAtTime(0.0008, at(up)); W.exponentialRampToValueAtTime(OUT.whirr, at(up + OUT.up)); W.linearRampToValueAtTime(0, at(up + OUT.up + 1.2));
+      f1.setValueAtTime(lo, at(up)); f1.exponentialRampToValueAtTime(hi, at(up + OUT.up));
+      f2.setValueAtTime(lo * 2, at(up)); f2.exponentialRampToValueAtTime(hi * 2, at(up + OUT.up));
+      wf.setValueAtTime(110, at(up)); wf.exponentialRampToValueAtTime(600, at(up + OUT.up));
+      // The lamps pinging now and then as they cool.
+      const P = out.pingGain.gain;
+      for (let s = C + rand(0.8, 1.6); s < Math.min(R - 0.5, C + 9); s += rand(0.9, 2.2)) {
+        out.ping.frequency.setValueAtTime(rand(2800, 5200), at(s)); out.pingPan.pan.setValueAtTime(rand(-0.8, 0.8), at(s));
+        P.setValueAtTime(0, at(s)); P.linearRampToValueAtTime(OUT.ping * rand(0.5, 1), at(s + 0.002)); P.exponentialRampToValueAtTime(0.0003, at(s + 0.25)); P.setValueAtTime(0, at(s + 0.26));
+      }
+      // The emergency lights' faint whine while the power is out.
+      const H = out.whineGain.gain;
+      H.setValueAtTime(0, at(C + 0.3)); H.linearRampToValueAtTime(OUT.whine, at(C + 0.9)); H.setValueAtTime(OUT.whine, at(R)); H.linearRampToValueAtTime(0, at(R + 0.3));
+      // The transformers' hum surging back.
+      const I = out.inrushGain.gain;
+      out.inrush.frequency.setValueAtTime(44, at(R)); out.inrush.frequency.linearRampToValueAtTime(55, at(R + 0.35));
+      I.setValueAtTime(0, at(R + 0.01)); I.linearRampToValueAtTime(OUT.inrush, at(R + 0.04)); I.exponentialRampToValueAtTime(0.0005, at(R + 0.9)); I.setValueAtTime(0, at(R + 0.91));
+      // The lamps' starters, each a tick and a blip of buzz, at their own moments as the power comes back.
+      const starts = [], n = Math.round(rand(OUT.starters[0], OUT.starters[1]));
+      for (let k = 0; k < n; k++) starts.push(R + rand(0.08, 1.7));
+      starts.sort((a, b) => a - b);
+      let last = -1;
+      for (const s of starts) {
+        if (s - last < 0.14) continue;
+        last = s;
+        ticks.push([s, rand(0.5, 0.9), rand(2600, 3800), rand(-0.8, 0.8)]);
+        const blip = OUT.buzz * rand(0.4, 0.9);
+        B.setValueAtTime(0, at(s)); B.linearRampToValueAtTime(blip, at(s + 0.01)); B.linearRampToValueAtTime(0, at(s + rand(0.05, 0.12)));
+      }
+      // Every tick in time order on its one voice.
+      ticks.sort((a, b) => a[0] - b[0]);
+      const T = out.tickGain.gain;
+      let prev = -1;
+      for (const [s, level, hz, pan] of ticks) {
+        if (s - prev < 0.03) continue;
+        prev = s;
+        out.tickBand.frequency.setValueAtTime(hz, at(s)); out.tickPan.pan.setValueAtTime(pan, at(s));
+        T.setValueAtTime(0, at(s)); T.linearRampToValueAtTime(OUT.tick * level, at(s + 0.001)); T.exponentialRampToValueAtTime(0.0003, at(s + 0.025)); T.setValueAtTime(0, at(s + 0.026));
+      }
+      return true;
+    };
+
     // A blackout from now, on its times `B` (s from its start: the power killed at `kill`, the banks coming back on at
     // `banks`, the end): a heavy relay's clunk as it dies; a low hum in the dark, wavering; a clunk as each bank comes
     // back, the hum gone with the first. The mains and the neon follow `power`, which the anomaly sets.
@@ -797,7 +923,24 @@
     // How much of the hall's electrical hum has power: the mains at once, the neon with the bed's next levelling.
     const setPower = (k) => {
       power = k;
-      if (ready && !muted) bed.mainsGain.gain.setTargetAtTime(LEVEL.mains * k, ctx.currentTime, 0.03);
+      if (ready && !muted) bed.mainsGain.gain.setTargetAtTime(LEVEL.mains * k * strained, ctx.currentTime, 0.03);
+    };
+
+    // The hall's hum straining as the power falters: the mains, the drone, the air and the neon at `level` (0 to 1) of
+    // themselves, followed quickly, and the mains' pitch sagging by `sag` (0 to 1) of `SAG`. A brownout's sound, not a
+    // breakdown's: nothing clunks.
+    const strain = (level, sag) => {
+      if (level === strained && sag === sagged) return;
+      strained = level; sagged = sag;
+      if (!ready) return;
+      const now = ctx.currentTime;
+      quickUntil = now + 0.4;
+      bed.mains.frequency.setTargetAtTime(55 * (1 - SAG * sag), now, 0.05);
+      bed.mains2.frequency.setTargetAtTime(110 * (1 - SAG * sag), now, 0.05);
+      if (muted) return;
+      bed.mainsGain.gain.setTargetAtTime(LEVEL.mains * power * level, now, 0.04);
+      bed.droneGain.gain.setTargetAtTime(LEVEL.drone * level, now, 0.04);
+      bed.airGain.gain.setTargetAtTime((LEVEL.air + LEVEL.tunnelAir * clamp((spots.tunnel.z0 - ear.z) / 6, 0, 1)) * level, now, 0.04);
     };
 
     // Only from a gesture the browser has already counted, so nothing warns in the console; a gesture also wakes a
@@ -825,6 +968,10 @@
       AT.level = 1 / (1 + r * r);
       AT.pan = flat > 0.5 ? clamp((dx * -ear.fz + dz * ear.fx) / flat, -1, 1) * PAN * Math.min(1, flat / 3) : 0;
     };
+    // The glint where the air shimmers at (x, y, z), `level` 0 (silent) to 1.
+    const glint = (x, y, z, level) => {
+      glinting.x = x; glinting.y = y; glinting.z = z; glinting.level = level;
+    };
     const listen = (x, y, z, fx, fz) => {
       const l = Math.hypot(fx, fz) || 1;
       ear.x = x; ear.y = y; ear.z = z; ear.fx = fx / l; ear.fz = fz / l;
@@ -832,7 +979,7 @@
 
     // The bed, ten times a second, eased: the neon from the nearest point on the tunnel's axis, so it surrounds a
     // visitor inside it and comes out of its mouth to one in the hall, and each shield from where it stands.
-    const set = (param, value, now) => param.setTargetAtTime(value, now, 0.15);
+    const set = (param, value, now) => param.setTargetAtTime(value, now, now < quickUntil ? 0.04 : 0.15);
     const update = (dt) => {
       if (!ready) {
         activate();
@@ -842,11 +989,11 @@
       if (since < 0.1 || muted) return;
       since = 0;
       const now = ctx.currentTime, T = spots.tunnel, L = spots.launch, D = spots.door;
-      set(bed.mainsGain.gain, LEVEL.mains * power, now);
-      set(bed.droneGain.gain, LEVEL.drone, now);
-      set(bed.airGain.gain, LEVEL.air + LEVEL.tunnelAir * clamp((T.z0 - ear.z) / 6, 0, 1), now);
+      set(bed.mainsGain.gain, LEVEL.mains * power * strained, now);
+      set(bed.droneGain.gain, LEVEL.drone * strained, now);
+      set(bed.airGain.gain, (LEVEL.air + LEVEL.tunnelAir * clamp((T.z0 - ear.z) / 6, 0, 1)) * strained, now);
       place(0, T.y, clamp(ear.z, T.z1, T.z0), REF.neon);
-      set(bed.neonGain.gain, LEVEL.neon * AT.level * power, now);
+      set(bed.neonGain.gain, LEVEL.neon * AT.level * power * strained, now);
       set(bed.neonPan.pan, AT.pan * 0.4, now);
       place(L.x, L.y, L.z, REF.launch);
       set(bed.launch.gain.gain, LEVEL.launch * AT.level, now);
@@ -854,6 +1001,9 @@
       place(D.x, D.y, D.z, REF.door);
       set(bed.door.gain.gain, LEVEL.door * AT.level, now);
       set(bed.door.pan.pan, AT.pan, now);
+      place(glinting.x, glinting.y, glinting.z, REF.glint);
+      set(bed.glintGain.gain, LEVEL.glint * glinting.level * AT.level, now);
+      set(bed.glintPan.pan, AT.pan, now);
       place(spots.booth.x, spots.booth.y, spots.booth.z, 1);
       set(test.boothPan.pan, AT.pan, now);
       const E = spots.engines;
@@ -1311,7 +1461,7 @@
     };
 
     return {
-      listen, update, setMuted, setVolume, test: play, misfire, revs, zap, blackout, lowrider, shuffle, power: setPower, clang, voice, boot, poke, beep, denied, forklift, forkliftWork, horn, projector, clunk, roll, watchCrane, craneCue, watchRoom, roomCue, dispose,
+      listen, update, setMuted, setVolume, glint, test: play, misfire, revs, zap, blackout, lowrider, shuffle, power: setPower, strain, outage, clang, voice, boot, poke, beep, denied, forklift, forkliftWork, horn, projector, clunk, roll, watchCrane, craneCue, watchRoom, roomCue, dispose,
       get muted() { return muted; },
       get volume() { return volume; },
       get ready() { return ready; },
