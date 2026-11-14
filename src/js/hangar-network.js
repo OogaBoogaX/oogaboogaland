@@ -41,8 +41,9 @@
   // The faint points: how big, m, how bright, how near the anchor at the least, m, and the share of them violet.
   const DUST = { size: [0.05, 0.1], glow: [0.3, 0.7], least: 10, violet: 0.3 };
   // The beads along each channel: one every `every` m, at most `most` a channel and `max` in all, how big, m, how
-  // bright against their channel, how fast they drift along it, m/s, and at most how many a channel on Canvas 2D.
-  const BEADS = { every: 1.4, most: 9, max: 1800, size: 0.07, bright: 2.2, speed: 0.35, flat: 3 };
+  // strong at rest and while a payment runs along their channel, how fast they drift along it, m/s, and at most how many
+  // a channel on Canvas 2D.
+  const BEADS = { every: 1.4, most: 9, max: 1800, size: 0.07, rest: 0.12, lit: 1, speed: 0.35, flat: 3 };
   // Faint clouds of colour high up and far off: how many, how big, m, and how strong.
   const NEBULA = { n: 7, size: [9, 18], glow: [0.1, 0.2] };
   // A ball of voxels: how bright its faces are, how big its warm glow is against it, and how near the view it fades out, m.
@@ -70,8 +71,9 @@
   const PULSE = { speed: 7, hop: [0.45, 1.6], trail: 3, gap: 0.06, settle: 0.6, back: 1.6, every: [0.25, 0.7] };
   // The hall's haze, near and far, m, as it is and pulled in while the hall is dimmest (with `fog`).
   const FOG = { near: [14, 4], far: [120, 32] };
-  // A channel's least width, m, and its width a metre off, m; how strong it is, and while a payment runs along it.
-  const CHANNEL = { width: 0.036, thin: 0.003, glow: 0.4, lit: 0.9 };
+  // A channel's least width, m, and its width a metre off, m; how strong it is at rest, kept faint so the eye goes to
+  // the nodes and their depth, and while a payment runs along it, and how much wider it is then.
+  const CHANNEL = { width: 0.026, thin: 0.0022, glow: 0.13, lit: 0.95, widen: 0.8 };
 
   const paint = (w, h, seed, rgb, alphaAt) => {
     const canvas = document.createElement("canvas");
@@ -589,7 +591,8 @@
         const ax = A3[0] + (B3[0] - A3[0]) * s0, ay = A3[1] + (B3[1] - A3[1]) * s0, az = A3[2] + (B3[2] - A3[2]) * s0;
         const bx = A3[0] + (B3[0] - A3[0]) * s1, by = A3[1] + (B3[1] - A3[1]) * s1, bz = A3[2] + (B3[2] - A3[2]) * s1;
         const mx = (ax + bx) / 2, my = (ay + by) / 2, mz = (az + bz) / 2, dm = Math.hypot(mx - cx, my - cy, mz - cz);
-        const width = Math.max(CHANNEL.width, dm * CHANNEL.thin), op = (CHANNEL.glow + (CHANNEL.lit - CHANNEL.glow) * C.lit[c]) * fading * Math.min(1, grown * 3) * smooth((dm - 0.5) / 1.5);
+        const lit = C.lit[c], shade = fading * Math.min(1, grown * 3), width = Math.max(CHANNEL.width, dm * CHANNEL.thin) * (1 + CHANNEL.widen * lit);
+        const op = (CHANNEL.glow + (CHANNEL.lit - CHANNEL.glow) * lit) * shade * smooth((dm - 0.5) / 1.5), bead = (BEADS.rest + (BEADS.lit - BEADS.rest) * lit) * shade;
         if (op > 0.004 && ribbon(channels, nl, ax, ay, az, bx, by, bz, width, op)) nl++;
         // Its beads, drifting along it from a toward b, only on what of it shows.
         const n = flat ? Math.min(BEADS.flat, C.beads[c]) : C.beads[c];
@@ -598,7 +601,7 @@
           u -= Math.floor(u);
           if (u < s0 || u > s1) continue;
           const px = A3[0] + (B3[0] - A3[0]) * u, py = A3[1] + (B3[1] - A3[1]) * u, pz = A3[2] + (B3[2] - A3[2]) * u, dp = Math.hypot(px - cx, py - cy, pz - cz);
-          sprite(beads, nb++, px, py, pz, Math.min(BEADS.size * Math.max(1, dp / 10), dp * 0.03), Math.min(1, op * BEADS.bright) * smooth((dp - 0.5) / 1.5));
+          sprite(beads, nb++, px, py, pz, Math.min(BEADS.size * (1 + 0.5 * lit) * Math.max(1, dp / 10), dp * 0.03), Math.min(1, bead) * smooth((dp - 0.5) / 1.5));
         }
       }
       halos.instanceCount = nh; cores.instanceCount = nc; channels.instanceCount = nl; pulses.instanceCount = np; balls.instanceCount = nq;
