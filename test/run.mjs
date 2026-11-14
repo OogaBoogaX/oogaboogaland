@@ -338,6 +338,93 @@ const sleepBeamPoolProof = () => {
   beam.dispose(); beam.dispose(); const released = new Set(); beam.liveGeometry(released);
   return { compacted, bounded, calm, deterministic, clean, disposed: !sceneRoot.children.length && !released.size };
 };
+// Regression: Map's window capture listener is registered first, so a pad's Escape (pad-focus.js `back`, B or Menu)
+// over another menu layer reached it before that layer's own handler and was swallowed. It must pass through.
+const destinationMapPadEscapeProof = () => {
+  const els = new Map(), listeners = new Map(), state = { layer: false, otherDialog: null, shown: 0 };
+  const el = id => {
+    if (!els.has(id)) els.set(id, { id, hidden: false, disabled: false, open: false, textContent: "", dataset: {}, attrs: {}, children: [],
+      addEventListener() {}, removeEventListener() {}, setAttribute(k, v) { this.attrs[k] = v; }, focus() {}, click() {}, append(...nodes) { this.children.push(...nodes); },
+      replaceChildren(...nodes) { this.children = nodes; }, querySelectorAll(tag) { return this.children.flatMap(n => [...(n.tagName === tag.toUpperCase() ? [n] : []), ...n.querySelectorAll(tag)]); }, showModal() { this.open = true; state.shown++; }, close() { this.open = false; } });
+    return els.get(id);
+  };
+  const document = { getElementById: el, querySelector: sel => sel === "dialog:modal, dialog[open]:not(.board-floating)" ? (el("destination-map").open ? el("destination-map") : state.otherDialog && !state.otherDialog.floating ? state.otherDialog : null) : null, pointerLockElement: null,
+    createElement: tag => Object.assign(el("row" + els.size), { tagName: tag.toUpperCase() }) };
+  const window = { BL: { controls: { resetAll() {} }, gamepad: { requireNeutral() {} }, padFocus: { open: () => state.layer } },
+    matchMedia: () => ({ matches: false }), addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener() {} };
+  const context = { window, document, localStorage: { getItem: () => "1", setItem() {} } };
+  runInNewContext(readFileSync(join(root, "src/js/destination-map.js"), "utf8"), context);
+  const scene = { id: "hub" }, map = window.BL.destinationMap.create({ current: () => scene, ready: () => true });
+  let available = true;
+  map.connect({ available: () => available, travels: () => true, selected: () => null, names: () => ["pile"], label: n => n, travel: () => true });
+  const press = (key, pad) => { const e = { key, code: key, pad, prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; } }; listeners.get("keydown")(e); return e; };
+  const dialog = el("destination-map");
+  // The Controls panel (or a board, Add an Ooga, the donation popup) is the open layer: B's Escape is its own.
+  state.layer = true; state.otherDialog = el("controls-help");
+  const overDialog = press("Escape", true), passedDialog = !overDialog.prevented && !overDialog.stopped && !dialog.open && state.shown === 0;
+  // A card such as the ghost lobby or #hangar-sound is a layer with no dialog: B is still its Escape, not Map.
+  state.otherDialog = null;
+  const overCard = press("Escape", true), passedCard = !overCard.prevented && !overCard.stopped && !dialog.open && state.shown === 0;
+  // On foot with no layer open, Menu's Escape still opens Map, and B inside Map still closes it.
+  state.layer = false;
+  const onFoot = press("Escape", true), opened = onFoot.prevented && onFoot.stopped && dialog.open && state.shown === 1;
+  state.layer = true;
+  const inside = press("Escape", true), closed = inside.prevented && !dialog.open;
+  // A keyboard Escape on foot is never Map's.
+  state.layer = false;
+  const keyboard = press("Escape", false), keyboardPassed = !keyboard.prevented && !dialog.open;
+  // The floating Oogatron board is a non-modal dialog that padFocus does not see: it must not block Map.
+  state.otherDialog = Object.assign(el("board"), { open: true, floating: true });
+  const shownBefore = state.shown, overBoard = press("Escape", true), floatingOpens = overBoard.prevented && overBoard.stopped && dialog.open && state.shown === shownBefore + 1;
+  press("Escape", true); state.otherDialog = null;
+  // A refused Map (a modal dialog padFocus misses, or Map unavailable) must not swallow Menu's Escape.
+  state.otherDialog = Object.assign(el("modal"), { open: true, floating: false });
+  const refused = press("Escape", true), refusedPassed = !refused.prevented && !refused.stopped && !dialog.open;
+  state.otherDialog = null; available = false;
+  const unavailable = press("Escape", true), unavailablePassed = !unavailable.prevented && !unavailable.stopped && !dialog.open;
+  available = true;
+  map.dispose();
+  return { passedDialog, passedCard, opened, closed, keyboardPassed, floatingOpens, refusedPassed, unavailablePassed };
+};
+const destinationMapCoachingHintProof = () => {
+  const els = new Map(), state = { otherDialog: null };
+  const el = id => {
+    if (!els.has(id)) els.set(id, { id, hidden: id === "explore-coach", disabled: false, open: false, textContent: "", dataset: {}, attrs: {}, children: [],
+      addEventListener() {}, removeEventListener() {}, setAttribute(k, v) { this.attrs[k] = v; }, focus() {}, click() {}, append(...nodes) { this.children.push(...nodes); },
+      replaceChildren(...nodes) { this.children = nodes; }, querySelectorAll(tag) { return this.children.flatMap(n => [...(n.tagName === tag.toUpperCase() ? [n] : []), ...n.querySelectorAll(tag)]); }, showModal() { this.open = true; }, close() { this.open = false; } });
+    return els.get(id);
+  };
+  const querySelector = sel => {
+    const open = [el("destination-map"), state.otherDialog].find(d => d && d.open) || null;
+    if (!open) return null;
+    if (sel === "dialog[open]") return open;
+    if (sel === "dialog:modal, dialog[open]:not(.board-floating)") return open.floating ? null : open;
+    return null;
+  };
+  const document = { getElementById: el, querySelector, pointerLockElement: null, createElement: tag => Object.assign(el("row" + els.size), { tagName: tag.toUpperCase() }) };
+  const window = { BL: { controls: { resetAll() {} }, gamepad: { requireNeutral() {}, state: { connected: false } }, padFocus: { open: () => false } },
+    matchMedia: () => ({ matches: false }), addEventListener() {}, removeEventListener() {} };
+  const context = { window, document, localStorage: { getItem: () => null, setItem() {} } };
+  runInNewContext(readFileSync(join(root, "src/js/destination-map.js"), "utf8"), context);
+  const scene = { id: "hub" }, map = window.BL.destinationMap.create({ current: () => scene, ready: () => true });
+  map.connect({ available: () => true, travels: () => true, selected: () => null, names: () => ["pile"], label: n => n, travel: () => true, controlled: () => false, position: () => null });
+  const coach = el("explore-coach");
+  map.update();
+  const offered = !coach.hidden;
+  // A floating Oogatron board is a non-modal dialog: it must not hide the coaching hint.
+  state.otherDialog = Object.assign(el("board"), { open: true, floating: true });
+  map.update();
+  const floatingShows = !coach.hidden;
+  // A modal or other non-floating dialog still hides the hint.
+  state.otherDialog = Object.assign(el("controls-help"), { open: true, floating: false });
+  map.update();
+  const modalHides = coach.hidden;
+  state.otherDialog = null;
+  map.update();
+  const restored = !coach.hidden;
+  map.dispose();
+  return { offered, floatingShows, modalHides, restored };
+};
 // Rule: exercise the actual bounded rage state machine with a small physical
 // adapter. Collision and the rendered carry are covered by the hub regressions.
 const gorillaRageProof = async () => {
@@ -4178,7 +4265,14 @@ const session = (url, steps, opts, final) => output.run({ lines: [], results: []
       const from = i ? b.logs.length : 0;
       run.open = open || null;
       try {
+        const cpu = name === "wall movement performance" && process.env.COVERED_CPU === "1";
+        if (cpu) { await b.send("Profiler.enable"); await b.send("Profiler.start"); }
         await fn(b);
+        if (cpu) {
+          const { profile } = (await b.send("Profiler.stop")).result;
+          writeFileSync(join(root, "untracked", "covered-suite.cpuprofile"), JSON.stringify(profile));
+          writeFileSync(join(root, "untracked", "covered-suite-stats.json"), JSON.stringify(await b.evaluate("__ooga.headquarters.objectGuides.stats")));
+        }
         if (Date.now()-t0>=SESSION_MS) { overran=true; b.close(true); throw driverError("session deadline"); }
         const observed=b.logs.slice(from),notices=b.shorelineHealthy&&b.shorelineSoftware?observed.filter(readbackPerformanceNotice):[];
         if(notices.length)lines.push(`INFO software WebGL: ${notices.length} driver ReadPixels performance notices; healthy state/GL checks passed (no application readback required).`);
@@ -4307,7 +4401,7 @@ const orbitFlow = async (b) => {
 const SCENES = ["hub", "lab", "studio", "race", "drop", "block", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
-for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "transport-unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
+for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "cliffs-unit", "transport-unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
 const ONLY = process.env.ONLY || ""; // Optional comma-separated substrings within the requested scenes.
 const onlyMatches = value => ONLY.split(",").some(part => value.includes(part));
 const FULL = ARGS.includes("full");
@@ -7309,26 +7403,326 @@ const gameRulesChecks = async () => {
       return deck.actors[deckMap.toLocal[3]].captures === 2;
     })(), `max ${biggest}, avg ${Math.round(total / frames)} bytes`);
     context.blockFrameBytes = { biggest, average: Math.round(total / frames) };
-    // 1v1 is a real match with bots and flags, and a solo step is untouched by the new input table.
+    // A size under the minimum is grown to two a side (never a 1v1), a real match with bots and flags, and a solo step
+    // is untouched by the new input table.
     const one = S.create({ team: "blue", seed: 9, size: 1, map: "fort", prep: 0 });
     one.actors[1].bot = true;
     for (let i = 0; i < 1200; i++) S.tick(one, S.CONFIG.STEP, still());
     const solo = (t) => { const s = S.create({ team: "blue", seed: 77, size: 3, map: "town", prep: 1 }); if (t) s.inputs = null; for (let i = 0; i < 1800; i++) S.tick(s, S.CONFIG.STEP, still()); return s.actors.map(a => a.x + a.z).join(","); };
-    record("block live: 1v1 runs, and a solo round is unchanged", one.actors.length === 2 && one.time > 9 && solo(false) === solo(true));
+    record("block live: there is no 1v1 (a size of one runs two a side), and a solo round is unchanged", one.size === 2 && one.actors.length === 4 && one.time > 9 && solo(false) === solo(true));
+    // No weather on any map: two minutes of a seeded round on each (no bots steering, so it stays cheap; the old
+    // weather drew a spell every 24 to 42 s whatever the Oogas did) raise no storm, rain or lightning, and the rules hold no sky.
+    const skies = W.MAPS.map((map) => {
+      const s = S.create({ team: "blue", seed: 31, size: 1, map, prep: 0 }), seen = new Set();
+      for (const o of s.actors) o.bot = false;
+      for (let i = 0; i < 120 * 120; i++) { S.tick(s, S.CONFIG.STEP, still()); for (let e = 0; e < s.eventCount; e++) seen.add(s.events[e].type); s.eventCount = 0; }
+      return { map, time: Math.round(s.time), sky: ["weather", "bolt", "boltwarn", "rain", "storm"].filter((t) => seen.has(t) || L.EVENT_TYPES.includes(t)), held: s.weather !== undefined || s.live !== undefined || "boltCool" in s.actors[0] };
+    });
+    record("block frenzy: no map has weather; two minutes of seeded play on each raises no storm, rain or lightning bolt",
+      skies.every((r) => r.time >= 119 && !r.sky.length && !r.held) && S.setLive === undefined && !Object.keys(S.CONFIG).some((k) => /^(WEATHER|BOLT)/.test(k)), JSON.stringify(skies));
+    // Four power-ups, no laser eyes: every spot on every map starts and redraws one of them from the seed, a taken one
+    // gives its own, and the host's kinds reach a guest through the live frame.
+    const drawn = new Set(), given = new Set();
+    let powersOk = S.POWERS.join() === "boots,halving,cold,monkeys" && !Object.keys(S.CONFIG).some((k) => /^(LASER|BEAM)/.test(k));
+    for (const map of W.MAPS) {
+      const s = S.create({ team: "blue", seed: 8, size: 1, map, prep: 0 }), me = s.actors[0];
+      for (const o of s.actors) o.bot = false;
+      powersOk &&= s.powers.length > 0 && s.powers.every((p) => S.POWERS[p.kind]) && !("laser" in me) && !("beam" in me);
+      for (let n = 0; n < 12; n++) for (const p of s.powers) {
+        p.dark = 0; Object.assign(me, { x: p.x, z: p.z, y: 0, vx: 0, vz: 0, grounded: true, splat: 0, trapped: 0, grabbed: 0 });
+        S.tick(s, S.CONFIG.STEP, still());
+        for (let e = 0; e < s.eventCount; e++) if (s.events[e].type === "power") given.add(S.POWERS[s.events[e].y]);
+        s.eventCount = 0; drawn.add(S.POWERS[p.kind]);
+      }
+    }
+    const ph = S.create({ team: "blue", seed: 8, size: 1, map: "fort", prep: 0 }), pg = S.create({ team: "blue", seed: 9, size: 1, map: "fort", prep: 0 }), pm = L.seatMap(1, 0);
+    ph.powers.forEach((p, i) => { p.kind = i % S.POWERS.length; });
+    L.decode(new DataView(buf.buffer.slice(0, L.encode(ph, pm, 7, 1, 1, buf))), pg, pm, new Float32Array(8));
+    const wired = pg.powers.every((p, i) => p.kind === ph.powers[i].kind);
+    const powerFrame = new Uint8Array(buf.buffer.slice(0, L.encode(ph, pm, 7, 1, 1, buf, [], 0)));
+    const powerAt = powerFrame.length - 1 - ph.powers.length * 2;
+    const invalidPowers = [S.POWERS.length, 255].map(kind => { const c = powerFrame.slice(); c[powerAt + 1] = kind; return new DataView(c.buffer); });
+    record("block live: all four power kinds validate, while removed and unknown kinds and a truncated power list are refused",
+      L.validFrame(new DataView(powerFrame.buffer), pg, pm) && invalidPowers.every(v => !L.validFrame(v, pg, pm))
+        && !L.validFrame(new DataView(powerFrame.buffer.slice(0, powerAt + 1)), pg, pm));
+    record("block frenzy power-ups: four kinds without laser eyes, each spot drawing one from the seed and giving its own, and the host's reach a guest",
+      powersOk && drawn.size === 4 && given.size === 4 && [...drawn, ...given].every((k) => k) && wired && !L.EVENT_TYPES.some((t) => t.startsWith("laser")), JSON.stringify({ powersOk, drawn: [...drawn], given: [...given], wired }));
+    // Paint and the AKs go where they are aimed.
+    const flat = ["paint", "ak", "gold"].map((kind) => { const T = S.TOOLS[kind], d = 20, t = d / T.speed, p = S.flatPitch(d, T), y = (T.lift + Math.sin(p) * T.speed) * t - 0.5 * T.gravity * t * t; return Math.abs(y) < 0.1 && T.speed * T.life >= 25 && T.gravity <= 1.5; });
+    record("block shots: paint and the AKs arrive within 10 cm of the aim at 20 m with about their old reach", flat.every(Boolean), JSON.stringify(flat));
+
+    // The round's scoring rule, one flag set as it starts: classic waits for your own block to be home (and says so
+    // once), "doesn't need to be home" scores at once, for a bot as for a person; a reset keeps the round's rule.
+    const scoring = (anyTime, bot = false) => {
+      const s = S.create({ team: "blue", seed: 3, size: 2, map: "fort", prep: 0 }), a = s.actors[0], st = S.ARENA.stands.blue;
+      s.anyTime = anyTime; S.reset(s, 3); a.bot = bot;
+      s.flags.blue.state = "dropped"; s.flags.blue.x = 0; s.flags.blue.z = 0; s.flags.red.state = "carried"; s.flags.red.carrier = 0; a.carrying = "red"; a.x = st.x; a.z = st.z; a.y = 0;
+      S.tick(s, S.CONFIG.STEP, still());
+      let waited = false; for (let i = 0; i < s.eventCount; i++) waited = waited || s.events[i].type === "waiting";
+      const first = a.captures;
+      // Classic: the carrier who waits scores the moment its own block is home again.
+      if (!anyTime) { s.flags.blue.state = "home"; s.flags.blue.x = st.x; s.flags.blue.z = st.z; S.tick(s, S.CONFIG.STEP, still()); }
+      return { first, waited, later: a.captures, kept: s.anyTime, score: s.score.blue };
+    };
+    const rules = { any: scoring(true), classic: scoring(false), anyBot: scoring(true, true), classicBot: scoring(false, true), fresh: S.create({ team: "blue", seed: 3, size: 2, map: "fort", prep: 0 }).anyTime, duel: "duel" in S.create({ team: "blue", seed: 3, size: 2, map: "fort", prep: 0 }) || "duel" in W };
+    const optBase = { t: "bf", v: W.WIRE, k: "opt", n: 2, m: W.FIRST_MAP }, ruleWire = { rules: W.RULES.join(), none: W.ruleFor(-1, 1) + "" + W.ruleFor(-1, 2) + W.ruleFor(-1, 3) + W.ruleFor(-1, 8), picked: W.ruleFor(0, 2) + "" + W.ruleFor(1, 5),
+      plain: JSON.stringify(W.parse(optBase)), home: W.parse({ ...optBase, r: 0 })?.r, any: W.parse({ ...optBase, r: 1 })?.r, bad: [2, -1, 0.5, "1", null, true].map((r) => W.parse({ ...optBase, r })).every((v) => v === null), old: W.parse({ ...optBase, v: W.WIRE - 1, r: 1 }) };
+    record("block scoring rule: classic needs your own block home, says so once and scores the moment it returns; doesn't-need-to-be-home scores at once; bots the same; a reset keeps the round's rule and a new sim is classic; the duel rule is gone",
+      rules.any.first === 1 && !rules.any.waited && rules.any.kept === true && rules.classic.first === 0 && rules.classic.waited && rules.classic.later === 1 && rules.classic.kept === false
+      && rules.anyBot.first === 1 && rules.classicBot.first === 0 && rules.classicBot.later === 1 && rules.fresh === false && !rules.duel, JSON.stringify(rules));
+    record("block scoring rule on the wire: opt may carry the rule, 0 or 1, and nothing else; left out, no pick; unpicked, two people play doesn't-need-to-be-home and any other count classic; a pick always stands; an older page's message is refused",
+      ruleWire.rules === "home,any" && ruleWire.none === "0100" && ruleWire.picked === "01" && ruleWire.plain === JSON.stringify({ t: "bf", k: "opt", n: 2, m: W.FIRST_MAP }) && ruleWire.home === 0 && ruleWire.any === 1 && ruleWire.bad && ruleWire.old === null && W.WIRE >= 3, JSON.stringify(ruleWire));
+
+    // Each block mined wins one pair of Golden AKs, never more than `GOLD_GUNS` in the round: for the miner, else the
+    // nearest teammate without a pair; from the pool, else from a rival by the sim's seeded pick; a side holding every
+    // pair wins nothing more. The wallets and their machines are gone.
+    const mine = (setup, seed = 3, left = S.CONFIG.GOLD_GUNS) => { const s = S.create({ team: "blue", seed, size: 3, map: "town", prep: 0 }), a = s.actors[0], st = S.ARENA.stands.blue; for (const q of s.actors) { q.bot = false; q.x = 200 + q.id * 3; q.z = 200; } s.gorillas.length = 0; s.goldLeft = left; setup(s, a); s.flags.red.state = "carried"; s.flags.red.carrier = 0; a.carrying = "red"; a.x = st.x; a.z = st.z; a.y = 0; S.tick(s, S.CONFIG.STEP, still()); return s; };
+    const pairs = (s) => s.goldLeft + s.actors.filter((b) => b.gold).length, held = (s) => s.actors.filter((b) => b.gold).map((b) => b.id).join();
+    const evOf = (s, type) => { for (let i = 0; i < s.eventCount; i++) if (s.events[i].type === type) return s.events[i]; return null; };
+    const toMiner = mine(() => {}), toMate = mine((s, a) => { a.gold = true; s.goldLeft = 1; s.actors[1].x = 60; s.actors[2].x = 30; }), both = mine((s, a) => { a.gold = s.actors[1].gold = true; s.goldLeft = 0; });
+    const fromRival = mine((s) => { s.actors[3].gold = s.actors[4].gold = true; s.goldLeft = 0; }), mateFromRival = mine((s, a) => { a.gold = s.actors[4].gold = true; s.goldLeft = 0; s.actors[1].x = 30; s.actors[2].x = 60; });
+    const whoLost = (seed) => { const s = mine((q) => { q.actors[3].gold = q.actors[4].gold = true; q.goldLeft = 0; }, seed); return s.actors[3].gold ? 4 : 3; };
+    const seeds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(whoLost), mateEv = evOf(toMate, "gold");
+    const mining = { miner: held(toMiner) === "0" && toMiner.goldLeft === 1 && evOf(toMiner, "gold")?.actor === 0, mate: held(toMate) === "0,2" && toMate.goldLeft === 0 && mateEv?.actor === 2 && mateEv?.by === 0,
+      both: held(both) === "0,1" && !evOf(both, "gold") && !evOf(both, "goldsteal"), rival: fromRival.actors[0].gold && held(fromRival).split(",").length === 2 && evOf(fromRival, "goldsteal")?.actor === 0,
+      mateRival: held(mateFromRival) === "0,1" && evOf(mateFromRival, "goldsteal")?.actor === 1, seeded: seeds.includes(3) && seeds.includes(4) && seeds.every((v, i) => v === whoLost(i + 1)),
+      two: S.CONFIG.GOLD_GUNS === 2 && [toMiner, toMate, both, fromRival, mateFromRival].every((s) => pairs(s) === 2), noHook: [toMiner, fromRival].every((s) => s.actors.every((b) => !b.hook)), noDrops: !("drops" in toMiner) && !("DROP_BACK_S" in S.CONFIG) };
+    record("block mining wins Golden AKs: each block mined wins one pair, for the miner or else the nearest teammate without one; from the pool, else from a rival by the seeded pick; a side holding both wins nothing; two pairs in all, and mining takes no hook",
+      Object.values(mining).every(Boolean), JSON.stringify({ ...mining, seeds }));
+    const stolen = mine((s) => { s.actors[3].gold = s.actors[4].gold = true; s.goldLeft = 0; }), stolenMap = L.seatMap(3, 0), buf3 = new DataView(new ArrayBuffer(W.FRAME_MAX)), len3 = L.encode(stolen, stolenMap, 1, 1, 1, buf3), guest3 = S.create({ team: "blue", seed: 3, size: 3, map: "town", prep: 0 }), frame3 = new DataView(buf3.buffer.slice(0, len3));
+    guest3.gorillas.length = 0;
+    const gone = { sim: !("wallets" in stolen) && !("vends" in stolen) && !S.nearVend && !S.takeWallet && !S.WALLETS && !S.ARENA.vends && !Object.keys(S.CONFIG).some((k) => /WALLET|VEND/.test(k)), actor: !("wallet" in stolen.actors[0]) && !("soot" in stolen.actors[0]) && !("vendGo" in stolen.actors[0]), wire: !W.ACTIONS.some((k) => /wallet/i.test(k)) && !L.EVENT_TYPES.some((k) => ["wallet", "wthrow", "wdrop", "wbounce", "stuck", "rekt", "blast"].includes(k)), frame: L.validFrame(frame3, guest3, stolenMap) && !L.validFrame(new DataView(buf3.buffer.slice(0, len3 + 1)), guest3, stolenMap) };
+    L.decode(frame3, guest3, stolenMap, new Float32Array(32));
+    gone.guestAgrees = guest3.actors.map((b) => +b.gold).join("") === stolen.actors.map((b) => +b.gold).join("") && guest3.actors[0].gold;
+    // The two special weapons take each other, and only each other, out of a rival's hands: a hook that reaches a rival
+    // with the Golden AKs out takes the pair; Golden AK fire that splats a rival with the hook out takes the hook. Put
+    // away, nothing is taken; no other shot, burst, beam or bonk takes either; a taker never holds two.
+    const duel = (setup) => { const s = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }), a = s.actors[0], b = s.actors[2]; for (const q of s.actors) { q.bot = false; q.guard = 0; q.x = 300 + q.id * 5; q.z = 300; q.y = 0; } s.gorillas.length = 0; a.x = 8; a.z = 9; b.x = 8; b.z = 3; setup(s, a, b); s.goldLeft = S.CONFIG.GOLD_GUNS - s.actors.filter((q) => q.gold).length; return { s, a, b }; };
+    const hold = (s, a, k = 0) => { a.hook = k + 1; s.hooks[k].state = 1; s.hooks[k].holder = a.id; };
+    const quiet = (s, t) => { for (let i = 0; i < Math.ceil(t / S.CONFIG.STEP); i++) { for (const q of s.actors) q.guard = 0; S.tick(s, S.CONFIG.STEP, still()); } };
+    const hookAt = (setup) => { const d = duel((s, a, b) => { hold(s, a); b.gold = true; setup(s, a, b); }); S.grapple(d.s, 0, Math.PI, Math.atan2(1 - S.CONFIG.SHOT_Y, 6)); quiet(d.s, 1); return d; };
+    const hookIn = hookAt((s, a, b) => { b.wield = "gold"; }), hookAway = hookAt((s, a, b) => { b.wield = "paint"; }), hookBotFired = hookAt((s, a, b) => { b.wield = ""; b.lastKind = "gold"; }), hookArmed = hookAt((s, a, b) => { a.gold = true; b.wield = "gold"; });
+    const shotAt = (kind, wield = "hook", setup = () => {}) => { const d = duel((s, a, b) => { a.gold = true; hold(s, b); b.wield = wield; setup(s, a, b); }); S.fire(d.s, 0, Math.PI, S.flatPitch(6, S.TOOLS[kind]), kind); quiet(d.s, 1); return d; };
+    const goldIn = shotAt("gold"), goldAway = shotAt("gold", "paint"), goldInUse = shotAt("gold", "paint", (s, a, b) => { b.hk = 4; }), goldOwn = shotAt("gold", "hook", (s, a) => hold(s, a, 1)), akIn = shotAt("ak");
+    const splatBy = (kind) => { const d = duel((s, a, b) => { a.gold = true; hold(s, b); b.wield = "hook"; }); S.splat(d.s, d.b, kind === "bonk", kind === "bonk" ? null : { kind, owner: 0, team: "blue", ox: d.a.x, oz: d.a.z }); return d.b.hook === 1 && d.a.hook === 0; };
+    const goldSplat = (() => { const d = duel((s, a, b) => { b.gold = true; b.wield = "gold"; hold(s, a); }); for (const k of ["paint", "ak", "sniper", "rocket", "grenade", "net", "crate", "homer"]) { d.b.splat = 0; S.splat(d.s, d.b, false, { kind: k, owner: 0, team: "blue", ox: 0, oz: 0 }); } S.splat(d.s, d.b, true); return d.b.gold && !d.a.gold; })();
+    const steals = { hookTakes: hookIn.a.gold && !hookIn.b.gold && hookIn.a.hook === 1, hookAway: !hookAway.a.gold && hookAway.b.gold, botFired: hookBotFired.a.gold && !hookBotFired.b.gold, hookArmed: hookArmed.a.gold && hookArmed.b.gold,
+      goldTakes: goldIn.a.hook === 1 && goldIn.b.hook === 0 && goldIn.s.hooks[0].holder === 0 && goldIn.b.splats === 1, goldAway: goldAway.b.hook === 1 && goldAway.a.hook === 0 && goldAway.b.splats === 1, inUse: goldInUse.a.hook === 1 && goldInUse.b.hook === 0,
+      ownHook: goldOwn.a.hook === 2 && goldOwn.b.hook === 1, akKeeps: akIn.b.hook === 1 && akIn.a.hook === 0 && akIn.b.splats === 1,
+      othersKeep: ["paint", "ak", "sniper", "rocket", "grenade", "net", "crate", "homer", "bonk"].every(splatBy), goldKept: goldSplat, pairs: [hookIn, goldIn].every((d) => d.s.goldLeft + d.s.actors.filter((q) => q.gold).length === 2) };
+    record("block special-weapon steals: a hook takes a rival's Golden AKs only while they're in hand (a bot's last fired counts), to a thrower with none; Golden AK fire takes a rival's hook only while it's in hand or out, to a shooter with none; the Ooga AK, paint, the sniper, rockets, grenades, nets, crates, monkeys and bonks take neither",
+      Object.values(steals).every(Boolean), JSON.stringify(steals));
+    // A guest's tool is the host's word through `wield`: a guest who puts the AKs away keeps them from a hook, one who
+    // holds the hook out loses it to Golden AK fire; a tool they don't own is refused. The frame carries the result.
+    const asGuest = (wieldKind, give, setup) => { const s = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }), h = s.actors[0], g = s.actors[2]; for (const q of s.actors) { q.bot = false; q.guard = 0; q.x = 300 + q.id * 5; q.z = 300; q.y = 0; } s.gorillas.length = 0; h.x = 8; h.z = 9; g.x = 8; g.z = 3; give(s, h, g); g.lastKind = "paint"; const r = S.wield(s, 2, S.WIELD.indexOf(wieldKind)); setup(s, h, g); quiet(s, 1); return { s, h, g, r }; };
+    const guestAway = asGuest("paint", (s, h, g) => { hold(s, h); g.gold = true; g.lastKind = "gold"; }, (s) => S.grapple(s, 0, Math.PI, Math.atan2(1 - S.CONFIG.SHOT_Y, 6)));
+    const guestOut = asGuest("hook", (s, h, g) => { h.gold = true; hold(s, g); }, (s) => S.fire(s, 0, Math.PI, S.flatPitch(6, S.TOOLS.gold), "gold"));
+    const refused = (() => { const s = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }), g = s.actors[1]; g.wield = "paint"; return !S.wield(s, 1, S.WIELD.indexOf("gold")) && !S.wield(s, 1, S.WIELD.indexOf("hook")) && !S.wield(s, 1, 99) && !S.wield(s, 1, -1) && g.wield === "paint" && W.ACTIONS.includes("wield"); })();
+    const outMap = L.seatMap(2, 1), outBuf = new DataView(new ArrayBuffer(W.FRAME_MAX)), outLen = L.encode(guestOut.s, L.seatMap(2, 0), 1, 1, 1, outBuf), outGuest = S.create({ team: "red", seed: 4, size: 2, map: "town", prep: 0 }), outFrame = new DataView(outBuf.buffer.slice(0, outLen));
+    outGuest.gorillas.length = 0;
+    const framedOut = L.validFrame(outFrame, outGuest, L.seatMap(2, 0)) && !L.validFrame(new DataView(outBuf.buffer.slice(0, outLen + 1)), outGuest, L.seatMap(2, 0)); L.decode(outFrame, outGuest, L.seatMap(2, 0), new Float32Array(16));
+    const guests = { away: guestAway.r && guestAway.g.gold && !guestAway.h.gold, out: guestOut.r && guestOut.h.hook === 1 && guestOut.g.hook === 0, refused, framed: framedOut, agrees: outGuest.actors[0].hook === 1 && outGuest.actors[2].hook === 0 && outGuest.hooks[0].holder === 0,
+      events: ["goldhook", "hooksteal", "goldsteal", "gold"].every((t) => L.EVENT_TYPES.includes(t)) && !["golddrop", "goldget", "goldback", "hookdrop", "hookback"].some((t) => L.EVENT_TYPES.includes(t)), wire: W.WIRE === 7 };
+    record("block steals live: a guest's wield on the host decides what a hook or Golden AK fire can take, an unowned tool is refused, the frame carries the result to a guest exactly, and the drop events are gone (WIRE 7)",
+      Object.values(guests).every(Boolean), JSON.stringify(guests));
+    // Shots through the sim itself: bots meet a crouched, a higher and a lower target; no round passes a thin wall.
+    // The pair stand on the first open lane of Ooga Town with nothing built on or across it.
+    const shootAt = (kind, setup) => { const s = S.create({ team: "blue", seed: 6, size: 2, map: "town", prep: 0 }), a = s.actors[0], t = s.actors[2]; for (const q of s.actors) { q.bot = false; q.guard = 0; } s.gorillas.length = 0; a.x = t.x = [6, 8, 2, 0].find((x) => S.clearLine(x, -20, x, -8, 0.4) && S.groundAt(x, -20, 3, 0.2) === 0); a.z = -20; a.y = 0; t.z = -8; t.y = 0; s.actors[1].x = s.actors[3].x = 200; setup(s, a, t);
+      const ty = t.y, ay = a.y, tc = t.crouch, d = Math.hypot(t.x - a.x, t.z - a.z); S.fire(s, 0, Math.atan2(t.x - a.x, t.z - a.z), S.flatPitch(d, S.TOOLS[kind]) + S.aimRise(a, t, d), kind);
+      for (let i = 0; i < 150 && t.splat <= 0; i++) { t.y = ty; t.vy = 0; t.crouch = tc; a.y = ay; a.vy = 0; S.tick(s, S.CONFIG.STEP, still()); } return t.splat > 0; };
+    const aims = {};
+    for (const kind of ["paint", "ak", "gold"]) { aims[kind + "Crouch"] = shootAt(kind, (s, a, t) => { a.gold = true; t.crouch = true; }); aims[kind + "High"] = shootAt(kind, (s, a, t) => { a.gold = true; t.y = 2; }); aims[kind + "Low"] = shootAt(kind, (s, a, t) => { a.gold = true; a.y = 1.2; }); }
+    const through = (kind) => { let passed = 0; for (let k = 0; k < 40; k++) { const s = S.create({ team: "blue", seed: 6, size: 2, map: "haunted", prep: 0 }), a = s.actors[0]; for (const q of s.actors) { q.bot = false; q.x = 200; q.z = 200; } s.gorillas.length = 0; s.ghosts.length = 0; a.x = -1.8 + k * 0.09; a.z = 21.5 + (k % 7) * 0.031; a.y = 0; a.gold = true;
+      S.fire(s, 0, 0, S.flatPitch(5, S.TOOLS[kind]), kind); const q = s.shots.find((v) => v.live); if (!q) return -1; for (let i = 0; i < 40 && q.live; i++) { a.y = 0; a.vy = 0; S.tick(s, S.CONFIG.STEP, still()); } if (q.z > 24.7) passed++; } return passed; };
+    aims.wall = { paint: through("paint"), ak: through("ak"), gold: through("gold") };
+    record("block shots through the sim: bots hit a crouched, a higher and a lower target with paint and both AKs, and no round passes Haunted Hollow's 0.2 m gate", Object.entries(aims).every(([k, v]) => k === "wall" ? v.paint === 0 && v.ak === 0 && v.gold === 0 : v), JSON.stringify(aims));
+    // A guest hears an AK as an AK: the host's round goes out as its own event and arrives as one.
+    const gunHost = S.create({ team: "blue", seed: 2, size: 2, map: "town", prep: 0 }), gunGuest = S.create({ team: "blue", seed: 2, size: 2, map: "town", prep: 0 }), gunMap = L.seatMap(2, 0), gunBuf = new DataView(new ArrayBuffer(W.FRAME_MAX));
+    gunHost.gorillas.length = gunGuest.gorillas.length = 0; gunHost.eventCount = 0; S.fire(gunHost, 1, 0, 0, "ak"); const gunLen = L.encode(gunHost, gunMap, 1, 1, 1, gunBuf); gunGuest.eventCount = 0; L.decode(new DataView(gunBuf.buffer.slice(0, gunLen)), gunGuest, gunMap, new Float32Array(16));
+    const heard = [...gunGuest.events.slice(0, gunGuest.eventCount)].map((e) => e.type), cue = readFileSync(join(root, "src/js/scene-block.js"), "utf8").includes('else if (t === "gunfire") { c.gun(k);');
+    const panelChecks = { fort: !W.playable("fort") && W.playable("town") && W.playable("clank") === (W.MAPS.indexOf("clank") > 0), five: W.plannedSize({ size: 2, reg: [1, 2, 3, 4, 5] }) === 3, two: W.plannedSize({ size: 3, reg: [1, 2] }) === 3, retiredReg: !!W.parse({ v: W.WIRE, k: "reg", m: 0 }) && W.parse({ v: W.WIRE, k: "reg", m: 0 }).m === undefined, strictOpt: W.parse({ v: W.WIRE, k: "opt", n: 2, m: 0 }) === null };
+    record("block lobby and guest cue: a guest hears an AK round as gunfire, a saved Fort Chaos pick isn't playable, the panel's size counts everyone who has joined, and a retired map on Register is no pick while Options stays strict", heard.includes("gunfire") && !heard.includes("fire") && cue && Object.values(panelChecks).every(Boolean), JSON.stringify({ heard, cue, ...panelChecks }));
+    record("block wallets removed: no wallet or vending state in the sim, an actor or the wire, and a frame's length is exact", Object.values(gone).every(Boolean), JSON.stringify(gone));
+    // The sniper rifle is every Ooga's from the start, on every map, and fires and hits from open ground, no tower near.
+    const rifle = S.MAPS.map((map) => {
+      const s = S.create({ team: "blue", seed: 4, size: 2, map, prep: 0 }), a = s.actors[0], b = s.actors[2], armed = s.actors.every((q) => q.sniper === 1);
+      for (const q of s.actors) { q.bot = false; q.guard = 0; q.x = 200; q.z = 200; } s.gorillas.length = 0;
+      // Down the first lane across the middle with nothing standing in it: a map may put a tomb or a wall on any one line.
+      a.x = b.x = [8, 12, 4, 16, 0].find((x) => S.clearLine(x, 9, x, -9, 0.4)); a.y = b.y = 0; a.z = 9; b.z = -9;
+      const off = a.y === 0 && S.TEAMS.every((k) => { const [x0, x1, z0, z1] = S.ARENA.towers[k]; return !(a.x > x0 && a.x < x1 && a.z > z0 && a.z < z1); }), fired = S.fire(s, 0, Math.PI, 0, "sniper"), shot = s.shots.some((x) => x.live && x.kind === "sniper" && x.owner === 0);
+      const soon = !S.fire(s, 0, Math.PI, 0, "sniper");
+      for (let n = 0; n < 120 && b.splat <= 0; n++) { for (const q of s.actors) q.guard = 0; S.tick(s, S.CONFIG.STEP, still()); }
+      const hit = b.splat > 0, far = a.longShot, hits = a.hits;
+      S.reset(s, 9);
+      return { map, armed, off, fired, shot, soon, hit, far: +far.toFixed(1), hits, again: s.actors.every((q) => q.sniper === 1) };
+    });
+    record("block sniper: the rifle is in every Ooga's arsenal at the start of a round and after a reset on every map, fires from open ground with no tower near, keeps its cooldown, splats a rival 18 m off and counts the long shot",
+      rifle.length === S.MAPS.length && rifle.every((r) => r.armed && r.off && r.fired && r.shot && r.soon && r.hit && r.far > 17 && r.far < 19 && r.hits === 1 && r.again)
+      && S.TOOLS.sniper.max === 0 && S.TOOLS.sniper.cool === 0.35 && S.TOOLS.sniper.speed === 160, JSON.stringify(rifle));
+    // The results' line-up and its most valuable Ooga are the rules' word, so every page agrees: the winning side in seat
+    // order, and of it the most worth (three a block mined, two a block brought home, one a splat landed), a tie to
+    // more mined, then more brought home, then the lower seat, whatever a page's own numbering.
+    {
+      const mk = (winner, stats) => { const s = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }); s.over = true; s.winner = winner; stats.forEach(([c, r, h], i) => Object.assign(s.actors[i], { captures: c, rescues: r, hits: h })); return s; };
+      const teams = mk("blue", []).actors.map((a) => a.team).join();
+      const plain = mk("blue", [[1, 0, 2], [2, 0, 0], [3, 3, 9], [0, 0, 0]]), red = mk("red", [[3, 0, 0], [0, 0, 0], [0, 1, 1], [1, 0, 1]]);
+      const tieWorth = mk("blue", [[0, 3, 0], [2, 0, 0], [0, 0, 0], [0, 0, 0]]), tieMined = mk("blue", [[1, 0, 3], [1, 1, 1], [0, 0, 0], [0, 0, 0]]), tieAll = mk("blue", [[1, 1, 1], [1, 1, 1], [0, 0, 0], [0, 0, 0]]);
+      const none = mk(null, [[0, 0, 1], [0, 0, 0], [2, 0, 0], [0, 0, 0]]);
+      // A guest's page numbers its own Ooga 0: the seat map turns its numbering back to seats.
+      const guestMap = L.seatMap(2, 1), guestSeat = (i) => guestMap.toSeat[i], hostMap = L.seatMap(2, 0), hostSeat = (i) => hostMap.toSeat[i];
+      const hostPick = hostMap.toSeat[S.mvp(tieAll, hostSeat)], guestPick = guestMap.toSeat[S.mvp(tieAll, guestSeat)];
+      const out = { teams, worth: S.worth({ captures: 2, rescues: 1, hits: 4 }), plain: S.mvp(plain), red: S.mvp(red), tieWorth: S.mvp(tieWorth), tieMined: S.mvp(tieMined), tieAll: S.mvp(tieAll), none: S.mvp(none), hostPick, guestPick };
+      const page = readFileSync(new URL("../src/index.html", import.meta.url), "utf8"), sc = readFileSync(new URL("../src/js/scene-block.js", import.meta.url), "utf8"), trophyCss = readFileSync(new URL("../src/style.css", import.meta.url), "utf8");
+      record("block trophy MVP: the winning side's most valuable Ooga is the most worth, a tie to more mined, then more brought home, then the lower seat, the same on a host's and a guest's page; with no winner, of everyone; the trophy's podium, tables and medal use it and break ties by seat; the card has one picture of the winners, its stage, and no portrait row",
+        out.teams === "blue,blue,red,red" && out.worth === 12 && out.plain === 1 && out.red === 3 && out.tieWorth === 1 && out.tieMined === 1 && out.tieAll === 0 && out.none === 2 && out.hostPick === 0 && out.guestPick === 0
+        && /const mvp = SIM\.mvp\(sim, seatOfActor\);/.test(sc) && /trophyShow\(winner, worth, mvp\)/.test(sc) && (sc.match(/\|\| seatOfActor\(a\) - seatOfActor\(b\)\)/g) || []).length === 2
+        && !/lineup|renderFaceIcon|posePodium|podiumView|BM\.crown/i.test(sc) && !/block-lineup|block-crown/.test(page + trophyCss) && !("lineup" in S)
+        // The card shows what the MVP's worth counts (blocks brought home too), keeps names readable and its buttons in view.
+        && /\$\{sim\.actors\[mvp\]\.captures\} mined · \$\{sim\.actors\[mvp\]\.rescues\} brought home · \$\{sim\.actors\[mvp\]\.hits\} splats/.test(sc) && /home\.textContent = String\(sim\.actors\[i\]\.rescues\);/.test(sc)
+        && (page.match(/<small title="Blocks brought home">Home<\/small>/g) || []).length === 2 && /\.block-side-panel li span \{ overflow-wrap: anywhere; \}/.test(trophyCss)
+        && /\.block-trophy-board \.actions \{ position: sticky; bottom: 0;/.test(trophyCss) && /grid-template-columns: minmax\(0, 1fr\) 6ch 6ch 6ch;/.test(trophyCss), JSON.stringify(out));
+    }
+    // The hook takes the rivals' block off its stand wherever on it the hook is aimed, low or high, from the open side,
+    // on every map: a hook aimed low once bit the stand under the block and pulled the Ooga in instead.
+    {
+      const pulls = S.MAPS.map((map) => {
+        const row = { map, low: 0, mid: 0, high: 0, own: 0 };
+        for (const [key, aimY] of [["low", 0.3], ["mid", 0.9], ["high", 1.5], ["own", 0.5]]) for (let k = 0; k < 8; k++) {
+          const s = S.create({ team: "blue", seed: 4, size: 2, map, prep: 0 }), a = s.actors[0], f = s.flags[key === "own" ? "blue" : "red"], d = 6, ang = k / 8 * Math.PI * 2;
+          // The round's starting crates are put away: Clanktown stands two by each room's door, on a low hook's line.
+          for (const q of s.actors) { q.bot = false; q.guard = 0; if (q !== a) { q.x = 300; q.z = 300; } } s.gorillas.length = 0; for (const c of s.crates) c.live = false;
+          a.x = f.x + Math.sin(ang) * d; a.z = f.z + Math.cos(ang) * d; a.y = 0; a.hook = 1; s.hooks[0].state = 1; s.hooks[0].holder = 0;
+          S.grapple(s, 0, Math.atan2(f.x - a.x, f.z - a.z), Math.atan2(aimY - S.CONFIG.SHOT_Y, d));
+          let took = false, bit = false;
+          for (let n = 0; n < 240 && !took && !bit; n++) { S.tick(s, S.CONFIG.STEP, still()); for (let i = 0; i < s.eventCount; i++) { took = took || s.events[i].type === "yank"; bit = bit || s.events[i].type === "hookbite"; } }
+          if (key === "own" ? bit && s.flags.blue.state === "home" : took) row[key]++;
+        }
+        return row;
+      });
+      record("block hook: the rivals' block comes off its stand to a hook aimed low or at its middle wherever one aimed high takes it (bar a low wall in the way), on every map; your own block at home is never pulled, the stand bites",
+        pulls.every((r) => r.high >= 2 && r.low >= 2 && r.low >= r.high - 1 && r.mid >= r.high - 1 && r.own >= 2) && S.CONFIG.HOOK_STAND_R ** 2 > 1.2 && S.CONFIG.HOOK_RANGE === 24, JSON.stringify(pulls));
+    }
+    // No recharge: a hook fires again the moment it is back in the hand, after a miss and after pulling a block in, and
+    // never while it is still out; a bot alone waits between throws.
+    {
+      const mk = () => { const s = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }), a = s.actors[0]; for (const q of s.actors) { q.bot = false; q.guard = 0; if (q !== a) { q.x = 300; q.z = 300; } } s.gorillas.length = 0; a.hook = 1; s.hooks[0].state = 1; s.hooks[0].holder = 0; return { s, a }; };
+      const until = (s, done, max = 600) => { let n = 0; for (; n < max && !done(); n++) S.tick(s, S.CONFIG.STEP, still()); return n; };
+      const m = mk(); m.a.x = 8; m.a.z = 9; m.a.y = 0;
+      const first = S.grapple(m.s, 0, 0, 1.2), whileOut = S.grapple(m.s, 0, 0, 1.2), flew = until(m.s, () => m.a.hk === 0), second = S.grapple(m.s, 0, 0, 1.2); until(m.s, () => m.a.hk === 0); const third = S.grapple(m.s, 0, 0, 1.2);
+      const b = mk(), f = b.s.flags.red; b.a.x = f.x; b.a.z = f.z + 6; b.a.y = 0; if (S.ARENA.stands.red.z > 0) b.a.z = f.z - 6;
+      const took = S.grapple(b.s, 0, Math.atan2(f.x - b.a.x, f.z - b.a.z), Math.atan2(1.5 - S.CONFIG.SHOT_Y, 6)); until(b.s, () => b.a.hk === 0);
+      const carrying = b.a.carrying === "red"; S.drop(b.s, 0); const afterBlock = S.grapple(b.s, 0, 0, 1.2);
+      const bot = mk(); bot.a.bot = true; bot.a.x = 8; bot.a.z = 9; S.grapple(bot.s, 0, 0, 1.2); until(bot.s, () => bot.a.hk === 0);
+      const out = { first, whileOut, flew, second, third, took, carrying, afterBlock, botWaits: bot.a.hookWait > 0, playerWaits: m.a.hookWait, cool: "HOOK_COOL" in S.CONFIG || "HOOK_YANK_COOL" in S.CONFIG || "hCool" in m.a };
+      record("block hook: no recharge: a hook that missed fires again the moment it is back, and again, and after pulling a block in; never while it is still out; only a bot waits between throws",
+        first && !whileOut && flew > 5 && flew < 240 && second && third && took && carrying && afterBlock && out.botWaits && out.playerWaits === 0 && !out.cool, JSON.stringify(out));
+    }
+    // The visitor's own running tally, this browser's: a finished round adds their counts once, solo or live; it adds up
+    // over rounds, survives a reload, takes in a save from before the tally without losing its rounds and best, and a
+    // round left early (not over) or only watched adds nothing.
+    {
+      const KEY = "oogaboogaland.v1", was = store.get(KEY);
+      store.set(KEY, JSON.stringify({ block: { wins: 2, games: 5, best: 61000 } }));
+      const g1 = BL.game.create({ catalog: [] }), old = { ...g1.state.block };
+      const round = (winner, time, stats, target = S.CONFIG.CAPTURES) => { const s = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0, target }); s.winner = winner; s.over = winner !== undefined; s.time = time; Object.assign(s.actors[0], stats); return s; };
+      const first = round("blue", 50, { captures: 2, rescues: 1, hits: 4, splats: 3 }), second = round("red", 70, { captures: 1, rescues: 0, hits: 2, splats: 5 }), left = round(undefined, 30, { captures: 2, rescues: 2, hits: 9, splats: 1 });
+      const t1 = S.tallyOf(first, 0, 0), t2 = S.tallyOf(second, 0, 3), t3 = S.tallyOf(left, 0, 0), longer = S.tallyOf(round("blue", 20, {}, 5), 0, 1);
+      const fastest = g1.recordBlock(t1), slower = g1.recordBlock(t2); if (t3) g1.recordBlock(t3);
+      const after = { ...g1.state.block }, reloaded = { ...BL.game.create({ catalog: [] }).state.block };
+      store.set(KEY, JSON.stringify({ block: { wins: 1, games: 2, best: 0, mined: -4, home: 7, splats: "x", splatted: 2.9, mvps: 9 } }));
+      const mended = { ...BL.game.create({ catalog: [] }).state.block };
+      if (was === undefined) store.delete(KEY); else store.set(KEY, was);
+      const want = JSON.stringify({ wins: 3, games: 7, best: 50000, mined: 3, home: 1, splats: 6, splatted: 8, mvps: 1 });
+      const sceneSrc = readFileSync(new URL("../src/js/scene-block.js", import.meta.url), "utf8"), pageSrc = readFileSync(new URL("../src/index.html", import.meta.url), "utf8");
+      record("block record: a finished round adds the visitor's own counts to a running tally once, two rounds add up, a reload keeps it, a save from before the tally keeps its rounds and best, bad counts start at 0, and a round left early or watched from the chairs adds nothing; the board and the trophy card show it",
+        JSON.stringify(old) === JSON.stringify({ wins: 2, games: 5, best: 61000, mined: 0, home: 0, splats: 0, splatted: 0, mvps: 0 }) && JSON.stringify(t1) === JSON.stringify({ won: true, ms: 50000, mined: 2, home: 1, splats: 4, splatted: 3, mvp: true })
+        && t2.won === false && t2.mvp === false && t3 === null && longer.ms === 0 && fastest === true && slower === false && JSON.stringify(after) === want && JSON.stringify(reloaded) === want
+        && JSON.stringify(mended) === JSON.stringify({ wins: 1, games: 2, best: 0, mined: 0, home: 7, splats: 0, splatted: 2, mvps: 2 })
+        && /const tally = onDeck\(\) \? null : SIM\.tallyOf\(sim, 0, mvp\), best = tally \? game\.recordBlock\(tally\) : false;/.test(sceneSrc) && (sceneSrc.match(/recordBlock\(/g) || []).length === 1
+        && ["mined", "home", "splats", "splatted", "mvps"].every((k) => pageSrc.includes(`id="block-rec-${k}"`)), JSON.stringify({ old, t1, t2, t3, after, reloaded, mended }));
+    }
+    // The controls list: five whole groups, each row key caps and a short action, no key twice in a group, and every
+    // key it names is one the scene handles (its key handler, the tool keys, the shared controls and the pointer);
+    // every key the handler takes is in it.
+    {
+      const src = readFileSync(new URL("../src/js/scene-block.js", import.meta.url), "utf8"), cssSrc = readFileSync(new URL("../src/style.css", import.meta.url), "utf8");
+      const groups = new Function(`return ${src.match(/const CONTROL_GROUPS = (\[[\s\S]*?\n  \]);/)[1]}`)();
+      const handled = new Set([...src.matchAll(/e\.key === "([^"]+)"/g)].map((m) => m[1].toUpperCase()));
+      for (const k of Object.keys(JSON.parse(src.match(/const TOOL_KEYS = (\{[^}]+\});/)[1].replace(/(\d):/g, '"$1":')))) handled.add(k);
+      if (/e\.code !== "KeyB"/.test(src)) handled.add("B");
+      if (/e\.key === "c" \|\| e\.key === "C"/.test(src)) handled.add("C");
+      const shared = ["W", "A", "S", "D", "Q", "E", "Shift", "Space", "Click", "Right click", "Wheel", "Esc", "Tab", "+", "−", "–", "Enter", "1", "2", "3", "4"];
+      const named = groups.flatMap(([, rows]) => rows.flatMap(([keys]) => keys)), words = groups.flatMap(([, rows]) => rows.map(([keys, what]) => keys.join(" ") + " " + what)).join(" | ");
+      const unknown = named.filter((k) => !shared.includes(k) && !handled.has(k.toUpperCase()));
+      const missing = [...handled].filter((k) => k.length === 1 && /[A-Z0-9?]/.test(k) && k !== "/" && !named.includes(k) && !named.includes(k.toLowerCase()) && !new RegExp(`\\(or ${k}\\)`).test(words) && !/^[1-8]$/.test(k) && k !== "_" && k !== "=");
+      const dupes = groups.filter(([, rows]) => new Set(rows.map(([keys]) => keys.join(" "))).size !== rows.length).map(([n]) => n);
+      const longest = Math.max(...groups.flatMap(([, rows]) => rows.map(([, what]) => what.length)));
+      const ctl = { names: groups.map(([n]) => n).join(), unknown, missing, dupes, longest, sniper: /Right click.*sniper scope/.test(words), hook: /R Fire, or let go/.test(words), drop: /K Drop the block/.test(words), bar: /U Hide the weapons bar/.test(words),
+        grid: /\.block-keys \{\s*display: grid;\s*grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 230px\), 1fr\)\);/.test(cssSrc) && !/column-count: 3/.test(cssSrc.slice(cssSrc.indexOf("Block Frenzy's controls list"))), summary: /paintSummary\(el\.help\)/.test(src) && !/wallets/.test(src.match(/const TOUCH_GROUPS = [^\n]*/)[0]) };
+      record("block controls: five whole groups (Move, Weapons, Hook, Block and crates, View and game) laid out as a grid, no key twice in a group, short actions, every key named is one the scene handles and every key it handles is named (the sniper scope, the hook's R, K, U among them)",
+        ctl.names === "Move,Weapons,Hook,Block and crates,View and game" && !unknown.length && !missing.length && !dupes.length && longest <= 34 && ctl.sniper && ctl.hook && ctl.drop && ctl.bar && ctl.grid && ctl.summary, JSON.stringify(ctl));
+    }
+    // The weapons bar: what a slot shows is the rules' word (not yours yet, yours and out, ready, and the count beside
+    // it), and the page's eight slots stand in key order, each named, the sniper rifle always among them.
+    {
+      const s = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }), a = s.actors[0], st = (k) => S.slotState(a, k), n = (k) => S.slotCount(a, k);
+      const fresh = { paint: [st("paint"), n("paint")], sniper: [st("sniper"), n("sniper")], ak: [st("ak"), n("ak")], grenade: [st("grenade"), n("grenade")], gold: [st("gold"), n("gold")], hook: [st("hook"), n("hook")], crate: n("crate") };
+      a.grenade = a.rocket = a.net = 0; const out = ["grenade", "rocket", "net"].map((k) => st(k) + n(k));
+      a.gold = true; a.hook = 1; a.hk = 1; a.akReload = 1; const owned = [st("gold"), n("gold"), st("hook"), n("hook"), n("ak")];
+      a.hk = 0; a.akReload = 0; a.akMag = 7; const settled = [n("hook"), n("ak")];
+      const html = readFileSync(new URL("../src/index.html", import.meta.url), "utf8"), bar = html.slice(html.indexOf('<div class="block-slots">'), html.indexOf('<div class="block-actions">'));
+      const slots = [...bar.matchAll(/<button type="button" data-tool="(\w+)" aria-pressed="\w+" aria-label="([^"]+)" title="([^"]+)"[^>]*><kbd>(\d)<\/kbd><svg class="block-slot-icon" viewBox="0 0 16 12"[^>]*>(.*?)<\/svg><b><\/b><\/button>/g)];
+      const keys = JSON.parse(readFileSync(new URL("../src/js/scene-block.js", import.meta.url), "utf8").match(/const TOOL_KEYS = (\{[^}]+\});/)[1].replace(/(\d):/g, '"$1":'));
+      const css = readFileSync(new URL("../src/style.css", import.meta.url), "utf8");
+      // The board's weapons preview: one entry a tool in key order, named as its slot is, each with a line whose numbers
+      // are the rules' own, and a previous and a next button; reduced motion neither turns nor steps it.
+      const scene = readFileSync(new URL("../src/js/scene-block.js", import.meta.url), "utf8"), AR = S.ARSENAL;
+      const preview = { tools: AR.map(([k]) => k).join() === S.WIELD.filter((k) => k !== "grab").join() && AR.every(([k], i) => keys[i + 1] === k), names: AR.every(([, name], i) => slots[i] && slots[i][2] === name),
+        blurbs: AR.every(([, , b]) => b.length >= 30 && b.length <= 80 && b.endsWith(".")), numbers: S.TOOLS.grenade.max === 3 && S.TOOLS.net.max === 3 && S.TOOLS.rocket.max === 1 && S.CONFIG.AK_MAG === 30 && S.CONFIG.HOOKS === 2 && S.TOOLS.paint.max === 0 && S.TOOLS.gold.max === 0,
+        board: /const showing = preview\.wide && el\.intro\.hidden;/.test(scene) && /show\.node\.visible = showing;/.test(scene) && /el\.weaponCard\.hidden = !showing;/.test(scene) && html.includes('id="block-intro" data-intro="block"'),
+        clear: /right: max\(12px, min\(9vw, calc\(50vw - 46vh - 250px\)\)\);/.test(css) && /if \(SHOW_AT\.x > edge\) \{\s*renderer\.ray\(edge, SHOW_AT\.y, camera, SHOW_RAY\);/.test(scene),
+        buttons: /data-weapon-step="-1" aria-label="Previous weapon"/.test(html) && /data-weapon-step="1" aria-label="Next weapon"/.test(html) && html.includes('id="block-weapon-blurb"'),
+        calm: /if \(!CLOUD_CALM && showing\) \{\s*show\.spin = [^}]*showWeapon\(show\.i \+ 1\);\s*\}/.test(scene), hidden: /#block-board\[hidden\] ~ \.block-weapon-card \{\s*display: none/.test(css.replace(/#block-board\[hidden\] ~ \.block-preview-name,\s*/, "")) };
+      record("block board: no Ooga picker, only the Ooga's name; the cast still starts from the visitor's own Ooga, then the one driven in, then the roster's first",
+        !/<select[^>]*id="block-ooga"/.test(html) && !html.includes("block-preview-pick") && /<p class="block-ooga" id="block-ooga"><\/p>/.test(html) && !/oogaPick|previewPick/.test(scene)
+        && /const first = own \|\| selection\.ooga \|\| names\[0\] \|\| null;/.test(scene) && /el\.previewName\.firstChild\.textContent = el\.oogaName\.textContent = /.test(scene), "");
+      record("block weapons preview: the board's list covers every tool of the arsenal in key order under its slot's name, each with a short line whose numbers are the rules', with previous and next buttons, hidden with the board and still under reduced motion",
+        Object.values(preview).every(Boolean), JSON.stringify({ preview, arsenal: AR.map(([k, n]) => k + ":" + n) }));
+      const named = slots.every((m, i) => Number(m[4]) === i + 1 && keys[i + 1] === m[1] && m[2].length > 4 && m[3] === `${m[2]} (${i + 1})` && (m[5].match(/<path/g) || []).length >= 5);
+      record("block weapons bar: a slot is locked until its tool is owned, empty with a 0 when it runs out and ready otherwise, counts show only where a tool runs out or reloads, and the eight named slots stand in key order with detailed icons, the selected one grown in place and still under reduced motion",
+        fresh.paint.join() === "ready," && fresh.sniper.join() === "ready," && fresh.ak.join() === "ready,30" && fresh.grenade.join() === "ready,3" && fresh.gold.join() === "locked," && fresh.hook.join() === "locked," && fresh.crate === "3"
+        && out.join() === "empty0,empty0,empty0" && owned.join() === "ready,,ready,…,…" && settled.join() === ",7"
+        && slots.length === 8 && named && slots[4][1] === "sniper" && !/data-tool="sniper"[^>]*disabled/.test(bar) && html.includes('id="block-tool-name"')
+        && /\.block-slots button\[aria-pressed="true"\] \{[^}]*transform: translateY\(-4px\) scale\(1\.22\)/.test(css)
+        // The chosen weapon's name stays up over its slot: no timer hides it, and it moves with the choice.
+        && !/nameTimer|setTimeout\(hideToolName/.test(scene) && /tool = k;\s*showToolName\(k\);/.test(scene) && /placeBar\(\);\s*\/\/ The chosen weapon's name stands over its slot from the round's start\.\s*showToolName\(tool\);/.test(scene) && /n\.dataset\.at = "slot"; n\.style\.left = `\$\{x\}px`;/.test(scene)
+        && /prefers-reduced-motion: reduce\) \{[^@]*\.block-tool-name\[data-at="slot"\] \{\s*transition: none;/.test(css) && /prefers-reduced-motion: reduce\) \{\s*\.block-slots button,\s*\.block-tool-name \{\s*transition: none/.test(css),
+        JSON.stringify({ fresh, out, owned, settled, slots: slots.map((m) => m[1]), named }));
+    }
     // The session over a fake room: a guest's input moves its actor on the host, a leaver becomes an NPC, the host hands over.
-    const session = (selfId) => {
+    const session = (selfId, arena = "fort") => {
       const subs = new Set(), frames_ = new Set(), sent = [], bins = [];
-      const net = { state: { selfId }, serverNow: () => context.clock + (context.skew || 0), subscribeBf: f => { subs.add(f); return () => subs.delete(f); }, subscribeBfFrame: f => { frames_.add(f); return () => frames_.delete(f); }, sendBf: m => { sent.push(m); return true; }, sendBfInput: m => { sent.push({ ...m }); return true; }, sendBfFrame: b => { bins.push(b.slice().buffer); } };
+      const net = { state: { selfId }, serverNow: () => context.clock + (context.skew || 0), subscribeBf: f => { subs.add(f); return () => subs.delete(f); }, subscribeBfFrame: f => { frames_.add(f); return () => frames_.delete(f); }, sendBf: m => { sent.push(m); return true; }, sendBfInput: m => { sent.push({ ...m, a: m.a && m.a.slice() }); return true; }, sendBfFrame: b => { bins.push(b.slice().buffer); } };
       const seen = { sim: null, started: 0 }, live = L.create({ net, now: () => context.clock, resolveBody: () => {}, onMatch: () => {}, onHost: () => { seen.tookOver = true; },
-        onStart: (m, role, map) => { seen.started++; seen.role = role; const s = S.create({ team: map.team, seed: m.seed, size: m.size, map: "fort", prep: 0 }); seen.sim = s; S.reset(s, m.seed); live.bind(s); } });
+        onStart: (m, role, map) => { seen.started++; seen.role = role; const s = S.create({ team: map.team, seed: m.seed, size: m.size, map: arena, prep: 0 }); seen.sim = s; s.anyTime = W.RULES[m.rule] === "any"; S.reset(s, m.seed); live.bind(s); } });
       return { live, sent, bins, seen, tell: m => { for (const f of subs) f({ k: "match", ...m }); }, input: m => { for (const f of subs) f({ k: "input", ...m }); }, frame: b => { for (const f of frames_) f(b); } };
     };
     { const a = session(1); a.live.register(1); record("block live: registering sends the map picked on the board", a.sent.length === 1 && a.sent[0].k === "reg" && a.sent[0].m === 1, JSON.stringify(a.sent)); a.live.dispose?.(); }
     context.clock = 1000;
-    const match = { s: "0123456789abcdef", phase: "play", size: 2, map: 0, reg: [], ready: [], seats: [10, 20, 30, 0], host: 10, epoch: 1, tag: 99, seed: 5 };
+    const match = { s: "0123456789abcdef", phase: "play", size: 2, map: 0, rule: 1, reg: [], ready: [], seats: [10, 20, 30, 0], host: 10, epoch: 1, tag: 99, seed: 5 };
     const A = session(10), B = session(20), D = session(40);
     A.tell(match); B.tell(match); D.tell(match);
     const a = A.seen.sim, b = B.seen.sim, dk = D.seen.sim;
+    {
+      // The match's rule is every page's: host, guest and viewer start the round under it; a match without one is classic.
+      const C2 = session(10), D2 = session(20), plainMatch = { ...match, s: "fedcba9876543210", tag: 98 }; delete plainMatch.rule; C2.tell(plainMatch); D2.tell(plainMatch);
+      const sceneSrc = readFileSync(new URL("../src/js/scene-block.js", import.meta.url), "utf8"), pageSrc = readFileSync(new URL("../src/index.html", import.meta.url), "utf8");
+      record("block scoring rule in a live round: host, guest and viewer all start under the match's rule, and classic when it names none; the board has both choices in the owner's words, the scene fixes the rule as the round starts and sends the first in's pick",
+        a.anyTime === true && b.anyTime === true && dk.anyTime === true && C2.seen.sim.anyTime === false && D2.seen.sim.anyTime === false
+        && /data-rule="home" aria-pressed="true" aria-label="Block must be home \(classic\)"/.test(pageSrc) && /data-rule="any" aria-pressed="false" aria-label="Block doesn't need to be home"/.test(pageSrc)
+        && /sim\.anyTime = selection\.rule === "any";\s*SIM\.reset\(sim, seed\);/.test(sceneSrc) && /round\.setOptions\(round\.match\.size, WIRE\.MAPS\.indexOf\(selection\.map\), WIRE\.RULES\.indexOf\(k\)\)/.test(sceneSrc) && !/\bduel\b/.test(sceneSrc),
+        JSON.stringify({ host: a.anyTime, guest: b.anyTime, viewer: dk.anyTime, plain: [C2.seen.sim.anyTime, D2.seen.sim.anyTime] }));
+    }
     record("block live: roles and NPC fill from the seats", A.seen.role === "host" && B.seen.role === "guest" && D.seen.role === "watch" && a.actors[3].bot === true && !a.actors[0].bot && !b.actors[0].bot);
     const mv = A.live.map.toLocal[1], before = a.actors[mv].x;
     A.input({ from: 1, s: match.s, q: 1, x: 1000, z: 0, f: 0, b: 1 });
@@ -7343,6 +7737,66 @@ const gameRulesChecks = async () => {
     record("block live: no game action works from the chairs", D.live.act("drop", 0) === false && D.sent.filter(m => m.k === "input").length === 0);
     B.live.after(1, still());
     record("block live: a guest sends bounded input", B.sent.some(m => m.k === "input" && m.q === 0 && m.s === match.s));
+    // A guest picks the sniper rifle and fires it from the ground: both go to the host as actions, which the wire takes
+    // and the host's rules allow.
+    {
+      const g = a.actors[mv]; g.cooldown = g.splat = g.trapped = g.guard = 0; g.y = 0; g.wield = "paint";
+      const asked = B.live.act("wield", 0, S.WIELD.indexOf("sniper")) && B.live.act("fire", 0, 0.5, 0, "sniper");
+      B.live.after(1, still());
+      const msg = B.sent.filter(m => m.k === "input" && m.a).pop(), parsed = msg ? W.parse({ ...msg, v: W.WIRE }) : null;
+      if (parsed) { A.input({ ...parsed, from: 1, s: match.s, q: 1000 }); A.live.hostStep(); }
+      const shot = a.shots.find(x => x.live && x.kind === "sniper" && x.owner === mv);
+      record("block sniper: a guest's pick and shot reach the host as wield and fire actions the wire accepts, and the host fires the rifle for it off any tower",
+        asked === true && !!parsed && parsed.a.length === 8 && W.ACTIONS[parsed.a[0]] === "wield" && W.ACTIONS[parsed.a[4]] === "fire" && W.KINDS[parsed.a[7]] === "sniper"
+        && g.wield === "sniper" && !!shot && g.y < S.CONFIG.TOWER_TOP - 1 && g.lastKind === "sniper", JSON.stringify({ asked, msg, wield: g.wield, shot: !!shot }));
+    }
+    // A guest's every tool choice, Lift (the last) included, reaches the host in the action's kind slot with a fire
+    // beside it: the whole message passes the wire's check and both act on the host's sim.
+    {
+      const g = a.actors[mv], q0 = B.sent.length;
+      g.gold = true; g.hook = 1; a.hooks[0].state = 1; a.hooks[0].holder = mv; g.cooldown = g.splat = g.trapped = 0; g.y = 0;
+      const reached = S.WIELD.map((kind, idx) => {
+        B.live.act("wield", 0, idx); B.live.act("fire", 0, 0.4, 0, "paint");
+        B.live.after(1, still());
+        const msg = B.sent.slice(q0).filter(m => m.k === "input" && m.a).pop(), parsed = msg ? W.parse({ ...msg, v: W.WIRE }) : null;
+        g.cooldown = 0; const shots = a.shots.filter(x => x.live && x.owner === mv).length;
+        if (parsed) { A.input({ ...parsed, from: 1, s: match.s, q: 2000 + idx }); A.live.hostStep(); }
+        return { kind, parsed: !!parsed, slot: parsed ? parsed.a[3] : -1, yaw: parsed ? parsed.a[1] : null, wield: g.wield, fired: a.shots.filter(x => x.live && x.owner === mv).length > shots || g.lastKind === "paint" };
+      });
+      record("block live wield: every tool a guest can choose, Lift included, goes in the action's kind slot (never the yaw's), passes the wire's check with a fire beside it, and sets the guest's tool on the host",
+        reached.length === 9 && reached.every((r, idx) => r.parsed && r.slot === idx && r.yaw === 0 && r.wield === r.kind && r.fired) && S.WIELD.length <= W.KINDS.length, JSON.stringify(reached));
+      g.wield = "paint";
+    }
+    // What is in hand travels in the frame: a guest draws each Ooga's tool, and a page that takes over as host keeps it,
+    // so a hook still takes Golden AKs held out after a handover; a bot's (no choice) stays its last fired.
+    {
+      const hostSim = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }), hmap = L.seatMap(2, 0), gmap = L.seatMap(2, 1);
+      for (const q of hostSim.actors) { q.x = 300 + q.id * 5; q.z = 300; q.y = 0; } hostSim.gorillas.length = 0;
+      const r1 = hostSim.actors[2], bot = hostSim.actors[3];
+      r1.gold = true; r1.wield = "gold"; r1.lastKind = "ak"; bot.bot = true; bot.wield = ""; bot.lastKind = "net"; hostSim.actors[1].wield = "grab"; hostSim.actors[1].lastKind = "sniper";
+      const buf = new DataView(new ArrayBuffer(W.FRAME_MAX)), len = L.encode(hostSim, hmap, 1, 1, 1, buf), frame = new DataView(buf.buffer.slice(0, len));
+      const guest = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }); guest.gorillas.length = 0;
+      const ok = L.validFrame(frame, guest, gmap); L.decode(frame, guest, gmap, new Float32Array(16));
+      const onGuest = (seat) => guest.actors[gmap.toLocal[seat]];
+      const seen = { valid: ok, rival: onGuest(2).wield === "gold" && S.heldOf(onGuest(2)) === "gold", bot: onGuest(3).wield === "" && S.heldOf(onGuest(3)) === "net", lift: onGuest(1).wield === "grab" };
+      // Now the guest's page hosts: its own Ooga (the old seat 1, local 0) hooks the rival who has the AKs out.
+      const me = guest.actors[0], rv = onGuest(2);
+      for (const q of guest.actors) { q.guard = 0; q.bot = q !== me && q.bot; } me.x = 8; me.z = 9; rv.x = 8; rv.z = 3; me.hook = 1; guest.hooks[0].state = 1; guest.hooks[0].holder = 0; me.gold = false;
+      S.grapple(guest, 0, Math.PI, Math.atan2(1 - S.CONFIG.SHOT_Y, 6));
+      for (let i = 0; i < 120; i++) { for (const q of guest.actors) q.guard = 0; S.tick(guest, S.CONFIG.STEP, still()); }
+      seen.handover = me.gold && !rv.gold;
+      const sceneSrc = readFileSync(new URL("../src/js/scene-block.js", import.meta.url), "utf8");
+      seen.drawn = /const held = i === 0 \? tool : SIM\.heldOf\(s\) \|\| "paint"/.test(sceneSrc) && !/s\.lastKind \|\| "paint"/.test(sceneSrc);
+      // The results count seats by the round's own map, kept until the board shows again, never a page's own numbering.
+      seen.seats = /liveSeats = map;/.test(sceneSrc) && /const showBoard = \(\) => \{\s*liveSeats = null;/.test(sceneSrc) && /const seatOfActor = \(i\) => liveSeats \? liveSeats\.toSeat\[i\] : i;/.test(sceneSrc) && !/round\.map/.test(sceneSrc);
+      const tie = S.create({ team: "blue", seed: 4, size: 2, map: "town", prep: 0 }); tie.over = true; tie.winner = "blue"; for (const q of tie.actors) Object.assign(q, { captures: 1, rescues: 0, hits: 1 });
+      seen.sameMvp = hmap.toSeat[S.mvp(tie, (i) => hmap.toSeat[i])] === gmap.toSeat[S.mvp(tie, (i) => gmap.toSeat[i])] && hmap.toSeat[S.mvp(tie, (i) => hmap.toSeat[i])] === 0;
+      // The first waiter's Scoring pick goes to the match with their board's map, in a round as in the lobby.
+      seen.rule = /if \(firstRegistered\(\)\) round\.setOptions\(round\.match\.size, WIRE\.MAPS\.indexOf\(selection\.map\), WIRE\.RULES\.indexOf\(k\)\);\s*if \(boardInMatch\) return;/.test(sceneSrc);
+      seen.defaultMap = S.create().map === "town" || S.ARENA.id === "town";
+      record("block live held tools: the frame carries what each Ooga has in hand, a guest draws it and keeps a bot's last fired, a page that takes over hosts with it (a hook still takes AKs held out), the results count seats by the round's own map to the board (the same MVP on host and guest in a tie), the first waiter's Scoring pick is sent in a round, and a new sim is on Ooga Town",
+        Object.values(seen).every(Boolean), JSON.stringify(seen));
+    }
     const leftA = { ...match, seats: [10, 0, 30, 0] };
     A.tell(leftA); record("block live: a leaver's seat falls back to an NPC", a.actors[mv].bot === true);
     const handed = { ...match, seats: [0, 20, 30, 0], host: 20, epoch: 2 };
@@ -7377,7 +7831,7 @@ const gameRulesChecks = async () => {
       const good = new Uint8Array(LH.bins.at(-1)), corrupt = (fn) => { const c = good.slice(); fn(c); return new DataView(c.buffer); };
       const viewSim = S.create({ team: "blue", seed: 1, size: 2, map: "fort", prep: 0 });
       record("block live: a valid frame passes the hostile-frame check", L.validFrame(new DataView(good.buffer), viewSim, sameMap));
-      const bad = [corrupt(() => {}).buffer.slice(0, good.length - 3), corrupt(c => { c[W.FRAME_HEADER + 10] = 99; }).buffer, corrupt(c => { c[W.FRAME_HEADER + 21] = 200; }).buffer, corrupt(c => { c[good.length - 1] = 255; c[good.length - 11] = 200; }).buffer];
+      const bad = [corrupt(() => {}).buffer.slice(0, good.length - 3), corrupt(c => { c[W.FRAME_HEADER + 8] = 99; }).buffer, corrupt(c => { c[W.FRAME_HEADER + 14] = 200; }).buffer, corrupt(c => { c[good.length - 1] = 255; c[good.length - 11] = 200; }).buffer];
       record("block live: truncated frames, bad enums and bad counts are refused", bad.every(b => !L.validFrame(new DataView(b), viewSim, sameMap)));
       const before = viewSim.score.blue;
       record("block live: a refused frame leaves the sim untouched", viewSim.score.blue === before && viewSim.eventCount === 0);
@@ -7402,13 +7856,134 @@ const gameRulesChecks = async () => {
       record("block live: events the wire demands an actor for are only ever raised with a real Ooga", odd.length === 0, odd.join(","));
       const frameOf = (fix) => { const h = S.create({ team: "blue", seed: 1, size: 2, map: "fort", prep: 0 }), m = L.seatMap(2, 0), b = new DataView(new ArrayBuffer(W.FRAME_MAX)); fix(h); return new DataView(b.buffer.slice(0, L.encode(h, m, 1, 1, 1, b))); };
       const viewS = S.create({ team: "blue", seed: 1, size: 2, map: "fort", prep: 0 }), viewM = L.seatMap(2, 0);
-      const wallet = (state, owner, stuck) => (h) => { Object.assign(h.wallets[0], { live: true, state, owner, stuck, team: "blue", look: 0, x: 0, y: 0, z: 0, fuse: 1 }); };
       const event = (type, actor) => (h) => { h.eventCount = 1; Object.assign(h.events[0], { type, team: "blue", actor, by: -1, x: 0, y: 0, z: 0 }); };
-      record("block live: a frame naming no Ooga where one is required is refused; legal no-Ooga events pass", !L.validFrame(frameOf(wallet(0, -1, -1)), viewS, viewM) && !L.validFrame(frameOf(wallet(3, 0, -1)), viewS, viewM) && L.validFrame(frameOf(wallet(1, -1, -1)), viewS, viewM) && !L.validFrame(frameOf(event("pickup", -1)), viewS, viewM) && L.validFrame(frameOf(event("go", -1)), viewS, viewM));
+      record("block live: a frame naming no Ooga where one is required is refused; legal no-Ooga events pass", !L.validFrame(frameOf(event("pickup", -1)), viewS, viewM) && L.validFrame(frameOf(event("go", -1)), viewS, viewM));
       record("regression: Enter, Space and Play share one menu helper that does nothing from the chairs and leaves a live results screen for the shared menu", scene.includes('if (e.key === "Enter" && phase !== "play") beginFromMenu();') && scene.includes('return beginFromMenu();') && /beginFromMenu = \(\) => \{\s*if \(onDeck\(\)\) return false;\s*if \(phase === "results" && kept\) \{ showBoard\(\); return true; \}/.test(scene));
       record("regression: the zoom keys work from the chairs, ahead of the check that ends key handling outside play", scene.indexOf('if (onDeck()) { if (e.key === "+"') > 0 && scene.indexOf('if (onDeck()) { if (e.key === "+"') < scene.indexOf('if (phase !== "play" || e.repeat'));
       record("regression: the last frame's winning capture is heard before the reset, and a thrown event can't leave the queue full", /renderLive = \(m\) => \{[\s\S]{0,200}hearCaptures\(\)/.test(scene) && scene.includes("} finally { sim.eventCount = 0; }"));
       record("regression: chairs-full clears out of play and a no-room visit has no dead Register button", scene.includes("if (!play) chairsFull = false;") && scene.includes("el.watchReg.hidden = !round;"));
+    }
+    {
+      // Clanktown: its data, the miner walls, the Mainframe's decoys, the firewall's timing, the mirage and the bots' way round.
+      const CK = S.ARENAS.clank, C2 = S.CONFIG, step = C2.STEP, calm = (r) => { for (const g of r.gorillas) { g.state = 3; g.t = 1e9; } return r; };
+      const fresh = (opts = {}) => calm(S.create({ map: "clank", seed: 7, prep: 0, ...opts }));
+      const key = (b) => b.slice(0, 6).map((v) => v.toFixed(2)).join(), keys = new Set(CK.BLOCKS.map(key));
+      const mirrored = CK.BLOCKS.every((b) => keys.has(key([-b[1], -b[0], -b[3], -b[2], b[4], b[5]])));
+      const room = (t) => t === "blue" ? [-6.5, 6.5, 22.5, 33.5] : [-6.5, 6.5, -33.5, -22.5], inside = ([x0, x1, z0, z1], x, z, m = 0) => x > x0 - m && x < x1 + m && z > z0 - m && z < z1 + m;
+      const miners = CK.BLOCKS.filter((b) => (b[5] || 0) === 0 && Math.abs(b[4] - S.MINER_H) < 0.01);
+      const apex = 2 * C2.JUMP * C2.JUMP / (2 * C2.FALL);
+      record("clanktown map: listed in the rules, the wire and the board; mirrored; each block's stand inside its miner-walled server room",
+        S.MAPS.includes("clank") && W.MAPS[4] === "clank" && CK.name === "Clanktown" && mirrored && miners.length >= 12
+        && S.TEAMS.every((t) => inside(room(t), CK.stands[t].x, CK.stands[t].z)) && miners.every((b) => S.TEAMS.some((t) => inside(room(t), (b[0] + b[1]) / 2, (b[2] + b[3]) / 2, 0.1))),
+        JSON.stringify({ mirrored, miners: miners.length }));
+      // A double jump at the front wall, from a standing start right up against it, never gets over.
+      const jr = fresh(), ja = jr.actors[0];
+      for (const c of jr.crates) c.live = false;
+      for (const o of jr.actors) o.bot = false;
+      ja.x = 0; ja.z = 21.9; ja.y = 0;
+      let peak = 0;
+      S.tick(jr, step, { ...still(), z: 1, jump: 1 });
+      for (let t = 0; t < 1.6; t += step) { S.tick(jr, step, { ...still(), z: 1, jump: ja.vy < 0.5 && ja.jumps > 0 ? 1 : 0 }); peak = Math.max(peak, ja.y); }
+      record("clanktown miners: walls too tall for a double jump (the apex " + apex.toFixed(2) + " m under " + S.MINER_H + " m); a double jump against one stays outside",
+        S.MINER_H > apex + 0.6 && ja.z < 22.5 && peak < S.MINER_H, JSON.stringify({ peak: +peak.toFixed(2), z: +ja.z.toFixed(2) }));
+      // On foot there is always a way in: the rest flood from the side's start reaches the far stand's room, round
+      // through a side door; the zipline's end and the catapult's drop land inside the rival room; the walls keep
+      // clear of the stands, towers and ladders.
+      fresh();
+      const walk = (x, z) => { const p = S.restSpot(x, z); return Math.abs(p.x - x) < 0.3 && Math.abs(p.z - z) < 0.3; };
+      const routes = { blueRoom: walk(0, 25.5), blueDoor: walk(-7.6, 29.4), redRoom: walk(0, -25.5), redDoor: walk(7.6, -29.4), field: walk(0, 12) };
+      const zip = CK.zips.blue, drop = CK.drops.blue;
+      const shortcuts = inside(room("red"), zip.bx, zip.bz, 1) && inside(room("red"), drop[0], drop[1]);
+      const clear = miners.every((b) => S.TEAMS.every((t) => { const st = CK.stands[t], [x0, x1, z0, z1] = CK.towers[t]; return Math.hypot(Math.max(b[0], Math.min(st.x, b[1])) - st.x, Math.max(b[2], Math.min(st.z, b[3])) - st.z) > C2.STAND_R + 1 && (b[0] >= x1 || b[1] <= x0 || b[2] >= z1 || b[3] <= z0); }));
+      record("clanktown miners: a walking route into each server room by its side doors; the zipline and catapult land inside the rival room; the walls stay clear of stands and towers",
+        Object.values(routes).every(Boolean) && shortcuts && clear, JSON.stringify({ routes, shortcuts, clear }));
+      // The firewall: off while fortifying, then off 3.2 s, flickering 0.8 s, on 3 s, on the shared clock; never a block.
+      const fr = fresh(), seq = [];
+      for (let t = 0; t < 7; t += 0.25) { fr.time = t; seq.push(S.firewallState(fr)); }
+      const cycleOk = seq.join("") === "0000000000000111222222222222".slice(0, seq.length);
+      const prepped = S.create({ map: "clank", seed: 7 });
+      prepped.time = 5;
+      const offInPrep = S.firewallState(prepped) === 0;
+      const halves = CK.firewall.halves, gapAtMainframe = halves.every(([x0, x1]) => Math.min(Math.abs(x0), Math.abs(x1)) >= 1.6 + C2.BODY_R * 2) && halves[0][0] === -halves[1][1];
+      const notSolid = !S.solidAt(8, 1, 0) && !S.solidAt(-8, 1, 0);
+      record("clanktown firewall: on the clock, off while fortifying, a gap either side of the Mainframe, mirrored, and never a solid block", cycleOk && offInPrep && gapAtMainframe && notSolid, seq.join(""));
+      const zapAt = (fix) => { const r = fresh(); for (const o of r.actors) o.bot = false; const a = r.actors[0]; a.x = 8; a.z = 0.3; a.y = 0; a.guard = 0; fix(r, a); S.tick(r, step, still()); return a.splat > 0; };
+      const zap = { on: zapAt((r) => { r.time = 5.5; }), off: !zapAt((r) => { r.time = 1; }), over: !zapAt((r, a) => { r.time = 5.5; a.y = 2.6; a.grounded = false; }), riding: !zapAt((r, a) => { r.time = 5.5; a.flight = 2; a.y = 1; }), gap: !zapAt((r, a) => { r.time = 5.5; a.x = 2.2; }) };
+      record("clanktown firewall: touched while on it splats as paint does; off, over its top, under a parachute or in the gap it doesn't", Object.values(zap).every(Boolean), JSON.stringify(zap));
+      // The decoys: 2 or 3 of each colour, turned pairs, on walkable ground, never at a stand; a touch glitches one and
+      // staggers the toucher, the real blocks untouched; untouched ones fade.
+      const dr = fresh(), real0 = JSON.stringify(dr.flags);
+      for (const o of dr.actors) { o.bot = false; o.x = 0; o.z = 0.6; }
+      dr.halluT = step / 2; dr.actors[0].x = 30; dr.actors[0].z = 0;
+      S.tick(dr, step, still());
+      const live = dr.decoys.filter((d) => d.live), red = live.filter((d) => d.team === "red"), blue = live.filter((d) => d.team === "blue");
+      const pairs = red.length >= 2 && red.length <= 3 && blue.length === red.length && red.every((d) => blue.some((b) => Math.abs(b.x + d.x) < 0.6 && Math.abs(b.z + d.z) < 0.6));
+      const placed = live.every((d) => S.TEAMS.every((t) => Math.hypot(d.x - CK.stands[t].x, d.z - CK.stands[t].z) > C2.STAND_R + 2) && walk(d.x, d.z));
+      const d0 = red[0], toucher = dr.actors[0];
+      toucher.x = d0.x; toucher.z = d0.z; toucher.y = 0; toucher.grounded = true;
+      dr.eventCount = 0; S.tick(dr, step, still());
+      let glitched = false;
+      for (let i = 0; i < dr.eventCount; i++) if (dr.events[i].type === "glitch") glitched = true;
+      const touched = glitched && !d0.live && toucher.knock > 0 && !toucher.carrying && JSON.stringify(dr.flags) === real0;
+      for (let t = 0; t < C2.DECOY_S + 0.5; t += step) S.tick(dr, step, still());
+      const faded = dr.decoys.every((d) => !d.live) && JSON.stringify(dr.flags) === real0;
+      record("clanktown decoys: 2 or 3 of each side's block in turned pairs on open ground, away from the stands; a touch glitches one and staggers, the real blocks untouched; the rest fade",
+        pairs && placed && touched && faded, JSON.stringify({ red: red.length, blue: blue.length, pairs, placed, touched, faded }));
+      // Bots fall for decoys by skill: easy ones often, experts rarely.
+      const fooledBy = (skill) => { let n = 0, of = 0; for (let seed = 1; seed <= 30; seed++) { const r = calm(S.create({ map: "clank", seed, prep: 0, skill, size: 3 })); r.halluT = step / 2; S.tick(r, step, still()); for (const a of r.actors) if (a.bot) { of++; if (a.fooled >= 0) n++; } } return n / of; };
+      const rates = { easy: fooledBy("easy"), expert: fooledBy("expert") };
+      record("clanktown decoys: bots fall for them by skill, easy ones far more often than experts", rates.easy > 0.5 && rates.expert < 0.2 && rates.easy > rates.expert * 3, JSON.stringify(rates));
+      // The mirage: round the middle, the same for both sides; a bot taken in only changes where it runs.
+      const mirror = [[0, 4], [3, -7], [8.5, 1], [-12, 0], [5, 9]].every(([x, z]) => S.inMirage(x, z, CK) === S.inMirage(-x, -z, CK)) && S.inMirage(0, 3, CK) && !S.inMirage(0, 12, CK) && !S.inMirage(0, 3, S.ARENAS.fort);
+      const mr = calm(S.create({ map: "clank", seed: 4, prep: 0, skill: "easy" })), bot = mr.actors[1], real1 = JSON.stringify(mr.flags);
+      let taken = 0;
+      for (let k = 0; k < 40; k++) { bot.x = 0; bot.z = 3.5; bot.inMirage = false; bot.mirageCool = 0; bot.mirageT = 0; mr.time = 1; S.tick(mr, step, still()); if (bot.mirageT > 0) taken++; }
+      record("clanktown mirage: round the Mainframe, mirrored, none on other maps; an easy bot is taken in by phantoms there without touching a real block",
+        mirror && taken > 10 && JSON.stringify(mr.flags) === real1, JSON.stringify({ mirror, taken }));
+      // The phantoms are the page's own: the scene never writes the shared sim from the mirage.
+      const sceneSrc = await readFile(new URL("../src/js/scene-block.js", import.meta.url), "utf8"), mir = sceneSrc.slice(sceneSrc.indexOf("const poseMirage = "), sceneSrc.indexOf("// The gorillas follow the sim"));
+      record("clanktown mirage: phantoms and the drift live in the scene alone, gated on being inside the zone, and never write the shared sim",
+        mir.length > 500 && /SIM\.inMirage\(me\.x, me\.z\)/.test(mir) && !/\bsim\.[a-zA-Z]+(\[[^\]]+\])?(\.[a-zA-Z]+)?\s*=[^=]/.test(mir) && !/SIM\.(fire|drop|pass|tick|step|grab|escape)\(/.test(mir));
+      // The bots find the way: an attacker alone walks from its room, round the rival room to a side door, takes the
+      // block and brings it home, timing the firewall.
+      // (There is no 1v1: the smallest round is two a side, so its teammate and both rivals stand aside.)
+      const br = fresh({ size: 2 }), att = br.actors[0], aside = () => { for (const q of br.actors) if (q !== att) { q.x = 20 + q.id * 2; q.z = -36; q.vx = q.vz = 0; } };
+      att.bot = "auto"; for (const q of br.actors) if (q !== att) q.bot = false; aside();
+      let zaps = 0;
+      for (let t = 0; t < 150 && !br.score.blue; t += step) { S.tick(br, step, still()); aside(); for (let i = 0; i < br.eventCount; i++) if (br.events[i].type === "zap") zaps++; br.eventCount = 0; }
+      record("clanktown bots: an attacker walks round to the rival room's door, takes the block, brings it home and scores, timing the firewall", br.score.blue === 1 && zaps <= 1, JSON.stringify({ score: br.score, t: Math.round(br.time), zaps }));
+      // Live: the decoys ride the frame.
+      const lh = fresh({ size: 2 }), lm = L.seatMap(2, 0), buf = new DataView(new ArrayBuffer(W.FRAME_MAX));
+      Object.assign(lh.decoys[0], { live: true, team: "red", x: 5, z: 7 }); Object.assign(lh.decoys[4], { live: true, team: "blue", x: -5, z: -7 });
+      const fr2 = new DataView(buf.buffer.slice(0, L.encode(lh, lm, 1, 1, 1, buf))), guest = fresh({ size: 2 }), next = new Float64Array(16);
+      const okFrame = L.validFrame(fr2, guest, lm);
+      L.decode(fr2, guest, lm, next);
+      record("clanktown live: the decoys ride the host's frame, colour and place", okFrame && guest.decoys[0].live && guest.decoys[0].team === "red" && Math.abs(guest.decoys[0].x - 5) < 0.05 && guest.decoys[4].team === "blue" && !guest.decoys[1].live);
+      const tail = lh.hooks.length * 8 + lh.traps.length + lh.caches.length + lh.peels.length + lh.puddles.length + lh.powers.length * 2 + 1;
+      const waveAt = fr2.byteLength - tail - lh.decoys.length * 8 - 1;
+      const malformed = [[waveAt, 255], [waveAt + 1, 3], [waveAt + 8, 255]].map(([at, value]) => {
+        const bad = new DataView(fr2.buffer.slice(0)); bad.setUint8(at, value); return !L.validFrame(bad, guest, lm);
+      });
+      record("clanktown live: malformed wave timers, decoy teams and lifetimes are refused before decode", malformed.every(Boolean));
+      // A real client handover must keep live decoys and the next wave's timer, rather than expiring them on the first tick.
+      const ch = session(10, "clank"), cg = session(20, "clank"), cm = { ...match, map: W.MAPS.indexOf("clank"), tag: 701 };
+      ch.tell(cm); cg.tell(cm);
+      const hs = ch.seen.sim; hs.halluT = 12.5;
+      Object.assign(hs.decoys[0], { live: true, team: "red", x: 5, y: 0, z: 7, t: 4.2 });
+      ch.live.after(.2, still()); cg.frame(ch.bins.at(-1));
+      cg.tell({ ...cm, host: 20, epoch: 2 });
+      const gs = cg.seen.sim;
+      for (const a of gs.actors) a.bot = false;
+      for (const g of gs.gorillas) { g.state = 3; g.t = 100; }
+      const continued = cg.live.role === "host" && gs.decoys[0].live && gs.decoys[0].t === 4.2 && gs.halluT === 12.5;
+      S.tick(gs, step, still());
+      const held = gs.decoys[0].live && gs.decoys[0].t > 4.1 && gs.halluT > 12.4;
+      for (let t = 0; t < 4.3; t += step) S.tick(gs, step, still());
+      record("regression: Clanktown host migration preserves decoy lifetimes and the next wave, then expires them on schedule",
+        continued && held && !gs.decoys[0].live && gs.halluT > 8, JSON.stringify({continued, held, live:gs.decoys[0].live, next:gs.halluT}));
+      ch.live.dispose(); cg.live.dispose();
+      // Leave the rules pointed at Fort Chaos again, as the checks after this read `S.ARENA` before making their own round.
+      S.create({ map: "fort" });
     }
     const wentTo = []; L.openWatchDeck((scene, place) => wentTo.push(scene, place));
     const idle = session(50); idle.tell({ phase: "empty" }); idle.live.after(0.2, still());
@@ -7494,10 +8069,9 @@ const gameRulesChecks = async () => {
     // own side carries it back, a quiz trap that holds and protects until answered, a net that slows and grounds, a
     // crate pushed by walking into it, and three captures deciding the round. Nothing here repeats a formula.
     const S = BL.blockSim, A = S.ARENA, still = { x: 0, z: 0, sprint: 0, jump: 0 };
-    const sim = S.create({ team: "blue", seed: 7, prep: 0 });
+    const sim = S.create({ map: "fort", team: "blue", seed: 7, prep: 0 });
     for (const a of sim.actors) if (a.id) a.bot = false;
     // Still air, so nothing drifts.
-    Object.assign(sim.weather, { left: 1e9 });
     const me = sim.actors[0], put = (a, x, z) => { a.x = x; a.z = z; S.tick(sim, S.CONFIG.STEP, still); };
     const theirs = A.stands.red, mine = A.stands.blue;
     put(me, theirs.x, theirs.z);
@@ -7508,12 +8082,16 @@ const gameRulesChecks = async () => {
     put(me, theirs.x + 4, theirs.z);
     put(me, sim.flags.red.x, sim.flags.red.z);
     const regrab = me.carrying === "red";
+    // The feed and notices tell a carry from a throw by the event's y: 0 for a carry.
+    const carried = (type) => { for (let i = 0; i < sim.eventCount; i++) if (sim.events[i].type === type) return sim.events[i].y === 0; return false; };
     sim.flags.blue.state = "carried"; sim.flags.blue.carrier = 2;
+    sim.eventCount = 0;
     put(me, mine.x, mine.z);
-    const noScoreAway = sim.score.blue === 0 && me.carrying === "red";
+    const noScoreAway = sim.score.blue === 0 && me.carrying === "red" && carried("waiting");
     sim.flags.blue.state = "home"; sim.flags.blue.carrier = null;
+    sim.eventCount = 0;
     put(me, mine.x + 0.2, mine.z);
-    const scored = sim.score.blue === 1 && sim.flags.red.state === "home" && !me.carrying;
+    const scored = sim.score.blue === 1 && sim.flags.red.state === "home" && !me.carrying && carried("capture");
     put(me, theirs.x, theirs.z);
     put(me, theirs.x + 4, theirs.z + 3);
     const rival = sim.actors[2];
@@ -7550,7 +8128,6 @@ const gameRulesChecks = async () => {
     // A pass: the carrier throws the block ahead and a teammate down the line catches it.
     const mate = sim.actors[1];
     S.reset(sim); sim.prep = 0;
-    Object.assign(sim.weather, { left: 1e9 });
     put(me, theirs.x, theirs.z);
     me.x = -16.5; me.z = 14; me.y = 0; mate.x = -16.5; mate.z = 24; mate.y = 0;
     const threw = S.pass(sim, 0, 0) && sim.flags.red.state === "flying";
@@ -7571,12 +8148,242 @@ const gameRulesChecks = async () => {
     record("block frenzy rules: pickup, a drop held until you step out, scoring only with your own block home, a splat drops the carrier's block, which stays until its side touches it home, a quiz trap holds and shields, a net slows and grounds, a crate pushes, a pass is caught, a crate stacks and a thrown one stuns",
       picked && dropped && held && regrab && noScoreAway && scored && splatted && stays && rescued && returned && trapped && frozen && shielded && freed && netted && pushed && caught && bonked,
       JSON.stringify({ picked, dropped, held, regrab, noScoreAway, scored, splatted, stays, rescued, returned, trapped, frozen, shielded, freed, netted, pushed, caught, lifted, stacked, bonked }));
+    {
+      // A throw home: the rivals' block coming down in the thrower's capture zone is a capture for the thrower, on the
+      // same terms as carrying it in. `lob` throws through `pass`, then sets where the block comes down from.
+      const C = S.CONFIG, R2 = (e, c) => Math.hypot(e.x - c.x, e.z - c.z);
+      const fresh = (map, target = C.CAPTURES) => {
+        const r = S.create({ team: "blue", seed: 7, prep: 0, map, target });
+        r.actors.forEach((a, i) => { a.bot = false; a.x = i * 2 - 3; a.z = 0; a.y = 0; });
+        return r;
+      };
+      const settle = (r, more = 0) => {
+        const seen = [];
+        const look = () => { S.tick(r, C.STEP, still); for (let i = 0; i < r.eventCount; i++) seen.push({ ...r.events[i] }); r.eventCount = 0; };
+        for (let t = 0; t < 3 && (r.flags.red.state === "flying" || r.flags.blue.state === "flying"); t += C.STEP) look();
+        for (let t = 0; t < more; t += C.STEP) look();
+        return seen;
+      };
+      const hold = (r, id, team) => { const f = r.flags[team]; f.state = "carried"; f.carrier = id; r.actors[id].carrying = team; return f; };
+      const lob = (r, id, team, x, z, y = 0.8, vx = 0, vz = 0) => {
+        const f = hold(r, id, team);
+        r.eventCount = 0;
+        S.pass(r, id, 0);
+        f.x = x; f.y = y; f.z = z; f.vx = vx; f.vy = 0; f.vz = vz;
+        return settle(r);
+      };
+      const scoredBy = (r, seen, id, team, c, radius) => {
+        const e = seen.find((k) => k.type === "capture"), a = r.actors[id];
+        return !!e && e.actor === id && e.team === team && e.y === 1 && R2(e, c) < radius && r.score[team] === 1 && a.captures === 1 && a.gold && r.goldLeft === C.GOLD_GUNS - 1 &&
+          r.actors.every((k) => k === a || k.captures === 0) && r.flags.red.state === "home" && r.flags.blue.state === "home" && r.flags.red.thrower === -1 && !seen.some((k) => k.type === "landed");
+      };
+      const noScore = (r, f) => r.score.blue === 0 && r.score.red === 0 && r.actors.every((k) => k.captures === 0) && f.state === "dropped";
+      const rows = {};
+      for (const map of S.MAPS) {
+        const I = S.ARENAS[map], blue = I.stands.blue, red = I.stands.red, row = rows[map] = {};
+        let r = fresh(map), seen = lob(r, 1, "red", blue.x + 0.5, blue.z);
+        row.stand = scoredBy(r, seen, 1, "blue", blue, C.STAND_R);
+        r = fresh(map); seen = lob(r, 2, "blue", red.x - 0.5, red.z);
+        row.redStand = scoredBy(r, seen, 2, "red", red, C.STAND_R);
+        r = fresh(map); seen = lob(r, 1, "red", blue.x + C.STAND_R - 0.05, blue.z);
+        row.justInside = r.score.blue === 1;
+        r = fresh(map); seen = lob(r, 1, "red", blue.x + C.STAND_R + 0.05, blue.z);
+        row.justOutside = noScore(r, r.flags.red) && !seen.some((k) => k.type === "capture") && seen.some((k) => k.type === "landed");
+        // Your own block away: no score, the block lies there, and the thrower is told.
+        r = fresh(map);
+        const away = S.restSpot(10, 10), clear = r.actors.every((k) => Math.hypot(k.x - away.x, k.z - away.z) > C.PICK_R * 2);
+        Object.assign(r.flags.blue, { state: "dropped", x: away.x, z: away.z, y: 0 });
+        seen = lob(r, 1, "red", blue.x + 0.5, blue.z);
+        row.ownAway = clear && r.flags.blue.state === "dropped" && noScore(r, r.flags.red) && seen.some((k) => k.type === "waiting" && k.actor === 1 && k.team === "blue" && k.y === 1) && seen.some((k) => k.type === "landed");
+        // The alternate rule permits exactly the same throw with the team's own block away.
+        r = fresh(map); r.anyTime = true;
+        Object.assign(r.flags.blue, { state: "dropped", x: away.x, z: away.z, y: 0 });
+        seen = lob(r, 1, "red", blue.x + 0.5, blue.z);
+        row.anyTime = scoredBy(r, seen, 1, "blue", blue, C.STAND_R) && !seen.some(k => k.type === "waiting");
+        // A side's own block, into the rivals' zone or its own.
+        r = fresh(map); lob(r, 0, "blue", red.x + 0.5, red.z);
+        row.ownBlockThere = noScore(r, r.flags.blue);
+        r = fresh(map); seen = lob(r, 0, "blue", blue.x + 0.5, blue.z);
+        row.ownBlockHome = noScore(r, r.flags.blue) && !seen.some((k) => k.type === "waiting");
+        // The rivals' block landing in the rivals' own zone is no capture for the thrower either.
+        r = fresh(map); lob(r, 1, "red", red.x + 0.5, red.z);
+        row.theirZone = noScore(r, r.flags.red);
+      }
+      // A map with its own scoring spot counts there as well as at the stand, to `GOAL_R`, and not on the roof over a stand.
+      const H = S.ARENAS.haunted, goal = H.goals.blue, stand = H.stands.blue;
+      let r = fresh("haunted"), seen = lob(r, 1, "red", goal.x + 0.5, goal.z);
+      const goalSpot = scoredBy(r, seen, 1, "blue", goal, C.GOAL_R);
+      r = fresh("haunted"); lob(r, 1, "red", goal.x + C.GOAL_R - 0.05, goal.z);
+      const goalInside = r.score.blue === 1;
+      r = fresh("haunted"); lob(r, 1, "red", goal.x + C.GOAL_R + 0.05, goal.z);
+      const goalOutside = noScore(r, r.flags.red);
+      r = fresh("haunted"); lob(r, 1, "red", stand.x, stand.z, 3.2);
+      const roof = noScore(r, r.flags.red);
+      // Struck cover inside the zone: at 6 m/s it would have flown past the ring, but it falls where it hit.
+      // The rebuilt house leaves the ring clear, so place real buildable cover instead of relying on an old wall.
+      r = fresh("haunted");
+      Object.assign(r.actors[0], { x: goal.x, z: goal.z + 0.6, y: 0, grounded: true, flight: 0 });
+      const builtCover = S.build(r, 0, 0);
+      Object.assign(r.actors[0], { x: -3, z: 0 });
+      S.tick(r, C.STEP, still);
+      let wall = null;
+      for (let k = 0; k < 72 && !wall; k++) for (let d = 1; d < C.GOAL_R - 0.1 && !wall; d += 0.05) {
+        const th = k / 72 * Math.PI * 2;
+        if (S.solidAt(goal.x + Math.sin(th) * d, 0.65, goal.z + Math.cos(th) * d)) wall = { th, d };
+      }
+      seen = wall ? lob(r, 1, "red", goal.x + Math.sin(wall.th) * (wall.d - 0.6), goal.z + Math.cos(wall.th) * (wall.d - 0.6), 0.7, Math.sin(wall.th) * 6, Math.cos(wall.th) * 6) : [];
+      const hit = seen.find((k) => k.type === "capture"), offWall = builtCover && !!wall && !!hit && r.score.blue === 1 && Math.abs(R2(hit, goal) - wall.d) < 0.15;
+      // A real arc through `pass` alone, from just the throw's range out, in by the gate.
+      const arcFrom = (r) => { const a = r.actors[1], s = S.ARENAS.fort.stands.blue; a.x = s.x; a.z = s.z - 13.7; a.y = 0; a.vx = a.vz = 0; hold(r, 1, "red"); r.eventCount = 0; return S.pass(r, 1, 0); };
+      r = fresh("fort");
+      const arcThrew = arcFrom(r); seen = settle(r);
+      const arc = arcThrew && scoredBy(r, seen, 1, "blue", S.ARENAS.fort.stands.blue, C.STAND_R);
+      // Caught short of the zone: the catcher carries it, and the throw scores nothing.
+      r = fresh("fort"); arcFrom(r);
+      const catcher = r.actors[0], fs = S.ARENAS.fort.stands.blue; catcher.x = fs.x; catcher.z = fs.z - 2.6;
+      for (let t = 0; t < 1.5 && r.flags.red.state === "flying"; t += C.STEP) S.tick(r, C.STEP, still);
+      const caught = catcher.carrying === "red" && r.flags.red.state === "carried" && r.score.blue === 0 && r.actors[1].captures === 0;
+      // A block off a hook's rope never lands as a throw: on the rope it doesn't fall, a promoted host forgets any thrower.
+      r = fresh("fort");
+      const hooked = hold(r, 1, "red"), bs = S.ARENAS.fort.stands.blue;
+      S.pass(r, 1, 0); hooked.x = bs.x; hooked.y = 0.8; hooked.z = bs.z; hooked.vx = hooked.vy = hooked.vz = 0; hooked.hookedBy = 1;
+      for (let t = 0; t < 0.5; t += C.STEP) S.tick(r, C.STEP, still);
+      const onRope = hooked.state === "flying" && r.score.blue === 0;
+      hooked.hookedBy = -1; S.settleHooks(r); settle(r);
+      const offRope = noScore(r, hooked);
+      // Three throws home end the round, for the thrower's side, with a Golden AK only the first time.
+      r = fresh("fort");
+      let ended = true;
+      for (let n = 1; n <= C.CAPTURES; n++) { seen = lob(r, 1, "red", bs.x, bs.z); ended = ended && r.score.blue === n && r.over === (n === C.CAPTURES) && seen.some((k) => k.type === "win") === (n === C.CAPTURES); }
+      ended = ended && r.winner === "blue" && r.actors[1].captures === C.CAPTURES && r.actors[1].gold && r.goldLeft === C.GOLD_GUNS - r.actors.filter((k) => k.gold).length && !r.actors.some((k) => k.gold && k.team !== "blue");
+      const out = { goalSpot, goalInside, goalOutside, roof, offWall, arc, caught, onRope, offRope, ended };
+      record("block frenzy throw home: a rival block landing in the thrower's zone scores and credits the thrower at every map's stand and a map's own spot, off a wall too; with your own block away only under the alternate rule, never for a side's own block, just outside, on a roof, caught or off a hook; and it ends the round",
+        Object.values(out).every(Boolean) && Object.values(rows).every((v) => Object.values(v).every(Boolean)), JSON.stringify({ out, rows }));
+    }
+    {
+      // A loose block lies on what it came down onto, never under it. On every map, over every floating slab (a cave's
+      // roof, a hut's or the deck's floor, a tower's platform): a block coming down onto it, and one let go by a
+      // carrier standing on it, lies on that slab's top where a body can stand (or, on a top above the loose-block placement limit,
+      // on open ground beside it and not underneath); a block thrown up into it from underneath never gets over it and
+      // falls back to where it was thrown from. On a cave's roof on every map: a body coming down stands on it, a real
+      // throw from the air lands on it, a carrier splatted up there leaves the block up there, a bot fetches it from
+      // there, and a real throw inside the tunnel stays in the cave. A block on a crate falls when the crate is lifted.
+      const roofStats = {}, roofFails = [];
+      for (const map of S.MAPS) {
+        const r = S.create({ team: "blue", seed: 7, prep: 0, map });
+        for (const a of r.actors) a.bot = false;
+        for (const g of r.gorillas) { g.state = 3; g.t = 1e9; }
+        S.tick(r, S.CONFIG.STEP, still);
+        const M = S.ARENA, f = r.flags.red, body = r.actors[0], count = roofStats[map] = { slabs: 0, caves: 0, under: 0, high: 0, fetch: 0 };
+        // The lowest floating bottom over a point, read off the map's own boxes: what a block there would have fallen through.
+        const lowest = (x, z) => M.BLOCKS.reduce((low, b) => b[5] > 0 && x > b[0] && x < b[1] && z > b[2] && z < b[3] ? Math.min(low, b[5]) : low, Infinity);
+        const park = () => { for (const a of r.actors) Object.assign(a, { x: 0.25 + a.id * 0.9, z: a.team === "blue" ? M.spawnZ : -M.spawnZ, y: 0, vx: 0, vy: 0, vz: 0, carrying: null, grounded: true, splat: 0, guard: 0, blocked: null }); };
+        const fly = (x, y, z, vy) => {
+          park();
+          Object.assign(f, { state: "flying", x, y, z, vx: 0, vy, vz: 0, carrier: null, thrower: -1, t: 0, hookedBy: -1 });
+          let peak = y;
+          for (let t = 0; t < 4 && f.state === "flying"; t += S.CONFIG.STEP) { S.tick(r, S.CONFIG.STEP, still); peak = Math.max(peak, f.y); }
+          return peak;
+        };
+        const fail = (what, b) => { if (roofFails.length < 4) roofFails.push(`${map} ${what} [${b.join(",")}] -> ${f.state} ${f.x.toFixed(2)},${f.y},${f.z.toFixed(2)}`); };
+        // Lying on the slab `b` where a body stands, or off a top too high to reach and not under it.
+        const stand = { x: 0, y: 0, z: 0, crouch: false };
+        const rests = (b) => {
+          if (f.state !== "dropped") return false;
+          if (b[4] > S.CONFIG.LOOSE_TOP) return f.y === 0 && lowest(f.x, f.z) >= b[4];
+          Object.assign(stand, { x: f.x, y: f.y, z: f.z });
+          S.resolve(stand, S.CONFIG.BODY_R * 0.95);
+          return f.y === b[4] && f.x >= b[0] && f.x <= b[1] && f.z >= b[2] && f.z <= b[3] && stand.x === f.x && stand.z === f.z;
+        };
+        let caveRoof = null;
+        for (const b of M.BLOCKS) {
+          if (!(b[5] > 0) || b[1] - b[0] < 1 || b[3] - b[2] < 1) continue;
+          const x = (b[0] + b[1]) / 2, z = (b[2] + b[3]) / 2, top = b[4];
+          if (S.groundAt(x, z, 99, 0.2) !== top) continue;
+          count.slabs++;
+          if (top > S.CONFIG.LOOSE_TOP) count.high++;
+          if (M.rockKind.get(b) === "cave") { count.caves++; caveRoof = caveRoof || b; }
+          // Coming down onto it.
+          fly(x, top + 2, z, 0);
+          if (!rests(b)) fail("landing", b);
+          // Let go by a carrier standing on it.
+          park();
+          Object.assign(body, { x, z, y: top, carrying: "red" });
+          Object.assign(f, { state: "carried", carrier: 0 });
+          if (!S.drop(r, 0) || !rests(b)) fail("drop", b);
+          // Thrown up into it from the ground underneath, where there is ground to stand on.
+          const at = S.restSpot(x, z);
+          if (at.x !== x || at.z !== z || b[5] > 2.5 || lowest(x, z) !== b[5]) continue;
+          count.under++;
+          const peak = fly(x, 1.6, z, S.CONFIG.PASS_LIFT);
+          if (!(f.state === "dropped" && f.x === x && f.z === z && f.y === 0 && peak < top)) fail("from under", b);
+        }
+        // A body coming down on a cave's roof stands on it.
+        const x = (caveRoof[0] + caveRoof[1]) / 2, z = (caveRoof[2] + caveRoof[3]) / 2, top = caveRoof[4];
+        park();
+        Object.assign(body, { x, z, y: top + 2, grounded: false });
+        for (let i = 0; i < 180; i++) S.tick(r, S.CONFIG.STEP, still);
+        if (!(body.grounded && body.y === top)) fail("body y " + body.y, caveRoof);
+        // A real throw from the air beside the roof, across it: the block comes down on the roof and lies there.
+        park();
+        Object.assign(body, { x, z: caveRoof[2] - 1.5, y: top + 1.5, grounded: false, carrying: "red" });
+        Object.assign(f, { state: "carried", carrier: 0 });
+        const span = caveRoof[3] - caveRoof[2], lift = S.CONFIG.PASS_LIFT, g = S.CONFIG.PASS_GRAVITY, air = (lift + Math.sqrt(lift * lift + 2 * g * 3.1)) / g;
+        const thrown = S.pass(r, 0, 0);
+        // Slowed so it comes down mid-roof whatever the roof's length.
+        f.vz = (1.5 + span / 2 - 0.6) / air;
+        body.y = 0; body.x = 0.25; body.z = M.spawnZ; body.grounded = true;
+        for (let t = 0; t < 4 && f.state === "flying"; t += S.CONFIG.STEP) S.tick(r, S.CONFIG.STEP, still);
+        if (!(thrown && rests(caveRoof))) fail("throw", caveRoof);
+        // A carrier splatted on the roof by a rival beside them leaves the block on the roof.
+        park();
+        const rival = r.actors.find((a) => a.team === "red");
+        Object.assign(body, { x, z, y: top, carrying: "red" });
+        Object.assign(f, { state: "carried", carrier: 0 });
+        Object.assign(rival, { x, z: z - 0.9, y: top, cooldown: 0 });
+        S.tick(r, S.CONFIG.STEP, still);
+        S.fire(r, rival.id, 0);
+        for (let t = 0; t < 1 && body.splat <= 0; t += S.CONFIG.STEP) S.tick(r, S.CONFIG.STEP, still);
+        if (!(body.splat > 0 && !body.carrying && rests(caveRoof))) fail("splat " + body.splat, caveRoof);
+        // A bot on the field beside the cave fetches it from the roof: up on the jetpack and onto the block.
+        fly(x, top + 2, z, 0);
+        const bot = r.actors[1];
+        Object.assign(bot, { x: x - Math.sign(x) * 9, z, bot: true, role: "attack" });
+        let took = 0;
+        for (; took < 30 && f.state !== "carried"; took += S.CONFIG.STEP) S.tick(r, S.CONFIG.STEP, still);
+        count.fetch = Math.round(took);
+        if (!(f.state === "carried" && f.carrier === bot.id)) fail("bot fetch, bot at " + [bot.x, bot.y, bot.z].map((v) => v.toFixed(1)), caveRoof);
+        bot.bot = false;
+        // A real throw down the flank tunnel from inside it: the ceiling stops it and it stays in the cave.
+        const spot = M.hookSpots.find((h) => h[1] === 0 && lowest(h[0], h[2]) === 2.5 && h[0] > M.fieldW);
+        park();
+        Object.assign(body, { x: spot[0], z: spot[2] - 4, y: 0, carrying: "red" });
+        Object.assign(f, { state: "carried", carrier: 0 });
+        const inside = S.pass(r, 0, 0);
+        body.x = 0.25; body.z = M.spawnZ;
+        let peak = 0;
+        for (let t = 0; t < 4 && f.state === "flying"; t += S.CONFIG.STEP) { S.tick(r, S.CONFIG.STEP, still); peak = Math.max(peak, f.y); }
+        if (!(inside && f.state === "dropped" && f.y === 0 && peak < top && lowest(f.x, f.z) === 2.5 && f.z > spot[2] - 4)) fail("in cave peak " + peak, caveRoof);
+        // On the top crate of one of the map's own stacks the block lies on the crate; lift the crate and it falls to
+        // what was under it.
+        const crate = r.crates.find((c) => c.live && !r.crates.some((o) => o.live && o !== c && o.x === c.x && o.z === c.z && o.y > c.y));
+        fly(crate.x, crate.y + S.CONFIG.CRATE_H + 2, crate.z, 0);
+        const on = f.state === "dropped" && f.y === crate.y + S.CONFIG.CRATE_H && f.x === crate.x && f.z === crate.z;
+        Object.assign(body, { x: crate.x, z: crate.z - 1.3, y: crate.y });
+        const lifted = S.grab(r, 0, 0);
+        body.x = 0.25; body.z = M.spawnZ; body.y = 0;
+        for (let t = 0; t < 2 && (f.state === "flying" || f.y > crate.y); t += S.CONFIG.STEP) S.tick(r, S.CONFIG.STEP, still);
+        if (!(on && lifted && f.state === "dropped" && f.y === crate.y)) fail("crate on " + on + " lifted " + lifted, [crate.x, crate.y, crate.z]);
+        body.holding = false;
+      }
+      record("block frenzy roofs: on every map a block landing on, or dropped on, a cave's roof, a floor or a platform lies on it and never underneath, one thrown up from underneath falls back, a body stands on the same roof, a splatted carrier leaves the block up there, a bot fetches it from a cave's roof, and a block on a lifted crate falls",
+        !roofFails.length && S.MAPS.every((m) => roofStats[m].caves > 0 && roofStats[m].under > 0), JSON.stringify({ roofStats, roofFails }));
+    }
     // An expert that loses its crate target must free its hands so it can rescue a block.
     const expertFixture = () => {
-      const r = S.create({ skill: "expert", prep: 0 }), bot = r.actors[1];
+      const r = S.create({ map: "fort", skill: "expert", prep: 0 }), bot = r.actors[1];
       for (const actor of r.actors) { actor.bot = false; actor.x = 18; actor.z = -35; }
       Object.assign(bot, { x: 0, z: 20, y: 0, bot: true });
-      Object.assign(r.weather, { left: 1e9 });
       const lifted = S.grab(r, bot.id, 0);
       Object.assign(r.flags.blue, { state: "dropped", x: 0, z: 20, y: 0, carrier: null });
       const advance = (seconds) => { for (let n = 0; n < Math.round(seconds / S.CONFIG.STEP); n++) S.tick(r, S.CONFIG.STEP, { ...still }); };
@@ -7591,7 +8398,6 @@ const gameRulesChecks = async () => {
       // still stands on the ground; both measured through the sim's own ticks.
       const jungle = S.create({ team: "blue", seed: 7, prep: 0, map: "jungle" });
       for (const a of jungle.actors) if (a.id) a.bot = false;
-      Object.assign(jungle.weather, { left: 1e9 });
       const tree = S.ARENA.decor.find((d) => d.kind === "canopy" && !d.middle), j = jungle.actors[0];
       for (const a of jungle.actors) if (a.id) { a.x = 20; a.z = a.team === "blue" ? 34 : -34; }
       Object.assign(j, { x: tree.x + 0.9, z: tree.z + 0.4, y: tree.y + S.LEAF_TOP + 3, vx: 0, vz: 0, vy: 0, grounded: false });
@@ -7604,6 +8410,77 @@ const gameRulesChecks = async () => {
       const open = !S.solidAt(tree.x + 0.9, tree.y + S.LEAF_TOP - 0.1, tree.z + 0.4) && !S.solidAt(tree.x + 0.9, tree.y + S.LEAF_TOP + 0.5, tree.z + 0.4);
       record("block frenzy jungle: an Ooga coming down on a tree lands on its leaves' top, one under the leaves stands on the ground, and the top stops nobody rising through it",
         landed.grounded && Math.abs(landed.y - landed.top) < 0.05 && under < 0.05 && open, JSON.stringify({ landed, under, open, tree: { x: tree.x, z: tree.z, y: tree.y, r: tree.r } }));
+    }
+    {
+      // Gorilla Jungle's treetop walkway and temples. The walkway is level from one tree house to the other by way of
+      // the Great Tree; a net reaches it; a gorilla takes an Ooga on the ground under it and leaves one up on it alone;
+      // the temple gate is walked through under the stone head, which is somewhere to stand; and the map keeps the
+      // other maps' size, its four gorillas and a mirrored layout.
+      const J = S.ARENAS.jungle, F = S.ARENAS.fort, idle = { x: 0, z: 0, sprint: 0, jump: 0, jet: 0, crouch: 0, face: 0 }, out = {};
+      const make = () => { const r = S.create({ seed: 5, prep: 0, map: "jungle" }); for (const o of r.actors) o.bot = false; for (const g of r.gorillas) { g.x = g.wx = g.hx = 100; g.z = g.wz = g.hz = 100; g.state = 3; g.t = 1e9; } for (const k of r.crates) k.live = false; for (const t of r.traps) t.dark = 1e9; return r; };
+      const go = (r, secs, input = idle, until = () => false) => { for (let t = 0; t < secs && !until(); t += S.CONFIG.STEP) { S.tick(r, S.CONFIG.STEP, input); r.eventCount = 0; } };
+      const high = J.caches[0][1];
+      S.create({ map: "jungle" });
+      out.size = J.fieldW === F.fieldW && J.fieldL === F.fieldL && J.W === F.W && J.L === F.L && J.gorillas.length === 4 && J.stands.blue.z === F.stands.blue.z;
+      out.mirrored = J.BLOCKS.every((b) => J.rocks.has(b) || J.BLOCKS.some((c) => c[0] === -b[1] && c[1] === -b[0] && c[2] === -b[3] && c[3] === -b[2] && c[4] === b[4] && c[5] === b[5]))
+        && J.ledges.every((b) => J.ledges.some((c) => c[0] === -b[1] && c[2] === -b[3] && c[4] === b[4]));
+      // Level all the way: down the centre line, and round the Great Tree's trunk.
+      let level = true;
+      for (let z = -16.5; z <= 16.5; z += 0.5) if (Math.abs(z) > 1.2) level &&= S.groundAt(0, z, high + 0.2) === high;
+      for (let z = -3; z <= 3; z += 0.5) for (const x of [-2, 2]) level &&= S.groundAt(x, z, high + 0.2) === high;
+      out.level = level;
+      // On foot from blue's tree house along the bridge onto the Great Tree's platform, never leaving the planks.
+      {
+        const r = make(), a = r.actors[0];
+        Object.assign(a, { x: 0, z: 16, y: high, vx: 0, vy: 0, vz: 0, grounded: true });
+        let fell = false;
+        go(r, 4, { ...idle, z: -1 }, () => { if (a.y < high - 0.01) fell = true; return fell || a.z < 2; });
+        out.bridge = !fell && a.z < 2 && a.y === high;
+      }
+      // Up a net from the ground, pushing into it.
+      {
+        const r = make(), a = r.actors[0], n = J.nets[0], [x0, x1, z0, z1] = n.zone;
+        Object.assign(a, { x: (x0 + x1) / 2 - n.dx * 0.6, z: (z0 + z1) / 2, y: 0, vx: 0, vy: 0, vz: 0, grounded: true });
+        go(r, 3, { ...idle, x: n.dx, z: n.dz }, () => a.grounded && a.y === high);
+        out.net = a.y === high && Math.abs(a.x) < 3.5;
+      }
+      // The gorillas' ground: one beside the bridge leaves an Ooga up on it alone, and takes the same Ooga on the grass.
+      {
+        const r = make(), a = r.actors[0], g = r.gorillas[0];
+        Object.assign(g, { x: 1.6, z: 7, wx: 1.6, wz: 7, hx: 1.6, hz: 7, state: 0, t: 0 });
+        Object.assign(a, { x: 0, z: 7, y: high, vx: 0, vy: 0, vz: 0, grounded: true });
+        go(r, 3);
+        const safe = !a.grabbed && a.y === high;
+        Object.assign(a, { x: 0, z: 7, y: 0, guard: 0, grounded: true });
+        go(r, 3, idle, () => a.grabbed);
+        out.gorillas = safe && !!a.grabbed;
+      }
+      // The temple gate: open under the stone head at walking and jumping height, the pillars solid either side, the
+      // head solid over it and stood on; an Ooga walks in through it on either side.
+      S.create({ map: "jungle" });
+      out.gate = [1, -1].every((s) => [0.2, 1, 1.7, 3.2].every((y) => [-2, 0, 2].every((x) => !S.solidAt(x, y, s * 23.5))) && S.solidAt(3.1, 3, s * 23.5) && S.solidAt(-3.1, 3, s * 23.5) && S.solidAt(0, 4.2, s * 23.5) && S.groundAt(0, s * 23.5, 6) === 5);
+      {
+        const r = make(), a = r.actors[0];
+        Object.assign(a, { x: 0, z: 20, y: 0, vx: 0, vy: 0, vz: 0, grounded: true });
+        go(r, 1.2, { ...idle, z: 1 });
+        out.walkIn = a.z > 24.5 && a.y === 0;
+      }
+      // The models draw the nets and puddles into the map's one mesh; the map says so, and names each of its own boxes.
+      out.kinds = J.drawn.nets && J.drawn.puddles && J.BLOCKS.filter((b) => J.kinds.has(b)).length >= 60 && J.ledges.length === J.decor.filter((d) => d.kind === "canopy").length && J.ledges.length <= 15;
+      record("block frenzy jungle walkway: the treetop walkway is level from tree house to Great Tree to tree house and walked without a fall, a net climbs to it, a gorilla takes an Ooga on the ground beside it and leaves one up on it alone, the temple gate is open under the stone head, and the map keeps the other maps' size, four gorillas and its mirrored halves", Object.values(out).every(Boolean), JSON.stringify(out));
+      // Raids from every start, on both sides: the two spawns, the centre lane, either side line, both flanks, beside
+      // the rivals' temple, the raider's own corner and its own alley. A raider bot takes the rivals' block within 30 s.
+      // The raider has a hook in hand, so none lying in a cave round the field calls it aside.
+      const raids = {};
+      for (const [team, s] of [["blue", 1], ["red", -1]]) for (const [sx, sz] of [[-1.2, -26], [1.2, -26], [0, -8], [-18, 0], [18, 0], [-16, -12], [16, 12], [12, -30], [-12, 30], [0, -36]]) {
+        const r = make(), a = r.actors.find((o) => o.team !== team);
+        for (const pw of r.powers) pw.dark = 1e9;
+        Object.assign(a, { bot: true, role: "attack", x: s * sx, z: s * sz, y: 0, hook: 1 });
+        let t = 0;
+        for (; t < 30 && a.carrying !== team; t += S.CONFIG.STEP) { S.tick(r, S.CONFIG.STEP, idle); r.eventCount = 0; }
+        raids[`${team}@${s * sx},${s * sz}`] = a.carrying === team ? +t.toFixed(1) : `fail at ${a.x.toFixed(1)},${a.z.toFixed(1)}`;
+      }
+      record("block frenzy jungle raids: from the spawns, the centre lane, the side lines, the flanks, beside the temple and the far alley, on both sides, a raider bot takes the rivals' block within 30 s", Object.values(raids).every((v) => typeof v === "number"), JSON.stringify(raids));
     }
     record("block frenzy expert: after losing a crate target, wait three seconds, set it down and rescue the dropped home block",
       lost.lifted && waits && !lost.bot.holding && lost.r.flags.blue.state === "home",
@@ -7632,9 +8509,8 @@ const gameRulesChecks = async () => {
       JSON.stringify({ blockedWait, holding: blockedCrate.bot.holding }));
     // Piggyback: a fixture with the visitor and one bot teammate on Fort Chaos, the rivals out of the way.
     const piggy = () => {
-      const r = S.create({ team: "blue", seed: 2, prep: 0, size: 3 });
+      const r = S.create({ map: "fort", team: "blue", seed: 2, prep: 0, size: 3 });
       for (const b of r.actors) { b.x = 18; b.z = -35; b.bot = false; }
-      Object.assign(r.weather, { left: 1e9 });
       const run = (s, input = still) => { for (let n = 0; n < Math.round(s / S.CONFIG.STEP); n++) S.tick(r, S.CONFIG.STEP, { ...input }); };
       return { r, me: r.actors[0], b1: r.actors[1], b2: r.actors[2], run };
     };
@@ -7655,13 +8531,13 @@ const gameRulesChecks = async () => {
       const { r, me, b1, run } = piggy();
       Object.assign(me, { x: 0, z: 10 }); Object.assign(b1, { x: 0.9, z: 10 });
       const on = S.hopOn(r, 0);
-      me.knock = me.soot = 1;
+      me.knock = 1;
       run(0.5);
-      const halfway = me.ride === b1.id + 1 && me.knock > 0.49 && me.knock < 0.51 && me.soot > 0.49 && me.soot < 0.51;
+      const halfway = me.ride === b1.id + 1 && me.knock > 0.49 && me.knock < 0.51;
       run(1.5);
       record("block frenzy piggyback: mounted riders' knockback and soot expire without ending the ride",
-        on && halfway && me.ride === b1.id + 1 && me.knock === 0 && me.soot === 0,
-        JSON.stringify({ on, halfway, ride: me.ride, knock: me.knock, soot: me.soot }));
+        on && halfway && me.ride === b1.id + 1 && me.knock === 0,
+        JSON.stringify({ on, halfway, ride: me.ride, knock: me.knock }));
     }
     {
       // J: a closer teammate that can't come (splatted) doesn't stop a healthy one answering.
@@ -7684,27 +8560,14 @@ const gameRulesChecks = async () => {
       record("block frenzy piggyback: a rider beside a wall or post sits clear of it, not inside it",
         on && me.ride === 2 && clear, JSON.stringify({ on, ride: me.ride, rider: [me.x, me.z], gap: Math.hypot(me.x - cx, me.z - cz) }));
     }
-    {
-      // The machine's picker: the device chosen is the one taken; a pick out of range falls back to a random one.
-      const pickAt = (look) => {
-        const r = S.create({ team: "blue", seed: 5 }), me = r.actors[0], v = r.vends[0];
-        r.prep = 0; Object.assign(me, { x: v.x + 0.4, z: v.z, y: 0 });
-        const ok = S.takeWallet(r, 0, look);
-        return { ok, look: ok ? r.wallets[me.wallet].look : -1 };
-      };
-      const picked = [0, 1, 2, 3, 4, 5].map(pickAt), stray = pickAt(9), none = pickAt(-1);
-      record("block frenzy wallets: the device picked at the machine is the one taken, and a pick out of range gets one of the six",
-        picked.every((p, i) => p.ok && p.look === i) && stray.ok && stray.look >= 0 && stray.look < S.WALLETS.length && none.ok && none.look >= 0 && none.look < S.WALLETS.length,
-        JSON.stringify({ picked, stray, none }));
-    }
-    const round = (seed) => { const r = S.create({ team: "red", seed }); r.actors[0].bot = "auto"; for (let t = 0; t < 900 && !r.over; t += 1 / 30) S.step(r, 1 / 30, still), r.eventCount = 0; return JSON.stringify({ over: r.over, winner: r.winner, score: r.score, time: Math.round(r.time) }); };
+    const round = (seed) => { const r = S.create({ map: "fort", team: "red", seed }); r.actors[0].bot = "auto"; for (let t = 0; t < 900 && !r.over; t += 1 / 30) S.step(r, 1 / 30, still), r.eventCount = 0; return JSON.stringify({ over: r.over, winner: r.winner, score: r.score, time: Math.round(r.time) }); };
     const a = round(3), b = round(3);
     record("block frenzy rounds: a seeded round replays exactly and reaches three captures", a === b && JSON.parse(a).over && Math.max(...Object.values(JSON.parse(a).score)) === S.CONFIG.CAPTURES, JSON.stringify({ a, b }));
     {
       // The floating island: its edges are open, an Ooga walking off falls, and one fallen all the way is back in its
       // own block zone; a block carried over the edge drops at the edge and goes home by itself; under the rim the
       // island's rock holds a body out, and the jetpack brings a thrown Ooga back over the edge, the visitor's or a bot's.
-      const fresh = (map = "fort") => { const r = S.create({ seed: 5, prep: 0, map }); for (const o of r.actors) o.bot = false; Object.assign(r.weather, { left: 1e9 }); for (const g of r.gorillas) { g.state = 3; g.t = 1e9; } return r; };
+      const fresh = (map = "fort") => { const r = S.create({ seed: 5, prep: 0, map }); for (const o of r.actors) o.bot = false; for (const g of r.gorillas) { g.state = 3; g.t = 1e9; } return r; };
       const run = (r, secs, input = still, until = () => false) => { for (let t = 0; t < secs && !until(); t += S.CONFIG.STEP) S.tick(r, S.CONFIG.STEP, input); };
       const rows = {};
       for (const map of S.MAPS) {
@@ -7739,6 +8602,38 @@ const gameRulesChecks = async () => {
       }
       record("block frenzy island: on every map an Ooga walks off the open edge and, fallen all the way, is back in its own block zone; a block carried over drops at the edge and goes home; the rock under the rim holds a body out; the jetpack brings the visitor and a bot back after a throw",
         Object.values(rows).every((v) => Object.values(v).every(Boolean)), JSON.stringify(rows));
+      // The jetpack's power is the island's, on the timer it always had: held, it reaches its top speed, climbs (the old
+      // gate pinned it near 1.5 m/s, about 2.1 m in 1.5 s), a full tank from a jump empties about 4.7 s after the press
+      // as it did, it settles at the ceiling without a bounce, leaves a faster throw alone, and a roof stops it.
+      {
+        const C = S.CONFIG, idle = { x: 0, z: 0, jump: 0, jet: 0 }, held = { ...idle, jet: 1 };
+        const air = (y, vy = 0, map = "fort", x = 0, z = 12) => { const r = fresh(map), o = r.actors[0]; o.x = x; o.z = z; o.y = y; o.vy = vy; o.grounded = false; return [r, o]; };
+        const clear = S.ARENAS.fort.BLOCKS.every((b) => 0 < b[0] - 1 || 0 > b[1] + 1 || 12 < b[2] - 1 || 12 > b[3] + 1);
+        let [r, o] = air(3), peak = 0;
+        for (let t = 0; t < 1.5; t += C.STEP) { S.tick(r, C.STEP, held); peak = Math.max(peak, o.vy); }
+        const out = { clear, peak, climb: o.y - 3 };
+        r = fresh(); o = r.actors[0]; o.x = 0; o.z = 12;
+        const press = { ...held, jump: 1 };
+        r.inputs = [press];
+        out.tank = 0;
+        for (; out.tank < 8 && o.fuel > 0; out.tank += C.STEP) S.tick(r, C.STEP, idle);
+        [r, o] = air(9); o.fuel = 99;
+        let top = 0, settled = Infinity;
+        for (let t = 0; t < 6; t += C.STEP) { S.tick(r, C.STEP, held); top = Math.max(top, o.y); if (t > 4) settled = Math.min(settled, o.y); }
+        Object.assign(out, { top, settled });
+        [r, o] = air(3, 9); o.jetting = true;
+        S.tick(r, C.STEP, held);
+        out.thrown = o.vy;
+        const roofs = [["fort", 2, 0, 2.2], ["town", 0, 32.25, 2.7], ["haunted", 0, 30.5, 2.7]];
+        out.roofs = roofs.map(([map, x, z, roof]) => {
+          const [q, a] = air(Math.max(0, roof - C.HEIGHT - 0.5), C.JET_RISE, map, x, z);
+          let head = 0;
+          for (let t = 0; t < 1.5; t += C.STEP) { S.tick(q, C.STEP, held); head = Math.max(head, a.y + C.HEIGHT); }
+          return head <= roof + 1e-6 && head > roof - 0.05;
+        });
+        record("block frenzy jetpack: held it reaches the island's top speed and climbs, a full tank lasts its old held time, it settles at the ceiling with no bounce, a faster throw keeps its speed, and a roof stops it",
+          out.clear && out.peak >= C.JET_RISE * 0.9 && out.climb > 6 && Math.abs(out.tank - 4.7) < 0.15 && out.top <= C.JET_CEILING + 1e-6 && out.settled > C.JET_CEILING - 0.05 && out.thrown > C.JET_RISE && out.roofs.every(Boolean), JSON.stringify(out));
+      }
     }
     {
       // Hub-style terrain on every map: the boxes come in turned pairs, stand clear of the buildings and every spot the
@@ -7756,7 +8651,7 @@ const gameRulesChecks = async () => {
         const others = I.BLOCKS.filter((b) => !I.rocks.has(b));
         const clearOfBuildings = rocks.every((b) => others.every((o) => b[0] >= o[1] || b[1] <= o[0] || b[2] >= o[3] || b[3] <= o[2] || b[5] >= o[4] || b[4] <= o[5]));
         const spots = [];
-        for (const list of [I.traps, I.powers, I.tramps, I.vends, I.peels, [I.fire], I.catapults.blue, I.catapults.red, I.crates.blue, I.crates.red, I.plug.blue, I.plug.red, I.alley.blue, I.alley.red, I.gorillas]) spots.push(...list);
+        for (const list of [I.traps, I.powers, I.tramps, I.peels, [I.fire], I.catapults.blue, I.catapults.red, I.crates.blue, I.crates.red, I.plug.blue, I.plug.red, I.alley.blue, I.alley.red, I.gorillas]) spots.push(...list);
         for (const s of I.caches) spots.push([s[0], s[2]]);
         for (const t of S.TEAMS) spots.push([I.stands[t].x, I.stands[t].z]);
         const clearOfSpots = spots.every(([x, z]) => rocks.every((b) => b[5] > 0.05 || x <= b[0] - 0.4 || x >= b[1] + 0.4 || z <= b[2] - 0.4 || z >= b[3] + 0.4));
@@ -7780,20 +8675,29 @@ const gameRulesChecks = async () => {
         const hidden = I.hookSpots.length >= 3 && I.hookSpots.every(([x, y, z]) => y < 0.5 ? reached(x, z) : Math.abs(S.groundAt(x, z, y + 0.1) - y) < 0.05);
         rows[map] = { mirrored, clearOfBuildings, clearOfSpots, walked, ladders, caves, hidden };
         // Loose blocks, through the same flood: dropped from the top of every fixed block, and landing from the air on it.
-        const cr = r.actors[0], red = r.flags.red, rests = (f) => f.state === "dropped" && f.y === 0 && reached(f.x, f.z);
+        // Each lies on a top in a jetpack's reach where a body stands, or on ground walked to that is not under a floor
+        // or roof lower than the top it came from.
+        const cr = r.actors[0], red = r.flags.red, stood = { x: 0, y: 0, z: 0, crouch: false };
+        const rests = (f, top) => {
+          if (f.state !== "dropped") return false;
+          if (f.y === 0) return reached(f.x, f.z) && I.BLOCKS.every((c) => !(c[5] > 0 && c[5] < top && f.x > c[0] && f.x < c[1] && f.z > c[2] && f.z < c[3]));
+          Object.assign(stood, { x: f.x, y: f.y, z: f.z });
+          S.resolve(stood, S.CONFIG.BODY_R * 0.95);
+          return f.y <= S.CONFIG.LOOSE_TOP && S.groundAt(f.x, f.z, f.y + 0.01, 0) === f.y && stood.x === f.x && stood.z === f.z;
+        };
         let dropped = true, landed = true;
         for (const b of I.BLOCKS) {
           const x = (b[0] + b[1]) / 2, z = (b[2] + b[3]) / 2;
           Object.assign(cr, { x, z, y: b[4], vx: 0, vy: 0, vz: 0, splat: 0, trapped: 0, carrying: "red", blocked: null, grounded: true });
           Object.assign(red, { state: "carried", carrier: 0, homeT: 0 });
-          dropped &&= S.drop(r, 0) && rests(red);
+          dropped &&= S.drop(r, 0) && rests(red, b[4]);
           cr.carrying = null;
           Object.assign(red, { state: "flying", carrier: null, thrower: -1, t: 1, x, y: b[4] + 1.2, z, vx: 0, vy: -2, vz: 0 });
           Object.assign(cr, { x: 0, z: I.spawnZ, y: 0 });
           r.prep = 1;
           for (let t = 0; t < 2 && red.state === "flying"; t += S.CONFIG.STEP) S.tick(r, S.CONFIG.STEP, still);
           r.eventCount = 0;
-          landed &&= rests(red);
+          landed &&= rests(red, b[4]);
         }
         // A gorilla's grab on the mound's lower tier.
         const mound = rocks.find((b) => I.rockKind.get(b) === "mound" && b[4] === 1 && b[0] < 0 && b[2] > 0), g = r.gorillas[0], tierX = mound[1] - 0.3, tierZ = (mound[2] + mound[3]) / 2;
@@ -7802,21 +8706,58 @@ const gameRulesChecks = async () => {
         Object.assign(g, { x: tierX + 1, z: tierZ, wx: tierX + 1, wz: tierZ, hx: tierX + 1, hz: tierZ, state: 0, t: 0, holding: -1 });
         r.prep = 0;
         S.tick(r, S.CONFIG.STEP, still);
-        loose[map] = { dropped, landed, grabbed: cr.grabbed > 0 && rests(red) };
+        loose[map] = { dropped, landed, grabbed: cr.grabbed > 0 && rests(red, 1) };
       }
-      record("block frenzy loose blocks: on every map a block dropped from the top of any block, landing on it from the air, or dropped by a gorilla's grab on a mound comes to rest on ground the bots can walk to",
+      record("block frenzy loose blocks: on every map a block dropped from the top of any block, landing on it from the air, or dropped by a gorilla's grab on a mound lies on a top where a body can stand or on ground the bots can walk to, never under what it came down on",
         Object.values(loose).every((v) => Object.values(v).every(Boolean)), JSON.stringify(loose));
       record("block frenzy terrain: on every map the mounds, caves and outcrops are mirrored half round, clear of the buildings and every spot in use, and the forts, stands, catapults, ladders and hiding spots stay reachable on foot",
         Object.values(rows).every((v) => Object.values(v).every(Boolean)), JSON.stringify(rows));
+      {
+        // Ooga Town: no building is a dead end. Each bank's front doors, back door and the hole in its side wall, and
+        // each shop's front, back and side doors are open at walking height on both sides, with wall beside them;
+        // every box of the town is named for the models; and a catapult's Ooga comes down on the hall's floor.
+        const fresh = () => { const r = S.create({ seed: 5, prep: 0, map: "town" }); for (const o of r.actors) o.bot = false; for (const g of r.gorillas) { g.state = 3; g.t = 1e9; } for (const k of r.crates) k.live = false; return r; };
+        fresh();
+        const T = S.ARENAS.town, open = (x, z) => !S.solidAt(x, 0.4, z) && !S.solidAt(x, 1.6, z);
+        const town = { doors: true, walls: true };
+        for (const s of [1, -1]) {
+          for (const [x, z] of [[0, 24.5], [0, 34.5], [-8.5, 26], [10.3, 8.2], [-10.3, 8.2], [10.3, 14.8], [-10.3, 14.8], [9.2, 11.4], [-9.2, 11.4]]) town.doors &&= open(s * x, s * z);
+          for (const [x, z] of [[5, 24.5], [-8.5, 30], [8.5, 26], [13, 8.2], [-13, 8.2], [13, 14.8], [-13, 14.8], [5, 34.5]]) town.walls &&= S.solidAt(s * x, 1.6, s * z);
+        }
+        town.named = T.BLOCKS.filter((b) => T.kinds.has(b)).length === T.kinds.size && T.kinds.size === T.BLOCKS.length - T.rocks.size - 20 && [...T.steps].every((b) => T.kinds.get(b) === "step");
+        town.drops = S.TEAMS.every((t) => S.groundAt(T.drops[t][0], T.drops[t][1], 9) === 0 && Math.abs(T.drops[t][1]) > 25 && Math.abs(T.drops[t][1]) < 30);
+        // A raider bot reaches the rivals' block from the spawns, the street, the side lines, beside and behind the
+        // shops and behind its own bank, on both sides (on rock before the shops had back doors, the side-line and
+        // shop-side starts ended inside a shop). The raider has a hook in hand, so none lying in a cave calls it aside.
+        // And a bot with the block runs it home down the street without meeting a quiz pad.
+        const raids = {};
+        for (const [team, s] of [["blue", 1], ["red", -1]]) {
+          for (const [sx, sz] of [[-1.2, -26], [0, -8], [-18, 0], [18, 0], [16, -4], [-12, 13], [12, 6], [12, -18], [0, -36]]) {
+            const rq = fresh(), a = rq.actors.find((o) => o.team !== team);
+            Object.assign(a, { bot: true, role: "attack", x: s * sx, z: s * sz, y: 0, hook: 1 });
+            let t = 0;
+            for (; t < 30 && a.carrying !== team; t += S.CONFIG.STEP) { S.tick(rq, S.CONFIG.STEP, still); rq.eventCount = 0; }
+            raids[`${team}@${s * sx},${s * sz}`] = a.carrying === team ? +t.toFixed(1) : `fail at ${a.x.toFixed(1)},${a.z.toFixed(1)}`;
+          }
+          const rq = fresh(), a = rq.actors.find((o) => o.team !== team), st = T.stands[team], was = rq.score[a.team];
+          Object.assign(a, { bot: true, role: "attack", x: st.x, z: st.z - s * 2.2, y: 0, hook: 1 });
+          let t = 0, quizzed = false;
+          for (; t < 20 && rq.score[a.team] === was; t += S.CONFIG.STEP) { S.tick(rq, S.CONFIG.STEP, still); rq.eventCount = 0; quizzed ||= a.trapped > 0; }
+          raids[`${team} home`] = rq.score[a.team] > was && !quizzed ? +t.toFixed(1) : `fail at ${a.x.toFixed(1)},${a.z.toFixed(1)}${quizzed ? ", quizzed" : ""}`;
+        }
+        record("block frenzy ooga town: each bank's doors and the hole in its side and each shop's three doors are open on both sides with wall beside them, every box is named, and a catapult lands in the hall",
+          Object.values(town).every(Boolean), JSON.stringify(town));
+        record("block frenzy ooga town raids: from the spawns, the street, the side lines, round the shops and behind its own bank, on both sides, a raider bot reaches the rivals' block within 30 s, and a carrier bot is home within 20 s without meeting a quiz pad",
+          Object.values(raids).every((v) => typeof v === "number"), JSON.stringify(raids));
+      }
     }
     {
       // The grappling hook, played through the sim's own calls: a hook found at its hiding spot, a bite on rock reeling the
-      // Ooga in, a block yanked off a rival carrier (nothing from a teammate), and a wallet bomb taking a held hook as it
+      // Ooga in, a block yanked off a rival carrier (nothing from a teammate), and a mined block taking a held hook as it
       // takes the Golden AKs. A hook lost over the edge goes back into hiding.
       const fresh = (map = "fort", seed = 5) => {
         const r = S.create({ seed, prep: 0, map });
         for (const o of r.actors) o.bot = false;
-        Object.assign(r.weather, { left: 1e9 });
         for (const g of r.gorillas) { g.x = g.wx = g.hx = 100; g.z = g.wz = g.hz = 100; g.state = 3; g.t = 1e9; }
         return r;
       };
@@ -7831,7 +8772,8 @@ const gameRulesChecks = async () => {
       run(r, 0.5, still, () => o.hk === 2);
       const bx = o.x, bz = o.z;
       run(r, 1.5);
-      rows.pull = bit && Math.hypot(o.x - bx, o.z - bz) > 2 && o.hCool > 0 && !S.grapple(r, 0, yaw, 0);
+      run(r, 2, still, () => o.hk === 0);
+      rows.pull = bit && Math.hypot(o.x - bx, o.z - bz) > 2 && o.hk === 0 && S.grapple(r, 0, yaw, 0) && !S.grapple(r, 0, yaw + 3, 0.4);
       r = fresh(); o = r.actors[0];
       const c = r.actors[2];
       o.hook = 1; o.x = -17; o.z = -1; c.x = -17; c.z = 10; r.flags.blue.state = "carried"; r.flags.blue.carrier = 2; c.carrying = "blue";
@@ -7846,9 +8788,8 @@ const gameRulesChecks = async () => {
       r = fresh(); o = r.actors[0];
       const holder = r.actors[2];
       holder.hook = 1; r.hooks[0].state = 1; r.hooks[0].holder = 2; o.x = -17; o.z = 0; holder.x = -17; holder.z = 2.5; o.guard = holder.guard = 9;
-      const w = r.wallets.find((v) => !v.live);
-      Object.assign(w, { live: true, state: 3, owner: 0, team: o.team, look: 0, x: holder.x, y: holder.y + 1, z: holder.z, fuse: 0.01, stuck: 2 });
-      rows.steal = !!run(r, 0.2).hooksteal && o.hook === 1 && holder.hook === 0 && r.hooks[0].holder === 0;
+      r.goldLeft = 0; r.flags[holder.team].state = "carried"; r.flags[holder.team].carrier = 0; o.carrying = holder.team; o.x = S.ARENA.stands[o.team].x; o.z = S.ARENA.stands[o.team].z; o.y = 0;
+      rows.steal = !run(r, 0.2).hooksteal && o.hook === 0 && holder.hook === 1 && r.hooks[0].holder === 2;
       r = fresh(); o = r.actors[0]; o.hook = 2; r.hooks[1].state = 1; r.hooks[1].holder = 0; o.y = S.CONFIG.FALL_FLOOR - 1; o.x = 40; o.grounded = false;
       const fell = run(r, S.CONFIG.STEP * 2);
       rows.rehide = !!fell.hookhide && o.hook === 0 && r.hooks[1].state === 0;
@@ -7867,7 +8808,7 @@ const gameRulesChecks = async () => {
           return { m, u };
         };
         let hooked = hookAt((m, u) => { u.x = 0; u.z = -20; u.aim0 = Math.PI; });
-        rows.stand = hooked.u.carrying === "red" && hooked.m.flags.red.state === "carried" && hooked.m.flags.red.carrier === 0 && hooked.u.hCool > 2.5;
+        rows.stand = hooked.u.carrying === "red" && hooked.m.flags.red.state === "carried" && hooked.m.flags.red.carrier === 0;
         hooked = hookAt((m) => Object.assign(m.flags.red, { state: "dropped", x: -17, y: 0, z: 8, homeT: 0 }));
         rows.loose = hooked.u.carrying === "red" && hooked.m.flags.red.state === "carried";
         hooked = hookAt((m) => Object.assign(m.flags.blue, { state: "dropped", x: -17, y: 0, z: 8, homeT: 0 }));
@@ -7887,7 +8828,7 @@ const gameRulesChecks = async () => {
         rows.chuteHook = S.grapple(cut.m, 0, 0, 0.1) && cut.u.flight === 0 && cut.u.hk === 1;
         const cm = fresh("jungle"), cu = cm.actors[0];
         for (const k of cm.crates) k.live = false;
-        Object.assign(cu, { hook: 1, x: 5, z: 10, y: 0 });
+        Object.assign(cu, { hook: 1, x: 10, z: 8, y: 0 });
         S.grapple(cm, 0, 0, Math.atan2(5.2, 7));
         run(cm, 0.6, still, () => cu.hk === 2);
         rows.canopy = cu.hk === 2;
@@ -7922,27 +8863,21 @@ const gameRulesChecks = async () => {
         ru.y = S.CONFIG.FALL_FLOOR - 1; ru.x = 40; ru.grounded = false; run(rg, S.CONFIG.STEP * 2);
         rows.spawnGuard = ru.guard > 0 && ru.guard <= 0.5;
       }
-      // Storm lightning warns a spot, then strikes whoever stays; a jungle puddle slips without dropping the block.
+      // A jungle puddle slips without dropping the block.
       {
-        const m = fresh(), u = m.actors[0], w = m.weather;
-        for (const k of m.crates) k.live = false;
-        Object.assign(u, { x: -17, z: 12 });
-        w.kind = "storm"; w.boltWarn = 0.5; w.boltX = u.x; w.boltZ = u.z;
-        run(m, 0.6);
-        rows.bolt = u.splat > 0 && u.boltCool > 0;
         const j = fresh("jungle"), ju = j.actors[0];
         for (const k of j.crates) k.live = false;
         const pu = j.puddles[0];
         Object.assign(ju, { x: pu.x, z: pu.z, y: 0, carrying: "red", grounded: true }); Object.assign(j.flags.red, { state: "carried", carrier: 0 });
         run(j, 0.1);
         rows.puddle = ju.slip > 0 && ju.carrying === "red" && pu.dark > 0;
-        rows.weatherMix = S.ARENAS.jungle.puddles.length >= 6;
+        rows.puddles = S.ARENAS.jungle.puddles.length >= 6;
       }
       // Regressions: a block behind solid can't be hooked (thin fence), and cover reached during the warning stops the yank.
       {
         const f1 = fresh("haunted"), a1 = f1.actors[0], c1 = f1.actors[2];
         for (const k of f1.crates) k.live = false;
-        Object.assign(a1, { hook: 1, x: -16, z: 23.9, y: 0 }); Object.assign(c1, { x: -16, z: 25.75, y: 0, carrying: "blue" });
+        Object.assign(a1, { hook: 1, x: -6, z: 12.8, y: 0 }); Object.assign(c1, { x: -6, z: 14.55, y: 0, carrying: "blue" });
         Object.assign(f1.flags.blue, { state: "carried", carrier: 2 });
         S.grapple(f1, 0, 0, -0.12);
         const fence = run(f1, 0.6);
@@ -7957,38 +8892,32 @@ const gameRulesChecks = async () => {
         Object.assign(c2, { x: -18.8, z: 25.4 });
         run(f2, 0.5);
         rows.reachedCover = latched && c2.carrying === "blue" && f2.flags.blue.state === "carried";
-        // Live fees: only storm overrides a map's weather.
-        const fees = fresh(), liveTry = (v) => { S.setLive(fees, v); return fees.live; };
-        rows.feeClear = liveTry("clear") === null;
-        rows.feeCalm = liveTry("clear") === null;
-        // No wind: a body in the air over a storm drifts nowhere, and only clear and storm ever come up.
+        // No wind: a body in the air drifts nowhere.
         const calm = fresh(), cu = calm.actors[0];
         for (const k of calm.crates) k.live = false;
-        Object.assign(calm.weather, { kind: "storm", strength: 1 });
         Object.assign(cu, { x: 3, z: 3, y: 8, vx: 0, vz: 0, vy: 0, grounded: false, guard: 9 });
         run(calm, 0.4, still);
-        const kinds = new Set();
-        for (let n = 0; n < 40; n++) { calm.weather.left = 0; S.tick(calm, S.CONFIG.STEP, still); calm.eventCount = 0; kinds.add(calm.weather.kind); }
-        rows.noWind = cu.x === 3 && cu.z === 3 && S.CONFIG.WIND === undefined && [...kinds].every((k) => k === "clear" || k === "storm") && kinds.size === 2;
-        // The tall iron gate is solid, with the way round either end of it open, and the block zones are at the back.
+        rows.noWind = cu.x === 3 && cu.z === 3 && S.CONFIG.WIND === undefined;
+        // Haunted Hollow's graveyard gate is walked through under its arch, the iron fence either side of it is solid, and
+        // the block zones are at the back; the map is the size of the others.
         const hg = fresh("haunted"), hu = hg.actors[0], hI = S.ARENAS.haunted;
         for (const k of hg.crates) k.live = false;
-        Object.assign(hu, { x: 0, z: 26, y: 0, grounded: true });
+        Object.assign(hu, { x: 0, z: 16, y: 0, grounded: true });
         run(hg, 1, { x: 0, z: -1 });
-        const stopped = hu.z > 24.5;
-        Object.assign(hu, { x: 3.2, z: 26, y: 0, vx: 0, vz: 0, grounded: true });
+        const through = hu.z < 13;
+        Object.assign(hu, { x: 6, z: 16, y: 0, vx: 0, vz: 0, grounded: true });
         run(hg, 1, { x: 0, z: -1 });
-        rows.gateSolid = stopped && hu.z < 23.5 && S.solidAt(0, 1.5, 24.5) && S.solidAt(0, 1.5, -24.5) && !S.solidAt(3.2, 1.5, 24.5);
-        const twn = S.ARENAS.town;
-        rows.blockZones = twn.stands.blue.z === 32.2 && twn.stands.red.z === -32.2 && hI.goals.blue.z === 52.5 && hI.goals.red.z === -52.5;
-        rows.feeStorm = liveTry("storm") === "storm" && (() => { fees.weather.left = 0; S.tick(fees, S.CONFIG.STEP, still); return fees.weather.kind === "storm"; })();
-        rows.feeNone = liveTry(null) === null;
+        rows.gateSolid = through && hu.z > 14.1 && S.solidAt(6, 0.6, 14) && S.solidAt(-6, 0.6, -14) && !S.solidAt(0, 1.5, 14) && S.solidAt(0, 3.7, 14);
+        const twn = S.ARENAS.town, frt = S.ARENAS.fort;
+        rows.blockZones = twn.stands.blue.z === 32.2 && twn.stands.red.z === -32.2 && hI.goals.blue.z === 36 && hI.goals.red.z === -36;
+        rows.hauntedSize = hI.fieldW === frt.fieldW && hI.fieldL === frt.fieldL && hI.W === frt.W && hI.L === frt.L;
         // An open grave: fall in, one jump can't clear the rim, a double jump does, a block can't rest inside, and a
         // bot knocked in gets out on its own.
         const g = fresh("haunted"), gu = g.actors[0], I = S.ARENAS.haunted, [gx0, gx1, gz0, gz1] = I.graves[0], cx = (gx0 + gx1) / 2, cz = (gz0 + gz1) / 2;
         for (const k of g.crates) k.live = false;
         for (const o of g.actors) if (o.id) o.bot = true;
-        Object.assign(gu, { x: cx, z: cz, y: 0, grounded: true });
+        // Fresh paint keeps the ghost that haunts this grave off the Ooga while it climbs.
+        Object.assign(gu, { x: cx, z: cz, y: 0, grounded: true, guard: 9 });
         run(g, 0.7, still, () => gu.grounded && gu.y === S.GRAVE_Y);
         rows.graveFall = gu.y === S.GRAVE_Y && S.inGrave(gu.x, gu.z);
         const climb = { x: 0, z: 1, jump: 1 };
@@ -8066,7 +8995,133 @@ const gameRulesChecks = async () => {
         bv.bot = true; Object.assign(bv, { x: bx, z: bz, y: 0, grounded: true });
         rows.enemyCatBot = !S.nearEnemyCatapult(bot, bv);
       }
-      record("block frenzy grapple: a hook found at a hidden spot bites rock and reels its Ooga in, yanks a block off a rival carrier but not a teammate, a wallet bomb steals a held hook, and a hook lost over the edge goes back into hiding", Object.values(rows).every(Boolean), JSON.stringify(rows));
+      record("block frenzy grapple: a hook found at a hidden spot bites rock and reels its Ooga in, yanks a block off a rival carrier but not a teammate, a mined block takes no hook, and a hook lost over the edge goes back into hiding", Object.values(rows).every(Boolean), JSON.stringify(rows));
+      {
+        // Haunted Hollow's houses. The back door: each cellar's doorway is open at walking height under the upper floor,
+        // with the wall either side; a raider coming round the house takes the block through it on either side, and a
+        // defender at the stand chases a thief out through it. The other ways in: the side door, the porch stairs and
+        // the front door up to the upper floor, the stairs down from it into the cellar, and the cellar's front windows,
+        // open at chest height only. The scoring ring behind the house has nothing standing in it.
+        const hI = S.ARENAS.haunted, R = S.CONFIG.BODY_R, out = {};
+        S.create({ map: "haunted" });
+        out.open = hI.backDoors.every(([x0, x1, z0, z1]) => {
+          const xm = (x0 + x1) / 2, zm = (z0 + z1) / 2, s = Math.sign(zm);
+          return [0.2, 1, 1.7, 2.3].every((y) => [x0 + R, xm, x1 - R].every((x) => !S.solidAt(x, y, zm))) && S.solidAt(x0 - 0.5, 1, zm) && S.solidAt(x1 + 0.5, 1, zm) &&
+            S.solidAt(xm, 2.85, zm) && S.clearLine(xm, zm + s * 1.5, xm, zm - s * 1.5, R) && S.clearLine(xm, zm + s * 1.5, hI.goals[s > 0 ? "blue" : "red"].x, hI.goals[s > 0 ? "blue" : "red"].z, R);
+        });
+        out.ring = S.TEAMS.every((t) => { const g = hI.goals[t]; return [[0, 0], [2, 0], [-2, 0], [0, 2], [0, -2], [1.5, 1.5], [-1.5, -1.5]].every(([dx, dz]) => { const p = { x: g.x + dx, z: g.z + dz, y: 0 }; S.resolve(p, R, 0.05); return p.x === g.x + dx && p.z === g.z + dz && S.groundAt(p.x, p.z, 0.3) === 0; }); });
+        out.windows = [[-4.7, 23.2], [4.7, 23.2], [4.7, -23.2], [-4.7, -23.2]].every(([x, z]) => S.solidAt(x, 0.5, z) && !S.solidAt(x, 1.45, z) && S.solidAt(x, 2.3, z));
+        const nav = hI.nav, nn = nav.blue.length;
+        out.navLinks = nav.red.length === nn && nav.links.every(([i, j]) => i >= 0 && j >= 0 && i < nn * 2 && j < nn * 2 && (i < nn) === (j < nn));
+        // On foot through the house, either side: up the porch and in at the front door, down the stairs inside to the
+        // cellar floor, and out by the side door.
+        for (const [team, s] of [["blue", 1], ["red", -1]]) {
+          const q = fresh("haunted"), a = q.actors[0];
+          for (const k of q.crates) k.live = false;
+          const walk = (x, z, y, dx, dz, secs) => { Object.assign(a, { x: s * x, z: s * z, y, vx: 0, vy: 0, vz: 0, grounded: true, guard: 9 }); const mv = { x: s * dx, z: s * dz, sprint: 0, jump: 0 }; for (let t = 0; t < secs; t += S.CONFIG.STEP) { S.tick(q, S.CONFIG.STEP, mv); q.eventCount = 0; } return [s * a.x, s * a.z, a.y]; };
+          const up = walk(0, 18.5, 0, 0, 1, 1.4), down = walk(4.5, 25.4, 3, 0, 1, 1.2), side = walk(6.5, 25.5, 0, 1, 0, 0.8);
+          out[team + "Ways"] = up[2] === 3 && up[1] > 23.5 && down[2] === 0 && down[1] > 28.7 && side[0] > 8.4 && side[2] === 0;
+        }
+        const through = (a, [x0, x1, z0, z1], pz) => a.x > x0 && a.x < x1 && (pz - (z0 + z1) / 2) * (a.z - (z0 + z1) / 2) <= 0;
+        for (const [team, door, sx, sz] of [["blue", hI.backDoors[0], -13, 30], ["red", hI.backDoors[1], 13, -30]]) {
+          const q = fresh("haunted"), a = q.actors.find((o) => o.team !== team);
+          for (const k of q.crates) k.live = false;
+          Object.assign(a, { bot: true, role: "attack", x: sx, z: sz, y: 0 });
+          let via = false, t = 0;
+          for (; t < 10 && a.carrying !== team; t += S.CONFIG.STEP) { const pz = a.z; S.tick(q, S.CONFIG.STEP, still); q.eventCount = 0; if (through(a, door, pz)) via = true; }
+          out[team + "Steal"] = a.carrying === team && via;
+        }
+        const q = fresh("haunted"), d = q.actors[1], c = q.actors[2], st = hI.stands.blue;
+        for (const k of q.crates) k.live = false;
+        Object.assign(d, { bot: true, role: "defend", x: st.x, z: st.z - 1, y: 0 }); Object.assign(c, { x: -1.5, z: 37, y: 0, carrying: "blue" });
+        Object.assign(q.flags.blue, { state: "carried", carrier: 2 });
+        let chased = false;
+        for (let t = 0; t < 4 && !chased; t += S.CONFIG.STEP) { const pz = d.z; S.tick(q, S.CONFIG.STEP, still); q.eventCount = 0; if (through(d, hI.backDoors[0], pz)) chased = true; }
+        out.defend = chased;
+        // Regression: red's ghosts had no reach (the turned copies dropped it), so they never left their haunts. One in
+        // each half's graveyard now spooks an Ooga standing in its haunt.
+        out.ghosts = hI.ghosts.length === 4 && [2, 3].every((i) => {
+          const gq = fresh("haunted"), u = gq.actors[0], [gx, gz] = hI.ghosts[i];
+          for (const k of gq.crates) k.live = false;
+          Object.assign(u, { x: gx + 2.5, z: gz, y: 0, grounded: true });
+          let boo = false;
+          for (let t = 0; t < 6 && !boo; t += S.CONFIG.STEP) { S.tick(gq, S.CONFIG.STEP, still); for (let k = 0; k < gq.eventCount; k++) if (gq.events[k].type === "boo") boo = true; gq.eventCount = 0; }
+          return boo && gq.ghosts.every((g) => Number.isFinite(g.x + g.z));
+        });
+        record("block frenzy haunted house: each cellar's back door is open at walking height under the upper floor, walled either side and clear to the scoring ring, which stands empty; the porch, the front door, the stairs down, the side door and the barred windows are as built; a raider round the house takes the block through the back door on both sides, a defender at the stand chases a thief out through it, and a ghost in either half spooks whoever stands in its haunt", Object.values(out).every(Boolean), JSON.stringify(out));
+        // Raids from every start, on both sides: the two spawns, the avenue, either side line, beside the rivals' house
+        // and the raider's own scoring ring. A raider bot reaches the rivals' block in its cellar, by whichever way,
+        // and never stands stuck up on the house's floor (the nav once saw the cellar's walls under it, and a bot in
+        // the house lost its way for the rest of the round). Inside the house is its upper floor within its walls. The
+        // raider has a hook in hand, so none lying in a cave calls it aside.
+        const raids = {};
+        for (const [team, s] of [["blue", 1], ["red", -1]]) for (const [sx, sz] of [[-1.2, -17.6], [1.2, -16.4], [0, -8], [-18, 0], [16, -4], [-16, -6], [18, 10], [12, -30], [0, -36]]) {
+          const rq = fresh("haunted"), a = rq.actors.find((o) => o.team !== team);
+          for (const k of rq.crates) k.live = false;
+          Object.assign(a, { bot: true, role: "attack", x: s * sx, z: s * sz, y: 0, hook: 1 });
+          let t = 0, up = 0;
+          for (; t < 30 && a.carrying !== team; t += S.CONFIG.STEP) { S.tick(rq, S.CONFIG.STEP, still); rq.eventCount = 0; if (a.y > 2.5 && Math.abs(a.x) < 8 && Math.abs(a.z) > 23 && Math.abs(a.z) < 33) up += S.CONFIG.STEP; }
+          raids[`${team}@${s * sx},${s * sz}`] = a.carrying === team && up < 8 ? +t.toFixed(1) : `fail ${t.toFixed(1)}s, ${up.toFixed(1)}s in the house`;
+        }
+        record("block frenzy haunted raids: from the spawns, the avenue, the side lines, beside the house and the far ring, on both sides, a raider bot reaches the rivals' block within 30 s and never stands stuck on the house's floor", Object.values(raids).every((v) => typeof v === "number"), JSON.stringify(raids));
+      }
+      {
+        // The rivals' zipline only carries a rider whose own block is home; grabbed with it gone, a trap door throws them
+        // off the island as the enemy catapult does. Checked only at the grab, never on your own line, and bots know it.
+        const zr = {};
+        // (`flight` 2: still under a parachute when they reach the handle; the throw takes over from it.)
+        const atLine = (line, ownAway, carrying = null, flight = 0) => {
+          const q = fresh(), v = q.actors[0], Z = S.ARENA.zips[line];
+          Object.assign(v, { x: Z.ax, z: Z.az, y: S.CONFIG.TOWER_TOP, grounded: true, carrying, flight });
+          if (carrying) Object.assign(q.flags[carrying], { state: "carried", carrier: 0 });
+          if (ownAway) Object.assign(q.flags.blue, { state: "dropped", carrier: null, x: 4, y: 0, z: 0, homeT: 1e9 });
+          return [q, v, S.zip(q, 0), q.events.slice(0, q.eventCount).map((e) => e.type)];
+        };
+        let [q, v, took, ev] = atLine("red", false, "red");
+        zr.homeRides = took && v.riding && v.zipLine === "red" && ev.includes("zip") && !ev.includes("ziptrap") && !S.zipSprings(q, v, "red");
+        [q, v, took, ev] = atLine("red", true, "red", 2);
+        zr.awaySprings = took && !v.riding && v.flung && !v.flight && ev.includes("ziptrap") && !ev.includes("zip") && S.zipSprings(q, v, "red") && v.vy > 0;
+        // An opposing client's local actor indices differ: the trap still names the right rider and line.
+        const L = BL.blockLive, W = BL.blockWire, hm = L.seatMap(q.size, 0), gm = L.seatMap(q.size, q.size);
+        const guest = S.create({ team: "red", size: q.size, map: "fort", prep: 0 }), buffer = new DataView(new ArrayBuffer(W.FRAME_MAX));
+        const bytes = L.encode(q, hm, 1, 1, 1, buffer);
+        L.decode(new DataView(buffer.buffer.slice(0, bytes)), guest, gm, new Float32Array(q.actors.length * 4));
+        const event = guest.events.slice(0, guest.eventCount).find(e => e.type === "ziptrap");
+        zr.wireRider = event?.actor === gm.toLocal[0] && event.team === "red" && !guest.actors[gm.toLocal[0]].riding && guest.flags.red.state === "carried";
+        const trapLog = run(q, 12, still, () => v.falls > 0);
+        zr.awayFalls = v.falls === 1 && !v.carrying && q.flags.red.state === "home" && !trapLog.edgedrop && !!trapLog.return;
+        [q, v, took, ev] = atLine("blue", true);
+        zr.ownNever = took && v.riding && v.zipLine === "blue" && !ev.includes("ziptrap") && !S.zipSprings(q, v, "blue");
+        // Already sliding when their own block is taken, the rider rides on to the end of the line.
+        [q, v, took] = atLine("red", false, "red");
+        Object.assign(q.flags.blue, { state: "carried", carrier: 2 }); q.actors[2].carrying = "blue";
+        const rideLog = run(q, 6, still, () => !v.riding);
+        zr.midRide = took && !rideLog.ziptrap && !!rideLog.unzip && !v.flung && v.zipT === 1;
+        // An expert carrying their block by the rivals' tower takes the zip home only with its own block home, and
+        // drops that route the moment its block goes.
+        const botAt = (ownAway) => {
+          const r = S.create({ seed: 5, prep: 0, map: "fort", skill: "expert" }); for (const g of r.gorillas) { g.state = 3; g.t = 1e9; }
+          for (const o of r.actors) if (o.id !== 1) { o.bot = false; o.y = -100; }
+          const b = r.actors[1], L = S.ARENA.ladders.red; b.bot = true;
+          Object.assign(b, { x: (L.zone[0] + L.zone[1]) / 2 - L.dx * 3, z: (L.zone[2] + L.zone[3]) / 2, y: 0, grounded: true, carrying: "red", guard: 99 }); Object.assign(r.flags.red, { state: "carried", carrier: 1 });
+          if (ownAway) Object.assign(r.flags.blue, { state: "dropped", carrier: null, x: 4, y: 0, z: 0, homeT: 1e9 });
+          return [r, b];
+        };
+        let [br, bb] = botAt(false), botLog = run(br, 8, still, () => bb.riding);
+        zr.botRidesHome = bb.riding && bb.zipLine === "red" && !botLog.ziptrap;
+        [br, bb] = botAt(true); let routed = false;
+        botLog = run(br, 8, still, () => { routed ||= bb.route === "zipHome" || bb.riding; return false; });
+        zr.botStaysOff = !routed && !botLog.ziptrap;
+        [br, bb] = botAt(false); run(br, 8, still, () => bb.route === "zipHome");
+        const chose = bb.route === "zipHome";
+        Object.assign(br.flags.blue, { state: "dropped", carrier: null, x: 4, y: 0, z: 0, homeT: 1e9 });
+        botLog = run(br, 6, still, () => bb.riding);
+        zr.botDrops = chose && bb.route !== "zipHome" && !bb.riding && !botLog.ziptrap;
+        // The event crosses the wire, an Ooga's own.
+        zr.wire = BL.blockLive.EVENT_TYPES.includes("ziptrap") && BL.blockLive.ACTOR_EVENTS.includes("ziptrap") && BL.blockWire.WIRE === 7;
+        record("block frenzy zipline trap: the rivals' line carries a rider whose own block is home and throws one whose block isn't off the island, a carried block going home with a fall; a rider already sliding rides on, your own line never springs, and expert bots only take the zip home with their block home",
+          Object.values(zr).every(Boolean), JSON.stringify(zr));
+      }
       {
         // wicked's gorillas: a charge and grab dropping the block where it was grabbed, a drag by the feet to the nearest
         // edge, a throw off it, a jetpack back, breaking free by mashing, and the hook stunning a gorilla to free its
@@ -8168,7 +9223,7 @@ const gameRulesChecks = async () => {
       // The play strip repaints only when something it shows moved (`stripChanged`, the scene's own test before it
       // touches the DOM): never on an unchanged frame or inside a clock second, on every input it shows, and afresh for
       // a new round or visit (`shown` cleared, as `start` does).
-      const sim = S.create({ seed: 5, prep: 0 }), me = sim.actors[0], view = S.stripView(), changed = () => S.stripChanged(sim, view);
+      const sim = S.create({ map: "fort", seed: 5, prep: 0 }), me = sim.actors[0], view = S.stripView(), changed = () => S.stripChanged(sim, view);
       const first = changed(), quiet = [changed(), changed(), changed()].every((c) => !c);
       sim.time = 0.4; const subSecond = !changed(); sim.time = 1; const second = changed() && !changed();
       const misses = [];
@@ -8180,7 +9235,7 @@ const gameRulesChecks = async () => {
       each("carrying", () => { me.carrying = sim.rival; }, () => { me.carrying = null; });
       each("holding", () => { me.holding = true; }, () => { me.holding = false; });
       each("splatted", () => { me.splat = 1; }, () => { me.splat = 0; });
-      for (const k of ["boots", "laser", "monkeys"]) each(k, () => { me[k] = 2.5; }, () => { me[k] = 0; });
+      for (const k of ["boots", "monkeys"]) each(k, () => { me[k] = 2.5; }, () => { me[k] = 0; });
       for (const k of ["halving", "cold"]) each(k, () => { sim[k][sim.team] = 3; }, () => { sim[k][sim.team] = 0; });
       me.boots = 2.5; changed(); me.boots = 2.1; const powerSecond = !changed(); me.boots = 1.9; const powerTick = changed(); me.boots = 0; changed();
       // Their power-ups are not on the visitor's strip.
@@ -8300,8 +9355,45 @@ const gameRulesChecks = async () => {
     // The jackpot wheel, from arcade-models.js and its scene half on the builders they load with: the house wins slowly, and every
     // wedge, from a turn at rest and one far round after many spins, stops under the clapper wherever in it the spin
     // aims, after its whole turns and less than one more.
-    for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "hockey-wire", "arcade-models", "haunt-models", "arcade-scene-models", "zipline-models", "zipline"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+    for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "hockey-wire", "arcade-models", "haunt-models", "ooga-portal-models", "ooga-portal", "arcade-block-watch", "arcade-scene-models", "zipline-models", "zipline"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
     runInNewContext(await readFile(new URL("../src/js/arcade-games.js", import.meta.url), "utf8"), context);
+    // The Block Frenzy watch door: signed-in only, it opens Block Frenzy's watch deck, the real portal is crossed from the
+    // hall's side within the opening, and the door opens no new way out of the hall.
+    {
+      const W = BL.arcadeBlockWatch, D = W.DOOR, H = BL.arcadeModels.BLOCK_HALL;
+      const opened = [], sentGo = (id, place) => opened.push(id, place), savedLive = BL.blockLive; BL.blockLive = { openWatchDeck: (g) => { g("block", "watch-deck"); return true; } };
+      const left = W.goToWatchDeck(sentGo); BL.blockLive = savedLive;
+      const sb = await readFile(new URL("../src/js/scene-block.js", import.meta.url), "utf8");
+      const wayBack = sb.includes('go(home, doorVisit ? WIRE.DOOR_PLACE : undefined)') && sb.includes("go(home, WIRE.DOOR_FULL_PLACE)") && /watchVisit = ctx\.place === WIRE\.WATCH_DECK_PLACE;\s+if \(watchVisit\) showDeck\(\);/.test(sb) && W.PLACE === "block-watch" && W.PLACE_FULL === "block-watch-full";
+      const menu = { querySelector: () => ({}), addEventListener() {}, removeEventListener() {} };
+      context.document = context.document || { getElementById: () => menu }; context.matchMedia = context.matchMedia || (() => ({ matches: true }));
+      const gate = BL.oogaPortal.create({ radius: 1.6, outerRadius: 1.8, aperture: W.APERTURE, position: { x: D.plane, y: D.y + D.h / 2, z: D.z }, rotation: { x: Math.PI / 2, y: -Math.PI / 2, z: 0 }, receiving: true, reducedMotion: true, now: () => 0 });
+      gate.update();
+      const shown = gate.state === "ACTIVE" && gate.horizon.visible, trigger = W.atPortal(D.plane, D.z, D.y) && W.atPortal(D.plane + 0.02, D.z, D.y + 0.3) && !W.atPortal(D.plane - 0.2, D.z, D.y) && !W.atPortal(D.plane, D.z0 - 0.1, D.y) && !W.atPortal(D.plane, D.z, D.y + 1);
+      const R = 0.4, sees = (x, z, feet = D.y) => W.doorDepth(x, z, R, feet) < 0;
+      const reach = D.reach - R, rock = !sees(reach + 0.05, D.z), crosses = reach > D.plane && sees(reach - 0.01, D.z), onlyOpening = !sees(D.plane, D.z0 + R - 0.05) && !sees(D.plane, D.z1 - R + 0.05);
+      let seamless = true; for (let x = H.x1 - 2; x <= reach; x += 0.01) if (!sees(x, D.z)) seamless = false;
+      const levels = !sees(D.plane - 0.5, D.z, D.y - 1.5) && !sees(D.plane - 0.5, D.z, D.y + D.h + 0.1);
+      const clearDoor = D.z0 - 0.38 > BL.arcadeModels.BLOCK_HALL.pictures[3][0] + 0.91 && D.z1 + 0.38 < H.torches[3][1] - 0.07;
+      const back = W.ARRIVAL.x > H.x0 && W.ARRIVAL.x < D.plane - 1 && W.ARRIVAL.z === D.z;
+      record("arcade watch door: signed-in only, sends the viewer to the chairs and back in front of the door, the portal zone is the opening only, no new way out",
+        !W.mayWatch(null, false) && !!W.mayWatch({ id: 1 }, false) && !!W.mayWatch(null, true) && left === true && opened.join() === "block,watch-deck" && wayBack
+        && shown && trigger && rock && crosses && seamless && onlyOpening && levels && clearDoor && back,
+        JSON.stringify({ left, opened, wayBack, shown, trigger, rock, crosses, seamless, onlyOpening, levels, clearDoor, back }));
+      // The scene's own full-chairs answer and update bounce, run with a director that refuses `go` while the arrival fades in.
+      const fullAnswer = sb.match(/onChairsFull: (\(\) => \{.*\}) \}\);/)?.[1], bounceLine = sb.match(/^ {4}if \(chairsBounce\b.*$/m)?.[0];
+      if (!fullAnswer || !bounceLine) throw Error("block chairs bounce anchors missing");
+      let busy = true; const goes = [];
+      const visit = new Function("go", "WIRE", `let chairsFull = false, doorVisit = true, chairsBounce = false; const home = "arcade", round = null, onDeck = () => true, showBoard = () => {}, renderLive = () => {};
+        const onChairsFull = ${fullAnswer}; const update = () => { ${bounceLine} return "frame"; };
+        return { onChairsFull, update, pending: () => chairsBounce };`)((id, place) => { goes.push(id, place); return !busy; }, BL.blockWire);
+      visit.onChairsFull();
+      const refused = visit.update() === "frame" && visit.update() === "frame" && visit.pending() && goes.length === 4;
+      busy = false;
+      const bounced = visit.update() === undefined && !visit.pending() && goes.slice(-2).join() === "arcade,block-watch-full", once = visit.update() === "frame" && goes.length === 6;
+      record("regression: full chairs answered while the arrival still fades in keep the bounce pending until the director takes `go`, then send the viewer back to the door once",
+        refused && bounced && once, JSON.stringify({ refused, bounced, once, goes }));
+    }
     // Solo smash assistance must never send an out-of-bounds authoritative frame at a rail.
     const soloAim={x:1}, solo=BL.arcadeGames.airHockey({node:BL.scene.createNode(),aim:soloAim,onEnd(){},burst(){}});
     solo.shared(true);solo.multiplayer(false);solo.start();let soloInvalid=0,soloEdge=false;
@@ -8419,9 +9511,37 @@ const gameRulesChecks = async () => {
       GA.r === A.HAUNT.arena.r && GA.wall === A.HAUNT.arena.wall && GA.spots[1] === A.HAUNT.arena.wall + 1.2 && built.length === GA.elixirs.length
       && built.every((t, k) => t.elixir.x === GA.elixirs[k].x && t.elixir.y === GA.elixirs[k].y && t.elixir.z === GA.elixirs[k].z),
       JSON.stringify({ r: GA.r, wall: GA.wall, built: built.map((t) => t.elixir), elixirs: GA.elixirs }));
+    // Block Frenzy's models on the builders they load with: everything its scene and the hall's racks place is built here,
+    // and each tool's gun is one cached mesh a team, kept modest.
+    let modelsLoad = "";
+    try { runInNewContext(await readFile(new URL("../src/js/block-models.js", import.meta.url), "utf8"), context); } catch (e) { modelsLoad = String(e); }
+    {
+      const BM = BL.blockModels || {}, sources = ["scene-block.js", "arcade-scene-models.js"].map(f => readFileSync(new URL(`../src/js/${f}`, import.meta.url), "utf8")).join("\n");
+      const placed = [...new Set([...sources.matchAll(/\bBM\.(\w+)/g)].map(m => m[1]))], absent = placed.filter(n => BM[n] === undefined);
+      const guns = (BM.GUNS || []).map((kind, i) => { const blue = BM.gun(i * 2), red = BM.gun(i * 2 + 1); return { kind, faces: blue.faces.length, shared: BM.gun(i * 2) === blue, teams: blue !== red && red.faces.length === blue.faces.length }; });
+      const held = ["hookHead", "rope", "monkey"].map(n => BM[n]().faces.length), thrown = [BM.rocket(0), BM.grenade(1), BM.cache(0), BM.cache(1), BM.crate(0), BM.rack(1), BM.power(4)].map(g => g.faces.length);
+      // The file loads, every name it exports is defined, and the scene asks the models and the sim for nothing they lack.
+      const undefinedNames = Object.keys(BM).filter(n => BM[n] === undefined), simAsked = [...new Set([...sources.matchAll(/\bSIM\.(\w+)/g)].map(m => m[1]))].filter(n => !(n in BL.blockSim));
+      record("block models: the file loads with every exported name defined, and the scene reads nothing the models or the sim lack",
+        modelsLoad === "" && Object.keys(BM).length > 40 && undefinedNames.length === 0 && absent.length === 0 && simAsked.length === 0, JSON.stringify({ modelsLoad, undefinedNames, absent, simAsked }));
+      record("block models: each tool's gun, the hook launcher among them, is one cached mesh a team of at most 400 faces",
+        placed.length > 40 && BL.blockSim.ARSENAL.every(([k]) => BM.GUNS.includes(k)) && guns.length === 8 && guns[7].kind === "hook" && guns.every(g => g.shared && g.teams && g.faces > 100 && g.faces <= 400)
+        && held.every(n => n > 0 && n <= 400) && thrown.every(n => n > 0 && n <= 400), JSON.stringify({ absent, guns, held, thrown }));
+    }
     const racked = H.racks.flatMap(([, , rows]) => rows.map(([id]) => id));
-    record("arcade block hall: three racks hold the game's nine weapons, each from its own held model",
-      racked.length === 9 && racked.filter(Number.isInteger).every((i, k) => i === k) && racked.includes("hook") && racked.includes("wallet") && H.pictures.length === 4, JSON.stringify(racked));
+    // Every gun the game holds hangs there by its own `GUNS` index (the sniper rifle, the Golden AK and the hook's
+    // launcher among them), with the hook's head, and each row has a peg height on its rack.
+    const hung = racked.filter(Number.isInteger), hallGuns = BL.blockModels.GUNS;
+    record("arcade block hall: three racks hold the game's nine weapons, each from its own held model: every gun in the game's list once, the hook launcher among them, and the hook's head",
+      racked.length === 9 && hung.length === hallGuns.length && hung.every((i, k) => i === k && BL.blockModels.gun(i * 2).faces.length > 0) && ["sniper", "gold", "hook"].every((k) => hung.includes(hallGuns.indexOf(k)))
+      && racked.includes("hook") && H.racks.every(([, , rows]) => rows.length <= 3) && /BM\.gun\(i \* 2\)/.test(readFileSync(new URL("../src/js/arcade-scene-models.js", import.meta.url), "utf8")) && H.pictures.length === 4, JSON.stringify(racked));
+    {
+      // Block Frenzy's trophy stage: the golden block is the teams' cube in gold, and each side's sunburst glows in its own colour.
+      const T = BL.blockModels, gold = T.goldBlock(), rays = [T.trophyRays(0), T.trophyRays(1)];
+      record("block frenzy trophy: the golden block and each side's sunburst build, the rays glowing in that side's colour",
+        gold.faces.length === T.block(0).faces.length && rays.every((r) => r.faces.length > 0 && r.faces.every((f) => f.emissive === 1)) && rays[0].faces[0].color.join() !== rays[1].faces[0].color.join(),
+        JSON.stringify({ gold: gold.faces.length, rays: rays.map((r) => r.faces.length) }));
+    }
     // The zipline off the ledge: the survey over the scene's world, ledge to island, is clean and the ride ends on the island's top.
     const Z = BL.zipline, far = (z) => z <= H.stop.z + 1;
     const q = { support: (x, z) => far(z) ? H.cloudY : z >= H.ledge - 0.5 ? H.y : NaN, clear: () => true, landable: (x, y, z) => far(z) };
@@ -10062,6 +11182,14 @@ const gamepadHoldProof = async () => {
   const disconnected = !S.connected && neutral();
   connected = true; G.poll(); G.hold(false); G.poll();
   const reconnected = S.connected && !(S.held | S.pressed | S.released);
+  // Map asks for neutral sticks as it closes (`requireNeutral`): a stick still deflected from the menu moves nothing
+  // until both have rested inside the dead zone, while buttons keep working; one stick resting is not enough.
+  buttons[1].pressed = false; G.poll(); G.requireNeutral(); buttons[0].pressed = true; G.poll();
+  const mapInput = !!(S.pressed & B.a) && !S.lx && !S.ly && !S.rx && !S.ry;
+  hardware.axes[0] = 0; G.poll(); const mapHeld = !S.lx && !S.ly && !S.rx && !S.ry;
+  hardware.axes.fill(0); G.poll(); hardware.axes[0] = 0.6; G.poll();
+  const mapReleased = S.lx > 0;
+  buttons[0].pressed = false; G.poll();
   context.window.removeEventListener = () => {};
   for (const name of ["math", "controls"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
   buttons[1].pressed = false; G.poll();
@@ -10078,7 +11206,7 @@ const gamepadHoldProof = async () => {
   const pilot = await readFile(join(root, "src/js/pilot.js"), "utf8");
   const reset = new Function("pad", `let padFrame = -1, padFire = true, padAds = true, mouseAds = true, ads = true; ${pilot.match(/const resetPad = [^\n]+/)[0]} resetPad(); return { padFrame, padFire, padAds, mouseAds, ads };`)(S);
   const pilotReset = reset.padFrame === S.frame && !reset.padFire && !reset.padAds && !reset.mouseAds && !reset.ads;
-  return { initiallyLive: !!initiallyLive, synchronous, heldNeutral, noReplay, fresh, idempotent, betweenFrames, afterRelease, disconnected, reconnected, controlsResume, pilotReset };
+  return { initiallyLive: !!initiallyLive, synchronous, heldNeutral, noReplay, fresh, idempotent, betweenFrames, afterRelease, disconnected, reconnected, mapInput, mapHeld, mapReleased, controlsResume, pilotReset };
 };
 // The real gamepad and controls modules against stub pads: what a button does comes from the bindings, so a remap
 // reaches a reader and survives a reload, the pad last pressed is the one read, a game's context delivers its keys,
@@ -10795,7 +11923,7 @@ const hubGuestLikeness = { name: "hub guest likeness", why: "regression: a guest
   const arcadeLook = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, a = P.player, map = document.getElementById("destination-hud");
     const name = a ? a.traits.name : null, p = a ? { x: a.root.position.x, z: a.root.position.z } : null, mode = P.mode;
-    map.click(); B.advance(0.1, 1 / 60);
+    map.click(); document.querySelector("#destination-map [data-destination]").click(); document.getElementById("destination-map-go").click(); B.advance(0.1, 1 / 60);
     const looked = !!a && P.looking && P.player === a && Math.hypot(a.root.position.x - p.x, a.root.position.z - p.z) < 1e-6;
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "w", code: "KeyW" })); B.advance(1 / 60, 1 / 60);
     const back = !P.looking && P.player === a && P.mode === mode;
@@ -12047,7 +13175,7 @@ const blockStart = { name: "block start", why: "rule: Space only closes the titl
     s.prep = 0; a.cooldown = 0; a.crates = 3; a.splat = a.trapped = 0;
     for (const o of s.actors) if (o.id) { o.x = 20; o.z = o.team === s.team ? 34 : -34; }
     B.block.chooseTool("paint");
-    Object.assign(a, { x: -14, y: 0, z: s.team === "blue" ? 6 : -6, vx: 0, vy: 0, vz: 0, grounded: true, holding: false, riding: false });
+    Object.assign(a, { x: -14, y: 0, z: s.team === "blue" ? 6 : -6, vx: 0, vy: 0, vz: 0, grounded: true, holding: false, riding: false, flight: 0 });
     const fired = shots(); document.getElementById("block-paint").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
     window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     const crates = a.crates; press("crate");
@@ -12084,7 +13212,7 @@ const blockWalk = { name: "block walk", why: "rule: W A S D move the visitor's O
   const rows = {};
   for (const k of "wsadqe") {
     // The map's own gorillas, trap and peels stand round this spot: they would drag or trip the Ooga being measured.
-    await b.evaluate(`(() => { const B = window.__ooga, s = B.block.sim, a = s.actors[0]; s.prep = 0; a.flight = 0; a.y = 0; a.vy = 0; a.grounded = true; Object.assign(s.weather, { left: 1e9 }); a.x = -14; a.z = 2; a.vx = a.vz = 0; for (const o of s.actors) if (o.id) { o.x = 20; o.z = o.team === s.team ? 30 : -30; } for (const g of s.gorillas) { g.x = g.wx = g.hx = 34; g.z = g.wz = g.hz = 34; g.holding = -1; } for (const h of [...s.peels, ...s.traps]) { h.walkX ??= h.x; h.walkZ ??= h.z; h.x = h.z = 999; } B.advance(0.6, 1 / 60); const c = B.camera, vx = c.target.x - c.position.x, vz = c.target.z - c.position.z, l = Math.hypot(vx, vz); window.__walk = { fx: vx / l, fz: vz / l, x0: a.x, z0: a.z }; })()`);
+    await b.evaluate(`(() => { const B = window.__ooga, s = B.block.sim, a = s.actors[0]; s.prep = 0; a.flight = 0; a.y = 0; a.vy = 0; a.grounded = true; a.x = -14; a.z = 2; a.vx = a.vz = 0; for (const o of s.actors) if (o.id) { o.x = 20; o.z = o.team === s.team ? 30 : -30; } for (const g of s.gorillas) { g.x = g.wx = g.hx = 34; g.z = g.wz = g.hz = 34; g.holding = -1; } for (const h of [...s.peels, ...s.traps]) { h.walkX ??= h.x; h.walkZ ??= h.z; h.x = h.z = 999; } B.advance(0.6, 1 / 60); const c = B.camera, vx = c.target.x - c.position.x, vz = c.target.z - c.position.z, l = Math.hypot(vx, vz); window.__walk = { fx: vx / l, fz: vz / l, x0: a.x, z0: a.z }; })()`);
     await holdKey(b, k, 0.5);
     rows[k] = await b.evaluate(`(() => { const q = window.__walk, a = window.__ooga.block.sim.actors[0], c = window.__ooga.camera, dx = a.x - q.x0, dz = a.z - q.z0, vx = c.target.x - c.position.x, vz = c.target.z - c.position.z, l = Math.hypot(vx, vz); return { fwd: +(dx * q.fx + dz * q.fz).toFixed(2), side: +(dx * -q.fz + dz * q.fx).toFixed(2), turn: +((vx / l) * -q.fz + (vz / l) * q.fx).toFixed(2) }; })()`);
   }
@@ -12096,24 +13224,218 @@ const blockWalk = { name: "block walk", why: "rule: W A S D move the visitor's O
   record("block walk: W and S run the Ooga forward and back on screen, A and D step it left and right, Q turns it and the camera left and E right", ok, JSON.stringify(rows));
 } };
 const blockQuiz = { name: "block quiz", why: "rule: a quiz trap holds the visitor until a right answer, a wrong one locks the answers, and a right one frees them", run: async (b) => {
+  // Release any native lock from the preceding walk before installing the deterministic lock fixture.
+  // Otherwise Chrome still routes a real answer click to the locked canvas despite the mocked getter.
+  await b.evaluate(`document.exitPointerLock()`);
+  for (let i = 0; i < 40 && await b.evaluate(`!!document.pointerLockElement`); i++) await b.sleep(25);
+  // A captured mouse, stood in for (a headless page can't hold one): the trap must let it go, and a right answer take it back.
+  await b.evaluate(`(() => { const c = document.getElementById("scene"); window.__lock = { el: c, exits: 0, takes: 0, was: c.requestPointerLock };
+    Object.defineProperty(document, "pointerLockElement", { configurable: true, get: () => window.__lock.el });
+    document.exitPointerLock = () => { window.__lock.el = null; window.__lock.exits++; };
+    c.requestPointerLock = () => { window.__lock.el = c; window.__lock.takes++; }; })()`);
   const r = await b.evaluate(`(() => { const B = window.__ooga, D = B.block, s = D.sim, a = s.actors[0], t = s.traps[2];
     a.x = t.x; a.z = t.z + 0.5; B.advance(0.2, 1 / 60);
-    const open = D.quiz.open && !document.getElementById("block-quiz").hidden && a.trapped > 0;
+    const open = D.quiz.open && !document.getElementById("block-quiz").hidden && a.trapped > 0 && window.__lock.exits === 1 && document.pointerLockElement === null;
     D.answer((D.quiz.right + 1) % 4);
     const locked = D.quiz.locked && a.trapped > 0;
     return { open, locked }; })()`);
   await b.evaluate(`new Promise((resolve) => setTimeout(resolve, 2700))`);
-  const f = await b.evaluate(`(() => { const B = window.__ooga, D = B.block, a = D.sim.actors[0]; const fresh = !D.quiz.locked && D.quiz.asked === 2; D.answer(D.quiz.right); B.advance(0.1, 1 / 60); return { fresh, free: a.trapped === 0 && !D.quiz.open && document.getElementById("block-quiz").hidden }; })()`);
-  record("block quiz: a trap opens the question, a wrong answer locks the card and brings another, a right answer breaks the bubble", r.open && r.locked && f.fresh && f.free, JSON.stringify({ ...r, ...f }));
+  // The right answer, clicked with the real mouse at the free cursor.
+  const at = await b.evaluate(`(() => { const D = window.__ooga.block, q = document.querySelectorAll("#block-quiz [data-answer]")[D.quiz.right].getBoundingClientRect(); return { fresh: !D.quiz.locked && D.quiz.asked === 2, x: q.left + q.width / 2, y: q.top + q.height / 2 }; })()`);
+  await b.click(at.x, at.y);
+  const f = await b.evaluate(`(() => { const B = window.__ooga, D = B.block, a = D.sim.actors[0]; B.advance(0.1, 1 / 60); const back = window.__lock.takes === 1 && document.pointerLockElement === document.getElementById("scene");
+    const c = document.getElementById("scene"); delete document.pointerLockElement; delete document.exitPointerLock; c.requestPointerLock = window.__lock.was; if (!window.__lock.was) delete c.requestPointerLock; delete window.__lock;
+    return { back, free: a.trapped === 0 && !D.quiz.open && document.getElementById("block-quiz").hidden }; })()`);
+  record("block quiz: a trap frees a captured mouse and opens the question, a wrong answer locks the card and brings another, a right answer clicked at the free cursor breaks the bubble and captures the mouse again", r.open && r.locked && at.fresh && f.free && f.back, JSON.stringify({ ...r, ...at, ...f }));
 } };
-const blockRun = `(() => { const B = window.__ooga, D = B.block; D.start(); for (let i = 0; i < 80 && D.phase === "play"; i++) D.simulate(15, true); B.advance(0.3, 1 / 30); const save = B.game.state.block; return { ok: D.phase === "results" && !document.getElementById("block-results").hidden && save.games === 1 && save.wins === (D.result.won ? 1 : 0), phase: D.phase, result: D.result, save }; })()`;
+// The results are the trophy screen: the winning side named on its banner and its colour, and every Ooga of both sides in the tables.
+const blockRun = `(() => { const B = window.__ooga, D = B.block; D.start(); for (let i = 0; i < 80 && D.phase === "play"; i++) D.simulate(15, true); B.advance(0.3, 1 / 30); const save = B.game.state.block, card = document.getElementById("block-results"), w = D.sim.winner;
+  const trophy = card.dataset.team === w && document.getElementById("block-result-title").textContent === (w === "blue" ? "Blue" : "Red") + " wins!" && document.querySelectorAll("#block-side-blue li, #block-side-red li").length === D.sim.actors.length && card.querySelector('[data-team="' + w + '"].won') !== null;
+  return { ok: D.phase === "results" && !card.hidden && trophy && save.games === 1 && save.wins === (D.result.won ? 1 : 0), phase: D.phase, result: D.result, save, trophy }; })()`;
+const blockMirage = { name: "block clank mirage", why: "regression: phantom carriers copied a rival's firing pose and held a block above the modelled hands", run: async b => {
+  if (await b.evaluate(`!document.querySelector('[data-intro="block"]').hidden`)) await b.key(" ");
+  const proof = await b.evaluate(`(() => {
+    const D = __ooga.block, S = BL.scenes.block, update = S.update;
+    S.update = () => {};
+    try {
+      D.showBoard(); document.querySelector('#block-board [data-map="clank"]').click(); D.start(567); D.sim.prep = 0;
+      for (const a of D.sim.actors) { a.bot = false; a.guard = 30; }
+      for (const g of D.sim.gorillas) { g.state = 3; g.t = 100; }
+      Object.assign(D.sim.actors[0], { x: 5, z: 2, y: 0, flight: 0, grounded: true }); D.sim.time = 1;
+      update(0, 1); BL.scene.updateWorld(S.root);
+      const rivals = D.actors.filter((a, i) => D.sim.actors[i].team !== D.sim.team);
+      const overlay = !document.getElementById("block-mirage").hidden;
+      const phantoms = D.clank.phantoms.map((p, k) => {
+        const a = rivals[k % rivals.length], hands = p.list.filter(n => n.geometry === a.cave.parts.fingersR.geometry || n.geometry === a.cave.parts.fingersL.geometry), visible = [];
+        BL.scene.traverseVisible(p.root, n => visible.push(n));
+        return { hands: hands.length, gap: hands.length ? Math.abs(p.block.world[13] - .48 - hands.reduce((v, n) => v + n.world[13], 0) / hands.length) : 99,
+          gun: visible.some(n => n.geometry === a.gun.geometry || n.geometry === a.gunL.geometry) };
+      });
+      Object.assign(D.sim.actors[0], { x: 20, z: 4 }); update(0, 2);
+      const cleared = document.getElementById("block-mirage").hidden && D.clank.phantoms.every(p => !p.root.visible);
+      D.showBoard(); document.querySelector('#block-board [data-map="town"]').click(); update(0, 3);
+      return { overlay, phantoms, cleared, switched: D.sim.map === "town" && !D.clank && document.getElementById("block-mirage").hidden };
+    } finally { S.update = update; D.showBoard(); }
+  })()`);
+  record("block mirage: phantom carriers hold the block on both modelled fists without a gun, and the effect clears outside the zone and on another map",
+    proof.overlay && proof.phantoms.length === 3 && proof.phantoms.every(p => p.hands === 2 && p.gap < .03 && !p.gun) && proof.cleared && proof.switched, JSON.stringify(proof));
+} };
+const blockPoses = { name: "block modelled poses", why: "regression: old straight-arm weapon offsets missed the modelled fists and the trophy block floated above slim Oogas", run: async b => {
+  const rows = await b.evaluate(`(() => {
+    const B = __ooga, D = B.block, S = BL.scenes.block, rows = [], update = S.update;
+    S.update = () => {};
+    try {
+      for (const name of ["w-s-bitcoin", "tiffanyvarty", "portlandhodl"]) {
+        D.showBoard(); D.chooseOoga(name); D.chooseOoga(name); D.start(604);
+        const a = D.sim.actors[0];
+        Object.assign(a, { flight: 0, y: 0, x: -7, z: 4, grounded: true, gold: true, hook: 1 });
+        D.sim.prep = 0;
+        for (const kind of ["paint", "grenade", "rocket", "net", "sniper", "ak", "gold", "hook"]) {
+          D.chooseTool(kind); update(0, 0); BL.scene.updateWorld(S.root);
+          const actor = D.actors[0], cave = actor.cave, p = cave.parts;
+          let gap = 0;
+          for (const [gun, hand] of [[actor.gun, p.fingersR], ...(kind === "gold" ? [[actor.gunL, p.fingersL]] : [])]) {
+            const point = new Float64Array(3); BL.math.mat4.transformPoint(point, gun.world, 0, -.08, -.03);
+            gap = Math.max(gap, Math.hypot(point[0] - hand.world[12], point[1] - hand.world[13], point[2] - hand.world[14]));
+          }
+          rows.push({ name, kind, gap, visible: actor.gun.visible, modelled: cave.modelled, own: cave.traits.name === name });
+        }
+        const actor = D.actors[0], hip = actor.cave.root.position.y;
+        const pack = actor.jet, cave = actor.cave, bounds = BL.scene.boundsOf(pack.geometry), front = new Float64Array(3), back = new Float64Array(3);
+        BL.math.mat4.transformPoint(front, pack.world, 0, 0, bounds.max[2]);
+        BL.math.mat4.transformPoint(back, cave.root.world, 0, .06 * cave.traits.height, -cave.back);
+        rows.push({ name, jet: true, gap: Math.hypot(...front.map((v, i) => v - back[i])), attached: pack.parent === cave.root, scale: pack.scale.x / cave.traits.height });
+        a.riding = true; a.crouch = true; update(0, 0); BL.scene.updateWorld(S.root);
+        const ends = [-.3, .3].map(x => { const v = new Float64Array(3); BL.math.mat4.transformPoint(v, actor.trolley.world, x, -.15, 0); return v; });
+        const dx = ends[1][0] - ends[0][0], dy = ends[1][1] - ends[0][1], dz = ends[1][2] - ends[0][2], len2 = dx * dx + dy * dy + dz * dz;
+        let gap = 0;
+        for (const hand of [actor.cave.parts.fingersR, actor.cave.parts.fingersL]) {
+          const x = hand.world[12] - ends[0][0], y = hand.world[13] - ends[0][1], z = hand.world[14] - ends[0][2];
+          const t = Math.max(0, Math.min(1, (x * dx + y * dy + z * dz) / len2));
+          gap = Math.max(gap, Math.hypot(x - t * dx, y - t * dy, z - t * dz));
+        }
+        const hiddenGuns = !actor.gun.visible && !actor.gunL.visible;
+        a.riding = a.crouch = false; update(0, 0);
+        rows.push({ name, zip: true, gap, restored: actor.cave.root.position.y === hip && !actor.trolley.visible, hiddenGuns });
+        D.sim.over = true; D.sim.winner = D.sim.team; D.sim.actors[0].captures = 3; D.simulate(.1); update(0, 0); BL.scene.updateWorld(S.root);
+        const p = D.actors[0].cave.parts, gold = S.root.children.find(n => n.geometry === BL.blockModels.goldBlock() && n.visible);
+        rows.push({ name, trophy: D.phase === "results", gap: Math.abs(gold.world[13] - .465 - (p.fingersR.world[13] + p.fingersL.world[13]) / 2) });
+      }
+    } finally { S.update = update; D.showBoard(); }
+    return rows;
+  })()`);
+  record("block modelled poses: regular, slim and wide Oogas grip every weapon and both Golden AKs, and their trophy rests on their raised fists", rows.filter(r => !r.zip && !r.jet).length === 27 && rows.filter(r => !r.zip && !r.jet).every(r => r.trophy ? r.gap < .03 : r.visible && r.modelled && r.own && r.gap < .001), JSON.stringify(rows));
+  record("block modelled poses: both fists meet the zipline bar even while crouch is held, weapons are stowed, and letting go restores each Ooga's hip", rows.filter(r => r.zip).length === 3 && rows.filter(r => r.zip).every(r => r.gap < .001 && r.restored && r.hiddenGuns), JSON.stringify(rows.filter(r => r.zip)));
+  record("block modelled jetpacks: regular, slim and wide Oogas carry a body-sized pack seated on their actual back", rows.filter(r => r.jet).length === 3 && rows.filter(r => r.jet).every(r => r.attached && r.gap < .001 && Math.abs(r.scale - 1) < .001), JSON.stringify(rows.filter(r => r.jet)));
+} };
+const blockThrowScore = { name: "block throw scoring controls", why: "rule: keyboard and touch throws must score under the selected rule and show the correct throw feedback on the new Oogas", run: async b => {
+  const rows = [], touch = await b.evaluate('matchMedia("(pointer: coarse)").matches');
+  // A focused run may reach this check before blockStart dismisses the title card.
+  if (await b.evaluate(`!document.querySelector('[data-intro="block"]').hidden`)) await b.key(" ");
+  await b.evaluate('window.__throwUpdate = BL.scenes.block.update; BL.scenes.block.update = () => {}');
+  try {
+    for (const name of ["w-s-bitcoin", "tiffanyvarty", "portlandhodl"]) for (const mode of ["home", "away", "any"]) {
+      const setup = await b.evaluate(`(() => {
+        const D = __ooga.block, S = BL.blockSim;
+        D.showBoard(); document.querySelector('#block-board [data-map="town"]').click(); D.selection.rule = "home"; D.chooseTeam(${JSON.stringify(name === "tiffanyvarty" ? "red" : "blue")}); D.chooseOoga(${JSON.stringify(name)}); D.chooseOoga(${JSON.stringify(name)}); D.start(583);
+        const sim = D.sim, a = sim.actors[0], stand = S.ARENA.stands[a.team], sign = a.team === "blue" ? 1 : -1, other = S.other(a.team);
+        sim.prep = 0; sim.anyTime = ${mode === "any"};
+        for (const p of sim.actors) Object.assign(p, { bot: false, flight: 0, x: 18, z: p.id * 3, y: 0, grounded: true, guard: 60 });
+        for (const g of sim.gorillas) { g.state = 3; g.t = 1e9; }
+        Object.assign(a, { x: stand.x, z: stand.z - sign * 13.7, vx: 0, vz: 0, y: 0, vy: 0, carrying: other });
+        Object.assign(sim.flags[other], { state: "carried", carrier: 0 });
+        if (${mode !== "home"}) Object.assign(sim.flags[a.team], { state: "dropped", x: -18, y: 0, z: 0 });
+        D.cam.face = sign === 1 ? 0 : Math.PI; __throwUpdate(0, 0);
+        const e = document.querySelector('#block-tools [data-tool="pass"]'), r = e.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2, enabled: !e.disabled, hit: document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('[data-tool="pass"]') === e, modelled: D.actors[0].cave.modelled };
+      })()`);
+      if (touch) {
+        await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: setup.x, y: setup.y }] });
+        await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      } else await b.key("t");
+      const result = await b.evaluate(`(() => {
+        const D = __ooga.block, a = D.sim.actors[0], f = D.sim.flags[BL.blockSim.other(a.team)], threw = f.state === "flying";
+        D.simulate(2); __throwUpdate(0, 0);
+        return { threw, score: D.sim.score[a.team], captures: a.captures, gold: a.gold, state: f.state, feed: document.getElementById("block-feed").textContent, notice: document.getElementById("block-notice").textContent };
+      })()`);
+      rows.push({ name, mode, setup, result });
+    }
+  } finally { await b.evaluate('BL.scenes.block.update = __throwUpdate; delete window.__throwUpdate; __ooga.block.showBoard()'); }
+  record("block throw controls: regular/slim/wide Oogas throw from keyboard or touch; classic scores only with their block home, alternate scores while away, and the feed and waiting hint explain the result", rows.length === 9 && rows.every(({ mode, setup, result: r }) => setup.modelled && setup.enabled && (!touch || setup.hit) && r.threw && (mode === "away" ? r.score === 0 && r.captures === 0 && r.state === "dropped" && r.notice.includes("that throw can't score") : r.score === 1 && r.captures === 1 && r.gold && r.state === "home" && r.feed.includes("threw it home"))), JSON.stringify({ touch, rows }));
+} };
+const blockRoofs = { name: "block roof presentation", why: "regression: a loose block fell through a cave roof; the drawn block, modelled feet and retrieving bot must agree on its surface", run: async b => {
+  const rows = await b.evaluate(`(() => {
+    const D = __ooga.block, S = BL.blockSim, scene = BL.scenes.block, update = scene.update, rows = [];
+    scene.update = () => {};
+    try {
+      for (const name of ["w-s-bitcoin", "tiffanyvarty", "portlandhodl"]) for (const [map, surface] of [["town", "cave"], ["jungle", "cave"], ["jungle", "bridge"], ["jungle", "floor"], ["jungle", "head"]]) {
+        D.showBoard(); document.querySelector('#block-board [data-map="' + map + '"]').click(); D.chooseTeam("blue"); D.chooseOoga(name); D.chooseOoga(name); D.start(602); D.sim.prep = 0;
+        const sim = D.sim, body = sim.actors[0], f = sim.flags.red;
+        for (const a of sim.actors) Object.assign(a, { bot: false, flight: 0, x: 0.25 + a.id, z: S.ARENA.spawnZ, y: 0, grounded: true, guard: 60 });
+        for (const g of sim.gorillas) { g.state = 3; g.t = 1e9; }
+        const roof = S.ARENA.BLOCKS.find(b => surface === "cave"
+          ? S.ARENA.rockKind.get(b) === "cave" && b[5] > 0 && b[1] - b[0] >= 1 && b[3] - b[2] >= 1 && S.groundAt((b[0] + b[1]) / 2,(b[2] + b[3]) / 2, 99, 0.2) === b[4]
+          : S.ARENA.kinds.get(b) === surface && b[2] > 0);
+        const x = (roof[0] + roof[1]) / 2, z = (roof[2] + roof[3]) / 2, top = roof[4];
+        Object.assign(f, { state: "flying", x, z, y: top + 2, vx: 0, vz: 0, vy: 0, carrier: null, thrower: -1, hookedBy: -1 });
+        // A player below the roof cannot take the falling block through it.
+        Object.assign(body, { x, z, y: 0 }); D.simulate(1.5); update(0, 0); BL.scene.updateWorld(scene.root);
+        const block = scene.root.children.find(n => n.geometry === BL.blockModels.block(1));
+        const landed = f.state === "dropped" && f.y === top && !body.carrying;
+        const drawn = block.visible && Math.abs(block.world[13] - top - .5) < .07;
+        // Land the actual chosen model beside the block, then measure both soles in world space.
+        Object.assign(body, { x: x + (surface === "head" || surface === "floor" ? 2 : 0), z: z + (surface === "head" || surface === "floor" ? 0 : 2), y: top + 2, grounded: false, vy: 0 }); D.simulate(1.5); update(0, 0); BL.scene.updateWorld(scene.root);
+        const cave = D.actors[0].cave, feet = [];
+        for (const leg of [cave.parts.legL, cave.parts.legR]) {
+          const box = BL.scene.boundsOf(leg.geometry), p = new Float64Array(3); let low = Infinity;
+          for (const x of [box.min[0], box.max[0]]) for (const y of [box.min[1], box.max[1]]) for (const z of [box.min[2], box.max[2]]) { BL.math.mat4.transformPoint(p, leg.world, x, y, z); low = Math.min(low, p[1]); }
+          feet.push(low - top);
+        }
+        const stood = body.grounded && body.y === top && cave.modelled;
+        Object.assign(body, { x: .25, z: S.ARENA.spawnZ, y: 0 });
+        const bot = sim.actors[1]; Object.assign(bot, { x: surface === "cave" ? x - Math.sign(x) * 9 : surface === "head" ? x : x + 6, z: z + (surface === "head" ? 3 : 0), y: 0, bot: true, role: "attack", fuel: S.CONFIG.JET_FUEL });
+        let seconds = 0, flame = false;
+        while (seconds < 30 && f.state !== "carried") { D.simulate(.1); update(0, 0); flame ||= D.actors[bot.id].jetFlame.visible; seconds += .1; }
+        rows.push({ name, map, surface, landed, drawn, stood, feet, flame, seconds, fetched: f.state === "carried" && f.carrier === bot.id });
+      }
+    } finally { scene.update = update; D.showBoard(); }
+    return rows;
+  })()`);
+  record("block roofs: blocks stay visible above the roof, cannot be picked up below it, regular/slim/wide Oogas land with their feet on it, and bots retrieve them using the upgraded jetpack", rows.length === 15 && rows.every(r => r.landed && r.drawn && r.stood && r.feet.every(y => Math.abs(y) < .1) && r.flame && r.fetched), JSON.stringify(rows));
+} };
+const blockZipline = { name: "block zipline controls", why: "rule: the ride control and warning lamps must agree about a rival zipline's trap for either team", run: async b => {
+  const rows = await b.evaluate(`(() => {
+    const D = __ooga.block, S = BL.scenes.block, M = BL.blockSim, rows = [], update = S.update;
+    S.update = () => {};
+    try {
+      for (const team of M.TEAMS) for (const away of [false, true]) {
+        D.showBoard(); D.chooseTeam(team); D.start(631); D.sim.prep = 0;
+        // Give the new round its spawn frame before moving to a handle, as a real approach does.
+        update(0, 0);
+        const a = D.sim.actors[0], line = M.ARENA.zips[D.sim.rival];
+        Object.assign(a, { x: line.ax, z: line.az, y: M.CONFIG.TOWER_TOP, flight: 0, grounded: true });
+        if (away) Object.assign(D.sim.flags[team], { state: "dropped", x: 0, y: 0, z: 0, homeT: 999 });
+        update(0, 0);
+        const lamps = S.root.children.flatMap(n => n.children).concat(S.root.children).filter(n => n.geometry === BL.blockModels.zipLight(0) || n.geometry === BL.blockModels.zipLight(1));
+        const reds = lamps.filter(n => n.geometry === BL.blockModels.zipLight(1));
+        const button = document.querySelector('#block-tools [data-tool="zip"]'), enabled = !button.disabled;
+        button.click(); update(0, 0);
+        rows.push({ team, away, enabled, lamps: lamps.length, red: reds.length, correctLamp: !away || reds[0]?.position.x === line.ax,
+          acted: away ? !a.riding && a.vy > 0 && !a.flight && !D.actors[0].trolley.visible : a.riding && D.actors[0].trolley.visible });
+        D.sim.flags[team].state = "home"; update(0, 0);
+        rows.at(-1).reset = lamps.every(n => n.geometry === BL.blockModels.zipLight(0));
+      }
+    } finally { S.update = update; D.showBoard(); }
+    return rows;
+  })()`);
+  record("block zipline controls: each team's lamps warn when its own block is away, Ride springs the trap or boards the trolley accordingly, and a return clears the warning", rows.length === 4 && rows.every(r => r.enabled && r.lamps === 2 && r.red === (r.away ? 1 : 0) && r.correctLamp && r.acted && r.reset), JSON.stringify(rows));
+} };
 const dropStart = { name: "drop start", why: "regression: Space on the title card also launched the flight", run: async (b) => {
   const st = () => b.evaluate(`({ phase: window.__ooga.drop.phase, card: !document.querySelector('[data-intro="drop"]').hidden })`);
   const fresh = await st();
   await b.key(" ");
   const closed = await st();
   await b.key("Enter");
-  await b.evaluate(`(() => { const a = window.__ooga.block.sim.actors[0]; a.flight = 0; a.y = 0; a.vy = 0; a.grounded = true; })()`);
   const climb = await st();
   const mark = await b.evaluate(`(() => { const B = window.__ooga; let t = 0; for (; t < 60 && !B.drop.jumpOpen; t += 0.25) B.advance(0.25, 1 / 60); return t; })()`);
   await b.key(" ");
@@ -12328,9 +13650,11 @@ const sharedPanelBuildings = { name: "shared panel buildings", why: "regression:
     for (const id of ids) {
       const r = await b.evaluate(`(() => { const I = __ooga.dsb.interiors; I.review(${JSON.stringify(id)}, true); __ooga.advance(.5,1/60);
         const s = document.getElementById("sheet"), inside = I.active?.definition.id, shown = !s.hidden && getComputedStyle(s).display !== "none", open = s.dataset.open;
-        I.request(I.active.room.exit); __ooga.advance(.5,1/60); return { inside, shown, open, exited: !I.active, after: s.dataset.open, panels: document.querySelectorAll(".sheet").length }; })()`);
+        document.getElementById("destination-hud").click();
+        const map = document.getElementById("destination-map"), entries = map.querySelectorAll("[data-destination]"), outside = map.open && entries.length === 1 && entries[0].dataset.destination === "outside";
+        entries[0]?.click(); document.getElementById("destination-map-go").click(); __ooga.advance(.5,1/60); return { inside, shown, open, outside, exited: !I.active && !map.open, after: s.dataset.open, panels: document.querySelectorAll(".sheet").length }; })()`);
       rows.push(r);
-      record("shared panel: " + id + " preserves " + (pass ? "closed" : "open") + " state on entry and exit", r.inside === id && r.shown && r.open === String(!pass) && r.after === r.open && r.exited && r.panels === 1, JSON.stringify(r));
+      record("shared panel: " + id + " preserves " + (pass ? "closed" : "open") + " state on entry and exit", r.inside === id && r.shown && r.open === String(!pass) && r.after === r.open && r.outside && r.exited && r.panels === 1, JSON.stringify(r));
     }
   }
   await tourGo(b, "bifrost");
@@ -12647,6 +13971,112 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: panels
   }) && ["left", "right", "bottom"].every(dock => [false, true].every(open => motions.some(m => m.dock === dock && m.open === open))), JSON.stringify(motions));
   } finally { await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] }); }
 } };
+// Inspector protocol acceptance in Chrome; transport/media failures are deterministic, with no live SFU or microphone.
+const inspectorRecovery = { name: "inspector recovery", why: "rule: reconnect evidence is feature gated and sent once, and failed or disconnected voice restarts preserve mute and microphone intent", run: async (b) => {
+  const netSource = readFileSync(join(root, "src/js/net.js"), "utf8");
+  await b.evaluate(`(() => {
+    BL.net.dispose(); BL.voice.dispose();
+    const F = window.__inspectFixture = { realNet: BL.net, realVoice: BL.voice, sockets: [], timers: [], intervals: [], sent: [], realFetch: window.fetch,
+      realSocket: window.WebSocket, timeout: window.setTimeout, interval: window.setInterval, clearTimeout: window.clearTimeout, clearInterval: window.clearInterval };
+    window.fetch = async () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player: { id: 71, login: "fixture" } }) });
+    window.WebSocket = class { static OPEN = 1; constructor() { this.readyState = 1; F.sockets.push(this); } send(v) { F.sent.push(v === "ping" ? v : JSON.parse(v)); } close(code, reason) { this.readyState = 3; this.closed = { code, reason }; } };
+    window.setTimeout = (fn, ms) => { F.timers.push({ fn, ms }); return F.timers.length; };
+    window.setInterval = (fn, ms) => { F.intervals.push({ fn, ms }); return F.intervals.length; };
+    window.clearTimeout = window.clearInterval = () => {};
+    BL.voice = { ...F.realVoice, restart() {}, stop() {}, setPeers() {} };
+  })()`);
+  await b.evaluate(netSource);
+  const net = await b.evaluate(`(async () => {
+    const F = __inspectFixture, N = BL.net;
+    await N.start();
+    const welcome = (features) => { const ws = F.sockets.at(-1); ws.onopen(); ws.onmessage({ data: JSON.stringify({ t: "welcome", you: { id: 71 }, players: [], now: Date.now(), features }) }); return ws; };
+    const recover = features => { F.timers.at(-1).fn(); return welcome(features); };
+    let ws = welcome([]); ws.onclose({ code: 1006, wasClean: false }); ws = recover([]);
+    const older = F.sent.every(m => m.t !== "back");
+    ws.onmessage({ data: JSON.stringify({ t: "welcome", you: { id: 71 }, players: [], now: Date.now(), features: ["inspect-v1"] }) });
+    ws.onclose({ code: 1006, wasClean: false }); ws = recover(["inspect-v1"]);
+    const back = F.sent.filter(m => m.t === "back");
+    welcome(["inspect-v1"]);
+    const once = F.sent.filter(m => m.t === "back").length === 1;
+    const beat = F.intervals.at(-1).fn; beat(); beat(); beat(); beat();
+    const heartbeat = ws.closed?.reason === "heartbeat";
+    ws = recover(["inspect-v1"]);
+    const recovered = F.sent.filter(m => m.t === "back").at(-1);
+    ws.onclose({ code: 1001, wasClean: true }); recover([]);
+    const off = F.sent.filter(m => m.t === "back").length === 2;
+    N.dispose();
+    Object.assign(window, { fetch: F.realFetch, WebSocket: F.realSocket, setTimeout: F.timeout, setInterval: F.interval, clearTimeout: F.clearTimeout, clearInterval: F.clearInterval });
+    return { older, once, heartbeat, off, back, recovered };
+  })()`);
+  record("inspector reconnect: old rooms send no evidence; socket and heartbeat recovery send one bounded report after welcome", net.older && net.once && net.heartbeat && net.off && net.back[0]?.why === "socket" && net.back[0]?.code === 1006 && net.back[0]?.clean === false && net.back[0]?.down >= 0 && net.recovered?.why === "heartbeat", JSON.stringify(net));
+  await b.evaluate(`(() => {
+    const F = __inspectFixture; F.pcs = []; F.ops = []; F.timers = []; F.mics = 0;
+    F.realPc = window.RTCPeerConnection; F.gum = navigator.mediaDevices.getUserMedia;
+    window.RTCPeerConnection = class {
+      constructor() { this.connectionState = "connected"; this.iceGatheringState = "complete"; this.localDescription = { sdp: "v=0\\r\\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\\r\\n" }; this.handlers = {}; F.pcs.push(this); }
+      addEventListener(k, fn) { this.handlers[k] = fn; } removeEventListener(k) { delete this.handlers[k]; }
+      addTransceiver() { return { mid: "0" }; } getTransceivers() { return []; }
+      async createOffer() { return this.localDescription; } async createAnswer() { return {}; } async setLocalDescription() {} async setRemoteDescription() {}
+      close() { this.connectionState = "closed"; }
+    };
+    navigator.mediaDevices.getUserMedia = async () => { F.mics++; return new MediaStream(); };
+    window.fetch = async (url, options) => { F.ops.push({ op: String(url).split("/").pop(), body: JSON.parse(options.body) }); return { ok: true, json: async () => ({ tracks: [], sessionDescription: {} }) }; };
+    window.setTimeout = (fn, ms) => { const t = { fn, ms }; F.timers.push(t); return t; };
+    window.clearTimeout = t => { if (t) t.cancelled = true; };
+    BL.net = { ...F.realNet, state: { ...F.realNet.state, connectionToken: "synthetic", me: { id: 71, login: "fixture" } }, remotes: new Map(), voiceLink: () => "none", setMuted() {}, subscribe: () => () => {} };
+  })()`);
+  await b.evaluate(readFileSync(join(root, "src/js/voice.js"), "utf8"));
+  await b.click(720, 450); // Voice is entered through a real user gesture in the app.
+  const voice = await b.evaluate(`(async () => {
+    const F = __inspectFixture, V = BL.voice, drain = async () => { for (let i = 0; i < 100; i++) await Promise.resolve(); };
+    await V.listen(); V.setMuted(true);
+    const fail = why => { const pc = F.pcs.filter(p => p.connectionState !== "closed").at(-1); pc.connectionState = why; pc.handlers.connectionstatechange(); };
+    fail("failed"); await drain();
+    const failed = V.stats.enabled && V.stats.muted && !V.stats.publishing && F.ops.some(o => o.op === "leave" && o.body.why === "failed");
+    fail("disconnected"); const timer = F.timers.filter(t => !t.cancelled).at(-1); timer.fn(); await drain();
+    const disconnected = V.stats.enabled && V.stats.muted && !V.stats.publishing && F.ops.some(o => o.op === "leave" && o.body.why === "disconnected");
+    const mics = F.mics;
+    V.dispose();
+    Object.assign(window, { fetch: F.realFetch, RTCPeerConnection: F.realPc, setTimeout: F.timeout, clearTimeout: F.clearTimeout }); navigator.mediaDevices.getUserMedia = F.gum;
+    BL.net = F.realNet; BL.voice = F.realVoice;
+    return { failed, disconnected, mics, ops: F.ops };
+  })()`);
+  record("inspector voice: failed and sustained disconnected receivers report why and return muted without opening a microphone", voice.failed && voice.disconnected && voice.mics === 0, JSON.stringify(voice));
+} };
+scene("hub", { label: "inspector recovery", query: "pos=0&net=0", httpMedia: true, steps: [inspectorRecovery] });
+
+// Optional acceptance against an isolated wrangler dev, with a synthetic session seeded in its local D1 only.
+if (process.env.INSPECTOR_RUNTIME === "1") scene("hub", { label: "inspector runtime", query: "pos=0&net=0", steps: [{
+  name: "inspector runtime", why: "contract: the real Cloudflare runtime reports the named island, and its gated page displays live join, zone, close and return evidence", run: async b => {
+    const url = new URL(process.env.INSPECTOR_TEST_ORIGIN || "http://127.0.0.1:8640");
+    if (url.protocol !== "http:" || url.hostname !== "127.0.0.1") throw Error("Inspector runtime check requires an isolated loopback Worker");
+    const anonymous = await fetch(url.origin + "/inspect");
+    record("inspector runtime: anonymous page access stays hidden", anonymous.status === 404);
+    await b.send("Network.setCookie", { name: "obl_session", value: "inspector-local-test", url: url.origin, httpOnly: true });
+    await b.open(url.origin + "/inspect");
+    const lines = await b.evaluate(`(async () => {
+      const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+      const join = () => new Promise((resolve, reject) => {
+        const ws = new WebSocket("ws://" + location.host + "/room"), timer = setTimeout(() => reject(Error("room welcome timed out")), 8000);
+        ws.onmessage = e => { const m = JSON.parse(e.data); if (m.t === "welcome") { clearTimeout(timer); resolve(ws); } };
+      });
+      const first = await join(); first.send(JSON.stringify({ t: "zone", name: "factory" }));
+      await pause(300); first.close(1000, "heartbeat");
+      await pause(300); const second = await join(); second.send(JSON.stringify({ t: "back", why: "heartbeat", code: 1006, clean: false, down: 4800 }));
+      let text = "";
+      for (let i = 0; i < 80; i++) { text = document.body.innerText; if (text.includes("page says heartbeat") && text.includes("island : Room") && document.querySelector(".sock.you")) break; await pause(100); }
+      const result = { text, live: document.getElementById("feed").textContent, own: !!document.querySelector(".sock.you"), overflow: document.documentElement.scrollWidth > innerWidth };
+      window.__runtimeRoom = second;
+      return result;
+    })()`);
+    record("inspector runtime: island card, own socket, zone, close code and reconnect appear on the live page", lines.live === "Live" && lines.own && lines.text.includes("island : Room") && lines.text.includes("outside → factory") && lines.text.includes("1000, clean") && lines.text.includes("page says heartbeat") && !lines.overflow, JSON.stringify(lines));
+    await b.evaluate('document.getElementById("filter").value="heartbeat";document.getElementById("filter").dispatchEvent(new Event("input"))');
+    record("inspector runtime: filtering keeps matching drop and return evidence", await b.evaluate('[...document.querySelectorAll("#log .text")].length===2 && [...document.querySelectorAll("#log .text")].every(e=>e.textContent.includes("heartbeat"))'));
+    await b.screenshot(join(root, "untracked/inspector-runtime.png"));
+    await b.evaluate('window.__runtimeRoom.close(1000,"paused")');
+  }
+}] });
+
 const hubMuteKey = { name: "voice mute key", why: "regression: M reserves voice mute across canvas, panel and dialog focus, preserves typing, and falls back to environment sound only when voice is off", run: async (b) => {
   const r = await b.evaluate(`(() => {
     const V = BL.voice, sound = BL.sound, saved = { ...V.stats }, environment = sound.muted, focus = document.activeElement;
@@ -12932,26 +14362,217 @@ const hubBlockHeight = { name: "header clock and block height", why: "rule: the 
   const after = await b.evaluate(`(() => { const height = document.getElementById("world-block-height"), block = document.getElementById("world-block"); const shown = height.textContent; return { shown, label: block.getAttribute("aria-label"), bananas: !!document.getElementById("world-banana-count"), icon: !!block.querySelector(".banana-icon") }; })()`);
   record("header: a single-digit clock is centered from its displayed time and local zone, while the chain feed paints block height below it", before.height === "\u2014" && before.namedImage && !before.bananas && before.text === `9:00 AM ${before.zone}` && before.viewWidth === before.cells && Math.abs(before.cssWidth - before.cells / 6) < 1e-6 && after.shown === "900,123" && after.label === "Bitcoin block height 900123" && !after.bananas && !after.icon, JSON.stringify({ before, after }));
 } };
-const hubDestinationNames = { name: "destination accessible names", why: "regression: each visible destination label must occur in the button's accessible name", run: async (b) => {
+const hubDestinationNames = { name: "destination accessible names", why: "regression: destinations need explicit accessible actions without moving the player when the map opens", run: async (b) => {
   await b.send("Accessibility.enable");
-  await b.evaluate(`__ooga.pilot.release(true); __ooga.hud.setDetachedView("pile", true)`);
-  const expected = ["Lab", "Mirror", "HQ", "Basement", "Mempool", "LN Factory", "Ooga Arcade", "B.C.A.", "North gate", "₿IFRÖST", "TC Sphere", "Pile"], rows = [];
-  for (const label of expected) {
-    const row = await b.evaluate(`(() => {
-      const map = document.getElementById("destination-hud"); map.click();
-      return { label: document.getElementById("detached-destination-name").textContent, action: map.dataset.action,
-        detached: !__ooga.pilot.player && !__ooga.clankerPlay.active,
-        removed: !document.getElementById("destination-picker") && !document.getElementById("reset-camera-hud"),
-        noPopup: !map.hasAttribute("aria-haspopup") && !map.hasAttribute("aria-controls") };
-    })()`);
-    const tree = await b.send("Accessibility.getFullAXTree");
-    rows.push({ ...row, expected: label, named: tree.result.nodes.some(node => node.role?.value === "button"
-      // CSS paints the destination in uppercase; Chrome's labelled-by name
-      // contains that rendered text rather than the title-case DOM source.
-      && node.name?.value.includes(label.toUpperCase()) && /map/i.test(node.name.value)) });
+  await b.evaluate(`__ooga.pilot.endLook(); __ooga.hud.setDetachedView("pile", true); document.getElementById("destination-hud").click()`);
+  const tree = await b.send("Accessibility.getFullAXTree");
+  const names = ["Pile", "Lab", "Mirror", "HQ", "Basement", "Mempool", "LN Factory", "Ooga Arcade", "B.C.A.", "North gate", "₿IFRÖST", "TC Sphere", "Merge Rock"];
+  const opened = await b.evaluate(`(() => {
+    const dialog = document.getElementById("destination-map"), map = document.getElementById("destination-hud");
+    return { open: dialog.open, count: dialog.querySelectorAll("[data-destination]").length,
+      stayed: document.getElementById("detached-destination-name").textContent === "Pile",
+      focus: document.activeElement.id === "destination-map-close", expanded: map.getAttribute("aria-expanded"),
+      current: dialog.querySelector('[aria-current="true"]')?.dataset.destination };
+  })()`);
+  const preview = await b.evaluate(`(() => {
+    const P = __ooga.pilot, actor = P.player, at = actor && { ...actor.root.position }, camera = { ...__ooga.camera.position };
+    const pin = document.querySelector('[data-map-destination="mempool"]'); pin.click();
+    const points = BL.scenes.hub.navigationMap().points, hq = points.find(p => p.name === "underground"), basement = points.find(p => p.name === "basement");
+    return { stayed: (!actor || Math.hypot(actor.root.position.x - at.x, actor.root.position.z - at.z) < 1e-6) && Math.hypot(__ooga.camera.position.x - camera.x, __ooga.camera.position.z - camera.z) < 1e-6,
+      open: document.getElementById("destination-map").open, selected: pin.getAttribute("aria-pressed") === "true",
+      confirmation: document.getElementById("destination-map-go").textContent === "View Mempool",
+      underground: document.getElementById("destination-map-detail").textContent.includes("beneath the lake"),
+      layers: hq.x === basement.x && hq.z === basement.z && hq.level !== basement.level,
+      pins: document.querySelectorAll("[data-map-destination]").length === 13 };
+  })()`);
+  record("destinations: a real-world map pin previews without moving camera or actor, requires confirmation, and distinguishes underground floors", Object.values(preview).every(Boolean), JSON.stringify(preview));
+  const usability = await b.evaluate(`(() => {
+    const D=BL.destinationMap,H=BL.scenes.hub,P=__ooga.pilot,dialog=document.getElementById("destination-map"),list=document.getElementById("destination-map-list");
+    const layers=document.getElementById("destination-map-layers"), pins=()=>[...document.querySelectorAll("[data-map-destination]")].filter(p=>!p.hidden).map(p=>p.dataset.mapDestination);
+    layers.querySelector('[data-map-layer="hq"]').click();const hq=pins().join()==="underground";
+    layers.querySelector('[data-map-layer="basement"]').click();const basement=pins().join()==="basement";
+    layers.querySelector('[data-map-layer="surface"]').click();const surface=!pins().includes("underground")&&!pins().includes("basement")&&pins().length===11;
+    layers.querySelector('[data-map-layer="all"]').click();
+    document.getElementById("destination-show-list").click();const listMode=dialog.dataset.display==="list"&&getComputedStyle(list).display!=="none";
+    document.getElementById("destination-show-map").click();const mapMode=dialog.dataset.display==="map";
+    P.possess(__ooga.cavemen.get("portlandhodl")); if(__ooga.crew.sleeping)__ooga.crew.wakePlayer(); P.endLook();
+    const p=P.player?.root.position, before=p&&JSON.stringify(p), point={};
+    const doors=!!p&&["pile","lab","underground","basement","factory","arcade","bca","mirror","mempool","timechain","bifrost","gate","repos"].every(n=>H.navigationWaypoint(n,point)&&[point.x,point.y,point.z].every(Number.isFinite));
+    document.querySelector('[data-map-destination="lab"]').click();document.getElementById("destination-map-guide").click();D.update();
+    const guided=!dialog.open&&!document.getElementById("destination-waypoint").hidden&&JSON.stringify(p)===before&&!P.looking;
+    document.getElementById("destination-waypoint-stop").click();const stopped=document.getElementById("destination-waypoint").hidden;
+    document.getElementById("destination-hud").click();document.querySelector('[data-map-destination="lab"]').click();document.getElementById("destination-map-go").click();D.update();
+    const returnShown=P.looking&&!document.getElementById("destination-return").hidden;
+    document.getElementById("destination-return").click();const returned=!P.looking&&JSON.stringify(p)===before;
+    document.getElementById("destination-hud").click();
+    const status=H.navigationStatus;H.navigationStatus=()=>"Finish carrying first.";document.querySelector('[data-map-destination="lab"]').click();
+    const refusal=document.getElementById("destination-map-go").disabled&&document.getElementById("destination-map-detail").textContent.includes("Finish carrying first.");H.navigationStatus=status;
+    return {hq,basement,surface,listMode,mapMode,doors,guided,stopped,returnShown,returned,refusal};
+  })()`);
+  record("destinations: floor filters, phone Map/List, entrance bearings, touch return and early refusals preserve the actor",Object.values(usability).every(Boolean),JSON.stringify(usability));
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+  const closed = await b.evaluate(`!document.getElementById("destination-map").open && document.activeElement.id === "destination-hud" && __ooga.scene === "hub"`);
+  const buttonClosed = await b.evaluate(`(() => { document.getElementById("destination-hud").click(); document.getElementById("destination-map-close").click(); return !document.getElementById("destination-map").open && document.activeElement.id === "destination-hud"; })()`);
+  record("destinations: Map lists all thirteen named actions with current location, opens without travelling and Escape restores its focus",
+    opened.open && opened.count === 13 && opened.stayed && opened.focus && opened.expanded === "true" && opened.current === "pile" && closed && buttonClosed
+      && names.every(name => tree.result.nodes.some(node => node.role?.value === "button" && node.name?.value.startsWith("Preview " + name))), JSON.stringify({ opened, closed, buttonClosed }));
+  await b.evaluate(`document.getElementById("destination-hud").click(); window.__mapElapsed = BL.scenes.hub.elapsed`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW" });
+  const held = await b.evaluate(`(__ooga.advance(.2, 1/60), { quiet: __ooga.pilot.controls.read().y === 0, moving: BL.scenes.hub.elapsed > __mapElapsed })`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+  await b.evaluate(`document.getElementById("scene").focus()`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW", autoRepeat: true });
+  const noReplay = await b.evaluate(`__ooga.pilot.controls.read().y === 0`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW" });
+  const resumed = await b.evaluate(`__ooga.pilot.controls.read().y !== 0`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
+  await b.evaluate(`delete window.__mapElapsed`);
+  record("destination controls: the world advances behind Map, held movement stays quiet after Escape and a fresh press resumes it", held.quiet && held.moving && noReplay && resumed, JSON.stringify({ held, noReplay, resumed }));
+  const gamepad = await b.evaluate(`(async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, "getGamepads"), P = BL.gamepad;
+    // Named as Chrome names an Xbox pad: the gamepad picks its controller family from the id.
+    const pad = { index:0, id:"Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 02fd)", connected:true, mapping:"standard", axes:[0,0,0,0], buttons:Array.from({length:16},()=>({pressed:false,value:0})) };
+    const event = type => { const e = new Event(type); Object.defineProperty(e,"gamepad",{value:pad}); window.dispatchEvent(e); };
+    let now = performance.now();
+    // The pad reaches the open Map through the menus layer (pad-focus.js), whose view of the dialog settles on a microtask.
+    const poll = () => { P.poll(); BL.destinationMap.update(now += 20); };
+    const tick = async () => { poll(); await new Promise(r => setTimeout(r)); };
+    const press = async i => { pad.buttons[i].pressed=true; await tick(); pad.buttons[i].pressed=false; await tick(); };
+    Object.defineProperty(navigator,"getGamepads",{configurable:true,value:()=>[pad]}); event("gamepadconnected");
+    try {
+      await press(9); const opened = document.getElementById("destination-map").open;
+      // pad-focus.js moves to the nearest control below the Close button: a destination, whichever column is nearer.
+      await press(13); const ordered = !!(document.activeElement.dataset.destination || document.activeElement.dataset.mapDestination || document.activeElement.dataset.mapLayer || document.activeElement.id === "destination-show-map");
+      pad.axes[0]=1; await press(1); const closed = !document.getElementById("destination-map").open;
+      await tick(); const quiet = P.state.lx === 0;
+      pad.axes[0]=0; await tick(); pad.axes[0]=1; await tick(); const resumed = P.state.lx > 0;
+      await press(9); pad.axes[2]=1; pad.buttons[2].pressed=true; await tick();
+      pad.connected=false; event("gamepaddisconnected"); await tick();
+      const disconnected = !P.state.connected && !P.state.held && !P.state.lx && !P.state.rx;
+      pad.connected=true; event("gamepadconnected"); await tick(); await press(1); await tick();
+      const reconnectHeld = !document.getElementById("destination-map").open && !P.state.lx && !P.state.rx && !(P.state.held & P.BUTTON.x);
+      await press(9); pad.connected=false; event("gamepaddisconnected"); await tick();
+      BL.destinationMap.close(); await tick();
+      pad.connected=true; event("gamepadconnected"); await tick();
+      const closeAbsent = !document.getElementById("destination-map").open && !P.state.lx && !P.state.rx;
+      // The neutral requirement also survives an absence after the dialog closes.
+      pad.connected=false; event("gamepaddisconnected"); await tick();
+      pad.connected=true; event("gamepadconnected"); await tick();
+      const reconnectClosed = !P.state.lx && !P.state.rx;
+      pad.axes[0]=0; await tick(); const bothRequired = !P.state.rx;
+      pad.axes[2]=0; pad.buttons[2].pressed=false; await tick();
+      // A press edge lasts one poll and the page's frames poll too, so read it right after our own poll.
+      pad.axes[0]=pad.axes[2]=1; pad.buttons[2].pressed=true; poll();
+      const neutralRelease = P.state.lx > 0 && P.state.rx > 0 && !!(P.state.pressed & P.BUTTON.x); await tick();
+      pad.connected=false; event("gamepaddisconnected"); await tick();
+      // Losing the controller publishes neutral input (gamepad.js disconnected()), not a release edge.
+      const ordinaryDisconnect = !P.state.connected && !P.state.lx && !P.state.rx && !P.state.held;
+      pad.buttons[2].pressed=false; pad.connected=true; event("gamepadconnected"); await tick();
+      const ordinaryReconnect = P.state.connected && P.state.lx > 0 && P.state.rx > 0;
+      // Map's capture listener runs first, but a pad's B or Menu over another menu layer is that layer's Escape:
+      // it closes the Controls panel and never opens Map.
+      pad.axes[0]=pad.axes[2]=0; pad.buttons[2].pressed=false; await tick(); await tick();
+      const help = document.getElementById("controls-help"), map = document.getElementById("destination-map");
+      const otherLayer = [];
+      for (const button of [1, 9]) {
+        document.getElementById("controls-help-button").click(); await tick();
+        const shown = help.open && BL.padFocus.open();
+        await press(button); await tick();
+        otherLayer.push({ button, shown, closed: !help.open, map: map.open });
+        if (help.open) document.getElementById("controls-help-close").click();
+        BL.destinationMap.close(); await tick();
+      }
+      const otherLayerEscape = otherLayer.every(r => r.shown && r.closed && !r.map);
+      return {opened,ordered,closed,quiet,resumed,disconnected,reconnectHeld,closeAbsent,reconnectClosed,bothRequired,neutralRelease,ordinaryDisconnect,ordinaryReconnect,otherLayerEscape,otherLayer:JSON.stringify(otherLayer)};
+    } finally {
+      BL.destinationMap.close(); event("gamepaddisconnected");
+      if(descriptor)Object.defineProperty(navigator,"getGamepads",descriptor);else delete navigator.getGamepads;
+      P.poll();
+    }
+  })()`);
+  record("destination gamepad: Menu opens Map, Down moves focus into the destinations, B closes, a held stick waits for neutral, and B or Menu over the Controls panel closes it without opening Map", Object.values(gamepad).every(Boolean), JSON.stringify(gamepad));
+  const keyboardReplay = [];
+  for (const [key, code] of [["Enter", "Enter"], [" ", "Space"]]) {
+    await b.evaluate(`document.getElementById("controls-help-button").click(); document.getElementById("controls-learn").focus()`);
+    const keyCode = key === "Enter" ? 13 : 32;
+    await b.send("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: keyCode, text: key === "Enter" ? "\r" : " " });
+    await b.send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: keyCode });
+    keyboardReplay.push(await b.evaluate(`(() => {
+      const replayed = !document.getElementById("controls-help").open && BL.destinationMap.coaching;
+      document.getElementById("explore-coach-skip").click(); return replayed;
+    })()`));
   }
-  record("destinations: each Map click advances through all twelve places and wraps to Pile, with matching accessible labels including LN Factory and TC Sphere and no picker or reset button",
-    rows.every(row => row.label === row.expected && row.action === "mode-preset" && row.detached && row.removed && row.noPopup && row.named), JSON.stringify(rows));
+  record("destination coaching: Enter and Space activate the Controls replay button", keyboardReplay.every(Boolean), JSON.stringify(keyboardReplay));
+  const coaching = await b.evaluate(`(() => {
+    const start = document.getElementById("explore-coach-start"), skip = document.getElementById("explore-coach-skip");
+    document.getElementById("controls-help-button").click(); document.getElementById("controls-learn").click();
+    const offered = BL.destinationMap.coaching;
+    skip.click(); const dismissed = !BL.destinationMap.coaching && document.getElementById("explore-coach").hidden;
+    // The guide's movement step is about the visitor's own Ooga, so one is driven first, as a visitor would have taken one.
+    const a = __ooga.cavemen.get("portlandhodl"); if (!(__ooga.pilot.player === a || __ooga.pilot.player?.npc === a)) __ooga.pilot.possess(a);
+    __ooga.pilot.navigate({ position: { x: -5, y: __ooga.island.surfaceAt(-5, 5), z: 5 }, yaw: 0, pitch: 0.4, dist: 10 }); __ooga.advance(.5,1/60);
+    document.getElementById("controls-help-button").click(); document.getElementById("controls-learn").click();
+    start.click(); document.getElementById("scene").focus();
+    __ooga.advance(.1,1/60);
+    window.dispatchEvent(new KeyboardEvent("keydown", {key:"w",code:"KeyW"})); __ooga.advance(1,1/60);
+    window.dispatchEvent(new KeyboardEvent("keyup", {key:"w",code:"KeyW"})); __ooga.advance(.1,1/60);
+    const moved = start.textContent === "Open Map";
+    start.click(); document.querySelector('[data-destination="arcade"]')?.click(); document.getElementById("destination-map-go").click();
+    const completed = start.textContent === "Done" && localStorage.getItem("ooga-explore-coach-v1") === "1";
+    __ooga.advance(.1,1/60);
+    const receiptClear = !document.getElementById("destination-map-receipt").hidden && document.getElementById("explore-coach").hidden;
+    start.click(); return {offered,dismissed,moved,completed,receiptClear};
+  })()`);
+  record("destination coaching: Controls replays a dismissible guide, actual movement advances it and a successful Arcade view completes it", Object.values(coaching).every(Boolean), JSON.stringify(coaching));
+  // Real touch activation, including the scrolling needed to reach a narrow phone's controls.
+  const viewport = await b.evaluate(`({width:innerWidth,height:innerHeight,deviceScaleFactor:devicePixelRatio,mobile:false})`), phoneRows=[], pinFailures=[];
+  const tapMapControl = async selector => {
+    const point=await b.evaluate(`(() => {const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:"center"});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),width:r.width,height:r.height};})()`);
+    await b.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[{x:point.x,y:point.y,id:1,radiusX:5,radiusY:5,force:1}]});
+    await b.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
+    return point.hit&&point.width>=44&&point.height>=44;
+  };
+  try {
+    for(const width of [320,390]){
+      await b.send("Emulation.setDeviceMetricsOverride",{width,height:width===320?640:844,deviceScaleFactor:1,mobile:true});
+      await b.evaluate(`BL.destinationMap.close();__ooga.pilot.endLook();document.getElementById("destination-hud").click()`);
+      // ResizeObserver lays out the newly shown atlas before its pins can be hit-tested.
+      await b.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+      const pinTargets=await b.evaluate(`[...document.querySelectorAll('[data-map-destination]')].map(e=>{e.scrollIntoView({block:"center"});const r=e.getBoundingClientRect(),atlas=document.getElementById("destination-atlas"),a=atlas.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {name:e.dataset.mapDestination,x:r.x-a.x,y:r.y-a.y,width:r.width,height:r.height,hit:e.contains(hit),coveredBy:hit?.closest('[data-map-destination]')?.dataset.mapDestination||hit?.id||hit?.tagName,atlas:[a.width,a.height,atlas.scrollLeft,atlas.scrollTop]};})`);
+      const badPins=pinTargets.filter(p=>p.width<44||p.height<44||!p.hit),pins=pinTargets.length===13&&!badPins.length;
+      if(badPins.length)pinFailures.push({width,pins:badPins,layout:pinTargets});
+      if(process.env.MAP_PIN_SHOTS){
+        mkdirSync(process.env.MAP_PIN_SHOTS,{recursive:true});await b.evaluate(`document.getElementById("destination-map").scrollTop=0`);
+        await b.screenshot(join(process.env.MAP_PIN_SHOTS,`map-${width}.png`));
+      }
+      let pinSelection=true;
+      for(const pin of pinTargets){
+        const tapped=await tapMapControl('[data-map-destination="'+pin.name+'"]');
+        const selected=await b.evaluate(`document.querySelector('[data-map-destination="${pin.name}"]').getAttribute("aria-pressed")==="true"&&document.querySelector('[data-destination="${pin.name}"]').getAttribute("aria-pressed")==="true"`);
+        pinSelection=tapped&&selected&&pinSelection;
+      }
+      let targets=await tapMapControl("#destination-show-list");
+      targets=await tapMapControl('[data-destination="basement"]')&&targets;
+      const listed=await b.evaluate(`document.getElementById("destination-map").dataset.display==="list"&&getComputedStyle(document.getElementById("destination-map-list")).display!=="none"&&document.getElementById("destination-map-go").textContent==="View Basement"`);
+      targets=await tapMapControl("#destination-show-map")&&targets;
+      const mapped=await b.evaluate(`document.getElementById("destination-map").dataset.display==="map"&&document.querySelector('[data-map-destination="basement"]').getAttribute("aria-pressed")==="true"`);
+      targets=await tapMapControl("#destination-map-guide")&&targets;
+      const guided=await b.evaluate(`(BL.destinationMap.update(),!document.getElementById("destination-map").open&&!document.getElementById("destination-waypoint").hidden&&!__ooga.pilot.looking)`);
+      targets=await tapMapControl("#destination-waypoint-stop")&&targets;
+      await b.evaluate(`document.getElementById("destination-hud").click()`);
+      targets=await tapMapControl("#destination-show-list")&&targets;
+      targets=await tapMapControl('[data-destination="repos"]')&&targets;
+      targets=await tapMapControl("#destination-map-go")&&targets;
+      const viewed=await b.evaluate(`(BL.destinationMap.update(),__ooga.pilot.looking&&!document.getElementById("destination-return").hidden)`);
+      targets=await tapMapControl("#destination-return")&&targets;
+      const returned=await b.evaluate(`!__ooga.pilot.looking&&document.documentElement.scrollWidth<=innerWidth`);
+      phoneRows.push({width,pins,pinSelection,targets,listed,mapped,guided,viewed,returned});
+    }
+  } finally {await b.send("Emulation.setDeviceMetricsOverride",viewport);await b.evaluate(`BL.destinationMap.close()`);}
+  record("destination phones: 320px and 390px touch targets switch Map/List without losing selection, start and stop guidance, and return from a Merge Rock view",phoneRows.every(r=>Object.entries(r).every(([k,v])=>k==="width"||v===true)),JSON.stringify({phoneRows,pinFailures}));
 } };
 const hubWalking = { name: "hub walking", why: "regression: steering keys came out mirrored, and the removed hub Agent could still be summoned", run: async (b) => {
   // Seeded scenery places a rock at the old (-8, 8) direction-check start.
@@ -13095,6 +14716,65 @@ const TOUR_ENDED = `(() => {
   B.advance(0.5, 1 / 60);
   return { ended, walked: +Math.hypot(body.root.position.x - f.x, body.root.position.z - f.z).toFixed(3) };
 })()`;
+const hubSharedGuide = { name: "hub shared guide", why: "rule: visitors opt into Tess's queue, accept their turn, keep conversations private and retain their own camera while another visitor uses the guide", run: async b => {
+  const result = await b.evaluate(`(() => {
+    const N=BL.net,G=BL.scenes.hub.debug.tess,s=G.state,camera=__ooga.camera;
+    const saved={me:N.state.me,room:N.state.room,connectionToken:N.state.connectionToken,tessShared:N.state.tessShared,tessGuide:N.state.tessGuide},send=N.sendTess,calls=[];
+    const visitKey="ooga-tess-visits",savedVisits=localStorage.getItem(visitKey);
+    let elapsed=0;const step=(n=1)=>{for(let i=0;i<n;i++){elapsed+=1/30;G.update(1/30,elapsed);}};
+    const receive=(phase,position=0,token="")=>{N.state.tessGuide={phase,position,token,count:position?2:0,until:N.serverNow()+60000,busy:phase==="wait"||phase==="active",pose:null};step();};
+    const view=()=>JSON.stringify([camera.position,camera.target]);
+    try {
+      localStorage.setItem(visitKey,"{}");
+      N.sendTess=m=>{calls.push(JSON.parse(JSON.stringify(m)));return true;};
+      Object.assign(N.state,{me:{id:901,login:"queue-fixture"},room:"live",connectionToken:"queue-fixture",tessShared:true,tessGuide:null});
+      receive("none");
+      // Shared Tess idles in queue even when her panel is hidden; coaching must still be usable.
+      document.getElementById("controls-learn").click();step();BL.destinationMap.update();
+      const sharedCoaching=BL.destinationMap.coaching&&!document.getElementById("explore-coach").hidden;
+      document.getElementById("explore-coach-skip").click();
+      G.tap();step();BL.destinationMap.update();
+      const queueHidesCoaching=!BL.scenes.hub.coachingReady&&document.getElementById("explore-coach").hidden;
+      const panel=document.querySelector(".greeter-menu"),go=panel.querySelector(".greeter-row button:first-child"),skip=panel.querySelector(".greeter-row button:last-child");
+      const optIn=!panel.hidden&&go.textContent==="Join queue"&&!calls.some(m=>m.op==="join");
+      const fits=()=>{const r=panel.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1&&r.top>=0&&r.bottom<=innerHeight+1;};
+      let contained=fits();
+      N.state.tessGuide={...N.state.tessGuide,count:32};step();
+      const full=go.disabled&&panel.textContent.includes("queue is full");
+      const announced=panel.querySelector(".greeter-menu-help").getAttribute("aria-live")==="polite";
+      receive("none");
+      go.click();const joined=calls.at(-1).op==="join";
+      receive("wait",2,"mine");const before=view();
+      N.state.tessGuide.pose=[3,2,4,1,0,0,0,0,0,0,0,0];step(60);
+      const observer=before===view()&&!s.holding&&go.hidden&&panel.textContent.includes("2 of 2")&&Math.hypot(G.root.position.x-3,G.root.position.y-2,G.root.position.z-4)<.01;
+      receive("ready",1,"mine");contained&&=fits();const ready=go.textContent==="Talk to Tess"&&!go.hidden&&!s.holding;
+      go.click();const accepted=calls.at(-1).op==="accept"&&calls.at(-1).token==="mine";
+      receive("active",1,"mine");for(let i=0;i<450&&s.phase!=="offer";i++)step();
+      contained&&=fits();const offered=s.phase==="offer"&&!panel.querySelector("form").hidden;
+      const unreadNews=s.kind==="news"&&s.newest.line===BL.hubGuide.NEWS[0].line&&s.legs.length>0&&!JSON.parse(localStorage.getItem(visitKey))["queue-fixture"];
+      const field=panel.querySelector("input");field.value="How do I donate?";panel.querySelector("form").requestSubmit();step();
+      const privateReply=String(JSON.stringify(G.speech?.beats)).includes("Feed the Oogas")&&calls.every(m=>!["question","say","answer"].some(k=>k in m));
+      const boundedWire=calls.filter(m=>m.op==="pose").length>0&&calls.every(m=>JSON.stringify({t:"tess-guide",...m}).length<=256);
+      go.click();step();const touring=s.holding;
+      const newsRecorded=JSON.parse(localStorage.getItem(visitKey))["queue-fixture"]?.line===BL.hubGuide.NEWS[0].line;
+      N.state.room="connecting";N.state.tessGuide=null;step();
+      const disconnected=!s.holding&&!G.speech&&go.disabled&&panel.textContent.includes("15 seconds");
+      N.state.room="live";N.state.connectionToken="reconnected";receive("wait",2,"mine");skip.click();
+      const cancelled=calls.at(-1).op==="cancel"&&panel.hidden;
+      // Leaving the shared feature during a tour must return the pilot, not leave a hidden guide holding it.
+      let availabilityReleased=true;
+      for(const reason of ["signout","feature"]){
+        N.state.me={id:901,login:"queue-fixture"};N.state.tessShared=true;
+        receive("active",1,reason);for(let i=0;i<450&&s.phase!=="offer";i++)step();
+        go.click();step();const held=s.holding;
+        if(reason==="signout")N.state.me=null;else N.state.tessShared=false;
+        step();availabilityReleased&&=held&&!s.holding&&!G.speech&&!document.body.classList.contains("tess-touring");
+      }
+      return {sharedCoaching,queueHidesCoaching,optIn,full,announced,contained,joined,observer,ready,accepted,offered,unreadNews,newsRecorded,privateReply,boundedWire,touring,disconnected,cancelled,availabilityReleased};
+    } finally {if(savedVisits===null)localStorage.removeItem(visitKey);else localStorage.setItem(visitKey,savedVisits);Object.assign(N.state,saved);N.sendTess=send;step();}
+  })()`);
+  record("hub shared guide: explicit join/accept, queue position, private answers, observer camera independence, disconnect release and cancellation",Object.values(result).every(Boolean),JSON.stringify(result));
+} };
 const hubGuide = { name: "hub guide", why: "regression: Tess's offer showed only its first speech bubble, she stopped shots aimed past her, an Ooga walking or flying as her tour began went on through it, and T before or during her tour let the gorilla and tour share control", run: async (b) => {
   const guide = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, a = B.cavemen.get("portlandhodl"), G = BL.scenes.hub.debug.tess, s = G.state;
@@ -13336,6 +15016,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
   const r = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, H = B.hud, a = B.cavemen.get("portlandhodl");
     const map = document.getElementById("destination-hud"), label = document.getElementById("detached-destination-name");
+    const choose = name => { if (!document.getElementById("destination-map").open) map.click(); document.querySelector('[data-destination="' + name + '"]')?.click(); document.getElementById("destination-map-go").click(); };
     const rows = [], net = BL.net.state, account = net.me, backend = net.backend;
     const character = BL.characters.get(a.traits.name), xyz = p => [p.x, p.y, p.z];
     // The driven Ooga is its own body standing for the roster's (crew.js \`separateBodies\`): read that body.
@@ -13367,7 +15048,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
         const before = snapshot(), prepared = before.player && before.mode === mode.slice(mode.indexOf("-") + 1) && before.combat === mode.startsWith("combat");
         // Use the native keyboard/assistive activation path. A lone detail-one
         // click has no matching pointer press and can be a suppressed compatibility event.
-        map.click();
+        choose("lab");
         const after = snapshot();
         // The view goes to the place; the Ooga stays where it stands, still the visitor's.
         const looked = P.looking && label.textContent === "Lab" && after.player && error(after.actor, before.actor) < 1e-6;
@@ -13392,7 +15073,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
     P.endLook(); if (!drives()) P.possess(a); if (B.crew.sleeping) B.crew.wakePlayer();
     if (P.aiming) P.modeAction("mode-toggle"); B.advance(1, 1 / 60);
     // Frames go by while the look holds (camera input would end it, pilot.js \`look\`), and the label stays the place's.
-    H.setDetachedView("pile"); map.click(); B.advance(0.5, 1 / 60);
+    H.setDetachedView("pile"); choose("lab"); B.advance(0.5, 1 / 60);
     const looking = P.looking && label.textContent === "Lab" && label.classList.contains("show");
     const lab = B.mouths.find(mouth => mouth.id === "c11");
     P.orbit.yaw = P.orbit.tYaw = lab.ry;
@@ -13402,7 +15083,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
     const departed = { distance: Math.hypot(at().x - start.x, at().z - start.z), label: label.textContent, visible: label.classList.contains("show"), driven: drives() && !P.looking };
     return { rows, looking, departed };
   })()`);
-  record("hub map: signed in or out, a Map click looks at the next destination while the visitor keeps their Ooga where it stands, and a movement gives back its own camera, carry or combat and view in that frame and walks it",
+  record("hub map: signed in or out, a Map choice looks at the selected destination while the visitor keeps their Ooga where it stands, and a movement gives back its own camera, carry or combat and view in that frame and walks it",
     r.rows.length === 8 && r.rows.every(row => row.prepared && row.looked && row.moved > 1 && row.returned && row.walked > 0.3), JSON.stringify(r.rows));
   record("hub reset: 0 resets framing without relocating the Ooga or changing its mode or view family", r.rows.every(row => row.resetKept && row.resetChanged), JSON.stringify(r.rows));
   record("hub map: looking keeps the destination's label, and walking off shows the Ooga's own area, HUB", r.looking && r.departed.driven && r.departed.distance > 1.5 && r.departed.label === "HUB" && r.departed.visible,
@@ -13654,7 +15335,13 @@ const hubChalkboardEraser = { name: "chalkboard eraser", why: "rule: an eraser p
     const x = c.x + c.frontX * 1.3 - c.rightX * 0.6, z = c.z + c.frontZ * 1.3 - c.rightZ * 0.6;
     B.pilot.navigate({ position: { x, y: B.island.surfaceAt(x, z), z }, yaw: Math.atan2(c.frontX, c.frontZ), pitch: 0.15, dist: 4 });
     B.advance(0.5, 1 / 60);
-    return B.project(c.x + c.rightX * 0.45, c.y + 1.25, c.z + c.rightZ * 0.45, {});
+    // Find exposed board pixels: the modelled Ooga can cover the old fixed tap point.
+    for (const rise of [1.25, 1.7, 0.9]) for (const across of [0.45, 0.9, -0.45]) {
+      const point = B.project(c.x + c.rightX * across, c.y + rise, c.z + c.rightZ * across, {});
+      const hit = point && B.input.pick(point.x, point.y);
+      if (hit?.owner.kind === "piece" && hit.owner.piece === "chalkboard") return point;
+    }
+    throw new Error("Chalkboard fixture has no exposed tap point");
   })()`);
   const tapAt = async (point) => { await b.click(point.x, point.y); await b.sleep(50); };
   await tapAt(await standAtBoard());
@@ -13691,7 +15378,13 @@ const hubChalkboardReach = { name: "chalkboard reach", why: "rule: only an Ooga 
     const x = c.x + c.frontX * ${along} - c.rightX * 0.6, z = c.z + c.frontZ * ${along} - c.rightZ * 0.6;
     B.pilot.navigate({ position: { x, y: B.island.surfaceAt(x, z), z }, yaw: Math.atan2(c.frontX, c.frontZ), pitch: 0.15, dist: 4 });
     B.advance(0.5, 1 / 60);
-    return B.project(c.x + c.rightX * 0.45, c.y + 1.25, c.z + c.rightZ * 0.45, {});
+    // Find exposed board pixels: the modelled Ooga can cover the old fixed tap point.
+    for (const rise of [1.25, 1.7, 0.9]) for (const across of [0.45, 0.9, -0.45]) {
+      const point = B.project(c.x + c.rightX * across, c.y + rise, c.z + c.rightZ * across, {});
+      const hit = point && B.input.pick(point.x, point.y);
+      if (hit?.owner.kind === "piece" && hit.owner.piece === "chalkboard") return point;
+    }
+    throw new Error("Chalkboard fixture has no exposed tap point");
   })()`);
   // The room checks a writer's pose against chalk-board.js AT: it must be where the hub stands the board.
   const spot = await b.evaluate(`(() => { const c = BL.scenes.hub.debug.chalkboardAt, A = BL.chalkBoard.AT; return { at: [c.x, c.y, c.z, c.frontX, c.frontZ].map(v => +v.toFixed(3)), off: Math.hypot(c.x - A.x, c.z - A.z), rise: Math.abs(c.y - A.y), turn: Math.hypot(c.frontX - A.frontX, c.frontZ - A.frontZ) }; })()`);
@@ -14478,13 +16171,9 @@ const hubMatrix = { name: "hub matrix", why: "regression: the OBL cave blanked f
     return { free, freeAbove, outside, driven, drivenAbove, returned, batches, noDamage, gateLocked: M.gate.locked, wave: !!B.renderOpts.matrix };
   })()`);
   record("hub matrix: free and following cameras keep their view inside, above and outside the cave, without glyph batches or mirror HP", [r.free, r.freeAbove, r.outside, r.driven, r.drivenAbove, r.returned].every(view => view.black < 64) && !r.batches && !r.wave && r.noDamage && r.gateLocked, JSON.stringify(r));
-  const carved = await b.evaluate(`(() => { const B = __ooga, D = BL.scenes.hub.debug, rooms = new Map(B.mouths.map(mouth => [mouth.id, mouth.room])); return {
-    regions: D.caveSections.map(entry => { const room = rooms.get(entry.region.id); return { id: entry.region.id, width: entry.region.halfWidth, depth: entry.region.halfDepth, expectedWidth: room.w / 2 + 0.45, expectedDepth: (room.to + 1.6) / 2 }; }),
-    sealed: B.matrixGate.sealed.map(entry => ({ id: entry.mouth.id, visible: entry.node.visible, stop: entry.stopZ }))
-  }; })()`);
-  record("hub caves: carved chambers retain fitted bird's-eye roof regions and the sealed cave's seal", carved.regions.length === 5 && carved.regions.map(region => region.id).sort().join() === "c1,c10,c11,c2,c3"
-    && carved.regions.every(region => Math.abs(region.width - region.expectedWidth) < 1e-7 && Math.abs(region.depth - region.expectedDepth) < 1e-7)
-    && carved.sealed.length === 1 && carved.sealed[0].id === "c9" && carved.sealed.every(entry => entry.visible && Number.isFinite(entry.stop)), JSON.stringify(carved));
+  const sealed = await b.evaluate(`__ooga.matrixGate.sealed.map(entry => ({ id: entry.mouth.id, visible: entry.node.visible, stop: entry.stopZ }))`);
+  record("hub caves: the sealed cave retains its visible seal and collision boundary", sealed.length === 1 && sealed[0].id === "c9"
+    && sealed.every(entry => entry.visible && Number.isFinite(entry.stop)), JSON.stringify(sealed));
 } };
 const hubMirror = { name: "hub mirror", why: "rule: rifle shots and melee ripple the unbreakable mirror without damage or panel HP, including after a scene round trip", run: async (b) => {
   const physical = await b.evaluate(`(() => {
@@ -14692,7 +16381,8 @@ const oogatronPopups = { name: "oogatron popups", why: "rule: Oogatron windows k
   const point = (id, selector, x = 0.5, y = 0.5) => b.evaluate(`(() => {
     const e = document.getElementById(${JSON.stringify(id)}).querySelector(${JSON.stringify(selector)}), r = e.getBoundingClientRect();
     const x = r.x + r.width * ${x}, y = r.y + r.height * ${y};
-    if (!e.contains(document.elementFromPoint(x, y))) throw Error('Popup control is covered: ' + ${JSON.stringify(selector)});
+    const hit = document.elementFromPoint(x, y);
+    if (!e.contains(hit)) throw Error('Popup control is covered: ' + ${JSON.stringify(selector)} + ' by ' + hit?.tagName + '#' + hit?.id + '.' + hit?.className);
     return { x, y };
   })()`);
   const press = async (id, selector, x, y) => {
@@ -14939,10 +16629,14 @@ const hubGorillaPopulation = { name: "gorilla population restoration", why: "reg
         fromSite: e.fromSite, site: e.site, x: +e.root.position.x.toFixed(2), y: +e.root.position.y.toFixed(2), z: +e.root.position.z.toFixed(2),
         goalX: +e.goalX.toFixed(2), goalZ: +e.goalZ.toFixed(2), speed: +e.speed.toFixed(2), blocked: +e.blocked.toFixed(2),
         stuck: +e.stuck.time.toFixed(2), recover: +e.recover.toFixed(2), climbing: e.climb.active, jumping: e.jump.active, footprint: e.footprintMode,
-        goalY: +e.goalY.toFixed(2), roof: e.loungeRoof, climb: e.climb.active ? { descending: e.climb.descending, free: e.climb.free, hold: e.climb.holdPose,
+        goalY: +e.goalY.toFixed(2), roof: e.loungeRoof, rest: e.rest, exitFootprint: e.exitFootprint,
+        roam: { failedChoices: e.roam.failedChoices, nextChoice: e.roam.nextChoice, levelOnlyUntil: e.roam.levelOnlyUntil,
+          progressTime: e.roam.progressTime, count: e.roam.count, index: e.roam.index, target: [e.roam.targetX,e.roam.targetY,e.roam.targetZ],
+          failed: [e.roam.failedX,e.roam.failedZ,e.roam.failedUntil], wall: e.roam.wall, depart: e.roam.departPending, align: e.roam.alignTime },
+        elapsed: C.stats().elapsed, climb: e.climb.active ? { descending: e.climb.descending, free: e.climb.free, hold: e.climb.holdPose,
           mount: e.climb.mountPending, wait: e.climb.waitRelease, handoff: e.climb.handoffDirection, claim: e.climb.claimPending, crest: e.climb.crestPending,
           search: e.climb.searchPending, progress: +(e.climb.progress || 0).toFixed(2), length: +(e.climb.length || 0).toFixed(2), opening: e.climb.openingExit } : null });
-      const track = list.map(e => ({ e, pile, pileAt: pile ? 0 : -1, leftAt: -1, loungeAt: -1, maxStep: 0, prev: null, stall: null, trace: [],
+      const track = list.map(e => ({ e, pile, pileAt: pile ? 0 : -1, leftAt: -1, loungeAt: -1, maxStep: 0, prev: null, stall: null, trace: [], approach: [], transitions: [], state: "",
         last: { x: e.root.position.x, z: e.root.position.z }, recoveries: e.stuck.recoveries }));
       let f = 0;
       for (; f < frames && track.some(t => t.loungeAt < 0); f++) {
@@ -14955,6 +16649,17 @@ const hubGorillaPopulation = { name: "gorilla population restoration", why: "reg
           if (t.leftAt >= 0 && t.loungeAt < 0 && e.phase === "chill" && e.lounge && e.roam.arrived) t.loungeAt = f;
           if (!t.stall && e.stuck.recoveries !== t.recoveries) t.stall = { frame: f, ...t.prev };
           if (!t.stall) t.prev = snap(e);
+          if (t.leftAt >= 0 && !t.stall && t.loungeAt < 0) {
+            const state = [e.climb.active, e.climb.descending, e.climb.failure, e.jump.active, e.drive.airborne,
+              e.goalX.toFixed(2), e.goalY.toFixed(2), e.goalZ.toFixed(2)].join(":");
+            if (state !== t.state && t.transitions.length < 100) t.transitions.push({ frame: f, ...t.prev,
+              heading: e.heading, backout: e.backoutLeft, climbFailure: e.climb.failure, fromTop: e.climb.fromTop });
+            t.state = state;
+          }
+          if (t.leftAt >= 0 && t.loungeAt < 0 && !t.stall && f % 30 === 0) {
+            if (t.approach.length === 20) t.approach.shift();
+            t.approach.push({ frame: f, ...t.prev });
+          }
           // Until the pile, a sample every third of a second (at most 60): where a blocked walk dwells and why.
           if (t.pileAt < 0 && !t.stall && f % 10 === 0 && t.trace.length < 60) t.trace.push([f, +q.x.toFixed(2), +q.z.toFixed(2), +e.goalX.toFixed(2),
             +e.goalZ.toFixed(2), +e.speed.toFixed(2), +e.stuck.time.toFixed(2), e.stuck.escapeLeft > 0 ? 1 : 0, +e.blocked.toFixed(2), e.route]);
@@ -14965,7 +16670,7 @@ const hubGorillaPopulation = { name: "gorilla population restoration", why: "reg
         return { name: e.owner.traits.name, ok: t.pileAt >= 0 && t.leftAt >= t.pileAt && t.loungeAt >= t.leftAt
           && t.maxStep < 0.5 && e.stuck.recoveries === t.recoveries && e.mode === "chilling" && e.nonInteractive,
           pileAt: t.pileAt, leftAt: t.leftAt, loungeAt: t.loungeAt, frames: f, maxStep: +t.maxStep.toFixed(3),
-          recoveries: e.stuck.recoveries - t.recoveries, reason: e.stuck.reason, stall: t.stall, trace: t.loungeAt < 0 ? t.trace : undefined, pile: t.pile,
+          recoveries: e.stuck.recoveries - t.recoveries, reason: e.stuck.reason, stall: t.stall, trace: t.loungeAt < 0 ? t.trace : undefined, approach: t.loungeAt < 0 ? t.approach : undefined, transitions: t.loungeAt < 0 ? t.transitions : undefined, pile: t.pile,
           at: { x: +q.x.toFixed(2), y: +q.y.toFixed(2), z: +q.z.toFixed(2) }, fromPile: t.pile ? +Math.hypot(q.x - t.pile.x, q.z - t.pile.z).toFixed(2) : null,
           goal: { x: +e.goalX.toFixed(2), z: +e.goalZ.toFixed(2) }, phase: e.phase, route: e.route, lounge: e.lounge,
           rest: +e.rest.toFixed(2), failedChoices: e.roam.failedChoices, detour: e.roam.detour, roam: [e.roam.index, e.roam.count],
@@ -15403,10 +17108,10 @@ const combatTabProbe = (B, actor, gorilla, pointer) => {
       const shift = pending ? "ShiftLeft" : "ShiftRight", location = pending ? 1 : 2;
       key("keydown", "w", "KeyW"); key("keydown", "Shift", shift, { location });
       pointer("pointerdown", 0, 1); P.readInput(0.05);
-      // A pending Ooga overhead lock consumes the capture click before it
-      // reaches combat. Soft focus still exercises cancellation of a charge.
+      // Pending overhead focus consumes the capture click. Close-view soft focus
+      // exercises cancellation of a charge even while native lock is pending.
       const held = controls.read().y > 0;
-      const attackPrepared = gorilla ? actor.motion.poundCharge > 0 : pending ? !actor.weapon.meleeHeld : actor.weapon.meleeHeld;
+      const attackPrepared = gorilla ? actor.motion.poundCharge > 0 : pending && P.birdsEye ? !actor.weapon.meleeHeld : actor.weapon.meleeHeld;
       const first = key("keydown", "Tab", "Tab", { shiftKey: true });
       const stopped = quiet() && !focused() && (gorilla ? !actor.motion.poundCharge && !actor.drive.x && !actor.drive.z && !actor.drive.run
         : !actor.weapon.meleeHeld && !actor.weapon.triggerHeld);
@@ -15476,10 +17181,14 @@ const cameraSelectionProbe = (B, controller, select, reselect = null) => {
   return { immediate, progress, total, maxStep, began, finite, finished, repeated,
     smooth: immediate < 1e-6 && began && finite && finished && repeated && progress > 1e-6 && maxStep < total * 0.6 };
 };
-const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizontal aim rotates the view around a centerline reticle, zoom retains forward targets, and carry handoffs preserve valid cursors and camera distance", run: async (b) => {
+const hubCameraModes = { name: "hub camera modes", why: "regression: hub carry/combat gestures, focus and acquisition must use only supported orbit, shoulder and first-person views", run: async (b) => {
   const focusPoint = await b.evaluate(`(() => {
-    const B = __ooga, a = B.pilot.player, C = B.camera;
-    B.pilot.release(true); B.advance(0.1, 1 / 60);
+    const B = __ooga, body = B.pilot.player, a = body.npc || body, C = B.camera;
+    // A released body goes (#501): its NPC is stood where it was let go, to be double-clicked there.
+    const at = { x: body.root.position.x, y: body.root.position.y - body.baseY + a.baseY, z: body.root.position.z };
+    B.pilot.release(true);
+    if (a !== body) Object.assign(a.root.position, at);
+    B.advance(0.1, 1 / 60);
     const point = B.project(a.root.position.x, a.root.position.y - a.baseY + a.bodyHeight * 0.55, a.root.position.z, {});
     return { x: point.x, y: point.y, eye: [C.position.x, C.position.y, C.position.z] };
   })()`);
@@ -15557,9 +17266,9 @@ const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizon
   record("possession: signed-in and signed-out acquisition from low or high detached views smoothly recenters carry orbit at the fixed eye above or below ground; same-Ooga double-clicks neither snap nor restart the handoff",
     selectionModes.rows.length === 8 && selectionModes.rows.every(row => row.immediate < 1e-6 && row.acquired.selected
       && row.blend.smooth && row.acquired.mode === "orbit" && !row.acquired.combat && row.acquired.error < 0.001 && row.acquired.centered && row.repeated), JSON.stringify(selectionModes.rows));
-  record("Ooga X entry: signed in or out, a displayed eye below or exactly 45 degrees enters shoulder and only a higher eye enters bird's-eye, smoothly interrupting a rolled off-target acquisition regardless of requested orbit pitch",
+  record("Ooga X entry: signed in or out, every displayed eye enters shoulder without enabling the retired hub overhead view, smoothly interrupting a rolled off-target acquisition regardless of requested orbit pitch",
     selectionModes.retakes.every(row => row.entries.length === 3 && row.entries.every(e => e.pending && e.blend.smooth && e.selected && e.combat
-      && e.mode === (e.rise > 20 ? "birds-eye" : "shoulder") && e.projection === (e.rise > 20 ? 1 : 0) && e.finite)),
+      && e.mode === "shoulder" && e.projection === 0 && e.finite)),
     JSON.stringify(selectionModes.retakes.map(({ signedIn, entries }) => ({ signedIn, entries }))));
   const rightViews = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, C = B.camera, canvas = document.getElementById("scene"), rows = [];
@@ -15596,8 +17305,7 @@ const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizon
     P.hooks.onZoom(1.2, {}); B.advance(1, 1 / 60);
     P.hooks.onOrbit(0, (1.1 - P.orbit.tPitch) / 0.0035); B.advance(1, 1 / 60);
     P.modeAction("mode-toggle"); B.advance(1, 1 / 60);
-    // From an orbit this steep X enters bird's-eye (the orbit-angle rule): combat's clicks start at the shoulder.
-    if (P.mode === "birds-eye") { P.hooks.onZoom(0.001, {}); B.advance(1, 1 / 60); }
+    // The hub always enters combat at the shoulder, even from a steep carry orbit.
     click(); click(false); B.advance(1, 1 / 60); const combatOut = sample();
     click(); B.advance(1, 1 / 60); const combatBack = sample();
     P.hooks.onZoom(0.8, {}); B.advance(1, 1 / 60); const combatFirst = sample();
@@ -15641,11 +17349,12 @@ const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizon
             pointer("pointerup");
             const shots = a.weapon.shotsFired;
             pointer("pointerdown", 1, 4); pointer("pointermove", 2, 6);
-            rightChord = P.mode === "shoulder" && P.aiming && P.captureControl({}).focused
+            rightChord = P.mode === "first-person" && P.aiming && P.captureControl({}).focused
               && a.weapon.shotsFired === shots && !a.weapon.triggerHeld && !a.weapon.meleeHeld;
             pointer("pointermove", 2, 4); pointer("pointerup", 1, 0);
           } else click();
           B.advance(1, 1 / 60); const rightBack = sample();
+          if (combat && P.mode === "first-person") { P.hooks.onZoom(1.2, {}); P.update(2); }
           const recapture = [], interrupted = [], reticle = document.getElementById("weapon-reticle");
           if (combat) {
             const requestLock = Object.getOwnPropertyDescriptor(canvas, "requestPointerLock");
@@ -15678,7 +17387,7 @@ const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizon
             if (reason === "blur") window.dispatchEvent(new Event("blur"));
             else if (reason === "cancel") pointer("pointercancel");
             else if (reason === "other-button") { pointer("pointerdown", 1, 4); pointer("pointerup", 1, 0); }
-            // X twice passes through carry's orbit, from which a high eye re-enters combat overhead: bring it down.
+            // X twice passes through carry's orbit and re-enters the hub's shoulder view.
             else if (reason === "mode") { toggle(); toggle(); if (P.mode !== "shoulder") { P.hooks.onZoom(0.001, {}); P.update(2); } }
             else if (reason === "view") { P.hooks.onZoom(0.5, {}); P.hooks.onZoom(1.2, {}); P.update(2); }
             else { P.release(true); P.possess(npc); a = P.player; if (P.aiming !== combat) toggle(); if (P.mode !== "shoulder") P.hooks.onZoom(0.001, {}); P.update(2); }
@@ -15777,29 +17486,29 @@ const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizon
       && r.wheelIn.mode === "first-person" && !r.wheelIn.combat && r.firstClicked.mode === "first-person" && !r.firstClicked.combat
       && [r.wheelOut, r.heldOut].every(s => s.mode === "orbit" && !s.combat && Math.abs(s.wanted - 3.6) < 1e-6)
       && r.freshOut.mode === "orbit" && Math.abs(r.freshOut.wanted - 3.6 * 1.2) < 0.01 && Math.abs(r.freshOut.distance - r.freshOut.wanted) < 0.01)
-    // Carry returns to perspective orbit; only combat is forced to the overhead pole. Under the basement's ceiling
+    // Carry returns to perspective orbit. Under the basement's ceiling
     // the eye keeps its height as the orbit draws out.
     && rightViews.rows[0].out.horizontal > 0.01 && rightViews.rows[0].out.projection === 0
     && Math.abs(rightViews.rows[1].out.y - rightViews.rows[1].before.y) < 0.01
     && rightViews.carryFirst.mode === "first-person" && !rightViews.carryFirst.combat
     && rightViews.carryScrollBack.mode === "orbit" && !rightViews.carryScrollBack.combat && Math.abs(rightViews.carryScrollBack.wanted - 3.6) < 1e-6
-    && rightViews.combatOut.mode === "birds-eye" && rightViews.combatOut.combat && rightViews.combatOut.height === 21
+    && rightViews.combatOut.mode === "shoulder" && rightViews.combatOut.combat && rightViews.combatOut.projection === 0
     && rightViews.combatBack.mode === "shoulder" && rightViews.combatBack.combat
     && rightViews.combatFirst.mode === "first-person" && rightViews.combatFirst.combat
-    && rightViews.combatFirstOut.mode === "birds-eye" && rightViews.combatFirstOut.combat
-    && rightViews.combatFirstBack.mode === "shoulder" && rightViews.combatFirstBack.combat, JSON.stringify(rightViews));
-  record("view intent: signed-in and signed-out Oogas keep the carry/combat mode chosen by X through scroll and right-click, and combat's native chorded RMB goes from birds-eye to shoulder",
+    && rightViews.combatFirstOut.mode === "first-person" && rightViews.combatFirstOut.combat
+    && rightViews.combatFirstBack.mode === "first-person" && rightViews.combatFirstBack.combat, JSON.stringify(rightViews));
+  record("view intent: signed-in and signed-out Oogas keep the carry/combat mode chosen by X through scroll and right-click, and native chorded RMB preserves the current combat view",
     rightViews.authIntent.length === 4 && rightViews.authIntent.every(row => {
-      const modes = row.combat ? ["shoulder", "first-person", "shoulder", "birds-eye", "shoulder", "birds-eye", "shoulder"]
+      const modes = row.combat ? ["shoulder", "first-person", "shoulder", "shoulder", "shoulder", "shoulder", "first-person"]
         : ["orbit", "first-person", "orbit", "orbit", "orbit", "orbit", "first-person"];
-      const right = row.combat ? ["first-person", "birds-eye", "shoulder"] : ["first-person", "first-person", "first-person"];
+      const right = ["first-person", "first-person", "first-person"];
       return row.selected && row.steps.length === modes.length && row.steps.every((step, i) => step.mode === modes[i] && step.combat === row.combat)
         && [row.rightFirst, row.rightFar, row.rightBack].every((step, i) => step.combat === row.combat && step.mode === right[i]) && row.rightChord;
     }), JSON.stringify(rightViews.authIntent));
-  record("Ooga zoom stops: signed in or out, long wheel bursts stop at combat's shoulder in both directions and at carry's near orbit coming out of the eyes (going in, carry's orbit goes on into them), a pause starts the next step, and a reversed pinch stops at the same place",
+  record("Ooga zoom stops: signed in or out, inward bursts reach first person, outward bursts stop at shoulder or carry's near orbit, and only a fresh carry gesture zooms farther",
     rightViews.authIntent.every(row => row.combat
-      ? [row.inward, row.outward, row.heldPinch].every(s => s.mode === "shoulder" && s.combat)
-        && row.freshInward.mode === "first-person" && row.freshInward.combat && row.freshOutward.mode === "birds-eye" && row.freshOutward.combat
+      ? row.inward.mode === "first-person" && row.inward.combat && [row.outward, row.heldPinch].every(s => s.mode === "shoulder" && s.combat)
+        && row.freshInward.mode === "first-person" && row.freshInward.combat && row.freshOutward.mode === "shoulder" && row.freshOutward.combat
       : row.inward.mode === "first-person" && row.freshInward.mode === "first-person"
         && [row.outward, row.heldPinch].every(s => s.mode === "orbit" && Math.abs(s.wanted - 3.6) < 1e-6)
         && row.freshOutward.mode === "orbit" && row.freshOutward.wanted > row.outward.wanted
@@ -15812,14 +17521,14 @@ const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizon
       && r.combat && r.ads)), JSON.stringify(rightViews.authIntent.map(({ signedIn, combat, interrupted }) => ({ signedIn, combat, interrupted }))));
   record("Ooga Tab: soft and pending combat focus release on the first Tab, held repeats stay consumed until keyup, then Tab is native; Shift and held movement cannot leak, and UI controls always own navigation",
     rightViews.authIntent.every(row => !row.combat ? row.tabs.native : row.tabs.rows.length === 2
-      && row.tabs.rows.every((r, i) => r.view === (i ? "birds-eye" : "shoulder") && Object.entries(r).every(([key, value]) => key === "kind" || key === "view" || value === true))
+      && row.tabs.rows.every((r, i) => r.view === "shoulder" && Object.entries(r).every(([key, value]) => key === "kind" || key === "view" || value === true))
       && row.tabs.ui.length === 4 && row.tabs.ui.every(r => r.native && r.stopped)), JSON.stringify(rightViews.authIntent.map(({ signedIn, combat, tabs }) => ({ signedIn, combat, tabs }))));
   record("sleeping Ooga: signed in or out, right-click leaves the real bed, pose, view and cursor unchanged until waking",
     rightViews.sleepRows.length === 2 && rightViews.sleepRows.every(r => r.prepared && r.ignored && r.nativeTab && r.woke), JSON.stringify(rightViews.sleepRows));
   record("touch zoom: a two-finger pinch survives view changes and mouse-ID collisions, stops at combat's shoulder (carry's goes on into the eyes, and reversed comes back out to its near orbit and stops), and goes on to first person only after lifting and restarting",
     rightViews.touch.length === 2 && rightViews.touch.every(row => row.fine
-      && [row.outward, row.continued].every(s => s.mode === (row.combat ? "birds-eye" : "orbit") && s.combat === row.combat)
-      && (row.combat ? row.continued.height > row.outward.height * 1.2 : row.continued.distance > row.outward.distance * 1.2)
+      && [row.outward, row.continued].every(s => s.mode === (row.combat ? "shoulder" : "orbit") && s.combat === row.combat)
+      && (row.combat ? row.continued.projection === 0 && row.outward.projection === 0 : row.continued.distance > row.outward.distance * 1.2)
       && (row.combat ? row.stopped.mode === "shoulder" : row.stopped.mode === "orbit" && Math.abs(row.stopped.wanted - 3.6) < 1e-6) && row.stopped.combat === row.combat
       && row.restarted.mode === "first-person" && row.restarted.combat === row.combat), JSON.stringify(rightViews.touch));
   const shoulderFraming = await b.evaluate(`(() => {
@@ -15841,1014 +17550,19 @@ const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizon
       P.navigate({ position: location, yaw: 0, pitch: 0.3, dist: 4 }); B.advance(1, 1 / 60);
       const baseline = sample();
       for (const offset of [0, 0.4]) {
-        P.hooks.onZoom(1.2, {}); B.advance(1, 1 / 60);
-        const point = B.project(a.root.position.x + B.camera.up.x * offset, location.y + 0.01, a.root.position.z + B.camera.up.z * offset, {});
-        P.hooks.onOrbit(0, point.y - parseFloat(document.getElementById("weapon-reticle").style.top)); B.advance(0.2, 1 / 60);
-        P.hooks.onZoom(0.001, {}); B.advance(2, 1 / 60); const settled = sample();
+        P.hooks.onOrbit(0, offset * 30); B.advance(1, 1 / 60); const settled = sample();
         P.hooks.onOrbit(12, 0); B.advance(0.7, 1 / 60);
         rows.push({ floor: location.y, offset, baseline, settled, looking: sample() });
       }
     }
     return rows;
   })()`);
-  record("shoulder combat: zooming toward the feet keeps normal head-side framing on the surface and a clear, shortened shoulder boom underground, including after mouse-look", shoulderFraming.length === 4 && shoulderFraming.every(row => row.baseline.side > 0
+  record("shoulder combat: looking down keeps normal head-side framing on the surface and a clear, shortened shoulder boom underground, including after mouse-look", shoulderFraming.length === 4 && shoulderFraming.every(row => row.baseline.side > 0
     && [row.settled, row.looking].every(s => s.mode === "shoulder" && s.headOffset > 0
       && (row.floor >= 0 ? row.baseline.side > 0.5 && Math.abs(s.side - row.baseline.side) < 0.001
         : s.side > 0 && s.side <= shoulderFraming[0].baseline.side + 0.001 && s.clear && !s.cutaway))), JSON.stringify(shoulderFraming));
-  const entry = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, C = B.camera, a = P.player;
-    P.navigate({ position: { x: -8, y: 0, z: 8 }, yaw: 0, pitch: 0.3, dist: 4 }); B.advance(1, 1 / 60);
-    const view = BL.math.mat4.create();
-    window.__birdsSnapshot = () => { const rect = document.getElementById("scene").getBoundingClientRect(), reticle = document.getElementById("weapon-reticle"), screen = B.project(a.root.position.x, a.root.position.y, a.root.position.z, {});
-      BL.math.mat4.lookAt(view, C.position, C.target, C.up || { x: 0, y: 1, z: 0 });
-      return { mode: P.mode, combat: P.aiming, overhead: P.birdsEye, mix: P.birdsEyeMix, height: P.birdsEyeHeight,
-      altitude: C.position.y - (a.root.position.y - a.baseY), horizontal: Math.hypot(C.position.x - a.root.position.x, C.position.z - a.root.position.z),
-      down: (C.position.y - C.target.y) / Math.hypot(C.target.x - C.position.x, C.target.y - C.position.y, C.target.z - C.position.z),
-      yaw: a.root.rotation.y, x: C.position.x, y: C.position.y, z: C.position.z,
-      distance: Math.hypot(C.position.x - a.root.position.x, C.position.y - a.root.position.y, C.position.z - a.root.position.z),
-      center: screen ? Math.hypot(screen.x - B.renderer.size.width / 2, screen.y - B.renderer.size.height / 2) : Infinity,
-      pointer: P.cursor.active ? [P.cursor.x, P.cursor.y] : [rect.left + parseFloat(reticle.style.left), rect.top + parseFloat(reticle.style.top)],
-      forward: [-view[2], -view[6], -view[10]], screenUp: [view[1], view[5], view[9]], orthoMix: C.orthoMix || 0, fov: C.fov,
-      up: C.up ? [C.up.x, C.up.y, C.up.z] : [0, 1, 0], cutoff: B.renderOpts.cutawayMaxY }; };
-    const weaponDirection = () => { BL.scene.updateWorld(a.root); const w = a.parts.gun.world, length = Math.hypot(w[8], w[9], w[10]); return [w[8] / length, w[9] / length, w[10] / length]; };
-    const weaponBefore = weaponDirection(), before = __birdsSnapshot(); P.hooks.onZoom(1.02, {}); P.update(0);
-    const weaponAfter = weaponDirection(), weaponSnap = Math.hypot(...weaponAfter.map((value, i) => value - weaponBefore[i]));
-    const immediate = Math.hypot(C.position.x - before.x, C.position.y - before.y, C.position.z - before.z);
-    let maxStep = 0, finite = true, radiusError = 0, last = [C.position.x, C.position.y, C.position.z];
-    for (let i = 0; i < 90; i++) { B.advance(1 / 60, 1 / 60); const p = C.position;
-      maxStep = Math.max(maxStep, Math.hypot(p.x - last[0], p.y - last[1], p.z - last[2]));
-      radiusError = Math.max(radiusError, Math.abs(Math.hypot(p.x - a.root.position.x, p.y - a.root.position.y, p.z - a.root.position.z) - before.distance));
-      finite = finite && [p.x, p.y, p.z, C.target.x, C.target.y, C.target.z].every(Number.isFinite); last = [p.x, p.y, p.z]; }
-    return { before, immediate, weaponSnap, maxStep, radiusError, finite, after: __birdsSnapshot() };
-  })()`);
-  record("birds-eye combat: a small shoulder zoom smoothly tilts overhead at the displayed radius instead of jumping to the default height", entry.before.mode === "shoulder" && entry.after.mode === "birds-eye" && entry.after.overhead && entry.after.combat && entry.after.mix === 1 && entry.after.horizontal < 1e-6 && entry.after.down > 0.999999 && entry.immediate < 1e-6 && entry.weaponSnap < 1e-5 && entry.maxStep < 3 && entry.radiusError < 0.5 && entry.after.distance > entry.before.distance && entry.finite, JSON.stringify(entry));
-  const outlines = await b.evaluate(`(() => { const B = __ooga, H = B.headquarters; B.advance(0.1, 1 / 60); return {
-    mode: B.pilot.mode, combat: B.pilot.aiming, wallLines: H.sightGuides.structureCount, objectLines: H.sightGuides.objectCount,
-    wall: !!H.sightGuides.structure || !!H.sightGuides.structures, bananaWall: !!H.bananaGuides.structure || !!H.bananaGuides.structures,
-    guideLines: H.cameraCover.guideLines, outlined: H.cameraCover.outlined
-  }; })()`);
-  record("birds-eye combat: wall and object outline passes stay disabled", outlines.mode === "birds-eye" && outlines.combat && !outlines.wallLines && !outlines.objectLines
-    && !outlines.wall && !outlines.bananaWall && !outlines.guideLines && !outlines.outlined, JSON.stringify(outlines));
-  const size = await b.evaluate(`(() => { const r = document.getElementById("scene").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height }; })()`);
-  await b.mouse("mouseMoved", size.x, size.y, { button: "none" });
-  await b.evaluate(`__ooga.pilot.focusAim()`);
-  await b.mouse("mouseMoved", size.x + size.w * 0.22, size.y - size.h * 0.14, { button: "none" });
-  await b.evaluate(`__ooga.advance(0.5, 1 / 60)`);
-  const aim = await b.evaluate(`__birdsSnapshot()`);
-  const turn = Math.abs(Math.atan2(Math.sin(aim.yaw - entry.after.yaw), Math.cos(aim.yaw - entry.after.yaw)));
-  const viewTurn = Math.atan2(aim.up[0] * entry.after.up[2] - aim.up[2] * entry.after.up[0], aim.up[0] * entry.after.up[0] + aim.up[2] * entry.after.up[2]);
-  record("birds-eye combat: real horizontal mouse movement turns the overhead view while the reticle stays on its forward centerline", turn > 0.15 && viewTurn < -0.15 && aim.horizontal < 1e-6 && aim.down > 0.999999
-    && Math.abs(aim.pointer[0] - size.x) < 0.02 && aim.pointer[1] >= size.y - size.h / 2 && aim.pointer[1] < size.y, JSON.stringify({ before: entry.after, aim, turn, viewTurn }));
-  await b.evaluate(`if (document.pointerLockElement) document.exitPointerLock();`);
-  if (!await untilPage(b, "!document.pointerLockElement", 3000)) throw Error("Pointer lock did not release before the unlocked gesture probe");
-  const centered = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, R = B.renderer, a = P.player, reticle = document.getElementById("weapon-reticle"), canvas = document.getElementById("scene"), rect = canvas.getBoundingClientRect(), ray = {};
-    P.hooks.onZoom(60 / P.birdsEyeHeight); B.advance(1.5, 1 / 60); const before = __birdsSnapshot();
-    const width = R.size.width, height = R.size.height, inset = parseFloat(reticle.style.getPropertyValue("--reticle-radius"));
-    const pointer = () => ({ x: parseFloat(reticle.style.left), y: parseFloat(reticle.style.top) });
-    // In a settled overhead projection every point on this vertical ray shares
-    // the same pixel, whether the actual hit is land or an item's raised face.
-    const pointAt = (x, y) => { R.ray(x, y, B.camera, ray); const t = (a.root.position.y - a.baseY - a.hop - ray.oy) / ray.dy;
-      return { x: ray.ox + ray.dx * t, y: ray.oy + ray.dy * t, z: ray.oz + ray.dz * t }; };
-    const start = { x: width / 2, y: height * 0.14 }, original = pointAt(start.x, start.y);
-    P.hooks.onOrbit(0, start.y - pointer().y);
-    // Scroll before another frame refreshes aim: the anchor must come from
-    // this pointer position, not the previous assisted hit or cached ground ray.
-    let anchor = original, center = 0, horizontal = 0, minHeight = before.height, screenError = 0, edgeError = 0, directionError = 0, boundsError = 0, inside = 0, outside = 0;
-    const sample = () => {
-      const s = __birdsSnapshot(), p = pointer(), projected = R.project(anchor.x, anchor.y, anchor.z, {});
-      center = Math.max(center, s.center); horizontal = Math.max(horizontal, s.horizontal); minHeight = Math.min(minHeight, s.height);
-      if (projected.y >= inset && projected.y <= height / 2) {
-        inside++; screenError = Math.max(screenError, Math.hypot(p.x - projected.x, p.y - projected.y));
-      } else {
-        outside++; edgeError = Math.max(edgeError, Math.abs(p.y - inset));
-        const dx = projected.x - width / 2, dy = projected.y - height / 2, px = p.x - width / 2, py = p.y - height / 2;
-        directionError = Math.max(directionError, dx * px + dy * py > 0 ? Math.abs(dx * py - dy * px) / Math.hypot(dx, dy) : Infinity);
-      }
-      boundsError = Math.max(boundsError, Math.abs(p.x - width / 2), -p.y, p.y - height / 2);
-    };
-    const zoom = (factor, frames = 60) => { P.hooks.onZoom(factor); for (let i = 0; i < frames; i++) { B.advance(1 / 60, 1 / 60); sample(); } };
-    zoom(0.75); const moved = pointer(); zoom(0.8); const edge = pointer(); zoom(0.9); const repeated = pointer();
-    const unlocked = document.pointerLockElement !== canvas; P.focusAim();
-    const mouse = (dx, dy) => canvas.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: rect.left + start.x, clientY: rect.top + start.y, movementX: dx, movementY: dy }));
-    mouse(0, 0); B.advance(1 / 60, 1 / 60); sample(); const zero = pointer(), zeroError = Math.hypot(zero.x - repeated.x, zero.y - repeated.y);
-    zoom(1 / (0.75 * 0.8 * 0.9), 90); const returned = pointer(), returnError = Math.hypot(returned.x - start.x, returned.y - start.y);
-    zoom(0.54, 90); const clamped = pointer(), dx = -8, dy = 4;
-    const angle = () => Math.atan2(-B.camera.up.x, -B.camera.up.z), wrap = n => Math.atan2(Math.sin(n), Math.cos(n)), yaw = angle();
-    // Native coordinates still describe the old cursor location. Relative Y
-    // resumes from the edge, while relative X turns the view, not the reticle.
-    const wantedY = Math.max(0, Math.min(height / 2, clamped.y + dy * height / rect.height));
-    const wantedTurn = -Math.atan2(dx * width / rect.width, Math.max(inset, height * 0.1, height / 2 - wantedY));
-    mouse(dx, dy); const immediate = pointer(); B.advance(1 / 60, 1 / 60);
-    const manual = pointer(), manualError = Math.max(Math.hypot(immediate.x - clamped.x, immediate.y - clamped.y), Math.hypot(manual.x - width / 2, manual.y - wantedY));
-    B.advance(1, 1 / 60); const released = pointer(), releasedError = Math.hypot(released.x - manual.x, released.y - manual.y), mouseTurnError = Math.abs(wrap(angle() - yaw) - wantedTurn);
-    anchor = pointAt(released.x, released.y); zoom(1 / 0.54, 90);
-    const final = pointer(), originalScreen = R.project(original.x, original.y, original.z, {});
-    P.hooks.onOrbit(-4, -2); B.advance(1 / 60, 1 / 60); const hooked = pointer(), hookError = Math.hypot(hooked.x - width / 2, hooked.y - Math.max(0, Math.min(height / 2, final.y - 2)));
-    return { before, center, horizontal, minHeight, restored: P.birdsEyeHeight, inside, outside, screenError, edgeError, directionError, boundsError,
-      travel: Math.hypot(moved.x - start.x, moved.y - start.y), edge, repeated, returnError, unlocked, zeroError, manualError, releasedError, mouseTurnError, hookError,
-      newTarget: Math.hypot(final.x - originalScreen.x, final.y - originalScreen.y) };
-  })()`);
-  record("birds-eye combat: animated zoom keeps the character centered while aiming ahead", centered.center < 0.02 && centered.horizontal < 1e-6 && centered.minHeight < centered.before.height - 1 && Math.abs(centered.restored - centered.before.height) < 0.02, JSON.stringify(centered));
-  record("birds-eye combat: zoom tracks the fresh world point, keeps an off-screen forward target at the top edge across repeated scrolls and zero-motion events, and restores it on zoom-out", centered.inside > 30 && centered.outside > 30 && centered.screenError < 0.05 && centered.edgeError < 0.05 && centered.directionError < 0.05 && centered.boundsError < 0.01 && centered.travel > 20 && centered.zeroError < 0.02 && centered.returnError < 0.05, JSON.stringify(centered));
-  record("birds-eye combat: small native mouse and orbit gestures release the tracked target without jumping to stale absolute coordinates", centered.unlocked && centered.manualError < 0.02 && centered.releasedError < 0.02 && centered.mouseTurnError < 0.001 && centered.hookError < 0.02 && centered.newTarget > 20, JSON.stringify(centered));
-  const rotation = await b.evaluate(`(() => {
-    const B = __ooga, angle = () => { const s = __birdsSnapshot(); return Math.atan2(-s.up[0], -s.up[2]); }, wrap = n => Math.atan2(Math.sin(n), Math.cos(n));
-    // The preceding mouse/orbit probe ends one frame after a new gesture.
-    // Settle that gesture before comparing equal opposite held-key turns.
-    B.advance(1, 1 / 60);
-    const key = (type, k) => window.dispatchEvent(new KeyboardEvent(type, { key: k }));
-    const hold = (k, frames) => { const before = angle(); key("keydown", k); const immediate = Math.abs(wrap(angle() - before)); let total = 0, maxStep = 0, center = 0, last = before;
-      for (let i = 0; i < frames; i++) { B.advance(1 / 60, 1 / 60); const next = angle(), step = wrap(next - last); total += step; maxStep = Math.max(maxStep, Math.abs(step)); center = Math.max(center, __birdsSnapshot().center); last = next; }
-      key("keyup", k); B.advance(0.6, 1 / 60); const settled = angle(); B.advance(0.5, 1 / 60);
-      return { before, immediate, total, maxStep, center, after: angle(), stopped: Math.abs(wrap(angle() - settled)) }; };
-    const left = hold("q", 36), right = hold("e", 36), around = hold("e", 252), before = angle(); key("keydown", "n"); key("keyup", "n");
-    const immediate = Math.abs(wrap(angle() - before)); let path = 0, maxStep = 0, monotonic = true, last = before, first = null;
-    for (let i = 0; i < 90; i++) { B.advance(1 / 60, 1 / 60); const next = angle(), step = Math.abs(wrap(next - last)); if (!i) first = next;
-      monotonic = monotonic && Math.abs(next) <= Math.abs(last) + 1e-6; path += step; maxStep = Math.max(maxStep, step); last = next; }
-    return { left, right, returned: Math.abs(wrap(right.after - left.before)), around, north: { before, immediate, first, after: angle(), path, maxStep, monotonic } };
-  })()`);
-  record("birds-eye combat: held Q and E rotate smoothly in opposite directions and settle after release", rotation.left.total > 0.7 && rotation.right.total < -0.7 && [rotation.left, rotation.right].every(r => r.immediate < 1e-6 && r.maxStep < 0.04 && r.center < 0.02 && r.stopped < 0.001) && rotation.returned < 0.01, JSON.stringify(rotation));
-  const north = rotation.north;
-  record("birds-eye combat: N eases back to north along the shortest path after rotating past a full turn", Math.abs(rotation.around.total) > Math.PI * 2 && Math.abs(north.before) > 0.2 && north.immediate < 1e-6 && Math.abs(north.first) > 0.01 && Math.abs(north.first) < Math.abs(north.before) && Math.abs(north.after) < 0.001 && north.path <= Math.abs(north.before) + 0.001 && north.maxStep < 0.25 && north.monotonic, JSON.stringify(north));
-  const zoom = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot; P.hooks.onZoom(100, {}); B.advance(1.5, 1 / 60); const max = __birdsSnapshot();
-    P.hooks.onZoom(100, {}); B.advance(0.5, 1 / 60); const clamped = __birdsSnapshot();
-    P.hooks.onZoom(0.75, {}); B.advance(1, 1 / 60); const lowered = __birdsSnapshot();
-    P.hooks.onZoom(100, {}); B.advance(1, 1 / 60); const fromMax = __birdsSnapshot();
-    const C = B.camera, before = [C.position.x, C.position.y, C.position.z]; P.hooks.onZoom(0.001, {});
-    const immediate = Math.hypot(C.position.x - before[0], C.position.y - before[1], C.position.z - before[2]);
-    let last = before, maxStep = 0, switchFrame = -1;
-    for (let i = 0; i < 90; i++) { B.advance(1 / 60, 1 / 60); const p = C.position;
-      maxStep = Math.max(maxStep, Math.hypot(p.x - last[0], p.y - last[1], p.z - last[2])); last = [p.x, p.y, p.z];
-      if (switchFrame < 0 && P.mode === "shoulder") switchFrame = i + 1; }
-    const shoulder = __birdsSnapshot(); P.hooks.onZoom(0.8, {}); B.advance(1.5, 1 / 60); const first = __birdsSnapshot();
-    P.hooks.onZoom(1.2, {}); B.advance(1.5, 1 / 60); const back = __birdsSnapshot();
-    P.hooks.onZoom(1.2, {}); B.advance(1, 1 / 60); return { max, clamped, lowered, fromMax, immediate, maxStep, switchFrame, shoulder, first, back };
-  })()`);
-  record("birds-eye combat: a full-height inward zoom retains combat through shoulder and first person along a continuous path", [zoom.max, zoom.clamped, zoom.lowered, zoom.fromMax, zoom.shoulder, zoom.first, zoom.back].every(view => view.combat) && Math.abs(zoom.max.height - zoom.clamped.height) < 0.01 && zoom.lowered.height < zoom.max.height && zoom.lowered.mode === "birds-eye" && zoom.fromMax.height > 60 && zoom.immediate < 1e-6 && zoom.maxStep < 5 && zoom.switchFrame > 0 && zoom.switchFrame < 45 && zoom.shoulder.mode === "shoulder" && zoom.first.mode === "first-person" && zoom.back.mode === "shoulder", JSON.stringify(zoom));
-  await b.evaluate(`(() => { const B = __ooga, reticle = document.getElementById("weapon-reticle"); B.pilot.hooks.onOrbit(0, B.renderer.size.height * 0.25 - parseFloat(reticle.style.top)); B.advance(0.5, 1 / 60); })()`);
-  const handoffs = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, difference = (a, b) => Math.hypot(...a.map((n, i) => n - b[i]));
-    window.__birdsHandoff = frames => {
-      const before = __birdsSnapshot(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "x" })); window.dispatchEvent(new KeyboardEvent("keyup", { key: "x" }));
-      let last = before, eyeStep = 0, forwardStep = 0, upStep = 0, projectionStep = 0, radiusError = 0, cursorError = 0, fovError = 0, center = 0, blended = 0;
-      const sample = () => { const s = __birdsSnapshot();
-        eyeStep = Math.max(eyeStep, Math.hypot(s.x - last.x, s.y - last.y, s.z - last.z));
-        forwardStep = Math.max(forwardStep, difference(s.forward, last.forward)); upStep = Math.max(upStep, difference(s.screenUp, last.screenUp));
-        projectionStep = Math.max(projectionStep, Math.abs(s.orthoMix - last.orthoMix)); radiusError = Math.max(radiusError, Math.abs(s.distance - before.distance));
-        cursorError = Math.max(cursorError, difference(s.pointer, before.pointer)); fovError = Math.max(fovError, Math.abs(s.fov - before.fov));
-        if (s.overhead && s.mix === 1) center = Math.max(center, s.center);
-        if (s.orthoMix > 0 && s.orthoMix < 1) blended++;
-        last = s;
-      };
-      sample(); const immediate = { eyeStep, forwardStep, upStep, projectionStep, radiusError, cursorError };
-      for (let i = 0; i < frames; i++) { B.advance(1 / 60, 1 / 60); sample(); }
-      return { before, after: last, immediate, eyeStep, forwardStep, upStep, projectionStep, radiusError, cursorError, fovError, center, blended };
-    };
-    const carry = __birdsHandoff(90), diagonal = [];
-    for (const side of ["a", "d"]) { const before = P.orbit.tYaw; window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); window.dispatchEvent(new KeyboardEvent("keydown", { key: side }));
-      B.advance(0.4, 1 / 60); window.dispatchEvent(new KeyboardEvent("keyup", { key: side })); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));
-      diagonal.push(Math.abs(Math.atan2(Math.sin(P.orbit.tYaw - before), Math.cos(P.orbit.tYaw - before)))); }
-    const yaw = P.orbit.tYaw; P.hooks.onOrbit(40, -70); B.advance(1, 1 / 60); const drag = { yaw: Math.abs(P.orbit.tYaw - yaw), down: __birdsSnapshot().down };
-    const entering = __birdsHandoff(18), entryReversed = __birdsHandoff(90);
-    const combat = __birdsHandoff(90), partial = __birdsHandoff(18), reversed = __birdsHandoff(90);
-    return { carry, diagonal, drag, entering, entryReversed, combat, partial, reversed };
-  })()`);
-  const continuous = r => Object.values(r.immediate).every(n => n < 1e-6) && r.eyeStep < 3 && r.forwardStep < 0.15 && r.upStep < 0.15 && r.projectionStep < 0.08 && r.radiusError < 0.02 && r.cursorError < 0.02 && r.fovError < 1e-6 && r.center < 0.02 && r.blended > 2;
-  record("birds-eye combat: X smoothly hands off both ways with a valid centerline cursor and fixed character distance, including reversal in each direction mid-transition", [handoffs.carry, handoffs.entering, handoffs.entryReversed, handoffs.combat, handoffs.partial, handoffs.reversed].every(continuous)
-    && Math.hypot(handoffs.carry.before.pointer[0] - size.x, handoffs.carry.before.pointer[1] - size.y) > 20
-    && [handoffs.carry, handoffs.entryReversed].every(r => r.after.mode === "orbit" && !r.after.combat && r.after.orthoMix === 0)
-    && Math.abs(handoffs.carry.after.altitude - handoffs.carry.before.altitude) < 0.02 && handoffs.carry.after.down > 0.999
-    && [handoffs.entering, handoffs.partial].every(r => r.after.orthoMix > 0 && r.after.orthoMix < 1)
-    && [handoffs.combat, handoffs.reversed].every(r => r.after.mode === "birds-eye" && r.after.combat && r.after.down > 0.999999 && r.after.orthoMix === 1 && r.after.center < 0.02), JSON.stringify(handoffs));
-  record("birds-eye combat: carry orbit stays still on W+A and W+D, and manual orbit rotation remains available", handoffs.diagonal.every(n => n < 1e-6) && handoffs.drag.yaw > 0.1 && handoffs.drag.down < 0.99 && handoffs.carry.after.cutoff >= 1e5, JSON.stringify({ diagonal: handoffs.diagonal, drag: handoffs.drag, cutoff: handoffs.carry.after.cutoff }));
-  const falling = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, I = B.island, a = P.player, C = B.camera, diagonal = -Math.SQRT1_2;
-    const key = (type, k) => window.dispatchEvent(new KeyboardEvent(type, { key: k, code: "Key" + k.toUpperCase(), bubbles: true }));
-    let radius = 5; while (radius < 100 && I.onLand(diagonal * radius, diagonal * radius)) radius += 0.25;
-    const x = diagonal * (radius - 1.5), z = x, start = { position: { x, y: I.surfaceAt(x, z), z }, yaw: Math.PI, pitch: 0.4, dist: 24 };
-    const run = bird => {
-      if (P.aiming) P.modeAction("mode-toggle");
-      P.navigate({ ...start, pitch: bird ? 1.1 : start.pitch }); B.advance(1, 1 / 60);
-      if (bird) {
-        P.modeAction("mode-toggle"); key("keydown", "n"); key("keyup", "n"); B.advance(1.5, 1 / 60);
-        const reticle = document.getElementById("weapon-reticle"), halfHeight = B.renderer.size.height / 2;
-        P.hooks.onOrbit(0, halfHeight - parseFloat(reticle.style.top));
-        const reach = Math.max(parseFloat(reticle.style.getPropertyValue("--reticle-radius")), halfHeight * 0.2);
-        for (let i = 0; i < 3; i++) P.hooks.onOrbit(-reach * Math.tan(Math.PI / 3), 0);
-        B.advance(1.5, 1 / 60);
-        P.hooks.onOrbit(0, B.renderer.size.height * 0.1 - parseFloat(reticle.style.top)); B.advance(0.4, 1 / 60);
-      }
-      const p = a.root.position, trace = [], projected = {}, initial = [p.x, p.y, p.z];
-      const aimDot = diagonal * (Math.sin(a.root.rotation.y) + Math.cos(a.root.rotation.y));
-      let off = -1, back = -1, departure = null, low = Infinity, center = 0, follow = 0, clearance = Infinity, gravityError = 0, ballisticError = 0, gravityFrames = 0, shown = true;
-      let lastY = p.y, lastEye = C.position.y, lastV = a.hopV;
-      key("keydown", "s"); key("keydown", "d");
-      try {
-        for (let i = 0; i < 600; i++) {
-          B.advance(1 / 60, 1 / 60); const feet = p.y - a.baseY;
-          if (low < -50 && Math.hypot(p.x, p.z) < 12 && feet > -1) { back = i; break; }
-          low = Math.min(low, feet);
-          // Hop is relative to the live support, including the unseen abyss
-          // floor. The body's world height must never jump to that support.
-          if (off < 0 && feet - a.hop < -100) {
-            off = i; departure = { x: p.x - initial[0], z: p.z - initial[2], vx: a.leap.vx, vz: a.leap.vz };
-            key("keyup", "s"); key("keyup", "d");
-          } else if (off >= 0) {
-            gravityFrames++; gravityError = Math.max(gravityError, Math.abs(a.hopV - lastV + 9.8 / 60));
-            ballisticError = Math.max(ballisticError, Math.abs(p.y - lastY - a.hopV / 60));
-          }
-          trace.push([p.x, p.y, p.z, a.hopV, a.leap.vx, a.leap.vz]);
-          if (bird) {
-            const screen = B.project(p.x, p.y, p.z, projected);
-            center = Math.max(center, screen ? Math.hypot(screen.x - B.renderer.size.width / 2, screen.y - B.renderer.size.height / 2) : Infinity);
-            follow = Math.max(follow, Math.abs(C.position.y - lastEye - p.y + lastY));
-            let cut = B.renderOpts.cutawayMaxY;
-            for (let j = 0; j < B.renderOpts.cutawayRegionCount; j++) {
-              const r = B.renderOpts.cutawayRegions[j], dx = p.x - r.x, dz = p.z - r.z;
-              if (Math.abs(dx * r.cos - dz * r.sin) < r.halfWidth + a.bodyRadius && Math.abs(dx * r.sin + dz * r.cos) < r.halfDepth + a.bodyRadius) cut = Math.min(cut, r.y);
-            }
-            clearance = Math.min(clearance, cut - feet - a.bodyHeight - Math.max(0, a.viewLift));
-            shown = shown && a.root.visible && P.mode === "birds-eye" && C.orthoMix === 1;
-          }
-          lastY = p.y; lastEye = C.position.y; lastV = a.hopV;
-        }
-      } finally { key("keyup", "s"); key("keyup", "d"); }
-      return { trace, initial, aimDot, off, back, departure, low, center, follow, clearance, gravityError, ballisticError, gravityFrames, shown };
-    };
-    try {
-      const carry = run(false), bird = run(true); let error = 0;
-      for (let i = 0; i < Math.min(carry.trace.length, bird.trace.length); i++) for (let j = 0; j < carry.trace[i].length; j++) error = Math.max(error, Math.abs(carry.trace[i][j] - bird.trace[i][j]));
-      const summarize = r => { const { trace, ...rest } = r; return { ...rest, frames: trace.length }; };
-      return { edge: radius < 100, sameActor: P.player === a, error, carry: summarize(carry), bird: summarize(bird) };
-    } finally {
-      P.navigate({ position: { x: -8, y: 0, z: 8 }, yaw: 0, pitch: 0.3, dist: 24 });
-      if (!P.aiming) P.modeAction("mode-toggle"); B.advance(1, 1 / 60);
-    }
-  })()`);
-  record("birds-eye combat: walking off the same ledge has the same launch and gravity as carry orbit, even when aiming opposite travel", falling.edge && falling.sameActor && falling.error < 0.0001
-    && falling.bird.aimDot < -0.5 && falling.carry.frames === falling.bird.frames && falling.carry.off === falling.bird.off && falling.carry.back === falling.bird.back
-    && [falling.carry, falling.bird].every(r => r.off >= 0 && r.back > r.off && r.back < 600 && r.low < -50 && r.gravityFrames > 120 && r.gravityError < 1e-5 && r.ballisticError < 1e-5 && r.departure.x < -0.5 && r.departure.z < -0.5 && r.departure.vx < 0 && r.departure.vz < 0), JSON.stringify(falling));
-  record("birds-eye combat: the falling character stays centered and visible above every cut plane until respawn, without a camera-height lag", falling.bird.shown && falling.bird.center < 0.02 && falling.bird.follow < 1e-5 && falling.bird.clearance > 0.06 && falling.bird.low < -50 && falling.bird.back > falling.bird.off, JSON.stringify(falling.bird));
-  // The abyss emptied the AK; load it so accidental fire through the HUD
-  // would actually spend ammunition. Start the swap check with the club.
-  // Native pointer lock needs an active tab as well as emulated focus.
-  await b.send("Page.bringToFront");
-  await b.evaluate(`__ooga.crew.configureWeapon(__ooga.pilot.player, 2, 30); __ooga.pilot.weaponMode(1)`);
-  await untilPage(b, 'B.pilot.player.weapon.primaryEquipped');
-  await b.click(size.x, size.y);
-  await untilPage(b, 'document.pointerLockElement === document.getElementById("scene")');
-  const hudPointer = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, a = P.player, canvas = document.getElementById("scene"), reticle = document.getElementById("weapon-reticle"), rect = canvas.getBoundingClientRect();
-    B.advance(0.1, 1 / 60);
-    const sample = () => ({ x: P.cursor.x, y: P.cursor.y, reticleX: parseFloat(reticle.style.left), reticleY: parseFloat(reticle.style.top) });
-    const move = (dx, dy) => canvas.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, movementX: dx, movementY: dy }));
-    // Hidden pointer-lock input cannot independently drift the click destination
-    // before the frame updates the reticle and its weapon target together.
-    const before = sample(); move(1000, -1000); const pending = sample(); B.advance(1 / 60, 1 / 60); const top = sample();
-    move(-1000, 1000); B.advance(1 / 60, 1 / 60); const center = sample();
-    const buttonPoint = id => { const r = document.getElementById(id).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
-    const out = { active: P.cursor.active, visible: P.cursor.visible, locked: document.pointerLockElement === canvas, before, pending, top, center,
-      centerX: rect.left + rect.width / 2, topY: rect.top, centerY: rect.top + rect.height / 2, width: B.renderer.size.width, height: B.renderer.size.height,
-      secondary: buttonPoint("weapon-hud"), primaryButton: buttonPoint("primary-hud"), primary: a.weapon.primaryEquipped,
-      shots: a.weapon.shotsFired, ammo: a.weapon.ammo, reticleZ: parseInt(getComputedStyle(reticle).zIndex, 10) };
-    if (document.pointerLockElement) document.exitPointerLock();
-    return out;
-  })()`);
-  if (!await untilPage(b, "!document.pointerLockElement", 3000)) throw Error("Pointer lock did not release before the HUD button probe");
-  await b.click(hudPointer.secondary.x, hudPointer.secondary.y);
-  const equipped = await b.evaluate(`__ooga.pilot.player.weapon.equipped`);
-  await b.click(hudPointer.primaryButton.x, hudPointer.primaryButton.y);
-  const hudAfter = await b.evaluate(`(() => { const a = __ooga.pilot.player; return { restored: a.weapon.primaryEquipped, shots: a.weapon.shotsFired, ammo: a.weapon.ammo }; })()`);
-  record("birds-eye combat: the hidden cursor shares the centerline reticle, and unlocked HUD weapon clicks do not fire through buttons", hudPointer.active && !hudPointer.visible && hudPointer.locked
-    && Object.keys(hudPointer.before).every(key => Math.abs(hudPointer.before[key] - hudPointer.pending[key]) < 0.02)
-    && [hudPointer.top, hudPointer.center].every(p => Math.abs(p.x - hudPointer.centerX) < 0.02 && Math.abs(p.reticleX - hudPointer.width / 2) < 0.02)
-    && Math.abs(hudPointer.top.y - hudPointer.topY) < 0.02 && Math.abs(hudPointer.top.reticleY) < 0.02
-    && Math.abs(hudPointer.center.y - hudPointer.centerY) < 0.02 && Math.abs(hudPointer.center.reticleY - hudPointer.height / 2) < 0.02
-    && hudPointer.primary && equipped && hudAfter.restored && hudPointer.ammo === 30 && hudAfter.ammo === hudPointer.ammo
-    && hudAfter.shots === hudPointer.shots && hudPointer.reticleZ >= 30, JSON.stringify({ before: hudPointer, equipped, after: hudAfter }));
 } };
-
-const hubBirdsEyeFloors = { name: "birds-eye lower floors", why: "regression: ramp labels reversed with the camera and the HQ ceiling cut left the basement arrow covered", run: async (b) => {
-  const state = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, I = B.island, npc = P.player.npc || P.player, H = I.headquarters, room = H.rooms[0], lower = H.basement.rooms[0], D = BL.scenes.hub.debug;
-    // The driven Ooga is a separate body standing for its NPC (#501): taking the NPC again stands a fresh one beside it.
-    let a = P.player;
-    if (!P.birdsEye) { P.hooks.onZoom(1.2); B.advance(1.5, 1 / 60); }
-    P.hooks.onZoom(32 / P.birdsEyeHeight); B.advance(1.5, 1 / 60);
-    let hill = null;
-    for (let x = -24; x <= 24 && !hill; x += 2) for (let z = -24; z <= 24; z += 2) {
-      const floor = I.surfaceAt(x, z);
-      if (floor >= 4 && I.clearAt(x, floor + 0.05, z, 0.35, 2) && B.headquarters.solids.props.clearAt(x, floor + 0.05, z, 0.35, 2)) { hill = { name: "hill", x, z, floor }; break; }
-    }
-    const lab = B.mouths.find(m => BL.caves.slots.find(s => s.id === m.id)?.scene === "lab"), places = [
-      { name: "surface", x: -8, z: 8, floor: 0 }, ...(hill ? [hill] : []),
-      // Keep the floor sample beside the gorilla's work lane: his live mesh
-      // is a moving support, so standing on him cannot prove zoom stability.
-      { name: "cave", x: lab.x - Math.sin(lab.ry) * 3 + Math.cos(lab.ry) * 2.5,
-        z: lab.z - Math.cos(lab.ry) * 3 - Math.sin(lab.ry) * 2.5, floor: lab.floorY },
-      { name: "HQ", x: room.x, z: room.z, floor: H.floor }, { name: "basement", x: lower.x, z: lower.z, floor: H.basement.floor }];
-    const geometry = I.geometry, verts = geometry.verts, originalVerts = Array.from(verts), source = I.cutawaySource, data = source.data, originalData = data.slice(), rows = [], thresholds = [];
-    const entries = [...D.terrainSections, ...D.caveSections], regions = B.renderOpts.cutawayRegions;
-    const paths = I.cutawayPaths, pathState = D.cutawayPaths, roof = D.terrainRampRoof;
-    const rampMarkers = D.headquarters.rampMarkers.map(marker => {
-      // The route curves: each mark follows the segment where it stands,
-      // rather than the heading at the mouth several metres away.
-      const alignment = (node, distance) => {
-        const samples = marker.ramp.samples;
-        let i = 1; while (i < samples.length - 1 && samples[i].s < distance) i++;
-        const from = samples[i - 1], to = samples[i], dx = to.x - from.x, dz = to.z - from.z;
-        return (Math.sin(node.rotation.y) * dx + Math.cos(node.rotation.y) * dz) / Math.hypot(dx, dz);
-      };
-      return { label: marker.label, channel: marker.channel, visible: marker.node.visible, arrowVisible: marker.arrow.visible,
-        model: marker.node.geometry.rampMarker?.label, visual: marker.node.geometry.rampMarker?.visual, markerKind: marker.node.geometry.rampMarker?.kind, columns: marker.node.geometry.rampMarker?.columns, rows: marker.node.geometry.rampMarker?.rows,
-        arrowKind: marker.arrow.geometry.rampMarker?.kind, labelDistance: marker.labelDistance, arrowDistance: marker.arrowDistance, scale: marker.frame.scale.x,
-        labelSurfaceError: Math.abs(marker.frame.position.y - marker.labelPoint.y - 0.035),
-        arrowSurfaceError: Math.abs(marker.arrow.position.y - marker.arrowPoint.y - 0.035),
-        aligned: alignment(marker.frame, marker.labelDistance),
-        arrowAligned: alignment(marker.arrow, marker.arrowDistance) };
-    });
-    // Project the actual label transform through a full camera turn, including
-    // the side-on and reversed views that used to mirror or invert the words.
-    const markerViews = [], markerCoverage = [];
-    for (let turn = 0; turn < 8; turn++) {
-      P.navigate({ position: { x: 13.7, y: 0, z: 20.3 }, yaw: turn * Math.PI / 4, pitch: 0.3, dist: 8 }); B.advance(0.5, 1 / 60);
-      B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
-      for (const marker of D.headquarters.rampMarkers) {
-        const m = marker.node.world, bounds = BL.scene.boundsOf(marker.node.geometry);
-        const project = (x, z) => B.renderer.project(m[0] * x + m[8] * z + m[12], m[1] * x + m[9] * z + m[13], m[2] * x + m[10] * z + m[14], {});
-        const left = project(bounds.min[0], 0), right = project(bounds.max[0], 0), top = project(0, bounds.min[2]), bottom = project(0, bounds.max[2]);
-        markerViews.push({ label: marker.label, turn, right: right.x - left.x, up: bottom.y - top.y, baseline: Math.abs(right.y - left.y) });
-      }
-    }
-    const vineGeometry = BL.hubModels.vine(); let rampVines = 0;
-    const countRampVines = node => { if (node.geometry === vineGeometry) rampVines++; for (const child of node.children) countRampVines(child); };
-    countRampVines(BL.scenes.hub.root);
-    const standardRim = BL.hubModels.caveMouthRim(), rampRim = BL.hubModels.caveMouthRim(1);
-    const standardRimBounds = BL.scene.boundsOf(standardRim), rampRimBounds = BL.scene.boundsOf(rampRim);
-    const mouthRims = { standard: 0, ramp: 0, expectedRamp: B.mouths.filter(mouth => BL.caves.slots.find(slot => slot.id === mouth.id)?.status === "headquarters").length,
-      standardTop: standardRimBounds.max[1], rampTop: rampRimBounds.max[1], sameOpening: JSON.stringify(standardRim.openingBounds) === JSON.stringify(rampRim.openingBounds) };
-    const rampEntranceFrame = { rampLintels: BL.headquartersModels.rampEntrance(0).faces.filter(face => face.headquartersEntranceLintel).length,
-      roomLintels: BL.headquartersModels.roomEntrance(0).faces.filter(face => face.headquartersEntranceLintel).length };
-    const countMouthRims = node => { const sourceGeometry = node.geometry?.matrixSourceGeometry || node.geometry;
-      if (sourceGeometry === standardRim) mouthRims.standard++; else if (sourceGeometry === rampRim) mouthRims.ramp++;
-      for (const child of node.children) countMouthRims(child); };
-    countMouthRims(BL.scenes.hub.root);
-    const pathRead = () => Array.from(paths.lengths, (length, channel) => ({ channel, length, initial: paths.initial[channel],
-      lo: pathState.lo[channel], hi: pathState.hi[channel], mix: pathState.mix[channel] }));
-    const roofTopology = () => {
-      const original = new Set(geometry.faces), seen = new Set(); let partition = true, walls = 0, voxelWalls = true;
-      for (const mesh of roof.partitionGeometries) {
-        partition = partition && mesh.verts === verts;
-        for (const face of mesh.faces) { partition = partition && original.has(face) && !seen.has(face); seen.add(face); }
-      }
-      for (const mesh of roof.perimeterGeometry) for (const face of mesh.faces) {
-        let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-        for (const index of face.i) { const n = index * 3, x = mesh.verts[n], y = mesh.verts[n + 1], z = mesh.verts[n + 2];
-          minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); }
-        voxelWalls = voxelWalls && face.cutawayRampWall && maxY > minY && Math.min(maxX - minX, maxZ - minZ) < 1e-7
-          && Math.abs(Math.max(maxX - minX, maxZ - minZ) - paths.unit) < 1e-7;
-        walls++;
-      }
-      return { partition: partition && Array.from(original).every(face => seen.has(face)
-        || face.cutawayFloorChannel >= 2 && face.cutawayFloorChannel < 4), voxelWalls, walls, removable: roof.stats.removableFaces,
-        windowRoofFaces: Array.from(roof.stats.windowRoofFaces) };
-    };
-    const initialSpans = paths.ramps.map((ramp, channel) => ({ channel,
-      span: (paths.initial[channel] - 1) / 254 * paths.lengths[channel],
-      expected: Math.min(ramp.length, channel < 2 ? ramp.cutawayEntranceLength || ramp.width : ramp.width), length: ramp.length, tolerance: ramp.length / 254 }));
-    const birdseyeWindows = H.windows.filter(window => window.kind === "room" || window.kind === "panorama").map(window => ({
-      kind: window.kind, basement: !!window.basement, level: window.birdseyeCutawayLevel, columns: window.birdseyeCutawayColumns || 0
-    }));
-    const lowerFloorOrdered = () => roof.lowerFloorGeometry.every(geometry => geometry.faces.every(face => {
-      const channel = face.cutawayFloorChannel, station = face.cutawayFloorStation;
-      return station < pathState.lo[channel] || pathState.mix[channel] >= 1 - 1e-7
-        && station >= pathState.lo[channel] && station <= pathState.hi[channel];
-    }));
-    const decodePath = key => {
-      let channel = -1, station = 0, owners = 0;
-      for (let i = 0; i < 4; i++) { const value = key >>> (i * 8) & 255; if (value) { channel = i; station = value; owners++; } }
-      return { channel, station, owners };
-    };
-    const windowStations = Array.from({ length: 4 }, () => new Set());
-    for (const window of H.windows) if (window.kind === "ramp") windowStations[window.cutawayChannel].add(1 + Math.round(window.cutawayStation / paths.lengths[window.cutawayChannel] * 254));
-    const rampWindowCells = [];
-    for (let cell = 0; cell < paths.keys.length; cell++) {
-      const decoded = decodePath(paths.keys[cell]);
-      if (decoded.channel < 0 || !source.windows[cell]?.length) continue;
-      const x = paths.origin.x + (Math.floor(cell / paths.height) + 0.5) * paths.unit, z = paths.origin.z + (cell % paths.height + 0.5) * paths.unit;
-      const raw = I.rampColumnAt(x, z, decoded.channel >= 2, {});
-      if (raw) continue;
-      rampWindowCells.push({ cell, ...decoded, channelCorrect: windowStations[decoded.channel].has(decoded.station) });
-    }
-    let overlapCells = 0, overlapOwnership = true, retainedFloors = 0, floorsPreserved = true;
-    const upperColumn = {}, lowerColumn = {}, baseFaces = new Set(roof.baseGeometry.faces);
-    for (let cell = 0; cell < paths.keys.length; cell++) {
-      const x = paths.origin.x + (Math.floor(cell / paths.height) + 0.5) * paths.unit, z = paths.origin.z + (cell % paths.height + 0.5) * paths.unit;
-      const upper = I.rampColumnAt(x, z, false, upperColumn), lower = I.rampColumnAt(x, z, true, lowerColumn);
-      if (upper > 0 && upper <= 2 && lower > 0 && lower <= 2) {
-        const key = paths.keys[cell]; overlapCells++;
-        overlapOwnership = overlapOwnership && !!(key >>> ((upper - 1) * 8) & 255) && !(key >>> 16)
-          && Math.abs(paths.bottoms[cell] - upperColumn.ceiling) < 1e-6;
-      }
-    }
-    for (const face of geometry.faces) {
-      if (!face.cutawayPathKey || !face.i.some(index => verts[index * 3 + 1] < face.cutawayPathBottom - 1e-7)) continue;
-      // Floors are horizontal, upward-facing surfaces. Walls above a basement
-      // window can sit below an unrelated upper ramp's ceiling and are roofs.
-      const a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3;
-      const normalY = (verts[b + 2] - verts[a + 2]) * (verts[c] - verts[a]) - (verts[b] - verts[a]) * (verts[c + 2] - verts[a + 2]);
-      if (normalY <= 0 || face.i.some(index => verts[index * 3 + 1] !== verts[a + 1])) continue;
-      retainedFloors++; floorsPreserved = floorsPreserved && baseFaces.has(face);
-    }
-    let rampWindowFaces = 0, rampWindowBaseFaces = 0, rampWindowCrossingFaces = 0, rampWindowFacesPreserved = true, rampWindowFaceOwnership = true;
-    for (const face of geometry.faces) {
-      const window = H.windows[face.windowIndex];
-      // Room windows can overlap a ramp column without belonging to its route.
-      if (!face.headquartersWindowReveal || !face.cutawayPathKey || window?.kind !== "ramp") continue;
-      rampWindowFaces++;
-      const decoded = decodePath(face.cutawayPathKey);
-      // Inside a corridor, the fragment inherits that column's station; an
-      // overlapping upper route keeps ownership over a basement window.
-      // The extended columns above separately prove authored window stations.
-      let x = 0, z = 0;
-      for (const index of face.i) { x += verts[index * 3]; z += verts[index * 3 + 2]; }
-      x /= face.i.length; z /= face.i.length;
-      const gx = Math.floor((x - paths.origin.x) / paths.unit), gz = Math.floor((z - paths.origin.z) / paths.unit);
-      const column = gx * paths.height + gz;
-      rampWindowFaceOwnership = rampWindowFaceOwnership && decoded.owners === 1
-        && gx >= 0 && gx < paths.width && gz >= 0 && gz < paths.height
-        && face.cutawayPathKey === paths.keys[column];
-      let below = false, above = false;
-      for (const index of face.i) {
-        const y = verts[index * 3 + 1];
-        below ||= y < face.cutawayPathBottom - 1e-7;
-        above ||= y > face.cutawayPathBottom + 1e-7;
-      }
-      // A fragment crossing or touching the ceiling is part of the actual
-      // window reveal, not removable roof. It must remain canonical base
-      // geometry while wholly-above fragments may join the roof split.
-      if (below || !above) {
-        rampWindowCrossingFaces++;
-        rampWindowFacesPreserved = rampWindowFacesPreserved && baseFaces.has(face);
-      }
-      if (baseFaces.has(face)) rampWindowBaseFaces++;
-    }
-    const sections = () => D.terrainSections.map(e => ({ visible: e.cap.node.visible, worldY: e.worldY,
-      y: e.cap.node.world[13], faces: e.cap.stats.faces, cache: e.cap.stats.cacheEntries }));
-    const builds = () => entries.map(e => [e.cap.stats.solidBuilds, e.cap.stats.detailBuilds]);
-    for (const q of places) {
-      const support = I.supportAt(q.x, q.z, q.floor + 1, 0.35), clearance = I.clearAt(q.x, q.floor + 0.1, q.z, 0.2, 1.2);
-      P.navigate({ position: { x: q.x, y: q.floor, z: q.z }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(2, 1 / 60);
-      BL.scene.updateWorld(BL.scenes.hub.root);
-      const activeRegions = regions.slice(0, B.renderOpts.cutawayRegionCount);
-      const before = { cutoff: B.renderOpts.cutawayMaxY, regions: activeRegions.map(r => ({ ...r })), paths: pathRead(), builds: builds(), roofBuilds: roof.stats.rebuilds, height: P.birdsEyeHeight };
-      const caveRegions = D.caveSections.filter(e => activeRegions.includes(e.region)).map(e => ({ ...e.region }));
-      P.hooks.onZoom(1.2); B.advance(0.6, 1 / 60);
-      const zoomHeight = P.birdsEyeHeight;
-      P.hooks.onZoom(1 / 1.2); B.advance(0.6, 1 / 60);
-      const zoomStable = before.cutoff === B.renderOpts.cutawayMaxY && JSON.stringify(before.regions) === JSON.stringify(regions.slice(0, B.renderOpts.cutawayRegionCount))
-        && JSON.stringify(before.paths) === JSON.stringify(pathRead()) && before.roofBuilds === roof.stats.rebuilds && JSON.stringify(before.builds) === JSON.stringify(builds());
-      BL.scene.updateWorld(BL.scenes.hub.root);
-      B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
-      if (q.name === "surface" || q.name === "HQ") for (const marker of D.headquarters.rampMarkers) {
-        if ((marker.channel < 2) !== (q.name === "surface")) continue;
-        let checked = 0, covered = 0;
-        const m = marker.arrow.world, v = marker.arrow.geometry.verts;
-        for (let i = 0; i < v.length; i += 3) {
-          const x = m[0] * v[i] + m[4] * v[i + 1] + m[8] * v[i + 2] + m[12];
-          const z = m[2] * v[i] + m[6] * v[i + 1] + m[10] * v[i + 2] + m[14];
-          const gx = Math.floor((x - paths.origin.x) / paths.unit), gz = Math.floor((z - paths.origin.z) / paths.unit), cell = gx * paths.height + gz;
-          const station = paths.keys[cell] >>> (marker.channel * 8) & 255;
-          const globallyOpen = paths.bottoms[cell] >= B.renderOpts.cutawayMaxY - 0.01;
-          const locallyOpen = station > 0 && station >= pathState.lo[marker.channel] && station <= pathState.hi[marker.channel] && pathState.mix[marker.channel] === 1;
-          checked++; if (!globallyOpen && !locallyOpen) covered++;
-        }
-        markerCoverage.push({ channel: marker.channel, floor: q.name, checked, covered });
-      }
-      const centers = [0, H.floor, H.basement.floor].map(y => B.renderer.project(0, y, 0, {}));
-      const centerError = centers.every(Boolean) ? Math.max(...centers.map(p => Math.hypot(p.x - centers[0].x, p.y - centers[0].y))) : Infinity;
-      rows.push({ name: q.name, mode: P.mode, overhead: P.birdsEye, horizontal: Math.hypot(B.camera.position.x - a.root.position.x, B.camera.position.z - a.root.position.z),
-        floor: a.root.position.y - a.baseY, requestedFloor: q.floor, ceiling: P.birdsEyeCeiling, floorCeiling: q.name === "HQ" ? H.ceiling : q.name === "basement" ? H.basement.ceiling : null, cutoff: B.renderOpts.cutawayMaxY,
-        regions: before.regions, caveRegions, paths: before.paths, windowMix: Array.from(pathState.windowMix), roof: roofTopology(), caps: sections(), caveCaps: D.caveSections.filter(e => e.cap.node.visible).length, zoomStable, zoomMoved: Math.abs(zoomHeight - before.height) > 0.1, centerError, orthoMix: B.camera.orthoMix,
-        unchanged: I.geometry === geometry && I.geometry.verts === verts && I.supportAt(q.x, q.z, q.floor + 1, 0.35) === support && I.clearAt(q.x, q.floor + 0.1, q.z, 0.2, 1.2) === clearance });
-      if (q.name !== "cave") {
-        const read = () => { const feet = a.root.position.y - a.baseY, relative = B.camera.position.y - feet;
-          return { mode: P.mode, relative, headClearance: relative - a.headOffset * 0.95 - a.viewLift }; };
-        P.hooks.onZoom(21.5 / P.birdsEyeHeight, {}); B.advance(1.5, 1 / 60); const above = read(); P.hooks.onZoom(0.001, {});
-        let frames = 0; while (P.mode === "birds-eye" && frames++ < 150) B.advance(1 / 60, 1 / 60);
-        const switched = read(); thresholds.push({ name: q.name, floor: q.floor, above, switched, frames });
-        B.advance(1, 1 / 60); P.hooks.onZoom(1.2, {}); B.advance(1, 1 / 60);
-        P.hooks.onZoom(before.height / P.birdsEyeHeight, {}); B.advance(1.5, 1 / 60);
-      }
-    }
-    const landingCoverage = [];
-    for (const point of [{ x: 17.12639, z: 1.63491 }, { x: 18.24953, z: -0.09931 }]) {
-      P.navigate({ position: { x: point.x, y: H.floor, z: point.z }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(0.5, 1 / 60);
-      landingCoverage.push({ hi: Array.from(pathState.hi), cutFaces: Array.from(roof.stats.cutFaces) });
-    }
-    // Move the actual actor along the authored ramps. The expected plateaus
-    // come from the settled floor visits above, not a copy of the blend rule.
-    const cutRead = () => {
-      const p = a.root.position, feet = p.y - a.baseY, global = B.renderOpts.cutawayMaxY;
-      let cut = global;
-      for (let i = 0; i < B.renderOpts.cutawayRegionCount; i++) {
-        const r = regions[i], dx = p.x - r.x, dz = p.z - r.z;
-        if (Math.abs(dx * r.cos - dz * r.sin) < r.halfWidth && Math.abs(dx * r.sin + dz * r.cos) < r.halfDepth) cut = Math.min(cut, r.y);
-      }
-      const gx = Math.floor((p.x - paths.origin.x) / paths.unit), gz = Math.floor((p.z - paths.origin.z) / paths.unit);
-      if (gx >= 0 && gz >= 0 && gx < paths.width && gz < paths.height) {
-        const cell = gx * paths.height + gz, key = paths.keys[cell];
-        for (let channel = 0; channel < 4; channel++) {
-          const station = key >>> (channel * 8) & 255;
-          if (station && pathState.mix[channel] > 0 && station >= pathState.lo[channel] && station <= pathState.hi[channel])
-            cut = Math.min(cut, 16 + (paths.bottoms[cell] - 16) * pathState.mix[channel]);
-        }
-      }
-      return { y: global >= 1e5 ? 16 : global, clearance: cut - feet - a.bodyHeight - Math.max(0, a.viewLift), feet, regions: B.renderOpts.cutawayRegionCount };
-    };
-    const rampTravel = [];
-    for (const [name, ramp, upper, lower] of [["main-HQ", H.ramps[0], 16, rows.find(r => r.name === "HQ").cutoff], ["HQ-basement", H.basement.ramps[0], rows.find(r => r.name === "HQ").cutoff, rows.find(r => r.name === "basement").cutoff]]) {
-      const samples = ramp.samples, first = samples[0], last = samples[samples.length - 1];
-      const at = progress => {
-        const y = first.y + (last.y - first.y) * progress;
-        let i = 1; while (i < samples.length - 1 && samples[i].y > y) i++;
-        const from = samples[i - 1], to = samples[i], k = (y - from.y) / (to.y - from.y);
-        return { x: from.x + (to.x - from.x) * k, y, z: from.z + (to.z - from.z) * k };
-      };
-      for (const down of [true, false]) {
-        const source = down ? 0.08 : 0.92, destination = 1 - source, start = at(source);
-        P.navigate({ position: start, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(1, 1 / 60);
-        const early = cutRead(); let previous = early, maxStep = 0, clearance = Infinity, maxRegions = 0, positionError = 0, moving = 0, structureHidden = false, slicedVisible = false, visibleFrames = 0, wholeHidden = 0, wholeGorillas = 0, wholeComplete = true, lowerFloorsOrdered = lowerFloorOrdered(), lowerActorRoofChecks = 0, lowerActorRoofCovered = 0;
-        const initialLowerMix = Math.max(pathState.mix[2], pathState.mix[3]), lowerGate = H.ceiling - 0.06 - paths.unit;
-        const inactiveLowerCovered = () => [2, 3].every(channel => channel === D.cutawayTravelChannel
-          || pathState.mix[channel] === 0 || pathState.hi[channel] <= paths.initial[channel]);
-        let lowerMixMax = initialLowerMix,
-          lowerRevealFrames = B.renderOpts.cutawayMaxY < lowerGate - 1e-7 && initialLowerMix > 0 ? 1 : 0,
-          lowerRevealGuard = B.renderOpts.cutawayMaxY < lowerGate - 1e-7 || inactiveLowerCovered();
-        const sample = () => {
-          const value = cutRead(), step = Math.abs(value.y - previous.y);
-          maxStep = Math.max(maxStep, step); clearance = Math.min(clearance, value.clearance); maxRegions = Math.max(maxRegions, value.regions);
-          const lowerMix = Math.max(pathState.mix[2], pathState.mix[3]);
-          lowerMixMax = Math.max(lowerMixMax, lowerMix);
-          if (B.renderOpts.cutawayMaxY >= lowerGate - 1e-7) lowerRevealGuard = lowerRevealGuard && inactiveLowerCovered();
-          else if (lowerMix > 0) lowerRevealFrames++;
-          const channel = D.cutawayTravelChannel, position = a.root.position;
-          const gx = Math.floor((position.x - paths.origin.x) / paths.unit), gz = Math.floor((position.z - paths.origin.z) / paths.unit);
-          if (channel >= 2 && gx >= 0 && gz >= 0 && gx < paths.width && gz < paths.height) {
-            const cell = gx * paths.height + gz, station = paths.keys[cell] >>> (channel * 8) & 255;
-            const head = position.y - a.baseY + a.bodyHeight + Math.max(0, a.viewLift);
-            if (station >= pathState.lo[channel] && station <= pathState.hi[channel] && paths.bottoms[cell] > head) {
-              lowerActorRoofChecks++;
-              if (pathState.mix[channel] < 1 - 1e-6) lowerActorRoofCovered++;
-            }
-          }
-          lowerFloorsOrdered = lowerFloorsOrdered && lowerFloorOrdered();
-          structureHidden ||= !!D.headquarters.node.cutawayWholeHidden || D.headquarters.entrances.some(entry => entry.node.cutawayWholeHidden);
-          if (!a.root.cutawayWholeHidden) visibleFrames++;
-          wholeHidden = Math.max(wholeHidden, B.crew.list.filter(cave => cave.root.cutawayWholeHidden).length + D.props.filter(prop => prop.node.cutawayWholeHidden).length);
-          wholeGorillas = Math.max(wholeGorillas, B.clankers.list.filter(entry => entry.root.cutawayWholeHidden).length);
-          wholeComplete = wholeComplete && D.props.every(prop => !prop.node.cutawayWholeHidden || prop.node.cameraHidden)
-            && B.clankers.list.every(entry => !entry.root.cutawayWholeHidden || entry.root.cameraHidden);
-          if (value.clearance < -0.01 && !a.root.cutawayWholeHidden) slicedVisible = true;
-          if (step > 1e-5) moving++;
-          previous = value; return value;
-        };
-        const place = progress => {
-          const point = at(progress); B.crew.relocatePlayer(point, 0); B.advance(1 / 60, 1 / 60);
-          positionError = Math.max(positionError, Math.abs(a.root.position.y - a.baseY - point.y));
-          return sample();
-        };
-        const travel = (from, to, frames, trace = null) => { for (let i = 1; i <= frames; i++) { const progress = from + (to - from) * i / frames, value = place(progress); if (trace) {
-          const active = regions.slice(0, B.renderOpts.cutawayRegionCount);
-          trace.push({ progress, floor: value.y, paths: pathRead(), caveRegionsOnly: active.every(region => D.caveSections.some(entry => entry.region === region)) });
-        } } };
-        const hold = () => { for (let i = 0; i < 45; i++) { B.advance(1 / 60, 1 / 60); sample(); } return previous; };
-        travel(source, 0.5, 36); const middle = hold();
-        // Let the first small excursion settle, then repeat the same noise
-        // band: it must not alternate between the two floor states.
-        place(0.502); place(0.498); B.advance(0.1, 1 / 60); const stopped = sample();
-        let stopDrift = 0;
-        for (let i = 0; i < 18; i++) { const value = place(0.5 + (i % 2 ? -0.002 : 0.002)); stopDrift = Math.max(stopDrift, Math.abs(value.y - stopped.y)); }
-        travel(0.5, source, 36); const reversed = hold();
-        const linear = []; travel(source, destination, 72, linear); const late = hold();
-        const changing = linear.filter(row => row.floor > lower + 0.02 && row.floor < upper - 0.02);
-        const floorWindow = changing.length ? Math.max(...changing.map(row => row.progress)) - Math.min(...changing.map(row => row.progress)) : Infinity;
-        const floorCenter = changing.length ? (Math.max(...changing.map(row => row.progress)) + Math.min(...changing.map(row => row.progress))) / 2 : Infinity;
-        rampTravel.push({ name, down, upper, lower, early, middle, late, reversed, maxStep, clearance, maxRegions, positionError, moving, stopDrift, floorWindow, floorCenter,
-          minimumSpan: linear.every(row => row.paths.every(path => path.hi >= path.initial)), caveRegionsOnly: linear.every(row => row.caveRegionsOnly),
-          lowerMixMax, lowerRevealFrames, lowerRevealGuard, lowerFloorsOrdered, lowerActorRoofChecks, lowerActorRoofCovered,
-          structureHidden, slicedVisible, visibleFrames, wholeHidden, wholeGorillas, wholeComplete });
-      }
-    }
-    // Follow cumulative authored distance, including each route's flat tail.
-    // Height-only samples cannot prove that the visible endpoint keeps moving
-    // ahead after the descent itself has reached the next floor.
-    const pathTravel = [];
-    for (let channel = 0; channel < paths.ramps.length; channel++) {
-      const ramp = paths.ramps[channel], samples = ramp.samples;
-      const at = distance => {
-        let i = 1; while (i < samples.length - 1 && samples[i].s < distance) i++;
-        const from = samples[i - 1], to = samples[i], t = (distance - from.s) / (to.s - from.s);
-        return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t, z: from.z + (to.z - from.z) * t };
-      };
-      P.navigate({ position: at(0), yaw: 0, pitch: 0.3, dist: 8 }); B.advance(1, 1 / 60);
-      let previous = 0, backwards = 0, minimum = Infinity, balance = Infinity, matched = 0, balanced = 0, end = 0, windowActive = false;
-      for (let i = 0; i <= 48; i++) {
-        B.crew.relocatePlayer(at(ramp.length * i / 48), 0); B.advance(1 / 60, 1 / 60);
-        const hi = pathState.hi[channel], endpoint = Math.max(hi, pathState.lo[channel] - 1);
-        backwards = Math.max(backwards, previous - endpoint); previous = endpoint;
-        minimum = Math.min(minimum, hi - paths.initial[channel]);
-        if (D.cutawayTravelChannel === channel) {
-          matched++;
-          const station = 1 + 254 * D.cutawayTravelStation / ramp.length;
-          if (2 * station - 1 <= 255) { balance = Math.min(balance, endpoint - station - (station - 1)); balanced++; }
-        }
-        windowActive ||= pathState.mix[channel] > 0 && rampWindowCells.some(cell => cell.channel === channel
-          && cell.station >= pathState.lo[channel] && cell.station <= pathState.hi[channel]);
-        end = endpoint;
-      }
-      pathTravel.push({ channel, backwards, minimum, balance, matched, balanced, end, windowActive, roof: roofTopology() });
-    }
-    const coverFade = { out: [], in: [] }, readCoverFade = () => ({ path: pathState.mix[0], cave: B.renderOpts.cutawayRegionCount ? regions[0].mix : 0 });
-    P.navigate({ position: { x: -8, y: 0, z: 8 }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(0.5, 1 / 60);
-    P.navigate({ position: { x: hill.x, y: hill.floor, z: hill.z }, yaw: 0, pitch: 0.3, dist: 8 });
-    for (let i = 0; i < 22; i++) { B.advance(1 / 60, 1 / 60); coverFade.out.push(readCoverFade()); }
-    P.navigate({ position: { x: -8, y: 0, z: 8 }, yaw: 0, pitch: 0.3, dist: 8 });
-    for (let i = 0; i < 22; i++) { B.advance(1 / 60, 1 / 60); coverFade.in.push(readCoverFade()); }
-    const key = (type, value, code) => window.dispatchEvent(new KeyboardEvent(type, { key: value, code, bubbles: true }));
-    const jetWasWorn = !!a.jet, flightFloor = I.surfaceAt(-8, 16);
-    P.navigate({ position: { x: -8, y: flightFloor, z: 16 }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(1, 1 / 60);
-    if (!jetWasWorn) { key("keydown", "j", "KeyJ"); key("keyup", "j", "KeyJ"); }
-    const flight = { peak: 0, highFrames: 0, fallFrames: 0, clearance: Infinity, preserved: true, centered: true, landed: false };
-    key("keydown", " ", "Space");
-    try {
-      for (let i = 0; i < 300; i++) {
-        if (i === 60) key("keyup", " ", "Space");
-        B.advance(1 / 60, 1 / 60); const value = cutRead(), altitude = value.feet - flightFloor;
-        flight.peak = Math.max(flight.peak, altitude); flight.clearance = Math.min(flight.clearance, value.clearance);
-        if (a.hopV < -0.1) flight.fallFrames++;
-        if (altitude > 4) {
-          flight.highFrames++;
-          flight.preserved = flight.preserved && B.renderOpts.cutawayMaxY >= 1e5 && pathState.mix.every(mix => mix === 0);
-        }
-        flight.centered = flight.centered && P.mode === "birds-eye" && a.root.visible && Math.hypot(B.camera.position.x - a.root.position.x, B.camera.position.z - a.root.position.z) < 1e-6;
-        if (i > 90 && altitude < 0.1 && a.hopV === 0) { flight.landed = true; break; }
-      }
-    } finally {
-      key("keyup", " ", "Space");
-      if (!jetWasWorn) { key("keydown", "j", "KeyJ"); key("keyup", "j", "KeyJ"); }
-    }
-    // Restore the basement before exercising the existing camera handoffs.
-    P.navigate({ position: { x: lower.x, y: H.basement.floor, z: lower.z }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(2, 1 / 60);
-    const cutClear = () => !B.renderOpts.birdsEyeCutaway && B.renderOpts.cutawayMaxY >= 1e5 && !B.renderOpts.cutawayRegionCount
-      && B.renderOpts.cutawayFade === 0 && B.renderOpts.cutawayRockMix === 0 && B.renderOpts.cutawayCloudMix === 0
-      && pathState.active === 0 && pathState.mix.every(mix => mix === 0) && pathState.windowMix.every(mix => mix === 0)
-      && entries.every(entry => !entry.cap.node.visible) && D.headquarters.rampMarkers.every(marker => !marker.node.visible && !marker.arrow.visible)
-      && B.crew.list.every(cave => !cave.root.cutawayWholeHidden) && B.clankers.list.every(entry => !entry.root.cutawayWholeHidden)
-      && D.props.every(prop => !prop.node.cutawayWholeHidden);
-    const geometryHead = new Float64Array(3);
-    const geometryClear = (actor, gorilla = false) => {
-      const p = actor.root.position, eye = B.camera.position, radius = 0.3;
-      let x = p.x, y = gorilla ? p.y : p.y - actor.baseY + actor.headOffset * 0.95 + actor.viewLift, z = p.z;
-      if (gorilla) {
-        BL.scene.updateWorld(actor.root, actor.root.parent.world);
-        const head = actor.gorilla.parts.head, bounds = BL.scene.boundsOf(head.geometry);
-        BL.math.mat4.transformPoint(geometryHead, head.world, bounds.center[0], bounds.min[1] + (bounds.max[1] - bounds.min[1]) * 0.65, bounds.max[2] + 0.01);
-        x = geometryHead[0]; y = geometryHead[1]; z = geometryHead[2];
-      }
-      return I.clearAt(eye.x, eye.y - radius, eye.z, radius, radius * 2)
-        && I.voxelSegmentClearAt(x, y - radius, z, eye.x, eye.y - radius, eye.z, radius, radius * 2)
-        && D.headquarters.solids.props.segmentClear(x, y - radius, z, eye.x, eye.y - radius, eye.z, radius, radius * 2);
-    };
-    const cutState = () => ({ mode: P.mode, player: !!P.player, combat: P.aiming, clear: cutClear(), mix: P.birdsEyeMix, fade: B.renderOpts.cutawayFade, rock: B.renderOpts.cutawayRockMix,
-      geometryClear: !!P.player && geometryClear(P.player), eyeY: B.camera.position.y, ceiling: H.basement.ceiling,
-      markers: D.headquarters.rampMarkers.reduce((count, marker) => count + (marker.node.visible ? 1 : 0), 0),
-      cuts: B.renderOpts.cutawayMaxY < 1e5 ? [B.renderOpts.cutawayMaxY] : regions.slice(0, B.renderOpts.cutawayRegionCount).map(r => r.y) });
-    const transition = (name, action, frames = 60) => {
-      const before = cutState(); action(); const immediate = Math.abs(P.birdsEyeMix - before.mix), immediateFade = Math.abs(B.renderOpts.cutawayFade - before.fade);
-      let last = before, mixStep = 0, fadeStep = 0, cutStep = 0, fadeError = 0, capError = 0, minCut = Infinity, maxCut = -Infinity, changed = 0, direction = true, blended = 0, withoutPlayer = 0;
-      let rockError = Math.abs(before.rock - before.fade), maxRegions = 0, carryClear = true, firstClear = false, blockedCloseFrames = 0, blockedRetained = true, residualRestored = false, residualSafe = true;
-      for (let i = 0; i < frames; i++) {
-        B.advance(1 / 60, 1 / 60); const s = cutState(); mixStep = Math.max(mixStep, Math.abs(s.mix - last.mix)); fadeError = Math.max(fadeError, Math.abs(s.fade - s.mix));
-        if (!i) firstClear = s.clear;
-        if (!s.player || !s.combat) carryClear = carryClear && s.clear;
-        if (s.combat && s.mode !== "birds-eye" && !s.geometryClear) { blockedCloseFrames++; blockedRetained = blockedRetained && s.fade > 0; }
-        if (s.combat && s.mode !== "birds-eye" && s.geometryClear && s.mix > 0) { residualSafe = residualSafe && s.clear; residualRestored ||= s.clear; }
-        fadeStep = Math.max(fadeStep, Math.abs(s.fade - last.fade));
-        rockError = Math.max(rockError, Math.abs(s.rock - s.fade));
-        maxRegions = Math.max(maxRegions, B.renderOpts.cutawayRegionCount);
-        if (s.fade > 0 && s.fade < 1) blended++;
-        if (!s.player && s.fade > 0) withoutPlayer++;
-        if (s.cuts.length) { minCut = Math.min(minCut, ...s.cuts); maxCut = Math.max(maxCut, ...s.cuts); }
-        // The disabled 1e6 sentinel lies above all rock. Only compare real
-        // slicing planes while both samples have an active cutaway.
-        if (s.fade > 0 && last.fade > 0 && s.cuts.length === last.cuts.length) for (let j = 0; j < s.cuts.length; j++) {
-          const delta = s.cuts[j] - last.cuts[j]; cutStep = Math.max(cutStep, Math.abs(delta));
-          direction = direction && delta * (s.fade - last.fade) <= 1e-6;
-          if (!j && Math.abs(delta) > 1e-5) changed++;
-        }
-        if (B.renderOpts.cutawayMaxY < 1e5) for (const e of D.terrainSections) if (e.cap.node.visible) capError = Math.max(capError, Math.abs(e.cap.node.world[13] + 0.002 - B.renderOpts.cutawayMaxY));
-        last = s;
-      }
-      return { name, before, after: last, immediate, immediateFade, mixStep, fadeStep, cutStep, fadeError, rockError, capError, span: maxCut - minCut, changed, direction, blended, withoutPlayer, maxRegions, carryClear, firstClear, blockedCloseFrames, blockedRetained, residualRestored, residualSafe };
-    };
-    const toggle = () => P.modeAction("mode-toggle"), transitions = [];
-    transitions.push(transition("basement carry exit", toggle));
-    transitions.push(transition("basement partial entry", toggle, 12));
-    transitions.push(transition("basement entry reversal", toggle));
-    transitions.push(transition("basement carry entry", toggle));
-    transitions.push(transition("basement shoulder exit", () => P.hooks.onZoom(0.001, {}), 150));
-    transitions.push(transition("basement shoulder entry", () => P.hooks.onZoom(1.2, {})));
-    const carryRoofs = [], G = B.clankerPlay, C = B.clankers, e = C.list.find(entry => entry.owner === npc);
-    const account = BL.net.state.me, backend = BL.net.state.backend, character = BL.characters.get(a.traits.name);
-    const pressX = () => { key("keydown", "x", "KeyX"); key("keyup", "x", "KeyX"); };
-    const canvas = document.getElementById("scene"), rect = canvas.getBoundingClientRect();
-    const rightClick = () => {
-      for (const type of ["pointerdown", "pointerup"]) canvas.dispatchEvent(new PointerEvent(type,
-        { pointerId: 93, pointerType: "mouse", button: 2, buttons: type === "pointerdown" ? 2 : 0,
-          clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, bubbles: true, cancelable: true }));
-    };
-    try {
-      BL.net.state.backend = true;
-      for (const signedIn of [false, true]) for (const gorilla of [false, true]) for (const q of places.filter(place => place.name === "HQ" || place.name === "basement")) {
-        BL.net.state.me = signedIn ? { id: 75, login: character.github || character.handle, display: "Cutaway fixture" } : null;
-        G.release(); P.release(true);
-        if (gorilla) e.active = e.root.visible = true;
-        P.goPreset("pile");
-        Object.assign(B.camera.position, { x: q.x + 3, y: q.floor + 25, z: q.z + 5 });
-        Object.assign(B.camera.target, { x: q.x, y: q.floor + 1, z: q.z }); B.camera.up = { x: 0, y: 1, z: 0 };
-        const controller = gorilla ? G : P, spot = gorilla ? e : npc, zoom = factor => gorilla ? G.zoom(factor, {}) : P.hooks.onZoom(factor, {});
-        // A released body goes (#501), so each acquisition stands the NPC on the roof floor and takes the fresh body
-        // standing beside it there.
-        let actor = null;
-        const take = () => {
-          Object.assign(spot.root.position, { x: q.x, y: q.floor + (gorilla ? 0 : spot.baseY), z: q.z });
-          controller.possess(spot); if (gorilla ? C.sleeping(controller.player || e) : B.crew.sleeping) gorilla ? C.wake() : B.crew.wakePlayer();
-          actor = controller.player;
-        };
-        const read = () => ({ view: gorilla ? G.view : P.mode, combat: gorilla ? G.combat : P.aiming, controlled: controller.player === actor,
-          clear: cutClear(), cut: B.renderOpts.birdsEyeCutaway, geometryClear: geometryClear(controller.player === actor ? actor : spot, gorilla), mix: B.camera.orthoMix || 0, eye: B.camera.position.y });
-        const advance = (frames, requireClear = false) => {
-          let clear = true;
-          for (let i = 0; i < frames; i++) { B.advance(1 / 60, 1 / 60); if (requireClear) clear = clear && cutClear(); }
-          return { ...read(), clearThroughout: clear };
-        };
-        take(); const acquired = advance(1, true);
-        pressX(); const overhead = advance(90);
-        pressX(); const carryExit = advance(1, true);
-        const carrySettling = advance(12, true);
-        pressX(); const overheadAgain = advance(90);
-        rightClick();
-        let shoulder, blocked = 0, retained = true, residualRestored = false, residualSafe = true, shoulderFrames = 0;
-        for (; shoulderFrames < 150; shoulderFrames++) {
-          B.advance(1 / 60, 1 / 60); shoulder = read();
-          if (shoulder.view === "shoulder" && !shoulder.geometryClear) { blocked++; retained = retained && shoulder.cut; }
-          if (shoulder.view === "shoulder" && shoulder.geometryClear && shoulder.mix > 0) { residualSafe = residualSafe && shoulder.clear; residualRestored ||= shoulder.clear; }
-          if (shoulder.view === "shoulder" && shoulder.clear && shoulder.geometryClear && shoulder.mix === 0) break;
-        }
-        zoom(0.5);
-        let first, firstFrames = 0, firstClear = true;
-        for (; firstFrames < 90; firstFrames++) {
-          B.advance(1 / 60, 1 / 60); first = read(); firstClear = firstClear && first.clear;
-          if (first.view === "first-person" && (gorilla ? B.pilot.orbit.dist < 0.01 : P.closeMix === 1)) break;
-        }
-        zoom(2); advance(1); zoom(2); advance(90);
-        controller.release(true); const detached = advance(1, true);
-        take(); const retaken = advance(1, true);
-        carryRoofs.push({ signedIn, gorilla, floor: q.name, ceiling: q.floor === H.floor ? H.ceiling : H.basement.ceiling,
-          acquired, overhead, carryExit, carrySettling, overheadAgain, closeExit: { shoulder, blocked, retained, residualRestored, residualSafe, shoulderFrames, first, firstClear, firstFrames }, detached, retaken });
-      }
-    } finally { G.release(); P.release(true); BL.net.state.me = account; BL.net.state.backend = backend; }
-    P.possess(npc); if (B.crew.sleeping) B.crew.wakePlayer(); a = P.player;
-    P.navigate({ position: { x: lower.x, y: H.basement.floor, z: lower.z }, yaw: 0, pitch: 0.3, dist: 8 });
-    if (P.aiming) toggle(); P.hooks.onZoom(0.001, {}); B.advance(1, 1 / 60);
-    toggle(); P.hooks.onZoom(1.2, {}); B.advance(1, 1 / 60);
-    const cave = places.find(q => q.name === "cave");
-    P.navigate({ position: { x: cave.x, y: cave.floor, z: cave.z }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(2, 1 / 60);
-    transitions.push(transition("cave roof exit", toggle));
-    transitions.push(transition("cave roof entry", toggle));
-    const basement = { position: { x: lower.x, y: H.basement.floor, z: lower.z }, yaw: 0, pitch: 0.3, dist: 8 };
-    P.navigate(basement); B.advance(2, 1 / 60);
-    const released = transition("basement actor release", () => P.release(true));
-    P.possess(npc); if (B.crew.sleeping) B.crew.wakePlayer(); a = P.player; P.navigate(basement); B.advance(0.7, 1 / 60);
-    if (!P.aiming) P.modeAction("mode-toggle"); if (P.mode === "shoulder") P.hooks.onZoom(1.2); B.advance(1, 1 / 60);
-    const restored = !!a && a.npc === npc && P.player === a && P.mode === "birds-eye" && P.birdsEyeMix === 1 && Math.abs(a.root.position.y - a.baseY - H.basement.floor) < 0.2;
-    const landmarks = [B.altar.node.position, B.headquarters.firepit.position, H.basement.hole].map(p => [p.x, p.z]);
-    const clouds = [], weather = [];
-    // Relief windows include an ordinary front mesh as well as projective
-    // batches. Neither is part of the weather deck.
-    const reliefRoots = [D.factory?.batches.hall.parent, D.factory?.roof?.batches.hall.parent, D.bifrost?.window?.root];
-    const visit = n => { if (reliefRoots.includes(n)) return; if (n.geometry?.cutawayPreserve) clouds.push(n); if (n.geometry?.cutawayHide) weather.push(n); for (const child of n.children) visit(child); };
-    visit(BL.scenes.hub.root);
-    const immutable = I.geometry === geometry && I.geometry.verts === verts && verts.every((v, i) => v === originalVerts[i]) && source.data === data && data.every((v, i) => v === originalData[i]);
-    const cache = entries.map(e => ({ ...e.cap.stats }));
-    return { rows, thresholds, rampTravel, pathTravel, landingCoverage, coverFade, initialSpans, birdseyeWindows, mouthRims, rampEntranceFrame, rampMarkers, markerViews, markerCoverage, rampVines, rampWindowCells, rampWindowFaces, rampWindowBaseFaces, rampWindowCrossingFaces, rampWindowFacesPreserved, rampWindowFaceOwnership,
-      overlapCells, overlapOwnership, retainedFloors, floorsPreserved, noRampRegions: !D.rampSections,
-      flight, transitions, carryRoofs, released, restored, immutable, landmarks, cache, regionStorage: regions === B.renderOpts.cutawayRegions, sections: D.terrainSections.length, caves: D.caveSections.length, clouds: clouds.length, weather: weather.length, weatherPreserved: weather.every(n => n.geometry.cutawayPreserve) };
-  })()`);
-  const rows = state.rows, underground = rows.filter(r => r.requestedFloor < -0.15), surface = rows.filter(r => r.requestedFloor >= -0.15);
-  record("birds-eye combat: surface and hills retain their terrain, caves use local roof cuts, and HQ and basement use the current floor's global section", rows.length === 5 && rows.every(r => r.mode === "birds-eye" && r.overhead && r.horizontal < 1e-6 && Math.abs(r.floor - r.requestedFloor) < 0.2 && r.unchanged)
-    && underground.length === 2 && underground.every(r => r.cutoff > r.floor + 1.3 && r.cutoff < r.floor + 5 && Math.abs(r.cutoff - r.floorCeiling + 0.06) < 0.01 && !r.caveRegions.length && !r.caveCaps && r.caps[0].visible && r.caps[0].faces > 0)
-    && surface.every(r => r.cutoff >= 1e5 && r.caps.every(c => !c.visible) && r.caveRegions.every(region => Math.abs(region.y - 2.85) < 1e-6))
-    && surface.find(r => r.name === "cave").caveRegions.length > 0 && surface.find(r => r.name === "hill").regions.length === 0, JSON.stringify(rows));
-  record("birds-eye combat: surface ramps keep their authored entrance span and basement openings initially extend one ramp-width", state.initialSpans.length === 4
-    && state.initialSpans.every(p => Math.abs(p.span - p.expected) <= p.tolerance)
-    && rows.every(r => r.paths.length === 4 && r.paths.every(p => p.hi >= p.initial))
-    && rows.find(r => r.name === "surface").paths.slice(0, 2).every(p => p.mix === 1 && p.lo === 1)
-    && rows.find(r => r.name === "hill").paths.every(p => p.mix === 0), JSON.stringify({ spans: state.initialSpans, paths: rows.map(r => ({ name: r.name, paths: r.paths })) }));
-  record("birds-eye combat: every authored room window removes only its level's fitted lintel rock", state.birdseyeWindows.length > 0
-    && state.birdseyeWindows.every(window => window.columns > 0 && window.level === (window.basement ? 1 : 0))
-    && rows.find(r => r.name === "surface").windowMix.every(mix => mix === 0)
-    && rows.find(r => r.name === "HQ").windowMix.join() === "1,0"
-    && rows.find(r => r.name === "basement").windowMix.join() === "1,1"
-    && rows.find(r => r.name === "HQ").roof.windowRoofFaces.every(faces => faces > 0), JSON.stringify({ windows: state.birdseyeWindows,
-      levels: rows.map(({ name, windowMix }) => ({ name, windowMix })), faces: rows.find(r => r.name === "HQ").roof.windowRoofFaces }));
-  record("birds-eye combat: surface ramp mouths omit only the overhead stone lintel while ordinary cave frames retain it", state.mouthRims.expectedRamp === 2
-    && state.mouthRims.ramp === state.mouthRims.expectedRamp && state.mouthRims.standard > 0 && state.mouthRims.sameOpening
-    && Math.abs(state.mouthRims.standardTop - 3.5) < 1e-7 && Math.abs(state.mouthRims.rampTop - 3) < 1e-7
-    && state.rampEntranceFrame.rampLintels === 0 && state.rampEntranceFrame.roomLintels > 0, JSON.stringify({ mouths: state.mouthRims, basement: state.rampEntranceFrame }));
-  record("birds-eye combat: each downhill ramp has a dense entrance label and a separate arrow fitted to its surface, hidden outside bird's-eye view", state.rampMarkers.length === 4
-    && state.rampMarkers.map(marker => marker.channel).join() === "0,1,2,3"
-    && state.rampMarkers.map(marker => marker.label).join() === "HQ,HQ,B1,B1"
-    && state.rampMarkers.every(marker => marker.visible && marker.arrowVisible && marker.model === marker.label && marker.markerKind === "label" && marker.arrowKind === "arrow"
-      && marker.visual === marker.label && marker.columns === 5 && marker.rows === 7 && marker.scale === 0.72
-      && marker.labelDistance > 0 && marker.arrowDistance > marker.labelDistance && marker.labelSurfaceError < 1e-7
-      && marker.arrowSurfaceError < 1e-7 && marker.aligned > 0.999 && marker.arrowAligned > 0.999)
-    && state.rampVines === 0
-    && [0, 2, 4, 6].every(i => state.transitions[i].after.markers === 0)
-    && [3, 5, 7].every(i => state.transitions[i].after.markers === 4)
-    && state.released.after.markers === 0 && state.restored, JSON.stringify({ markers: state.rampMarkers, transitions: state.transitions.map(({ name, after }) => ({ name, visible: after.markers })), released: state.released.after.markers }));
-  record("birds-eye combat: HQ and B1 read upright left-to-right through a full camera turn and every entrance exposes its complete downhill arrow", state.markerViews.length === 32
-    && state.markerViews.every(view => view.right > 0 && view.up > 0 && view.baseline < 0.001)
-    && state.markerCoverage.length === 4 && state.markerCoverage.every(marker => marker.checked > 0 && marker.covered === 0), JSON.stringify({ views: state.markerViews, coverage: state.markerCoverage }));
-  record("birds-eye combat: ramp openings use original terrain faces and exact vertical voxel walls, never clipping rectangles or proxy floors", state.noRampRegions
-    && rows.every(r => r.regions.length <= 8 && r.regions.every(region => r.caveRegions.some(cave => cave.id === region.id)) && r.roof.partition && r.roof.voxelWalls && r.roof.removable > 0)
-    && rows.some(r => r.roof.walls > 0) && state.pathTravel.every(r => r.roof.partition && r.roof.voxelWalls), JSON.stringify(rows.map(({ name, roof, regions }) => ({ name, roof, regions }))));
-  record("birds-eye combat: ramp-window cutaway columns extend beyond the raw ramp, keep their authored route station, and retain real window fragments in the terrain base", state.rampWindowCells.length > 0
-    && state.rampWindowCells.every(cell => cell.owners === 1 && cell.channelCorrect)
-    && state.rampWindowFaces > 0 && state.rampWindowCrossingFaces > 0 && state.rampWindowBaseFaces > 0
-    && state.rampWindowFacesPreserved && state.rampWindowFaceOwnership && state.pathTravel.every(r => r.windowActive), JSON.stringify({ cells: state.rampWindowCells, faces: state.rampWindowFaces,
-      base: state.rampWindowBaseFaces, crossing: state.rampWindowCrossingFaces, preserved: state.rampWindowFacesPreserved, ownership: state.rampWindowFaceOwnership, travel: state.pathTravel.map(r => ({ channel: r.channel, active: r.windowActive })) }));
-  record("birds-eye combat: descending either route never shortens its opening and retains as much path ahead as behind until the route ends", state.pathTravel.length === 4
-    && state.pathTravel.every(r => r.backwards === 0 && r.minimum >= 0 && r.matched > 30 && r.balanced > 10 && r.balance >= -1.001 && r.end === 255), JSON.stringify(state.pathTravel));
-  record("birds-eye combat: the HQ landing keeps identical completed ramp coverage inside and just outside the travel detector", state.landingCoverage.length === 2
-    && state.landingCoverage.every(row => row.hi[0] === 255 && row.hi[1] === 255)
-    && JSON.stringify(state.landingCoverage[0]) === JSON.stringify(state.landingCoverage[1]), JSON.stringify(state.landingCoverage));
-  record("birds-eye combat: hill and jet-height cave roofs share the ramp cover's smooth opacity timing", state.coverFade.out.some(row => row.path > 0 && row.path < 1)
-    && state.coverFade.in.some(row => row.path > 0 && row.path < 1)
-    && state.coverFade.out.every((row, i, rows) => Math.abs(row.path - row.cave) < 1e-6 && (!i || row.path <= rows[i - 1].path + 1e-7))
-    && state.coverFade.in.every((row, i, rows) => Math.abs(row.path - row.cave) < 1e-6 && (!i || row.path >= rows[i - 1].path - 1e-7)), JSON.stringify(state.coverFade));
-  record("birds-eye combat: overlapping ramp cells belong to the upper path and retained voxel floors stay in the immutable terrain base", state.overlapCells > 0 && state.overlapOwnership
-    && state.retainedFloors > 0 && state.floorsPreserved, JSON.stringify({ overlaps: state.overlapCells, ownership: state.overlapOwnership, retained: state.retainedFloors, preserved: state.floorsPreserved }));
-  record("birds-eye combat: both ramp connections retain the source floor early, progressively remove it across the ramp and reach the destination before exit in either direction", state.rampTravel.length === 4 && state.rampTravel.every(r =>
-    Math.abs(r.early.y - (r.down ? r.upper : r.lower)) < 0.02 && Math.abs(r.late.y - (r.down ? r.lower : r.upper)) < 0.02
-    && r.middle.y > r.lower + (r.upper - r.lower) * 0.1 && r.middle.y < r.upper - (r.upper - r.lower) * 0.1
-    && r.positionError < 0.2 && r.maxRegions <= 8 && r.moving > 15), JSON.stringify(state.rampTravel));
-  record("birds-eye combat: stopping with small ramp-height noise holds the cut, while reversing smoothly restores the source floor", state.rampTravel.every(r =>
-    r.stopDrift < 0.01 && r.maxStep <= 1 && Math.abs(r.reversed.y - r.early.y) < 0.02), JSON.stringify(state.rampTravel));
-  record("birds-eye combat: upcoming ramp paths retain their minimum span while upper floors reveal progressively in either direction", state.rampTravel.every(r =>
-    r.minimumSpan && r.caveRegionsOnly && r.floorWindow > 0.6 && r.floorWindow < 0.82 && Math.abs(r.floorCenter - 0.5) < 0.04), JSON.stringify(state.rampTravel));
-  record("birds-eye combat: basement entrances open at HQ while the remaining route stays covered until descent", rows.filter(r => r.name !== "HQ" && r.name !== "basement").every(r => r.paths.slice(2).every(p => p.mix === 0))
-    && rows.find(r => r.name === "HQ").paths.slice(2).every(p => p.mix === 1 && p.hi === p.initial)
-    && rows.find(r => r.name === "basement").paths.slice(2).some(p => p.mix > 0)
-    && state.rampTravel.filter(r => r.name === "main-HQ").every(r => r.lowerRevealFrames === 0 && r.lowerRevealGuard)
-    && state.rampTravel.every(r => r.lowerFloorsOrdered)
-    && state.rampTravel.filter(r => r.name === "HQ-basement").every(r => r.lowerRevealGuard && r.lowerRevealFrames > 0 && r.lowerMixMax === 1 && r.lowerActorRoofChecks > 0 && r.lowerActorRoofCovered === 0), JSON.stringify({ rows: rows.map(r => ({ name: r.name, lower: r.paths.slice(2) })),
-      travel: state.rampTravel.map(({ name, down, lowerMixMax, lowerRevealFrames, lowerRevealGuard, lowerActorRoofChecks, lowerActorRoofCovered }) => ({ name, down, lowerMixMax, lowerRevealFrames, lowerRevealGuard, lowerActorRoofChecks, lowerActorRoofCovered })) }));
-  record("birds-eye combat: the upper-floor scan hides sliced actors and gorillas as whole units without hiding structural rooms or entrances", state.rampTravel.every(r =>
-    !r.slicedVisible && r.visibleFrames > 0 && r.wholeHidden > 0 && r.wholeGorillas > 0 && r.wholeComplete && !r.structureHidden), JSON.stringify(state.rampTravel));
-  record("birds-eye combat: jetting above the surface restores ramp cover and the following fall keeps the actor centered with head clearance", state.flight.peak > 4 && state.flight.highFrames > 10
-    && state.flight.fallFrames > 10 && state.flight.clearance >= 0.075 && state.flight.preserved && state.flight.centered && state.flight.landed, JSON.stringify(state.flight));
-  record("birds-eye combat: inward zoom reaches shoulder with the same near-body head clearance on the surface, hills, HQ and basement", state.thresholds.length === 4
-    && state.thresholds.every(r => r.above.mode === "birds-eye" && r.above.relative > 21.2 && r.switched.mode === "shoulder" && r.switched.headClearance >= 0.075 && r.switched.relative < 10 && r.frames < 150)
-    && Math.max(...state.thresholds.map(r => r.switched.headClearance)) - Math.min(...state.thresholds.map(r => r.switched.headClearance)) < 0.05, JSON.stringify(state.thresholds));
-  record("birds-eye combat: zoom leaves section meshes cached, translated islands share the exact world cut height, and terrain and centered landmarks stay unchanged", state.immutable && state.regionStorage && state.sections >= 2 && state.caves > 0 && state.caves <= 8
-    && rows.every(r => r.zoomStable && r.zoomMoved && r.caps.every(c => !c.visible || Math.abs(c.y + 0.002 - r.cutoff) < 1e-5))
-    && underground.some(r => r.caps.slice(1).some(c => c.visible && c.faces > 0))
-    && state.cache.every(c => c.cacheEntries <= 16) && state.cache.some(c => c.cacheEntries === 16)
-    && state.landmarks.length === 3 && state.landmarks.every(p => p[0] === 0 && p[1] === 0) && state.clouds > 0 && state.weather > 0, JSON.stringify({ ...state, rows: rows.map(r => ({ name: r.name, zoomStable: r.zoomStable, zoomMoved: r.zoomMoved, caps: r.caps })) }));
-  record("birds-eye combat: the pile, HQ hearth and basement center align on screen at every selected floor despite their different elevations", rows.every(r => r.orthoMix === 1 && r.centerError < 0.001), JSON.stringify(rows.map(({ name, centerError, orthoMix }) => ({ name, centerError, orthoMix }))));
-  record("birds-eye combat: carry clears every cut immediately; an underground shoulder handoff keeps its slice while blocked, then restores intact terrain once the displayed camera is clear", state.transitions.length === 8
-    && state.transitions.every(r => r.immediate < 1e-6 && r.mixStep < 0.08 && r.cutStep < 5 && r.rockError < 1e-6 && r.capError < 1e-5 && r.maxRegions <= 8 && r.carryClear)
-    && state.transitions[4].blockedCloseFrames > 0 && state.transitions[4].blockedRetained && state.transitions[4].residualSafe
-    && state.transitions[4].after.clear && state.transitions[4].after.geometryClear && state.transitions[4].after.eyeY < state.transitions[4].after.ceiling
-    && state.transitions[7].fadeError < 1e-6 && state.transitions[7].span > 1 && state.transitions[7].changed >= 10 && state.transitions[7].direction && state.transitions[7].blended >= 10
-    && state.transitions[1].after.mix > 0 && state.transitions[1].after.mix < 1
-    && state.transitions[2].before.mix === state.transitions[1].after.mix
-    && [0, 2, 6].every(i => state.transitions[i].firstClear && state.transitions[i].after.mix === 0 && state.transitions[i].after.clear)
-    && [3, 5, 7].every(i => state.transitions[i].after.mix === 1 && state.transitions[i].after.fade === 1 && state.transitions[i].after.cuts.length > 0)
-    && state.transitions[4].after.mode === "shoulder" && state.transitions[5].after.mode === "birds-eye", JSON.stringify(state.transitions));
-  record("lower floors: signed in or out, Ooga and gorilla carry never slice HQ or basement during high detached acquisition, residual projection after X or last-actor retake; X combat restores slicing", state.carryRoofs.length === 8
-    && state.carryRoofs.every(r => Number.isFinite(r.acquired.eye) && r.acquired.eye > r.ceiling
-      && [r.acquired, r.carryExit, r.carrySettling, r.retaken].every(s => s.controlled && s.view === "orbit" && !s.combat && s.clear && s.clearThroughout)
-      && r.carryExit.mix > 0
-      && [r.overhead, r.overheadAgain].every(s => s.controlled && s.combat && s.view === "birds-eye" && s.cut && s.mix === 1)
-      && !r.detached.controlled && !r.detached.combat && r.detached.clear && r.detached.clearThroughout && r.retaken.view === "orbit"), JSON.stringify(state.carryRoofs));
-  record("underground combat: both actors and sign-in states retain the cut while the entering shoulder camera crosses intact rock, then restore all cover in clear shoulder and first-person views", state.carryRoofs.every(r => {
-    const c = r.closeExit;
-    return c.blocked > 0 && c.retained && c.residualSafe && c.shoulderFrames < 150 && c.firstFrames < 90
-      && c.shoulder.view === "shoulder" && c.shoulder.eye < r.ceiling && c.first.view === "first-person" && c.firstClear
-      && [c.shoulder, c.first].every(s => s.controlled && s.combat && s.clear && s.geometryClear);
-  }), JSON.stringify(state.carryRoofs.map(r => ({ signedIn: r.signedIn, gorilla: r.gorilla, floor: r.floor, ...r.closeExit }))));
-  const released = state.released;
-  record("birds-eye combat: releasing the actor restores terrain, weather, caps, paths, markers and whole hidden actors on the first detached update", released.before.mix === 1 && released.before.fade === 1
-    && released.immediateFade < 1e-6 && released.firstClear && released.carryClear && released.withoutPlayer === 0
-    && !released.after.player && released.after.mix === 0 && released.after.clear && state.restored, JSON.stringify({ released, restored: state.restored }));
-  const rendering = await b.evaluate(`(() => {
-    const B = __ooga, S = BL.scene, root = S.createNode(), floor = BL.models.box({ w: 40, h: 0.2, d: 40, color: "#00ff00" });
-    // One greedy-meshed roof face crosses all four cut edges. Whole-face culling
-    // and clipping only the rectangle's original vertices both fail this case.
-    const roof = { verts: [-6, 0, -6, -6, 0, 6, 6, 0, 6, 6, 0, -6], faces: [{ i: [0, 1, 2, 3], color: [255, 0, 0] }], lines: [] };
-    const top = S.createNode({ geometry: roof, position: { x: 0, y: 5, z: 0 } });
-    const ground = S.createNode({ geometry: floor }); S.addChild(root, ground); S.addChild(root, top);
-    const camera = S.createCamera({ far: 60 }); Object.assign(camera.position, { x: 0, y: 20, z: 0 }); Object.assign(camera.target, { x: 0, y: 0, z: 0 }); camera.up = { x: 0, y: 0, z: -1 };
-    const canvas = document.createElement("canvas"); canvas.getContext("2d", { willReadFrequently: true });
-    const fallback = BL.canvasRenderer.createRenderer(canvas, { width: 256, height: 256 }), rows = [];
-    const region = { x: 0, z: 0, cos: Math.cos(Math.PI / 6), sin: Math.sin(Math.PI / 6), halfWidth: 1.5, halfDepth: 3, y: 2 };
-    const second = { x: -3, z: 0, cos: Math.cos(-Math.PI / 5), sin: Math.sin(-Math.PI / 5), halfWidth: 1.2, halfDepth: 2, y: 2 };
-    const regions = [region, second], original = JSON.stringify(roof), cloud = BL.hubModels.cloud(0);
-    const points = [[0, 5, 0], [region.cos * 1.2 + region.sin * 2.4, 5, -region.sin * 1.2 + region.cos * 2.4], [1.4, 5, -2.8], [4.5, 5, 0], [-3, 5, 0]];
-    const hidden = { ...roof, cutawayHide: true, cutawayPreserve: true }, base = { bloomStrength: 0, shadowStrength: 0, ambientFloor: 1, directStrength: 0 };
-    let cloudPoint = null, cloudDistance = Infinity;
-    for (const face of cloud.faces) {
-      const a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3, v = cloud.verts;
-      const ny = (v[b + 2] - v[a + 2]) * (v[c] - v[a]) - (v[b] - v[a]) * (v[c + 2] - v[a + 2]);
-      if (ny <= 0) continue;
-      let x = 0, y = 0, z = 0;
-      for (const i of face.i) { x += v[i * 3]; y += v[i * 3 + 1]; z += v[i * 3 + 2]; }
-      x /= face.i.length; y /= face.i.length; z /= face.i.length;
-      if (x * x + z * z < cloudDistance) { cloudDistance = x * x + z * z; cloudPoint = [x, y + 8, z]; }
-    }
-    try {
-      for (const [renderer, element] of [[B.renderer, document.getElementById("scene")], [fallback, canvas]]) {
-        const read = (opts, samples = points, area = 1) => {
-          renderer.render(root, camera, { ...base, ...opts });
-          return samples.map(point => {
-            const projected = renderer.project(...point, {}), x = Math.floor(projected.x * element.width / renderer.size.width) - Math.floor(area / 2), y = Math.floor(projected.y * element.height / renderer.size.height) - Math.floor(area / 2);
-            let pixels;
-            if (renderer.kind !== "webgl2") pixels = element.getContext("2d").getImageData(x, y, area, area).data;
-            else { const gl = element.getContext("webgl2"); pixels = new Uint8Array(area * area * 4); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.readPixels(x, element.height - area - y, area, area, gl.RGBA, gl.UNSIGNED_BYTE, pixels); }
-            const average = [0, 0, 0, 0]; for (let i = 0; i < pixels.length; i++) average[i % 4] += pixels[i];
-            return average.map(n => n / (area * area));
-          });
-        };
-        const covered = read({}), revealed = read({ cutawayMaxY: 2 }), restored = read({});
-        const selective = read({ cutawayRegions: regions, cutawayRegionCount: 1 }), both = read({ cutawayRegions: regions, cutawayRegionCount: 2 });
-        region.y = 5; const coplanar = read({ cutawayRegions: regions, cutawayRegionCount: 1 }); region.y = 2;
-        roof.cutawayPreserve = true;
-        const preserved = read({ cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2 });
-        roof.clipMaxY = 4; const ownMaximum = read({ cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2 }); delete roof.clipMaxY;
-        roof.clipMinY = 6; const ownMinimum = read({ cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2 }); delete roof.clipMinY; delete roof.cutawayPreserve;
-        top.geometry = hidden;
-        const weatherBefore = read({}), weatherWorld = Array.from(top.world), weatherGeometry = JSON.stringify(hidden), weatherFade = [];
-        // Average full ordered-coverage tiles: WebGL fades depth-writing
-        // clouds by coverage, while Canvas blends the same visible fraction.
-        for (const fade of [0, 0.25, 0.5, 0.75, 1, 0.75, 0.5, 0.25, 0]) weatherFade.push({ fade, pixel: read({ cutawayFade: fade, birdsEyeCutaway: true, cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2 }, [points[0]], 8)[0] });
-        const weatherHidden = read({ birdsEyeCutaway: true }), weatherAfter = read({});
-        const weatherUnchanged = top.visible && top.geometry === hidden && top.position.y === 5 && top.world.every((v, i) => v === weatherWorld[i]) && JSON.stringify(hidden) === weatherGeometry;
-        top.geometry = cloud; top.position.y = 8;
-        const cloudBefore = read({}, [cloudPoint])[0], cloudCut = read({ cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2, birdsEyeCutaway: true }, [cloudPoint])[0];
-        const cloudWorld = Array.from(top.world), cloudPosition = { ...top.position };
-        top.matrixCloud = true; ground.visible = false;
-        camera.position.y = 4; camera.target.y = -5;
-        const loweredPoint = [cloudPoint[0], cloudPoint[1] - 8, cloudPoint[2]];
-        const cloudLowered = read({ cutawayCloudY: 0, cutawayCloudMix: 1 }, [loweredPoint])[0];
-        const cloudWorldUnchanged = top.world.every((v, i) => v === cloudWorld[i]) && Object.keys(cloudPosition).every(k => top.position[k] === cloudPosition[k]);
-        // Keep cloud shading in both samples; only the translation differs.
-        top.position.y = 0;
-        const cloudReference = read({}, [loweredPoint])[0];
-        top.position.y = 8; top.matrixCloud = true; camera.position.y = 12;
-        const middlePoint = [cloudPoint[0], cloudPoint[1] - 4, cloudPoint[2]];
-        const cloudMiddle = read({ cutawayCloudY: 0, cutawayCloudMix: 0.5 }, [middlePoint])[0];
-        top.position.y = 4;
-        const cloudMiddleReference = read({}, [middlePoint])[0];
-        ground.visible = true; camera.position.y = 20; camera.target.y = 0;
-        top.geometry = roof; top.position.y = 5;
-        rows.push({ kind: renderer.kind, covered, revealed, restored, selective, both, coplanar, preserved, ownMaximum, ownMinimum,
-          weatherBefore, weatherHidden, weatherAfter, weatherFade, weatherUnchanged, cloudBefore, cloudCut, cloudPreserved: cloud.cutawayPreserve,
-          cloudLowered, cloudReference, cloudMiddle, cloudMiddleReference, cloudWorldUnchanged,
-          visible: root.children.every(n => n.visible), immutable: JSON.stringify(roof) === original });
-      }
-    } finally { fallback.dispose(); for (const geometry of [floor, roof, hidden]) B.renderer.releaseGeometry(geometry); B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts); }
-    return rows;
-  })()`);
-  const red = p => p[0] > p[1] + 40, green = p => p[1] > p[0] + 40;
-  record("birds-eye combat: WebGL2 and Canvas cut a large roof only inside rotated regions, retain both outside portions and coplanar faces, and restore the original mesh", rendering.length === 2 && rendering.some(r => r.kind === "webgl2") && rendering.some(r => r.kind === "canvas2d") && rendering.every(r => r.covered.every(red) && r.revealed.every(green) && r.restored.every(red)
-    && r.selective.slice(0, 2).every(green) && r.selective.slice(2).every(red) && green(r.both[4]) && red(r.both[2]) && red(r.both[3]) && r.coplanar.every(red) && r.visible && r.immutable), JSON.stringify(rendering));
-  record("birds-eye combat: preserved clouds survive local and global cuts, authored height limits still apply, and weather hides only during the render pass", rendering.every(r => r.preserved.every(red) && r.ownMaximum.every(green) && r.ownMinimum.every(green)
-    && r.weatherBefore.every(red) && r.weatherHidden.every(green) && r.weatherAfter.every(red) && r.weatherUnchanged && r.cloudPreserved
-    && r.cloudBefore[0] > 40 && r.cloudBefore[2] > 40 && r.cloudBefore.every((v, i) => Math.abs(v - r.cloudCut[i]) <= 1)), JSON.stringify(rendering.map(({ kind, preserved, ownMaximum, ownMinimum, weatherHidden, weatherUnchanged, cloudBefore, cloudCut }) => ({ kind, preserved, ownMaximum, ownMinimum, weatherHidden, weatherUnchanged, cloudBefore, cloudCut }))));
-  record("birds-eye combat: WebGL2 and Canvas weather fade independently of rock cuts and reverse to the same coverage without mutating scene nodes or geometry", state.weatherPreserved && rendering.every(r => r.weatherUnchanged && red(r.weatherFade[0].pixel) && green(r.weatherFade[4].pixel)
-    && r.weatherFade[2].pixel[0] > 20 && r.weatherFade[2].pixel[1] > 20
-    && r.weatherFade.slice(1, 5).every((f, i) => f.pixel[0] < r.weatherFade[i].pixel[0] - 10 && f.pixel[1] > r.weatherFade[i].pixel[1] + 10)
-    && r.weatherFade.slice(5).every((f, i) => f.pixel.every((v, channel) => Math.abs(v - r.weatherFade[3 - i].pixel[channel]) <= 1))), JSON.stringify({ weatherPreserved: state.weatherPreserved, renderers: rendering.map(({ kind, weatherFade, weatherUnchanged }) => ({ kind, weatherFade, weatherUnchanged })) }));
-  record("birds-eye combat: low-floor clouds render below the camera with a continuous visual offset while their world transforms and authored positions remain unchanged", rendering.every(r => r.cloudWorldUnchanged && r.cloudLowered[0] > 40 && r.cloudLowered[2] > 40
-    && r.cloudLowered.every((v, i) => Math.abs(v - r.cloudReference[i]) <= 1) && r.cloudMiddle.every((v, i) => Math.abs(v - r.cloudMiddleReference[i]) <= 1)), JSON.stringify(rendering.map(({ kind, cloudLowered, cloudReference, cloudMiddle, cloudMiddleReference, cloudWorldUnchanged }) => ({ kind, cloudLowered, cloudReference, cloudMiddle, cloudMiddleReference, cloudWorldUnchanged }))));
-} };
-
-const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhead projection keeps vertical landmarks aligned and picking rays agree with rendered geometry throughout the perspective transition", run: async (b) => {
+const sharedCameraRendering = { name: "shared camera rendering", why: "rule: games retain overhead projection, picking, culling and speech visibility; the hub supplies landmark geometry without enabling overhead gameplay", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, S = BL.scene, root = S.createNode(), rows = [], camera = S.createCamera({ near: 0.1, far: 80 });
     Object.assign(camera.position, { x: 3, y: 20, z: 5 }); Object.assign(camera.target, { x: 3, y: 0, z: 5 }); camera.up = { x: 0, y: 0, z: -1 }; camera.orthoHeight = 20;
@@ -16899,9 +17613,9 @@ const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhe
     } finally { fallback.dispose(); for (const geometry of [red, blue, pink]) B.renderer.releaseGeometry(geometry); B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts); }
   })()`);
   const samples = state.filter(r => !r.fallback), settled = samples.filter(r => r.mix === 1);
-  record("birds-eye projection: WebGL2 and Canvas match the continuous projection formula and their rays hit the same world points at every transition sample", samples.length === 10 && samples.every(r => r.projectError < 0.002 && r.rayError < 1e-4 && r.rayForward)
+  record("shared camera rendering: WebGL2 and Canvas match the continuous projection formula and their rays hit the same world points at every transition sample", samples.length === 10 && samples.every(r => r.projectError < 0.002 && r.rayError < 1e-4 && r.rayForward)
     && state.filter(r => r.fallback).every(r => r.error < 0.002) && settled.every(r => r.aligned < 0.001 && r.parallel < 1e-6), JSON.stringify(state));
-  record("birds-eye projection: rendered near and far objects follow projected positions, including a batch outside the old perspective frustum", samples.every(r => r.pixels[0]?.[0] > r.pixels[0]?.[1] + 40 && r.pixels[1]?.[2] > r.pixels[1]?.[1] + 40
+  record("shared camera rendering: rendered near and far objects follow projected positions, including a batch outside the old perspective frustum", samples.every(r => r.pixels[0]?.[0] > r.pixels[0]?.[1] + 40 && r.pixels[1]?.[2] > r.pixels[1]?.[1] + 40
     && (!r.pixels[2] || r.pixels[2][0] > r.pixels[2][1] + 40 && r.pixels[2][2] > r.pixels[2][1] + 40)) && settled.every(r => r.pixels[2]), JSON.stringify(samples.map(({ kind, mix, pixels }) => ({ kind, mix, pixels }))));
   const culling = await b.evaluate(`(() => {
     const B = __ooga, S = BL.scene, R = B.renderer, root = S.createNode(), rows = [];
@@ -16933,7 +17647,7 @@ const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhe
       return {rows,mixed,preserved,kind:R.kind};
     } finally {for(const g of [geometry,protectedGeometry,batchGeometry])R.releaseGeometry(g);R.render(BL.scenes.hub.root,B.camera,B.renderOpts);}
   })()`);
-  record("birds-eye projection: physical screen bounds cull only marked tiny props with hysteresis, preserve coherent glyph mosaics and assembled details, and retain an entire mixed batch", culling.kind === "webgl2"
+  record("shared camera rendering: physical screen bounds cull only marked tiny props with hysteresis, preserve coherent glyph mosaics and assembled details, and retain an entire mixed batch", culling.kind === "webgl2"
     && culling.rows.map(r=>r.drawn).join() === "9,9,10,10,9,9,10" && culling.rows.map(r=>r.smallCulled).join() === "5,5,4,4,5,5,4"
     && culling.mixed.drawn === 14 && culling.mixed.smallCulled === 0 && culling.mixed.count === 4 && culling.preserved, JSON.stringify(culling));
   const anchors = await b.evaluate(`(() => {
@@ -16943,7 +17657,7 @@ const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhe
     S.addChild(actor, body, head); S.addChild(root, actor);
     const roofGeometry = BL.models.box({ w: 16, h: 0.2, d: 16, color: "#777777" }), roof = S.createNode({ geometry: roofGeometry, position: { x: 0, y: 6, z: 0 } }); S.addChild(root, roof);
     const camera = S.createCamera({ far: 80, orthoHeight: 20 }); Object.assign(camera.position, { x: 0, y: 20, z: 0 }); Object.assign(camera.target, { x: 0, y: 0, z: 0 }); camera.up = { x: 0, y: 0, z: -1 };
-    const opts = { cutawayMaxY: 1e6, cutawayRegionCount: 0, cutawayRegions: [], birdsEyeCutaway: true, bloomStrength: 0, shadowStrength: 0 };
+    const opts = { bloomStrength: 0, shadowStrength: 0 };
     const visibility = BL.characterVisibility.create({ root, renderer: B.renderer, camera, renderOpts: opts }), cave = { root: actor, parts: { head } }, rows = [];
     const sample = name => {
       B.renderer.render(root, camera, opts); visibility.begin();
@@ -16956,22 +17670,13 @@ const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhe
       for (const mix of [0, 0.5, 1]) {
         camera.orthoMix = mix; roof.visible = false; rows.push(sample("uncovered"));
         roof.visible = true; rows.push(sample("covered"));
-        opts.cutawayMaxY = 4; rows.push(sample("global cut")); opts.cutawayMaxY = 1e6;
       }
-      opts.cutawayRegions[0] = { x: 4, z: 0, cos: 1, sin: 0, halfWidth: 1, halfDepth: 1, y: 4 }; opts.cutawayRegionCount = 1;
-      rows.push(sample("local cut"));
-      opts.cutawayRegions[0].x = 4.65; opts.cutawayRegions[0].halfWidth = 0.25;
-      rows.push(sample("visible sliver"));
-      roofGeometry.cutawayPreserve = true; rows.push(sample("preserved roof")); delete roofGeometry.cutawayPreserve;
-      roofGeometry.cutawayHide = true; rows.push(sample("hidden weather")); delete roofGeometry.cutawayHide;
       const decoratedRoof = BL.models.merge(roofGeometry);
       for (const face of decoratedRoof.faces) face.visibility = false;
       roof.geometry = decoratedRoof; rows.push(sample("render-only foliage")); roof.geometry = roofGeometry;
-      roof.matrixCloud = true; roofGeometry.cutawayPreserve = true; opts.cutawayCloudY = -4; opts.cutawayCloudMix = 1;
-      rows.push({ ...sample("lowered cloud"), physicalY: roof.position.y, worldY: roof.world[13] });
       // The ₿IFRÖST arch's stone carries a depth offset for its joins, yet stands free: its lintel and towers hide a
       // speaker behind them, while one seen through the opening stays visible.
-      roof.visible = false; roof.matrixCloud = false; opts.birdsEyeCutaway = false; opts.cutawayRegionCount = 0;
+      roof.visible = false;
       camera.orthoMix = 0; camera.up = { x: 0, y: 1, z: 0 };
       const landmark = BL.bifrostGate.landmark(), arch = S.createNode({ geometry: landmark.stone }); S.addChild(root, arch);
       const small = BL.models.box({ w: 0.3, h: 0.3, d: 0.3, color: "#ffffff" }), speaker = S.createNode({ sightHidden: true }), mouth = S.createNode({ geometry: small });
@@ -16986,38 +17691,16 @@ const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhe
       return { rows, archRows };
     } finally { visibility.dispose(); for (const geometry of [bodyGeometry, headGeometry, roofGeometry]) B.renderer.releaseGeometry(geometry); B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts); }
   })()`);
-  record("birds-eye projection: speech anchors follow the rendered head through the transition, ignore cut roofs and weather, and retain a sliver exposed through a local cut", anchors.rows.length === 15 && anchors.rows.every(r => {
-    const expected = r.name !== "covered" && r.name !== "preserved roof";
-    return r.visible === expected && (!expected || r.error < 0.002) && (r.name !== "lowered cloud" || r.physicalY === 6 && r.worldY === 6);
+  record("shared camera rendering: speech anchors follow the rendered head through projection changes, respect solid roofs and ignore render-only foliage", anchors.rows.length === 7 && anchors.rows.every(r => {
+    const expected = r.name !== "covered";
+    return r.visible === expected && (!expected || r.error < 0.002);
   }), JSON.stringify(anchors.rows));
   record("speech anchors: the ₿IFRÖST arch's offset stone hides a speaker behind its lintel and towers, and one seen through the opening stays visible", anchors.archRows.length === 4 && anchors.archRows.every(r => r.visible === r.shown), JSON.stringify(anchors.archRows));
 } };
 
-const hubCombatReplay = { name: "birds-eye combat replay", why: "contract: replay links preserve north-up intent and legacy combat orbit poses still migrate", run: async (b) => {
-  const northState = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, key = (type, value) => window.dispatchEvent(new KeyboardEvent(type, { key: value }));
-    if (!P.birdsEye) { P.hooks.onZoom(1.2); B.advance(1.5, 1 / 60); }
-    const angle = () => Math.atan2(-B.camera.up.x, -B.camera.up.z), wrap = n => Math.atan2(Math.sin(n), Math.cos(n));
-    key("keydown", "q"); B.advance(0.4, 1 / 60); key("keyup", "q"); B.advance(0.6, 1 / 60);
-    const before = angle(), pose = JSON.parse(document.getElementById("position-debug").dataset.pose);
-    P.restorePose(JSON.parse(JSON.stringify(pose)), true);
-    key("keydown", "w"); B.advance(1 / 60, 1 / 60); key("keyup", "w"); B.advance(0.5, 1 / 60);
-    const drift = Math.abs(wrap(angle() - before)), stillUnlocked = !P.birdsEyeNorthUp;
-    key("keydown", "n"); key("keyup", "n"); B.advance(0.8, 1 / 60);
-    const locked = JSON.parse(document.getElementById("position-debug").dataset.pose), north = angle();
-    P.modeAction("mode-toggle"); B.advance(0.8, 1 / 60); P.hooks.onOrbit(120, 0); B.advance(0.8, 1 / 60);
-    const orbit = P.orbit.yaw; P.modeAction("mode-toggle"); B.advance(0.8, 1 / 60);
-    return { storedUnlocked: pose.birdsEyeNorthUp, stillUnlocked, drift, locked: locked.birdsEyeNorthUp, north,
-      reentry: { orbit, angle: angle(), northUp: P.birdsEyeNorthUp, mode: P.mode, error: Math.abs(wrap(angle() - orbit)) } };
-  })()`);
-  record("birds-eye combat: debug replay records explicit north-up intent, while a fresh orbit-to-birds-eye transition clears the old lock and preserves the orbit heading", northState.storedUnlocked === false && northState.stillUnlocked && northState.locked && northState.drift < 0.001 && Math.abs(northState.north) < 0.001
-    && northState.reentry.mode === "birds-eye" && !northState.reentry.northUp && Math.abs(northState.reentry.orbit) > 0.1 && northState.reentry.error < 0.01, JSON.stringify(northState));
-  const legacy = await b.evaluate(`(() => { const pose = JSON.parse(document.getElementById("position-debug").dataset.pose); __ooga.pilot.capturePose(pose); pose.mode = "orbit"; pose.battle = pose.combat; delete pose.combat; delete pose.birdsEyeNorthUp; return pose; })()`);
-  await b.open(hubPage(src, `solo=1&character=portlandhodl&birdseye=1&pose=${encodeURIComponent(JSON.stringify(legacy))}`));
-  await untilReady(b);
-  const replay = await b.evaluate(`(() => { const B = __ooga, pose = JSON.parse(document.getElementById("position-debug").dataset.pose), el = B.hud.el.mode; return { mode: B.pilot.mode, combat: B.pilot.aiming, northUp: pose.birdsEyeNorthUp, poseMode: pose.mode, poseCombat: pose.combat, legacyField: Object.hasOwn(pose, "battle"), attribute: el.dataset.combat, legacyAttribute: el.hasAttribute("data-battle"), label: el.getAttribute("aria-label") }; })()`);
-  record("birds-eye combat: old pose links migrate once, and new pose and HUD state use only combat terminology", replay.mode === "birds-eye" && replay.combat && replay.northUp === false && replay.poseMode === "birds-eye" && replay.poseCombat && !replay.legacyField && replay.attribute === "true" && !replay.legacyAttribute && replay.label.includes("combat") && !replay.label.includes("battle"), JSON.stringify(replay));
-  // User-supplied basement replay: the old cursor-entry path saved a zero sideways offset.
+const hubShoulderReplay = { name: "shoulder replay", why: "contract: supported shoulder replay links preserve camera, actor and equipment state", run: async (b) => {
+  // User-supplied basement replay: repair the zero sideways offset, allowing the current
+  // modelled body's boom to shorten against rock while keeping its eye clear and beside the head.
   const collapsed = {
     version: 1, character: "w-s-bitcoin", mode: "shoulder", closeWanted: false, combat: true, birdsEyeNorthUp: true,
     position: [4.196401756845946, -10.703027121441215, 6.695479695588937], target: [0.32891306379743845, -11.382788314313563, 5.933603782632617],
@@ -17041,9 +17724,11 @@ const hubCombatReplay = { name: "birds-eye combat replay", why: "contract: repla
     B.advance(0.5, 1 / 60);
     const held = P.poseHeld && view === JSON.stringify([C.position, C.target, C.up, C.fov]);
     P.restorePose(JSON.parse(JSON.stringify(pose)), true); B.advance(0.2, 1 / 60);
-    return { pose, side, headOffset: B.renderer.size.width / 2 - head.x, held, roundTrip: view === JSON.stringify([C.position, C.target, C.up, C.fov]) };
+    const clear = B.island.clearAt(C.position.x, C.position.y - 0.3, C.position.z, 0.3, 0.6)
+      && B.headquarters.solids.props.clearAt(C.position.x, C.position.y - 0.3, C.position.z, 0.3, 0.6);
+    return { pose, side, clear, headOffset: B.renderer.size.width / 2 - head.x, held, roundTrip: view === JSON.stringify([C.position, C.target, C.up, C.fov]) };
   })()`);
-  record("shoulder replay: the supplied zero-offset URL loads beside the head before any input and holds the repaired camera", repaired.pose.mode === "shoulder" && repaired.pose.combat && repaired.pose.shoulderSide === 0.9 && Math.abs(repaired.side - 0.9) < 1e-5 && repaired.headOffset > 0 && repaired.held
+  record("shoulder replay: the supplied zero-offset URL loads beside the head before any input and holds the repaired camera", repaired.pose.mode === "shoulder" && repaired.pose.combat && repaired.pose.shoulderSide === 0.9 && repaired.side > 0 && repaired.side <= repaired.pose.shoulderSide + 1e-5 && repaired.clear && repaired.headOffset > 0 && repaired.held
     && repaired.pose.actor.every((n, i) => Math.abs(n - collapsed.actor[i]) < 1e-6) && repaired.pose.selectedSlot === 2 && repaired.pose.ammo === 30 && repaired.roundTrip, JSON.stringify(repaired));
   // The same replay as saved before the shoulder moved out: settled at the earlier ±0.6 side, which is valid, not collapsed.
   const height = await b.evaluate("__ooga.pilot.player.traits.height"), yaw = collapsed.orbit[0], kept = [];
@@ -17066,166 +17751,6 @@ const hubCombatReplay = { name: "birds-eye combat replay", why: "contract: repla
     && kept.every((k, i) => k.exact && k.held && Math.abs(k.side - (i ? -0.6 : 0.6)) < 1e-9), JSON.stringify(kept));
 } };
 
-const hubBirdsEyeTargets = { name: "birds-eye lower-floor targets", why: "rule: hidden upstairs targets cannot steal downstairs aim, and the orange melee dot and secondary shots identify the object that actually receives damage", run: async (b) => {
-  const result = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, S = BL.scene, root = BL.scenes.hub.root, a = P.player, H = B.island.headquarters;
-    const lowerGeometry = BL.models.box({ w: 0.8, h: 1, d: 0.8, color: "#527545" });
-    const upperGeometry = BL.models.box({ w: 3, h: 1, d: 3, color: "#aa5555" });
-    // Two real weapon-query targets share a footprint on separate floors.
-    const make = (geometry, y) => {
-      const target = (${hubWeaponTarget.toString()})(geometry, { x: 6, y: y + 0.5, z: 0 });
-      return target.owner;
-    };
-    const lower = make(lowerGeometry, H.basement.floor), upper = make(upperGeometry, H.floor);
-    const pointAtLower = () => {
-      S.updateWorld(root); B.renderer.render(root, B.camera, B.renderOpts);
-      const p = B.renderer.project(lower.node.position.x, lower.node.position.y, lower.node.position.z, {});
-      P.hooks.onOrbit(0, p.y - parseFloat(document.getElementById("weapon-reticle").style.top));
-    };
-    const aim = () => {
-      pointAtLower(); B.advance(0.4, 1 / 60);
-      const target = P.assistedTarget, reticle = document.getElementById("weapon-reticle"), dot = getComputedStyle(reticle.querySelector("span"));
-      return { target: target?.owner === lower ? "lower" : target?.owner === upper ? "upper" : "other", feedback: reticle.dataset.target,
-        dot: dot.backgroundColor, visibility: dot.visibility, x: target?.x, y: target?.y, z: target?.z, ceiling: P.birdsEyeCeiling,
-        distance: P.assistedTargetDistance, reach: B.crew.meleeReach(a) };
-    };
-    // This fixture exercises both owned weapons, with rounds for both firing checks.
-    B.crew.configureWeapon(a, 2, 12);
-    if (!P.birdsEye) { P.hooks.onZoom(100); B.advance(1, 1 / 60); }
-    // The target is south of the actor. Turn through the real birds-eye input;
-    // navigate's orbit yaw does not replace an already active overhead yaw.
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "n" })); window.dispatchEvent(new KeyboardEvent("keyup", { key: "n" })); B.advance(1.5, 1 / 60);
-    const reticle = document.getElementById("weapon-reticle"), halfHeight = B.renderer.size.height / 2;
-    P.hooks.onOrbit(0, halfHeight - parseFloat(reticle.style.top));
-    const reach = Math.max(parseFloat(reticle.style.getPropertyValue("--reticle-radius")), halfHeight * 0.2);
-    for (let i = 0; i < 3; i++) P.hooks.onOrbit(-reach * Math.tan(Math.PI / 3), 0);
-    B.advance(1.5, 1 / 60);
-    try {
-      P.navigate({ position: { x: 6, y: H.basement.floor, z: -Math.max(6, B.crew.meleeReach(a) + 2) }, yaw: Math.PI, pitch: 0.3, dist: 8 }); B.advance(0.7, 1 / 60);
-      P.weaponAction("weapon-primary"); B.advance(0.5, 1 / 60); const far = aim(), farBefore = lower.cave.health.value;
-      P.weaponAction("weapon-fire"); B.advance(0.65, 1 / 60); const farAfter = lower.cave.health.value;
-      P.navigate({ position: { x: 6, y: H.basement.floor, z: -0.95 }, yaw: Math.PI, pitch: 0.3, dist: 8 }); B.advance(0.7, 1 / 60);
-      const near = aim(), beforeMelee = lower.cave.health.value;
-      P.weaponAction("weapon-fire"); B.advance(0.65, 1 / 60); const afterMelee = lower.cave.health.value;
-      const jump = { peak: 0, peakTarget: false, orangeFrames: 0 }; B.crew.jumpPlayer();
-      for (let i = 0; i < 60; i++) {
-        B.advance(1 / 60, 1 / 60);
-        if (a.hop > jump.peak) { jump.peak = a.hop; jump.peakTarget = P.assistedTarget?.owner === lower; }
-        if (a.hop > 0.1 && document.getElementById("weapon-reticle").dataset.target === "object") jump.orangeFrames++;
-      }
-      P.weaponAction("weapon-secondary"); B.advance(0.4, 1 / 60); const firearm = aim(), shotsBefore = a.weapon.shotsFired;
-      P.weaponAction("weapon-secondary"); B.advance(0.7, 1 / 60);
-      const afterShot = lower.cave.health.value, shots = a.weapon.shotsFired - shotsBefore, mode = P.mode;
-      P.navigate({ position: { x: 6, y: H.basement.floor, z: -2 }, yaw: Math.PI, pitch: 0.3, dist: 8 }); B.advance(0.5, 1 / 60);
-      P.hooks.onZoom(100); B.advance(1, 1 / 60); aim(); const fromHeight = P.birdsEyeHeight;
-      P.hooks.onZoom(0.001);
-      // A stationary pointer retains the exact object hit as zoom carries its
-      // projection beyond the screen. Exercise moving edge input separately
-      // below: asking for an off-screen pixel deliberately changes that aim.
-      let frames = 0; for (; frames < 120 && P.mode === "birds-eye"; frames++) B.advance(1 / 60, 1 / 60);
-      B.advance(0.06, 1 / 60);
-      const anchor = P.assistedTarget ? { x: P.assistedTarget.x, y: P.assistedTarget.y, z: P.assistedTarget.z } : null;
-      const reticle = document.getElementById("weapon-reticle"), handoff = { mode: P.mode, mix: P.birdsEyeMix, frames, fromHeight, anchor,
-        offset: Math.hypot(parseFloat(reticle.style.left) - B.renderer.size.width / 2, parseFloat(reticle.style.top) - B.renderer.size.height / 2),
-        before: lower.cave.health.value, shotsBefore: a.weapon.shotsFired };
-      P.weaponAction("weapon-fire"); B.advance(0.3, 1 / 60);
-      handoff.after = lower.cave.health.value; handoff.shots = a.weapon.shotsFired - handoff.shotsBefore;
-      B.advance(1, 1 / 60);
-      const held = P.assistedTarget, screen = anchor && B.renderer.project(anchor.x, anchor.y, anchor.z, {});
-      handoff.targetError = anchor && held ? Math.hypot(anchor.x - held.x, anchor.y - held.y, anchor.z - held.z) : Infinity;
-      handoff.centerError = screen ? Math.hypot(screen.x - B.renderer.size.width / 2, screen.y - B.renderer.size.height / 2) : Infinity;
-      const closeAim = [];
-      for (const fresh of [false, true]) {
-        if (fresh) { P.hooks.onOrbit(0.1, 0); B.advance(0.5, 1 / 60); }
-        const C = B.camera, dx = C.target.x - C.position.x, dy = C.target.y - C.position.y, dz = C.target.z - C.position.z;
-        const length = Math.hypot(dx, dy, dz), hit = {};
-        const found = B.input.weaponTargets.ray(hit, C.position.x, C.position.y, C.position.z, dx / length, dy / length, dz / length, 60, a);
-        const point = fresh ? hit : anchor;
-        P.hooks.onZoom(0.8, {});
-        let error = 0;
-        for (let frame = 0; frame < 90; frame++) {
-          B.advance(1 / 60, 1 / 60);
-          const q = point && B.project(point.x, point.y, point.z, {});
-          error = Math.max(error, q ? Math.hypot(q.x - B.renderer.size.width / 2, q.y - B.renderer.size.height / 2) : Infinity);
-        }
-        const mode = P.mode;
-        if (fresh) { P.hooks.onOrbit(0.015, 0); B.advance(1, 1 / 60); }
-        const eye = B.camera, vx = eye.target.x - eye.position.x, vy = eye.target.y - eye.position.y, vz = eye.target.z - eye.position.z;
-        const rayLength = Math.hypot(vx, vy, vz), exitHit = {};
-        const exitFound = B.input.weaponTargets.ray(exitHit, eye.position.x, eye.position.y, eye.position.z, vx / rayLength, vy / rayLength, vz / rayLength, 60, a);
-        const exitPoint = exitFound ? { x: exitHit.x, y: exitHit.y, z: exitHit.z } : null;
-        P.hooks.onZoom(1.2, {});
-        let exitError = 0;
-        for (let frame = 0; frame < 90; frame++) {
-          B.advance(1 / 60, 1 / 60);
-          const q = exitPoint && B.project(exitPoint.x, exitPoint.y, exitPoint.z, {});
-          exitError = Math.max(exitError, q ? Math.hypot(q.x - B.renderer.size.width / 2, q.y - B.renderer.size.height / 2) : Infinity);
-        }
-        closeAim.push({ fresh, found, mode, error, exitFound, exitMode: P.mode, exitError });
-      }
-      P.hooks.onZoom(1.2, {}); B.advance(1, 1 / 60);
-      P.navigate({ position: { x: 6, y: H.basement.floor, z: -2 }, yaw: Math.PI, pitch: 0.3, dist: 8 }); B.advance(0.5, 1 / 60);
-      // The close-view probe deliberately turned the aim. Restore the same
-      // exact overhead bearing before replaying the original vertical input.
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "n" })); window.dispatchEvent(new KeyboardEvent("keyup", { key: "n" })); B.advance(1.5, 1 / 60);
-      P.hooks.onOrbit(0, halfHeight - parseFloat(reticle.style.top));
-      for (let i = 0; i < 3; i++) P.hooks.onOrbit(-reach * Math.tan(Math.PI / 3), 0);
-      B.advance(1.5, 1 / 60);
-      P.hooks.onZoom(100, {}); B.advance(1, 1 / 60); aim(); P.hooks.onZoom(0.001, {});
-      const edge = { frames: 0, offscreen: 0, clamped: true };
-      for (; edge.frames < 120 && P.mode === "birds-eye"; edge.frames++) {
-        // Retain the original per-frame input sequence, including requests
-        // above the viewport as the continuous zoom lowers the overhead eye.
-        pointAtLower();
-        const projected = B.renderer.project(lower.node.position.x, lower.node.position.y, lower.node.position.z, {});
-        if (projected.y < 0) edge.offscreen++;
-        B.advance(1 / 60, 1 / 60);
-        if (P.birdsEye) edge.clamped &&= parseFloat(reticle.style.top) >= 0;
-      }
-      B.advance(0.06, 1 / 60);
-      const edgeAnchor = P.assistedTarget && { x: P.assistedTarget.x, y: P.assistedTarget.y, z: P.assistedTarget.z };
-      edge.mode = P.mode; edge.height = edgeAnchor?.y;
-      // The reticle glides toward centre until the overhead blend ends.
-      // Check the selected point against that displayed reticle throughout,
-      // then require exact centering once the handoff is actually complete.
-      edge.reticleError = 0; edge.settleFrames = 0;
-      for (; edge.settleFrames < 90 && P.birdsEyeMix > 0; edge.settleFrames++) {
-        B.advance(1 / 60, 1 / 60);
-        if (!P.birdsEyeMix) break;
-        const q = edgeAnchor && B.project(edgeAnchor.x, edgeAnchor.y, edgeAnchor.z, {});
-        edge.reticleError = Math.max(edge.reticleError, q ? Math.hypot(q.x - parseFloat(reticle.style.left), q.y - parseFloat(reticle.style.top)) : Infinity);
-      }
-      edge.settled = P.birdsEyeMix === 0;
-      const edgeHeld = P.assistedTarget, edgeScreen = edgeAnchor && B.project(edgeAnchor.x, edgeAnchor.y, edgeAnchor.z, {});
-      edge.targetError = edgeAnchor && edgeHeld ? Math.hypot(edgeAnchor.x - edgeHeld.x, edgeAnchor.y - edgeHeld.y, edgeAnchor.z - edgeHeld.z) : Infinity;
-      edge.centerError = edgeScreen ? Math.hypot(edgeScreen.x - B.renderer.size.width / 2, edgeScreen.y - B.renderer.size.height / 2) : Infinity;
-      return { far, farBefore, farAfter, near, firearm, jump, handoff, closeAim, edge, floor: H.basement.floor, beforeMelee, afterMelee, afterShot,
-        upperHealth: upper.cave.health.value, shots, mode };
-    } finally {
-      B.crew.stopBurst(a); B.crew.selectWeapon(1, a);
-      for (const owner of [lower, upper]) { B.input.remove(owner.node); S.removeChild(root, owner.node); B.renderer.releaseGeometry(owner.node.geometry); }
-      B.advance(0.2, 1 / 60);
-    }
-  })()`);
-  record("birds-eye combat: basement aim ignores upstairs geometry, identifies distant and reachable objects, then melee and secondary fire damage that same target", result.mode === "birds-eye" && result.far.target === "lower" && result.far.feedback === "object" && result.far.visibility === "visible" && result.far.distance > result.far.reach && result.farAfter === result.farBefore && result.near.target === "lower" && result.near.feedback === "object" && result.near.dot === "rgb(255, 157, 66)" && result.near.visibility === "visible" && Math.abs(result.near.y - result.floor - 0.5) < 1e-5 && result.afterMelee < result.beforeMelee && result.firearm.target === "lower" && result.shots > 0 && result.afterShot < result.afterMelee && result.upperHealth === 100, JSON.stringify(result));
-  record("birds-eye combat: a jump retains same-floor targeting through its apex and orange feedback while melee remains within reach", result.jump.peak > 0.9 && result.jump.peakTarget && result.jump.orangeFrames > 2, JSON.stringify(result.jump));
-  record("birds-eye combat: a full-height zoom reaches shoulder promptly, retains the exact elevated world anchor through the swoop, and fires into the same target", result.handoff.mode === "shoulder" && result.handoff.mix > 0 && result.handoff.mix < 1 && result.handoff.offset > 20
-    && result.handoff.fromHeight > 60 && result.handoff.frames > 0 && result.handoff.frames < 45 && result.handoff.anchor && result.handoff.anchor.y > result.floor + 0.05
-    && result.handoff.targetError < 1e-6 && result.handoff.centerError < 0.1 && result.handoff.shots > 0 && result.handoff.after < result.handoff.before, JSON.stringify(result.handoff));
-  record("combat zoom: object points stay under the crosshair in both shoulder/first-person directions, including after new first-person aim",
-    result.closeAim.length === 2 && result.closeAim.every(row => row.found && row.mode === "first-person" && row.error < 0.1 && row.exitFound && row.exitMode === "shoulder" && row.exitError < 0.1), JSON.stringify(result.closeAim));
-  record("combat zoom: continued pointer input above the viewport clamps to its edge and retains the resulting same-floor point through shoulder entry", result.edge.offscreen > 0 && result.edge.clamped
-    && result.edge.mode === "shoulder" && result.edge.frames > 0 && result.edge.frames < 45 && Math.abs(result.edge.height - result.floor) < 0.05
-    && result.edge.settled && result.edge.reticleError < 0.1 && result.edge.targetError < 1e-6 && result.edge.centerError < 0.1, JSON.stringify(result.edge));
-} };
-
-// ---- Phones ----
-// Each scene again at 390x844 with touch, as a phone player meets it. PHONE lists what a player would feel:
-// ellipsis or clipped text, a button or heading wrapped by accident, text past the screen edge, and a
-// required control missing, off screen or covered where a thumb lands. Planted defects (ellipsis, clipping,
-// a card too wide, a buried button, desktop wording on a touch line, a wrapped label, a stick off screen)
-// were each caught before this went in; its first run found Throw under Drift in the rally, the mine's
-// strip over Pause and Sound, and the Mempool cave's sheet covering both sticks.
 const PHONE = (required) => `((required) => {
   const W = innerWidth, H = innerHeight, bad = [];
   const name = (el) => el.id ? '#' + el.id : el.tagName.toLowerCase() + '.' + [...el.classList].join('.');
@@ -18237,7 +18762,7 @@ const factoryFloor = { name: "factory floor", why: "regression: stairs landed ag
     if (!near(L.stairway[0], L.stairway[2] - 1, 0)) missing.push("forge floor");
     return { who, radius: +R.toFixed(2), missing, cells: cells.length, deck: deck.size };
   })()`);
-  record("factory floor: from the balcony the widest Ooga on the roster reaches both ends of every stair, every line's deck, each peer tunnel's shield, the switchboard, Kortik's deck, the right-wall platform with the rebalancer's operator lane and the treasury (walking the platform's length from the cooker's stair), the donation kiosk in the right wall, the watchtower, landing, galleries and the forge", r.missing.length === 0 && r.radius > 0.6 && r.cells > 20000, JSON.stringify(r));
+  record("factory floor: from the balcony the widest Ooga on the roster reaches both ends of every stair, every line's deck, each peer tunnel's shield, the switchboard, Kortik's deck, the right-wall platform with the rebalancer's operator lane and the treasury (walking the platform's length from the cooker's stair), the donation kiosk in the right wall, the watchtower, landing, galleries and the forge", r.missing.length === 0 && r.radius > 0.45 && r.cells > 20000, JSON.stringify(r));
 } };
 // The way in and out: from the island through the 2 o'clock mouth's shield, back out past the balcony, and Escape.
 const factoryEntrance = { name: "factory entrance", why: "regression: flying above the mouth entered the factory and reaching its front wall away from the doorway exited; real doorway crossings must still keep the same Ooga", run: async (b) => {
@@ -18716,6 +19241,17 @@ const arcadeHuntGear = { name: "arcade hunt gear", why: "rule: no gun in the are
     hunting.armed && hunting.owned && hunting.equipped && hunting.gun && hunting.gear && !hunting.bananas && !hunting.primary && !hunting.club && !hunting.primaryHud && !hunting.magazineHud
       && hunting.skin === "ghost" && hunting.shown && hunting.width === 78 && hunting.readout === "none" && hunting.infinity === "∞" && hunting.infinityShown, JSON.stringify(hunting));
   record("arcade hunt gear: the hunt's start puts a hunter in combat with the full crosshair", hunting.combat && hunting.crosshair && !hunting.dot, JSON.stringify(hunting));
+  const overhead = await b.evaluate(`(() => {
+    const B=__ooga,P=B.pilot,a=P.player,at={...a.root.position};
+    if(P.mode==="first-person"){P.hooks.onZoom(2,{});B.advance(1,1/60);}
+    P.hooks.onZoom(2,{});B.advance(1,1/60);
+    const active=P.mode==="birds-eye"&&P.aiming&&B.camera.orthoMix===1;
+    const heading=Math.atan2(B.camera.up.x,B.camera.up.z);P.hooks.onOrbit(35,0);B.advance(.3,1/60);
+    const turns=Math.abs(Math.atan2(B.camera.up.x,B.camera.up.z)-heading)>.01,projection=B.camera.orthoMix;
+    const stayed=Math.hypot(a.root.position.x-at.x,a.root.position.z-at.z)<.01;
+    return {active,turns,projection,stayed};
+  })()`);
+  record("ghost hunt camera: the running game offers controllable overhead combat without moving the Ooga",overhead.active&&overhead.turns&&overhead.projection===1&&overhead.stayed,JSON.stringify(overhead));
   const remote = await b.evaluate(`(() => {
     const B = __ooga, N = BL.net, H = BL.arcadeModels.HAUNT, A = H.arena, sim = BL.scenes.arcade.debug.halloween.sim, build = BL.models.caveman, caves = [];
     const peer = (id, x) => ({ id, login: "peer" + id, display: "Peer", body: "w-s-bitcoin", zone: "ghost-arena", x: A.x + x, y: H.y, z: A.z + 4, yaw: 0, weapon: 2 | 4, jet: 0 });
@@ -18737,6 +19273,8 @@ const arcadeHuntGear = { name: "arcade hunt gear", why: "rule: no gun in the are
   record("arcade hunt gear: on another player only a hunter shows the gun and pack, never a spectator", remote.hunter.gear && remote.hunter.gun && !remote.hunter.club && !remote.spectator.gear && !remote.spectator.gun && !remote.spectator.club, JSON.stringify(remote));
   await b.evaluate(`(() => { document.getElementById("ghost-exit").click(); __ooga.advance(0.5, 1 / 60); })()`);
   const left = await b.evaluate(read);
+  const normal = await b.evaluate(`(__ooga.advance(1,1/60),{view:__ooga.pilot.mode,projection:__ooga.camera.orthoMix||0})`);
+  record("ghost hunt camera: leaving the game removes overhead from the ordinary Arcade view",normal.view!=="birds-eye"&&normal.projection===0,JSON.stringify(normal));
   record("arcade hunt gear: leaving the hunt takes the gun, pack and its skin away", !left.armed && !left.owned && !left.equipped && !left.gun && !left.gear && !left.skin, JSON.stringify(left));
 } };
 // HALLOWEEN: a real click on the ghost opens the hunt's lobby from either view.
@@ -19102,9 +19640,19 @@ const arcadeBlockHall = { name: "arcade block hall", why: "rule: an Ooga walks t
     let ok = true, x = H.x - 0.6, z = -20;
     while (z > H.ledge + 0.8) { const nz = z - 0.2; ok = ok && B.arcade.walkable(x, z, x, nz, H.y, actor.bodyHeight, actor) && B.arcade.supportAt(x, nz, H.y) === H.y; z = nz; }
     const past = B.arcade.walkable(x, H.ledge + 0.5, x, H.ledge - 0.6, H.y, actor.bodyHeight, actor);
-    return { ok, z, past, wall: B.arcade.walkable(H.x0 - 0.3, -28, H.x0 - 0.3, -28.2, H.y, actor.bodyHeight, actor) };
+    return { ok, z, past, wall: B.arcade.walkable(H.x, -28, H.x0 - 0.3, -28, H.y, actor.bodyHeight, actor) };
   })()`);
   record("arcade block hall: walkable from the deck to the ledge, held by its railing and walls", r.ok && !r.past && !r.wall, JSON.stringify(r));
+  const doorway = await b.evaluate(`(() => {
+    const B = __ooga, W = BL.arcadeBlockWatch, D = W.DOOR;
+    return ['w-s-bitcoin', 'tiffanyvarty', 'portlandhodl'].map(name => {
+      const a = BL.models.caveman(BL.contributors.traitsFor(name)); a.bodyHeight = BL.crew.bodyHeightOf(a); a.bodyRadius = BL.crew.bodyRadiusOf(a); let x = W.ARRIVAL.x, clear = true;
+      while (x < D.plane) { const nx = Math.min(D.plane, x + .025); clear = clear && B.arcade.walkable(x, D.z, nx, D.z, D.y, a.bodyHeight, a); x = nx; }
+      return { name, clear, floor: B.arcade.supportAt(x, D.z, D.y) === D.y, bounded: !B.arcade.walkable(x, D.z, D.reach + .5, D.z, D.y, a.bodyHeight, a), entered: W.atPortal(x, D.z, D.y), height: a.bodyHeight, aperture: D.h };
+    });
+  })()`);
+  record("arcade watch doorway: regular, slim and broad modelled Oogas reach the portal on its floor while the wall beyond remains solid",
+    doorway.every(r => r.clear && r.bounded && r.entered && r.floor && r.height < r.aperture), JSON.stringify(doorway));
 } };
 const arcadeStage = { name: "arcade stage approaches", why: "regression: oversized decorative root collision boxes blocked walking onto the central stage from its sides and back", run: async (b) => {
   const r = await b.evaluate(`(() => {
@@ -19725,8 +20273,7 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
         eachCloudDips: ring.every(c => c.minY < (radius === 36 ? -3.9 : 2.1)),
         eachCloudRises: ring.every(c => c.maxY > (radius === 36 ? 1.9 : 10.9)) };
     });
-    // The render-only cutaway offset used to lower every high cloud toward the walker,
-    // collapsing separate lanes into buildings even though the node transforms stayed clear.
+    // Ordinary hub combat must leave the cloud lanes at their actual world heights.
     const P = B.pilot, actor = B.cavemen.get("portlandhodl");
     try {
       P.possess(actor); if (B.crew.sleeping) B.crew.wakePlayer();
@@ -19747,7 +20294,7 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
       && ring.minHeight >= (ring.radius === 36 ? -4 : 2) && ring.maxHeight <= (ring.radius === 36 ? 2 : 11)
       && ring.maxVerticalSpeed <= (ring.radius === 36 ? 0.2 : 0.25))
     && clouds.maxTravelExcess < 1e-7 && clouds.minGap > 0 && clouds.spacingDrift < 1e-8
-    && clouds.cutaway?.selected && clouds.cutaway.view === "birds-eye" && clouds.cutaway.combat && clouds.cutaway.active && clouds.cutaway.mix === 0 && clouds.cutaway.heights
+    && clouds.cutaway?.selected && clouds.cutaway.view === "shoulder" && clouds.cutaway.combat && !clouds.cutaway.active && clouds.cutaway.mix === 0 && clouds.cutaway.heights
     && state.horizon.every(row => row.clouds.length === 18 && row.clouds.every(c => c.visible && c.moving)), JSON.stringify(clouds));
   const animation = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, H = BL.scenes.hub.debug, a = B.cavemen.get("portlandhodl"), e = B.clankers.list.find(entry => entry.owner === a);
@@ -19806,7 +20353,81 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
       && animation.far.gorilla > 0 && animation.far.gorilla < 12 && animation.nearOoga.ooga >= 58 && animation.nearGorilla.gorilla >= 58
       && animation.host.ooga >= 58 && animation.host.gorilla >= 58 && animation.network && animation.controlled >= 58, JSON.stringify(animation));
 } };
-scene("hub", { label: "distant effects", query: "pos=0&birdseye=1", steps: [hubDistantEffects] });
+const hubCliffLedges = { name: "hub cliff ledges", why: "rule: both cliff paths must be reachable up and down by existing Ooga controls, with pause and jump release and GAME MODE disabling the ropes", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    ${DRIVEN_OF}
+    const B = __ooga, H = BL.scenes.hub, npc = B.cavemen.get("portlandhodl"), routes = H.debug.cliffLadders, rows = [];
+    if (!drivenOf(B, npc)) B.pilot.possess(npc);
+    const a = drivenOf(B, npc);
+    if (!a) throw new Error("Cliff route fixture could not acquire its Ooga");
+    const key = (name, down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: name === "Space" ? " " : name, code: name === "Space" ? name : "Key" + name.toUpperCase(), bubbles: true }));
+    const feet = () => a.root.position.y - a.baseY, anchor = {};
+    for (const l of routes) {
+      l.pathAt(l.bottom, anchor);
+      const yaw = Math.atan2(l.nx, l.nz), gap = a.bodyRadius * 0.5;
+      B.pilot.navigate({ position: { x: anchor.x + l.nx * gap, y: l.bottom, z: anchor.z + l.nz * gap }, yaw, pitch: 0, dist: 6 });
+      B.advance(0.1, 1 / 60); key("w", true);
+      let mounted = false, paused = false, hold = 0;
+      for (let frame = 0; frame < 1800; frame++) {
+        B.advance(1 / 60, 1 / 60); mounted ||= !!a.ladder.plane;
+        if (!paused && a.ladder.plane && feet() > (l.top + l.bottom) / 2) {
+          key("w", false); const y = feet(); B.advance(0.2, 1 / 60); hold = Math.abs(feet() - y); paused = true; key("w", true);
+        }
+        if (mounted && !a.ladder.plane) break;
+      }
+      key("w", false); const top = feet(), landing = { x: a.root.position.x, y: top, z: a.root.position.z };
+      const landed = Math.hypot(landing.x - l.x + l.nx * l.inset, landing.z - l.z + l.nz * l.inset) < 1e-6;
+      // Turn in place at the landing actually reached by climbing. Walking must
+      // cover the full inset to the lip; never place the fixture beside the rope.
+      B.advance(0.4, 1 / 60);
+      const landingHeld = Math.hypot(a.root.position.x - landing.x, a.root.position.z - landing.z) < 1e-6 && Math.abs(feet() - top) < 1e-6;
+      B.pilot.orbit.yaw = B.pilot.orbit.tYaw = yaw + Math.PI;
+      B.advance(0.1, 1 / 60); key("w", true);
+      let descended = false, approach = 0, lowering = false, clearedLip = false;
+      for (let frame = 0; frame < 1800; frame++) {
+        B.advance(1 / 60, 1 / 60);
+        if (!lowering && feet() < top - 1e-6) {
+          lowering = true;
+          approach = Math.hypot(a.root.position.x - landing.x, a.root.position.z - landing.z);
+          clearedLip = !!a.ladder.plane && (a.root.position.x - l.x) * l.nx + (a.root.position.z - l.z) * l.nz >= gap - 1e-6;
+        }
+        descended ||= !!a.ladder.plane;
+        if (descended && !a.ladder.plane) break;
+      }
+      key("w", false);
+      rows.push({ kind: l.kind, mounted, paused, hold, top, expectedTop: l.top, landed, landingHeld, approach, requiredApproach: l.inset + gap, clearedLip, descended, bottom: feet(), expectedBottom: l.bottom, active: !!a.ladder.plane });
+    }
+    const l = routes.find(r => r.kind === "ladder");
+    l.pathAt(l.bottom, anchor);
+    B.pilot.navigate({ position: { x: anchor.x + l.nx * a.bodyRadius * 0.5, y: l.bottom, z: anchor.z + l.nz * a.bodyRadius * 0.5 }, yaw: Math.atan2(l.nx, l.nz), pitch: 0, dist: 6 });
+    key("w", true); B.advance(0.4, 1 / 60); key("w", false); const attached = !!a.ladder.plane;
+    key("Space", true); B.advance(1 / 60, 1 / 60); key("Space", false); const released = !a.ladder.plane;
+    B.crew.wearJetpack(a, BL.hubModels.jetpack(), BL.hubModels.jetFlame()); a.jetFuel = 1; a.jetRecovering = false;
+    B.pilot.navigate({ position: { x: anchor.x + l.nx * a.bodyRadius * 0.5, y: l.bottom, z: anchor.z + l.nz * a.bodyRadius * 0.5 }, yaw: Math.atan2(l.nx, l.nz), pitch: 0, dist: 6 });
+    key("w", true); B.advance(0.4, 1 / 60); key("w", false); const jetAttached = !!a.ladder.plane && !!a.jet;
+    key("Space", true); B.advance(1 / 60, 1 / 60); key("Space", false); const jetReleased = !a.ladder.plane && a.hopV > 0 && !a.jet.thrust;
+    const bottomLanding = { position: { x: anchor.x + l.nx * a.bodyRadius * 0.5, y: l.bottom, z: anchor.z + l.nz * a.bodyRadius * 0.5 }, yaw: Math.atan2(l.nx, l.nz), pitch: 0, dist: 6 };
+    B.pilot.navigate(bottomLanding);
+    key("w", true); B.advance(0.4, 1 / 60); key("w", false); const modeAttached = !!a.ladder.plane;
+    H.debug.setGameMode(true); B.advance(1 / 60, 1 / 60); const modeDetached = !a.ladder.plane;
+    // Navigation gives a fresh, grounded attempt with zero cooldown. Otherwise
+    // the release cooldown alone could make the disabled-mount check pass.
+    B.pilot.navigate(bottomLanding); const mountReady = a.ladder.cooldown === 0;
+    key("w", true); let mountedInMode = false;
+    for (let frame = 0; frame < 24; frame++) { B.advance(1 / 60, 1 / 60); mountedInMode ||= !!a.ladder.plane; }
+    key("w", false); const modeBlocked = mountReady && !mountedInMode && a.ladder.cooldown === 0;
+    H.debug.setGameMode(false); B.pilot.navigate(bottomLanding);
+    key("w", true); B.advance(0.4, 1 / 60); key("w", false); const reenabled = !!a.ladder.plane;
+    key("Space", true); B.advance(1 / 60, 1 / 60); key("Space", false);
+    return { rows, attached, released, jetAttached, jetReleased, modeAttached, modeDetached, modeBlocked, reenabled };
+  })()`);
+  record("hub cliff ledges: rappel ropes and lower ladders climb and descend, hold at rest, release on Space and respect GAME MODE",
+    r.rows.filter(v => v.kind === "rope").length === 3 && r.rows.filter(v => v.kind === "ladder").length === 3
+      && r.rows.every(v => v.mounted && v.paused && v.hold < 1e-6 && Math.abs(v.top - v.expectedTop) < 1e-6 && v.landed && v.landingHeld && v.clearedLip && v.approach >= v.requiredApproach - 1e-6 && v.descended && Math.abs(v.bottom - v.expectedBottom) < 1e-6 && !v.active)
+      && r.attached && r.released && r.jetAttached && r.jetReleased && r.modeAttached && r.modeDetached && r.modeBlocked && r.reenabled, JSON.stringify(r));
+} };
+scene("hub", { label: "cliff ledges", query: "solo=1&character=portlandhodl&pos=0", steps: [hubCliffLedges] });
+scene("hub", { label: "distant effects", query: "pos=0", steps: [hubDistantEffects] });
 // No other session's cast holds the default local Ooga or a server-vouched contributor: both join the roster before
 // the crew is built, as on a real arrival.
 scene("hub", { label: "guest likeness", query: "pos=0", opts: { initScript: GUEST_LIKENESS_INIT }, steps: [hubGuestLikeness] });
@@ -20207,8 +20828,10 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
     await untilPage(b, 'B.scene === "hub" && !B.transitioning', 20000);
     resumed = await b.evaluate(`(() => {
       const S = __entryHold, map = document.getElementById("destination-hud"), pad = BL.gamepad.state, axes = S.pilot.controls.read();
-      map.click();
-      return { scene: __ooga.scene, live: !document.getElementById("equipment-hud").inert, actions: S.actions,
+      map.click(); document.querySelector('[data-destination="lab"]')?.click();
+      const previewQuiet = S.actions === 0 && document.getElementById("destination-map").open;
+      document.getElementById("destination-map-go").click();
+      return { scene: __ooga.scene, previewQuiet, live: !document.getElementById("equipment-hud").inert, actions: S.actions,
         padNoReplay: S.pad.buttons[0].pressed && pad.connected && !(pad.held || pad.pressed || pad.released),
         padQuiet: axes.x === 0 && axes.y === 0 && axes.up === 0 && axes.yaw === 0 && axes.pitch === 0 };
     })()`);
@@ -20216,7 +20839,7 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
   record("hub entry hold: the real released visit refuses map/mode, canvas capture, Space/W, then restores its HUD when ready",
     held.scene === null && held.transitioning && held.inert && held.captures === 0 && held.actions === 0
       && held.passiveTouch && held.touchLeaks === 0 && held.touchCancelled.every(cancelled => !cancelled) && pressed.quiet && pressed.unchanged
-      && resumed.scene === "hub" && resumed.live && resumed.actions === 1
+      && resumed.scene === "hub" && resumed.previewQuiet && resumed.live && resumed.actions === 1
       && held.padConnected && held.padReads >= 3 && held.padNeutral && resumed.padNoReplay && resumed.padQuiet, JSON.stringify({ held, pressed, resumed }));
 } };
 scene("hub", { label: "release policy", query: "hubcache=release", steps: [hudVisit, hubEntryHold, hubSlicedReturn, trip("hub")] });
@@ -20284,8 +20907,8 @@ const hubBootHold = { name: "hub boot hold", why: "regression: sliced cold boot 
   await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
   await b.evaluate(`__bootHold.released=true`);
   const resumed = await untilPage(b, 'B.scene==="hub"', 20000);
-  const live = await b.evaluate(`(()=>{const map=document.getElementById("destination-hud");map.click();return {live:!document.getElementById("equipment-hud").inert,actions:__bootHold.actions};})()`);
-  record("hub boot hold: cold construction refuses HUD, wheel, canvas and Space/W input, then restores a live island", paused && held.scene === null && held.actions === 0 && held.inert && held.quiet && held.unchanged && resumed && live.live && live.actions === 1, JSON.stringify({ held, resumed, live, before }));
+  const live = await b.evaluate(`(()=>{const map=document.getElementById("destination-hud");map.click();document.querySelector('[data-destination="lab"]')?.click();const previewQuiet=__bootHold.actions===0&&document.getElementById("destination-map").open;document.getElementById("destination-map-go").click();return {previewQuiet,live:!document.getElementById("equipment-hud").inert,actions:__bootHold.actions};})()`);
+  record("hub boot hold: cold construction refuses HUD, wheel, canvas and Space/W input, then restores a live island", paused && held.scene === null && held.actions === 0 && held.inert && held.quiet && held.unchanged && resumed && live.previewQuiet && live.live && live.actions === 1, JSON.stringify({ held, resumed, live, before }));
 } };
 const hubBootFailure = { name: "hub boot failure", why: "regression: a sliced cold-boot exception left a spinning curtain and live partial controls without recovery", run: async (b) => {
   await bootFixture(b, `
@@ -22660,7 +23283,7 @@ scene("hub", { label: "gorilla lab carry jump", exclusive: true, query: "charact
       && state.smashUnchanged,
     JSON.stringify(state));
 } }].map(gameCombat) });
-scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&birdseye=1", steps: [{ name: "gorilla prop traversal", why: "regression: a box lost its supporting contact before the collision body cleared its side, low props interrupted the gallop, and a stale motion envelope trapped gorillas beneath trees", run: async (b) => {
+scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1", steps: [{ name: "gorilla prop traversal", why: "regression: a box lost its supporting contact before the collision body cleared its side, low props interrupted the gallop, and a stale motion envelope trapped gorillas beneath trees", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, S = BL.scene, root = BL.scenes.hub.root, C = B.clankers, npc = C.list.find(e => e.owner.traits.name === "portlandhodl"), solids = B.headquarters.solids.props;
     // \`e\` is the gorilla in hand: the driven body while one is taken (clankers.js separateBodies builds it where the NPC
@@ -23071,12 +23694,9 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
       tap("x"); sample("combat first-person");
       wheel(120); sample("combat shoulder again");
       // A fresh wheel gesture may cross the next stop; one gesture cannot skip both close views.
-      P.zoom(2, "overhead"); const overhead = sample("combat birds-eye");
-      key("keydown", "q"); B.advance(0.3, 1 / 60); key("keyup", "q");
-      const turned = sample("rotated birds-eye");
-      tap("n"); const north = sample("north birds-eye");
+      P.zoom(2, "outer-limit"); sample("combat stays at shoulder");
       tap("x"); sample("carry orbit");
-      tap("x"); sample("combat birds-eye again");
+      tap("x"); sample("combat shoulder again");
       const gestures = [], accountBefore = BL.net.state.me, backendBefore = BL.net.state.backend;
       BL.scenes.hub.debug.setGameMode(true); C.setAway(false);
       // These camera targets include open sky; an arena wall rising between the two account cases
@@ -23117,26 +23737,11 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
           P.zoom(2, {}); P.update(2);
           P.orbit(0, (1.1 - B.pilot.orbit.tPitch) / 0.0035); P.update(2);
           tap("x"); P.update(2);
-          const aimed = [];
-          for (let side = 0; side < 2; side++) {
-            const p = g().root.position;
-            const point = { x: p.x + Math.sin(g().heading) * 10, z: p.z + Math.cos(g().heading) * 10 };
-            // This field fixture has no props or water at the aim point. Use
-            // the real terrain floor and project the displayed camera ray.
-            point.y = B.island.supportAt(point.x, point.z, height, 0, -120);
-            if (point.y <= -120) point.y = p.y;
-            rightClick(); P.update(2);
-            const a = B.camera.position, b = B.camera.target, t = (point.y - a.y) / (b.y - a.y);
-            const error = Math.hypot(a.x + (b.x - a.x) * t - point.x, a.z + (b.z - a.z) * t - point.z);
-            aimed.push({ view: P.view, combat: P.combat, focused: P.focused, error });
-            rightClick(); rightClick(); P.update(2);
-            if (!side) { tap("Shift", "ShiftRight", 2); P.readInput(1 / 60); }
-          }
           const chordSerial = g().smashSerial;
           pointer("pointerdown", 1, 4); pointer("pointermove", 2, 6);
           const rightChord = P.view === "shoulder" && P.combat && P.focused && g().smashSerial === chordSerial && !g().motion.poundCharge;
           pointer("pointermove", 2, 4); pointer("pointerup", 1, 0);
-          P.update(2); fromFirst(true);
+          P.update(2); fromFirst(true); P.zoom(2, {}); P.update(2);
           const recapture = [], interrupted = [], requestLock = Object.getOwnPropertyDescriptor(canvas, "requestPointerLock");
           let denied = 0;
           Object.defineProperty(canvas, "requestPointerLock", { configurable: true, value: () => { denied++; throw new DOMException("Fixture denial", "NotAllowedError"); } });
@@ -23184,7 +23789,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
           const chord = { charged: charged > 0, rightReleaseHeld, leftReleased: g().motion.poundCharge === 0 && g().smashSerial === serial + 1 };
           pointer("pointerup", 2, 0); B.advance(1.2, 1 / 60);
           rightClick(); rightClick(); P.update(2);
-          const returned = P.view === "birds-eye" && P.combat, stops = [];
+          const returned = P.view === "shoulder" && P.combat, stops = [];
           const read = () => ({ view: P.view, combat: P.combat, distance: B.pilot.orbit.tDist });
           for (const combat of [false, true]) {
             if (P.combat !== combat) tap("x");
@@ -23210,8 +23815,11 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
             }
             let trackingError = 0;
             if (combat) {
+              // Shoulder follows smoothly; overhead used to track this displacement immediately.
+              P.update(2);
               const x = B.pilot.orbit.tx, z = B.pilot.orbit.tz;
-              g().root.position.x += 0.1; g().root.position.z += 0.05; P.update(1 / 60);
+              g().root.position.x += 0.1; g().root.position.z += 0.05;
+              for (let frame = 0; frame < 60; frame++) P.update(1 / 60);
               trackingError = Math.hypot(B.pilot.orbit.tx - x - 0.1, B.pilot.orbit.tz - z - 0.05);
             }
             const freshOutward = read(), pinch = {};
@@ -23220,13 +23828,14 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
             stops.push({ combat, inward, freshInward, outward, freshOutward, heldPinch, immediate, firstStep, targetStep, maxStep, trackingError, finite });
             P.zoom(2, {}); P.update(2);
           }
-          gestures.push({ signedIn, carry, rightCarry, nativeTab, doubleCarry, firstReturns, aimed, rightChord, recapture, interrupted, tabs, chord, returned, stops });
+          gestures.push({ signedIn, carry, rightCarry, nativeTab, doubleCarry, firstReturns, rightChord, recapture, interrupted, tabs, chord, returned, stops });
         }
       } finally {
         BL.net.state.me = accountBefore; BL.net.state.backend = backendBefore;
         BL.scenes.hub.debug.setGameMode(false);
       }
       const mapRows = [], mapCrowds = [], map = document.getElementById("destination-hud"), label = document.getElementById("detached-destination-name");
+      const choose = name => { if (!document.getElementById("destination-map").open) map.click(); document.querySelector('[data-destination="' + name + '"]')?.click(); document.getElementById("destination-map-go").click(); };
       // Camera-only updates above do not finish the preceding charged smash.
       // Travel is tested from an idle body, after the world advances its recovery.
       P.cancelInput(); B.advance(2, 1 / 60);
@@ -23241,7 +23850,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
         const character = BL.characters.get(e.owner.traits.name);
         BL.net.state.backend = true;
         // Carry has no shoulder: its views are first person and the orbit.
-        for (const signedIn of [false, true]) for (const combat of [false, true]) for (const view of combat ? ["shoulder", "first-person", "birds-eye"] : ["first-person", "orbit"]) {
+        for (const signedIn of [false, true]) for (const combat of [false, true]) for (const view of combat ? ["shoulder", "first-person"] : ["first-person", "orbit"]) {
           BL.net.state.me = signedIn ? { id: 71, login: character.github || character.handle, display: "Map fixture" } : null;
           if (P.combat !== combat) P.action("mode-toggle");
           if (!combat) { if (P.view !== view) P.zoom(view === "first-person" ? 0.001 : 2, {}); P.update(2); }
@@ -23251,7 +23860,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
             if (view !== "shoulder") { P.zoom(view === "first-person" ? 0.5 : 2, {}); P.update(2); }
           }
           B.hud.setDetachedView(mapRows.length % 2 ? "pile" : "lab");
-          const before = mapState(); map.click();
+          const before = mapState(); choose(mapRows.length % 2 ? "lab" : "mirror");
           const after = mapState(), delta = after.actor.map((n, i) => n - before.actor[i]);
           const arrived = label.textContent === (mapRows.length % 2 ? "Lab" : "Mirror") && after.controlled && after.view === view && after.combat === combat
             && Math.hypot(...delta) > 1 && error(after.eye.map((n, i) => n - before.eye[i]), delta) < 1e-5
@@ -23266,7 +23875,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
             delta, resetKept, resetChanged: error(keyboard.eye.concat(keyboard.target), keyboardBefore.eye.concat(keyboardBefore.target)) > 1e-5 });
         }
         // Start away from the Lab so a successful arrival has visible travel.
-        B.hud.setDetachedView("lab"); map.click();
+        B.hud.setDetachedView("lab"); choose("mirror");
         // Fill the arrivals the real Map chooses, without copying its search
         // geometry. Real crew bodies eventually occupy every available spot.
         for (const signedIn of [false, true]) {
@@ -23274,13 +23883,13 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
           const origin = { ...g().root.position };
           let blockers = 0, refused = false, unchanged = false, restored = true;
           for (const [cave] of mapTraffic) {
-            B.hud.setDetachedView("pile"); const before = mapState(); map.click();
+            B.hud.setDetachedView("pile"); const before = mapState(); choose("lab");
             const after = mapState(), moved = error(after.actor, before.actor) > 1;
             if (!moved) {
               refused = document.getElementById("toast").textContent === "That arrival is blocked. Choose another destination.";
               unchanged = after.controlled && after.view === before.view && after.combat === before.combat
                 && error(after.actor.concat(after.eye, after.target), before.actor.concat(before.eye, before.target)) < 1e-6
-                && label.textContent === "Lab";
+                && document.getElementById("destination-map").open;
               break;
             }
             Object.assign(cave.root.position, { x: g().root.position.x, y: g().root.position.y + cave.baseY, z: g().root.position.z });
@@ -23288,9 +23897,9 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
             restored = P.travel(origin) && restored;
           }
           for (const [cave, , position] of mapTraffic) { cave.root.visible = false; Object.assign(cave.root.position, position); }
-          B.hud.setDetachedView("pile"); const before = mapState(); map.click(); const after = mapState();
+          B.hud.setDetachedView("pile"); const before = mapState(); choose("lab"); const after = mapState();
           const reopened = after.controlled && after.view === before.view && after.combat === before.combat
-            && error(after.actor, before.actor) > 1 && label.textContent === "Lab";
+            && error(after.actor, before.actor) > 1 && label.textContent === "Lab" && !document.getElementById("destination-map").open;
           mapCrowds.push({ signedIn, blockers, refused, unchanged, restored, reopened });
           P.travel(origin);
         }
@@ -23298,11 +23907,10 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
         for (const [cave, visible, position] of mapTraffic) { cave.root.visible = visible; Object.assign(cave.root.position, position); }
         BL.net.state.me = accountBefore; BL.net.state.backend = backendBefore;
       }
-      // Restore the prior fixture's combat overhead state for its Escape chain.
+      // Restore combat shoulder before testing first-person Escape.
+      if (!P.combat) P.action("mode-toggle");
       if (P.view === "first-person") P.zoom(2, {});
-      if (P.view === "shoulder") P.zoom(2, {});
-      P.update(2);
-      P.zoom(0.01, "inward"); sample("combat shoulder from overhead");
+      sample("combat shoulder before Escape");
       P.zoom(0.5, "first-person"); sample("first-person before release");
       const eye = { ...B.camera.position }, target = { ...B.camera.target };
       if (!P.focused) { P.action("mode-toggle"); P.action("mode-toggle"); }
@@ -23370,7 +23978,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
         B.pilot.update(1);
         let reversed = false;
         // Carry has no shoulder: its views are first person and the orbit.
-        for (const combat of [false, true]) for (const view of combat ? ["shoulder", "first-person", "birds-eye"] : ["first-person", "orbit"]) {
+        for (const combat of [false, true]) for (const view of combat ? ["shoulder", "first-person"] : ["first-person", "orbit"]) {
           const gesture = "pair-" + combat + "-" + view;
           if (B.pilot.aiming !== combat) B.pilot.modeAction("mode-toggle");
           if (!combat) { if (B.pilot.mode !== view) B.pilot.hooks.onZoom(view === "first-person" ? 0.001 : 2, gesture + "-view"); B.pilot.update(2); }
@@ -23465,7 +24073,11 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
           // and settle the rig, rather than manufacturing a sleep pose.
           e.owner.override = e.owner.state = "sleeping";
           e.active = e.root.visible = false; e.sleep.stage = "";
-          C.update(1 / 60);
+          // Waking can leave a one-second relocation retry. Let the real admission
+          // path finish before measuring possession of the next sleeping companion.
+          const admission = { retry: e.retry, stage: e.sleep.stage, slot: e.sleep.slot };
+          for (let frame = 0; frame < 120 && (!e.active || e.sleep.stage !== "asleep"); frame++) C.update(1 / 60);
+          admission.active = e.active; admission.settled = e.sleep.stage; admission.remaining = e.retry;
           const fixture = e.active && e.sleep.stage === "asleep" && e.sleep.slot >= 0 && e.lounge === e.sleep.pose;
           const bed = { ...e.root.position }, slot = e.sleep.slot, pose = e.sleep.pose;
           const eye = { x: bed.x + 17, y: bed.y + 20, z: bed.z + 9 };
@@ -23493,7 +24105,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
           // Its Ooga awake again, the NPC companion wakes on its own track and frees its bed.
           e.owner.override = e.owner.state = "chilling";
           for (let i = 0; i < 600 && (e.sleep.slot >= 0 || e.sleep.stage); i++) C.update(1 / 60);
-          sleepRows.push({ signedIn, fixture, selected, heldEye, separate, nativeTab, awakeCombat, releasedAsleep, combatKept, keptBed, freedBed: e.sleep.slot === -1 && !e.sleep.stage });
+          sleepRows.push({ signedIn, admission, fixture, selected, heldEye, separate, nativeTab, awakeCombat, releasedAsleep, combatKept, keptBed, freedBed: e.sleep.slot === -1 && !e.sleep.stage });
         }
       } finally {
         key("keyup", "w"); key("keyup", " ", "Space");
@@ -23501,42 +24113,42 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
         BL.net.state.me = sleepAccount; BL.net.state.backend = sleepBackend;
       }
       return { possessed, acquired, reset, rows, coverRows, gestures, mapRows, mapCrowds, pair, selection, transitions, retakes, sleepRows, escape: { uiStep, repeatHeld, cursorStep, kept, stayed }, swap: shoulder.side * swapped.side < 0,
-        turn: Math.abs(turned.yaw - overhead.yaw), north: Math.atan2(Math.sin(north.yaw), Math.cos(north.yaw)), originalHeadHidden, near, released };
+        originalHeadHidden, near, released };
     } finally { key("keyup", "q"); key("keyup", "Shift", "ShiftRight", 2); P.release(); }
   })()`);
-  const views = ["shoulder", "shoulder", "orbit", "first-person", "first-person", "shoulder", "birds-eye", "birds-eye", "birds-eye", "orbit", "birds-eye", "shoulder", "first-person"];
-  const modes = [true, true, false, false, true, true, true, true, true, false, true, true, true];
+  const views = ["shoulder", "shoulder", "orbit", "first-person", "first-person", "shoulder", "shoulder", "orbit", "shoulder", "shoulder", "first-person"];
+  const modes = [true, true, false, false, true, true, true, false, true, true, true];
   const cameras = state.rows.length === views.length && state.rows.every((row, i) => row.finite && row.view === views[i] && row.combat === modes[i]
     && row.hudView === row.view && row.hudCombat === String(row.combat) && row.hidden === !row.combat
     && (row.combat || !row.focused && !row.locked && !row.tabConsumed && row.nativeCursor)
     && (!row.combat || row.visible === "visible" && row.stroke === "rgb(255, 255, 255)")
-    && row.headHidden === (row.view === "first-person") && row.mix === (row.view === "birds-eye" ? 1 : 0)
-    && (!["first-person", "birds-eye"].includes(row.view) || !row.outlined && !row.objectLines)
-    && row.cutaway === (row.view === "birds-eye"));
+    && row.headHidden === (row.view === "first-person") && row.mix === 0
+    && (row.view !== "first-person" || !row.outlined && !row.objectLines)
+    && !row.cutaway);
   const released = state.released;
-  record("gorilla camera: carry keeps the native cursor and Tab navigation in every view; carry and combat share first-person, shoulder and distant views; Right Shift swaps shoulder, Q rotates birds-eye and N faces north; combat has a white-ring crosshair and release restores the head without moving the camera",
-    state.possessed && state.acquired && state.reset && cameras && state.swap && state.turn > 0.2 && Math.abs(state.north) < 0.001
+  record("gorilla camera: carry keeps the native cursor and Tab navigation in every view; carry uses orbit/first-person and combat uses shoulder/first-person; Right Shift swaps shoulder; combat has a white-ring crosshair and release restores the head without moving the camera",
+    state.possessed && state.acquired && state.reset && cameras && state.swap
     && !released.active && !released.controlled && released.headHidden === state.originalHeadHidden && released.hidden
     && released.target === "none" && released.hit === "none" && released.positionCleared && released.near === state.near
     && released.eyeDelta < 1e-6 && released.targetDelta < 1e-6, JSON.stringify(state));
   record("gorilla Escape: close the sheet, ignore key repeat, free mouse-look, and then never let go of the gorilla or leave the hub", Object.values(state.escape).every(Boolean), JSON.stringify(state.escape));
-  record("gorilla occlusion: signed in or out, real island rock reveals the controlled gorilla's silhouette and a nearby perceived item's outline; a clear view removes both, and first-person/bird's-eye stay suppressed",
+  record("gorilla occlusion: signed in or out, real island rock reveals the controlled gorilla's silhouette and a nearby perceived item's outline; a clear view removes both, and first-person stays suppressed",
     state.coverRows.length === 2 && state.coverRows.every(row => row.covered.outlined && row.covered.enabled && row.covered.perceived
       && row.covered.itemLines > 0 && row.covered.headEye && row.clear) && cameras, JSON.stringify(state.coverRows));
-  record("gorilla camera gestures: signed in or out, wheel and right-click preserve carry/combat; carry's wheel goes from the orbit straight into the eyes and out of them to its near orbit, and its right button changes no view; combat overhead right-click aims at ground 10m ahead on either shoulder",
+  record("gorilla camera gestures: signed in or out, wheel and right-click preserve carry/combat; carry's wheel goes from the orbit straight into the eyes and out of them to its near orbit, and its right button changes no view; combat right-click preserves its current close view",
     state.gestures.length === 2 && state.gestures.every(row => row.rightCarry && row.doubleCarry && row.rightChord && row.returned
       && row.carry.every((view, i) => view.view === ["first-person", "first-person", "orbit", "orbit"][i] && !view.combat && !view.focused && view.hidden)
       && Math.abs(row.carry[2].distance - 3.8) < 1e-6 && row.carry[3].distance > row.carry[2].distance
       && row.firstReturns.length === 2 && row.firstReturns.every(view => view.first === "first-person"
-        && view.far === (view.combat ? "birds-eye" : "first-person") && view.back === (view.combat ? "shoulder" : "first-person") && view.keptMode)
-      && row.aimed.length === 2 && row.aimed.every(view => view.view === "shoulder" && view.combat && view.focused && view.error < 0.01)), JSON.stringify(state.gestures));
-  record("gorilla zoom stops: the shared wheel path stops long bursts at combat's shoulder in both directions and at carry's near orbit coming out of the eyes (going in, carry's orbit goes on into them), and continues only after a pause; a reversed pinch stops at the same place, and a small outward scroll starts a smooth view change",
+        && view.far === "first-person" && view.back === "first-person" && view.keptMode)
+), JSON.stringify(state.gestures));
+  record("gorilla zoom stops: inward bursts reach first person, outward bursts stop at shoulder or carry's near orbit, and only a fresh carry gesture zooms farther with a smooth view change",
     state.gestures.every(row => row.stops.length === 2 && row.stops.every(stop => (stop.combat
-      ? [stop.inward, stop.outward, stop.heldPinch].every(s => s.view === "shoulder" && s.combat) && stop.freshInward.view === "first-person" && stop.freshInward.combat
+      ? stop.inward.view === "first-person" && stop.inward.combat && [stop.outward, stop.heldPinch].every(s => s.view === "shoulder" && s.combat) && stop.freshInward.view === "first-person" && stop.freshInward.combat
       : [stop.inward, stop.freshInward].every(s => s.view === "first-person" && !s.combat)
         && [stop.outward, stop.heldPinch].every(s => s.view === "orbit" && !s.combat && Math.abs(s.distance - 3.8) < 1e-6))
-      && stop.freshOutward.view === (stop.combat ? "birds-eye" : "orbit") && stop.freshOutward.combat === stop.combat
-      && Math.abs(stop.freshOutward.distance - stop.outward.distance * Math.exp(8 * 0.0025)) < 0.001
+      && stop.freshOutward.view === (stop.combat ? "shoulder" : "orbit") && stop.freshOutward.combat === stop.combat
+      && Math.abs(stop.freshOutward.distance - stop.outward.distance * (stop.combat ? 1 : Math.exp(8 * 0.0025))) < 0.001
       && stop.immediate < 1e-6 && stop.firstStep < 0.01 && stop.targetStep < 0.01 && stop.maxStep < 1 && stop.trackingError < 0.001 && stop.finite)), JSON.stringify(state.gestures));
   record("gorilla right-click: signed in or out, close combat recapture survives denied pointer lock without attacking or seeding a double-click; interrupted combat taps never change view",
     state.gestures.every(row => row.recapture.length === 2 && row.recapture.every(r => r.captured && r.next && r.denied && r.fallback)
@@ -23545,20 +24157,20 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
     state.gestures.every(row => Object.values(row.chord).every(Boolean)), JSON.stringify(state.gestures.map(({ signedIn, chord }) => ({ signedIn, chord }))));
   record("gorilla Tab: soft and pending combat focus release on the first Tab, repeats stay consumed until keyup, then navigation is native; Shift and held movement cannot leak, and UI controls always own Tab",
     state.gestures.every(row => row.nativeTab && row.tabs.rows.length === 2
-      && row.tabs.rows.every((r, i) => r.view === (i ? "birds-eye" : "shoulder") && Object.entries(r).every(([key, value]) => key === "kind" || key === "view" || value === true))
+      && row.tabs.rows.every((r, i) => r.view === "shoulder" && Object.entries(r).every(([key, value]) => key === "kind" || key === "view" || value === true))
       && row.tabs.ui.length === 4 && row.tabs.ui.every(r => r.native && r.stopped)), JSON.stringify(state.gestures.map(({ signedIn, tabs }) => ({ signedIn, tabs }))));
-  record("gorilla map: signed in or out, one Map click travels to the next destination while retaining the gorilla, mode and view family and translating the camera", state.mapRows.length === 10
+  record("gorilla map: signed in or out, a chosen Map destination travels directly while retaining the gorilla, mode and view family and translating the camera", state.mapRows.length === 8
     && state.mapRows.every(row => row.prepared && row.arrived)
     && state.mapCrowds.length === 2 && state.mapCrowds.every(row => row.blockers > 0 && row.refused && row.unchanged && row.restored && row.reopened),
     JSON.stringify({ arrivals: state.mapRows, crowds: state.mapCrowds }));
   record("gorilla reset: 0 resets camera framing while retaining the actor's position, carry/combat and view family", state.mapRows.every(row => row.resetKept && row.resetChanged), JSON.stringify(state.mapRows));
   record("owned pair: T retakes the Ooga then cycles its gorilla at their existing positions; rapid reversal starts from the displayed view, same-actor selection does not restart it, G keeps the driven gorilla, held T does not repeat and signed-out T does not switch", Object.values(state.pair).every(Boolean), JSON.stringify(state.pair));
-  record("owned pair views: T smoothly moves the displayed camera to each actor while preserving carry/combat and first-person, shoulder or distant view in both directions; after Escape frees combat's cursor, both switches keep it native", state.transitions.length === 5 && state.transitions.every(r => r.prepared && r.toGorilla && r.toOoga && r.gorillaBlend.smooth && r.oogaBlend.smooth && r.cursorFreed && r.nativeToOoga && r.nativeToGorilla), JSON.stringify(state.transitions));
+  record("owned pair views: T smoothly moves the displayed camera to each actor while preserving carry/combat and first-person, shoulder or distant view in both directions; after Escape frees combat's cursor, both switches keep it native", state.transitions.length === 4 && state.transitions.every(r => r.prepared && r.toGorilla && r.toOoga && r.gorillaBlend.smooth && r.oogaBlend.smooth && r.cursorFreed && r.nativeToOoga && r.nativeToGorilla), JSON.stringify(state.transitions));
   record("Ooga selection: an unavailable, remote-controlled or missing owned Ooga refuses T selection with a reason and preserves the current gorilla, camera and control mode", Object.values(state.selection).every(Boolean), JSON.stringify(state.selection));
   record("gorilla selection: signed in or out, selecting a gorilla from a fixture's still view smoothly recenters carry/orbit at the fixed eye; an unavailable gorilla leaves the view alone and same-actor selection does not restart the handoff", state.retakes.length === 2 && state.retakes.every(r => r.acquisition.smooth && r.blend.smooth && r.refused && r.returned && r.repeated), JSON.stringify(state.retakes));
   record("gorilla X entry: signed in or out, a displayed eye below or exactly 45 degrees above its carry focus enters shoulder and only a higher eye enters bird's-eye, smoothly interrupting a rolled off-target acquisition regardless of requested orbit pitch",
     state.retakes.every(row => row.entries.length === 3 && row.entries.every(e => e.pending && e.blend.smooth && e.selected && e.combat
-      && e.view === (e.rise > 20 ? "birds-eye" : "shoulder") && e.projection === (e.rise > 20 ? 1 : 0) && e.finite)),
+      && e.view === "shoulder" && e.projection === 0 && e.finite)),
     JSON.stringify(state.retakes.map(({ signedIn, entries }) => ({ signedIn, entries }))));
   record("sleeping gorilla: signed in or out, selecting a sleeping companion from a still view holds the detached eye and drives an awake body beside it at once, combat included, while the NPC sleeps on in its own bed and pose through selection, release and a combat handoff, and wakes on its own track freeing its bed once its Ooga does", state.sleepRows.length === 2 && state.sleepRows.every(r => r.fixture && r.selected && r.heldEye && r.separate && r.nativeTab && r.awakeCombat && r.releasedAsleep && r.combatKept && r.keptBed && r.freedBed), JSON.stringify(state.sleepRows));
 } }, { name: "gorilla wall destination", why: "regression: commanding a roof gorilla to a lower point farther along the cave face stalled at the crest instead of reaching the clicked wall", run: async (b) => {
@@ -23934,6 +24546,97 @@ const studioPlaces = { name: "studio places", why: "playthrough: the studio is w
   record("studio places: reloading an Ooga in bed preserves its rifle selection and waking restores the held rifle", reloaded.asleep && reloaded.kept && reloaded.standing, JSON.stringify(reloaded));
 } };
 scene("studio", { query: `character=${STUDIO_OOGA}`, steps: [studioPlaces, trip("studio")] });
+const modelledCarryPoses = { name: "modelled Heimdall and axe poses", why: "regression: Heimdall's props followed the old straight arms and planting an axe lifted the whole arm before bending its elbow", run: async b => {
+  const result = await b.evaluate(`(() => {
+    const S = BL.scene, M = BL.models, C = BL.crew, stage = S.createNode(), rows = [], shots = [];
+    const point = (node, x = 0, y = 0, z = 0) => { const p = new Float64Array(3); BL.math.mat4.transformPoint(p, node.world, x, y, z); return p; };
+    const distance = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
+    let figure; const original = M.caveman;
+    M.caveman = traits => (figure = original(traits));
+    let keeper;
+    try { keeper = BL.bifrostHeimdall.create({ parent: stage, x: 0, y: 0, z: 0, heading: 0, fx: { sayAt() {}, burst() {} } }); }
+    finally { M.caveman = original; }
+    const P = figure.parts;
+    let time = 0, maxGrip = 0, finite = true;
+    const sample = () => {
+      S.updateWorld(stage);
+      maxGrip = Math.max(maxGrip, distance(point(P.staff), point(P.fingersR)), distance(point(P.horn), point(P.fingersL)));
+      for (const n of [P.staff, P.horn, P.cape, P.forearmL, P.forearmR]) finite &&= Array.from(n.world).every(Number.isFinite);
+    };
+    const advance = (seconds, near) => { for (let i = 0; i < Math.round(seconds * 60); i++) { time += 1 / 60; keeper.update(1 / 60, time, 0, 0, near ? 4 : 30, near); sample(); } };
+    let renderer, host, camera, light;
+    const capture = (label, target, reach, side = 1) => {
+      if (!${!!process.env.POSE_SHOTS}) return;
+      if (!renderer) {
+        host = document.createElement("canvas"); host.style.cssText = "position:fixed;left:0;top:0;width:600px;height:650px;z-index:99999"; document.body.appendChild(host);
+        renderer = BL.glRenderer.createRenderer(host, { quality: "high" }); renderer.resize();
+        camera = S.createCamera({ fov: 30, near: .1, far: 60 });
+        light = { clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3), light: { x: .55, y: .78, z: -.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, moonSun: { x: 0, y: -1, z: 0 }, celestialPole: { x: 0, y: .34, z: -.94 }, starMatrix: new Float32Array(9), stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, sunStrength: 1, moonStrength: 0, moonIllumination: 1, moonPhase: .5, ambientFloor: .18, diffuseFloor: 0, shadowStrength: 1, shadowFloor: 0, shadowBias: .002, time: 0, bloomStrength: .5, shadowCenter: { x: 0, y: 1, z: 0 }, shadowExtent: 3 };
+        BL.daylight.sample(15, light, 80);
+      }
+      Object.assign(camera.target, { x: 0, y: target, z: 0 }); Object.assign(camera.position, { x: -reach * .7, y: target + reach * .3, z: reach * side });
+      S.updateWorld(stage); renderer.render(stage, camera, light); shots.push({ label, png: host.toDataURL("image/png") });
+    };
+    try {
+      advance(.2, false); capture("heimdall-rest", 1.6, 6); capture("heimdall-back", 1.6, 6, -1);
+      const rest = P.armR.rotation.x;
+      advance(.6, true); capture("heimdall-hail", 2.2, 8.5);
+      const hailed = P.armR.rotation.x < -2 && P.forearmR.rotation.x > -.5;
+      advance(3, false); const returned = Math.abs(P.armR.rotation.x - rest) < .01;
+      const poked = keeper.poke(), refused = !keeper.poke(); advance(.7, false); capture("heimdall-horn", 1.6, 6);
+      const hornUp = point(P.horn)[1] > point(P.head)[1] && P.forearmL.rotation.x < -1;
+      advance(3.2, false); const lowered = P.forearmL.rotation.x > -.8;
+      rows.push({ kind: "heimdall", maxGrip, finite, hailed, returned, poked, refused, hornUp, lowered });
+      keeper.root.visible = keeper.plinth.visible = false;
+      const axeDress = BL.contributors.traitsFor("w-s-bitcoin").dress;
+      for (const [name, owner] of [["regular", "w-s-bitcoin"], ["slim", "tiffanyvarty"], ["wide", "portlandhodl"]]) {
+        // Keep each character's actual body hook; setting slim on a regular custom model does not change its rig.
+        const base = BL.contributors.traitsFor(owner);
+        const traits = { ...base, name: "fixture/axe-" + name, stoneAxe: true, nunchaku: false, dress: { ...base.dress, club: axeDress.club } };
+        const cave = M.caveman(traits); C.preparePresentation(cave); S.addChild(stage, cave.root);
+        const p = cave.parts, club = p.club, h = cave.traits.height;
+        for (const remote of [false, true]) {
+          let minY = Infinity, gripGap = 0, maxArm = 0, endY = 0;
+          for (let frame = 0; frame <= 120; frame++) {
+            const move = frame <= 60 ? frame / 60 : (120 - frame) / 60;
+            if (remote) { delete cave.weapon.stick; cave.weapon.axeIdle = 1 + move * .3; } else cave.weapon.stick = move;
+            p.armR.rotation.x = .2 * Math.sin(frame * .2); C.poseEquipment(cave, true, frame / 60); S.updateWorld(stage);
+            const hand = point(p.fingersR), origin = point(club), axis = point(club, 0, 1, 0).map((v, i) => v - origin[i]);
+            const len = Math.hypot(...axis); for (let i = 0; i < 3; i++) axis[i] /= len;
+            const along = hand.reduce((sum, v, i) => sum + (v - origin[i]) * axis[i], 0);
+            gripGap = Math.max(gripGap, distance(hand, origin.map((v, i) => v + along * axis[i])));
+            const butt = point(club, 0, S.boundsOf(club.geometry).min[1], 0)[1]; minY = Math.min(minY, butt);
+            if (frame === 60) endY = butt;
+            maxArm = Math.max(maxArm, Math.abs(p.armR.rotation.x));
+            if (!remote && [0, 30, 60, 90, 120].includes(frame)) capture("axe-" + name + "-" + frame, .8 * h, 3.5 * h);
+          }
+          rows.push({ kind: "axe", name, remote, modelled: cave.modelled, armScale: cave.armScale, minY, endY, gripGap, maxArm });
+        }
+        S.removeChild(stage, cave.root);
+      }
+    } finally { keeper.dispose(); if (renderer) renderer.dispose(); if (host) host.remove(); }
+    return { rows, shots };
+  })()`);
+  const keeper = result.rows[0], axes = result.rows.slice(1);
+  record("modelled Heimdall: rest, hail, repeat tap, horn and return keep both props in the fists with finite clothes and arm transforms", keeper.maxGrip < .001 && keeper.finite && keeper.hailed && keeper.returned && keeper.poked && keeper.refused && keeper.hornUp && keeper.lowered, JSON.stringify(keeper));
+  record("modelled axe: regular, slim and wide bodies, local and remote transitions keep the haft in the fist, its butt above the floor until planted, and the upper arm below its old lifted pose", axes.length === 6 && axes.filter(r => r.name === "slim").every(r => r.armScale < 1) && axes.every(r => r.modelled && r.gripGap < .001 && r.minY > -.005 && Math.abs(r.endY) < .005 && r.maxArm < .4), JSON.stringify(axes));
+  if (process.env.POSE_SHOTS) {
+    mkdirSync(process.env.POSE_SHOTS, { recursive: true });
+    for (const shot of result.shots) writeFileSync(join(process.env.POSE_SHOTS, shot.label + ".png"), Buffer.from(shot.png.split(",")[1], "base64"));
+    writeFileSync(join(process.env.POSE_SHOTS, "measurements.json"), JSON.stringify(result.rows, null, 2));
+  }
+  await b.evaluate('__ooga.studio.place("stand"); __ooga.advance(.5, 1 / 60)');
+  await holdKey(b, "w", .5);
+  const walking = await b.evaluate('__ooga.studio.cave.weapon.stick');
+  await b.evaluate('__ooga.advance(1.8, 1 / 60)');
+  const planted = await b.evaluate('__ooga.studio.cave.weapon.stick');
+  if (process.env.POSE_SHOTS) await b.screenshot(join(process.env.POSE_SHOTS, "studio-axe-planted.png"));
+  await holdKey(b, "w", .5);
+  const away = await b.evaluate('__ooga.studio.cave.weapon.stick');
+  record("modelled axe controls: walking carries the axe, stopping plants it, and walking off releases it again", walking === 0 && planted === 1 && away === 0, JSON.stringify({ walking, planted, away }));
+} };
+scene("studio", { label: "modelled carry poses", query: "character=w-s-bitcoin", steps: [modelledCarryPoses] });
+
 scene("race", { label:"optional rig link fallback",url:hubPage(src, "scene=hub"),steps:[{name:"race optional rig link fallback",why:"regression: an optional uniform-limited rig must preserve WebGL and every original CPU driver",run:async b=>{
   await b.evaluate(`(()=>{
     const gl=document.getElementById("scene").getContext("webgl2"),create=gl.createProgram,parameter=gl.getProgramParameter,pending=new Set();
@@ -23950,7 +24653,8 @@ scene("race", { label:"optional rig link fallback",url:hubPage(src, "scene=hub")
 }}]});
 scene("race", { query: "rain=0&draw=0", steps: [raceStart, raceOwn, raceBench, { name: "race tracks", why: "regression: the 12-slot grid spawned a free banana on Banana Bay", run: async (b) => { await b.evaluate(`window.__ooga.race.toGarage()`); await raceTracks[1](b); } }, raceRigs, raceRigContext, racePause, play("race", "a whole cup under the autopilot: one drawn field of fifteen runs every race and finishes in order, the cup medal and every track's best are saved", cupRun), raceMirror, raceAgain, trip("race")] });
 scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on the target, scores its own medal and is saved as the best", dropRun), dropCrash, trip("drop"), dropOwn] });
-scene("block", { steps: [blockStart, blockWalk, blockQuiz, play("block", "a round on autopilot reaches three captures, shows its results and saves the round", blockRun), trip("block")] });
+
+scene("block", { steps: [blockStart, blockWalk, blockQuiz, play("block", "a round on autopilot reaches three captures, shows its results and saves the round", blockRun), blockPoses, blockMirage, blockRoofs, blockThrowScore, blockZipline, trip("block")] });
 scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit"), orbitOwn] });
 scene("mine", { steps: [mineResume, trip("mine"), mineControls, mineOwn] });
 // ---- The Lightning Jet Hangar ----
@@ -24072,6 +24776,73 @@ const hangarShuffleSafety = { name: "hangar shuffle safety", why: "rule: the Jet
 } };
 scene("hangar", { query: "character=portlandhodl", steps: [hangarWalking, hangarDoor, hangarFire, hangarAnomalies, hangarShuffleSafety, trip("hangar")] });
 scene("factory", { label: "canvas2d", query: "canvas2d=1&character=portlandhodl", steps: [factoryCanvas, factoryGreeter] });
+const caveDirectory = (mobile = false) => ({ name: "cave directory", why: "rule: browsing connected projects loads no external code, holds movement, closes safely and disposes on travel; external travel sends no OBL payload or referrer", run: async (b) => {
+  const click = async selector => {
+    await b.evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: "center", behavior: "instant" })`);
+    await b.sleep(80);
+    const point = await b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)}), r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    if (mobile) { await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] }); await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); }
+    else await b.click(point.x, point.y);
+  };
+  await click("#cave-directory-button");
+  if (!await untilPage(b, 'document.getElementById("cave-directory").open', 3000)) throw Error("Cave directory did not open after its pointer activation");
+  const shown = await b.evaluate(`(() => {
+    const d = document.getElementById("cave-directory"), a = d.querySelector("[data-external-land]"), r = d.getBoundingClientRect(), p = __ooga.pilot.player.root.position;
+    window.__directoryStart = { x:p.x, y:p.y, z:p.z };
+    return { open:d.open, modal:d.matches(":modal"), count:document.querySelectorAll("#cave-directory").length, href:a.href, referrer:a.referrerPolicy, rel:a.rel, target:a.target,
+      fit:r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight, overflow:d.scrollWidth<=d.clientWidth,
+      focus:d.contains(document.activeElement), integrated:d.textContent.includes("Mainland caves") && d.textContent.includes("DSB Land"), requests:performance.getEntriesByType("resource").filter(r=>r.name.startsWith("https://entropylab.online/")).length };
+  })()`);
+  await b.key("w");
+  const held = await b.evaluate(`(() => { __ooga.advance(.5,1/60); const p=__ooga.pilot.player.root.position, a=__directoryStart; return Math.hypot(p.x-a.x,p.z-a.z)<.01; })()`);
+  await b.key("Escape");
+  await b.sleep(50);
+  const cancelled = await b.evaluate(`!document.getElementById("cave-directory").open && document.activeElement.id === "cave-directory-button" && __ooga.scene === "bifrost"`);
+  await click("#cave-directory-button");
+  // A native close event is queued: reopening before it arrives must not close the new view.
+  const repeated = await b.evaluate(`(() => { const d=document.getElementById("cave-directory"); d.querySelector(".modal-close").click(); document.getElementById("cave-directory-button").click(); document.getElementById("cave-directory-button").click(); return d.open; })()`);
+  await b.sleep(50);
+  const staysOpen = await b.evaluate(`document.getElementById("cave-directory").open && document.querySelectorAll("#cave-directory").length===1`);
+  record("cave directory: modal keyboard/touch entry, bounded layout and safe links, movement hold, Escape focus and immediate reopen", shown.open && shown.modal && shown.count===1 && shown.href==="https://entropylab.online/" && shown.referrer==="no-referrer" && shown.rel.includes("noopener") && !shown.target && shown.fit && shown.overflow && shown.focus && shown.integrated && shown.requests===0 && held && cancelled && repeated && staysOpen, JSON.stringify({shown,held,cancelled,repeated,staysOpen}));
+  mkdirSync(join(root,"untracked"),{recursive:true});
+  await b.screenshot(join(root,"untracked",mobile?"cave-directory-phone.png":"cave-directory-desktop.png"));
+  await tourGo(b,"lab");
+  const disposed=await b.evaluate(`!document.getElementById("cave-directory") && document.getElementById("cave-directory-button").getAttribute("aria-expanded")==="false"`);
+  await tourGo(b,"bifrost");
+  await click("#cave-directory-button");
+  await untilPage(b, 'document.getElementById("cave-directory").open', 3000);
+  const restored=await b.evaluate(`document.querySelectorAll("#cave-directory").length===1 && document.getElementById("cave-directory").open`);
+  record("cave directory: scene departure removes the modal and the next visit owns exactly one working directory",disposed&&restored,JSON.stringify({disposed,restored}));
+  if (!mobile) {
+    let request = null, interceptionError = null;
+    b.on("Fetch.requestPaused", event => {
+      request = event.request;
+      b.send("Fetch.fulfillRequest",{requestId:event.requestId,responseCode:200,responseHeaders:[{name:"Content-Type",value:"text/html"}],body:Buffer.from('<!doctype html><title>Local external-land fixture</title><p id="land-fixture">Independent document</p>').toString("base64")}).catch(error=>{interceptionError=String(error);});
+    });
+    await b.send("Fetch.enable",{patterns:[{urlPattern:"https://entropylab.online/*",resourceType:"Document",requestStage:"Request"}]});
+    await b.evaluate(`(() => { let voice=0,net=0; const v=BL.voice.dispose,n=BL.net.dispose; BL.voice.dispose=()=>{voice++;v();}; BL.net.dispose=()=>{net++;n();}; addEventListener("pagehide",e=>sessionStorage.setItem("cave-directory-departure",JSON.stringify({persisted:e.persisted,voice,net})),{once:true}); })()`);
+    await click("[data-external-land='entropylab']");
+    for(let n=0;n<100;n++){if(await b.evaluate(`!!document.getElementById("land-fixture")`).catch(()=>false))break;await b.sleep(50);}
+    const away=await b.evaluate(`({fixture:!!document.getElementById("land-fixture"),url:location.href,referrer:document.referrer,obl:!!window.BL})`);
+    await b.evaluate("history.back()"); await b.sleep(200); await untilReady(b);
+    const back=await b.evaluate(`({scene:__ooga.scene,departure:JSON.parse(sessionStorage.getItem("cave-directory-departure")),count:document.querySelectorAll("#cave-directory").length})`);
+    await b.send("Fetch.disable"); b.on("Fetch.requestPaused",null);
+    record("cave directory: same-tab cross-origin navigation carries only the registered URL, suppresses referrer, leaves the old runtime and supports browser Back",!interceptionError&&request?.url==="https://entropylab.online/"&&!Object.keys(request.headers).some(k=>k.toLowerCase()==="referer")&&away.fixture&&!away.referrer&&!away.obl&&back.scene==="bifrost"&&back.count===1&&back.departure&&(back.departure.persisted||back.departure.voice===1&&back.departure.net===1),JSON.stringify({away,back,interceptionError}));
+  }
+  if (!mobile) {
+    // Visit in OBL on a hub cave hands the Ooga back to the island at that cave's mouth, not at the bridge.
+    await click("#cave-directory-button");
+    await untilPage(b, 'document.getElementById("cave-directory").open', 3000);
+    await b.evaluate(`[...document.querySelectorAll("#cave-directory li")].find(li => li.querySelector("strong")?.textContent === "EntropyLab").querySelector("button").click()`);
+    await untilPage(b, '__ooga.scene === "hub" && !__ooga.transitioning', 20000);
+    const arrival = await b.evaluate(`(() => { const B = __ooga, p = B.pilot.player.root.position, m = B.island.mouths.find(m => m.id === "c11");
+      return { scene: B.scene, path: location.pathname + location.hash, lab: Math.round(Math.hypot(p.x - m.x, p.z - m.z) * 10) / 10 }; })()`);
+    record("cave directory: Visit in OBL on a hub cave brings the driven Ooga back to the island at that cave's mouth, not the bridge", arrival.scene === "hub" && arrival.path.endsWith("/entropylab") && arrival.lab < 12, JSON.stringify(arrival));
+  }
+  await b.evaluate(`document.getElementById("cave-directory")?.close()`);
+} });
+scene("bifrost", { label: "cave directory", query: "solo=1&character=portlandhodl", steps: [caveDirectory()] });
+scene("bifrost", { label: "cave directory phone", query: "solo=1&character=portlandhodl", opts: PHONE_SIZE, steps: [caveDirectory(true)] });
 scene("bifrost", { url: hubPage(src, "solo=1&character=portlandhodl"), steps: [bifrostEntrance, bifrostWalking, bifrostExit, trip("bifrost")] });
 scene("bifrost", { label: "dsb round trip", query: "character=portlandhodl", steps: [bifrostDsb] });
 scene("bifrost", { label: "poker round trip", query: "character=portlandhodl", steps: [bifrostPoker] });
@@ -24206,7 +24977,7 @@ const cabinetVisit = id => ({ name: `cabinet ${id}`, why: "rule: each cabinet co
   const expanded = cloudJourney ? cloudJourney.expanded : await untilPage(b, `B.cabinet.phase === 'playing'`, 10000);
   const full = cloudJourney ? cloudJourney.full : await b.evaluate(`document.getElementById('stage').clientWidth === innerWidth && document.getElementById('cabinet-backdrop').hidden && document.getElementById('cabinet-foreground').hidden && !document.querySelector('.cabinet-leaderboard') && __ooga.fade === 0`);
   if (shape === "phone" && id !== "cloud-hopper") {
-    const header = await b.evaluate(`(() => { const e=document.getElementById('equipment-hud'), p=document.querySelector('.topbar .presets:not([hidden])'); const buttons=p ? [...p.querySelectorAll('button')].filter(b=>!b.hidden && b.getClientRects().length) : []; return {equipment:e.getBoundingClientRect().top,presets:p?.getBoundingClientRect().top,tappable:buttons.every(b=>{const r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));})}; })()`);
+    const header = await b.evaluate(`(() => { const e=document.getElementById('equipment-hud'), p=document.querySelector('.topbar .presets:not([hidden])'); const buttons=p ? [...p.querySelectorAll('button')].filter(b=>!b.hidden && b.getClientRects().length) : []; return {equipment:e.getBoundingClientRect().top,presets:p?.getBoundingClientRect().top,tappable:buttons.every(b=>{const r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}),buttons:buttons.map(b=>{const r=b.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {action:b.dataset.action,text:b.textContent,rect:[r.x,r.y,r.width,r.height],hit:hit?.tagName+"#"+hit?.id+"."+hit?.className};})}; })()`);
     record(`cabinet ${id}: phone header controls return above the game`, header.equipment < 180 && (!header.presets || header.presets < 180) && header.tappable, JSON.stringify(header));
   }
   if (id !== "cloud-hopper") {
@@ -24368,10 +25139,11 @@ scene("poker", { opts: PHONE_SIZE, steps: [phone("poker", { card: '[data-intro="
 scene("hub", { label: "gorilla population restoration", query: "status=clankin", exclusive: true, opts: { motion: true }, steps: [hubGorillaPopulation] });
 scene("hub", { label: "weapons", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1&gorillarage=1", steps: [hubCombatGate, ...[hubAk, hubMelee, hubJetpack].map(gameCombat)] });
 // Her greeting comes once a page, to a fresh landing nothing has moved, so the guide has its own page.
-scene("hub", { label: "guide", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubGuide, hubAsk, hubTourInput] });
+scene("hub", { label: "guide", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubGuide, hubAsk, hubTourInput, hubSharedGuide] });
+scene("hub", { label: "shared guide phone", opts: { w: 390, h: 844, mobile: true }, query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubSharedGuide] });
 // Native pointer-lock assertions need sole focus; another browser lane can
 // steal capture and spend this long scenario's deadline waiting for it back.
-scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1&birdseye=1", exclusive: true, steps: [hubBirdsEye] });
+scene("hub", { label: "camera modes", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", exclusive: true, steps: [hubCameraModes] });
 const hubPlayersAim = { name: "players camera targeting", why: "regression: the Players crosshair aimed through the orbit avatar, hiding its target behind the head; shoulder and first person must still centre it", run: async (b) => {
   const rows = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, a = P.player || B.cavemen.get("portlandhodl"), rows = [];
@@ -24410,9 +25182,9 @@ const hubPlayersAim = { name: "players camera targeting", why: "regression: the 
         zoom: P.orbit.tDist - distance,
         moved: Math.hypot(a.root.position.x - before.x, a.root.position.y - before.y, a.root.position.z - before.z) });
     }
-    // Orbit entered from bird's-eye combat has a separate root-centred solver; targeting must release it too.
+    // A normal shoulder-to-carry handoff must still allow targeting another player.
     P.modeAction("mode-toggle"); B.advance(1, 1 / 60);
-    const overhead = P.view === "birds-eye";
+    const shoulder = P.view === "shoulder";
     P.modeAction("mode-toggle"); B.advance(1, 1 / 60);
     {
       const before = { ...a.root.position }, distance = P.orbit.tDist;
@@ -24420,7 +25192,7 @@ const hubPlayersAim = { name: "players camera targeting", why: "regression: the 
       const accepted = BL.pilot.turnToward(target.x, target.y, target.z);
       B.advance(3, 1 / 60);
       const point = B.project(target.x, target.y, target.z, {}), size = B.renderer.size;
-      framing.push({ fromBirdsEye: true, dist: distance, accepted: overhead && accepted, mode: P.view,
+      framing.push({ fromCombat: true, dist: distance, accepted: shoulder && accepted, mode: P.view,
         gap: point ? (headTop(a.parts.head) - point.y) / size.height : -1,
         x: point ? point.x / size.width : -1, y: point ? point.y / size.height : -1,
         zoom: P.orbit.tDist - distance,
@@ -24459,11 +25231,11 @@ const hubPlayersAim = { name: "players camera targeting", why: "regression: the 
   record("regression: live head look is published after the final pilot pose while idle in shoulder and first person",
     rows.every(row => Math.abs(row.head) > 0.01 && row.lookSample !== null && Math.abs(row.lookSample / 100 - row.head) <= 0.006), JSON.stringify(rows));
 } };
-scene("hub", { label: "birds-eye combat projection and targets", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1&birdseye=1", steps: [hubBirdsEyeProjection, gameCombat(hubBirdsEyeTargets), hubCombatReplay] });
+scene("hub", { label: "shared camera rendering", query: "solo=1&character=portlandhodl", steps: [sharedCameraRendering] });
+scene("hub", { label: "shoulder replay", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubShoulderReplay] });
 for (const character of ["portlandhodl", "w-s-bitcoin"]) for (const opts of [{ w: 1920, h: 1080 }, PHONE_SIZE]) {
-  scene("hub", { label: "players camera targeting " + character, query: "solo=1&character=" + character + "&weapon=1&mode=shoulder&combat=1&birdseye=1", opts, steps: [hubPlayersAim] });
+  scene("hub", { label: "players camera targeting " + character, query: "solo=1&character=" + character + "&weapon=1&mode=shoulder&combat=1", opts, steps: [hubPlayersAim] });
 }
-scene("hub", { label: "birds-eye lower floors", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1&birdseye=1", steps: [hubBirdsEyeFloors] });
 scene("hub", { label: "mirror", query: "status=chillin", steps: [hubJumbotron, hubMirrorMedium, hubMirror] });
 scene("hub", { label: "matrix", steps: [hubMatrix] });
 scene("hub", { label: "oogatron popups", url: hubPage(dist, "pos=0"), steps: [oogatronPopups] });
@@ -24939,9 +25711,9 @@ scene("hub", { label: "clock and block height", query: "pos=0&time=0900", steps:
 // Rally is out of order for visitors; the tour still boots it on Canvas 2D through its retained maintenance opt-in
 // (`wip=race` alone would land the page in Rally, so it names the island).
 scene("hub", { label: "canvas2d", query: "canvas2d=1&scene=hub&wip=race", steps: [hubMatrix, canvasTour] });
-// On a phone the move stick stays on screen through Tess's tour, her panel clear of it, and a real touch on it ends the
-// tour and walks the same Ooga from its own view.
-const hubTourTouch = { name: "hub tour touch", why: "regression: the touch sticks hid through Tess's tour, so a phone had no movement to end it with", run: async (b) => {
+// On a phone the move stick stays on screen through Tess's tour, her panel clear of it and of the screen's middle, where
+// each stop's view puts its landmark, and a real touch on it ends the tour and walks the same Ooga from its own view.
+const hubTourTouch = { name: "hub tour touch", why: "regression: the touch sticks hid through Tess's tour, so a phone had no movement to end it with; then the panel, lifted over the sticks and an open drawer, stood on each stop's landmark", run: async (b) => {
   const rows = [];
   // With the bottom drawer closed, open, and open but resized taller while it still leaves the sticks room over it
   // (sheet.js writes that height on the stage, and the sticks ride up on it), through the real touch path.
@@ -24960,6 +25732,7 @@ const hubTourTouch = { name: "hub tour touch", why: "regression: the touch stick
         inStage: !!document.getElementById("stage").querySelector(".greeter-menu"),
         shown: getComputedStyle(j).visibility === "visible" && getComputedStyle(j).display !== "none" && r.width > 0,
         clear: m.bottom <= r.top || m.top >= r.bottom || m.right <= r.left || m.left >= r.right, onScreen: m.top >= 0 && r.bottom <= innerHeight,
+        middle: m.bottom <= innerHeight / 3 || m.top >= innerHeight * 2 / 3,
         x: r.x + r.width / 2 + r.width * 0.3, y: r.y + r.height / 2 }; })()`);
     await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: layout.x, y: layout.y }] });
     let byTouch;
@@ -24970,8 +25743,8 @@ const hubTourTouch = { name: "hub tour touch", why: "regression: the touch stick
   // A double-click on the drag bar resets the resized drawer (and its saved rectangle) before it closes.
   await b.evaluate(`(() => { const s = document.getElementById("sheet"); s.querySelector(".sheet-drag").dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); if (s.dataset.open === "true") document.getElementById("sheet-toggle").click(); })()`);
   const resized = rows.find(r => r.drawer === "resized");
-  record("hub tour touch: with the drawer closed, open, or resized taller with the sticks still over it, the move stick stays on screen clear of Tess's tour panel, and a touch on it ends the tour at once and walks the same Ooga from its own view",
-    rows.length === 3 && rows.every(r => r.touring && r.layout.inStage && r.layout.shown && r.layout.clear && r.layout.onScreen && r.byTouch.ended && r.byTouch.walked > 0.3)
+  record("hub tour touch: with the drawer closed, open, or resized taller with the sticks still over it, the move stick stays on screen clear of Tess's tour panel, the panel stays out of the middle third of the screen where each stop's landmark stands, and a touch on it ends the tour at once and walks the same Ooga from its own view",
+    rows.length === 3 && rows.every(r => r.touring && r.layout.inStage && r.layout.shown && r.layout.clear && r.layout.middle && r.layout.onScreen && r.byTouch.ended && r.byTouch.walked > 0.3)
       && !!resized && resized.sized.sized === "true" && resized.sized.to > resized.sized.from && Math.abs(parseFloat(resized.sized.written) - (resized.layout.sheet.bottom - resized.layout.sheet.top)) <= 1
       && resized.layout.sticks === "true" && resized.layout.stick.bottom <= resized.layout.sheet.top && resized.layout.panel.bottom <= resized.layout.stick.top, JSON.stringify(rows));
 } };
@@ -24992,6 +25765,45 @@ scene("lab", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("lab", { required
 scene("studio", { query: `pos=0&character=${STUDIO_OOGA}`, opts: PHONE_SIZE, steps: [phone("studio", { required: ["#joy-move", "#joy-look", "#act"] })] });
 scene("race", { query: "pos=0&rain=0&draw=0", opts: PHONE_SIZE, steps: [phone("race", { card: '[data-intro="race"]', play: "window.__ooga.race.startRace()", required: ["#joy-move", "#act", "#item-btn", "#race-garage-btn", "#leave-hud"] })] });
 scene("drop", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("drop", { card: '[data-intro="drop"]', play: "window.__ooga.drop.start()", required: ["#joy-move", "#joy-look", "#act", "#leave-hud"] })] });
+scene("block", { label: "block phone", opts: PHONE_SIZE, steps: [phone("block", { card: '[data-intro="block"]', play: "__ooga.block.start()", required: ["#joy-move", "#joy-look", "#act", "#block-paint", "#block-tools [data-tool=paint]"] }), {
+  name: "block phone actions and results", why: "regression: Throw overlapped Jump and the sticks, and small results cards clipped names and action labels", run: async b => {
+    if (await b.evaluate(`!document.querySelector('[data-intro="block"]').hidden`)) await b.key(" ");
+    const rows = [];
+    for (const [map, flightX, flightZ] of [["town", 0, 6], ["jungle", 18, 0], ["haunted", 20, 0], ["clank", 20, 0]]) for (const [width, height] of [[390,844],[844,390],[320,568]]) {
+      await b.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: true });
+      await b.sleep(100);
+      await b.evaluate(`__ooga.block.showBoard();document.querySelector('#block-board [data-map="${map}"]').click();new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+      rows.push({ map, width, phase: "board", bad: await b.evaluate(PHONE(['#block-board [data-action="block-start"]'])) });
+      await b.evaluate(`(() => { const D=__ooga.block;D.start(604);D.sim.prep=0;Object.assign(D.sim.actors[0],{flight:0,grounded:true,x:-7,z:4,y:0,vy:0,guard:30}); })()`);
+      rows.push({ map, width, phase: "play", bad: await b.evaluate(PHONE(["#joy-move", "#joy-look", "#act", "#block-paint", "#block-tools [data-tool=paint]"])) });
+      // Hold simulation time while the native touch crosses CDP: a short shot cooldown can expire between calls.
+      const at = await b.evaluate(`(() => { const scene=BL.scenes.block;window.__blockPhoneUpdate=scene.update;scene.update=()=>{};const r=document.getElementById("block-paint").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
+      let fired;
+      try {
+        await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [at] });
+        await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        fired = await b.evaluate(`(() => { const s=__ooga.block.sim;return s.actors[0].lastKind === "paint" && s.actors[0].cooldown > 0 && s.shots.some(p=>p.live&&p.owner===0&&p.kind==="paint"); })()`);
+      } finally { await b.evaluate(`BL.scenes.block.update=window.__blockPhoneUpdate;delete window.__blockPhoneUpdate`); }
+      rows.push({ map, width, fired });
+      // Hold the actual touch Jump control through the jump's apex, then release and cancel a fresh hold.
+      // Spawn protection keeps a gorilla or a bot from interrupting this input check.
+      await b.evaluate(`(() => { const D=__ooga.block;D.cam.first=D.cam.close=D.cam.island=false;if(!BL.blockSim.ARENA.BLOCKS.every(b=>${flightX}<b[0]-1||${flightX}>b[1]+1||${flightZ}<b[2]-1||${flightZ}>b[3]+1))throw Error("Jetpack flight column is obstructed");Object.assign(D.sim.actors[0],{x:${flightX},z:${flightZ},y:0,vy:0,grounded:true,flight:0,grabbed:0,guard:30,fuel:BL.blockSim.CONFIG.JET_FUEL});__ooga.advance(.1,1/60); })()`);
+      const jump = await b.evaluate(`(() => { const r=document.getElementById("act").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
+      await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [jump] });
+      const flight = await b.evaluate(`(() => { __ooga.advance(1.8,1/60);const D=__ooga.block,a=D.sim.actors[0];return {map:D.sim.map,y:a.y,vy:a.vy,fuel:a.fuel,jet:a.jetting,flame:D.actors[0].jetFlame.visible}; })()`);
+      if (process.env.BLOCK_JET_SHOTS) { mkdirSync(process.env.BLOCK_JET_SHOTS,{recursive:true});await b.screenshot(join(process.env.BLOCK_JET_SHOTS,"jet-phone-"+width+".png")); }
+      await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      const released = await b.evaluate(`(() => { __ooga.advance(.1,1/60);const D=__ooga.block;return !D.sim.actors[0].jetting&&!D.actors[0].jetFlame.visible; })()`);
+      await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [jump] });
+      await b.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+      const cancelled = await b.evaluate(`(() => { __ooga.advance(.1,1/60);return !__ooga.block.sim.actors[0].jetting; })()`);
+      rows.push({ map, width, flight, released, cancelled, fired: flight.map === map && flight.y > 6 && flight.vy > 6 && flight.fuel > 0 && flight.fuel < 4.4 && flight.jet && flight.flame && released && cancelled });
+      await b.evaluate(`(() => { const D=__ooga.block;D.sim.over=true;D.sim.winner=D.sim.team;D.simulate(.1);__ooga.advance(.1); })()`);
+      rows.push({ map, width, phase: "results", bad: await b.evaluate(PHONE(['#block-results [data-action="block-again"]','#block-results [data-action="block-board"]','#block-results [data-role="leave"]'])) });
+    }
+    record("block phone: portrait, landscape and narrow screens keep the controls reachable, real Throw taps fire, held Jump climbs with flame and fuel use, release/cancel cuts thrust, and the results names and actions fit", rows.every(r => r.bad ? !r.bad.length : r.fired), JSON.stringify(rows));
+  }
+}, blockThrowScore, blockMirage] });
 scene("orbit", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("orbit", { card: '[data-intro="orbit"]', play: "window.__ooga.orbit.launch()", required: ["#joy-move", "#act", "#leave-hud"] })] });
 scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: "#mine-intro", required: ["#joy-move", "#joy-look", "#act", "#mine-view-btn", "#mine-pause-btn", "#environment-sound", "#leave-hud"] })] });
 scene("factory", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("factory", { required: ["#joy-move", "#joy-look", "#leave-hud"] }), factoryGreeter] });
@@ -25279,7 +26091,7 @@ scene("dsb", { label: "dsb shared player", url: hubPage(dist), steps: [{ name: "
   record("dsb shared player: DSB Land leaves the Ooga with no weapon in hand, on its body or as a button", await b.evaluate(unarmedInPage("__ooga.pilot.player")));
   const move = await b.evaluate(`(() => { const c = __ooga.pilot.player, z = c.root.position.z; window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); __ooga.advance(0.3); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); return Math.abs(c.root.position.z - z); })()`);
   record("dsb shared player: shared walking moves the actor", move > 0.2, String(move));
-  await b.evaluate(`document.getElementById("destination-hud").click(); __ooga.advance(0.4)`);
+  await b.evaluate(`document.getElementById("destination-hud").click(); document.querySelector('#destination-map [data-destination="overview"]').click(); document.getElementById("destination-map-go").click(); __ooga.advance(0.4)`);
   record("dsb shared player: the island view selector looks at the overview, keeping its CHORA label, while the visitor keeps their Ooga", await b.evaluate('__ooga.pilot.player === __ooga.dsb.avatar && __ooga.pilot.looking && __ooga.camera.position.y > 5 && document.getElementById("detached-destination-name").textContent === "CHORA"'));
   const resumed = await b.evaluate(`(() => {
     const B = __ooga, a = B.dsb.avatar, p = { ...a.root.position };
@@ -25417,6 +26229,16 @@ const gpuGeometrySnapshot = (renderer, scenes, activeId, state) => {
     if (!node) return;
     if (scene === "dsb" && rooms.has(node)) path = `room[${rooms.get(node)}]`;
     observe(node.geometry, true);
+    const lods = node.geometry?.foliageLods;
+    if (lods?.owner === node.geometry) for (const level of ["medium", "far"]) {
+      const geometry = lods[level]; observe(geometry, true);
+      const row = resident.get(geometry);
+      if (row && geometry !== node.geometry) {
+        row.references++;
+        if (row.owners.length < 8) row.owners.push({ scene, path: `${path}/lod:${level}`.slice(0, 240), graphVisible: null });
+        else row.omittedOwners++;
+      }
+    }
     const visible = !!(enabled && node.visible), row = resident.get(node.geometry);
     if (row) {
       row.references++;
@@ -25742,18 +26564,27 @@ const gpuGeometryDiagnosticChecks = async () => {
   record("Factory residency guard: real current-visit collection excludes history; shared owners and hall upload phases pass while stale, accumulating, malformed and over-budget retention fails", Object.values(factoryCases).every(Boolean), JSON.stringify({ ...factoryCases, collectorError }));
 };
 const dsbSoak = async (b, { geometry = false, factory = false } = {}) => {
+  // Compare the same roster and work sites even when an activity expires during the soak.
+  // Only classification uses this instant; scene animation and the Factory feed keep their clocks.
+  await b.evaluate(`(() => {
+    const C = BL.contributors, at = Date.now(), stateFor = C.stateFor, hasRecentActivity = C.hasRecentActivity;
+    C.stateFor = contributor => stateFor(contributor, at);
+    C.hasRecentActivity = (contributor, repo) => hasRecentActivity(contributor, repo, at);
+  })()`);
   await b.send("HeapProfiler.enable");
   const until = (cond, ms) => b.evaluate(`new Promise((resolve) => { const B = window.__ooga; const t0 = performance.now(); const tick = () => { const ok = !!(${cond}); if (ok || performance.now() - t0 > ${ms}) resolve(ok); else requestAnimationFrame(tick); }; tick(); })`);
   const rendered = (frames, ms = 6000) => b.evaluate(`new Promise((resolve) => { const B = window.__ooga; const start = B.renderedFrames; const t0 = performance.now(); const tick = () => { if (B.renderedFrames >= start + ${frames} || performance.now() - t0 > ${ms}) resolve(B.renderedFrames - start); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); })`);
   const settled = (ms = 4000) => until("window.BL.scene.tweenCount() === 0", ms);
   // Later visits can expose a different attract frame or an Ooga that was behind scenery at baseline.
-  // Upload only the retained hub's existing character meshes, without building new models, changing visibility or
+  // Upload the retained hub's existing character meshes and finite foliage LODs, without building new models, changing visibility or
   // replacing any resource. Subsequent growth is still measured by the same bounds. Cloud Hopper's cabinet now stands in
   // Ooga Arcade (cloud-hopper.js \`arcade\`), so the hub holds none of its screen frames: \`frames\` reports that.
   const warmHubGeometry = () => b.evaluate(`(() => {
-    const B = __ooga, H = BL.scenes.hub, characters = new Set(), frames = H.debug.cloudHopper?.cabinet.frames || [];
+    const B = __ooga, H = BL.scenes.hub, characters = new Set(), foliage = new Set(), frames = H.debug.cloudHopper?.cabinet.frames || [];
     const visit = node => {
       if (node.geometry?.characterPart) characters.add(node.geometry);
+      const lods = node.geometry?.foliageLods;
+      if (lods?.owner === node.geometry) foliage.add(node.geometry).add(lods.medium).add(lods.far);
       for (const child of node.children) visit(child);
     };
     visit(H.root);
@@ -25761,12 +26592,31 @@ const dsbSoak = async (b, { geometry = false, factory = false } = {}) => {
       if (cave.headOpen) characters.add(cave.headOpen);
       if (cave.headClosed) characters.add(cave.headClosed);
     }
-    const geometries = new Set([...frames, ...characters]);
+    const geometries = new Set([...frames, ...characters, ...foliage]);
     let prepared = true;
     for (const geometry of geometries) prepared = B.renderer.prepareGeometry(geometry) && prepared;
     const resident = new Set(B.renderer.geometryRecords());
-    return { frames: frames.length, characters: characters.size,
+    return { frames: frames.length, characters: characters.size, foliage: foliage.size,
       prepared: prepared && [...geometries].every(geometry => resident.has(geometry)) };
+  })()`);
+  // Each window lazily uploads its finite batch geometries as the feed lights a tank or sends a sat.
+  // Warm the same existing batches before both snapshots, so a different feed phase cannot look like a leak.
+  // Zero-count batches create their mesh record but draw no instances; restore visibility and redraw immediately.
+  const warmWindowBatches = () => b.evaluate(`(() => {
+    const B = window.__ooga, windows = [B.factory, B.factory.roof];
+    const batches = windows.flatMap(w => Object.values(w.batches));
+    const nodes = windows.map(w => w.batches.hall.parent).concat(batches), visible = nodes.map(n => n.visible);
+    const scene = BL.scenes.hub;
+    let warmed = false, restored = false;
+    try {
+      for (const n of nodes) n.visible = true;
+      warmed = B.renderer.render(scene.root, scene.camera, scene.renderOpts);
+    } finally {
+      nodes.forEach((n, i) => { n.visible = visible[i]; });
+      restored = B.renderer.render(scene.root, scene.camera, scene.renderOpts);
+    }
+    return { windows: windows.length, batches: batches.length, empty: batches.filter(n => n.instanceCount === 0).length,
+      warmed, restored: restored && nodes.every((n, i) => n.visible === visible[i]) };
   })()`);
   const heap = async () => {
     await b.send("HeapProfiler.collectGarbage");
@@ -25827,37 +26677,32 @@ const dsbSoak = async (b, { geometry = false, factory = false } = {}) => {
   const travel = (id) => b.evaluate(`new Promise((resolve, reject) => { const B = window.__ooga; const T = window.BL.scene.tweenCount; const t0 = performance.now(); let last = t0, requested = false, swap = 0, swapFrame = 0, swapGap = 0, accepted = false; const startFrames = B.renderedFrames, trail = []; const tick = () => { const now = performance.now(); const state=B.scene+":"+B.transitioning; if (!trail.length || trail[trail.length-1].state!==state) { if(trail.length<20)trail.push({state,at:now-t0,frames:B.renderedFrames}); } if (!requested && !B.transitioning && T() === 0) { accepted = B.go(${JSON.stringify(id)}); requested = true; } if (requested && !swap && B.scene === ${JSON.stringify(id)}) { swap = now - t0; swapGap = now - last; swapFrame = B.renderedFrames; } last = now; if (swap && B.renderedFrames >= swapFrame + 3 && T() === 0 && !B.transitioning) resolve({ swap, swapGap, settled: now - t0 }); else if (now - t0 > 8000) reject(new Error("Scene travel did not settle: " + JSON.stringify({ wanted: ${JSON.stringify(id)}, scene: B.scene, accepted, trail, framesTotal: B.renderedFrames-startFrames, hidden: document.hidden, focus: document.hasFocus(), requested, tweens: T(), framesSinceSwap: swap ? B.renderedFrames - swapFrame : -1, swap: Math.round(swap) }))); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); })`);
   const heapDetail = (a, z) => `objects ${mb(a.objects)} -> ${mb(z.objects)} MB (used ${mb(a.used)} -> ${mb(z.used)} MB, code ${mb(a.code)} -> ${mb(z.code)} MB)`;
   const within = (a, z, share) => Math.abs(z.objects - a.objects) <= a.objects * share;
-  return { until, rendered, settled, snapshot, travel, heapDetail, within, warmHubGeometry };
+  return { until, rendered, settled, snapshot, travel, heapDetail, within, warmHubGeometry, warmWindowBatches };
 };
 
-scene("dsb", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{ name: "dsb lifecycle", why: "contract: repeated DSB visits release nodes, listeners and GPU resources", run: async (b) => {
-  const { rendered, settled, snapshot, travel, heapDetail, within, warmHubGeometry } = await dsbSoak(b, { geometry: true });
+scene("dsb", { label: "lifecycle", exclusive: true, url: hubPage(src, "repospin=0"), steps: [{ name: "dsb lifecycle", why: "contract: repeated DSB visits release nodes, listeners and GPU resources", run: async (b) => {
+  const { until, rendered, settled, snapshot, travel, heapDetail, within, warmHubGeometry, warmWindowBatches } = await dsbSoak(b, { geometry: true });
   // The weather deck is sized by tier on each visit. Compare the same tier;
   // low is terminal, so the governor cannot change capacity during the soak.
   await b.evaluate('window.__ooga.renderer.setQuality("low")');
   // Warm the new cached model builders before comparing retained memory.
   await travel("dsb"); await travel("hub"); await settled(); await rendered(2);
-  const hubWarm = await warmHubGeometry(), before = await snapshot();
+  if (!await until("(() => { const s = BL.scenes.hub.debug.repoIsland?.stats(); return !s || s.built >= s.chunks && !s.pending; })()", 60000)) throw new Error("Merge Rock construction did not finish");
+  const hubWarm = await warmHubGeometry(), beforeWindows = await warmWindowBatches(), before = await snapshot();
   for (let i = 0; i < 6; i++) { await travel("dsb"); await travel("hub"); }
-  const after = await snapshot();
+  const afterWindows = await warmWindowBatches(), after = await snapshot();
   const same = (key) => before.stats[key] === after.stats[key];
   record("soak: dsb cycles: six round trips retain node, target, tween and DOM counts", same("allNodes") && same("targets") && same("tweens") && same("dom") && after.stats.tweens === 0, JSON.stringify({ before: before.stats, after: after.stats }));
   const bounded = hubWarm.frames === 0 && hubWarm.characters > 0 && hubWarm.prepared
+    && [beforeWindows, afterWindows].every(w => w.windows === 2 && w.batches === 18 && w.warmed && w.restored)
     && Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1);
   record("soak: dsb cycles: GPU records, listeners and heap remain bounded", bounded, heapDetail(before, after)
     + `, GPU ${before.stats.gl.records} -> ${after.stats.gl.records}, DOM ${before.nodes} -> ${after.nodes}, listeners ${before.listeners} -> ${after.listeners}`
     + (bounded ? "" : `, hub warmup ${JSON.stringify(hubWarm)}, geometry ${JSON.stringify(gpuGeometryDelta(before.geometry, after.geometry))}`));
 } }] });
 
-scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{ name: "factory lifecycle", why: "contract: repeated factory visits, each left with a tip's show in the air, release the hall's listeners, nodes and GPU resources while retaining one bounded shared node", run: async (b) => {
-  const { until, rendered, settled, snapshot, travel, heapDetail, within, warmHubGeometry } = await dsbSoak(b, { geometry: true, factory: true });
-  // Compare the same roster and work sites even when an activity expires during the soak.
-  // Only classification uses this instant; scene animation and the Factory feed keep their clocks.
-  await b.evaluate(`(() => {
-    const C = BL.contributors, at = Date.now(), stateFor = C.stateFor, hasRecentActivity = C.hasRecentActivity;
-    C.stateFor = contributor => stateFor(contributor, at);
-    C.hasRecentActivity = (contributor, repo) => hasRecentActivity(contributor, repo, at);
-  })()`);
+scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src, "repospin=0"), steps: [{ name: "factory lifecycle", why: "contract: repeated factory visits, each left with a tip's show in the air, release the hall's listeners, nodes and GPU resources while retaining one bounded shared node", run: async (b) => {
+  const { until, rendered, settled, snapshot, travel, heapDetail, within, warmHubGeometry, warmWindowBatches } = await dsbSoak(b, { geometry: true, factory: true });
   // Keep resource comparisons at one tier, as in the other lifecycle soaks.
   await b.evaluate('__ooga.renderer.setQuality("low")');
   // Replay can become live after the first snapshot. These four static signal labels are intentionally
@@ -25882,30 +26727,11 @@ scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps
   })()`);
   // A legendary tip two seconds before each departure, so every visit leaves with cubes or bananas in the air.
   const tip = (id) => b.evaluate(`(() => { const B = window.__ooga; window.BL.scenes.factory.onDonation({ id: "${id}", sats: 120000, handle: "soak", message: "", at: Date.now() }); B.advance(2, 1 / 30); const c = B.stats().cooker; return c.cubes + c.bananas + c.queued; })()`);
-  // Each window lazily uploads its finite batch geometries as the feed lights a tank or sends a sat.
-  // Warm the same existing batches before both snapshots, so a different feed phase cannot look like a leak.
-  // Zero-count batches create their mesh record but draw no instances; restore visibility and redraw immediately.
-  const warmWindowBatches = () => b.evaluate(`(() => {
-    const B = window.__ooga, windows = [B.factory, B.factory.roof];
-    const batches = windows.flatMap(w => Object.values(w.batches));
-    const nodes = windows.map(w => w.batches.hall.parent).concat(batches), visible = nodes.map(n => n.visible);
-    const scene = BL.scenes.hub;
-    let warmed = false, restored = false;
-    try {
-      for (const n of nodes) n.visible = true;
-      warmed = B.renderer.render(scene.root, scene.camera, scene.renderOpts);
-    } finally {
-      nodes.forEach((n, i) => { n.visible = visible[i]; });
-      restored = B.renderer.render(scene.root, scene.camera, scene.renderOpts);
-    }
-    return { windows: windows.length, batches: batches.length, empty: batches.filter(n => n.instanceCount === 0).length,
-      warmed, restored: restored && nodes.every((n, i) => n.visible === visible[i]) };
-  })()`);
   // Warm both scenes and the cooker's show, so the counts below start from a visit made after the instrumenting.
   await travel("factory"); await tip("soak-warm"); await travel("lab"); await travel("hub"); await settled(); await rendered(2);
-  // The Repo Island joins its chunks in idle time (repo-island.js). The baseline waits for the last of them: a hub that
-  // comes up sooner would otherwise count their nodes and uploads as the visits' own.
-  await until("(() => { const s = window.BL.scenes.hub.debug.repoIsland?.stats(); return !s || s.built >= s.chunks; })()", 60000);
+  // Hold Merge Rock rotation steady and finish its required detail preloads before accounting.
+  // Otherwise newly approached chunks are counted as resources retained by a departed scene.
+  if (!await until("(() => { const s = window.BL.scenes.hub.debug.repoIsland?.stats(); return !s || s.built >= s.chunks && !s.pending; })()", 60000)) throw new Error("Merge Rock construction did not finish");
   // Each visit's tip grows the shared pile, whose wider footprint culls scenery off the ring (a target fewer): the
   // closing count is taken at the opening pile, set back through the hub's own pile.
   const startLevel = await b.evaluate("__ooga.level");
@@ -25964,6 +26790,43 @@ const tessAnswerChecks = (BL) => {
   const lines = cases.flatMap(([q]) => (H.answer(q) || { lines: [] }).lines).every((id) => typeof H.LINES[id] === "string");
   record("tess answers: the page sends a typed question to a trip, an answer, the tour or nothing, follows \"take me there\" to the last place, leaves other follow-ups and Bitcoin questions that name a place's idea to the Worker, and answers every suggestion",
     !wrong.length && there === "trip:lab" && followUp === "none" && suggested && lines, JSON.stringify({ wrong, there, followUp, suggested, lines }));
+};
+// Shared Tess (#466) in Node: the real island guide under a stubbed room, its queue turns handed over as the Room
+// sends them. Under the shared guide her greeting offers Join queue, so news must come with the granted turn.
+const sharedTessNewsChecks = (BL) => {
+  const H = BL.hubGuide, N = BL.net, store = new Map(), visitKey = "ooga-tess-visits";
+  const savedStorage = globalThis.localStorage, savedState = { me: N.state.me, room: N.state.room, connectionToken: N.state.connectionToken, tessShared: N.state.tessShared, tessGuide: N.state.tessGuide }, savedSend = N.sendTess;
+  globalThis.localStorage = { getItem: (k) => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+  const size = { innerWidth: globalThis.innerWidth, innerHeight: globalThis.innerHeight };
+  Object.assign(globalThis, { innerWidth: 1280, innerHeight: 800 });
+  const calls = [], seen = () => JSON.parse(store.get(visitKey) || "{}")["news-fixture"] || null;
+  N.sendTess = (m) => { calls.push({ ...m, a: m.a?.slice() }); return true; };
+  const v = (x, y, z) => ({ x, y, z });
+  const guide = H.create({ parent: BL.scene.createNode(), input: { add() {}, remove() {} }, fx: new Proxy({}, { get: () => () => {} }), camera: { position: v(0, 4, -12), target: v(0, 2, 0), fov: 1 },
+    pilot: { controls: { moving: () => false } }, visitor: () => null, world: {}, hud: {}, busy: () => false, coarse: false, quality: () => 1, landing: true });
+  const s = guide.state, turn = (token) => { N.state.tessGuide = { phase: "active", position: 0, token, count: 1, until: N.serverNow() + 60000, busy: true, pose: null }; guide.update(0.016, 1); };
+  try {
+    Object.assign(N.state, { me: { id: 902, login: "news-fixture", display: "News Fixture" }, room: "live", connectionToken: "news-fixture", tessShared: true, tessGuide: null });
+    // Before a turn her greeting only offers Join queue and reads no news as seen.
+    for (let i = 0; i < 400; i++) guide.update(0.016, i * 0.016);
+    const waitingUnread = s.kind !== "news" && seen() === null;
+    // A granted turn with unread news offers that news first, from the newest entry, and still leaves it unread.
+    turn("turn-1");
+    const offered = s.kind === "news" && s.newest?.line === H.NEWS[0].line && s.legs.length > 0 && s.login === "news-fixture" && /^Welcome back, News Fixture!/.test(s.welcome || "") && s.phase === "approach" && seen() === null;
+    // Not now on that offer records it as seen.
+    s.phase = "offer"; guide.escape();
+    const recorded = seen()?.line === H.NEWS[0].line && calls.some(m => m.op === "cancel");
+    // The next granted turn, nothing new: the island tour with no welcome.
+    turn("turn-2");
+    const toured = s.kind === "island" && s.welcome === null && s.login === null && s.phase === "approach";
+    record("shared Tess news (#466): a signed-in visitor's granted turn offers unread island news first and Not now records it as seen; waiting reads nothing, and with nothing new the turn offers the island tour",
+      waitingUnread && offered && recorded && toured, JSON.stringify({ waitingUnread, offered, recorded, toured, kind: s.kind, phase: s.phase }));
+    const poses = calls.filter(m => m.op === "pose");
+    record("shared Tess privacy: without a driven Ooga, the visual pose does not publish the private camera as a look target",
+      poses.length > 0 && poses.every(m => m.a[10] === 0 && m.a.slice(7, 10).some((n, i) => n !== [0, 4, -12][i])), JSON.stringify(poses));
+  } finally {
+    guide.dispose(); globalThis.localStorage = savedStorage; Object.assign(N.state, savedState); N.sendTess = savedSend; Object.assign(globalThis, size);
+  }
 };
 // The Lightning Factory in Node: the feed's two contracts, the demo node that stands in for a real one, and the
 // walkable floor of the hall, each through the module's own functions.
@@ -26661,15 +27524,15 @@ const voiceAloneChecks = async () => {
 const voiceFailureChecks = async () => {
   const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8");
   const page=(joined=false,AudioContext=undefined)=>{
-    const timers=[],calls=[],failing=new Set(),holds=new Map();let holdLeave=null;
+    const timers=[],calls=[],bodies=[],pcs=[],failing=new Set(),holds=new Map();let holdLeave=null;
     const track={enabled:true,stopped:false,stop(){this.stopped=true;}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
-    class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}getTransceivers(){return [];}addEventListener(){}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}close(){this.connectionState="closed";}}
+    class Pc {constructor(){this.handlers={};pcs.push(this);this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}getTransceivers(){return [];}addEventListener(k,fn){this.handlers[k]=fn;}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}close(){this.connectionState="closed";}}
     class Audio {pause(){}play(){return Promise.resolve();}}
-    const fetch=async(url,o)=>{const op=url.split("/").pop();calls.push(op);if(op==="leave"&&holdLeave)await holdLeave;if(holds.has(op))await holds.get(op);return failing.has(op)?{ok:false,status:503,json:async()=>({error:"sfu"})}:{ok:true,status:200,json:async()=>({tracks:[],sessionDescription:{}})};};
+    const fetch=async(url,o)=>{const op=url.split("/").pop();calls.push(op);bodies.push({op,body:JSON.parse(o.body)});if(op==="leave"&&holdLeave)await holdLeave;if(holds.has(op))await holds.get(op);return failing.has(op)?{ok:false,status:503,json:async()=>({error:"sfu"})}:{ok:true,status:200,json:async()=>({tracks:[],sessionDescription:{}})};};
     const context={window:{BL:{net:{state:{connectionToken:"synthetic",me:{id:900,login:"listener"},zone:"outside",self:{x:0,y:0,z:0,zone:"outside"},blendTo:null,blendT:0},setMuted(){},remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{}},voiceBlend:{}},setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout(){},setInterval:()=>1,clearInterval(){},addEventListener(){},removeEventListener(){},AudioContext},document:{createElement:()=>({volume:1})},navigator:{userActivation:{hasBeenActive:true},mediaDevices:{getUserMedia:async()=>stream}},localStorage:{getItem:k=>joined&&k.includes("voice-joined")?"1":null,setItem(){},removeItem(){}},fetch,RTCPeerConnection:Pc,MediaStream:class {},Audio,AudioContext,AbortController,console};
     context.window.navigator=context.navigator;context.window.document=context.document;context.window.localStorage=context.localStorage;
     runInNewContext(source,context);
-    return {V:context.window.BL.voice,timers,calls,failing,holds,track,hold:p=>{holdLeave=p;}};
+    return {V:context.window.BL.voice,timers,calls,bodies,pcs,failing,holds,track,hold:p=>{holdLeave=p;}};
   };
   const settle=async()=>{for(let i=0;i<30;i++)await new Promise(r=>setImmediate(r));};
   // The retry's new receive session is refused, so there is no receiver at all: the next change must open one, or say so.
@@ -26689,6 +27552,15 @@ const voiceFailureChecks = async () => {
   speaker.hold(null);release();await settle();
   const after={publishing:speaker.V.stats.publishing,muted:speaker.V.stats.muted,returning:speaker.V.stats.returning,mic:!speaker.track.stopped};
   record("voice recovery: a room welcome during a connection restart leaves a speaker publishing and unmuted",after.publishing&&!after.muted&&!after.returning,JSON.stringify(after));
+  for (const why of ["failed", "disconnected"]) {
+    const recovery=page(); await recovery.V.enable(); recovery.V.setMuted(true); await settle();
+    const pc=recovery.pcs.filter(p=>p.connectionState!=="closed").at(-1);
+    pc.connectionState=why;pc.handlers.connectionstatechange();
+    if(why==="disconnected")recovery.timers.at(-1).fn();
+    await settle();
+    record("voice inspector: "+why+" reports its cause and restores a muted publisher",recovery.bodies.some(r=>r.op==="leave"&&r.body.why===why)&&recovery.V.stats.publishing&&recovery.V.stats.muted,JSON.stringify({bodies:recovery.bodies,publishing:recovery.V.stats.publishing,muted:recovery.V.stats.muted}));
+    recovery.V.dispose();
+  }
   // Someone who leaves while a pull is on its way is no failed pull: every other voice this listener hears stays put.
   const racer=page();
   await racer.V.listen();await settle();
@@ -29540,7 +30412,10 @@ const integrationChecks = async BL => {
   records.get(72).weapon=1;pool.update(.1);let primary=clubBack();records.get(72).weapon=0;pool.update(.1);primary=primary&&clubBack();
   if(shotHeard)shotHeard(72,[1,2,3,4,5,6]);const replay=replayed.length===1&&replayed[0].join()===",1,2,3,4,5,6";
   const restingArmX=armR.rotation.x;
-  if(swingHeard)swingHeard(72);pool.update(.1);const swung=!!armR&&armR.rotation.x<-1;
+  // Swung: the arm raised at least 60 degrees from hanging at its highest, by its Euler turn or, on a modelled body,
+  // its quaternion.
+  let swung=false;if(swingHeard)swingHeard(72);
+  for(let i=0;i<40;i++){pool.update(.01);const raised=new Float32Array(3);if(armR&&armR.quaternion)BL.math.quat.rotateVec(raised,armR.quaternion,0,-1,0);swung||=!!armR&&(armR.quaternion?raised[1]>-0.5:armR.rotation.x<-1);}
   pool.update(.4);const settled=!!armR&&Math.abs(armR.rotation.x-restingArmX)<1e-9&&pool.body(72).weapon.meleeTime===0;
   record("integration remotes: another player's gun shows aimed with a banana for each three rounds, the club comes back when it is put away, their shots replay through the crew and their strike swings the arm and settles",
     aimed&&primary&&replay&&swung&&settled,JSON.stringify({aimed,bananas,primary,replay,swung,settled}));
@@ -30964,7 +31839,7 @@ const studioVideoSecurityProof = async () => {
     drawArraysInstanced:(...args)=>{calls.draws++;calls.arrays.push(args);},drawElementsInstanced:(...args)=>{calls.draws++;calls.elements.push(args);},
     texImage2D:()=>{calls.uploads++;if(failure)throw Object.assign(Error("synthetic upload failure"),{name:failure});},texSubImage2D:()=>{calls.uploads++;if(failure)throw Object.assign(Error("synthetic update failure"),{name:failure});}};
   const context={gl,programs:{image:{prog:"image",u:{uReady:"ready"}},mesh:{prog:"mesh"}},res:{matrixTexture:"fallback"},viewProj:[],mirrorViewProj:[],applyCutaway:noop,cutawayMaxY:1e6};
-  runInNewContext("let imageTextures=0,blendPass=false;"+source.slice(partStart,partEnd)+source.slice(start,end)+";globalThis.draw=(rec,count,cameraPass)=>drawImageSurface(rec,count,cameraPass,programs.mesh);globalThis.partDraw=drawPart;globalThis.textures=()=>imageTextures;globalThis.resetTextureCount=()=>{imageTextures=0;};",context);
+  runInNewContext("let imageTextures=0,blendPass=false,pictureDim=1;const countDraw=()=>{};"+source.slice(partStart,partEnd)+source.slice(start,end)+";globalThis.draw=(rec,count,cameraPass)=>drawImageSurface(rec,count,cameraPass,programs.mesh);globalThis.partDraw=drawPart;globalThis.textures=()=>imageTextures;globalThis.resetTextureCount=()=>{imageTextures=0;};",context);
   let image={readyState:2,seeking:false,videoWidth:320,videoHeight:180,currentTime:0,currentSrc:"file:///synthetic.mp4"};const surface={dynamic:true,asset:{load:()=>image},rect:[0,0,7,3.5]},rec={geometry:{imageSurface:surface},mesh:{vao:{},count:6}};
   context.draw(rec,1,true);const fallback=rec.imageTexture===null&&context.textures()===0&&calls.deletes===1&&calls.draws===1&&calls.ready.at(-1)===0&&surface.mediaErrorCode==="video-security";
   context.draw(rec,1,true);const suppressed=calls.uploads===1&&calls.draws===2;
@@ -30999,10 +31874,10 @@ const studioCatalogueProof = async () => {
 // Exercise the shipped voice lifecycle with deferred permissions/signaling and no real devices/network.
 const studioVoiceLifecycleProof = async () => {
   const source=await readFile(join(root,"src/js/voice.js"),"utf8");
-  const fixture=(gathering="complete",candidate=true,failFirstPeer=false)=>{
+  const fixture=(gathering="complete",candidate=true,failFirstPeer=false,voiceTurn=false)=>{
     const calls=[],streams=[],peers=[],elements=[],timers=new Map();let timerId=0,gum=0,permission=null,publishResponse=null,deferred=null,peerAttempts=0;
     class Peer {
-      constructor(){if(++peerAttempts===1&&failFirstPeer)throw Error("probe construction failed");peers.push(this);this.connectionState="connected";this.iceGatheringState=gathering;this.localDescription=null;this.handlers=new Map();}
+      constructor(config){this.config=config;if(++peerAttempts===1&&failFirstPeer)throw Error("probe construction failed");peers.push(this);this.connectionState="connected";this.iceGatheringState=gathering;this.localDescription=null;this.handlers=new Map();}
       addEventListener(k,fn){this.handlers.set(k,fn);}
       removeEventListener(k){this.handlers.delete(k);}
       addTransceiver(track){this.track=track;return {mid:"0"};}
@@ -31010,11 +31885,12 @@ const studioVoiceLifecycleProof = async () => {
       setLocalDescription(d){this.localDescription=d;return Promise.resolve();}
       setRemoteDescription(){return Promise.resolve();}
       getTransceivers(){return [];}
+      setConfiguration(config){this.config=config;}
       close(){this.connectionState="closed";}
     }
     class Sound {constructor(){this.pending=[];elements.push(this);}play(){return new Promise((resolve,reject)=>this.pending.push({resolve,reject}));}pause(){this.pauses=(this.pauses||0)+1;}}
     const makeStream=()=>{const track={enabled:true,stops:0,stop(){this.stops++;}},stream={track,getTracks:()=>[track],getAudioTracks:()=>[track]};streams.push(stream);return stream;};
-    const win={BL:{net:{state:{connectionToken:"synthetic",me:{id:900,login:"listener"}},remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{},setMuted:on=>calls.push({op:"mute",on})}},setTimeout:fn=>{timers.set(++timerId,fn);return timerId;},clearTimeout:id=>timers.delete(id),setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id)};
+    const win={BL:{net:{state:{voiceTurn,connectionToken:"synthetic",me:{id:900,login:"listener"}},remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{},setMuted:on=>calls.push({op:"mute",on})}},setTimeout:(fn,delay)=>{timers.set(++timerId,{fn,delay});return timerId;},clearTimeout:id=>timers.delete(id),setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id)};
     const context={window:win,document:{createElement:()=>({})},localStorage:{getItem:()=>null,setItem(){}},AbortController,RTCPeerConnection:Peer,Audio:Sound,MediaStream:class {constructor(tracks){this.tracks=tracks;}getTracks(){return this.tracks;}},navigator:{mediaDevices:{enumerateDevices:async()=>[{kind:"audioinput",deviceId:"synthetic-mic",label:"Synthetic mic"},{kind:"videoinput",deviceId:"camera",label:"Camera"}],getUserMedia:constraints=>{gum++;calls.push({op:"capture",constraints});return permission||Promise.resolve(makeStream());}}},
       fetch:async(url,options)=>{const op=url.split("/").at(-1);calls.push({op,body:JSON.parse(options.body)});if(deferred?.op===op)return deferred.promise;if(op==="publish"&&publishResponse)return publishResponse;if(op==="pull")return {ok:true,json:async()=>({tracks:JSON.parse(options.body).ids.map(id=>({id,mid:String(id)}))})};return {ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})};}};
     runInNewContext(source,context);
@@ -31023,7 +31899,7 @@ const studioVoiceLifecycleProof = async () => {
   const drain=async()=>{for(let i=0;i<40;i++)await Promise.resolve();};
   // A gather timeout is inconclusive; only a completed empty gather may refuse the listener.
   const slow=fixture("gathering",false),slowJoin=slow.voice.listen();await drain();
-  for(const fn of [...slow.timers.values()])fn();await slowJoin;await drain();
+  for(const task of [...slow.timers.values()])(typeof task === "function" ? task : task.fn)();await slowJoin;await drain();
   const slowGatherJoins=slow.voice.stats.enabled&&slow.calls.some(c=>c.op==="session")&&slow.peers[0].connectionState==="closed";
   slow.voice.dispose();await drain();
   const blocked=fixture("complete",false);await blocked.voice.listen();
@@ -31080,7 +31956,43 @@ const studioVoiceLifecycleProof = async () => {
   const latePlaybackStaysOff=!leaving.voice.stats.enabled&&!leaving.voice.stats.hearing;leaving.voice.dispose();await drain();
   const restarting=fixture();await restarting.voice.listen();const finishRestart=restarting.defer("leave");const restart=restarting.voice.restart();await drain();restarting.voice.stop();finishRestart({ok:true});await restart;await drain();
   const leaveCancelsRestart=!restarting.voice.stats.enabled&&restarting.calls.filter(c=>c.op==="session").length===1;restarting.voice.dispose();await drain();
-  return {slowGatherJoins,emptyGatherRefuses,unavailableProbeJoins,publicationReplaced,leaveStopsAudio,latePlaybackStaysOff,leaveCancelsRestart,receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[slow,blocked,unavailable,listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied,replaced,leaving,restarting].every(f=>f.timers.size===0)};
+  const relay = fixture("complete",true,false,true), tls = "turns:turn.cloudflare.com:443?transport=tcp";
+  const ice = (username) => ({ ttl: 120, iceServers: [{ urls: tls, username, credential: "fixture" }] });
+  const finishIce = relay.defer("ice"), relayJoin = relay.voice.enable();
+  await drain(); finishIce(ice("initial")); await relayJoin; await drain();
+  const hasRelay = (peer, name) => peer.config.iceServers.some(s => s.urls === tls && s.username === name)
+    && peer.config.iceServers.some(s => s.urls === "stun:stun.cloudflare.com:3478");
+  const turnShared = relay.voice.stats.enabled && relay.peers.length === 2
+    && relay.calls.filter(c => c.op === "ice").length === 1 && relay.peers.every(pc => hasRelay(pc, "initial"));
+  const refreshIce = relay.defer("ice"), refreshTimer = [...relay.timers].find(([, task]) => task.delay === 60000);
+  let refreshing;
+  if (refreshTimer) { relay.timers.delete(refreshTimer[0]); refreshing = refreshTimer[1].fn(); }
+  // Keep the existing call while minting credentials; only the subsequent rebuild interrupts it.
+  await drain(); const turnPrefetched = relay.peers.length === 2 && relay.peers.every(pc => pc.connectionState === "connected");
+  refreshIce(ice("fresh")); await refreshing; await drain();
+  const turnRefreshed = !!refreshTimer && relay.peers.length === 4 && relay.peers.slice(0, 2).every(pc => pc.connectionState === "closed")
+    && relay.peers.slice(2).every(pc => hasRelay(pc, "fresh")) && relay.voice.stats.enabled;
+  relay.voice.setPeers([71],[1]); await drain();
+  relay.peers.findLast(pc => pc.connectionState === "connected" && pc.handlers.has("track")).handlers.get("track")({transceiver:{mid:"71"},track:{id:71,stop(){}}});
+  const renewal = relay.voice.inspect().relayRenewals.at(-1);
+  const turnMeasured = renewal.status === "rebuilt" && renewal.credentialsMs >= 0 && renewal.rebuildMs >= 0 && renewal.firstTrackMs >= 0
+    && !JSON.stringify(renewal).includes("fixture") && !JSON.stringify(renewal).includes("turn.cloudflare");
+  const failedIce = relay.defer("ice"), failedTimer = [...relay.timers].find(([, task]) => task.delay === 60000);
+  relay.timers.delete(failedTimer[0]); const failedRefresh = failedTimer[1].fn(); await drain(); failedIce({}); await failedRefresh;
+  const turnFailureKeepsCall = relay.peers.length === 4 && relay.peers.slice(2).every(pc => pc.connectionState === "connected")
+    && relay.voice.inspect().relayRenewals.at(-1).status === "credentials-unavailable";
+  // A stopped call must not return when a pending prefetch eventually resolves.
+  const stopIce = relay.defer("ice"), stopTimer = [...relay.timers].find(([, task]) => task.delay === 60000);
+  relay.timers.delete(stopTimer[0]); const stoppingRefresh = stopTimer[1].fn(); await drain();
+  relay.voice.stop(); stopIce(ice("too-late")); await stoppingRefresh; await drain();
+  const turnStopped = relay.timers.size === 0 && relay.peers.length === 4 && turnFailureKeepsCall && !relay.voice.stats.enabled;
+  const cancelled = fixture("complete",true,false,true), lateIce = cancelled.defer("ice"), cancelledJoin = cancelled.voice.enable();
+  await drain();
+  const iceWasPending = cancelled.calls.some(c => c.op === "ice");
+  cancelled.voice.dropMic();
+  lateIce(ice("stale")); await cancelledJoin; await drain();
+  const turnCancelled = iceWasPending && cancelled.timers.size === 0 && cancelled.peers.length === 0;
+  return {slowGatherJoins,emptyGatherRefuses,unavailableProbeJoins,turnShared,turnRefreshed,turnPrefetched,turnMeasured,turnStopped,turnCancelled,publicationReplaced,leaveStopsAudio,latePlaybackStaysOff,leaveCancelsRestart,receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[slow,blocked,unavailable,listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied,replaced,leaving,restarting].every(f=>f.timers.size===0)};
 };
 
 // The real controller runs against a bounded DOM/media double: no permission prompts or SFU.
@@ -31249,6 +32161,111 @@ const terrainCacheChecks = async () => {
 // must keep its golden digest, and the snapshot's queries, rehydrated after a structured clone (the Worker's and
 // IndexedDB's codec), must answer exactly as the direct build does on a seeded sample of every query.
 // The golden is the island as it was built before the snapshot existed, since given EntropyLab's white floor.
+const CLIFF_TERRAIN_CHECK = "hub cliff ledges: two full-width rings have real floor and headroom in direct and cached terrain, without changing top voxels, rooms, inner windows or paths";
+const cliffLedgeChecks = (BL, baseline, baselineRestored) => {
+  const options = { seed: 1, cliffLedges: true }, island = BL.terrain.island(options);
+  let step; const steps = BL.terrain.islandSnapshotSteps(options);
+  do { step = steps.next(); } while (!step.done);
+  let restored;
+  try { restored = BL.terrainSnapshot.create(structuredClone(step.value)); }
+  catch (error) {
+    // Diagnose the existing failed build, never run a replacement probe or
+    // loosen snapshot validation to get past its geometry limit.
+    const meshBreakdown = built => {
+      const geometry = built.geometry, gridEnd = built.cutawaySource.rampFaceOffset;
+      const windowStart = geometry.faces.length - built.headquarters.windowFaces;
+      const counts = { faces: geometry.faces.length, grid: gridEnd, ramps: windowStart - gridEnd,
+        windows: built.headquarters.windowFaces, buriedPathFaces: 0, buriedWindowFaces: 0,
+        gridPathFaces: 0, gridWindowFaces: 0, belowUpperFloor: 0, belowLowerFloor: 0, triangles: 0 };
+      for (let n = 0; n < geometry.faces.length; n++) {
+        const face = geometry.faces[n]; counts.triangles += face.i.length - 2;
+        if (n >= gridEnd) continue;
+        let top = -Infinity;
+        for (const i of face.i) top = Math.max(top, geometry.verts[i * 3 + 1]);
+        if (face.cutawayPathKey) {
+          counts.gridPathFaces++;
+          if (top <= face.cutawayPathBottom + 1e-7) {
+            if (face.cutawayWindowMask) counts.buriedWindowFaces++;
+            else counts.buriedPathFaces++;
+          }
+        }
+        if (face.cutawayWindowMask) counts.gridWindowFaces++;
+        if (top <= BL.terrain.CLIFF_LEDGES.levels[0].floor) counts.belowUpperFloor++;
+        if (top <= BL.terrain.CLIFF_LEDGES.levels[1].floor) counts.belowLowerFloor++;
+      }
+      return counts;
+    };
+    record(CLIFF_TERRAIN_CHECK, false, JSON.stringify({ error: error.message,
+      baseline: meshBreakdown(baseline), cliffs: meshBreakdown(island) }));
+    return;
+  }
+  const failures = [];
+  let samples = 0;
+  for (const ledge of BL.terrain.CLIFF_LEDGES.levels) for (let degrees = 0; degrees < 360; degrees++) {
+    const angle = degrees * Math.PI / 180;
+    for (const radius of [ledge.inner + 0.55, (ledge.inner + ledge.outer) / 2, ledge.outer - 0.6]) {
+      const x = Math.sin(angle) * radius, z = -Math.cos(angle) * radius;
+      for (const built of [island, restored]) {
+        const floor = built.supportAt(x, z, ledge.floor, 0.1, -120, 0.4);
+        const clear = built.clearAt(x, ledge.floor + 0.01, z, 0.4, 2.5);
+        samples++;
+        if ((Math.abs(floor - ledge.floor) > 1e-6 || !clear) && failures.length < 12) failures.push({ degrees, radius, floor, expected: ledge.floor, clear });
+      }
+    }
+  }
+  // Enlarged route-tagged grid quads are the below-ceiling optimization. None
+  // may cross into a removable roof or a window-owned column, direct or cached.
+  let mergedPathFaces = 0, unsafeMergedPaths = 0;
+  for (const built of [island, restored]) {
+    const geometry = built.geometry, gridEnd = built.cutawaySource.rampFaceOffset;
+    for (let n = 0; n < gridEnd; n++) {
+      const face = geometry.faces[n];
+      if (!face.cutawayPathKey) continue;
+      let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      for (const i of face.i) {
+        const x = geometry.verts[i * 3], y = geometry.verts[i * 3 + 1], z = geometry.verts[i * 3 + 2];
+        minX = Math.min(minX, x); minY = Math.min(minY, y); minZ = Math.min(minZ, z);
+        maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); maxZ = Math.max(maxZ, z);
+      }
+      if (Math.max(maxX - minX, maxY - minY, maxZ - minZ) <= built.unit + 1e-7) continue;
+      mergedPathFaces++;
+      if (face.cutawayWindowMask || !Number.isFinite(face.cutawayPathBottom) || maxY > face.cutawayPathBottom + 1e-7) unsafeMergedPaths++;
+    }
+  }
+  const a = baseline.cutawaySource, b = island.cutawaySource;
+  let topChanges = 0;
+  for (let x = 0; x < a.sx; x++) for (let z = 0; z < a.sz; z++) for (let y = 120; y < a.sy; y++) {
+    const i = (x * a.sy + y) * a.sz + z;
+    if (a.data[i] !== b.data[i]) topChanges++;
+  }
+  const rooms = built => JSON.stringify([built.headquarters.rooms, built.headquarters.basement.rooms]);
+  const apertures = built => JSON.stringify(built.headquarters.windows.map(w => [w.kind, w.x, w.z, w.width, w.height, w.sill, w.flare.frusta.filter(f => f.inner)]));
+  const pathDetails = { baseline: [], direct: [], restored: [] };
+  const paths = (built, details) => {
+    const path = built.path, hash = createHash("sha256");
+    hash.update(JSON.stringify([path.centerlines, path.debug.masterMaskHash, path.debug.masterSpokeCellCount]));
+    for (const radius of [4, 8, 16]) {
+      path.setRadius(radius);
+      const count = path.debug.visibleInstanceCount;
+      hash.update(JSON.stringify([radius, count, path.debug.visibleSpokeCellCount, path.debug.ringCellCount]));
+      const instances = new Uint8Array(path.instanceData.buffer, path.instanceData.byteOffset, count * 20 * Float32Array.BYTES_PER_ELEMENT);
+      hash.update(instances);
+      details.push({ radius, count, instances: createHash("sha256").update(instances).digest("hex") });
+    }
+    return hash.digest("hex");
+  };
+  // Reuse parity's restored baseline so sampling active radii does not change the
+  // original island used by the remaining unit checks. Compare placements, not PATH_TILE.
+  const originalPaths = paths(baselineRestored, pathDetails.baseline), directPaths = paths(island, pathDetails.direct), restoredPaths = paths(restored, pathDetails.restored);
+  const samePaths = directPaths === originalPaths && restoredPaths === originalPaths;
+  record(CLIFF_TERRAIN_CHECK,
+    !failures.length && !topChanges && mergedPathFaces > 0 && !unsafeMergedPaths
+      && rooms(baseline) === rooms(island) && apertures(baseline) === apertures(island) && samePaths,
+    JSON.stringify({ samples, failures, topChanges, mergedPathFaces, unsafeMergedPaths, faces: island.geometry.faces.length,
+      rooms: rooms(baseline) === rooms(island), apertures: apertures(baseline) === apertures(island), paths: samePaths,
+      pathHashes: { baseline: originalPaths, direct: directPaths, restored: restoredPaths }, pathDetails: samePaths ? undefined : pathDetails,
+      masterCells: [baselineRestored.path.debug.masterSpokeCellCount, island.path.debug.masterSpokeCellCount, restored.path.debug.masterSpokeCellCount] }));
+};
 const TERRAIN_GOLDEN = "7ceeb12cec5b0ec3";
 const terrainParityChecks = (BL, island) => {
   const islandDigest = (built) => {
@@ -31309,11 +32326,12 @@ const terrainParityChecks = (BL, island) => {
   });
   record("terrain collision: direct and Worker-restored voxel sweeps use caller-owned typed box queries instead of the allocating scalar adapter",
     voxelPaths.every(path => path.typed), JSON.stringify(voxelPaths));
+  return restored;
 };
 // Repo Island (repo-island-data.js, repo-island-models.js, repo-feed.js): the list the page and the Worker share, the
 // island laid out from it, and the feed's boundary. The meadow's four totems are carved by the same kit at its full
-// detail, so their golden is the one they had before the island's details existed.
-const MEADOW_TOTEMS_GOLDEN = "8bdd4fca5a005b4f";
+// detail. The golden includes the shared name-board lettering, updated for the readable N and R.
+const MEADOW_TOTEMS_GOLDEN = "f22e865e938044c5";
 const repoIslandChecks = (BL, island) => {
   const D = BL.repoIslandData, M = BL.repoIslandModels, TM = BL.totemModels, H = BL.hubModels;
   const sections = D.SECTIONS.map((s) => s.id), order = D.REPOS.map((r) => sections.indexOf(r.section));
@@ -31505,7 +32523,61 @@ const npcActivityRefreshProof = (BL) => {
   }
 };
 
+const caveDirectoryProof = () => {
+  const context = { window: {}, URL };
+  runInNewContext(readFileSync(join(root, "src/js/cave-directory.js"), "utf8"), context);
+  const api = context.window.BL.caveDirectory, data = api.registry, row = data.entries[0];
+  const invalid = [null, { ...data, schema: 2 }, { ...data, extra: true }, { ...data, entries: [row, row] },
+    { ...data, entries: Array(65).fill(row) }, ...[
+      { id: "../land" }, { name: "<script>".repeat(10) }, { description: "\nsecret" }, { repository: "owner/repo/tree/main" },
+      { status: "enabled" }, { extra: true }, { url: "http://example.invalid/" }, { url: "javascript:alert(1)" },
+      { url: "https://user:secret@example.invalid/" }, { url: "https://example.invalid/?token=secret" },
+      { url: "https://example.invalid/#identity" }, { url: "https://example.invalid:8443/" }, { url: " https://example.invalid/" }
+    ].map(change => ({ ...data, entries: [{ ...row, ...change }] }))];
+  const rejected = invalid.every(value => { try { api.validate(value); return false; } catch { return true; } });
+  const tasks = [], nodes = [], holds = [];
+  const document = { activeElement:null, pointerLockElement:null, querySelector:()=>nodes.find(node=>node.tag==="dialog"&&node.open)||null };
+  const make = tag => {
+    const node = { tag, children:[], dataset:{}, attributes:{}, listeners:{}, open:false, isConnected:true,
+      append(child){this.children.push(child);child.parent=this;}, replaceChildren(){this.children=[];},
+      setAttribute(k,v){this.attributes[k]=v;}, focus(){document.activeElement=this;},
+      addEventListener(k,fn,options){(this.listeners[k]||=[]).push(fn);options?.signal?.addEventListener("abort",()=>this.listeners[k]=this.listeners[k].filter(f=>f!==fn),{once:true});},
+      emit(k,event={}){for(const fn of this.listeners[k]||[])fn(event);}, showModal(){this.open=true;},
+      close(){if(!this.open)return;this.open=false;tasks.push(()=>this.emit("close"));},
+      remove(){this.isConnected=false;this.parent.children=this.parent.children.filter(c=>c!==this);} };
+    nodes.push(node);return node;
+  };
+  document.createElement=make;document.body=make("body");
+  Object.assign(context,{document,AbortController});
+  Object.assign(context.window.BL,{controls:{resetAll(){}},caves:{slots:[]},routes:{list:[]},bifrostModels:{WINDOWS:[]},scenes:{}});
+  const button=make("button"), ui=api.create({button,hold:on=>holds.push(on),travel:()=>true});
+  const first=ui.open(),duplicate=ui.open(),dialog=document.body.children[0];
+  let prevented=false;
+  dialog.emit("keydown",{key:"Escape",preventDefault(){prevented=true;},stopPropagation(){}});
+  const escape=prevented&&!dialog.open&&!ui.opened&&document.activeElement===button;
+  const reopen=ui.open();while(tasks.length)tasks.shift()();
+  const staleClose=dialog.open&&ui.opened;
+  ui.dispose();ui.dispose();while(tasks.length)tasks.shift()();
+  const lifecycle=first&&!duplicate&&escape&&reopen&&staleClose&&!document.body.children.length&&!ui.open()&&holds.join(",")==="true,false,true,false";
+  // Visit in OBL hands each mainland row's own hub place to travel: the lab and B.C.A. through their routes, the
+  // mirror (no route of its own) by its navigation name, so none falls back to a bare hub arrival at the bridge.
+  Object.assign(context.window.BL,{caves:{slots:[{name:"EntropyLab",status:"open",scene:"lab"},{name:"B.C.A.",status:"open",scene:null,place:"bca"},
+    {name:"Ooga Booga Land",status:"mirror",scene:null},{name:"Lightning Factory",status:"open",scene:"factory"}]},
+    routes:{list:[{scene:"hub",place:"lab"},{scene:"hub",place:"bca"},{scene:"factory",place:null}]},scenes:{lab:{},factory:{}}});
+  const trips=[], placesUi=api.create({button:make("button"),hold:()=>{},travel:(id,place)=>{trips.push(`${id}:${place}`);return false;}});
+  placesUi.open();
+  for(const node of nodes.filter(node=>node.tag==="button"&&node.textContent==="Visit in OBL"&&node.isConnected))node.emit("click");
+  const mainlandPlaces=trips.slice(0,4).join(",")==="hub:lab,hub:bca,hub:mirror,factory:null";
+  placesUi.dispose();while(tasks.length)tasks.shift()();
+  const empty = api.validate({ schema: 1, entries: [] }).entries.length === 0;
+  const statuses = ["open", "unavailable", "retired"].every(status => api.validate({ schema: 1, entries: [{ ...row, status }] }).entries[0].status === status);
+  return { rejected, empty, statuses, lifecycle, mainlandPlaces, existingDestination: row.url === "https://entropylab.online/" && row.repository === "OogaBoogaX/entropylab",
+    immutable: Object.isFrozen(api) && Object.isFrozen(data) && Object.isFrozen(data.entries) && data.entries.every(Object.isFrozen) };
+};
+
 const unitPreludeChecks = async () => {
+  const caves = caveDirectoryProof();
+  record("cave directory: bounded immutable reviewed destinations reject duplicate identities, unknown schemas and credentials or payload-bearing URLs", Object.values(caves).every(Boolean), JSON.stringify(caves));
   await connectionReportChecks();
   const artifact = artifactUnitProof();
   record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
@@ -31533,6 +32605,10 @@ const unitPreludeChecks = async () => {
   record("gorilla re-sleep regression: waking remembers its former bed; the same bed keeps its return leg and a changed bed chooses the nearest waypoint on its own path", sleepRoutes.every(row => row.ok), JSON.stringify(sleepRoutes));
   const sleepLandingPlayers = sleepLandingPlayersProof();
   record("gorilla sleep landing: the real hub predicate protects local and remote players while allowing vertically clear beds", Object.values(sleepLandingPlayers).every(Boolean), JSON.stringify(sleepLandingPlayers));
+  const mapPadEscape = destinationMapPadEscapeProof();
+  record("destination map pad regression: a pad's B or Menu over another dialog or card is that layer's Escape and never opens Map; on foot it opens Map and inside Map it closes it; a floating board does not block Map and a refused Map never swallows Menu's Escape", Object.values(mapPadEscape).every(Boolean), JSON.stringify(mapPadEscape));
+  const mapCoachingHint = destinationMapCoachingHintProof();
+  record("destination map coaching hint: a floating board does not hide the island coaching hint, while a non-floating dialog still does", Object.values(mapCoachingHint).every(Boolean), JSON.stringify(mapCoachingHint));
   const sleepBeamPool = sleepBeamPoolProof();
   record("gorilla sleep beam: fixed pool, slot isolation, live reduced motion and scene cleanup", Object.values(sleepBeamPool).every(Boolean), JSON.stringify(sleepBeamPool));
   const sleepStalls = gorillaSleepStallProof();
@@ -31603,6 +32679,18 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   await distributionAudioChecks();
 };
 const unitChecks = async () => {
+  // The same terrain rule can run alone without unrelated browser or global checks.
+  if (ARGS.includes("cliffs-unit")) {
+    const scope = {};
+    for (const name of ["math", "scene", "models", "convex", "terrain", "terrain-snapshot"]) {
+      new Function("window", readFileSync(join(root, "src/js", name + ".js"), "utf8"))(scope);
+    }
+    const BL = scope.BL, baseline = BL.terrain.island({ seed: 1 });
+    const steps = BL.terrain.islandSnapshotSteps({ seed: 1 });
+    let step; do { step = steps.next(); } while (!step.done);
+    cliffLedgeChecks(BL, baseline, BL.terrainSnapshot.create(structuredClone(step.value)));
+    return;
+  }
   if (!ARGS.includes("transport-unit")) await unitPreludeChecks();
   const canvasStub = () => ({
     width: 0, height: 0,
@@ -31919,6 +33007,7 @@ const unitChecks = async () => {
   }
   factoryChecks(BL);
   tessAnswerChecks(BL);
+  sharedTessNewsChecks(BL);
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
   await cloudHopperFailureChecks(BL);
@@ -31931,7 +33020,8 @@ const unitChecks = async () => {
     npcActivity.every(row => row.preserved && row.restoredByHost && row.resumedLocally), JSON.stringify(npcActivity));
 
   const island = BL.terrain.island({ seed: 1 });
-  terrainParityChecks(BL, island);
+  const originalTerrainSnapshot = terrainParityChecks(BL, island);
+  cliffLedgeChecks(BL, island, originalTerrainSnapshot);
   catapultChecks(BL, island);
   repoIslandChecks(BL, island);
   await terrainCacheChecks();
@@ -33323,7 +34413,16 @@ scene("dsb",{label:"wallets",query:"&view=wallets-door&weather=clear&time=1200",
   const taken=await b.evaluate('(()=>{const D=__ooga.dsb,t=document.getElementById("toast");return {open:D.walletsMenu.isOpen,list:D.wallets.list().map(d=>d.look+":"+d.state).join(),line:D.walletLine,shown:!document.querySelector(".wallet-carry").hidden,toast:t&&!t.hidden?t.textContent:null};})()');
   record("Wallets browser: Space at the machine offers all six wallets by picture and name alone; Take hands over the Rektdger with its countdown line and, on a desktop, Y and the ground",dialog.open&&dialog.engaged&&dialog.names==="ClownCard,Rektdger,BrickBox02,Passpoor,Jaded,SeedSnitcher"&&dialog.said==="clowncard rektdger brickbox02 passpoor jaded seedsnitcher take"&&!taken.open&&taken.list==="rektdger:carried"&&taken.line==="Carrying Rektdger · 21 s · Click the ground to place ·"&&taken.shown&&taken.toast==="Press Y to throw · Click the ground to place",JSON.stringify({dialog,taken}));
   await b.evaluate('__ooga.pilot.navigate(__ooga.dsb.interiors.active.room.reviews["wallets-wide"])');await walletsStep(b);
-  const spot=await b.evaluate(WALLETS_SPOT);await walletsTap(b,spot.x,spot.y,spot.z);const walked=await walletsUntil(b,"!__ooga.dsb.walletWalk");
+  const spot=await b.evaluate(WALLETS_SPOT);await walletsTap(b,spot.x,spot.y,spot.z);
+  const mapHold=await b.evaluate(`(()=>{
+    const B=__ooga,D=B.dsb,walking=!!D.walletWalk,p={...D.avatar.root.position};
+    document.getElementById("destination-hud").click();const opened=document.getElementById("destination-map").open;
+    B.advance(.3,1/60);const held=!D.walletWalk&&Math.hypot(D.avatar.root.position.x-p.x,D.avatar.root.position.z-p.z)<1e-6&&D.wallets.list()[0].state==="carried";
+    document.getElementById("destination-map-close").click();B.advance(.3,1/60);
+    return {walking,opened,held,closed:!document.getElementById("destination-map").open,stopped:!D.walletWalk&&Math.hypot(D.avatar.root.position.x-p.x,D.avatar.root.position.z-p.z)<1e-6&&D.wallets.list()[0].state==="carried"};
+  })()`);
+  record("Wallets browser: Map cancels a click-to-place walk without moving or placing the device behind the dialog, and closing does not resume it",Object.values(mapHold).every(Boolean),JSON.stringify(mapHold));
+  await walletsTap(b,spot.x,spot.y,spot.z);const walked=await walletsUntil(b,"!__ooga.dsb.walletWalk");
   const placed=await b.evaluate(`(()=>{const D=__ooga.dsb,d=D.wallets.list()[0];return {state:d.state,off:Math.hypot(d.x-(${spot.x}),d.z-(${spot.z})),y:d.y,line:D.walletLine};})()`);
   record("Wallets browser: a real click on the store floor walks the Ooga there and sets the device down exactly where clicked",walked&&placed.state==="dropped"&&placed.off<.06&&Math.abs(placed.y)<1e-6&&placed.line===null,JSON.stringify(placed));
   await walletsStep(b,200);await b.evaluate('__ooga.pilot.navigate(__ooga.dsb.interiors.active.room.reviews["wallets-machine"])');await walletsStep(b);await b.key(" ");await walletsStep(b);

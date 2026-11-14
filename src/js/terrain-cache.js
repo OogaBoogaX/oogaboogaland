@@ -21,14 +21,16 @@
       || entry < 0 || entry > 4) throw new Error("Invalid terrain nook");
     return { x, z, ry, floor, width, depth, height, entry };
   };
-  const normalize = ({ seed = 1, roofHole = null, nook = null } = {}) => {
+  const normalize = ({ seed = 1, roofHole = null, nook = null, cliffLedges = false } = {}) => {
     if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) throw new Error("Invalid terrain seed");
+    if (typeof cliffLedges !== "boolean") throw new Error("Invalid cliff ledges option");
+    const ledges = cliffLedges ? { cliffLedges: true } : {};
     const cut = normalizeNook(nook);
-    if (!roofHole) return { seed, roofHole: null, nook: cut };
+    if (!roofHole) return { seed, roofHole: null, nook: cut, ...ledges };
     const { id, x, z, radius } = roofHole;
     if (!/^c(?:11|10|9|730|1|2|3|5)$/.test(id) || ![x, z, radius].every(Number.isFinite)
       || Math.abs(x) > 100 || Math.abs(z) > 100 || radius <= 0 || radius > 16) throw new Error("Invalid terrain roof");
-    return { seed, roofHole: { id, x, z, radius }, nook: cut };
+    return { seed, roofHole: { id, x, z, radius }, nook: cut, ...ledges };
   };
   const open = () => new Promise((resolve, reject) => {
     if (!window.indexedDB) { reject(new Error("No terrain storage")); return; }

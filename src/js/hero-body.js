@@ -27,10 +27,13 @@
   };
   // A ring: a rectangle hx by hz about (cx, cz) at height y, its corners cut by `b`; `back`, as [across, along],
   // cuts its two rear corners by that much instead, which tapers a heel; `tilt` drops its front and lifts its back
-  // by that much a unit, for a ring that must sit level on a part that leans.
-  const octagon = ([y, hx, hz, b, cx = 0, cz = 0, back, tilt = 0]) => {
+  // by that much a unit, for a ring that must sit level on a part that leans. `toe`, as [way, lag, across, along], draws
+  // a foot's front back toward its outer side `way` (-1 or 1): that front corner is cut by `across` and `along`
+  // instead, and the front runs back by `lag` from the other corner to it.
+  const octagon = ([y, hx, hz, b, cx = 0, cz = 0, back, tilt = 0, toe]) => {
     const bx = Math.min(b, hx * 0.9), bz = Math.min(b, hz * 0.9), rx = back ? back[0] : bx, rz = back ? back[1] : bz;
-    return [[cx + hx - bx, hz], [cx + hx, hz - bz], [cx + hx, rz - hz], [cx + hx - rx, -hz], [cx - hx + rx, -hz], [cx - hx, rz - hz], [cx - hx, hz - bz], [cx - hx + bx, hz]]
+    const [way, lag, ax, az] = toe || [0], cut = (side) => side === way ? [ax, az, lag] : [bx, bz, 0], [px, pz, pl] = cut(1), [mx, mz, ml] = cut(-1);
+    return [[cx + hx - px, hz - pl], [cx + hx, hz - pz], [cx + hx, rz - hz], [cx + hx - rx, -hz], [cx - hx + rx, -hz], [cx - hx, rz - hz], [cx - hx, hz - mz], [cx - hx + mx, hz - ml]]
       .map(([x, z]) => [x, y - z * tilt, cz + z]);
   };
   // Rings joined into a solid: `sections` are [y, hx, hz, bevel, cx, cz] in order, `colors` one colour or one a span.
@@ -249,6 +252,23 @@
   // The hand widens no faster than WIDEN (across for each unit down), so a fist much wider than its wrist, as a
   // slender arm's is, widens all the way down the heel of the palm and has no shelf under the wrist.
   const WRIST = 1.28, WIDEN = 0.58;
+  // The end of a hand's thumb seen from the hand's side: the outline, as (z, y) pairs, of the thumb's half toward the
+  // knuckles where it lies past the fingers' tips (`past`) on the palm's side, for a hold to keep inside what it holds.
+  const thumbEnd = (g, past) => {
+    const points = [];
+    for (let i = 0; i < g.verts.length; i += 3) if (g.verts[i + 2] > past && g.verts[i + 1] < 0) points.push([g.verts[i + 2], g.verts[i + 1]]);
+    points.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const turn = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]), lower = [], upper = [];
+    for (const p of points) {
+      while (lower.length >= 2 && turn(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+      lower.push(p);
+    }
+    for (let i = points.length - 1; i >= 0; i--) {
+      while (upper.length >= 2 && turn(upper[upper.length - 2], upper[upper.length - 1], points[i]) <= 0) upper.pop();
+      upper.push(points[i]);
+    }
+    return Float64Array.from(lower.slice(0, -1).concat(upper.slice(0, -1)).flat());
+  };
   const hand = (side, skin, s = 1, wrist = [1.25, 1.05, 0.4]) => {
     const g = geometry(), inside = shade(skin, 0.5);
     // The hand: whole from the wrist down over the fingers' tips (the heel of the palm), and behind them below that
@@ -267,17 +287,17 @@
     for (const x of [-0.535, 0.535]) poly(g, [[x - 0.03, KNUCKLE - 0.02, BACK - 0.012], [x + 0.03, KNUCKLE - 0.02, BACK - 0.012], [x + 0.008, KNUCKLE + 0.22, BACK - 0.012], [x - 0.008, KNUCKLE + 0.22, BACK - 0.012]], inside, [0, 0, -1]);
     // The side of the hand runs on into the side of its first and last fingers, with no notch where they meet.
     for (const x of [-1.6, 1.6]) poly(g, [[x, TIP + 0.05, 0.05], [x, TIP + 0.05, 0.65], [x, TIP - 0.2, 0.65], [x, TIP - 0.2, 0.05]], skin, [x, 0, 0]);
-    // The thumb, one skin from wrist to tip with no joint showing: it rises out of the hand at the wrist, level
-    // with it there, stands further out down the palm's half of the leading side, folds under and round the corner
-    // in an even bend, and ends a short way across the first finger's tip. Down the heel of the palm it keeps to
-    // the hand's own side as that widens (`wide`), so it is part of the hand at any wrist: it starts inside the
-    // wrist and swells out of the hand's side below it, and its inner half is sunk in the palm's corner all the
-    // way down, so no gap shows between the two.
+    // The thumb, one skin from wrist to tip with no joint showing, as thick as a finger: it rises out of the hand
+    // at the wrist, swells out of the palm's half of the leading side as the ball of the thumb, folds under and
+    // round the corner in an even bend, and lies across the first two fingers' tips, half way up them, sunk a
+    // little into them. Down the heel of the palm it keeps to the hand's own side as that widens (`wide`), so it
+    // is part of the hand at any wrist: it starts inside the wrist and swells out of the hand's side below it, and
+    // its inner half is sunk in the palm's corner all the way down, so no gap shows between the two.
     const S = side;
-    sweep(g, [[(wide(1.3) - 0.32) * S, 1.3, 0.5, S, 0, 0.3, 0.4, 0.18], [(wide(0.85) - 0.14) * S, 0.85, 0.55, 0.95 * S, 0.3, 0.42, 0.48, 0.2],
-      [(wide(0.3) - 0.06) * S, 0.3, 0.6, S, 0, 0.5, 0.52, 0.2], [1.62 * S, -0.02, 0.7, 0.92 * S, -0.38, 0.46, 0.5, 0.2],
-      [1.62 * S, -0.27, 0.9, 0.71 * S, -0.71, 0.36, 0.46, 0.18], [1.4 * S, -0.4, 1.12, 0.26 * S, -0.97, 0.35, 0.4, 0.18],
-      [1 * S, -0.4, 1.26, 0, -1, 0.33, 0.34, 0.16], [0.58 * S, -0.4, 1.26, 0, -1, 0.27, 0.27, 0.12]], skin);
+    sweep(g, [[(wide(1.25) - 0.4) * S, 1.25, 0.55, S, 0, 0.36, 0.55, 0.22], [(wide(0.75) - 0.25) * S, 0.75, 0.7, 0.95 * S, 0.3, 0.58, 0.66, 0.26],
+      [(wide(0.2) - 0.18) * S, 0.2, 0.85, 0.97 * S, -0.25, 0.6, 0.64, 0.26], [1.52 * S, -0.25, 1.08, 0.8 * S, -0.6, 0.55, 0.58, 0.24],
+      [1.25 * S, -0.55, 1.36, 0.3 * S, -0.95, 0.5, 0.52, 0.22], [0.8 * S, -0.66, 1.46, 0, -1, 0.47, 0.47, 0.2],
+      [0.25 * S, -0.68, 1.44, 0, -1, 0.44, 0.43, 0.2], [-0.1 * S, -0.68, 1.4, 0, -1, 0.4, 0.38, 0.18]], skin);
     if (s !== 1) for (let i = 0; i < g.verts.length; i++) g.verts[i] *= s;
     return g;
   };
@@ -299,9 +319,14 @@
       knee: [-3.95, -2.85, 1, 2], ankle: [-5.05, 1.68, 1.84],
       // The foot is a block its whole length: as tall at the toes as a toe, its top rising from them to the instep,
       // and drawn in a little toward the heel.
-      // `toe` is how tall the foot is at the toes and `sole` how thick a boot's sole is.
-      foot: [[-7, 1.9, 2.75, 0.4, 0, 0.8, [0.65, 1.7]], [-6.15, 1.9, 2.75, 0.45, 0, 0.8, [0.65, 1.7]], [-5.55, 1.5, 1.75, 0.45, 0, -0.05]], toe: 0.85, sole: 0.28,
-      arm: [[-0.55, 0.95, 1.05, 0.45], [-0.9, 1.5, 1.55, 0.55], [-1.8, 1.75, 1.8, 0.65], [-2.7, 1.6, 1.7, 0.55, 0, -0.22], [-3.15, 1.4, 1.5, 0.5, 0, -0.35],
+      // `toe` is how tall the foot is at the toes and `sole` how thick a boot's sole is. A bare foot's toes run back
+      // toward its outer side (`toes`: how far its front falls back from the big toe to the last toe, and how far the
+      // last toe's outer corner is cut back), so the little toe is the shortest, as a foot's is.
+      foot: [[-7, 1.9, 2.75, 0.4, 0, 0.8, [0.65, 1.7]], [-6.15, 1.9, 2.75, 0.45, 0, 0.8, [0.65, 1.7]], [-5.55, 1.5, 1.75, 0.45, 0, -0.05]], toe: 0.85, sole: 0.28, toes: [0.3, 0.95],
+      // The shoulder's rings are tilted as a sleeve's are (SLEEVE), so its top and bottom are level when the arm hangs
+      // at rest.
+      arm: [[-0.55, 0.95, 1.05, 0.45, 0, 0, null, SLEEVE], [-0.9, 1.5, 1.55, 0.55, 0, 0, null, SLEEVE], [-1.8, 1.75, 1.8, 0.65, 0, 0, null, SLEEVE],
+        [-2.7, 1.6, 1.7, 0.55, 0, -0.22, null, SLEEVE], [-3.15, 1.4, 1.5, 0.5, 0, -0.35, null, SLEEVE],
         [-3.95, 1.5, 1.6, 0.5, 0, -0.58], [-4.9, 1.3, 1.4, 0.45, 0, -0.9], [-5.5, 1.05, 1.15, 0.4, 0, -1]],
       forearm: [[1.25, 0.95, 1, 0.45], [0.8, 1.3, 1.4, 0.5], [-0.6, 1.4, 1.5, 0.5], [-1.4, 1.55, 1.65, 0.5], [-2.9, 1.45, 1.5, 0.45], [-4, 1.3, 1.35, 0.45]],
       elbow: [-4.9, -0.9], sleeve: 4, wrist: [-2.75, 1.45, 1.5],
@@ -322,11 +347,11 @@
       knee: null, ankle: [-5.2, 0.9, 1],
       // Her foot is about seven tenths of his across and along, so it is seven tenths as tall at the toes and a boot's
       // sole seven tenths as thick: a foot as tall as his on her small one reads as a block.
-      foot: [[-7, 1.25, 2.15, 0.35, 0, 0.6], [-6.39, 1.25, 2.15, 0.4, 0, 0.6], [-5.6, 1.05, 1.35, 0.4, 0, -0.05]], toe: 0.61, sole: 0.2,
+      foot: [[-7, 1.25, 2.15, 0.35, 0, 0.6], [-6.39, 1.25, 2.15, 0.4, 0, 0.6], [-5.6, 1.05, 1.35, 0.4, 0, -0.05]], toe: 0.61, sole: 0.2, toes: [0.2, 0.65],
       // Her elbow sits at her waist, lower than his, so her forearm is the shorter half of her arm. Her shoulder is
       // a round cap in her sleeve: rings near eight even sides, each level and one over the other when the arm
       // hangs at rest (`cap`), so it is the same from the front as from behind.
-      arm: [cap(0.42, 0.34), cap(0.3, 0.62), cap(0.08, 0.88), cap(-0.25, 1.04), cap(-0.7, 1.1), cap(-1.25, 1.1), [-2.05, 0.95, 1, 0.35, 0, -0.25],
+      arm: [cap(0.42, 0.34), cap(0.3, 0.62), cap(0.08, 0.88), cap(-0.25, 1.04), cap(-0.7, 1.1), cap(-1.25, 1.1), [-2.05, 0.95, 1, 0.35, 0, -0.25, null, SLEEVE],
         [-6.1, 0.85, 0.9, 0.3, 0, -0.75], [-6.6, 0.68, 0.72, 0.28, 0, -0.8]],
       forearm: [[0.9, 0.6, 0.65, 0.28], [0.5, 0.85, 0.9, 0.3], [-0.5, 0.9, 0.95, 0.3], [-3.4, 0.75, 0.78, 0.3], [-4.45, 0.68, 0.7, 0.28]],
       // An empty hand of hers hangs relaxed at her side: `relaxed` is that arm's bend at the elbow.
@@ -457,9 +482,11 @@
     // up the hand); `wristOf` is that ring as the hand sees it, a quarter turn round and in the hand's own scale.
     const [ey, ez] = B.elbow, reach = Math.hypot(HAND_Y + ey, HAND_Z - ez), hs = B.handScale / armK, last = thick(B.forearm[B.forearm.length - 1]);
     const long = (y) => y < 0 ? y * (reach - WRIST * hs) / -last[0] : y, wristOf = [last[2] / hs, last[1] / hs, last[3] / hs];
-    // `clear` is the bend that carries the fist clear of the front of the trunk, for an arm laid across it.
+    // `clear` is the bend that carries the fist clear of the front of the trunk, for an arm laid across it. `deltoid`
+    // is how far down the arm its shoulder is widest, the middle the top of the arm is rounded about.
     const elbow = { y: ey * u, z: ez * u, length: reach * u, rest: Math.atan2(HAND_Z - ez, HAND_Y + ey),
-      clear: Math.asin(Math.min(1, (B.belt[3] + 1.45 * B.handScale - ez * armK) / (reach * armK))), relaxed: B.relaxed };
+      clear: Math.asin(Math.min(1, (B.belt[3] + 1.45 * B.handScale - ez * armK) / (reach * armK))), relaxed: B.relaxed,
+      deltoid: -B.arm.reduce((a, ring) => ring[1] > a[1] ? ring : a)[0] * u };
     const forearm = (side = 0) => {
       const rings = B.forearm.map(([y, ...ring]) => thick([long(y), ...ring]));
       const g = paint ? paintedLoft(geometry(), rings, paint.forearm[side].breaks, paint.forearm[side].pick, paint.tone, skin, paint.print) : loft(geometry(), rings, skin);
@@ -486,23 +513,29 @@
         loft(g, [[-7 + B.sole, f[0][1], f[0][2], 0.35, 0, f[0][5]], [f[1][0] + 0.05, f[1][1], f[1][2], 0.4, 0, f[1][5]], [f[2][0] + 0.05, f[2][1] + 0.12, f[2][2] + 0.12, 0.4, 0, f[2][5]]], o.boot.color);
         if (o.boot.detail) o.boot.detail(g, B);
       } else {
-        loft(g, B.foot, skin);
         // Toes: grooves cut down the foot's blunt front, as lines a shade darker. They split the foot's own width
-        // into four toes and are as thick as that width allows, so a small foot's are closer and finer.
-        const f = B.foot[0], front = f[5] + f[2], gap = f[1] / 2, line = f[1] * 0.032;
-        for (const x of [-gap, 0, gap]) poly(g, [[x - line, -6.98, front + 0.012], [x + line, -6.98, front + 0.012], [x + line, -7 + B.toe, front + 0.012], [x - line, -7 + B.toe, front + 0.012]], shade(skin, 0.7), FRONT);
+        // into four toes and are as thick as that width allows, so a small foot's are closer and finer. The front
+        // falls back toward the foot's outer side (-x for the right foot) from the big toe to the third, and the last
+        // toe is the corner cut back from there.
+        const f = B.foot[0], front = f[5] + f[2], gap = f[1] / 2, line = f[1] * 0.032, way = side ? 1 : -1, [lag, along] = B.toes;
+        const inner = -way * (f[1] - f[3]), outer = way * (gap + line), back = (x) => front - lag * (x - inner) / (outer - inner);
+        loft(g, B.foot.map((ring, i) => i < 2 ? [...ring.slice(0, 6), ring[6], 0, [way, lag, f[1] - gap - line, along]] : ring), skin);
+        for (const x of [-gap, 0, gap]) poly(g, [[x - line, -6.98, back(x - line) + 0.012], [x + line, -6.98, back(x + line) + 0.012], [x + line, -7 + B.toe, back(x + line) + 0.012], [x - line, -7 + B.toe, back(x - line) + 0.012]], shade(skin, 0.7), FRONT);
         if (o.anklets) cuff(g, B.ankle[0] + 0.3, B.ankle[1], B.ankle[2], o.anklets, 1, 0.62);
       }
       return g;
     };
-    // A painted body's left arm and leg are their own meshes only where they wear something the right ones do not.
+    // A painted body's left arm and leg are their own meshes only where they wear something the right ones do not. Bare
+    // feet are a left and a right (`sided`), each with its little toe on its outer side.
     const alike = (a, b) => a.faces.length === b.faces.length && a.faces.every((f, i) => { const c = b.faces[i].color; return f.color[0] === c[0] && f.color[1] === c[1] && f.color[2] === c[2]; });
-    const pair = (make) => { const right = scaled(make(0), u), left = paint ? scaled(make(1), u) : right; return [right, alike(right, left) ? right : left]; };
-    const [armR, armL] = pair(arm), [forearmR, forearmL] = pair(forearm), [legR, legL] = pair(leg), hands = o.hands || [skin, skin];
+    const pair = (make, sided = false) => { const right = scaled(make(0), u), left = paint || sided ? scaled(make(1), u) : right; return [right, !sided && alike(right, left) ? right : left]; };
+    const [armR, armL] = pair(arm), [forearmR, forearmL] = pair(forearm), [legR, legL] = pair(leg, !o.boot), hands = o.hands || [skin, skin];
+    const handR = scaled(hand(-1, hands[0], hs, wristOf), u);
     return { torso: scaled(torso, u), arm: armR, armL, forearm: forearmR, forearmL, leg: legR, legL,
-      handR: scaled(hand(-1, hands[0], hs, wristOf), u), handL: scaled(hand(1, hands[1], hs, wristOf), u), armX: B.armX * u, armDrop: (B.armDrop || 0) * u, armScale: armK,
-      // The fist's measures from its middle: to the face of its palm, and to the end of its thumb's side.
-      fist: { palm: 1.1 * B.handScale * u, span: 2.17 * B.handScale * u },
+      handR, handL: scaled(hand(1, hands[1], hs, wristOf), u), armX: B.armX * u, armDrop: (B.armDrop || 0) * u, armScale: armK,
+      // The fist's measures from its middle: to the face of its palm and to the end of its thumb's side, and the end
+      // of the thumb lying across the fingers on the palm's side, seen from the hand's side.
+      fist: { palm: 1.1 * B.handScale * u, span: 2.17 * B.handScale * u, tip: thumbEnd(handR, 1.12 * hs * u) },
       legX: B.legX ? B.legX * u : 0, elbow, back: spine * u, modelled: true };
   };
   // The default Ooga's strap, an object of its own: a band that comes out from behind the belt at the left hip, runs
@@ -857,5 +890,5 @@
     if (built) body.torso = merge(body.torso, built);
     return body;
   };
-  BL.heroBody = { wear, trunk, head, club, nunchaku, poly, both, loft, slab, noseBlock, rect, fur, cuff, buckle, hand, build, shade, scaled, FRONT, BUILD };
+  BL.heroBody = { wear, trunk, head, club, nunchaku, poly, both, loft, slab, noseBlock, rect, fur, cuff, buckle, hand, build, shade, scaled, FRONT, BUILD, HAND: [HAND_Y, HAND_Z] };
 })();

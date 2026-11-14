@@ -14,7 +14,7 @@
     "html_handling": "drop-trailing-slash",
     "not_found_handling": "404-page",
     // Only these paths run the Worker (worker/src/index.js); every other path is served straight from _site.
-    "run_worker_first": ["/auth/*", "/api/*", "/poker/*", "/room", "/game/*", "/donations/*"]
+    "run_worker_first": ["/auth/*", "/api/*", "/poker/*", "/room", "/game/*", "/donations/*", "/inspect"]
   },
   "vars": {
     // Optional poker: set POKER_SERVICE_URL to the HTTPS service origin and POKER_SERVICE_TOKEN as a secret.
@@ -29,6 +29,8 @@
     // Optional, for the games the Worker hosts (GAMES, worker/src/game-host.js): GAME_LOCATION_HINT, a region such as
     // "enam" an instance's object is made in (else near whoever first connects; it stays there), and GAME_DEBUG_IDS,
     // account ids, comma-separated, that may pause a hosted game or start it past its first round (staging).
+    // Optional, for the Durable Object inspector at /inspect (worker/src/inspect.js): INSPECTOR_IDS, account ids,
+    // comma-separated, that may open it; unset, it is off and no object reports anything.
   },
   // Private staging replay storage; public reads are served through the Worker.
   // See docs/cloud-hopper-replays.md for validation and bounded retention.
@@ -45,10 +47,10 @@
   // page donations are on. Deploy bananapayserver-staging first.
   "services": [{ "binding": "DONATIONS", "service": "bananapayserver-staging", "entrypoint": "PageApi" }],
   "durable_objects": {
-    "bindings": [{ "name": "ROOM", "class_name": "Room" }, { "name": "GAMES", "class_name": "GameHost" }]
+    "bindings": [{ "name": "ROOM", "class_name": "Room" }, { "name": "GAMES", "class_name": "GameHost" }, { "name": "INSPECTOR", "class_name": "Inspector" }]
   },
   // v2: one GameHost a hosted game's instance (worker/src/games.js names them), apart from the island's Room.
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }, { "tag": "v2", "new_sqlite_classes": ["GameHost"] }],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }, { "tag": "v2", "new_sqlite_classes": ["GameHost"] }, { "tag": "v3", "new_sqlite_classes": ["Inspector"] }],
   // Namespaces are per account: staging counts in 2001-2008, production in 1001-1008.
   "ratelimits": [
     // Opt-in dropout reports per signed-in account, with additional D1 retention and volume caps.
@@ -61,6 +63,8 @@
     { "name": "ROOM_LIMITER", "namespace_id": "2002", "simple": { "limit": 20, "period": 60 } },
     // Voice signalling per player: a join is four calls, each change of who is near one or two more.
     { "name": "VOICE_LIMITER", "namespace_id": "2003", "simple": { "limit": 120, "period": 60 } },
+    // Short-lived TURN credentials per player; independent of game and voice signalling limits.
+    { "name": "VOICE_ICE_LIMITER", "namespace_id": "2009", "simple": { "limit": 6, "period": 60 } },
     // Questions to Tess per IP, the address used only for this count: the page answers most by itself.
     { "name": "TESS_LIMITER", "namespace_id": "2005", "simple": { "limit": 5, "period": 60 } },
     // Public high-score reads per IP; signed-in submissions per account, on separate keys.

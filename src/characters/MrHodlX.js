@@ -4,7 +4,6 @@
   const { box, lathe, ring, merge, forward, cached, geometry, pushVert, face, tube } = BL.models;
   const { hexToRgb } = BL.math;
   const { createNode, addChild } = BL.scene;
-  // crew.js MASK_PORTS match the centre hole and six surrounding holes here.
   const gasMaskGeometry = cached(() => {
     const shell = "#3a3d35", trim = "#2a2d27", metal = "#5b6066";
     const hood = lathe({ profile: [[0.29, -0.06], [0.31, 0.1], [0.31, 0.3], [0.28, 0.46], [0.2, 0.58], [0.08, 0.66], [0, 0.68]], segments: 14, color: shell });
@@ -19,14 +18,14 @@
       .map(([hx, hy]) => box({ w: 0.03, h: 0.03, d: 0.008, color: "#0f1113", offset: { x: hx, y: 0.1 + hy, z: 0.463 } }));
     return merge(hood, snout, filter, ...holes, lens(-0.12), lens(0.12), tube(-0.21), tube(0.21), ring({ r: 0.315, thickness: 0.02, y: 0.4, segments: 14, color: trim }));
   });
-  const hockeyStickGeometry = (h, gold = false) => {
+  const hockeyStickGeometry = (h) => {
     const u = h / 16, shaft = geometry(), blade = geometry(), shaftRings = [], bladeSections = [];
     const bladeSegments = 28, bladeRise = 2.8;
-    const shaftColor = hexToRgb(gold ? "#a77b32" : "#292e31");
-    const shaftSide = hexToRgb(gold ? "#805a25" : "#1b2023");
-    const tape = (gold ? ["#e8cf8d", "#cba95d", "#dfc27c"] : ["#e1dfd7", "#b9b9b3", "#d1d0ca"]).map(hexToRgb);
-    const tapeEdge = hexToRgb(gold ? "#ad8848" : "#999b98");
-    const seam = gold ? "#765922" : "#777b7a";
+    const shaftColor = hexToRgb("#292e31");
+    const shaftSide = hexToRgb("#1b2023");
+    const tape = ["#e1dfd7", "#b9b9b3", "#d1d0ca"].map(hexToRgb);
+    const tapeEdge = hexToRgb("#999b98");
+    const seam = "#777b7a";
     for (let i = 0; i <= 20; i++) {
       const t = i / 20, y = (-3 + 18.2 * t) * u, w = 0.8 * u, d = 0.52 * u;
       shaftRings.push([pushVert(shaft, -w, y, -d), pushVert(shaft, w, y, -d),
@@ -92,12 +91,9 @@
     handle: "MrHodlX",
     joined: 1788800920,
     lastCommit: 1788200000,
-    // gasMask also drives the mask's breath smoke in crew.js; nose, beard and mouth sit under the mask
     look: { gasMask: true, stoneAxe: true, hairless: true, noBrow: true, face: "none" },
     dress: {
-      hatY: (k) => 0.66 * k.h,
-      // Turned a quarter about the shaft (y, then the tilt as z: the rotation's order is YXZ), so the blade faces forward.
-      club: (k) => ({ default: hockeyStickGeometry(k.h), gold: hockeyStickGeometry(k.h, true), rest: { x: 0, y: Math.PI / 2, z: 0.24 }, carry: { x: 0, y: Math.PI / 2, z: 0.95 } }),
+      club: (k) => ({ default: hockeyStickGeometry(k.h), rest: { x: 0, y: Math.PI / 2, z: 0.24 }, carry: { x: 0, y: Math.PI / 2, z: 0.95 } }),
       headgear(k) {
         const h = k.h;
         addChild(k.parts.head, createNode({ scale: { x: h, y: h, z: h }, geometry: gasMaskGeometry() }));

@@ -80,7 +80,7 @@
   };
   // Exposed grid faces, greedy-meshed one slice at a time.
   const DIR_BIT = 0x100, FLOOR_DETAIL_BIT = 0x4000;
-  const gridGeometrySteps = function* (grid, { unit, palette, origin = { x: 0, y: 0, z: 0 }, matrixCaves = null, floorRooms = [], cutawayPathKeys = null, cutawayPathBottoms = null, cutawayWindowMask = null, cutawayWindowTops = null, cutawayWindowCeilings = null }, slice = null) {
+  const gridGeometrySteps = function* (grid, { unit, palette, origin = { x: 0, y: 0, z: 0 }, matrixCaves = null, floorRooms = [], cutawayPathKeys = null, cutawayPathBottoms = null, cutawayWindowMask = null, cutawayWindowTops = null, cutawayWindowCeilings = null, mergeBuriedPaths = false }, slice = null) {
     if (slice && !slice.until) { slice.work = 0; slice.until = performance.now() + slice.budget; }
     const { data, sx, sy, sz } = grid;
     const dims = [sx, sy, sz], strides = [sy * sz, sz, 1];
@@ -90,6 +90,12 @@
     const pathBottomMask = cutawayPathBottoms ? new Float32Array(mask.length) : null;
     const windowMask = cutawayWindowMask ? new Uint8Array(mask.length) : null;
     const windowColumnMask = cutawayWindowMask ? new Uint32Array(mask.length) : null;
+    // Below-ceiling rock is always in createRampRoof's stable base mesh. The
+    // cliff variant can merge those cells, retaining their exact path metadata.
+    const buriedMask = mergeBuriedPaths && pathMask && pathBottomMask ? new Uint8Array(mask.length) : null;
+    const sameBuried = (a, b) => buriedMask[a] === buriedMask[b] && (!buriedMask[a]
+      || pathBottomMask[a] === pathBottomMask[b] && (!windowMask
+        || windowMask[a] === windowMask[b] && windowColumnMask[a] === windowColumnMask[b]));
     const floorDetails = floorRooms.map((room) => ({ ...room, cr: Math.cos(room.angle), sr: Math.sin(room.angle) }));
     // Rooms bucketed by the slice their floor lands on, so the y sweep never refilters the whole list.
     const floorsByRow = new Map();
@@ -164,6 +170,12 @@
             const dx = origin.x + (j + 0.5) * unit - room.x, dz = origin.z + (i + 0.5) * unit - room.z;
             if (Math.abs(dx * room.cr + dz * room.sr) < room.width / 2 + unit && Math.abs(dx * room.sr - dz * room.cr) < room.depth / 2 + unit) { mask[n] |= FLOOR_DETAIL_BIT; break; }
           }
+          if (buriedMask) {
+            const solid = a && !b ? base - sd : base;
+            const faceTop = origin.y + (d === 1 ? k : Math.floor(solid / sz) % sy + 1) * unit;
+            buriedMask[n] = pathMask[n] && !(mask[n] & FLOOR_DETAIL_BIT) && (!windowMask || !windowMask[n])
+              && faceTop <= pathBottomMask[n] ? 1 : 0;
+          }
         };
         if (d === 2) {
           // Rows run along z: one cell per row, in memory order.
@@ -197,13 +209,17 @@
             // Ramp-roof faces stay on their authored voxel cells. The render
             // cutaway can then remove the true curved ceiling footprint in
             // either renderer instead of approximating it with a rectangle.
-            const span = pathKey || windowKey ? 1 : c & FLOOR_DETAIL_BIT ? Math.max(1, Math.round(1 / unit)) : Infinity;
+            const span = pathKey && !(buriedMask && buriedMask[n]) || windowKey ? 1 : c & FLOOR_DETAIL_BIT ? Math.max(1, Math.round(1 / unit)) : Infinity;
             let w = 1;
-            while (w < span && i + w < nu && mask[n + w] === c && (!pathMask || pathMask[n + w] === pathKey)) { w++; }
+            while (w < span && i + w < nu && mask[n + w] === c && (!pathMask || pathMask[n + w] === pathKey)
+              && (!buriedMask || sameBuried(n, n + w))) { w++; }
             let h = 1;
             for (; h < span && j + h < nv; h++) {
               let same = true;
-              for (let x = 0; x < w && same; x++) { same = mask[n + x + h * nu] === c && (!pathMask || pathMask[n + x + h * nu] === pathKey); }
+              for (let x = 0; x < w && same; x++) {
+                const at = n + x + h * nu;
+                same = mask[at] === c && (!pathMask || pathMask[at] === pathKey) && (!buriedMask || sameBuried(n, at));
+              }
               if (!same) break;
             }
             // (d, u, v) is cyclic, so this vertex order faces +d.
@@ -212,6 +228,7 @@
             for (let y = 0; y < h; y++) {
               mask.fill(0, n + y * nu, n + y * nu + w);
               if (pathMask) pathMask.fill(0, n + y * nu, n + y * nu + w);
+              if (buriedMask) buriedMask.fill(0, n + y * nu, n + y * nu + w);
               if (windowMask) { windowMask.fill(0, n + y * nu, n + y * nu + w); windowColumnMask.fill(0, n + y * nu, n + y * nu + w); }
             }
             i += w;
@@ -342,6 +359,12 @@
   const CLOCKS = [["c11", 11], ["c10", 10], ["c9", 9], ["c730", 7.25, 10.25], ["c1", 1], ["c2", 2], ["c3", 3], ["c5", 4.75, 1.75]];
   const HEADQUARTERS_CAVE = 9;
   const HEADQUARTERS_FLOOR = -7;
+  // Hub-only terraces: the upper rooms and original top remain inside these cuts.
+  // The wider exterior rock and window reveals are deliberate; inner apertures stay fixed.
+  const CLIFF_LEDGES = {
+    levels: [{ floor: -7.75, inner: 27.25, outer: 29.6, depth: 2.75 }, { floor: -13.25, inner: 24.5, outer: 26.85, depth: 2.5 }],
+    ropes: [20, 160, 280], ladders: [80, 200, 320], landingRadius: 30.25, padRadius: 31.35
+  };
   const HEADQUARTERS_CEILING = -2.75;
   const HEADQUARTERS_HEIGHT = HEADQUARTERS_CEILING - HEADQUARTERS_FLOOR;
   const HEADQUARTERS_ROCK = 0.75;
@@ -466,9 +489,9 @@
     return result.length >= 3 ? result : null;
   };
   const ISLANDS = new Map();
-  const islandSteps = function* ({ seed = 1, roofHole = null, nook = null } = {}, slice = { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 }, capture = null) {
+  const islandSteps = function* ({ seed = 1, roofHole = null, nook = null, cliffLedges = false } = {}, slice = { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 }, capture = null) {
     if (slice && !slice.until) { slice.work = 0; slice.until = performance.now() + slice.budget; }
-    const cacheKey = islandKey({ seed, roofHole, nook });
+    const cacheKey = islandKey({ seed, roofHole, nook, cliffLedges });
     const hit = ISLANDS.get(cacheKey);
     if (hit && !capture) { hit.scope.use(); return hit.value; }
     const rand = mulberry32(seed);
@@ -1255,6 +1278,38 @@
         a.flare.vertical = Math.min(a.flare.vertical, room); b.flare.vertical = Math.min(b.flare.vertical, room);
       }
     } }
+    // Work after every seeded top/path/room pass and after measuring the original window apertures, before fragmentation. No RNG is
+    // consumed and no cell at the island top is touched. Each shelf grows from the existing
+    // underside, tapering back into it; both its floor and clearance are real collision voxels.
+    if (cliffLedges) {
+      const stations = [...CLIFF_LEDGES.ropes, ...CLIFF_LEDGES.ladders].map(degrees => degrees * Math.PI / 180);
+      for (let gx = 0; gx < SX; gx++) { yield* pause(slice); for (let gz = 0; gz < SZ; gz++) {
+        const x = (gx + 0.5) * UNIT + ORIGIN.x, z = (gz + 0.5) * UNIT + ORIGIN.z;
+        const radius = Math.hypot(x, z), angle = Math.atan2(x, -z);
+        // Each added shelf is one stone bed in the existing underside palette.
+        // Matching its floor material through the backing lets adjacent faces
+        // merge without changing the shape or the original rock's variation.
+        for (let level = 0; level < CLIFF_LEDGES.levels.length; level++) {
+          const ledge = CLIFF_LEDGES.levels[level];
+          let pad = 0;
+          for (const station of stations) {
+            const distance = Math.abs(Math.atan2(Math.sin(angle - station), Math.cos(angle - station)));
+            pad = Math.max(pad, clamp((0.105 - distance) / 0.035, 0, 1));
+          }
+          const outer = ledge.outer + 0.1 * Math.sin(angle * 7) + pad * ((level ? 27.7 : CLIFF_LEDGES.padRadius) - ledge.outer);
+          const floorGy = SURFACE + Math.round(ledge.floor / UNIT);
+          for (let gy = floorGy - Math.ceil(ledge.depth / UNIT); gy < floorGy; gy++) {
+            const y = (gy + 1 - SURFACE) * UNIT;
+            const blend = clamp((y - ledge.floor + ledge.depth) / ledge.depth, 0, 1);
+            const core = undersideRadiusAt(y), reach = core + Math.max(0, outer - core) * blend;
+            if (radius < reach && radius > core - UNIT && !grid.has(gx, gy, gz)) grid.set(gx, gy, gz, P.stoneDark);
+          }
+          if (radius >= ledge.inner - UNIT * Math.SQRT1_2) for (let gy = floorGy; gy < floorGy + 14; gy++) {
+            grid.set(gx, gy, gz, 0); matrixCaves[grid.index(gx, gy, gz)] = 0;
+          }
+        }
+      } }
+    }
     // Keep the exact columns each authored frustum touches. Ramp apertures join
     // their route reveal; room apertures remove only the fitted lintel band for
     // their own underground level instead of using a rectangular proxy cut.
@@ -1280,6 +1335,11 @@
       for (let gy = Math.max(0, Math.floor((lower - ORIGIN.y) / UNIT)); gy < Math.min(SY, Math.ceil((upper - ORIGIN.y) / UNIT)); gy++) {
         const id = grid.index(gx, gy, gz), prior = windowCuts.get(id), color = prior ? prior.color : data[id];
         if (!color) continue;
+        // A descending ramp window can cross either shelf's height. Its inner
+        // aperture stays untouched; outside the rooms its reveal meets the rock
+        // landing, rather than cutting a hole across the new walking circuit.
+        if (cliffLedges && CLIFF_LEDGES.levels.some(ledge => gy === SURFACE + Math.round(ledge.floor / UNIT) - 1
+          && Math.hypot(cx, cz) >= ledge.inner - UNIT)) continue;
         const y = gy * UNIT + ORIGIN.y;
         let outside = false, whollyInside = true;
         for (const p of planes) {
@@ -1320,7 +1380,8 @@
         const start = span ? window.radius * Math.cos(span / 2) : inner ? marker - (window.kind === "room" ? UNIT * Math.SQRT2 : 0) : frame, end = inner ? frame : 31;
         const half = span ? window.radius * Math.sin(span / 2) : window.width / 2;
         const horizontal = inner ? 0 : span ? Math.tan(span / 2) : window.flare.horizontal / Math.max(UNIT, window.flare.edge - start);
-        const vertical = inner ? 0 : window.flare.vertical / Math.max(UNIT, window.flare.edge - start);
+        const vertical = inner ? 0 : Math.min(window.flare.vertical / Math.max(UNIT, window.flare.edge - start),
+          cliffLedges ? Math.max(0, window.sill - CLIFF_LEDGES.levels[window.basement ? 1 : 0].floor - UNIT) / Math.max(UNIT, end - start) : Infinity);
         // The constant-width inner throat overlaps the room by one voxel diagonal, removing thin strips at the
         // quantized wall edge.
         const planes = [[-sx, 0, -sz, -start], [sx, 0, sz, end], [tx - horizontal * sx, 0, tz - horizontal * sz, half - horizontal * start], [-tx - horizontal * sx, 0, -tz - horizontal * sz, half - horizontal * start], [-vertical * sx, -1, -vertical * sz, -window.sill - vertical * start], [-vertical * sx, 1, -vertical * sz, window.sill + window.height - vertical * start]];
@@ -1833,7 +1894,9 @@
     let masterPathCount = 0, masterHashValue = 2166136261;
     const masterCell = (gx, gz, wx) => {
       const i = gx * PZ + gz, c = (gx >> 1) * SZ + (gz >> 1);
-      if (!land[c]) return;
+      // Shelf-only columns are real collision land, but they must not extend
+      // the original surface spokes down onto a new cliff walking circuit.
+      if (!land[c] || cliffLedges && tops[c] === NONE) return;
       const wz = (gz + 0.5) * PATH_UNIT + ORIGIN.z, r = Math.hypot(wx, wz);
       let path = !!masterPaths[i], headquartersPath = false;
       if (!path && meadow[c] && r >= MASTER_PATH_CENTER) {
@@ -2205,7 +2268,7 @@
     }
     const geometry = yield* gridGeometrySteps(grid, { unit: UNIT, palette: PALETTE, origin: ORIGIN, matrixCaves,
       floorRooms: [...headquartersRooms, ...basement.rooms], cutawayPathKeys, cutawayPathBottoms, cutawayWindowMask: birdseyeWindowMask,
-      cutawayWindowTops: birdseyeWindowTops, cutawayWindowCeilings: birdseyeWindowCeilings }, slice);
+      cutawayWindowTops: birdseyeWindowTops, cutawayWindowCeilings: birdseyeWindowCeilings, mergeBuriedPaths: cliffLedges }, slice);
     let roofOpening = null;
     const roofMouth = roofHole && mouths.find(m => m.id === roofHole.id);
     if (roofMouth) {
@@ -2569,7 +2632,7 @@
     // the worker/IndexedDB boundary. Preserve shared array-buffer views and palette/layout object aliases.
     if (capture) {
       const hole = { ...basementHole }; delete hole.contains;
-      capture({ version: 1, options: { seed, roofHole, nook }, gridData: data,
+      capture({ version: 1, options: { seed, roofHole, nook, ...(cliffLedges ? { cliffLedges: true } : {}) }, gridData: data,
         constants: { UNIT, SX, SY, SZ, PX, PZ, SURFACE, ORIGIN, RADIUS, MEADOW, DEPTH, RING_HALF, PATH_UNIT, PATH_CAPACITY, PATH_LIFT, GATE_Z, PASS_HALF, STAIR_TERRACE, TIMECHAIN, TIMECHAIN_X, TIMECHAIN_Z, POOL_APPROACH, POOL_X, POOL_Z, P, PALETTE, PATH_TILE, UNDER_SPHERE_CENTER, UNDER_SPHERE_RADIUS, HEADQUARTERS_CAVE, HEADQUARTERS_FLOOR, HEADQUARTERS_CEILING, HEADQUARTERS_HEIGHT, HEADQUARTERS_ROCK, HEADQUARTERS_ROOM },
         cavities, lowerCavities, basementCavities, basementCells, basementHeights, basementCollision, rampCells, rampHeights, rampCollision, frontageCells, height, surface, land, meadow, windowColumns, windowSightPlanes, windowSightRefs, headquartersRamps, headquartersRooms, headquartersWindows, headquartersGallery, headquartersBalconies, headquartersFronts, cutawayPaths, birdseyeWindowMask, birdseyeWindowTops, birdseyeWindowCeilings, geometry, roofOpening, rampFaceOffset, rockCaves, rampSight, sightColumnWork, masterList, masterPathCount, masterPathHash, centerlines, mouths, windowFragmentCount,
         basement: { ...basement, hole }, windowFaceCount: windowGeometry.faces.length });
@@ -2585,8 +2648,9 @@
     yield* islandSteps(options, slice, value => { snapshot = value; });
     return snapshot;
   };
-  const islandKey = ({ seed = 1, roofHole = null, nook = null } = {}) => {
+  const islandKey = ({ seed = 1, roofHole = null, nook = null, cliffLedges = false } = {}) => {
     let key = String(seed);
+    if (cliffLedges) key += ":cliff-ledges-v1";
     if (roofHole) key += `:${roofHole.id}:${roofHole.x}:${roofHole.z}:${roofHole.radius}`;
     // Only the fields that shape the cut, so a scene may pass its own richer spec.
     if (nook) key += `:nook:${nook.x}:${nook.z}:${nook.ry}:${nook.floor}:${nook.width}:${nook.depth}:${nook.height}:${nook.entry || 0}`;
@@ -2603,5 +2667,5 @@
     return built;
   };
   const island = (options) => finishBuild(islandSteps(options, null));
-  BL.terrain = { makeGrid, gridGeometry, gridGeometrySteps, compactVertices, compactVerticesSteps, island, islandSteps, islandSnapshotSteps, hasIsland, restoreIslandSnapshot, segmentBoxClear, segmentBoxQueryClear, cutawaySourceFromVox, PALETTE, MAX_HEIGHT, TIMECHAIN, POOL_APPROACH };
+  BL.terrain = { CLIFF_LEDGES, makeGrid, gridGeometry, gridGeometrySteps, compactVertices, compactVerticesSteps, island, islandSteps, islandSnapshotSteps, hasIsland, restoreIslandSnapshot, segmentBoxClear, segmentBoxQueryClear, cutawaySourceFromVox, PALETTE, MAX_HEIGHT, TIMECHAIN, POOL_APPROACH };
 })();

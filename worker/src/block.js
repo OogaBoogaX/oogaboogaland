@@ -13,7 +13,7 @@ const take = (p, key, rate, burst, now) => {
 };
 const sessionId = () => { const bytes = new Uint8Array(8); crypto.getRandomValues(bytes); return Array.from(bytes, n => n.toString(16).padStart(2, "0")).join(""); };
 const random = () => { const v = new Uint32Array(1); crypto.getRandomValues(v); return v[0] / 0x100000000; };
-const fresh = () => ({ wire: W.WIRE, s: sessionId(), phase: "lobby", size: 2, map: 0, next: -1, reg: [], ready: [], seats: [], host: 0, epoch: 0, seed: 0, q: -1, tag: 0, start: 0, win: -1, rev: 0, keeper: 0 });
+const fresh = () => ({ wire: W.WIRE, s: sessionId(), phase: "lobby", size: 2, map: W.FIRST_MAP, next: -1, pick: -1, picker: 0, rule: 0, reg: [], ready: [], seats: [], host: 0, epoch: 0, seed: 0, q: -1, tag: 0, start: 0, win: -1, rev: 0, keeper: 0 });
 // The round's tag in every binary frame, so a frame from an earlier round or host can't be taken for this one.
 const tagOf = s => parseInt(s.slice(0, 8), 16) >>> 0;
 export const block = {
@@ -42,8 +42,11 @@ export const block = {
     const p = room.players.get(id);
     if (p) { p.block = m; p.ws.serializeAttachment(room.attachment(p)); }
   },
+  // The scoring rule chosen counts only while whoever chose it is still first in: it leaves with them, however they
+  // stop being first (leaving, a round's reshuffle of the waiters, or a seat given up mid-round).
+  pickOf(m) { return m.reg.length && m.reg[0] === m.picker ? m.pick : -1; },
   view(m) {
-    return { t: "bf", k: "match", s: m.s, phase: m.phase, size: m.size, map: m.map, reg: m.reg, ready: m.ready, seats: m.seats, host: m.host, epoch: m.epoch, tag: m.tag, seed: m.seed, start: m.start, win: m.win, now: Date.now() };
+    return { t: "bf", k: "match", s: m.s, phase: m.phase, size: m.size, map: m.map, reg: m.reg, ready: m.ready, seats: m.seats, rule: m.phase === "lobby" ? W.ruleFor(block.pickOf(m), m.reg.length) : m.rule, host: m.host, epoch: m.epoch, tag: m.tag, seed: m.seed, start: m.start, win: m.win, now: Date.now() };
   },
   tell(room, m, to = null) {
     if (m) block.save(room, m);
@@ -85,6 +88,8 @@ export const block = {
     m.size = W.sizeFor(m.size, m.reg.length);
     m.seats = W.split(m.reg, m.size, random);
     m.s = sessionId(); m.tag = tagOf(m.s); m.seed = (Math.floor(random() * 0x7ffffffe) + 1);
+    // The scoring rule is fixed as the round is dealt (`blockWire.ruleFor`): every page reads the match's word, never its own.
+    m.rule = W.ruleFor(block.pickOf(m), m.reg.length);
     m.host = 0; block.elect(room, m); m.win = -1;
     if (m.reg.length === 1) block.play(m);
     else { m.phase = "countdown"; m.start = now + W.COUNTDOWN_MS; }
@@ -98,8 +103,8 @@ export const block = {
     const i = m.reg.indexOf(id), seat = W.seatOf(m, id);
     if (i < 0 && seat < 0) return;
     if (i >= 0) { m.reg.splice(i, 1); m.ready.splice(i, 1); }
-    // A first waiter's map leaves with them.
-    if (i === 0) m.next = -1;
+    // A first waiter's map and scoring pick leave with them.
+    if (i === 0) { m.next = -1; m.pick = -1; }
     if (m.phase === "countdown") block.unseat(m);
     else if (seat >= 0 && m.phase === "play") {
       m.seats[seat] = 0;
@@ -179,6 +184,8 @@ export const block = {
     if (msg.k === "unreg") { block.leave(room, p.id); return; }
     if (msg.k === "opt") {
       if (m.reg[0] !== p.id || m.phase === "countdown") return;
+      // The scoring rule they chose, for this lobby or, in a round under way, the next.
+      if (msg.r !== undefined) { m.pick = msg.r; m.picker = p.id; }
       // A round under way keeps its map and size: the first waiter's pick is for the next one.
       if (m.phase === "play") m.next = msg.m;
       else { m.size = msg.n; m.map = msg.m; }

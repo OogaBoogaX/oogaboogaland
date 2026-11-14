@@ -400,6 +400,8 @@
 
     return {
       update,
+      // Put the next off: none for at least `s` s from now, however long it has been due.
+      defer: (s) => { if (wait < s) wait = s; },
       get holding() { return active ? gorilla : null; },
       get active() { return active; },
       dispose: () => { if (active) release(); },

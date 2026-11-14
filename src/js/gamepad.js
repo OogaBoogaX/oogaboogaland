@@ -51,7 +51,7 @@
       native("descend", "Climb down · descend", "", ["down"]), key("actor", "Switch Ooga · gorilla", "", ["lb"], "t"),
       key("resetView", "Reset camera", "", ["rs"], "0"), key("jetpack", "Jetpack on · off", "", ["up"], "j"),
       key("club", "Club", "", ["left"], "1"), key("rifle", "Rifle", "", ["right"], "2"),
-      key("twirl", "Twirl · face north", "", ["rb"], "n"), pause("Let go · back")] },
+      key("twirl", "Twirl · face north", "", ["rb"], "n"), pause("Map · let go · back")] },
     race: { label: "Ooga Rally", note: "", pauseKey: "Escape", entries: [
       stick("move", "Steer · throttle", "", 0), stick("look", "Look round", "", 1),
       key("throttle", "Accelerate", "", ["rt"], "w"), key("brake", "Brake · reverse", "", ["lt"], "s"),
@@ -263,6 +263,9 @@
   // The pad normalized: 18 places' values (a trigger's depth, 1 or 0 for the rest) and the four stick axes.
   const value = new Float32Array(COUNT), axis = new Float32Array(4);
   let plugged = 0, physicalHeld = 0, blocked = 0, holding = false, active = -1, focused = true;
+  // Map (destination-map.js) asks for neutral sticks as it closes: a stick still deflected from the menu moves nothing
+  // until both have been sampled inside the dead zone. A pad's absence is not such a sample, so the requirement waits.
+  let blockedAxes = false;
   let context = "foot", menuOpen = null, capture = null, entryHeld = 0, sentHeld = 0, menuRepeat = 0, menuDir = 0;
   window.addEventListener("gamepadconnected", () => { plugged++; });
   window.addEventListener("gamepaddisconnected", (e) => {
@@ -531,9 +534,10 @@
     if (holding) { blocked = held; neutral(); return; }
     settleContext(fresh);
     held &= ~blocked;
-    let k = scale(state.rawLx, state.rawLy, false);
+    if (blockedAxes && Math.hypot(state.rawLx, state.rawLy) <= feel.dead && Math.hypot(state.rawRx, state.rawRy) <= feel.dead) blockedAxes = false;
+    let k = blockedAxes ? 0 : scale(state.rawLx, state.rawLy, false);
     state.lx = state.rawLx * k; state.ly = -state.rawLy * k;
-    k = scale(state.rawRx, state.rawRy, true);
+    k = blockedAxes ? 0 : scale(state.rawRx, state.rawRy, true);
     state.rx = state.rawRx * k * (feel.invertX ? -1 : 1); state.ry = -state.rawRy * k * (feel.invertY ? -1 : 1);
     if (context === "menus") { state.lx = state.ly = state.rx = state.ry = 0; menuStick(performance.now() / 1000); }
     const pressed = held & ~state.held, released = state.held & ~held;
@@ -552,6 +556,8 @@
     blocked |= physicalHeld;
     neutral();
   };
+  // `requireNeutral()`: publish no stick movement until both sticks have rested inside the dead zone (Map closing).
+  const requireNeutral = () => { blockedAxes = true; state.lx = state.ly = state.rx = state.ry = 0; };
   // A key pressed and let go, as the pad delivers one: what a lost controller presses to pause a game.
   const tap = (spec) => { send("keydown", spec); send("keyup", spec); };
   // `setMenu(fn)`: fn says whether a menu layer is open, which hands the pad to the Menus context.
@@ -625,7 +631,7 @@
   const glyph = (place, family = familyNow()) => NAMES[family][typeof place === "number" ? place : PLACE.indexOf(place)];
 
   BL.gamepad = { BUTTON, PLACE, ACTION, RESERVED, FIXED, CONTEXTS, DEFAULT_BINDINGS, FAMILIES, NAMES, MENU,
-    state, feel, poll, hold, bind, bindings, resetBindings, snapshot, restore, setFeel, setFamily, setContext, setMenu, listen,
+    state, feel, poll, hold, requireNeutral, bind, bindings, resetBindings, snapshot, restore, setFeel, setFamily, setContext, setMenu, listen,
     raw, learn, forget, familyOf, nameOf, profileKey, glyph, subscribe, tap,
     rumble, stop, setStrength, canRumble, get strength() { return strength; },
     get family() { return familyNow(); }, get detectedFamily() { return detected; }, get familyOverride() { return saved.family; },

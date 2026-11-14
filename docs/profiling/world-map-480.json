@@ -1,0 +1,1898 @@
+[
+  {
+    "name": "desktop",
+    "open": true,
+    "bounds": {
+      "left": 160,
+      "top": 12,
+      "right": 1280,
+      "bottom": 801
+    },
+    "viewport": [
+      1440,
+      813
+    ],
+    "overflow": false,
+    "focus": "destination-map-close",
+    "buttons": [
+      {
+        "name": "×",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "Map",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "List",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "All",
+        "height": 44,
+        "width": 49.484375
+      },
+      {
+        "name": "Surface",
+        "height": 44,
+        "width": 80.796875
+      },
+      {
+        "name": "HQ",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "Basement",
+        "height": 44,
+        "width": 88.625
+      },
+      {
+        "name": "1Pile",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "2Lab",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "3Mirror",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "4HQ",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "5Basement",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "6Mempool",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "7LN Factory",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "8Ooga Arcade",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "9B.C.A.",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "10North gate",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "11₿IFRÖST",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "12TC Sphere",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "13Repo Island",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "8. Ooga ArcadeCave entrance",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "1. PileExplore · Last chosen",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "3. MirrorCave entrance",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "4. HQHQ · below ground",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "5. BasementBasement · lower floor",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "10. North gateExplore",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "11. ₿IFRÖSTExplore",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "2. LabCave entrance",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "6. MempoolChamber · beneath the lake",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "7. LN FactoryCave entrance",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "9. B.C.A.Cave entrance",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "12. TC SphereDoorway · choose a room at the keypad",
+        "height": 71.96875,
+        "width": 264
+      },
+      {
+        "name": "13. Repo IslandOpen-source Bitcoin projects",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "Guide me there",
+        "height": 48,
+        "width": 135.578125
+      },
+      {
+        "name": "Choose a zone",
+        "height": 48,
+        "width": 147.578125
+      }
+    ],
+    "contrast": "rgb(217, 194, 140)",
+    "latency": [
+      30.099999997764826,
+      25.800000000745058,
+      23.800000000745058,
+      18.400000002235174,
+      29.100000001490116,
+      30.600000001490116,
+      27.600000001490116,
+      29.399999998509884,
+      30,
+      30.399999998509884
+    ],
+    "preview": {
+      "mode": "CAMERA VIEW · Your Ooga stays where it is.",
+      "action": "View Mempool",
+      "detail": "Chamber · beneath the lake · The chamber beneath the rainforest lake · Bitcoin's waiting transactions. · Camera only. Move, Escape or Return to my Ooga to resume.",
+      "pins": [
+        {
+          "name": "pile",
+          "x": 568.484375,
+          "y": 423,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "lab",
+          "x": 481.234375,
+          "y": 363.28125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "mirror",
+          "x": 550.21875,
+          "y": 363.28125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "underground",
+          "x": 553.03125,
+          "y": 479.078125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "basement",
+          "x": 495.53125,
+          "y": 490.515625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "mempool",
+          "x": 694.171875,
+          "y": 483.53125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "factory",
+          "x": 601.84375,
+          "y": 388.515625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "arcade",
+          "x": 637.46875,
+          "y": 423,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "bca",
+          "x": 466.078125,
+          "y": 412.875,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "gate",
+          "x": 497.0625,
+          "y": 316.609375,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "bifrost",
+          "x": 515.71875,
+          "y": 247.515625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "timechain",
+          "x": 384.875,
+          "y": 475.796875,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "repos",
+          "x": 515.71875,
+          "y": 565.890625,
+          "w": 44,
+          "h": 44
+        }
+      ]
+    },
+    "result": {
+      "open": false,
+      "receipt": "View selected · Mempool. Your Ooga stays in place. Move or Escape to return.",
+      "notice": "",
+      "moved": null
+    },
+    "reduced": {
+      "receipt": "none",
+      "effect": "none"
+    },
+    "touch": null,
+    "logs": []
+  },
+  {
+    "name": "phone",
+    "open": true,
+    "bounds": {
+      "left": 16,
+      "top": 12,
+      "right": 374,
+      "bottom": 832
+    },
+    "viewport": [
+      390,
+      844
+    ],
+    "overflow": false,
+    "focus": "destination-map-close",
+    "buttons": [
+      {
+        "name": "×",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "Map",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "List",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "All",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "Surface",
+        "height": 44,
+        "width": 60.359375
+      },
+      {
+        "name": "HQ",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "Basement",
+        "height": 44,
+        "width": 66.984375
+      },
+      {
+        "name": "1Pile",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "2Lab",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "3Mirror",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "4HQ",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "5Basement",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "6Mempool",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "7LN Factory",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "8Ooga Arcade",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "9B.C.A.",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "10North gate",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "11₿IFRÖST",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "12TC Sphere",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "13Repo Island",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "8. Ooga ArcadeCave entrance",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "1. PileExplore · Last chosen",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "3. MirrorCave entrance",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "4. HQHQ · below ground",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "5. BasementBasement · lower floor",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "10. North gateExplore",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "11. ₿IFRÖSTExplore",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "2. LabCave entrance",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "6. MempoolChamber · beneath the lake",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "7. LN FactoryCave entrance",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "9. B.C.A.Cave entrance",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "12. TC SphereDoorway · choose a room at the keypad",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "13. Repo IslandOpen-source Bitcoin projects",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "Guide me there",
+        "height": 48,
+        "width": 158
+      },
+      {
+        "name": "Choose a zone",
+        "height": 48,
+        "width": 170
+      }
+    ],
+    "contrast": "rgb(217, 194, 140)",
+    "latency": [
+      29.5,
+      18.899999998509884,
+      29.799999997019768,
+      27.900000002235174,
+      21.5,
+      22,
+      27.800000000745058,
+      30.199999999254942,
+      21.299999997019768,
+      29.300000000745058
+    ],
+    "preview": {
+      "mode": "CAMERA VIEW · Your Ooga stays where it is.",
+      "action": "View Mempool",
+      "detail": "Chamber · beneath the lake · The chamber beneath the rainforest lake · Bitcoin's waiting transactions. · Camera only. Move, Escape or Return to my Ooga to resume.",
+      "pins": [
+        {
+          "name": "pile",
+          "x": 206.171875,
+          "y": 352.21875,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "lab",
+          "x": 109.28125,
+          "y": 321.625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "mirror",
+          "x": 160.953125,
+          "y": 297.265625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "underground",
+          "x": 190.703125,
+          "y": 399.140625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "basement",
+          "x": 133.15625,
+          "y": 410.5625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "mempool",
+          "x": 244.875,
+          "y": 383.234375,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "factory",
+          "x": 221.34375,
+          "y": 297.265625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "arcade",
+          "x": 294.34375,
+          "y": 352.21875,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "bca",
+          "x": 85.40625,
+          "y": 371.84375,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "gate",
+          "x": 116.03125,
+          "y": 269.96875,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "bifrost",
+          "x": 163.46875,
+          "y": 243.15625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "timechain",
+          "x": 86.28125,
+          "y": 432,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "repos",
+          "x": 172.03125,
+          "y": 444.078125,
+          "w": 44,
+          "h": 44
+        }
+      ]
+    },
+    "result": {
+      "open": false,
+      "receipt": "View selected · Mempool. Your Ooga stays in place. Move or Escape to return.",
+      "notice": "",
+      "moved": null
+    },
+    "reduced": {
+      "receipt": "none",
+      "effect": "none"
+    },
+    "touch": true,
+    "logs": []
+  },
+  {
+    "name": "narrow",
+    "open": true,
+    "bounds": {
+      "left": 16,
+      "top": 12,
+      "right": 304,
+      "bottom": 628
+    },
+    "viewport": [
+      320,
+      640
+    ],
+    "overflow": false,
+    "focus": "destination-map-close",
+    "buttons": [
+      {
+        "name": "×",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "Map",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "List",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "All",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "Surface",
+        "height": 44,
+        "width": 60.359375
+      },
+      {
+        "name": "HQ",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "Basement",
+        "height": 44,
+        "width": 66.984375
+      },
+      {
+        "name": "1Pile",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "2Lab",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "3Mirror",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "4HQ",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "5Basement",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "6Mempool",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "7LN Factory",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "8Ooga Arcade",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "9B.C.A.",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "10North gate",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "11₿IFRÖST",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "12TC Sphere",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "13Repo Island",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "8. Ooga ArcadeCave entrance",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "1. PileExplore · Last chosen",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "3. MirrorCave entrance",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "4. HQHQ · below ground",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "5. BasementBasement · lower floor",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "10. North gateExplore",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "11. ₿IFRÖSTExplore",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "2. LabCave entrance",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "6. MempoolChamber · beneath the lake",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "7. LN FactoryCave entrance",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "9. B.C.A.Cave entrance",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "12. TC SphereDoorway · choose a room at the keypad",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "13. Repo IslandOpen-source Bitcoin projects",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "Guide me there",
+        "height": 65.1875,
+        "width": 123
+      },
+      {
+        "name": "Choose a zone",
+        "height": 65.1875,
+        "width": 135
+      }
+    ],
+    "contrast": "rgb(217, 194, 140)",
+    "latency": [
+      20.800000000745058,
+      30.199999999254942,
+      28.400000002235174,
+      20.899999998509884,
+      29.399999998509884,
+      28.800000000745058,
+      20.099999997764826,
+      31.300000000745058,
+      27.800000000745058,
+      20.899999998509884
+    ],
+    "preview": {
+      "mode": "CAMERA VIEW · Your Ooga stays where it is.",
+      "action": "View Mempool",
+      "detail": "Chamber · beneath the lake · The chamber beneath the rainforest lake · Bitcoin's waiting transactions. · Camera only. Move, Escape or Return to my Ooga to resume.",
+      "pins": [
+        {
+          "name": "pile",
+          "x": 175.328125,
+          "y": 149.953125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "lab",
+          "x": 84.203125,
+          "y": 115.78125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "mirror",
+          "x": 136.46875,
+          "y": 99.5,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "underground",
+          "x": 142.734375,
+          "y": 206.25,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "basement",
+          "x": 85.203125,
+          "y": 194.828125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "mempool",
+          "x": 221.015625,
+          "y": 174.390625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "factory",
+          "x": 176.96875,
+          "y": 69.140625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "arcade",
+          "x": 223.578125,
+          "y": 119.703125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "bca",
+          "x": 49.609375,
+          "y": 156.21875,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "gate",
+          "x": 66.53125,
+          "y": 69.140625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "bifrost",
+          "x": 244,
+          "y": 69.140625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "timechain",
+          "x": 32.34375,
+          "y": 208.546875,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "repos",
+          "x": 195.703125,
+          "y": 237.546875,
+          "w": 44,
+          "h": 44
+        }
+      ]
+    },
+    "result": {
+      "open": false,
+      "receipt": "View selected · Mempool. Your Ooga stays in place. Move or Escape to return.",
+      "notice": "",
+      "moved": null
+    },
+    "reduced": {
+      "receipt": "none",
+      "effect": "none"
+    },
+    "touch": true,
+    "logs": []
+  },
+  {
+    "name": "zoom-equivalent",
+    "open": true,
+    "bounds": {
+      "left": 16,
+      "top": 12,
+      "right": 704,
+      "bottom": 351
+    },
+    "viewport": [
+      720,
+      363
+    ],
+    "overflow": false,
+    "focus": "destination-map-close",
+    "buttons": [
+      {
+        "name": "×",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "Map",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "List",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "All",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "Surface",
+        "height": 44,
+        "width": 60.359375
+      },
+      {
+        "name": "HQ",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "Basement",
+        "height": 44,
+        "width": 66.984375
+      },
+      {
+        "name": "1Pile",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "2Lab",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "3Mirror",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "4HQ",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "5Basement",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "6Mempool",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "7LN Factory",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "8Ooga Arcade",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "9B.C.A.",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "10North gate",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "11₿IFRÖST",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "12TC Sphere",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "13Repo Island",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "8. Ooga ArcadeCave entrance",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "1. PileExplore · Last chosen",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "3. MirrorCave entrance",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "4. HQHQ · below ground",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "5. BasementBasement · lower floor",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "10. North gateExplore",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "11. ₿IFRÖSTExplore",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "2. LabCave entrance",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "6. MempoolChamber · beneath the lake",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "7. LN FactoryCave entrance",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "9. B.C.A.Cave entrance",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "12. TC SphereDoorway · choose a room at the keypad",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "13. Repo IslandOpen-source Bitcoin projects",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "Guide me there",
+        "height": 48,
+        "width": 323
+      },
+      {
+        "name": "Choose a zone",
+        "height": 48,
+        "width": 335
+      }
+    ],
+    "contrast": "rgb(217, 194, 140)",
+    "latency": [
+      20.199999999254942,
+      30.799999997019768,
+      17.5,
+      28.600000001490116,
+      23.099999997764826,
+      28,
+      31.599999997764826,
+      30.5,
+      27,
+      22.900000002235174
+    ],
+    "preview": {
+      "mode": "CAMERA VIEW · Your Ooga stays where it is.",
+      "action": "View Mempool",
+      "detail": "Chamber · beneath the lake · The chamber beneath the rainforest lake · Bitcoin's waiting transactions. · Camera only. Move, Escape or Return to my Ooga to resume.",
+      "pins": [
+        {
+          "name": "pile",
+          "x": 244.9375,
+          "y": -112.265625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "lab",
+          "x": 145.34375,
+          "y": -140.9375,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "mirror",
+          "x": 190.140625,
+          "y": -161.125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "underground",
+          "x": 229.46875,
+          "y": -62.75,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "basement",
+          "x": 171.9375,
+          "y": -51.328125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "mempool",
+          "x": 308.03125,
+          "y": -72.953125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "factory",
+          "x": 230.9375,
+          "y": -187.390625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "arcade",
+          "x": 292.9375,
+          "y": -168.21875,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "bca",
+          "x": 133.125,
+          "y": -85.90625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "gate",
+          "x": 143.359375,
+          "y": -189.421875,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "bifrost",
+          "x": 192.140625,
+          "y": -226.203125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "timechain",
+          "x": 97.046875,
+          "y": -53.609375,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "repos",
+          "x": 216.53125,
+          "y": -9.390625,
+          "w": 44,
+          "h": 44
+        }
+      ]
+    },
+    "result": {
+      "open": false,
+      "receipt": "View selected · Mempool. Your Ooga stays in place. Move or Escape to return.",
+      "notice": "",
+      "moved": null
+    },
+    "reduced": {
+      "receipt": "none",
+      "effect": "none"
+    },
+    "touch": null,
+    "logs": []
+  },
+  {
+    "name": "gorilla",
+    "open": true,
+    "bounds": {
+      "left": 160,
+      "top": 12,
+      "right": 1280,
+      "bottom": 801
+    },
+    "viewport": [
+      1440,
+      813
+    ],
+    "overflow": false,
+    "focus": "destination-map-close",
+    "buttons": [
+      {
+        "name": "×",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "Map",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "List",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "All",
+        "height": 44,
+        "width": 49.484375
+      },
+      {
+        "name": "Surface",
+        "height": 44,
+        "width": 80.796875
+      },
+      {
+        "name": "HQ",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "Basement",
+        "height": 44,
+        "width": 88.625
+      },
+      {
+        "name": "1Pile",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "2Lab",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "3Mirror",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "4HQ",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "5Basement",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "6Mempool",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "7LN Factory",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "8Ooga Arcade",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "9B.C.A.",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "10North gate",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "11₿IFRÖST",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "12TC Sphere",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "13Repo Island",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "8. Ooga ArcadeCave entrance",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "1. PileExplore · Last chosen",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "3. MirrorCave entrance",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "4. HQHQ · below ground",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "5. BasementBasement · lower floor",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "10. North gateExplore",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "11. ₿IFRÖSTExplore",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "2. LabCave entrance",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "6. MempoolChamber · beneath the lake",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "7. LN FactoryCave entrance",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "9. B.C.A.Cave entrance",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "12. TC SphereDoorway · choose a room at the keypad",
+        "height": 71.96875,
+        "width": 264
+      },
+      {
+        "name": "13. Repo IslandOpen-source Bitcoin projects",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "Guide me there",
+        "height": 48,
+        "width": 135.578125
+      },
+      {
+        "name": "Choose a zone",
+        "height": 48,
+        "width": 147.578125
+      }
+    ],
+    "contrast": "rgb(217, 194, 140)",
+    "latency": [
+      30.599999997764826,
+      25.599999997764826,
+      26.400000002235174,
+      25.099999997764826,
+      38,
+      30.399999998509884,
+      26.300000000745058,
+      34.5,
+      24.600000001490116,
+      27.599999997764826
+    ],
+    "preview": {
+      "mode": "GORILLA WARP · Choose a zone, preview, then warp.",
+      "action": "Warp to Lab",
+      "detail": "Cave entrance · EntropyLab's contributors at work. · Heading and equipment stay. Landing must be clear.",
+      "pins": [
+        {
+          "name": "pile",
+          "x": 568.484375,
+          "y": 423,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "lab",
+          "x": 481.234375,
+          "y": 363.28125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "mirror",
+          "x": 550.21875,
+          "y": 363.28125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "underground",
+          "x": 525.8125,
+          "y": 466.15625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "basement",
+          "x": 478.40625,
+          "y": 479.078125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "mempool",
+          "x": 694.171875,
+          "y": 483.53125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "factory",
+          "x": 601.84375,
+          "y": 388.515625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "arcade",
+          "x": 637.46875,
+          "y": 423,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "bca",
+          "x": 455.984375,
+          "y": 414.890625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "gate",
+          "x": 497.0625,
+          "y": 316.609375,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "bifrost",
+          "x": 515.71875,
+          "y": 247.515625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "timechain",
+          "x": 384.875,
+          "y": 475.796875,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "repos",
+          "x": 515.71875,
+          "y": 565.890625,
+          "w": 44,
+          "h": 44
+        }
+      ]
+    },
+    "result": {
+      "open": false,
+      "receipt": "Warp complete · Lab. Heading and equipment kept.",
+      "notice": "",
+      "moved": 14.038075069159548
+    },
+    "reduced": {
+      "receipt": "none",
+      "effect": "none"
+    },
+    "touch": null,
+    "logs": []
+  },
+  {
+    "name": "dsb",
+    "open": true,
+    "bounds": {
+      "left": 160,
+      "top": 12,
+      "right": 1280,
+      "bottom": 801
+    },
+    "viewport": [
+      1440,
+      813
+    ],
+    "overflow": false,
+    "focus": "destination-map-close",
+    "buttons": [
+      {
+        "name": "×",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "Map",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "List",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "All",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "Surface",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "HQ",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "Basement",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "1Overview",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "2Portara",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "3Chora",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "4Harbor",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "5Beach",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "6Ruins",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "7Sacred Way",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "8Waterfalls",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "9Pool",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "10Windmills",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "11Lower town",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "12Central town",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "13Upper town",
+        "height": 44,
+        "width": 44
+      },
+      {
+        "name": "1. OverviewViewpoint · Last chosen",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "2. PortaraViewpoint",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "3. ChoraViewpoint",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "4. HarborViewpoint",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "5. BeachViewpoint",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "6. RuinsViewpoint",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "7. Sacred WayViewpoint",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "8. WaterfallsViewpoint",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "9. PoolViewpoint",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "10. WindmillsViewpoint",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "11. Lower townViewpoint",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "12. Central townViewpoint",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "13. Upper townViewpoint",
+        "height": 56.578125,
+        "width": 264
+      },
+      {
+        "name": "Guide me there",
+        "height": 0,
+        "width": 0
+      },
+      {
+        "name": "Choose a zone",
+        "height": 48,
+        "width": 147.578125
+      }
+    ],
+    "contrast": "rgb(217, 194, 140)",
+    "latency": [
+      29.800000000745058,
+      21.199999999254942,
+      22,
+      30.5,
+      30.199999999254942,
+      30.800000000745058,
+      30.5,
+      31,
+      30.800000000745058,
+      31.100000001490116
+    ],
+    "preview": {
+      "mode": "CAMERA VIEW · Your Ooga stays where it is.",
+      "action": "View Harbor",
+      "detail": "Look around this part of DSB Land. · Camera only. Move, Escape or Return to my Ooga to resume.",
+      "pins": [
+        {
+          "name": "overview",
+          "x": 558.21875,
+          "y": 401.46875,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "portara",
+          "x": 489.765625,
+          "y": 269.046875,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "coastal-chora",
+          "x": 637.15625,
+          "y": 528.25,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "coastal-harbor",
+          "x": 425.71875,
+          "y": 505.703125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "coastal-beach",
+          "x": 631.515625,
+          "y": 590.234375,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "coastal-ruins",
+          "x": 775.296875,
+          "y": 426.8125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "coastal-trail",
+          "x": 513.109375,
+          "y": 429.640625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "water-falls",
+          "x": 459.546875,
+          "y": 359.203125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "water-pool",
+          "x": 437,
+          "y": 404.28125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "vac-windmills",
+          "x": 536.671875,
+          "y": 229.59375,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "vac-lower",
+          "x": 701.203125,
+          "y": 539.515625,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "vac-central",
+          "x": 634.34375,
+          "y": 457.8125,
+          "w": 44,
+          "h": 44
+        },
+        {
+          "name": "vac-upper",
+          "x": 597.6875,
+          "y": 373.28125,
+          "w": 44,
+          "h": 44
+        }
+      ]
+    },
+    "result": {
+      "open": false,
+      "receipt": "View selected · Harbor. Your Ooga stays in place. Move or Escape to return.",
+      "notice": "",
+      "moved": 0
+    },
+    "reduced": {
+      "receipt": "none",
+      "effect": "none"
+    },
+    "touch": null,
+    "logs": []
+  }
+]

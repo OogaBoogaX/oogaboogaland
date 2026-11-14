@@ -37,7 +37,7 @@
     list.unshift(handle);
     if (list.length > RECENT_HANDLES) list.length = RECENT_HANDLES;
   };
-  const defaults = () => ({ handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, cloudHopper: { unlocked: 1, last: 0, players: [] }, block: { wins: 0, games: 0, best: 0 }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, machines: {}, tickets: 0, prizes: [] } });
+  const defaults = () => ({ handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, cloudHopper: { unlocked: 1, last: 0, players: [] }, block: { wins: 0, games: 0, best: 0, mined: 0, home: 0, splats: 0, splatted: 0, mvps: 0 }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, machines: {}, tickets: 0, prizes: [] } });
   // Ooga Arcade's carnival bests, each capped past the most its game can score (nine doubled 100s; the round games
   // run on), the retro cabinets' bests (`retro-games.js`, capped past any run), the ticket balance, and the prizes
   // (`ARCADE_PRIZES` ids) redeemed at the counter.
@@ -106,10 +106,14 @@
       if (d && Number.isFinite(d.score) && d.score >= 0 && d.score < 1e6 && Number.isFinite(d.rings) && d.rings >= 0 && Number.isFinite(d.ringTotal) && d.ringTotal >= d.rings && d.ringTotal <= 99 && LANDINGS.includes(d.landing)) {
         state.drop.best = { score: Math.floor(d.score), rings: Math.floor(d.rings), ringTotal: Math.floor(d.ringTotal), landing: d.landing };
       }
-      // Block Frenzy: rounds played and won, and the fastest win in milliseconds (0 until one is won).
+      // Block Frenzy: rounds played and won, the fastest win in milliseconds (0 until one is won), and the visitor's own
+      // running tally over every finished round: blocks mined, blocks brought home, splats landed, times splatted and
+      // rounds as the most valuable Ooga. A save from before the tally keeps its rounds and best and starts the rest at 0;
+      // a count that isn't a sane number starts at 0 by itself.
       const b = parsed.block;
       if (b && Number.isFinite(b.games) && b.games >= 0 && b.games < 1e7 && Number.isFinite(b.wins) && b.wins >= 0 && b.wins <= b.games && Number.isFinite(b.best) && b.best >= 0 && b.best < 864e5) {
-        state.block = { wins: Math.floor(b.wins), games: Math.floor(b.games), best: Math.floor(b.best) };
+        const count = (v) => Number.isFinite(v) && v >= 0 && v < 1e9 ? Math.floor(v) : 0;
+        state.block = { wins: Math.floor(b.wins), games: Math.floor(b.games), best: Math.floor(b.best), mined: count(b.mined), home: count(b.home), splats: count(b.splats), splatted: count(b.splatted), mvps: Math.min(count(b.mvps), Math.floor(b.games)) };
       }
       const o = parsed.orbit;
       if (o && o.best && Number.isFinite(o.best.score) && o.best.score >= 0 && o.best.score < 1e6 && typeof o.best.orbit === "boolean" && ORBIT_LANDINGS.includes(o.best.landing)) {
@@ -251,10 +255,13 @@
       save(state);
       return true;
     };
-    // A finished Block Frenzy round: every one counts, a win counts as a win, and the fastest win is the best.
-    const recordBlock = ({ won, ms }) => {
-      const b = state.block;
+    // A finished Block Frenzy round: every one counts, a win counts as a win, the fastest win is the best, and the
+    // visitor's own counts in it join their running tally. This browser's only: nothing is sent anywhere.
+    const recordBlock = ({ won, ms, mined = 0, home = 0, splats = 0, splatted = 0, mvp = false }) => {
+      const b = state.block, add = (v) => Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
       b.games++;
+      b.mined += add(mined); b.home += add(home); b.splats += add(splats); b.splatted += add(splatted);
+      if (mvp) b.mvps++;
       const best = won && ms > 0 && (b.best === 0 || ms < b.best);
       if (won) b.wins++;
       if (best) b.best = Math.floor(ms);

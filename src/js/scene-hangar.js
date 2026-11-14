@@ -112,6 +112,12 @@
   // `NEON_STUTTER` seconds one stutters, dipping twice as a tired tube does; the light at the tunnel's mouth follows
   // its first strip (`MOUTH_LIGHT`), at `MOUTH_LEVEL` of the tint.
   const NEON_GLOW = 0.8, NEON_STUTTER = [6, 14], MOUTH_LIGHT = HM.TINTS.mouth, MOUTH_LEVEL = 0.7, MOUTH_SLOT = 6;
+  // The emergency lights while the hall's power seems out (`hangar-network.js`), in the fixed lights' slots of the work
+  // lights at the booth and over the desks: [slot, r, g, b] each, at full.
+  const EMERGENCY_LIGHTS = [8, 0.5, 0.07, 0.03, 9, 0.55, 0.2, 0.04];
+  // The hall's own light while the network stands in the dark: its sky, ground and haze turned to the network's blue,
+  // and lifted by `lift` of itself.
+  const CAST = { sky: [0.3, 0.42, 0.85], ground: [0.1, 0.16, 0.38], fog: [0.03, 0.06, 0.16], lift: 0.7 };
   // The floor lamps breathe a little, each at its own pace, and every `LAMP_STUTTER` seconds one stutters, failing four
   // times in half a second (`LAMP_FAILS`, from and to, s, at `LAMP_DIM` of its light); and every `RABBIT` seconds a
   // pulse runs down the runway's marker lamps toward the launch tunnel at `RABBIT_SPEED` m/s, each brightening by up to
@@ -235,6 +241,13 @@
   const roomBody = (rec) => {
     if (!nearHit && rec.body && rec.zone === hangarScene.voiceZone && nearTest(rec.x, rec.z, rec.y, BODY.height, BODY.radius)) nearHit = true;
   };
+  // Whether nothing that walks the hall (as `nearJet` counts them) stands within `r` of (x, z); `CLEAR` its question.
+  const CLEAR = { x: 0, z: 0, r: 0 };
+  const clearTest = (x, z) => Math.hypot(x - CLEAR.x, z - CLEAR.z) < CLEAR.r;
+  const clearOf = (x, z, r) => {
+    CLEAR.x = x; CLEAR.z = z; CLEAR.r = r;
+    return !nearJet(clearTest);
+  };
   const nearJet = (test) => {
     const d = people && people.player, others = remotes ? remotes.actors() : NO_ACTORS, sis = scene.sis.actor;
     if (d && test(d.root.position.x, d.root.position.z, d.root.position.y - d.baseY, BODY.height, d.bodyRadius || BODY.radius)) return true;
@@ -253,10 +266,10 @@
   const COMMAND_DOOR = { reach: 3.6, ease: 6, swing: Math.PI * 0.48 };
   const atCommandDoor = (x, z, feet) => feet < 1 && Math.hypot(x - HM.COMMAND.doorX, z - HM.COMMAND.front) < COMMAND_DOOR.reach;
   // The control room's warning beacon: dim at rest, flashing `rate` times a second while one of the crew is out of their
-  // room (a worker's meltdown).
-  const BEACON = { idle: 0.12, rate: 2.2 };
+  // room (a worker's meltdown), and lit steady as an emergency light while the hall's power seems out (`emergency`).
+  const BEACON = { idle: 0.12, rate: 2.2, emergency: 0.9 };
   const beaconLife = (s, elapsed) => {
-    s.commandBeacon.glow = s.meltdown.active ? (Math.sin(elapsed * BEACON.rate * Math.PI * 2) > 0 ? 1.4 : 0.15) * s.anomaly.dim : BEACON.idle;
+    s.commandBeacon.glow = s.meltdown.active ? (Math.sin(elapsed * BEACON.rate * Math.PI * 2) > 0 ? 1.4 : 0.15) * s.anomaly.dim : Math.max(BEACON.idle, BEACON.emergency * s.network.env.emergency);
   };
   const commandDoorLife = (s, dt) => {
     const want = !HM.COMMAND.locked && nearJet(atCommandDoor) ? 1 : 0;
@@ -391,8 +404,46 @@
     // A switch the director refuses (another under way) leaves the Ooga in the hangar.
     if (!leaving) { world.hangarCrossing = null; w.through = w.grab = false; }
   };
+  // The network's life (`hangar-network.js`), a first draft on a debug page alone. With `network=a` or `b` it plays
+  // when the visitor's own Ooga walks up to the faint shape: on foot, within 4.5 m, having come 3 m nearer since it
+  // formed, while it shows or in its afterimage's first 8 s, once a showing (every time, for now); round the middle
+  // between the Ooga and the shape. The shape steadies a moment as it never otherwise does, then breaks up as the
+  // hall's power falters and goes (only clearing away, if it had already started to dissolve). While it plays and
+  // `T.quiet` s after, the hall's other events wait, Kortik's Sis is hushed, and the next engine anomaly and meltdown
+  // are put off `NET_DEFER` s more (drawn each time) past that, so none comes the moment it ends.
+  const NET_AUTO = DEBUG && (params.get("network") === "a" || params.get("network") === "b");
+  const NT = BL.hangarNetwork.T, NET_DEFER = [10, 40];
+  const playNetwork = (s, anywhere) => {
+    const me = people && people.player, sh = s.shimmer;
+    if (s.network.active) return;
+    const at = me ? me.root.position : pilot.orbit.target;
+    const x = sh.state === "show" && !anywhere ? (at.x + sh.at.x) / 2 : at.x, z = sh.state === "show" && !anywhere ? (at.z + sh.at.z) / 2 : at.z;
+    if (sh.state === "show") sh.cohere(NT.cohere, NT.hold, NT.dissolve);
+    s.network.play(x, z);
+    if (audio) audio.outage(s.network.cues());
+    s.netDefer = between(NET_DEFER);
+  };
+  const netLife = (s, dt, elapsed) => {
+    const sh = s.shimmer, me = people && people.player, N = s.network;
+    if (NET_AUTO && !N.active && sh.state === "show" && me && !me.camp.seat) {
+      const p = me.root.position, d = Math.hypot(p.x - sh.at.x, p.z - sh.at.z);
+      if (sh.shows !== s.netShow) { s.netShow = sh.shows; s.netFrom = d; s.netUsed = false; }
+      if (!s.netUsed && d < 4.5 && s.netFrom - d >= 3 && sh.t < sh.at.gone + 8) { s.netUsed = true; playNetwork(s, false); }
+    }
+    N.update(dt, elapsed);
+    if (N.quiet) { s.anomaly.defer(s.netDefer); s.meltdown.defer(s.netDefer); }
+    if (audio) audio.strain(N.env.hum, N.env.sag);
+  };
   const onKey = (e) => {
     if (scene && scene.keypad.onKey(e)) return true;
+    // On a debug page, Shift+N plays the network round the visitor, Shift+Y swaps its density and Shift+U its haze.
+    if (DEBUG && scene && e.shiftKey && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && (e.code === "KeyN" || e.code === "KeyY" || e.code === "KeyU")) {
+      if (e.code === "KeyY") { scene.network.density = scene.network.density === "a" ? "b" : "a"; hud.toast(`Network · density ${scene.network.density === "a" ? "A" : "B (denser)"}`); }
+      else if (e.code === "KeyU") { scene.network.fog = !scene.network.fog; hud.toast(`Network · haze ${scene.network.fog ? "pulled in" : "as the hall's"}`); }
+      else playNetwork(scene, true);
+      e.preventDefault();
+      return true;
+    }
     if (BL.controls.matches(e, "resetView") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) return pilot.resetCamera();
     if (BL.controls.matches(e, "horn") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && scene && honk(scene.forklift, people && people.player, false)) return true;
     if (BL.controls.matches(e, "view") && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) {
@@ -880,8 +931,9 @@
     }
   };
   // The lamps' life: the floor lamps breathing and one now and then stuttering; the runway's rabbit, or the one an
-  // anomaly runs the wrong way (its `rabbit`, where its front is); all as dim as an anomaly has the hall's lights (`dim`).
-  const lampLife = (s, dt, elapsed, dim) => {
+  // anomaly runs the wrong way (its `rabbit`, where its front is); the lamps as dim as the hall's lights (`dim`), the
+  // markers as their own (`marks`), and steady, without the rabbit, by `steady` (0 to 1) as emergency lights.
+  const lampLife = (s, dt, elapsed, dim, marks, steady) => {
     if ((s.lampWait -= dt) <= 0) {
       s.lampWait = LAMP_STUTTER[0] + Math.random() * (LAMP_STUTTER[1] - LAMP_STUTTER[0]);
       s.lampOut = Math.floor(Math.random() * s.lamps.length);
@@ -898,7 +950,7 @@
     const back = s.anomaly.rabbit, front = back !== null ? back : LAYOUT.runway.z0 - (elapsed - s.rabbitAt) * RABBIT_SPEED;
     for (let i = 0; i < s.markers.length; i++) {
       const d = (s.markers[i].position.z - front) / RABBIT_WIDTH;
-      s.markers[i].glow = (1 + RABBIT_GLOW * Math.exp(-d * d)) * dim;
+      s.markers[i].glow = (1 + RABBIT_GLOW * Math.exp(-d * d) * (1 - steady)) * marks;
     }
   };
   // The lofts' life (`LOFT_LIFE`): what each one's crew member does next, where it stands and which way it and its head
@@ -907,7 +959,7 @@
   // easing `FAN_EASE` a second.
   const FAN_EASE = 0.5;
   const fanLife = (s, dt) => {
-    s.fanSpeed += ((s.anomaly.powered ? HM.FAN.rate * Math.PI * 2 : 0) - s.fanSpeed) * Math.min(1, dt * FAN_EASE);
+    s.fanSpeed += ((s.anomaly.powered && !s.network.out ? HM.FAN.rate * Math.PI * 2 : 0) - s.fanSpeed) * Math.min(1, dt * FAN_EASE);
     s.fan.rotation.x = (s.fan.rotation.x + s.fanSpeed * dt) % (Math.PI * 2);
   };
   const loftLife = (s, dt, elapsed, dim) => {
@@ -996,7 +1048,7 @@
   // The hangar for a visit: the hall and everything standing in it from the cached builds, the signs, the boards, the
   // Jet at its dock, the door back to the hall with its shield, the launch shield and space past it.
   const build = () => {
-    const L = LAYOUT, s = { crew: [], dimmed: 1, ambient: 1 }, shell = HM.shell(), runway = HM.runway(), tunnel = HM.tunnel(), fixtures = HM.fixtures(), frames = HM.boardFrames();
+    const L = LAYOUT, s = { crew: [], dimmed: 1, ambient: 1, emergency: 0, cast: 0 }, shell = HM.shell(), runway = HM.runway(), tunnel = HM.tunnel(), fixtures = HM.fixtures(), frames = HM.boardFrames();
     // The fixtures' glass and the vault's light slots, which an anomaly dims with the hall's lights.
     s.glass = [createNode({ geometry: fixtures.glow, sightHidden: true }), createNode({ geometry: fixtures.glass, sightHidden: true }), createNode({ geometry: shell.slots, sightHidden: true })];
     addChild(root, createNode({ geometry: shell.floor, depthBias: SHELL_BIAS }), createNode({ geometry: shell.walls, depthBias: SHELL_BIAS }), createNode({ geometry: shell.front, depthBias: SHELL_BIAS }),
@@ -1162,7 +1214,7 @@
       addChild(work.crate, crateTrim, work.sling, work.slack);
       if (work.spot) addChild(root, work.spot);
       s.glass.push(work.crate, crateTrim);
-      s.crane = BL.hangarCrane.create({ C, nodes: work, root, powered: () => s.anomaly.powered, under: underLoad, cue: (name, x, y, z) => audio && audio.craneCue(name, x, y, z) });
+      s.crane = BL.hangarCrane.create({ C, nodes: work, root, powered: () => s.anomaly.powered && !s.network.out, under: underLoad, cue: (name, x, y, z) => audio && audio.craneCue(name, x, y, z) });
       s.farCrane = crane(C.far, g.farTrolley);
     }
     // The forklift, parked on the runway by the steps.
@@ -1170,8 +1222,8 @@
     addChild(root, s.forklift.root);
     // The boards on the left wall: each a glass in its frame with its face built on it and the Jet flying across it,
     // its lettering painted over it from the reading (`paintBoards`); the stats board's fifth tile shows the stars, or
-    // a flag while the repository has a milestone open. Each has its picture for the board dialog too, with a link out
-    // to the repository.
+    // a flag while the repository has a milestone open. Their lit frames, faces and streaks dim with the glass. Each has
+    // its picture for the board dialog too, with a link out to the repository.
     s.boards = {};
     s.flyers = [];
     s.boardText = {};
@@ -1179,11 +1231,13 @@
     const faces = { stats: HM.statsFace(), timeline: HM.timelineFace() };
     for (const [key, b] of Object.entries(L.boards)) {
       const n = createNode({ position: { x: b.x, y: b.y, z: b.z }, rotation: { x: 0, y: b.turn, z: 0 }, scale: { x: b.scale, y: b.scale, z: b.scale }, geometry: frames[key].flat });
-      addChild(n, createNode({ geometry: frames[key].glow, sightHidden: true }), createNode({ geometry: faces[key].flat }), createNode({ geometry: faces[key].glow, sightHidden: true }));
+      const frameGlow = createNode({ geometry: frames[key].glow, sightHidden: true }), faceGlow = createNode({ geometry: faces[key].glow, sightHidden: true });
+      addChild(n, frameGlow, createNode({ geometry: faces[key].flat }), faceGlow);
+      s.glass.push(frameGlow, faceGlow);
       HM.JETS[key].forEach((spot, i) => {
         const flight = miniJet(spot);
         addChild(n, flight);
-        if (i === 0) addChild(flight, createNode({ geometry: HM.jetStreaks()[key], sightHidden: true }));
+        if (i === 0) { const streak = createNode({ geometry: HM.jetStreaks()[key], sightHidden: true }); addChild(flight, streak); s.glass.push(streak); }
         if (JET_STYLE[key] && JET_STYLE[key].spot === i) s.flyers.push(flyer(n, flight, spot, JET_STYLE[key]));
       });
       addChild(root, n);
@@ -1195,6 +1249,7 @@
     s.statsStars = createNode({ geometry: faces.stats.stars, sightHidden: true });
     s.statsFlag = createNode({ geometry: faces.stats.flag, sightHidden: true, visible: false });
     addChild(s.boards.stats, s.statsStars, s.statsFlag);
+    s.glass.push(s.statsStars, s.statsFlag);
     // The arch round the launch tunnel's mouth with the hangar's plaque across its top (`HM.arch`): its lights dimmed
     // with the glass, its small parts and the plaque's face sorted nearer on Canvas 2D.
     const archParts = HM.arch(), archGlow = createNode({ geometry: archParts.glow, sightHidden: true }), plaque = archParts.picture;
@@ -1558,7 +1613,8 @@
       onTap: (hit) => {
         if (!hit) return;
         const o = hit.owner;
-        if (o.kind === "tess") return scene.guide.tap();
+        // A tap on Tess while she watches the faint shape: she leaves it be and answers as she would at work.
+        if (o.kind === "tess") { if (scene.tessFor === "shimmer") { scene.unsettled.reset(); scene.guide.lend(null); scene.tessFor = null; } return scene.guide.tap(); }
         if (scene.guide.holding) return;
         if (o.kind === "exit") return leaveHangar();
         if (o.kind === "stats" || o.kind === "timeline") return hud.openBoard(scene.boardViews[o.kind]);
@@ -1578,18 +1634,19 @@
     });
     hud.setDestinations(Object.keys(VIEW_NAMES), VIEW_NAMES);
     hud.setAreaLabel("Lightning Jet Hangar");
-    hud.el.modeDestination.title = "Lightning Jet Hangar · cycle stations";
-    hud.el.modeDestinationLabel.textContent = "Lightning Jet Hangar views. Press to cycle stations";
+    hud.el.modeDestination.title = "Lightning Jet Hangar · choose a viewpoint";
+    hud.el.modeDestinationLabel.textContent = "Lightning Jet Hangar views. Open Map to choose a viewpoint";
     const presetView = (name) => {
-      if (leaving || scene.guide.holding || !VIEW_NAMES[name]) return;
+      if (leaving || scene.guide.holding || !VIEW_NAMES[name]) return false;
       pilot.goPreset(name);
       hud.setDetachedView(name, true);
+      return true;
     };
     hud.onPreset(presetView);
     hud.onAction((action, value) => {
       if (action === "leave") leaveHangar();
       else if (action === "reset-view") pilot.resetCamera();
-      else if (action === "mode-preset") presetView(value);
+      else if (action === "mode-preset") return presetView(value);
       else if (action === "act") pilot.action();
       else if (action === "hangar-mute") soundPanel.toggle();
       else if (!leaving && action.startsWith("mode-")) pilot.modeAction(action);
@@ -1611,13 +1668,13 @@
     scene.fire = BL.hangarFire.create({ root, jet: scene.jet, nozzles: scene.jet.children[0] || null, fx, audio, hold: (on) => {
       pilot.setActive(!on);
       pilot.setExternalControl(on);
-    }, toast: hud.toast, busy: () => !!scene.anomaly && scene.anomaly.playing || !!scene.meltdown && scene.meltdown.active });
+    }, toast: hud.toast, busy: () => !!scene.anomaly && scene.anomaly.playing || !!scene.meltdown && scene.meltdown.active || !!scene.network && scene.network.active });
     input.add(scene.fire.body, { kind: "firetest", preset: null }, { radius: 1.6 });
     targets.push(scene.fire.body);
     soundPanel = openSoundPanel();
     // Kortik's Sis, the hangar's chief engineer (`sis.js`).
     scene.sis = BL.sis.create({ fx, audio, fire: scene.fire, jet: scene.jet, toast: hud.toast, blocks: () => scene.forklift.blocks,
-      avoid: (x, z, feet, height, radius) => !!scene.anomaly && scene.anomaly.keepsOut(x, z, feet, height, radius) });
+      avoid: (x, z, feet, height, radius) => !!scene.anomaly && scene.anomaly.keepsOut(x, z, feet, height, radius), quieted: () => !!scene.network && scene.network.quiet });
     addChild(root, scene.sis.node, scene.sis.props);
     input.add(scene.sis.body, { kind: "sis", preset: null }, { radius: 1.2 });
     targets.push(scene.sis.body);
@@ -1630,7 +1687,7 @@
     // on the right wall, whose operators' posts come just before it.
     const side = HM.sideRooms(), first = LAYOUT.crew.length - 1 - side.length;
     scene.roomFire = BL.hangarRoomFire.create({ root, fx, audio, rooms: [{ spots: HM.controlRoom().spots, gorilla: scene.crew[LAYOUT.crew.length - 1] }, ...side.map((r, i) => ({ spots: r.spots, gorilla: scene.crew[first + i] }))] });
-    scene.anomaly = BL.hangarAnomaly.create({ root, fire: scene.fire, sis: scene.sis, fx, audio, jet: scene.jet, stage: JET_STAGE, room: scene.roomFire, auto: !params.has("nosim") || every > 0, gap: every > 0 ? every : null, riders: () => jetRidden(), near: (test) => nearJet(test), busy: () => scene.meltdown.active });
+    scene.anomaly = BL.hangarAnomaly.create({ root, fire: scene.fire, sis: scene.sis, fx, audio, jet: scene.jet, stage: JET_STAGE, room: scene.roomFire, auto: !params.has("nosim") || every > 0, gap: every > 0 ? every : null, riders: () => jetRidden(), near: (test) => nearJet(test), busy: () => scene.meltdown.active || !!scene.shimmer && scene.shimmer.holding || !!scene.network && scene.network.quiet });
     // Now and then a worker in one of the crew's rooms has had enough, and runs down to pound on the Jet
     // (`hangar-meltdown.js`), with nothing else going on: not on a test page unless `meltdown=` asks, which under debug
     // also sets the wait between them, s.
@@ -1638,7 +1695,7 @@
     scene.meltdown = BL.hangarMeltdown.create({ root, fx, audio, sis: scene.sis, rooms: side.map((r, i) => ({ spots: r.spots, gorilla: scene.crew[first + i], door: scene.roomDoors[i], shut: r.door.turn })),
       // Tess, to break up the fight, when nobody else has her.
       tess: { free: () => !scene.guide.lent && !scene.guide.holding, lend: (drive) => { scene.guide.lend(drive); scene.tessFor = drive ? "meltdown" : null; } },
-      busy: () => leaving || scene.anomaly.playing || scene.fire.t >= 0 || scene.roomFire.burning || scene.sis.rampaging || scene.guide.lent,
+      busy: () => leaving || scene.anomaly.playing || scene.fire.t >= 0 || scene.roomFire.burning || scene.sis.rampaging || scene.guide.lent || !!scene.shimmer && scene.shimmer.holding || !!scene.network && scene.network.quiet,
       blocker: () => people && people.player, auto: !params.has("nosim") || fed > 0, gap: fed > 0 ? fed : null });
     // The terminals by the runway and the film show they start (`hangar-terminals.js`), its mood page reading hers.
     scene.terminals = BL.hangarTerminals.create({ root, audio, mood: () => scene.sis.mood, toast: hud.toast });
@@ -1681,6 +1738,24 @@
       targets: { sis: [scene.sisHead], show: [HM.projector().lens, HM.filmScreen().picture] }
     });
     scene.distraction = BL.hangarGuide.distraction(scene.sis);
+    // Now and then, a faint shape gathering and coming apart in the air where the visitor is looking
+    // (`hangar-shimmer.js`), which the anomalies and a worker's meltdown wait on: not on a test page unless `shimmer=`
+    // asks, which under debug also sets the wait before each, s.
+    const glints = DEBUG ? Number(params.get("shimmer")) : NaN;
+    scene.shimmer = BL.hangarShimmer.create({ root, audio, camera, renderer, coarse: COARSE, auto: !params.has("nosim") || glints > 0, gap: glints > 0 ? glints : null,
+      busy: () => leaving || scene.anomaly.playing || scene.fire.t >= 0 || scene.meltdown.active || scene.roomFire.burning || scene.sis.rampaging || scene.sis.brawling
+        || scene.tessFor !== "shimmer" && (scene.guide.lent || scene.guide.holding || scene.guide.state.phase !== "work") || scene.terminals.showing || scene.keypad.open >= 0 || !!scene.network && scene.network.quiet && !scene.network.active,
+      ooga: () => people && people.player, guide: () => scene.guide.root.position, clear: clearOf });
+    // The network, on a debug page: walked up to with `network=a` or `b` (its density), its haze pulled in with
+    // `netfog=1`, or played with Shift+N.
+    scene.network = BL.hangarNetwork.create({ root, renderer, camera, onStop: (early) => { if (audio) { audio.strain(1, 0); if (early) audio.outage(null); } } });
+    scene.netDefer = 0;
+    if (DEBUG && params.get("network") === "b") scene.network.density = "b";
+    if (DEBUG && params.get("netfog") === "1") scene.network.fog = true;
+    scene.netShow = -1; scene.netFrom = 0; scene.netUsed = true;
+    // Tess notices the shape if she is near it and free when she would notice it, and glances at it, looks it over or is
+    // puzzled by it.
+    scene.unsettled = BL.hangarGuide.unsettled(scene.shimmer, camera);
     // The repository's reading: read from GitHub on the first visit a page life, unless the cache holds a fresh one.
     unsubscribeFeed = BL.jetFeed.subscribe(() => { boardsDirty = true; });
     if (!params.has("nosim") && params.get("jet") !== "0") BL.jetFeed.load();
@@ -1741,7 +1816,7 @@
     hangarScene.input = input;
     hangarScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
-      hangar: { layout: LAYOUT, feed: BL.jetFeed, get scene() { return scene; }, get avatar() { return avatar; }, get audio() { return audio; }, get fire() { return scene && scene.fire; }, get sis() { return scene && scene.sis && scene.sis.debug; }, get anomaly() { return scene && scene.anomaly && scene.anomaly.debug; }, get roomFire() { return scene && scene.roomFire && scene.roomFire.debug; }, get meltdown() { return scene && scene.meltdown && scene.meltdown.debug; }, get terminals() { return scene && scene.terminals && scene.terminals.debug; }, get keypad() { return scene && scene.keypad && scene.keypad.debug; }, get crane() { return scene && scene.crane && scene.crane.debug; }, get guide() { return scene && scene.guide; } }
+      hangar: { layout: LAYOUT, feed: BL.jetFeed, get scene() { return scene; }, get avatar() { return avatar; }, get audio() { return audio; }, get fire() { return scene && scene.fire; }, get sis() { return scene && scene.sis && scene.sis.debug; }, get anomaly() { return scene && scene.anomaly && scene.anomaly.debug; }, get roomFire() { return scene && scene.roomFire && scene.roomFire.debug; }, get meltdown() { return scene && scene.meltdown && scene.meltdown.debug; }, get shimmer() { return scene && scene.shimmer && scene.shimmer.debug; }, get network() { return scene && scene.network && scene.network.debug; }, get terminals() { return scene && scene.terminals && scene.terminals.debug; }, get keypad() { return scene && scene.keypad && scene.keypad.debug; }, get crane() { return scene && scene.crane && scene.crane.debug; }, get guide() { return scene && scene.guide; } }
     };
   };
   const feetOf = () => avatar ? avatar.root.position.y - avatar.baseY : 0;
@@ -1851,11 +1926,17 @@
     s.sisHead.x = sp.x; s.sisHead.y = sp.y + 0.9; s.sisHead.z = sp.z;
     if (s.sis.rampaging && !s.guide.lent) { s.guide.lend(s.distraction.drive); s.tessFor = "sis"; s.sis.distract(s.guide.root.position); }
     else if (!s.sis.rampaging && s.tessFor === "sis") { s.distraction.done(); s.guide.lend(null); s.tessFor = null; s.sis.distract(null); }
+    // The faint shape in the air catches her eye: lent to it while it shows, if it is near her, in her sight, and she is
+    // free to notice it, back once she is done with it.
+    if (!s.guide.lent && !s.guide.holding && s.guide.state.phase === "work" && s.unsettled.due(s.guide.root.position)) { s.guide.lend(s.unsettled.drive); s.tessFor = "shimmer"; }
+    else if (s.tessFor === "shimmer" && s.unsettled.over) { s.unsettled.reset(); s.guide.lend(null); s.tessFor = null; }
     seatViewBack(drivenHere);
     pilot.update(dt);
     s.guide.update(dt, elapsed);
     s.fire.view(camera);
     if (s.window) s.window.update(camera);
+    s.shimmer.update(dt, elapsed);
+    netLife(s, dt, elapsed);
     // The hall's hum hears from the Ooga driven here, or from the view's target.
     const ear = people && people.player, at = ear ? ear.root.position : pilot.orbit.target;
     audio.listen(at.x, ear ? at.y - ear.baseY + 1.4 : at.y, at.z, camera.target.x - camera.position.x, camera.target.z - camera.position.z);
@@ -1884,20 +1965,32 @@
     const who = drivenHere ? drivenHere.root.position : pilot.orbit.target;
     const want = clamp((DOOR_FAR - Math.max(0, Math.hypot(who.x - DOOR.x, who.y - DOOR.y - 1, who.z - DOOR.z) - 2)) / (DOOR_FAR - DOOR_NEAR), 0, 1);
     s.gate.near += (want * want - s.gate.near) * Math.min(1, dt * DOOR_EASE);
-    const Lt = RENDER_OPTS.lights, dim = s.anomaly.dim, amb = s.anomaly.ambient, power = (1 + DOOR_POWER * s.gate.near) * dim;
+    const Lt = RENDER_OPTS.lights, dim = s.anomaly.dim * s.network.env.dim, amb = s.anomaly.ambient * s.network.env.ambient, power = (1 + DOOR_POWER * s.gate.near) * dim;
     s.doorGlow.glow = (1 + DOOR_BRIGHTEN * s.gate.near) * dim;
     Lt[3] = DOOR_LIGHT[3] + DOOR_REACH * s.gate.near; Lt[4] = DOOR_LIGHT[4] * power; Lt[5] = DOOR_LIGHT[5] * power; Lt[6] = DOOR_LIGHT[6] * power;
-    // The hall's lights as dim as an anomaly has them: the door's above, the other fixed ones (the tunnel mouth's goes
-    // with the neon), the hall's own light as its `ambient` says, and the lanterns' and fixtures' glass.
-    if (dim !== s.dimmed || amb !== s.ambient) {
-      s.dimmed = dim; s.ambient = amb;
+    // The hall's lights as dim as an anomaly and the network have them: the door's above, the other fixed ones (the
+    // tunnel mouth's goes with the neon), the hall's own light as its `ambient` says, and the lanterns' and fixtures'
+    // glass.
+    const emergency = s.network.env.emergency, cast = s.network.env.cast;
+    if (dim !== s.dimmed || amb !== s.ambient || emergency !== s.emergency || cast !== s.cast) {
+      s.dimmed = dim; s.ambient = amb; s.emergency = emergency; s.cast = cast;
       const F = HM.fixedLights();
       for (let i = 1; i < FIXED; i++) if (i !== MOUTH_SLOT) { const l = F[i], o = i * 8; Lt[o + 4] = l[4] * dim; Lt[o + 5] = l[5] * dim; Lt[o + 6] = l[6] * dim; }
+      // With the power out, the work lights' pools at the booth and the desks are the emergency lights', red and amber.
+      for (let j = 0; j < EMERGENCY_LIGHTS.length; j += 4) { const o = EMERGENCY_LIGHTS[j] * 8; for (let c = 0; c < 3; c++) Lt[o + 4 + c] += EMERGENCY_LIGHTS[j + 1 + c] * emergency; }
       for (let i = 0; i < 3; i++) RENDER_OPTS.spotLight[8 + i] = KEY.color[i] * dim;
-      for (let i = 0; i < 3; i++) { RENDER_OPTS.sky[i] = SKY[i] * amb; RENDER_OPTS.ground[i] = GROUND[i] * amb; RENDER_OPTS.fog[i] = HAZE[i] * amb; }
+      // The hall's own light, taking the network's blue while it stands (`CAST`).
+      const lift = 1 + CAST.lift * cast;
+      for (let i = 0; i < 3; i++) {
+        RENDER_OPTS.sky[i] = (SKY[i] + (CAST.sky[i] - SKY[i]) * cast) * amb * lift; RENDER_OPTS.ground[i] = (GROUND[i] + (CAST.ground[i] - GROUND[i]) * cast) * amb * lift;
+        RENDER_OPTS.fog[i] = (HAZE[i] + (CAST.fog[i] - HAZE[i]) * cast) * amb * lift;
+      }
       RENDER_OPTS.directStrength = DIRECT * amb; RENDER_OPTS.ambientFloor = FLOOR * amb;
       for (const g of s.glass) g.glow = dim;
     }
+    // The network's haze, its dimming of the screens and boards' pictures, and its stronger bloom.
+    RENDER_OPTS.fogNear = s.network.env.fogNear; RENDER_OPTS.fogFar = s.network.env.fogFar;
+    RENDER_OPTS.pictureDim = s.network.env.screens; RENDER_OPTS.bloomStrength = s.network.env.bloom;
     hum(s.gate, OPENING, dt, elapsed, 0.12 * (1 - 0.65 * s.gate.near));
     hum(s.launch, LAUNCH, dt, elapsed, 0.18);
     // Walked up to the hold-short bar, the launch shield ripples where they stand and says, once an approach, that it is
@@ -1918,10 +2011,10 @@
     const shown = burnt + s.terminals.lights(RENDER_OPTS.lights, burnt);
     const beamed = shown + beaconLight(s.forklift, RENDER_OPTS.lights, shown);
     s.guide.light(RENDER_OPTS.lights, beamed * 8);
-    glowNear(elapsed, beamed + 1, dim);
+    glowNear(elapsed, beamed + 1 + s.network.lights(RENDER_OPTS.lights, beamed + 1), dim);
     heavens(s, dt, elapsed);
     neonLife(s, dt, elapsed, dim);
-    lampLife(s, dt, elapsed, dim);
+    lampLife(s, dt, elapsed, dim, s.anomaly.dim * s.network.env.markers, s.network.env.emergency);
     loftLife(s, dt, elapsed, dim);
     fanLife(s, dt);
     boardJets(s, dt);
@@ -1984,6 +2077,8 @@
     if (scene.window) scene.window.dispose();
     scene.anomaly.dispose();
     scene.meltdown.dispose();
+    scene.shimmer.dispose();
+    scene.network.dispose();
     scene.roomFire.dispose();
     scene.fire.dispose();
     scene.keypad.dispose();
@@ -2016,6 +2111,8 @@
       scene.gate.phase.liveGeometry(set); scene.launch.phase.liveGeometry(set);
       scene.sis.liveGeometry(set);
       scene.anomaly.liveGeometry(set);
+      scene.shimmer.liveGeometry(set);
+      scene.network.liveGeometry(set);
       scene.terminals.liveGeometry(set);
       scene.keypad.liveGeometry(set);
       scene.guide.liveGeometry(set);

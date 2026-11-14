@@ -407,6 +407,10 @@
     let rightDownAt = -Infinity, rightTapAt = -Infinity, rightTravel = 0, rightExitHeld = false;
     // The Ooga whose AK the HUD's button holds the trigger of (full auto until let go), or null.
     let primaryButtonCave = null, triggerButtonCave = null;
+    // A scene flying a camera of its own with the pilot held (the studio's free camera) still lets the weapon buttons
+    // and the mode's switch reach the Ooga (`setButtonsHeld`).
+    let buttonsHeld = false;
+    const setButtonsHeld = (on) => { buttonsHeld = !!on; };
     // The AK button let go of, or a hold ended for it (the Ooga changed, the gun went away, the view was taken).
     const releaseTriggerButton = () => {
       if (triggerButtonCave && crew) crew.setWeaponTrigger(false);
@@ -1405,11 +1409,9 @@
       orbit.yaw = orbit.tYaw -= e.movementX * sensitivity;
       orbit.pitch = orbit.tPitch = clamp(orbit.tPitch + e.movementY * sensitivity, TRAILING_PITCH[0], TRAILING_PITCH[1]);
     };
-    // Mouse and trackpad taps expose the same buttons. Classify the release
-    // by its held duration, shared with the displayed charge and HUD button.
+    // Mouse and trackpad taps expose the same buttons.
     const releasePrimary = (cave, focused = null) => {
-      const released = crew.releaseSwing(cave, false, focused,
-        !!cave && cave.weapon.meleeHeldTime < BL.crew.MELEE_TAP_TIME);
+      const released = crew.releaseSwing(cave, false, focused);
       if (released) syncWeaponHud();
       return released;
     };
@@ -1933,7 +1935,7 @@
         return true;
       }
       const cave = player();
-      if (!active || menuOpen || !crew.weaponsEnabled || !cave || cave.grabbedBy || crew.sleeping) return false;
+      if (!active && !buttonsHeld || menuOpen || !crew.weaponsEnabled || !cave || cave.grabbedBy || crew.sleeping) return false;
       resumePose();
       if (action === "weapon-primary" || action === "weapon-primary-down") {
         const alreadyHeld = !cave.weapon.equipped;
@@ -1955,7 +1957,7 @@
         } else {
           // Navigation looks back toward the character. A HUD shot follows
           // the character's facing instead of that unrelated orbit-camera ray.
-          const target = armed() ? null : facingTarget(cave);
+          const target = armed() && active ? null : facingTarget(cave);
           // Held, the AK button fires full auto on the trigger's own shot clock until it is let go; a press from the
           // keyboard is one burst, as a click was.
           const fired = action === "weapon-secondary-down" ? crew.setWeaponTrigger(true, ads, target) : crew.fireWeapon(cave, target, ads ? 1 : undefined);
@@ -2072,7 +2074,9 @@
       syncWeaponHud();
       syncModeHud();
     };
-    const modeAction = (action) => {
+    // `held`: the scene is flying its own camera (`setButtonsHeld`), so the Ooga changes mode and the camera is left
+    // alone; the scene gives the view back for the new mode itself.
+    const modeAction = (action, held = false) => {
       const cave = player();
       if (firstOnly && cave) {
         hud.hint("First person only in here");
@@ -2083,6 +2087,21 @@
       endLook();
       const combatOnly = !!ctx.combatOnly?.();
       if (combatOnly && cave.weapon.aiming) return true;
+      if (held) {
+        // Standing (not seated, in bed or stunned) to go into combat; coming out of it always.
+        const w = cave.weapon;
+        if (!w.aiming && (cave.health.stunned || cave.camp.seat && !cave.camp.seat.allowWeapons || cave.bedTravel.mode || crew.sleeping)) {
+          hud.hint(crew.sleeping ? "Wake this Ooga Booga before entering shooter mode" : "Stand up before entering shooter mode");
+          return true;
+        }
+        w.aiming = !w.aiming;
+        if (!w.aiming) { crew.stopBurst(cave); crew.releaseSwing(cave, true); }
+        else if (!w.equipped && !w.primaryEquipped) crew.selectWeapon(w.selectedSlot, cave);
+        crew.poseWeapon(cave);
+        syncWeaponHud();
+        syncModeHud();
+        return true;
+      }
       // A game's combat intent survives sleep/stuns; readiness still gates aiming and attacks.
       if (!weaponViewReady(cave) && !lyingLook(cave) && !combatOnly) {
         hud.hint(crew.sleeping ? "Wake this Ooga Booga before entering shooter mode" : "Stand up before entering shooter mode");
@@ -2669,7 +2688,7 @@
     };
     const readInput = (dt) => {
       readPad();
-      if (!active || externalControl || menuOpen) { releaseTriggerButton(); return; }
+      if (!active || externalControl || menuOpen) { if (!buttonsHeld) releaseTriggerButton(); return; }
       syncAim();
       const a = controls.read();
       // Arrival easing keeps its label; only manual camera input fades it.
@@ -2980,7 +2999,7 @@
       }
       // Keep the world hold for reflections; the renderer applies the sight
       // pose only while uploading the player's camera view.
-      crew.poseWeapon(cave, camera, 0, closeMix * aimMix);
+      crew.poseWeapon(cave, camera, 0);
       cave.gunSightMix = adsMix * closeMix * aimMix;
       if (reticle.dataset.sight !== String(cave.gunSightMix > 0.95)) reticle.dataset.sight = String(cave.gunSightMix > 0.95);
       if (armed()) updateFeedback(cave, dt);
@@ -3904,6 +3923,8 @@
         orbit.tPitch = (low + high) * 0.5;
       } else if (orbitFollow) {
         endCenteredCarry();
+        // Release the carry handoff before solving: it restores the old pitch.
+        stopCarryExit();
         // Centre the selected point on a ray passing above the whole head (including hats), rather than through
         // the follow anchor in the torso. Solve only on the click; ordinary camera damping owns the transition.
         // The eight world bounds corners also cover wide heads when looking uphill or downhill at close zoom.
@@ -3934,7 +3955,6 @@
         }
         frameLiftWanted = high - base;
         orbit.tPitch = clamp(Math.atan2(high - y, horizontal), TRAILING_PITCH[0], TRAILING_PITCH[1]);
-        stopCarryExit();
         headOrbit = exitAngleHold = false;
         trailingPitchChosen = true;
         zoomTilt = false; zoomPitchVelocity = 0;
@@ -3993,7 +4013,7 @@
       get shoulderEntryMix() { return aimMix; },
       // The view being kept: "first-person", "shoulder", "birds-eye", "orbit", or "detached" with nobody driven.
       get view() { return viewMode(); },
-      bind, setActive, refreshCombat, viewState, adopt, readInput, update, syncHeadVisibility, turnToward, goPreset, look, endLook, get looking() { return looking(); }, resetCamera, freeCursor, navigate, travelRefusal, travel, transformView, tiltView, framePoint, releaseFrame, enterClose, exitClose, possess, release, escape, action, modeAction, weaponAction, weaponMode, showAct, suspend, resume, dispose, get player() {
+      bind, setActive, setButtonsHeld, refreshCombat, viewState, adopt, readInput, update, syncHeadVisibility, turnToward, goPreset, look, endLook, get looking() { return looking(); }, resetCamera, freeCursor, navigate, travelRefusal, travel, transformView, tiltView, framePoint, releaseFrame, enterClose, exitClose, possess, release, escape, action, modeAction, weaponAction, weaponMode, showAct, suspend, resume, dispose, get player() {
       return player();
     }, get assistedTarget() {
       if (birdsEye() && assistedTargetActive) return assistedTargetHit;

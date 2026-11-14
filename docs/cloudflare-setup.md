@@ -14,8 +14,9 @@ The two share code and nothing else: each has its own D1 database, room, OAuth A
 | Thing | Name | Set where |
 |---|---|---|
 | D1 database | `oogaboogaland-staging`, `oogaboogaland-production`; accounts, Tess and shared game high scores | `d1_databases` (`database_id`), migrations in `worker/migrations` |
-| Rate limiters | `AUTH_LIMITER` 10 sign-ins a minute per IP; `ROOM_LIMITER` 20 room connections and `VOICE_LIMITER` 120 voice calls a minute per player; `TESS_LIMITER` 5 questions to Tess a minute per IP; `HIGHSCORE_LIMITER` 120 public score reads per IP or submissions per account per minute, on separate keys; `GAME_LIMITER` 20 hosted-game connections a minute per player | `ratelimits` (staging namespaces 2001–2007, production 1001–1007) |
+| Rate limiters | `AUTH_LIMITER` 10 sign-ins a minute per IP; `ROOM_LIMITER` 20 room connections and `VOICE_LIMITER` 120 voice calls a minute per player; `VOICE_ICE_LIMITER` 6 TURN credential requests per minute per player; `TESS_LIMITER` 5 questions to Tess a minute per IP; `HIGHSCORE_LIMITER` 120 public score reads per IP or submissions per account per minute, on separate keys; `GAME_LIMITER` 20 hosted-game connections a minute per player | `ratelimits` (staging namespaces 2001–2009, production 1001–1009) |
 | Durable Object | `Room`, one named `island`; `GameHost` (binding `GAMES`), one a hosted game's instance, named only from `worker/src/games.js` (`docs/game-host.md`), with `/game/*` in `run_worker_first`. Optional vars: `GAME_LOCATION_HINT`, the region a new instance is made in (else near whoever first connects, and it stays there), and on staging `GAME_DEBUG_IDS` | `durable_objects`, `migrations` (v1 `Room`, v2 `GameHost`) |
+| Durable Object inspector | `Inspector` (binding `INSPECTOR`), one named `global`, migration `v3`, with `/inspect` in `run_worker_first`. Off until the optional secret `INSPECTOR_IDS` names the numeric GitHub ids that may open `<site>/inspect` (`wrangler secret put INSPECTOR_IDS --config wrangler.<env>.jsonc`; unset, empty or malformed: off, and no object reports). See "The Durable Object inspector" in `docs/auth-and-presence.md` | `durable_objects`, `migrations` |
 | Cron | daily 04:00 UTC, purges expired sessions and Tess's questions not asked for 90 days | `triggers` |
 | Service binding | `DONATIONS` → `bananapayserver-staging`'s `PageApi` on staging, `bananapayserver-production`'s on production | `services`, with `/donations/*` in `run_worker_first`. The bound Worker must exist before a deploy carries the binding |
 | Vars | `SITE_ORIGIN`, `GITHUB_CLIENT_ID`, `REALTIME_APP_ID`; optionally `TESS_DAILY_CENTS` (Tess's daily cap, 50 when unset) and `STUDIO_HOST_IDS`, the comma-separated numeric GitHub ids that may host DSB Studio (unset, empty or malformed: nobody; see `docs/dsb-studio-session.md`) | `vars` |
@@ -39,6 +40,7 @@ Run from `worker/` after `npm ci`, logged in with `npx wrangler login` as a memb
 1. **D1.** `npx wrangler d1 create oogaboogaland-<env>`; put its id in `database_id` (wrangler may offer to add a second binding: keep only `DB`).
 2. **GitHub OAuth App** (OogaBoogaX → Settings → Developer settings → OAuth Apps → New): homepage `https://oogaboogaland-<env>.wickedsmartbitcoin.workers.dev`, callback `https://oogaboogaland-<env>.wickedsmartbitcoin.workers.dev/auth/callback`. Put the client id in `vars.GITHUB_CLIENT_ID`, then `npx wrangler secret put GITHUB_CLIENT_SECRET --config ../wrangler.<env>.jsonc`.
 3. **Voice.** dash.cloudflare.com → Realtime → Serverless SFU → Create `oogaboogaland-<env>`; put the App ID in `vars.REALTIME_APP_ID`, then `npx wrangler secret put REALTIME_SECRET --config ../wrangler.<env>.jsonc` with the App token. Without it **Join voice** says voice is unavailable and everything else works.
+   For UDP-blocked networks, create a separate Realtime TURN key per environment and set `REALTIME_TURN_KEY_ID` and `REALTIME_TURN_TOKEN` as Worker secrets. Configure staging first. To exercise renewal quickly on staging, temporarily set `REALTIME_TURN_TTL` to `300` (accepted range 300–7200 seconds; default 7200), then restore the default after testing.
 4. **Tess's answers** (optional). An Anthropic API key from a workspace with a monthly spend limit, one key per Worker: `npx wrangler secret put ANTHROPIC_API_KEY --config ../wrangler.<env>.jsonc`. Without it `/api/tess` answers `closed` and Tess says only what the page knows by itself.
 5. `npm run deploy:<env>`: builds `_site`, applies the D1 migrations and deploys.
 6. **Deploy token**, once for both: Manage Account → Account API Tokens → Create, with *Workers Scripts → Edit* and *D1 → Edit* on this account. Save it in the OogaBoogaX repo as `CLOUDFLARE_API_TOKEN`.
@@ -50,6 +52,15 @@ The zone `oogabooga.land` is in this account. Production serves the apex as a Wo
 ## Every deploy
 
 Both `cloudflare-staging.yml` and `cloudflare-production.yml` run by hand on `rock`: Actions → Deploy Cloudflare staging (or production) → Run workflow. Merging does not deploy either Worker. Each takes a fresh jumbotron snapshot, runs `npm run build:site`, installs the Worker's locked dependencies (`npm ci --prefix worker --omit=dev`, the Anthropic SDK its bundle imports), runs the Worker's checks, applies D1 migrations and deploys. Every deploy drops live sockets, and clients reconnect on their own. These workflows are the normal deploy path: keep Workers Builds (a Worker's Settings → Build) disconnected and don't deploy from the dashboard, or a second deploy can replace the Worker and drop its secrets. If GitHub Actions is unavailable, the README documents the emergency laptop deployment procedure.
+
+For the Inspector rollout (#643, then #640), first deploy and verify any already-merged changes on staging and
+production before merging #643. Otherwise those changes would share its irreversible class-creation deployment.
+Then merge #643 alone, deploy staging and verify the existing site and room still work, and deploy production.
+Record each successful deployment's commit and Worker version: these are the rollback targets for part 2.
+Only then merge #640. On its staging deployment, verify the `INSPECTOR_IDS` access gate, the island room's card,
+reconnect reporting and voice before production. Deploy the site and Worker together through the workflows above.
+Rolling back part 2 keeps the `Inspector` class and migration `v3`; it does not remove the namespace. Any later class
+migration uses a new tag (`v4` or later), never a rewritten `v3`.
 
 Production's `DONATIONS` binding to `bananapayserver-production`'s `PageApi` and `/donations/*` in `assets.run_worker_first` must be committed to `rock` before deploying; a live-only binding is replaced by the checked-out config. The Worker's donation checks enforce both before the workflow deploys.
 
@@ -90,3 +101,11 @@ If using local sign-in, first apply its local schema with
 The feed reflects the currently deployed backend. The independent sats leaderboard requires
 bananapayserver's donor-sats migration and updated feed to be deployed; starting this local
 preview does not deploy either.
+
+## TURN staging acceptance
+
+Use two distinct eligible contributor accounts, both driving Oogas in the same voice region. Block UDP in the test browsers, join voice, and verify a selected relay candidate over TLS/TCP port 443 on both publish and receive connections, with audible sound in both directions. With staging TTL 300, keep the call past five minutes and verify fresh connections/credentials, continued two-way audio and preserved mute. Repeat receive-only and leave/rejoin. Record browser versions, deployment revision and observed gaps; mocked signalling checks do not establish live relay connectivity.
+
+Renewal fetches new credentials while the old connections are still active, then rebuilds using those credentials. A failed fetch leaves the call running and retries in 60 seconds; stopping during a fetch cannot resurrect voice. The SFU still uses one publication per account, so this is not overlapping audio sessions or a guarantee of gapless renewal.
+
+Capture `BL.voice.inspect().relayRenewals` before closing the page. It holds the last eight renewals: credential-fetch time, rebuild time, first replacement receive-track event, peer count, mute state and outcome. `firstTrackMs` is measured from the start of rebuilding and stays null when no remote track arrives. A track event and successful signalling do **not** prove audible sound or RTP continuity: measure audible gaps separately on both staging clients and compare with these timings. No credentials, candidates/IP addresses, conversation content, storage or network telemetry are added.

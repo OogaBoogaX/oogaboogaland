@@ -442,19 +442,21 @@
     // each cell a fifth of a metre across, each pebble a rounded stone of seven to nine sides set a little off its
     // cell, turned its own way, a darker rim round its pale top, in bone and pale ochre; a few dark pebbles pressed
     // into the earth round them; and a kerb of eighteen bevelled stones round it all.
-    const MZ = MEDALLION.z, IN = MEDALLION.r - 0.28, CELL = 0.19, trand = mulberry32(3330), earth = geometry();
-    const letter = (col, row) => col >= 0 && col < 15 && row >= 0 && row < 5 && col % 4 < 3 && BL.hubModels.SIGN_GLYPHS["OOGA"[col >> 2]][row][col % 4] === "1";
+    const letters = Array.from({ length: 5 }, (_, row) => [..."OOGA"].map(ch => BL.hubModels.SIGN_GLYPHS[ch][row]).join("0"));
+    const cols = letters[0].length, mid = (cols - 1) / 2;
+    const MZ = MEDALLION.z, IN = MEDALLION.r - 0.28, CELL = 0.19 * 15 / cols, trand = mulberry32(3330), earth = geometry();
+    const letter = (col, row) => col >= 0 && col < cols && row >= 0 && row < 5 && letters[row][col] === "1";
     const pebble = (x, z, r, tone, e) => {
       const n = 7 + Math.floor(trand() * 3), turn = trand() * 3, squash = 0.78 + trand() * 0.18;
       daubDot(earth, x, -z, r, r * squash, tint(tone, 0.68), e * 0.5, turn, 0.0012, n);
       daubDot(earth, x - r * 0.06, -z + r * 0.06, r * 0.8, r * squash * 0.78, tone, e, turn, 0.0024, n);
     };
     daubDot(earth, 0, -MZ, IN + 0.03, IN + 0.03, EARTH[3], 0.03, 0, 0, 36);
-    for (let row = 0; row < 5; row++) { for (let col = 0; col < 15; col++) { if (letter(col, row)) {
-      pebble((col - 7) * CELL + (trand() - 0.5) * 0.04, MZ + (row - 2) * CELL + (trand() - 0.5) * 0.04, 0.088 + trand() * 0.018, trand() < 0.6 ? BONE : "#e8c890", 0.2);
+    for (let row = 0; row < 5; row++) { for (let col = 0; col < cols; col++) { if (letter(col, row)) {
+      pebble((col - mid) * CELL + (trand() - 0.5) * 0.04, MZ + (row - 2) * CELL + (trand() - 0.5) * 0.04, (0.088 + trand() * 0.018) * 15 / cols, trand() < 0.6 ? BONE : "#e8c890", 0.2);
     } } }
     for (let k = 0, n = 0; k < 120 && n < 26; k++) { yield* pause(slice);
-      const a = trand() * Math.PI * 2, d = Math.sqrt(trand()) * (IN - 0.12), x = Math.cos(a) * d, z = Math.sin(a) * d, col = Math.round(x / CELL + 7), row = Math.round(z / CELL + 2);
+      const a = trand() * Math.PI * 2, d = Math.sqrt(trand()) * (IN - 0.12), x = Math.cos(a) * d, z = Math.sin(a) * d, col = Math.round(x / CELL + mid), row = Math.round(z / CELL + 2);
       if ([-1, 0, 1].some((dc) => [-1, 0, 1].some((dr) => letter(col + dc, row + dr)))) continue;
       pebble(x, MZ + z, 0.035 + trand() * 0.025, FLAGS[3 - (n % 2) * 2], 0.03);
       n++;
@@ -1044,7 +1046,7 @@
     return [f * 0.075, y * c - z * sn + 0.3, y * sn + z * c - 0.12];
   });
   const gargoyleLaser = cached(() => unshadowed(box({ w: 0.035, h: 0.035, d: 1, color: HAUNT_GLOW, emissive: 1, offset: { z: 0.5 } })));
-  // A white letter on a gargoyle's chest, in the signs' 3x5 alphabet, each block set on the curve of its breast and
+  // A white letter on a gargoyle's chest, in the signs' five-row alphabet, each block set on the curve of its breast and
   // belly as they lean with it; the gargoyles spell `GARGOYLE_WORDS` round the wall from the one over the mouth. The M
   // is the carved signs' five-wide one, centred as the others are, since a three-wide M reads as an H (#420).
   const GARGOYLE_WORDS = "FREE SAMOURAI", GARGOYLE_CELL = 0.045;
@@ -1201,7 +1203,7 @@
     const sized = (g, k) => { const c = merge(g); for (let v = 0; v < c.verts.length; v++) c.verts[v] *= k; return c; };
     const centredX = (g) => moved(g, -boundsOf(g).center[0], 0, 0);
     const alongRack = (i, turn = Math.PI / 2) => centredX(turnedY(merge(BM.gun(i * 2)), turn));
-    const weapon = (id, label) => id === "hook" ? [centredX(sized(BM.hookHead(), 1.4))] : id === "wallet" ? [centredX(sized(BM.walletDevice(0), 1.6))]
+    const weapon = (id, label) => id === "hook" ? [centredX(sized(BM.hookHead(), 1.4))]
       : label === "GOLD AKS" ? [moved(alongRack(id), -0.58, 0, 0), moved(alongRack(id, -Math.PI / 2), 0.58, 0, 0)] : [alongRack(id)];
     for (const [z, side, rows] of BLOCK_HALL.racks) {
       const wall = side < 0 ? X0 + 0.1 : X1 - 0.1, turn = side < 0 ? Math.PI / 2 : -Math.PI / 2, at = (g) => moved(turnedY(g, turn), wall, Y, z), inRack = [box({ w: RACK_W, h: 2.3, d: 0.05, color: TIMBER_DK, offset: { y: 1.45 } })];
@@ -1242,6 +1244,52 @@
     for (let k = 0; k < 14; k++) sky.push(puff(k, X + (cloudRand() - 0.5) * 70, cloudY - 4 + cloudRand() * 6, stop.z + 12 - cloudRand() * 26, 2 + cloudRand() * 1.2));
     for (let k = 0; k < 16; k++) sky.push(puff(k, X + (cloudRand() - 0.5) * 240, -30 + cloudRand() * 80, -60 - cloudRand() * 80, 1.2 + cloudRand() * 2));
     return { rock, ledge: shaded(round, flat), props: merge(...props), sky: merge(...sky) };
+  });
+  // The watch door's sign, its own board in the carved signs' style: two lines so the letters can be large, the shared
+  // alphabet but for its own five-wide W (the shared one reads as an H and stays as it is), every line measured so it
+  // sits inside the board with a margin. 2.3 m wide, centred on its origin, facing +z.
+  const WATCH_W = ["10001", "10001", "10101", "11011", "10001"];
+  const watchSignBoard = cached(() => {
+    const G = BL.hubModels.SIGN_GLYPHS, glyphOf = (ch) => ch === "W" ? WATCH_W : ch === "M" ? BL.hubModels.CARVED_M : G[ch];
+    const measure = (s) => { let n = -1; for (const ch of s) n += ch === " " ? 2 : glyphOf(ch)[0].length + 1; return n; };
+    const LINES = ["Watch", "Block Frenzy"], W = 2.3, MARGIN = 0.16, BADGE = 6, cell = (W - MARGIN * 2) / Math.max(measure(LINES[0]) + BADGE + 2, measure(LINES[1])), ROW = 8 * cell, H = ROW * 2 + cell * 2;
+    const planks = ["#7a4f2a", "#86592f", "#6f4726"], plankH = H / 3, parts = [];
+    planks.forEach((c, k) => parts.push(bevelBox({ w: W + (k === 1 ? 0.08 : 0), h: plankH + 0.01, d: 0.12, color: c, bevel: 0.03, offset: { y: H / 2 - plankH * (k + 0.5) } })));
+    parts.push(box({ w: W - MARGIN, h: H - cell, d: 0.02, color: "#3f2513", offset: { z: 0.07 } }));
+    const ink = (x, y, w) => parts.push(box({ w, h: cell, d: 0.05, color: "#f5e6c0", emissive: 1, offset: { x, y, z: 0.1 } }));
+    LINES.forEach((line, l) => {
+      const n = measure(line) + (l === 0 ? BADGE + 2 : 0), base = H / 2 - cell * 1.5 - ROW * l;
+      let cursor = -n * cell / 2;
+      // The orange cube badge leads the first line, as on the hall's own sign.
+      if (l === 0) { parts.push(box({ w: BADGE * cell, h: BADGE * cell, d: 0.05, color: "#f7931a", emissive: 1, offset: { x: cursor + BADGE * cell / 2, y: base - 2.5 * cell + cell / 2, z: 0.1 } })); cursor += (BADGE + 2) * cell; }
+      for (const ch of line) {
+        if (ch === " ") { cursor += cell * 2; continue; }
+        const glyph = glyphOf(ch);
+        for (let row = 0; row < glyph.length; row++) for (let col = 0; col < glyph[row].length; col++) {
+          if (glyph[row][col] !== "1") continue;
+          let run = 1;
+          while (glyph[row][col + run] === "1") run++;
+          ink(cursor + (col + run / 2) * cell, base - row * cell, run * cell);
+          col += run - 1;
+        }
+        cursor += cell * (glyph[0].length + 1);
+      }
+    });
+    return merge(...parts);
+  });
+  // The doorway to watch Block Frenzy (`BL.arcadeBlockWatch`): a timber set proud of the hall's east wall, like the hall's
+  // own, with a vine along its lintel. The rock stays whole behind it; the scene hangs the portal and the sign in it.
+  const blockWatchDoor = cached(() => {
+    const { DOOR: D } = BL.arcadeBlockWatch, J = BL.hubModels, X = BLOCK_HALL.x1 - 0.3, Y = D.y, TOP = Y + D.h, round = [];
+    for (const z of [D.z0 - 0.22, D.z1 + 0.22]) round.push(J.log(X, Y - 0.02, z, X, TOP + 0.05, z, 0.16, "#5a3c22"), J.lashing(X, TOP - 0.45, z, 0, 1, 0, 0.16));
+    round.push(J.log(X, TOP + 0.04, D.z0 - 0.42, X, TOP + 0.02, D.z1 + 0.42, 0.17, "#5c3f25"));
+    // The hanging sign's ropes, and the blade sign's bark arm out from the post over the hall.
+    for (const z of [D.z - 0.85, D.z + 0.85]) round.push(J.log(BLOCK_HALL.x1 - 0.42, Y + BL.arcadeBlockWatch.SIGN_Y + 0.2, z, BLOCK_HALL.x1 - 0.42, TOP, z, 0.018, "#c9a36a"));
+    const armY = Y + BL.arcadeBlockWatch.BLADE_Y + 0.42, armZ = D.z1 + 0.22;
+    round.push(J.log(X, armY, armZ, BLOCK_HALL.x1 - 1.85, armY, armZ, 0.07, "#5a3c22"), J.lashing(X, armY, armZ, 1, 0, 0, 0.08));
+    return J.withJungle(shaded(round, []), (g) => {
+      J.garland(g, J.sagPoints(X - 0.14, TOP + 0.14, D.z0 - 0.3, X - 0.14, TOP + 0.14, D.z1 + 0.3, 0.16), { r: 0.04, every: 0.45, size: 0.26, droop: 0.55, out: [-1, 0, 0], rand: mulberry32(7411) });
+    });
   });
   const haunt = BL.models.cachedSteps(function* (slice = null) {
     const { z0, z1, y: Y, h: H, end, arena: A } = HAUNT, X0 = HALL.halfW, L = end - X0, TOP = Y + H, MID = (z0 + z1) / 2, J = BL.hubModels, TAU = Math.PI * 2;
@@ -2132,7 +2180,7 @@
   // ---- the retro games' loops -----------------------------------------------------------------------------
   // The mezzanine's cabinets loop their retro games as the stage's loop theirs: the same grid, frame count and PRESS
   // START blink, the best under the loop. Their names are too long for the 5x7 font, so the title is lettered in the
-  // carved signs' 3x5 alphabet. Every palette shares its first five inks (the glass, the cabinet's trim, bone, and the
+  // carved signs' five-row alphabet. Every palette shares its first five inks (the glass, the cabinet's trim, bone, and the
   // banana coin and its mark); each game's own follow.
   const RETRO_INKS = {
     invaders: ["#b98cff", "#c8ff5a", "#c68642", "#3a2414", "#8a5a2c", "#8e8e96", "#ff8a2a"],
@@ -2147,12 +2195,15 @@
   const retroPalette = (r) => ["#07080d", CABINETS.find((c) => c.retro === r).trim, BONE, BANANA, "#8a5210", ...RETRO_INKS[RETRO[r].id]];
   const smallCentred = (g, s, y, c) => {
     const G = BL.hubModels.SIGN_GLYPHS;
-    let x = Math.floor((g.w - (s.length * 4 - 1)) / 2);
+    let width = -1;
+    for (const ch of s) width += G[ch] ? G[ch][0].length + 1 : 4;
+    let x = Math.floor((g.w - width) / 2);
     for (const ch of s) {
       const rows = G[ch];
       if (rows) for (let row = 0; row < rows.length; row++) for (let k = 0; k < rows[row].length; k++) if (rows[row][k] === "1") at(g, x + k, y + row, c);
-      x += 4;
+      x += rows ? rows[0].length + 1 : 4;
     }
+    return width;
   };
   // A triangle wave over `n` frames, 0 at f = 0 and 1 half way.
   const tri = (f, n = FRAMES) => { const k = (f % n) / n; return k < 0.5 ? k * 2 : 2 - k * 2; };
@@ -2320,14 +2371,14 @@
       }
     }
   };
-  // A retro game's loop, by its index in RETRO: its title between two bones, then the anim box.
+  // A retro game's loop, by its index in RETRO: its title, flanked by bones when there is room, then the anim box.
   const retroFrames = variants((r) => {
     const game = RETRO[r], palette = retroPalette(r), frames = [];
     for (let f = 0; f < FRAMES; f++) {
       const g = grid(GRID_W, GRID_H);
-      smallCentred(g, game.title, 2, 1);
+      const width = smallCentred(g, game.title, 2, 1);
       RETRO_DRAW[game.id](g, f);
-      titleBones(g, 2);
+      if (width <= GRID_W - 10) titleBones(g, 2);
       frames.push(bake(g, palette, PIXEL, 0.45));
     }
     return frames;
@@ -2337,8 +2388,8 @@
     const game = RETRO[r], palette = retroPalette(r);
     return [true, false].map((lit) => {
       const g = grid(GRID_W, GRID_H);
-      smallCentred(g, game.title, 2, 1);
-      titleBones(g, 2);
+      const width = smallCentred(g, game.title, 2, 1);
+      if (width <= GRID_W - 10) titleBones(g, 2);
       rect(g, 33, 21, 5, 5, 3); rect(g, 34, 20, 3, 7, 3); at(g, 35, 22, 4);
       if (lit) { centred(g, "PRESS", 10, 2); centred(g, "START", 18, 2); }
       return bake(g, palette, PIXEL, 0.45);
@@ -4754,6 +4805,6 @@
   };
   Object.assign(BL.arcadeModels, {
     buildSteps,
-    caveRoom, blockHall, haunt, steelDoor, gargoyle, gargoyleLetter, GARGOYLE_EYES, gargoyleLaser, ARENA_TOTEMS, ironFence, IRON_FENCE, spotCan, spotRods, wheelAt, wheelStop, lanterns, ceiling, stage, mezzanine, wheel, clawMachine, claw, pinball, pinAt, airHockey, hockeyPieces, changer, ropes, retroFrames, retroStart, retroLine, ride, rideBeat, poolRing, dartSight, boardPost, pinFlipper, pinLight, pinTooth, pinRamp, clawMark, poolTable, poolBall, poolCue, poolDot, dartBoard, dart, dartOche, clawBooth, clawPrize, ticketStrip, fameBoard, fameFrame, prizeShelf, pennants, discoBall, speakers, tableProps, trashBin, ticketBucket, directory, wornPatch, backDoor, chainLink, prize, prizeCounter, staffHat, staffVest, staffProp, bulbFrame, zoneSign, posterFrame, posterArt, table, planterPot, hall, signFrame, rallyRepairBay, repairDriver, attractStart, bestLine, digit, board, skeeLane, skeeDot, hoopMachine, hoop, coconutShy, coconut, shyVine, coconutBall, balls, meter, arrow, snackBar
+    caveRoom, blockHall, blockWatchDoor, watchSignBoard, haunt, steelDoor, gargoyle, gargoyleLetter, GARGOYLE_EYES, gargoyleLaser, ARENA_TOTEMS, ironFence, IRON_FENCE, spotCan, spotRods, wheelAt, wheelStop, lanterns, ceiling, stage, mezzanine, wheel, clawMachine, claw, pinball, pinAt, airHockey, hockeyPieces, changer, ropes, retroFrames, retroStart, retroLine, ride, rideBeat, poolRing, dartSight, boardPost, pinFlipper, pinLight, pinTooth, pinRamp, clawMark, poolTable, poolBall, poolCue, poolDot, dartBoard, dart, dartOche, clawBooth, clawPrize, ticketStrip, fameBoard, fameFrame, prizeShelf, pennants, discoBall, speakers, tableProps, trashBin, ticketBucket, directory, wornPatch, backDoor, chainLink, prize, prizeCounter, staffHat, staffVest, staffProp, bulbFrame, zoneSign, posterFrame, posterArt, table, planterPot, hall, signFrame, rallyRepairBay, repairDriver, attractStart, bestLine, digit, board, skeeLane, skeeDot, hoopMachine, hoop, coconutShy, coconut, shyVine, coconutBall, balls, meter, arrow, snackBar
   });
 })();

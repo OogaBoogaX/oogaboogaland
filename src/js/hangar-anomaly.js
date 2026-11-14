@@ -517,7 +517,9 @@
     const dispose = () => { if (kind) end(); };
     // The Jet's lit mesh, kept on the GPU off the graph, so the lightning swaps it in without a hitch.
     const liveGeometry = (set) => { set.add(lit); };
-    return { update, lights, liveGeometry, dispose, debug, standsOn, keepsOut, get playing() { return !!kind; }, get dim() { return dim; }, get ambient() { return ambient; }, get rabbit() { return rabbit; },
+    // Put the next off: none for at least `s` s from now, however long it has been due.
+    const defer = (s) => { if (wait < s) wait = s; };
+    return { update, lights, liveGeometry, dispose, debug, standsOn, keepsOut, defer, get playing() { return !!kind; }, get dim() { return dim; }, get ambient() { return ambient; }, get rabbit() { return rabbit; },
       get powered() { return kind !== "blackout" || t < BLACKOUT.kill || t >= BLACKOUT.banks[BLACKOUT.banks.length - 1]; } };
   };
 
