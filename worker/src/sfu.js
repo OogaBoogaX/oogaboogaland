@@ -17,8 +17,9 @@ export const turnCredentials = async (env) => {
   // Staging can exercise an allocation renewal in five minutes. Production defaults to two hours.
   const configured = Number(env.REALTIME_TURN_TTL);
   const ttl = Number.isInteger(configured) && configured >= 300 && configured <= TURN_TTL ? configured : TURN_TTL;
+  // "manual": a redirect is a 3xx, not `ok`, so it reads as no relay (Workers' fetch has no "error" mode).
   const res = await fetch(`${TURN_BASE}/${key}/credentials/generate-ice-servers`, {
-    method: "POST", redirect: "error", signal: AbortSignal.timeout(5000),
+    method: "POST", redirect: "manual", signal: AbortSignal.timeout(5000),
     headers: { authorization: `Bearer ${env.REALTIME_TURN_TOKEN}`, "content-type": "application/json" },
     body: JSON.stringify({ ttl }),
   });
