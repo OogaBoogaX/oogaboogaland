@@ -22,6 +22,11 @@
     "run_worker_first": ["/auth/*", "/api/*", "/poker/*", "/room", "/game/*", "/donations/*", "/inspect"]
   },
   "vars": {
+    "ENVIRONMENT": "production",
+    // Ooga Chat's private bridge (worker/src/chat-bridge.js), comma-separated: bridge (every operation but hello),
+    // outdoor (island voices heard by Ooga Chat's audience), cloud (Ooga Chat speakers on clouds), commons (The Commons
+    // from Ooga Chat). Empty: the bridge answers hello alone. Deploying with it empty is the kill switch (docs/ooga-chat-backend.md).
+    "OOGA_CHAT_FEATURES": "",
     // Optional poker: set POKER_SERVICE_URL to the HTTPS service origin and POKER_SERVICE_TOKEN as a secret.
     // Missing either leaves live poker disabled. See docs/poker-integration.md.
     // Redirects, cookies and the Origin check all use this origin.

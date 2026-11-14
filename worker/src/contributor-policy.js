@@ -71,7 +71,7 @@ const within = (promise, ms) => {
 };
 export const createContributorLookup = (fetcher = fetch, clock = Date.now, patience = PENDING_MS) => {
   let rows = new Map(), until = 0, expires = 0, pending = null, pendingAt = 0;
-  return async (login) => {
+  const look = async (login) => {
     if (typeof login !== "string" || !LOGIN.test(login)) return null;
     if (pending && clock() - pendingAt >= patience) pending = null;
     if (clock() >= until && !pending) { pendingAt = clock(); pending = (async () => {
@@ -88,6 +88,9 @@ export const createContributorLookup = (fetcher = fetch, clock = Date.now, patie
     if (pending) await within(pending, patience);
     return clock() < expires ? rows.get(login.toLowerCase()) || null : null;
   };
+  // Whether a null from the last look means "not a contributor" (a verified snapshot is held) or "could not tell".
+  look.fresh = () => clock() < expires;
+  return look;
 };
 
 // The generated cast owns its handles, including aliases. A GitHub account with an
@@ -101,7 +104,7 @@ export const createOwnedCharacterLookup = (cast, lookup = createContributorLooku
       lastCommit: Math.floor(Date.parse(row.last_commit_at) / 1000),
     });
   }
-  return async (login, id) => {
+  const owned = async (login, id) => {
     if (typeof login !== "string" || !LOGIN.test(login) || login.includes("--")) return null;
     const account = globalThis.BL.accountIdentities.accountForId(id);
     if (account) {
@@ -113,4 +116,7 @@ export const createOwnedCharacterLookup = (cast, lookup = createContributorLooku
     if (handles.has(key)) return null;
     return lookup(login);
   };
+  // Ooga Chat's capability answer (worker/src/chat-capability.js) tells "ineligible" from "unknown" by this.
+  owned.fresh = () => typeof lookup.fresh === "function" ? lookup.fresh() : true;
+  return owned;
 };

@@ -26,6 +26,8 @@ import { inspectEdge } from "./inspect-report.js";
 export { Room } from "./room.js";
 export { GameHost } from "./game-host.js";
 export { Inspector } from "./inspector.js";
+// Ooga Chat's private door (docs/ooga-chat-backend.md): reachable only through a service binding that names it.
+export { ChatBridge } from "./chat-bridge.js";
 
 const ROOM_NAME = "island";
 

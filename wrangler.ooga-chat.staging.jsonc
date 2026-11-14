@@ -1,0 +1,67 @@
+{
+  // Ooga Chat's staging edge (docs/ooga-chat-backend.md): the staged app and its server routes on one origin. It shares
+  // nothing with oogaboogaland-staging but the private bridge below: its own D1, OAuth apps, cookies and rate counters.
+  "name": "ooga-chat-staging",
+  "main": "worker/chat/src/index.js",
+  // The island Workers' date, whose WebSocket close and hibernation behaviour they already rely on.
+  "compatibility_date": "2026-10-02",
+  "account_id": "1e5c1e8f7c343bf6cabced151b1ae2c6",
+  // Staging lives on workers.dev until the ooga.chat zone is on this account (it is on Squarespace's nameservers today);
+  // then it moves to staging.ooga.chat with a custom-domain route and SITE_ORIGIN, and its OAuth callbacks with it.
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  "assets": {
+    // `npm run build:ooga-chat` stages the app here (#651), with its own _headers and 404.html.
+    "directory": "./untracked/ooga-chat",
+    "binding": "ASSETS",
+    "html_handling": "drop-trailing-slash",
+    "not_found_handling": "404-page",
+    // Only these paths run the Worker; an unknown one under them answers a JSON 404, never the app's HTML.
+    "run_worker_first": ["/api/*", "/auth/*", "/donations/*"]
+  },
+  "vars": {
+    "ENVIRONMENT": "staging",
+    // Redirects, cookies, OAuth callbacks and the Origin check all use this origin.
+    "SITE_ORIGIN": "https://ooga-chat-staging.wickedsmartbitcoin.workers.dev",
+    // Comma-separated: github, x, listen, speak, feed, commons, cloud. Empty: the app browses its public panels only.
+    // A flag counts only when what it needs is configured too (worker/chat/src/config.js `effective`).
+    "FEATURES": "",
+    // OogaBoogaX's "Ooga Chat (staging)" OAuth App (callback <SITE_ORIGIN>/auth/github/callback). A client id is public.
+    "GITHUB_CLIENT_ID": "Ov23limsSaK7tng3ziBP",
+    // @w_s_bitcoin's "Ooga Chat" X app, OAuth 2.0 confidential client (callbacks for both environments). Public.
+    "X_CLIENT_ID": "SkNWYXRycmFpLWt4Z1hHSUl6RzM6MTpjaQ"
+    // Secrets, never here (worker/chat/dev.vars.example lists them): GITHUB_CLIENT_SECRET, X_CLIENT_SECRET.
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ooga-chat-staging",
+      "database_id": "109e1799-1fdb-45e2-a8b4-af82f5ff5f18",
+      "migrations_dir": "worker/chat/migrations"
+    }
+  ],
+  "services": [
+    // The island Worker's private ChatBridge entrypoint (worker/src/chat-bridge.js): capabilities, public data, the
+    // audience and media. Deploy oogaboogaland-staging with the entrypoint first, or this deploy fails on the binding.
+    { "binding": "OBL", "service": "oogaboogaland-staging", "entrypoint": "ChatBridge" },
+    // bananapayserver's staging PageApi, on signet: /donations/* (#664).
+    { "binding": "DONATIONS", "service": "bananapayserver-staging", "entrypoint": "PageApi" }
+  ],
+  // Daily: purge expired sessions and abandoned sign-ins.
+  "triggers": { "crons": ["15 4 * * *"] },
+  // Namespaces are per account: the island's staging counters use 2001-2009, Ooga Chat's staging 2010-2014.
+  "ratelimits": [
+    // Public reads (bootstrap, health, panels) per IP.
+    { "name": "CHAT_PUBLIC_LIMITER", "namespace_id": "2010", "simple": { "limit": 120, "period": 60 } },
+    // Sign-in starts and callbacks per IP.
+    { "name": "CHAT_AUTH_LIMITER", "namespace_id": "2011", "simple": { "limit": 10, "period": 60 } },
+    // Audience and Commons socket upgrades per principal.
+    { "name": "CHAT_SOCKET_LIMITER", "namespace_id": "2012", "simple": { "limit": 20, "period": 60 } },
+    // Media signalling per principal.
+    { "name": "CHAT_MEDIA_LIMITER", "namespace_id": "2013", "simple": { "limit": 120, "period": 60 } },
+    // Profile picture fetches per IP.
+    { "name": "CHAT_AVATAR_LIMITER", "namespace_id": "2014", "simple": { "limit": 120, "period": 60 } }
+  ]
+}
