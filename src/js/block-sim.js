@@ -429,115 +429,119 @@
       puddles: [[-6, 9], [11, 3], [-9, 19], [16, 15], [3, 21.2]].flatMap(([x, z]) => [[x, z], [-x, -z]])
     };
   };
-  // Haunted Hollow: a bigger field (60 x 100 m), a graveyard, and at each end a haunted house up on a raised yard 3 m
-  // high, reached by stairs at its front. The block isn't out in the open: it's down in the cellar under the yard, in
-  // the back room of a little maze. The cellar has three ways in: the side doors at ground level, through a front
-  // passage and a middle one (each wall leaving a gap at the other end), the stairs down from inside the house,
-  // which come out right by the block, or the back door (`backDoors`), a wide doorway in the back wall right behind the
-  // block, opening onto the ground behind the house. `nav` is the cellar's way through, for the bots.
+  // Haunted Hollow: the other maps' field, a graveyard down its middle and a haunted house at each end. A house is two
+  // floors, open to the sky: the block is in its cellar, one room at ground level, and the upper floor (`YARD` up) is
+  // reached by the porch stairs and the front door. Four ways to the block: the porch, the front door and the stairs
+  // down inside; the side door at ground level; the back door (`backDoors`), a wide doorway in the back wall right
+  // behind the block, from the ground behind the house; or the jetpack onto the upper floor. Windows in the cellar's
+  // front wall show the block from the field and let paint through. Down the middle runs one avenue: porch, the
+  // graveyard's gate in its iron fence, the mausoleum. `nav` is the way round and through a house, for the bots, and
+  // `kinds` says what each of the map's own boxes is, for the models.
   const hauntedHollow = () => {
-    const half = [], steps = [], decor = [];
-    const YARD = 3, UNDER = 2.7;
+    const half = [], steps = [], decor = [], kinds = new Map();
+    const put = (kind, ...boxes) => { for (const b of boxes) { half.push(b); kinds.set(b, kind); } };
+    const YARD = 3, UNDER = 2.7, H = YARD + 3.2;
     // The back door's opening [x0, x1] in the back wall, 2.4 m wide, beside the block's stand.
-    const DOOR = [-12.2, -9.8];
-    // The yard over the cellar: a floor with the stairwell's hole in it.
-    half.push([-14, 14, 32, 43, YARD, UNDER], [-14, 14, 46.8, 49, YARD, UNDER], [-14, -6, 43, 46.8, YARD, UNDER], [-3, 14, 43, 46.8, YARD, UNDER]);
-    // The cellar's outer walls, a side door into its front passage at each side and the back door behind the block:
-    // the back wall either side of it, a timber post each side (0.3 m wide, standing 0.1 m proud of the wall) and a
-    // lintel across, 2.4 m up under the yard's floor.
-    half.push([-14, 14, 32, 32.4, UNDER, 0], [-14, DOOR[0] - 0.3, 48.6, 49, UNDER, 0], [DOOR[1] + 0.3, 14, 48.6, 49, UNDER, 0]);
-    half.push([DOOR[0] - 0.3, DOOR[0], 48.5, 49.1, UNDER, 0], [DOOR[1], DOOR[1] + 0.3, 48.5, 49.1, UNDER, 0], [DOOR[0] - 0.3, DOOR[1] + 0.3, 48.5, 49.1, UNDER, 2.4]);
-    for (const s of [-1, 1]) {
-      const x0 = s > 0 ? 13.6 : -14, x1 = s > 0 ? 14 : -13.6;
-      half.push([x0, x1, 32.4, 33, UNDER, 0], [x0, x1, 35.5, 48.6, UNDER, 0]);
-    }
-    // The maze: the front passage's wall leaves a gap on the right, the middle passage's on the left.
-    half.push([-13.6, 8, 38, 38.4, UNDER, 0], [-8, 13.6, 42, 42.4, UNDER, 0]);
-    // Junk down there: barrels and boxes to hide behind.
-    half.push(at(-3, 35.5, 1, 1, 1.1), at(4, 36.5, 1.2, 0.8, 1.4), at(-9, 41.5, 0.9, 0.9, 1.2), at(5, 39, 1, 1, 1), at(8, 46, 1.4, 1, 1.6), at(-13, 44, 0.8, 0.8, 1.2));
-    // Stairs from the field up to the yard, seven steps either side of its middle.
-    for (let k = 1; k <= 7; k++) { const b = [-3, 3, 32 - (8 - k) * 0.49, 32 - (7 - k) * 0.49, k * YARD / 7, 0]; half.push(b); steps.push(b); }
-    // Stairs from inside the house down to the cellar's back room, along the hole, and a rail round it.
-    for (let k = 1; k <= 6; k++) { const b = [-6, -3, 43 + (k - 1) * 0.45, 43 + k * 0.45, YARD - k * YARD / 7, 0]; half.push(b); steps.push(b); }
-    half.push([-6.2, -6, 43, 47, YARD + 0.9, YARD], [-3, -2.8, 43, 47, YARD + 0.9, YARD], [-6, -3, 46.8, 47, YARD + 0.9, YARD]);
-    // The house on the yard: open to the sky, a front door, a side door to the yard, windows in its sides.
-    const H = YARD + 3.2;
-    half.push([-8, -1.3, 36, 36.4, H, YARD], [1.3, 8, 36, 36.4, H, YARD], [-8, 8, 46.6, 47, H, YARD]);
-    half.push([-8, -7.6, 36.4, 46.6, YARD + 1, YARD], [-8, -7.6, 36.4, 46.6, H, YARD + 2.2]);
-    half.push([7.6, 8, 36.4, 40, H, YARD], [7.6, 8, 42, 46.6, H, YARD], [7.6, 8, 40, 42, H, YARD + 2.4]);
-    // A rail round the yard's edge, open over the front stairs.
-    half.push([-14, -3, 32, 32.2, YARD + 0.7, YARD], [3, 14, 32, 32.2, YARD + 0.7, YARD], [-14, -13.8, 32, 49, YARD + 0.7, YARD], [13.8, 14, 32, 49, YARD + 0.7, YARD]);
-    // Inside the house: a table and an old wardrobe.
-    half.push(at(3, 40, 2, 1, YARD + 0.8, YARD), at(6.5, 45.5, 1.6, 0.8, YARD + 2.2, YARD));
-    // The graveyard: rows of headstones for cover, an iron fence, dead trees, and a crypt at each side.
-    for (const [x, z] of [[-9, 12], [-6, 12], [-3, 12], [3, 14], [6, 14], [9, 14], [-12, 18], [-9, 18], [12, 20], [15, 20], [-16, 7], [16, 9]]) half.push(at(x, z, 1, 0.35, 1.1));
-    half.push([-20, -12, 25, 25.3, 1.3, 0], [12, 20, 25, 25.3, 1.3, 0]);
-    // The tall iron gate before the house, a lone panel (`hauntModels.IRON_FENCE`'s width): solid, the way round either end.
-    half.push([-2.3, 2.3, 24.4, 24.6, 3.9, 0]);
-    const deadTree = (x, z, top = 5.5) => { half.push(at(x, z, 0.7, 0.7, top)); decor.push({ kind: "deadtree", x, z, y: top, r: 1.8 }); };
-    deadTree(-20, 14); deadTree(20, 16, 6); deadTree(-7, 22, 5); deadTree(23, 30, 6.5); deadTree(-24, 34, 6);
-    half.push([-25, -19, 4, 8, 2.6, 0]);
-    // The mausoleum in the middle, put in once: a stone tomb to climb and fight over, steps at each end.
-    const middle = [[-3, 3, -2, 2, 2.6, 0]];
-    for (const s of [-1, 1]) for (let k = 1; k <= 5; k++) middle.push([-1.2, 1.2, s > 0 ? 2 + (5 - k) * 0.45 : -2 - (6 - k) * 0.45, s > 0 ? 2 + (6 - k) * 0.45 : -2 - (5 - k) * 0.45, k * 2.6 / 6, 0]);
-    const tower = [-27, -24, 36, 39], gap = [37.4, 38.6];
-    const { BLOCKS, steps: stepSet } = turnedMap(half, middle, steps, tower, gap);
+    const DOOR = [-5.7, -3.3];
+    // The upper floor over the cellar, with the stairwell's hole in it.
+    put("floor", [-8, 8, 23, 26, YARD, UNDER], [-8, 8, 29.8, 33, YARD, UNDER], [-8, 3, 26, 29.8, YARD, UNDER], [6, 8, 26, 29.8, YARD, UNDER]);
+    // The cellar's front wall: piers at the corners and behind the porch, and between them a window, a low band and a
+    // high one with a gap at chest height (too low to crawl through).
+    put("cellar", [-8, -7, 23, 23.4, UNDER, 0], [-2.4, 2.4, 23, 23.4, UNDER, 0], [7, 8, 23, 23.4, UNDER, 0]);
+    for (const [x0, x1] of [[-7, -2.4], [2.4, 7]]) put("cellar", [x0, x1, 23, 23.4, 1, 0], [x0, x1, 23, 23.4, UNDER, 1.9]);
+    // Its side walls, the right one with the side door, and the back door behind the block: the back wall either side
+    // of it, a timber post each side (0.3 m wide, standing 0.1 m proud of the wall) and a lintel across, 2.4 m up
+    // under the floor.
+    put("cellar", [-8, -7.6, 23.4, 32.6, UNDER, 0], [7.6, 8, 23.4, 24.4, UNDER, 0], [7.6, 8, 26.6, 32.6, UNDER, 0]);
+    put("cellar", [-8, DOOR[0] - 0.3, 32.6, 33, UNDER, 0], [DOOR[1] + 0.3, 8, 32.6, 33, UNDER, 0]);
+    put("frame", [DOOR[0] - 0.3, DOOR[0], 32.5, 33.1, UNDER, 0], [DOOR[1], DOOR[1] + 0.3, 32.5, 33.1, UNDER, 0], [DOOR[0] - 0.3, DOOR[1] + 0.3, 32.5, 33.1, UNDER, 2.4]);
+    // Two barrels down there, out of the doors' way.
+    put("barrel", at(-6.7, 24.4, 1, 1, 1.2), at(6.9, 32, 1, 1, 1.2));
+    // The porch: seven steps from the forecourt up to the front door.
+    for (let k = 1; k <= 7; k++) { const b = [-2, 2, 23 - (8 - k) * 0.49, 23 - (7 - k) * 0.49, k * YARD / 7, 0]; half.push(b); steps.push(b); }
+    // Stairs from the upper floor down into the cellar, along the hole, and a rail round it.
+    for (let k = 1; k <= 6; k++) { const b = [3, 6, 26 + (k - 1) * 0.45, 26 + k * 0.45, YARD - k * YARD / 7, 0]; half.push(b); steps.push(b); }
+    put("rail", [2.8, 3, 26, 30, YARD + 0.9, YARD], [6, 6.2, 26, 30, YARD + 0.9, YARD], [3, 6, 29.8, 30, YARD + 0.9, YARD]);
+    // The house's walls: the front with its door, the sides with a window band, the back.
+    put("house", [-8, -1.4, 23, 23.4, H, YARD], [1.4, 8, 23, 23.4, H, YARD], [-1.4, 1.4, 23, 23.4, H, YARD + 2.4], [-8, 8, 32.6, 33, H, YARD]);
+    for (const [x0, x1] of [[-8, -7.6], [7.6, 8]]) put("house", [x0, x1, 23.4, 32.6, YARD + 1, YARD], [x0, x1, 23.4, 32.6, H, YARD + 2.2]);
+    // The crooked gable over the front: four courses, each narrower and further to one side.
+    for (let k = 1; k <= 4; k++) put("gable", [0.4 * k - 8 + 1.6 * k, 0.4 * k + 8 - 1.6 * k, 23, 23.4, H + k * 0.75, H + (k - 1) * 0.75]);
+    // The tower in the back corner, over the block, and its witch-hat roof: eaves, cone and tip, each a ledge to land on.
+    put("tower", [-8.2, -5.2, 30.2, 33.2, 9.4, YARD]);
+    put("roof", [-8.5, -4.9, 29.9, 33.5, 9.9, 9.4], [-7.8, -5.4, 30.6, 33, 11, 9.9], [-7, -5.8, 31.4, 32.6, 12.2, 11]);
+    // The graveyard's gate across the avenue: two stone pillars, an iron arch over them (walked under), and the iron
+    // fence running out either side, low enough to jump, with the way round its ends.
+    put("pillar", at(-2.6, 14, 0.9, 0.9, 3.4), at(2.6, 14, 0.9, 0.9, 3.4));
+    put("arch", [-3.05, 3.05, 13.8, 14.2, 4.1, 3.4]);
+    put("fence", [-9.5, -3.05, 13.9, 14.1, 1.3, 0], [3.05, 9.5, 13.9, 14.1, 1.3, 0]);
+    // The graves: a row of three headstones and a family tomb (`tombs`, with its epitaph) either side of the avenue.
+    for (const [x, z] of [[-10, 10], [-7.5, 10], [-5, 10], [5, 6], [7.5, 6], [10, 6]]) put("stone", at(x, z, 1, 0.35, 1.1));
+    const tombs = [[8, 10], [-8, 6]];
+    for (const [x, z] of tombs) put("tomb", at(x, z, 2.4, 0.5, 1.6));
+    const deadTree = (x, z, top) => { put("trunk", at(x, z, 0.7, 0.7, top)); decor.push({ kind: "deadtree", x, z, y: top, r: 1.8 }); };
+    deadTree(-15, 11, 6); deadTree(16, 13, 5.2);
+    // The mausoleum in the middle, put in once: a stone tomb to climb and fight over, steps at each end, and the
+    // obelisk on its roof.
+    const middle = [[-3, 3, -2, 2, 2.6, 0], at(0, 0, 1.1, 1.1, 5.4, 2.6)];
+    kinds.set(middle[0], "crypt"); kinds.set(middle[1], "obelisk");
+    for (const s of [-1, 1]) for (let k = 1; k <= 5; k++) { const b = [-1.2, 1.2, s > 0 ? 2 + (5 - k) * 0.45 : -2 - (6 - k) * 0.45, s > 0 ? 2 + (6 - k) * 0.45 : -2 - (5 - k) * 0.45, k * 2.6 / 6, 0]; middle.push(b); kinds.set(b, "crypt"); }
+    const { BLOCKS, steps: stepSet } = turnedMap(half, middle, steps);
+    // Red's boxes follow blue's one for one (`turnedMap`), and are the same things.
+    for (let i = 0; i < half.length; i++) if (kinds.has(half[i])) kinds.set(BLOCKS[middle.length + 2 * i + 1], kinds.get(half[i]));
     const allDecor = [];
     for (const d of decor) allDecor.push(d, { ...d, x: -d.x, z: -d.z });
     const two = (list) => [...list, ...flip(list)];
-    // The cellar's way through, blue's (red's turned): each side door outside and in, the gap at each passage's
-    // end, and the back room.
-    const navHalf = [[-15.4, 34.2], [-12.6, 34.2], [15.4, 34.2], [12.6, 34.2], [11, 36.4], [11, 40.2], [-11, 40.2], [-11, 44], [-10.5, 46], [-4.5, 46.4], [-16.5, 31], [16.5, 31], [-16.5, 49.6], [16.5, 49.6],
-      // Across the graveyard to the other half.
-      [10, 0], [22, 0], [-10.5, 22], [10.5, 22], [0, 17], [-17, 12],
-      // The way up through the house: the foot of the cellar stairs, their top on the house floor, inside the front door,
-      // the yard before it, and the foot of the front stairs (indices 20 to 24, joined by `links`).
-      // The middle three are up on the yard: a node's third number is its floor, 0 if left out.
-      [-4.5, 46.6], [-4.5, 42.3, YARD], [0, 37.6, YARD], [0, 34.2, YARD], [0, 27.8],
-      // The scoring ring behind the house.
-      [0, 51.5],
-      // The back door: outside it behind the house, and inside it by the block (indices 26 and 27).
-      [(DOOR[0] + DOOR[1]) / 2, 50.4], [(DOOR[0] + DOOR[1]) / 2, 47.6]];
+    // The way round and through a house, blue's (red's turned): outside and inside the side door and the cellar's
+    // front (0 to 2), outside and inside the back door (3 and 4), the house's back and front corners (5 to 8), the
+    // scoring ring (9), the way up through the house (10 to 13: the foot of the cellar stairs, their top on the upper
+    // floor, inside the front door, and the porch's foot, joined by `links`), and the graveyard: through the gate,
+    // the fence's ends, either side of the mausoleum and out by the side line. A node's third number is its floor,
+    // 0 if left out.
+    const navHalf = [[9.4, 25.5], [6.6, 25.2], [1.5, 24.9], [(DOOR[0] + DOOR[1]) / 2, 34.4], [(DOOR[0] + DOOR[1]) / 2, 31.6],
+      [-9.6, 34.4], [9.6, 34.4], [-9.6, 21], [9.6, 21], [0, 36],
+      [4.5, 30.6], [4.5, 25, YARD], [0, 24.6, YARD], [0, 18.2],
+      [0, 11.5], [-10.8, 12.9], [10.8, 12.9], [-4.8, 0], [14.5, 0]];
     // Node pairs joined though a straight line between them crosses a step (the stairs are walked, not seen through).
-    const linkHalf = [[20, 21], [21, 22], [22, 23], [23, 24], [8, 20]];
+    const linkHalf = [[10, 11], [11, 12], [12, 13]];
     return {
-      id: "haunted", name: "Haunted Hollow", BLOCKS, steps: stepSet, decor: allDecor,
-      // Open graves: pits too deep for one jump (`GRAVE_Y`), a double jump, the jetpack or the hook out, footprints on blue's side, turned for red.
-      graves: [[-19, -17.5, 16.5, 19.5], [24, 25.5, 19, 22], [-22, -20.5, 27, 30]].flatMap((g) => [g, [-g[1], -g[0], -g[3], -g[2]]]),
-      gorillas: [[-14, 2], [14, -2], [8, 22], [-8, -22]],
-      // Hub-style terrain (`mound`, `cave`, `outcrop`) and the grappling hooks' hand-checked hiding spots [x, y, z]:
-      // in the cave, on the mound's top, behind the outcrop.
-      terrain: [...cave(23, 28, 8, 13), ...mound(-29, -25, 12, 18), ...outcrop(3, 5, 5, 6.5)],
-      hookSpots: [[25.5, 0, 10.5], [-27, 2, 15], [4, 0, 7.4]],
-      // The rivals' block isn't marked on the mini-map until it's out of its cellar: it has to be found.
-      hidden: true,
-      W: 30, L: 50, tower, gap, spawnZ: 26.6,
-      // The block's stand, in the cellar's back room.
-      stands: { blue: { x: -10.5, z: 46 }, red: { x: 10.5, z: -46 } },
-      // Where a stolen block is mined: out behind your own house, at the back of the map, a run round the building.
-      goals: { blue: { x: 0, z: 52.5 }, red: { x: 0, z: -52.5 } },
-      // Where the visitor's Ooga stands on show on the board: before its house's stairs.
-      showcase: { blue: { x: 4, z: 24 }, red: { x: -4, z: -24 } },
-      // A catapult drops its Ooga into the other house, right over its stairs down.
-      drops: { blue: [4.5, -44], red: [-4.5, 44] },
-      zipEnd: [-4, 3.1, -29],
-      // Each house's cellar, and where an Ooga up on its yard drops in: the top of the stairs inside the house.
-      cellars: [{ box: [-14, 14, 32, 49], entry: [-4.5, 43.4] }, { box: [-14, 14, -49, -32], entry: [4.5, -43.4] }],
+      id: "haunted", name: "Haunted Hollow", BLOCKS, steps: stepSet, decor: allDecor, kinds,
+      // Open graves: pits too deep for one jump (`GRAVE_Y`), a double jump, the jetpack or the hook out, footprints on
+      // blue's side, turned for red: one before the left tomb, one out by the right-hand tree.
+      graves: [[-8.75, -7.25, 1.7, 4.7], [13.2, 14.7, 7.5, 10.5]].flatMap((g) => [g, [-g[1], -g[0], -g[3], -g[2]]]),
+      // The family tombs [x, z], blue's then red's turned: the models carve an epitaph on each.
+      tombs: two(tombs),
+      gorillas: [[-14, 2], [14, -2], [10.5, 18], [-10.5, -18]],
+      // The grappling hooks' hand-checked hiding spots [x, y, z]: behind the dead tree, behind a tomb, on the gate's arch.
+      hookSpots: [[-15, 0, 12.2], [8, 0, 11.2], [0, 4.1, 14]],
+      vends: [[-16.5, 7.5], [16.5, -7.5]],
+      spawnZ: 17.6,
+      // The block's stand, in the cellar by the back door.
+      stands: { blue: { x: -4, z: 30 }, red: { x: 4, z: -30 } },
+      // Where a stolen block is mined: out behind your own house, at the back of the field.
+      goals: { blue: { x: 0, z: 36 }, red: { x: 0, z: -36 } },
+      // Where the visitor's Ooga stands on show on the board: on the forecourt, before its porch.
+      showcase: { blue: { x: 3.5, z: 17 }, red: { x: -3.5, z: -17 } },
+      // A catapult drops its Ooga onto the other house's upper floor, at the top of its stairs down.
+      drops: { blue: [-4.5, -24.6], red: [4.5, 24.6] },
+      // A zipline comes down beside the other house's porch.
+      zipEnd: [-4.5, 3.1, -20.6],
       // Each cellar's back door [x0, x1, z0, z1], the opening through its back wall: blue's, then red's turned.
-      backDoors: [[DOOR[0], DOOR[1], 48.6, 49], [-DOOR[1], -DOOR[0], -49, -48.6]],
+      backDoors: [[DOOR[0], DOOR[1], 32.6, 33], [-DOOR[1], -DOOR[0], -33, -32.6]],
       nav: { blue: navHalf, red: navHalf.map(([x, z, y]) => y ? [-x, -z, y] : [-x, -z]), links: [...linkHalf, ...linkHalf.map(([i, j]) => [i + navHalf.length, j + navHalf.length])] },
-      guard: { blue: { x: 0, z: 29 }, red: { x: 0, z: -29 } },
-      traps: two([[0, 35.4], [10, 40.2], [-12, 15], [16, 2], [-6, 26], [-1, 44]]),
-      crates: both([[-6, 23], [6, 23], [-9, 29], [9, 29]]),
-      plug: both([[-6, 27], [6, 27], [-3.5, 22]]),
-      alley: both([[-17.5, 29.5], [17.5, 29.5]]),
-      caches: [[10, YARD, 38], [-10, YARD, -38], [0, 0, 40.2], [0, 0, -40.2], [0, 2.6, 0]],
-      tramps: two([[-17, 22], [10, 6]]),
-      powers: two([[-12, 34.2], [5, 44.5], [18, 12], [0, 9]]),
-      fire: [-24, 0],
-      catapults: both([[-9, 27]]),
-      // The ghosts' haunts [x, z, reach]: one in each cellar, and two in each half of the graveyard.
-      ghosts: two([[0, 40, 6], [-12, 14, 7], [12, 18, 6]])
+      guard: { blue: { x: 0, z: 17.2 }, red: { x: 0, z: -17.2 } },
+      traps: two([[1, 25.2], [-13, 16], [12, 12.2], [3.4, 9]]),
+      crates: both([[-4.6, 18.6], [4.6, 18.6], [-6.5, 21], [6.5, 21]]),
+      // The defenders plug the gate, three across between its pillars.
+      plug: both([[-1.4, 14], [0, 14], [1.4, 14]]),
+      alley: both([[-12.5, 30], [12.5, 23]]),
+      caches: [[-3, YARD, 27], [3, YARD, -27], [2, 2.6, 0], [-2, 2.6, 0]],
+      tramps: two([[-15, 19], [12, 3.5]]),
+      powers: two([[-6.5, 17.5], [18.5, 9], [5, 3]]),
+      fire: [-20, 0],
+      catapults: both([[-11.5, 20]]),
+      // The ghosts' haunts [x, z, reach]: one in each cellar and one by each half's open grave, blue's then red's turned.
+      ghosts: [[1, 27, 5], [-8, 7, 7]].flatMap(([x, z, r]) => [[x, z, r], [-x, -z, r]])
     };
   };
   const ARENAS = { fort: fortChaos(), town: oogaTown(), jungle: gorillaJungle(), haunted: hauntedHollow() };
@@ -852,7 +856,7 @@
   };
   // True when the straight line from (ax, az) to (bx, bz) misses every box, widened by r, that stands on the ground.
   // `over` skips boxes lower than it: a throw at chest height clears crates and low walls, and any open grave.
-  // `floor` reads it on a raised floor instead (Haunted Hollow's yards, for the bots' nav): only boxes standing on that
+  // `floor` reads it on a raised floor instead (Haunted Hollow's upper floors, for the bots' nav): only boxes standing on that
   // floor count, not the cellar's walls under it.
   const clearLine = (ax, az, bx, bz, r, over = 0, floor = 0) => {
     // Open graves count as in the way of a walk, so bots go round them.
@@ -2150,9 +2154,9 @@
       }
     }
   };
-  // ---- Finding the way (maps with a `nav`: Haunted Hollow's cellars) ----
+  // ---- Finding the way (maps with a `nav`: Haunted Hollow's houses) ----
   // The nodes of both halves, and which pairs see each other past the fixed blocks, worked out once a map.
-  const navCache = {};
+  const navCache = {}, STAIRS_S = 2;
   const navFor = () => {
     let N = navCache[ARENA.id];
     if (N) return N;
@@ -2166,7 +2170,7 @@
     N = navCache[ARENA.id] = { pts, see, linked, dist: new Float64Array(n + 1), prev: new Int16Array(n + 1), done: new Uint8Array(n + 1), seeEnd: new Uint8Array(n) };
     return N;
   };
-  // When the bot can't run straight at its goal (or is up on a yard), the next node on the shortest way there through
+  // When the bot can't run straight at its goal (or is up on a house's floor), the next node on the shortest way there through
   // the nodes on its own floor (seen past only that floor's boxes), every half second.
   const navigate = (sim, a, dt) => {
     if (!ARENA.nav || a.riding || a.flight || a.climbing) return;
@@ -2174,12 +2178,17 @@
     const N = navFor(), pts = N.pts, n = pts.length;
     // Heading for a stairs node, run straight at it: the steps are walked up, not steered round.
     const onStairs = (i) => N.linked.has(i) && Math.hypot(pts[i][0] - a.x, pts[i][1] - a.z) < 7;
-    if (a.navI >= 0 && (a.navT -= dt) > 0 && Math.hypot(pts[a.navI][0] - a.x, pts[a.navI][1] - a.z) > 0.7) { goal.x = pts[a.navI][0]; goal.z = pts[a.navI][1]; a.botStraight = onStairs(a.navI); return; }
+    // On its way to a stairs node it keeps going till it is there (`STAIRS_S` at most): halfway down a flight it stands
+    // on neither floor, and a fresh look from there would turn it back.
+    if (a.navI >= 0 && (a.navT -= dt) > (onStairs(a.navI) ? -STAIRS_S : 0) && Math.hypot(pts[a.navI][0] - a.x, pts[a.navI][1] - a.z) > 0.7) { goal.x = pts[a.navI][0]; goal.z = pts[a.navI][1]; a.botStraight = onStairs(a.navI); return; }
+    // With no way found it runs straight at its goal (`navI` -2) until the next look, rather than looking every step.
+    if (a.navI === -2 && (a.navT -= dt) > 0) return;
     a.navT = 0.5;
     // Dijkstra from the bot: node i's distance, the goal as node n.
     const { dist, prev, done, seeEnd } = N;
-    // The bot is on the floor it stands on; goals are on the ground.
-    const level = a.y > 1.5 ? 3 : 0;
+    // The bot is on the floor it stands on, or the one under it while it is in the air (a jump on the field is still
+    // on the ground); goals are on the ground.
+    const level = (a.grounded ? a.y : groundAt(a.x, a.z, a.y + 0.1)) > 1.5 ? 3 : 0;
     for (let i = 0; i < n; i++) {
       const pl = pts[i][2] || 0;
       seeEnd[i] = pl === 0 && clearLine(pts[i][0], pts[i][1], goal.x, goal.z, CONFIG.BODY_R * 0.8) ? 1 : 0;
@@ -2201,9 +2210,11 @@
       }
     }
     if (prev[n] < 0) {
-      // No way through from here: the nearest node in sight, to get somewhere that has one.
-      let near = -1, nd = Infinity;
-      for (let i = 0; i < n; i++) if (dist[i] < nd) { nd = dist[i]; near = i; }
+      // No way through from here: the nearest node in sight, to get somewhere that has one. A goal no node sees at all
+      // (a hook in a cave) has no way through from anywhere: straight at it, steering as on a map without nodes.
+      let near = -1, nd = Infinity, seen = 0;
+      for (let i = 0; i < n; i++) { seen |= seeEnd[i]; if (dist[i] < nd) { nd = dist[i]; near = i; } }
+      if (!seen) near = -2;
       a.navI = near;
       if (near >= 0) { goal.x = pts[near][0]; goal.z = pts[near][1]; }
       return;

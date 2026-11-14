@@ -7966,15 +7966,20 @@ const gameRulesChecks = async () => {
       const goalOutside = noScore(r, r.flags.red);
       r = fresh("haunted"); lob(r, 1, "red", stand.x, stand.z, 3.2);
       const roof = noScore(r, r.flags.red);
-      // Struck a wall inside the zone: at 6 m/s it would have flown past the ring, but it falls where it hit.
-      r = fresh("haunted"); S.tick(r, C.STEP, still);
+      // Struck cover inside the zone: at 6 m/s it would have flown past the ring, but it falls where it hit.
+      // The rebuilt house leaves the ring clear, so place real buildable cover instead of relying on an old wall.
+      r = fresh("haunted");
+      Object.assign(r.actors[0], { x: goal.x, z: goal.z + 0.6, y: 0, grounded: true, flight: 0 });
+      const builtCover = S.build(r, 0, 0);
+      Object.assign(r.actors[0], { x: -3, z: 0 });
+      S.tick(r, C.STEP, still);
       let wall = null;
       for (let k = 0; k < 72 && !wall; k++) for (let d = 1; d < C.GOAL_R - 0.1 && !wall; d += 0.05) {
         const th = k / 72 * Math.PI * 2;
         if (S.solidAt(goal.x + Math.sin(th) * d, 0.65, goal.z + Math.cos(th) * d)) wall = { th, d };
       }
       seen = wall ? lob(r, 1, "red", goal.x + Math.sin(wall.th) * (wall.d - 0.6), goal.z + Math.cos(wall.th) * (wall.d - 0.6), 0.7, Math.sin(wall.th) * 6, Math.cos(wall.th) * 6) : [];
-      const hit = seen.find((k) => k.type === "capture"), offWall = !!wall && !!hit && r.score.blue === 1 && Math.abs(R2(hit, goal) - wall.d) < 0.15;
+      const hit = seen.find((k) => k.type === "capture"), offWall = builtCover && !!wall && !!hit && r.score.blue === 1 && Math.abs(R2(hit, goal) - wall.d) < 0.15;
       // A real arc through `pass` alone, from just the throw's range out, in by the gate.
       const arcFrom = (r) => { const a = r.actors[1], s = S.ARENAS.fort.stands.blue; a.x = s.x; a.z = s.z - 13.7; a.y = 0; a.vx = a.vz = 0; hold(r, 1, "red"); r.eventCount = 0; return S.pass(r, 1, 0); };
       r = fresh("fort");
@@ -8370,7 +8375,7 @@ const gameRulesChecks = async () => {
         [r, o] = air(3, 9); o.jetting = true;
         S.tick(r, C.STEP, held);
         out.thrown = o.vy;
-        const roofs = [["fort", 2, 0, 2.2], ["town", 0, 32.25, 2.7], ["haunted", 0, 36, 2.7]];
+        const roofs = [["fort", 2, 0, 2.2], ["town", 0, 32.25, 2.7], ["haunted", 0, 30.5, 2.7]];
         out.roofs = roofs.map(([map, x, z, roof]) => {
           const [q, a] = air(Math.max(0, roof - C.HEIGHT - 0.5), C.JET_RISE, map, x, z);
           let head = 0;
@@ -8630,7 +8635,7 @@ const gameRulesChecks = async () => {
       {
         const f1 = fresh("haunted"), a1 = f1.actors[0], c1 = f1.actors[2];
         for (const k of f1.crates) k.live = false;
-        Object.assign(a1, { hook: 1, x: -16, z: 23.9, y: 0 }); Object.assign(c1, { x: -16, z: 25.75, y: 0, carrying: "blue" });
+        Object.assign(a1, { hook: 1, x: -6, z: 12.8, y: 0 }); Object.assign(c1, { x: -6, z: 14.55, y: 0, carrying: "blue" });
         Object.assign(f1.flags.blue, { state: "carried", carrier: 2 });
         S.grapple(f1, 0, 0, -0.12);
         const fence = run(f1, 0.6);
@@ -8658,17 +8663,19 @@ const gameRulesChecks = async () => {
         const kinds = new Set();
         for (let n = 0; n < 40; n++) { calm.weather.left = 0; S.tick(calm, S.CONFIG.STEP, still); calm.eventCount = 0; kinds.add(calm.weather.kind); }
         rows.noWind = cu.x === 3 && cu.z === 3 && S.CONFIG.WIND === undefined && [...kinds].every((k) => k === "clear" || k === "storm") && kinds.size === 2;
-        // The tall iron gate is solid, with the way round either end of it open, and the block zones are at the back.
+        // Haunted Hollow's graveyard gate is walked through under its arch, the iron fence either side of it is solid, and
+        // the block zones are at the back; the map is the size of the others.
         const hg = fresh("haunted"), hu = hg.actors[0], hI = S.ARENAS.haunted;
         for (const k of hg.crates) k.live = false;
-        Object.assign(hu, { x: 0, z: 26, y: 0, grounded: true });
+        Object.assign(hu, { x: 0, z: 16, y: 0, grounded: true });
         run(hg, 1, { x: 0, z: -1 });
-        const stopped = hu.z > 24.5;
-        Object.assign(hu, { x: 3.2, z: 26, y: 0, vx: 0, vz: 0, grounded: true });
+        const through = hu.z < 13;
+        Object.assign(hu, { x: 6, z: 16, y: 0, vx: 0, vz: 0, grounded: true });
         run(hg, 1, { x: 0, z: -1 });
-        rows.gateSolid = stopped && hu.z < 23.5 && S.solidAt(0, 1.5, 24.5) && S.solidAt(0, 1.5, -24.5) && !S.solidAt(3.2, 1.5, 24.5);
-        const twn = S.ARENAS.town;
-        rows.blockZones = twn.stands.blue.z === 32.2 && twn.stands.red.z === -32.2 && hI.goals.blue.z === 52.5 && hI.goals.red.z === -52.5;
+        rows.gateSolid = through && hu.z > 14.1 && S.solidAt(6, 0.6, 14) && S.solidAt(-6, 0.6, -14) && !S.solidAt(0, 1.5, 14) && S.solidAt(0, 3.7, 14);
+        const twn = S.ARENAS.town, frt = S.ARENAS.fort;
+        rows.blockZones = twn.stands.blue.z === 32.2 && twn.stands.red.z === -32.2 && hI.goals.blue.z === 36 && hI.goals.red.z === -36;
+        rows.hauntedSize = hI.fieldW === frt.fieldW && hI.fieldL === frt.fieldL && hI.W === frt.W && hI.L === frt.L;
         rows.feeStorm = liveTry("storm") === "storm" && (() => { fees.weather.left = 0; S.tick(fees, S.CONFIG.STEP, still); return fees.weather.kind === "storm"; })();
         rows.feeNone = liveTry(null) === null;
         // An open grave: fall in, one jump can't clear the rim, a double jump does, a block can't rest inside, and a
@@ -8676,7 +8683,8 @@ const gameRulesChecks = async () => {
         const g = fresh("haunted"), gu = g.actors[0], I = S.ARENAS.haunted, [gx0, gx1, gz0, gz1] = I.graves[0], cx = (gx0 + gx1) / 2, cz = (gz0 + gz1) / 2;
         for (const k of g.crates) k.live = false;
         for (const o of g.actors) if (o.id) o.bot = true;
-        Object.assign(gu, { x: cx, z: cz, y: 0, grounded: true });
+        // Fresh paint keeps the ghost that haunts this grave off the Ooga while it climbs.
+        Object.assign(gu, { x: cx, z: cz, y: 0, grounded: true, guard: 9 });
         run(g, 0.7, still, () => gu.grounded && gu.y === S.GRAVE_Y);
         rows.graveFall = gu.y === S.GRAVE_Y && S.inGrave(gu.x, gu.z);
         const climb = { x: 0, z: 1, jump: 1 };
@@ -8756,6 +8764,75 @@ const gameRulesChecks = async () => {
       }
       record("block frenzy grapple: a hook found at a hidden spot bites rock and reels its Ooga in, yanks a block off a rival carrier but not a teammate, a mined block takes no hook, and a hook lost over the edge goes back into hiding", Object.values(rows).every(Boolean), JSON.stringify(rows));
       {
+        // Haunted Hollow's houses. The back door: each cellar's doorway is open at walking height under the upper floor,
+        // with the wall either side; a raider coming round the house takes the block through it on either side, and a
+        // defender at the stand chases a thief out through it. The other ways in: the side door, the porch stairs and
+        // the front door up to the upper floor, the stairs down from it into the cellar, and the cellar's front windows,
+        // open at chest height only. The scoring ring behind the house has nothing standing in it.
+        const hI = S.ARENAS.haunted, R = S.CONFIG.BODY_R, out = {};
+        S.create({ map: "haunted" });
+        out.open = hI.backDoors.every(([x0, x1, z0, z1]) => {
+          const xm = (x0 + x1) / 2, zm = (z0 + z1) / 2, s = Math.sign(zm);
+          return [0.2, 1, 1.7, 2.3].every((y) => [x0 + R, xm, x1 - R].every((x) => !S.solidAt(x, y, zm))) && S.solidAt(x0 - 0.5, 1, zm) && S.solidAt(x1 + 0.5, 1, zm) &&
+            S.solidAt(xm, 2.85, zm) && S.clearLine(xm, zm + s * 1.5, xm, zm - s * 1.5, R) && S.clearLine(xm, zm + s * 1.5, hI.goals[s > 0 ? "blue" : "red"].x, hI.goals[s > 0 ? "blue" : "red"].z, R);
+        });
+        out.ring = S.TEAMS.every((t) => { const g = hI.goals[t]; return [[0, 0], [2, 0], [-2, 0], [0, 2], [0, -2], [1.5, 1.5], [-1.5, -1.5]].every(([dx, dz]) => { const p = { x: g.x + dx, z: g.z + dz, y: 0 }; S.resolve(p, R, 0.05); return p.x === g.x + dx && p.z === g.z + dz && S.groundAt(p.x, p.z, 0.3) === 0; }); });
+        out.windows = [[-4.7, 23.2], [4.7, 23.2], [4.7, -23.2], [-4.7, -23.2]].every(([x, z]) => S.solidAt(x, 0.5, z) && !S.solidAt(x, 1.45, z) && S.solidAt(x, 2.3, z));
+        const nav = hI.nav, nn = nav.blue.length;
+        out.navLinks = nav.red.length === nn && nav.links.every(([i, j]) => i >= 0 && j >= 0 && i < nn * 2 && j < nn * 2 && (i < nn) === (j < nn));
+        // On foot through the house, either side: up the porch and in at the front door, down the stairs inside to the
+        // cellar floor, and out by the side door.
+        for (const [team, s] of [["blue", 1], ["red", -1]]) {
+          const q = fresh("haunted"), a = q.actors[0];
+          for (const k of q.crates) k.live = false;
+          const walk = (x, z, y, dx, dz, secs) => { Object.assign(a, { x: s * x, z: s * z, y, vx: 0, vy: 0, vz: 0, grounded: true, guard: 9 }); const mv = { x: s * dx, z: s * dz, sprint: 0, jump: 0 }; for (let t = 0; t < secs; t += S.CONFIG.STEP) { S.tick(q, S.CONFIG.STEP, mv); q.eventCount = 0; } return [s * a.x, s * a.z, a.y]; };
+          const up = walk(0, 18.5, 0, 0, 1, 1.4), down = walk(4.5, 25.4, 3, 0, 1, 1.2), side = walk(6.5, 25.5, 0, 1, 0, 0.8);
+          out[team + "Ways"] = up[2] === 3 && up[1] > 23.5 && down[2] === 0 && down[1] > 28.7 && side[0] > 8.4 && side[2] === 0;
+        }
+        const through = (a, [x0, x1, z0, z1], pz) => a.x > x0 && a.x < x1 && (pz - (z0 + z1) / 2) * (a.z - (z0 + z1) / 2) <= 0;
+        for (const [team, door, sx, sz] of [["blue", hI.backDoors[0], -13, 30], ["red", hI.backDoors[1], 13, -30]]) {
+          const q = fresh("haunted"), a = q.actors.find((o) => o.team !== team);
+          for (const k of q.crates) k.live = false;
+          Object.assign(a, { bot: true, role: "attack", x: sx, z: sz, y: 0 });
+          let via = false, t = 0;
+          for (; t < 10 && a.carrying !== team; t += S.CONFIG.STEP) { const pz = a.z; S.tick(q, S.CONFIG.STEP, still); q.eventCount = 0; if (through(a, door, pz)) via = true; }
+          out[team + "Steal"] = a.carrying === team && via;
+        }
+        const q = fresh("haunted"), d = q.actors[1], c = q.actors[2], st = hI.stands.blue;
+        for (const k of q.crates) k.live = false;
+        Object.assign(d, { bot: true, role: "defend", x: st.x, z: st.z - 1, y: 0 }); Object.assign(c, { x: -1.5, z: 37, y: 0, carrying: "blue" });
+        Object.assign(q.flags.blue, { state: "carried", carrier: 2 });
+        let chased = false;
+        for (let t = 0; t < 4 && !chased; t += S.CONFIG.STEP) { const pz = d.z; S.tick(q, S.CONFIG.STEP, still); q.eventCount = 0; if (through(d, hI.backDoors[0], pz)) chased = true; }
+        out.defend = chased;
+        // Regression: red's ghosts had no reach (the turned copies dropped it), so they never left their haunts. One in
+        // each half's graveyard now spooks an Ooga standing in its haunt.
+        out.ghosts = hI.ghosts.length === 4 && [2, 3].every((i) => {
+          const gq = fresh("haunted"), u = gq.actors[0], [gx, gz] = hI.ghosts[i];
+          for (const k of gq.crates) k.live = false;
+          Object.assign(u, { x: gx + 2.5, z: gz, y: 0, grounded: true });
+          let boo = false;
+          for (let t = 0; t < 6 && !boo; t += S.CONFIG.STEP) { S.tick(gq, S.CONFIG.STEP, still); for (let k = 0; k < gq.eventCount; k++) if (gq.events[k].type === "boo") boo = true; gq.eventCount = 0; }
+          return boo && gq.ghosts.every((g) => Number.isFinite(g.x + g.z));
+        });
+        record("block frenzy haunted house: each cellar's back door is open at walking height under the upper floor, walled either side and clear to the scoring ring, which stands empty; the porch, the front door, the stairs down, the side door and the barred windows are as built; a raider round the house takes the block through the back door on both sides, a defender at the stand chases a thief out through it, and a ghost in either half spooks whoever stands in its haunt", Object.values(out).every(Boolean), JSON.stringify(out));
+        // Raids from every start, on both sides: the two spawns, the avenue, either side line, beside the rivals' house
+        // and the raider's own scoring ring. A raider bot reaches the rivals' block in its cellar, by whichever way,
+        // and never stands stuck up on the house's floor (the nav once saw the cellar's walls under it, and a bot in
+        // the house lost its way for the rest of the round). Inside the house is its upper floor within its walls. The
+        // raider has a hook in hand, so none lying in a cave calls it aside.
+        const raids = {};
+        for (const [team, s] of [["blue", 1], ["red", -1]]) for (const [sx, sz] of [[-1.2, -17.6], [1.2, -16.4], [0, -8], [-18, 0], [16, -4], [-16, -6], [18, 10], [12, -30], [0, -36]]) {
+          const rq = fresh("haunted"), a = rq.actors.find((o) => o.team !== team);
+          for (const k of rq.crates) k.live = false;
+          Object.assign(a, { bot: true, role: "attack", x: s * sx, z: s * sz, y: 0, hook: 1 });
+          let t = 0, up = 0;
+          for (; t < 30 && a.carrying !== team; t += S.CONFIG.STEP) { S.tick(rq, S.CONFIG.STEP, still); rq.eventCount = 0; if (a.y > 2.5 && Math.abs(a.x) < 8 && Math.abs(a.z) > 23 && Math.abs(a.z) < 33) up += S.CONFIG.STEP; }
+          raids[`${team}@${s * sx},${s * sz}`] = a.carrying === team && up < 8 ? +t.toFixed(1) : `fail ${t.toFixed(1)}s, ${up.toFixed(1)}s in the house`;
+        }
+        record("block frenzy haunted raids: from the spawns, the avenue, the side lines, beside the house and the far ring, on both sides, a raider bot reaches the rivals' block within 30 s and never stands stuck on the house's floor", Object.values(raids).every((v) => typeof v === "number"), JSON.stringify(raids));
+      }
+      {
         // The rivals' zipline only carries a rider whose own block is home; grabbed with it gone, a trap door throws them
         // off the island as the enemy catapult does. Checked only at the grab, never on your own line, and bots know it.
         const zr = {};
@@ -8811,50 +8888,6 @@ const gameRulesChecks = async () => {
         zr.wire = BL.blockLive.EVENT_TYPES.at(-1) === "ziptrap" && BL.blockLive.ACTOR_EVENTS.includes("ziptrap") && BL.blockWire.WIRE === 5;
         record("block frenzy zipline trap: the rivals' line carries a rider whose own block is home and throws one whose block isn't off the island, a carried block going home with a fall; a rider already sliding rides on, your own line never springs, and expert bots only take the zip home with their block home",
           Object.values(zr).every(Boolean), JSON.stringify(zr));
-      }
-      {
-        // Haunted Hollow's back doors: each cellar's doorway is open at walking height under the yard's floor, with the
-        // wall either side; a raider coming round the house from the field takes the block through it on either side,
-        // and a defender at the stand chases a thief out through it.
-        const hI = S.ARENAS.haunted, R = S.CONFIG.BODY_R, out = {};
-        S.create({ map: "haunted" });
-        out.open = hI.backDoors.every(([x0, x1, z0, z1]) => {
-          const xm = (x0 + x1) / 2, zm = (z0 + z1) / 2, s = Math.sign(zm);
-          return [0.2, 1, 1.7, 2.3].every((y) => [x0 + R, xm, x1 - R].every((x) => !S.solidAt(x, y, zm))) && S.solidAt(x0 - 0.5, 1, zm) && S.solidAt(x1 + 0.5, 1, zm) &&
-            S.solidAt(xm, 2.85, zm) && S.clearLine(xm, zm + s * 1.5, xm, zm - s * 1.5, R) && S.clearLine(xm, zm + s * 1.5, hI.goals[s > 0 ? "blue" : "red"].x, hI.goals[s > 0 ? "blue" : "red"].z, R);
-        });
-        const nav = hI.nav, nn = nav.blue.length;
-        out.navLinks = nav.red.length === nn && nav.links.every(([i, j]) => i >= 0 && j >= 0 && i < nn * 2 && j < nn * 2 && (i < nn) === (j < nn));
-        const through = (a, [x0, x1, z0, z1], pz) => a.x > x0 && a.x < x1 && (pz - (z0 + z1) / 2) * (a.z - (z0 + z1) / 2) <= 0;
-        for (const [team, door, sx, sz] of [["blue", hI.backDoors[0], -20, 44], ["red", hI.backDoors[1], 20, -44]]) {
-          const q = fresh("haunted"), a = q.actors.find((o) => o.team !== team);
-          for (const k of q.crates) k.live = false;
-          Object.assign(a, { bot: true, role: "attack", x: sx, z: sz, y: 0 });
-          let via = false, t = 0;
-          for (; t < 10 && a.carrying !== team; t += S.CONFIG.STEP) { const pz = a.z; S.tick(q, S.CONFIG.STEP, still); q.eventCount = 0; if (through(a, door, pz)) via = true; }
-          out[team + "Steal"] = a.carrying === team && via;
-        }
-        const q = fresh("haunted"), d = q.actors[1], c = q.actors[2], st = hI.stands.blue;
-        for (const k of q.crates) k.live = false;
-        Object.assign(d, { bot: true, role: "defend", x: st.x, z: st.z - 1, y: 0 }); Object.assign(c, { x: -8, z: 53, y: 0, carrying: "blue" });
-        Object.assign(q.flags.blue, { state: "carried", carrier: 2 });
-        let chased = false;
-        for (let t = 0; t < 4 && !chased; t += S.CONFIG.STEP) { const pz = d.z; S.tick(q, S.CONFIG.STEP, still); q.eventCount = 0; if (through(d, hI.backDoors[0], pz)) chased = true; }
-        out.defend = chased;
-        record("block frenzy haunted back door: each cellar's back door is open at walking height under the yard, walled either side and clear to the scoring ring; a raider from the field round the house takes the block through it on both sides, and a defender at the stand chases a thief out through it", Object.values(out).every(Boolean), JSON.stringify(out));
-        // Raids from the spawn and the field, on both sides: a raider bot reaches the rivals' block in its cellar, by
-        // whichever way, and never stands stuck up on the house's floor (the yard's nav once saw the cellar's walls under
-        // it, and a bot in the house lost its way for the rest of the round). Inside the house is its floor within its walls.
-        const raids = {};
-        for (const [team, sx, sz] of [["blue", -6, -26.6], ["blue", 6, -26.6], ["blue", 0, -10], ["blue", -20, 0], ["blue", 20, 10], ["red", 6, 26.6], ["red", -6, 26.6], ["red", 0, 10], ["red", 20, 0], ["red", -20, -10]]) {
-          const rq = fresh("haunted"), a = rq.actors.find((o) => o.team !== team);
-          for (const k of rq.crates) k.live = false;
-          Object.assign(a, { bot: true, role: "attack", x: sx, z: sz, y: 0 });
-          let t = 0, up = 0;
-          for (; t < 45 && a.carrying !== team; t += S.CONFIG.STEP) { S.tick(rq, S.CONFIG.STEP, still); rq.eventCount = 0; if (a.y > 2.5 && Math.abs(a.x) < 8 && Math.abs(a.z) > 36 && Math.abs(a.z) < 47) up += S.CONFIG.STEP; }
-          raids[`${team}@${sx},${sz}`] = a.carrying === team && up < 8 ? +t.toFixed(1) : `fail ${t.toFixed(1)}s, ${up.toFixed(1)}s in the house`;
-        }
-        record("block frenzy haunted raids: from the spawn and the field, on both sides, a raider bot reaches the rivals' block within 45 s and never stands stuck on the house's floor", Object.values(raids).every((v) => typeof v === "number"), JSON.stringify(raids));
       }
       {
         // wicked's gorillas: a charge and grab dropping the block where it was grabbed, a drag by the feet to the nearest
