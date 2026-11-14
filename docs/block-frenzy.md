@@ -83,7 +83,7 @@ card), `src/style.css` (the game's panels, appended), `test/run.mjs` (rules in t
 
 ## Play-test additions
 
-Each map has its own time of day and weather mix (`MAP_WEATHER`, seeded): Fort Chaos at sunset, Ooga Town at midday, Gorilla Jungle cloudy and always raining with puddles that slip you, Haunted Hollow at night on a brick field. Storms warn a spot and then strike whoever stays with lightning (`bolt`), once per `BOLT_COOL` each. A busy network (fees at the storm rate) brings a storm over a map's own weather; calmer fees change nothing. Haunted Hollow has lamps, neon on the cave walls, a few open graves to fall in and step out of with a skeleton and a ghost. The Detail setting on the menu turns off foliage, rain, lightning effects and that dressing; the rules stay. `N` hides the mini-map, `?` or Help opens the in-play help. Ooga Town's block stand is at the back of its building, under the upper floor. Haunted Hollow's block is in its house's cellar, under the raised yard: in by the side doors and the little maze, down the stairs inside the house, or through the back door, a 2.4 m doorway in the cellar's back wall right behind the block (a timber frame, its plank door swung open and a lantern beside it), straight in from the ground behind the house; the bots use it to steal the block and to chase a thief out. Up on a yard, the bots' way-finding (`nav`) sees past only what stands on that floor, not the cellar's walls under it, so a raider who goes in through the house finds the stairs down. Haunted Hollow's scoring ring is out behind each house at the back of the map, its tall iron gate is solid with the way round either end, and its open graves are too deep for one jump: a double jump, the jetpack or the hook gets you out.
+Each map has its own time of day and weather mix (`MAP_WEATHER`, seeded): Fort Chaos at sunset, Ooga Town at midday, Gorilla Jungle cloudy and always raining with puddles that slip you, Haunted Hollow at night. Storms warn a spot and then strike whoever stays with lightning (`bolt`), once per `BOLT_COOL` each. A busy network (fees at the storm rate) brings a storm over a map's own weather; calmer fees change nothing. Haunted Hollow has a few open graves to fall in and step out of, a skeleton in each, and ghosts. The Detail setting on the menu turns off foliage, rain, lightning effects and that dressing; the rules stay. `N` hides the mini-map, `?` or Help opens the in-play help. Ooga Town's block stand is at the back of its building, under the upper floor. Haunted Hollow is described under its own heading below.
 
 ## Towers, ziplines and ammo caches
 
@@ -264,6 +264,38 @@ on the mound, up a tree and on a tree house's crown.
 its cargo nets and puddles into the map's one mesh (`jungleDress`, with the crowns, the hoard and the signs), so the
 scene places no node for them. The trees round the rim are one mesh too (`jungleRing`, Detail: Full) in place of the
 hub's trees. Nothing on the map is lit or animated beyond what every map has.
+
+## Haunted Hollow
+
+44 by 74 m, the other maps' size (it was 60 by 100 m), red's half blue's turned half round. Night, under a big moon that
+hangs low behind the rivals' house. One avenue runs down the middle: porch, the graveyard's gate, the mausoleum, the
+other gate, the other porch.
+
+- **The houses.** One at each end, 16 by 10 m, two floors and open to the sky. Its front is a face: two lit windows in
+  its team's colour for eyes, the front door for a mouth, a crooked gable over them and a leaning tower with a
+  witch-hat roof in the back corner (every course of the gable and the roof is a ledge to land on).
+- **The block** is in the cellar, one room at ground level, and shows on the mini-map as on every map. Ways in: up the
+  porch stairs, through the front door and down the stairs inside; the side door at ground level; the back door, a
+  2.4 m doorway in the back wall right behind the block (a timber frame, its plank door swung open and a lantern
+  beside it), straight in from the ground behind the house; or the jetpack or the catapult onto the upper floor. The
+  zipline comes down beside the porch. The cellar's front windows are barred, open at chest height only: the block's
+  glow shows through them and so does paint.
+- **Scoring.** A stolen block is mined in the ring out behind your own house, three steps from the back door.
+- **The graveyard.** A low iron fence across each half with the gate in it (two stone pillars, an arch reading REST IN
+  PROFIT, a lantern on each pillar, a gargoyle on top); the defenders plug the gate with crates, and the way round is
+  either end of the fence or a jump over it. A row of three headstones and a family tomb with an epitaph either side
+  of the avenue, two dead trees and two open graves a half (too deep for one jump: a double jump, the jetpack or the
+  hook gets you out). The mausoleum in the middle has steps at each end, an obelisk with a ghost-flame on its roof
+  and an ammo cache either side of it.
+- **Ghosts.** One in each cellar and one by each half's first grave. They drift through walls round their haunt, chase
+  an Ooga that comes close and spook it stiff for a moment; paint or a blast pops one.
+- **Bots** find their way with `nav`: nodes at each door (outside and in), the house's corners, the ring, the gate,
+  the fence's ends and round the mausoleum, and three for the way through the house, joined across the stairs by
+  `links`. Up on the upper floor a bot sees past only what stands on that floor, and on a flight of stairs it keeps
+  going until it is off them.
+- **Detail: Full** adds the epitaphs, the skeletons, the gargoyles, banks of mist over the graves (still for reduced
+  motion) and lantern light at the gates, the porches and the mausoleum. `kinds` in the map's data says what each of
+  its boxes is, so the models draw a wall, a tomb or a pillar by name.
 
 ## Controls
 

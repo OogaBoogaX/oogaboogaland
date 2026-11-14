@@ -1101,7 +1101,6 @@
     }
     for (const t of SIM.TEAMS) {
       const s = SIM.ARENA.stands[t];
-      if (SIM.ARENA.hidden && t !== sim.team) continue;
       g.strokeStyle = BM.TEAM[t].paint;
       g.lineWidth = 2;
       g.strokeRect(mapX(s.x) - 4, mapY(s.z) - 4, 8, 8);
@@ -1123,8 +1122,6 @@
     for (const t of SIM.TEAMS) {
       const f = sim.flags[t];
       if (f.state === "dropped" && Math.sin(elapsed * 10) < 0) continue;
-      // A hidden block sitting on its stand isn't shown: it has to be found.
-      if (SIM.ARENA.hidden && t !== sim.team && f.state === "home") continue;
       g.fillStyle = BM.ORANGE;
       g.fillRect(mapX(f.x) - 3, mapY(f.z) - 3, 6, 6);
       g.fillStyle = BM.TEAM[t].paint;
@@ -1153,7 +1150,7 @@
         if (e.actor >= 0) say(e.actor, LINES.splat, 1.2);
       } else if (e.type === "pickup") {
         fx.burst(e.x, 1.2, e.z, 14, ORANGE_BITS, 2);
-        if (me) { center("GOT THE BLOCK!", 1100); notice(SIM.ARENA.goals ? "Run it to the glowing ring behind your house (or down to your block's spot in your cellar)" : COARSE ? "Run it home · Drop hands it off" : "Run it home to your stand · K drops it", 4000); }
+        if (me) { center("GOT THE BLOCK!", 1100); notice(SIM.ARENA.goals ? "Run it to the glowing ring behind your house" : COARSE ? "Run it home · Drop hands it off" : "Run it home to your stand · K drops it", 4000); }
         // The block's side is the event's team; whose side picked it up is the carrier's.
         else if (sim.actors[e.actor].team === sim.team) notice("Teammate has the block! Cover them!", 2500);
         else { notice("They took your block! Paint the carrier!", 2500); say(1, LINES.lost); }
@@ -2402,6 +2399,7 @@
     poseHooks(elapsed);
     paintStruggle();
     poseGhosts(elapsed);
+    poseHaunt(elapsed);
     if (sim && actors) poseBeams(elapsed);
     poseShots();
     if (onTrophy) poseTrophy(dt, elapsed);
@@ -2543,7 +2541,8 @@
     if (sim) { buildMap(); mapBase = null; }
   };
   // A few themed plants and rocks round the island's outer ring: shared geometry, placed once a map, mirrored half
-  // round. Haunted Hollow gets the Ghost Hunter's gargoyles and iron fence, when the arcade's models are loaded.
+  // round. Haunted Hollow gets its own dressing, banks of mist over the graveyard and one of the Ghost Hunter's
+  // gargoyles on each gate pillar, looking out over the graves.
   const MAP_DECOR = { fort: ["rock", "bush", "tree"], town: ["tree", "bush", "bush"], jungle: ["tree", "tree", "bush"], haunted: ["rock", "rock", "bush"] };
   const buildDecor = (A, add) => {
     const kinds = MAP_DECOR[A.id], H = BL.hubModels;
@@ -2555,15 +2554,35 @@
       const kind = kinds[k % kinds.length], geo = kind === "tree" ? H.tree(k % 3) : kind === "bush" ? H.bush(k % 2) : H.rock(k % 3);
       for (const s of [1, -1]) add(createNode({ geometry: geo, sightHidden: true, position: { x: s * x, y: -0.02, z: s * z }, rotation: { x: 0, y: k * 2.1 * s, z: 0 } }));
     }
-    const AM = BL.hauntModels;
-    if (A.id === "haunted" && AM) {
+    if (A.id === "haunted") {
       add(createNode({ geometry: BM.hauntDress(), sightHidden: true }));
-      for (const [x0, x1, z0, z1] of A.graves) add(createNode({ geometry: BM.ghost(), sightHidden: true, position: { x: (x0 + x1) / 2, y: 0.1, z: (z0 + z1) / 2 }, scale: { x: 0.7, y: 0.7, z: 0.7 } }));
-      for (const [x, y, z, turn] of [[-10, 3, 26, 0], [10, 3, 26, 0], [-14, 3.6, 32.1, 0.4], [14, 3.6, 32.1, -0.4]]) for (const s of [1, -1]) {
-        add(createNode({ geometry: AM.gargoyle(), sightHidden: true, position: { x: s * x, y: y - 1.2, z: s * z }, rotation: { x: 0, y: turn + (s < 0 ? Math.PI : 0), z: 0 } }));
-      }
-      for (const z of [24.5, -24.5]) add(createNode({ geometry: AM.ironFence(), sightHidden: true, position: { x: 0, y: 0, z } }));
+      for (const b of A.BLOCKS) if (A.kinds.get(b) === "pillar") add(createNode({ geometry: BL.hauntModels.gargoyle(), sightHidden: true, position: { x: (b[0] + b[1]) / 2, y: b[4], z: (b[2] + b[3]) / 2 }, rotation: { x: 0, y: b[2] > 0 ? Math.PI : 0, z: 0 } }));
+      mistNodes = MIST.map(([x, z], i) => add(createNode({ geometry: BM.mist(), sightHidden: true, position: { x, y: 0.06, z }, rotation: { x: 0, y: i * 1.3, z: 0 } })));
     }
+  };
+  // Haunted Hollow's own nodes: the moon, hung low behind the rivals' house so its roofline cuts into it (it changes
+  // ends with the visitor's side), and on Full detail the mist, each bank drifting a little round where it lies (still
+  // for a visitor who asks for reduced motion) and the lantern light at the gates, the porches and the mausoleum.
+  const MIST = [[-13, 5.5], [5.5, 12.2], [12, -1.5], [13, -5.5], [-5.5, -12.2], [-12, 1.5]], MOON = { x: 11, y: 29, z: 88 };
+  const HAUNT_LIGHTS = [[0, 2.6, 14, 9, 1.25, 0.8, 0.38], [0, 2.6, -14, 9, 1.25, 0.8, 0.38], [0, 4.6, 20.5, 8, 1.1, 0.72, 0.36], [0, 4.6, -20.5, 8, 1.1, 0.72, 0.36], [0, 6.6, 0, 10, 0.3, 1.05, 0.55]];
+  let moonNode = null, mistNodes = [];
+  const buildHaunt = (A, add) => {
+    moonNode = null; mistNodes = [];
+    const L = RENDER_OPTS.lights;
+    RENDER_OPTS.lightCount = 0;
+    if (A.id !== "haunted") return;
+    HAUNT_LIGHTS.forEach((v, i) => { for (let k = 0; k < 7; k++) L[i * 8 + k] = v[k]; L[i * 8 + 7] = 0; });
+    moonNode = add(createNode({ geometry: BM.hauntMoon(), sightHidden: true }));
+  };
+  const poseHaunt = (elapsed) => {
+    if (!moonNode) return;
+    // The board is up in the clouds at noon: no moon and no lantern light there.
+    moonNode.visible = phase !== "board";
+    RENDER_OPTS.lightCount = moonNode.visible && detail.full ? HAUNT_LIGHTS.length : 0;
+    const s = sim && sim.team === "red" ? 1 : -1;
+    setVec(moonNode.position, MOON.x * -s, MOON.y, MOON.z * s);
+    moonNode.rotation.y = Math.atan2(MOON.x * s, -MOON.z * s);
+    if (!hookStill) for (let i = 0; i < mistNodes.length; i++) { const n = mistNodes[i]; n.position.x = MIST[i][0] + Math.sin(elapsed * 0.11 + i * 2.1) * 1.3; n.position.z = MIST[i][1] + Math.sin(elapsed * 0.07 + i) * 0.7; }
   };
   let boltNode = null, boltRing = null, flashSeen = 0, enemyCatNear = false;
   const buildMap = () => {
@@ -2580,6 +2599,7 @@
     // The floating island it stands on (its rock, cliffs and terrain), and the hub's white clouds drifting under it.
     add(createNode({ geometry: BM.isle(SIM.MAPS.indexOf(selection.map)) }));
     add(createNode({ geometry: BM.keel(SIM.MAPS.indexOf(selection.map)) }));
+    buildHaunt(A, add);
     if (detail.full) buildDecor(A, add);
     // Ooga Town's lettering and small dressing, one mesh, behind the same setting.
     if (detail.full && A.id === "town") add(createNode({ geometry: BM.townDress(), sightHidden: true }));
@@ -2647,9 +2667,9 @@
     hookStill = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     hookNodes = [];
     for (let i = 0; i < C.HOOKS; i++) hookNodes.push(add(createNode({ geometry: BM.hookHead(), visible: false, sightHidden: true, scale: { x: 1.4, y: 1.4, z: 1.4 } })));
-    // Haunted Hollow's ghosts, one node each (the sim has the haunts both ways round).
+    // Haunted Hollow's ghosts, one node each.
     ghostNodes = [];
-    for (let i = 0; i < (A.ghosts || []).length * 2; i++) ghostNodes.push(add(createNode({ geometry: BM.ghost(), visible: false, scale: { x: 1.1, y: 1.1, z: 1.1 } })));
+    for (let i = 0; i < (A.ghosts || []).length; i++) ghostNodes.push(add(createNode({ geometry: BM.ghost(), visible: false, scale: { x: 1.1, y: 1.1, z: 1.1 } })));
     disposeGorillas();
     gorillaRigs = A.gorillas.map(([x, z]) => {
       const rig = BL.agent.create({ managed: true, groundAt: () => 0, x, z, scale: GORILLA_SCALE });
@@ -3151,7 +3171,7 @@
     skyClouds = []; skyPerch = null; trophy = trophyNodes = null;
     sim = blocks = shots = splats = ticks = pads = crates = rain = caches = zipLights = fpGun = fpGunL = fpFlash = fpFlashL = trampNodes = powerNodes = result = null;
     mapRoot = fireNode = dancers = peelNodes = catapults = boltNode = boltRing = null;
-    hookNodes = []; ghostNodes = [];
+    hookNodes = []; ghostNodes = []; mistNodes = []; moonNode = null;
     catNear = false;
     for (const t of SIM.TEAMS) iceNodes[t] = null;
     zipNear = false;
