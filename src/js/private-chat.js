@@ -271,7 +271,7 @@
       // Two who ask each other at once are talking: the room opens it next, with nothing to answer.
       if (c.phase !== "inviting" || from !== c.peer) {
         const name = who(from).name;
-        nudge(c.phase === "idle" ? `${name} asks for a private conversation. Open Ooga Chat to answer.` : `${name} asks for a private conversation. ${first()} to answer.`);
+        nudge(c.phase === "idle" ? `${name} asks for a private conversation. Open The Commons to answer.` : `${name} asks for a private conversation. ${first()} to answer.`);
       }
     } else if (msg.op === "inviting") {
       // The page began inviting when it asked; this only confirms, and one for an invite already taken back changes nothing.

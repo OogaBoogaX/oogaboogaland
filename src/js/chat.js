@@ -1,4 +1,5 @@
-// Ooga Chat, the sheet's last tab: one live conversation for every signed-in player on the island, on the
+// The Commons (the island's text chat, formerly shown as Ooga Chat; #660 kept every `chat-*` id, key and message), the
+// tab before Ooga Chat's cloud: one live conversation for every signed-in player on the island, on the
 // page the Worker serves (docs/auth-and-presence.md). Like Online Oogas, the tab is hidden while signed
 // out. Contributor sign-in lives in the Contributing Oogas panel. The room names each speaker and holds
 // the last CHAT_KEEP lines in its memory alone, not persisted to the database: a reload fetches the room history, and a
