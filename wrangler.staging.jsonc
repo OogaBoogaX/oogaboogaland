@@ -5,7 +5,9 @@
   "account_id": "1e5c1e8f7c343bf6cabced151b1ae2c6",
   "workers_dev": true,
   "preview_urls": false,
-  "observability": { "enabled": true },
+  // Invocation logs off: they would keep every request's URL, a sign-in callback's GitHub code and state among them. The
+  // Worker's own console lines stay in Workers Logs; request counts, errors and CPU stay in the Worker's metrics.
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
   "assets": {
     // `npm run build:site` stages the pages here, with worker/_headers.
@@ -17,6 +19,19 @@
     "run_worker_first": ["/auth/*", "/api/*", "/poker/*", "/room", "/game/*", "/donations/*", "/inspect"]
   },
   "vars": {
+    "ENVIRONMENT": "staging",
+    // Ooga Chat's private bridge (worker/src/chat-bridge.js), comma-separated: bridge (every operation but hello),
+    // outdoor (island voices heard by Ooga Chat's audience), cloud (Ooga Chat speakers on clouds), commons (The Commons
+    // from Ooga Chat, read; commons-send lets its members send too). Empty: the bridge answers hello alone. Deploying with
+    // it empty is the kill switch (docs/ooga-chat-backend.md).
+    // Staging: the bridge's operations (the contributor answer, revocations, readiness), no audio or Commons yet.
+    "OOGA_CHAT_FEATURES": "bridge",
+    // The audience's caps a zone (worker/src/audience.js `limitsOf`, docs/ooga-chat-operations.md): listeners (the proposed
+    // launch envelope, for the staging matrix), cloud speakers (one a cloud seat), and the reaction fan-out budget in frames
+    // a second.
+    "AUDIENCE_LISTENERS": "500",
+    "AUDIENCE_SPEAKERS": "8",
+    "AUDIENCE_FANOUT": "5000",
     // Optional poker: set POKER_SERVICE_URL to the HTTPS service origin and POKER_SERVICE_TOKEN as a secret.
     // Missing either leaves live poker disabled. See docs/poker-integration.md.
     // Redirects, cookies and the Origin check all use this origin.
@@ -47,10 +62,11 @@
   // page donations are on. Deploy bananapayserver-staging first.
   "services": [{ "binding": "DONATIONS", "service": "bananapayserver-staging", "entrypoint": "PageApi" }],
   "durable_objects": {
-    "bindings": [{ "name": "ROOM", "class_name": "Room" }, { "name": "GAMES", "class_name": "GameHost" }, { "name": "INSPECTOR", "class_name": "Inspector" }]
+    "bindings": [{ "name": "ROOM", "class_name": "Room" }, { "name": "GAMES", "class_name": "GameHost" }, { "name": "INSPECTOR", "class_name": "Inspector" }, { "name": "AUDIENCE", "class_name": "Audience" }]
   },
   // v2: one GameHost a hosted game's instance (worker/src/games.js names them), apart from the island's Room.
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }, { "tag": "v2", "new_sqlite_classes": ["GameHost"] }, { "tag": "v3", "new_sqlite_classes": ["Inspector"] }],
+  // v4: Ooga Chat's Audience (worker/src/audience.js), one named `audience`, reached only through ChatBridge and the Room.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }, { "tag": "v2", "new_sqlite_classes": ["GameHost"] }, { "tag": "v3", "new_sqlite_classes": ["Inspector"] }, { "tag": "v4", "new_sqlite_classes": ["Audience"] }],
   // Namespaces are per account: staging counts in 2001-2008, production in 1001-1008.
   "ratelimits": [
     // Opt-in dropout reports per signed-in account, with additional D1 retention and volume caps.

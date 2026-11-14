@@ -256,10 +256,13 @@ test("TURN credentials require the active room token and return only a temporary
   room.env = { REALTIME_APP_ID: "test-app", REALTIME_SECRET: "test-app-secret", REALTIME_TURN_KEY_ID: "test-key", REALTIME_TURN_TOKEN: "test-token" };
   const request = token => new Request("https://example.test/voice/ice", { method: "POST", headers: { "x-player-id": "1", "x-room-token": token } });
   const original = globalThis.fetch, calls = [], tls = "turns:turn.cloudflare.com:443?transport=tcp";
-  let replaced = false;
+  let replaced = false, moved = false;
   globalThis.fetch = async (url, options) => {
+    // As workerd does: its fetch has no "error" redirect mode and throws on it.
+    if (options.redirect !== undefined && options.redirect !== "follow" && options.redirect !== "manual") throw new TypeError(`Invalid redirect value ${options.redirect}`);
     calls.push({ url, options });
     if (replaced) room.players.set(1, { id: 1, connectionToken: "replacement" });
+    if (moved) return new Response(null, { status: 307, headers: { location: "https://attacker.example/" } });
     return Response.json({ iceServers: [{ urls: ["turn:turn.cloudflare.com:53?transport=udp", tls], username: "temporary", credential: "limited" }] });
   };
   try {
@@ -272,15 +275,19 @@ test("TURN credentials require the active room token and return only a temporary
     assert.deepEqual(await res.json(), { iceServers: [{ urls: tls, username: "temporary", credential: "limited" }], ttl: 7200 });
     assert.equal(calls[0].url, "https://rtc.live.cloudflare.com/v1/turn/keys/test-key/credentials/generate-ice-servers");
     assert.equal(calls[0].options.headers.authorization, "Bearer test-token");
+    assert.equal(calls[0].options.redirect, "manual");
     assert.equal(JSON.parse(calls[0].options.body).ttl, 7200);
     room.env.REALTIME_TURN_TTL = "300";
     assert.equal((await (await room.voiceRequest("ice", request("active"))).json()).ttl, 300);
     assert.equal(JSON.parse(calls[1].options.body).ttl, 300);
+    moved = true;
+    assert.deepEqual(await (await room.voiceRequest("ice", request("active"))).json(), {}, "a redirect is no relay, never followed");
+    moved = false;
     let evicted = false;
     room.evict = (p, reason) => { evicted = p === player && reason === "revoked"; };
     player.login = "not-a-contributor";
     assert.equal((await room.voiceRequest("ice", request("active"))).status, 403);
-    assert.ok(evicted); assert.equal(calls.length, 2, "revoked accounts cannot mint relay credentials");
+    assert.ok(evicted); assert.equal(calls.length, 3, "revoked accounts cannot mint relay credentials");
     player.login = "YellowBrokeIt";
     replaced = true;
     assert.equal((await room.voiceRequest("ice", request("active"))).status, 409);

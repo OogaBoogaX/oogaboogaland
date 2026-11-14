@@ -9,6 +9,8 @@ The island runs as two Cloudflare Workers in the account `1e5c1e8f7c343bf6cabced
 
 The two share code and nothing else: each has its own D1 database, room, OAuth App, Realtime app, secrets and rate-limit counters. Everything below is done once per Worker.
 
+Ooga Chat (`ooga.chat`) has two more Workers of its own, `ooga-chat-staging` and `ooga-chat-production`, with their own D1, OAuth apps and counters (2010–2014, 1010–1014), and a private binding into these two (`ChatBridge`). Their resources, flags, secrets and runbook are in `docs/ooga-chat-backend.md`. On these Workers the bridge's switch is the var `OOGA_CHAT_FEATURES`, empty until the release runbook turns it on.
+
 ## What exists, per Worker
 
 | Thing | Name | Set where |

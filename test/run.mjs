@@ -4907,7 +4907,7 @@ const hudNoticeChecks = async () => {
     };
     const nodes = Object.fromEntries(["toast", "reload-notice", "message-stack"].map(id => [id, element()]));
     nodes["message-stack"].children = [nodes["reload-notice"], nodes.toast];
-    const BL = { game: {}, scene: {} };
+    const BL = { game: {}, scene: {}, signGlyphs: { lettering() {}, letter() {} }, nativeIcons: { fill() {} } };
     runInNewContext(source, {
       window: { BL, matchMedia: () => ({ matches: false }), setTimeout: (fn, ms) => { timers.set(++serial, { fn, ms }); return serial; }, clearTimeout: id => timers.delete(id) },
       document: { getElementById: id => nodes[id], querySelectorAll: () => [], createElement: element,
@@ -5000,7 +5000,7 @@ const characterChecks = async () => {
   }
   // The worn jetpack and its flame come from the hub's kit, not the caveman builder (#290 review).
   Object.assign(context, { document: { createElement: () => ({ getContext: () => null }) }, performance, console });
-  for (const name of ["terrain", "hub-models"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
+  for (const name of ["terrain", "sign-glyphs", "hub-models"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
   const worn = [BL.hubModels.jetpack(), BL.hubModels.jetFlame()];
   for (const geo of worn) mirrorGeometries.add(geo);
   const spare = BL.models.spareMagazine();
@@ -6298,7 +6298,7 @@ const environmentSoundChecks = async () => {
 const hammockChecks = async () => {
   // The page's default: finished character bakes are packed compactly, as the live crew's are.
   const real = { window: { location: { search: "" } }, location: { search: "" }, URLSearchParams, document: { createElement: () => ({ getContext: () => null }) }, performance, console };
-  for (const name of ["math", "compact-geometry", "scene", "models", "hero-body", "hub-models", "convex", "solid-props", "hub-hammock"])
+  for (const name of ["math", "compact-geometry", "scene", "models", "hero-body", "sign-glyphs", "hub-models", "convex", "solid-props", "hub-hammock"])
     runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), real);
   const R = real.window.BL, H = R.hubHammock, flat = () => 0, clear = (x, z, r) => z > 1 + r;
   const plan = (a, b, fits = clear) => H.plan({ a: { ...a, ground: 0 }, b: { ...b, ground: 0 }, clear: fits, surfaceAt: flat });
@@ -6949,7 +6949,7 @@ const poolLayoutChecks = async () => {
     JSON.stringify({ graded, open, roofed, linked, beds, apart, lake, slots: L.SLOTS.length, along, hidden, doorways, mouths, chamber, fallLedges, boxes }));
   // The water over that layout, through its own module: what the backlog floods and what it never reaches.
   Object.assign(context, { document: { createElement: () => ({ getContext: () => null }) }, performance, console });
-  for (const file of ["scene", "models", "convex", "terrain", "hub-models", "pool-models", "pool-water"]) runInNewContext(await readFile(new URL(`../src/js/${file}.js`, import.meta.url), "utf8"), context);
+  for (const file of ["scene", "models", "convex", "terrain", "sign-glyphs", "hub-models", "pool-models", "pool-water"]) runInNewContext(await readFile(new URL(`../src/js/${file}.js`, import.meta.url), "utf8"), context);
   const { poolWater: W, scene: S } = context.window.BL, H = W.HYDRO;
   let rising = true, last = -Infinity;
   for (let mvb = 0; mvb <= 400; mvb += 0.5) { const level = W.levelFor(mvb * 1e6); rising &&= level >= last; last = level; }
@@ -9355,7 +9355,7 @@ const gameRulesChecks = async () => {
     // The jackpot wheel, from arcade-models.js and its scene half on the builders they load with: the house wins slowly, and every
     // wedge, from a turn at rest and one far round after many spins, stops under the clapper wherever in it the spin
     // aims, after its whole turns and less than one more.
-    for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "hockey-wire", "arcade-models", "haunt-models", "ooga-portal-models", "ooga-portal", "arcade-block-watch", "arcade-scene-models", "zipline-models", "zipline"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+    for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron", "sign-glyphs", "hub-models", "hockey-wire", "arcade-models", "haunt-models", "ooga-portal-models", "ooga-portal", "arcade-block-watch", "arcade-scene-models", "zipline-models", "zipline"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
     runInNewContext(await readFile(new URL("../src/js/arcade-games.js", import.meta.url), "utf8"), context);
     // The Block Frenzy watch door: signed-in only, it opens Block Frenzy's watch deck, the real portal is crossed from the
     // hall's side within the opening, and the door opens no new way out of the hall.
@@ -10100,7 +10100,7 @@ const cloudHopperRecordChecks = async () => {
   mkdirSync(dir, { recursive: true });
   const page = join(dir, "fixture.html");
   writeFileSync(page, `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="../../src/style.css">
+    <link rel="stylesheet" href="../../src/native.css"><link rel="stylesheet" href="../../src/style.css">
     <script src="../../src/js/cloud-hopper-levels.js"></script><script src="../../src/js/cloud-hopper-hud.js"></script>`);
   const b = await launch();
   try {
@@ -10773,24 +10773,30 @@ const donationClientChecks = async () => {
   let priceClock = 1000, nextPriceTimer = 0;
   const rateContext = { window: { BL: {}, setTimeout: fn => { const id = ++nextPriceTimer; priceTimers.set(id, fn); return id; }, clearTimeout: id => priceTimers.delete(id) },
     document: { hidden: false, addEventListener: (name, fn) => priceListeners.set(name, fn), removeEventListener: name => priceListeners.delete(name) },
-    Date: { now: () => priceClock }, WebSocket: class { constructor(url) { this.url = url; this.readyState = 0; priceSockets.push(this); } close() { this.closed = true; this.readyState = 3; } } };
+    Date: { now: () => priceClock }, WebSocket: class { constructor(url) { this.url = url; this.readyState = 0; priceSockets.push(this); } send(text) { this.sent = text; } close() { this.closed = true; this.readyState = 3; } } };
   runInNewContext(await readFile(new URL("../src/js/donation-rate.js", import.meta.url), "utf8"), rateContext);
+  const COINBASE = "wss://ws-feed.exchange.coinbase.com", ticker = (ws, price, product = "BTC-USD") => ws.onmessage({ data: JSON.stringify({ type: "ticker", product_id: product, price }) });
+  const fireRetry = () => { const [id, fn] = [...priceTimers].at(-1); priceTimers.delete(id); fn(); };
   const rateNotices = [];
   const rates = rateContext.window.BL.donationRate, offOne = rates.watch(value => rateNotices.push(value && { ...value })), offTwo = rates.watch();
   priceSockets[0].readyState = 1; priceSockets[0].onopen();
-  priceSockets[0].onmessage({ data: JSON.stringify({ weightedPrice: "90000.12" }) });
+  const hello = JSON.parse(priceSockets[0].sent || "null");
+  const subscribed = priceSockets[0].url === COINBASE && hello?.type === "subscribe" && hello.product_ids.join() === "BTC-USD" && hello.channels.join() === "ticker_batch";
+  priceSockets[0].onmessage({ data: JSON.stringify({ type: "subscriptions", channels: [{ name: "ticker_batch", product_ids: ["BTC-USD"] }] }) });
+  ticker(priceSockets[0], "90000.12");
   const sharedRate = priceSockets.length === 1 && rates.current.usdPerBtc === 90000.12 && !rates.current.stale
-    && rates.current.live && rates.current.satsPerBanana > 1111 && rates.current.satsPerBanana < 1112
+    && rates.current.live && rates.current.source === "coinbase" && rates.current.satsPerBanana > 1111 && rates.current.satsPerBanana < 1112
     && rateNotices.at(-1)?.usdPerBtc === 90000.12;
-  priceSockets[0].onmessage({ data: JSON.stringify({ weightedPrice: "-1" }) });
+  ticker(priceSockets[0], "-1"); ticker(priceSockets[0], "3000", "ETH-USD");
+  priceSockets[0].onmessage({ data: JSON.stringify({ weightedPrice: "80000" }) });
   const validRate = rates.current.usdPerBtc === 90000.12;
   rateContext.document.hidden = true; priceListeners.get("visibilitychange")();
   const hiddenRate = priceSockets[0].closed && rates.current.stale && priceTimers.size === 0 && rateNotices.at(-1)?.stale;
   rateContext.document.hidden = false; priceListeners.get("visibilitychange")();
   priceSockets[1].readyState = 1; priceSockets[1].onopen();
-  priceClock++; priceSockets[1].onmessage({ data: JSON.stringify({ weightedPrice: "91000" }) });
+  priceClock++; ticker(priceSockets[1], "91000");
   const noticeCount = rateNotices.length;
-  offOne(); priceClock++; priceSockets[1].onmessage({ data: JSON.stringify({ weightedPrice: "92000" }) });
+  offOne(); priceClock++; ticker(priceSockets[1], "92000");
   const retainedRate = !priceSockets[1].closed && rateNotices.length === noticeCount;
   offTwo(); offTwo();
   // A quick panel close must not abort CONNECTING; reopening reuses that one
@@ -10802,12 +10808,36 @@ const donationClientChecks = async () => {
   const reused = priceSockets.length === count && priceTimers.size === 1;
   offAgain(); pending.readyState = 1; pending.onopen();
   const pendingClosed = pending.closed && pending.onopen === null && pending.onmessage === null;
-  record("donation rate: watchers share one socket, receive live and stale updates until released, reject invalid prices, pause while hidden, reconnect when visible, and close the last socket and its timers exactly once",
-    sharedRate && validRate && hiddenRate && retainedRate && waiting && reused && pendingClosed && priceSockets[1].closed && priceListeners.size === 0 && priceTimers.size === 0,
-    JSON.stringify({ sharedRate, validRate, hiddenRate, retainedRate, waiting, reused, pendingClosed, listeners: priceListeners.size, timers: priceTimers.size }));
+  // Coinbase refusing its subscription hands over to 2140data at once; a 2140data drop goes back to
+  // Coinbase after a wait, and a Coinbase drop after it delivered asks Coinbase again.
+  const offFallback = rates.watch(), refusing = priceSockets.at(-1);
+  refusing.readyState = 1; refusing.onopen();
+  refusing.onmessage({ data: JSON.stringify({ type: "subscriptions", channels: [] }) });
+  const rateFallback = priceSockets.at(-1);
+  rateFallback.readyState = 1; rateFallback.onopen();
+  priceClock++; rateFallback.onmessage({ data: JSON.stringify({ weightedPrice: "93000.5" }) });
+  const fellBack = refusing.url === COINBASE && refusing.closed && rateFallback.url === "wss://2140data.io/" && rateFallback.sent === undefined
+    && rates.current.usdPerBtc === 93000.5 && rates.current.source === "2140data" && !rates.current.stale;
+  const before = priceSockets.length;
+  rateFallback.onclose();
+  const rateWaited = rates.current.stale && priceSockets.length === before && priceTimers.size === 1;
+  fireRetry();
+  const rateBack = priceSockets.at(-1);
+  rateBack.readyState = 1; rateBack.onopen(); priceClock++; ticker(rateBack, "94000");
+  const preferred = rateBack.url === COINBASE && rates.current.usdPerBtc === 94000 && rates.current.source === "coinbase";
+  rateBack.onclose();
+  const held = priceSockets.length === before + 1 && priceTimers.size === 1;
+  fireRetry();
+  const again = priceSockets.at(-1), retried = again !== rateBack && again.url === COINBASE;
+  offFallback(); again.readyState = 1; again.onopen();
+  const fallbackClosed = again.closed && priceListeners.size === 0 && priceTimers.size === 0;
+  record("donation rate: watchers share one Coinbase BTC-USD ticker_batch socket, receive live and stale updates until released, reject invalid prices and other products, pause while hidden, reconnect when visible, fall back to 2140data only while Coinbase is not delivering, and close the last socket and its timers exactly once",
+    subscribed && sharedRate && validRate && hiddenRate && retainedRate && waiting && reused && pendingClosed && priceSockets[1].closed
+      && fellBack && rateWaited && preferred && held && retried && fallbackClosed && priceListeners.size === 0 && priceTimers.size === 0,
+    JSON.stringify({ subscribed, sharedRate, validRate, hiddenRate, retainedRate, waiting, reused, pendingClosed, fellBack, rateWaited, preferred, held, retried, fallbackClosed, listeners: priceListeners.size, timers: priceTimers.size }));
 
   // Regression: the pile showed whole gameplay stock (79) beside a panel valued at 77.97.
-  const valueBL = { game: {}, scene: {}, donationRate: { current: null }, donations: { real: true,
+  const valueBL = { game: {}, scene: {}, signGlyphs: { lettering() {}, letter() {} }, nativeIcons: { fill() {} }, donationRate: { current: null }, donations: { real: true,
     state: { tally: { sats: 96458, rate: { usdPerBtc: 80832.63, at: 10 } } } } };
   runInNewContext(await readFile(new URL("../src/js/hud.js", import.meta.url), "utf8"), {
     window: { BL: valueBL, matchMedia: () => ({ matches: false }) },
@@ -22539,8 +22569,9 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
   const r = await b.evaluate(`(() => {
     const B = __ooga, D = BL.scenes.hub.debug, net = BL.net.state, T = D.timechainIsland, M = __ooga.poolIsland, F = D.bifrost;
     B.pilot.possess(B.cavemen.get("portlandhodl"));
-    // A point short of a bridge stands on the island's own ground.
-    const at = (p, wait) => { if (!Number.isFinite(p.y)) p.y = D.island.heightAt(p.x, p.z); B.pilot.navigate({ position: p, yaw: 0, pitch: 0.4, dist: 6 }); B.advance(wait, 1 / 60); return { to: net.blendTo, t: +net.blendT.toFixed(2), zone: net.zone }; };
+    // A point short of a bridge stands on the island's own ground: its surface, not the floor of a cliff ledge
+    // or cave under it, which heightAt answers where the column has one.
+    const at = (p, wait) => { if (!Number.isFinite(p.y)) p.y = D.island.surfaceAt(p.x, p.z); B.pilot.navigate({ position: p, yaw: 0, pitch: 0.4, dist: 6 }); B.advance(wait, 1 / 60); return { to: net.blendTo, t: +net.blendT.toFixed(2), zone: net.zone, scope: BL.outdoorScope.state.scope, reason: BL.outdoorScope.state.reason }; };
     // Each bridge as points from its island end (0) to where its land's zone begins (1), and a step onto the land.
     const sphereNear = T.place.bridgeZ + BL.timechainModels.SITE.span + 0.5, porch = BL.timechainModels.SPOTS.WAIT.z + 5;
     const pool = M.place, poolNear = pool.bridgeLocalZ + BL.poolModels.SITE.span, S = BL.poolModels.SITE;
@@ -22559,19 +22590,32 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
       row.bridge = at(point(0.5), 0.5);
       row.land = at(point(1.4), 0.5);
     }
-    const lab = D.island.mouths.find((m) => m.id === "c11").inside;
+    const labMouth = D.island.mouths.find((m) => m.id === "c11"), lab = labMouth.inside;
     out.mouth = at({ x: lab.x, y: 0, z: lab.z }, 0.5);
+    const outX = labMouth.x + (labMouth.apron.x - labMouth.x) * 2.5, outZ = labMouth.z + (labMouth.apron.z - labMouth.z) * 2.5;
+    out.apron = at({ x: outX, y: D.island.surfaceAt(outX, outZ), z: outZ }, 0.5);
     out.air = at({ x: 53.7, y: 8, z: -31 }, 0.5);
+    // Inside the Sphere's shell, down its passage short of the curtain, and Merge Rock, which has no public scope yet.
+    const passage = BL.timechainModels.PASSAGE.curtain + 0.5;
+    out.passage = at({ x: T.worldX(0, passage), y: T.place.y + BL.timechainModels.SITE.bridgeFloor, z: T.worldZ(0, passage) }, 0.5);
+    const rock = D.repoIsland && D.repoIsland.arrival;
+    out.repos = rock ? at({ x: rock.x, y: rock.y, z: rock.z }, 0.5) : null;
     return out;
   })()`);
   const lands = ["sphere", "rainforest", "bifrost"];
   record("voice levels: the bridges and the air off the edge are the land between, the cave entrances the island, and none of them is a crossing",
     lands.every((land) => !r[land].home.to && r[land].home.zone === "outside" && !r[land].bridge.to && r[land].bridge.zone === "between" && !r[land].land.to && r[land].land.zone === land)
       && r.mouth.zone === "outside" && r.air.zone === "between" && !r.air.to, JSON.stringify(r));
+  // The outdoor scope (outdoor-scope.js) goes by entrances, not the panels' zone names: the lab's room reads `outside`
+  // as a zone but is a cave, and the Sphere's passage is the way into its rooms.
+  record("outdoor scope: the island, its apron, bridges, air and the three bridged lands' tops are Main Island, while a cave's room, the Sphere's passage and Merge Rock are not",
+    lands.every((land) => r[land].home.scope === "main" && r[land].bridge.scope === "main" && r[land].land.scope === "main")
+      && r.apron.scope === "main" && r.air.scope === "main" && r.mouth.scope === null && r.mouth.reason === "interior"
+      && r.passage.scope === null && r.passage.reason === "interior" && (!r.repos || r.repos.scope === null && r.repos.reason === "unscoped"), JSON.stringify(r));
   // Levels: by height off the island's edge, and down HQ's ramps, its basement's and the rainforest's descent.
   const lv = await b.evaluate(`(() => {
     const B = __ooga, D = BL.scenes.hub.debug, H = D.island.headquarters, M = __ooga.poolIsland, L = BL.poolLayout, net = BL.net.state;
-    const at = (x, y, z) => { B.pilot.navigate({ position: { x, y, z }, yaw: 0, pitch: 0.4, dist: 6 }); B.advance(0.6, 1 / 60); return { to: net.blendTo, t: +net.blendT.toFixed(2), zone: net.zone }; };
+    const at = (x, y, z) => { B.pilot.navigate({ position: { x, y, z }, yaw: 0, pitch: 0.4, dist: 6 }); B.advance(0.6, 1 / 60); return { to: net.blendTo, t: +net.blendT.toFixed(2), zone: net.zone, scope: BL.outdoorScope.state.scope, reason: BL.outdoorScope.state.reason }; };
     const air = (feet) => { const o = { to: "", t: 0 }; return D.levelOf(53.7, feet, -31, "between", o) ? { to: o.to, t: +o.t.toFixed(2) } : null; };
     const near = (samples, y) => samples.reduce((best, p) => Math.abs(p.y - y) < Math.abs(best.y - y) ? p : best);
     const world = (lx, ly, lz) => [M.worldX(lx, lz), M.place.y + ly, M.worldZ(lx, lz)], down = L.rampPoint(50), room = H.basement.rooms[0];
@@ -22593,6 +22637,28 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
       && lv.descent.to === "rainforest-under" && Math.abs(lv.descent.t - lv.depth) <= 0.05 && lv.descent.zone === "rainforest-under"
       && lv.chamber.to === "rainforest-under" && lv.chamber.t === 1 && lv.chamber.zone === "rainforest-under" && !lv.court.to && lv.court.zone === "rainforest" && !lv.lake.to,
     JSON.stringify(lv));
+  record("outdoor scope: part way down HQ's ramp or the rainforest's descent is already out of Main Island, however much surface the voice blend keeps, as are HQ, its basement and the chamber; the rainforest's top is in",
+    [lv.entrance, lv.floor, lv.stair, lv.basement, lv.backUp, lv.descent, lv.chamber].every((p) => p.scope === null && (p.reason === "interior" || p.reason === "descending"))
+      && lv.descent.reason === "descending" && lv.descent.t < 1 && lv.court.scope === "main", JSON.stringify(lv));
+  // A scene change takes the body out of Main Island from the moment it starts, through the old scene's last frames and
+  // the fade, and keeps it out in a scene that reports nothing (the lab), so nothing there is public.
+  const away = await b.evaluate(`(async () => {
+    const B = __ooga, S = BL.outdoorScope.state, D = BL.scenes.hub.debug, frame = () => new Promise((r) => setTimeout(r, 0));
+    const lab = D.island.mouths.find((m) => m.id === "c11"), x = lab.x + (lab.apron.x - lab.x) * 2.5, z = lab.z + (lab.apron.z - lab.z) * 2.5;
+    B.pilot.navigate({ position: { x, y: D.island.surfaceAt(x, z), z }, yaw: 0, pitch: 0.4, dist: 6 }); B.advance(0.5, 1 / 60);
+    const before = { scope: S.scope, reason: S.reason }, seen = new Set();
+    let frames = 0;
+    B.go("lab");
+    while ((B.transitioning || B.scene !== "lab") && frames++ < 900) { B.advance(1 / 60, 1 / 60); seen.add(S.scope + ":" + S.reason + ":" + S.public); await frame(); }
+    for (let i = 0; i < 60; i++) { B.advance(1 / 60, 1 / 60); seen.add(S.scope + ":" + S.reason + ":" + S.public); }
+    const after = { scene: B.scene, scope: S.scope, reason: S.reason };
+    B.go("hub"); frames = 0;
+    while ((B.transitioning || B.scene !== "hub") && frames++ < 900) { B.advance(1 / 60, 1 / 60); await frame(); }
+    return { before, seen: [...seen], after, home: B.scene };
+  })()`);
+  record("outdoor scope: leaving the hub from open ground for a scene that reports nothing stays out of Main Island through the old scene's last frames, the fade and the whole visit",
+    away.before.scope === "main" && away.seen.every((s) => s === "null:scene:false") && away.after.scene === "lab" && away.after.scope === null && away.home === "hub",
+    JSON.stringify(away));
 } };
 // Sessions that need portlandhodl awake on the surface pin it (ooga=): by itself his state comes from the real activity snapshot, and once
 // it has aged he boots asleep in the headquarters, where jetpacks are refused and his gorilla is in bed.
@@ -30760,7 +30826,7 @@ const raceRigChecks = async () => {
   const context = { window: {}, location: { search: "?debug=1&rain=0" }, URLSearchParams, crypto: webcrypto };
   for (const name of ["math", "scene", "models", "hero-body", "caves", "contributor-identities", "activity-repos", "characters"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
   for (const name of readdirSync(join(root, "src", "characters")).filter(name => name.endsWith(".js")).sort()) runInNewContext(readFileSync(join(root, "src", "characters", name), "utf8"), context);
-  for (const name of ["contributors", "hub-models", "dressing", "daylight", "race-models", "race-track", "racers", "mirror-ripples", "mirror-body", "dsb-water", "gl-renderer"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+  for (const name of ["contributors", "sign-glyphs", "hub-models", "dressing", "daylight", "race-models", "race-track", "racers", "mirror-ripples", "mirror-body", "dsb-water", "gl-renderer"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
   const BL = context.window.BL, scene = BL.scene.createNode(), released = [];
   const renderer = { createRig: BL.glRenderer.createRig, releaseGeometry: geometry => released.push(geometry) };
   const track = BL.raceTrack.build(BL.raceTrack.TRACKS[0], { renderer, slots: CAST, rain: false, hour: 12 });
@@ -32575,10 +32641,190 @@ const caveDirectoryProof = () => {
     immutable: Object.isFrozen(api) && Object.isFrozen(data) && Object.isFrozen(data.entries) && data.entries.every(Object.isFrozen) };
 };
 
+// The outdoor scope (outdoor-scope.js, #658): which public Ooga Chat audience the visitor's body stands in. The policy
+// names every public hub zone, and an acknowledgement opens only the exact epoch it answers.
+const outdoorScopeChecks = () => {
+  const context = { window: {} };
+  runInNewContext(readFileSync(join(root, "src/js/outdoor-scope.js"), "utf8"), context);
+  const O = context.window.BL.outdoorScope, Z = context.window.BL;
+  runInNewContext(readFileSync(join(root, "src/js/zone-map.js"), "utf8"), context);
+  const hub = (zone, inside = false, descending = false) => O.hubReason(zone, inside, descending);
+  const policy = {
+    outdoors: ["outside", "between", "sphere", "rainforest", "bifrost"].every((zone) => hub(zone) === "outdoor"),
+    entrances: ["outside", "sphere", "rainforest", "bifrost"].every((zone) => hub(zone, true) === "interior"),
+    under: ["rainforest-under", "hq", "hq-basement"].every((zone) => hub(zone) === "descending") && hub("outside", false, true) === "descending"
+      && hub("sphere", false, true) === "descending" && hub("outside", true, true) === "interior",
+    unscoped: hub("repos") === "unscoped",
+    // Grouped with the island by the panels (zone-map.js), but never public by that.
+    grouped: ["lab", "bca", "factory", "arcade", "mirror", "cave-3"].every((zone) => Z.zoneMap.groupOf(zone) === "outside" && hub(zone) === "unknown"),
+    elsewhere: ["", "none", "scene-transition", "lab.hall", "bifrost.chamber", "sphere-0", "sphere-1", "dsb-outside", "block-frenzy"].every((zone) => hub(zone) === "unknown"),
+    dsb: O.dsbReason(false, false, false) === "outdoor" && O.dsbReason(true, false, false) === "transit" && O.dsbReason(false, true, false) === "entering"
+      && O.dsbReason(false, true, true) === "entering" && O.dsbReason(false, false, true) === "interior"
+  };
+  record("outdoor scope policy: only the island's outdoors, bridges and air and the Sphere's, rainforest's and Bifrost's tops are Main Island; cave and shell interiors, any descent, Merge Rock, the panels' island groupings and every other zone are not; DSB Land is outdoors only with no room, no fade and no arrival under way",
+    Object.values(policy).every(Boolean), JSON.stringify(policy));
+  // A transport's acknowledgements against moves, backtracking, resets and a lost transport.
+  const T = O.create(), S = T.state, heard = [];
+  T.subscribe(() => heard.push(S.epoch));
+  const seq = {};
+  T.report("main", "outdoor"); const first = S.epoch;
+  seq.unsupported = !T.acknowledge(first, "main") && !S.public;
+  T.setSupported(true); const supported = S.epoch;
+  seq.staleAfterSupport = !T.acknowledge(first, "main") && T.acknowledge(supported, "main") && S.public;
+  T.report(null, "interior");
+  seq.leaving = !S.public && S.scope === null;
+  T.report("main", "outdoor");
+  seq.backtrack = !T.acknowledge(supported, "main") && !S.public && S.epoch > supported;
+  const current = S.epoch;
+  seq.wrongScope = !T.acknowledge(current, "dsb") && !T.acknowledge(current, null);
+  T.reset();
+  seq.reset = !T.acknowledge(current, "main") && T.acknowledge(S.epoch, "main");
+  const before = heard.length;
+  seq.quiet = !T.report("main", "outdoor") && heard.length === before;
+  T.report(null, "descending"); const out = S.epoch; T.report(null, "interior");
+  seq.reasonOnly = S.epoch === out && S.reason === "interior";
+  T.report("main", "outdoor"); T.setSupported(false);
+  seq.lost = !S.public && !T.acknowledge(S.epoch, "main");
+  let threw = 0;
+  for (const [scope, reason] of [["main", "interior"], [null, "outdoor"], ["dsb-outside", "outdoor"], [null, "nowhere"]]) { try { T.report(scope, reason); } catch { threw++; } }
+  seq.contract = threw === 4;
+  // A scene change holds the scope out whatever the old scene's last frames report, until it settles.
+  T.report("main", "outdoor"); T.hold(true);
+  const holding = S.scope === null && S.reason === "scene" && !T.report("main", "outdoor") && S.scope === null;
+  T.hold(false);
+  seq.held = holding && T.report("main", "outdoor") && S.scope === "main";
+  seq.monotonic = heard.every((epoch, i) => i === 0 || epoch >= heard[i - 1]);
+  record("outdoor scope epochs: nothing is public without a transport; an acknowledgement opens only the current epoch and scope, so leaving, backtracking, a reset or a lost transport closes it and no late answer reopens it; repeats are silent and verdicts must agree with their reason",
+    Object.values(seq).every(Boolean), JSON.stringify(seq));
+};
+// Ooga Chat (src/ooga-chat/, docs/ooga-chat-app.md): the bootstrap contract, the production adapter's failures, the
+// shell's lifecycle on a small DOM stand-in, and the build's guards, all in Node.
+const oogaChatChecks = async () => {
+  const load = (names, context) => { for (const name of names) runInNewContext(readFileSync(join(root, name), "utf8"), context); return context.window.BL; };
+  const C = load(["src/ooga-chat/ooga-chat-config.js"], { window: {} }).oogaChatConfig;
+  const valid = (extra = {}) => ({ version: 1, protocols: { identity: [1], audience: [1, 2], media: [1] }, features: { github: true, x: true, voice: false, feed: "demo" },
+    paths: { session: "/api/session", logout: "/api/logout", login: { github: "/auth/github", x: "//evil.example/x" } }, ...extra });
+  const live = C.parseBootstrap(valid(), "b1"), review = C.parseBootstrap(valid(), "b1", { fixture: true });
+  const contract = {
+    missing: C.parseBootstrap(null, "b1").mode === "unavailable" && C.parseBootstrap("<html>", "b1").mode === "unavailable",
+    revision: C.parseBootstrap({ version: 2 }, "b1").mode === "stale",
+    protocol: C.parseBootstrap(valid({ protocols: { identity: [1], audience: [2], media: [1] } }), "b1").mode === "stale",
+    live: live.ok && live.mode === "live" && live.features.github && live.paths.login.github === "/auth/github",
+    foreignPath: !live.features.x && !live.paths.login.x,
+    noDemoInProduction: live.features.feed === "off" && review.features.feed === "demo",
+    newer: C.parseBootstrap(valid({ build: "b2" }), "b1").newer === "b2" && C.parseBootstrap(valid({ build: "b1" }), "b1").newer === null,
+    xListens: C.parseSession({ identity: { provider: "x", login: "someone" }, capabilities: { speak: true, contributor: true } }).capabilities.speak === false,
+    githubSpeaks: C.parseSession({ identity: { provider: "github", login: "someone" }, capabilities: { speak: true, contributor: true } }).capabilities.contributor === true,
+    badLogin: C.parseSession({ identity: { provider: "github", login: "../x" } }) === null,
+    storage: C.storageKey("fixture", "tab") !== C.storageKey("http", "tab")
+  };
+  record("Ooga Chat bootstrap: a missing or foreign answer is unavailable, another revision or protocol is stale, paths stay same-origin, production never takes demo payments, and only a GitHub account the server names may speak",
+    Object.values(contract).every(Boolean), JSON.stringify(contract));
+
+  // The production adapter against a stand-in fetch: every failure is an explicit unavailable mode, and dispose aborts.
+  const answer = (status, type, body) => async () => ({ ok: status < 400, status, headers: { get: () => type }, json: async () => body });
+  const adapterWith = (fetch) => load(["src/ooga-chat/ooga-chat-config.js", "src/ooga-chat/ooga-chat-http.js"],
+    { window: {}, AbortController, setTimeout, clearTimeout }).oogaChatHttp.create({ fetch, location: { assign() {} }, doc: { querySelector: () => ({ content: "b1" }) } });
+  const modes = [];
+  for (const fetch of [answer(404, "text/html"), answer(200, "text/html; charset=utf-8", null), async () => { throw new TypeError("offline"); }, answer(200, "application/json", valid())]) {
+    modes.push((await adapterWith(fetch).bootstrap()).mode);
+  }
+  const hanging = adapterWith((path, init) => new Promise((resolve, reject) => init.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })))));
+  const waiting = hanging.bootstrap(), held = hanging.pending;
+  hanging.dispose();
+  const ended = await waiting;
+  // Sign-out ends only when the server confirms it; a refused one throws, so the app keeps the session and says so.
+  const outWith = async (status) => { try { await adapterWith(answer(status, "application/json", {})).signOut({ paths: { logout: "/api/logout" } }); return "ok"; } catch { return "threw"; } };
+  const signOut = [await outWith(204), await outWith(401), await outWith(500)].join();
+  const adapter = { modes: modes.join() === "unavailable,unavailable,unavailable,live", held, released: hanging.pending === 0 && ended.mode === "unavailable" && ended.reason === "disposed",
+    signOut: signOut === "ok,threw,threw" };
+  record("Ooga Chat adapter: a 404, a non-JSON page or an unreachable service each leave the app unavailable rather than invented, disposing aborts what is still asking, and a sign-out the server refuses throws instead of signing out",
+    adapter.modes && adapter.held === 1 && adapter.released && adapter.signOut, JSON.stringify({ ...adapter, signOut }));
+
+  // The shell over a minimal DOM: views build on first visit, are kept across tab switches and updates, and dispose once.
+  const node = (tag, doc) => {
+    const el = { tagName: tag, ownerDocument: doc, children: [], parent: null, dataset: {}, attrs: {}, hidden: false, listeners: [], className: "", id: "", title: "", type: "", tabIndex: 0,
+      setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return this.attrs[k] ?? null; },
+      append(...items) { for (const item of items) { if (typeof item === "object") { item.parent?.children.splice(item.parent.children.indexOf(item), 1); item.parent = this; } this.children.push(item); } },
+      remove() { if (this.parent) this.parent.children.splice(this.parent.children.indexOf(this), 1); this.parent = null; },
+      addEventListener(type, fn, options = {}) { const entry = { type, fn }; this.listeners.push(entry); options.signal?.addEventListener("abort", () => this.listeners.splice(this.listeners.indexOf(entry), 1)); },
+      dispatch(type, event = {}) { for (const entry of [...this.listeners]) if (entry.type === type) entry.fn({ preventDefault() {}, ...event }); },
+      focus() {}, querySelector(selector) { return this.children.find((child) => child.className === selector.slice(1)) || null; } };
+    return el;
+  };
+  const doc = { createElement: (tag) => node(tag, doc) };
+  const rootEl = node("main", doc), bar = node("nav", doc), stack = node("div", doc);
+  bar.className = "oc-tabs"; stack.className = "oc-views"; rootEl.append(bar, stack);
+  const made = {}, updates = {}, disposed = {};
+  const view = (id) => () => { made[id] = (made[id] || 0) + 1; const el = node("div", doc); return { node: el, update() { updates[id] = (updates[id] || 0) + 1; }, dispose() { disposed[id] = (disposed[id] || 0) + 1; } }; };
+  const S = load(["src/ooga-chat/ooga-chat-shell.js"], { window: { BL: { nativeIcons: { svg: () => node("svg", doc) } } }, AbortController }).oogaChatShell;
+  const shell = S.create({ root: rootEl, selected: "c", tabs: [
+    { id: "a", label: "A", icon: "cloud", visible: () => true, view: view("a") },
+    { id: "b", label: "B", icon: "bananas", visible: () => true, view: view("b") },
+    { id: "c", label: "C", icon: "chat", visible: (s) => s.contributor, view: view("c") }] });
+  const button = (id) => bar.children.find((el) => el.dataset.tab === id), panel = (id) => stack.children.find((el) => el.dataset.view === id);
+  const lazy = shell.mounted.length === 0;
+  shell.update({ contributor: false });
+  const remembered = shell.selected === "a" && shell.mounted.join() === "a" && button("c").hidden;
+  button("b").dispatch("click");
+  const bNode = panel("b").children[0];
+  button("a").dispatch("click"); button("b").dispatch("click");
+  bar.dispatch("keydown", { key: "ArrowLeft" });
+  const kept = made.a === 1 && made.b === 1 && panel("b").children[0] === bNode && shell.selected === "a" && panel("b").hidden && !panel("a").hidden;
+  shell.update({ contributor: true }); button("c").dispatch("click");
+  shell.update({ contributor: false });
+  const fallback = shell.selected === "a" && !disposed.c && panel("c").hidden && updates.c >= 1;
+  const buttons = ["a", "b", "c"].map(button);
+  shell.dispose(); shell.dispose();
+  const listeners = bar.listeners.length + buttons.reduce((sum, el) => sum + el.listeners.length, 0);
+  const lifecycle = { lazy, remembered, kept, fallback, disposedOnce: disposed.a === 1 && disposed.b === 1 && disposed.c === 1,
+    emptied: bar.children.length === 0 && stack.children.length === 0, listeners: listeners === 0, inert: (shell.update({ contributor: true }), shell.mounted.length === 0) };
+  record("Ooga Chat shell: nothing builds before the first state, a hidden remembered tab is not built, a view is built once and its nodes survive tab changes, keys and updates, a tab that hides falls back without disposing, and dispose tears every view, node and listener down once",
+    Object.values(lifecycle).every(Boolean), JSON.stringify(lifecycle));
+
+  // The build: one same-origin script and stylesheet, only the app's and the shared modules, no fixtures unless asked,
+  // and it never stages over the island's folders or a folder it did not make.
+  const B = await import(pathToFileURL(join(root, "scripts/ooga-chat.mjs")).href);
+  const out = mkdtempSync(join(tmpdir(), "ooga-chat-")), staged = join(out, "app");
+  try {
+    const manifest = B.build(staged), page = readFileSync(join(staged, "index.html"), "utf8"), headers = readFileSync(join(staged, "_headers"), "utf8");
+    const script = manifest.files.find((file) => /^js\/ooga-chat-[0-9a-f]{16}\.js$/.test(file.path)), js = readFileSync(join(staged, script.path), "utf8");
+    const art = manifest.files.find((file) => file.path.startsWith("art/"));
+    const refuses = (dir) => { try { B.build(dir); return false; } catch (error) { return /refusing|did not stage/.test(error.message); } };
+    mkdirSync(join(out, "foreign")); writeFileSync(join(out, "foreign", "keep.txt"), "x");
+    // stage.mjs's placeholder may be staged over, but not with anything else beside it or in place of its page.
+    const held = (files) => { const dir = mkdtempSync(join(out, "held-")); for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text); return dir; };
+    const overPlaceholder = (() => { const dir = held({ "index.html": B.PLACEHOLDER, "404.html": B.PLACEHOLDER }); B.build(dir); return readdirSync(dir).includes("build.json"); })();
+    const placeholderOnly = refuses(held({ "index.html": B.PLACEHOLDER, "404.html": B.PLACEHOLDER, "keep.txt": "x" })) && refuses(held({ "index.html": "<p>mine</p>", "404.html": B.PLACEHOLDER }));
+    const withFixtures = B.build(staged, { fixtures: true });
+    const fixtureJs = withFixtures.files.find((file) => file.path.startsWith("js/ooga-chat-fixture-"));
+    const build = {
+      modules: manifest.scripts.every((src) => B.SHARED.includes(`../${src}`) || /^ooga-chat-[a-z-]+\.js$/.test(src)) && !manifest.scripts.includes("ooga-chat-fixtures.js"),
+      island: !/glRenderer|BL\.scene\b|BL\.net\b|BL\.director|terrain/.test(js),
+      noFixture: !js.includes("BL.oogaChatFixtures =") && !js.includes("sample-contributor") && !manifest.files.some((file) => file.path.includes("fixture")),
+      page: (page.match(/<script /g) || []).length === 1 && (page.match(/<link rel="stylesheet"/g) || []).length === 1 && !/<style|<script>/.test(page) && page.includes(`content="${manifest.build}"`),
+      art: !!art && js.includes(`"/${art.path}"`),
+      policy: B.headersFor(headers, "/")["Content-Security-Policy"] === `${B.POLICY}; frame-ancestors 'none'` && B.headersFor(headers, `/${script.path}`)["Cache-Control"].includes("immutable")
+        && B.headersFor(headers, "/index.html")["Cache-Control"] === "no-cache",
+      fixtures: !!fixtureJs && readFileSync(join(staged, fixtureJs.path), "utf8").includes("BL.oogaChatFixtures =") && readFileSync(join(staged, "fixture.html"), "utf8").includes('data-adapter="fixture"'),
+      guards: refuses(join(root, "_site")) && refuses(join(root, "src", "x")) && refuses(join(root, "untracked", "site")) && refuses(root) && refuses(join(out, "foreign")),
+      placeholder: overPlaceholder && placeholderOnly
+    };
+    record("Ooga Chat build: one hashed same-origin script and stylesheet holding only the app's and the shared modules, no fixture code unless asked, its pictures renamed by hash, its policy in _headers, and never staged over the island's folders or a folder it did not make",
+      Object.values(build).every(Boolean), JSON.stringify(build));
+  } finally { rmSync(out, { recursive: true, force: true }); }
+
+  // The island's tabs draw from the same icons, and every icon slot names one that exists.
+  const I = load(["src/js/native-icons.js"], { window: {} }).nativeIcons;
+  const slots = [...readFileSync(join(root, "src/index.html"), "utf8").matchAll(/data-native-icon="([a-z]+)"/g)].map((m) => m[1]);
+  record("shared native icons: every island tab slot names an icon native-icons.js draws", slots.length === 4 && slots.every((name) => I.names.includes(name)), JSON.stringify(slots));
+};
 const unitPreludeChecks = async () => {
   const caves = caveDirectoryProof();
   record("cave directory: bounded immutable reviewed destinations reject duplicate identities, unknown schemas and credentials or payload-bearing URLs", Object.values(caves).every(Boolean), JSON.stringify(caves));
   await connectionReportChecks();
+  outdoorScopeChecks();
+  await oogaChatChecks();
   const artifact = artifactUnitProof();
   record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
   const previewRange=await studioPreviewRangeProof();
@@ -35188,8 +35434,15 @@ const dsbIntegrationCheckpoint={name:"dsb integration checkpoint",why:"contract:
   const walking=await b.evaluate('({x:__ooga.dsb.avatar.root.position.x,z:__ooga.dsb.avatar.root.position.z,open:document.getElementById("sheet").dataset.open})');
   record("DSB integration: pressing outside the global sheet restores WASD and character movement with the sheet still open",resumed.focused&&resumed.keys==='[[0,1],[-1,0],[0,-1],[1,0]]'&&Math.hypot(walking.x-moved.x,walking.z-moved.z)>.01&&walking.open==="true",JSON.stringify({resumed,moved,walking}));
   const zones={"dsb-studio":"dsb-studio","maxis-club":"dsb-maxis","without-rulers":"dsb-without-rulers","proof-of-ink":"dsb-proof-of-ink","big-bitcoin":"dsb-big-bitcoin","meme-factory":"dsb-meme-factory","stackchain-magazine":"dsb-stackchain","svrn-society":"dsb-svrn"};
+  // The outdoor scope (outdoor-scope.js) leaves DSB Land at the entry's request, before the room swaps in, and returns
+  // only once the exit has finished, under a new epoch, so no earlier acknowledgement could reopen it.
+  const scopes=[];
   for(const [id,zone] of Object.entries(zones)){
-    await b.evaluate(`__ooga.dsb.interiors.review(${JSON.stringify(id)},true)`);await step();state=await read();
+    const outside=await b.evaluate('({scope:BL.outdoorScope.state.scope,epoch:BL.outdoorScope.state.epoch})');
+    const entering=await b.evaluate(`(()=>{__ooga.dsb.interiors.review(${JSON.stringify(id)},true);const S=BL.outdoorScope.state;return {scope:S.scope,reason:S.reason,epoch:S.epoch,active:!!__ooga.dsb.interiors.active,public:S.public};})()`);
+    await step();state=await read();
+    const inside=await b.evaluate('({scope:BL.outdoorScope.state.scope,reason:BL.outdoorScope.state.reason})');
+    scopes.push({id,outside,entering,inside});
     record("DSB integration: "+id+" immediately selects its voice zone",state.zone===zone&&!!state.body,JSON.stringify(state));
     if(id==="proof-of-ink"||id==="svrn-society"){
       const menu=id==="proof-of-ink"?"inkMenu":"svrnMenu",selector=id==="proof-of-ink"?"#ink-catalog":".svrn-menu";
@@ -35200,18 +35453,22 @@ const dsbIntegrationCheckpoint={name:"dsb integration checkpoint",why:"contract:
       await b.key("Escape");
       record("DSB integration: closing "+id+" restores global menu without changing saved state",await b.evaluate('!document.getElementById("sheet").closest("[inert]")&&document.getElementById("sheet").dataset.open==="true"&&BL.dsbMenuShell.count===0'));
     }
-    await b.evaluate('__ooga.dsb.interiors.request(__ooga.dsb.interiors.active.room.exit)');await step();
+    const leaving=await b.evaluate('(()=>{__ooga.dsb.interiors.request(__ooga.dsb.interiors.active.room.exit);return {scope:BL.outdoorScope.state.scope,reason:BL.outdoorScope.state.reason};})()');await step();
+    scopes.at(-1).leaving=leaving;scopes.at(-1).back=await b.evaluate('({scope:BL.outdoorScope.state.scope,epoch:BL.outdoorScope.state.epoch})');
     record("DSB integration: exit "+id+" restores exterior voice",await b.evaluate('BL.net.state.zone==="dsb-outside"&&!__ooga.dsb.interiors.active'));
   }
+  record("DSB outdoor scope: every room's entry leaves DSB Land's public scope at its request, before the room swaps in, stays out inside and through the exit's fade, and comes back outside only under a new epoch",
+    scopes.length===8&&scopes.every(r=>r.outside.scope==="dsb"&&r.entering.scope===null&&r.entering.reason==="entering"&&!r.entering.active&&!r.entering.public&&r.entering.epoch>r.outside.epoch
+      &&r.inside.scope===null&&r.inside.reason==="interior"&&r.leaving.scope===null&&r.leaving.reason==="entering"&&r.back.scope==="dsb"&&r.back.epoch>r.entering.epoch),JSON.stringify(scopes));
   await b.evaluate('__ooga.go("bifrost");__ooga.advance(.6,.3)');
-  record("DSB integration: short direct return clears DSB presence and keeps global sheet",await b.evaluate('__ooga.scene==="bifrost"&&BL.net.state.zone==="bifrost.chamber"&&!document.querySelector(".dsb-entry")&&document.getElementById("sheet").dataset.open==="true"'));
+  record("DSB integration: short direct return clears DSB presence and keeps global sheet",await b.evaluate('__ooga.scene==="bifrost"&&BL.net.state.zone==="bifrost.chamber"&&!document.querySelector(".dsb-entry")&&document.getElementById("sheet").dataset.open==="true"&&BL.outdoorScope.state.scope===null&&BL.outdoorScope.state.reason==="scene"'));
   await b.evaluate('document.getElementById("sheet-toggle").focus()');
   const returned=await resumeCanvas();
   record("DSB integration: the same canvas focus handoff restores WASD after returning to Bifrost",returned.focused&&returned.keys==='[[0,1],[-1,0],[0,-1],[1,0]]',JSON.stringify(returned));
   await b.evaluate('__ooga.go("dsb");__ooga.advance(.6,.3)');
-  record("DSB integration: outbound Bifrost journey uses special tunnel without island voice",await b.evaluate('__ooga.dsb.entrance.phase==="tunnel"&&BL.net.state.zone==="dsb-transit"&&document.getElementById("sheet").dataset.open==="true"'));
+  record("DSB integration: outbound Bifrost journey uses special tunnel without island voice",await b.evaluate('__ooga.dsb.entrance.phase==="tunnel"&&BL.net.state.zone==="dsb-transit"&&document.getElementById("sheet").dataset.open==="true"&&BL.outdoorScope.state.scope===null&&BL.outdoorScope.state.reason==="transit"'));
   await b.evaluate('__ooga.dsb.entrance.skip();__ooga.advance(.1,.1)');
-  record("DSB integration: arrival restores exterior and rectangular membrane",await b.evaluate('BL.net.state.zone==="dsb-outside"&&__ooga.dsb.gate.horizon.geometry.portalRect'));
+  record("DSB integration: arrival restores exterior and rectangular membrane",await b.evaluate('BL.net.state.zone==="dsb-outside"&&__ooga.dsb.gate.horizon.geometry.portalRect&&BL.outdoorScope.state.scope==="dsb"'));
 }};
 scene("dsb",{label:"integration checkpoint",query:"&weather=clear&time=1200",steps:[dsbIntegrationCheckpoint]});
 scene("dsb",{label:"integration checkpoint phone",query:"&weather=clear&time=1200",opts:{w:390,h:844,mobile:true},steps:[dsbIntegrationCheckpoint]});
