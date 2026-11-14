@@ -234,7 +234,8 @@ Browsing them never changes a voice role, zone, microphone or hand.
   when either is not `ok`. `revision` (and the ETag) change only when what the body says changes; a matching
   If-None-Match answers 304.
 - The edge asks Oogatron at most once a minute and the island at most every five minutes per isolate, so no browser
-  fetches either itself.
+  fetches either itself. It reaches Oogatron through its `OOGATRON` service binding: Cloudflare refuses one Worker
+  fetching another of the same account's `workers.dev` addresses.
 
 **Feed the Oogas.** The same routes and wire answers as the island's relay (`worker/src/donations.js`), to the same
 `bananapayserver-<env>` `PageApi` (protocol v0.2, pinned at bananapayserver `ede387d9`):

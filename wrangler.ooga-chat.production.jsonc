@@ -44,7 +44,10 @@
   ],
   "services": [
     { "binding": "OBL", "service": "oogaboogaland-production", "entrypoint": "ChatBridge" },
-    { "binding": "DONATIONS", "service": "bananapayserver-production", "entrypoint": "PageApi" }
+    { "binding": "DONATIONS", "service": "bananapayserver-production", "entrypoint": "PageApi" },
+    // Oogatron, for the contributors panel's stats: a Worker cannot fetch another of this account's workers.dev
+    // addresses, so it is reached by binding (worker/chat/src/public.js).
+    { "binding": "OOGATRON", "service": "oogatron" }
   ],
   // Daily: purge expired sessions and abandoned sign-ins.
   "triggers": { "crons": ["15 4 * * *"] },

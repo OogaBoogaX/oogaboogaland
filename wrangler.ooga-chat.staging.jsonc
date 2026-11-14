@@ -50,7 +50,10 @@
     // audience and media. Deploy oogaboogaland-staging with the entrypoint first, or this deploy fails on the binding.
     { "binding": "OBL", "service": "oogaboogaland-staging", "entrypoint": "ChatBridge" },
     // bananapayserver's staging PageApi, on signet: /donations/* (#664).
-    { "binding": "DONATIONS", "service": "bananapayserver-staging", "entrypoint": "PageApi" }
+    { "binding": "DONATIONS", "service": "bananapayserver-staging", "entrypoint": "PageApi" },
+    // Oogatron, for the contributors panel's stats: a Worker cannot fetch another of this account's workers.dev
+    // addresses, so it is reached by binding (worker/chat/src/public.js).
+    { "binding": "OOGATRON", "service": "oogatron" }
   ],
   // Daily: purge expired sessions and abandoned sign-ins.
   "triggers": { "crons": ["15 4 * * *"] },

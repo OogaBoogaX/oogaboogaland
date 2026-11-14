@@ -112,7 +112,10 @@ export const handlePublic = async (request, env, url, deps) => {
   if (url.pathname !== "/api/chat/public/contributors") return refusal("not_found", 404);
   if (request.method !== "GET" && request.method !== "HEAD") return refusal("method_not_allowed", 405);
   if (!(await allowed(env.CHAT_PUBLIC_LIMITER, clientIp(request)))) return refusal("rate_limited", 429, { retryable: true, retryAfter: 60 });
-  const body = await contributorsSnapshot(env, { fetcher: deps.fetch });
+  // Oogatron is another Worker in this account: Cloudflare refuses one Worker fetching another's workers.dev address,
+  // so the edge reaches it through its service binding (`OOGATRON`), and the public address only without one.
+  const fetcher = env.OOGATRON && typeof env.OOGATRON.fetch === "function" ? (input, init) => env.OOGATRON.fetch(input, init) : deps.fetch;
+  const body = await contributorsSnapshot(env, { fetcher });
   const etag = `"${body.revision}"`;
   const headers = { etag, "cache-control": "public, max-age=30", vary: "accept-encoding" };
   if (request.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers: { ...headers, "x-content-type-options": "nosniff" } });

@@ -206,3 +206,12 @@ test("the bootstrap says Feed is on only with its flag and its binding", async (
   assert.equal(await boot({ FEATURES: "feed" }), false);
   assert.equal(await boot({ FEATURES: "", DONATIONS: pageApi() }), false);
 });
+
+test("the edge reaches Oogatron through its service binding when it has one, never the workers.dev address", async () => {
+  forgetPublic(); forgetHello();
+  const isle = island(), feed = oogatron(() => new Response(JSON.stringify(snapshot(new Date(Date.now() - 1000).toISOString()))));
+  const env = { ENVIRONMENT: "staging", SITE_ORIGIN: SITE, OBL: isle.binding, ASSETS: { fetch: async () => new Response("app") }, OOGATRON: { fetch: feed.fetch } };
+  const deps = { fetch: async () => { throw new Error("a Worker cannot fetch another of its account's workers.dev addresses"); }, waitUntil: null, cache: null };
+  const body = await (await route(new Request(`${SITE}/api/chat/public/contributors`), env, deps)).json();
+  assert.deepEqual([body.sources.stats.state, feed.calls], ["ok", 1]);
+});
