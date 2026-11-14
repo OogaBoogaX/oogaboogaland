@@ -10772,24 +10772,30 @@ const donationClientChecks = async () => {
   let priceClock = 1000, nextPriceTimer = 0;
   const rateContext = { window: { BL: {}, setTimeout: fn => { const id = ++nextPriceTimer; priceTimers.set(id, fn); return id; }, clearTimeout: id => priceTimers.delete(id) },
     document: { hidden: false, addEventListener: (name, fn) => priceListeners.set(name, fn), removeEventListener: name => priceListeners.delete(name) },
-    Date: { now: () => priceClock }, WebSocket: class { constructor(url) { this.url = url; this.readyState = 0; priceSockets.push(this); } close() { this.closed = true; this.readyState = 3; } } };
+    Date: { now: () => priceClock }, WebSocket: class { constructor(url) { this.url = url; this.readyState = 0; priceSockets.push(this); } send(text) { this.sent = text; } close() { this.closed = true; this.readyState = 3; } } };
   runInNewContext(await readFile(new URL("../src/js/donation-rate.js", import.meta.url), "utf8"), rateContext);
+  const COINBASE = "wss://ws-feed.exchange.coinbase.com", ticker = (ws, price, product = "BTC-USD") => ws.onmessage({ data: JSON.stringify({ type: "ticker", product_id: product, price }) });
+  const fireRetry = () => { const [id, fn] = [...priceTimers].at(-1); priceTimers.delete(id); fn(); };
   const rateNotices = [];
   const rates = rateContext.window.BL.donationRate, offOne = rates.watch(value => rateNotices.push(value && { ...value })), offTwo = rates.watch();
   priceSockets[0].readyState = 1; priceSockets[0].onopen();
-  priceSockets[0].onmessage({ data: JSON.stringify({ weightedPrice: "90000.12" }) });
+  const hello = JSON.parse(priceSockets[0].sent || "null");
+  const subscribed = priceSockets[0].url === COINBASE && hello?.type === "subscribe" && hello.product_ids.join() === "BTC-USD" && hello.channels.join() === "ticker_batch";
+  priceSockets[0].onmessage({ data: JSON.stringify({ type: "subscriptions", channels: [{ name: "ticker_batch", product_ids: ["BTC-USD"] }] }) });
+  ticker(priceSockets[0], "90000.12");
   const sharedRate = priceSockets.length === 1 && rates.current.usdPerBtc === 90000.12 && !rates.current.stale
-    && rates.current.live && rates.current.satsPerBanana > 1111 && rates.current.satsPerBanana < 1112
+    && rates.current.live && rates.current.source === "coinbase" && rates.current.satsPerBanana > 1111 && rates.current.satsPerBanana < 1112
     && rateNotices.at(-1)?.usdPerBtc === 90000.12;
-  priceSockets[0].onmessage({ data: JSON.stringify({ weightedPrice: "-1" }) });
+  ticker(priceSockets[0], "-1"); ticker(priceSockets[0], "3000", "ETH-USD");
+  priceSockets[0].onmessage({ data: JSON.stringify({ weightedPrice: "80000" }) });
   const validRate = rates.current.usdPerBtc === 90000.12;
   rateContext.document.hidden = true; priceListeners.get("visibilitychange")();
   const hiddenRate = priceSockets[0].closed && rates.current.stale && priceTimers.size === 0 && rateNotices.at(-1)?.stale;
   rateContext.document.hidden = false; priceListeners.get("visibilitychange")();
   priceSockets[1].readyState = 1; priceSockets[1].onopen();
-  priceClock++; priceSockets[1].onmessage({ data: JSON.stringify({ weightedPrice: "91000" }) });
+  priceClock++; ticker(priceSockets[1], "91000");
   const noticeCount = rateNotices.length;
-  offOne(); priceClock++; priceSockets[1].onmessage({ data: JSON.stringify({ weightedPrice: "92000" }) });
+  offOne(); priceClock++; ticker(priceSockets[1], "92000");
   const retainedRate = !priceSockets[1].closed && rateNotices.length === noticeCount;
   offTwo(); offTwo();
   // A quick panel close must not abort CONNECTING; reopening reuses that one
@@ -10801,9 +10807,33 @@ const donationClientChecks = async () => {
   const reused = priceSockets.length === count && priceTimers.size === 1;
   offAgain(); pending.readyState = 1; pending.onopen();
   const pendingClosed = pending.closed && pending.onopen === null && pending.onmessage === null;
-  record("donation rate: watchers share one socket, receive live and stale updates until released, reject invalid prices, pause while hidden, reconnect when visible, and close the last socket and its timers exactly once",
-    sharedRate && validRate && hiddenRate && retainedRate && waiting && reused && pendingClosed && priceSockets[1].closed && priceListeners.size === 0 && priceTimers.size === 0,
-    JSON.stringify({ sharedRate, validRate, hiddenRate, retainedRate, waiting, reused, pendingClosed, listeners: priceListeners.size, timers: priceTimers.size }));
+  // Coinbase refusing its subscription hands over to 2140data at once; a 2140data drop goes back to
+  // Coinbase after a wait, and a Coinbase drop after it delivered asks Coinbase again.
+  const offFallback = rates.watch(), refusing = priceSockets.at(-1);
+  refusing.readyState = 1; refusing.onopen();
+  refusing.onmessage({ data: JSON.stringify({ type: "subscriptions", channels: [] }) });
+  const rateFallback = priceSockets.at(-1);
+  rateFallback.readyState = 1; rateFallback.onopen();
+  priceClock++; rateFallback.onmessage({ data: JSON.stringify({ weightedPrice: "93000.5" }) });
+  const fellBack = refusing.url === COINBASE && refusing.closed && rateFallback.url === "wss://2140data.io/" && rateFallback.sent === undefined
+    && rates.current.usdPerBtc === 93000.5 && rates.current.source === "2140data" && !rates.current.stale;
+  const before = priceSockets.length;
+  rateFallback.onclose();
+  const rateWaited = rates.current.stale && priceSockets.length === before && priceTimers.size === 1;
+  fireRetry();
+  const rateBack = priceSockets.at(-1);
+  rateBack.readyState = 1; rateBack.onopen(); priceClock++; ticker(rateBack, "94000");
+  const preferred = rateBack.url === COINBASE && rates.current.usdPerBtc === 94000 && rates.current.source === "coinbase";
+  rateBack.onclose();
+  const held = priceSockets.length === before + 1 && priceTimers.size === 1;
+  fireRetry();
+  const again = priceSockets.at(-1), retried = again !== rateBack && again.url === COINBASE;
+  offFallback(); again.readyState = 1; again.onopen();
+  const fallbackClosed = again.closed && priceListeners.size === 0 && priceTimers.size === 0;
+  record("donation rate: watchers share one Coinbase BTC-USD ticker_batch socket, receive live and stale updates until released, reject invalid prices and other products, pause while hidden, reconnect when visible, fall back to 2140data only while Coinbase is not delivering, and close the last socket and its timers exactly once",
+    subscribed && sharedRate && validRate && hiddenRate && retainedRate && waiting && reused && pendingClosed && priceSockets[1].closed
+      && fellBack && rateWaited && preferred && held && retried && fallbackClosed && priceListeners.size === 0 && priceTimers.size === 0,
+    JSON.stringify({ subscribed, sharedRate, validRate, hiddenRate, retainedRate, waiting, reused, pendingClosed, fellBack, rateWaited, preferred, held, retried, fallbackClosed, listeners: priceListeners.size, timers: priceTimers.size }));
 
   // Regression: the pile showed whole gameplay stock (79) beside a panel valued at 77.97.
   const valueBL = { game: {}, scene: {}, donationRate: { current: null }, donations: { real: true,
