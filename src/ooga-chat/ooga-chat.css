@@ -339,5 +339,7 @@ img.oc-zone-icon { width: 24px; image-rendering: pixelated; }
   .oc-slab { padding: 14px 16px; }
   .oc-space { --face: 44px; }
   .oc-people { gap: 14px 6px; }
-  .oc-zone { gap: 6px; padding: 0 6px; }
+  .oc-zone { gap: 4px; padding: 0 5px; }
+  .oc-zone-icon { width: 24px; }
+  img.oc-zone-icon { width: 20px; }
 }
