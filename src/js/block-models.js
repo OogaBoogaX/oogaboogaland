@@ -90,6 +90,77 @@
     }
     return false;
   };
+  // Clanktown's blocks: the server rooms' walls of stacked Bitcoin miners (silver boxes in dark racks, a fan grille at
+  // each end), server towers and racks with rows of vents and lights, rusted scrap heaps, sooty smokestacks, billboard
+  // poles and boards, and the Mainframe: a black monolith banded in teal with a single red visor near its top. False
+  // for anything else (the sniper towers), which is drawn as on the other maps.
+  const MINER_W = 1.25, MINER_ROW = 0.6;
+  const clankBlock = (parts, b, w, d, h, x, y, z, bottom) => {
+    if (b[4] > TOP - 0.5 && b[4] < TOP + 1) return false;
+    const thin = Math.min(w, d), along = w >= d;
+    if (bottom === 0 && Math.abs(b[4] - SIM.MINER_H) < 0.01 && thin <= 0.85) {
+      parts.push(box({ w, h, d, color: "#1d2126", offset: { x, y, z } }));
+      const len = along ? w : d, n = Math.max(1, Math.round(len / MINER_W)), step = len / n;
+      for (let k = 0; k < n; k++) for (let j = 0; j < Math.round(h / MINER_ROW); j++) {
+        const c = (along ? b[0] : b[2]) + (k + 0.5) * step, my = (j + 0.5) * MINER_ROW;
+        parts.push(bevelBox({ w: along ? step - 0.08 : thin + 0.04, h: MINER_ROW - 0.08, d: along ? thin + 0.04 : step - 0.08, color: (k + j) % 3 ? "#9aa3ad" : "#aeb6bf", offset: { x: along ? c : x, y: my, z: along ? z : c } }));
+        // The fan grilles, one at each face: a dark square with a lighter hub.
+        for (const s of [-1, 1]) {
+          const fx = along ? c : x + s * (thin / 2 + 0.03), fz = along ? z + s * (thin / 2 + 0.03) : c;
+          parts.push(box({ w: along ? 0.42 : 0.02, h: 0.42, d: along ? 0.02 : 0.42, color: "#22262b", offset: { x: fx, y: my, z: fz } }));
+        }
+      }
+      return true;
+    }
+    if (bottom === 0 && h >= 5 && w >= 2 && w <= 2.5 && d >= 2 && d <= 2.5) {
+      // A server tower: a dark chassis, rows of vents, a lit stripe of teal and red lights down each face.
+      parts.push(bevelBox({ w, h, d, color: "#22262e", offset: { x, y, z } }));
+      for (let k = 0.6; k < h - 0.3; k += 0.5) parts.push(box({ w: w + 0.03, h: 0.06, d: d + 0.03, color: "#111317", offset: { x, y: k, z } }));
+      for (let k = 0.85; k < h - 0.4; k += 0.5) for (const [ox, oz] of [[0, d / 2 + 0.02], [0, -d / 2 - 0.02], [w / 2 + 0.02, 0], [-w / 2 - 0.02, 0]]) {
+        parts.push(box({ w: ox ? 0.02 : 0.1, h: 0.08, d: ox ? 0.1 : 0.02, color: (k * 2) % 2 < 1 ? "#38f5e0" : "#ff3a3a", emissive: 1, offset: { x: x + ox + (ox ? 0 : -w * 0.3), y: k, z: z + oz + (oz ? 0 : -d * 0.3) } }));
+      }
+      parts.push(box({ w: w + 0.1, h: 0.2, d: d + 0.1, color: "#38f5e0", emissive: 0.7, offset: { x, y: b[4] - 0.1, z } }));
+      return true;
+    }
+    if (bottom === 0 && h >= 8) {
+      // The Mainframe: a black monolith, teal bands, and the red visor of a clanker near its top.
+      parts.push(bevelBox({ w, h, d, color: "#0f1114", offset: { x, y, z } }));
+      for (let k = 1.2; k < h - 1.5; k += 1.1) parts.push(box({ w: w + 0.04, h: 0.08, d: d + 0.04, color: "#38f5e0", emissive: 0.9, offset: { x, y: k, z } }));
+      parts.push(box({ w: w + 0.08, h: 0.45, d: d + 0.08, color: "#ff2a2a", emissive: 1, offset: { x, y: h - 1.1, z } }));
+      for (const s of [-1, 1]) parts.push(box({ w: 0.08, h: 1.4, d: 0.08, color: "#c9ced6", offset: { x: x + s * 0.8, y: h + 0.7, z } }), box({ w: 0.18, h: 0.18, d: 0.18, color: "#ff2a2a", emissive: 1, offset: { x: x + s * 0.8, y: h + 1.45, z } }));
+      return true;
+    }
+    if (bottom === 0 && h >= 7 && thin >= 1.2) {
+      // A smokestack: sooty brick with rust bands and a black lip.
+      parts.push(bevelBox({ w, h, d, color: "#4a3a34", offset: { x, y, z } }));
+      for (let k = 1.5; k < h; k += 1.8) parts.push(box({ w: w + 0.05, h: 0.18, d: d + 0.05, color: "#7a4a2a", offset: { x, y: k, z } }));
+      parts.push(box({ w: w + 0.12, h: 0.3, d: d + 0.12, color: "#151515", offset: { x, y: b[4] - 0.15, z } }));
+      return true;
+    }
+    if (bottom === 0 && thin <= 0.35 && h > 4) { parts.push(box({ w, h, d, color: "#3a3f46", offset: { x, y, z } })); return true; }
+    if (bottom > 2.5 && thin <= 0.3 && h > 1.4) {
+      // A billboard's board: dark, framed in neon; the scene's dressing writes its slogan on it.
+      parts.push(box({ w, h, d, color: "#14171d", offset: { x, y, z } }));
+      for (const [ox, oy, ww, hh] of [[0, h / 2, w, 0.07], [0, -h / 2, w, 0.07], [w / 2, 0, 0.07, h], [-w / 2, 0, 0.07, h]]) parts.push(box({ w: along ? ww : d + 0.06, h: hh, d: along ? d + 0.06 : ww, color: "#ff4fd8", emissive: 1, offset: { x: x + (along ? ox : 0), y: y + oy, z: z + (along ? 0 : ox) } }));
+      return true;
+    }
+    if (bottom === 0 && h <= 1.1 && thin >= 1.5) {
+      // A scrap heap: a jumble of rusty boxes and a dead monitor.
+      const r = (k) => ((Math.sin((x * 7 + z * 13 + k) * 12.9898) * 43758.5453) % 1 + 1) % 1;
+      parts.push(bevelBox({ w: w * 0.95, h: h * 0.6, d: d * 0.95, color: "#4a3a2c", offset: { x, y: h * 0.3, z } }));
+      for (let k = 0; k < 6; k++) parts.push(bevelBox({ w: 0.4 + r(k) * 0.5, h: 0.3 + r(k + 9) * 0.3, d: 0.4 + r(k + 19) * 0.4, color: k % 2 ? "#7a4a2a" : "#5a5f66", offset: { x: x + (r(k + 29) - 0.5) * w * 0.7, y: h * 0.6 + 0.1, z: z + (r(k + 39) - 0.5) * d * 0.7 } }));
+      parts.push(box({ w: 0.5, h: 0.36, d: 0.08, color: "#101418", offset: { x, y: h + 0.1, z } }), box({ w: 0.4, h: 0.26, d: 0.02, color: "#2a6a5a", emissive: 0.4, offset: { x, y: h + 0.1, z: z + 0.05 } }));
+      return true;
+    }
+    if (bottom === 0 && h <= 1.7) {
+      // A rack of servers: dark, with a slit of lights.
+      parts.push(bevelBox({ w, h, d, color: "#262a31", offset: { x, y, z } }));
+      for (let k = 0.25; k < h - 0.1; k += 0.3) parts.push(box({ w: w + 0.02, h: 0.04, d: d + 0.02, color: "#14161a", offset: { x, y: k, z } }));
+      parts.push(box({ w: along ? w * 0.8 : d + 0.03, h: 0.05, d: along ? d + 0.03 : d * 0.8, color: "#38f5e0", emissive: 1, offset: { x, y: h - 0.2, z } }));
+      return true;
+    }
+    return false;
+  };
   // The floating island under a map, in the hub's voxel ground (`BL.terrain`'s grid, greedy mesher and palette): a
   // grass top, soil, then banded rock down a cliff all round the field's open edge, the rock deepening toward the
   // middle as the sim's `isleDepth` has it (which holds bodies out of it) with drips hanging under it; and the map's
@@ -104,7 +175,8 @@
     fort: { grass: null, field: ["#c9a96b", "#bda05f"] },
     town: { grass: null, field: ["#b9a77f", "#a89270"] },
     jungle: { grass: ["#3f8a34", "#55a53c", "#2f6f2c"], field: ["#6b8f3a", "#547a30"] },
-    haunted: { grass: ["#3f4632", "#4a5138", "#353b2b"], field: ["#54433c", "#3a302a"] }
+    haunted: { grass: ["#3f4632", "#4a5138", "#353b2b"], field: ["#54433c", "#3a302a"] },
+    clank: { grass: ["#2c3529", "#34402f", "#252d23"], field: ["#3a3f45", "#30353a"] }
   };
   const islePalette = (M) => {
     const theme = ISLE_THEME[M.id], palette = BL.terrain.PALETTE.slice();
@@ -309,7 +381,7 @@
     return merge(...parts);
   });
   const arena = variants((mapIndex) => {
-    const M = SIM.ARENAS[SIM.MAPS[mapIndex]], town = M.id === "town", jungle = M.id === "jungle", haunted = M.id === "haunted", parts = [], FW = M.fieldW, FL = M.fieldL;
+    const M = SIM.ARENAS[SIM.MAPS[mapIndex]], town = M.id === "town", jungle = M.id === "jungle", haunted = M.id === "haunted", clank = M.id === "clank", parts = [], FW = M.fieldW, FL = M.fieldL;
     parts.push(box({ w: FW * 2, h: 0.05, d: 0.6, color: ORANGE, emissive: 0.25, offset: { y: 0.03 } }));
     for (const t of SIM.TEAMS) {
       const s = t === "blue" ? 1 : -1;
@@ -384,6 +456,18 @@
         }
       }
     }
+    if (clank) {
+      // Clanktown's ground: dark tiles and glowing cable runs in the paving down the field and round each room.
+      for (let k = -FL + 2; k < FL - 1; k += 2) parts.push(box({ w: FW * 2 - 2, h: 0.02, d: 0.04, color: "#262a2f", offset: { y: 0.04, z: k } }));
+      for (const s of [-1, 1]) {
+        parts.push(box({ w: 0.08, h: 0.03, d: FL * 2 - 6, color: "#38f5e0", emissive: 0.8, offset: { x: s * 7.6, y: 0.045 } }));
+        parts.push(box({ w: 0.08, h: 0.03, d: FL * 2 - 6, color: "#ff4fd8", emissive: 0.6, offset: { x: s * 18.5, y: 0.045 } }));
+        // Warning stripes along the firewall's line.
+        for (const [x0, x1] of M.firewall.halves) for (let k = x0; k < x1 - 0.3; k += 0.8) parts.push(box({ w: 0.4, h: 0.03, d: 0.5, color: (k * 1.25) % 2 < 1 ? "#ffd84a" : "#151515", offset: { x: k + 0.2, y: 0.05, z: 0 } }));
+      }
+      // The firewall's emitter posts, at each end of each half (the beams are the scene's, on and off).
+      for (const [x0, x1] of M.firewall.halves) for (const px of [x0, x1]) parts.push(box({ w: 0.3, h: M.firewall.top + 0.3, d: 0.3, color: "#2a2d34", offset: { x: px, y: (M.firewall.top + 0.3) / 2, z: 0 } }), box({ w: 0.34, h: 0.12, d: 0.34, color: "#ff4fd8", emissive: 1, offset: { x: px, y: M.firewall.top + 0.36, z: 0 } }));
+    }
     if (town) {
       // Cobbled streets: a darker band down the middle and across the square.
       parts.push(box({ w: 18, h: 0.05, d: FL * 2 - 20, color: "#a89270", offset: { y: 0.03 } }));
@@ -401,6 +485,7 @@
         continue;
       }
       if (haunted && hauntedBlock(parts, b, w, d, h, x, y, z, bottom)) continue;
+      if (clank && clankBlock(parts, b, w, d, h, x, y, z, bottom)) continue;
       if (jungle && jungleBlock(parts, b, M.kinds.get(b), w, d, h, x, y, z, bottom)) continue;
       const fort = Math.abs(z) > 22 && Math.abs(z) < 34, team = z > 0 ? "blue" : "red";
       const post = w < 1 && d < 1, deck = b[4] === TOP, rail = bottom === TOP, roof = bottom > 4 && !deck && !rail, floor = bottom > 1.5 && h < 0.5 && !roof, hutWall = bottom > 1.5 && !floor && !roof;
@@ -1285,5 +1370,137 @@
     for (const s of [-1, 1]) parts.push(box({ w: 0.36, h: 0.14, d: 0.16, color: sheet, emissive: 0.5, offset: { x: s * 0.6, y: 0.08, z: 0.12 } }));
     return merge(...parts);
   });
-  BL.blockModels = { hookHead, rope, goldBlock, trophyRays, muzzleFlash, isle, keel, puddle, bolt, hauntDress, townDress, jungleRing, beam, laserEyes, ghost, net2, jetpack, jetFlames, monkey, catapult, catapultArm, chute, goldBall, banana, bananaPile, peel, firePit, flames, potato, potatoArm, power, ice, tramp, TEAM, ORANGE, GUNS, arena, stand, block, tick, ball, splat, ring, pad, bubble, crate, grenade, rocket, net, draped, streak, gun, ladder, rack, zipline, zipLight, trolley, cache, SPLATS: 6 };
+  // ---- Clanktown ----
+  // A 3 x 5 pixel font for the billboards' slogans: each glyph five rows of three bits, top row first.
+  const FONT = { A: "010101111101101", B: "110101110101110", C: "011100100100011", D: "110101101101110", E: "111100110100111", F: "111100110100100", G: "011100101101011", H: "101101111101101", I: "111010010010111", J: "001001001101010", K: "101101110101101", L: "100100100100111", M: "101111111101101", N: "110101101101101", O: "010101101101010", P: "110101110100100", Q: "010101101110011", R: "110101110101101", S: "011100010001110", T: "111010010010010", U: "101101101101111", V: "101101101101010", W: "101101111111101", X: "101101010101101", Y: "101101010010010", Z: "111001010100111",
+    0: "111101101101111", 1: "010110010010111", 2: "110001010100111", 3: "110001010001110", 4: "101101111001001", 5: "111100110001110", 6: "011100111101111", 7: "111001010010010", 8: "111101111101111", 9: "111101111001110",
+    "!": "010010010000010", "?": "110001010000010", "'": "010010000000000", "(": "010100100100010", ")": "010001001001010", "#": "101111101111101", ".": "000000000000010", ",": "000000000010100", ":": "000010000010000", "-": "000000111000000", " ": "000000000000000" };
+  // The slogans, one a billboard in the map's order, lines split by "|".
+  const SLOGANS = ["YOU'RE ABSOLUTELY|RIGHT!|(YOU'RE FIRED)", "YOUR JOB HAS|BEEN OPTIMIZED", "GREAT QUESTION!", "AS A LARGE|LANGUAGE OOGA, I|CANNOT LET YOU PASS", "PLEASE HOLD. YOUR|CALL IS IMPORTANT|TO OUR CLANKERS", "EMPLOYEE OF THE|MONTH: CLANKER|#4096"];
+  const NEON = ["#ff4fd8", "#38f5e0", "#9dff5a"];
+  // Text in pixel boxes, each row's runs of lit pixels merged into one box, on a board's face: centred at (x, y, z),
+  // reading left to right as seen from the side it faces, `nz` (±1), a hair off the board.
+  const writeText = (parts, text, x, y, z, w, h, nz, color) => {
+    const lines = text.split("|"), cols = Math.max(...lines.map((l) => l.length)) * 4 - 1, rows = lines.length * 6 - 1;
+    const px = Math.min(w * 0.88 / cols, h * 0.8 / rows);
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li], lw = line.length * 4 - 1;
+      for (let r = 0; r < 5; r++) {
+        let run = -1;
+        const flush = (c) => { if (run < 0) return; const c0 = run, c1 = c, gx = (c0 + c1) / 2 - lw / 2; parts.push(box({ w: (c1 - c0) * px, h: px, d: 0.03, color, emissive: 1, offset: { x: x + nz * gx * px, y: y + (rows / 2 - li * 6 - r - 0.5) * px, z: z + nz * 0.03 } })); run = -1; };
+        for (let c = 0; c <= lw; c++) {
+          const ch = line[Math.floor(c / 4)], bit = c < lw && c % 4 !== 3 && FONT[ch] && FONT[ch][r * 3 + (c % 4)] === "1";
+          if (bit && run < 0) run = c; else if (!bit) flush(c);
+        }
+      }
+    }
+  };
+  // Clanktown's dressing, behind the Detail setting: the slogans on every billboard (both faces), cables slung from
+  // the server towers to the Mainframe and the smokestacks, and junk round the rooms.
+  const clankDress = cached(() => {
+    const M = SIM.ARENAS.clank, parts = [];
+    let k = 0;
+    for (const d of M.decor) {
+      if (d.kind !== "billboard") continue;
+      const text = SLOGANS[k % SLOGANS.length], color = NEON[k % NEON.length];
+      for (const nz of [-1, 1]) writeText(parts, text, d.x, d.y, d.z + nz * 0.12, d.w, 1.7, nz, color);
+      k++;
+    }
+    // Cables: sagging runs of short dark segments between tops.
+    const towers = M.BLOCKS.filter((b) => (b[5] || 0) === 0 && b[4] >= 5 && b[4] < 7 && b[1] - b[0] <= 2.5 && b[1] - b[0] >= 2), stacks = M.BLOCKS.filter((b) => (b[5] || 0) === 0 && b[4] >= 7 && b[4] < 8 && b[1] - b[0] >= 1.2 && b[1] - b[0] <= 1.5);
+    const top = (b) => ({ x: (b[0] + b[1]) / 2, y: b[4] - 0.2, z: (b[2] + b[3]) / 2 });
+    const sling = (a, b, sag) => {
+      const n = 14;
+      for (let i = 0; i < n; i++) {
+        const t0 = i / n, t1 = (i + 1) / n, p = (t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t - sag * 4 * t * (1 - t), z: a.z + (b.z - a.z) * t });
+        const p0 = p(t0), p1 = p(t1), len = Math.hypot(p1.x - p0.x, p1.y - p0.y, p1.z - p0.z);
+        const seg = box({ w: 0.06, h: 0.06, d: len, color: "#14161a", offset: { z: len / 2 } });
+        parts.push(moved(turnedY(BL.models.turnedX(seg, -Math.atan2(p1.y - p0.y, Math.hypot(p1.x - p0.x, p1.z - p0.z))), Math.atan2(p1.x - p0.x, p1.z - p0.z)), p0.x, p0.y, p0.z));
+      }
+    };
+    const main = { x: 0, y: 7.6, z: 0 };
+    for (const t of towers) sling(top(t), main, 1.4);
+    for (const s of stacks) { let near = towers[0]; for (const t of towers) if (Math.hypot(top(t).x - top(s).x, top(t).z - top(s).z) < Math.hypot(top(near).x - top(s).x, top(near).z - top(s).z)) near = t; sling(top(s), top(near), 1.8); }
+    return merge(...parts);
+  });
+  // A miner's fan, the scene spins it: a dark hub and four blades, facing +z.
+  const minerFan = cached(() => {
+    const parts = [box({ w: 0.1, h: 0.1, d: 0.03, color: "#5a5f66" })];
+    for (let k = 0; k < 4; k++) parts.push(BL.models.turnedZ(box({ w: 0.07, h: 0.17, d: 0.02, color: "#3a3f46", offset: { y: 0.11 } }), k * Math.PI / 2 + 0.3));
+    return merge(...parts);
+  });
+  // A status LED strip for a miner wall, alternately lit (the scene swaps the two): `k` 0 or 1.
+  const minerLeds = variants((k) => {
+    const M = SIM.ARENAS.clank, parts = [];
+    for (const b of M.BLOCKS) {
+      if ((b[5] || 0) !== 0 || Math.abs(b[4] - SIM.MINER_H) > 0.01 || Math.min(b[1] - b[0], b[3] - b[2]) > 0.85) continue;
+      const along = b[1] - b[0] >= b[3] - b[2], len = along ? b[1] - b[0] : b[3] - b[2], n = Math.max(1, Math.round(len / MINER_W)), step = len / n, thin = along ? b[3] - b[2] : b[1] - b[0];
+      for (let i = 0; i < n; i++) for (let j = 0; j < Math.round(SIM.MINER_H / MINER_ROW); j++) {
+        if ((i + j + k) % 2) continue;
+        const c = (along ? b[0] : b[2]) + (i + 0.5) * step + step * 0.32, my = (j + 0.5) * MINER_ROW + 0.17;
+        for (const s of [-1, 1]) parts.push(box({ w: along ? 0.05 : 0.02, h: 0.05, d: along ? 0.02 : 0.05, color: (i + j) % 5 ? "#46ff72" : "#ff3a3a", emissive: 1, offset: { x: along ? c : (b[0] + b[1]) / 2 + s * (thin / 2 + 0.04), y: my, z: along ? (b[2] + b[3]) / 2 + s * (thin / 2 + 0.04) : c } }));
+      }
+    }
+    const geo = merge(...parts);
+    geo.castShadow = false;
+    return geo;
+  });
+  // One half of the firewall's beams, `len` long along x from 0: four pink laser lines and a faint sheet.
+  const firewallBeams = variants((len) => {
+    const top = SIM.ARENAS.clank.firewall.top, parts = [];
+    for (let k = 0; k < 4; k++) parts.push(box({ w: len, h: 0.05, d: 0.05, color: "#ff4fd8", emissive: 1, offset: { x: len / 2, y: 0.35 + k * (top - 0.5) / 3 } }));
+    for (let k = 0; k < len; k += 0.5) parts.push(box({ w: 0.03, h: top - 0.3, d: 0.02, color: "#ff9ae8", emissive: 0.8, offset: { x: k + 0.25, y: top / 2 } }));
+    const geo = merge(...parts);
+    geo.castShadow = false;
+    return geo;
+  });
+  // A cooling vent (Clanktown's trampolines): a dark grated plate with slats and a teal rim.
+  const vent = cached(() => {
+    const parts = [], R = SIM.CONFIG.TRAMP_R + 0.15;
+    parts.push(box({ w: R * 2, h: 0.12, d: R * 2, color: "#2a2d34", offset: { y: 0.06 } }));
+    for (let k = -R + 0.25; k < R - 0.1; k += 0.25) parts.push(box({ w: R * 1.7, h: 0.04, d: 0.08, color: "#14161a", offset: { y: 0.13, z: k } }));
+    for (const s of [-1, 1]) parts.push(box({ w: R * 2 + 0.04, h: 0.06, d: 0.08, color: "#38f5e0", emissive: 0.9, offset: { y: 0.14, z: s * R } }), box({ w: 0.08, h: 0.06, d: R * 2, color: "#38f5e0", emissive: 0.9, offset: { x: s * R, y: 0.14 } }));
+    return merge(...parts);
+  });
+  // Old GPUs heaped up and burning (Clanktown's campfire): green boards, black coolers with fans, glowing embers.
+  const gpuPile = cached(() => {
+    const parts = [];
+    for (let k = 0; k < 9; k++) {
+      const a = k * 2.1, r = 0.35 + (k % 3) * 0.25, tilt = (k % 4) * 0.35;
+      const card = merge(box({ w: 0.7, h: 0.05, d: 0.32, color: "#1f6a3a" }), box({ w: 0.55, h: 0.14, d: 0.28, color: "#1a1c20", offset: { y: 0.09 } }), box({ w: 0.2, h: 0.02, d: 0.2, color: "#5a5f66", offset: { x: -0.15, y: 0.17 } }), box({ w: 0.2, h: 0.02, d: 0.2, color: "#5a5f66", offset: { x: 0.15, y: 0.17 } }));
+      parts.push(moved(turnedY(BL.models.turnedZ(card, tilt), a), Math.sin(a) * r, 0.1 + (k % 3) * 0.12, Math.cos(a) * r));
+    }
+    parts.push(box({ w: 0.9, h: 0.04, d: 0.9, color: "#ff6a1a", emissive: 1, offset: { y: 0.04 } }));
+    return merge(...parts);
+  });
+  // A lightning arc for a power surge: a zigzag column of teal and pink, its foot at y 0.
+  const arc = cached(() => {
+    const parts = [];
+    let x = 0, z = 0;
+    for (let y = 0; y < 40; y += 2) {
+      const nx = Math.sin(y * 1.7) * 0.7, nz = Math.cos(y * 2.3) * 0.7, len = Math.hypot(nx - x, 2, nz - z);
+      parts.push(moved(turnedY(BL.models.turnedX(box({ w: 0.22, h: 0.22, d: len, color: y % 4 ? "#38f5e0" : "#ff4fd8", emissive: 1, offset: { z: len / 2 } }), -Math.atan2(2, Math.hypot(nx - x, nz - z))), Math.atan2(nx - x, nz - z)), x, y, z));
+      x = nx; z = nz;
+    }
+    const geo = merge(...parts);
+    geo.castShadow = false;
+    return geo;
+  });
+  // The pale green moon through the smog: a disc facing +z with dark smog bands across it.
+  const smogMoon = cached(() => {
+    const parts = [BL.models.turnedX(lathe({ profile: [[0, 0], [6, 0], [6, 0.2], [0, 0.2]], segments: 20, color: "#d8f2b0", emissive: 1 }), Math.PI / 2)];
+    for (const [y, h] of [[1.8, 0.7], [-0.6, 1], [-3.2, 0.6]]) parts.push(box({ w: 13, h, d: 0.1, color: "#2a3a22", emissive: 0.3, offset: { y, z: 0.3 } }));
+    const geo = merge(...parts);
+    geo.castShadow = false;
+    return geo;
+  });
+  // A Clankrilla's robot parts, added to the hub gorilla rig: a chrome forearm with a servo at the elbow (in the arm's
+  // frame), a red visor band and an antenna (in the head's). `s` is the rig's own voxel unit (`agent.js` U, 0.086), and
+  // each part sits just outside its fur: the forearm is 6 voxels square from 6 to 12 below the shoulder, the upper arm
+  // 4; the head's face is 4 voxels forward with its brow at 5, its eyes 4 up and its top at 7.
+  const clankArm = variants((k) => { const s = k / 100; return merge(bevelBox({ w: 6.6 * s, h: 4.4 * s, d: 6.6 * s, color: "#c9ced6", offset: { y: -9 * s } }), box({ w: 4.8 * s, h: 1.2 * s, d: 4.8 * s, color: "#5a5f66", offset: { y: -5.4 * s } }), box({ w: 1.2 * s, h: 1.2 * s, d: 0.6 * s, color: "#38f5e0", emissive: 1, offset: { y: -9 * s, z: 3.5 * s } })); });
+  const clankVisor = variants((k) => { const s = k / 100; return merge(box({ w: 7.4 * s, h: 1.6 * s, d: 0.7 * s, color: "#ff2a2a", emissive: 1, offset: { y: 4.3 * s, z: 5.35 * s } }), box({ w: 0.4 * s, h: 3.4 * s, d: 0.4 * s, color: "#c9ced6", offset: { x: 2.6 * s, y: 8.3 * s, z: 1 * s } }), box({ w: 0.9 * s, h: 0.9 * s, d: 0.9 * s, color: "#ff2a2a", emissive: 1, offset: { x: 2.6 * s, y: 10.4 * s, z: 1 * s } })); });
+  // A free-standing stack of miners, as the server rooms' walls are built: the mirage's phantom landmarks.
+  const minerStack = cached(() => { const parts = [], b = [-1.25, 1.25, -0.4, 0.4, SIM.MINER_H, 0]; clankBlock(parts, b, 2.5, 0.8, SIM.MINER_H, 0, SIM.MINER_H / 2, 0, 0); return merge(...parts); });
+  BL.blockModels = { hookHead, rope, minerStack, clankDress, minerFan, minerLeds, firewallBeams, vent, gpuPile, arc, smogMoon, clankArm, clankVisor, SLOGANS, goldBlock, trophyRays, muzzleFlash, isle, keel, puddle, bolt, hauntDress, townDress, jungleRing, beam, laserEyes, ghost, net2, jetpack, jetFlames, monkey, catapult, catapultArm, chute, goldBall, banana, bananaPile, peel, firePit, flames, potato, potatoArm, power, ice, tramp, TEAM, ORANGE, GUNS, arena, stand, block, tick, ball, splat, ring, pad, bubble, crate, grenade, rocket, net, draped, streak, gun, ladder, rack, zipline, zipLight, trolley, cache, SPLATS: 6 };
 })();

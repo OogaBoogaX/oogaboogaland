@@ -103,7 +103,7 @@ Each map has its own time of day and weather mix (`MAP_WEATHER`, seeded): Fort C
   at the grab: a rider already sliding rides on, whatever happens to their block meanwhile. Your own line is never
   trapped. A lamp on each handle shows it from your side, green to ride, red when it would spring. Bots only choose
   the zip home with their own block home, and drop that route if it goes. The event appended to `EVENT_TYPES` made
-  `WIRE` 5.
+  `WIRE` 5. Clanktown's events (`decoy`, `decoyfade`, `glitch`, `zap`, `mirage`) appended after it made `WIRE` 6.
 - **Ammo caches.** Five on Fort Chaos (each stilt hut's floor and the centre deck; the other maps place their own).
   Walking onto one refills grenades, rockets, nets and the crate stock as your stand does, then it goes dark for 15 s
   (`CACHE_S`). A real Bitcoin block found while you play makes every cache and quiz pad ready again.
@@ -348,6 +348,48 @@ and confetti from the scene's fx, in a warm light. The window is measured when t
 per frame. The winner is the sim's, so every page in a live round shows the same side; a page whose side lost sees the
 winners celebrate with a line for the next round. The title drops in, the score counts up and the confetti bursts;
 with reduced motion the picture holds still and nothing animates. No raster art: all of it is the game's own models.
+
+## Clanktown
+
+The fifth map (`clank`), a server-farm city on the floating island played for dark comedy: night under a sickly green
+smog sky (the scene pulls the sky's colours toward green, `smogSky`) with a pale green moon striped by smog, server
+towers with teal and red lights, smokestacks puffing, cables slung to the Mainframe, scrap heaps, racks of servers for
+cover, and neon billboards with sycophantic slogans written in a 3 x 5 pixel font (`blockModels.SLOGANS`). The potato
+Oogas dance round a burning pile of old GPUs (`gpuPile`), same peels, same rule. The trampolines are steaming cooling
+vents (`vent`). Storms are power surges: the bolt is a teal and pink arc (`arc`) and the notice says so. Detail Low
+drops the dressing (slogans, cables, the miners' fans, status LEDs and hot air, smoke and steam); the walls stay.
+
+- **Server rooms.** Each block's stand sits in a room walled by stacked Bitcoin miners, `MINER_H` (3.6 m) high, over a
+  double jump's apex. The ways in: the jetpack over the top, the catapult (its drop lands inside the rival room), the
+  zipline (its end is inside too), or on foot through a door in each side wall, the long way round. Bots use the
+  map's `nav` nodes for the long way, and experts hop the walls on the jetpack. The hook bites the walls as any wall.
+- **The Mainframe hallucinates.** From about 40 s (seeded), and every 32 to 46 s after, it lays 2 or 3 decoys of each
+  side's block, red's on blue's half and blue's turned onto red's, at seeded open spots (`decoySpots`, snapped to
+  walkable ground). They look exactly like a loose block, ticks and all, and the mini-map marks them as one. A touch
+  glitches one apart in pink and teal pixels with an apology ("I apologize for the confusion") and staggers the
+  toucher for `DECOY_STAGGER`; untouched, one fades after `DECOY_S`. The real blocks and stands are never touched.
+  Bots fall for a decoy by skill (`SKILLS[...].fool`: easy 0.75, normal 0.45, hard 0.2, expert 0.06).
+- **Clankrillas.** The hub gorilla rig with a chrome forearm, a red visor band and an antenna added on
+  (`clankArm`, `clankVisor`); the same rules as every gorilla. Grabbing and throwing, they talk: "Great question!",
+  "You're absolutely right!", "Happy to help you... off the island", "As an AI, I must throw you now".
+- **The firewall.** A pink laser fence across the halfway line in two halves, a gap either side of the Mainframe and
+  at each side line. On the shared clock it is off for 3.2 s, flickers its warning for 0.8 s (three times a second,
+  never faster) and is on for 3 s; off while fortifying. Touched while on, it splats as paint does; riders, the
+  catapult's throw, the parachute and anyone over its 2.2 m top pass. It is no block. Bots time it: across while it's
+  safely off, otherwise round by a gap, stepping off the line if it comes on (`dodgeFirewall`).
+- **The mirage.** Round the Mainframe, radius 9 m, the same for both sides. Inside it each player sees their own
+  hallucinations, drawn by the scene alone (`poseMirage`): phantom rivals running about carrying what looks like your
+  block (on the mini-map too, while you're inside), with a faint scan-line flicker as the tell, which glitch away
+  with an apology when shot or touched; phantom stacks of miners shimmering in and out; the mini-map drifting round
+  and its own-stand marker jittering; and a pink-and-teal tint with slow scan lines and an edge ring (`#block-mirage`).
+  The keys are never touched. Reduced motion and Low detail keep the tint and the phantoms and drop the drift, the
+  jitter and the moving lines. The shared sim only knows that a bot inside may chase a phantom for a moment, by its
+  skill (`mirageBot`).
+
+Live rounds carry the decoys in the host's frame (colour and place); the firewall runs on the frame's clock, and the
+mirage is each page's own. The suite checks the map's data, the walls against a double jump, a walking route into
+each room, the decoys, the firewall's timing and touch, the mirage's symmetry, that the scene's mirage never writes
+the shared sim, an attacker bot's way round to a capture, and the decoys in a live frame.
 
 ## High scores
 
