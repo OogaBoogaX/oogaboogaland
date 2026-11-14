@@ -28,68 +28,123 @@
   // The ground: a sandy field with a darker strip down the middle and each half's end tinted to its team, then every
   // wall block in stone with a team-coloured cap near its fort, timber crates for the field's low cover, and the
   // centre tower in dark stone with an orange band.
-  // Haunted Hollow's own blocks: the yards' plank floors over the cellars, iron rails, the houses' grey boards with a
-  // purple trim, the cellars' mossy stone, headstones, the iron fence, dead trunks and the pale mausoleum. False for
-  // anything else (the towers, the junk), which is drawn as on the other maps.
-  const hauntedBlock = (parts, b, w, d, h, x, y, z, bottom) => {
-    const thin = Math.min(w, d);
-    if (b[4] > TOP - 0.5) return false;
-    if (bottom > 2.5 && bottom < 2.8 && h <= 0.35) {
+  // Haunted Hollow's own boxes, by what the map says each is (`kinds`): the houses' plank floors, mossy cellar walls
+  // (their windows barred), dark boards with a purple trim, crooked gables and towers under slate; the graveyard's
+  // gate, fence, headstones and tombs, dead trunks, and the pale mausoleum with its obelisk. False for anything else
+  // (the sniper towers), which is drawn as on the other maps.
+  const IRON = "#1c1a20", PURPLE = "#6a3fa0", BOARD = "#5a5263", BOARD_DARK = "#423b4a", SLATE = "#262230", GRAVE = "#8e8e98", PALE = "#b4aeb8", GHOST_LIGHT = "#57ff9a", LAMP = "#ffcf7a";
+  const hauntedBlock = (parts, b, kind, w, d, h, x, y, z, bottom) => {
+    const top = b[4], s = Math.sign(z) || 1;
+    if (kind === "floor") {
       parts.push(bevelBox({ w, h, d, color: "#3e3229", offset: { x, y, z } }));
-      for (let k = 1; k < Math.floor(w / 0.9); k++) parts.push(box({ w: 0.05, h: 0.02, d, color: "#2a211b", offset: { x: b[0] + k * 0.9, y: b[4] + 0.005, z } }));
-      return true;
-    }
-    if (bottom >= 2.9 && h <= 0.95 && thin <= 0.25) {
-      parts.push(box({ w, h: 0.06, d, color: "#1c1a20", offset: { x, y: b[4] - 0.03, z } }));
-      for (let k = (w > d ? b[0] : b[2]) + 0.25; k < (w > d ? b[1] : b[3]); k += 0.5) parts.push(box({ w: 0.05, h, d: 0.05, color: "#1c1a20", offset: { x: w > d ? k : x, y, z: w > d ? z : k } }));
-      return true;
-    }
-    if (bottom >= 2.9) {
-      parts.push(bevelBox({ w, h, d, color: "#5a5258", offset: { x, y, z } }));
-      for (let k = bottom + 0.4; k < b[4]; k += 0.4) parts.push(box({ w: w + 0.02, h: 0.03, d: d + 0.02, color: "#463f45", offset: { x, y: k, z } }));
-      parts.push(box({ w: w + 0.05, h: 0.14, d: d + 0.05, color: "#6a3fa0", emissive: 0.25, offset: { x, y: b[4] - 0.07, z } }));
-      return true;
-    }
-    if (h >= 4.5 && w <= 0.75 && d <= 0.75) {
-      parts.push(bevelBox({ w, h, d, color: "#2e2622", offset: { x, y, z } }));
-      return true;
-    }
-    if (Math.abs(d - 0.6) < 0.05 && Math.abs(Math.abs(z) - 48.8) < 0.05) {
-      // The back door's frame (its posts and lintel, 0.6 m deep): dark timber with iron bands on the posts and the
-      // house's purple trim under the lintel.
-      parts.push(bevelBox({ w, h, d, color: "#3e3229", offset: { x, y, z } }));
-      if (bottom > 0) parts.push(box({ w: w - 0.6, h: 0.05, d: d + 0.02, color: "#6a3fa0", emissive: 0.35, offset: { x, y: bottom - 0.01, z } }));
-      else for (const by of [0.5, 2]) parts.push(box({ w: w + 0.03, h: 0.08, d: d + 0.03, color: "#1c1a20", offset: { x, y: by, z } }));
-      return true;
-    }
-    if (bottom === 0 && Math.abs(h - 2.7) < 0.05 && Math.abs(z) >= 31.9) {
+      for (let k = 1; k < Math.floor(w / 0.9); k++) parts.push(box({ w: 0.05, h: 0.02, d, color: "#2a211b", offset: { x: b[0] + k * 0.9, y: top + 0.005, z } }));
+    } else if (kind === "cellar") {
       parts.push(bevelBox({ w, h, d, color: "#6a6670", offset: { x, y, z } }));
-      parts.push(box({ w: w + 0.03, h: 0.35, d: d + 0.03, color: "#4f5a3c", offset: { x, y: 0.18, z } }));
-      return true;
-    }
-    if (bottom === 0 && Math.abs(h - 1.1) < 0.05 && thin <= 0.4) {
-      // A headstone: a grey slab with a rounded top and a darker plinth.
-      parts.push(bevelBox({ w, h: h - 0.15, d, color: "#8e8e98", offset: { x, y: (h - 0.15) / 2, z } }));
-      parts.push(bevelBox({ w: w * 0.7, h: 0.18, d, color: "#8e8e98", offset: { x, y: h - 0.09, z } }));
-      parts.push(box({ w: w + 0.1, h: 0.12, d: d + 0.12, color: "#55555e", offset: { x, y: 0.06, z } }));
-      return true;
-    }
-    // The tall iron gate's collision: the scene draws the gate itself (`hauntModels.ironFence`).
-    if (bottom === 0 && Math.abs(h - 3.9) < 0.05 && Math.abs(w - 4.6) < 0.05) return true;
-    if (bottom === 0 && Math.abs(h - 1.3) < 0.05 && thin <= 0.35) {
+      if (bottom === 0) parts.push(box({ w: w + 0.03, h: 0.35, d: d + 0.03, color: "#4f5a3c", offset: { x, y: 0.18, z } }));
+      // Over a window: iron bars down to the sill.
+      else for (let k = b[0] + 0.35; k < b[1]; k += 0.65) parts.push(box({ w: 0.07, h: bottom - 1, d: 0.07, color: IRON, offset: { x: k, y: (bottom + 1) / 2, z } }));
+    } else if (kind === "frame") {
+      // The back door's frame (its posts and lintel): dark timber with iron bands on the posts and the house's purple
+      // trim under the lintel.
+      parts.push(bevelBox({ w, h, d, color: "#3e3229", offset: { x, y, z } }));
+      if (bottom > 0) parts.push(box({ w: w - 0.6, h: 0.05, d: d + 0.02, color: PURPLE, emissive: 0.35, offset: { x, y: bottom - 0.01, z } }));
+      else for (const by of [0.5, 2]) parts.push(box({ w: w + 0.03, h: 0.08, d: d + 0.03, color: IRON, offset: { x, y: by, z } }));
+    } else if (kind === "barrel") {
+      parts.push(bevelBox({ w, h, d, color: "#6a4a2c", offset: { x, y, z } }));
+      for (const by of [0.28, 0.9]) parts.push(box({ w: w + 0.04, h: 0.07, d: d + 0.04, color: IRON, offset: { x, y: by, z } }));
+    } else if (kind === "rail") {
+      parts.push(box({ w, h: 0.06, d, color: IRON, offset: { x, y: top - 0.03, z } }));
+      for (let k = (w > d ? b[0] : b[2]) + 0.25; k < (w > d ? b[1] : b[3]); k += 0.5) parts.push(box({ w: 0.05, h, d: 0.05, color: IRON, offset: { x: w > d ? k : x, y, z: w > d ? z : k } }));
+    } else if (kind === "house" || kind === "gable") {
+      parts.push(bevelBox({ w, h, d, color: BOARD, offset: { x, y, z } }));
+      for (let k = bottom + 0.4; k < top - 0.1; k += 0.4) parts.push(box({ w: w + 0.02, h: 0.03, d: d + 0.02, color: BOARD_DARK, offset: { x, y: k, z } }));
+      // Slate along a gable's course, the purple trim under a wall's eaves.
+      if (kind === "gable") parts.push(box({ w: w + 0.16, h: 0.12, d: d + 0.2, color: SLATE, offset: { x, y: top - 0.02, z } }));
+      else if (top > 6) parts.push(box({ w: w + 0.05, h: 0.14, d: d + 0.05, color: PURPLE, emissive: 0.25, offset: { x, y: top - 0.07, z } }));
+    } else if (kind === "tower") {
+      // Three storeys, each a little out of line with the one under it, and a lit window toward the field and over the house.
+      const each = h / 3, lean = [0, -0.12, 0.1];
+      for (let k = 0; k < 3; k++) {
+        const ky = bottom + each * (k + 0.5), kx = x + lean[k] * s, kw = w - k * 0.12;
+        parts.push(bevelBox({ w: kw, h: each, d: d - k * 0.12, color: BOARD, offset: { x: kx, y: ky, z } }));
+        parts.push(box({ w: kw + 0.08, h: 0.1, d: d - k * 0.12 + 0.08, color: BOARD_DARK, offset: { x: kx, y: bottom + each * (k + 1) - 0.05, z } }));
+      }
+      const wy = bottom + each * 2.45, wx = x + lean[2] * s, fz = (s > 0 ? b[2] + 0.1 : b[3] - 0.1), fx = wx - Math.sign(x) * ((w - 0.24) / 2 + 0.02);
+      parts.push(box({ w: 0.9, h: 1.2, d: 0.06, color: IRON, offset: { x: wx, y: wy, z: fz } }), box({ w: 0.7, h: 1, d: 0.1, color: "#ffd98a", emissive: 1, offset: { x: wx, y: wy, z: fz } }));
+      parts.push(box({ w: 0.08, h: 1, d: 0.14, color: IRON, offset: { x: wx, y: wy, z: fz } }), box({ w: 0.7, h: 0.08, d: 0.14, color: IRON, offset: { x: wx, y: wy, z: fz } }));
+      parts.push(box({ w: 0.06, h: 1.2, d: 0.9, color: IRON, offset: { x: fx, y: wy, z } }), box({ w: 0.1, h: 1, d: 0.7, color: "#ffd98a", emissive: 1, offset: { x: fx, y: wy, z } }));
+    } else if (kind === "roof") {
+      parts.push(bevelBox({ w, h, d, color: SLATE, offset: { x, y, z } }));
+      if (h < 0.6) parts.push(box({ w: w + 0.04, h: 0.1, d: d + 0.04, color: PURPLE, emissive: 0.25, offset: { x, y: bottom + 0.05, z } }));
+      // The hat's bent tip.
+      if (top > 12) parts.push(box({ w: 0.4, h: 0.8, d: 0.4, color: SLATE, offset: { x: x + 0.15 * s, y: top + 0.4, z } }), box({ w: 0.24, h: 0.55, d: 0.24, color: SLATE, offset: { x: x + 0.42 * s, y: top + 0.95, z } }));
+    } else if (kind === "pillar") {
+      // A gate pillar: stone on a plinth under a cap, a lantern hung on its avenue side.
+      parts.push(bevelBox({ w, h, d, color: "#77737d", offset: { x, y, z } }), box({ w: w + 0.2, h: 0.3, d: d + 0.2, color: "#55555e", offset: { x, y: 0.15, z } }), box({ w: w + 0.26, h: 0.2, d: d + 0.26, color: GRAVE, offset: { x, y: top - 0.1, z } }));
+      const lx = x - Math.sign(x) * (w / 2 + 0.24);
+      parts.push(box({ w: 0.4, h: 0.06, d: 0.06, color: IRON, offset: { x: x - Math.sign(x) * (w / 2 + 0.12), y: 2.62, z } }), box({ w: 0.3, h: 0.38, d: 0.3, color: LAMP, emissive: 1, offset: { x: lx, y: 2.36, z } }), box({ w: 0.36, h: 0.06, d: 0.36, color: IRON, offset: { x: lx, y: 2.58, z } }), box({ w: 0.36, h: 0.05, d: 0.36, color: IRON, offset: { x: lx, y: 2.15, z } }));
+    } else if (kind === "arch") {
+      // The gate's iron arch and its sign, read from either side.
+      parts.push(box({ w, h: 0.09, d: 0.14, color: IRON, offset: { x, y: top - 0.045, z } }), box({ w, h: 0.09, d: 0.14, color: IRON, offset: { x, y: bottom + 0.045, z } }), box({ w: w - 0.1, h: h - 0.1, d: 0.06, color: "#121016", offset: { x, y, z } }));
+      for (const nz of [-1, 1]) carve(parts, GATE_SIGN, x, y, z + nz * 0.03, 3.9, h - 0.18, nz, "#c8ffd9", 0.9);
+    } else if (kind === "fence") {
       // The iron fence: rails and spiked bars.
-      parts.push(box({ w, h: 0.06, d, color: "#1c1a20", offset: { x, y: 1.1, z } }), box({ w, h: 0.06, d, color: "#1c1a20", offset: { x, y: 0.3, z } }));
-      for (let k = b[0] + 0.15; k < b[1]; k += 0.3) parts.push(box({ w: 0.04, h, d: 0.04, color: "#1c1a20", offset: { x: k, y: h / 2, z } }));
-      return true;
-    }
-    if (bottom === 0 && Math.abs(x) <= 3.1 && Math.abs(z) <= 4.5 && h > 0.4) {
-      // The mausoleum and its steps: pale stone, a purple band round the tomb.
-      parts.push(bevelBox({ w, h, d, color: "#b4aeb8", offset: { x, y, z } }));
-      if (h > 2.5) parts.push(box({ w: w + 0.06, h: 0.25, d: d + 0.06, color: "#6a3fa0", emissive: 0.4, offset: { x, y: b[4] - 0.4, z } }));
-      return true;
-    }
-    return false;
+      parts.push(box({ w, h: 0.06, d, color: IRON, offset: { x, y: 1.05, z } }), box({ w, h: 0.06, d, color: IRON, offset: { x, y: 0.3, z } }));
+      for (let k = b[0] + 0.2; k < b[1]; k += 0.4) parts.push(box({ w: 0.05, h, d: 0.05, color: IRON, offset: { x: k, y: h / 2, z } }));
+    } else if (kind === "stone") {
+      // A headstone: a grey slab with a rounded top and a darker plinth.
+      parts.push(bevelBox({ w, h: h - 0.15, d, color: GRAVE, offset: { x, y: (h - 0.15) / 2, z } }), bevelBox({ w: w * 0.7, h: 0.18, d, color: GRAVE, offset: { x, y: h - 0.09, z } }), box({ w: w + 0.1, h: 0.12, d: d + 0.12, color: "#55555e", offset: { x, y: 0.06, z } }));
+    } else if (kind === "tomb") {
+      // A family tomb: a wide slab stepping up to its crown, on a plinth; `hauntDress` carves its epitaph.
+      parts.push(bevelBox({ w, h: h - 0.3, d, color: "#9a98a4", offset: { x, y: (h - 0.3) / 2, z } }), bevelBox({ w: w * 0.74, h: 0.2, d, color: "#9a98a4", offset: { x, y: h - 0.22, z } }), bevelBox({ w: w * 0.42, h: 0.14, d, color: "#9a98a4", offset: { x, y: h - 0.07, z } }), box({ w: w + 0.2, h: 0.16, d: d + 0.24, color: "#55555e", offset: { x, y: 0.08, z } }));
+    } else if (kind === "trunk") {
+      parts.push(bevelBox({ w, h, d, color: "#2e2622", offset: { x, y, z } }));
+    } else if (kind === "crypt") {
+      parts.push(bevelBox({ w, h, d, color: PALE, offset: { x, y, z } }));
+      if (h > 2.5) {
+        // The tomb itself: a cornice, a purple band, a pilaster at each corner and a door of ghost-light in each long side.
+        parts.push(box({ w: w + 0.24, h: 0.2, d: d + 0.24, color: "#c9c3cc", offset: { x, y: top - 0.1, z } }), box({ w: w + 0.06, h: 0.2, d: d + 0.06, color: PURPLE, emissive: 0.4, offset: { x, y: top - 0.42, z } }));
+        for (const cx of [b[0], b[1]]) for (const cz of [b[2], b[3]]) parts.push(box({ w: 0.5, h: h - 0.2, d: 0.5, color: "#c9c3cc", offset: { x: cx - Math.sign(cx) * 0.2, y: (h - 0.2) / 2, z: cz - Math.sign(cz) * 0.2 } }));
+        for (const cx of [b[0], b[1]]) parts.push(box({ w: 0.08, h: 1.9, d: 1.5, color: "#141018", offset: { x: cx, y: 0.95, z } }), box({ w: 0.12, h: 1.6, d: 1.1, color: GHOST_LIGHT, emissive: 0.9, offset: { x: cx, y: 0.85, z } }));
+      }
+    } else if (kind === "obelisk") {
+      // The obelisk on the mausoleum's roof, narrowing to its point, and the ghost-flame over it.
+      const each = h / 3;
+      for (let k = 0; k < 3; k++) parts.push(bevelBox({ w: w - k * 0.22, h: each, d: d - k * 0.22, color: k ? PALE : "#c9c3cc", offset: { x, y: bottom + each * (k + 0.5), z } }));
+      parts.push(box({ w: 0.42, h: 0.3, d: 0.42, color: PALE, offset: { x, y: top + 0.15, z } }));
+      parts.push(moved(lathe({ profile: [[0, 0], [0.34, 0.16], [0.24, 0.6], [0, 1.15]], segments: 6, color: GHOST_LIGHT, emissive: 1 }), x, top + 0.3, z));
+    } else return false;
+    return true;
   };
+  // Haunted Hollow's letters, the jumbotron's 5 x 7 alphabet in flat pixels (each row's runs of lit pixels merged into
+  // one quad): lines split by "|", centred at (x, y, z) inside `w` by `h`, on a face looking down `nz` (+1 or -1 along z),
+  // reading left to right from that side.
+  const GATE_SIGN = "REST IN PROFIT";
+  const EPITAPHS = ["HERE LIES|MY SEED|PHRASE", "NOT YOUR|KEYS", "SOLD THE|BOTTOM", "PAPER|HANDS", "R.I.P. FIAT|1971 - SOON", "HE CHECKED|THE PRICE", "LOST KEYS|2013", "BOUGHT|THE TOP"];
+  const carve = (parts, text, x, y, z, w, h, nz, color, emissive) => {
+    const glyphOf = BL.jumbotron.text.glyphOf, lines = text.split("|"), cols = Math.max(...lines.map((l) => l.length)) * 6 - 1, rows = lines.length * 9 - 2;
+    const px = Math.min(w / cols, h / rows), geo = geometry(), rgb = hexToRgb(color), opts = { emissive }, fz = z + nz * 0.035;
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li], lw = line.length * 6 - 1;
+      for (let r = 0; r < 7; r++) {
+        let run = -1;
+        for (let c = 0; c <= lw; c++) {
+          const lit = c < lw && c % 6 < 5 && (glyphOf(line[Math.floor(c / 6)])[r] >> (4 - c % 6)) & 1;
+          if (lit && run < 0) run = c;
+          else if (!lit && run >= 0) {
+            // One flat quad a run, wound to face `nz`.
+            const xa = x + nz * (run - lw / 2) * px, xb = x + nz * (c - lw / 2) * px, y1 = y + (rows / 2 - li * 9 - r) * px, y0 = y1 - px;
+            face(geo, [pushVert(geo, xa, y0, fz), pushVert(geo, xb, y0, fz), pushVert(geo, xb, y1, fz), pushVert(geo, xa, y1, fz)], rgb, opts);
+            run = -1;
+          }
+        }
+      }
+    }
+    parts.push(geo);
+  };
+  // Haunted Hollow's paving: flagstones down the avenue from porch to porch, across each forecourt and under each house.
+  const turnedYAt = (geo, a, x, y, z) => moved(turnedY(geo, a), x, y, z);
+  const hauntPaved = (x, z) => Math.abs(x) < 2.5 || (Math.abs(z) > 14.5 && Math.abs(x) < 9.5 && Math.abs(z) < 33.5);
   // The floating island under a map, in the hub's voxel ground (`BL.terrain`'s grid, greedy mesher and palette): a
   // grass top, soil, then banded rock down a cliff all round the field's open edge, the rock deepening toward the
   // middle as the sim's `isleDepth` has it (which holds bodies out of it) with drips hanging under it; and the map's
@@ -104,7 +159,7 @@
     fort: { grass: null, field: ["#c9a96b", "#bda05f"] },
     town: { grass: null, field: ["#b9a77f", "#a89270"] },
     jungle: { grass: ["#3f8a34", "#55a53c", "#2f6f2c"], field: ["#6b8f3a", "#547a30"] },
-    haunted: { grass: ["#3f4632", "#4a5138", "#353b2b"], field: ["#54433c", "#3a302a"] }
+    haunted: { grass: ["#3f4632", "#4a5138", "#353b2b"], field: ["#464c36", "#3a402f"] }
   };
   const islePalette = (M) => {
     const theme = ISLE_THEME[M.id], palette = BL.terrain.PALETTE.slice();
@@ -128,11 +183,11 @@
       const n = Math.hypot(x / M.W, z / M.L), top = field ? (patch > 0.3 ? 10 : 11) : Math.abs(n - 0.82) < 0.018 ? 4 : patch > 0.9 ? P.grassLight : patch < -0.9 ? P.grassDark : P.grass;
       for (let iy = TOP - depth; iy < TOP; iy++) {
         const k = TOP - 1 - iy;
-        // Haunted Hollow's field is brick, courses in staggered runs (slots 10 and 11 are its brick and mortar).
+        // Haunted Hollow's field is dead grass (slots 10 and 11), with flagstones in staggered courses where it is paved.
         // An open grave's hole (the pit `GRAVE_Y` deep in the sim), down to dirt.
         const pit = SIM.inGraveOf(x, z, M), holeK = Math.round(-SIM.GRAVE_Y / C);
         if (pit && k < holeK) continue;
-        const row = Math.floor(iz / 2), brick = M.id === "haunted" && field ? (iz % 2 === 0 || (ix + (row % 2) * 2) % 4 === 0 ? 11 : 10) : top;
+        const row = Math.floor(iz / 2), brick = M.id === "haunted" && field && hauntPaved(x, z) ? (iz % 2 === 0 || (ix + (row % 2) * 2) % 4 === 0 ? P.stoneDark : P.stone) : top;
         grid.set(ix, iy, iz, k === 0 ? brick : k <= 2 || (pit && k <= holeK + 1) ? P.dirt : isleRock(ix, iy, iz, 1));
       }
     }
@@ -330,57 +385,47 @@
     }
     if (jungle) jungleDress(M, parts);
     if (haunted) {
-      // Haunted Hollow: dead grass over the field, bare patches, and each dead tree's crooked branches.
-      const r = (k) => ((Math.sin(k * 7.233) * 43758.5453) % 1 + 1) % 1;
-      for (let k = 0; k < 60; k++) parts.push(box({ w: 1 + r(k) * 3, h: 0.05, d: 1 + r(k + 70) * 3, color: k % 3 ? "#3d4430" : "#5a5a44", offset: { x: (r(k + 140) - 0.5) * FW * 1.9, y: 0.035, z: (r(k + 210) - 0.5) * (FL * 2 - 8) } }));
-      // Grass: tufts of blades in greens and dry yellows, thicker toward the edges and round the headstones.
-      const greens = ["#4f6b34", "#5e7d3a", "#6f8a44", "#7d8a4a", "#8a8a52"];
-      for (let k = 0; k < 1100; k++) {
-        const gx = (r(k + 400) - 0.5) * FW * 1.94, gz = (r(k + 900) - 0.5) * FL * 1.94;
-        if (Math.abs(gz) > 31 && Math.abs(gx) < 14.5) continue;
-        const c = greens[k % greens.length], hgt = 0.18 + r(k + 1300) * 0.3;
-        for (let j = 0; j < 3; j++) parts.push(box({ w: 0.05, h: hgt * (1 - j * 0.2), d: 0.05, color: c, offset: { x: gx + (j - 1) * 0.07, y: hgt * (1 - j * 0.2) / 2, z: gz + ((j * 37) % 3 - 1) * 0.06 } }));
+      // Each house's face, on its front wall: two lit windows in its team's colour under slanted brows, their pupils on
+      // the porch, the front door for a mouth with a row of teeth under its lintel, and a little window in the gable.
+      for (const t of SIM.TEAMS) {
+        const s = t === "blue" ? 1 : -1, face = s * 23 - s * 0.04, H = 6.2;
+        for (const e of [-1, 1]) {
+          const ex = e * 4.7, ey = 5.02;
+          parts.push(box({ w: 2.3, h: 1.3, d: 0.08, color: IRON, offset: { x: ex, y: ey, z: face } }), box({ w: 2, h: 1, d: 0.12, color: TEAM[t].paint, emissive: 1, offset: { x: ex, y: ey, z: face } }));
+          parts.push(box({ w: 0.55, h: 0.62, d: 0.16, color: "#141018", offset: { x: ex - e * 0.5, y: ey - 0.16, z: face } }));
+          for (let k = 0; k < 3; k++) parts.push(box({ w: 0.86, h: 0.3, d: 0.2, color: BOARD_DARK, offset: { x: ex + e * (0.78 - k * 0.78), y: ey + 0.98 - k * 0.22, z: face } }));
+        }
+        for (const e of [-1, 1]) parts.push(box({ w: 0.14, h: 2.4, d: 0.5, color: PURPLE, emissive: 0.35, offset: { x: e * 1.47, y: 4.2, z: s * 23.2 } }));
+        for (let k = -2; k <= 2; k++) parts.push(box({ w: 0.36, h: 0.34, d: 0.3, color: "#e0dccf", offset: { x: k * 0.55, y: 5.4 - 0.17, z: s * 23.2 } }));
+        parts.push(box({ w: 0.9, h: 0.74, d: 0.08, color: IRON, offset: { x: 0.8 * s, y: H + 1.12, z: face } }), box({ w: 0.7, h: 0.54, d: 0.12, color: "#ffd98a", emissive: 1, offset: { x: 0.8 * s, y: H + 1.12, z: face } }));
       }
-      // Tall grass in clumps, and grey rocks half sunk in it.
-      for (let k = 0; k < 46; k++) {
-        const cx = (r(k + 2400) - 0.5) * FW * 1.9, cz = (r(k + 2500) - 0.5) * FL * 1.6;
-        if (Math.abs(cx) < 3.5 && Math.abs(cz) < 6) continue;
-        for (let j = 0; j < 9; j++) {
-          const hgt = 0.5 + r(k * 9 + j + 2600) * 0.45, ox = (r(k * 9 + j + 2700) - 0.5) * 1.1, oz = (r(k * 9 + j + 2800) - 0.5) * 1.1;
-          parts.push(box({ w: 0.06, h: hgt, d: 0.06, color: j % 3 ? "#6a7f3e" : "#8f8a50", offset: { x: cx + ox, y: hgt / 2, z: cz + oz } }));
+      // Jack-o'-lanterns, glowing: one either side of each porch's foot and one by each tomb, facing the middle.
+      const pumpkin = (px, pz, sz) => {
+        const f = pz + sz / 2 * Math.sign(-pz || 1);
+        parts.push(bevelBox({ w: sz, h: sz * 0.8, d: sz, color: "#e8761c", offset: { x: px, y: sz * 0.4, z: pz } }), box({ w: 0.06, h: 0.14, d: 0.06, color: "#3e5a22", offset: { x: px, y: sz * 0.85, z: pz } }));
+        parts.push(box({ w: sz * 0.5, h: sz * 0.12, d: 0.02, color: "#ffd84a", emissive: 1, offset: { x: px, y: sz * 0.32, z: f } }));
+        for (const e of [-1, 1]) parts.push(box({ w: sz * 0.14, h: sz * 0.14, d: 0.02, color: "#ffd84a", emissive: 1, offset: { x: px + e * sz * 0.18, y: sz * 0.55, z: f } }));
+      };
+      for (const s of [-1, 1]) { pumpkin(-2.7, s * 19.2, 0.6); pumpkin(2.7, s * 19.2, 0.5); }
+      for (const [x, z] of M.tombs) pumpkin(x + Math.sign(x) * 1.7, z, 0.45);
+      // Dry grass at the foot of every headstone and tomb.
+      const r = (k) => ((Math.sin(k * 7.233) * 43758.5453) % 1 + 1) % 1;
+      let tuft = 0;
+      for (const b of M.BLOCKS) {
+        const kind = M.kinds.get(b);
+        if (kind !== "stone" && kind !== "tomb") continue;
+        for (const e of [b[0] - 0.12, b[1] + 0.12]) for (let j = 0; j < 3; j++) {
+          const hgt = 0.22 + r(tuft++) * 0.3;
+          parts.push(box({ w: 0.06, h: hgt, d: 0.06, color: j % 2 ? "#6a7f3e" : "#8f8a50", offset: { x: e + (j - 1) * 0.09 * Math.sign(e - (b[0] + b[1]) / 2), y: hgt / 2, z: (b[2] + b[3]) / 2 + (r(tuft + 40) - 0.5) * 0.5 } }));
         }
       }
-      for (let k = 0; k < 26; k++) {
-        const rx = (r(k + 3000) - 0.5) * FW * 1.9, rz = (r(k + 3100) - 0.5) * FL * 1.7, sz = 0.35 + r(k + 3200) * 0.5;
-        if (Math.abs(rx) < 3.5 && Math.abs(rz) < 6) continue;
-        parts.push(bevelBox({ w: sz * 1.3, h: sz * 0.6, d: sz, color: k % 2 ? "#7a7880" : "#68666e", offset: { x: rx, y: sz * 0.25, z: rz } }));
-      }
-      // Bushes, dark and lumpy.
-      for (let k = 0; k < 28; k++) {
-        const bx = (r(k + 1700) - 0.5) * FW * 1.9, bz = (r(k + 1800) - 0.5) * FL * 1.7;
-        if (Math.abs(bz) > 30 || (Math.abs(bx) < 4 && Math.abs(bz) < 5)) continue;
-        parts.push(bevelBox({ w: 0.9, h: 0.6, d: 0.8, color: "#3c5a2c", offset: { x: bx, y: 0.3, z: bz } }), bevelBox({ w: 0.6, h: 0.45, d: 0.6, color: "#4a6a34", offset: { x: bx + 0.35, y: 0.55, z: bz - 0.2 } }));
-      }
-      // A worn stone path from each house's stairs to the mausoleum, and little white flowers on the graves.
-      for (const s of [-1, 1]) for (let k = 0; k < 14; k++) parts.push(box({ w: 1.1 + r(k + s * 50) * 0.5, h: 0.05, d: 0.8, color: k % 2 ? "#8a8478" : "#77716a", offset: { x: Math.sin(k) * 0.4, y: 0.04, z: s * (27.6 - k * 1.7) } }));
-      for (let k = 0; k < 60; k++) parts.push(box({ w: 0.07, h: 0.07, d: 0.07, color: k % 3 ? "#f2eee0" : "#c9a0e8", emissive: 0.2, offset: { x: (r(k + 2100) - 0.5) * 30, y: 0.12, z: (r(k + 2200) - 0.5) * 50 } }));
-      // Jack-o'-lanterns, glowing, by the stairs and through the graveyard; lanterns on posts along the path.
-      const lantern = (lx, lz) => parts.push(box({ w: 0.1, h: 1.8, d: 0.1, color: "#1c1a20", offset: { x: lx, y: 0.9, z: lz } }), box({ w: 0.28, h: 0.32, d: 0.28, color: "#ffcf7a", emissive: 1, offset: { x: lx, y: 1.95, z: lz } }), box({ w: 0.34, h: 0.06, d: 0.34, color: "#1c1a20", offset: { x: lx, y: 2.14, z: lz } }));
-      const pumpkin = (px, pz, sz = 0.5) => {
-        parts.push(bevelBox({ w: sz, h: sz * 0.8, d: sz, color: "#e8761c", offset: { x: px, y: sz * 0.4, z: pz } }), box({ w: 0.06, h: 0.14, d: 0.06, color: "#3e5a22", offset: { x: px, y: sz * 0.85, z: pz } }));
-        parts.push(box({ w: sz * 0.5, h: sz * 0.12, d: 0.02, color: "#ffd84a", emissive: 1, offset: { x: px, y: sz * 0.32, z: pz + sz / 2 * Math.sign(-pz || 1) } }));
-        for (const e of [-1, 1]) parts.push(box({ w: sz * 0.14, h: sz * 0.14, d: 0.02, color: "#ffd84a", emissive: 1, offset: { x: px + e * sz * 0.18, y: sz * 0.55, z: pz + sz / 2 * Math.sign(-pz || 1) } }));
-      };
-      for (const s of [-1, 1]) {
-        pumpkin(-3.6, s * 28.2); pumpkin(3.6, s * 28.2, 0.6); pumpkin(-13, s * 19.5, 0.45); pumpkin(8, s * 12.8); pumpkin(17, s * 8, 0.65); pumpkin(-21, s * 30);
-        lantern(-2.4, s * 22); lantern(2.4, s * 16); lantern(-2.4, s * 10); lantern(-15, s * 31.2); lantern(15, s * 31.2);
-      }
+      // Each dead tree's crooked branches, forking upward.
       for (const d of M.decor) {
         if (d.kind !== "deadtree") continue;
-        for (let k = 0; k < 4; k++) {
-          const a = k * 1.7 + d.x, len = 1.2 + (k % 2) * 0.6, y = d.y - 0.6 - k * 0.7;
-          parts.push(box({ w: 0.2, h: 0.2, d: len, color: "#2e2622", offset: { x: d.x + Math.sin(a) * len / 2, y, z: d.z + Math.cos(a) * len / 2 } }));
-          parts.push(box({ w: 0.14, h: 0.6, d: 0.14, color: "#2e2622", offset: { x: d.x + Math.sin(a) * len, y: y + 0.3, z: d.z + Math.cos(a) * len } }));
+        for (let k = 0; k < 5; k++) {
+          const a = k * 1.9 + d.x, len = 1.3 + (k % 2) * 0.7, y = d.y - 0.4 - k * 0.75, ex = d.x + Math.sin(a) * len, ez = d.z + Math.cos(a) * len;
+          parts.push(turnedYAt(box({ w: 0.22, h: 0.22, d: len, color: "#2e2622", offset: { z: len / 2 } }), a, d.x, y, d.z));
+          parts.push(box({ w: 0.16, h: 0.8, d: 0.16, color: "#2e2622", offset: { x: ex, y: y + 0.4, z: ez } }), box({ w: 0.12, h: 0.12, d: 0.5, color: "#2e2622", offset: { x: ex, y: y + 0.74, z: ez + 0.25 } }));
         }
       }
     }
@@ -400,7 +445,7 @@
         parts.push(box({ w: w + 0.02, h: 0.05, d: 0.12, color: "#b0a698", offset: { x, y: b[4] - 0.02, z: z - d / 2 + 0.06 * Math.sign(z || 1) } }));
         continue;
       }
-      if (haunted && hauntedBlock(parts, b, w, d, h, x, y, z, bottom)) continue;
+      if (haunted && hauntedBlock(parts, b, M.kinds.get(b), w, d, h, x, y, z, bottom)) continue;
       if (jungle && jungleBlock(parts, b, M.kinds.get(b), w, d, h, x, y, z, bottom)) continue;
       const fort = Math.abs(z) > 22 && Math.abs(z) < 34, team = z > 0 ? "blue" : "red";
       const post = w < 1 && d < 1, deck = b[4] === TOP, rail = bottom === TOP, roof = bottom > 4 && !deck && !rail, floor = bottom > 1.5 && h < 0.5 && !roof, hutWall = bottom > 1.5 && !floor && !roof;
@@ -1225,22 +1270,14 @@
   const puddle = cached(() => box({ w: 1.6, h: 0.02, d: 1.3, color: "#3a5a78", emissive: 0.05, offset: { y: 0.015 } }));
   // The lightning bolt's column, a tall thin white box with its foot at y 0.
   const bolt = cached(() => box({ w: 0.28, h: 40, d: 0.28, color: "#eaf4ff", emissive: 1, offset: { y: 20 } }));
-  // Haunted Hollow's dressing, one merged mesh: lamps along the routes, neon tubes on the cave walls, skeletons in the
-  // open graves, and at each cellar's back door its plank door swung open flat against the wall outside, with a lantern
-  // on the wall beside it. Glow is emissive faces only, no extra lights.
+  // Haunted Hollow's dressing, one merged mesh, behind the Detail setting: an epitaph on each face of every tomb, a
+  // skeleton in each open grave, and at each cellar's back door its plank door swung open flat against the wall
+  // outside, with a lantern on the wall beside it. Glow is emissive faces only.
   const hauntDress = cached(() => {
     const M = SIM.ARENAS.haunted, parts = [];
-    for (const [x, z] of [[-9, 2], [9, -2], [-15, 22], [15, -22], [9, 28], [-9, -28], [-24, 12], [24, -12], [0, 19], [0, -19], [18, 30], [-18, -30]]) {
-      parts.push(box({ w: 0.14, h: 2.8, d: 0.14, color: "#2a2c30", offset: { x, y: 1.4, z } }), box({ w: 0.42, h: 0.42, d: 0.42, color: "#ffd98a", emissive: 1, offset: { x, y: 2.95, z } }));
-    }
-    let k = 0;
-    for (const b of M.rocks) {
-      if (M.rockKind.get(b) !== "cave" || (b[5] || 0) > 0 || b[3] - b[2] < 2 || (k++ % 3)) continue;
-      const color = k % 2 ? "#46ff72" : "#ff4fd8";
-      parts.push(box({ w: 0.08, h: 0.12, d: b[3] - b[2] - 0.8, color, emissive: 1, offset: { x: b[1] + 0.05, y: 1.5, z: (b[2] + b[3]) / 2 } }));
-    }
+    M.tombs.forEach(([x, z], k) => { for (const nz of [-1, 1]) carve(parts, EPITAPHS[(k * 2 + (nz > 0 ? 1 : 0)) % EPITAPHS.length], x, 0.74, z + nz * 0.25, 2.1, 0.96, nz, "#c8ffd9", 0.75); });
     for (const [x0, x1, z0, z1] of M.graves) {
-      const x = (x0 + x1) / 2, z = (z0 + z1) / 2, floor = SIM.GRAVE_Y;
+      const x = (x0 + x1) / 2, floor = SIM.GRAVE_Y;
       parts.push(box({ w: 0.28, h: 0.28, d: 0.28, color: "#e0dccf", offset: { x, y: floor + 0.29, z: z1 - 0.45 } }));
       for (let r = 0; r < 4; r++) parts.push(box({ w: 0.42, h: 0.05, d: 0.06, color: "#d4cebd", offset: { x, y: floor + 0.15, z: z1 - 0.8 - r * 0.2 } }));
       parts.push(box({ w: 0.08, h: 0.05, d: 0.9, color: "#d4cebd", offset: { x: x - 0.12, y: floor + 0.13, z: z0 + 0.7 } }), box({ w: 0.08, h: 0.05, d: 0.9, color: "#d4cebd", offset: { x: x + 0.12, y: floor + 0.13, z: z0 + 0.7 } }));
@@ -1251,12 +1288,26 @@
       const s = Math.sign(z0 + z1), face = (s > 0 ? z1 : z0) + s * 0.17, hinge = s > 0 ? x1 + 0.3 : x0 - 0.3, mid = hinge + s * 1.15;
       parts.push(bevelBox({ w: 2.3, h: 2.25, d: 0.08, color: "#4a3a2c", offset: { x: mid, y: 1.15, z: face } }));
       for (let k = 1; k < 5; k++) parts.push(box({ w: 0.03, h: 2.2, d: 0.1, color: "#2a211b", offset: { x: hinge + s * k * 0.46, y: 1.15, z: face } }));
-      for (const by of [0.45, 1.85]) parts.push(box({ w: 2.1, h: 0.1, d: 0.11, color: "#1c1a20", offset: { x: mid - s * 0.05, y: by, z: face } }));
+      for (const by of [0.45, 1.85]) parts.push(box({ w: 2.1, h: 0.1, d: 0.11, color: IRON, offset: { x: mid - s * 0.05, y: by, z: face } }));
       const lx = s > 0 ? x0 - 1.1 : x1 + 1.1;
-      parts.push(box({ w: 0.08, h: 0.08, d: 0.4, color: "#1c1a20", offset: { x: lx, y: 2.25, z: face + s * 0.1 } }));
+      parts.push(box({ w: 0.08, h: 0.08, d: 0.4, color: IRON, offset: { x: lx, y: 2.25, z: face + s * 0.1 } }));
       parts.push(box({ w: 0.3, h: 0.36, d: 0.3, color: "#ffd98a", emissive: 1, offset: { x: lx, y: 2.0, z: face + s * 0.3 } }));
     }
     return merge(...parts);
+  });
+  // Haunted Hollow's moon: a big pale disc with a few grey seas, facing +z; the scene hangs it low behind the rivals' house.
+  const hauntMoon = cached(() => {
+    const disc = (r, color, emissive, x, y, z) => moved(turnedX(lathe({ profile: [[0, 0], [r, 0], [r, 0.2], [0, 0.2]], segments: 28, color, emissive }), Math.PI / 2), x, y, z);
+    const geo = merge(disc(9, "#f6efd2", 1, 0, 0, 0), disc(2.3, "#d6ccaa", 0.85, -3.1, 2.9, 0.12), disc(1.4, "#d6ccaa", 0.85, 2.6, 4.3, 0.12), disc(2.9, "#dcd3b2", 0.9, 2.9, -2.4, 0.12), disc(1.1, "#d6ccaa", 0.85, -4.1, -3.4, 0.12), disc(0.8, "#d6ccaa", 0.85, -0.5, -5.8, 0.12));
+    geo.castShadow = false;
+    return geo;
+  });
+  // A bank of ground mist: a few low see-through mounds lying into one another; the scene drifts it.
+  const mist = cached(() => {
+    const geo = merge(...[[0, 0, 2.6, 0.14], [1.9, 0.7, 1.7, 0.2], [-2, -0.5, 1.5, 0.17], [0.4, -1.3, 1.2, 0.24], [-0.8, 1.2, 1.1, 0.22]]
+      .map(([x, z, r, h]) => moved(lathe({ profile: [[0, h], [r * 0.5, h * 0.86], [r * 0.85, h * 0.5], [r, 0]], segments: 12, color: "#c3cdea", emissive: 0.35 }), x, 0, z)));
+    geo.glass = 0.06; geo.castShadow = false;
+    return geo;
   });
   // The laser-eyes beam: a white-hot core in a red glow, one metre long along +z from the origin (the scene stretches
   // it to the beam's length), in two strands a hand apart, one from each eye.
@@ -1285,5 +1336,5 @@
     for (const s of [-1, 1]) parts.push(box({ w: 0.36, h: 0.14, d: 0.16, color: sheet, emissive: 0.5, offset: { x: s * 0.6, y: 0.08, z: 0.12 } }));
     return merge(...parts);
   });
-  BL.blockModels = { hookHead, rope, goldBlock, trophyRays, muzzleFlash, isle, keel, puddle, bolt, hauntDress, townDress, jungleRing, beam, laserEyes, ghost, net2, jetpack, jetFlames, monkey, catapult, catapultArm, chute, goldBall, banana, bananaPile, peel, firePit, flames, potato, potatoArm, power, ice, tramp, TEAM, ORANGE, GUNS, arena, stand, block, tick, ball, splat, ring, pad, bubble, crate, grenade, rocket, net, draped, streak, gun, ladder, rack, zipline, zipLight, trolley, cache, SPLATS: 6 };
+  BL.blockModels = { hookHead, rope, goldBlock, trophyRays, muzzleFlash, isle, keel, puddle, bolt, hauntDress, hauntMoon, mist, townDress, jungleRing, beam, laserEyes, ghost, net2, jetpack, jetFlames, monkey, catapult, catapultArm, chute, goldBall, banana, bananaPile, peel, firePit, flames, potato, potatoArm, power, ice, tramp, TEAM, ORANGE, GUNS, arena, stand, block, tick, ball, splat, ring, pad, bubble, crate, grenade, rocket, net, draped, streak, gun, ladder, rack, zipline, zipLight, trolley, cache, SPLATS: 6 };
 })();
