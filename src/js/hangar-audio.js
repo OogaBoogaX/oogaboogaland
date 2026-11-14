@@ -55,6 +55,8 @@
   // How loud each part of the bed sits: the hum, the drone and the air everywhere, more air inside the tunnel, the
   // neon at its loudest inside it, and each shield close to; and at how many metres each of those last falls to half.
   const LEVEL = { mains: 0.05, drone: 0.08, air: 0.045, tunnelAir: 0.035, neon: 0.05, launch: 0.11, door: 0.06, glint: 0.04 };
+  // How far the mains' pitch sags at most as the power falters (`strain`), a share of it.
+  const SAG = 0.14;
   const REF = { neon: 5, launch: 9, door: 5, glint: 8 };
 
   // How loud the test's voices peak: the siren, the whine and its whoosh, the whoomph, the roar's body, crackle and
@@ -130,6 +132,9 @@
     const sisVoice = { pos: null, until: 0, least: 0 };
     // How much of the hall's electrical hum (the mains and the neon) has power, 0 to 1.
     let power = 1;
+    // The hall's hum straining (`strain`): how much of itself the bed plays, 0 to 1, how far the mains' pitch has sagged,
+    // 0 to 1 of `SAG`, and until when the bed follows it quickly.
+    let strained = 1, sagged = 0, quickUntil = 0;
     // Where the visitor hears from and the way the view faces on the ground, and where the last spot was placed.
     const ear = { x: 0, y: 0, z: 0, fx: 0, fz: -1 }, AT = { level: 0, pan: 0 }, glinting = { x: 0, y: 0, z: 0, level: 0 };
 
@@ -806,7 +811,24 @@
     // How much of the hall's electrical hum has power: the mains at once, the neon with the bed's next levelling.
     const setPower = (k) => {
       power = k;
-      if (ready && !muted) bed.mainsGain.gain.setTargetAtTime(LEVEL.mains * k, ctx.currentTime, 0.03);
+      if (ready && !muted) bed.mainsGain.gain.setTargetAtTime(LEVEL.mains * k * strained, ctx.currentTime, 0.03);
+    };
+
+    // The hall's hum straining as the power falters: the mains, the drone, the air and the neon at `level` (0 to 1) of
+    // themselves, followed quickly, and the mains' pitch sagging by `sag` (0 to 1) of `SAG`. A brownout's sound, not a
+    // breakdown's: nothing clunks.
+    const strain = (level, sag) => {
+      if (level === strained && sag === sagged) return;
+      strained = level; sagged = sag;
+      if (!ready) return;
+      const now = ctx.currentTime;
+      quickUntil = now + 0.4;
+      bed.mains.frequency.setTargetAtTime(55 * (1 - SAG * sag), now, 0.05);
+      bed.mains2.frequency.setTargetAtTime(110 * (1 - SAG * sag), now, 0.05);
+      if (muted) return;
+      bed.mainsGain.gain.setTargetAtTime(LEVEL.mains * power * level, now, 0.04);
+      bed.droneGain.gain.setTargetAtTime(LEVEL.drone * level, now, 0.04);
+      bed.airGain.gain.setTargetAtTime((LEVEL.air + LEVEL.tunnelAir * clamp((spots.tunnel.z0 - ear.z) / 6, 0, 1)) * level, now, 0.04);
     };
 
     // Only from a gesture the browser has already counted, so nothing warns in the console; a gesture also wakes a
@@ -845,7 +867,7 @@
 
     // The bed, ten times a second, eased: the neon from the nearest point on the tunnel's axis, so it surrounds a
     // visitor inside it and comes out of its mouth to one in the hall, and each shield from where it stands.
-    const set = (param, value, now) => param.setTargetAtTime(value, now, 0.15);
+    const set = (param, value, now) => param.setTargetAtTime(value, now, now < quickUntil ? 0.04 : 0.15);
     const update = (dt) => {
       if (!ready) {
         activate();
@@ -855,11 +877,11 @@
       if (since < 0.1 || muted) return;
       since = 0;
       const now = ctx.currentTime, T = spots.tunnel, L = spots.launch, D = spots.door;
-      set(bed.mainsGain.gain, LEVEL.mains * power, now);
-      set(bed.droneGain.gain, LEVEL.drone, now);
-      set(bed.airGain.gain, LEVEL.air + LEVEL.tunnelAir * clamp((T.z0 - ear.z) / 6, 0, 1), now);
+      set(bed.mainsGain.gain, LEVEL.mains * power * strained, now);
+      set(bed.droneGain.gain, LEVEL.drone * strained, now);
+      set(bed.airGain.gain, (LEVEL.air + LEVEL.tunnelAir * clamp((T.z0 - ear.z) / 6, 0, 1)) * strained, now);
       place(0, T.y, clamp(ear.z, T.z1, T.z0), REF.neon);
-      set(bed.neonGain.gain, LEVEL.neon * AT.level * power, now);
+      set(bed.neonGain.gain, LEVEL.neon * AT.level * power * strained, now);
       set(bed.neonPan.pan, AT.pan * 0.4, now);
       place(L.x, L.y, L.z, REF.launch);
       set(bed.launch.gain.gain, LEVEL.launch * AT.level, now);
@@ -1327,7 +1349,7 @@
     };
 
     return {
-      listen, update, setMuted, setVolume, glint, test: play, misfire, revs, zap, blackout, lowrider, shuffle, power: setPower, clang, voice, boot, poke, beep, denied, forklift, forkliftWork, horn, projector, clunk, roll, watchCrane, craneCue, watchRoom, roomCue, dispose,
+      listen, update, setMuted, setVolume, glint, test: play, misfire, revs, zap, blackout, lowrider, shuffle, power: setPower, strain, clang, voice, boot, poke, beep, denied, forklift, forkliftWork, horn, projector, clunk, roll, watchCrane, craneCue, watchRoom, roomCue, dispose,
       get muted() { return muted; },
       get volume() { return volume; },
       get ready() { return ready; },
