@@ -22808,7 +22808,8 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
     }
     const labMouth = D.island.mouths.find((m) => m.id === "c11"), lab = labMouth.inside;
     out.mouth = at({ x: lab.x, y: 0, z: lab.z }, 0.5);
-    out.apron = at({ x: labMouth.apron.x, y: NaN, z: labMouth.apron.z }, 0.5);
+    const outX = labMouth.x + (labMouth.apron.x - labMouth.x) * 2.5, outZ = labMouth.z + (labMouth.apron.z - labMouth.z) * 2.5;
+    out.apron = at({ x: outX, y: D.island.surfaceAt(outX, outZ), z: outZ }, 0.5);
     out.air = at({ x: 53.7, y: 8, z: -31 }, 0.5);
     // Inside the Sphere's shell, down its passage short of the curtain, and Merge Rock, which has no public scope yet.
     const passage = BL.timechainModels.PASSAGE.curtain + 0.5;
@@ -32540,11 +32541,12 @@ const outdoorScopeChecks = () => {
   runInNewContext(readFileSync(join(root, "src/js/outdoor-scope.js"), "utf8"), context);
   const O = context.window.BL.outdoorScope, Z = context.window.BL;
   runInNewContext(readFileSync(join(root, "src/js/zone-map.js"), "utf8"), context);
-  const hub = (zone, inside = false) => O.hubReason(zone, inside);
+  const hub = (zone, inside = false, descending = false) => O.hubReason(zone, inside, descending);
   const policy = {
     outdoors: ["outside", "between", "sphere", "rainforest", "bifrost"].every((zone) => hub(zone) === "outdoor"),
     entrances: ["outside", "sphere", "rainforest", "bifrost"].every((zone) => hub(zone, true) === "interior"),
-    under: ["rainforest-under", "hq", "hq-basement"].every((zone) => hub(zone) === "descending"),
+    under: ["rainforest-under", "hq", "hq-basement"].every((zone) => hub(zone) === "descending") && hub("outside", false, true) === "descending"
+      && hub("sphere", false, true) === "descending" && hub("outside", true, true) === "interior",
     unscoped: hub("repos") === "unscoped",
     // Grouped with the island by the panels (zone-map.js), but never public by that.
     grouped: ["lab", "bca", "factory", "arcade", "mirror", "cave-3"].every((zone) => Z.zoneMap.groupOf(zone) === "outside" && hub(zone) === "unknown"),

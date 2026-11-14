@@ -19,11 +19,12 @@
   // await an explicit scope decision; every zone not named here is excluded.
   const HUB_OUTDOOR = new Set(["outside", "between", "sphere", "rainforest", "bifrost"]);
   const HUB_UNDER = new Set(["rainforest-under", "hq", "hq-basement"]);
-  // The hub's reason from its immediate zone and whether the body is inside a cave or the Sphere's shell (either
-  // counts, mouth plane and shell wall being the entrances). A level crossing down (rainforest-under at any depth,
-  // HQ's ramps) is already excluded, however much surface the voice blend still keeps.
-  const hubReason = (zone, inside) => inside ? "interior" : HUB_UNDER.has(zone) ? "descending" : HUB_OUTDOOR.has(zone) ? "outdoor"
-    : zone === "repos" ? "unscoped" : "unknown";
+  // The hub's reason from its immediate zone, whether the body is inside a cave or the Sphere's shell (either counts,
+  // mouth plane and shell wall being the entrances), and whether it has started down a level (`descending`: the hub's
+  // voice levels say so anywhere but the open air off the island's edge, HQ's entrance ramps included while their
+  // zone still reads `outside`). A level crossing is excluded at any depth, however much surface the voice blend keeps.
+  const hubReason = (zone, inside, descending = false) => inside ? "interior" : descending || HUB_UNDER.has(zone) ? "descending"
+    : HUB_OUTDOOR.has(zone) ? "outdoor" : zone === "repos" ? "unscoped" : "unknown";
   // DSB Land's: outdoors only with no room active, no entry or exit fading (an entry is excluded from its request on,
   // before the fade), and the arrival done. An unknown room is a room.
   const dsbReason = (travelling, transitioning, room) => travelling ? "transit" : transitioning ? "entering" : room ? "interior" : "outdoor";

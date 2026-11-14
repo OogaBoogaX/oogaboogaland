@@ -8640,9 +8640,12 @@
     const p = timechainIsland.place, r = BL.timechainModels.SITE.radius, dx = x - p.x, dy = feet - p.y - BL.timechainModels.SITE.shellY, dz = z - p.z;
     return dx * dx + dy * dy + dz * dz < r * r;
   };
+  // Started down a level by the voice levels' own heights (`levelOf`), except in the open air off the island's edge,
+  // which is public air however far below the plane it falls.
   const shareScope = (driven, gorilla, zone) => {
     const p = driven.root.position, feet = p.y - (gorilla ? 0 : driven.baseY);
-    const reason = BL.outdoorScope.hubReason(zone, insideCave(driven, gorilla) || insideSphere(p.x, feet, p.z));
+    const descending = zone !== "between" && levelOf(p.x, feet, p.z, zone, LEVEL_AT);
+    const reason = BL.outdoorScope.hubReason(zone, insideCave(driven, gorilla) || insideSphere(p.x, feet, p.z), descending);
     BL.outdoorScope.report(reason === "outdoor" ? "main" : null, reason);
   };
   // A new zone holds ZONE_HOLD seconds before it is reported, so a bridge's foot does not flicker in the panels.
