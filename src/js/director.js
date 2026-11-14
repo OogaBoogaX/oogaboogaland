@@ -1013,7 +1013,7 @@
         const factory = first.id === "hub" && window.BL.caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
         const roofHole = factory ? { id: factory.id, ...window.BL.factoryModels.ROOF_TUBE } : null;
         const nook = first.id === "hub" ? first.libraryNook || null : null;
-        await window.BL.terrainCache.prepare({ seed: 1, roofHole, nook }, first.id, terrainController.signal);
+        await window.BL.terrainCache.prepare({ seed: 1, roofHole, nook, cliffLedges: first.id === "hub" }, first.id, terrainController.signal);
       } catch { /* A rejected opt-in build uses the ordinary path unless this page was destroyed. */ }
       if (destroyed) { models.release(first.id, []); return; }
     }

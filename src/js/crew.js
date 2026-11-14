@@ -2396,7 +2396,7 @@
         },
         roofEscape: { active: false, jumping: false, blocked: 0 },
         ladder: ctx.ladders ? {
-          plane: null, cooldown: 0, across: 0, along: 0, descentHeld: false, mix: 0,
+          plane: null, cooldown: 0, across: 0, along: 0, descentHeld: false, mix: 0, anchor: { x: 0, z: 0 },
           flat: { width: 0, depth: 0, overlap: 0 }, vertical: { width: 0, height: 0, overlap: 0 }
         } : null,
         avoidance: {
@@ -6340,19 +6340,25 @@
     const runLadder = (cave, dt, driving) => {
       const l = cave.ladder;
       if (!l) return false;
+      if (ctx.laddersEnabled && !ctx.laddersEnabled(cave)) { if (l.plane) leaveLadder(cave); return false; }
       const p = cave.root.position, feet = p.y - cave.baseY;
       l.cooldown = Math.max(0, l.cooldown - dt);
       if (!l.plane && driving && l.cooldown === 0 && !(cave.jet && cave.jet.thrust)) {
         for (const plane of ctx.ladders) {
-          const dx = p.x - plane.x, dz = p.z - plane.z, along = dx * plane.nx + dz * plane.nz;
+          const anchor = plane.pathAt ? plane.pathAt(feet, l.anchor) : plane;
+          const dx = p.x - anchor.x, dz = p.z - anchor.z, along = dx * plane.nx + dz * plane.nz;
           const across = dx * plane.nz - dz * plane.nx, outward = steer.x * plane.nx + steer.z * plane.nz;
           const gap = cave.bodyRadius * 0.5, half = plane.width / 2;
           // At the top the outward walking command becomes descent until released, so a held W cannot
           // immediately reverse the mount and put the character back on the deck.
           const fromTop = Math.abs(feet - plane.top) < 0.15 && outward > 0.05;
           const fromFace = feet >= plane.bottom - 0.1 && feet < plane.top - 0.15 && outward < -0.05;
+          // A rappel starts at its stake, before the stepped rim falls away.
+          // The existing outward handoff carries the body along the lash at
+          // landing height, with ordinary collision checks, before descending.
+          const inner = fromTop && plane.topAnchor ? -plane.inset - 0.08 : -cave.bodyRadius;
           if ((!fromTop && !fromFace) || Math.abs(across) > half - 0.1
-            || along < -cave.bodyRadius || along > gap + 0.08) continue;
+            || along < inner || along > gap + 0.08) continue;
           l.plane = plane; l.across = across; l.along = along;
           l.descentHeld = fromTop && steer.forward > 0.05;
           l.flat.width = l.vertical.width = cave.bodyRadius * 2;
@@ -6368,20 +6374,31 @@
       if (steer.forward <= 0.05) l.descentHeld = false;
       const axis = driving ? (l.descentHeld ? -steer.forward : steer.forward) : -1;
       const side = driving ? steer.strafe : 0, length = Math.max(1, Math.hypot(axis, side));
-      const speed = LADDER_SPEED * (driving ? steer.speed : 1), step = speed * dt / length;
-      const nextFeet = clamp(feet + axis * step, plane.bottom, plane.top);
+      const speed = LADDER_SPEED * (plane.pathSpeed || 1) * (driving ? steer.speed : 1), step = speed * dt / length;
+      // Step out over a cliff landing before lowering the feet through its lip.
+      const depart = !!plane.pathAt && axis < 0 && feet > plane.top - 0.15 && l.along < cave.bodyRadius * 0.5 - 1e-6;
+      const nextFeet = depart ? feet : clamp(feet + axis * step, plane.bottom, plane.top);
       const across = clamp(l.across - side * step, -plane.width / 2 + 0.1, plane.width / 2 - 0.1);
       // The exposed vertical fraction and the footprint's landing fraction are kept separate. Start moving
       // over the lip at 25% exposure, with no flip animation or pause in the held movement.
       const exposed = clamp((nextFeet + height - plane.top) / height, 0, 1);
       const blend = clamp((exposed - 0.25) / 0.75, 0, 1);
       const gap = cave.bodyRadius * 0.5, inset = plane.inset, landingTarget = lerp(gap, -inset, blend);
-      const target = axis < 0 ? Math.max(l.along, landingTarget) : axis > 0 ? Math.min(l.along, landingTarget) : l.along;
-      const along = l.along + clamp(target - l.along, -speed * dt, speed * dt);
-      const nx = plane.x + plane.nz * across + plane.nx * along;
-      const nz = plane.z - plane.nx * across + plane.nz * along;
+      const target = depart ? gap : axis < 0 ? Math.max(l.along, landingTarget) : axis > 0 ? Math.min(l.along, landingTarget) : l.along;
+      let along = l.along + clamp(target - l.along, -speed * dt, speed * dt);
+      const anchor = plane.pathAt ? plane.pathAt(nextFeet, l.anchor) : plane;
+      let nx = anchor.x + plane.nz * across + plane.nx * along;
+      let nz = anchor.z - plane.nx * across + plane.nz * along;
       // Check scenery at the actual feet height; a ladder never grants passage through a machine or wall.
-      if (!flyable(p.x, p.z, nx, nz, Math.min(feet, nextFeet), cave.bodyHeight, cave)) return true;
+      if (!flyable(p.x, p.z, nx, nz, Math.min(feet, nextFeet), cave.bodyHeight, cave)) {
+        // A rock lip may need the feet, not just the head, above it before the
+        // inward handoff. Keep climbing outside it rather than freezing below it.
+        if (!plane.pathAt || along >= l.along) return true;
+        along = l.along;
+        nx = anchor.x + plane.nz * across + plane.nx * along;
+        nz = anchor.z - plane.nx * across + plane.nz * along;
+        if (!flyable(p.x, p.z, nx, nz, Math.min(feet, nextFeet), cave.bodyHeight, cave)) return true;
+      }
       l.along = along; l.across = across; p.x = nx; p.z = nz; p.y = cave.baseY + nextFeet;
       cave.hop = Math.max(0, p.y - groundY(cave)); cave.hopV = 0;
       cave.root.rotation.y = Math.atan2(-plane.nx, -plane.nz);
@@ -7461,7 +7478,7 @@
       parts.legR.scale.y = parts.legL.scale.y = (cave.baseY + lift) / cave.baseY;
     };
     const jumpPlayer = () => {
-      if (!player || player.grabbedBy || player.health.stunned || player.bedTravel.manual || player.camp.seat || player.camp.rolling || player.jet && !player.jetRecovering) return false;
+      if (!player || player.grabbedBy || player.health.stunned || player.bedTravel.manual || player.camp.seat || player.camp.rolling) return false;
       if (player.ladder && player.ladder.plane) {
         const plane = player.ladder.plane;
         leaveLadder(player);
@@ -7470,6 +7487,7 @@
         ctx.onJump?.(player);
         return true;
       }
+      if (player.jet && !player.jetRecovering) return false;
       if (player.traits.footRockets && !player.jet && jetpackRefills(player)) {
         if (!grounded(player)) return false;
         elevatePlayer(0);
@@ -7500,6 +7518,9 @@
       // A seat may take the act itself (`seat.act`, true when it did), as the forklift's starts it; else it stands up.
       if (player.camp.seat) return player.camp.seat.act && player.camp.seat.act() || standPlayer(player, true);
       if (player.bedTravel.manual) return wakePlayer();
+      // An attached rope owns this press, even with an idle or built-in pack.
+      // Consume it so held Space cannot immediately turn the release into thrust.
+      if (player.ladder?.plane) return jumpPlayer();
       if (weaponsEnabled && !player.weapon.reloading && !player.weapon.swapTime && !player.weapon.reloadHandoff && player.weapon.equipped && reloadMissing(player) > 0 && nearReload(player)) {
         if (!startReload(player)) hud.hint("No bananas in the pile");
         return true;

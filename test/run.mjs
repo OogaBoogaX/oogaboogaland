@@ -4306,7 +4306,7 @@ const orbitFlow = async (b) => {
 const SCENES = ["hub", "lab", "studio", "race", "drop", "block", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
-for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
+for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "cliffs-unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
 const ONLY = process.env.ONLY || ""; // Optional comma-separated substrings within the requested scenes.
 const onlyMatches = value => ONLY.split(",").some(part => value.includes(part));
 const FULL = ARGS.includes("full");
@@ -20934,6 +20934,80 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
       && animation.far.gorilla > 0 && animation.far.gorilla < 12 && animation.nearOoga.ooga >= 58 && animation.nearGorilla.gorilla >= 58
       && animation.host.ooga >= 58 && animation.host.gorilla >= 58 && animation.network && animation.controlled >= 58, JSON.stringify(animation));
 } };
+const hubCliffLedges = { name: "hub cliff ledges", why: "rule: both cliff paths must be reachable up and down by existing Ooga controls, with pause and jump release and GAME MODE disabling the ropes", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    ${DRIVEN_OF}
+    const B = __ooga, H = BL.scenes.hub, npc = B.cavemen.get("portlandhodl"), routes = H.debug.cliffLadders, rows = [];
+    if (!drivenOf(B, npc)) B.pilot.possess(npc);
+    const a = drivenOf(B, npc);
+    if (!a) throw new Error("Cliff route fixture could not acquire its Ooga");
+    const key = (name, down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: name === "Space" ? " " : name, code: name === "Space" ? name : "Key" + name.toUpperCase(), bubbles: true }));
+    const feet = () => a.root.position.y - a.baseY, anchor = {};
+    for (const l of routes) {
+      l.pathAt(l.bottom, anchor);
+      const yaw = Math.atan2(l.nx, l.nz), gap = a.bodyRadius * 0.5;
+      B.pilot.navigate({ position: { x: anchor.x + l.nx * gap, y: l.bottom, z: anchor.z + l.nz * gap }, yaw, pitch: 0, dist: 6 });
+      B.advance(0.1, 1 / 60); key("w", true);
+      let mounted = false, paused = false, hold = 0;
+      for (let frame = 0; frame < 1800; frame++) {
+        B.advance(1 / 60, 1 / 60); mounted ||= !!a.ladder.plane;
+        if (!paused && a.ladder.plane && feet() > (l.top + l.bottom) / 2) {
+          key("w", false); const y = feet(); B.advance(0.2, 1 / 60); hold = Math.abs(feet() - y); paused = true; key("w", true);
+        }
+        if (mounted && !a.ladder.plane) break;
+      }
+      key("w", false); const top = feet(), landing = { x: a.root.position.x, y: top, z: a.root.position.z };
+      const landed = Math.hypot(landing.x - l.x + l.nx * l.inset, landing.z - l.z + l.nz * l.inset) < 1e-6;
+      // Turn in place at the landing actually reached by climbing. Walking must
+      // cover the full inset to the lip; never place the fixture beside the rope.
+      B.advance(0.4, 1 / 60);
+      const landingHeld = Math.hypot(a.root.position.x - landing.x, a.root.position.z - landing.z) < 1e-6 && Math.abs(feet() - top) < 1e-6;
+      B.pilot.orbit.yaw = B.pilot.orbit.tYaw = yaw + Math.PI;
+      B.advance(0.1, 1 / 60); key("w", true);
+      let descended = false, approach = 0, lowering = false, clearedLip = false;
+      for (let frame = 0; frame < 1800; frame++) {
+        B.advance(1 / 60, 1 / 60);
+        if (!lowering && feet() < top - 1e-6) {
+          lowering = true;
+          approach = Math.hypot(a.root.position.x - landing.x, a.root.position.z - landing.z);
+          clearedLip = !!a.ladder.plane && (a.root.position.x - l.x) * l.nx + (a.root.position.z - l.z) * l.nz >= gap - 1e-6;
+        }
+        descended ||= !!a.ladder.plane;
+        if (descended && !a.ladder.plane) break;
+      }
+      key("w", false);
+      rows.push({ kind: l.kind, mounted, paused, hold, top, expectedTop: l.top, landed, landingHeld, approach, requiredApproach: l.inset + gap, clearedLip, descended, bottom: feet(), expectedBottom: l.bottom, active: !!a.ladder.plane });
+    }
+    const l = routes.find(r => r.kind === "ladder");
+    l.pathAt(l.bottom, anchor);
+    B.pilot.navigate({ position: { x: anchor.x + l.nx * a.bodyRadius * 0.5, y: l.bottom, z: anchor.z + l.nz * a.bodyRadius * 0.5 }, yaw: Math.atan2(l.nx, l.nz), pitch: 0, dist: 6 });
+    key("w", true); B.advance(0.4, 1 / 60); key("w", false); const attached = !!a.ladder.plane;
+    key("Space", true); B.advance(1 / 60, 1 / 60); key("Space", false); const released = !a.ladder.plane;
+    B.crew.wearJetpack(a, BL.hubModels.jetpack(), BL.hubModels.jetFlame()); a.jetFuel = 1; a.jetRecovering = false;
+    B.pilot.navigate({ position: { x: anchor.x + l.nx * a.bodyRadius * 0.5, y: l.bottom, z: anchor.z + l.nz * a.bodyRadius * 0.5 }, yaw: Math.atan2(l.nx, l.nz), pitch: 0, dist: 6 });
+    key("w", true); B.advance(0.4, 1 / 60); key("w", false); const jetAttached = !!a.ladder.plane && !!a.jet;
+    key("Space", true); B.advance(1 / 60, 1 / 60); key("Space", false); const jetReleased = !a.ladder.plane && a.hopV > 0 && !a.jet.thrust;
+    const bottomLanding = { position: { x: anchor.x + l.nx * a.bodyRadius * 0.5, y: l.bottom, z: anchor.z + l.nz * a.bodyRadius * 0.5 }, yaw: Math.atan2(l.nx, l.nz), pitch: 0, dist: 6 };
+    B.pilot.navigate(bottomLanding);
+    key("w", true); B.advance(0.4, 1 / 60); key("w", false); const modeAttached = !!a.ladder.plane;
+    H.debug.setGameMode(true); B.advance(1 / 60, 1 / 60); const modeDetached = !a.ladder.plane;
+    // Navigation gives a fresh, grounded attempt with zero cooldown. Otherwise
+    // the release cooldown alone could make the disabled-mount check pass.
+    B.pilot.navigate(bottomLanding); const mountReady = a.ladder.cooldown === 0;
+    key("w", true); let mountedInMode = false;
+    for (let frame = 0; frame < 24; frame++) { B.advance(1 / 60, 1 / 60); mountedInMode ||= !!a.ladder.plane; }
+    key("w", false); const modeBlocked = mountReady && !mountedInMode && a.ladder.cooldown === 0;
+    H.debug.setGameMode(false); B.pilot.navigate(bottomLanding);
+    key("w", true); B.advance(0.4, 1 / 60); key("w", false); const reenabled = !!a.ladder.plane;
+    key("Space", true); B.advance(1 / 60, 1 / 60); key("Space", false);
+    return { rows, attached, released, jetAttached, jetReleased, modeAttached, modeDetached, modeBlocked, reenabled };
+  })()`);
+  record("hub cliff ledges: rappel ropes and lower ladders climb and descend, hold at rest, release on Space and respect GAME MODE",
+    r.rows.filter(v => v.kind === "rope").length >= 2 && r.rows.filter(v => v.kind === "ladder").length === 3
+      && r.rows.every(v => v.mounted && v.paused && v.hold < 1e-6 && Math.abs(v.top - v.expectedTop) < 1e-6 && v.landed && v.landingHeld && v.clearedLip && v.approach >= v.requiredApproach - 1e-6 && v.descended && Math.abs(v.bottom - v.expectedBottom) < 1e-6 && !v.active)
+      && r.attached && r.released && r.jetAttached && r.jetReleased && r.modeAttached && r.modeDetached && r.modeBlocked && r.reenabled, JSON.stringify(r));
+} };
+scene("hub", { label: "cliff ledges", query: "solo=1&character=portlandhodl&pos=0", steps: [hubCliffLedges] });
 scene("hub", { label: "distant effects", query: "pos=0&birdseye=1", steps: [hubDistantEffects] });
 // No other session's cast holds the default local Ooga or a server-vouched contributor: both join the roster before
 // the crew is built, as on a real arrival.
@@ -32262,6 +32336,111 @@ const terrainCacheChecks = async () => {
 // must keep its golden digest, and the snapshot's queries, rehydrated after a structured clone (the Worker's and
 // IndexedDB's codec), must answer exactly as the direct build does on a seeded sample of every query.
 // The golden is the island as it was built before the snapshot existed, since given EntropyLab's white floor.
+const CLIFF_TERRAIN_CHECK = "hub cliff ledges: two full-width rings have real floor and headroom in direct and cached terrain, without changing top voxels, rooms, inner windows or paths";
+const cliffLedgeChecks = (BL, baseline, baselineRestored) => {
+  const options = { seed: 1, cliffLedges: true }, island = BL.terrain.island(options);
+  let step; const steps = BL.terrain.islandSnapshotSteps(options);
+  do { step = steps.next(); } while (!step.done);
+  let restored;
+  try { restored = BL.terrainSnapshot.create(structuredClone(step.value)); }
+  catch (error) {
+    // Diagnose the existing failed build, never run a replacement probe or
+    // loosen snapshot validation to get past its geometry limit.
+    const meshBreakdown = built => {
+      const geometry = built.geometry, gridEnd = built.cutawaySource.rampFaceOffset;
+      const windowStart = geometry.faces.length - built.headquarters.windowFaces;
+      const counts = { faces: geometry.faces.length, grid: gridEnd, ramps: windowStart - gridEnd,
+        windows: built.headquarters.windowFaces, buriedPathFaces: 0, buriedWindowFaces: 0,
+        gridPathFaces: 0, gridWindowFaces: 0, belowUpperFloor: 0, belowLowerFloor: 0, triangles: 0 };
+      for (let n = 0; n < geometry.faces.length; n++) {
+        const face = geometry.faces[n]; counts.triangles += face.i.length - 2;
+        if (n >= gridEnd) continue;
+        let top = -Infinity;
+        for (const i of face.i) top = Math.max(top, geometry.verts[i * 3 + 1]);
+        if (face.cutawayPathKey) {
+          counts.gridPathFaces++;
+          if (top <= face.cutawayPathBottom + 1e-7) {
+            if (face.cutawayWindowMask) counts.buriedWindowFaces++;
+            else counts.buriedPathFaces++;
+          }
+        }
+        if (face.cutawayWindowMask) counts.gridWindowFaces++;
+        if (top <= BL.terrain.CLIFF_LEDGES.levels[0].floor) counts.belowUpperFloor++;
+        if (top <= BL.terrain.CLIFF_LEDGES.levels[1].floor) counts.belowLowerFloor++;
+      }
+      return counts;
+    };
+    record(CLIFF_TERRAIN_CHECK, false, JSON.stringify({ error: error.message,
+      baseline: meshBreakdown(baseline), cliffs: meshBreakdown(island) }));
+    return;
+  }
+  const failures = [];
+  let samples = 0;
+  for (const ledge of BL.terrain.CLIFF_LEDGES.levels) for (let degrees = 0; degrees < 360; degrees++) {
+    const angle = degrees * Math.PI / 180;
+    for (const radius of [ledge.inner + 0.55, (ledge.inner + ledge.outer) / 2, ledge.outer - 0.6]) {
+      const x = Math.sin(angle) * radius, z = -Math.cos(angle) * radius;
+      for (const built of [island, restored]) {
+        const floor = built.supportAt(x, z, ledge.floor, 0.1, -120, 0.4);
+        const clear = built.clearAt(x, ledge.floor + 0.01, z, 0.4, 2.5);
+        samples++;
+        if ((Math.abs(floor - ledge.floor) > 1e-6 || !clear) && failures.length < 12) failures.push({ degrees, radius, floor, expected: ledge.floor, clear });
+      }
+    }
+  }
+  // Enlarged route-tagged grid quads are the below-ceiling optimization. None
+  // may cross into a removable roof or a window-owned column, direct or cached.
+  let mergedPathFaces = 0, unsafeMergedPaths = 0;
+  for (const built of [island, restored]) {
+    const geometry = built.geometry, gridEnd = built.cutawaySource.rampFaceOffset;
+    for (let n = 0; n < gridEnd; n++) {
+      const face = geometry.faces[n];
+      if (!face.cutawayPathKey) continue;
+      let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      for (const i of face.i) {
+        const x = geometry.verts[i * 3], y = geometry.verts[i * 3 + 1], z = geometry.verts[i * 3 + 2];
+        minX = Math.min(minX, x); minY = Math.min(minY, y); minZ = Math.min(minZ, z);
+        maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); maxZ = Math.max(maxZ, z);
+      }
+      if (Math.max(maxX - minX, maxY - minY, maxZ - minZ) <= built.unit + 1e-7) continue;
+      mergedPathFaces++;
+      if (face.cutawayWindowMask || !Number.isFinite(face.cutawayPathBottom) || maxY > face.cutawayPathBottom + 1e-7) unsafeMergedPaths++;
+    }
+  }
+  const a = baseline.cutawaySource, b = island.cutawaySource;
+  let topChanges = 0;
+  for (let x = 0; x < a.sx; x++) for (let z = 0; z < a.sz; z++) for (let y = 120; y < a.sy; y++) {
+    const i = (x * a.sy + y) * a.sz + z;
+    if (a.data[i] !== b.data[i]) topChanges++;
+  }
+  const rooms = built => JSON.stringify([built.headquarters.rooms, built.headquarters.basement.rooms]);
+  const apertures = built => JSON.stringify(built.headquarters.windows.map(w => [w.kind, w.x, w.z, w.width, w.height, w.sill, w.flare.frusta.filter(f => f.inner)]));
+  const pathDetails = { baseline: [], direct: [], restored: [] };
+  const paths = (built, details) => {
+    const path = built.path, hash = createHash("sha256");
+    hash.update(JSON.stringify([path.centerlines, path.debug.masterMaskHash, path.debug.masterSpokeCellCount]));
+    for (const radius of [4, 8, 16]) {
+      path.setRadius(radius);
+      const count = path.debug.visibleInstanceCount;
+      hash.update(JSON.stringify([radius, count, path.debug.visibleSpokeCellCount, path.debug.ringCellCount]));
+      const instances = new Uint8Array(path.instanceData.buffer, path.instanceData.byteOffset, count * 20 * Float32Array.BYTES_PER_ELEMENT);
+      hash.update(instances);
+      details.push({ radius, count, instances: createHash("sha256").update(instances).digest("hex") });
+    }
+    return hash.digest("hex");
+  };
+  // Reuse parity's restored baseline so sampling active radii does not change the
+  // original island used by the remaining unit checks. Compare placements, not PATH_TILE.
+  const originalPaths = paths(baselineRestored, pathDetails.baseline), directPaths = paths(island, pathDetails.direct), restoredPaths = paths(restored, pathDetails.restored);
+  const samePaths = directPaths === originalPaths && restoredPaths === originalPaths;
+  record(CLIFF_TERRAIN_CHECK,
+    !failures.length && !topChanges && mergedPathFaces > 0 && !unsafeMergedPaths
+      && rooms(baseline) === rooms(island) && apertures(baseline) === apertures(island) && samePaths,
+    JSON.stringify({ samples, failures, topChanges, mergedPathFaces, unsafeMergedPaths, faces: island.geometry.faces.length,
+      rooms: rooms(baseline) === rooms(island), apertures: apertures(baseline) === apertures(island), paths: samePaths,
+      pathHashes: { baseline: originalPaths, direct: directPaths, restored: restoredPaths }, pathDetails: samePaths ? undefined : pathDetails,
+      masterCells: [baselineRestored.path.debug.masterSpokeCellCount, island.path.debug.masterSpokeCellCount, restored.path.debug.masterSpokeCellCount] }));
+};
 const TERRAIN_GOLDEN = "7ceeb12cec5b0ec3";
 const terrainParityChecks = (BL, island) => {
   const islandDigest = (built) => {
@@ -32322,6 +32501,7 @@ const terrainParityChecks = (BL, island) => {
   });
   record("terrain collision: direct and Worker-restored voxel sweeps use caller-owned typed box queries instead of the allocating scalar adapter",
     voxelPaths.every(path => path.typed), JSON.stringify(voxelPaths));
+  return restored;
 };
 // Repo Island (repo-island-data.js, repo-island-models.js, repo-feed.js): the list the page and the Worker share, the
 // island laid out from it, and the feed's boundary. The meadow's four totems are carved by the same kit at its full
@@ -32519,6 +32699,18 @@ const npcActivityRefreshProof = (BL) => {
 };
 
 const unitChecks = async () => {
+  // The same terrain rule can run alone without unrelated browser or global checks.
+  if (ARGS.includes("cliffs-unit")) {
+    const scope = {};
+    for (const name of ["math", "scene", "models", "convex", "terrain", "terrain-snapshot"]) {
+      new Function("window", readFileSync(join(root, "src/js", name + ".js"), "utf8"))(scope);
+    }
+    const BL = scope.BL, baseline = BL.terrain.island({ seed: 1 });
+    const steps = BL.terrain.islandSnapshotSteps({ seed: 1 });
+    let step; do { step = steps.next(); } while (!step.done);
+    cliffLedgeChecks(BL, baseline, BL.terrainSnapshot.create(structuredClone(step.value)));
+    return;
+  }
   await connectionReportChecks();
   const artifact = artifactUnitProof();
   record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
@@ -32935,7 +33127,8 @@ record("character visibility source bakes: ownership wrappers share exact immuta
     npcActivity.every(row => row.preserved && row.restoredByHost && row.resumedLocally), JSON.stringify(npcActivity));
 
   const island = BL.terrain.island({ seed: 1 });
-  terrainParityChecks(BL, island);
+  const originalTerrainSnapshot = terrainParityChecks(BL, island);
+  cliffLedgeChecks(BL, island, originalTerrainSnapshot);
   repoIslandChecks(BL, island);
   await terrainCacheChecks();
   {

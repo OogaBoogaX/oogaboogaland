@@ -9,6 +9,7 @@
   const params = new URLSearchParams(location.search);
   const LAZY_BEDDING = params.get("lazyhub") === "1";
   const SEED = 1;
+  const cliffLadders = [];
   const DEG = Math.PI / 180;
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
   const yawParam = parseFloat(params.get("yaw"));
@@ -219,7 +220,7 @@
   const WANDER_COUNT = 36, WANDER_INNER = 5.5;
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
-  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", poolbridge: "Vine bridge · to the Mempool island", poolsign: "Mempool Rainforest · the way down is through the hill", poolpainting: "Wall painting · tap to read it closely", chainsign: "The chain, at a glance · tap to read it", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", jumbotron: "Oogatron · OogaBoogaX on the big screen · tap the screen for a close-up", palm: "Palm · shake it", bifrostbridge: "Bifröst · the bridge to ₿IFRÖST", bifrostgate: "₿IFRÖST · walk an Ooga through the field", heimdall: "Heimdall · keeper of the bridge", gate: null };
+  const PROP_TIPS = { cliffrope: "Cliff rope · climb between the rock ledges", tree: "Tree · shake it", bush: "Bush · rustle it", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", poolbridge: "Vine bridge · to the Mempool island", poolsign: "Mempool Rainforest · the way down is through the hill", poolpainting: "Wall painting · tap to read it closely", chainsign: "The chain, at a glance · tap to read it", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", jumbotron: "Oogatron · OogaBoogaX on the big screen · tap the screen for a close-up", palm: "Palm · shake it", bifrostbridge: "Bifröst · the bridge to ₿IFRÖST", bifrostgate: "₿IFRÖST · walk an Ooga through the field", heimdall: "Heimdall · keeper of the bridge", gate: null };
   const RETICLE_PROPS = new Set(["tree", "bush", "flower", "torch", "firepit", "ladder", "poolsign", "poolpainting", "chainsign", "weathersign", "poolfern", "poollog", "jaguar", "monkey", "toucan", "canopy", "jumbotron", "palm", "timechainentrance", "timechainkeypad", "bifrostgate", "heimdall"]);
   const workCave = (slot) => slot.repo && (slot.status === "open" || slot.status === "mirror");
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
@@ -5910,6 +5911,9 @@
       case "bedroll":
         hud.toast("Somebody's bed. Ooga leaves it.");
         break;
+      case "cliffrope":
+        hud.toast("Walk toward the rope to climb · forward/back to go up/down · Space to let go. Falling returns you to the island.");
+        break;
       case "ladder":
         if (!wobble(o.lean, 0.05)) return;
         hud.toast("Wobbly. Ooga does not climb.");
@@ -11006,7 +11010,7 @@
     if (heldHub || ctx.from === "hub") return null;
     preparedCharacters.clear();
     const factory = caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
-    const options = { seed: SEED, roofHole: factory ? { id: factory.id, ...BL.factoryModels.ROOF_TUBE } : null, nook: LIBRARY };
+    const options = { seed: SEED, roofHole: factory ? { id: factory.id, ...BL.factoryModels.ROOF_TUBE } : null, nook: LIBRARY, cliffLedges: true };
     const slice = { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 };
     if (!terrain.hasIsland(options)) yield* terrain.islandSteps(options, slice);
     yield* poolModels.prepareSteps();
@@ -11089,7 +11093,7 @@
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     phase = null;
     const factorySlot = caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
-    island = terrain.island({ seed: SEED, roofHole: factorySlot ? { id: factorySlot.id, ...BL.factoryModels.ROOF_TUBE } : null, nook: LIBRARY });
+    island = terrain.island({ seed: SEED, roofHole: factorySlot ? { id: factorySlot.id, ...BL.factoryModels.ROOF_TUBE } : null, nook: LIBRARY, cliffLedges: true });
     guideWitness[0] = -1;
     cutawayPathBounds = buildCutawayPathBounds(island.cutawayPaths);
     guideSegmentClear.boxGrid = POOL_SEAMS[0].boxGrid = POOL_SEAMS[1].boxGrid = island.sightGrid;
@@ -11295,6 +11299,19 @@
     buildLawn();
     reflowScenery();
     buildSpots();
+    // Build after all seeded scatter and reflow, with no ground claims or RNG draws.
+    for (const cliff of BL.hubCliffs.create(island, free, PLAYER_RADIUS, STEP_MAX)) {
+      const node = createNode({ geometry: cliff.geometry });
+      addChild(root, node); placed.push(node); cliffLadders.push(cliff.route);
+      // Help is reachable at either landing, not only halfway down an airborne rope.
+      const route = cliff.route, bottom = route.pathAt(route.bottom, {});
+      for (const at of [{ x: route.x - route.nx * route.inset, y: route.top + 0.6, z: route.z - route.nz * route.inset },
+        { x: bottom.x, y: route.bottom + 0.6, z: bottom.z }]) {
+        const pick = createNode({ position: at, geometry: PICK_GEOMETRY });
+        addChild(root, pick); placed.push(pick);
+        addProp("cliffrope", pick, at.x, at.z, 0.75).weaponType = "none";
+      }
+    }
     buildClouds();
     // The ring's veils are laid in a group of their own before it joins the island, so each one's ripples, which read
     // their veil's place once, walk only the group to find it.
@@ -11321,7 +11338,7 @@
     critters = crittersMod.create({ root, renderer, flowers: scenery.filter((o) => o.prop === "flower" && o.active), fire: firePos, secondaryFire: { x: 0, y: island.headquarters.floor, z: 0 }, meadowRadius: MEADOW, heightAt: island.surfaceAt, activeAt: effectsActiveAt });
     cloudRememberNodes(cloudNodeStart);
     mark("props");
-    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, zzzVisible: sleepMarksVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, matrixLivingPile: true, onLayout: layoutPile, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: playerSupportAt, petLanding: (x, z, lying) => hammock ? hammock.landing(x, z, lying) : null, ceilingAt, wanderSpot, walkable, flyable, glideJetCeiling, useNear, abyssAt, abyssRespawnY: ABYSS_RESPAWN_Y, seaY: SEA_Y, jetpackAllowed, reticleTarget, phase: () => phase };
+    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, zzzVisible: sleepMarksVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, matrixLivingPile: true, onLayout: layoutPile, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: playerSupportAt, ladders: cliffLadders, laddersEnabled: () => !gameMode && !cloudHopper?.active && !pilot?.poseHeld, petLanding: (x, z, lying) => hammock ? hammock.landing(x, z, lying) : null, ceilingAt, wanderSpot, walkable, flyable, glideJetCeiling, useNear, abyssAt, abyssRespawnY: ABYSS_RESPAWN_Y, seaY: SEA_Y, jetpackAllowed, reticleTarget, phase: () => phase };
     shared.weaponsEnabled = true;
     shared.jetpackRefills = cave => !(cloudHopper?.active && cave === cloudHopper.actor);
     shared.jetpackLiftOnly = cave => !!cloudHopper?.active && cave === cloudHopper.actor;
@@ -12048,6 +12065,7 @@
     Object.assign(hubScene, {
       root, camera, input,
       debug: {
+        cliffLadders,
         setGameMode, delayGameRing, animationInterval,
         get gameMode() { return gameMode; },
         selectDebugGorilla,
@@ -12389,6 +12407,7 @@
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
     targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixGates.length = sealedCaves.length = clouds.length = lamps.length = pilePosts.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = meadowPalms.length = 0;
+    cliffLadders.length = 0;
     fireHazards.length = 0;
     fireRigs = null;
     firePitRig = null;
