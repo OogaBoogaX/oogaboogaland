@@ -369,6 +369,7 @@
       <button type="button" data-action="studio-fire">Fire</button>
       <button type="button" data-action="studio-eyes" aria-pressed="false" title="Through the Ooga's own eyes">1st person</button>
       <button type="button" data-action="studio-third" aria-pressed="false" title="From behind and a little above; in combat, over its shoulder">3rd person</button>
+      <button type="button" data-action="studio-combat">Carry</button>
       <button type="button" data-action="studio-free" aria-pressed="false" title="A camera of your own, flown anywhere round the Ooga">Free cam</button>
       <button type="button" data-action="studio-night">Day</button>
       <button type="button" data-action="studio-build" aria-pressed="false" title="A new Ooga's female build (reloads)">Female</button>
@@ -1035,25 +1036,24 @@
         <div class="garage-head">
           <h2><span data-sign>Block Frenzy</span></h2>
           <p class="help block-tip" id="block-tip"></p>
-          <section id="block-live" class="block-live" hidden aria-label="Live match">
-            <h3 class="section-head" id="block-live-title">Live match</h3>
+          <section id="block-live" class="block-live" hidden aria-label="Multiplayer">
+            <h3 class="section-head" id="block-live-title">Multiplayer</h3>
             <p class="help" id="block-live-status"></p>
             <div class="block-live-sizes" id="block-live-sizes" hidden>
-              <button type="button" class="block-side block-target" data-action="block-live-size-1" data-live-size="1" aria-pressed="false">1v1</button>
               <button type="button" class="block-side block-target" data-action="block-live-size-2" data-live-size="2" aria-pressed="false">2v2</button>
               <button type="button" class="block-side block-target" data-action="block-live-size-3" data-live-size="3" aria-pressed="false">3v3</button>
               <button type="button" class="block-side block-target" data-action="block-live-size-4" data-live-size="4" aria-pressed="false">4v4</button>
             </div>
             <ul class="block-live-list" id="block-live-list"></ul>
             <div class="block-live-buttons">
-              <button type="button" data-action="block-live-reg" id="block-live-reg">Register</button>
+              <button type="button" data-action="block-live-reg" id="block-live-reg">Join match</button>
               <button type="button" data-action="block-live-ready" id="block-live-ready" hidden>Ready!</button>
-              <button type="button" data-action="block-live-alone" id="block-live-alone" hidden>Start alone</button>
+              <button type="button" data-action="block-live-alone" id="block-live-alone" hidden>Start with NPCs</button>
               <button type="button" data-action="block-live-wait" id="block-live-wait" hidden>Wait for players</button>
               <button type="button" data-action="block-live-watch" id="block-live-watch" hidden>Watch from the deck</button>
             </div>
           </section>
-          <p class="help" id="block-board-help">Pick a side. Steal the rivals' Bitcoin block (their colour), carry it to your own stand while your block is home. First to 3 captures wins.</p>
+          <p class="help" id="block-board-help">Pick a side. Steal the rivals' Bitcoin block (their colour), carry it to your own stand or throw it into your zone while your block is home. First to 3 captures wins.</p>
         </div>
         <div class="garage-columns">
           <div class="garage-col">
@@ -1069,10 +1069,14 @@
               <button type="button" class="block-side block-target" data-target="5" aria-pressed="false">5</button>
               <button type="button" class="block-side block-target" data-target="7" aria-pressed="false">7</button>
             </div>
+            <h3 class="section-head">Scoring</h3>
+            <div class="block-sides block-targets">
+              <button type="button" class="block-side block-target" data-rule="home" aria-pressed="true" aria-label="Block must be home (classic)" title="Block must be home (classic)">Classic</button>
+              <button type="button" class="block-side block-target" data-rule="any" aria-pressed="false" aria-label="Block doesn't need to be home" title="Block doesn't need to be home">Any time</button>
+            </div>
             <h3 class="section-head">Map</h3>
             <div class="block-sides block-targets">
-              <button type="button" class="block-side block-target" data-map="fort" aria-pressed="true">Fort Chaos</button>
-              <button type="button" class="block-side block-target" data-map="town" aria-pressed="false">Ooga Town</button>
+              <button type="button" class="block-side block-target" data-map="town" aria-pressed="true">Ooga Town</button>
               <button type="button" class="block-side block-target" data-map="jungle" aria-pressed="false">Gorilla Jungle</button>
               <button type="button" class="block-side block-target" data-map="haunted" aria-pressed="false">Haunted Hollow</button>
             </div>
@@ -1096,8 +1100,8 @@
               <button type="button" class="block-side block-target" data-skill="expert" aria-pressed="false" title="Bots ride the catapult and ziplines, climb, jetpack over walls, stack and throw crates">Expert</button>
             </div>
             <div id="block-ooga-slot">
-              <h3 class="section-head"><label for="block-ooga">Your Ooga</label></h3>
-              <select class="block-ooga" id="block-ooga"></select>
+              <h3 class="section-head">Your Ooga</h3>
+              <p class="block-ooga" id="block-ooga"></p>
             </div>
           </div>
           <div class="garage-col">
@@ -1105,6 +1109,14 @@
             <ul class="garage-list drop-rows">
               <li><span>Fastest win</span> <b id="block-best">none yet</b></li>
               <li><span>Rounds</span> <b id="block-record">0 won of 0</b></li>
+            </ul>
+            <h3 class="section-head">Your record</h3>
+            <ul class="garage-list drop-rows" aria-label="Your record, kept in this browser">
+              <li><span>Blocks mined</span> <b id="block-rec-mined">0</b></li>
+              <li><span>Brought home</span> <b id="block-rec-home">0</b></li>
+              <li><span>Splats landed</span> <b id="block-rec-splats">0</b></li>
+              <li><span>Times splatted</span> <b id="block-rec-splatted">0</b></li>
+              <li><span>Rounds as MVP</span> <b id="block-rec-mvps">0</b></li>
             </ul>
           </div>
         </div>
@@ -1116,7 +1128,17 @@
           <button type="button" class="feed-open race-go" data-action="block-start"><span data-sign>Play!</span></button>
         </div>
       </section>
-      <div class="block-preview-name" id="block-preview-name" hidden><b></b><span>drag to turn</span><div class="block-preview-pick" id="block-preview-pick"><label for="block-ooga">Your Ooga</label></div></div>
+      <div class="block-preview-name" id="block-preview-name" hidden><b></b><span>drag to turn</span></div>
+      <div class="block-weapon-card" id="block-weapon-card" hidden role="group" aria-label="Weapons">
+        <small>Weapons</small>
+        <b id="block-weapon-name"></b>
+        <p id="block-weapon-blurb"></p>
+        <div class="block-weapon-nav">
+          <button type="button" data-weapon-step="-1" aria-label="Previous weapon" title="Previous weapon">‹</button>
+          <span id="block-weapon-count" aria-hidden="true"></span>
+          <button type="button" data-weapon-step="1" aria-label="Next weapon" title="Next weapon">›</button>
+        </div>
+      </div>
       <div class="race-strip" id="block-strip" hidden>
         <div class="race-hud race-hud-left">
           <div class="race-lap block-score" data-team="blue"><span>Blue</span><b id="block-score-blue">0</b></div>
@@ -1134,7 +1156,7 @@
       </div>
       <section class="block-watch" id="block-watch" hidden aria-label="Watch deck" aria-live="polite">
         <span id="block-watch-line"></span>
-        <button type="button" data-action="block-live-reg" id="block-watch-reg">Register for next round</button>
+        <button type="button" data-action="block-live-reg" id="block-watch-reg">Join next round</button>
         <button type="button" data-action="block-board">Main menu</button>
       </section>
       <div class="block-viewer-board" id="block-viewer-board" hidden aria-live="off"><div class="block-board-side" data-side="blue"><span>Blue</span><b id="block-viewer-blue">0</b></div><div class="block-board-mid"><small id="block-viewer-goal"></small><small id="block-viewer-clock"></small></div><div class="block-board-side" data-side="red"><span>Red</span><b id="block-viewer-red">0</b></div><table class="block-board-stats" id="block-viewer-captures" hidden></table></div>
@@ -1145,7 +1167,7 @@
       </div>
  <section class="block-help" id="block-help-box" hidden aria-label="How to play">
         <h3>How to play</h3>
-        <p>Steal the rivals' Bitcoin block and carry it to your stand while your own block is home. Gorillas drag you to the edge: mash Space to fill the meter and break free. Fall off and you fly back, or respawn at home.</p>
+        <p>Steal the rivals' Bitcoin block and carry it to your stand, or throw it into your zone. Scoring is the round's pick on the board: block must be home (classic), where yours has to be on its stand to score, or block doesn't need to be home. Every block you mine wins a pair of Golden AKs, for you or a teammate. Only the two special weapons take each other: hook a rival holding the Golden AKs out to take them, or splat a rival holding the hook out with Golden AK fire to take it. Gorillas drag you to the edge: mash Space to fill the meter and break free. The rivals' zipline only carries you while your own block is home: grab it with yours gone and a trap door throws you off the island (the lamp on its handle shows red). Fall off and you fly back, or respawn at home.</p>
         <div class="block-keys" id="block-help-keys"></div>
         <button type="button" data-action="block-help">Close</button>
       </section>
@@ -1153,19 +1175,20 @@
       <ol class="block-feed" id="block-feed" hidden aria-live="off"><li></li><li></li><li></li><li></li></ol>
       <button type="button" class="act block-paint" id="block-paint" hidden>Throw!</button>
       <div class="block-tools" id="block-tools" hidden role="toolbar" aria-label="Weapons">
+        <div class="block-tool-name" id="block-tool-name" aria-hidden="true"></div>
         <div class="block-bar-tabs">
           <button type="button" class="block-bar-grip" id="block-bar-grip" aria-label="Drag the weapons bar" title="Drag to move">⠿</button>
           <button type="button" class="block-bar-min" id="block-bar-min" aria-pressed="false" aria-label="Hide or show the weapons bar" title="Hide or show (U)">–</button>
         </div>
         <div class="block-slots">
-          <button type="button" data-tool="paint" aria-pressed="true" aria-label="Paint" title="Paint"><kbd>1</kbd><svg class="block-slot-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3a8dff" d="M2 2h5v5H2z" /><path fill="#9cc8ff" d="M3 3h2v1H3z" /><path fill="#3a8dff" d="M7 3h2v2H7zM0 5h2v2H0z" /></svg><b></b></button>
-          <button type="button" data-tool="grenade" aria-pressed="false" aria-label="Grenade" title="Grenade"><kbd>2</kbd><svg class="block-slot-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3f7a3a" d="M2 3h5v5H2z" /><path fill="#2a5428" d="M2 6h5v1H2z" /><path fill="#c9a96b" d="M4 1h1v2H4zM5 1h2v1H5z" /></svg><b></b></button>
-          <button type="button" data-tool="rocket" aria-pressed="false" aria-label="Rocket" title="Rocket"><kbd>3</kbd><svg class="block-slot-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#d8d0c2" d="M3 2h3v5H3z" /><path fill="#ff4a3a" d="M4 0h1v2H4zM3 1h3v1H3z" /><path fill="#f7931a" d="M3 7h1v2H3zM5 7h1v2H5z" /></svg><b></b></button>
-          <button type="button" data-tool="net" aria-pressed="false" aria-label="Net" title="Net"><kbd>4</kbd><svg class="block-slot-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#bfe3ff" d="M1 1h7v1H1zM1 4h7v1H1zM1 7h7v1H1zM1 1h1v7H1zM4 1h1v7H4zM7 1h1v7H7z" /></svg><b></b></button>
-          <button type="button" data-tool="sniper" aria-pressed="false" aria-label="Sniper rifle, on a tower" title="Sniper rifle, on a tower"><kbd>5</kbd><svg class="block-slot-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#9aa3ad" d="M0 4h9v1H0zM6 3h1v1H6z" /><path fill="#c9a96b" d="M1 5h2v2H1z" /><path fill="#6a4e39" d="M0 5h1v1H0z" /></svg><b></b></button>
-          <button type="button" data-tool="gold" aria-pressed="false" aria-label="Golden Dual AKs" title="Golden Dual AKs" disabled><kbd>6</kbd><svg class="block-slot-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd27a" d="M0 3h8v1H0zM0 6h8v1H0zM2 4h1v1H2zM2 7h1v1H2z" /><path fill="#b8650a" d="M7 3h1v1H7zM7 6h1v1H7z" /></svg><b></b></button>
-          <button type="button" data-tool="ak" aria-pressed="false" aria-label="Ooga AK" title="Ooga AK"><kbd>7</kbd><svg class="block-slot-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#6a4e39" d="M0 5h3v1H0z" /><path fill="#9aa3ad" d="M3 4h6v1H3zM4 5h2v2H4z" /></svg><b></b></button>
-          <button type="button" data-tool="hook" aria-pressed="false" aria-label="Grappling hook" title="Grappling hook" disabled><kbd>8</kbd><svg class="block-slot-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd27a" d="M4 0h1v6H4zM2 5h1v2H2zM6 5h1v2H6zM3 7h3v1H3z" /><path fill="#8a7040" d="M3 0h1v2H3z" /></svg><b></b></button>
+          <button type="button" data-tool="paint" aria-pressed="true" aria-label="Paint marker" title="Paint marker (1)"><kbd>1</kbd><svg class="block-slot-icon" viewBox="0 0 16 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#7b808c" d="M4 5h6v2h-6zM13 4h2v3h-2z" /><path fill="#4a4c58" d="M7 4h2v1h-2zM10 5h3v1h-3zM5 7h2v3h-2zM9 7h1v2h-1z" /><path class="block-icon-td" d="M6 0h3v1h-3zM1 8h4v2h-4z" /><path class="block-icon-tp" d="M5 1h6v3h-6zM5 5h4v1h-4zM15 4h1v3h-1z" /><path class="block-icon-tl" d="M6 2h3v1h-3zM0 8h1v2h-1z" /><path fill="#c9ced8" d="M7 7h1v1h-1zM10 6h3v1h-3z" /></svg><b></b></button>
+          <button type="button" data-tool="grenade" aria-pressed="false" aria-label="Grenade launcher" title="Grenade launcher (2)"><kbd>2</kbd><svg class="block-slot-icon" viewBox="0 0 16 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#7b808c" d="M0 4h4v1h-4zM0 7h4v1h-4z" /><path fill="#4a4c58" d="M0 3h1v6h-1zM5 9h2v3h-2zM10 8h2v3h-2z" /><path class="block-icon-td" d="M4 3h4v6h-4z" /><path class="block-icon-tp" d="M4 5h4v2h-4zM14 3h1v6h-1z" /><path fill="#6a6d4a" d="M8 4h6v4h-6z" /><path fill="#4a4c58" d="M4 3h1v6h-1zM7 3h1v6h-1zM8 4h1v4h-1zM15 4h1v4h-1z" /><path fill="#fff3d6" d="M10 1h1v3h-1zM9 1h3v1h-3z" /></svg><b></b></button>
+          <button type="button" data-tool="rocket" aria-pressed="false" aria-label="Rocket launcher" title="Rocket launcher (3)"><kbd>3</kbd><svg class="block-slot-icon" viewBox="0 0 16 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#4a4c58" d="M0 2h1v7h-1z" /><path fill="#7b808c" d="M1 3h1v5h-1zM4 7h7v1h-7z" /><path class="block-icon-td" d="M2 4h10v3h-10z" /><path fill="#fff3d6" d="M3 4h1v3h-1zM5 4h1v3h-1zM15 5h1v1h-1z" /><path class="block-icon-tp" d="M10 4h1v3h-1zM12 3h1v5h-1z" /><path fill="#f7931a" d="M13 4h2v3h-2z" /><path fill="#4a4c58" d="M6 2h3v2h-3zM5 8h1v3h-1zM9 8h1v3h-1zM2 7h2v1h-2z" /><path fill="#bfe8ff" d="M9 2h1v1h-1z" /></svg><b></b></button>
+          <button type="button" data-tool="net" aria-pressed="false" aria-label="Net launcher" title="Net launcher (4)"><kbd>4</kbd><svg class="block-slot-icon" viewBox="0 0 16 12" shape-rendering="crispEdges" aria-hidden="true"><path class="block-icon-td" d="M0 7h3v2h-3z" /><path class="block-icon-tl" d="M0 7h1v2h-1z" /><path fill="#7b808c" d="M3 4h3v4h-3z" /><path fill="#4b6a40" d="M6 2h4v8h-4z" /><path fill="#38502f" d="M10 1h1v10h-1zM6 5h4v1h-4z" /><path class="block-icon-tp" d="M11 0h1v12h-1z" /><path fill="#7fe08a" d="M12 1h4v1h-4zM12 4h4v1h-4zM12 7h4v1h-4zM12 10h4v1h-4zM13 1h1v10h-1zM15 1h1v10h-1z" /><path fill="#4a4c58" d="M7 0h3v1h-3zM7 1h1v1h-1zM9 1h1v1h-1zM4 8h1v3h-1z" /></svg><b></b></button>
+          <button type="button" data-tool="sniper" aria-pressed="false" aria-label="Sniper rifle" title="Sniper rifle (5)"><kbd>5</kbd><svg class="block-slot-icon" viewBox="0 0 16 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#8a5a34" d="M0 5h4v2h-4zM8 6h4v1h-4z" /><path fill="#4a4c58" d="M0 5h1v3h-1zM8 5h7v1h-7zM4 2h1v3h-1zM9 2h2v3h-2zM5 7h1v3h-1zM7 7h1v1h-1z" /><path class="block-icon-td" d="M1 4h3v1h-3z" /><path fill="#7b808c" d="M4 5h4v2h-4zM15 4h1v3h-1zM6 4h1v1h-1zM8 4h1v1h-1z" /><path class="block-icon-tp" d="M5 3h4v1h-4z" /><path fill="#bfe8ff" d="M11 2h1v3h-1z" /><path fill="#c9ced8" d="M7 2h1v1h-1zM11 7h1v2h-1zM10 9h1v2h-1zM12 9h1v2h-1z" /></svg><b></b></button>
+          <button type="button" data-tool="gold" aria-pressed="false" aria-label="Golden Dual AKs" title="Golden Dual AKs (6)" disabled><kbd>6</kbd><svg class="block-slot-icon" viewBox="0 0 16 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#4a2e18" d="M0 2h4v1h-4zM0 3h3v1h-3zM8 1h3v2h-3zM5 3h1v3h-1z" /><path fill="#8a6410" d="M0 2h1v2h-1z" /><path fill="#8a6410" d="M4 1h4v2h-4z" /><path fill="#8a6410" d="M4 1h4v1h-4z" /><path fill="#4a2e18" d="M9 2h1v1h-1zM6 2h1v1h-1z" /><path fill="#8a6410" d="M11 1h1v2h-1z" /><path fill="#8a6410" d="M12 2h4v1h-4zM12 1h2v1h-2zM15 1h1v1h-1z" /><path fill="#8a5226" d="M0 6h4v1h-4zM0 7h3v1h-3zM8 5h3v2h-3zM5 7h1v3h-1z" /><path fill="#a87c14" d="M0 6h1v2h-1z" /><path fill="#edbd32" d="M4 5h4v2h-4z" /><path fill="#f8d458" d="M4 5h4v1h-4z" /><path fill="#3a2414" d="M9 6h1v1h-1zM6 6h1v1h-1z" /><path fill="#ffe27a" d="M11 5h1v2h-1z" /><path fill="#f0c95a" d="M12 6h4v1h-4zM12 5h2v1h-2zM15 5h1v1h-1z" /><path fill="#edbd32" d="M7 7h2v1h-2zM8 8h2v1h-2zM9 9h2v1h-2z" /><path fill="#a87c14" d="M8 7h1v1h-1zM9 8h1v1h-1zM10 9h1v1h-1z" /><path fill="#ffe27a" d="M5 6h1v1h-1zM7 6h1v1h-1zM13 5h1v1h-1z" /><path fill="#ffffff" d="M2 3h1v1h-1zM13 9h1v1h-1z" /></svg><b></b></button>
+          <button type="button" data-tool="ak" aria-pressed="false" aria-label="Ooga AK" title="Ooga AK (7)"><kbd>7</kbd><svg class="block-slot-icon" viewBox="0 0 16 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#8a5a34" d="M0 4h4v1h-4zM0 5h3v1h-3zM8 3h3v2h-3zM5 5h1v3h-1z" /><path fill="#4a4c58" d="M0 4h1v2h-1z" /><path fill="#7b808c" d="M4 3h4v2h-4z" /><path fill="#a3a8b4" d="M4 3h4v1h-4z" /><path fill="#5a3a20" d="M9 4h1v1h-1zM6 4h1v1h-1z" /><path class="block-icon-tp" d="M11 3h1v2h-1z" /><path fill="#4a4c58" d="M12 4h4v1h-4zM12 3h2v1h-2zM15 3h1v1h-1z" /><path fill="#c8602c" d="M7 5h2v1h-2zM8 6h2v1h-2zM9 7h2v1h-2z" /><path fill="#8a3d1c" d="M8 5h1v1h-1zM9 6h1v1h-1zM10 7h1v1h-1z" /></svg><b></b></button>
+          <button type="button" data-tool="hook" aria-pressed="false" aria-label="Grappling hook" title="Grappling hook (8)" disabled><kbd>8</kbd><svg class="block-slot-icon" viewBox="0 0 16 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#7b808c" d="M2 5h5v2h-5z" /><path fill="#4a4c58" d="M2 4h4v1h-4zM3 7h1v3h-1zM7 5h3v2h-3zM5 7h1v3h-1zM8 7h1v3h-1z" /><path fill="#c9ced8" d="M1 5h1v2h-1z" /><path fill="#b8935a" d="M6 7h2v3h-2z" /><path fill="#8a6c3e" d="M6 8h2v1h-2z" /><path class="block-icon-tp" d="M10 5h1v2h-1zM3 3h1v1h-1z" /><path fill="#8a92a0" d="M11 5h3v2h-3zM12 2h1v3h-1zM13 2h2v1h-2zM12 7h1v3h-1zM13 9h2v1h-2z" /><path fill="#e3e8f0" d="M14 5h2v1h-2zM15 2h1v2h-1zM15 8h1v2h-1z" /></svg><b></b></button>
         </div>
         <div class="block-actions">
           <button type="button" data-tool="crate" class="block-tool-crate"><kbd>B</kbd>Crate <b>3</b></button>
@@ -1190,13 +1213,13 @@
       </section>
       <section class="race-results game-intro" id="block-intro" data-intro="block" hidden aria-label="Block Frenzy">
         <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
-        <p class="game-intro-kicker">Capture the block on Fort Chaos</p>
+        <p class="game-intro-kicker">Capture the block</p>
         <h2 class="game-intro-title"><span data-sign>Block Frenzy</span></h2>
         <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#b8650a" d="M2 2h12v12H2z" /><path fill="#f7931a" d="M3 3h10v10H3z" /><path fill="#fff3d6" d="M6 4h1v1H6zM8 4h1v1H8zM5 5h5v1H5zM6 6h1v1H6zM10 6h1v1H10zM6 7h4v1H6zM6 8h1v1H6zM10 8h1v1H10zM5 9h5v1H5zM6 10h1v1H6zM8 10h1v1H8z" /></svg>
-        <p class="game-intro-goal">Carry the rivals' <b>Bitcoin block</b> home three times. Nobody gets hurt: paint wears off.</p>
+        <p class="game-intro-goal">Carry or throw the rivals' <b>Bitcoin block</b> home three times. Nobody gets hurt: paint wears off.</p>
         <p class="help block-tip" id="block-intro-tip"></p>
         <ul class="game-rules">
-          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#b8650a" d="M1 1h7v7H1z" /><path fill="#f7931a" d="M2 2h5v5H2z" /><path fill="#fff3d6" d="M4 3h1v3H4z" /></svg><b>Grab their block</b><small>Touch the block in their colour in their fort. Tab throws it to a friend.</small></li>
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#b8650a" d="M1 1h7v7H1z" /><path fill="#f7931a" d="M2 2h5v5H2z" /><path fill="#fff3d6" d="M4 3h1v3H4z" /></svg><b>Grab their block</b><small>Touch the block in their colour in their fort. Tab throws it to a friend, or into your zone to score.</small></li>
           <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3dff7a" d="M0 0h9v1H0zM0 8h9v1H0zM0 1h1v7H0zM8 1h1v7H8z" /><path fill="#b8ffcf" d="M3 2h3v1H3zM6 3h1v1H6zM5 4h1v1H5zM4 5h1v1H4zM4 7h1v1H4z" /></svg><b>Quiz traps</b><small>Green pads trap you. Answer a Bitcoin question to break out.</small></li>
           <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3a8dff" d="M4 0h1v1H4zM3 1h3v1H3zM2 2h5v1H2zM1 3h7v1H1z" /><path fill="#8a8178" d="M2 4h5v5H2z" /><path fill="#f7931a" d="M4 6h1v3H4z" /></svg><b>Yours must be home</b><small>You only score while your own block sits on its stand.</small></li>
           <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff4a3a" d="M3 1h3v1H3zM2 2h5v4H2zM3 6h3v1H3zM1 4h1v1H1zM7 3h1v1H7zM4 7h1v2H4z" /></svg><b>Paint stops a runner</b><small data-coarse="Paint! throws. A splatted carrier drops the block.">Click or Enter throws. A splatted carrier drops the block.</small></li>
@@ -1208,14 +1231,37 @@
           <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
-      <section class="race-results" id="block-results" hidden aria-label="Block Frenzy results">
-        <h2><span data-sign id="block-result-title">Blocks mined!</span></h2>
-        <p class="help" id="block-summary"></p>
-        <ul class="race-podium drop-rows" id="block-stats"></ul>
-        <div class="actions">
-          <button type="button" data-action="block-again">Again</button>
-          <button type="button" data-action="block-board">Main menu</button>
-          <button type="button" data-action="leave">Back to the island</button>
+      <section class="race-results block-trophy" id="block-results" hidden aria-label="Block Frenzy results" data-team="blue">
+        <header class="block-trophy-head">
+          <p class="game-intro-kicker">Ooga Arcade</p>
+          <h2 class="game-intro-title"><span data-sign>Block Frenzy</span></h2>
+        </header>
+        <div class="block-trophy-stage" id="block-trophy-stage">
+          <i class="block-trophy-sparkles" aria-hidden="true"></i>
+          <p class="block-trophy-banner" id="block-result-title" role="status">Blue wins!</p>
+        </div>
+        <div class="block-trophy-board">
+          <div class="block-trophy-tally">
+            <p class="block-trophy-score" aria-label="Final score"><b class="block-final" data-team="blue" id="block-final-blue">0</b><i aria-hidden="true">–</i><b class="block-final" data-team="red" id="block-final-red">0</b></p>
+            <p class="block-trophy-time" id="block-trophy-time" aria-label="Round time">0:00</p>
+          </div>
+          <p class="help" id="block-summary"></p>
+          <div class="block-trophy-sides">
+            <section class="block-side-panel" data-team="blue" aria-label="Blue side">
+              <h3><span>Blue</span><small>Mined</small><small title="Blocks brought home">Home</small><small>Splats</small></h3>
+              <ol id="block-side-blue"></ol>
+            </section>
+            <section class="block-side-panel" data-team="red" aria-label="Red side">
+              <h3><span>Red</span><small>Mined</small><small title="Blocks brought home">Home</small><small>Splats</small></h3>
+              <ol id="block-side-red"></ol>
+            </section>
+          </div>
+          <ul class="block-badges" id="block-stats" aria-label="Highlights"></ul>
+          <div class="actions">
+            <button type="button" data-action="block-again" data-role="go">Again</button>
+            <button type="button" data-action="block-board" data-role="choose">Main menu</button>
+            <button type="button" data-action="leave" data-role="leave">Back to the island</button>
+          </div>
         </div>
       </section>
     </div>
@@ -2423,7 +2469,7 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/drop-hud.js"></script>
   <script src="js/drop-audio.js" data-defer="drop"></script>
   <script src="js/scene-drop.js" data-defer="drop-scene"></script>
-  <!-- DSB Land's menu shell and the wallet store's picker art load with the page: Block Frenzy's wallet machines use them too. -->
+  <!-- DSB Land's menu shell and the wallet store's picker art load with the page. -->
   <script src="js/dsb-menu-shell.js"></script>
   <script src="js/wallets-menu.js"></script>
   <script src="js/block-sim.js"></script>
