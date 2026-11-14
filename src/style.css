@@ -5188,20 +5188,54 @@ body.dsb-menu-open .rescue-equipment { visibility: hidden; pointer-events: none;
 }
 
 /* While her tour holds the view the look stick does nothing and steps aside; the move stick stays, since moving ends
-   the tour and walks the Ooga, and on a touch screen her panel rises clear of the sticks. */
+   the tour and walks the Ooga. */
 body.tess-touring #joy-look {
   visibility: hidden;
 }
 
+/* Each stop's view puts its landmark in the middle of the screen, and on a touch screen the sticks and an open drawer
+   would lift the panel onto it. So her panel takes the equipment's slot under the top bar instead, matching its top in
+   every layout below, and the equipment, which does nothing on tour, steps aside for it. */
 @media (pointer: coarse) {
-  body.tess-touring .greeter-menu.greeter-tour {
-    bottom: calc(max(48px, var(--stick-inset) - var(--home-chrome)) + var(--stick-size) + 12px + var(--safe-bottom));
+  body.tess-touring .equipment-hud {
+    visibility: hidden;
+    /* Equipped readouts set their own visibility; fade the whole group out too. */
+    opacity: 0;
   }
 
-  /* With the bottom drawer open the sticks ride up on it (`--drawer-lift`), and the panel rises over them. The panel
-     stands on the stage, so a resized drawer's --drawer-height, which sheet.js writes there, reaches it too. */
-  body.tess-touring:has(.sheet[data-dock="bottom"][data-sticks="true"][data-open="true"]:not([hidden])) .greeter-menu.greeter-tour {
-    bottom: calc(var(--drawer-height) + var(--drawer-clear) + var(--stick-size) + 12px);
+  body.tess-touring .greeter-menu.greeter-tour {
+    top: calc(62px + var(--safe-top));
+    bottom: auto;
+  }
+}
+
+@media (pointer: coarse) and (max-width: 720px) {
+  body.tess-touring .greeter-menu.greeter-tour {
+    top: calc(98px + var(--safe-top));
+  }
+
+  body.tess-touring .topbar:not(:has(.presets:not([hidden])))~.greeter-menu.greeter-tour {
+    top: calc(55px + var(--safe-top));
+  }
+}
+
+/* A short landscape screen has no room over the middle for both the panel and her bubble. She always flies to the
+   view's right, so the panel docks at the left, beside the move stick (#joy-move), which an open drawer lifts to it. */
+@media (pointer: coarse) and (max-height: 500px) and (orientation: landscape) {
+  body.tess-touring .greeter-menu.greeter-tour {
+    top: calc(62px + var(--safe-top));
+    left: calc(32px + var(--stick-size) + var(--safe-left));
+    transform: none;
+  }
+}
+
+@media (pointer: coarse) and (max-width: 720px) and (max-height: 500px) and (orientation: landscape) {
+  body.tess-touring .greeter-menu.greeter-tour {
+    top: calc(64px + var(--safe-top));
+  }
+
+  body.tess-touring .topbar:has(.presets[data-scene="hub"]:not([hidden]))~.greeter-menu.greeter-tour {
+    top: calc(96px + var(--safe-top));
   }
 }
 
@@ -11102,6 +11136,8 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
   background: #5a3a22;
 }
 
+.block-target[data-map] { flex-basis: max-content; white-space: nowrap; }
+
 .block-side[data-team="blue"] {
   background: #1d4fa8;
 }
@@ -11210,16 +11246,12 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
   }
 }
 
-/* Block Frenzy's Ooga picker on the board, and the touch paint button above the jump. */
+/* Block Frenzy's Ooga by name on the board (a narrow screen, where it isn't on show), and the touch paint button above the jump. */
 .block-ooga {
-  width: 100%;
-  min-height: 40px;
-  padding: 6px 8px;
-  border: 2px solid var(--wood-edge);
-  border-radius: 6px;
-  background: #2a1d12;
+  margin: 0;
+  font-size: 16px;
+  font-weight: bold;
   color: #f3e6cc;
-  font: inherit;
 }
 
 .block-paint {
@@ -11299,15 +11331,26 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
   gap: 4px;
   flex-wrap: wrap;
   justify-content: flex-end;
+  /* Room over the row for the chosen slot to grow into. */
+  margin-top: 12px;
 }
 
 .block-slots button {
   position: relative;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   padding: 0;
   display: grid;
   place-items: center;
+  transform-origin: 50% 100%;
+  transition: transform 0.12s ease-out;
+}
+
+/* The weapon in hand stands larger than the rest: grown and lifted in place, so no other slot moves. */
+.block-slots button[aria-pressed="true"] {
+  z-index: 1;
+  transform: translateY(-4px) scale(1.22);
+  background: rgba(64, 42, 22, 0.96);
 }
 
 .block-slots kbd {
@@ -11316,21 +11359,120 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
   left: 3px;
   font: inherit;
   font-size: 10px;
-  opacity: 0.75;
+  opacity: 0.8;
 }
 
+/* The count: a fixed corner plate, so a changing number moves nothing. */
 .block-slots b {
   position: absolute;
-  right: 3px;
-  bottom: 1px;
-  font-size: 10px;
-  font-weight: normal;
+  right: 2px;
+  bottom: 2px;
+  min-width: 14px;
+  padding: 0 2px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+  font-weight: bold;
+  line-height: 14px;
+  text-align: center;
   color: #ffd27a;
 }
 
+.block-slots b:empty {
+  display: none;
+}
+
 .block-slot-icon {
-  width: 24px;
-  height: 24px;
+  width: 40px;
+  height: 30px;
+}
+
+.block-icon-tp {
+  fill: var(--block-team, #3a8dff);
+}
+
+.block-icon-td {
+  fill: var(--block-team-deep, #1d4fa8);
+}
+
+.block-icon-tl {
+  fill: var(--block-team-light, #9cc8ff);
+}
+
+/* Yours and out: the slot stays lit with a red 0. Not yours yet: dim and grey, a dashed edge, no count. */
+.block-slots button[data-state="empty"]:disabled {
+  opacity: 1;
+}
+
+.block-slots button[data-state="empty"] b {
+  color: #ff6a5a;
+}
+
+.block-slots button[data-state="empty"] .block-slot-icon {
+  opacity: 0.5;
+}
+
+.block-slots button[data-state="locked"] {
+  border-style: dashed;
+}
+
+.block-slots button[data-state="locked"] .block-slot-icon {
+  filter: grayscale(1);
+}
+
+.block-slots button[data-state="locked"] b {
+  display: none;
+}
+
+/* The chosen weapon's name, standing over its slot (`data-at`, placed by the scene) for as long as it is chosen. */
+.block-tool-name {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--wood-edge);
+  border-radius: 6px;
+  background: rgba(30, 20, 12, 0.9);
+  color: #ffd27a;
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.block-tool-name[data-show="true"] {
+  opacity: 1;
+}
+
+.block-tool-name[data-at="slot"] {
+  right: auto;
+  transform: translateX(-50%);
+  transition: opacity 0.25s, left 0.15s ease-out;
+}
+
+@media (max-width: 480px) {
+  .block-slots button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .block-slot-icon {
+    width: 36px;
+    height: 27px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .block-slots button,
+  .block-tool-name {
+    transition: none;
+  }
+
+  .block-tool-name[data-at="slot"] {
+    transition: none;
+  }
 }
 
 .block-actions {
@@ -11391,6 +11533,13 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
   .block-slots {
     justify-content: center;
   }
+
+}
+
+/* Keep Throw above both sticks and Jump; the weapons bar starts above Throw. */
+@media (pointer: coarse) and (max-width: 720px) {
+  .block-paint { bottom: calc(max(48px, var(--stick-inset) - var(--home-chrome)) + var(--stick-size) + 8px + var(--safe-bottom)); }
+  .block-tools { bottom: calc(max(48px, var(--stick-inset) - var(--home-chrome)) + var(--stick-size) + 60px + var(--safe-bottom)); }
 }
 
 /* Block Frenzy's sprint gauge in the strip. */
@@ -11515,22 +11664,6 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
   color: #f3e6cc;
 }
 
-.block-preview-pick {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 3px;
-  margin-top: 4px;
-  min-width: 220px;
-}
-
-.block-preview-pick label {
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  opacity: 0.8;
-}
-
 .block-preview-name b {
   font-size: 16px;
 }
@@ -11540,8 +11673,79 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
   opacity: 0.75;
 }
 
-#block-board[hidden] ~ .block-preview-name {
+#block-board[hidden] ~ .block-preview-name,
+#block-board[hidden] ~ .block-weapon-card {
   display: none;
+}
+
+/* The board's weapons preview: its card up by the weapon turning over the Ooga on show. The Ooga stands a share of
+   the view's height right of its middle, so on a view less wide for its height the card keeps further right, clear of
+   the weapon (the scene also holds the weapon left of the card's edge). */
+.block-weapon-card {
+  position: absolute;
+  z-index: 11;
+  right: max(12px, min(9vw, calc(50vw - 46vh - 250px)));
+  top: 14%;
+  width: 250px;
+  max-width: 28vw;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 14px 10px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 8px;
+  background: rgba(30, 20, 12, 0.82);
+  color: #f3e6cc;
+}
+
+.block-weapon-card small {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.block-weapon-card b {
+  font-size: 16px;
+  color: #ffd27a;
+}
+
+/* Two lines held for the blurb, so the card keeps its height from weapon to weapon. */
+.block-weapon-card p {
+  margin: 0;
+  min-height: 3.9em;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.block-weapon-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.block-weapon-nav span {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.block-weapon-nav button {
+  min-width: 44px;
+  min-height: 36px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: rgba(70, 44, 20, 0.88);
+  color: #f3e6cc;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.block-weapon-nav button:focus-visible {
+  outline: 2px solid #f7931a;
+  outline-offset: 2px;
 }
 
 /* Block Frenzy's jetpack fuel, beside the sprint gauge, in flame orange. */
@@ -12285,25 +12489,12 @@ body.arcade-game .cloud-hopper-panel { z-index: 40; }
   color: #ffd27a !important;
 }
 
-/* Block Frenzy's controls list: grouped key and action rows on a dark backing. */
-/* With All controls open, the panel grows sideways and the list runs in columns, so it stays on screen. */
+/* Block Frenzy's controls list: whole groups in a grid that is three across when wide, two when middling and one when
+   narrow (by the list's own width), each group's rows aligned in two columns: key caps, then a short action. */
 @media (min-width: 900px) {
   #block-board:has(.block-controls[open]) {
     width: min(94vw, 1060px);
     max-width: min(94vw, 1060px);
-  }
-
-  #block-board .block-keys {
-    column-count: 3;
-    column-gap: 22px;
-  }
-
-  #block-board .block-keys h4 {
-    break-after: avoid;
-  }
-
-  #block-board .block-keys div {
-    break-inside: avoid;
   }
 }
 
@@ -12317,6 +12508,10 @@ body.arcade-game .cloud-hopper-panel { z-index: 40; }
 }
 
 .block-keys {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: 10px 18px;
+  align-items: start;
   padding: 8px 10px;
   border-radius: 6px;
   background: rgba(18, 11, 6, 0.82);
@@ -12324,26 +12519,63 @@ body.arcade-game .cloud-hopper-panel { z-index: 40; }
   font-size: 12px;
 }
 
-.block-keys h4 {
-  margin: 8px 0 3px;
+.block-key-group {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 3px;
+  align-items: center;
+}
+
+.block-key-group h4 {
+  grid-column: 1 / -1;
+  margin: 0 0 2px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid rgba(255, 210, 122, 0.25);
   color: #ffd27a;
   font-size: 12px;
 }
 
-.block-keys h4:first-child {
-  margin-top: 0;
+.block-key-group div {
+  display: contents;
 }
 
-.block-keys div {
-  display: grid;
-  grid-template-columns: 112px 1fr;
-  gap: 6px;
-  padding: 1px 0;
+.block-key-group div > span:last-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.block-keys kbd {
-  font: inherit;
+.block-key-caps {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 2px;
+}
+
+.block-key-caps i {
+  font-style: normal;
+  opacity: 0.7;
+}
+
+.block-keys kbd,
+.block-key-part kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0 4px;
+  border: 1px solid rgba(255, 210, 122, 0.45);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
   color: #ffd27a;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.block-key-part {
+  white-space: nowrap;
 }
 
 .block-live { margin: 8px 0; }
@@ -12363,6 +12595,191 @@ body.arcade-game .cloud-hopper-panel { z-index: 40; }
 .block-board-mid { display: flex; flex-direction: column; align-items: center; gap: 2px; color: #f4f4f0; }
 .block-board-mid small { font-size: clamp(13px, 1.5vw, 16px); }
 .block-board-mid small:last-child { font-size: clamp(18px, 2.2vw, 24px); font-variant-numeric: tabular-nums; }
+
+/* Block Frenzy's multiplayer panel: the next step stands out, Leave doesn't; picks a match has set are muted. */
+.block-live-buttons button { padding: 8px 14px; border: 2px solid #c8791f; border-radius: 6px; background: #e8962e; color: #2b1b10; font: inherit; font-weight: 700; cursor: pointer; }
+.block-live-buttons button.is-leave, #block-live-wait, #block-live-watch { border-color: #6d5a44; background: transparent; color: #e9dfcf; font-weight: 400; }
+.block-side:disabled { opacity: 0.35; cursor: not-allowed; }
+/* Block Frenzy's trophy screen (`finish` in scene-block.js). The card is a frame round an open window: the scene's
+   camera frames the winners' 3D podium in `#block-trophy-stage`, so the wood boards sit above and below it and the cave
+   dims round the card. Cloud Hopper's results look: the gold pixel-block title, big glowing numbers, buttons coloured by
+   what they do. The winning side's colour comes from `data-team`. */
+#block-results.block-trophy {
+  --trophy: #3a8dff;
+  --trophy-light: #9cc8ff;
+  display: flex;
+  flex-direction: column;
+  width: min(760px, calc(100vw - 20px - var(--safe-left) - var(--safe-right)));
+  height: min(900px, calc(100dvh - 20px - var(--safe-top) - var(--safe-bottom)));
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: 0 0 0 100vmax rgba(8, 6, 4, 0.42);
+  text-align: center;
+}
+#block-results.block-trophy[data-team="red"] { --trophy: #ff4a3a; --trophy-light: #ffb0a6; }
+#block-results.block-trophy[hidden] { display: none; }
+.block-trophy-head, .block-trophy-board {
+  position: relative;
+  border: 3px solid var(--wood-edge);
+  background: var(--planks);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+.block-trophy-head { flex: none; padding: 10px 14px 8px; border-bottom: 0; border-radius: var(--radius) var(--radius) 0 0; }
+.block-trophy-head .game-intro-kicker { margin: 0 0 4px; }
+.block-trophy-head .game-intro-title {
+  margin: 0;
+  color: #f5c542;
+  font-size: 46px;
+  filter: drop-shadow(0 3px 0 #7a3f0c) drop-shadow(0 3px 0 #4a2306) drop-shadow(0 0 16px rgba(255, 200, 60, 0.7));
+  animation: block-trophy-drop 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.35) both;
+}
+/* The open window: only its sides are wood, so the podium shows through between the boards. */
+.block-trophy-stage {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 150px;
+  border-left: 3px solid var(--wood-edge);
+  border-right: 3px solid var(--wood-edge);
+  /* A warm vignette over the view: the light reads as sunset gold and the sky darkens at the edges against either side. */
+  background: radial-gradient(ellipse at 50% 52%, transparent 30%, rgba(120, 48, 6, 0.35) 72%, rgba(60, 20, 4, 0.7) 100%);
+  box-shadow: inset 0 0 0 2px rgba(255, 216, 74, 0.35), inset 0 0 40px rgba(255, 200, 60, 0.25);
+  pointer-events: none;
+  overflow: hidden;
+}
+/* Gold sparkles twinkling over the podium: one layer of small dots, nothing repaints but its opacity. */
+.block-trophy-sparkles {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 14% 24%, #fff6c8 0 2px, transparent 3px),
+    radial-gradient(circle at 82% 18%, #ffd84a 0 3px, transparent 4px),
+    radial-gradient(circle at 26% 70%, #ffd84a 0 2px, transparent 3px),
+    radial-gradient(circle at 72% 62%, #fff6c8 0 2px, transparent 3px),
+    radial-gradient(circle at 90% 44%, #ffe9a0 0 2px, transparent 3px),
+    radial-gradient(circle at 8% 52%, #ffe9a0 0 3px, transparent 4px);
+  animation: block-trophy-twinkle 1.6s ease-in-out infinite alternate;
+}
+.block-trophy-banner {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  margin: 0;
+  padding: 6px 22px 7px;
+  border: 3px solid rgba(0, 0, 0, 0.45);
+  border-radius: 4px;
+  background: linear-gradient(var(--trophy-light), var(--trophy) 55%);
+  color: #fff;
+  font-size: 26px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 0 22px var(--trophy);
+  transform: translateX(-50%) rotate(-2deg);
+  animation: block-trophy-pop 0.5s 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.5) both;
+}
+.block-trophy-board {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 14px 14px;
+  border-top: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
+  animation: block-trophy-rise 0.4s 0.1s ease-out both;
+}
+/* The score and the round's time share one row. */
+.block-trophy-tally { display: flex; align-items: center; justify-content: center; gap: 28px; flex-wrap: wrap; }
+.block-trophy-score { display: flex; align-items: baseline; justify-content: center; gap: 14px; margin: 0; line-height: 1; }
+.block-trophy-score i { color: var(--paper); font-size: 34px; font-style: normal; opacity: 0.7; }
+.block-final { font-size: 64px; font-variant-numeric: tabular-nums; text-shadow: 0 3px 0 rgba(0, 0, 0, 0.55), 0 0 18px currentColor; }
+.block-final[data-team="blue"] { color: #58b4ff; }
+.block-final[data-team="red"] { color: #ff7a5c; }
+.block-trophy-time { margin: 4px 0 2px; color: #f5c542; font-size: 34px; font-variant-numeric: tabular-nums; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5), 0 0 12px rgba(255, 200, 60, 0.45); }
+.block-trophy-board .help { margin: 0 0 8px; text-wrap: balance; }
+/* The two sides, styled as Cloud Hopper's shared top 10; the winners' panel lit in gold. */
+.block-trophy-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; text-align: left; }
+.block-side-panel { padding: 4px 8px 6px; border: 2px solid var(--stone-dk); border-radius: 9px 7px 10px 8px; background: var(--tablet); box-shadow: var(--tablet-shadow); }
+.block-side-panel.won { border-color: #f5c542; box-shadow: var(--tablet-shadow), 0 0 0 2px rgba(245, 197, 66, 0.35), 0 0 18px rgba(245, 197, 66, 0.35); }
+.block-side-panel h3, .block-side-panel li { display: grid; grid-template-columns: minmax(0, 1fr) 6ch 6ch 6ch; align-items: baseline; gap: 4px; }
+.block-side-panel h3 { margin: 2px 0 4px; font-size: 14px; }
+.block-side-panel[data-team="blue"] h3 span { color: #58b4ff; }
+.block-side-panel[data-team="red"] h3 span { color: #ff7a5c; }
+.block-side-panel.won h3 span::after { content: " ★"; color: #f5c542; }
+.block-side-panel h3 small { color: var(--muted); font-size: 10px; text-align: right; text-transform: uppercase; }
+.block-side-panel ol { margin: 0; padding: 0; list-style: none; }
+.block-side-panel li { padding: 3px 4px; border-top: 1px solid rgba(255, 255, 255, 0.08); font-size: 13px; }
+/* A long player name stays readable, including on touch where there is no title hover. */
+.block-side-panel li span { overflow-wrap: anywhere; }
+.block-side-panel li b { text-align: right; font-variant-numeric: tabular-nums; }
+.block-side-panel li.you { background: rgba(245, 197, 66, 0.16); border-radius: 4px; }
+.block-side-panel li.mvp span::before { content: "♛ "; color: #f5c542; }
+/* The highlights as medals. */
+.block-badges { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px; margin: 10px 0 0; padding: 0; list-style: none; text-align: left; }
+.block-badge { display: grid; grid-template-columns: 22px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 8px; align-items: center; padding: 4px 8px; border: 2px solid rgba(0, 0, 0, 0.35); border-radius: 8px; background: rgba(0, 0, 0, 0.22); }
+.block-badge::before { content: ""; grid-row: 1 / 3; width: 18px; height: 18px; border: 2px solid rgba(0, 0, 0, 0.45); border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff6c8, #f5c542 45%, #a8720f); box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35); }
+.block-badge[data-medal="silver"]::before { background: radial-gradient(circle at 35% 30%, #ffffff, #c9ced6 45%, #7c8290); }
+.block-badge[data-medal="bronze"]::before { background: radial-gradient(circle at 35% 30%, #ffe1c2, #d0874a 45%, #7d4618); }
+.block-badge[data-medal="wood"]::before { border-radius: 4px; background: linear-gradient(#b98a52, #6f4a25); }
+.block-badge span { color: var(--accent-text); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+.block-badge b { font-size: 13px; overflow-wrap: anywhere; }
+/* The buttons stay in view: if the board must scroll on a very short screen, they hold to its foot. */
+.block-trophy-board .actions { position: sticky; bottom: 0; z-index: 1; margin-top: 8px; padding-top: 4px; grid-template-columns: repeat(3, minmax(0, 1fr)); background: var(--wood); box-shadow: 0 0 0 6px var(--wood); border-radius: 4px; }
+.block-trophy-board .actions button[data-role="go"] { background: linear-gradient(#ffe27a, #f0b62a); color: var(--ink); }
+.block-trophy-board .actions button[data-role="go"]:hover, .block-trophy-board .actions button[data-role="go"].virtual-hover { background: linear-gradient(#fff0a8, #ffe27a); }
+.block-trophy-board .actions button[data-role="choose"] { background: linear-gradient(#a6d97f, #5f9e3f); color: #13260b; }
+.block-trophy-board .actions button[data-role="choose"]:hover, .block-trophy-board .actions button[data-role="choose"].virtual-hover { background: linear-gradient(#c2e8a3, #a6d97f); }
+.block-trophy-board .actions button[data-role="leave"] { background: linear-gradient(#77706a, #4a4541); color: var(--paper); }
+.block-trophy-board .actions button[data-role="leave"]:hover, .block-trophy-board .actions button[data-role="leave"].virtual-hover { background: linear-gradient(#8a837c, #77706a); }
+@keyframes block-trophy-drop { from { transform: translateY(-60px) scale(1.25); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes block-trophy-pop { from { transform: translateX(-50%) rotate(-2deg) scale(0.2); opacity: 0; } to { transform: translateX(-50%) rotate(-2deg); opacity: 1; } }
+@keyframes block-trophy-rise { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes block-trophy-twinkle { from { opacity: 0.25; } to { opacity: 1; } }
+/* Wide screens: the two sides run the card's width under the score, so names have room, and the medals run three
+   across under them, so the window keeps its height and nothing scrolls. */
+@media (min-width: 980px) and (min-height: 600px) {
+  #block-results.block-trophy { width: min(1000px, calc(100vw - 40px)); }
+  .block-trophy-board { padding-bottom: 10px; }
+  .block-final { font-size: 52px; }
+  .block-trophy-time { font-size: 30px; margin: 0; }
+  .block-trophy-board .help { margin-bottom: 6px; }
+  .block-badges { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 8px 0 0; }
+}
+/* Phones and short screens: smaller numbers and rows, so the card fits without scrolling where it can. */
+@media (max-width: 560px), (max-height: 700px) {
+  #block-results.block-trophy { height: calc(100dvh - 12px - var(--safe-top) - var(--safe-bottom)); }
+  .block-trophy-head { padding: 6px 10px 4px; }
+  .block-trophy-head .game-intro-title { font-size: 32px; }
+  .block-trophy-stage { min-height: 120px; }
+  .block-trophy-tally { gap: 16px; }
+  .block-trophy-banner { font-size: 18px; padding: 4px 14px 5px; }
+  .block-trophy-board { padding: 6px 8px 10px; }
+  .block-final { font-size: 44px; }
+  .block-trophy-score i { font-size: 24px; }
+  .block-trophy-time { font-size: 24px; margin: 2px 0; }
+  .block-trophy-board .help { font-size: 11px; margin-bottom: 6px; }
+  .block-trophy-sides { gap: 6px; }
+  .block-side-panel { padding: 3px 5px 4px; }
+  .block-side-panel h3, .block-side-panel li { grid-template-columns: minmax(0, 1fr) 3.5ch 3.5ch 3.5ch; gap: 2px; }
+  .block-side-panel h3 small { font-size: 8px; }
+  .block-side-panel li { font-size: 10.5px; padding: 2px; }
+  .block-badges { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin-top: 6px; }
+  .block-badge { grid-template-columns: 14px minmax(0, 1fr); column-gap: 5px; padding: 3px 5px; }
+  .block-badge::before { width: 12px; height: 12px; }
+  .block-badge span { font-size: 8px; }
+  .block-badge b { font-size: 11px; }
+  .block-trophy-board .actions { margin-top: 8px; gap: 6px; }
+  .block-trophy-board .actions button { min-height: 38px; padding: 4px; font-size: 12px; }
+}
+@media (max-width: 560px) {
+  .block-trophy-sides { grid-template-columns: 1fr; }
+  .block-trophy-board .actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .block-trophy-board .actions button[data-role="leave"] { grid-column: 1 / -1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .block-trophy-head .game-intro-title, .block-trophy-banner, .block-trophy-board, .block-trophy-sparkles { animation: none; }
+}
 
 /* Directory text and links only: no external world is loaded to browse its entry. */
 .cave-directory { width: min(560px, calc(100vw - 24px)); max-height: calc(100dvh - 32px - var(--safe-top) - var(--safe-bottom)); overflow-y: auto; overscroll-behavior: contain; }

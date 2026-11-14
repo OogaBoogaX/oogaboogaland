@@ -3,8 +3,6 @@
   const BL = window.BL;
   const { box, lathe, ring, merge, cached } = BL.models;
   const { createNode, addChild } = BL.scene;
-  // A silk top hat: wide brim, tall crown with a slight flare, an island-orange
-  // band, a white X badge pinned above the band
   const topHatGeometry = cached(() => {
     const felt = "#1b1b1d";
     const brim = lathe({ profile: [[0, 0], [0.31, 0], [0.325, 0.02], [0.31, 0.04], [0, 0.04]], segments: 14, color: "#111113" });
@@ -19,24 +17,16 @@
   const PUMPKIN = "#e8862a", PUMPKIN_DK = "#cf6f1c", PUMPKIN_GLOW = "#ffc14d";
   BL.characters.add({
     handle: "rules-without-rulers",
-    // In-game name; activity still joins on the handle (the GitHub login)
     display: "genXbtc",
     joined: 1789801750,
     lastCommit: 1789954043,
-    // pumpkin also flickers the head's glow in crew.js
-    look: { portrait: { min: [-1, -2, 0], max: [7, 7, 8] }, pumpkin: true, bald: true, cleanShaven: true, noBrow: true, noPupils: true, face: "none", hatY: 15, skin: "#cfc8b4", hair: "#151515", fur: "#141414", height: 1.16 },
+    look: { portrait: { min: [-1, -2, 0], max: [7, 7, 8] }, pumpkin: true, bald: true, cleanShaven: true, noBrow: true, noPupils: true, face: "none", skin: "#cfc8b4", hair: "#151515", fur: "#141414", height: 1.16 },
     voice: {
       poke: "POWER OVERWHELMING",
       idle: ["Shut up you larp", "Rules Without Rulers"]
     },
     dress: {
-      // The modelled look: the stock build in his coat, with the X laid on its back as two straight bands that run
-      // corner to corner, from each shoulder to the far side of the waist where the loincloth's wrap begins. Each
-      // follows the back's own surface a short length at a time.
       model(k, wear) {
-        // Each band is a strap: raised off the coat, its two edges bound darker, a row of stitches down its middle
-        // and a steel rivet at each end. Where the two cross they are pinned under an orange lozenge, his hat band's
-        // colour, with a rivet at its heart.
         const H = BL.heroBody, body = wear(), S = H.trunk(false), geo = BL.models.geometry(), STEPS = 10, HALF = 0.36, OUT = [0, 0, -1];
         const top = S.top - 0.6, foot = S.belt + 0.45, corner = (y) => { const [hx, , cut] = S.ring(y); return hx - cut - 0.16; };
         const strap = "#f4f1e8", bound = "#c9c3b0", stitch = "#8f8875", steel = "#a8adb5", steelDk = "#6d727a";
@@ -60,8 +50,6 @@
         body.torso = merge(body.torso, H.scaled(geo, k.u));
         return body;
       },
-      // A dark tailcoat over bone: rib stripes and a sternum on the chest, a light
-      // cravat at the throat, an orange rose on the lapel, a white X across the back
       torso(k, v) {
         const P = k.P, orange = k.color("#e89423");
         v.fill(0, 8, 0, 7, 0, 5, k.leopard);
@@ -70,19 +58,16 @@
         v.fill(3, 5, 4, 7, 5, 5, k.jit(P.white, P.skin, 0.3));
         v.fill(6, 7, 5, 6, 5, 5, orange);
         v.set(7, 6, 5, P.spot);
-        // The white X across the coat's back. The modelled look lays it on as two straight bands (see model).
         if (BL.models.STYLE !== "R") for (let i = 0; i <= 6; i++) {
           v.set(1 + i, 7 - i, 0, P.white);
           v.set(7 - i, 7 - i, 0, P.white);
         }
-        // Under the tailcoat, the Ooga's leopard loincloth: its wrap here, its flaps from models.js.
         const hide = k.color("#c8923a"), spot = k.color("#4a2f16");
         k.loin = [hide, spot];
         for (let x = 0; x <= 8; x++) for (let z = 0; z <= 5; z++) for (const y of [0, 1]) {
           if (x === 0 || x === 8 || z === 0 || z === 5) v.set(x, y, z, (x * 3 + y * 5 + z * 7) % 6 === 0 ? spot : hide);
         }
       },
-      // A carved pumpkin, ribbed in two oranges, rounded top and bottom
       skull(k, v) {
         const pumpkin = k.color(PUMPKIN), pumpkinDk = k.color(PUMPKIN_DK);
         v.fill(-1, 7, 0, 7, -1, 5, (x) => (x + 9) % 3 ? pumpkin : pumpkinDk);
@@ -96,8 +81,6 @@
         }
         return true;
       },
-      // Carved triangle eyes lit from inside; lids still close over them.
-      // The nose and jagged grin glow too, but stay clear when he blinks.
       eyes(k, v) {
         const glow = k.color(PUMPKIN_GLOW);
         for (const [ex, ey] of [[1, 4], [2, 4], [2, 5], [4, 4], [5, 4], [4, 5]]) {

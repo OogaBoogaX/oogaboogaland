@@ -9,10 +9,6 @@
     ...[-0.28, 0.28].map((y) => box({ w: 0.2 * h, h: 0.03 * h, d: 0.045 * h, color: "#8a8a8a", offset: { y: y * h, z: -0.03 * h } })),
     ...[-0.28, 0.28].flatMap((y) => [-0.085, 0.085].map((x) => box({ w: 0.06 * h, h: 0.06 * h, d: 0.05 * h, color: "#1a1a1a", offset: { x: x * h, y: y * h, z: -0.07 * h } })))
   );
-  // The modelled look's skateboard, in the same frame as the one above: its length up his back, its top
-  // toward him and its wheels out, in units of his height. A popsicle deck of maple with both ends kicked up, black
-  // grip tape on top and the green graphic with its orange band underneath; a truck under each end (baseplate,
-  // hanger and axle); and four wheels, each a node of its own on its axle so that it turns as he rides.
   const DECK = { y: [-0.4, -0.386, -0.355, -0.3, -0.21, -0.05, 0.05, 0.21, 0.3, 0.355, 0.386, 0.4], wide: [0.03, 0.068, 0.098, 0.11, 0.11, 0.11, 0.11, 0.11, 0.11, 0.098, 0.068, 0.03],
     kick: [0.05, 0.044, 0.03, 0.01, 0, 0, 0, 0, 0.01, 0.03, 0.044, 0.05] };
   const TRUCK = 0.27, AXLE = -0.045, WHEEL = 0.022, TRACK = 0.095;
@@ -35,14 +31,11 @@
   BL.characters.add({
     handle: "bc1gui",
     display: "ottoz0r",
-    // GitHub login behind the handle, for activity and the jumbotron
     github: "ottoz0r",
     joined: 1788800918,
     lastCommit: 1788190400,
-    // skater also moves the drawn gun to the side in crew.js (the board takes the back)
-    look: { portrait: { min: [-3, -2, -1], max: [7, 13, 8] }, skater: true, hairless: true, noBrow: true, face: "smirk", hatY: 13, skin: "#f2a33c", hair: "#e4561f", fur: "#8f4f17" },
+    look: { portrait: { min: [-3, -2, -1], max: [7, 13, 8] }, skater: true, hairless: true, noBrow: true, face: "smirk", skin: "#f2a33c", hair: "#e4561f", fur: "#8f4f17" },
     dress: {
-      // A slouched green beanie over dreads, shades in front of the eyes
       crown(k, v) {
         const P = k.P, knit = k.color("#8cc63f"), knitDk = k.color("#6faa2f"), pom = k.color("#a9d94c"), btc = k.color("#f7931a"), lens = k.color("#3f9c96");
         const rib = (x, y, z) => (x + z) % 2 ? knitDk : knit;
@@ -52,7 +45,6 @@
         v.fill(-3, 0, 11, 12, 1, 3, k.jit(pom, knit, 0.2));
         v.fill(-2, -1, 13, 13, 2, 2, pom);
         for (const [bx, by] of [[3, 8], [4, 8], [3, 7], [5, 7], [3, 6], [4, 6], [3, 5], [5, 5], [3, 4], [4, 4]]) v.set(bx, by, 6, btc);
-        // His locks: block columns round the head, or under the modelled look flat locks hung on the head (see extras).
         if (BL.models.STYLE !== "R") {
           for (const z of [-1, 1, 3]) {
             v.fill(-1, -1, -2, 3, z, z, k.hairJ);
@@ -66,7 +58,6 @@
         v.fill(-1, -1, 3, 3, 4, 6, P.black);
         v.fill(7, 7, 3, 3, 4, 6, P.black);
       },
-      // The board on its back, a named part so a scene can take it off (the arcade's rides do)
       extras(k) {
         const h = k.h;
         if (BL.models.STYLE !== "R") {
@@ -74,18 +65,12 @@
           addChild(k.root, k.parts.board);
           return;
         }
-        // The modelled look: the board lies close on his back, and under his feet when he runs. `ride` tells crew.js
-        // how: where it rests, how far under its own middle its wheels reach (`under`) and how far over the ground its
-        // deck then stands (`deck`), and a wheel's radius; `parts.boardWheels` are the four it turns.
         const rest = { x: 0, y: 0.28 * h, z: -0.215 * h, turn: 0.4 }, wheel = wheelGeometry(h);
         k.parts.board = createNode({ position: { x: rest.x, y: rest.y, z: rest.z }, rotation: { x: 0, y: 0, z: rest.turn }, geometry: deckGeometry(h) });
         k.parts.board.ride = { rest, under: (WHEEL - AXLE) * h, deck: (WHEEL - AXLE + 0.0085) * h, wheel: WHEEL * h };
         k.parts.boardWheels = [-TRUCK, TRUCK].flatMap((y) => [-TRACK, TRACK].map((x) => createNode({ position: { x: x * h, y: y * h, z: AXLE * h }, geometry: wheel })));
         for (const node of k.parts.boardWheels) addChild(k.parts.board, node);
         addChild(k.root, k.parts.board);
-        // The modelled look's locks, in units of the head: separate locks as before, but thin and flat against the
-        // head. Four hang down the back of it and three down each side, out from under the hat; from the nape and
-        // the jaw they turn in a little toward the neck, and their ends are uneven.
         const H = BL.heroBody, geo = BL.models.geometry(), hair = "#e4561f", dark = "#c94a18";
         [-3, -1, 1, 3].forEach((x, i) => H.loft(geo, [[4.2, 0.5, 0.17, 0.05, x, -3.17], [0, 0.5, 0.17, 0.05, x, -3.17], [i % 2 ? -2.3 : -3, 0.44, 0.15, 0.05, x, -2.55]], i % 2 ? dark : hair));
         for (const side of [-1, 1]) [-2.4, -0.5, 1.4].forEach((z, i) => H.loft(geo, [[4.2, 0.17, 0.5, 0.05, side * 3.67, z], [0.4, 0.17, 0.5, 0.05, side * 3.67, z], [i === 1 ? -2 : -1.4, 0.15, 0.44, 0.05, side * 3.2, z]], i % 2 ? hair : dark));

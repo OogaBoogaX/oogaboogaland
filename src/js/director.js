@@ -252,7 +252,8 @@
       }
       const glyph = window.BL.hubModels.SIGN_GLYPHS[ch];
       if (!glyph) throw new Error(`No clock glyph for "${ch}"`);
-      for (let row = 0; row < glyph.length; row++) for (let col = 0; col < glyph[row].length; col++) if (glyph[row][col] === "1") d += `M${cursor + col} ${row}h.82v.82h-.82z`;
+      const sx = 3 / glyph[0].length, pixel = 0.82 * sx;
+      for (let row = 0; row < glyph.length; row++) for (let col = 0; col < glyph[row].length; col++) if (glyph[row][col] === "1") d += `M${cursor + col * sx} ${row}h${pixel}v.82h-${pixel}z`;
       cursor += 4;
     }
     const cells = cursor - 1;

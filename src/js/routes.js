@@ -28,7 +28,7 @@
       { path: "oogamine", scene: "mine", image: "oogamine", title: "Ooga Mine",
         description: "A mining tycoon about margin: power, heat and the halving. Mine 21 coin in an hour without going broke." },
       { path: "blockfrenzy", scene: "block", title: "Block Frenzy",
-        description: "Capture the block on Fort Chaos: steal the rivals' glowing Bitcoin block, carry it home and splat their runners with paint. Nobody gets hurt." },
+        description: "Capture the block: steal the rivals' glowing Bitcoin block, carry it home and splat their runners with paint. Nobody gets hurt." },
       { path: "mempool", scene: "hub", place: "mempool", image: "mempool", title: "Mempool chamber",
         description: "The live Bitcoin mempool as a rainforest lake: the backlog fills it, new blocks fall from it, and the chamber under it reads the chain out in paint." },
       { path: "bifrost", scene: "bifrost", title: "₿IFRÖST · Caves and lands",

@@ -80,6 +80,24 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
       throw error;
     }
   };
+  // Establish the required pending statuses before a writer queues or yields,
+  // including bundle/override PRs whose quick inspection otherwise returns early.
+  const holdForWriter = async (event) => {
+    let prs = [];
+    if (event.pull_request) prs = [await gh.api(`pulls/${event.pull_request.number}`)];
+    else if (event.workflow_run) {
+      const run = event.workflow_run;
+      if (run.event === "pull_request_review") prs = await openBundles();
+      else if (run.event === "push" && run.head_repository?.full_name === gh.repo && run.head_branch !== "rock"
+        && !run.head_branch.startsWith("automation/characters-")) prs = await gh.list(`commits/${run.head_sha}/pulls`);
+    } else if (!event.inputs?.override_pr) prs = await openBundles();
+    // Match the writer's routing: rock audits and standalone pushes never
+    // re-report unrelated bundle statuses, nor does targeted override recovery.
+    for (const pr of prs) {
+      if (pr.state !== "open" || pr.base.ref !== "rock") continue;
+      for (const context of [STATUS, BUNDLE_STATUS]) await status(pr.head.sha, context, "pending", "Waiting for character reconciliation; release work has priority");
+    }
+  };
   const rejectSubmission = async (pr, submission, error) => {
     await status(submission.head, STATUS, "failure", error instanceof CharacterRejection ? error.message : "Scan unavailable or conflicted; retry or ask a maintainer");
     // A timeout, rate limit or base conflict is not evidence of malicious code.
@@ -478,7 +496,7 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
       throw new Error("Direct rock character changes cannot be quarantined after a push. Require PRs and the character checks in branch rules.");
     }
   };
-  return { ensure, intake, mergeDaily, refreshReviews, sweep, auditRock, deployMerged, accountRename, refreshAccountRenames, reconcileOverride, needsWriter };
+  return { ensure, intake, mergeDaily, refreshReviews, sweep, auditRock, deployMerged, accountRename, refreshAccountRenames, reconcileOverride, needsWriter, holdForWriter };
 };
 
 export const runAccountRenameChecks = async (coordinator, event) => {
@@ -497,6 +515,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (process.argv.includes("--inspect")) {
     const write = process.env.CHARACTER_ACCOUNT_RENAMES_ONLY === "true" || !event.pull_request
       || await coordinator.needsWriter(event.pull_request.number);
+    if (write && process.env.CHARACTER_ACCOUNT_RENAMES_ONLY !== "true") await coordinator.holdForWriter(event);
     appendFileSync(process.env.GITHUB_OUTPUT, `write=${write}\n`);
   } else if (process.env.CHARACTER_ACCOUNT_RENAMES_ONLY === "true") {
     // Maintenance mode has no bundle creation, intake, merge, close, sweep or

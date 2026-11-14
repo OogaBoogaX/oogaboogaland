@@ -4,8 +4,6 @@
   const { geometry, pushVert, face, box, lathe, tube, merge, forward, cached, noShadow } = BL.models;
   const { createNode, addChild } = BL.scene;
   const { hexToRgb } = BL.math;
-  // A rounded rectangle's outline, counter-clockwise from the front: quarter-arc corners of three
-  // points each, which keeps any cap within the canvas fallback's sixteen-vertex face.
   const roundedOutline = (hw, hh, rr) => {
     const out = [];
     for (let c = 0; c < 4; c++) {
@@ -17,11 +15,9 @@
     }
     return out;
   };
-  // Side walls between two outlines of equal length, the first behind the second.
   const walls = (geo, a, b, rgb) => {
     for (let i = 0; i < a.length; i++) face(geo, [a[i], a[(i + 1) % a.length], b[(i + 1) % a.length], b[i]], rgb);
   };
-  // A slab facing +z with rounded corners and bevelled front and back edges.
   const slab = ({ w, h, d, r, bevel = 0, color, offset }) => {
     const geo = geometry(), rgb = hexToRgb(color);
     const ring = (inset, z) => roundedOutline(w / 2 - inset, h / 2 - inset, r - inset).map(([x, y]) => pushVert(geo, offset.x + x, offset.y + y, offset.z + z));
@@ -31,7 +27,6 @@
     face(geo, rings[0].slice().reverse(), rgb);
     return geo;
   };
-  // A convex outline, counter-clockwise from the front, extruded from z0 forward to z1.
   const prism = (points, z0, z1, color) => {
     const geo = geometry(), rgb = hexToRgb(color);
     const back = points.map(([x, y]) => pushVert(geo, x, y, z0)), front = points.map(([x, y]) => pushVert(geo, x, y, z1));
@@ -40,8 +35,6 @@
     face(geo, back.slice().reverse(), rgb);
     return geo;
   };
-  // A ring between an outer and an inner outline of equal length, from z0 forward to z1: its outer
-  // walls, the walls facing into the opening, and the rim across its front.
   const frame = (outer, inner, z0, z1, color) => {
     const geo = geometry(), rgb = hexToRgb(color);
     const at = (points, z) => points.map(([x, y]) => pushVert(geo, x, y, z));
@@ -52,41 +45,35 @@
     return geo;
   };
   const MEDKIT = { shell: "#f4f1ea", seam: "#2e2e30", cross: "#f7931a", grip: "#2e2e30", brass: "#f2b81c" };
-  const GOLD_MEDKIT = { shell: "#e0b53a", seam: "#6b5416", cross: "#f0c95a", grip: "#6b5416", brass: "#c99a2e" };
   const medkitCache = new Map();
-  // A clamshell case standing on the fist: a dark seam round its middle, a raised cross on both lids,
-  // latches on the ends, and the stethoscope's dark grip and brass on top.
-  const medkitGeometry = (h, pal) => {
-    const key = `${h}:${pal === MEDKIT ? "kit" : "gold"}`;
-    let geo = medkitCache.get(key);
+  const medkitGeometry = (h) => {
+    let geo = medkitCache.get(h);
     if (!geo) {
       const W = 0.42, H = 0.32, D = 0.17, R = 0.06, X = 0.03, Y = 0.235, TOP = Y + H / 2;
       const at = (x, y, z) => ({ x: x * h, y: y * h, z: z * h });
       const part = (w, hh, d, color, x, y, z) => box({ w: w * h, h: hh * h, d: d * h, color, offset: at(x, y, z) });
-      const cross = (side) => merge(part(0.2, 0.064, 0.014, pal.cross, X, Y, side * (D / 2 + 0.004)), part(0.064, 0.2, 0.014, pal.cross, X, Y, side * (D / 2 + 0.004)));
+      const cross = (side) => merge(part(0.2, 0.064, 0.014, MEDKIT.cross, X, Y, side * (D / 2 + 0.004)), part(0.064, 0.2, 0.014, MEDKIT.cross, X, Y, side * (D / 2 + 0.004)));
       const grip = tube({
         rings: 12,
         segments: 6,
         path: (t) => at(X - 0.1 * Math.cos(Math.PI * t), TOP + 0.012 + 0.07 * Math.sin(Math.PI * t), 0),
         radius: () => 0.019 * h,
-        colorFn: () => pal.grip
+        colorFn: () => MEDKIT.grip
       });
       geo = merge(
-        slab({ w: W * h, h: H * h, d: D * h, r: R * h, bevel: 0.018 * h, color: pal.shell, offset: at(X, Y, 0) }),
-        slab({ w: (W + 0.014) * h, h: (H + 0.014) * h, d: 0.028 * h, r: (R + 0.007) * h, color: pal.seam, offset: at(X, Y, 0) }),
+        slab({ w: W * h, h: H * h, d: D * h, r: R * h, bevel: 0.018 * h, color: MEDKIT.shell, offset: at(X, Y, 0) }),
+        slab({ w: (W + 0.014) * h, h: (H + 0.014) * h, d: 0.028 * h, r: (R + 0.007) * h, color: MEDKIT.seam, offset: at(X, Y, 0) }),
         cross(1), cross(-1), grip,
-        part(0.05, 0.03, 0.05, pal.brass, X - 0.1, TOP + 0.012, 0),
-        part(0.05, 0.03, 0.05, pal.brass, X + 0.1, TOP + 0.012, 0),
-        part(0.02, 0.07, 0.05, pal.brass, X - W / 2 - 0.009, Y, 0),
-        part(0.02, 0.07, 0.05, pal.brass, X + W / 2 + 0.009, Y, 0)
+        part(0.05, 0.03, 0.05, MEDKIT.brass, X - 0.1, TOP + 0.012, 0),
+        part(0.05, 0.03, 0.05, MEDKIT.brass, X + 0.1, TOP + 0.012, 0),
+        part(0.02, 0.07, 0.05, MEDKIT.brass, X - W / 2 - 0.009, Y, 0),
+        part(0.02, 0.07, 0.05, MEDKIT.brass, X + W / 2 + 0.009, Y, 0)
       );
-      medkitCache.set(key, geo);
+      medkitCache.set(h, geo);
     }
     return geo;
   };
   const stethoscopeCache = new Map();
-  // One tube: bell at one end, forked earpieces at the other, nothing converging (it would read as a chain).
-  // The bell sits clear of the arm that carries the kit; brass collars tie the hardware together.
   const stethoscopeGeometry = (h) => {
     let geo = stethoscopeCache.get(h);
     if (!geo) {
@@ -123,11 +110,6 @@
     }
     return geo;
   };
-  // A mouth piece after the concept, in head space at unit height (the muzzle's face is at z 0.25,
-  // between y 0 and 0.125): a thick rounded lip frame standing proud of the muzzle round a dark
-  // cavity with the tongue on its floor, and chunky teeth set just behind the lips, square incisors,
-  // short side teeth and pointed fangs above and two stubs below. Each tooth is [left, right,
-  // bottom, top] with a fang's tip last; the ends hidden behind the lips anchor it.
   const TEETH = [
     [-0.031, -0.001, 0.064, 0.1], [0.001, 0.031, 0.064, 0.1],
     [-0.058, -0.037, 0.078, 0.1], [0.037, 0.058, 0.078, 0.1],
@@ -149,8 +131,6 @@
       ...TEETH.map(tooth)
     ));
   });
-  // The mane's tufts: a root [x, y, z] on the cap or outside a side, the step each voxel takes as the
-  // tuft grows [dx, dy, dz], and its length. Tops rise and lean out; sides jut out and lift.
   const TUFTS = [
     [-1, 9, 6, -0.6, 1, 0.6, 3], [3, 9, 6, 0, 1, 0.7, 3], [7, 9, 6, 0.6, 1, 0.6, 3],
     [-1, 9, 2, -0.7, 1, 0, 4], [3, 9, 2, 0, 1, 0.2, 4], [7, 9, 2, 0.7, 1, 0, 4],
@@ -160,24 +140,19 @@
   ];
   BL.characters.add({
     handle: "DrNeski",
-    // GitHub login behind the handle, for activity and the jumbotron
     github: "drneski",
     joined: 1789692980,
     lastCommit: 1788219000,
-    // Laser eyes: lit orange, open or closed, with no pupils; clean shaven under the mane
     look: { portrait: { min: [-1, -3, -1], max: [7, 8, 8] }, eyeColor: "#f7931a", eyeGlow: 1, noPupils: true, cleanShaven: true, hair: "#f2ece0" },
     voice: {
       poke: "You've got 10 seconds!",
       idle: ["You are fired!", "Where is Kortik??", "Go rebalance your Node!", "Get laid on the 1st date", "What's your question for DrNeski?", "I sold my neighbor ex's cat for sats"]
     },
     dress: {
-      // The kit stands upright in the grip, rolled slightly.
-      club: (k) => ({ default: medkitGeometry(k.h, MEDKIT), gold: medkitGeometry(k.h, GOLD_MEDKIT), rest: { x: 0.2, z: 0.1 } }),
+      club: (k) => ({ default: medkitGeometry(k.h), rest: { x: 0.2, z: 0.1 } }),
       gear(k) {
         addChild(k.root, createNode({ geometry: stethoscopeGeometry(k.h) }));
       },
-      // A wild pale mane: a cap over the crown, full sides down past the jaw, and chunky tufts that
-      // lean out as they rise, each two voxels thick at the root and one at the tip
       crown(k, v) {
         const P = k.P, rand = k.rand, hair = () => rand() < 0.3 ? P.hairDk : P.hair;
         v.fill(-1, 7, 6, 8, -1, 6, k.hairJ);
@@ -193,10 +168,8 @@
             }
           }
         }
-        // The band sits proud of the hair it holds back
         v.fill(-1, 7, 4, 5, -1, 6, k.jit(k.color("#c8342a"), k.color("#8f231b"), 0.25));
       },
-      // A white-hot core in each laser eye
       mark(k, v) {
         const core = k.color("#fff0b0");
         v.set(1, 3, 5, core);

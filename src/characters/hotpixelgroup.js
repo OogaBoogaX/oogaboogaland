@@ -7,8 +7,6 @@
   const GREEN = "#1bcd6e", DARK = "#080a0e", CHARCOAL = "#161b28";
   const CLUB_PALETTE = ["#38291f", "#594231", "#947657"].map(hexToRgb);
 
-  // A white/cyan faceted fist: palm, four folded fingers and a crossing thumb.
-  // Opaque facets keep the diamond readable in both renderers without a new material.
   const diamondFist = (u) => {
     const pieces = [];
     const gem = (x, y, z, w, h, d, color) => {
@@ -38,7 +36,6 @@
     return merge(...pieces);
   };
 
-  // Sampled from the supplied logo: the inner curl and detached tongues stay intact.
   const LOGO = [
     "000000000000000000000000",
     "000000000000000000000000",
@@ -95,7 +92,6 @@
       height: 1.08,
       eyeColor: "#e8eaf0",
       face: "beard",
-      hatY: 19,
       portrait: { min: [-2, -2, -1], max: [8, 18, 8] }
     },
     voice: {
@@ -113,16 +109,13 @@
         const green = k.color(GREEN), shade = k.color("#13a356");
         const bone = k.color("#e8e5d5"), leather = k.color("#38291f");
         k.loin = [charcoal, dark];
-        // Clear the stock diagonal strap: the exposed chest is plain skin.
         v.fill(1, 7, 3, 7, 1, 4, k.skinJ);
         v.fill(0, 8, 0, 2, 0, 5, (x, y, z) => (x + z) % 4 === 0 ? dark : charcoal);
         v.fill(0, 8, 3, 3, 0, 5, leather);
-        // Green hide over the anatomical left shoulder, front and back.
         for (let x = 6; x <= 9; x++) for (let z = 0; z <= 5; z++) {
           const hem = 5 + (x + z) % 2;
           v.fill(x, x, hem, 8, z, z, (a, y) => (a + y + z) % 5 === 0 ? shade : green);
         }
-        // Eighth-size cells retain the original badge size with a 24x40 logo.
         const badge = makeVox();
         badge.fill(0, 35, 0, 43, 0, 1, bone);
         badge.fill(2, 33, 2, 41, 2, 2, green);
@@ -146,19 +139,15 @@
           unit: u, palette: CLUB_PALETTE, origin: { x: -u, y: -u, z: -u }
         });
         const geo = merge(handle, diamondFist(u));
-        // Swag keeps the crystal fist instead of replacing it with a gold club.
-        return { voxels: v, default: geo, gold: geo,
+        return { voxels: v, default: geo,
           rest: { x: 0.2, z: -0.05 }, carry: { x: 0.35, z: 0 } };
       },
       crown(k, v) {
-        // Keep the brow close to the head; the fine carved flames live above it.
         v.fill(-1, 7, 6, 7, -1, 6, k.color(CHARCOAL));
       },
       headgear(k) {
         const dark = k.color(CHARCOAL);
         const green = k.color(GREEN), light = k.color("#2ee085"), shade = k.color("#13a356");
-        // Half-size cells give each tongue a curled tip, broad belly and tapered
-        // root instead of a rectangular post. Green fills both faces and the sides.
         const outline = [
           "000000100", "000001100", "000011100", "000111000",
           "001111000", "001111100", "011111110", "011111110",
@@ -187,10 +176,8 @@
       },
       mark(k, v) {
         const green = k.color(GREEN);
-        // Below the eyes and clear of the blink cells.
         for (const x of [0, 1, 5, 6]) v.set(x, 1, 7, green);
       },
-      // The modelled look: a bone band close round each wrist, worn on the forearm so it stays there as the arm bends.
       gear(k) {
         if (BL.models.STYLE !== "R") return;
         const H = BL.heroBody, band = BL.models.geometry();
@@ -198,8 +185,6 @@
         const geometry = H.scaled(band, k.u);
         for (const arm of [k.parts.armR, k.parts.armL]) { const worn = createNode({ geometry }); worn.forearm = 0.84; addChild(arm, worn); }
       },
-      // Bone wrist bands, drawn on the arm's fine grid: a cuff standing a cell proud round the wrist and forearm's foot,
-      // so it follows each animated arm.
       refine(k, part, v) {
         if (part !== "arm") return;
         const bone = k.color("#e8e5d5"), band = [];

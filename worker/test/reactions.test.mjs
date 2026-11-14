@@ -38,6 +38,9 @@ const roomClass = (extra = {}) => {
     .replace("export class Room", "class Room") + "\nglobalThis.Room = Room;";
   const context = { ...protocol, ...studio, getPlayer, DurableObject: class {}, WebSocketRequestResponsePair: class {}, sfuClient, CAST_ROWS: [], Date, Map, Set, Response, Promise, ...extra };
   runInNewContext(source, context);
+  // Rooms built here without the constructor (Object.create) take the inspector's reporter switched off, as the
+  // constructor gives one without INSPECTOR_IDS.
+  context.Room.prototype.inspect = protocol.inspectReporter(null, {}, "Room", () => "", () => null);
   return context.Room;
 };
 const forbidden = (what) => () => { throw new Error(`a reaction touched ${what}`); };
