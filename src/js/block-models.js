@@ -95,7 +95,7 @@
   const ISLE_THEME = {
     fort: { grass: null, field: ["#c9a96b", "#bda05f"] },
     town: { grass: null, field: ["#b9a77f", "#a89270"] },
-    jungle: { grass: ["#4f7030", "#5c7f38", "#456129"], field: ["#5f7a3a", "#4c6a2e"] },
+    jungle: { grass: ["#3f8a34", "#55a53c", "#2f6f2c"], field: ["#6b8f3a", "#547a30"] },
     haunted: { grass: ["#3f4632", "#4a5138", "#353b2b"], field: ["#54433c", "#3a302a"] }
   };
   const islePalette = (M) => {
@@ -152,6 +152,154 @@
     }
     return T.gridGeometry(grid, { unit: C, palette: islePalette(M), origin: { x: -M.W, y: -RIM_DEPTH - H * C, z: -M.L } });
   });
+  // ---- Gorilla Jungle ----
+  // Everything of the map's own goes into its one mesh: the temples, the treetop walkway, the trees and their crowns,
+  // the cargo nets, the puddles, the banana hoard and the signs. Nothing here moves and nothing is lit.
+  const JUNGLE = {
+    bark: "#5e4026", barkPale: "#86603a", plank: "#9a6f44", plankDark: "#5a3a22", rope: "#d9b877", stone: "#8f8c7e", stoneDark: "#66645a",
+    moss: "#5f9a3a", leaves: ["#2c8a34", "#43a83a", "#63c244"], bloom: "#ff8a2a", banana: "#ffd23a", bananaDark: "#d9a61f", ink: "#fff3d6", pool: "#3f7fa6"
+  };
+  const JUNGLE_SIGNS = { gate: ["APES|TOGETHER", "HODL|FOREVER"], alley: "NOT YOUR VINES, NOT YOUR BANANAS", hoard: ["BANANA RESERVE", "21 MILLION. NO MORE."], middle: "MIND THE GORILLAS", home: "DON'T TRUST. PEEL." };
+  // Letters in the jumbotron's 5 x 7 alphabet as flat pixels (each row's runs of lit pixels one quad): lines split by
+  // "|", centred at (x, y, z) inside `w` by `h`, on a face looking down `nz` (+1 or -1 along z), reading left to right
+  // from that side.
+  const jungleCarve = (parts, text, x, y, z, w, h, nz, color, emissive = 0) => {
+    const glyphOf = BL.jumbotron.text.glyphOf, lines = text.split("|"), cols = Math.max(...lines.map((l) => l.length)) * 6 - 1, rows = lines.length * 9 - 2;
+    const px = Math.min(w / cols, h / rows), geo = geometry(), rgb = hexToRgb(color), opts = { emissive }, fz = z + nz * 0.035;
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li], lw = line.length * 6 - 1;
+      for (let r = 0; r < 7; r++) {
+        let run = -1;
+        for (let c = 0; c <= lw; c++) {
+          const lit = c < lw && c % 6 < 5 && (glyphOf(line[Math.floor(c / 6)])[r] >> (4 - c % 6)) & 1;
+          if (lit && run < 0) run = c;
+          else if (!lit && run >= 0) {
+            const xa = x + nz * (run - lw / 2) * px, xb = x + nz * (c - lw / 2) * px, y1 = y + (rows / 2 - li * 9 - r) * px, y0 = y1 - px;
+            face(geo, [pushVert(geo, xa, y0, fz), pushVert(geo, xb, y0, fz), pushVert(geo, xb, y1, fz), pushVert(geo, xa, y1, fz)], rgb, opts);
+            run = -1;
+          }
+        }
+      }
+    }
+    parts.push(geo);
+  };
+  // A sign board fixed under a floor's edge at (x, z), facing `nz`: a narrow plank (it hangs no lower than 2.25 m, over
+  // every head and out of the chase camera's way) and its one line of words.
+  const jungleBoard = (parts, text, x, z, nz, w, under) => {
+    const y = under - 0.33;
+    parts.push(box({ w, h: 0.66, d: 0.08, color: JUNGLE.plankDark, offset: { x, y, z } }));
+    jungleCarve(parts, text, x, y, z + nz * 0.04, w - 0.4, 0.5, nz, JUNGLE.ink, 0.3);
+  };
+  const jungleDress = (M, parts) => {
+    const J = JUNGLE, C = SIM.CONFIG;
+    // Each tree's crown, three stepped slabs of leaves up to the ledge an Ooga lands on (`LEAF_TOP` over the trunk's
+    // top, 1.3 radii across); the big ones carry blossom and trail a few vines.
+    for (const d of M.decor) {
+      if (d.kind !== "canopy") continue;
+      const k = Math.round(Math.abs(d.x * 3 + d.z * 7)), big = d.r >= 4;
+      parts.push(bevelBox({ w: d.r * 2.2, h: 0.75, d: d.r * 2.2, color: J.leaves[k % 3], offset: { x: d.x, y: d.y + 0.1, z: d.z } }));
+      parts.push(bevelBox({ w: d.r * 1.75, h: 0.7, d: d.r * 1.75, color: J.leaves[(k + 1) % 3], offset: { x: d.x, y: d.y + 0.6, z: d.z } }));
+      parts.push(bevelBox({ w: d.r * 1.3, h: 0.5, d: d.r * 1.3, color: J.leaves[(k + 2) % 3], offset: { x: d.x, y: d.y + SIM.LEAF_TOP - 0.25, z: d.z } }));
+      for (let n = 0; n < (big ? 4 : 1); n++) {
+        const a = n * Math.PI / 2 + k, rr = d.r * (big ? 0.95 : 0.7);
+        parts.push(box({ w: 0.35, h: 0.3, d: 0.35, color: J.bloom, emissive: 0.25, offset: { x: d.x + Math.sin(a) * rr, y: d.y + 0.55, z: d.z + Math.cos(a) * rr } }));
+        if (big) parts.push(box({ w: 0.07, h: 1.6 + (n % 2) * 0.7, d: 0.07, color: J.leaves[1], offset: { x: d.x + Math.cos(a) * d.r, y: d.y - 0.9 - (n % 2) * 0.35, z: d.z + Math.sin(a) * d.r } }));
+      }
+    }
+    // The cargo nets: uprights and rungs across each climb zone's wider side.
+    for (const n of M.nets) {
+      const [x0, x1, z0, z1] = n.zone, across = n.dx ? "z" : "x", w = n.dx ? z1 - z0 : x1 - x0, x = n.dx ? (n.dx < 0 ? x0 + 0.08 : x1 - 0.08) : (x0 + x1) / 2, z = n.dx ? (z0 + z1) / 2 : (n.dz < 0 ? z0 + 0.08 : z1 - 0.08);
+      for (let k = 0; k < 4; k++) { const o = (k / 3 - 0.5) * w; parts.push(box({ w: 0.05, h: n.top, d: 0.05, color: J.rope, offset: { x: across === "x" ? x + o : x, y: n.top / 2, z: across === "z" ? z + o : z } })); }
+      for (let y = 0.3; y < n.top; y += 0.5) parts.push(box({ w: across === "x" ? w : 0.05, h: 0.05, d: across === "z" ? w : 0.05, color: J.rope, offset: { x, y, z } }));
+    }
+    // Rain puddles, flush with the ground.
+    for (const [x, z] of M.puddles) parts.push(box({ w: 1.6, h: 0.02, d: 1.3, color: J.pool, emissive: 0.08, offset: { x, y: 0.045, z } }));
+    // The banana hoard between the Great Tree's roots, and its sign under each end of the ring platform.
+    const high = M.caches[0][1];
+    for (const s of [-1, 1]) {
+      parts.push(bevelBox({ w: 1.5, h: 0.6, d: 1.1, color: J.banana, emissive: 0.15, offset: { x: 0, y: 0.3, z: s * 1.4 } }), bevelBox({ w: 0.9, h: 0.45, d: 0.7, color: J.bananaDark, emissive: 0.15, offset: { x: s * 0.15, y: 0.8, z: s * 1.3 } }));
+      for (const [bx, bz, turn] of [[-1.1, 1.9, 0.5], [1.2, 2.1, -0.7], [0.3, 2.4, 1.4]]) parts.push(moved(turnedY(box({ w: 0.55, h: 0.12, d: 0.14, color: J.banana, emissive: 0.15 }), turn), s * bx, 0.07, s * bz));
+      jungleBoard(parts, JUNGLE_SIGNS.hoard[s > 0 ? 0 : 1], 0, s * 3.44, s, 6, high - 0.3);
+      // Each tree house's two signs: one toward the middle, one toward its own temple.
+      jungleBoard(parts, JUNGLE_SIGNS.middle, 0, s * 11.06, -s, 5.4, high - 0.3);
+      jungleBoard(parts, JUNGLE_SIGNS.home, 0, s * 16.94, s, 5.4, high - 0.3);
+      // The slogans carved either side of each temple gate, read from the field.
+      jungleCarve(parts, JUNGLE_SIGNS.gate[0], s * 5.8, 1.3, s * 23, 3.8, 1.5, -s, J.banana, 0.35);
+      jungleCarve(parts, JUNGLE_SIGNS.gate[1], -s * 5.8, 1.3, s * 23, 3.8, 1.5, -s, J.banana, 0.35);
+      // And one along the back wall, for whoever comes round by the alley.
+      jungleCarve(parts, JUNGLE_SIGNS.alley, 0, 1.3, s * 33, 15, 0.9, s, J.banana, 0.35);
+    }
+  };
+  // The map's own boxes, by what the map says each is (`kinds`). False for anything else (the towers), which is drawn
+  // as on the other maps.
+  const jungleBlock = (parts, b, kind, w, d, h, x, y, z, bottom) => {
+    const J = JUNGLE, top = b[4], s = Math.sign(z) || 1, team = z > 0 ? "blue" : "red";
+    if (kind === "trunk") {
+      // Bark, flared into roots at the foot; the Great Tree's roots reach further.
+      parts.push(bevelBox({ w, h, d, color: J.bark, offset: { x, y, z } }));
+      parts.push(box({ w: w + 0.3, h: 0.35, d: w + 0.3, color: J.barkPale, offset: { x, y: 0.175, z } }));
+      if (w > 1.2) for (const [rx, rz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) parts.push(bevelBox({ w: 0.7, h: 0.7, d: 0.7, color: J.bark, offset: { x: x + rx * (w / 2 + 0.15), y: 0.35, z: z + rz * (w / 2 + 0.15) } }));
+    } else if (kind === "floor") {
+      parts.push(bevelBox({ w, h, d, color: J.plank, offset: { x, y, z } }));
+      for (const e of [-1, 1]) parts.push(box({ w: w + 0.06, h: 0.12, d: 0.18, color: J.plankDark, offset: { x, y: bottom + 0.02, z: z + e * (d / 2 - 0.4) } }));
+    } else if (kind === "bridge") {
+      // Planks on two ropes: a slat every 0.75 m.
+      parts.push(box({ w, h: 0.08, d, color: J.plank, offset: { x, y: top - 0.04, z } }));
+      for (let k = b[2] + 0.4; k < b[3]; k += 0.75) parts.push(box({ w: w + 0.04, h: 0.1, d: 0.1, color: J.plankDark, offset: { x, y: top - 0.035, z: k } }));
+    } else if (kind === "rope" || kind === "rail") {
+      // A rope rail: a hand rope and a lower one.
+      parts.push(box({ w, h: 0.07, d, color: J.rope, offset: { x, y: top - 0.05, z } }), box({ w, h: 0.05, d, color: J.rope, offset: { x, y: bottom + 0.38, z } }));
+    } else if (kind === "temple" || kind === "pillar") {
+      // Old stone on a dark footing, moss along the top and the team's paint under it.
+      parts.push(bevelBox({ w, h, d, color: J.stone, offset: { x, y, z } }));
+      parts.push(box({ w: w + 0.04, h: 0.16, d: d + 0.04, color: TEAM[team].paint, emissive: 0.2, offset: { x, y: top - 0.2, z } }), box({ w: w + 0.02, h: 0.1, d: d + 0.02, color: J.moss, offset: { x, y: top + 0.04, z } }));
+      // A banner in the team's colour down each gate pillar, on the field's side.
+      if (kind === "pillar") parts.push(box({ w: 0.6, h: 1.9, d: 0.04, color: TEAM[team].paint, emissive: 0.3, offset: { x, y: 1.75, z: z - s * (d / 2 + 0.03) } }));
+    } else if (kind === "head") {
+      // The stone gorilla head over the gate, its face to the field: a heavy brow, eyes in the team's colour, a flat
+      // nose, and fangs hanging over the doorway (the gate is its mouth). Moss on its crown.
+      const f = z - s * d / 2, out = (n) => f - s * n;
+      parts.push(bevelBox({ w, h, d, color: J.stone, offset: { x, y, z } }), box({ w: w + 0.02, h: 0.1, d: d + 0.02, color: J.moss, offset: { x, y: top + 0.04, z } }));
+      parts.push(bevelBox({ w: w * 0.78, h: 0.4, d: 0.5, color: J.stoneDark, offset: { x, y: top - 0.32, z: out(0.2) } }));
+      for (const e of [-1, 1]) {
+        parts.push(box({ w: 1.05, h: 0.42, d: 0.1, color: "#1c1a18", offset: { x: x + e * 1.45, y: top - 0.8, z: out(0.04) } }), box({ w: 0.5, h: 0.26, d: 0.06, color: TEAM[team].paint, emissive: 1, offset: { x: x + e * 1.4, y: top - 0.82, z: out(0.1) } }));
+        parts.push(box({ w: 0.22, h: 0.16, d: 0.08, color: "#1c1a18", offset: { x: x + e * 0.3, y: bottom + 0.3, z: out(0.2) } }));
+        for (const fx of [0.9, 1.9]) parts.push(box({ w: 0.3, h: 0.4, d: 0.3, color: J.ink, offset: { x: x + e * fx, y: bottom - 0.2, z: out(-0.3) } }));
+      }
+      parts.push(bevelBox({ w: 1.5, h: 0.6, d: 0.35, color: J.stoneDark, offset: { x, y: bottom + 0.4, z: out(0.12) } }));
+    } else if (kind === "bush") {
+      parts.push(bevelBox({ w, h: h * 0.8, d, color: J.leaves[0], offset: { x, y: h * 0.4, z } }), bevelBox({ w: w * 0.6, h: h * 0.45, d: d * 0.75, color: J.leaves[2], offset: { x: x + w * 0.1, y: h * 0.78, z } }));
+      parts.push(box({ w: 0.22, h: 0.2, d: 0.22, color: J.bloom, emissive: 0.25, offset: { x: x - w * 0.3, y: h * 0.85, z: z + d * 0.2 } }));
+    } else if (kind === "log") {
+      // A fallen trunk, its cut ends pale.
+      parts.push(bevelBox({ w, h, d, color: J.bark, offset: { x, y, z } }));
+      for (const e of [-1, 1]) parts.push(box({ w: 0.06, h: h * 0.7, d: d * 0.7, color: J.barkPale, offset: { x: x + e * w / 2, y, z } }));
+      parts.push(box({ w: w * 0.4, h: 0.08, d: d * 0.6, color: J.moss, offset: { x: x - w * 0.15, y: top + 0.03, z } }));
+    } else if (kind === "rock") {
+      parts.push(bevelBox({ w, h, d, color: J.stoneDark, offset: { x, y, z } }), box({ w: w * 0.7, h: 0.08, d: d * 0.7, color: J.moss, offset: { x, y: top + 0.03, z } }));
+    } else return false;
+    return true;
+  };
+  // The jungle round the field, out on the island's rim (Detail: Full): tall trees and a few bushes in one mesh, on
+  // the open ground the terrain leaves [x, z, trunk height, crown radius (0 a bush)], blue's half, turned for red.
+  // Scenery only: nothing stands on these.
+  const JUNGLE_RING = [[-4.5, 52, 9, 3.2], [4, 52.5, 7.5, 2.6], [0, 54, 0, 0], [13, 47, 10, 3], [-13, 47, 8, 2.6], [27, 21, 9, 3], [27.5, 22.5, 0, 0], [24.5, 33, 8, 2.6], [-24.5, 33, 9.5, 3.2],
+    [29.5, 1.5, 10, 3.2], [-28, 3.5, 8, 2.8], [-30.5, 2, 0, 0], [7.5, 40, 0, 0], [-7.5, 40, 0, 0]];
+  const jungleRing = cached(() => {
+    const J = JUNGLE, parts = [];
+    JUNGLE_RING.forEach(([px, pz, top, r], k) => {
+      for (const s of [1, -1]) {
+        const x = s * px, z = s * pz;
+        if (!r) {
+          parts.push(bevelBox({ w: 1.8, h: 0.9, d: 1.5, color: J.leaves[k % 3], offset: { x, y: 0.45, z } }), box({ w: 0.25, h: 0.22, d: 0.25, color: J.bloom, emissive: 0.25, offset: { x: x + 0.4, y: 0.95, z: z - 0.3 } }));
+          continue;
+        }
+        parts.push(box({ w: 0.9, h: top, d: 0.9, color: J.bark, offset: { x, y: top / 2, z } }));
+        parts.push(bevelBox({ w: r * 2.1, h: 0.9, d: r * 2.1, color: J.leaves[k % 3], offset: { x, y: top + 0.25, z } }), bevelBox({ w: r * 1.4, h: 0.8, d: r * 1.4, color: J.leaves[(k + 1) % 3], offset: { x, y: top + 1, z } }));
+      }
+    });
+    return merge(...parts);
+  });
   const arena = variants((mapIndex) => {
     const M = SIM.ARENAS[SIM.MAPS[mapIndex]], town = M.id === "town", jungle = M.id === "jungle", haunted = M.id === "haunted", parts = [], FW = M.fieldW, FL = M.fieldL;
     parts.push(box({ w: FW * 2, h: 0.05, d: 0.6, color: ORANGE, emissive: 0.25, offset: { y: 0.03 } }));
@@ -172,19 +320,7 @@
       }
       parts.push(box({ w: 1.2, h: 0.05, d: 1.2, color: ORANGE, emissive: 0.6, offset: { x: g.x, y: 0.035, z: g.z } }));
     }
-    if (jungle) {
-      // Jungle floor: moss over the sand, darker patches, and the leaves of every tree (decor: nothing stops in them).
-      const r = (k) => ((Math.sin(k * 12.9898) * 43758.5453) % 1 + 1) % 1;
-      for (let k = 0; k < 40; k++) parts.push(box({ w: 1 + r(k) * 2.5, h: 0.05, d: 1 + r(k + 50) * 2.5, color: k % 2 ? "#4c6a2e" : "#6e8a44", offset: { x: (r(k + 100) - 0.5) * FW * 1.9, y: 0.035, z: (r(k + 150) - 0.5) * (FL * 2 - 28) } }));
-      for (const d of M.decor) {
-        if (d.kind !== "canopy") continue;
-        for (let k = 0; k < 6; k++) {
-          const a = k / 6 * Math.PI * 2 + d.x, rr = d.r * (k % 2 ? 0.55 : 0.75);
-          parts.push(bevelBox({ w: d.r * 0.9, h: 0.9, d: d.r * 0.9, color: k % 3 ? "#2f6a2a" : "#3f8a34", offset: { x: d.x + Math.sin(a) * rr, y: d.y + 0.3 + (k % 2) * 0.4, z: d.z + Math.cos(a) * rr } }));
-        }
-        parts.push(bevelBox({ w: d.r * 1.1, h: 1.1, d: d.r * 1.1, color: "#3a7a30", offset: { x: d.x, y: d.y + 0.9, z: d.z } }));
-      }
-    }
+    if (jungle) jungleDress(M, parts);
     if (haunted) {
       // Haunted Hollow: dead grass over the field, bare patches, and each dead tree's crooked branches.
       const r = (k) => ((Math.sin(k * 7.233) * 43758.5453) % 1 + 1) % 1;
@@ -257,25 +393,7 @@
         continue;
       }
       if (haunted && hauntedBlock(parts, b, w, d, h, x, y, z, bottom)) continue;
-      if (jungle && w <= 1.7 && d <= 1.7 && h >= 3) {
-        // A tree trunk: bark with paler rings and a vine.
-        parts.push(bevelBox({ w, h, d, color: "#5a3e26", offset: { x, y, z } }));
-        for (let k = 1; k < h; k += 1.3) parts.push(box({ w: w + 0.04, h: 0.08, d: d + 0.04, color: "#6e4e30", offset: { x, y: k, z } }));
-        parts.push(box({ w: 0.08, h: h * 0.8, d: 0.08, color: "#3f8a34", offset: { x: x + w / 2, y: h * 0.45, z: z + d / 4 } }));
-        continue;
-      }
-      if (jungle && bottom > 2.6 && h < 0.4 && Math.min(w, d) <= 1.3) {
-        // The rope bridge: planks on ropes.
-        parts.push(box({ w, h: 0.1, d, color: "#8a6440", offset: { x, y: b[4] - 0.05, z } }));
-        for (let k = b[0]; k < b[1]; k += 0.5) parts.push(box({ w: 0.06, h: 0.11, d: d + 0.02, color: "#5a3a22", offset: { x: k, y: b[4] - 0.04, z } }));
-        continue;
-      }
-      if (jungle && bottom >= 3 && h < 1 && Math.min(w, d) <= 0.25) {
-        // A rope rail.
-        parts.push(box({ w, h: 0.07, d, color: "#c9a96b", offset: { x, y: b[4] - 0.05, z } }));
-        parts.push(box({ w, h: 0.05, d, color: "#a8884e", offset: { x, y: bottom + 0.35, z } }));
-        continue;
-      }
+      if (jungle && jungleBlock(parts, b, M.kinds.get(b), w, d, h, x, y, z, bottom)) continue;
       const fort = Math.abs(z) > 22 && Math.abs(z) < 34, team = z > 0 ? "blue" : "red";
       const post = w < 1 && d < 1, deck = b[4] === TOP, rail = bottom === TOP, roof = bottom > 4 && !deck && !rail, floor = bottom > 1.5 && h < 0.5 && !roof, hutWall = bottom > 1.5 && !floor && !roof;
       if (rail) {
@@ -1147,5 +1265,5 @@
     for (const s of [-1, 1]) parts.push(box({ w: 0.36, h: 0.14, d: 0.16, color: sheet, emissive: 0.5, offset: { x: s * 0.6, y: 0.08, z: 0.12 } }));
     return merge(...parts);
   });
-  BL.blockModels = { hookHead, rope, goldBlock, trophyRays, muzzleFlash, isle, keel, puddle, bolt, hauntDress, townDress, beam, laserEyes, ghost, net2, jetpack, jetFlames, monkey, catapult, catapultArm, chute, goldBall, banana, bananaPile, peel, firePit, flames, potato, potatoArm, power, ice, tramp, TEAM, ORANGE, GUNS, arena, stand, block, tick, ball, splat, ring, pad, bubble, crate, grenade, rocket, net, draped, streak, gun, ladder, rack, zipline, zipLight, trolley, cache, SPLATS: 6 };
+  BL.blockModels = { hookHead, rope, goldBlock, trophyRays, muzzleFlash, isle, keel, puddle, bolt, hauntDress, townDress, jungleRing, beam, laserEyes, ghost, net2, jetpack, jetFlames, monkey, catapult, catapultArm, chute, goldBall, banana, bananaPile, peel, firePit, flames, potato, potatoArm, power, ice, tramp, TEAM, ORANGE, GUNS, arena, stand, block, tick, ball, splat, ring, pad, bubble, crate, grenade, rocket, net, draped, streak, gun, ladder, rack, zipline, zipLight, trolley, cache, SPLATS: 6 };
 })();

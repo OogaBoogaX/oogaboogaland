@@ -349,70 +349,84 @@
       drops: { blue: [0, -27], red: [0, 27] }
     };
   };
-  // Gorilla Jungle: stone forts at the ends as on Fort Chaos, and between them jungle: trees, a two-storey tree fort
-  // in each corner of each half (climbed by a cargo net), a rope bridge joining each half's pair across the middle,
-  // a giant tree in the centre with a ring platform round its trunk and a net up each side, and angry gorillas.
+  // Gorilla Jungle: a ruined gorilla temple at each end (Fort Chaos's walls, a stone gorilla head over the gate), and
+  // between them one treetop walkway down the middle, 3.2 m up: a tree house in each half, a rope bridge from each to
+  // the Great Tree's ring platform. The gorillas take nobody that high, so the walkway is the safe road and the open
+  // one; the ground lanes either side of it are theirs. `kinds` says what each of the map's own boxes is, for the models.
   const gorillaJungle = () => {
-    const half = [], nets = [], decor = [], steps = [];
-    // The forts, as Fort Chaos has them, with a crate in the alley behind.
-    half.push([-8, 8, 32, 33, 2.4, 0], [-8, -7, 23, 32, 2.4, 0], [7, 8, 23, 32, 2.4, 0], [-8, -2.6, 23, 24, 2.4, 0], [2.6, 8, 23, 24, 2.4, 0], at(0, 34.6, 2, 1.2, 1.1));
+    const half = [], nets = [], decor = [], steps = [], ledges = [], kinds = new Map();
+    const put = (kind, ...boxes) => { for (const b of boxes) { half.push(b); kinds.set(b, kind); } };
+    const HIGH = 3.2, RAIL = HIGH + 0.8, HEAD = [3.4, 5];
+    // The temple: Fort Chaos's walls, the gate between two pillars under the stone head (clear of anyone walking in or
+    // hopping a crate under it, and somewhere to stand), with a crate in the alley behind.
+    put("temple", [-8, 8, 32, 33, 2.4, 0], [-8, -7, 23, 32, 2.4, 0], [7, 8, 23, 32, 2.4, 0], [-8, -3.6, 23, 24, 2.4, 0], [3.6, 8, 23, 24, 2.4, 0]);
+    put("pillar", [-3.6, -2.6, 23, 24, HEAD[0], 0], [2.6, 3.6, 23, 24, HEAD[0], 0]);
+    put("head", [-3.6, 3.6, 23, 24, HEAD[1], HEAD[0]]);
+    put("crate", at(0, 34.6, 2, 1.2, 1.1));
     // A tree: a trunk to stand under, solid to its top, and leaves above it (decor, so nothing hides in them), with a
     // ledge at the leaves' top (`leafTop`) to land and stand on.
-    const ledges = [];
-    const tree = (x, z, top = 6, w = 0.9) => { half.push(at(x, z, w, w, top)); ledges.push(leafTop(x, z, top, 1.6 + w)); decor.push({ kind: "canopy", x, z, y: top, r: 1.6 + w }); };
-    // The tree forts: trees at four corners, a floor at 3 m, rails round it with a gap over the net and one where the
-    // rope bridge comes in.
+    const crown = (x, z, y, r) => { ledges.push(leafTop(x, z, y, r)); decor.push({ kind: "canopy", x, z, y, r }); };
+    const tree = (x, z, top = 6, w = 0.9) => { put("trunk", at(x, z, w, w, top)); crown(x, z, top, 1.6 + w); };
+    // The tree house on the centre line: four trunks under one crown, a floor at `HIGH`, a rail down each side with a
+    // gap over its cargo net, and one across the end facing the temple with a gap to jump down from. The end facing
+    // the middle is open: the rope bridge leaves from it.
+    for (const [x, z] of [[-2.9, 11.6], [2.9, 11.6], [-2.9, 16.4], [2.9, 16.4]]) put("trunk", at(x, z, 0.8, 0.8, 6.2));
+    crown(0, 14, 6.2, 4.4);
+    put("floor", [-3.5, 3.5, 11, 17, HIGH, HIGH - 0.3]);
     for (const s of [-1, 1]) {
-      const x0 = s > 0 ? 8.5 : -15.5, x1 = s > 0 ? 15.5 : -8.5, xm = (x0 + x1) / 2, inner = s > 0 ? x0 : x1, outer = s > 0 ? x1 : x0;
-      for (const [x, z] of [[x0 + 0.6, 10.1], [x1 - 0.6, 10.1], [x0 + 0.6, 14.9], [x1 - 0.6, 14.9]]) tree(x, z, 6.2, 0.8);
-      half.push([x0, x1, 9.5, 15.5, 3, 2.7]);
-      half.push([x0, x1, 15.3, 15.5, 3.8, 3]);
-      half.push([x0, xm - 0.6, 9.5, 9.7, 3.8, 3], [xm + 0.6, x1, 9.5, 9.7, 3.8, 3]);
-      half.push([Math.min(outer, outer - 0.2 * s), Math.max(outer, outer - 0.2 * s), 9.5, 15.5, 3.8, 3]);
-      half.push([Math.min(inner, inner + 0.2 * s), Math.max(inner, inner + 0.2 * s), 9.5, 12, 3.8, 3], [Math.min(inner, inner + 0.2 * s), Math.max(inner, inner + 0.2 * s), 13.2, 15.5, 3.8, 3]);
-      // The cargo net up its middle-facing side: climb it by pushing into it.
-      nets.push({ zone: [xm - 0.6, xm + 0.6, 8.8, 9.5], dx: 0, dz: 1, top: 3 });
+      const x0 = s > 0 ? 3.3 : -3.5, x1 = s > 0 ? 3.5 : -3.3;
+      put("rail", [x0, x1, 11, 13.4, RAIL, HIGH], [x0, x1, 14.6, 17, RAIL, HIGH], [s > 0 ? 1.2 : -3.5, s > 0 ? 3.5 : -1.2, 16.8, 17, RAIL, HIGH]);
+      // The cargo net up each side: climb it by pushing into it.
+      nets.push({ zone: [s > 0 ? 3.5 : -4.2, s > 0 ? 4.2 : -3.5, 13.4, 14.6], dx: -s, dz: 0, top: HIGH });
     }
-    // The rope bridge between the pair, with a rope on each side.
-    half.push([-8.5, 8.5, 12, 13.2, 3, 2.85], [-8.5, 8.5, 11.9, 12, 3.7, 3], [-8.5, 8.5, 13.2, 13.3, 3.7, 3]);
-    // More trees, bushes for low cover before the gate, and rocks at the side.
+    // The rope bridge to the Great Tree, with a rope on each side.
+    put("bridge", [-0.7, 0.7, 3.5, 11, HIGH, HIGH - 0.15]);
+    put("rope", [-0.8, -0.7, 3.5, 11, RAIL - 0.1, HIGH], [0.7, 0.8, 3.5, 11, RAIL - 0.1, HIGH]);
+    // More trees, bushes for low cover before the gate, a fallen log across each ground lane, and a rock at the side.
     // The two before the sniper tower stand low (3.5 m), their leaves under the scope's line over the field.
-    tree(-4.5, 8.5); tree(5, 17); tree(-18, 20, 3.5); tree(14, 4.5, 5.5); tree(-13, 21, 3.5);
-    half.push(at(-5, 19.5, 3, 1.2, 1.1), at(5, 19.5, 3, 1.2, 1.1), [-20, -18, 5, 8, 1.6, 0]);
-    // The giant tree in the middle and its ring platform, put in once: its rails leave a gap north and south for the nets.
-    const middle = [at(0, 0, 1.6, 1.6, 7.5), [-3.5, 3.5, -3.5, 3.5, 3.6, 3.3]];
-    for (const s of [-1, 1]) {
-      const z0 = s > 0 ? 3.3 : -3.5, z1 = s > 0 ? 3.5 : -3.3;
-      middle.push([-3.5, -0.6, z0, z1, 4.4, 3.6], [0.6, 3.5, z0, z1, 4.4, 3.6]);
-      middle.push([s > 0 ? 3.3 : -3.5, s > 0 ? 3.5 : -3.3, -3.5, 3.5, 4.4, 3.6]);
-    }
+    tree(-8, 9); tree(10, 15); tree(-18, 20, 3.5); tree(14, 4.5, 5.5); tree(-13, 21, 3.5);
+    put("bush", at(-5, 19.5, 3, 1.2, 1.1), at(5, 19.5, 3, 1.2, 1.1));
+    put("log", at(-12, 13, 4, 1, 1.1), at(10, 9, 4, 1, 1.1));
+    put("rock", [-20, -18, 5, 8, 1.6, 0]);
+    // The Great Tree in the middle and its ring platform, put in once: the bridges come in north and south, a rail down
+    // each side leaves a gap for its net.
+    const middle = [at(0, 0, 1.6, 1.6, 7.5), [-3.5, 3.5, -3.5, 3.5, HIGH, HIGH - 0.3]];
+    kinds.set(middle[0], "trunk"); kinds.set(middle[1], "floor");
+    for (const s of [-1, 1]) for (const [z0, z1] of [[-3.5, -0.6], [0.6, 3.5]]) { const b = [s > 0 ? 3.3 : -3.5, s > 0 ? 3.5 : -3.3, z0, z1, RAIL, HIGH]; middle.push(b); kinds.set(b, "rail"); }
     decor.push({ kind: "canopy", x: 0, z: 0, y: 7.5, r: 4.2, middle: true });
-    const midNets = [{ zone: [-0.6, 0.6, 3.5, 4.2], dx: 0, dz: -1, top: 3.6 }, { zone: [-0.6, 0.6, -4.2, -3.5], dx: 0, dz: 1, top: 3.6 }];
+    const midNets = [{ zone: [3.5, 4.2, -0.6, 0.6], dx: -1, dz: 0, top: HIGH }, { zone: [-4.2, -3.5, -0.6, 0.6], dx: 1, dz: 0, top: HIGH }];
     const { BLOCKS, steps: stepSet } = turnedMap(half, middle, steps);
+    // `turnedMap` lays the halves out after the middle, each box followed by its turned twin.
+    for (let i = 0; i < half.length; i++) kinds.set(BLOCKS[middle.length + 2 * i + 1], kinds.get(half[i]));
     const turnNet = (n) => ({ zone: [-n.zone[1], -n.zone[0], -n.zone[3], -n.zone[2]], dx: -n.dx, dz: -n.dz, top: n.top });
     const allDecor = [];
     for (const d of decor) { allDecor.push(d); if (!d.middle) allDecor.push({ ...d, x: -d.x, z: -d.z }); }
     return {
-      id: "jungle", name: "Gorilla Jungle", BLOCKS, steps: stepSet, decor: allDecor,
-      // Hub-style terrain (`mound`, `cave`, `outcrop`) and the grappling hooks' hand-checked hiding spots [x, y, z]:
-      // in the cave, on the mound's top or up a tree, behind the outcrop.
-      terrain: [...cave(16.5, 21.5, 17, 21), ...mound(-21.5, -17.5, 10, 15), ...outcrop(1.5, 3.5, 5, 6.5)],
-      hookSpots: [[19, 0, 19.25], [-19.5, 2, 12.5], [5, 7.45, 17]],
+      id: "jungle", name: "Gorilla Jungle", BLOCKS, steps: stepSet, decor: allDecor, kinds,
+      // Hub-style terrain (`mound`, `cave`) and the grappling hooks' hand-checked hiding spots [x, y, z]: behind the
+      // fallen log, on the mound's top, up a tree and on the tree house's crown. The one on the ground lies in the open
+      // (not in the cave, as it did), so a bot sent for it walks straight to it.
+      terrain: [...cave(16.5, 21.5, 17, 21), ...mound(-21.5, -17.5, 10, 15)],
+      hookSpots: [[-12, 0, 14.6], [-19.5, 2, 12.5], [10, 7.45, 15], [0, 7.65, 14]],
       ledges: [...ledges, ...ledges.map(turned), leafTop(0, 0, 7.5, 4.2)],
       nets: [...nets, ...nets.map(turnNet), ...midNets],
-      guard: { blue: { x: 0, z: 17.2 }, red: { x: 0, z: -17.2 } },
-      traps: [[-12, 4], [12, -4], [12, 19], [-12, -19], [-5, 13], [5, -13], [-15, 6], [15, -6]],
+      // The models draw this map's nets and puddles into its one mesh, so the scene places no node for them.
+      drawn: { nets: true, puddles: true },
+      guard: { blue: { x: 0, z: 19.4 }, red: { x: 0, z: -19.4 } },
+      traps: [[-12, 4], [12, -4], [12, 19], [-12, -19], [-5.6, 12.4], [5.6, -12.4], [-15, 6], [15, -6]],
       crates: both([[-4.6, 21], [4.6, 21], [-1.6, 29.6], [1.6, 29.6]]),
       plug: both([[0, 21.4], [-1.3, 22.6], [1.3, 22.6]]),
       alley: both([[-3, 35.6], [3, 35.6], [0, 31.1]]),
-      caches: [[-12, 3, 13.5], [12, 3, 13.5], [12, 3, -13.5], [-12, 3, -13.5], [2.4, 3.6, 0]],
+      // Ammo caches: on each tree house's floor, on the Great Tree's platform and out on each flank.
+      caches: [[0, HIGH, 14], [0, HIGH, -14], [2.4, HIGH, 0], [16, 0, 12], [-16, 0, -12]],
       tramps: [[-15, 19], [15, -19], [8, 4], [-8, -4]],
-      powers: [[-6, 18], [6, -18], [17, 11], [-17, -11], [0, 7], [0, -7]],
+      powers: [[-6, 18], [6, -18], [17, 9], [-17, -9], [0, 7], [0, -7]],
       fire: [-20, 0],
       catapults: both([[-5, 29.5]]),
-      // Where the gorillas live: each roams round its home and charges any Ooga that comes close.
+      // Where the gorillas live, on the ground lanes either side of the Great Tree: each roams round its home and
+      // charges any Ooga on the ground that comes close.
       gorillas: [[-6, 5], [6, -5], [10, 6], [-10, -6]],
-      puddles: [[-3, 11], [11, 3], [-9, 19], [16, 16], [3, 22]].flatMap(([x, z]) => [[x, z], [-x, -z]])
+      puddles: [[-6, 9], [11, 3], [-9, 19], [16, 15], [3, 21.2]].flatMap(([x, z]) => [[x, z], [-x, -z]])
     };
   };
   // Haunted Hollow: a bigger field (60 x 100 m), a graveyard, and at each end a haunted house up on a raised yard 3 m
