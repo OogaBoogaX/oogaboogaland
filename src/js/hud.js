@@ -350,6 +350,8 @@
       }
       ctx.putImageData(image, 0, 0);
       el.modeFree.src = canvas.toDataURL("image/png");
+      // Ooga Chat's Main Island button shows the same island.
+      for (const img of document.querySelectorAll("img[data-island-icon]")) img.src = el.modeFree.src;
     };
     favicon.src = document.querySelector('link[rel="icon"][sizes="64x64"]').href;
     const sheet = BL.sheet.create({ signal });

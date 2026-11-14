@@ -113,6 +113,70 @@ disabled and the page says the service can't be reached. It never assembles a ro
 grants it. `avatar` must be a same-origin path. The backend proxies or stores profile pictures, so the page's
 `img-src` stays `'self' data:`.
 
+## The audience contract (v1)
+
+Who speaks and who listens in each outdoor zone. The backend owns it (#665, #668); this is the page side's proposal
+for the owner to confirm, and the shape the island's panel (#660, `src/js/audience.js`, `src/js/cloud-panel.js`) reads
+today. The app's roster (#653) reads the same messages. Nothing here is live until the room advertises it.
+
+**Gate.** The island's room lists `audience-v1` in `welcome.features` (`net.state.audience`); the app's bootstrap lists
+`audience: [1]`. Without it the page sends nothing below and the island shows no cloud tab, so older backends keep the
+panels they had. Zones are `main` (Main Island) and `dsb` (DSB Land); which outdoor zone a player stands in is #658's.
+
+**Page to room.** Both only where the gate is open:
+
+```json
+{ "t": "audience-view", "v": 1, "zone": "dsb" }
+{ "t": "audience-resync", "v": 1, "zone": "dsb", "epoch": 3, "rev": 41 }
+```
+
+`audience-view` asks to see and hear a zone: sent once the room is live (the visitor's own outdoor zone at first) and
+whenever the visitor picks the other zone. Picking the zone already asked for sends nothing. It asks for a view and a
+receive scope only: it never moves the visitor's Ooga or publishes their microphone anywhere. `audience-resync` asks
+for a fresh snapshot after a gap.
+
+**Room to page.** One message type, `t: "audience"`, `v: 1`, in three kinds:
+
+```json
+{ "t": "audience", "v": 1, "kind": "snapshot", "epoch": 3, "rev": 41, "zone": "main", "part": 0, "parts": 1,
+  "you": { "speak": "eligible" }, "rows": [ { "id": "gh:1", "login": "someone", "provider": "github", "role": "listener", "self": true } ] }
+{ "t": "audience", "v": 1, "kind": "delta", "epoch": 3, "rev": 42, "base": 41, "zone": "main",
+  "upsert": [ { "id": "gh:7", "login": "maker", "provider": "github", "role": "speaker", "source": "world", "character": "maker", "contributions": 120, "mic": "on" } ],
+  "remove": ["x:9"] }
+{ "t": "audience", "v": 1, "kind": "react", "epoch": 3, "zone": "main", "id": "gh:7", "e": "🔥" }
+```
+
+- **Epoch and revision.** `epoch` is the room's roster generation (a restart or reset starts a new, larger one);
+  `rev` counts changes within it. A message from an older epoch is dropped. A delta applies only when its `base` is
+  the page's `rev`; otherwise the page sends one `audience-resync` and shows the roster as stale until a snapshot comes.
+  A new socket forgets the epoch.
+- **Chunks.** A large snapshot may come in `parts` (at most 64) with the same `epoch`, `rev` and `zone`, each with its
+  `part` index. The page shows it only once every part has come, so the roster never mixes revisions. The page does
+  not cap the roster: it pages it, 50 rows at a time.
+- **Rows.** `id` (the server's stable participant id, at most 64 characters: one id is one row, so nobody is listed
+  twice), `login` (no `@`, at most 39), `display` (defaults to `login`), `provider` (`github` or `x`), `role`
+  (`speaker` or `listener`), and for speakers `source` (`world`, an island player; `chat`, an Ooga Chat speaker),
+  `mic` (`on`, `muted` by its owner, or `off`), `speaking` and `hand` (the pinned emoji, empty when down). `character`
+  is the canonical roster handle of a world speaker's Ooga, whose face the page draws; `avatar` a same-origin picture
+  path; `contributions` a count for ordering only, never proof of anything; `self` marks the visitor. A row that breaks
+  any of this is dropped, not guessed at.
+- **You.** `you.speak` is the room's word on the visitor: `eligible` (may Join Voice), `pending`, `denied`, `active`
+  or `none`. Only `eligible` enables Join Voice; pending or denied never briefly enables publishing.
+- **Reactions.** `react` is a transient emoji for one row, shown in that row's column for its own lifetime over any
+  hand. It changes no revision.
+
+**Order.** World speakers by `contributions`, most first; then Ooga Chat speakers, the visitor first; then listeners,
+the visitor first; names alphabetical (lowercased display name) within each, the `id` breaking ties. Mic, speaking
+and hand changes never reorder.
+
+**The island's panel.** The cloud tab is last, after The Commons. Main Island and DSB Land buttons at the top, one
+roster of speakers then listeners, the emoji bar, and a footer of the visitor's name, a fixed-width Mute or Unmute,
+Join or Leave Voice and Sign out, all through the island's existing voice session. A speaker's portrait is ringed
+green (`#22c55e`) from the island or purple (`#b18aff`) from Ooga Chat; listeners have no ring, and rows carry no
+other dot. Listeners appear only in this panel, never as characters in the world. Bridging the outdoor voice and the
+app speakers' playback is #661; cloud speakers in the world are #659. `?debug=1&audience=fixture` shows a generated
+roster of named samples for review and sends nothing.
+
 ## Fixtures
 
 `fixture.html?state=` picks the canned answers: `signed-out`, `listener` (an X account, listening), `contributor` (a

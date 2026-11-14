@@ -1364,6 +1364,57 @@ body[data-active-scene="block"] .mode-hud {
 .panel[data-panel="chat"][data-view="private"] > .panel-title > .chat-about { display: none; }
 /* Without the island's About button, the title itself keeps the room's chip and the bell at the right. */
 .panel[data-panel="chat"][data-view="private"] > .panel-title h2 { margin-right: auto; }
+/* Ooga Chat (cloud-panel.js), the last tab: two zone buttons, one roster (speakers, then listeners), a page bar for a
+   long list, the emoji bar and the footer. A speaker's portrait carries the only source mark: a 3px ring past a 3px
+   dark gap, green for the island, purple for Ooga Chat. Names wrap rather than truncate. */
+.sheet-toggle-cloud { height: 56px; }
+.cloud-zones { display: grid; flex: none; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cloud-zone {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; min-height: 36px; padding: 4px 10px;
+  border: 2px solid var(--wood-edge); border-radius: 6px; background: linear-gradient(var(--plank), var(--wood)); box-shadow: 0 2px 0 var(--nail);
+  color: var(--paper); font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5); cursor: pointer;
+}
+.cloud-zone:hover, .cloud-zone.virtual-hover { background: linear-gradient(#b8844a, var(--plank)); }
+.cloud-zone[aria-pressed="true"] { background: linear-gradient(#e2a04a, var(--accent)); color: var(--ink); text-shadow: none; }
+.cloud-zone:focus-visible { outline: none; box-shadow: 0 2px 0 var(--nail), 0 0 0 2px var(--accent); }
+.cloud-zone-icon { display: block; flex: none; width: 24px; height: 18px; object-fit: contain; }
+.cloud-zone > img.cloud-zone-icon:not([src]) { visibility: hidden; }
+.cloud-status [hidden] { display: none; }
+.panel > .cloud-roster { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 6px 8px; overflow-y: auto; overscroll-behavior: contain; list-style: none; }
+.cloud-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 28px 20px; align-items: center; column-gap: 10px; min-height: 48px; }
+.cloud-portrait { display: block; width: 32px; height: 32px; margin: 6px; overflow: hidden; border-radius: 50%; background: #151312; }
+.cloud-portrait[data-source="world"] { box-shadow: 0 0 0 3px #151312, 0 0 0 6px #22c55e; }
+.cloud-portrait[data-source="chat"] { box-shadow: 0 0 0 3px #151312, 0 0 0 6px #b18aff; }
+.cloud-portrait > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.cloud-portrait > svg { display: block; box-sizing: border-box; width: 100%; height: 100%; padding: 5px; shape-rendering: crispEdges; }
+.cloud-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cloud-name { color: var(--paper); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.cloud-role { color: rgba(243, 239, 228, 0.6); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+.cloud-react { position: relative; display: grid; width: 28px; height: 28px; place-items: center; font-size: 18px; line-height: 1; }
+.cloud-hand { grid-area: 1 / 1; }
+.cloud-pop { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; animation: cloud-pop 2.4s ease-out forwards; }
+@keyframes cloud-pop { 0% { opacity: 0; transform: translateY(4px) scale(0.7); } 15% { opacity: 1; transform: none; } 70% { opacity: 1; } 100% { opacity: 0; transform: translateY(-10px); } }
+@keyframes cloud-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .cloud-pop { animation-name: cloud-fade; } }
+.cloud-mic { justify-self: center; }
+.cloud-mic[hidden] { display: none; }
+.cloud-pages { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; }
+.cloud-pages[hidden] { display: none; }
+.cloud-page { color: var(--paper); font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+.cloud-foot { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+.cloud-foot-name { min-width: 0; color: var(--paper); font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
+.cloud-foot-name[data-source="chat"]::before {
+  content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #b18aff; vertical-align: 1px;
+}
+.cloud-foot-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cloud-foot-actions .foot-button { white-space: nowrap; }
+.cloud-mute { width: 84px; padding: 0; }
+.cloud-foot-actions [hidden] { display: none; }
+@media (pointer: coarse) {
+  .cloud-mic { padding: 6px; margin: -6px; }
+}
+
 .pm-head { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; }
 .pm-head .pm-end { min-height: 24px; }
 .pm-title { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0; color: #cfe0ff; font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
