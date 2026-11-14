@@ -83,7 +83,14 @@
     else return false;
     pilot.showAct();return true;
   };
+  // DSB Land's outdoor scope (outdoor-scope.js): no room active, no entry or exit fading, the arrival done, an Ooga driven.
+  const shareScope=()=>{
+    const travelling=entrance&&entrance.phase!=="done";
+    const reason=!travelling&&!crew.player?"no-body":BL.outdoorScope.dsbReason(!!travelling,!!interiors?.transitioning,!!interiors?.active);
+    BL.outdoorScope.report(reason==="outdoor"?"dsb":null,reason);
+  };
   const sharePresence=()=>{
+    shareScope();
     const travelling=entrance&&entrance.phase!=="done";
     const driven=!travelling&&crew.player;
     BL.net.setZone(travelling?"dsb-transit":voiceZone());
@@ -358,7 +365,8 @@
         pilot.navigate({position,target:{x:position.x,y:position.y+1.7,z:position.z},yaw,pitch:.22,dist});
         pilot.setActive(!interiors?.transitioning);
       },
-      lock:on=>{pilot.setActive(!on);pilot.controls.reset();input.reset();hud.el.modeDestination.disabled=on;},
+      // An entry or exit leaves the outdoor scope from its request, before the fade or the room's swap.
+      lock:on=>{if(on)shareScope();pilot.setActive(!on);pilot.controls.reset();input.reset();hud.el.modeDestination.disabled=on;},
       onChange:(lighting,label)=>{
         if(exitPick){input.remove(exitPick);exitPick=null;}
         if(interiors.active?.room.exitDoor){exitPick=interiors.active.room.exitDoor;input.add(exitPick,{kind:"dsb-exit"});}

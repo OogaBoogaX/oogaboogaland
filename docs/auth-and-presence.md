@@ -157,6 +157,42 @@ A player who joins while the visitor is in the room is named on screen ("Bea is 
 
 A remote companion uses `BL.agent`'s managed gorilla rig instead of a caveman. Its local NPC copy releases its work/bed/portal reservations and hides while remotely driven, then returns to normal AI after release; the owner's Ooga remains in the crew. Health is transmitted as a fraction of the gorilla's maximum on the existing 0–100 scale. Voice and online marks stay on the owner's roster row. Locomotion, rig geometry and disposal share the existing bounded remote-player pool.
 
+### Outdoor scope (Ooga Chat, #658)
+
+Ooga Chat (#650) will let an outside audience hear the island's outdoor players. Which of its two public audiences the
+visitor's own body stands in, `main` (Ooga Booga Land Main Island) or `dsb` (DSB Land), is decided by
+`src/js/outdoor-scope.js`, apart from the zones above. Zones feed the panels, and their `ZONE_HOLD` debounce and
+voice-blend.js `WORLD` (which folds HQ and the caves into the surface) are no privacy boundary.
+
+| Where the body is | Scope | Reason |
+|---|---|---|
+| the island's surface and cave aprons, its bridges and the air between lands | `main` | `outdoor` |
+| the Timechain Sphere's exterior and bridge, the Mempool rainforest's top, the Bifrost islet | `main` | `outdoor` |
+| inside any cave (behind its doorway plane: HQ, the lab, B.C.A., the mirror room, a hall's tunnel) or the Sphere's shell (its passage included) | none | `interior` |
+| any way down a level: HQ's ramps and basement, the rainforest's descent, tunnels and chamber, at any depth | none | `descending` |
+| Merge Rock (`repos`), until it has a scope decision | none | `unscoped` |
+| DSB Land's outdoors, no room active, no entry or exit fading, arrival done | `dsb` | `outdoor` |
+| a DSB room, known or not | none | `interior` |
+| a DSB entry or exit, from its request (before the fade) to its end | none | `entering` |
+| DSB Land's arrival | none | `transit` |
+| any other scene, and every scene change from the moment it starts | none | `scene` |
+| Cloud Hopper | none | `game` |
+| no driven Ooga | none | `no-body` |
+| any other hub zone | none | `unknown` |
+
+The hub reports from the frame's own zone and entrances before it publishes pose or voice; DSB Land reports every
+frame and again inside its interiors' `lock`, the instant an entry is requested; the director reports `scene` the
+moment `go` starts a transition. A change of scope moves `epoch`.
+
+A scope is `public` only when something acknowledges that exact `epoch` and scope (`acknowledge(epoch, scope)`), and
+only while a transport says it can carry the handshake (`setSupported`). A stale epoch, another scope, an excluded
+state or no transport is refused. `reset()` moves the epoch, so no older acknowledgement, promise or snapshot reopens a
+scope. The director calls it whenever the room connection or the signed-in account changes. Today nothing acknowledges
+and no transport attaches, so `public` is always false. That is the safe default until the backend's two-zone presence
+and revocation (#665, #667) and the client's voice bridge (#661) agree the wire fields; the record's own field names
+(`version`, `scope`, `reason`, `epoch`, `acknowledged`, `public`, `supported`) are a proposal for that conversation, not
+yet sent anywhere. The panel's choice of which audience to browse (#660) never moves the body or its scope.
+
 ### Who drives which Ooga
 
 Every Ooga belongs to a contributor, and ownership keys on the GitHub login alone: a character's `github`, or its handle when it has none (`bc1gui` is owned by `ottoz0r`; a different GitHub account that happens to be called `bc1gui` owns nothing).

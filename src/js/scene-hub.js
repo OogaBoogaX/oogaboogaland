@@ -8622,6 +8622,29 @@
     if (repoIsland && repoIsland.onIsland(p.x, feet, p.z)) return "repos";
     return island.onLand(p.x, p.z) ? "outside" : "between";
   };
+  // Inside a cave (behind its doorway plane, as `zoneOf` binds one, HQ and every cave whose zone reads `outside`) or the
+  // Timechain Sphere's shell (its passage included): the outdoor scope's entrances (outdoor-scope.js), never a zone name.
+  const insideCave = (cave, gorilla) => {
+    if (!gorilla) return playerCaveIndex !== 0;
+    const p = cave.root.position;
+    if (!island.cavityAt(p.x, p.z, CAMERA_COLUMN, 0, p.y) || p.y < CAMERA_COLUMN.floor - 1e-6 || p.y >= CAMERA_COLUMN.ceiling) return false;
+    const index = CAMERA_COLUMN.caveIndex;
+    for (const opening of CAMERA_OPENINGS) {
+      if (opening.headquarters ? index === island.headquarters.caveIndex : opening.caveIndex === index
+        && !opening.blocked && (p.x - opening.mouth.x) * opening.sr + (p.z - opening.mouth.z) * opening.cr < opening.planeZ) return true;
+    }
+    return false;
+  };
+  const insideSphere = (x, feet, z) => {
+    if (!timechainIsland) return false;
+    const p = timechainIsland.place, r = BL.timechainModels.SITE.radius, dx = x - p.x, dy = feet - p.y - BL.timechainModels.SITE.shellY, dz = z - p.z;
+    return dx * dx + dy * dy + dz * dz < r * r;
+  };
+  const shareScope = (driven, gorilla, zone) => {
+    const p = driven.root.position, feet = p.y - (gorilla ? 0 : driven.baseY);
+    const reason = BL.outdoorScope.hubReason(zone, insideCave(driven, gorilla) || insideSphere(p.x, feet, p.z));
+    BL.outdoorScope.report(reason === "outdoor" ? "main" : null, reason);
+  };
   // A new zone holds ZONE_HOLD seconds before it is reported, so a bridge's foot does not flicker in the panels.
   let zoneHeld = null, zoneHeldFor = 0;
   // Both body kinds share position, health and zone transport. Gorilla locomotion
@@ -8669,11 +8692,13 @@
     else BL.net.setBlend(null, 0);
   };
   const shareDrivenActor = (dt) => {
-    if (cloudHopper?.active) { BL.net.setBlend(null, 0); return; }
+    if (cloudHopper?.active) { BL.outdoorScope.report(null, "game"); BL.net.setBlend(null, 0); return; }
     const gorilla = clankerPlay && clankerPlay.player, driven = gorilla || crew.player;
     BL.net.setBody(gorilla ? gorilla.netBody : driven ? driven.traits.name : null);
-    if (!driven) { BL.net.setBlend(null, 0); return; }
+    if (!driven) { BL.outdoorScope.report(null, "no-body"); BL.net.setBlend(null, 0); return; }
     const zone = zoneOf(driven, !!gorilla);
+    // The outdoor scope follows this frame's zone, before any pose or voice state is published; the panels' zone waits.
+    shareScope(driven, !!gorilla, zone);
     if (zone === BL.net.state.zone) zoneHeld = null;
     else if (zone !== zoneHeld) {
       zoneHeld = zone;
