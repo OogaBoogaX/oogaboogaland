@@ -12,9 +12,9 @@ Solo by default. Signed-in Oogas can also play together: see Live rounds below.
 
 | File | Job |
 |---|---|
-| `block-sim.js` | The rules as pure functions, no DOM or scene: the arena, actors, blocks, throws, crates, quiz traps, weather and bots, on a 1/120 s fixed step that allocates nothing. Seeded, so a seed replays a round. |
+| `block-sim.js` | The rules as pure functions, no DOM or scene: the arena, actors, blocks, throws, crates, quiz traps and bots, on a 1/120 s fixed step that allocates nothing. Seeded, so a seed replays a round. |
 | `block-trivia.js` | 35 multiple-choice Bitcoin questions, each with a one-line fact, for the quiz traps. |
-| `block-models.js` | Cached geometry: Fort Chaos, the stands, the two team blocks, crates, paint balls, grenades, rockets, nets, splats, quiz pads and bubbles, rain, and the arsenal: each tool's gun in a shared frame (`gun(index * 2 + team)` over `GUNS`, the grip at the origin and the muzzle along +z), the hook launcher among them, the hook's head and rope, the monkey and the ammo box. |
+| `block-models.js` | Cached geometry: Fort Chaos, the stands, the two team blocks, crates, paint balls, grenades, rockets, nets, splats, quiz pads and bubbles, and the arsenal: each tool's gun in a shared frame (`gun(index * 2 + team)` over `GUNS`, the grip at the origin and the muzzle along +z), the hook launcher among them, the hook's head and rope, the monkey and the ammo box. |
 | `scene-block.js` | The scene: the side picker, the round, the HUD, the cameras, the quiz card and the trophy screen. Registers `BL.scenes.block`. |
 
 Shared files touched, each by the smallest change: `arcade-models.js`, `arcade-scene-models.js` and `scene-arcade.js` (the entry hall: `BLOCK_HALL`, its walk, sight and light, and its zipline off the ledge; the stage stays rock's four cabinets, and the Rally poster moved just beside the mouth),
@@ -76,14 +76,13 @@ card), `src/style.css` (the game's panels, appended), `test/run.mjs` (rules in t
   from below, and come down on top to stand there. The leaves themselves stay decor, so nobody hides inside them, and
   the chase camera comes in front of (or over) leaves as it does walls. The two trees before each tower stand
   low (3.5 m), so a scope up there sees over them.
-- **Weather.** A seeded run of clear and stormy spells. Storms darken the light and bring rain and lightning.
 - **Movement.** Jump, and jump again in the air: a double jump reaches 2.55 m and clears the forts' 2.4 m walls, the
   stilt huts' floors and the centre deck, carrying or not. Shift sprints for up to 4 s, refilling after a rest. C
   crouches: slower, shorter, under chest-height paint.
 
 ## Play-test additions
 
-Each map has its own time of day and weather mix (`MAP_WEATHER`, seeded): Fort Chaos at sunset, Ooga Town at midday, Gorilla Jungle cloudy and always raining with puddles that slip you, Haunted Hollow at night. Storms warn a spot and then strike whoever stays with lightning (`bolt`), once per `BOLT_COOL` each. A busy network (fees at the storm rate) brings a storm over a map's own weather; calmer fees change nothing. Haunted Hollow has a few open graves to fall in and step out of, a skeleton in each, and ghosts. The Detail setting on the menu turns off foliage, rain, lightning effects and that dressing; the rules stay. `N` hides the mini-map, `?` or Help opens the in-play help. Ooga Town's block stand is at the back of its building, under the upper floor. Haunted Hollow is described under its own heading below.
+Each map has its own fixed time of day and sky (`MAP_HOUR`, `MAP_CLOUDS` in the scene): Fort Chaos at sunset, Ooga Town at midday, Gorilla Jungle cloudy with puddles that slip you, Haunted Hollow at night. There is no weather on any map: no storms, rain, lightning or thunder, and mempool fees change nothing (a block found still readies the pads and caches). Power-up spots hand out lightning boots, the halving, cold storage or the monkeys, drawn from the seed; there are no laser eyes. Haunted Hollow has a few open graves to fall in and step out of, a skeleton in each, and ghosts. The Detail setting on the menu turns off foliage and that dressing; the rules stay. `N` hides the mini-map, `?` or Help opens the in-play help. Ooga Town's block stand is at the back of its building, under the upper floor. Haunted Hollow is described under its own heading below.
 
 ## Towers, ziplines and ammo caches
 
@@ -103,7 +102,8 @@ Each map has its own time of day and weather mix (`MAP_WEATHER`, seeded): Fort C
   at the grab: a rider already sliding rides on, whatever happens to their block meanwhile. Your own line is never
   trapped. A lamp on each handle shows it from your side, green to ride, red when it would spring. Bots only choose
   the zip home with their own block home, and drop that route if it goes. The event appended to `EVENT_TYPES` made
-  `WIRE` 5.
+  `WIRE` 5. Taking the weather and laser events (`bolt`, `boltwarn`, `laseroff`, `laseron`, `weather`) out of `EVENT_TYPES` moved
+  every later index, so `WIRE` is 6.
 - **Ammo caches.** Five on Fort Chaos (each stilt hut's floor and the centre deck; the other maps place their own).
   Walking onto one refills grenades, rockets, nets and the crate stock as your stand does, then it goes dark for 15 s
   (`CACHE_S`). A real Bitcoin block found while you play makes every cache and quiz pad ready again.
@@ -198,7 +198,7 @@ and a page that takes over as host keeps it:
   none (`hooksteal`).
 
 Nothing else takes either: paint, the Ooga AK, the sniper rifle, grenades, rockets, nets, thrown crates, the monkeys,
-laser eyes, gorillas and bonks all splat as before and the victim keeps what they hold. Nothing is dropped on a splat.
+gorillas and bonks all splat as before and the victim keeps what they hold. Nothing is dropped on a splat.
 Bots now and then hook a rival who has the Golden AKs out, in reach and in sight, and fire the Golden AKs whenever they
 hold them, so a hook holder in their sights can lose it. The frame no longer carries dropped pairs but carries
 what each Ooga has in hand, and the drop events are gone: `WIRE` was 4 (5 since the zipline trap's event).
@@ -353,8 +353,9 @@ The global tier plays the rules through the sim's own calls: pickup, a drop held
 with your own block home, a splat dropping the carrier's block, which stays until its own side carries it home, a
 quiz trap holding and shielding, a net slowing and grounding, a crate pushed, a pass caught, a throw home (scoring and crediting the thrower at a stand and a map's own spot, with no score with
 your own block away, for a side's own block, just outside the zone, when caught, or off a hook; ending the round at
-its target), a crate lifted, stacked and thrown to stun, and a seeded round on
-autopilot replaying exactly to three captures. The `block` scene runs the title card and Escape, W S and A D on screen,
+its target), a crate lifted, stacked and thrown to stun, a seeded round on
+autopilot replaying exactly to three captures, and two minutes of seeded play on every map raising no storm, rain or
+lightning. The `block` scene runs the title card and Escape, W S and A D on screen,
 a quiz trap through a wrong and a right answer, an autopilot round to its saved results, and the round trip.
 
 The entry hall's Node checks cover the stage's four cabinets, the hall reaching the ledge, the zipline's survey and the Rally poster's move; the `arcade` step walks it. The Block Frenzy browser checks also measure each weapon's
@@ -398,6 +399,8 @@ physical touch controls and browser performance still require verification.
 
 ## Live rounds
 Signed-in Oogas only, on a Worker that lists `block-v1` in welcome; anywhere else the game is solo as before.
+
+The weather and laser removal changes the frame layout and event indexes to `WIRE` 6. Deploy the site and Worker together. Pages left open on wire 5 must reload before joining or watching a live round; the Worker refuses their control messages and discards saved rounds from the older wire on wake.
 
 - **Registry** (`worker/src/block.js`, contract in `block-wire.js`): one match a room. `reg`/`unreg`/`ready`/`opt` in the lobby; the first in picks the map, size and scoring rule (2v2 to 4v4, `MIN_SIDE` to `MAX_SIDE`; NPCs fill any empty seat, so there is never a 1v1); `reg` carries the map already picked on their board, and registered players' boards follow the match's map, grown if more have registered than it seats. With two or more registered, everyone ready starts a 3 s countdown. One person alone chooses: Start with NPCs (`alone`, at once with NPCs) or Wait for players (marks them ready, which starts nothing until someone else registers and readies). If the others leave, the choice comes back.
 - **Teams:** random and as even as can be (`split`); empty seats are NPCs.

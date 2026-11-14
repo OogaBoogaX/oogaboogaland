@@ -5,8 +5,8 @@
 //
 // Phases `board` (choose a side), `play` and `results`. The rules run in `blockSim.step` on a fixed step; this file
 // draws them: the arena and stands built once a visit, the four Oogas posed from the sim each frame, the two blocks on
-// their stands, at a carrier's back or lying where they fell, pooled crates, throws and splats, the weather (a
-// sign, rain and lightning in a storm), and a chase camera behind the visitor's Ooga that a captured mouse, Q E, the
+// their stands, at a carrier's back or lying where they fell, pooled crates, throws and splats, each map's own
+// sky and time of day, and a chase camera behind the visitor's Ooga that a captured mouse, Q E, the
 // arrows or the look stick turns. The keys follow the island's: W A S D move from where the Ooga faces, Shift
 // sprints, Space jumps (again in the air) or uses what stands beside it (a zipline or catapult), a
 // left click or Enter throws the chosen tool (1 to 7 pick one, G steps through them), X or a click captures the
@@ -56,15 +56,12 @@
   const QUIZ_BITS = ["#3dff7a", "#b8ffcf"].map((c) => models.particleGeometry(c, 0.09, 1));
   const NET_BITS = ["#7fe08a", "#c8ffd0"].map((c) => models.particleGeometry(c, 0.08, 0.6));
   const WOOD_BITS = ["#9a6a3a", "#5a3a22"].map((c) => models.particleGeometry(c, 0.1, 0));
-  const LASER_BITS = ["#ff3a1a", "#ffd0a0"].map((c) => models.particleGeometry(c, 0.08, 1));
   const GHOST_BITS = ["#e8eefc", "#b9a8ff"].map((c) => models.particleGeometry(c, 0.1, 1));
   const SMOKE_BITS = ["#3d3d44", "#6a6a72"].map((c) => models.particleGeometry(c, 0.12, 0));
   const STAR_BITS = ["#ffe066", "#fff3d6"].map((c) => models.particleGeometry(c, 0.09, 1));
   const TOOL_KEYS = { 1: "paint", 2: "grenade", 3: "rocket", 4: "net", 5: "sniper", 6: "gold", 7: "ak", 8: "hook" };
   // Each tool's gun (`BM.gun` takes the gun's index times two plus the team's; the hook's is its launcher); Lift shows none.
   const GUN_OF = { paint: 0, grenade: 1, rocket: 2, net: 3, sniper: 4, gold: 5, ak: 6, crate: 0, grab: -1, hook: 7 };
-  const WEATHER_WORDS = { clear: "Clear", storm: "Storm" };
-  const RAIN = 140;
   const MAP_HOUR = { fort: 17.7, town: 12.5, jungle: 11, haunted: 0.8 }, MAP_CLOUDS = { fort: 0.3, town: 0.15, jungle: 0.85, haunted: 0.25 };
   // Sky, light and haze from the island's clock, as the drop's.
   const RENDER_OPTS = {
@@ -109,18 +106,14 @@
   // touch or debug call reaches it, so nothing acts while paused. Resume, Board and Sound stay open while paused.
   const inRound = () => phase === "play" && !paused;
   let sim = null, phase = "board", sceneTime = 0, stateTimer = 0, hintTimer = 0, lineN = 0, result = null;
-  let actors = null, blocks = null, shots = null, splats = null, splatNext = 0, ticks = null, pads = null, crates = null, rain = null, caches = null, fpGun = null, fpGunL = null, fpFlash = null, fpFlashL = null, zipNear = false, zipLights = null, zipLit = [-1, -1], trampNodes = null, trampSeen = false, powerNodes = null;
+  let actors = null, blocks = null, shots = null, splats = null, splatNext = 0, ticks = null, pads = null, crates = null, caches = null, fpGun = null, fpGunL = null, fpFlash = null, fpFlashL = null, zipNear = false, zipLights = null, zipLit = [-1, -1], trampNodes = null, trampSeen = false, powerNodes = null;
   let mapRoot = null, fireNode = null, dancers = null, burnSeen = false, peelNodes = null, catapults = null, catNear = false;
   const iceNodes = {};
-  let tool = "paint", flash = 0, flashT = 0, audio = null, unfeed = null;
-  // The live Bitcoin network's say: a busy mempool (next block's median fee at `STORM_FEE` sat/vB or more) brings a storm
-  // over a map's own seeded weather, and a block found resets the pads and caches.
-  const STORM_FEE = 25;
-  const live = { fee: 0, block: 0 };
-  const feeWeather = (fee) => fee >= STORM_FEE ? "storm" : null;
+  let tool = "paint", audio = null, unfeed = null;
+  // The live Bitcoin network's say: a block found resets the pads and caches.
+  const live = { block: 0 };
   const onFeed = (ev) => {
-    if (ev.type === "fees" && ev.nextFee > 0) live.fee = ev.nextFee;
-    else if (ev.type === "block") live.block = ev.height;
+    if (ev.type === "block") live.block = ev.height;
   };
   // The sniper scope: its zoom step (`ZOOMS`, degrees of view), and the view to go back to when the rifle is put away.
   const ZOOMS = [34, 20, 11, 6];
@@ -219,10 +212,7 @@
       else { addChild(jet, jetFlame); addChild(body, jet); }
       // The monkeys at the hips, shown while the power-up lasts.
       const monkeys = [-1, 1].map((side) => createNode({ geometry: BM.monkey(), position: { x: side * 0.62, y: 0.82, z: 0.08 }, scale: { x: 0.9, y: 0.9, z: 0.9 }, visible: false }));
-      // Laser eyes: the lit eyes on the face, and the beam, placed in the world each frame (`poseBeams`).
-      const eyes = createNode({ geometry: BM.laserEyes(), position: { x: 0, y: 1.5, z: 0.24 }, visible: false });
-      const beam = place(createNode({ geometry: BM.beam(), visible: false }));
-      addChild(body, ring, blob, bubble, netted, held, trolley, chute, eyes, ...monkeys);
+      addChild(body, ring, blob, bubble, netted, held, trolley, chute, ...monkeys);
       // The gun sits in the right hand, its muzzle along the arm; the caveman's own club stays home.
       let gun = null, gunL = null;
       const flash = createNode({ geometry: BM.muzzleFlash(), position: { ...MUZZLE }, visible: false }), flashL = createNode({ geometry: BM.muzzleFlash(), position: { ...MUZZLE }, visible: false });
@@ -260,14 +250,14 @@
       const hookHead = place(createNode({ geometry: BM.hookHead(), visible: false, sightHidden: true }));
       const hookHip = createNode({ geometry: BM.hookHead(), visible: false, position: { x: 0.3, y: 0.85, z: -0.18 }, rotation: { x: 1.2, y: 0, z: 0 }, scale: { x: 0.45, y: 0.45, z: 0.45 } });
       addChild(body, hookHip);
-      return { body, cave, hip, armZ, hang, ring, blob, bubble, netted, held, trolley, chute, monkeys, jet, jetFlame, gun, gunL, flash, flashL, shot: SHOT_IDLE, kick: 0, pet, eyes, beam, rope, hookHead, hookHip, phase: 0, name };
+      return { body, cave, hip, armZ, hang, ring, blob, bubble, netted, held, trolley, chute, monkeys, jet, jetFlame, gun, gunL, flash, flashL, shot: SHOT_IDLE, kick: 0, pet, rope, hookHead, hookHip, phase: 0, name };
     });
   };
   const disposeActors = () => {
     if (!actors) return;
     for (const a of actors) {
       if (a.cave) input.remove(a.cave.parts.torso);
-      for (const node of a.pet ? [a.body, a.beam, a.rope, a.hookHead, a.pet.node] : [a.body, a.beam, a.rope, a.hookHead]) {
+      for (const node of a.pet ? [a.body, a.rope, a.hookHead, a.pet.node] : [a.body, a.rope, a.hookHead]) {
         removeChild(root, node);
         const i = placed.indexOf(node);
         if (i >= 0) placed.splice(i, 1);
@@ -555,14 +545,11 @@
     if (!chairsGreeted) { chairsGreeted = true; audio.cues.seat(); }
     el.viewerBoard.hidden = false;
     deck.visible = true;
-    // Only the match below: no drifting clouds, campfire, weather or sounds of its own.
+    // Only the match below: no drifting clouds, campfire or sounds of its own.
     for (const n of mapClouds) n.visible = false;
     for (const n of skyClouds) n.visible = false;
     if (fireNode) fireNode.visible = false;
     if (dancers) for (const d of dancers) d.visible = false;
-    if (rain) rain.visible = false;
-    if (boltRing) boltRing.visible = false;
-    if (boltNode) boltNode.visible = false;
     el.board.hidden = el.results.hidden = el.toolBar.hidden = el.feed.hidden = true;
     el.watch.hidden = false; el.strip.hidden = true; el.center.hidden = el.notice.hidden = true;
     strip.shown = false; updateStrip();
@@ -971,7 +958,6 @@
     // The power-ups in force for the visitor's side, each with its seconds left.
     const powers = [];
     if (me.boots > 0) powers.push(`Boots ${Math.ceil(me.boots)}`);
-    if (me.laser > 0) powers.push(`Lasers ${Math.ceil(me.laser)}`);
     if (me.monkeys > 0) powers.push(`Monkeys ${Math.ceil(me.monkeys)}`);
     if (sim.halving[sim.team] > 0) powers.push(`Halving ${Math.ceil(sim.halving[sim.team])}`);
     if (sim.cold[sim.team] > 0) powers.push(`Cold ${Math.ceil(sim.cold[sim.team])}`);
@@ -1043,7 +1029,7 @@
     else if (t === "pickup") feed(`${who} grabbed the ${TEAM_NAME[e.team]} block`, sim.actors[e.actor].team);
     else if (t === "rescue") feed(`${who} sent the ${TEAM_NAME[e.team]} block home`, e.team);
     else if (t === "capture") feed(`${who} ${e.y ? "threw it home" : "mined a block"}! ${TEAM_NAME[e.team]} ${sim.score[e.team]}`, e.team);
-    else if (t === "power") feed(`${who} got ${({ boots: "lightning boots", halving: "the halving", cold: "cold storage", laser: "laser eyes", monkeys: "the monkeys" })[SIM.POWERS[e.y]]}`, e.team);
+    else if (t === "power") feed(`${who} got ${({ boots: "lightning boots", halving: "the halving", cold: "cold storage", monkeys: "the monkeys" })[SIM.POWERS[e.y]]}`, e.team);
     else if (t === "zip") feed(`${who} took the zipline`, e.team);
     else if (t === "trap") feed(`${who} is stuck in a quiz`, e.team);
     else if (t === "burn") feed(`${who} burnt their feet in the fire!`, e.team);
@@ -1242,21 +1228,17 @@
         else notice("They threw a block · intercept it!", 1500);
       } else if (e.type === "landed") fx.burst(e.x, e.y + 0.3, e.z, 8, e.team === "blue" ? PAINT_BITS.blue : PAINT_BITS.red, 1.4);
       else if (e.type === "winded") { if (me) notice("Out of breath! Sprint refills in a moment", 1400); }
-      else if (e.type === "weather") {
-        const w = sim.weather.kind, fee = sim.live === "storm" && w === "storm" ? ` · mempool fees ${Math.round(live.fee)} sat/vB` : "";
-        notice((w === "storm" ? "A storm rolls in! Watch for lightning" : "The sky clears") + fee, 2800);
-      } else if (e.type === "power") {
+      else if (e.type === "power") {
         const kind = SIM.POWERS[e.y], who = me ? "You" : mine ? "Teammate" : "They";
-        fx.burst(e.x, 1.1, e.z, 16, kind === "laser" ? PAINT_BITS.red : kind === "cold" ? PAINT_BITS.blue : ORANGE_BITS, 2.6);
+        fx.burst(e.x, 1.1, e.z, 16, kind === "cold" ? PAINT_BITS.blue : ORANGE_BITS, 2.6);
         if (me || mine) audio.cues.power();
         const words = {
           boots: me ? "LIGHTNING BOOTS! Run!" : `${who} grabbed lightning boots`,
           halving: mine ? "THE HALVING! Our splats last half as long" : "They halved their splats for a while",
           cold: mine ? "COLD STORAGE! Our block is frozen on its stand" : "Their block is in cold storage · it can't be taken for a bit",
-          laser: me ? (COARSE ? "LASER EYES! Tap Paint! for one long beam from your eyes (3 s) · turn to sweep it" : "LASER EYES! Click for one long beam from your eyes (3 s) · turn to sweep it") : `${who} got laser eyes`,
           monkeys: me ? "MONKEYS! When you shoot, they fire heat-seeking missiles at the nearest rival" : `${who} got the monkeys`
         };
-        if (me) center(kind === "boots" ? "⚡ BOOTS!" : kind === "laser" ? "LASER EYES!" : kind === "cold" ? "COLD STORAGE!" : kind === "monkeys" ? "MONKEYS!" : "HALVING!", 900);
+        if (me) center(kind === "boots" ? "⚡ BOOTS!" : kind === "cold" ? "COLD STORAGE!" : kind === "monkeys" ? "MONKEYS!" : "HALVING!", 900);
         notice(words[kind], 2600);
         updateStrip();
       } else if (e.type === "enemycat") {
@@ -1304,10 +1286,7 @@
         else if (e.by === you) { center("PIGGYBACK!", 800); notice(`${nameOf(e.actor)} is on your back, shooting for you · they stay on even if you're splatted`, 2600); }
         else say(e.actor, ["Giddy up!", "Onward!", "Hup!"], 1.2);
       } else if (e.type === "hopoff") { if (me) notice("Back on your feet", 900); }
-      else if (e.type === "laseron") {
-        audio.cues.laser(me ? 1 : 0.5);
-        if (me) center("LASERS!", 800);
-      } else if (e.type === "boo") {
+      else if (e.type === "boo") {
         fx.burst(e.x, e.y, e.z, 14, GHOST_BITS, 2.2);
         if (me) { center("BOO!", 900); notice(sim.actors[0].carrying ? "Spooked stiff!" : "Spooked stiff! Shoot ghosts to pop them", 1600); }
         else say(e.actor, ["Eek!", "A g-g-ghost!", "Nope nope nope"], 1.3);
@@ -1321,13 +1300,6 @@
         } else say(e.actor, LINES.bonk, 1.3);
       } else if (e.type === "breakfree") { fx.burst(e.x, e.y + 0.8, e.z, 10, STAR_BITS, 2); if (me) { center("FREE!", 800); notice("Run before it grabs you again!", 1500); } }
       else if (e.type === "letgo") { if (me) notice("The gorilla got bored and dropped you", 1500); }
-      else if (e.type === "boltwarn") { if (e.actor === you) { center("LIGHTNING!", 700); notice("Lightning coming · move!", 1300); } }
-      else if (e.type === "bolt") {
-        audio.cues.thunder();
-        boltNode.visible = detail.full; setVec(boltNode.position, e.x, 0, e.z); flashSeen = sim.time + 0.16;
-        if (detail.full && !hookStill) flash = 1;
-        fx.burst(e.x, 0.6, e.z, 12, STAR_BITS, 2.2);
-      }
       else if (e.type === "puddle") { if (me) notice("Slipped in a puddle!", 900); }
       else if (e.type === "windup") { if (me) notice("It's swinging you! Mash!", 900); }
       else if (e.type === "thrown") { if (me) { center("THROWN!", 1000); notice(COARSE ? "Hold Jump to jetpack back over the edge" : "Hold Space to jetpack back over the edge", 2800); } }
@@ -1420,8 +1392,6 @@
     // In a gorilla's hands a click or tap is a struggle press, like Space.
     if (sim.actors[0].grabbed) { move.jump = 1; return true; }
     if (sim.actors[0].flight === 2) return acts("cutChute", 0);
-    // Laser eyes ready: whatever is in hand, the click lets them loose.
-    { const me = sim.actors[0]; if (me.laser > 0 && me.beam <= 0 && !me.holding) return acts("fire", 0, cam.face, 0, "paint"); }
     const a = sim.actors[0], q = aimPoint(), oy = a.y + (a.crouch ? C.CROUCH_H - 0.25 : C.SHOT_Y);
     // With Lift chosen and empty hands, a click lifts the crate in front; holding a crate, a throw throws the crate.
     if (tool === "grab" && !a.holding) return grabCrate();
@@ -2035,37 +2005,11 @@
       n.geometry = BM.crate(TEAM_INDEX[c.team]);
     }
   };
-  // The sky follows the weather: a storm darkens the light and thickens the cloud, rain falls
-  // round the camera, and now and then lightning flashes.
-  const poseWeather = (dt) => {
-    const w = sim.weather, storm = w.kind === "storm" ? Math.min(1, w.strength) : 0;
-    RENDER_OPTS.clouds = MAP_CLOUDS[SIM.ARENA.id] + 0.55 * storm;
-    RENDER_OPTS.directStrength *= 1 - 0.55 * storm;
-    RENDER_OPTS.sunStrength *= 1 - 0.55 * storm;
-    flashT -= dt;
-    // Lightning: a warned ring where it will strike, a brief column and a flash (no flash for reduced motion or Low detail).
-    const showBolt = w.boltWarn > 0;
-    boltRing.visible = showBolt;
-    if (showBolt) { setVec(boltRing.position, w.boltX, 0.05, w.boltZ); boltRing.scale.x = boltRing.scale.z = 2.6 + (hookStill ? 0 : Math.sin(sim.time * 16) * 0.3); }
-    if (boltNode.visible) { boltNode.visible = sim.time < flashSeen; }
-    flash = Math.max(0, flash - dt * 5);
-    RENDER_OPTS.ambientFloor = (SIM.ARENA.id === "haunted" ? 0.42 : 0.22) + flash * 0.8;
-    RENDER_OPTS.bloomStrength = 0.6 + flash * 1.2;
-    const cx = camera.position.x, cz = camera.position.z;
-    for (let i = 0; i < RAIN; i++) {
-      const r = rain[i];
-      // Rain only on Full detail; Gorilla Jungle's is always falling, a storm brings it anywhere.
-      const wet = SIM.ARENA.id === "jungle" ? Math.max(storm, 0.55) : storm;
-      r.node.visible = detail.full && wet > 0.2 && i < RAIN * wet;
-      if (!r.node.visible) continue;
-      r.y -= dt * 14;
-      if (r.y < 0 || Math.abs(r.x - cx) > 12 || Math.abs(r.z - cz) > 12) {
-        r.x = cx + (Math.random() - 0.5) * 22; r.z = cz + (Math.random() - 0.5) * 22; r.y = 6 + Math.random() * 6;
-      }
-      setVec(r.node.position, r.x, r.y, r.z);
-    }
-    // The weather word, written only when it changes.
-    if (w.kind !== el.weatherKind) { el.weatherKind = w.kind; el.weatherWord.textContent = WEATHER_WORDS[w.kind]; }
+  // Each map's own sky: its cloud cover, and the light floor (Haunted Hollow's night a little brighter to play in).
+  const poseSky = () => {
+    RENDER_OPTS.clouds = MAP_CLOUDS[SIM.ARENA.id];
+    RENDER_OPTS.ambientFloor = SIM.ARENA.id === "haunted" ? 0.42 : 0.22;
+    RENDER_OPTS.bloomStrength = 0.6;
   };
   // The sprint gauge: full, draining while Shift is held, orange while it refills after running dry.
   const poseStamina = () => {
@@ -2369,11 +2313,10 @@
       if (!round || round.role !== "guest") sim.actors[0].wield = tool;
       // Full auto: with the AK or the golden pair and the trigger held, a round goes each time the shot clock allows.
       if (trigger && (tool === "ak" || (tool === "gold" && sim.actors[0].gold)) && !quiz.open && !sim.actors[0].grabbed && sim.actors[0].cooldown <= 0) paint();
-      // The live feed, folded in before the step: fees to weather, a new block to its reset.
+      // The live feed, folded in before the step: a new block to its reset.
       const prepWas = sim.prep;
       if (round && round.role === "guest") round.after(dt, move);
       else {
-        SIM.setLive(sim, feeWeather(live.fee));
         if (live.block) { SIM.newBlock(sim, live.block); live.block = 0; }
         if (round && round.role === "host") round.hostStep();
         SIM.step(sim, dt, move);
@@ -2400,18 +2343,16 @@
     paintStruggle();
     poseGhosts(elapsed);
     poseHaunt(elapsed);
-    if (sim && actors) poseBeams(elapsed);
     poseShots();
     if (onTrophy) poseTrophy(dt, elapsed);
     if (phase === "board") boardView(elapsed, dt);
     else if (onDeck()) deckView(dt);
     else if (onTrophy) trophyView();
     else updateCamera(dt);
-    if (!onDeck()) poseWeather(dt);
+    if (!onDeck()) poseSky();
     if (phase === "play") drawMap(dt, elapsed);
     if (sim) {
-      // The held sounds: rain in a storm, and the whir while the visitor rides a zipline.
-      audio.state.rain = phase === "play" && sim.weather.kind === "storm" ? 1 : 0;
+      // The held sounds: the whir while the visitor rides a zipline, and the jetpack.
       audio.state.zip = phase === "play" && sim.actors[0].riding ? 1 : 0;
       audio.state.jet = phase === "play" && sim.actors[0].jetting ? 1 : 0;
     }
@@ -2529,7 +2470,7 @@
   };
   // Everything that belongs to the map, under one node so a new map replaces it whole: the ground and buildings, the
   // quiz pads, power-up spots, trampolines, ammo caches, and the campfire with its three dancing potato Oogas.
-  // The extras (foliage, weather effects), all behind the Detail setting so they can be turned off or withdrawn.
+  // The extras (foliage and the map's dressing), all behind the Detail setting so they can be turned off or withdrawn.
   const detail = { full: true };
   const DETAIL_KEY = "ooga-block-detail";
   const loadDetail = () => { try { detail.full = localStorage.getItem(DETAIL_KEY) !== "low"; } catch { /* the default stands */ } };
@@ -2584,7 +2525,7 @@
     moonNode.rotation.y = Math.atan2(MOON.x * s, -MOON.z * s);
     if (!hookStill) for (let i = 0; i < mistNodes.length; i++) { const n = mistNodes[i]; n.position.x = MIST[i][0] + Math.sin(elapsed * 0.11 + i * 2.1) * 1.3; n.position.z = MIST[i][1] + Math.sin(elapsed * 0.07 + i) * 0.7; }
   };
-  let boltNode = null, boltRing = null, flashSeen = 0, enemyCatNear = false;
+  let enemyCatNear = false;
   const buildMap = () => {
     if (mapRoot) {
       removeChild(root, mapRoot);
@@ -2604,8 +2545,6 @@
     // Ooga Town's lettering and small dressing, one mesh, behind the same setting.
     if (detail.full && A.id === "town") add(createNode({ geometry: BM.townDress(), sightHidden: true }));
     if (!(A.drawn && A.drawn.puddles)) for (const [x, z] of A.puddles || []) add(createNode({ geometry: BM.puddle(), position: { x, y: 0, z } }));
-    boltNode = add(createNode({ geometry: BM.bolt(), visible: false, sightHidden: true }));
-    boltRing = add(createNode({ geometry: BM.ring(0), visible: false, sightHidden: true, scale: { x: 3.2, y: 1, z: 3.2 } }));
     for (let k = 0; k < 12; k++) {
       const ang = k / 12 * Math.PI * 2 + 0.3, out = k % 3 === 0 ? 0.55 : 1.25, y = -9 - (k % 4) * 4.5;
       mapClouds.push(add(createNode({ geometry: BL.hubModels.cloud(k % 3), sightHidden: true, position: { x: Math.sin(ang) * (A.W * out + 6), y, z: Math.cos(ang) * (A.L * out + 6) }, rotation: { x: 0, y: ang, z: 0 } })));
@@ -2678,23 +2617,7 @@
     });
   };
   // The gorillas follow the sim: walking or charging, standing still holding an Ooga up, or dazed when painted.
-  // Laser eyes: the eyes glow while the power waits or the beam runs; the beam runs from the eyes along the heading to
-  // where it stops, sparks flying where it hits.
-  const poseBeams = (elapsed) => {
-    for (let i = 0; i < actors.length; i++) {
-      const s = sim.actors[i], a = actors[i];
-      if (!a.eyes) continue;
-      a.eyes.visible = (s.laser > 0 || s.beam > 0) && !(i === 0 && cam.first);
-      a.beam.visible = s.beam > 0 && s.beamLen > 0;
-      if (!a.beam.visible) continue;
-      const ey = s.y + (s.crouch ? C.CROUCH_H - 0.15 : 1.5), dx = Math.sin(s.heading), dz = Math.cos(s.heading);
-      setVec(a.beam.position, s.x + dx * 0.25, ey, s.z + dz * 0.25);
-      a.beam.rotation.y = s.heading;
-      a.beam.scale.z = Math.max(0.1, s.beamLen - 0.25);
-      a.beam.scale.x = a.beam.scale.y = 1 + Math.sin(elapsed * 60) * 0.15;
-      if (Math.random() < 0.6) fx.burst(s.x + dx * s.beamLen, ey, s.z + dz * s.beamLen, 2, LASER_BITS, 1.6);
-    }
-  };
+
   let hookNodes = [], hookStill = false;
   // A hidden hook sits where it lies, turning slowly (dead still for a visitor who asks for reduced motion), until someone picks it up.
   const poseHooks = (elapsed) => {
@@ -2810,7 +2733,6 @@
     hudMod.leaveTo("block", home);
     camera = createCamera({ fov: 58, near: 0.3, far: 400 });
     audio = BL.blockAudio.create();
-    live.fee = BL.mempool.state.nextFee || 0;
     live.block = 0;
     unfeed = BL.mempool.subscribe(onFeed);
     root = createNode();
@@ -2899,8 +2821,6 @@
     el.power = document.getElementById("block-power");
     el.powerWord = document.getElementById("block-power-word");
     el.staminaK = -1;
-    el.weatherWord = document.getElementById("block-weather-word");
-    el.weatherKind = "";
     el.cross = document.getElementById("block-cross");
     el.viewBtn = document.getElementById("block-view-btn");
     el.soundBtn = document.getElementById("block-sound-btn");
@@ -2964,8 +2884,6 @@
     for (let i = 0; i < C.MAX_SHOTS; i++) shots.push(place(createNode({ geometry: BM.ball(0), visible: false })));
     crates = [];
     for (let i = 0; i < C.MAX_CRATES; i++) crates.push(place(createNode({ geometry: BM.crate(0), visible: false })));
-    rain = [];
-    for (let i = 0; i < RAIN; i++) rain.push({ node: place(createNode({ geometry: BM.streak(), visible: false })), x: 0, y: -1, z: 0 });
     splats = [];
     for (let i = 0; i < MAX_SPLATS; i++) splats.push(place(createNode({ geometry: BM.splat(0), visible: false, depthBias: 0.2 })));
     splatNext = 0;
@@ -3169,8 +3087,8 @@
     hud.dispose();
     phase = "board";
     skyClouds = []; skyPerch = null; trophy = trophyNodes = null;
-    sim = blocks = shots = splats = ticks = pads = crates = rain = caches = zipLights = fpGun = fpGunL = fpFlash = fpFlashL = trampNodes = powerNodes = result = null;
-    mapRoot = fireNode = dancers = peelNodes = catapults = boltNode = boltRing = null;
+    sim = blocks = shots = splats = ticks = pads = crates = caches = zipLights = fpGun = fpGunL = fpFlash = fpFlashL = trampNodes = powerNodes = result = null;
+    mapRoot = fireNode = dancers = peelNodes = catapults = null;
     hookNodes = []; ghostNodes = []; mistNodes = []; moonNode = null;
     catNear = false;
     for (const t of SIM.TEAMS) iceNodes[t] = null;
