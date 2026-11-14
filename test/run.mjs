@@ -8044,6 +8044,38 @@ const gameRulesChecks = async () => {
       }
       record("block frenzy island: on every map an Ooga walks off the open edge and, fallen all the way, is back in its own block zone; a block carried over drops at the edge and goes home; the rock under the rim holds a body out; the jetpack brings the visitor and a bot back after a throw",
         Object.values(rows).every((v) => Object.values(v).every(Boolean)), JSON.stringify(rows));
+      // The jetpack's power is the island's, on the timer it always had: held, it reaches its top speed, climbs (the old
+      // gate pinned it near 1.5 m/s, about 2.1 m in 1.5 s), a full tank from a jump empties about 4.7 s after the press
+      // as it did, it settles at the ceiling without a bounce, leaves a faster throw alone, and a roof stops it.
+      {
+        const C = S.CONFIG, idle = { x: 0, z: 0, jump: 0, jet: 0 }, held = { ...idle, jet: 1 };
+        const air = (y, vy = 0, map = "fort", x = 0, z = 12) => { const r = fresh(map), o = r.actors[0]; o.x = x; o.z = z; o.y = y; o.vy = vy; o.grounded = false; return [r, o]; };
+        const clear = S.ARENAS.fort.BLOCKS.every((b) => 0 < b[0] - 1 || 0 > b[1] + 1 || 12 < b[2] - 1 || 12 > b[3] + 1);
+        let [r, o] = air(3), peak = 0;
+        for (let t = 0; t < 1.5; t += C.STEP) { S.tick(r, C.STEP, held); peak = Math.max(peak, o.vy); }
+        const out = { clear, peak, climb: o.y - 3 };
+        r = fresh(); o = r.actors[0]; o.x = 0; o.z = 12;
+        const press = { ...held, jump: 1 };
+        r.inputs = [press];
+        out.tank = 0;
+        for (; out.tank < 8 && o.fuel > 0; out.tank += C.STEP) S.tick(r, C.STEP, idle);
+        [r, o] = air(9); o.fuel = 99;
+        let top = 0, settled = Infinity;
+        for (let t = 0; t < 6; t += C.STEP) { S.tick(r, C.STEP, held); top = Math.max(top, o.y); if (t > 4) settled = Math.min(settled, o.y); }
+        Object.assign(out, { top, settled });
+        [r, o] = air(3, 9); o.jetting = true;
+        S.tick(r, C.STEP, held);
+        out.thrown = o.vy;
+        const roofs = [["fort", 2, 0, 2.2], ["town", 0, 32.25, 2.7], ["haunted", 0, 36, 2.7]];
+        out.roofs = roofs.map(([map, x, z, roof]) => {
+          const [q, a] = air(Math.max(0, roof - C.HEIGHT - 0.5), C.JET_RISE, map, x, z);
+          let head = 0;
+          for (let t = 0; t < 1.5; t += C.STEP) { S.tick(q, C.STEP, held); head = Math.max(head, a.y + C.HEIGHT); }
+          return head <= roof + 1e-6 && head > roof - 0.05;
+        });
+        record("block frenzy jetpack: held it reaches the island's top speed and climbs, a full tank lasts its old held time, it settles at the ceiling with no bounce, a faster throw keeps its speed, and a roof stops it",
+          out.clear && out.peak >= C.JET_RISE * 0.9 && out.climb > 6 && Math.abs(out.tank - 4.7) < 0.15 && out.top <= C.JET_CEILING + 1e-6 && out.settled > C.JET_CEILING - 0.05 && out.thrown > C.JET_RISE && out.roofs.every(Boolean), JSON.stringify(out));
+      }
     }
     {
       // Hub-style terrain on every map: the boxes come in turned pairs, stand clear of the buildings and every spot the
@@ -12535,6 +12567,10 @@ const blockPoses = { name: "block modelled poses", why: "regression: old straigh
           rows.push({ name, kind, gap, visible: actor.gun.visible, modelled: cave.modelled, own: cave.traits.name === name });
         }
         const actor = D.actors[0], hip = actor.cave.root.position.y;
+        const pack = actor.jet, cave = actor.cave, bounds = BL.scene.boundsOf(pack.geometry), front = new Float64Array(3), back = new Float64Array(3);
+        BL.math.mat4.transformPoint(front, pack.world, 0, 0, bounds.max[2]);
+        BL.math.mat4.transformPoint(back, cave.root.world, 0, .06 * cave.traits.height, -cave.back);
+        rows.push({ name, jet: true, gap: Math.hypot(...front.map((v, i) => v - back[i])), attached: pack.parent === cave.root, scale: pack.scale.x / cave.traits.height });
         a.riding = true; a.crouch = true; update(0, 0); BL.scene.updateWorld(S.root);
         const ends = [-.3, .3].map(x => { const v = new Float64Array(3); BL.math.mat4.transformPoint(v, actor.trolley.world, x, -.15, 0); return v; });
         const dx = ends[1][0] - ends[0][0], dy = ends[1][1] - ends[0][1], dz = ends[1][2] - ends[0][2], len2 = dx * dx + dy * dy + dz * dz;
@@ -12554,8 +12590,9 @@ const blockPoses = { name: "block modelled poses", why: "regression: old straigh
     } finally { S.update = update; D.showBoard(); }
     return rows;
   })()`);
-  record("block modelled poses: regular, slim and wide Oogas grip every weapon and both Golden AKs, and their trophy rests on their raised fists", rows.filter(r => !r.zip).length === 27 && rows.filter(r => !r.zip).every(r => r.trophy ? r.gap < .03 : r.visible && r.modelled && r.own && r.gap < .001), JSON.stringify(rows));
+  record("block modelled poses: regular, slim and wide Oogas grip every weapon and both Golden AKs, and their trophy rests on their raised fists", rows.filter(r => !r.zip && !r.jet).length === 27 && rows.filter(r => !r.zip && !r.jet).every(r => r.trophy ? r.gap < .03 : r.visible && r.modelled && r.own && r.gap < .001), JSON.stringify(rows));
   record("block modelled poses: both fists meet the zipline bar even while crouch is held, weapons are stowed, and letting go restores each Ooga's hip", rows.filter(r => r.zip).length === 3 && rows.filter(r => r.zip).every(r => r.gap < .001 && r.restored && r.hiddenGuns), JSON.stringify(rows.filter(r => r.zip)));
+  record("block modelled jetpacks: regular, slim and wide Oogas carry a body-sized pack seated on their actual back", rows.filter(r => r.jet).length === 3 && rows.filter(r => r.jet).every(r => r.attached && r.gap < .001 && Math.abs(r.scale - 1) < .001), JSON.stringify(rows.filter(r => r.jet)));
 } };
 const blockZipline = { name: "block zipline controls", why: "rule: the ride control and warning lamps must agree about a rival zipline's trap for either team", run: async b => {
   const rows = await b.evaluate(`(() => {
@@ -25419,7 +25456,7 @@ scene("block", { label: "block phone", opts: PHONE_SIZE, steps: [phone("block", 
     for (const [width, height] of [[390,844],[844,390],[320,568]]) {
       await b.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: true });
       await b.sleep(100);
-      await b.evaluate(`__ooga.block.showBoard();new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+      await b.evaluate(`__ooga.block.showBoard();document.querySelector('#block-board [data-map="town"]').click();new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
       rows.push({ width, phase: "board", bad: await b.evaluate(PHONE(['#block-board [data-action="block-start"]'])) });
       await b.evaluate(`(() => { const D=__ooga.block;D.start(604);D.sim.prep=0;Object.assign(D.sim.actors[0],{flight:0,grounded:true,x:-7,z:4,y:0,vy:0}); })()`);
       rows.push({ width, phase: "play", bad: await b.evaluate(PHONE(["#joy-move", "#joy-look", "#act", "#block-paint", "#block-tools [data-tool=paint]"])) });
@@ -25428,10 +25465,23 @@ scene("block", { label: "block phone", opts: PHONE_SIZE, steps: [phone("block", 
       await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
       const fired = await b.evaluate(`__ooga.block.sim.actors[0].lastKind === "paint" && __ooga.block.sim.actors[0].cooldown > 0`);
       rows.push({ width, fired });
+      // Hold the actual touch Jump control through the jump's apex, then release and cancel a fresh hold.
+      // Spawn protection keeps a gorilla or a bot from interrupting this input check.
+      await b.evaluate(`(() => { const D=__ooga.block;D.cam.first=D.cam.close=D.cam.island=false;if(!BL.blockSim.ARENA.BLOCKS.every(b=>0<b[0]-1||0>b[1]+1||6<b[2]-1||6>b[3]+1))throw Error("Jetpack flight column is obstructed");Object.assign(D.sim.actors[0],{x:0,z:6,y:0,vy:0,grounded:true,flight:0,grabbed:0,guard:30,fuel:BL.blockSim.CONFIG.JET_FUEL});__ooga.advance(.1,1/60); })()`);
+      const jump = await b.evaluate(`(() => { const r=document.getElementById("act").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
+      await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [jump] });
+      const flight = await b.evaluate(`(() => { __ooga.advance(1.8,1/60);const D=__ooga.block,a=D.sim.actors[0];return {map:D.sim.map,y:a.y,vy:a.vy,fuel:a.fuel,jet:a.jetting,flame:D.actors[0].jetFlame.visible}; })()`);
+      if (process.env.BLOCK_JET_SHOTS) { mkdirSync(process.env.BLOCK_JET_SHOTS,{recursive:true});await b.screenshot(join(process.env.BLOCK_JET_SHOTS,"jet-phone-"+width+".png")); }
+      await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      const released = await b.evaluate(`(() => { __ooga.advance(.1,1/60);const D=__ooga.block;return !D.sim.actors[0].jetting&&!D.actors[0].jetFlame.visible; })()`);
+      await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [jump] });
+      await b.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+      const cancelled = await b.evaluate(`(() => { __ooga.advance(.1,1/60);return !__ooga.block.sim.actors[0].jetting; })()`);
+      rows.push({ width, flight, released, cancelled, fired: flight.map === "town" && flight.y > 6 && flight.vy > 6 && flight.fuel > 0 && flight.fuel < 4.4 && flight.jet && flight.flame && released && cancelled });
       await b.evaluate(`(() => { const D=__ooga.block;D.sim.over=true;D.sim.winner=D.sim.team;D.simulate(.1);__ooga.advance(.1); })()`);
       rows.push({ width, phase: "results", bad: await b.evaluate(PHONE(['#block-results [data-action="block-again"]','#block-results [data-action="block-board"]','#block-results [data-role="leave"]'])) });
     }
-    record("block phone: portrait, landscape and narrow screens keep the controls reachable, a real Throw tap fires, and the results names and actions fit", rows.every(r => r.bad ? !r.bad.length : r.fired), JSON.stringify(rows));
+    record("block phone: portrait, landscape and narrow screens keep the controls reachable, real Throw taps fire, held Jump climbs with flame and fuel use, release/cancel cuts thrust, and the results names and actions fit", rows.every(r => r.bad ? !r.bad.length : r.fired), JSON.stringify(rows));
   }
 }] });
 scene("orbit", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("orbit", { card: '[data-intro="orbit"]', play: "window.__ooga.orbit.launch()", required: ["#joy-move", "#act", "#leave-hud"] })] });

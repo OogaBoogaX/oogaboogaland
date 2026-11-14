@@ -48,7 +48,9 @@
     NET_S: 4, NET_SLOW: 0.4, PASS_SPEED: 13, PASS_LIFT: 5, PASS_GRAVITY: 13, PASS_SAFE: 0.45, CATCH_R: 1.5,
     WEATHER_S: [24, 42],
     TRAMP_R: 1.0, BOUNCE: 13.5, STEP_UP: 0.45, FIRE_R: 0.95, BURN_HOPS: 3, BURN_SLOW: 0.25,
-    JET_FUEL: 2.6, JET_REFILL: 3, JET_ACCEL: 27, JET_RISE: 6, JET_CEILING: 15,
+    // The jetpack matches the island's: `JET_ACCEL` against `FALL` nets its +11 m/s² up to its 7 m/s, and `JET_FUEL` is
+    // seconds of thrust. Within `JET_RISE / JET_EASE` of `JET_CEILING` the top speed eases to nothing, so it arrives and hovers.
+    JET_FUEL: 4.4, JET_REFILL: 3, JET_ACCEL: 27, JET_RISE: 7, JET_CEILING: 15, JET_EASE: 2.3,
     GORILLA_SPEED: 3.2, GORILLA_CHARGE: 8, GORILLA_SIGHT: 8, GORILLA_LEASH: 11, GORILLA_WANDER: 5, GORILLA_R: 0.75,
     GORILLA_GRAB_R: 1.2, GRAB_NEED: 10, GRAB_DRAIN: 1.4, GRAB_MASH: 5, GRAB_MAX_S: 30, GORILLA_REST: 6, GORILLA_STUN: 1.6,
     // A captive is dragged by the feet to the nearest edge at `GORILLA_DRAG`, swung over the wind-up (`GORILLA_THROW_S`)
@@ -780,7 +782,7 @@
       x: 0, z: 0, y: 0, vx: 0, vz: 0, vy: 0, heading: 0, moving: 0, carrying: null, splat: 0, guard: 0, cooldown: 0,
       blocked: null, stuck: 0, lastX: 0, lastZ: 0, detour: 0, aim: 0, trapped: 0, think: 0, grounded: true, jumps: 0, crouch: false,
       waiting: false, stamina: 4, tired: false, sprinting: false, rest: 0, botJump: false, jump2At: 0, tries: 0, progT: 0, lastD: 0, netted: 0, grenade: 0, rocket: 0, net: 0, sniper: 1, crates: 0, holding: false, bonked: false,
-      climbing: false, riding: false, zipT: 0, flight: 0, zipLine: "blue", lastKind: "paint", wield: "", grabbed: 0, grabFill: 0, flung: false, fuel: 2.6, jetting: false, boots: 0, laser: 0, burnt: 0, slip: 0, gold: false, akMag: 30, akReload: 0, monkeys: 0, monkeyCool: 0,
+      climbing: false, riding: false, zipT: 0, flight: 0, zipLine: "blue", lastKind: "paint", wield: "", grabbed: 0, grabFill: 0, flung: false, fuel: CONFIG.JET_FUEL, jetting: false, boots: 0, laser: 0, burnt: 0, slip: 0, gold: false, akMag: 30, akReload: 0, monkeys: 0, monkeyCool: 0,
       knock: 0, spooked: 0, beam: 0, beamLen: 0, ride: 0, rider: 0, calling: 0, navI: -1, navT: 0, route: "", routeT: 0, botClimb: false, botStop: false, botStraight: false, crateGo: 0, crateX: 0, crateZ: 0, routeBan: 0, jetT: 0, hopT: 0, crateT: 0, stacks: 0,
       detourX: 0, detourZ: 0, painted: 0, captures: 0, splats: 0, hits: 0, longShot: 0, rescues: 0, edgeX: 0, edgeY: 0, edgeZ: 0, falls: 0,
       boltCool: 0, hook: 0, hk: 0, hookT: 0, hookLen: 0, hookWait: 0, hookTarget: -1, hookTip: { x: 0, y: 0, z: 0 }, hookEnd: { x: 0, y: 0, z: 0 }, hookHold: false, flingT: 0
@@ -2335,13 +2337,14 @@
     else if (d > 0.4) {
       const h = a.botStraight ? Math.atan2(goal.x - a.x, goal.z - a.z) : steer(sim, a, goal.x, goal.z);
       a.vx = Math.sin(h) * speed; a.vz = Math.cos(h) * speed;
-      // An expert hops a wall or a crate in its way on the jetpack rather than walking round it.
+      // An expert hops a wall or a crate in its way on the jetpack rather than walking round it, on a short burn: a
+      // long one at full thrust sails it 7 m up and past where it was going.
       if (ex && a.grounded && a.y < 0.3 && !a.botClimb && a.hopT <= 0 && d > 3 && a.netted <= 0 && a.burnt <= 0) {
         const bh = Math.atan2(goal.x - a.x, goal.z - a.z);
         const px = a.x + Math.sin(bh) * 1.8, pz = a.z + Math.cos(bh) * 1.8;
         // Only something low enough to clear (a crate, a wall), not a building or a tower.
         if (!clearLine(a.x, a.z, px, pz, CONFIG.BODY_R) && groundAt(px, pz, 9) < 4.5) {
-          a.botJump = true; a.jetT = 1.1; a.hopT = 2.2;
+          a.botJump = true; a.jetT = 0.55; a.hopT = 2.2;
           a.vx = Math.sin(bh) * speed; a.vz = Math.cos(bh) * speed;
         }
       }
@@ -2357,7 +2360,7 @@
         a.tries++;
         a.botJump = true;
         // An expert fires the jetpack on top of the jump.
-        if (ex) a.jetT = 1.2; else a.jump2At = sim.time + 0.28;
+        if (ex) a.jetT = 0.6; else a.jump2At = sim.time + 0.28;
       } else if (stalled) {
         a.tries = 0;
         a.detour = 1.2;
@@ -2822,10 +2825,11 @@
       const stepUp = a.grounded ? CONFIG.STEP_UP : 0.05;
       resolve(a, CONFIG.BODY_R, stepUp);
       // The jetpack, every Ooga's as on the island: Space held in the air, once the jump has lost its lift, thrusts up on
-      // the fuel; standing, the tank refills.
+      // the fuel and keeps thrusting to the top speed, never braking a throw or a bounce already rising faster; standing,
+      // the tank refills.
       if (a.jetT > 0) a.jetT -= dt;
       a.jetting = free && (a.bot ? a.jetT > 0 : !!input.jet) && !a.grounded && !a.flight && !a.riding && a.netted <= 0 && a.burnt <= 0 && a.slip <= 0
-        && a.fuel > 0 && a.vy < 1.5 && a.y < CONFIG.JET_CEILING;
+        && a.fuel > 0 && a.vy <= (a.jetting ? CONFIG.JET_RISE : 1.5) && a.y < CONFIG.JET_CEILING;
       if (a.jetting) a.fuel = Math.max(0, a.fuel - dt);
       else if (a.grounded && a.fuel < CONFIG.JET_FUEL) a.fuel = Math.min(CONFIG.JET_FUEL, a.fuel + dt * CONFIG.JET_FUEL / CONFIG.JET_REFILL);
       // A ladder: pushing into a tower's ladder climbs it, and at the top steps onto the platform.
@@ -2848,7 +2852,7 @@
       } else if (a.vy !== 0 || a.y > ground) {
         // Under a parachute the fall is a steady drift.
         if (a.flight === 2) a.vy = -CONFIG.CHUTE_FALL; else a.vy -= CONFIG.FALL * dt;
-        if (a.jetting) a.vy = Math.min(CONFIG.JET_RISE, a.vy + CONFIG.JET_ACCEL * dt);
+        if (a.jetting) a.vy = Math.min(CONFIG.JET_RISE, (CONFIG.JET_CEILING - a.y) * CONFIG.JET_EASE, a.vy + CONFIG.JET_ACCEL * dt);
         a.y += a.vy * dt;
         const ceiling = ceilingAt(a.x, a.z, a.y - a.vy * dt);
         if (a.vy > 0 && a.y + heightOf(a) > ceiling) { a.y = ceiling - heightOf(a); a.vy = 0; }
