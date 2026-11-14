@@ -330,6 +330,8 @@ export const parseClientMessage = (text) => {
   if (msg.t === "tess-guide") return tessQueue.parse(msg);
   // Ooga Chat's panel (#665, room-audience.js): a zone to see, or a fresh snapshot of it.
   if (msg.t === "audience-view" || msg.t === "audience-resync") return audienceRoom.parse(msg);
+  // Ooga Chat's outdoor handshake (#667): `enter` and `leave`, an epoch each.
+  if (msg.t === "outdoor") return audienceRoom.parseOutdoor(msg);
   if (msg.t === "hockey") return HOCKEY.parse(msg);
   if (msg.t === "bf") return BLOCK.parse(msg);
   if (msg.t === "studio") return parseStudioCommand(msg);

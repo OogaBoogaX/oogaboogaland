@@ -163,6 +163,8 @@ export class Room extends DurableObject {
     this.restoreDoor();
     this.hostId = electHost(this.players.values());
     this.followers = npcFollowers(this.players.values(), this.hostId);
+    // Outdoor grants held over a wake or a redeploy are checked again, and taken back if the switch is now off.
+    audienceRoom.restore(this);
     this.inspect.woke(this.players.size);
   }
 
@@ -185,7 +187,7 @@ export class Room extends DurableObject {
   }
 
   attachment(p) {
-    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, block: p.block || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, roomLock: p.roomLock, pinTries: this.pinTries.get(p.id) || null, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm, audienceZone: p.audienceZone || null };
+    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, block: p.block || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, roomLock: p.roomLock, pinTries: this.pinTries.get(p.id) || null, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm, audienceZone: p.audienceZone || null, outdoor: p.outdoor || null };
   }
 
   view(p) {
@@ -476,6 +478,8 @@ export class Room extends DurableObject {
 
     const older = this.players.get(who.id);
     if (older) this.evict(older, "replaced");
+    // The account's last connection's outdoor grants are taken back before this one's welcome (#667).
+    await audienceRoom.settled(this, who.id);
     if (this.players.size >= MAX_PLAYERS) {
       this.inspect.event("full", who);
       this.send(server, { t: "kick", reason: "full" });
@@ -666,6 +670,9 @@ export class Room extends DurableObject {
       p.handTone = msg.tone;
       p.handEmoji = msg.e;
       this.broadcast({ t: "hand", id: p.id, on: p.hand, tone: p.handTone, e: p.handEmoji }, p.ws);
+    } else if (msg.t === "outdoor") {
+      // Ooga Chat's outdoor handshake (room-audience.js): each frame in order, the grant saved on the attachment there.
+      return audienceRoom.outdoor(this, p, msg);
     } else if (msg.t === "audience-view" || msg.t === "audience-resync") {
       // Ooga Chat's panel (room-audience.js): its zone rides the attachment, saved there.
       return audienceRoom.view(this, p, msg.zone, msg.t === "audience-resync");
@@ -717,6 +724,8 @@ export class Room extends DurableObject {
       this.broadcast({ t: "body", id: p.id, name: p.body });
       this.enforceStudio(); this.updateVoice();
     }
+    // A zone, body or crossing that no longer matches an open outdoor grant takes it back (#667).
+    audienceRoom.check(this, p);
     ws.serializeAttachment(this.attachment(p));
   }
 
@@ -762,6 +771,7 @@ export class Room extends DurableObject {
     p.cabinet = { id: msg.id, q: msg.q };
     p.x = at.x; p.y = at.y; p.z = at.z; p.yaw = at.yaw; p.g = null; p.j = p.w = 0; p.v = null; p.va = 0; p.r = undefined;
     p.blendTo = null; p.blendK = 0;
+    audienceRoom.check(this, p);
     p.ws.serializeAttachment(this.attachment(p));
     this.dirty = true;
     this.scheduleFlush();
@@ -783,7 +793,7 @@ export class Room extends DurableObject {
     this.background(this.clearVoice(p));
     this.privateLeave(p);
     this.players.delete(p.id);
-    audienceRoom.leave(this);
+    audienceRoom.leave(this, p);
     tessQueue.presence(this, p, true, reason === "revoked");
     // A dropped socket can come straight back in; the last one out frees the room.
     const lockedIn = this.roomOf(p.zone), held = this.roomLocks.get(lockedIn);
@@ -810,6 +820,7 @@ export class Room extends DurableObject {
     p.j = p.w = 0; p.v = null; p.va = 0; p.r = undefined;
     this.leaveStudio(p);
     this.chalkLetGo(p);
+    audienceRoom.check(this, p);
     p.ws.serializeAttachment(this.attachment(p));
     this.broadcast({ t: "body", id: p.id, name: null });
     this.updateVoice();
@@ -1146,6 +1157,9 @@ export class Room extends DurableObject {
   // Ooga Chat's audience (audience.js) sends each change of a zone a panel here watches, and its speakers' publications.
   audienceDelta(delta) { audienceRoom.delta(this, delta); }
   audienceSources(list) { return audienceRoom.sources(this, list); }
+  // The outdoor handshake's answers from the Audience (#667): confirmed retirements, and each zone's listeners.
+  audienceConfirmed(ids) { audienceRoom.confirmed(this, ids); }
+  audienceListeners(counts) { audienceRoom.listeners(this, counts); }
 
   // /voice/<op> from the Worker, which checked the session and set x-player-id. Ops: session (a publish
   // or receive session), publish (the mic's offer), live (the publishing connection is up: only now is the
@@ -1756,7 +1770,8 @@ export class Room extends DurableObject {
   nextAlarm(now = Date.now()) {
     const here = this.players.size > 0;
     const cleanup = this.sfu && this.cleanupJobs && this.cleanupJobs.length ? (this.cleanupAt || now + SWEEP_MS) : Infinity;
-    const next = Math.min(here ? this.sweepAt || now + SWEEP_MS : Infinity, here ? this.nextDoorExpiry() : Infinity, cleanup, tessQueue.deadline(this));
+    const next = Math.min(here ? this.sweepAt || now + SWEEP_MS : Infinity, here ? this.nextDoorExpiry() : Infinity, cleanup, tessQueue.deadline(this),
+      audienceRoom.retryDue(this));
     return Number.isFinite(next) ? next : null;
   }
 
@@ -1795,6 +1810,8 @@ export class Room extends DurableObject {
     tessQueue.sweep(this);
     // Cleanup retries run on every wake, not only at sweep time.
     await this.retryCleanup();
+    // Ooga Chat's audience told again what it missed, and grants still closing asked about again (#667).
+    await audienceRoom.retry(this);
     // A full retry pass can outlast a sweep interval. Advance from completion, not the old start time.
     const now = Date.now();
     const sweepDue = !this.sweepAt || now >= this.sweepAt;

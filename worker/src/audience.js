@@ -24,6 +24,7 @@ import { appRow, createAudience, DEFAULT_LIMITS, ID, isZone, ZONES } from "./aud
 import { decideCapability } from "./chat-capability.js";
 import { contributorFor } from "./contributor-access.js";
 import { readContributorSnapshot } from "./contributor-policy.js";
+import { bridgeFeatures } from "./chat-bridge-protocol.js";
 import { createMediaBroker, MEDIA_BODY_MAX } from "./audience-media.js";
 
 export const AUDIENCE_NAME = "audience";
@@ -89,6 +90,9 @@ export class Audience extends DurableObject {
     this.contributorFor = contributorFor;
     this.media = createMediaBroker(this);
     this.sourcesSig = "";
+    // #667: retirements the Room waits on, and whether each zone had listeners when the Room was last told.
+    this.pendingWas = new Set();
+    this.listenersSig = "";
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     ctx.blockConcurrencyWhile(async () => {
       let meta = await ctx.storage.get("meta");
@@ -112,6 +116,16 @@ export class Audience extends DurableObject {
       // The list the Room was last told, kept: a wake sends only what changed meanwhile (a deployment that dropped every
       // socket empties it), so the Room's own stored copy never stays stale.
       this.sourcesSig = (await ctx.storage.get("sourcesSig")) ?? null;
+      // The island's `outdoor` switch off (the kill switch, deployed): no island publication stays pullable.
+      if (!bridgeFeatures(env).outdoor && this.island.speakers.length) {
+        this.island = { ...this.island, speakers: [] };
+        await ctx.storage.put("world", this.island);
+        this.model.setWorld([], this.island.active);
+        this.model.commit();
+        for (const zone of ZONES) this.model.zones[zone].rev = meta.revs && Number.isSafeInteger(meta.revs[zone]) ? meta.revs[zone] : 0;
+        await this.media.prune();
+      }
+      this.pendingWas = this.media.pending();
       this.sourcesChanged();
     });
   }
@@ -148,6 +162,7 @@ export class Audience extends DurableObject {
         this.send(ws, { type: "delta", zone: delta.zone, epoch: delta.epoch, base: delta.base, revision: delta.rev,
           upsert: delta.upsert.map((row) => appRow(row, c.id)), remove: delta.remove });
       }
+      this.listenersChanged();
       if (this.watching.has(delta.zone) && this.env.ROOM) {
         // In order, one at a time: the Room relays each to the island's panels, which apply a delta only on its base.
         this.roomQueue = this.roomQueue.then(() => this.env.ROOM.getByName("island").audienceDelta(delta)).catch(() => {});
@@ -155,6 +170,16 @@ export class Audience extends DurableObject {
       }
     }
     return deltas;
+  }
+
+  /** Each zone's listener count for the Room's open grants (#667), sent when a zone gains or loses its last listener. */
+  listenersChanged() {
+    const counts = { main: this.model.counts("main").listeners, dsb: this.model.counts("dsb").listeners };
+    const sig = `${counts.main > 0}|${counts.dsb > 0}`;
+    if (sig === this.listenersSig || !this.env.ROOM) return;
+    this.listenersSig = sig;
+    this.roomQueue = this.roomQueue.then(() => this.env.ROOM.getByName("island").audienceListeners(counts)).catch(() => {});
+    this.background(this.roomQueue);
   }
 
   snapshotFor(c) {
@@ -195,7 +220,21 @@ export class Audience extends DurableObject {
     }
     await this.flush();
     if (this.media.cleanup.length) await this.media.runCleanup();
+    this.confirmRetired();
     await this.scheduleAlarm();
+  }
+
+  /** Tell the Room which speakers' outdoor subscriptions are now confirmed closed, so it can send `closed` (#667). */
+  confirmRetired() {
+    const now = this.media.pending();
+    const done = [...this.pendingWas].filter((id) => !now.has(id));
+    this.pendingWas = now;
+    if (!done.length || !this.env.ROOM) return;
+    this.roomQueue = this.roomQueue.then(() => this.env.ROOM.getByName("island").audienceConfirmed(done)).catch(() => {
+      // Not delivered: kept as pending-then-done, so the next check reports them again (the Room also asks each sweep).
+      for (const id of done) if (!this.media.pending().has(id)) this.pendingWas.add(id);
+    });
+    this.background(this.roomQueue);
   }
 
   /** A lease ended: its publication leaves the catalog and is closed, with every subscription to it (#666). */
@@ -368,7 +407,9 @@ export class Audience extends DurableObject {
   /** The island's whole word on its players, newest `seq` wins: who publishes outdoors where, who is in its voice. */
   async world(seq, speakers, active) {
     if (!Number.isSafeInteger(seq) || seq <= this.island.seq || !Array.isArray(speakers) || !Array.isArray(active)) return { ok: false };
-    const clean = speakers.slice(0, 64).filter((s) => s && ID.test(s.id) && isZone(s.zone)).map((s) => ({
+    // With the island's `outdoor` switch off, no island publication is listed or pullable, whatever the Room sends.
+    const allowed = bridgeFeatures(this.env).outdoor ? speakers : [];
+    const clean = allowed.slice(0, 64).filter((s) => s && ID.test(s.id) && isZone(s.zone)).map((s) => ({
       id: s.id, zone: s.zone, mic: s.mic === "on" ? "on" : "muted", character: typeof s.character === "string" ? s.character.slice(0, 40) : null,
       hand: typeof s.hand === "string" ? s.hand.slice(0, 32) : "", speaking: s.speaking === true,
       // The publication to pull, by reference: kept here and given to no client.
@@ -382,11 +423,15 @@ export class Audience extends DurableObject {
     const ended = this.model.setWorld(this.island.speakers, this.island.active);
     for (const { connId, lease } of ended) { this.save(connId); this.leaseEnded(connId, lease, "source_in_use"); this.tellYou(connId); }
     await this.flush();
-    // A world publication gone or replaced: every subscription to the old one is closed at once.
+    // A world publication gone or replaced: every subscription to the old one is closed at once. The answer names the
+    // speakers whose subscriptions the SFU has not yet confirmed closed: the Room's `closed` for them waits (#667).
     await this.media.prune();
+    const pending = this.media.pending();
+    // Report every retirement that finished meanwhile, by any path, before the pending list moves on.
+    this.confirmRetired();
     await this.scheduleAlarm();
     if (clean.length) this.refreshContributions();
-    return { ok: true };
+    return { ok: true, pending: [...pending], listeners: { main: this.model.counts("main").listeners, dsb: this.model.counts("dsb").listeners } };
   }
 
   /** A canonical snapshot of a zone, for the Room's panels. */

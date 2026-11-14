@@ -79,8 +79,9 @@ const host = () => {
     setWebSocketAutoResponse() {}, waitUntil: (t) => tasks.push(t), blockConcurrencyWhile(fn) { this.ready = fn(); return this.ready; },
     acceptWebSocket: (ws) => sockets.push(ws), getWebSockets: () => sockets.filter((ws) => ws.readyState <= 1),
   };
-  const env = { REALTIME_APP_ID: "app", REALTIME_SECRET: "secret",
-    ROOM: { getByName: () => ({ audienceDelta: async (d) => room.deltas.push(d), audienceSources: async (list) => room.sources.push(list) }) } };
+  const env = { REALTIME_APP_ID: "app", REALTIME_SECRET: "secret", OOGA_CHAT_FEATURES: "bridge,outdoor",
+    ROOM: { getByName: () => ({ audienceDelta: async (d) => room.deltas.push(d), audienceSources: async (list) => room.sources.push(list),
+      audienceListeners: async (c) => (room.listeners = c), audienceConfirmed: async (ids) => (room.confirmed = (room.confirmed || []).concat(ids)) }) } };
   const make = async () => {
     const a = new Audience(ctx, env);
     await ctx.ready;
@@ -277,7 +278,7 @@ const roomHarness = async () => {
   runInNewContext(source, context);
   const ctx = { setWebSocketAutoResponse() {}, blockConcurrencyWhile: (fn) => { ready = fn(); }, acceptWebSocket: (ws) => accepted.push(ws), waitUntil() {},
     getWebSockets: () => accepted.filter((ws) => !ws.closed), storage: { get: async (k) => (Array.isArray(k) ? new Map() : saved.get(k)), put: async (k, v) => saved.set(k, v), getAlarm: async () => null, setAlarm: async () => {} } };
-  const env = { OOGA_CHAT_FEATURES: "bridge", AUDIENCE: { getByName: () => ({ world: async () => ({ ok: true }), watch: async () => {}, snapshot: async () => null }) } };
+  const env = { OOGA_CHAT_FEATURES: "bridge,outdoor", AUDIENCE: { getByName: () => ({ world: async () => ({ ok: true, pending: [] }), watch: async () => {}, snapshot: async () => null }) } };
   const room = new context.Room(ctx, env);
   await ready;
   // The same Room woken from hibernation: a new object over the same storage.

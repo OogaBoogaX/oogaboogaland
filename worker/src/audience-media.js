@@ -64,15 +64,23 @@ export const createMediaBroker = (aud) => {
 
   // --- the durable cleanup queue ---
   const persistCleanup = () => aud.ctx.storage.put("mediaCleanup", cleanup);
-  /** Close `mids` on `session` (or everything still open on it, `all`), now and, if that fails, from the alarm. */
-  const queueClose = async (session, mids, all = false) => {
+  /**
+   * Close `mids` on `session` (or everything still open on it, `all`), now and, if that fails, from the alarm.
+   * `participants` are the speakers whose publication those mids pulled: until the job is done they are still heard by
+   * someone outdoors, and the island's `closed` for them waits (#667).
+   */
+  const queueClose = async (session, mids, all = false, participants = []) => {
     if (!sfu || !session || (!mids.length && !all)) return;
     let job = cleanup.find((j) => j.session === session);
     // A merge bumps the job's version, so a run already in flight for it leaves it for the run this one starts.
-    if (job) { job.mids = [...new Set(job.mids.concat(mids))]; job.all = job.all || all; job.v = (job.v || 0) + 1; }
-    else cleanup.push(job = { session, mids: [...new Set(mids)], all, at: Date.now(), tries: 0 });
+    if (job) {
+      job.mids = [...new Set(job.mids.concat(mids))]; job.all = job.all || all;
+      job.participants = [...new Set((job.participants || []).concat(participants))]; job.v = (job.v || 0) + 1;
+    } else cleanup.push(job = { session, mids: [...new Set(mids)], all, at: Date.now(), tries: 0, participants: [...new Set(participants)] });
     await persistCleanup();
     await runCleanup(job);
+    // A retirement this run finished is confirmed to the Room now, not only at the next alarm.
+    if (typeof aud.confirmRetired === "function") aud.confirmRetired();
   };
   // Two runs can hold the same job at once (the alarm's, and `queueClose`'s after a merge: an SFU call opens the object's
   // input gate), so a job leaves the queue only if it is still there, never by a stale index.
@@ -136,11 +144,12 @@ export const createMediaBroker = (aud) => {
     for (const [connId, s] of states) {
       if (!s.sub) continue;
       const allowed = authorizedFor(aud.model.conns.get(connId));
-      const gone = Object.entries(s.mids).filter(([, [participant, gen]]) => { const a = allowed.get(participant); return !a || a.gen !== gen; }).map(([mid]) => mid);
-      if (!gone.length) continue;
+      const goneEntries = Object.entries(s.mids).filter(([, [participant, gen]]) => { const a = allowed.get(participant); return !a || a.gen !== gen; });
+      if (!goneEntries.length) continue;
+      const gone = goneEntries.map(([mid]) => mid), whose = [...new Set(goneEntries.map(([, [participant]]) => participant))];
       for (const mid of gone) delete s.mids[mid];
       await save(connId);
-      await queueClose(s.sub, gone);
+      await queueClose(s.sub, gone, false, whose);
       const ws = aud.sockets.get(connId);
       if (ws) aud.send(ws, { type: "media", op: "sync" });
     }
@@ -190,9 +199,10 @@ export const createMediaBroker = (aud) => {
     if (op === "receive/sync") {
       if (!s.sub) return refuse("receive_required", 400);
       const session = s.sub, allowed = authorizedFor(conn);
-      const closed = Object.entries(s.mids).filter(([, [participant, gen]]) => { const a = allowed.get(participant); return !a || a.gen !== gen; }).map(([mid]) => mid);
+      const closedEntries = Object.entries(s.mids).filter(([, [participant, gen]]) => { const a = allowed.get(participant); return !a || a.gen !== gen; });
+      const closed = closedEntries.map(([mid]) => mid);
       for (const mid of closed) delete s.mids[mid];
-      if (closed.length) await queueClose(session, closed);
+      if (closed.length) await queueClose(session, closed, false, [...new Set(closedEntries.map(([, [participant]]) => participant))]);
       const held = new Set(Object.values(s.mids).map(([participant]) => participant));
       const wanted = [...allowed].filter(([participant]) => !held.has(participant)).slice(0, Math.max(0, TRACKS_MAX - held.size));
       if (!wanted.length) { await save(conn.connId); return answer({ tracks: [], closed, requiresImmediateRenegotiation: false }); }
@@ -317,6 +327,8 @@ export const createMediaBroker = (aud) => {
   return {
     request, restore, retirePublication, releaseAll, prune, chatSources, authorizedFor, runCleanup,
     get cleanup() { return cleanup; }, get states() { return states; }, get configured() { return !!sfu; },
+    /** Speakers some outdoor subscription to whom is not yet confirmed closed at the SFU. */
+    pending: () => new Set(cleanup.flatMap((job) => job.participants || [])),
     nextCleanup: () => (cleanup.length ? Date.now() + CLEANUP_RETRY_MS : Infinity),
   };
 };

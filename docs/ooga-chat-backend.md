@@ -380,6 +380,79 @@ and downlink. The worst case to test is every island outdoor publisher (up to 32
 publications a listener. If direct tracks fail the phone target, a server-side mix is a separate design with its own
 cost, latency and security review; no speaker is dropped to fit.
 
+## The privacy boundary (#667)
+
+The guarantee: the island's private audio (a cave, a level below, a Sphere room, the Bifrost chamber, a DSB room, any
+other scene, a voice link) is never discoverable or subscribable through Ooga Chat, and a valid transition out of the
+outdoors cannot carry new private microphone samples to a subscription that was public. Launch waits on this.
+
+**Who decides the scope.** The page decides first and finer, from the body's own geometry (`src/js/outdoor-scope.js`,
+#658: a cave's doorway plane, the Sphere's shell), and asks the Room with the handshake (#661). The Room admits only a
+scope its own registry agrees with (`worker/src/outdoor-policy.js`), from what it holds about the player: its zone, its
+body, a level crossing (`blendTo`) and a cabinet seat. The registry is default-deny, every public zone named one by one:
+
+| Zone | Scope |
+|---|---|
+| `outside`, `between`, `sphere`, `rainforest`, `bifrost` | `main` |
+| `dsb-outside` | `dsb` |
+| no body; any crossing to or between levels; a seat at a hall cabinet (the cave apron's outdoor seats are `outside`) | none |
+| every other zone, known or not: `hq`, `hq-basement`, `rainforest-under`, `repos` (Merge Rock, no decision yet), `sphere-0`…`sphere-9`, `bifrost.chamber`, every DSB room, every other scene's zone | none |
+
+A new outdoor is added here with a check; a new interior needs nothing to stay excluded. The checks enumerate the island's
+world zones and DSB Land's rooms from their own sources, so a new one is caught as it lands.
+
+**The handshake** (the Room's `outdoor-voice-v1`, offered only with the island's `outdoor` switch; frames in
+`docs/auth-and-presence.md`, "Outdoor voice bridge"). Each connection's grant is `none`, `open` or `closing`:
+
+```
+ none ──enter(epoch, scope), Room agrees──▶ open ──leave(≥epoch), or the Room's own view disagrees──▶ closing
+  ▲                                                                                                    │
+  └──────────── closed(epoch): the Audience confirms no outdoor subscription to the publication is left ──┘
+```
+
+- Frames are handled one at a time a connection, in order. An epoch the page gave up never opens again, however it is
+  replayed; an `open` answers only the latest `enter`, for the scope asked; a repeated `enter` of the open epoch opens
+  nothing new; a `leave` below the open epoch closes nothing that is held.
+- `enter` is refused with a reason (`scope`, `interior`, `descending`, `no-body`, `cabinet`, `pending` while another scope
+  is still closing, `unavailable` with the switch off).
+- The Room takes a grant back **by itself** whenever its own view stops agreeing: a zone message (the next scene's zone,
+  a room, a level), a body released or changed, a crossing begun, a hall cabinet taken, the switch found off on a wake.
+  This closes the transition gap found in review on #673 and #676, where a page keeps reporting `main` through a scene
+  change: the next scene's zone reaches the Room, and the grant goes, unprompted.
+- **The barrier, in order.** A grant leaving `open` first leaves the island's word (`world`), so the Audience removes the
+  publication from its catalog and refuses any new subscription. The Audience then closes, at the SFU, every Ooga Chat
+  listener's pull of that publication (#666), and the Room closes every island player's pull of Ooga Chat speakers that
+  the grant allowed. The Room sends `closed` only when the Audience answers that none of those closes for this
+  identity is still unconfirmed. If the SFU has not confirmed (a timeout, a 5xx), nothing is said: the grant stays
+  `closing`, the page keeps its microphone track held, the close is retried from the Audience's durable queue, and its
+  confirmation (`audienceConfirmed`, sent by whichever cleanup run finishes it) sends `closed` when it comes. If the
+  Audience itself could not be told, the Room tells it again from its own alarm, backing off from 2 s to a minute, until
+  it lands, so a grant the Room took back unprompted never leaves its publication listed. Each sweep also asks again
+  for every grant still `closing`, so a lost confirmation costs a minute, not a microphone held for good. The page's own
+  retries of `leave` ask again too.
+- A socket closing takes its grants back. A new connection of the same account gets its `welcome` only after the old
+  connection's word has reached the Audience (a bounded wait, 3 s).
+- An island player with an open grant hears its zone's Ooga Chat speakers (`sources`) and the zone's listener count
+  (`audience`), so a lone outdoor speaker is not "alone". Without a grant, never.
+
+**Samples already sent.** The guarantee is about new samples. Audio the microphone captured while the grant was open
+may still be in flight to a subscriber for a moment after; what is said after the page's `leave`, with its track held, is
+never captured into the publication, and no subscription survives to the next unheld sample: the hold lifts only on
+`closed`, which follows the SFU's confirmation.
+
+**The kill switch.** Deploying the island Worker with `OOGA_CHAT_FEATURES` lacking `outdoor` stops the handshake from
+being offered, takes back every grant a woken Room holds (`closed`, reason `unavailable`), lists no island publication in
+the Audience, and closes every pull of one. Unrelated island voice is untouched. Turning `bridge` off as well stops
+every outward operation but `hello`, `cast` and `revoke`.
+
+**Threat model.** No web application can stop someone from re-broadcasting audio they can already hear, and no server
+can prove a browser's physical place in a game the browser simulates. The Room's view is built from what the page
+reports (zones, bodies, crossings), so a deliberately modified page could claim to stand outdoors while it does not.
+What this design guarantees is that the product, used as built, never exposes private audio: public grants exist only
+for zones named as outdoors, every application transition the Room sees takes the grant back, the page's hold and the
+server's confirmed closes together keep new private samples out of anything public, and an older page without the
+handshake is never admitted at all.
+
 ## Secrets and variables
 
 Names only; values live in Workers secrets and the owner's password manager (`worker/chat/dev.vars.example`).
