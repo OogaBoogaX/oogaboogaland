@@ -8813,6 +8813,50 @@ const gameRulesChecks = async () => {
           Object.values(zr).every(Boolean), JSON.stringify(zr));
       }
       {
+        // Haunted Hollow's back doors: each cellar's doorway is open at walking height under the yard's floor, with the
+        // wall either side; a raider coming round the house from the field takes the block through it on either side,
+        // and a defender at the stand chases a thief out through it.
+        const hI = S.ARENAS.haunted, R = S.CONFIG.BODY_R, out = {};
+        S.create({ map: "haunted" });
+        out.open = hI.backDoors.every(([x0, x1, z0, z1]) => {
+          const xm = (x0 + x1) / 2, zm = (z0 + z1) / 2, s = Math.sign(zm);
+          return [0.2, 1, 1.7, 2.3].every((y) => [x0 + R, xm, x1 - R].every((x) => !S.solidAt(x, y, zm))) && S.solidAt(x0 - 0.5, 1, zm) && S.solidAt(x1 + 0.5, 1, zm) &&
+            S.solidAt(xm, 2.85, zm) && S.clearLine(xm, zm + s * 1.5, xm, zm - s * 1.5, R) && S.clearLine(xm, zm + s * 1.5, hI.goals[s > 0 ? "blue" : "red"].x, hI.goals[s > 0 ? "blue" : "red"].z, R);
+        });
+        const nav = hI.nav, nn = nav.blue.length;
+        out.navLinks = nav.red.length === nn && nav.links.every(([i, j]) => i >= 0 && j >= 0 && i < nn * 2 && j < nn * 2 && (i < nn) === (j < nn));
+        const through = (a, [x0, x1, z0, z1], pz) => a.x > x0 && a.x < x1 && (pz - (z0 + z1) / 2) * (a.z - (z0 + z1) / 2) <= 0;
+        for (const [team, door, sx, sz] of [["blue", hI.backDoors[0], -20, 44], ["red", hI.backDoors[1], 20, -44]]) {
+          const q = fresh("haunted"), a = q.actors.find((o) => o.team !== team);
+          for (const k of q.crates) k.live = false;
+          Object.assign(a, { bot: true, role: "attack", x: sx, z: sz, y: 0 });
+          let via = false, t = 0;
+          for (; t < 10 && a.carrying !== team; t += S.CONFIG.STEP) { const pz = a.z; S.tick(q, S.CONFIG.STEP, still); q.eventCount = 0; if (through(a, door, pz)) via = true; }
+          out[team + "Steal"] = a.carrying === team && via;
+        }
+        const q = fresh("haunted"), d = q.actors[1], c = q.actors[2], st = hI.stands.blue;
+        for (const k of q.crates) k.live = false;
+        Object.assign(d, { bot: true, role: "defend", x: st.x, z: st.z - 1, y: 0 }); Object.assign(c, { x: -8, z: 53, y: 0, carrying: "blue" });
+        Object.assign(q.flags.blue, { state: "carried", carrier: 2 });
+        let chased = false;
+        for (let t = 0; t < 4 && !chased; t += S.CONFIG.STEP) { const pz = d.z; S.tick(q, S.CONFIG.STEP, still); q.eventCount = 0; if (through(d, hI.backDoors[0], pz)) chased = true; }
+        out.defend = chased;
+        record("block frenzy haunted back door: each cellar's back door is open at walking height under the yard, walled either side and clear to the scoring ring; a raider from the field round the house takes the block through it on both sides, and a defender at the stand chases a thief out through it", Object.values(out).every(Boolean), JSON.stringify(out));
+        // Raids from the spawn and the field, on both sides: a raider bot reaches the rivals' block in its cellar, by
+        // whichever way, and never stands stuck up on the house's floor (the yard's nav once saw the cellar's walls under
+        // it, and a bot in the house lost its way for the rest of the round). Inside the house is its floor within its walls.
+        const raids = {};
+        for (const [team, sx, sz] of [["blue", -6, -26.6], ["blue", 6, -26.6], ["blue", 0, -10], ["blue", -20, 0], ["blue", 20, 10], ["red", 6, 26.6], ["red", -6, 26.6], ["red", 0, 10], ["red", 20, 0], ["red", -20, -10]]) {
+          const rq = fresh("haunted"), a = rq.actors.find((o) => o.team !== team);
+          for (const k of rq.crates) k.live = false;
+          Object.assign(a, { bot: true, role: "attack", x: sx, z: sz, y: 0 });
+          let t = 0, up = 0;
+          for (; t < 45 && a.carrying !== team; t += S.CONFIG.STEP) { S.tick(rq, S.CONFIG.STEP, still); rq.eventCount = 0; if (a.y > 2.5 && Math.abs(a.x) < 8 && Math.abs(a.z) > 36 && Math.abs(a.z) < 47) up += S.CONFIG.STEP; }
+          raids[`${team}@${sx},${sz}`] = a.carrying === team && up < 8 ? +t.toFixed(1) : `fail ${t.toFixed(1)}s, ${up.toFixed(1)}s in the house`;
+        }
+        record("block frenzy haunted raids: from the spawn and the field, on both sides, a raider bot reaches the rivals' block within 45 s and never stands stuck on the house's floor", Object.values(raids).every((v) => typeof v === "number"), JSON.stringify(raids));
+      }
+      {
         // wicked's gorillas: a charge and grab dropping the block where it was grabbed, a drag by the feet to the nearest
         // edge, a throw off it, a jetpack back, breaking free by mashing, and the hook stunning a gorilla to free its
         // captive, once per cooldown.
@@ -25879,18 +25923,23 @@ scene("race", { query: "pos=0&rain=0&draw=0", opts: PHONE_SIZE, steps: [phone("r
 scene("drop", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("drop", { card: '[data-intro="drop"]', play: "window.__ooga.drop.start()", required: ["#joy-move", "#joy-look", "#act", "#leave-hud"] })] });
 scene("block", { label: "block phone", opts: PHONE_SIZE, steps: [phone("block", { card: '[data-intro="block"]', play: "__ooga.block.start()", required: ["#joy-move", "#joy-look", "#act", "#block-paint", "#block-tools [data-tool=paint]"] }), {
   name: "block phone actions and results", why: "regression: Throw overlapped Jump and the sticks, and small results cards clipped names and action labels", run: async b => {
+    if (await b.evaluate(`!document.querySelector('[data-intro="block"]').hidden`)) await b.key(" ");
     const rows = [];
-    for (const [map, flightX, flightZ] of [["town", 0, 6], ["jungle", 18, 0]]) for (const [width, height] of [[390,844],[844,390],[320,568]]) {
+    for (const [map, flightX, flightZ] of [["town", 0, 6], ["jungle", 18, 0], ["haunted", 20, 0]]) for (const [width, height] of [[390,844],[844,390],[320,568]]) {
       await b.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: true });
       await b.sleep(100);
       await b.evaluate(`__ooga.block.showBoard();document.querySelector('#block-board [data-map="${map}"]').click();new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
       rows.push({ map, width, phase: "board", bad: await b.evaluate(PHONE(['#block-board [data-action="block-start"]'])) });
-      await b.evaluate(`(() => { const D=__ooga.block;D.start(604);D.sim.prep=0;Object.assign(D.sim.actors[0],{flight:0,grounded:true,x:-7,z:4,y:0,vy:0}); })()`);
+      await b.evaluate(`(() => { const D=__ooga.block;D.start(604);D.sim.prep=0;Object.assign(D.sim.actors[0],{flight:0,grounded:true,x:-7,z:4,y:0,vy:0,guard:30}); })()`);
       rows.push({ map, width, phase: "play", bad: await b.evaluate(PHONE(["#joy-move", "#joy-look", "#act", "#block-paint", "#block-tools [data-tool=paint]"])) });
-      const at = await b.evaluate(`(() => { const r=document.getElementById("block-paint").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
-      await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [at] });
-      await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-      const fired = await b.evaluate(`__ooga.block.sim.actors[0].lastKind === "paint" && __ooga.block.sim.actors[0].cooldown > 0`);
+      // Hold simulation time while the native touch crosses CDP: a short shot cooldown can expire between calls.
+      const at = await b.evaluate(`(() => { const scene=BL.scenes.block;window.__blockPhoneUpdate=scene.update;scene.update=()=>{};const r=document.getElementById("block-paint").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
+      let fired;
+      try {
+        await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [at] });
+        await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        fired = await b.evaluate(`(() => { const s=__ooga.block.sim;return s.actors[0].lastKind === "paint" && s.actors[0].cooldown > 0 && s.shots.some(p=>p.live&&p.owner===0&&p.kind==="paint"); })()`);
+      } finally { await b.evaluate(`BL.scenes.block.update=window.__blockPhoneUpdate;delete window.__blockPhoneUpdate`); }
       rows.push({ map, width, fired });
       // Hold the actual touch Jump control through the jump's apex, then release and cancel a fresh hold.
       // Spawn protection keeps a gorilla or a bot from interrupting this input check.

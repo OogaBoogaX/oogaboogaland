@@ -431,16 +431,22 @@
   };
   // Haunted Hollow: a bigger field (60 x 100 m), a graveyard, and at each end a haunted house up on a raised yard 3 m
   // high, reached by stairs at its front. The block isn't out in the open: it's down in the cellar under the yard, in
-  // the back room of a little maze. The cellar has two ways in: the side doors at ground level, through a front
-  // passage and a middle one (each wall leaving a gap at the other end), or the stairs down from inside the house,
-  // which come out right by the block. `nav` is the cellar's way through, for the bots.
+  // the back room of a little maze. The cellar has three ways in: the side doors at ground level, through a front
+  // passage and a middle one (each wall leaving a gap at the other end), the stairs down from inside the house,
+  // which come out right by the block, or the back door (`backDoors`), a wide doorway in the back wall right behind the
+  // block, opening onto the ground behind the house. `nav` is the cellar's way through, for the bots.
   const hauntedHollow = () => {
     const half = [], steps = [], decor = [];
     const YARD = 3, UNDER = 2.7;
+    // The back door's opening [x0, x1] in the back wall, 2.4 m wide, beside the block's stand.
+    const DOOR = [-12.2, -9.8];
     // The yard over the cellar: a floor with the stairwell's hole in it.
     half.push([-14, 14, 32, 43, YARD, UNDER], [-14, 14, 46.8, 49, YARD, UNDER], [-14, -6, 43, 46.8, YARD, UNDER], [-3, 14, 43, 46.8, YARD, UNDER]);
-    // The cellar's outer walls, a side door into its front passage at each side.
-    half.push([-14, 14, 32, 32.4, UNDER, 0], [-14, 14, 48.6, 49, UNDER, 0]);
+    // The cellar's outer walls, a side door into its front passage at each side and the back door behind the block:
+    // the back wall either side of it, a timber post each side (0.3 m wide, standing 0.1 m proud of the wall) and a
+    // lintel across, 2.4 m up under the yard's floor.
+    half.push([-14, 14, 32, 32.4, UNDER, 0], [-14, DOOR[0] - 0.3, 48.6, 49, UNDER, 0], [DOOR[1] + 0.3, 14, 48.6, 49, UNDER, 0]);
+    half.push([DOOR[0] - 0.3, DOOR[0], 48.5, 49.1, UNDER, 0], [DOOR[1], DOOR[1] + 0.3, 48.5, 49.1, UNDER, 0], [DOOR[0] - 0.3, DOOR[1] + 0.3, 48.5, 49.1, UNDER, 2.4]);
     for (const s of [-1, 1]) {
       const x0 = s > 0 ? 13.6 : -14, x1 = s > 0 ? 14 : -13.6;
       half.push([x0, x1, 32.4, 33, UNDER, 0], [x0, x1, 35.5, 48.6, UNDER, 0]);
@@ -489,7 +495,9 @@
       // The middle three are up on the yard: a node's third number is its floor, 0 if left out.
       [-4.5, 46.6], [-4.5, 42.3, YARD], [0, 37.6, YARD], [0, 34.2, YARD], [0, 27.8],
       // The scoring ring behind the house.
-      [0, 51.5]];
+      [0, 51.5],
+      // The back door: outside it behind the house, and inside it by the block (indices 26 and 27).
+      [(DOOR[0] + DOOR[1]) / 2, 50.4], [(DOOR[0] + DOOR[1]) / 2, 47.6]];
     // Node pairs joined though a straight line between them crosses a step (the stairs are walked, not seen through).
     const linkHalf = [[20, 21], [21, 22], [22, 23], [23, 24], [8, 20]];
     return {
@@ -515,6 +523,8 @@
       zipEnd: [-4, 3.1, -29],
       // Each house's cellar, and where an Ooga up on its yard drops in: the top of the stairs inside the house.
       cellars: [{ box: [-14, 14, 32, 49], entry: [-4.5, 43.4] }, { box: [-14, 14, -49, -32], entry: [4.5, -43.4] }],
+      // Each cellar's back door [x0, x1, z0, z1], the opening through its back wall: blue's, then red's turned.
+      backDoors: [[DOOR[0], DOOR[1], 48.6, 49], [-DOOR[1], -DOOR[0], -49, -48.6]],
       nav: { blue: navHalf, red: navHalf.map(([x, z, y]) => y ? [-x, -z, y] : [-x, -z]), links: [...linkHalf, ...linkHalf.map(([i, j]) => [i + navHalf.length, j + navHalf.length])] },
       guard: { blue: { x: 0, z: 29 }, red: { x: 0, z: -29 } },
       traps: two([[0, 35.4], [10, 40.2], [-12, 15], [16, 2], [-6, 26], [-1, 44]]),
@@ -842,7 +852,9 @@
   };
   // True when the straight line from (ax, az) to (bx, bz) misses every box, widened by r, that stands on the ground.
   // `over` skips boxes lower than it: a throw at chest height clears crates and low walls, and any open grave.
-  const clearLine = (ax, az, bx, bz, r, over = 0) => {
+  // `floor` reads it on a raised floor instead (Haunted Hollow's yards, for the bots' nav): only boxes standing on that
+  // floor count, not the cellar's walls under it.
+  const clearLine = (ax, az, bx, bz, r, over = 0, floor = 0) => {
     // Open graves count as in the way of a walk, so bots go round them.
     if (!over && ARENA.graves) for (let i = 0; i < ARENA.graves.length; i++) {
       const g = ARENA.graves[i];
@@ -850,7 +862,7 @@
     }
     for (let i = 0, n = boxCount(); i < n; i++) {
       const b = boxAt(i);
-      if (b[5] > 1.4 || b[4] < over) continue;
+      if (b[5] > floor + 1.4 || b[4] < floor + over) continue;
       if (crossesRect(ax, az, bx, bz, b[0] - r, b[1] + r, b[2] - r, b[3] + r)) return false;
     }
     return true;
@@ -2147,7 +2159,7 @@
     const pts = [...ARENA.nav.blue, ...ARENA.nav.red], n = pts.length, keep = CRATES;
     CRATES = [];
     const lvl = (p) => p[2] || 0;
-    const see = Array.from({ length: n }, (_, i) => pts.map((q, j) => i !== j && lvl(pts[i]) === lvl(q) && clearLine(pts[i][0], pts[i][1], q[0], q[1], CONFIG.BODY_R * 0.8)));
+    const see = Array.from({ length: n }, (_, i) => pts.map((q, j) => i !== j && lvl(pts[i]) === lvl(q) && clearLine(pts[i][0], pts[i][1], q[0], q[1], CONFIG.BODY_R * 0.8, lvl(q) ? 0.05 : 0, lvl(q))));
     const linked = new Set();
     for (const [i, j] of ARENA.nav.links || []) { see[i][j] = see[j][i] = true; linked.add(i).add(j); }
     CRATES = keep;
@@ -2155,7 +2167,7 @@
     return N;
   };
   // When the bot can't run straight at its goal (or is up on a yard), the next node on the shortest way there through
-  // the nodes on its own floor, every half second.
+  // the nodes on its own floor (seen past only that floor's boxes), every half second.
   const navigate = (sim, a, dt) => {
     if (!ARENA.nav || a.riding || a.flight || a.climbing) return;
     if (a.y < 1.5 && clearLine(a.x, a.z, goal.x, goal.z, CONFIG.BODY_R * 0.9)) { a.navI = -1; return; }
@@ -2171,7 +2183,7 @@
     for (let i = 0; i < n; i++) {
       const pl = pts[i][2] || 0;
       seeEnd[i] = pl === 0 && clearLine(pts[i][0], pts[i][1], goal.x, goal.z, CONFIG.BODY_R * 0.8) ? 1 : 0;
-      dist[i] = pl === level && clearLine(a.x, a.z, pts[i][0], pts[i][1], CONFIG.BODY_R * 0.8) ? Math.hypot(pts[i][0] - a.x, pts[i][1] - a.z) : Infinity;
+      dist[i] = pl === level && clearLine(a.x, a.z, pts[i][0], pts[i][1], CONFIG.BODY_R * 0.8, level ? 0.05 : 0, level) ? Math.hypot(pts[i][0] - a.x, pts[i][1] - a.z) : Infinity;
       prev[i] = -1; done[i] = 0;
     }
     dist[n] = Infinity; prev[n] = -1; done[n] = 0;

@@ -54,6 +54,14 @@
       parts.push(bevelBox({ w, h, d, color: "#2e2622", offset: { x, y, z } }));
       return true;
     }
+    if (Math.abs(d - 0.6) < 0.05 && Math.abs(Math.abs(z) - 48.8) < 0.05) {
+      // The back door's frame (its posts and lintel, 0.6 m deep): dark timber with iron bands on the posts and the
+      // house's purple trim under the lintel.
+      parts.push(bevelBox({ w, h, d, color: "#3e3229", offset: { x, y, z } }));
+      if (bottom > 0) parts.push(box({ w: w - 0.6, h: 0.05, d: d + 0.02, color: "#6a3fa0", emissive: 0.35, offset: { x, y: bottom - 0.01, z } }));
+      else for (const by of [0.5, 2]) parts.push(box({ w: w + 0.03, h: 0.08, d: d + 0.03, color: "#1c1a20", offset: { x, y: by, z } }));
+      return true;
+    }
     if (bottom === 0 && Math.abs(h - 2.7) < 0.05 && Math.abs(z) >= 31.9) {
       parts.push(bevelBox({ w, h, d, color: "#6a6670", offset: { x, y, z } }));
       parts.push(box({ w: w + 0.03, h: 0.35, d: d + 0.03, color: "#4f5a3c", offset: { x, y: 0.18, z } }));
@@ -1218,7 +1226,8 @@
   // The lightning bolt's column, a tall thin white box with its foot at y 0.
   const bolt = cached(() => box({ w: 0.28, h: 40, d: 0.28, color: "#eaf4ff", emissive: 1, offset: { y: 20 } }));
   // Haunted Hollow's dressing, one merged mesh: lamps along the routes, neon tubes on the cave walls, skeletons in the
-  // open graves. Glow is emissive faces only, no extra lights.
+  // open graves, and at each cellar's back door its plank door swung open flat against the wall outside, with a lantern
+  // on the wall beside it. Glow is emissive faces only, no extra lights.
   const hauntDress = cached(() => {
     const M = SIM.ARENAS.haunted, parts = [];
     for (const [x, z] of [[-9, 2], [9, -2], [-15, 22], [15, -22], [9, 28], [-9, -28], [-24, 12], [24, -12], [0, 19], [0, -19], [18, 30], [-18, -30]]) {
@@ -1235,6 +1244,17 @@
       parts.push(box({ w: 0.28, h: 0.28, d: 0.28, color: "#e0dccf", offset: { x, y: floor + 0.29, z: z1 - 0.45 } }));
       for (let r = 0; r < 4; r++) parts.push(box({ w: 0.42, h: 0.05, d: 0.06, color: "#d4cebd", offset: { x, y: floor + 0.15, z: z1 - 0.8 - r * 0.2 } }));
       parts.push(box({ w: 0.08, h: 0.05, d: 0.9, color: "#d4cebd", offset: { x: x - 0.12, y: floor + 0.13, z: z0 + 0.7 } }), box({ w: 0.08, h: 0.05, d: 0.9, color: "#d4cebd", offset: { x: x + 0.12, y: floor + 0.13, z: z0 + 0.7 } }));
+    }
+    for (const [x0, x1, z0, z1] of M.backDoors) {
+      // `s` is +1 for blue's (the house's back faces +z), -1 for red's turned one. The door hangs off the post on the
+      // block's side, swung right back; the lantern is on the other side, over the corner of the wall.
+      const s = Math.sign(z0 + z1), face = (s > 0 ? z1 : z0) + s * 0.17, hinge = s > 0 ? x1 + 0.3 : x0 - 0.3, mid = hinge + s * 1.15;
+      parts.push(bevelBox({ w: 2.3, h: 2.25, d: 0.08, color: "#4a3a2c", offset: { x: mid, y: 1.15, z: face } }));
+      for (let k = 1; k < 5; k++) parts.push(box({ w: 0.03, h: 2.2, d: 0.1, color: "#2a211b", offset: { x: hinge + s * k * 0.46, y: 1.15, z: face } }));
+      for (const by of [0.45, 1.85]) parts.push(box({ w: 2.1, h: 0.1, d: 0.11, color: "#1c1a20", offset: { x: mid - s * 0.05, y: by, z: face } }));
+      const lx = s > 0 ? x0 - 1.1 : x1 + 1.1;
+      parts.push(box({ w: 0.08, h: 0.08, d: 0.4, color: "#1c1a20", offset: { x: lx, y: 2.25, z: face + s * 0.1 } }));
+      parts.push(box({ w: 0.3, h: 0.36, d: 0.3, color: "#ffd98a", emissive: 1, offset: { x: lx, y: 2.0, z: face + s * 0.3 } }));
     }
     return merge(...parts);
   });
