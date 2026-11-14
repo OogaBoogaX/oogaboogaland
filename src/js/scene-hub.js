@@ -337,6 +337,8 @@
   // Its floating lanterns (one node each over one geometry), and whether they showed last frame.
   const ringLanterns = [];
   let ringLanternsShown = false;
+  // The Cloud Archive's marked cloud and beanstalk (cloud-archive-entry.js), while its WIP scene is registered.
+  let archiveEntry = null;
   // The cave cabinet a Cloud Hopper run began at, when it began at one on the island (#554).
   let cloudYard = null;
   // Every way out of an island cabinet's Cloud Hopper but its own Exit (Escape at the menu, Return to the island, a lost
@@ -3223,6 +3225,7 @@
         hit.x + dx * 0.02, hit.y + dy * 0.02, hit.z + dz * 0.02, 0);
       return;
     }
+    if (hit.owner.kind === "archivecloud") { if (archiveEntry) archiveEntry.hit(isPlayerAttack(source)); return; }
     if (!gameMode) return;
     if (source && source.controlled && source.actionControlled && source.combat && !source.combat.powerSpent) {
       const combat = source.combat;
@@ -5692,6 +5695,9 @@
     switch (o.kind) {
       case "tess":
         return COARSE ? `${BL.hubGuide.NAME} the guide · tap for a tour` : `${BL.hubGuide.NAME} the guide · click for a tour`;
+      case "archivecloud":
+      case "beanstalk":
+        return archiveEntry ? archiveEntry.tip(o) : "";
       case "caveman":
         return o.cave.traits.display;
       case "clanker":
@@ -6044,6 +6050,7 @@
     if (arcadeMouth) { const near = arcadeMouth.entrance.nearby(x, y, z, player); if (near) return near; }
     if (player && timechainIsland.gate && timechainIsland.gate.nearKeypad(x, y, z)) return timechainIsland.gate.action;
     if (player && nearChalkboard(x, y, z)) return CHALK_ACTION;
+    if (player && archiveEntry && archiveEntry.nearFoot(x, y, z)) return archiveEntry.action;
     return null;
   };
   const useNearbyAction = (action) => {
@@ -6057,6 +6064,13 @@
     else if (action.sleep) crew.sleepPlayer(action);
     else if (action === timechainIsland.gate.action) timechainIsland.gate.engage();
     else if (action === CHALK_ACTION) chalkboard.open(null);
+    else if (archiveEntry && action === archiveEntry.action) {
+      // Up the beanstalk: the Ooga climbing goes with the visitor (world.pilot), as through a cave.
+      if (entering) return;
+      world.pilot = pilot.player ? pilot.player.traits.name : null;
+      archiveEntry.climb();
+      enterScene(archiveEntry.view, "cloudarchive");
+    }
     else arcadeMouth.entrance.use(action);
   };
   // Stationary functional controls take priority over a jump or jetpack thrust.
@@ -6782,6 +6796,9 @@
       } else if (action === CHALK_ACTION) {
         hud.hint(COARSE ? "Tap WRITE to use the chalkboard" : "Press Space to write on the chalkboard");
         hud.setAct("WRITE");
+      } else if (archiveEntry && action === archiveEntry.action) {
+        hud.hint(COARSE ? "Tap CLIMB to climb the beanstalk" : "Space · Climb the beanstalk");
+        hud.setAct("CLIMB");
       } else arcadeMouth.entrance.prompt(action, hud, COARSE);
     } else if (hadPlayerPrompt || player) pilot.showAct();
   };
@@ -7016,6 +7033,13 @@
       setVec(target, (player ? a.x : q.x) + Math.sin(a.yaw) * out, player ? a.y + 1.4 : q.floorY + 2.2, (player ? a.z : q.z) + Math.cos(a.yaw) * out);
       pitch = player ? 0.28 : 0.12;
       dist = player ? 6 : 11;
+    } else if (name === "beanstalk" && archiveEntry) {
+      // Down the Cloud Archive's beanstalk: beside its foot, looking back up it.
+      const f = archiveEntry.foot;
+      x = f.x; z = f.z + 2.2;
+      setVec(target, f.x, f.y + 3, f.z);
+      pitch = player ? 0.35 : 0.3;
+      dist = player ? 6 : 10;
     } else if (name === "mempool" && mempoolIsland) {
       // The chamber under the lake: on its floor before the first painting, the shaft and the membrane behind.
       const M = mempoolIsland, floor = M.place.y + M.layout.FLOOR;
@@ -8093,6 +8117,7 @@
     if (!cloudPlaying()) npcStatusBeams?.update(dt);
     shareDrivenActor(dt);
     remotes.update(dt);
+    if (archiveEntry) archiveEntry.update(dt, elapsed);
     const petSeat = hammock?.seats[0];
     const petOwner = petSeat?.sitter === crew.player ? crew.player : petSeat?.remote ? remotes.body(petSeat.remote) : null;
     petReactions.update(petOwner, BL.net.state.me ? controlledGuideActor() : null, remotes, dt);
@@ -8475,6 +8500,25 @@
     }
   };
   const delayGameRing = seconds => { gameRingWait = Math.max(0, seconds); };
+  // The archive TV's pictures are drawn as snapFromShield draws: no cutaway, and the visitor's own Ooga (possibly
+  // headless in first person) out of the picture. The options are written into one object, not spread per picture.
+  const ARCHIVE_SHOT_OPTS = {};
+  const renderArchiveView = (view) => {
+    Object.assign(ARCHIVE_SHOT_OPTS, RENDER_OPTS);
+    ARCHIVE_SHOT_OPTS.birdsEyeCutaway = false; ARCHIVE_SHOT_OPTS.cutawayFade = 0; ARCHIVE_SHOT_OPTS.cutawayMaxY = 1e6; ARCHIVE_SHOT_OPTS.cutawayRegionCount = 0;
+    const me = pilot.player, shown = !!me && me.root.visible;
+    if (me) me.root.visible = false;
+    const drawn = renderer.render(root, view, ARCHIVE_SHOT_OPTS);
+    if (me) me.root.visible = shown;
+    return drawn;
+  };
+  const createArchiveEntry = () => {
+    if (!BL.scenes.cloudarchive || archiveEntry) return;
+    const start = root.children.length;
+    archiveEntry = BL.cloudArchiveEntry.create({ root, island, world, free, nearPath, addTarget, removeTarget, hud, canvas: glCanvas,
+      renderView: renderArchiveView });
+    cloudRememberNodes(start);
+  };
   const cycleOwnActor = () => {
     const character = BL.net.ownCharacter();
     if (!character) { hud.toast("Sign in as a contributor to switch between your Ooga and gorilla"); return; }
@@ -10819,6 +10863,8 @@
     stopLazyBedding();
     // A kept hammock stays hung; its sitter gets up to go.
     if (hammock) vacateHammock();
+    // The Cloud Archive's entry finishes the TV's pictures and leaves with the island.
+    if (archiveEntry) { archiveEntry.finishShots(); archiveEntry.dispose(); archiveEntry = null; }
     // A kept island ends its game as a full leave does, and lowers the ring at once.
     setGameMode(false);
     gameRingK = gameRingWait = ringPulseWait = 0; gameRing.visible = false;
@@ -10936,7 +10982,7 @@
     BL.net.setHub(true);
     crew.refreshStates(true);
     restoreCloudYard(ctx);
-    const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || ctx.from === "lab" || ctx.from === "timechain" || !!world.arcadeYard;
+    const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || ctx.from === "lab" || ctx.from === "timechain" || ctx.from === "cloudarchive" || !!world.arcadeYard;
     const returningCharacter = handsBack ? (world.arcadeYard ? world.arcadeYard.name : world.pilot) : null;
     if (handsBack) world.pilot = null;
     if (returningCharacter) {
@@ -10963,12 +11009,14 @@
     world.factoryCrossing = null;
     const arcadeCrossing = ctx.from === "arcade" ? world.arcadeCrossing : null, arcadeYard = world.arcadeYard;
     world.arcadeCrossing = world.arcadeYard = null;
+    // Back down the beanstalk: the stalk stands before the Ooga is placed at its foot.
+    if (ctx.from === "cloudarchive") createArchiveEntry();
     if (returningCharacter && sphereExit && pilot.player) timechainIsland.gate.arrive(sphereExit);
     else if (returningCharacter && factoryCrossing && pilot.player && factoryMouth) arriveFromFactory(factoryCrossing);
     else if (returningCharacter && arcadeYard && pilot.player && arcadeMouth) arcadeMouth.entrance.standAt(arcadeYard.slot);
     else if (returningCharacter && arcadeCrossing && pilot.player && arcadeMouth) { arcadeMouth.entrance.arrive(arcadeCrossing); factoryWalk.still = 1; factoryWalk.hold = BL.factoryWindow.GLIDE.still; }
     else if (returningCharacter && ctx.from === "arcade" && pilot.player && arcadeMouth) arriveFromArcade();
-    else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile", false, false);
+    else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : ctx.from === "cloudarchive" && archiveEntry ? "beanstalk" : "pile", false, false);
     else navigate(routedPlace || (ctx.from === "bifrost" ? "bifrost" : "pile"), false, false);
     if (donate) hud.openFeed();
     clankers.sync(); clankerMeshes.sync();
@@ -10985,6 +11033,7 @@
       updatePositionDebug(true);
     }
     updatePoolEffectsActivity();
+    createArchiveEntry();
     if ((ctx.from === "arcade" || ctx.from === "hub") && ctx.place === "cloud-hopper") { cloudYard = ctx.from === "hub" ? arcadeYard : null; ensureCloudHopper(ctx).launch(true); }
   };
   // Prepare only raw character rigs: the published crew, its stable roster order, input, health and NPC/remote
@@ -11453,7 +11502,7 @@
       || !!(workShot && source && shared.workSites[source.work.site]?.mirrorRoom
         && mirrorCave.ripples.absorb(ax, ay, az, point));
     shared.onProjectileMove = (ax, ay, az, bx, by, bz, dt) => mirrorCave.ripples.cross(ax, ay, az, bx, by, bz, dt);
-    shared.weaponInteraction = (owner, node) => node === mirrorCave.node;
+    shared.weaponInteraction = (owner, node) => node === mirrorCave.node || !!archiveEntry && archiveEntry.isTarget(owner);
     shared.onWeaponImpact = weaponImpact;
     shared.onMeleeStrike = mirrorCave.ripples.strike;
     shared.aimSurface = (out, x, y, z) => !cloudPlaying() && mirrorCave.ripples.aimAt(out, x, y, z);
@@ -11959,7 +12008,7 @@
     const initialGorilla = initialCharacter && preloadedGorilla ? crew.cavemen.get(initialCharacter.name) : null;
     // The Ooga that went into DSB, the Lightning Factory, ₿IFRÖST or Ooga Arcade comes back out as the one played.
     restoreCloudYard(ctx);
-    const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || ctx.from === "lab" || ctx.from === "timechain" || !!world.arcadeYard;
+    const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || ctx.from === "lab" || ctx.from === "timechain" || ctx.from === "cloudarchive" || !!world.arcadeYard;
     const returningCharacter = handsBack ? (world.arcadeYard ? world.arcadeYard.name : world.pilot) : null;
     if (handsBack) world.pilot = null;
     if (initialGorilla) {
@@ -12001,12 +12050,14 @@
     world.factoryCrossing = null;
     const arcadeCrossing = ctx.from === "arcade" ? world.arcadeCrossing : null, arcadeYard = world.arcadeYard;
     world.arcadeCrossing = world.arcadeYard = null;
+    // Back down the beanstalk: the stalk stands before the Ooga is placed at its foot.
+    if (ctx.from === "cloudarchive") createArchiveEntry();
     if (returningCharacter && sphereExit && pilot.player) timechainIsland.gate.arrive(sphereExit);
     else if (returningCharacter && factoryCrossing && pilot.player && factoryMouth) arriveFromFactory(factoryCrossing);
     else if (returningCharacter && arcadeYard && pilot.player && arcadeMouth) arcadeMouth.entrance.standAt(arcadeYard.slot);
     else if (returningCharacter && arcadeCrossing && pilot.player && arcadeMouth) { arcadeMouth.entrance.arrive(arcadeCrossing); factoryWalk.still = 1; factoryWalk.hold = BL.factoryWindow.GLIDE.still; }
     else if (returningCharacter && ctx.from === "arcade" && pilot.player && arcadeMouth) arriveFromArcade();
-    else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile", false, false);
+    else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : ctx.from === "cloudarchive" && archiveEntry ? "beanstalk" : "pile", false, false);
     else if (ctx.from === "bifrost" && !routedPlace) navigate("bifrost", false, false);
     else if (!signedInArrival && !crew.sleeping && !initialGorilla && (routedPlace || preloadedView || initialCharacter || initialFirstPerson)) navigate(routedPlace || preloadedView || "pile", false, false);
     if (donate) hud.openFeed();
@@ -12162,6 +12213,7 @@
     const tessTiers = new Set();
     islandGuide.liveGeometry(tessTiers);
     for (const geometry of tessTiers) { renderer.prepareGeometry(geometry); yield* pause(slice); }
+    Object.defineProperty(hubScene.debug, "cloudArchive", { get: () => archiveEntry, enumerable: true });
     mark("visibility-start");
     fx.warmVisibility(crew);
     fx.warmBlockers();
@@ -12169,6 +12221,8 @@
     mark("covered-view-start");
     yield* prepareCoveredView(ctx.overlay, slice);
     mark("covered-view");
+    createArchiveEntry();
+    totemUnsub = BL.totemFeed.subscribe(onTotem);
     // Merge Rock's totems, in idle time from here on.
     repoIsland.start();
     if ((ctx.from === "arcade" || ctx.from === "hub") && ctx.place === "cloud-hopper") { cloudYard = ctx.from === "hub" ? arcadeYard : null; ensureCloudHopper(ctx).launch(true); }
@@ -12257,6 +12311,7 @@
     selectDebugGorilla(null);
     islandGuide.dispose();
     islandGuide = null;
+    if (archiveEntry) { archiveEntry.dispose(); archiveEntry = null; }
     // GAME MODE ends with the visit; the island comes back built afresh.
     gameMode = gameCombatOnly = clankerOnPlayer = false;
     for (const node of ringPanels) { node.mirrorRipples.dispose(); if (node.mirrorBody) node.mirrorBody.dispose(); }
@@ -12456,6 +12511,7 @@
     if (cloudHopper?.cabinet.frames) for (const geometry of cloudHopper.cabinet.frames) set.add(geometry);
     cloudHopper?.liveGeometry(set);
     if (islandGuide) islandGuide.liveGeometry(set);
+    if (archiveEntry) archiveEntry.liveGeometry(set);
     mempoolIsland.water.liveGeometry(set);
     pile.liveGeometry(set);
     clankers.liveGeometry(set);

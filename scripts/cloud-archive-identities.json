@@ -1,0 +1,17 @@
+{
+  "about": "Reviewed identity mapping for scripts/cloud-archive.mjs. An entry names an identity's kind (agent or organisation) and label on reviewed evidence, never from a display name. Match by `login` (a GitHub noreply login) or by `emailSha256` (SHA-256 of the exact, lower-cased author address; the address itself is never stored). Anything not listed stays as git shows it: a linked account, a [bot] automation login, or an unlinked author. Add an entry only with a reason a reviewer can check.",
+  "identities": [
+    {
+      "emailSha256": "cd29c5ac348a026a3ec5286890908fffb5bf6ab77f20672171be323a70c95026",
+      "kind": "agent",
+      "label": "Claude (AI coding agent)",
+      "reason": "Claude Code's default commit identity: the service address Anthropic's coding agent commits under, not a person's address."
+    },
+    {
+      "emailSha256": "78a4a5c134103e15cdfd7e3a9626eab26e33248f37676631f80f99e2dd6f1a5f",
+      "kind": "agent",
+      "label": "Codex (AI coding agent)",
+      "reason": "OpenAI Codex's commit service address, not a person's address."
+    }
+  ]
+}

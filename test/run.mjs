@@ -32274,6 +32274,322 @@ const artifactUnitProof = () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
   return { parsed: true, rows };
 };
+// The Cloud Archive's history rules (scripts/cloud-archive-lib.mjs) on made-up histories, the generator end to end on
+// throwaway repositories, and the committed snapshot's own invariants.
+const cloudArchiveProof = async () => {
+  const L = await import("../scripts/cloud-archive-lib.mjs");
+  const at = (day, n = 0) => Date.parse(`${day}T12:00:00Z`) / 1000 + n;
+  const sha = (n) => n.toString(16).padStart(40, "0");
+  const commit = (n, name, email, subject, parents = [sha(n + 1000)], body = "", time = at("2026-09-07", n)) => ({ sha: sha(n), time, name, email, parents, subject, body });
+  const build = (commits, heads = new Map(), identities = []) => L.buildArchive({ commits, pullHeads: heads, identities, rev: sha(1), officialTip: sha(1) });
+  const who = (data, n) => { for (const d of data.days) for (const c of d.commits) if (c[0] === sha(n)) return { ...data.people[c[1]], index: c[1], pr: c[3], title: c[2] }; return null; };
+  const r = {};
+  // Two people who share a display name stay two; neither is folded into a login seen under that name.
+  const same = build([commit(1, "Sam", "sam.one@example.org", "a"), commit(2, "Sam", "sam.two@example.net", "b"), commit(3, "Sam", "5+sam@users.noreply.github.com", "c")]);
+  r.collision = who(same, 1).index !== who(same, 2).index && who(same, 1).index !== who(same, 3).index && same.counts.identities.unlinked === 2 && same.counts.identities.account === 1 && who(same, 3).label === "sam";
+  // A merge-looking subject, a "(#n)" suffix or a branch owner's login proves nothing; only a published head does.
+  const heads = new Map([[7, sha(70)], [8, sha(80)]]);
+  const merges = build([
+    commit(10, "Ann", "ann@example.org", "Merge pull request #7 from mallory/feature", [sha(11), sha(99)], "Fake title"),
+    commit(12, "Ann", "ann@example.org", "Add a thing (#8)"),
+    commit(13, "Bo", "9+bo@users.noreply.github.com", "Merge pull request #8 from mallory/feature", [sha(14), sha(80)], "Real title\n\nCo-Authored-By: X <x@example.com>"),
+    commit(15, "Cy", "cy@example.org", "Merge branch 'rock' into topic", [sha(16), sha(70)])
+  ], heads);
+  r.fakeMerge = who(merges, 10).pr === 0 && who(merges, 12).pr === 0;
+  // A merge whose second parent is one PR's published head is a PR-head match for it (nothing more is claimed).
+  r.headMatch = who(merges, 13).pr === 8 && who(merges, 13).label === "bo" && who(merges, 13).title === "Real title" && who(merges, 15).pr === 7 && merges.counts.prHeadMatches === 2 && merges.counts.prHeadMatchRows === 2 && merges.counts.sharedHeadMerges === 0;
+  // A head several PRs share (open, closed or duplicate PRs can) credits none of them, whichever number is lowest.
+  const shared = build([commit(40, "Eve", "eve@example.org", "Merge pull request #65 from eve/x", [sha(41), sha(400)], "Shared head")], new Map([[40, sha(400)], [65, sha(400)], [66, sha(401)]]));
+  const sharedRow = shared.days[0].commits[0];
+  r.sharedHead = sharedRow[3] === 0 && (sharedRow[4] & L.FLAG.sharedHead) !== 0 && shared.counts.prHeadMatches === 0 && shared.counts.sharedHeadMerges === 1 && sharedRow[2] === "Merge pull request #65 from eve/x";
+  r.noBranchOwner = !merges.people.some((p) => p.label === "mallory");
+  // Unknowns stay unknown: a private address is an unlinked author under its git name, never an account or an agent by
+  // name; only the reviewed mapping and a [bot] login change a kind.
+  const kinds = build([
+    commit(20, "Claude", "claude.person@example.org", "x"), commit(21, "github-actions[bot]", "41898282+github-actions[bot]@users.noreply.github.com", "y"),
+    commit(22, "Helper", "agent@example.com", "z"), commit(23, "OrgName", "77+orgname@users.noreply.github.com", "w")
+  ], new Map(), [{ emailSha256: L.emailHash("agent@example.com"), kind: "agent", label: "Helper (AI agent)" }, { login: "orgname", kind: "organisation", label: "OrgName" }]);
+  r.unknown = who(kinds, 20).kind === "unlinked" && who(kinds, 20).label === L.UNLINKED && who(kinds, 21).kind === "automation" && who(kinds, 22).kind === "agent" && who(kinds, 23).kind === "organisation"
+    && kinds.counts.identities.unlinked === 1;
+  // No address anywhere in the output: not in titles, not in an author's display name, not in a reviewed label.
+  const addressed = build([commit(30, "Di", "di@example.org", "Reach me at di@example.org"), commit(31, "contact@example.com", "contact@example.com", "x"),
+    commit(32, "Svc", "svc@example.net", "y"), commit(33, "contact@example.com", "other@example.com", "z")], new Map(), [{ emailSha256: L.emailHash("svc@example.net"), kind: "agent", label: "Svc <svc@example.net>" }]);
+  const addressedText = [addressed, merges];
+  // The oracle is not the scrubber's pattern: it walks every "@" and fails when text sits on both sides of it, and it
+  // looks for each example's own pieces (Unicode, local and bracketed-IP domains included).
+  // It walks every exported string (not JSON text, where quotes would sit beside an "@mention").
+  const strings = (v, out = []) => { if (typeof v === "string") out.push(v); else if (v && typeof v === "object") for (const x of Object.values(v)) strings(x, out); return out; };
+  const atBetween = (t) => { for (let i = t.indexOf("@"); i >= 0; i = t.indexOf("@", i + 1)) if (i > 0 && /\S/u.test(t[i - 1]) && i + 1 < t.length && /\S/u.test(t[i + 1])) return true; return false; };
+  const addressLike = (v) => strings(v).some(atBetween);
+  const odd = ["josé@exämple.com", "用户@例子.广告", "admin@localhost", "root@[192.168.1.10]", "ops@[IPv6:2001:db8::1]"], pieces = ["exämple", "例子", "localhost", "192.168.1.10", "2001:db8", "josé@", "用户@", "admin@", "root@", "ops@"];
+  const broad = build(odd.flatMap((a, i) => [commit(60 + i, a, `${a.replace(/[^\x20-\x7e]/g, "x")}.mailer@example.org`, `Contact ${a} please`), commit(70 + i, "Svc", `svc${i}@example.net`, `<${a}> wrote`)]), new Map(),
+    odd.map((a, i) => ({ emailSha256: L.emailHash(`svc${i}@example.net`), kind: "agent", label: `Svc ${a}` })));
+  const broadText = JSON.stringify(broad);
+  r.noAddress = !addressLike(addressedText) && !addressLike(broad) && !pieces.some((x) => broadText.includes(x)) && who(addressed, 31).index !== who(addressed, 33).index
+    && build([commit(80, "Fi", "fi@example.org", "Thanks @w-s-bitcoin")]).days[0].commits[0][2] === "Thanks @w-s-bitcoin";
+  // Every exported label is distinct, even when a git name reads like a numbered label.
+  const labels = build([commit(34, "sam", "a@example.org", "a"), commit(35, "sam", "b@example.org", "b"), commit(36, "sam (1)", "c@example.org", "c")]).people.map((p) => p.label.toLowerCase());
+  r.uniqueLabels = new Set(labels).size === labels.length && new Set(addressed.people.map((p) => p.label)).size === addressed.people.length;
+  // The two noreply forms of one login are not merged on a guess: the unnumbered one is unconfirmed and not an
+  // account, with its own label; a reviewed alias joins them.
+  const mixedCommits = [commit(37, "Alice", "alice@users.noreply.github.com", "old"), commit(38, "Alice", "123+alice@users.noreply.github.com", "new")];
+  const mixed = build(mixedCommits), joined = build(mixedCommits, new Map(), [{ login: "alice", noreplyId: 123 }]);
+  r.mixedNoreply = who(mixed, 37).index !== who(mixed, 38).index && mixed.counts.uncertainIdentities === 1 && mixed.people[who(mixed, 37).index].uncertain === true && who(mixed, 37).label !== who(mixed, 38).label
+    && /unconfirmed/.test(who(mixed, 37).label) && who(joined, 37).index === who(joined, 38).index && joined.counts.uncertainIdentities === 0
+    && build([mixedCommits[0]]).counts.uncertainIdentities === 0;
+  // The same holds whatever the kind: automation, a reviewed agent and a reviewed organisation in both forms stay two
+  // identities each, the unnumbered one uncertain, unless a reviewed alias joins them; counts are of identities.
+  const kindsMixed = [commit(90, "github-actions[bot]", "github-actions[bot]@users.noreply.github.com", "a"), commit(91, "github-actions[bot]", "41898282+github-actions[bot]@users.noreply.github.com", "b"),
+    commit(92, "Helper", "helper@users.noreply.github.com", "c"), commit(93, "Helper", "55+helper@users.noreply.github.com", "d"),
+    commit(94, "Org", "orgname@users.noreply.github.com", "e"), commit(95, "Org", "77+orgname@users.noreply.github.com", "f")];
+  const kindMap = [{ login: "helper", kind: "agent", label: "Helper (AI agent)" }, { login: "orgname", kind: "organisation", label: "OrgName" }];
+  const apart = build(kindsMixed, new Map(), kindMap), together = build(kindsMixed, new Map(), [...kindMap, { login: "github-actions[bot]", noreplyId: 41898282 }, { login: "helper", noreplyId: 55 }, { login: "orgname", noreplyId: 77 }]);
+  const pairs = [[90, 91, "automation"], [92, 93, "agent"], [94, 95, "organisation"]];
+  r.mixedKinds = pairs.every(([u, n, kind]) => who(apart, u).index !== who(apart, n).index && who(apart, u).kind === kind && apart.people[who(apart, u).index].uncertain === true && !apart.people[who(apart, n).index].uncertain && who(apart, u).label !== who(apart, n).label)
+    && apart.counts.uncertainIdentities === 3 && apart.counts.identities.automation === 2
+    && pairs.every(([u, n]) => who(together, u).index === who(together, n).index) && together.counts.uncertainIdentities === 0 && together.counts.identities.automation === 1;
+  // Renames: a numbered account shows its newest login, an unlinked address its newest git name; an unnumbered
+  // address under the account's old login is still not joined to it.
+  const renamed = build([commit(100, "Old", "7+old-login@users.noreply.github.com", "a"), commit(101, "New", "7+new-login@users.noreply.github.com", "b"),
+    commit(102, "Old Name", "same@example.org", "c"), commit(103, "New Name", "same@example.org", "d"), commit(104, "x", "old-login@users.noreply.github.com", "e")]);
+  r.renames = who(renamed, 100).index === who(renamed, 101).index && who(renamed, 100).label === "new-login" && who(renamed, 102).index === who(renamed, 103).index && who(renamed, 102).label === L.UNLINKED
+    && who(renamed, 104).index !== who(renamed, 100).index && renamed.people[who(renamed, 104).index].uncertain === true;
+  // GitHub's own records decide authors when supplied: a linked commit shows the login GitHub links it to (one identity
+  // per account id, whatever address it used), one it links to no account the neutral label; [bot] noreply logins,
+  // GitHub's Bot and Organization types and the reviewed mapping keep their kinds. No git display name appears anywhere,
+  // in either mode, and a commit missing from the records is refused rather than guessed.
+  const gitNames = ["Zed Quux", "Ann Other", "Bob Botson", "Agnes Agent", "Dee Pendabot", "Orrin Org", "Zed Q. Second"];
+  const ghCommits = [commit(120, gitNames[0], "zed@example.org", "a"), commit(121, gitNames[1], "ann@example.org", "b"), commit(122, gitNames[2], "41898282+github-actions[bot]@users.noreply.github.com", "c"),
+    commit(123, gitNames[3], "agent@example.net", "d"), commit(124, gitNames[4], "dep@example.org", "e"), commit(125, gitNames[5], "org@example.org", "f"), commit(126, gitNames[6], "zed.other@example.com", "g")];
+  const ghRecords = new Map([[sha(120), { login: "zq", id: 9001, type: "User" }], [sha(121), null], [sha(122), null], [sha(123), { login: "someone", id: 7, type: "User" }],
+    [sha(124), { login: "dependabot[bot]", id: 49699333, type: "Bot" }], [sha(125), { login: "OrgName", id: 55, type: "Organization" }], [sha(126), { login: "zq", id: 9001, type: "User" }]]);
+  const gh = L.buildArchive({ commits: ghCommits, github: ghRecords, githubInfo: { source: "test", readAt: "2026-11-01T00:00:00.000Z", digest: "d" }, identities: [{ emailSha256: L.emailHash("agent@example.net"), kind: "agent", label: "Agent (AI agent)" }], rev: sha(1), officialTip: sha(1) });
+  const ghWho = (n) => { for (const d of gh.days) for (const c of d.commits) if (c[0] === sha(n)) return { ...gh.people[c[1]], index: c[1] }; return null; };
+  const anyGitName = (v) => strings(v).some((t) => gitNames.some((n) => t.includes(n)));
+  let refusedMissing = false;
+  try { L.buildArchive({ commits: ghCommits, github: new Map([[sha(120), null]]), rev: sha(1), officialTip: sha(1) }); } catch { refusedMissing = true; }
+  r.githubRecords = ghWho(120).label === "zq" && ghWho(120).kind === "account" && ghWho(126).index === ghWho(120).index
+    && ghWho(121).label === L.UNLINKED && ghWho(121).kind === "unlinked" && ghWho(122).kind === "automation" && ghWho(122).label === "github-actions[bot]"
+    && ghWho(123).kind === "agent" && ghWho(124).kind === "automation" && ghWho(125).kind === "organisation"
+    && gh.provenance.authorRecords.mode === "github" && gh.provenance.authorRecords.linked === 5 && gh.provenance.authorRecords.unlinked === 2 && gh.provenance.authorRecords.readAt === "2026-11-01T00:00:00.000Z"
+    && !anyGitName(gh) && !anyGitName(build(ghCommits)) && build(ghCommits).provenance.authorRecords.mode === "provisional" && refusedMissing;
+  // The PR refs are part of the evidence: count and digest recorded (the same whatever order they arrive in), with when
+  // and from where; distinct PR numbers counted apart from merge rows (one head merged twice is one PR, two rows).
+  const refsA = new Map([[3, sha(300)], [1, sha(100)]]), refsB = new Map([[1, sha(100)], [3, sha(300)]]);
+  const twice = build([commit(110, "Bo", "9+bo@users.noreply.github.com", "Merge 1", [sha(111), sha(100)]), commit(112, "Bo", "9+bo@users.noreply.github.com", "Merge 1 again", [sha(113), sha(100)])], refsA);
+  const fetched = L.buildArchive({ commits: [], pullHeads: refsB, pullRefs: { fetchedAt: "2026-11-01T00:00:00.000Z", source: "test" }, rev: sha(1), officialTip: sha(1) }).provenance.pullRefs;
+  r.pullRefs = twice.provenance.pullRefs.fetchedAt === null && twice.counts.prHeadMatches === 1 && twice.counts.prHeadMatchRows === 2 && twice.provenance.pullRefs.count === 2 && /^[0-9a-f]{64}$/.test(twice.provenance.pullRefs.digest)
+    && fetched.digest === twice.provenance.pullRefs.digest && fetched.fetchedAt === "2026-11-01T00:00:00.000Z" && fetched.source === "test" && L.pullRefsDigest(new Map([[1, sha(100)]])) !== fetched.digest;
+  // Shelves: a day over capacity keeps capacity - 1 books and one overflow binder; nothing is dropped.
+  const cap = L.SHELF.capacity, over = L.shelve(cap + 57), full = L.shelve(cap);
+  r.overflow = full.books === cap && full.overflow === 0 && over.books === cap - 1 && over.books + over.overflow === cap + 57;
+  // The generator itself: an official branch with two commits and a fork one ahead, the fork checked out.
+  const dir = mkdtempSync(join(tmpdir(), "cloud-archive-")), off = join(dir, "official"), fork = join(dir, "fork"), out = join(dir, "data.js");
+  const g = (cwd, ...args) => spawnSync("git", ["-c", "commit.gpgsign=false", "-c", "user.name=Test", "-c", "user.email=test@example.org", ...args], { cwd, encoding: "utf8" });
+  try {
+    mkdirSync(off);
+    g(off, "init", "-q", "-b", "rock"); g(off, "commit", "-q", "--allow-empty", "-m", "one"); g(off, "commit", "-q", "--allow-empty", "-m", "two");
+    const tip = g(off, "rev-parse", "HEAD").stdout.trim();
+    g(dir, "clone", "-q", off, fork); g(fork, "commit", "-q", "--allow-empty", "-m", "fork only");
+    const forkHead = g(fork, "rev-parse", "HEAD").stdout.trim();
+    const run = (rev, extra = ["--provisional"]) => spawnSync(process.execPath, [join(root, "scripts/cloud-archive.mjs"), "--cwd", fork, "--official", off, "--out", out, ...(rev ? ["--rev", rev] : []), ...extra], { encoding: "utf8" });
+    const good = run(tip), context = { window: {} };
+    if (good.status === 0) runInNewContext(readFileSync(out, "utf8"), context);
+    const data = context.window.BL && context.window.BL.cloudArchiveData;
+    r.selectsRev = good.status === 0 && !!data && data.rev === tip && data.commits === 2 && !JSON.stringify(data).includes(forkHead);
+    r.refusesFork = run(forkHead).status === 1 && run(null).status === 1 && run(tip.slice(0, 7)).status === 1;
+    // Authors: refused with neither --github-authors nor --provisional; a records file covering every commit at --rev
+    // is used and described; one missing a commit is refused.
+    const shas = g(off, "log", "--format=%H", tip).stdout.trim().split("\n"), full = join(dir, "authors.ndjson"), part = join(dir, "partial.ndjson");
+    writeFileSync(full, shas.map((h, i) => JSON.stringify({ sha: h, login: i ? null : "tester", id: i ? null : 1, type: i ? null : "User" })).join("\n") + "\n");
+    writeFileSync(part, JSON.stringify({ sha: shas[0], login: "tester", id: 1, type: "User" }) + "\n");
+    const withRecords = run(tip, ["--github-authors", full]), recorded = { window: {} };
+    if (withRecords.status === 0) runInNewContext(readFileSync(out, "utf8"), recorded);
+    const R = recorded.window.BL && recorded.window.BL.cloudArchiveData;
+    r.authorRecordsCli = run(tip, []).status === 1 && run(tip, ["--github-authors", part]).status === 1 && !!R && R.provenance.authorRecords.mode === "github"
+      && R.provenance.authorRecords.linked === 1 && R.provenance.authorRecords.unlinked === 1 && /^[0-9a-f]{64}$/.test(R.provenance.authorRecords.digest) && R.people.some((p) => p.label === "tester");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+  // The rack the page builds agrees: a 250-commit day shows capacity - 1 books and the binder's two boxes, a 12-commit
+  // day twelve books, measured as faces added over an empty day's rack (six a box).
+  {
+    const context = { window: {}, document: { createElement: () => ({ getContext: () => null }) } };
+    for (const name of ["math", "scene", "models"]) runInNewContext(readFileSync(join(root, `src/js/${name}.js`), "utf8"), context);
+    const W = context.window, day = (date, n) => ({ date, commits: Array.from({ length: n }, (_, i) => [sha(i + 1), 0, "t", 0, 0]) });
+    W.BL.cloudArchiveData = { shelf: { capacity: cap }, people: [{ label: "a", kind: "account" }], days: [day("2026-09-07", 0), day("2026-09-08", 12), day("2026-09-09", 250)] };
+    W.BL.cloudArchiveEntry = { stalkGeometry: () => ({ verts: [], faces: [], lines: [] }) };
+    runInNewContext(readFileSync(join(root, "src/js/cloud-archive-models.js"), "utf8"), context);
+    const built = W.BL.models.withScope("cloudarchive", () => W.BL.cloudArchiveModels.build());
+    const faces = built.racks.map((n) => n.geometry.faces.length), shelf = W.BL.cloudArchiveModels.LAYOUT.shelve(250);
+    r.rackOverflow = faces[1] - faces[0] === 12 * 6 && faces[2] - faces[0] === (cap - 1 + 2) * 6 && shelf.books === cap - 1 && shelf.overflow === 250 - (cap - 1);
+  }
+  // The committed snapshot: from a full SHA of the official repository, people as label and kind only, no address,
+  // every commit on a day, and each day shelved within capacity.
+  const context = { window: {} };
+  runInNewContext(readFileSync(join(root, "src/js/cloud-archive-data.js"), "utf8"), context);
+  const D = context.window.BL.cloudArchiveData;
+  r.snapshot = D.repo === L.OFFICIAL.repo && /^[0-9a-f]{40}$/.test(D.rev) && D.provenance.rev === D.rev && D.shelf.capacity === cap
+    && D.people.every((p) => ["label,kind", "label,kind,uncertain"].includes(Object.keys(p).join()) && L.KINDS.includes(p.kind)) && !addressLike(D)
+    && new Set(D.people.map((p) => p.label.toLowerCase())).size === D.people.length && D.provenance.pullRefs.count > 0 && /^[0-9a-f]{64}$/.test(D.provenance.pullRefs.digest)
+    && D.days.reduce((n, d) => n + d.commits.length, 0) === D.commits && D.days.every((d) => { const s = L.shelve(d.commits.length); return s.books + s.overflow === d.commits.length && s.books <= cap; });
+  return r;
+};
+// The Cloud Archive TV's channel guide over stand-ins for the page's live systems (the real score rules): each game's
+// records read by its own score type, the guide's selection and rotation, stale and unavailable feeds, a channel's
+// rows rebuilt only when its stamp moves, and every subscription and record watch released.
+const cloudArchiveTvProof = () => {
+  const context = { window: {} };
+  runInNewContext(readFileSync(join(root, "src/js/highscore-rules.js"), "utf8"), context);
+  const B = context.window.BL, now = { t: 10_000_000 }, subs = new Set(), watches = new Map();
+  const records = new Map();
+  Object.assign(B, {
+    chain: { snapshot: { source: "mempool.space", at: 0, heightAt: 0, priceAt: 0, feesAt: 0, backlogAt: 0, socketAt: 0, height: 0, gale: 0, soak: 0 } },
+    mempool: { state: { connected: false, blocks: 0 }, subscribe: (fn) => { subs.add(fn); return () => subs.delete(fn); } },
+    weather: { STEPS: [{ name: "dry", from: 0 }, { name: "rain", from: 0.4 }], ARRIVALS_FRESH_MS: 30000 },
+    contributors: { activeRoster: [{ name: "a" }, { name: "b" }], stateFor: (e) => e.name === "a" ? "working" : "sleeping" },
+    net: { state: { backend: false, highscores: false, room: "off", me: null }, remotes: new Map() },
+    donations: { state: { connected: false, donations: 0, tally: null, board: null, recent: null } },
+    oogatronLive: { state: { enabled: false } },
+    totemFeed: { REPOS: [{ name: "Bitcoin Core" }], state: { enabled: true, polls: 0, repos: [{ number: 0, url: "", changedAt: 0 }] } },
+    characters: { displayOf: (login) => `Ooga ${login}` },
+    highscores: { get: (id) => records.get(id) || null, watch: (id) => { watches.set(id, (watches.get(id) || 0) + 1); return () => watches.set(id, watches.get(id) - 1); } }
+  });
+  // Cloud Hopper's levels as shipped: their names and the boards they keep (one a level).
+  runInNewContext(readFileSync(join(root, "src/js/cloud-hopper-levels.js"), "utf8"), context);
+  runInNewContext(readFileSync(join(root, "src/js/cloud-archive-channels.js"), "utf8"), context);
+  const C = B.cloudArchiveChannels, world = { level: 42 }, env = { BL: B, world, now: () => now.t, reader: null, views: [{ label: "The pile", canvas: {} }] };
+  const list = C.channels(env), byId = (id) => list.find((c) => c.id === id), r = {};
+  const data = (id, highscores) => ({ game: id, scoreType: B.highscoreRules.get(id).scoreType, highscores, achieved: Object.fromEntries(Object.keys(highscores).map((k) => [k, 1])), revision: 1 });
+  // Score types: a cabinet game keeps one record a cabinet (an unknown key is no cabinet); Cloud Hopper keeps one a
+  // player, keyed by login and best (fastest) first, and is never read as a cabinet.
+  const skee = C.scoresOf(B.highscoreRules.get("skee"), data("skee", { "skee-1": 900, "skee-2": 1240 }));
+  const hopper = C.scoresOf(B.highscoreRules.get("cloud-hopper"), data("cloud-hopper", { alice: 95000, bob: 81000, "cloud-hopper-1": 1 }));
+  r.machineScores = skee.kind === "machine" && skee.rows.map((x) => x.key).join() === "skee-2,skee-1";
+  r.playerScores = hopper.kind === "ooga" && hopper.rows.map((x) => x.key).join() === "cloud-hopper-1,bob,alice" && hopper.rows.length === 3;
+  B.net.state.backend = true; B.net.state.highscores = true;
+  records.set("skee", data("skee", { "skee-2": 1240 }));
+  // Cloud Hopper reads each level's own board and the retired single board, by player login.
+  records.set("cloud-hopper-l1", data("cloud-hopper-l1", { alice: 95000, bob: 81000 }));
+  records.set("cloud-hopper-l2", data("cloud-hopper-l2", { carol: 120000, bob: 130000 }));
+  records.set("cloud-hopper", data("cloud-hopper", { dave: 70000 }));
+  const cab = byId("cabinets").read(env), hop = byId("hopper").read(env);
+  r.cabinetChannel = cab.rows[0][0] === "Thro-ball · cabinet 2" && cab.rows[0][1] === "1,240";
+  const L = B.cloudHopperLevels.LEVELS, hopRow = (label) => hop.rows.find((x) => x[0] === label);
+  r.hopperChannel = L.length >= 2 && hop.rows[0][0] === L[0].name && hop.rows[0][1] === "Ooga bob · 1:21.00" && hopRow(L[1].name)[1] === "Ooga carol · 2:00.00"
+    && L.slice(2).every((l) => hopRow(l.name)[1] === "no time yet") && hopRow("Before levels (retired)")[1] === "Ooga dave · 1:10.00"
+    && hopRow("Players with a time")[1] === "4" && !hop.rows.some((x) => /cloud-hopper-/.test(x[0] + x[1]));
+  // Freshness: waiting with no reading, live within its cadence, stale after, and off where nothing can supply it.
+  const chain = byId("chain"), snap = B.chain.snapshot;
+  r.waiting = chain.status(env) === "waiting";
+  snap.at = now.t - 30_000; r.live = chain.status(env) === "live";
+  snap.at = now.t - 10 * 60_000; r.stale = chain.status(env) === "stale";
+  B.net.state.backend = false;
+  r.unavailable = ["online", "cabinets", "rally", "hopper", "pools", "jet", "factory"].every((id) => byId(id).status(env) === "off")
+    && byId("online").read(env).empty && byId("bananas").status(env) === "held";
+  world.factoryNode = { version: 1, cooker: { tips: 0 }, feed: { counts: { accepted: 0 }, reading: { channels: 3, peers: 2, settled: 1, failed: 0, rebalances: 0 } } };
+  r.demoSaysDemo = byId("factory").status(env) === "demo" && /demo node/.test(byId("factory").read(env).note);
+  // A stamp moves only with what the channel shows: the same inputs give the same stamp, a new height another.
+  const s1 = chain.stamp(env), s2 = chain.stamp(env); snap.heightAt = now.t; snap.height = 900001;
+  r.stamps = s1 === s2 && chain.stamp(env) !== s1;
+  // Selection: rotation off under reduced motion; by hand a channel holds; on, it turns after its wait, skipping
+  // channels with nothing to show, and stands still while held; a block cuts to the mempool only when free to.
+  const still = C.createSelector(list, env, { reduced: true });
+  still.update(60);
+  r.reducedHolds = !still.auto && still.index === 0;
+  still.dispose();
+  const sel = C.createSelector(list, env, { reduced: false });
+  const off = list.findIndex((c) => c.status(env) === "off");
+  sel.select(off - 1); sel.update(C.ROTATE_SECONDS + 0.1);
+  r.skipsOff = sel.index !== off && list[sel.index].status(env) !== "off";
+  const at = sel.index; sel.hold("guide", true); sel.update(60);
+  r.holds = sel.index === at;
+  for (const fn of subs) fn({ type: "block", height: 1 });
+  r.blockWaitsWhileHeld = sel.index === at;
+  sel.hold("guide", false);
+  for (const fn of subs) fn({ type: "block", height: 2 });
+  r.blockCuts = list[sel.index].id === "mempool";
+  sel.select(list.findIndex((c) => c.id === "hopper"));
+  r.watchesOnShow = ["cloud-hopper", ...B.cloudHopperLevels.LEVELS.map((l) => l.board)].every((id) => watches.get(id) === 1) && !watches.has("race");
+  sel.dispose();
+  r.cleanup = subs.size === 0 && [...watches.values()].every((n) => n === 0);
+  r.categories = C.CATEGORIES.map((c) => c[0]).every((id) => list.some((c) => c.category === id) || id === "github");
+  // A GitHub pick opens its own page, whatever page the hanging sign shows; Repositories opens its top repository.
+  const views = ["recent", "totals", "commit", "pr", "review", "comment", "issue"].map((name, i) => i < 2 ? { name, params: undefined } : { name: "leaderboard", params: { type: name } });
+  const reader = { index: 0, count: views.length, version: 1, repos: [{ name: "small", totals: { commits: 3, prs: 1, contributors: 1 } }, { name: "big", totals: { commits: 90, prs: 9, contributors: 4 } }],
+    go(i) { this.index = i; }, get view() { return views[this.index]; }, get caption() { return `page ${this.index}`; }, dispose() {} };
+  const ghList = C.channels({ ...env, reader }), page5 = ghList.find((c) => c.page === 5);
+  reader.go(0); // the hanging sign shows page 0
+  const d5 = C.detailFor(page5, reader), dRepos = C.detailFor(ghList.find((c) => c.id === "repos"), reader);
+  r.detailPage = d5.kind === "oogatron" && d5.screen.name === "leaderboard" && d5.screen.params.type === "comment" && reader.index === 0;
+  r.detailRepos = dRepos.screen.name === "repo" && dRepos.screen.params.name === "big" && dRepos.filters.repos.join() === "big";
+  r.detailBoard = C.detailFor(byId("fees"), reader).kind === "board";
+  // Its board holds rotation and block cuts while a reader it made is open, and releases on close and on dispose.
+  const dsel = C.createSelector(ghList, env, { reduced: false });
+  const opened = dsel.holdDetail((state) => ({ state, dispose() {} }));
+  const win = opened.createReader(null), at2 = dsel.index;
+  dsel.update(60);
+  for (const fn of subs) fn({ type: "block", height: 3 });
+  r.detailHolds = dsel.held && dsel.index === at2;
+  win.dispose(); win.dispose();
+  dsel.update(C.ROTATE_SECONDS + 0.1);
+  r.detailReleases = !dsel.held && dsel.index !== at2;
+  const never = dsel.holdDetail(() => ({ dispose() {} })); never.settle();
+  r.settleReleases = !dsel.held;
+  dsel.holdDetail(() => ({ dispose() {} })).createReader(null);
+  dsel.dispose();
+  r.disposeReleases = !dsel.held && subs.size === 0;
+  // Freshness from each feed's own success, cadence and failure, never from its being enabled.
+  const O = B.oogatronLive.state, act = byId("activity");
+  Object.assign(O, { enabled: true, polls: 0, failures: 0, lastAt: 0 });
+  r.oogatronNever = act.status(env) === "waiting";
+  Object.assign(O, { failures: 2 });
+  r.oogatronFailed = act.status(env) === "held";
+  Object.assign(O, { polls: 1, lastAt: now.t - 30_000 });
+  r.oogatronFresh = act.status(env) === "live";
+  O.lastAt = now.t - 10 * 60_000;
+  r.oogatronStale = act.status(env) === "stale" && ghList.find((c) => c.page === 0).status(env) === "stale";
+  const T = B.totemFeed.state, tot = byId("totems");
+  Object.assign(T, { enabled: true, polls: 0, failures: 0, lastError: "" });
+  r.totemNever = tot.status(env) === "waiting";
+  T.failures = 1; T.lastError = "HTTP 403";
+  r.totemFailed = tot.status(env) === "off";
+  T.polls = 1; T.lastError = "";
+  r.totemFresh = tot.status(env) === "live";
+  T.failures = 2; T.lastError = "HTTP 403";
+  r.totemFailing = tot.status(env) === "stale";
+  T.lastError = ""; T.polls = 2; tot.status(env); now.t += 3 * C.TOTEM_MS + 1;
+  r.totemQuiet = tot.status(env) === "stale";
+  // A guide opened long after a successful poll cannot infer its age from the counter.
+  const lateTot = C.channels(env).find(c => c.id === "totems");
+  r.totemAlreadyLoaded = lateTot.status(env) === "held";
+  T.failures++; T.lastError = "HTTP 500";
+  r.totemOldFailure = lateTot.status(env) === "stale";
+  T.lastError = "";
+  r.totemClearedError = lateTot.status(env) === "held";
+  T.polls++; r.totemObservedSuccess = lateTot.status(env) === "live";
+  now.t += 3 * C.TOTEM_MS + 1;
+  T.failures++; T.lastError = "HTTP 500"; lateTot.status(env); T.lastError = "";
+  r.totemFailureNoRefresh = lateTot.status(env) === "stale";
+  const jet = byId("jet");
+  r.jetAbsent = jet.status(env) === "off";
+  B.jetFeed = { state: { fetched: null, failures: 0 }, reading: () => ({ source: "bake", at: "2026-10-25T05:07:36Z", stars: 1, forks: 1, commits: 1, commitsWeek: 0, openIssues: 0, releases: [] }) };
+  r.jetBake = jet.status(env) === "held";
+  B.jetFeed.state.fetched = { at: new Date(now.t - 10 * 60_000).toISOString() };
+  r.jetFresh = jet.status(env) === "live";
+  B.jetFeed.state.fetched = { at: new Date(now.t - C.JET_MS - 60_000).toISOString() };
+  r.jetOld = jet.status(env) === "stale";
+  // A status change alone repaints: the totems' stamp is unchanged by a new error, its stampOf is not.
+  T.lastError = ""; T.polls = 3; tot.status(env);
+  const raw = tot.stamp(env), keyed = C.stampOf(tot, env);
+  T.lastError = "HTTP 500";
+  r.statusInStamp = tot.stamp(env) === raw && C.stampOf(tot, env) !== keyed;
+  // Players online: a remote moving outside to an interior repaints with population and NPC version unchanged.
+  Object.assign(B.net.state, { backend: true, room: "live", npcVersion: 4 });
+  B.net.remotes.set(1, { zone: "outside" }); B.net.remotes.set(2, { zone: "outside" });
+  const online = byId("online"), before = online.stamp(env);
+  B.net.remotes.get(2).zone = "lab";
+  r.zoneMove = online.stamp(env) !== before && B.net.remotes.size === 2 && B.net.state.npcVersion === 4 && online.read(env).rows.some((x) => x[0] === "Inside somewhere");
+  return r;
+};
 const npcActivityRefreshProof = (BL) => {
   const S = BL.scene, C = BL.contributors, noop = () => {}, now = Date.now(), hour = 3600000;
   const saved = C.roster.map(c => ({ lastCommitAt: c.lastCommitAt, lastContributionAt: c.lastContributionAt, maintainer: c.maintainer }));
@@ -32321,7 +32637,41 @@ const npcActivityRefreshProof = (BL) => {
   }
 };
 
+// The Cloud Archive scene's motion, through the real scene shell and the real interior module: the director keeps
+// full rate unfocused only while `inMotion` holds. An idle visit must let it throttle; LOAD's racks, the sign's glide,
+// the TV's snow, a tween and live particles must not. (The interior's `create` needs WebGL and the crew, so the visit
+// here is the interior's own exported rule over a visit's motion state; the scene is the shell as shipped.)
+const cloudArchiveMotionProof = (sceneSource = readFileSync(join(root, "src/js/scene-cloudarchive.js"), "utf8")) => {
+  const media = { matches: false };
+  // The real modules the interior reads at load (as the history proof loads them), the committed snapshot and layout.
+  const context = { window: { matchMedia: () => media }, document: { createElement: () => ({ getContext: () => null }) } };
+  for (const name of ["math", "scene", "models", "cloud-archive-data"]) runInNewContext(readFileSync(join(root, `src/js/${name}.js`), "utf8"), context);
+  Object.assign(context.window.BL, { glRenderer: { POINT_LIGHT_CAPACITY: 8 }, cloudArchiveEntry: { stalkGeometry: () => ({ verts: [], faces: [], lines: [] }) }, deferred: { load: () => null } });
+  for (const name of ["cloud-archive-models", "cloud-archive-interior"]) runInNewContext(readFileSync(join(root, `src/js/${name}.js`), "utf8"), context);
+  runInNewContext(sceneSource, context);
+  const B = context.window.BL, rule = B.cloudArchiveInterior.inMotion, scene = B.scenes.cloudarchive;
+  const state = { train: false, glide: false, snow: false, tweens: 0, fx: false };
+  B.cloudArchiveInterior.create = () => ({ get inMotion() { return rule(state); }, leave: () => ({}) });
+  const r = { before: scene.inMotion === false };
+  scene.enter({});
+  r.idleThrottles = scene.inMotion === false;
+  for (const [key, on] of [["train", true], ["glide", true], ["snow", true], ["tweens", 1], ["fx", true]]) {
+    const off = state[key]; state[key] = on;
+    r[`${key}KeepsRate`] = scene.inMotion === true;
+    state[key] = off;
+  }
+  r.idleAgain = scene.inMotion === false;
+  scene.leave();
+  r.afterLeave = scene.inMotion === false;
+  return r;
+};
 const unitChecks = async () => {
+  const archive = await cloudArchiveProof();
+  const tv = cloudArchiveTvProof();
+  const motion = cloudArchiveMotionProof();
+  record("cloud archive motion: the scene reports motion only while something moves by itself (LOAD's racks, the sign's glide, the TV's snow, a tween, particles), so an idle visit lets the director throttle unfocused frames", Object.values(motion).every(Boolean), JSON.stringify(motion));
+  record("cloud archive tv: records read by the game's own score type (one a cabinet, Cloud Hopper one a player), the guide's channel selection and rotation (off under reduced motion, held while read, skipping channels with nothing to show, a block cutting in only when free), stale and unavailable feeds said so, a channel rebuilt only when its stamp moves, and every subscription and record watch released", Object.values(tv).every(Boolean), JSON.stringify(tv));
+  record("cloud archive history: shared display names stay separate people, merge-looking subjects and branch owners prove no PR, a PR is only ever a PR-head match and a shared head credits none, unique PR matches are counted apart from merge rows against a recorded PR-ref snapshot, the two noreply forms join only by reviewed alias for every kind, renamed identities show their newest name, authors come from GitHub's records when supplied (login or a neutral label, never a git name, and a missing record refused), unknown and unreviewed identities stay unlinked, no address of any shape appears anywhere in the output and labels are distinct, an over-full day overflows without dropping commits, and the generator shelves only an explicit revision of the official branch", Object.values(archive).every(Boolean), JSON.stringify(archive));
   await connectionReportChecks();
   const artifact = artifactUnitProof();
   record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));

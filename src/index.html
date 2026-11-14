@@ -169,6 +169,7 @@
         <p data-scene="hangar" data-zone-line hidden>Lightning Jet Hangar</p>
         <p data-scene="bifrost" data-zone-line hidden>₿IFRÖST</p>
         <p data-scene="timechain" id="sphere-subtitle" hidden>Timechain Sphere</p>
+        <p data-scene="cloudarchive" hidden>Cloud Archive</p>
         <p data-scene="arcade" data-zone-line hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr></p>
         <p data-scene="skee" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Thro-ball</p>
         <p data-scene="hoops" hidden><abbr class="arcade-banner-name" title="Ooga Arcade"><span>Ooga Arcade</span></abbr> · Hoop Shot</p>
@@ -324,6 +325,11 @@
       </button>
       <nav class="presets" aria-label="Timechain Sphere room" data-scene="timechain" hidden>
         <button type="button" class="leave" data-action="leave">Leave<span> room</span></button>
+      </nav>
+      <nav class="presets" aria-label="Cloud Archive" data-scene="cloudarchive" hidden>
+        <span class="archive-mode" id="archive-mode" role="status"></span>
+        <button type="button" data-action="tv-guide">TV guide</button>
+        <button type="button" class="leave" data-action="leave">Leave<span> archive</span></button>
       </nav>
       <nav class="presets" aria-label="₿IFRÖST" data-scene="bifrost" hidden>
         <button type="button" data-preset="core">Core</button>
@@ -2073,6 +2079,16 @@ Open the pull request from my fork as a draft and keep it draft while building o
         <button type="button" id="chalk-reset">Reset message</button>
       </div>
     </dialog>
+    <!-- The Cloud Archive TV's channel guide (cloud-archive-tv.js fills the list; WIP, only under ?wip=cloudarchive). -->
+    <dialog class="modal archive-guide" id="archive-guide" aria-labelledby="archive-guide-title">
+      <form method="dialog" class="panel-head">
+        <h2 id="archive-guide-title">Island TV · channel guide</h2>
+        <button type="submit" class="modal-close" aria-label="Close the channel guide">&times;</button>
+      </form>
+      <p class="help">Ooga Booga Land's live systems. Pick a channel to watch it and open its board.</p>
+      <label class="archive-guide-auto"><input type="checkbox" id="archive-guide-auto">Change channel by itself</label>
+      <div class="archive-guide-list" id="archive-guide-list"></div>
+    </dialog>
     <dialog class="modal board-modal" id="board-modal" aria-labelledby="board-title">
       <div class="panel-head" id="board-head">
         <button type="button" class="modal-close board-filter" id="board-filter" data-action="board-filter" aria-label="Filter repos, contributors, and contribution types" aria-expanded="false" aria-controls="board-filter-menu" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 4H21L14 12V19L10 21V12Z"/></svg></button>
@@ -2355,6 +2371,7 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/pile.js"></script>
   <script src="js/pile-guides.js"></script>
   <script src="js/banana-cover.js"></script>
+  <script src="js/view-assist.js"></script>
   <script src="js/mirror-guides.js"></script>
   <script src="js/critters.js"></script>
   <script src="js/weather.js"></script>
@@ -2584,6 +2601,14 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/timechain-room-lecture.js" data-defer="timechain"></script>
   <script src="js/timechain-room-theater.js" data-defer="timechain"></script>
   <script src="js/timechain-interior.js" data-defer="timechain"></script>
+  <script src="js/cloud-archive-entry.js"></script>
+  <script src="js/scene-cloudarchive.js"></script>
+  <script src="js/cloud-archive-data.js" data-defer="cloudarchive"></script>
+  <script src="js/cloud-archive-models.js" data-defer="cloudarchive"></script>
+  <script src="js/cloud-archive-audio.js" data-defer="cloudarchive"></script>
+  <script src="js/cloud-archive-channels.js" data-defer="cloudarchive"></script>
+  <script src="js/cloud-archive-tv.js" data-defer="cloudarchive"></script>
+  <script src="js/cloud-archive-interior.js" data-defer="cloudarchive"></script>
   <script src="js/routes.js"></script>
   <script src="js/router.js"></script>
   <script src="js/poker-rules.js" data-defer="poker"></script>

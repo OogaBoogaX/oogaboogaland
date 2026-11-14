@@ -12182,6 +12182,83 @@ body[data-active-scene="arcade"] #destination-hud:not([hidden]) { display: flex;
 body.cloud-hopper-active #destination-hud,
 body.cloud-hopper-active #mode-hud { display: none; }
 
+/* The Cloud Archive's status in its banner nav ("N days · N commits"). */
+.archive-mode {
+  align-self: center;
+  padding: 0 10px;
+  color: #f2a33a;
+  font: 700 11px var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+@media (max-width: 720px) {
+  .archive-mode { white-space: normal; max-width: 46vw; overflow-wrap: anywhere; }
+}
+
+/* The Cloud Archive TV's channel guide (WIP, ?wip=cloudarchive): the channels by category, each with its status. */
+.archive-guide {
+  width: 420px;
+  max-height: min(640px, calc(100vh - 32px));
+  overflow-y: auto;
+}
+.archive-guide-auto {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0 4px;
+}
+.archive-guide-list h3 {
+  margin: 14px 0 6px;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--paper);
+  opacity: 0.8;
+}
+.archive-guide-list ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.archive-guide-list button {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 8px;
+  background: rgba(10, 12, 10, 0.78);
+  color: var(--paper);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.archive-guide-list button:hover,
+.archive-guide-list button:focus-visible {
+  border-color: var(--paper);
+  outline: none;
+}
+.archive-guide-list button[aria-current="true"] {
+  border-color: #e8b04a;
+}
+.archive-guide-status {
+  flex: none;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #a6a6a2;
+}
+.archive-guide-list button[data-status="live"] .archive-guide-status { color: #46ff70; }
+.archive-guide-list button[data-status="stale"] .archive-guide-status,
+.archive-guide-list button[data-status="demo"] .archive-guide-status { color: #e8b04a; }
+.archive-guide-list button[data-status="held"] .archive-guide-status { color: #8fb7dc; }
+
 /* Block Frenzy's board: one short line of keys, the full list folded under "All controls" and scrolled within a
    bounded height, so the choices above stay in view. */
 #block-board .block-help-wrap {
