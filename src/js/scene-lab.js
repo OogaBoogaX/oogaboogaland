@@ -421,18 +421,19 @@
     }
     hud.setDestinations(Object.keys(VIEW_NAMES), VIEW_NAMES);
     hud.setAreaLabel("EntropyLab");
-    hud.el.modeDestination.title = "EntropyLab · cycle stations";
-    hud.el.modeDestinationLabel.textContent = "EntropyLab views. Press to cycle stations";
+    hud.el.modeDestination.title = "EntropyLab · choose a viewpoint";
+    hud.el.modeDestinationLabel.textContent = "EntropyLab views. Open Map to choose a viewpoint";
     const presetView = (name) => {
-      if (!VIEW_NAMES[name]) return;
+      if (!VIEW_NAMES[name]) return false;
       pilot.goPreset(name);
       hud.setDetachedView(name, true);
+      return true;
     };
     hud.onPreset(presetView);
     hud.onAction((action, value) => {
       if (action === "reset") resetDemo();
       else if (action === "act") pilot.action();
-      else if (action === "mode-preset") presetView(value);
+      else if (action === "mode-preset") return presetView(value);
       else if (action.startsWith("mode-")) pilot.modeAction(action);
       else if (action.startsWith("weapon-") || action === "magazine-swap") pilot.weaponAction(action);
       else if (action === "reset-view") pilot.resetCamera();

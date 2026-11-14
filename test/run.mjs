@@ -337,6 +337,93 @@ const sleepBeamPoolProof = () => {
   beam.dispose(); beam.dispose(); const released = new Set(); beam.liveGeometry(released);
   return { compacted, bounded, calm, deterministic, clean, disposed: !sceneRoot.children.length && !released.size };
 };
+// Regression: Map's window capture listener is registered first, so a pad's Escape (pad-focus.js `back`, B or Menu)
+// over another menu layer reached it before that layer's own handler and was swallowed. It must pass through.
+const destinationMapPadEscapeProof = () => {
+  const els = new Map(), listeners = new Map(), state = { layer: false, otherDialog: null, shown: 0 };
+  const el = id => {
+    if (!els.has(id)) els.set(id, { id, hidden: false, disabled: false, open: false, textContent: "", dataset: {}, attrs: {}, children: [],
+      addEventListener() {}, removeEventListener() {}, setAttribute(k, v) { this.attrs[k] = v; }, focus() {}, click() {}, append(...nodes) { this.children.push(...nodes); },
+      replaceChildren(...nodes) { this.children = nodes; }, querySelectorAll(tag) { return this.children.flatMap(n => [...(n.tagName === tag.toUpperCase() ? [n] : []), ...n.querySelectorAll(tag)]); }, showModal() { this.open = true; state.shown++; }, close() { this.open = false; } });
+    return els.get(id);
+  };
+  const document = { getElementById: el, querySelector: sel => sel === "dialog:modal, dialog[open]:not(.board-floating)" ? (el("destination-map").open ? el("destination-map") : state.otherDialog && !state.otherDialog.floating ? state.otherDialog : null) : null, pointerLockElement: null,
+    createElement: tag => Object.assign(el("row" + els.size), { tagName: tag.toUpperCase() }) };
+  const window = { BL: { controls: { resetAll() {} }, gamepad: { requireNeutral() {} }, padFocus: { open: () => state.layer } },
+    matchMedia: () => ({ matches: false }), addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener() {} };
+  const context = { window, document, localStorage: { getItem: () => "1", setItem() {} } };
+  runInNewContext(readFileSync(join(root, "src/js/destination-map.js"), "utf8"), context);
+  const scene = { id: "hub" }, map = window.BL.destinationMap.create({ current: () => scene, ready: () => true });
+  let available = true;
+  map.connect({ available: () => available, travels: () => true, selected: () => null, names: () => ["pile"], label: n => n, travel: () => true });
+  const press = (key, pad) => { const e = { key, code: key, pad, prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; } }; listeners.get("keydown")(e); return e; };
+  const dialog = el("destination-map");
+  // The Controls panel (or a board, Add an Ooga, the donation popup) is the open layer: B's Escape is its own.
+  state.layer = true; state.otherDialog = el("controls-help");
+  const overDialog = press("Escape", true), passedDialog = !overDialog.prevented && !overDialog.stopped && !dialog.open && state.shown === 0;
+  // A card such as the ghost lobby or #hangar-sound is a layer with no dialog: B is still its Escape, not Map.
+  state.otherDialog = null;
+  const overCard = press("Escape", true), passedCard = !overCard.prevented && !overCard.stopped && !dialog.open && state.shown === 0;
+  // On foot with no layer open, Menu's Escape still opens Map, and B inside Map still closes it.
+  state.layer = false;
+  const onFoot = press("Escape", true), opened = onFoot.prevented && onFoot.stopped && dialog.open && state.shown === 1;
+  state.layer = true;
+  const inside = press("Escape", true), closed = inside.prevented && !dialog.open;
+  // A keyboard Escape on foot is never Map's.
+  state.layer = false;
+  const keyboard = press("Escape", false), keyboardPassed = !keyboard.prevented && !dialog.open;
+  // The floating Oogatron board is a non-modal dialog that padFocus does not see: it must not block Map.
+  state.otherDialog = Object.assign(el("board"), { open: true, floating: true });
+  const shownBefore = state.shown, overBoard = press("Escape", true), floatingOpens = overBoard.prevented && overBoard.stopped && dialog.open && state.shown === shownBefore + 1;
+  press("Escape", true); state.otherDialog = null;
+  // A refused Map (a modal dialog padFocus misses, or Map unavailable) must not swallow Menu's Escape.
+  state.otherDialog = Object.assign(el("modal"), { open: true, floating: false });
+  const refused = press("Escape", true), refusedPassed = !refused.prevented && !refused.stopped && !dialog.open;
+  state.otherDialog = null; available = false;
+  const unavailable = press("Escape", true), unavailablePassed = !unavailable.prevented && !unavailable.stopped && !dialog.open;
+  available = true;
+  map.dispose();
+  return { passedDialog, passedCard, opened, closed, keyboardPassed, floatingOpens, refusedPassed, unavailablePassed };
+};
+const destinationMapCoachingHintProof = () => {
+  const els = new Map(), state = { otherDialog: null };
+  const el = id => {
+    if (!els.has(id)) els.set(id, { id, hidden: id === "explore-coach", disabled: false, open: false, textContent: "", dataset: {}, attrs: {}, children: [],
+      addEventListener() {}, removeEventListener() {}, setAttribute(k, v) { this.attrs[k] = v; }, focus() {}, click() {}, append(...nodes) { this.children.push(...nodes); },
+      replaceChildren(...nodes) { this.children = nodes; }, querySelectorAll(tag) { return this.children.flatMap(n => [...(n.tagName === tag.toUpperCase() ? [n] : []), ...n.querySelectorAll(tag)]); }, showModal() { this.open = true; }, close() { this.open = false; } });
+    return els.get(id);
+  };
+  const querySelector = sel => {
+    const open = [el("destination-map"), state.otherDialog].find(d => d && d.open) || null;
+    if (!open) return null;
+    if (sel === "dialog[open]") return open;
+    if (sel === "dialog:modal, dialog[open]:not(.board-floating)") return open.floating ? null : open;
+    return null;
+  };
+  const document = { getElementById: el, querySelector, pointerLockElement: null, createElement: tag => Object.assign(el("row" + els.size), { tagName: tag.toUpperCase() }) };
+  const window = { BL: { controls: { resetAll() {} }, gamepad: { requireNeutral() {}, state: { connected: false } }, padFocus: { open: () => false } },
+    matchMedia: () => ({ matches: false }), addEventListener() {}, removeEventListener() {} };
+  const context = { window, document, localStorage: { getItem: () => null, setItem() {} } };
+  runInNewContext(readFileSync(join(root, "src/js/destination-map.js"), "utf8"), context);
+  const scene = { id: "hub" }, map = window.BL.destinationMap.create({ current: () => scene, ready: () => true });
+  map.connect({ available: () => true, travels: () => true, selected: () => null, names: () => ["pile"], label: n => n, travel: () => true, controlled: () => false, position: () => null });
+  const coach = el("explore-coach");
+  map.update();
+  const offered = !coach.hidden;
+  // A floating Oogatron board is a non-modal dialog: it must not hide the coaching hint.
+  state.otherDialog = Object.assign(el("board"), { open: true, floating: true });
+  map.update();
+  const floatingShows = !coach.hidden;
+  // A modal or other non-floating dialog still hides the hint.
+  state.otherDialog = Object.assign(el("controls-help"), { open: true, floating: false });
+  map.update();
+  const modalHides = coach.hidden;
+  state.otherDialog = null;
+  map.update();
+  const restored = !coach.hidden;
+  map.dispose();
+  return { offered, floatingShows, modalHides, restored };
+};
 // Rule: exercise the actual bounded rage state machine with a small physical
 // adapter. Collision and the rendered carry are covered by the hub regressions.
 const gorillaRageProof = async () => {
@@ -4177,7 +4264,14 @@ const session = (url, steps, opts, final) => output.run({ lines: [], results: []
       const from = i ? b.logs.length : 0;
       run.open = open || null;
       try {
+        const cpu = name === "wall movement performance" && process.env.COVERED_CPU === "1";
+        if (cpu) { await b.send("Profiler.enable"); await b.send("Profiler.start"); }
         await fn(b);
+        if (cpu) {
+          const { profile } = (await b.send("Profiler.stop")).result;
+          writeFileSync(join(root, "untracked", "covered-suite.cpuprofile"), JSON.stringify(profile));
+          writeFileSync(join(root, "untracked", "covered-suite-stats.json"), JSON.stringify(await b.evaluate("__ooga.headquarters.objectGuides.stats")));
+        }
         if (Date.now()-t0>=SESSION_MS) { overran=true; b.close(true); throw driverError("session deadline"); }
         const observed=b.logs.slice(from),notices=b.shorelineHealthy&&b.shorelineSoftware?observed.filter(readbackPerformanceNotice):[];
         if(notices.length)lines.push(`INFO software WebGL: ${notices.length} driver ReadPixels performance notices; healthy state/GL checks passed (no application readback required).`);
@@ -11087,6 +11181,14 @@ const gamepadHoldProof = async () => {
   const disconnected = !S.connected && neutral();
   connected = true; G.poll(); G.hold(false); G.poll();
   const reconnected = S.connected && !(S.held | S.pressed | S.released);
+  // Map asks for neutral sticks as it closes (`requireNeutral`): a stick still deflected from the menu moves nothing
+  // until both have rested inside the dead zone, while buttons keep working; one stick resting is not enough.
+  buttons[1].pressed = false; G.poll(); G.requireNeutral(); buttons[0].pressed = true; G.poll();
+  const mapInput = !!(S.pressed & B.a) && !S.lx && !S.ly && !S.rx && !S.ry;
+  hardware.axes[0] = 0; G.poll(); const mapHeld = !S.lx && !S.ly && !S.rx && !S.ry;
+  hardware.axes.fill(0); G.poll(); hardware.axes[0] = 0.6; G.poll();
+  const mapReleased = S.lx > 0;
+  buttons[0].pressed = false; G.poll();
   context.window.removeEventListener = () => {};
   for (const name of ["math", "controls"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
   buttons[1].pressed = false; G.poll();
@@ -11103,7 +11205,7 @@ const gamepadHoldProof = async () => {
   const pilot = await readFile(join(root, "src/js/pilot.js"), "utf8");
   const reset = new Function("pad", `let padFrame = -1, padFire = true, padAds = true, mouseAds = true, ads = true; ${pilot.match(/const resetPad = [^\n]+/)[0]} resetPad(); return { padFrame, padFire, padAds, mouseAds, ads };`)(S);
   const pilotReset = reset.padFrame === S.frame && !reset.padFire && !reset.padAds && !reset.mouseAds && !reset.ads;
-  return { initiallyLive: !!initiallyLive, synchronous, heldNeutral, noReplay, fresh, idempotent, betweenFrames, afterRelease, disconnected, reconnected, controlsResume, pilotReset };
+  return { initiallyLive: !!initiallyLive, synchronous, heldNeutral, noReplay, fresh, idempotent, betweenFrames, afterRelease, disconnected, reconnected, mapInput, mapHeld, mapReleased, controlsResume, pilotReset };
 };
 // The real gamepad and controls modules against stub pads: what a button does comes from the bindings, so a remap
 // reaches a reader and survives a reload, the pad last pressed is the one read, a game's context delivers its keys,
@@ -11820,7 +11922,7 @@ const hubGuestLikeness = { name: "hub guest likeness", why: "regression: a guest
   const arcadeLook = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, a = P.player, map = document.getElementById("destination-hud");
     const name = a ? a.traits.name : null, p = a ? { x: a.root.position.x, z: a.root.position.z } : null, mode = P.mode;
-    map.click(); B.advance(0.1, 1 / 60);
+    map.click(); document.querySelector("#destination-map [data-destination]").click(); document.getElementById("destination-map-go").click(); B.advance(0.1, 1 / 60);
     const looked = !!a && P.looking && P.player === a && Math.hypot(a.root.position.x - p.x, a.root.position.z - p.z) < 1e-6;
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "w", code: "KeyW" })); B.advance(1 / 60, 1 / 60);
     const back = !P.looking && P.player === a && P.mode === mode;
@@ -13333,7 +13435,6 @@ const dropStart = { name: "drop start", why: "regression: Space on the title car
   await b.key(" ");
   const closed = await st();
   await b.key("Enter");
-  await b.evaluate(`(() => { const a = window.__ooga.block.sim.actors[0]; a.flight = 0; a.y = 0; a.vy = 0; a.grounded = true; })()`);
   const climb = await st();
   const mark = await b.evaluate(`(() => { const B = window.__ooga; let t = 0; for (; t < 60 && !B.drop.jumpOpen; t += 0.25) B.advance(0.25, 1 / 60); return t; })()`);
   await b.key(" ");
@@ -13548,9 +13649,11 @@ const sharedPanelBuildings = { name: "shared panel buildings", why: "regression:
     for (const id of ids) {
       const r = await b.evaluate(`(() => { const I = __ooga.dsb.interiors; I.review(${JSON.stringify(id)}, true); __ooga.advance(.5,1/60);
         const s = document.getElementById("sheet"), inside = I.active?.definition.id, shown = !s.hidden && getComputedStyle(s).display !== "none", open = s.dataset.open;
-        I.request(I.active.room.exit); __ooga.advance(.5,1/60); return { inside, shown, open, exited: !I.active, after: s.dataset.open, panels: document.querySelectorAll(".sheet").length }; })()`);
+        document.getElementById("destination-hud").click();
+        const map = document.getElementById("destination-map"), entries = map.querySelectorAll("[data-destination]"), outside = map.open && entries.length === 1 && entries[0].dataset.destination === "outside";
+        entries[0]?.click(); document.getElementById("destination-map-go").click(); __ooga.advance(.5,1/60); return { inside, shown, open, outside, exited: !I.active && !map.open, after: s.dataset.open, panels: document.querySelectorAll(".sheet").length }; })()`);
       rows.push(r);
-      record("shared panel: " + id + " preserves " + (pass ? "closed" : "open") + " state on entry and exit", r.inside === id && r.shown && r.open === String(!pass) && r.after === r.open && r.exited && r.panels === 1, JSON.stringify(r));
+      record("shared panel: " + id + " preserves " + (pass ? "closed" : "open") + " state on entry and exit", r.inside === id && r.shown && r.open === String(!pass) && r.after === r.open && r.outside && r.exited && r.panels === 1, JSON.stringify(r));
     }
   }
   await tourGo(b, "bifrost");
@@ -14258,26 +14361,217 @@ const hubBlockHeight = { name: "header clock and block height", why: "rule: the 
   const after = await b.evaluate(`(() => { const height = document.getElementById("world-block-height"), block = document.getElementById("world-block"); const shown = height.textContent; return { shown, label: block.getAttribute("aria-label"), bananas: !!document.getElementById("world-banana-count"), icon: !!block.querySelector(".banana-icon") }; })()`);
   record("header: a single-digit clock is centered from its displayed time and local zone, while the chain feed paints block height below it", before.height === "\u2014" && before.namedImage && !before.bananas && before.text === `9:00 AM ${before.zone}` && before.viewWidth === before.cells && Math.abs(before.cssWidth - before.cells / 6) < 1e-6 && after.shown === "900,123" && after.label === "Bitcoin block height 900123" && !after.bananas && !after.icon, JSON.stringify({ before, after }));
 } };
-const hubDestinationNames = { name: "destination accessible names", why: "regression: each visible destination label must occur in the button's accessible name", run: async (b) => {
+const hubDestinationNames = { name: "destination accessible names", why: "regression: destinations need explicit accessible actions without moving the player when the map opens", run: async (b) => {
   await b.send("Accessibility.enable");
-  await b.evaluate(`__ooga.pilot.release(true); __ooga.hud.setDetachedView("pile", true)`);
-  const expected = ["Lab", "Mirror", "HQ", "Basement", "Mempool", "LN Factory", "Ooga Arcade", "B.C.A.", "North gate", "₿IFRÖST", "TC Sphere", "Pile"], rows = [];
-  for (const label of expected) {
-    const row = await b.evaluate(`(() => {
-      const map = document.getElementById("destination-hud"); map.click();
-      return { label: document.getElementById("detached-destination-name").textContent, action: map.dataset.action,
-        detached: !__ooga.pilot.player && !__ooga.clankerPlay.active,
-        removed: !document.getElementById("destination-picker") && !document.getElementById("reset-camera-hud"),
-        noPopup: !map.hasAttribute("aria-haspopup") && !map.hasAttribute("aria-controls") };
-    })()`);
-    const tree = await b.send("Accessibility.getFullAXTree");
-    rows.push({ ...row, expected: label, named: tree.result.nodes.some(node => node.role?.value === "button"
-      // CSS paints the destination in uppercase; Chrome's labelled-by name
-      // contains that rendered text rather than the title-case DOM source.
-      && node.name?.value.includes(label.toUpperCase()) && /map/i.test(node.name.value)) });
+  await b.evaluate(`__ooga.pilot.endLook(); __ooga.hud.setDetachedView("pile", true); document.getElementById("destination-hud").click()`);
+  const tree = await b.send("Accessibility.getFullAXTree");
+  const names = ["Pile", "Lab", "Mirror", "HQ", "Basement", "Mempool", "LN Factory", "Ooga Arcade", "B.C.A.", "North gate", "₿IFRÖST", "TC Sphere", "Merge Rock"];
+  const opened = await b.evaluate(`(() => {
+    const dialog = document.getElementById("destination-map"), map = document.getElementById("destination-hud");
+    return { open: dialog.open, count: dialog.querySelectorAll("[data-destination]").length,
+      stayed: document.getElementById("detached-destination-name").textContent === "Pile",
+      focus: document.activeElement.id === "destination-map-close", expanded: map.getAttribute("aria-expanded"),
+      current: dialog.querySelector('[aria-current="true"]')?.dataset.destination };
+  })()`);
+  const preview = await b.evaluate(`(() => {
+    const P = __ooga.pilot, actor = P.player, at = actor && { ...actor.root.position }, camera = { ...__ooga.camera.position };
+    const pin = document.querySelector('[data-map-destination="mempool"]'); pin.click();
+    const points = BL.scenes.hub.navigationMap().points, hq = points.find(p => p.name === "underground"), basement = points.find(p => p.name === "basement");
+    return { stayed: (!actor || Math.hypot(actor.root.position.x - at.x, actor.root.position.z - at.z) < 1e-6) && Math.hypot(__ooga.camera.position.x - camera.x, __ooga.camera.position.z - camera.z) < 1e-6,
+      open: document.getElementById("destination-map").open, selected: pin.getAttribute("aria-pressed") === "true",
+      confirmation: document.getElementById("destination-map-go").textContent === "View Mempool",
+      underground: document.getElementById("destination-map-detail").textContent.includes("beneath the lake"),
+      layers: hq.x === basement.x && hq.z === basement.z && hq.level !== basement.level,
+      pins: document.querySelectorAll("[data-map-destination]").length === 13 };
+  })()`);
+  record("destinations: a real-world map pin previews without moving camera or actor, requires confirmation, and distinguishes underground floors", Object.values(preview).every(Boolean), JSON.stringify(preview));
+  const usability = await b.evaluate(`(() => {
+    const D=BL.destinationMap,H=BL.scenes.hub,P=__ooga.pilot,dialog=document.getElementById("destination-map"),list=document.getElementById("destination-map-list");
+    const layers=document.getElementById("destination-map-layers"), pins=()=>[...document.querySelectorAll("[data-map-destination]")].filter(p=>!p.hidden).map(p=>p.dataset.mapDestination);
+    layers.querySelector('[data-map-layer="hq"]').click();const hq=pins().join()==="underground";
+    layers.querySelector('[data-map-layer="basement"]').click();const basement=pins().join()==="basement";
+    layers.querySelector('[data-map-layer="surface"]').click();const surface=!pins().includes("underground")&&!pins().includes("basement")&&pins().length===11;
+    layers.querySelector('[data-map-layer="all"]').click();
+    document.getElementById("destination-show-list").click();const listMode=dialog.dataset.display==="list"&&getComputedStyle(list).display!=="none";
+    document.getElementById("destination-show-map").click();const mapMode=dialog.dataset.display==="map";
+    P.possess(__ooga.cavemen.get("portlandhodl")); if(__ooga.crew.sleeping)__ooga.crew.wakePlayer(); P.endLook();
+    const p=P.player?.root.position, before=p&&JSON.stringify(p), point={};
+    const doors=!!p&&["pile","lab","underground","basement","factory","arcade","bca","mirror","mempool","timechain","bifrost","gate","repos"].every(n=>H.navigationWaypoint(n,point)&&[point.x,point.y,point.z].every(Number.isFinite));
+    document.querySelector('[data-map-destination="lab"]').click();document.getElementById("destination-map-guide").click();D.update();
+    const guided=!dialog.open&&!document.getElementById("destination-waypoint").hidden&&JSON.stringify(p)===before&&!P.looking;
+    document.getElementById("destination-waypoint-stop").click();const stopped=document.getElementById("destination-waypoint").hidden;
+    document.getElementById("destination-hud").click();document.querySelector('[data-map-destination="lab"]').click();document.getElementById("destination-map-go").click();D.update();
+    const returnShown=P.looking&&!document.getElementById("destination-return").hidden;
+    document.getElementById("destination-return").click();const returned=!P.looking&&JSON.stringify(p)===before;
+    document.getElementById("destination-hud").click();
+    const status=H.navigationStatus;H.navigationStatus=()=>"Finish carrying first.";document.querySelector('[data-map-destination="lab"]').click();
+    const refusal=document.getElementById("destination-map-go").disabled&&document.getElementById("destination-map-detail").textContent.includes("Finish carrying first.");H.navigationStatus=status;
+    return {hq,basement,surface,listMode,mapMode,doors,guided,stopped,returnShown,returned,refusal};
+  })()`);
+  record("destinations: floor filters, phone Map/List, entrance bearings, touch return and early refusals preserve the actor",Object.values(usability).every(Boolean),JSON.stringify(usability));
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+  const closed = await b.evaluate(`!document.getElementById("destination-map").open && document.activeElement.id === "destination-hud" && __ooga.scene === "hub"`);
+  const buttonClosed = await b.evaluate(`(() => { document.getElementById("destination-hud").click(); document.getElementById("destination-map-close").click(); return !document.getElementById("destination-map").open && document.activeElement.id === "destination-hud"; })()`);
+  record("destinations: Map lists all thirteen named actions with current location, opens without travelling and Escape restores its focus",
+    opened.open && opened.count === 13 && opened.stayed && opened.focus && opened.expanded === "true" && opened.current === "pile" && closed && buttonClosed
+      && names.every(name => tree.result.nodes.some(node => node.role?.value === "button" && node.name?.value.startsWith("Preview " + name))), JSON.stringify({ opened, closed, buttonClosed }));
+  await b.evaluate(`document.getElementById("destination-hud").click(); window.__mapElapsed = BL.scenes.hub.elapsed`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW" });
+  const held = await b.evaluate(`(__ooga.advance(.2, 1/60), { quiet: __ooga.pilot.controls.read().y === 0, moving: BL.scenes.hub.elapsed > __mapElapsed })`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+  await b.evaluate(`document.getElementById("scene").focus()`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW", autoRepeat: true });
+  const noReplay = await b.evaluate(`__ooga.pilot.controls.read().y === 0`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW" });
+  const resumed = await b.evaluate(`__ooga.pilot.controls.read().y !== 0`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
+  await b.evaluate(`delete window.__mapElapsed`);
+  record("destination controls: the world advances behind Map, held movement stays quiet after Escape and a fresh press resumes it", held.quiet && held.moving && noReplay && resumed, JSON.stringify({ held, noReplay, resumed }));
+  const gamepad = await b.evaluate(`(async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, "getGamepads"), P = BL.gamepad;
+    // Named as Chrome names an Xbox pad: the gamepad picks its controller family from the id.
+    const pad = { index:0, id:"Xbox Wireless Controller (STANDARD GAMEPAD Vendor: 045e Product: 02fd)", connected:true, mapping:"standard", axes:[0,0,0,0], buttons:Array.from({length:16},()=>({pressed:false,value:0})) };
+    const event = type => { const e = new Event(type); Object.defineProperty(e,"gamepad",{value:pad}); window.dispatchEvent(e); };
+    let now = performance.now();
+    // The pad reaches the open Map through the menus layer (pad-focus.js), whose view of the dialog settles on a microtask.
+    const poll = () => { P.poll(); BL.destinationMap.update(now += 20); };
+    const tick = async () => { poll(); await new Promise(r => setTimeout(r)); };
+    const press = async i => { pad.buttons[i].pressed=true; await tick(); pad.buttons[i].pressed=false; await tick(); };
+    Object.defineProperty(navigator,"getGamepads",{configurable:true,value:()=>[pad]}); event("gamepadconnected");
+    try {
+      await press(9); const opened = document.getElementById("destination-map").open;
+      // pad-focus.js moves to the nearest control below the Close button: a destination, whichever column is nearer.
+      await press(13); const ordered = !!(document.activeElement.dataset.destination || document.activeElement.dataset.mapDestination || document.activeElement.dataset.mapLayer || document.activeElement.id === "destination-show-map");
+      pad.axes[0]=1; await press(1); const closed = !document.getElementById("destination-map").open;
+      await tick(); const quiet = P.state.lx === 0;
+      pad.axes[0]=0; await tick(); pad.axes[0]=1; await tick(); const resumed = P.state.lx > 0;
+      await press(9); pad.axes[2]=1; pad.buttons[2].pressed=true; await tick();
+      pad.connected=false; event("gamepaddisconnected"); await tick();
+      const disconnected = !P.state.connected && !P.state.held && !P.state.lx && !P.state.rx;
+      pad.connected=true; event("gamepadconnected"); await tick(); await press(1); await tick();
+      const reconnectHeld = !document.getElementById("destination-map").open && !P.state.lx && !P.state.rx && !(P.state.held & P.BUTTON.x);
+      await press(9); pad.connected=false; event("gamepaddisconnected"); await tick();
+      BL.destinationMap.close(); await tick();
+      pad.connected=true; event("gamepadconnected"); await tick();
+      const closeAbsent = !document.getElementById("destination-map").open && !P.state.lx && !P.state.rx;
+      // The neutral requirement also survives an absence after the dialog closes.
+      pad.connected=false; event("gamepaddisconnected"); await tick();
+      pad.connected=true; event("gamepadconnected"); await tick();
+      const reconnectClosed = !P.state.lx && !P.state.rx;
+      pad.axes[0]=0; await tick(); const bothRequired = !P.state.rx;
+      pad.axes[2]=0; pad.buttons[2].pressed=false; await tick();
+      // A press edge lasts one poll and the page's frames poll too, so read it right after our own poll.
+      pad.axes[0]=pad.axes[2]=1; pad.buttons[2].pressed=true; poll();
+      const neutralRelease = P.state.lx > 0 && P.state.rx > 0 && !!(P.state.pressed & P.BUTTON.x); await tick();
+      pad.connected=false; event("gamepaddisconnected"); await tick();
+      // Losing the controller publishes neutral input (gamepad.js disconnected()), not a release edge.
+      const ordinaryDisconnect = !P.state.connected && !P.state.lx && !P.state.rx && !P.state.held;
+      pad.buttons[2].pressed=false; pad.connected=true; event("gamepadconnected"); await tick();
+      const ordinaryReconnect = P.state.connected && P.state.lx > 0 && P.state.rx > 0;
+      // Map's capture listener runs first, but a pad's B or Menu over another menu layer is that layer's Escape:
+      // it closes the Controls panel and never opens Map.
+      pad.axes[0]=pad.axes[2]=0; pad.buttons[2].pressed=false; await tick(); await tick();
+      const help = document.getElementById("controls-help"), map = document.getElementById("destination-map");
+      const otherLayer = [];
+      for (const button of [1, 9]) {
+        document.getElementById("controls-help-button").click(); await tick();
+        const shown = help.open && BL.padFocus.open();
+        await press(button); await tick();
+        otherLayer.push({ button, shown, closed: !help.open, map: map.open });
+        if (help.open) document.getElementById("controls-help-close").click();
+        BL.destinationMap.close(); await tick();
+      }
+      const otherLayerEscape = otherLayer.every(r => r.shown && r.closed && !r.map);
+      return {opened,ordered,closed,quiet,resumed,disconnected,reconnectHeld,closeAbsent,reconnectClosed,bothRequired,neutralRelease,ordinaryDisconnect,ordinaryReconnect,otherLayerEscape,otherLayer:JSON.stringify(otherLayer)};
+    } finally {
+      BL.destinationMap.close(); event("gamepaddisconnected");
+      if(descriptor)Object.defineProperty(navigator,"getGamepads",descriptor);else delete navigator.getGamepads;
+      P.poll();
+    }
+  })()`);
+  record("destination gamepad: Menu opens Map, Down moves focus into the destinations, B closes, a held stick waits for neutral, and B or Menu over the Controls panel closes it without opening Map", Object.values(gamepad).every(Boolean), JSON.stringify(gamepad));
+  const keyboardReplay = [];
+  for (const [key, code] of [["Enter", "Enter"], [" ", "Space"]]) {
+    await b.evaluate(`document.getElementById("controls-help-button").click(); document.getElementById("controls-learn").focus()`);
+    const keyCode = key === "Enter" ? 13 : 32;
+    await b.send("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: keyCode, text: key === "Enter" ? "\r" : " " });
+    await b.send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: keyCode });
+    keyboardReplay.push(await b.evaluate(`(() => {
+      const replayed = !document.getElementById("controls-help").open && BL.destinationMap.coaching;
+      document.getElementById("explore-coach-skip").click(); return replayed;
+    })()`));
   }
-  record("destinations: each Map click advances through all twelve places and wraps to Pile, with matching accessible labels including LN Factory and TC Sphere and no picker or reset button",
-    rows.every(row => row.label === row.expected && row.action === "mode-preset" && row.detached && row.removed && row.noPopup && row.named), JSON.stringify(rows));
+  record("destination coaching: Enter and Space activate the Controls replay button", keyboardReplay.every(Boolean), JSON.stringify(keyboardReplay));
+  const coaching = await b.evaluate(`(() => {
+    const start = document.getElementById("explore-coach-start"), skip = document.getElementById("explore-coach-skip");
+    document.getElementById("controls-help-button").click(); document.getElementById("controls-learn").click();
+    const offered = BL.destinationMap.coaching;
+    skip.click(); const dismissed = !BL.destinationMap.coaching && document.getElementById("explore-coach").hidden;
+    // The guide's movement step is about the visitor's own Ooga, so one is driven first, as a visitor would have taken one.
+    const a = __ooga.cavemen.get("portlandhodl"); if (!(__ooga.pilot.player === a || __ooga.pilot.player?.npc === a)) __ooga.pilot.possess(a);
+    __ooga.pilot.navigate({ position: { x: -5, y: __ooga.island.surfaceAt(-5, 5), z: 5 }, yaw: 0, pitch: 0.4, dist: 10 }); __ooga.advance(.5,1/60);
+    document.getElementById("controls-help-button").click(); document.getElementById("controls-learn").click();
+    start.click(); document.getElementById("scene").focus();
+    __ooga.advance(.1,1/60);
+    window.dispatchEvent(new KeyboardEvent("keydown", {key:"w",code:"KeyW"})); __ooga.advance(1,1/60);
+    window.dispatchEvent(new KeyboardEvent("keyup", {key:"w",code:"KeyW"})); __ooga.advance(.1,1/60);
+    const moved = start.textContent === "Open Map";
+    start.click(); document.querySelector('[data-destination="arcade"]')?.click(); document.getElementById("destination-map-go").click();
+    const completed = start.textContent === "Done" && localStorage.getItem("ooga-explore-coach-v1") === "1";
+    __ooga.advance(.1,1/60);
+    const receiptClear = !document.getElementById("destination-map-receipt").hidden && document.getElementById("explore-coach").hidden;
+    start.click(); return {offered,dismissed,moved,completed,receiptClear};
+  })()`);
+  record("destination coaching: Controls replays a dismissible guide, actual movement advances it and a successful Arcade view completes it", Object.values(coaching).every(Boolean), JSON.stringify(coaching));
+  // Real touch activation, including the scrolling needed to reach a narrow phone's controls.
+  const viewport = await b.evaluate(`({width:innerWidth,height:innerHeight,deviceScaleFactor:devicePixelRatio,mobile:false})`), phoneRows=[], pinFailures=[];
+  const tapMapControl = async selector => {
+    const point=await b.evaluate(`(() => {const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:"center"});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),width:r.width,height:r.height};})()`);
+    await b.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[{x:point.x,y:point.y,id:1,radiusX:5,radiusY:5,force:1}]});
+    await b.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
+    return point.hit&&point.width>=44&&point.height>=44;
+  };
+  try {
+    for(const width of [320,390]){
+      await b.send("Emulation.setDeviceMetricsOverride",{width,height:width===320?640:844,deviceScaleFactor:1,mobile:true});
+      await b.evaluate(`BL.destinationMap.close();__ooga.pilot.endLook();document.getElementById("destination-hud").click()`);
+      // ResizeObserver lays out the newly shown atlas before its pins can be hit-tested.
+      await b.evaluate(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+      const pinTargets=await b.evaluate(`[...document.querySelectorAll('[data-map-destination]')].map(e=>{e.scrollIntoView({block:"center"});const r=e.getBoundingClientRect(),atlas=document.getElementById("destination-atlas"),a=atlas.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {name:e.dataset.mapDestination,x:r.x-a.x,y:r.y-a.y,width:r.width,height:r.height,hit:e.contains(hit),coveredBy:hit?.closest('[data-map-destination]')?.dataset.mapDestination||hit?.id||hit?.tagName,atlas:[a.width,a.height,atlas.scrollLeft,atlas.scrollTop]};})`);
+      const badPins=pinTargets.filter(p=>p.width<44||p.height<44||!p.hit),pins=pinTargets.length===13&&!badPins.length;
+      if(badPins.length)pinFailures.push({width,pins:badPins,layout:pinTargets});
+      if(process.env.MAP_PIN_SHOTS){
+        mkdirSync(process.env.MAP_PIN_SHOTS,{recursive:true});await b.evaluate(`document.getElementById("destination-map").scrollTop=0`);
+        await b.screenshot(join(process.env.MAP_PIN_SHOTS,`map-${width}.png`));
+      }
+      let pinSelection=true;
+      for(const pin of pinTargets){
+        const tapped=await tapMapControl('[data-map-destination="'+pin.name+'"]');
+        const selected=await b.evaluate(`document.querySelector('[data-map-destination="${pin.name}"]').getAttribute("aria-pressed")==="true"&&document.querySelector('[data-destination="${pin.name}"]').getAttribute("aria-pressed")==="true"`);
+        pinSelection=tapped&&selected&&pinSelection;
+      }
+      let targets=await tapMapControl("#destination-show-list");
+      targets=await tapMapControl('[data-destination="basement"]')&&targets;
+      const listed=await b.evaluate(`document.getElementById("destination-map").dataset.display==="list"&&getComputedStyle(document.getElementById("destination-map-list")).display!=="none"&&document.getElementById("destination-map-go").textContent==="View Basement"`);
+      targets=await tapMapControl("#destination-show-map")&&targets;
+      const mapped=await b.evaluate(`document.getElementById("destination-map").dataset.display==="map"&&document.querySelector('[data-map-destination="basement"]').getAttribute("aria-pressed")==="true"`);
+      targets=await tapMapControl("#destination-map-guide")&&targets;
+      const guided=await b.evaluate(`(BL.destinationMap.update(),!document.getElementById("destination-map").open&&!document.getElementById("destination-waypoint").hidden&&!__ooga.pilot.looking)`);
+      targets=await tapMapControl("#destination-waypoint-stop")&&targets;
+      await b.evaluate(`document.getElementById("destination-hud").click()`);
+      targets=await tapMapControl("#destination-show-list")&&targets;
+      targets=await tapMapControl('[data-destination="repos"]')&&targets;
+      targets=await tapMapControl("#destination-map-go")&&targets;
+      const viewed=await b.evaluate(`(BL.destinationMap.update(),__ooga.pilot.looking&&!document.getElementById("destination-return").hidden)`);
+      targets=await tapMapControl("#destination-return")&&targets;
+      const returned=await b.evaluate(`!__ooga.pilot.looking&&document.documentElement.scrollWidth<=innerWidth`);
+      phoneRows.push({width,pins,pinSelection,targets,listed,mapped,guided,viewed,returned});
+    }
+  } finally {await b.send("Emulation.setDeviceMetricsOverride",viewport);await b.evaluate(`BL.destinationMap.close()`);}
+  record("destination phones: 320px and 390px touch targets switch Map/List without losing selection, start and stop guidance, and return from a Merge Rock view",phoneRows.every(r=>Object.entries(r).every(([k,v])=>k==="width"||v===true)),JSON.stringify({phoneRows,pinFailures}));
 } };
 const hubWalking = { name: "hub walking", why: "regression: steering keys came out mirrored, and the removed hub Agent could still be summoned", run: async (b) => {
   // Seeded scenery places a rock at the old (-8, 8) direction-check start.
@@ -14433,7 +14727,13 @@ const hubSharedGuide = { name: "hub shared guide", why: "rule: visitors opt into
       localStorage.setItem(visitKey,"{}");
       N.sendTess=m=>{calls.push(JSON.parse(JSON.stringify(m)));return true;};
       Object.assign(N.state,{me:{id:901,login:"queue-fixture"},room:"live",connectionToken:"queue-fixture",tessShared:true,tessGuide:null});
-      receive("none");G.tap();step();
+      receive("none");
+      // Shared Tess idles in queue even when her panel is hidden; coaching must still be usable.
+      document.getElementById("controls-learn").click();step();BL.destinationMap.update();
+      const sharedCoaching=BL.destinationMap.coaching&&!document.getElementById("explore-coach").hidden;
+      document.getElementById("explore-coach-skip").click();
+      G.tap();step();BL.destinationMap.update();
+      const queueHidesCoaching=!BL.scenes.hub.coachingReady&&document.getElementById("explore-coach").hidden;
       const panel=document.querySelector(".greeter-menu"),go=panel.querySelector(".greeter-row button:first-child"),skip=panel.querySelector(".greeter-row button:last-child");
       const optIn=!panel.hidden&&go.textContent==="Join queue"&&!calls.some(m=>m.op==="join");
       const fits=()=>{const r=panel.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1&&r.top>=0&&r.bottom<=innerHeight+1;};
@@ -14469,7 +14769,7 @@ const hubSharedGuide = { name: "hub shared guide", why: "rule: visitors opt into
         if(reason==="signout")N.state.me=null;else N.state.tessShared=false;
         step();availabilityReleased&&=held&&!s.holding&&!G.speech&&!document.body.classList.contains("tess-touring");
       }
-      return {optIn,full,announced,contained,joined,observer,ready,accepted,offered,unreadNews,newsRecorded,privateReply,boundedWire,touring,disconnected,cancelled,availabilityReleased};
+      return {sharedCoaching,queueHidesCoaching,optIn,full,announced,contained,joined,observer,ready,accepted,offered,unreadNews,newsRecorded,privateReply,boundedWire,touring,disconnected,cancelled,availabilityReleased};
     } finally {if(savedVisits===null)localStorage.removeItem(visitKey);else localStorage.setItem(visitKey,savedVisits);Object.assign(N.state,saved);N.sendTess=send;step();}
   })()`);
   record("hub shared guide: explicit join/accept, queue position, private answers, observer camera independence, disconnect release and cancellation",Object.values(result).every(Boolean),JSON.stringify(result));
@@ -14715,6 +15015,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
   const r = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, H = B.hud, a = B.cavemen.get("portlandhodl");
     const map = document.getElementById("destination-hud"), label = document.getElementById("detached-destination-name");
+    const choose = name => { if (!document.getElementById("destination-map").open) map.click(); document.querySelector('[data-destination="' + name + '"]')?.click(); document.getElementById("destination-map-go").click(); };
     const rows = [], net = BL.net.state, account = net.me, backend = net.backend;
     const character = BL.characters.get(a.traits.name), xyz = p => [p.x, p.y, p.z];
     // The driven Ooga is its own body standing for the roster's (crew.js \`separateBodies\`): read that body.
@@ -14746,7 +15047,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
         const before = snapshot(), prepared = before.player && before.mode === mode.slice(mode.indexOf("-") + 1) && before.combat === mode.startsWith("combat");
         // Use the native keyboard/assistive activation path. A lone detail-one
         // click has no matching pointer press and can be a suppressed compatibility event.
-        map.click();
+        choose("lab");
         const after = snapshot();
         // The view goes to the place; the Ooga stays where it stands, still the visitor's.
         const looked = P.looking && label.textContent === "Lab" && after.player && error(after.actor, before.actor) < 1e-6;
@@ -14771,7 +15072,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
     P.endLook(); if (!drives()) P.possess(a); if (B.crew.sleeping) B.crew.wakePlayer();
     if (P.aiming) P.modeAction("mode-toggle"); B.advance(1, 1 / 60);
     // Frames go by while the look holds (camera input would end it, pilot.js \`look\`), and the label stays the place's.
-    H.setDetachedView("pile"); map.click(); B.advance(0.5, 1 / 60);
+    H.setDetachedView("pile"); choose("lab"); B.advance(0.5, 1 / 60);
     const looking = P.looking && label.textContent === "Lab" && label.classList.contains("show");
     const lab = B.mouths.find(mouth => mouth.id === "c11");
     P.orbit.yaw = P.orbit.tYaw = lab.ry;
@@ -14781,7 +15082,7 @@ const hubMapNavigation = { name: "hub map navigation", why: "rule: a destination
     const departed = { distance: Math.hypot(at().x - start.x, at().z - start.z), label: label.textContent, visible: label.classList.contains("show"), driven: drives() && !P.looking };
     return { rows, looking, departed };
   })()`);
-  record("hub map: signed in or out, a Map click looks at the next destination while the visitor keeps their Ooga where it stands, and a movement gives back its own camera, carry or combat and view in that frame and walks it",
+  record("hub map: signed in or out, a Map choice looks at the selected destination while the visitor keeps their Ooga where it stands, and a movement gives back its own camera, carry or combat and view in that frame and walks it",
     r.rows.length === 8 && r.rows.every(row => row.prepared && row.looked && row.moved > 1 && row.returned && row.walked > 0.3), JSON.stringify(r.rows));
   record("hub reset: 0 resets framing without relocating the Ooga or changing its mode or view family", r.rows.every(row => row.resetKept && row.resetChanged), JSON.stringify(r.rows));
   record("hub map: looking keeps the destination's label, and walking off shows the Ooga's own area, HUB", r.looking && r.departed.driven && r.departed.distance > 1.5 && r.departed.label === "HUB" && r.departed.visible,
@@ -15033,7 +15334,13 @@ const hubChalkboardEraser = { name: "chalkboard eraser", why: "rule: an eraser p
     const x = c.x + c.frontX * 1.3 - c.rightX * 0.6, z = c.z + c.frontZ * 1.3 - c.rightZ * 0.6;
     B.pilot.navigate({ position: { x, y: B.island.surfaceAt(x, z), z }, yaw: Math.atan2(c.frontX, c.frontZ), pitch: 0.15, dist: 4 });
     B.advance(0.5, 1 / 60);
-    return B.project(c.x + c.rightX * 0.45, c.y + 1.25, c.z + c.rightZ * 0.45, {});
+    // Find exposed board pixels: the modelled Ooga can cover the old fixed tap point.
+    for (const rise of [1.25, 1.7, 0.9]) for (const across of [0.45, 0.9, -0.45]) {
+      const point = B.project(c.x + c.rightX * across, c.y + rise, c.z + c.rightZ * across, {});
+      const hit = point && B.input.pick(point.x, point.y);
+      if (hit?.owner.kind === "piece" && hit.owner.piece === "chalkboard") return point;
+    }
+    throw new Error("Chalkboard fixture has no exposed tap point");
   })()`);
   const tapAt = async (point) => { await b.click(point.x, point.y); await b.sleep(50); };
   await tapAt(await standAtBoard());
@@ -15070,7 +15377,13 @@ const hubChalkboardReach = { name: "chalkboard reach", why: "rule: only an Ooga 
     const x = c.x + c.frontX * ${along} - c.rightX * 0.6, z = c.z + c.frontZ * ${along} - c.rightZ * 0.6;
     B.pilot.navigate({ position: { x, y: B.island.surfaceAt(x, z), z }, yaw: Math.atan2(c.frontX, c.frontZ), pitch: 0.15, dist: 4 });
     B.advance(0.5, 1 / 60);
-    return B.project(c.x + c.rightX * 0.45, c.y + 1.25, c.z + c.rightZ * 0.45, {});
+    // Find exposed board pixels: the modelled Ooga can cover the old fixed tap point.
+    for (const rise of [1.25, 1.7, 0.9]) for (const across of [0.45, 0.9, -0.45]) {
+      const point = B.project(c.x + c.rightX * across, c.y + rise, c.z + c.rightZ * across, {});
+      const hit = point && B.input.pick(point.x, point.y);
+      if (hit?.owner.kind === "piece" && hit.owner.piece === "chalkboard") return point;
+    }
+    throw new Error("Chalkboard fixture has no exposed tap point");
   })()`);
   // The room checks a writer's pose against chalk-board.js AT: it must be where the hub stands the board.
   const spot = await b.evaluate(`(() => { const c = BL.scenes.hub.debug.chalkboardAt, A = BL.chalkBoard.AT; return { at: [c.x, c.y, c.z, c.frontX, c.frontZ].map(v => +v.toFixed(3)), off: Math.hypot(c.x - A.x, c.z - A.z), rise: Math.abs(c.y - A.y), turn: Math.hypot(c.frontX - A.frontX, c.frontZ - A.frontZ) }; })()`);
@@ -15857,13 +16170,9 @@ const hubMatrix = { name: "hub matrix", why: "regression: the OBL cave blanked f
     return { free, freeAbove, outside, driven, drivenAbove, returned, batches, noDamage, gateLocked: M.gate.locked, wave: !!B.renderOpts.matrix };
   })()`);
   record("hub matrix: free and following cameras keep their view inside, above and outside the cave, without glyph batches or mirror HP", [r.free, r.freeAbove, r.outside, r.driven, r.drivenAbove, r.returned].every(view => view.black < 64) && !r.batches && !r.wave && r.noDamage && r.gateLocked, JSON.stringify(r));
-  const carved = await b.evaluate(`(() => { const B = __ooga, D = BL.scenes.hub.debug, rooms = new Map(B.mouths.map(mouth => [mouth.id, mouth.room])); return {
-    regions: D.caveSections.map(entry => { const room = rooms.get(entry.region.id); return { id: entry.region.id, width: entry.region.halfWidth, depth: entry.region.halfDepth, expectedWidth: room.w / 2 + 0.45, expectedDepth: (room.to + 1.6) / 2 }; }),
-    sealed: B.matrixGate.sealed.map(entry => ({ id: entry.mouth.id, visible: entry.node.visible, stop: entry.stopZ }))
-  }; })()`);
-  record("hub caves: carved chambers retain fitted bird's-eye roof regions and the sealed cave's seal", carved.regions.length === 5 && carved.regions.map(region => region.id).sort().join() === "c1,c10,c11,c2,c3"
-    && carved.regions.every(region => Math.abs(region.width - region.expectedWidth) < 1e-7 && Math.abs(region.depth - region.expectedDepth) < 1e-7)
-    && carved.sealed.length === 1 && carved.sealed[0].id === "c9" && carved.sealed.every(entry => entry.visible && Number.isFinite(entry.stop)), JSON.stringify(carved));
+  const sealed = await b.evaluate(`__ooga.matrixGate.sealed.map(entry => ({ id: entry.mouth.id, visible: entry.node.visible, stop: entry.stopZ }))`);
+  record("hub caves: the sealed cave retains its visible seal and collision boundary", sealed.length === 1 && sealed[0].id === "c9"
+    && sealed.every(entry => entry.visible && Number.isFinite(entry.stop)), JSON.stringify(sealed));
 } };
 const hubMirror = { name: "hub mirror", why: "rule: rifle shots and melee ripple the unbreakable mirror without damage or panel HP, including after a scene round trip", run: async (b) => {
   const physical = await b.evaluate(`(() => {
@@ -16071,7 +16380,8 @@ const oogatronPopups = { name: "oogatron popups", why: "rule: Oogatron windows k
   const point = (id, selector, x = 0.5, y = 0.5) => b.evaluate(`(() => {
     const e = document.getElementById(${JSON.stringify(id)}).querySelector(${JSON.stringify(selector)}), r = e.getBoundingClientRect();
     const x = r.x + r.width * ${x}, y = r.y + r.height * ${y};
-    if (!e.contains(document.elementFromPoint(x, y))) throw Error('Popup control is covered: ' + ${JSON.stringify(selector)});
+    const hit = document.elementFromPoint(x, y);
+    if (!e.contains(hit)) throw Error('Popup control is covered: ' + ${JSON.stringify(selector)} + ' by ' + hit?.tagName + '#' + hit?.id + '.' + hit?.className);
     return { x, y };
   })()`);
   const press = async (id, selector, x, y) => {
@@ -16318,10 +16628,14 @@ const hubGorillaPopulation = { name: "gorilla population restoration", why: "reg
         fromSite: e.fromSite, site: e.site, x: +e.root.position.x.toFixed(2), y: +e.root.position.y.toFixed(2), z: +e.root.position.z.toFixed(2),
         goalX: +e.goalX.toFixed(2), goalZ: +e.goalZ.toFixed(2), speed: +e.speed.toFixed(2), blocked: +e.blocked.toFixed(2),
         stuck: +e.stuck.time.toFixed(2), recover: +e.recover.toFixed(2), climbing: e.climb.active, jumping: e.jump.active, footprint: e.footprintMode,
-        goalY: +e.goalY.toFixed(2), roof: e.loungeRoof, climb: e.climb.active ? { descending: e.climb.descending, free: e.climb.free, hold: e.climb.holdPose,
+        goalY: +e.goalY.toFixed(2), roof: e.loungeRoof, rest: e.rest, exitFootprint: e.exitFootprint,
+        roam: { failedChoices: e.roam.failedChoices, nextChoice: e.roam.nextChoice, levelOnlyUntil: e.roam.levelOnlyUntil,
+          progressTime: e.roam.progressTime, count: e.roam.count, index: e.roam.index, target: [e.roam.targetX,e.roam.targetY,e.roam.targetZ],
+          failed: [e.roam.failedX,e.roam.failedZ,e.roam.failedUntil], wall: e.roam.wall, depart: e.roam.departPending, align: e.roam.alignTime },
+        elapsed: C.stats().elapsed, climb: e.climb.active ? { descending: e.climb.descending, free: e.climb.free, hold: e.climb.holdPose,
           mount: e.climb.mountPending, wait: e.climb.waitRelease, handoff: e.climb.handoffDirection, claim: e.climb.claimPending, crest: e.climb.crestPending,
           search: e.climb.searchPending, progress: +(e.climb.progress || 0).toFixed(2), length: +(e.climb.length || 0).toFixed(2), opening: e.climb.openingExit } : null });
-      const track = list.map(e => ({ e, pile, pileAt: pile ? 0 : -1, leftAt: -1, loungeAt: -1, maxStep: 0, prev: null, stall: null, trace: [],
+      const track = list.map(e => ({ e, pile, pileAt: pile ? 0 : -1, leftAt: -1, loungeAt: -1, maxStep: 0, prev: null, stall: null, trace: [], approach: [], transitions: [], state: "",
         last: { x: e.root.position.x, z: e.root.position.z }, recoveries: e.stuck.recoveries }));
       let f = 0;
       for (; f < frames && track.some(t => t.loungeAt < 0); f++) {
@@ -16334,6 +16648,17 @@ const hubGorillaPopulation = { name: "gorilla population restoration", why: "reg
           if (t.leftAt >= 0 && t.loungeAt < 0 && e.phase === "chill" && e.lounge && e.roam.arrived) t.loungeAt = f;
           if (!t.stall && e.stuck.recoveries !== t.recoveries) t.stall = { frame: f, ...t.prev };
           if (!t.stall) t.prev = snap(e);
+          if (t.leftAt >= 0 && !t.stall && t.loungeAt < 0) {
+            const state = [e.climb.active, e.climb.descending, e.climb.failure, e.jump.active, e.drive.airborne,
+              e.goalX.toFixed(2), e.goalY.toFixed(2), e.goalZ.toFixed(2)].join(":");
+            if (state !== t.state && t.transitions.length < 100) t.transitions.push({ frame: f, ...t.prev,
+              heading: e.heading, backout: e.backoutLeft, climbFailure: e.climb.failure, fromTop: e.climb.fromTop });
+            t.state = state;
+          }
+          if (t.leftAt >= 0 && t.loungeAt < 0 && !t.stall && f % 30 === 0) {
+            if (t.approach.length === 20) t.approach.shift();
+            t.approach.push({ frame: f, ...t.prev });
+          }
           // Until the pile, a sample every third of a second (at most 60): where a blocked walk dwells and why.
           if (t.pileAt < 0 && !t.stall && f % 10 === 0 && t.trace.length < 60) t.trace.push([f, +q.x.toFixed(2), +q.z.toFixed(2), +e.goalX.toFixed(2),
             +e.goalZ.toFixed(2), +e.speed.toFixed(2), +e.stuck.time.toFixed(2), e.stuck.escapeLeft > 0 ? 1 : 0, +e.blocked.toFixed(2), e.route]);
@@ -16344,7 +16669,7 @@ const hubGorillaPopulation = { name: "gorilla population restoration", why: "reg
         return { name: e.owner.traits.name, ok: t.pileAt >= 0 && t.leftAt >= t.pileAt && t.loungeAt >= t.leftAt
           && t.maxStep < 0.5 && e.stuck.recoveries === t.recoveries && e.mode === "chilling" && e.nonInteractive,
           pileAt: t.pileAt, leftAt: t.leftAt, loungeAt: t.loungeAt, frames: f, maxStep: +t.maxStep.toFixed(3),
-          recoveries: e.stuck.recoveries - t.recoveries, reason: e.stuck.reason, stall: t.stall, trace: t.loungeAt < 0 ? t.trace : undefined, pile: t.pile,
+          recoveries: e.stuck.recoveries - t.recoveries, reason: e.stuck.reason, stall: t.stall, trace: t.loungeAt < 0 ? t.trace : undefined, approach: t.loungeAt < 0 ? t.approach : undefined, transitions: t.loungeAt < 0 ? t.transitions : undefined, pile: t.pile,
           at: { x: +q.x.toFixed(2), y: +q.y.toFixed(2), z: +q.z.toFixed(2) }, fromPile: t.pile ? +Math.hypot(q.x - t.pile.x, q.z - t.pile.z).toFixed(2) : null,
           goal: { x: +e.goalX.toFixed(2), z: +e.goalZ.toFixed(2) }, phase: e.phase, route: e.route, lounge: e.lounge,
           rest: +e.rest.toFixed(2), failedChoices: e.roam.failedChoices, detour: e.roam.detour, roam: [e.roam.index, e.roam.count],
@@ -16782,10 +17107,10 @@ const combatTabProbe = (B, actor, gorilla, pointer) => {
       const shift = pending ? "ShiftLeft" : "ShiftRight", location = pending ? 1 : 2;
       key("keydown", "w", "KeyW"); key("keydown", "Shift", shift, { location });
       pointer("pointerdown", 0, 1); P.readInput(0.05);
-      // A pending Ooga overhead lock consumes the capture click before it
-      // reaches combat. Soft focus still exercises cancellation of a charge.
+      // Pending overhead focus consumes the capture click. Close-view soft focus
+      // exercises cancellation of a charge even while native lock is pending.
       const held = controls.read().y > 0;
-      const attackPrepared = gorilla ? actor.motion.poundCharge > 0 : pending ? !actor.weapon.meleeHeld : actor.weapon.meleeHeld;
+      const attackPrepared = gorilla ? actor.motion.poundCharge > 0 : pending && P.birdsEye ? !actor.weapon.meleeHeld : actor.weapon.meleeHeld;
       const first = key("keydown", "Tab", "Tab", { shiftKey: true });
       const stopped = quiet() && !focused() && (gorilla ? !actor.motion.poundCharge && !actor.drive.x && !actor.drive.z && !actor.drive.run
         : !actor.weapon.meleeHeld && !actor.weapon.triggerHeld);
@@ -16855,7 +17180,7 @@ const cameraSelectionProbe = (B, controller, select, reselect = null) => {
   return { immediate, progress, total, maxStep, began, finite, finished, repeated,
     smooth: immediate < 1e-6 && began && finite && finished && repeated && progress > 1e-6 && maxStep < total * 0.6 };
 };
-const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizontal aim rotates the view around a centerline reticle, zoom retains forward targets, and carry handoffs preserve valid cursors and camera distance", run: async (b) => {
+const hubCameraModes = { name: "hub camera modes", why: "regression: hub carry/combat gestures, focus and acquisition must use only supported orbit, shoulder and first-person views", run: async (b) => {
   const focusPoint = await b.evaluate(`(() => {
     const B = __ooga, body = B.pilot.player, a = body.npc || body, C = B.camera;
     // A released body goes (#501): its NPC is stood where it was let go, to be double-clicked there.
@@ -16940,9 +17265,9 @@ const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizon
   record("possession: signed-in and signed-out acquisition from low or high detached views smoothly recenters carry orbit at the fixed eye above or below ground; same-Ooga double-clicks neither snap nor restart the handoff",
     selectionModes.rows.length === 8 && selectionModes.rows.every(row => row.immediate < 1e-6 && row.acquired.selected
       && row.blend.smooth && row.acquired.mode === "orbit" && !row.acquired.combat && row.acquired.error < 0.001 && row.acquired.centered && row.repeated), JSON.stringify(selectionModes.rows));
-  record("Ooga X entry: signed in or out, a displayed eye below or exactly 45 degrees enters shoulder and only a higher eye enters bird's-eye, smoothly interrupting a rolled off-target acquisition regardless of requested orbit pitch",
+  record("Ooga X entry: signed in or out, every displayed eye enters shoulder without enabling the retired hub overhead view, smoothly interrupting a rolled off-target acquisition regardless of requested orbit pitch",
     selectionModes.retakes.every(row => row.entries.length === 3 && row.entries.every(e => e.pending && e.blend.smooth && e.selected && e.combat
-      && e.mode === (e.rise > 20 ? "birds-eye" : "shoulder") && e.projection === (e.rise > 20 ? 1 : 0) && e.finite)),
+      && e.mode === "shoulder" && e.projection === 0 && e.finite)),
     JSON.stringify(selectionModes.retakes.map(({ signedIn, entries }) => ({ signedIn, entries }))));
   const rightViews = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, C = B.camera, canvas = document.getElementById("scene"), rows = [];
@@ -16979,8 +17304,7 @@ const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizon
     P.hooks.onZoom(1.2, {}); B.advance(1, 1 / 60);
     P.hooks.onOrbit(0, (1.1 - P.orbit.tPitch) / 0.0035); B.advance(1, 1 / 60);
     P.modeAction("mode-toggle"); B.advance(1, 1 / 60);
-    // From an orbit this steep X enters bird's-eye (the orbit-angle rule): combat's clicks start at the shoulder.
-    if (P.mode === "birds-eye") { P.hooks.onZoom(0.001, {}); B.advance(1, 1 / 60); }
+    // The hub always enters combat at the shoulder, even from a steep carry orbit.
     click(); click(false); B.advance(1, 1 / 60); const combatOut = sample();
     click(); B.advance(1, 1 / 60); const combatBack = sample();
     P.hooks.onZoom(0.8, {}); B.advance(1, 1 / 60); const combatFirst = sample();
@@ -17024,11 +17348,12 @@ const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizon
             pointer("pointerup");
             const shots = a.weapon.shotsFired;
             pointer("pointerdown", 1, 4); pointer("pointermove", 2, 6);
-            rightChord = P.mode === "shoulder" && P.aiming && P.captureControl({}).focused
+            rightChord = P.mode === "first-person" && P.aiming && P.captureControl({}).focused
               && a.weapon.shotsFired === shots && !a.weapon.triggerHeld && !a.weapon.meleeHeld;
             pointer("pointermove", 2, 4); pointer("pointerup", 1, 0);
           } else click();
           B.advance(1, 1 / 60); const rightBack = sample();
+          if (combat && P.mode === "first-person") { P.hooks.onZoom(1.2, {}); P.update(2); }
           const recapture = [], interrupted = [], reticle = document.getElementById("weapon-reticle");
           if (combat) {
             const requestLock = Object.getOwnPropertyDescriptor(canvas, "requestPointerLock");
@@ -17061,7 +17386,7 @@ const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizon
             if (reason === "blur") window.dispatchEvent(new Event("blur"));
             else if (reason === "cancel") pointer("pointercancel");
             else if (reason === "other-button") { pointer("pointerdown", 1, 4); pointer("pointerup", 1, 0); }
-            // X twice passes through carry's orbit, from which a high eye re-enters combat overhead: bring it down.
+            // X twice passes through carry's orbit and re-enters the hub's shoulder view.
             else if (reason === "mode") { toggle(); toggle(); if (P.mode !== "shoulder") { P.hooks.onZoom(0.001, {}); P.update(2); } }
             else if (reason === "view") { P.hooks.onZoom(0.5, {}); P.hooks.onZoom(1.2, {}); P.update(2); }
             else { P.release(true); P.possess(npc); a = P.player; if (P.aiming !== combat) toggle(); if (P.mode !== "shoulder") P.hooks.onZoom(0.001, {}); P.update(2); }
@@ -17160,29 +17485,29 @@ const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizon
       && r.wheelIn.mode === "first-person" && !r.wheelIn.combat && r.firstClicked.mode === "first-person" && !r.firstClicked.combat
       && [r.wheelOut, r.heldOut].every(s => s.mode === "orbit" && !s.combat && Math.abs(s.wanted - 3.6) < 1e-6)
       && r.freshOut.mode === "orbit" && Math.abs(r.freshOut.wanted - 3.6 * 1.2) < 0.01 && Math.abs(r.freshOut.distance - r.freshOut.wanted) < 0.01)
-    // Carry returns to perspective orbit; only combat is forced to the overhead pole. Under the basement's ceiling
+    // Carry returns to perspective orbit. Under the basement's ceiling
     // the eye keeps its height as the orbit draws out.
     && rightViews.rows[0].out.horizontal > 0.01 && rightViews.rows[0].out.projection === 0
     && Math.abs(rightViews.rows[1].out.y - rightViews.rows[1].before.y) < 0.01
     && rightViews.carryFirst.mode === "first-person" && !rightViews.carryFirst.combat
     && rightViews.carryScrollBack.mode === "orbit" && !rightViews.carryScrollBack.combat && Math.abs(rightViews.carryScrollBack.wanted - 3.6) < 1e-6
-    && rightViews.combatOut.mode === "birds-eye" && rightViews.combatOut.combat && rightViews.combatOut.height === 21
+    && rightViews.combatOut.mode === "shoulder" && rightViews.combatOut.combat && rightViews.combatOut.projection === 0
     && rightViews.combatBack.mode === "shoulder" && rightViews.combatBack.combat
     && rightViews.combatFirst.mode === "first-person" && rightViews.combatFirst.combat
-    && rightViews.combatFirstOut.mode === "birds-eye" && rightViews.combatFirstOut.combat
-    && rightViews.combatFirstBack.mode === "shoulder" && rightViews.combatFirstBack.combat, JSON.stringify(rightViews));
-  record("view intent: signed-in and signed-out Oogas keep the carry/combat mode chosen by X through scroll and right-click, and combat's native chorded RMB goes from birds-eye to shoulder",
+    && rightViews.combatFirstOut.mode === "first-person" && rightViews.combatFirstOut.combat
+    && rightViews.combatFirstBack.mode === "first-person" && rightViews.combatFirstBack.combat, JSON.stringify(rightViews));
+  record("view intent: signed-in and signed-out Oogas keep the carry/combat mode chosen by X through scroll and right-click, and native chorded RMB preserves the current combat view",
     rightViews.authIntent.length === 4 && rightViews.authIntent.every(row => {
-      const modes = row.combat ? ["shoulder", "first-person", "shoulder", "birds-eye", "shoulder", "birds-eye", "shoulder"]
+      const modes = row.combat ? ["shoulder", "first-person", "shoulder", "shoulder", "shoulder", "shoulder", "first-person"]
         : ["orbit", "first-person", "orbit", "orbit", "orbit", "orbit", "first-person"];
-      const right = row.combat ? ["first-person", "birds-eye", "shoulder"] : ["first-person", "first-person", "first-person"];
+      const right = ["first-person", "first-person", "first-person"];
       return row.selected && row.steps.length === modes.length && row.steps.every((step, i) => step.mode === modes[i] && step.combat === row.combat)
         && [row.rightFirst, row.rightFar, row.rightBack].every((step, i) => step.combat === row.combat && step.mode === right[i]) && row.rightChord;
     }), JSON.stringify(rightViews.authIntent));
-  record("Ooga zoom stops: signed in or out, long wheel bursts stop at combat's shoulder in both directions and at carry's near orbit coming out of the eyes (going in, carry's orbit goes on into them), a pause starts the next step, and a reversed pinch stops at the same place",
+  record("Ooga zoom stops: signed in or out, inward bursts reach first person, outward bursts stop at shoulder or carry's near orbit, and only a fresh carry gesture zooms farther",
     rightViews.authIntent.every(row => row.combat
-      ? [row.inward, row.outward, row.heldPinch].every(s => s.mode === "shoulder" && s.combat)
-        && row.freshInward.mode === "first-person" && row.freshInward.combat && row.freshOutward.mode === "birds-eye" && row.freshOutward.combat
+      ? row.inward.mode === "first-person" && row.inward.combat && [row.outward, row.heldPinch].every(s => s.mode === "shoulder" && s.combat)
+        && row.freshInward.mode === "first-person" && row.freshInward.combat && row.freshOutward.mode === "shoulder" && row.freshOutward.combat
       : row.inward.mode === "first-person" && row.freshInward.mode === "first-person"
         && [row.outward, row.heldPinch].every(s => s.mode === "orbit" && Math.abs(s.wanted - 3.6) < 1e-6)
         && row.freshOutward.mode === "orbit" && row.freshOutward.wanted > row.outward.wanted
@@ -17195,14 +17520,14 @@ const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizon
       && r.combat && r.ads)), JSON.stringify(rightViews.authIntent.map(({ signedIn, combat, interrupted }) => ({ signedIn, combat, interrupted }))));
   record("Ooga Tab: soft and pending combat focus release on the first Tab, held repeats stay consumed until keyup, then Tab is native; Shift and held movement cannot leak, and UI controls always own navigation",
     rightViews.authIntent.every(row => !row.combat ? row.tabs.native : row.tabs.rows.length === 2
-      && row.tabs.rows.every((r, i) => r.view === (i ? "birds-eye" : "shoulder") && Object.entries(r).every(([key, value]) => key === "kind" || key === "view" || value === true))
+      && row.tabs.rows.every((r, i) => r.view === "shoulder" && Object.entries(r).every(([key, value]) => key === "kind" || key === "view" || value === true))
       && row.tabs.ui.length === 4 && row.tabs.ui.every(r => r.native && r.stopped)), JSON.stringify(rightViews.authIntent.map(({ signedIn, combat, tabs }) => ({ signedIn, combat, tabs }))));
   record("sleeping Ooga: signed in or out, right-click leaves the real bed, pose, view and cursor unchanged until waking",
     rightViews.sleepRows.length === 2 && rightViews.sleepRows.every(r => r.prepared && r.ignored && r.nativeTab && r.woke), JSON.stringify(rightViews.sleepRows));
   record("touch zoom: a two-finger pinch survives view changes and mouse-ID collisions, stops at combat's shoulder (carry's goes on into the eyes, and reversed comes back out to its near orbit and stops), and goes on to first person only after lifting and restarting",
     rightViews.touch.length === 2 && rightViews.touch.every(row => row.fine
-      && [row.outward, row.continued].every(s => s.mode === (row.combat ? "birds-eye" : "orbit") && s.combat === row.combat)
-      && (row.combat ? row.continued.height > row.outward.height * 1.2 : row.continued.distance > row.outward.distance * 1.2)
+      && [row.outward, row.continued].every(s => s.mode === (row.combat ? "shoulder" : "orbit") && s.combat === row.combat)
+      && (row.combat ? row.continued.projection === 0 && row.outward.projection === 0 : row.continued.distance > row.outward.distance * 1.2)
       && (row.combat ? row.stopped.mode === "shoulder" : row.stopped.mode === "orbit" && Math.abs(row.stopped.wanted - 3.6) < 1e-6) && row.stopped.combat === row.combat
       && row.restarted.mode === "first-person" && row.restarted.combat === row.combat), JSON.stringify(rightViews.touch));
   const shoulderFraming = await b.evaluate(`(() => {
@@ -17224,1014 +17549,19 @@ const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizon
       P.navigate({ position: location, yaw: 0, pitch: 0.3, dist: 4 }); B.advance(1, 1 / 60);
       const baseline = sample();
       for (const offset of [0, 0.4]) {
-        P.hooks.onZoom(1.2, {}); B.advance(1, 1 / 60);
-        const point = B.project(a.root.position.x + B.camera.up.x * offset, location.y + 0.01, a.root.position.z + B.camera.up.z * offset, {});
-        P.hooks.onOrbit(0, point.y - parseFloat(document.getElementById("weapon-reticle").style.top)); B.advance(0.2, 1 / 60);
-        P.hooks.onZoom(0.001, {}); B.advance(2, 1 / 60); const settled = sample();
+        P.hooks.onOrbit(0, offset * 30); B.advance(1, 1 / 60); const settled = sample();
         P.hooks.onOrbit(12, 0); B.advance(0.7, 1 / 60);
         rows.push({ floor: location.y, offset, baseline, settled, looking: sample() });
       }
     }
     return rows;
   })()`);
-  record("shoulder combat: zooming toward the feet keeps normal head-side framing on the surface and a clear, shortened shoulder boom underground, including after mouse-look", shoulderFraming.length === 4 && shoulderFraming.every(row => row.baseline.side > 0
+  record("shoulder combat: looking down keeps normal head-side framing on the surface and a clear, shortened shoulder boom underground, including after mouse-look", shoulderFraming.length === 4 && shoulderFraming.every(row => row.baseline.side > 0
     && [row.settled, row.looking].every(s => s.mode === "shoulder" && s.headOffset > 0
       && (row.floor >= 0 ? row.baseline.side > 0.5 && Math.abs(s.side - row.baseline.side) < 0.001
         : s.side > 0 && s.side <= shoulderFraming[0].baseline.side + 0.001 && s.clear && !s.cutaway))), JSON.stringify(shoulderFraming));
-  const entry = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, C = B.camera, a = P.player;
-    P.navigate({ position: { x: -8, y: 0, z: 8 }, yaw: 0, pitch: 0.3, dist: 4 }); B.advance(1, 1 / 60);
-    const view = BL.math.mat4.create();
-    window.__birdsSnapshot = () => { const rect = document.getElementById("scene").getBoundingClientRect(), reticle = document.getElementById("weapon-reticle"), screen = B.project(a.root.position.x, a.root.position.y, a.root.position.z, {});
-      BL.math.mat4.lookAt(view, C.position, C.target, C.up || { x: 0, y: 1, z: 0 });
-      return { mode: P.mode, combat: P.aiming, overhead: P.birdsEye, mix: P.birdsEyeMix, height: P.birdsEyeHeight,
-      altitude: C.position.y - (a.root.position.y - a.baseY), horizontal: Math.hypot(C.position.x - a.root.position.x, C.position.z - a.root.position.z),
-      down: (C.position.y - C.target.y) / Math.hypot(C.target.x - C.position.x, C.target.y - C.position.y, C.target.z - C.position.z),
-      yaw: a.root.rotation.y, x: C.position.x, y: C.position.y, z: C.position.z,
-      distance: Math.hypot(C.position.x - a.root.position.x, C.position.y - a.root.position.y, C.position.z - a.root.position.z),
-      center: screen ? Math.hypot(screen.x - B.renderer.size.width / 2, screen.y - B.renderer.size.height / 2) : Infinity,
-      pointer: P.cursor.active ? [P.cursor.x, P.cursor.y] : [rect.left + parseFloat(reticle.style.left), rect.top + parseFloat(reticle.style.top)],
-      forward: [-view[2], -view[6], -view[10]], screenUp: [view[1], view[5], view[9]], orthoMix: C.orthoMix || 0, fov: C.fov,
-      up: C.up ? [C.up.x, C.up.y, C.up.z] : [0, 1, 0], cutoff: B.renderOpts.cutawayMaxY }; };
-    const weaponDirection = () => { BL.scene.updateWorld(a.root); const w = a.parts.gun.world, length = Math.hypot(w[8], w[9], w[10]); return [w[8] / length, w[9] / length, w[10] / length]; };
-    const weaponBefore = weaponDirection(), before = __birdsSnapshot(); P.hooks.onZoom(1.02, {}); P.update(0);
-    const weaponAfter = weaponDirection(), weaponSnap = Math.hypot(...weaponAfter.map((value, i) => value - weaponBefore[i]));
-    const immediate = Math.hypot(C.position.x - before.x, C.position.y - before.y, C.position.z - before.z);
-    let maxStep = 0, finite = true, radiusError = 0, last = [C.position.x, C.position.y, C.position.z];
-    for (let i = 0; i < 90; i++) { B.advance(1 / 60, 1 / 60); const p = C.position;
-      maxStep = Math.max(maxStep, Math.hypot(p.x - last[0], p.y - last[1], p.z - last[2]));
-      radiusError = Math.max(radiusError, Math.abs(Math.hypot(p.x - a.root.position.x, p.y - a.root.position.y, p.z - a.root.position.z) - before.distance));
-      finite = finite && [p.x, p.y, p.z, C.target.x, C.target.y, C.target.z].every(Number.isFinite); last = [p.x, p.y, p.z]; }
-    return { before, immediate, weaponSnap, maxStep, radiusError, finite, after: __birdsSnapshot() };
-  })()`);
-  record("birds-eye combat: a small shoulder zoom smoothly tilts overhead at the displayed radius instead of jumping to the default height", entry.before.mode === "shoulder" && entry.after.mode === "birds-eye" && entry.after.overhead && entry.after.combat && entry.after.mix === 1 && entry.after.horizontal < 1e-6 && entry.after.down > 0.999999 && entry.immediate < 1e-6 && entry.weaponSnap < 1e-5 && entry.maxStep < 3 && entry.radiusError < 0.5 && entry.after.distance > entry.before.distance && entry.finite, JSON.stringify(entry));
-  const outlines = await b.evaluate(`(() => { const B = __ooga, H = B.headquarters; B.advance(0.1, 1 / 60); return {
-    mode: B.pilot.mode, combat: B.pilot.aiming, wallLines: H.sightGuides.structureCount, objectLines: H.sightGuides.objectCount,
-    wall: !!H.sightGuides.structure || !!H.sightGuides.structures, bananaWall: !!H.bananaGuides.structure || !!H.bananaGuides.structures,
-    guideLines: H.cameraCover.guideLines, outlined: H.cameraCover.outlined
-  }; })()`);
-  record("birds-eye combat: wall and object outline passes stay disabled", outlines.mode === "birds-eye" && outlines.combat && !outlines.wallLines && !outlines.objectLines
-    && !outlines.wall && !outlines.bananaWall && !outlines.guideLines && !outlines.outlined, JSON.stringify(outlines));
-  const size = await b.evaluate(`(() => { const r = document.getElementById("scene").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height }; })()`);
-  await b.mouse("mouseMoved", size.x, size.y, { button: "none" });
-  await b.evaluate(`__ooga.pilot.focusAim()`);
-  await b.mouse("mouseMoved", size.x + size.w * 0.22, size.y - size.h * 0.14, { button: "none" });
-  await b.evaluate(`__ooga.advance(0.5, 1 / 60)`);
-  const aim = await b.evaluate(`__birdsSnapshot()`);
-  const turn = Math.abs(Math.atan2(Math.sin(aim.yaw - entry.after.yaw), Math.cos(aim.yaw - entry.after.yaw)));
-  const viewTurn = Math.atan2(aim.up[0] * entry.after.up[2] - aim.up[2] * entry.after.up[0], aim.up[0] * entry.after.up[0] + aim.up[2] * entry.after.up[2]);
-  record("birds-eye combat: real horizontal mouse movement turns the overhead view while the reticle stays on its forward centerline", turn > 0.15 && viewTurn < -0.15 && aim.horizontal < 1e-6 && aim.down > 0.999999
-    && Math.abs(aim.pointer[0] - size.x) < 0.02 && aim.pointer[1] >= size.y - size.h / 2 && aim.pointer[1] < size.y, JSON.stringify({ before: entry.after, aim, turn, viewTurn }));
-  await b.evaluate(`if (document.pointerLockElement) document.exitPointerLock();`);
-  if (!await untilPage(b, "!document.pointerLockElement", 3000)) throw Error("Pointer lock did not release before the unlocked gesture probe");
-  const centered = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, R = B.renderer, a = P.player, reticle = document.getElementById("weapon-reticle"), canvas = document.getElementById("scene"), rect = canvas.getBoundingClientRect(), ray = {};
-    P.hooks.onZoom(60 / P.birdsEyeHeight); B.advance(1.5, 1 / 60); const before = __birdsSnapshot();
-    const width = R.size.width, height = R.size.height, inset = parseFloat(reticle.style.getPropertyValue("--reticle-radius"));
-    const pointer = () => ({ x: parseFloat(reticle.style.left), y: parseFloat(reticle.style.top) });
-    // In a settled overhead projection every point on this vertical ray shares
-    // the same pixel, whether the actual hit is land or an item's raised face.
-    const pointAt = (x, y) => { R.ray(x, y, B.camera, ray); const t = (a.root.position.y - a.baseY - a.hop - ray.oy) / ray.dy;
-      return { x: ray.ox + ray.dx * t, y: ray.oy + ray.dy * t, z: ray.oz + ray.dz * t }; };
-    const start = { x: width / 2, y: height * 0.14 }, original = pointAt(start.x, start.y);
-    P.hooks.onOrbit(0, start.y - pointer().y);
-    // Scroll before another frame refreshes aim: the anchor must come from
-    // this pointer position, not the previous assisted hit or cached ground ray.
-    let anchor = original, center = 0, horizontal = 0, minHeight = before.height, screenError = 0, edgeError = 0, directionError = 0, boundsError = 0, inside = 0, outside = 0;
-    const sample = () => {
-      const s = __birdsSnapshot(), p = pointer(), projected = R.project(anchor.x, anchor.y, anchor.z, {});
-      center = Math.max(center, s.center); horizontal = Math.max(horizontal, s.horizontal); minHeight = Math.min(minHeight, s.height);
-      if (projected.y >= inset && projected.y <= height / 2) {
-        inside++; screenError = Math.max(screenError, Math.hypot(p.x - projected.x, p.y - projected.y));
-      } else {
-        outside++; edgeError = Math.max(edgeError, Math.abs(p.y - inset));
-        const dx = projected.x - width / 2, dy = projected.y - height / 2, px = p.x - width / 2, py = p.y - height / 2;
-        directionError = Math.max(directionError, dx * px + dy * py > 0 ? Math.abs(dx * py - dy * px) / Math.hypot(dx, dy) : Infinity);
-      }
-      boundsError = Math.max(boundsError, Math.abs(p.x - width / 2), -p.y, p.y - height / 2);
-    };
-    const zoom = (factor, frames = 60) => { P.hooks.onZoom(factor); for (let i = 0; i < frames; i++) { B.advance(1 / 60, 1 / 60); sample(); } };
-    zoom(0.75); const moved = pointer(); zoom(0.8); const edge = pointer(); zoom(0.9); const repeated = pointer();
-    const unlocked = document.pointerLockElement !== canvas; P.focusAim();
-    const mouse = (dx, dy) => canvas.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: rect.left + start.x, clientY: rect.top + start.y, movementX: dx, movementY: dy }));
-    mouse(0, 0); B.advance(1 / 60, 1 / 60); sample(); const zero = pointer(), zeroError = Math.hypot(zero.x - repeated.x, zero.y - repeated.y);
-    zoom(1 / (0.75 * 0.8 * 0.9), 90); const returned = pointer(), returnError = Math.hypot(returned.x - start.x, returned.y - start.y);
-    zoom(0.54, 90); const clamped = pointer(), dx = -8, dy = 4;
-    const angle = () => Math.atan2(-B.camera.up.x, -B.camera.up.z), wrap = n => Math.atan2(Math.sin(n), Math.cos(n)), yaw = angle();
-    // Native coordinates still describe the old cursor location. Relative Y
-    // resumes from the edge, while relative X turns the view, not the reticle.
-    const wantedY = Math.max(0, Math.min(height / 2, clamped.y + dy * height / rect.height));
-    const wantedTurn = -Math.atan2(dx * width / rect.width, Math.max(inset, height * 0.1, height / 2 - wantedY));
-    mouse(dx, dy); const immediate = pointer(); B.advance(1 / 60, 1 / 60);
-    const manual = pointer(), manualError = Math.max(Math.hypot(immediate.x - clamped.x, immediate.y - clamped.y), Math.hypot(manual.x - width / 2, manual.y - wantedY));
-    B.advance(1, 1 / 60); const released = pointer(), releasedError = Math.hypot(released.x - manual.x, released.y - manual.y), mouseTurnError = Math.abs(wrap(angle() - yaw) - wantedTurn);
-    anchor = pointAt(released.x, released.y); zoom(1 / 0.54, 90);
-    const final = pointer(), originalScreen = R.project(original.x, original.y, original.z, {});
-    P.hooks.onOrbit(-4, -2); B.advance(1 / 60, 1 / 60); const hooked = pointer(), hookError = Math.hypot(hooked.x - width / 2, hooked.y - Math.max(0, Math.min(height / 2, final.y - 2)));
-    return { before, center, horizontal, minHeight, restored: P.birdsEyeHeight, inside, outside, screenError, edgeError, directionError, boundsError,
-      travel: Math.hypot(moved.x - start.x, moved.y - start.y), edge, repeated, returnError, unlocked, zeroError, manualError, releasedError, mouseTurnError, hookError,
-      newTarget: Math.hypot(final.x - originalScreen.x, final.y - originalScreen.y) };
-  })()`);
-  record("birds-eye combat: animated zoom keeps the character centered while aiming ahead", centered.center < 0.02 && centered.horizontal < 1e-6 && centered.minHeight < centered.before.height - 1 && Math.abs(centered.restored - centered.before.height) < 0.02, JSON.stringify(centered));
-  record("birds-eye combat: zoom tracks the fresh world point, keeps an off-screen forward target at the top edge across repeated scrolls and zero-motion events, and restores it on zoom-out", centered.inside > 30 && centered.outside > 30 && centered.screenError < 0.05 && centered.edgeError < 0.05 && centered.directionError < 0.05 && centered.boundsError < 0.01 && centered.travel > 20 && centered.zeroError < 0.02 && centered.returnError < 0.05, JSON.stringify(centered));
-  record("birds-eye combat: small native mouse and orbit gestures release the tracked target without jumping to stale absolute coordinates", centered.unlocked && centered.manualError < 0.02 && centered.releasedError < 0.02 && centered.mouseTurnError < 0.001 && centered.hookError < 0.02 && centered.newTarget > 20, JSON.stringify(centered));
-  const rotation = await b.evaluate(`(() => {
-    const B = __ooga, angle = () => { const s = __birdsSnapshot(); return Math.atan2(-s.up[0], -s.up[2]); }, wrap = n => Math.atan2(Math.sin(n), Math.cos(n));
-    // The preceding mouse/orbit probe ends one frame after a new gesture.
-    // Settle that gesture before comparing equal opposite held-key turns.
-    B.advance(1, 1 / 60);
-    const key = (type, k) => window.dispatchEvent(new KeyboardEvent(type, { key: k }));
-    const hold = (k, frames) => { const before = angle(); key("keydown", k); const immediate = Math.abs(wrap(angle() - before)); let total = 0, maxStep = 0, center = 0, last = before;
-      for (let i = 0; i < frames; i++) { B.advance(1 / 60, 1 / 60); const next = angle(), step = wrap(next - last); total += step; maxStep = Math.max(maxStep, Math.abs(step)); center = Math.max(center, __birdsSnapshot().center); last = next; }
-      key("keyup", k); B.advance(0.6, 1 / 60); const settled = angle(); B.advance(0.5, 1 / 60);
-      return { before, immediate, total, maxStep, center, after: angle(), stopped: Math.abs(wrap(angle() - settled)) }; };
-    const left = hold("q", 36), right = hold("e", 36), around = hold("e", 252), before = angle(); key("keydown", "n"); key("keyup", "n");
-    const immediate = Math.abs(wrap(angle() - before)); let path = 0, maxStep = 0, monotonic = true, last = before, first = null;
-    for (let i = 0; i < 90; i++) { B.advance(1 / 60, 1 / 60); const next = angle(), step = Math.abs(wrap(next - last)); if (!i) first = next;
-      monotonic = monotonic && Math.abs(next) <= Math.abs(last) + 1e-6; path += step; maxStep = Math.max(maxStep, step); last = next; }
-    return { left, right, returned: Math.abs(wrap(right.after - left.before)), around, north: { before, immediate, first, after: angle(), path, maxStep, monotonic } };
-  })()`);
-  record("birds-eye combat: held Q and E rotate smoothly in opposite directions and settle after release", rotation.left.total > 0.7 && rotation.right.total < -0.7 && [rotation.left, rotation.right].every(r => r.immediate < 1e-6 && r.maxStep < 0.04 && r.center < 0.02 && r.stopped < 0.001) && rotation.returned < 0.01, JSON.stringify(rotation));
-  const north = rotation.north;
-  record("birds-eye combat: N eases back to north along the shortest path after rotating past a full turn", Math.abs(rotation.around.total) > Math.PI * 2 && Math.abs(north.before) > 0.2 && north.immediate < 1e-6 && Math.abs(north.first) > 0.01 && Math.abs(north.first) < Math.abs(north.before) && Math.abs(north.after) < 0.001 && north.path <= Math.abs(north.before) + 0.001 && north.maxStep < 0.25 && north.monotonic, JSON.stringify(north));
-  const zoom = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot; P.hooks.onZoom(100, {}); B.advance(1.5, 1 / 60); const max = __birdsSnapshot();
-    P.hooks.onZoom(100, {}); B.advance(0.5, 1 / 60); const clamped = __birdsSnapshot();
-    P.hooks.onZoom(0.75, {}); B.advance(1, 1 / 60); const lowered = __birdsSnapshot();
-    P.hooks.onZoom(100, {}); B.advance(1, 1 / 60); const fromMax = __birdsSnapshot();
-    const C = B.camera, before = [C.position.x, C.position.y, C.position.z]; P.hooks.onZoom(0.001, {});
-    const immediate = Math.hypot(C.position.x - before[0], C.position.y - before[1], C.position.z - before[2]);
-    let last = before, maxStep = 0, switchFrame = -1;
-    for (let i = 0; i < 90; i++) { B.advance(1 / 60, 1 / 60); const p = C.position;
-      maxStep = Math.max(maxStep, Math.hypot(p.x - last[0], p.y - last[1], p.z - last[2])); last = [p.x, p.y, p.z];
-      if (switchFrame < 0 && P.mode === "shoulder") switchFrame = i + 1; }
-    const shoulder = __birdsSnapshot(); P.hooks.onZoom(0.8, {}); B.advance(1.5, 1 / 60); const first = __birdsSnapshot();
-    P.hooks.onZoom(1.2, {}); B.advance(1.5, 1 / 60); const back = __birdsSnapshot();
-    P.hooks.onZoom(1.2, {}); B.advance(1, 1 / 60); return { max, clamped, lowered, fromMax, immediate, maxStep, switchFrame, shoulder, first, back };
-  })()`);
-  record("birds-eye combat: a full-height inward zoom retains combat through shoulder and first person along a continuous path", [zoom.max, zoom.clamped, zoom.lowered, zoom.fromMax, zoom.shoulder, zoom.first, zoom.back].every(view => view.combat) && Math.abs(zoom.max.height - zoom.clamped.height) < 0.01 && zoom.lowered.height < zoom.max.height && zoom.lowered.mode === "birds-eye" && zoom.fromMax.height > 60 && zoom.immediate < 1e-6 && zoom.maxStep < 5 && zoom.switchFrame > 0 && zoom.switchFrame < 45 && zoom.shoulder.mode === "shoulder" && zoom.first.mode === "first-person" && zoom.back.mode === "shoulder", JSON.stringify(zoom));
-  await b.evaluate(`(() => { const B = __ooga, reticle = document.getElementById("weapon-reticle"); B.pilot.hooks.onOrbit(0, B.renderer.size.height * 0.25 - parseFloat(reticle.style.top)); B.advance(0.5, 1 / 60); })()`);
-  const handoffs = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, difference = (a, b) => Math.hypot(...a.map((n, i) => n - b[i]));
-    window.__birdsHandoff = frames => {
-      const before = __birdsSnapshot(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "x" })); window.dispatchEvent(new KeyboardEvent("keyup", { key: "x" }));
-      let last = before, eyeStep = 0, forwardStep = 0, upStep = 0, projectionStep = 0, radiusError = 0, cursorError = 0, fovError = 0, center = 0, blended = 0;
-      const sample = () => { const s = __birdsSnapshot();
-        eyeStep = Math.max(eyeStep, Math.hypot(s.x - last.x, s.y - last.y, s.z - last.z));
-        forwardStep = Math.max(forwardStep, difference(s.forward, last.forward)); upStep = Math.max(upStep, difference(s.screenUp, last.screenUp));
-        projectionStep = Math.max(projectionStep, Math.abs(s.orthoMix - last.orthoMix)); radiusError = Math.max(radiusError, Math.abs(s.distance - before.distance));
-        cursorError = Math.max(cursorError, difference(s.pointer, before.pointer)); fovError = Math.max(fovError, Math.abs(s.fov - before.fov));
-        if (s.overhead && s.mix === 1) center = Math.max(center, s.center);
-        if (s.orthoMix > 0 && s.orthoMix < 1) blended++;
-        last = s;
-      };
-      sample(); const immediate = { eyeStep, forwardStep, upStep, projectionStep, radiusError, cursorError };
-      for (let i = 0; i < frames; i++) { B.advance(1 / 60, 1 / 60); sample(); }
-      return { before, after: last, immediate, eyeStep, forwardStep, upStep, projectionStep, radiusError, cursorError, fovError, center, blended };
-    };
-    const carry = __birdsHandoff(90), diagonal = [];
-    for (const side of ["a", "d"]) { const before = P.orbit.tYaw; window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); window.dispatchEvent(new KeyboardEvent("keydown", { key: side }));
-      B.advance(0.4, 1 / 60); window.dispatchEvent(new KeyboardEvent("keyup", { key: side })); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));
-      diagonal.push(Math.abs(Math.atan2(Math.sin(P.orbit.tYaw - before), Math.cos(P.orbit.tYaw - before)))); }
-    const yaw = P.orbit.tYaw; P.hooks.onOrbit(40, -70); B.advance(1, 1 / 60); const drag = { yaw: Math.abs(P.orbit.tYaw - yaw), down: __birdsSnapshot().down };
-    const entering = __birdsHandoff(18), entryReversed = __birdsHandoff(90);
-    const combat = __birdsHandoff(90), partial = __birdsHandoff(18), reversed = __birdsHandoff(90);
-    return { carry, diagonal, drag, entering, entryReversed, combat, partial, reversed };
-  })()`);
-  const continuous = r => Object.values(r.immediate).every(n => n < 1e-6) && r.eyeStep < 3 && r.forwardStep < 0.15 && r.upStep < 0.15 && r.projectionStep < 0.08 && r.radiusError < 0.02 && r.cursorError < 0.02 && r.fovError < 1e-6 && r.center < 0.02 && r.blended > 2;
-  record("birds-eye combat: X smoothly hands off both ways with a valid centerline cursor and fixed character distance, including reversal in each direction mid-transition", [handoffs.carry, handoffs.entering, handoffs.entryReversed, handoffs.combat, handoffs.partial, handoffs.reversed].every(continuous)
-    && Math.hypot(handoffs.carry.before.pointer[0] - size.x, handoffs.carry.before.pointer[1] - size.y) > 20
-    && [handoffs.carry, handoffs.entryReversed].every(r => r.after.mode === "orbit" && !r.after.combat && r.after.orthoMix === 0)
-    && Math.abs(handoffs.carry.after.altitude - handoffs.carry.before.altitude) < 0.02 && handoffs.carry.after.down > 0.999
-    && [handoffs.entering, handoffs.partial].every(r => r.after.orthoMix > 0 && r.after.orthoMix < 1)
-    && [handoffs.combat, handoffs.reversed].every(r => r.after.mode === "birds-eye" && r.after.combat && r.after.down > 0.999999 && r.after.orthoMix === 1 && r.after.center < 0.02), JSON.stringify(handoffs));
-  record("birds-eye combat: carry orbit stays still on W+A and W+D, and manual orbit rotation remains available", handoffs.diagonal.every(n => n < 1e-6) && handoffs.drag.yaw > 0.1 && handoffs.drag.down < 0.99 && handoffs.carry.after.cutoff >= 1e5, JSON.stringify({ diagonal: handoffs.diagonal, drag: handoffs.drag, cutoff: handoffs.carry.after.cutoff }));
-  const falling = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, I = B.island, a = P.player, C = B.camera, diagonal = -Math.SQRT1_2;
-    const key = (type, k) => window.dispatchEvent(new KeyboardEvent(type, { key: k, code: "Key" + k.toUpperCase(), bubbles: true }));
-    let radius = 5; while (radius < 100 && I.onLand(diagonal * radius, diagonal * radius)) radius += 0.25;
-    const x = diagonal * (radius - 1.5), z = x, start = { position: { x, y: I.surfaceAt(x, z), z }, yaw: Math.PI, pitch: 0.4, dist: 24 };
-    const run = bird => {
-      if (P.aiming) P.modeAction("mode-toggle");
-      P.navigate({ ...start, pitch: bird ? 1.1 : start.pitch }); B.advance(1, 1 / 60);
-      if (bird) {
-        P.modeAction("mode-toggle"); key("keydown", "n"); key("keyup", "n"); B.advance(1.5, 1 / 60);
-        const reticle = document.getElementById("weapon-reticle"), halfHeight = B.renderer.size.height / 2;
-        P.hooks.onOrbit(0, halfHeight - parseFloat(reticle.style.top));
-        const reach = Math.max(parseFloat(reticle.style.getPropertyValue("--reticle-radius")), halfHeight * 0.2);
-        for (let i = 0; i < 3; i++) P.hooks.onOrbit(-reach * Math.tan(Math.PI / 3), 0);
-        B.advance(1.5, 1 / 60);
-        P.hooks.onOrbit(0, B.renderer.size.height * 0.1 - parseFloat(reticle.style.top)); B.advance(0.4, 1 / 60);
-      }
-      const p = a.root.position, trace = [], projected = {}, initial = [p.x, p.y, p.z];
-      const aimDot = diagonal * (Math.sin(a.root.rotation.y) + Math.cos(a.root.rotation.y));
-      let off = -1, back = -1, departure = null, low = Infinity, center = 0, follow = 0, clearance = Infinity, gravityError = 0, ballisticError = 0, gravityFrames = 0, shown = true;
-      let lastY = p.y, lastEye = C.position.y, lastV = a.hopV;
-      key("keydown", "s"); key("keydown", "d");
-      try {
-        for (let i = 0; i < 600; i++) {
-          B.advance(1 / 60, 1 / 60); const feet = p.y - a.baseY;
-          if (low < -50 && Math.hypot(p.x, p.z) < 12 && feet > -1) { back = i; break; }
-          low = Math.min(low, feet);
-          // Hop is relative to the live support, including the unseen abyss
-          // floor. The body's world height must never jump to that support.
-          if (off < 0 && feet - a.hop < -100) {
-            off = i; departure = { x: p.x - initial[0], z: p.z - initial[2], vx: a.leap.vx, vz: a.leap.vz };
-            key("keyup", "s"); key("keyup", "d");
-          } else if (off >= 0) {
-            gravityFrames++; gravityError = Math.max(gravityError, Math.abs(a.hopV - lastV + 9.8 / 60));
-            ballisticError = Math.max(ballisticError, Math.abs(p.y - lastY - a.hopV / 60));
-          }
-          trace.push([p.x, p.y, p.z, a.hopV, a.leap.vx, a.leap.vz]);
-          if (bird) {
-            const screen = B.project(p.x, p.y, p.z, projected);
-            center = Math.max(center, screen ? Math.hypot(screen.x - B.renderer.size.width / 2, screen.y - B.renderer.size.height / 2) : Infinity);
-            follow = Math.max(follow, Math.abs(C.position.y - lastEye - p.y + lastY));
-            let cut = B.renderOpts.cutawayMaxY;
-            for (let j = 0; j < B.renderOpts.cutawayRegionCount; j++) {
-              const r = B.renderOpts.cutawayRegions[j], dx = p.x - r.x, dz = p.z - r.z;
-              if (Math.abs(dx * r.cos - dz * r.sin) < r.halfWidth + a.bodyRadius && Math.abs(dx * r.sin + dz * r.cos) < r.halfDepth + a.bodyRadius) cut = Math.min(cut, r.y);
-            }
-            clearance = Math.min(clearance, cut - feet - a.bodyHeight - Math.max(0, a.viewLift));
-            shown = shown && a.root.visible && P.mode === "birds-eye" && C.orthoMix === 1;
-          }
-          lastY = p.y; lastEye = C.position.y; lastV = a.hopV;
-        }
-      } finally { key("keyup", "s"); key("keyup", "d"); }
-      return { trace, initial, aimDot, off, back, departure, low, center, follow, clearance, gravityError, ballisticError, gravityFrames, shown };
-    };
-    try {
-      const carry = run(false), bird = run(true); let error = 0;
-      for (let i = 0; i < Math.min(carry.trace.length, bird.trace.length); i++) for (let j = 0; j < carry.trace[i].length; j++) error = Math.max(error, Math.abs(carry.trace[i][j] - bird.trace[i][j]));
-      const summarize = r => { const { trace, ...rest } = r; return { ...rest, frames: trace.length }; };
-      return { edge: radius < 100, sameActor: P.player === a, error, carry: summarize(carry), bird: summarize(bird) };
-    } finally {
-      P.navigate({ position: { x: -8, y: 0, z: 8 }, yaw: 0, pitch: 0.3, dist: 24 });
-      if (!P.aiming) P.modeAction("mode-toggle"); B.advance(1, 1 / 60);
-    }
-  })()`);
-  record("birds-eye combat: walking off the same ledge has the same launch and gravity as carry orbit, even when aiming opposite travel", falling.edge && falling.sameActor && falling.error < 0.0001
-    && falling.bird.aimDot < -0.5 && falling.carry.frames === falling.bird.frames && falling.carry.off === falling.bird.off && falling.carry.back === falling.bird.back
-    && [falling.carry, falling.bird].every(r => r.off >= 0 && r.back > r.off && r.back < 600 && r.low < -50 && r.gravityFrames > 120 && r.gravityError < 1e-5 && r.ballisticError < 1e-5 && r.departure.x < -0.5 && r.departure.z < -0.5 && r.departure.vx < 0 && r.departure.vz < 0), JSON.stringify(falling));
-  record("birds-eye combat: the falling character stays centered and visible above every cut plane until respawn, without a camera-height lag", falling.bird.shown && falling.bird.center < 0.02 && falling.bird.follow < 1e-5 && falling.bird.clearance > 0.06 && falling.bird.low < -50 && falling.bird.back > falling.bird.off, JSON.stringify(falling.bird));
-  // The abyss emptied the AK; load it so accidental fire through the HUD
-  // would actually spend ammunition. Start the swap check with the club.
-  // Native pointer lock needs an active tab as well as emulated focus.
-  await b.send("Page.bringToFront");
-  await b.evaluate(`__ooga.crew.configureWeapon(__ooga.pilot.player, 2, 30); __ooga.pilot.weaponMode(1)`);
-  await untilPage(b, 'B.pilot.player.weapon.primaryEquipped');
-  await b.click(size.x, size.y);
-  await untilPage(b, 'document.pointerLockElement === document.getElementById("scene")');
-  const hudPointer = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, a = P.player, canvas = document.getElementById("scene"), reticle = document.getElementById("weapon-reticle"), rect = canvas.getBoundingClientRect();
-    B.advance(0.1, 1 / 60);
-    const sample = () => ({ x: P.cursor.x, y: P.cursor.y, reticleX: parseFloat(reticle.style.left), reticleY: parseFloat(reticle.style.top) });
-    const move = (dx, dy) => canvas.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, movementX: dx, movementY: dy }));
-    // Hidden pointer-lock input cannot independently drift the click destination
-    // before the frame updates the reticle and its weapon target together.
-    const before = sample(); move(1000, -1000); const pending = sample(); B.advance(1 / 60, 1 / 60); const top = sample();
-    move(-1000, 1000); B.advance(1 / 60, 1 / 60); const center = sample();
-    const buttonPoint = id => { const r = document.getElementById(id).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
-    const out = { active: P.cursor.active, visible: P.cursor.visible, locked: document.pointerLockElement === canvas, before, pending, top, center,
-      centerX: rect.left + rect.width / 2, topY: rect.top, centerY: rect.top + rect.height / 2, width: B.renderer.size.width, height: B.renderer.size.height,
-      secondary: buttonPoint("weapon-hud"), primaryButton: buttonPoint("primary-hud"), primary: a.weapon.primaryEquipped,
-      shots: a.weapon.shotsFired, ammo: a.weapon.ammo, reticleZ: parseInt(getComputedStyle(reticle).zIndex, 10) };
-    if (document.pointerLockElement) document.exitPointerLock();
-    return out;
-  })()`);
-  if (!await untilPage(b, "!document.pointerLockElement", 3000)) throw Error("Pointer lock did not release before the HUD button probe");
-  await b.click(hudPointer.secondary.x, hudPointer.secondary.y);
-  const equipped = await b.evaluate(`__ooga.pilot.player.weapon.equipped`);
-  await b.click(hudPointer.primaryButton.x, hudPointer.primaryButton.y);
-  const hudAfter = await b.evaluate(`(() => { const a = __ooga.pilot.player; return { restored: a.weapon.primaryEquipped, shots: a.weapon.shotsFired, ammo: a.weapon.ammo }; })()`);
-  record("birds-eye combat: the hidden cursor shares the centerline reticle, and unlocked HUD weapon clicks do not fire through buttons", hudPointer.active && !hudPointer.visible && hudPointer.locked
-    && Object.keys(hudPointer.before).every(key => Math.abs(hudPointer.before[key] - hudPointer.pending[key]) < 0.02)
-    && [hudPointer.top, hudPointer.center].every(p => Math.abs(p.x - hudPointer.centerX) < 0.02 && Math.abs(p.reticleX - hudPointer.width / 2) < 0.02)
-    && Math.abs(hudPointer.top.y - hudPointer.topY) < 0.02 && Math.abs(hudPointer.top.reticleY) < 0.02
-    && Math.abs(hudPointer.center.y - hudPointer.centerY) < 0.02 && Math.abs(hudPointer.center.reticleY - hudPointer.height / 2) < 0.02
-    && hudPointer.primary && equipped && hudAfter.restored && hudPointer.ammo === 30 && hudAfter.ammo === hudPointer.ammo
-    && hudAfter.shots === hudPointer.shots && hudPointer.reticleZ >= 30, JSON.stringify({ before: hudPointer, equipped, after: hudAfter }));
 } };
-
-const hubBirdsEyeFloors = { name: "birds-eye lower floors", why: "regression: ramp labels reversed with the camera and the HQ ceiling cut left the basement arrow covered", run: async (b) => {
-  const state = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, I = B.island, npc = P.player.npc || P.player, H = I.headquarters, room = H.rooms[0], lower = H.basement.rooms[0], D = BL.scenes.hub.debug;
-    // The driven Ooga is a separate body standing for its NPC (#501): taking the NPC again stands a fresh one beside it.
-    let a = P.player;
-    if (!P.birdsEye) { P.hooks.onZoom(1.2); B.advance(1.5, 1 / 60); }
-    P.hooks.onZoom(32 / P.birdsEyeHeight); B.advance(1.5, 1 / 60);
-    let hill = null;
-    for (let x = -24; x <= 24 && !hill; x += 2) for (let z = -24; z <= 24; z += 2) {
-      const floor = I.surfaceAt(x, z);
-      if (floor >= 4 && I.clearAt(x, floor + 0.05, z, 0.35, 2) && B.headquarters.solids.props.clearAt(x, floor + 0.05, z, 0.35, 2)) { hill = { name: "hill", x, z, floor }; break; }
-    }
-    const lab = B.mouths.find(m => BL.caves.slots.find(s => s.id === m.id)?.scene === "lab"), places = [
-      { name: "surface", x: -8, z: 8, floor: 0 }, ...(hill ? [hill] : []),
-      // Keep the floor sample beside the gorilla's work lane: his live mesh
-      // is a moving support, so standing on him cannot prove zoom stability.
-      { name: "cave", x: lab.x - Math.sin(lab.ry) * 3 + Math.cos(lab.ry) * 2.5,
-        z: lab.z - Math.cos(lab.ry) * 3 - Math.sin(lab.ry) * 2.5, floor: lab.floorY },
-      { name: "HQ", x: room.x, z: room.z, floor: H.floor }, { name: "basement", x: lower.x, z: lower.z, floor: H.basement.floor }];
-    const geometry = I.geometry, verts = geometry.verts, originalVerts = Array.from(verts), source = I.cutawaySource, data = source.data, originalData = data.slice(), rows = [], thresholds = [];
-    const entries = [...D.terrainSections, ...D.caveSections], regions = B.renderOpts.cutawayRegions;
-    const paths = I.cutawayPaths, pathState = D.cutawayPaths, roof = D.terrainRampRoof;
-    const rampMarkers = D.headquarters.rampMarkers.map(marker => {
-      // The route curves: each mark follows the segment where it stands,
-      // rather than the heading at the mouth several metres away.
-      const alignment = (node, distance) => {
-        const samples = marker.ramp.samples;
-        let i = 1; while (i < samples.length - 1 && samples[i].s < distance) i++;
-        const from = samples[i - 1], to = samples[i], dx = to.x - from.x, dz = to.z - from.z;
-        return (Math.sin(node.rotation.y) * dx + Math.cos(node.rotation.y) * dz) / Math.hypot(dx, dz);
-      };
-      return { label: marker.label, channel: marker.channel, visible: marker.node.visible, arrowVisible: marker.arrow.visible,
-        model: marker.node.geometry.rampMarker?.label, visual: marker.node.geometry.rampMarker?.visual, markerKind: marker.node.geometry.rampMarker?.kind, columns: marker.node.geometry.rampMarker?.columns, rows: marker.node.geometry.rampMarker?.rows,
-        arrowKind: marker.arrow.geometry.rampMarker?.kind, labelDistance: marker.labelDistance, arrowDistance: marker.arrowDistance, scale: marker.frame.scale.x,
-        labelSurfaceError: Math.abs(marker.frame.position.y - marker.labelPoint.y - 0.035),
-        arrowSurfaceError: Math.abs(marker.arrow.position.y - marker.arrowPoint.y - 0.035),
-        aligned: alignment(marker.frame, marker.labelDistance),
-        arrowAligned: alignment(marker.arrow, marker.arrowDistance) };
-    });
-    // Project the actual label transform through a full camera turn, including
-    // the side-on and reversed views that used to mirror or invert the words.
-    const markerViews = [], markerCoverage = [];
-    for (let turn = 0; turn < 8; turn++) {
-      P.navigate({ position: { x: 13.7, y: 0, z: 20.3 }, yaw: turn * Math.PI / 4, pitch: 0.3, dist: 8 }); B.advance(0.5, 1 / 60);
-      B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
-      for (const marker of D.headquarters.rampMarkers) {
-        const m = marker.node.world, bounds = BL.scene.boundsOf(marker.node.geometry);
-        const project = (x, z) => B.renderer.project(m[0] * x + m[8] * z + m[12], m[1] * x + m[9] * z + m[13], m[2] * x + m[10] * z + m[14], {});
-        const left = project(bounds.min[0], 0), right = project(bounds.max[0], 0), top = project(0, bounds.min[2]), bottom = project(0, bounds.max[2]);
-        markerViews.push({ label: marker.label, turn, right: right.x - left.x, up: bottom.y - top.y, baseline: Math.abs(right.y - left.y) });
-      }
-    }
-    const vineGeometry = BL.hubModels.vine(); let rampVines = 0;
-    const countRampVines = node => { if (node.geometry === vineGeometry) rampVines++; for (const child of node.children) countRampVines(child); };
-    countRampVines(BL.scenes.hub.root);
-    const standardRim = BL.hubModels.caveMouthRim(), rampRim = BL.hubModels.caveMouthRim(1);
-    const standardRimBounds = BL.scene.boundsOf(standardRim), rampRimBounds = BL.scene.boundsOf(rampRim);
-    const mouthRims = { standard: 0, ramp: 0, expectedRamp: B.mouths.filter(mouth => BL.caves.slots.find(slot => slot.id === mouth.id)?.status === "headquarters").length,
-      standardTop: standardRimBounds.max[1], rampTop: rampRimBounds.max[1], sameOpening: JSON.stringify(standardRim.openingBounds) === JSON.stringify(rampRim.openingBounds) };
-    const rampEntranceFrame = { rampLintels: BL.headquartersModels.rampEntrance(0).faces.filter(face => face.headquartersEntranceLintel).length,
-      roomLintels: BL.headquartersModels.roomEntrance(0).faces.filter(face => face.headquartersEntranceLintel).length };
-    const countMouthRims = node => { const sourceGeometry = node.geometry?.matrixSourceGeometry || node.geometry;
-      if (sourceGeometry === standardRim) mouthRims.standard++; else if (sourceGeometry === rampRim) mouthRims.ramp++;
-      for (const child of node.children) countMouthRims(child); };
-    countMouthRims(BL.scenes.hub.root);
-    const pathRead = () => Array.from(paths.lengths, (length, channel) => ({ channel, length, initial: paths.initial[channel],
-      lo: pathState.lo[channel], hi: pathState.hi[channel], mix: pathState.mix[channel] }));
-    const roofTopology = () => {
-      const original = new Set(geometry.faces), seen = new Set(); let partition = true, walls = 0, voxelWalls = true;
-      for (const mesh of roof.partitionGeometries) {
-        partition = partition && mesh.verts === verts;
-        for (const face of mesh.faces) { partition = partition && original.has(face) && !seen.has(face); seen.add(face); }
-      }
-      for (const mesh of roof.perimeterGeometry) for (const face of mesh.faces) {
-        let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-        for (const index of face.i) { const n = index * 3, x = mesh.verts[n], y = mesh.verts[n + 1], z = mesh.verts[n + 2];
-          minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); }
-        voxelWalls = voxelWalls && face.cutawayRampWall && maxY > minY && Math.min(maxX - minX, maxZ - minZ) < 1e-7
-          && Math.abs(Math.max(maxX - minX, maxZ - minZ) - paths.unit) < 1e-7;
-        walls++;
-      }
-      return { partition: partition && Array.from(original).every(face => seen.has(face)
-        || face.cutawayFloorChannel >= 2 && face.cutawayFloorChannel < 4), voxelWalls, walls, removable: roof.stats.removableFaces,
-        windowRoofFaces: Array.from(roof.stats.windowRoofFaces) };
-    };
-    const initialSpans = paths.ramps.map((ramp, channel) => ({ channel,
-      span: (paths.initial[channel] - 1) / 254 * paths.lengths[channel],
-      expected: Math.min(ramp.length, channel < 2 ? ramp.cutawayEntranceLength || ramp.width : ramp.width), length: ramp.length, tolerance: ramp.length / 254 }));
-    const birdseyeWindows = H.windows.filter(window => window.kind === "room" || window.kind === "panorama").map(window => ({
-      kind: window.kind, basement: !!window.basement, level: window.birdseyeCutawayLevel, columns: window.birdseyeCutawayColumns || 0
-    }));
-    const lowerFloorOrdered = () => roof.lowerFloorGeometry.every(geometry => geometry.faces.every(face => {
-      const channel = face.cutawayFloorChannel, station = face.cutawayFloorStation;
-      return station < pathState.lo[channel] || pathState.mix[channel] >= 1 - 1e-7
-        && station >= pathState.lo[channel] && station <= pathState.hi[channel];
-    }));
-    const decodePath = key => {
-      let channel = -1, station = 0, owners = 0;
-      for (let i = 0; i < 4; i++) { const value = key >>> (i * 8) & 255; if (value) { channel = i; station = value; owners++; } }
-      return { channel, station, owners };
-    };
-    const windowStations = Array.from({ length: 4 }, () => new Set());
-    for (const window of H.windows) if (window.kind === "ramp") windowStations[window.cutawayChannel].add(1 + Math.round(window.cutawayStation / paths.lengths[window.cutawayChannel] * 254));
-    const rampWindowCells = [];
-    for (let cell = 0; cell < paths.keys.length; cell++) {
-      const decoded = decodePath(paths.keys[cell]);
-      if (decoded.channel < 0 || !source.windows[cell]?.length) continue;
-      const x = paths.origin.x + (Math.floor(cell / paths.height) + 0.5) * paths.unit, z = paths.origin.z + (cell % paths.height + 0.5) * paths.unit;
-      const raw = I.rampColumnAt(x, z, decoded.channel >= 2, {});
-      if (raw) continue;
-      rampWindowCells.push({ cell, ...decoded, channelCorrect: windowStations[decoded.channel].has(decoded.station) });
-    }
-    let overlapCells = 0, overlapOwnership = true, retainedFloors = 0, floorsPreserved = true;
-    const upperColumn = {}, lowerColumn = {}, baseFaces = new Set(roof.baseGeometry.faces);
-    for (let cell = 0; cell < paths.keys.length; cell++) {
-      const x = paths.origin.x + (Math.floor(cell / paths.height) + 0.5) * paths.unit, z = paths.origin.z + (cell % paths.height + 0.5) * paths.unit;
-      const upper = I.rampColumnAt(x, z, false, upperColumn), lower = I.rampColumnAt(x, z, true, lowerColumn);
-      if (upper > 0 && upper <= 2 && lower > 0 && lower <= 2) {
-        const key = paths.keys[cell]; overlapCells++;
-        overlapOwnership = overlapOwnership && !!(key >>> ((upper - 1) * 8) & 255) && !(key >>> 16)
-          && Math.abs(paths.bottoms[cell] - upperColumn.ceiling) < 1e-6;
-      }
-    }
-    for (const face of geometry.faces) {
-      if (!face.cutawayPathKey || !face.i.some(index => verts[index * 3 + 1] < face.cutawayPathBottom - 1e-7)) continue;
-      // Floors are horizontal, upward-facing surfaces. Walls above a basement
-      // window can sit below an unrelated upper ramp's ceiling and are roofs.
-      const a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3;
-      const normalY = (verts[b + 2] - verts[a + 2]) * (verts[c] - verts[a]) - (verts[b] - verts[a]) * (verts[c + 2] - verts[a + 2]);
-      if (normalY <= 0 || face.i.some(index => verts[index * 3 + 1] !== verts[a + 1])) continue;
-      retainedFloors++; floorsPreserved = floorsPreserved && baseFaces.has(face);
-    }
-    let rampWindowFaces = 0, rampWindowBaseFaces = 0, rampWindowCrossingFaces = 0, rampWindowFacesPreserved = true, rampWindowFaceOwnership = true;
-    for (const face of geometry.faces) {
-      const window = H.windows[face.windowIndex];
-      // Room windows can overlap a ramp column without belonging to its route.
-      if (!face.headquartersWindowReveal || !face.cutawayPathKey || window?.kind !== "ramp") continue;
-      rampWindowFaces++;
-      const decoded = decodePath(face.cutawayPathKey);
-      // Inside a corridor, the fragment inherits that column's station; an
-      // overlapping upper route keeps ownership over a basement window.
-      // The extended columns above separately prove authored window stations.
-      let x = 0, z = 0;
-      for (const index of face.i) { x += verts[index * 3]; z += verts[index * 3 + 2]; }
-      x /= face.i.length; z /= face.i.length;
-      const gx = Math.floor((x - paths.origin.x) / paths.unit), gz = Math.floor((z - paths.origin.z) / paths.unit);
-      const column = gx * paths.height + gz;
-      rampWindowFaceOwnership = rampWindowFaceOwnership && decoded.owners === 1
-        && gx >= 0 && gx < paths.width && gz >= 0 && gz < paths.height
-        && face.cutawayPathKey === paths.keys[column];
-      let below = false, above = false;
-      for (const index of face.i) {
-        const y = verts[index * 3 + 1];
-        below ||= y < face.cutawayPathBottom - 1e-7;
-        above ||= y > face.cutawayPathBottom + 1e-7;
-      }
-      // A fragment crossing or touching the ceiling is part of the actual
-      // window reveal, not removable roof. It must remain canonical base
-      // geometry while wholly-above fragments may join the roof split.
-      if (below || !above) {
-        rampWindowCrossingFaces++;
-        rampWindowFacesPreserved = rampWindowFacesPreserved && baseFaces.has(face);
-      }
-      if (baseFaces.has(face)) rampWindowBaseFaces++;
-    }
-    const sections = () => D.terrainSections.map(e => ({ visible: e.cap.node.visible, worldY: e.worldY,
-      y: e.cap.node.world[13], faces: e.cap.stats.faces, cache: e.cap.stats.cacheEntries }));
-    const builds = () => entries.map(e => [e.cap.stats.solidBuilds, e.cap.stats.detailBuilds]);
-    for (const q of places) {
-      const support = I.supportAt(q.x, q.z, q.floor + 1, 0.35), clearance = I.clearAt(q.x, q.floor + 0.1, q.z, 0.2, 1.2);
-      P.navigate({ position: { x: q.x, y: q.floor, z: q.z }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(2, 1 / 60);
-      BL.scene.updateWorld(BL.scenes.hub.root);
-      const activeRegions = regions.slice(0, B.renderOpts.cutawayRegionCount);
-      const before = { cutoff: B.renderOpts.cutawayMaxY, regions: activeRegions.map(r => ({ ...r })), paths: pathRead(), builds: builds(), roofBuilds: roof.stats.rebuilds, height: P.birdsEyeHeight };
-      const caveRegions = D.caveSections.filter(e => activeRegions.includes(e.region)).map(e => ({ ...e.region }));
-      P.hooks.onZoom(1.2); B.advance(0.6, 1 / 60);
-      const zoomHeight = P.birdsEyeHeight;
-      P.hooks.onZoom(1 / 1.2); B.advance(0.6, 1 / 60);
-      const zoomStable = before.cutoff === B.renderOpts.cutawayMaxY && JSON.stringify(before.regions) === JSON.stringify(regions.slice(0, B.renderOpts.cutawayRegionCount))
-        && JSON.stringify(before.paths) === JSON.stringify(pathRead()) && before.roofBuilds === roof.stats.rebuilds && JSON.stringify(before.builds) === JSON.stringify(builds());
-      BL.scene.updateWorld(BL.scenes.hub.root);
-      B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
-      if (q.name === "surface" || q.name === "HQ") for (const marker of D.headquarters.rampMarkers) {
-        if ((marker.channel < 2) !== (q.name === "surface")) continue;
-        let checked = 0, covered = 0;
-        const m = marker.arrow.world, v = marker.arrow.geometry.verts;
-        for (let i = 0; i < v.length; i += 3) {
-          const x = m[0] * v[i] + m[4] * v[i + 1] + m[8] * v[i + 2] + m[12];
-          const z = m[2] * v[i] + m[6] * v[i + 1] + m[10] * v[i + 2] + m[14];
-          const gx = Math.floor((x - paths.origin.x) / paths.unit), gz = Math.floor((z - paths.origin.z) / paths.unit), cell = gx * paths.height + gz;
-          const station = paths.keys[cell] >>> (marker.channel * 8) & 255;
-          const globallyOpen = paths.bottoms[cell] >= B.renderOpts.cutawayMaxY - 0.01;
-          const locallyOpen = station > 0 && station >= pathState.lo[marker.channel] && station <= pathState.hi[marker.channel] && pathState.mix[marker.channel] === 1;
-          checked++; if (!globallyOpen && !locallyOpen) covered++;
-        }
-        markerCoverage.push({ channel: marker.channel, floor: q.name, checked, covered });
-      }
-      const centers = [0, H.floor, H.basement.floor].map(y => B.renderer.project(0, y, 0, {}));
-      const centerError = centers.every(Boolean) ? Math.max(...centers.map(p => Math.hypot(p.x - centers[0].x, p.y - centers[0].y))) : Infinity;
-      rows.push({ name: q.name, mode: P.mode, overhead: P.birdsEye, horizontal: Math.hypot(B.camera.position.x - a.root.position.x, B.camera.position.z - a.root.position.z),
-        floor: a.root.position.y - a.baseY, requestedFloor: q.floor, ceiling: P.birdsEyeCeiling, floorCeiling: q.name === "HQ" ? H.ceiling : q.name === "basement" ? H.basement.ceiling : null, cutoff: B.renderOpts.cutawayMaxY,
-        regions: before.regions, caveRegions, paths: before.paths, windowMix: Array.from(pathState.windowMix), roof: roofTopology(), caps: sections(), caveCaps: D.caveSections.filter(e => e.cap.node.visible).length, zoomStable, zoomMoved: Math.abs(zoomHeight - before.height) > 0.1, centerError, orthoMix: B.camera.orthoMix,
-        unchanged: I.geometry === geometry && I.geometry.verts === verts && I.supportAt(q.x, q.z, q.floor + 1, 0.35) === support && I.clearAt(q.x, q.floor + 0.1, q.z, 0.2, 1.2) === clearance });
-      if (q.name !== "cave") {
-        const read = () => { const feet = a.root.position.y - a.baseY, relative = B.camera.position.y - feet;
-          return { mode: P.mode, relative, headClearance: relative - a.headOffset * 0.95 - a.viewLift }; };
-        P.hooks.onZoom(21.5 / P.birdsEyeHeight, {}); B.advance(1.5, 1 / 60); const above = read(); P.hooks.onZoom(0.001, {});
-        let frames = 0; while (P.mode === "birds-eye" && frames++ < 150) B.advance(1 / 60, 1 / 60);
-        const switched = read(); thresholds.push({ name: q.name, floor: q.floor, above, switched, frames });
-        B.advance(1, 1 / 60); P.hooks.onZoom(1.2, {}); B.advance(1, 1 / 60);
-        P.hooks.onZoom(before.height / P.birdsEyeHeight, {}); B.advance(1.5, 1 / 60);
-      }
-    }
-    const landingCoverage = [];
-    for (const point of [{ x: 17.12639, z: 1.63491 }, { x: 18.24953, z: -0.09931 }]) {
-      P.navigate({ position: { x: point.x, y: H.floor, z: point.z }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(0.5, 1 / 60);
-      landingCoverage.push({ hi: Array.from(pathState.hi), cutFaces: Array.from(roof.stats.cutFaces) });
-    }
-    // Move the actual actor along the authored ramps. The expected plateaus
-    // come from the settled floor visits above, not a copy of the blend rule.
-    const cutRead = () => {
-      const p = a.root.position, feet = p.y - a.baseY, global = B.renderOpts.cutawayMaxY;
-      let cut = global;
-      for (let i = 0; i < B.renderOpts.cutawayRegionCount; i++) {
-        const r = regions[i], dx = p.x - r.x, dz = p.z - r.z;
-        if (Math.abs(dx * r.cos - dz * r.sin) < r.halfWidth && Math.abs(dx * r.sin + dz * r.cos) < r.halfDepth) cut = Math.min(cut, r.y);
-      }
-      const gx = Math.floor((p.x - paths.origin.x) / paths.unit), gz = Math.floor((p.z - paths.origin.z) / paths.unit);
-      if (gx >= 0 && gz >= 0 && gx < paths.width && gz < paths.height) {
-        const cell = gx * paths.height + gz, key = paths.keys[cell];
-        for (let channel = 0; channel < 4; channel++) {
-          const station = key >>> (channel * 8) & 255;
-          if (station && pathState.mix[channel] > 0 && station >= pathState.lo[channel] && station <= pathState.hi[channel])
-            cut = Math.min(cut, 16 + (paths.bottoms[cell] - 16) * pathState.mix[channel]);
-        }
-      }
-      return { y: global >= 1e5 ? 16 : global, clearance: cut - feet - a.bodyHeight - Math.max(0, a.viewLift), feet, regions: B.renderOpts.cutawayRegionCount };
-    };
-    const rampTravel = [];
-    for (const [name, ramp, upper, lower] of [["main-HQ", H.ramps[0], 16, rows.find(r => r.name === "HQ").cutoff], ["HQ-basement", H.basement.ramps[0], rows.find(r => r.name === "HQ").cutoff, rows.find(r => r.name === "basement").cutoff]]) {
-      const samples = ramp.samples, first = samples[0], last = samples[samples.length - 1];
-      const at = progress => {
-        const y = first.y + (last.y - first.y) * progress;
-        let i = 1; while (i < samples.length - 1 && samples[i].y > y) i++;
-        const from = samples[i - 1], to = samples[i], k = (y - from.y) / (to.y - from.y);
-        return { x: from.x + (to.x - from.x) * k, y, z: from.z + (to.z - from.z) * k };
-      };
-      for (const down of [true, false]) {
-        const source = down ? 0.08 : 0.92, destination = 1 - source, start = at(source);
-        P.navigate({ position: start, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(1, 1 / 60);
-        const early = cutRead(); let previous = early, maxStep = 0, clearance = Infinity, maxRegions = 0, positionError = 0, moving = 0, structureHidden = false, slicedVisible = false, visibleFrames = 0, wholeHidden = 0, wholeGorillas = 0, wholeComplete = true, lowerFloorsOrdered = lowerFloorOrdered(), lowerActorRoofChecks = 0, lowerActorRoofCovered = 0;
-        const initialLowerMix = Math.max(pathState.mix[2], pathState.mix[3]), lowerGate = H.ceiling - 0.06 - paths.unit;
-        const inactiveLowerCovered = () => [2, 3].every(channel => channel === D.cutawayTravelChannel
-          || pathState.mix[channel] === 0 || pathState.hi[channel] <= paths.initial[channel]);
-        let lowerMixMax = initialLowerMix,
-          lowerRevealFrames = B.renderOpts.cutawayMaxY < lowerGate - 1e-7 && initialLowerMix > 0 ? 1 : 0,
-          lowerRevealGuard = B.renderOpts.cutawayMaxY < lowerGate - 1e-7 || inactiveLowerCovered();
-        const sample = () => {
-          const value = cutRead(), step = Math.abs(value.y - previous.y);
-          maxStep = Math.max(maxStep, step); clearance = Math.min(clearance, value.clearance); maxRegions = Math.max(maxRegions, value.regions);
-          const lowerMix = Math.max(pathState.mix[2], pathState.mix[3]);
-          lowerMixMax = Math.max(lowerMixMax, lowerMix);
-          if (B.renderOpts.cutawayMaxY >= lowerGate - 1e-7) lowerRevealGuard = lowerRevealGuard && inactiveLowerCovered();
-          else if (lowerMix > 0) lowerRevealFrames++;
-          const channel = D.cutawayTravelChannel, position = a.root.position;
-          const gx = Math.floor((position.x - paths.origin.x) / paths.unit), gz = Math.floor((position.z - paths.origin.z) / paths.unit);
-          if (channel >= 2 && gx >= 0 && gz >= 0 && gx < paths.width && gz < paths.height) {
-            const cell = gx * paths.height + gz, station = paths.keys[cell] >>> (channel * 8) & 255;
-            const head = position.y - a.baseY + a.bodyHeight + Math.max(0, a.viewLift);
-            if (station >= pathState.lo[channel] && station <= pathState.hi[channel] && paths.bottoms[cell] > head) {
-              lowerActorRoofChecks++;
-              if (pathState.mix[channel] < 1 - 1e-6) lowerActorRoofCovered++;
-            }
-          }
-          lowerFloorsOrdered = lowerFloorsOrdered && lowerFloorOrdered();
-          structureHidden ||= !!D.headquarters.node.cutawayWholeHidden || D.headquarters.entrances.some(entry => entry.node.cutawayWholeHidden);
-          if (!a.root.cutawayWholeHidden) visibleFrames++;
-          wholeHidden = Math.max(wholeHidden, B.crew.list.filter(cave => cave.root.cutawayWholeHidden).length + D.props.filter(prop => prop.node.cutawayWholeHidden).length);
-          wholeGorillas = Math.max(wholeGorillas, B.clankers.list.filter(entry => entry.root.cutawayWholeHidden).length);
-          wholeComplete = wholeComplete && D.props.every(prop => !prop.node.cutawayWholeHidden || prop.node.cameraHidden)
-            && B.clankers.list.every(entry => !entry.root.cutawayWholeHidden || entry.root.cameraHidden);
-          if (value.clearance < -0.01 && !a.root.cutawayWholeHidden) slicedVisible = true;
-          if (step > 1e-5) moving++;
-          previous = value; return value;
-        };
-        const place = progress => {
-          const point = at(progress); B.crew.relocatePlayer(point, 0); B.advance(1 / 60, 1 / 60);
-          positionError = Math.max(positionError, Math.abs(a.root.position.y - a.baseY - point.y));
-          return sample();
-        };
-        const travel = (from, to, frames, trace = null) => { for (let i = 1; i <= frames; i++) { const progress = from + (to - from) * i / frames, value = place(progress); if (trace) {
-          const active = regions.slice(0, B.renderOpts.cutawayRegionCount);
-          trace.push({ progress, floor: value.y, paths: pathRead(), caveRegionsOnly: active.every(region => D.caveSections.some(entry => entry.region === region)) });
-        } } };
-        const hold = () => { for (let i = 0; i < 45; i++) { B.advance(1 / 60, 1 / 60); sample(); } return previous; };
-        travel(source, 0.5, 36); const middle = hold();
-        // Let the first small excursion settle, then repeat the same noise
-        // band: it must not alternate between the two floor states.
-        place(0.502); place(0.498); B.advance(0.1, 1 / 60); const stopped = sample();
-        let stopDrift = 0;
-        for (let i = 0; i < 18; i++) { const value = place(0.5 + (i % 2 ? -0.002 : 0.002)); stopDrift = Math.max(stopDrift, Math.abs(value.y - stopped.y)); }
-        travel(0.5, source, 36); const reversed = hold();
-        const linear = []; travel(source, destination, 72, linear); const late = hold();
-        const changing = linear.filter(row => row.floor > lower + 0.02 && row.floor < upper - 0.02);
-        const floorWindow = changing.length ? Math.max(...changing.map(row => row.progress)) - Math.min(...changing.map(row => row.progress)) : Infinity;
-        const floorCenter = changing.length ? (Math.max(...changing.map(row => row.progress)) + Math.min(...changing.map(row => row.progress))) / 2 : Infinity;
-        rampTravel.push({ name, down, upper, lower, early, middle, late, reversed, maxStep, clearance, maxRegions, positionError, moving, stopDrift, floorWindow, floorCenter,
-          minimumSpan: linear.every(row => row.paths.every(path => path.hi >= path.initial)), caveRegionsOnly: linear.every(row => row.caveRegionsOnly),
-          lowerMixMax, lowerRevealFrames, lowerRevealGuard, lowerFloorsOrdered, lowerActorRoofChecks, lowerActorRoofCovered,
-          structureHidden, slicedVisible, visibleFrames, wholeHidden, wholeGorillas, wholeComplete });
-      }
-    }
-    // Follow cumulative authored distance, including each route's flat tail.
-    // Height-only samples cannot prove that the visible endpoint keeps moving
-    // ahead after the descent itself has reached the next floor.
-    const pathTravel = [];
-    for (let channel = 0; channel < paths.ramps.length; channel++) {
-      const ramp = paths.ramps[channel], samples = ramp.samples;
-      const at = distance => {
-        let i = 1; while (i < samples.length - 1 && samples[i].s < distance) i++;
-        const from = samples[i - 1], to = samples[i], t = (distance - from.s) / (to.s - from.s);
-        return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t, z: from.z + (to.z - from.z) * t };
-      };
-      P.navigate({ position: at(0), yaw: 0, pitch: 0.3, dist: 8 }); B.advance(1, 1 / 60);
-      let previous = 0, backwards = 0, minimum = Infinity, balance = Infinity, matched = 0, balanced = 0, end = 0, windowActive = false;
-      for (let i = 0; i <= 48; i++) {
-        B.crew.relocatePlayer(at(ramp.length * i / 48), 0); B.advance(1 / 60, 1 / 60);
-        const hi = pathState.hi[channel], endpoint = Math.max(hi, pathState.lo[channel] - 1);
-        backwards = Math.max(backwards, previous - endpoint); previous = endpoint;
-        minimum = Math.min(minimum, hi - paths.initial[channel]);
-        if (D.cutawayTravelChannel === channel) {
-          matched++;
-          const station = 1 + 254 * D.cutawayTravelStation / ramp.length;
-          if (2 * station - 1 <= 255) { balance = Math.min(balance, endpoint - station - (station - 1)); balanced++; }
-        }
-        windowActive ||= pathState.mix[channel] > 0 && rampWindowCells.some(cell => cell.channel === channel
-          && cell.station >= pathState.lo[channel] && cell.station <= pathState.hi[channel]);
-        end = endpoint;
-      }
-      pathTravel.push({ channel, backwards, minimum, balance, matched, balanced, end, windowActive, roof: roofTopology() });
-    }
-    const coverFade = { out: [], in: [] }, readCoverFade = () => ({ path: pathState.mix[0], cave: B.renderOpts.cutawayRegionCount ? regions[0].mix : 0 });
-    P.navigate({ position: { x: -8, y: 0, z: 8 }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(0.5, 1 / 60);
-    P.navigate({ position: { x: hill.x, y: hill.floor, z: hill.z }, yaw: 0, pitch: 0.3, dist: 8 });
-    for (let i = 0; i < 22; i++) { B.advance(1 / 60, 1 / 60); coverFade.out.push(readCoverFade()); }
-    P.navigate({ position: { x: -8, y: 0, z: 8 }, yaw: 0, pitch: 0.3, dist: 8 });
-    for (let i = 0; i < 22; i++) { B.advance(1 / 60, 1 / 60); coverFade.in.push(readCoverFade()); }
-    const key = (type, value, code) => window.dispatchEvent(new KeyboardEvent(type, { key: value, code, bubbles: true }));
-    const jetWasWorn = !!a.jet, flightFloor = I.surfaceAt(-8, 16);
-    P.navigate({ position: { x: -8, y: flightFloor, z: 16 }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(1, 1 / 60);
-    if (!jetWasWorn) { key("keydown", "j", "KeyJ"); key("keyup", "j", "KeyJ"); }
-    const flight = { peak: 0, highFrames: 0, fallFrames: 0, clearance: Infinity, preserved: true, centered: true, landed: false };
-    key("keydown", " ", "Space");
-    try {
-      for (let i = 0; i < 300; i++) {
-        if (i === 60) key("keyup", " ", "Space");
-        B.advance(1 / 60, 1 / 60); const value = cutRead(), altitude = value.feet - flightFloor;
-        flight.peak = Math.max(flight.peak, altitude); flight.clearance = Math.min(flight.clearance, value.clearance);
-        if (a.hopV < -0.1) flight.fallFrames++;
-        if (altitude > 4) {
-          flight.highFrames++;
-          flight.preserved = flight.preserved && B.renderOpts.cutawayMaxY >= 1e5 && pathState.mix.every(mix => mix === 0);
-        }
-        flight.centered = flight.centered && P.mode === "birds-eye" && a.root.visible && Math.hypot(B.camera.position.x - a.root.position.x, B.camera.position.z - a.root.position.z) < 1e-6;
-        if (i > 90 && altitude < 0.1 && a.hopV === 0) { flight.landed = true; break; }
-      }
-    } finally {
-      key("keyup", " ", "Space");
-      if (!jetWasWorn) { key("keydown", "j", "KeyJ"); key("keyup", "j", "KeyJ"); }
-    }
-    // Restore the basement before exercising the existing camera handoffs.
-    P.navigate({ position: { x: lower.x, y: H.basement.floor, z: lower.z }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(2, 1 / 60);
-    const cutClear = () => !B.renderOpts.birdsEyeCutaway && B.renderOpts.cutawayMaxY >= 1e5 && !B.renderOpts.cutawayRegionCount
-      && B.renderOpts.cutawayFade === 0 && B.renderOpts.cutawayRockMix === 0 && B.renderOpts.cutawayCloudMix === 0
-      && pathState.active === 0 && pathState.mix.every(mix => mix === 0) && pathState.windowMix.every(mix => mix === 0)
-      && entries.every(entry => !entry.cap.node.visible) && D.headquarters.rampMarkers.every(marker => !marker.node.visible && !marker.arrow.visible)
-      && B.crew.list.every(cave => !cave.root.cutawayWholeHidden) && B.clankers.list.every(entry => !entry.root.cutawayWholeHidden)
-      && D.props.every(prop => !prop.node.cutawayWholeHidden);
-    const geometryHead = new Float64Array(3);
-    const geometryClear = (actor, gorilla = false) => {
-      const p = actor.root.position, eye = B.camera.position, radius = 0.3;
-      let x = p.x, y = gorilla ? p.y : p.y - actor.baseY + actor.headOffset * 0.95 + actor.viewLift, z = p.z;
-      if (gorilla) {
-        BL.scene.updateWorld(actor.root, actor.root.parent.world);
-        const head = actor.gorilla.parts.head, bounds = BL.scene.boundsOf(head.geometry);
-        BL.math.mat4.transformPoint(geometryHead, head.world, bounds.center[0], bounds.min[1] + (bounds.max[1] - bounds.min[1]) * 0.65, bounds.max[2] + 0.01);
-        x = geometryHead[0]; y = geometryHead[1]; z = geometryHead[2];
-      }
-      return I.clearAt(eye.x, eye.y - radius, eye.z, radius, radius * 2)
-        && I.voxelSegmentClearAt(x, y - radius, z, eye.x, eye.y - radius, eye.z, radius, radius * 2)
-        && D.headquarters.solids.props.segmentClear(x, y - radius, z, eye.x, eye.y - radius, eye.z, radius, radius * 2);
-    };
-    const cutState = () => ({ mode: P.mode, player: !!P.player, combat: P.aiming, clear: cutClear(), mix: P.birdsEyeMix, fade: B.renderOpts.cutawayFade, rock: B.renderOpts.cutawayRockMix,
-      geometryClear: !!P.player && geometryClear(P.player), eyeY: B.camera.position.y, ceiling: H.basement.ceiling,
-      markers: D.headquarters.rampMarkers.reduce((count, marker) => count + (marker.node.visible ? 1 : 0), 0),
-      cuts: B.renderOpts.cutawayMaxY < 1e5 ? [B.renderOpts.cutawayMaxY] : regions.slice(0, B.renderOpts.cutawayRegionCount).map(r => r.y) });
-    const transition = (name, action, frames = 60) => {
-      const before = cutState(); action(); const immediate = Math.abs(P.birdsEyeMix - before.mix), immediateFade = Math.abs(B.renderOpts.cutawayFade - before.fade);
-      let last = before, mixStep = 0, fadeStep = 0, cutStep = 0, fadeError = 0, capError = 0, minCut = Infinity, maxCut = -Infinity, changed = 0, direction = true, blended = 0, withoutPlayer = 0;
-      let rockError = Math.abs(before.rock - before.fade), maxRegions = 0, carryClear = true, firstClear = false, blockedCloseFrames = 0, blockedRetained = true, residualRestored = false, residualSafe = true;
-      for (let i = 0; i < frames; i++) {
-        B.advance(1 / 60, 1 / 60); const s = cutState(); mixStep = Math.max(mixStep, Math.abs(s.mix - last.mix)); fadeError = Math.max(fadeError, Math.abs(s.fade - s.mix));
-        if (!i) firstClear = s.clear;
-        if (!s.player || !s.combat) carryClear = carryClear && s.clear;
-        if (s.combat && s.mode !== "birds-eye" && !s.geometryClear) { blockedCloseFrames++; blockedRetained = blockedRetained && s.fade > 0; }
-        if (s.combat && s.mode !== "birds-eye" && s.geometryClear && s.mix > 0) { residualSafe = residualSafe && s.clear; residualRestored ||= s.clear; }
-        fadeStep = Math.max(fadeStep, Math.abs(s.fade - last.fade));
-        rockError = Math.max(rockError, Math.abs(s.rock - s.fade));
-        maxRegions = Math.max(maxRegions, B.renderOpts.cutawayRegionCount);
-        if (s.fade > 0 && s.fade < 1) blended++;
-        if (!s.player && s.fade > 0) withoutPlayer++;
-        if (s.cuts.length) { minCut = Math.min(minCut, ...s.cuts); maxCut = Math.max(maxCut, ...s.cuts); }
-        // The disabled 1e6 sentinel lies above all rock. Only compare real
-        // slicing planes while both samples have an active cutaway.
-        if (s.fade > 0 && last.fade > 0 && s.cuts.length === last.cuts.length) for (let j = 0; j < s.cuts.length; j++) {
-          const delta = s.cuts[j] - last.cuts[j]; cutStep = Math.max(cutStep, Math.abs(delta));
-          direction = direction && delta * (s.fade - last.fade) <= 1e-6;
-          if (!j && Math.abs(delta) > 1e-5) changed++;
-        }
-        if (B.renderOpts.cutawayMaxY < 1e5) for (const e of D.terrainSections) if (e.cap.node.visible) capError = Math.max(capError, Math.abs(e.cap.node.world[13] + 0.002 - B.renderOpts.cutawayMaxY));
-        last = s;
-      }
-      return { name, before, after: last, immediate, immediateFade, mixStep, fadeStep, cutStep, fadeError, rockError, capError, span: maxCut - minCut, changed, direction, blended, withoutPlayer, maxRegions, carryClear, firstClear, blockedCloseFrames, blockedRetained, residualRestored, residualSafe };
-    };
-    const toggle = () => P.modeAction("mode-toggle"), transitions = [];
-    transitions.push(transition("basement carry exit", toggle));
-    transitions.push(transition("basement partial entry", toggle, 12));
-    transitions.push(transition("basement entry reversal", toggle));
-    transitions.push(transition("basement carry entry", toggle));
-    transitions.push(transition("basement shoulder exit", () => P.hooks.onZoom(0.001, {}), 150));
-    transitions.push(transition("basement shoulder entry", () => P.hooks.onZoom(1.2, {})));
-    const carryRoofs = [], G = B.clankerPlay, C = B.clankers, e = C.list.find(entry => entry.owner === npc);
-    const account = BL.net.state.me, backend = BL.net.state.backend, character = BL.characters.get(a.traits.name);
-    const pressX = () => { key("keydown", "x", "KeyX"); key("keyup", "x", "KeyX"); };
-    const canvas = document.getElementById("scene"), rect = canvas.getBoundingClientRect();
-    const rightClick = () => {
-      for (const type of ["pointerdown", "pointerup"]) canvas.dispatchEvent(new PointerEvent(type,
-        { pointerId: 93, pointerType: "mouse", button: 2, buttons: type === "pointerdown" ? 2 : 0,
-          clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, bubbles: true, cancelable: true }));
-    };
-    try {
-      BL.net.state.backend = true;
-      for (const signedIn of [false, true]) for (const gorilla of [false, true]) for (const q of places.filter(place => place.name === "HQ" || place.name === "basement")) {
-        BL.net.state.me = signedIn ? { id: 75, login: character.github || character.handle, display: "Cutaway fixture" } : null;
-        G.release(); P.release(true);
-        if (gorilla) e.active = e.root.visible = true;
-        P.goPreset("pile");
-        Object.assign(B.camera.position, { x: q.x + 3, y: q.floor + 25, z: q.z + 5 });
-        Object.assign(B.camera.target, { x: q.x, y: q.floor + 1, z: q.z }); B.camera.up = { x: 0, y: 1, z: 0 };
-        const controller = gorilla ? G : P, spot = gorilla ? e : npc, zoom = factor => gorilla ? G.zoom(factor, {}) : P.hooks.onZoom(factor, {});
-        // A released body goes (#501), so each acquisition stands the NPC on the roof floor and takes the fresh body
-        // standing beside it there.
-        let actor = null;
-        const take = () => {
-          Object.assign(spot.root.position, { x: q.x, y: q.floor + (gorilla ? 0 : spot.baseY), z: q.z });
-          controller.possess(spot); if (gorilla ? C.sleeping(controller.player || e) : B.crew.sleeping) gorilla ? C.wake() : B.crew.wakePlayer();
-          actor = controller.player;
-        };
-        const read = () => ({ view: gorilla ? G.view : P.mode, combat: gorilla ? G.combat : P.aiming, controlled: controller.player === actor,
-          clear: cutClear(), cut: B.renderOpts.birdsEyeCutaway, geometryClear: geometryClear(controller.player === actor ? actor : spot, gorilla), mix: B.camera.orthoMix || 0, eye: B.camera.position.y });
-        const advance = (frames, requireClear = false) => {
-          let clear = true;
-          for (let i = 0; i < frames; i++) { B.advance(1 / 60, 1 / 60); if (requireClear) clear = clear && cutClear(); }
-          return { ...read(), clearThroughout: clear };
-        };
-        take(); const acquired = advance(1, true);
-        pressX(); const overhead = advance(90);
-        pressX(); const carryExit = advance(1, true);
-        const carrySettling = advance(12, true);
-        pressX(); const overheadAgain = advance(90);
-        rightClick();
-        let shoulder, blocked = 0, retained = true, residualRestored = false, residualSafe = true, shoulderFrames = 0;
-        for (; shoulderFrames < 150; shoulderFrames++) {
-          B.advance(1 / 60, 1 / 60); shoulder = read();
-          if (shoulder.view === "shoulder" && !shoulder.geometryClear) { blocked++; retained = retained && shoulder.cut; }
-          if (shoulder.view === "shoulder" && shoulder.geometryClear && shoulder.mix > 0) { residualSafe = residualSafe && shoulder.clear; residualRestored ||= shoulder.clear; }
-          if (shoulder.view === "shoulder" && shoulder.clear && shoulder.geometryClear && shoulder.mix === 0) break;
-        }
-        zoom(0.5);
-        let first, firstFrames = 0, firstClear = true;
-        for (; firstFrames < 90; firstFrames++) {
-          B.advance(1 / 60, 1 / 60); first = read(); firstClear = firstClear && first.clear;
-          if (first.view === "first-person" && (gorilla ? B.pilot.orbit.dist < 0.01 : P.closeMix === 1)) break;
-        }
-        zoom(2); advance(1); zoom(2); advance(90);
-        controller.release(true); const detached = advance(1, true);
-        take(); const retaken = advance(1, true);
-        carryRoofs.push({ signedIn, gorilla, floor: q.name, ceiling: q.floor === H.floor ? H.ceiling : H.basement.ceiling,
-          acquired, overhead, carryExit, carrySettling, overheadAgain, closeExit: { shoulder, blocked, retained, residualRestored, residualSafe, shoulderFrames, first, firstClear, firstFrames }, detached, retaken });
-      }
-    } finally { G.release(); P.release(true); BL.net.state.me = account; BL.net.state.backend = backend; }
-    P.possess(npc); if (B.crew.sleeping) B.crew.wakePlayer(); a = P.player;
-    P.navigate({ position: { x: lower.x, y: H.basement.floor, z: lower.z }, yaw: 0, pitch: 0.3, dist: 8 });
-    if (P.aiming) toggle(); P.hooks.onZoom(0.001, {}); B.advance(1, 1 / 60);
-    toggle(); P.hooks.onZoom(1.2, {}); B.advance(1, 1 / 60);
-    const cave = places.find(q => q.name === "cave");
-    P.navigate({ position: { x: cave.x, y: cave.floor, z: cave.z }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(2, 1 / 60);
-    transitions.push(transition("cave roof exit", toggle));
-    transitions.push(transition("cave roof entry", toggle));
-    const basement = { position: { x: lower.x, y: H.basement.floor, z: lower.z }, yaw: 0, pitch: 0.3, dist: 8 };
-    P.navigate(basement); B.advance(2, 1 / 60);
-    const released = transition("basement actor release", () => P.release(true));
-    P.possess(npc); if (B.crew.sleeping) B.crew.wakePlayer(); a = P.player; P.navigate(basement); B.advance(0.7, 1 / 60);
-    if (!P.aiming) P.modeAction("mode-toggle"); if (P.mode === "shoulder") P.hooks.onZoom(1.2); B.advance(1, 1 / 60);
-    const restored = !!a && a.npc === npc && P.player === a && P.mode === "birds-eye" && P.birdsEyeMix === 1 && Math.abs(a.root.position.y - a.baseY - H.basement.floor) < 0.2;
-    const landmarks = [B.altar.node.position, B.headquarters.firepit.position, H.basement.hole].map(p => [p.x, p.z]);
-    const clouds = [], weather = [];
-    // Relief windows include an ordinary front mesh as well as projective
-    // batches. Neither is part of the weather deck.
-    const reliefRoots = [D.factory?.batches.hall.parent, D.factory?.roof?.batches.hall.parent, D.bifrost?.window?.root];
-    const visit = n => { if (reliefRoots.includes(n)) return; if (n.geometry?.cutawayPreserve) clouds.push(n); if (n.geometry?.cutawayHide) weather.push(n); for (const child of n.children) visit(child); };
-    visit(BL.scenes.hub.root);
-    const immutable = I.geometry === geometry && I.geometry.verts === verts && verts.every((v, i) => v === originalVerts[i]) && source.data === data && data.every((v, i) => v === originalData[i]);
-    const cache = entries.map(e => ({ ...e.cap.stats }));
-    return { rows, thresholds, rampTravel, pathTravel, landingCoverage, coverFade, initialSpans, birdseyeWindows, mouthRims, rampEntranceFrame, rampMarkers, markerViews, markerCoverage, rampVines, rampWindowCells, rampWindowFaces, rampWindowBaseFaces, rampWindowCrossingFaces, rampWindowFacesPreserved, rampWindowFaceOwnership,
-      overlapCells, overlapOwnership, retainedFloors, floorsPreserved, noRampRegions: !D.rampSections,
-      flight, transitions, carryRoofs, released, restored, immutable, landmarks, cache, regionStorage: regions === B.renderOpts.cutawayRegions, sections: D.terrainSections.length, caves: D.caveSections.length, clouds: clouds.length, weather: weather.length, weatherPreserved: weather.every(n => n.geometry.cutawayPreserve) };
-  })()`);
-  const rows = state.rows, underground = rows.filter(r => r.requestedFloor < -0.15), surface = rows.filter(r => r.requestedFloor >= -0.15);
-  record("birds-eye combat: surface and hills retain their terrain, caves use local roof cuts, and HQ and basement use the current floor's global section", rows.length === 5 && rows.every(r => r.mode === "birds-eye" && r.overhead && r.horizontal < 1e-6 && Math.abs(r.floor - r.requestedFloor) < 0.2 && r.unchanged)
-    && underground.length === 2 && underground.every(r => r.cutoff > r.floor + 1.3 && r.cutoff < r.floor + 5 && Math.abs(r.cutoff - r.floorCeiling + 0.06) < 0.01 && !r.caveRegions.length && !r.caveCaps && r.caps[0].visible && r.caps[0].faces > 0)
-    && surface.every(r => r.cutoff >= 1e5 && r.caps.every(c => !c.visible) && r.caveRegions.every(region => Math.abs(region.y - 2.85) < 1e-6))
-    && surface.find(r => r.name === "cave").caveRegions.length > 0 && surface.find(r => r.name === "hill").regions.length === 0, JSON.stringify(rows));
-  record("birds-eye combat: surface ramps keep their authored entrance span and basement openings initially extend one ramp-width", state.initialSpans.length === 4
-    && state.initialSpans.every(p => Math.abs(p.span - p.expected) <= p.tolerance)
-    && rows.every(r => r.paths.length === 4 && r.paths.every(p => p.hi >= p.initial))
-    && rows.find(r => r.name === "surface").paths.slice(0, 2).every(p => p.mix === 1 && p.lo === 1)
-    && rows.find(r => r.name === "hill").paths.every(p => p.mix === 0), JSON.stringify({ spans: state.initialSpans, paths: rows.map(r => ({ name: r.name, paths: r.paths })) }));
-  record("birds-eye combat: every authored room window removes only its level's fitted lintel rock", state.birdseyeWindows.length > 0
-    && state.birdseyeWindows.every(window => window.columns > 0 && window.level === (window.basement ? 1 : 0))
-    && rows.find(r => r.name === "surface").windowMix.every(mix => mix === 0)
-    && rows.find(r => r.name === "HQ").windowMix.join() === "1,0"
-    && rows.find(r => r.name === "basement").windowMix.join() === "1,1"
-    && rows.find(r => r.name === "HQ").roof.windowRoofFaces.every(faces => faces > 0), JSON.stringify({ windows: state.birdseyeWindows,
-      levels: rows.map(({ name, windowMix }) => ({ name, windowMix })), faces: rows.find(r => r.name === "HQ").roof.windowRoofFaces }));
-  record("birds-eye combat: surface ramp mouths omit only the overhead stone lintel while ordinary cave frames retain it", state.mouthRims.expectedRamp === 2
-    && state.mouthRims.ramp === state.mouthRims.expectedRamp && state.mouthRims.standard > 0 && state.mouthRims.sameOpening
-    && Math.abs(state.mouthRims.standardTop - 3.5) < 1e-7 && Math.abs(state.mouthRims.rampTop - 3) < 1e-7
-    && state.rampEntranceFrame.rampLintels === 0 && state.rampEntranceFrame.roomLintels > 0, JSON.stringify({ mouths: state.mouthRims, basement: state.rampEntranceFrame }));
-  record("birds-eye combat: each downhill ramp has a dense entrance label and a separate arrow fitted to its surface, hidden outside bird's-eye view", state.rampMarkers.length === 4
-    && state.rampMarkers.map(marker => marker.channel).join() === "0,1,2,3"
-    && state.rampMarkers.map(marker => marker.label).join() === "HQ,HQ,B1,B1"
-    && state.rampMarkers.every(marker => marker.visible && marker.arrowVisible && marker.model === marker.label && marker.markerKind === "label" && marker.arrowKind === "arrow"
-      && marker.visual === marker.label && marker.columns === 5 && marker.rows === 7 && marker.scale === 0.72
-      && marker.labelDistance > 0 && marker.arrowDistance > marker.labelDistance && marker.labelSurfaceError < 1e-7
-      && marker.arrowSurfaceError < 1e-7 && marker.aligned > 0.999 && marker.arrowAligned > 0.999)
-    && state.rampVines === 0
-    && [0, 2, 4, 6].every(i => state.transitions[i].after.markers === 0)
-    && [3, 5, 7].every(i => state.transitions[i].after.markers === 4)
-    && state.released.after.markers === 0 && state.restored, JSON.stringify({ markers: state.rampMarkers, transitions: state.transitions.map(({ name, after }) => ({ name, visible: after.markers })), released: state.released.after.markers }));
-  record("birds-eye combat: HQ and B1 read upright left-to-right through a full camera turn and every entrance exposes its complete downhill arrow", state.markerViews.length === 32
-    && state.markerViews.every(view => view.right > 0 && view.up > 0 && view.baseline < 0.001)
-    && state.markerCoverage.length === 4 && state.markerCoverage.every(marker => marker.checked > 0 && marker.covered === 0), JSON.stringify({ views: state.markerViews, coverage: state.markerCoverage }));
-  record("birds-eye combat: ramp openings use original terrain faces and exact vertical voxel walls, never clipping rectangles or proxy floors", state.noRampRegions
-    && rows.every(r => r.regions.length <= 8 && r.regions.every(region => r.caveRegions.some(cave => cave.id === region.id)) && r.roof.partition && r.roof.voxelWalls && r.roof.removable > 0)
-    && rows.some(r => r.roof.walls > 0) && state.pathTravel.every(r => r.roof.partition && r.roof.voxelWalls), JSON.stringify(rows.map(({ name, roof, regions }) => ({ name, roof, regions }))));
-  record("birds-eye combat: ramp-window cutaway columns extend beyond the raw ramp, keep their authored route station, and retain real window fragments in the terrain base", state.rampWindowCells.length > 0
-    && state.rampWindowCells.every(cell => cell.owners === 1 && cell.channelCorrect)
-    && state.rampWindowFaces > 0 && state.rampWindowCrossingFaces > 0 && state.rampWindowBaseFaces > 0
-    && state.rampWindowFacesPreserved && state.rampWindowFaceOwnership && state.pathTravel.every(r => r.windowActive), JSON.stringify({ cells: state.rampWindowCells, faces: state.rampWindowFaces,
-      base: state.rampWindowBaseFaces, crossing: state.rampWindowCrossingFaces, preserved: state.rampWindowFacesPreserved, ownership: state.rampWindowFaceOwnership, travel: state.pathTravel.map(r => ({ channel: r.channel, active: r.windowActive })) }));
-  record("birds-eye combat: descending either route never shortens its opening and retains as much path ahead as behind until the route ends", state.pathTravel.length === 4
-    && state.pathTravel.every(r => r.backwards === 0 && r.minimum >= 0 && r.matched > 30 && r.balanced > 10 && r.balance >= -1.001 && r.end === 255), JSON.stringify(state.pathTravel));
-  record("birds-eye combat: the HQ landing keeps identical completed ramp coverage inside and just outside the travel detector", state.landingCoverage.length === 2
-    && state.landingCoverage.every(row => row.hi[0] === 255 && row.hi[1] === 255)
-    && JSON.stringify(state.landingCoverage[0]) === JSON.stringify(state.landingCoverage[1]), JSON.stringify(state.landingCoverage));
-  record("birds-eye combat: hill and jet-height cave roofs share the ramp cover's smooth opacity timing", state.coverFade.out.some(row => row.path > 0 && row.path < 1)
-    && state.coverFade.in.some(row => row.path > 0 && row.path < 1)
-    && state.coverFade.out.every((row, i, rows) => Math.abs(row.path - row.cave) < 1e-6 && (!i || row.path <= rows[i - 1].path + 1e-7))
-    && state.coverFade.in.every((row, i, rows) => Math.abs(row.path - row.cave) < 1e-6 && (!i || row.path >= rows[i - 1].path - 1e-7)), JSON.stringify(state.coverFade));
-  record("birds-eye combat: overlapping ramp cells belong to the upper path and retained voxel floors stay in the immutable terrain base", state.overlapCells > 0 && state.overlapOwnership
-    && state.retainedFloors > 0 && state.floorsPreserved, JSON.stringify({ overlaps: state.overlapCells, ownership: state.overlapOwnership, retained: state.retainedFloors, preserved: state.floorsPreserved }));
-  record("birds-eye combat: both ramp connections retain the source floor early, progressively remove it across the ramp and reach the destination before exit in either direction", state.rampTravel.length === 4 && state.rampTravel.every(r =>
-    Math.abs(r.early.y - (r.down ? r.upper : r.lower)) < 0.02 && Math.abs(r.late.y - (r.down ? r.lower : r.upper)) < 0.02
-    && r.middle.y > r.lower + (r.upper - r.lower) * 0.1 && r.middle.y < r.upper - (r.upper - r.lower) * 0.1
-    && r.positionError < 0.2 && r.maxRegions <= 8 && r.moving > 15), JSON.stringify(state.rampTravel));
-  record("birds-eye combat: stopping with small ramp-height noise holds the cut, while reversing smoothly restores the source floor", state.rampTravel.every(r =>
-    r.stopDrift < 0.01 && r.maxStep <= 1 && Math.abs(r.reversed.y - r.early.y) < 0.02), JSON.stringify(state.rampTravel));
-  record("birds-eye combat: upcoming ramp paths retain their minimum span while upper floors reveal progressively in either direction", state.rampTravel.every(r =>
-    r.minimumSpan && r.caveRegionsOnly && r.floorWindow > 0.6 && r.floorWindow < 0.82 && Math.abs(r.floorCenter - 0.5) < 0.04), JSON.stringify(state.rampTravel));
-  record("birds-eye combat: basement entrances open at HQ while the remaining route stays covered until descent", rows.filter(r => r.name !== "HQ" && r.name !== "basement").every(r => r.paths.slice(2).every(p => p.mix === 0))
-    && rows.find(r => r.name === "HQ").paths.slice(2).every(p => p.mix === 1 && p.hi === p.initial)
-    && rows.find(r => r.name === "basement").paths.slice(2).some(p => p.mix > 0)
-    && state.rampTravel.filter(r => r.name === "main-HQ").every(r => r.lowerRevealFrames === 0 && r.lowerRevealGuard)
-    && state.rampTravel.every(r => r.lowerFloorsOrdered)
-    && state.rampTravel.filter(r => r.name === "HQ-basement").every(r => r.lowerRevealGuard && r.lowerRevealFrames > 0 && r.lowerMixMax === 1 && r.lowerActorRoofChecks > 0 && r.lowerActorRoofCovered === 0), JSON.stringify({ rows: rows.map(r => ({ name: r.name, lower: r.paths.slice(2) })),
-      travel: state.rampTravel.map(({ name, down, lowerMixMax, lowerRevealFrames, lowerRevealGuard, lowerActorRoofChecks, lowerActorRoofCovered }) => ({ name, down, lowerMixMax, lowerRevealFrames, lowerRevealGuard, lowerActorRoofChecks, lowerActorRoofCovered })) }));
-  record("birds-eye combat: the upper-floor scan hides sliced actors and gorillas as whole units without hiding structural rooms or entrances", state.rampTravel.every(r =>
-    !r.slicedVisible && r.visibleFrames > 0 && r.wholeHidden > 0 && r.wholeGorillas > 0 && r.wholeComplete && !r.structureHidden), JSON.stringify(state.rampTravel));
-  record("birds-eye combat: jetting above the surface restores ramp cover and the following fall keeps the actor centered with head clearance", state.flight.peak > 4 && state.flight.highFrames > 10
-    && state.flight.fallFrames > 10 && state.flight.clearance >= 0.075 && state.flight.preserved && state.flight.centered && state.flight.landed, JSON.stringify(state.flight));
-  record("birds-eye combat: inward zoom reaches shoulder with the same near-body head clearance on the surface, hills, HQ and basement", state.thresholds.length === 4
-    && state.thresholds.every(r => r.above.mode === "birds-eye" && r.above.relative > 21.2 && r.switched.mode === "shoulder" && r.switched.headClearance >= 0.075 && r.switched.relative < 10 && r.frames < 150)
-    && Math.max(...state.thresholds.map(r => r.switched.headClearance)) - Math.min(...state.thresholds.map(r => r.switched.headClearance)) < 0.05, JSON.stringify(state.thresholds));
-  record("birds-eye combat: zoom leaves section meshes cached, translated islands share the exact world cut height, and terrain and centered landmarks stay unchanged", state.immutable && state.regionStorage && state.sections >= 2 && state.caves > 0 && state.caves <= 8
-    && rows.every(r => r.zoomStable && r.zoomMoved && r.caps.every(c => !c.visible || Math.abs(c.y + 0.002 - r.cutoff) < 1e-5))
-    && underground.some(r => r.caps.slice(1).some(c => c.visible && c.faces > 0))
-    && state.cache.every(c => c.cacheEntries <= 16) && state.cache.some(c => c.cacheEntries === 16)
-    && state.landmarks.length === 3 && state.landmarks.every(p => p[0] === 0 && p[1] === 0) && state.clouds > 0 && state.weather > 0, JSON.stringify({ ...state, rows: rows.map(r => ({ name: r.name, zoomStable: r.zoomStable, zoomMoved: r.zoomMoved, caps: r.caps })) }));
-  record("birds-eye combat: the pile, HQ hearth and basement center align on screen at every selected floor despite their different elevations", rows.every(r => r.orthoMix === 1 && r.centerError < 0.001), JSON.stringify(rows.map(({ name, centerError, orthoMix }) => ({ name, centerError, orthoMix }))));
-  record("birds-eye combat: carry clears every cut immediately; an underground shoulder handoff keeps its slice while blocked, then restores intact terrain once the displayed camera is clear", state.transitions.length === 8
-    && state.transitions.every(r => r.immediate < 1e-6 && r.mixStep < 0.08 && r.cutStep < 5 && r.rockError < 1e-6 && r.capError < 1e-5 && r.maxRegions <= 8 && r.carryClear)
-    && state.transitions[4].blockedCloseFrames > 0 && state.transitions[4].blockedRetained && state.transitions[4].residualSafe
-    && state.transitions[4].after.clear && state.transitions[4].after.geometryClear && state.transitions[4].after.eyeY < state.transitions[4].after.ceiling
-    && state.transitions[7].fadeError < 1e-6 && state.transitions[7].span > 1 && state.transitions[7].changed >= 10 && state.transitions[7].direction && state.transitions[7].blended >= 10
-    && state.transitions[1].after.mix > 0 && state.transitions[1].after.mix < 1
-    && state.transitions[2].before.mix === state.transitions[1].after.mix
-    && [0, 2, 6].every(i => state.transitions[i].firstClear && state.transitions[i].after.mix === 0 && state.transitions[i].after.clear)
-    && [3, 5, 7].every(i => state.transitions[i].after.mix === 1 && state.transitions[i].after.fade === 1 && state.transitions[i].after.cuts.length > 0)
-    && state.transitions[4].after.mode === "shoulder" && state.transitions[5].after.mode === "birds-eye", JSON.stringify(state.transitions));
-  record("lower floors: signed in or out, Ooga and gorilla carry never slice HQ or basement during high detached acquisition, residual projection after X or last-actor retake; X combat restores slicing", state.carryRoofs.length === 8
-    && state.carryRoofs.every(r => Number.isFinite(r.acquired.eye) && r.acquired.eye > r.ceiling
-      && [r.acquired, r.carryExit, r.carrySettling, r.retaken].every(s => s.controlled && s.view === "orbit" && !s.combat && s.clear && s.clearThroughout)
-      && r.carryExit.mix > 0
-      && [r.overhead, r.overheadAgain].every(s => s.controlled && s.combat && s.view === "birds-eye" && s.cut && s.mix === 1)
-      && !r.detached.controlled && !r.detached.combat && r.detached.clear && r.detached.clearThroughout && r.retaken.view === "orbit"), JSON.stringify(state.carryRoofs));
-  record("underground combat: both actors and sign-in states retain the cut while the entering shoulder camera crosses intact rock, then restore all cover in clear shoulder and first-person views", state.carryRoofs.every(r => {
-    const c = r.closeExit;
-    return c.blocked > 0 && c.retained && c.residualSafe && c.shoulderFrames < 150 && c.firstFrames < 90
-      && c.shoulder.view === "shoulder" && c.shoulder.eye < r.ceiling && c.first.view === "first-person" && c.firstClear
-      && [c.shoulder, c.first].every(s => s.controlled && s.combat && s.clear && s.geometryClear);
-  }), JSON.stringify(state.carryRoofs.map(r => ({ signedIn: r.signedIn, gorilla: r.gorilla, floor: r.floor, ...r.closeExit }))));
-  const released = state.released;
-  record("birds-eye combat: releasing the actor restores terrain, weather, caps, paths, markers and whole hidden actors on the first detached update", released.before.mix === 1 && released.before.fade === 1
-    && released.immediateFade < 1e-6 && released.firstClear && released.carryClear && released.withoutPlayer === 0
-    && !released.after.player && released.after.mix === 0 && released.after.clear && state.restored, JSON.stringify({ released, restored: state.restored }));
-  const rendering = await b.evaluate(`(() => {
-    const B = __ooga, S = BL.scene, root = S.createNode(), floor = BL.models.box({ w: 40, h: 0.2, d: 40, color: "#00ff00" });
-    // One greedy-meshed roof face crosses all four cut edges. Whole-face culling
-    // and clipping only the rectangle's original vertices both fail this case.
-    const roof = { verts: [-6, 0, -6, -6, 0, 6, 6, 0, 6, 6, 0, -6], faces: [{ i: [0, 1, 2, 3], color: [255, 0, 0] }], lines: [] };
-    const top = S.createNode({ geometry: roof, position: { x: 0, y: 5, z: 0 } });
-    const ground = S.createNode({ geometry: floor }); S.addChild(root, ground); S.addChild(root, top);
-    const camera = S.createCamera({ far: 60 }); Object.assign(camera.position, { x: 0, y: 20, z: 0 }); Object.assign(camera.target, { x: 0, y: 0, z: 0 }); camera.up = { x: 0, y: 0, z: -1 };
-    const canvas = document.createElement("canvas"); canvas.getContext("2d", { willReadFrequently: true });
-    const fallback = BL.canvasRenderer.createRenderer(canvas, { width: 256, height: 256 }), rows = [];
-    const region = { x: 0, z: 0, cos: Math.cos(Math.PI / 6), sin: Math.sin(Math.PI / 6), halfWidth: 1.5, halfDepth: 3, y: 2 };
-    const second = { x: -3, z: 0, cos: Math.cos(-Math.PI / 5), sin: Math.sin(-Math.PI / 5), halfWidth: 1.2, halfDepth: 2, y: 2 };
-    const regions = [region, second], original = JSON.stringify(roof), cloud = BL.hubModels.cloud(0);
-    const points = [[0, 5, 0], [region.cos * 1.2 + region.sin * 2.4, 5, -region.sin * 1.2 + region.cos * 2.4], [1.4, 5, -2.8], [4.5, 5, 0], [-3, 5, 0]];
-    const hidden = { ...roof, cutawayHide: true, cutawayPreserve: true }, base = { bloomStrength: 0, shadowStrength: 0, ambientFloor: 1, directStrength: 0 };
-    let cloudPoint = null, cloudDistance = Infinity;
-    for (const face of cloud.faces) {
-      const a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3, v = cloud.verts;
-      const ny = (v[b + 2] - v[a + 2]) * (v[c] - v[a]) - (v[b] - v[a]) * (v[c + 2] - v[a + 2]);
-      if (ny <= 0) continue;
-      let x = 0, y = 0, z = 0;
-      for (const i of face.i) { x += v[i * 3]; y += v[i * 3 + 1]; z += v[i * 3 + 2]; }
-      x /= face.i.length; y /= face.i.length; z /= face.i.length;
-      if (x * x + z * z < cloudDistance) { cloudDistance = x * x + z * z; cloudPoint = [x, y + 8, z]; }
-    }
-    try {
-      for (const [renderer, element] of [[B.renderer, document.getElementById("scene")], [fallback, canvas]]) {
-        const read = (opts, samples = points, area = 1) => {
-          renderer.render(root, camera, { ...base, ...opts });
-          return samples.map(point => {
-            const projected = renderer.project(...point, {}), x = Math.floor(projected.x * element.width / renderer.size.width) - Math.floor(area / 2), y = Math.floor(projected.y * element.height / renderer.size.height) - Math.floor(area / 2);
-            let pixels;
-            if (renderer.kind !== "webgl2") pixels = element.getContext("2d").getImageData(x, y, area, area).data;
-            else { const gl = element.getContext("webgl2"); pixels = new Uint8Array(area * area * 4); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.readPixels(x, element.height - area - y, area, area, gl.RGBA, gl.UNSIGNED_BYTE, pixels); }
-            const average = [0, 0, 0, 0]; for (let i = 0; i < pixels.length; i++) average[i % 4] += pixels[i];
-            return average.map(n => n / (area * area));
-          });
-        };
-        const covered = read({}), revealed = read({ cutawayMaxY: 2 }), restored = read({});
-        const selective = read({ cutawayRegions: regions, cutawayRegionCount: 1 }), both = read({ cutawayRegions: regions, cutawayRegionCount: 2 });
-        region.y = 5; const coplanar = read({ cutawayRegions: regions, cutawayRegionCount: 1 }); region.y = 2;
-        roof.cutawayPreserve = true;
-        const preserved = read({ cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2 });
-        roof.clipMaxY = 4; const ownMaximum = read({ cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2 }); delete roof.clipMaxY;
-        roof.clipMinY = 6; const ownMinimum = read({ cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2 }); delete roof.clipMinY; delete roof.cutawayPreserve;
-        top.geometry = hidden;
-        const weatherBefore = read({}), weatherWorld = Array.from(top.world), weatherGeometry = JSON.stringify(hidden), weatherFade = [];
-        // Average full ordered-coverage tiles: WebGL fades depth-writing
-        // clouds by coverage, while Canvas blends the same visible fraction.
-        for (const fade of [0, 0.25, 0.5, 0.75, 1, 0.75, 0.5, 0.25, 0]) weatherFade.push({ fade, pixel: read({ cutawayFade: fade, birdsEyeCutaway: true, cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2 }, [points[0]], 8)[0] });
-        const weatherHidden = read({ birdsEyeCutaway: true }), weatherAfter = read({});
-        const weatherUnchanged = top.visible && top.geometry === hidden && top.position.y === 5 && top.world.every((v, i) => v === weatherWorld[i]) && JSON.stringify(hidden) === weatherGeometry;
-        top.geometry = cloud; top.position.y = 8;
-        const cloudBefore = read({}, [cloudPoint])[0], cloudCut = read({ cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2, birdsEyeCutaway: true }, [cloudPoint])[0];
-        const cloudWorld = Array.from(top.world), cloudPosition = { ...top.position };
-        top.matrixCloud = true; ground.visible = false;
-        camera.position.y = 4; camera.target.y = -5;
-        const loweredPoint = [cloudPoint[0], cloudPoint[1] - 8, cloudPoint[2]];
-        const cloudLowered = read({ cutawayCloudY: 0, cutawayCloudMix: 1 }, [loweredPoint])[0];
-        const cloudWorldUnchanged = top.world.every((v, i) => v === cloudWorld[i]) && Object.keys(cloudPosition).every(k => top.position[k] === cloudPosition[k]);
-        // Keep cloud shading in both samples; only the translation differs.
-        top.position.y = 0;
-        const cloudReference = read({}, [loweredPoint])[0];
-        top.position.y = 8; top.matrixCloud = true; camera.position.y = 12;
-        const middlePoint = [cloudPoint[0], cloudPoint[1] - 4, cloudPoint[2]];
-        const cloudMiddle = read({ cutawayCloudY: 0, cutawayCloudMix: 0.5 }, [middlePoint])[0];
-        top.position.y = 4;
-        const cloudMiddleReference = read({}, [middlePoint])[0];
-        ground.visible = true; camera.position.y = 20; camera.target.y = 0;
-        top.geometry = roof; top.position.y = 5;
-        rows.push({ kind: renderer.kind, covered, revealed, restored, selective, both, coplanar, preserved, ownMaximum, ownMinimum,
-          weatherBefore, weatherHidden, weatherAfter, weatherFade, weatherUnchanged, cloudBefore, cloudCut, cloudPreserved: cloud.cutawayPreserve,
-          cloudLowered, cloudReference, cloudMiddle, cloudMiddleReference, cloudWorldUnchanged,
-          visible: root.children.every(n => n.visible), immutable: JSON.stringify(roof) === original });
-      }
-    } finally { fallback.dispose(); for (const geometry of [floor, roof, hidden]) B.renderer.releaseGeometry(geometry); B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts); }
-    return rows;
-  })()`);
-  const red = p => p[0] > p[1] + 40, green = p => p[1] > p[0] + 40;
-  record("birds-eye combat: WebGL2 and Canvas cut a large roof only inside rotated regions, retain both outside portions and coplanar faces, and restore the original mesh", rendering.length === 2 && rendering.some(r => r.kind === "webgl2") && rendering.some(r => r.kind === "canvas2d") && rendering.every(r => r.covered.every(red) && r.revealed.every(green) && r.restored.every(red)
-    && r.selective.slice(0, 2).every(green) && r.selective.slice(2).every(red) && green(r.both[4]) && red(r.both[2]) && red(r.both[3]) && r.coplanar.every(red) && r.visible && r.immutable), JSON.stringify(rendering));
-  record("birds-eye combat: preserved clouds survive local and global cuts, authored height limits still apply, and weather hides only during the render pass", rendering.every(r => r.preserved.every(red) && r.ownMaximum.every(green) && r.ownMinimum.every(green)
-    && r.weatherBefore.every(red) && r.weatherHidden.every(green) && r.weatherAfter.every(red) && r.weatherUnchanged && r.cloudPreserved
-    && r.cloudBefore[0] > 40 && r.cloudBefore[2] > 40 && r.cloudBefore.every((v, i) => Math.abs(v - r.cloudCut[i]) <= 1)), JSON.stringify(rendering.map(({ kind, preserved, ownMaximum, ownMinimum, weatherHidden, weatherUnchanged, cloudBefore, cloudCut }) => ({ kind, preserved, ownMaximum, ownMinimum, weatherHidden, weatherUnchanged, cloudBefore, cloudCut }))));
-  record("birds-eye combat: WebGL2 and Canvas weather fade independently of rock cuts and reverse to the same coverage without mutating scene nodes or geometry", state.weatherPreserved && rendering.every(r => r.weatherUnchanged && red(r.weatherFade[0].pixel) && green(r.weatherFade[4].pixel)
-    && r.weatherFade[2].pixel[0] > 20 && r.weatherFade[2].pixel[1] > 20
-    && r.weatherFade.slice(1, 5).every((f, i) => f.pixel[0] < r.weatherFade[i].pixel[0] - 10 && f.pixel[1] > r.weatherFade[i].pixel[1] + 10)
-    && r.weatherFade.slice(5).every((f, i) => f.pixel.every((v, channel) => Math.abs(v - r.weatherFade[3 - i].pixel[channel]) <= 1))), JSON.stringify({ weatherPreserved: state.weatherPreserved, renderers: rendering.map(({ kind, weatherFade, weatherUnchanged }) => ({ kind, weatherFade, weatherUnchanged })) }));
-  record("birds-eye combat: low-floor clouds render below the camera with a continuous visual offset while their world transforms and authored positions remain unchanged", rendering.every(r => r.cloudWorldUnchanged && r.cloudLowered[0] > 40 && r.cloudLowered[2] > 40
-    && r.cloudLowered.every((v, i) => Math.abs(v - r.cloudReference[i]) <= 1) && r.cloudMiddle.every((v, i) => Math.abs(v - r.cloudMiddleReference[i]) <= 1)), JSON.stringify(rendering.map(({ kind, cloudLowered, cloudReference, cloudMiddle, cloudMiddleReference, cloudWorldUnchanged }) => ({ kind, cloudLowered, cloudReference, cloudMiddle, cloudMiddleReference, cloudWorldUnchanged }))));
-} };
-
-const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhead projection keeps vertical landmarks aligned and picking rays agree with rendered geometry throughout the perspective transition", run: async (b) => {
+const sharedCameraRendering = { name: "shared camera rendering", why: "rule: games retain overhead projection, picking, culling and speech visibility; the hub supplies landmark geometry without enabling overhead gameplay", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, S = BL.scene, root = S.createNode(), rows = [], camera = S.createCamera({ near: 0.1, far: 80 });
     Object.assign(camera.position, { x: 3, y: 20, z: 5 }); Object.assign(camera.target, { x: 3, y: 0, z: 5 }); camera.up = { x: 0, y: 0, z: -1 }; camera.orthoHeight = 20;
@@ -18282,9 +17612,9 @@ const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhe
     } finally { fallback.dispose(); for (const geometry of [red, blue, pink]) B.renderer.releaseGeometry(geometry); B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts); }
   })()`);
   const samples = state.filter(r => !r.fallback), settled = samples.filter(r => r.mix === 1);
-  record("birds-eye projection: WebGL2 and Canvas match the continuous projection formula and their rays hit the same world points at every transition sample", samples.length === 10 && samples.every(r => r.projectError < 0.002 && r.rayError < 1e-4 && r.rayForward)
+  record("shared camera rendering: WebGL2 and Canvas match the continuous projection formula and their rays hit the same world points at every transition sample", samples.length === 10 && samples.every(r => r.projectError < 0.002 && r.rayError < 1e-4 && r.rayForward)
     && state.filter(r => r.fallback).every(r => r.error < 0.002) && settled.every(r => r.aligned < 0.001 && r.parallel < 1e-6), JSON.stringify(state));
-  record("birds-eye projection: rendered near and far objects follow projected positions, including a batch outside the old perspective frustum", samples.every(r => r.pixels[0]?.[0] > r.pixels[0]?.[1] + 40 && r.pixels[1]?.[2] > r.pixels[1]?.[1] + 40
+  record("shared camera rendering: rendered near and far objects follow projected positions, including a batch outside the old perspective frustum", samples.every(r => r.pixels[0]?.[0] > r.pixels[0]?.[1] + 40 && r.pixels[1]?.[2] > r.pixels[1]?.[1] + 40
     && (!r.pixels[2] || r.pixels[2][0] > r.pixels[2][1] + 40 && r.pixels[2][2] > r.pixels[2][1] + 40)) && settled.every(r => r.pixels[2]), JSON.stringify(samples.map(({ kind, mix, pixels }) => ({ kind, mix, pixels }))));
   const culling = await b.evaluate(`(() => {
     const B = __ooga, S = BL.scene, R = B.renderer, root = S.createNode(), rows = [];
@@ -18316,7 +17646,7 @@ const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhe
       return {rows,mixed,preserved,kind:R.kind};
     } finally {for(const g of [geometry,protectedGeometry,batchGeometry])R.releaseGeometry(g);R.render(BL.scenes.hub.root,B.camera,B.renderOpts);}
   })()`);
-  record("birds-eye projection: physical screen bounds cull only marked tiny props with hysteresis, preserve coherent glyph mosaics and assembled details, and retain an entire mixed batch", culling.kind === "webgl2"
+  record("shared camera rendering: physical screen bounds cull only marked tiny props with hysteresis, preserve coherent glyph mosaics and assembled details, and retain an entire mixed batch", culling.kind === "webgl2"
     && culling.rows.map(r=>r.drawn).join() === "9,9,10,10,9,9,10" && culling.rows.map(r=>r.smallCulled).join() === "5,5,4,4,5,5,4"
     && culling.mixed.drawn === 14 && culling.mixed.smallCulled === 0 && culling.mixed.count === 4 && culling.preserved, JSON.stringify(culling));
   const anchors = await b.evaluate(`(() => {
@@ -18326,7 +17656,7 @@ const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhe
     S.addChild(actor, body, head); S.addChild(root, actor);
     const roofGeometry = BL.models.box({ w: 16, h: 0.2, d: 16, color: "#777777" }), roof = S.createNode({ geometry: roofGeometry, position: { x: 0, y: 6, z: 0 } }); S.addChild(root, roof);
     const camera = S.createCamera({ far: 80, orthoHeight: 20 }); Object.assign(camera.position, { x: 0, y: 20, z: 0 }); Object.assign(camera.target, { x: 0, y: 0, z: 0 }); camera.up = { x: 0, y: 0, z: -1 };
-    const opts = { cutawayMaxY: 1e6, cutawayRegionCount: 0, cutawayRegions: [], birdsEyeCutaway: true, bloomStrength: 0, shadowStrength: 0 };
+    const opts = { bloomStrength: 0, shadowStrength: 0 };
     const visibility = BL.characterVisibility.create({ root, renderer: B.renderer, camera, renderOpts: opts }), cave = { root: actor, parts: { head } }, rows = [];
     const sample = name => {
       B.renderer.render(root, camera, opts); visibility.begin();
@@ -18339,22 +17669,13 @@ const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhe
       for (const mix of [0, 0.5, 1]) {
         camera.orthoMix = mix; roof.visible = false; rows.push(sample("uncovered"));
         roof.visible = true; rows.push(sample("covered"));
-        opts.cutawayMaxY = 4; rows.push(sample("global cut")); opts.cutawayMaxY = 1e6;
       }
-      opts.cutawayRegions[0] = { x: 4, z: 0, cos: 1, sin: 0, halfWidth: 1, halfDepth: 1, y: 4 }; opts.cutawayRegionCount = 1;
-      rows.push(sample("local cut"));
-      opts.cutawayRegions[0].x = 4.65; opts.cutawayRegions[0].halfWidth = 0.25;
-      rows.push(sample("visible sliver"));
-      roofGeometry.cutawayPreserve = true; rows.push(sample("preserved roof")); delete roofGeometry.cutawayPreserve;
-      roofGeometry.cutawayHide = true; rows.push(sample("hidden weather")); delete roofGeometry.cutawayHide;
       const decoratedRoof = BL.models.merge(roofGeometry);
       for (const face of decoratedRoof.faces) face.visibility = false;
       roof.geometry = decoratedRoof; rows.push(sample("render-only foliage")); roof.geometry = roofGeometry;
-      roof.matrixCloud = true; roofGeometry.cutawayPreserve = true; opts.cutawayCloudY = -4; opts.cutawayCloudMix = 1;
-      rows.push({ ...sample("lowered cloud"), physicalY: roof.position.y, worldY: roof.world[13] });
       // The ₿IFRÖST arch's stone carries a depth offset for its joins, yet stands free: its lintel and towers hide a
       // speaker behind them, while one seen through the opening stays visible.
-      roof.visible = false; roof.matrixCloud = false; opts.birdsEyeCutaway = false; opts.cutawayRegionCount = 0;
+      roof.visible = false;
       camera.orthoMix = 0; camera.up = { x: 0, y: 1, z: 0 };
       const landmark = BL.bifrostGate.landmark(), arch = S.createNode({ geometry: landmark.stone }); S.addChild(root, arch);
       const small = BL.models.box({ w: 0.3, h: 0.3, d: 0.3, color: "#ffffff" }), speaker = S.createNode({ sightHidden: true }), mouth = S.createNode({ geometry: small });
@@ -18369,38 +17690,16 @@ const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhe
       return { rows, archRows };
     } finally { visibility.dispose(); for (const geometry of [bodyGeometry, headGeometry, roofGeometry]) B.renderer.releaseGeometry(geometry); B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts); }
   })()`);
-  record("birds-eye projection: speech anchors follow the rendered head through the transition, ignore cut roofs and weather, and retain a sliver exposed through a local cut", anchors.rows.length === 15 && anchors.rows.every(r => {
-    const expected = r.name !== "covered" && r.name !== "preserved roof";
-    return r.visible === expected && (!expected || r.error < 0.002) && (r.name !== "lowered cloud" || r.physicalY === 6 && r.worldY === 6);
+  record("shared camera rendering: speech anchors follow the rendered head through projection changes, respect solid roofs and ignore render-only foliage", anchors.rows.length === 7 && anchors.rows.every(r => {
+    const expected = r.name !== "covered";
+    return r.visible === expected && (!expected || r.error < 0.002);
   }), JSON.stringify(anchors.rows));
   record("speech anchors: the ₿IFRÖST arch's offset stone hides a speaker behind its lintel and towers, and one seen through the opening stays visible", anchors.archRows.length === 4 && anchors.archRows.every(r => r.visible === r.shown), JSON.stringify(anchors.archRows));
 } };
 
-const hubCombatReplay = { name: "birds-eye combat replay", why: "contract: replay links preserve north-up intent and legacy combat orbit poses still migrate", run: async (b) => {
-  const northState = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, key = (type, value) => window.dispatchEvent(new KeyboardEvent(type, { key: value }));
-    if (!P.birdsEye) { P.hooks.onZoom(1.2); B.advance(1.5, 1 / 60); }
-    const angle = () => Math.atan2(-B.camera.up.x, -B.camera.up.z), wrap = n => Math.atan2(Math.sin(n), Math.cos(n));
-    key("keydown", "q"); B.advance(0.4, 1 / 60); key("keyup", "q"); B.advance(0.6, 1 / 60);
-    const before = angle(), pose = JSON.parse(document.getElementById("position-debug").dataset.pose);
-    P.restorePose(JSON.parse(JSON.stringify(pose)), true);
-    key("keydown", "w"); B.advance(1 / 60, 1 / 60); key("keyup", "w"); B.advance(0.5, 1 / 60);
-    const drift = Math.abs(wrap(angle() - before)), stillUnlocked = !P.birdsEyeNorthUp;
-    key("keydown", "n"); key("keyup", "n"); B.advance(0.8, 1 / 60);
-    const locked = JSON.parse(document.getElementById("position-debug").dataset.pose), north = angle();
-    P.modeAction("mode-toggle"); B.advance(0.8, 1 / 60); P.hooks.onOrbit(120, 0); B.advance(0.8, 1 / 60);
-    const orbit = P.orbit.yaw; P.modeAction("mode-toggle"); B.advance(0.8, 1 / 60);
-    return { storedUnlocked: pose.birdsEyeNorthUp, stillUnlocked, drift, locked: locked.birdsEyeNorthUp, north,
-      reentry: { orbit, angle: angle(), northUp: P.birdsEyeNorthUp, mode: P.mode, error: Math.abs(wrap(angle() - orbit)) } };
-  })()`);
-  record("birds-eye combat: debug replay records explicit north-up intent, while a fresh orbit-to-birds-eye transition clears the old lock and preserves the orbit heading", northState.storedUnlocked === false && northState.stillUnlocked && northState.locked && northState.drift < 0.001 && Math.abs(northState.north) < 0.001
-    && northState.reentry.mode === "birds-eye" && !northState.reentry.northUp && Math.abs(northState.reentry.orbit) > 0.1 && northState.reentry.error < 0.01, JSON.stringify(northState));
-  const legacy = await b.evaluate(`(() => { const pose = JSON.parse(document.getElementById("position-debug").dataset.pose); __ooga.pilot.capturePose(pose); pose.mode = "orbit"; pose.battle = pose.combat; delete pose.combat; delete pose.birdsEyeNorthUp; return pose; })()`);
-  await b.open(hubPage(src, `solo=1&character=portlandhodl&birdseye=1&pose=${encodeURIComponent(JSON.stringify(legacy))}`));
-  await untilReady(b);
-  const replay = await b.evaluate(`(() => { const B = __ooga, pose = JSON.parse(document.getElementById("position-debug").dataset.pose), el = B.hud.el.mode; return { mode: B.pilot.mode, combat: B.pilot.aiming, northUp: pose.birdsEyeNorthUp, poseMode: pose.mode, poseCombat: pose.combat, legacyField: Object.hasOwn(pose, "battle"), attribute: el.dataset.combat, legacyAttribute: el.hasAttribute("data-battle"), label: el.getAttribute("aria-label") }; })()`);
-  record("birds-eye combat: old pose links migrate once, and new pose and HUD state use only combat terminology", replay.mode === "birds-eye" && replay.combat && replay.northUp === false && replay.poseMode === "birds-eye" && replay.poseCombat && !replay.legacyField && replay.attribute === "true" && !replay.legacyAttribute && replay.label.includes("combat") && !replay.label.includes("battle"), JSON.stringify(replay));
-  // User-supplied basement replay: the old cursor-entry path saved a zero sideways offset.
+const hubShoulderReplay = { name: "shoulder replay", why: "contract: supported shoulder replay links preserve camera, actor and equipment state", run: async (b) => {
+  // User-supplied basement replay: repair the zero sideways offset, allowing the current
+  // modelled body's boom to shorten against rock while keeping its eye clear and beside the head.
   const collapsed = {
     version: 1, character: "w-s-bitcoin", mode: "shoulder", closeWanted: false, combat: true, birdsEyeNorthUp: true,
     position: [4.196401756845946, -10.703027121441215, 6.695479695588937], target: [0.32891306379743845, -11.382788314313563, 5.933603782632617],
@@ -18424,9 +17723,11 @@ const hubCombatReplay = { name: "birds-eye combat replay", why: "contract: repla
     B.advance(0.5, 1 / 60);
     const held = P.poseHeld && view === JSON.stringify([C.position, C.target, C.up, C.fov]);
     P.restorePose(JSON.parse(JSON.stringify(pose)), true); B.advance(0.2, 1 / 60);
-    return { pose, side, headOffset: B.renderer.size.width / 2 - head.x, held, roundTrip: view === JSON.stringify([C.position, C.target, C.up, C.fov]) };
+    const clear = B.island.clearAt(C.position.x, C.position.y - 0.3, C.position.z, 0.3, 0.6)
+      && B.headquarters.solids.props.clearAt(C.position.x, C.position.y - 0.3, C.position.z, 0.3, 0.6);
+    return { pose, side, clear, headOffset: B.renderer.size.width / 2 - head.x, held, roundTrip: view === JSON.stringify([C.position, C.target, C.up, C.fov]) };
   })()`);
-  record("shoulder replay: the supplied zero-offset URL loads beside the head before any input and holds the repaired camera", repaired.pose.mode === "shoulder" && repaired.pose.combat && repaired.pose.shoulderSide === 0.9 && Math.abs(repaired.side - 0.9) < 1e-5 && repaired.headOffset > 0 && repaired.held
+  record("shoulder replay: the supplied zero-offset URL loads beside the head before any input and holds the repaired camera", repaired.pose.mode === "shoulder" && repaired.pose.combat && repaired.pose.shoulderSide === 0.9 && repaired.side > 0 && repaired.side <= repaired.pose.shoulderSide + 1e-5 && repaired.clear && repaired.headOffset > 0 && repaired.held
     && repaired.pose.actor.every((n, i) => Math.abs(n - collapsed.actor[i]) < 1e-6) && repaired.pose.selectedSlot === 2 && repaired.pose.ammo === 30 && repaired.roundTrip, JSON.stringify(repaired));
   // The same replay as saved before the shoulder moved out: settled at the earlier ±0.6 side, which is valid, not collapsed.
   const height = await b.evaluate("__ooga.pilot.player.traits.height"), yaw = collapsed.orbit[0], kept = [];
@@ -18449,166 +17750,6 @@ const hubCombatReplay = { name: "birds-eye combat replay", why: "contract: repla
     && kept.every((k, i) => k.exact && k.held && Math.abs(k.side - (i ? -0.6 : 0.6)) < 1e-9), JSON.stringify(kept));
 } };
 
-const hubBirdsEyeTargets = { name: "birds-eye lower-floor targets", why: "rule: hidden upstairs targets cannot steal downstairs aim, and the orange melee dot and secondary shots identify the object that actually receives damage", run: async (b) => {
-  const result = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, S = BL.scene, root = BL.scenes.hub.root, a = P.player, H = B.island.headquarters;
-    const lowerGeometry = BL.models.box({ w: 0.8, h: 1, d: 0.8, color: "#527545" });
-    const upperGeometry = BL.models.box({ w: 3, h: 1, d: 3, color: "#aa5555" });
-    // Two real weapon-query targets share a footprint on separate floors.
-    const make = (geometry, y) => {
-      const target = (${hubWeaponTarget.toString()})(geometry, { x: 6, y: y + 0.5, z: 0 });
-      return target.owner;
-    };
-    const lower = make(lowerGeometry, H.basement.floor), upper = make(upperGeometry, H.floor);
-    const pointAtLower = () => {
-      S.updateWorld(root); B.renderer.render(root, B.camera, B.renderOpts);
-      const p = B.renderer.project(lower.node.position.x, lower.node.position.y, lower.node.position.z, {});
-      P.hooks.onOrbit(0, p.y - parseFloat(document.getElementById("weapon-reticle").style.top));
-    };
-    const aim = () => {
-      pointAtLower(); B.advance(0.4, 1 / 60);
-      const target = P.assistedTarget, reticle = document.getElementById("weapon-reticle"), dot = getComputedStyle(reticle.querySelector("span"));
-      return { target: target?.owner === lower ? "lower" : target?.owner === upper ? "upper" : "other", feedback: reticle.dataset.target,
-        dot: dot.backgroundColor, visibility: dot.visibility, x: target?.x, y: target?.y, z: target?.z, ceiling: P.birdsEyeCeiling,
-        distance: P.assistedTargetDistance, reach: B.crew.meleeReach(a) };
-    };
-    // This fixture exercises both owned weapons, with rounds for both firing checks.
-    B.crew.configureWeapon(a, 2, 12);
-    if (!P.birdsEye) { P.hooks.onZoom(100); B.advance(1, 1 / 60); }
-    // The target is south of the actor. Turn through the real birds-eye input;
-    // navigate's orbit yaw does not replace an already active overhead yaw.
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "n" })); window.dispatchEvent(new KeyboardEvent("keyup", { key: "n" })); B.advance(1.5, 1 / 60);
-    const reticle = document.getElementById("weapon-reticle"), halfHeight = B.renderer.size.height / 2;
-    P.hooks.onOrbit(0, halfHeight - parseFloat(reticle.style.top));
-    const reach = Math.max(parseFloat(reticle.style.getPropertyValue("--reticle-radius")), halfHeight * 0.2);
-    for (let i = 0; i < 3; i++) P.hooks.onOrbit(-reach * Math.tan(Math.PI / 3), 0);
-    B.advance(1.5, 1 / 60);
-    try {
-      P.navigate({ position: { x: 6, y: H.basement.floor, z: -Math.max(6, B.crew.meleeReach(a) + 2) }, yaw: Math.PI, pitch: 0.3, dist: 8 }); B.advance(0.7, 1 / 60);
-      P.weaponAction("weapon-primary"); B.advance(0.5, 1 / 60); const far = aim(), farBefore = lower.cave.health.value;
-      P.weaponAction("weapon-fire"); B.advance(0.65, 1 / 60); const farAfter = lower.cave.health.value;
-      P.navigate({ position: { x: 6, y: H.basement.floor, z: -0.95 }, yaw: Math.PI, pitch: 0.3, dist: 8 }); B.advance(0.7, 1 / 60);
-      const near = aim(), beforeMelee = lower.cave.health.value;
-      P.weaponAction("weapon-fire"); B.advance(0.65, 1 / 60); const afterMelee = lower.cave.health.value;
-      const jump = { peak: 0, peakTarget: false, orangeFrames: 0 }; B.crew.jumpPlayer();
-      for (let i = 0; i < 60; i++) {
-        B.advance(1 / 60, 1 / 60);
-        if (a.hop > jump.peak) { jump.peak = a.hop; jump.peakTarget = P.assistedTarget?.owner === lower; }
-        if (a.hop > 0.1 && document.getElementById("weapon-reticle").dataset.target === "object") jump.orangeFrames++;
-      }
-      P.weaponAction("weapon-secondary"); B.advance(0.4, 1 / 60); const firearm = aim(), shotsBefore = a.weapon.shotsFired;
-      P.weaponAction("weapon-secondary"); B.advance(0.7, 1 / 60);
-      const afterShot = lower.cave.health.value, shots = a.weapon.shotsFired - shotsBefore, mode = P.mode;
-      P.navigate({ position: { x: 6, y: H.basement.floor, z: -2 }, yaw: Math.PI, pitch: 0.3, dist: 8 }); B.advance(0.5, 1 / 60);
-      P.hooks.onZoom(100); B.advance(1, 1 / 60); aim(); const fromHeight = P.birdsEyeHeight;
-      P.hooks.onZoom(0.001);
-      // A stationary pointer retains the exact object hit as zoom carries its
-      // projection beyond the screen. Exercise moving edge input separately
-      // below: asking for an off-screen pixel deliberately changes that aim.
-      let frames = 0; for (; frames < 120 && P.mode === "birds-eye"; frames++) B.advance(1 / 60, 1 / 60);
-      B.advance(0.06, 1 / 60);
-      const anchor = P.assistedTarget ? { x: P.assistedTarget.x, y: P.assistedTarget.y, z: P.assistedTarget.z } : null;
-      const reticle = document.getElementById("weapon-reticle"), handoff = { mode: P.mode, mix: P.birdsEyeMix, frames, fromHeight, anchor,
-        offset: Math.hypot(parseFloat(reticle.style.left) - B.renderer.size.width / 2, parseFloat(reticle.style.top) - B.renderer.size.height / 2),
-        before: lower.cave.health.value, shotsBefore: a.weapon.shotsFired };
-      P.weaponAction("weapon-fire"); B.advance(0.3, 1 / 60);
-      handoff.after = lower.cave.health.value; handoff.shots = a.weapon.shotsFired - handoff.shotsBefore;
-      B.advance(1, 1 / 60);
-      const held = P.assistedTarget, screen = anchor && B.renderer.project(anchor.x, anchor.y, anchor.z, {});
-      handoff.targetError = anchor && held ? Math.hypot(anchor.x - held.x, anchor.y - held.y, anchor.z - held.z) : Infinity;
-      handoff.centerError = screen ? Math.hypot(screen.x - B.renderer.size.width / 2, screen.y - B.renderer.size.height / 2) : Infinity;
-      const closeAim = [];
-      for (const fresh of [false, true]) {
-        if (fresh) { P.hooks.onOrbit(0.1, 0); B.advance(0.5, 1 / 60); }
-        const C = B.camera, dx = C.target.x - C.position.x, dy = C.target.y - C.position.y, dz = C.target.z - C.position.z;
-        const length = Math.hypot(dx, dy, dz), hit = {};
-        const found = B.input.weaponTargets.ray(hit, C.position.x, C.position.y, C.position.z, dx / length, dy / length, dz / length, 60, a);
-        const point = fresh ? hit : anchor;
-        P.hooks.onZoom(0.8, {});
-        let error = 0;
-        for (let frame = 0; frame < 90; frame++) {
-          B.advance(1 / 60, 1 / 60);
-          const q = point && B.project(point.x, point.y, point.z, {});
-          error = Math.max(error, q ? Math.hypot(q.x - B.renderer.size.width / 2, q.y - B.renderer.size.height / 2) : Infinity);
-        }
-        const mode = P.mode;
-        if (fresh) { P.hooks.onOrbit(0.015, 0); B.advance(1, 1 / 60); }
-        const eye = B.camera, vx = eye.target.x - eye.position.x, vy = eye.target.y - eye.position.y, vz = eye.target.z - eye.position.z;
-        const rayLength = Math.hypot(vx, vy, vz), exitHit = {};
-        const exitFound = B.input.weaponTargets.ray(exitHit, eye.position.x, eye.position.y, eye.position.z, vx / rayLength, vy / rayLength, vz / rayLength, 60, a);
-        const exitPoint = exitFound ? { x: exitHit.x, y: exitHit.y, z: exitHit.z } : null;
-        P.hooks.onZoom(1.2, {});
-        let exitError = 0;
-        for (let frame = 0; frame < 90; frame++) {
-          B.advance(1 / 60, 1 / 60);
-          const q = exitPoint && B.project(exitPoint.x, exitPoint.y, exitPoint.z, {});
-          exitError = Math.max(exitError, q ? Math.hypot(q.x - B.renderer.size.width / 2, q.y - B.renderer.size.height / 2) : Infinity);
-        }
-        closeAim.push({ fresh, found, mode, error, exitFound, exitMode: P.mode, exitError });
-      }
-      P.hooks.onZoom(1.2, {}); B.advance(1, 1 / 60);
-      P.navigate({ position: { x: 6, y: H.basement.floor, z: -2 }, yaw: Math.PI, pitch: 0.3, dist: 8 }); B.advance(0.5, 1 / 60);
-      // The close-view probe deliberately turned the aim. Restore the same
-      // exact overhead bearing before replaying the original vertical input.
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "n" })); window.dispatchEvent(new KeyboardEvent("keyup", { key: "n" })); B.advance(1.5, 1 / 60);
-      P.hooks.onOrbit(0, halfHeight - parseFloat(reticle.style.top));
-      for (let i = 0; i < 3; i++) P.hooks.onOrbit(-reach * Math.tan(Math.PI / 3), 0);
-      B.advance(1.5, 1 / 60);
-      P.hooks.onZoom(100, {}); B.advance(1, 1 / 60); aim(); P.hooks.onZoom(0.001, {});
-      const edge = { frames: 0, offscreen: 0, clamped: true };
-      for (; edge.frames < 120 && P.mode === "birds-eye"; edge.frames++) {
-        // Retain the original per-frame input sequence, including requests
-        // above the viewport as the continuous zoom lowers the overhead eye.
-        pointAtLower();
-        const projected = B.renderer.project(lower.node.position.x, lower.node.position.y, lower.node.position.z, {});
-        if (projected.y < 0) edge.offscreen++;
-        B.advance(1 / 60, 1 / 60);
-        if (P.birdsEye) edge.clamped &&= parseFloat(reticle.style.top) >= 0;
-      }
-      B.advance(0.06, 1 / 60);
-      const edgeAnchor = P.assistedTarget && { x: P.assistedTarget.x, y: P.assistedTarget.y, z: P.assistedTarget.z };
-      edge.mode = P.mode; edge.height = edgeAnchor?.y;
-      // The reticle glides toward centre until the overhead blend ends.
-      // Check the selected point against that displayed reticle throughout,
-      // then require exact centering once the handoff is actually complete.
-      edge.reticleError = 0; edge.settleFrames = 0;
-      for (; edge.settleFrames < 90 && P.birdsEyeMix > 0; edge.settleFrames++) {
-        B.advance(1 / 60, 1 / 60);
-        if (!P.birdsEyeMix) break;
-        const q = edgeAnchor && B.project(edgeAnchor.x, edgeAnchor.y, edgeAnchor.z, {});
-        edge.reticleError = Math.max(edge.reticleError, q ? Math.hypot(q.x - parseFloat(reticle.style.left), q.y - parseFloat(reticle.style.top)) : Infinity);
-      }
-      edge.settled = P.birdsEyeMix === 0;
-      const edgeHeld = P.assistedTarget, edgeScreen = edgeAnchor && B.project(edgeAnchor.x, edgeAnchor.y, edgeAnchor.z, {});
-      edge.targetError = edgeAnchor && edgeHeld ? Math.hypot(edgeAnchor.x - edgeHeld.x, edgeAnchor.y - edgeHeld.y, edgeAnchor.z - edgeHeld.z) : Infinity;
-      edge.centerError = edgeScreen ? Math.hypot(edgeScreen.x - B.renderer.size.width / 2, edgeScreen.y - B.renderer.size.height / 2) : Infinity;
-      return { far, farBefore, farAfter, near, firearm, jump, handoff, closeAim, edge, floor: H.basement.floor, beforeMelee, afterMelee, afterShot,
-        upperHealth: upper.cave.health.value, shots, mode };
-    } finally {
-      B.crew.stopBurst(a); B.crew.selectWeapon(1, a);
-      for (const owner of [lower, upper]) { B.input.remove(owner.node); S.removeChild(root, owner.node); B.renderer.releaseGeometry(owner.node.geometry); }
-      B.advance(0.2, 1 / 60);
-    }
-  })()`);
-  record("birds-eye combat: basement aim ignores upstairs geometry, identifies distant and reachable objects, then melee and secondary fire damage that same target", result.mode === "birds-eye" && result.far.target === "lower" && result.far.feedback === "object" && result.far.visibility === "visible" && result.far.distance > result.far.reach && result.farAfter === result.farBefore && result.near.target === "lower" && result.near.feedback === "object" && result.near.dot === "rgb(255, 157, 66)" && result.near.visibility === "visible" && Math.abs(result.near.y - result.floor - 0.5) < 1e-5 && result.afterMelee < result.beforeMelee && result.firearm.target === "lower" && result.shots > 0 && result.afterShot < result.afterMelee && result.upperHealth === 100, JSON.stringify(result));
-  record("birds-eye combat: a jump retains same-floor targeting through its apex and orange feedback while melee remains within reach", result.jump.peak > 0.9 && result.jump.peakTarget && result.jump.orangeFrames > 2, JSON.stringify(result.jump));
-  record("birds-eye combat: a full-height zoom reaches shoulder promptly, retains the exact elevated world anchor through the swoop, and fires into the same target", result.handoff.mode === "shoulder" && result.handoff.mix > 0 && result.handoff.mix < 1 && result.handoff.offset > 20
-    && result.handoff.fromHeight > 60 && result.handoff.frames > 0 && result.handoff.frames < 45 && result.handoff.anchor && result.handoff.anchor.y > result.floor + 0.05
-    && result.handoff.targetError < 1e-6 && result.handoff.centerError < 0.1 && result.handoff.shots > 0 && result.handoff.after < result.handoff.before, JSON.stringify(result.handoff));
-  record("combat zoom: object points stay under the crosshair in both shoulder/first-person directions, including after new first-person aim",
-    result.closeAim.length === 2 && result.closeAim.every(row => row.found && row.mode === "first-person" && row.error < 0.1 && row.exitFound && row.exitMode === "shoulder" && row.exitError < 0.1), JSON.stringify(result.closeAim));
-  record("combat zoom: continued pointer input above the viewport clamps to its edge and retains the resulting same-floor point through shoulder entry", result.edge.offscreen > 0 && result.edge.clamped
-    && result.edge.mode === "shoulder" && result.edge.frames > 0 && result.edge.frames < 45 && Math.abs(result.edge.height - result.floor) < 0.05
-    && result.edge.settled && result.edge.reticleError < 0.1 && result.edge.targetError < 1e-6 && result.edge.centerError < 0.1, JSON.stringify(result.edge));
-} };
-
-// ---- Phones ----
-// Each scene again at 390x844 with touch, as a phone player meets it. PHONE lists what a player would feel:
-// ellipsis or clipped text, a button or heading wrapped by accident, text past the screen edge, and a
-// required control missing, off screen or covered where a thumb lands. Planted defects (ellipsis, clipping,
-// a card too wide, a buried button, desktop wording on a touch line, a wrapped label, a stick off screen)
-// were each caught before this went in; its first run found Throw under Drift in the rally, the mine's
-// strip over Pause and Sound, and the Mempool cave's sheet covering both sticks.
 const PHONE = (required) => `((required) => {
   const W = innerWidth, H = innerHeight, bad = [];
   const name = (el) => el.id ? '#' + el.id : el.tagName.toLowerCase() + '.' + [...el.classList].join('.');
@@ -20099,6 +19240,17 @@ const arcadeHuntGear = { name: "arcade hunt gear", why: "rule: no gun in the are
     hunting.armed && hunting.owned && hunting.equipped && hunting.gun && hunting.gear && !hunting.bananas && !hunting.primary && !hunting.club && !hunting.primaryHud && !hunting.magazineHud
       && hunting.skin === "ghost" && hunting.shown && hunting.width === 78 && hunting.readout === "none" && hunting.infinity === "∞" && hunting.infinityShown, JSON.stringify(hunting));
   record("arcade hunt gear: the hunt's start puts a hunter in combat with the full crosshair", hunting.combat && hunting.crosshair && !hunting.dot, JSON.stringify(hunting));
+  const overhead = await b.evaluate(`(() => {
+    const B=__ooga,P=B.pilot,a=P.player,at={...a.root.position};
+    if(P.mode==="first-person"){P.hooks.onZoom(2,{});B.advance(1,1/60);}
+    P.hooks.onZoom(2,{});B.advance(1,1/60);
+    const active=P.mode==="birds-eye"&&P.aiming&&B.camera.orthoMix===1;
+    const heading=Math.atan2(B.camera.up.x,B.camera.up.z);P.hooks.onOrbit(35,0);B.advance(.3,1/60);
+    const turns=Math.abs(Math.atan2(B.camera.up.x,B.camera.up.z)-heading)>.01,projection=B.camera.orthoMix;
+    const stayed=Math.hypot(a.root.position.x-at.x,a.root.position.z-at.z)<.01;
+    return {active,turns,projection,stayed};
+  })()`);
+  record("ghost hunt camera: the running game offers controllable overhead combat without moving the Ooga",overhead.active&&overhead.turns&&overhead.projection===1&&overhead.stayed,JSON.stringify(overhead));
   const remote = await b.evaluate(`(() => {
     const B = __ooga, N = BL.net, H = BL.arcadeModels.HAUNT, A = H.arena, sim = BL.scenes.arcade.debug.halloween.sim, build = BL.models.caveman, caves = [];
     const peer = (id, x) => ({ id, login: "peer" + id, display: "Peer", body: "w-s-bitcoin", zone: "ghost-arena", x: A.x + x, y: H.y, z: A.z + 4, yaw: 0, weapon: 2 | 4, jet: 0 });
@@ -20120,6 +19272,8 @@ const arcadeHuntGear = { name: "arcade hunt gear", why: "rule: no gun in the are
   record("arcade hunt gear: on another player only a hunter shows the gun and pack, never a spectator", remote.hunter.gear && remote.hunter.gun && !remote.hunter.club && !remote.spectator.gear && !remote.spectator.gun && !remote.spectator.club, JSON.stringify(remote));
   await b.evaluate(`(() => { document.getElementById("ghost-exit").click(); __ooga.advance(0.5, 1 / 60); })()`);
   const left = await b.evaluate(read);
+  const normal = await b.evaluate(`(__ooga.advance(1,1/60),{view:__ooga.pilot.mode,projection:__ooga.camera.orthoMix||0})`);
+  record("ghost hunt camera: leaving the game removes overhead from the ordinary Arcade view",normal.view!=="birds-eye"&&normal.projection===0,JSON.stringify(normal));
   record("arcade hunt gear: leaving the hunt takes the gun, pack and its skin away", !left.armed && !left.owned && !left.equipped && !left.gun && !left.gear && !left.skin, JSON.stringify(left));
 } };
 // HALLOWEEN: a real click on the ghost opens the hunt's lobby from either view.
@@ -21118,8 +20272,7 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
         eachCloudDips: ring.every(c => c.minY < (radius === 36 ? -3.9 : 2.1)),
         eachCloudRises: ring.every(c => c.maxY > (radius === 36 ? 1.9 : 10.9)) };
     });
-    // The render-only cutaway offset used to lower every high cloud toward the walker,
-    // collapsing separate lanes into buildings even though the node transforms stayed clear.
+    // Ordinary hub combat must leave the cloud lanes at their actual world heights.
     const P = B.pilot, actor = B.cavemen.get("portlandhodl");
     try {
       P.possess(actor); if (B.crew.sleeping) B.crew.wakePlayer();
@@ -21140,7 +20293,7 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
       && ring.minHeight >= (ring.radius === 36 ? -4 : 2) && ring.maxHeight <= (ring.radius === 36 ? 2 : 11)
       && ring.maxVerticalSpeed <= (ring.radius === 36 ? 0.2 : 0.25))
     && clouds.maxTravelExcess < 1e-7 && clouds.minGap > 0 && clouds.spacingDrift < 1e-8
-    && clouds.cutaway?.selected && clouds.cutaway.view === "birds-eye" && clouds.cutaway.combat && clouds.cutaway.active && clouds.cutaway.mix === 0 && clouds.cutaway.heights
+    && clouds.cutaway?.selected && clouds.cutaway.view === "shoulder" && clouds.cutaway.combat && !clouds.cutaway.active && clouds.cutaway.mix === 0 && clouds.cutaway.heights
     && state.horizon.every(row => row.clouds.length === 18 && row.clouds.every(c => c.visible && c.moving)), JSON.stringify(clouds));
   const animation = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, H = BL.scenes.hub.debug, a = B.cavemen.get("portlandhodl"), e = B.clankers.list.find(entry => entry.owner === a);
@@ -21199,7 +20352,7 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
       && animation.far.gorilla > 0 && animation.far.gorilla < 12 && animation.nearOoga.ooga >= 58 && animation.nearGorilla.gorilla >= 58
       && animation.host.ooga >= 58 && animation.host.gorilla >= 58 && animation.network && animation.controlled >= 58, JSON.stringify(animation));
 } };
-scene("hub", { label: "distant effects", query: "pos=0&birdseye=1", steps: [hubDistantEffects] });
+scene("hub", { label: "distant effects", query: "pos=0", steps: [hubDistantEffects] });
 // No other session's cast holds the default local Ooga or a server-vouched contributor: both join the roster before
 // the crew is built, as on a real arrival.
 scene("hub", { label: "guest likeness", query: "pos=0", opts: { initScript: GUEST_LIKENESS_INIT }, steps: [hubGuestLikeness] });
@@ -21570,8 +20723,10 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
     await untilPage(b, 'B.scene === "hub" && !B.transitioning', 20000);
     resumed = await b.evaluate(`(() => {
       const S = __entryHold, map = document.getElementById("destination-hud"), pad = BL.gamepad.state, axes = S.pilot.controls.read();
-      map.click();
-      return { scene: __ooga.scene, live: !document.getElementById("equipment-hud").inert, actions: S.actions,
+      map.click(); document.querySelector('[data-destination="lab"]')?.click();
+      const previewQuiet = S.actions === 0 && document.getElementById("destination-map").open;
+      document.getElementById("destination-map-go").click();
+      return { scene: __ooga.scene, previewQuiet, live: !document.getElementById("equipment-hud").inert, actions: S.actions,
         padNoReplay: S.pad.buttons[0].pressed && pad.connected && !(pad.held || pad.pressed || pad.released),
         padQuiet: axes.x === 0 && axes.y === 0 && axes.up === 0 && axes.yaw === 0 && axes.pitch === 0 };
     })()`);
@@ -21579,7 +20734,7 @@ const hubEntryHold = { name: "hub entry hold", why: "regression: a released hub 
   record("hub entry hold: the real released visit refuses map/mode, canvas capture, Space/W, then restores its HUD when ready",
     held.scene === null && held.transitioning && held.inert && held.captures === 0 && held.actions === 0
       && held.passiveTouch && held.touchLeaks === 0 && held.touchCancelled.every(cancelled => !cancelled) && pressed.quiet && pressed.unchanged
-      && resumed.scene === "hub" && resumed.live && resumed.actions === 1
+      && resumed.scene === "hub" && resumed.previewQuiet && resumed.live && resumed.actions === 1
       && held.padConnected && held.padReads >= 3 && held.padNeutral && resumed.padNoReplay && resumed.padQuiet, JSON.stringify({ held, pressed, resumed }));
 } };
 scene("hub", { label: "release policy", query: "hubcache=release", steps: [hudVisit, hubEntryHold, hubSlicedReturn, trip("hub")] });
@@ -21647,8 +20802,8 @@ const hubBootHold = { name: "hub boot hold", why: "regression: sliced cold boot 
   await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
   await b.evaluate(`__bootHold.released=true`);
   const resumed = await untilPage(b, 'B.scene==="hub"', 20000);
-  const live = await b.evaluate(`(()=>{const map=document.getElementById("destination-hud");map.click();return {live:!document.getElementById("equipment-hud").inert,actions:__bootHold.actions};})()`);
-  record("hub boot hold: cold construction refuses HUD, wheel, canvas and Space/W input, then restores a live island", paused && held.scene === null && held.actions === 0 && held.inert && held.quiet && held.unchanged && resumed && live.live && live.actions === 1, JSON.stringify({ held, resumed, live, before }));
+  const live = await b.evaluate(`(()=>{const map=document.getElementById("destination-hud");map.click();document.querySelector('[data-destination="lab"]')?.click();const previewQuiet=__bootHold.actions===0&&document.getElementById("destination-map").open;document.getElementById("destination-map-go").click();return {previewQuiet,live:!document.getElementById("equipment-hud").inert,actions:__bootHold.actions};})()`);
+  record("hub boot hold: cold construction refuses HUD, wheel, canvas and Space/W input, then restores a live island", paused && held.scene === null && held.actions === 0 && held.inert && held.quiet && held.unchanged && resumed && live.previewQuiet && live.live && live.actions === 1, JSON.stringify({ held, resumed, live, before }));
 } };
 const hubBootFailure = { name: "hub boot failure", why: "regression: a sliced cold-boot exception left a spinning curtain and live partial controls without recovery", run: async (b) => {
   await bootFixture(b, `
@@ -23795,7 +22950,7 @@ scene("hub", { label: "gorilla lab carry jump", exclusive: true, query: "charact
       && state.smashUnchanged,
     JSON.stringify(state));
 } }].map(gameCombat) });
-scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&birdseye=1", steps: [{ name: "gorilla prop traversal", why: "regression: a box lost its supporting contact before the collision body cleared its side, low props interrupted the gallop, and a stale motion envelope trapped gorillas beneath trees", run: async (b) => {
+scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1", steps: [{ name: "gorilla prop traversal", why: "regression: a box lost its supporting contact before the collision body cleared its side, low props interrupted the gallop, and a stale motion envelope trapped gorillas beneath trees", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, S = BL.scene, root = BL.scenes.hub.root, C = B.clankers, npc = C.list.find(e => e.owner.traits.name === "portlandhodl"), solids = B.headquarters.solids.props;
     // \`e\` is the gorilla in hand: the driven body while one is taken (clankers.js separateBodies builds it where the NPC
@@ -24206,12 +23361,9 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
       tap("x"); sample("combat first-person");
       wheel(120); sample("combat shoulder again");
       // A fresh wheel gesture may cross the next stop; one gesture cannot skip both close views.
-      P.zoom(2, "overhead"); const overhead = sample("combat birds-eye");
-      key("keydown", "q"); B.advance(0.3, 1 / 60); key("keyup", "q");
-      const turned = sample("rotated birds-eye");
-      tap("n"); const north = sample("north birds-eye");
+      P.zoom(2, "outer-limit"); sample("combat stays at shoulder");
       tap("x"); sample("carry orbit");
-      tap("x"); sample("combat birds-eye again");
+      tap("x"); sample("combat shoulder again");
       const gestures = [], accountBefore = BL.net.state.me, backendBefore = BL.net.state.backend;
       BL.scenes.hub.debug.setGameMode(true); C.setAway(false);
       // These camera targets include open sky; an arena wall rising between the two account cases
@@ -24252,26 +23404,11 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
           P.zoom(2, {}); P.update(2);
           P.orbit(0, (1.1 - B.pilot.orbit.tPitch) / 0.0035); P.update(2);
           tap("x"); P.update(2);
-          const aimed = [];
-          for (let side = 0; side < 2; side++) {
-            const p = g().root.position;
-            const point = { x: p.x + Math.sin(g().heading) * 10, z: p.z + Math.cos(g().heading) * 10 };
-            // This field fixture has no props or water at the aim point. Use
-            // the real terrain floor and project the displayed camera ray.
-            point.y = B.island.supportAt(point.x, point.z, height, 0, -120);
-            if (point.y <= -120) point.y = p.y;
-            rightClick(); P.update(2);
-            const a = B.camera.position, b = B.camera.target, t = (point.y - a.y) / (b.y - a.y);
-            const error = Math.hypot(a.x + (b.x - a.x) * t - point.x, a.z + (b.z - a.z) * t - point.z);
-            aimed.push({ view: P.view, combat: P.combat, focused: P.focused, error });
-            rightClick(); rightClick(); P.update(2);
-            if (!side) { tap("Shift", "ShiftRight", 2); P.readInput(1 / 60); }
-          }
           const chordSerial = g().smashSerial;
           pointer("pointerdown", 1, 4); pointer("pointermove", 2, 6);
           const rightChord = P.view === "shoulder" && P.combat && P.focused && g().smashSerial === chordSerial && !g().motion.poundCharge;
           pointer("pointermove", 2, 4); pointer("pointerup", 1, 0);
-          P.update(2); fromFirst(true);
+          P.update(2); fromFirst(true); P.zoom(2, {}); P.update(2);
           const recapture = [], interrupted = [], requestLock = Object.getOwnPropertyDescriptor(canvas, "requestPointerLock");
           let denied = 0;
           Object.defineProperty(canvas, "requestPointerLock", { configurable: true, value: () => { denied++; throw new DOMException("Fixture denial", "NotAllowedError"); } });
@@ -24319,7 +23456,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
           const chord = { charged: charged > 0, rightReleaseHeld, leftReleased: g().motion.poundCharge === 0 && g().smashSerial === serial + 1 };
           pointer("pointerup", 2, 0); B.advance(1.2, 1 / 60);
           rightClick(); rightClick(); P.update(2);
-          const returned = P.view === "birds-eye" && P.combat, stops = [];
+          const returned = P.view === "shoulder" && P.combat, stops = [];
           const read = () => ({ view: P.view, combat: P.combat, distance: B.pilot.orbit.tDist });
           for (const combat of [false, true]) {
             if (P.combat !== combat) tap("x");
@@ -24345,8 +23482,11 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
             }
             let trackingError = 0;
             if (combat) {
+              // Shoulder follows smoothly; overhead used to track this displacement immediately.
+              P.update(2);
               const x = B.pilot.orbit.tx, z = B.pilot.orbit.tz;
-              g().root.position.x += 0.1; g().root.position.z += 0.05; P.update(1 / 60);
+              g().root.position.x += 0.1; g().root.position.z += 0.05;
+              for (let frame = 0; frame < 60; frame++) P.update(1 / 60);
               trackingError = Math.hypot(B.pilot.orbit.tx - x - 0.1, B.pilot.orbit.tz - z - 0.05);
             }
             const freshOutward = read(), pinch = {};
@@ -24355,13 +23495,14 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
             stops.push({ combat, inward, freshInward, outward, freshOutward, heldPinch, immediate, firstStep, targetStep, maxStep, trackingError, finite });
             P.zoom(2, {}); P.update(2);
           }
-          gestures.push({ signedIn, carry, rightCarry, nativeTab, doubleCarry, firstReturns, aimed, rightChord, recapture, interrupted, tabs, chord, returned, stops });
+          gestures.push({ signedIn, carry, rightCarry, nativeTab, doubleCarry, firstReturns, rightChord, recapture, interrupted, tabs, chord, returned, stops });
         }
       } finally {
         BL.net.state.me = accountBefore; BL.net.state.backend = backendBefore;
         BL.scenes.hub.debug.setGameMode(false);
       }
       const mapRows = [], mapCrowds = [], map = document.getElementById("destination-hud"), label = document.getElementById("detached-destination-name");
+      const choose = name => { if (!document.getElementById("destination-map").open) map.click(); document.querySelector('[data-destination="' + name + '"]')?.click(); document.getElementById("destination-map-go").click(); };
       // Camera-only updates above do not finish the preceding charged smash.
       // Travel is tested from an idle body, after the world advances its recovery.
       P.cancelInput(); B.advance(2, 1 / 60);
@@ -24376,7 +23517,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
         const character = BL.characters.get(e.owner.traits.name);
         BL.net.state.backend = true;
         // Carry has no shoulder: its views are first person and the orbit.
-        for (const signedIn of [false, true]) for (const combat of [false, true]) for (const view of combat ? ["shoulder", "first-person", "birds-eye"] : ["first-person", "orbit"]) {
+        for (const signedIn of [false, true]) for (const combat of [false, true]) for (const view of combat ? ["shoulder", "first-person"] : ["first-person", "orbit"]) {
           BL.net.state.me = signedIn ? { id: 71, login: character.github || character.handle, display: "Map fixture" } : null;
           if (P.combat !== combat) P.action("mode-toggle");
           if (!combat) { if (P.view !== view) P.zoom(view === "first-person" ? 0.001 : 2, {}); P.update(2); }
@@ -24386,7 +23527,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
             if (view !== "shoulder") { P.zoom(view === "first-person" ? 0.5 : 2, {}); P.update(2); }
           }
           B.hud.setDetachedView(mapRows.length % 2 ? "pile" : "lab");
-          const before = mapState(); map.click();
+          const before = mapState(); choose(mapRows.length % 2 ? "lab" : "mirror");
           const after = mapState(), delta = after.actor.map((n, i) => n - before.actor[i]);
           const arrived = label.textContent === (mapRows.length % 2 ? "Lab" : "Mirror") && after.controlled && after.view === view && after.combat === combat
             && Math.hypot(...delta) > 1 && error(after.eye.map((n, i) => n - before.eye[i]), delta) < 1e-5
@@ -24401,7 +23542,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
             delta, resetKept, resetChanged: error(keyboard.eye.concat(keyboard.target), keyboardBefore.eye.concat(keyboardBefore.target)) > 1e-5 });
         }
         // Start away from the Lab so a successful arrival has visible travel.
-        B.hud.setDetachedView("lab"); map.click();
+        B.hud.setDetachedView("lab"); choose("mirror");
         // Fill the arrivals the real Map chooses, without copying its search
         // geometry. Real crew bodies eventually occupy every available spot.
         for (const signedIn of [false, true]) {
@@ -24409,13 +23550,13 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
           const origin = { ...g().root.position };
           let blockers = 0, refused = false, unchanged = false, restored = true;
           for (const [cave] of mapTraffic) {
-            B.hud.setDetachedView("pile"); const before = mapState(); map.click();
+            B.hud.setDetachedView("pile"); const before = mapState(); choose("lab");
             const after = mapState(), moved = error(after.actor, before.actor) > 1;
             if (!moved) {
               refused = document.getElementById("toast").textContent === "That arrival is blocked. Choose another destination.";
               unchanged = after.controlled && after.view === before.view && after.combat === before.combat
                 && error(after.actor.concat(after.eye, after.target), before.actor.concat(before.eye, before.target)) < 1e-6
-                && label.textContent === "Lab";
+                && document.getElementById("destination-map").open;
               break;
             }
             Object.assign(cave.root.position, { x: g().root.position.x, y: g().root.position.y + cave.baseY, z: g().root.position.z });
@@ -24423,9 +23564,9 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
             restored = P.travel(origin) && restored;
           }
           for (const [cave, , position] of mapTraffic) { cave.root.visible = false; Object.assign(cave.root.position, position); }
-          B.hud.setDetachedView("pile"); const before = mapState(); map.click(); const after = mapState();
+          B.hud.setDetachedView("pile"); const before = mapState(); choose("lab"); const after = mapState();
           const reopened = after.controlled && after.view === before.view && after.combat === before.combat
-            && error(after.actor, before.actor) > 1 && label.textContent === "Lab";
+            && error(after.actor, before.actor) > 1 && label.textContent === "Lab" && !document.getElementById("destination-map").open;
           mapCrowds.push({ signedIn, blockers, refused, unchanged, restored, reopened });
           P.travel(origin);
         }
@@ -24433,11 +23574,10 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
         for (const [cave, visible, position] of mapTraffic) { cave.root.visible = visible; Object.assign(cave.root.position, position); }
         BL.net.state.me = accountBefore; BL.net.state.backend = backendBefore;
       }
-      // Restore the prior fixture's combat overhead state for its Escape chain.
+      // Restore combat shoulder before testing first-person Escape.
+      if (!P.combat) P.action("mode-toggle");
       if (P.view === "first-person") P.zoom(2, {});
-      if (P.view === "shoulder") P.zoom(2, {});
-      P.update(2);
-      P.zoom(0.01, "inward"); sample("combat shoulder from overhead");
+      sample("combat shoulder before Escape");
       P.zoom(0.5, "first-person"); sample("first-person before release");
       const eye = { ...B.camera.position }, target = { ...B.camera.target };
       if (!P.focused) { P.action("mode-toggle"); P.action("mode-toggle"); }
@@ -24505,7 +23645,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
         B.pilot.update(1);
         let reversed = false;
         // Carry has no shoulder: its views are first person and the orbit.
-        for (const combat of [false, true]) for (const view of combat ? ["shoulder", "first-person", "birds-eye"] : ["first-person", "orbit"]) {
+        for (const combat of [false, true]) for (const view of combat ? ["shoulder", "first-person"] : ["first-person", "orbit"]) {
           const gesture = "pair-" + combat + "-" + view;
           if (B.pilot.aiming !== combat) B.pilot.modeAction("mode-toggle");
           if (!combat) { if (B.pilot.mode !== view) B.pilot.hooks.onZoom(view === "first-person" ? 0.001 : 2, gesture + "-view"); B.pilot.update(2); }
@@ -24600,7 +23740,11 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
           // and settle the rig, rather than manufacturing a sleep pose.
           e.owner.override = e.owner.state = "sleeping";
           e.active = e.root.visible = false; e.sleep.stage = "";
-          C.update(1 / 60);
+          // Waking can leave a one-second relocation retry. Let the real admission
+          // path finish before measuring possession of the next sleeping companion.
+          const admission = { retry: e.retry, stage: e.sleep.stage, slot: e.sleep.slot };
+          for (let frame = 0; frame < 120 && (!e.active || e.sleep.stage !== "asleep"); frame++) C.update(1 / 60);
+          admission.active = e.active; admission.settled = e.sleep.stage; admission.remaining = e.retry;
           const fixture = e.active && e.sleep.stage === "asleep" && e.sleep.slot >= 0 && e.lounge === e.sleep.pose;
           const bed = { ...e.root.position }, slot = e.sleep.slot, pose = e.sleep.pose;
           const eye = { x: bed.x + 17, y: bed.y + 20, z: bed.z + 9 };
@@ -24628,7 +23772,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
           // Its Ooga awake again, the NPC companion wakes on its own track and frees its bed.
           e.owner.override = e.owner.state = "chilling";
           for (let i = 0; i < 600 && (e.sleep.slot >= 0 || e.sleep.stage); i++) C.update(1 / 60);
-          sleepRows.push({ signedIn, fixture, selected, heldEye, separate, nativeTab, awakeCombat, releasedAsleep, combatKept, keptBed, freedBed: e.sleep.slot === -1 && !e.sleep.stage });
+          sleepRows.push({ signedIn, admission, fixture, selected, heldEye, separate, nativeTab, awakeCombat, releasedAsleep, combatKept, keptBed, freedBed: e.sleep.slot === -1 && !e.sleep.stage });
         }
       } finally {
         key("keyup", "w"); key("keyup", " ", "Space");
@@ -24636,42 +23780,42 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
         BL.net.state.me = sleepAccount; BL.net.state.backend = sleepBackend;
       }
       return { possessed, acquired, reset, rows, coverRows, gestures, mapRows, mapCrowds, pair, selection, transitions, retakes, sleepRows, escape: { uiStep, repeatHeld, cursorStep, kept, stayed }, swap: shoulder.side * swapped.side < 0,
-        turn: Math.abs(turned.yaw - overhead.yaw), north: Math.atan2(Math.sin(north.yaw), Math.cos(north.yaw)), originalHeadHidden, near, released };
+        originalHeadHidden, near, released };
     } finally { key("keyup", "q"); key("keyup", "Shift", "ShiftRight", 2); P.release(); }
   })()`);
-  const views = ["shoulder", "shoulder", "orbit", "first-person", "first-person", "shoulder", "birds-eye", "birds-eye", "birds-eye", "orbit", "birds-eye", "shoulder", "first-person"];
-  const modes = [true, true, false, false, true, true, true, true, true, false, true, true, true];
+  const views = ["shoulder", "shoulder", "orbit", "first-person", "first-person", "shoulder", "shoulder", "orbit", "shoulder", "shoulder", "first-person"];
+  const modes = [true, true, false, false, true, true, true, false, true, true, true];
   const cameras = state.rows.length === views.length && state.rows.every((row, i) => row.finite && row.view === views[i] && row.combat === modes[i]
     && row.hudView === row.view && row.hudCombat === String(row.combat) && row.hidden === !row.combat
     && (row.combat || !row.focused && !row.locked && !row.tabConsumed && row.nativeCursor)
     && (!row.combat || row.visible === "visible" && row.stroke === "rgb(255, 255, 255)")
-    && row.headHidden === (row.view === "first-person") && row.mix === (row.view === "birds-eye" ? 1 : 0)
-    && (!["first-person", "birds-eye"].includes(row.view) || !row.outlined && !row.objectLines)
-    && row.cutaway === (row.view === "birds-eye"));
+    && row.headHidden === (row.view === "first-person") && row.mix === 0
+    && (row.view !== "first-person" || !row.outlined && !row.objectLines)
+    && !row.cutaway);
   const released = state.released;
-  record("gorilla camera: carry keeps the native cursor and Tab navigation in every view; carry and combat share first-person, shoulder and distant views; Right Shift swaps shoulder, Q rotates birds-eye and N faces north; combat has a white-ring crosshair and release restores the head without moving the camera",
-    state.possessed && state.acquired && state.reset && cameras && state.swap && state.turn > 0.2 && Math.abs(state.north) < 0.001
+  record("gorilla camera: carry keeps the native cursor and Tab navigation in every view; carry uses orbit/first-person and combat uses shoulder/first-person; Right Shift swaps shoulder; combat has a white-ring crosshair and release restores the head without moving the camera",
+    state.possessed && state.acquired && state.reset && cameras && state.swap
     && !released.active && !released.controlled && released.headHidden === state.originalHeadHidden && released.hidden
     && released.target === "none" && released.hit === "none" && released.positionCleared && released.near === state.near
     && released.eyeDelta < 1e-6 && released.targetDelta < 1e-6, JSON.stringify(state));
   record("gorilla Escape: close the sheet, ignore key repeat, free mouse-look, and then never let go of the gorilla or leave the hub", Object.values(state.escape).every(Boolean), JSON.stringify(state.escape));
-  record("gorilla occlusion: signed in or out, real island rock reveals the controlled gorilla's silhouette and a nearby perceived item's outline; a clear view removes both, and first-person/bird's-eye stay suppressed",
+  record("gorilla occlusion: signed in or out, real island rock reveals the controlled gorilla's silhouette and a nearby perceived item's outline; a clear view removes both, and first-person stays suppressed",
     state.coverRows.length === 2 && state.coverRows.every(row => row.covered.outlined && row.covered.enabled && row.covered.perceived
       && row.covered.itemLines > 0 && row.covered.headEye && row.clear) && cameras, JSON.stringify(state.coverRows));
-  record("gorilla camera gestures: signed in or out, wheel and right-click preserve carry/combat; carry's wheel goes from the orbit straight into the eyes and out of them to its near orbit, and its right button changes no view; combat overhead right-click aims at ground 10m ahead on either shoulder",
+  record("gorilla camera gestures: signed in or out, wheel and right-click preserve carry/combat; carry's wheel goes from the orbit straight into the eyes and out of them to its near orbit, and its right button changes no view; combat right-click preserves its current close view",
     state.gestures.length === 2 && state.gestures.every(row => row.rightCarry && row.doubleCarry && row.rightChord && row.returned
       && row.carry.every((view, i) => view.view === ["first-person", "first-person", "orbit", "orbit"][i] && !view.combat && !view.focused && view.hidden)
       && Math.abs(row.carry[2].distance - 3.8) < 1e-6 && row.carry[3].distance > row.carry[2].distance
       && row.firstReturns.length === 2 && row.firstReturns.every(view => view.first === "first-person"
-        && view.far === (view.combat ? "birds-eye" : "first-person") && view.back === (view.combat ? "shoulder" : "first-person") && view.keptMode)
-      && row.aimed.length === 2 && row.aimed.every(view => view.view === "shoulder" && view.combat && view.focused && view.error < 0.01)), JSON.stringify(state.gestures));
-  record("gorilla zoom stops: the shared wheel path stops long bursts at combat's shoulder in both directions and at carry's near orbit coming out of the eyes (going in, carry's orbit goes on into them), and continues only after a pause; a reversed pinch stops at the same place, and a small outward scroll starts a smooth view change",
+        && view.far === "first-person" && view.back === "first-person" && view.keptMode)
+), JSON.stringify(state.gestures));
+  record("gorilla zoom stops: inward bursts reach first person, outward bursts stop at shoulder or carry's near orbit, and only a fresh carry gesture zooms farther with a smooth view change",
     state.gestures.every(row => row.stops.length === 2 && row.stops.every(stop => (stop.combat
-      ? [stop.inward, stop.outward, stop.heldPinch].every(s => s.view === "shoulder" && s.combat) && stop.freshInward.view === "first-person" && stop.freshInward.combat
+      ? stop.inward.view === "first-person" && stop.inward.combat && [stop.outward, stop.heldPinch].every(s => s.view === "shoulder" && s.combat) && stop.freshInward.view === "first-person" && stop.freshInward.combat
       : [stop.inward, stop.freshInward].every(s => s.view === "first-person" && !s.combat)
         && [stop.outward, stop.heldPinch].every(s => s.view === "orbit" && !s.combat && Math.abs(s.distance - 3.8) < 1e-6))
-      && stop.freshOutward.view === (stop.combat ? "birds-eye" : "orbit") && stop.freshOutward.combat === stop.combat
-      && Math.abs(stop.freshOutward.distance - stop.outward.distance * Math.exp(8 * 0.0025)) < 0.001
+      && stop.freshOutward.view === (stop.combat ? "shoulder" : "orbit") && stop.freshOutward.combat === stop.combat
+      && Math.abs(stop.freshOutward.distance - stop.outward.distance * (stop.combat ? 1 : Math.exp(8 * 0.0025))) < 0.001
       && stop.immediate < 1e-6 && stop.firstStep < 0.01 && stop.targetStep < 0.01 && stop.maxStep < 1 && stop.trackingError < 0.001 && stop.finite)), JSON.stringify(state.gestures));
   record("gorilla right-click: signed in or out, close combat recapture survives denied pointer lock without attacking or seeding a double-click; interrupted combat taps never change view",
     state.gestures.every(row => row.recapture.length === 2 && row.recapture.every(r => r.captured && r.next && r.denied && r.fallback)
@@ -24680,20 +23824,20 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1&
     state.gestures.every(row => Object.values(row.chord).every(Boolean)), JSON.stringify(state.gestures.map(({ signedIn, chord }) => ({ signedIn, chord }))));
   record("gorilla Tab: soft and pending combat focus release on the first Tab, repeats stay consumed until keyup, then navigation is native; Shift and held movement cannot leak, and UI controls always own Tab",
     state.gestures.every(row => row.nativeTab && row.tabs.rows.length === 2
-      && row.tabs.rows.every((r, i) => r.view === (i ? "birds-eye" : "shoulder") && Object.entries(r).every(([key, value]) => key === "kind" || key === "view" || value === true))
+      && row.tabs.rows.every((r, i) => r.view === "shoulder" && Object.entries(r).every(([key, value]) => key === "kind" || key === "view" || value === true))
       && row.tabs.ui.length === 4 && row.tabs.ui.every(r => r.native && r.stopped)), JSON.stringify(state.gestures.map(({ signedIn, tabs }) => ({ signedIn, tabs }))));
-  record("gorilla map: signed in or out, one Map click travels to the next destination while retaining the gorilla, mode and view family and translating the camera", state.mapRows.length === 10
+  record("gorilla map: signed in or out, a chosen Map destination travels directly while retaining the gorilla, mode and view family and translating the camera", state.mapRows.length === 8
     && state.mapRows.every(row => row.prepared && row.arrived)
     && state.mapCrowds.length === 2 && state.mapCrowds.every(row => row.blockers > 0 && row.refused && row.unchanged && row.restored && row.reopened),
     JSON.stringify({ arrivals: state.mapRows, crowds: state.mapCrowds }));
   record("gorilla reset: 0 resets camera framing while retaining the actor's position, carry/combat and view family", state.mapRows.every(row => row.resetKept && row.resetChanged), JSON.stringify(state.mapRows));
   record("owned pair: T retakes the Ooga then cycles its gorilla at their existing positions; rapid reversal starts from the displayed view, same-actor selection does not restart it, G keeps the driven gorilla, held T does not repeat and signed-out T does not switch", Object.values(state.pair).every(Boolean), JSON.stringify(state.pair));
-  record("owned pair views: T smoothly moves the displayed camera to each actor while preserving carry/combat and first-person, shoulder or distant view in both directions; after Escape frees combat's cursor, both switches keep it native", state.transitions.length === 5 && state.transitions.every(r => r.prepared && r.toGorilla && r.toOoga && r.gorillaBlend.smooth && r.oogaBlend.smooth && r.cursorFreed && r.nativeToOoga && r.nativeToGorilla), JSON.stringify(state.transitions));
+  record("owned pair views: T smoothly moves the displayed camera to each actor while preserving carry/combat and first-person, shoulder or distant view in both directions; after Escape frees combat's cursor, both switches keep it native", state.transitions.length === 4 && state.transitions.every(r => r.prepared && r.toGorilla && r.toOoga && r.gorillaBlend.smooth && r.oogaBlend.smooth && r.cursorFreed && r.nativeToOoga && r.nativeToGorilla), JSON.stringify(state.transitions));
   record("Ooga selection: an unavailable, remote-controlled or missing owned Ooga refuses T selection with a reason and preserves the current gorilla, camera and control mode", Object.values(state.selection).every(Boolean), JSON.stringify(state.selection));
   record("gorilla selection: signed in or out, selecting a gorilla from a fixture's still view smoothly recenters carry/orbit at the fixed eye; an unavailable gorilla leaves the view alone and same-actor selection does not restart the handoff", state.retakes.length === 2 && state.retakes.every(r => r.acquisition.smooth && r.blend.smooth && r.refused && r.returned && r.repeated), JSON.stringify(state.retakes));
   record("gorilla X entry: signed in or out, a displayed eye below or exactly 45 degrees above its carry focus enters shoulder and only a higher eye enters bird's-eye, smoothly interrupting a rolled off-target acquisition regardless of requested orbit pitch",
     state.retakes.every(row => row.entries.length === 3 && row.entries.every(e => e.pending && e.blend.smooth && e.selected && e.combat
-      && e.view === (e.rise > 20 ? "birds-eye" : "shoulder") && e.projection === (e.rise > 20 ? 1 : 0) && e.finite)),
+      && e.view === "shoulder" && e.projection === 0 && e.finite)),
     JSON.stringify(state.retakes.map(({ signedIn, entries }) => ({ signedIn, entries }))));
   record("sleeping gorilla: signed in or out, selecting a sleeping companion from a still view holds the detached eye and drives an awake body beside it at once, combat included, while the NPC sleeps on in its own bed and pose through selection, release and a combat handoff, and wakes on its own track freeing its bed once its Ooga does", state.sleepRows.length === 2 && state.sleepRows.every(r => r.fixture && r.selected && r.heldEye && r.separate && r.nativeTab && r.awakeCombat && r.releasedAsleep && r.combatKept && r.keptBed && r.freedBed), JSON.stringify(state.sleepRows));
 } }, { name: "gorilla wall destination", why: "regression: commanding a roof gorilla to a lower point farther along the cave face stalled at the crest instead of reaching the clicked wall", run: async (b) => {
@@ -25500,7 +24644,7 @@ const cabinetVisit = id => ({ name: `cabinet ${id}`, why: "rule: each cabinet co
   const expanded = cloudJourney ? cloudJourney.expanded : await untilPage(b, `B.cabinet.phase === 'playing'`, 10000);
   const full = cloudJourney ? cloudJourney.full : await b.evaluate(`document.getElementById('stage').clientWidth === innerWidth && document.getElementById('cabinet-backdrop').hidden && document.getElementById('cabinet-foreground').hidden && !document.querySelector('.cabinet-leaderboard') && __ooga.fade === 0`);
   if (shape === "phone" && id !== "cloud-hopper") {
-    const header = await b.evaluate(`(() => { const e=document.getElementById('equipment-hud'), p=document.querySelector('.topbar .presets:not([hidden])'); const buttons=p ? [...p.querySelectorAll('button')].filter(b=>!b.hidden && b.getClientRects().length) : []; return {equipment:e.getBoundingClientRect().top,presets:p?.getBoundingClientRect().top,tappable:buttons.every(b=>{const r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));})}; })()`);
+    const header = await b.evaluate(`(() => { const e=document.getElementById('equipment-hud'), p=document.querySelector('.topbar .presets:not([hidden])'); const buttons=p ? [...p.querySelectorAll('button')].filter(b=>!b.hidden && b.getClientRects().length) : []; return {equipment:e.getBoundingClientRect().top,presets:p?.getBoundingClientRect().top,tappable:buttons.every(b=>{const r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}),buttons:buttons.map(b=>{const r=b.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {action:b.dataset.action,text:b.textContent,rect:[r.x,r.y,r.width,r.height],hit:hit?.tagName+"#"+hit?.id+"."+hit?.className};})}; })()`);
     record(`cabinet ${id}: phone header controls return above the game`, header.equipment < 180 && (!header.presets || header.presets < 180) && header.tappable, JSON.stringify(header));
   }
   if (id !== "cloud-hopper") {
@@ -25666,7 +24810,7 @@ scene("hub", { label: "guide", query: "ooga=portlandhodl:clank:lab,obl,lf&charac
 scene("hub", { label: "shared guide phone", opts: { w: 390, h: 844, mobile: true }, query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubSharedGuide] });
 // Native pointer-lock assertions need sole focus; another browser lane can
 // steal capture and spend this long scenario's deadline waiting for it back.
-scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1&birdseye=1", exclusive: true, steps: [hubBirdsEye] });
+scene("hub", { label: "camera modes", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", exclusive: true, steps: [hubCameraModes] });
 const hubPlayersAim = { name: "players camera targeting", why: "regression: the Players crosshair aimed through the orbit avatar, hiding its target behind the head; shoulder and first person must still centre it", run: async (b) => {
   const rows = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, a = P.player || B.cavemen.get("portlandhodl"), rows = [];
@@ -25705,9 +24849,9 @@ const hubPlayersAim = { name: "players camera targeting", why: "regression: the 
         zoom: P.orbit.tDist - distance,
         moved: Math.hypot(a.root.position.x - before.x, a.root.position.y - before.y, a.root.position.z - before.z) });
     }
-    // Orbit entered from bird's-eye combat has a separate root-centred solver; targeting must release it too.
+    // A normal shoulder-to-carry handoff must still allow targeting another player.
     P.modeAction("mode-toggle"); B.advance(1, 1 / 60);
-    const overhead = P.view === "birds-eye";
+    const shoulder = P.view === "shoulder";
     P.modeAction("mode-toggle"); B.advance(1, 1 / 60);
     {
       const before = { ...a.root.position }, distance = P.orbit.tDist;
@@ -25715,7 +24859,7 @@ const hubPlayersAim = { name: "players camera targeting", why: "regression: the 
       const accepted = BL.pilot.turnToward(target.x, target.y, target.z);
       B.advance(3, 1 / 60);
       const point = B.project(target.x, target.y, target.z, {}), size = B.renderer.size;
-      framing.push({ fromBirdsEye: true, dist: distance, accepted: overhead && accepted, mode: P.view,
+      framing.push({ fromCombat: true, dist: distance, accepted: shoulder && accepted, mode: P.view,
         gap: point ? (headTop(a.parts.head) - point.y) / size.height : -1,
         x: point ? point.x / size.width : -1, y: point ? point.y / size.height : -1,
         zoom: P.orbit.tDist - distance,
@@ -25754,11 +24898,11 @@ const hubPlayersAim = { name: "players camera targeting", why: "regression: the 
   record("regression: live head look is published after the final pilot pose while idle in shoulder and first person",
     rows.every(row => Math.abs(row.head) > 0.01 && row.lookSample !== null && Math.abs(row.lookSample / 100 - row.head) <= 0.006), JSON.stringify(rows));
 } };
-scene("hub", { label: "birds-eye combat projection and targets", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1&birdseye=1", steps: [hubBirdsEyeProjection, gameCombat(hubBirdsEyeTargets), hubCombatReplay] });
+scene("hub", { label: "shared camera rendering", query: "solo=1&character=portlandhodl", steps: [sharedCameraRendering] });
+scene("hub", { label: "shoulder replay", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubShoulderReplay] });
 for (const character of ["portlandhodl", "w-s-bitcoin"]) for (const opts of [{ w: 1920, h: 1080 }, PHONE_SIZE]) {
-  scene("hub", { label: "players camera targeting " + character, query: "solo=1&character=" + character + "&weapon=1&mode=shoulder&combat=1&birdseye=1", opts, steps: [hubPlayersAim] });
+  scene("hub", { label: "players camera targeting " + character, query: "solo=1&character=" + character + "&weapon=1&mode=shoulder&combat=1", opts, steps: [hubPlayersAim] });
 }
-scene("hub", { label: "birds-eye lower floors", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1&birdseye=1", steps: [hubBirdsEyeFloors] });
 scene("hub", { label: "mirror", query: "status=chillin", steps: [hubJumbotron, hubMirrorMedium, hubMirror] });
 scene("hub", { label: "matrix", steps: [hubMatrix] });
 scene("hub", { label: "oogatron popups", url: hubPage(dist, "pos=0"), steps: [oogatronPopups] });
@@ -26614,7 +25758,7 @@ scene("dsb", { label: "dsb shared player", url: hubPage(dist), steps: [{ name: "
   record("dsb shared player: DSB Land leaves the Ooga with no weapon in hand, on its body or as a button", await b.evaluate(unarmedInPage("__ooga.pilot.player")));
   const move = await b.evaluate(`(() => { const c = __ooga.pilot.player, z = c.root.position.z; window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); __ooga.advance(0.3); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); return Math.abs(c.root.position.z - z); })()`);
   record("dsb shared player: shared walking moves the actor", move > 0.2, String(move));
-  await b.evaluate(`document.getElementById("destination-hud").click(); __ooga.advance(0.4)`);
+  await b.evaluate(`document.getElementById("destination-hud").click(); document.querySelector('#destination-map [data-destination="overview"]').click(); document.getElementById("destination-map-go").click(); __ooga.advance(0.4)`);
   record("dsb shared player: the island view selector looks at the overview, keeping its CHORA label, while the visitor keeps their Ooga", await b.evaluate('__ooga.pilot.player === __ooga.dsb.avatar && __ooga.pilot.looking && __ooga.camera.position.y > 5 && document.getElementById("detached-destination-name").textContent === "CHORA"'));
   const resumed = await b.evaluate(`(() => {
     const B = __ooga, a = B.dsb.avatar, p = { ...a.root.position };
@@ -26752,6 +25896,16 @@ const gpuGeometrySnapshot = (renderer, scenes, activeId, state) => {
     if (!node) return;
     if (scene === "dsb" && rooms.has(node)) path = `room[${rooms.get(node)}]`;
     observe(node.geometry, true);
+    const lods = node.geometry?.foliageLods;
+    if (lods?.owner === node.geometry) for (const level of ["medium", "far"]) {
+      const geometry = lods[level]; observe(geometry, true);
+      const row = resident.get(geometry);
+      if (row && geometry !== node.geometry) {
+        row.references++;
+        if (row.owners.length < 8) row.owners.push({ scene, path: `${path}/lod:${level}`.slice(0, 240), graphVisible: null });
+        else row.omittedOwners++;
+      }
+    }
     const visible = !!(enabled && node.visible), row = resident.get(node.geometry);
     if (row) {
       row.references++;
@@ -27077,18 +26231,27 @@ const gpuGeometryDiagnosticChecks = async () => {
   record("Factory residency guard: real current-visit collection excludes history; shared owners and hall upload phases pass while stale, accumulating, malformed and over-budget retention fails", Object.values(factoryCases).every(Boolean), JSON.stringify({ ...factoryCases, collectorError }));
 };
 const dsbSoak = async (b, { geometry = false, factory = false } = {}) => {
+  // Compare the same roster and work sites even when an activity expires during the soak.
+  // Only classification uses this instant; scene animation and the Factory feed keep their clocks.
+  await b.evaluate(`(() => {
+    const C = BL.contributors, at = Date.now(), stateFor = C.stateFor, hasRecentActivity = C.hasRecentActivity;
+    C.stateFor = contributor => stateFor(contributor, at);
+    C.hasRecentActivity = (contributor, repo) => hasRecentActivity(contributor, repo, at);
+  })()`);
   await b.send("HeapProfiler.enable");
   const until = (cond, ms) => b.evaluate(`new Promise((resolve) => { const B = window.__ooga; const t0 = performance.now(); const tick = () => { const ok = !!(${cond}); if (ok || performance.now() - t0 > ${ms}) resolve(ok); else requestAnimationFrame(tick); }; tick(); })`);
   const rendered = (frames, ms = 6000) => b.evaluate(`new Promise((resolve) => { const B = window.__ooga; const start = B.renderedFrames; const t0 = performance.now(); const tick = () => { if (B.renderedFrames >= start + ${frames} || performance.now() - t0 > ${ms}) resolve(B.renderedFrames - start); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); })`);
   const settled = (ms = 4000) => until("window.BL.scene.tweenCount() === 0", ms);
   // Later visits can expose a different attract frame or an Ooga that was behind scenery at baseline.
-  // Upload only the retained hub's existing character meshes, without building new models, changing visibility or
+  // Upload the retained hub's existing character meshes and finite foliage LODs, without building new models, changing visibility or
   // replacing any resource. Subsequent growth is still measured by the same bounds. Cloud Hopper's cabinet now stands in
   // Ooga Arcade (cloud-hopper.js \`arcade\`), so the hub holds none of its screen frames: \`frames\` reports that.
   const warmHubGeometry = () => b.evaluate(`(() => {
-    const B = __ooga, H = BL.scenes.hub, characters = new Set(), frames = H.debug.cloudHopper?.cabinet.frames || [];
+    const B = __ooga, H = BL.scenes.hub, characters = new Set(), foliage = new Set(), frames = H.debug.cloudHopper?.cabinet.frames || [];
     const visit = node => {
       if (node.geometry?.characterPart) characters.add(node.geometry);
+      const lods = node.geometry?.foliageLods;
+      if (lods?.owner === node.geometry) foliage.add(node.geometry).add(lods.medium).add(lods.far);
       for (const child of node.children) visit(child);
     };
     visit(H.root);
@@ -27096,12 +26259,31 @@ const dsbSoak = async (b, { geometry = false, factory = false } = {}) => {
       if (cave.headOpen) characters.add(cave.headOpen);
       if (cave.headClosed) characters.add(cave.headClosed);
     }
-    const geometries = new Set([...frames, ...characters]);
+    const geometries = new Set([...frames, ...characters, ...foliage]);
     let prepared = true;
     for (const geometry of geometries) prepared = B.renderer.prepareGeometry(geometry) && prepared;
     const resident = new Set(B.renderer.geometryRecords());
-    return { frames: frames.length, characters: characters.size,
+    return { frames: frames.length, characters: characters.size, foliage: foliage.size,
       prepared: prepared && [...geometries].every(geometry => resident.has(geometry)) };
+  })()`);
+  // Each window lazily uploads its finite batch geometries as the feed lights a tank or sends a sat.
+  // Warm the same existing batches before both snapshots, so a different feed phase cannot look like a leak.
+  // Zero-count batches create their mesh record but draw no instances; restore visibility and redraw immediately.
+  const warmWindowBatches = () => b.evaluate(`(() => {
+    const B = window.__ooga, windows = [B.factory, B.factory.roof];
+    const batches = windows.flatMap(w => Object.values(w.batches));
+    const nodes = windows.map(w => w.batches.hall.parent).concat(batches), visible = nodes.map(n => n.visible);
+    const scene = BL.scenes.hub;
+    let warmed = false, restored = false;
+    try {
+      for (const n of nodes) n.visible = true;
+      warmed = B.renderer.render(scene.root, scene.camera, scene.renderOpts);
+    } finally {
+      nodes.forEach((n, i) => { n.visible = visible[i]; });
+      restored = B.renderer.render(scene.root, scene.camera, scene.renderOpts);
+    }
+    return { windows: windows.length, batches: batches.length, empty: batches.filter(n => n.instanceCount === 0).length,
+      warmed, restored: restored && nodes.every((n, i) => n.visible === visible[i]) };
   })()`);
   const heap = async () => {
     await b.send("HeapProfiler.collectGarbage");
@@ -27162,37 +26344,32 @@ const dsbSoak = async (b, { geometry = false, factory = false } = {}) => {
   const travel = (id) => b.evaluate(`new Promise((resolve, reject) => { const B = window.__ooga; const T = window.BL.scene.tweenCount; const t0 = performance.now(); let last = t0, requested = false, swap = 0, swapFrame = 0, swapGap = 0, accepted = false; const startFrames = B.renderedFrames, trail = []; const tick = () => { const now = performance.now(); const state=B.scene+":"+B.transitioning; if (!trail.length || trail[trail.length-1].state!==state) { if(trail.length<20)trail.push({state,at:now-t0,frames:B.renderedFrames}); } if (!requested && !B.transitioning && T() === 0) { accepted = B.go(${JSON.stringify(id)}); requested = true; } if (requested && !swap && B.scene === ${JSON.stringify(id)}) { swap = now - t0; swapGap = now - last; swapFrame = B.renderedFrames; } last = now; if (swap && B.renderedFrames >= swapFrame + 3 && T() === 0 && !B.transitioning) resolve({ swap, swapGap, settled: now - t0 }); else if (now - t0 > 8000) reject(new Error("Scene travel did not settle: " + JSON.stringify({ wanted: ${JSON.stringify(id)}, scene: B.scene, accepted, trail, framesTotal: B.renderedFrames-startFrames, hidden: document.hidden, focus: document.hasFocus(), requested, tweens: T(), framesSinceSwap: swap ? B.renderedFrames - swapFrame : -1, swap: Math.round(swap) }))); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); })`);
   const heapDetail = (a, z) => `objects ${mb(a.objects)} -> ${mb(z.objects)} MB (used ${mb(a.used)} -> ${mb(z.used)} MB, code ${mb(a.code)} -> ${mb(z.code)} MB)`;
   const within = (a, z, share) => Math.abs(z.objects - a.objects) <= a.objects * share;
-  return { until, rendered, settled, snapshot, travel, heapDetail, within, warmHubGeometry };
+  return { until, rendered, settled, snapshot, travel, heapDetail, within, warmHubGeometry, warmWindowBatches };
 };
 
-scene("dsb", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{ name: "dsb lifecycle", why: "contract: repeated DSB visits release nodes, listeners and GPU resources", run: async (b) => {
-  const { rendered, settled, snapshot, travel, heapDetail, within, warmHubGeometry } = await dsbSoak(b, { geometry: true });
+scene("dsb", { label: "lifecycle", exclusive: true, url: hubPage(src, "repospin=0"), steps: [{ name: "dsb lifecycle", why: "contract: repeated DSB visits release nodes, listeners and GPU resources", run: async (b) => {
+  const { until, rendered, settled, snapshot, travel, heapDetail, within, warmHubGeometry, warmWindowBatches } = await dsbSoak(b, { geometry: true });
   // The weather deck is sized by tier on each visit. Compare the same tier;
   // low is terminal, so the governor cannot change capacity during the soak.
   await b.evaluate('window.__ooga.renderer.setQuality("low")');
   // Warm the new cached model builders before comparing retained memory.
   await travel("dsb"); await travel("hub"); await settled(); await rendered(2);
-  const hubWarm = await warmHubGeometry(), before = await snapshot();
+  if (!await until("(() => { const s = BL.scenes.hub.debug.repoIsland?.stats(); return !s || s.built >= s.chunks && !s.pending; })()", 60000)) throw new Error("Merge Rock construction did not finish");
+  const hubWarm = await warmHubGeometry(), beforeWindows = await warmWindowBatches(), before = await snapshot();
   for (let i = 0; i < 6; i++) { await travel("dsb"); await travel("hub"); }
-  const after = await snapshot();
+  const afterWindows = await warmWindowBatches(), after = await snapshot();
   const same = (key) => before.stats[key] === after.stats[key];
   record("soak: dsb cycles: six round trips retain node, target, tween and DOM counts", same("allNodes") && same("targets") && same("tweens") && same("dom") && after.stats.tweens === 0, JSON.stringify({ before: before.stats, after: after.stats }));
   const bounded = hubWarm.frames === 0 && hubWarm.characters > 0 && hubWarm.prepared
+    && [beforeWindows, afterWindows].every(w => w.windows === 2 && w.batches === 18 && w.warmed && w.restored)
     && Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1);
   record("soak: dsb cycles: GPU records, listeners and heap remain bounded", bounded, heapDetail(before, after)
     + `, GPU ${before.stats.gl.records} -> ${after.stats.gl.records}, DOM ${before.nodes} -> ${after.nodes}, listeners ${before.listeners} -> ${after.listeners}`
     + (bounded ? "" : `, hub warmup ${JSON.stringify(hubWarm)}, geometry ${JSON.stringify(gpuGeometryDelta(before.geometry, after.geometry))}`));
 } }] });
 
-scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{ name: "factory lifecycle", why: "contract: repeated factory visits, each left with a tip's show in the air, release the hall's listeners, nodes and GPU resources while retaining one bounded shared node", run: async (b) => {
-  const { until, rendered, settled, snapshot, travel, heapDetail, within, warmHubGeometry } = await dsbSoak(b, { geometry: true, factory: true });
-  // Compare the same roster and work sites even when an activity expires during the soak.
-  // Only classification uses this instant; scene animation and the Factory feed keep their clocks.
-  await b.evaluate(`(() => {
-    const C = BL.contributors, at = Date.now(), stateFor = C.stateFor, hasRecentActivity = C.hasRecentActivity;
-    C.stateFor = contributor => stateFor(contributor, at);
-    C.hasRecentActivity = (contributor, repo) => hasRecentActivity(contributor, repo, at);
-  })()`);
+scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src, "repospin=0"), steps: [{ name: "factory lifecycle", why: "contract: repeated factory visits, each left with a tip's show in the air, release the hall's listeners, nodes and GPU resources while retaining one bounded shared node", run: async (b) => {
+  const { until, rendered, settled, snapshot, travel, heapDetail, within, warmHubGeometry, warmWindowBatches } = await dsbSoak(b, { geometry: true, factory: true });
   // Keep resource comparisons at one tier, as in the other lifecycle soaks.
   await b.evaluate('__ooga.renderer.setQuality("low")');
   // Replay can become live after the first snapshot. These four static signal labels are intentionally
@@ -27217,30 +26394,11 @@ scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps
   })()`);
   // A legendary tip two seconds before each departure, so every visit leaves with cubes or bananas in the air.
   const tip = (id) => b.evaluate(`(() => { const B = window.__ooga; window.BL.scenes.factory.onDonation({ id: "${id}", sats: 120000, handle: "soak", message: "", at: Date.now() }); B.advance(2, 1 / 30); const c = B.stats().cooker; return c.cubes + c.bananas + c.queued; })()`);
-  // Each window lazily uploads its finite batch geometries as the feed lights a tank or sends a sat.
-  // Warm the same existing batches before both snapshots, so a different feed phase cannot look like a leak.
-  // Zero-count batches create their mesh record but draw no instances; restore visibility and redraw immediately.
-  const warmWindowBatches = () => b.evaluate(`(() => {
-    const B = window.__ooga, windows = [B.factory, B.factory.roof];
-    const batches = windows.flatMap(w => Object.values(w.batches));
-    const nodes = windows.map(w => w.batches.hall.parent).concat(batches), visible = nodes.map(n => n.visible);
-    const scene = BL.scenes.hub;
-    let warmed = false, restored = false;
-    try {
-      for (const n of nodes) n.visible = true;
-      warmed = B.renderer.render(scene.root, scene.camera, scene.renderOpts);
-    } finally {
-      nodes.forEach((n, i) => { n.visible = visible[i]; });
-      restored = B.renderer.render(scene.root, scene.camera, scene.renderOpts);
-    }
-    return { windows: windows.length, batches: batches.length, empty: batches.filter(n => n.instanceCount === 0).length,
-      warmed, restored: restored && nodes.every((n, i) => n.visible === visible[i]) };
-  })()`);
   // Warm both scenes and the cooker's show, so the counts below start from a visit made after the instrumenting.
   await travel("factory"); await tip("soak-warm"); await travel("lab"); await travel("hub"); await settled(); await rendered(2);
-  // The Repo Island joins its chunks in idle time (repo-island.js). The baseline waits for the last of them: a hub that
-  // comes up sooner would otherwise count their nodes and uploads as the visits' own.
-  await until("(() => { const s = window.BL.scenes.hub.debug.repoIsland?.stats(); return !s || s.built >= s.chunks; })()", 60000);
+  // Hold Merge Rock rotation steady and finish its required detail preloads before accounting.
+  // Otherwise newly approached chunks are counted as resources retained by a departed scene.
+  if (!await until("(() => { const s = window.BL.scenes.hub.debug.repoIsland?.stats(); return !s || s.built >= s.chunks && !s.pending; })()", 60000)) throw new Error("Merge Rock construction did not finish");
   // Each visit's tip grows the shared pile, whose wider footprint culls scenery off the ring (a target fewer): the
   // closing count is taken at the opening pile, set back through the hub's own pile.
   const startLevel = await b.evaluate("__ooga.level");
@@ -33008,6 +32166,10 @@ const unitChecks = async () => {
   record("gorilla re-sleep regression: waking remembers its former bed; the same bed keeps its return leg and a changed bed chooses the nearest waypoint on its own path", sleepRoutes.every(row => row.ok), JSON.stringify(sleepRoutes));
   const sleepLandingPlayers = sleepLandingPlayersProof();
   record("gorilla sleep landing: the real hub predicate protects local and remote players while allowing vertically clear beds", Object.values(sleepLandingPlayers).every(Boolean), JSON.stringify(sleepLandingPlayers));
+  const mapPadEscape = destinationMapPadEscapeProof();
+  record("destination map pad regression: a pad's B or Menu over another dialog or card is that layer's Escape and never opens Map; on foot it opens Map and inside Map it closes it; a floating board does not block Map and a refused Map never swallows Menu's Escape", Object.values(mapPadEscape).every(Boolean), JSON.stringify(mapPadEscape));
+  const mapCoachingHint = destinationMapCoachingHintProof();
+  record("destination map coaching hint: a floating board does not hide the island coaching hint, while a non-floating dialog still does", Object.values(mapCoachingHint).every(Boolean), JSON.stringify(mapCoachingHint));
   const sleepBeamPool = sleepBeamPoolProof();
   record("gorilla sleep beam: fixed pool, slot isolation, live reduced motion and scene cleanup", Object.values(sleepBeamPool).every(Boolean), JSON.stringify(sleepBeamPool));
   const sleepStalls = gorillaSleepStallProof();
@@ -34789,7 +33951,16 @@ scene("dsb",{label:"wallets",query:"&view=wallets-door&weather=clear&time=1200",
   const taken=await b.evaluate('(()=>{const D=__ooga.dsb,t=document.getElementById("toast");return {open:D.walletsMenu.isOpen,list:D.wallets.list().map(d=>d.look+":"+d.state).join(),line:D.walletLine,shown:!document.querySelector(".wallet-carry").hidden,toast:t&&!t.hidden?t.textContent:null};})()');
   record("Wallets browser: Space at the machine offers all six wallets by picture and name alone; Take hands over the Rektdger with its countdown line and, on a desktop, Y and the ground",dialog.open&&dialog.engaged&&dialog.names==="ClownCard,Rektdger,BrickBox02,Passpoor,Jaded,SeedSnitcher"&&dialog.said==="clowncard rektdger brickbox02 passpoor jaded seedsnitcher take"&&!taken.open&&taken.list==="rektdger:carried"&&taken.line==="Carrying Rektdger · 21 s · Click the ground to place ·"&&taken.shown&&taken.toast==="Press Y to throw · Click the ground to place",JSON.stringify({dialog,taken}));
   await b.evaluate('__ooga.pilot.navigate(__ooga.dsb.interiors.active.room.reviews["wallets-wide"])');await walletsStep(b);
-  const spot=await b.evaluate(WALLETS_SPOT);await walletsTap(b,spot.x,spot.y,spot.z);const walked=await walletsUntil(b,"!__ooga.dsb.walletWalk");
+  const spot=await b.evaluate(WALLETS_SPOT);await walletsTap(b,spot.x,spot.y,spot.z);
+  const mapHold=await b.evaluate(`(()=>{
+    const B=__ooga,D=B.dsb,walking=!!D.walletWalk,p={...D.avatar.root.position};
+    document.getElementById("destination-hud").click();const opened=document.getElementById("destination-map").open;
+    B.advance(.3,1/60);const held=!D.walletWalk&&Math.hypot(D.avatar.root.position.x-p.x,D.avatar.root.position.z-p.z)<1e-6&&D.wallets.list()[0].state==="carried";
+    document.getElementById("destination-map-close").click();B.advance(.3,1/60);
+    return {walking,opened,held,closed:!document.getElementById("destination-map").open,stopped:!D.walletWalk&&Math.hypot(D.avatar.root.position.x-p.x,D.avatar.root.position.z-p.z)<1e-6&&D.wallets.list()[0].state==="carried"};
+  })()`);
+  record("Wallets browser: Map cancels a click-to-place walk without moving or placing the device behind the dialog, and closing does not resume it",Object.values(mapHold).every(Boolean),JSON.stringify(mapHold));
+  await walletsTap(b,spot.x,spot.y,spot.z);const walked=await walletsUntil(b,"!__ooga.dsb.walletWalk");
   const placed=await b.evaluate(`(()=>{const D=__ooga.dsb,d=D.wallets.list()[0];return {state:d.state,off:Math.hypot(d.x-(${spot.x}),d.z-(${spot.z})),y:d.y,line:D.walletLine};})()`);
   record("Wallets browser: a real click on the store floor walks the Ooga there and sets the device down exactly where clicked",walked&&placed.state==="dropped"&&placed.off<.06&&Math.abs(placed.y)<1e-6&&placed.line===null,JSON.stringify(placed));
   await walletsStep(b,200);await b.evaluate('__ooga.pilot.navigate(__ooga.dsb.interiors.active.room.reviews["wallets-machine"])');await walletsStep(b);await b.key(" ");await walletsStep(b);

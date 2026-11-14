@@ -4806,7 +4806,8 @@
     };
     const outsideNeighbor = (cave, body) => {
       const feet = cave.root.position.y - cave.baseY;
-      return feet < body.y + (body.height || ctx.outsideActorHeight) && feet + cave.bodyHeight > body.y;
+      // A rider on the top is touching, not overlapping; root/baseY arithmetic can differ by a few ulps.
+      return feet < body.y + (body.height || ctx.outsideActorHeight) - 1e-7 && feet + cave.bodyHeight > body.y + 1e-7;
     };
     const snapshotTraffic = (cave) => {
       const traffic = cave.traffic, travel = cave.bedTravel, work = cave.work, p = cave.root.position;

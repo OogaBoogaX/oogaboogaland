@@ -248,15 +248,16 @@
     });
     hud.setDestinations(Object.keys(VIEW_NAMES), VIEW_NAMES);
     hud.setAreaLabel("Ember Den");
-    hud.el.modeDestination.title = "Ember Den · cycle tables";
-    hud.el.modeDestinationLabel.textContent = "Ember Den views. Press to cycle tables";
+    hud.el.modeDestination.title = "Ember Den · choose a table";
+    hud.el.modeDestinationLabel.textContent = "Ember Den views. Open Map to choose a table";
     const presetView = name => {
-      if (leaving || panel.focused || seatTable >= 0 && !pendingStand || !VIEW_NAMES[name]) return;
+      if (leaving || panel.focused || seatTable >= 0 && !pendingStand || !VIEW_NAMES[name]) return false;
       tableView = name !== "entrance";
       pilot.goPreset(name); hud.setDetachedView(name, true);
+      return true;
     };
     hud.onPreset(presetView);
-    hud.onAction((a, v) => { if (a === "leave") leaveFloor(); else if (a === "reset-view") pilot.resetCamera(); else if (a === "act") pilot.action(); else if (a === "mode-preset") presetView(v); else if (a.startsWith("mode-")) modeAction(a); });
+    hud.onAction((a, v) => { if (a === "leave") leaveFloor(); else if (a === "reset-view") pilot.resetCamera(); else if (a === "act") pilot.action(); else if (a === "mode-preset") return presetView(v); else if (a.startsWith("mode-")) modeAction(a); });
     fx = BL.fx.create({ root, input, hooks, hud, game: ctx.game, world, renderer: ctx.renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 5, z: -34 } });
     room = BL.pokerModels.build(theme.id); S.addChild(root, room.root);
     for (let i = 0; i < 10; i++) { input.add(room.tables[i].top, { kind: "poker", index: i }); targets.push(room.tables[i].top); }

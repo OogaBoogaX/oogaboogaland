@@ -867,7 +867,7 @@
       window.addEventListener("keydown", captureKey, true);
     };
     const dispose = () => { suspend(); rig.dispose(); };
-    return { root: rig.root, state, update, yieldToMovement, escape, tap, suspend, resume, dispose, liveGeometry: rig.liveGeometry, light: rig.light, lend, get holding() { return state.holding; }, get lent() { return !!lender; }, get speech() { return rig.speech; } };
+    return { root: rig.root, state, update, yieldToMovement, escape, tap, suspend, resume, dispose, liveGeometry: rig.liveGeometry, light: rig.light, lend, get coachingReady() { return state.phase === "work" || state.phase === "queue" && !queueShown; }, get holding() { return state.holding; }, get lent() { return !!lender; }, get speech() { return rig.speech; } };
   };
   BL.hubGuide = { create, NAME, LINES, STOPS, NEWS, freshAfter, legsOf, answer, SUGGESTIONS, fold, has };
 })();

@@ -1,0 +1,187 @@
+{
+  "result": "2070/2106",
+  "durationMinutes": 28.7,
+  "scope": "Full suite on Map branch before final focused corrections; not integrated full-suite acceptance",
+  "failures": [
+    {
+      "check": "wall movement performance: moving behind cave walls during a donation stays responsive at a high-density desktop size",
+      "detail": "{\"fps\":46.88865930223318,\"p95\":33.399999999999636,\"max\":49.899999999999636,\"worst\":{\"gap\":42.700000047683716,\"at\":333.2999999999993,\"updateMs\":2,\"renderMs\":2.600000023841858,\"overlayMs\":32.60000002384186,\"donated\":false},\"outlined\":236,\"samples\":236,\"travel\":3.48749999999999,\"donated\":true,\"quality\":\"low\"}",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "shared panel: Chat selected in Arcade stays open on mainland",
+      "detail": "{\"scene\":\"hub\",\"open\":\"false\",\"hidden\":false,\"painted\":true,\"tab\":null,\"panels\":1,\"content\":5,\"saved\":{\"open\":false,\"tab\":\"roster\",\"folded\":false,\"drawer\":2,\"height\":null,\"rect\":null,\"dock\":null,\"windows\":[]},\"subscriptions\":4}",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "shared panel gameplay",
+      "detail": "TypeError: Cannot read properties of undefined (reading 'startRace')",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "shared panel: Chat selected in Arcade stays open on mainland",
+      "detail": "{\"scene\":\"hub\",\"open\":\"false\",\"hidden\":false,\"painted\":true,\"tab\":null,\"panels\":1,\"content\":5,\"saved\":{\"open\":false,\"tab\":\"roster\",\"folded\":false,\"drawer\":2,\"height\":null,\"rect\":null,\"dock\":null,\"windows\":[]},\"subscriptions\":4}",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "shared panel gameplay",
+      "detail": "TypeError: Cannot read properties of undefined (reading 'startRace')",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "Cloud Hopper camera: nearby props, overhead scenery and a ghost never redirect or compress the racing view",
+      "detail": "[{\"dt\":0.03333333333333333,\"mode\":\"orbit\",\"actualMode\":\"orbit\",\"obstructed\":true,\"firstChange\":0,\"heldChange\":0,\"clearedChange\":0},{\"dt\":0.03333333333333333,\"mode\":\"shoulder\",\"actualMode\":\"shoulder\",\"obstructed\":true,\"firstChange\":0,\"heldChange\":0,\"clearedChange\":0},{\"dt\":0.03333333333333333,\"mode\":\"first-person\",\"actualMode\":\"first-person\",\"obstru",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "Cloud Hopper camera: downhill steps and airborne movement retain the exact actor-relative eye, target and up in every view at 30/60 Hz",
+      "detail": "[{\"dt\":0.03333333333333333,\"mode\":\"orbit\",\"airborne\":false,\"actualMode\":\"orbit\",\"maxChange\":1.1027264266441819},{\"dt\":0.03333333333333333,\"mode\":\"orbit\",\"airborne\":true,\"actualMode\":\"orbit\",\"maxChange\":1.1027264266441819},{\"dt\":0.03333333333333333,\"mode\":\"shoulder\",\"airborne\":false,\"actualMode\":\"shoulder\",\"maxChange\":3.552713678800501e-15},{\"dt\":0.",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "Cloud Hopper camera: real island rock cannot shorten or pivot the camera, including the first crossing frame at 30/60 Hz",
+      "detail": "[{\"dt\":0.03333333333333333,\"obstructed\":false,\"firstChange\":23.7014882969372,\"heldChange\":23.7014882969372,\"clearedChange\":22.05462709094916},{\"dt\":0.016666666666666666,\"obstructed\":false,\"firstChange\":25.761243609621054,\"heldChange\":25.761243609621054,\"clearedChange\":23.815706975382604}]",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "Cloud Hopper framing: results reject held keys, deliberate replay retains the selected view and island framing, and racing releases the camera",
+      "detail": "{\"opened\":false,\"ascent\":{\"x\":0.9758370153715613,\"y\":1.037440665271674,\"front\":true,\"centreError\":1405.2053021350482,\"gap\":843.4392608658709,\"phase\":\"idle\",\"mode\":\"shoulder\",\"cloudClear\":true,\"actorVisible\":true},\"settled\":{\"x\":0.9758370153715613,\"y\":1.037440665271674,\"front\":true,\"centreError\":1405.2053021350482,\"gap\":843.4392608658709,\"phase\":\"id",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "hub round trip: leaving and entering twice keeps the leave contract and holds nothing the first visit did not, and a donation mid-visit is taken",
+      "detail": "{\"grew\":[],\"beds\":[{\"failures\":[{\"outdoor\":\"NickDaGreek\"},{\"outdoor\":\"l0n0\"}],\"claimed\":16,\"sleeping\":7,\"overflow\":2},{\"failures\":[{\"outdoor\":\"NickDaGreek\"},{\"outdoor\":\"l0n0\"}],\"claimed\":16,\"sleeping\":7,\"overflow\":2}],\"donated\":{\"scene\":\"hub\",\"donations\":1,\"sats\":2100,\"bananas\":1.25},\"first\":{\"scene\":\"hub\",\"records\":879,\"nodes\":5632,\"targets\":1712,",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "hub hammock ends: the moving tips remain within the planned bounds, the sole occupant stays face-up, and approved tree positions are preserved",
+      "detail": "{\"angleDegrees\":0.0000059764155237611605,\"gap\":5.711050451935397e-7,\"inside\":true,\"faceY\":0.9940133432861273,\"states\":[{\"occupied\":false,\"seated\":false,\"free\":true},{\"occupied\":true,\"seated\":true,\"free\":false}],\"riseRanges\":[[0.172864771912145,0.19507416200586558],[0.17228951586028085,0.19425538623322547]],\"anchors\":[{\"x\":5.2364550701895425,\"z\":4.2",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "timechain roster: fresh contribution data unfolds and updates an Ooga absent from the room without recreating its row or changing the driven Ooga",
+      "detail": "{\"away\":true,\"fresh\":false,\"same\":true,\"scene\":\"timechain\",\"player\":\"portlandhodl\"}",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "chilling arrival: every Ooga rests aboveground in separate concentric campfire rings facing the fire, with empty HQ beds and no eating or permanent nunchaku spin",
+      "detail": "{\"rows\":[{\"name\":\"Global-DSB\",\"state\":\"chilling\",\"visible\":true,\"feet\":0,\"bed\":false,\"seated\":true,\"radius\":1.8000000000000007,\"snack\":false,\"facing\":1},{\"name\":\"shitnobi\",\"state\":\"chilling\",\"visible\":true,\"feet\":0,\"bed\":false,\"seated\":true,\"radius\":1.8000000000000007,\"snack\":false,\"facing\":1},{\"name\":\"itme-brain\",\"state\":\"chilling\",\"visible\":true,",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "players stand on players: a drop onto another player rests on their head at their own height, short or tall, and on a gorilla's back, then falls to the ground when they leave",
+      "detail": "[{\"name\":\"NickDaGreek\",\"kind\":\"ooga\",\"shown\":1,\"height\":1.2810332246180438,\"feet\":0,\"still\":0,\"off\":0.1499999999999999,\"left\":0},{\"name\":\"rules-without-rulers\",\"kind\":\"ooga\",\"shown\":0,\"height\":2.0533325566435723,\"feet\":0,\"still\":0,\"off\":0.1499999999999999,\"left\":0},{\"name\":\"NickDaGreek\",\"kind\":\"gorilla\",\"shown\":0,\"height\":null,\"feet\":0,\"still\":0,\"o",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "players stand on players: standing on a player who walks, rises 3 m and comes down keeps the rider on their head, and walking off lands beside them",
+      "detail": "{\"ride\":{\"start\":{\"feet\":0,\"off\":0.1499999999999999},\"walked\":{\"feet\":0,\"off\":1.8499999999999934},\"up\":{\"feet\":-2.999999999999999,\"off\":1.8499999999999934},\"down\":{\"feet\":1.249000902703301e-16,\"off\":1.8499999999999934}},\"walkOff\":{\"feet\":0,\"off\":2.127645412186904}}",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "players stand on players: the visitor's gorilla lands on a player's head at their height, rides them as they walk, rise 3 m and come down, and falls to the ground when they leave",
+      "detail": "{\"possessed\":true,\"radius\":0.7169534887513822,\"height\":1.2810332246180438,\"landed\":{\"feet\":0,\"off\":0.20000000000000018},\"walked\":{\"feet\":0,\"off\":1.7999999999999932},\"up\":{\"feet\":-2.999999999999999,\"off\":1.7999999999999932},\"down\":{\"feet\":1.249000902703301e-16,\"off\":1.7999999999999932},\"left\":0,\"approach\":{\"start\":3.000000000000001,\"nearest\":0.12000",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "players stand on players: the visitor's gorilla walking into a player is held off, their centre outside its body",
+      "detail": "{\"start\":3.000000000000001,\"nearest\":0.12000000000001111,\"radius\":1.2569350271374429}",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "working arrival: every Ooga starts upright beside the pile with no HQ or basement bed held",
+      "detail": "{\"rows\":[{\"name\":\"Global-DSB\",\"state\":\"working\",\"visible\":true,\"feet\":0,\"surface\":0,\"radius\":4.0314784716271825,\"bed\":false,\"quaternion\":false},{\"name\":\"shitnobi\",\"state\":\"working\",\"visible\":true,\"feet\":0,\"surface\":0,\"radius\":5.328422464410366,\"bed\":false,\"quaternion\":false},{\"name\":\"itme-brain\",\"state\":\"working\",\"visible\":true,\"feet\":0,\"surface\":0",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "lab work: exclusive regular and overflow jobs animate correctly, and coworkers take room routes out together without a doorway stall",
+      "detail": "{\"actors\":2,\"seconds\":[31.633333333334065,19.800000000000143],\"strokes\":[0.6790628537078716,0.7400604599430616],\"outside\":false,\"duplicate\":false,\"regular\":6,\"used\":[4,3,2,0,6,1],\"six\":{\"used\":false,\"allClaimed\":true,\"premature\":false},\"shared\":false,\"overflowWorked\":true,\"code\":true,\"scroll\":true,\"restored\":true,\"released\":true,\"routed\":true,\"depa",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "gorilla work apron descent: the worker climbs from the ramp roof onto the ground without stalling or relocation",
+      "detail": "{\"roof\":7.25,\"mounted\":true,\"landed\":true,\"maxBlocked\":7.883333333333311,\"y\":0,\"recoveries\":1,\"trace\":[{\"t\":0,\"x\":14.973160635922419,\"y\":7.25,\"z\":16.963880081175187,\"route\":\"apron\",\"active\":false,\"free\":false,\"blocked\":0,\"recoveries\":0},{\"t\":1,\"x\":13.615129786177222,\"y\":5.895,\"z\":14.79844480598157,\"route\":\"apron\",\"active\":true,\"free\":true,\"blocked\"",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "gorilla map: signed in or out, a chosen Map destination travels directly while retaining the gorilla, mode and view family and translating the camera",
+      "detail": "{\"arrivals\":[{\"signedIn\":false,\"combat\":false,\"view\":\"shoulder\",\"prepared\":true,\"arrived\":true,\"refusal\":null,\"toast\":\"Gorilla movement debug \u00b7 click a gorilla, then a destination\",\"label\":\"Mirror\",\"delta\":[-0.5599999999999632,0,-12.224355652982146],\"resetKept\":true,\"resetChanged\":true},{\"signedIn\":false,\"combat\":false,\"view\":\"first-person\",\"prepar",
+      "subsequentStatus": "Focused check passed after correcting dialog-close expectation"
+    },
+    {
+      "check": "race start and steering: Enter closes the title card, Enter starts the countdown into the race, and A, D and the arrows steer left and right on screen",
+      "detail": "{\"fresh\":{\"phase\":\"garage\",\"card\":true},\"closed\":{\"phase\":\"garage\",\"card\":false},\"counting\":{\"phase\":\"countdown\",\"card\":false},\"racing\":{\"phase\":\"racing\",\"card\":false},\"px\":{\"none\":28,\"a\":-205.5,\"d\":205.5,\"ArrowLeft\":-214.5,\"ArrowRight\":205.5}}",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "hub jetpack: J takes the permanent pack off and on, Space climbs, fuel refills, and an abyss respawn keeps it while emptying loaded and spare AK magazines",
+      "detail": "{\"off\":{\"worn\":true,\"owned\":true,\"fuel\":1,\"feet\":0,\"pickup\":false,\"toast\":\"Jetpack!\"},\"on\":{\"worn\":false,\"owned\":true,\"fuel\":1,\"feet\":0,\"pickup\":false,\"toast\":\"Jetpack off\"},\"up\":{\"worn\":false,\"owned\":true,\"fuel\":1,\"feet\":0,\"pickup\":false,\"toast\":\"Jetpack off\"},\"down\":{\"worn\":false,\"owned\":true,\"fuel\":1,\"feet\":0,\"pickup\":false,\"toast\":\"Jetpack off\"",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "hub jetpack: stun keeps the pack, and dropped magazines carry a +1 MAG tag",
+      "detail": "{\"ammo\":0,\"spares\":0,\"everyOwned\":true,\"drops\":[{\"kind\":\"magazine\",\"label\":\"+1 MAG\"}],\"wornAfterStun\":false}",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "hub guide",
+      "detail": "Runtime.evaluate got no reply in 90 s: Chrome hung",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "hub ask",
+      "detail": "Runtime.evaluate cannot run: Chrome is gone",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "hub matrix: free and following cameras keep their view inside, above and outside the cave, without glyph batches or mirror HP",
+      "detail": "{\"free\":{\"black\":0},\"freeAbove\":{\"black\":0},\"outside\":{\"black\":0},\"driven\":{\"black\":0},\"drivenAbove\":{\"black\":0},\"returned\":{\"black\":0},\"batches\":8,\"noDamage\":true,\"gateLocked\":true,\"wave\":false}",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "hub matrix: free and following cameras keep their view inside, above and outside the cave, without glyph batches or mirror HP",
+      "detail": "{\"free\":{\"black\":0},\"freeAbove\":{\"black\":0},\"outside\":{\"black\":0},\"driven\":{\"black\":0},\"drivenAbove\":{\"black\":0},\"returned\":{\"black\":0},\"batches\":8,\"noDamage\":true,\"gateLocked\":true,\"wave\":false}",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "canvas2d tour: with WebGL2 unavailable every scene still boots, arrives and paints, and the island, planting no meadow palms, hangs no hammock (no shell, claims or REST)",
+      "detail": "{\"hub\":{\"kind\":\"canvas2d\",\"colours\":9,\"hammock\":false},\"lab\":{\"arrived\":true,\"colours\":23},\"race\":{\"arrived\":false,\"colours\":44},\"drop\":{\"arrived\":true,\"colours\":15},\"orbit\":{\"arrived\":true,\"colours\":29},\"mine\":{\"arrived\":true,\"colours\":55},\"arcade\":{\"arrived\":true,\"colours\":56},\"back\":{\"arrived\":true,\"colours\":22}}",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "dsb entrance audio enabled: clean console",
+      "detail": "11.6s [log.error] Failed to load resource: net::ERR_FILE_NOT_FOUND",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "dsb shared player: TV opens with weapons suspended",
+      "detail": "",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "dsb shared player",
+      "detail": "DSB return did not reach bifrost",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "dsb phone: clean console",
+      "detail": "3.2s [log.error] Failed to load resource: net::ERR_FILE_NOT_FOUND",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "arcade hall: back in the hall a cabinet in sight shows its tooltip and a line over the stage shows again",
+      "detail": "{\"inHall\":{\"armed\":false,\"hidden\":false},\"cabinet\":{\"x\":482,\"y\":176,\"kind\":\"cabinet\"},\"shown\":null}",
+      "subsequentStatus": "Unresolved; not automatically retried"
+    },
+    {
+      "check": "dsb lifecycle",
+      "detail": "TypeError: frames is not iterable",
+      "subsequentStatus": "DSB lifecycle passes on startup branch after removed-cabinet fixture repair"
+    },
+    {
+      "check": "factory lifecycle",
+      "detail": "TypeError: frames is not iterable",
+      "subsequentStatus": "Factory lifecycle now runs; exact target count still fails on startup branch"
+    }
+  ]
+}

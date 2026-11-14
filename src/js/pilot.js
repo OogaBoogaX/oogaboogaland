@@ -3923,6 +3923,8 @@
         orbit.tPitch = (low + high) * 0.5;
       } else if (orbitFollow) {
         endCenteredCarry();
+        // Release the carry handoff before solving: it restores the old pitch.
+        stopCarryExit();
         // Centre the selected point on a ray passing above the whole head (including hats), rather than through
         // the follow anchor in the torso. Solve only on the click; ordinary camera damping owns the transition.
         // The eight world bounds corners also cover wide heads when looking uphill or downhill at close zoom.
@@ -3953,7 +3955,6 @@
         }
         frameLiftWanted = high - base;
         orbit.tPitch = clamp(Math.atan2(high - y, horizontal), TRAILING_PITCH[0], TRAILING_PITCH[1]);
-        stopCarryExit();
         headOrbit = exitAngleHold = false;
         trailingPitchChosen = true;
         zoomTilt = false; zoomPitchVelocity = 0;
