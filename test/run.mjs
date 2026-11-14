@@ -4812,7 +4812,7 @@ const hudNoticeChecks = async () => {
     };
     const nodes = Object.fromEntries(["toast", "reload-notice", "message-stack"].map(id => [id, element()]));
     nodes["message-stack"].children = [nodes["reload-notice"], nodes.toast];
-    const BL = { game: {}, scene: {} };
+    const BL = { game: {}, scene: {}, signGlyphs: { lettering() {}, letter() {} }, nativeIcons: { fill() {} } };
     runInNewContext(source, {
       window: { BL, matchMedia: () => ({ matches: false }), setTimeout: (fn, ms) => { timers.set(++serial, { fn, ms }); return serial; }, clearTimeout: id => timers.delete(id) },
       document: { getElementById: id => nodes[id], querySelectorAll: () => [], createElement: element,
@@ -4905,7 +4905,7 @@ const characterChecks = async () => {
   }
   // The worn jetpack and its flame come from the hub's kit, not the caveman builder (#290 review).
   Object.assign(context, { document: { createElement: () => ({ getContext: () => null }) }, performance, console });
-  for (const name of ["terrain", "hub-models"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
+  for (const name of ["terrain", "sign-glyphs", "hub-models"]) runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
   const worn = [BL.hubModels.jetpack(), BL.hubModels.jetFlame()];
   for (const geo of worn) mirrorGeometries.add(geo);
   const spare = BL.models.spareMagazine();
@@ -6203,7 +6203,7 @@ const environmentSoundChecks = async () => {
 const hammockChecks = async () => {
   // The page's default: finished character bakes are packed compactly, as the live crew's are.
   const real = { window: { location: { search: "" } }, location: { search: "" }, URLSearchParams, document: { createElement: () => ({ getContext: () => null }) }, performance, console };
-  for (const name of ["math", "compact-geometry", "scene", "models", "hero-body", "hub-models", "convex", "solid-props", "hub-hammock"])
+  for (const name of ["math", "compact-geometry", "scene", "models", "hero-body", "sign-glyphs", "hub-models", "convex", "solid-props", "hub-hammock"])
     runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), real);
   const R = real.window.BL, H = R.hubHammock, flat = () => 0, clear = (x, z, r) => z > 1 + r;
   const plan = (a, b, fits = clear) => H.plan({ a: { ...a, ground: 0 }, b: { ...b, ground: 0 }, clear: fits, surfaceAt: flat });
@@ -6854,7 +6854,7 @@ const poolLayoutChecks = async () => {
     JSON.stringify({ graded, open, roofed, linked, beds, apart, lake, slots: L.SLOTS.length, along, hidden, doorways, mouths, chamber, fallLedges, boxes }));
   // The water over that layout, through its own module: what the backlog floods and what it never reaches.
   Object.assign(context, { document: { createElement: () => ({ getContext: () => null }) }, performance, console });
-  for (const file of ["scene", "models", "convex", "terrain", "hub-models", "pool-models", "pool-water"]) runInNewContext(await readFile(new URL(`../src/js/${file}.js`, import.meta.url), "utf8"), context);
+  for (const file of ["scene", "models", "convex", "terrain", "sign-glyphs", "hub-models", "pool-models", "pool-water"]) runInNewContext(await readFile(new URL(`../src/js/${file}.js`, import.meta.url), "utf8"), context);
   const { poolWater: W, scene: S } = context.window.BL, H = W.HYDRO;
   let rising = true, last = -Infinity;
   for (let mvb = 0; mvb <= 400; mvb += 0.5) { const level = W.levelFor(mvb * 1e6); rising &&= level >= last; last = level; }
@@ -9122,7 +9122,7 @@ const gameRulesChecks = async () => {
     // The jackpot wheel, from arcade-models.js and its scene half on the builders they load with: the house wins slowly, and every
     // wedge, from a turn at rest and one far round after many spins, stops under the clapper wherever in it the spin
     // aims, after its whole turns and less than one more.
-    for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "hockey-wire", "arcade-models", "haunt-models", "arcade-scene-models", "zipline-models", "zipline"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+    for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron", "sign-glyphs", "hub-models", "hockey-wire", "arcade-models", "haunt-models", "arcade-scene-models", "zipline-models", "zipline"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
     runInNewContext(await readFile(new URL("../src/js/arcade-games.js", import.meta.url), "utf8"), context);
     // Solo smash assistance must never send an out-of-bounds authoritative frame at a rail.
     const soloAim={x:1}, solo=BL.arcadeGames.airHockey({node:BL.scene.createNode(),aim:soloAim,onEnd(){},burst(){}});
@@ -9830,7 +9830,7 @@ const cloudHopperRecordChecks = async () => {
   mkdirSync(dir, { recursive: true });
   const page = join(dir, "fixture.html");
   writeFileSync(page, `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="../../src/style.css">
+    <link rel="stylesheet" href="../../src/native.css"><link rel="stylesheet" href="../../src/style.css">
     <script src="../../src/js/cloud-hopper-levels.js"></script><script src="../../src/js/cloud-hopper-hud.js"></script>`);
   const b = await launch();
   try {
@@ -10537,7 +10537,7 @@ const donationClientChecks = async () => {
     JSON.stringify({ sharedRate, validRate, hiddenRate, retainedRate, waiting, reused, pendingClosed, listeners: priceListeners.size, timers: priceTimers.size }));
 
   // Regression: the pile showed whole gameplay stock (79) beside a panel valued at 77.97.
-  const valueBL = { game: {}, scene: {}, donationRate: { current: null }, donations: { real: true,
+  const valueBL = { game: {}, scene: {}, signGlyphs: { lettering() {}, letter() {} }, nativeIcons: { fill() {} }, donationRate: { current: null }, donations: { real: true,
     state: { tally: { sats: 96458, rate: { usdPerBtc: 80832.63, at: 10 } } } } };
   runInNewContext(await readFile(new URL("../src/js/hud.js", import.meta.url), "utf8"), {
     window: { BL: valueBL, matchMedia: () => ({ matches: false }) },
@@ -30898,7 +30898,7 @@ const raceRigChecks = async () => {
   const context = { window: {}, location: { search: "?debug=1&rain=0" }, URLSearchParams, crypto: webcrypto };
   for (const name of ["math", "scene", "models", "hero-body", "caves", "contributor-identities", "activity-repos", "characters"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
   for (const name of readdirSync(join(root, "src", "characters")).filter(name => name.endsWith(".js")).sort()) runInNewContext(readFileSync(join(root, "src", "characters", name), "utf8"), context);
-  for (const name of ["contributors", "hub-models", "dressing", "daylight", "race-models", "race-track", "racers", "mirror-ripples", "mirror-body", "dsb-water", "gl-renderer"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+  for (const name of ["contributors", "sign-glyphs", "hub-models", "dressing", "daylight", "race-models", "race-track", "racers", "mirror-ripples", "mirror-body", "dsb-water", "gl-renderer"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
   const BL = context.window.BL, scene = BL.scene.createNode(), released = [];
   const renderer = { createRig: BL.glRenderer.createRig, releaseGeometry: geometry => released.push(geometry) };
   const track = BL.raceTrack.build(BL.raceTrack.TRACKS[0], { renderer, slots: CAST, rain: false, hour: 12 });
@@ -32518,8 +32518,212 @@ const npcActivityRefreshProof = (BL) => {
   }
 };
 
+// Ooga Chat (src/ooga-chat/, docs/ooga-chat-app.md): the bootstrap contract, the production adapter's failures, the
+// shell's lifecycle on a small DOM stand-in, and the build's guards, all in Node.
+const oogaChatChecks = async () => {
+  const load = (names, context) => { for (const name of names) runInNewContext(readFileSync(join(root, name), "utf8"), context); return context.window.BL; };
+  const C = load(["src/ooga-chat/ooga-chat-config.js"], { window: {}, URLSearchParams }).oogaChatConfig;
+  const valid = (extra = {}) => ({ version: 1, protocols: { identity: [1], audience: [1, 2], media: [1] }, features: { github: true, x: true, voice: false, feed: "demo" },
+    paths: { session: "/api/session", logout: "/api/logout", login: { github: "/auth/github", x: "//evil.example/x" } }, ...extra });
+  const live = C.parseBootstrap(valid(), "b1"), review = C.parseBootstrap(valid(), "b1", { fixture: true });
+  const contract = {
+    missing: C.parseBootstrap(null, "b1").mode === "unavailable" && C.parseBootstrap("<html>", "b1").mode === "unavailable",
+    revision: C.parseBootstrap({ version: 2 }, "b1").mode === "stale",
+    protocol: C.parseBootstrap(valid({ protocols: { identity: [1], audience: [2], media: [1] } }), "b1").mode === "stale",
+    live: live.ok && live.mode === "live" && live.features.github && live.paths.login.github === "/auth/github",
+    foreignPath: !live.features.x && !live.paths.login.x,
+    noDemoInProduction: live.features.feed === "off" && review.features.feed === "demo",
+    newer: C.parseBootstrap(valid({ build: "b2" }), "b1").newer === "b2" && C.parseBootstrap(valid({ build: "b1" }), "b1").newer === null,
+    storage: C.storageKey("fixture", "tab") !== C.storageKey("http", "tab")
+  };
+  record("Ooga Chat bootstrap: a missing or foreign answer is unavailable, another revision or protocol is stale, paths stay same-origin and production never takes demo payments",
+    Object.values(contract).every(Boolean), JSON.stringify(contract));
+
+  // The session (identity protocol 1) and the sign-in return: only a GitHub account the server reports eligible may
+  // speak or see the contributor tabs; X never does, whatever its answer or handle claims; identity is the principal.
+  const NOW = 1_800_000_000_000, all = { speak: true, contributor: true };
+  const account = (provider, login, state, extra = {}) => ({ identity: { principal: `p:${provider}:${login}`, provider, login, display: login, ...extra.identity },
+    capabilities: all, eligibility: { state, ...extra.eligibility }, expiresAt: extra.expiresAt ?? NOW + 3_600_000 });
+  const parse = (raw) => C.parseSession(raw, NOW);
+  const big = "1790000000000000001", stored = new Map([["ooga-chat.v1.tab", "chat"], ["ooga-chat.v1.zone", "dsb"], ["ooga-chat.v1.screen", "choice"],
+    ["ooga-chat.v1.speaker", "true"], ["ooga-chat.role", "speaker"], ["ooga-chat.fixture.v1.tab", "bananas"], ["other", "1"]]);
+  const storage = { get length() { return stored.size; }, key: (i) => [...stored.keys()][i] ?? null, removeItem: (key) => stored.delete(key) };
+  C.sweep(storage, "http");
+  const session = {
+    eligible: parse(account("github", "someone", "eligible")).capabilities.speak === true && parse(account("github", "someone", "eligible")).capabilities.contributor === true,
+    xNeverSpeaks: (({ capabilities, eligibility }) => !capabilities.speak && !capabilities.contributor && eligibility.state === "ineligible")(parse(account("x", "someone", "eligible"))),
+    notEligible: ["ineligible", "unknown", "revoked", "nonsense"].every((state) => !parse(account("github", "someone", state)).capabilities.speak),
+    unknownByDefault: parse({ ...account("github", "someone", "eligible"), eligibility: undefined }).eligibility.state === "unknown",
+    principal: parse({ ...account("github", "someone", "eligible"), identity: { provider: "github", login: "someone" } }) === null,
+    badLogin: parse(account("github", "../x", "eligible")) === null,
+    expired: parse(account("github", "someone", "eligible", { expiresAt: NOW - 1 })) === null,
+    idString: parse(account("x", "someone", "ineligible", { identity: { providerUserId: big } })).identity.providerUserId === big
+      && parse(account("x", "someone", "ineligible", { identity: { providerUserId: 17 } })).identity.providerUserId === null,
+    display: parse(account("github", "someone", "eligible", { identity: { display: "\u202eevil\u0007 name" } })).identity.display === "evil name",
+    avatar: parse(account("github", "someone", "eligible", { identity: { avatar: "https://evil.example/a.png" } })).identity.avatar === null,
+    staleBounded: parse(account("github", "someone", "eligible", { eligibility: { checkedAt: NOW, staleAfter: 999999 } })).eligibility.staleAfter === C.STALE_MAX_S,
+    returned: C.parseReturn("?state=x&signin=denied&provider=github").result === "denied" && C.parseReturn("?signin=code123&provider=evil").result === "failed"
+      && C.parseReturn("?signin=code123&provider=evil").provider === null && C.parseReturn("?state=x") === null,
+    dropped: C.withoutReturn("?state=listener&signin=ok&provider=x&reason=y") === "?state=listener" && C.withoutReturn("?signin=ok") === "",
+    swept: [...stored.keys()].join() === "ooga-chat.v1.tab,ooga-chat.v1.zone,ooga-chat.fixture.v1.tab,other",
+    zone: C.parseZone("dsb") === "dsb" && C.parseZone("interior") === "main"
+  };
+  record("Ooga Chat session: only a GitHub account the server reports eligible speaks or sees contributor tabs, X never does whatever it claims, unknown is not eligible, identity needs the opaque principal, an X id stays a string, names and pictures are cleaned, and a sign-in return or saved screen or speaker flag cannot survive",
+    Object.values(session).every(Boolean), JSON.stringify(session));
+
+  // The account lifecycle against a stand-in adapter, clock and voice seam: every sign-in lands as a listener, capture
+  // is released before the logout request and on every downgrade, and a failed or expired session says which.
+  const A = load(["src/ooga-chat/ooga-chat-config.js", "src/ooga-chat/ooga-chat-auth.js"], { window: {}, URLSearchParams }).oogaChatAuth;
+  const boot = { paths: { session: "/s", logout: "/l", login: { github: "/g", x: "/x" } } };
+  const signedIn = async (first, extra = {}) => {
+    let clock = NOW, answer = first, failLogout = extra.failLogout, timers = [];
+    const log = [];
+    const adapter = { session: async () => { log.push("session"); if (answer instanceof Error) throw answer; return answer && parse(answer); },
+      signIn: (b, provider) => { log.push(`signIn:${provider}`); return parse(account(provider, `fresh-${provider}`, "eligible")); },
+      signOut: async () => { log.push("logout"); if (failLogout) throw new Error("offline"); } };
+    const media = { available: true, release: (why) => log.push(`release:${why}`) };
+    const auth = A.create({ adapter, media, now: () => clock, timers: { set: (fn, ms) => (timers.push({ fn, at: clock + ms }), timers.length), clear: (id) => { timers[id - 1] = null; } } });
+    await auth.start(boot, extra.back || null);
+    return { auth, log, set answer(value) { answer = value; }, set failLogout(value) { failLogout = value; },
+      advance: async (ms) => { clock += ms; for (const timer of timers) if (timer && timer.at <= clock) { timers[timers.indexOf(timer)] = null; await timer.fn(); } },
+      gates: () => A.gates(auth.state, clock), get timers() { return timers.filter(Boolean); } };
+  };
+  const eligible = await signedIn(account("github", "speaker", "eligible", { eligibility: { checkedAt: NOW, staleAfter: 600 } }));
+  const opened = eligible.auth.state.auth === "eligible" && eligible.gates().joinVoice && eligible.gates().contributor && eligible.timers.length === 1;
+  await eligible.advance(600_000);
+  const stale = eligible.log.includes("release:stale") && !A.gates({ ...eligible.auth.state, session: eligible.auth.state.session }, NOW + 600_000).joinVoice;
+  const x = await signedIn(account("x", "speaker", "eligible"));
+  const ineligible = await signedIn(account("github", "visitor", "ineligible")), unknown = await signedIn(account("github", "unchecked", "unknown"));
+  const revoked = await signedIn(account("github", "revoked", "revoked"));
+  const gated = { x: x.auth.state.auth === "listener" && !x.gates().joinVoice && !x.gates().contributor && x.gates().why === A.WHY.x,
+    ineligible: ineligible.auth.state.auth === "listener" && !ineligible.gates().joinVoice && ineligible.gates().why === A.WHY.listener,
+    unknown: unknown.auth.state.auth === "unknown" && !unknown.gates().joinVoice && !unknown.gates().contributor && unknown.gates().why === A.WHY.unknown,
+    revoked: !revoked.gates().joinVoice && !revoked.gates().contributor && revoked.gates().why === A.WHY.revoked };
+  // Sign leaving with the network down: capture goes first, the page is signed leaving, and the retry reaches the server.
+  const leaving = await signedIn(account("github", "speaker", "eligible"), { failLogout: true });
+  leaving.auth.signOut();
+  const releasedFirst = leaving.log.indexOf("release:signout") >= 0 && leaving.log.indexOf("release:signout") < leaving.log.indexOf("logout") && leaving.auth.state.session === null;
+  await new Promise((resolve) => setImmediate(resolve));
+  const uncertain = leaving.auth.state.auth === "signed-out" && leaving.auth.state.notice?.kind === "signout" && !!leaving.auth.state.notice.action;
+  leaving.failLogout = false;
+  await leaving.auth.retry();
+  const retried = leaving.log.filter((entry) => entry === "logout").length === 2 && leaving.auth.state.notice === null;
+  // Another principal, an expired session and a failed check each release; the check says which.
+  const swap = await signedIn(account("github", "speaker", "eligible"));
+  swap.answer = account("github", "someone-else", "eligible");
+  await swap.auth.check("retry");
+  swap.answer = null;
+  await swap.auth.check("retry");
+  const expiredNotice = swap.auth.state.notice?.kind === "expired";
+  const broken = await signedIn(account("github", "speaker", "eligible"));
+  broken.answer = new Error("offline");
+  await broken.auth.check("retry");
+  const throttled = await signedIn(account("github", "speaker", "eligible"));
+  await throttled.auth.check("visible");
+  // A denied return names its provider and retries it; a GitHub sign-in lands eligible but closed until Join Voice.
+  const denied = await signedIn(null, { back: { result: "denied", provider: "github" } });
+  const deniedNotice = denied.auth.state.notice?.kind === "signin" && denied.auth.state.notice.provider === "github" && denied.auth.state.auth === "signed-out";
+  await denied.auth.retry();
+  const flow = { opened, stale, ...gated, releasedFirst, uncertain, retried,
+    identity: swap.log.includes("release:identity") && swap.log.includes("release:expired") && expiredNotice,
+    error: broken.auth.state.auth === "error" && broken.log.includes("release:error") && broken.auth.state.notice?.kind === "check" && !broken.gates().joinVoice,
+    throttled: throttled.log.filter((entry) => entry === "session").length === 1,
+    denied: deniedNotice && denied.log.includes("signIn:github") && denied.auth.state.auth === "eligible" && !denied.log.some((entry) => entry.startsWith("release")) };
+  record("Ooga Chat account: every sign-in lands as a listener with gates only the server's answer opens, a stale window or failed check closes them, sign-out releases capture before the request and offers a retry when unconfirmed, and another principal or an expired session releases and says so",
+    Object.values(flow).every(Boolean), JSON.stringify(flow));
+
+  // The production adapter against a stand-in fetch: every failure is an explicit unavailable mode, and dispose aborts.
+  const answer = (status, type, body) => async () => ({ ok: status < 400, status, headers: { get: () => type }, json: async () => body });
+  const adapterWith = (fetch) => load(["src/ooga-chat/ooga-chat-config.js", "src/ooga-chat/ooga-chat-http.js"],
+    { window: {}, AbortController, setTimeout, clearTimeout }).oogaChatHttp.create({ fetch, location: { assign() {} }, doc: { querySelector: () => ({ content: "b1" }) } });
+  const modes = [];
+  for (const fetch of [answer(404, "text/html"), answer(200, "text/html; charset=utf-8", null), async () => { throw new TypeError("offline"); }, answer(200, "application/json", valid())]) {
+    modes.push((await adapterWith(fetch).bootstrap()).mode);
+  }
+  const hanging = adapterWith((path, init) => new Promise((resolve, reject) => init.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })))));
+  const waiting = hanging.bootstrap(), held = hanging.pending;
+  hanging.dispose();
+  const ended = await waiting;
+  const adapter = { modes: modes.join() === "unavailable,unavailable,unavailable,live", held, released: hanging.pending === 0 && ended.mode === "unavailable" && ended.reason === "disposed" };
+  record("Ooga Chat adapter: a 404, a non-JSON page or an unreachable service each leave the app unavailable rather than invented, and disposing aborts what is still asking",
+    adapter.modes && adapter.held === 1 && adapter.released, JSON.stringify(adapter));
+
+  // The shell over a minimal DOM: views build on first visit, are kept across tab switches and updates, and dispose once.
+  const node = (tag, doc) => {
+    const el = { tagName: tag, ownerDocument: doc, children: [], parent: null, dataset: {}, attrs: {}, hidden: false, listeners: [], className: "", id: "", title: "", type: "", tabIndex: 0,
+      setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return this.attrs[k] ?? null; },
+      append(...items) { for (const item of items) { if (typeof item === "object") { item.parent?.children.splice(item.parent.children.indexOf(item), 1); item.parent = this; } this.children.push(item); } },
+      remove() { if (this.parent) this.parent.children.splice(this.parent.children.indexOf(this), 1); this.parent = null; },
+      addEventListener(type, fn, options = {}) { const entry = { type, fn }; this.listeners.push(entry); options.signal?.addEventListener("abort", () => this.listeners.splice(this.listeners.indexOf(entry), 1)); },
+      dispatch(type, event = {}) { for (const entry of [...this.listeners]) if (entry.type === type) entry.fn({ preventDefault() {}, ...event }); },
+      focus() {}, querySelector(selector) { return this.children.find((child) => child.className === selector.slice(1)) || null; } };
+    return el;
+  };
+  const doc = { createElement: (tag) => node(tag, doc) };
+  const rootEl = node("main", doc), bar = node("nav", doc), stack = node("div", doc);
+  bar.className = "oc-tabs"; stack.className = "oc-views"; rootEl.append(bar, stack);
+  const made = {}, updates = {}, disposed = {};
+  const view = (id) => () => { made[id] = (made[id] || 0) + 1; const el = node("div", doc); return { node: el, update() { updates[id] = (updates[id] || 0) + 1; }, dispose() { disposed[id] = (disposed[id] || 0) + 1; } }; };
+  const S = load(["src/ooga-chat/ooga-chat-shell.js"], { window: { BL: { nativeIcons: { svg: () => node("svg", doc) } } }, AbortController }).oogaChatShell;
+  const shell = S.create({ root: rootEl, selected: "c", tabs: [
+    { id: "a", label: "A", icon: "cloud", visible: () => true, view: view("a") },
+    { id: "b", label: "B", icon: "bananas", visible: () => true, view: view("b") },
+    { id: "c", label: "C", icon: "chat", visible: (s) => s.contributor, view: view("c") }] });
+  const button = (id) => bar.children.find((el) => el.dataset.tab === id), panel = (id) => stack.children.find((el) => el.dataset.view === id);
+  const lazy = shell.mounted.length === 0;
+  shell.update({ contributor: false });
+  const remembered = shell.selected === "a" && shell.mounted.join() === "a" && button("c").hidden;
+  button("b").dispatch("click");
+  const bNode = panel("b").children[0];
+  button("a").dispatch("click"); button("b").dispatch("click");
+  bar.dispatch("keydown", { key: "ArrowLeft" });
+  const kept = made.a === 1 && made.b === 1 && panel("b").children[0] === bNode && shell.selected === "a" && panel("b").hidden && !panel("a").hidden;
+  shell.update({ contributor: true }); button("c").dispatch("click");
+  shell.update({ contributor: false });
+  const fallback = shell.selected === "a" && !disposed.c && panel("c").hidden && updates.c >= 1;
+  const buttons = ["a", "b", "c"].map(button);
+  shell.dispose(); shell.dispose();
+  const listeners = bar.listeners.length + buttons.reduce((sum, el) => sum + el.listeners.length, 0);
+  const lifecycle = { lazy, remembered, kept, fallback, disposedOnce: disposed.a === 1 && disposed.b === 1 && disposed.c === 1,
+    emptied: bar.children.length === 0 && stack.children.length === 0, listeners: listeners === 0, inert: (shell.update({ contributor: true }), shell.mounted.length === 0) };
+  record("Ooga Chat shell: nothing builds before the first state, a hidden remembered tab is not built, a view is built once and its nodes survive tab changes, keys and updates, a tab that hides falls back without disposing, and dispose tears every view, node and listener down once",
+    Object.values(lifecycle).every(Boolean), JSON.stringify(lifecycle));
+
+  // The build: one same-origin script and stylesheet, only the app's and the shared modules, no fixtures unless asked,
+  // and it never stages over the island's folders or a folder it did not make.
+  const B = await import(pathToFileURL(join(root, "scripts/ooga-chat.mjs")).href);
+  const out = mkdtempSync(join(tmpdir(), "ooga-chat-")), staged = join(out, "app");
+  try {
+    const manifest = B.build(staged), page = readFileSync(join(staged, "index.html"), "utf8"), headers = readFileSync(join(staged, "_headers"), "utf8");
+    const script = manifest.files.find((file) => /^js\/ooga-chat-[0-9a-f]{16}\.js$/.test(file.path)), js = readFileSync(join(staged, script.path), "utf8");
+    const art = manifest.files.find((file) => file.path.startsWith("art/"));
+    const refuses = (dir) => { try { B.build(dir); return false; } catch (error) { return /refusing|did not stage/.test(error.message); } };
+    mkdirSync(join(out, "foreign")); writeFileSync(join(out, "foreign", "keep.txt"), "x");
+    const withFixtures = B.build(staged, { fixtures: true });
+    const fixtureJs = withFixtures.files.find((file) => file.path.startsWith("js/ooga-chat-fixture-"));
+    const build = {
+      modules: manifest.scripts.every((src) => B.SHARED.includes(`../${src}`) || /^ooga-chat-[a-z-]+\.js$/.test(src)) && !manifest.scripts.includes("ooga-chat-fixtures.js"),
+      island: !/glRenderer|BL\.scene\b|BL\.net\b|BL\.director|terrain/.test(js),
+      noFixture: !js.includes("BL.oogaChatFixtures =") && !js.includes("sample-contributor") && !manifest.files.some((file) => file.path.includes("fixture")),
+      page: (page.match(/<script /g) || []).length === 1 && (page.match(/<link rel="stylesheet"/g) || []).length === 1 && !/<style|<script>/.test(page) && page.includes(`content="${manifest.build}"`),
+      art: !!art && js.includes(`"/${art.path}"`),
+      policy: B.headersFor(headers, "/")["Content-Security-Policy"] === `${B.POLICY}; frame-ancestors 'none'` && B.headersFor(headers, `/${script.path}`)["Cache-Control"].includes("immutable")
+        && B.headersFor(headers, "/index.html")["Cache-Control"] === "no-cache",
+      fixtures: !!fixtureJs && readFileSync(join(staged, fixtureJs.path), "utf8").includes("BL.oogaChatFixtures =") && readFileSync(join(staged, "fixture.html"), "utf8").includes('data-adapter="fixture"'),
+      guards: refuses(join(root, "_site")) && refuses(join(root, "src", "x")) && refuses(join(root, "untracked", "site")) && refuses(root) && refuses(join(out, "foreign"))
+    };
+    record("Ooga Chat build: one hashed same-origin script and stylesheet holding only the app's and the shared modules, no fixture code unless asked, its pictures renamed by hash, its policy in _headers, and never staged over the island's folders or a folder it did not make",
+      Object.values(build).every(Boolean), JSON.stringify(build));
+  } finally { rmSync(out, { recursive: true, force: true }); }
+
+  // The island's tabs draw from the same icons, and every icon slot names one that exists.
+  const I = load(["src/js/native-icons.js"], { window: {} }).nativeIcons;
+  const slots = [...readFileSync(join(root, "src/index.html"), "utf8").matchAll(/data-native-icon="([a-z]+)"/g)].map((m) => m[1]);
+  record("shared native icons: every island tab slot names an icon native-icons.js draws", slots.length === 4 && slots.every((name) => I.names.includes(name)), JSON.stringify(slots));
+};
 const unitChecks = async () => {
   await connectionReportChecks();
+  await oogaChatChecks();
   const artifact = artifactUnitProof();
   record("artifact workflow: tests the generated commit with the Actions-owned status and blocks rock on failed tests, status writes or concurrent pushes; a lost race passes only when rock has moved to a later CI-triggering commit, and the staging branch is always deleted", artifact.parsed && artifact.rows.every(row => row.ok), JSON.stringify(artifact));
   const previewRange=await studioPreviewRangeProof();
