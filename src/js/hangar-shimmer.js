@@ -114,6 +114,11 @@
   // straying up to `scatter` times as far again as they do, now and then (`tears`) with a bar tearing across it as they
   // do; once a showing at most, only while it holds.
   const CATCH = { chance: 0.55, close: [2, 3], delay: [0.1, 0.5], share: [0.2, 0.4], hold: [0.15, 0.4], bright: 0.25, fall: 0.3, dim: 0.6, scatter: 4, tears: 0.5 };
+  // Asked to (`cohere`), it steadies for a moment as it never otherwise does: every run of its outline whole, even and
+  // nearly still, the gaps in it filled, no bars tearing across it and its breath and wavering held, up to `bright`
+  // brighter, its glitter and falling stream dimmed by `glitter` and `stream`; eased in over `rise` s and let go over
+  // `fall` s as it starts to dissolve. Still only an outline, broken off below the hips.
+  const COHERE = { rise: 0.18, fall: 0.15, bright: 0.18, still: 0.9, glitter: 0.5, stream: 0.4 };
   // Its afterimage stirs a little as the visitor's Ooga passes: only some showings (`chance`); within `reach` m of where
   // it stood (drawn each showing between, as is its `strength`), more the nearer, eased up at `up` and back down at
   // `down` (shares a second), its streaks and motes up to `bright` brighter, their shimmer up to `quicken` times as fast
@@ -379,6 +384,8 @@
     // and how long it has been due without a place, s.
     let state = "wait", t = 0, fadeAt = -1, due = auto ? (gap !== null ? gap : between(GAP.first)) : Infinity;
     let calm = 0, look = 0, after = 0, loud = 0, waited = 0, overdue = 0, shows = 0;
+    // When on its clock it is to steady (`cohere`), -1 while it isn't, and how steady it is now, 0 to 1.
+    let cohereAt = -1, coh = 0;
     const sphere = new Float32Array(4);
     for (const node of nodes) node.cullSphere = sphere;
     // The bars: whether each shows, how long until it next changes, s, and, while it shows, its height (model units),
@@ -491,7 +498,7 @@
       at.mirror = Math.random() < 0.5 ? -1 : 1; at.slow = Math.random() * Math.PI * 2;
       const form = between(SHOW.form), dissolve = between(SHOW.dissolve), hold = clamp(between(SHOW.total) - form - dissolve, SHOW.hold[0], SHOW.hold[1]);
       at.formed = form; at.held = form + hold; at.gone = at.held + dissolve; at.end = at.gone + between(RESIDUE.life);
-      state = "show"; t = 0; fadeAt = -1; loud = 0; waited = 0; overdue = 0; shows++;
+      state = "show"; t = 0; fadeAt = -1; loud = 0; waited = 0; overdue = 0; shows++; cohereAt = -1; coh = 0;
       // Every bar away to start with, each coming at its own moment once it is forming.
       for (let b = 0; b < TEARS.n; b++) { tear.on[b] = 0; tear.next[b] = form * 0.6 + between(TEARS.off); }
       near.on = Math.random() < NEAR.chance; near.reach = between(NEAR.reach); near.share = between(NEAR.share); near.peak = between(NEAR.strength);
@@ -554,8 +561,9 @@
       const spread = smooth((t - at.held) / dissolve), gather = smooth(t / (formed * 0.4)), shown = gather * (1 - spread) * e, bits = gather * (1 - spread * spread) * e, drift = rest ? 0 : spread * spread;
       const lasting = spread * Math.pow(1 - smooth((t - at.gone) / (at.end - at.gone)), 0.8) * e;
       // Wavering in strength as it holds, now and then dropping out for a moment.
-      const slot = Math.floor(t / 0.9), drop = !rest && t > formed && t < at.held && hash(slot * 31 + 7) < 0.15 && t - slot * 0.9 < 0.12 ? 0.5 : 1;
-      const breath = (rest ? 0.9 : 0.85 + 0.15 * Math.sin(t * 1.7 + at.slow)) * drop;
+      coh = cohereAt < 0 ? 0 : smooth((t - cohereAt) / COHERE.rise) * (1 - smooth((t - at.held) / COHERE.fall)) * e;
+      const slot = Math.floor(t / 0.9), drop = !rest && coh === 0 && t > formed && t < at.held && hash(slot * 31 + 7) < 0.15 && t - slot * 0.9 < 0.12 ? 0.5 : 1;
+      const breathing = (rest ? 0.9 : 0.85 + 0.15 * Math.sin(t * 1.7 + at.slow)) * drop, breath = breathing + (0.95 - breathing) * coh;
       up = rest ? 0 : Math.min(RESIDUE.most, Math.max(0, t - at.held) * RESIDUE.rise);
       const slowly = rest ? 0.2 : 1, step = flat ? FLAT.every : 1;
       let ns = 0, nl = 0, nb = 0, ng = 0;
@@ -565,8 +573,9 @@
       bands = 0;
       if (!rest && shown > 0.01) for (let b = 0; b < TEARS.n; b++) {
         if (near.tear && !tear.on[b]) { tear.next[b] = 0; near.tear = false; }
+        if (coh > 0.5 && tear.on[b]) { tear.on[b] = 0; tear.next[b] = between(TEARS.off); }
         if ((tear.next[b] -= dt) <= 0) {
-          tear.on[b] = tear.on[b] || t < formed * 0.6 || t > at.held + dissolve * 0.3 || Math.random() < Math.max(near.k * NEAR.calms, near.c) ? 0 : 1;
+          tear.on[b] = tear.on[b] || t < formed * 0.6 || t > at.held + dissolve * 0.3 || Math.random() < Math.max(near.k * NEAR.calms, near.c, coh) ? 0 : 1;
           tear.next[b] = between(tear.on[b] ? TEARS.on : TEARS.off);
           if (tear.on[b]) {
             const range = TEARS.heights[b], y = range[0] + Math.random() * (range[1] - range[0]), k = Math.min(RC.hi.length - 1, Math.floor(y / REACH));
@@ -595,18 +604,18 @@
         for (let i = 0; i < E.n; i++) {
           const y = E.y[i], fade = legs(y);
           if (fade <= 0) continue;
-          const arrive = smooth((t - E.delay[i] * formed) / (formed * 0.45));
+          const arrive = Math.max(coh, smooth((t - E.delay[i] * formed) / (formed * 0.45)));
           if (arrive <= 0) continue;
           // A run steadied near the visitor's Ooga holds steady at an even glint and nearly still; one caught closer in
           // holds whole, still and brighter for an instant, then breaks apart, dimming and straying.
           const mine = near.c > 0 || near.b > 0 ? hash(Math.floor(E.runPhase[i] * 1000) + near.catchSeed) < near.catchShare : false;
-          const caught = mine ? near.c : 0, broke = mine ? near.b : 0;
+          const caught = Math.max(coh, mine ? near.c : 0), broke = mine ? near.b : 0;
           const settled = near.k > 0 && hash(Math.floor(E.runPhase[i] * 1000) + near.seed) < near.share ? near.k : 0, steady = Math.max(settled, caught);
           const glint = rest ? 1 : EDGE.gap + (1 - EDGE.gap) * smooth((Math.sin(elapsed * E.runRate[i] + E.runPhase[i]) + 1 - 2 * EDGE.on) / 0.4 + 0.5);
           const even = rest ? glint : glint + (NEAR.level - glint) * settled, run = even + (1 - even) * caught;
-          const base = fade * height(y) * arrive * bits * breath * run * (1 + NEAR.bright * near.k + CATCH.bright * caught) * (1 - CATCH.dim * broke);
+          const base = fade * height(y) * arrive * bits * breath * run * (1 + NEAR.bright * near.k + CATCH.bright * (caught - coh) + COHERE.bright * coh) * (1 - CATCH.dim * broke);
           if (base <= 0.01) continue;
-          const stray = (1 - NEAR.still * steady) * (1 - 0.3 * caught) * (1 + (rest ? 0 : CATCH.scatter) * broke);
+          const stray = (1 - NEAR.still * steady) * (1 - 0.3 * caught) * (1 - COHERE.still * coh) * (1 + (rest ? 0 : CATCH.scatter) * broke);
           const apart = rest ? 0 : 1 - arrive, j = i * 2, jitter = EDGE.jitter * stray * Math.sin(E.phase[i] + elapsed * 0.7 * slowly);
           const x0 = E.x[i] + E.nx[i] * jitter + E.from[j] * apart + E.to[j] * drift, y0 = y + E.ny[i] * jitter + E.from[j + 1] * apart + E.to[j + 1] * drift;
           if (i % (EDGE.every * step) === 0) {
@@ -637,7 +646,7 @@
           const arrive = smooth((t - G.delay[i] * formed) / (formed * 0.5));
           if (arrive <= 0) continue;
           const twinkle = 0.3 + 0.7 * Math.pow(0.5 + 0.5 * Math.sin(elapsed * G.rate[i] * slowly + G.phase[i]), 3);
-          const opacity = GLITTER.glow * fade * height(y) * arrive * bits * breath * twinkle;
+          const opacity = GLITTER.glow * fade * height(y) * arrive * bits * breath * twinkle * (1 - COHERE.glitter * coh);
           if (opacity <= 0.01) continue;
           const apart = rest ? 0 : 1 - arrive, j = i * 2;
           place(G.x[i] + G.from[j] * apart + G.to[j] * drift, y + G.from[j + 1] * apart + G.to[j + 1] * drift);
@@ -646,7 +655,7 @@
         // The falling stream from the hips to the floor, thinning as it falls.
         for (let i = 0; i < FL.n; i += step) {
           const fallen = rest ? 0 : elapsed * FL.speed[i] / H, y = ((FL.y[i] - fallen) % FALL.top + FALL.top) % FALL.top;
-          const opacity = FALL.glow * bits * breath * smooth(y / 0.12) * (0.35 + 0.65 * smooth(y / FALL.top)) * (0.5 + 0.5 * Math.sin(elapsed * 4 * slowly + FL.phase[i]));
+          const opacity = FALL.glow * (1 - COHERE.stream * coh) * bits * breath * smooth(y / 0.12) * (0.35 + 0.65 * smooth(y / FALL.top)) * (0.5 + 0.5 * Math.sin(elapsed * 4 * slowly + FL.phase[i]));
           if (opacity <= 0.01) continue;
           place(FL.x[i] * (0.6 + 0.4 * y / FALL.top), y + spread * 0.2);
           sprite(sparks, ns++, P.x, P.y, P.z, FL.size[i], FL.size[i], 0, opacity);
@@ -786,7 +795,7 @@
       get state() { return state; }, get at() { return state === "wait" ? null : [at.x, at.z]; }, get spots() { return spots.length / 2; },
       get timeline() { return state === "wait" ? null : [at.formed, at.held, at.gone, at.end].map((v) => +v.toFixed(2)); },
       get due() { return due; }, get calm() { return calm; }, get after() { return after; }, get t() { return t; },
-      get count() { return sparks.instanceCount + lines.instanceCount + bars.instanceCount + glow.instanceCount; },
+      get count() { return sparks.instanceCount + lines.instanceCount + bars.instanceCount + glow.instanceCount; }, get coherence() { return coh; },
       get loud() { return loud; },
       get near() { return { on: near.on, reach: +near.reach.toFixed(2), left: near.left, k: +near.k.toFixed(3), catchOn: near.catchOn, close: +near.close.toFixed(2), caught: near.caught, c: +near.c.toFixed(2), b: +near.b.toFixed(2), stirOn: near.stirOn, stirReach: +near.stirReach.toFixed(2), s: +near.s.toFixed(3) }; }
     };
@@ -803,6 +812,15 @@
         if (t < at.held - lead) { at.held = Math.max(at.formed, t + lead); at.gone = at.held + len; at.end = at.gone + 1.2; }
         else at.end = Math.max(t + 0.8, Math.min(at.end, at.gone + 1.2));
         return Math.max(0, at.held - t);
+      },
+      // Steady `start` s from now as it never otherwise does (`COHERE`), hold so `hold` s, then dissolve over `dissolve` s,
+      // leaving only a short afterimage; returns how long until it starts dissolving, s. Already dissolving or gone to its
+      // afterimage, it only clears away, and returns -1.
+      cohere: (start, hold, dissolve) => {
+        if (state !== "show") return -1;
+        if (t >= at.held || fadeAt >= 0) { if (fadeAt < 0) fadeAt = t; return -1; }
+        cohereAt = t + start; at.held = cohereAt + hold; at.gone = at.held + dissolve; at.end = at.gone + 1;
+        return at.held - t;
       },
       // Whether, while it shows, its middle or its head is in sight from (x, y, z), past walls, boxes and the Jet.
       seen: (x, y, z) => state === "show" && (sightClear(x, y, z, at.x, TOP * SCALE * 0.55, at.z) || sightClear(x, y, z, at.x, TOP * SCALE * 0.9, at.z)),
