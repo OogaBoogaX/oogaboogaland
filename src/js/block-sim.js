@@ -270,57 +270,83 @@
     };
   };
 
-  // Ooga Town: a two-storey bank at each end with the block's stand in its open hall and a mezzanine over the back,
-  // reached by stairs; a pair of two-storey shops in each half, their upper floors joined by a footbridge over the
-  // street; market stalls, a fountain in the square and the campfire by the edge.
+  // Ooga Town: high noon on Main Street. A bank at each end with the block's stand at the back of its hall, under a
+  // mezzanine reached by stairs; a saloon and a general store in each half, each walked straight through (a front and
+  // a back door, both at its street end, and a side door onto the street), their upper floors joined by a footbridge
+  // over the street; market stalls before the bank, a cart in the square and the fountain with its gold coin in the
+  // middle. Three ways into a bank: the front doors, the back door behind the stand, and the hole in its side wall
+  // where the cash machine was.
+  // `kinds` says what each of the map's own boxes is, for the models. No building is a dead end, so the bots find
+  // their way by steering alone, as on Fort Chaos.
   const oogaTown = () => {
-    const half = [], steps = [];
-    // The bank: back wall with a door, side walls rising to the mezzanine, the front either side of its doors.
-    half.push([-9, -1.2, 34, 35, 4, 0], [1.2, 9, 34, 35, 4, 0], [-9, -8, 24, 34, 4, 0], [8, 9, 24, 34, 4, 0], [-9, -2.5, 24, 25, 3, 0], [2.5, 9, 24, 25, 3, 0]);
+    const half = [], steps = [], kinds = new Map();
+    const put = (kind, ...boxes) => { for (const b of boxes) { half.push(b); kinds.set(b, kind); } };
+    // The bank: its front either side of the doors, the side walls (the left one holed), the back wall with its door.
+    put("bank", [-9, -2.5, 24, 25, 3, 0], [2.5, 9, 24, 25, 3, 0], [8, 9, 25, 34, 4, 0], [-9, -8, 27, 34, 4, 0], [-9, -8, 25, 27, 4, 2.3],
+      [-9, -1.2, 34, 35, 4, 0], [1.2, 9, 34, 35, 4, 0], [-1.2, 1.2, 34, 35, 4, 2.4]);
+    // The pediment: the lintel over the doors, wider than they are, and the clock's tier on it (the zipline from the
+    // other end comes in over the wall beside it).
+    put("pediment", [-3.5, 3.5, 24, 25, 4, 3], [-2, 2, 24.2, 24.8, 4.8, 4]);
     // The mezzanine over the back of the hall, its parapet open over the stairs and in the middle to jump down.
-    half.push([-8, 8, 30.5, 34, 3, 2.7], [-8, -2.2, 30.5, 30.7, 3.9, 3], [2.2, 6, 30.5, 30.7, 3.9, 3]);
+    put("floor", [-8, 8, 30.5, 34, 3, 2.7]);
+    put("rail", [-8, -2.2, 30.5, 30.7, 3.9, 3], [2.2, 6, 30.5, 30.7, 3.9, 3]);
     // Seven steps up the inside of the right wall to the mezzanine.
-    for (let k = 1; k <= 7; k++) { const b = [6, 8, 25.6 + (k - 1) * 0.7, 25.6 + k * 0.7, k * 3 / 7, 0]; half.push(b); steps.push(b); }
-    // The two shops of the half, one either side of the street.
+    for (let k = 1; k <= 7; k++) { const b = [6, 8, 25.6 + (k - 1) * 0.7, 25.6 + k * 0.7, k * 3 / 7, 0]; put("step", b); steps.push(b); }
+    // The two shops of the half, one either side of the street: the saloon on the left, the general store on the right.
     for (const s of [-1, 1]) {
-      const x0 = s > 0 ? 9 : -16, x1 = s > 0 ? 16 : -9, xm = (x0 + x1) / 2, outer = s > 0 ? x1 : x0, inner = s > 0 ? x0 : x1;
+      const x0 = s > 0 ? 9 : -16, x1 = s > 0 ? 16 : -9, outer = s > 0 ? x1 : x0, inner = s > 0 ? x0 : x1, shop = s > 0 ? "store" : "saloon";
       const lo = (v) => Math.min(v, v - 0.4 * s), hi = (v) => Math.max(v, v - 0.4 * s), li = (v) => Math.min(v, v + 0.4 * s), hiI = (v) => Math.max(v, v + 0.4 * s);
-      half.push([x0, x1, 14.6, 15, 3.9, 0], [x0, xm - 0.9, 8, 8.4, 3, 0], [xm + 0.9, x1, 8, 8.4, 3, 0]);
-      half.push([lo(outer), hi(outer), 8, 15, 3.9, 0]);
+      // The back wall and the front, each with its door at the street end, so no corner inside is a pocket: a way
+      // straight through under the upper floor. The sign board stands over the front door.
+      const d0 = Math.min(inner + 0.4 * s, inner + 2.2 * s), d1 = Math.max(inner + 0.4 * s, inner + 2.2 * s), w0 = s > 0 ? d1 : x0, w1 = s > 0 ? x1 : d0;
+      put(shop, [w0, w1, 14.6, 15, 3.9, 0], [d0, d1, 14.6, 15, 3.9, 3], [w0, w1, 8, 8.4, 3, 0]);
+      put(shop + "Sign", [Math.min(inner, inner + 5.2 * s), Math.max(inner, inner + 5.2 * s), 8, 8.4, 4.6, 2.4]);
+      put(shop, [lo(outer), hi(outer), 8.4, 14.6, 3.9, 0]);
       // The inner wall, with a door, stops at the upper floor so the footbridge runs straight on.
-      half.push([li(inner), hiI(inner), 8, 10.6, 3, 0], [li(inner), hiI(inner), 12.2, 15, 3, 0]);
+      put(shop, [li(inner), hiI(inner), 8.4, 10.6, 3, 0], [li(inner), hiI(inner), 12.2, 14.6, 3, 0]);
       // The upper floor over the back half, its parapet open over the stairs.
       const sx0 = s > 0 ? 14.1 : -15.6, sx1 = s > 0 ? 15.6 : -14.1;
-      half.push([x0, x1, 11.5, 15, 3, 2.7], s > 0 ? [9.4, 14.1, 11.5, 11.7, 3.9, 3] : [-14.1, -9.4, 11.5, 11.7, 3.9, 3]);
-      for (let k = 1; k <= 7; k++) { const b = [sx0, sx1, 8.6 + (k - 1) * 0.414, 8.6 + k * 0.414, k * 3 / 7, 0]; half.push(b); steps.push(b); }
+      put("floor", [x0, x1, 11.5, 15, 3, 2.7]);
+      put("rail", s > 0 ? [9.4, 14.1, 11.5, 11.7, 3.9, 3] : [-14.1, -9.4, 11.5, 11.7, 3.9, 3]);
+      for (let k = 1; k <= 7; k++) { const b = [sx0, sx1, 8.6 + (k - 1) * 0.414, 8.6 + k * 0.414, k * 3 / 7, 0]; put("step", b); steps.push(b); }
     }
     // The footbridge between the shops' upper floors, its rails and two posts.
-    half.push([-9, 9, 12, 14, 3, 2.7], [-9, 9, 12, 12.2, 3.8, 3], [-9, 9, 13.8, 14, 3.8, 3], at(-4, 13, 0.5, 0.5, 2.7), at(4, 13, 0.5, 0.5, 2.7));
-    // Market stalls before the bank and a low wall by the tower.
-    half.push(at(-4.5, 19, 3, 1, 1.1), at(4.5, 19, 3, 1, 1.1), [-20, -17, 16, 17, 1.4, 0]);
-    // The fountain in the square.
-    const middle = [[-1.5, 1.5, -1.5, 1.5, 0.8, 0], at(0, 0, 0.6, 0.6, 2.2)];
+    put("bridge", [-9, 9, 12, 14, 3, 2.7]);
+    put("bridgeRail", [-9, 9, 12, 12.2, 3.8, 3], [-9, 9, 13.8, 14, 3.8, 3]);
+    put("post", at(-4, 13, 0.5, 0.5, 2.7), at(4, 13, 0.5, 0.5, 2.7));
+    // Two market stalls before the bank, a counter under an awning a double jump reaches, and the cart in the square.
+    for (const x of [-4.5, 4.5]) { put("stall", at(x, 19, 3, 1, 1.1)); put("awning", [x - 1.7, x + 1.7, 18.2, 19.8, 2.4, 2.25]); }
+    put("cart", at(5.5, 6, 2.6, 1.4, 1.6));
+    // The fountain in the square, put in once: its basin, the column and the gold coin standing on it.
+    const middle = [[-1.5, 1.5, -1.5, 1.5, 0.8, 0], at(0, 0, 0.6, 0.6, 3), [-1.3, 1.3, -0.15, 0.15, 5.6, 3]];
+    kinds.set(middle[0], "basin"); kinds.set(middle[1], "column"); kinds.set(middle[2], "coin");
     const { BLOCKS, steps: stepSet } = turnedMap(half, middle, steps);
+    for (let i = 0; i < half.length; i++) kinds.set(BLOCKS[middle.length + 2 * i + 1], kinds.get(half[i]));
     return {
-      id: "town", name: "Ooga Town", BLOCKS, steps: stepSet,
+      id: "town", name: "Ooga Town", BLOCKS, steps: stepSet, kinds,
       gorillas: [[-12.5, 0.5], [12.5, -0.5], [0, 10], [0, -10]],
-      // Hub-style terrain (`mound`, `cave`, `outcrop`) and the grappling hooks' hand-checked hiding spots [x, y, z]:
-      // in the cave, on the mound's top, behind the outcrop.
-      terrain: [...cave(16.5, 21.5, 17, 21), ...mound(-21.5, -17.5, 10, 15), ...outcrop(2, 4, 9, 10.5)],
-      hookSpots: [[19, 0, 19.25], [-19.5, 2, 12.5], [3, 0, 11.4]],
+      // Hub-style terrain (`mound`, `cave`) and the grappling hooks' hand-checked hiding spots [x, y, z]: in the cave,
+      // on the mound's top, behind the cart.
+      terrain: [...cave(16.5, 21.5, 17, 21), ...mound(-23, -19, 10, 15)],
+      hookSpots: [[19, 0, 19.25], [-21, 2, 12.5], [5.5, 0, 7.8]],
       // The block's stand at the back of the building, under its upper floor, with the board's Ooga out in the yard.
       stands: { blue: { x: 0, z: 32.2 }, red: { x: 0, z: -32.2 } },
       showcase: { blue: { x: 0, z: 25.5 }, red: { x: 0, z: -25.5 } },
       guard: { blue: { x: 0, z: 21.5 }, red: { x: 0, z: -21.5 } },
-      traps: [[-12.5, 4], [12.5, -4], [7, 21], [-7, -21], [-19, 8], [19, -8], [0, 6.5], [0, -6.5]],
+      // The quiz pads: under the footbridge beside its post, before the saloon, on the forecourt and out on the flank;
+      // none on the straight line between the stands, which a carrier bot runs.
+      traps: [[-3.2, 13], [3.2, -13], [-12.5, 4], [12.5, -4], [7, 21], [-7, -21], [-20.5, 7], [20.5, -7]],
       crates: both([[-4.6, 22], [4.6, 22], [-3.2, 27.5], [4.5, 27.5]]),
       plug: both([[0, 24.5], [-1.3, 25.8], [1.3, 25.8]]),
       alley: both([[-3, 36], [3, 36], [0, 35.7]]),
       caches: [[12.5, 3, 13.5], [-12.5, 3, 13.5], [12.5, 3, -13.5], [-12.5, 3, -13.5], [0, 3, 32.5], [0, 3, -32.5]],
-      tramps: [[-15, 19], [15, -19], [-5, 4], [5, -4]],
+      // A trampoline behind each saloon, onto its upper floor, and one in the square, onto the footbridge.
+      tramps: [[-13.5, 21], [13.5, -21], [-5, 5.8], [5, -5.8]],
       powers: [[-6.5, 17], [6.5, -17], [19, 12], [-19, -12], [0, 4], [0, -4]],
       fire: [-19.5, 0],
-      catapults: both([[-6, 29]])
+      catapults: both([[-6, 29]]),
+      // A catapult drops its Ooga into the other bank's hall, past the lintel over its front doors.
+      drops: { blue: [0, -27], red: [0, 27] }
     };
   };
   // Gorilla Jungle: stone forts at the ends as on Fort Chaos, and between them jungle: trees, a two-storey tree fort

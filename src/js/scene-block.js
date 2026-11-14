@@ -2579,6 +2579,8 @@
     add(createNode({ geometry: BM.isle(SIM.MAPS.indexOf(selection.map)) }));
     add(createNode({ geometry: BM.keel(SIM.MAPS.indexOf(selection.map)) }));
     if (detail.full) buildDecor(A, add);
+    // Ooga Town's lettering and small dressing, one mesh, behind the same setting.
+    if (detail.full && A.id === "town") add(createNode({ geometry: BM.townDress(), sightHidden: true }));
     for (const [x, z] of A.puddles || []) add(createNode({ geometry: BM.puddle(), position: { x, y: 0, z } }));
     boltNode = add(createNode({ geometry: BM.bolt(), visible: false, sightHidden: true }));
     boltRing = add(createNode({ geometry: BM.ring(0), visible: false, sightHidden: true, scale: { x: 3.2, y: 1, z: 3.2 } }));

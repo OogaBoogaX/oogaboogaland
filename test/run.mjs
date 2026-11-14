@@ -7394,7 +7394,8 @@ const gameRulesChecks = async () => {
     record("block steals live: a guest's wield on the host decides what a hook or Golden AK fire can take, an unowned tool is refused, the frame carries the result to a guest exactly, and the drop events are gone (WIRE 5)",
       Object.values(guests).every(Boolean), JSON.stringify(guests));
     // Shots through the sim itself: bots meet a crouched, a higher and a lower target; no round passes a thin wall.
-    const shootAt = (kind, setup) => { const s = S.create({ team: "blue", seed: 6, size: 2, map: "town", prep: 0 }), a = s.actors[0], t = s.actors[2]; for (const q of s.actors) { q.bot = false; q.guard = 0; } s.gorillas.length = 0; a.x = 6; a.z = -20; a.y = 0; t.x = 6; t.z = -8; t.y = 0; s.actors[1].x = s.actors[3].x = 200; setup(s, a, t);
+    // The pair stand on the first open lane of Ooga Town with nothing built on or across it.
+    const shootAt = (kind, setup) => { const s = S.create({ team: "blue", seed: 6, size: 2, map: "town", prep: 0 }), a = s.actors[0], t = s.actors[2]; for (const q of s.actors) { q.bot = false; q.guard = 0; } s.gorillas.length = 0; a.x = t.x = [6, 8, 2, 0].find((x) => S.clearLine(x, -20, x, -8, 0.4) && S.groundAt(x, -20, 3, 0.2) === 0); a.z = -20; a.y = 0; t.z = -8; t.y = 0; s.actors[1].x = s.actors[3].x = 200; setup(s, a, t);
       const ty = t.y, ay = a.y, tc = t.crouch, d = Math.hypot(t.x - a.x, t.z - a.z); S.fire(s, 0, Math.atan2(t.x - a.x, t.z - a.z), S.flatPitch(d, S.TOOLS[kind]) + S.aimRise(a, t, d), kind);
       for (let i = 0; i < 150 && t.splat <= 0; i++) { t.y = ty; t.vy = 0; t.crouch = tc; a.y = ay; a.vy = 0; S.tick(s, S.CONFIG.STEP, still()); } return t.splat > 0; };
     const aims = {};
@@ -8385,6 +8386,44 @@ const gameRulesChecks = async () => {
         Object.values(loose).every((v) => Object.values(v).every(Boolean)), JSON.stringify(loose));
       record("block frenzy terrain: on every map the mounds, caves and outcrops are mirrored half round, clear of the buildings and every spot in use, and the forts, stands, catapults, ladders and hiding spots stay reachable on foot",
         Object.values(rows).every((v) => Object.values(v).every(Boolean)), JSON.stringify(rows));
+      {
+        // Ooga Town: no building is a dead end. Each bank's front doors, back door and the hole in its side wall, and
+        // each shop's front, back and side doors are open at walking height on both sides, with wall beside them;
+        // every box of the town is named for the models; and a catapult's Ooga comes down on the hall's floor.
+        const fresh = () => { const r = S.create({ seed: 5, prep: 0, map: "town" }); for (const o of r.actors) o.bot = false; Object.assign(r.weather, { left: 1e9 }); for (const g of r.gorillas) { g.state = 3; g.t = 1e9; } for (const k of r.crates) k.live = false; return r; };
+        fresh();
+        const T = S.ARENAS.town, open = (x, z) => !S.solidAt(x, 0.4, z) && !S.solidAt(x, 1.6, z);
+        const town = { doors: true, walls: true };
+        for (const s of [1, -1]) {
+          for (const [x, z] of [[0, 24.5], [0, 34.5], [-8.5, 26], [10.3, 8.2], [-10.3, 8.2], [10.3, 14.8], [-10.3, 14.8], [9.2, 11.4], [-9.2, 11.4]]) town.doors &&= open(s * x, s * z);
+          for (const [x, z] of [[5, 24.5], [-8.5, 30], [8.5, 26], [13, 8.2], [-13, 8.2], [13, 14.8], [-13, 14.8], [5, 34.5]]) town.walls &&= S.solidAt(s * x, 1.6, s * z);
+        }
+        town.named = T.BLOCKS.filter((b) => T.kinds.has(b)).length === T.kinds.size && T.kinds.size === T.BLOCKS.length - T.rocks.size - 20 && [...T.steps].every((b) => T.kinds.get(b) === "step");
+        town.drops = S.TEAMS.every((t) => S.groundAt(T.drops[t][0], T.drops[t][1], 9) === 0 && Math.abs(T.drops[t][1]) > 25 && Math.abs(T.drops[t][1]) < 30);
+        // A raider bot reaches the rivals' block from the spawns, the street, the side lines, beside and behind the
+        // shops and behind its own bank, on both sides (on rock before the shops had back doors, the side-line and
+        // shop-side starts ended inside a shop). The raider has a hook in hand, so none lying in a cave calls it aside.
+        // And a bot with the block runs it home down the street without meeting a quiz pad.
+        const raids = {};
+        for (const [team, s] of [["blue", 1], ["red", -1]]) {
+          for (const [sx, sz] of [[-1.2, -26], [0, -8], [-18, 0], [18, 0], [16, -4], [-12, 13], [12, 6], [12, -18], [0, -36]]) {
+            const rq = fresh(), a = rq.actors.find((o) => o.team !== team);
+            Object.assign(a, { bot: true, role: "attack", x: s * sx, z: s * sz, y: 0, hook: 1 });
+            let t = 0;
+            for (; t < 30 && a.carrying !== team; t += S.CONFIG.STEP) { S.tick(rq, S.CONFIG.STEP, still); rq.eventCount = 0; }
+            raids[`${team}@${s * sx},${s * sz}`] = a.carrying === team ? +t.toFixed(1) : `fail at ${a.x.toFixed(1)},${a.z.toFixed(1)}`;
+          }
+          const rq = fresh(), a = rq.actors.find((o) => o.team !== team), st = T.stands[team], was = rq.score[a.team];
+          Object.assign(a, { bot: true, role: "attack", x: st.x, z: st.z - s * 2.2, y: 0, hook: 1 });
+          let t = 0, quizzed = false;
+          for (; t < 20 && rq.score[a.team] === was; t += S.CONFIG.STEP) { S.tick(rq, S.CONFIG.STEP, still); rq.eventCount = 0; quizzed ||= a.trapped > 0; }
+          raids[`${team} home`] = rq.score[a.team] > was && !quizzed ? +t.toFixed(1) : `fail at ${a.x.toFixed(1)},${a.z.toFixed(1)}${quizzed ? ", quizzed" : ""}`;
+        }
+        record("block frenzy ooga town: each bank's doors and the hole in its side and each shop's three doors are open on both sides with wall beside them, every box is named, and a catapult lands in the hall",
+          Object.values(town).every(Boolean), JSON.stringify(town));
+        record("block frenzy ooga town raids: from the spawns, the street, the side lines, round the shops and behind its own bank, on both sides, a raider bot reaches the rivals' block within 30 s, and a carrier bot is home within 20 s without meeting a quiz pad",
+          Object.values(raids).every((v) => typeof v === "number"), JSON.stringify(raids));
+      }
     }
     {
       // The grappling hook, played through the sim's own calls: a hook found at its hiding spot, a bite on rock reeling the
