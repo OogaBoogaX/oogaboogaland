@@ -1,6 +1,7 @@
 // Sign-in helpers and real routes with fixture D1 and identity responses: no network.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 import { cookieNames, parseCookies, serializeCookie } from "../src/cookies.js";
 import { randomToken, sameString, sha256Hex } from "../src/crypto.js";
 import { isExpired, needsTouch, publicPlayer, sanitizeDisplay, TOUCH_SECONDS } from "../src/db.js";
@@ -176,6 +177,36 @@ test("old nonowner sessions receive no identity and cannot reach account, room o
     assert.equal((await worker.fetch(requestFor("/room", "GET", { upgrade: "websocket", "x-player-contributor": "1" }), env)).status, 401);
     assert.equal((await worker.fetch(requestFor("/api/voice/publish", "POST"), env)).status, 401);
     assert.equal(DB.writes.length, 0);
+  }
+});
+
+test("TURN capability and the dedicated mint limit apply only to eligible sessions", async () => {
+  const { worker } = routeFixture({ cast: CAST });
+  const keys = [];
+  const env = { SITE_ORIGIN: SITE, DB: database("real-owner"), REALTIME_APP_ID: "app", REALTIME_SECRET: "fixture",
+    REALTIME_TURN_KEY_ID: "key", REALTIME_TURN_TOKEN: "fixture",
+    VOICE_LIMITER: { limit: () => { throw new Error("Used the signalling limiter"); } },
+    VOICE_ICE_LIMITER: { limit: async ({ key }) => { keys.push(key); return { success: false }; } },
+    ROOM: { getByName: () => { throw new Error("A limited request reached the room"); } } };
+  const me = async (current) => (await worker.fetch(requestFor("/api/me"), current)).json();
+  assert.equal((await me(env)).voiceTurn, true);
+  assert.equal((await me({ ...env, REALTIME_TURN_TOKEN: "" })).voiceTurn, undefined);
+  assert.equal((await me({ ...env, DB: database("visitor") })).voiceTurn, undefined);
+  assert.equal((await worker.fetch(requestFor("/api/voice/ice", "POST"), env)).status, 429);
+  assert.deepEqual(keys, ["123"]);
+});
+
+test("regression: no two rate limiters share a namespace, in a Worker or across the account's Workers", () => {
+  // Limiters with one namespace_id share counters: the TURN mint limiter once took CONNECTION_REPORT_LIMITER's.
+  const root = new URL("../../", import.meta.url), owner = new Map();
+  const files = readdirSync(root).filter((f) => /^wrangler\..+\.jsonc$/.test(f));
+  assert.ok(files.includes("wrangler.staging.jsonc") && files.includes("wrangler.production.jsonc"));
+  for (const file of files) {
+    const config = JSON.parse(readFileSync(new URL(file, root), "utf8").replace(/^\s*\/\/.*$/gm, ""));
+    for (const { name, namespace_id: id } of config.ratelimits || []) {
+      assert.ok(!owner.has(id), `${file} ${name} reuses namespace ${id} of ${owner.get(id)}`);
+      owner.set(id, `${file} ${name}`);
+    }
   }
 });
 

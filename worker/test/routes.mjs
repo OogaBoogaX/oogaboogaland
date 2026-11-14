@@ -7,6 +7,7 @@ import * as crypto from "../src/crypto.js";
 import * as db from "../src/db.js";
 import * as highscoreStore from "../src/highscore-store.js";
 import { createOwnedCharacterLookup } from "../src/contributor-policy.js";
+import { turnConfigured } from "../src/sfu.js";
 import { RULES } from "../src/tess-rules.js";
 import "../../src/js/highscore-rules.js";
 import "../../src/js/arcade-cabinets.js";
@@ -38,7 +39,7 @@ anthropic = class { constructor() { throw new Error("Unexpected Claude call"); }
   const http = load("http", { ...cookies, ...db, ...access }, ["json", "text", "redirect", "fromSite", "safeNext",
     "clientIp", "allowed", "sessionToken", "getSessionFromRequest", "getSessionForRemoval", "readBody"]);
   const auth = load("auth", { ...cookies, ...crypto, ...db, ...http, ...access, fetch: fetcher }, ["handleAuth"]);
-  const api = load("api", { ...cookies, ...db, ...http, GAME_KINDS }, ["handleApi"]);
+  const api = load("api", { ...cookies, ...db, ...http, turnConfigured, GAME_KINDS }, ["handleApi"]);
   const donations = load("donations", http, ["handleDonations"]);
   const tess = load("tess", { ...http, Anthropic: anthropic, FACTS: facts, RULES }, ["handleTess", "pruneTess", "ask", "RESERVE"]);
   const replayStore = load("cloud-hopper-replay-store", {}, ["winnerSQL", "liveSQL", "winnerReplay", "pruneCloudHopperReplays"]);

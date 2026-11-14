@@ -4,6 +4,35 @@
 
 const BASE = "https://rtc.live.cloudflare.com/v1/apps";
 
+const TURN_BASE = "https://rtc.live.cloudflare.com/v1/turn/keys";
+const TURN_TLS = "turns:turn.cloudflare.com:443?transport=tcp";
+const TURN_TTL = 7200;
+
+export const turnConfigured = (env) => !!(env.REALTIME_APP_ID && env.REALTIME_SECRET
+  && env.REALTIME_TURN_KEY_ID && env.REALTIME_TURN_TOKEN && env.VOICE_ICE_LIMITER);
+
+export const turnCredentials = async (env) => {
+  if (!turnConfigured(env)) return null;
+  const key = encodeURIComponent(env.REALTIME_TURN_KEY_ID);
+  // Staging can exercise an allocation renewal in five minutes. Production defaults to two hours.
+  const configured = Number(env.REALTIME_TURN_TTL);
+  const ttl = Number.isInteger(configured) && configured >= 300 && configured <= TURN_TTL ? configured : TURN_TTL;
+  const res = await fetch(`${TURN_BASE}/${key}/credentials/generate-ice-servers`, {
+    method: "POST", redirect: "error", signal: AbortSignal.timeout(5000),
+    headers: { authorization: `Bearer ${env.REALTIME_TURN_TOKEN}`, "content-type": "application/json" },
+    body: JSON.stringify({ ttl }),
+  });
+  if (!res.ok) return null;
+  const { iceServers } = await res.json();
+  if (!Array.isArray(iceServers)) return null;
+  for (const server of iceServers) {
+    if (!server || !(server.urls === TURN_TLS || Array.isArray(server.urls) && server.urls.includes(TURN_TLS))) continue;
+    if (typeof server.username !== "string" || !server.username || typeof server.credential !== "string" || !server.credential) continue;
+    return { iceServers: [{ urls: TURN_TLS, username: server.username, credential: server.credential }], ttl };
+  }
+  return null;
+};
+
 // `measured(ms, failed)`, when given, hears how long each call took and whether it failed (the inspector's counts).
 export const sfuClient = (env, measured = null) => {
   if (!env.REALTIME_APP_ID || !env.REALTIME_SECRET) return null;

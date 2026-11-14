@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import * as protocol from "../src/protocol.js";
 import * as studio from "../src/studio-policy.js";
-import { sfuClient } from "../src/sfu.js";
+import { sfuClient, turnCredentials } from "../src/sfu.js";
 import { getPlayer } from "../src/db.js";
 
 const zones = ["dsb-outside", "dsb-studio", "dsb-maxis", "dsb-without-rulers", "dsb-proof-of-ink", "dsb-big-bitcoin", "dsb-meme-factory", "dsb-stackchain", "dsb-svrn"];
@@ -26,7 +26,7 @@ const roomClass = (extra = {}) => {
   const source = readFileSync(new URL("../src/room.js", import.meta.url), "utf8")
     .replace(/import\s+[\s\S]*?from\s+"[^"]+";/g, "")
     .replace("export class Room", "class Room") + "\nglobalThis.Room = Room;";
-  const context = { ...protocol, ...studio, getPlayer, DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }, WebSocketRequestResponsePair: class {}, sfuClient, CAST_ROWS: [{ handle: "YellowBrokeIt", github_login: "YellowBrokeIt" }], Date, Map, Set, Response, Promise, setTimeout, clearTimeout, ...extra };
+  const context = { ...protocol, ...studio, getPlayer, DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }, WebSocketRequestResponsePair: class {}, sfuClient, turnCredentials, CAST_ROWS: [{ handle: "YellowBrokeIt", github_login: "YellowBrokeIt" }], Date, Map, Set, Response, Promise, setTimeout, clearTimeout, ...extra };
   runInNewContext(source, context);
   // Rooms built here without the constructor (Object.create) take the inspector's reporter switched off, as the
   // constructor gives one without INSPECTOR_IDS.
@@ -246,6 +246,44 @@ test("SFU stays unavailable without secrets and uses bounded upstream calls with
     globalThis.fetch = async () => ({ ok: false, status: 410, json: async () => ({ errorCode: "session_error" }) });
     await assert.rejects(client.getSession("fixture"), err => err.status === 410 && err.code === "session_error",
       "a terminal upstream response reaches cleanup instead of being obscured as a local timeout");
+  } finally { globalThis.fetch = original; }
+});
+
+test("TURN credentials require the active room token and return only a temporary TLS relay", async () => {
+  const Room = roomClass(), room = Object.create(Room.prototype);
+  const player = { id: 1, login: "YellowBrokeIt", connectionToken: "active" };
+  room.players = new Map([[1, player]]);
+  room.env = { REALTIME_APP_ID: "test-app", REALTIME_SECRET: "test-app-secret", REALTIME_TURN_KEY_ID: "test-key", REALTIME_TURN_TOKEN: "test-token" };
+  const request = token => new Request("https://example.test/voice/ice", { method: "POST", headers: { "x-player-id": "1", "x-room-token": token } });
+  const original = globalThis.fetch, calls = [], tls = "turns:turn.cloudflare.com:443?transport=tcp";
+  let replaced = false;
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    if (replaced) room.players.set(1, { id: 1, connectionToken: "replacement" });
+    return Response.json({ iceServers: [{ urls: ["turn:turn.cloudflare.com:53?transport=udp", tls], username: "temporary", credential: "limited" }] });
+  };
+  try {
+    assert.deepEqual(await (await room.voiceRequest("ice", request("active"))).json(), {}, "relay stays disabled without its limiter");
+    room.env.VOICE_ICE_LIMITER = {};
+    assert.equal((await room.voiceRequest("ice", request("wrong"))).status, 409);
+    assert.equal(calls.length, 0);
+    const res = await room.voiceRequest("ice", request("active"));
+    assert.equal(res.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await res.json(), { iceServers: [{ urls: tls, username: "temporary", credential: "limited" }], ttl: 7200 });
+    assert.equal(calls[0].url, "https://rtc.live.cloudflare.com/v1/turn/keys/test-key/credentials/generate-ice-servers");
+    assert.equal(calls[0].options.headers.authorization, "Bearer test-token");
+    assert.equal(JSON.parse(calls[0].options.body).ttl, 7200);
+    room.env.REALTIME_TURN_TTL = "300";
+    assert.equal((await (await room.voiceRequest("ice", request("active"))).json()).ttl, 300);
+    assert.equal(JSON.parse(calls[1].options.body).ttl, 300);
+    let evicted = false;
+    room.evict = (p, reason) => { evicted = p === player && reason === "revoked"; };
+    player.login = "not-a-contributor";
+    assert.equal((await room.voiceRequest("ice", request("active"))).status, 403);
+    assert.ok(evicted); assert.equal(calls.length, 2, "revoked accounts cannot mint relay credentials");
+    player.login = "YellowBrokeIt";
+    replaced = true;
+    assert.equal((await room.voiceRequest("ice", request("active"))).status, 409);
   } finally { globalThis.fetch = original; }
 });
 
