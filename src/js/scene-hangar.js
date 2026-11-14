@@ -1219,8 +1219,8 @@
     addChild(root, s.forklift.root);
     // The boards on the left wall: each a glass in its frame with its face built on it and the Jet flying across it,
     // its lettering painted over it from the reading (`paintBoards`); the stats board's fifth tile shows the stars, or
-    // a flag while the repository has a milestone open. Each has its picture for the board dialog too, with a link out
-    // to the repository.
+    // a flag while the repository has a milestone open. Their lit frames, faces and streaks dim with the glass. Each has
+    // its picture for the board dialog too, with a link out to the repository.
     s.boards = {};
     s.flyers = [];
     s.boardText = {};
@@ -1228,11 +1228,13 @@
     const faces = { stats: HM.statsFace(), timeline: HM.timelineFace() };
     for (const [key, b] of Object.entries(L.boards)) {
       const n = createNode({ position: { x: b.x, y: b.y, z: b.z }, rotation: { x: 0, y: b.turn, z: 0 }, scale: { x: b.scale, y: b.scale, z: b.scale }, geometry: frames[key].flat });
-      addChild(n, createNode({ geometry: frames[key].glow, sightHidden: true }), createNode({ geometry: faces[key].flat }), createNode({ geometry: faces[key].glow, sightHidden: true }));
+      const frameGlow = createNode({ geometry: frames[key].glow, sightHidden: true }), faceGlow = createNode({ geometry: faces[key].glow, sightHidden: true });
+      addChild(n, frameGlow, createNode({ geometry: faces[key].flat }), faceGlow);
+      s.glass.push(frameGlow, faceGlow);
       HM.JETS[key].forEach((spot, i) => {
         const flight = miniJet(spot);
         addChild(n, flight);
-        if (i === 0) addChild(flight, createNode({ geometry: HM.jetStreaks()[key], sightHidden: true }));
+        if (i === 0) { const streak = createNode({ geometry: HM.jetStreaks()[key], sightHidden: true }); addChild(flight, streak); s.glass.push(streak); }
         if (JET_STYLE[key] && JET_STYLE[key].spot === i) s.flyers.push(flyer(n, flight, spot, JET_STYLE[key]));
       });
       addChild(root, n);
@@ -1244,6 +1246,7 @@
     s.statsStars = createNode({ geometry: faces.stats.stars, sightHidden: true });
     s.statsFlag = createNode({ geometry: faces.stats.flag, sightHidden: true, visible: false });
     addChild(s.boards.stats, s.statsStars, s.statsFlag);
+    s.glass.push(s.statsStars, s.statsFlag);
     // The arch round the launch tunnel's mouth with the hangar's plaque across its top (`HM.arch`): its lights dimmed
     // with the glass, its small parts and the plaque's face sorted nearer on Canvas 2D.
     const archParts = HM.arch(), archGlow = createNode({ geometry: archParts.glow, sightHidden: true }), plaque = archParts.picture;
