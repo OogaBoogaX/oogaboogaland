@@ -204,7 +204,9 @@ test("the configs keep staging and production apart, and the edge apart from the
     // Production starts with every feature off; staging turns them on in the runbook's order, and only known ones.
     if (env === "production") assert.equal(chat.vars.FEATURES, "", "a new deployment starts with every feature off");
     else for (const flag of chat.vars.FEATURES.split(",").filter(Boolean)) assert.ok(["github", "x", "listen", "speak", "feed", "commons", "cloud"].includes(flag), flag);
-    assert.equal(isle.vars.OOGA_CHAT_FEATURES, "", "the island starts with its bridge off");
+    // Production's island keeps its bridge off; staging's turns switches on in the runbook's order, and only known ones.
+    if (env === "production") assert.equal(isle.vars.OOGA_CHAT_FEATURES, "", "the island starts with its bridge off");
+    else for (const flag of isle.vars.OOGA_CHAT_FEATURES.split(",").filter(Boolean)) assert.ok(["bridge", "outdoor", "cloud", "commons", "commons-send"].includes(flag), flag);
     for (const path of ["/api/*", "/auth/*", "/donations/*"]) assert.ok(chat.assets.run_worker_first.includes(path), path);
     const obl = chat.services.find((s) => s.binding === "OBL"), pay = chat.services.find((s) => s.binding === "DONATIONS");
     assert.deepEqual(obl, { binding: "OBL", service: isle.name, entrypoint: "ChatBridge" });
