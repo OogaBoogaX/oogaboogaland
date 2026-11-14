@@ -1,17 +1,19 @@
-// Heimdall, who keeps ₿IFRÖST's bridge: a voxel caveman grown half again as tall and dressed as the watchman of the
-// gods in the concept's colours, standing on a round rune-cut step on the islet's court at the foot of the gate's
-// stairs. He is built as the boat passengers are, a clone of `models.caveman` from hashed traits and dress hooks, never
-// a `src/characters/` file, which would sign him up to the crew. His head is a navy great helm banded in gold, his
+// Heimdall, who keeps ₿IFRÖST's bridge: an Ooga grown half again as tall and dressed as the watchman of the gods in
+// the concept's colours, standing on a round rune-cut step on the islet's court at the foot of the gate's stairs. He
+// is built as the boat passengers are, a clone of `models.caveman` from hashed traits and dress hooks, never a
+// `src/characters/` file, which would sign him up to the crew. His head is a navy great helm banded in gold, his
 // far-seeing eyes burning blue in its visor slit and two golden horns rising from its sides and forking at the tips.
-// He wears a long navy coat trimmed in gold with a ₿ medallion on the chest, broad gold-rimmed pauldrons, gold cuffs,
-// dark boots and a navy cape bearing the banners' white bind rune. In his right hand stands a tall staff crowned with a
-// glowing blue crystal, and Gjallarhorn hangs at his left hip.
+// His body is the modelled look's regular build (hero-body.js), and over it he wears clothes of their own that hang
+// loose of it: a long navy coat with a gold yoke and lapels, a ₿ medallion on the chest and a gold belt, its skirts
+// flaring to his shins and open down the front between two gold edges; broad gold-rimmed pauldrons over loose sleeves,
+// flared gold cuffs, gold-capped boots and a navy cape bearing the banners' white bind rune. In his right hand stands
+// a tall staff crowned with a glowing blue crystal, and Gjallarhorn hangs at his left hip.
 //
 // Here he is posed and given his few moods. He breathes and lets his gaze drift over the sea; he turns to whoever comes
 // within sight, raises his staff to hail a played Ooga that walks up, mutters now and then, and at a tap lifts
 // Gjallarhorn from his hip to his lips and blows it, gold sparks leaping from the bell. `create` builds one visit's
 // Heimdall under the hub's root and returns the root, the node to pick him by, the step to add to the solids, and
-// `update`, `poke` and `dispose`. Every accessory is built once for the page: the voxel ones in the caveman's own bake,
+// `update`, `poke` and `dispose`. Every accessory is built once for the page: his clothes in the caveman's own build,
 // the rest at his unit height and scaled by it on its node. `update` allocates nothing.
 (() => {
   "use strict";
@@ -27,9 +29,14 @@
   // No GitHub login holds a slash, so his template in `models.caveman`'s cache never meets a contributor's.
   const NAME = "heimdall/bifrost";
   // His build in the caveman's own units, where 1 is his `HEIGHT` in metres before the root's `SCALE`: the hip `LEG`
-  // up, the shoulders `ARM_X` either side (buildCaveman's formula at his `BELLY`), and the refined torso's `RISE`,
-  // which lifts his head and shoulders over where they were authored.
-  const HEIGHT = 1.1, BELLY = 1.08, SCALE = 1.35, LEG = models.BODY.hip, RISE = models.BODY.rise, ARM_X = 0.29 * BELLY + 0.09, STATURE = HEIGHT * SCALE;
+  // up, the shoulders `ARM_X` either side (the modelled regular build's), and the refined torso's `RISE`, which lifts
+  // his head and shoulders over where they were authored. `ELBOW` is where the modelled arm's elbow is from the
+  // shoulder ([down, ahead]), `FORE` the forearm's length from it to the fist, and `HAND` the fist from the shoulder
+  // when the forearm hangs at its rest, the rig's hand point.
+  const HB = BL.heroBody, BUILD = HB.BUILD.regular;
+  const HEIGHT = 1.1, BELLY = 1.08, SCALE = 1.35, LEG = models.BODY.hip, RISE = models.BODY.rise, ARM_X = BUILD.armX / 16, STATURE = HEIGHT * SCALE;
+  const HAND = [-HB.HAND[0] / 16, HB.HAND[1] / 16], ELBOW = [BUILD.elbow[0] / 16, BUILD.elbow[1] / 16];
+  const FORE = Math.hypot(HAND[0] - ELBOW[0], HAND[1] - ELBOW[1]);
   // The step he stands on, in metres: its radius and top, and the column of its collision shell round him, `column`
   // across and up to `crown`, so a walker bumps into him rather than through him but can still step onto the rim.
   const PLINTH = { r: 0.95, top: 0.24, column: 0.6, crown: 2.1 };
@@ -47,13 +54,17 @@
   // ---- his pose --------------------------------------------------------------------------------------
 
   // His arms at rest, in the angles models.buildCaveman's arms take (z outward on either side). The engine's `armL`
-  // hangs at +x, his left as he faces +z, by Gjallarhorn at his hip; `armR` at -x, his right, reaches forward to hold
-  // the staff upright on the step's rim, the staff leaning out by `lean`. `GRIP` is the fist's middle down the arm.
+  // hangs at +x, his left as he faces +z, by Gjallarhorn at his hip, its forearm at the build's rest; `armR` at -x,
+  // his right, comes a little forward with the elbow bent (`flex`) to hold the staff upright on the step's rim ahead of
+  // him, the staff leaning out by `lean`. `fist` is where the fist is in an arm's frame with its elbow bent by `flex`.
   const REST = { x: -0.2, z: 0.2 };
-  const STAFF = { x: -0.74, z: 0, lean: 0.05 };
-  const GRIP = 10 / 16;
+  const STAFF = { x: -0.3, z: 0, flex: 0.85, lean: 0.05 };
+  const fist = (flex) => [ELBOW[0] - FORE * Math.cos(flex), ELBOW[1] + FORE * Math.sin(flex)];
   // How far the staff reaches below the fist to stand on the step at rest, a hair into the stone.
-  const STAFF_BELOW = (0.46 + RISE - GRIP * Math.cos(STAFF.x) * Math.cos(STAFF.z) + LEG) / Math.cos(STAFF.lean) + 0.01;
+  const STAFF_BELOW = (() => {
+    const [y, z] = fist(STAFF.flex);
+    return (0.46 + RISE + y * Math.cos(STAFF.x) - z * Math.sin(STAFF.x) + LEG) / Math.cos(STAFF.lean) + 0.01;
+  })();
 
   // A rotation matrix m[row][col] as a unit quaternion [x, y, z, w] with w >= 0, the way fromTQS reads one back.
   const quatOf = (m) => {
@@ -89,12 +100,14 @@
   const inArm = (arm, horn) => quatOf(arm.map((a) => horn.map((h) => a[0] * h[0] + a[1] * h[1] + a[2] * h[2])));
 
   // The pose he blows the horn in, solved once in his own units: the head tipped back by `pitch`, the mouthpiece at
-  // the helm's face plate pointing `aim` (ahead and a little up), and the left arm reaching the grip, the club's spot
-  // in the fist (`grip` down the arm and `cuff` forward). How long the mouthpiece must be for that reach to come out
-  // exact is `lm`, and the horn is built to it, so pose and horn agree. `x` and `z` are the arm's angles there, and `q`
-  // the horn's turn in the hand, which `update` eases in from `HANG` as he lifts it.
+  // the helm's face plate pointing `aim` (ahead and a little up), and the left arm reaching the grip, the fist with
+  // the elbow bent by `flex` (`grip` down the arm and `cuff` forward). How long the mouthpiece must be for that reach
+  // to come out exact is `lm`, and the horn is built to it, so pose and horn agree. `x` and `z` are the arm's angles
+  // there, and `q` the horn's turn in the hand, which `update` eases in from `HANG` as he lifts it, bending the elbow
+  // from its rest (`REST_FLEX`, where the fist is the rig's hand point) as he does.
+  const REST_FLEX = Math.atan2(HAND[1] - ELBOW[1], ELBOW[0] - HAND[0]);
   const BLOW = (() => {
-    const pitch = -0.22, grip = 0.62, cuff = 0.08, lipY = 0.13, lipZ = 0.27, sp = Math.sin(pitch), cp = Math.cos(pitch);
+    const flex = 1.2, [fy, fz] = fist(flex), pitch = -0.22, grip = -fy, cuff = fz, lipY = 0.13, lipZ = 0.27, sp = Math.sin(pitch), cp = Math.cos(pitch);
     const mouth = [0, 0.5 + lipY * cp - lipZ * sp, 0.02 + lipY * sp + lipZ * cp], shoulder = [ARM_X, 0.46, 0];
     const al = Math.hypot(0.3, 0.95), aim = [0, 0.3 / al, 0.95 / al];
     const d = [mouth[0] - shoulder[0], mouth[1] - shoulder[1], mouth[2] - shoulder[2]];
@@ -104,7 +117,7 @@
     const tx = d[0] + lm * aim[0], ty = d[1] + lm * aim[1], tz = d[2] + lm * aim[2];
     const sz = tx / grip, cz = Math.sqrt(1 - sz * sz), A = grip * cz, det = A * A + cuff * cuff;
     const x = Math.atan2((-cuff * ty - A * tz) / det, (-A * ty + cuff * tz) / det), z = Math.asin(sz);
-    return { pitch, x, z, lm, q: inArm(armAxes(x, z), hornAxes(aim)) };
+    return { pitch, flex, x, z, lm, q: inArm(armAxes(x, z), hornAxes(aim)) };
   })();
   // How Gjallarhorn hangs at his hip in the resting fist: slung back along his thigh, its bell behind him curling up and
   // its mouthpiece forward. Signed to lie on BLOW's side, so easing from one to the other takes the short way round.
@@ -113,7 +126,8 @@
     return q[0] * BLOW.q[0] + q[1] * BLOW.q[1] + q[2] * BLOW.q[2] + q[3] * BLOW.q[3] < 0 ? q.map((c) => -c) : q;
   })();
   // The staff's turn in the fist that undoes the arm's, so it stands upright in the body whatever the arm does,
-  // leaning out by `STAFF.lean` (out is toward -x, a positive roll). `TURN` is scratch.
+  // leaning out by `STAFF.lean` (out is toward -x, a positive roll). It hangs on the upper arm where the fist is, so
+  // the forearm's bend moves it but does not turn it. `TURN` is scratch.
   const LEAN = quat.fromEuler(quat.create(), 0, 0, STAFF.lean), TURN = quat.create();
   const upright = (out, arm) => {
     quat.fromEuler(TURN, arm.rotation.x, 0, arm.rotation.z);
@@ -224,41 +238,133 @@
     return { geometry: BL.hubModels.flatInto(body, ...trim.map((g) => turnedY(g, -Math.PI / 2))), bell: { x: 0, y: tip.y, z: tip.x } };
   });
 
-  // The ₿ medallion on his chest, where the coat's gold lapels meet: a gold disc in a bright ring, the ₿ raised on it
-  // and glowing. `F` is the chest's face at his belly.
-  const medallion = cached(() => {
-    const F = 3 / 16 * BELLY, y = 0.33;
-    return merge(
-      moved(BM.disc(0.068, 0.022, LOOK.goldDk), 0, y, F + 0.011),
-      moved(forward(ring({ r: 0.06, thickness: 0.009, segments: 16, color: LOOK.goldLt })), 0, y, F + 0.022),
-      moved(FM.smoothBitcoin(0.085, 0.018, GOLD, 0.6), 0, y, F + 0.026)
-    );
-  });
+  // The ₿ medallion on his chest, where the coat's gold lapels draw together: a gold disc in a bright ring, the ₿ raised
+  // on it and glowing, its back at z 0.
+  const medallion = cached(() => merge(
+    moved(BM.disc(0.068, 0.022, LOOK.goldDk), 0, 0, 0.011),
+    moved(forward(ring({ r: 0.06, thickness: 0.009, segments: 16, color: LOOK.goldLt })), 0, 0, 0.022),
+    moved(FM.smoothBitcoin(0.085, 0.018, GOLD, 0.6), 0, 0, 0.026)
+  ));
 
-  // The cape, hung from a pivot behind his shoulders (`y`, `z` in the body, `rest` its resting tilt), in the caveman's
-  // own blocks: a collar two deep against his back, gold over navy, then navy cloth `drop` blocks down from the pivot
-  // and eleven across, edged and hemmed in gold, with the banners' white bind rune on its back (`RUNE_CELLS`, [x, y]).
-  const CAPE = { y: 0.5, z: -4.2 / 16, rest: 0.03, drop: 11 };
-  const RUNE_CELLS = [[-2, -4], [0, -4], [2, -4], [-1, -5], [0, -5], [1, -5], [0, -6], [0, -7], [-1, -8], [0, -8], [1, -8], [-2, -9], [0, -9], [2, -9]];
-  const capeVox = (T) => {
-    const v = makeVox(), cloth = weave(T.navy, T.navyDk), drop = CAPE.drop;
-    v.fill(-4, 4, -1, -1, 0, 1, T.gold);
-    v.fill(-4, 4, -2, -2, 0, 1, cloth);
-    v.fill(-5, 5, -drop, -3, 0, 0, (x, y, z) => x === -5 || x === 5 || y === -drop ? T.gold : cloth(x, y, z));
-    for (const [x, y] of RUNE_CELLS) v.set(x, y, 0, T.rune);
-    return v;
+  // ---- his clothes, on the modelled body ---------------------------------------------------------------
+  // In the modelled body's units, a sixteenth of his height, each in the frame of the part it is worn on: the trunk's
+  // with the hip at 0, an arm's hanging from the shoulder, the forearm's hanging from the elbow, a leg's from the hip.
+  // They stand clear of the body rather than being painted on it, so he wears them loose.
+
+  // The coat, round the trunk: rings [y, half width, half depth, corner cut, middle's depth] from the collar under the
+  // helm down to the hem at his shins. It hangs straight from the chest rather than drawing in at the waist, and its
+  // skirts flare from under the belt. Each ring's front is split (`OPEN`, either side of the middle) so the skirts can
+  // be open down the front between two gold edges.
+  const COAT = [
+    [9.2, 2.55, 2.15, 0.75, 0], [8.5, 3.2, 2.5, 0.95, 0], [7.85, 4.4, 2.8, 1.25, 0.06], [7, 4.65, 2.95, 1.4, 0.16],
+    [5.6, 4.55, 2.95, 1.35, 0.16], [3.6, 4.2, 2.85, 1.25, 0.1], [2.4, 4.05, 2.8, 1.2, 0.05], [0.7, 4.05, 2.8, 1.2, 0.05],
+    [-0.4, 4.3, 3, 1.3, 0], [-2.2, 4.75, 3.3, 1.45, -0.05], [-3.9, 5.1, 3.55, 1.55, -0.1], [-4.5, 5.2, 3.6, 1.6, -0.1]
+  ];
+  const OPEN = [0.42, 0.85];
+  // Which spans of the coat are the gold yoke round the collar, which hang under the belt as its skirts, and the last,
+  // the gold hem.
+  const YOKE = 2, SKIRT = 7, HEM = COAT.length - 2;
+  const coatRing = ([y, hx, hz, b, cz]) => [[hx - b, hz], [hx, hz - b], [hx, b - hz], [hx - b, -hz], [b - hx, -hz], [-hx, b - hz], [-hx, hz - b], [b - hx, hz],
+    [-OPEN[1], hz], [-OPEN[0], hz], [OPEN[0], hz], [OPEN[1], hz]].map(([x, z]) => [x, y, cz + z]);
+  // How far forward the coat's front stands at a height.
+  const coatFront = (y) => {
+    let n = 1;
+    while (n < COAT.length - 1 && COAT[n][0] > y) n++;
+    const a = COAT[n - 1], b = COAT[n], t = (y - a[0]) / (b[0] - a[0]);
+    return a[2] + a[4] + (b[2] + b[4] - a[2] - a[4]) * t;
   };
-  // The coat's skirts: a hollow ring of blocks flaring past the tunic from the waist to just above his boots, eleven
-  // across and eight deep with its corners cut, navy hemmed in gold and open down the front between two gold edges.
-  const skirtVox = (T) => {
-    const v = makeVox(), cloth = weave(T.navy, T.navyDk);
-    for (let x = 0; x <= 10; x++) for (let z = 0; z <= 7; z++) {
-      const side = x === 0 || x === 10, end = z === 0 || z === 7;
-      // Only the ring's walls, and never a corner.
-      if (side === end) continue;
-      for (let y = -3; y <= 1; y++) v.set(x, y, z, y === -3 ? T.gold : z === 7 && x >= 4 && x <= 6 ? (x === 5 ? T.navyDk : T.gold) : cloth(x, y, z));
+  // A gold trim laid on the coat's front from (x0, y0) down to (x1, y1), `half` either side, in a piece for each span
+  // it crosses so every piece lies flat on the coat.
+  const trim = (geo, x0, y0, x1, y1, half) => {
+    const cuts = [y0, ...COAT.map((r) => r[0]).filter((y) => y < y0 && y > y1), y1], at = (y) => x0 + (x1 - x0) * (y0 - y) / (y0 - y1);
+    for (let i = 0; i + 1 < cuts.length; i++) {
+      const a = cuts[i], b = cuts[i + 1], za = coatFront(a) + 0.005, zb = coatFront(b) + 0.005;
+      HB.slab(geo, [[at(a) - half, a, za], [at(a) + half, a, za], [at(b) + half, b, zb], [at(b) - half, b, zb]], HB.FRONT, 0.14, 0.88, LOOK.gold, LOOK.goldDk);
     }
-    return v;
+  };
+  // The coat: a gold yoke, navy cloth with gold lapels drawing together down to a gold placket, a gold belt with a bright
+  // buckle over it, and skirts open down the front, lined in dark navy and hemmed in gold.
+  const coat = () => {
+    const geo = geometry(), rings = COAT.map(coatRing);
+    for (let i = 0; i + 1 < rings.length; i++) {
+      const a = rings[i], b = rings[i + 1], cz = (COAT[i][4] + COAT[i + 1][4]) / 2;
+      for (let j = 0; j < 12; j++) {
+        const n = (j + 1) % 12, q = [a[j], a[n], b[n], b[j]], out = [(q[0][0] + q[1][0]) / 2, 0, (q[0][2] + q[1][2]) / 2 - cz];
+        const color = i < YOKE || i === HEM ? LOOK.gold : i < SKIRT ? LOOK.navy : j === 8 || j === 10 ? LOOK.gold : j === 9 ? LOOK.navyDk : LOOK.navy;
+        HB.poly(geo, q, color, out);
+        if (i >= SKIRT) HB.poly(geo, q, LOOK.navyDk, [-out[0], 0, -out[2]]);
+      }
+    }
+    for (const s of [-1, 1]) trim(geo, s * 2.7, COAT[YOKE][0], s * 0.45, 4.3, 0.36);
+    trim(geo, 0, 4.6, 0, COAT[6][0], 0.32);
+    const belt = [COAT[6][0], COAT[7][0]], z = COAT[6][2] + 0.15;
+    HB.loft(geo, belt.map((y) => [y, COAT[6][1] + 0.15, z, COAT[6][3] + 0.09, 0, COAT[6][4]]), LOOK.goldDk);
+    HB.buckle(geo, (belt[0] + belt[1]) / 2, z + COAT[6][4], { gold: LOOK.goldLt, goldDark: LOOK.goldDk });
+    return geo;
+  };
+  // Where the medallion sits on the coat, between the lapels.
+  const MEDAL_Y = 6;
+  // The arm's lean at rest: a ring tilted by this is level on a hanging arm (hero-body's SLEEVE).
+  const TILT = Math.tan(0.2);
+  // A pauldron over each shoulder, `side` 1 his left: a broad navy plate rimmed in gold, set out over the shoulder, with
+  // a smaller tier over it and a bright stud at its top, and under it a loose navy sleeve down past the elbow.
+  const shoulder = (side) => {
+    const geo = geometry(), ring = (y, hx, hz, b) => [y, hx, hz, b, side * 0.3, y * TILT, null, TILT];
+    HB.loft(geo, [ring(1.3, 0.22, 0.22, 0.08), ring(1.02, 0.34, 0.34, 0.12)], LOOK.goldLt);
+    HB.loft(geo, [ring(1.05, 0.9, 0.85, 0.4), ring(0.65, 1.3, 1.25, 0.55)], LOOK.navy);
+    HB.loft(geo, [ring(0.65, 2, 1.85, 0.75), ring(0.3, 2.45, 2.25, 0.9), ring(-1.6, 2.55, 2.35, 0.95)], LOOK.navy);
+    HB.loft(geo, [ring(-1.6, 2.62, 2.42, 0.97), ring(-2.25, 2.62, 2.42, 0.97)], LOOK.gold);
+    HB.loft(geo, [[-1.5, 2.05, 2.1, 0.75, 0, -0.05, null, TILT], [-3.1, 1.9, 2, 0.7, 0, -0.38, null, TILT], [-4.2, 1.85, 1.95, 0.7, 0, -0.68], [-5.3, 1.75, 1.85, 0.65, 0, -0.95]], LOOK.navy, [false, true]);
+    return geo;
+  };
+  // The forearm's loose sleeve, and a gold cuff flaring over the glove with a darker band at its foot.
+  const sleeve = () => {
+    const geo = geometry();
+    HB.loft(geo, [[1.1, 1.75, 1.85, 0.6], [-1.2, 1.9, 2, 0.65], [-2.9, 1.85, 1.95, 0.65]], LOOK.navy, [false, false]);
+    HB.loft(geo, [[-2.75, 1.95, 2.05, 0.7], [-4.15, 2.28, 2.38, 0.8]], LOOK.gold);
+    HB.loft(geo, [[-4.15, 2.32, 2.42, 0.8], [-4.55, 2.32, 2.42, 0.8]], LOOK.goldDk);
+    return geo;
+  };
+  // A gold cap over the front of each boot.
+  const toeCap = () => HB.loft(geometry(), [[-6.74, 1.97, 0.68, 0.38, 0, 2.92], [-6.05, 1.97, 0.68, 0.38, 0, 2.92]], LOOK.gold);
+  // The cape, hung from a pivot behind his shoulders (`y`, `z` in the trunk's frame, `rest` its resting tilt): cloth
+  // `thick` deep, its lining clear of the coat, falling from under the helm to the coat's hem. `rows` are its stations
+  // down from the pivot, [y, how far back its lining is, half its width, how far forward its edges wrap]: flat across
+  // the middle and wrapping round toward his sides, more at the top. A gold collar, `edge`-wide gold borders and a gold
+  // hem, a dark lining, and on its back the banners' white bind rune (`RUNE_CELLS`, [x, y] in cells `cell` across).
+  const CAPE = { y: 8.5, z: -2.6, rest: 0.03, thick: 0.2, edge: 0.5, cell: 0.95,
+    rows: [[0.2, 0.05, 3.5, 0.85], [-0.7, -0.3, 3.85, 0.85], [-1.6, -0.42, 4.3, 0.8], [-5, -0.5, 4.7, 0.65], [-9, -0.75, 5.1, 0.5], [-12.1, -1.3, 5.45, 0.42], [-12.8, -1.4, 5.5, 0.4]] };
+  const RUNE_CELLS = [[-2, -4], [0, -4], [2, -4], [-1, -5], [0, -5], [1, -5], [0, -6], [0, -7], [-1, -8], [0, -8], [1, -8], [-2, -9], [0, -9], [2, -9]];
+  const cape = () => {
+    const geo = geometry(), { thick, edge, rows: R } = CAPE, flat = 0.55;
+    // Across each station: the edge, the border's inner side, the flat middle's two sides, and so on round.
+    const rows = R.map(([y, z, w, wrap]) => [-w, edge - w, -flat * w, flat * w, w - edge, w].map((x) => [x, y, z - thick + Math.max(0, Math.abs(x) - flat * w) / ((1 - flat) * w) * wrap]));
+    const lining = ([x, y, z]) => [x, y, z + thick], last = rows.length - 1;
+    for (let i = 0; i < last; i++) {
+      const a = rows[i], b = rows[i + 1];
+      for (let c = 0; c < 5; c++) {
+        const q = [a[c], a[c + 1], b[c + 1], b[c]], dx = a[c + 1][0] - a[c][0], dz = a[c + 1][2] - a[c][2];
+        HB.poly(geo, q, i === 0 || i === last - 1 || c === 0 || c === 4 ? LOOK.gold : LOOK.navy, [dz, 0, -dx]);
+        HB.poly(geo, q.map(lining), LOOK.navyDk, [-dz, 0, dx]);
+      }
+      for (const c of [0, 5]) HB.poly(geo, [a[c], b[c], lining(b[c]), lining(a[c])], LOOK.goldDk, [c ? 1 : -1, 0, 0]);
+    }
+    for (const [row, up] of [[rows[0], 1], [rows[last], -1]]) {
+      for (let c = 0; c < 5; c++) HB.poly(geo, [row[c], row[c + 1], lining(row[c + 1]), lining(row[c])], LOOK.goldDk, [0, up, 0]);
+    }
+    // The rune lies on the flat middle, where its back is the station's lining less the cloth's depth.
+    const back = (y) => {
+      let n = 1;
+      while (n < last && R[n][0] > y) n++;
+      const a = R[n - 1], b = R[n];
+      return a[1] + (b[1] - a[1]) * (y - a[0]) / (b[0] - a[0]) - thick - 0.005;
+    };
+    const s = CAPE.cell / 2;
+    for (const [cx, cy] of RUNE_CELLS) {
+      const x = cx * CAPE.cell, y = (cy + 0.5) * CAPE.cell - 0.3;
+      HB.slab(geo, [[x - s, y - s, back(y - s)], [x + s, y - s, back(y - s)], [x + s, y + s, back(y + s)], [x - s, y + s, back(y + s)]], [0, 0, -1], 0.05, 0.94, LOOK.rune);
+    }
+    return geo;
   };
 
   // ---- the step --------------------------------------------------------------------------------------
@@ -389,20 +495,38 @@
     headgear(k) {
       addChild(k.parts.head, createNode({ scale: { x: k.h, y: k.h, z: k.h }, geometry: helmHorns() }));
     },
-    // The staff in his right fist where the club would hang (it and the snack stay hidden), Gjallarhorn in his left,
-    // the cape on its pivot, the coat's skirts and the medallion. `staff`, `horn`, `bell` and `cape` join the parts so
-    // every clone gets its own.
+    // The staff in his right fist where the club would hang (it and the snack stay hidden) and Gjallarhorn in his left,
+    // where the fist rests. `staff`, `horn` and `bell` join the parts so every clone gets its own.
     extras(k) {
-      const h = k.h, u = k.u, P = k.parts, T = tones(k), scale = () => ({ x: h, y: h, z: h }), gjallar = horn();
+      const h = k.h, P = k.parts, scale = () => ({ x: h, y: h, z: h }), gjallar = horn(), [y, z] = fist(STAFF.flex);
       P.club.visible = false;
-      P.staff = createNode({ position: { x: 0, y: -GRIP * h, z: 0 }, scale: scale(), quaternion: quat.create(), geometry: staff() });
+      P.staff = createNode({ position: { x: 0, y: y * h, z: z * h }, scale: scale(), quaternion: quat.create(), geometry: staff() });
       addChild(P.armR, P.staff);
-      P.horn = createNode({ position: { x: 0, y: -0.62 * h, z: 0.08 * h }, scale: scale(), quaternion: quat.create(), geometry: gjallar.geometry });
+      P.horn = createNode({ position: { x: 0, y: HAND[0] * h, z: HAND[1] * h }, scale: scale(), quaternion: quat.create(), geometry: gjallar.geometry });
       P.bell = createNode({ position: { ...gjallar.bell } });
       addChild(P.horn, P.bell);
       addChild(P.armL, P.horn);
-      P.cape = createNode({ position: { x: 0, y: CAPE.y * h, z: CAPE.z * h }, rotation: { x: CAPE.rest, y: 0, z: 0 }, geometry: k.vg(capeVox(T), { x: -0.5 * u, y: 0, z: -u }) });
-      addChild(k.root, P.cape, createNode({ geometry: k.vg(skirtVox(T), { x: -5.5 * u, y: 0, z: -4 * u }) }), createNode({ scale: scale(), geometry: medallion() }));
+    },
+    // The modelled body wearing his blocks (navy under the coat, dark gloves, navy trousers and dark boots), and over it
+    // his clothes: the coat on the trunk, a pauldron and sleeve on each arm, the sleeves' ends and cuffs on the
+    // forearms and the toe caps on the boots; then the cape on its pivot and the medallion on the coat, which breathes
+    // with the trunk. `cape` joins the parts so every clone gets its own.
+    model(k, wear) {
+      const body = wear(), u = k.u, h = k.h, P = k.parts, worn = new Map();
+      // A part dressed once, even where the build shares one mesh between both sides.
+      const dress = (geo, extra) => worn.get(geo) || worn.set(geo, merge(geo, extra)).get(geo);
+      const cuffs = HB.scaled(sleeve(), u), toes = HB.scaled(toeCap(), u);
+      body.torso = merge(body.torso, HB.scaled(coat(), u));
+      body.armL = merge(body.armL, HB.scaled(shoulder(1), u));
+      body.arm = merge(body.arm, HB.scaled(shoulder(-1), u));
+      body.forearm = dress(body.forearm, cuffs);
+      body.forearmL = dress(body.forearmL, cuffs);
+      body.leg = dress(body.leg, toes);
+      body.legL = dress(body.legL, toes);
+      P.cape = createNode({ position: { x: 0, y: CAPE.y * u, z: CAPE.z * u }, rotation: { x: CAPE.rest, y: 0, z: 0 }, geometry: HB.scaled(cape(), u) });
+      addChild(k.root, P.cape);
+      addChild(P.torso, createNode({ position: { x: 0, y: MEDAL_Y * u, z: coatFront(MEDAL_Y) * u }, scale: { x: h, y: h, z: h }, geometry: medallion(), surface: true }));
+      return body;
     }
   };
   const traits = cached(() => ({
@@ -542,7 +666,7 @@
   // second shower of sparks, the line he says after and the end. A hail: the staff raised high, held with a wave, and
   // lowered, its arm's angles at the top.
   const HORN_T = { lift: 0.45, sound: 0.4, hold: 2.55, lower: 0.5, second: 1.3, say: 2.85, end: 3.3 };
-  const HAIL = { up: 0.35, hold: 2.1, down: 0.4, end: 2.6, x: -2.55, z: 0.32 };
+  const HAIL = { up: 0.35, hold: 2.1, down: 0.4, end: 2.6, x: -2.55, z: 0.32, flex: 0.3 };
   const smooth = (k) => k * k * (3 - 2 * k);
   const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -627,8 +751,17 @@
       parts.head.rotation.x = clamp(s.pitch + nod, PITCH[0], PITCH[1]) * keep + BLOW.pitch * lift;
       parts.armL.rotation.x = (REST.x + breath * 0.015) * keep + BLOW.x * lift;
       parts.armL.rotation.z = REST.z * keep + BLOW.z * lift;
+      const bend = REST_FLEX * keep + BLOW.flex * lift;
+      parts.forearmL.rotation.x = -bend;
+      parts.horn.position.y = (ELBOW[0] - FORE * Math.cos(bend)) * HEIGHT;
+      parts.horn.position.z = (ELBOW[1] + FORE * Math.sin(bend)) * HEIGHT;
       parts.armR.rotation.x = STAFF.x + (HAIL.x - STAFF.x) * s.hail;
       parts.armR.rotation.z = -(STAFF.z + (HAIL.z - STAFF.z + Math.sin(s.t * 6.5) * 0.09) * s.hail);
+      // The elbow straightens as the staff goes up, and the staff stays in the fist.
+      const flex = STAFF.flex + (HAIL.flex - STAFF.flex) * s.hail;
+      parts.forearmR.rotation.x = -flex;
+      parts.staff.position.y = (ELBOW[0] - FORE * Math.cos(flex)) * HEIGHT;
+      parts.staff.position.z = (ELBOW[1] + FORE * Math.sin(flex)) * HEIGHT;
       upright(parts.staff.quaternion, parts.armR);
       for (let i = 0; i < 4; i++) q[i] = HANG[i] * keep + BLOW.q[i] * lift;
       quat.normalize(q);
