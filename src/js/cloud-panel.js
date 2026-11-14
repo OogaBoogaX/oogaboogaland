@@ -128,6 +128,8 @@
     entry.row = row;
     if (entry.li.dataset.role !== row.role) entry.li.dataset.role = row.role;
     set(entry.name, "textContent", row.display);
+    // One line, ending in an ellipsis when long (AGENTS.md, Panel text); the whole name is its title.
+    set(entry.name, "title", row.display);
     set(entry.role, "textContent", row.role === "speaker" ? "Speaker" : "Listener");
     const source = row.source || "";
     if (entry.portrait.dataset.source !== source) entry.portrait.dataset.source = source;

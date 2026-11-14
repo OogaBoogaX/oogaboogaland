@@ -18334,8 +18334,9 @@ const PHONE = (required) => `((required) => {
     if (s.clipPath === 'inset(50%)') continue; // screen-reader-only text
     if (r.bottom <= 0 || r.top >= H || r.right <= 0 || r.left >= W) continue; // folded or scrolled away on purpose
     // Panel text (AGENTS.md): only a player's or donor's name in a list row may end in an ellipsis, its whole name its
-    // title: the Ooga Boogas and Online Oogas name labels and the Bananas panel's donor and recent names, nothing else.
-    const listName = el.matches('li .roster-name > .roster-label, li .players-name .roster-label, li .banana-donor, li .banana-recent-label')
+    // title: the Ooga Boogas and Online Oogas name labels, the Ooga Chat audience's names and the Bananas panel's donor
+    // and recent names, nothing else.
+    const listName = el.matches('li .roster-name > .roster-label, li .players-name .roster-label, li .cloud-name, li .banana-donor, li .banana-recent-label')
       && el.title !== '' && el.title === el.textContent.trim();
     if (s.textOverflow === 'ellipsis' && !listName) bad.push('ellipsis ' + name(el));
     if (!listName && /hidden|clip/.test(s.overflowX) && el.scrollWidth > el.clientWidth + 1) bad.push('clipped ' + name(el) + ' ' + el.scrollWidth + '>' + el.clientWidth);
