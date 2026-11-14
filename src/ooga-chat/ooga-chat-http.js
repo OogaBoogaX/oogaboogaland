@@ -46,8 +46,11 @@
       if (!path) throw new Error(`No sign-in for ${provider}`);
       location.assign(path);
     };
+    // Throws unless the server confirms, so the app can say so and offer a retry (it has already stopped capture).
     const signOut = async (boot) => {
-      if (boot.paths.logout) await ask(boot.paths.logout, { method: "POST" });
+      if (!boot.paths.logout) throw new Error("No sign-out address");
+      const response = await ask(boot.paths.logout, { method: "POST" });
+      if (!response.ok) throw new Error(`logout ${response.status}`);
       return null;
     };
     const dispose = () => {

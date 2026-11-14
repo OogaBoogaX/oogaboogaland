@@ -85,6 +85,7 @@ body {
 }
 
 .oc-slab { padding: 20px 22px; }
+.oc-chat > .oc-slab { display: flex; flex-direction: column; gap: 16px; }
 
 .oc-signin,
 .oc-space {
@@ -164,6 +165,51 @@ body {
 .oc-note strong { color: var(--accent-text); }
 
 .oc-space-head { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
+.oc-space-head:focus { outline: none; }
+
+/* A notice that needs the visitor: an expired sign-in, a failed check, an unconfirmed sign-out, with its retry. */
+.oc-notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(216, 137, 43, 0.42);
+  border-radius: 6px;
+  background: rgba(216, 137, 43, 0.08);
+  color: var(--paper);
+}
+
+/* Read by assistive technology only: why a disabled control is off. */
+.oc-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* People: a fixed circle that keeps its size while a picture loads, the name on one line under it. */
+.oc-people { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 8px; }
+.oc-person { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; margin: 0; }
+.oc-person figcaption { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 100%; min-width: 0; }
+.oc-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 56px;
+  height: 56px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--stone-dk);
+  box-shadow: 0 0 0 2px var(--stone-lt);
+}
+.oc-face img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.oc-face svg { display: block; width: 62%; height: auto; }
+.oc-person-name { max-width: 100%; overflow: hidden; color: var(--paper); font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.oc-person-role { color: rgba(243, 239, 228, 0.62); font-size: 11px; }
 
 .oc-account {
   display: flex;

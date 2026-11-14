@@ -5,7 +5,7 @@ conversation in Ooga Booga Land, and verified GitHub contributors can speak from
 as its own entry, build and output, and shares the island's native look and components without loading the island.
 
 This document covers the foundation (#651): the entry, the build, the shell, the configuration contract and the
-fixture entry. Sign-in (#652), the roster and controls (#653), voice (#654), reactions (#655), the shared panels and
+fixture entry; and sign-in (#652): the session contract, the sign-in return and the account lifecycle. The roster and controls (#653), voice (#654), reactions (#655), the shared panels and
 Feed the Oogas (#656) and the installable app (#657) build on it. Nothing here deploys anything: Cloudflare resources,
 the domain, bindings and secrets belong to #662 and its owner.
 
@@ -29,9 +29,10 @@ is unchanged and never stages the app.
 | `src/ooga-chat/index.html` | the production entry: its policy, the title, the frame, and the script list |
 | `src/ooga-chat/fixture.html` | the review entry: the same files plus `ooga-chat-fixtures.js`, its root marked `data-adapter="fixture"` |
 | `src/ooga-chat/ooga-chat.css` | the app's layout; the look comes from `src/native.css` |
-| `src/ooga-chat/ooga-chat-config.js` | `BL.oogaChatConfig`: the bootstrap contract and its parsers, storage keys, the build identity |
+| `src/ooga-chat/ooga-chat-config.js` | `BL.oogaChatConfig`: the bootstrap and session contracts and their parsers, the sign-in return, zones, storage keys and their sweep, the build identity |
+| `src/ooga-chat/ooga-chat-auth.js` | `BL.oogaChatAuth`: the account lifecycle (`create`) and what an account may do (`gates`) |
 | `src/ooga-chat/ooga-chat-shell.js` | `BL.oogaChatShell`: the tabs and the views they keep |
-| `src/ooga-chat/ooga-chat-views.js` | `BL.oogaChatViews`: the Ooga Chat view and the stand-ins for the shared panels |
+| `src/ooga-chat/ooga-chat-views.js` | `BL.oogaChatViews`: the Ooga Chat view, the account footer, faces and the stand-ins for the shared panels |
 | `src/ooga-chat/ooga-chat-http.js` | `BL.oogaChatHttp`: the production adapter |
 | `src/ooga-chat/ooga-chat-fixtures.js` | `BL.oogaChatFixtures`: the offline adapter, review only |
 | `src/ooga-chat/ooga-chat-app.js` | startup, loaded last |
@@ -52,23 +53,26 @@ module reads nothing at load but `window.BL` and the document.
 
 ## Load order and contracts
 
-`sign-glyphs.js`, `native-icons.js`, `ooga-chat-config.js`, `ooga-chat-shell.js`, `ooga-chat-views.js`,
+`sign-glyphs.js`, `native-icons.js`, `ooga-chat-config.js`, `ooga-chat-auth.js`, `ooga-chat-shell.js`, `ooga-chat-views.js`,
 `ooga-chat-http.js`, then (fixture entry only) `ooga-chat-fixtures.js`, then `ooga-chat-app.js`. The build checks that
 `fixture.html` loads exactly `index.html`'s files plus the fixtures, just before the app.
 
 **Adapter.** `{ kind, bootstrap(), session(boot), signIn(boot, provider), signOut(boot), dispose() }`. `bootstrap`
 resolves to a parsed bootstrap (below), never throws. `session` resolves to a parsed session or `null` for signed
 out, and throws for any other failure, which the app shows as a recoverable error. `signIn` navigates (production)
-or returns a session (fixtures). `dispose` aborts what is still in flight.
+or returns a session (fixtures). `signOut` resolves only when the server confirms and throws otherwise. `dispose`
+aborts what is still in flight.
 
 **Shell.** `create({ root, tabs, ctx, selected, onSelect })` returns `{ update(state), select(id), dispose() }`. A
 tab is `{ id, label, icon, visible(state), view }`. A view is `view(ctx)` returning `{ node, update(state), dispose() }`:
 built the first time its tab is chosen, then kept. Switching tabs hides it, and `update` passes it the new state, so
 a view's own nodes and listeners (a sort, a draft, a voice control) survive both. `dispose` is the only teardown.
 
-**State.** `{ mode, boot, session, busy }`, `mode` being `loading`, `live`, `unavailable` or `stale`. Public tabs:
-Ooga Chat, Bananas, Contributing Oogas. Online Oogas and The Commons show only for a session whose capabilities say
-`contributor`.
+**State.** `{ mode, boot, session, auth, notice, busy, zone }`, `mode` being `loading`, `live`, `unavailable` or
+`stale`, and `auth`, `notice` and `busy` the account's (below). `zone` is the saved outdoor zone, `main` or `dsb`.
+Public tabs: Ooga Chat, Bananas, Contributing Oogas. Online Oogas and The Commons show only while `gates` says
+`contributor`. Choosing a tab never signs in, signs out, changes the zone or touches voice. The account footer sits
+under every tab while signed in, and not at all while signed out.
 
 ## The bootstrap contract (v1)
 
@@ -102,21 +106,95 @@ this address (#662, #663); the path is a proposal for the owner to confirm.
 A 404, a page that is not JSON, a timeout or no network makes the app `unavailable`: the sign-in buttons stay
 disabled and the page says the service can't be reached. It never assembles a room from sample people.
 
-**Session** (`paths.session`): 401 is signed out; otherwise
+## Sign-in and the session (identity protocol 1)
 
-```json
-{ "identity": { "provider": "github", "login": "someone", "display": "someone", "avatar": "/avatars/1.png" },
-  "capabilities": { "speak": true, "contributor": true } }
+Sign-in is the server's (#663): providers, PKCE, the callback, the token exchange, cookies and the contributor policy.
+The page never sees an OAuth code, verifier, provider token or session token, and stores none of them anywhere.
+
+**Signing in.** A provider button is a top-level navigation to `paths.login[provider]`, offered only when the
+bootstrap turns that provider on (X can be off while GitHub stays on: the button says X sign-in is unavailable).
+The server's callback ends by sending the browser back to the app's own page with a result and nothing else:
+
+```
+/?signin=ok&provider=github
+/?signin=denied&provider=x        denied | failed | unavailable | rate-limited
 ```
 
-`speak` counts only for a GitHub identity, and only as the server says. A paid donation or a matching X name never
-grants it. `avatar` must be a same-origin path. The backend proxies or stores profile pictures, so the page's
-`img-src` stays `'self' data:`.
+The app reads it once (`parseReturn`), takes it out of the address with `history.replaceState` before anything
+else runs, opens the Ooga Chat tab, and checks the session. Any other `signin` value reads as `failed`; an unknown
+provider as none. A failed or cancelled return says so with Try again, which signs in with the same provider.
+
+**Session** (`paths.session`, proposed `/api/chat/me`): 401 is signed out; otherwise
+
+```json
+{ "identity": { "principal": "pr_7f3a…", "provider": "github", "providerUserId": "583231",
+                "login": "someone", "display": "Someone", "avatar": "/avatars/pr_7f3a.png" },
+  "capabilities": { "speak": true, "contributor": true },
+  "eligibility": { "state": "eligible", "checkedAt": 1763000000000, "staleAfter": 900 },
+  "expiresAt": 1763086400000 }
+```
+
+- `principal` is the server's opaque, stable identity (up to 128 of `[A-Za-z0-9_:.-]`), required. Equality,
+  deduplication and anything kept per person key on it, never on `login`, which a rename changes. Signing out and in
+  with the other provider is a different principal: there is no GitHub to X linking.
+- `providerUserId` is optional, a string (an X id does not fit a safe integer), never compared as a number.
+- `login` is the handle (`[\w.-]{1,39}`), `display` the shown name (cleaned of control and direction characters,
+  50 at most, the login when empty), `avatar` a same-origin path or nothing (below).
+- `eligibility.state` is `eligible`, `ineligible`, `unknown` (contributions could not be checked) or `revoked`;
+  missing means `unknown`, and an X account is always `ineligible`. `checkedAt` (ms) and `staleAfter` (s, bounded to
+  3600) are the server's stale policy: past it an `eligible` answer counts as `unknown` until checked again. The page
+  invents no grace period of its own.
+- `capabilities.speak` and `capabilities.contributor` count only for a GitHub account whose state is `eligible`.
+  Neither a paid donation, a matching X handle nor anything the page saved can set them.
+- `expiresAt` (ms) is when the session ends; a session already past it is signed out.
+
+Speaking itself is not in the session: a speaker is someone holding an acknowledged media lease (#654, #665), and the
+server checks the capability again at every privileged operation.
+
+**Account lifecycle** (`BL.oogaChatAuth.create({ adapter, media, now, timers, onChange })`). `auth` is:
+
+| `auth` | When | Join Voice | Contributor tabs |
+|---|---|---|---|
+| `checking` | before the first answer | no | no |
+| `signed-out` | no session | (no footer) | no |
+| `listener` | X, or GitHub `ineligible` or `revoked` | off, saying why | no |
+| `unknown` | GitHub, eligibility unknown or stale | off, saying why | no |
+| `eligible` | GitHub, server says eligible | on when voice is ready | when `contributor` |
+| `signing-out` | sign-out sent | (footer says Signing out) | no |
+| `error` | the session could not be checked | off, saying why | as last answered |
+
+Every sign-in lands as a listener, microphone closed: no choice panel, no automatic capture. The session is checked
+before any control shows, then again at its nearest deadline (expiry, or the end of an eligible answer's stale
+window: one timer, clamped to 5 s – 1 h), when the page becomes visible or the network returns (at most every 30 s),
+and when the browser restores the page from its cache. A lost session reads "Your sign-in expired"; a failed check
+reads "can't check your sign-in" with Try again, so an expired login and an outage never look alike. Public tabs keep
+working through both.
+
+**The voice seam** is `media = { available, release(reason), join(state) }`. Until #654's client takes its place,
+`available` is false and Join Voice stays off ("Voice opens here soon"). The controller calls `release` first whenever
+the account stops being the one that may speak: sign-out (before the logout request), another principal, an expired
+session, a capability lost or gone stale, a failed check. Join Voice asks `gates` again at the click.
+
+**Signing out** stops capture, clears the session from the page and returns to Ooga Chat's sign-in at once, then posts
+`paths.logout`. If the server does not confirm, the page stays signed out and says so with Try again; the server ends
+the session when it expires.
+
+**Storage.** Only `tab` and `zone` are kept (`ooga-chat.v1.<name>`). At start `sweep` removes any other key under the
+app's prefix and any older unversioned `ooga-chat.` key, so no saved screen, role or speaker flag survives.
+
+**Faces.** A face is the account's `avatar`, loaded once at a fixed 56px circle, or the island's own Ooga face
+(`nativeIcons` `roster`) when there is none or it fails: never a broken image, a generated pattern or another
+person's picture, and never retried. A rename changes the words, not the face. Full names stay in the title and the
+accessible name when the line is cut short.
 
 ## Fixtures
 
-`fixture.html?state=` picks the canned answers: `signed-out`, `listener` (an X account, listening), `contributor` (a
-GitHub contributor who may speak, with the five tabs), `demo-payment` (feed answered in demo mode) and `unavailable`.
+`fixture.html?state=` picks the canned answers: `signed-out`, `listener` (an X account, listening, whose handle and
+answer both claim to be a contributor's), `contributor` (an eligible GitHub contributor, with the five tabs),
+`ineligible`, `unknown` and `revoked` (GitHub accounts the server does not let speak), `provider-disabled` (X sign-in
+off), `expiring` (a contributor whose session ends 20 s after load), `signout-fails` (the server never confirms a
+sign-out), `demo-payment` (feed answered in demo mode) and `unavailable`. Signing in with GitHub lands on the state's
+own kind of account, and with X on the X listener. A return can be tried by adding `&signin=denied&provider=github`.
 The accounts are named samples with no picture, never real people. Fixtures are isolated three ways:
 
 - a separate entry: `index.html` never loads `ooga-chat-fixtures.js`, and the build refuses one that does or that
@@ -154,8 +232,8 @@ to the page's own origin only.
 
 ## Size
 
-Measured from the staged foundation: a first visit is 4 requests (`index.html` 1.1 KB, script 29.8 KB, stylesheet
-11.9 KB, sign-in picture 57.9 KB): about 101 KB, 71 KB gzipped. For comparison, the island's portable page is about
+Measured from the staged app with sign-in (#652): a first visit is 4 requests (`index.html` 1.1 KB, script 51.3 KB,
+stylesheet 13.6 KB, sign-in picture 57.9 KB): about 124 KB, 78 KB gzipped (the foundation alone was 71 KB). For comparison, the island's portable page is about
 39.7 MB (23 MB gzipped). The app loads no 3D engine, terrain, cabinets, replays or live feeds. `FIRST_LOAD_BUDGET` in
 the build (96 KB gzipped) fails a build that grows past it; raise it deliberately, with the reason, when a later issue
 adds weight.
@@ -164,6 +242,21 @@ adds weight.
 
 `src/ooga-chat/art/sign-in-island.jpg` (430x287, 3:2) is a stand-in cropped from the issue's design capture. Replace
 it with the approved original under the same name; the build re-hashes it and the views need no change.
+
+## What the backend owner provides
+
+Each item is a proposal for the owner (`w-s-bitcoin`, #662, #663) to confirm or change; the page changes with it.
+
+- `GET /api/bootstrap` (v1, above), with `features.github`/`features.x` and `paths.login`, `paths.session`,
+  `paths.logout` on the app's origin.
+- The provider routes: `paths.login[provider]` starts OAuth (PKCE, state, cookies all server-side) and the callback
+  ends with a 303 to `/?signin=<result>&provider=<provider>`, `result` one of `ok`, `denied`, `failed`,
+  `unavailable`, `rate-limited`, and nothing else in the address.
+- `GET paths.session` (proposed `/api/chat/me`): 401 signed out, or the identity protocol 1 answer above, with
+  `Cache-Control: no-store`. The contributor policy decides `eligibility` and the capabilities; X is never eligible.
+- `POST paths.logout`: revokes the session and any media lease, answers 2xx only once done.
+- Profile pictures on the app's origin (proxied or stored, `img-src 'self'`), at a path that changes when the picture
+  does, so a face is never another principal's.
 
 ## Rollout and rollback
 

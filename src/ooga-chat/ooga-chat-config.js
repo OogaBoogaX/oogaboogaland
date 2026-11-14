@@ -37,18 +37,75 @@
     const newer = typeof raw.build === "string" && raw.build.length <= 64 && build && raw.build !== build ? raw.build : null;
     return { ok: true, mode: "live", features, paths: { login, session, logout }, protocols, newer };
   };
-  // A signed-in account as the session address reports it; anything else is signed out. Capabilities are the
-  // server's: the page shows Join Voice only where `speak` is true and never derives it from the provider or name.
-  const parseSession = (raw) => {
+  // The signed-in account as the session address reports it (identity protocol 1, docs/ooga-chat-app.md); anything else
+  // is signed out. `principal` is the server's opaque identity: equality, deduplication and every per-person state key
+  // on it, never on the login, which can be renamed. `providerUserId` stays a string (an X id outgrows a safe integer).
+  // Capabilities are the server's: `speak` and `contributor` count only for a GitHub account the server reports
+  // `eligible`, and never come from the provider, the name or anything the page saved. `unknown` is not eligible.
+  const ELIGIBILITY = ["eligible", "ineligible", "unknown", "revoked"];
+  // The longest stale window the page honours: the server's `staleAfter`, in seconds, bounded here, never invented.
+  const STALE_MAX_S = 3600;
+  // Text a person chose, without control or direction-override characters, bounded.
+  const clean = (text, max) => typeof text === "string" ? text.replace(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g, "").trim().slice(0, max) : "";
+  const time = (value) => Number.isSafeInteger(value) && value > 0 ? value : null;
+  const parseSession = (raw, now = Date.now()) => {
     const who = raw?.identity;
     if (!who || !PROVIDERS.includes(who.provider) || typeof who.login !== "string" || !/^[\w.-]{1,39}$/.test(who.login)) return null;
-    const display = typeof who.display === "string" && who.display.trim() ? who.display.trim().slice(0, 32) : who.login;
+    if (typeof who.principal !== "string" || !/^[\w:.-]{1,128}$/.test(who.principal)) return null;
+    const expiresAt = time(raw.expiresAt);
+    if (expiresAt !== null && expiresAt <= now) return null;
+    const display = clean(who.display, 50) || who.login;
     const avatar = pathOk(who.avatar) ? who.avatar : null;
-    const speak = who.provider === "github" && raw.capabilities?.speak === true;
-    return { identity: { provider: who.provider, login: who.login, display, avatar }, capabilities: { speak, contributor: speak && raw.capabilities?.contributor === true } };
+    const providerUserId = typeof who.providerUserId === "string" && /^[\w-]{1,64}$/.test(who.providerUserId) ? who.providerUserId : null;
+    const github = who.provider === "github";
+    const state = !github ? "ineligible" : ELIGIBILITY.includes(raw.eligibility?.state) ? raw.eligibility.state : "unknown";
+    const checkedAt = time(raw.eligibility?.checkedAt);
+    const staleAfter = checkedAt !== null && Number.isInteger(raw.eligibility?.staleAfter) && raw.eligibility.staleAfter > 0
+      ? Math.min(raw.eligibility.staleAfter, STALE_MAX_S) : null;
+    const eligible = state === "eligible";
+    return { identity: { principal: who.principal, provider: who.provider, providerUserId, login: who.login, display, avatar },
+      capabilities: { speak: eligible && raw.capabilities?.speak === true, contributor: eligible && raw.capabilities?.contributor === true },
+      eligibility: { state, checkedAt, staleAfter }, expiresAt };
   };
-  // Per-adapter storage keys, so a review session's choices never reach production's.
-  const storageKey = (adapter, name) => `ooga-chat.${adapter === "fixture" ? "fixture." : ""}v1.${name}`;
+  // Where the server's sign-in sends the browser back: `?signin=<result>&provider=<provider>` on the app's own page, a
+  // result code and nothing else (the server keeps the OAuth code, verifier and tokens). The app reads it once and drops
+  // it from the address at once, so routing, history and a reload never keep it.
+  const RETURNS = ["ok", "denied", "failed", "unavailable", "rate-limited"];
+  const RETURN_KEYS = ["signin", "provider", "reason"];
+  const parseReturn = (search) => {
+    const params = new URLSearchParams(search), result = params.get("signin");
+    if (result === null) return null;
+    const provider = params.get("provider");
+    return { result: RETURNS.includes(result) ? result : "failed", provider: PROVIDERS.includes(provider) ? provider : null };
+  };
+  // The address's query without the return's keys, everything else (a fixture's `state`) kept in order.
+  const withoutReturn = (search) => {
+    const params = new URLSearchParams(search);
+    for (const key of RETURN_KEYS) params.delete(key);
+    const rest = params.toString();
+    return rest ? `?${rest}` : "";
+  };
+  // The two outdoor zones; the roster's buttons (#653) choose between them. A saved value outside them is the first.
+  const ZONES = ["main", "dsb"];
+  const parseZone = (value) => ZONES.includes(value) ? value : ZONES[0];
+  // Per-adapter storage keys, so a review session's choices never reach production's. Only `STORED` names are kept:
+  // `sweep` removes any other key under this adapter's prefix and any older unversioned `ooga-chat.` key (a saved
+  // screen, role or speaker flag), so nothing saved can bring back a choice panel or a microphone.
+  const STORED = ["tab", "zone"];
+  const prefixOf = (adapter) => `ooga-chat.${adapter === "fixture" ? "fixture." : ""}v1.`;
+  const storageKey = (adapter, name) => `${prefixOf(adapter)}${name}`;
+  const sweep = (storage, adapter) => {
+    const mine = prefixOf(adapter), theirs = prefixOf(adapter === "fixture" ? "http" : "fixture"), gone = [];
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i);
+      if (!key?.startsWith("ooga-chat.") || key.startsWith(theirs)) continue;
+      if (key.startsWith(mine) && STORED.includes(key.slice(mine.length))) continue;
+      gone.push(key);
+    }
+    for (const key of gone) storage.removeItem(key);
+    return gone;
+  };
   const appBuild = (doc) => doc.querySelector('meta[name="ooga-chat-build"]')?.content || "dev";
-  BL.oogaChatConfig = { BOOTSTRAP_VERSION, BOOTSTRAP_PATH, PROTOCOLS, PROVIDERS, pathOk, parseBootstrap, parseSession, storageKey, appBuild };
+  BL.oogaChatConfig = { BOOTSTRAP_VERSION, BOOTSTRAP_PATH, PROTOCOLS, PROVIDERS, ELIGIBILITY, STALE_MAX_S, RETURNS, ZONES, STORED, pathOk,
+    parseBootstrap, parseSession, parseReturn, withoutReturn, parseZone, storageKey, sweep, appBuild };
 })();

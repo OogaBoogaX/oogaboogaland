@@ -32489,7 +32489,7 @@ const npcActivityRefreshProof = (BL) => {
 // shell's lifecycle on a small DOM stand-in, and the build's guards, all in Node.
 const oogaChatChecks = async () => {
   const load = (names, context) => { for (const name of names) runInNewContext(readFileSync(join(root, name), "utf8"), context); return context.window.BL; };
-  const C = load(["src/ooga-chat/ooga-chat-config.js"], { window: {} }).oogaChatConfig;
+  const C = load(["src/ooga-chat/ooga-chat-config.js"], { window: {}, URLSearchParams }).oogaChatConfig;
   const valid = (extra = {}) => ({ version: 1, protocols: { identity: [1], audience: [1, 2], media: [1] }, features: { github: true, x: true, voice: false, feed: "demo" },
     paths: { session: "/api/session", logout: "/api/logout", login: { github: "/auth/github", x: "//evil.example/x" } }, ...extra });
   const live = C.parseBootstrap(valid(), "b1"), review = C.parseBootstrap(valid(), "b1", { fixture: true });
@@ -32501,13 +32501,103 @@ const oogaChatChecks = async () => {
     foreignPath: !live.features.x && !live.paths.login.x,
     noDemoInProduction: live.features.feed === "off" && review.features.feed === "demo",
     newer: C.parseBootstrap(valid({ build: "b2" }), "b1").newer === "b2" && C.parseBootstrap(valid({ build: "b1" }), "b1").newer === null,
-    xListens: C.parseSession({ identity: { provider: "x", login: "someone" }, capabilities: { speak: true, contributor: true } }).capabilities.speak === false,
-    githubSpeaks: C.parseSession({ identity: { provider: "github", login: "someone" }, capabilities: { speak: true, contributor: true } }).capabilities.contributor === true,
-    badLogin: C.parseSession({ identity: { provider: "github", login: "../x" } }) === null,
     storage: C.storageKey("fixture", "tab") !== C.storageKey("http", "tab")
   };
-  record("Ooga Chat bootstrap: a missing or foreign answer is unavailable, another revision or protocol is stale, paths stay same-origin, production never takes demo payments, and only a GitHub account the server names may speak",
+  record("Ooga Chat bootstrap: a missing or foreign answer is unavailable, another revision or protocol is stale, paths stay same-origin and production never takes demo payments",
     Object.values(contract).every(Boolean), JSON.stringify(contract));
+
+  // The session (identity protocol 1) and the sign-in return: only a GitHub account the server reports eligible may
+  // speak or see the contributor tabs; X never does, whatever its answer or handle claims; identity is the principal.
+  const NOW = 1_800_000_000_000, all = { speak: true, contributor: true };
+  const account = (provider, login, state, extra = {}) => ({ identity: { principal: `p:${provider}:${login}`, provider, login, display: login, ...extra.identity },
+    capabilities: all, eligibility: { state, ...extra.eligibility }, expiresAt: extra.expiresAt ?? NOW + 3_600_000 });
+  const parse = (raw) => C.parseSession(raw, NOW);
+  const big = "1790000000000000001", stored = new Map([["ooga-chat.v1.tab", "chat"], ["ooga-chat.v1.zone", "dsb"], ["ooga-chat.v1.screen", "choice"],
+    ["ooga-chat.v1.speaker", "true"], ["ooga-chat.role", "speaker"], ["ooga-chat.fixture.v1.tab", "bananas"], ["other", "1"]]);
+  const storage = { get length() { return stored.size; }, key: (i) => [...stored.keys()][i] ?? null, removeItem: (key) => stored.delete(key) };
+  C.sweep(storage, "http");
+  const session = {
+    eligible: parse(account("github", "someone", "eligible")).capabilities.speak === true && parse(account("github", "someone", "eligible")).capabilities.contributor === true,
+    xNeverSpeaks: (({ capabilities, eligibility }) => !capabilities.speak && !capabilities.contributor && eligibility.state === "ineligible")(parse(account("x", "someone", "eligible"))),
+    notEligible: ["ineligible", "unknown", "revoked", "nonsense"].every((state) => !parse(account("github", "someone", state)).capabilities.speak),
+    unknownByDefault: parse({ ...account("github", "someone", "eligible"), eligibility: undefined }).eligibility.state === "unknown",
+    principal: parse({ ...account("github", "someone", "eligible"), identity: { provider: "github", login: "someone" } }) === null,
+    badLogin: parse(account("github", "../x", "eligible")) === null,
+    expired: parse(account("github", "someone", "eligible", { expiresAt: NOW - 1 })) === null,
+    idString: parse(account("x", "someone", "ineligible", { identity: { providerUserId: big } })).identity.providerUserId === big
+      && parse(account("x", "someone", "ineligible", { identity: { providerUserId: 17 } })).identity.providerUserId === null,
+    display: parse(account("github", "someone", "eligible", { identity: { display: "\u202eevil\u0007 name" } })).identity.display === "evil name",
+    avatar: parse(account("github", "someone", "eligible", { identity: { avatar: "https://evil.example/a.png" } })).identity.avatar === null,
+    staleBounded: parse(account("github", "someone", "eligible", { eligibility: { checkedAt: NOW, staleAfter: 999999 } })).eligibility.staleAfter === C.STALE_MAX_S,
+    returned: C.parseReturn("?state=x&signin=denied&provider=github").result === "denied" && C.parseReturn("?signin=code123&provider=evil").result === "failed"
+      && C.parseReturn("?signin=code123&provider=evil").provider === null && C.parseReturn("?state=x") === null,
+    dropped: C.withoutReturn("?state=listener&signin=ok&provider=x&reason=y") === "?state=listener" && C.withoutReturn("?signin=ok") === "",
+    swept: [...stored.keys()].join() === "ooga-chat.v1.tab,ooga-chat.v1.zone,ooga-chat.fixture.v1.tab,other",
+    zone: C.parseZone("dsb") === "dsb" && C.parseZone("interior") === "main"
+  };
+  record("Ooga Chat session: only a GitHub account the server reports eligible speaks or sees contributor tabs, X never does whatever it claims, unknown is not eligible, identity needs the opaque principal, an X id stays a string, names and pictures are cleaned, and a sign-in return or saved screen or speaker flag cannot survive",
+    Object.values(session).every(Boolean), JSON.stringify(session));
+
+  // The account lifecycle against a stand-in adapter, clock and voice seam: every sign-in lands as a listener, capture
+  // is released before the logout request and on every downgrade, and a failed or expired session says which.
+  const A = load(["src/ooga-chat/ooga-chat-config.js", "src/ooga-chat/ooga-chat-auth.js"], { window: {}, URLSearchParams }).oogaChatAuth;
+  const boot = { paths: { session: "/s", logout: "/l", login: { github: "/g", x: "/x" } } };
+  const signedIn = async (first, extra = {}) => {
+    let clock = NOW, answer = first, failLogout = extra.failLogout, timers = [];
+    const log = [];
+    const adapter = { session: async () => { log.push("session"); if (answer instanceof Error) throw answer; return answer && parse(answer); },
+      signIn: (b, provider) => { log.push(`signIn:${provider}`); return parse(account(provider, `fresh-${provider}`, "eligible")); },
+      signOut: async () => { log.push("logout"); if (failLogout) throw new Error("offline"); } };
+    const media = { available: true, release: (why) => log.push(`release:${why}`) };
+    const auth = A.create({ adapter, media, now: () => clock, timers: { set: (fn, ms) => (timers.push({ fn, at: clock + ms }), timers.length), clear: (id) => { timers[id - 1] = null; } } });
+    await auth.start(boot, extra.back || null);
+    return { auth, log, set answer(value) { answer = value; }, set failLogout(value) { failLogout = value; },
+      advance: async (ms) => { clock += ms; for (const timer of timers) if (timer && timer.at <= clock) { timers[timers.indexOf(timer)] = null; await timer.fn(); } },
+      gates: () => A.gates(auth.state, clock), get timers() { return timers.filter(Boolean); } };
+  };
+  const eligible = await signedIn(account("github", "speaker", "eligible", { eligibility: { checkedAt: NOW, staleAfter: 600 } }));
+  const opened = eligible.auth.state.auth === "eligible" && eligible.gates().joinVoice && eligible.gates().contributor && eligible.timers.length === 1;
+  await eligible.advance(600_000);
+  const stale = eligible.log.includes("release:stale") && !A.gates({ ...eligible.auth.state, session: eligible.auth.state.session }, NOW + 600_000).joinVoice;
+  const x = await signedIn(account("x", "speaker", "eligible"));
+  const ineligible = await signedIn(account("github", "visitor", "ineligible")), unknown = await signedIn(account("github", "unchecked", "unknown"));
+  const revoked = await signedIn(account("github", "revoked", "revoked"));
+  const gated = { x: x.auth.state.auth === "listener" && !x.gates().joinVoice && !x.gates().contributor && x.gates().why === A.WHY.x,
+    ineligible: ineligible.auth.state.auth === "listener" && !ineligible.gates().joinVoice && ineligible.gates().why === A.WHY.listener,
+    unknown: unknown.auth.state.auth === "unknown" && !unknown.gates().joinVoice && !unknown.gates().contributor && unknown.gates().why === A.WHY.unknown,
+    revoked: !revoked.gates().joinVoice && !revoked.gates().contributor && revoked.gates().why === A.WHY.revoked };
+  // Sign leaving with the network down: capture goes first, the page is signed leaving, and the retry reaches the server.
+  const leaving = await signedIn(account("github", "speaker", "eligible"), { failLogout: true });
+  leaving.auth.signOut();
+  const releasedFirst = leaving.log.indexOf("release:signout") >= 0 && leaving.log.indexOf("release:signout") < leaving.log.indexOf("logout") && leaving.auth.state.session === null;
+  await new Promise((resolve) => setImmediate(resolve));
+  const uncertain = leaving.auth.state.auth === "signed-out" && leaving.auth.state.notice?.kind === "signout" && !!leaving.auth.state.notice.action;
+  leaving.failLogout = false;
+  await leaving.auth.retry();
+  const retried = leaving.log.filter((entry) => entry === "logout").length === 2 && leaving.auth.state.notice === null;
+  // Another principal, an expired session and a failed check each release; the check says which.
+  const swap = await signedIn(account("github", "speaker", "eligible"));
+  swap.answer = account("github", "someone-else", "eligible");
+  await swap.auth.check("retry");
+  swap.answer = null;
+  await swap.auth.check("retry");
+  const expiredNotice = swap.auth.state.notice?.kind === "expired";
+  const broken = await signedIn(account("github", "speaker", "eligible"));
+  broken.answer = new Error("offline");
+  await broken.auth.check("retry");
+  const throttled = await signedIn(account("github", "speaker", "eligible"));
+  await throttled.auth.check("visible");
+  // A denied return names its provider and retries it; a GitHub sign-in lands eligible but closed until Join Voice.
+  const denied = await signedIn(null, { back: { result: "denied", provider: "github" } });
+  const deniedNotice = denied.auth.state.notice?.kind === "signin" && denied.auth.state.notice.provider === "github" && denied.auth.state.auth === "signed-out";
+  await denied.auth.retry();
+  const flow = { opened, stale, ...gated, releasedFirst, uncertain, retried,
+    identity: swap.log.includes("release:identity") && swap.log.includes("release:expired") && expiredNotice,
+    error: broken.auth.state.auth === "error" && broken.log.includes("release:error") && broken.auth.state.notice?.kind === "check" && !broken.gates().joinVoice,
+    throttled: throttled.log.filter((entry) => entry === "session").length === 1,
+    denied: deniedNotice && denied.log.includes("signIn:github") && denied.auth.state.auth === "eligible" && !denied.log.some((entry) => entry.startsWith("release")) };
+  record("Ooga Chat account: every sign-in lands as a listener with gates only the server's answer opens, a stale window or failed check closes them, sign-out releases capture before the request and offers a retry when unconfirmed, and another principal or an expired session releases and says so",
+    Object.values(flow).every(Boolean), JSON.stringify(flow));
 
   // The production adapter against a stand-in fetch: every failure is an explicit unavailable mode, and dispose aborts.
   const answer = (status, type, body) => async () => ({ ok: status < 400, status, headers: { get: () => type }, json: async () => body });
