@@ -543,7 +543,7 @@
       targets.length = 0;
       if (group.parent) removeChild(group.parent, group);
     };
-    const stats = () => ({ chunks: chunks.length, built, tiers: chunks.map((c) => c.tier).join(""), wants: chunks.map((c) => c.want).join(""), preps: chunks.map((c) => c.prep).join(""),
+    const stats = () => ({ chunks: chunks.length, built, pending: !!job || chunks.some(c => !c.meshes[0] || missing(c)), tiers: chunks.map((c) => c.tier).join(""), wants: chunks.map((c) => c.want).join(""), preps: chunks.map((c) => c.prep).join(""),
       lit: totems.filter((o) => o.live).length, hidden: totems.filter((o) => o.hidden).length, flames: flames.filter((f) => f.node.visible).length, features: totems.filter((o) => o.features?.visible).length, rings: ringBatches.reduce((n, b) => n + b.node.instanceCount, 0),
       ringDraws: ringBatches.filter((b) => b.node.visible).length, lights: totems.filter((o) => o.lamp?.always).length,
       crystalGlow: gemBands.map(n => n?.visible ? n.glow : 0),

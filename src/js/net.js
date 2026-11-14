@@ -182,6 +182,7 @@
   const sendBf = m => { if (!state.blockLive || state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN) return false; send(JSON.stringify({ t: "bf", v: BL.blockWire.WIRE, ...m })); return true; };
   const sendBfInput = m => { if (!state.blockLive || state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN) return false; send(JSON.stringify(m)); return true; };
   const sendBfFrame = bytes => { if (state.blockLive && ws && ws.readyState === WebSocket.OPEN) ws.send(bytes); };
+  const sendTess = m => { if (!state.tessShared || state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN) return false; send(JSON.stringify({ t: "tess-guide", ...m })); return true; };
   const sendHockey = m => { if (!state.hockey || state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN) return false; send(JSON.stringify({ t: "hockey", ...m, v: 4 })); return true; };
   const studioEmit = message => { for (const fn of studioSubscribers) fn(message); };
   const chatSubscribers = new Set();
@@ -197,7 +198,7 @@
   // room: "off" (signed out or no backend), "connecting", "live", "paused" (hidden a while), or a kick that
 // stopped it ("replaced", "full").
   const offline = new URLSearchParams(location.search);
-  const state = { roomLocks: false, lockedRooms: new Uint8Array(10), roomPin: "", roomPinRoom: -1, backend: false, games: [], me: null, donations: false, tess: false, highscores: false, highscoreSnapshots: false, logoutEpoch: 0, started: false,
+  const state = { roomLocks: false, lockedRooms: new Uint8Array(10), roomPin: "", roomPinRoom: -1, backend: false, games: [], me: null, donations: false, tess: false, voiceTurn: false, tessShared: false, tessGuide: null, highscores: false, highscoreSnapshots: false, logoutEpoch: 0, started: false,
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
     room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, npcVersion: 0, doorway: false, pokerVoice: null,
     self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, privateChat: false, chalk: null, blendTo: null, blendT: 0, reactions: false, customHand: false, hand: false, handTone: 0, handEmoji: "",
@@ -207,6 +208,10 @@
   // The room's last word on whom to hear, for what a move to another place keeps.
   let peersHeard = [], gensHeard = null;
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, unanswered = 0, hiddenTimer = 0, stopped = false;
+  // The Durable Object inspector (worker/src/inspect-report.js), only while the room's welcome names its feature: why
+  // this page's last socket ended (`ended`: why, the browser's close code, clean, when), said on the close frame and,
+  // after the next welcome, in one `back` message, so a drop's cause reaches the inspector's log.
+  let inspectOn = false, ended = null;
   // Opt-in local evidence for a brief disappearance; never retain payloads, names, tokens or raw close reasons.
   // No timers or network traffic. Only lifecycle events enter the bounded history, not pose snapshots.
   const DIAGNOSTIC_KEEP = 64;
@@ -261,11 +266,15 @@
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
   const gSent = new Float64Array(6);
   let gKnown = false, poseHasG = false, jetSent = 0, weaponSent = 0, visualKnown = false;
-  const visualSent = new Int16Array(17);
-  const VISUAL_LIMITS = [157, 157, 314, 8191, 240, 1200, 560, 440, 320, 1240, 100, 750, 1300, 280, 2000, 31, 31];
+  // A pose's visual state (crew.js `visualState`), each number between its low and high; an older page sends the
+  // first 17 alone, without the body's own pose (`VISUAL_BODY` on).
+  const VISUAL_LOWS = [-157, -157, -314, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -50, -100, 0, -157, 0];
+  const VISUAL_LIMITS = [157, 157, 314, 8191, 240, 1200, 560, 440, 320, 1240, 100, 750, 1300, 280, 2000, 31, 31, 2628, 50, 100, 1, 157, 100];
+  const VISUAL_SIZE = VISUAL_LIMITS.length, VISUAL_BODY = 17;
+  const visualSent = new Int16Array(VISUAL_SIZE);
   const validVisual = (v) => {
-    if (!v || v.length !== 17) return false;
-    for (let i = 0; i < 17; i++) if (!Number.isInteger(v[i]) || v[i] < (i < 3 ? -VISUAL_LIMITS[i] : 0) || v[i] > VISUAL_LIMITS[i]) return false;
+    if (!v || v.length !== VISUAL_SIZE && v.length !== VISUAL_BODY) return false;
+    for (let i = 0; i < v.length; i++) if (!Number.isInteger(v[i]) || v[i] < VISUAL_LOWS[i] || v[i] > VISUAL_LIMITS[i]) return false;
     return true;
   };
   const restSent = new Int16Array(6);
@@ -288,8 +297,10 @@
   const readVisual = (rec, v, at) => {
     rec.visual = null;
     if (!validVisual(v) || !Number.isFinite(at)) return;
-    if (!rec.visualData) rec.visualData = new Int16Array(17);
-    rec.visualData.set(v); rec.visual = rec.visualData; rec.visualAt = at;
+    if (!rec.visualData) rec.visualData = new Int16Array(VISUAL_SIZE);
+    rec.visualData.fill(0); rec.visualData.set(v); rec.visual = rec.visualData; rec.visualAt = at;
+    // Whether it carries the body's own pose, or came from an older page without it.
+    rec.visualBody = v.length === VISUAL_SIZE;
   };
   let clockOffset = 0, clockKnown = false;
   let pokerVoice = null;
@@ -324,6 +335,7 @@
     const lost = state.room === "live" && room !== "live";
     state.room = room;
     if (room !== "live") { cabinetSeats.clear(); cabinetSeat = null; state.cabinets = false; finishCabinetRequest("Connection to the arcade was lost"); }
+    if (room !== "live") state.tessGuide = null;
     if (room !== "live") state.chatUnicode = state.privateChat = false;
     if (room !== "live") { state.voiceLinks = false; state.linkWants.clear(); state.linked.clear(); peersHeard = []; gensHeard = null; }
     if (lost) privateHeard({ op: "lost" });
@@ -498,6 +510,9 @@
       studioEmit(msg);
     } else if (msg.t === "bf") {
       for (const fn of bfSubscribers) fn(msg);
+    } else if (msg.t === "tess-guide") {
+      if (msg.op === "state") state.tessGuide = msg;
+      else if (msg.op === "pose" && state.tessGuide) state.tessGuide.pose = msg.a;
     } else if (msg.t === "hockey") {
       if (Number.isInteger(msg.i) && msg.i >= 0 && msg.i < 3) {
         if (msg.k === "table") hockeyTables[msg.i] = msg.phase === "closed" ? null : msg;
@@ -539,7 +554,7 @@
       }
       const vs = msg.vs;
       if (Array.isArray(vs)) for (const row of vs) {
-        if (!Array.isArray(row) || row.length !== 19) continue;
+        if (!Array.isArray(row) || row.length !== VISUAL_SIZE + 2 && row.length !== VISUAL_BODY + 2) continue;
         const rec = remotes.get(row[0]);
         if (rec) readVisual(rec, row.slice(2), row[1]);
       }
@@ -552,6 +567,9 @@
       if (changed) moved();
     } else if (msg.t === "welcome") {
       retry = 0;
+      inspectOn = Array.isArray(msg.features) && msg.features.includes("inspect-v1");
+      if (inspectOn && ended) send(JSON.stringify({ t: "back", why: ended.why, code: ended.code, clean: ended.clean, down: Math.min(86400000, Math.max(0, Math.round(Date.now() - ended.at))) }));
+      ended = null;
       clockKnown = false;
       clockSample(msg.now);
       state.loopEpoch = typeof msg.loopEpoch === "number" ? msg.loopEpoch : 0;
@@ -561,6 +579,7 @@
       state.connectionToken = typeof msg.connectionToken === "string" ? msg.connectionToken : "";
       state.cabinets = Array.isArray(msg.features) && msg.features.includes(BL.arcadeCabinets.FEATURE);
       state.cabinetsOutdoor = Array.isArray(msg.features) && msg.features.includes(BL.arcadeCabinets.OUTDOOR_FEATURE);
+      state.tessShared = Array.isArray(msg.features) && msg.features.includes("tess-guide-v1");
       state.hockey = Array.isArray(msg.features) && msg.features.includes("hockey-v4");
       state.blockLive = Array.isArray(msg.features) && msg.features.includes("block-v1");
       state.doorway = Array.isArray(msg.features) && msg.features.includes("door");
@@ -589,7 +608,7 @@
       if (restoredPose) {
         // Cached equipment/look survive reconnect; transient actions are reconciled by the next
         // live sample rather than replayed with a fresh room timestamp.
-        if (visualKnown) { visualSent[3] &= 7; for (let i = 4; i < 15; i++) visualSent[i] = 0; }
+        if (visualKnown) { visualSent[3] &= 7; for (let i = 4; i < 15; i++) visualSent[i] = 0; for (let i = VISUAL_BODY; i < VISUAL_SIZE; i++) visualSent[i] = 0; }
         const extra = state.bodyKind === "gorilla" && poseHasG ? `,"g":[${gSent[0]},${gSent[1].toFixed(3)},${gSent[2].toFixed(3)},${gSent[3].toFixed(3)},${gSent[4].toFixed(3)},${gSent[5].toFixed(3)}]`
           : (jetSent ? `,"j":${jetSent}` : "") + (weaponSent ? `,"w":${weaponSent}` : "") + (visualKnown ? `,"v":[${visualSent.join(",")}]` : "")
             + (restKnown ? restActive ? `,"r":[${restSent.join(",")}]` : ',"r":0' : "");
@@ -773,17 +792,22 @@
       if (msg.reason === "revoked") { state.me = null; state.hand = false; }
       // replaced and full stop here; stale reconnects like any drop.
       if (msg.reason !== "stale") stopped = true;
-      close(msg.reason === "stale" ? "connecting" : msg.reason);
+      close(msg.reason === "stale" ? "connecting" : msg.reason, "kicked");
     }
   };
 
-  const close = (room) => {
+  // `why`, `code` and `clean`: what ended the socket, for the inspector (the browser's close code only when it closed).
+  const close = (room, why = "other", code = 0, clean = false) => {
     if (diagnostic || connectionSubscribers.size) traceConnection("clear", { next: diagnosticRoom(room) });
     window.clearInterval(pingTimer);
     pingTimer = 0;
     if (ws) {
+      if (inspectOn) ended = { why, code, clean, at: Date.now() };
       ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
-      if (ws.readyState <= WebSocket.OPEN) ws.close(1000);
+      if (ws.readyState <= WebSocket.OPEN) {
+        if (inspectOn) ws.close(1000, why);
+        else ws.close(1000);
+      }
       ws = null;
     }
     remotes.clear();
@@ -832,7 +856,7 @@
       unanswered = 0;
       pingTimer = window.setInterval(() => {
         // A half-open socket never closes by itself for minutes, while the room has long since evicted this page.
-        if (unanswered >= PING_MISSES) { traceConnection("heartbeat-timeout"); close("connecting"); return; }
+        if (unanswered >= PING_MISSES) { traceConnection("heartbeat-timeout"); close("connecting", "heartbeat"); return; }
         unanswered++;
         send("ping");
       }, PING_MS);
@@ -840,7 +864,7 @@
     ws.onerror = () => traceConnection("socket-error");
     ws.onclose = (event) => {
       if (diagnostic || connectionSubscribers.size) traceConnection("socket-close", { code: Number.isInteger(event?.code) ? event.code : 0, clean: event?.wasClean === true });
-      close("connecting");
+      close("connecting", "socket", Number.isInteger(event?.code) ? event.code : 0, event?.wasClean === true);
     };
   };
 
@@ -858,6 +882,7 @@
       state.me = accept(data.player);
       state.donations = data.donations === true;
       state.tess = data.tess === true;
+      state.voiceTurn = data.voiceTurn === true;
       state.highscores = data.highscores === true;
       state.highscoreSnapshots = data.highscoreSnapshots === true;
       state.arcadePlays = data.arcadePlays === true;
@@ -911,7 +936,7 @@
     state.me = null;
     state.hand = false;
     state.logoutEpoch++;
-    close("off");
+    close("off", "signout");
   };
 
   // Existing account API; rejoin with fresh authenticated headers so future lines use the new name.
@@ -1042,7 +1067,7 @@
     if (!document.hidden || stopped || !state.me) return;
     stopped = true;
     window.clearTimeout(retryTimer);
-    close("paused");
+    close("paused", "paused");
   };
   document.addEventListener("visibilitychange", onVisibility);
 
@@ -1207,7 +1232,7 @@
     let changed = !!g && !gKnown || jet !== jetSent || weapon !== weaponSent || !!visual !== visualKnown
       || state.bodyKind !== "gorilla" && (!restKnown || !!rest !== restActive);
     if (rest && !changed) for (let i = 0; i < 6; i++) if (rest[i] !== restSent[i]) { changed = true; break; }
-    if (visual && !changed) for (let i = 0; i < 17; i++) if (visual[i] !== visualSent[i]) { changed = true; break; }
+    if (visual && !changed) for (let i = 0; i < visual.length; i++) if (visual[i] !== visualSent[i]) { changed = true; break; }
     // A held wind-up can outlast its last changing sample. A bounded heartbeat keeps it live, and
     // lets a silent/disconnected action expire without an extra timer or a new message type.
     if (visual && (visual[3] & 40 || visual[14] > 0) && now - poseAt >= 300) changed = true;
@@ -1447,5 +1472,5 @@
     diagnostic = null;
   };
 
-  BL.net = { connectionDiagnostics, subscribeConnection, lockRoom, unlockRoom, tryRoomPin, voiceLink, toggleVoiceLink, linkEveryone, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeBf, subscribeBfFrame, sendBf, sendBfInput, sendBfFrame, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendReaction, subscribeReactions, setHand, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { sendTess, connectionDiagnostics, subscribeConnection, lockRoom, unlockRoom, tryRoomPin, voiceLink, toggleVoiceLink, linkEveryone, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeBf, subscribeBfFrame, sendBf, sendBfInput, sendBfFrame, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribePrivate, subscribeChalk, subscribeWallets, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendReaction, subscribeReactions, setHand, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

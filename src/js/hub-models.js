@@ -2,9 +2,10 @@
 // sign, trees, bushes, grass, rocks, barrels, torches, fire pit, clouds, dock and the critter
 // bodies.
 //
-// `SIGN_GLYPHS` is the blocky 3x5 alphabet every carved sign in the world is cut from, the Mempool cave's
+// `SIGN_GLYPHS` is the blocky five-row alphabet every carved sign in the world is cut from, the Mempool cave's
 // headlines included. It must stay complete: a missing key is silently skipped and the reading loses a
-// letter. `SIGN_ICONS` are the cave emblems dressing.js banners carry; `SIGN_BADGES` the larger outlined ones
+// letter. Rows are three to five cells wide; fixed-width labels fit each glyph into their existing slot.
+// `SIGN_ICONS` are the cave emblems dressing.js banners carry; `SIGN_BADGES` the larger outlined ones
 // either side of a cave sign's name. `postSign` stands a scaled cave sign on two pegs for the Drop and Orbit
 // launch sites and the Mempool island. The jungle kit (`withJungle` and its vines, leaves, bamboo, lashings,
 // logs and thatch) dresses machines and stalls in the geometry they already draw with.
@@ -78,11 +79,11 @@
     i: ["010", "000", "010", "010", "010"],
     k: ["100", "101", "110", "101", "101"],
     l: ["110", "010", "010", "010", "011"],
-    m: ["000", "111", "111", "101", "101"],
+    m: ["00000", "11010", "10101", "10101", "10101"],
     s: ["000", "011", "110", "001", "110"],
     u: ["000", "101", "101", "101", "011"],
     v: ["000", "101", "101", "101", "010"],
-    w: ["000", "101", "101", "111", "101"],
+    w: ["00000", "10001", "10101", "10101", "01010"],
     x: ["000", "101", "010", "010", "101"],
     z: ["000", "111", "001", "010", "111"],
     A: ["010", "101", "111", "101", "101"],
@@ -90,19 +91,19 @@
     D: ["110", "101", "101", "101", "110"],
     F: ["111", "100", "110", "100", "100"],
     H: ["101", "101", "111", "101", "101"],
-    M: ["101", "111", "111", "101", "101"],
+    M: ["10001", "11011", "10101", "10001", "10001"],
     P: ["110", "101", "110", "100", "100"],
-    R: ["110", "101", "110", "101", "101"],
+    R: ["1110", "1001", "1110", "1010", "1001"],
     S: ["011", "100", "010", "001", "110"],
     T: ["111", "010", "010", "010", "010"],
-    W: ["101", "101", "101", "111", "101"],
+    W: ["10001", "10001", "10101", "10101", "01010"],
     X: ["101", "101", "010", "101", "101"],
-    G: ["011", "100", "101", "101", "011"],
+    G: ["01110", "10000", "10111", "10001", "01110"],
     I: ["111", "010", "010", "010", "111"],
     J: ["001", "001", "001", "101", "010"],
-    K: ["101", "101", "110", "101", "101"],
-    N: ["101", "111", "101", "101", "101"],
-    Q: ["111", "101", "101", "111", "011"],
+    K: ["1001", "1010", "1100", "1010", "1001"],
+    N: ["10001", "11001", "10101", "10011", "10001"],
+    Q: ["01110", "10001", "10101", "10010", "01101"],
     U: ["101", "101", "101", "101", "111"],
     V: ["101", "101", "101", "101", "010"],
     Y: ["101", "101", "010", "010", "010"],
@@ -127,8 +128,8 @@
     "'": ["010", "010", "000", "000", "000"],
     "&": ["010", "101", "010", "101", "011"]
   };
-  // The carved headline has room for both diagonals; a three-cell M reads too much like H at bridge distance.
-  const CARVED_M = ["10001", "11011", "10101", "10001", "10001"];
+  // Keep the existing carved-M export on the shared shape.
+  const CARVED_M = SIGN_GLYPHS.M;
   const SIGN_CELL = 0.075, SIGN_PAD = 0.855, SIGN_FRONT = 0.23;
   const SIGN_CACHE = BL.models.scopedMap();
   // The emblem each cave flies, 5 by 7: on its sign either side of the name and on its banners.
@@ -407,10 +408,10 @@
     for (const [text, y] of [["OFF", 0.37], ["ON", -0.37]]) {
       const width = (text.length * 4 - 1) * cell;
       for (let i = 0; i < text.length; i++) {
-        const glyph = SIGN_GLYPHS[text[i]];
-        for (let row = 0; row < 5; row++) for (let col = 0; col < 3; col++) if (glyph[row][col] === "1") {
-          parts.push(box({ w: cell * 0.85, h: cell * 0.85, d: 0.006, color: "#e8efdf", emissive: 0.8,
-            offset: { x: -width / 2 + (i * 4 + col + 0.5) * cell, y: y + (2 - row) * cell, z: 0.255 } }));
+        const glyph = SIGN_GLYPHS[text[i]], sx = 3 / glyph[0].length;
+        for (let row = 0; row < 5; row++) for (let col = 0; col < glyph[row].length; col++) if (glyph[row][col] === "1") {
+          parts.push(box({ w: cell * sx * 0.85, h: cell * 0.85, d: 0.006, color: "#e8efdf", emissive: 0.8,
+            offset: { x: -width / 2 + (i * 4 + (col + 0.5) * sx) * cell, y: y + (2 - row) * cell, z: 0.255 } }));
         }
       }
     }
@@ -498,13 +499,13 @@
     for (const ch of name) {
       const glyph = SIGN_GLYPHS[ch];
       if (glyph) for (let row = 0; row < glyph.length; row++) {
-        const line = glyph[row];
+        const line = glyph[row], sx = 3 / line.length;
         for (let col = 0; col < line.length; col++) {
           if (line[col] !== "1") continue;
           let run = 1;
           while (line[col + run] === "1") run++;
-          parts.push(box({ w: cell * run * 0.92, h: cell * 0.92, d: 0.02, color: SIGN_INK, emissive: 1,
-            offset: { x: cursor + (col + run * 0.5) * cell, y: 3.02 + (2 - row) * cell, z: 0.18 } }));
+          parts.push(box({ w: cell * sx * run * 0.92, h: cell * 0.92, d: 0.02, color: SIGN_INK, emissive: 1,
+            offset: { x: cursor + (col + run * 0.5) * cell * sx, y: 3.02 + (2 - row) * cell, z: 0.18 } }));
           col += run - 1;
         }
       }
@@ -617,12 +618,13 @@
   const labScreenText = (geometry, text, x, y, z, cell, color) => {
     for (let i = 0; i < text.length; i++) {
       const ch = text[i], glyph = LAB_CODE_SIGNS[ch] || SIGN_GLYPHS[ch.toUpperCase()];
-      if (glyph) for (let row = 0; row < 5; row++) for (let col = 0; col < 3;) {
+      if (glyph) for (let row = 0; row < 5; row++) for (let col = 0; col < glyph[row].length;) {
         if (glyph[row][col] !== "1") { col++; continue; }
         const start = col;
-        while (col < 3 && glyph[row][col] === "1") col++;
-        labScreenRect(geometry, x + i * cell * 4 + start * cell, y - (row + 1) * cell,
-          (col - start) * cell * 0.88, cell * 0.88, z, color);
+        while (col < glyph[row].length && glyph[row][col] === "1") col++;
+        const sx = 3 / glyph[row].length;
+        labScreenRect(geometry, x + i * cell * 4 + start * cell * sx, y - (row + 1) * cell,
+          (col - start) * cell * sx * 0.88, cell * 0.88, z, color);
       }
     }
   };

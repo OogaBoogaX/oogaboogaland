@@ -7,7 +7,8 @@
     const key=text+color;let geometry=signs.get(key);
     if(!geometry){geometry={verts:[],faces:[],lines:[],castShadow:false};const width=(text.length*4-1)*.16,ink=BL.math.hexToRgb(color);
       for(let i=0;i<text.length;i++){if(text[i]===" ")continue;const glyph=extra[text[i]]||BL.hubModels.SIGN_GLYPHS[text[i]]||BL.hubModels.SIGN_GLYPHS[text[i].toLowerCase()];if(!glyph)throw Error("Missing factory glyph "+text[i]);
-        for(let r=0;r<5;r++)for(let c=0;c<3;c++)if(glyph[r][c]==="1"){const n=geometry.verts.length/3,a=i*.64+c*.16-width/2,b=(4-r)*.16;geometry.verts.push(a-.0675,b-.0675,.061,a+.0675,b-.0675,.061,a+.0675,b+.0675,.061,a-.0675,b+.0675,.061);geometry.faces.push({i:[n,n+1,n+2,n+3],color:ink,emissive:.6});}}
+        const sx=3/glyph[0].length,half=.0675*sx;
+        for(let r=0;r<5;r++)for(let c=0;c<glyph[r].length;c++)if(glyph[r][c]==="1"){const n=geometry.verts.length/3,a=i*.64+((c+.5)*sx-.5)*.16-width/2,b=(4-r)*.16;geometry.verts.push(a-half,b-.0675,.061,a+half,b-.0675,.061,a+half,b+.0675,.061,a-half,b+.0675,.061);geometry.faces.push({i:[n,n+1,n+2,n+3],color:ink,emissive:.6});}}
       signs.set(key,geometry);
     }
     const n=BL.scene.createNode({geometry,position:{x,y,z},scale:{x:size,y:size,z:size}});BL.scene.addChild(parent,n);return n;

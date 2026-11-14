@@ -9,6 +9,7 @@
   const params = new URLSearchParams(location.search);
   const LAZY_BEDDING = params.get("lazyhub") === "1";
   const SEED = 1;
+  const cliffLadders = [];
   const DEG = Math.PI / 180;
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
   const yawParam = parseFloat(params.get("yaw"));
@@ -219,7 +220,7 @@
   const WANDER_COUNT = 36, WANDER_INNER = 5.5;
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
-  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", poolbridge: "Vine bridge · to the Mempool island", poolsign: "Mempool Rainforest · the way down is through the hill", poolpainting: "Wall painting · tap to read it closely", chainsign: "The chain, at a glance · tap to read it", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", jumbotron: "Oogatron · OogaBoogaX on the big screen · tap the screen for a close-up", palm: "Palm · shake it", bifrostbridge: "Bifröst · the bridge to ₿IFRÖST", bifrostgate: "₿IFRÖST · walk an Ooga through the field", heimdall: "Heimdall · keeper of the bridge", gate: null };
+  const PROP_TIPS = { cliffrope: "Cliff rope · climb between the rock ledges", tree: "Tree · shake it", bush: "Bush · rustle it", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", poolbridge: "Vine bridge · to the Mempool island", poolsign: "Mempool Rainforest · the way down is through the hill", poolpainting: "Wall painting · tap to read it closely", chainsign: "The chain, at a glance · tap to read it", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", jumbotron: "Oogatron · OogaBoogaX on the big screen · tap the screen for a close-up", palm: "Palm · shake it", bifrostbridge: "Bifröst · the bridge to ₿IFRÖST", bifrostgate: "₿IFRÖST · walk an Ooga through the field", heimdall: "Heimdall · keeper of the bridge", gate: null };
   const RETICLE_PROPS = new Set(["tree", "bush", "flower", "torch", "firepit", "ladder", "poolsign", "poolpainting", "chainsign", "weathersign", "poolfern", "poollog", "jaguar", "monkey", "toucan", "canopy", "jumbotron", "palm", "timechainentrance", "timechainkeypad", "bifrostgate", "heimdall"]);
   const workCave = (slot) => slot.repo && (slot.status === "open" || slot.status === "mirror");
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
@@ -5941,6 +5942,9 @@
       case "bedroll":
         hud.toast("Somebody's bed. Ooga leaves it.");
         break;
+      case "cliffrope":
+        hud.toast("Walk toward the rope to climb · forward/back to go up/down · " + (COARSE ? "tap JUMP!" : "Space") + " to let go. Falling returns you to the island.");
+        break;
       case "ladder":
         if (!wobble(o.lean, 0.05)) return;
         hud.toast("Wobbly. Ooga does not climb.");
@@ -10951,7 +10955,7 @@
     heldDebug = null;
     hud.renew(ctx.signal);
     hud.restoreBoards(jumbotronBoard);
-    hud.setDestinations(["pile", "lab", "mirror", "underground", "basement", "mempool", "factory", "arcade", "bca", "gate", "bifrost", "timechain"]);
+    hud.setDestinations(["pile", "lab", "mirror", "underground", "basement", "mempool", "factory", "arcade", "bca", "gate", "bifrost", "timechain", "repos"]);
     input.resume(); pilot.resume(); clankerPlay.resume(); chalkboard.resume();
     islandGuide.resume();
     if (timechainIsland.gate.resume()) hud.toast(`Room ${timechainIsland.gate.preselected} is chosen at the keypad · walk up to it and press Enter to go in`);
@@ -11008,7 +11012,7 @@
     else if (returningCharacter && arcadeYard && pilot.player && arcadeMouth) arcadeMouth.entrance.standAt(arcadeYard.slot);
     else if (returningCharacter && arcadeCrossing && pilot.player && arcadeMouth) { arcadeMouth.entrance.arrive(arcadeCrossing); factoryWalk.still = 1; factoryWalk.hold = BL.factoryWindow.GLIDE.still; }
     else if (returningCharacter && ctx.from === "arcade" && pilot.player && arcadeMouth) arriveFromArcade();
-    else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile", false, false);
+    else if (returningCharacter) navigate(routedPlace || (ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile"), false, false);
     else navigate(routedPlace || (ctx.from === "bifrost" ? "bifrost" : "pile"), false, false);
     if (donate) hud.openFeed();
     clankers.sync(); clankerMeshes.sync();
@@ -11046,7 +11050,7 @@
     if (heldHub || ctx.from === "hub") return null;
     preparedCharacters.clear();
     const factory = caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
-    const options = { seed: SEED, roofHole: factory ? { id: factory.id, ...BL.factoryModels.ROOF_TUBE } : null, nook: LIBRARY };
+    const options = { seed: SEED, roofHole: factory ? { id: factory.id, ...BL.factoryModels.ROOF_TUBE } : null, nook: LIBRARY, cliffLedges: true };
     const slice = { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 };
     if (!terrain.hasIsland(options)) yield* terrain.islandSteps(options, slice);
     yield* poolModels.prepareSteps();
@@ -11129,7 +11133,7 @@
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     phase = null;
     const factorySlot = caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
-    island = terrain.island({ seed: SEED, roofHole: factorySlot ? { id: factorySlot.id, ...BL.factoryModels.ROOF_TUBE } : null, nook: LIBRARY });
+    island = terrain.island({ seed: SEED, roofHole: factorySlot ? { id: factorySlot.id, ...BL.factoryModels.ROOF_TUBE } : null, nook: LIBRARY, cliffLedges: true });
     guideWitness[0] = -1;
     cutawayPathBounds = buildCutawayPathBounds(island.cutawayPaths);
     guideSegmentClear.boxGrid = POOL_SEAMS[0].boxGrid = POOL_SEAMS[1].boxGrid = island.sightGrid;
@@ -11335,6 +11339,19 @@
     buildLawn();
     reflowScenery();
     buildSpots();
+    // Build after all seeded scatter and reflow, with no ground claims or RNG draws.
+    for (const cliff of BL.hubCliffs.create(island, free, PLAYER_RADIUS, STEP_MAX)) {
+      const node = createNode({ geometry: cliff.geometry });
+      addChild(root, node); placed.push(node); cliffLadders.push(cliff.route);
+      // Help is reachable at either landing, not only halfway down an airborne rope.
+      const route = cliff.route, bottom = route.pathAt(route.bottom, {});
+      for (const at of [{ x: route.x - route.nx * route.inset, y: route.top + 0.6, z: route.z - route.nz * route.inset },
+        { x: bottom.x, y: route.bottom + 0.6, z: bottom.z }]) {
+        const pick = createNode({ position: at, geometry: PICK_GEOMETRY });
+        addChild(root, pick); placed.push(pick);
+        addProp("cliffrope", pick, at.x, at.z, 0.75).weaponType = "none";
+      }
+    }
     buildClouds();
     // The ring's veils are laid in a group of their own before it joins the island, so each one's ripples, which read
     // their veil's place once, walk only the group to find it.
@@ -11361,7 +11378,7 @@
     critters = crittersMod.create({ root, renderer, flowers: scenery.filter((o) => o.prop === "flower" && o.active), fire: firePos, secondaryFire: { x: 0, y: island.headquarters.floor, z: 0 }, meadowRadius: MEADOW, heightAt: island.surfaceAt, activeAt: effectsActiveAt });
     cloudRememberNodes(cloudNodeStart);
     mark("props");
-    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, zzzVisible: sleepMarksVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, matrixLivingPile: true, onLayout: layoutPile, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: playerSupportAt, petLanding: (x, z, lying) => hammock ? hammock.landing(x, z, lying) : null, ceilingAt, wanderSpot, walkable, flyable, glideJetCeiling, useNear, abyssAt, abyssRespawnY: ABYSS_RESPAWN_Y, seaY: SEA_Y, jetpackAllowed, reticleTarget, phase: () => phase };
+    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, zzzVisible: sleepMarksVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, matrixLivingPile: true, onLayout: layoutPile, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: playerSupportAt, ladders: cliffLadders, laddersEnabled: () => !gameMode && !cloudHopper?.active && !pilot?.poseHeld, petLanding: (x, z, lying) => hammock ? hammock.landing(x, z, lying) : null, ceilingAt, wanderSpot, walkable, flyable, glideJetCeiling, useNear, abyssAt, abyssRespawnY: ABYSS_RESPAWN_Y, seaY: SEA_Y, jetpackAllowed, reticleTarget, phase: () => phase };
     shared.weaponsEnabled = true;
     shared.jetpackRefills = cave => !(cloudHopper?.active && cave === cloudHopper.actor);
     shared.jetpackLiftOnly = cave => !!cloudHopper?.active && cave === cloudHopper.actor;
@@ -11968,7 +11985,7 @@
     now = 0;
     hud.onPreset(name => { if (!cloudHopper?.active && !factoryDeparting && !bifrostDeparting && !islandGuide.holding) navigate(name, false, true, true); });
     hud.setDetachedView("pile");
-    hud.setDestinations(["pile", "lab", "mirror", "underground", "basement", "mempool", "factory", "arcade", "bca", "gate", "bifrost", "timechain"]);
+    hud.setDestinations(["pile", "lab", "mirror", "underground", "basement", "mempool", "factory", "arcade", "bca", "gate", "bifrost", "timechain", "repos"]);
     hud.onAction((action, value) => {
       if (cloudHopper?.active) {
         if (cloudHopper.held) return false;
@@ -12048,7 +12065,7 @@
     else if (returningCharacter && arcadeYard && pilot.player && arcadeMouth) arcadeMouth.entrance.standAt(arcadeYard.slot);
     else if (returningCharacter && arcadeCrossing && pilot.player && arcadeMouth) { arcadeMouth.entrance.arrive(arcadeCrossing); factoryWalk.still = 1; factoryWalk.hold = BL.factoryWindow.GLIDE.still; }
     else if (returningCharacter && ctx.from === "arcade" && pilot.player && arcadeMouth) arriveFromArcade();
-    else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile", false, false);
+    else if (returningCharacter) navigate(routedPlace || (ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile"), false, false);
     else if (ctx.from === "bifrost" && !routedPlace) navigate("bifrost", false, false);
     else if (!signedInArrival && !crew.sleeping && !initialGorilla && (routedPlace || preloadedView || initialCharacter || initialFirstPerson)) navigate(routedPlace || preloadedView || "pile", false, false);
     if (donate) hud.openFeed();
@@ -12090,6 +12107,7 @@
     Object.assign(hubScene, {
       root, camera, input,
       debug: {
+        cliffLadders,
         setGameMode, delayGameRing, animationInterval,
         get gameMode() { return gameMode; },
         selectDebugGorilla,
@@ -12189,7 +12207,7 @@
     islandGuide = BL.hubGuide.create({
       parent: root, input, fx, camera, pilot, visitor: () => crew.player, world, hud, coarse: COARSE,
       landing: !ctx.place && !preloadedView && !returningCharacter && ctx.from !== "bifrost",
-      quality: () => renderer.quality, busy: () => chalkboard.openNow || clankerPlay.active || factoryDeparting || bifrostDeparting,
+      quality: () => renderer.quality, busy: () => BL.destinationMap?.coaching || chalkboard.openNow || clankerPlay.active || factoryDeparting || bifrostDeparting,
     });
     yield* pause(slice);
     cloudRememberNodes(cloudNodeStart);
@@ -12433,6 +12451,7 @@
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
     targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixGates.length = sealedCaves.length = clouds.length = lamps.length = pilePosts.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = meadowPalms.length = 0;
+    cliffLadders.length = 0;
     fireHazards.length = 0;
     fireRigs = null;
     firePitRig = null;
@@ -12576,6 +12595,79 @@
     }
     if (!gorilla) help.title = "Island · " + help.title; return help;
   };
+  // The map reads this visit's real terrain and door coordinates; it never builds another island.
+  hubScene.navigationMap = () => {
+    if (!island || !mempoolIsland) return null;
+    const M = mempoolIsland, T = timechainIsland, B = bifrostIsle, R = repoIsland, source = island.cutawaySource;
+    const bounds = { minX: source.origin.x, minZ: source.origin.z, maxX: source.origin.x + source.sx * source.unit, maxZ: source.origin.z + source.sz * source.unit };
+    const include = (x, z, r) => { bounds.minX = Math.min(bounds.minX, x - r); bounds.maxX = Math.max(bounds.maxX, x + r); bounds.minZ = Math.min(bounds.minZ, z - r); bounds.maxZ = Math.max(bounds.maxZ, z + r); };
+    include(M.place.x, M.place.z, poolModels.SITE.reach);
+    if (T) include(T.place.x, T.place.z, BL.timechainModels.SITE.radius);
+    if (B) include(B.site.cloud.x, B.site.cloud.z, B.site.cloud.r);
+    if (R) include(R.spot.x, R.spot.z, BL.repoIslandModels.ISLE.R);
+    const points = [{ name: "pile", x: 0, z: 0 }, { name: "gate", x: island.gate.x, z: island.gate.z },
+      { name: "underground", layer: "hq", x: 0, z: 6, level: "HQ · below ground" }, { name: "basement", layer: "basement", x: 0, z: 6, level: "Basement · lower floor" },
+      { name: "mempool", x: M.worldX(0, 7.4), z: M.worldZ(0, 7.4), level: "Chamber · beneath the lake" }];
+    for (const [id, name] of Object.entries(CAVE_ZONES)) {
+      const mouth = island.mouths.find(m => m.id === id);
+      if (mouth) points.push({ name, x: mouth.x, z: mouth.z, level: "Cave entrance" });
+    }
+    if (T) points.push({ name: "timechain", x: T.worldX(0.4, 12.7), z: T.worldZ(0.4, 12.7), level: "Doorway · choose a room at the keypad" });
+    if (B) points.push({ name: "bifrost", x: B.site.portal.x, z: B.site.portal.z });
+    if (R) points.push({ name: "repos", x: R.arrival.x, z: R.arrival.z, level: "Open-source Bitcoin projects" });
+    const repoBridge = (x, z) => !!R && Math.abs(x - R.spot.x) <= BL.repoIslandModels.BRIDGE.width / 2 && z >= R.bridgeEnds.from.z && z <= R.bridgeEnds.to.z;
+    const poolBridge = (x, z) => {
+      const across = M.localX(x, z), along = M.localZ(x, z) - M.place.bridgeLocalZ, S = poolModels.SITE;
+      return Math.abs(across) <= S.width / 2 && along >= S.deckStart && along <= S.span ? along : -Infinity;
+    };
+    return { title: "The Island of Caves", bounds, points, origin: { x: pilot.orbit.target.x, z: pilot.orbit.target.z },
+      surfaceAt: (x, z) => {
+        if (!island || !mempoolIsland) return NaN;
+        if (R && (Math.hypot(x - R.spot.x, z - R.spot.z) <= BL.repoIslandModels.ISLE.R || repoBridge(x, z))) return R.spot.y;
+        const land = rageLandAt(x, z);
+        if (land) return rageExteriorFloor(land, x, z);
+        const along = poolBridge(x, z);
+        if (Number.isFinite(along)) return M.place.y + poolModels.deckY(along / poolModels.SITE.span);
+        if (T && onSphere(x, z)) return T.place.y + BL.timechainModels.SITE.bridgeFloor;
+        return B ? B.site.groundAt(x, z) : NaN;
+      },
+      isPath: (x, z) => !!island && (island.onLand(x, z) && island.isPath(x, z) || repoBridge(x, z) || Number.isFinite(poolBridge(x, z)) || !!T && onSphere(x, z) && Math.hypot(x - T.place.x, z - T.place.z) >= BL.timechainModels.SITE.radius)
+    };
+  };
+  hubScene.navigationLooking = () => !clankerPlay?.active && !!pilot?.looking;
+  hubScene.navigationReturn = () => pilot?.endLook();
+  hubScene.navigationStatus = name => {
+    if (!hubScene.navigationReady) return "Finish the current interaction first.";
+    return clankerPlay?.active ? clankerPlay.travelRefusal() : "";
+  };
+  const MAP_ZONES = { pile: "outside", gate: "outside", lab: "lab", mirror: "mirror", factory: "factory.hall", arcade: "arcade.hall", bca: "bca", underground: "hq", basement: "hq", mempool: "rainforest", bifrost: "bifrost.chamber", timechain: "sphere", repos: "repos" };
+  // Bearings lead to authored doors and bridge ends. They are not a collision-free walking path or auto-walk.
+  hubScene.navigationWaypoint = (name, out) => {
+    const actor = clankerPlay?.active ? clankerPlay.player : pilot?.player;
+    if (!actor || !island || !Object.hasOwn(MAP_ZONES, name)) return false;
+    const p = actor.root.position, from = zoneOf(actor, !!clankerPlay?.active), to = MAP_ZONES[name], step = BL.zoneMap.next(from, to);
+    out.note = "Entrance reached · use the on-screen action";
+    if (step && doorToward(from, step, out, p.x, p.z)) return true;
+    if (to === "hq") {
+      if (BL.zoneMap.routeFrom(from) === "hq") { out.x = p.x; out.y = p.y; out.z = p.z; out.note = name === "basement" ? "Inside HQ · follow the stairs down to the basement" : "You are inside HQ"; return true; }
+      return mouthDoor("hq", out, p.x, p.z);
+    }
+    if (["lab", "mirror", "bca"].includes(name)) return mouthDoor(to, out, p.x, p.z);
+    if (name === "mempool" && mempoolIsland) {
+      const M = mempoolIsland, R = M.layout.RAMP, x = Math.sin(R.start) * R.r, z = Math.cos(R.start) * R.r;
+      out.x = M.worldX(x, z); out.y = M.place.y + DOOR_Y; out.z = M.worldZ(x, z); out.note = "Tunnel entrance · follow the descent beneath the lake"; return true;
+    }
+    if (name === "repos") return bridgeDoor("repos", true, out);
+    if (name === "timechain") return bridgeDoor("sphere", true, out);
+    if (name === "bifrost") return doorToward("bifrost", "bifrost.chamber", out, p.x, p.z);
+    if (name === "factory" || name === "arcade") return doorToward(name, to, out, p.x, p.z);
+    if (name === "gate") { out.x = island.gate.x; out.y = island.surfaceAt(out.x, island.gate.z) + DOOR_Y; out.z = island.gate.z; return true; }
+    if (name === "pile") { out.x = 0; out.y = ALTAR_HEIGHT + DOOR_Y; out.z = Math.max(5, altar.platformRadius + 1.3); out.note = "You reached the pile"; return true; }
+    return false;
+  };
+  hubScene.beginCoaching = () => islandGuide.escape();
+  Object.defineProperty(hubScene, "coachingReady", { get: () => islandGuide?.coachingReady && !gameMode });
+  Object.defineProperty(hubScene, "navigationReady", { get: () => !!islandGuide && !islandGuide.holding && !cloudHopper?.active && !factoryDeparting && !bifrostDeparting && !timechainIsland?.gate.busy });
   hubScene.controlsHelpHold = on => { clankerPlay?.cancelInput(); if (on) clankerPlay?.freeCursor(); cloudHopper?.controlsHelpHold(on); pilot.controls.reset(); pilot.setMenuOpen(on, false); };
   BL.scenes.hub = hubScene;
 })();

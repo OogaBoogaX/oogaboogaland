@@ -16,7 +16,7 @@
 // runs down deletes its own, and an alarm set with the first save deletes one left older than `RESUME_MS`, so no record
 // (it names its players' accounts) outlives its game, even when nobody comes back to wake the object.
 import { DurableObject } from "cloudflare:workers";
-import { CLOSE_KICK, CLOSE_PROTOCOL, playerFromHeaders, takeToken } from "./protocol.js";
+import { CLOSE_KICK, CLOSE_PROTOCOL, inspectReporter, playerFromHeaders, takeToken } from "./protocol.js";
 import { kindOf } from "./games.js";
 import "../../src/js/game-wire.js";
 
@@ -26,6 +26,9 @@ const SAVE_MS = 5000, RESUME_MS = 10 * 60000;
 export class GameHost extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    // What the inspector hears (inspect-report.js): joins, drops and kicks, and the game's state riding its ticks.
+    this.inspect = inspectReporter(ctx, env, "GameHost", () => this.name, () => this.inspectState());
+    this.tickDue = 0;
     // Account id → { ws, id, login, display, debug, buckets }.
     this.sockets = new Map();
     this.kind = null;
@@ -51,6 +54,7 @@ export class GameHost extends DurableObject {
       if (saved && typeof saved === "object" && this.bind(saved.name) && Date.now() - saved.at < RESUME_MS) this.game.restore(saved.data, Date.now());
       else if (saved) await ctx.storage.delete("game");
       this.schedule();
+      this.inspect.woke(this.sockets.size);
     });
   }
 
@@ -97,6 +101,7 @@ export class GameHost extends DurableObject {
     const older = this.sockets.get(who.id);
     if (older) this.evict(older, "replaced");
     if (this.sockets.size >= this.kind.limits.sockets) {
+      this.inspect.event("full", who);
       this.send(server, { t: "kick", reason: "full" });
       server.close(CLOSE_KICK, "full");
       return new Response(null, { status: 101, webSocket: client });
@@ -105,6 +110,7 @@ export class GameHost extends DurableObject {
     server.serializeAttachment(a);
     const p = this.record(server, a), now = Date.now();
     this.sockets.set(who.id, p);
+    this.inspect.event("join", p, { replaced: !!older });
     this.game.join(p, now);
     this.send(server, { t: "welcome", you: who.id, kind: this.kind.id, now, tickMs: this.kind.tickMs });
     this.send(server, this.stateMessage(now));
@@ -115,6 +121,7 @@ export class GameHost extends DurableObject {
   webSocketMessage(ws, message) {
     const p = this.byWs(ws);
     if (!p) return;
+    this.inspect.count("in");
     if (typeof message !== "string" || message.length > this.kind.limits.chars) { this.close(p, "unreadable message"); return; }
     let raw;
     try { raw = JSON.parse(message); } catch { this.close(p, "unreadable message"); return; }
@@ -132,14 +139,14 @@ export class GameHost extends DurableObject {
   }
 
   // On this compatibility date close handlers must not call ws.close() (room.js).
-  webSocketClose(ws) {
+  webSocketClose(ws, code, reason, wasClean) {
     const p = this.byWs(ws);
-    if (p) this.drop(p);
+    if (p) this.drop(p, "closed", { code, said: reason, clean: wasClean });
   }
 
-  webSocketError(ws) {
+  webSocketError(ws, error) {
     const p = this.byWs(ws);
-    if (p) this.drop(p);
+    if (p) this.drop(p, "error", { error: String((error && error.message) || error || "") });
   }
 
   byWs(ws) {
@@ -148,19 +155,20 @@ export class GameHost extends DurableObject {
     return p && p.ws === ws ? p : null;
   }
 
-  drop(p) {
+  drop(p, reason = "closed", detail = null) {
     if (this.sockets.get(p.id) !== p) return;
+    this.inspect.event("leave", p, { reason, ...detail });
     this.sockets.delete(p.id);
     this.game.leave(p, Date.now());
   }
 
   close(p, reason) {
-    this.drop(p);
+    this.drop(p, "protocol", { code: CLOSE_PROTOCOL });
     try { p.ws.close(CLOSE_PROTOCOL, reason); } catch { /* already closed */ }
   }
 
   evict(p, reason) {
-    this.drop(p);
+    this.drop(p, reason, { code: CLOSE_KICK });
     this.send(p.ws, { t: "kick", reason });
     try {
       p.ws.serializeAttachment(null);
@@ -182,6 +190,7 @@ export class GameHost extends DurableObject {
 
   schedule() {
     if (this.timer || !this.game || !this.game.running(Date.now())) return;
+    this.tickDue = Date.now() + this.kind.tickMs;
     this.timer = setTimeout(() => this.tick(), this.kind.tickMs);
   }
 
@@ -189,12 +198,26 @@ export class GameHost extends DurableObject {
     this.timer = 0;
     const now = Date.now(), changed = this.game.step(now);
     this.ticks++;
+    this.inspect.count("ticks");
+    this.inspect.peak("late", now - this.tickDue);
     if (this.sockets.size) {
       if (this.game.motion(this.frame, now)) this.broadcast(this.bytes.slice(0, WIRE.encode(this.frame, this.bytes)));
       if (changed || this.ticks % this.kind.stateEvery === 0) this.broadcast(this.stateMessage(now));
     }
     if (changed || now - this.savedAt >= SAVE_MS) this.save(now);
     this.schedule();
+    this.inspect.tick();
+  }
+
+  inspectState() {
+    const running = !!this.game && this.game.running(Date.now());
+    return { status: running ? "running" : this.sockets.size ? "open" : "idle", sockets: this.sockets.size, maxSockets: this.kind ? this.kind.limits.sockets : 0,
+      running, savedAt: this.savedAt || null };
+  }
+
+  // The Inspector, when a viewer connects: report now.
+  inspectWatch(until) {
+    this.inspect.watch(until);
   }
 
   // The kind's record while its game runs, deleted once it has run down. Not waited on: a lost save costs only a

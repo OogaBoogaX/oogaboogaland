@@ -1717,7 +1717,7 @@
         const size = grid.size, x = Math.min(size - 1, Math.floor((sx - b[0]) * grid.scaleX)), y = Math.min(size - 1, Math.floor((sy - b[1]) * grid.scaleY)), cell = y * size + x;
         for (let n = grid.offsets[cell], end = grid.offsets[cell + 1]; n < end; n++) {
           const triangle = grid.indices[n];
-          if (triangle === previous) continue;
+          if (triangle === previous || triangle === opposite) continue;
           const box = triangle * 4;
           if (sx < boxes[box] || sx > boxes[box + 2] || sy < boxes[box + 1] || sy > boxes[box + 3]) continue;
           if (boundaryTriangle(e, triangle * 10, sx, sy)) {
@@ -1740,7 +1740,7 @@
         // a second local-space ray/box query adds no hit information here.
         for (let n = g.starts[id], end = n + g.counts[id]; n < end; n++) {
           const triangle = g.indices[n];
-          if (triangle === previous) continue;
+          if (triangle === previous || triangle === opposite) continue;
           const box = triangle * 4;
           if (sx < boxes[box] || sx > boxes[box + 2] || sy < boxes[box + 1] || sy > boxes[box + 3]) continue;
           if (boundaryTriangle(e, triangle * 10, sx, sy)) { e.boundaryHits[side] = triangle; return true; }
@@ -1779,7 +1779,7 @@
       if (depth < near || depth > far) return false;
       const rx = m[0] * vx + m[4] * vy + m[8] * vz, ry = m[1] * vx + m[5] * vy + m[9] * vz;
       const dd = -(m[2] * dx + m[6] * dy + m[10] * dz);
-      const tx = (m[0] * dx + m[4] * dy + m[8] * dz) * depth - rx * dd, ty = (m[1] * dx + m[5] * dy + m[9] * dz) * depth - ry * dd, length = Math.hypot(tx, ty);
+      const tx = (m[0] * dx + m[4] * dy + m[8] * dz) * depth - rx * dd, ty = (m[1] * dx + m[5] * dy + m[9] * dz) * depth - ry * dd, length = Math.sqrt(tx * tx + ty * ty);
       if (length < 1e-9) return false;
       // Quarter of a pixel in a fixed 1024-wide view (depth * tanX / 2048): sample the projected owner union on
       // both sides, so a limb or pillow contour over another part has two solid sides.

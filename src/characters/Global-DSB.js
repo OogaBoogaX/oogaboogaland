@@ -14,7 +14,6 @@
       noBrow: true,
       noPupils: true,
       face: "none",
-      hatY: 12,
       height: 1.10,
       skin: "#3a1a12",
       hair: "#1a0a08",

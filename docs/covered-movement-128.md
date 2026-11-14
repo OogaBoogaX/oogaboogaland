@@ -2,11 +2,13 @@
 
 `scripts/profile-covered-movement.mjs` runs the suite's own `wallPerformance` workload (ordinary and covered movement during a donation, at 1920x1080) in one Chrome, with the suite's acceptance checks, and writes what it saw. It changes no engine behaviour and no check.
 
-Run `npm run build`, then `node scripts/profile-covered-movement.mjs`. Add `--cpu` to sample the CPU as well. Sampling adds overhead, so don't compare frame rates between runs with and without it.
+Run `npm run build`, then `node scripts/profile-covered-movement.mjs`. Add `--source` to load `src/index.html`, matching the suite’s normal scene URL; the default profiles the portable built page. Add `--cpu` to sample the CPU as well. Sampling adds overhead, so don't compare frame rates between runs with and without it.
 
-It writes, under the ignored `untracked/`:
+To profile the suite session itself, use `ONLY="wall movement performance" COVERED_CPU=1 VERBOSE=1 node test/run.mjs perf`. It writes `untracked/covered-suite.cpuprofile` and the guide counters in `untracked/covered-suite-stats.json`; the workload and all assertions remain active. Use a normal run without `COVERED_CPU` for acceptance timing.
 
-- `covered-movement-profile.json`: the capture time, `workloadSha256` (the SHA-256 of the suite's workload slice, from `const wallPerformance =` to `const adaptiveQualityChecks =`, the same field #194's captures record), `suiteSha256`, `pageSha256`, the browser version, both rows with their details, the object-guide stats, the hot list and the browser logs.
+The standalone helper writes, under the ignored `untracked/`:
+
+- `covered-movement-profile.json`: the capture time, `workloadSha256` (the SHA-256 of the suite's workload slice, from `const wallPerformance =` to `const adaptiveQualityChecks =`, the same field #194's captures record), `suiteSha256`, `pageKind` (`source` or `portable`), `pageSha256` (HTML plus referenced script contents for the source page), the browser version, both rows with their details, the object-guide stats, the hot list and the browser logs.
 - `covered-movement.cpuprofile`, with `--cpu`: open it in Chrome DevTools' Performance panel. The hot list in the JSON sums self samples by function (file, line and column) before ranking, and `paths` counts the call paths merged into each row.
 
 It exits non-zero when either row fails or the browser logged anything. Captures stay out of the tree: their timings belong to one machine and one moment, and console logs may hold `file://` paths. Run it on AC power with no other browser work. A changed `workloadSha256` means the suite's workload changed, so captures from either side of the change aren't comparable.
