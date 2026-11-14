@@ -78,6 +78,7 @@ anything is handed on, and the bridge never reads a browser header at all.
 | `cast` | nothing (public browsing stays up under the kill switch) | `{ rows, revision, count }`: the registered Oogas from the island's build (`chat-public.js`), each `{ handle, github, display, joinedAt, lastCommitAt }`, sorted by join then handle, `revision` the hash of exactly those rows |
 | `revoke` | nothing (cleanup works while admissions are off) | `{ revoked }`: the Audience closes every socket of that principal with 4401 (`logout`, `logout-all`, `deleted`), or for `eligibility` ends its lease and its right to ask again while it keeps listening |
 | socket `/audience` (`ChatBridge.fetch`) | `bridge`, the `AUDIENCE` binding | the audience socket (#665, below), handed to the Audience object with the edge's assertion as `x-audience-principal`, and only the WebSocket headers |
+| `POST /media/<op>` (`ChatBridge.fetch`) | `bridge`, the `AUDIENCE` binding | a media call (#666, below), its body passed on to the Audience object with the same assertion |
 
 Later issues add their operations here.
 
@@ -122,6 +123,7 @@ The app's own contract (`docs/ooga-chat-app.md`) is the source of truth for shap
 | `GET /api/chat/public/contributors` | the native Contributing Oogas panel's data for anyone (below); `public, max-age=30` with an ETag |
 | `POST /donations/invoice`, `/note`, `/onchain`; `GET /donations/socket` | the native Feed the Oogas popup, through to bananapayserver (below) |
 | `GET /api/chat/audience`, upgraded | the audience socket (#665, below), from the app's own page with a session |
+| `POST /api/chat/media/<op>` | media signalling (#666, below), from the app's own page with a session; `publish/*` needs `speak` and GitHub |
 | any other `/api/*`, `/auth/*`, `/donations/*` | a JSON 404 (`{ error: { code: "not_found" } }`), never the app's HTML |
 
 Every other path is served from the staged app. Only `/api/*`, `/auth/*` and `/donations/*` run the Worker
@@ -321,6 +323,62 @@ reconnect, a snapshot can carry the same epoch and revision the app already hold
 snapshot after a reconnect as a confirmation (the review on #677). The two clients' row shapes differ (`source`
 `app`/`chat`, `face`/`avatar`, `muted`/`mic`). The server sends each client its own shape from one model, and a single
 shape later is welcome.
+
+## Media (#666)
+
+Ooga Chat's audio goes publisher to SFU to listener on the environment's one Realtime SFU app, the island's own, so a
+track is pulled straight from whoever publishes it, island player or Ooga Chat speaker. Nothing in a Worker or Durable
+Object carries or mixes audio, and the SFU secret stays in the island Worker. The broker is the Audience object
+(`audience-media.js`); the edge passes calls on (`worker/chat/src/media.js`).
+
+**What may be pulled is the server's choice.** A client names only its own audience connection (`connection`, from its
+snapshot), never a session or track. `receive/sync` pulls every speaker of the connection's zone that is publishing,
+other than its own identity: island speakers by the publication reference the Room hands over with `world` (never
+given to a client), and Ooga Chat speakers whose lease is active and whose microphone is up. It checks before the SFU
+call and again after it; anything that changed in flight (a zone, a lease, a publication) keeps nothing: the tracks the
+SFU made are closed before the reply. At most 64 pulled tracks a connection. A listener never needs a microphone or a
+publish session.
+
+**Publishing.** One local audio track, the microphone, on a session of its own, only under the connection's pending or
+active lease of the same generation: `publish/open`, `publish/offer` (answered), then `publish/ready`, which makes the
+lease an active, muted speaker and the publication pullable, with a fresh publication generation. Playback, a mix or a
+loopback is never published. `publish/close` goes back to listening and keeps the receive session.
+
+**Retiring.** A publication that ends (Leave Voice, a lease ending, a real zone change, a revocation, the island
+taking the identity, the socket going) leaves the catalog at once; its track is closed at the SFU, and so is every
+listener's pull of it, server-side, without waiting for the listener, who is told to `sync`. An island speaker leaving
+the outdoors (a new `world` without them) or publishing again (a new generation) closes every pull of the old
+publication the same way. A listener changing zone loses the old zone's pulls at once.
+
+**Durable cleanup.** Every close goes through a queue kept in storage (`mediaCleanup`) and retried by the alarm until
+the SFU confirms (`close_track_error` counts as gone) or an hour has passed, after every client has left too. A
+session whose tracks are unknown (a failed call) is swept whole, and any track that sweep finds and fails to close is
+kept for the next try. Two runs over one job (the alarm's and a new close merged into it) never remove another job. With
+64 jobs pending, publishing and receiving wait
+(`cleanup_pending`) while giving things up still works. A woken object restores each connection's media from
+`media:<connId>` and sweeps the sessions of a socket that went while it slept.
+
+**Ops** (`POST /api/chat/media/<op>`, body `{ connection, generation?, sdp?, mid?, mids? }`, at most 256 KiB, one at a
+time per connection, `CHAT_MEDIA_LIMITER` per principal): `ice` (TURN credentials, as the island's voice has them),
+`receive/open`, `receive/sync` (`{ tracks: [{ participant, mid }], closed, sessionDescription,
+requiresImmediateRenegotiation }`), `renegotiate`, `receive/close`, `publish/open`, `publish/offer`, `publish/ready`,
+`publish/close`, `leave`. Errors are `{ error: { code, retryable } }`: `stale_epoch` (another connection's, or a lease
+that moved on), `capability_required`, `permission_changed`, `receive_required`, `cleanup_pending`, `voice_unavailable`,
+`upstream_failed`.
+
+**The island hears Ooga Chat speakers.** The Audience sends the Room its speakers' publications
+(`audienceSources`: GitHub id, zone, reference, generation) whenever they change. The Room keeps the list in its
+storage, so it survives the Room's hibernation; the Audience keeps the last list it delivered, so a wake sends only a
+change and a failed send is tried again. An island player whose outdoor grant
+is open in a zone (#667) gets that zone's Ooga Chat speakers as voice peers by GitHub id, pulls them through its usual
+`/api/voice/pull` by the Audience's reference alone (checked again after the SFU call), and loses them, closed at the
+SFU, when they stop. An island player without a grant never hears them. A chat speaker's id is never an island player's
+too: the island's own voice ends a chat lease first.
+
+**Capacity, for #669 to measure.** Many listeners mainly cost SFU egress; many speakers cost each listener's decoding
+and downlink. The worst case to test is every island outdoor publisher (up to 32) plus 8 Ooga Chat speakers, 40
+publications a listener. If direct tracks fail the phone target, a server-side mix is a separate design with its own
+cost, latency and security review; no speaker is dropped to fit.
 
 ## Secrets and variables
 

@@ -88,7 +88,9 @@ export const audienceRoom = {
       const o = p.outdoor;
       if (inVoice && o && o.state === "open" && isZone(o.scope))
         speakers.push({ id: selfOf(p), zone: o.scope, mic: p.muted ? "muted" : "on", login: p.login, display: p.display || p.login,
-          character: typeof p.body === "string" ? p.body.replace(/^gorilla:/, "") : null, hand: p.hand ? p.handEmoji || "" : "" });
+          character: typeof p.body === "string" ? p.body.replace(/^gorilla:/, "") : null, hand: p.hand ? p.handEmoji || "" : "",
+          // The microphone's publication, by reference, for Ooga Chat's listeners to pull (#666); a new one is a new gen.
+          pub: p.voice.pub && p.voice.track ? { session: p.voice.pub, track: p.voice.track, gen: p.voice.gen || 0 } : null });
     }
     speakers.sort((a, b) => (a.id < b.id ? -1 : 1));
     active.sort();
@@ -102,5 +104,32 @@ export const audienceRoom = {
   leave(room) {
     audienceRoom.watch(room);
     audienceRoom.world(room);
+  },
+
+  // --- Ooga Chat speakers heard on the island (#666) ---
+  // The Audience's list of chat speakers' publications (`{ id, zone, session, track, gen }`, id a GitHub account id),
+  // replaced whole. An island player with an open outdoor grant in a zone hears that zone's chat speakers as voice peers
+  // by those ids (none of them is ever an island player too: the island's own voice ends a chat lease first).
+  cleanSources: (list) => (Array.isArray(list) ? list : []).filter((s) => s && Number.isSafeInteger(s.id) && s.id > 0 && isZone(s.zone)
+    && typeof s.session === "string" && typeof s.track === "string").slice(0, 64),
+  sources(room, list) {
+    room.chatSources = audienceRoom.cleanSources(list);
+    // Who hears whom changed: a source gone is closed for every island listener, one new is offered.
+    room.enforceStudio();
+    // Kept in the Room's storage, so a Room woken from hibernation still has it: the Audience sends only changes.
+    return room.ctx.storage.put("chatSources", room.chatSources);
+  },
+  sourceOf: (room, id) => (room.chatSources || []).find((s) => s.id === id) || null,
+  addSources(room, plan) {
+    const sources = room.chatSources || [];
+    if (!sources.length) return plan;
+    for (const p of room.players.values()) {
+      const o = p.outdoor;
+      if (!o || o.state !== "open" || !isZone(o.scope)) continue;
+      const peers = plan.get(p.id) || [];
+      for (const s of sources) if (s.zone === o.scope && s.id !== p.id && !peers.includes(s.id)) peers.push(s.id);
+      plan.set(p.id, peers);
+    }
+    return plan;
   },
 };

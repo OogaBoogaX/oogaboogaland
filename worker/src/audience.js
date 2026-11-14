@@ -24,6 +24,7 @@ import { appRow, createAudience, DEFAULT_LIMITS, ID, isZone, ZONES } from "./aud
 import { decideCapability } from "./chat-capability.js";
 import { contributorFor } from "./contributor-access.js";
 import { readContributorSnapshot } from "./contributor-policy.js";
+import { createMediaBroker, MEDIA_BODY_MAX } from "./audience-media.js";
 
 export const AUDIENCE_NAME = "audience";
 export const AUDIENCE_PROTOCOL = 1;
@@ -86,6 +87,8 @@ export class Audience extends DurableObject {
     this.contributions = { at: 0, map: null, pending: null };
     // The island's contributor lookup (contributor-access.js), on the instance so a check can stand in its own.
     this.contributorFor = contributorFor;
+    this.media = createMediaBroker(this);
+    this.sourcesSig = "";
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     ctx.blockConcurrencyWhile(async () => {
       let meta = await ctx.storage.get("meta");
@@ -105,6 +108,11 @@ export class Audience extends DurableObject {
       this.model.setWorld(this.island.speakers, this.island.active);
       this.model.commit();
       for (const zone of ZONES) this.model.zones[zone].rev = meta.revs && Number.isSafeInteger(meta.revs[zone]) ? meta.revs[zone] : 0;
+      await this.media.restore();
+      // The list the Room was last told, kept: a wake sends only what changed meanwhile (a deployment that dropped every
+      // socket empties it), so the Room's own stored copy never stays stale.
+      this.sourcesSig = (await ctx.storage.get("sourcesSig")) ?? null;
+      this.sourcesChanged();
     });
   }
 
@@ -152,7 +160,7 @@ export class Audience extends DurableObject {
   snapshotFor(c) {
     const snap = this.model.snapshot(c.zone);
     return { type: "snapshot", zone: c.zone, epoch: snap.epoch, revision: snap.rev, participants: snap.rows.map((row) => appRow(row, c.id)),
-      you: this.model.youOf(c.connId), limits: { listeners: limitsOf(this.env).listeners, chatSpeakers: limitsOf(this.env).chatSpeakers },
+      you: this.model.youOf(c.connId), connection: c.connId, limits: { listeners: limitsOf(this.env).listeners, chatSpeakers: limitsOf(this.env).chatSpeakers },
       features: AUDIENCE_FEATURES };
   }
 
@@ -167,6 +175,8 @@ export class Audience extends DurableObject {
       if (c.lease && c.lease.state === "pending") next = Math.min(next, c.lease.until);
       next = Math.min(next, c.authUntil);
     }
+    // Media cleanup retries even after every client has gone.
+    next = Math.min(next, this.media.nextCleanup());
     if (next === Infinity) return;
     const current = await this.ctx.storage.getAlarm();
     if (!current || current > next) await this.ctx.storage.setAlarm(next);
@@ -184,11 +194,29 @@ export class Audience extends DurableObject {
       }
     }
     await this.flush();
+    if (this.media.cleanup.length) await this.media.runCleanup();
     await this.scheduleAlarm();
   }
 
-  /** A lease ended: its publication is retired by the media broker (#666); here only the record. */
-  leaseEnded(_connId, _lease, _reason) {}
+  /** A lease ended: its publication leaves the catalog and is closed, with every subscription to it (#666). */
+  leaseEnded(connId) { this.background(this.media.retirePublication(connId)); }
+
+  /** Ooga Chat speakers' publications changed: the Room's island players with an open outdoor grant hear them. */
+  sourcesChanged() {
+    const list = this.media.chatSources(), sig = JSON.stringify(list);
+    if (sig === this.sourcesSig || !this.env.ROOM) return;
+    this.sourcesSig = sig;
+    this.roomQueue = this.roomQueue.then(async () => {
+      try {
+        await this.env.ROOM.getByName("island").audienceSources(list);
+        await this.ctx.storage.put("sourcesSig", sig);
+      } catch {
+        // Not delivered: the next check sends it again rather than counting it as told.
+        if (this.sourcesSig === sig) this.sourcesSig = null;
+      }
+    });
+    this.background(this.roomQueue);
+  }
 
   close(connId, code, reason) {
     const ws = this.sockets.get(connId);
@@ -201,12 +229,14 @@ export class Audience extends DurableObject {
     this.sockets.delete(connId);
     this.replies.delete(connId);
     this.buckets.delete(connId);
-    if (c && c.lease) this.leaseEnded(connId, c.lease, "left");
+    // Every session of the connection goes, its publication with every subscription to it.
+    if (c) this.background(this.media.releaseAll(connId));
     return c;
   }
 
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith("/media/")) return this.mediaRequest(url.pathname.slice(7), request);
     if (url.pathname !== "/connect") return new Response("Not found", { status: 404 });
     if (request.headers.get("upgrade") !== "websocket") return new Response("Expected WebSocket", { status: 426 });
     const who = readPrincipal(request.headers.get("x-audience-principal"));
@@ -225,6 +255,23 @@ export class Audience extends DurableObject {
     this.save(connId);
     await this.scheduleAlarm();
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /** A media call (audience-media.js), only for the caller's own connection: never another's session or track. */
+  async mediaRequest(op, request) {
+    const json = (code, status) => new Response(JSON.stringify({ error: { code, retryable: status >= 500 } }), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+    if (request.method !== "POST") return json("method_not_allowed", 405);
+    const who = readPrincipal(request.headers.get("x-audience-principal"));
+    if (!who) return json("auth_required", 401);
+    const text = await request.text();
+    if (text.length > MEDIA_BODY_MAX) return json("too_large", 413);
+    let body;
+    try { body = JSON.parse(text || "{}"); } catch { return json("malformed", 400); }
+    const conn = body && typeof body.connection === "string" ? this.model.conns.get(body.connection) : null;
+    if (!conn || conn.principal !== who.principal) return json("stale_epoch", 409);
+    const res = await this.media.request(op, conn, body);
+    await this.scheduleAlarm();
+    return res;
   }
 
   async webSocketMessage(ws, message) {
@@ -256,6 +303,8 @@ export class Audience extends DurableObject {
     if (r.endedLease) this.leaseEnded(c.connId, r.endedLease, "zone");
     this.save(c.connId);
     await this.flush();
+    // The old zone's voices are no longer this connection's to hear: closed now, not at its next sync.
+    if (r.changed) await this.media.prune();
     const ws = this.sockets.get(c.connId);
     if (ws) this.send(ws, this.snapshotFor(c));
   }
@@ -322,6 +371,9 @@ export class Audience extends DurableObject {
     const clean = speakers.slice(0, 64).filter((s) => s && ID.test(s.id) && isZone(s.zone)).map((s) => ({
       id: s.id, zone: s.zone, mic: s.mic === "on" ? "on" : "muted", character: typeof s.character === "string" ? s.character.slice(0, 40) : null,
       hand: typeof s.hand === "string" ? s.hand.slice(0, 32) : "", speaking: s.speaking === true,
+      // The publication to pull, by reference: kept here and given to no client.
+      pub: s.pub && typeof s.pub.session === "string" && typeof s.pub.track === "string"
+        ? { session: s.pub.session.slice(0, 64), track: s.pub.track.slice(0, 64), gen: Number.isSafeInteger(s.pub.gen) ? s.pub.gen : 0 } : null,
       info: { provider: "github", login: String(s.login || "").slice(0, 39), display: String(s.display || s.login || "").slice(0, 50), character: s.character || null,
         contributions: this.contributionOf(s.login) },
     }));
@@ -330,6 +382,9 @@ export class Audience extends DurableObject {
     const ended = this.model.setWorld(this.island.speakers, this.island.active);
     for (const { connId, lease } of ended) { this.save(connId); this.leaseEnded(connId, lease, "source_in_use"); this.tellYou(connId); }
     await this.flush();
+    // A world publication gone or replaced: every subscription to the old one is closed at once.
+    await this.media.prune();
+    await this.scheduleAlarm();
     if (clean.length) this.refreshContributions();
     return { ok: true };
   }

@@ -24,6 +24,20 @@ export const closedSocket = (code, reason) => {
   return new Response(null, { status: 101, webSocket: client });
 };
 
+/** What the edge tells the island about a session's principal: written here, from its own rows, never from a request. */
+export const assertionFor = async (env, found, deps) => {
+  const p = found.principal;
+  let capability = null;
+  if (p.provider === "github") { try { capability = await capabilityFor(env, p, { waitUntil: deps.waitUntil }); } catch { capability = null; } }
+  return {
+    v: BRIDGE_VERSION, env: env.ENVIRONMENT,
+    principal: { id: p.id, provider: p.provider, providerUserId: p.provider_user_id, login: p.login, display: p.display || p.login, avatar: avatarPath(p) },
+    eligible: !!capability && capability.state === "eligible" && capability.fresh,
+    character: capability && capability.state === "eligible" ? capability.character : null,
+    sessionExpiresAt: found.session.expiresAt,
+  };
+};
+
 export const handleAudienceSocket = async (request, env, deps) => {
   if (request.method !== "GET") return refusal("method_not_allowed", 405);
   if (request.headers.get("upgrade") !== "websocket") return refusal("upgrade_required", 426);
@@ -34,16 +48,7 @@ export const handleAudienceSocket = async (request, env, deps) => {
   if (!found) return closedSocket(4401, "auth_required");
   const p = found.principal;
   if (!(await allowed(env.CHAT_SOCKET_LIMITER, p.id))) return closedSocket(4429, "rate_limited");
-  let capability = null;
-  if (p.provider === "github") { try { capability = await capabilityFor(env, p, { waitUntil: deps.waitUntil }); } catch { capability = null; } }
-  const assertion = {
-    v: BRIDGE_VERSION, env: env.ENVIRONMENT,
-    principal: { id: p.id, provider: p.provider, providerUserId: p.provider_user_id, login: p.login, display: p.display || p.login, avatar: avatarPath(p) },
-    eligible: !!capability && capability.state === "eligible" && capability.fresh,
-    character: capability && capability.state === "eligible" ? capability.character : null,
-    sessionExpiresAt: found.session.expiresAt,
-  };
-  const headers = new Headers({ "x-ooga-chat-assertion": JSON.stringify(assertion) });
+  const headers = new Headers({ "x-ooga-chat-assertion": JSON.stringify(await assertionFor(env, found, deps)) });
   for (const name of SOCKET_HEADERS) { const value = request.headers.get(name); if (value !== null) headers.set(name, value); }
   try {
     return await env.OBL.fetch(new Request("https://chat-bridge.invalid/audience", { headers }));

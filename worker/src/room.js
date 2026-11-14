@@ -114,6 +114,8 @@ export class Room extends DurableObject {
       this.studio.hands = [...new Set((Array.isArray(this.studio.hands) ? this.studio.hands : []).filter(seated))].slice(0, MAX_PLAYERS);
       this.studio.invited = this.studio.mode === "qa" ? [...new Set((Array.isArray(this.studio.invited) ? this.studio.invited : []).filter(seated))].slice(0, MAX_PLAYERS) : [];
       this.cleanupJobs = (await ctx.storage.get("voiceCleanup")) || [];
+      // Ooga Chat's speakers the island's open outdoor grants hear (#666), as the Audience last sent them.
+      this.chatSources = audienceRoom.cleanSources(await ctx.storage.get("chatSources"));
       this.links = restoreLinks(await ctx.storage.get("voiceLinks"));
       const chalk = await ctx.storage.get("chalk"), marks = chalk && CHALK.restore(chalk.marks);
       // A board stored before the board grew (no `v`) is widened as it loads; the next save stores it widened.
@@ -1112,7 +1114,8 @@ export class Room extends DurableObject {
     for (const q of this.players.values()) if (q.voice.sub && !q.voice.track) for (const id of desired.get(q.id) || []) quiet.set(id, (quiet.get(id) || 0) + 1);
     for (const p of this.players.values()) {
       const peers = desired.get(p.id) || [];
-      const reopened = p.voice.reopened || {}, gens = peers.map((id) => (this.players.get(id).voice.gen || 0) + (reopened[id] || 0));
+      const reopened = p.voice.reopened || {}, gens = peers.map((id) => { const q = this.players.get(id), src = q ? null : audienceRoom.sourceOf(this, id);
+        return (q ? q.voice.gen || 0 : src ? src.gen : 0) + (reopened[id] || 0); });
       // Receiving attendees do not publish tracks. Their receive sessions, rather
       // than the list of speakers this player hears, keep a Studio microphone live.
       // A linked partner's does too, wherever that partner is, since it hears from anywhere.
@@ -1131,7 +1134,8 @@ export class Room extends DurableObject {
     }
   }
 
-  voicePlan() { return voicePeers([...this.players.values()], this.studio, this.links); }
+  // Ooga Chat speakers join the plan for island players with an open outdoor grant (room-audience.js).
+  voicePlan() { return audienceRoom.addSources(this, voicePeers([...this.players.values()], this.studio, this.links)); }
 
   // Every other page's roster shows who is in voice (a live microphone) and who muted it: sent on a change only.
   voiceState(p) {
@@ -1139,8 +1143,9 @@ export class Room extends DurableObject {
     audienceRoom.world(this);
   }
 
-  // Ooga Chat's audience (audience.js) sends each change of a zone a panel here watches.
+  // Ooga Chat's audience (audience.js) sends each change of a zone a panel here watches, and its speakers' publications.
   audienceDelta(delta) { audienceRoom.delta(this, delta); }
+  audienceSources(list) { return audienceRoom.sources(this, list); }
 
   // /voice/<op> from the Worker, which checked the session and set x-player-id. Ops: session (a publish
   // or receive session), publish (the mic's offer), live (the publishing connection is up: only now is the
@@ -1261,10 +1266,12 @@ export class Room extends DurableObject {
         if (Object.keys(p.voice.mids || {}).length >= 64) return json({ error: "close old subscriptions first" }, 409);
         const tracks = [], requested = new Map();
         for (const id of [...new Set(body.ids.slice(0, 64))]) {
-          const q = this.players.get(id);
-          if (!allowed.has(id) || !q || !q.voice.pub || !q.voice.track) continue;
-          tracks.push({ location: "remote", sessionId: q.voice.pub, trackName: q.voice.track });
-          requested.set(q.voice.pub, { id, track: q.voice.track });
+          const q = this.players.get(id), src = q ? null : audienceRoom.sourceOf(this, id);
+          // An Ooga Chat speaker the plan allows is pulled by the Audience's reference, never by anything the page sent.
+          const pub = q ? q.voice.pub : src && src.session, track = q ? q.voice.track : src && src.track;
+          if (!allowed.has(id) || !pub || !track) continue;
+          tracks.push({ location: "remote", sessionId: pub, trackName: track });
+          requested.set(pub, { id, track });
         }
         if (!tracks.length) return json({ tracks: [], requiresImmediateRenegotiation: false });
         if (Object.keys(p.voice.mids || {}).length + tracks.length > 64) return json({ error: "close old subscriptions first" }, 409);
@@ -1282,8 +1289,9 @@ export class Room extends DurableObject {
         const allowedNow = live ? new Set(this.voicePlan().get(p.id) || []) : new Set();
         const kept = [], close = [];
         for (const t of res.tracks || []) {
-          const asked = requested.get(t.sessionId), q = asked && this.players.get(asked.id);
-          if (live && asked && allowedNow.has(asked.id) && q && q.voice.pub === t.sessionId && q.voice.track === asked.track) {
+          const asked = requested.get(t.sessionId), q = asked && this.players.get(asked.id), src = asked && !q ? audienceRoom.sourceOf(this, asked.id) : null;
+          const still = q ? q.voice.pub === t.sessionId && q.voice.track === asked.track : !!src && src.session === t.sessionId && src.track === asked.track;
+          if (live && asked && allowedNow.has(asked.id) && still) {
             kept.push({ id: asked.id, mid: t.mid, errorCode: t.errorCode });
           } else if (typeof t.mid === "string" && !t.errorCode) close.push(t.mid);
         }

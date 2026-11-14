@@ -72,25 +72,33 @@ const SOCKET_HEADERS = ["upgrade", "connection", "sec-websocket-key", "sec-webso
  * principal from its session) is checked, then handed to the Audience object as `x-audience-principal`, the only
  * identity it reads. Nothing a browser sent passes: the edge built this request, and only the WebSocket headers go on.
  */
+const MEDIA_OP = /^(ice|renegotiate|leave|receive\/(open|sync|close)|publish\/(open|offer|ready|close))$/;
 export const bridgeFetch = async (env, request) => {
   const url = new URL(request.url);
-  if (url.pathname !== "/audience") return new Response("Not found", { status: 404 });
-  if (request.headers.get("upgrade") !== "websocket") return new Response("Expected WebSocket", { status: 426 });
+  const media = url.pathname.startsWith("/media/") ? url.pathname.slice(7) : null;
+  if (url.pathname !== "/audience" && !(media && MEDIA_OP.test(media))) return new Response("Not found", { status: 404 });
+  if (!media && request.headers.get("upgrade") !== "websocket") return new Response("Expected WebSocket", { status: 426 });
+  if (media && request.method !== "POST") return new Response("Method not allowed", { status: 405 });
   let assertion;
   try { assertion = JSON.parse(request.headers.get("x-ooga-chat-assertion") || ""); } catch { assertion = null; }
   if (!assertion || assertion.v !== BRIDGE_VERSION || assertion.env !== env.ENVIRONMENT || !assertion.principal || typeof assertion.principal !== "object")
     return new Response("Forbidden", { status: 403 });
   if (!bridgeFeatures(env).bridge || !env.AUDIENCE) return new Response("Unavailable", { status: 503 });
   const headers = new Headers();
-  for (const name of SOCKET_HEADERS) { const value = request.headers.get(name); if (value !== null) headers.set(name, value); }
+  if (media) headers.set("content-type", "application/json");
+  else for (const name of SOCKET_HEADERS) { const value = request.headers.get(name); if (value !== null) headers.set(name, value); }
   const p = assertion.principal;
   headers.set("x-audience-principal", JSON.stringify({ principal: p.id, provider: p.provider, providerUserId: p.providerUserId, login: p.login,
     display: p.display, avatar: p.avatar, character: assertion.character, eligible: assertion.eligible === true, sessionExpiresAt: assertion.sessionExpiresAt }));
-  return env.AUDIENCE.getByName(AUDIENCE_NAME).fetch(new Request("https://audience.invalid/connect", { headers }));
+  const stub = env.AUDIENCE.getByName(AUDIENCE_NAME);
+  // A media call (#666): its body (a connection and an SDP) goes on as it is; the Audience reads it bounded.
+  if (media) return stub.fetch(new Request(`https://audience.invalid/media/${media}`, { method: "POST", headers, body: await request.text() }));
+  return stub.fetch(new Request("https://audience.invalid/connect", { headers }));
 };
 
 export class ChatBridge extends WorkerEntrypoint {
   async call(envelope) { return handleEnvelope(this.env, envelope, OPS, this.ctx); }
-  // Sockets arrive here as fetches through the same binding: the audience (#665); the Commons (#670) later.
+  // Sockets and media calls arrive here as fetches through the same binding: the audience (#665) and its media
+  // (#666); the Commons (#670) later.
   async fetch(request) { return bridgeFetch(this.env, request); }
 }

@@ -162,6 +162,8 @@ const host = (env = {}) => {
   const ctx = {
     id: { name: "audience" },
     storage: { get: async (key) => structuredClone(storage.get(key)), put: async (key, value) => { storage.set(key, structuredClone(value)); },
+      delete: async (key) => storage.delete(key),
+      list: async ({ prefix }) => new Map([...storage].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => [key, structuredClone(value)])),
       getAlarm: async () => alarm, setAlarm: async (at) => { alarm = at; } },
     setWebSocketAutoResponse() {}, waitUntil: (task) => tasks.push(task),
     blockConcurrencyWhile(fn) { this.ready = fn(); return this.ready; },
@@ -396,7 +398,8 @@ test("the Room: its word on its players goes only when it changes, and only an o
   assert.equal(calls.world.length, 1, "nothing changed, nothing sent");
   one.outdoor = { state: "open", scope: "dsb" };
   audienceRoom.world(room);
-  assert.deepEqual(calls.world.at(-1).s, [{ id: "gh:1", zone: "dsb", mic: "on", login: "p1", display: "P1", character: "amy", hand: "" }]);
+  assert.deepEqual(calls.world.at(-1).s, [{ id: "gh:1", zone: "dsb", mic: "on", login: "p1", display: "P1", character: "amy", hand: "",
+    pub: { session: "s", track: "mic", gen: 0 } }], "with its publication by reference, for the Audience alone");
   assert.ok(calls.world.at(-1).seq > calls.world[0].seq);
   one.voice.track = one.voice.pub = null;
   audienceRoom.world(room);
