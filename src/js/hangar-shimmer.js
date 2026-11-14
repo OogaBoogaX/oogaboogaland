@@ -10,7 +10,7 @@
 // its sparks drift apart, rising; then streaks of light stand where it stood,
 // shimmering, with motes drifting in them, a faint afterimage for 15 to 20 seconds (`RESIDUE`), before it is gone. It
 // faces the view, one way or mirrored. Now and then, with the visitor's own Ooga a few metres off, a few runs of its
-// line hold whole and still a moment and it brightens a touch (`NEAR`), then it goes on as before; closer still, a few
+// line hold steady and still a moment and it brightens a touch (`NEAR`), then it goes on as before; closer still, a few
 // fragments may catch for an instant and break apart again (`CATCH`); and its afterimage stirs a little as the Ooga
 // passes (`STIR`). It lasts no longer for it. A very faint shimmer of sound comes with the figure, not the afterimage
 // (`hangarAudio.glint`). Under reduced motion nothing gathers, drifts or falls, its sparks glint slowly and no bars
@@ -100,12 +100,13 @@
   const RESIDUE = { life: [15, 20], rise: 0.04, most: 0.5, streaks: 26, streak: [0.6, 2.6], streakWidth: 0.04, streakGlow: 0.6 };
   // Near the visitor's own Ooga it may steady a little, never for long: only some showings (`chance`); once the Ooga
   // comes within `reach` m of it (drawn each showing between), after `delay` s, a share (`share`, drawn each showing) of
-  // its outline's runs glint whole and nearly still (losing `still` of their stray), the outline brightens up to
-  // `bright` more and fewer bars tear across it (`calms`, the chance one coming is skipped), eased in over `rise` s,
+  // its outline's runs hold steady and nearly still (their glinting settling to `level`, a little over its own average, so
+  // they read steadier rather than brighter, and losing `still` of their stray), the outline brightens up to `bright` more and
+  // fewer bars tear across it (`calms`, the chance one coming is skipped), eased in over `rise` s,
   // held `hold` s and eased out over `fall` s, at a `strength` drawn each showing, wavering a little; at most `times`
   // times a showing, each coming back nearer, the later ones `again` as strong; only while it holds. It lasts no longer
   // for it, and answers nobody else.
-  const NEAR = { chance: 0.7, reach: [5, 6.5], delay: [0, 0.6], share: [0.25, 0.45], still: 0.7, bright: 0.18, calms: 0.5,
+  const NEAR = { chance: 0.7, reach: [5, 6.5], delay: [0, 0.6], share: [0.25, 0.45], level: 0.7, still: 0.7, bright: 0.06, calms: 0.25,
     rise: 0.7, hold: [0.8, 1.8], fall: 1.4, strength: [0.5, 1], times: 2, again: 0.6 };
   // Closer still it may catch for an instant: only some showings (`chance`); once the Ooga comes within `close` m of it
   // (drawn each showing between), after `delay` s, a share (`share`, drawn each showing) of its outline's runs hold
@@ -596,13 +597,13 @@
           if (fade <= 0) continue;
           const arrive = smooth((t - E.delay[i] * formed) / (formed * 0.45));
           if (arrive <= 0) continue;
-          // A run steadied near the visitor's Ooga glints whole and nearly still; one caught closer in holds whole, still and
-          // brighter for an instant, then breaks apart, dimming and straying.
+          // A run steadied near the visitor's Ooga holds steady at an even glint and nearly still; one caught closer in
+          // holds whole, still and brighter for an instant, then breaks apart, dimming and straying.
           const mine = near.c > 0 || near.b > 0 ? hash(Math.floor(E.runPhase[i] * 1000) + near.catchSeed) < near.catchShare : false;
           const caught = mine ? near.c : 0, broke = mine ? near.b : 0;
-          const steady = Math.max(near.k > 0 && hash(Math.floor(E.runPhase[i] * 1000) + near.seed) < near.share ? near.k : 0, caught);
+          const settled = near.k > 0 && hash(Math.floor(E.runPhase[i] * 1000) + near.seed) < near.share ? near.k : 0, steady = Math.max(settled, caught);
           const glint = rest ? 1 : EDGE.gap + (1 - EDGE.gap) * smooth((Math.sin(elapsed * E.runRate[i] + E.runPhase[i]) + 1 - 2 * EDGE.on) / 0.4 + 0.5);
-          const run = glint + (1 - glint) * steady;
+          const even = rest ? glint : glint + (NEAR.level - glint) * settled, run = even + (1 - even) * caught;
           const base = fade * height(y) * arrive * bits * breath * run * (1 + NEAR.bright * near.k + CATCH.bright * caught) * (1 - CATCH.dim * broke);
           if (base <= 0.01) continue;
           const stray = (1 - NEAR.still * steady) * (1 - 0.3 * caught) * (1 + (rest ? 0 : CATCH.scatter) * broke);
