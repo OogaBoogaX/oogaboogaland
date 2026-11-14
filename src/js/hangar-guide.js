@@ -226,8 +226,9 @@
   // notices it. Most times she only glances at it: she stops where she is, turns to face it, perhaps drifting a little
   // toward it or aside, watches it a few seconds and goes back to work. Otherwise, with time enough left, she looks it
   // over: she stops where she is, facing it, a beat; then comes over unhurried, in two moves rising over what stands
-  // between, the second slower, to hang a few metres off to its side (so the view sees them both), facing it, her rings
-  // turning a little quicker; there she watches it, moving a little round it once or twice. As it comes apart she
+  // between and going round it rather than through it, the second slower, to hang a few metres off to its side (so
+  // the view sees them both), facing it, her rings turning a little quicker; there she watches it, moving a little
+  // round it once or twice. As it comes apart she
   // watches it start to go and eases back a touch, or, still on her way, stops where she is, and watches it go; a
   // moment after it has gone she goes back to work, or sooner if anything ended it early. Rarely it puzzles her: she
   // comes over or watches it from where she is, her rings quickening, and once makes a small, uncertain movement (a
@@ -255,6 +256,9 @@
     // over where she hangs if that is higher; a pause, s; and the last, slower, at `speed[1]` m/s; each at random
     // between.
     last: 1.5, first: 0.55, rise: 0.5, speed: [[2.2, 3], [0.8, 1.1]], pause: [0.4, 0.9],
+    // On her way in she keeps `around` m from its middle below `over` m up: where the way would pass nearer, she goes
+    // round it first, on the side the way passes (else the other side, else over it).
+    around: 2.8, over: 4.8,
     // Once there, one to `shifts` small moves round it, `shiftGap` s apart at random between: each `shift` rad round it
     // either way at random between, up or down `bob` m at most, at `shiftSpeed` m/s, where the air is open.
     shifts: 2, shiftGap: [0.9, 1.8], shift: [0.2, 0.45], bob: 0.25, shiftSpeed: 0.5,
@@ -308,6 +312,36 @@
       spot.y = y;
     };
     const go = (r, x, y, z, speed, corner) => { r.clearPath(speed, corner); r.push(x, y, z); };
+    // Her way from `from` to (x, y, z), never through it: true, with a point round it in `via`, if the straight way would
+    // pass within `around` m of its middle below `over` m up anywhere along that stretch.
+    const via = { x: 0, y: 0, z: 0 };
+    const roundIt = (from, x, y, z) => {
+      const U = UNEASY, sx = x - from.x, sz = z - from.z, l2 = sx * sx + sz * sz, dx = from.x - at.x, dz = from.z - at.z;
+      // The stretch of the way within `around` of its middle, as shares of the way, and how low it is there.
+      const half = dx * sx + dz * sz, disc = half * half - l2 * (dx * dx + dz * dz - U.around * U.around);
+      if (l2 < 1e-6 || disc <= 0) return false;
+      const f0 = Math.max(0, (-half - Math.sqrt(disc)) / l2), f1 = Math.min(1, (-half + Math.sqrt(disc)) / l2);
+      if (f0 > f1 || Math.min(from.y + (y - from.y) * f0, from.y + (y - from.y) * f1) > U.over) return false;
+      const f = Math.max(f0, Math.min(f1, -half / l2)), cx = from.x + sx * f, cz = from.z + sz * f, cy = from.y + (y - from.y) * f;
+      let ox = cx - at.x, oz = cz - at.z, ol = Math.hypot(ox, oz);
+      if (ol < 1e-3) { const l = Math.sqrt(l2) || 1; ox = -sz / l; oz = sx / l; ol = 1; }
+      via.y = Math.max(cy, y);
+      for (let side = 1; side >= -1; side -= 2) {
+        via.x = at.x + ox / ol * side * (U.around + 0.4); via.z = at.z + oz / ol * side * (U.around + 0.4);
+        if (open(via.x, via.y, via.z)) return true;
+      }
+      via.x = cx; via.z = cz; via.y = U.over + 0.4;
+      return true;
+    };
+    // A move to (x, y, z) at `speed` m/s, round it where the straight way would pass through it: a point round it, and
+    // from there another if the way on would still pass too near.
+    const from = { x: 0, y: 0, z: 0 };
+    const goRound = (r, x, y, z, speed, corner) => {
+      r.clearPath(speed, corner);
+      from.x = r.root.position.x; from.y = r.root.position.y; from.z = r.root.position.z;
+      for (let k = 0; k < 2 && roundIt(from, x, y, z); k++) { r.push(via.x, via.y, via.z); from.x = via.x; from.y = via.y; from.z = via.z; }
+      r.push(x, y, z);
+    };
     // Easing back a touch from it, as it comes apart.
     const backOff = (r) => {
       const p = r.root.position, dx = p.x - at.x, dz = p.z - at.z, l = Math.hypot(dx, dz) || 1;
@@ -392,7 +426,10 @@
           if (t >= stareFor) {
             const dx = p.x - spot.x, dy = p.y - spot.y, dz = p.z - spot.z, d = Math.hypot(dx, dy, dz), k = d > U.last / (1 - U.first) ? U.last / d : 1 - U.first;
             mid.x = spot.x + dx * k; mid.z = spot.z + dz * k; mid.y = Math.max(spot.y + U.rise, spot.y + dy * k);
-            go(r, mid.x, mid.y, mid.z, between(U.speed[0]), 0.5);
+            // Short of where she hangs, but never nearer it than `around`.
+            const ml = Math.hypot(mid.x - at.x, mid.z - at.z);
+            if (ml < U.around) { mid.x = at.x + (mid.x - at.x) / (ml || 1) * U.around; mid.z = at.z + (mid.z - at.z) / (ml || 1) * U.around; }
+            goRound(r, mid.x, mid.y, mid.z, between(U.speed[0]), 0.5);
             enter("edge");
           }
           break;
@@ -400,7 +437,7 @@
           if (r.steer(dt)) enter("pause");
           break;
         case "pause":
-          if (t >= pauseFor) { go(r, spot.x, spot.y, spot.z, between(U.speed[1]), 0.4); enter("near"); }
+          if (t >= pauseFor) { goRound(r, spot.x, spot.y, spot.z, between(U.speed[1]), 0.4); enter("near"); }
           break;
         case "near":
           if (r.steer(dt)) { shiftsLeft = kind === "approach" ? 1 + Math.floor(Math.random() * U.shifts) : 0; shiftIn = between(U.shiftGap); enter("study"); }
