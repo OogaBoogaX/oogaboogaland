@@ -17,6 +17,8 @@
 // the island reports the identity in its own voice (`active`), whose source always wins: the island's arrival ends a
 // chat lease first.
 
+import { freeSeat } from "./cloud-seats.js";
+
 export const ZONES = ["main", "dsb"];
 export const DEFAULT_LIMITS = Object.freeze({ listeners: 500, chatSpeakers: 8, connectionsPerIdentity: 3, connections: 1200 });
 export const ID = /^(gh|x):[1-9][0-9]{0,19}$/;
@@ -48,7 +50,7 @@ export const createAudience = ({ epoch = Date.now(), limits = DEFAULT_LIMITS, re
     let listener = false;
     for (const c of p.conns.values()) {
       if (c.zone !== zone) continue;
-      if (c.lease && c.lease.state === "active") return { role: "speaker", source: "chat", mic: c.mic, hand: c.hand || "", speaking: !!c.speaking, character: p.info.character || null };
+      if (c.lease && c.lease.state === "active") return { role: "speaker", source: "chat", mic: c.mic, hand: c.hand || "", speaking: !!c.speaking, character: c.lease.character || p.info.character || null };
       listener = true;
     }
     return listener ? { role: "listener", source: "chat", mic: "off", hand: "", speaking: false, character: null } : null;
@@ -156,7 +158,7 @@ export const createAudience = ({ epoch = Date.now(), limits = DEFAULT_LIMITS, re
   };
 
   /** Ask to speak: `capability` is the island's answer, checked by the caller just before. */
-  const requestSpeaker = (connId, { eligible, generation, until }) => {
+  const requestSpeaker = (connId, { eligible, generation, until, character = null }) => {
     const c = conns.get(connId);
     if (!c) return refuse("unknown_connection");
     if (!c.zone) return refuse("zone_required");
@@ -166,17 +168,25 @@ export const createAudience = ({ epoch = Date.now(), limits = DEFAULT_LIMITS, re
     if (p.active || p.world) return refuse("source_in_use");
     for (const o of p.conns.values()) if (o !== c && o.lease) return refuse("source_in_use");
     if (counts(c.zone).chatSpeakers >= limits.chatSpeakers) return refuse("speaker_capacity", { retryable: true });
-    c.lease = { state: "pending", generation, until };
+    c.lease = { state: "pending", generation, until, character };
     c.mic = "muted"; c.hand = "";
     return { ok: true, lease: c.lease, changed: true };
   };
 
-  /** The microphone is published (#666): the lease of that generation becomes a muted speaker. */
+  /** The seats this zone's active speakers hold now. */
+  const seatsTaken = (zone) => new Set([...conns.values()].filter((o) => o.zone === zone && o.lease && o.lease.seat).map((o) => o.lease.seat));
+
+  /**
+   * The microphone is published (#666): the lease of that generation becomes a muted speaker on a cloud seat of its
+   * zone's catalog (#668), the same seat for the life of the lease. A full catalog is no speaker, never a shared seat.
+   */
   const activate = (connId, generation) => {
     const c = conns.get(connId);
     if (!c || !c.lease || c.lease.generation !== generation) return refuse("stale_epoch");
     if (c.lease.state === "active") return { ok: true, changed: false };
-    c.lease = { state: "active", generation };
+    const seat = freeSeat(c.zone, seatsTaken(c.zone));
+    if (!seat) return refuse("speaker_capacity", { retryable: true });
+    c.lease = { state: "active", generation, seat, character: c.lease.character || null };
     c.mic = "muted";
     touch(c.id, c.zone);
     return { ok: true, changed: true };
@@ -190,6 +200,17 @@ export const createAudience = ({ epoch = Date.now(), limits = DEFAULT_LIMITS, re
     c.lease = null; c.mic = "muted"; c.hand = ""; c.speaking = false;
     if (c.zone) touch(c.id, c.zone);
     return lease;
+  };
+
+  /** A speaker's persistent hand: only under an active lease; lowering is always allowed and idempotent. */
+  const setHand = (connId, hand) => {
+    const c = conns.get(connId);
+    if (!c) return refuse("unknown_connection");
+    if (hand && (!c.lease || c.lease.state !== "active")) return refuse("capability_required");
+    if (c.hand === (hand || "")) return { ok: true, changed: false };
+    c.hand = hand || "";
+    if (c.zone) touch(c.id, c.zone);
+    return { ok: true, changed: true };
   };
 
   const setMic = (connId, muted) => {
@@ -251,7 +272,7 @@ export const createAudience = ({ epoch = Date.now(), limits = DEFAULT_LIMITS, re
 
   return {
     get epoch() { return epoch; }, zones, people, conns,
-    connect, join, disconnect, requestSpeaker, activate, endLease, setMic, setWorld, setInfo,
+    connect, join, disconnect, requestSpeaker, activate, endLease, setMic, setHand, setWorld, setInfo, seatsTaken,
     commit, snapshot, counts, youOf, touch,
     revs: () => Object.fromEntries(ZONES.map((zone) => [zone, zones[zone].rev])),
   };

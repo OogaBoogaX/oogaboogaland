@@ -25,11 +25,18 @@ import { decideCapability } from "./chat-capability.js";
 import { contributorFor } from "./contributor-access.js";
 import { readContributorSnapshot } from "./contributor-policy.js";
 import { bridgeFeatures } from "./chat-bridge-protocol.js";
+import { SEAT_REVISION } from "./cloud-seats.js";
+import "../../src/js/emoji-data.js";
+import "../../src/js/reaction-policy.js";
 import { createMediaBroker, MEDIA_BODY_MAX } from "./audience-media.js";
 
 export const AUDIENCE_NAME = "audience";
 export const AUDIENCE_PROTOCOL = 1;
-export const AUDIENCE_FEATURES = ["roles-v1"];
+export const AUDIENCE_FEATURES = ["roles-v1", "reactions-v1", "hand-emoji-v1"];
+// A transient reaction's life on every client (players.js shows the island's for the same time), and the limits on
+// sending them: per identity across its tabs (as the island's room has it) and per zone, which bounds any zone's fanout.
+export const REACTION_MS = 2600;
+export const REACT_HZ = 3, REACT_BURST = 6, ZONE_REACT_HZ = 30, ZONE_REACT_BURST = 60;
 export const FRAME_MAX = 4096;
 export const PENDING_MS = 30 * 1000;
 export const REAUTH_MS = 60 * 60 * 1000;
@@ -93,6 +100,11 @@ export class Audience extends DurableObject {
     // #667: retirements the Room waits on, and whether each zone had listeners when the Room was last told.
     this.pendingWas = new Set();
     this.listenersSig = "";
+    // #668: reaction buckets by identity and by zone, the event counter, and the clouds the Room was last told.
+    this.reactBuckets = new Map();
+    this.zoneBuckets = new Map();
+    this.reactSeq = 0;
+    this.cloudsSig = null;
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     ctx.blockConcurrencyWhile(async () => {
       let meta = await ctx.storage.get("meta");
@@ -127,6 +139,10 @@ export class Audience extends DurableObject {
       }
       this.pendingWas = this.media.pending();
       this.sourcesChanged();
+      // The clouds the Room was last told, kept as the sources are: a wake sends only a change. Never told, the Room has
+      // none, as an empty list.
+      this.cloudsSig = (await ctx.storage.get("cloudsSig")) ?? "[]";
+      this.cloudsChanged();
     });
   }
 
@@ -163,6 +179,7 @@ export class Audience extends DurableObject {
           upsert: delta.upsert.map((row) => appRow(row, c.id)), remove: delta.remove });
       }
       this.listenersChanged();
+      this.cloudsChanged();
       if (this.watching.has(delta.zone) && this.env.ROOM) {
         // In order, one at a time: the Room relays each to the island's panels, which apply a delta only on its base.
         this.roomQueue = this.roomQueue.then(() => this.env.ROOM.getByName("island").audienceDelta(delta)).catch(() => {});
@@ -180,6 +197,85 @@ export class Audience extends DurableObject {
     this.listenersSig = sig;
     this.roomQueue = this.roomQueue.then(() => this.env.ROOM.getByName("island").audienceListeners(counts)).catch(() => {});
     this.background(this.roomQueue);
+  }
+
+  /**
+   * Ooga Chat speakers on clouds (#668), for the Room's world (`audienceClouds`): one entry an active speaker, its seat
+   * from the zone's catalog, its canonical character, mic and hand. Nothing while the island's `cloud` switch is off.
+   */
+  clouds() {
+    if (!bridgeFeatures(this.env).cloud) return [];
+    const out = [];
+    for (const c of this.model.conns.values()) {
+      if (!c.zone || !c.lease || c.lease.state !== "active" || !c.lease.seat || !c.id.startsWith("gh:")) continue;
+      const p = this.model.people.get(c.id);
+      out.push({ id: c.id, character: c.lease.character || p.info.character || null, zone: c.zone, seat: c.lease.seat, seatRevision: SEAT_REVISION,
+        lease: c.lease.generation, mic: c.mic, hand: c.hand || "" });
+    }
+    return out.sort((a, b) => (a.seat < b.seat ? -1 : 1));
+  }
+
+  cloudsChanged() {
+    const list = this.clouds(), sig = JSON.stringify(list);
+    if (sig === this.cloudsSig || !this.env.ROOM) return;
+    this.cloudsSig = sig;
+    this.roomQueue = this.roomQueue.then(async () => {
+      try {
+        await this.env.ROOM.getByName("island").audienceClouds(list);
+        await this.ctx.storage.put("cloudsSig", sig);
+      } catch {
+        // Not delivered: the next check sends it again rather than counting it as told.
+        if (this.cloudsSig === sig) this.cloudsSig = null;
+      }
+    });
+    this.background(this.roomQueue);
+  }
+
+  /** One reaction event to every Ooga Chat client in its zone, and to the Room when anything there shows it. */
+  fanReaction(event) {
+    const text = JSON.stringify(event);
+    for (const c of this.model.conns.values()) {
+      if (c.zone !== event.zone) continue;
+      const ws = this.sockets.get(c.connId);
+      if (ws) this.send(ws, text);
+    }
+    const shown = this.watching.has(event.zone) || this.island.speakers.some((s) => s.zone === event.zone);
+    if (shown && this.env.ROOM) {
+      this.roomQueue = this.roomQueue.then(() => this.env.ROOM.getByName("island").audienceReaction(event)).catch(() => {});
+      this.background(this.roomQueue);
+    }
+  }
+
+  bucket(map, key, hz, burst, now) {
+    for (const [k, b] of map) if (map.size > 4096 && b.tokens + (now - b.at) * hz / 1000 >= burst) map.delete(k);
+    let b = map.get(key);
+    if (!b) map.set(key, b = { tokens: burst, at: now });
+    b.tokens = Math.min(burst, b.tokens + (now - b.at) * hz / 1000);
+    b.at = now;
+    if (b.tokens < 1) return false;
+    b.tokens -= 1;
+    return true;
+  }
+
+  /** A transient reaction (#668): anyone in a zone, listener or speaker; the native policy's emoji; never kept. */
+  react(c, emoji) {
+    if (!c.zone) return { ok: false, code: "zone_required" };
+    if (!globalThis.BL.reactionPolicy.valid(emoji)) return { ok: false, code: "malformed" };
+    const now = Date.now();
+    if (!this.bucket(this.reactBuckets, c.id, REACT_HZ, REACT_BURST, now) || !this.bucket(this.zoneBuckets, c.zone, ZONE_REACT_HZ, ZONE_REACT_BURST, now))
+      return { ok: false, code: "rate_limited", retryable: true };
+    this.reactSeq = Math.max(now, this.reactSeq + 1);
+    this.fanReaction({ type: "reaction", eventId: `r${this.reactSeq}`, participantId: c.id, zone: c.zone, epoch: this.model.epoch, emoji, at: now, expiresAt: now + REACTION_MS });
+    return { ok: true };
+  }
+
+  /** A speaker's hand (#668): `on` with its pinned emoji, or the hand in its tone; down is always allowed. */
+  hand(c, msg) {
+    const P = globalThis.BL.reactionPolicy;
+    if (msg.on !== true) return this.model.setHand(c.connId, "");
+    const tone = msg.tone === undefined ? 0 : msg.tone, emoji = msg.emoji === undefined ? "" : msg.emoji;
+    if (!P.tone(tone) || emoji !== "" && !P.valid(emoji)) return { ok: false, code: "malformed" };
+    return this.model.setHand(c.connId, emoji || P.toned(P.HAND, tone));
   }
 
   snapshotFor(c) {
@@ -328,7 +424,7 @@ export class Audience extends DurableObject {
     if (!take(bucket, now)) { if (msg.requestId !== undefined) this.result(c.connId, msg.requestId, { ok: false, code: "rate_limited", retryable: true }); return; }
     if (msg.type === "join") return this.onJoin(c, msg);
     if (msg.type === "resync") { if (c.zone && msg.zone === c.zone) this.send(ws, this.snapshotFor(c)); return; }
-    if (msg.type === "setRole" || msg.type === "setMic") return this.onRequest(c, msg);
+    if (msg.type === "setRole" || msg.type === "setMic" || msg.type === "reaction" || msg.type === "hand") return this.onRequest(c, msg);
   }
 
   async onJoin(c, msg) {
@@ -365,6 +461,8 @@ export class Audience extends DurableObject {
     if (kept && kept.has(msg.requestId)) { this.send(this.sockets.get(c.connId), kept.get(msg.requestId)); return; }
     let outcome;
     if (msg.type === "setMic") outcome = this.model.setMic(c.connId, msg.muted === true);
+    else if (msg.type === "reaction") outcome = typeof msg.emoji === "string" && msg.emoji.length <= 32 ? this.react(c, msg.emoji) : { ok: false, code: "malformed" };
+    else if (msg.type === "hand") outcome = this.hand(c, msg);
     else if (msg.role === "listener") { const lease = this.model.endLease(c.connId); if (lease) this.leaseEnded(c.connId, lease, "listener"); outcome = { ok: true }; }
     else if (msg.role === "speaker") outcome = await this.requestSpeaker(c);
     else outcome = { ok: false, code: "malformed" };
@@ -389,7 +487,8 @@ export class Audience extends DurableObject {
       if (answer.state === "ineligible") c.eligible = false;
       return { ok: false, code: answer.state === "unknown" ? "capability_unavailable" : "capability_required", retryable: answer.state === "unknown" };
     }
-    return this.model.requestSpeaker(c.connId, { eligible: true, generation: this.nextGeneration(), until: Date.now() + PENDING_MS });
+    return this.model.requestSpeaker(c.connId, { eligible: true, generation: this.nextGeneration(), until: Date.now() + PENDING_MS,
+      character: typeof answer.character === "string" ? answer.character : null });
   }
 
   async webSocketClose(ws) { return this.closed(ws); }
@@ -432,6 +531,17 @@ export class Audience extends DurableObject {
     await this.scheduleAlarm();
     if (clean.length) this.refreshContributions();
     return { ok: true, pending: [...pending], listeners: { main: this.model.counts("main").listeners, dsb: this.model.counts("dsb").listeners } };
+  }
+
+  /** An island world speaker's reaction (the Room's `react`), to Ooga Chat's clients in its zone (#668). */
+  islandReaction(event) {
+    if (!event || !ID.test(event.participantId) || !isZone(event.zone) || !globalThis.BL.reactionPolicy.valid(event.emoji)) return { ok: false };
+    const now = Date.now();
+    if (!this.bucket(this.zoneBuckets, event.zone, ZONE_REACT_HZ, ZONE_REACT_BURST, now)) return { ok: false };
+    const text = JSON.stringify({ type: "reaction", eventId: String(event.eventId).slice(0, 64), participantId: event.participantId, zone: event.zone,
+      epoch: this.model.epoch, emoji: event.emoji, at: now, expiresAt: now + REACTION_MS });
+    for (const c of this.model.conns.values()) if (c.zone === event.zone) { const ws = this.sockets.get(c.connId); if (ws) this.send(ws, text); }
+    return { ok: true };
   }
 
   /** A canonical snapshot of a zone, for the Room's panels. */

@@ -116,6 +116,10 @@ export class Room extends DurableObject {
       this.cleanupJobs = (await ctx.storage.get("voiceCleanup")) || [];
       // Ooga Chat's speakers the island's open outdoor grants hear (#666), as the Audience last sent them.
       this.chatSources = audienceRoom.cleanSources(await ctx.storage.get("chatSources"));
+      // The clouds Ooga Chat speakers sit on (#668), as the Audience last sent them, at their revision.
+      const clouds = await ctx.storage.get("clouds");
+      this.clouds = audienceRoom.cleanClouds(this, clouds && clouds.list);
+      this.cloudsRev = clouds && Number.isSafeInteger(clouds.revision) ? clouds.revision : 0;
       this.links = restoreLinks(await ctx.storage.get("voiceLinks"));
       const chalk = await ctx.storage.get("chalk"), marks = chalk && CHALK.restore(chalk.marks);
       // A board stored before the board grew (no `v`) is widened as it loads; the next save stores it widened.
@@ -506,6 +510,7 @@ export class Room extends DurableObject {
     this.sendCabinets(server);
     this.sendLinks(p);
     this.send(server, { t: "chalk-board", marks: this.chalk.marks, editor: this.chalkEditor ? this.chalkEditor.id : 0 });
+    audienceRoom.welcome(this, p);
     this.broadcast({ t: "join", p: this.view(p) }, server);
     this.sendStudio(p);
     this.updateVoice();
@@ -657,6 +662,8 @@ export class Room extends DurableObject {
       if (!p.body || !this.reactToken(p)) return;
       const out = JSON.stringify({ t: "react", id: p.id, e: msg.e });
       for (const other of this.players.values()) if (other !== p && seenTogether(other.zone, p.zone)) this.send(other.ws, out);
+      // Speaking outdoors, Ooga Chat's audience sees it too (#668).
+      audienceRoom.islandReaction(this, p, msg.e);
       return;
     } else if (msg.t === "hand") {
       if (msg.on === p.hand && (!msg.on || msg.tone === p.handTone && msg.e === p.handEmoji)) return;
@@ -670,6 +677,8 @@ export class Room extends DurableObject {
       p.handTone = msg.tone;
       p.handEmoji = msg.e;
       this.broadcast({ t: "hand", id: p.id, on: p.hand, tone: p.handTone, e: p.handEmoji }, p.ws);
+      // An outdoor speaker's hand is in Ooga Chat's roster too (#668).
+      audienceRoom.world(this);
     } else if (msg.t === "outdoor") {
       // Ooga Chat's outdoor handshake (room-audience.js): each frame in order, the grant saved on the attachment there.
       return audienceRoom.outdoor(this, p, msg);
@@ -1159,6 +1168,9 @@ export class Room extends DurableObject {
   audienceSources(list) { return audienceRoom.sources(this, list); }
   // The outdoor handshake's answers from the Audience (#667): confirmed retirements, and each zone's listeners.
   audienceConfirmed(ids) { audienceRoom.confirmed(this, ids); }
+  // Ooga Chat's reactions and clouds (#668).
+  audienceReaction(event) { audienceRoom.reaction(this, event); }
+  audienceClouds(list) { return audienceRoom.clouds(this, list); }
   audienceListeners(counts) { audienceRoom.listeners(this, counts); }
 
   // /voice/<op> from the Worker, which checked the session and set x-player-id. Ops: session (a publish

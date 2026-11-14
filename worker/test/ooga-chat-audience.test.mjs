@@ -64,7 +64,7 @@ test("a lease is pending (still a listener), then an active muted speaker; endin
   a.join("c1", "main");
   const [first] = a.commit();
   const listenerGen = first.upsert[0].generation;
-  assert.deepEqual(a.requestSpeaker("c1", { eligible: true, generation: 11, until: 99 }).lease, { state: "pending", generation: 11, until: 99 });
+  assert.deepEqual(a.requestSpeaker("c1", { eligible: true, generation: 11, until: 99 }).lease, { state: "pending", generation: 11, until: 99, character: null });
   assert.deepEqual(a.commit(), [], "pending is not public: no phantom speaker while the microphone is asked for");
   assert.equal(a.youOf("c1").speak, "pending");
   assert.equal(a.activate("c1", 10).code, "stale_epoch", "another lease's acknowledgement does nothing");

@@ -18,6 +18,8 @@ import { scopeOf } from "./outdoor-policy.js";
 
 export const AUDIENCE_FEATURE = "audience-v1";
 export const OUTDOOR_FEATURE = "outdoor-voice-v1";
+export const CLOUDS_FEATURE = "cloud-seats-v1";
+export const CLOUDS_V = 1;
 export const OUTDOOR_V = 1;
 // How long a new connection's welcome waits for the replaced one's grants to be taken back.
 export const RETIRE_WAIT_MS = 3000;
@@ -30,6 +32,8 @@ const enabled = (room) => !!room.env && !!room.env.AUDIENCE && bridgeFeatures(ro
 // The outdoor handshake and Ooga Chat speakers heard on the island: the island's `outdoor` switch, which is its kill switch.
 const outdoorOn = (room) => enabled(room) && bridgeFeatures(room.env).outdoor;
 const isOpen = (p) => !!p.outdoor && p.outdoor.state === "open";
+// Ooga Chat speakers drawn on clouds in the world (#668, rendered by #659): the island's `cloud` switch.
+const cloudsOn = (room) => enabled(room) && bridgeFeatures(room.env).cloud;
 // Which hall cabinets are outdoors (the island's cave apron), from the registry the page and the Room share.
 const cabinets = () => (globalThis.BL && globalThis.BL.arcadeCabinets) || null;
 const stub = (room) => room.env.AUDIENCE.getByName(NAME);
@@ -39,7 +43,7 @@ const RETRY_MIN = 2000, RETRY_MAX = 60000;
 
 export const audienceRoom = {
   enabled,
-  features: (room) => (enabled(room) ? [AUDIENCE_FEATURE, ...(outdoorOn(room) ? [OUTDOOR_FEATURE] : [])] : []),
+  features: (room) => (enabled(room) ? [AUDIENCE_FEATURE, ...(outdoorOn(room) ? [OUTDOOR_FEATURE] : []), ...(cloudsOn(room) ? [CLOUDS_FEATURE] : [])] : []),
 
   parse: (msg) => {
     if (msg.v !== AUDIENCE_V || !isZone(msg.zone)) return null;
@@ -73,6 +77,10 @@ export const audienceRoom = {
 
   delta(room, delta) {
     if (!delta || !isZone(delta.zone)) return;
+    room.audienceEpoch = delta.epoch;
+    const rows = room.audienceRows || (room.audienceRows = new Map());
+    for (const r of delta.upsert) rows.set(r.id, { role: r.role });
+    for (const r of delta.remove) rows.delete(r.id);
     for (const p of room.players.values()) {
       if (p.audienceZone !== delta.zone) continue;
       room.send(p.ws, { t: "audience", v: AUDIENCE_V, kind: "delta", epoch: delta.epoch, rev: delta.rev, base: delta.base, zone: delta.zone,
@@ -101,7 +109,9 @@ export const audienceRoom = {
       const o = p.outdoor;
       if (inVoice && isOpen(p) && outdoorOn(room) && isZone(o.scope))
         speakers.push({ id: selfOf(p), zone: o.scope, mic: p.muted ? "muted" : "on", login: p.login, display: p.display || p.login,
-          character: typeof p.body === "string" ? p.body.replace(/^gorilla:/, "") : null, hand: p.hand ? p.handEmoji || "" : "",
+          character: typeof p.body === "string" ? p.body.replace(/^gorilla:/, "") : null,
+          // The island's raised hand as the roster shows it: its pinned emoji, or the hand in its tone.
+          hand: p.hand ? p.handEmoji || globalThis.BL.reactionPolicy.toned(globalThis.BL.reactionPolicy.HAND, p.handTone || 0) : "",
           // The microphone's publication, by reference, for Ooga Chat's listeners to pull (#666); a new one is a new gen.
           pub: p.voice.pub && p.voice.track ? { session: p.voice.pub, track: p.voice.track, gen: p.voice.gen || 0 } : null });
     }
@@ -296,5 +306,49 @@ export const audienceRoom = {
       else audienceRoom.check(room, p);
     }
     if (enabled(room)) audienceRoom.world(room);
+  },
+
+  // --- reactions and clouds (#668) ---
+
+  // An Ooga Chat reaction: to each island panel on its zone (`kind: "react"`) and, from a GitHub account, to each open
+  // outdoor grant there (the page's bridge, `op: "react"`), each with the event's own id so a client shows it once.
+  reaction(room, event) {
+    if (!event || !isZone(event.zone)) return;
+    const gh = /^gh:([1-9][0-9]{0,15})$/.exec(event.participantId), account = gh ? Number(gh[1]) : 0;
+    const row = room.audienceRows && room.audienceRows.get(event.participantId);
+    for (const p of room.players.values()) {
+      if (p.audienceZone === event.zone)
+        room.send(p.ws, { t: "audience", v: AUDIENCE_V, kind: "react", epoch: event.epoch, zone: event.zone, id: event.participantId, e: event.emoji, rid: event.eventId });
+      if (account && Number.isSafeInteger(account) && isOpen(p) && p.outdoor.scope === event.zone && account !== p.id)
+        audienceRoom.sendOutdoor(room, p, { op: "react", epoch: p.outdoor.epoch, rid: event.eventId, id: account, e: event.emoji, speaker: !!row && row.role === "speaker" });
+    }
+  },
+
+  // An island player's own reaction while it speaks outdoors: Ooga Chat's listeners in its zone see it too, as do the
+  // island panels on that zone. Rate-limited already by the Room's own bucket.
+  islandReaction(room, p, emoji) {
+    if (!isOpen(p) || !outdoorOn(room)) return;
+    room.reactSeq = Math.max(Date.now(), (room.reactSeq || 0) + 1);
+    const event = { eventId: `i${room.reactSeq}`, participantId: selfOf(p), zone: p.outdoor.scope, emoji };
+    for (const q of room.players.values()) if (q.audienceZone === event.zone && q !== p)
+      room.send(q.ws, { t: "audience", v: AUDIENCE_V, kind: "react", zone: event.zone, id: event.participantId, e: emoji, rid: event.eventId, epoch: room.audienceEpoch || 0 });
+    room.background(stub(room).islandReaction(event).catch(() => {}));
+  },
+
+  // The clouds Ooga Chat speakers sit on, replaced whole, to every page: each `{ id, character, zone, seat, seatRevision,
+  // lease, mic, hand }`. A page draws a cloud speaker from its seat and ghosts that character's NPC while any source owns
+  // it: the island's own drivers (every `body`) and these clouds together are the canonical owners.
+  cleanClouds: (room, list) => (cloudsOn(room) ? (Array.isArray(list) ? list : []).filter((c) => c && /^gh:[1-9][0-9]{0,15}$/.test(c.id) && isZone(c.zone) && typeof c.seat === "string").slice(0, 32) : []),
+  clouds(room, list) {
+    room.clouds = audienceRoom.cleanClouds(room, list);
+    room.cloudsRev = (room.cloudsRev || 0) + 1;
+    if (cloudsOn(room)) room.broadcast({ t: "clouds", v: CLOUDS_V, revision: room.cloudsRev, clouds: room.clouds });
+    // Kept in the Room's storage, as its chat sources are: a Room woken from hibernation still welcomes pages with them.
+    return room.ctx.storage.put("clouds", { list: room.clouds, revision: room.cloudsRev });
+  },
+
+  // A page's welcome is followed by the clouds standing now (as the chalkboard follows it).
+  welcome(room, p) {
+    if (cloudsOn(room)) room.send(p.ws, { t: "clouds", v: CLOUDS_V, revision: room.cloudsRev || 0, clouds: room.clouds || [] });
   },
 };

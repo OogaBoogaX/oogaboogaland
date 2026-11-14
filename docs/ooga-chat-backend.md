@@ -453,6 +453,47 @@ for zones named as outdoors, every application transition the Room sees takes th
 server's confirmed closes together keep new private samples out of anything public, and an older page without the
 handshake is never admitted at all.
 
+## Reactions, hands and clouds (#668)
+
+**Reactions.** Anyone in a zone, listener or speaker, GitHub or X, sends `{ type: "reaction", requestId, emoji }` over
+the audience socket. The emoji must pass the island's own policy (`reaction-policy.js` over `emoji-data.js`: one known
+emoji, plain or in a skin tone, never text). The server supplies the sender and time, and every accepted occurrence is
+its own event, even the same emoji twice:
+
+```json
+{ "type": "reaction", "eventId": "r1763121000123", "participantId": "gh:583231", "zone": "main", "epoch": 1763120000000,
+  "emoji": "🔥", "at": 1763121000123, "expiresAt": 1763121002723 }
+```
+
+Each lives 2,600 ms on its own (`REACTION_MS`, the island's own display time), so a new one never ends an earlier one or
+the hand beneath it. A retried `requestId` gets its first answer and no second event. Limits: 3 a second with a burst
+of 6 per identity across its tabs (the island's room's own), and 30 a second with a burst of 60 per zone, which bounds
+any zone's fanout. Nothing is kept: a snapshot or reconnect carries hands, never past reactions. The island's panels on
+a zone get each as `{ t: "audience", kind: "react", id, e, rid }`; an island player with an open outdoor grant gets a
+GitHub account's as the bridge's `{ t: "outdoor", op: "react", rid, id, e, speaker }` (an X id does not fit the bridge's
+account id, so those show in the panel alone). Both carry the event's id, so a page that hears both shows it once.
+An island speaker's own reactions while its grant is open reach Ooga Chat's listeners in its zone too.
+
+**Hands.** `{ type: "hand", requestId, on, tone?, emoji? }`: only an active speaker raises or pins one (a listener's,
+or a pending speaker's, is refused); lowering is always allowed and idempotent. The roster's `hand` is the pinned emoji
+(`hand-emoji-v1`) or the hand in the chosen skin tone, and it stays beneath reactions until lowered, the speaker goes
+back to listening, the zone really changes, or the lease ends. It rides the connection's attachment, so a wake keeps it
+once; a new lease starts without one. An island outdoor speaker's raised hand is in the roster from its own `hand`.
+
+**Clouds.** An active Ooga Chat speaker (GitHub only) sits on one seat of its zone's catalog (`worker/src/cloud-seats.js`,
+`cloud-seats-v1`: `main-cloud-1`…`main-cloud-8` over the island, `dsb-cloud-1`…`dsb-cloud-8` in DSB Land's sky, each
+drawn only in its own zone), taken when its microphone goes live and kept for the life of the lease. A full catalog is
+no speaker, never a shared seat. The character is the island's canonical one for that GitHub account, from the
+contributor policy at the lease's grant, never one a client named. The Audience sends the Room its clouds
+(`audienceClouds`) whenever they change (both keep the last list, so it outlasts either one's hibernation and a failed
+send is retried), and the Room sends every page `{ t: "clouds", v: 1, revision, clouds: [{ id,
+character, zone, seat, seatRevision, lease, mic, hand }] }` (and the list now after each `welcome`). The world (#659)
+draws a seated speaker from its seat, the scene and its clock, and ghosts that character's NPC while any source owns
+it: the island's own drivers (each player's `body`) and these clouds together are the canonical owner set, so one
+leaving never un-ghosts a character still driven elsewhere. Clouds need the island's `cloud` switch; off, none is sent
+and the welcome omits `cloud-seats-v1`. Ending a lease ends its cloud. No cloud takes a game slot or names a private
+room.
+
 ## Secrets and variables
 
 Names only; values live in Workers secrets and the owner's password manager (`worker/chat/dev.vars.example`).
