@@ -928,7 +928,11 @@
           if (visit.view) pilot.adopt(visit.view);
         }
       } else if (guide.stage === "toDoor") {
-        if (steerTo(L.doorStep.x, L.doorStep.z, dt) || guide.t > GUIDE_LIMIT) { guide.stage = "open"; guide.t = 0; doors.want = 1; }
+        if (steerTo(L.doorStep.x, L.doorStep.z, dt) || guide.t > GUIDE_LIMIT) {
+          // A walk that could not get there (something held it) goes on from the door's foot, facing the doors.
+          if (guide.t > GUIDE_LIMIT) arrive(L.doorStep, Math.PI, 0);
+          guide.stage = "open"; guide.t = 0; doors.want = 1;
+        }
       } else if (guide.stage === "open") {
         faceDoor(dt);
         if (doors.open >= 0.85) { guide.stage = "through"; guide.t = 0; guide.hold = 0; }
@@ -938,7 +942,9 @@
         if (camera.position.z < exitEye && guide.t < GUIDE_LIMIT) steerTo(0, L.veil, dt, 0);
         else {
           people.steer(0, 0, 0, 0, 0);
-          if ((guide.hold += dt) > EXIT_HOLD) { guide.stage = "out"; handOff(false, exitPose()); }
+          // Only an eye at the handover point hands its view over; a walk that ran out short of it leaves by the fade,
+          // so the island never takes a pose from inside the room.
+          if ((guide.hold += dt) > EXIT_HOLD) { guide.stage = "out"; if (camera.position.z < exitEye) handOff(); else handOff(false, exitPose()); }
         }
       } else if (guide.stage === "out") people.steer(0, 0, 0, 0, 0);
     };

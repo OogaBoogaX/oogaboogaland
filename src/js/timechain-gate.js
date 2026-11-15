@@ -131,6 +131,9 @@
       crew.steer(dx / d, dz / d, 0, 1, 0, WALK_SPEED);
       return false;
     };
+    // Inside the ball at the passage's height, in the doorway's frame: nearer its middle than the plug, where only a
+    // crossing's Ooga ever stands.
+    const behindDoors = (x, z, feet) => Math.hypot(x, z) < S.THRESHOLD - 0.5 && feet > P.floor - 1 && feet < P.top + 1;
     // Turns the Ooga where it stands, the eyes with it; true once it faces `heading`.
     const turnTo = (heading, dt) => {
       const r = crew.player.root.rotation, off = wrap(heading - r.y);
@@ -590,7 +593,10 @@
       } else if (g.state === "idle" && cave) {
         // Pressing against the doorway: it only opens from the keypad.
         const lx = localX(cave.root.position.x, cave.root.position.z), lz = localZ(cave.root.position.x, cave.root.position.z);
-        if (Math.abs(lx) < P.halfW && lz > S.THRESHOLD && lz < S.THRESHOLD + 1.1 && now - g.hintAt > HINT_GAP * 1000) {
+        // Only a crossing stands behind the doors. An Ooga left in the ball (a walk out that ran past its limit short of
+        // them, held by another player or begun off the passage) is put on the bridge where that walk ends.
+        if (behindDoors(lx, lz, cave.root.position.y - cave.baseY - place.y)) pilot.navigate({ position: { x: OUTSIDE.x, y: place.y, z: OUTSIDE.z }, yaw: OUT_HEADING + Math.PI, pitch: 0.12, dist: 4.5 });
+        else if (Math.abs(lx) < P.halfW && lz > S.THRESHOLD && lz < S.THRESHOLD + 1.1 && now - g.hintAt > HINT_GAP * 1000) {
           g.hintAt = now;
           hud.hint("Use keypad to choose a room", 3000);
         }

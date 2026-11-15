@@ -171,7 +171,9 @@
     const r = radius;
     // Reaching back a body's width, so it overlaps the room's own edge below whatever the walker's size.
     if (door && Math.abs(x) < DOOR.halfW - r && z >= L.doorZ - 0.6 - r && z <= L.doorZ + DOOR.vestibule - r) return true;
-    if (Math.hypot(x, z) > wallAt(L, feet) - r || z > L.doorZ - 0.12 - r) return false;
+    // Where the sphere widens over the floor a body in the air keeps to where it can stand, so no jump comes down held
+    // by the wall.
+    if (Math.hypot(x, z) > Math.min(wallAt(L, feet), wallAt(L, floorAt(L, x, z))) - r || z > L.doorZ - 0.12 - r) return false;
     if (solids) for (const o of solids) {
       if (o.top !== undefined && feet >= o.top - STEP_UP) continue;
       if (o.below !== undefined && feet + 1.8 <= o.below) continue;
