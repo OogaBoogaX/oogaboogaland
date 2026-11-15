@@ -21310,6 +21310,29 @@ const partyRadioChecks = async () => {
   record("party radio: kicks lock at their tempo and on their beat alike at 60 and 144 frames a second, and noise and silence never lock",
     at60.live === 1 && at144.live === 1 && Math.abs(at60.bpm - BPM) < 1 && Math.abs(at144.bpm - at60.bpm) < 0.3 && at60.err < 30 && at144.err < 30
       && noise.live === 0 && silence.live === 0, JSON.stringify({ at60, at144, noise, silence }));
+  // Regression: the player took Web Audio to be handing it silence (and gave the stream up for a plain element, the
+  // music stopping while it tuned in again and the lights losing the beat for the visit) after one late frame: the
+  // whole time since the frame before counted as heard silent. A stream that comes back plays on, read as before, and
+  // one that stays silent frame after frame is still given up.
+  const elements = [], level = { now: 0.2 }, node = () => ({ gain: { value: 0, setTargetAtTime() {} }, frequency: {}, connect() {}, disconnect() {} });
+  const audio = { currentTime: 0, sampleRate: SR, state: "running", destination: {}, createGain: node, createBiquadFilter: node, createMediaElementSource: node, close: async () => {},
+    createAnalyser: () => ({ ...node(), getFloatTimeDomainData: (a) => a.fill(level.now), getByteFrequencyData() {} }) };
+  const page = { window: { BL: { sound: { muted: false, subscribe: () => () => {} } } }, location: { search: "" }, navigator: {}, URLSearchParams, setTimeout, clearTimeout, Date,
+    document: { addEventListener() {}, removeEventListener() {} }, AudioContext: function () { return audio; },
+    Audio: function () { const e = { currentTime: 0, play: async () => {}, pause() {}, removeAttribute() {}, load() {} }; elements.push(e); return e; } };
+  runInNewContext(await readFile(new URL("../src/js/timechain-party-radio.js", import.meta.url), "utf8"), page);
+  const radio = page.window.BL.timechainPartyRadio.create(), reading = {};
+  const frames = (seconds, dt, sound) => { level.now = sound; for (let t = 0; t < seconds; t += dt) { audio.currentTime += dt; elements.at(-1).currentTime += dt; radio.sample(reading); } };
+  let late, silent;
+  try {
+    elements[0].onplaying();
+    frames(1, 1 / 60, 0.2); frames(5, 5, 0); frames(1, 1 / 60, 0.2);
+    late = { plain: radio.stats.plain, starts: radio.stats.starts, mode: radio.stats.mode };
+    frames(5, 1 / 60, 0);
+    silent = { plain: radio.stats.plain, starts: radio.stats.starts };
+  } finally { radio.dispose(); }
+  record("party radio: one late frame that finds the stream quiet neither restarts the music nor gives up its beat, and a stream silent frame after frame still falls back to the plain element",
+    !late.plain && late.starts === 1 && late.mode === "live" && silent.plain && silent.starts === 2, JSON.stringify({ late, silent }));
 };
 
 // Rule: a room id is validated at every boundary, and the three sizes are one design whose doorway, arrival, button and

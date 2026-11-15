@@ -222,7 +222,9 @@
       analyser.getFloatTimeDomainData(wave);
       const heard = beats.take(wave, Math.round(context.currentTime * context.sampleRate), track);
       if (!heard && lastTime >= 0 && element.currentTime > lastTime) {
-        quiet += element.currentTime - lastTime;
+        // A frame vouches only for the stretch the analyser holds: a late frame (a stalled page, a view change's
+        // hitch) that finds the stream catching its breath is one quiet moment, not all the time since the last.
+        quiet += Math.min(element.currentTime - lastTime, WAVE / context.sampleRate);
         if (quiet > SILENT_S) { plain = true; mode = "idle"; start(); out.live = false; return out; }
       } else if (heard) quiet = 0;
       lastTime = element.currentTime;
