@@ -1167,12 +1167,13 @@ body[data-active-scene="block"] .mode-hud {
   .cloud-tile { --face: 44px; }
   .cloud-name { font-size: 11px; }
 }
-.cloud-foot { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+.cloud-foot { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 10px; }
 .cloud-foot-name { min-width: 0; color: var(--paper); font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
+.cloud-foot-name:empty { display: none; }
 .cloud-foot-name[data-source="chat"]::before {
   content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #b18aff; vertical-align: 1px;
 }
-.cloud-foot-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cloud-foot-actions { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
 .cloud-foot-actions .foot-button { white-space: nowrap; }
 .cloud-mute { width: 84px; padding: 0; }
 .cloud-foot-actions [hidden] { display: none; }

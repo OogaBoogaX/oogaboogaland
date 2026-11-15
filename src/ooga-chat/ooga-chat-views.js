@@ -161,6 +161,16 @@
     stale: () => "This page is older than Ooga Chat's service. Reload to keep listening."
   };
   const VOICE_WORDS = { on: "In voice", muted: "Muted their microphone" };
+  // The visitor stands in the zone they picked: their own circle, a listener, while the server's list doesn't hold them
+  // (listening off, connecting, or no snapshot yet), first among the listeners as the roster orders them. The server's
+  // own row for them, keyed by the same participant id, takes its place once it comes.
+  const withSelf = (list, identity) => {
+    if (!identity.participant || list.some((p) => p.id === identity.participant)) return list;
+    const me = { id: identity.participant, role: "listener", source: "app", login: identity.login, display: identity.display || identity.login, face: identity.avatar,
+      muted: false, hand: "" };
+    const at = list.findIndex((p) => p.role === "listener");
+    return at < 0 ? [...list, me] : [...list.slice(0, at), me, ...list.slice(at)];
+  };
   const audience = (ctx) => {
     const { actions } = ctx;
     const listeners = new AbortController(), { signal } = listeners;
@@ -223,13 +233,13 @@
       const words = HEARD[now.status]?.(zone) || (now.status === "live" && !now.list.length ? "Nobody is here yet." : "");
       set(statusText, "textContent", words);
       set(heard, "hidden", !words);
-      const who = state.session.identity.participant, mics = who !== self || state.voice !== voice, role = voice && voice.role;
+      const who = state.session.identity.participant, moved = who !== self, mics = moved || state.voice !== voice, role = voice && voice.role;
       self = who;
       voice = state.voice;
       if (voice.role !== role) ctx.reactions.bars.refresh();
-      if (now.version !== version) {
+      if (now.version !== version || moved) {
         version = now.version;
-        people = now.list;
+        people = withSelf(now.list, state.session.identity);
         if (!frame) frame = requestAnimationFrame(render);
       } else if (mics && !frame) tiles.repaint(describe);
     };
@@ -323,7 +333,7 @@
       set(out, "textContent", signing ? "Signing out…" : "Sign out");
       set(out, "disabled", !!state.busy);
       const here = !!who && state.commons.status === "live" && !!model.state.you;
-      set(room, "textContent", here ? `${model.state.players.size} online` : "");
+      set(room, "textContent", here ? `${onlineCount(model)} online` : "");
       set(room, "hidden", !here);
       if (node.dataset.live !== String(here)) node.dataset.live = String(here);
       if (!who) {
@@ -547,7 +557,10 @@
     "signed-out": "Checking your sign-in…",
     "read-only": "Reading only: sending lines from Ooga Chat isn't open yet."
   };
-  const commonsChip = (status, model) => status === "live" ? `${model.state.players.size} online` : status === "closed" ? "Closed" : "Offline";
+  // Everyone online for a member: the island's players, and the member, who is online here in Ooga Chat even while their
+  // Ooga is not on the island (the Room lists only the island's players, worker/src/room-commons.js).
+  const onlineCount = (model) => model.state.players.size + (model.state.you && !model.state.players.has(model.state.you.id) ? 1 : 0);
+  const commonsChip = (status, model) => status === "live" ? `${onlineCount(model)} online` : status === "closed" ? "Closed" : "Offline";
   const panelHead = (title) => {
     const heading = make("span", "", title), chip = make("span", "panel-chip");
     heading.dataset.sign = "";
@@ -625,10 +638,12 @@
     return { node, update, dispose };
   };
   // Online Oogas: everyone on the island now, grouped by where they are (zone-map.js, as the island's tab groups them),
-  // with their raised hand and whether they are in voice. Presence without positions: no distance, crosshair, voice
+  // with their raised hand and whether they are in voice, and the member's own row first: in their island group while
+  // their Ooga is there, else under Ooga Chat. Presence without positions: no distance, crosshair, voice
   // link or volume, which are the island's alone (docs/ooga-chat-backend.md, the capability matrix).
   const online = (ctx) => {
     const { model } = ctx.commons;
+    const APP = "ooga-chat";
     const { header, chip } = panelHead("Online Oogas");
     const list = make("div", "players slab oc-players"), note = make("p", "help players-status");
     const account = accountRow(ctx);
@@ -665,12 +680,13 @@
       if (node.closest("[hidden]")) return;
       const you = model.state.you, rows = [];
       for (const p of model.state.players.values()) rows.push({ id: p.id, name: p.display, group: BL.zoneMap.groupOf(p.zone), self: !!you && p.id === you.id, p });
+      if (you && !model.state.players.has(you.id)) rows.push({ id: you.id, name: you.display, group: APP, self: true, p: { ...you, hand: false, voice: false, muted: false } });
       const mine = rows.find((r) => r.self)?.group || null;
       BL.zoneMap.arrange(rows, mine);
       const groups = [];
       for (const r of rows) {
         if (!groups.length || groups.at(-1).key !== r.group) {
-          const head = make("h3", "section-head", BL.zoneMap.heading(r.group)), ul = make("ul", "players-rows");
+          const head = make("h3", "section-head", r.group === APP ? "Ooga Chat" : BL.zoneMap.heading(r.group)), ul = make("ul", "players-rows");
           ul.setAttribute("aria-label", head.textContent);
           groups.push({ key: r.group, section: make("section", "players-group", head, ul), ul });
         }
@@ -685,9 +701,10 @@
       const live = status === "live" && !!model.state.you;
       chip.textContent = commonsChip(status, model);
       chip.dataset.tone = live ? "live" : status === "closed" ? "closed" : "idle";
-      note.textContent = !live ? COMMONS_WORDS[status] || "" : model.state.players.size ? "" : "Nobody is on the island right now.";
+      note.textContent = live ? "" : COMMONS_WORDS[status] || "";
       note.hidden = !note.textContent;
-      list.hidden = !live || !model.state.players.size;
+      // While live the list always holds at least the member's own row.
+      list.hidden = !live;
     };
     const update = (state) => {
       watch();
