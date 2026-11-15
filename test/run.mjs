@@ -22402,8 +22402,11 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
     out.apron = at({ x: outX, y: D.island.surfaceAt(outX, outZ), z: outZ }, 0.5);
     out.air = at({ x: 53.7, y: 8, z: -31 }, 0.5);
     // Inside the Sphere's shell, down its passage short of the curtain, and Merge Rock, which has no public scope yet.
-    const passage = BL.timechainModels.PASSAGE.curtain + 0.5;
-    out.passage = at({ x: T.worldX(0, passage), y: T.place.y + BL.timechainModels.SITE.bridgeFloor, z: T.worldZ(0, passage) }, 0.5);
+    // Only a crossing's Ooga stands behind the doors (timechain-gate.js puts one left there on the bridge), so the
+    // passage is read from the hub's own shell test and reason at that spot rather than by parking an Ooga in it.
+    const passage = BL.timechainModels.PASSAGE.curtain + 0.5, px = T.worldX(0, passage), pz = T.worldZ(0, passage);
+    const shelled = D.insideSphere(px, T.place.y + BL.timechainModels.SITE.bridgeFloor, pz), why = BL.outdoorScope.hubReason("sphere", shelled);
+    out.passage = { zone: "sphere", inside: shelled, scope: why === "outdoor" ? "main" : null, reason: why };
     const rock = D.repoIsland && D.repoIsland.arrival;
     out.repos = rock ? at({ x: rock.x, y: rock.y, z: rock.z }, 0.5) : null;
     return out;

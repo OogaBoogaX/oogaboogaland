@@ -12082,6 +12082,7 @@
         get timechainIsland() { return timechainIsland; },
         get arcadeEntrance() { return arcadeMouth && arcadeMouth.entrance; },
         levelOf,
+        insideSphere,
         get factory() { return factoryMouth && factoryMouth.hall ? factoryMouth.hall.debug : null; },
         get bifrost() { return bifrostIsle; },
         get footsteps() { return footsteps; },
