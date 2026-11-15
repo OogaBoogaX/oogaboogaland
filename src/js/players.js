@@ -187,24 +187,16 @@
     if (row.hostOn !== host) { row.hostOn = host; row.host.hidden = !host; }
   };
   // A reaction (`net.subscribeReactions`, 0 for the visitor's own) pops up on its sender's row where a raised hand stands,
-  // over the hand when one is up, rises a little and fades, as it does over their Ooga; the newest replaces the one
-  // before, and under Calm it only fades. Rows are not kept up while the panel is hidden, so then it shows nowhere.
-  const REACT_TIMING = { duration: 2600, easing: "linear" }, CALM = window.matchMedia("(prefers-reduced-motion: reduce)");
-  const REACT_POP = [
-    { opacity: 1, transform: "translateY(0) scale(0.4)" },
-    { opacity: 1, transform: "translateY(-2px) scale(1.15)", offset: 0.07 },
-    { opacity: 1, transform: "translateY(-3px) scale(1)", offset: 0.12 },
-    { opacity: 1, transform: "translateY(-5px) scale(1)", offset: 0.73 },
-    { opacity: 0, transform: "translateY(-7px) scale(1)" },
-  ];
-  const REACT_CALM = [{ opacity: 1 }, { opacity: 1, offset: 0.73 }, { opacity: 0 }];
+  // over the hand when one is up, rises a little and fades, as it does over their Ooga (reaction-bar.js `pop`, which
+  // Ooga Chat's tiles play too); the newest replaces the one before. Rows are not kept up while the panel is hidden, so
+  // then it shows nowhere.
   const reacted = (id, emoji) => {
     if (!showing || stale) return;
     const row = id === 0 ? selfRow : rows.get(id);
     if (!row || !row.li.isConnected) return;
     if (row.reacting) row.reacting.cancel();
     row.react.textContent = emoji; row.react.hidden = false;
-    const run = row.reacting = row.react.animate(CALM.matches ? REACT_CALM : REACT_POP, REACT_TIMING);
+    const run = row.reacting = BL.reactionBar.pop(row.react);
     run.onfinish = () => {
       if (row.reacting !== run) return;
       row.reacting = null; row.react.hidden = true;

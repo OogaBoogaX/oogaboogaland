@@ -1108,7 +1108,7 @@ body[data-active-scene="block"] .mode-hud {
 /* Without the island's About button, the title itself keeps the room's chip and the bell at the right. */
 .panel[data-panel="chat"][data-view="private"] > .panel-title h2 { margin-right: auto; }
 /* Ooga Chat (cloud-panel.js), the last tab, and Ooga Chat's own (the app takes these rules): two zone buttons, one roster
-   of circles four to a row (speakers, then listeners) scrolling in its slab, the emoji bar and the footer. A speaker's
+   of circles, as many to a row as fit at 76 px or more a column (six in a 600 px panel) (speakers, then listeners) scrolling in its slab, the emoji bar and the footer. A speaker's
    portrait carries a 3px ring past a 3px dark gap, green for the island, purple for Ooga Chat, whose speakers also have
    a purple dot before their name. A name keeps to one line, cut short with its whole self in its title. */
 .sheet-toggle-cloud { height: 56px; }
@@ -1126,15 +1126,15 @@ body[data-active-scene="block"] .mode-hud {
 .cloud-zone > img.cloud-zone-icon:not([src]) { visibility: hidden; }
 .cloud-status [hidden] { display: none; }
 .panel > .cloud-roster {
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-content: start; gap: 14px 6px; margin: 0; padding: 14px 8px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); align-content: start; gap: 10px 4px; margin: 0; padding: 14px 8px;
   overflow-y: auto; overscroll-behavior: contain; list-style: none; container-type: inline-size;
 }
 /* A tile (audience-tiles.js): the portrait with its ring and the hand or a reaction over its corner, the name, and the
    role under it after a speaker's microphone. A tile out of sight skips its layout and paint. */
 .cloud-tile {
-  --face: 56px;
+  --face: 40px;
   display: flex; flex-direction: column; align-items: center; min-width: 0; padding: 6px 0 2px; border-radius: 6px;
-  content-visibility: auto; contain-intrinsic-block-size: auto 104px;
+  content-visibility: auto; contain-intrinsic-block-size: auto 88px;
 }
 .cloud-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .cloud-face { position: relative; flex: none; margin-bottom: 10px; }
@@ -1151,22 +1151,15 @@ body[data-active-scene="block"] .mode-hud {
   font-size: 18px; line-height: 1; pointer-events: none;
 }
 .cloud-hand { grid-area: 1 / 1; }
-.cloud-pop { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; animation: cloud-pop 2.4s ease-out forwards; }
-@keyframes cloud-pop { 0% { opacity: 0; transform: translateY(4px) scale(0.7); } 15% { opacity: 1; transform: none; } 70% { opacity: 1; } 100% { opacity: 0; transform: translateY(-10px); } }
-@keyframes cloud-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .cloud-pop { animation-name: cloud-fade; } }
-.cloud-name { display: flex; align-items: center; justify-content: center; gap: 4px; max-width: 100%; color: var(--paper); font-size: 12px; font-weight: 700; }
+.cloud-pop { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.cloud-pop[hidden] { display: none; }
+.cloud-name { display: flex; align-items: center; justify-content: center; gap: 4px; max-width: 100%; color: var(--paper); font-size: 10px; font-weight: 700; }
 .cloud-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cloud-dot { display: none; flex: none; width: 6px; height: 6px; border-radius: 50%; background: #b18aff; }
 .cloud-tile[data-source="chat"] .cloud-dot { display: block; }
-.cloud-role { display: flex; align-items: center; gap: 4px; margin-top: 2px; color: rgba(243, 239, 228, 0.62); font-size: 11px; white-space: nowrap; }
+.cloud-role { display: flex; align-items: center; gap: 4px; margin-top: 2px; color: rgba(243, 239, 228, 0.62); font-size: 9px; white-space: nowrap; }
 .cloud-role .roster-voice svg { width: 10px; height: 10px; }
 .cloud-mic[hidden] { display: none; }
-/* A drawer as narrow as the island's, or a phone: smaller circles, the same four to a row. */
-@container (max-width: 400px) {
-  .cloud-tile { --face: 44px; }
-  .cloud-name { font-size: 11px; }
-}
 .cloud-foot { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 10px; }
 .cloud-foot-name { min-width: 0; color: var(--paper); font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
 .cloud-foot-name:empty { display: none; }
@@ -1176,6 +1169,14 @@ body[data-active-scene="block"] .mode-hud {
 .cloud-foot-actions { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
 .cloud-foot-actions .foot-button { white-space: nowrap; }
 .cloud-mute { width: 84px; padding: 0; }
+/* Join and Leave Voice (and Joining…, Leaving…) at one width, the widest's, so the footer never shifts. */
+.cloud-voice { width: 100px; padding: 0; }
+/* The emoji bar beside the footer's buttons once the panel is wide enough for both, else centred over them, as Ooga
+   Chat's app lays its own out (ooga-chat.css `.oc-chat-foot`). */
+.cloud-bottom { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 14px; margin-top: 8px; }
+.cloud-bottom > .reactions { flex: 1 1 240px; min-width: 0; max-width: 370px; margin-top: 0; }
+.cloud-bottom > .cloud-foot { flex: 1 1 220px; }
+.cloud-bottom .cloud-foot-name { flex-basis: 100%; text-align: center; }
 .cloud-foot-actions [hidden] { display: none; }
 @media (pointer: coarse) {
   .cloud-mic { padding: 6px; margin: -6px; }
@@ -2588,8 +2589,11 @@ body[data-active-scene="block"] .mode-hud {
 .foot-primary.virtual-hover,
 .foot-primary:focus-visible { background: linear-gradient(#f0b05a, #e2a04a); }
 
-/* In voice with the microphone live, the voice button wears the presence green. */
-.foot-button[aria-pressed="true"] { border-color: rgba(34, 197, 94, 0.75); }
+/* In voice with the microphone live, the voice button wears the presence green. A microphone button that says so in
+   `data-mic` (Ooga Chat's, both apps) is green on Mute and red on an enabled Unmute, and plain while disabled. */
+.foot-button[aria-pressed="true"]:not([data-mic]),
+.foot-button[data-mic="live"]:not(:disabled) { border-color: rgba(34, 197, 94, 0.75); }
+.foot-button[data-mic="muted"]:not(:disabled) { border-color: rgba(239, 68, 68, 0.8); }
 
 @media (pointer: coarse) {
   .foot-button { min-height: 40px; }

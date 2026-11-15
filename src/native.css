@@ -473,3 +473,7 @@ select {
   width: calc(100% * 11 / 9);
   margin: 0 calc(100% / -9);
 }
+/* Its outer dots: a pixel nearer the middle on a side-docked panel's tab, where the wide ones read too spread. */
+.cloud-icon .cloud-near,
+.sheet:not([data-dock="bottom"]) .cloud-icon .cloud-wide { display: none; }
+.sheet:not([data-dock="bottom"]) .cloud-icon .cloud-near { display: inline; }

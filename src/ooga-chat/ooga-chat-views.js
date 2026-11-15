@@ -273,10 +273,16 @@
   // fixed-width microphone, always first and off for a listener, Join Voice for a listener the server allows to speak
   // (Leave Voice for a speaker), and Sign out. A disabled button says why on itself. The voice state is the seam's
   // (`state.voice`); nothing here opens a microphone.
+  // A microphone button's colour (style.css `data-mic`): green on Mute while the microphone is live, red on an enabled
+  // Unmute, none while it is disabled or not a microphone button.
+  const micLook = (el, on, muted) => {
+    const look = on ? muted ? "muted" : "live" : "";
+    if (el.dataset.mic !== look) el.dataset.mic = look;
+  };
   const cloudFoot = ({ actions, media }) => {
     const listeners = new AbortController(), { signal } = listeners;
     const name = make("span", "cloud-foot-name");
-    const mute = button("foot-button cloud-mute", "Unmute"), join = button("foot-button", "Join Voice"), out = button("link", "Sign out");
+    const mute = button("foot-button cloud-mute", "Unmute"), join = button("foot-button cloud-voice", "Join Voice"), out = button("link", "Sign out");
     const muteWhy = explain(mute), joinWhy = explain(join);
     mute.setAttribute("aria-pressed", "false");
     mute.addEventListener("click", (event) => {
@@ -302,6 +308,7 @@
       set(mute, "disabled", !speaker || !!state.busy || state.voice.busy);
       set(mute, "textContent", speaker && !state.voice.muted ? "Mute" : "Unmute");
       attr(mute, "aria-pressed", String(speaker && state.voice.muted));
+      micLook(mute, !mute.disabled && speaker, state.voice.muted);
       set(muteWhy, "textContent", speaker ? "" : "Join voice first to unmute.");
       const going = joining(state, allowed, media);
       join.dataset.voice = speaker ? "speaker" : "listener";
@@ -364,6 +371,7 @@
       set(voice, "textContent", speaker ? state.voice.muted ? "Unmute" : "Mute" : join.words || "Join voice");
       set(voice, "disabled", speaker ? !!state.busy : join.disabled);
       attr(voice, "aria-pressed", String(speaker && !state.voice.muted));
+      micLook(voice, !voice.disabled && speaker, state.voice.muted);
       const why = speaker ? "" : join.why;
       set(voiceWhy, "textContent", why);
       set(voice, "title", why);

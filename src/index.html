@@ -559,14 +559,16 @@
         </div>
         <p class="help cloud-status" id="cloud-status" role="status" aria-live="polite" hidden><span id="cloud-status-text"></span> <button type="button" class="link" id="cloud-retry" hidden>Retry</button></p>
         <ul class="cloud-roster slab" id="cloud-roster" aria-label="Speakers and listeners"></ul>
-        <div class="reactions" id="cloud-reactions" hidden></div>
-        <div class="cloud-foot" id="cloud-foot">
-          <span class="cloud-foot-name" id="cloud-foot-name"></span>
-          <span class="cloud-foot-actions">
-            <button type="button" class="foot-button cloud-mute" id="cloud-mute" aria-pressed="false" disabled>Unmute</button>
-            <button type="button" class="foot-button" id="cloud-voice" disabled>Join Voice</button>
-            <button type="button" class="link" id="cloud-logout">Sign out</button>
-          </span>
+        <div class="cloud-bottom">
+          <div class="reactions" id="cloud-reactions" hidden></div>
+          <div class="cloud-foot" id="cloud-foot">
+            <span class="cloud-foot-name" id="cloud-foot-name"></span>
+            <span class="cloud-foot-actions">
+              <button type="button" class="foot-button cloud-mute" id="cloud-mute" aria-pressed="false" data-mic="" disabled>Unmute</button>
+              <button type="button" class="foot-button cloud-voice" id="cloud-voice" disabled>Join Voice</button>
+              <button type="button" class="link" id="cloud-logout">Sign out</button>
+            </span>
+          </div>
         </div>
       </section>
       </div>

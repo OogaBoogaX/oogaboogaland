@@ -125,6 +125,7 @@
     set(mute, "textContent", footerState.mute.text);
     set(mute, "disabled", footerState.mute.disabled);
     attr(mute, "aria-pressed", String(footerState.mute.pressed));
+    if (mute.dataset.mic !== footerState.mute.mic) mute.dataset.mic = footerState.mute.mic;
     set(voiceButton, "textContent", footerState.voice.text);
     set(voiceButton, "disabled", footerState.voice.disabled);
     set(voiceButton, "title", footerState.voice.action === "join" && reason ? reason : "");

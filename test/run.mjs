@@ -30542,7 +30542,7 @@ const audienceChecks = async BL => {
   // The room's pictures are Ooga Chat's own paths, which only its edge serves: the island keeps none, so asks for none.
   const pics = ["/api/chat/avatar/1", "/avatars/1.png", "//evil.example/x.png", "https://x.example/p.png"].map(avatar => A.parseRow(row("x", "speaker", { source: "chat", avatar })).avatar);
   const v = (extra = {}) => ({ enabled: false, joining: false, returning: false, publishing: false, muted: false, ...extra });
-  const f = (you, voice, reason) => { const r = A.footer(you, voice, reason); return `${r.mute.text}:${r.mute.disabled}/${r.voice.text}:${r.voice.disabled}`; };
+  const f = (you, voice, reason) => { const r = A.footer(you, voice, reason); return `${r.mute.text}:${r.mute.disabled}:${r.mute.mic}/${r.voice.text}:${r.voice.disabled}`; };
   const footers = [f({ speak: "eligible" }, v()), f({ speak: "pending" }, v()), f({ speak: "denied" }, v()), f(null, v()), f({ speak: "eligible" }, v(), "no mic"),
     f({ speak: "active" }, v({ enabled: true, publishing: true })), f({ speak: "active" }, v({ enabled: true, publishing: true, muted: true })), f({ speak: "active" }, v({ enabled: true, joining: true })), f({ speak: "eligible" }, v({ returning: true, muted: true }))];
   m.reset("unavailable"); const kept = m.desired === "dsb" && m.rows.size === 0 && m.epoch === -1;
@@ -30552,8 +30552,8 @@ const audienceChecks = async BL => {
       && old === "ignored" && half === 10 && whole && switched && connecting && whole1001 && pics.every(p => p === undefined)
       && kept && forgot,
     JSON.stringify({ first, again, asked, order, steady, gap, resyncs, stale, old, half, whole, switched, connecting, whole1001, pics }));
-  record("Ooga Chat footer and hand: a listener has a disabled Unmute and a Join Voice the room must call eligible (pending, denied, unknown or an unsupported browser never enable it); a speaker has Mute or Unmute and Leave Voice; only an active speaker may raise the hand",
-    footers.join("|") === "Unmute:true/Join Voice:false|Unmute:true/Join Voice:true|Unmute:true/Join Voice:true|Unmute:true/Join Voice:true|Unmute:true/Join Voice:true|Mute:false/Leave Voice:false|Unmute:false/Leave Voice:false|Mute:true/Leave Voice:false|Unmute:false/Leave Voice:false"
+  record("Ooga Chat footer and hand: a listener has a disabled, uncoloured Unmute and a Join Voice the room must call eligible (pending, denied, unknown or an unsupported browser never enable it); a speaker has a green Mute or a red Unmute and Leave Voice, and a disabled one still reads Unmute, uncoloured; only an active speaker may raise the hand",
+    footers.join("|") === "Unmute:true:/Join Voice:false|Unmute:true:/Join Voice:true|Unmute:true:/Join Voice:true|Unmute:true:/Join Voice:true|Unmute:true:/Join Voice:true|Mute:false:live/Leave Voice:false|Unmute:false:muted/Leave Voice:false|Unmute:true:/Leave Voice:false|Unmute:false:muted/Leave Voice:false"
       && hand && lowered,
     JSON.stringify({ footers, hand, lowered }));
 };

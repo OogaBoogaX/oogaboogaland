@@ -364,5 +364,18 @@
       stats: () => ({ bars: bars.length, available, open: !!picker && !picker.root.hidden, slot: pickSlot, picker: picker ? picker.all.length : 0 })
     };
   };
-  BL.reactionBar = { create };
+  // A reaction popping up over whoever sent it, the same on Online Oogas' rows (players.js) and Ooga Chat's tiles
+  // (audience-tiles.js), as it does over their Ooga: it pops in, rises a little and fades over 2.6 s, and under Calm only
+  // fades. `pop(el)` plays it on `el` and returns the animation; the caller shows the emoji and hides it on finish.
+  const POP_TIMING = { duration: 2600, easing: "linear" }, CALM = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const POP = [
+    { opacity: 1, transform: "translateY(0) scale(0.4)" },
+    { opacity: 1, transform: "translateY(-2px) scale(1.15)", offset: 0.07 },
+    { opacity: 1, transform: "translateY(-3px) scale(1)", offset: 0.12 },
+    { opacity: 1, transform: "translateY(-5px) scale(1)", offset: 0.73 },
+    { opacity: 0, transform: "translateY(-7px) scale(1)" },
+  ];
+  const POP_CALM = [{ opacity: 1 }, { opacity: 1, offset: 0.73 }, { opacity: 0 }];
+  const pop = (el) => el.animate(CALM.matches ? POP_CALM : POP, POP_TIMING);
+  BL.reactionBar = { create, pop };
 })();

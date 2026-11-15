@@ -6,7 +6,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const NS = "http://www.w3.org/2000/svg";
-  // name: [class, viewBox, crisp, [[fill, d], ...]] or a circle list for the round online mark.
+  // name: [class, viewBox, crisp, [[fill, d, class?], ...]] or a circle list for the round online mark.
   const ICONS = {
     bananas: ["banana-icon", "-0.5 0 9 10", true, [
       ["#2b1b10", "M0 0h3v1H0zM0 1h1v1H0zM2 1h1v1H2zM0 2h1v1H0zM2 2h2v1H2zM0 3h1v1H0zM3 3h1v1H3zM0 4h1v1H0zM3 4h2v1H3zM0 5h1v1H0zM4 5h2v1H4zM0 6h2v1H0zM5 6h2v1H5zM1 7h1v1H1zM6 7h2v1H6zM1 8h3v1H1zM7 8h1v1H7zM3 9h5v1H3z"],
@@ -25,10 +25,16 @@
       ["#f3efe4", "M1 1h7v5H4v1H3v1H2V6H1z"],
       ["#5c4425", "M2 3h1v1H2zM4 3h1v1H4zM6 3h1v1H6z"]]],
     // Ooga Chat's mark: the outlined cloud under three dots in the purple of its speakers, the middle one a pixel higher.
+    // A part's third entry is its class: on a side-docked panel's tab the outer two dots stand a pixel nearer the middle
+    // (`cloud-near`, shown there by native.css in place of `cloud-wide`); the app's favicons draw the wide ones alone.
     cloud: ["cloud-icon", "0 0 11 11", true, [
-      ["#2b1b10", "M5 1h1v1H5zM4 2h1v1H4zM6 2h1v1H6zM5 3h1v1H5zM1 2h1v1H1zM0 3h1v1H0zM2 3h1v1H2zM1 4h1v1H1zM9 2h1v1H9zM8 3h1v1H8zM10 3h1v1H10zM9 4h1v1H9zM4 5h3v1H4zM2 6h2v1H2zM7 6h2v1H7zM1 7h1v2H1zM9 7h1v2H9zM2 9h7v1H2z"],
+      ["#2b1b10", "M5 1h1v1H5zM4 2h1v1H4zM6 2h1v1H6zM5 3h1v1H5zM4 5h3v1H4zM2 6h2v1H2zM7 6h2v1H7zM1 7h1v2H1zM9 7h1v2H9zM2 9h7v1H2z"],
+      ["#2b1b10", "M1 2h1v1H1zM0 3h1v1H0zM2 3h1v1H2zM1 4h1v1H1zM9 2h1v1H9zM8 3h1v1H8zM10 3h1v1H10zM9 4h1v1H9z", "cloud-wide"],
+      ["#2b1b10", "M2 2h1v1H2zM1 3h1v1H1zM3 3h1v1H3zM2 4h1v1H2zM8 2h1v1H8zM7 3h1v1H7zM9 3h1v1H9zM8 4h1v1H8z", "cloud-near"],
       ["#f3efe4", "M4 6h3v1H4zM2 7h7v2H2z"],
-      ["#b18aff", "M5 2h1v1H5zM1 3h1v1H1zM9 3h1v1H9z"]]],
+      ["#b18aff", "M5 2h1v1H5z"],
+      ["#b18aff", "M1 3h1v1H1zM9 3h1v1H9z", "cloud-wide"],
+      ["#b18aff", "M2 3h1v1H2zM8 3h1v1H8z", "cloud-near"]]],
     // DSB Land's destination mark, the same paths as the island's `dsb-island-icon` (the suite holds them equal).
     dsb: ["dsb-island-icon", "0 0 64 48", false, [
       ["#195c78", "m3 30 9-8 30-6 18 12-5 11-23 7-24-6z"],
@@ -69,8 +75,9 @@
     el.setAttribute("viewBox", viewBox);
     if (crisp) el.setAttribute("shape-rendering", "crispEdges");
     el.setAttribute("aria-hidden", "true");
-    for (const [fill, shape] of parts) {
+    for (const [fill, shape, partClass] of parts) {
       const part = document.createElementNS(NS, typeof shape === "number" ? "circle" : "path");
+      if (partClass) part.setAttribute("class", partClass);
       if (typeof shape === "number") {
         part.setAttribute("cx", "4.5"); part.setAttribute("cy", "4.5"); part.setAttribute("r", String(shape));
       } else part.setAttribute("d", shape);

@@ -27,8 +27,8 @@
     "ENVIRONMENT": "production",
     "SITE_ORIGIN": "https://ooga.chat",
     // Comma-separated: github, x, listen, speak, feed, commons, cloud. Turned on in stages by the release runbook.
-    // Production: GitHub sign-in, Feed the Oogas and The Commons, as on staging; no audio yet.
-    "FEATURES": "github,feed,commons",
+    // Production: GitHub sign-in, listening and speaking, Feed the Oogas and The Commons.
+    "FEATURES": "github,listen,speak,feed,commons",
     // OogaBoogaX's "Ooga Chat" OAuth App (callback https://ooga.chat/auth/github/callback). A client id is public.
     "GITHUB_CLIENT_ID": "Ov23lilwmHOnCXhvwsKJ",
     // @w_s_bitcoin's "Ooga Chat" X app, OAuth 2.0 confidential client (callbacks for both environments). Public.

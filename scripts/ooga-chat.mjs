@@ -45,8 +45,8 @@ export const FIRST_LOAD_BUDGET = 236 * 1024;
 // pick.
 export const ISLAND_RULES = [".roster", ".players-", ".chat-", ".section-head", ".panel .chat-status", '.panel[data-panel="chat"] > .panel-title',
   ".help", ".link", ".account", ".foot-button", ".foot-primary", ".cloud-zone", ".cloud-status", ".panel > .cloud-roster", ".cloud-tile",
-  ".cloud-face", ".cloud-portrait", ".cloud-react", ".cloud-hand", ".cloud-pop", ".cloud-fade", ".cloud-name", ".cloud-dot", ".cloud-role",
-  ".cloud-mic", ".cloud-foot", ".cloud-mute", ".reaction"];
+  ".cloud-face", ".cloud-portrait", ".cloud-react", ".cloud-hand", ".cloud-pop", ".cloud-name", ".cloud-dot", ".cloud-role",
+  ".cloud-mic", ".cloud-foot", ".cloud-mute", ".cloud-voice", ".reaction"];
 // Pictures the app loads only when they are wanted, never on a first visit: the face sheet, when a stats strip opens.
 export const LAZY_ART = ["ooga-faces.png"];
 export const islandRules = (css, prefixes = ISLAND_RULES) => {
@@ -117,7 +117,8 @@ export const cloudMark = () => {
   runInNewContext(readFileSync(join(root, "src", "js", "native-icons.js"), "utf8"), context);
   const [, viewBox, , parts] = context.window.BL.nativeIcons.ICONS.cloud;
   const [, , w, h] = viewBox.split(" ").map(Number), grid = new Array(w * h).fill(null);
-  for (const [colour, d] of parts) {
+  for (const [colour, d, part] of parts) {
+    if (part === "cloud-near") continue;
     const rects = [...d.matchAll(/M(\d+) (\d+)h(\d+)v(\d+)H\d+z/g)];
     if (!rects.length) throw new Error("ooga-chat: the native cloud's paths are not pixel rectangles");
     for (const [, x, y, rw, rh] of rects) for (let j = +y; j < +y + +rh; j++) for (let i = +x; i < +x + +rw; i++) grid[j * w + i] = colour;
