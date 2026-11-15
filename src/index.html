@@ -1164,6 +1164,17 @@
           <div class="race-lap block-state"><span>Your block</span><b id="block-own" data-state="home">home</b></div>
           <div class="race-lap block-state"><span>Theirs</span><b id="block-theirs" data-state="home">home</b></div>
         </div>
+        <div class="block-tally" id="block-tally" role="group" aria-label="Your round so far" title="Hold Z for everyone's counts"><span>Grabbed</span><b>0</b><span>Mined</span><b>0</b><span>Home</span><b>0</b><span>Splats</span><b>0</b><span>Splatted</span><b>0</b></div>
+        <section class="block-tally-board" id="block-tally-board" hidden aria-label="Everyone's counts this round">
+          <div class="block-side-panel" data-team="blue">
+            <h3><span>Blue</span><small title="Rival blocks picked up">Grabbed</small><small>Mined</small><small title="Your own block sent home">Home</small><small>Splats</small><small title="Times splatted">Splatted</small></h3>
+            <ol class="ghost-scores" id="block-tally-blue"></ol>
+          </div>
+          <div class="block-side-panel" data-team="red">
+            <h3><span>Red</span><small title="Rival blocks picked up">Grabbed</small><small>Mined</small><small title="Your own block sent home">Home</small><small>Splats</small><small title="Times splatted">Splatted</small></h3>
+            <ol class="ghost-scores" id="block-tally-red"></ol>
+          </div>
+        </section>
       </div>
       <section class="block-watch" id="block-watch" hidden aria-label="Watch deck" aria-live="polite">
         <span id="block-watch-line"></span>
@@ -1260,11 +1271,11 @@
           <p class="help" id="block-summary"></p>
           <div class="block-trophy-sides">
             <section class="block-side-panel" data-team="blue" aria-label="Blue side">
-              <h3><span>Blue</span><small>Mined</small><small title="Blocks brought home">Home</small><small>Splats</small></h3>
+              <h3><span>Blue</span><small title="Rival blocks picked up">Grabbed</small><small>Mined</small><small title="Blocks brought home">Home</small><small>Splats</small></h3>
               <ol id="block-side-blue"></ol>
             </section>
             <section class="block-side-panel" data-team="red" aria-label="Red side">
-              <h3><span>Red</span><small>Mined</small><small title="Blocks brought home">Home</small><small>Splats</small></h3>
+              <h3><span>Red</span><small title="Rival blocks picked up">Grabbed</small><small>Mined</small><small title="Blocks brought home">Home</small><small>Splats</small></h3>
               <ol id="block-side-red"></ol>
             </section>
           </div>

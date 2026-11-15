@@ -5,7 +5,7 @@
   "use strict";
   const scope = typeof window === "undefined" ? globalThis : window;
   const BL = scope.BL = scope.BL || {};
-  const FEATURE = "block-v1", ZONE = "block-frenzy", WIRE = 7;
+  const FEATURE = "block-v1", ZONE = "block-frenzy", WIRE = 8;
   // The `place` that arrives on the watch deck to spectate, for a portal or anything else that opens the game to watch.
   const WATCH_DECK_PLACE = "watch-deck";
   // The `place`s the chairs send a viewer back to the arcade with when they came by its watch door: in front of it, or

@@ -11480,6 +11480,147 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
   }
 }
 
+/* Block Frenzy's live tally. The visitor's own five counts stand under the map through a round (beside it on a short
+   screen, where the sticks are below). Everyone's, by side, show while Z is held or after a tap on the small panel:
+   the results table's side panels over the ghost hunt's scoreboard rows (`.ghost-score`: a face in a circle, the
+   leader's glowing green), here one Ooga a line with its name and counts. */
+.block-tally {
+  position: absolute;
+  z-index: 11;
+  right: calc(12px + var(--safe-right, 0px));
+  top: 314px;
+  box-sizing: border-box;
+  min-width: 88px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1px 6px;
+  padding: 4px 6px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: rgba(30, 20, 12, 0.72);
+  color: #f3e6cc;
+  font-size: 9px;
+  line-height: 1.35;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.block-tally b {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.block-tally-board {
+  position: absolute;
+  z-index: 13;
+  left: 50%;
+  top: calc(132px + var(--safe-top, 0px));
+  transform: translateX(-50%);
+  width: min(760px, calc(100% - 24px));
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  color: var(--paper);
+  pointer-events: auto;
+}
+
+.block-tally-board[hidden] {
+  display: none;
+}
+
+.block-tally-board .ghost-scores {
+  position: static;
+  display: block;
+  max-width: none;
+  transform: none;
+}
+
+.block-tally-board .block-side-panel h3,
+.block-tally-board .ghost-score {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) repeat(5, 6ch);
+  align-items: center;
+  gap: 4px;
+}
+
+.block-tally-board h3 span {
+  grid-column: 1 / 3;
+}
+
+.block-tally-board .ghost-score canvas {
+  width: 20px;
+  height: 20px;
+  padding: 1px;
+  box-shadow: none;
+}
+
+.block-tally-board .ghost-score span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.block-tally-board .ghost-score b,
+.block-tally-board .ghost-score i {
+  grid-row: 1;
+  color: var(--paper);
+  font-size: 13px;
+  font-style: normal;
+  text-align: right;
+  text-shadow: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Grabbed leads, then the blocks mined (the row's points). */
+.block-tally-board .ghost-score i:nth-of-type(1) { grid-column: 3; }
+.block-tally-board .ghost-score b { grid-column: 4; }
+.block-tally-board .ghost-score i:nth-of-type(2) { grid-column: 5; }
+.block-tally-board .ghost-score i:nth-of-type(3) { grid-column: 6; }
+.block-tally-board .ghost-score i:nth-of-type(4) { grid-column: 7; }
+
+.block-tally-board .ghost-score[data-lead] b {
+  color: #8dffa6;
+}
+
+.block-tally-board .ghost-score[data-you] {
+  background: rgba(245, 197, 66, 0.16);
+  border-radius: 4px;
+}
+
+@media (max-width: 520px) {
+  .block-tally {
+    top: 343px;
+    min-width: 66px;
+    padding: 3px 4px;
+    font-size: 8px;
+    letter-spacing: 0;
+  }
+
+  .block-tally-board {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .block-tally-board .block-side-panel h3,
+  .block-tally-board .ghost-score {
+    grid-template-columns: 24px minmax(0, 1fr) repeat(5, 5ch);
+    gap: 2px;
+  }
+}
+
+@media (max-height: 480px) {
+  .block-tally {
+    top: 160px;
+    right: calc(106px + var(--safe-right, 0px));
+  }
+
+  .block-tally-board {
+    top: calc(64px + var(--safe-top, 0px));
+  }
+}
+
 /* On a wide screen Block Frenzy's board sits on the left, leaving the right for the Ooga on show, with its name
    under it. */
 @media (min-width: 760px) {
@@ -12668,7 +12809,7 @@ body.arcade-game .cloud-hopper-panel { z-index: 40; }
 .block-trophy-sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; text-align: left; }
 .block-side-panel { padding: 4px 8px 6px; border: 2px solid var(--stone-dk); border-radius: 9px 7px 10px 8px; background: var(--tablet); box-shadow: var(--tablet-shadow); }
 .block-side-panel.won { border-color: #f5c542; box-shadow: var(--tablet-shadow), 0 0 0 2px rgba(245, 197, 66, 0.35), 0 0 18px rgba(245, 197, 66, 0.35); }
-.block-side-panel h3, .block-side-panel li { display: grid; grid-template-columns: minmax(0, 1fr) 6ch 6ch 6ch; align-items: baseline; gap: 4px; }
+.block-side-panel h3, .block-side-panel li { display: grid; grid-template-columns: minmax(0, 1fr) 6ch 6ch 6ch 6ch; align-items: baseline; gap: 4px; }
 .block-side-panel h3 { margin: 2px 0 4px; font-size: 14px; }
 .block-side-panel[data-team="blue"] h3 span { color: #58b4ff; }
 .block-side-panel[data-team="red"] h3 span { color: #ff7a5c; }
@@ -12727,7 +12868,7 @@ body.arcade-game .cloud-hopper-panel { z-index: 40; }
   .block-trophy-board .help { font-size: 11px; margin-bottom: 6px; }
   .block-trophy-sides { gap: 6px; }
   .block-side-panel { padding: 3px 5px 4px; }
-  .block-side-panel h3, .block-side-panel li { grid-template-columns: minmax(0, 1fr) 3.5ch 3.5ch 3.5ch; gap: 2px; }
+  .block-side-panel h3, .block-side-panel li { grid-template-columns: minmax(0, 1fr) 4.5ch 3.5ch 3.5ch 3.5ch; gap: 2px; }
   .block-side-panel h3 small { font-size: 8px; }
   .block-side-panel li { font-size: 10.5px; padding: 2px; }
   .block-badges { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin-top: 6px; }

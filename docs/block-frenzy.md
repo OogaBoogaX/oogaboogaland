@@ -117,8 +117,41 @@ landed), a tie going to more mined, then more brought home, then the lower seat.
 already carries (the winner and each Ooga's counts) and the round's seat map (kept by the scene until the board shows
 again, since a guest's results can come after the lobby message ends the round), and the podium's places and the tables'
 order break ties by seat too, so every page of a live round shows the same and the wire is unchanged; solo, a seat is
-an actor's index. The tables show blocks mined, blocks brought home and splats, a name on one line; on a wide screen
+an actor's index. The tables show rival blocks grabbed, blocks mined, blocks brought home and splats, a name on one line; on a wide screen
 they run the card's width with the medals three across under them, and the card's buttons hold to its foot.
+
+## The live tally
+
+Every Ooga's counts show while the round is played, not only on the trophy screen, from the same per-actor numbers the
+results read, so the two always agree (`TALLY` in `block-sim.js` is the one list of them):
+
+| Count | Field | What adds one |
+|---|---|---|
+| Grabbed | `grabs` | The rival block coming into your hands: off its stand or the ground, a pass caught, a net steal that leaves you carrying it, a hook's reel that ends carried. Each pickup counts, so a block you drop and pick up again is two; holding it adds nothing; your own block touched home is Home, never a grab |
+| Mined | `captures` | A block you scored, carried in or thrown in |
+| Home | `rescues` | Your own block sent home by your touch, net steal or hook |
+| Splats | `hits` | A rival you splatted |
+| Splatted | `splats` | A time you were splatted |
+
+- **Your own counts** stand in a small panel under the map through the round (`#block-tally`; beside the map on a short
+  screen), away from the crosshair.
+- **Everyone's**, by side, show while Z is held, or after a tap on the small panel (a phone's way; a second tap, or one
+  on the board, takes it down): `#block-tally-board`, a face, name and the five counts a row, your own row marked and
+  the round's most valuable Ooga so far (`SIM.mvp`) glowing. Tab stays the throw, so the board has its own key.
+- **Built on Ghost Hunter's scoreboard.** The rows are its component, moved from `ghost-hud.js` to `BL.hud.faceScores`
+  in `hud.js` so both games use one (`ghost-hud.js` loads only with the Halloween group): pooled `.ghost-score` rows,
+  a face painted only when the Ooga in a place changes, `data-lead` for the leader. Block Frenzy's rows add a name and
+  more cells (`cells`, `you`), laid out as a table inside the trophy card's side panels (`.block-side-panel`). As in
+  the hunt, the scene writes it only when something changed (`SIM.tallyChanged`, beside `stripChanged`) or the board opens.
+- **Who mined it.** A block mined says `YOU MINED IT!` on the scorer's screen, `<name> MINED IT` on a teammate's and
+  `THEY MINED ONE` on the rivals' (`SIM.minedWord`), where every teammate's capture used to read `BLOCK MINED!`.
+  Your own capture keeps the middle of the screen: the Golden Dual AKs it wins (or takes) are named in the notice
+  line instead of over it.
+- **Live rounds:** the host's sim counts and each frame carries `grabs` with the other counts (`NUMBERS` in
+  `block-live.js`), so a guest's panel and board read the host's numbers, its own row being its own seat (`seatMap`).
+  The viewing chairs keep their own Stolen column (blocks taken off the stand since the viewer sat down).
+- The trophy card's tables gain a Grabbed column and the Your round medal says it too. The saved record
+  (`game.state.block`) is unchanged.
 
 ## Your record
 
@@ -331,6 +364,7 @@ page-wide mute (`sound.js`: the banner speaker and M). Keys only Block Frenzy ne
 | C (held) | Crouch |
 | + / −, wheel | Zoom the sniper scope; elsewhere the wheel zooms the camera |
 | V | Chase camera, first person or the Island view |
+| Z (held) | Everyone's live tally, by side (your own counts are always under the map) |
 | P | Pause, or play on. While paused nothing acts (keys, the tool bar, touch Throw!, the act button); only play on, Sides (the board) and Sound respond, and no held key, stick or trigger carries through |
 | Escape | One step back at a time: the captured mouse, then the view, then a pause, then the board (the round is given up), then the Arcade |
 | Tab outside a round | The page's own: moves the focus. In a round Tab throws (a game choice; Escape or X frees the mouse) |
@@ -338,7 +372,7 @@ page-wide mute (`sound.js`: the banner speaker and M). Keys only Block Frenzy ne
 R fires the grappling hook at the crosshair (or lets it go), when you have one; the Ooga AK reloads itself when its magazine runs dry, and no other tool reloads.
 
 Touch: the left stick moves, the right stick turns, Jump and Throw! buttons, a tool bar (its Ride button uses a
-zipline or catapult) and a View button; Main menu goes back to the board. A gamepad drives the sticks and
+zipline or catapult) and a View button; a tap on your tally under the map shows everyone's; Main menu goes back to the board. A gamepad drives the sticks and
 A jumps, through the shared controls.
 
 The board's All controls list (`CONTROL_GROUPS` in `scene-block.js`, also the in-play Help) shows these as five whole groups, Move, Weapons, Hook, Block and crates, View and game, in a grid three, two or one across by its width, each row key caps and a short action; a unit check holds it to the keys the scene really handles, both ways.
@@ -366,6 +400,11 @@ every box through the gap, the rider standing on that floor after letting go, th
 taking the block or scoring from the landing. The `block` scene runs the title card and Escape, W S and A D on screen,
 a quiz trap through a wrong and a right answer, an autopilot round to its saved results, and the round trip.
 
+The live tally's unit checks count a grab for a pickup off the stand, a net steal, a hook's reel and a catch, a second
+grab for a dropped block picked up again and none for a rescue; hold the three capture banners; send the counts through
+a frame to a blue and a red guest, whose own row must be its own seat; and hold the panel's view to the sim's numbers.
+The `block` scene's tally step stages a grab and three captures and reads the panel, the held board and the banner.
+
 The entry hall's Node checks cover the stage's four cabinets, the hall reaching the ledge, the zipline's survey and the Rally poster's move; the `arcade` step walks it. The Block Frenzy browser checks also measure each weapon's
 grip, zipline bar and raised trophy against regular, slim and wide Oogas' actual fists, including letting go of the
 bar. Both teams' Ride controls and warning lamps are checked with their own block home and away; the trap event
@@ -377,7 +416,7 @@ shared controls reference. Throw sits above the sticks and Jump, with the weapon
 
 When a round ends (`finish` in `scene-block.js`) the results card is a trophy screen in Cloud Hopper's results style:
 "Ooga Arcade" over the gold pixel-block title, a banner naming the winning side, the final score big in team colours
-beside the round's time in gold, the two sides' tables (every Ooga and bot: blocks mined, blocks brought home and splats, long names wrapping so touch users can read them; the winners'
+beside the round's time in gold, the two sides' tables (every Ooga and bot: rival blocks grabbed, blocks mined, blocks brought home and splats, long names wrapping so touch users can read them; the winners'
 table lit, their MVP crowned, the visitor's row marked), medals for the round's MVP, most splats and longest sniper
 shot plus the visitor's round, fastest win and rounds won, and the same three buttons.
 
@@ -450,7 +489,7 @@ physical touch controls and browser performance still require verification.
 ## Live rounds
 Signed-in Oogas only, on a Worker that lists `block-v1` in welcome; anywhere else the game is solo as before.
 
-Clanktown extends the frame layout and event list to `WIRE` 7. Deploy the site and Worker together. Pages left open on wire 6 or earlier must reload before joining or watching a live round; the Worker refuses their control messages and discards saved rounds from the older wire on wake.
+Clanktown extends the frame layout and event list to `WIRE` 7. The live tally adds each actor's `grabs` byte to the frame, so `WIRE` is 8. Deploy the site and Worker together. Pages left open on wire 7 or earlier must reload before joining or watching a live round; the Worker refuses their control messages and discards saved rounds from the older wire on wake.
 
 - **Registry** (`worker/src/block.js`, contract in `block-wire.js`): one match a room. `reg`/`unreg`/`ready`/`opt` in the lobby; the first in picks the map, size and scoring rule (2v2 to 4v4, `MIN_SIDE` to `MAX_SIDE`; NPCs fill any empty seat, so there is never a 1v1); `reg` carries the map already picked on their board, and registered players' boards follow the match's map, grown if more have registered than it seats. With two or more registered, everyone ready starts a 3 s countdown. One person alone chooses: Start with NPCs (`alone`, at once with NPCs) or Wait for players (marks them ready, which starts nothing until someone else registers and readies). If the others leave, the choice comes back.
 - **Teams:** random and as even as can be (`split`); empty seats are NPCs.

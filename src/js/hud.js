@@ -2639,5 +2639,48 @@
     }
     if (document.body.dataset.activeScene === scene) nameLeave(`Back to ${place}`);
   };
-  BL.hud = { create, renderIcon, renderFaceIcon, renderBodyIcon, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor, voiceIcon, voiceWords };
+  // A scoreboard of faces in `list` (HALLOWEEN: the ghost hunt's hunters; Block Frenzy's live tally). `set(rows, count)`
+  // shows the first `count` of `rows` (`cave` the Ooga whose face shows, `name`, `points`, `lead` for the leader); null
+  // hides the list. A row with `cells` (more counts) is a table's: its name is written beside the face, the cells
+  // follow the points, and `you` marks the visitor's own. The caller passes rows only when something on it changed.
+  // Each place's face is painted again only when the Ooga in it changes. `clear` takes the rows away with the visit.
+  const faceScores = (list) => {
+    const pool = [];
+    const set = (rows, count = 0) => {
+      if (rows === null) { list.hidden = true; return; }
+      list.hidden = false;
+      while (pool.length < count) {
+        const li = document.createElement("li"), canvas = document.createElement("canvas"), points = document.createElement("b");
+        li.className = "ghost-score";
+        canvas.setAttribute("aria-hidden", "true");
+        li.append(canvas, points);
+        pool.push({ li, canvas, points, cave: null, name: null, cells: [] });
+      }
+      for (let i = 0; i < pool.length; i++) {
+        const r = pool[i];
+        if (i >= count) { if (r.li.parentNode) r.li.remove(); continue; }
+        const row = rows[i];
+        if (!r.li.parentNode) list.append(r.li);
+        if (r.cave !== row.cave) {
+          r.cave = row.cave;
+          if (row.cave) renderFaceIcon(r.canvas, row.cave, null, 68);
+          else r.canvas.getContext("2d").clearRect(0, 0, r.canvas.width, r.canvas.height);
+        }
+        r.points.textContent = String(row.points);
+        r.li.title = row.name;
+        r.li.toggleAttribute("data-lead", !!row.lead);
+        if (!row.cells) continue;
+        if (!r.name) { r.name = document.createElement("span"); r.li.insertBefore(r.name, r.points); }
+        r.name.textContent = row.name;
+        r.li.toggleAttribute("data-you", !!row.you);
+        for (let k = 0; k < row.cells.length; k++) {
+          if (!r.cells[k]) r.li.append(r.cells[k] = document.createElement("i"));
+          r.cells[k].textContent = String(row.cells[k]);
+        }
+      }
+    };
+    const clear = () => { for (const r of pool) r.li.remove(); pool.length = 0; };
+    return { set, clear };
+  };
+  BL.hud = { create, renderIcon, renderFaceIcon, renderBodyIcon, faceScores, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, offerReload, holdRow, leaveTo, STATE_LABELS, statusFor, voiceIcon, voiceWords };
 })();

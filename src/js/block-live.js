@@ -19,7 +19,7 @@
   const NUMBERS = [["x", 64, 2], ["z", 64, 2], ["y", 64, 2], ["heading", 1000, 2], ["vx", 6, 1], ["vz", 6, 1], ["vy", 6, 1], ["moving", 20, 0],
     ["splat", 10, 0], ["guard", 10, 0], ["trapped", 10, 0], ["netted", 10, 0], ["boots", 10, 0], ["monkeys", 10, 0], ["knock", 10, 0], ["spooked", 10, 0], ["slip", 10, 0], ["cooldown", 20, 0], ["stamina", 20, 0], ["fuel", 20, 0], ["akReload", 20, 0], ["grabFill", 8, 0],
     ["flight", 1, 0], ["jumps", 1, 0], ["hk", 1, 0], ["hookT", 100, 0], ["hookLen", 4, 0], ["hook", 1, 0], ["grabbed", 1, 0], ["burnt", 1, 0], ["akMag", 1, 0], ["grenade", 1, 0], ["rocket", 1, 0], ["net", 1, 0], ["sniper", 1, 0], ["crates", 1, 0],
-    ["captures", 1, 0], ["splats", 1, 0], ["hits", 1, 0], ["longShot", 1, 0], ["rescues", 1, 0]];
+    ["captures", 1, 0], ["splats", 1, 0], ["hits", 1, 0], ["longShot", 1, 0], ["rescues", 1, 0], ["grabs", 1, 0]];
   const SWITCHES = ["crouch", "grounded", "jetting", "sprinting", "riding", "climbing", "holding", "tired", "gold", "bonked", "flung", "waiting"];
   const TEAM_CODE = t => t === "blue" ? 1 : t === "red" ? 2 : 0, TEAM_NAME = [null, "blue", "red"];
   const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;

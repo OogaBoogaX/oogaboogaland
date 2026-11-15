@@ -353,6 +353,8 @@
   // captured when it closed round the Ooga (`quiz.relock`).
   const openQuiz = () => {
     quiz.open = true;
+    // The question has the middle of the screen: everyone's tally comes down.
+    setTally(false, false);
     quiz.relock = locked();
     if (quiz.relock) document.exitPointerLock();
     trigger = false;
@@ -434,10 +436,10 @@
     ["Weapons", [[["1", "–", "8"], "Pick a weapon"], [["G"], "Next weapon"], [["Click"], "Fire (or Enter)"], [["Right click"], "Aim, sniper scope"], [["+", "−"], "Zoom the scope"]]],
     ["Hook", [[["R"], "Fire, or let go"], [["Space"], "Let go"], [["C"], "Swing (hold)"]]],
     ["Block and crates", [[["K"], "Drop the block"], [["Tab"], "Throw the block (or T)"], [["F"], "Lift or set a crate"], [["B"], "Place a crate"], [["Click"], "Throw a held crate"]]],
-    ["View and game", [[["X"], "Capture the mouse"], [["V"], "Change view"], [["Wheel"], "Zoom"], [["0"], "Level the camera"], [["U"], "Hide the weapons bar"], [["N"], "Hide the map"],
+    ["View and game", [[["X"], "Capture the mouse"], [["V"], "Change view"], [["Wheel"], "Zoom"], [["0"], "Level the camera"], [["U"], "Hide the weapons bar"], [["N"], "Hide the map"], [["Z"], "Everyone's tally (hold)"],
       [["1", "–", "4"], "Answer a quiz"], [["?"], "Help"], [["P"], "Pause"], [["Esc"], "Step back"]]]
   ];
-  const TOUCH_GROUPS = [["Controls", [[["Left stick"], "Move"], [["Right stick"], "Turn and aim"], [["Jump"], "Jump, jetpack"], [["Jump"], "Break a gorilla's grip (tap fast)"], [["Throw!"], "Fire"], [["Weapons bar"], "Pick a weapon"], [["Ride"], "Zipline, catapult"]]]];
+  const TOUCH_GROUPS = [["Controls", [[["Left stick"], "Move"], [["Right stick"], "Turn and aim"], [["Jump"], "Jump, jetpack"], [["Jump"], "Break a gorilla's grip (tap fast)"], [["Throw!"], "Fire"], [["Weapons bar"], "Pick a weapon"], [["Ride"], "Zipline, catapult"], [["Your tally"], "Everyone's tally (tap)"]]]];
   blockScene.controlsHelp = (touch) => ({ title: "Block Frenzy", rows: (touch ? TOUCH_GROUPS : CONTROL_GROUPS)
     .flatMap(([, rows]) => rows.map(([keys, what]) => BL.controlsHelp.row(touch ? [] : keys, what, touch ? keys.join(" / ") : ""))) });
   const SUMMARY = [[["W", "A", "S", "D"], "move"], [["Q", "E"], "turn"], [["Click"], "fires"], [["Space"], "jumps"], [["Tab"], "throws"], [["P"], "pauses"], [["Esc"], "steps back"]];
@@ -559,6 +561,7 @@
     if (dancers) for (const d of dancers) d.visible = false;
     el.board.hidden = el.results.hidden = el.toolBar.hidden = el.feed.hidden = true;
     el.watch.hidden = false; el.strip.hidden = true; el.center.hidden = el.notice.hidden = true;
+    setTally(false, false);
     strip.shown = false; updateStrip();
     if (document.pointerLockElement === el.canvas) document.exitPointerLock();
   };
@@ -693,6 +696,7 @@
     if (el.againBtn) el.againBtn.textContent = "Again";
     el.board.hidden = false;
     el.results.hidden = el.strip.hidden = el.center.hidden = el.notice.hidden = el.toolBar.hidden = el.map.hidden = el.feed.hidden = true;
+    setTally(false, false);
     hud.el.act.hidden = el.paintBtn.hidden = el.cross.hidden = true;
     if (document.pointerLockElement === el.canvas) document.exitPointerLock();
     for (const b of el.teams) b.setAttribute("aria-pressed", String(b.dataset.team === selection.team));
@@ -719,6 +723,7 @@
     sim.anyTime = selection.rule === "any";
     SIM.reset(sim, seed);
     strip.shown = false;
+    setTally(false, false); tallySeen.shown = false;
     paintTeams();
     for (const s of splats) s.visible = false;
     phase = "play";
@@ -767,6 +772,7 @@
     if (kept) el.againBtn.textContent = "New game?";
     result = { won, ms, best };
     el.strip.hidden = el.toolBar.hidden = el.map.hidden = el.feed.hidden = true;
+    setTally(false, false);
     el.center.hidden = el.notice.hidden = true;
     hud.el.act.hidden = el.paintBtn.hidden = el.cross.hidden = true;
     if (document.pointerLockElement === el.canvas) document.exitPointerLock();
@@ -792,7 +798,7 @@
     // The MVP's line shows all three things its worth counts: blocks mined, blocks brought home and splats landed.
     const rows = [["Round MVP", `${nameOf(mvp)} · ${sim.actors[mvp].captures} mined · ${sim.actors[mvp].rescues} brought home · ${sim.actors[mvp].hits} splats`], ["Most splats", `${nameOf(shooter)} · ${sim.actors[shooter].hits}`]];
     if (sim.actors[sniper].longShot > 0) rows.push(["Longest sniper shot", `${nameOf(sniper)} · ${Math.round(sim.actors[sniper].longShot)} m`]);
-    rows.push(["Your round", `${me.captures} mined · ${me.rescues} brought home · ${me.hits} splats · ${me.splats} splatted`], ["Fastest win", game.state.block.best ? fmt(game.state.block.best) : "—"], ["Your record", `${game.state.block.wins} won of ${game.state.block.games} · ${game.state.block.mined} mined · ${game.state.block.mvps} MVP`]);
+    rows.push(["Your round", `${me.grabs} grabbed · ${me.captures} mined · ${me.rescues} brought home · ${me.hits} splats · ${me.splats} splatted`], ["Fastest win", game.state.block.best ? fmt(game.state.block.best) : "—"], ["Your record", `${game.state.block.wins} won of ${game.state.block.games} · ${game.state.block.mined} mined · ${game.state.block.mvps} MVP`]);
     // Each highlight a medal: gold for the MVP, silver and bronze for the shots, the visitor's own in plain wood.
     const MEDALS = ["gold", "silver", "bronze"];
     for (let k = 0; k < rows.length; k++) {
@@ -804,7 +810,7 @@
       li.append(span, b);
       el.stats.append(li);
     }
-    // The sides, every Ooga and bot on each, best first: blocks mined, blocks brought home and splats; the visitor's row
+    // The sides, every Ooga and bot on each, best first: rival blocks grabbed, blocks mined, blocks brought home and splats; the visitor's row
     // and the MVP marked. A name keeps to one line (its whole in the title).
     for (const t of SIM.TEAMS) {
       const list = t === "blue" ? el.sideBlue : el.sideRed, ids = [];
@@ -812,14 +818,15 @@
       ids.sort((a, b) => worth(sim.actors[b]) - worth(sim.actors[a]) || seatOfActor(a) - seatOfActor(b));
       list.textContent = "";
       for (const i of ids) {
-        const li = document.createElement("li"), name = document.createElement("span"), mined = document.createElement("b"), home = document.createElement("b"), hits = document.createElement("b");
+        const li = document.createElement("li"), name = document.createElement("span"), grabs = document.createElement("b"), mined = document.createElement("b"), home = document.createElement("b"), hits = document.createElement("b");
         name.textContent = name.title = nameOf(i);
+        grabs.textContent = String(sim.actors[i].grabs);
         mined.textContent = String(sim.actors[i].captures);
         home.textContent = String(sim.actors[i].rescues);
         hits.textContent = String(sim.actors[i].hits);
         li.classList.toggle("you", i === 0 && !onDeck());
         li.classList.toggle("mvp", i === mvp);
-        li.append(name, mined, home, hits);
+        li.append(name, grabs, mined, home, hits);
         list.append(li);
       }
       list.closest("[data-team]").classList.toggle("won", t === winner);
@@ -951,7 +958,49 @@
   const STATE_WORDS = { home: "home", carried: "taken", dropped: "dropped", flying: "in the air" };
   // What the strip last showed (`blockSim.stripChanged`): an unchanged frame returns before building or writing anything.
   const strip = SIM.stripView();
+  // The live tally (`blockSim.TALLY`): the visitor's own five counts in the small panel through a round, and everyone's
+  // by side on the board while Z is held or after a tap on the panel (`setTally`). The board's rows are the ghost
+  // hunt's scoreboard (`hud.faceScores`): a face, the name, the blocks mined for its points and the other counts, the
+  // round's most valuable Ooga so far glowing. Written only when a count changed or the board opens; one pooled row a
+  // place, in the actors' own order, so a face is painted once.
+  const tallySeen = SIM.tallyView(), TALLY_ROWS = { blue: [], red: [] };
+  for (const t of SIM.TEAMS) for (let i = 0; i < C.MAX_SIDE; i++) TALLY_ROWS[t].push({ cave: null, name: "", points: 0, lead: false, you: false, cells: [0, 0, 0, 0] });
+  let tallyHeld = false, tallyPinned = false;
+  const updateTally = () => {
+    if (!SIM.tallyChanged(sim, tallySeen)) return;
+    const me = sim.actors[0];
+    for (let k = 0; k < SIM.TALLY.length; k++) el.tallyCounts[k].textContent = String(me[SIM.TALLY[k][1]]);
+    if (el.tallyBoard.hidden) return;
+    const best = SIM.mvp(sim, seatOfActor), lead = SIM.worth(sim.actors[best]) > 0 ? best : -1;
+    for (const t of SIM.TEAMS) {
+      const rows = TALLY_ROWS[t];
+      let n = 0;
+      for (let i = 0; i < sim.actors.length; i++) {
+        const a = sim.actors[i];
+        if (a.team !== t) continue;
+        const row = rows[n++];
+        row.cave = actors[i].cave || null; row.name = nameOf(i); row.points = a.captures; row.lead = i === lead; row.you = i === 0;
+        row.cells[0] = a.grabs; row.cells[1] = a.rescues; row.cells[2] = a.hits; row.cells[3] = a.splats;
+      }
+      el.tallyLists[t].set(rows, n);
+    }
+  };
+  const setTally = (held, pinned) => {
+    tallyHeld = held; tallyPinned = pinned;
+    const open = held || pinned;
+    if (open === !el.tallyBoard.hidden) return;
+    el.tallyBoard.hidden = !open;
+    if (open) { tallySeen.shown = false; updateTally(); }
+  };
+  // Z, held, shows everyone's tally; letting go, or the window losing focus, takes it down. A tap on the small panel
+  // (or on the board) keeps it up until the next: a phone's way to it. A quiz card takes it down and holds it down.
+  const onTallyKey = (e) => {
+    if (e.type === "blur") setTally(false, tallyPinned);
+    else if (e.key === "z" || e.key === "Z") setTally(e.type === "keydown" && inRound() && !quiz.open && !panelLive() && !e.metaKey && !e.ctrlKey && !e.altKey, tallyPinned);
+  };
+  const onTallyTap = (e) => { e.preventDefault(); if (phase === "play" && !quiz.open) setTally(tallyHeld, !tallyPinned); };
   const updateStrip = () => {
+    updateTally();
     if (!SIM.stripChanged(sim, strip)) return;
     const own = sim.flags[sim.team], theirs = sim.flags[sim.rival], me = sim.actors[0];
     el.scoreBlue.textContent = String(sim.score.blue);
@@ -1151,6 +1200,8 @@
   };
   const readEvents = () => {
     try {
+    // The visitor's own block mined keeps the middle of the screen: the Golden AKs it wins say so in the notice.
+    let minedIt = false;
     for (let i = 0; i < sim.eventCount; i++) {
       const e = sim.events[i], mine = e.team === sim.team, me = e.actor === you;
       hear(e, me, mine);
@@ -1170,7 +1221,8 @@
         say(e.actor, LINES.pickup);
       } else if (e.type === "capture") {
         fx.burst(e.x, 1.4, e.z, 30, ORANGE_BITS, 3.2);
-        center(mine ? "BLOCK MINED!" : "THEY MINED ONE", 1300);
+        center(SIM.minedWord(sim, e, nameOf(e.actor)), 1300);
+        if (me) minedIt = true;
         say(e.actor, LINES.capture);
       } else if (e.type === "return") {
         if (e.team === sim.team) notice("Your block is home", 1800);
@@ -1289,14 +1341,14 @@
         fx.burst(e.x, e.y + 1.4, e.z, 24, ORANGE_BITS, 3);
         audio.cues.power();
         if (me) {
-          center("GOLDEN DUAL AKs!", 1200);
-          notice(e.by >= 0 && e.by !== e.actor ? `${nameOf(e.by)} mined a block: the Golden Dual AKs are yours (6) · a hook can take them while they're out` : COARSE ? "One in each hand, full auto! Hold Paint · a hook can take them while they're out" : "One in each hand, full auto! Hold click (6) · a hook can take them while they're out", 4000);
+          if (!minedIt) center("GOLDEN DUAL AKs!", 1200);
+          notice(e.by >= 0 && e.by !== e.actor ? `${nameOf(e.by)} mined a block: the Golden Dual AKs are yours (6) · a hook can take them while they're out` : `${minedIt ? "Golden Dual AKs! " : ""}One in each hand, full auto! Hold ${COARSE ? "Paint" : "click (6)"} · a hook can take them while they're out`, 4000);
           chooseTool("gold");
         } else notice(mine ? `${nameOf(e.actor)} has the Golden Dual AKs!` : "They won the Golden Dual AKs · hook them away, or mine a block", 2600);
         updateTools();
       } else if (e.type === "goldsteal") {
         fx.burst(e.x, e.y, e.z, 18, ORANGE_BITS, 2.6);
-        if (me) { center("STOLEN!", 1000); notice("A mined block took their Golden Dual AKs! They're yours (6)", 3000); audio.cues.rescue(); chooseTool("gold"); }
+        if (me) { if (!minedIt) center("STOLEN!", 1000); notice("A mined block took their Golden Dual AKs! They're yours (6)", 3000); audio.cues.rescue(); chooseTool("gold"); }
         else if (e.by === you) { center("AKs STOLEN!", 1000); notice("They mined a block and took your Golden Dual AKs", 2600); if (tool === "gold") chooseTool("paint"); }
         else if (mine) notice(`${nameOf(e.actor)} has the Golden Dual AKs!`, 2200);
         updateTools();
@@ -2956,6 +3008,11 @@
       el[id.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = document.getElementById(`block-${id}`);
     }
     el.struggleWord.textContent = COARSE ? "Tap fast!" : "Mash SPACE!";
+    el.tallyOwn = document.getElementById("block-tally"); el.tallyBoard = document.getElementById("block-tally-board"); el.tallyCounts = el.tallyOwn.querySelectorAll("b");
+    el.tallyLists = { blue: BL.hud.faceScores(document.getElementById("block-tally-blue")), red: BL.hud.faceScores(document.getElementById("block-tally-red")) };
+    if (COARSE) el.tallyOwn.title = "Tap for everyone's counts";
+    el.tallyOwn.addEventListener("pointerdown", onTallyTap);
+    el.tallyBoard.addEventListener("pointerdown", onTallyTap);
     el.live = document.getElementById("block-live"); el.liveTitle = document.getElementById("block-live-title"); el.liveStatus = document.getElementById("block-live-status"); el.liveList = document.getElementById("block-live-list"); el.liveSizes = document.getElementById("block-live-sizes");
     el.liveReg = document.getElementById("block-live-reg"); el.liveReady = document.getElementById("block-live-ready"); el.liveWatch = document.getElementById("block-live-watch"); el.liveAlone = document.getElementById("block-live-alone"); el.liveWait = document.getElementById("block-live-wait");
     el.watch = document.getElementById("block-watch"); el.watchLine = document.getElementById("block-watch-line"); el.viewerBoard = document.getElementById("block-viewer-board"); el.viewerBlue = document.getElementById("block-viewer-blue"); el.viewerRed = document.getElementById("block-viewer-red"); el.viewerGoal = document.getElementById("block-viewer-goal"); el.viewerClock = document.getElementById("block-viewer-clock"); el.viewerCaps = document.getElementById("block-viewer-captures"); el.watchReg = document.getElementById("block-watch-reg");
@@ -3057,6 +3114,9 @@
     window.addEventListener("keydown", onBuildKey, true);
     window.addEventListener("keydown", onTabKey, true);
     window.addEventListener("keyup", onCrouchKey);
+    window.addEventListener("keydown", onTallyKey);
+    window.addEventListener("keyup", onTallyKey);
+    window.addEventListener("blur", onTallyKey);
     el.onPaint = (e) => { e.preventDefault(); if (inRound()) { trigger = true; paint(); } };
     window.addEventListener("mouseup", onTriggerUp);
     window.addEventListener("pointerup", onTriggerUp);
@@ -3278,6 +3338,14 @@
     window.removeEventListener("keydown", onBuildKey, true);
     window.removeEventListener("keydown", onTabKey, true);
     window.removeEventListener("keyup", onCrouchKey);
+    window.removeEventListener("keydown", onTallyKey);
+    window.removeEventListener("keyup", onTallyKey);
+    window.removeEventListener("blur", onTallyKey);
+    el.tallyOwn.removeEventListener("pointerdown", onTallyTap);
+    el.tallyBoard.removeEventListener("pointerdown", onTallyTap);
+    setTally(false, false);
+    // The rows go with the visit: they hold this visit's Oogas for their faces.
+    for (const t of SIM.TEAMS) { el.tallyLists[t].clear(); for (const row of TALLY_ROWS[t]) row.cave = null; }
     if (document.pointerLockElement === el.canvas) document.exitPointerLock();
     el.cross.hidden = true;
     cam.first = cam.island = false;

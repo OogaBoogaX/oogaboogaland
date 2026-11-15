@@ -153,34 +153,9 @@
     // The halving notice, shown while an hourglass stands (`on`).
     const halving = (on) => { if (el.halving.hidden === on) el.halving.hidden = !on; };
     // The hunters' scoreboard: `rows` (`cave` the Ooga whose face shows, `name`, `points`, `lead` for the point leader)
-    // of which `count` show; null hides it. The caller passes rows only when something on it changed. Each place's face
-    // is painted again only when the Ooga in it changes.
-    const scoreRows = [];
-    const scores = (rows, count = 0) => {
-      if (rows === null) { el.scores.hidden = true; return; }
-      el.scores.hidden = false;
-      while (scoreRows.length < count) {
-        const li = document.createElement("li"), canvas = document.createElement("canvas"), points = document.createElement("b");
-        li.className = "ghost-score";
-        canvas.setAttribute("aria-hidden", "true");
-        li.append(canvas, points);
-        scoreRows.push({ li, canvas, points, cave: null });
-      }
-      for (let i = 0; i < scoreRows.length; i++) {
-        const r = scoreRows[i];
-        if (i >= count) { if (r.li.parentNode) r.li.remove(); continue; }
-        const row = rows[i];
-        if (!r.li.parentNode) el.scores.append(r.li);
-        if (r.cave !== row.cave) {
-          r.cave = row.cave;
-          if (row.cave) BL.hud.renderFaceIcon(r.canvas, row.cave, null, 68);
-          else r.canvas.getContext("2d").clearRect(0, 0, r.canvas.width, r.canvas.height);
-        }
-        r.points.textContent = String(row.points);
-        r.li.title = row.name;
-        r.li.toggleAttribute("data-lead", !!row.lead);
-      }
-    };
+    // of which `count` show; null hides it. The caller passes rows only when something on it changed. The rows are the
+    // shared `BL.hud.faceScores`, which Block Frenzy's live tally uses too.
+    const scoreList = BL.hud.faceScores(el.scores), scores = scoreList.set;
     // A won hunt's results card: `goal` its line, the podium's three steps from `top` (`cave`, `name`, `points`, first
     // to third; a step past `rows`' count stands empty), and every hunter's tally from `rows` (`name`, `foes` the
     // enemies they killed, `points`), best first, of which `count` show; null takes it down. Each on the podium stands
@@ -329,8 +304,7 @@
       // The rows go with the visit: the next one's card makes its own, and these would stand beside them.
       for (const r of lobbyRows) r.li.remove();
       lobbyRows.length = 0;
-      for (const r of scoreRows) r.li.remove();
-      scoreRows.length = 0;
+      scoreList.clear();
       for (const r of resultRows) r.li.remove();
       resultRows.length = 0;
       el.banner.removeAttribute("data-win");
