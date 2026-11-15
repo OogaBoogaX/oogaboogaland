@@ -118,8 +118,8 @@ const roomHost = ({ sfu = null, inspector = true } = {}) => {
   let now = 100000;
   const accepted = [];
   const socket = () => ({
-    sent: [], closed: null, store: null,
-    send(text) { this.sent.push(JSON.parse(text)); },
+    sent: [], bytes: 0, closed: null, store: null,
+    send(data) { this.bytes += typeof data === "string" ? data.length : data.byteLength; this.sent.push(typeof data === "string" ? JSON.parse(data) : data); },
     close(code, reason) { this.closed = { code, reason }; },
     serializeAttachment(value) { this.store = JSON.parse(JSON.stringify(value)); },
     deserializeAttachment() { return this.store; },
@@ -141,7 +141,7 @@ const roomHost = ({ sfu = null, inspector = true } = {}) => {
     ...protocol, ...studioPolicy, sha256Hex, getPlayer, sfuClient: () => sfu,
     CAST_ROWS: [{ handle: "a", github_login: "a" }, { handle: "b", github_login: "b" }],
     DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } },
-    WebSocketPair, Response, WebSocketRequestResponsePair: class {}, URL, crypto, Date: Clock, Map, Set, setTimeout, clearTimeout, console,
+    WebSocketPair, Response, WebSocketRequestResponsePair: class {}, URL, crypto, Date: Clock, Map, Set, setTimeout, clearTimeout, console, ArrayBuffer, DataView,
   };
   runInNewContext(source, context);
   const stored = new Map(), INSPECTOR = binding();
@@ -161,7 +161,8 @@ const roomHost = ({ sfu = null, inspector = true } = {}) => {
     return accepted[before];
   };
   const events = () => INSPECTOR.reports.flatMap((r) => r.events);
-  return { room, join, events, INSPECTOR, advance: (ms) => { now += ms; } };
+  const counters = () => INSPECTOR.reports.reduce((sum, r) => { for (const [k, n] of Object.entries(r.counters)) sum[k] = (sum[k] || 0) + n; return sum; }, {});
+  return { room, join, events, counters, accepted, INSPECTOR, advance: (ms) => { now += ms; } };
 };
 
 test("the room tells the inspector who joined, moved and dropped, with what the close said", async () => {
@@ -181,6 +182,30 @@ test("the room tells the inspector who joined, moved and dropped, with what the 
   const [first, second] = lines.filter((e) => e.kind === "leave");
   assert.deepEqual([first.login, first.fields.reason, first.fields.code, first.fields.clean, first.fields.zone, first.fields.on], ["a", "closed", 1006, false, "factory", 65000]);
   assert.deepEqual([second.fields.code, second.fields.said, second.fields.clean], [1000, "paused", true]);
+});
+
+test("the room counts every message it sends, NPC frames on counters of their own", async () => {
+  const { room, join, counters, accepted } = roomHost();
+  const a = await join(1, "a"), b = await join(2, "b");
+  const send = (ws, msg) => room.webSocketMessage(ws, JSON.stringify(msg));
+  send(a, { t: "body", name: "a" }); send(b, { t: "body", name: "b" });
+  send(a, { t: "hub", on: true }); send(b, { t: "hub", on: true });
+  const host = room.hostId === 1 ? a : b, follower = host === a ? b : a;
+  // An NPC frame relayed, a reaction and a shot to the zone, a hockey table told to the hall, and a chat line.
+  room.webSocketMessage(host, new ArrayBuffer(1000));
+  send(a, { t: "react", e: "👍" });
+  send(a, { t: "shot", a: [0, 0, 0, 1, 0, 0] });
+  send(a, { t: "zone", name: "arcade.hall" }); send(b, { t: "zone", name: "arcade.hall" });
+  room.broadcastZone("arcade.hall", { t: "hockey", k: "busy", i: 0 });
+  await send(b, { t: "chat", text: "hello", clientId: "c1" });
+  // An event so the last counts go out in a report.
+  send(b, { t: "visible", on: false });
+  await flush(); await flush();
+  const c = counters();
+  assert.ok(follower.sent.some((m) => m instanceof ArrayBuffer), "the follower got the frame");
+  assert.equal(c.out, accepted.reduce((n, ws) => n + ws.sent.length, 0), "every send is counted");
+  assert.equal(c.outBytes, accepted.reduce((n, ws) => n + ws.bytes, 0), "and every byte");
+  assert.deepEqual([c.npc, c.npcOut, c.npcBytes], [1, 1, 1000], "one frame in, relayed once, its bytes apart");
 });
 
 test("a page back from a drop says why, once a connection; a stale eviction names its kick", async () => {

@@ -105,6 +105,7 @@ test("real Room sockets bind Tess turns to the account, reject replaced connecti
   // Rooms built here without the constructor (Object.create) take the inspector's reporter switched off.
   context.Room.prototype.inspect = protocol.inspectReporter(null, {}, "Room", () => "", () => null);
   const room = Object.create(context.Room.prototype);
+  room.sockets = new Map();
   let alarm = null;
   room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.doorPasses = new Map();
   room.ctx = { storage: { ...h.room.ctx.storage, getAlarm: async () => alarm, setAlarm: async at => { alarm = at; } } };

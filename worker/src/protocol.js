@@ -163,13 +163,18 @@ export const HP_HZ = 4;
 // Voice across a crossing (#392, src/js/voice-blend.js): a page sends its step along one a few times a second at most.
 export const BLEND = globalThis.BL.voiceBlend;
 export const BLEND_HZ = 8;
-// Close codes: 4000 follows a `kick` (replaced, stale, full); 4400 is a message the room cannot read.
+// Close codes: 4000 follows a `kick` (replaced, stale, full); 4400 is a message the room cannot read; 1011 is a message
+// whose handling threw, which ends that socket alone and leaves the page free to reconnect.
 export const CLOSE_KICK = 4000;
+export const CLOSE_ERROR = 1011;
 // NPC frames: the host sends about 4 a second, only while a page follows; a frame of every Ooga's pose is a few kilobytes.
 // Up to 128 bundled Oogas (112 floats each), plus the bounded event tail.
 // The former 16 KiB cap could not carry the org-wide roster after reconciliation.
 export const NPC_FRAME_MAX = 128 * 112 * 4 + 131072;
 export const NPC_HZ = 20;
+// A pose's fields are saved to its socket's attachment at most this often (room.js): every pose re-serialized the whole
+// attachment, the room's largest cost per inbound message. A woken room may find a player up to this far behind.
+export const POSE_SAVE_MS = 1000;
 export const CLOSE_PROTOCOL = 4400;
 export const CHAT_MAX = globalThis.BL.chatPolicy.MAX;
 export const CHAT_FEATURE = globalThis.BL.chatPolicy.FEATURE;

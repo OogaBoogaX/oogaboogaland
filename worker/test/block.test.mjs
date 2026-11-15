@@ -45,7 +45,8 @@ const harness = t => {
     return accepted[before];
   };
   const send = (ws, msg) => h.room.webSocketMessage(ws, JSON.stringify(msg.t === "bf" ? { v: W.WIRE, ...msg } : msg));
-  h.join=join;h.send=send;h.wake=async()=>{if(h.room.flushTimer)clearTimeout(h.room.flushTimer);h.room=new context.Room(ctx,{});await initialized;return h.room;};
+  // A room hibernates only once its timers have run: the pose save fires, the snapshot is dropped.
+  h.join=join;h.send=send;h.wake=async()=>{if(h.room.flushTimer)clearTimeout(h.room.flushTimer);if(h.room.poseTimer){clearTimeout(h.room.poseTimer);h.room.savePoses();}h.room=new context.Room(ctx,{});await initialized;return h.room;};
   return h;
 };
 const W = protocol.BLOCK;

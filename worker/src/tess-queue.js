@@ -70,8 +70,9 @@ const presence = (room, p, gone = false, revoked = false) => {
   if (changed) { save(room); tell(room); }
   else if (!gone && eligible(p)) tell(room, p);
 };
-const restore = async room => {
-  const stored = await room.ctx.storage.get(KEY), s = state(room), now = Date.now(), ids = new Set();
+const restore = async function (room, stored) {
+  if (arguments.length < 2) stored = await room.ctx.storage.get(KEY);
+  const s = state(room), now = Date.now(), ids = new Set();
   s.entries = (Array.isArray(stored) ? stored : []).filter(e => {
     if (!e || !Number.isSafeInteger(e.id) || e.id <= 0 || ids.has(e.id) || typeof e.token !== "string" || !e.token.length || e.token.length > 64
       || !["wait", "ready", "active"].includes(e.phase) || ![e.until, e.end, e.away].every(Number.isFinite)) return false;

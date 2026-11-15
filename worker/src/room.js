@@ -32,8 +32,8 @@
 
 import { DurableObject } from "cloudflare:workers";
 import {
-  CABINETS, hockey, block, BLOCK, tessQueue, CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
-  NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
+  CABINETS, hockey, block, BLOCK, tessQueue, CLOSE_KICK, CLOSE_PROTOCOL, CLOSE_ERROR, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
+  NPC_FRAME_MAX, NPC_HZ, POSE_SAVE_MS, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
   DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, ROOM_LOCK_FEATURE, PIN_PASS_MS, PIN_TRIES, PIN_WAIT_MS, CONTROL_FRAMES, CONTROL_HZ, CONTROL_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, REACT_FEATURE, HAND_EMOJI_FEATURE, REACT_HZ, REACT_BURST,
   GHOST_MAGIC, inGhostArena, watchesGhost,
   CHALK, CHALK_HZ, CHALK_BURST, CHALK_IDLE_MS, CHALK_SAVE_MS, CHALK_TELL_MS, CHALK_FEATURE,
@@ -54,12 +54,19 @@ const CAST = castIndex(CAST_ROWS);
 // A retired SFU session cannot own usable tracks. Other 410 responses are not proof of session expiry.
 const sfuSessionGone = err => err.status === 404 || (err.status === 410 && err.code === "session_error");
 
+// Only explicit validation failures may discard a stored value; I/O and handler faults never do.
+class InvalidStoredValue extends TypeError {}
+
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.inspect = inspectReporter(ctx, env, "Room", () => ctx.id.name, (detail) => this.inspectState(detail));
     this.flushDue = 0;
     this.players = new Map();
+    // Each player socket to its record, so a message finds its sender without reading the socket's attachment. Rebuilt
+    // from the sockets on every wake, as `players` is; a record leaves both together (`drop`).
+    this.sockets = new Map();
+    this.poseTimer = 0;
     this.highscoreRevisions = new Map();
     this.studio = studioState();
     this.cleanupJobs = [];
@@ -102,47 +109,66 @@ export class Room extends DurableObject {
     // The pile's sound loop started once, for good: every page plays it at (now - loopEpoch), so all
     // hear the same crackle at the same moment. Stored, so a woken or redeployed room keeps the phase.
     this.loopEpoch = 0;
+    // Each stored key is restored on its own (`restoring`): a throw inside this block resets the object, and the same
+    // stored value would then fail every wake and every connect after it.
     ctx.blockConcurrencyWhile(async () => {
-      await hockey.loadLimits(this);
-      hockey.restore(this);
-      block.restore(this);
-      await tessQueue.restore(this);
-      this.studio = (await ctx.storage.get("studio")) || this.studio;
-      if (!studioSource(this.studio.source)) { this.studio.source = studioState().source; this.studio.position = 0; this.studio.playing = false; this.studio.at = Date.now(); this.studio.revision++; this.studio.playbackRevision = (this.studio.playbackRevision || 0) + 1; await ctx.storage.put("studio", this.studio); }
-      this.studio.position = studioPosition(this.studio, this.studio.at);
-      const seated = id => { const p = this.players.get(id); return !!p && p.zone === STUDIO_ZONE && !!p.body && Number.isInteger(p.studioSeat) && !p.studioRevoked && !(this.studio.restrictedIds || []).includes(id); };
-      this.studio.hands = [...new Set((Array.isArray(this.studio.hands) ? this.studio.hands : []).filter(seated))].slice(0, MAX_PLAYERS);
-      this.studio.invited = this.studio.mode === "qa" ? [...new Set((Array.isArray(this.studio.invited) ? this.studio.invited : []).filter(seated))].slice(0, MAX_PLAYERS) : [];
-      this.cleanupJobs = (await ctx.storage.get("voiceCleanup")) || [];
+      await this.restoring("hockeyLimitsV1", (saved) => {
+        if (saved !== undefined && (!saved || typeof saved !== "object" || Array.isArray(saved))) throw new InvalidStoredValue("hockey limits are not an object");
+        return hockey.loadLimits(this, saved);
+      });
+      await this.restoring(null, () => hockey.restore(this), () => { this.hockeyTables = [null, null, null]; });
+      await this.restoring(null, () => block.restore(this), () => { this.blockMatch = null; this.blockSeen = new Map(); });
+      await this.restoring("tessQueue", (stored) => tessQueue.restore(this, stored), () => { this.tessQueue = { entries: [], pose: null }; });
+      await this.restoring("studio", async (studio) => {
+        if (studio !== undefined && (!studio || typeof studio !== "object" || Array.isArray(studio))) throw new InvalidStoredValue("studio is not an object");
+        this.studio = studio || studioState();
+        if (!studioSource(this.studio.source)) { this.studio.source = studioState().source; this.studio.position = 0; this.studio.playing = false; this.studio.at = Date.now(); this.studio.revision++; this.studio.playbackRevision = (this.studio.playbackRevision || 0) + 1; await ctx.storage.put("studio", this.studio); }
+        this.studio.position = studioPosition(this.studio, this.studio.at);
+        const seated = id => { const p = this.players.get(id); return !!p && p.zone === STUDIO_ZONE && !!p.body && Number.isInteger(p.studioSeat) && !p.studioRevoked && !(this.studio.restrictedIds || []).includes(id); };
+        this.studio.hands = [...new Set((Array.isArray(this.studio.hands) ? this.studio.hands : []).filter(seated))].slice(0, MAX_PLAYERS);
+        this.studio.invited = this.studio.mode === "qa" ? [...new Set((Array.isArray(this.studio.invited) ? this.studio.invited : []).filter(seated))].slice(0, MAX_PLAYERS) : [];
+      }, () => { this.studio = studioState(); });
+      await this.restoring("voiceCleanup", (jobs) => {
+        if (jobs !== undefined && !Array.isArray(jobs)) throw new InvalidStoredValue("voiceCleanup is not a list");
+        this.cleanupJobs = jobs || [];
+      });
       // Ooga Chat's speakers the island's open outdoor grants hear (#666), as the Audience last sent them.
-      this.chatSources = audienceRoom.cleanSources(await ctx.storage.get("chatSources"));
+      await this.restoring("chatSources", (sources) => { this.chatSources = audienceRoom.cleanSources(sources); },
+        () => { this.chatSources = []; });
       // The clouds Ooga Chat speakers sit on (#668), as the Audience last sent them, at their revision.
-      const clouds = await ctx.storage.get("clouds");
-      this.clouds = audienceRoom.cleanClouds(this, clouds && clouds.list);
-      this.cloudsRev = clouds && Number.isSafeInteger(clouds.revision) ? clouds.revision : 0;
-      this.links = restoreLinks(await ctx.storage.get("voiceLinks"));
-      const chalk = await ctx.storage.get("chalk"), marks = chalk && CHALK.restore(chalk.marks);
-      // A board stored before the board grew (no `v`) is widened as it loads; the next save stores it widened.
-      if (marks) this.chalk = CHALK.board(chalk.v === CHALK.VERSION ? marks : CHALK.widen(marks));
-      this.chalkStored = chalk !== undefined;
-      // Older versions stored the original drawing too; it can always be rebuilt locally.
-      if (this.chalkStored && CHALK.preset(this.chalk) === "original") {
-        await ctx.storage.delete("chalk");
-        this.chalkStored = false;
-      }
-      const stored = await ctx.storage.get(["loopEpoch", "sweepAt"]);
-      this.loopEpoch = stored.get("loopEpoch") || Date.now();
-      this.sweepAt = stored.get("sweepAt") || Date.now() + SWEEP_MS;
+      await this.restoring("clouds", (clouds) => {
+        this.clouds = audienceRoom.cleanClouds(this, clouds && clouds.list);
+        this.cloudsRev = clouds && Number.isSafeInteger(clouds.revision) ? clouds.revision : 0;
+      }, () => { this.clouds = []; this.cloudsRev = 0; });
+      await this.restoring("voiceLinks", (links) => { this.links = restoreLinks(links); });
+      await this.restoring("chalk", async (chalk) => {
+        const marks = chalk && CHALK.restore(chalk.marks);
+        // A board stored before the board grew (no `v`) is widened as it loads; the next save stores it widened.
+        if (marks) this.chalk = CHALK.board(chalk.v === CHALK.VERSION ? marks : CHALK.widen(marks));
+        this.chalkStored = chalk !== undefined;
+        // Older versions stored the original drawing too; it can always be rebuilt locally.
+        if (this.chalkStored && CHALK.preset(this.chalk) === "original") {
+          await ctx.storage.delete("chalk");
+          this.chalkStored = false;
+        }
+      }, () => { this.chalk = CHALK.board(); this.chalkStored = false; });
       // Restore without rewriting unchanged values on every hibernation wake. The alarm persists
       // a new sweep deadline when it actually advances; the pile loop's phase is initialized once.
-      if (!stored.get("loopEpoch")) await ctx.storage.put("loopEpoch", this.loopEpoch);
-      if (!stored.get("sweepAt")) await ctx.storage.put("sweepAt", this.sweepAt);
-      if (this.studio.hostId && (!this.players.has(this.studio.hostId) || this.players.get(this.studio.hostId).zone !== STUDIO_ZONE || !studioHostAllowed(env, this.studio.hostId))) this.suspendStudio();
+      for (const key of ["loopEpoch", "sweepAt"]) {
+        await this.restoring(key, async (value) => {
+          if (value !== undefined && !Number.isFinite(value)) throw new InvalidStoredValue(key + " is not a number");
+          this[key] = value || (key === "loopEpoch" ? Date.now() : Date.now() + SWEEP_MS);
+          if (!value) await ctx.storage.put(key, this[key]);
+        }, () => { this[key] = key === "loopEpoch" ? Date.now() : Date.now() + SWEEP_MS; });
+      }
+      await this.restoring(null, () => {
+        if (this.studio.hostId && (!this.players.has(this.studio.hostId) || this.players.get(this.studio.hostId).zone !== STUDIO_ZONE || !studioHostAllowed(env, this.studio.hostId))) this.suspendStudio();
+      });
       // Stored cleanup retries from an alarm due now, never inside this block: several bounded SFU calls can accumulate, and a
       // block past 30 s resets the island's only room, presence and voice with it.
       if (this.sfu && this.cleanupJobs.length) {
         this.cleanupAt = Date.now();
-        await this.scheduleAlarm();
+        await this.restoring(null, () => this.scheduleAlarm());
       }
     });
     // A woken room rebuilds its roster from the attachments its sockets carry. The runtime still lists a socket that is
@@ -153,7 +179,7 @@ export class Room extends DurableObject {
       const a = ws.deserializeAttachment();
       // Ooga Chat's community members (room-commons.js) have no player record.
       if (a && a.community) { commonsRoom.restore(this, ws, a, Date.now()); continue; }
-      if (a) this.players.set(a.id, this.record(ws, a));
+      if (a) { const p = this.record(ws, a); this.players.set(a.id, p); this.sockets.set(ws, p); }
     }
     // Old guest sockets can survive a deployment in hibernated attachments.
     // Use the ordinary departure path so peers drop their presence and voice.
@@ -175,7 +201,38 @@ export class Room extends DurableObject {
   }
 
   record(ws, a) {
-    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hand: false, handTone: 0, handEmoji: "", hp: 100, ko: false, g: null, j: 0, w: 0, v: null, va: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], roomLock: null, blendTo: null, blendK: 0, pm: { inv: [], open: 0, blocked: [] }, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: a.joinedAt || Date.now() };
+    return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hand: false, handTone: 0, handEmoji: "", hp: 100, ko: false, g: null, j: 0, w: 0, v: null, va: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], roomLock: null, blendTo: null, blendK: 0, pm: { inv: [], open: 0, blocked: [] }, savedAt: 0, posePending: false, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: a.joinedAt || Date.now() };
+  }
+
+  // Read once, then restore that snapshot. Only a value rejected by explicit validation is deleted.
+  // Failed reads, writes and unexpected handler errors preserve the saved value for a later wake.
+  async restoring(key, step, reset = null) {
+    try { await step(key ? await this.ctx.storage.get(key) : undefined); return; } catch (error) {
+      let dropped = false;
+      if (key && error instanceof InvalidStoredValue) {
+        try { await this.ctx.storage.delete(key); dropped = true; }
+        catch (again) { this.failed("restore", null, again, { key, dropped: false }); }
+      }
+      this.failed("restore", null, error, { key: key || "", dropped });
+      if (dropped) {
+        try { await step(undefined); return; } catch (again) { this.failed("restore", null, again, { key, dropped: false }); }
+      }
+      if (reset) reset();
+    }
+  }
+
+  // A fault, counted and on the inspector each time, and in the Worker's log once per kind of fault for the object's life.
+  // Only where it failed is logged (the error's name and stack frames), never its message, which can carry what a player sent.
+  failed(where, p, error, fields) {
+    const name = (error && error.name) || "Error";
+    this.inspect.count("errors");
+    this.inspect.event("error", p, { where, name, ...fields });
+    const kind = where + ":" + (fields.t || fields.key) + ":" + name;
+    this.logged ||= new Set();
+    if (this.logged.has(kind) || this.logged.size >= 64) return;
+    this.logged.add(kind);
+    const frames = String((error && error.stack) || "").split("\n").slice(1, 5).map((line) => line.trim()).join(" | ");
+    console.error("room: " + kind + (fields.dropped ? " (stored value dropped)" : "") + " at " + frames);
   }
 
   // Retain account debt across socket records, only while awake. Reclaim fully replenished
@@ -200,20 +257,24 @@ export class Room extends DurableObject {
     return { id: p.id, login: p.login, display: p.display, body: p.body, zone: p.zone, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: inVoice(p), muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, blendTo: p.blendTo, blendK: p.blendK };
   }
 
+  // Every message the room sends goes through here, players' and Ooga Chat members' alike, so the inspector's `out` and
+  // `outBytes` are the room's whole outbound traffic (text counted by its length, a binary frame by its bytes).
   send(ws, msg) {
+    const data = typeof msg === "string" || msg instanceof ArrayBuffer ? msg : JSON.stringify(msg);
     try {
-      ws.send(typeof msg === "string" || msg instanceof ArrayBuffer ? msg : JSON.stringify(msg));
+      ws.send(data);
     } catch {
       // A socket closing under us is dropped by its close event.
+      return false;
     }
+    this.inspect.count("out");
+    this.inspect.count("outBytes", typeof data === "string" ? data.length : data.byteLength);
+    return true;
   }
 
   broadcast(msg, except = null) {
     const text = JSON.stringify(msg);
-    let sent = 0;
-    for (const p of this.players.values()) if (p.ws !== except) { this.send(p.ws, text); sent++; }
-    this.inspect.count("out", sent);
-    this.inspect.count("outBytes", sent * text.length);
+    for (const p of this.players.values()) if (p.ws !== except) this.send(p.ws, text);
     // The Commons and Online Oogas for Ooga Chat's contributors, without positions (room-commons.js).
     commonsRoom.relay(this, msg);
   }
@@ -509,6 +570,7 @@ export class Room extends DurableObject {
     const own = ownedBody(CAST, p.login, p.contributor, p.id);
     if (own) for (const o of this.players.values()) if (o.body && bodyName(o.body).toLowerCase() === own) this.release(o, "owner-here");
     this.players.set(p.id, p);
+    this.sockets.set(server, p);
     if (this.inspect.on) this.inspect.event("join", p, { replaced: !!older });
 
     const others = [];
@@ -527,13 +589,44 @@ export class Room extends DurableObject {
     return new Response(null, { status: 101, webSocket: client });
   }
 
+  // The map first; a socket it does not hold (an Ooga Chat member's) is looked up by its attachment, as before the map,
+  // and a player found that way is kept in the map.
   byWs(ws) {
+    const known = this.sockets.get(ws);
+    if (known) return this.players.get(known.id) === known ? known : null;
     const a = ws.deserializeAttachment();
     const p = a && this.players.get(a.id);
-    return p && p.ws === ws ? p : null;
+    if (!p || p.ws !== ws) return null;
+    this.sockets.set(ws, p);
+    return p;
   }
 
+  // A message whose handling throws, at once or in the promise it returns, ends the socket that sent it and nothing else:
+  // uncaught, it would reach the runtime, which may reset the object and drop every player and Ooga Chat member with it.
   webSocketMessage(ws, message) {
+    let out;
+    try { out = this.handleMessage(ws, message); } catch (error) { this.messageFailed(ws, message, error); return; }
+    if (out && typeof out.then === "function") return out.catch((error) => this.messageFailed(ws, message, error));
+    return out;
+  }
+
+  messageFailed(ws, message, error, type = null) {
+    let p = null, member = false, t = type || (typeof message === "string" ? "text" : "binary");
+    try { p = this.byWs(ws); member = !p && commonsRoom.closed(this, ws); } catch { /* an attachment that cannot be read */ }
+    if (typeof message === "string") try { const msg = parseClientMessage(message); if (msg && msg.t) t = msg.t; } catch { /* named "text" */ }
+    this.failed("message", p, error, { t, member });
+    if (p) {
+      try { this.drop(p, "failed", { code: CLOSE_ERROR }); } catch (again) {
+        this.failed("message", p, again, { t: "drop" });
+        if (this.players.get(p.id) === p) this.players.delete(p.id);
+        this.sockets.delete(ws);
+      }
+    }
+    try { ws.serializeAttachment(null); } catch { /* a failed attachment must not prevent the close */ }
+    try { ws.close(CLOSE_ERROR, "server error"); } catch { /* already closed */ }
+  }
+
+  handleMessage(ws, message) {
     const p = this.byWs(ws);
     if (!p) {
       const a = ws.deserializeAttachment();
@@ -584,17 +677,22 @@ export class Room extends DurableObject {
       p.w = ooga && msg.w ? msg.w : 0;
       p.v = ooga && msg.v ? msg.v : null; p.va = p.v ? p.seenAt : 0;
       p.r = ooga ? msg.r : undefined;
-      if (Number.isInteger(p.studioSeat) && !studioSeatAllowed(p, p.studioSeat, this.players.values())) { delete p.studioSeat; this.removeStudioSpeaker(p.id); this.studio.revision++; this.persistStudio(); this.enforceStudio(); }
+      const seatLost = Number.isInteger(p.studioSeat) && !studioSeatAllowed(p, p.studioSeat, this.players.values());
+      if (seatLost) { delete p.studioSeat; this.removeStudioSpeaker(p.id); this.studio.revision++; this.persistStudio(); this.enforceStudio(); }
       if (this.chalkEditor && this.chalkEditor.id === p.id && this.chalkRefusal(p)) this.chalkLetGo(p);
       this.dirty = true;
       this.scheduleFlush();
+      // The room's busiest message: its fields reach the attachment at most once a second, or with any other change, and
+      // never later than a second after the last pose (`savePoses`), so a woken room still knows where everyone stands.
+      // Nothing else a pose changes is in the attachment unless it took away a Studio seat, which is saved at once.
+      if (!seatLost && p.seenAt - p.savedAt < POSE_SAVE_MS) { this.saveLater(p); return; }
     } else if (msg.t === "hub") {
       if (msg.on === p.inHub) return;
       p.inHub = msg.on;
       tessQueue.presence(this, p);
       this.electHost();
       // A page arriving on the island catches up with the NPCs at once rather than at the next frame.
-      if (p.inHub && p.id !== this.hostId && this.lastNpc) this.send(p.ws, this.lastNpc);
+      if (p.inHub && p.id !== this.hostId && this.lastNpc && this.send(p.ws, this.lastNpc)) { this.inspect.count("npcOut"); this.inspect.count("npcBytes", this.lastNpc.byteLength); }
     } else if (msg.t === "visible") {
       // A page hidden in a Block Frenzy match hands its hosting on; shown again, it comes back a guest (block.js).
       if (msg.on === p.visible) return;
@@ -749,6 +847,33 @@ export class Room extends DurableObject {
     // A zone, body or crossing that no longer matches an open outdoor grant takes it back (#667).
     audienceRoom.check(this, p);
     ws.serializeAttachment(this.attachment(p));
+    p.savedAt = p.seenAt;
+    p.posePending = false;
+  }
+
+  // One timer for the room, armed by the first pose held back and gone once it fires: every player still holding one
+  // is saved then. The room cannot hibernate while it is pending, a second at most after the last pose.
+  saveLater(p) {
+    p.posePending = true;
+    if (this.poseTimer) return;
+    this.poseTimer = setTimeout(() => this.savePoses(), POSE_SAVE_MS);
+  }
+
+  savePoses() {
+    this.poseTimer = 0;
+    const now = Date.now();
+    for (const p of this.players.values()) {
+      if (!p.posePending) continue;
+      p.posePending = false;
+      try {
+        p.ws.serializeAttachment(this.attachment(p));
+        p.savedAt = now;
+      } catch (error) {
+        // A deferred save has the same socket-local failure policy as an immediate message save.
+        // Keep flushing the other players, even if this socket's attachment can no longer be written.
+        this.messageFailed(p.ws, null, error, "pose");
+      }
+    }
   }
 
   // The prototype's note stands: on this compatibility date close handlers must not call ws.close().
@@ -817,6 +942,7 @@ export class Room extends DurableObject {
     this.background(this.clearVoice(p));
     this.privateLeave(p);
     this.players.delete(p.id);
+    this.sockets.delete(p.ws);
     audienceRoom.leave(this, p);
     tessQueue.presence(this, p, true, reason === "revoked");
     // A dropped socket can come straight back in; the last one out frees the room.
@@ -829,6 +955,10 @@ export class Room extends DurableObject {
     if (!this.players.size && this.flushTimer) {
       clearTimeout(this.flushTimer);
       this.flushTimer = 0;
+    }
+    if (!this.players.size && this.poseTimer) {
+      clearTimeout(this.poseTimer);
+      this.poseTimer = 0;
     }
   }
 
@@ -1135,7 +1265,12 @@ export class Room extends DurableObject {
     if (!takeToken(p.npcBucket, NPC_HZ, Date.now())) return;
     p.seenAt = Date.now();
     this.lastNpc = data;
-    for (const q of this.players.values()) if (q !== p && q.inHub) this.send(q.ws, data);
+    // The largest outbound stream at a full room, so its frames and bytes are also counted on their own.
+    this.inspect.count("npc");
+    let relayed = 0;
+    for (const q of this.players.values()) if (q !== p && q.inHub && this.send(q.ws, data)) relayed++;
+    this.inspect.count("npcOut", relayed);
+    this.inspect.count("npcBytes", relayed * data.byteLength);
   }
 
   // Tells each player whom to hear, with each one's publication (`gens`: a microphone published again is

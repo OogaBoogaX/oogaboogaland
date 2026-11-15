@@ -45,7 +45,9 @@ const harness = t => {
     return accepted[before];
   };
   const send = (ws, msg) => h.room.webSocketMessage(ws, JSON.stringify(msg.t === "hockey" ? { v: 4, ...(msg.k === "join" ? { e: 0 } : {}), ...msg } : msg));
-  h.join=join;h.send=send;h.wake=async()=>{if(h.room.flushTimer)clearTimeout(h.room.flushTimer);h.room=new context.Room(ctx,{});await initialized;return h.room;};
+  // A room hibernates only once its timers have run: the pose save fires (settle), the snapshot is dropped.
+  h.settle=()=>{if(h.room.poseTimer){clearTimeout(h.room.poseTimer);h.room.savePoses();}};
+  h.join=join;h.send=send;h.wake=async()=>{if(h.room.flushTimer)clearTimeout(h.room.flushTimer);h.settle();h.room=new context.Room(ctx,{});await initialized;return h.room;};
   return h;
 };
 const W = protocol.HOCKEY;
@@ -97,7 +99,7 @@ test("an older live attachment is closed on wake and older clients cannot join o
   assert.equal(s.q,-1,"old host frames cannot drive a v4 match");
   h.send(b.ws,{t:"hockey",v:undefined,k:"input",i:0,s:s.s,q:0,x:1000,y:500});
   assert.equal(messages(a.ws).length,before,"old input cannot drive a v3 match");
-  a.ws.store.hockey.wire=3;await h.wake();
+  h.settle();a.ws.store.hockey.wire=3;await h.wake();
   assert.equal(h.room.hockeyTables[0],null,"legacy live attachment cannot restore");
   assert.equal(a.ws.store.hockey,null,"legacy attachment is cleared");
   assert.ok(messages(a.ws).some(m=>m.k==="table"&&m.phase==="closed"),"seats are notified of closure");

@@ -35,6 +35,7 @@ const roomClass = (extra = {}) => {
 };
 test("room broadcasts DSB zone changes, persists them and keeps ownership enforcement", () => {
   const Room = roomClass(), room = Object.create(Room.prototype), sent = [];
+  room.sockets = new Map();
   room.hockeyTables = [null, null, null];
   room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.voiceSig = new Map();
   let attachment;
@@ -51,6 +52,8 @@ test("room broadcasts DSB zone changes, persists them and keeps ownership enforc
   const g = [4, 1.8, 12.5, 1, -0.5, 0];
   room.scheduleFlush = () => {};
   room.webSocketMessage(ws, JSON.stringify({ t: "pose", x: -45, y: 55, z: -43, yaw: 0.7, g }));
+  // Within a second of the body change the pose waits for the room's pose save (POSE_SAVE_MS).
+  clearTimeout(room.poseTimer); room.savePoses();
   assert.deepEqual(attachment.g, g);
   assert.deepEqual(room.view(player).g, g, "late joiners see the companion's current climbing stance");
   assert.equal(room.view(player).y, 55, "the room keeps an elevated companion pose");
@@ -73,6 +76,7 @@ test("room broadcasts DSB zone changes, persists them and keeps ownership enforc
 
 test("room passes DSB wallets to the pages in their zone, and hands the live ones to whoever walks in", () => {
   const Room = roomClass(), room = Object.create(Room.prototype), now = Date.now();
+  room.sockets = new Map();
   room.hockeyTables = [null, null, null];
   room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.voiceSig = new Map();
   room.scheduleFlush = () => {};
@@ -120,6 +124,7 @@ test("room passes DSB wallets to the pages in their zone, and hands the live one
 
 test("room carries an Ooga's jetpack to every page and drops it with the body", () => {
   const Room = roomClass(), room = Object.create(Room.prototype), sent = [];
+  room.sockets = new Map();
   room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.voiceSig = new Map();
   let attachment;
   const ws = { deserializeAttachment: () => ({ id: 1 }), serializeAttachment: value => { attachment = value; }, send: text => sent.push(JSON.parse(text)) };
@@ -147,6 +152,7 @@ test("room carries an Ooga's jetpack to every page and drops it with the body", 
 
 test("room carries an Ooga's weapons and relays its shots and strikes to its own zone alone", () => {
   const Room = roomClass(), room = Object.create(Room.prototype);
+  room.sockets = new Map();
   room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.voiceSig = new Map();
   room.scheduleFlush = () => {};
   const join = (id, login, zone) => {
@@ -189,12 +195,14 @@ test("voice lists survive the room sleeping and follow a microphone published ag
   const stores = { 1: {}, 2: {} }, sockets = { 1: socket(1, stores[1]), 2: socket(2, stores[2]) };
   const wake = () => {
     const room = Object.create(Room.prototype);
+    room.sockets = new Map();
     room.sfu = {};
     room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map();
     for (const id of [1, 2]) if (stores[id].a) room.players.set(id, room.record(sockets[id], stores[id].a));
     return room;
   };
   const room = Object.create(Room.prototype);
+  room.sockets = new Map();
   room.sfu = {};
   room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map();
   for (const id of [1, 2]) {
@@ -251,6 +259,7 @@ test("SFU stays unavailable without secrets and uses bounded upstream calls with
 
 test("TURN credentials require the active room token and return only a temporary TLS relay", async () => {
   const Room = roomClass(), room = Object.create(Room.prototype);
+  room.sockets = new Map();
   const player = { id: 1, login: "YellowBrokeIt", connectionToken: "active" };
   room.players = new Map([[1, player]]);
   room.env = { REALTIME_APP_ID: "test-app", REALTIME_SECRET: "test-app-secret", REALTIME_TURN_KEY_ID: "test-key", REALTIME_TURN_TOKEN: "test-token" };
@@ -296,6 +305,7 @@ test("TURN credentials require the active room token and return only a temporary
 
 const studioRoom = () => {
   const Room = roomClass(), room = Object.create(Room.prototype);
+  room.sockets = new Map();
   room.hockeyTables = [null, null, null];
   room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.studio = studio.studioState(1000); room.env = { STUDIO_HOST_IDS: "1,3" }; room.cleanupJobs = [];
   room.doorQueue = []; room.doorActive = null; room.doorPasses = new Map(); room.roomLocks = new Map(); room.sweepAt = 0;
@@ -662,6 +672,7 @@ test("Studio wake migrates old snapshots, clamps catalogue edits and rechecks co
 // Regression: a table voice choice survives hibernation, but never a scene change.
 test("room scopes poker voice to Ember Den and clears it on departure", () => {
   const Room = roomClass(), room = Object.create(Room.prototype);
+  room.sockets = new Map();
   room.hockeyTables = [null, null, null];
   room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.sfu = {};
   let attachment;

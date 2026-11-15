@@ -5,8 +5,8 @@ const bucket = (rate, burst) => ({ at: Date.now(), tokens: burst, rate, burst })
 const available = (b, now) => Math.min(b.burst, b.tokens + Math.max(0, now - b.at) * b.rate / 1000);
 const spend = (b, count, now) => { b.tokens = available(b, now) - count; b.at = now; };
 export const hockeyLimits = {
-  async load(room) {
-    const saved = await room.ctx.storage.get(KEY);
+  async load(room, saved) {
+    if (arguments.length < 2) saved = await room.ctx.storage.get(KEY);
     room.hockeyLimits = saved || { admission: bucket(2, 2), replay: bucket(8, 8), nextCreate: [0, 0, 0], proofs: [null, null, null], accounts: [] };
     room.hockeyLimits.proofs ||= [null, null, null];
     room.hockeyLimitsFailed = false;

@@ -128,7 +128,7 @@ function roomCard(row) {
     + bar("messages in", r.in || 0, L.requestsPerSecond, num(r.in, 1) + "/s of ~" + L.requestsPerSecond)
     + bar("snapshots", r.snapshots || 0, st.tickHz, num(r.snapshots, 1) + " of " + st.tickHz + " Hz · worst " + num(pk.late) + " ms late")
     + bar("sent", r.out || 0, L.requestsPerSecond * 4, num(r.out, 1) + " msg/s · " + num((r.outBytes || 0) / 1024, 1) + " KB/s")
-    + bar("npc frames in", r.npc || 0, 20, num(r.npc, 1) + "/s")
+    + bar("npc frames in", r.npc || 0, 20, num(r.npc, 1) + "/s · relayed " + num(r.npcOut, 1) + "/s · " + num((r.npcBytes || 0) / 1024, 1) + " KB/s of the sent")
     + bar("pulled voices", st.maxPulled || 0, st.pullCap, (st.pulled || 0) + " total · max " + (st.maxPulled || 0) + " / " + st.pullCap)
     + bar("voice cleanup", st.cleanup || 0, st.cleanupCap, (st.cleanup || 0) + " / " + st.cleanupCap)
     + (st.attachMax !== undefined ? bar("largest attachment", st.attachMax, L.attachmentBytes, num(st.attachMax / 1024, 1) + " / " + (L.attachmentBytes / 1024) + " KB") : "")
@@ -247,6 +247,8 @@ function describe(e) {
     case "wake-lost": return ["system", "system", f.deployed ? obj + " restarted for a new version · " + f.lost + " connections lost"
       : obj + " woke with " + f.lost + " fewer connections (closed while it slept, or it was reset) · " + f.kept + " kept"];
     case "dropped": return ["system", "system", obj + " · " + f.lines + " log lines dropped in a burst"];
+    case "error": return ["drop", "error", f.where === "restore" ? obj + " · stored " + f.key + (f.dropped ? " dropped" : " kept") + " · " + f.name
+      : who + " · " + f.t + " message threw " + f.name + " · socket closed"];
     default: return ["zone", e.kind, who];
   }
 }

@@ -35,8 +35,6 @@ export const presenceOf = (p) => ({ id: p.id, login: p.login, display: p.display
 
 const attachmentOf = (m) => ({ community: true, connId: m.connId, id: m.id, login: m.login, display: m.display, principal: m.principal, authUntil: m.authUntil });
 
-const send = (ws, msg) => { try { ws.send(typeof msg === "string" ? msg : JSON.stringify(msg)); } catch { /* closing */ } };
-
 export const commonsRoom = {
   size: (room) => members(room).size,
   has: (room, id) => { for (const m of members(room).values()) if (m.id === id) return true; return false; },
@@ -80,10 +78,10 @@ export const commonsRoom = {
     m.chatBucket = room.chatBucketFor(m.id, m.seenAt);
     all.set(m.connId, m);
     server.serializeAttachment(attachmentOf(m));
-    send(server, { t: "community", v: COMMONS_V, op: "welcome", epoch: epochOf(room, now), send: bridgeFeatures(room.env).commonsSend,
+    room.send(server, { t: "community", v: COMMONS_V, op: "welcome", epoch: epochOf(room, now), send: bridgeFeatures(room.env).commonsSend,
       you: { id: m.id, login: m.login, display: m.display }, players: [...room.players.values()].map(presenceOf),
       features: [globalThis.BL.chatPolicy.FEATURE, COMMONS_FEATURE] });
-    send(server, { t: "chat-history", messages: room.chat.list() });
+    room.send(server, { t: "chat-history", messages: room.chat.list() });
     audienceRoom.welcome(room, m);
     await room.ensureSweep();
     return new Response(null, { status: 101, webSocket: client });
@@ -111,7 +109,7 @@ export const commonsRoom = {
     if (m.authUntil <= m.seenAt) { commonsRoom.close(room, m, CLOSE.auth, "auth_required"); return; }
     if (!msg || msg.t !== "chat") return;
     // Rolled out reading first (#670): until the island's `commons-send`, a line is refused and the app keeps its draft.
-    if (!bridgeFeatures(room.env).commonsSend) { send(ws, { t: "chat-rejected", clientId: msg.clientId, reason: "read_only" }); return; }
+    if (!bridgeFeatures(room.env).commonsSend) { room.send(ws, { t: "chat-rejected", clientId: msg.clientId, reason: "read_only" }); return; }
     if (!m.chatBucket) m.chatBucket = room.chatBucketFor(m.id, m.seenAt);
     await room.say(m, msg.text, msg.clientId);
   },
@@ -132,7 +130,7 @@ export const commonsRoom = {
   relay(room, msg) {
     if (!room.community || !room.community.size || !msg || !RELAYED.has(msg.t)) return;
     const out = JSON.stringify(msg.t === "join" ? { t: "join", p: presenceOf(room.players.get(msg.p.id) || msg.p) } : msg);
-    for (const m of room.community.values()) send(m.ws, out);
+    for (const m of room.community.values()) room.send(m.ws, out);
   },
 
   /** An account's access ends (signed out, deleted, eligibility lost): every member socket of it closes. */

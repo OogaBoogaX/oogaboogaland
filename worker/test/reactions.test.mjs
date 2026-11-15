@@ -47,6 +47,7 @@ const forbidden = (what) => () => { throw new Error(`a reaction touched ${what}`
 const reactionRoom = (clock) => {
   const Room = roomClass({ Date: { now: () => clock.now }, setTimeout: forbidden("setTimeout"), setInterval: forbidden("setInterval"), clearTimeout: () => {} });
   const room = Object.create(Room.prototype);
+  room.sockets = new Map();
   room.ctx = { storage: new Proxy({}, { get: (_, key) => forbidden(`storage.${String(key)}`) }) };
   room.env = {};
   room.players = new Map(); room.chatBuckets = new Map(); room.pinTries = new Map(); room.chat = protocol.chatLog();

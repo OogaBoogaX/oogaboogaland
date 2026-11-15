@@ -1,0 +1,214 @@
+// The island room's guards: a message whose handler throws ends that socket alone, and a stored value the
+// constructor cannot restore is dropped and logged rather than thrown, through the real Room with a small host mock.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
+import * as protocol from "../src/protocol.js";
+import * as studioPolicy from "../src/studio-policy.js";
+import { sha256Hex } from "../src/crypto.js";
+import { getPlayer } from "../src/db.js";
+
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+const host = ({ stored: seed = {}, unreadable = [], failReads = {}, unwritable = [] } = {}) => {
+  let now = 100000;
+  const accepted = [], logged = [], reports = [];
+  const socket = () => ({
+    sent: [], closed: null, store: null,
+    send(text) { if (this.closed) throw new Error("closed"); this.sent.push(typeof text === "string" ? JSON.parse(text) : text); },
+    close(code, reason) { this.closed = { code, reason }; },
+    serializeAttachment(value) { this.store = JSON.parse(JSON.stringify(value)); },
+    deserializeAttachment() { return this.store; },
+  });
+  class WebSocketPair { constructor() { this[0] = socket(); this[1] = socket(); } }
+  class Response {
+    constructor(body, init = {}) { this.body = body; this.status = init.status; this.webSocket = init.webSocket; }
+    async json() { return JSON.parse(this.body); }
+  }
+  class Clock extends Date {
+    constructor(...args) { super(...(args.length ? args : [now])); }
+    static now() { return now; }
+  }
+  const source = readFileSync(new URL("../src/room.js", import.meta.url), "utf8")
+    .replace(/import\s+[\s\S]*?from\s+"[^"]+";/g, "")
+    .replace("export class Room", "class Room") + "\nglobalThis.Room = Room;";
+  const context = {
+    ...protocol, ...studioPolicy, sha256Hex, getPlayer, sfuClient: () => null,
+    CAST_ROWS: [{ handle: "a", github_login: "a" }, { handle: "b", github_login: "b" }],
+    DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } },
+    WebSocketPair, Response, WebSocketRequestResponsePair: class {}, URL, crypto, Date: Clock, Map, Set, setTimeout, clearTimeout,
+    console: { ...console, error: (...args) => logged.push(args.map(String).join(" ")) },
+  };
+  runInNewContext(source, context);
+  const stored = new Map(Object.entries(seed)), deleted = [], reads = [];
+  let blocked = null;
+  const ctx = {
+    id: { name: "island" }, waitUntil: () => {},
+    setWebSocketAutoResponse() {}, blockConcurrencyWhile: (fn) => { blocked = fn(); return blocked; }, acceptWebSocket: (ws) => accepted.push(ws),
+    getWebSockets: () => accepted.filter((ws) => !ws.closed), getWebSocketAutoResponseTimestamp: () => null,
+    storage: {
+      get: async (key) => {
+        reads.push(key);
+        if (failReads[key] > 0) { failReads[key]--; throw new Error("temporary read failure"); }
+        if ([key].flat().some((k) => unreadable.includes(k))) throw new Error("storage unavailable");
+        return Array.isArray(key) ? new Map(key.filter((k) => stored.has(k)).map((k) => [k, stored.get(k)])) : structuredClone(stored.get(key));
+      },
+      put: async (key, value) => { if (unwritable.includes(key)) throw new Error("write failed"); stored.set(key, structuredClone(value)); }, delete: async (key) => { deleted.push(key); stored.delete(key); },
+      getAlarm: async () => null, setAlarm: async () => {},
+    },
+  };
+  const INSPECTOR = { getByName: () => ({ report: async (r) => { reports.push(structuredClone(r)); return { watchUntil: 0 }; } }) };
+  const room = () => new context.Room(ctx, { INSPECTOR, INSPECTOR_IDS: "1" });
+  const join = async (r, id, login) => {
+    const before = accepted.length;
+    await r.fetch({ url: "https://island.invalid/room", headers: new Headers({ upgrade: "websocket", "x-player-id": String(id), "x-player-login": login, "x-player-contributor": "0" }) });
+    return accepted[before];
+  };
+  const counters = () => reports.reduce((sum, r) => { for (const [k, n] of Object.entries(r.counters)) sum[k] = (sum[k] || 0) + n; return sum; }, {});
+  const events = () => reports.flatMap((r) => r.events);
+  return { room, join, stored, deleted, reads, logged, counters, events, restored: () => blocked, advance: (ms) => { now += ms; } };
+};
+
+test("a handler that throws closes only the socket that sent it, counts it and logs it once", async () => {
+  const h = host(), r = h.room();
+  await h.restored();
+  const a = await h.join(r, 1, "a"), b = await h.join(r, 2, "b");
+  r.voiceState = () => { throw new Error("mute broke"); };
+  assert.doesNotThrow(() => r.webSocketMessage(a, JSON.stringify({ t: "mute", on: true })));
+  assert.deepEqual(a.closed, { code: protocol.CLOSE_ERROR, reason: "server error" });
+  assert.equal(b.closed, null, "the other player stays");
+  assert.ok(!r.players.has(1) && r.players.has(2));
+  assert.ok(b.sent.some((m) => m.t === "leave" && m.id === 1), "the others hear it left");
+  // The same fault again from another socket is counted again but not logged again.
+  const a2 = await h.join(r, 1, "a");
+  r.webSocketMessage(a2, JSON.stringify({ t: "mute", on: true }));
+  assert.equal(a2.closed.code, protocol.CLOSE_ERROR);
+  await flush(); await flush();
+  assert.equal(h.counters().errors, 2);
+  assert.deepEqual(h.events().filter((e) => e.kind === "error").map((e) => [e.id, e.fields.where, e.fields.t, e.fields.name]),
+    [[1, "message", "mute", "Error"], [1, "message", "mute", "Error"]]);
+  assert.equal(h.logged.length, 1, "one log line for a repeated fault");
+  assert.ok(!h.logged[0].includes("mute broke"), "the log carries where it failed, not what the message said");
+  // The room still works for the one left.
+  r.webSocketMessage(b, JSON.stringify({ t: "zone", name: "factory" }));
+  assert.equal(r.players.get(2).zone, "factory");
+});
+
+test("a handler whose promise rejects closes only its socket", async () => {
+  const h = host(), r = h.room();
+  await h.restored();
+  const a = await h.join(r, 1, "a"), b = await h.join(r, 2, "b");
+  r.say = async () => { throw new Error("chat broke"); };
+  await r.webSocketMessage(a, JSON.stringify({ t: "chat", text: "hi", clientId: "c1" }));
+  assert.equal(a.closed.code, protocol.CLOSE_ERROR);
+  assert.equal(b.closed, null);
+  assert.ok(!r.players.has(1) && r.players.has(2));
+});
+
+test("a binary frame whose handler throws closes only its socket", async () => {
+  const h = host(), r = h.room();
+  await h.restored();
+  const a = await h.join(r, 1, "a"), b = await h.join(r, 2, "b");
+  r.npcFrame = () => { throw new RangeError("frame broke"); };
+  assert.doesNotThrow(() => r.webSocketMessage(a, new ArrayBuffer(16)));
+  assert.equal(a.closed.code, protocol.CLOSE_ERROR);
+  assert.equal(b.closed, null);
+  await flush(); await flush();
+  assert.deepEqual(h.events().filter((e) => e.kind === "error").map((e) => [e.fields.t, e.fields.name]), [["binary", "RangeError"]]);
+});
+
+test("a community member's message that throws closes only that member", async () => {
+  const h = host(), r = h.room();
+  await h.restored();
+  const b = await h.join(r, 2, "b");
+  const member = { sent: [], closed: null, store: { community: true, connId: "m1", id: 3 }, send() {}, close(code, reason) { this.closed = { code, reason }; },
+    serializeAttachment(v) { this.store = v; }, deserializeAttachment() { return this.store; } };
+  r.community = new Map([["m1", { ws: member, connId: "m1", id: 3 }]]);
+  const message = protocol.commonsRoom.message;
+  protocol.commonsRoom.message = async () => { throw new Error("member broke"); };
+  try {
+    await r.webSocketMessage(member, JSON.stringify({ t: "chat", text: "hi", clientId: "c1" }));
+  } finally { protocol.commonsRoom.message = message; }
+  assert.equal(member.closed.code, protocol.CLOSE_ERROR);
+  assert.ok(!r.community.has("m1"));
+  assert.equal(b.closed, null, "an island player is untouched");
+});
+
+test("a stored value the room cannot restore is dropped and logged, and players can still join", async () => {
+  const h = host({ stored: { studio: "garbage", hockeyLimitsV1: "garbage", voiceCleanup: "garbage", loopEpoch: "garbage", sweepAt: { bad: true }, voiceLinks: [[5, [6]]] } });
+  const r = h.room();
+  await h.restored();
+  assert.deepEqual(h.deleted.sort(), ["hockeyLimitsV1", "loopEpoch", "studio", "sweepAt", "voiceCleanup"], "each bad key deleted, the good ones kept");
+  assert.equal(typeof r.studio, "object");
+  assert.ok(r.hockeyLimits && Array.isArray(r.hockeyLimits.proofs), "hockey limits back to their defaults");
+  assert.ok(Array.isArray(r.cleanupJobs) && !r.cleanupJobs.length, "no cleanup jobs from a value that is not a list");
+  assert.ok(Number.isFinite(r.loopEpoch) && Number.isFinite(r.sweepAt), "a stored time that is not a number is replaced");
+  assert.ok(r.links.get(5).has(6), "a good key restores as before");
+  assert.equal(h.logged.length, 5);
+  assert.equal(h.stored.get("loopEpoch"), r.loopEpoch, "a replaced time is stored again");
+  assert.ok(h.logged.every((line) => !line.includes("garbage")), "the log names the key, not the value");
+  const a = await h.join(r, 1, "a");
+  assert.equal(a.sent[0].t, "welcome");
+});
+
+test("a stored key that cannot be read is logged and left in storage", async () => {
+  const h = host({ stored: { chalk: { v: 1, marks: [] } }, unreadable: ["chalk"] });
+  const r = h.room();
+  await h.restored();
+  assert.deepEqual(h.deleted, [], "a failed read deletes nothing");
+  assert.ok(h.stored.has("chalk"));
+  assert.equal(h.logged.length, 1);
+  const a = await h.join(r, 1, "a");
+  assert.equal(a.sent[0].t, "welcome");
+});
+
+
+test("a transient restore read failure preserves the value for the next wake", async () => {
+  const saved = studioPolicy.studioState();
+  saved.position = 3;
+  const h = host({ stored: { studio: saved }, failReads: { studio: 1 } });
+  h.room();
+  await h.restored();
+  assert.deepEqual(h.deleted, [], "a later successful read is not proof of corrupt data");
+  assert.deepEqual(h.stored.get("studio"), saved);
+  assert.equal(h.reads.filter(key => key === "studio").length, 1, "no diagnostic reread");
+  const recovered = h.room();
+  await h.restored();
+  assert.equal(recovered.studio.position, 3, "the next wake restores the retained value");
+});
+
+test("a failed restore write does not delete the previously stored studio", async () => {
+  const saved = { ...studioPolicy.studioState(), source: "retired-source", position: 3 };
+  const h = host({ stored: { studio: saved }, unwritable: ["studio"] });
+  const r = h.room();
+  await h.restored();
+  assert.deepEqual(h.deleted, []);
+  assert.deepEqual(h.stored.get("studio"), saved, "a rejected migration write keeps the original snapshot");
+  assert.equal(r.studio.source, studioPolicy.studioState().source, "this wake uses the safe default");
+});
+
+test("an unexpected restore handler failure preserves readable data", async () => {
+  const h = host(), r = h.room();
+  await h.restored();
+  const saved = { revision: 7 };
+  h.stored.set("example", saved);
+  await r.restoring("example", () => { throw new TypeError("handler failed"); });
+  assert.deepEqual(h.deleted, []);
+  assert.deepEqual(h.stored.get("example"), saved);
+});
+
+test("a read that fails once and then succeeds deletes nothing, and the next wake restores the value", async () => {
+  const links = [[5, [6]]];
+  const h = host({ stored: { voiceLinks: links }, failReads: { voiceLinks: 1 }, unwritable: ["sweepAt"] });
+  const r = h.room();
+  await h.restored();
+  assert.deepEqual(h.deleted, [], "neither the failed read nor the failed write deleted a key");
+  assert.deepEqual(h.stored.get("voiceLinks"), links, "the stored value is untouched");
+  assert.ok(!r.links.has(5), "this wake goes without it");
+  assert.ok(Number.isFinite(r.sweepAt), "a write that failed still leaves a default");
+  assert.equal(h.logged.length, 2);
+  const woken = h.room();
+  await h.restored();
+  assert.ok(woken.links.get(5).has(6), "the next wake reads it again");
+});
