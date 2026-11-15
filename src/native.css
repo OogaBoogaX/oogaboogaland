@@ -464,3 +464,12 @@ select {
 @media (pointer: coarse) {
   .banana-units button { min-height: 40px; padding: 0 12px; }
 }
+
+/* Ooga Chat's mark (native-icons.js `cloud`) is drawn on 11 pixels where the other tab icons use 9, so it takes 11/9 of
+   their box, reaching evenly into the tab's side padding, and its pixels match theirs. */
+.sheet-toggle svg.cloud-icon,
+.oc-tab svg.cloud-icon {
+  flex: none;
+  width: calc(100% * 11 / 9);
+  margin: 0 calc(100% / -9);
+}

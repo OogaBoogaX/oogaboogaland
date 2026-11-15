@@ -57,7 +57,7 @@ export const encode = (w, h, px) => {
 };
 
 // The touch icon: the mark scaled up by whole pixels, no smoothing, laid over `background` and centred.
-const touchIcon = (png, background) => {
+export const touchIcon = (png, background) => {
   const { w, h, px } = decode(png), out = Buffer.alloc(TOUCH * TOUCH * 4);
   const bg = [1, 3, 5].map((k) => parseInt(background.slice(k, k + 2), 16)), x0 = (TOUCH - w * TOUCH_SCALE) / 2, y0 = (TOUCH - h * TOUCH_SCALE) / 2;
   if (x0 < 0 || y0 < 0 || x0 % 1 || y0 % 1) throw new Error("favicon: the touch icon's mark does not fit");
@@ -71,7 +71,7 @@ const touchIcon = (png, background) => {
 };
 
 // An ICO directory of PNG images, each kept byte for byte.
-const ico = (pngs) => {
+export const ico = (pngs) => {
   const head = Buffer.alloc(6 + pngs.length * 16);
   head.writeUInt16LE(1, 2);
   head.writeUInt16LE(pngs.length, 4);

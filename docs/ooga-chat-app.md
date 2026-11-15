@@ -62,7 +62,7 @@ Shared with the island, one copy each:
 | `src/js/emoji-data.js`, `src/js/reaction-bar.js` | The island's own emoji panel (#655), in the Ooga Chat panel's footer: the ten reactions, the raised hand and the picker over every emoji, its skin tones and heart colours, from this browser's own choices (`ooga-reactions*`). `ooga-chat-app.js` hands it the audience socket as its connection: a tap is a `reaction` request, the hand a `hand` request an active speaker alone may make, and every reaction the server sends the zone pops over that participant's circle |
 | `src/js/chat-policy.js`, `src/js/reaction-policy.js`, `src/js/zone-map.js`, `src/js/commons-log.js` | The Commons and Online Oogas for an eligible contributor (#670): the island's chat rules, the raised hand in each tone, the zones as the island's Online Oogas groups them, and the conversation's log and composer, run over the app's own `/api/chat/commons` socket (`ooga-chat-http.js` `commons`). Their look is placed by `ooga-chat.css`; no distance, crosshair, voice link or volume, which are the island's alone |
 | `src/js/qr.js`, `src/js/banana-icon.js`, `src/js/jumbotron-font.js`, `src/js/factory-kiosk-core.js`, `src/js/factory-kiosk.js`, `src/js/donation-popup.js` | Feed the Oogas: the island's donation dialog and its kiosk screen, with the QR codes, the banana and the 5x7 letters they draw. The app opens it from its Bananas tab while the feed is live (the fixture entry's demo aside), real over its own `/donations` relay, with `ooga-chat-donor.js` as its `game`; its frame is placed by `ooga-chat.css` |
-| `src/js/native-icons.js` | `BL.nativeIcons`: the panel tabs' pixel icons (`bananas`, `roster`, `players`, `chat`), Ooga Chat's outlined `cloud`, DSB Land's destination mark `dsb` (the island's `dsb-island-icon` paths, held equal by the suite) and `voice()`, the roster's voice mark. `hud.js` fills the island's tab slots (`data-native-icon`) from it and draws its roster's voice mark with it |
+| `src/js/native-icons.js` | `BL.nativeIcons`: the panel tabs' pixel icons (`bananas`, `roster`, `players`, `chat`), Ooga Chat's mark `cloud` (the tab icon on both, and the app's favicons and icons), DSB Land's destination mark `dsb` (the island's `dsb-island-icon` paths, held equal by the suite) and `voice()`, the roster's voice mark. `hud.js` fills the island's tab slots (`data-native-icon`) from it and draws its roster's voice mark with it |
 
 A module the app may load is either `src/ooga-chat/ooga-chat-*.js` or named in `SHARED` in `scripts/ooga-chat.mjs`;
 the build fails on anything else, so a renderer, scene, socket or game cannot reach the app by accident. A shared
@@ -381,7 +381,8 @@ The accounts are named samples with no picture, never real people. Fixtures are 
 | `js/ooga-chat-<hash>.js`, `css/ooga-chat-<hash>.css` | every module and stylesheet in order, one file each |
 | `art/<name>-<hash>.<ext>` | each picture under `src/ooga-chat/art/` that a view shows (the build fails on an unshown one) |
 | `manifest.webmanifest` | the installable app's manifest (below), linked by `index.html` only |
-| `icons/ooga-chat-<size>[-maskable]-<hash>.png` | the native cloud at 180 (Apple touch), 192, 512 and 512 maskable |
+| `icons/ooga-chat-<size>[-maskable]-<hash>.png` | the mark at 192, 512 and 512 maskable, for the manifest |
+| `favicon-32.png`, `favicon-64.png`, `favicon.ico`, `apple-touch-icon.png`, `apple-touch-icon-precomposed.png` | the island's favicon set, at the addresses browsers and link previews ask for unprompted: the mark on a rounded square of the theme colour at 32px and 64px, both in `favicon.ico`, and the 64px one at twice its size on the theme colour as the 180px touch icon |
 | `sw.js` | the service worker, its build and shell list filled in |
 | `fixture.html`, `js/ooga-chat-fixture-<hash>.js` | with `--fixtures` only |
 | `404.html` | sends any unknown address home, without script |
@@ -423,10 +424,11 @@ The first release is the web app at `ooga.chat`, not a store binary. Installing 
 zones, roles or privacy, grants no background microphone, and never gates listening or the public panels.
 
 **Manifest.** `manifest.webmanifest`: `id` and `start_url` `/`, `scope` `/`, `display` `standalone`, name and short
-name Ooga Chat, background and theme `#0a0a0b`, icons at 192, 512 and 512 maskable, plus a 180px Apple touch icon
-linked from the page. Every icon is the native cloud (`nativeIcons.cloud`) drawn pixel for pixel by whole-number
-scaling on the theme colour, the maskable one inside the platform's safe circle; approved artwork can replace
-`cloudIcon` in the build without touching the page. Direct navigation, reload and an installed launch all land on `/`;
+name Ooga Chat, background and theme `#0a0a0b`, icons at 192, 512 and 512 maskable, plus the 32px and 64px favicons
+and the 180px Apple touch icon linked from the page. Every icon is Ooga Chat's mark (`nativeIcons.cloud`: the cloud
+under three dots in the purple of its speakers) drawn pixel for pixel by whole-number scaling, with its outline taking
+the colour of what it outlines so it reads on black: the manifest's icons on the theme colour, the maskable one inside
+the platform's safe circle, and the favicons on a rounded square of it (`cloudIcon` and `favicon` in the build). Direct navigation, reload and an installed launch all land on `/`;
 an unknown path gets `404.html`, which sends it home. The sign-in return is `/` with a result code, so it works from
 the browser and from the installed app alike (on iOS an installed app may finish OAuth in its own browser sheet).
 

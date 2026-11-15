@@ -1,7 +1,7 @@
 // The sheet's tab icons as pixel paths, shared by the island's panel tabs and the Ooga Chat app (src/ooga-chat/), so
 // neither redraws them. `svg(name)` returns a fresh element; an element carrying `data-native-icon="<name>"` gets one
-// prepended by `fill(root)` (hud.js fills the island's tabs at load). `cloud` is Ooga Chat's outlined cloud and `dsb`
-// DSB Land's destination mark; `voice()` is the roster's voice mark, which hud.js and Ooga Chat both draw.
+// prepended by `fill(root)` (hud.js fills the island's tabs at load). `cloud` is Ooga Chat's mark, which its build also
+// draws as the app's favicons and icons (scripts/ooga-chat.mjs), and `dsb` DSB Land's destination mark; `voice()` is the roster's voice mark, which hud.js and Ooga Chat both draw.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -24,9 +24,11 @@
       ["#2b1b10", "M0 0h9v7H5v1H4v1H1V7H0z"],
       ["#f3efe4", "M1 1h7v5H4v1H3v1H2V6H1z"],
       ["#5c4425", "M2 3h1v1H2zM4 3h1v1H4zM6 3h1v1H6z"]]],
-    cloud: ["cloud-icon", "0 0 9 9", true, [
-      ["#2b1b10", "M3 2h3v1H3zM1 3h2v1H1zM6 3h2v1H6zM0 4h1v2H0zM8 4h1v2H8zM1 6h7v1H1z"],
-      ["#f3efe4", "M3 3h3v1H3zM1 4h7v2H1z"]]],
+    // Ooga Chat's mark: the outlined cloud under three dots in the purple of its speakers, the middle one a pixel higher.
+    cloud: ["cloud-icon", "0 0 11 11", true, [
+      ["#2b1b10", "M5 1h1v1H5zM4 2h1v1H4zM6 2h1v1H6zM5 3h1v1H5zM1 2h1v1H1zM0 3h1v1H0zM2 3h1v1H2zM1 4h1v1H1zM9 2h1v1H9zM8 3h1v1H8zM10 3h1v1H10zM9 4h1v1H9zM4 5h3v1H4zM2 6h2v1H2zM7 6h2v1H7zM1 7h1v2H1zM9 7h1v2H9zM2 9h7v1H2z"],
+      ["#f3efe4", "M4 6h3v1H4zM2 7h7v2H2z"],
+      ["#b18aff", "M5 2h1v1H5zM1 3h1v1H1zM9 3h1v1H9z"]]],
     // DSB Land's destination mark, the same paths as the island's `dsb-island-icon` (the suite holds them equal).
     dsb: ["dsb-island-icon", "0 0 64 48", false, [
       ["#195c78", "m3 30 9-8 30-6 18 12-5 11-23 7-24-6z"],

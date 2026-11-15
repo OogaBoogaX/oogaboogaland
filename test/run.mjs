@@ -33521,14 +33521,19 @@ const oogaChatChecks = async () => {
     const installable = {
       manifest: appManifest.name === "Ooga Chat" && appManifest.id === "/" && appManifest.start_url === "/" && appManifest.scope === "/" && appManifest.display === "standalone"
         && appManifest.icons.length === 3 && appManifest.icons.some((icon) => icon.purpose === "maskable") && appManifest.icons.every(iconOk),
-      linked: shellPage.includes('<link rel="manifest" href="/manifest.webmanifest">') && /<link rel="apple-touch-icon" sizes="180x180" href="\/icons\/ooga-chat-180-[0-9a-f]{16}\.png">/.test(shellPage)
+      linked: shellPage.includes('<link rel="manifest" href="/manifest.webmanifest">') && shellPage.includes('<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">')
+        && [32, 64].every((size) => shellPage.includes(`<link rel="icon" type="image/png" sizes="${size}x${size}" href="/favicon-${size}.png">`))
         && !readFileSync(join(staged, "fixture.html"), "utf8").includes('rel="manifest"'),
+      // The island's favicon set: 32px and 64px PNGs, favicon.ico holding both, and the touch icon twice.
+      favicons: [32, 64].every((size) => { const { w, h } = decode(readFileSync(join(staged, `favicon-${size}.png`))); return w === size && h === size; })
+        && readFileSync(join(staged, "favicon.ico")).readUInt16LE(4) === 2 && decode(readFileSync(join(staged, "apple-touch-icon.png"))).w === 180
+        && readFileSync(join(staged, "apple-touch-icon.png")).equals(readFileSync(join(staged, "apple-touch-icon-precomposed.png"))),
       shell: swSource.includes(`const VERSION = "${withFixtures.build}";`) && shellList[0] === "/" && shellList.slice(1).every((path) => /^\/(js|css|art|icons)\/[\w.-]+-[0-9a-f]{16}\.[a-z]+$/.test(path))
         && !shellList.some((path) => /fixture|api|auth|manifest|404/.test(path)) && shellList.length === withFixtures.files.filter((file) => /^(js|css|art|icons)\//.test(file.path) && !file.path.includes("fixture")).length + 1,
       headers: B.headersFor(headers, "/sw.js")["Cache-Control"] === "no-cache" && B.POLICY.includes("manifest-src 'self'") && B.POLICY.includes("worker-src 'self'")
         && B.headersFor(readFileSync(join(staged, "_headers"), "utf8"), "/manifest.webmanifest")["Content-Type"] === "application/manifest+json"
     };
-    record("Ooga Chat install: the manifest names the standalone app at /, its icons are the native cloud at their sizes with the maskable one inside the safe circle, only the production entry links it, and the worker's shell is this build's hashed public files and the page",
+    record("Ooga Chat install: the manifest names the standalone app at /, its icons are the native cloud at their sizes with the maskable one inside the safe circle, only the production entry links it, the favicons are the island's set, and the worker's shell is this build's hashed public files and the page",
       Object.values(installable).every(Boolean), JSON.stringify(installable));
 
     // The worker against stand-in caches and network: it keeps the shell, answers hashed files from the cache and the

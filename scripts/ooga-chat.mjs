@@ -16,7 +16,7 @@ import { basename, dirname, extname, join, relative, resolve, sep } from "node:p
 import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import { gzipSync } from "node:zlib";
-import { encode } from "./distribution-icons.mjs";
+import { encode, ico, touchIcon } from "./distribution-icons.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const app = join(root, "src", "ooga-chat");
@@ -99,28 +99,67 @@ export const islandRules = (css, prefixes = ISLAND_RULES) => {
 };
 export const POLICY = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'";
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex").slice(0, 16);
-// The installable app's identity and colours, and its icons: the native cloud (native-icons.js) on the theme colour,
-// scaled by whole pixels, at most `fill` of the side (a maskable icon keeps inside the platform's safe circle).
+// The installable app's identity and colours, and its icons, all drawn from Ooga Chat's mark (native-icons.js `cloud`)
+// by whole pixels. On the black theme its dark outline would vanish, so each outline pixel takes the colour of what it
+// outlines: the dots' purple beside a dot, the cloud's white elsewhere. The manifest's icons are that mark on the theme
+// colour, at most `fill` of the side (a maskable icon keeps inside the platform's safe circle). The favicons are the
+// island's set (distribution-icons.mjs): 32px and 64px PNGs, here the mark on a rounded square of the theme colour,
+// favicon.ico holding both, and the Apple touch icon the 64px one at twice its size on the theme colour.
 export const APP = { name: "Ooga Chat", description: "Listen to the island. Speak from the clouds.", theme: "#0a0a0b" };
-export const ICON_SIZES = [{ size: 180, fill: 0.75, purpose: "apple" }, { size: 192, fill: 0.75, purpose: "any" }, { size: 512, fill: 0.75, purpose: "any" },
-  { size: 512, fill: 0.5, purpose: "maskable" }];
-export const cloudIcon = (size, fill) => {
+export const ICON_SIZES = [{ size: 192, fill: 0.75, purpose: "any" }, { size: 512, fill: 0.75, purpose: "any" }, { size: 512, fill: 0.5, purpose: "maskable" }];
+export const FAVICON_SIZES = [32, 64];
+const OUTLINE = "#2b1b10", DOT = "#b18aff";
+const rgb = (hex) => [1, 3, 5].map((k) => parseInt(hex.slice(k, k + 2), 16));
+/** The mark as a grid of colours (null where clear), its outline filled in. */
+export const cloudMark = () => {
   const context = { window: {} };
   runInNewContext(readFileSync(join(root, "src", "js", "native-icons.js"), "utf8"), context);
-  const rects = [];
-  for (const [colour, d] of context.window.BL.nativeIcons.ICONS.cloud[3]) {
-    for (const m of d.matchAll(/M(\d+) (\d+)h(\d+)v(\d+)H\d+z/g)) rects.push({ x: +m[1], y: +m[2], w: +m[3], h: +m[4], rgb: [1, 3, 5].map((k) => parseInt(colour.slice(k, k + 2), 16)) });
+  const [, viewBox, , parts] = context.window.BL.nativeIcons.ICONS.cloud;
+  const [, , w, h] = viewBox.split(" ").map(Number), grid = new Array(w * h).fill(null);
+  for (const [colour, d] of parts) {
+    const rects = [...d.matchAll(/M(\d+) (\d+)h(\d+)v(\d+)H\d+z/g)];
+    if (!rects.length) throw new Error("ooga-chat: the native cloud's paths are not pixel rectangles");
+    for (const [, x, y, rw, rh] of rects) for (let j = +y; j < +y + +rh; j++) for (let i = +x; i < +x + +rw; i++) grid[j * w + i] = colour;
   }
-  if (!rects.length) throw new Error("ooga-chat: the native cloud's paths are not pixel rectangles");
-  const x0 = Math.min(...rects.map((r) => r.x)), y0 = Math.min(...rects.map((r) => r.y));
-  const w = Math.max(...rects.map((r) => r.x + r.w)) - x0, h = Math.max(...rects.map((r) => r.y + r.h)) - y0;
-  const scale = Math.floor(size * fill / Math.max(w, h)), left = Math.floor((size - w * scale) / 2), top = Math.floor((size - h * scale) / 2);
-  const bg = [1, 3, 5].map((k) => parseInt(APP.theme.slice(k, k + 2), 16)), px = Buffer.alloc(size * size * 4);
-  for (let i = 0; i < size * size; i++) px.set([...bg, 255], i * 4);
-  for (const r of rects) for (let y = (r.y - y0) * scale; y < (r.y - y0 + r.h) * scale; y++) for (let x = (r.x - x0) * scale; x < (r.x - x0 + r.w) * scale; x++) {
-    px.set([...r.rgb, 255], ((top + y) * size + left + x) * 4);
+  return { w, h, grid: grid.map((colour, k) => {
+    if (colour !== OUTLINE) return colour;
+    const x = k % w, y = (k - x) / w;
+    const near = [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]].filter(([i, j]) => i >= 0 && i < w && j >= 0 && j < h)
+      .map(([i, j]) => grid[j * w + i]).filter((c) => c && c !== OUTLINE);
+    if (!near.length) throw new Error("ooga-chat: an outline pixel of the native cloud outlines nothing");
+    return near.includes(DOT) ? DOT : near[0];
+  }) };
+};
+// The mark at `scale` a pixel with its corner at (left, top), over `px`, a size x size RGBA buffer.
+const lay = (px, size, mark, scale, left, top) => {
+  for (let k = 0; k < mark.grid.length; k++) {
+    if (!mark.grid[k]) continue;
+    const colour = [...rgb(mark.grid[k]), 255], x0 = left + (k % mark.w) * scale, y0 = top + Math.floor(k / mark.w) * scale;
+    for (let y = y0; y < y0 + scale; y++) for (let x = x0; x < x0 + scale; x++) px.set(colour, (y * size + x) * 4);
   }
-  return encode(size, size, px);
+  return px;
+};
+export const cloudIcon = (size, fill, mark = cloudMark()) => {
+  const scale = Math.floor(size * fill / Math.max(mark.w, mark.h)), px = Buffer.alloc(size * size * 4);
+  for (let i = 0; i < size * size; i++) px.set([...rgb(APP.theme), 255], i * 4);
+  return encode(size, size, lay(px, size, mark, scale, Math.floor((size - mark.w * scale) / 2), Math.floor((size - mark.h * scale) / 2)));
+};
+// A favicon: the mark at size/16 a pixel, centred on a rounded square of the theme colour (corners 7/32 of the side,
+// their edge smoothed by coverage), clear outside it.
+export const favicon = (size, mark = cloudMark()) => {
+  const scale = size / 16, left = (size - mark.w * scale) / 2, top = (size - mark.h * scale) / 2, r = size * 7 / 32;
+  if (!Number.isInteger(scale) || !Number.isInteger(left) || !Number.isInteger(top) || left < 0 || top < 0) throw new Error(`ooga-chat: the mark does not fit a ${size}px favicon`);
+  const inside = (x, y) => {
+    const dx = Math.max(r - x, 0, x - (size - r)), dy = Math.max(r - y, 0, y - (size - r));
+    return dx * dx + dy * dy <= r * r;
+  };
+  const px = Buffer.alloc(size * size * 4), bg = rgb(APP.theme);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    let hit = 0;
+    for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) hit += inside(x + (i + 0.5) / 4, y + (j + 0.5) / 4);
+    px.set([...bg, Math.round(hit / 16 * 255)], (y * size + x) * 4);
+  }
+  return encode(size, size, lay(px, size, mark, scale, left, top));
 };
 
 const read = (page) => readFileSync(join(app, page), "utf8");
@@ -205,8 +244,16 @@ export const build = (out, { fixtures = false } = {}) => {
   const js = bundle(main.scripts);
   for (const [file, path] of art) if (js.includes(path)) used.add(file);
   for (const file of pictures) if (!used.has(file)) throw new Error(`ooga-chat: art/${file} is staged but no script shows it`);
+  const mark = cloudMark();
   const icons = ICON_SIZES.map(({ size, fill, purpose }) => ({ size, purpose,
-    path: named("icons", `ooga-chat-${size}${purpose === "maskable" ? "-maskable" : ""}`, "png", cloudIcon(size, fill)) }));
+    path: named("icons", `ooga-chat-${size}${purpose === "maskable" ? "-maskable" : ""}`, "png", cloudIcon(size, fill, mark)) }));
+  // The favicons at the addresses browsers and link previews ask for unprompted, as the island's staged site has them.
+  const favicons = FAVICON_SIZES.map((size) => ({ size, bytes: favicon(size, mark) }));
+  for (const { size, bytes } of favicons) write(`favicon-${size}.png`, bytes);
+  write("favicon.ico", ico(favicons));
+  const touch = touchIcon(favicons.find((f) => f.size === 64).bytes, APP.theme);
+  for (const file of ["apple-touch-icon.png", "apple-touch-icon-precomposed.png"]) write(file, touch);
+  const iconLinks = FAVICON_SIZES.map((size) => `\n  <link rel="icon" type="image/png" sizes="${size}x${size}" href="/favicon-${size}.png">`).join("");
   // native.css, then the island's own rules for the panels it shares, then the app's own stylesheets.
   const island = `/* The island's own rules for the panels the app shares (src/style.css, scripts/ooga-chat.mjs ISLAND_RULES). */\n${islandRules(readFileSync(join(root, "src", "style.css"), "utf8"))}`;
   const sheets = main.sheets.map((path) => read(path).trim().replace(/\r\n/g, "\n"));
@@ -228,17 +275,16 @@ export const build = (out, { fixtures = false } = {}) => {
   const script = named("js", "ooga-chat", "js", js);
   const buildId = hash(`${js}${css}`);
   // Only the production entry is installable: the review entry links no manifest and registers no worker.
-  const apple = icons.find((icon) => icon.purpose === "apple").path;
-  stage(index, "index.html", script, buildId, `\n  <link rel="manifest" href="/manifest.webmanifest">\n  <link rel="apple-touch-icon" sizes="180x180" href="${apple}">`);
+  stage(index, "index.html", script, buildId, `${iconLinks}\n  <link rel="manifest" href="/manifest.webmanifest">\n  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">`);
   write("manifest.webmanifest", `${JSON.stringify({ id: "/", name: APP.name, short_name: APP.name, description: APP.description, start_url: "/", scope: "/",
     display: "standalone", background_color: APP.theme, theme_color: APP.theme,
-    icons: icons.filter((icon) => icon.purpose !== "apple").map((icon) => ({ src: icon.path, sizes: `${icon.size}x${icon.size}`, type: "image/png", purpose: icon.purpose })) }, null, 2)}\n`);
+    icons: icons.map((icon) => ({ src: icon.path, sizes: `${icon.size}x${icon.size}`, type: "image/png", purpose: icon.purpose })) }, null, 2)}\n`);
   // The worker's shell: the page and every hashed file of this build, never the fixture entry, the manifest or the 404.
   const shell = ["/", ...files.filter((path) => /^(js|css|art|icons)\//.test(path)).sort().map((path) => `/${path}`)];
   const worker = read("service-worker.js").replace('const VERSION = "dev";', `const VERSION = ${JSON.stringify(buildId)};`).replace("const SHELL = [];", `const SHELL = ${JSON.stringify(shell)};`);
   if (!worker.includes(buildId) || worker.includes("const SHELL = [];")) throw new Error("ooga-chat: the service worker did not stage");
   write("sw.js", worker);
-  if (fixtures) stage(fixture, "fixture.html", named("js", "ooga-chat-fixture", "js", bundle(review.scripts)), buildId);
+  if (fixtures) stage(fixture, "fixture.html", named("js", "ooga-chat-fixture", "js", bundle(review.scripts)), buildId, iconLinks);
   write("404.html", `<!doctype html>
 <html lang="en">
 <head>
