@@ -33,7 +33,8 @@
     const session = pathOk(paths.session) ? paths.session : null, logout = pathOk(paths.logout) ? paths.logout : null;
     const audience = pathOk(paths.audience) ? paths.audience : null;
     const feed = raw.features?.feed === true ? "live" : options.fixture && raw.features?.feed === "demo" ? "demo" : "off";
-    const features = { github: !!login.github, x: !!login.x, voice: raw.features?.voice === true, feed };
+    // The Commons and Online Oogas (#670) at their fixed address, for an eligible contributor while the server says so.
+    const features = { github: !!login.github, x: !!login.x, voice: raw.features?.voice === true, feed, commons: raw.features?.commons === true };
     // A newer deployment's build is worth a reload; an absent or matching one is not.
     const newer = typeof raw.build === "string" && raw.build.length <= 64 && build && raw.build !== build ? raw.build : null;
     return { ok: true, mode: "live", features, paths: { login, session, logout, audience }, protocols, newer };
@@ -95,7 +96,7 @@
   // Per-adapter storage keys, so a review session's choices never reach production's. Only `STORED` names are kept:
   // `sweep` removes any other key under this adapter's prefix and any older unversioned `ooga-chat.` key (a saved
   // screen, role or speaker flag), so nothing saved can bring back a choice panel or a microphone.
-  const STORED = ["tab", "zone"];
+  const STORED = ["tab", "zone", "recent-bar", "donor", "roster-sort"];
   const prefixOf = (adapter) => `ooga-chat.${adapter === "fixture" ? "fixture." : ""}v1.`;
   const storageKey = (adapter, name) => `${prefixOf(adapter)}${name}`;
   const sweep = (storage, adapter) => {

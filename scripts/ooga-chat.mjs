@@ -21,11 +21,82 @@ import { encode } from "./distribution-icons.mjs";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const app = join(root, "src", "ooga-chat");
 // The island modules the app may share: each loads nothing at load but window.BL and the document.
-export const SHARED = ["../js/sign-glyphs.js", "../js/native-icons.js"];
+export const SHARED = ["../js/sign-glyphs.js", "../js/native-icons.js", "../js/donations.js", "../js/banana-panel.js", "../js/qr.js", "../js/banana-icon.js",
+  "../js/jumbotron-font.js", "../js/factory-kiosk-core.js", "../js/factory-kiosk.js", "../js/donation-popup.js", "../js/chat-policy.js", "../js/emoji-data.js", "../js/reaction-policy.js",
+  "../js/zone-map.js", "../js/commons-log.js", "../js/format-large.js", "../js/roster-panel.js", "../js/contributor-identities.js", "../js/activity-repos.js",
+  "../js/audience-tiles.js", "../js/reaction-bar.js"];
 // What a first visit may cost over the wire (index.html, the script, the stylesheet and the art it shows), gzipped. The
-// staged foundation measures about 111 KB, most of it the sign-in picture, the original at Retina size (about 80 KB in
-// place of the 430-pixel stand-in's 58); the build fails past this.
-export const FIRST_LOAD_BUDGET = 116 * 1024;
+// staged foundation measured about 91 KB, most of it the sign-in picture. The original picture at Retina size (about
+// 80 KB in place of the 430-pixel stand-in's 58), the island's Bananas panel with donations.js (#656, about 15 KB) and
+// its Feed the Oogas kiosk (donation-popup.js, factory-kiosk.js, qr.js and the jumbotron's font, about 28 KB) and
+// The Commons and Online Oogas (commons-log.js, the chat, reaction and zone helpers and their views, about 13 KB) and
+// Contributing Oogas (roster-panel.js, the oogatron normalizers, the face sheet's index and the island's own rules for
+// these panels, about 16 KB; the face sheet itself loads only when a stats strip opens), the Ooga Chat panel's circles
+// and account rows (about 3 KB) and the island's own emoji panel with its picker (#655: reaction-bar.js and the whole
+// emoji list it picks from, emoji-data.js, about 25 KB with their rules) bring it to about 213 KB. Loading the emoji list
+// only when the picker opens would take most of that back; that needs the build to stage a second script. The build
+// fails past this.
+export const FIRST_LOAD_BUDGET = 224 * 1024;
+// The island's own rules for the panels the app shows as the island does (src/style.css), taken by selector each time
+// the app builds, so the two look the same from one source: every rule whose selectors begin with one of ISLAND_RULES
+// (a rule's other selectors, another panel's, left behind), in an @media, @supports or @container block too, and every
+// @keyframes named by one, joined after native.css and before ooga-chat.css, which places them. `islandRules` is that
+// pick.
+export const ISLAND_RULES = [".roster", ".players-", ".chat-", ".section-head", ".panel .chat-status", '.panel[data-panel="chat"] > .panel-title',
+  ".help", ".link", ".account", ".foot-button", ".foot-primary", ".cloud-zone", ".cloud-status", ".panel > .cloud-roster", ".cloud-tile",
+  ".cloud-face", ".cloud-portrait", ".cloud-react", ".cloud-hand", ".cloud-pop", ".cloud-fade", ".cloud-name", ".cloud-dot", ".cloud-role",
+  ".cloud-mic", ".cloud-foot", ".cloud-mute", ".reaction"];
+// Pictures the app loads only when they are wanted, never on a first visit: the face sheet, when a stats strip opens.
+export const LAZY_ART = ["ooga-faces.png"];
+export const islandRules = (css, prefixes = ISLAND_RULES) => {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const names = prefixes.map((prefix) => prefix.replace(/^[.#]/, ""));
+  // The top-level statements of a block of CSS, each `{ prelude, body }` (body null for one ending in `;`).
+  const statements = (block) => {
+    const out = [];
+    let at = 0;
+    while (at < block.length) {
+      const open = block.indexOf("{", at), semi = block.indexOf(";", at);
+      if (open < 0) break;
+      if (semi >= 0 && semi < open) { at = semi + 1; continue; }
+      let depth = 1, end = open + 1;
+      while (end < block.length && depth) { if (block[end] === "{") depth++; else if (block[end] === "}") depth--; end++; }
+      out.push({ prelude: block.slice(at, open).trim(), body: block.slice(open + 1, end - 1) });
+      at = end;
+    }
+    return out;
+  };
+  // Selectors split at the commas outside brackets and parentheses.
+  const selectors = (prelude) => {
+    const out = [];
+    let depth = 0, start = 0;
+    for (let i = 0; i < prelude.length; i++) {
+      const c = prelude[i];
+      if (c === "(" || c === "[") depth++;
+      else if (c === ")" || c === "]") depth--;
+      else if (c === "," && !depth) { out.push(prelude.slice(start, i).trim()); start = i + 1; }
+    }
+    out.push(prelude.slice(start).trim());
+    return out;
+  };
+  const pick = (block) => {
+    const kept = [];
+    for (const { prelude, body } of statements(block)) {
+      if (prelude.startsWith("@media") || prelude.startsWith("@supports") || prelude.startsWith("@container")) {
+        const inner = pick(body);
+        if (inner.length) kept.push(`${prelude} {\n${inner.map((rule) => `  ${rule.replace(/\n/g, "\n  ")}`).join("\n")}\n}`);
+      } else if (prelude.startsWith("@keyframes")) {
+        const name = prelude.slice("@keyframes".length).trim();
+        if (names.some((prefix) => name.startsWith(prefix))) kept.push(`${prelude} {${body}}`);
+      } else if (!prelude.startsWith("@")) {
+        const ours = selectors(prelude).filter((selector) => prefixes.some((prefix) => selector.startsWith(prefix)));
+        if (ours.length) kept.push(`${ours.join(",\n")} {${body}}`);
+      }
+    }
+    return kept;
+  };
+  return pick(text).join("\n\n");
+};
 export const POLICY = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'";
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex").slice(0, 16);
 // The installable app's identity and colours, and its icons: the native cloud (native-icons.js) on the theme colour,
@@ -136,7 +207,10 @@ export const build = (out, { fixtures = false } = {}) => {
   for (const file of pictures) if (!used.has(file)) throw new Error(`ooga-chat: art/${file} is staged but no script shows it`);
   const icons = ICON_SIZES.map(({ size, fill, purpose }) => ({ size, purpose,
     path: named("icons", `ooga-chat-${size}${purpose === "maskable" ? "-maskable" : ""}`, "png", cloudIcon(size, fill)) }));
-  const css = `${main.sheets.map((path) => read(path).trim().replace(/\r\n/g, "\n")).join("\n\n")}\n`;
+  // native.css, then the island's own rules for the panels it shares, then the app's own stylesheets.
+  const island = `/* The island's own rules for the panels the app shares (src/style.css, scripts/ooga-chat.mjs ISLAND_RULES). */\n${islandRules(readFileSync(join(root, "src", "style.css"), "utf8"))}`;
+  const sheets = main.sheets.map((path) => read(path).trim().replace(/\r\n/g, "\n"));
+  const css = `${[sheets[0], island, ...sheets.slice(1)].join("\n\n")}\n`;
   if (/url\(/.test(css)) throw new Error("ooga-chat: a stylesheet loads a url(); name pictures from the views instead");
   const sheet = named("css", "ooga-chat", "css", css);
   const stage = (html, page, scriptPath, buildId, head = "") => {
@@ -202,7 +276,8 @@ ${hashed.map((path) => `\n/${path}\n  Cache-Control: public, max-age=31536000, i
     const bytes = readFileSync(join(out, path));
     return { path, bytes: bytes.length, gzip: gzipSync(bytes).length };
   });
-  const firstLoad = inventory.filter((file) => file.path === "index.html" || file.path === sheet.slice(1) || file.path === script.slice(1) || file.path.startsWith("art/"))
+  const lazy = (path) => LAZY_ART.some((name) => path.startsWith(`art/${basename(name, extname(name))}-`));
+  const firstLoad = inventory.filter((file) => file.path === "index.html" || file.path === sheet.slice(1) || file.path === script.slice(1) || file.path.startsWith("art/") && !lazy(file.path))
     .reduce((sum, file) => sum + file.gzip, 0);
   if (firstLoad > FIRST_LOAD_BUDGET) throw new Error(`ooga-chat: first load is ${firstLoad} bytes gzipped, over FIRST_LOAD_BUDGET (${FIRST_LOAD_BUDGET})`);
   const manifest = { app: "ooga-chat", build: buildId, bootstrap: 1, fixtures, firstLoad, scripts: main.scripts.map((src) => src.replace(/^\.\.\//, "")), files: inventory };

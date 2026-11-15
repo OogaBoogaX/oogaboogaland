@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
-import { dirname, extname, join } from "node:path";
+import { dirname, extname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { createHash, webcrypto } from "node:crypto";
@@ -4400,7 +4400,7 @@ const orbitFlow = async (b) => {
 const SCENES = ["hub", "lab", "studio", "race", "drop", "block", "orbit", "mine", "dsb", "factory", "hangar", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
-for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
+for (const a of ARGS) if (!SCENES.includes(a) && !["--browser-only", "unit", "cloud-hopper-arcade", "cloud-hopper-record", "cloud-hopper-controller", "highscores-unit", "chat-unit", "integration-unit", "ooga-chat-app", "svrn-unit", "svrn-review", "vacancy-unit", "rescue-unit", "wallets-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | --browser-only <scene> | ${SCENES.join(" | ")})`);
 const ONLY = process.env.ONLY || ""; // Optional comma-separated substrings within the requested scenes.
 const onlyMatches = value => ONLY.split(",").some(part => value.includes(part));
 const FULL = ARGS.includes("full");
@@ -4410,7 +4410,7 @@ const BROWSER_ONLY = ARGS.includes("--browser-only");
 if (BROWSER_ONLY && (!PICKED.length || FULL || ARGS.some(arg => arg !== "--browser-only" && !SCENES.includes(arg)))) {
   throw new Error("--browser-only requires named scenes and cannot be combined with full, unit, perf or dedicated checks");
 }
-const UNIT = !BROWSER_ONLY && !(ARGS.length === 1 && ["perf", "poker-protocol", "cloud-hopper-record", "cloud-hopper-arcade"].includes(ARGS[0]));
+const UNIT = !BROWSER_ONLY && !(ARGS.length === 1 && ["perf", "poker-protocol", "cloud-hopper-record", "cloud-hopper-arcade", "ooga-chat-app"].includes(ARGS[0]));
 const PROTOCOL = FULL || ARGS.includes("poker-protocol");
 // What keeps the cruft out: every step says why it exists, or the run does not start.
 const WHY = /^(regression|playthrough|rule|contract): \S/;
@@ -4433,7 +4433,7 @@ const scene = (id, { query = "", steps, perf = false, opts = {}, label = "", url
   } });
 };
 // contributors.js reads the roster from the character files, which build on math, scene and models.
-const CONTRIBUTOR_SOURCES = ["math", "scene", "models", "hero-body", "caves", "contributor-identities", "activity-repos", "characters", "characters.gen", "contributors"];
+const CONTRIBUTOR_SOURCES = ["math", "scene", "models", "hero-body", "caves", "contributor-identities", "activity-repos", "characters", "characters.gen", "roster-panel", "contributors"];
 const contributorActivityChecks = async () => {
   const context = { window: {}, URLSearchParams, location: { search: "" } };
   for (const name of CONTRIBUTOR_SOURCES) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
@@ -4884,7 +4884,7 @@ const deferredLoadingChecks = async () => {
   record("deferred loading: base and scene fetch together but execute in order, failed retries and timeouts release preloads, only an error moves the address on, a chunk a deploy removed is reported stale, a chunk run twice keeps its first definition and module state, and shells carry their wip", rows.every(r => r.ok), JSON.stringify(rows));
 };
 const hudNoticeChecks = async () => {
-  const source = await readFile(join(root, "src/js/hud.js"), "utf8");
+  const source = await readFile(join(root, "src/js/hud.js"), "utf8"), rosterSource = await readFile(join(root, "src/js/roster-panel.js"), "utf8");
   const fixture = () => {
     const timers = new Map(); let serial = 0, reloads = 0;
     const element = () => {
@@ -4907,12 +4907,14 @@ const hudNoticeChecks = async () => {
     const nodes = Object.fromEntries(["toast", "reload-notice", "message-stack"].map(id => [id, element()]));
     nodes["message-stack"].children = [nodes["reload-notice"], nodes.toast];
     const BL = { game: {}, scene: {}, signGlyphs: { lettering() {}, letter() {} }, nativeIcons: { fill() {}, voice: () => ({ cloneNode: () => ({}) }) } };
-    runInNewContext(source, {
+    const context = {
       window: { BL, matchMedia: () => ({ matches: false }), setTimeout: (fn, ms) => { timers.set(++serial, { fn, ms }); return serial; }, clearTimeout: id => timers.delete(id) },
       document: { getElementById: id => nodes[id], querySelectorAll: () => [], createElement: element,
         createElementNS: () => ({ setAttribute() {}, append() {} }) },
       location: { reload() { reloads++; } }
-    });
+    };
+    runInNewContext(rosterSource, context);
+    runInNewContext(source, context);
     const expire = () => { const [id, timer] = timers.entries().next().value; timers.delete(id); timer.fn(); return timer.ms; };
     return { hud: BL.hud, nodes, timers, expire, reloads: () => reloads };
   };
@@ -5004,7 +5006,7 @@ const characterChecks = async () => {
   for (const geo of worn) mirrorGeometries.add(geo);
   const spare = BL.models.spareMagazine();
   collect(spare.node);
-  for (const name of ["jumbotron", "factory-kiosk-core", "factory-kiosk", "factory-models", "kortik-models", "tess"])
+  for (const name of ["jumbotron-font", "jumbotron", "factory-kiosk-core", "factory-kiosk", "factory-models", "kortik-models", "tess"])
     runInNewContext(await readFile(join(root, `src/js/${name}.js`), "utf8"), context);
   const kortik = BL.kortikModels.rig(), kortikHeads = ["headOpen", "headClosed", "headTalk", "redOpen", "redClosed", "redTalk"];
   collect(kortik.root);
@@ -6824,7 +6826,7 @@ const hammockChecks = async () => {
   // club, rifle and jetpack), its own pack or the hub's put on as the crew puts it on, stowed by a resting peer's pose.
   for (const file of readdirSync(new URL("../src/characters/", import.meta.url)))
     if (!R.characters.get(file.replace(/\.js$/, ""))) runInNewContext(await readFile(new URL(`../src/characters/${file}`, import.meta.url), "utf8"), real);
-  for (const name of ["caves", "contributor-identities", "activity-repos", "contributors"])
+  for (const name of ["caves", "contributor-identities", "activity-repos", "roster-panel", "contributors"])
     runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), real);
   const roster = R.characters.all().map((definition) => {
     const handle = definition.handle, cave = R.models.caveman(R.contributors.traitsFor(handle));
@@ -7353,7 +7355,7 @@ const npcPaths = (backend) => [`NPC paths ${backend}`, async (b) => {
 
 // The games' rules and saves in Node, under the same localStorage the page uses: the mine's seeded sim,
 // every game's stored best, the tickets a machine spends and the jackpot wheel's odds.
-const GAME_SOURCES = ["math", "grapple", "contributor-identities", "donations", "rocket-parts", "mine-rigs", "mine-sim", "block-wire", "block-sim", "block-live", "highscore-rules", "game", "cloud-hopper-levels"];
+const GAME_SOURCES = ["math", "grapple", "contributor-identities", "donations", "rocket-parts", "mine-rigs", "mine-sim", "block-wire", "block-sim", "block-live", "highscore-rules", "format-large", "game", "cloud-hopper-levels"];
 const gameRulesChecks = async () => {
   const store = new Map();
   const context = { window: {}, URLSearchParams, location: { search: "" }, localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) } };
@@ -9461,7 +9463,7 @@ const gameRulesChecks = async () => {
     // The jackpot wheel, from arcade-models.js and its scene half on the builders they load with: the house wins slowly, and every
     // wedge, from a turn at rest and one far round after many spins, stops under the clapper wherever in it the spin
     // aims, after its whole turns and less than one more.
-    for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron", "sign-glyphs", "hub-models", "hockey-wire", "arcade-models", "haunt-models", "ooga-portal-models", "ooga-portal", "arcade-block-watch", "arcade-scene-models", "zipline-models", "zipline"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+    for (const name of ["scene", "models", "blaze", "contributor-identities", "activity-repos", "jumbotron-font", "jumbotron", "sign-glyphs", "hub-models", "hockey-wire", "arcade-models", "haunt-models", "ooga-portal-models", "ooga-portal", "arcade-block-watch", "arcade-scene-models", "zipline-models", "zipline"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
     runInNewContext(await readFile(new URL("../src/js/arcade-games.js", import.meta.url), "utf8"), context);
     // The Block Frenzy watch door: signed-in only, it opens Block Frenzy's watch deck, the real portal is crossed from the
     // hall's side within the opening, and the door opens no new way out of the hall.
@@ -10199,6 +10201,286 @@ const ghostHuntChecks = async () => {
       JSON.stringify({ states: [...states], outcome, paused, still, heldOutcome, hatched, leftAtDefeat }));
   }
 };
+// Rule (#656): Ooga Chat's own page in Chrome, its fixture entry built and served from loopback as the edge serves it.
+// Every tab is the island's own panel at 320, 390 and 1024 pixels wide: inside its frame, its carved title showing, no
+// page wider than the screen and one frame height for every tab. The tabs are a visitor's by who they are (three signed
+// out and for an X listener, five for a contributor). Every registered Ooga is reachable through Show away, with its
+// sort and its details, and a list that can't be read says so rather than showing none. Tab switches build each view
+// once and leave no duplicate id, timer or growing DOM behind, never making a WebGL context. Feed the Oogas on the
+// demo, signed out and by the visitor's keys, refuses a tip under the minimum, carries a message only at the message
+// bar, counts its receipt in the Bananas panel, keeps the donor's name for the next tip and hands the focus back; its
+// screens fit at each width. With the service's feed live it is the real kiosk over this server's stand-in relay, and
+// whatever the relay answers it never simulates or counts a payment; with the service unreachable there is no Feed.
+// Each tab and screen at each width is saved to untracked/ooga-chat-app for review.
+const oogaChatAppChecks = async () => {
+  const B = await import(pathToFileURL(join(root, "scripts/ooga-chat.mjs")).href);
+  const out = mkdtempSync(join(tmpdir(), "ooga-chat-app-")), staged = join(out, "app"), shots = join(root, "untracked", "ooga-chat-app");
+  mkdirSync(shots, { recursive: true });
+  B.build(staged, { fixtures: true });
+  const TYPES = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".png": "image/png",
+    ".webp": "image/webp", ".jpg": "image/jpeg", ".json": "application/json", ".webmanifest": "application/manifest+json" };
+  const { createServer } = await import("node:http");
+  // The edge's /donations relay, for the real-mode checks: `down` drops the call as an unreachable service does,
+  // `closed` refuses it as bananapayserver does while closed, `invoice` answers with an invoice nothing here can pay.
+  // The donation socket's handshake gets the same answer and is never upgraded, so no donation event, and so no
+  // payment, ever arrives. Every call is kept.
+  let relay = "down";
+  const relayed = [];
+  const server = createServer((request, response) => {
+    if (request.url.startsWith("/donations/")) {
+      relayed.push(`${request.method} ${request.url}`);
+      if (relay === "down") return request.socket.destroy();
+      const reply = relay === "closed" ? { error: "closed" }
+        : { request: "fixture-request", invoice: { id: "fixture-invoice", bolt11: "lntbs10u1fixture", expires: Math.floor(Date.now() / 1000) + 300 }, bananas: null, rate: null };
+      response.writeHead(relay === "closed" ? 503 : 200, { "content-type": "application/json" });
+      return response.end(JSON.stringify(reply));
+    }
+    const path = decodeURIComponent(new URL(request.url, "http://localhost").pathname).slice(1) || "index.html", file = join(staged, path);
+    let body = null;
+    if (file.startsWith(staged + sep)) try { body = readFileSync(file); } catch { body = null; }
+    response.writeHead(body ? 200 : 404, { "content-type": TYPES[extname(path)] || "application/octet-stream" });
+    response.end(body || "");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}/fixture.html`;
+  // Counts live intervals and any WebGL context, from before the page's first script.
+  const WATCH = `window.__oc = { intervals: new Set(), gl: 0 };
+    { const si = window.setInterval, ci = window.clearInterval, gc = HTMLCanvasElement.prototype.getContext;
+      window.setInterval = function (...a) { const id = si.apply(this, a); __oc.intervals.add(id); return id; };
+      window.clearInterval = function (id) { __oc.intervals.delete(id); return ci.call(this, id); };
+      HTMLCanvasElement.prototype.getContext = function (type, ...rest) { if (/webgl/i.test(type)) __oc.gl++; return gc.call(this, type, ...rest); }; }`;
+  const page = async (w, query) => {
+    const b = await launch({ w, h: 860, mobile: w < 600 });
+    await b.send("Page.addScriptToEvaluateOnNewDocument", { source: WATCH });
+    await b.open(`${base}?${query}`);
+    for (let i = 0; i < 80 && !await b.evaluate("document.querySelectorAll('.oc-tab:not([hidden])').length > 0 && document.querySelector('#ooga-chat').dataset.mode !== 'loading'").catch(() => false); i++) await b.sleep(50);
+    await b.sleep(600);
+    return b;
+  };
+  const tabs = (b) => b.evaluate("[...document.querySelectorAll('.oc-tab')].filter((t) => !t.hidden).map((t) => t.dataset.tab)");
+  const open = async (b, tab, settle = 450) => { await b.evaluate(`document.getElementById("oc-tab-${tab}").click()`); await b.sleep(settle); };
+  // One tab as it stands: inside the frame, titled, no wider page, and the frame's height.
+  const measure = (b, tab) => b.evaluate(`(() => {
+    const panel = document.getElementById("oc-view-${tab}").firstElementChild, f = document.querySelector(".oc-frame").getBoundingClientRect(), p = panel.getBoundingClientRect();
+    return { frame: Math.round(f.height), inside: p.left >= f.left - 1 && p.right <= f.right + 1 && p.top >= f.top - 1 && p.bottom <= f.bottom + 1,
+      titled: !!panel.querySelector(".panel-title"), wide: document.documentElement.scrollWidth > innerWidth + 1 };
+  })()`);
+  try {
+    // Every tab at three widths, for the three kinds of visitor.
+    const layout = {};
+    for (const [who, query] of [["signed-out", "state=signed-out"], ["listener", "state=listener"], ["contributor", "state=contributor&roster=mixed"]]) {
+      for (const w of [320, 390, 1024]) {
+        const b = await page(w, query);
+        try {
+          const seen = await tabs(b), each = {};
+          for (const tab of seen) {
+            await open(b, tab, tab === "roster" ? 1500 : 450);
+            each[tab] = await measure(b, tab);
+            await b.screenshot(join(shots, `${who}-${w}-${tab}.png`));
+          }
+          layout[`${who}@${w}`] = { tabs: seen.join(), ok: Object.values(each).every((m) => m.inside && m.titled && !m.wide),
+            heights: [...new Set(Object.values(each).map((m) => m.frame))], each };
+        } finally { b.close(); }
+      }
+    }
+    const tabsFor = (who) => [320, 390, 1024].map((w) => layout[`${who}@${w}`].tabs);
+    const gated = tabsFor("signed-out").every((t) => t === "chat,bananas,roster") && tabsFor("listener").every((t) => t === "chat,bananas,roster")
+      && tabsFor("contributor").every((t) => t === "chat,bananas,roster,players,commons");
+    const fits = Object.values(layout).every((l) => l.ok && l.heights.length === 1);
+    record("Ooga Chat page: every tab is the island's own titled panel inside its frame at 320, 390 and 1024 pixels, no page wider than the screen, one frame height for every tab, and the tabs offered by who the visitor is",
+      gated && fits, JSON.stringify(Object.fromEntries(Object.entries(layout).map(([k, l]) => [k, { tabs: l.tabs, ok: l.ok, heights: l.heights }]))));
+
+    // Contributing Oogas: every registered Ooga reachable, its sort and its details; an unreadable list says so.
+    let b = await page(1024, "state=signed-out");
+    let roster;
+    try {
+      await open(b, "roster", 1500);
+      roster = await b.evaluate(`(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms)), list = () => [...document.querySelectorAll(".oc-roster li[data-name]")];
+        const shown = () => list().filter((li) => !li.hidden).map((li) => li.dataset.name).join();
+        const before = shown(), away = document.querySelector(".oc-roster .roster-away button");
+        away.click(); await wait(100);
+        const all = shown(), sort = document.querySelector(".oc-roster select");
+        sort.value = "most"; sort.dispatchEvent(new Event("change")); await wait(100);
+        const most = shown();
+        sort.value = "recent"; sort.dispatchEvent(new Event("change")); await wait(100);
+        const first = list().find((li) => !li.hidden);
+        first.querySelector(".roster-name").click(); await wait(300);
+        const strip = first.querySelector(".roster-stats");
+        return { rows: list().length, before, all, most, chip: document.querySelector(".oc-roster .panel-chip").textContent,
+          strip: !!strip && !strip.hidden, face: !!strip && !!strip.querySelector("canvas"), kinds: strip ? strip.querySelector(".roster-stats-kinds").textContent : "",
+          repos: strip ? strip.querySelectorAll(".roster-stats-repos a").length : 0 };
+      })()`);
+    } finally { b.close(); }
+    b = await page(1024, "state=unavailable");
+    let unread, unserved;
+    try {
+      await open(b, "roster", 1200);
+      unread = await b.evaluate(`({ rows: document.querySelectorAll(".oc-roster li[data-name]").length,
+        note: (() => { const n = document.querySelector(".oc-roster-note"); return n && !n.hidden ? n.textContent : ""; })() })`);
+      // The service unreachable is no feed: no Feed the Oogas, no demo, and its closed note, never a simulated kiosk.
+      await open(b, "bananas", 450);
+      unserved = await b.evaluate(`({ feed: !document.querySelector('#oc-view-bananas [data-action="feed"]').hidden,
+        note: !document.querySelector('#oc-view-bananas .oc-pending').hidden, popup: !!document.querySelector('dialog.donation-popup'),
+        real: BL.donations.real, simulate: BL.donations.config.simulate })`);
+    } finally { b.close(); }
+    const reachable = roster.rows === 5 && roster.chip === "5 Oogas" && roster.before.split(",").length === 4 && roster.all.split(",").length === 5
+      && roster.all.split(",").includes("sample-moss") && roster.most.startsWith("sample-fern,") && roster.before.startsWith("sample-oak,")
+      && roster.strip && roster.face && /commit/i.test(roster.kinds) && roster.repos >= 1;
+    const honest = unread.rows === 0 && /can.t be reached/.test(unread.note);
+    record("Ooga Chat page: Contributing Oogas lists every registered Ooga (the away one behind Show away), sorts by latest and by most contributions, opens a contributor's details with their face, kinds and repositories, and says a list it can't read can't be reached rather than showing none",
+      reachable && honest, JSON.stringify({ roster, unread }));
+
+    // Tab switches: each view built once and kept, nothing left behind, no WebGL.
+    b = await page(1024, "state=contributor&roster=empty");
+    let hygiene;
+    try {
+      const seen = await tabs(b);
+      for (const tab of seen) await open(b, tab, tab === "roster" ? 1200 : 300);
+      const warm = await b.evaluate(`(() => { for (const v of document.querySelectorAll(".oc-view")) v.firstElementChild.__kept = true;
+        return { nodes: document.querySelectorAll("*").length, intervals: __oc.intervals.size }; })()`);
+      for (let round = 0; round < 6; round++) for (const tab of seen) await open(b, tab, 60);
+      await open(b, "chat", 300);
+      hygiene = await b.evaluate(`(() => { const ids = [...document.querySelectorAll("[id]")].map((e) => e.id);
+        return { views: document.querySelectorAll(".oc-view").length, kept: [...document.querySelectorAll(".oc-view")].every((v) => v.firstElementChild.__kept === true),
+          nodes: document.querySelectorAll("*").length, intervals: __oc.intervals.size, duplicates: ids.length - new Set(ids).size, gl: __oc.gl,
+          bars: document.querySelectorAll(".reaction-bar").length }; })()`);
+      hygiene.warm = warm;
+      hygiene.tabs = seen.length;
+    } finally { b.close(); }
+    const clean = hygiene.views === hygiene.tabs && hygiene.kept && hygiene.nodes === hygiene.warm.nodes && hygiene.intervals <= hygiene.warm.intervals
+      && hygiene.duplicates === 0 && hygiene.gl === 0 && hygiene.bars === 1;
+    record("Ooga Chat page: thirty tab switches build each view once and keep it, leave the DOM as it was with no duplicate id or extra interval, keep one emoji bar, and never make a WebGL context",
+      clean, JSON.stringify(hygiene));
+
+    // Feed the Oogas, signed out on the demo: the minimum, the message bar, the receipt, the name kept and the focus
+    // handed back, all by the visitor's own keys; the dialog follows the kiosk's screen (`data-stage`).
+    const stage = (b) => b.evaluate("document.querySelector('dialog.donation-popup')?.dataset.stage || ''");
+    const press = async (b, ...keys) => { for (const k of keys) { await b.key(k); await b.sleep(120); } return stage(b); };
+    const until = async (b, want, ms = 6000) => { for (let t = 0; t < ms && await stage(b) !== want; t += 100) await b.sleep(100); return stage(b); };
+    const openFeed = async (b) => {
+      await b.evaluate(`document.querySelector('.oc-bananas [data-action="feed"]').focus(); document.querySelector('.oc-bananas [data-action="feed"]').click()`);
+      await b.sleep(400);
+    };
+    const bananas = (b) => b.evaluate(`(() => { const q = (r) => document.querySelector('.oc-bananas [data-banana="' + r + '"]');
+      const top = [...q("recent").children].find((li) => !li.hidden);
+      return { donations: q("donations").textContent.trim(), leaders: q("leaders").innerText, top: top ? top.innerText.replace(/\\s+/g, " ").trim() : "" }; })()`);
+    b = await page(1024, "state=demo-payment");
+    let feed;
+    try {
+      await open(b, "bananas", 600);
+      const before = await bananas(b);
+      await openFeed(b);
+      const opened = await stage(b);
+      const refused = await press(b, "6", "8", "Enter");
+      await press(b, "Backspace");
+      const taken = await press(b, "9", "Enter");
+      const details = await press(b, "a");
+      const named = await b.evaluate("document.activeElement?.id");
+      await b.send("Input.insertText", { text: "sample-tester" });
+      await b.sleep(150);
+      await press(b, "Enter");
+      const invoice = await press(b, "Enter");
+      await press(b, "Enter");
+      const paid = await until(b, "paid");
+      await press(b, "Enter");
+      await b.sleep(300);
+      const back = await b.evaluate(`({ closed: !document.querySelector('dialog.donation-popup[open]'), focus: document.activeElement?.dataset?.action || "" })`);
+      const small = await bananas(b);
+      await b.evaluate(`(() => { const bar = document.querySelector('.oc-bananas [data-banana="bar"]'); if (bar.checked) bar.click(); })()`);
+      await b.sleep(150);
+      const quiet = (await bananas(b)).top;
+      // Again, at the message bar, with a message; the name is the one given last time.
+      await openFeed(b);
+      const kept = await b.evaluate("document.getElementById('donation-handle').value");
+      await press(b, "1", "0", "0", "0", "Enter");
+      await press(b, "a");
+      await press(b, "Tab");
+      await b.send("Input.insertText", { text: "Ooga from the check" });
+      await b.sleep(150);
+      await press(b, "Enter");
+      await press(b, "Enter");
+      await press(b, "Enter");
+      await until(b, "paid");
+      await press(b, "Enter");
+      await b.sleep(300);
+      const big = await bananas(b);
+      feed = { before: before.donations, opened, refused, taken, details, named, invoice, paid, back, small: small.donations, leader: /@sample-tester/.test(small.leaders),
+        quiet, kept, after: big.donations, said: big.top };
+    } finally { b.close(); }
+    const walked = feed.before === "4" && feed.opened === "amount" && feed.refused === "amount" && feed.taken === "quote" && feed.details === "details"
+      && feed.named === "donation-handle" && feed.invoice === "invoice" && feed.paid === "paid" && feed.back.closed && feed.back.focus === "feed";
+    const counted = feed.small === "5" && feed.leader && /sample-tester/.test(feed.quiet) && !/Ooga from the check/.test(feed.quiet)
+      && feed.kept === "sample-tester" && feed.after === "6" && /sample-tester/.test(feed.said) && /Ooga from the check/.test(feed.said);
+    record("Ooga Chat page: on the demo, signed out, Feed the Oogas refuses 68 sats and takes 69, names the donor on its own details screen, pays, closes with the focus back on its button, counts the tip in the Bananas panel, keeps the name for the next tip, and carries a message only at 1,000 sats",
+      walked && counted, JSON.stringify(feed));
+
+    // The donation's screens at each width, for review, inside the screen.
+    const screens = {};
+    for (const w of [320, 390, 1024]) {
+      b = await page(w, "state=demo-payment");
+      try {
+        await open(b, "bananas", 600);
+        await openFeed(b);
+        const fit = () => b.evaluate(`(() => { const r = document.querySelector('dialog.donation-popup').getBoundingClientRect();
+          return r.left >= -1 && r.right <= innerWidth + 1 && r.width > 0 && document.documentElement.scrollWidth <= innerWidth + 1; })()`);
+        const seen = [];
+        for (const [name, keys] of [["amount", []], ["quote", ["6", "9", "Enter"]], ["details", ["a"]], ["invoice", ["Enter", "Enter"]]]) {
+          const at = await press(b, ...keys);
+          seen.push(at === name && await fit());
+          await b.screenshot(join(shots, `feed-${w}-${name}.png`));
+        }
+        screens[w] = seen.every(Boolean);
+      } finally { b.close(); }
+    }
+    record("Ooga Chat page: Feed the Oogas' amount, quote, details and invoice screens each fit inside the screen at 320, 390 and 1024 pixels",
+      Object.values(screens).every(Boolean), JSON.stringify(screens));
+
+    // Real mode (`state=real-payment`, the feed live as the service answers it), this server standing in for the relay.
+    // Unreachable, refusing or answering with an invoice, the kiosk is the real one and asks the API each time, and it
+    // never falls back to a simulated payment: no wait, nothing paid from a key and nothing counted. Every screen it
+    // showed is kept, watched from before the dialog is made.
+    b = await page(1024, "state=real-payment");
+    let real;
+    try {
+      await open(b, "bananas", 600);
+      await b.evaluate(`window.__stages = []; new MutationObserver((list) => { for (const m of list) if (m.target.dataset.stage) __stages.push(m.target.dataset.stage); })
+        .observe(document.body, { subtree: true, attributes: true, attributeFilter: ["data-stage"] })`);
+      const before = await bananas(b), tries = {}, posts = {};
+      relayed.length = 0;
+      await openFeed(b);
+      const help = await b.evaluate("document.querySelector('dialog.donation-popup .help').textContent");
+      for (const mode of ["down", "closed", "invoice"]) {
+        relay = mode;
+        const from = relayed.length;
+        await press(b, "Backspace", "Backspace", "Backspace", "Backspace", "Backspace", "1", "0", "0", "0", "Enter");
+        tries[mode] = await until(b, mode === "invoice" ? "quote" : "problem");
+        posts[mode] = relayed.slice(from).filter((r) => r === "POST /donations/invoice").length;
+        if (mode !== "invoice") await press(b, "Enter");
+      }
+      tries.shown = await press(b, "Enter");
+      await press(b, "Enter", " ", "Enter");
+      await b.sleep(1500);
+      tries.held = await stage(b);
+      for (let i = 0; i < 4 && await b.evaluate("!!document.querySelector('dialog.donation-popup[open]')"); i++) await press(b, "Escape");
+      const back = await b.evaluate(`({ closed: !document.querySelector('dialog.donation-popup[open]'), focus: document.activeElement?.dataset?.action || "" })`);
+      real = { tries, posts, help, back, stages: [...new Set(await b.evaluate("__stages"))], relayed: relayed.slice(), before: before.donations,
+        after: (await bananas(b)).donations, real: await b.evaluate("BL.donations.real"), simulate: await b.evaluate("BL.donations.config.simulate") };
+    } finally { b.close(); }
+    // Each try asks the API (Chrome may itself retry a dropped call), and nothing but invoices and the socket is called.
+    const asked = Object.values(real.posts).length === 3 && Object.values(real.posts).every((n) => n >= 1)
+      && real.relayed.every((r) => r === "POST /donations/invoice" || r.startsWith("GET /donations/socket"));
+    const honestReal = real.real && real.simulate === false && !/simulation/i.test(real.help) && real.tries.down === "problem" && real.tries.closed === "problem"
+      && real.tries.invoice === "quote" && real.tries.shown === "invoice" && real.tries.held === "invoice" && !real.stages.some((s) => s === "waiting" || s === "paid")
+      && real.before === real.after && real.back.closed && real.back.focus === "feed" && asked;
+    const noFallback = !unserved.feed && unserved.note && !unserved.popup && !unserved.real && unserved.simulate === false;
+    record("Ooga Chat page: with the service's feed live, Feed the Oogas is the real kiosk, asks the API each time and shows its answer (unreachable, refused, or an invoice no key can mark paid), never simulates or counts a payment and hands the focus back; with the service unreachable there is no Feed at all",
+      honestReal && noFallback, JSON.stringify({ real, unserved }));
+  } finally {
+    server.close();
+    rmSync(out, { recursive: true, force: true });
+  }
+};
 // The timer identifies the current level’s shared record without borrowing a local personal best.
 // Exercise the real HUD and stylesheet in one lightweight browser, without booting WebGL or live services.
 const cloudHopperRecordChecks = async () => {
@@ -10763,7 +11045,7 @@ const donationClientChecks = async () => {
     JSON.stringify({ advertisedLimits, validatedLimits, empty, tally, boards, legacyBoard, replay, raisedBar, snapshot, quiet, raisedLater, keptBoth, subBarRequest, overBarRequest, owned, heard, unlit, received }));
 
   let now = Date.now(), detailsOpen = false;
-  const kioskContext = { window: { BL: { jumbotron: { text: { GLYPH_W: 5, GLYPH_H: 7, TRACKING: 1 } }, qr: { encode: () => ({ size: 1, modules: [1] }) }, donations: D } },
+  const kioskContext = { window: { BL: { jumbotronFont: { GLYPH_W: 5, GLYPH_H: 7, TRACKING: 1 }, qr: { encode: () => ({ size: 1, modules: [1] }) }, donations: D } },
     document: { createElement: () => ({ getContext: () => ({}) }) }, Date: class extends Date { static now() { return now; } } };
   for (const name of ["factory-kiosk-core", "factory-kiosk"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), kioskContext);
   const F = kioskContext.window.BL.factoryKiosk.create({ real: true, link: () => "/lightning", bananasFor: () => 1,
@@ -10945,10 +11227,11 @@ const donationClientChecks = async () => {
   // Regression: the pile showed whole gameplay stock (79) beside a panel valued at 77.97.
   const valueBL = { game: {}, scene: {}, signGlyphs: { lettering() {}, letter() {} }, nativeIcons: { fill() {}, voice: () => ({ cloneNode: () => ({}) }) }, donationRate: { current: null }, donations: { real: true,
     state: { tally: { sats: 96458, rate: { usdPerBtc: 80832.63, at: 10 } } } } };
-  runInNewContext(await readFile(new URL("../src/js/hud.js", import.meta.url), "utf8"), {
-    window: { BL: valueBL, matchMedia: () => ({ matches: false }) },
-    document: { querySelectorAll: () => [], createElementNS: () => ({ setAttribute() {}, append() {} }) }
-  });
+  const valueContext = { window: { BL: valueBL, matchMedia: () => ({ matches: false }) },
+    document: { querySelectorAll: () => [], createElementNS: () => ({ setAttribute() {}, append() {} }) } };
+  runInNewContext(await readFile(new URL("../src/js/banana-panel.js", import.meta.url), "utf8"), valueContext);
+  runInNewContext(await readFile(new URL("../src/js/roster-panel.js", import.meta.url), "utf8"), valueContext);
+  runInNewContext(await readFile(new URL("../src/js/hud.js", import.meta.url), "utf8"), valueContext);
   const valueText = valueBL.hud.donationValueText, values = [valueText()];
   valueBL.donationRate.current = { usdPerBtc: 100000, at: 9 }; values.push(valueText());
   valueBL.donationRate.current.at = 11; values.push(valueText());
@@ -10964,7 +11247,7 @@ const donationClientChecks = async () => {
     values.join("|") === "77.97|77.97|96.46|100.00|—|0.00|—|0.25|1,250.00", JSON.stringify(values));
 
   const drawn = [], blankGlyph = [0, 0, 0, 0, 0, 0, 0];
-  kioskContext.window.BL.jumbotron.text.glyphOf = ch => { drawn.push(ch); return blankGlyph; };
+  kioskContext.window.BL.jumbotronFont.glyphOf = ch => { drawn.push(ch); return blankGlyph; };
   const paintContext = new Proxy({}, { get: () => () => {} });
   kioskContext.document.createElement = () => ({ getContext: () => paintContext });
   let capCalls = 0;
@@ -11000,7 +11283,7 @@ const donationClientChecks = async () => {
   let noteFails = 0;
   for (const id of ["donation-popup", "donation-screen", "donation-handle", "donation-message", "donation-close",
     "donation-fields", "factory-donation-fields", "donation-details-status"]) elements.set(id, {
-    listeners: new Map(), open: false, value: "", disabled: false,
+    listeners: new Map(), open: false, value: "", disabled: false, dataset: {},
     addEventListener(type, fn) { this.listeners.set(type, fn); }, removeEventListener(type) { this.listeners.delete(type); },
     showModal() { this.open = true; }, close() { this.open = false; }, focus() { this.focused = true; }, blur() { this.focused = false; },
     select() { this.selected = true; }, setSelectionRange() {}, scrollIntoView() {}, append() {}, insertBefore() {}, querySelector: () => ({}), getContext: () => ({})
@@ -11024,7 +11307,8 @@ const donationClientChecks = async () => {
   runInNewContext(await readFile(new URL("../src/js/donation-popup.js", import.meta.url), "utf8"), kioskContext);
   let identityWrites = 0;
   const popupGame = { state: { handle: "", message: "hello", recentHandles: ["Ooga-Dev"] }, rememberHandle() {}, setIdentity(value) { identityWrites++; Object.assign(this.state, value); } };
-  const popup = K.donationPopup.create(popupGame), dialog = elements.get("donation-popup");
+  const popup = K.donationPopup.create(popupGame, undefined, { login: () => K.net.state.me?.login, bananasFor: (sats) => K.game.bananasFor(sats),
+    price: () => K.chain.snapshot.priceUsd, link: () => `${kioskContext.location.origin}/donate` }), dialog = elements.get("donation-popup");
   let closedCount = 0;
   popup.onClose(() => closedCount++);
   const popupQuote = async () => { popup.open(); for (const key of ["1", "0", "0", "0", "Enter"]) popupFlow.key({ key }); await Promise.resolve(); };
@@ -11096,6 +11380,9 @@ const donationClientChecks = async () => {
   elements.get("donation-fields").listeners.get("change")({ target: messageInput });
   const clearedDefault = deferredWrite && popupGame.state.message === "" && identityWrites === writesBeforeInput + 1;
   popup.close();
+  // Reopening keeps the name the donor last gave (#656), not the login; the login comes back only for one never given.
+  const keptName = popup.defaults().handle === "another-name" && popupGame.state.handle === "another-name";
+  popupGame.state.handle = "";
   K.donations.real = false;
   popup.open(true);
   const demoAnonymous = popup.defaults().handle === "" && popup.details().handle === "";
@@ -11104,9 +11391,9 @@ const donationClientChecks = async () => {
   const demoOutside = !dialog.open && closedCount === beforeDemoClose + 1;
   K.donations.real = true;
   const realAfterDemo = popup.defaults().handle === "tester" && popup.defaults().message === "";
-  record("donation popup: real invoices ignore backdrop dismissal, message typing defers the local save until change, a cleared real message updates the saved default, demo anonymous stays empty, demo backdrop dismissal closes once, and the next real default uses the signed-in login",
-    realOutside && clearedDefault && demoAnonymous && demoOutside && realAfterDemo,
-    JSON.stringify({ realOutside, clearedDefault, demoAnonymous, demoOutside, realAfterDemo }));
+  record("donation popup: real invoices ignore backdrop dismissal, message typing defers the local save until change, a cleared real message updates the saved default, reopening keeps the name last given, demo anonymous stays empty, demo backdrop dismissal closes once, and with no name given the next real default uses the signed-in login",
+    realOutside && clearedDefault && keptName && demoAnonymous && demoOutside && realAfterDemo,
+    JSON.stringify({ realOutside, clearedDefault, keptName, demoAnonymous, demoOutside, realAfterDemo }));
   // A saved name completes after an explicit preview; a typed prefix survives plain Tab. A tip under the message
   // bar goes out without a message, and its details screen offers the name alone.
   const settle = () => new Promise((resolve) => setImmediate(resolve));
@@ -21585,7 +21872,7 @@ const timechainRoomChecks = async () => {
   // The shell's sphere, built for every room with its kind's own part set aside: the doorway's passage cut through wall
   // and screen alike, and the screen in quads (Canvas 2D maps a picture over four corners) none of which crosses the
   // dome canvas's seam over the door.
-  for (const name of ["math", "scene", "models", "jumbotron", "timechain-room-models"])
+  for (const name of ["math", "scene", "models", "jumbotron-font", "jumbotron", "timechain-room-models"])
     runInNewContext(await readFile(join(root, "src/js/" + name + ".js"), "utf8"), context);
   const M = context.window.BL.models, RM = context.window.BL.timechainRoomModels, S = context.window.BL.scene, math = context.window.BL.math;
   for (const { kind } of R.ROOMS) RM.KINDS[kind] = { plan() {} };
@@ -30080,7 +30367,7 @@ const audienceChecks = async BL => {
   const crowd = [row("me", "speaker", { source: "chat", self: true })];
   for (let i = 0; i < 1000; i++) crowd.push(row(`l${String(i).padStart(4, "0")}`, "listener"));
   m.apply(snap("dsb", crowd, { epoch: 3, rev: 1, you: { speak: "active" } }));
-  const paged = m.pages() === 21 && m.page(0).length === A.PAGE && m.page(20).length === 1 && m.order.length === 1001 && m.status === "live";
+  const whole1001 = m.order.length === 1001 && m.status === "live";
   const hand = m.canHand();
   m.apply({ t: "audience", v: 1, kind: "delta", epoch: 3, rev: 2, base: 1, zone: "dsb", upsert: [row("me", "listener", { self: true })] });
   const lowered = !m.canHand();
@@ -30092,11 +30379,11 @@ const audienceChecks = async BL => {
     f({ speak: "active" }, v({ enabled: true, publishing: true })), f({ speak: "active" }, v({ enabled: true, publishing: true, muted: true })), f({ speak: "active" }, v({ enabled: true, joining: true })), f({ speak: "eligible" }, v({ returning: true, muted: true }))];
   m.reset("unavailable"); const kept = m.desired === "dsb" && m.rows.size === 0 && m.epoch === -1;
   m.reset("off"); const forgot = m.desired === null;
-  record("Ooga Chat audience: one roster ordered by source, contributions, the visitor and name; mic and hand changes never reorder; a gap asks once for a resync; an older epoch and half a chunked snapshot change nothing; the desired zone waits apart from the confirmed one; a thousand listeners page rather than truncate; no row keeps a picture the island cannot serve",
+  record("Ooga Chat audience: one roster ordered by source, contributions, the visitor and name; mic and hand changes never reorder; a gap asks once for a resync; an older epoch and half a chunked snapshot change nothing; the desired zone waits apart from the confirmed one; a thousand listeners are all kept, never truncated; no row keeps a picture the island cannot serve",
     first && !again && asked === 1 && order === "high,tiea,tieb,low,amy,zed,me,abe,dup,lena" && steady && gap === "resync" && resyncs === 1 && stale === "stale"
-      && old === "ignored" && half === 10 && whole && switched && connecting && paged && pics.every(p => p === undefined)
+      && old === "ignored" && half === 10 && whole && switched && connecting && whole1001 && pics.every(p => p === undefined)
       && kept && forgot,
-    JSON.stringify({ first, again, asked, order, steady, gap, resyncs, stale, old, half, whole, switched, connecting, paged, pics }));
+    JSON.stringify({ first, again, asked, order, steady, gap, resyncs, stale, old, half, whole, switched, connecting, whole1001, pics }));
   record("Ooga Chat footer and hand: a listener has a disabled Unmute and a Join Voice the room must call eligible (pending, denied, unknown or an unsupported browser never enable it); a speaker has Mute or Unmute and Leave Voice; only an active speaker may raise the hand",
     footers.join("|") === "Unmute:true/Join Voice:false|Unmute:true/Join Voice:true|Unmute:true/Join Voice:true|Unmute:true/Join Voice:true|Unmute:true/Join Voice:true|Mute:false/Leave Voice:false|Unmute:false/Leave Voice:false|Mute:true/Leave Voice:false|Unmute:false/Leave Voice:false"
       && hand && lowered,
@@ -30123,9 +30410,9 @@ const audienceNetChecks = async BL => {
     !shut.sent && !shut.state && open.sent && !open.other && open.state && heard.join() === "snapshot" && frames.length === 1 && frames[0].t === "audience-view" && frames[0].v === 1 && frames[0].zone === "dsb" && !dropped,
     JSON.stringify({ shut, open, heard, frames, dropped }));
 };
-// Rule (#660): Ooga Chat's panel on a DOM stand-in, through its own handlers: it asks for the visitor's own zone, draws a
-// page of a long roster and nothing past it, keeps each row's nodes by id across a delta and paging, touches only what
-// changed, drops removed rows with their pictures, sends nothing for the zone already chosen, gates Join Voice and the
+// Rule (#660, #656): Ooga Chat's panel on a DOM stand-in, through its own handlers: it asks for the visitor's own zone,
+// draws the whole of a long roster as tiles (audience-tiles.js) for its slab to scroll, keeps each tile's nodes by id
+// across a delta, touches only what changed, drops removed tiles with their pictures, sends nothing for the zone already chosen, gates Join Voice and the
 // hand on the room's word, shows a gap honestly with a Retry that asks afresh (joining too), draws the roster again
 // after a reconnect it sat out hidden, and forgets everything on sign-out.
 const cloudPanelChecks = async BL => {
@@ -30137,6 +30424,8 @@ const cloudPanelChecks = async BL => {
     setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; },
     removeAttribute(k) { delete this.attrs[k]; if (k === "src") { this.src = undefined; this.cleared++; } },
     append(...xs) { for (const x of xs) { if (x.parent) x.remove(); x.parent = this; this.children.push(x); } },
+    insertBefore(x, ref) { if (x.parent) x.remove(); x.parent = this; const at = ref ? this.children.indexOf(ref) : -1; this.children.splice(at < 0 ? this.children.length : at, 0, x); return x; },
+    focus() {},
     prepend(x) { x.parent = this; this.children.unshift(x); },
     replaceChildren(...xs) { this.replaced++; for (const c of this.children) c.parent = null; this.children = []; this.append(...xs); },
     remove() { if (this.parent) { this.parent.children.splice(this.parent.children.indexOf(this), 1); this.parent = null; } },
@@ -30159,34 +30448,31 @@ const cloudPanelChecks = async BL => {
     voice: { stats, support: () => ({ secure: true, webrtc: true, mic: true }), subscribe: sub("voice"), mutedLocally: login => local.has(login), muteLocal: (login, on) => on ? local.add(login) : local.delete(login), setMuted() {}, toggle() {}, leave() {} },
     hud: { voiceIcon: el("svg"), voiceWords: (look, self) => `${look}${self ? " (you)" : ""}`, renderFaceIcon() {} },
     models: { caveman: () => ({}) }, contributors: { traitsFor: () => ({}) }, characters: { get: name => name === "ooga" ? {} : null },
-    nativeIcons: { svg: () => el("svg") }, sheet: { visible: () => visible },
+    nativeIcons: { svg: () => el("svg"), voice: () => el("svg") }, sheet: { visible: () => visible },
     reactions: { mount: (host, options) => { gate = options.handAllowed; }, refresh: () => refreshes.push(gate()) } } };
   const document = { getElementById: $, createElement: el, querySelector: () => el("svg"), addEventListener() {}, removeEventListener() {} };
-  runInNewContext(readFileSync(join(root, "src/js/cloud-panel.js"), "utf8"), { window, document, location: { search: "" }, URLSearchParams, MutationObserver: class { constructor(fn) { observers.push(fn); } observe() {} disconnect() {} } });
+  runInNewContext(["src/js/audience-tiles.js", "src/js/cloud-panel.js"].map(file => readFileSync(join(root, file), "utf8")).join("\n"), { window, document, getComputedStyle: () => ({ gridTemplateColumns: "1fr 1fr 1fr 1fr" }), location: { search: "" }, URLSearchParams, MutationObserver: class { constructor(fn) { observers.push(fn); } observe() {} disconnect() {} } });
   const P = window.BL.cloudPanel, hear = msg => { for (const fn of subs.audience) fn(msg); }, tick = () => { for (const fn of subs.net) fn(state); };
   const row = (id, role, extra = {}) => ({ id, login: id, provider: "github", role, ...(role === "speaker" ? { source: "world" } : {}), ...extra });
   const asked = sent.map(x => `${x.type}:${x.zone}`).join();
   const crowd = [row("w1", "speaker", { contributions: 9 }), row("c1", "speaker", { character: "ooga" }), row("tester", "listener", { self: true })];
   for (let i = 0; i < 300; i++) crowd.push(row(`l${String(i).padStart(3, "0")}`, "listener"));
   hear({ t: "audience", v: 1, kind: "snapshot", epoch: 1, rev: 1, zone: "dsb", rows: crowd, you: { speak: "pending" } });
-  const drawn = { rows: list.children.length, cached: P.stats.cached, pages: P.stats.pages, nav: !$("cloud-pages").hidden, label: $("cloud-page").textContent };
+  const part = (node, cls) => { for (const c of node.children) { if (c.className.split(" ").includes(cls)) return c; const found = part(c, cls); if (found) return found; } return null; };
+  const drawn = { rows: list.children.length, cached: P.stats.cached, order: list.children.slice(0, 3).map(li => li.dataset.id).join() };
   const pending = $("cloud-voice").disabled && $("cloud-voice").textContent === "Join Voice" && $("cloud-mute").disabled && $("cloud-mute").textContent === "Unmute";
-  const w1 = list.children[0], ring = w1.children[0].dataset.source, listenerMic = list.children[2].children[3].hidden;
+  const w1 = list.children[0], ring = w1.dataset.source, listenerMic = part(list.children[2], "cloud-mic").hidden;
   const madeBefore = made, replacedBefore = list.replaced;
   hear({ t: "audience", v: 1, kind: "delta", epoch: 1, rev: 2, base: 1, zone: "dsb", upsert: [row("w1", "speaker", { contributions: 9, mic: "muted" })], you: { speak: "eligible" } });
-  const delta = list.children[0] === w1 && made === madeBefore && list.replaced === replacedBefore && w1.children[3].dataset.voice === "muted";
+  const delta = list.children[0] === w1 && made === madeBefore && list.replaced === replacedBefore && part(w1, "cloud-mic").dataset.voice === "muted";
   const eligible = !$("cloud-voice").disabled;
-  list.handlers.click[0]({ target: w1.children[3] });
-  const localMute = local.has("w1") && w1.children[3].getAttribute("aria-pressed") === "true";
-  for (const fn of $("cloud-next").handlers.click) fn({});
-  const second = list.children[0].dataset.id;
-  for (const fn of $("cloud-prev").handlers.click) fn({});
-  const back = list.children[0] === w1;
-  const c1img = list.children[1].children[0].children[0];
+  list.handlers.click[0]({ target: part(w1, "cloud-mic") });
+  const localMute = local.has("w1") && part(w1, "cloud-mic").getAttribute("aria-pressed") === "true";
+  const c1img = part(list.children[1], "cloud-portrait").children[0];
   // The room names a chat speaker's picture by Ooga Chat's own path, which the island does not serve: no request for it.
   hear({ t: "audience", v: 1, kind: "delta", epoch: 1, rev: 3, base: 2, zone: "dsb", remove: ["c1"], upsert: [row("tester", "speaker", { source: "chat", self: true, avatar: "/api/chat/avatar/tester" })] });
   const removed = c1img.tag === "img" && c1img.cleared === 1 && !list.children.some(li => li.dataset.id === "c1") && refreshes.at(-1) === true && $("cloud-foot-name").dataset.source === "chat";
-  const noPicture = list.children.find(li => li.dataset.id === "tester").children[0].children[0].tag === "svg";
+  const noPicture = part(list.children.find(li => li.dataset.id === "tester"), "cloud-portrait").children[0].tag === "svg";
   const sentBefore = sent.length;
   for (const fn of zones[1].handlers.click) fn({ currentTarget: zones[1], detail: 1 });
   const noop = sent.length === sentBefore && zones[1].getAttribute("aria-pressed") === "true";
@@ -30213,11 +30499,11 @@ const cloudPanelChecks = async BL => {
   state.logoutEpoch = 1; state.me = null; tick();
   const signedOut = list.children.length === 0 && P.stats.cached === 0 && P.stats.desired === null && !P.available();
   P.dispose();
-  record("Ooga Chat panel: asks for the visitor's own zone, draws one page of a long roster, keeps each row's nodes through a delta and paging, drops removed rows and their pictures, asks for no picture the island cannot serve, ignores the zone already chosen, gates Join Voice and the hand on the room's word, shows a gap with a Retry that asks afresh (joining too), draws the roster again after a hidden reconnect, and forgets everything on sign-out",
-    asked === "audience-view:dsb" && drawn.rows === BL.audience.PAGE && drawn.cached === BL.audience.PAGE && drawn.pages === 7 && drawn.nav && drawn.label === "1–50 of 303"
-      && ring === "world" && listenerMic && pending && delta && eligible && localMute && second === "l047" && back && removed && noPicture && noop && switched && joinRetry && stale && staleRetry
+  record("Ooga Chat panel: asks for the visitor's own zone, draws the whole of a long roster as tiles, keeps each tile's nodes through a delta, drops removed tiles and their pictures, asks for no picture the island cannot serve, ignores the zone already chosen, gates Join Voice and the hand on the room's word, shows a gap with a Retry that asks afresh (joining too), draws the roster again after a hidden reconnect, and forgets everything on sign-out",
+    asked === "audience-view:dsb" && drawn.rows === 303 && drawn.cached === 303 && drawn.order === "w1,c1,tester"
+      && ring === "world" && listenerMic && pending && delta && eligible && localMute && removed && noPicture && noop && switched && joinRetry && stale && staleRetry
       && dropped && rejoined && signedOut && unsubs.length === 3,
-    JSON.stringify({ asked, drawn, ring, listenerMic, pending, delta, eligible, localMute, second, back, removed, noPicture, noop, switched, joinRetry, stale, staleRetry, dropped, rejoinAsk, rejoined, signedOut, unsubs }));
+    JSON.stringify({ asked, drawn, ring, listenerMic, pending, delta, eligible, localMute, removed, noPicture, noop, switched, joinRetry, stale, staleRetry, dropped, rejoinAsk, rejoined, signedOut, unsubs }));
 };
 const chatClientChecks = async () => {
   const nodes = new Map(), timers = new Map(); let timerId = 0, uuid = 0;
@@ -30233,6 +30519,7 @@ const chatClientChecks = async () => {
     badges: {}, inPanel: false, viewed: null, setBadge(name, count) { this.badges[name] = count; }, watchViews(panel, fn) { this.viewed = fn; }, attending() { return sheetApi.inPanel; } };
   const sent = [], window = { BL: { sheet: sheetApi, net: { state: { chatUnicode: true }, CHAT_MAX: 160, CHAT_KEEP: 100, subscribe() {}, subscribeChat() {}, sendChat(text, clientId) { sent.push({ text, clientId }); return true; } }, donations: { sanitize: (text, max) => String(text || "").replace(/[^\w .,!?'@#:-]/g, "").trim().slice(0, max) } }, crypto: { randomUUID: () => "id-" + ++uuid }, matchMedia: () => ({ matches: true }), setTimeout(fn) { timers.set(++timerId, fn); return timerId; }, clearTimeout(id) { timers.delete(id); } };
   runInNewContext(await readFile(join(root, "src/js/chat-policy.js"), "utf8"), { window });
+  runInNewContext(await readFile(join(root, "src/js/commons-log.js"), "utf8"), { window, document, Intl });
   runInNewContext(await readFile(join(root, "src/js/chat.js"), "utf8"), { window, document, MutationObserver: class { observe() {} }, Intl });
   const C = window.BL.chat, input = nodes.get("chat-input"), send = nodes.get("chat-send"), status = nodes.get("chat-status-text"), edit = text => { input.value = text; input.handlers.input(); }, submit = () => nodes.get("chat-form").handlers.submit({ preventDefault() {} }), receipt = id => C.heard([], false, { clientId: id, accepted: true });
   C.account({ backend: true, me: { id: 1, login: "Tester" }, room: "live" });
@@ -30298,7 +30585,7 @@ const persistentPanel = (BL, net, saved = new Map()) => {
     setTimeout: fn => { timers.set(nextTimer, fn); return nextTimer++; }, clearTimeout: id => timers.delete(id), matchMedia: () => ({ matches: true }) },
     document: { createElement: make, getElementById: id => ids.get(id), body, addEventListener() {}, removeEventListener() {} },
     localStorage: { getItem: key => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value) }, Event: class {} };
-  runInNewContext(readFileSync(join(root, "src/js/reactions.js"), "utf8"), context);
+  runInNewContext(["src/js/reaction-bar.js", "src/js/reactions.js"].map(file => readFileSync(join(root, file), "utf8")).join("\n"), context);
   const bars = [...ids.values()].map(host => { const card = host.children[0]; return { card, buttons: [...card.children[0].children, card.children[2]] }; });
   const event = (slot, type, extra = {}, bar = 0) => {
     const e = { target: bars[bar].buttons[slot], button: 0, pointerId: 1, isPrimary: true, clientX: 0, clientY: 0, preventDefault() {}, ...extra };
@@ -31073,7 +31360,7 @@ const raceRigChecks = async () => {
   const context = { window: {}, location: { search: "?debug=1&rain=0" }, URLSearchParams, crypto: webcrypto };
   for (const name of ["math", "scene", "models", "hero-body", "caves", "contributor-identities", "activity-repos", "characters"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
   for (const name of readdirSync(join(root, "src", "characters")).filter(name => name.endsWith(".js")).sort()) runInNewContext(readFileSync(join(root, "src", "characters", name), "utf8"), context);
-  for (const name of ["contributors", "sign-glyphs", "hub-models", "dressing", "daylight", "race-models", "race-track", "racers", "mirror-ripples", "mirror-body", "dsb-water", "gl-renderer"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+  for (const name of ["roster-panel", "contributors", "sign-glyphs", "hub-models", "dressing", "daylight", "race-models", "race-track", "racers", "mirror-ripples", "mirror-body", "dsb-water", "gl-renderer"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
   const BL = context.window.BL, scene = BL.scene.createNode(), released = [];
   const renderer = { createRig: BL.glRenderer.createRig, releaseGeometry: geometry => released.push(geometry) };
   const track = BL.raceTrack.build(BL.raceTrack.TRACKS[0], { renderer, slots: CAST, rain: false, hour: 12 });
@@ -33133,7 +33420,8 @@ const oogaChatChecks = async () => {
     const fixtureJs = withFixtures.files.find((file) => file.path.startsWith("js/ooga-chat-fixture-"));
     const build = {
       modules: manifest.scripts.every((src) => B.SHARED.includes(`../${src}`) || /^ooga-chat-[a-z-]+\.js$/.test(src)) && !manifest.scripts.includes("ooga-chat-fixtures.js"),
-      island: !/glRenderer|BL\.scene\b|BL\.net\b|BL\.director|terrain/.test(js),
+      // donations.js only reads the island's account where one is loaded (`BL.net?.`), so that alone is no dependency.
+      island: !/glRenderer|BL\.scene\b|BL\.net\b(?!\?\.)|BL\.director|terrain/.test(js),
       noFixture: !js.includes("BL.oogaChatFixtures =") && !js.includes("sample-contributor") && !manifest.files.some((file) => file.path.includes("fixture")),
       page: (page.match(/<script /g) || []).length === 1 && (page.match(/<link rel="stylesheet"/g) || []).length === 1 && !/<style|<script>/.test(page) && page.includes(`content="${manifest.build}"`),
       art: !!art && js.includes(`"/${art.path}"`),
@@ -36152,6 +36440,7 @@ if (ARGS.includes("cloud-hopper-arcade")) {
   await dispose();
 }
 if (ARGS.includes("cloud-hopper-record")) { await highscoreClientChecks(); await cloudHopperRecordChecks(); }
+if (ARGS.includes("ooga-chat-app")) { await oogaChatAppChecks(); await dispose(); }
 // The shim installs browser globals in this process, so it runs after the browser lanes finish with Chrome.
 if (UNIT || ARGS.includes("cloud-hopper-controller")) await unitChecks();
 if (PROTOCOL) await pokerProtocolChecks();

@@ -827,21 +827,6 @@ body[data-active-scene="block"] .mode-hud {
 
 .roster-hint:not(:has(> :not([hidden]))) { display: none; }
 
-/* Bananas: the all-time total on top, its count and sats beneath, then the donors and the latest tips in the same
-   slab. Like every panel's slab it scrolls above the panel's action, so Feed the Oogas stays at the foot as
-   Contributor sign-in does; its sections never shrink, and each list scrolls inside its own window: the donors' five
-   donor rows tall (`--banana-five`), the latest tips' at least as tall and taking whatever room the slab has left. The
-   slab may shrink to nothing, so even a phone's short drawer keeps the action whole; only a drawer shorter than the
-   title and the action scrolls the panel. */
-.panel > .banana-slab {
-  --banana-five: calc(5 * (17px + 12px + 1px));
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  padding: 12px 12px 10px;
-}
-.banana-slab > section { flex: none; }
-.banana-slab > .banana-recent { flex: 1 0 auto; display: flex; flex-direction: column; }
 /* A phone on its side leaves the default drawer under 100px: too short to stack the title, a row of the slab and a
    44px Feed the Oogas. While the Bananas panel shows there, its untouched drawer stands at least 200px tall
    (sheet.js's BANANA_DRAWER, which also holds a resized or saved drawer to it and, that drawer too tall to leave the
@@ -851,248 +836,6 @@ body[data-active-scene="block"] .mode-hud {
     --drawer-height: max(calc(var(--drawer-share) * 1vh), 200px);
   }
 }
-.banana-leaders,
-.banana-recent-list {
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.45) transparent;
-}
-/* The donors' window holds five rows however few entries it has. The latest tips' is never shorter and grows into the
-   slab's spare room, unless it holds nothing: then it keeps the donors' height with its note under it. */
-.banana-leaders { height: var(--banana-five); }
-.banana-recent-list { flex: 1 0 var(--banana-five); min-height: var(--banana-five); }
-.banana-recent:has(> .banana-empty:not([hidden])) > .banana-recent-list { flex-grow: 0; }
-
-/* The total's title over it, and the total with the banana beside it as tall as its figures, both flush left. */
-.banana-hero {
-  display: grid;
-  row-gap: 4px;
-  text-align: left;
-}
-
-.banana-hero-value {
-  margin: 0;
-  color: var(--accent-text);
-  font-size: clamp(26px, 7vw, 34px);
-  font-weight: 700;
-  line-height: 1.05;
-  font-variant-numeric: tabular-nums;
-  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
-  overflow-wrap: anywhere;
-}
-
-/* On the figures' baseline and a cap height tall (the em fallback is about a cap). */
-.banana-hero-icon {
-  width: 0.72em;
-  height: 0.72em;
-  width: 1cap;
-  height: 1cap;
-  margin-right: 0.2em;
-  vertical-align: baseline;
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
-}
-
-.banana-hero-label,
-.banana-totals dt,
-.banana-board-labels {
-  color: rgba(243, 239, 228, 0.58);
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.banana-totals {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin: 12px 0 0;
-  padding-top: 10px;
-  text-align: left;
-}
-
-.banana-totals,
-.banana-rates,
-.banana-board {
-  border-top: 1px solid rgba(0, 0, 0, 0.4);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-}
-
-.banana-totals div { min-width: 0; }
-
-.banana-totals dd {
-  margin: 3px 0 0;
-  color: var(--paper);
-  font-size: 14px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
-}
-
-/* A banana's price in dollars and sats, then a bitcoin's in bananas, a line each, flush left. A stale price dims; the
-   line says so on hover. */
-.banana-rates {
-  display: grid;
-  gap: 6px;
-  margin: 12px 0 0;
-  padding-top: 10px;
-  text-align: left;
-}
-
-.banana-rate {
-  min-width: 0;
-  margin: 0;
-  color: var(--paper);
-  font-size: 14px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
-}
-
-.banana-rate[data-tone="stale"] { color: rgba(243, 239, 228, 0.6); }
-/* The bitcoin line is measured on one line (hud.js `fitBtcRate`) and wraps only when even "100M sats" will not fit. */
-.banana-rate[data-fit="line"] { white-space: nowrap; }
-
-/* The banana before an amount, as a currency's sign: an em square centred on the figures after it. */
-.banana-rate-icon,
-.banana-amount-icon {
-  width: 1em;
-  height: 1em;
-  margin-right: 0.15em;
-  vertical-align: -0.15em;
-  vertical-align: calc((1cap - 1em) / 2);
-}
-
-#bananas-panel[data-unit="sats"] .banana-amount-icon { display: none; }
-
-.banana-board { margin-top: 12px; padding-top: 12px; }
-
-.banana-board-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.banana-units {
-  display: inline-flex;
-  flex: none;
-  padding: 2px;
-  border: 1px solid rgba(0, 0, 0, 0.5);
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.3);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
-}
-
-.banana-units button {
-  min-height: 24px;
-  padding: 0 9px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: rgba(243, 239, 228, 0.66);
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.banana-units button[aria-pressed="true"] {
-  background: linear-gradient(#e2a04a, var(--accent));
-  color: var(--ink);
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
-}
-
-.banana-units button:not([aria-pressed="true"]):hover,
-.banana-units button.virtual-hover:not([aria-pressed="true"]) {
-  background: rgba(255, 255, 255, 0.07);
-  color: var(--paper);
-}
-
-.banana-units button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; }
-
-.banana-board-labels,
-.banana-leaders li {
-  display: grid;
-  grid-template-columns: 3ch minmax(0, 1fr) auto;
-  column-gap: 10px;
-  align-items: baseline;
-}
-
-.banana-board-labels { margin-top: 10px; padding: 0 2px 5px; }
-.banana-board-labels span:last-child { text-align: right; }
-
-.banana-leaders { margin: 0; padding: 0; list-style: none; }
-.banana-leaders li[hidden] { display: none; }
-
-/* A row's 17px line, 12px of padding and 1px rule are the `--banana-five` unit. */
-.banana-leaders li {
-  padding: 6px 2px;
-  border-top: 1px solid rgba(0, 0, 0, 0.35);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
-  font-size: 12px;
-  line-height: 17px;
-}
-
-.banana-rank { color: rgba(243, 239, 228, 0.5); font-size: 10px; font-variant-numeric: tabular-nums; }
-.banana-leaders li:nth-child(-n + 3) .banana-rank { color: var(--accent-text); }
-/* A donor's name keeps to one line and ends in an ellipsis where it would not fit; hovering shows it whole. */
-.banana-donor { min-width: 0; overflow: hidden; color: var(--paper); text-overflow: ellipsis; white-space: nowrap; }
-.banana-donor[data-anon="true"] { color: rgba(243, 239, 228, 0.55); font-style: italic; }
-.banana-amount { color: var(--paper); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
-.banana-leaders li:first-child .banana-amount { color: var(--accent-text); }
-
-.banana-recent { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(0, 0, 0, 0.4); }
-.banana-recent-filter { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; color: rgba(243, 239, 228, 0.7); cursor: pointer; }
-.banana-recent-filter input { margin: 0; accent-color: var(--accent); }
-.banana-recent-list { margin: 10px 0 0; padding: 0; list-style: none; }
-.banana-recent-list li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 4px 10px;
-  align-items: baseline;
-  padding: 8px 2px;
-  border-top: 1px solid rgba(0, 0, 0, 0.35);
-  font-size: 12px;
-}
-/* The name and its check share one line, the check centred on the name's line rather than on its x-height; a name too
-   long for it ends in an ellipsis before the check, and hovering shows it whole. */
-.banana-recent-name { display: flex; align-items: center; min-width: 0; color: var(--paper); }
-.banana-recent-name[data-anon="true"] { color: rgba(243, 239, 228, 0.55); font-style: italic; }
-.banana-recent-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The orange check is a seal with a ridged rim (hud.js `verifiedSeal`). */
-.banana-verified {
-  display: inline-flex;
-  flex: none;
-  width: 13px;
-  height: 13px;
-  margin-left: 5px;
-}
-.banana-verified svg { width: 100%; height: 100%; }
-.banana-verified-seal { fill: var(--accent); }
-.banana-verified-tick { fill: none; stroke: #211b14; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
-.banana-recent-message { grid-column: 1 / -1; margin: 0; color: rgba(243, 239, 228, 0.7); overflow-wrap: anywhere; line-height: 1.4; }
-.banana-recent-list li[hidden], .banana-verified[hidden], .banana-recent-message[hidden] { display: none; }
-
-.banana-empty {
-  margin: 0;
-  padding: 14px 0 6px;
-  color: rgba(243, 239, 228, 0.62);
-  font-size: 10.5px;
-  text-align: center;
-}
-
-.banana-board-note {
-  margin: auto 0 0;
-  padding-top: 12px;
-  color: rgba(243, 239, 228, 0.48);
-  font-size: 9.5px;
-  line-height: 1.45;
-}
-
-@media (pointer: coarse) {
-  .banana-units button { min-height: 40px; padding: 0 12px; }
-}
-
 /* Ooga Chat: the log takes the height, the composer is pinned under it, and the account's name and the
    room's memory sit above it in one line each. */
 .panel[data-panel="chat"] > .panel-title { position: relative; }
@@ -1364,9 +1107,10 @@ body[data-active-scene="block"] .mode-hud {
 .panel[data-panel="chat"][data-view="private"] > .panel-title > .chat-about { display: none; }
 /* Without the island's About button, the title itself keeps the room's chip and the bell at the right. */
 .panel[data-panel="chat"][data-view="private"] > .panel-title h2 { margin-right: auto; }
-/* Ooga Chat (cloud-panel.js), the last tab: two zone buttons, one roster (speakers, then listeners), a page bar for a
-   long list, the emoji bar and the footer. A speaker's portrait carries the only source mark: a 3px ring past a 3px
-   dark gap, green for the island, purple for Ooga Chat. Names wrap rather than truncate. */
+/* Ooga Chat (cloud-panel.js), the last tab, and Ooga Chat's own (the app takes these rules): two zone buttons, one roster
+   of circles four to a row (speakers, then listeners) scrolling in its slab, the emoji bar and the footer. A speaker's
+   portrait carries a 3px ring past a 3px dark gap, green for the island, purple for Ooga Chat, whose speakers also have
+   a purple dot before their name. A name keeps to one line, cut short with its whole self in its title. */
 .sheet-toggle-cloud { height: 56px; }
 .cloud-zones { display: grid; flex: none; grid-template-columns: 1fr 1fr; gap: 8px; }
 .cloud-zone {
@@ -1381,27 +1125,48 @@ body[data-active-scene="block"] .mode-hud {
 .cloud-zone-icon { display: block; flex: none; width: 24px; height: 18px; object-fit: contain; }
 .cloud-zone > img.cloud-zone-icon:not([src]) { visibility: hidden; }
 .cloud-status [hidden] { display: none; }
-.panel > .cloud-roster { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 6px 8px; overflow-y: auto; overscroll-behavior: contain; list-style: none; }
-.cloud-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 28px 20px; align-items: center; column-gap: 10px; min-height: 48px; }
-.cloud-portrait { display: block; width: 32px; height: 32px; margin: 6px; overflow: hidden; border-radius: 50%; background: #151312; }
-.cloud-portrait[data-source="world"] { box-shadow: 0 0 0 3px #151312, 0 0 0 6px #22c55e; }
-.cloud-portrait[data-source="chat"] { box-shadow: 0 0 0 3px #151312, 0 0 0 6px #b18aff; }
+.panel > .cloud-roster {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-content: start; gap: 14px 6px; margin: 0; padding: 14px 8px;
+  overflow-y: auto; overscroll-behavior: contain; list-style: none; container-type: inline-size;
+}
+/* A tile (audience-tiles.js): the portrait with its ring and the hand or a reaction over its corner, the name, and the
+   role under it after a speaker's microphone. A tile out of sight skips its layout and paint. */
+.cloud-tile {
+  --face: 56px;
+  display: flex; flex-direction: column; align-items: center; min-width: 0; padding: 6px 0 2px; border-radius: 6px;
+  content-visibility: auto; contain-intrinsic-block-size: auto 104px;
+}
+.cloud-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cloud-face { position: relative; flex: none; margin-bottom: 10px; }
+.cloud-portrait {
+  display: flex; align-items: center; justify-content: center; width: var(--face); height: var(--face); overflow: hidden;
+  border-radius: 50%; background: var(--stone-dk); box-shadow: 0 0 0 2px var(--stone-lt);
+}
+.cloud-tile[data-source="world"] .cloud-portrait { box-shadow: 0 0 0 3px var(--slab-dark), 0 0 0 6px #22c55e; }
+.cloud-tile[data-source="chat"] .cloud-portrait { box-shadow: 0 0 0 3px var(--slab-dark), 0 0 0 6px #b18aff; }
 .cloud-portrait > img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.cloud-portrait > svg { display: block; box-sizing: border-box; width: 100%; height: 100%; padding: 5px; shape-rendering: crispEdges; }
-.cloud-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.cloud-name { min-width: 0; overflow: hidden; color: var(--paper); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.cloud-role { color: rgba(243, 239, 228, 0.6); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
-.cloud-react { position: relative; display: grid; width: 28px; height: 28px; place-items: center; font-size: 18px; line-height: 1; }
+.cloud-portrait > svg { display: block; width: 62%; height: auto; shape-rendering: crispEdges; }
+.cloud-react {
+  position: absolute; top: -8px; right: -12px; display: grid; width: 26px; height: 26px; place-items: center;
+  font-size: 18px; line-height: 1; pointer-events: none;
+}
 .cloud-hand { grid-area: 1 / 1; }
 .cloud-pop { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; animation: cloud-pop 2.4s ease-out forwards; }
 @keyframes cloud-pop { 0% { opacity: 0; transform: translateY(4px) scale(0.7); } 15% { opacity: 1; transform: none; } 70% { opacity: 1; } 100% { opacity: 0; transform: translateY(-10px); } }
 @keyframes cloud-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .cloud-pop { animation-name: cloud-fade; } }
-.cloud-mic { justify-self: center; }
+.cloud-name { display: flex; align-items: center; justify-content: center; gap: 4px; max-width: 100%; color: var(--paper); font-size: 12px; font-weight: 700; }
+.cloud-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cloud-dot { display: none; flex: none; width: 6px; height: 6px; border-radius: 50%; background: #b18aff; }
+.cloud-tile[data-source="chat"] .cloud-dot { display: block; }
+.cloud-role { display: flex; align-items: center; gap: 4px; margin-top: 2px; color: rgba(243, 239, 228, 0.62); font-size: 11px; white-space: nowrap; }
+.cloud-role .roster-voice svg { width: 10px; height: 10px; }
 .cloud-mic[hidden] { display: none; }
-.cloud-pages { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; }
-.cloud-pages[hidden] { display: none; }
-.cloud-page { color: var(--paper); font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+/* A drawer as narrow as the island's, or a phone: smaller circles, the same four to a row. */
+@container (max-width: 400px) {
+  .cloud-tile { --face: 44px; }
+  .cloud-name { font-size: 11px; }
+}
 .cloud-foot { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
 .cloud-foot-name { min-width: 0; color: var(--paper); font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
 .cloud-foot-name[data-source="chat"]::before {

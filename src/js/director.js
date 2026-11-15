@@ -140,6 +140,12 @@
     if (donations.real) return;
     deliverDonation(donation);
     window.BL.hud.setDonationStats(game.state);
+  }, {
+    login: () => window.BL.net.state.me?.login,
+    bananasFor: gameMod.bananasFor,
+    price: () => window.BL.chain.snapshot.priceUsd,
+    // The page's own /donate address: a path where the router serves paths, a hash from disk or a named file.
+    link: () => routerMod.served ? `${location.origin}/donate` : `${location.href.split("#")[0]}#/donate`
   });
   window.BL.hud.setDonationStats(game.state);
   // world survives scene swaps: banana level, equipment ownership, and the Ooga handed from hub to scene.

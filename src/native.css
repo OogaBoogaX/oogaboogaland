@@ -1,6 +1,7 @@
-/* The native look the island and the Ooga Chat app (src/ooga-chat/) share: the tokens, the cave-sign lettering, and a
-   panel's carved title, status chip, stone slab and amber primary button. Both pages load it before their own
-   stylesheet; scripts/build.mjs joins it ahead of style.css into the island's one style block. */
+/* The native look the island and the Ooga Chat app (src/ooga-chat/) share: the tokens, the cave-sign lettering, a
+   panel's carved title, status chip, stone slab and amber primary button, and the Bananas panel (banana-panel.js).
+   Both pages load it before their own stylesheet; scripts/build.mjs joins it ahead of style.css into the island's one
+   style block. */
 
 :root {
   color-scheme: dark;
@@ -205,4 +206,261 @@ select {
 .panel-primary:focus-visible {
   background: linear-gradient(#f0b05a, #e2a04a);
   outline: none;
+}
+
+/* Bananas: the all-time total on top, its count and sats beneath, then the donors and the latest tips in the same
+   slab. Like every panel's slab it scrolls above the panel's action, so Feed the Oogas stays at the foot as
+   Contributor sign-in does; its sections never shrink, and each list scrolls inside its own window: the donors' five
+   donor rows tall (`--banana-five`), the latest tips' at least as tall and taking whatever room the slab has left. The
+   slab may shrink to nothing, so even a phone's short drawer keeps the action whole; only a drawer shorter than the
+   title and the action scrolls the panel. */
+.panel > .banana-slab {
+  --banana-five: calc(5 * (17px + 12px + 1px));
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 12px 10px;
+}
+.banana-slab > section { flex: none; }
+.banana-slab > .banana-recent { flex: 1 0 auto; display: flex; flex-direction: column; }
+.banana-leaders,
+.banana-recent-list {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.45) transparent;
+}
+/* The donors' window holds five rows however few entries it has. The latest tips' is never shorter and grows into the
+   slab's spare room, unless it holds nothing: then it keeps the donors' height with its note under it. */
+.banana-leaders { height: var(--banana-five); }
+.banana-recent-list { flex: 1 0 var(--banana-five); min-height: var(--banana-five); }
+.banana-recent:has(> .banana-empty:not([hidden])) > .banana-recent-list { flex-grow: 0; }
+
+/* The total's title over it, and the total with the banana beside it as tall as its figures, both flush left. */
+.banana-hero {
+  display: grid;
+  row-gap: 4px;
+  text-align: left;
+}
+
+.banana-hero-value {
+  margin: 0;
+  color: var(--accent-text);
+  font-size: clamp(26px, 7vw, 34px);
+  font-weight: 700;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
+  overflow-wrap: anywhere;
+}
+
+/* On the figures' baseline and a cap height tall (the em fallback is about a cap). */
+.banana-hero-icon {
+  width: 0.72em;
+  height: 0.72em;
+  width: 1cap;
+  height: 1cap;
+  margin-right: 0.2em;
+  vertical-align: baseline;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
+}
+
+.banana-hero-label,
+.banana-totals dt,
+.banana-board-labels {
+  color: rgba(243, 239, 228, 0.58);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.banana-totals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0 0;
+  padding-top: 10px;
+  text-align: left;
+}
+
+.banana-totals,
+.banana-rates,
+.banana-board {
+  border-top: 1px solid rgba(0, 0, 0, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.banana-totals div { min-width: 0; }
+
+.banana-totals dd {
+  margin: 3px 0 0;
+  color: var(--paper);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* A banana's price in dollars and sats, then a bitcoin's in bananas, a line each, flush left. A stale price dims; the
+   line says so on hover. */
+.banana-rates {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding-top: 10px;
+  text-align: left;
+}
+
+.banana-rate {
+  min-width: 0;
+  margin: 0;
+  color: var(--paper);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.banana-rate[data-tone="stale"] { color: rgba(243, 239, 228, 0.6); }
+/* The bitcoin line is measured on one line (banana-panel.js `fitBtcRate`) and wraps only when even "100M sats" will not fit. */
+.banana-rate[data-fit="line"] { white-space: nowrap; }
+
+/* The banana before an amount, as a currency's sign: an em square centred on the figures after it. */
+.banana-rate-icon,
+.banana-amount-icon {
+  width: 1em;
+  height: 1em;
+  margin-right: 0.15em;
+  vertical-align: -0.15em;
+  vertical-align: calc((1cap - 1em) / 2);
+}
+
+.panel[data-panel="bananas"][data-unit="sats"] .banana-amount-icon { display: none; }
+
+.banana-board { margin-top: 12px; padding-top: 12px; }
+
+.banana-board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.banana-units {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.banana-units button {
+  min-height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(243, 239, 228, 0.66);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.banana-units button[aria-pressed="true"] {
+  background: linear-gradient(#e2a04a, var(--accent));
+  color: var(--ink);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+}
+
+.banana-units button:not([aria-pressed="true"]):hover,
+.banana-units button.virtual-hover:not([aria-pressed="true"]) {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--paper);
+}
+
+.banana-units button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; }
+
+.banana-board-labels,
+.banana-leaders li {
+  display: grid;
+  grid-template-columns: 3ch minmax(0, 1fr) auto;
+  column-gap: 10px;
+  align-items: baseline;
+}
+
+.banana-board-labels { margin-top: 10px; padding: 0 2px 5px; }
+.banana-board-labels span:last-child { text-align: right; }
+
+.banana-leaders { margin: 0; padding: 0; list-style: none; }
+.banana-leaders li[hidden] { display: none; }
+
+/* A row's 17px line, 12px of padding and 1px rule are the `--banana-five` unit. */
+.banana-leaders li {
+  padding: 6px 2px;
+  border-top: 1px solid rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.banana-rank { color: rgba(243, 239, 228, 0.5); font-size: 10px; font-variant-numeric: tabular-nums; }
+.banana-leaders li:nth-child(-n + 3) .banana-rank { color: var(--accent-text); }
+/* A donor's name keeps to one line and ends in an ellipsis where it would not fit; hovering shows it whole. */
+.banana-donor { min-width: 0; overflow: hidden; color: var(--paper); text-overflow: ellipsis; white-space: nowrap; }
+.banana-donor[data-anon="true"] { color: rgba(243, 239, 228, 0.55); font-style: italic; }
+.banana-amount { color: var(--paper); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.banana-leaders li:first-child .banana-amount { color: var(--accent-text); }
+
+.banana-recent { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(0, 0, 0, 0.4); }
+.banana-recent-filter { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; color: rgba(243, 239, 228, 0.7); cursor: pointer; }
+.banana-recent-filter input { margin: 0; accent-color: var(--accent); }
+.banana-recent-list { margin: 10px 0 0; padding: 0; list-style: none; }
+.banana-recent-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  align-items: baseline;
+  padding: 8px 2px;
+  border-top: 1px solid rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+}
+/* The name and its check share one line, the check centred on the name's line rather than on its x-height; a name too
+   long for it ends in an ellipsis before the check, and hovering shows it whole. */
+.banana-recent-name { display: flex; align-items: center; min-width: 0; color: var(--paper); }
+.banana-recent-name[data-anon="true"] { color: rgba(243, 239, 228, 0.55); font-style: italic; }
+.banana-recent-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The orange check is a seal with a ridged rim (banana-panel.js `seal`). */
+.banana-verified {
+  display: inline-flex;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin-left: 5px;
+}
+.banana-verified svg { width: 100%; height: 100%; }
+.banana-verified-seal { fill: var(--accent); }
+.banana-verified-tick { fill: none; stroke: #211b14; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.banana-recent-message { grid-column: 1 / -1; margin: 0; color: rgba(243, 239, 228, 0.7); overflow-wrap: anywhere; line-height: 1.4; }
+.banana-recent-list li[hidden], .banana-verified[hidden], .banana-recent-message[hidden] { display: none; }
+
+.banana-empty {
+  margin: 0;
+  padding: 14px 0 6px;
+  color: rgba(243, 239, 228, 0.62);
+  font-size: 10.5px;
+  text-align: center;
+}
+
+.banana-board-note {
+  margin: auto 0 0;
+  padding-top: 12px;
+  color: rgba(243, 239, 228, 0.48);
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
+@media (pointer: coarse) {
+  .banana-units button { min-height: 40px; padding: 0 12px; }
 }

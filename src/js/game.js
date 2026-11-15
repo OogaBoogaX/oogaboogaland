@@ -8,13 +8,7 @@
   // The donations board's tally keeps the sats and bananas of each of the last TIP_DAYS local days, by day number.
   const TIP_DAYS = 7, DAY_MS = 864e5, DONOR_MAX = 256, RECENT_HANDLES = 12;
   const dayOf = (at) => Math.floor((at - new Date(at).getTimezoneOffset() * 6e4) / DAY_MS);
-  const LARGE_UNITS = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]];
-  const formatLarge = (n) => {
-    const unit = LARGE_UNITS.find(([size]) => n >= size);
-    if (!unit) return String(n);
-    const v = n / unit[0];
-    return `${v < 10 ? (Math.floor(v * 10) / 10).toFixed(1).replace(/\.0$/, "") : Math.floor(v)}${unit[1]}`;
-  };
+  const { UNITS: LARGE_UNITS, formatLarge } = BL.largeNumbers;
   const formatThree = (n, compact = false) => {
     if (!Number.isFinite(n)) return "-";
     const rounded = Number(n.toPrecision(3));

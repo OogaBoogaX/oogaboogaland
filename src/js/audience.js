@@ -15,7 +15,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const VERSION = 1, FEATURE = "audience-v1", ZONES = ["main", "dsb"], ZONE_NAMES = { main: "Main Island", dsb: "DSB Land" };
-  const PAGE = 50, ID_MAX = 64, NAME_MAX = 39, PARTS_MAX = 64;
+  const ID_MAX = 64, NAME_MAX = 39, PARTS_MAX = 64;
   const SPEAK = ["eligible", "pending", "denied", "active", "none"];
   const isZone = (z) => ZONES.includes(z);
   const text = (v, max) => typeof v === "string" && v.length > 0 && v.length <= max && !/[\u0000-\u001f\u007f]/.test(v) ? v : null;
@@ -174,8 +174,6 @@
       apply, setDesired, ask, retry, reset, self,
       // Only an active speaker raises or pins the hand.
       canHand: () => { const s = self(); return !!s && s.role === "speaker"; },
-      page: (index, size = PAGE) => order.slice(index * size, index * size + size),
-      pages: (size = PAGE) => Math.max(1, Math.ceil(order.length / size)),
       get rows() { return rows; },
       get order() { return order; },
       get zone() { return zone; },
@@ -190,5 +188,5 @@
   // The outdoor zone a reported island zone counts as, until #658's classifier supplies it: DSB Land's zones are
   // `dsb-*`, everything else is the main island. A private interior is not decided here.
   const zoneOfWorld = (name) => typeof name === "string" && name.startsWith("dsb-") ? "dsb" : "main";
-  BL.audience = { VERSION, FEATURE, ZONES, ZONE_NAMES, PAGE, parseRow, compare, footer, create, zoneOfWorld };
+  BL.audience = { VERSION, FEATURE, ZONES, ZONE_NAMES, parseRow, compare, footer, create, zoneOfWorld };
 })();

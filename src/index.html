@@ -432,18 +432,7 @@
       <div class="sheet-body">
       <div class="sheet-content">
       <section class="panel" data-panel="roster" id="roster-panel" role="tabpanel" aria-labelledby="sheet-toggle">
-        <header class="panel-title">
-          <h2><span data-sign>Contributing Oogas</span></h2>
-          <span class="panel-chip" id="roster-count" data-tone="idle"></span>
-        </header>
-        <div class="roster-sort">
-          <label class="roster-sort-label" for="roster-sort">Sorted by</label>
-          <select id="roster-sort">
-            <option value="recent">Most recent contributions</option>
-            <option value="most">Most contributions</option>
-          </select>
-        </div>
-        <ul id="roster" class="roster slab" aria-label="Contributing Oogas"></ul>
+        <!-- The title, Sorted by and the list (#roster) are built here by roster-panel.js, shared with Ooga Chat. -->
         <div class="account" id="account" hidden>
           <button type="button" class="panel-primary" data-action="account-login" id="account-login" aria-label="Contributor sign-in with GitHub" title="Contributors can sign in with GitHub to control their own Ooga and gorilla."><span data-sign>Contributor sign-in</span></button>
           <span class="account-who">
@@ -488,54 +477,7 @@
         <p class="help players-status" id="players-status" hidden></p>
         <div data-account-copy="players"></div>
       </section>
-      <section class="panel" data-panel="bananas" id="bananas-panel" role="tabpanel" aria-labelledby="sheet-bananas" hidden>
-        <header class="panel-title">
-          <h2><span data-sign>Bananas donated</span></h2>
-          <span class="panel-chip" id="banana-source" data-tone="idle">Demo</span>
-        </header>
-        <div class="slab banana-slab">
-          <section class="banana-total" aria-label="Current banana value of all sats donated">
-            <div class="banana-hero">
-              <span class="banana-hero-label">Bananas current value</span>
-              <p class="banana-hero-value"><svg class="banana-hero-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
-                <g id="banana-panel-glyph">
-                  <path fill="#211b14" d="M0 0h1v5H0zM2 0h1v2H2zM3 2h1v2H3zM4 4h1v1H4zM1 5h1v2H1zM5 5h1v1H5zM6 6h1v1H6zM2 7h2v1H2zM7 7h1v1H7zM4 8h4v1H4z" />
-                  <path fill="#ffd84a" d="M1 2h2v2H1zM1 4h3v1H1zM2 5h3v1H2zM2 6h4v1H2zM4 7h3v1H4z" />
-                  <path fill="#789a3b" d="M1 0h1v2H1z" />
-                </g>
-              </svg><strong id="banana-total" title="All donated sats valued at the current BTCUSD price; 1 banana = $1">—</strong></p>
-            </div>
-            <dl class="banana-totals">
-              <div><dt>Donations</dt><dd id="stat-donations">0</dd></div>
-              <div><dt>Sats donated</dt><dd id="stat-sats">0</dd></div>
-            </dl>
-            <div class="banana-rates" role="group" aria-label="Current Bitcoin and banana exchange rates">
-              <p class="banana-rate"><svg class="banana-rate-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" role="img" aria-label="Banana"><use href="#banana-panel-glyph" /></svg>1 = $1 <span id="banana-exchange">— sats</span></p>
-              <p class="banana-rate" id="banana-btc-rate" data-tone="wait"><span id="banana-btc-sats">100,000,000</span> sats = <svg class="banana-rate-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" role="img" aria-label="bananas"><use href="#banana-panel-glyph" /></svg><span id="banana-btc-price">—</span></p>
-            </div>
-          </section>
-          <section class="banana-board" aria-labelledby="banana-board-title">
-            <div class="banana-board-head">
-              <h3 class="slab-head" id="banana-board-title"><span data-sign>Top donors</span></h3>
-              <div class="banana-units" role="group" aria-label="Rank donors by">
-                <button type="button" data-donor-unit="bananas" aria-pressed="true">Bananas</button>
-                <button type="button" data-donor-unit="sats" aria-pressed="false">Sats</button>
-              </div>
-            </div>
-            <div class="banana-board-labels" aria-hidden="true"><span>#</span><span>Donor</span><span id="banana-board-unit">Bananas</span></div>
-            <ol class="banana-leaders" id="banana-leaders" aria-label="Top donors by bananas"></ol>
-            <p class="banana-empty" id="banana-empty">No donations yet. Feed the first Ooga!</p>
-          </section>
-          <section class="banana-recent" aria-labelledby="banana-recent-title">
-            <h3 class="slab-head" id="banana-recent-title"><span data-sign>Most recent donations</span></h3>
-            <label class="banana-recent-filter"><input type="checkbox" id="banana-recent-bar"> <span id="banana-recent-bar-label">1,000 sats and up only</span></label>
-            <ol class="banana-recent-list" id="banana-recent-list" aria-label="Most recent donations"></ol>
-            <p class="banana-empty" id="banana-recent-empty">New donations will appear here.</p>
-          </section>
-          <p class="banana-board-note" id="banana-board-note">Demo donations saved in this browser.</p>
-        </div>
-        <button type="button" class="panel-primary feed-open" data-action="feed"><span data-sign>Feed the Oogas</span></button>
-      </section>
+      <section class="panel" data-panel="bananas" id="bananas-panel" role="tabpanel" aria-labelledby="sheet-bananas" hidden></section>
       <section class="panel" data-panel="chat" id="chat-panel" role="tabpanel" aria-labelledby="chat-tab" hidden>
         <header class="panel-title">
           <h2><span data-sign>The Commons</span></h2>
@@ -617,11 +559,6 @@
         </div>
         <p class="help cloud-status" id="cloud-status" role="status" aria-live="polite" hidden><span id="cloud-status-text"></span> <button type="button" class="link" id="cloud-retry" hidden>Retry</button></p>
         <ul class="cloud-roster slab" id="cloud-roster" aria-label="Speakers and listeners"></ul>
-        <nav class="cloud-pages" id="cloud-pages" aria-label="Speaker and listener pages" hidden>
-          <button type="button" class="foot-button" id="cloud-prev">Previous</button>
-          <span class="cloud-page" id="cloud-page"></span>
-          <button type="button" class="foot-button" id="cloud-next">Next</button>
-        </nav>
         <div class="reactions" id="cloud-reactions" hidden></div>
         <div class="cloud-foot" id="cloud-foot">
           <span class="cloud-foot-name" id="cloud-foot-name"></span>
@@ -1971,21 +1908,7 @@
         <button type="button" data-action="leave">Exit Game</button>
       </section>
     </div>
-    <dialog class="modal donation-popup" id="donation-popup" aria-labelledby="donation-title">
-      <div class="panel-head">
-        <h2 id="donation-title"><span data-sign>Feed the Oogas</span></h2>
-        <button type="button" class="modal-close" id="donation-close" aria-label="Close donation">&times;</button>
-      </div>
-      <canvas id="donation-screen" width="400" height="400" tabindex="0" aria-label="Donation screen. Type an amount, press Enter to continue, A for your name and message. In the name field, the arrow shows previous names; Down Arrow previews a suggestion, Tab or Enter accepts it, and Escape cancels it. O for on-chain, C to copy, and Escape to go back."></canvas>
-      <div id="donation-fields">
-        <label class="field"><span>Donation handle</span><input id="donation-handle" type="text" maxlength="39" tabindex="-1" autocomplete="off" spellcheck="false" placeholder="anon"></label>
-        <label class="field"><span id="donation-message-label">Banana message (up to 280 characters)</span><input id="donation-message" type="text" maxlength="280" tabindex="-1" autocomplete="off" placeholder="Optional message"></label>
-        <div class="donation-details-actions">
-          <span id="donation-details-status" role="status"></span>
-        </div>
-      </div>
-      <p class="help">Pay with Lightning or on-chain. Your bananas arrive from the Factory when the payment confirms.</p>
-    </dialog>
+    <!-- The donation dialog (#donation-popup) is built here by donation-popup.js, shared with Ooga Chat. -->
     <div id="factory-donation-fields" hidden></div>
     <!-- Continues Holo-Elfstone's native controls dialog from PR #57. -->
     <dialog class="modal controls-help" id="controls-help" tabindex="-1" aria-labelledby="controls-help-title" aria-describedby="controls-help-note">
@@ -2348,6 +2271,7 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/contributor-identities.js"></script>
   <script src="js/activity-repos.js"></script>
   <script src="js/jumbotron-data.js"></script>
+  <script src="js/jumbotron-font.js"></script>
   <script src="js/jumbotron.js"></script>
   <script src="js/headquarters-models.js"></script>
   <script src="js/headquarters-sleep.js"></script>
@@ -2361,6 +2285,7 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/caves.js"></script>
   <script src="js/characters.js"></script>
   <script src="js/characters.gen.js"></script>
+  <script src="js/roster-panel.js"></script>
   <script src="js/contributors.js"></script>
   <script src="js/donations.js"></script>
   <script src="js/donation-rate.js"></script>
@@ -2380,9 +2305,11 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/mine-rigs.js"></script>
   <script src="js/highscore-rules.js"></script>
   <script src="js/cloud-hopper-replay-codec.js"></script>
+  <script src="js/format-large.js"></script>
   <script src="js/game.js"></script>
   <script src="js/sheet.js"></script>
   <script src="js/zone-map.js"></script>
+  <script src="js/banana-panel.js"></script>
   <script src="js/hud.js"></script>
   <script src="js/chat-policy.js"></script>
   <script src="js/emoji-data.js"></script>
@@ -2404,12 +2331,15 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/outdoor-voice.js"></script>
   <script src="js/studio-catalogue.js"></script>
   <script src="js/studio-session.js"></script>
+  <script src="js/commons-log.js"></script>
   <script src="js/chat.js"></script>
   <script src="js/one-time-pad.js"></script>
   <script src="js/private-chat.js"></script>
   <script src="js/connection-reports.js"></script>
   <script src="js/players.js"></script>
+  <script src="js/reaction-bar.js"></script>
   <script src="js/reactions.js"></script>
+  <script src="js/audience-tiles.js"></script>
   <script src="js/cloud-panel.js"></script>
   <script src="js/fx.js"></script>
   <script src="js/camera-cover.js"></script>

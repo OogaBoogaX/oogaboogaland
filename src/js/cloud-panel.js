@@ -4,15 +4,16 @@
 // Shown where the room's welcome lists `audience-v1` (`available`, read by sheet.js), so an older backend keeps the
 // panels it had. Two zone buttons ask the room for a view (`audience-view`); choosing the zone already asked for does
 // nothing. A choice never moves the visitor's Ooga or their microphone: what they publish stays the island's voice.
-// One roster: speakers, then listeners, each row a portrait (the Ooga's face for a world speaker with a character
-// the server names, else the native Ooga face; audience.js leaves out the room's account pictures), the name with
-// Speaker or Listener under it, a reaction column and the microphone. A speaker's portrait carries the ring of where
-// they speak from: green for the island, purple for Ooga Chat. The visitor's own microphone mutes them as M does;
-// anyone else's mutes that voice for this visitor alone (voice.js `muteLocal`, which #661 extends to Ooga Chat's
-// speakers). Retry, offered while joining, catching up or unreachable, asks the room for a fresh snapshot.
-// Cost: rows are kept by the server's id and drawn a page (audience.js PAGE) at a time, only while the panel shows; a
-// change touches only the rows and fields it changed, and paging or a delta never rebuilds the list unless its order
-// moved. Portraits are drawn once a character a page. No timers, no frame work.
+// One roster of circles, Ooga Chat's own (audience-tiles.js, which the app draws with too): speakers, then listeners,
+// the whole list scrolling in its slab, each a portrait (the Ooga's face for a world speaker with a character the server
+// names, else the native Ooga face; audience.js leaves out the room's account pictures), the name, and Speaker or
+// Listener under it after a speaker's microphone. A speaker's portrait carries the ring of where they speak from: green
+// for the island, purple for Ooga Chat. The visitor's own microphone mutes them as M does; anyone else's mutes that
+// voice for this visitor alone (voice.js `muteLocal`, which #661 extends to Ooga Chat's speakers). Retry, offered while
+// joining, catching up or unreachable, asks the room for a fresh snapshot.
+// Cost: tiles are kept by the server's id and drawn only while the panel shows; a change writes only the fields it
+// changed and moves a tile only when the order moved. Portraits are drawn once a character a page. No timers, no
+// frame work.
 // The emoji bar (reactions.js `mount`, the same state as the other bars; the hand an active speaker's alone) sits
 // under the roster, the footer under it: the visitor's name, Mute or Unmute (always there), Join or Leave Voice and
 // Sign out, all through the island's own voice session (voice.js), never a second one.
@@ -26,7 +27,6 @@
   const $ = (id) => document.getElementById(id);
   const panel = $("cloud-panel"), sheet = $("sheet"), list = $("cloud-roster");
   const status = $("cloud-status"), statusText = $("cloud-status-text"), retry = $("cloud-retry");
-  const pagesNav = $("cloud-pages"), prev = $("cloud-prev"), next = $("cloud-next"), pageLabel = $("cloud-page");
   const footName = $("cloud-foot-name"), mute = $("cloud-mute"), voiceButton = $("cloud-voice"), logout = $("cloud-logout");
   const zoneButtons = [...panel.querySelectorAll("[data-cloud-zone]")];
   // DSB Land's button wears the destination button's own DSB island.
@@ -66,83 +66,27 @@
     }
     return faces.get(handle);
   };
-  const portraitKey = (row) => row.character && BL.characters.get(row.character) ? `c:${row.character}` : "d";
-  const showDefault = (entry) => {
-    if (entry.img) { entry.img.onerror = null; entry.img.removeAttribute("src"); entry.img = null; }
-    entry.portrait.replaceChildren(BL.nativeIcons.svg("roster"));
-  };
-  const showPortrait = (entry, row) => {
-    const key = portraitKey(row);
-    if (entry.face === key) return;
-    entry.face = key;
-    if (key === "d") { showDefault(entry); return; }
-    if (!entry.img) {
-      entry.img = document.createElement("img");
-      entry.img.alt = "";
-      entry.img.decoding = "async";
-      entry.portrait.replaceChildren(entry.img);
-    }
-    entry.img.onerror = () => { entry.face = "d"; showDefault(entry); };
-    entry.img.src = faceUrl(row.character);
-  };
-
-  // Rows by the server's id, built the first time a page shows them and dropped when the room drops them.
-  const cache = new Map();
-  const entryFor = (id) => {
-    let entry = cache.get(id);
-    if (entry) return entry;
-    const li = document.createElement("li"), portrait = document.createElement("span"), who = document.createElement("span");
-    const name = document.createElement("span"), role = document.createElement("span"), react = document.createElement("span");
-    const hand = document.createElement("span"), mic = document.createElement("button");
-    li.className = "cloud-row"; li.dataset.id = id;
-    portrait.className = "cloud-portrait";
-    who.className = "cloud-who"; name.className = "cloud-name"; role.className = "cloud-role";
-    who.append(name, role);
-    react.className = "cloud-react"; hand.className = "cloud-hand";
-    react.append(hand);
-    mic.type = "button"; mic.className = "roster-voice cloud-mic";
-    mic.append(BL.hud.voiceIcon.cloneNode(true));
-    li.append(portrait, who, react, mic);
-    entry = { li, portrait, name, role, react, hand, mic, img: null, face: "", row: null, pops: 0 };
-    cache.set(id, entry);
-    return entry;
-  };
-  // A dropped row leaves the list, so what was drawn is no longer there: the next showing attaches the page afresh.
-  const drop = (id, entry) => {
-    if (entry.img) { entry.img.onerror = null; entry.img.removeAttribute("src"); }
-    entry.li.remove();
-    cache.delete(id);
-    drawn = "";
-  };
-  const paintMic = (entry, row) => {
-    const speaker = row.role === "speaker", look = row.mic === "muted" ? "muted" : row.speaking ? "speaking" : "on";
+  // A row as the tiles draw it: its picture, its microphone's look and words, and whether this visitor muted it.
+  const describe = (id, t) => {
+    const row = model.rows.get(id), speaker = row.role === "speaker";
+    const look = !speaker ? "" : row.mic === "muted" ? "muted" : row.speaking ? "speaking" : "on";
     const blocked = speaker && !row.self && voice.mutedLocally(row.login);
-    set(entry.mic, "hidden", !speaker);
-    if (!speaker) return;
-    if (entry.mic.dataset.voice !== look) entry.mic.dataset.voice = look;
-    attr(entry.mic, "aria-pressed", String(blocked));
+    t.id = id; t.display = row.display; t.role = row.role; t.source = row.source || ""; t.self = row.self;
+    t.face = row.character && BL.characters.get(row.character) ? faceUrl(row.character) : "";
+    t.look = look; t.hand = row.hand; t.micPressed = blocked;
     // The visitor's own button works their microphone, so only while they are in voice.
-    set(entry.mic, "disabled", row.self && !voice.stats.enabled && !voice.stats.returning);
-    const words = `${row.display}: ${BL.hud.voiceWords(look, row.self, blocked, row.login)}`;
-    attr(entry.mic, "aria-label", words);
-    set(entry.mic, "title", words);
+    t.micDisabled = row.self && !voice.stats.enabled && !voice.stats.returning;
+    t.micWords = speaker ? `${row.display}: ${BL.hud.voiceWords(look, row.self, blocked, row.login)}` : "";
   };
-  const paintRow = (entry, row) => {
-    entry.row = row;
-    if (entry.li.dataset.role !== row.role) entry.li.dataset.role = row.role;
-    set(entry.name, "textContent", row.display);
-    // One line, ending in an ellipsis when long (AGENTS.md, Panel text); the whole name is its title.
-    set(entry.name, "title", row.display);
-    set(entry.role, "textContent", row.role === "speaker" ? "Speaker" : "Listener");
-    const source = row.source || "";
-    if (entry.portrait.dataset.source !== source) entry.portrait.dataset.source = source;
-    showPortrait(entry, row);
-    set(entry.hand, "textContent", row.hand);
-    set(entry.hand, "title", row.hand ? `${row.display} has ${row.hand} up` : "");
-    paintMic(entry, row);
-  };
+  const tiles = BL.audienceTiles.create(list, { mic(id) {
+    const row = model.rows.get(id);
+    if (!row) return;
+    if (row.self) { if (voice.stats.returning) voice.toggle(); else voice.setMuted(!voice.stats.muted); }
+    else voice.muteLocal(row.login, !voice.mutedLocally(row.login));
+    tiles.repaint(describe);
+  } });
 
-  let page = 0, drawn = "", drawnVersion = -1, showing = false, handGate = false;
+  let drawnVersion = -1, showing = false, handGate = false;
   const STATUS = {
     connecting: () => `Joining ${A.ZONE_NAMES[model.desired] || "the conversation"}…`,
     stale: () => "Catching up with the room…",
@@ -159,28 +103,13 @@
   const render = () => {
     paintStatus();
     if (handGate !== model.canHand()) { handGate = model.canHand(); BL.reactions.refresh(); }
-    // Rows the room dropped (or a sign-out forgot) leave at once, their pictures cancelled, shown or not.
+    // Tiles the room dropped (or a sign-out forgot) leave at once, their pictures cancelled, shown or not.
     if (drawnVersion !== model.version) {
-      for (const [id, entry] of cache) if (!model.rows.has(id)) drop(id, entry);
-      drawnVersion = model.version;
+      if (showing) {
+        tiles.draw(model.order, describe);
+        drawnVersion = model.version;
+      } else tiles.prune((id) => model.rows.has(id));
     }
-    if (!showing) return;
-    const pages = model.pages();
-    if (page >= pages) page = pages - 1;
-    const ids = model.page(page), seq = ids.join("\n");
-    for (const id of ids) {
-      const entry = entryFor(id), row = model.rows.get(id);
-      if (entry.row !== row) paintRow(entry, row);
-    }
-    if (seq !== drawn) {
-      list.replaceChildren(...ids.map((id) => cache.get(id).li));
-      drawn = seq;
-    }
-    const total = model.order.length, start = page * A.PAGE;
-    set(pagesNav, "hidden", pages < 2);
-    set(pageLabel, "textContent", total ? `${start + 1}–${Math.min(total, start + A.PAGE)} of ${total}` : "");
-    set(prev, "disabled", page === 0);
-    set(next, "disabled", page >= pages - 1);
   };
 
   // The footer, from the room's word on the visitor and this page's own voice session.
@@ -200,13 +129,13 @@
     set(voiceButton, "disabled", footerState.voice.disabled);
     set(voiceButton, "title", footerState.voice.action === "join" && reason ? reason : "");
     set(logout, "hidden", !me);
-    if (showing) for (const id of model.page(page)) { const entry = cache.get(id); if (entry && entry.row) paintMic(entry, entry.row); }
+    if (showing) tiles.repaint(describe);
   };
 
   const updateShowing = () => {
     const was = showing;
     showing = BL.sheet.visible(panel);
-    if (showing && !was) { render(); paintFooter(); }
+    if (showing && !was) { drawnVersion = -1; render(); paintFooter(); }
   };
   const watch = new MutationObserver(updateShowing);
   watch.observe(panel, { attributes: true, attributeFilter: ["hidden"] });
@@ -219,7 +148,7 @@
   let ready = false, logoutEpoch = net.state.logoutEpoch;
   const account = () => {
     const s = net.state;
-    if (s.logoutEpoch !== logoutEpoch) { logoutEpoch = s.logoutEpoch; model.reset("off"); page = 0; }
+    if (s.logoutEpoch !== logoutEpoch) { logoutEpoch = s.logoutEpoch; model.reset("off"); }
     if (!fixture) {
       const now = available() && s.room === "live";
       if (now && !ready) { if (!model.setDesired(zoneSource())) model.ask(); }
@@ -228,17 +157,10 @@
     }
     render(); paintFooter();
   };
-  // A reaction lasts its own time in its row's column, layered over the hand; a row holds a few at once.
-  const POPS = 4;
+  // A reaction lasts its own time over its tile's corner, layered over the hand; a tile holds a few at once.
   const pop = (msg) => {
-    if (msg.epoch !== model.epoch || msg.zone !== model.zone || !model.rows.has(msg.id) || !BL.reactionPolicy.valid(msg.e)) return;
-    const entry = cache.get(msg.id);
-    if (!entry || !showing || !entry.li.isConnected || entry.pops >= POPS) return;
-    const el = document.createElement("span");
-    el.className = "cloud-pop"; el.textContent = msg.e; el.setAttribute("aria-hidden", "true");
-    entry.pops++;
-    el.addEventListener("animationend", () => { el.remove(); entry.pops--; }, { once: true });
-    entry.react.append(el);
+    if (msg.epoch !== model.epoch || msg.zone !== model.zone || !model.rows.has(msg.id) || !BL.reactionPolicy.valid(msg.e) || !showing) return;
+    tiles.pop(msg.id, msg.e);
   };
   subs.push(net.subscribe(account));
   subs.push(net.subscribeAudience((msg) => {
@@ -251,23 +173,11 @@
     const b = e.currentTarget;
     if (e.detail) b.blur();
     if (!model.setDesired(b.dataset.cloudZone)) return;
-    page = 0;
     if (fixture) model.apply(sample(b.dataset.cloudZone));
     render(); paintFooter();
   };
   for (const b of zoneButtons) b.addEventListener("click", zoneClick);
   retry.addEventListener("click", () => { model.retry(); render(); });
-  prev.addEventListener("click", () => { page = Math.max(0, page - 1); render(); });
-  next.addEventListener("click", () => { page++; render(); });
-  list.addEventListener("click", (e) => {
-    const button = e.target.closest(".cloud-mic"), li = button && button.closest(".cloud-row");
-    if (!li || button.disabled) return;
-    const row = model.rows.get(li.dataset.id);
-    if (!row) return;
-    if (row.self) { if (voice.stats.returning) voice.toggle(); else voice.setMuted(!voice.stats.muted); }
-    else voice.muteLocal(row.login, !voice.mutedLocally(row.login));
-    paintMic(cache.get(row.id), row);
-  });
   mute.addEventListener("click", (e) => {
     if (e.detail) mute.blur();
     if (voice.stats.returning) voice.toggle();
@@ -290,7 +200,7 @@
     subs.length = 0;
     watch.disconnect();
     document.removeEventListener("sheetchange", onSheet);
-    for (const [id, entry] of cache) drop(id, entry);
+    tiles.dispose();
     model.reset("off");
   };
   BL.cloudPanel = {
@@ -298,6 +208,6 @@
     // #658's classifier hands the visitor's outdoor zone here, "main" or "dsb"; until then net.js's zone decides.
     setZoneSource(fn) { zoneSource = fn; },
     dispose,
-    get stats() { return { rows: model.rows.size, drawn: list.childElementCount, cached: cache.size, page, pages: model.pages(), status: model.status, zone: model.zone, desired: model.desired, showing }; }
+    get stats() { return { rows: model.rows.size, drawn: list.childElementCount, cached: tiles.count, status: model.status, zone: model.zone, desired: model.desired, showing }; }
   };
 })();

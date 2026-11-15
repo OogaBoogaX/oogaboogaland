@@ -1,6 +1,7 @@
 /* Ooga Chat's own layout. The look (tokens, sign lettering, slabs, chips, the amber button) comes from ../native.css,
-   which the island shares; this file only places it: native tabs on top of one plank frame, sized for a phone first
-   and centred on wider screens. */
+   which the island shares, and every panel wears the island's own rules (src/style.css, taken by scripts/ooga-chat.mjs
+   ISLAND_RULES); this file only places them: native tabs on top of one plank frame, the island's drawer, sized for a
+   phone first and centred on wider screens. */
 html,
 body {
   margin: 0;
@@ -16,10 +17,18 @@ body {
 .oc [hidden] { display: none !important; }
 
 .oc {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   max-width: 620px;
+  height: 100vh;
+  height: min(100dvh, 900px);
+  min-height: 520px;
   margin: 0 auto;
   padding: calc(16px + var(--safe-top)) calc(16px + var(--safe-right)) calc(16px + var(--safe-bottom)) calc(16px + var(--safe-left));
 }
+
+.oc > * { flex: none; }
 
 .oc-tabs {
   position: relative;
@@ -64,11 +73,11 @@ body {
 .oc-tab:focus-visible { outline: none; }
 .oc-tab:focus-visible .oc-tab-face { outline: 2px solid var(--accent); outline-offset: -3px; }
 
-.oc-frame {
+.oc > .oc-frame {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
-  gap: 12px;
-  padding: 14px 16px 18px;
+  min-height: 0;
   border: 3px solid var(--wood-edge);
   border-radius: var(--radius);
   background: var(--planks);
@@ -76,19 +85,19 @@ body {
   color: var(--paper);
 }
 
-.oc-title h1 {
-  margin: 2px 0 0 4px;
-  font-size: 26px;
-  line-height: 1;
-  font-weight: 400;
-  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.6));
+/* The page's name, for assistive technology: what shows is each panel's own carved title, as on the island. */
+.oc-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .oc-slab { padding: 20px 22px; }
-.oc-chat > .oc-slab { display: flex; flex-direction: column; gap: 16px; }
 
-.oc-signin,
-.oc-space {
+.oc-signin {
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -102,14 +111,19 @@ body {
   border-radius: 6px;
 }
 
+/* The sign-in's words, as the design has them: a quiet sans line over the buttons, in the note and under it. */
 .oc-lede,
 .oc-role,
-.oc-foot {
+.oc-foot,
+.oc-note span {
   margin: 0;
-  color: rgba(243, 239, 228, 0.78);
+  color: #bbb4a6;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
-.oc-foot { text-align: center; font-size: 12px; }
+.oc-foot { text-align: center; }
 
 .oc-status-line {
   display: flex;
@@ -119,7 +133,8 @@ body {
   color: var(--accent-text);
 }
 
-.oc .link {
+.oc-status-line .link,
+.oc-notice .link {
   padding: 0;
   border: 0;
   background: none;
@@ -131,38 +146,42 @@ body {
 
 .oc-providers {
   display: grid;
-  gap: 12px;
+  gap: 11px;
+  margin-top: 12px;
 }
 
+/* A sign-in button, the design's: the plank's wood, its edge and nail shadow, the label in the panels' own type. */
 .oc-provider {
-  min-height: 48px;
-  padding: 0 14px;
+  min-height: 51px;
+  padding: 9px 12px;
   border: 2px solid var(--wood-edge);
   border-radius: 6px;
-  background: linear-gradient(#ae844f, var(--wood));
+  background: linear-gradient(var(--plank), var(--wood));
   color: var(--paper);
-  font-weight: 700;
+  font: inherit;
+  font-weight: 600;
   box-shadow: 0 3px 0 var(--nail);
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
   cursor: pointer;
 }
 
-.oc-provider:hover:not(:disabled),
-.oc-provider:focus-visible { background: linear-gradient(#bf935b, var(--plank)); outline: none; }
-.oc-provider:focus-visible { box-shadow: 0 3px 0 var(--nail), 0 0 0 2px var(--accent); }
-.oc-provider:disabled { opacity: 0.5; cursor: not-allowed; }
+.oc-provider:hover:not(:disabled) { filter: brightness(1.12); }
+.oc-provider:focus-visible { outline: 2px solid #ffd9a0; outline-offset: 2px; }
+.oc-provider:disabled { opacity: 0.4; cursor: default; }
 
 .oc-note {
   display: grid;
   gap: 6px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.03);
-  color: rgba(243, 239, 228, 0.7);
+  margin: 8px 0 1px;
+  padding: 13px;
+  border: 1px solid #51483b;
+  border-radius: 5px;
+  background: #24211d;
 }
 
-.oc-note strong { color: var(--accent-text); }
+.oc-note strong { color: #ffd9a0; font-size: 12px; }
+
+/* In the account row, the sign-in button spans the panel as it does on the sign-in screen. */
+.account > .oc-account-signin { flex: 1 1 100%; }
 
 /* A notice that needs the visitor: an expired sign-in, a failed check, an unconfirmed sign-out, with its retry. */
 .oc-notice {
@@ -187,136 +206,87 @@ body {
   white-space: nowrap;
 }
 
-/* The two zones: Main Island and DSB Land, each with the island's own destination mark left of its name. The chosen one
-   is the native dark slab with a gold label and border; the other keeps the wood. */
-.oc-zones { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.oc-zone {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-width: 0;
-  min-height: 44px;
-  padding: 0 10px;
+/* One height for every tab, as the island's drawer has: the frame takes the page's height, each tab's panel the frame's,
+   and inside it the slab takes what the panel's fixed parts leave and scrolls its own overflow (native.css .panel). */
+.oc-views,
+.oc-view { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
+/* The Ooga Chat panel shows its space only while signed in, and only its footer while signing out. */
+.oc-chat[data-space="off"] > :is(.cloud-zones, .cloud-status, .cloud-roster, .oc-chat-foot),
+.oc-chat[data-space="foot"] > :is(.cloud-zones, .cloud-status, .cloud-roster) { display: none; }
+/* Its foot, as the design has it: the emoji panel left of the account controls where there is room and above them where
+   not, centred there, the name over the buttons. */
+.oc-chat-foot { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 14px; }
+.oc-chat-foot > .reactions { flex: 1 1 240px; min-width: 0; max-width: 370px; margin-top: 0; }
+.oc-chat-foot > .cloud-foot { flex: 1 1 220px; justify-content: center; }
+.oc-chat-foot .cloud-foot-name { flex-basis: 100%; text-align: center; }
+.oc-chat-foot .cloud-foot-actions { justify-content: center; }
+.oc-pending p { margin: 0; color: rgba(243, 239, 228, 0.7); }
+
+.oc-players { padding: 12px 14px; }
+.oc-roster-note { margin: 0; }
+
+/* Feed the Oogas: the island's donation dialog (donation-popup.js), framed as the island frames its dialogs (style.css
+   `.modal`, `.modal-close`, `.donation-popup`). The kiosk draws the name and message on its own screen; their fields
+   only take the typing, so they stay in the page, focusable, a phone's keyboard able to open on them, but out of
+   sight; 16px keeps iOS from zooming in. */
+.donation-popup {
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  margin: auto;
+  padding: 16px 18px 18px;
+  border: 3px solid var(--wood-edge);
+  border-radius: var(--radius);
+  background: var(--planks);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
+  font: inherit;
+}
+.donation-popup::backdrop { background: rgba(0, 0, 0, 0.6); }
+.donation-popup .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.donation-popup h2 { margin: 0 0 12px; font-size: 14px; color: var(--paper); filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5)); }
+.donation-popup .modal-close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -4px -4px 0 0;
+  padding: 0;
   border: 2px solid var(--wood-edge);
   border-radius: 6px;
-  background: linear-gradient(#ae844f, var(--wood));
+  background: rgba(0, 0, 0, 0.22);
   color: var(--paper);
-  font-weight: 700;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
-  white-space: nowrap;
+  font-size: 18px;
+  line-height: 1;
   cursor: pointer;
 }
-.oc-zone[aria-pressed="true"] { border-color: var(--accent); background: var(--slab-dark); color: var(--accent-text); text-shadow: none; }
-.oc-zone:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.oc-zone-icon { display: block; flex: none; width: 28px; height: auto; }
-img.oc-zone-icon { width: 24px; image-rendering: pixelated; }
-
-.oc-heard { margin: 0; color: var(--accent-text); }
-
-/* People: one continuous four-column list, speakers first. A face keeps its circle while its picture loads; a speaker's
-   carries a 3px ring in its source's colour (green from the island, purple from Ooga Chat) outside a 3px dark gap. The
-   name sits under it on one line, cut short with its whole self in the title, then the role 2px below. */
-.oc-space { --face: 56px; }
-.oc-people { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 8px; margin: 0; padding: 0; list-style: none; }
-.oc-space[data-audience="reconnecting"] .oc-people { opacity: 0.6; }
-.oc-person { display: flex; flex-direction: column; align-items: center; min-width: 0; padding: 6px 0 2px; border-radius: 6px; }
-.oc-person:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.oc-face {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: var(--face);
-  height: var(--face);
+.donation-popup .modal-close:hover,
+.donation-popup .modal-close:focus-visible { background: rgba(0, 0, 0, 0.38); }
+#donation-fields {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
   overflow: hidden;
-  border-radius: 50%;
-  background: var(--stone-dk);
-  box-shadow: 0 0 0 2px var(--stone-lt);
+  opacity: 0;
+  pointer-events: none;
 }
-.oc-person .oc-face { margin-bottom: 10px; }
-.oc-person[data-role="speaker"] .oc-face { box-shadow: 0 0 0 3px var(--slab-dark), 0 0 0 6px #22c55e; }
-.oc-person[data-role="speaker"][data-source="app"] .oc-face { box-shadow: 0 0 0 3px var(--slab-dark), 0 0 0 6px #b18aff; }
-.oc-face img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.oc-face svg { display: block; width: 62%; height: auto; }
-.oc-person-name { display: flex; align-items: center; justify-content: center; gap: 4px; max-width: 100%; color: var(--paper); font-weight: 700; }
-.oc-person-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.oc-source-dot { display: none; flex: none; width: 6px; height: 6px; border-radius: 50%; background: #b18aff; }
-.oc-person[data-role="speaker"][data-source="app"] .oc-source-dot { display: block; }
-.oc-person-role { display: flex; align-items: center; gap: 4px; margin-top: 2px; color: rgba(243, 239, 228, 0.62); font-size: 11px; }
-.oc-voice { display: none; flex: none; width: 9px; height: 9px; color: var(--paper); shape-rendering: crispEdges; }
-.oc-person[data-role="speaker"] .oc-voice { display: block; }
-.oc-voice .voice-far,
-.oc-voice .voice-cross,
-.oc-voice .voice-slash,
-.oc-person[data-muted="true"] .oc-voice .voice-near { display: none; }
-.oc-person[data-muted="true"] .oc-voice { color: var(--danger); }
-.oc-person[data-muted="true"] .oc-voice .voice-cross { display: inline; }
-
-/* The footer: the reactions slot left of the account where there is room, above it where not. */
-.oc-account {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 16px;
-  margin-top: 12px;
-  padding: 14px 16px;
-  background: var(--slab-dark);
+#donation-fields input { font-size: 16px; }
+#donation-screen { display: block; width: 100%; height: auto; image-rendering: pixelated; border-radius: 6px; }
+#donation-screen:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.donation-popup .help {
+  margin: 12px 0 0;
+  padding: 8px 12px;
   border: 2px solid var(--stone-dk);
   border-radius: 9px 7px 10px 8px;
+  background: var(--tablet);
   box-shadow: var(--tablet-shadow);
-}
-
-.oc-reactions { flex: 1 1 240px; min-width: 0; }
-.oc-account-main { display: flex; flex: 0 1 auto; flex-direction: column; align-items: flex-end; gap: 16px; min-width: 0; max-width: 100%; }
-
-.oc-account-who {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  margin: 0;
-  font-weight: 700;
-}
-
-.oc-account-name { overflow-wrap: anywhere; }
-.oc-speaker-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #b18aff; }
-
-.oc-account-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 16px 14px;
-}
-
-/* Compact like the island's footer buttons: 28px to see, 44px to touch through an invisible band of hit area, and rows
-   16px apart so no band reaches the next row. The microphone keeps one width whatever it says. */
-.oc-foot-button {
-  position: relative;
-  height: 28px;
-  padding: 0 12px;
-  border: 2px solid var(--wood-edge);
-  border-radius: 5px;
-  background: linear-gradient(var(--plank), var(--wood));
   color: var(--paper);
   font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  cursor: pointer;
+  line-height: 1.5;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
 }
-
-.oc-foot-button::before { content: ""; position: absolute; inset: -8px -2px; }
-.oc-foot-button:disabled { opacity: 0.5; cursor: not-allowed; }
-.oc-foot-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.oc-mute { flex: 0 0 84px; width: 84px; min-width: 84px; padding: 0; }
-.oc-signout { position: relative; min-height: 28px; text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px; }
-.oc-signout::before { content: ""; position: absolute; inset: -8px -4px; }
-
-.oc-panel { padding: 0; overflow: visible; }
-.oc-pending p { margin: 0; color: rgba(243, 239, 228, 0.7); }
 
 .oc-device { display: grid; gap: 6px; margin: 12px 4px 0; color: rgba(243, 239, 228, 0.78); font-size: 12px; }
 .oc-device-line { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0; }
@@ -337,12 +307,5 @@ img.oc-zone-icon { width: 24px; image-rendering: pixelated; }
   .oc-tabs { gap: 4px; padding: 0 4px; }
   .oc-tab { width: 52px; height: 42px; }
   .oc-tab-face { padding: 6px 11px 4px; }
-  .oc-frame { padding: 12px 10px 14px; }
-  .oc-title h1 { font-size: 22px; }
   .oc-slab { padding: 14px 16px; }
-  .oc-space { --face: 44px; }
-  .oc-people { gap: 14px 6px; }
-  .oc-zone { gap: 4px; padding: 0 5px; }
-  .oc-zone-icon { width: 24px; }
-  img.oc-zone-icon { width: 20px; }
 }

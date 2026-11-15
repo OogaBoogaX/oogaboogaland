@@ -1,7 +1,8 @@
 // Ooga Chat's production adapter: the bootstrap, the session and sign-in through the same origin's server only.
 // Every answer passes oogaChatConfig's parsers; a failure becomes an explicit unavailable mode, never mock data.
 // The fixture adapter (ooga-chat-fixtures.js) keeps the same interface: `kind`, `bootstrap()`, `session(boot)`,
-// `signIn(boot, provider)`, `signOut(boot)`, `audience(boot, { message, status })`, `dispose()`.
+// `signIn(boot, provider)`, `signOut(boot)`, `audience(boot, { message, status })`, `commons(boot, { message, status })`,
+// `contributors()`, `dispose()`.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -10,6 +11,11 @@
   // The audience feed's limits: the largest frame read, reconnect backoff, the wait after a full zone, and the wait
   // while listening is off.
   const FRAME_MAX = 1 << 20, BACKOFF_MS = [1000, 30000], FULL_WAIT_MS = 30000, OFF_WAIT_MS = 180000;
+  // The Commons' fixed address (docs/ooga-chat-backend.md) and its heartbeat: the island's Room answers "ping" with
+  // "pong" without waking, and closes a member silent past 90 s.
+  const COMMONS_PATH = "/api/chat/commons", PING_MS = 30000;
+  // The public panels' data (#664): the island's cast and Oogatron's reading, for anyone, signed in or not.
+  const PUBLIC_PATH = "/api/chat/public/contributors";
   const create = ({ fetch = window.fetch.bind(window), location = window.location, doc = document, WebSocket = window.WebSocket } = {}) => {
     const pending = new Set();
     let disposed = false;
@@ -57,14 +63,15 @@
       return null;
     };
     // The audience feed (audience protocol 1): one same-origin WebSocket at `paths.audience`, joined to one zone at a
-    // time (`join`), asked for a fresh snapshot after a gap (`resync`). Frames go to `message` as parsed JSON; the roster
+    // time (`join`), asked for a fresh snapshot after a gap (`resync`), and asked things with an id (`request`: a
+    // reaction or the hand, #668). Frames go to `message` as parsed JSON; the roster
     // checks them. `status` hears connecting, reconnecting, full, signed-out (close 4401: the app checks the session),
     // stale (4426: another protocol revision), closed (4503: listening is off, asked again after about 3 min) and
     // unavailable (no address). Reconnects back off from 1 s to 30 s. The edge refuses by accepting a socket and
     // closing it at once, so `open` proves nothing: only a frame from the zone resets the backoff.
     const audience = (boot, { message, status }) => {
-      let socket = null, zone = null, tries = 0, timer = null, closed = false;
-      const idle = { zone() {}, resync() {}, dispose() {} };
+      let socket = null, zone = null, tries = 0, timer = null, closed = false, requests = 0;
+      const idle = { zone() {}, resync() {}, request: () => 0, dispose() {} };
       if (!boot.paths.audience) {
         status("unavailable");
         return idle;
@@ -110,6 +117,9 @@
           else if (!socket && timer === null) open();
         },
         resync: () => send({ type: "resync", zone }),
+        // A request the server answers with a `result` of the same id (#668: `reaction`, `hand`): its id, 0 when the
+        // socket is not open.
+        request: (type, fields) => socket?.readyState === 1 && send({ type, requestId: ++requests, ...fields }) !== false ? requests : 0,
         dispose() {
           closed = true;
           clearTimeout(timer);
@@ -118,12 +128,86 @@
         }
       };
     };
+    // The Commons and Online Oogas (#670): one same-origin WebSocket at COMMONS_PATH while the server offers it to an
+    // eligible contributor. Frames go to `message` as parsed JSON (ooga-chat-commons.js checks them); `send` hands one
+    // line on, false while the socket is not open. `status` hears connecting, reconnecting, signed-out (4401: the app
+    // checks the session), refused (4403: not a contributor now; nothing more is asked), full (4429, asked again after
+    // 30 s), closed (4503: the Commons is off, asked again after about 3 min) and live (a frame has come). As with the
+    // audience, the edge refuses by accepting and closing at once, so only a frame resets the backoff.
+    const commons = (boot, { message, status }) => {
+      let socket = null, tries = 0, timer = null, ping = null, closed = false, heard = false;
+      if (!boot.features.commons) {
+        status("closed");
+        return { send: () => false, dispose() {} };
+      }
+      const later = (ms) => { timer = setTimeout(() => { timer = null; open(); }, ms); };
+      const open = () => {
+        if (closed) return;
+        status(tries ? "reconnecting" : "connecting");
+        heard = false;
+        const own = socket = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${COMMONS_PATH}`);
+        own.addEventListener("open", () => {
+          clearInterval(ping);
+          ping = setInterval(() => own.readyState === 1 && own.send("ping"), PING_MS);
+        });
+        own.addEventListener("message", (event) => {
+          if (own !== socket || typeof event.data !== "string" || event.data === "pong" || event.data.length > FRAME_MAX) return;
+          let data;
+          try { data = JSON.parse(event.data); } catch { return; }
+          tries = 0;
+          if (!heard) {
+            heard = true;
+            status("live");
+          }
+          message(data);
+        });
+        own.addEventListener("close", (event) => {
+          if (own !== socket || closed) return;
+          socket = null;
+          clearInterval(ping);
+          ping = null;
+          if (event.code === 4401) return status("signed-out");
+          if (event.code === 4403) return status("refused");
+          if (event.code === 4429) {
+            status("full");
+            return later(FULL_WAIT_MS);
+          }
+          if (event.code === 4503) {
+            status("closed");
+            return later(OFF_WAIT_MS * (0.75 + Math.random() * 0.5));
+          }
+          tries++;
+          status("reconnecting");
+          later(Math.min(BACKOFF_MS[1], BACKOFF_MS[0] * 2 ** Math.min(tries - 1, 5)) * (0.75 + Math.random() * 0.5));
+        });
+      };
+      open();
+      return {
+        send: (data) => socket?.readyState === 1 ? (socket.send(JSON.stringify(data)), true) : false,
+        dispose() {
+          closed = true;
+          clearTimeout(timer);
+          clearInterval(ping);
+          socket?.close(1000);
+          socket = null;
+        }
+      };
+    };
+    // The public panel data as the server answers it, or null when it can't be read (the view says so, never zeros).
+    const contributors = async () => {
+      try {
+        const response = await ask(PUBLIC_PATH, { headers: { accept: "application/json" } });
+        return response.ok ? await json(response) : null;
+      } catch {
+        return null;
+      }
+    };
     const dispose = () => {
       disposed = true;
       for (const controller of pending) controller.abort();
       pending.clear();
     };
-    return { kind: "http", bootstrap, session, signIn, signOut, audience, dispose, get pending() { return pending.size; } };
+    return { kind: "http", bootstrap, session, signIn, signOut, audience, commons, contributors, dispose, get pending() { return pending.size; } };
   };
   BL.oogaChatHttp = { create, TIMEOUT_MS };
 })();

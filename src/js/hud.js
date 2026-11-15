@@ -4,16 +4,11 @@
   const { iconRenderer: iconRendererMod } = BL;
   const { formatLarge } = BL.game;
   const { createNode, addChild, createCamera, boundsOf } = BL.scene;
-  const STATE_LABELS = { working: "clank", chilling: "chill", sleeping: "sleep", away: "away", online: "online" };
-  const ROSTER_ORDER = { working: 0, chilling: 1, sleeping: 2, away: 3 };
+  // Contributing Oogas is roster-panel.js's, shared with the Ooga Chat app: its rows, their order (this browser's Sorted
+  // by choice, `ooga-roster-sort`), Show away and the stats strip. This file hands it the island's contributors and their
+  // faces, and keeps the presence, host and voice marks on its rows.
+  const { STATE_LABELS } = BL.rosterPanel;
   const stampOf = (contributor) => contributor.lastContributionAt || contributor.lastCommitAt;
-  // How Contributing Oogas are ordered: "recent", by activity and then the latest contribution, or "most", by the
-  // contributions in the newest oogatron reading with the away Oogas still behind their button. This browser's choice.
-  const ROSTER_SORT_KEY = "ooga-roster-sort";
-  let rosterSort = "recent";
-  try { if (localStorage.getItem(ROSTER_SORT_KEY) === "most") rosterSort = "most"; } catch { /* Storage may be unavailable. */ }
-  const rosterRank = (state) => rosterSort === "recent" || state === "away" ? ROSTER_ORDER[state] : 0;
-  const rosterKey = (contributor) => rosterSort === "most" ? contributionsOf(contributor) : stampOf(contributor);
   // Local control is online only while signed in; remote presence remains independent. An NPC ghost track
   // (npc-ghosts.js) shows its own activity (a gorilla its Ooga's), never online: the player driving that character
   // is a separate body, which carries the online dot itself.
@@ -24,10 +19,6 @@
     return online ? "online" : actor.state === "away" ? "chilling" : actor.state;
   };
   const $ = (id) => document.getElementById(id);
-  const BANANA_COUNT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-  const DONATED_COUNT = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const DONOR_BANANAS = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  let donorUnit = "bananas";
   let donationStats = null, liveDonors = null;
   const setDonationStats = (stats) => {
     donationStats = stats;
@@ -46,8 +37,7 @@
     const price = currentDonationRate()?.usdPerBtc;
     if (!donatedValueText || sats !== valuedSats || price !== valuedPrice) {
       valuedSats = sats; valuedPrice = price;
-      donatedValueText = sats === 0 ? DONATED_COUNT.format(0) : sats !== null && price
-        ? DONATED_COUNT.format(sats / 1e8 * price) : "—";
+      donatedValueText = BL.bananaPanel.valueText(sats, price);
     }
     return donatedValueText;
   };
@@ -120,43 +110,11 @@
   };
   // Sign headings and the panel tabs' icons: sign-glyphs.js and native-icons.js draw them, shared with the Ooga Chat
   // app. The tabs fill before sheet.js copies them for its windows.
-  const SIGN_NS = "http://www.w3.org/2000/svg";
   const { lettering: signLettering, letter: letterSign } = BL.signGlyphs;
   for (const el of document.querySelectorAll("[data-sign]")) letterSign(el);
   BL.nativeIcons.fill(document);
   // The roster's voice mark, a 9x9 pixel speaker shared with Ooga Chat; the stylesheet shows the parts each state needs.
   const voiceIcon = BL.nativeIcons.voice();
-  // The Bananas panel's banana (its glyph is in the panel's markup) before each amount its two lists show: every row
-  // clones it, and the stylesheet hides it while the lists count sats.
-  const amountBanana = document.createElementNS(SIGN_NS, "svg");
-  amountBanana.setAttribute("viewBox", "0 0 9 9");
-  amountBanana.setAttribute("shape-rendering", "crispEdges");
-  amountBanana.setAttribute("aria-hidden", "true");
-  amountBanana.setAttribute("class", "banana-amount-icon");
-  {
-    const use = document.createElementNS(SIGN_NS, "use");
-    use.setAttribute("href", "#banana-panel-glyph");
-    amountBanana.append(use);
-  }
-  // The recent list's orange check: a seal whose rim rises and falls in eight rounded ridges, a ridge at the top,
-  // with the tick over it. Every row clones it.
-  const verifiedSeal = document.createElementNS(SIGN_NS, "svg");
-  verifiedSeal.setAttribute("viewBox", "0 0 24 24");
-  verifiedSeal.setAttribute("aria-hidden", "true");
-  {
-    const RIDGES = 8, STEPS = RIDGES * 8;
-    let d = "";
-    for (let i = 0; i < STEPS; i++) {
-      const a = i / STEPS * Math.PI * 2, r = 11 + 0.9 * Math.cos(RIDGES * a);
-      d += `${i ? "L" : "M"}${(12 + r * Math.sin(a)).toFixed(2)} ${(12 - r * Math.cos(a)).toFixed(2)}`;
-    }
-    const seal = document.createElementNS(SIGN_NS, "path"), tick = document.createElementNS(SIGN_NS, "path");
-    seal.setAttribute("class", "banana-verified-seal");
-    seal.setAttribute("d", `${d}Z`);
-    tick.setAttribute("class", "banana-verified-tick");
-    tick.setAttribute("d", "M7.6 12.4L10.9 17.1L16.9 8.3");
-    verifiedSeal.append(seal, tick);
-  }
   // Icons are rasterized once into an offscreen canvas.
   const ICON_PX = 48;
   const renderIcon = (item) => {
@@ -244,25 +202,18 @@
     renderer.render(root, camera);
     renderer.dispose();
   };
-  // The sheet belongs to the page. Reuse attached rows across visits; only current roster names stay in this map.
-  const rosterNodes = new Map();
-  let rosterAway = null, donorRows = null, donationRows = null;
   const create = ({ roster, healthEnabled = false, signal = null, escapeHeld = null }) => {
     const lifetime = signal ? null : new AbortController();
     signal = signal || lifetime.signal;
+    // The Bananas panel's markup (banana-panel.js, shared with the Ooga Chat app): built and lettered on the first visit,
+    // then kept for the page life, before the panel's actions are gathered.
+    if (!$("bananas-panel").firstChild) for (const sign of BL.bananaPanel.build($("bananas-panel"), { ids: true }).querySelectorAll("[data-sign]")) letterSign(sign);
+    // So too the title, Sorted by and list of Contributing Oogas (roster-panel.js), before the sheet's bells join the titles.
+    if (!$("roster-panel").querySelector("[data-roster]")) for (const sign of BL.rosterPanel.build($("roster-panel"), { ids: true }).querySelectorAll("[data-sign]:not([aria-label])")) letterSign(sign);
     const el = {
-      roster: $("roster"), rosterCount: $("roster-count"), rosterSort: $("roster-sort"),
-      statDonations: $("stat-donations"),
-      statSats: $("stat-sats"),
-      bananaTotal: $("banana-total"), bananaSource: $("banana-source"),
-      bananaLeaders: $("banana-leaders"), bananaEmpty: $("banana-empty"),
-      bananaRecent: $("banana-recent-list"), bananaRecentEmpty: $("banana-recent-empty"),
-      bananaRecentBar: $("banana-recent-bar"), bananaRecentBarLabel: $("banana-recent-bar-label"),
+      rosterPanel: $("roster-panel"),
       donationMessageLabel: $("donation-message-label"),
-      bananaBoardUnit: $("banana-board-unit"), bananaBoardNote: $("banana-board-note"),
-      bananaPanel: $("bananas-panel"), bananaBtcRate: $("banana-btc-rate"),
-      bananaBtcSats: $("banana-btc-sats"), bananaBtcPrice: $("banana-btc-price"), bananaExchange: $("banana-exchange"),
-      donorUnits: [...document.querySelectorAll("[data-donor-unit]")],
+      bananaPanel: $("bananas-panel"),
       subtitle: $("subtitle"),
       topbar: document.querySelector(".topbar"), brand: document.querySelector(".brand"),
       clock: $("world-clock"), block: $("world-block"),
@@ -465,174 +416,24 @@
       scheduleBanner();
     }
     let hintTimer = 0, hintHideTimer = 0, copyTimer = 0;
-    const rosterRows = new Map();
-    let showAway = false, awayCount = 0, awayShownCount = -1, awayShownShow = null;
-    if (!rosterAway) {
-      const li = document.createElement("li"), button = document.createElement("button");
-      li.className = "roster-away"; button.type = "button"; li.append(button);
-      rosterAway = { li, button };
-    }
-    const awayRow = rosterAway.li, awayButton = rosterAway.button;
-    awayButton.setAttribute("aria-expanded", "false");
-    awayRow.remove();
-    const names = new Set(roster.map(contributor => contributor.name));
-    for (const [name, row] of rosterNodes) if (!names.has(name)) { row.li.remove(); rosterNodes.delete(name); }
-    // countAway rescans on every roster state flip and online toggle; skip the writes until they change.
-    el.rosterCount.textContent = `${roster.length} Oogas`;
-    const updateAwayButton = () => {
-      if (awayCount === awayShownCount && showAway === awayShownShow) return;
-      awayShownCount = awayCount;
-      awayShownShow = showAway;
-      awayRow.hidden = awayCount === 0;
-      awayButton.textContent = `${showAway ? "Hide" : "Show"} away (${awayCount})`;
-    };
-    const orderedRoster = [...roster].sort((a, b) =>
-      rosterRank(BL.contributors.contributionStateFor(a)) - rosterRank(BL.contributors.contributionStateFor(b)) ||
-      rosterKey(b) - rosterKey(a) || stampOf(b) - stampOf(a));
-    for (let rosterIndex = 0; rosterIndex < orderedRoster.length; rosterIndex++) {
-      const contributor = orderedRoster[rosterIndex];
-      let nodes = rosterNodes.get(contributor.name);
-      if (!nodes) {
-        const li = document.createElement("li"), dots = document.createElement("span"), presence = document.createElement("span"), name = document.createElement("button");
-        li.dataset.name = contributor.name;
-        // The online dot, with the host's outlined dot centred behind it.
-        dots.className = "roster-dots";
-        presence.className = "roster-presence"; presence.setAttribute("role", "img");
-        const label = document.createElement("span"), host = document.createElement("span");
-        host.className = "roster-host";
-        host.setAttribute("role", "img"); host.setAttribute("aria-label", "Host: runs the Oogas for everyone");
-        host.title = "Host: runs the Oogas for everyone";
-        dots.append(presence, host);
-        // The name, on one line and cut short with an ellipsis, opens the row onto the contributor's stats.
-        name.className = "roster-name"; name.type = "button"; label.className = "roster-label";
-        name.append(label);
-        const marks = document.createElement("span"), voice = document.createElement("button");
-        marks.className = "roster-marks";
-        voice.className = "roster-voice"; voice.type = "button"; voice.append(voiceIcon.cloneNode(true));
-        marks.append(voice);
-        const age = document.createElement("span"), state = document.createElement("span");
-        age.className = "roster-age"; age.append(""); state.className = "roster-state"; state.append("");
-        li.append(dots, name, marks, age, state);
-        nodes = { li, presence, name, label, host, voice, age, state, stats: null };
-        rosterNodes.set(contributor.name, nodes);
-      }
-      const { li, presence, name, label, host, voice, age, state } = nodes;
-      if (label.textContent !== contributor.display) { label.textContent = contributor.display; label.title = contributor.display; }
-      presence.dataset.online = "false"; presence.setAttribute("aria-label", "Offline"); presence.title = "Offline";
-      host.hidden = voice.hidden = true; voice.disabled = false;
-      if (nodes.stats) nodes.stats.box.hidden = true;
-      name.setAttribute("aria-expanded", "false");
-      voice.dataset.voice = voice.dataset.login = ""; voice.dataset.self = "false";
-      const activity = BL.contributors.contributionStateFor(contributor), ageText = BL.contributors.contributionAgeLabel(contributor);
-      if (age.firstChild.data !== ageText) age.firstChild.data = ageText;
-      state.dataset.state = activity;
-      if (state.firstChild.data !== STATE_LABELS[activity]) state.firstChild.data = STATE_LABELS[activity];
-      li.hidden = activity === "away";
-      if (activity === "away") { if (!awayRow.parentElement) el.roster.append(awayRow); awayCount++; }
-      el.roster.append(li);
-      rosterRows.set(contributor.name, { li, presence, state, age, contributor, rosterIndex, online: false, sceneOnline: false, remoteOnline: false, netOnline: false, nextOnline: false, placedStamp: stampOf(contributor), host, voice, look: "", login: "", hostOn: false, blocked: false, self: false, nextLook: "", nextLogin: "", nextHost: false, nextSelf: false, name, nodes, open: false });
-    }
-    if (!awayRow.parentElement) el.roster.append(awayRow);
-    updateAwayButton();
-    on(el.roster, "click", (e) => {
-      const who = e.target.closest(".roster-name");
-      if (who) {
-        who.blur();
-        const row = rosterRows.get(who.parentElement.dataset.name);
-        if (row) openStats(row, !row.open);
-        return;
-      }
-      const button = e.target.closest(".roster-voice");
-      if (!button || button.disabled) return;
-      button.blur();
+    // Contributing Oogas (roster-panel.js, shared with the Ooga Chat app), its rows kept for the page life. The island
+    // hands it its contributors, their contribution state and age (contributors.js), their faces from this page's own
+    // renderer and the presence the scene reports.
+    const rosterPanel = BL.rosterPanel.create(el.rosterPanel, {
+      roster, stamp: stampOf, login: (contributor) => loginOf(contributor), joinedAt: (contributor) => joinedAt(contributor, BL.characters.get(contributor.name)),
+      stateFor: (contributor) => BL.contributors.contributionStateFor(contributor), ageLabel: (contributor) => BL.contributors.contributionAgeLabel(contributor),
+      stats: () => liveStats || BL.jumbotronData, face: faceOf,
+      // A scene's local driver needs a signed-in account; remote drivers and the room's signed-in identities remain
+      // online independently.
+      online: (row) => row.sceneOnline && !!BL.net.state.me || row.remoteOnline || row.netOnline,
       // The visitor's own mark mutes and unmutes their microphone; anyone else's mutes them for this visitor.
-      if (button.dataset.self === "true") BL.voice.toggle();
-      else BL.voice.muteLocal(button.dataset.login, button.getAttribute("aria-pressed") !== "true");
-    });
-    on(awayButton, "click", () => {
-      showAway = !showAway;
-      awayButton.setAttribute("aria-expanded", String(showAway));
-      for (const row of rosterRows.values()) if (row.state.dataset.state === "away") row.li.hidden = !showAway && !row.online;
-      updateAwayButton();
-    });
-    // The Sorted by choice orders the roster; online presence never changes a row's rank.
-    const rankOf = (row) => rosterRank(row.state.dataset.state);
-    const countAway = () => {
-      awayCount = 0;
-      for (const row of rosterRows.values()) if (!row.online && row.state.dataset.state === "away") awayCount++;
-      updateAwayButton();
-    };
-    const placeRosterRow = (row) => {
-      const rank = rankOf(row), stamp = rosterKey(row.contributor);
-      let before = rank === ROSTER_ORDER.away ? null : awayRow;
-      for (const sibling of el.roster.children) {
-        if (sibling === row.li || sibling === awayRow) continue;
-        const other = rosterRows.get(sibling.dataset.name);
-        const otherRank = rankOf(other), otherStamp = rosterKey(other.contributor);
-        if (otherRank > rank) { before = otherRank === ROSTER_ORDER.away ? awayRow : sibling; break; }
-        if (otherRank === rank && (otherStamp < stamp || otherStamp === stamp && other.rosterIndex > row.rosterIndex)) { before = sibling; break; }
+      voice: (button) => {
+        if (button.dataset.self === "true") BL.voice.toggle();
+        else BL.voice.muteLocal(button.dataset.login, button.getAttribute("aria-pressed") !== "true");
       }
-      if (before) {
-        if (row.li.nextElementSibling !== before) el.roster.insertBefore(row.li, before);
-      } else if (el.roster.lastElementChild !== row.li) el.roster.append(row.li);
-    };
-    // Every row in the chosen order, the away rows behind their button, moving only what is out of place.
-    const sortRoster = () => {
-      const rows = [...rosterRows.values()].sort((a, b) => rankOf(a) - rankOf(b) || rosterKey(b.contributor) - rosterKey(a.contributor) || stampOf(b.contributor) - stampOf(a.contributor));
-      let at = el.roster.firstElementChild, awayPlaced = false;
-      const place = (li) => { if (li === at) at = at.nextElementSibling; else el.roster.insertBefore(li, at); };
-      rows.forEach((row, index) => {
-        row.rosterIndex = index;
-        if (!awayPlaced && rankOf(row) === ROSTER_ORDER.away) { place(awayRow); awayPlaced = true; }
-        place(row.li);
-      });
-      if (!awayPlaced) place(awayRow);
-    };
-    el.rosterSort.value = rosterSort;
-    on(el.rosterSort, "change", () => {
-      rosterSort = el.rosterSort.value === "most" ? "most" : "recent";
-      try { localStorage.setItem(ROSTER_SORT_KEY, rosterSort); } catch { /* Storage may be unavailable. */ }
-      el.rosterSort.blur();
-      sortRoster();
     });
-    // A scene's local driver needs a signed-in account; remote drivers and the room's
-    // signed-in identities remain online independently. A change repaints the dot without moving the row.
-    const showOnline = (row) => {
-      const online = row.sceneOnline && !!BL.net.state.me || row.remoteOnline || row.netOnline;
-      if (row.online === online) return;
-      row.online = online;
-      row.presence.dataset.online = online ? "true" : "false";
-      row.presence.title = online ? "Online" : "Offline";
-      row.presence.setAttribute("aria-label", row.presence.title);
-      row.li.hidden = row.state.dataset.state === "away" && !showAway && !online;
-      countAway();
-    };
-    const setRosterRow = (name, _stateKey, _ageText, online = false, remoteOnline = false) => {
-      const row = rosterRows.get(name);
-      if (!row) return;
-      // Gameplay can put an Ooga to work or sleep; this board follows the
-      // contributor's latest recorded activity instead.
-      const activity = BL.contributors.contributionStateFor(row.contributor);
-      const ageText = BL.contributors.contributionAgeLabel(row.contributor);
-      let moved = false;
-      if (row.state.dataset.state !== activity) {
-        row.state.dataset.state = activity;
-        row.state.firstChild.data = STATE_LABELS[activity] || activity;
-        row.li.hidden = activity === "away" && !showAway && !row.online;
-        countAway();
-        moved = true;
-      }
-      if (row.age.firstChild.data !== ageText) row.age.firstChild.data = ageText;
-      row.sceneOnline = online;
-      row.remoteOnline = remoteOnline;
-      showOnline(row);
-      const stamp = stampOf(row.contributor);
-      if (row.placedStamp !== stamp) {
-        row.placedStamp = stamp;
-        moved = true;
-      }
-      if (moved) placeRosterRow(row);
-    };
+    const rosterRows = rosterPanel.rows, setRosterRow = rosterPanel.setRow, showOnline = rosterPanel.showOnline;
+    listeners.push(() => rosterPanel.dispose());
     // Contribution data and its age stay live even in rooms with only one local Ooga.
     // Preserve the scene's presence flags when refreshing activity across the whole panel.
     const refreshRosterActivity = () => {
@@ -649,55 +450,20 @@
     listeners.push(BL.oogatronLive.subscribe((event) => {
       if (event.type !== "stats") return;
       liveStats = BL.activityRepos.normalizeStats(event.stats);
-      for (const row of rosterRows.values()) if (row.open) fillStats(row);
-      fitSince();
-      if (rosterSort === "most") sortRoster();
+      rosterPanel.statsChanged();
     }));
     liveOnline = showOnline;
     showVoices();
-    // Value the donated sats at the current price; donor rankings retain their receipt prices. A bitcoin's price is
-    // in bananas, since a banana is a dollar; whether that price is live or stale is said on hover alone.
-    const showBananaRate = () => {
-      if (document.hidden || !BL.sheet.visible(el.bananaPanel)) return;
-      const rate = currentDonationRate(), total = donationValueText();
-      const tone = !rate ? "wait" : rate.stale ? "stale" : rate.live ? "live" : "idle";
-      const label = tone === "live" ? "Live BTCUSD price" : tone === "stale" ? "Stale BTCUSD price, the last one kept" : tone === "wait" ? "Waiting for the BTCUSD price" : "BTCUSD price";
-      const price = rate ? DONOR_BANANAS.format(rate.usdPerBtc) : "—";
-      const exchange = rate ? `≈ ${DONOR_BANANAS.format(1e8 / rate.usdPerBtc)} sats` : "— sats";
-      if (el.bananaBtcRate.dataset.tone !== tone) el.bananaBtcRate.dataset.tone = tone;
-      if (el.bananaBtcRate.title !== label) el.bananaBtcRate.title = label;
-      if (el.bananaBtcPrice.textContent !== price) el.bananaBtcPrice.textContent = price;
-      if (el.bananaExchange.textContent !== exchange) el.bananaExchange.textContent = exchange;
-      if (el.bananaTotal.textContent !== total) el.bananaTotal.textContent = total;
-      if (price.length !== fitPriceLength) fitBtcRate();
-    };
-    // The bitcoin line keeps to one line: "100,000,000 sats" while it fits, "100M sats" once a narrow panel or a long
-    // price would wrap it, and only past that does it wrap. Fitted again when the price's length or the line's width
-    // changes; digits are tabular, so the same length takes the same room.
-    let fitPriceLength = -1, fitWidth = 0;
-    const fitBtcRate = () => {
-      const line = el.bananaBtcRate;
-      fitPriceLength = el.bananaBtcPrice.textContent.length;
-      if (!fitWidth) return;
-      line.dataset.fit = "line";
-      el.bananaBtcSats.textContent = "100,000,000";
-      if (line.scrollWidth <= line.clientWidth) return;
-      el.bananaBtcSats.textContent = "100M";
-      if (line.scrollWidth > line.clientWidth) line.dataset.fit = "wrap";
-    };
-    const btcRateObserver = new ResizeObserver((entries) => {
-      const width = Math.round(entries[entries.length - 1].contentRect.width);
-      if (width === fitWidth) return;
-      fitWidth = width;
-      fitBtcRate();
-    });
-    btcRateObserver.observe(el.bananaBtcRate);
+    // The Bananas panel (banana-panel.js, shared with the Ooga Chat app) fills from donations.js; here its price is the
+    // 2140data socket's while it or the pile's value shows, and the demo's tally stands in while donations are simulated.
+    const bananas = BL.bananaPanel.create(el.bananaPanel, { demo: () => donationStats, rate: currentDonationRate,
+      visible: () => BL.sheet.visible(el.bananaPanel) });
     let stopBananaRate = null, pileValueVisible = false;
     const watchBananaRate = () => {
       const visible = !document.hidden && (pileValueVisible || BL.sheet.visible(el.bananaPanel));
-      if (visible && !stopBananaRate) stopBananaRate = BL.donationRate.watch(showBananaRate);
+      if (visible && !stopBananaRate) stopBananaRate = BL.donationRate.watch(bananas.showRate);
       else if (!visible && stopBananaRate) { stopBananaRate(); stopBananaRate = null; }
-      if (visible) showBananaRate();
+      if (visible) bananas.showRate();
     };
     const setPileValueVisible = (visible) => {
       if (pileValueVisible === visible) return;
@@ -711,134 +477,17 @@
     on(document, "sheetchange", watchBananaRate);
     listeners.push(() => {
       bananaRateObserver.disconnect();
-      btcRateObserver.disconnect();
       if (stopBananaRate) stopBananaRate();
+      bananas.dispose();
     });
     watchBananaRate();
-    // A fixed pool, so the DOM never grows with donations.
-    const recentRows = donationRows || (donationRows = Array.from({ length: BL.donations.RECENT_MAX }, () => {
-      const li = document.createElement("li"), name = document.createElement("span"), labelBox = document.createElement("span"), label = document.createTextNode("");
-      const badge = document.createElement("span"), amount = document.createElement("strong"), message = document.createElement("p");
-      // Every text node exists from the start, so filling a row later adds nothing to the DOM.
-      const amountText = document.createTextNode(""), messageText = document.createTextNode("");
-      name.className = "banana-recent-name";
-      labelBox.className = "banana-recent-label";
-      labelBox.append(label);
-      badge.className = "banana-verified";
-      badge.append(verifiedSeal.cloneNode(true));
-      badge.title = "Signed in with GitHub using this donor name";
-      badge.setAttribute("role", "img");
-      badge.setAttribute("aria-label", "GitHub name confirmed");
-      badge.hidden = true;
-      amount.className = "banana-amount";
-      message.className = "banana-recent-message";
-      message.hidden = true;
-      name.append(labelBox, badge);
-      amount.append(amountBanana.cloneNode(true), amountText);
-      message.append(messageText);
-      li.append(name, amount, message);
-      li.hidden = true;
-      el.bananaRecent.append(li);
-      return { li, name, labelBox, label, badge, amountText, message, messageText };
-    }));
-    // One row a ranked donor, made as the board first grows to it and kept for the page life: the board scrolls inside
-    // its five-row window, and both boards it shows hold at most 256 (the API's and the game's demo donors).
-    const leaderRows = donorRows || (donorRows = []);
-    const leaderRow = (i) => {
-      const li = document.createElement("li"), rank = document.createElement("span"), name = document.createElement("span"), amount = document.createElement("strong");
-      const nameText = document.createTextNode(""), amountText = document.createTextNode("");
-      rank.className = "banana-rank"; rank.textContent = String(i + 1).padStart(2, "0");
-      name.className = "banana-donor"; name.append(nameText);
-      amount.className = "banana-amount"; amount.append(amountBanana.cloneNode(true), amountText);
-      li.append(rank, name, amount); li.hidden = true; el.bananaLeaders.append(li);
-      return { li, name, nameText, amountText };
+    // The donation popup's message field names the API's bar.
+    const showMessageBar = () => {
+      el.donationMessageLabel.textContent = `Banana message (up to 280 characters, with a tip of ${BL.bananaPanel.BANANA_COUNT.format(BL.donations.messageMinSats)} sats or more)`;
     };
-    // The recent list's checkbox keeps it to tips at or above the message bar: on until the visitor turns it off,
-    // and their choice either way remembered in this browser.
-    const RECENT_BAR_KEY = "ooga-recent-bar";
-    let recentBarOnly = true;
-    try { recentBarOnly = localStorage.getItem(RECENT_BAR_KEY) !== "0"; } catch { /* no storage: on, as for a first visit */ }
-    el.bananaRecentBar.checked = recentBarOnly;
-    on(el.bananaRecentBar, "change", () => {
-      recentBarOnly = el.bananaRecentBar.checked;
-      try { localStorage.setItem(RECENT_BAR_KEY, recentBarOnly ? "1" : "0"); } catch { /* kept for this visit alone */ }
-      refreshDonors(true);
-      el.bananaRecentBar.blur();
-    });
-    let shownTally, shownBoard, shownRecent, shownReal, shownNetwork, shownOpen, shownBar;
-    const refreshDonors = (force = false) => {
-      const { real, state, testNetwork, messageMinSats: bar } = BL.donations;
-      showBananaRate();
-      if (!force && shownTally === state.tally && shownBoard === state.board && shownRecent === state.recent && shownReal === real && shownNetwork === testNetwork && shownOpen === state.open && shownBar === bar) return;
-      shownTally = state.tally; shownBoard = state.board; shownRecent = state.recent; shownReal = real; shownNetwork = testNetwork; shownOpen = state.open; shownBar = bar;
-      const tally = real ? state.tally : donationStats;
-      // The chip says whose figures these are: this browser's demo, a test network's, the feed still loading,
-      // donations closed, or the island's live feed.
-      const tone = !real ? "idle" : testNetwork ? "test" : !tally ? "wait" : state.open === false ? "closed" : "live";
-      el.bananaSource.dataset.tone = tone;
-      el.bananaSource.textContent = tone === "idle" ? "Demo" : tone === "test" ? `Test · ${testNetwork}` : tone === "wait" ? "Loading" : tone === "closed" ? "Closed" : "Live";
-      el.bananaSource.title = tone === "idle" ? "Demo donations saved in this browser" : tone === "test" ? `Test donations on ${testNetwork}, not real bitcoin`
-        : tone === "wait" ? "Waiting for the island’s donation feed" : tone === "closed" ? "Donations are closed for now" : "The island’s donation feed";
-      el.statDonations.textContent = tally ? BANANA_COUNT.format(real ? tally.count : tally.donations) : "—";
-      el.statSats.textContent = tally ? BANANA_COUNT.format(real ? tally.sats : tally.totalSats) : "—";
-      const entries = real ? donorUnit === "sats" ? state.boardSats : state.board : donationStats?.donors;
-      const missingSats = donorUnit === "sats" && (real && state.board !== null && entries === null || entries?.some((entry) => entry.sats === null));
-      // The API ranks before rounding bananas, with stable account-id ties. Keep that order.
-      const ranked = missingSats ? [] : real ? entries || [] : (entries || []).slice().sort((a, b) =>
-        b[donorUnit] - a[donorUnit] || b[donorUnit === "bananas" ? "sats" : "bananas"] - a[donorUnit === "bananas" ? "sats" : "bananas"]
-        || a.handle.localeCompare(b.handle));
-      while (leaderRows.length < ranked.length) leaderRows.push(leaderRow(leaderRows.length));
-      for (let i = 0; i < leaderRows.length; i++) {
-        const entry = ranked[i], row = leaderRows[i];
-        row.li.hidden = !entry;
-        if (!entry) continue;
-        const name = entry.handle ? `@${entry.handle}` : "Anonymous";
-        const amount = (donorUnit === "sats" ? BANANA_COUNT : DONOR_BANANAS).format(entry[donorUnit]);
-        if (row.nameText.data !== name) { row.nameText.data = name; row.name.title = name; }
-        if (row.amountText.data !== amount) row.amountText.data = amount;
-        row.name.dataset.anon = String(!entry.handle);
-      }
-      el.bananaEmpty.hidden = ranked.length > 0;
-      el.bananaEmpty.textContent = missingSats ? "Sat totals are not available from the donation feed yet."
-        : real && !entries ? "Loading the donor leaderboard…"
-        : real ? "No donations yet. Feed the first Ooga!" : "New demo donations will appear here.";
-      // The recent list: the newest first, its orange check only on the API's word that the donor's GitHub login
-      // matched the name, into the fixed rows (the first `RECENT_MAX` the checkbox leaves).
-      const all = real ? state.recent || [] : donationStats?.recentDonations || [];
-      const recent = recentBarOnly ? all.filter((entry) => entry.sats >= bar) : all;
-      el.bananaRecentBarLabel.textContent = `${BANANA_COUNT.format(bar)} sats and up only`;
-      el.donationMessageLabel.textContent = `Banana message (up to 280 characters, with a tip of ${BANANA_COUNT.format(bar)} sats or more)`;
-      for (let i = 0; i < recentRows.length; i++) {
-        const row = recentRows[i], entry = recent[i];
-        row.li.hidden = !entry;
-        if (!entry) continue;
-        row.label.data = entry.handle ? `@${entry.handle}` : "Anonymous";
-        if (row.labelBox.title !== row.label.data) row.labelBox.title = row.label.data;
-        row.name.dataset.anon = String(!entry.handle);
-        row.badge.hidden = !(real && entry.verified);
-        row.amountText.data = (donorUnit === "sats" ? BANANA_COUNT : DONOR_BANANAS).format(entry[donorUnit]);
-        const message = BL.donations.carried(entry.sats, entry.message);
-        row.message.hidden = !message;
-        row.messageText.data = message;
-      }
-      el.bananaRecentEmpty.hidden = recent.length > 0;
-      el.bananaRecentEmpty.textContent = recentBarOnly && all.length ? `None of the latest tips reached ${BANANA_COUNT.format(bar)} sats.`
-        : real ? "Recent donations will appear here as they arrive." : "New demo donations will appear here.";
-      el.bananaBoardNote.textContent = !real ? "Demo donations in this browser only. Earlier tips have no donor history."
-        : testNetwork ? `Test donations on ${testNetwork}. Leaderboard values are recorded when paid.`
-        : "Leaderboard totals use each donation's recorded value.";
-      el.bananaBoardUnit.textContent = donorUnit === "sats" ? "Sats" : "Bananas";
-      el.bananaPanel.dataset.unit = donorUnit;
-      el.bananaLeaders.setAttribute("aria-label", `Top donors by ${donorUnit}`);
-      for (const button of el.donorUnits) button.setAttribute("aria-pressed", String(button.dataset.donorUnit === donorUnit));
-    };
-    for (const button of el.donorUnits) on(button, "click", () => {
-      donorUnit = button.dataset.donorUnit;
-      refreshDonors(true);
-    });
-    listeners.push(BL.donations.subscribeState(refreshDonors));
-    liveDonors = refreshDonors;
-    refreshDonors(true);
+    listeners.push(BL.donations.subscribeState(showMessageBar));
+    showMessageBar();
+    liveDonors = bananas.refresh;
     const setStats = (stats) => {
       setDonationStats(stats);
     };
@@ -2246,7 +1895,7 @@
       listeners.length = 0;
       if (lifetime) lifetime.abort();
       if (liveRows === rosterRows) liveRows = liveOnline = null;
-      if (liveDonors === refreshDonors) liveDonors = null;
+      if (liveDonors === bananas.refresh) liveDonors = null;
       // Page-owned roster and donation rows remain attached; the next visit reconciles their contents.
       el.toast.classList.remove("show");
       el.toast.hidden = true;
@@ -2379,171 +2028,17 @@
     const character = BL.net.characterOf(login);
     return character && liveRows.get(character.handle) || body && liveRows.get(BL.net.bodyName(body)) || null;
   };
-  // A contributor's stats, a darker strip under their row that their name opens: their Ooga's face, the day of their
-  // first contribution (the character's `joined`), their contributions across the org, all five kinds, and every
-  // repository they have contributed to with their count there, from the newest oogatron reading (oogatron-live.js,
-  // kept on `liveStats`) or the baked one. Built on its first opening and filled on each, and again while open when a
-  // reading arrives; the face is drawn once a page a contributor.
-  const STAT_KINDS = [["commits", "commit", "commits"], ["prs", "PR", "PRs"], ["reviews", "review", "reviews"], ["issues", "issue", "issues"], ["comments", "comment", "comments"]];
-  // The org's .github repository holds its profile and templates, not a project, so it gets no chip.
-  const STAT_FACE_PX = 40, REPO_URL = "https://github.com/OogaBoogaX/", UNLISTED_REPOS = new Set([".github"]);
-  const SINCE = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" });
-  const shortYear = (t) => SINCE.formatToParts(t).map((p) => p.type === "year" ? `\u2019${p.value.slice(-2)}` : p.value).join("");
-  const faces = new Map();
-  // The total and the first contribution stand side by side next to the face: the day with its whole year while they
-  // fit, "’26" once a narrow panel would wrap them, and only past that do they wrap. One answer for the whole roster,
-  // measured with its longest total beside its longest date, so no two strips differ and opening another never changes
-  // one. Fitted again when a total or the strip's width changes, on the bitcoin line's pattern; a hidden strip (width 0)
-  // takes the last answer until it shows.
-  const sinceFits = new Map();
-  let sinceResize = null, sinceShort = false, liveStats = null;
-  // Every login's contributions across the five kinds in the newest reading, worked out once a reading.
-  const tally = { data: null, totals: new Map() };
-  const totals = () => {
-    const data = liveStats || BL.jumbotronData;
-    if (tally.data === data) return tally.totals;
-    tally.data = data;
-    tally.totals.clear();
-    const boards = data && data.leaderboards;
-    if (boards) for (const [kind] of STAT_KINDS) {
-      if (!Array.isArray(boards[kind])) continue;
-      for (const entry of boards[kind]) {
-        const login = entry.login.toLowerCase();
-        tally.totals.set(login, (tally.totals.get(login) || 0) + entry.count);
-      }
-    }
-    return tally.totals;
-  };
+  // A contributor's stats strip (roster-panel.js) reads the newest oogatron reading (oogatron-live.js, kept on
+  // `liveStats`) or the baked one, each contributor's GitHub login and first contribution from the character, and their
+  // Ooga's face, drawn here once a page with this page's own renderer.
+  const STAT_FACE_PX = 40;
+  let liveStats = null;
   const loginOf = (contributor, character = BL.characters.get(contributor.name)) => ((character && character.github) || contributor.name).toLowerCase();
-  const contributionsOf = (contributor) => totals().get(loginOf(contributor)) || 0;
   const joinedAt = (contributor, character) => character ? character.joined * 1e3 : contributor.lastCommitAt;
-  const fitSince = () => {
-    let probe = null;
-    for (const fit of sinceFits.values()) if (fit.fitWidth) { probe = fit; break; }
-    if (probe) {
-      let total = "", since = "";
-      for (const row of liveRows.values()) {
-        const character = BL.characters.get(row.contributor.name), joined = joinedAt(row.contributor, character);
-        const count = statCount(totals().get(loginOf(row.contributor, character)) || 0), day = joined > 0 ? SINCE.format(joined) : "";
-        if (count.length > total.length) total = count;
-        if (day.length > since.length) since = day;
-      }
-      const shown = probe.total.textContent;
-      probe.facts.dataset.fit = "line";
-      probe.total.textContent = total; probe.since.textContent = since;
-      sinceShort = probe.facts.scrollWidth > probe.facts.clientWidth;
-      probe.total.textContent = shown;
-    }
-    for (const fit of sinceFits.values()) {
-      fit.since.textContent = sinceShort ? fit.short : fit.long;
-      if (!fit.fitWidth) continue;
-      fit.facts.dataset.fit = "line";
-      if (fit.facts.scrollWidth > fit.facts.clientWidth) fit.facts.dataset.fit = "wrap";
-    }
-  };
-  const statCount = (n) => n >= 1e4 ? BL.game.formatLarge(n) : n.toLocaleString();
-  const countIn = (board, login) => {
-    if (Array.isArray(board)) for (const entry of board) if (entry.login.toLowerCase() === login) return entry.count;
-    return 0;
-  };
-  const countFor = (boards, login) => {
-    let n = 0;
-    if (boards) for (const [kind] of STAT_KINDS) n += countIn(boards[kind], login);
-    return n;
-  };
-  const buildStats = (row) => {
-    const box = document.createElement("div"), face = document.createElement("canvas"), facts = document.createElement("dl");
-    const total = document.createElement("dd"), since = document.createElement("dd"), kinds = document.createElement("p"), repos = document.createElement("div");
-    box.className = "roster-stats"; box.id = `roster-stats-${row.rosterIndex}-${row.contributor.name}`;
-    face.className = "roster-stats-face"; face.setAttribute("role", "img"); face.setAttribute("aria-label", `${row.contributor.display}'s Ooga`);
-    facts.className = "roster-stats-facts";
-    for (const [term, value] of [["Contributions", total], ["Since", since]]) {
-      const pair = document.createElement("div"), dt = document.createElement("dt");
-      dt.textContent = term;
-      pair.append(dt, value);
-      facts.append(pair);
-    }
-    kinds.className = "roster-stats-kinds";
-    // Links in a group, not list items: the roster's own rows are its <li>s.
-    repos.className = "roster-stats-repos"; repos.setAttribute("role", "group"); repos.setAttribute("aria-label", "Repositories");
-    box.append(face, facts, kinds, repos);
-    const stats = row.nodes.stats = { box, face, facts, total, since, kinds, repos, long: "", short: "", fitWidth: 0 };
-    row.li.append(box);
-    sinceFits.set(facts, stats);
-    if (!sinceResize) sinceResize = new ResizeObserver((entries) => {
-      let moved = false;
-      for (const entry of entries) {
-        const fit = sinceFits.get(entry.target), width = Math.round(entry.contentRect.width);
-        if (width === fit.fitWidth) continue;
-        fit.fitWidth = width;
-        moved = true;
-      }
-      if (moved) fitSince();
-    });
-    sinceResize.observe(facts);
-    row.name.setAttribute("aria-controls", box.id);
-  };
-  const fillStats = (row) => {
-    const stats = row.nodes.stats, contributor = row.contributor, character = BL.characters.get(contributor.name);
-    const login = loginOf(contributor, character);
-    if (!faces.has(contributor.name)) {
-      const canvas = document.createElement("canvas");
-      renderFaceIcon(canvas, BL.models.caveman(BL.contributors.traitsFor(contributor.name)), null, STAT_FACE_PX * 2);
-      faces.set(contributor.name, canvas);
-    }
-    const art = faces.get(contributor.name), ctx = stats.face.getContext("2d");
-    stats.face.width = stats.face.height = art.width;
-    ctx.drawImage(art, 0, 0);
-    const joined = joinedAt(contributor, character);
-    stats.long = joined > 0 ? SINCE.format(joined) : "—";
-    stats.short = joined > 0 ? shortYear(joined) : "—";
-    const data = liveStats || BL.jumbotronData;
-    const kinds = [];
-    let sum = 0;
-    for (const [kind, one, many] of STAT_KINDS) {
-      const n = countIn(data && data.leaderboards && data.leaderboards[kind], login);
-      sum += n;
-      if (n) kinds.push(`${statCount(n)} ${n === 1 ? one : many}`);
-    }
-    stats.total.textContent = statCount(sum);
-    fitSince();
-    // Each count stays on one line with its label (and the dot after it), so the line wraps only between them.
-    stats.kinds.replaceChildren();
-    kinds.forEach((text, i) => {
-      const item = document.createElement("span");
-      item.textContent = i < kinds.length - 1 ? `${text}\u00a0·` : text;
-      stats.kinds.append(item, i < kinds.length - 1 ? " " : "");
-    });
-    stats.kinds.hidden = !kinds.length;
-    const list = [];
-    for (const repo of data && Array.isArray(data.repos) ? data.repos : []) {
-      if (UNLISTED_REPOS.has(repo.name)) continue;
-      const listed = Array.isArray(repo.contributors) && repo.contributors.some((c) => c.login.toLowerCase() === login);
-      const n = countFor(repo.leaderboards, login);
-      if (listed || n) list.push({ name: repo.name, n });
-    }
-    list.sort((a, b) => b.n - a.n || (a.name < b.name ? -1 : 1));
-    stats.repos.replaceChildren();
-    for (const { name, n } of list) {
-      const a = document.createElement("a"), count = document.createElement("b");
-      a.href = REPO_URL + name; a.target = "_blank"; a.rel = "noopener";
-      a.title = `${name}: ${n.toLocaleString()} contribution${n === 1 ? "" : "s"}`;
-      count.textContent = statCount(n);
-      a.append(name, count);
-      stats.repos.append(a);
-    }
-    if (!list.length) {
-      const none = document.createElement("span");
-      none.className = "roster-stats-none"; none.textContent = "No repositories in the latest reading";
-      stats.repos.append(none);
-    }
-  };
-  const openStats = (row, open) => {
-    row.open = open;
-    if (open && !row.nodes.stats) buildStats(row);
-    if (open) fillStats(row);
-    if (row.nodes.stats) row.nodes.stats.box.hidden = !open;
-    row.name.setAttribute("aria-expanded", String(open));
+  const faceOf = (contributor) => {
+    const canvas = document.createElement("canvas");
+    renderFaceIcon(canvas, BL.models.caveman(BL.contributors.traitsFor(contributor.name)), null, STAT_FACE_PX * 2);
+    return canvas;
   };
   const paintMarks = (row) => {
     const blocked = !!row.nextLogin && BL.voice.mutedLocally(row.nextLogin);

@@ -4,7 +4,8 @@
 // server owns membership, roles and contribution totals, and nothing here grants a role. A delta must follow the
 // revision before it in the same epoch: an older one is stale and dropped, a later one or one from a newer epoch is a
 // gap, and the caller asks for a fresh snapshot. A delta is checked whole before any of it applies. A snapshot is the
-// server's whole list, so one at the revision already held applies too: after a reconnect it confirms the list.
+// server's whole list, so one at the revision already held applies too: after a reconnect it confirms the list. A
+// speaker's `hand` is its raised hand or pinned emoji (#668), "" when down; a listener has none.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -17,7 +18,8 @@
     if (!SOURCES.includes(raw.source) || !ROLES.includes(raw.role) || count(raw.generation) === null) return null;
     if (typeof raw.login !== "string" || !/^[\w.-]{1,39}$/.test(raw.login)) return null;
     return { id: raw.id, generation: raw.generation, source: raw.source, role: raw.role, login: raw.login, display: clean(raw.display, 50) || raw.login,
-      face: pathOk(raw.face) ? raw.face : null, contributions: raw.source === "world" ? count(raw.contributions) : null, muted: raw.muted === true };
+      face: pathOk(raw.face) ? raw.face : null, contributions: raw.source === "world" ? count(raw.contributions) : null, muted: raw.muted === true,
+      hand: raw.role === "speaker" && typeof raw.hand === "string" && raw.hand.length <= 16 && !/[\u0000-\u001f\u007f]/.test(raw.hand) ? raw.hand : "" };
   };
   const nameKey = (p) => p.login.toLowerCase();
   const byName = (a, b) => nameKey(a) < nameKey(b) ? -1 : nameKey(a) > nameKey(b) ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
