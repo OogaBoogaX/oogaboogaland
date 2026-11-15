@@ -16,7 +16,9 @@ function rig({ shared = false } = {}) {
   const load = name => runInNewContext(readFileSync(new URL(`../../src/js/${name}.js`, import.meta.url), 'utf8'), context);
   for (const name of ['math', 'scene', 'models', 'hub-models', 'rescue-shared']) load(name);
   const B = context.window.BL, noop = () => {};
-  B.crew = { COMPANION_FLIGHT: { gain: 6 }, JET_SPEED: 15, JET_RISE: 8, JET_SPARKS: [] };
+  // The dogs pose with the crew's own quadruped gait (crew.js `QUAD_GAIT`), read from its source rather than copied.
+  const gait = readFileSync(new URL('../../src/js/crew.js', import.meta.url), 'utf8').match(/const QUAD_GAIT = Object\.freeze\((\{[^}]*\})\)/)[1];
+  B.crew = { COMPANION_FLIGHT: { gain: 6 }, JET_SPEED: 15, JET_RISE: 8, JET_SPARKS: [], QUAD_GAIT: Object.freeze(runInNewContext(`(${gait})`)) };
   load('rescue-dogs');
   const root = B.scene.createNode(), targets = new Set(), pickOwners = new Map(), renderer = { quality: 'low' };
   const store = { dogs: {}, poops: [1, 0, 2], scooped: 3, ...(shared ? { shared: 1 } : {}) };
