@@ -64,6 +64,11 @@ const host = () => {
 };
 
 const messages = (ws, t, op) => ws.sent.filter((m) => m.t === t && (op === undefined || m.op === op));
+// Whether any field of any frame a socket was sent, at any depth, is this value whole (never part of an id or a time).
+const carries = (ws, value) => {
+  const has = (v) => v !== null && typeof v === "object" ? Object.values(v).some(has) : String(v) === value;
+  return ws.sent.some(has);
+};
 
 test("the exterior doorway is FIFO, starts only after go, and releases on completion", async () => {
   const h = host(), r = h.room();
@@ -116,7 +121,7 @@ test("a room locked from inside keeps everyone out but those with its PIN, and o
   assert.equal(messages(inside, "door", "lock-result").at(-1).ok, true);
   assert.deepEqual(messages(stranger, "door", "locks").at(-1).rooms, [1], "everyone hears which rooms are locked");
   assert.deepEqual(messages(inside, "door", "room-pin").at(-1), { t: "door", op: "room-pin", room: 1, pin: "1234" }, "those inside are shown the PIN");
-  assert.ok(!JSON.stringify(stranger.sent).includes("1234") && !JSON.stringify(friend.sent).includes("1234"), "nobody outside is told the PIN");
+  assert.ok(![stranger, friend].some((ws) => messages(ws, "door", "room-pin").length || carries(ws, "1234")), "nobody outside is told the PIN");
   await h.send(r, stranger, { t: "door", op: "ask", dir: "in", room: 1 });
   assert.equal(messages(stranger, "door", "denied").at(-1).reason, "locked");
   await h.send(r, stranger, { t: "zone", name: "sphere-1" });
