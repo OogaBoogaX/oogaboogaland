@@ -222,8 +222,8 @@ const PM_DATA = /^[A-Za-z0-9+/]+={0,2}$/;
 // announcements inside exactly one numbered room. Alarms, rather than timers, expire both while idle.
 export const DOOR_ZONE = "sphere";
 export const DOOR_ROOM = /^sphere-([0-9])$/;
-// Of the Sphere's ten rooms (0–9) only room 1, the Conference Room, has a lock (src/js/timechain-rooms.js `lockable`).
-export const LOCKABLE_ROOMS = [1];
+// Of the Sphere's rooms (0–9) only room 0, the Conference Room, has a lock (src/js/timechain-rooms.js `lockable`).
+export const LOCKABLE_ROOMS = [0];
 const sphereRoom = (room) => Number.isInteger(room) && room >= 0 && room <= 9;
 export const DOOR_CYCLE = /^[A-Za-z0-9_-]{1,64}$/;
 export const DOOR_GRANT_MS = 5000;

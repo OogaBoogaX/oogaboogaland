@@ -1,11 +1,11 @@
-// Room 0, the Planetarium: the night sky over London as it stands now. The screen starts at the sphere's equator,
+// Room 7, the Planetarium: the night sky over London as it stands now. The screen starts at the sphere's equator,
 // 1.6 m up, so the dome is the whole sky above the horizon and a star's height over the island's skyline is its true
 // altitude. The real bright stars, their constellation figures and names and the Milky Way stand on one node the
 // scene turns about the celestial pole by the local sidereal time, so the sky turns in real time, as it does outside;
 // the Zeiss-style projector in the middle, its axis on the pole, turns its two star balls with it, and a tap on it or
 // on its console runs the night forward an hour a second, and again brings it back to now. Loungers in two rings lie
 // back facing out from it, and the island's skyline (hills, palms, huts and a billboard, the compass points under it)
-// stands in silhouette round the horizon. The sky's builder is shared with the Observatory's slit (`sky`).
+// stands in silhouette round the horizon.
 (() => {
   "use strict";
   const BL = window.BL;
@@ -418,7 +418,7 @@
   };
   BL.timechainRoomKinds.planetarium = {
     plan, animate, door, steps: (L) => [() => sky(L.id), () => skyline(L.id)],
-    // The sky's builder and clock, shared with the Observatory's slit.
+    // The sky's builder and clock.
     sky: { build: skyGeometry, lst, TILT }
   };
 })();

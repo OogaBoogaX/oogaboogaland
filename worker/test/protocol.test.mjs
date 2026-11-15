@@ -224,12 +224,12 @@ test("Sphere rooms 0–9 isolate voice by number, only the Conference Room locks
   assert.deepEqual(parseClientMessage('{"t":"door","op":"done","cycle":"abc-123"}'), { t: "door", op: "done", cycle: "abc-123" });
   assert.deepEqual(parseClientMessage('{"t":"door","op":"cancel","extra":true}'), { t: "door", op: "cancel" });
   assert.deepEqual(parseClientMessage('{"t":"door","op":"pass","door":"sphere-9","dir":"out"}'), { t: "door", op: "pass", door: "sphere-9", dir: "out" });
-  assert.deepEqual(parseClientMessage('{"t":"door","op":"lock","room":1,"pin":"0042"}'), { t: "door", op: "lock", room: 1, pin: "0042" });
-  assert.deepEqual(parseClientMessage('{"t":"door","op":"try","room":1,"pin":"1234","extra":1}'), { t: "door", op: "try", room: 1, pin: "1234" });
-  assert.deepEqual(parseClientMessage('{"t":"door","op":"unlock","room":1}'), { t: "door", op: "unlock", room: 1 });
-  for (const bad of ['{"t":"door","op":"lock","room":1,"pin":"123"}', '{"t":"door","op":"try","room":1}']) assert.equal(parseClientMessage(bad), null);
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"lock","room":0,"pin":"0042"}'), { t: "door", op: "lock", room: 0, pin: "0042" });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"try","room":0,"pin":"1234","extra":1}'), { t: "door", op: "try", room: 0, pin: "1234" });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"unlock","room":0}'), { t: "door", op: "unlock", room: 0 });
+  for (const bad of ['{"t":"door","op":"lock","room":0,"pin":"123"}', '{"t":"door","op":"try","room":0}']) assert.equal(parseClientMessage(bad), null);
   // Every other room has no lock to set, try or open.
-  for (const room of [0, 2, 3, 4, 5, 6, 7, 8, 9]) for (const op of ["lock", "try", "unlock"]) assert.equal(parseClientMessage(JSON.stringify({ t: "door", op, room, pin: "1234" })), null, `${op} room ${room}`);
+  for (const room of [1, 2, 3, 4, 5, 6, 7, 8, 9]) for (const op of ["lock", "try", "unlock"]) assert.equal(parseClientMessage(JSON.stringify({ t: "door", op, room, pin: "1234" })), null, `${op} room ${room}`);
   for (const bad of [
     { t: "door", op: "ask", dir: "in", room: 10 }, { t: "door", op: "ask", dir: "in", room: -1 }, { t: "door", op: "ask", dir: "side", room: 1 },
     { t: "door", op: "go", cycle: "bad cycle" }, { t: "door", op: "done", cycle: "x".repeat(65) },

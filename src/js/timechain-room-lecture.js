@@ -1,4 +1,4 @@
-// Room 8, the Lecture Hall: curved rows stepping down from the doorway's landing to a round stage, after the mock-up's
+// Room 1, the Lecture Hall: curved rows stepping down from the doorway's landing to a round stage, after the mock-up's
 // lecture halls. A lecture seat stands at every place of every row either side of the aisle, with a writing ledge
 // along the front of each row; on the stage stand the lectern with its ₿ plate and three whiteboards (a block header,
 // a Merkle tree and the subsidy's halvings, in a marker hand). Over the stage the dome carries the slide, why the

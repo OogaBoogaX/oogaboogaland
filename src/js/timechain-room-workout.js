@@ -1,4 +1,4 @@
-// Room 5, Proof of Work-out: a gym under a sunrise, the joke that explains proof of work (effort in, lottery tickets
+// Room 4, Proof of Work-out: a gym under a sunrise, the joke that explains proof of work (effort in, lottery tickets
 // out). The dome is mountains at dawn all round the horizon with the sun rising at the front; over it the gym's
 // hashrate in front, a leaderboard of fake blocks found today on the left and how it works on the right, each a patch
 // of its own canvas painted once. Three rows of exercise bikes face the sunrise, each a seat with its little screen

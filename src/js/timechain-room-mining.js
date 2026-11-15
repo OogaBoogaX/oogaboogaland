@@ -1,4 +1,4 @@
-// Room 7, the Mining Museum: how the work moved from hobby desktops to warehouses, and why today's hardware does
+// Room 2, the Mining Museum: how the work moved from hobby desktops to warehouses, and why today's hardware does
 // about a million times more hashes per joule than in 2009. The dome is seventeen years of network hashrate on a log
 // scale wrapped round the room, from 2009 by the door on the left to today on the right, shaded by era (CPU, GPU,
 // FPGA, ASIC) right over that era's exhibits, the hash units labelled over the door where the chart starts and ends;

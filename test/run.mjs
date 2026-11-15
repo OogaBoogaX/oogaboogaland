@@ -21741,14 +21741,14 @@ const timechainRoomChecks = async () => {
   const context = { window: { BL: {} } };
   runInNewContext(await readFile(new URL("../src/js/timechain-rooms.js", import.meta.url), "utf8"), context);
   const R = context.window.BL.timechainRooms;
-  const good = [0, 1, 9, "0", "5", "9"].every(v => R.parse(v) === Number(v));
-  const bad = [10, 3.5, -1, "03", "3a", " 3", "", "sphere-3", null, undefined, NaN, {}, [3]].every(v => R.parse(v) === null);
+  const good = [0, 1, 7, "0", "5", "7"].every(v => R.parse(v) === Number(v));
+  const bad = [8, 9, "8", "9", 10, 3.5, -1, "03", "3a", " 3", "", "sphere-3", null, undefined, NaN, {}, [3]].every(v => R.parse(v) === null);
   const zones = R.ROOMS.map(r => r.zone), kinds = R.ROOMS.map(r => r.kind).join();
-  record("timechain rooms: only 0–9 resolve to rooms, each its own kind and undotted zone, and only the Conference Room locks",
-    good && bad && new Set(zones).size === 10 && zones.every((z, i) => z === `sphere-${i}` && !z.includes(".")) && R.get(0).kind === "planetarium" && R.get("1").name === "Conference Room"
-      && kinds === "planetarium,conference,temple,party,fireside,workout,observatory,mining,lecture,theater" && R.LOCKABLE.join() === "1" && R.get(12) === null
-      && R.ROOMS.every(r => !!R.layout(r.id).lockPad === r.lockable), JSON.stringify({ good, bad, zones, kinds }));
-  const rows = R.ROOMS.map(({ id }) => {
+  record("timechain rooms: only 0–7 resolve to rooms (8 and 9 are empty), each its own kind and undotted zone, and only the Conference Room locks",
+    good && bad && new Set(zones).size === 10 && zones.every((z, i) => z === `sphere-${i}` && !z.includes(".")) && R.get(0).name === "Conference Room" && R.get("7").kind === "planetarium"
+      && kinds === "conference,lecture,mining,temple,workout,theater,party,planetarium,," && R.OPEN.join() === "0,1,2,3,4,5,6,7" && R.LOCKABLE.join() === "0" && R.get(8) === null && R.get(12) === null
+      && R.ROOMS.every(r => r.empty || !!R.layout(r.id).lockPad === r.lockable), JSON.stringify({ good, bad, zones, kinds }));
+  const rows = R.ROOMS.filter(r => !r.empty).map(({ id }) => {
     const L = R.layout(id), along = (a) => [+(L.doorZ - a.z).toFixed(9), a.x];
     const guided = Array.from({ length: 40 }, (_, i) => L.threshold.z + (L.arrival.z - L.threshold.z) * i / 39).every(z => R.clearAt(L, 0, z, 0.45, true));
     // Down the middle from the door to the front, no step is more than a walker's (pilot.js `WALK.step`).
@@ -21766,7 +21766,7 @@ const timechainRoomChecks = async () => {
   const same = (k) => rows.every(r => JSON.stringify(r[k]) === JSON.stringify(rows[0][k]));
   record("timechain rooms: every room has one centred doorway at the back with the arrival, Exit button and door at human size, a clear guided walk, a shut door, its wall, and no step down the middle over a walker's",
     rows.every(r => r.heading === Math.PI && r.landing && r.worst <= 0.6 && r.front && r.inside && r.arrivalClear && r.buttonReach && r.doorShut && r.doorGuided && r.wallSolid && r.guided && r.ceiling)
-      && ["door", "arrival", "button"].every(same) && rows[8].worst > 0.3 && rows[9].worst > 0.3, JSON.stringify(rows));
+      && ["door", "arrival", "button"].every(same) && rows[1].worst > 0.3 && rows[5].worst > 0.3, JSON.stringify(rows));
   // Regression: a rejected hub build released guided control in the vestibule, outside ordinary room collision.
   // Exercise only the production recovery methods; no doorway animation or scene crossing runs in this fixture.
   const interior = await readFile(new URL("../src/js/timechain-interior.js", import.meta.url), "utf8");
@@ -21775,7 +21775,7 @@ const timechainRoomChecks = async () => {
     return interior.slice(start, interior.indexOf(`    const ${next} =`, start));
   }).join("\n");
   const recovery = [];
-  for (const { id } of R.ROOMS) for (const shared of [false, true]) for (const walking of [false, true]) {
+  for (const id of R.OPEN) for (const shared of [false, true]) for (const walking of [false, true]) {
     const L = R.layout(id), calls = [], guide = { stage: walking ? "out" : null }, doors = { want: walking ? 1 : 0 }, zones = [];
     let destination = null, insideBeforeRelease = false, releasedInside = false;
     const fixture = {
@@ -21802,7 +21802,7 @@ const timechainRoomChecks = async () => {
   // Regression: under a dome that widens over the floor a jump carried a body out past where it could stand, and it
   // came down held by the wall. Space at the Exit button then walked nowhere, ran out both of the walk's limits and
   // handed the island an eye still inside the room, which stood the Ooga in the ball off the passage and left it there.
-  const held = R.ROOMS.map(({ id }) => {
+  const held = R.OPEN.map((id) => {
     const L = R.layout(id);
     let air = 0, stranded = 0;
     for (let b = 0; b < 360; b += 6) for (let r = L.R; r > L.R - 2; r -= 0.05) {
@@ -21818,7 +21818,7 @@ const timechainRoomChecks = async () => {
   const guideCode = [interior.match(/^  const DOOR_TIME = .*;$/m)[0], interior.slice(interior.indexOf("    const arrive ="), interior.indexOf("    const guide =")),
     interior.slice(interior.indexOf("    const steerTo ="), interior.indexOf("    const update ="))].join("\n");
   const walkOuts = [];
-  for (const { id } of R.ROOMS) for (const hold of ["free", "wall", "doorway"]) {
+  for (const id of R.OPEN) for (const hold of ["free", "wall", "doorway"]) {
     const L = R.layout(id), exitEye = L.doorZ + 1, from = { x: L.exitButton.x - 1, z: L.doorZ - 0.6 }, hand = [];
     const guide = { stage: "toDoor", t: 0, hold: 0 }, doors = { open: 0, want: 0 }, at = { x: from.x, y: 0, z: from.z };
     let push = null;
@@ -21846,14 +21846,15 @@ const timechainRoomChecks = async () => {
     runInNewContext(await readFile(join(root, "src/js/" + name + ".js"), "utf8"), gateContext);
   const GB = gateContext.window.BL, SPOTS = GB.timechainModels.SPOTS;
   GB.net = { state: { doorway: false, room: null, lockedRooms: {} }, subscribeDoor: () => () => {}, cancelDoor() {}, doneDoor() {}, serverNow: () => 0 };
-  const walkBack = (held, pose) => {
+  const walkBack = (held, pose, others = null) => {
     const at = { x: 0, y: 0, z: 0 }, cave = { root: { position: at, rotation: { y: 0 } }, baseY: 0, headOffset: 1.5, viewLift: 0, traits: { name: "tester", height: 1.6 }, parts: { head: {} } };
     let push = null;
-    const site = { plug: { visible: true }, choose() {}, lock() {}, setDoors() {}, say() {}, tick() {}, directory: {}, keys: [] };
+    const site = { plug: { visible: true }, choose() {}, lock() {}, pinMode() {}, setDoors() {}, say() {}, tick() {}, directory: {}, keys: [] };
     const gate = GB.timechainGate.create({
       site, place: { x: 0, y: 0, z: 0, ry: 0 }, crew: { player: cave, steer(x, z, _, power) { push = power ? [x, z] : null; }, thrust() {} },
       pilot: { navigate(to) { at.x = to.position.x; at.y = to.position.y; at.z = to.position.z; }, setExternalControl() {}, showAct() {}, adopt() {}, eyeFov: () => 1 },
-      hud: { hint() {}, el: { act: {} } }, camera: { position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: 1 }, fov: 1 }, renderer: {}, canvas: {}, world: {}, go: () => true, equipJetpack: () => false, keep: () => null
+      hud: { hint() {}, el: { act: {} } }, camera: { position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: 1 }, fov: 1 }, renderer: {}, canvas: {}, world: {}, go: () => true, equipJetpack: () => false, keep: () => null,
+      others: () => others || []
     });
     gate.arrive({ room: 3, mode: "solo", character: "tester", jetpack: null, pose, view: null });
     const began = +Math.abs(at.x).toFixed(2);
@@ -21864,20 +21865,27 @@ const timechainRoomChecks = async () => {
       gate.view(1 / 30);
     }
     gate.update(1 / 30);
-    return { held, began, busy: gate.busy, t: +t.toFixed(1), past: +(at.z - SPOTS.THRESHOLD).toFixed(2), plug: site.plug.visible };
+    return { held, began, busy: gate.busy, t: +t.toFixed(1), past: +(at.z - SPOTS.THRESHOLD).toFixed(2), plug: site.plug.visible, x: +at.x.toFixed(2), z: +at.z.toFixed(2) };
   };
   const backs = [walkBack(false, null), walkBack(true, null), walkBack(true, { x: -3.35, dz: -1.5, heading: 0, pitch: 0 })];
   record("timechain walk out: the island never leaves the Ooga in the ball behind the doors: a walk back out that is held past its limit, or begun off the passage, ends with it on the bridge, the doorway its own and plugged again",
     backs.every(row => !row.busy && row.past > 1 && row.plug) && backs[0].t < 8 && backs[2].began > GB.timechainModels.PASSAGE.halfW, JSON.stringify(backs));
+  // Two coming out one after the other: the second stops clear of where the first stands, and of anyone else there.
+  const outs = [walkBack(false, null)];
+  outs.push(walkBack(false, null, [{ x: outs[0].x, z: outs[0].z, radius: 0.4 }]));
+  outs.push(walkBack(false, null, outs.map(o => ({ x: o.x, z: o.z, radius: 0.4 }))));
+  const apart = outs.every((a, i) => outs.every((b, j) => i === j || Math.hypot(a.x - b.x, a.z - b.z) > 1.5));
+  record("timechain walk out: players walking out one after another stop on different spots of the bridge, clear of whoever already stands there",
+    outs.every(row => !row.busy && row.past > 1) && apart, JSON.stringify(outs));
   // The shell's sphere, built for every room with its kind's own part set aside: the doorway's passage cut through wall
   // and screen alike, and the screen in quads (Canvas 2D maps a picture over four corners) none of which crosses the
   // dome canvas's seam over the door.
   for (const name of ["math", "scene", "models", "jumbotron-font", "jumbotron", "timechain-room-models"])
     runInNewContext(await readFile(join(root, "src/js/" + name + ".js"), "utf8"), context);
   const M = context.window.BL.models, RM = context.window.BL.timechainRoomModels, S = context.window.BL.scene, math = context.window.BL.math;
-  for (const { kind } of R.ROOMS) RM.KINDS[kind] = { plan() {} };
+  for (const { kind } of R.ROOMS.filter(r => !r.empty)) RM.KINDS[kind] = { plan() {} };
   M.setScope("hub");
-  const shells = R.ROOMS.map(({ id }) => {
+  const shells = R.OPEN.map((id) => {
     const L = R.layout(id), sphere = RM.sphere(id), D = L.door;
     let blocked = 0, notQuads = 0, seam = 0, uMin = Infinity, uMax = -Infinity, yLow = Infinity, yHigh = -Infinity;
     for (const [geo, shift] of [[sphere.wall, 0], [sphere.screen, 1]]) for (const f of geo.faces) {
@@ -21897,7 +21905,7 @@ const timechainRoomChecks = async () => {
   // A live picture is picked on its own faces: a ray to its middle hits it at the dome, one beside or above it misses.
   const picking = { math };
   runInNewContext(interior.slice(interior.indexOf("  const INVERSE ="), interior.indexOf("  const TIPS =")) + "\nthis.pick = facePick;", picking);
-  const picks = [1, 9].map((id) => {
+  const picks = [0, 5].map((id) => {
     const L = R.layout(id), canvas = { width: 768, height: 512 }, spec = { az0: -20, az1: 20, el0: 10, el1: 30, w: 768, h: 512 };
     const node = S.createNode({ geometry: RM.liveGeometry(L, spec, canvas), position: { x: 0, y: 0, z: -1 } });
     S.updateWorld(node);
@@ -22304,6 +22312,70 @@ const sphereCrossing = { name: "timechain crossing", why: "playthrough: Enter wa
   else record("timechain crossing: with the island released, the way into the room is the Ooga's own eye at the swap and the way out fades over the rebuild instead of freezing",
     seams.frames > 30 && seams.far === 0 && seamless(seams.swapIn) && seams.fadeMax > 0, JSON.stringify(seams));
 } };
+// The keypad from the bridge: its buttons answer clicks from the bridge's half nearer the Sphere without taking the
+// Ooga or the view, an empty number does nothing, walking off lets the choice go, and Enter glides into the eyes where
+// the Ooga stands and walks it in; walked back out in first person the view never leaves its head, and it stops on
+// a spot of the bridge clear of the players already there.
+const sphereBridgeKeypad = { name: "timechain bridge keypad", why: "rule: the keypad's buttons take clicks from the near half of the bridge, Enter walks the Ooga in from there, and a first-person walk out keeps the view in its head", run: async (b) => {
+  const clicks = [];
+  const clickKey = async (key) => {
+    // The camera settles first, so the point projected is where the button is drawn when the click lands.
+    const at = await b.evaluate(`(() => { const B = __ooga, T = BL.scenes.hub.debug.timechainIsland, n = T.site.keys.find(k => k.key === "${key}").node, out = {}, r = document.getElementById("scene").getBoundingClientRect();
+      B.advance(1, 1 / 60);
+      B.renderer.project(n.world[12], n.world[13], n.world[14], out);
+      const x = r.left + out.x * r.width / B.renderer.size.width, y = r.top + out.y * r.height / B.renderer.size.height, el = document.elementFromPoint(x, y);
+      return { x, y, el: el && (el.id || el.className || el.tagName) }; })()`);
+    clicks.push(key + ":" + JSON.stringify(at));
+    await b.click(at.x, at.y);
+    await b.evaluate(`__ooga.advance(0.2, 1 / 60)`);
+  };
+  const read = `(() => { const B = __ooga, ${sphereLocal}, G = T.gate, a = B.pilot.player, p = a.root.position;
+    return { state: G.debug.state, remote: G.remote, busy: G.busy, selection: G.debug.selection, lens: G.debug.lens, along: +local(p).toFixed(2), act: !document.getElementById("act").hidden,
+      eight: T.site.keys.find(k => k.key === "8").node.geometry.faces[0].color.join() }; })()`;
+  await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; ${sphereStand("0.4", "19")} })()`);
+  await clickKey("8");
+  const empty = await b.evaluate(read);
+  await clickKey("3");
+  const chosen = await b.evaluate(read);
+  await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; ${sphereStand("0.4", "24")} B.advance(0.2, 1 / 60); })()`);
+  const walkedOff = await b.evaluate(read);
+  // Regression: the empty rooms' 8 and 9 are a PIN's digits like any other, drawn plain while the keypad asks for one.
+  await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; window.__lockedWas = BL.net.state.lockedRooms[0]; BL.net.state.lockedRooms[0] = 1; ${sphereStand("0.4", "19")} })()`);
+  await clickKey("0");
+  await clickKey("8");
+  const pin = await b.evaluate(`(() => { const r = ${read}, G = BL.scenes.hub.debug.timechainIsland.gate.debug; return { ...r, pin: G.pin }; })()`);
+  await clickKey("back");
+  await clickKey("back");
+  const unpinned = await b.evaluate(`(() => { BL.net.state.lockedRooms[0] = window.__lockedWas || 0; __ooga.advance(0.6, 1 / 60); return ${read}; })()`);
+  await clickKey("3");
+  await clickKey("enter");
+  const entering = await b.evaluate(`(() => { __ooga.advance(0.6, 1 / 60); return ${read}; })()`);
+  const inside = await untilPage(b, 'B.scene === "timechain" && !B.transitioning && B.timechain.guide.stage === null', 20000);
+  const room = await b.evaluate(`(() => { const B = __ooga; if (!B.timechain) { const G = BL.scenes.hub.debug.timechainIsland.gate.debug; return { scene: B.scene, state: G.state, stage: G.stage, selection: G.selection }; }
+    B.advance(1.2, 1 / 60); return { room: B.timechain.room.id, player: B.pilot.player.traits.name }; })()`);
+  if (room.room === undefined) throw new Error("not in the room: " + JSON.stringify({ empty, chosen, walkedOff, entering, room, clicks }));
+  // Out again in first person, the camera's distance from the head sampled every frame to a second past the end.
+  await b.evaluate(`(() => { const B = __ooga, L = B.timechain.layout; B.pilot.navigate({ position: { x: L.exitButton.x + 0.6, y: 0, z: L.doorZ - 1 }, yaw: Math.PI, pitch: 0.05, dist: 4 }); B.pilot.enterClose(); B.advance(0.6, 1 / 60);
+    window.__eyeGap = { worst: 0, frames: 0, idleAt: 0 };
+    const tick = () => { const g = window.__eyeGap, hub = B.scene === "hub" && !B.transitioning && BL.scenes.hub.debug.timechainIsland.gate.debug;
+      if (hub && (hub.state === "leaving" || hub.state === "idle")) { const h = B.pilot.player.parts.head.world, c = B.camera.position;
+        g.worst = Math.max(g.worst, Math.hypot(c.x - h[12], c.y - h[13], c.z - h[14])); g.frames++;
+        if (hub.state === "idle" && !g.idleAt) g.idleAt = g.frames; }
+      if (!g.idleAt || g.frames < g.idleAt + 60) requestAnimationFrame(tick); else g.done = true; };
+    tick(); })()`);
+  await b.key(" ");
+  await untilPage(b, 'window.__eyeGap.done', 25000);
+  const out = await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}, a = B.pilot.player, p = a.root.position; return { ...window.__eyeGap, view: B.pilot.mode, along: +local(p).toFixed(2), state: T.gate.debug.state }; })()`);
+  record("timechain bridge keypad: from the bridge's near half an empty number does nothing, a room's number is chosen with the Ooga and view still the player's, and walking off lets it go",
+    empty.state === "idle" && empty.eight === "34,30,27" && chosen.state === "keypad" && chosen.remote && !chosen.busy && chosen.selection === 3 && chosen.lens === null && chosen.act && Math.abs(chosen.along - 19) < 0.2
+      && walkedOff.state === "idle" && walkedOff.selection === -1, JSON.stringify({ empty, chosen, walkedOff }));
+  record("timechain bridge keypad: while it asks for a locked room's PIN the empty rooms' 8 and 9 are digits like any other, drawn plain, and greyed out again after",
+    pin.state === "pin" && pin.pin === "8" && pin.eight === "58,52,48" && unpinned.state !== "pin" && unpinned.eight === "34,30,27", JSON.stringify({ pin, unpinned }));
+  record("timechain bridge keypad: Enter clicked from the bridge glides into the Ooga's eyes where it stands and walks the same Ooga into the chosen room",
+    !entering.remote && entering.lens === "eyes" && entering.along > 16 && inside && room.room === 3 && room.player === "portlandhodl", JSON.stringify({ entering, room }));
+  record("timechain bridge keypad: walked back out in first person the view stays in the Ooga's head to the end and after",
+    out.done && out.frames > 60 && out.worst < 0.45 && out.view === "first-person" && out.state === "idle" && out.along > 17, JSON.stringify(out));
+} };
 const sphereAccount = { name: "timechain account", why: "regression: account Retry must keep the owned Ooga at the keypad; an unanswered account still offers a solo visit without guessing", run: async (b) => {
   await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; BL.net.state.resolved = false; ${sphereStand("0.7", "13.8")} })()`);
   await b.key(" ");
@@ -22368,7 +22440,7 @@ const sphereAccount = { name: "timechain account", why: "regression: account Ret
       && retry.before.selected && retry.after.selected && retry.before.held && retry.after.held && retry.before.mode === retry.after.mode && retry.after.lens === "eyes"
       && released.state === "idle" && released.selected === "portlandhodl" && released.refusal === null && released.near < 2, JSON.stringify({ retry, released }));
 } };
-scene("hub", { label: "timechain doorway", query: "solo=1&character=portlandhodl&view=timechain&pos=0", opts: { motion: true }, steps: [sphereApproach, sphereThreshold, sphereKeypad, sphereCrossing, sphereAccount, trip("hub")] });
+scene("hub", { label: "timechain doorway", query: "solo=1&character=portlandhodl&view=timechain&pos=0", opts: { motion: true }, steps: [sphereApproach, sphereThreshold, sphereKeypad, sphereCrossing, sphereBridgeKeypad, sphereAccount, trip("hub")] });
 // The released hub (phones under 8 GB): the walk-out rebuilds the hub behind the room's held frame.
 scene("hub", { label: "timechain doorway release", query: "solo=1&character=portlandhodl&view=timechain&pos=0&hubcache=release", opts: { motion: true }, steps: [sphereApproach, sphereCrossing] });
 scene("hub", { label: "timechain doorway canvas2d", exclusive: true, query: "solo=1&character=portlandhodl&view=timechain&pos=0&canvas2d=1", steps: [sphereApproach, sphereCrossing] });
@@ -22412,9 +22484,9 @@ const timechainRoom = { name: "timechain room", why: "playthrough: a signed-out 
       subtitle: document.getElementById("sphere-subtitle").textContent, before, near, nearDistance, orbit, orbitDistance, kept, after: P.mode, player: cave.traits.name, jet: !!cave.jet, jetHud: document.getElementById("jetpack-hud").hidden,
       emptyViews, deniedWeapons, requests: B.stats().requests, paused: D.reader.status("recent"), hash: location.hash, remotes: D.remotes === null };
   })()`);
-  record("timechain room: a signed-out arrival at /sphere-1 is a solo copy of the Conference Room, with its lock, that publishes nothing, named only under the title, with every live picture painted",
-    painted && r.room === 1 && r.kind === "conference" && r.radius === 10.5 && r.lock && r.mode === "solo" && r.zone === "none" && r.body === null && !r.chip && r.subtitle === "TCS · Conference Room"
-      && r.hash === "#/sphere-1" && r.requests === 0 && r.paused === "PAUSED" && r.remotes, JSON.stringify(r));
+  record("timechain room: a signed-out arrival at /sphere-0 is a solo copy of the Conference Room, with its lock, that publishes nothing, named only under the title, with every live picture painted",
+    painted && r.room === 0 && r.kind === "conference" && r.radius === 10.5 && r.lock && r.mode === "solo" && r.zone === "none" && r.body === null && !r.chip && r.subtitle === "TCS · Conference Room"
+      && r.hash === "#/sphere-0" && r.requests === 0 && r.paused === "PAUSED" && r.remotes, JSON.stringify(r));
   record("timechain room: scroll goes out of the eyes to the near orbit and on out, nothing lets go of the Ooga, and every view stays empty-handed with no jetpack",
     r.before === "first-person" && r.near === "orbit" && Math.abs(r.nearDistance - 3.6) < 1e-6 && r.orbit === "orbit" && r.orbitDistance > r.nearDistance
       && r.kept && r.after === "first-person"
@@ -22461,14 +22533,14 @@ const timechainRoom = { name: "timechain room", why: "playthrough: a signed-out 
   })()`);
   record("timechain room: the controls reference omits intercepted R/F while retaining available movement controls", pitch.every(n => n === 0) && reference.open && reference.driven && !reference.keys.some(k => ["r", "f"].includes(k)) && reference.keys.includes("w") && !reference.text.includes("Tilt the view"), JSON.stringify({ pitch, reference }));
 } };
-const timechainRooms = { name: "timechain rooms", why: "rule: every room 0–9 builds its own kind around the same doorway, arrival and Exit button, only the Conference Room has a lock, the camera stays inside every sphere, and the raked halls walk down to the front", run: async (b) => {
+const timechainRooms = { name: "timechain rooms", why: "rule: every room 0–7 builds its own kind around the same doorway, arrival and Exit button, only the Conference Room has a lock, the camera stays inside every sphere, and the raked halls walk down to the front", run: async (b) => {
   const rows = [], bounds = [], walks = [];
-  for (const room of [0, 2, 3, 4, 5, 6, 7, 8, 9, 1]) {
+  for (const room of [7, 1, 2, 3, 4, 5, 6, 0]) {
     await b.evaluate(roomGo(room));
     rows.push(await b.evaluate(`(() => { const B = __ooga, D = B.timechain, L = D.layout, a = B.pilot.player.root.position, w = B.pilot.player;
       return { room: D.room.id, kind: D.room.kind, radius: L.R, door: L.door.halfW, arrivalGap: +(L.doorZ - L.arrival.z).toFixed(6), at: +Math.hypot(a.x - L.arrival.x, a.z - L.arrival.z).toFixed(3),
         button: [L.exitButton.y, +(L.doorZ - L.exitButton.z).toFixed(6), L.exitButton.x], lock: !!D.built.lockPad, seats: D.seats.length, mode: D.visit.mode, hash: location.hash, view: B.pilot.mode, height: w.traits.height }; })()`));
-    if ([0, 9, 1].includes(room)) bounds.push(await b.evaluate(`(() => {
+    if ([7, 5, 0].includes(room)) bounds.push(await b.evaluate(`(() => {
       const B = __ooga, P = B.pilot, L = B.timechain.layout, R = BL.timechainRooms, modes = new Set();
       let frames = 0, outside = 0;
       const sample = () => {
@@ -22493,7 +22565,7 @@ const timechainRooms = { name: "timechain rooms", why: "rule: every room 0–9 b
       B.advance(0.3, 1 / 60);
       return { room: B.timechain.room.id, frames, outside, modes: [...modes] };
     })()`));
-    if (room === 8 || room === 9) {
+    if (room === 1 || room === 5) {
       // From the arrival straight down the aisle to the front, as a held key walks it.
       await b.evaluate(`(() => { const B = __ooga, L = B.timechain.layout; B.pilot.navigate({ position: { x: 0.25, y: 0, z: L.arrival.z }, yaw: 0, pitch: 0.05, dist: 4 }); B.advance(0.2, 1 / 60); document.getElementById("scene").focus(); })()`);
       await holdKey(b, "w", 5);
@@ -22501,8 +22573,8 @@ const timechainRooms = { name: "timechain rooms", why: "rule: every room 0–9 b
     }
   }
   const same = (k) => rows.every(r => JSON.stringify(r[k]) === JSON.stringify(rows[0][k]));
-  record("timechain rooms: rooms 0–9 each build their own kind around the same doorway, arrival, Exit button and Ooga, solo and first person, each at its own address, with seats but in the Block Party and the Mining Museum, and only the Conference Room locks",
-    rows.map(r => r.kind).join() === "planetarium,temple,party,fireside,workout,observatory,mining,lecture,theater,conference" && rows.every(r => r.at < 0.4 && r.mode === "solo" && r.view === "first-person" && r.hash === "#/sphere-" + r.room && (r.seats > 0) === (r.kind !== "party" && r.kind !== "mining") && r.lock === (r.room === 1))
+  record("timechain rooms: rooms 0–7 each build their own kind around the same doorway, arrival, Exit button and Ooga, solo and first person, each at its own address, with seats but in the Block Party and the Mining Museum, and only the Conference Room locks",
+    rows.map(r => r.kind).join() === "planetarium,lecture,mining,temple,workout,theater,party,conference" && rows.every(r => r.at < 0.4 && r.mode === "solo" && r.view === "first-person" && r.hash === "#/sphere-" + r.room && (r.seats > 0) === (r.kind !== "party" && r.kind !== "mining") && r.lock === (r.room === 0))
       && ["door", "arrivalGap", "button", "height"].every(same), JSON.stringify(rows));
   record("timechain rooms: the final camera stays inside the sphere, the closed doors, the floor and the dome in every view and transition, in the smallest, the tallest raked and the conference room",
     bounds.every(r => r.frames >= 840 && r.outside === 0 && ["first-person", "shoulder", "orbit"].every(mode => r.modes.includes(mode))), JSON.stringify(bounds));
@@ -22537,21 +22609,21 @@ const timechainTrip = { name: "timechain round trip", why: "contract: a room lef
   const laps = [];
   for (let i = 0; i < 2; i++) {
     await tourGo(b, "hub");
-    laps.push(await b.evaluate(roomGo(1)));
+    laps.push(await b.evaluate(roomGo(0)));
   }
   const grew = ["records", "nodes", "targets", "dom"].filter((k) => laps[1][k] > laps[0][k] * 1.02 + 4);
   const donated = await b.evaluate(`(() => { const B = window.__ooga, g = B.game.state, before = { donations: g.donations, sats: g.totalSats, bananas: g.bananas }; window.BL.scenes.timechain.onDonation({ id: "trip-timechain", sats: 2100, handle: "tester", message: "ooga", at: Date.now() }, { exact: 1.25, rounded: 1 }); B.advance(1, 1 / 30); return { scene: B.scene, donations: g.donations - before.donations, sats: g.totalSats - before.sats, bananas: g.bananas - before.bananas }; })()`);
   record("timechain round trip: leaving and entering twice keeps the leave contract and holds nothing the first visit did not, with no timer or request left, and a donation mid-visit is taken",
-    laps.every(l => l.scene === "timechain" && l.room === 1 && l.timers === 0 && l.requests === 0) && grew.length === 0 && donated.scene === "timechain" && donated.donations === 1 && donated.sats === 2100 && donated.bananas === 1.25,
+    laps.every(l => l.scene === "timechain" && l.room === 0 && l.timers === 0 && l.requests === 0) && grew.length === 0 && donated.scene === "timechain" && donated.donations === 1 && donated.sats === 2100 && donated.bananas === 1.25,
     JSON.stringify({ grew, donated, first: laps[0], second: laps[1] }));
 } };
 const timechainCanvas = { name: "timechain canvas2d", why: "rule: a room boots and paints its dome and live pictures on Canvas 2D", run: async (b) => {
   const painted = await untilPage(b, 'B.scene === "timechain" && B.timechain.slots.every(s => s.shown)', 20000);
   const r = await b.evaluate(`({ kind: __ooga.renderer.kind, drawn: __ooga.renderer.stats.drawn, room: __ooga.timechain.room.id, view: __ooga.pilot.mode })`);
-  record("timechain canvas2d: the Lecture Hall, a raked hall, boots and paints every live picture on Canvas 2D", painted && r.kind === "canvas2d" && r.room === 8 && r.view === "first-person", JSON.stringify(r));
+  record("timechain canvas2d: the Lecture Hall, a raked hall, boots and paints every live picture on Canvas 2D", painted && r.kind === "canvas2d" && r.room === 1 && r.view === "first-person", JSON.stringify(r));
 } };
-scene("timechain", { url: roomPage(1), steps: [timechainRoom, timechainRooms, timechainWallJump, timechainTrip] });
-scene("timechain", { label: "canvas2d", url: roomPage(8, "canvas2d=1"), steps: [timechainCanvas] });
+scene("timechain", { url: roomPage(0), steps: [timechainRoom, timechainRooms, timechainWallJump, timechainTrip] });
+scene("timechain", { label: "canvas2d", url: roomPage(1, "canvas2d=1"), steps: [timechainCanvas] });
 scene("hub", { label: "chilling", query: "status=chillin&pos=0",
   // This placement order exhausted the old 36-point pool before the last Ooga could settle.
   opts: { initScript: `Math.random = (() => { let a = 3; return () => { let t = a += 0x6D2B79F5; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; })();` },
@@ -26107,7 +26179,7 @@ scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: 
 scene("factory", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("factory", { required: ["#joy-move", "#joy-look", "#leave-hud"] }), factoryGreeter] });
 scene("hangar", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("hangar", { required: ["#joy-move", "#joy-look", "#leave-hud"] })] });
 scene("bifrost", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("bifrost", { required: ["#joy-move", "#joy-look", "#leave-hud"] })] });
-scene("timechain", { url: roomPage(1), opts: PHONE_SIZE, steps: [phone("timechain", { required: ["#joy-move", "#joy-look", "#leave-hud"] })] });
+scene("timechain", { url: roomPage(0), opts: PHONE_SIZE, steps: [phone("timechain", { required: ["#joy-move", "#joy-look", "#leave-hud"] })] });
 // The keypad's controls are its physical keys: from the first person a phone shows, each is on screen with nothing of
 // the page's over it (the hint over the view takes no pointer, so it is checked as text, not as a control).
 const sphereKeypadPhone = phone("hub", { play: `(() => { const B = __ooga, ${sphereLocal}; ${sphereStand("0.7", "13.8")} T.gate.engage(); B.advance(0.6, 1 / 60); })()`, required: [] });

@@ -2919,7 +2919,7 @@
       const x = node.position.x, z = node.position.z;
       addProp(kind, node, worldX(x, z), worldZ(x, z), radius);
     }
-    for (const key of site.keys) addTarget(key.node, { kind: "sphere-key", key: key.key, priority: 2 }, { radius: key.key.length === 1 ? 0.055 : 0.09 });
+    for (const key of site.keys) addTarget(key.node, { kind: "sphere-key", key: key.key, dim: !!key.dim, priority: 2 }, { radius: key.key.length === 1 ? 0.055 : 0.09 });
     addTarget(site.directoryKey, { kind: "sphere-directory", priority: 2 }, { radius: 0.16 });
     // From the bridge, square to the doors with the keypad in view.
     presets.timechain = { yaw: p.ry, pitch: 0.1, dist: 9, target: { x: worldX(0.6, 13.2), y: p.y + 2.2, z: worldZ(0.6, 13.2) } };
@@ -5707,7 +5707,7 @@
       case "room-sign":
         return "Room sign · tap to copy hash";
       case "sphere-key":
-        return o.key === "back" ? "Back · return to room choice" : o.key === "enter" ? "Enter · open selected room" : `Room ${o.key} · select`;
+        return o.key === "back" ? "Back · return to room choice" : o.key === "enter" ? "Enter · open selected room" : timechainIsland.gate.askingPin ? `${o.key} · PIN digit` : o.dim ? `Room ${o.key} · empty` : `Room ${o.key} · select`;
       case "sphere-directory":
         return "Directory · which room each number opens";
       case "lab-link":
@@ -5944,7 +5944,7 @@
         const gate = timechainIsland.gate, player = pilot.player, at = player && player.root.position;
         if (gate.busy) break;
         if (!player) hud.toast("Only an Ooga can go in. Double-tap one, then walk it up to the keypad.");
-        else if (!gate.nearKeypad(at.x, at.y - player.baseY + 1.1, at.z)) hud.toast("Walk up to the keypad beside the doors.");
+        else if (!gate.nearKeypad(at.x, at.y - player.baseY + 1.1, at.z)) hud.toast(gate.fromBridge() ? "Click a room number on the keypad, then Enter." : "Walk up to the keypad beside the doors.");
         else gate.engage();
         break;
       }
@@ -6551,13 +6551,13 @@
         tapRoomSign(o.roomSign);
         break;
       case "sphere-key": {
-        const gate = timechainIsland.gate, player = pilot.player, at = player && player.root.position;
+        // Engaged at the keypad, the click is a press there; from the bridge's half nearer the sphere it chooses without
+        // taking the Ooga or the view, until Enter.
+        const gate = timechainIsland.gate, player = pilot.player;
         if (!player) hud.toast("Only an Ooga can go in. Double-tap one, then walk it up to the keypad.");
-        else if (!gate.busy && !gate.nearKeypad(at.x, at.y - player.baseY + 1.1, at.z)) hud.toast("Walk up to the keypad beside the doors.");
-        else {
-          if (!gate.busy) gate.engage();
-          gate.press(o.key);
-        }
+        else if (o.dim && !gate.askingPin) hud.toast(`Room ${o.key} is empty.`);
+        else if (gate.busy) gate.press(o.key);
+        else if (!gate.pressFromBridge(o.key)) hud.toast("Walk onto the bridge up to the doors to use the keypad.");
         break;
       }
       case "sphere-directory":
@@ -11790,7 +11790,7 @@
         const rendered = renderer.render(root, view, RENDER_OPTS);
         timechainIsland.site.view(camera.position);
         return rendered;
-      }, keep: keepGeometry });
+      }, keep: keepGeometry, others: () => remotes ? remotes.actors() : [] });
     // A room's address opened signed in, with no visit of this tab's own to repeat, comes here with the room chosen.
     if (timechainIsland.gate.preselected >= 0) hud.toast(`Room ${timechainIsland.gate.preselected} is chosen at the keypad · walk up to it and press Enter to go in`);
     clankerMeshes = BL.solidProps.create();
@@ -11940,6 +11940,8 @@
         if (cloudHopper?.active) return;
         if (factoryDeparting || bifrostDeparting || islandGuide.holding) return;
         if (gorillaBehindBillboard(hit, p)) return;
+        // A keypad button takes every press, so the same number twice (a PIN's 11) is two presses.
+        if (hit && hit.owner.kind === "sphere-key") { onTap(hit, p); return; }
         if (hit && hit.owner.kind === "clanker") {
           if (selectGorilla(hit.owner.entry)) selectDebugGorilla(null);
           return;

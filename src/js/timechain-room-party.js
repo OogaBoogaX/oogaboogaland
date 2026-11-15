@@ -1,4 +1,4 @@
-// Room 3, the Block Party: a club under a dome of light (the shortlist mock-up's `buildParty`). The dome plays the
+// Room 6, the Block Party: a club under a dome of light (the shortlist mock-up's `buildParty`). The dome plays the
 // mock-up's light show: rings of the fee bands' colours stepping down from the crown on the beat, bands sweeping round it
 // in spirals and a scatter of warm LED dots twinkling over it. The whole floor is LED panels, each a block of cells in
 // a hash grid that re-hashes on every beat, whose rings step out through the same colours on every beat, and the wall under the dome is an LED wall all the way round but for the doors, the

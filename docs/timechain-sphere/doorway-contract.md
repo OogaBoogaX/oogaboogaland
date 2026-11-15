@@ -4,7 +4,7 @@ The shared doorway for [issue #235](https://github.com/OogaBoogaX/oogaboogaland/
 
 ## What it is for
 
-The Sphere has one doorway on the island (zone `sphere`) and ten rooms behind it (zones `sphere-0` … `sphere-9`). Signed-in players share it, so its short crossing is serialized and shown: an outside observer sees the doors part and the traveler walk into the dim passage and out of sight behind its curtain, and the doors close again. Only the crossing is serialized, never keypad use or loading: a page asks for the doorway only once its room is prepared (code loaded, picture taken), from the waiting spot square to the doors. The reservation coordinates presentation; the room does not simulate anyone's walk.
+The Sphere has one doorway on the island (zone `sphere`) and its rooms behind it (zones `sphere-0` … `sphere-9`; 8 and 9 have no room yet). Signed-in players share it, so its short crossing is serialized and shown: an outside observer sees the doors part and the traveler walk into the dim passage and out of sight behind its curtain, and the doors close again. Only the crossing is serialized, never keypad use or loading: a page asks for the doorway only once its room is prepared (code loaded, picture taken), from the waiting spot square to the doors. The reservation coordinates presentation; the room does not simulate anyone's walk.
 
 Signed-out (solo) visits never send any of this: their crossings are local and invisible to everyone else.
 
@@ -41,7 +41,7 @@ Room → client:
 
 ## Locking a room
 
-A signed-in player inside the Conference Room (room 1, the only room with a lock) can lock it with a 4-digit PIN from the keypad beside its doors; the room refuses `lock`, `unlock` and `try` for any other room. `welcome` lists `room-lock-v1` in `features` and the rooms already locked in `locks`.
+A signed-in player inside the Conference Room (room 0, the only room with a lock) can lock it with a 4-digit PIN from the keypad beside its doors; the room refuses `lock`, `unlock` and `try` for any other room. `welcome` lists `room-lock-v1` in `features` and the rooms already locked in `locks`.
 
 | Message | When |
 |---|---|

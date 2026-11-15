@@ -1,4 +1,4 @@
-// Room 9, the Movie Theater: the largest sphere, its raked rows of recliners stepping down toward the front, and the
+// Room 5, the Movie Theater: the largest sphere, its raked rows of recliners stepping down toward the front, and the
 // whole dome the picture. The mock-up rendered a film into a cube map from the sweet spot in the middle of the hall
 // and drew the dome by direction from there; the engine paints a still of that film instead, projected from the same
 // spot so it reads true from the best seats: deep space with its stars and three nebula glows, a ringed planet off to

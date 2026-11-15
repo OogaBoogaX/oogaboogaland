@@ -1,7 +1,8 @@
-// The Timechain Sphere's ten rooms, each its own kind of place, numbered 0–9 on the keypad: 1 the Conference Room, 2
-// Satoshi's Temple, 3 the Block Party, 4 the Fireside Lounge, 5 Proof of Work-out, 6 the Observatory, 7
-// the Mining Museum, 8 the Lecture Hall, 9 the Movie Theater and 0 the Planetarium. A room is an integer `id` 0–9,
-// validated wherever one comes in (`parse`): the keypad, a route, a history entry, a stored visit.
+// The Timechain Sphere's rooms, each its own kind of place, numbered on the keypad's 0–9: 0 the Conference Room, 1 the
+// Lecture Hall, 2 the Mining Museum, 3 Satoshi's Temple, 4 Proof of Work-out, 5 the Movie Theater, 6 the Block Party and
+// 7 the Planetarium. 8 and 9 are empty: on the keypad and in the directory, greyed out and never chosen. A room is an
+// integer `id`, validated wherever one comes in (`parse`, which refuses an empty number): the keypad, a route, a history
+// entry, a stored visit.
 // Signed in, a room's zone (`sphere-<id>`, never a dotted name, which would fold every room into one voice group)
 // is who is seen and heard there; a solo visit uses the same design and joins nothing.
 //
@@ -24,26 +25,33 @@
   // behind it, and the Exit button beside it at hand height.
   const DOOR = { halfW: 1.5, height: 3.2, bay: 2.7, vestibule: 2.6, frame: 0.18, casing: 4 };
   const BODY = 0.3;
-  // In keypad order's number: the kind, its name, the line under it and its sphere's radius, as the mock-ups drew them.
+  // In keypad order's number: the kind, its name, the line under it and its sphere's radius, as the mock-ups drew them;
+  // null for a number with no room behind it yet.
   const KINDS = [
-    { kind: "planetarium", name: "Planetarium", tag: "Tonight's sky over London", R: 8 },
     { kind: "conference", name: "Conference Room", tag: "Live block and mining charts round the dome", R: 10.5 },
-    { kind: "temple", name: "Satoshi's Temple", tag: "A meditation temple; the bell rings every block", R: 15 },
-    { kind: "party", name: "Block Party", tag: "The bass drops on every block", R: 13.5 },
-    { kind: "fireside", name: "Fireside Lounge", tag: "A small room for a fireside chat", R: 9 },
-    { kind: "workout", name: "Proof of Work-out", tag: "Pedal to find a fake block", R: 12 },
-    { kind: "observatory", name: "The Observatory", tag: "A telescope under a slit to the sky", R: 12 },
-    { kind: "mining", name: "The Mining Museum", tag: "From Satoshi's CPU to today's ASICs", R: 15 },
     { kind: "lecture", name: "Lecture Hall", tag: "A slide, three whiteboards and live charts", R: 15 },
-    { kind: "theater", name: "Movie Theater", tag: "The whole dome is the picture", R: 20 }
+    { kind: "mining", name: "The Mining Museum", tag: "From Satoshi's CPU to today's ASICs", R: 15 },
+    { kind: "temple", name: "Satoshi's Temple", tag: "A meditation temple; the bell rings every block", R: 15 },
+    { kind: "workout", name: "Proof of Work-out", tag: "Pedal to find a fake block", R: 12 },
+    { kind: "theater", name: "Movie Theater", tag: "The whole dome is the picture", R: 20 },
+    { kind: "party", name: "Block Party", tag: "The bass drops on every block", R: 13.5 },
+    { kind: "planetarium", name: "Planetarium", tag: "Tonight's sky over London", R: 8 },
+    null,
+    null
   ];
-  // Only the Conference Room has a lock: a keypad inside its doors that shuts it to anyone without the PIN.
-  const ROOMS = Object.freeze(KINDS.map((k, id) => Object.freeze({ id, zone: `sphere-${id}`, kind: k.kind, name: k.name, tag: k.tag, radius: k.R, ambience: k.kind, lockable: k.kind === "conference" })));
+  // Every number on the keypad, an empty one (`empty`) named "Empty" with no kind. Only the Conference Room has a lock:
+  // a keypad inside its doors that shuts it to anyone without the PIN.
+  const ROOMS = Object.freeze(KINDS.map((k, id) => Object.freeze(k
+    ? { id, zone: `sphere-${id}`, kind: k.kind, name: k.name, tag: k.tag, radius: k.R, ambience: k.kind, lockable: k.kind === "conference", empty: false }
+    : { id, zone: `sphere-${id}`, kind: null, name: "Empty", tag: "No room here yet", radius: 0, ambience: null, lockable: false, empty: true })));
   const LOCKABLE = Object.freeze(ROOMS.filter((room) => room.lockable).map((room) => room.id));
-  // A room id from whatever a boundary hands in: an integer 0–9 or its one-digit string. Anything else is null.
+  const OPEN = Object.freeze(ROOMS.filter((room) => !room.empty).map((room) => room.id));
+  // A room id from whatever a boundary hands in: an integer 0–9 or its one-digit string, of a number with a room behind
+  // it. Anything else, an empty number included, is null.
   const parse = (value) => {
-    if (typeof value === "number") return Number.isInteger(value) && value >= 0 && value < COUNT ? value : null;
-    return typeof value === "string" && /^[0-9]$/.test(value) ? Number(value) : null;
+    const id = typeof value === "number" ? Number.isInteger(value) && value >= 0 && value < COUNT ? value : null
+      : typeof value === "string" && /^[0-9]$/.test(value) ? Number(value) : null;
+    return id === null || ROOMS[id].empty ? null : id;
   };
   const get = (value) => {
     const id = parse(value);
@@ -200,5 +208,5 @@
     const D = Math.max(0.3, Math.min(width / (2 * h), (eye - floor) / v, (ceiling - eye) / v, reach));
     return { D, w: 2 * D * h, h: 2 * D * v };
   };
-  BL.timechainRooms = { COUNT, ROOMS, LOCKABLE, EXTERIOR_ZONE, DOOR, BODY, STEP_UP, DEG, TAU, parse, get, layout, radiusAt, onSphere, edgeY, edgeEl, floorAt, wallAt, clearAt, ceilingAt, fill };
+  BL.timechainRooms = { COUNT, ROOMS, LOCKABLE, OPEN, EXTERIOR_ZONE, DOOR, BODY, STEP_UP, DEG, TAU, parse, get, layout, radiusAt, onSphere, edgeY, edgeEl, floorAt, wallAt, clearAt, ceilingAt, fill };
 })();

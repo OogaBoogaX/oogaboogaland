@@ -1,4 +1,4 @@
-// Room 2, Satoshi's Temple: dusk over misty mountains drawn like an ink painting, a full moon rising beside the hall
+// Room 3, Satoshi's Temple: dusk over misty mountains drawn like an ink painting, a full moon rising beside the hall
 // with cranes crossing and the first stars, and one quiet line under the moon with the latest block. Through a torii
 // and up a stone path lined with stone lanterns and hedges to the main hall, where Satoshi sits on a Corten plinth
 // under a scroll with an ensō: a replica of Valentina Picozzi's statue in Lugano, made with her permission, half as

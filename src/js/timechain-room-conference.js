@@ -1,4 +1,4 @@
-// Room 1, the Conference Room: the round table seating eight under a dome of live block and mining charts (the
+// Room 0, the Conference Room: the round table seating eight under a dome of live block and mining charts (the
 // mock-up's layout A, the ring). Round the dome's base the latest blocks run all the way round as cards, the label at
 // the front; above them six charts stand at a look-up angle, a sixth of the way round from each other; the next block
 // fills the crown. The holdings desk stands against the left wall, the amber chain runs from the doors to the ring
