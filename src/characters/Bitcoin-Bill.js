@@ -10,6 +10,19 @@
     n = Math.imul(n ^ (n >>> 13), 1274126177);
     return ((n ^ (n >>> 16)) >>> 0) % 100;
   };
+  const DIRS = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const smooth = (src) => {
+    const out = makeVox();
+    src.each((x, y, z, c) => {
+      for (let o = 0; o < 8; o++) {
+        const s = [o & 1 ? 1 : -1, o & 2 ? 1 : -1, o & 4 ? 1 : -1];
+        let cut = 0;
+        DIRS.forEach(([a, b, d], i) => { if (!src.has(x + a * s[i], y + b * s[i], z + d * s[i]) && src.has(x - a * s[i], y - b * s[i], z - d * s[i])) cut++; });
+        if (cut < 2) out.set(2 * x + (o & 1), 2 * y + (o >> 1 & 1), 2 * z + (o >> 2), c);
+      }
+    });
+    return out;
+  };
   const KOBE_PALETTE = ["#4a35c8", "#3b28a6", "#ff7a2a", "#ff4f9a", "#2fd6c8", "#ffd23f", "#f6ecd9", "#15100c", "#3a2416", "#3f8fe8", "#8fd0ff"];
   const [VIOLET, INDIGO, TANGERINE, ROSE, TURQUOISE, SUN, CREAM, JET, EYE, BEAD, BEAD_LIGHT] = KOBE_PALETTE.map((_, i) => i);
   const KOBE_GLOW = { [BEAD]: 0.9, [BEAD_LIGHT]: 1.2 };
@@ -66,10 +79,10 @@
     }
     v.fill(0, 0, 8, 11, -7, -7, (x, y) => [ROSE, TANGERINE, SUN, TURQUOISE][y - 8]);
     v.set(0, 12, -6, ROSE); v.set(0, 12, -5, SUN);
-    return (kobe = v);
+    return (kobe = smooth(v));
   };
-  const HAT_PALETTE = ["#d8c08a", "#c4a768", "#e8d7a8", "#b39656", "#7a5a3a", "#5e432a"];
-  const [STRAW, STRAW_DARK, STRAW_LIGHT, STRAW_OLD, BAND, BAND_DARK] = HAT_PALETTE.map((_, i) => i);
+  const HAT_PALETTE = ["#d8c08a", "#c4a768", "#e8d7a8", "#b39656", "#7a5a3a", "#5e432a", "#c4783a", "#8a4f22", "#d99a55", "#f0e2c0"];
+  const [STRAW, STRAW_DARK, STRAW_LIGHT, STRAW_OLD, BAND, BAND_DARK, VANE, QUILL, VANE_LIGHT, TIP] = HAT_PALETTE.map((_, i) => i);
   let hat = null;
   const hatVox = () => {
     if (hat) return hat;
@@ -97,6 +110,10 @@
         if (speckle(x, 5, z) < 45) v.set(x, y - 2, z, straw(x, 2, z));
         if (speckle(x, 9, z) < 15) v.set(x, y - 3, z, STRAW_OLD);
       }
+    }
+    for (let i = 0; i <= 13; i++) {
+      const y = 20 + i, zc = 7 - Math.round(i * 0.6), w = i < 2 ? 0 : i < 4 || i > 10 ? 1 : 2, x = 16 + (i > 7 ? 1 : 0);
+      for (let d = -w; d <= w; d++) for (const side of [x, 13 - x]) v.set(side, y, zc + d, i > 10 ? TIP : d === 0 ? QUILL : speckle(x, y, zc + d) < 35 ? VANE_LIGHT : VANE);
     }
     return (hat = v);
   };
@@ -140,6 +157,39 @@
     for (let x = 1; x <= 3; x++) v.set(x, 19, 0, x === 2 ? S_PURPLE : S_YELLOW);
     return (guitar = v);
   };
+  const SASH_PALETTE = ["#b3443b", "#93342d", "#c4665a", "#e4dac1", "#d0c4a6", "#eee6d1", "#4f7f4a", "#3d6639", "#70996a", "#40599a", "#31477d", "#5b74ab", "#d3a08f", "#a9b88f", "#44706f", "#6e4526", "#55331b", "#8a5a34", "#c9a878", "#c4c8cc", "#8e9499", "#eef1f3"];
+  const [RED, , , WHITE, , , GREEN, , , BLUE, , , PINK, SAGE, TEAL, LEATHER, LEATHER_DARK, LEATHER_LIGHT, STITCH, SILVER, SILVER_DARK, SILVER_LIGHT] = SASH_PALETTE.map((_, i) => i);
+  let sash = null;
+  const sashVox = () => {
+    if (sash) return sash;
+    const v = makeVox();
+    const inside = (x, z, grow) => Math.abs(x) <= 14 + grow && Math.abs(z + 0.5) <= 9.5 + grow && Math.abs(x) + Math.abs(z + 0.5) <= 20.5 + 2 * grow;
+    const cloth = (x, y, z) => {
+      const n = speckle(x, y, z), top = 7.6 + 0.9 * Math.sin(x * 0.45 + z * 0.3), low = 0.1 + 0.8 * Math.sin(x * 0.38 - z * 0.33 + 2);
+      const wash = Math.sin(x * 0.3 + y * 0.9 + z * 0.25) + Math.sin(z * 0.4 - x * 0.17 + y * 0.5 + 1.3) + (n / 100 - 0.5) * 1.4;
+      if (Math.abs(y - top) < 0.5 && n % 2) return PINK;
+      if (Math.abs(y - low) < 0.5 && n % 2) return TEAL;
+      if (y === 2 && n % 3 === 0 || y === 6 && n % 5 === 0) return SAGE;
+      return (y > top ? RED : y > 4 ? WHITE : y > low ? GREEN : BLUE) + (wash < -0.8 ? 1 : wash > 0.8 ? 2 : 0);
+    };
+    const hide = (x, y, z) => { const n = speckle(x, y, z); return y !== 4 ? LEATHER_DARK : (x + z + 40) % 3 === 0 ? STITCH : n < 20 ? LEATHER_LIGHT : LEATHER; };
+    for (let x = -15; x <= 15; x++) for (let z = -11; z <= 10; z++) {
+      if (inside(x, z, 0) && !inside(x, z, -1)) for (let y = -1; y <= 9; y++) if (y < 3 || y > 5) v.set(x, y, z, cloth(x, y, z));
+      if (inside(x, z, 1) && !inside(x, z, 0)) for (let y = 3; y <= 5; y++) v.set(x, y, z, hide(x, y, z));
+    }
+    for (let x = -3; x <= 3; x++) for (let y = 2; y <= 6; y++) {
+      const rim = Math.abs(x) === 3 || y === 2 || y === 6;
+      if (rim) v.set(x, y, 11, y === 6 ? SILVER_LIGHT : y === 2 || x === 3 ? SILVER_DARK : SILVER);
+      else if (y === 4 && x >= 0) v.set(x, y, 11, SILVER_DARK);
+    }
+    for (let x = 8; x <= 12; x++) for (let y = -2; y <= 9; y++) {
+      const star = y % 2 === 0 ? x % 4 === 0 : x === 10;
+      v.set(x, y, 11, star ? WHITE + speckle(x, y, 3) % 2 : BLUE + speckle(x, y, 11) % 3);
+    }
+    return (sash = v);
+  };
+  const HEAD_PALETTE = ["#d99a74", "#3b3430", "#322c29", "#8b8279", "#b3aba1", "#3f3732", "#857c72", "#c9c3b9", "#b9b2a7"];
+  const [SKIN, HAIR, HAIR_DARK, GREY, ASH, BEARD_DARK, BEARD_MID, BEARD, BEARD_SHADE] = HEAD_PALETTE.map((_, i) => i);
   BL.characters.add({
     handle: "Bitcoin-Bill",
     github: "Bitclank-Bill",
@@ -180,32 +230,37 @@
           rest: { x: 0.95, z: 0 }, carry: { x: 0.95, z: 0 }
         };
       },
-      crown(k, v) {
-        const grey = k.color("#8b8279"), silver = k.color("#b3aba1");
-        for (let y = 2; y <= 8; y++) for (let z = -1; z <= 6; z++) for (const x of [-1, 7]) {
-          if (v.has(x, y, z) && k.rand() < 0.35) v.set(x, y, z, k.rand() < 0.5 ? grey : silver);
-        }
-        for (let x = 0; x <= 6; x++) for (let y = 2; y <= 8; y++) if (v.has(x, y, -1) && k.rand() < 0.25) v.set(x, y, -1, grey);
-      },
-      eyes(k, v) {
-        const o = k.color(ORANGE), oc = k.color(ORANGE_CORE);
-        for (const [x0, ring, core] of [[0, o, oc], [5, o, oc]]) {
-          for (let x = x0; x <= x0 + 1; x++) for (let y = 2; y <= 3; y++) {
-            v.set(x, y, 5, ring);
-            k.eyeCells.push([x, y]);
+      model(k, wear) {
+        const H = BL.heroBody, u = k.u, F = H.FRONT, v = makeVox(), z = 3.001;
+        const lock = (x, y, z, a, b) => v.set(x, y, z, speckle(x, y, z) < 16 ? b : a);
+        v.fill(0, 6, 0, 5, 0, 5, SKIN);
+        v.fill(1, 5, 0, 1, 6, 6, SKIN);
+        for (let x = -1; x <= 7; x++) for (let z = -1; z <= 6; z++) for (let y = 6; y <= 8; y++) if (y < 8 || x > -1 && x < 7 && z > -1 && z < 6) lock(x, y, z, HAIR, HAIR_DARK);
+        for (let x = -1; x <= 7; x++) for (let z = -2; z <= -1; z++) for (let y = -2; y <= 5; y++) if (z > -2 || x > -1 && x < 7) lock(x, y, z, HAIR, HAIR_DARK);
+        for (const x of [-1, 7]) for (let z = 0; z <= 4; z++) for (let y = 2; y <= 5; y++) v.set(x, y, z, z < 3 ? HAIR : y === 2 + (z & 1) ? ASH : GREY);
+        for (let x = 0; x <= 6; x++) for (let y = 0; y <= 1; y++) for (let z = 5; z <= 7; z++) if (y || z < 7 || x % 6) lock(x, y, z, y ? BEARD_DARK : x % 6 ? BEARD : BEARD_MID, y ? BEARD_DARK : BEARD_SHADE);
+        for (let x = 1; x <= 5; x++) for (let y = -2; y <= -1; y++) for (let z = 5; z <= 7; z++) if (y > -2 || z < 7 && x > 1 && x < 5) lock(x, y, z, BEARD, BEARD_SHADE);
+        const blocks = voxelGeometry(v, { unit: u, palette: HEAD_PALETTE, origin: { x: -3.5 * u, y: 0, z: -3 * u } });
+        const face = (shut) => {
+          const g = BL.models.geometry();
+          for (const side of [-1, 1]) {
+            const X = (a, b) => [Math.min(a * side, b * side), Math.max(a * side, b * side)];
+            const [bx0, bx1] = X(0, 3.55), [ex0, ex1] = X(1.5, 3.5), [cx0, cx1] = X(1.62, 2.5);
+            H.slab(g, H.rect(bx0, bx1, 4, 5.05, z, 0.18, 0.07 * side), F, 1, 0.9, HEAD_PALETTE[HAIR], HEAD_PALETTE[HAIR_DARK]);
+            if (shut) {
+              H.slab(g, H.rect(ex0, ex1, 2, 4, z), F, 0.1, 1, "#c38a68");
+              H.slab(g, H.rect(ex0, ex1, 2.55, 2.75, z + 0.1), F, 0.03, 1, "#62453a");
+            } else {
+              H.slab(g, H.rect(ex0, ex1, 2, 4, z, 0.12), F, 0.06, 1, ORANGE, ORANGE, 1);
+              H.slab(g, H.rect(cx0, cx1, 3, 3.88, z + 0.06, 0.1), F, 0.03, 1, ORANGE_CORE, ORANGE_CORE, 1.4);
+            }
+            H.slab(g, H.rect(2 * side - 0.36, 2 * side + 0.36, 0.12, 0.88, 5.001, 0.1), F, 0.14, 0.8, "#f2efe4", "#d6d0c0");
           }
-          v.set(x0 + (x0 ? 0 : 1), 3, 5, core);
-        }
-        k.headEmissive = { [o]: 1, [oc]: 1.4 };
-        return true;
-      },
-      mark(k, v) {
-        const dark = k.color("#3f3732"), mid = k.color("#857c72"), silver = k.color("#c9c3b9"), skip = new Set([k.P.nose, k.P.white, k.P.skin, k.P.skinDk]);
-        for (let x = 0; x <= 6; x++) for (let y = -2; y <= 1; y++) for (let z = 5; z <= 7; z++) {
-          if (!v.has(x, y, z) || skip.has(v.get(x, y, z))) continue;
-          const r = k.rand();
-          v.set(x, y, z, y <= -1 ? (r < 0.7 ? silver : mid) : y === 0 ? (r < 0.4 ? silver : r < 0.75 ? mid : dark) : (r < 0.6 ? dark : mid));
-        }
+          H.noseBlock(g, H.rect(-1.5, 1.5, 2, 4, z, 0.4), F, 1.9, "#f0ab80", "#cc9170");
+          return g;
+        };
+        const head = (shut) => BL.models.merge(blocks, H.scaled(face(shut), u));
+        return { ...wear(), headOpen: head(false), headClosed: head(true) };
       },
       headgear(k) {
         addChild(k.parts.head, createNode({ geometry: voxelGeometry(hatVox(), { unit: k.u / 2, palette: HAT_PALETTE, origin: { x: -3.5 * k.u, y: 0, z: -3 * k.u } }) }));
@@ -226,9 +281,10 @@
         const s = 0.7, h = k.h, unit = k.u / 2;
         k.parts.dog = createNode({
           position: { x: 0.55 * h, y: -k.legH, z: -0.25 * h }, scale: { x: s, y: s, z: s },
-          geometry: voxelGeometry(kobeVox(), { unit, palette: KOBE_PALETTE, origin: { x: -0.5 * unit, y: 0, z: -0.5 * unit }, emissive: KOBE_GLOW })
+          geometry: voxelGeometry(kobeVox(), { unit: unit / 2, palette: KOBE_PALETTE, origin: { x: -0.5 * unit, y: 0, z: -0.5 * unit }, emissive: KOBE_GLOW })
         });
         addChild(k.root, k.parts.dog);
+        addChild(k.parts.torso, createNode({ position: { x: 0, y: 1.3 * k.u, z: 0 }, geometry: voxelGeometry(sashVox(), { unit: unit / 2, palette: SASH_PALETTE, origin: { x: -0.25 * unit, y: 0, z: 0 } }) }));
       }
     }
   });
