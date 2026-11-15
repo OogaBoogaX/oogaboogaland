@@ -100,6 +100,23 @@ notifying live clients through the same durable outbox. Names follow renames, re
 lose the prior account's attribution, and account deletion removes its runs while retaining
 the unattributed machine record. No scores are uploaded from local saves.
 
+## The cave's cabinets and what is played (#554)
+
+The Arcade's cave on the island shows the four most played of the twelve seat cabinets. Score data cannot answer that:
+`game_highscores` keeps only each machine's record and `cabinet_runs`/`cloud_hopper_runs` only each board's best 1,024
+distinct finishes, so a play that does not reach a board leaves no trace, and signed-out plays leave none at all. So
+`0010_cabinet_plays.sql` adds `cabinet_plays(game, day, plays)`: one counter per game per UTC day, nothing about who
+played. `POST /api/arcade-plays/<id>` counts one when a cabinet leaves its menu for a run, from a same-site page, under
+`HIGHSCORE_LIMITER` per address; `GET /api/arcade-plays` returns the last 30 days as `{plays, windowDays}`, shared through
+the edge cache for 30 seconds. Each write is one atomic upsert in a D1 batch that also drops days past the window, so
+the table stays bounded and simultaneous plays never lose a count. `/api/me` advertises `arcadePlays`.
+
+A game's cave cabinet and its hall cabinet are two machines of one game: separate seats (`<id>@out` beside `<id>`, see
+Arcade cabinets in `auth-and-presence.md`) that submit to the one shared board and machine ID. Scores from players
+finishing at nearly the same time are compared and replaced inside SQL as described below; a run's replay pointer is
+published in the same transaction as its score and only for the current winner, so two near-simultaneous winners cannot
+pair the wrong recording (`worker/test/cloud-hopper-replays.test.mjs`).
+
 ## API and client lifecycle
 
 - `GET /api/highscores/<game>` is public and returns `{game, highscores, achieved,
@@ -237,8 +254,8 @@ browser networking; they do not replace a two-player staging smoke test or CI at
 ## Wrangler and rollout
 
 The existing migration directory and deploy workflows apply `0004_highscore_notifications.sql` and
-`0005_cloud_hopper_levels.sql`, `0006_cloud_hopper_replays.sql`, `0007_cloud_hopper_runs.sql` and
-`0008_cabinet_runs.sql`
+`0005_cloud_hopper_levels.sql`, `0006_cloud_hopper_replays.sql`, `0007_cloud_hopper_runs.sql`,
+`0008_cabinet_runs.sql` and `0010_cabinet_plays.sql`
 before the Worker. These add the level rows, replay registry and bounded run history. No
 `d1 create`, new database binding, secret, Durable Object or scheduled job is needed.
 The configs add limiter namespaces `2006` on staging and `1006` in production; the local

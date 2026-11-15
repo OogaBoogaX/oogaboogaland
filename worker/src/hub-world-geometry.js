@@ -6,7 +6,7 @@ import { buildHubTerrainSnapshot, compilePrivateHubTerrain, hubSlots, hubScene,
   createHubSolids, createHubHeadquarters, createHubCavePhysics,
   createHubLab, createHubOffice, createHubFactoryMouth, createMempoolSite,
   createMempoolBoards, buildMempoolForest, createMempoolSupport, createMempoolSleep,
-  createTimechainSite, createBifrostSite, createHubAltar, hubPileScale,
+  createTimechainSite, createBifrostSite, createRepoIslandSite, createHubAltar, hubPileScale,
   hubPileMaximum, hubPileFootprint, hubLibrary, createHubGate,
   createHubStructuralSupport, createHubClankerSupport,
   createHubPileCore, scaleHubPileCore, createHubPileVolume, findHubFireSpot, createHubFireRig, createHubLadder, hubTotemLayout, hubTotemModels,
@@ -236,13 +236,16 @@ function* buildGeometry({ layout, getRosterCount }) {
     };
     const sleep = createMempoolSleep(mempool);
     yield;
-    const timechain = createTimechainSite(island);
+    const timechain = createTimechainSite(island, { presentation: false });
     attach(timechain.node);
     for (const node of [timechain.shell, timechain.entrance, timechain.bridge, timechain.plug]) solids.add(node);
     yield;
     const bifrost = createBifrostSite(island);
     for (const node of bifrost.roots) attach(node);
     for (const node of bifrost.solids) { node.sightSolid = true; solids.add(node); }
+    const repoIsland = createRepoIslandSite(island);
+    attach(repoIsland.group);
+    for (const node of repoIsland.solids) solids.add(node);
     updateWorld(root); solids.sync();
     // Ground reservations use the browser's authored order and predicate.
     // Physical placement still independently checks the complete solid graph.
@@ -285,7 +288,7 @@ function* buildGeometry({ layout, getRosterCount }) {
     }
     movePilePosts();
     mainland = yield* buildHubMainland({ island, root, solids, placed, targets, props, addProp,
-      claimed, claim, free, nearPath, getRosterCount, layout, chalkboardClearance, mempool, timechain, bifrost, firePosition });
+      claimed, claim, free, nearPath, getRosterCount, layout, chalkboardClearance, mempool, timechain, bifrost, repoIsland, firePosition });
     updateWorld(root); solids.sync();
     const structuralSupport = createHubStructuralSupport({ getRoot: () => root, getHeadquarters: () => headquarters,
       disabled: () => false, getDefaultRadius: () => 0.3 });
@@ -300,7 +303,7 @@ function* buildGeometry({ layout, getRosterCount }) {
       } });
     complete = true;
     return { npcLandSegmentClear, root, island, solids, placed, targets, props, headquarters, mouths,
-      lab, offices, factory, mirror, mempool, timechain, bifrost, sleep, cavePhysics,
+      lab, offices, factory, mirror, mempool, timechain, bifrost, repoIsland, sleep, cavePhysics,
       altar, pileCore, pileVolume, pathNode, gate, library, setPileLevel, get pileLevel() { return pileLevel; },
       matrixGates, sealedCaves, closedCaveZones, headquartersRimLintels, climbMasonry,
       fireRigs, fireHazards, firePosition, ladder, jumbotron, totems, pilePosts, buildSpots, claimed, free, structuralSupport, clankerSupport,

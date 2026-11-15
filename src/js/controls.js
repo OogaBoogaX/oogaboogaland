@@ -2,7 +2,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { clamp } = BL.math;
-  const { BUTTON: PAD, state: pad } = BL.gamepad;
+  const gamepad = BL.gamepad, { ACTION: PAD, state: pad } = gamepad, padActions = pad.actions;
   const KEYS = {
     w: "forward", s: "back", a: "left", d: "right", q: "yawLeft", e: "yawRight", r: "pitchDown", f: "pitchUp",
     z: "up", " ": "up", x: "down", arrowup: "forward", arrowdown: "back", arrowleft: "left", arrowright: "right", shift: "sprint"
@@ -12,7 +12,7 @@
   // Discrete shortcuts shared by scene handlers and their reference rows.
   const SHORTCUTS = { view: ["x"], resetView: ["0"], weapon: ["1", "2"], swapWeapon: ["g"], attack: ["v"], reload: ["r"], bash: ["f"], jetpack: ["j"], actor: ["t"], escape: ["escape"], start: ["enter"], item: ["e", "shift"], autopilot: ["g"], spacewalk: ["v"], mineView: ["v"], crack: ["c"], pause: ["p"], act: [" ", "enter"] };
   const shortcutKeys = action => SHORTCUTS[action];
-  Object.assign(SHORTCUTS, { north: ["n"], twirl: ["n"], tint: ["c"], horn: ["h"], tomato: ["t"], throwWallet: ["y"], grab: ["g"], smash: ["1"], chest: ["c"] });
+  Object.assign(SHORTCUTS, { north: ["n"], twirl: ["n"], tint: ["c"], horn: ["h"], tomato: ["t"], throwWallet: ["y"], grab: ["g"], smash: ["1"], chest: ["c"], hand: ["h"], linkAll: ["l"] });
   const matches = (e, action) => SHORTCUTS[action].includes(e.key.toLowerCase());
   const resets = new Set();
   const resetAll = () => { for (const reset of resets) reset(); };
@@ -86,10 +86,17 @@
     return s;
   };
   // Joystick bases, a hold-to-climb button, a canvas whose mouse chord walks, and a Space handler
+  // The keys physically down, whichever scene is listening. A scene's controls learn of a key only from its events, so a
+  // key held across a change of scene is lost to them (at once where a later key has stopped its auto-repeat).
+  const physical = new Map();
+  window.addEventListener("keydown", (e) => { if (!e.metaKey && !e.ctrlKey && !e.altKey && !uiKey(e)) physical.set(e.code || e.key, e); }, true);
+  window.addEventListener("keyup", (e) => physical.delete(e.code || e.key), true);
+  window.addEventListener("blur", () => physical.clear());
   const create = ({ move = null, look = null, boost = null, chord = null, onAction = null, pressActions = false, tabNavigation = false, shooter = () => false, canDescend = () => true } = {}) => {
     const held = { forward: 0, back: 0, left: 0, right: 0, yawLeft: 0, yawRight: 0, pitchDown: 0, pitchUp: 0, up: 0, space: 0, down: 0, boost: 0, chord: 0, sprint: 0, peek: 0 };
     const axes = { x: 0, y: 0, up: 0, yaw: 0, pitch: 0, keyPitch: 0, orbitYaw: 0, sprint: 0, peek: 0, shiftTap: 0 };
-    let pitchBorrowed = false;
+    // `moveTap`: a movement key pressed since the last `read`, so a tap between frames still counts for `moving`.
+    let pitchBorrowed = false, settled = false, moveTap = false;
     let spaceDown = false, boostPointer = null, boostClick = false, boostLift = 0, shiftAt = 0, shiftUsed = false, shiftTap = 0;
     let padFrame = -1, padUp = 0, padSprint = 0;
     const downKeys = new Set(), blockedKeys = new Set();
@@ -145,6 +152,8 @@
       const name = pressActions && e.key === " " ? "space" : keyName(e);
       if (!name) return;
       if (e.key === " " || e.key.startsWith("Arrow")) e.preventDefault();
+      if (settled && e.repeat && !held[name]) return;
+      if (!e.repeat && (name === "forward" || name === "back" || name === "left" || name === "right")) moveTap = true;
       if (name === "peek" && !held.peek) {
         shiftAt = e.timeStamp;
         shiftUsed = !!(held.left || held.right);
@@ -232,34 +241,52 @@
       chord.addEventListener("pointerup", onChord);
       chord.addEventListener("pointercancel", onChord);
     }
-    // A pad's sticks are the touch sticks, its A is Space (each press acted on once, however often `read` runs) and a
-    // click of its left stick runs until the stick lets go.
+    // A pad's sticks are the touch sticks, its `act` button (A by default) is Space (each press acted on once, however
+    // often `read` runs) and its `sprint` button (a click of the left stick) runs until the stick lets go, or while
+    // held when the player chose that. Its `descend` button is X held.
     const readPad = () => {
       if (pad.frame !== padFrame) {
         padFrame = pad.frame;
-        if (pad.pressed & PAD.a) padUp = onAction && onAction() ? 0 : 1;
-        if (pad.released & PAD.a) padUp = 0;
-        if (pad.pressed & PAD.ls) padSprint = 1;
+        if (padActions.pressed & PAD.act) padUp = onAction && onAction() ? 0 : 1;
+        if (padActions.released & PAD.act) padUp = 0;
+        if (padActions.pressed & PAD.sprint) padSprint = 1;
       }
-      if (!pad.lx && !pad.ly) padSprint = 0;
+      if (gamepad.feel.runHold ? !(padActions.held & PAD.sprint) : !pad.lx && !pad.ly) padSprint = 0;
     };
     // Sign convention: yaw positive is left, pitch positive is down.
     const read = () => {
+      moveTap = false;
       readPad();
       axes.x = clamp(held.right - held.left + (moveStick ? moveStick.x : 0) + pad.lx, -1, 1);
       axes.y = clamp(held.forward - held.back + (shooter() ? 0 : held.chord) + (moveStick ? moveStick.y : 0) + pad.ly, -1, 1);
-      axes.up = clamp(held.up + held.space + held.boost + padUp - (canDescend() ? held.down : 0), -1, 1);
+      axes.up = clamp(held.up + held.space + held.boost + padUp - (canDescend() ? Math.max(held.down, padActions.held & PAD.descend ? 1 : 0) : 0), -1, 1);
       // Bird's-eye combat rotates with Q/E while its look stick aims the pointer.
       axes.orbitYaw = held.yawLeft - held.yawRight;
-      axes.yaw = clamp((shooter() ? 0 : held.yawLeft - held.yawRight) - (lookStick ? lookStick.x : 0) - pad.rx, -1, 1);
+      // The pad's look speed scales its share after the clamp, so above 1 a full push turns faster, not just sooner.
+      const look = gamepad.feel.look;
+      axes.yaw = clamp((shooter() ? 0 : held.yawLeft - held.yawRight) - (lookStick ? lookStick.x : 0), -1, 1);
+      axes.yaw = clamp(axes.yaw - pad.rx * look, -Math.max(1, pad.rx ? look : 1), Math.max(1, pad.rx ? look : 1));
       // R and F pitch the view unless a scene borrows them (`borrowPitch`), which reads them as `keyPitch` instead.
       axes.keyPitch = held.pitchDown - held.pitchUp;
-      axes.pitch = clamp((shooter() || pitchBorrowed ? 0 : axes.keyPitch) - (lookStick ? lookStick.y : 0) - pad.ry, -1, 1);
+      axes.pitch = clamp((shooter() || pitchBorrowed ? 0 : axes.keyPitch) - (lookStick ? lookStick.y : 0), -1, 1);
+      axes.pitch = clamp(axes.pitch - pad.ry * look, -Math.max(1, pad.ry ? look : 1), Math.max(1, pad.ry ? look : 1));
       axes.sprint = Math.max(held.sprint, padSprint);
       axes.peek = shooter() ? held.peek : 0;
       axes.shiftTap = shiftTap;
       shiftTap = 0;
       return axes;
+    };
+    // Whether any movement is held now (keys, the move stick, the pad's stick or A, the mouse chord, climb or jump),
+    // read without consuming a tap or a pad edge: what ends a look or a tour and goes to the Ooga instead.
+    const moving = () => !!(moveTap || held.forward || held.back || held.left || held.right || held.up || held.space
+      || held.chord || moveStick && (moveStick.x || moveStick.y) || pad.lx || pad.ly || padActions.held & PAD.act);
+    // A forward movement still held, which a walk just ended hands back to the player: true if there is one. Keys are
+    // taken up here from the physical record, with the sprint and sideways keys held with them; a stick is read live.
+    const takeForward = () => {
+      let forward = false;
+      for (const e of physical.values()) if (keyName(e) === "forward") forward = true;
+      if (forward) for (const e of physical.values()) { const name = keyName(e); if (name === "forward" || name === "left" || name === "right" || name === "sprint") held[name] = 1; }
+      return forward || pad.ly > 0.2 || !!moveStick && moveStick.y > 0.2;
     };
     let listening = true;
     const dispose = () => {
@@ -296,7 +323,9 @@
       held.chord = held.boost = 0;
       boostPointer = null;
     };
-    const reset = () => { onBlur(); if (moveStick) moveStick.reset(); if (lookStick) lookStick.reset(); };
+    // `settle` also drops the auto-repeats of keys held through the reset, so only a fresh press moves again (a tour
+    // that a movement ends must not end on the key that was held as it began).
+    const reset = (settle = false) => { onBlur(); settled = settle; moveTap = false; if (moveStick) moveStick.reset(); if (lookStick) lookStick.reset(); };
     resets.add(reset);
     const borrowPitch = (on) => { pitchBorrowed = !!on; };
     const resume = () => {
@@ -328,7 +357,29 @@
       if (moveStick) moveStick.resume();
       if (lookStick) lookStick.resume();
     };
-    return { read, axes, clearPointer, reset, consumeTab, resume, borrowPitch, dispose, get rightShift() { return !!held.peek; } };
+    return { read, moving, takeForward, axes, clearPointer, reset, consumeTab, resume, borrowPitch, dispose, get rightShift() { return !!held.peek; } };
   };
-  BL.controls = { create, uiKey, keysFor, shortcutKeys, matches, resetAll };
+  // Whether the controller was the last thing used, for words that name its buttons: a key or pointer press from the
+  // visitor (never a key the pad delivered) hands prompts back to the keyboard.
+  let otherAt = 0;
+  const other = (e) => { if (!e.pad) otherAt = e.timeStamp || performance.now(); };
+  window.addEventListener("keydown", other, true);
+  window.addEventListener("pointerdown", other, true);
+  const usingPad = () => pad.connected && pad.lastAt > otherAt;
+  const KEY_WORDS = { " ": "Space", enter: "Enter", escape: "Esc", shift: "Shift" };
+  // What to press for an action, in the words of the last input: a controller's own button names (several joined
+  // by "/"), else the key. `action` is a row of the current pad context, or a shortcut name.
+  const label = (action) => {
+    const shortcut = SHORTCUTS[action] ? SHORTCUTS[action][0] : action === "act" ? " " : action;
+    if (usingPad()) {
+      const def = gamepad.CONTEXTS[gamepad.wantedContext];
+      const entry = def.entries.find(e => e.id === action) || def.entries.find(e => e.key === shortcut || e.native === action);
+      const names = entry && entry.stick === undefined ? gamepad.bindings(entry.id, gamepad.wantedContext) : [];
+      if (names.length) return names.map(n => gamepad.glyph(n)).join("/");
+    }
+    return KEY_WORDS[shortcut] || shortcut.toUpperCase();
+  };
+  // A prompt written for the keyboard, with "Space" named as the controller's button when the pad was last used.
+  const words = (text) => usingPad() && text.includes("Space") ? text.replace(/\bSpace\b/g, label("act")) : text;
+  BL.controls = { create, uiKey, keysFor, shortcutKeys, matches, resetAll, usingPad, label, words };
 })();

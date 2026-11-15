@@ -6,6 +6,7 @@ import "../../src/js/math.js";
 import "../../src/js/scene.js";
 import "../../src/js/compact-geometry.js";
 import "../../src/js/models.js";
+import "../../src/js/hero-body.js";
 import "../../src/js/lab-wallpaper.js";
 import "../../src/js/hub-models.js";
 import "../../src/js/characters.js";
@@ -189,3 +190,9 @@ import "../../src/js/hub-hammock.js";
 import "../../src/js/hub-mainland-planting.js";
 export const hubMainlandPlanting = B.hubMainlandPlanting;
 export const hubTimechainModels = B.timechainModels;
+
+// Repo Island's static walking shell; no feed, picks or idle presentation work.
+import "../../src/js/repo-island-data.js";
+import "../../src/js/repo-island-models.js";
+import "../../src/js/repo-island.js";
+export const createRepoIslandSite = island => B.repoIsland.create({ island, presentation: false });

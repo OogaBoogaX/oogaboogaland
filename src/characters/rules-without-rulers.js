@@ -30,6 +30,36 @@
       idle: ["Shut up you larp", "Rules Without Rulers"]
     },
     dress: {
+      // The modelled look: the stock build in his coat, with the X laid on its back as two straight bands that run
+      // corner to corner, from each shoulder to the far side of the waist where the loincloth's wrap begins. Each
+      // follows the back's own surface a short length at a time.
+      model(k, wear) {
+        // Each band is a strap: raised off the coat, its two edges bound darker, a row of stitches down its middle
+        // and a steel rivet at each end. Where the two cross they are pinned under an orange lozenge, his hat band's
+        // colour, with a rivet at its heart.
+        const H = BL.heroBody, body = wear(), S = H.trunk(false), geo = BL.models.geometry(), STEPS = 10, HALF = 0.36, OUT = [0, 0, -1];
+        const top = S.top - 0.6, foot = S.belt + 0.45, corner = (y) => { const [hx, , cut] = S.ring(y); return hx - cut - 0.16; };
+        const strap = "#f4f1e8", bound = "#c9c3b0", stitch = "#8f8875", steel = "#a8adb5", steelDk = "#6d727a";
+        for (const side of [-1, 1]) {
+          const x1 = side * corner(top), x0 = -side * corner(foot), length = Math.hypot(x1 - x0, top - foot), nx = -(top - foot) / length * HALF, ny = (x1 - x0) / length * HALF;
+          const at = (t, s, lift) => { const y = foot + (top - foot) * t + ny * s; return [x0 + (x1 - x0) * t + nx * s, y, S.back(y) - lift]; };
+          const run = (t0, t1, s0, s1, lift) => [at(t0, s0, lift), at(t0, s1, lift), at(t1, s1, lift), at(t1, s0, lift)];
+          for (let i = 0; i < STEPS; i++) {
+            const t0 = i / STEPS, t1 = (i + 1) / STEPS;
+            H.slab(geo, run(t0, t1, -1, 1, 0.01), OUT, 0.08, 1, strap, bound);
+            for (const [s0, s1] of [[-1, -0.72], [0.72, 1]]) H.poly(geo, run(t0, t1, s0, s1, 0.095), bound, OUT);
+            H.poly(geo, run(t0 + 0.03, t0 + 0.07, -0.14, 0.14, 0.095), stitch, OUT);
+          }
+          for (const t of [0.035, 0.965]) {
+            H.slab(geo, run(t - 0.022, t + 0.022, -0.42, 0.42, 0.09), OUT, 0.07, 0.7, steel, steelDk);
+          }
+        }
+        const mid = (top + foot) / 2, pin = S.back(mid) - 0.1;
+        H.slab(geo, [[0, mid + 0.95, pin], [0.72, mid, pin], [0, mid - 0.95, pin], [-0.72, mid, pin]], OUT, 0.1, 0.78, "#e89423", "#b86f12");
+        H.slab(geo, H.rect(-0.17, 0.17, mid - 0.17, mid + 0.17, pin - 0.1, 0.06), OUT, 0.07, 0.7, steel, steelDk);
+        body.torso = merge(body.torso, H.scaled(geo, k.u));
+        return body;
+      },
       // A dark tailcoat over bone: rib stripes and a sternum on the chest, a light
       // cravat at the throat, an orange rose on the lapel, a white X across the back
       torso(k, v) {
@@ -40,7 +70,8 @@
         v.fill(3, 5, 4, 7, 5, 5, k.jit(P.white, P.skin, 0.3));
         v.fill(6, 7, 5, 6, 5, 5, orange);
         v.set(7, 6, 5, P.spot);
-        for (let i = 0; i <= 6; i++) {
+        // The white X across the coat's back. The modelled look lays it on as two straight bands (see model).
+        if (BL.models.STYLE !== "R") for (let i = 0; i <= 6; i++) {
           v.set(1 + i, 7 - i, 0, P.white);
           v.set(7 - i, 7 - i, 0, P.white);
         }

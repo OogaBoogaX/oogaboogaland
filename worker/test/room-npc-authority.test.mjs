@@ -291,6 +291,38 @@ test('actual net retains authority through close, refuses stale epochs and legac
   c.net.dispose();
 });
 
+test('net welcome stops at a subscriber disposal or replacement before replaying state or restarting voice', async () => {
+  const stopped = client({ manual: true });
+  stopped.net.subscribe(state => { if (state.room === 'connecting') stopped.net.dispose(); });
+  await stopped.net.start();
+  assert.equal(stopped.sockets.length, 0, 'a connecting subscriber can dispose before socket creation');
+  assert.equal(stopped.net.state.room, 'off');
+  for (const replace of [false, true]) {
+    const c = client({ manual: true }); await c.net.start();
+    const old = c.sockets[0]; let restarted = 0;
+    c.BL.voice.restart = () => { restarted++; };
+    c.net.subscribe(state => {
+      if (state.room !== 'live') return;
+      c.net.dispose();
+      if (replace) c.net.rejoin();
+    });
+    const before = c.sent.length;
+    old.onmessage({ data: JSON.stringify({ t: 'welcome', you: { id: 1 }, players: [], features: [],
+      host: 0, now: 1000, connectionToken: 'old-connection' }) });
+    assert.equal(c.net.state.room, replace ? 'connecting' : 'off');
+    assert.equal(c.sent.length, before, 'the old welcome cannot send cached state to a replacement');
+    assert.equal(restarted, 0, 'the old welcome cannot restart voice after disposal');
+    if (replace) {
+      const fresh = c.sockets.at(-1); assert.notEqual(fresh, old);
+      fresh.onmessage({ data: JSON.stringify({ t: 'welcome', you: { id: 1 }, players: [], features: [],
+        host: 0, now: 1100, connectionToken: 'new-connection' }) });
+      assert.equal(c.net.state.room, 'live'); assert.equal(restarted, 1);
+      assert.ok(c.sent.some(m => m?.t === 'body'), 'the replacement replays only after its own welcome');
+    }
+    c.net.dispose();
+  }
+});
+
 test('actual net negotiates Ooga capture, retries one sample until host ACK and suppresses unchanged accepted state', async () => {
   const c = client({ manual: true, bodyMovementPreview: true }), codec = globalThis.BL.oogaMotion;
   c.BL.characters.get = name => name === 'a' ? { handle: 'a' } : null;
@@ -391,7 +423,12 @@ test('actual npc-sync freezes before crew update, including no frame, mismatched
   const BL={...globalThis.BL,math:{quat:{create:()=>new Float32Array([0,0,0,1])},fnv1a:()=>123},scene:{addChild(){},removeChild(){}},
     net:{state:{room:'live',selfId:1,hostId:1,followers:1,npcVersion:0,npcAuthority:{mode:'server',revision:1}},npcFrame:null,sendNpc(){throw Error('browser must not publish');}}};
   const cave=()=>({contributor:{},traits:{name:'a'},parts:{armL:{},armR:{}},root:{},sleepWeapons:{},puppet:false});
-  const a=cave(),b=cave(),player=cave(),crew={list:[a,b],player,workSites:[]};
+  const resumed=[];
+  const a=cave(),b=cave(),player=cave(),crew={list:[a,b],player,workSites:[],resumeFromHost(actor){
+    assert.ok(actor===a || actor===b,'only roster NPCs resume');
+    assert.equal(actor.puppet,false,'release clears the puppet before resuming');
+    resumed.push(actor);
+  }};
   for (const name of ['npc-lab-pose', 'npc-clanker-sync', 'npc-sync'])
     runInNewContext(readFileSync(new URL(`../../src/js/${name}.js`,import.meta.url),'utf8'),{window:{BL},TextEncoder,TextDecoder,ArrayBuffer,Uint32Array,Float32Array,Uint8Array,Int32Array});
   const sync=BL.npcSync.create({crew,fx:{},onPlan(){},onHit(){},onModelChange(){}});
@@ -403,7 +440,9 @@ test('actual npc-sync freezes before crew update, including no frame, mismatched
   assert.equal(a.puppet,true,'incompatible roster cannot enable local AI');assert.equal(b.puppet,true);assert.equal(player.puppet,false);
   BL.net.state.npcAuthority={mode:'browser',revision:2};sync.prepare();sync.update(.05);
   assert.equal(a.puppet,false);assert.equal(b.puppet,false);assert.equal(player.puppet,false);
+  assert.deepEqual(resumed,[a,b,a,b],'host replacement and authority release each return the prior puppets once');
   sync.dispose();
+  assert.equal(resumed.length,4,'disposing an already released crew does not resume it twice');
 });
 
 test('committed mixed host poses reach two clients and a late join with exact Clanker recovery and explicit format fencing',async t=>{
@@ -1330,8 +1369,17 @@ test('net routes public body frames only after explicit preview negotiation and 
     assert.equal(view.frame.views[0].motion.vy, 0); assert.equal(c.net.bodyReclaim.active, false);
     const count = c.sent.length, bad = structuredClone(message); bad.frame.views[0].token = token;
     receive(bad); assert.equal(c.sent.length, count); assert.equal(c.net.bodyPresence.sample().frame.revision, 1);
+    const retiredMessage = ws.onmessage, retiredClose = ws.onclose, retiredOpen = ws.onopen;
     ws.onclose(); assert.equal(c.net.bodyPresence.sample(), null);
-    c.reconnect(); ws = c.sockets.at(-1); receive(welcome); receive(message);
+    c.reconnect(); ws = c.sockets.at(-1); receive(welcome);
+    const beforeRetry = c.sent.length;
+    retiredMessage({ data: JSON.stringify(message) });
+    retiredMessage({ data: JSON.stringify({ t: 'kick', reason: 'replaced' }) });
+    retiredOpen(); retiredClose();
+    assert.equal(c.net.state.room, 'live', 'retired callbacks cannot close the replacement');
+    assert.equal(c.sent.length, beforeRetry, 'retired public body delivery cannot ACK on the new socket');
+    assert.equal(c.net.bodyPresence.sample(), null);
+    receive(message);
     assert.equal(c.net.bodyPresence.sample().frame.revision, 1);
     receive({ t: 'npc-authority', authority: { ...descriptor.authority, v: 2, format: 'mixed-1', revision: 2 } });
     assert.equal(c.net.bodyPresence.sample(), null, 'net-incompatible mixed authority also fences presentation');

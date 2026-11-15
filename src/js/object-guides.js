@@ -2,7 +2,7 @@
 //
 // The registry behind every object outline. Camera silhouettes are baked once per vertex array and never
 // written again; the queries are exact local-space visibility, proximity, occlusion and actor tests:
-// `register`, `collect`, `refresh`, `cameraClear`, `perceptionClear`, `perceived`, `concealed`, `distance`,
+// `register`, `body`, `collect`, `refresh`, `cameraClear`, `perceptionClear`, `perceived`, `concealed`, `distance`,
 // `inView`, `actorVisible`, `ownerBoundaryAt`. Providers (the pile, the platform, the mirror) join the same
 // registry through `create({ providers })`. Faces tagged `visibility: false`
 // are render-only decoration, omitted from all registry queries. sight-guides.js draws the result.
@@ -13,7 +13,10 @@
   // A bake reads only verts and each face's index list and is never written after build; shared vertex arrays
   // reuse one bake per page instead of per registry.
   const bakes = new WeakMap();
-  const create = ({ roots, crew, actorRoots = [], exclude = [], providers = [], propsBlockActor = true, perceptionThrough = null }) => {
+  // Scene coordinates and transforms are bounded. The fixed-arity norm avoids
+  // the temporary numeric arguments in Chrome's variadic hypot hot path.
+  const length3 = (x, y, z) => Math.sqrt(x * x + y * y + z * z);
+  const create = ({ roots, crew, actorRoots = [], bodies: initialBodies = [], exclude = [], providers = [], propsBlockActor = true, perceptionThrough = null }) => {
     const excluded = new Set(exclude), geometries = new Map(), registered = [], seen = new Set(), entries = new Map(), ownerEntries = new Map(), ownerGroups = [];
     const aliases = new Map(), providerOwners = new Map(), descriptorUsers = new Map();
     for (const provider of providers) {
@@ -206,7 +209,8 @@
         if (!plane) { plane = []; planes.set(planeKey, plane); }
         const bounds = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
         for (const vertex of face.i) for (let axis = 0; axis < 3; axis++) { bounds[axis] = Math.min(bounds[axis], v[vertex * 3 + axis]); bounds[axis + 3] = Math.max(bounds[axis + 3], v[vertex * 3 + axis]); }
-        plane.push({ face, bounds });
+        // Compact face reads reuse one cursor; retain the index, never that mutable view.
+        plane.push({ faceIndex, bounds });
         let centerX = 0, centerY = 0, centerZ = 0;
         for (const vertex of face.i) {
           const at = vertex * 3;
@@ -277,7 +281,7 @@
           for (const entry of faces) {
             const box = entry.bounds;
             if (x < box[0] - EPS || x > box[3] + EPS || y < box[1] - EPS || y > box[4] + EPS || z < box[2] - EPS || z > box[5] + EPS) continue;
-            const indices = entry.face.i;
+            const indices = readFace(geometry, entry.faceIndex).i;
             let inside = true;
             for (let j = 0; j < indices.length; j++) {
               const p = indices[j] * 3, q = indices[(j + 1) % indices.length] * 3;
@@ -384,8 +388,9 @@
       }
       return group;
     };
-    const registerNode = (node, owner = node, character = -1) => {
-      if (node.sightHidden) return;
+    // `force` takes a separate body's own sightHidden root (and bed gear); its sightHidden effects below stay out.
+    const registerNode = (node, owner = node, character = -1, force = false) => {
+      if (node.sightHidden && !force) return;
       seen.add(node);
       if (aliases.has(node)) owner = aliases.get(node);
       if (character < 0 && characterRoots.has(owner)) character = characterRoots.get(owner);
@@ -486,10 +491,73 @@
       if (!characterRoots.has(node)) characterRoots.set(node, characterIndex++);
       registerNode(node, node, characterRoots.get(node));
     }
+    // Separate bodies (crew.js/clankers.js `separateBodies`): the driven Ooga or gorilla, a character as a roster one
+    // is, though never in the roster. Its root stays sightHidden so no scenery pass takes it; `body` registers it while
+    // it exists and forgets it before it is detached. A body made before this registry is passed in as `bodies`.
+    const bodies = new Set();
+    const registerBody = (body) => {
+      const root = body.root, character = characterRoots.get(root);
+      if (body.sleepWeapons) registerNode(body.sleepWeapons, root, character, true);
+      registerNode(root, root, character, true);
+      if (body.headOpen) reserveHead(body);
+    };
+    const addBody = (body) => {
+      if (!body || !body.root || bodies.has(body)) return false;
+      bodies.add(body);
+      if (!characterRoots.has(body.root)) characterRoots.set(body.root, characterIndex++);
+      registerBody(body);
+      return true;
+    };
+    for (const body of initialBodies) addBody(body);
     for (const node of roots) registerNode(node);
     for (const cave of crew.cavemen.values()) reserveHead(cave);
     resize();
     const register = (node, owner = node, character = -1) => { registerNode(node, owner, character); resize(); };
+    // Bakes count as they are made; after descriptors are pruned the metrics are taken again from those still held.
+    const measureBakes = () => {
+      stats.geometries = geometries.size; stats.triangles = stats.triangleBytes = stats.samples = 0;
+      for (const geometry of geometries.values()) if (geometry.ready) { stats.triangles += geometry.triangleIndices.length / 3; stats.triangleBytes += geometry.triangleIndices.byteLength; stats.samples += geometry.samples.length / 3; }
+    };
+    // Every entry the body's root owns goes, including one whose node left the body before this (only a refresh drops
+    // those otherwise). A descriptor stays while another entry or head still holds it, by identity: a ghost track's
+    // nodes wear their painted copies between frames, so their current geometry proves nothing.
+    const forgetBody = (body) => {
+      const root = body.root, dropped = new Set();
+      const unsee = (node) => { seen.delete(node); for (const child of node.children) unsee(child); };
+      unsee(root);
+      if (body.sleepWeapons) unsee(body.sleepWeapons);
+      if (body.headOpen) { dropped.add(geometries.get(body.headOpen)); dropped.add(geometries.get(body.headClosed)); }
+      let kept = 0;
+      for (let i = 0; i < registered.length; i++) {
+        const entry = registered[i];
+        if (entry.owner === root) {
+          dropped.add(entry.geometry); dropped.add(entry.boundsGeometry);
+          setEntryGeometry(entry, "geometry", null); setEntryGeometry(entry, "boundsGeometry", null);
+          entries.delete(entry.node); seen.delete(entry.node);
+        } else registered[kept++] = entry;
+      }
+      registered.length = kept;
+      for (let i = 0; i < kept; i++) { dropped.delete(registered[i].geometry); dropped.delete(registered[i].boundsGeometry); }
+      const keepHeads = (cave) => { dropped.delete(geometries.get(cave.headOpen)); dropped.delete(geometries.get(cave.headClosed)); };
+      for (const cave of crew.cavemen.values()) keepHeads(cave);
+      for (const other of bodies) if (other.headOpen) keepHeads(other);
+      for (const [geometry, descriptor] of geometries) if (dropped.has(descriptor)) {
+        descriptorUsers.get(descriptor)?.clear(); descriptorUsers.delete(descriptor); geometries.delete(geometry);
+      }
+      measureBakes();
+      const group = ownerEntries.get(root);
+      if (group) { ownerEntries.delete(root); ownerGroups.splice(ownerGroups.indexOf(group), 1); }
+      characterRoots.delete(root);
+      contoursPending = false; contourActor = contourRetained = null; contourRetainedCount = 0;
+      cameraPropEntry = cameraPropSource = null; cameraPropFace = cameraPropStamp = -1; cameraPropCount = 0;
+      emissionMembership.fill(null); emissionActor = null;
+    };
+    const body = (actor, on) => {
+      if (on ? !addBody(actor) : !actor || !bodies.delete(actor)) return false;
+      if (!on) forgetBody(actor);
+      resize();
+      return true;
+    };
     const visible = (node) => {
       if (!node.parent) return false;
       for (let p = node; p; p = p.parent) { if (!p.visible) return false; if (p === sceneRoot) return true; }
@@ -669,7 +737,7 @@
       if (camera) {
         BL.math.mat4.lookAt(cameraView, camera.position, camera.target, camera.up || worldUp);
         near = camera.near; far = camera.far; tanY = Math.tan(camera.fov / 2); tanX = tanY * aspect;
-        planeX = Math.hypot(1, tanX); planeY = Math.hypot(1, tanY);
+        planeX = Math.sqrt(1 + tanX * tanX); planeY = Math.sqrt(1 + tanY * tanY);
       }
       for (let n = 0; n < registered.length; n++) {
         const entry = registered[n], node = entry.node, geometry = geometries.get(node.geometry), w = node.world;
@@ -678,7 +746,7 @@
         let worldChanged = false;
         for (let i = 0; i < 16; i++) if (entry.world[i] !== w[i]) { worldChanged = true; entry.world[i] = w[i]; }
         // Scale and vertical bounds follow the matrix and geometry only; visibility is still read every frame.
-        if (worldChanged) { entry.scaleX = Math.hypot(w[0], w[1], w[2]); entry.scaleY = Math.hypot(w[4], w[5], w[6]); entry.scaleZ = Math.hypot(w[8], w[9], w[10]); }
+        if (worldChanged) { entry.scaleX = length3(w[0], w[1], w[2]); entry.scaleY = length3(w[4], w[5], w[6]); entry.scaleZ = length3(w[8], w[9], w[10]); }
         if (worldChanged || entry.boundsGeometry !== geometry) {
           const b = geometry && geometry.sphere, p = b && b.center;
           entry.centerY = b ? w[1] * p[0] + w[5] * p[1] + w[9] * p[2] + w[13] : 0;
@@ -718,7 +786,7 @@
             entry.hz = Math.abs(w[2]) * hx + Math.abs(w[6]) * hy + Math.abs(w[10]) * hz;
             if (worldMinY !== -Infinity || worldMaxY !== Infinity) {
               const low = Math.max(entry.y - entry.hy, worldMinY), high = Math.min(entry.y + entry.hy, worldMaxY);
-              entry.y = (low + high) / 2; entry.hy = (high - low) / 2; entry.radius = Math.hypot(entry.hx, entry.hy, entry.hz);
+              entry.y = (low + high) / 2; entry.hy = (high - low) / 2; entry.radius = length3(entry.hx, entry.hy, entry.hz);
             }
           }
         }
@@ -731,7 +799,10 @@
         const dx = entry.x - ex, dy = entry.y - ey, dz = entry.z - ez;
         const group = entry.group;
         group.active = true;
-        if (Math.hypot(dx, dy, dz) - entry.radius <= RANGE) group.near = true;
+        // Once one piece establishes relevance the owner's remaining pieces
+        // need no further range tests. Keep the exact norm at the boundary.
+        if (!group.near && Math.abs(dx) <= RANGE + entry.radius && Math.abs(dy) <= RANGE + entry.radius
+          && Math.abs(dz) <= RANGE + entry.radius && length3(dx, dy, dz) - entry.radius <= RANGE) group.near = true;
       }
       let nearCount = 0, nearChanged = false;
       for (let n = 0; n < ownerGroups.length; n++) {
@@ -749,7 +820,7 @@
       let guideRange = RANGE;
       for (let n = 0; n < occluderCount; n++) {
         const entry = occluders[n];
-        if (entry.group.near) guideRange = Math.max(guideRange, Math.hypot(entry.x - ex, entry.y - ey, entry.z - ez) + entry.radius);
+        if (entry.group.near) guideRange = Math.max(guideRange, length3(entry.x - ex, entry.y - ey, entry.z - ez) + entry.radius);
       }
       for (let n = 0; n < occluderCount; n++) {
         const entry = occluders[n];
@@ -778,18 +849,20 @@
       stats.candidates = candidateCount; stats.occluders = occluderCount; stats.cameraOccluders = cameraOccluderCount;
       return result;
     };
-    const boxHit = (bounds, at, ax, ay, az, dx, dy, dz) => {
+    const boxHit = (bounds, at, ax, ay, az, dx, dy, dz, inclusive = false) => {
       let lo = 0, hi = 1;
       for (let axis = 0; axis < 3; axis++) {
         const a = axis === 0 ? ax : axis === 1 ? ay : az, d = axis === 0 ? dx : axis === 1 ? dy : dz;
         if (Math.abs(d) < 1e-12) { if (a < bounds[at + axis] - EPS || a > bounds[at + axis + 3] + EPS) return false; }
         else {
-          let t0 = (bounds[at + axis] - a) / d, t1 = (bounds[at + axis + 3] - a) / d;
+          // Certificate candidates include boundary contact and transform roundoff; exact queries keep their bounds.
+          const pad = inclusive ? EPS + Number.EPSILON * 16 * Math.max(1, Math.abs(a), Math.abs(d), Math.abs(bounds[at + axis]), Math.abs(bounds[at + axis + 3])) : 0;
+          let t0 = (bounds[at + axis] - a - pad) / d, t1 = (bounds[at + axis + 3] - a + pad) / d;
           if (t0 > t1) { const t = t0; t0 = t1; t1 = t; }
           lo = Math.max(lo, t0); hi = Math.min(hi, t1); if (lo > hi + 1e-9) return false;
         }
       }
-      return hi > 1e-5 && lo < 1 - 1e-5;
+      return inclusive ? hi >= 0 && lo <= 1 : hi > 1e-5 && lo < 1 - 1e-5;
     };
     const triangleBlocks = (e, at, x, y, z, dx, dy, dz, ay, vy) => {
       const geometry = e.geometry, v = geometry.vertices, ids = geometry.triangleIndices, index = at / 3;
@@ -912,8 +985,8 @@
         const e = group[n];
         if (!e.visible) continue;
         const dx = x - e.x, dy = y - e.y, dz = z - e.z;
-        const box = Math.hypot(Math.max(0, Math.abs(dx) - e.hx), Math.max(0, Math.abs(dy) - e.hy), Math.max(0, Math.abs(dz) - e.hz));
-        nearest = Math.min(nearest, Math.max(0, box, Math.hypot(dx, dy, dz) - e.radius));
+        const box = length3(Math.max(0, Math.abs(dx) - e.hx), Math.max(0, Math.abs(dy) - e.hy), Math.max(0, Math.abs(dz) - e.hz));
+        nearest = Math.min(nearest, Math.max(0, box, length3(dx, dy, dz) - e.radius));
       }
       if (group && group.providerActive) nearest = Math.min(nearest, group.provider.distance(x, y, z));
       return nearest;
@@ -1387,15 +1460,30 @@
         // a back-facing polygon.
         if (m[0] * (m[5] * m[10] - m[6] * m[9]) - m[4] * (m[1] * m[10] - m[2] * m[9]) + m[8] * (m[1] * m[6] - m[2] * m[5]) <= 0) continue;
         const ex = m[0] * cameraX + m[4] * cameraY + m[8] * cameraZ + m[12], ey = m[1] * cameraX + m[5] * cameraY + m[9] * cameraZ + m[13], ez = m[2] * cameraX + m[6] * cameraY + m[10] * cameraZ + m[14];
-        // The center-ray hit often identifies the face covering this patch: try it before the other faces, keeping
-        // the complete fallback.
+        // The center-ray hit often identifies the face covering this patch: try it first.
         const witness = n < 0 ? cameraCoverFace : e.geometry.triangleCoverFaces[e.hitTriangle / 9];
-        for (let scan = -1, end = n < 0 ? 0 : e.geometry.coverFaces.length; scan < end; scan++) {
-          const faceIndex = scan < 0 ? witness : scan;
-          if (faceIndex < 0 || scan >= 0 && faceIndex === witness) continue;
-          if (cameraPropFaceBlocked(e, faceIndex, dx, dy, dz, hx, hy, hz, ex, ey, ez, allProps)) {
-            cameraCoverEntry = e; cameraCoverSource = e.source; cameraCoverFace = faceIndex;
-            return true;
+        if (witness >= 0 && cameraPropFaceBlocked(e, witness, dx, dy, dz, hx, hy, hz, ex, ey, ez, allProps)) {
+          cameraCoverEntry = e; cameraCoverSource = e.source; cameraCoverFace = witness;
+          return true;
+        }
+        if (n < 0) continue;
+        // A convex face covering the whole target box must meet its center segment. The mesh BVH therefore
+        // retains every possible certificate without scanning unrelated faces for every small target patch.
+        // Leaves remain conservative candidates; the original exact face/near/clip certificate decides each one.
+        const g = e.geometry, lx = m[0] * dx + m[4] * dy + m[8] * dz,
+          ly = m[1] * dx + m[5] * dy + m[9] * dz, lz = m[2] * dx + m[6] * dy + m[10] * dz;
+        let top = 1; stack[0] = 0;
+        while (top) {
+          const id = stack[--top];
+          if (!boxHit(g.bounds, id * 6, ex, ey, ez, lx, ly, lz, true)) continue;
+          if (!g.counts[id]) { stack[top++] = g.left[id]; stack[top++] = g.right[id]; continue; }
+          for (let i = g.starts[id], end = i + g.counts[id]; i < end; i++) {
+            const faceIndex = g.triangleCoverFaces[g.indices[i]];
+            if (faceIndex < 0 || faceIndex === witness) continue;
+            if (cameraPropFaceBlocked(e, faceIndex, dx, dy, dz, hx, hy, hz, ex, ey, ez, allProps)) {
+              cameraCoverEntry = e; cameraCoverSource = e.source; cameraCoverFace = faceIndex;
+              return true;
+            }
           }
         }
       }
@@ -1754,6 +1842,10 @@
         visit(cave.root);
         if (cave.sleepWeapons) visit(cave.sleepWeapons);
       }
+      for (const body of bodies) {
+        visit(body.root);
+        if (body.sleepWeapons) visit(body.sleepWeapons);
+      }
       for (let i = registered.length - 1; i >= 0; i--) if (!live.has(registered[i].node)) {
         const entry = registered[i];
         setEntryGeometry(entry, "geometry", null); setEntryGeometry(entry, "boundsGeometry", null);
@@ -1770,14 +1862,18 @@
         registerNode(cave.root, cave.root, characterRoots.get(cave.root));
         wanted.add(cave.headOpen); wanted.add(cave.headClosed);
       }
+      // A body's head keeps both its open and closed descriptors, as a roster head does.
+      for (const body of bodies) {
+        registerBody(body);
+        if (body.headOpen) { wanted.add(body.headOpen); wanted.add(body.headClosed); }
+      }
       for (const node of roots) registerNode(node);
       for (const cave of crew.cavemen.values()) reserveHead(cave);
       for (const geometry of geometries.keys()) if (!wanted.has(geometry)) {
         const descriptor = geometries.get(geometry);
         descriptorUsers.get(descriptor)?.clear(); descriptorUsers.delete(descriptor); geometries.delete(geometry);
       }
-      stats.geometries = geometries.size; stats.triangles = stats.triangleBytes = stats.samples = 0;
-      for (const geometry of geometries.values()) if (geometry.ready) { stats.triangles += geometry.triangleIndices.length / 3; stats.triangleBytes += geometry.triangleIndices.byteLength; stats.samples += geometry.samples.length / 3; }
+      measureBakes();
       resize();
       stats.candidates = stats.occluders = stats.cameraOccluders = stats.nearOwners = 0;
     };
@@ -1785,7 +1881,7 @@
       contoursPending = false; contourActor = contourRetained = null; contourRetainedCount = 0;
       for (const users of descriptorUsers.values()) users.clear();
       descriptorUsers.clear();
-      registered.length = ownerGroups.length = 0; seen.clear(); entries.clear(); ownerEntries.clear(); aliases.clear(); providerOwners.clear(); geometries.clear(); characterRoots.clear();
+      registered.length = ownerGroups.length = 0; seen.clear(); entries.clear(); ownerEntries.clear(); aliases.clear(); providerOwners.clear(); geometries.clear(); characterRoots.clear(); bodies.clear();
       cameraCoverEntry = cameraCoverSource = null; cameraCoverFace = -1;
       cameraPropEntry = cameraPropSource = null; cameraPropFace = cameraPropStamp = -1; cameraPropCount = 0;
       ignoredPerceptionOwner = null;
@@ -1796,7 +1892,7 @@
       stats.geometries = stats.registered = stats.candidates = stats.occluders = stats.cameraOccluders = stats.triangles = stats.triangleBytes = stats.samples = stats.owners = stats.nearOwners = 0;
       stats.boundaryGridBytes = stats.boundaryGridReferences = 0;
     };
-    return { collect, clear, perceptionClear, cameraClear, cameraBoundsState, perceived, concealed, distance, inView, getProvider, ownerClear, actorVisible, actorFullyVisible, ownerBoundaryAt, register, refresh, dispose, stats, result };
+    return { collect, clear, perceptionClear, cameraClear, cameraBoundsState, perceived, concealed, distance, inView, getProvider, ownerClear, actorVisible, actorFullyVisible, ownerBoundaryAt, register, body, refresh, dispose, stats, result };
   };
   BL.objectGuides = { create };
 })();

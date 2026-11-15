@@ -774,7 +774,8 @@
           // The passenger keeps an island Ooga's own size inside the scaled balloon.
           const passenger = BL.models.caveman(BL.contributors.traitsFor(`balloon-ooga-${n}`)), figure = passenger.root;
           figure.scale.x = figure.scale.y = figure.scale.z = 1 / BALLOON_SCALE;
-          figure.position.y = 0.5 + figure.scale.y * passenger.traits.height * 5 / 16; figure.rotation.y = n ? 0.4 : -0.3;
+          // On the basket's floor, from the hip the build stands it at.
+          figure.position.y = 0.5 + figure.scale.y * passenger.root.position.y; figure.rotation.y = n ? 0.4 : -0.3;
           passenger.parts.club.visible = false;
           passenger.parts.armR.rotation.x = -2.6;
           figure.sightHidden = true;

@@ -19,9 +19,9 @@ const fixture = (fetcher, env = {}) => {
     if (args[1]?.redirect && !["follow", "manual"].includes(args[1].redirect)) throw new TypeError("Unsupported Worker redirect mode");
     calls.push(args); return fetcher(...args);
   }, { default: cache }, Clock, json);
-  return { calls, entries, advance: ms => { now += ms; }, request: (path = "/api/totems/0", headers = {}, method = "GET") => {
+  return { calls, entries, advance: ms => { now += ms; }, request: (path = "/api/totems/0", headers = {}, method = "GET", ctx) => {
     const request = new Request(`https://island.example${path}`, { headers, method });
-    return handleTotems(request, new URL(request.url), env);
+    return handleTotems(request, new URL(request.url), env, ctx);
   } };
 };
 const pull = (number, at = "2026-10-22T11:00:00Z", overrides = {}) => ({ number, html_url: `https://github.com/bitcoin/bitcoin/pull/${number}`,
@@ -151,4 +151,12 @@ test("a fetch that throws is a 503 the edge holds for a minute, then scans again
   f.advance(61000);
   const later = await f.request();
   assert.equal(later.status, 200); assert.equal(f.calls.length, 2);
+});
+
+test("a scan others wait on is held open past the request that started it", async () => {
+  const kept = [], { request } = fixture(async () => Response.json([pull(7)]));
+  const res = await request("/api/totems/0", {}, "GET", { waitUntil: job => kept.push(job) });
+  assert.equal(res.status, 200);
+  assert.equal(kept.length, 1, "a visitor leaving must not cancel the scan the next ones are waiting on");
+  await Promise.all(kept);
 });

@@ -5,7 +5,8 @@ import { createGitHub } from "./character-github.mjs";
 import { BOT, OPERATORS, isOperator } from "./character-operators.mjs";
 import { CharacterRejection, touchesCharacters } from "./character-safety.mjs";
 import { inspectAccountRename } from "./character-account-rename.mjs";
-import { LANES, manifestPath, branchPrefix, dayOf, due, digest, inspectSubmission, readManifest, checkRegistry, isBundle, validateBundle, reviewDecision, queuedCharacters } from "./character-submissions.mjs";
+import { LANES, manifestPath, branchPrefix, dayOf, due, digest, inspectSubmission, readManifest, checkRegistry, isBundle, validateBundle, reviewDecision, queuedCharacters, isMaintainer } from "./character-submissions.mjs";
+import { OVERRIDE_PREFIX, OVERRIDE_VERIFIED, isOverride, inspectOverride, overrideAudit, overridePaths, overrideRecord, readRecord, supersededBy, supersededLine } from "./character-override.mjs";
 
 const serializable = (entry) => Object.fromEntries(Object.entries(entry).filter(([key]) => key !== "source"));
 const manifestText = (state) => JSON.stringify(state, null, 2) + "\n";
@@ -147,7 +148,93 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
   };
   const accountRename = async (number) => {
     const pr = await gh.api(`pulls/${number}`);
+    // A maintainer override owns its own statuses, even for a pinned account's file.
+    if (isOverride(pr)) return false;
     return checkAccountRename(pr, await ref("rock"));
+  };
+  // Verify and audit an open override; never extract, close, approve or merge it.
+  const checkOverride = async (pr, rock) => {
+    if (pr.draft) {
+      for (const context of [STATUS, BUNDLE_STATUS]) await status(pr.head.sha, context, "pending", "Draft maintainer override waits until ready for review");
+      return;
+    }
+    let audit;
+    const unchanged = async () => {
+      const latest = await gh.api(`pulls/${pr.number}`);
+      if (latest.state !== "open" || latest.draft || latest.head.sha !== pr.head.sha || latest.user.id !== pr.user.id
+        || latest.base.ref !== "rock" || await ref("rock") !== rock) throw new Error("Maintainer override or rock changed during verification; retry");
+    };
+    try {
+      audit = await inspectOverride(gh, pr, rock, bot);
+      await unchanged();
+      const text = overrideAudit(pr, rock, audit);
+      // GitHub comments hold 65,536 characters; a larger batch is split, never truncated.
+      if (text.length > 60000) throw new CharacterRejection("The override audit is too large; split it into smaller batches.");
+      // Comment again when the exact head, its changes or the superseded queue change.
+      await comment(pr.number, `override-${pr.head.sha}-${digest(JSON.stringify(audit)).slice(0, 16)}`, text);
+      // Role loss or a push during the scan fails closed instead of passing.
+      if (!await isMaintainer(gh, pr.user.login)) throw new CharacterRejection("The override PR's author lacks current Maintain/Admin permission.");
+      await unchanged();
+    } catch (error) {
+      await status(pr.head.sha, STATUS, "failure", error instanceof CharacterRejection ? error.message : "Maintainer override not verified; inspect the trusted workflow log");
+      await status(pr.head.sha, BUNDLE_STATUS, "failure", "Maintainer override verification failed");
+      if (error instanceof CharacterRejection) return;
+      throw error;
+    }
+    await status(pr.head.sha, STATUS, "success", `${OVERRIDE_VERIFIED}: ${audit.changes.length} files, ${audit.superseded.length} superseded, record ${digest(overrideRecord(pr, audit))}`);
+    await status(pr.head.sha, BUNDLE_STATUS, "success", "Override verified for this exact head; normal review, CI and manual merge still apply");
+  };
+  // After a verified override merges, withdraw the queued revisions it replaced by
+  // restoring rock's bytes in their bundles. Old sources are never parsed. A retry
+  // finds nothing left to withdraw, and later submissions keep their places.
+  const reconcileOverride = async (number) => {
+    const pr = await gh.api(`pulls/${number}`);
+    if (!isOverride(pr) || !pr.merged_at || pr.base.ref !== "rock" || pr.head.repo?.full_name !== gh.repo) return [];
+    const verified = (await gh.list(`commits/${pr.head.sha}/statuses`, 1)).find((row) => row.context === STATUS);
+    const recorded = verified?.state === "success" && verified.creator?.login === bot && verified.description?.startsWith(OVERRIDE_VERIFIED)
+      && /, record ([a-f0-9]{64})$/.exec(verified.description)?.[1];
+    if (!recorded) throw new Error(`Override #${number} merged without verification of its head; reconcile its queue manually`);
+    const audited = readRecord(await gh.list(`issues/${number}/comments`), bot, pr.head.sha, recorded);
+    if (!audited) throw new Error(`Override #${number}'s audit record is missing or altered; reconcile its queue manually`);
+    const rock = await ref("rock");
+    if (!["ahead", "identical"].includes((await gh.api(`compare/${pr.merge_commit_sha}...${rock}`)).status)) throw new Error("Merged override is not on rock");
+    const { touched } = overridePaths(await gh.list(`pulls/${number}/files`, 3));
+    const merged = await gh.tree(pr.merge_commit_sha), head = await gh.tree(pr.head.sha), current = await gh.tree(rock);
+    for (const path of touched) if ((merged.get(path)?.sha || null) !== (head.get(path)?.sha || null)) throw new Error("Merged override differs from its verified head; reconcile manually");
+    const withdrawn = [], failures = [];
+    for (const lane of LANES) {
+      const { pr: bundle, state } = await load(lane);
+      const removed = state.entries.filter((entry) => supersededBy(entry, touched, merged, current, audited));
+      if (!removed.length) continue;
+      // Restore the bundle's own base bytes (never parsed), so it stops changing the
+      // path and the override arrives through the usual expected-head branch update.
+      const base = (await gh.api(`compare/${rock}...${bundle.head.sha}`)).merge_base_commit?.sha;
+      if (!base) throw new Error("Cannot establish bundle base");
+      const additions = [], deletions = [], queued = await gh.tree(bundle.head.sha);
+      for (const entry of removed) {
+        const original = await gh.file(base, entry.path);
+        if (original) additions.push({ path: entry.path, source: original.source });
+        else if (queued.has(entry.path)) deletions.push(entry.path);
+      }
+      const paths = new Set(removed.map((entry) => entry.path));
+      const next = { ...state, entries: state.entries.filter((entry) => !paths.has(entry.path)) };
+      additions.push({ path: manifestPath(lane), source: manifestText(next) });
+      const evidence = removed.map(supersededLine).join("\n");
+      // The signed commit's body is the durable record of what was withdrawn.
+      await gh.commit(bundle.head.ref, bundle.head.sha, additions, deletions,
+        `Withdraw character revisions superseded by maintainer override #${number}\nMerged as ${pr.merge_commit_sha} from head ${pr.head.sha}; paths restored to bundle base ${base}.\n${evidence}`);
+      await gh.api(`pulls/${bundle.number}`, "PATCH", { body: body(lane, next) });
+      await comment(bundle.number, `override-${number}-${pr.merge_commit_sha}`, `Maintainer override #${number} (merged as ${pr.merge_commit_sha}) superseded these queued revisions. This bundle no longer changes their paths, and their provenance left its manifest:\n\n${evidence}\n\nOther queued entries are unchanged.`);
+      withdrawn.push(...removed);
+      // Bot commits start no workflows: publish this head's checks now.
+      try { await intake({ pr: bundle.number }); } catch (error) { failures.push(`#${bundle.number}: ${error.message}`); }
+    }
+    if (withdrawn.length) await comment(number, `withdrawn-${pr.merge_commit_sha}`, `Withdrew the superseded queued revisions:\n\n${withdrawn.map(supersededLine).join("\n")}`);
+    for (const source of new Set(withdrawn.map((entry) => entry.pr).filter(Boolean))) {
+      await comment(source, `superseded-${number}-${pr.merge_commit_sha}`, `Maintainer override #${number} replaced the queued character revision(s) from this PR:\n\n${withdrawn.filter((entry) => entry.pr === source).map(supersededLine).join("\n")}\n\nThe override may change this character's content, owner or identity, as reviewed in #${number}. This submission's provenance stays in that PR's audit and the bundle's commit history. Ask an OBL maintainer about further edits.`);
+    }
+    if (failures.length) throw new Error(failures.join("\n"));
+    return withdrawn;
   };
   const refreshAccountRenames = async () => {
     const failures = [];
@@ -177,6 +264,7 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
       }
       return;
     }
+    if (pr && isOverride(pr)) return checkOverride(pr, rock);
     if (pr?.draft) { await status(pr.head.sha, STATUS, "pending", "Draft character submissions wait until ready for review"); return; }
     if (pr && await checkAccountRename(pr, rock)) return;
     if (pr) submission = { pr: pr.number, head: pr.head.sha };
@@ -314,6 +402,9 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
     const failures = [];
     for (const pr of await gh.api("pulls?state=closed&base=rock&sort=updated&direction=desc&per_page=100")) {
       if (isBundle(pr, bot) && pr.merged_at) await deployMerged(await gh.api(`pulls/${pr.number}`));
+      if (isOverride(pr) && pr.merged_at) {
+        try { await reconcileOverride(pr.number); } catch (error) { failures.push(`Override #${pr.number}: ${error.message}`); }
+      }
     }
     // A changed source must be replaceable even when yesterday's bundle fails
     // revalidation. Retry the merge after intake has removed superseded entries.
@@ -325,7 +416,9 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
     // Push signals can be superseded by GitHub's concurrency queue. Recover
     // standalone branch heads as well; fork commits become visible through PRs.
     for (const branch of await gh.list("branches", 1)) {
-      if (branch.name === "rock" || branch.name.startsWith("automation/characters-") || branch.name.startsWith("automation/site-artifact-")) continue;
+      // Override branches act only through their PRs, never as standalone submissions.
+      if (branch.name === "rock" || branch.name.startsWith("automation/characters-") || branch.name.startsWith("automation/site-artifact-")
+        || branch.name.startsWith(OVERRIDE_PREFIX)) continue;
       const prs = await gh.list(`commits/${branch.commit.sha}/pulls`);
       if (prs.some((pr) => pr.base.ref === "rock")) continue;
       try { await intake({ pr: null, head: branch.commit.sha }); }
@@ -344,7 +437,7 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
       throw new Error("Direct rock character changes cannot be quarantined after a push. Require PRs and the character checks in branch rules.");
     }
   };
-  return { ensure, intake, mergeDaily, refreshReviews, sweep, auditRock, deployMerged, accountRename, refreshAccountRenames };
+  return { ensure, intake, mergeDaily, refreshReviews, sweep, auditRock, deployMerged, accountRename, refreshAccountRenames, reconcileOverride };
 };
 
 export const runAccountRenameChecks = async (coordinator, event) => {
@@ -364,8 +457,16 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // Maintenance mode has no bundle creation, intake, merge, close, sweep or
     // page dispatch. Reviews still arrive through the unprivileged signal job.
     await runAccountRenameChecks(coordinator, event);
+  } else if (process.env.GITHUB_EVENT_NAME === "workflow_dispatch" && event.inputs?.override_pr) {
+    // Operator recovery for one merged override whose closed event and sweep window
+    // have passed. reconcileOverride repeats every merge, status and record check.
+    if (!/^[1-9][0-9]{0,8}$/.test(event.inputs.override_pr)) throw new Error("override_pr must be a PR number");
+    console.log(`Withdrew ${(await coordinator.reconcileOverride(Number(event.inputs.override_pr))).length} superseded queued revision(s)`);
   } else if (event.pull_request) {
-    if (event.action === "closed") { for (const lane of LANES) await coordinator.ensure(lane); }
+    if (event.action === "closed") {
+      for (const lane of LANES) await coordinator.ensure(lane);
+      if (event.pull_request.merged && isOverride(event.pull_request)) await coordinator.reconcileOverride(event.pull_request.number);
+    }
     else await coordinator.intake({ pr: event.pull_request.number, head: event.pull_request.head.sha });
   } else if (event.workflow_run) {
     const run = event.workflow_run;
@@ -380,7 +481,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const prs = await gh.list(`commits/${run.head_sha}/pulls`);
       const open = prs.filter((pr) => pr.state === "open" && pr.base.ref === "rock");
       if (open.length) for (const pr of open) await coordinator.intake({ pr: pr.number, head: pr.head.sha });
-      else await coordinator.intake({ pr: null, head: run.head_sha });
+      else if (!run.head_branch.startsWith(OVERRIDE_PREFIX)) await coordinator.intake({ pr: null, head: run.head_sha });
     }
   } else await coordinator.sweep();
 }

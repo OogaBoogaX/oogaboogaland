@@ -1847,7 +1847,7 @@
         imageVertices[at + 3] = (localX - rect[0]) / rect[2] * sw;
         imageVertices[at + 4] = (1 - (localY - rect[1]) / rect[3]) * sh;
       }
-      ctx.save(); ctx.clip(); ctx.imageSmoothingEnabled = false;
+      ctx.save(); ctx.clip(); ctx.imageSmoothingEnabled = !!surface.smooth;
       for (let y = 0; y < rows; y++) for (let x = 0; x < columns; x++) {
         const a = (y * (columns + 1) + x) * 5, b = a + 5, c = a + (columns + 1) * 5, d = c + 5;
         drawImageTriangle(shaded, imageVertices, a, b, d, 0, 0, width, height);

@@ -63,7 +63,7 @@ export function createHubWorldClearance({ geometry, getClankers, navigation }) {
         || !g.npcLandSegmentClear(p.x, p.z, p.x, p.z, entry.radius)) return false;
       // Outdoor walking admits a collision core, not the wider animated rig.
       // Rebuilding an idle pose must not reject an otherwise legal saved walk
-      // beside a prop. Apply the live center/prop gate and also prove the trunk
+      // beside a prop. Apply the live terrain/masonry gate and also prove the trunk
       // core at rest (live planted turns normally skip that second query).
       if (!entry.climb.active && !entry.jump.active && !entry.drive.airborne
         && !entry.biped && !entry.parked && !entry.lounge && !entry.motion.lab
@@ -71,7 +71,7 @@ export function createHubWorldClearance({ geometry, getClankers, navigation }) {
         return clear.clankerCenterClear(entry, p.x, p.y, p.z, p.x, p.y, p.z)
           && clear.clankerWalkCoreClear(entry, p.x, p.y, p.z, p.x, p.y, p.z, entry.heading, entry.heading, true);
       // Recovery already rebuilt this rig from the logical snapshot. Prove the
-      // complete static pose against the real terrain and per-part prop sweeps,
+      // complete static pose against the real terrain and per-part wall sweeps,
       // including the assigned screen/held-equipment contact exceptions. Do
       // not move an obstructed actor, discard its reservation or advance AI.
       return entry.gorilla.climbPoseClear(2, p.x, p.y, p.z, entry.heading, entry.motion,

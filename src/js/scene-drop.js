@@ -366,6 +366,7 @@
     cam.offset = cam.tilt = 0;
     audio.cues.pull();
     audio.cues.open();
+    BL.gamepad.rumble(0.55, 0.3, 180);
     cam.shake = Math.max(cam.shake, 0.4);
     fx.burst(diver.state.p.x, diver.state.p.y + 1.5, diver.state.p.z, 8, CLOUD_BITS, 2);
     return true;
@@ -411,6 +412,7 @@
     phase = "down";
     landedAt = sceneTime;
     const p = diver.state.p, crash = crashed(landing);
+    BL.gamepad.rumble(crash ? 1 : landing === "stand" ? 0.25 : 0.5, crash ? 0.8 : 0.35, crash ? 320 : 140);
     fx.burst(p.x, groundY + 0.1, p.z, crash ? 14 : 6, landing === "hole" ? DIRT_BITS : DUST_BITS, crash ? 2.4 : 1.2);
     if (landing === "hole") {
       setVec(hole.position, p.x, groundY + 0.01, p.z);
@@ -1111,7 +1113,7 @@
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), phase, rings: ringsHit, streaks: streaks.node.instanceCount };
   };
   const dropScene = BL.deferred.scene("drop", {
-    id: "drop", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
+    id: "drop", padContext: "drop", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     // The bare island is the cold visit's largest build, sliced behind the black hold; enter then adopts the completed,
     // scene-owned cache entry.
     buildSteps: () => terrain.islandSteps({ seed: SEED }),

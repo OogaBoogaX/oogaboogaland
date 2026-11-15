@@ -41,7 +41,8 @@
     let prepared = false, disposed = false, previousTime = 0, hands = 0, activeBeams = 0, expired = 0;
     const occupied = (actor, arm) => {
       for (const key of WEAPONS) {
-        const node = actor.parts[key]; if (node?.visible && node.parent === arm) return true;
+        const node = actor.parts[key];
+        if (node?.visible) for (let parent = node.parent; parent; parent = parent.parent) if (parent === arm) return true;
       }
       return !!actor.labItem && actor.labItem.parent === arm;
     };
@@ -123,7 +124,8 @@
           s.arm = arm; s.actor = actor; s.x = arm.rotation.x; s.y = arm.rotation.y; s.z = arm.rotation.z; s.quaternion = arm.quaternion;
           arm.quaternion = p.rotation;
           updateWorld(actor.root, actor.root.parent?.world);
-          const m = arm.world, y = boundsOf(arm.geometry).min[1];
+          const hand = actor.modelled ? actor.parts[arm === actor.parts.armL ? "fingersL" : "fingersR"] : null;
+          const m = hand ? hand.world : arm.world, y = hand ? 0 : boundsOf(arm.geometry).min[1];
           icon.position.x = m[12] + m[4] * y; icon.position.y = m[13] + m[5] * y + .1; icon.position.z = m[14] + m[6] * y;
           icon.rotation.y = actor.root.rotation.y; icon.visible = true; hands++;
         }

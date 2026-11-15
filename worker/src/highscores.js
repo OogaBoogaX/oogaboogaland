@@ -2,7 +2,7 @@
 // The JSON entry is compared and replaced inside SQL, so concurrent finishes cannot lose a best.
 import "../../src/js/highscore-rules.js";
 import { readHighscores, readArcade } from "./highscore-store.js";
-import { allowed, clientIp, fromSite, getSessionFromRequest, json } from "./http.js";
+import { allowed, clientIp, fromSite, getSessionFromRequest, json, readBody } from "./http.js";
 import { winnerReplay } from "./cloud-hopper-replay-store.js";
 
 const rules = globalThis.BL.highscoreRules;
@@ -10,22 +10,6 @@ const BODY_MAX = 512;
 const PLAYER_LIMIT = rules.MAX_PLAYERS;
 const LOGIN = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/i;
 const closed = () => json({ error: "closed" }, 503, { "retry-after": "60" });
-
-const readBody = async (request) => {
-  if (Number(request.headers.get("content-length") || 0) > BODY_MAX) return null;
-  if (!request.body) return "";
-  const reader = request.body.getReader(), bytes = new Uint8Array(BODY_MAX);
-  let used = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (used + value.byteLength > BODY_MAX) { await reader.cancel(); return null; }
-      bytes.set(value, used); used += value.byteLength;
-    }
-    return new TextDecoder().decode(bytes.subarray(0, used));
-  } finally { reader.releaseLock(); }
-};
 
 export const readScores = async (db, game, rule, replayEnabled = false) => {
   const board = await readHighscores(db, game);
@@ -39,7 +23,7 @@ export const readScores = async (db, game, rule, replayEnabled = false) => {
 
 const SNAPSHOT_MS = 30000;
 const snapshots = new WeakMap();
-const arcadeSnapshot = async (url, db, cache) => {
+const arcadeSnapshot = async (url, db, cache, ctx) => {
   const key = new Request(new URL("/__highscores-cache/v3/arcade", url.origin));
   if (cache) {
     try {
@@ -56,6 +40,8 @@ const arcadeSnapshot = async (url, db, cache) => {
     return saved;
   })());
   const pending = running.get(url.origin);
+  // Others wait on this read: it must outlive the request that started it, which a visitor can cancel by leaving.
+  if (ctx) ctx.waitUntil(pending.catch(() => {}));
   try { return await pending; } finally { if (running.get(url.origin) === pending) running.delete(url.origin); }
 };
 
@@ -138,7 +124,7 @@ export const createHighscoreHandler = (sessionFor = getSessionFromRequest, cache
         || typeof found.session?.token_hash !== "string") return json({ error: "unauthenticated" }, 401);
       if (!(await allowed(env.HIGHSCORE_LIMITER, "write:" + found.player.id))) return json({ error: "too many scores" }, 429, { "retry-after": "60" });
       if (request.headers.get("content-type")?.split(";")[0].trim() !== "application/json") return json({ error: "expected json" }, 415);
-      const raw = await readBody(request);
+      const raw = await readBody(request, BODY_MAX);
       if (raw === null) return json({ error: "too large" }, 413);
       let body;
       try { body = JSON.parse(raw); } catch { return json({ error: "bad json" }, 400); }
@@ -158,7 +144,7 @@ export const createHighscoreHandler = (sessionFor = getSessionFromRequest, cache
     }
     if (snapshot) {
       if (game === "arcade-live") return json({ boards: await readArcade(env.DB), refreshAfterMs: 0 });
-      const saved = await arcadeSnapshot(url, env.DB, cacheFor());
+      const saved = await arcadeSnapshot(url, env.DB, cacheFor(), ctx);
       return json({ boards: saved.boards, refreshAfterMs: Math.max(0, saved.expiresAt - Date.now()) });
     }
     const scores = await readScores(env.DB, game, rule, !!env.CLOUD_HOPPER_REPLAYS);

@@ -3,10 +3,11 @@
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join, extname } from "node:path";
+import { join, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { launch, dispose } from "../test/browser.mjs";
-const root = fileURLToPath(new URL("../", import.meta.url));
+import { assetManifest } from "./profile-assets.mjs";
+const root = process.env.PROFILE_ROOT ? resolve(process.env.PROFILE_ROOT) : fileURLToPath(new URL("../", import.meta.url));
 const label = process.argv[2] || "render", out = join(root, "untracked/performance");
 const stagedSHA256 = createHash("sha256").update(readFileSync(join(root, "_site/index.html"))).digest("hex");
 mkdirSync(out, { recursive: true });
@@ -69,7 +70,7 @@ try {
     await b.evaluate(`__ooga.go(${JSON.stringify(process.env.PROFILE_SCENE)})`);
     if (!await b.evaluate(`new Promise(resolve => { const start = performance.now(); const tick = () => { if (__ooga.scene === ${JSON.stringify(process.env.PROFILE_SCENE)} && !__ooga.transitioning) resolve(true); else if (performance.now() - start > 30000) resolve(false); else setTimeout(tick, 25); }; tick(); })`)) throw Error("Travel deadline");
   }
-  environment = await b.evaluate(`(() => { const gl = document.getElementById("scene").getContext("webgl2"), e = gl.getExtension("WEBGL_debug_renderer_info"); return { userAgent: navigator.userAgent, gpu: e && gl.getParameter(e.UNMASKED_RENDERER_WEBGL), dpr: devicePixelRatio, memory: navigator.deviceMemory, scene: __ooga.scene }; })()`);
+  environment = await b.evaluate(`(() => { const gl = document.getElementById("scene").getContext("webgl2"), e = gl.getExtension("WEBGL_debug_renderer_info"); return { viewport: [innerWidth, innerHeight], canvas: [document.getElementById("scene").width, document.getElementById("scene").height], userAgent: navigator.userAgent, gpu: e && gl.getParameter(e.UNMASKED_RENDERER_WEBGL), dpr: devicePixelRatio, memory: navigator.deviceMemory, scene: __ooga.scene }; })()`);
   if (process.env.PROFILE_NO_FOLIAGE_LOD === "1") await b.evaluate(`(() => {
     BL.scene.traverseVisible(BL.scenes[__ooga.scene].root, node => {
       const geometry = node.geometry;
@@ -129,5 +130,5 @@ try {
   }
   if (b.logs.length) throw Error(b.logs.join(" | "));
 } catch (error) { failure = String(error.stack || error); console.error(failure); }
-finally { writeFileSync(join(out, `${label}.json`), JSON.stringify({ label, stagedSHA256, hostRuntime: { arch: process.arch, node: process.version, chromeArchRequested: process.env.CHROME_ARCH || null }, environment, rows, failure, logs: b?.logs || [] }, null, 2) + "\n"); if (b) await b.close(); await dispose(); await new Promise(resolve => server.close(resolve)); }
+finally { writeFileSync(join(out, `${label}.json`), JSON.stringify({ label, assetManifest: assetManifest(join(root, "_site")), stagedSHA256, hostRuntime: { arch: process.arch, node: process.version, chromeArchRequested: process.env.CHROME_ARCH || null }, environment, rows, failure, logs: b?.logs || [] }, null, 2) + "\n"); if (b) await b.close(); await dispose(); await new Promise(resolve => server.close(resolve)); }
 if (failure) process.exitCode = 1;

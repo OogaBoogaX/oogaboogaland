@@ -17,11 +17,11 @@
         });
   const create = ({ ctx, crewList, playerBody, gapClear, npcWalkable, groundAt,
     inBananas, shoulderNeighbor, shoulderClear, flyable, walkerClear, groundY,
-    shoulderStep, standPose, walkPose, SHOULDER_GAP, OUTSIDE_GAP, STEP,
+    shoulderStep, standPose, walkPose, fixedTrip = () => false, pathsFor = () => ctx.npcPaths, SHOULDER_GAP, OUTSIDE_GAP, STEP,
     SHOULDER_REACH, JUMP_SPEED, WALK, PLAYER_STEP, NPC_PASS_REACH, RUSH_SPEED }) => {
     const recoverWalker = (cave, tx, tz, dt, usePath = false) => {
       const a = cave.avoidance, nav = a.navigation, p = cave.root.position, path = cave.pathing;
-      if (ctx.npcFixedPaths && cave.nonInteractive) { nav.mode = 0; return; }
+      if (fixedTrip(cave)) { nav.mode = 0; return; }
       // Keep the route identity stable and recover toward its current segment.
       // The path index advances within a route; replans and explicit route
       // resets invalidate the cached target before restarting stall tracking.
@@ -201,14 +201,19 @@
       }
     };
     const walkToward = (cave, tx, tz, distance) => {
-      if (ctx.npcFixedPaths && cave.nonInteractive) {
+      // A fixed meadow leg steps straight along its authored waypoint and passes
+      // through any object in its way: the authored paths are clear, so there is
+      // no blocking check. Each step settles on the terrain beneath it (groundY).
+      if (fixedTrip(cave)) {
         const p = cave.root.position, dx = tx - p.x, dz = tz - p.z, left = Math.hypot(dx, dz);
         if (left < 1e-7) return 0;
         const step = Math.min(distance, PLAYER_STEP, left), x = p.x + dx / left * step, z = p.z + dz / left * step;
-        if (!walkerClear(cave, x, z)) return 0;
+        // The host also fences its authored route against the authoritative
+        // land boundary. The browser keeps rock's terrain-only passive walk.
+        if (ctx.npcExecution && !walkerClear(cave, x, z)) return 0;
         p.x = x; p.z = z; p.y = groundY(cave);
         const angle = Math.atan2(dx, dz);
-        cave.root.rotation.y += Math.atan2(Math.sin(angle - cave.root.rotation.y), Math.cos(angle - cave.root.rotation.y)) * .35;
+        cave.root.rotation.y += Math.atan2(Math.sin(angle - cave.root.rotation.y), Math.cos(angle - cave.root.rotation.y)) * 0.35;
         return step;
       }
       if (cave.traffic.yielding) return 0;
@@ -273,7 +278,7 @@
       return step;
     };
     const walkWorkTo = (cave, target, dt, followPath = true) => {
-      const p = cave.root.position, work = cave.work, paths = followPath && !work.direct && ctx.npcPaths;
+      const p = cave.root.position, work = cave.work, paths = followPath && !work.direct && pathsFor(cave);
       if (!paths && cave.pathing) {
         cave.pathing.tx = NaN; cave.pathing.index = cave.pathing.count;
         cave.pathing.targetX = target.x; cave.pathing.targetZ = target.z;

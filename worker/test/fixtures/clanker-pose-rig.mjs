@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 export const managedRigs = ({ presence = false } = {}) => {
   const context = { window: {}, TextEncoder };
-  for (const name of ["math", "scene", "models", "convex", "npc-authority", "clanker-pose", "npc-pose-packet", "clanker-state"]) {
+  for (const name of ["math", "scene", "models", "hero-body", "convex", "npc-authority", "clanker-pose", "npc-pose-packet", "clanker-state"]) {
     runInNewContext(readFileSync(new URL(`../../../src/js/${name}.js`, import.meta.url), "utf8"), context);
   }
   const B = context.window.BL;

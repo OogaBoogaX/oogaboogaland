@@ -79,12 +79,27 @@ test("the page never receives the avatar url or ban fields", () => {
   assert.equal(publicPlayer({ id: 1, login: "o", look: "{bad" }).look, null);
 });
 
-test("the page takes real donations only from a Worker with the bananapayserver binding, and asks Tess's questions only of one with her key", async () => {
+test("the page takes real donations only from a Worker with the bananapayserver binding, asks Tess's questions only of one with her key, and follows hosted games only on one with GAMES", async () => {
   const me = async (env) => (await handleApi(new Request("https://site.test/api/me"), { SITE_ORIGIN: "https://site.test", ...env }, new URL("https://site.test/api/me"))).json();
-  assert.deepEqual(await me({}), { player: null, character: null, donations: false, tess: false, highscores: false, highscoreSnapshots: false });
-  assert.deepEqual(await me({ DONATIONS: {} }), { player: null, character: null, donations: true, tess: false, highscores: false, highscoreSnapshots: false });
-  assert.deepEqual(await me({ ANTHROPIC_API_KEY: "sk-test" }), { player: null, character: null, donations: false, tess: true, highscores: false, highscoreSnapshots: false });
+  assert.deepEqual(await me({}), { player: null, character: null, donations: false, tess: false, highscores: false, highscoreSnapshots: false, arcadePlays: false, games: [] });
+  assert.deepEqual(await me({ DONATIONS: {} }), { player: null, character: null, donations: true, tess: false, highscores: false, highscoreSnapshots: false, arcadePlays: false, games: [] });
+  assert.deepEqual(await me({ ANTHROPIC_API_KEY: "sk-test" }), { player: null, character: null, donations: false, tess: true, highscores: false, highscoreSnapshots: false, arcadePlays: false, games: [] });
   assert.equal((await me({ DB: {} })).highscores, true);
+  assert.deepEqual((await me({ GAMES: {} })).games, ["ghost-hunt"], "a Worker with the GAMES binding names the games it hosts");
+});
+
+test("a D1 failure is never reported as signed out, and a failed session stamp is no failure at all", async () => {
+  const token = "session-token", cookie = `${cookieNames("https://site.test").session}=${token}`;
+  const request = () => new Request("https://site.test/api/me", { headers: { cookie } }), url = new URL("https://site.test/api/me");
+  const failing = { prepare: () => ({ bind: () => ({ first: async () => { throw new Error("D1_ERROR"); } }) }) };
+  const down = await handleApi(request(), { SITE_ORIGIN: "https://site.test", DB: failing }, url);
+  assert.equal(down.status, 503, "the page asks again rather than believing it is signed out");
+  const player = { id: 7, login: "ooga-dev", banned_at: null, created_at: 1, token_hash: "h", expires_at: 4102444800, last_used_at: 1 };
+  let stamps = 0;
+  const unstamped = { prepare: () => ({ bind: () => ({ first: async () => player }) }), batch: async () => { stamps++; throw new Error("D1_ERROR"); } };
+  const body = await (await handleApi(request(), { SITE_ORIGIN: "https://site.test", DB: unstamped }, url)).json();
+  assert.equal(stamps, 1);
+  assert.equal(body.player && body.player.login, "ooga-dev", "only the last-used stamp failed");
 });
 
 const SITE = "https://site.test", FAR = 4102444800;
@@ -154,7 +169,7 @@ test("old nonowner sessions receive no identity and cannot reach account, room o
   for (const login of ["visitor", "cave-name"]) {
     const DB = database(login), env = { SITE_ORIGIN: SITE, DB,
       ROOM: { getByName: () => { throw new Error("Ineligible session reached the room binding"); } } };
-    assert.deepEqual(await (await worker.fetch(requestFor("/api/me"), env)).json(), { player: null, character: null, donations: false, tess: false, highscores: true, highscoreSnapshots: true });
+    assert.deepEqual(await (await worker.fetch(requestFor("/api/me"), env)).json(), { player: null, character: null, donations: false, tess: false, highscores: true, highscoreSnapshots: true, arcadePlays: true, games: [] });
     assert.equal((await worker.fetch(requestFor("/api/me", "PATCH"), env)).status, 401);
     assert.equal((await worker.fetch(requestFor("/room", "GET", { upgrade: "websocket", "x-player-contributor": "1" }), env)).status, 401);
     assert.equal((await worker.fetch(requestFor("/api/voice/publish", "POST"), env)).status, 401);
@@ -223,4 +238,27 @@ test("a database identity collision returns a recoverable response without creat
   const request=callbackFor(),response=await routes.handleAuth(request,{ SITE_ORIGIN:SITE,DB },new URL(request.url));
   assert.equal(response.status,409); assert.equal(calls,1);
   assert.ok(!response.headers.get("set-cookie").includes("__Host-obl_session="));
+});
+
+test("a hosted game's socket reaches only a game and venue the Worker names, as the session's player", async () => {
+  let named = null, forwarded = null, options;
+  const { worker } = routeFixture({ cast: CAST, lookup: async (name) => name === "new-ooga" ? { handle: "new-ooga", joined: 1, lastCommit: 2 } : null });
+  const GAMES = { idFromName: (name) => { named = name; return { name }; },
+    get: (id, opts) => { options = opts; return { fetch: async (request) => { forwarded = request; return new Response("accepted"); } }; } };
+  const env = { SITE_ORIGIN: SITE, DB: database("new-ooga"), GAMES }, ws = { upgrade: "websocket" };
+  assert.equal((await worker.fetch(requestFor("/game/ghost-hunt/arena"), env)).status, 426, "a socket only");
+  for (const path of ["/game/ghost-hunt/lobby", "/game/rally/arena", "/game/ghost-hunt/arena/more", "/game/ghost-hunt"]) {
+    assert.equal((await worker.fetch(requestFor(path, "GET", ws), env)).status, 404, path);
+  }
+  assert.equal((await worker.fetch(requestFor("/game/ghost-hunt/arena", "GET", ws), { ...env, GAMES: undefined })).status, 404, "nor without the binding");
+  assert.equal((await worker.fetch(requestFor("/game/ghost-hunt/arena", "GET", ws), { ...env, DB: database("visitor") })).status, 401, "signed in with an Ooga only");
+  assert.equal((await worker.fetch(requestFor("/game/ghost-hunt/arena", "GET", ws), { ...env, GAME_LIMITER: { limit: async () => ({ success: false }) } })).status, 429);
+  assert.equal(named, null, "none of those reached an object");
+  const forged = { ...ws, "x-player-id": "999", "x-player-login": "victim", "x-game-name": "ghost-hunt:other:v1" };
+  assert.equal((await worker.fetch(requestFor("/game/ghost-hunt/arena", "GET", forged), { ...env, GAME_LOCATION_HINT: "enam" })).status, 200);
+  assert.equal(named, "ghost-hunt:arena:v1", "one object for the game and venue, by the registry's name");
+  assert.deepEqual(options, { locationHint: "enam" });
+  assert.equal(forwarded.headers.get("x-game-name"), "ghost-hunt:arena:v1");
+  assert.equal(forwarded.headers.get("x-player-id"), "123");
+  assert.equal(forwarded.headers.get("x-player-login"), "new-ooga");
 });

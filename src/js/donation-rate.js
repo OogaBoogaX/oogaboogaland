@@ -5,7 +5,7 @@
   "use strict";
   const BL = window.BL;
   const URL = "wss://2140data.io/", STALL = 30000, RETRY_MAX = 30000;
-  let users = 0, socket = null, retry = 0, watchTimer = 0, backoff = 1000, rate = null;
+  let users = 0, socket = null, retry = 0, watchTimer = 0, backoff = 1000, rate = null, off = false;
   const listeners = new Set();
   const emit = () => { for (const listener of listeners) listener(); };
   const drop = (immediate = false) => {
@@ -31,7 +31,7 @@
   };
   const connect = () => {
     retry = 0;
-    if (!users || document.hidden || typeof WebSocket === "undefined") return;
+    if (off || !users || document.hidden || typeof WebSocket === "undefined") return;
     if (socket) { watchdog(); return; }
     try { socket = new WebSocket(URL); } catch { return reconnect(); }
     const ws = socket;
@@ -76,5 +76,7 @@
       drop();
     };
   };
-  BL.donationRate = { watch, get current() { return rate; } };
+  // Like the page's other live feeds it stays off under `nosim` (the suite) and `rate=0` (director.js `stop`).
+  const stop = () => { off = true; window.clearTimeout(retry); retry = 0; drop(true); };
+  BL.donationRate = { watch, stop, get current() { return rate; } };
 })();

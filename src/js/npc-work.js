@@ -7,8 +7,8 @@
   const scope = typeof window === "undefined" ? globalThis : window;
   const BL = scope.BL = scope.BL || {};
   const setVec = (v, x, y, z) => { v.x = x; v.y = y; v.z = z; };
-  const createState = (i) => ({ phase: "", site: 0, plannedSite: -1, targetReady: false, aimReady: false, aimSample: i, index: 0, place: -1, blocked: false, blockedTime: 0, gait: 0, timer: i * 0.137, emptyTime: 0, rest: 0, reloadSlot: false, direct: false, position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: 0 } });
-  const create = ({ workSites, siteActive, standPose, nearReload, walkWorkTo, spotOccupied, resetWalkerRoute, aimWork, stopBurst, fireWeapon, hasMagazine, magazineAmmo, fullestMagazine, swapMagazine, slotAvailable, closestSlot, approachPile, reloadMissing, startReload, runReload, planPath, workPlanned, random, AMMO_MAX, WORK_REST_MIN, WORK_REST_SPREAD }) => {
+  const createState = (i) => ({ phase: "", site: 0, plannedSite: -1, targetReady: false, aimReady: false, aimSample: i, index: 0, place: -1, blocked: false, blockedTime: 0, gait: 0, timer: i * 0.137, emptyTime: 0, rest: 0, reloadSlot: false, reservedAt: Infinity, direct: false, position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: 0 } });
+  const create = ({ workSites, siteActive, standPose, nearReload, walkWorkTo, spotOccupied, resetWalkerRoute, aimWork, stopBurst, fireWeapon, hasMagazine, magazineAmmo, fullestMagazine, swapMagazine, slotAvailable, closestSlot, approachPile, reloadMissing, startReload, runReload, planPath, workPlanned, random, AMMO_MAX, WORK_REST_MIN, WORK_REST_SPREAD, fixedTrip = () => false, clock = () => 0 }) => {
     const planWorkSite = (cave, resume = false, announceTrip = false) => {
       const previous = cave.weapon.workSite === undefined ? -1 : cave.weapon.workSite;
       const first = resume && previous >= 0 ? 0 : 1;
@@ -38,7 +38,7 @@
       work.targetReady = work.aimReady = false;
       work.blocked = false; work.blockedTime = 0;
       work.rest = cave.traits.maintainer ? WORK_REST_MIN + random(cave) * WORK_REST_SPREAD : 0;
-      work.reloadSlot = work.direct = cave.pileApproach = false;
+      work.reloadSlot = work.direct = cave.pileApproach = false; work.reservedAt = Infinity;
       cave.act.kind = "work";
       cave.weapon.equipped = true;
       cave.avoidance.tx = NaN;
@@ -59,7 +59,13 @@
           planWorkSite(cave);
         }
       }
-      const site = workSites[work.site], route = site.route;
+      const site = workSites[work.site];
+      // A page following the room's host takes the phase and site from its frames but no place along the route: handed
+      // back its Oogas, its own index can lie off either end of this one, and a thrown frame here would freeze the picture.
+      if (!site) { work.phase = ""; standPose(cave); return; }
+      const route = site.route;
+      if (work.phase === "outbound") work.index = Math.max(0, Math.min(work.index, route.length));
+      else if (work.phase === "return") work.index = Math.min(work.index, route.length - 1);
       if ((work.phase === "outbound" || work.phase === "station" || work.phase === "shoot") && !siteActive(cave, site)) {
         work.index = work.phase === "outbound" ? Math.min(work.index, route.length - 1) : route.length - 1;
         work.phase = "return"; cave.act.kind = "reload-return"; cave.avoidance.tx = NaN;
@@ -155,9 +161,11 @@
           if (!work.reloadSlot || !cave.slot || !slotAvailable(cave, cave.slot)) {
             const slot = closestSlot(cave);
             if (!slot) { standPose(cave); return; }
-            cave.slot = slot; work.reloadSlot = true; cave.pileApproach = false;
+            cave.slot = slot; work.reloadSlot = true; work.reservedAt = clock(); cave.pileApproach = false;
           }
-          const direct = approachPile(cave);
+          // A passive meadow leg keeps its reserved slot along the authored ring. The direct approach re-picks the
+          // nearest slot it can sweep to past props and the pile, which swings a walker on the ring to another slot.
+          const direct = !fixedTrip(cave) && approachPile(cave);
           if (walkWorkTo(cave, cave.slot, dt, !direct)) { work.phase = "reload"; work.direct = false; cave.act.kind = "reload"; }
         }
       } else if (work.phase === "reload") {

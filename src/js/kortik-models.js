@@ -632,5 +632,5 @@
   // The sign above the board, in the Factory's lit lettering.
   const sign = () => FM.label("KORTIK'S\nSWITCHBOARD", "Manual Routing Department", { height: BOARD.sign.height });
 
-  BL.kortikModels = { NAME, U, BOARD, ACTIVE, NOTES, PLUG, GRIP, KATANA, DESK, MUG, LOG, rig, station, sparks, trail, sign, jackX, jackY, cordX };
+  BL.kortikModels = { NAME, U, BOARD, ACTIVE, NOTES, PLUG, GRIP, KATANA, DESK, MUG, LOG, rig, geometries, station, sparks, trail, sign, jackX, jackY, cordX };
 })();
