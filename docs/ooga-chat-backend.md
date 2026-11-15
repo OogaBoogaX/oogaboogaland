@@ -47,10 +47,11 @@ release (#669).
 | Rate limiters | namespaces 2010–2014 | namespaces 1010–1014 |
 | Deploys | by hand (`ooga-chat-staging.yml`) | by hand on `rock` (`ooga-chat-production.yml`) |
 
-Staging lives on workers.dev for now: `ooga.chat` is on Squarespace's nameservers (checked 2026-11-14), not a zone in
-this account. Once the zone is moved here, staging moves to `staging.ooga.chat` (a custom-domain route, `SITE_ORIGIN`
-and its OAuth callbacks together), and production's custom domain can be created. Until then a production deploy fails
-at its route, which is the intended state. The canonical origin is the apex: `www.ooga.chat` becomes a proxied record
+Staging lives on workers.dev for now. `ooga.chat` is a zone in this account since 2026-11-15, on Cloudflare's
+nameservers. A Custom Domain can't be created over an existing DNS record for the same name, so the apex's records
+carried over from Squarespace (its four A records) are deleted before production's first deploy; until then that deploy
+uploads the Worker and fails at its route. Staging later moves to `staging.ooga.chat` (a custom-domain route,
+`SITE_ORIGIN` and its OAuth callbacks together). The canonical origin is the apex: `www.ooga.chat` becomes a proxied record
 that a Redirect Rule sends to `https://ooga.chat`, as `www.oogabooga.land` does, and HTTP redirects to HTTPS at the
 edge (Always Use HTTPS on the zone).
 
