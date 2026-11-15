@@ -22315,7 +22315,7 @@ const sphereKeypad = { name: "timechain keypad", why: "rule: the keypad chooses 
     const dx = c.x - k[12], dz = c.z - k[14];
     return { lens: G.lens, glide: G.glide, atBody: Math.hypot(c.x - a.root.position.x, c.z - a.root.position.z), headHidden: a.parts.head.cameraHidden, kx: out.x / B.renderer.size.width, ky: out.y / B.renderer.size.height,
       faceOn: (dx * k[8] + dz * k[10]) / (Math.hypot(dx, dz) * Math.hypot(k[8], k[10])) }; })()`);
-  for (const k of ["1", "3", "3"]) await b.key(k);
+  for (const k of ["1", "3"]) await b.key(k);
   const chosen = await b.evaluate(`(() => { const B = __ooga, T = BL.scenes.hub.debug.timechainIsland, G = T.gate, key = k => T.site.keys.find(v => v.key === k).node; return { selection: G.debug.selection, three: key("3").geometry.faces[0].color, one: key("1").geometry.faces[0].color, enter: key("enter").geometry.faces[0].color, readout: T.site.readout.room, readoutVisible: T.site.readout.visible, slot: B.pilot.player.weapon.selectedSlot === window.__sphereSlot, moved: B.pilot.player.root.position.x }; })()`);
   // Enter while the room's code is held back: the keys lock and the Ooga turns to the doors; Back cancels that and
   // turns it to the keypad again with the room still chosen, nothing prepared and the doors shut.
@@ -22375,11 +22375,11 @@ const sphereCrossing = { name: "timechain crossing", why: "playthrough: Enter wa
 // Ooga or the view, an empty number does nothing, walking off lets the choice go, and Enter glides into the eyes where
 // the Ooga stands and walks it in; walked back out in first person the view never leaves its head, and it stops on
 // a spot of the bridge clear of the players already there.
-const sphereBridgeKeypad = { name: "timechain bridge keypad", why: "rule: the keypad's buttons take clicks from the near half of the bridge, Enter walks the Ooga in from there, and a first-person walk out keeps the view in its head", run: async (b) => {
+const sphereBridgeKeypad = { name: "timechain bridge keypad", why: "rule: the keypad's buttons and the directory's rows take clicks from the near half of the bridge, the chosen room clicked again clears it, Enter walks the Ooga in from there, and a first-person walk out keeps the view in its head", run: async (b) => {
   const clicks = [];
   const clickKey = async (key) => {
     // The camera settles first, so the point projected is where the button is drawn when the click lands.
-    const at = await b.evaluate(`(() => { const B = __ooga, T = BL.scenes.hub.debug.timechainIsland, n = T.site.keys.find(k => k.key === "${key}").node, out = {}, r = document.getElementById("scene").getBoundingClientRect();
+    const at = await b.evaluate(`(() => { const B = __ooga, T = BL.scenes.hub.debug.timechainIsland, n = ${key === "directory" ? "T.site.directoryKey" : `T.site.keys.find(k => k.key === "${key}").node`}, out = {}, r = document.getElementById("scene").getBoundingClientRect();
       B.advance(1, 1 / 60);
       B.renderer.project(n.world[12], n.world[13], n.world[14], out);
       const x = r.left + out.x * r.width / B.renderer.size.width, y = r.top + out.y * r.height / B.renderer.size.height, el = document.elementFromPoint(x, y);
@@ -22388,19 +22388,48 @@ const sphereBridgeKeypad = { name: "timechain bridge keypad", why: "rule: the ke
     await b.click(at.x, at.y);
     await b.evaluate(`__ooga.advance(0.2, 1 / 60)`);
   };
-  const read = `(() => { const B = __ooga, ${sphereLocal}, G = T.gate, a = B.pilot.player, p = a.root.position;
+  // A directory row, clicked where the board dialog draws it: its rows run `pitch` 7 dots of 4 pixels from `top`.
+  const clickRow = async (id) => {
+    const at = await b.evaluate(`(() => { const el = document.getElementById("board-screen"), r = el.getBoundingClientRect(), c = BL.scenes.hub.debug.timechainIsland.site.directory.canvas;
+      const top = c.height / 4 - BL.timechainRooms.COUNT * 7 + 2 - 3; return { x: r.left + el.clientLeft + el.clientWidth / 2, y: r.top + el.clientTop + (top + ${id} * 7 + 2) * 4 * el.clientHeight / c.height }; })()`);
+    clicks.push("row" + id + ":" + JSON.stringify(at));
+    await b.click(at.x, at.y);
+    await b.evaluate(`__ooga.advance(0.2, 1 / 60)`);
+  };
+  const read = `(() => { const B = __ooga, ${sphereLocal}, G = T.gate, a = B.pilot.player, p = a.root.position, cap = (k) => T.site.keys.find(x => x.key === k).node.geometry.faces[0].color.join();
     return { state: G.debug.state, remote: G.remote, busy: G.busy, selection: G.debug.selection, lens: G.debug.lens, along: +local(p).toFixed(2), act: !document.getElementById("act").hidden,
-      eight: T.site.keys.find(k => k.key === "8").node.geometry.faces[0].color.join() }; })()`;
+      eight: cap("8"), three: cap("3"), five: cap("5"), board: document.getElementById("board-modal").open, caption: document.getElementById("board-caption").textContent }; })()`;
   await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; ${sphereStand("0.4", "19")} })()`);
   await clickKey("8");
   const empty = await b.evaluate(read);
   await clickKey("3");
   const chosen = await b.evaluate(read);
+  await clickKey("3");
+  const unchosen = await b.evaluate(read);
+  // The directory chooses as the keypad does: a row lights its key, the same row again clears both, an empty row does
+  // nothing, and a number key pressed over it chooses too.
+  await clickKey("directory");
+  await clickRow(5);
+  const listed = await b.evaluate(read);
+  await clickRow(5);
+  const unlisted = await b.evaluate(read);
+  await clickRow(8);
+  const emptyRow = await b.evaluate(read);
+  await b.key("3");
+  await b.evaluate(`__ooga.advance(0.2, 1 / 60)`);
+  const typed = await b.evaluate(read);
+  await b.key("Escape");
   await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; ${sphereStand("0.4", "24")} B.advance(0.2, 1 / 60); })()`);
   const walkedOff = await b.evaluate(read);
   // Regression: the empty rooms' 8 and 9 are a PIN's digits like any other, drawn plain while the keypad asks for one.
   await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; window.__lockedWas = BL.net.state.lockedRooms[0]; BL.net.state.lockedRooms[0] = 1; ${sphereStand("0.4", "19")} })()`);
   await clickKey("0");
+  // Regression: the directory reopened while the keypad asks for the PIN chooses nothing and types no digit.
+  await clickKey("directory");
+  await clickRow(5);
+  await b.key("5");
+  const pinDirectory = await b.evaluate(`(() => { const r = ${read}, G = BL.scenes.hub.debug.timechainIsland.gate.debug; return { ...r, pin: G.pin }; })()`);
+  await b.key("Escape");
   await clickKey("8");
   const pin = await b.evaluate(`(() => { const r = ${read}, G = BL.scenes.hub.debug.timechainIsland.gate.debug; return { ...r, pin: G.pin }; })()`);
   await clickKey("back");
@@ -22428,8 +22457,16 @@ const sphereBridgeKeypad = { name: "timechain bridge keypad", why: "rule: the ke
   record("timechain bridge keypad: from the bridge's near half an empty number does nothing, a room's number is chosen with the Ooga and view still the player's, and walking off lets it go",
     empty.state === "idle" && empty.eight === "34,30,27" && chosen.state === "keypad" && chosen.remote && !chosen.busy && chosen.selection === 3 && chosen.lens === null && chosen.act && Math.abs(chosen.along - 19) < 0.2
       && walkedOff.state === "idle" && walkedOff.selection === -1, JSON.stringify({ empty, chosen, walkedOff }));
+  record("timechain bridge keypad: the chosen number clicked again clears it, and the directory's rows choose and clear the keypad's button the same way",
+    unchosen.state === "keypad" && unchosen.remote && unchosen.selection === -1 && unchosen.three === "58,52,48"
+      && listed.board && listed.selection === 5 && listed.five === "247,147,26" && listed.caption.startsWith("Room 5 selected")
+      && unlisted.board && unlisted.selection === -1 && unlisted.five === "58,52,48" && !unlisted.caption.startsWith("Room")
+      && emptyRow.selection === -1 && typed.board && typed.selection === 3 && typed.three === "247,147,26",
+    JSON.stringify({ unchosen, listed, unlisted, emptyRow, typed, clicks }));
   record("timechain bridge keypad: while it asks for a locked room's PIN the empty rooms' 8 and 9 are digits like any other, drawn plain, and greyed out again after",
     pin.state === "pin" && pin.pin === "8" && pin.eight === "58,52,48" && unpinned.state !== "pin" && unpinned.eight === "34,30,27", JSON.stringify({ pin, unpinned }));
+  record("timechain bridge keypad: the directory reopened during a locked room's PIN chooses nothing, types no digit, and says to enter the PIN on the keypad",
+    pinDirectory.board && pinDirectory.state === "pin" && pinDirectory.pin === "" && pinDirectory.caption.includes("PIN"), JSON.stringify(pinDirectory));
   record("timechain bridge keypad: Enter clicked from the bridge glides into the Ooga's eyes where it stands and walks the same Ooga into the chosen room",
     !entering.remote && entering.lens === "eyes" && entering.along > 16 && inside && room.room === 3 && room.player === "portlandhodl", JSON.stringify({ entering, room }));
   record("timechain bridge keypad: walked back out in first person the view stays in the Ooga's head to the end and after",

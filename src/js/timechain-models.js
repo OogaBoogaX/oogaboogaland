@@ -357,8 +357,10 @@
     return geo;
   })());
   // The keypad's small window: one canvas in the signs' five-row pixels. Words that fit stand centred; longer ones run
-  // across it and round again, repainted only when they have moved a cell.
-  const WINDOW = { w: 0.39, h: 0.09, width: 140, height: 32, dot: 4, top: 6, speed: 14, gap: 10 };
+  // across it and round again a canvas pixel at a time (a quarter of a cell), repainted only when they have moved one,
+  // so they glide rather than step; each time round they start `lead` cells in from the left edge, so the first letter
+  // stays in view a moment before it runs off.
+  const WINDOW = { w: 0.39, h: 0.09, width: 140, height: 32, dot: 4, top: 6, speed: 14, gap: 10, lead: 6 };
   // One hidden digit of a PIN.
   const WINDOW_DOT = ["000", "111", "111", "111", "000"];
   const windowRig = () => {
@@ -373,7 +375,7 @@
       for (let i = 0; i < words.length; i++) {
         const glyph = words[i] === "*" ? WINDOW_DOT : glyphs[words[i]];
         if (!glyph) { cursor += 4; continue; }
-        for (let r = 0; r < glyph.length; r++) for (let c = 0; c < glyph[r].length; c++) if (glyph[r][c] === "1") ctx.fillRect((cursor + c) * WINDOW.dot, WINDOW.top + r * WINDOW.dot, WINDOW.dot, WINDOW.dot);
+        for (let r = 0; r < glyph.length; r++) for (let c = 0; c < glyph[r].length; c++) if (glyph[r][c] === "1") ctx.fillRect(Math.round((cursor + c) * WINDOW.dot), WINDOW.top + r * WINDOW.dot, WINDOW.dot, WINDOW.dot);
         cursor += glyph[0].length + 1;
       }
     };
@@ -382,7 +384,7 @@
       ctx.fillStyle = "#1a120a"; ctx.fillRect(0, 0, WINDOW.width, WINDOW.height);
       ctx.fillStyle = ink;
       if (wide <= cells) draw(Math.floor((cells - wide) / 2));
-      else { draw(1 - offset); draw(1 - offset + wide + WINDOW.gap); }
+      else { draw(1 + WINDOW.lead - offset); draw(1 + WINDOW.lead - offset + wide + WINDOW.gap); }
       geometry.imageSurface.version++;
     };
     const say = (text, color = "#f7931a") => {
@@ -398,7 +400,7 @@
     const tick = (dt) => {
       if (wide <= cells) return;
       clock += dt;
-      const offset = Math.floor(clock * WINDOW.speed) % (wide + WINDOW.gap);
+      const offset = Math.floor(clock * WINDOW.speed * WINDOW.dot) % ((wide + WINDOW.gap) * WINDOW.dot) / WINDOW.dot;
       if (offset !== drawn) paint(offset);
     };
     paint(0);
@@ -453,9 +455,12 @@
     ...[-1, 1].map((x) => box({ w: 0.03, h: 0.03, d: 0.012, color: "#8a7a6a", offset: { x: x * 0.19, y: -0.025, z: 0.03 } }))
   ));
   // The room directory the button opens, in the shared board dialog: every number on the keypad and the room it
-  // opens, in the keypad window's pixels on the same dark glass, the chosen room's row lit as its key is, a locked
-  // room's padlocked and an empty number's greyed out. One canvas, repainted only when the choice or a lock changes.
-  // It only shows: rooms are chosen on the keypad.
+  // opens, in the keypad window's pixels on the same dark glass, the chosen room's row lit as its key is (its number in
+  // white), a locked room's padlocked and an empty number's greyed out. One canvas, repainted only when the choice or a lock changes.
+  // A tap on a row or a number key chooses that room as the keypad's number does, and on the room already chosen
+  // clears the choice, through `onChoose`, which the doorway sets ("close" when the directory should go, as for a
+  // PIN); `canChoose` says whether it would take one now (wherever a click on the keypad would, and never while the
+  // keypad asks for a PIN, which `asking` says).
   const DIRECTORY = { dot: 4, margin: 3, gap: 2, pitch: 7, title: "ROOM DIRECTORY" };
   const DIRECTORY_LOCK = ["010", "101", "111", "111", "111"];
   const directoryBoard = () => {
@@ -485,10 +490,24 @@
     let chosen = -1;
     const locked = new Uint8Array(rooms.length);
     const board = {
-      title: "Room Directory", help: "Which room each number on the keypad opens. Choose one on the keypad, then press Enter.", canvas, count: 1, index: 0, version: 0,
-      get caption() { return chosen >= 0 ? `Room ${chosen} selected · press Enter on the keypad` : "Choose a room on the keypad beside the doors"; },
+      title: "Room Directory", help: "Choose a room here or on the keypad, then press Enter on the keypad. Choose it again to clear it.", canvas, count: 1, index: 0, version: 0,
+      onChoose: null, canChoose: null, asking: null,
+      get pickable() { return !!(board.canChoose && board.canChoose()); },
+      get caption() {
+        if (board.asking && board.asking()) return `Room ${chosen} is locked · enter its PIN on the keypad`;
+        return chosen >= 0 ? `Room ${chosen} selected · press Enter on the keypad` : board.pickable ? "Tap a room or press its number" : "Walk onto the bridge up to the doors to choose";
+      },
       get note() { return chosen >= 0 ? rooms[chosen].tag : ""; },
-      go() {}
+      go() {},
+      // A point on the canvas, in its pixels: the row under it, each row's band running to the next's.
+      pick(x, y) {
+        const id = Math.floor((Math.floor(y / D.dot) - top + 1) / D.pitch);
+        return id >= 0 && id < rooms.length && !rooms[id].empty && board.pickable ? board.onChoose(id) : null;
+      },
+      key(k) {
+        if (!/^[0-9]$/.test(k)) return false;
+        return !rooms[Number(k)].empty && board.pickable && board.onChoose(Number(k)) || true;
+      }
     };
     const paint = () => {
       ctx.fillStyle = "#1a120a"; ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -497,7 +516,7 @@
       for (let id = 0; id < rooms.length; id++) {
         const y = top + id * D.pitch, lit = id === chosen, dim = rooms[id].empty;
         if (lit) { ctx.fillStyle = "#f7931a"; ctx.fillRect((D.margin - 1) * D.dot, (y - 1) * D.dot, (cols - 2 * D.margin + 2) * D.dot, 7 * D.dot); }
-        text(String(id), D.margin, y, lit ? "#17110a" : dim ? "#5a4a38" : "#f7931a");
+        text(String(id), D.margin, y, lit ? "#ffffff" : dim ? "#5a4a38" : "#f7931a");
         text(names[id], nameAt, y, lit ? "#17110a" : dim ? "#5a4a38" : "#f2d39a");
         if (locked[id]) text("#", lockAt, y, lit ? "#17110a" : "#ffbd53");
       }

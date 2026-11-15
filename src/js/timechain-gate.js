@@ -5,8 +5,9 @@
 // and the physical buttons take the clicks and keys. Its buttons also take clicks from anywhere on the bridge's half
 // nearer the sphere (`fromBridge`) without engaging it: the Ooga stays the player's and the view theirs until Enter,
 // which glides the view into the Ooga's eyes where it stands; walking off that half lets the choice go. A number with
-// a room behind it chooses exactly that room (choosing another replaces it; an empty number does nothing), Enter is
-// off until one is chosen, Back or Escape lets go and glides the view back to the camera the player had. Enter
+// a room behind it chooses exactly that room (choosing another replaces it, choosing it again clears it, and an empty
+// number does nothing; the directory's rows choose the same way), Enter is off until one is chosen, Back or Escape
+// lets go and glides the view back to the camera the player had. Enter
 // commits: the visitor's account must already be resolved (signed in: a shared room; signed out: a solo copy); after
 // an unanswered account look, the selected number retries and Enter explicitly continues solo.
 //
@@ -279,9 +280,15 @@
       return true;
     };
     // A click on the keypad from the bridge: the keypad answers it without taking the Ooga or the view.
+    // A room chosen in advance is lit as the keypad starts, so its own number keeps it rather than clearing it.
     const pressFromBridge = (key) => {
       if (!fromBridge()) return false;
-      if (g.state === "idle") { startKeypad(); g.remote = true; }
+      if (g.state === "idle") {
+        const kept = String(preselect) === key;
+        startKeypad();
+        g.remote = true;
+        if (kept) { show(`${roomWords(g.selection)} selected · press Enter`); return true; }
+      }
       press(key);
       return true;
     };
@@ -295,8 +302,10 @@
       lens("back");
       hold(false);
     };
+    // The room already chosen, chosen again, clears the choice.
     const choose = (digit) => {
       if (g.state !== "keypad" || ROOMS.parse(digit) === null) return;
+      if (digit === g.selection) { g.selection = NONE; site.choose(NONE); show(CHOOSE); return; }
       if (lockedRoom(digit) && g.pass !== digit) { askPin(digit); return; }
       g.selection = digit;
       site.choose(digit);
@@ -757,6 +766,18 @@
       return true;
     };
     window.addEventListener("keydown", onKey, true);
+    // The directory's rows and number keys choose as the keypad's numbers do, wherever a click on them would: while the
+    // keypad is in use, or from the bridge's near half. A locked room's PIN closes the directory so the keypad takes it,
+    // and while the keypad asks for one the directory chooses nothing (`asking`, for its caption).
+    const canChoose = () => g.state !== "pin" && (g.state === "keypad" || g.state === "account" || fromBridge());
+    const asking = () => g.state === "pin";
+    const pickRoom = (room) => {
+      if (g.state === "idle") pressFromBridge(String(room));
+      else press(String(room));
+      return g.state === "pin" ? "close" : true;
+    };
+    const hookDirectory = (on) => { site.directory.onChoose = on ? pickRoom : null; site.directory.canChoose = on ? canChoose : null; site.directory.asking = on ? asking : null; };
+    hookDirectory(true);
     // A hidden tab can come back long after a grant ran out; a waiting request is then given up rather than kept.
     const onVisibility = () => {
       if (!document.hidden && g.state === "waiting" && g.ask && performance.now() - g.ask > 60000) fallBack("The wait ran out · press Enter to try again");
@@ -769,6 +790,7 @@
     };
     const dispose = () => {
       window.removeEventListener("keydown", onKey, true);
+      hookDirectory(false);
       document.removeEventListener("visibilitychange", onVisibility);
       if (unsubscribeDoor) unsubscribeDoor();
       unsubscribeDoor = null;
@@ -796,6 +818,7 @@
       showLocks();
       unsubscribeDoor = BL.net.subscribeDoor(onDoor);
       window.addEventListener("keydown", onKey, true);
+      hookDirectory(true);
       document.addEventListener("visibilitychange", onVisibility);
       show();
       return asked !== null;
