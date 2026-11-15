@@ -76,9 +76,9 @@
   const chat = ({ actions }) => {
     const listeners = new AbortController(), { signal } = listeners;
     const art = make("img", "oc-art");
-    art.src = "art/sign-in-island.jpg";
-    art.width = 430;
-    art.height = 287;
+    art.src = "art/sign-in-island.webp";
+    art.width = 1005;
+    art.height = 670;
     art.alt = "Cavemen on clouds above a floating island, round a pile of bananas";
     art.decoding = "async";
     // Lazy and hidden until the session answers, so a signed-in visit, which never shows it, never fetches it.

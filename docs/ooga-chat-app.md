@@ -376,13 +376,14 @@ stylesheet 16.9 KB, sign-in picture 57.9 KB, Main Island's mark 3 KB): about 157
 alone was 71 KB, with sign-in 78 KB, with the space 88 KB). The manifest and icons are fetched by the browser when it
 considers installing, and the worker then keeps the same files once more in its cache, off the first paint. For comparison, the island's portable page is about
 39.7 MB (23 MB gzipped). The app loads no 3D engine, terrain, cabinets, replays or live feeds. `FIRST_LOAD_BUDGET` in
-the build (96 KB gzipped) fails a build that grows past it; raise it deliberately, with the reason, when a later issue
+the build (116 KB gzipped) fails a build that grows past it; raise it deliberately, with the reason, when a later issue
 adds weight.
 
 ## Artwork
 
-`src/ooga-chat/art/sign-in-island.jpg` (430x287, 3:2) is a stand-in cropped from the issue's design capture. Replace
-it with the approved original under the same name; the build re-hashes it and the views need no change.
+`src/ooga-chat/art/sign-in-island.webp` (1005x670, 3:2) is the approved original illustration, sized for a Retina
+display at the picture's widest (502 CSS pixels) and laid flat on the slab's own colour (`--slab-dark`, #161412), which
+costs about a third of keeping its transparency. A new version replaces it under the same name; the build re-hashes it.
 
 ## The installable app (#657)
 
