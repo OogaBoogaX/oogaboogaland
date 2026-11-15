@@ -2,7 +2,7 @@
 // two routes, with the Cloudflare host mocked as the other room tests do.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { DatabaseSync } from "node:sqlite";
 import * as protocol from "../src/protocol.js";
@@ -206,6 +206,38 @@ test("the room counts every message it sends, NPC frames on counters of their ow
   assert.equal(c.out, accepted.reduce((n, ws) => n + ws.sent.length, 0), "every send is counted");
   assert.equal(c.outBytes, accepted.reduce((n, ws) => n + ws.bytes, 0), "and every byte");
   assert.deepEqual([c.npc, c.npcOut, c.npcBytes], [1, 1, 1000], "one frame in, relayed once, its bytes apart");
+});
+
+test("what the room relays to an Ooga Chat member's socket is counted too", async () => {
+  const { room, join, counters, accepted } = roomHost();
+  const member = { sent: [], bytes: 0, closed: null, store: { community: true, connId: "m1", id: 3 },
+    send(data) { this.bytes += data.length; this.sent.push(JSON.parse(data)); }, close(code, reason) { this.closed = { code, reason }; },
+    serializeAttachment(v) { this.store = v; }, deserializeAttachment() { return this.store; } };
+  room.community = new Map([["m1", { community: true, connId: "m1", ws: member, id: 3, login: "c", display: "c" }]]);
+  accepted.push(member);
+  const a = await join(1, "a");
+  room.webSocketMessage(a, JSON.stringify({ t: "body", name: "a" }));
+  await room.webSocketMessage(a, JSON.stringify({ t: "chat", text: "hello", clientId: "c1" }));
+  room.webSocketMessage(a, JSON.stringify({ t: "visible", on: false }));
+  await flush(); await flush();
+  const c = counters();
+  assert.ok(member.sent.length >= 2, "the member heard the join and the line");
+  assert.equal(c.out, accepted.reduce((n, ws) => n + ws.sent.length, 0));
+  assert.equal(c.outBytes, accepted.reduce((n, ws) => n + ws.bytes, 0));
+});
+
+test("nothing in the room's code writes to a socket but Room.send, so no send goes uncounted", () => {
+  // Other objects' sockets (the Audience, a game host, the Inspector) and the inspector's own browser page are not the room's.
+  const others = new Set(["audience.js", "audience-media.js", "game-host.js", "inspector.js", "inspect-page.js"]);
+  const dir = new URL("../src/", import.meta.url), raw = [];
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".js") || others.has(name)) continue;
+    readFileSync(new URL(name, dir), "utf8").split("\n").forEach((line, i) => {
+      if (/\.send\(/.test(line) && !/\broom\.send\(/.test(line) && !(name === "room.js" && /\bthis\.send\(/.test(line))) raw.push(name + ":" + (i + 1) + ": " + line.trim());
+    });
+  }
+  assert.equal(raw.length, 1, "only Room.send itself: " + raw.join(" | "));
+  assert.match(raw[0], /^room\.js:\d+: ws\.send\(data\);$/);
 });
 
 test("a page back from a drop says why, once a connection; a stale eviction names its kick", async () => {

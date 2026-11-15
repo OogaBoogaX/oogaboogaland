@@ -152,15 +152,28 @@ test("a stored value the room cannot restore is dropped and logged, and players 
   assert.equal(a.sent[0].t, "welcome");
 });
 
-test("a stored key that cannot be read is logged and left in storage", async () => {
+test("a stored key that cannot be read is logged and left in storage, and the object resets rather than run on a default", async () => {
   const h = host({ stored: { chalk: { v: 1, marks: [] } }, unreadable: ["chalk"] });
-  const r = h.room();
-  await h.restored();
+  h.room();
+  await assert.rejects(h.restored(), /storage unavailable/);
   assert.deepEqual(h.deleted, [], "a failed read deletes nothing");
   assert.ok(h.stored.has("chalk"));
   assert.equal(h.logged.length, 1);
+});
+
+test("an unreadable key is never overwritten by the room's next save of it", async () => {
+  const links = [[5, [6]], [7, [8]]];
+  const h = host({ stored: { voiceLinks: links }, failReads: { voiceLinks: 1 } });
+  h.room();
+  await assert.rejects(h.restored(), /temporary read failure/);
+  const r = h.room();
+  await h.restored();
   const a = await h.join(r, 1, "a");
-  assert.equal(a.sent[0].t, "welcome");
+  await h.join(r, 2, "b");
+  r.webSocketMessage(a, JSON.stringify({ t: "link", to: 2, on: true }));
+  await flush();
+  const kept = new Map(h.stored.get("voiceLinks").map(([id, wants]) => [id, wants]));
+  assert.deepEqual([kept.get(5), kept.get(7), kept.get(1)], [[6], [8], [2]], "the other accounts' links survive the new one");
 });
 
 
@@ -169,7 +182,7 @@ test("a transient restore read failure preserves the value for the next wake", a
   saved.position = 3;
   const h = host({ stored: { studio: saved }, failReads: { studio: 1 } });
   h.room();
-  await h.restored();
+  await assert.rejects(h.restored(), /temporary read failure/, "the object resets, as before");
   assert.deepEqual(h.deleted, [], "a later successful read is not proof of corrupt data");
   assert.deepEqual(h.stored.get("studio"), saved);
   assert.equal(h.reads.filter(key => key === "studio").length, 1, "no diagnostic reread");
@@ -201,14 +214,51 @@ test("an unexpected restore handler failure preserves readable data", async () =
 test("a read that fails once and then succeeds deletes nothing, and the next wake restores the value", async () => {
   const links = [[5, [6]]];
   const h = host({ stored: { voiceLinks: links }, failReads: { voiceLinks: 1 }, unwritable: ["sweepAt"] });
-  const r = h.room();
-  await h.restored();
+  h.room();
+  await assert.rejects(h.restored(), /temporary read failure/, "the failed read resets the object");
   assert.deepEqual(h.deleted, [], "neither the failed read nor the failed write deleted a key");
   assert.deepEqual(h.stored.get("voiceLinks"), links, "the stored value is untouched");
-  assert.ok(!r.links.has(5), "this wake goes without it");
-  assert.ok(Number.isFinite(r.sweepAt), "a write that failed still leaves a default");
-  assert.equal(h.logged.length, 2);
   const woken = h.room();
   await h.restored();
   assert.ok(woken.links.get(5).has(6), "the next wake reads it again");
+  assert.ok(Number.isFinite(woken.sweepAt), "a write that failed still leaves a default");
+  assert.equal(h.logged.length, 2);
+});
+
+test("stored values of the wrong shape that would not throw are dropped: hockey limits and cleanup jobs", async () => {
+  const good = { session: "s1", at: 5, revision: 0, mids: ["0"], midVersions: { 0: 0 }, inspect: false, inspectUntil: 0 };
+  const h = host({ stored: { hockeyLimitsV1: {}, voiceCleanup: [good, { session: 3 }] } });
+  const r = h.room();
+  await h.restored();
+  assert.deepEqual(h.deleted.sort(), ["hockeyLimitsV1", "voiceCleanup"]);
+  assert.ok(r.hockeyLimits && r.hockeyLimits.admission && Array.isArray(r.hockeyLimits.accounts), "the limits are back to their defaults");
+  assert.equal(r.cleanupJobs.length, 0);
+  const a = await h.join(r, 1, "a");
+  r.webSocketMessage(a, JSON.stringify({ t: "body", name: "a" }));
+  r.webSocketMessage(a, JSON.stringify({ t: "zone", name: "arcade.hall" }));
+  r.webSocketMessage(a, JSON.stringify({ t: "hockey", k: "watch", i: 0, v: 4 }));
+  assert.equal(a.closed, null, "watching a table no longer closes the player");
+  const h2 = host({ stored: { voiceCleanup: [good] } }), r2 = h2.room();
+  await h2.restored();
+  assert.deepEqual(r2.cleanupJobs.map((j) => j.session), ["s1"], "a list of good jobs restores as before");
+});
+
+test("a helper that throws in both a handler and the departure still lets the others hear the leave and a new host", async () => {
+  const h = host(), r = h.room();
+  await h.restored();
+  const a = await h.join(r, 1, "a"), b = await h.join(r, 2, "b");
+  r.webSocketMessage(a, JSON.stringify({ t: "hub", on: true }));
+  r.webSocketMessage(b, JSON.stringify({ t: "hub", on: true }));
+  assert.equal(r.hostId, 1);
+  r.cancelDoor = () => { throw new Error("door broke"); };
+  b.sent.length = 0;
+  r.webSocketMessage(a, JSON.stringify({ t: "zone", name: "factory" }));
+  assert.equal(a.closed.code, protocol.CLOSE_ERROR);
+  assert.deepEqual([...r.players.keys()], [2]);
+  assert.ok(b.sent.some((m) => m.t === "leave" && m.id === 1), "the others hear it left");
+  assert.equal(r.hostId, 2, "a new NPC host is elected");
+  assert.ok(b.sent.some((m) => m.t === "host" && m.id === 2), "and told");
+  // A plain close through the same fault does not escape either.
+  assert.doesNotThrow(() => r.webSocketClose(b, 1001, "", true));
+  assert.equal(r.players.size, 0);
 });

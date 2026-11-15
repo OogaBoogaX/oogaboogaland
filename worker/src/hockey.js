@@ -5,6 +5,7 @@ import { hockeyLimits } from "./hockey-limits.js";
 const W = globalThis.BL.hockeyWire;
 export const hockey = {
   loadLimits: hockeyLimits.load,
+  validLimits: hockeyLimits.valid,
   restore(room) {
     room.hockeyTables = [null, null, null];
     for (const p of room.players.values()) {

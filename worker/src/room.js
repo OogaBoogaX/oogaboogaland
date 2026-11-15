@@ -56,6 +56,12 @@ const sfuSessionGone = err => err.status === 404 || (err.status === 410 && err.c
 
 // Only explicit validation failures may discard a stored value; I/O and handler faults never do.
 class InvalidStoredValue extends TypeError {}
+// A stored voice cleanup job as queueClose writes it; any other shape could never run.
+const cleanupJob = (job) => !!job && typeof job === "object" && typeof job.session === "string" && job.session.length > 0
+  && Array.isArray(job.mids) && job.mids.every((mid) => typeof mid === "string")
+  && (job.midVersions === undefined || (!!job.midVersions && typeof job.midVersions === "object" && !Array.isArray(job.midVersions)))
+  && (job.at == null || Number.isFinite(job.at)) && (job.revision === undefined || Number.isFinite(job.revision))
+  && (job.inspectUntil === undefined || Number.isFinite(job.inspectUntil));
 
 export class Room extends DurableObject {
   constructor(ctx, env) {
@@ -113,7 +119,7 @@ export class Room extends DurableObject {
     // stored value would then fail every wake and every connect after it.
     ctx.blockConcurrencyWhile(async () => {
       await this.restoring("hockeyLimitsV1", (saved) => {
-        if (saved !== undefined && (!saved || typeof saved !== "object" || Array.isArray(saved))) throw new InvalidStoredValue("hockey limits are not an object");
+        if (saved !== undefined && !hockey.validLimits(saved)) throw new InvalidStoredValue("hockey limits are not their shape");
         return hockey.loadLimits(this, saved);
       });
       await this.restoring(null, () => hockey.restore(this), () => { this.hockeyTables = [null, null, null]; });
@@ -129,7 +135,7 @@ export class Room extends DurableObject {
         this.studio.invited = this.studio.mode === "qa" ? [...new Set((Array.isArray(this.studio.invited) ? this.studio.invited : []).filter(seated))].slice(0, MAX_PLAYERS) : [];
       }, () => { this.studio = studioState(); });
       await this.restoring("voiceCleanup", (jobs) => {
-        if (jobs !== undefined && !Array.isArray(jobs)) throw new InvalidStoredValue("voiceCleanup is not a list");
+        if (jobs !== undefined && (!Array.isArray(jobs) || !jobs.every(cleanupJob))) throw new InvalidStoredValue("voiceCleanup is not a list of jobs");
         this.cleanupJobs = jobs || [];
       });
       // Ooga Chat's speakers the island's open outdoor grants hear (#666), as the Audience last sent them.
@@ -204,10 +210,18 @@ export class Room extends DurableObject {
     return { ws, voice: { pub: null, sub: null, track: null, gen: 0, mids: {}, pubMid: null }, muted: false, hand: false, handTone: 0, handEmoji: "", hp: 100, ko: false, g: null, j: 0, w: 0, v: null, va: 0, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, visible: true, joinedAt: Date.now(), door: null, passes: [], roomLock: null, blendTo: null, blendK: 0, pm: { inv: [], open: 0, blocked: [] }, savedAt: 0, posePending: false, ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, blendBucket: { tokens: BLEND_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: a.joinedAt || Date.now() };
   }
 
-  // Read once, then restore that snapshot. Only a value rejected by explicit validation is deleted.
-  // Failed reads, writes and unexpected handler errors preserve the saved value for a later wake.
+  // Read once, then restore that snapshot. Only a value rejected by explicit validation is deleted; a failed write or an
+  // unexpected handler error keeps it. A read that fails is rethrown: the object resets and the next request tries again,
+  // since running on a default would save that default over the stored value at the key's next write.
   async restoring(key, step, reset = null) {
-    try { await step(key ? await this.ctx.storage.get(key) : undefined); return; } catch (error) {
+    let stored;
+    if (key) {
+      try { stored = await this.ctx.storage.get(key); } catch (unread) {
+        this.failed("restore", null, unread, { key, dropped: false, unread: true });
+        throw unread;
+      }
+    }
+    try { await step(stored); return; } catch (error) {
       let dropped = false;
       if (key && error instanceof InvalidStoredValue) {
         try { await this.ctx.storage.delete(key); dropped = true; }
@@ -232,7 +246,7 @@ export class Room extends DurableObject {
     if (this.logged.has(kind) || this.logged.size >= 64) return;
     this.logged.add(kind);
     const frames = String((error && error.stack) || "").split("\n").slice(1, 5).map((line) => line.trim()).join(" | ");
-    console.error("room: " + kind + (fields.dropped ? " (stored value dropped)" : "") + " at " + frames);
+    console.error("room: " + kind + (fields.dropped ? " (stored value dropped)" : fields.unread ? " (unread, room reset)" : "") + " at " + frames);
   }
 
   // Retain account debt across socket records, only while awake. Reclaim fully replenished
@@ -259,9 +273,11 @@ export class Room extends DurableObject {
 
   // Every message the room sends goes through here, players' and Ooga Chat members' alike, so the inspector's `out` and
   // `outBytes` are the room's whole outbound traffic (text counted by its length, a binary frame by its bytes).
+  // The one place the room writes to a socket; a test scans the room's files for any other.
   send(ws, msg) {
-    const data = typeof msg === "string" || msg instanceof ArrayBuffer ? msg : JSON.stringify(msg);
+    let data;
     try {
+      data = typeof msg === "string" || msg instanceof ArrayBuffer ? msg : JSON.stringify(msg);
       ws.send(data);
     } catch {
       // A socket closing under us is dropped by its close event.
@@ -616,6 +632,7 @@ export class Room extends DurableObject {
     if (typeof message === "string") try { const msg = parseClientMessage(message); if (msg && msg.t) t = msg.t; } catch { /* named "text" */ }
     this.failed("message", p, error, { t, member });
     if (p) {
+      // drop runs each of its steps alone, so a helper's fault cannot stop it; this is the last resort should drop itself fail.
       try { this.drop(p, "failed", { code: CLOSE_ERROR }); } catch (again) {
         this.failed("message", p, again, { t: "drop" });
         if (this.players.get(p.id) === p) this.players.delete(p.id);
@@ -929,29 +946,35 @@ export class Room extends DurableObject {
   }
 
   // `detail`: what the close said, for the inspector's line (a close code, its reason, whether it was clean).
+  // Each step runs alone (`step`): one that throws is counted and logged and the rest still run, so the record always goes
+  // and the others always hear the leave, a new NPC host and their voice lists. A message whose handler failed ends here,
+  // often in the same helper that failed it, and so do a close and a socket error.
   drop(p, reason, detail = null) {
     if (this.players.get(p.id) !== p) return;
-    if (this.inspect.on) this.inspect.event("leave", p, { reason, ...detail, zone: p.zone, on: Date.now() - p.joinedAt, heard: Date.now() - this.heardAt(p), voice: inVoice(p) });
-    this.releaseCabinet(p);
-    hockey.leave(this, p.id);
-    block.leave(this, p.id);
-    this.cancelDoor(p);
-    this.clearPasses(p);
-    this.leaveStudio(p);
-    this.chalkLetGo(p);
-    this.background(this.clearVoice(p));
-    this.privateLeave(p);
+    const step = (t, fn) => { try { fn(); } catch (error) { this.failed("drop", p, error, { t }); } };
+    if (this.inspect.on) step("inspect", () => this.inspect.event("leave", p, { reason, ...detail, zone: p.zone, on: Date.now() - p.joinedAt, heard: Date.now() - this.heardAt(p), voice: inVoice(p) }));
+    step("cabinet", () => this.releaseCabinet(p));
+    step("hockey", () => hockey.leave(this, p.id));
+    step("block", () => block.leave(this, p.id));
+    step("door", () => this.cancelDoor(p));
+    step("passes", () => this.clearPasses(p));
+    step("studio", () => this.leaveStudio(p));
+    step("chalk", () => this.chalkLetGo(p));
+    step("voice", () => this.background(this.clearVoice(p)));
+    step("pm", () => this.privateLeave(p));
     this.players.delete(p.id);
     this.sockets.delete(p.ws);
-    audienceRoom.leave(this, p);
-    tessQueue.presence(this, p, true, reason === "revoked");
+    step("audience", () => audienceRoom.leave(this, p));
+    step("tess", () => tessQueue.presence(this, p, true, reason === "revoked"));
     // A dropped socket can come straight back in; the last one out frees the room.
-    const lockedIn = this.roomOf(p.zone), held = this.roomLocks.get(lockedIn);
-    if (held) held.passes.set(p.id, Date.now() + PIN_PASS_MS);
-    this.freeEmptyRoom(lockedIn);
-    this.broadcast({ t: "leave", id: p.id, reason });
-    this.electHost();
-    this.updateVoice();
+    step("lock", () => {
+      const lockedIn = this.roomOf(p.zone), held = this.roomLocks.get(lockedIn);
+      if (held) held.passes.set(p.id, Date.now() + PIN_PASS_MS);
+      this.freeEmptyRoom(lockedIn);
+    });
+    step("leave", () => this.broadcast({ t: "leave", id: p.id, reason }));
+    step("host", () => this.electHost());
+    step("voices", () => this.updateVoice());
     if (!this.players.size && this.flushTimer) {
       clearTimeout(this.flushTimer);
       this.flushTimer = 0;
