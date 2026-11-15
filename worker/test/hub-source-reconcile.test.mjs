@@ -5,9 +5,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildHubWorld } from '../src/hub-world.js';
 import { createHubWorldSimulation } from '../src/hub-world-simulation.js';
+import { HUB_WORLD_CHECKPOINT_VERSION } from '../src/hub-world-recovery.js';
 import * as M from '../src/ooga-crew.js';
-import { HOST } from '../src/virtual-host.js';
+import { HOST, VirtualHost } from '../src/virtual-host.js';
 import { BODY_STORAGE } from '../src/host-body-storage.js';
+import { createCheckpointPack } from '../src/checkpoint-pack.js';
 
 const NOW = Date.UTC(2026, 10, 6, 10, 0);
 const pile = (fields) => ({ v: 2, type: 'pile', bananas: 0, at: NOW, eatPerHour: 0, revision: 1, basis: 'credits',
@@ -40,6 +42,36 @@ test('a changed pile applies to real geometry without advancing NPCs, keeps queu
   try {
     assert.ok(world.project().npcs.length > 0, 'real Oogas');
     assert.ok(world.capture().clankers, 'real Clanker logical state');
+    const { repoIsland, solids, claimed, free } = world.geometry, spot = repoIsland.spot;
+    assert.equal(repoIsland.solids.length, 2, 'island soil and bridge are both solid');
+    for (const [x, z, r] of repoIsland.claims) {
+      assert.ok(claimed.some(c => c.x === x && c.z === z && c.r === r), 'browser bridge approach claim is present');
+      assert.equal(free(x, z, 0.1), false, 'later placements cannot occupy the approach');
+    }
+    for (const [x, z, node] of [[spot.x, spot.z, repoIsland.solids[0]], [spot.x, spot.rim + 2, repoIsland.solids[1]]]) {
+      const hit = {};
+      const y = solids.supportAt(x, z, spot.y + 1, 0, 0.2, null, hit);
+      assert.ok(Number.isFinite(y) && Math.abs(y - spot.y) < 0.3, 'a player has floor on the island and bridge');
+      assert.equal(hit.node, node, 'support comes from the registered Repo Island solid');
+    }
+
+    // Exercise the actual crew codec directly: a refused live value must not
+    // poison the enclosing world's recovery adapter or alter its reservation.
+    const { crew, bedId, bedFor } = world.actors, work = crew.list[0].work;
+    const logical = crew.createLogicalCheckpoint({ world: config.version, bedId, bedFor,
+      placement() { throw Error('capture must not perform restoration'); } });
+    const reservedAt = work.reservedAt;
+    try {
+      for (const invalid of [null, -1, NaN, -Infinity, '0']) {
+        work.reservedAt = invalid;
+        assert.throws(() => logical.capture(), /invalid logical Ooga checkpoint/);
+        assert.ok(Object.is(work.reservedAt, invalid), 'capture never repairs corrupt live state');
+      }
+      work.reservedAt = Infinity;
+      assert.equal(logical.capture().actors[0].work.reservedAt, null, 'only Infinity encodes the unreserved sentinel');
+      work.reservedAt = 0;
+      assert.equal(logical.capture().actors[0].work.reservedAt, 0, 'a finite reservation retains its timestamp');
+    } finally { work.reservedAt = reservedAt; }
     // Queued activity, accepted a second after the world's clock: an absolute
     // input that only a later tick applies.
     const queuedAt = NOW + 1000, initial = world.capture();
@@ -118,4 +150,55 @@ test('the transaction adapter commits a reconciliation atomically and leaves the
   assert.equal(simulation.applySource(saved, pile({ bananas: 5000, at: observed - 1 }), timing(observed)), 'applied');
   assert.equal(saved.state.level, 5000);
   assert.equal(saved.state.at, untouched.state.at, 'no clock change');
+});
+
+
+test('complete Hub rejects pre-Repo-Island recovery before constructing geometry or controllers', () => {
+  assert.equal(HUB_WORLD_CHECKPOINT_VERSION, 9);
+  const config = configuration();
+  // A stale envelope needs no valid actor payload: its schema is refused first.
+  const saved = { v: 8, world: config.version };
+  assert.throws(() => construct(config, saved, null), /migration required/);
+});
+
+test('real fixed-route Oogas recover a failed host write without changing the committed step', async () => {
+  const config = configuration(), simulation = createHubWorldSimulation(config);
+  let saved, attempted, now = NOW, failWrite = false;
+  const storage = { async transaction(run) {
+    let pending = structuredClone(saved);
+    const result = await run({ get: async () => structuredClone(pending), put: async (_, value) => {
+      if (failWrite) {
+        failWrite = false; attempted = structuredClone(value); throw Error('injected host write failure');
+      }
+      pending = structuredClone(value);
+    } });
+    saved = pending; return result;
+  } };
+  const options = { storage, clock: () => now,
+    sessionAdapter: { stepPassive() { throw Error('this fixture has no player bodies'); } } };
+  const host = new VirtualHost({ ...options, simulation });
+  const ticket = await host.begin('recovery-test', 60000);
+  for (let i = 0; i < 8; i++) {
+    now += HOST.stepMs;
+    const tick = await host.tick(ticket, []);
+    assert.equal(tick.steps, 1);
+    assert.equal(tick.snapshot.npcs.length, config.activity.rows.length * 2);
+  }
+  const before = structuredClone(saved), oldFrame = await host.poses(ticket, { format: 'mixed-3' });
+  const logical = createCheckpointPack(Math.min(config.checkpointBytes, 64 * 1024), { intern: true }).unpack(saved.simulation.ooga);
+  assert.ok(logical.actors.some(actor => actor.walk?.[5]?.length > 0 && actor.work.phase === ''),
+    'a routed slot walk is fixed even before a work phase begins');
+  now += HOST.stepMs; failWrite = true;
+  await assert.rejects(host.tick(ticket, []), /injected host write failure/);
+  assert.deepEqual(saved, before, 'the failed attempt leaves the durable record unchanged');
+  const recovered = await host.tick(ticket, []);
+  assert.equal(recovered.steps, 1);
+  assert.deepEqual(saved, attempted, 'reconstruction commits exactly the discarded logical step, without relocation');
+  assert.equal(await host.confirmPoses(ticket, oldFrame), false);
+  const frame = await host.poses(ticket, { format: 'mixed-3' });
+  assert.equal(await host.confirmPoses(ticket, frame), true);
+  const cold = new VirtualHost({ ...options, simulation: createHubWorldSimulation(config) });
+  const restored = await cold.poses(ticket, { format: 'mixed-3' });
+  assert.equal(await cold.confirmPoses(ticket, restored), true);
+  assert.deepEqual(saved, attempted, 'new-adapter reconstruction cannot rewrite the logical checkpoint');
 });

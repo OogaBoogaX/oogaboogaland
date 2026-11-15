@@ -1,10 +1,13 @@
 // HALLOWEEN: the ghost hunt's rules, ported from OBL-Audio-lab (config.js, machine.js, spawn.js, motion.js and the
-// room's game tick) into metres on the island. Pure and loadable in Node: no DOM, no clock, no Math.random. Time
-// comes in as `now`, milliseconds on the room's clock; every timer is kept relative to `epoch` (the hunt's start),
-// so a snapshot moves between pages that share that clock and a new host picks the hunt up where the old one left it.
-// The page that runs the hunt (the room's host, or a page alone) calls `present` for each player in the arena, then
-// `advance(now)`; a 50 ms fixed tick, at most four a frame. Fixed pools: MAX_GHOSTS ghosts, the boss, MAX_DROPS
-// drops, MAX_PLAYERS players. `step` allocates nothing.
+// room's game tick) into metres on the island. Pure and loadable in Node and the Worker (which imports it): no DOM, no
+// clock, no Math.random. Time comes in as `now`, milliseconds on the clock of whoever runs the hunt; every timer is
+// kept relative to `epoch` (the hunt's start), so a snapshot moves between runners that share that clock and one
+// picked up after a restart goes on where it stopped. The server's game host (worker/src/games/ghost-hunt.js), or a
+// page alone, calls `present` for each player in the arena, then `advance(now)`; a 50 ms fixed tick, at most four a
+// frame. Fixed pools: MAX_GHOSTS ghosts, the boss, MAX_DROPS drops, MAX_PLAYERS players. `step` allocates nothing.
+// What a shot meets is decided here too, the same way on the server, on a page alone and in a page's prediction:
+// `targets` lays every enemy out as a ball, `resolveShot` finds the one a shot's line meets, `hitBy` lands it only for
+// a hunter still standing, `shotDamage` says what a rifle round does.
 //
 //   IDLE -> GATHER  the herald is clicked       GATHER -> LAP  the one who woke it (the host) ready, and everyone
 //                                                there ready or GATHER_MS gone by
@@ -15,7 +18,8 @@
 //   VICTORY / DEFEAT -> DAWN -> IDLE             any hunting state -> DAWN  the arena empty ABANDON_MS
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
 
   // GATHER, the lobby before the walls rise, comes last in number so every LAP..DAWN range keeps its meaning.
   const STATE = { IDLE: 0, LAP: 1, NIGHT: 2, COUNTDOWN: 3, ACTIVE: 4, BREAK: 5, BOSS: 6, VICTORY: 7, DEFEAT: 8, DAWN: 9, GATHER: 10 };
@@ -174,6 +178,109 @@
     WEAPON: { tiers: [0, 0, 1, 1, 1, 2, 2], damage: [2, 3, 6, 8] }
   };
   const C = CONFIG, TAU = Math.PI * 2;
+
+  // The arcade's ghost arena about its own middle, as the hunt and the server's copy of it need it. scene-arcade.js
+  // builds the arena from arcade-models.js `HAUNT` and arcade-scene-models.js `ARENA_TOTEMS`; the suite checks these
+  // match. Its radius and wall; where ghosts come in over the wall top (every 4° but the hallway's mouth, as
+  // [x, y, z, bearing] runs, bearing from -z toward +x); where each elixir hangs in front of its totem; how near the
+  // middle a player takes the lightning drop; the herald's lap (ghost-game.js's rise); the seed every hunt starts from
+  // (fnv1a("ooga ghosts")); and how many may hunt.
+  const ARENA = (() => {
+    const r = 30, wall = 7, mouth = 1.5 * Math.PI, spots = [], elixirs = [];
+    for (let i = 0; i < 90; i++) {
+      const a = i / 90 * Math.PI * 2;
+      if (Math.abs(((a - mouth + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.22) continue;
+      spots.push(Math.sin(a) * (r - 1), wall + 1.2, -Math.cos(a) * (r - 1), a);
+    }
+    for (let k = 0; k < 4; k++) {
+      const a = Math.PI / 4 + k * Math.PI / 2;
+      elixirs.push({ x: Math.cos(a) * (13 - 1.9), y: 1.35, z: Math.sin(a) * (13 - 1.9) });
+    }
+    return { r, wall, spots: Float64Array.from(spots), elixirs, pile: { x: 0, z: 0, r: 4.3 }, lapMs: 4700, seed: 1368657481, hunters: 4 };
+  })();
+
+  // What a shot meets, in metres about an enemy's foot, the same on every page and on the server: a ghost a ball
+  // `ghost` of its height round its middle (heights `ghostH` by tier); a gorilla, skeleton, spider or hourglass a ball
+  // `bruteR` round its middle (heights `bruteH` by kind), `ahead` along its heading; a spiderling a ball `lingR` round a
+  // point `lingY` off the floor; the boss, while he shows, a ball `boss` of his height round his middle. ghost-game.js
+  // draws them at these sizes. A shot reaches `range`; a bash (the gun's butt) meets what is within `bash.r` of a point
+  // `bash.reach` ahead of its hunter and `bash.y` up, for `bash.damage`.
+  const HIT = {
+    ghostH: [1.3, 1.3 * C.BIG * C.GENERAL, 1.3 * C.BIG], ghost: 0.45,
+    bruteH: [1.5 * 1.25, 0.7 * 1.5, 1.25 * 2, 3.94], bruteR: [1.5 * 1.25 * 0.55, 0.6 * 1.5, 0.85 * 2, 0.9], ahead: [0, 0.25, -0.15 * 2, 0],
+    lingY: 0.25, lingR: 0.4, bossH: 5.2, boss: 0.4, range: 60,
+    bash: { reach: 1.1, y: 1, r: 0.9, damage: 4 }
+  };
+  // The target table `targets` fills: every slot one row of `TARGET_WIDTH` numbers (the ghosts' slots, the gorillas',
+  // the spiderlings', then the boss): its id (the boss's 0), the middle of its ball, the ball's radius and its flags,
+  // TARGET_ON while something stands in the slot and TARGET_OPEN while a shot can hurt it.
+  const TARGET_WIDTH = 6, TARGET_ON = 1, TARGET_OPEN = 2;
+  const TARGET_BRUTES = C.MAX_GHOSTS, TARGET_LINGS = TARGET_BRUTES + C.BRUTE.max, TARGET_BOSS = TARGET_LINGS + C.LING.max, TARGET_SLOTS = TARGET_BOSS + 1;
+  /**
+   * The target a shot from (ox, oy, oz) along the unit (dx, dy, dz) meets within `range`, out of `rows` (a target
+   * table): `hint`'s (the id the shooter's page saw it meet, -1 for none) when the line passes within its ball grown by
+   * `hintPad`, else the nearest whose ball grown by `pad` the line enters. Writes `out` (`slot`, `id`, how far `along`,
+   * and where: `x`, `y`, `z`) and returns whether it met one. Allocates nothing.
+   */
+  const resolveShot = (rows, ox, oy, oz, dx, dy, dz, range, hint, hintPad, pad, out) => {
+    let best = Infinity;
+    out.slot = -1;
+    for (let slot = 0, o = 0; slot < TARGET_SLOTS; slot++, o += TARGET_WIDTH) {
+      if (!(rows[o + 5] & TARGET_OPEN)) continue;
+      const cx = rows[o + 1] - ox, cy = rows[o + 2] - oy, cz = rows[o + 3] - oz, r = rows[o + 4];
+      const along = cx * dx + cy * dy + cz * dz;
+      if (along <= 0) continue;
+      const off = Math.max(0, cx * cx + cy * cy + cz * cz - along * along), id = rows[o];
+      if (id === hint && off <= (r + hintPad) * (r + hintPad) && along - r - hintPad <= range) { best = -1; take(out, slot, id, ox, oy, oz, dx, dy, dz, along); break; }
+      const reach = r + pad;
+      if (off > reach * reach) continue;
+      const enter = along - Math.sqrt(reach * reach - off);
+      if (enter > range || enter >= best) continue;
+      best = enter;
+      take(out, slot, id, ox, oy, oz, dx, dy, dz, Math.max(0, enter));
+    }
+    return out.slot >= 0;
+  };
+  const take = (out, slot, id, ox, oy, oz, dx, dy, dz, along) => {
+    out.slot = slot; out.id = id; out.along = along;
+    out.x = ox + dx * along; out.y = oy + dy * along; out.z = oz + dz * along;
+  };
+  /**
+   * What a bash from a hunter at (x, y, z) facing `yaw` meets, out of `rows`: `hint`'s when its ball grown by `hintPad`
+   * reaches the bash's point, else the nearest there; as `resolveShot` writes `out` (`along` its distance from the point).
+   */
+  const resolveBash = (rows, x, y, z, yaw, hint, hintPad, pad, out) => {
+    const B = HIT.bash, px = x + Math.sin(yaw) * B.reach, py = y + B.y, pz = z + Math.cos(yaw) * B.reach;
+    let best = Infinity;
+    out.slot = -1;
+    for (let slot = 0, o = 0; slot < TARGET_SLOTS; slot++, o += TARGET_WIDTH) {
+      if (!(rows[o + 5] & TARGET_OPEN)) continue;
+      const d = Math.hypot(rows[o + 1] - px, rows[o + 2] - py, rows[o + 3] - pz), r = rows[o + 4] + B.r, id = rows[o];
+      if (id === hint && d <= r + hintPad) { best = -1; bashAt(out, slot, id, px, py, pz, d); break; }
+      if (d > r + pad || d >= best) continue;
+      best = d;
+      bashAt(out, slot, id, px, py, pz, d);
+    }
+    return out.slot >= 0;
+  };
+  const bashAt = (out, slot, id, x, y, z, d) => { out.slot = slot; out.id = id; out.along = d; out.x = x; out.y = y; out.z = z; };
+  // The monkeys at a hunter's sides (ghost-game.js draws them there): `out` m to each side of where they stand facing
+  // `yaw` (left of an Ooga facing +z is +x, `side` 1), `up` of their height and half their own `size` up, where each one's
+  // shot leaves from; each aims `aimSide` m to its own side of the end of its hunter's shot.
+  const MONKEY = { out: 0.78, up: 0.1, size: 0.42, aimSide: 1.2 };
+  /** Where the monkey on `side` (1 or -1) of a hunter standing at (x, y, z), `h` tall and facing `yaw`, fires from. */
+  const monkeyOrigin = (x, y, z, yaw, h, side, out) => {
+    out.x = x + side * MONKEY.out * Math.cos(yaw); out.y = y + MONKEY.up * h + MONKEY.size / 2; out.z = z - side * MONKEY.out * Math.sin(yaw);
+    return out;
+  };
+  /** Where the monkey on `side` aims when its hunter fires from (fx, fz) to (tx, ty, tz). */
+  const monkeyAim = (fx, fz, tx, ty, tz, side, out) => {
+    let ax = tx - fx, az = tz - fz;
+    const flat = Math.hypot(ax, az) || 1;
+    ax /= flat; az /= flat;
+    out.x = tx + side * az * MONKEY.aimSide; out.y = ty; out.z = tz - side * ax * MONKEY.aimSide;
+    return out;
+  };
 
   const roundSettings = (round, players, out) => {
     const r = ROUNDS[round - 1];
@@ -1354,6 +1461,40 @@
       return g.dying ? "kill" : "hurt";
     };
 
+    /** `hit` by player `by` only while they hunt: in the hunt's roster, here and standing (not down). */
+    const hitBy = (id, damage, by) => {
+      const p = playerById(by);
+      return p && p.inGame && active(p) ? hit(id, damage, by) : "";
+    };
+    /** A rifle round's damage as the hunt stands: its tier's (red for the boss), halved (at least 1) while an hourglass stands. */
+    const shotDamage = () => {
+      const d = C.WEAPON.damage[weaponTier(s.round, s.state === STATE.BOSS)];
+      return halving() ? Math.max(1, Math.round(d / 2)) : d;
+    };
+    // ---------- what a shot meets ----------
+    const row = (rows, o, on, id, x, y, z, r, open) => {
+      rows[o] = on ? id : 0; rows[o + 1] = on ? x : 0; rows[o + 2] = on ? y : 0; rows[o + 3] = on ? z : 0;
+      rows[o + 4] = on ? r : 0; rows[o + 5] = on ? TARGET_ON | (open ? TARGET_OPEN : 0) : 0;
+      return o + TARGET_WIDTH;
+    };
+    /** Every enemy as a shot meets it now, written into `rows` (a target table of TARGET_SLOTS rows); returns `rows`. */
+    const targets = (rows) => {
+      let o = 0;
+      for (const g of ghosts) {
+        const h = HIT.ghostH[g.tier];
+        o = row(rows, o, g.on, g.id, g.x, g.y + h / 2, g.z, h * HIT.ghost, !g.dying);
+      }
+      for (const b of brutes) {
+        const ahead = HIT.ahead[b.kind];
+        o = row(rows, o, b.on, b.id, b.x + Math.sin(b.heading) * ahead, Math.max(0, b.y) + HIT.bruteH[b.kind] / 2, b.z + Math.cos(b.heading) * ahead,
+          HIT.bruteR[b.kind], !b.dying && b.phase >= BRUTE_PHASE.FALL);
+      }
+      for (const l of lings) o = row(rows, o, l.on, l.id, l.x, HIT.lingY, l.z, HIT.lingR, !l.dying && l.phase !== LING_PHASE.DROP);
+      const boss = !!s.bossOn && !s.bossDyingAt;
+      row(rows, o, boss, 0, s.bossX, C.BOSS.y + HIT.bossH / 2, s.bossZ, HIT.bossH * HIT.boss, bossShown());
+      return rows;
+    };
+
     // ---------- snapshots ----------
     // A hunt as plain numbers: everything `load` needs to go on from here, timers relative to `epoch`.
     const SNAP = { k: "gh", v: 1, e: 0, s: [], g: [], p: [], d: [], q: [], u: [], x: [], l: [], y: [] };
@@ -1556,11 +1697,12 @@
     };
 
     return {
-      state: s, ghosts, players, drops, brutes, lings, round, settings, debug, brutesAlive, bossShown, bossNext, halving, beginPresence, present, playerById, advance, start, ready, full, leave, pause, hit, snapshot, load, clear, jump,
+      state: s, ghosts, players, drops, brutes, lings, round, settings, debug, brutesAlive, bossShown, bossNext, halving, beginPresence, present, playerById, advance, start, ready, full, leave, pause, hit, hitBy, shotDamage, targets, snapshot, load, clear, jump,
       get ticks() { return ticks; }, get presence() { return presence; },
       frozen: (p) => frozen(p), alive, radiusOf, dawnMs
     };
   };
 
-  BL.ghostSim = { create, STATE, OUTCOME, TIER, LING_PHASE, DROP, TESS_DROP, LIGHTNING_DROP, MONKEY_DROP, DYING, BRUTE_PHASE, ROUNDS, CONFIG, roundSettings, introPages, introMs, weaponTier, hpOf, ghostTier, radiusOf, brutesFor, spidersFor, swarmFor, glassesFor, bonesFor, REVIVE_BOT };
+  BL.ghostSim = { create, STATE, OUTCOME, TIER, LING_PHASE, DROP, TESS_DROP, LIGHTNING_DROP, MONKEY_DROP, DYING, BRUTE_PHASE, ROUNDS, CONFIG, roundSettings, introPages, introMs, weaponTier, hpOf, ghostTier, radiusOf, brutesFor, spidersFor, swarmFor, glassesFor, bonesFor, REVIVE_BOT,
+    ARENA, HIT, MONKEY, TARGET_WIDTH, TARGET_ON, TARGET_OPEN, TARGET_BRUTES, TARGET_LINGS, TARGET_BOSS, TARGET_SLOTS, resolveShot, resolveBash, monkeyOrigin, monkeyAim };
 })();

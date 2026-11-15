@@ -5,6 +5,10 @@ import { boundedJSON, HOST } from './virtual-host.js';
 import { createClankerLogicalCheckpoint } from './clanker-roaming.js';
 import { createCheckpointPack } from './checkpoint-pack.js';
 
+// Repo Island adds walking solids and approach claims to the rock compatibility bridge.
+// Older complete worlds require an explicit migration, never an implicit replay.
+export const HUB_WORLD_CHECKPOINT_VERSION = 9;
+
 export function createHubWorldRecovery({ version, checkpointBytes, crew, clankers, roster,
   labEquipment, offices, inputs, bedId, bedFor, placement, worldState, layoutState, validateWorld, syncWorld, disposeWorld }) {
   const fail = () => { throw Error('invalid combined Hub recovery'); };
@@ -30,7 +34,7 @@ export function createHubWorldRecovery({ version, checkpointBytes, crew, clanker
   const bound = saved => {
     boundedJSON(saved, checkpointBytes, HOST.simulationNodes);
     if (!saved || Object.keys(saved).sort().join() !== 'activity,clankers,equipment,inputs,layout,offices,ooga,state,v,world'
-      || saved.v !== 7 || saved.world !== version || !Array.isArray(saved.offices)
+      || saved.v !== HUB_WORLD_CHECKPOINT_VERSION || saved.world !== version || !Array.isArray(saved.offices)
       || saved.offices.length !== offices.length || Object.keys(saved.offices).length !== offices.length) fail();
   };
   const poison = error => {
@@ -45,7 +49,7 @@ export function createHubWorldRecovery({ version, checkpointBytes, crew, clanker
       ready();
       try {
         if (sync(validateWorld()) !== true) fail();
-        const saved = { v: 7, world: version, activity: sync(roster.capture()), layout: sync(layoutState.capture()),
+        const saved = { v: HUB_WORLD_CHECKPOINT_VERSION, world: version, activity: sync(roster.capture()), layout: sync(layoutState.capture()),
           inputs: sync(inputs.capture()), state: sync(worldState.capture()), ooga: oogaPack.pack(ooga.capture()), clankers: companion.capture(),
           equipment: equipment.capture(), offices: offices.map(office => sync(office.checkpoint.capture())) };
         bound(saved);

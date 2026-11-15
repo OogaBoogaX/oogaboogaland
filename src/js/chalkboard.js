@@ -5,9 +5,12 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const C = BL.chalkBoard;
-  const KEY = "ooga-chalkboard-v2", OLD_KEY = "ooga-chalkboard-v1", MAX_STROKES = C.MAX_MARKS, MAX_POINTS = C.MAX_POINTS;
-  const W = 800, H = 500, BOARD_W = 1.5, BOARD_H = 0.875, BOARD_FACE_Z = -1 / 16 + 0.002;
-  const GRID_W = 160, GRID_H = 100, WASH_MS = 650, DRAW_MS = 700, WASH_BANDS = 6, WORLD_UPDATE_MS = 100;
+  // v3 holds the board as it is now; v2 held the smaller first board (widened as it loads), and v1 only the marks
+  // drawn over the original message.
+  const KEY = "ooga-chalkboard-v3", SMALL_KEY = "ooga-chalkboard-v2", OLD_KEY = "ooga-chalkboard-v1", MAX_STROKES = C.MAX_MARKS, MAX_POINTS = C.MAX_POINTS;
+  // The face in the dressing kit's chalkboard, in its own metres: 36 by 21 cells of a sixteenth over its foot.
+  const W = 1200, H = 750, BOARD_W = 2.25, BOARD_H = 1.3125, BOARD_Y = 0.5625, BOARD_FACE_Z = -1 / 16 + 0.002;
+  const GRID_W = 240, GRID_H = 150, WASH_MS = 650, DRAW_MS = 700, WASH_BANDS = 6, WORLD_UPDATE_MS = 100;
   const TEXT_FONT = "58.125px 'Bradley Hand', 'Marker Felt', cursive", TEXT_SIZE = 60, TEXT_LINE = 84.375, TEXT_MARGIN = 32;
   const clamp = (v) => Math.max(0, Math.min(1, v));
   const read = (key) => {
@@ -34,7 +37,7 @@
   const geometryFor = (ctx, previous = null) => {
     const geo = previous || { verts: [], faces: [], lines: [], castShadow: false };
     if (!geo.imageSurface) {
-      const pad = 0.006, left = -BOARD_W / 2 + pad, top = 0.75 + BOARD_H - pad;
+      const pad = 0.006, left = -BOARD_W / 2 + pad, top = BOARD_Y + BOARD_H - pad;
       const width = BOARD_W - pad * 2, height = BOARD_H - pad * 2;
       geo.verts.push(left, top - height, BOARD_FACE_Z, left + width, top - height, BOARD_FACE_Z,
         left + width, top, BOARD_FACE_Z, left, top, BOARD_FACE_Z);
@@ -81,8 +84,10 @@
       bindings.push([target, type, fn, opts]);
       target.addEventListener(type, fn, { ...opts, signal: listeners.signal });
     };
-    const net = BL.net, startingMarks = C.initial(), saved = read(KEY), legacy = saved === null ? read(OLD_KEY) : null;
-    const local = C.board(saved !== null ? saved : legacy !== null ? startingMarks.concat(legacy) : startingMarks.slice());
+    const net = BL.net, startingMarks = C.initial(), saved = read(KEY);
+    const small = saved === null ? read(SMALL_KEY) : null, legacy = saved === null && small === null ? read(OLD_KEY) : null;
+    const local = C.board(saved !== null ? saved : small !== null ? C.widen(small)
+      : legacy !== null ? startingMarks.concat(C.widen(legacy)) : startingMarks.slice());
     let localSession = C.session(local);
     const shared = () => net && net.state.chalk;
     const holding = () => { const c = shared(); return !!c && !!c.editor && c.editor === net.state.selfId; };
@@ -127,8 +132,8 @@
     };
     const paintBase = () => {
       ctx.fillStyle = "#1b4034"; ctx.fillRect(0, 0, W, H);
-      for (let i = 0; i < 900; i++) {
-        const x = (i * 1973 % 797), y = (i * 839 % 499);
+      for (let i = 0; i < 2025; i++) {
+        const x = (i * 1973 % (W - 3)), y = (i * 839 % (H - 1));
         ctx.fillStyle = i % 3 ? "#325549" : "#15392f";
         ctx.fillRect(x, y, 1 + i % 2, 1);
       }

@@ -10,11 +10,11 @@ export function createHubWorldPlacement(g) {
   const { island, solids, altar, cavePhysics, structuralSupport: support } = g;
   const { mirrorActorSegmentClear } = createHubMirrorClearance({ getMirror: () => g.mirror,
     radius: .3, eyeForward: .16, portalZ: hubCaveLayout.PORTAL_Z });
-  const clear = (x, y, z, radius, height) => [x, y, z, radius, height].every(finite)
+  const clear = (x, y, z, radius, height, fixedTrip = false) => [x, y, z, radius, height].every(finite)
     && radius > 0 && radius <= 10 && height > 0 && height <= 10 && y > -120
     && Math.hypot(x, z) + radius <= hubFlightBound
     && island.clearAt(x, y + 1e-5, z, radius, height - 1e-5)
-    && solids.clearAt(x, y + 1e-5, z, radius, height - 1e-5)
+    && (fixedTrip || solids.clearAt(x, y + 1e-5, z, radius, height - 1e-5))
     && support.bedSegmentClear(x, y + 1e-5, z, x, y + 1e-5, z, radius, height - 1e-5)
     && cavePhysics.matrixGateSegmentClear(x, y, z, x, y, z, radius, height)
     && hubCylinderSegmentClear(x, y, z, x, y, z, radius, height, 0, 0, 0, altar.height, altar.platformRadius);
@@ -42,8 +42,8 @@ export function createHubWorldPlacement(g) {
       // above these saved feet refuses reclaim rather than snapping the body.
       return { grounded: floor > -120 && Math.abs(p.y - floor) <= .04 };
     },
-    oogaPlacement(cave) {
-      if (!cave?.nonInteractive || cave.humanControlled || cave.remoteControlled
+    oogaPlacement(cave, others, fixedTrip = false) {
+      if (typeof fixedTrip !== 'boolean' || !cave?.nonInteractive || cave.humanControlled || cave.remoteControlled
         || ![cave.root.position.x, cave.root.position.y, cave.root.position.z, cave.root.rotation.y].every(finite)) return false;
       if (!cave.root.visible) return ['away', 'working', 'chilling', 'sleeping'].includes(cave.state);
       if (!g.npcLandSegmentClear(cave.root.position.x, cave.root.position.z,
@@ -74,7 +74,10 @@ export function createHubWorldPlacement(g) {
           const x = (minX + maxX) / 2, z = (minZ + maxZ) / 2;
           const radius = Math.max(.001, Math.hypot(maxX - minX, maxZ - minZ) / 2);
           const height = Math.max(.001, maxY - minY);
-          if (!clear(x, minY, z, radius, height)
+          // Only the source crew's fixed-trip predicate can exempt incidental
+          // props, as in live terrain-only routing. Terrain, structural beds,
+          // gates, the altar and mirror still refuse an obstructed restore.
+          if (!clear(x, minY, z, radius, height, fixedTrip)
             || !mirrorActorSegmentClear(x, minY, z, x, minY, z, height, null, radius)) return false;
         }
         // Accessories on the head belong to its collision envelope. Held tools

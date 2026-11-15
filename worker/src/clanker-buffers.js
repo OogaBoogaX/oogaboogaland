@@ -1,12 +1,12 @@
 // Fixed Clanker typed-buffer checkpoint component. This is not a controller or
 // world checkpoint: clocks, scalar state, references and rig state belong to its
 // enclosing transaction. No runtime caller enables it yet.
-import { boundedJSON } from "./virtual-host.js";
-export const CLANKER_BUFFERS = Object.freeze({ version: 1, actors: 53, bytes: 32 * 1024,
+import { boundedJSON, HOST } from "./virtual-host.js";
+export const CLANKER_BUFFERS = Object.freeze({ version: 1, actors: 53, fixedActors: HOST.maxOogas, bytes: 32 * 1024,
   expandedBytes: 1024 * 1024, blockBytes: 64 });
 // Fixed source-owned schema; no constructor, property path or allocation length
 // comes from a stored checkpoint. A source layout change requires a new version.
-const schema = [
+const baseSchema = [
   ["rage", "times", Float64Array, 42], ["rage", "hitters", Uint16Array, 42],
   ["rage", "serials", Float64Array, 128], ["rage", "path", Float64Array, 768],
   ["rage", "edgeRejected", Uint8Array, 48], ["rage", "rejectedTargets", Uint8Array, 0],
@@ -18,7 +18,11 @@ const schema = [
   ["climb", "points", Float64Array, 384], ["climb", "lengths", Float64Array, 128],
   ["climb", "headings", Float64Array, 128], ["jump", "points", Float64Array, 63],
 ];
-export const CLANKER_BUFFER_FIELDS = Object.freeze(schema.map(s => `${s[0]}.${s[1]}`));
+// Fixed-path capacity is selected by trusted world construction, never storage.
+export const CLANKER_FIXED_PATH_CAPACITY = 512;
+const fixedSchema = [...baseSchema, ["pathing", "laneX", Float64Array, CLANKER_FIXED_PATH_CAPACITY],
+  ["pathing", "laneZ", Float64Array, CLANKER_FIXED_PATH_CAPACITY]];
+export const CLANKER_BUFFER_FIELDS = Object.freeze(fixedSchema.map(s => `${s[0]}.${s[1]}`));
 const endian = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1 ? "le" : "be";
 const hex = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, "0"));
 const bad = () => { throw Error("invalid Clanker buffer checkpoint or capacity"); };
@@ -35,15 +39,19 @@ const lengthOf = Object.getOwnPropertyDescriptor(typed, "length").get;
 const bufferOf = Object.getOwnPropertyDescriptor(typed, "buffer").get;
 const offsetOf = Object.getOwnPropertyDescriptor(typed, "byteOffset").get;
 
-export function createClankerBufferCheckpoint(world, ids, identity = e => e?.owner?.id) {
-  if (typeof identity !== "function") bad();
-  if (!id(world) || !dense(ids, CLANKER_BUFFERS.actors) || ids.some(s => !id(s)) || new Set(ids).size !== ids.length) bad();
+export function createClankerBufferCheckpoint(world, ids, identity = e => e?.owner?.id, fixedPaths = false) {
+  if (typeof identity !== "function" || typeof fixedPaths !== "boolean") bad();
+  const schema = fixedPaths ? fixedSchema : baseSchema, version = fixedPaths ? 2 : CLANKER_BUFFERS.version;
+  if (!id(world) || !dense(ids, fixedPaths ? CLANKER_BUFFERS.fixedActors : CLANKER_BUFFERS.actors) || ids.some(s => !id(s)) || new Set(ids).size !== ids.length) bad();
   ids = [...ids];
   const length = spec => spec[3] || ids.length;
   const byteLength = spec => length(spec) * spec[2].BYTES_PER_ELEMENT;
   const optional = spec => spec[1] === "rejectedTargets" ? 1 : spec[1] === "agitators" ? 2 : 0;
   const maxRow = 1 + schema.reduce((n, spec) => n + Math.ceil(byteLength(spec) / CLANKER_BUFFERS.blockBytes) * 3, 0);
-  if (ids.length * schema.reduce((n, spec) => n + byteLength(spec), 0) > CLANKER_BUFFERS.expandedBytes) bad();
+  // At 64 paired actors: base 1,036,032 B + lanes 524,288 B =
+  // 1,560,320 B, below the explicit 1 MiB base plus lane allocation bound.
+  // Encoded payload admission remains 32 KiB regardless of roster size.
+  if (ids.length * schema.reduce((n, spec) => n + byteLength(spec), 0) > CLANKER_BUFFERS.expandedBytes + (fixedPaths ? ids.length * CLANKER_FIXED_PATH_CAPACITY * 16 : 0)) bad();
   return {
     capture(entries) {
       if (!Array.isArray(entries) || entries.length !== ids.length) bad();
@@ -78,12 +86,12 @@ export function createClankerBufferCheckpoint(world, ids, identity = e => e?.own
         }
         return row;
       });
-      const saved = { v: CLANKER_BUFFERS.version, world, endian, ids: [...ids], buffers };
+      const saved = { v: version, world, endian, ids: [...ids], buffers };
       boundedJSON(saved, CLANKER_BUFFERS.bytes, 13000);
       return saved;
     },
     restore(saved) {
-      if (!exact(saved, ["v", "world", "endian", "ids", "buffers"]) || saved.v !== CLANKER_BUFFERS.version
+      if (!exact(saved, ["v", "world", "endian", "ids", "buffers"]) || saved.v !== version
         || saved.world !== world || saved.endian !== endian || !dense(saved.ids, ids.length) || saved.ids.length !== ids.length
         || saved.ids.some((s, i) => s !== ids[i]) || !dense(saved.buffers, ids.length) || saved.buffers.length !== ids.length) bad();
       // Validate the complete input before allocating any expanded buffers.

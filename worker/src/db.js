@@ -81,10 +81,15 @@ export const getSession = async (db, token) => {
   }
   if (row.banned_at) return null;
   if (needsTouch(session, now)) {
-    await db.batch([
-      db.prepare("UPDATE sessions SET last_used_at = ?2 WHERE token_hash = ?1").bind(hash, now),
-      db.prepare("UPDATE players SET last_seen_at = ?2 WHERE id = ?1").bind(row.id, now),
-    ]);
+    // Bookkeeping: a failed stamp must not read as a failed sign-in.
+    try {
+      await db.batch([
+        db.prepare("UPDATE sessions SET last_used_at = ?2 WHERE token_hash = ?1").bind(hash, now),
+        db.prepare("UPDATE players SET last_seen_at = ?2 WHERE id = ?1").bind(row.id, now),
+      ]);
+    } catch (err) {
+      console.error("session touch failed", err);
+    }
   }
   return { player: row, session };
 };

@@ -386,6 +386,40 @@ test("every video cabinet arbitrates simultaneous players, pins presence and rel
   if (h.room.flushTimer) clearTimeout(h.room.flushTimer);
 });
 
+test("a game's cave cabinet and hall cabinet seat two players at once, and a player only ever holds one", async t => {
+  const h = harness(t), a = await seat(h, 1, "a"), b = await seat(h, 2, "b");
+  h.send(a.ws, { t: "zone", name: "arcade.hall" });
+  h.send(b.ws, { t: "zone", name: "outside" });
+  const hall = { t: "cabinet", op: "take", id: "mine", q: 1 }, cave = { t: "cabinet", op: "take", id: "mine@out", q: 2, slot: 3 }, at = protocol.CABINETS.slot(3);
+  h.advance(1000);
+  await Promise.all([h.send(a.ws, hall), h.send(b.ws, cave)]);
+  assert.equal(h.room.players.get(1).cabinet.id, "mine");
+  assert.equal(h.room.players.get(2).cabinet.id, "mine@out");
+  const p = h.room.players.get(2);
+  assert.deepEqual([p.x, p.y, p.z, p.yaw, p.zone], [at.x, at.y, at.z, at.yaw, "outside"]);
+  // A player at a cave cabinet stays in the main island's voice: its islanders hear them and they hear its islanders, never the hall.
+  const hallSeat = h.room.players.get(1), mic = { sub: "listen", track: "mic" };
+  p.voice = hallSeat.voice = mic;
+  const island = { id: 3, body: "c", zone: "outside", voice: mic };
+  const peers = protocol.voicePeers([hallSeat, p, island]);
+  assert.deepEqual(peers.get(2), [3]);
+  assert.deepEqual(peers.get(3), [2]);
+  assert.deepEqual(peers.get(1), []);
+  // The cave's seat is still one player's, and one player holds one cabinet.
+  h.send(a.ws, { ...hall, op: "leave" });
+  h.advance(1000); h.send(a.ws, { t: "zone", name: "outside" }); h.send(a.ws, { ...cave, q: 3 });
+  assert.equal(h.room.players.get(1).cabinet, null);
+  assert.equal(a.ws.sent.filter(m => m.t === "cabinet").at(-1).ok, false);
+  h.send(b.ws, { ...cave, op: "leave" });
+  assert.equal(h.room.players.get(2).cabinet, null);
+  // A cave seat can only be taken from outside, at a real slot.
+  h.advance(1000); h.send(a.ws, { t: "zone", name: "arcade.hall" }); h.send(a.ws, { ...cave, q: 4 });
+  assert.equal(h.room.players.get(1).cabinet, null);
+  for (const patch of [{ slot: undefined }, { slot: 4 }, { slot: 1.5 }, { slot: "0" }, { id: "race@out" }])
+    assert.equal(protocol.parseClientMessage(JSON.stringify({ t: "cabinet", id: "mine@out", q: 1, op: "take", slot: 0, ...patch })), null);
+  if (h.room.flushTimer) clearTimeout(h.room.flushTimer);
+});
+
 test("cabinet ownership survives hibernation but not disconnect, body revocation or socket replacement", async t => {
   const h = harness(t), a = await seat(h, 1, "a"), b = await seat(h, 2, "b");
   const claim = { t: "cabinet", op: "take", id: "mine", q: 1 };

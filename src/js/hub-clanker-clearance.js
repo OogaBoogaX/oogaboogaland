@@ -52,6 +52,27 @@
     const support = getSolids().supportAt(x, z, y, STEP_MAX, radius);
     return support > -Infinity && support <= y + STEP_MAX && support >= y - 3.5;
   };
+  // A passive NPC gorilla collides with cave walls only: island terrain and the
+  // cave masonry it climbs. No other solid is queried at all, so props, bodies
+  // and scenery never block, lift or divert it.
+  // Terrain stays with the callers' own island checks (climb poses skip it on
+  // purpose); this adds only the cave masonry, less any row a climb grips.
+  const PASSIVE_WALL_HULL = new Float64Array(24);
+  const clankerWallsOnlyClear = (x, y, z, radius, height, ignore = null) => {
+    const climbMasonry = getClimbMasonry(), solids = getSolids();
+    for (let corner = 0; corner < 8; corner++) {
+      PASSIVE_WALL_HULL[corner * 3] = x + (corner & 1 ? radius : -radius);
+      PASSIVE_WALL_HULL[corner * 3 + 1] = y + (corner & 2 ? height : 0);
+      PASSIVE_WALL_HULL[corner * 3 + 2] = z + (corner & 4 ? radius : -radius);
+    }
+    for (let i = 0; i < climbMasonry.length; i++) {
+      const row = climbMasonry[i];
+      if (row.node === ignore || x + radius < row.minX || x - radius > row.maxX || y + height < row.minY || y > row.maxY
+        || z + radius < row.minZ || z - radius > row.maxZ || !solids.isActive(row.node)) continue;
+      for (let j = 0; j < row.boxes.length; j++) if (BL.convex.hullsOverlap(PASSIVE_WALL_HULL, row.boxes[j])) return false;
+    }
+    return true;
+  };
   const clankerCylinderClear = (x, y, z, toX, toY, toZ, radius, height, entry = null, ignore = null, climbing = false, actors = true, checkTerrain = true, toRadius = radius, toHeight = height, skipClimbMasonry = false) => {
     const fromRadius = radius, fromHeight = height;
     radius = Math.max(radius, toRadius); height = Math.max(height, toHeight);
@@ -59,10 +80,12 @@
     if (!climbing && !getIsland().onLand(toX, toZ) && !clankerSatelliteLandAt(toX, toY, toZ, radius) || crossesSealedCave(x, z, toX, toZ, y)
       || checkTerrain && (!getIsland().clearAt(toX, toFloor, toZ, radius, body)
         || !getIsland().voxelSegmentClearAt(x, floor, z, toX, toFloor, toZ, radius, body))
-      || !getSolids().segmentClear(x, floor, z, toX, toFloor, toZ, fromRadius, fromHeight - 0.002, ignore, toRadius, toHeight - 0.002, !!entry && !climbing, skipClimbMasonry, false, !!entry?.rage?.active)
+      || (entry?.nonInteractive ? !skipClimbMasonry && !clankerWallsOnlyClear(toX, toFloor, toZ, radius, body, ignore)
+        : !getSolids().segmentClear(x, floor, z, toX, toFloor, toZ, fromRadius, fromHeight - 0.002, ignore, toRadius, toHeight - 0.002, !!entry && !climbing, skipClimbMasonry, false, !!entry?.rage?.active))
       || !matrixGateSegmentClear(x, floor, z, toX, toFloor, toZ, radius, body, true)) return false;
+    if (entry?.nonInteractive) return true;
     if ((!entry || !entry.controlled) && !npcFireClear(x, y, z, toX, toY, toZ, height)) return false;
-    if (!actors || entry?.nonInteractive) return true;
+    if (!actors) return true;
     if (getClankers()) for (let i = 0; i < getClankers().list.length; i++) {
       const other = getClankers().list[i];
       if (other !== entry && other !== ignore && other.active && !clankerPassingPeer(entry, other)
@@ -78,7 +101,7 @@
     return along * along + across * across;
   };
   const clankerFireClear = (entry, x, y, z, toX, toY, toZ, fromHeading = entry.heading, toHeading = fromHeading) => {
-    if (entry.controlled) return true;
+    if (entry.controlled || entry.nonInteractive) return true;
     // Prop-height blending can leave the rendered feet below their support
     // position. Keep that lower body inside the pit's avoidance height band.
     const offset = Math.min(0, entry.motion.supportOffset);
@@ -118,7 +141,8 @@
       || crossesSealedCave(x, z, toX, toZ, y)
       || !getIsland().clearAt(toX, to, toZ, radius, height)
       || !getIsland().voxelSegmentClearAt(x, from, z, toX, to, toZ, radius, height)
-      || !getSolids().segmentClear(x, from, z, toX, to, toZ, radius, height, null, radius, height, true, false, !entry.drive.airborne && !entry.jump.active, entry.rage.active)
+      || (entry.nonInteractive ? !clankerWallsOnlyClear(toX, to, toZ, radius, height)
+        : !getSolids().segmentClear(x, from, z, toX, to, toZ, radius, height, null, radius, height, true, false, !entry.drive.airborne && !entry.jump.active, entry.rage.active))
       || !matrixGateSegmentClear(x, from, z, toX, to, toZ, radius, height, true)) return false;
     return clankerFireClear(entry, x, y, z, toX, toY, toZ, fromHeading, toHeading);
   };
@@ -173,7 +197,8 @@
     return clankerCenterClear(entry, x, y, z, toX, toY, toZ, true)
       && getIsland().clearAt(toX, to, toZ, radius, 0.12)
       && getIsland().voxelSegmentClearAt(x, from, z, toX, to, toZ, radius, 0.12)
-      && getSolids().segmentClear(x, from, z, toX, to, toZ, radius, 0.12, null, radius, 0.12, true, false, false, entry.rage.active)
+      && (entry.nonInteractive ? clankerWallsOnlyClear(toX, to, toZ, radius, 0.12)
+        : getSolids().segmentClear(x, from, z, toX, to, toZ, radius, 0.12, null, radius, 0.12, true, false, false, entry.rage.active))
       && clankerPlayersClear(entry, x, y, z, toX, toY, toZ);
   };
   const clankerRigClear = (x, y, z, toX, toY, toZ, radius, height, entry = null, ignore = null,
@@ -271,7 +296,7 @@
   const clankerRestFootingClear = (entry, x, y, z, heading) => {
     if (entry.rage.active || !labInside(x, y, z))
       return clankerCenterClear(entry, x, y, z, x, y, z, false, heading, heading)
-        && Math.abs(clankerPointFootingAt(x, z, y, entry.rage.active) - y) < 0.1;
+        && Math.abs((entry.nonInteractive ? getIsland().supportAt(x, z, y, 0.02, ABYSS_FLOOR) : clankerPointFootingAt(x, z, y, entry.rage.active)) - y) < 0.1;
     CLANKER_REST_FOOTING.lab = labInside(x, y, z);
     return entry.gorilla.walkPoseClear(x, y, z, x, y, z, heading, heading,
       CLANKER_REST_FOOTING, clankerWalkSolidAt, clankerWalkTransitionClear,
@@ -386,6 +411,7 @@
       let clear = true;
       // NPC lab departures retain their coworker passing policy while the
       // body opens outside. A queued upright trunk cannot veto that handoff.
+      // Neither side of a passive pair reserves the doorway.
       if (!entry.nonInteractive && !clankerLabWorker(entry) && !clankerEntering(entry)) for (const other of getClankers().list) {
         if (other.nonInteractive || other === entry || !other.active) continue;
         const q = other.root.position;

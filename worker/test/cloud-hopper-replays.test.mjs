@@ -196,7 +196,7 @@ test("client keeps the active ghost fixed while numeric boards and post-finish r
 
 test("the actual recorder snapshots appearance, stages on elevated clouds without doubling height, and preserves world-space playback", () => {
   const context = { window: { BL: { cloudHopperReplayCodec: codec } }, Float32Array };
-  for (const name of ["math", "scene", "models", "cloud-hopper-ghost"])
+  for (const name of ["math", "scene", "models", "ghost-style", "cloud-hopper-ghost"])
     runInNewContext(readFileSync(new URL(`../../src/js/${name}.js`, import.meta.url), "utf8"), context);
   const BL = context.window.BL, S = BL.scene, root = S.createNode(), body = S.createNode(), head = S.createNode({ geometry: BL.models.box({ w: 1, h: 1, d: 1, color: "#ff0000" }) });
   S.addChild(body, head); S.addChild(root, body);
@@ -307,4 +307,23 @@ test("same-player replay finishes remain separate; upload retry and numeric fall
   assert.deepEqual(slower.runs.map(r => r.score), [1000, 2000, 3000]);
   assert.deepEqual(slower.replay, won.replay);
   assert.equal(f.objects.size, 2); // Only the two successive winning recordings went to R2.
+});
+
+
+test("island NPC ghosts render without loading the deferred Cloud Hopper game", () => {
+  const context = { window: { BL: {} }, Float32Array };
+  for (const name of ["math", "scene", "models", "ghost-style", "npc-ghosts"])
+    runInNewContext(readFileSync(new URL(`../../src/js/${name}.js`, import.meta.url), "utf8"), context);
+  const BL = context.window.BL;
+  assert.equal(BL.cloudHopperGhost, undefined);
+  const geometry = BL.models.box({ w: 1, h: 1, d: 1, color: "#ff0000" });
+  const actor = { root: BL.scene.createNode({ geometry }) };
+  const ghosts = BL.npcGhosts.create({ renderer: { releaseGeometry() {} } });
+  assert.equal(ghosts.set(actor, true), true);
+  ghosts.paint(.016);
+  assert.notEqual(actor.root.geometry, geometry);
+  assert.equal(actor.root.geometry.glass, .3);
+  ghosts.restore();
+  assert.equal(actor.root.geometry, geometry);
+  ghosts.dispose();
 });

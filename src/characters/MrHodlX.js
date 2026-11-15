@@ -96,7 +96,8 @@
     look: { gasMask: true, stoneAxe: true, hairless: true, noBrow: true, face: "none" },
     dress: {
       hatY: (k) => 0.66 * k.h,
-      club: (k) => ({ default: hockeyStickGeometry(k.h), gold: hockeyStickGeometry(k.h, true), rest: { x: 0.24, z: 0 }, carry: { x: 0.95, z: 0 } }),
+      // Turned a quarter about the shaft (y, then the tilt as z: the rotation's order is YXZ), so the blade faces forward.
+      club: (k) => ({ default: hockeyStickGeometry(k.h), gold: hockeyStickGeometry(k.h, true), rest: { x: 0, y: Math.PI / 2, z: 0.24 }, carry: { x: 0, y: Math.PI / 2, z: 0.95 } }),
       headgear(k) {
         const h = k.h;
         addChild(k.parts.head, createNode({ scale: { x: h, y: h, z: h }, geometry: gasMaskGeometry() }));

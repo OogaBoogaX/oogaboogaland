@@ -12,6 +12,23 @@ export const json = (data, status = 200, headers = {}) =>
 export const text = (body, status, headers = {}) =>
   new Response(body, { status, headers: { ...BASE_HEADERS, "content-type": "text/plain; charset=utf-8", ...headers } });
 
+/** A request's body as text, read no further than `max` bytes; null past that, where `request.text()` would buffer it all. */
+export const readBody = async (request, max) => {
+  if (Number(request.headers.get("content-length") || 0) > max) return null;
+  if (!request.body) return "";
+  const reader = request.body.getReader(), bytes = new Uint8Array(max);
+  let used = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (used + value.byteLength > max) { await reader.cancel(); return null; }
+      bytes.set(value, used); used += value.byteLength;
+    }
+    return new TextDecoder().decode(bytes.subarray(0, used));
+  } finally { reader.releaseLock(); }
+};
+
 export const redirect = (location, cookies = []) => {
   const headers = new Headers(BASE_HEADERS);
   headers.set("location", location);
@@ -45,7 +62,7 @@ export const allowed = async (limiter, key) => !limiter || (await limiter.limit(
 export const sessionToken = (request, env) =>
   parseCookies(request.headers.get("cookie")).get(cookieNames(env.SITE_ORIGIN).session) || null;
 
-const findSession = async (request, env, removal) => {
+const findSession = async (request, env, removal, strict = false) => {
   const token = sessionToken(request, env);
   if (!token) return null;
   try {
@@ -56,13 +73,15 @@ const findSession = async (request, env, removal) => {
     return character ? { ...found, token, character } : null;
   } catch (err) {
     console.error("session lookup failed", err);
+    // `/api/me` says it could not tell rather than "signed out", which a page believes for its whole life.
+    if (strict) throw err;
     return null;
   }
 };
 
 /** `{ player, session, token, character }` for a current character owner, or null. */
-export const getSessionFromRequest = (request, env) => findSession(request, env, false);
+export const getSessionFromRequest = (request, env, strict = false) => findSession(request, env, false, strict);
 
 // Losing character eligibility must not prevent clearing one's sessions or deleting one's account.
 // This authenticates ownership only; use exclusively for those removal operations.
-export const getSessionForRemoval = (request, env) => findSession(request, env, true);
+export const getSessionForRemoval = (request, env, strict = false) => findSession(request, env, true, strict);

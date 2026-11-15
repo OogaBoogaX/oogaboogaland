@@ -4,7 +4,7 @@ The shared doorway for [issue #235](https://github.com/OogaBoogaX/oogaboogaland/
 
 ## What it is for
 
-The Sphere has one doorway on the island (zone `sphere`) and nine rooms behind it (zones `sphere-1` … `sphere-9`). Signed-in players share it, so its short crossing is serialized and shown: an outside observer sees the doors part and the traveler walk into the dim passage and out of sight behind its curtain, and the doors close again. Only the crossing is serialized, never keypad use or loading: a page asks for the doorway only once its room is prepared (code loaded, picture taken), from the waiting spot square to the doors. The reservation coordinates presentation; the room does not simulate anyone's walk.
+The Sphere has one doorway on the island (zone `sphere`) and ten rooms behind it (zones `sphere-0` … `sphere-9`). Signed-in players share it, so its short crossing is serialized and shown: an outside observer sees the doors part and the traveler walk into the dim passage and out of sight behind its curtain, and the doors close again. Only the crossing is serialized, never keypad use or loading: a page asks for the doorway only once its room is prepared (code loaded, picture taken), from the waiting spot square to the doors. The reservation coordinates presentation; the room does not simulate anyone's walk.
 
 Signed-out (solo) visits never send any of this: their crossings are local and invisible to everyone else.
 
@@ -20,7 +20,7 @@ Client → room (each under `MESSAGE_MAX`):
 
 | Message | When |
 |---|---|
-| `{ t: "door", op: "ask", dir: "in" \| "out", room: 1…9 }` | Prepared and standing at the source-side waiting point: outside on the bridge for `in`, hidden behind the passage's curtain (already in zone `sphere`, with a valid pose there) for `out`. |
+| `{ t: "door", op: "ask", dir: "in" \| "out", room: 0…9 }` | Prepared and standing at the source-side waiting point: outside on the bridge for `in`, hidden behind the passage's curtain (already in zone `sphere`, with a valid pose there) for `out`. |
 | `{ t: "door", op: "go", cycle }` | A `grant` arrived and the page rechecked that it is still ready and still where it asked from; the walk starts now. |
 | `{ t: "door", op: "done", cycle }` | The traveler is through: behind the curtain at the scene handoff (`in`), or clear of the threshold on the bridge (`out`). |
 | `{ t: "door", op: "cancel" }` | Withdraws a pending ask or gives back a grant not yet used (Cancel, a failed recheck, a stale tab). |
@@ -38,6 +38,23 @@ Room → client:
 | `{ t: "transit-end", cycle }` | The crossing finished (`done`), was cancelled, expired, or its traveler disconnected. |
 
 `cycle` is an opaque id of 1–64 characters from `[A-Za-z0-9_-]`, issued by the room.
+
+## Locking a room
+
+A signed-in player inside the Conference Room (room 1, the only room with a lock) can lock it with a 4-digit PIN from the keypad beside its doors; the room refuses `lock`, `unlock` and `try` for any other room. `welcome` lists `room-lock-v1` in `features` and the rooms already locked in `locks`.
+
+| Message | When |
+|---|---|
+| `{ t: "door", op: "lock", room, pin }` | From inside that room: lock it. Refused if it is already locked. |
+| `{ t: "door", op: "unlock", room }` | From inside that room: open it. Anyone inside may. |
+| `{ t: "door", op: "try", room, pin }` | From the doorway's zone: the PIN for a locked room. |
+| `{ t: "door", op: "lock-result", action, room, ok, reason }` | The answer to any of those, to the sender alone; `reason` is `wrong`, `wait`, `wrong-room`, `not-at-door` or `already-locked`. |
+| `{ t: "door", op: "locks", rooms }` | Which rooms are locked now, to every page, whenever that changes. |
+| `{ t: "door", op: "room-pin", room, pin }` | A locked room's PIN, to each player inside it as it is locked and to each who walks in while it is. The page shows it on the inside keypad while it is in use and forgets it on leaving the room. |
+
+The room enforces it, not the page. A locked room refuses `ask` with `dir: "in"` and the `zone` message for its name (`denied`, reason `locked`) unless the player holds a pass: a right PIN gives one for a minute, spent on walking in, and a socket dropped inside gives one so a reconnect can come back. Leaving by the door needs the PIN to return. Five wrong tries make a player wait a minute; the tally is the player's, so a reconnect or the room's hibernation does not start it again. The PIN reaches only the players inside that room, is kept only while the room is locked and in the occupants' socket attachments, so hibernation keeps it, and the room opens by itself when its last occupant goes.
+
+On the island a locked room's number wears a padlock. Pressing it scrolls `ENTER 4-DIGIT PIN` in the window until a digit is typed; a right PIN crosses as Enter would, and a wrong one says so and goes back to choosing with no room selected. A solo copy has nothing to lock.
 
 ## Rules the room keeps
 
@@ -62,4 +79,4 @@ Room → client:
 
 ## Zones, presence and voice
 
-`sphere-1` … `sphere-9` match `ZONE_NAME`, have no dot, and are nine separate voice groups, apart from each other and from `sphere`. The page sends the destination body and bounded pose before its zone, and filters remote players by exact zone. A solo visit publishes `none` with no body for its whole length. The Worker rechecks voice eligibility after each asynchronous SFU pull and closes any track whose socket, body, zone, receiving session or publication changed while that call was in flight.
+`sphere-0` … `sphere-9` match `ZONE_NAME`, have no dot, and are ten separate voice groups, apart from each other and from `sphere`. The page sends the destination body and bounded pose before its zone, and filters remote players by exact zone. A solo visit publishes `none` with no body for its whole length. The Worker rechecks voice eligibility after each asynchronous SFU pull and closes any track whose socket, body, zone, receiving session or publication changed while that call was in flight.

@@ -464,6 +464,7 @@
         if (r === racers.player) {
           cam.shake = Math.max(cam.shake, 0.3 + tier * 0.15);
           audio.cues.boost();
+          BL.gamepad.rumble(0.15 + tier * 0.15, 0.45, 160);
           // The tiers are taught the first time each is released, once a visit.
           if (tier > driftTaught) {
             driftTaught = tier;
@@ -477,6 +478,7 @@
       if (r === racers.player) {
         if (hard) cam.shake = Math.max(cam.shake, 0.5);
         audio.cues.land();
+        if (hard) BL.gamepad.rumble(0.6, 0.4, 120);
       }
     };
     racers.events.onHop = (r) => {
@@ -487,11 +489,12 @@
       if (r === racers.player) {
         audio.cues.wall();
         cam.shake = Math.max(cam.shake, 0.3);
+        BL.gamepad.rumble(0.5, 0.3, 120);
       }
     };
     racers.events.onBump = (a, b) => {
       peelOut(a, 0.07, 0.25, 3);
-      if (a === racers.player || b === racers.player) audio.cues.bump();
+      if (a === racers.player || b === racers.player) { audio.cues.bump(); BL.gamepad.rumble(0.3, 0.3, 90); }
     };
     racers.events.onRespawn = (r, why) => {
       const geo = why === "lava" ? EMBER : why === "water" ? SPLASH : DUST;
@@ -500,6 +503,7 @@
       if (r === racers.player) {
         cam.warm = false;
         cam.shake = 0.6;
+        BL.gamepad.rumble(0.7, 0.5, 220);
         if (why === "water") audio.cues.splash();
         else audio.cues.respawn();
       }
@@ -554,7 +558,7 @@
     items.events.onHit = (r, by, kind) => {
       fx.burst(r.x, r.y + 0.8, r.z, 8, [SPARK, DUST], 2);
       fx.say(r.cave, kind === "peel" ? "Slippy!" : kind === "boulder" ? "OOF." : "Ow! Rock!", 1.4);
-      if (r === racers.player) cam.shake = Math.max(cam.shake, 0.7);
+      if (r === racers.player) { cam.shake = Math.max(cam.shake, 0.7); BL.gamepad.rumble(0.85, 0.6, 240); }
       if (by === racers.player && by) hud.toast(`${BL.characters.displayOf(r.name)} spun out`);
       if (r === racers.player || by === racers.player) audio.cues.hit();
       peelOut(r, 0.12, 0.4, 5);
@@ -965,7 +969,7 @@
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...racers.stats(), ...items.stats(), sectors: track.sectors.length, phase };
   };
   const raceScene = BL.deferred.scene("race", {
-    id: "race", renderOpts: null, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
+    id: "race", padContext: "race", renderOpts: null, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry,
     get inMotion() {
       return phase === "countdown" || phase === "racing" || fx.inMotion;

@@ -4,7 +4,7 @@
   const scope = typeof window === "undefined" ? globalThis : window;
   const BL = scope.BL = scope.BL || {};
   const PILE_POST_DEGREES = [315, 78, 195];
-  const BUILD_DEGREES = [12, 40, 66, 80, 102, 165, 195, 212, 282, 297, 312, 340];
+  const BUILD_DEGREES = [12, 40, 66, 80, 110, 165, 195, 212, 282, 297, 312, 340];
   const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
   const DEG = Math.PI / 180;
   const polar = (deg, r) => ({ x: Math.sin(deg * DEG) * r, z: -Math.cos(deg * DEG) * r });

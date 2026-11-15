@@ -1,3 +1,4 @@
+import { HOST } from './virtual-host.js';
 // Both complete NPC streams, including hidden/away entries and online owners.
 // Presence changes their client presentation, never this authoritative roster.
 import { createNpcPose } from './npc-pose.js';
@@ -15,7 +16,7 @@ export const hubNpcId = (kind, handle) => {
 
 export function createHubWorldProjection({ version, actors, geometry, world }) {
   const { crew, clankers } = actors, list = crew.list.filter(cave => !cave.contributor.temporary);
-  if (!list.length || list.length > 53 || list.length !== crew.list.length || clankers.list.length !== list.length) fail();
+  if (!list.length || list.length > HOST.maxOogas || list.length !== crew.list.length || clankers.list.length !== list.length) fail();
   const signature = hubMath.fnv1a(JSON.stringify([list.map(cave => cave.traits.name),
     (crew.workSites || []).map(site => site.mouth?.id || site.repo)])) >>> 0;
   const encode = createNpcPose(signature, list.length);

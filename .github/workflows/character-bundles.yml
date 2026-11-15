@@ -12,6 +12,11 @@ on:
     # Recover delayed schedules, API failures and superseded pending events.
     - cron: '17,37,57 * * * *'
   workflow_dispatch:
+    inputs:
+      override_pr:
+        description: 'Recover one merged character-override PR (number); empty runs the normal sweep'
+        type: string
+        required: false
 
 permissions:
   contents: write

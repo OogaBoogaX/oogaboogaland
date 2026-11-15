@@ -13,7 +13,7 @@ export const SESSION_PROTOCOL = "host-session-v5";
 export const HOST = Object.freeze({
   schema: 4, key: "virtual-host-v1", stepMs: 250, maxSteps: 8, maxLagMs: 30000,
   leaseMs: 10000, maxRunMs: 15 * 60000, checkpointBytes: 96 * 1024,
-  snapshotBytes: 32 * 1024, maxNpcs: 128, maxFollowers: 32, deliveryMs: 250,
+  snapshotBytes: 32 * 1024, maxNpcs: globalThis.BL.npcAuthority.MAX_NPCS, maxOogas: globalThis.BL.npcAuthority.MAX_OOGAS, maxFollowers: 32, deliveryMs: 250,
   passiveSteps: 4096, metadataBytes: 2048, sessionSlotBytes: 1024, simulationNodes: 16000, sessionSlotNodes: 48, metadataNodes: 128,
 });
 // Matches the existing complete-body store's capacity; never truncate a world

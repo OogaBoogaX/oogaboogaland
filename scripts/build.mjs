@@ -15,6 +15,13 @@ const sha256 = (text) => `'sha256-${createHash("sha256").update(text, "utf8").di
 writeCharacters();
 let html = read("index.html");
 
+// The source links its touch icon beside index.html; the single-file page has no file beside it (opened from disk it
+// asked for a missing apple-touch-icon.png), so it carries the icon's bytes, as it carries its favicons. Site staging
+// links the staged file again (scripts/distribution-icons.mjs).
+const touchTag = /<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon\.png">/;
+if (!touchTag.test(html)) throw new Error("index.html: apple-touch-icon link not found");
+html = html.replace(touchTag, () => `<link rel="apple-touch-icon" sizes="180x180" href="data:image/png;base64,${readFileSync(join(root, "src", "apple-touch-icon.png")).toString("base64")}">`);
+
 const cssTag = /<link rel="stylesheet" href="([^"]+)">/;
 const cssMatch = html.match(cssTag);
 if (!cssMatch) throw new Error("index.html: stylesheet link not found");

@@ -68,7 +68,9 @@ export const retiredCharacters = (existing, sourceFor) => {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const out = join(root, "untracked", "new-characters"), retirement = join(out, "retired.json");
   const sourceFor = (file) => { const path = join(root, "src", "characters", file); return existsSync(path) ? readFileSync(path, "utf8") : null; };
-  const readQueued = () => queuedCharacters(createGitHub(process.env.GITHUB_REPOSITORY, process.env.GITHUB_TOKEN), process.env.CHARACTER_BOT_LOGIN);
+  // Against the checked-out commit, so a merged override's superseded revision
+  // cannot fail this build before the coordinator withdraws it from its bundle.
+  const readQueued = () => queuedCharacters(createGitHub(process.env.GITHUB_REPOSITORY, process.env.GITHUB_TOKEN), process.env.CHARACTER_BOT_LOGIN, process.env.GITHUB_SHA);
   if (process.argv[2] === "--retired-artifact") {
     const records = existsSync(retirement) ? JSON.parse(readFileSync(retirement, "utf8")) : [];
     if (!Array.isArray(records) || records.length > MAX_CHARACTERS || new Set(records.map((r) => r?.file)).size !== records.length) throw new Error("Invalid retired character artifact");
