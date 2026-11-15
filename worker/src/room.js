@@ -27,6 +27,7 @@
 // Voice links: each account's asks live in the room's storage, so a link outlives reconnects, sleep and deploys (see
 // Voice links in protocol.js). Nothing runs for them while idle.
 
+import { observeRoomRescue } from "./room-rescue.js";
 import { DurableObject } from "cloudflare:workers";
 import {
   CABINETS, hockey, block, BLOCK, CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
@@ -1077,6 +1078,12 @@ export class Room extends DurableObject {
       }
       return { ready: !closed.length && !pending.length && !unobserved.length, tokens, closed, pending, unobserved };
     });
+  }
+
+  // Server-only public rescue/command observation; no endpoint or binding
+  // enables it. The caller fences the host revision read before this snapshot.
+  rescueObservation(ticket, identity = null) {
+    return this.ctx.blockConcurrencyWhile(() => observeRoomRescue(this, ticket, identity));
   }
 
   // A finite server work inventory. Expired preparation is closed at its
