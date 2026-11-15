@@ -7,6 +7,7 @@ import { randomToken, sameString } from "./crypto.js";
 import { createSession, deleteAllSessions, deleteSession, SESSION_SECONDS, upsertPlayerFromGitHub } from "./db.js";
 import { allowed, clientIp, fromSite, getSessionForRemoval, redirect, safeNext, text } from "./http.js";
 import { contributorFor } from "./contributor-access.js";
+import { oogatron } from "./contributor-policy.js";
 
 const STATE_SECONDS = 600;
 const GITHUB_AUTHORIZE = "https://github.com/login/oauth/authorize";
@@ -79,7 +80,7 @@ const callback = async (request, env, url) => {
   if (!Number.isSafeInteger(profile.id) || typeof profile.login !== "string" || profile.type !== "User") {
     return text("GitHub sent an unexpected profile.", 502, { "set-cookie": clearState });
   }
-  if (!(await contributorFor(profile.login, profile.id))) {
+  if (!(await contributorFor(profile.login, profile.id, oogatron(env)))) {
     const destination = new URL(next, env.SITE_ORIGIN);
     destination.searchParams.set("signin", "contributor-required");
     return redirect(destination.pathname + destination.search + destination.hash, [clearState]);

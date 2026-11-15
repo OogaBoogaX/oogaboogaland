@@ -23,7 +23,7 @@ import { DurableObject } from "cloudflare:workers";
 import { appRow, createAudience, DEFAULT_LIMITS, FANOUT_DEFAULT, ID, isZone, ZONES, zoneReactHz } from "./audience-model.js";
 import { decideCapability } from "./chat-capability.js";
 import { contributorFor } from "./contributor-access.js";
-import { readContributorSnapshot } from "./contributor-policy.js";
+import { oogatron, readContributorSnapshot } from "./contributor-policy.js";
 import { bridgeFeatures } from "./chat-bridge-protocol.js";
 import { SEAT_REVISION } from "./cloud-seats.js";
 import "../../src/js/emoji-data.js";
@@ -684,7 +684,7 @@ export class Audience extends DurableObject {
     this.contributions.at = Date.now();
     this.contributions.pending = (async () => {
       try {
-        const snapshot = await readContributorSnapshot();
+        const snapshot = await readContributorSnapshot(oogatron(this.env));
         const map = new Map();
         for (const row of Array.isArray(snapshot.contributors) ? snapshot.contributors : []) {
           if (!row || typeof row.login !== "string" || !row.counts) continue;

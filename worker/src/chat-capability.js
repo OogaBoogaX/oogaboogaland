@@ -9,6 +9,7 @@
 // not be read, so nothing was decided). A display name or a donation is never consulted.
 
 import { BridgeRefusal } from "./chat-bridge-protocol.js";
+import { oogatron } from "./contributor-policy.js";
 
 export const POLICY = "obl-contributor-v1";
 const GITHUB_ID = /^[1-9][0-9]{0,15}$/;
@@ -42,7 +43,7 @@ export const decideCapability = async (env, principal, contributorFor, now = Dat
     // A login another id holds (renamed away on GitHub, then registered by someone else) is not this account's Ooga.
     if (row && row.collision) return answer("ineligible", null, "identity-collision");
   }
-  const owned = await contributorFor(login, id);
+  const owned = await contributorFor(login, id, oogatron(env));
   if (owned) return answer("eligible", owned.handle);
   return typeof contributorFor.fresh !== "function" || contributorFor.fresh() ? answer("ineligible", null, "not-contributor") : answer("unknown", null, "unavailable");
 };

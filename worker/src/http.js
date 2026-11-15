@@ -3,6 +3,7 @@
 import { cookieNames, parseCookies } from "./cookies.js";
 import { getSession } from "./db.js";
 import { contributorFor } from "./contributor-access.js";
+import { oogatron } from "./contributor-policy.js";
 
 const BASE_HEADERS = { "cache-control": "no-store", "x-content-type-options": "nosniff" };
 
@@ -69,7 +70,7 @@ const findSession = async (request, env, removal, strict = false) => {
     const found = await getSession(env.DB, token);
     if (!found) return null;
     if (removal) return { ...found, token };
-    const character = await contributorFor(found.player.login, found.player.id);
+    const character = await contributorFor(found.player.login, found.player.id, oogatron(env));
     return character ? { ...found, token, character } : null;
   } catch (err) {
     console.error("session lookup failed", err);

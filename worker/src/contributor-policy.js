@@ -35,6 +35,11 @@ export const contributorRows = (stats, now = Date.now()) => {
   return [...rows.values()].sort((a, b) => a.handle < b.handle ? -1 : a.handle > b.handle ? 1 : 0);
 };
 
+// A Worker cannot fetch another of its own account's workers.dev addresses, so the island reaches Oogatron through
+// its `OOGATRON` service binding; without one (tests, the merge-time generator) a lookup keeps its own fetcher.
+export const oogatron = (env) => env?.OOGATRON && typeof env.OOGATRON.fetch === "function"
+  ? (input, init) => env.OOGATRON.fetch(input, init) : undefined;
+
 export const readContributorSnapshot = async (fetcher = fetch) => {
   const response = await fetcher(STATS_URL, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(4000) });
   if (!response.ok) throw new Error(`Oogatron returned ${response.status}`);
@@ -71,12 +76,12 @@ const within = (promise, ms) => {
 };
 export const createContributorLookup = (fetcher = fetch, clock = Date.now, patience = PENDING_MS) => {
   let rows = new Map(), until = 0, expires = 0, pending = null, pendingAt = 0;
-  const look = async (login) => {
+  const look = async (login, via) => {
     if (typeof login !== "string" || !LOGIN.test(login)) return null;
     if (pending && clock() - pendingAt >= patience) pending = null;
     if (clock() >= until && !pending) { pendingAt = clock(); pending = (async () => {
       try {
-        const snapshot = await readContributorSnapshot(fetcher);
+        const snapshot = await readContributorSnapshot(via || fetcher);
         rows = new Map(contributorRows(snapshot, clock()).map((row) => [row.handle, row]));
         expires = time(snapshot.meta.generated_at) + 86400000;
         until = clock() + 60000;
@@ -104,7 +109,7 @@ export const createOwnedCharacterLookup = (cast, lookup = createContributorLooku
       lastCommit: Math.floor(Date.parse(row.last_commit_at) / 1000),
     });
   }
-  const owned = async (login, id) => {
+  const owned = async (login, id, via) => {
     if (typeof login !== "string" || !LOGIN.test(login) || login.includes("--")) return null;
     const account = globalThis.BL.accountIdentities.accountForId(id);
     if (account) {
@@ -114,7 +119,7 @@ export const createOwnedCharacterLookup = (cast, lookup = createContributorLooku
     const key = login.toLowerCase(), own = owners.get(key);
     if (own) return globalThis.BL.accountIdentities.accountForHandle(own.handle) ? null : own;
     if (handles.has(key)) return null;
-    return lookup(login);
+    return lookup(login, via);
   };
   // Ooga Chat's capability answer (worker/src/chat-capability.js) tells "ineligible" from "unknown" by this.
   owned.fresh = () => typeof lookup.fresh === "function" ? lookup.fresh() : true;

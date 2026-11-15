@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-import { contributorRows, createContributorLookup, createOwnedCharacterLookup } from "../src/contributor-policy.js";
+import { STATS_URL, contributorRows, createContributorLookup, createOwnedCharacterLookup, oogatron } from "../src/contributor-policy.js";
 import { missingCharacters, characterSource, retiredCharacters, queuedDefaults } from "../../scripts/sync-characters.mjs";
 import { checkCharacterIdentities, identityAdvice } from "../../scripts/contributor-pr.mjs";
 import { declaredIdentity, mayAuthorIdentity } from "../../scripts/character-identity.mjs";
@@ -969,6 +969,17 @@ test("a refresh that never settles, its request cancelled, keeps nobody waiting 
   now += 10; hang = false;
   assert.equal((await lookup("new-ooga")).handle, "new-ooga", "the next look starts a new refresh");
   assert.equal(calls, 2);
+});
+
+test("the island reads Oogatron through its service binding, and its own fetcher only without one", async () => {
+  const seen = [];
+  const reader = (name) => async (url) => { seen.push([name, String(url)]); return Response.json(snapshot(person("new-ooga"))); };
+  const bound = createOwnedCharacterLookup([], createContributorLookup(reader("public"), () => NOW));
+  assert.equal((await bound("new-ooga", 990000001, oogatron({ OOGATRON: { fetch: reader("binding") } }))).handle, "new-ooga");
+  const unbound = createOwnedCharacterLookup([], createContributorLookup(reader("public"), () => NOW));
+  assert.equal(oogatron({}), undefined);
+  assert.equal((await unbound("new-ooga", 990000001, oogatron({}))).handle, "new-ooga");
+  assert.deepEqual(seen, [["binding", STATS_URL], ["public", STATS_URL]]);
 });
 
 test("sign-in belongs to the bundled GitHub owner, never an account named after their alias", async () => {

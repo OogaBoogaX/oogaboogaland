@@ -6,7 +6,7 @@ import * as cookies from "../src/cookies.js";
 import * as crypto from "../src/crypto.js";
 import * as db from "../src/db.js";
 import * as highscoreStore from "../src/highscore-store.js";
-import { createOwnedCharacterLookup } from "../src/contributor-policy.js";
+import { createOwnedCharacterLookup, oogatron } from "../src/contributor-policy.js";
 import { turnConfigured } from "../src/sfu.js";
 import { RULES } from "../src/tess-rules.js";
 import "../../src/js/highscore-rules.js";
@@ -36,9 +36,9 @@ lookup = async () => null, fetcher = async () => { throw new Error("Unexpected n
 anthropic = class { constructor() { throw new Error("Unexpected Claude call"); } }, facts = TESS_FACTS } = {}) => {
   const access = load("contributor-access", { CAST_ROWS: cast,
     createOwnedCharacterLookup: (rows) => createOwnedCharacterLookup(rows, lookup) }, ["contributorFor"]);
-  const http = load("http", { ...cookies, ...db, ...access }, ["json", "text", "redirect", "fromSite", "safeNext",
+  const http = load("http", { ...cookies, ...db, ...access, oogatron }, ["json", "text", "redirect", "fromSite", "safeNext",
     "clientIp", "allowed", "sessionToken", "getSessionFromRequest", "getSessionForRemoval", "readBody"]);
-  const auth = load("auth", { ...cookies, ...crypto, ...db, ...http, ...access, fetch: fetcher }, ["handleAuth"]);
+  const auth = load("auth", { ...cookies, ...crypto, ...db, ...http, ...access, oogatron, fetch: fetcher }, ["handleAuth"]);
   const api = load("api", { ...cookies, ...db, ...http, turnConfigured, GAME_KINDS }, ["handleApi"]);
   const donations = load("donations", http, ["handleDonations"]);
   const tess = load("tess", { ...http, Anthropic: anthropic, FACTS: facts, RULES }, ["handleTess", "pruneTess", "ask", "RESERVE"]);
