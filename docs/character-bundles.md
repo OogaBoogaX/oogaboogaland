@@ -5,7 +5,7 @@ GitHub Actions keeps three PRs open against `rock`:
 | PR | Changes | Merge |
 |---|---|---|
 | Daily character updates | Bounded literal character data in the documented wrapper | First successful run at/after the following midnight UTC |
-| Character updates · maintainer review required | Custom code that passes the preliminary screen and ownership checks | w-s-bitcoin or 2140data approves the current head, then an authorized human merges |
+| [Batch] Character updates · maintainer review required | Custom code that passes the preliminary screen and ownership checks | w-s-bitcoin or 2140data approves the current head, then an authorized human merges |
 | Character display names · maintainer review required | Operator-submitted display names matching the existing GitHub owner; all other bytes unchanged | Same exact-head approval and manual merge as custom code |
 
 The automation never merges the manual or rename lanes. A queued update invalidates old
