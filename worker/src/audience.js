@@ -612,6 +612,7 @@ export class Audience extends DurableObject {
     // A world publication gone or replaced: every subscription to the old one is closed at once. The answer names the
     // speakers whose subscriptions the SFU has not yet confirmed closed: the Room's `closed` for them waits (#667).
     await this.media.prune();
+    this.media.announce();
     const pending = this.media.pending();
     // Report every retirement that finished meanwhile, by any path, before the pending list moves on.
     this.confirmRetired();

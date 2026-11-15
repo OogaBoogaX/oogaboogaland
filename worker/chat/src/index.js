@@ -10,7 +10,7 @@
 
 import { handleAudienceSocket } from "./audience.js";
 import { handleAuth } from "./auth.js";
-import { handleCommonsSocket } from "./commons.js";
+import { handleCommonsName, handleCommonsSocket } from "./commons.js";
 import { handleAvatar } from "./avatar.js";
 import { bootstrap, effective, health, version } from "./config.js";
 import { handleDonations } from "./donations.js";
@@ -52,6 +52,7 @@ const dispatch = async (request, env, deps) => {
     return json(await read(env));
   }
   if (path === "/api/chat/audience") return handleAudienceSocket(request, env, deps);
+  if (path === "/api/chat/commons/name") return handleCommonsName(request, env, deps);
   if (path === "/api/chat/commons") return handleCommonsSocket(request, env, deps);
   if (path.startsWith("/api/chat/media/")) return handleMedia(request, env, url, deps);
   if (path.startsWith("/api/chat/avatar/")) return handleAvatar(request, env, url, deps);

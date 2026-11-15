@@ -10,7 +10,8 @@
 // `hello`; `outdoor`, `cloud` and `commons` for those paths), so deploying this Worker with the variable empty is the
 // kill switch for the whole outward path, whatever the edge believes. `hello` always answers, so the edge can say why.
 // Operations are added by the issues that need them: `capability` (#663, chat-capability.js), `cast` (#664,
-// chat-public.js), `revoke` and the audience socket (#665, audience.js); later media (#666-#668) and the Commons (#670). This file holds the boundary and `hello`.
+// chat-public.js), `revoke` and the audience socket (#665, audience.js); later media (#666-#668), the Commons (#670) and
+// its member's name (`display`, chat-display.js). This file holds the boundary and `hello`.
 
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { BRIDGE_ENVIRONMENTS, BRIDGE_VERSION, BridgeRefusal, ENVELOPE_MAX, ERROR_CODE, FEATURES, REQUEST_ID, bridgeFeatures } from "./chat-bridge-protocol.js";
@@ -19,6 +20,8 @@ export { BridgeRefusal, FEATURES, bridgeFeatures };
 import { capabilityOps } from "./chat-capability.js";
 import { contributorFor } from "./contributor-access.js";
 import { publicOps } from "./chat-public.js";
+import { displayOps } from "./chat-display.js";
+import { deleteChatOnlyPlayer } from "./db.js";
 import { AUDIENCE_NAME } from "./audience.js";
 import CAST_ROWS from "./characters.gen.json" with { type: "json" };
 
@@ -64,6 +67,8 @@ export const revokeOps = {
       // The Commons is a GitHub contributor's alone: its sockets close too (#670).
       const github = p.provider === "github" && /^[1-9][0-9]{0,15}$/.test(String(p.providerUserId)) ? Number(p.providerUserId) : 0;
       const commons = github && env.ROOM ? await env.ROOM.getByName("island").communityRevoke(github, reason).catch(() => ({ revoked: 0 })) : { revoked: 0 };
+      // An Ooga Chat account deleted takes back the player row its Commons name made, while it never signed in here.
+      if (github && reason === "deleted" && env.DB) await deleteChatOnlyPlayer(env.DB, github);
       return { revoked: audience.revoked + commons.revoked };
     },
   },
@@ -75,7 +80,8 @@ export const readinessOps = {
   readiness: { run: async (env) => env.AUDIENCE ? env.AUDIENCE.getByName(AUDIENCE_NAME).readiness() : { sfu: "off", cleanup: "ok" } },
 };
 
-export const OPS = { ...BASE_OPS, ...capabilityOps({ contributorFor }), ...publicOps({ cast: CAST_ROWS }), ...revokeOps, ...readinessOps };
+export const OPS = { ...BASE_OPS, ...capabilityOps({ contributorFor }), ...publicOps({ cast: CAST_ROWS }), ...revokeOps, ...readinessOps,
+  ...displayOps({ contributorFor }) };
 
 const SOCKET_HEADERS = ["upgrade", "connection", "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions"];
 /**

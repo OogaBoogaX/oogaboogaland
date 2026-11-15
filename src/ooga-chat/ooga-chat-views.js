@@ -1,6 +1,6 @@
 // Ooga Chat's views, each `view(ctx)` returning `{ node, update(state), dispose() }` for ooga-chat-shell.js. `ctx`
-// carries `actions` (`signIn(provider)`, `signOut()`, `retry()`, `joinVoice()`, `leaveVoice()`, `mute()`, `zone(id)`)
-// and `media`, the voice seam; `state` is `{ mode, boot, session, auth, notice, busy, zone, voice, audience, commons }`
+// carries `actions` (`signIn(provider)`, `signOut()`, `retry()`, `joinVoice()`, `leaveVoice()`, `mute()`, `retryVoice()`,
+// `zone(id)`) and `media`, the voice controller (ooga-chat-media.js); `state` is `{ mode, boot, session, auth, notice, busy, zone, voice, audience, commons }`
 // (docs/ooga-chat-app.md), where `mode` is loading, live, unavailable or stale and `auth` is ooga-chat-auth.js's. Every
 // tab is the island's own panel (#656), in its markup and its rules: `chat` is the Ooga Chat tab, sign-in or the island's
 // Ooga Chat panel with its footer; `bananas`, `roster`, `commons` and `online` are Bananas, Contributing Oogas, The Commons
@@ -28,6 +28,13 @@
     stale: "This page is older than Ooga Chat's service."
   };
   const OFFLINE = "You're offline. Ooga Chat reconnects when you're back.";
+  // Join Voice while not speaking (ooga-chat-media.js's state): its words while joining or leaving, whether it can be
+  // pressed, and why not, or what the last attempt said (a blocked microphone, a full zone).
+  const joining = (state, allowed, media) => {
+    const voice = state.voice, why = !state.device.online ? OFFLINE : allowed.why || (media.available ? voice.notice : media.why || "Voice opens here soon.");
+    return { words: voice.phase === "leaving" ? "Leaving…" : voice.busy ? "Joining…" : "",
+      disabled: !allowed.joinVoice || !media.available || !!state.busy || voice.busy || !state.device.online, why };
+  };
   const PROVIDERS = { github: ["Continue with GitHub", "Opening GitHub…", "GitHub sign-in is unavailable"], x: ["Continue with X", "Opening X…", "X sign-in is unavailable"] };
   const { gates } = BL.oogaChatAuth;
   // A visually hidden explanation a control names with aria-describedby.
@@ -198,7 +205,11 @@
       zones.append(el);
       return el;
     });
-    const statusText = make("span", ""), heard = make("p", "help cloud-status", statusText);
+    // A receiver that gave up offers its own retry here, beside what the line says.
+    const retryVoice = button("link", "Try again");
+    retryVoice.hidden = true;
+    retryVoice.addEventListener("click", () => actions.retryVoice(), { signal });
+    const statusText = make("span", ""), heard = make("p", "help cloud-status", statusText, retryVoice);
     heard.setAttribute("role", "status");
     heard.setAttribute("aria-live", "polite");
     heard.hidden = true;
@@ -230,8 +241,13 @@
       if (!state.session) return;
       const { audience: now, zone } = state;
       for (const el of zoneButtons) attr(el, "aria-pressed", String(el.dataset.cloudZone === zone));
-      const words = HEARD[now.status]?.(zone) || (now.status === "live" && !now.list.length ? "Nobody is here yet." : "");
+      // The feed's state first; then voice's (playback the browser held back, a receiver that gave up, what the last try
+      // to speak said); then an empty zone.
+      const failed = now.status === "live" && state.voice.phase === "failed";
+      const words = HEARD[now.status]?.(zone) || (now.status !== "live" ? "" : state.voice.blocked ? "Tap anywhere to hear this zone."
+        : failed ? "Can't hear this zone right now. " : state.voice.notice || (!now.list.length ? "Nobody is here yet." : ""));
       set(statusText, "textContent", words);
+      set(retryVoice, "hidden", !failed);
       set(heard, "hidden", !words);
       const who = state.session.identity.participant, moved = who !== self, mics = moved || state.voice !== voice, role = voice && voice.role;
       self = who;
@@ -283,14 +299,15 @@
       const speaker = state.voice.role === "speaker", allowed = gates(state, Date.now());
       const source = speaker ? "chat" : "";
       if (name.dataset.source !== source) name.dataset.source = source;
-      set(mute, "disabled", !speaker || !!state.busy);
+      set(mute, "disabled", !speaker || !!state.busy || state.voice.busy);
       set(mute, "textContent", speaker && !state.voice.muted ? "Mute" : "Unmute");
       attr(mute, "aria-pressed", String(speaker && state.voice.muted));
       set(muteWhy, "textContent", speaker ? "" : "Join voice first to unmute.");
+      const going = joining(state, allowed, media);
       join.dataset.voice = speaker ? "speaker" : "listener";
-      set(join, "textContent", speaker ? "Leave Voice" : "Join Voice");
-      set(join, "disabled", speaker ? !!state.busy : !allowed.joinVoice || !media.available || !!state.busy || !state.device.online);
-      const why = speaker ? "" : !state.device.online ? OFFLINE : allowed.why || (media.available ? "" : "Voice opens here soon.");
+      set(join, "textContent", speaker ? "Leave Voice" : going.words || "Join Voice");
+      set(join, "disabled", speaker ? !!state.busy : going.disabled);
+      const why = speaker ? "" : going.why;
       set(joinWhy, "textContent", why);
       set(join, "title", why);
     };
@@ -342,12 +359,12 @@
         return;
       }
       set(name, "textContent", who.identity.display);
-      const speaker = state.voice.role === "speaker", allowed = gates(state, Date.now());
+      const speaker = state.voice.role === "speaker", allowed = gates(state, Date.now()), join = joining(state, allowed, media);
       set(voice, "hidden", false);
-      set(voice, "textContent", speaker ? state.voice.muted ? "Unmute" : "Mute" : "Join voice");
-      set(voice, "disabled", speaker ? !!state.busy : !allowed.joinVoice || !media.available || !!state.busy || !state.device.online);
+      set(voice, "textContent", speaker ? state.voice.muted ? "Unmute" : "Mute" : join.words || "Join voice");
+      set(voice, "disabled", speaker ? !!state.busy : join.disabled);
       attr(voice, "aria-pressed", String(speaker && !state.voice.muted));
-      const why = speaker ? "" : !state.device.online ? OFFLINE : allowed.why || (media.available ? "" : "Voice opens here soon.");
+      const why = speaker ? "" : join.why;
       set(voiceWhy, "textContent", why);
       set(voice, "title", why);
       set(leave, "hidden", !speaker);
@@ -602,8 +619,62 @@
     send.disabled = true;
     const form = make("form", "chat-form", make("span", "chat-field", input, left), send);
     form.autocomplete = "off";
+    // The name field at its top, as the island's Commons has it (index.html `chat-identity`, chat.js): the account's island
+    // display name, shown to members only, saved through the edge to the island (`ctx.commons.rename`).
+    const nameInput = make("input", "");
+    Object.assign(nameInput, { id: "oc-commons-name", type: "text", minLength: 3, maxLength: 24, autocomplete: "off", disabled: true });
+    nameInput.setAttribute("aria-describedby", "oc-commons-name-status");
+    const nameLabel = make("label", "", "Name");
+    nameLabel.htmlFor = nameInput.id;
+    const nameSave = make("button", "chat-display-save", "Save");
+    nameSave.type = "submit";
+    nameSave.disabled = true;
+    const nameForm = make("form", "chat-display-form", nameLabel, nameInput, nameSave);
+    nameForm.autocomplete = "off";
+    const nameStatus = make("p", "chat-display-status");
+    nameStatus.id = "oc-commons-name-status";
+    nameStatus.setAttribute("role", "status");
+    nameStatus.setAttribute("aria-live", "polite");
+    const identity = make("div", "chat-identity", nameForm, nameStatus);
+    identity.hidden = true;
+    let nameShown = "", nameSaving = false, nameComposing = false;
+    // While the Commons joins again (after a save) the last name stays shown, off until the welcome comes back.
+    const showName = () => {
+      const you = model.state.you;
+      if (you) {
+        const display = you.display || you.login;
+        if (display !== nameShown) { nameInput.value = display; if (!nameSaving) nameStatus.textContent = ""; }
+        nameShown = display;
+      }
+      identity.hidden = !you && !nameShown;
+      nameInput.disabled = nameSave.disabled = !you || nameSaving;
+    };
+    nameForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!model.state.you || nameSaving || nameComposing) return;
+      const login = model.state.you.login, clean = nameInput.value.replace(/\s+/g, " ").trim();
+      if (clean.length < 3 || clean.length > 24 || /[^\w .,!?'@#:-]/.test(clean)) {
+        nameStatus.textContent = "Use 3–24 letters A–Z, digits, spaces or _ . , ! ? ' @ # : -";
+        return;
+      }
+      nameSaving = true;
+      nameInput.disabled = nameSave.disabled = true;
+      nameStatus.textContent = "Saving display name…";
+      let result;
+      try { result = await ctx.commons.rename(clean); } catch { result = { ok: false }; }
+      nameSaving = false;
+      if (result.ok) nameInput.value = nameShown = result.display;
+      showName();
+      if (result.ok || model.state.you?.login === login) nameStatus.textContent = result.ok ? "Display name saved." : result.error || "Could not save display name. Try again.";
+    });
+    nameInput.addEventListener("compositionstart", () => { nameComposing = true; });
+    nameInput.addEventListener("compositionend", () => { nameComposing = false; });
+    nameInput.addEventListener("keydown", (event) => {
+      if (event.isComposing || event.keyCode === 229 || nameComposing) return;
+      if (event.key === "Escape") { event.preventDefault(); document.getElementById("oc-tab-commons")?.focus({ preventScroll: true }); }
+    });
     const account = accountRow(ctx);
-    const node = make("section", "panel oc-panel oc-commons", header, log, status, announcement, form, account.node);
+    const node = make("section", "panel oc-panel oc-commons", header, identity, log, status, announcement, form, account.node);
     node.dataset.panel = "chat";
     const conversation = BL.commonsLog.create({ log, form, input, left, send, status, statusText, announcement },
       { keep: BL.oogaChatCommons.KEEP, send: (text, clientId) => ctx.commons.send({ t: "chat", text, clientId }), unicode: () => model.state.unicode,
@@ -614,6 +685,7 @@
       if (kind === "lines") conversation.heard(a, b);
       else if (kind === "receipt") conversation.heard([], false, a);
       else if (kind === "welcome" && !model.state.you) conversation.clear();
+      if (kind === "welcome") showName();
       if ((kind === "welcome" || kind === "players") && last) update(last);
     });
     const watch = onShown(node, () => conversation.show(!node.closest("[hidden]")));
@@ -621,6 +693,7 @@
       last = state;
       watch();
       account.update(state);
+      showName();
       const socket = state.commons.status, live = socket === "live" && !!model.state.you;
       const words = live && !model.state.send ? COMMONS_WORDS["read-only"] : COMMONS_WORDS[socket] || "";
       const key = `${socket}|${live}|${model.state.send}|${model.state.you?.login}|${model.state.players.size}`;

@@ -2574,6 +2574,9 @@ body[data-active-scene="block"] .mode-hud {
 .foot-button.virtual-hover,
 .foot-button:focus-visible { background: linear-gradient(#b8844a, var(--plank)); outline: none; }
 .foot-button:focus-visible { box-shadow: 0 2px 0 var(--nail), 0 0 0 2px var(--accent); }
+/* A button that can do nothing yet (Unmute before Join Voice, Join Voice where voice isn't open) reads as off, as the
+   panels' other buttons do, and a hover leaves it as it is. */
+.foot-button:disabled { opacity: 0.5; cursor: default; background: linear-gradient(var(--plank), var(--wood)); }
 
 .foot-primary {
   background: linear-gradient(#e2a04a, var(--accent));

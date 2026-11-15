@@ -50,6 +50,16 @@ export const upsertPlayerFromGitHub = async (db, { id, login, avatar_url }) => {
   return db.prepare("SELECT * FROM players WHERE id = ?1").bind(id).first();
 };
 
+/** A row Ooga Chat's Commons name made (chat-display.js) for an account that never signed in on the island, marked by
+ * `last_login_at` 0 so its Ooga Chat deletion can take it back (`deleteChatOnlyPlayer`); a first island sign-in
+ * (`upsertPlayerFromGitHub`) sets the time and makes it an ordinary account. */
+export const ensureChatPlayer = (db, { id, login }) =>
+  db.prepare("INSERT INTO players (id, login, created_at, last_login_at) VALUES (?1, ?2, ?3, 0) ON CONFLICT(id) DO NOTHING")
+    .bind(id, login, nowSeconds()).run();
+
+export const deleteChatOnlyPlayer = (db, id) =>
+  db.prepare("DELETE FROM players WHERE id = ?1 AND last_login_at = 0").bind(id).run();
+
 export const getPlayer = (db, id) => db.prepare("SELECT * FROM players WHERE id = ?1").bind(id).first();
 
 export const updateDisplay = (db, id, display) =>

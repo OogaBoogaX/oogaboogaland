@@ -226,7 +226,9 @@ test("the Audience: a speaker lease is decided by the island now, refused withou
   const { ws: amy } = await open(audience, principal(1));
   await say(audience, amy, { type: "join", zone: "main" });
   await say(audience, amy, { type: "setRole", requestId: 1, role: "speaker" });
-  assert.deepEqual(last(amy, "result"), { type: "result", requestId: 1, ok: true, you: { id: "gh:1", speak: "pending" } });
+  const granted = last(amy, "result");
+  assert.ok(Number.isSafeInteger(granted.you.lease) && granted.you.lease > 0, "the page hears its lease's generation, to name it in its media calls");
+  assert.deepEqual(granted, { type: "result", requestId: 1, ok: true, you: { id: "gh:1", speak: "pending", lease: granted.you.lease } });
   await say(audience, amy, { type: "setRole", requestId: 1, role: "speaker" });
   assert.equal(amy.sent.filter((m) => m.type === "result").length, 2, "a retried request is answered again");
   assert.ok(h.alarm > 0, "the pending lease's expiry is the alarm");

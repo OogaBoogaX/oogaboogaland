@@ -10476,6 +10476,65 @@ const oogaChatAppChecks = async () => {
     const noFallback = !unserved.feed && unserved.note && !unserved.popup && !unserved.real && unserved.simulate === false;
     record("Ooga Chat page: with the service's feed live, Feed the Oogas is the real kiosk, asks the API each time and shows its answer (unreachable, refused, or an invoice no key can mark paid), never simulates or counts a payment and hands the focus back; with the service unreachable there is no Feed at all",
       honestReal && noFallback, JSON.stringify({ real, unserved }));
+    // Voice (#654) through the fixture's fake broker and WebRTC: a listener hears the zone's speakers and never captures;
+    // a contributor's Join Voice captures once and lands muted, M and the footer agree, Leave Voice keeps listening, a
+    // zone change ends speaking and hears the new zone, and a refused microphone leaves a listener saying why.
+    const voiceNow = (b) => b.evaluate(`(() => {
+      const foot = document.querySelector("#oc-view-chat .cloud-foot"), [mute, join] = foot.querySelectorAll(".foot-button"), s = BL.oogaChatFixtures.rtc.stats;
+      const me = document.querySelector('#oc-view-chat .cloud-tile[data-role="speaker"] .cloud-name-text')?.textContent || "";
+      const said = document.querySelector("#oc-view-chat .cloud-status");
+      return { mute: mute.textContent, muteOff: mute.disabled, join: join.textContent, joinOff: join.disabled, why: foot.textContent, said: said && !said.hidden ? said.textContent : "",
+        captures: s.captures, live: s.live, playing: s.playing, self: [...document.querySelectorAll('#oc-view-chat .cloud-tile')].filter((t) => t.dataset.role === "speaker" && t.dataset.source === "chat").length };
+    })()`);
+    const voice = {};
+    b = await page(1024, "state=listener&roster=mixed");
+    try {
+      await open(b, "chat", 1500);
+      voice.listener = await voiceNow(b);
+    } finally { b.close(); }
+    b = await page(1024, "state=contributor&roster=mixed");
+    try {
+      await open(b, "chat", 1500);
+      voice.before = await voiceNow(b);
+      await b.evaluate(`document.querySelectorAll("#oc-view-chat .cloud-foot .foot-button")[1].click()`);
+      await b.sleep(1200);
+      voice.joined = await voiceNow(b);
+      await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "m", code: "KeyM", windowsVirtualKeyCode: 77 });
+      await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "m", code: "KeyM", windowsVirtualKeyCode: 77 });
+      await b.sleep(400);
+      voice.unmuted = await voiceNow(b);
+      await b.evaluate(`document.querySelectorAll("#oc-view-chat .cloud-foot .foot-button")[0].click()`);
+      await b.sleep(400);
+      voice.muted = await voiceNow(b);
+      await b.evaluate(`document.querySelectorAll("#oc-view-chat .cloud-foot .foot-button")[1].click()`);
+      await b.sleep(800);
+      voice.left = await voiceNow(b);
+      await b.evaluate(`document.querySelectorAll("#oc-view-chat .cloud-foot .foot-button")[1].click()`);
+      await b.sleep(1200);
+      await b.evaluate(`document.querySelector('#oc-view-chat [data-cloud-zone="dsb"]').click()`);
+      await b.sleep(1500);
+      voice.moved = await voiceNow(b);
+      await b.screenshot(join(shots, "voice-contributor-1024-dsb.png"));
+    } finally { b.close(); }
+    b = await page(390, "state=contributor&roster=mixed&voice=denied");
+    try {
+      await open(b, "chat", 1500);
+      await b.evaluate(`document.querySelectorAll("#oc-view-chat .cloud-foot .foot-button")[1].click()`);
+      await b.sleep(800);
+      voice.denied = await voiceNow(b);
+      await b.screenshot(join(shots, "voice-denied-390.png"));
+    } finally { b.close(); }
+    const v = voice, spoke = {
+      listener: v.listener.captures === 0 && v.listener.playing === 6 && v.listener.joinOff && v.listener.muteOff,
+      before: v.before.captures === 0 && v.before.playing === 6 && !v.before.joinOff && v.before.join === "Join Voice",
+      joined: v.joined.captures === 1 && v.joined.live === 1 && v.joined.join === "Leave Voice" && v.joined.mute === "Unmute" && !v.joined.muteOff && v.joined.self === 3,
+      key: v.unmuted.mute === "Mute" && v.muted.mute === "Unmute",
+      left: v.left.live === 0 && v.left.join === "Join Voice" && v.left.playing === 6 && v.left.self === 2,
+      moved: v.moved.live === 0 && v.moved.join === "Join Voice" && v.moved.playing === 1 && v.moved.captures === 2,
+      denied: v.denied.captures === 0 && v.denied.join === "Join Voice" && /Microphone access is blocked/.test(v.denied.said) && v.denied.self === 2
+    };
+    record("Ooga Chat page voice: a listener hears every speaker of the zone and can't join; Join Voice captures once and lands muted, M and the footer agree, Leave Voice stops capture and keeps listening, another zone ends speaking and hears that zone, and a refused microphone stays a listener saying why where it can be seen",
+      Object.values(spoke).every(Boolean), JSON.stringify(voice));
   } finally {
     server.close();
     rmSync(out, { recursive: true, force: true });
@@ -33612,6 +33671,107 @@ const oogaChatChecks = async () => {
   const I = load(["src/js/native-icons.js"], { window: {} }).nativeIcons;
   const slots = [...readFileSync(join(root, "src/index.html"), "utf8").matchAll(/data-native-icon="([a-z]+)"/g)].map((m) => m[1]);
   record("shared native icons: every island tab slot names an icon native-icons.js draws, Ooga Chat's cloud last", slots.length === 5 && slots.at(-1) === "cloud" && slots.every((name) => I.names.includes(name)), JSON.stringify(slots));
+  // Voice (ooga-chat-media.js, #654) against a fake broker, fake WebRTC and a fake feed: a listener never asks for a
+  // microphone; Join Voice captures muted before anything carries it, takes the server's lease and becomes a speaker only
+  // on its acknowledgement; refusals leave nothing held; Leave Voice keeps listening; the server ending a lease, a new
+  // connection or a zone change stop capture exactly once; a sync asked before a zone change plays nothing of the old zone.
+  const voiceCheck = async () => {
+    const M = load(["src/ooga-chat/ooga-chat-media.js"], { window: {}, setTimeout, clearTimeout, Math, Date, Promise, Object, Number, Map, Set, Error }).oogaChatMedia;
+    const flush = async (n = 6) => { for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0)); };
+    const rig = ({ deny = null, holdPlay = false, allowed = true } = {}) => {
+      const log = [], asked = [], listeners = new Map(), tracks = [], pcs = [];
+      let delay = null, nextMid = 0, playHeld = holdPlay;
+      const replies = { "receive/sync": () => { const mid = `r${nextMid++}`; return { tracks: [{ participant: "gh:7", mid }], closed: [], sessionDescription: { type: "offer", sdp: "v=0", mids: [mid] }, requiresImmediateRenegotiation: true }; },
+        "publish/offer": () => ({ sessionDescription: { type: "answer", sdp: "v=0" } }) };
+      const broker = { call: async (op, body) => { log.push(`${op}@${body.connection}${body.generation ? `#${body.generation}` : ""}`); if (delay && op === delay.op) await delay.until; return (replies[op] || (() => ({ ok: true })))(); } };
+      class PC {
+        constructor() { this.on = new Map(); this.connectionState = "new"; this.iceGatheringState = "complete"; this.tx = []; this.closed = false; pcs.push(this); }
+        addEventListener(t, fn) { if (!this.on.has(t)) this.on.set(t, new Set()); this.on.get(t).add(fn); }
+        removeEventListener(t, fn) { this.on.get(t)?.delete(fn); }
+        fire(t, e = {}) { for (const fn of [...(this.on.get(t) || [])]) fn(e); }
+        getTransceivers() { return this.tx; }
+        addTransceiver(track) { const tx = { mid: null, track, enabledWhenAdded: track.enabled, stopped: false, stop() { this.stopped = true; } }; this.tx.push(tx); return tx; }
+        async createOffer() { return { type: "offer", sdp: "o" }; }
+        async createAnswer() { return { type: "answer", sdp: "a" }; }
+        async setLocalDescription(d) { this.localDescription = d; for (const t of this.tx) if (t.mid === null) t.mid = "0"; }
+        async setRemoteDescription(d) {
+          const fresh = (d.mids || []).map((mid) => { const tx = { mid, stopped: false, stop() { this.stopped = true; } }; this.tx.push(tx); return tx; });
+          setTimeout(() => { this.connectionState = "connected"; this.fire("connectionstatechange"); for (const transceiver of fresh) this.fire("track", { transceiver, track: { kind: "audio" } }); }, 0);
+        }
+        close() { this.closed = true; this.connectionState = "closed"; }
+      }
+      let captures = 0;
+      const rtc = { PeerConnection: PC, stream: (t) => ({ t }),
+        getUserMedia: async () => { captures++; if (deny) throw Object.assign(new Error("no"), { name: deny }); const track = { enabled: true, readyState: "live", stops: 0, stop() { this.stops++; this.readyState = "ended"; }, addEventListener() {}, removeEventListener() {} }; tracks.push(track); return { getAudioTracks: () => [track], getTracks: () => [track] }; },
+        audio: () => ({ srcObject: null, played: 0, play() { this.played++; return playHeld ? Promise.reject(Object.assign(new Error("held"), { name: "NotAllowedError" })) : Promise.resolve(); }, pause() {} }) };
+      const target = { addEventListener: (t, fn) => listeners.set(t, fn), removeEventListener: (t) => listeners.delete(t) };
+      let requestId = 0;
+      const c = M.create({ broker: () => broker, rtc, target, allowed: () => allowed, request: (type, fields) => { asked.push({ type, ...fields, id: ++requestId }); return requestId; } });
+      const answer = (ok, you, error) => c.heard({ type: "result", requestId: asked.at(-1).id, ok, you, ...(error ? { error: { code: error, retryable: false } } : {}) });
+      return { c, log, asked, tracks, pcs, listeners, answer, get captures() { return captures; }, hold: (op) => { let go; delay = { op, until: new Promise((r) => { go = r; }) }; return () => { delay = null; go(); }; },
+        play: (held) => { playHeld = held; } };
+    };
+    const snap = (r, connection, speak, zone = "main") => r.c.heard({ type: "snapshot", zone, epoch: 1, revision: 1, participants: [], connection, you: { id: "gh:1", speak } });
+    const out = {};
+    // A listener: hears the zone, never captures, can't join.
+    let r = rig({ allowed: false });
+    r.c.zone("main"); snap(r, "c1", "none"); await flush();
+    out.listener = r.captures === 0 && r.log.join() === "ice@c1,receive/open@c1,receive/sync@c1,renegotiate@c1" && r.c.state.hearing === 1 && r.c.state.phase === "listening" && !r.c.available;
+    await r.c.join(); out.listenerNoJoin = r.captures === 0 && !r.asked.length;
+    // A contributor: muted capture, lease, publish, acknowledged speaker; mute, unmute, leave and keep listening.
+    r = rig();
+    r.c.zone("main"); snap(r, "c1", "eligible"); await flush();
+    const joining = r.c.join(); await flush();
+    const asked = r.asked[0], beforeLease = r.c.state;
+    r.answer(true, { id: "gh:1", speak: "pending", lease: 41 }); await joining; await flush();
+    const pub = r.pcs[1];
+    out.join = r.captures === 1 && asked.type === "setRole" && asked.role === "speaker" && beforeLease.role === "listener" && beforeLease.busy
+      && pub.tx[0].enabledWhenAdded === false && r.log.includes("publish/open@c1#41") && r.log.includes("publish/offer@c1#41") && r.log.at(-1) === "publish/ready@c1#41"
+      && r.c.state.role === "speaker" && r.c.state.muted && r.tracks[0].enabled === false;
+    r.c.mute(); const open = r.tracks[0].enabled === true && !r.c.state.muted && r.asked.at(-1).type === "setMic" && r.asked.at(-1).muted === false;
+    r.c.mute(); out.mute = open && r.tracks[0].enabled === false && r.c.state.muted && r.asked.at(-1).muted === true;
+    await r.c.leave(); await flush();
+    r.c.heard({ type: "you", zone: "main", you: { id: "gh:1", speak: "eligible" } });
+    out.leave = r.tracks[0].stops === 1 && pub.closed && r.log.at(-1) === "publish/close@c1" && r.c.state.role === "listener" && r.c.stats.receiving && r.c.state.hearing === 1 && !r.c.stats.capturing;
+    // The server ends a lease (a revocation, an expiry, the island taking the identity): capture stops once, nothing sent.
+    const again = r.c.join(); await flush(); r.answer(true, { id: "gh:1", speak: "pending", lease: 42 }); await again; await flush();
+    const sent = r.log.length;
+    r.c.heard({ type: "you", zone: "main", you: { id: "gh:1", speak: "eligible" } }); r.c.heard({ type: "you", zone: "main", you: { id: "gh:1", speak: "eligible" } });
+    out.revoked = r.tracks[1].stops === 1 && r.c.state.role === "listener" && r.log.length === sent && r.c.state.notice === M.NOTICE.ended;
+    // A new audience connection: everything held under the old one ends, and listening starts again under the new one.
+    const third = r.c.join(); await flush(); r.answer(true, { id: "gh:1", speak: "pending", lease: 43 }); await third; await flush();
+    snap(r, "c2", "eligible"); await flush();
+    out.reconnected = r.tracks[2].stops === 1 && r.c.state.role === "listener" && r.c.state.notice === M.NOTICE.reconnected && r.log.includes("receive/open@c2") && r.pcs[0].closed;
+    // The server closing a voice names its mid: dropped at once, its transceiver stopped.
+    const before = r.c.state.hearing, rx = r.pcs.at(-1), mid = rx.tx[0].mid;
+    r.c.heard({ type: "media", op: "sync", closed: [mid] }); await flush();
+    out.closed = before === 1 && rx.tx[0].stopped && r.log.at(-1) === "renegotiate@c2";
+    // Refusals: a denied microphone asks for no lease; a full zone gives the microphone back; neither leaves a role.
+    r = rig({ deny: "NotAllowedError" }); r.c.zone("main"); snap(r, "c1", "eligible"); await flush(); await r.c.join(); await flush();
+    out.denied = r.captures === 1 && !r.asked.length && !r.log.some((l) => l.startsWith("publish")) && r.c.state.notice === M.NOTICE.denied && r.c.state.role === "listener";
+    r = rig(); r.c.zone("main"); snap(r, "c1", "eligible"); await flush();
+    const full = r.c.join(); await flush(); r.answer(false, { id: "gh:1", speak: "eligible" }, "speaker_capacity"); await full; await flush();
+    out.full = r.tracks[0].stops === 1 && !r.log.some((l) => l.startsWith("publish")) && r.c.state.notice === M.NOTICE.full && r.c.state.role === "listener" && !r.c.stats.capturing;
+    // A zone change while speaking stops capture at once; a sync asked before it plays nothing of the old zone.
+    r = rig(); r.c.zone("main"); snap(r, "c1", "eligible"); await flush();
+    const z = r.c.join(); await flush(); r.answer(true, { id: "gh:1", speak: "pending", lease: 9 }); await z; await flush();
+    const release = r.hold("receive/sync");
+    r.c.heard({ type: "media", op: "sync" }); await flush();
+    r.c.zone("dsb");
+    const stoppedAtOnce = r.tracks[0].stops === 1 && r.c.state.role === "listener" && r.c.state.hearing === 0;
+    release(); await flush(10);
+    out.zone = stoppedAtOnce && r.c.state.hearing === 0 && r.log.at(-1) === "renegotiate@c1";
+    // Playback the browser held back plays on the next gesture; dispose lets go of every listener.
+    r = rig({ holdPlay: true }); r.c.zone("main"); snap(r, "c1", "none"); await flush();
+    const held = r.c.state.blocked;
+    r.play(false); r.listeners.get("pointerup")({ isTrusted: true }); await flush();
+    r.c.dispose();
+    out.blocked = held && !r.c.state.blocked && r.listeners.size === 0 && r.pcs[0].closed;
+    return out;
+  };
+  const voice = await voiceCheck();
+  record("Ooga Chat voice: a listener hears the zone and never captures; Join Voice captures muted before any connection carries it, publishes under the server's lease and speaks only once acknowledged; mute and Leave Voice act on the track at once and keep listening; a refusal, a revoked lease, a new connection or a zone change stop capture exactly once; a stale sync plays nothing; held playback starts on a gesture",
+    Object.values(voice).every(Boolean), JSON.stringify(voice));
 };
 // The outdoor voice bridge (outdoor-voice.js, #661) against a fake room: the real scope record, a transport whose frames
 // are delivered, delayed, dropped or replayed by hand, held timers and a voice that can only be told `setOutdoor`, so any

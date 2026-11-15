@@ -34,9 +34,10 @@ export const SHARED = ["../js/sign-glyphs.js", "../js/native-icons.js", "../js/d
 // these panels, about 16 KB; the face sheet itself loads only when a stats strip opens), the Ooga Chat panel's circles
 // and account rows (about 3 KB) and the island's own emoji panel with its picker (#655: reaction-bar.js and the whole
 // emoji list it picks from, emoji-data.js, about 25 KB with their rules) bring it to about 213 KB. Loading the emoji list
-// only when the picker opens would take most of that back; that needs the build to stage a second script. The build
-// fails past this.
-export const FIRST_LOAD_BUDGET = 224 * 1024;
+// only when the picker opens would take most of that back; that needs the build to stage a second script. Ooga Chat's
+// own voice client (#654: ooga-chat-media.js, about 14 KB) and the Commons' name field (about 1 KB) bring it to about
+// 229.5 KB. The build fails past this.
+export const FIRST_LOAD_BUDGET = 236 * 1024;
 // The island's own rules for the panels the app shows as the island does (src/style.css), taken by selector each time
 // the app builds, so the two look the same from one source: every rule whose selectors begin with one of ISLAND_RULES
 // (a rule's other selectors, another panel's, left behind), in an @media, @supports or @container block too, and every

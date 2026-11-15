@@ -273,7 +273,8 @@ export const createAudience = ({ epoch = Date.now(), limits = DEFAULT_LIMITS, re
     const p = people.get(c.id);
     const speak = c.lease ? (c.lease.state === "active" ? "active" : "pending")
       : c.eligible && !p.active && !p.world ? "eligible" : c.eligible ? "denied" : "none";
-    return { id: c.id, speak };
+    // The lease's generation names it in the media calls (#666, #654): only this connection's own page hears it.
+    return c.lease ? { id: c.id, speak, lease: c.lease.generation } : { id: c.id, speak };
   };
 
   return {

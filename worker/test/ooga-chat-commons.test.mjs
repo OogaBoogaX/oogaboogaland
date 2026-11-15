@@ -222,3 +222,94 @@ test("the edge's Commons socket: X, a non-contributor or a stale answer never ge
   assert.equal(off.status, 101);
   assert.equal(reached.length, 1, "the Commons off: nothing reaches the island");
 });
+
+test("the bridge's `display`: an eligible contributor's Commons name becomes the island's display name, by the island's rules", async () => {
+  const { displayOps } = await import("../src/chat-display.js");
+  const { getPlayer } = await import("../src/db.js");
+  const db = memoryD1(new URL("../migrations/", import.meta.url));
+  const contributorFor = Object.assign(async (login) => login === "amy" ? { handle: "amy" } : null, { fresh: () => true });
+  const op = displayOps({ contributorFor }).display;
+  const env = { OOGA_CHAT_FEATURES: "bridge,commons", DB: db };
+  const principal = (id, login, provider = "github") => ({ id: "pr_x", provider, providerUserId: String(id), login });
+  const run = (payload, p = principal(1, "amy"), e = env) => op.run(e, { payload, principal: p });
+  const refused = (code) => (error) => error.code === code;
+  // An account the island has never seen gets its row, as a first island sign-in would make it, and the name.
+  assert.deepEqual(await run({ display: "  Amy   the Great  " }), { display: "Amy the Great" });
+  assert.equal((await getPlayer(db, 1)).display, "Amy the Great");
+  assert.deepEqual(await run({ display: "Amy" }), { display: "Amy" });
+  await assert.rejects(run({ display: "x" }), refused("invalid_display"));
+  await assert.rejects(run({ display: "<b>" }), refused("invalid_display"));
+  await assert.rejects(run({ display: "Bea" }, principal(2, "bea")), refused("capability_required"));
+  await assert.rejects(run({ display: "Amy" }, principal(1, "amy", "x")), refused("capability_required"));
+  await assert.rejects(run({ display: "Amy" }, principal(1, "amy"), { ...env, OOGA_CHAT_FEATURES: "bridge" }), refused("disabled"));
+  await db.prepare("UPDATE players SET banned_at = 1 WHERE id = 1").run();
+  await assert.rejects(run({ display: "Amy Again" }), refused("capability_required"));
+  assert.equal((await getPlayer(db, 1)).display, "Amy", "a banned account's name stays as it was");
+});
+
+test("a player row a Commons name made goes with the Ooga Chat account, while it never signed in on the island", async () => {
+  const { displayOps } = await import("../src/chat-display.js");
+  const { revokeOps } = await import("../src/chat-bridge.js");
+  const { getPlayer, upsertPlayerFromGitHub } = await import("../src/db.js");
+  const db = memoryD1(new URL("../migrations/", import.meta.url));
+  const contributorFor = Object.assign(async (login) => ["amy", "bea"].includes(login) ? { handle: login } : null, { fresh: () => true });
+  const env = { OOGA_CHAT_FEATURES: "bridge,commons", DB: db };
+  const principal = (id, login) => ({ id: `pr_${login}`, provider: "github", providerUserId: String(id), login });
+  const name = (p, display) => displayOps({ contributorFor }).display.run(env, { payload: { display }, principal: p });
+  const revoke = (p, reason) => revokeOps.revoke.run(env, { payload: { reason }, principal: p });
+  await name(principal(1, "amy"), "Amy");
+  assert.equal((await getPlayer(db, 1)).last_login_at, 0, "marked as never signed in on the island");
+  await revoke(principal(1, "amy"), "logout");
+  assert.ok(await getPlayer(db, 1), "signing out keeps it");
+  await revoke(principal(1, "amy"), "deleted");
+  assert.equal(await getPlayer(db, 1), null, "deleting the Ooga Chat account removes it");
+  // Signed in on the island first, or after: the island's own account, which Ooga Chat deletion leaves alone.
+  await name(principal(2, "bea"), "Bea");
+  await upsertPlayerFromGitHub(db, { id: 2, login: "bea", avatar_url: null });
+  assert.equal((await getPlayer(db, 2)).display, "Bea");
+  await revoke(principal(2, "bea"), "deleted");
+  assert.equal((await getPlayer(db, 2)).display, "Bea", "an island account stays");
+});
+
+test("the edge's Commons name: only an eligible GitHub contributor's save from the app's own page reaches the island", async () => {
+  const { route } = await import("../chat/src/index.js");
+  const { forgetHello } = await import("../chat/src/bridge.js");
+  const { createSession, upsertPrincipal } = await import("../chat/src/session.js");
+  forgetHello();
+  const asked = [];
+  const answers = { "1": "eligible", "2": "ineligible" };
+  const env = { ENVIRONMENT: "staging", SITE_ORIGIN: "https://chat.example", DB: memoryD1(new URL("../chat/migrations/", import.meta.url)), FEATURES: "github,x,commons",
+    GITHUB_CLIENT_ID: "i", GITHUB_CLIENT_SECRET: "s", X_CLIENT_ID: "i", X_CLIENT_SECRET: "s", ASSETS: { fetch: async () => new Response("app") },
+    OBL: { call: async (e) => {
+      if (e.op === "hello") return { ok: true, requestId: e.requestId, result: { version: BRIDGE_VERSION, environment: "staging", features: { bridge: true, commons: true }, voice: true } };
+      if (e.op === "capability") return { ok: true, requestId: e.requestId, result: { state: answers[e.principal.providerUserId], character: null, policy: "p", checkedAt: Date.now() } };
+      if (e.op === "display") {
+        asked.push(e);
+        const clean = e.payload.display.trim();
+        return clean.length >= 3 ? { ok: true, requestId: e.requestId, result: { display: clean } } : { ok: false, error: { code: "invalid_display", retryable: false } };
+      }
+      return { ok: false, error: { code: "unknown_operation" } };
+    } } };
+  const tokenFor = async (provider, id, login) => createSession(env.DB, (await upsertPrincipal(env.DB, { provider, providerUserId: id, login, display: login, avatarUrl: null })).id, "t");
+  const save = (token, body, { origin = "https://chat.example", method = "POST", e = env } = {}) => route(new Request("https://chat.example/api/chat/commons/name", {
+    method, headers: { origin, "content-type": "application/json", ...(token ? { cookie: `__Host-ooga_chat_session=${token}` } : {}) },
+    ...(method === "POST" ? { body: typeof body === "string" ? body : JSON.stringify(body) } : {}) }), e, { fetch, waitUntil: null, cache: null });
+  const amy = await tokenFor("github", "1", "amy");
+  assert.equal((await save(null, { display: "Amy" })).status, 401);
+  assert.equal((await save(await tokenFor("x", "99", "xan"), { display: "Xan" })).status, 403);
+  assert.equal((await save(await tokenFor("github", "2", "nope"), { display: "Nope" })).status, 403);
+  assert.equal((await save(amy, { display: "Amy" }, { origin: "https://elsewhere.example" })).status, 403);
+  assert.equal((await save(amy, null, { method: "GET" })).status, 405);
+  assert.equal((await save(amy, "{not json")).status, 400);
+  assert.equal((await save(amy, { display: 7 })).status, 400);
+  assert.equal(asked.length, 0, "nothing reaches the island but an eligible contributor's well-formed save");
+  const ok = await save(amy, { display: " Amy B " });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { display: "Amy B" });
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].principal.providerUserId, "1");
+  assert.equal(asked[0].principal.provider, "github");
+  assert.equal((await save(amy, { display: "x" })).status, 400, "the island's rules refuse it");
+  forgetHello();
+  assert.equal((await save(amy, { display: "Amy" }, { e: { ...env, FEATURES: "github" } })).status, 503, "the Commons off");
+});

@@ -34,7 +34,8 @@
     const audience = pathOk(paths.audience) ? paths.audience : null;
     const feed = raw.features?.feed === true ? "live" : options.fixture && raw.features?.feed === "demo" ? "demo" : "off";
     // The Commons and Online Oogas (#670) at their fixed address, for an eligible contributor while the server says so.
-    const features = { github: !!login.github, x: !!login.x, voice: raw.features?.voice === true, feed, commons: raw.features?.commons === true };
+    // `speak`: the deployment lets eligible contributors publish (the session's own capability says who); `voice` listening.
+    const features = { github: !!login.github, x: !!login.x, voice: raw.features?.voice === true, speak: raw.features?.speak === true, feed, commons: raw.features?.commons === true };
     // A newer deployment's build is worth a reload; an absent or matching one is not.
     const newer = typeof raw.build === "string" && raw.build.length <= 64 && build && raw.build !== build ? raw.build : null;
     return { ok: true, mode: "live", features, paths: { login, session, logout, audience }, protocols, newer };

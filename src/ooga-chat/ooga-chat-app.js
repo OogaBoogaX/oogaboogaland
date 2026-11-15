@@ -8,7 +8,9 @@
 // A signed-in account hears its zone's audience: the adapter's feed, kept by ooga-chat-roster.js, which asks for a fresh
 // snapshot after a gap; the views draw `state.audience` (`status`, `zone`, `list` in the space's order, `version`).
 // The device (ooga-chat-device.js) reports the network, install help and a waiting update, and registers the service
-// worker for the production entry of a staged build; M mutes or unmutes a speaker. It starts no island system: no
+// worker for the production entry of a staged build; M mutes or unmutes a speaker. Voice is ooga-chat-media.js's one
+// controller (#654): it hears the feed's snapshots, `you`, results and media notices, and the views read its state as
+// `state.voice`. It starts no island system: no
 // renderer, scene, socket or game. A failure shows a recoverable error with Reload;
 // pagehide disposes the shell, the account and the adapter.
 (() => {
@@ -27,11 +29,8 @@
     box.replaceChildren(`${text} · `, reload);
     box.hidden = false;
   };
-  // The voice seam (#654's SFU client takes its place). Until then nothing captures or publishes, so Join Voice stays
-  // off, `state` is always a muted listener, and there is nothing for `release`, `zone`, `mute` or `leave` to change.
-  // `zone(next)` is where the client moves or ends its lease for another zone; no role shows there before the server
-  // acknowledges it in the new zone's audience.
-  const media = { available: false, state: Object.freeze({ role: "listener", muted: true }), release() {}, join() {}, leave() {}, mute() {}, zone() {} };
+  // The voice seam until the controller is made (and if it can't be): a muted listener that captures nothing.
+  let media = { available: false, why: "", state: BL.oogaChatMedia.IDLE, heard() {}, status() {}, release() {}, join() {}, leave() {}, mute() {}, zone() {}, stop() {}, retry() {}, dispose() {} };
   // `relisten` is the feed's 4401 restart timer; pagehide clears it, so it lives out here with what pagehide disposes.
   // `donating` ends the donation socket, opened once the service says its feed is live; `feeding` is Feed the Oogas,
   // the island's own donation popup, made the first time it opens; `member` is the Commons socket.
@@ -44,8 +43,17 @@
     const back = parseReturn(location.search);
     if (back) history.replaceState(history.state, "", `${location.pathname}${withoutReturn(location.search)}${location.hash}`);
     const query = new URLSearchParams(location.search);
-    adapter = fixture ? BL.oogaChatFixtures.create({ state: query.get("state") || undefined, roster: query.get("roster") || undefined })
+    adapter = fixture ? BL.oogaChatFixtures.create({ state: query.get("state") || undefined, roster: query.get("roster") || undefined, voice: query.get("voice") || undefined })
       : BL.oogaChatHttp.create();
+    // Voice (ooga-chat-media.js): it calls the adapter's media broker under the feed's own connection, asks the feed for a
+    // speaker lease, and speaks only where this deployment lets contributors speak. The fixture brings its own WebRTC.
+    media = BL.oogaChatMedia.create({
+      broker: () => state.mode === "live" && state.boot ? adapter.media(state.boot) : null,
+      ...(adapter.rtc ? { rtc: adapter.rtc } : {}),
+      request: (type, fields) => feed ? feed.request(type, fields) : 0,
+      allowed: () => state.mode === "live" && !!state.boot && state.boot.features.speak && !!state.boot.paths.audience,
+      onChange: () => { if (shell && bar) set({}); }
+    });
     const tabKey = storageKey(adapter.kind, "tab"), zoneKey = storageKey(adapter.kind, "zone");
     let remembered, zone;
     try {
@@ -93,7 +101,10 @@
       syncLink();
     };
     // The audience as the views see it: the feed's status, and the list in order once a snapshot for the zone is in.
-    const hear = (status) => set({ audience: { status, zone: state.zone, list: roster.ready ? roster.list(state.session?.identity.participant) : [], version: ++heard } });
+    const hear = (status) => {
+      media.status(status);
+      set({ audience: { status, zone: state.zone, list: roster.ready ? roster.list(state.session?.identity.participant) : [], version: ++heard } });
+    };
     // One feed per signed-in principal, for the page's zone; none while signed out. Another principal starts again empty;
     // a feed restarted for the same one (`kept`) keeps its list until the new snapshot replaces it.
     const listen = (kept = null) => {
@@ -101,6 +112,7 @@
       if (principal === listening) return;
       clearTimeout(relisten);
       relisten = 0;
+      media.stop();
       feed?.dispose();
       feed = null;
       handRequest = 0;
@@ -115,15 +127,19 @@
             return;
           }
           if (msg && msg.type === "result") {
+            media.heard(msg);
             // The hand's own answer: the visitor's row decides from here, whatever was shown meanwhile.
             if (msg.requestId === handRequest) { handRequest = 0; syncLink(true); }
             return;
           }
+          if (msg && (msg.type === "you" || msg.type === "media")) return media.heard(msg);
           const result = roster.apply(msg);
           if (result === "gap") feed.resync();
           if (result === "applied") {
             refused = 0;
             hear("live");
+            // After the roster, so a new connection's voice starts from the list the views now show.
+            if (msg.type === "snapshot") media.heard(msg);
           }
         },
         // A closed session (4401) is checked again, the list kept meanwhile, marked as reconnecting rather than live.
@@ -147,6 +163,7 @@
           }, refused > 1 ? 1000 * 2 ** (refused - 2) : 0);
         }
       });
+      media.zone(state.zone);
       feed.zone(state.zone);
     };
     const contributor = () => state.mode === "live" && gates(state, Date.now()).contributor;
@@ -218,6 +235,7 @@
       },
       mute: () => media.mute(),
       leaveVoice: () => media.leave(),
+      retryVoice: () => media.retry(),
       // Asked again at the moment of the click: only the server's answer opens voice, and it decides again there.
       joinVoice: () => {
         if (media.available && gates(state, Date.now()).joinVoice) media.join(state);
@@ -238,7 +256,14 @@
       feeding.open(mode === "demo");
     };
     const ctx = { actions, media, install: () => device.install(), reload: () => device.reload(), storageKey: (name) => storageKey(adapter.kind, name),
-      demo: fixture ? adapter.demo : null, feed: feedOogas, commons: { model: town, send: (data) => !!member && member.send(data) },
+      demo: fixture ? adapter.demo : null, feed: feedOogas, commons: { model: town, send: (data) => !!member && member.send(data),
+        // The name field: saved as the island's display name, then the Commons is joined again so the Room's welcome,
+        // and every line after it, carries the new name (as an island page joins again after its own rename).
+        rename: async (display) => {
+          const result = await adapter.commonsName(display);
+          if (result.ok) { membership = null; joinCommons(); }
+          return result;
+        } },
       contributors: () => adapter.contributors(),
       reactions: { bars: BL.reactionBar.create(link), onPop(fn) { pops.add(fn); return () => pops.delete(fn); } } };
     shell = BL.oogaChatShell.create({ root, ctx, selected: back ? "chat" : remembered, onSelect(id) {
@@ -282,6 +307,7 @@
     if (event.persisted) return;
     page.abort();
     clearTimeout(relisten);
+    media.dispose();
     feed?.dispose();
     member?.dispose();
     donating?.();

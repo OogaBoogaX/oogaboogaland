@@ -14,6 +14,11 @@
 // list, as a quiet zone does), `reauth` (closed as signed out, 4401, after 6 s: the app checks the session and opens a
 // new feed), `full` and `none` (no audience address). Accounts and participants are named samples with no picture,
 // never real people.
+// `?voice=` picks how voice answers (`VOICES`, #654), through a fake broker (`media`) and fake WebRTC (`rtc`): no
+// microphone is ever opened and nothing is heard. `ok` (the default) pulls each speaker of the zone, and Join Voice gets
+// a lease, publishes and becomes a muted speaker; `denied` refuses the microphone; `blocked` holds playback until a
+// gesture, as a browser's autoplay rule does; `refused` refuses the lease (the zone's speakers are full); `off` is a
+// deployment that doesn't let anyone speak. `BL.oogaChatFixtures.rtc` is the last fake's record, for the checks.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -21,9 +26,9 @@
   const STATES = ["signed-out", "listener", "contributor", "ineligible", "unknown", "revoked", "provider-disabled", "expiring", "signout-fails",
     "demo-payment", "real-payment", "unavailable"];
   const protocols = Object.fromEntries(Object.entries(PROTOCOLS).map(([name, version]) => [name, [version]]));
-  const answer = (feed, x) => ({ version: BOOTSTRAP_VERSION, protocols,
-    features: { github: true, x, voice: false, feed, commons: true },
-    paths: { session: "/fixture/session", logout: "/fixture/logout", login: { github: "/fixture/login/github", x: "/fixture/login/x" } } });
+  const answer = (feed, x, speak) => ({ version: BOOTSTRAP_VERSION, protocols,
+    features: { github: true, x, voice: true, speak, feed, commons: true },
+    paths: { session: "/fixture/session", logout: "/fixture/logout", audience: "/fixture/audience", login: { github: "/fixture/login/github", x: "/fixture/login/x" } } });
   const github = (n, login, state, capabilities = {}) => ({ identity: { principal: `fixture:github:${n}`, participant: `gh:${n}`, provider: "github", providerUserId: String(n), login, display: login },
     capabilities, eligibility: { state } });
   const ACCOUNTS = {
@@ -37,6 +42,7 @@
   // The account a state starts signed in as, and the one its GitHub button signs in as.
   const SIGNED_IN = { listener: "listener", contributor: "contributor", ineligible: "ineligible", unknown: "unknown", revoked: "revoked", expiring: "contributor", "signout-fails": "contributor" };
   const ROSTERS = ["mixed", "empty", "crowd", "reconnecting", "reauth", "full", "none"];
+  const VOICES = ["ok", "denied", "blocked", "refused", "off"];
   const person = (id, source, role, login, extra = {}) => ({ id: `fixture:${id}`, generation: 1, source, role, login, display: login, ...extra });
   const CAST = {
     main: [
@@ -109,14 +115,84 @@
         repos: [{ name: "oogaboogaland", contributors: people.map(([login, minutes]) => ({ login, last_seen_at: ago(minutes) })), leaderboards: { commits: board("commits", 0.5) } },
           { name: "entropylab", contributors: people.slice(0, 2).map(([login, minutes]) => ({ login, last_seen_at: ago(minutes + 5) })), leaderboards: { commits: board("commits", 0.1).slice(0, 2) } }] } };
   };
-  const create = ({ state = "signed-out", roster = "mixed", now = () => Date.now() } = {}) => {
+  // Fake WebRTC for the fixture (`?voice=`): peer connections that "connect" as soon as they are answered, a receiver that
+  // reports a track for each mid the fake broker's offer names (its `mids`), a microphone that is a record and never a
+  // device, and audio elements that play nothing. `stats` counts what a check needs to see.
+  const fakeRtc = (voice) => {
+    const stats = { captures: 0, live: 0, elements: 0, playing: 0, stopped: 0, peers: 0, closed: 0 };
+    const events = (obj) => {
+      const on = new Map();
+      obj.addEventListener = (type, fn) => { if (!on.has(type)) on.set(type, new Set()); on.get(type).add(fn); };
+      obj.removeEventListener = (type, fn) => on.get(type)?.delete(fn);
+      obj.dispatch = (type, event = {}) => { for (const fn of [...(on.get(type) || [])]) fn(event); };
+      return obj;
+    };
+    const track = () => events({ kind: "audio", enabled: true, readyState: "live",
+      stop() { if (this.readyState === "ended") return; this.readyState = "ended"; stats.live--; stats.stopped++; } });
+    class PeerConnection {
+      constructor() {
+        events(this);
+        Object.assign(this, { connectionState: "new", iceGatheringState: "complete", localDescription: null, transceivers: [], mids: 0 });
+        stats.peers++;
+      }
+      getTransceivers() { return this.transceivers; }
+      addTransceiver(sending) {
+        const tx = { mid: null, sending, stopped: false, stop() { this.stopped = true; } };
+        this.transceivers.push(tx);
+        return tx;
+      }
+      async createOffer() { return { type: "offer", sdp: "v=0 fixture offer" }; }
+      async createAnswer() { return { type: "answer", sdp: "v=0 fixture answer" }; }
+      async setLocalDescription(desc) {
+        for (const tx of this.transceivers) if (tx.mid === null) tx.mid = String(this.mids++);
+        this.localDescription = desc;
+      }
+      async setRemoteDescription(desc) {
+        const fresh = (desc.mids || []).map((mid) => { const tx = { mid, stopped: false, stop() { this.stopped = true; } }; this.transceivers.push(tx); return tx; });
+        setTimeout(() => {
+          if (this.connectionState === "closed") return;
+          if (this.connectionState !== "connected") { this.connectionState = "connected"; this.dispatch("connectionstatechange"); }
+          for (const transceiver of fresh) this.dispatch("track", { transceiver, track: track() });
+        }, 40);
+      }
+      close() { if (this.connectionState === "closed") return; this.connectionState = "closed"; stats.closed++; }
+    }
+    const blocked = () => voice === "blocked" && !(navigator.userActivation && navigator.userActivation.hasBeenActive);
+    const rtc = {
+      PeerConnection,
+      async getUserMedia() {
+        if (voice === "denied") throw new DOMException("Permission denied", "NotAllowedError");
+        const mic = track();
+        stats.captures++;
+        stats.live++;
+        return { getAudioTracks: () => [mic], getTracks: () => [mic] };
+      },
+      stream: (t) => ({ getTracks: () => [t] }),
+      audio: () => {
+        stats.elements++;
+        const el = { autoplay: false, srcObject: null, muted: false, playing: false,
+          play() {
+            if (blocked()) return Promise.reject(new DOMException("Autoplay held", "NotAllowedError"));
+            if (!this.playing) { this.playing = true; stats.playing++; }
+            return Promise.resolve();
+          },
+          pause() { if (this.playing) { this.playing = false; stats.playing--; } } };
+        return el;
+      },
+      stats
+    };
+    BL.oogaChatFixtures.rtc = rtc;
+    return rtc;
+  };
+  const create = ({ state = "signed-out", roster = "mixed", voice = "ok", now = () => Date.now() } = {}) => {
     if (!STATES.includes(state)) throw new Error(`Unknown fixture state "${state}" (${STATES.join(", ")})`);
     if (!ROSTERS.includes(roster)) throw new Error(`Unknown fixture roster "${roster}" (${ROSTERS.join(", ")})`);
+    if (!VOICES.includes(voice)) throw new Error(`Unknown fixture voice "${voice}" (${VOICES.join(", ")})`);
     const expiresAt = state === "expiring" ? now() + 20000 : null;
     const asked = (name) => name && { ...ACCOUNTS[name], expiresAt };
     let account = asked(SIGNED_IN[state]), disposed = false;
     const bootstrap = async () => state === "unavailable" ? { ok: false, mode: "unavailable", reason: "fixture" }
-      : parseBootstrap(answer(state === "demo-payment" ? "demo" : state === "real-payment", state !== "provider-disabled"), null, { fixture: true });
+      : parseBootstrap(answer(state === "demo-payment" ? "demo" : state === "real-payment", state !== "provider-disabled", voice !== "off"), null, { fixture: true });
     const session = async () => disposed || !account ? null : parseSession(account, now());
     const signIn = (boot, provider) => {
       account = asked(provider === "x" ? "listener" : ["ineligible", "unknown", "revoked"].includes(state) ? state : "contributor");
@@ -127,15 +203,36 @@
       if (state === "signout-fails") throw new Error("fixture: sign-out not confirmed");
       return null;
     };
-    // The audience: a snapshot a moment after each join, then the roster's script. The signed-in account listens.
-    const feeds = new Set();
-    let opened = 0;
+    // The audience: a snapshot a moment after each join, then the roster's script. The signed-in account listens, and a
+    // contributor may speak (`?voice=`): the feed keeps its connection's lease and the voices its receiver pulled, which
+    // the fake broker (`media`) reads and changes by that connection.
+    const feeds = new Set(), links = new Map();
+    let opened = 0, connections = 0, generations = 0;
     const audience = (boot, { message, status }) => {
       let zone = null, epoch = 0, revision = 0, people = [], step = 0, closed = false, requests = 0;
+      let connection = `fixture-conn-${++connections}`, lease = 0, active = false, mic = "muted", mids = 0;
+      const held = new Map();
+      const contributor = () => !!account && account.identity.provider === "github" && account.eligibility.state === "eligible";
+      const you = () => {
+        const id = self()[0]?.id || null;
+        return lease ? { id, speak: active ? "active" : "pending", lease } : { id, speak: contributor() ? "eligible" : "none" };
+      };
+      // The visitor's row as the server would draw it: a muted app speaker once its microphone is up.
+      const ownRow = () => {
+        const mine = self()[0];
+        return mine && (active ? { ...mine, role: "speaker", source: "app", muted: mic === "muted" } : mine);
+      };
+      const endLease = () => {
+        if (!lease) return;
+        const was = active;
+        lease = 0; active = false; mic = "muted";
+        if (was) delta([ownRow()]);
+        message({ type: "you", zone, you: you() });
+      };
       const timers = new Set();
       const after = (ms, fn) => { const id = setTimeout(() => { timers.delete(id); if (!closed) fn(); }, ms); timers.add(id); };
       const clear = () => { for (const id of timers) clearTimeout(id); timers.clear(); };
-      const snapshot = () => message({ type: "snapshot", zone, epoch, revision, participants: people });
+      const snapshot = () => message({ type: "snapshot", zone, epoch, revision, participants: people, you: you(), connection });
       // A delta changes the fixture's own list too, so a resync's snapshot matches it; `skip` leaves a gap.
       const delta = (upsert, remove = [], skip = 0) => {
         const gone = new Set([...remove, ...upsert].map((p) => p.id));
@@ -172,14 +269,49 @@
             // A reaction from the cast, as the server sends each one to the zone (#668).
             after(2500, () => { const at = now(); message({ type: "reaction", eventId: "fixture-oak", participantId: "fixture:world-oak", zone, epoch, emoji: "🔥", at, expiresAt: at + 2600 }); });
           }
-          // Back to an unchanged zone: the same epoch and revision, so the snapshot only confirms the list.
-          if (roster === "reconnecting") after(6000, () => { status("reconnecting"); after(3000, () => { status("connecting"); after(500, snapshot); }); });
+          // Back to an unchanged zone: the same epoch and revision, so the snapshot only confirms the list. A new socket is a
+          // new connection, holding nothing the old one did.
+          if (roster === "reconnecting") after(6000, () => {
+            status("reconnecting");
+            links.delete(connection);
+            lease = 0; active = false; held.clear();
+            connection = `fixture-conn-${++connections}`;
+            links.set(connection, link);
+            after(3000, () => { status("connecting"); after(500, snapshot); });
+          });
           if (roster === "reauth" && opened++ === 0) after(6000, () => status("signed-out"));
         });
       };
+      // What the fake broker reaches by this feed's connection: the voices to pull, a lease's steps and its end.
+      const link = {
+        sync() {
+          const speakers = new Set(people.filter((p) => p.role === "speaker" && p.id !== self()[0]?.id).map((p) => p.id));
+          const closedMids = [];
+          for (const [participant, mid] of held) if (!speakers.has(participant)) { held.delete(participant); closedMids.push(mid); }
+          const tracks = [...speakers].filter((id) => !held.has(id)).map((participant) => ({ participant, mid: `r${mids++}` }));
+          for (const t of tracks) held.set(t.participant, t.mid);
+          return tracks.length ? { tracks, closed: closedMids, sessionDescription: { type: "offer", sdp: "v=0 fixture", mids: tracks.map((t) => t.mid) }, requiresImmediateRenegotiation: true }
+            : { tracks: [], closed: closedMids, requiresImmediateRenegotiation: false };
+        },
+        lease: (generation) => !!lease && lease === generation,
+        ready() {
+          active = true; mic = "muted";
+          delta([ownRow()]);
+          message({ type: "you", zone, you: you() });
+        },
+        endLease
+      };
+      links.set(connection, link);
       const feed = {
         zone(next) {
           if (next === zone || closed) return;
+          // A real change of zone: the lease ends there, and the old zone's pulls are closed, as the server does.
+          if (zone) {
+            lease = 0; active = false; mic = "muted";
+            const gone = [...held.values()];
+            held.clear();
+            if (gone.length) message({ type: "media", op: "sync", closed: gone });
+          }
           zone = next;
           join();
         },
@@ -194,6 +326,21 @@
           if (closed || !zone) return 0;
           const requestId = ++requests, mine = self()[0], me = mine && people.find((p) => p.id === mine.id);
           after(120, () => {
+            // Speaking (#654): a lease for an eligible contributor (`refused` fills the zone), a speaker's microphone
+            // state, and back to listening.
+            if (type === "setRole") {
+              if (fields.role === "listener") { endLease(); return message({ type: "result", requestId, ok: true, you: you() }); }
+              if (!contributor()) return message({ type: "result", requestId, ok: false, error: { code: "capability_required", retryable: false }, you: you() });
+              if (voice === "refused") return message({ type: "result", requestId, ok: false, error: { code: "speaker_capacity", retryable: true }, you: you() });
+              if (!lease) lease = ++generations;
+              return message({ type: "result", requestId, ok: true, you: you() });
+            }
+            if (type === "setMic") {
+              if (!active) return message({ type: "result", requestId, ok: false, error: { code: "capability_required", retryable: false }, you: you() });
+              mic = fields.muted ? "muted" : "on";
+              delta([ownRow()]);
+              return message({ type: "result", requestId, ok: true, you: you() });
+            }
             if (type === "reaction" && me) {
               const at = now();
               message({ type: "reaction", eventId: `fixture-${requestId}`, participantId: me.id, zone, epoch, emoji: fields.emoji, at, expiresAt: at + 2600 });
@@ -209,6 +356,7 @@
           closed = true;
           clear();
           feeds.delete(feed);
+          links.delete(connection);
         }
       };
       if (roster === "none") {
@@ -222,11 +370,29 @@
       disposed = true;
       for (const feed of [...feeds]) feed.dispose();
     };
+    // The fake broker: each operation a moment later, by the page's own connection, as the server's answers it.
+    const media = () => ({
+      call: (op, body) => new Promise((resolve, reject) => setTimeout(() => {
+        const link = links.get(body && body.connection), refuse = (code) => reject(Object.assign(new Error(code), { code, retryable: false }));
+        if (disposed || !link) return refuse("stale_epoch");
+        if (op === "ice") return resolve({});
+        if (op === "receive/sync") return resolve(link.sync());
+        if (op === "publish/open" || op === "publish/offer" || op === "publish/ready") {
+          if (!link.lease(body.generation)) return refuse("capability_required");
+          if (op === "publish/offer") return resolve({ sessionDescription: { type: "answer", sdp: "v=0 fixture answer" } });
+          if (op === "publish/ready") link.ready();
+          return resolve({ ok: true });
+        }
+        if (op === "publish/close" || op === "leave") link.endLease();
+        resolve({ ok: true });
+      }, 60))
+    });
+    const rtc = fakeRtc(voice);
     const commons = (boot, { message, status }) => {
       let closed = false, next = HISTORY.length + 1;
       const timers = new Set();
       const later = (ms, fn) => { const timer = setTimeout(() => { timers.delete(timer); if (!closed) fn(); }, ms); timers.add(timer); };
-      const you = { id: 1, login: account?.identity.login || "sample-contributor", display: account?.identity.display || "sample-contributor" };
+      const you = { id: 1, login: account?.identity.login || "sample-contributor", display: named || account?.identity.display || "sample-contributor" };
       status("connecting");
       later(300, () => {
         status("live");
@@ -250,8 +416,16 @@
         }
       };
     };
+    // The Commons' name field, answered as the island's rules would after a short wait; the next welcome carries it.
+    let named = null;
+    const commonsName = (display) => new Promise((resolve) => setTimeout(() => {
+      const clean = String(display).replace(/\s+/g, " ").trim();
+      if (clean.length < 3 || clean.length > 24 || /[^\w .,!?'@#:-]/.test(clean)) return resolve({ ok: false, error: "Use 3–24 letters A–Z, digits, spaces or _ . , ! ? ' @ # : -" });
+      named = clean;
+      resolve({ ok: true, display: clean });
+    }, 300));
     const contributors = async () => state === "unavailable" ? null : PUBLIC(now());
-    return { kind: "fixture", state, bootstrap, session, signIn, signOut, audience, commons, contributors, dispose, pending: 0, demo };
+    return { kind: "fixture", state, bootstrap, session, signIn, signOut, audience, commons, commonsName, media, rtc, contributors, dispose, pending: 0, demo };
   };
-  BL.oogaChatFixtures = { create, STATES, ROSTERS };
+  BL.oogaChatFixtures = { create, STATES, ROSTERS, VOICES, rtc: null };
 })();

@@ -177,6 +177,29 @@ test("a publication retired is out of the catalog at once and closed at the SFU,
   assert.deepEqual(h.room.sources.at(-1), [], "the island stops hearing them too");
 });
 
+test("a receiver is told when its zone gains a voice and which of its mids were closed, so a page never polls (#654)", async () => {
+  const h = host(), a = await h.make();
+  const amy = await connect(a, who(1)), bea = await connect(a, who(2)), cyd = await connect(a, who(3), "dsb");
+  for (const listener of [bea, cyd]) { await media(a, listener, "receive/open"); await media(a, listener, "receive/sync"); }
+  const told = (client) => client.ws.sent.filter((m) => m.type === "media");
+  const before = told(bea).length;
+  await speak(a, amy);
+  assert.equal(told(bea).length, before + 1, "a chat speaker going live: the listener in that zone is told to sync");
+  assert.deepEqual(told(bea).at(-1), { type: "media", op: "sync" });
+  assert.equal(told(cyd).length, 0, "the other zone hears nothing");
+  assert.equal(told(amy).length, 0, "nor does anyone without a receiver");
+  const sync = await media(a, bea, "receive/sync");
+  const mid = sync.body.tracks[0].mid;
+  await a.world(20, [{ id: "gh:40", zone: "main", mic: "on", login: "isle", pub: { session: "island-pub", track: "mic", gen: 1 } }], []);
+  assert.deepEqual(told(bea).at(-1), { type: "media", op: "sync" }, "and an island speaker's publication arriving");
+  const quiet = told(bea).length;
+  await a.world(21, [{ id: "gh:40", zone: "main", mic: "muted", login: "isle", pub: { session: "island-pub", track: "mic", gen: 1 } }], []);
+  assert.equal(told(bea).length, quiet, "a mute changes no publication, so nobody is asked to sync");
+  assert.equal((await media(a, amy, "publish/close")).status, 200);
+  await h.settle();
+  assert.ok(told(bea).some((m) => Array.isArray(m.closed) && m.closed.includes(mid)), "a retired voice's mid is named, so the page drops it at once");
+});
+
 test("an island speaker leaving the outdoors, or a listener changing zone, closes their pulls at once", async () => {
   const h = host(), a = await h.make();
   const bea = await connect(a, who(2));

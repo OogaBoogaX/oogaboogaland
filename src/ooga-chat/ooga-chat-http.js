@@ -2,7 +2,7 @@
 // Every answer passes oogaChatConfig's parsers; a failure becomes an explicit unavailable mode, never mock data.
 // The fixture adapter (ooga-chat-fixtures.js) keeps the same interface: `kind`, `bootstrap()`, `session(boot)`,
 // `signIn(boot, provider)`, `signOut(boot)`, `audience(boot, { message, status })`, `commons(boot, { message, status })`,
-// `contributors()`, `dispose()`.
+// `commonsName(display)`, `media(boot)`, `contributors()`, `dispose()`.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -14,15 +14,20 @@
   // The Commons' fixed address (docs/ooga-chat-backend.md) and its heartbeat: the island's Room answers "ping" with
   // "pong" without waking, and closes a member silent past 90 s.
   const COMMONS_PATH = "/api/chat/commons", PING_MS = 30000;
+  // The Commons' name, saved as the island's display name (the island's rules: 3 to 24 of these characters).
+  const COMMONS_NAME_PATH = "/api/chat/commons/name", NAME_RULE = "Use 3–24 letters A–Z, digits, spaces or _ . , ! ? ' @ # : -";
   // The public panels' data (#664): the island's cast and Oogatron's reading, for anyone, signed in or not.
   const PUBLIC_PATH = "/api/chat/public/contributors";
+  // Voice's signalling (#666, #654): `POST <MEDIA_PATH><op>`, a JSON body naming the audience connection, answered JSON
+  // or `{ error: { code, retryable } }`. Longer than an ordinary read: the island's SFU calls have their own 5 s each.
+  const MEDIA_PATH = "/api/chat/media/", MEDIA_TIMEOUT_MS = 12000;
   const create = ({ fetch = window.fetch.bind(window), location = window.location, doc = document, WebSocket = window.WebSocket } = {}) => {
     const pending = new Set();
     let disposed = false;
     // One bounded request; the controller leaves `pending` however it ends.
-    const ask = async (path, init = {}) => {
+    const ask = async (path, init = {}, timeout = TIMEOUT_MS) => {
       if (disposed) throw new Error("Ooga Chat adapter disposed");
-      const controller = new AbortController(), timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeout);
       pending.add(controller);
       try {
         return await fetch(path, { credentials: "same-origin", cache: "no-store", redirect: "error", ...init, signal: controller.signal });
@@ -193,6 +198,22 @@
         }
       };
     };
+    // Voice's broker (ooga-chat-media.js): one bounded POST an operation. A refusal throws with the server's `code` and
+    // whether trying again may help; the body never carries anything but the page's own connection and SDP.
+    const media = () => ({
+      async call(op, body) {
+        let response;
+        try {
+          response = await ask(`${MEDIA_PATH}${op}`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify(body) }, MEDIA_TIMEOUT_MS);
+        } catch (error) {
+          throw Object.assign(new Error("media unreachable"), { code: disposed ? "disposed" : "unreachable", retryable: !disposed });
+        }
+        const data = await json(response).catch(() => null);
+        if (response.ok && data && typeof data === "object") return data;
+        const error = data && data.error && typeof data.error.code === "string" ? data.error : { code: `http_${response.status}`, retryable: response.status >= 500 };
+        throw Object.assign(new Error(error.code), { code: error.code, retryable: !!error.retryable, status: response.status });
+      }
+    });
     // The public panel data as the server answers it, or null when it can't be read (the view says so, never zeros).
     const contributors = async () => {
       try {
@@ -202,12 +223,24 @@
         return null;
       }
     };
+    // The Commons' name field (worker/chat/src/commons.js): the account's island display name, set as the island's own
+    // field sets it. `{ ok: true, display }` with the name as the island kept it, or `{ ok: false, error }` in words.
+    const commonsName = async (display) => {
+      try {
+        const response = await ask(COMMONS_NAME_PATH, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify({ display }) });
+        const data = await json(response);
+        if (response.ok && data && typeof data.display === "string") return { ok: true, display: data.display };
+        return { ok: false, error: response.status === 400 ? NAME_RULE : response.status === 429 ? "Too many saves. Try again in a minute." : "Name could not be saved. Try again." };
+      } catch {
+        return { ok: false, error: "Name could not be saved. Try again." };
+      }
+    };
     const dispose = () => {
       disposed = true;
       for (const controller of pending) controller.abort();
       pending.clear();
     };
-    return { kind: "http", bootstrap, session, signIn, signOut, audience, commons, contributors, dispose, get pending() { return pending.size; } };
+    return { kind: "http", bootstrap, session, signIn, signOut, audience, commons, commonsName, media, contributors, dispose, get pending() { return pending.size; } };
   };
-  BL.oogaChatHttp = { create, TIMEOUT_MS };
+  BL.oogaChatHttp = { create, TIMEOUT_MS, MEDIA_PATH };
 })();

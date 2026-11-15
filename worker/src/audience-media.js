@@ -22,6 +22,8 @@
 //                    sessionDescription, requiresImmediateRenegotiation }`
 //   renegotiate      the client's answer for the receive session
 //   receive/close    give up some pulled tracks
+// A receiver is told `{ type: "media", op: "sync", closed? }` over its audience socket whenever its zone's publications
+// change: `closed` names the mids already closed for it (a publication retired, a zone left), and a gain asks it to sync.
 //   publish/open     a publish session, under a pending or active lease of `generation`
 //   publish/offer    the microphone's offer: one local audio track, answered
 //   publish/ready    the publication is connected: the lease becomes an active, muted speaker
@@ -152,7 +154,33 @@ export const createMediaBroker = (aud) => {
       for (const mid of gone) delete s.mids[mid];
       await save(connId);
       await queueClose(s.sub, gone, false, whose);
+      // The page is told which of its mids went, so it drops those voices now rather than waiting on its next sync.
       const ws = aud.sockets.get(connId);
+      if (ws) aud.send(ws, { type: "media", op: "sync", closed: gone });
+    }
+  };
+
+  /**
+   * A zone gained or changed a publication (a world speaker's, or a chat speaker's going live): every receiver there is
+   * told to `sync`, so a listener pulls a new voice without polling. A zone whose publications did not change hears
+   * nothing; one that lost some already heard `prune`'s word.
+   */
+  const announced = new Map();
+  const announce = () => {
+    const now = new Map();
+    for (const s of aud.island.speakers) if (s.pub && s.pub.session && s.pub.track) now.set(s.zone, `${now.get(s.zone) || ""}|${s.id}:${s.pub.gen || 0}`);
+    for (const c of aud.model.conns.values()) {
+      if (!c.zone || !c.lease || c.lease.state !== "active") continue;
+      const m = states.get(c.connId);
+      if (m && m.pub && m.track) now.set(c.zone, `${now.get(c.zone) || ""}|${c.id}:${m.gen}`);
+    }
+    const changed = new Set();
+    for (const zone of new Set([...now.keys(), ...announced.keys()])) if ((now.get(zone) || "") !== (announced.get(zone) || "")) changed.add(zone);
+    announced.clear();
+    for (const [zone, sig] of now) announced.set(zone, sig);
+    if (!changed.size) return;
+    for (const [connId, s] of states) {
+      const c = aud.model.conns.get(connId), ws = s.sub && c && changed.has(c.zone) ? aud.sockets.get(connId) : null;
       if (ws) aud.send(ws, { type: "media", op: "sync" });
     }
   };
@@ -166,6 +194,7 @@ export const createMediaBroker = (aud) => {
     await save(connId);
     await queueClose(session, mid ? [mid] : [], !mid);
     await prune();
+    announce();
     aud.sourcesChanged();
   };
 
@@ -176,7 +205,7 @@ export const createMediaBroker = (aud) => {
     if (s.pub) await queueClose(s.pub, s.pubMid ? [s.pubMid] : [], !s.pubMid);
     const had = !!s.pub;
     await forget(connId);
-    if (had) { await prune(); aud.sourcesChanged(); }
+    if (had) { await prune(); announce(); aud.sourcesChanged(); }
   };
 
   // --- one op ---
@@ -278,6 +307,7 @@ export const createMediaBroker = (aud) => {
       if (!r.ok) { await retirePublication(conn.connId); return refuse("stale_epoch", 409); }
       aud.save(conn.connId);
       await aud.flush();
+      announce();
       aud.sourcesChanged();
       aud.tellYou(conn.connId);
       return answer({ ok: true, publication: s.gen });
@@ -327,7 +357,7 @@ export const createMediaBroker = (aud) => {
   };
 
   return {
-    request, restore, retirePublication, releaseAll, prune, chatSources, authorizedFor, runCleanup,
+    request, restore, retirePublication, releaseAll, prune, announce, chatSources, authorizedFor, runCleanup,
     /** The cleanup queue as the owner sees it: how many jobs and the oldest one's age. */
     backlog: (now = Date.now()) => ({ jobs: cleanup.length, oldestMs: cleanup.reduce((age, job) => Math.max(age, now - job.at), 0) }),
     get cleanup() { return cleanup; }, get states() { return states; }, get configured() { return !!sfu; },

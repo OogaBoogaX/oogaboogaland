@@ -40,6 +40,7 @@ is unchanged and never stages the app.
 | `src/ooga-chat/ooga-chat-shell.js` | `BL.oogaChatShell`: the tabs and the views they keep |
 | `src/ooga-chat/ooga-chat-views.js` | `BL.oogaChatViews`: each tab's view, every one the island's own panel in its markup (#656): the Ooga Chat tab (sign-in, or the island's Ooga Chat panel: the zones, the roster and its footer), Bananas, Contributing Oogas, Online Oogas and The Commons, the island's account row at the foot of the last three, and the stand-in for a panel not built yet |
 | `src/ooga-chat/ooga-chat-http.js` | `BL.oogaChatHttp`: the production adapter |
+| `src/ooga-chat/ooga-chat-media.js` | `BL.oogaChatMedia`: voice (#654), one controller apart from the views: hearing the zone through the server's media operations and speaking from it (Voice, below) |
 | `src/ooga-chat/ooga-chat-faces.js` | `BL.oogaChatFaces`: where each Ooga's face stands on `art/ooga-faces.png`, by handle, and the default Ooga's for anyone added since. Generated with the sheet by `npm run ooga-chat:faces` (`scripts/ooga-chat-faces.mjs`, the island's own renderer in the suite's Chrome), never edited; run it again when an Ooga is added or changes its look |
 | `src/ooga-chat/ooga-chat-commons.js` | `BL.oogaChatCommons`: what the island's Room tells a community member (#670), checked and kept for The Commons and Online Oogas: who you are, whether lines may be sent, everyone online without a position, and the last 100 lines |
 | `src/ooga-chat/ooga-chat-donor.js` | `BL.oogaChatDonor`: who Feed the Oogas says a tip is from (the name and message last given, and the names this browser's own paid tips used), the `game` the shared donation popup reads, in this app's own storage. Reopening Feed starts from the name last given, never the login or "anon" over it; a GitHub account's login is the starting name only until one is given |
@@ -60,7 +61,7 @@ Shared with the island, one copy each:
 | `src/js/audience-tiles.js` | The Ooga Chat roster's circles (`BL.audienceTiles`), the island's Ooga Chat panel's and this tab's alike: everyone in the zone four to a row, scrolling in its slab, each tile kept by id and only its changed fields written |
 | `src/js/format-large.js`, `src/js/roster-panel.js`, `src/js/contributor-identities.js`, `src/js/activity-repos.js` | Contributing Oogas (#656): the island's own panel over `/api/chat/public/contributors` (#664), its contribution states and ages, Oogatron's reading normalized as the island normalizes it, and each Ooga's face from `art/ooga-faces.png`, loaded when a stats strip first opens and not counted in the first load (`LAZY_ART`). A contributor in The Commons sees whose Ooga is on the island now; a stale or unreadable reading says so under the list |
 | `src/js/emoji-data.js`, `src/js/reaction-bar.js` | The island's own emoji panel (#655), in the Ooga Chat panel's footer: the ten reactions, the raised hand and the picker over every emoji, its skin tones and heart colours, from this browser's own choices (`ooga-reactions*`). `ooga-chat-app.js` hands it the audience socket as its connection: a tap is a `reaction` request, the hand a `hand` request an active speaker alone may make, and every reaction the server sends the zone pops over that participant's circle |
-| `src/js/chat-policy.js`, `src/js/reaction-policy.js`, `src/js/zone-map.js`, `src/js/commons-log.js` | The Commons and Online Oogas for an eligible contributor (#670): the island's chat rules, the raised hand in each tone, the zones as the island's Online Oogas groups them, and the conversation's log and composer, run over the app's own `/api/chat/commons` socket (`ooga-chat-http.js` `commons`). Their look is placed by `ooga-chat.css`; no distance, crosshair, voice link or volume, which are the island's alone |
+| `src/js/chat-policy.js`, `src/js/reaction-policy.js`, `src/js/zone-map.js`, `src/js/commons-log.js` | The Commons and Online Oogas for an eligible contributor (#670): the island's chat rules, the raised hand in each tone, the zones as the island's Online Oogas groups them, and the conversation's log and composer, run over the app's own `/api/chat/commons` socket (`ooga-chat-http.js` `commons`), with the island's name field at the Commons' top, saved as the island's display name (`commonsName`, `POST /api/chat/commons/name`). Their look is placed by `ooga-chat.css`; no distance, crosshair, voice link or volume, which are the island's alone |
 | `src/js/qr.js`, `src/js/banana-icon.js`, `src/js/jumbotron-font.js`, `src/js/factory-kiosk-core.js`, `src/js/factory-kiosk.js`, `src/js/donation-popup.js` | Feed the Oogas: the island's donation dialog and its kiosk screen, with the QR codes, the banana and the 5x7 letters they draw. The app opens it from its Bananas tab while the feed is live (the fixture entry's demo aside), real over its own `/donations` relay, with `ooga-chat-donor.js` as its `game`; its frame is placed by `ooga-chat.css` |
 | `src/js/native-icons.js` | `BL.nativeIcons`: the panel tabs' pixel icons (`bananas`, `roster`, `players`, `chat`), Ooga Chat's mark `cloud` (the tab icon on both, and the app's favicons and icons), DSB Land's destination mark `dsb` (the island's `dsb-island-icon` paths, held equal by the suite) and `voice()`, the roster's voice mark. `hud.js` fills the island's tab slots (`data-native-icon`) from it and draws its roster's voice mark with it |
 
@@ -74,14 +75,14 @@ module reads nothing at load but `window.BL` and the document.
 `factory-kiosk.js`, `donation-popup.js`, `chat-policy.js`, `emoji-data.js`, `reaction-policy.js`, `zone-map.js`, `commons-log.js`, `format-large.js`, `roster-panel.js`,
 `contributor-identities.js`, `activity-repos.js`, `audience-tiles.js`, `reaction-bar.js`, `ooga-chat-config.js`, `ooga-chat-auth.js`, `ooga-chat-roster.js`, `ooga-chat-device.js`,
 `ooga-chat-shell.js`, `ooga-chat-views.js`,
-`ooga-chat-http.js`, `ooga-chat-donor.js`, `ooga-chat-commons.js`, `ooga-chat-faces.js`, then (fixture entry only) `ooga-chat-fixtures.js`, then `ooga-chat-app.js`. The build checks that
+`ooga-chat-http.js`, `ooga-chat-media.js`, `ooga-chat-donor.js`, `ooga-chat-commons.js`, `ooga-chat-faces.js`, then (fixture entry only) `ooga-chat-fixtures.js`, then `ooga-chat-app.js`. The build checks that
 `fixture.html` loads exactly `index.html`'s files plus the fixtures, just before the app.
 
-**Adapter.** `{ kind, bootstrap(), session(boot), signIn(boot, provider), signOut(boot), audience(boot, handlers), commons(boot, handlers), contributors(), dispose() }`. `bootstrap`
+**Adapter.** `{ kind, bootstrap(), session(boot), signIn(boot, provider), signOut(boot), audience(boot, handlers), commons(boot, handlers), media(boot), contributors(), dispose() }`. `bootstrap`
 resolves to a parsed bootstrap (below), never throws. `session` resolves to a parsed session or `null` for signed
 out, and throws for any other failure, which the app shows as a recoverable error. `signIn` navigates (production)
 or returns a session (fixtures). `signOut` resolves only when the server confirms and throws otherwise. `dispose`
-aborts what is still in flight. `audience` opens the audience feed (below) and returns `{ zone(id), resync(), request(type, fields), dispose() }`, `request` sending one with an id the server answers with a `result` (a `reaction` or the `hand`, #668), 0 while the socket is not open. `contributors` resolves to the
+aborts what is still in flight. `audience` opens the audience feed (below) and returns `{ zone(id), resync(), request(type, fields), dispose() }`, `request` sending one with an id the server answers with a `result` (a `reaction` or the `hand`, #668), 0 while the socket is not open. `media` returns voice's broker, `{ call(op, body) }`: one `POST /api/chat/media/<op>` resolving to the server's JSON and throwing `{ code, retryable }` on a refusal (the fixture's answers from its own state, with its fake WebRTC as `rtc`). `contributors` resolves to the
 edge's public `/api/chat/public/contributors` reply (the cast and Oogatron's reading, each with its state), or `null` when it
 cannot be read, which Contributing Oogas says under its list.
 
@@ -92,7 +93,7 @@ a view's own nodes and listeners (a sort, a draft, a voice control) survive both
 
 **State.** `{ mode, boot, session, auth, notice, busy, zone, voice, audience }`, `mode` being `loading`, `live`,
 `unavailable` or `stale`, and `auth`, `notice` and `busy` the account's (below). `zone` is the outdoor zone, `main` or
-`dsb`, saved. `voice` is the voice seam's `{ role, muted }`. `audience` is `{ status, zone, list, version }`: the feed's
+`dsb`, saved. `voice` is the voice controller's `{ role, muted, phase, busy, notice, blocked, hearing }` (Voice, below). `audience` is `{ status, zone, list, version }`: the feed's
 status (`off`, `connecting`, `joining`, `live`, `reconnecting`, `full`, `closed`, `unavailable`, `stale`) and the list
 in the space's order.
 Public tabs: Ooga Chat, Bananas, Contributing Oogas. Online Oogas and The Commons show only while `gates` says
@@ -201,8 +202,9 @@ and when the browser restores the page from its cache. A lost session reads "You
 reads "can't check your sign-in" with Try again, so an expired login and an outage never look alike. Public tabs keep
 working through both.
 
-**The voice seam** is `media = { available, release(reason), join(state) }`. Until #654's client takes its place,
-`available` is false and Join Voice stays off ("Voice opens here soon"). The controller calls `release` first whenever
+**The voice seam** is the voice controller (`ooga-chat-media.js`, Voice below). `available` is whether this deployment
+lets contributors speak (the bootstrap's `speak` and an audience path) in a browser that can; without it Join Voice
+stays off ("Voice opens here soon", or that the browser can't). The account controller calls `release` first whenever
 the account stops being the one that may speak: sign-out (before the logout request), another principal, an expired
 session, a capability lost or gone stale, a failed check. Join Voice asks `gates` again at the click.
 
@@ -277,14 +279,52 @@ live, the hand only an active speaker raises (disabled, never hidden, for a list
 the island's Ooga Chat panel's account controls, the name over the buttons: the name (a purple dot
 only while speaking from Ooga Chat), the microphone (always first, 84px wide whatever it says: a disabled Unmute for a
 listener, explaining voice must be joined first; Mute or Unmute for a speaker), Join Voice for a listener the server
-allows to speak (Leave Voice for a speaker), and Sign out. A disabled button says why on itself. The seam
-(`media.state`) says who is a speaker; until #654 nobody is.
+allows to speak (Leave Voice for a speaker), and Sign out. A disabled button says why on itself. The voice controller's state says who is a speaker: only the
+server's acknowledged lease makes one. While joining the button reads Joining… and while leaving Leaving…, both off.
 
 **Account row.** The island's (`hud.js` `showAccount`), at the foot of Contributing Oogas, Online Oogas and The
 Commons: while signed out (and GitHub sign-in is on), the sign-in screen's own Continue with GitHub, the design's sign-in
 button in place of the island's amber Contributor sign-in; else the name, with a green dot
 and how many are on the island while The Commons is live, Join voice (Mute or Unmute for a speaker), Leave voice for
 a speaker, and Sign out.
+
+## Voice (#654)
+
+`BL.oogaChatMedia.create({ broker, rtc, request, allowed, onChange })` is one controller for the page's life, apart from
+any view. It speaks the server's media operations (media protocol 1, `docs/ooga-chat-backend.md`, Media) under the
+audience feed's own connection (the snapshot's `connection`), and names nothing else: never a session, track or
+anyone's publication. Audio goes publisher to SFU to listener, on the island's own Realtime app: no browser mesh, no
+mix, and an island speaker and an Ooga Chat speaker in the same zone hear each other.
+
+**Listening.** A signed-in page whose feed is live listens: `ice`, `receive/open`, a receive-only peer connection, and
+`receive/sync`, which pulls every speaker of the zone the server allows (island outdoor speakers and Ooga Chat
+speakers, never the visitor) and answers the SFU's offer with `renegotiate`. It syncs on each snapshot and whenever the
+server says so over the feed, `{ type: "media", op: "sync", closed? }` (a speaker going live, an island publication
+arriving or changing); a `closed` mid is dropped at once, its transceiver stopped. Each voice plays in an `<audio>`
+element of its own. A browser that holds playback until a gesture sets `blocked`, the space says "Tap anywhere to
+hear this zone.", and the next tap or key plays every voice. A receiver that fails opens again, backing off from 1 s to
+30 s six times, then the space says it can't hear the zone with Try again. A listener never asks for a microphone.
+
+**Speaking.** Join Voice, for an account `you.speak` says is `eligible`, asks for the microphone first, inside the
+click, and turns its track off before anything can carry it; then asks the feed for a lease (`setRole: speaker`, whose
+`result` names the lease's generation, `you.lease`); then `publish/open`, `publish/offer` (one sendonly audio track)
+and, once connected, `publish/ready`. Only that acknowledgement makes a speaker, muted. A denied, missing or busy
+microphone, a refusal (`speaker_capacity`, `source_in_use`, `capability_required`) or a failed connection returns to
+listening with nothing held, the lease given back with `publish/close`, and says why in the space's status line.
+Mute and Unmute (the footer, the visitor's own circle, M) flip the track at once and tell the server (`setMic`).
+Leave Voice stops and releases the microphone, then `publish/close`, and keeps listening. A `you` that no longer says
+`pending` or `active` (an expiry, a revocation, the island's own voice taking the identity) stops capture at once.
+
+**Changes.** Another zone ends speaking (capture stops before the join, which ends the lease at the server) and drops
+the old zone's voices before the new zone's snapshot; a sync asked before the change plays nothing. A new audience
+connection (a reconnect) ends everything held under the old one, says "Voice reconnected. Join Voice to speak again.",
+and listens again; speaking is never put back by itself. The feed lost (`reconnecting`, `signed-out`, `closed`, `full`)
+stops capture and receiving until its next snapshot. `release` ends speaking and keeps listening; signing out or
+another principal stops both with the feed. Nothing is kept in storage.
+
+**Not yet.** A peer's voice mark does not yet mute that voice for this visitor alone, and nothing here measures who is
+speaking; both are follow-ups. iOS routes playback differently while the microphone is open, and no browser promises
+audio or capture in the background.
 
 ## The audience contract (v1)
 
@@ -363,6 +403,11 @@ own kind of account, and with X on the X listener. A return can be tried by addi
 total and a source mute, listeners with a duplicate and a long name, then a join, a rename, a gap the page must
 resync over and a leave, one every 4 s), `empty`, `crowd` (300 listeners), `reconnecting` (drops after 6 s and comes
 back in a new epoch), `full` and `none` (no audience address).
+`&voice=` picks how voice answers, through a fake broker and fake WebRTC that never open a microphone or play
+anything: `ok` (the default: every speaker of the zone pulled, and Join Voice lands a muted speaker), `denied` (the
+microphone refused), `blocked` (playback held until a gesture), `refused` (the zone's speakers full) and `off` (a
+deployment that doesn't let anyone speak). `BL.oogaChatFixtures.rtc.stats` counts captures, live tracks and playing
+elements for the checks.
 The accounts are named samples with no picture, never real people. Fixtures are isolated three ways:
 
 - a separate entry: `index.html` never loads `ooga-chat-fixtures.js`, and the build refuses one that does or that
@@ -409,7 +454,7 @@ stylesheet 16.9 KB, sign-in picture 57.9 KB, Main Island's mark 3 KB): about 157
 alone was 71 KB, with sign-in 78 KB, with the space 88 KB). The manifest and icons are fetched by the browser when it
 considers installing, and the worker then keeps the same files once more in its cache, off the first paint. For comparison, the island's portable page is about
 39.7 MB (23 MB gzipped). The app loads no 3D engine, terrain, cabinets, replays or live feeds. `FIRST_LOAD_BUDGET` in
-the build (224 KB gzipped) fails a build that grows past it; raise it deliberately, with the reason, when a later issue
+the build (236 KB gzipped, raised from 224 KB for the voice client and the Commons' name field) fails a build that grows past it; raise it deliberately, with the reason, when a later issue
 adds weight.
 
 ## Artwork
