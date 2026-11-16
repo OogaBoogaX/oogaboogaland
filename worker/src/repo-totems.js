@@ -1,6 +1,6 @@
 // Repo Island's merges: for every repository `repo-island-data.js` lists, its newest pull request merged into its
-// default branch within the last day, all in one compact reply at `/api/repo-totems`, so a page asks once for 170
-// totems rather than 170 times. A scan asks GitHub's GraphQL API about `CHUNK` repositories a query: each one's
+// default branch within the last day, all in one compact reply at `/api/repo-totems`, so a page asks once for 171
+// totems rather than 171 times. A scan asks GitHub's GraphQL API about `CHUNK` repositories a query: each one's
 // default branch and its merged pull requests newest-updated first, read until their updates predate the day (any PR
 // merged in the day was updated in it), a further page only for a repository whose first is all of the day, at most
 // `MAX_PAGES` in all. A repository GitHub no longer knows is left out. GraphQL needs a token: the optional

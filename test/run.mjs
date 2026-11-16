@@ -21123,10 +21123,10 @@ scene("hub", { label: "Merge Rock", query: "hour=0&pos=0", steps: [{
       BL.repoFeed.apply({ at: now, merges: {} }, now);
       site.update(1 / 60, 3, h.camera);
       const dark = site.stats();
-      return { before, after, expected, animated, followed, matrices, crystalBright, crystalDim, varied, independent, lights: lamps.length, dark };
+      return { before, after, expected, animated, followed, matrices, crystalBright, crystalDim, varied, independent, lights: lamps.length, repos: BL.repoIslandData.REPOS.length, dark };
     })()`);
     record("Merge Rock lighting: all face fires, animated details, bounded ring batches and rotating warm lights; cleared feed extinguishes them",
-      result.before.flames === result.expected && result.expected > 340 && result.before.features > 0 && result.before.rings > 0 && result.before.ringDraws < 50 && result.animated && result.followed && result.matrices && result.varied && result.independent && result.crystalBright - result.crystalDim > 0.1 && result.crystalDim > 0 && result.crystalBright <= 0.75 && result.before.crystalGlow.filter(v => v > 0).length > 2 && result.dark.crystalGlow.every(v => v === 0) && result.lights === 170 && !result.dark.flames && !result.dark.features && !result.dark.rings && !result.dark.lights,
+      result.before.flames === result.expected && result.expected > 340 && result.before.features > 0 && result.before.rings > 0 && result.before.ringDraws < 50 && result.animated && result.followed && result.matrices && result.varied && result.independent && result.crystalBright - result.crystalDim > 0.1 && result.crystalDim > 0 && result.crystalBright <= 0.75 && result.before.crystalGlow.filter(v => v > 0).length > 2 && result.dark.crystalGlow.every(v => v === 0) && result.lights === result.repos && result.repos >= 170 && !result.dark.flames && !result.dark.features && !result.dark.rings && !result.dark.lights,
       JSON.stringify(result));
   }
 }] });

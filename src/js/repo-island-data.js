@@ -194,6 +194,7 @@
     ["stacks-network/stacks-core", "Stacks", "STACKS", "layers", 0.3],
     ["rsksmart/rskj", "Rootstock", "RSK", "layers", 0.3],
     ["BitVM/BitVM", "BitVM", "BITVM", "layers", 0.3],
+    ["hazync/hazync", "Hazync", "HAZYNC", "layers", 0.3],
     ["cashubtc/nuts", "NUTs", "NUTS", "layers", 0.3],
     ["BlockstreamResearch/simplicity", "Simplicity", "SIMPLIC", "layers", 0.28],
     ["RGB-WG/rgb", "RGB", "RGB", "layers", 0.26],

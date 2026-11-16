@@ -22,7 +22,7 @@
 // eyes burn, each flame a node on the arcade's one `blaze` geometry, at every carving detail and view distance. Each crystal cluster under the island
 // glows across its outer facets with distance-weighted light from nearby totems. Eight baked strength levels
 // share one mesh per source totem and follow that source's own pulse; meshes rebuild only when membership changes. The lit runes of a chunk are merged into one mesh a brightness band
-// (fresh within FRESH, older), rebuilt only when that chunk's lit set changes, so 170 totems light in a few dozen draws.
+// (fresh within FRESH, older), rebuilt only when that chunk's lit set changes, so 171 totems light in a few dozen draws.
 // Painted features pulse on their matching detail mesh, and the mainland's traveling ring glow uses one instanced
 // sector batch per paint. Warm point lights follow the turning poles through the hub's existing light budget.
 // A merge seen during the visit flares that totem's runes for FLARE seconds. Effects stay animated at every

@@ -87,7 +87,7 @@
     newsArcade: "Ooga Arcade opened: games, tickets and prizes.",
     newsFactory: "The Lightning Factory opened: a Lightning node at work.",
     newsTimechain: "The Timechain Sphere opened out west. Walk inside!",
-    repos: "Over the stone bridge past the Oogatron: Merge Rock, slowly turning, a carved totem for each of 170 open-source Bitcoin projects, sorted by kind.",
+    repos: "Over the stone bridge past the Oogatron: Merge Rock, slowly turning, a carved totem for each of 171 open-source Bitcoin projects, sorted by kind.",
     reposLit: "Each stands as tall as Bitcoin leans on its project, and lights up for a day after its repo merges a pull request.",
     newsRepos: "Merge Rock opened off the south rim: 170 totems, one for each open-source Bitcoin project. They light up when their repos merge."
   };
