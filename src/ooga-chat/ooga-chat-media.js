@@ -46,6 +46,10 @@
   const BUSY = new Set(["permission", "requesting", "negotiating", "leaving"]);
   // The own meter: RMS over SPEAK_ON starts speaking at once, SPEAK_HOLD quiet reads in a row end it (voice.js's values).
   const SPEAK_MS = 150, SPEAK_ON = 0.02, SPEAK_HOLD = 4, SAMPLES = 1024;
+  // While a lease is held the page makes a media call this often (`ice`, the lightest): the island's Audience re-reads
+  // the session with each call and carries the connection's authorisation on from it, so its hourly re-authentication
+  // never closes a speaker's socket and takes the lease (worker/src/audience.js `mediaRequest`).
+  const RENEW_MS = 20 * 60 * 1000;
   const NOTICE = {
     denied: "Microphone access is blocked. Allow it for this site to speak.",
     nodevice: "No microphone was found.",
@@ -90,7 +94,13 @@
     let sub = null, receiveTicket = 0, tries = 0, retryTimer = 0, dropTimer = 0;
     const voices = new Map();
     // Speaking: the join's ticket, the microphone, the publishing connection, the lease's generation and the mute.
-    let joinTicket = 0, mic = null, pub = null, lease = 0, speaker = false, muted = true;
+    let joinTicket = 0, mic = null, pub = null, lease = 0, speaker = false, muted = true, renewTimer = 0;
+    const renew = () => {
+      renewTimer = 0;
+      if (!speaker || disposed) return;
+      call("ice").catch(() => {});
+      renewTimer = timers.set(renew, RENEW_MS);
+    };
     // The own meter while a microphone is held: `{ audio, source, analyser, samples, timer, quiet }`, and its reading.
     let meter = null, speaking = false;
     // The voices heard: one context for their meters (`v.meter`, `{ source, analyser, quiet, speaking }`), one read of
@@ -393,6 +403,8 @@
     const stopSpeaking = () => {
       joinTicket++;
       stopMeter();
+      timers.clear(renewTimer);
+      renewTimer = 0;
       const had = !!mic || !!pub || speaker;
       speaker = false;
       muted = true;
@@ -487,6 +499,8 @@
       speaker = true;
       muted = true;
       phase = "muted";
+      timers.clear(renewTimer);
+      renewTimer = timers.set(renew, RENEW_MS);
       emit();
     };
     const leave = async () => {

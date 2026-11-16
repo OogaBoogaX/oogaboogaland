@@ -13,6 +13,9 @@
   const RECHECK_MIN_MS = 30000;
   // The session's own deadlines (expiry, the eligibility's stale window) wake a check, clamped to this range.
   const TIMER_MIN_MS = 5000, TIMER_MAX_MS = 3600000;
+  // An eligible answer is asked again this long before its stale window ends, so the server refreshes it (it does once
+  // the row is five minutes old) and the window never lapses under a speaker; still old, it is asked once more at the end.
+  const STALE_LEAD_MS = 120000;
   const NAMES = { github: "GitHub", x: "X" };
   const RETURN_TEXT = {
     ok: () => "Sign-in didn't finish.",
@@ -65,14 +68,22 @@
     let boot = null, timer = null, lastCheck = -Infinity, ticket = 0, disposed = false;
     let state = { auth: "checking", session: null, notice: null, busy: false }, open = false;
     // Every change passes here: capture is released before anyone hears of the new state. `open` is whether Join Voice
-    // was allowed when last said, so a window that passed between two changes still counts as a loss.
+    // was allowed when last said, so a window that passed between two changes still counts as a loss. A loss that is
+    // only this page not knowing for a moment (a stale window, a check that failed or is under way, the server not yet
+    // sure) closes Join Voice but leaves a lease already held: the server ends it when the standing really is lost
+    // (eligibility, revocation, sign-out, the session's end), and the speaker is not dropped every quarter hour.
+    const lost = (is, why) => {
+      if (why === "signout" || why === "expired" || !is || !is.capabilities.speak || is.identity.provider !== "github") return true;
+      const standing = eligibilityAt(is, now());
+      return standing !== "eligible" && standing !== "unknown";
+    };
     const set = (patch, why = "change") => {
       if (disposed) return;
       const was = state.session;
       state = { ...state, ...patch };
       const is = state.session, opened = gates(state, now()).joinVoice;
       if (was && (!is || is.identity.principal !== was.identity.principal)) media.release(is ? "identity" : why);
-      else if (open && !opened) media.release(why);
+      else if (open && !opened && lost(is, why)) media.release(why);
       open = opened;
       onChange(state);
     };
@@ -80,7 +91,8 @@
       if (timer !== null) timers.clear(timer);
       timer = null;
     };
-    // One timer, at the session's nearest deadline: its expiry, or the end of an eligible answer's stale window.
+    // One timer, at the session's nearest deadline: its expiry, or STALE_LEAD_MS before the end of an eligible answer's
+    // stale window (its end, when that is nearer).
     const schedule = () => {
       stop();
       const session = state.session;
@@ -88,7 +100,8 @@
       const { state: standing, checkedAt, staleAfter } = session.eligibility;
       // A window that has already passed wakes nothing: the answer stays unknown until a return to the page or the
       // network asks again, rather than asking every TIMER_MIN_MS.
-      const at = now(), stale = standing === "eligible" && staleAfter !== null && checkedAt + staleAfter * 1000 > at ? checkedAt + staleAfter * 1000 : Infinity;
+      const at = now(), lapse = checkedAt + staleAfter * 1000;
+      const stale = standing === "eligible" && staleAfter !== null && lapse > at ? lapse - STALE_LEAD_MS > at ? lapse - STALE_LEAD_MS : lapse : Infinity;
       const due = Math.min(session.expiresAt ?? Infinity, stale);
       if (due === Infinity) return;
       timer = timers.set(() => { timer = null; check("timer"); }, Math.min(TIMER_MAX_MS, Math.max(TIMER_MIN_MS, due - at)));
@@ -195,5 +208,5 @@
     };
     return { start, check, signIn, signOut, retry, resume, dispose, get state() { return state; }, get timed() { return timer !== null; } };
   };
-  BL.oogaChatAuth = { create, status, gates, eligibilityAt, RECHECK_MIN_MS, TIMER_MIN_MS, TIMER_MAX_MS, NOTICE, WHY };
+  BL.oogaChatAuth = { create, status, gates, eligibilityAt, RECHECK_MIN_MS, TIMER_MIN_MS, TIMER_MAX_MS, STALE_LEAD_MS, NOTICE, WHY };
 })();

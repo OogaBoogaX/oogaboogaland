@@ -101,7 +101,9 @@
     // Public high-score reads per IP; signed-in submissions per account, on separate keys.
     { "name": "HIGHSCORE_LIMITER", "namespace_id": "1006", "simple": { "limit": 120, "period": 60 } },
     // Hosted games' socket connections per player: a page's reconnect backoff stays far under it.
-    { "name": "GAME_LIMITER", "namespace_id": "1007", "simple": { "limit": 20, "period": 60 } }
+    { "name": "GAME_LIMITER", "namespace_id": "1007", "simple": { "limit": 20, "period": 60 } },
+    // GitHub profile pictures served from this origin (worker/src/avatar.js), per IP, counted only on an edge miss.
+    { "name": "AVATAR_LIMITER", "namespace_id": "1015", "simple": { "limit": 240, "period": 60 } }
   ],
   // Daily: purge expired sessions and Tess's questions not asked for 90 days.
   "triggers": { "crons": ["0 4 * * *"] }

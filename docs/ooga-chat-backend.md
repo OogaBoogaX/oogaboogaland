@@ -309,7 +309,9 @@ delta's `revision` is always `base + 1` within an epoch; the epoch is fixed for 
 storage is reset), and each zone's revision is stored, so an object woken from hibernation carries on where it was and
 clients never resync for a nap. Generations follow the clock and only rise. A request repeated with the same
 `requestId` gets its first answer again. Close codes: 4401 (signed out, deleted, or the hourly re-authentication: the
-app checks its session and reconnects), 4426 (another protocol), 4429 (full, too many tabs, or too many sockets
+app checks its session and reconnects; a media call re-reads the session and eligibility at the edge and, while the
+account is still eligible, carries the connection's authorisation on from it, and a speaker's page makes one every 20
+minutes, so a held lease is never closed this way while the hourly check stays the backstop for a missed revocation), 4426 (another protocol), 4429 (full, too many tabs, or too many sockets
 lately), 4400 (an unreadable frame), 4503 (listening is off).
 
 **The island's panel** (`audience-v1`, advertised in the Room's `welcome` only with the bridge on and the binding): the

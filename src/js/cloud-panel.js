@@ -6,7 +6,8 @@
 // nothing. A choice never moves the visitor's Ooga or their microphone: what they publish stays the island's voice.
 // One roster of circles, Ooga Chat's own (audience-tiles.js, which the app draws with too): speakers, then listeners,
 // the whole list scrolling in its slab, each a portrait (the Ooga's face for a world speaker with a character the server
-// names, else the native Ooga face; audience.js leaves out the room's account pictures), the name, and Speaker or
+// names; else, for a GitHub account, its GitHub picture from this origin, the Worker's `/api/avatar/<id>`; else, or when
+// that does not load, the native Ooga face; audience.js leaves out the room's own picture paths), the name, and Speaker or
 // Listener under it after a speaker's microphone. A speaker's portrait carries the ring of where they speak from: green
 // for the island, purple for Ooga Chat. The visitor's own microphone mutes them as M does; anyone else's mutes that
 // voice for this visitor alone (voice.js `muteLocal`, which #661 extends to Ooga Chat's speakers). Retry, offered while
@@ -78,7 +79,7 @@
     const look = !speaker ? "" : muted ? "muted" : speaking ? "speaking" : "on";
     const blocked = speaker && !row.self && voice.mutedLocally(row.login);
     t.id = id; t.display = row.display; t.role = row.role; t.source = row.source || ""; t.self = row.self;
-    t.face = row.character && BL.characters.get(row.character) ? faceUrl(row.character) : "";
+    t.face = row.character && BL.characters.get(row.character) ? faceUrl(row.character) : key ? `/api/avatar/${key}` : "";
     t.look = look; t.hand = row.hand; t.micPressed = blocked;
     // The visitor's own button works their microphone, so only while they are in voice.
     t.micDisabled = row.self && !voice.stats.enabled && !voice.stats.returning;

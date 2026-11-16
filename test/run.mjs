@@ -33369,9 +33369,16 @@ const oogaChatChecks = async () => {
       gates: () => A.gates(auth.state, clock), get timers() { return timers.filter(Boolean); } };
   };
   const eligible = await signedIn(account("github", "speaker", "eligible", { eligibility: { checkedAt: NOW, staleAfter: 600 } }));
-  const opened = eligible.auth.state.auth === "eligible" && eligible.gates().joinVoice && eligible.gates().contributor && eligible.timers.length === 1;
+  const opened = eligible.auth.state.auth === "eligible" && eligible.gates().joinVoice && eligible.gates().contributor && eligible.timers.length === 1
+    && eligible.timers[0].at === NOW + 600_000 - A.STALE_LEAD_MS;
   await eligible.advance(600_000);
-  const stale = eligible.log.includes("release:stale") && !A.gates({ ...eligible.auth.state, session: eligible.auth.state.session }, NOW + 600_000).joinVoice;
+  // A window that lapses closes Join Voice but ends no lease held: the server ends a real loss.
+  const stale = !eligible.log.some((entry) => entry.startsWith("release")) && !A.gates({ ...eligible.auth.state, session: eligible.auth.state.session }, NOW + 600_000).joinVoice;
+  // Asked again before the window ends, a fresh answer keeps Join Voice open and nothing is released.
+  const early = await signedIn(account("github", "speaker", "eligible", { eligibility: { checkedAt: NOW, staleAfter: 600 } }));
+  early.answer = account("github", "speaker", "eligible", { eligibility: { checkedAt: NOW + 600_000 - A.STALE_LEAD_MS, staleAfter: 600 } });
+  await early.advance(600_000 - A.STALE_LEAD_MS);
+  const refreshed = early.log.filter((entry) => entry === "session").length === 2 && early.gates().joinVoice && !early.log.some((entry) => entry.startsWith("release"));
   const x = await signedIn(account("x", "speaker", "eligible"));
   const ineligible = await signedIn(account("github", "visitor", "ineligible")), unknown = await signedIn(account("github", "unchecked", "unknown"));
   const revoked = await signedIn(account("github", "revoked", "revoked"));
@@ -33417,12 +33424,12 @@ const oogaChatChecks = async () => {
   const denied = await signedIn(null, { back: { result: "denied", provider: "github" } });
   const deniedNotice = denied.auth.state.notice?.kind === "signin" && denied.auth.state.notice.provider === "github" && denied.auth.state.auth === "signed-out";
   await denied.auth.retry();
-  const flow = { opened, stale, ...gated, releasedFirst, uncertain, outKept, retried, outConfirmed,
+  const flow = { opened, stale, refreshed, ...gated, releasedFirst, uncertain, outKept, retried, outConfirmed,
     identity: swap.log.includes("release:identity") && swap.log.includes("release:expired") && expiredNotice,
-    error: broken.auth.state.auth === "error" && broken.log.includes("release:error") && broken.auth.state.notice?.kind === "check" && !broken.gates().joinVoice,
+    error: broken.auth.state.auth === "error" && !broken.log.some((entry) => entry.startsWith("release")) && broken.auth.state.notice?.kind === "check" && !broken.gates().joinVoice,
     throttled: throttled.log.filter((entry) => entry === "session").length === 1,
     denied: deniedNotice && denied.log.includes("signIn:github") && denied.auth.state.auth === "eligible" && !denied.log.some((entry) => entry.startsWith("release")) };
-  record("Ooga Chat account: every sign-in lands as a listener with gates only the server's answer opens, a stale window or failed check closes them, sign-out releases capture before the request and offers a retry when unconfirmed, a session the server still holds after it is never adopted again, and another principal or an expired session releases and says so",
+  record("Ooga Chat account: every sign-in lands as a listener with gates only the server's answer opens, a stale window (asked again two minutes before it ends) or failed check closes them without ending a lease held, sign-out releases capture before the request and offers a retry when unconfirmed, a session the server still holds after it is never adopted again, and another principal or an expired session releases and says so",
     Object.values(flow).every(Boolean), JSON.stringify(flow));
 
   // The audience roster (audience protocol 1): the space's one order, and a snapshot and deltas applied whole or not at
@@ -33507,7 +33514,7 @@ const oogaChatChecks = async () => {
     close() {}
   }
   const feedAdapter = load(["src/ooga-chat/ooga-chat-config.js", "src/ooga-chat/ooga-chat-http.js"], { window: {}, AbortController,
-    setTimeout: (fn, ms) => waits.push({ fn, ms }), clearTimeout() {} }).oogaChatHttp.create({ fetch: answer(500), location: { protocol: "https:", host: "chat.test" }, doc: {}, WebSocket: Socket });
+    setTimeout: (fn, ms) => waits.push({ fn, ms }), clearTimeout() {}, setInterval: () => 1, clearInterval() {} }).oogaChatHttp.create({ fetch: answer(500), location: { protocol: "https:", host: "chat.test" }, doc: {}, WebSocket: Socket });
   const refused = (code, frame) => {
     const socket = sockets.at(-1);
     socket.readyState = 1;

@@ -74,8 +74,10 @@
     // stale (4426: another protocol revision), closed (4503: listening is off, asked again after about 3 min) and
     // unavailable (no address). Reconnects back off from 1 s to 30 s. The edge refuses by accepting a socket and
     // closing it at once, so `open` proves nothing: only a frame from the zone resets the backoff.
+    // The audience socket pings as the Commons' does (the Audience answers "pong" without waking): a quiet zone sends
+    // nothing for minutes otherwise, and a connection a network or proxy drops on idle would take a speaker's lease.
     const audience = (boot, { message, status }) => {
-      let socket = null, zone = null, tries = 0, timer = null, closed = false, requests = 0;
+      let socket = null, zone = null, tries = 0, timer = null, closed = false, requests = 0, ping = null;
       const idle = { zone() {}, resync() {}, request: () => 0, dispose() {} };
       if (!boot.paths.audience) {
         status("unavailable");
@@ -87,9 +89,13 @@
         if (closed || !zone) return;
         status(tries ? "reconnecting" : "connecting");
         const own = socket = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${boot.paths.audience}`);
-        own.addEventListener("open", () => send({ type: "join", zone, protocol: PROTOCOLS.audience }));
+        own.addEventListener("open", () => {
+          send({ type: "join", zone, protocol: PROTOCOLS.audience });
+          clearInterval(ping);
+          ping = setInterval(() => own.readyState === 1 && own.send("ping"), PING_MS);
+        });
         own.addEventListener("message", (event) => {
-          if (own !== socket || typeof event.data !== "string" || event.data.length > FRAME_MAX) return;
+          if (own !== socket || typeof event.data !== "string" || event.data === "pong" || event.data.length > FRAME_MAX) return;
           let data;
           try { data = JSON.parse(event.data); } catch { return; }
           tries = 0;
@@ -98,6 +104,8 @@
         own.addEventListener("close", (event) => {
           if (own !== socket || closed) return;
           socket = null;
+          clearInterval(ping);
+          ping = null;
           if (event.code === 4401) return status("signed-out");
           if (event.code === 4426) return status("stale");
           if (event.code === 4429) {
@@ -128,6 +136,8 @@
         dispose() {
           closed = true;
           clearTimeout(timer);
+          clearInterval(ping);
+          ping = null;
           socket?.close(1000);
           socket = null;
         }
