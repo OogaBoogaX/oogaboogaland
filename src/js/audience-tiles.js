@@ -1,7 +1,7 @@
 // Ooga Chat's roster as circles, the island's (cloud-panel.js) and Ooga Chat's alike (#656): everyone in an outdoor zone,
 // as many to a row as fit at 76 px or more a column, in the order the caller hands them (speakers first), the whole list scrolling in its slab. A tile is a
 // portrait (a picture, or the native Ooga face when there is none or it fails, asked for once) carrying a speaker's
-// source ring (green from the island, purple from Ooga Chat) and, over its corner, a raised hand or a reaction; then
+// source ring (green from the island, purple from Ooga Chat) and, over its centre, a raised hand or a reaction; then
 // the name on one line, cut short with its whole self in the title (an Ooga Chat speaker's purple dot before it); then
 // the role, a speaker's voice mark first. Reads nothing at load but window.BL, so Ooga Chat shares it.
 // `create(list, { mic(id) })` takes the <ul> and what a press on a voice mark does, and returns:
@@ -13,7 +13,7 @@
 //                          far more often than the list, and only speakers have one)
 //   prune(keep)            drops every tile whose id `keep(id)` refuses, cancelling its picture (for a list that changed
 //                          while hidden, which is drawn again only once shown)
-//   pop(id, emoji)         a reaction over that tile's corner, as Online Oogas' rows show one (reaction-bar.js `pop`): the
+//   pop(id, emoji)         a reaction over that tile's centre, as Online Oogas' rows show one (reaction-bar.js `pop`): the
 //                          newest replaces the one before
 //   clear()                every tile gone (a sign-out)
 //   count                  the tiles kept

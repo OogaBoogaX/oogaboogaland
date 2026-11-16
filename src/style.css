@@ -1129,8 +1129,10 @@ body[data-active-scene="block"] .mode-hud {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); align-content: start; gap: 10px 4px; margin: 0; padding: 14px 8px;
   overflow-y: auto; overscroll-behavior: contain; list-style: none; container-type: inline-size;
 }
-/* A tile (audience-tiles.js): the portrait with its ring and the hand or a reaction over its corner, the name, and the
-   role under it after a speaker's microphone. A tile out of sight skips its layout and paint. */
+/* A tile (audience-tiles.js): the portrait with its ring and the hand or a reaction over its centre, at three quarters of
+   its size, the name, and the role under it after a speaker's microphone. A tile out of sight skips its layout and paint.
+   An emoji font draws its glyph a little above the middle of its line, so the overlay's top padding brings its ink down
+   onto the circle's centre. */
 .cloud-tile {
   --face: 40px;
   display: flex; flex-direction: column; align-items: center; min-width: 0; padding: 6px 0 2px; border-radius: 6px;
@@ -1147,12 +1149,17 @@ body[data-active-scene="block"] .mode-hud {
 .cloud-portrait > img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .cloud-portrait > svg { display: block; width: 62%; height: auto; shape-rendering: crispEdges; }
 .cloud-react {
-  position: absolute; top: -8px; right: -12px; display: grid; width: 26px; height: 26px; place-items: center;
-  font-size: 18px; line-height: 1; pointer-events: none;
+  position: absolute; inset: 0; display: grid; place-items: center; padding-top: 0.09em;
+  font-size: calc(var(--face) * 0.75); line-height: 1; pointer-events: none;
 }
 .cloud-hand { grid-area: 1 / 1; }
-.cloud-pop { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+/* The pop (reaction-bar.js) rises 7px as it goes, 4.25px of it by halfway: started that much lower, it crosses the
+   circle's centre halfway through and ends a little above it. Under Calm it only fades, so it stays centred. */
+.cloud-pop { position: absolute; inset: 0; display: grid; place-items: center; padding-top: inherit; translate: 0 4.25px; pointer-events: none; }
 .cloud-pop[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .cloud-pop { translate: none; }
+}
 .cloud-name { display: flex; align-items: center; justify-content: center; gap: 4px; max-width: 100%; color: var(--paper); font-size: 10px; font-weight: 700; }
 .cloud-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cloud-dot { display: none; flex: none; width: 6px; height: 6px; border-radius: 50%; background: #b18aff; }

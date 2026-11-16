@@ -264,7 +264,7 @@ speaker. Totals sort; they grant nothing.
 
 **Tiles.** A circle portrait (the server's same-origin picture, the island's Ooga face when there is none or it fails,
 asked for once and only as it scrolls near), a speaker's 3px source ring outside a 3px dark gap (green `#22c55e` from
-the island, purple `#b18aff` from Ooga Chat; listeners neutral), the hand's corner (#655), the name without `@` on one
+the island, purple `#b18aff` from Ooga Chat; listeners neutral), the hand over the portrait's centre (#655), the name without `@` on one
 line cut short with its whole self in the title and the accessible name, an app speaker's purple dot before it, and
 under it a speaker's voice mark (crossed and red when source-muted) with Speaker, or Listener. The visitor's own voice
 mark mutes or unmutes them while they speak; anyone else's will mute that voice for this visitor once Ooga Chat plays

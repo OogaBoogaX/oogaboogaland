@@ -186,26 +186,29 @@ export const createMediaBroker = (aud) => {
   };
 
   /** A publication ends: out of the catalog first, then closed at the SFU, then every subscription to it. */
+  // Who pulls it hears first: the island's Room is told and every subscription is closed before the publication is,
+  // since an island listener still offered it would pull a closed session and fail its whole change (voice.js), and the
+  // SFU's close can take a while and retries.
   const retirePublication = async (connId) => {
     const s = states.get(connId);
     if (!s || !s.pub) return;
     const session = s.pub, mid = s.pubMid;
     s.pub = s.pubMid = s.track = null; s.pending = false; s.lease = 0;
     await save(connId);
-    await queueClose(session, mid ? [mid] : [], !mid);
+    aud.sourcesChanged();
     await prune();
     announce();
-    aud.sourcesChanged();
+    await queueClose(session, mid ? [mid] : [], !mid);
   };
 
   const releaseAll = async (connId) => {
     const s = states.get(connId);
     if (!s) return;
-    if (s.sub) await queueClose(s.sub, Object.keys(s.mids), !Object.keys(s.mids).length);
-    if (s.pub) await queueClose(s.pub, s.pubMid ? [s.pubMid] : [], !s.pubMid);
     const had = !!s.pub;
     await forget(connId);
-    if (had) { await prune(); announce(); aud.sourcesChanged(); }
+    if (had) { aud.sourcesChanged(); await prune(); announce(); }
+    if (s.sub) await queueClose(s.sub, Object.keys(s.mids), !Object.keys(s.mids).length);
+    if (s.pub) await queueClose(s.pub, s.pubMid ? [s.pubMid] : [], !s.pubMid);
   };
 
   // --- one op ---

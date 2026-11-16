@@ -612,8 +612,17 @@ export class Audience extends DurableObject {
     }));
     this.island = { seq, speakers: clean, active: active.slice(0, 64).filter((id) => ID.test(id)) };
     await this.ctx.storage.put("world", this.island);
+    // Whether each identity holds an island source, before and after: one that gained or lost it is `denied` or
+    // `eligible` again in every Ooga Chat tab it has open, which hears it now rather than at its next lease change.
+    const held = (p) => !!(p.active || p.world), before = new Map();
+    for (const p of this.model.people.values()) before.set(p.id, held(p));
     const ended = this.model.setWorld(this.island.speakers, this.island.active);
-    for (const { connId, lease } of ended) { this.save(connId); this.leaseEnded(connId, lease, "source_in_use"); this.tellYou(connId); }
+    const told = new Set();
+    for (const { connId, lease } of ended) { this.save(connId); this.leaseEnded(connId, lease, "source_in_use"); this.tellYou(connId); told.add(connId); }
+    for (const p of this.model.people.values()) {
+      if ((before.get(p.id) || false) === held(p)) continue;
+      for (const connId of p.conns.keys()) if (!told.has(connId)) this.tellYou(connId);
+    }
     await this.flush();
     // A world publication gone or replaced: every subscription to the old one is closed at once. The answer names the
     // speakers whose subscriptions the SFU has not yet confirmed closed: the Room's `closed` for them waits (#667).

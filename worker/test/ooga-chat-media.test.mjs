@@ -388,3 +388,32 @@ test("cleanup: two runs over one job never remove another, and tracks found thro
   await a.media.runCleanup(jobC);
   assert.deepEqual([a.media.cleanup.length, openMids("sC")], [0, []]);
 });
+
+test("regression: a retired publication leaves the island's sources before it is closed, so no island listener pulls a closed session", async () => {
+  const h = host(), a = await h.make();
+  const amy = await connect(a, who(1));
+  await speak(a, amy);
+  const pub = a.media.states.get(amy.connection).pub;
+  assert.deepEqual(h.room.sources.at(-1).map((s) => s.id), [1]);
+  let openWhenTold = null;
+  const push = h.room.sources.push.bind(h.room.sources);
+  h.room.sources.push = (list) => { if (openWhenTold === null && !list.length) openWhenTold = openMids(pub).length; return push(list); };
+  assert.equal((await media(a, amy, "publish/close")).status, 200);
+  await h.settle();
+  assert.equal(openWhenTold, 1, "the Room heard it gone while the publication was still open");
+  assert.deepEqual(openMids(pub), [], "and then it was closed");
+});
+
+test("regression: an Ooga Chat tab hears at once when the island's voice takes or gives back its account's standing", async () => {
+  const h = host(), a = await h.make();
+  const amy = await connect(a, who(1)), bea = await connect(a, who(2));
+  const you = (client) => client.ws.sent.filter((m) => m.type === "you").at(-1);
+  await a.world(30, [], ["gh:1"]);
+  assert.equal(you(amy).you.speak, "denied", "in the island's voice: Join is held off here");
+  assert.equal(you(bea), undefined, "nobody else is told anything");
+  await a.world(31, [], []);
+  assert.equal(you(amy).you.speak, "eligible", "out of it again: Join opens without waiting for anything else");
+  const sent = amy.ws.sent.length;
+  await a.world(32, [], []);
+  assert.equal(amy.ws.sent.length, sent, "no change, no word");
+});

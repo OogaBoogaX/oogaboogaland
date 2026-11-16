@@ -165,7 +165,7 @@
     }
     render(); paintFooter();
   };
-  // A reaction lasts its own time over its tile's corner, layered over the hand; a tile holds a few at once.
+  // A reaction lasts its own time over its tile's centre, layered over the hand; a tile holds a few at once.
   const pop = (msg) => {
     if (msg.epoch !== model.epoch || msg.zone !== model.zone || !model.rows.has(msg.id) || !BL.reactionPolicy.valid(msg.e) || !showing) return;
     tiles.pop(msg.id, msg.e);

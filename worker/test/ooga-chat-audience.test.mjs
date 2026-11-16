@@ -442,6 +442,15 @@ test("the Room: its word on its players goes only when it changes, and only an o
   assert.deepEqual([calls.world.at(-1).s, calls.world.at(-1).a], [[], []], "out of voice: neither");
 });
 
+test("regression: the island panel's footer calls a player active only while in the island's voice with an open grant, never for the grant alone", () => {
+  const p = player(3, { voice: {}, outdoor: { state: "open", scope: "main" } });
+  assert.deepEqual(audienceRoom.you(p), { speak: "eligible" }, "outdoors out of voice (the grant opens anyway): Join stays open");
+  p.voice = { track: "mic", pub: "s" };
+  assert.deepEqual(audienceRoom.you(p), { speak: "active" });
+  p.outdoor = { state: "none" };
+  assert.deepEqual(audienceRoom.you(p), { speak: "eligible" }, "in voice indoors: its own voice, not the public one");
+});
+
 test("the bridge hands an audience socket on only for this environment and version, with the switch on, and only socket headers", async () => {
   const forwarded = [];
   const env = { ENVIRONMENT: "staging", OOGA_CHAT_FEATURES: "bridge", AUDIENCE: { getByName: () => ({ fetch: async (request) => { forwarded.push(request); return new Response("ok"); } }) } };

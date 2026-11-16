@@ -32,6 +32,8 @@ const enabled = (room) => !!room.env && !!room.env.AUDIENCE && bridgeFeatures(ro
 // The outdoor handshake and Ooga Chat speakers heard on the island: the island's `outdoor` switch, which is its kill switch.
 const outdoorOn = (room) => enabled(room) && bridgeFeatures(room.env).outdoor;
 const isOpen = (p) => !!p.outdoor && p.outdoor.state === "open";
+// In the island's voice at all: a microphone published, or listening with it muted.
+const inVoiceOf = (p) => !!(p.voice && (p.voice.track || p.voice.pub || (p.voice.sub && p.muted === true)));
 // Ooga Chat speakers drawn on clouds in the world (#668, rendered by #659): the island's `cloud` switch.
 const cloudsOn = (room) => enabled(room) && bridgeFeatures(room.env).cloud;
 // Which hall cabinets are outdoors (the island's cave apron), from the registry the page and the Room share.
@@ -50,8 +52,10 @@ export const audienceRoom = {
     return { t: msg.t, zone: msg.zone };
   },
 
-  // What the panel's footer may offer the visitor: the island's own voice is how an island player speaks.
-  you: (p) => ({ speak: isOpen(p) ? "active" : "eligible" }),
+  // What the panel's footer may offer the visitor: the island's own voice is how an island player speaks, so it is
+  // `active` only while in that voice with an open outdoor grant. The grant itself opens outdoors whether or not the
+  // player is in voice (outdoor-voice.js), so it alone never says so.
+  you: (p) => ({ speak: isOpen(p) && inVoiceOf(p) ? "active" : "eligible" }),
 
   async view(room, p, zone, again = false) {
     if (!enabled(room)) return;
@@ -103,8 +107,8 @@ export const audienceRoom = {
     if (!enabled(room)) return null;
     const speakers = [], active = [];
     for (const p of room.players.values()) {
-      // In the island's voice at all (a microphone published, or listening with it muted): its source wins.
-      const inVoice = !!(p.voice && (p.voice.track || p.voice.pub || (p.voice.sub && p.muted === true)));
+      // In the island's voice at all: its source wins.
+      const inVoice = inVoiceOf(p);
       if (inVoice) active.push(selfOf(p));
       const o = p.outdoor;
       if (inVoice && isOpen(p) && outdoorOn(room) && isZone(o.scope))

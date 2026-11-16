@@ -319,10 +319,13 @@ page's `audience-view` and `audience-resync` (`{ v: 1, zone }`) are answered by 
 `{ t: "audience", v: 1, kind: "snapshot", epoch, rev, zone, part, parts, you, rows }` in parts of 100 rows, and then
 `kind: "delta"` with `base`, relayed from the Audience in order for the zones a panel is open on (`watch`). Rows there
 use the panel's shape (`source` `world` or `chat` on speakers only, `mic` `on`/`muted`/`off`, `avatar`, `self`). An
-island player's `you.speak` is `active` while they speak outdoors, else `eligible`.
+island player's `you.speak` is `active` while they are in the island's voice with an open outdoor grant, else `eligible`:
+the grant opens outdoors in or out of voice, so it alone never makes them `active`, and the panel's Join Voice reads
+the page's own voice before the room's `active`.
 
 **The island's word.** The Room calls `world(seq, speakers, active)` whenever who publishes outdoors (players the
-outdoor handshake has opened, #667) or who is in its voice at all changes, newest `seq` winning; the Audience stores it.
+outdoor handshake has opened, #667) or who is in its voice at all changes, newest `seq` winning; the Audience stores it. An identity that gains or loses an island source with it is sent
+`you` again in every Ooga Chat tab it has open, so their Join Voice follows the island at once.
 A world speaker's `contributions` (for ordering only) are Oogatron's counts, read by the Audience at most every ten
 minutes; an unknown total sorts last and is never shown as zero.
 
@@ -355,8 +358,10 @@ lease an active, muted speaker and the publication pullable, with a fresh public
 loopback is never published. `publish/close` goes back to listening and keeps the receive session.
 
 **Retiring.** A publication that ends (Leave Voice, a lease ending, a real zone change, a revocation, the island
-taking the identity, the socket going) leaves the catalog at once; its track is closed at the SFU, and so is every
-listener's pull of it, server-side, without waiting for the listener, who is told to `sync`. An island speaker leaving
+taking the identity, the socket going) leaves the catalog at once. The island's Room hears its sources without it and
+every listener's pull of it is closed, server-side, without waiting for the listener, who is told to `sync`; only then
+is its track closed at the SFU, so no island listener is still offered a closed publication, whose pull would fail its
+whole change. An island speaker leaving
 the outdoors (a new `world` without them) or publishing again (a new generation) closes every pull of the old
 publication the same way. A listener changing zone loses the old zone's pulls at once.
 
