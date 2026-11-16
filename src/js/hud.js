@@ -1981,7 +1981,7 @@
     const iceBlocked = voice.error === BL.voice.ICE_BLOCKED;
     const voiceFailure = iceBlocked ? voice.error : voice.returning ? voice.micError : voice.enabled ? "" : voice.error || voice.micError;
     const reason = voiceReason();
-    const voiceWords = reason ? reason : voice.joining ? "Joining voice" : voiceFailure ? `Voice: ${voiceFailure}` : !voice.enabled && !voice.returning ? "Join voice" : voice.muted ? "Unmute" : "Mute";
+    const voiceWords = reason ? reason : voice.reconnecting ? "Reconnecting voice" : voice.joining ? "Joining voice" : voiceFailure ? `Voice: ${voiceFailure}` : !voice.enabled && !voice.returning ? "Join voice" : voice.muted ? "Unmute" : "Mute";
     writeAccount("account-voice", "hidden", !live);
     writeAccount("account-voice", "textContent", voiceWords);
     writeAccount("account-voice", "disabled", !!reason);
@@ -1991,7 +1991,7 @@
       ? "A VPN's leak protection can block WebRTC by setting the browser's IP handling policy to disable non-proxied UDP (Brave specific). Allow WebRTC for this site, or turn that protection off."
       : "";
     writeAccount("account-voice", "title", voiceTip);
-    writeAccount("account-voice-leave", "hidden", !live || !voice.enabled && !voice.returning);
+    writeAccount("account-voice-leave", "hidden", !live || !voice.enabled && !voice.returning && !voice.reconnecting);
     const pressed = String(voice.enabled && !voice.muted), onlineDot = String(live);
     for (const row of fieldsFor("account")) if (row.dataset.live !== onlineDot) row.dataset.live = onlineDot;
     for (const button of fieldsFor("account-voice")) if (button.getAttribute("aria-pressed") !== pressed) button.setAttribute("aria-pressed", pressed);

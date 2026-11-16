@@ -349,6 +349,15 @@ that goes to another app, a network change, a microphone another app takes.
 - *A dead socket.* A socket the page was away from can read open long after it died. When the page is shown again or
   back online (`feed.wake`), or after 75 s of silence, the feed asks for a pong, and with no frame in 4 s closes the
   socket itself and opens another at once.
+- *A network change* (another Wi-Fi, Wi-Fi to cellular). The same loss, found sooner. A voice connection that drops
+  (`disconnected`) is the first sign, long before the feed's socket is known dead, so the controller asks the feed to
+  check its socket at once (`stall`, the feed's `wake(true)`: a pong within 2.5 s or the socket is closed and opened
+  again; one still opening on the old network after 4 s is opened afresh). The connection's type changing
+  (`navigator.connection`, where the browser has it) asks the same. A dead socket's new connection then speaks again
+  by itself, as above. Under a feed that lives, a publishing connection still down after 5 s is published again
+  without waiting for the browser to call it failed. A lease asked for over a socket that never answers is that dead
+  socket too: the feed is checked, and the first such silence under a connection is not counted as a try. A wait
+  after a failed try ends with the connection it failed under.
 - *A failed publishing connection.* The lease is given back and asked for again the same way.
 - *An unsure answer.* A session check the server itself answers `unknown` (the island could not be asked for a while)
   closes Join Voice and leaves a lease already held, as a stale window or a failed check does.

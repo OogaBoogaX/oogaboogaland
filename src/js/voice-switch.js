@@ -20,7 +20,7 @@
       if (s.voiceMoved !== moved) { moved = s.voiceMoved; BL.hud.toast(BL.voiceHandoff.WORDS.moved); }
       // What the first welcome found, read once.
       if (!arrived && s.room === "live") { arrived = true; found = s.voiceElsewhere; }
-      const elsewhere = s.room === "live" && s.voiceElsewhere && !v.enabled && !v.joining;
+      const elsewhere = s.room === "live" && s.voiceElsewhere && !v.enabled && !v.joining && !v.reconnecting;
       if (!elsewhere) card.close();
       else if (found && !asked) { asked = true; card.open(); }
     };

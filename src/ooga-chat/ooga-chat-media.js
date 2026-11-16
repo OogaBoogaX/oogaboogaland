@@ -32,13 +32,19 @@
 // then twice that, RESUME_TRIES in a row at most; a refusal says why and listens. A zone that reads full for a moment
 // (`full`) keeps the wish to speak as a dropped socket does. A microphone the browser takes away (another app, a call)
 // leaves a muted speaker with nothing captured; Unmute, a click, captures it again.
+// A network change (another Wi-Fi, Wi-Fi to cellular) is that same loss, found sooner: a voice connection that drops
+// is the first to show it, long before the feed's socket is known dead, so the page asks the feed to check its socket
+// at once (`stall`), and a publishing connection still down after DROP_GRACE_MS is published again without waiting for
+// the browser to call it failed. A lease asked for over a socket that never answers is that dead socket too: the feed
+// is checked, and the try is not counted against the speaker.
 // A page that comes straight back (a refresh, a phone that reloads it) is the same loss: `remember()`, called as the page
 // is hidden or leaves, leaves word in `memory` that this account was speaking in this zone, under which connection and
 // whether its microphone was open, and the next page's first connection within RETURN_MS takes that word up once and
 // speaks again the same way.
 // `release(reason)` (the account's seam, ooga-chat-auth.js) ends speaking and keeps listening; `stop` ends both.
 //
-// `create({ broker, rtc, request, allowed, onChange, timers, target, memory })`: `broker()` the adapter's `{ call(op, body) }` or
+// `create({ broker, rtc, request, allowed, onChange, timers, target, memory, stall })`: `stall()` asks the feed to check
+// its socket now (the app's `feed.wake(true)`), `broker()` the adapter's `{ call(op, body) }` or
 // null, `rtc` the browser's WebRTC and media (the fixture passes its own), `request(type, fields)` sends a request over
 // the audience feed and returns its id (0 when it can't), `allowed()` whether the deployment lets anyone speak now,
 // `memory` the tab's own `{ take(), keep(record | null) }` (the app's session storage; none remembers nothing).
@@ -112,7 +118,7 @@
   };
   const IDLE = Object.freeze({ role: "listener", muted: true, phase: "off", busy: false, notice: "", blocked: false, hearing: 0, speaking: false, talking: Object.freeze([]), elsewhere: "" });
   const create = ({ broker, rtc = browser(), request = () => 0, allowed = () => true, onChange = () => {},
-    timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) }, target = window, memory = null } = {}) => {
+    timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) }, target = window, memory = null, stall = () => {} } = {}) => {
     const R = rtc;
     let state = IDLE, phase = "off", notice = "", blocked = false, disposed = false;
     // The audience connection everything is held under, the zone asked for (and how many times it has changed), and the
@@ -123,13 +129,14 @@
     let sub = null, receiveTicket = 0, tries = 0, retryTimer = 0, dropTimer = 0;
     const voices = new Map();
     // Speaking: the join's ticket, the microphone, the publishing connection, the lease's generation and the mute.
-    let joinTicket = 0, mic = null, pub = null, lease = 0, speaker = false, muted = true, renewTimer = 0;
+    let joinTicket = 0, mic = null, pub = null, lease = 0, speaker = false, muted = true, renewTimer = 0, pubDropTimer = 0;
     // Staying a speaker: `again` from the server's acknowledgement until the visitor leaves or the server refuses,
     // `stales` the connections a lease may still be held under at the server (the last speaker's, and any a join was
     // under way on when its socket dropped), `resumes` the tries in a row, `resumeAt` when the next may be made, and the
     // timers. `reopen` is whether the microphone was open when speaking was lost, at `lostAt`.
     // `who` is the account the server last named on this page, and `arrived` that its first connection has come.
-    let again = false, resumes = 0, holdTimer = 0, steadyTimer = 0, resumeTimer = 0, resumeAt = 0, reopen = false, lostAt = 0, who = null, arrived = false;
+    // `unanswered`: a lease asked for under this connection went unanswered once, so the next silence counts as a try.
+    let again = false, resumes = 0, holdTimer = 0, steadyTimer = 0, resumeTimer = 0, resumeAt = 0, reopen = false, lostAt = 0, who = null, arrived = false, unanswered = false;
     const stales = [];
     const mayHold = () => {
       if (!connection || stales.includes(connection)) return;
@@ -338,10 +345,13 @@
       timers.clear(dropTimer);
       dropTimer = 0;
       if (pc.connectionState === "failed") receiveFailed(failure("connection_failed", true));
-      else if (pc.connectionState === "disconnected") dropTimer = timers.set(() => {
-        dropTimer = 0;
-        if (sub && sub.pc === pc && pc.connectionState !== "connected") receiveFailed(failure("connection_lost", true));
-      }, DROP_GRACE_MS);
+      else if (pc.connectionState === "disconnected") {
+        stall();
+        dropTimer = timers.set(() => {
+          dropTimer = 0;
+          if (sub && sub.pc === pc && pc.connectionState !== "connected") receiveFailed(failure("connection_lost", true));
+        }, DROP_GRACE_MS);
+      }
     };
     const openReceive = async () => {
       closeReceive();
@@ -461,7 +471,8 @@
       joinTicket++;
       timers.clear(renewTimer);
       timers.clear(steadyTimer);
-      renewTimer = steadyTimer = 0;
+      timers.clear(pubDropTimer);
+      renewTimer = steadyTimer = pubDropTimer = 0;
       const had = !!mic || !!pub || speaker;
       // A microphone open at the moment of a loss comes back open if the return is quick (`join`).
       if (speaker) { reopen = keep && !muted; lostAt = Date.now(); }
@@ -511,15 +522,29 @@
       startMeter(stream);
       track.addEventListener("ended", micEnded);
     };
-    // A publishing connection that failed under a live feed: the lease is given back and asked for again, muted.
-    const watchPublish = (pc) => pc.addEventListener("connectionstatechange", () => {
-      if (!pub || pub.pc !== pc || pc.connectionState !== "failed") return;
+    // A publishing connection that failed under a live feed: the lease is given back and asked for again, landing as
+    // the speaker had it (`reopen`). One that drops is the first sign of a network change: the feed checks its socket
+    // now (a dead one brings a new connection, which speaks again by itself), and if the connection is still down after
+    // DROP_GRACE_MS under a feed that lives, it is published again as a failed one is.
+    const republish = () => {
       if (!speaker || !again) return endSpeaking(NOTICE.failed);
       mayHold();
       stopSpeaking(true);
       phase = listening();
       emit();
       call("publish/close").then(() => { stats.closed++; }, () => request("setRole", { role: "listener" })).then(resume);
+    };
+    const watchPublish = (pc) => pc.addEventListener("connectionstatechange", () => {
+      if (!pub || pub.pc !== pc) return;
+      timers.clear(pubDropTimer);
+      pubDropTimer = 0;
+      if (pc.connectionState === "failed") return republish();
+      if (pc.connectionState !== "disconnected") return;
+      stall();
+      pubDropTimer = timers.set(() => {
+        pubDropTimer = 0;
+        if (pub && pub.pc === pc && pc.connectionState !== "connected") republish();
+      }, DROP_GRACE_MS);
     });
     // Speaking again by itself, once the server says this connection may: at most RESUME_TRIES in a row, and after a
     // try that failed not before `resumeAt`.
@@ -570,7 +595,7 @@
         stopSpeaking(true);
         if (giveBack) call("publish/close").then(() => { stats.closed++; }, () => request("setRole", { role: "listener" }));
         phase = listening();
-        const wait = RESUME_WAIT_MS * resumes;
+        const wait = RESUME_WAIT_MS * Math.max(1, resumes);
         resumeAt = Date.now() + wait;
         timers.clear(resumeTimer);
         resumeTimer = timers.set(() => { resumeTimer = 0; resumeAt = 0; resume(); }, wait);
@@ -605,7 +630,15 @@
       // Every connection this page may still hold a lease under is named, so its own stale lease does not refuse it.
       const granted = await ask("setRole", { role: "speaker", ...(stales.length ? { replaces: stales.length === 1 ? stales[0] : stales.slice() } : {}), ...(takeover ? { takeover: true } : {}) });
       if (!live()) return;
-      if (!granted.ok) return fail(NOTICE[REFUSED[granted.error && granted.error.code]] || NOTICE.failed, !!(granted.error && granted.error.retryable), false);
+      if (!granted.ok) {
+        // No answer at all is the feed's socket, not a refusal: it is checked now, and the first such silence under a
+        // connection is not a try (a dead socket's next connection speaks again by itself).
+        if (resumed && granted.error && granted.error.code === "timeout") {
+          if (!unanswered) { unanswered = true; resumes = Math.max(0, resumes - 1); }
+          stall();
+        }
+        return fail(NOTICE[REFUSED[granted.error && granted.error.code]] || NOTICE.failed, !!(granted.error && granted.error.retryable), false);
+      }
       lease = granted.you && Number.isSafeInteger(granted.you.lease) ? granted.you.lease : you && Number.isSafeInteger(you.lease) ? you.lease : 0;
       if (!lease) return fail(NOTICE.failed, true, false);
       phase = "negotiating";
@@ -639,6 +672,7 @@
       stats.published++;
       speaker = true;
       again = true;
+      unanswered = false;
       stales.length = 0;
       // Back soon after a loss with the microphone open before it: open again, and the server told. Otherwise muted.
       const open = resumed && reopen && Date.now() - lostAt < RETURN_MS && track.readyState !== "ended";
@@ -735,6 +769,8 @@
         const was = stopSpeaking(true);
         forgetWaiters();
         connection = msg.connection;
+        // A wait after a try that failed was for the connection it failed under.
+        unanswered = false; resumeAt = 0; timers.clear(resumeTimer); resumeTimer = 0;
         you = msg.you && typeof msg.you.speak === "string" ? msg.you : null;
         if (you && typeof you.id === "string") who = you.id;
         recall();

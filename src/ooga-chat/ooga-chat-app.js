@@ -68,6 +68,8 @@
     };
     media = BL.oogaChatMedia.create({
       memory,
+      // A voice connection dropped, or a lease went unanswered: the feed's socket is asked whether it still lives.
+      stall: () => feed?.wake?.(true),
       broker: () => state.mode === "live" && state.boot ? adapter.media(state.boot) : null,
       ...(adapter.rtc ? { rtc: adapter.rtc } : {}),
       request: (type, fields) => feed ? feed.request(type, fields) : 0,
@@ -341,6 +343,15 @@
       if (document.visibilityState === "visible") again("visible");
     }, { signal: page.signal });
     addEventListener("online", () => again("online"), { signal: page.signal });
+    // The network changed under the page (Wi-Fi to cellular, where the browser says): the feed's socket is very likely
+    // dead and still reads open. Only a change of the connection's own type counts; its speed estimates change all the time.
+    const radio = navigator.connection && typeof navigator.connection.addEventListener === "function" ? navigator.connection : null;
+    let radioType = radio ? radio.type : undefined;
+    radio?.addEventListener("change", () => {
+      if (radio.type === undefined || radio.type === radioType) return;
+      radioType = radio.type;
+      if (radioType !== "none") feed?.wake?.(true);
+    }, { signal: page.signal });
     addEventListener("pageshow", (event) => {
       if (!event.persisted) return;
       media.remember(false);

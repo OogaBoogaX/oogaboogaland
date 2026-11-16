@@ -14,7 +14,10 @@
   // A socket the page was away from (a phone in another app) can read open long after it died: one silent for
   // SILENT_MS, or the one open as the page comes back (`wake`), is asked for a pong, and with no frame in PROBE_MS is
   // closed here and opened again at once.
-  const SILENT_MS = 75000, PROBE_MS = 4000;
+  // A network change (`wake(true)`: the connection's type changed, or a voice connection dropped) is asked about
+  // sooner, QUICK_PROBE_MS, since the page is awake and a speaker is waiting; a socket still opening on the old network
+  // after OPENING_MS is opened afresh.
+  const SILENT_MS = 75000, PROBE_MS = 4000, QUICK_PROBE_MS = 2500, OPENING_MS = 4000;
   // The Commons' fixed address (docs/ooga-chat-backend.md) and its heartbeat: the island's Room answers "ping" with
   // "pong" without waking, and closes a member silent past 90 s.
   const COMMONS_PATH = "/api/chat/commons", PING_MS = 30000;
@@ -81,7 +84,7 @@
     // The audience socket pings as the Commons' does (the Audience answers "pong" without waking): a quiet zone sends
     // nothing for minutes otherwise, and a connection a network or proxy drops on idle would take a speaker's lease.
     const audience = (boot, { message, status }) => {
-      let socket = null, zone = null, tries = 0, timer = null, closed = false, requests = 0, ping = null, heardAt = 0, probe = null, backing = false;
+      let socket = null, zone = null, tries = 0, timer = null, closed = false, requests = 0, ping = null, heardAt = 0, probe = null, backing = false, openingAt = 0;
       const idle = { zone() {}, resync() {}, request: () => 0, wake() {}, dispose() {} };
       if (!boot.paths.audience) {
         status("unavailable");
@@ -100,15 +103,16 @@
         tries++;
         open();
       };
-      const check = (own) => {
+      const check = (own, quick = false) => {
         if (probe) return;
         const at = heardAt;
         own.send("ping");
-        probe = setTimeout(() => { probe = null; if (own === socket && heardAt === at) dead(own); }, PROBE_MS);
+        probe = setTimeout(() => { probe = null; if (own === socket && heardAt === at) dead(own); }, quick ? QUICK_PROBE_MS : PROBE_MS);
       };
       const open = () => {
         if (closed || !zone) return;
         status(tries ? "reconnecting" : "connecting");
+        openingAt = Date.now();
         const own = socket = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${boot.paths.audience}`);
         own.addEventListener("open", () => {
           send({ type: "join", zone, protocol: PROTOCOLS.audience });
@@ -162,9 +166,10 @@
         // A request the server answers with a `result` of the same id (#668: `reaction`, `hand`): its id, 0 when the
         // socket is not open.
         request: (type, fields) => socket?.readyState === 1 && send({ type, requestId: ++requests, ...fields }) !== false ? requests : 0,
-        // The page is back (shown again, or online again): a reconnect waiting out its backoff goes now, and an open
-        // socket is asked for a pong, which a dead one never sends.
-        wake() {
+        // The page is back (shown again, or online again), or the network changed under it (`quick`): a reconnect
+        // waiting out its backoff goes now, an open socket is asked for a pong, which a dead one never sends, and one
+        // that has sat opening since before the change is opened afresh.
+        wake(quick = false) {
           if (closed || !zone) return;
           if (!socket) {
             if (timer === null || !backing) return;
@@ -172,7 +177,8 @@
             timer = null; backing = false;
             return open();
           }
-          if (socket.readyState === 1) check(socket);
+          if (socket.readyState === 1) check(socket, quick);
+          else if (socket.readyState === 0 && Date.now() - openingAt > OPENING_MS) dead(socket);
         },
         dispose() {
           closed = true;

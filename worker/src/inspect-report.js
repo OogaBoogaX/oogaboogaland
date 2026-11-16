@@ -14,7 +14,7 @@ import { listed, listedIds } from "./allowlist.js";
 export const INSPECT_FEATURE = "inspect-v1";
 export const INSPECTOR_NAME = "global";
 // Why a page says its last socket ended (net.js), on the close frame and in the `back` message after it rejoins.
-export const BACK_WHY = ["socket", "heartbeat", "paused", "kicked", "signout", "other"];
+export const BACK_WHY = ["socket", "heartbeat", "network", "paused", "kicked", "signout", "other"];
 
 const QUIET_MS = 60000, WATCHED_MS = 1000, QUEUE_MAX = 64;
 

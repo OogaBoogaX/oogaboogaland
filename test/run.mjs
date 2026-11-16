@@ -14523,17 +14523,25 @@ const inspectorRecovery = { name: "inspector recovery", why: "rule: reconnect ev
     const back = F.sent.filter(m => m.t === "back");
     welcome(["inspect-v1"]);
     const once = F.sent.filter(m => m.t === "back").length === 1;
+    // A network change's hint asks for a pong: an answered one keeps the socket, a silent one is closed as lost to the
+    // network and opened again.
+    N.probe(); const probing = F.timers.at(-1); ws.onmessage({ data: "pong" }); probing.fn();
+    const answered = !ws.closed && F.sent.at(-1) === "ping";
+    N.probe(); F.timers.at(-1).fn();
+    const network = answered && ws.closed?.reason === "network";
+    ws = recover(["inspect-v1"]);
+    const changed = F.sent.filter(m => m.t === "back").at(-1);
     const beat = F.intervals.at(-1).fn; beat(); beat(); beat(); beat();
     const heartbeat = ws.closed?.reason === "heartbeat";
     ws = recover(["inspect-v1"]);
     const recovered = F.sent.filter(m => m.t === "back").at(-1);
     ws.onclose({ code: 1001, wasClean: true }); recover([]);
-    const off = F.sent.filter(m => m.t === "back").length === 2;
+    const off = F.sent.filter(m => m.t === "back").length === 3;
     N.dispose();
     Object.assign(window, { fetch: F.realFetch, WebSocket: F.realSocket, setTimeout: F.timeout, setInterval: F.interval, clearTimeout: F.clearTimeout, clearInterval: F.clearInterval });
-    return { older, once, heartbeat, off, back, recovered };
+    return { older, once, heartbeat, off, back, recovered, network, changed };
   })()`);
-  record("inspector reconnect: old rooms send no evidence; socket and heartbeat recovery send one bounded report after welcome", net.older && net.once && net.heartbeat && net.off && net.back[0]?.why === "socket" && net.back[0]?.code === 1006 && net.back[0]?.clean === false && net.back[0]?.down >= 0 && net.recovered?.why === "heartbeat", JSON.stringify(net));
+  record("inspector reconnect: old rooms send no evidence; socket, network and heartbeat recovery send one bounded report after welcome", net.older && net.once && net.heartbeat && net.off && net.network && net.changed?.why === "network" && net.back[0]?.why === "socket" && net.back[0]?.code === 1006 && net.back[0]?.clean === false && net.back[0]?.down >= 0 && net.recovered?.why === "heartbeat", JSON.stringify(net));
   await b.evaluate(`(() => {
     const F = __inspectFixture; F.pcs = []; F.ops = []; F.timers = []; F.mics = 0;
     F.realPc = window.RTCPeerConnection; F.gum = navigator.mediaDevices.getUserMedia;
@@ -14548,7 +14556,7 @@ const inspectorRecovery = { name: "inspector recovery", why: "rule: reconnect ev
     window.fetch = async (url, options) => { F.ops.push({ op: String(url).split("/").pop(), body: JSON.parse(options.body) }); return { ok: true, json: async () => ({ tracks: [], sessionDescription: {} }) }; };
     window.setTimeout = (fn, ms) => { const t = { fn, ms }; F.timers.push(t); return t; };
     window.clearTimeout = t => { if (t) t.cancelled = true; };
-    BL.net = { ...F.realNet, state: { ...F.realNet.state, connectionToken: "synthetic", me: { id: 71, login: "fixture" } }, remotes: new Map(), voiceLink: () => "none", setMuted() {}, subscribe: () => () => {} };
+    BL.net = { ...F.realNet, state: { ...F.realNet.state, room: "live", connectionToken: "synthetic", me: { id: 71, login: "fixture" } }, remotes: new Map(), voiceLink: () => "none", setMuted() {}, subscribe: () => () => {} };
   })()`);
   await b.evaluate(readFileSync(join(root, "src/js/voice.js"), "utf8"));
   await b.click(720, 450); // Voice is entered through a real user gesture in the app.
@@ -28058,7 +28066,7 @@ const voiceAloneChecks = async () => {
   class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
   class Audio {constructor(){this.muted=false;}pause(){}play(){return Promise.resolve();}}
   const fetch=async(url,o)=>{const op=url.split("/").pop(),body=JSON.parse(o.body);ops.push({op,mic:track.enabled});return {ok:true,json:async()=>op==="pull"?{tracks:body.ids.map((id,i)=>({id,mid:String(i+1)}))}:{sessionDescription:{}}};};
-  const context={window:{BL:{net:{state:{connectionToken:"synthetic",me:{id:900,login:"listener"}},setMuted:on=>netMuted.push(on),remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{}}},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{createElement:()=>({})},localStorage:{getItem:()=>null,setItem(){}},navigator:{mediaDevices:{getUserMedia:async()=>stream}},RTCPeerConnection:Pc,Audio,MediaStream:class{},fetch,AbortController,Promise,JSON,Error,Map,Set,Float32Array,Math};
+  const context={window:{BL:{net:{probe(){},state:{room:"live",connectionToken:"synthetic",me:{id:900,login:"listener"}},setMuted:on=>netMuted.push(on),remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{}}},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{createElement:()=>({})},localStorage:{getItem:()=>null,setItem(){}},navigator:{mediaDevices:{getUserMedia:async()=>stream}},RTCPeerConnection:Pc,Audio,MediaStream:class{},fetch,AbortController,Promise,JSON,Error,Map,Set,Float32Array,Math};
   runInNewContext(source,context);
   const V=context.window.BL.voice,settle=()=>new Promise(r=>setTimeout(r,0)),read=()=>({alone:V.stats.alone,muted:V.stats.muted,mic:track.enabled});
   const remote = { id: 185141343, login: "Bitcoin-Bill" };
@@ -28108,7 +28116,7 @@ const voiceFailureChecks = async () => {
     class Pc {constructor(){this.handlers={};pcs.push(this);this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}getTransceivers(){return [];}addEventListener(k,fn){this.handlers[k]=fn;}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}close(){this.connectionState="closed";}}
     class Audio {pause(){}play(){return Promise.resolve();}}
     const fetch=async(url,o)=>{const op=url.split("/").pop();calls.push(op);bodies.push({op,body:JSON.parse(o.body)});if(op==="leave"&&holdLeave)await holdLeave;if(holds.has(op))await holds.get(op);return failing.has(op)?{ok:false,status:503,json:async()=>({error:"sfu"})}:{ok:true,status:200,json:async()=>({tracks:[],sessionDescription:{}})};};
-    const context={window:{BL:{net:{state:{connectionToken:"synthetic",me:{id:900,login:"listener"},zone:"outside",self:{x:0,y:0,z:0,zone:"outside"},blendTo:null,blendT:0},setMuted(){},remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{}},voiceBlend:{}},setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout(){},setInterval:()=>1,clearInterval(){},addEventListener(){},removeEventListener(){},AudioContext},document:{createElement:()=>({volume:1})},navigator:{userActivation:{hasBeenActive:true},mediaDevices:{getUserMedia:async()=>stream}},localStorage:{getItem:k=>joined&&k.includes("voice-joined")?"1":null,setItem(){},removeItem(){}},fetch,RTCPeerConnection:Pc,MediaStream:class {constructor(t){this.tracks=t||[];}getTracks(){return this.tracks;}},Audio,AudioContext,AbortController,console};
+    const context={window:{BL:{net:{probe(){},state:{room:"live",connectionToken:"synthetic",me:{id:900,login:"listener"},zone:"outside",self:{x:0,y:0,z:0,zone:"outside"},blendTo:null,blendT:0},setMuted(){},remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{}},voiceBlend:{}},setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout(){},setInterval:()=>1,clearInterval(){},addEventListener(){},removeEventListener(){},AudioContext},document:{createElement:()=>({volume:1})},navigator:{userActivation:{hasBeenActive:true},mediaDevices:{getUserMedia:async()=>stream}},localStorage:{getItem:k=>joined&&k.includes("voice-joined")?"1":null,setItem(){},removeItem(){}},fetch,RTCPeerConnection:Pc,MediaStream:class {constructor(t){this.tracks=t||[];}getTracks(){return this.tracks;}},Audio,AudioContext,AbortController,console};
     context.window.navigator=context.navigator;context.window.document=context.document;context.window.localStorage=context.localStorage;
     runInNewContext(source,context);
     return {V:context.window.BL.voice,timers,calls,bodies,pcs,failing,holds,track,hold:p=>{holdLeave=p;}};
@@ -28151,7 +28159,7 @@ const voiceFailureChecks = async () => {
   const blip=page();
   await blip.V.enable();await settle();
   blip.failing.add("session");blip.V.restart();await settle();
-  const waiting=blip.timers.filter(t=>t.ms===3000).at(-1);
+  const waiting=blip.timers.filter(t=>t.ms===1000).at(-1);
   blip.failing.clear();if(waiting)waiting.fn();await settle();
   record("voice recovery: a restart whose first calls fail tries again and the speaker is back",!!waiting&&blip.V.stats.publishing&&!blip.V.stats.muted&&blip.V.stats.micError==="",JSON.stringify({waited:!!waiting,publishing:blip.V.stats.publishing,micError:blip.V.stats.micError}));
   // A microphone that goes away ends its track with no error anywhere: the speaker comes back on the device that is left.
@@ -28183,7 +28191,7 @@ const voiceReturnChecks = async () => {
     class Audio {constructor(){this.muted=false;}pause(){}play(){return Promise.resolve();}}
     const fetch=async(url,o)=>{const op=url.split("/").pop(),body=JSON.parse(o.body);ops.push(op==="session"?`session:${body.kind}`:op);return {ok:true,json:async()=>({sessionDescription:{}})};};
     const userActivation={hasBeenActive:active};
-    const context={window:{BL:{net:{state:{connectionToken:"synthetic",me:{id:900,login:"listener"},zone},setMuted:on=>told.push(on),remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{}}},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){},addEventListener:(t,f)=>presses.set(t,f),removeEventListener:t=>presses.delete(t)},document:{createElement:()=>({})},localStorage:{getItem:k=>stored.has(k)?stored.get(k):null,setItem:(k,v)=>stored.set(k,v),removeItem:k=>stored.delete(k)},navigator:{userActivation,mediaDevices:{getUserMedia:async()=>{mics++;if(denied)throw Object.assign(new Error("denied"),{name:"NotAllowedError"});return stream;}}},RTCPeerConnection:Pc,Audio,MediaStream:class{},fetch,AbortController,Promise,JSON,Error,Map,Set,Float32Array,Math};
+    const context={window:{BL:{net:{probe(){},state:{room:"live",connectionToken:"synthetic",me:{id:900,login:"listener"},zone},setMuted:on=>told.push(on),remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{}}},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){},addEventListener:(t,f)=>presses.set(t,f),removeEventListener:t=>presses.delete(t)},document:{createElement:()=>({})},localStorage:{getItem:k=>stored.has(k)?stored.get(k):null,setItem:(k,v)=>stored.set(k,v),removeItem:k=>stored.delete(k)},navigator:{userActivation,mediaDevices:{getUserMedia:async()=>{mics++;if(denied)throw Object.assign(new Error("denied"),{name:"NotAllowedError"});return stream;}}},RTCPeerConnection:Pc,Audio,MediaStream:class{},fetch,AbortController,Promise,JSON,Error,Map,Set,Float32Array,Math};
     runInNewContext(source,context);
     const V=context.window.BL.voice,S=V.stats;
     return {V,S,N:context.window.BL.net.state,ops,told,presses,userActivation,mics:()=>mics,press:(e={isTrusted:true})=>{const f=presses.get("pointerup");if(f)f(e);}};
@@ -29589,7 +29597,7 @@ const netFixture=(BL,response,step=200,cookie="")=>{
   class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"&&v!=="ping"?JSON.parse(v):v);}close(){this.readyState=3;}}
   const voice={setPeers:()=>{},restart:()=>{},stop:()=>{},warnings:[],hangUps:0,playing:0,warnLeaving(stage){this.warnings.push(stage);},hangUp(){this.hangUps++;return this.playing;}};
   const location={protocol:"https:",host:"fixture.invalid",pathname:"/",search:"",assign:url=>navigations.push(url)},pilot={saveLoginView(){savedViews++;}};
-  const context={window:{BL:{characters:BL.characters,accountIdentities:BL.accountIdentities,contributors:BL.contributors,donations:BL.donations,chatPolicy:BL.chatPolicy,reactionPolicy:BL.reactionPolicy,arcadeCabinets:BL.arcadeCabinets,chalkBoard:BL.chalkBoard,voiceBlend:BL.voiceBlend,audience:BL.audience,voice,pilot},setTimeout:(fn,ms)=>{timers.push({fn,ms});return 1;},clearTimeout(){},setInterval:(fn,ms)=>{intervals.push({fn,ms});return 1;},clearInterval(){}},document:{hidden:false,cookie,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams};
+  const context={window:{BL:{characters:BL.characters,accountIdentities:BL.accountIdentities,contributors:BL.contributors,donations:BL.donations,chatPolicy:BL.chatPolicy,reactionPolicy:BL.reactionPolicy,arcadeCabinets:BL.arcadeCabinets,chalkBoard:BL.chalkBoard,voiceBlend:BL.voiceBlend,audience:BL.audience,voice,pilot},setTimeout:(fn,ms)=>{timers.push({fn,ms});return 1;},clearTimeout(){},setInterval:(fn,ms)=>{intervals.push({fn,ms});return 1;},clearInterval(){},addEventListener(){},removeEventListener(){}},navigator:{},document:{hidden:false,cookie,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams};
   runInNewContext(source,context);
   return {net:context.window.BL.net,document:context.document,voice,sockets,sent,events,location,navigations,timers,intervals,advance(ms){tick+=ms;},get calls(){return calls;},get savedViews(){return savedViews;}};
 };
@@ -32712,7 +32720,7 @@ const studioCatalogueProof = async () => {
 const studioVoiceLifecycleProof = async () => {
   const source=await readFile(join(root,"src/js/voice.js"),"utf8");
   const fixture=(gathering="complete",candidate=true,failFirstPeer=false,voiceTurn=false)=>{
-    const calls=[],streams=[],peers=[],elements=[],timers=new Map();let timerId=0,gum=0,permission=null,publishResponse=null,deferred=null,peerAttempts=0;
+    const calls=[],streams=[],peers=[],elements=[],timers=new Map(),failing=new Map(),clock={at:null};let timerId=0,gum=0,permission=null,publishResponse=null,deferred=null,peerAttempts=0;
     class Peer {
       constructor(config){this.config=config;if(++peerAttempts===1&&failFirstPeer)throw Error("probe construction failed");peers.push(this);this.connectionState="connected";this.iceGatheringState=gathering;this.localDescription=null;this.handlers=new Map();}
       addEventListener(k,fn){this.handlers.set(k,fn);}
@@ -32727,11 +32735,11 @@ const studioVoiceLifecycleProof = async () => {
     }
     class Sound {constructor(){this.pending=[];elements.push(this);}play(){return new Promise((resolve,reject)=>this.pending.push({resolve,reject}));}pause(){this.pauses=(this.pauses||0)+1;}}
     const makeStream=()=>{const track={enabled:true,stops:0,stop(){this.stops++;}},stream={track,getTracks:()=>[track],getAudioTracks:()=>[track]};streams.push(stream);return stream;};
-    const win={BL:{net:{state:{voiceTurn,connectionToken:"synthetic",me:{id:900,login:"listener"}},remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{},setMuted:on=>calls.push({op:"mute",on})}},setTimeout:(fn,delay)=>{timers.set(++timerId,{fn,delay});return timerId;},clearTimeout:id=>timers.delete(id),setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id)};
-    const context={window:win,document:{createElement:()=>({})},localStorage:{getItem:()=>null,setItem(){}},AbortController,RTCPeerConnection:Peer,Audio:Sound,MediaStream:class {constructor(tracks){this.tracks=tracks;}getTracks(){return this.tracks;}},navigator:{mediaDevices:{enumerateDevices:async()=>[{kind:"audioinput",deviceId:"synthetic-mic",label:"Synthetic mic"},{kind:"videoinput",deviceId:"camera",label:"Camera"}],getUserMedia:constraints=>{gum++;calls.push({op:"capture",constraints});return permission||Promise.resolve(makeStream());}}},
-      fetch:async(url,options)=>{const op=url.split("/").at(-1);calls.push({op,body:JSON.parse(options.body)});if(deferred?.op===op)return deferred.promise;if(op==="publish"&&publishResponse)return publishResponse;if(op==="pull")return {ok:true,json:async()=>({tracks:JSON.parse(options.body).ids.map(id=>({id,mid:String(id)}))})};return {ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})};}};
+    const win={BL:{net:{state:{room:"live",voiceTurn,connectionToken:"synthetic",me:{id:900,login:"listener"}},remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{},setMuted:on=>calls.push({op:"mute",on}),probe:()=>calls.push({op:"probe"})}},setTimeout:(fn,delay)=>{timers.set(++timerId,{fn,delay});return timerId;},clearTimeout:id=>timers.delete(id),setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id)};
+    const context={window:win,Date:{now:()=>clock.at??Date.now()},document:{createElement:()=>({})},localStorage:{getItem:()=>null,setItem(){}},AbortController,RTCPeerConnection:Peer,Audio:Sound,MediaStream:class {constructor(tracks){this.tracks=tracks;}getTracks(){return this.tracks;}},navigator:{mediaDevices:{enumerateDevices:async()=>[{kind:"audioinput",deviceId:"synthetic-mic",label:"Synthetic mic"},{kind:"videoinput",deviceId:"camera",label:"Camera"}],getUserMedia:constraints=>{gum++;calls.push({op:"capture",constraints});return permission||Promise.resolve(makeStream());}}},
+      fetch:async(url,options)=>{const op=url.split("/").at(-1);calls.push({op,body:JSON.parse(options.body)});if(failing.get(op)>0){failing.set(op,failing.get(op)-1);return {ok:false,status:502,json:async()=>({error:"synthetic failure"})};}if(deferred?.op===op)return deferred.promise;if(op==="publish"&&publishResponse)return publishResponse;if(op==="pull")return {ok:true,json:async()=>({tracks:JSON.parse(options.body).ids.map(id=>({id,mid:String(id)}))})};return {ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})};}};
     runInNewContext(source,context);
-    return {defer(op){let finish;const promise=new Promise(resolve=>{finish=resolve;});deferred={op,promise};return data=>{deferred=null;finish({ok:true,json:async()=>data});};},voice:win.BL.voice,calls,streams,peers,elements,timers,get gum(){return gum;},makeStream,denyPermission(){permission=Promise.reject(Object.assign(Error("denied"),{name:"NotAllowedError"}));},deferPermission(){permission=new Promise(resolve=>{this.resolvePermission=resolve;});},deferPublish(){publishResponse=new Promise(resolve=>{this.resolvePublish=()=>resolve({ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})});});}};
+    return {net:win.BL.net,clock,failNext(op,n=1){failing.set(op,n);},fire(delay){const found=[...timers].find(([,task])=>task.delay===delay);if(!found)return false;timers.delete(found[0]);return found[1].fn();},defer(op){let finish;const promise=new Promise(resolve=>{finish=resolve;});deferred={op,promise};return data=>{deferred=null;finish({ok:true,json:async()=>data});};},voice:win.BL.voice,calls,streams,peers,elements,timers,get gum(){return gum;},makeStream,denyPermission(){permission=Promise.reject(Object.assign(Error("denied"),{name:"NotAllowedError"}));},deferPermission(){permission=new Promise(resolve=>{this.resolvePermission=resolve;});},deferPublish(){publishResponse=new Promise(resolve=>{this.resolvePublish=()=>resolve({ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})});});}};
   };
   const drain=async()=>{for(let i=0;i<40;i++)await Promise.resolve();};
   // A gather timeout is inconclusive; only a completed empty gather may refuse the listener.
@@ -32793,6 +32801,52 @@ const studioVoiceLifecycleProof = async () => {
   const latePlaybackStaysOff=!leaving.voice.stats.enabled&&!leaving.voice.stats.hearing;leaving.voice.dispose();await drain();
   const restarting=fixture();await restarting.voice.listen();const finishRestart=restarting.defer("leave");const restart=restarting.voice.restart();await drain();restarting.voice.stop();finishRestart({ok:true});await restart;await drain();
   const leaveCancelsRestart=!restarting.voice.stats.enabled&&restarting.calls.filter(c=>c.op==="session").length===1;restarting.voice.dispose();await drain();
+  // A network change. The room's socket is down when the connection drops: nothing is asked of the room, the
+  // microphone stays captured, and the room's welcome brings the speaker back with the microphone open, as it was.
+  const speakerOn=async(f)=>{await f.voice.enable();f.voice.setPeers([71],[1]);await drain();};
+  const change=fixture();await speakerOn(change);
+  const dropped=change.peers.find(pc=>pc.connectionState==="connected"&&pc.handlers.has("connectionstatechange"));
+  dropped.connectionState="disconnected";dropped.handlers.get("connectionstatechange")();
+  const networkProbed=change.calls.some(c=>c.op==="probe");
+  change.net.state.room="connecting";const asked=change.calls.length;
+  await change.voice.restart();await drain();
+  const networkWaits=change.voice.stats.reconnecting&&!change.voice.stats.enabled&&change.streams[0].track.stops===0&&change.calls.length===asked&&change.peers.every(pc=>pc.connectionState==="closed");
+  change.net.state.room="live";await change.voice.restart(true);await drain();
+  const networkReturnsOpen=networkProbed&&networkWaits&&change.gum===1&&change.voice.stats.publishing&&change.voice.stats.enabled&&!change.voice.stats.muted&&!change.voice.stats.reconnecting&&change.streams[0].track.enabled
+    &&!change.calls.slice(asked).some(c=>c.op==="leave");
+  change.voice.dispose();await drain();
+  // A try the new network fails is made again after its wait, on the same microphone, and still lands open.
+  const flaky=fixture();await speakerOn(flaky);
+  flaky.failNext("session",2);await flaky.voice.restart(true);await drain();
+  const flakyKept=flaky.voice.stats.reconnecting&&!flaky.voice.stats.publishing&&flaky.streams[0].track.stops===0&&!flaky.voice.stats.muted;
+  await flaky.fire(1000);for(let i=0;i<10;i++)await drain();
+  const networkRetries=flakyKept&&flaky.gum===1&&flaky.voice.stats.publishing&&!flaky.voice.stats.muted&&!flaky.voice.stats.reconnecting&&flaky.streams[0].track.enabled;
+  flaky.voice.dispose();await drain();
+  // Back later than a minute, an open microphone lands muted; with the microphone let go after its hold, the visitor is a
+  // returning listener whose Unmute opens it again.
+  const slowBack=fixture();slowBack.clock.at=1000;await speakerOn(slowBack);
+  slowBack.net.state.room="connecting";await slowBack.voice.restart();await drain();
+  slowBack.clock.at+=61000;slowBack.net.state.room="live";await slowBack.voice.restart(true);await drain();
+  const lateLandsMuted=slowBack.voice.stats.publishing&&slowBack.voice.stats.muted&&!slowBack.streams[0].track.enabled&&slowBack.gum===1;
+  slowBack.voice.dispose();await drain();
+  const gone=fixture();await speakerOn(gone);
+  gone.net.state.room="connecting";await gone.voice.restart();await drain();
+  gone.fire(120000);
+  const micLetGo=gone.streams[0].track.stops===1&&gone.voice.stats.reconnecting;
+  gone.net.state.room="live";await gone.voice.restart(true);await drain();
+  const longGapListens=micLetGo&&gone.gum===1&&gone.voice.stats.enabled&&!gone.voice.stats.publishing&&gone.voice.stats.returning&&gone.voice.stats.muted&&!gone.voice.stats.reconnecting;
+  gone.voice.dispose();await drain();
+  // Every try failing ends the recovery, the microphone released; Leave voice during one ends it at once.
+  const dead=fixture();await speakerOn(dead);
+  dead.failNext("session",99);await dead.voice.restart(true);await drain();
+  for(const delay of [1000,2000,4000,8000,15000]){await dead.fire(delay);await drain();}
+  const givesUp=!dead.voice.stats.reconnecting&&!dead.voice.stats.publishing&&dead.streams[0].track.stops===1&&!!dead.voice.stats.error;
+  dead.voice.dispose();await drain();
+  const quit=fixture();await speakerOn(quit);
+  quit.net.state.room="connecting";await quit.voice.restart();await drain();quit.voice.leave();
+  quit.net.state.room="live";const before=quit.calls.length;await quit.voice.restart(true);await drain();
+  const leaveEndsRecovery=!quit.voice.stats.reconnecting&&!quit.voice.stats.enabled&&quit.streams[0].track.stops===1&&!quit.calls.slice(before).some(c=>c.op==="session");
+  quit.voice.dispose();await drain();
   const relay = fixture("complete",true,false,true), tls = "turns:turn.cloudflare.com:443?transport=tcp";
   const ice = (username) => ({ ttl: 120, iceServers: [{ urls: tls, username, credential: "fixture" }] });
   const finishIce = relay.defer("ice"), relayJoin = relay.voice.enable();
@@ -32829,7 +32883,7 @@ const studioVoiceLifecycleProof = async () => {
   cancelled.voice.dropMic();
   lateIce(ice("stale")); await cancelledJoin; await drain();
   const turnCancelled = iceWasPending && cancelled.timers.size === 0 && cancelled.peers.length === 0;
-  return {slowGatherJoins,emptyGatherRefuses,unavailableProbeJoins,turnShared,turnRefreshed,turnPrefetched,turnMeasured,turnStopped,turnCancelled,publicationReplaced,leaveStopsAudio,latePlaybackStaysOff,leaveCancelsRestart,receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[slow,blocked,unavailable,listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied,replaced,leaving,restarting].every(f=>f.timers.size===0)};
+  return {networkReturnsOpen,networkRetries,lateLandsMuted,longGapListens,givesUp,leaveEndsRecovery,slowGatherJoins,emptyGatherRefuses,unavailableProbeJoins,turnShared,turnRefreshed,turnPrefetched,turnMeasured,turnStopped,turnCancelled,publicationReplaced,leaveStopsAudio,latePlaybackStaysOff,leaveCancelsRestart,receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[slow,blocked,unavailable,listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied,replaced,leaving,restarting,change,flaky,slowBack,gone,dead,quit].every(f=>f.timers.size===0)};
 };
 
 // The real controller runs against a bounded DOM/media double: no permission prompts or SFU.
@@ -33788,7 +33842,7 @@ const oogaChatChecks = async () => {
     const flush = async (n = 6) => { for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0)); };
     const rig = ({ deny = null, holdPlay = false, allowed = true, memory = null } = {}) => {
       const log = [], asked = [], listeners = new Map(), tracks = [], pcs = [];
-      let delay = null, nextMid = 0, playHeld = holdPlay, failing = null;
+      let delay = null, nextMid = 0, playHeld = holdPlay, failing = null, stalls = 0;
       // Waits of a second or more are held for the check to fire by hand (`waits`); shorter ones run as they are.
       const waits = [], timers = { set: (fn, ms) => ms >= 1000 ? -waits.push({ fn, ms }) : setTimeout(fn, ms), clear: (id) => { if (id < 0) waits[-id - 1] = null; else clearTimeout(id); } };
       const replies = { "receive/sync": () => { const mid = `r${nextMid++}`; return { tracks: [{ participant: "gh:7", mid }], closed: [], sessionDescription: { type: "offer", sdp: "v=0", mids: [mid] }, requiresImmediateRenegotiation: true }; },
@@ -33816,9 +33870,9 @@ const oogaChatChecks = async () => {
         audio: () => ({ srcObject: null, played: 0, play() { this.played++; return playHeld ? Promise.reject(Object.assign(new Error("held"), { name: "NotAllowedError" })) : Promise.resolve(); }, pause() {} }) };
       const target = { addEventListener: (t, fn) => listeners.set(t, fn), removeEventListener: (t) => listeners.delete(t) };
       let requestId = 0;
-      const c = M.create({ broker: () => broker, rtc, target, memory, timers, allowed: () => allowed, request: (type, fields) => { asked.push({ type, ...fields, id: ++requestId }); return requestId; } });
+      const c = M.create({ broker: () => broker, rtc, target, memory, timers, allowed: () => allowed, stall: () => { stalls++; }, request: (type, fields) => { asked.push({ type, ...fields, id: ++requestId }); return requestId; } });
       const answer = (ok, you, error) => c.heard({ type: "result", requestId: asked.at(-1).id, ok, you, ...(error ? { error: { code: error, retryable: false } } : {}) });
-      return { c, log, asked, tracks, pcs, listeners, answer, get captures() { return captures; }, hold: (op) => { let go; delay = { op, until: new Promise((r) => { go = r; }) }; return () => { delay = null; go(); }; },
+      return { c, log, asked, tracks, pcs, listeners, answer, get captures() { return captures; }, get stalls() { return stalls; }, hold: (op) => { let go; delay = { op, until: new Promise((r) => { go = r; }) }; return () => { delay = null; go(); }; },
         play: (held) => { playHeld = held; }, failNext: (op) => { failing = op; },
         fire: (ms) => { const i = waits.findIndex((w) => w && w.ms === ms); if (i < 0) return false; const { fn } = waits[i]; waits[i] = null; fn(); return true; } };
     };
@@ -33943,10 +33997,37 @@ const oogaChatChecks = async () => {
     const keptMic = r.c.state.role === "listener" && r.tracks[0].stops === 0 && r.c.state.notice === "";
     snap(r, "c2", "eligible"); await flush();
     out.full2 = keptMic && r.asked.at(-1).type === "setRole" && r.asked.at(-1).replaces === "c1" && r.c.state.busy;
+    // A network change under a feed that lives: the publishing connection drops, the feed is asked to check its socket
+    // at once, and still down after its grace the microphone is published again and lands open, as it was.
+    const down = (pc, why = "disconnected") => { pc.connectionState = why; pc.fire("connectionstatechange"); };
+    r = rig(); r.c.zone("main"); snap(r, "c1", "eligible"); await flush(); await speak(r, 1); r.c.mute();
+    const lost = r.pcs.at(-1);
+    down(lost);
+    const checked = r.stalls === 1 && r.c.state.role === "speaker" && !lost.closed;
+    const graced = r.fire(5000); await flush();
+    r.c.heard({ type: "you", zone: "main", you: { id: "gh:1", speak: "eligible" } }); await flush();
+    const asking = r.asked.at(-1);
+    r.answer(true, { id: "gh:1", speak: "pending", lease: 2 }); await flush(20);
+    out.networkRepublished = checked && graced && lost.closed && r.log.includes("publish/close@c1") && asking.type === "setRole" && asking.replaces === "c1" && r.captures === 1
+      && r.c.state.role === "speaker" && !r.c.state.muted && r.tracks[0].enabled === true && r.c.state.notice === M.NOTICE.reopened && r.log.includes("publish/ready@c1#2");
+    // One that comes back by itself inside the grace is left alone.
+    const healed = r.pcs.at(-1); down(healed); down(healed, "connected");
+    out.networkHealed = r.stalls === 2 && !r.fire(5000) && !healed.closed && r.c.state.role === "speaker" && !r.c.state.muted;
+    // A lease asked for over a dead socket never answers: the feed is checked, the silence is not a try, and the
+    // connection after it speaks again with the microphone open.
+    r = rig(); r.c.zone("main"); snap(r, "c1", "eligible"); await flush(); await speak(r, 1); r.c.mute();
+    down(r.pcs.at(-1), "failed"); await flush();
+    r.c.heard({ type: "you", zone: "main", you: { id: "gh:1", speak: "eligible" } }); await flush();
+    const silent = r.asked.filter((a) => a.type === "setRole").length === 2 && r.c.state.busy;
+    const unheard = r.fire(10000); await flush();
+    const spared = r.stalls === 1 && r.c.state.role === "listener" && r.c.stats.capturing && r.tracks[0].stops === 0 && r.c.state.notice === "";
+    r.c.status("reconnecting"); snap(r, "c2", "eligible"); await flush();
+    r.answer(true, { id: "gh:1", speak: "pending", lease: 3 }); await flush(20);
+    out.networkDeadFeed = silent && unheard && spared && r.captures === 1 && r.c.state.role === "speaker" && !r.c.state.muted && r.tracks[0].enabled === true && r.log.includes("publish/ready@c2#3");
     return out;
   };
   const voice = await voiceCheck();
-  record("Ooga Chat voice: a listener hears the zone and never captures; Join Voice captures muted before any connection carries it, publishes under the server's lease and speaks only once acknowledged; mute and Leave Voice act on the track at once and keep listening; a refusal, a revoked lease or a zone change stop capture exactly once; a new connection speaks again by itself on the microphone it kept, open again if it was open and muted if it was muted, and gives up where the server says no; a try that fails for a passing reason is made again after its wait; a second drop on the way back names both connections; a zone full for a moment keeps the wish to speak; a page that comes straight back after a refresh speaks again by itself from the word the page before it left in the tab, never from an old word, another account's or one left after Leave Voice; a microphone the browser takes leaves a muted speaker whom Unmute captures again; a stale sync plays nothing; held playback starts on a gesture",
+  record("Ooga Chat voice: a listener hears the zone and never captures; Join Voice captures muted before any connection carries it, publishes under the server's lease and speaks only once acknowledged; mute and Leave Voice act on the track at once and keep listening; a refusal, a revoked lease or a zone change stop capture exactly once; a new connection speaks again by itself on the microphone it kept, open again if it was open and muted if it was muted, and gives up where the server says no; a try that fails for a passing reason is made again after its wait; a second drop on the way back names both connections; a zone full for a moment keeps the wish to speak; a network change is found from the connection that drops, which asks the feed to check its socket and is published again with the microphone open, and a lease asked for over a dead socket is not a try; a page that comes straight back after a refresh speaks again by itself from the word the page before it left in the tab, never from an old word, another account's or one left after Leave Voice; a microphone the browser takes leaves a muted speaker whom Unmute captures again; a stale sync plays nothing; held playback starts on a gesture",
     Object.values(voice).every(Boolean), JSON.stringify(voice));
 };
 // The outdoor voice bridge (outdoor-voice.js, #661) against a fake room: the real scope record, a transport whose frames
@@ -34175,7 +34256,7 @@ const unitChecks = async () => {
   const catalogue=await studioCatalogueProof();
   record("Studio catalogue: bounded reviewed sources have local media, captions and transcripts with immutable unique identities",Object.values(catalogue).every(Boolean),JSON.stringify(catalogue));
   const voiceLifecycle=await studioVoiceLifecycleProof();
-  record("Studio voice lifecycle: receive-only restart, cancelled capture/publication, local preflight, muted restart and aggregate autoplay recovery",Object.values(voiceLifecycle).every(Boolean),JSON.stringify(voiceLifecycle));
+  record("Studio voice lifecycle: receive-only restart, cancelled capture/publication, local preflight, muted restart and aggregate autoplay recovery; a network change keeps a speaker's microphone and brings them back open with the room's welcome, retrying on the microphone it kept, muted after a minute away, a returning listener once the microphone was let go, and never after Leave voice",Object.values(voiceLifecycle).every(Boolean),JSON.stringify(voiceLifecycle));
   const listenOnlyMic=await listenOnlyMicStatusProof();
   record("Studio HUD: listen-only visitors see no mic status (no Mic on or Mic muted); opted-in speakers still do, and alone says nothing of being alone",Object.values(listenOnlyMic).every(Boolean),JSON.stringify(listenOnlyMic));
   const studio=await studioSessionProof();

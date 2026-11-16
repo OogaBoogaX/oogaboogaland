@@ -126,6 +126,8 @@
   // Health in steps of the smallest hit, a few reports a second at most; the room's own bounds for poses.
   const HP_MS = 250, HP_STEP = 4, BOUND_XZ = 160, BOUND_Y_MIN = -130, BOUND_Y_MAX = 100;
   const PING_MS = 10000, PING_MISSES = 3;
+  // A network change (below, `probe`): how long a pong may take, and how long a socket may sit opening on a dead network.
+  const PROBE_MS = 3000, OPENING_MS = 4000;
   const HIDDEN_PAUSE_MS = 5 * 60000;
   // How long before leaving a hidden tab still in voice hears each warning.
   const HIDDEN_WARN_BEFORE_MS = [30000, 15000];
@@ -255,6 +257,7 @@
   // The room's last word on whom to hear, for what a move to another place keeps.
   let peersHeard = [], gensHeard = null;
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, unanswered = 0, hiddenTimer = 0, stopped = false;
+  let probeTimer = 0, heardCount = 0, openingAt = 0;
   // The Durable Object inspector (worker/src/inspect-report.js), only while the room's welcome names its feature: why
   // this page's last socket ended (`ended`: why, the browser's close code, clean, when), said on the close frame and,
   // after the next welcome, in one `back` message, so a drop's cause reaches the inspector's log.
@@ -527,7 +530,7 @@
       diagnostic.lastMessage = performance.now(); diagnostic.messages++;
       if (e.data === "pong") diagnostic.lastPong = diagnostic.lastMessage;
     }
-    unanswered = 0;
+    unanswered = 0; heardCount++;
     if (e.data instanceof ArrayBuffer) {
       if (e.data.byteLength >= 4 && new DataView(e.data).getUint32(0, true) === 0x315a4642) { for (const fn of bfFrameSubscribers) fn(e.data); return; }
       npcFrame = e.data;
@@ -877,7 +880,8 @@
   const close = (room, why = "other", code = 0, clean = false) => {
     if (diagnostic || connectionSubscribers.size) traceConnection("clear", { next: diagnosticRoom(room) });
     window.clearInterval(pingTimer);
-    pingTimer = 0;
+    window.clearTimeout(probeTimer);
+    pingTimer = probeTimer = 0;
     if (ws) {
       if (inspectOn) ended = { why, code, clean, at: Date.now() };
       ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
@@ -927,6 +931,7 @@
     traceConnection("connect");
     // A tab opened in the background has no visibility change to arm this.
     if (document.hidden && !hiddenTimer) armHidden();
+    openingAt = performance.now();
     ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/room`);
     ws.binaryType = "arraybuffer";
     ws.onmessage = onMessage;
@@ -946,6 +951,48 @@
       close("connecting", "socket", Number.isInteger(event?.code) ? event.code : 0, event?.wasClean === true);
     };
   };
+
+  // A network change: another Wi-Fi, or a phone going from Wi-Fi to cellular. The socket then reads open and is dead,
+  // which the pings above notice only after PING_MISSES of them, while everything this page holds in the room, its voice
+  // first, waits. So anything that hints at a change asks for a pong now: the browser coming back online, the
+  // connection's type changing (where the browser says), the page shown again, and a voice connection that dropped
+  // (voice.js, the first to notice on a phone). With nothing heard in PROBE_MS the socket is closed here as lost to the
+  // network and opened again at once; one still opening on the old network after OPENING_MS is opened afresh, and a
+  // reconnect waiting out its backoff goes now. A hint costs one ping, and a live socket answers it and stays.
+  const reopen = () => {
+    retry = 0;
+    close("connecting", "network");
+  };
+  const probe = () => {
+    if (stopped || !state.me) return;
+    if (!ws) {
+      if (!retryTimer) return;
+      window.clearTimeout(retryTimer);
+      retry = 0;
+      connect();
+      return;
+    }
+    if (ws.readyState === WebSocket.CONNECTING) { if (performance.now() - openingAt > OPENING_MS) reopen(); return; }
+    if (ws.readyState !== WebSocket.OPEN || probeTimer) return;
+    const own = ws, heard = heardCount;
+    send("ping");
+    probeTimer = window.setTimeout(() => {
+      probeTimer = 0;
+      if (ws !== own || heardCount !== heard) return;
+      traceConnection("heartbeat-timeout");
+      reopen();
+    }, PROBE_MS);
+  };
+  const radio = navigator.connection && typeof navigator.connection.addEventListener === "function" ? navigator.connection : null;
+  let radioType = radio ? radio.type : undefined;
+  // Only a change of the connection's own type (Wi-Fi, cellular) counts: its speed estimates change all the time.
+  const onRadio = () => {
+    if (radio.type === undefined || radio.type === radioType) return;
+    radioType = radio.type;
+    if (radioType !== "none") probe();
+  };
+  window.addEventListener("online", probe);
+  if (radio) radio.addEventListener("change", onRadio);
 
   // One look at the account; true when it found a backend to join.
   const look = async () => {
@@ -1120,7 +1167,7 @@
       if (state.me && !stopped) armHidden();
     } else if (state.room === "paused") {
       rejoin();
-    }
+    } else probe();
   };
   // Someone in voice hears it coming: two warnings, then a hang-up that plays out before voice stops with the room.
   let hiddenStage = 0;
@@ -1572,6 +1619,8 @@
     traceConnection("dispose");
     connectionSubscribers.clear();
     document.removeEventListener("visibilitychange", onVisibility);
+    window.removeEventListener("online", probe);
+    if (radio) radio.removeEventListener("change", onRadio);
     stopped = true;
     window.clearTimeout(retryTimer);
     window.clearTimeout(hiddenTimer);
@@ -1591,5 +1640,5 @@
     diagnostic = null;
   };
 
-  BL.net = { sendDuel, subscribeDuel, sendTess, connectionDiagnostics, subscribeConnection, lockRoom, unlockRoom, tryRoomPin, voiceLink, toggleVoiceLink, linkEveryone, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeBf, subscribeBfFrame, sendBf, sendBfInput, sendBfFrame, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeAudience, subscribeClouds, sendAudience, subscribePrivate, subscribeChalk, subscribeWallets, sendOutdoor, subscribeOutdoor, OUTDOOR_FEATURE, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendReaction, subscribeReactions, setHand, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { sendDuel, subscribeDuel, sendTess, connectionDiagnostics, subscribeConnection, lockRoom, unlockRoom, tryRoomPin, voiceLink, toggleVoiceLink, linkEveryone, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeBf, subscribeBfFrame, sendBf, sendBfInput, sendBfFrame, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeAudience, subscribeClouds, sendAudience, subscribePrivate, subscribeChalk, subscribeWallets, sendOutdoor, subscribeOutdoor, OUTDOOR_FEATURE, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, probe, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendReaction, subscribeReactions, setHand, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();
