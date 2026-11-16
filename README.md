@@ -230,7 +230,9 @@ Public domain under [The Ooga Booga License](LICENSE), a caveman-speak dedicatio
 
 ## Contributing
 
-Read [AGENTS.md](AGENTS.md) first: the module layout, the engine patterns, how to add things, and the checks every change must pass.
+Start with [CONTRIBUTING.md](CONTRIBUTING.md): what the project is for, what needs no permission, what needs a maintainer's yes before you build it, and what is not wanted.
+
+Then read [AGENTS.md](AGENTS.md): the module layout, the engine patterns, how to add things, and the checks every change must pass.
 
 For a new project cave or independently hosted land, use the [connection contract](docs/cave-connections.md) and [submission template](docs/templates/cave-connection.md). The **Caves and lands** directory in ₿IFRÖST (also at `/bifrost`) lists the integrated caves and independent sites. External sites open in the same tab without transferring OBL account, inventory or voice data; browser Back returns to OBL.
 
