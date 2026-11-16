@@ -58,7 +58,7 @@ const dispatch = async (request, env, deps) => {
   if (path.startsWith("/api/chat/avatar/")) return handleAvatar(request, env, url, deps);
   if (path.startsWith("/api/chat/public/")) return handlePublic(request, env, url, deps);
   if (path.startsWith("/donations/")) return handleDonations(request, env, url, { ...deps, feed: effective(env, null).feed });
-  if (path.startsWith("/auth/") || path === "/api/chat/me" || path === "/api/chat/logout") return handleAuth(request, env, url, deps);
+  if (path.startsWith("/auth/") || path === "/api/chat/me" || path === "/api/chat/logout" || path === "/api/chat/native/token") return handleAuth(request, env, url, deps);
   if (path.startsWith("/api/")) return refusal("not_found", 404);
   return env.ASSETS.fetch(request);
 };

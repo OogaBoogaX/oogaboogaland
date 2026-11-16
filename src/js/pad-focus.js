@@ -10,7 +10,8 @@
   // The ghost hunt's round cards take no input (hunters walk and shoot behind them), so they never take the pad.
   const LAYERS = ["dialog:modal", ".dsb-menu-engaged", "[data-intro]:not([hidden])", "#mine-intro:not([hidden])",
     "#ghost-lobby:not([hidden])", ".race-results:not([hidden]):not(.ghost-intro)", ".race-pause:not([hidden])", "#prize-panel:not([hidden])",
-    "#garage:not([hidden])", "#drop-board:not([hidden])", "#orbit-build:not([hidden])", "#mine-card:not([hidden])", "#hangar-sound:not([hidden])"].join(",");
+    "#garage:not([hidden])", "#drop-board:not([hidden])", "#orbit-build:not([hidden])", "#mine-card:not([hidden])", "#hangar-sound:not([hidden])",
+    ".voice-handoff:not([hidden])"].join(",");
   const FOCUSABLE = "button, [href], input, select, textarea, summary, [tabindex]:not([tabindex='-1'])";
   // A layer's main button, in this order: where focus starts and what A presses before anything has focus.
   const PRIMARY = ["[autofocus]", ".game-intro-go", "[data-action='intro-go']", ".primary", ".race-go", ".panel-primary", ".actions button"];

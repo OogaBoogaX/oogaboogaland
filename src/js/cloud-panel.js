@@ -2,8 +2,8 @@
 // the outdoor conversation of Main Island or DSB Land, as the room's audience protocol reports it (audience.js;
 // docs/ooga-chat-app.md, The audience contract). Listeners appear here only, never as characters in the world.
 // Shown where the room's welcome lists `audience-v1` (`available`, read by sheet.js), so an older backend keeps the
-// panels it had. Two zone buttons ask the room for a view (`audience-view`); choosing the zone already asked for does
-// nothing. A choice never moves the visitor's Ooga or their microphone: what they publish stays the island's voice.
+// panels it had. For now the panel shows Main Island alone, named by the tag in its title's corner: it asks the room for
+// that view (`audience-view`) wherever the visitor's Ooga stands, which never moves the Ooga or their microphone.
 // One roster of circles, Ooga Chat's own (audience-tiles.js, which the app draws with too): speakers, then listeners,
 // the whole list scrolling in its slab, each a portrait (the Ooga's face for a world speaker with a character the server
 // names; else, for a GitHub account, its GitHub picture from this origin, the Worker's `/api/avatar/<id>`; else, or when
@@ -18,9 +18,8 @@
 // The emoji bar (reactions.js `mount`, the same state as the other bars; the hand an active speaker's alone) sits
 // under the roster, the footer under it: the visitor's name, Mute or Unmute (always there), Join or Leave Voice and
 // Sign out, all through the island's own voice session (voice.js), never a second one.
-// The visitor's outdoor zone comes from `setZoneSource` (#658 supplies the classifier), the zone net.js reports until
-// then. Under `?debug=1&audience=fixture` the panel shows a generated roster of named samples for review, sending
-// nothing. Exports available, setZoneSource, dispose, stats.
+// Under `?debug=1&audience=fixture` the panel shows a generated roster of named samples for review, sending
+// nothing. Exports available, dispose, stats.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -29,20 +28,14 @@
   const panel = $("cloud-panel"), sheet = $("sheet"), list = $("cloud-roster");
   const status = $("cloud-status"), statusText = $("cloud-status-text"), retry = $("cloud-retry");
   const footName = $("cloud-foot-name"), mute = $("cloud-mute"), voiceButton = $("cloud-voice"), logout = $("cloud-logout");
-  const zoneButtons = [...panel.querySelectorAll("[data-cloud-zone]")];
-  // DSB Land's button wears the destination button's own DSB island.
-  {
-    const icon = document.querySelector("#destination-hud .dsb-island-icon").cloneNode(true);
-    icon.setAttribute("class", "cloud-zone-icon");
-    zoneButtons[1].prepend(icon);
-  }
   const params = new URLSearchParams(location.search);
   const fixture = params.get("debug") === "1" && params.get("audience") === "fixture";
   const subs = [];
   const set = (el, key, value) => { if (el[key] !== value) el[key] = value; };
   const attr = (el, key, value) => { if (el.getAttribute(key) !== value) el.setAttribute(key, value); };
 
-  let zoneSource = () => A.zoneOfWorld(net.state.zone);
+  // The one zone the panel shows for now.
+  const ZONE = "main";
   const model = A.create({ send: (type, fields) => !fixture && net.sendAudience(type, fields) });
   const available = () => fixture || !!net.state.me && net.state.audience;
 
@@ -105,7 +98,6 @@
     set(statusText, "textContent", words);
     set(status, "hidden", !words);
     set(retry, "hidden", s !== "connecting" && s !== "stale" && s !== "unavailable");
-    for (const b of zoneButtons) attr(b, "aria-pressed", String(b.dataset.cloudZone === model.desired));
   };
   const render = () => {
     paintStatus();
@@ -159,7 +151,7 @@
     if (s.logoutEpoch !== logoutEpoch) { logoutEpoch = s.logoutEpoch; model.reset("off"); }
     if (!fixture) {
       const now = available() && s.room === "live";
-      if (now && !ready) { if (!model.setDesired(zoneSource())) model.ask(); }
+      if (now && !ready) { if (!model.setDesired(ZONE)) model.ask(); }
       else if (!now && ready) model.reset(s.me ? s.room === "connecting" ? "connecting" : "unavailable" : "off");
       ready = now;
     }
@@ -182,14 +174,6 @@
     if (self && BL.reactionPolicy.valid(e)) tiles.pop(self.id, e);
   }));
 
-  const zoneClick = (e) => {
-    const b = e.currentTarget;
-    if (e.detail) b.blur();
-    if (!model.setDesired(b.dataset.cloudZone)) return;
-    if (fixture) model.apply(sample(b.dataset.cloudZone));
-    render(); paintFooter();
-  };
-  for (const b of zoneButtons) b.addEventListener("click", zoneClick);
   retry.addEventListener("click", () => { model.retry(); render(); });
   mute.addEventListener("click", (e) => {
     if (e.detail) mute.blur();
@@ -204,7 +188,7 @@
   logout.addEventListener("click", () => net.logout());
   BL.reactions.mount($("cloud-reactions"), { handAllowed: () => model.canHand() });
 
-  if (fixture) { model.setDesired(zoneSource()); model.apply(sample(model.desired)); }
+  if (fixture) { model.setDesired(ZONE); model.apply(sample(model.desired)); }
   updateShowing();
   account();
 
@@ -218,8 +202,6 @@
   };
   BL.cloudPanel = {
     available,
-    // #658's classifier hands the visitor's outdoor zone here, "main" or "dsb"; until then net.js's zone decides.
-    setZoneSource(fn) { zoneSource = fn; },
     dispose,
     get stats() { return { rows: model.rows.size, drawn: list.childElementCount, cached: tiles.count, status: model.status, zone: model.zone, desired: model.desired, showing }; }
   };

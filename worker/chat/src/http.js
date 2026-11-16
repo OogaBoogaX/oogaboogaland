@@ -9,6 +9,18 @@ export const json = (data, status = 200, headers = {}) =>
 export const text = (body, status, headers = {}) =>
   new Response(body, { status, headers: { ...BASE_HEADERS, "content-type": "text/plain; charset=utf-8", ...headers } });
 
+/**
+ * A page this Worker writes itself: no script or style at all, so its policy can deny everything else outright. Its
+ * referrer policy is `same-origin`, not `no-referrer`: under that a form's POST carries `Origin: null`, which `fromSite`
+ * refuses, while this one still sends no Referer anywhere else.
+ */
+export const html = (body, csp, status = 200, cookies = []) => {
+  const headers = new Headers({ ...BASE_HEADERS, "content-type": "text/html; charset=utf-8", "content-security-policy": csp,
+    "referrer-policy": "same-origin", "x-frame-options": "DENY" });
+  for (const cookie of cookies) headers.append("set-cookie", cookie);
+  return new Response(body, { status, headers });
+};
+
 /** A stable, bounded refusal: `{ error: { code, retryable } }`, with Retry-After when there is a wait to tell. */
 export const refusal = (code, status, { retryable = false, retryAfter = 0 } = {}) =>
   json({ error: { code, retryable, ...(retryAfter ? { retryAfter } : {}) } }, status, retryAfter ? { "retry-after": String(retryAfter) } : {});

@@ -89,7 +89,7 @@
   const subs = new Map();
   // Each wanted voice's publication count from the room: a new count is a microphone published again.
   const wantedGen = new Map();
-  const stats = { enabled: false, muted: false, alone: false, micWanted: false, returning: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "", micError: "", publishing: false, blocked: false, ready: false, preflight: false, preflightPending: false, permission: "unknown", deviceId: "", receiveLevel: 1, micLevel: 0, receiveState: "off", radius: 0, held: false };
+  const stats = { enabled: false, passive: false, muted: false, alone: false, micWanted: false, returning: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "", micError: "", publishing: false, blocked: false, ready: false, preflight: false, preflightPending: false, permission: "unknown", deviceId: "", receiveLevel: 1, micLevel: 0, receiveState: "off", radius: 0, held: false };
   const samples = new Float32Array(SAMPLES);
   const preferences = new Map();
   let preferenceOwner = 0;
@@ -97,6 +97,12 @@
   let listenerCount = null;
   // The outdoor bridge's word (setOutdoor): the microphone held off, public listeners, public speakers to play at full.
   let outdoorHeld = false, outdoorAudience = 0, outdoorSources = null;
+  // Overhearing (below, `overhear`): a receive session this page opened by itself to hear the main island's public
+  // conversation without joining voice. `passive` while it is up, `passiveWanted` while the bridge says the body
+  // stands in that conversation, `passiveOpening` while it connects, `passiveArmed` while it waits for a first press.
+  let passive = false, passiveWanted = false, passiveOpening = false, passiveArmed = false, soundWatched = false;
+  // A session is up: the visitor's own voice, or the overheard conversation.
+  const up = () => stats.enabled || passive;
   const outdoorSource = (id) => !!outdoorSources && outdoorSources.has(id);
   let lifecycle = 0, micGeneration = 0, microphoneWanted = stats.micWanted = false;
   let cleanup = Promise.resolve(), receiverOpening = null;
@@ -307,7 +313,8 @@
     return s.blendTo || rec.blendTo || B.world(s.zone) || B.world(rec.zone) ? B.shares(s.zone, s.blendTo, k, rec.zone, rec.blendTo, rec.blendK) : B.group(s.zone) === B.group(rec.zone);
   };
   const localVolume = (id) => preferences.get(id)?.volume ?? 1;
-  const playVolume = (s) => stats.receiveLevel * s.near * s.inRange * localVolume(s.id);
+  // Overheard voices are part of the place, so the environment's mute silences them; a joined voice plays regardless.
+  const playVolume = (s) => stats.receiveLevel * s.near * s.inRange * localVolume(s.id) * (passive && BL.sound.muted ? 0 : 1);
   // A voice's level where it plays: its element's volume, or on GAIN_PLAY its gain (nothing until its track lands), which
   // also carries whether it is heard at all.
   const setLevel = (s, immediate = false) => {
@@ -527,6 +534,7 @@
     const oldPub = pubPc, oldSub = subPc;
     pubPc = subPc = null;
     stats.enabled = false;
+    passive = stats.passive = false;
     if (oldPub) oldPub.close();
     if (oldSub) oldSub.close();
     for (const s of subs.values()) silence(s, false);
@@ -600,6 +608,8 @@
     const s = support(), missing = s.secure ? s.webrtc ? "" : "this browser has no WebRTC" : "voice needs a secure page (https)";
     if (missing) { stats.error = missing; emit(); return; }
     activate();
+    // A session the visitor asked for replaces the overheard one, which the room treats differently.
+    if (passive || passiveOpening) endPassive();
     if (stats.enabled || stats.joining) return;
     const token = lifecycle;
     stats.joining = true; stats.error = ""; emit();
@@ -660,7 +670,7 @@
     mic = null;
     dropMeter(); stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
-    if (!stats.enabled) { window.clearInterval(speakTimer); speakTimer = 0; }
+    if (!up()) { window.clearInterval(speakTimer); speakTimer = 0; }
     emit();
   };
   const selectDevice = async (deviceId) => {
@@ -728,6 +738,7 @@
       if (!subPc) { openingReceiver = true; await openReceiver(token); }
       if (token !== lifecycle) return;
       stats.enabled = true; stats.ready = true; stats.returning = false;
+      passive = stats.passive = false;
       setMuted(stats.muted);
       window.clearInterval(speakTimer);
       speakTimer = window.setInterval(poll, SPEAK_MS);
@@ -748,16 +759,16 @@
 
   // The receiving side: a fresh session and connection, every remote voice pulled into it anew. Also the
   // recovery when the SFU refuses a pull on a receive session it calls disconnected.
-  const openReceiver = (token = lifecycle) => {
+  const openReceiver = (token = lifecycle, overheard = false) => {
     if (receiverOpening && receiverOpening.token === token) return receiverOpening.promise;
     const opening = { token, promise: null };
-    opening.promise = createReceiver(token).finally(() => {
+    opening.promise = createReceiver(token, overheard).finally(() => {
       if (receiverOpening === opening) receiverOpening = null;
     });
     receiverOpening = opening;
     return opening.promise;
   };
-  const createReceiver = async (token) => {
+  const createReceiver = async (token, overheard = false) => {
     await cleanup;
     current(token);
     for (const s of subs.values()) silence(s);
@@ -765,7 +776,7 @@
     if (subPc) subPc.close();
     subPc = null;
     const config = await iceFor(token); current(token);
-    await api("session", { kind: "sub" }, token);
+    await api("session", overheard ? { kind: "sub", passive: true } : { kind: "sub" }, token);
     current(token);
     const pc = new RTCPeerConnection(config);
     subPc = pc; stats.receiveState = "idle";
@@ -798,7 +809,8 @@
     if (mic) for (const t of mic.getAudioTracks()) t.enabled = !stats.muted && !stats.alone && !outdoorHeld;
   };
   // The outdoor bridge's whole word, applied at once (synchronously, so a hold lands before the next private word).
-  const setOutdoor = (held, audience, sources) => {
+  // `scope` is the public conversation the body stands in now ("main", "dsb" or null): the main island's is overheard.
+  const setOutdoor = (held, audience, sources, scope = null) => {
     const was = stats.alone, wasHeld = stats.held;
     outdoorHeld = !!held;
     outdoorAudience = Number.isSafeInteger(audience) && audience > 0 ? audience : 0;
@@ -806,6 +818,67 @@
     gate();
     subs.forEach(nearSub);
     if (stats.alone !== was || stats.held !== wasHeld) emit();
+    passiveWanted = scope === "main";
+    if (passiveWanted) overhear();
+  };
+
+  // Overhearing: a signed-in player standing in the main island's public conversation hears its speakers (island
+  // players talking outdoors and Ooga Chat's on their clouds) without joining voice. The page opens a receive session by
+  // itself, marked `passive` for the room, which lists only that conversation's speakers for it and counts it in nobody's
+  // voice; it asks for no microphone and shows as no voice state (`stats.enabled` stays false, `stats.passive` says so).
+  // It starts once the bridge says the body is public there and the browser has had a gesture, stays up while the room
+  // is live (the room empties its list wherever the body is not public), and gives way to the visitor's own voice:
+  // Join voice publishes over it, and a returning listener's session replaces it. The banner's speaker mutes it.
+  const disarmPassive = () => {
+    if (!passiveArmed) return;
+    passiveArmed = false;
+    window.removeEventListener("pointerup", firstPassive, true);
+    window.removeEventListener("keydown", firstPassive, true);
+  };
+  function firstPassive(e) {
+    if (!e.isTrusted) return;
+    disarmPassive();
+    overhear();
+  }
+  const overhear = async () => {
+    if (!passiveWanted || passive || passiveOpening || stats.enabled || stats.joining || armed || rejoining || BL.net.state.room !== "live") return;
+    const s = support();
+    if (!s.secure || !s.webrtc) return;
+    if (!(navigator.userActivation && navigator.userActivation.hasBeenActive)) {
+      if (passiveArmed) return;
+      passiveArmed = true;
+      window.addEventListener("pointerup", firstPassive, true);
+      window.addEventListener("keydown", firstPassive, true);
+      return;
+    }
+    activate();
+    const token = lifecycle;
+    passiveOpening = true;
+    try {
+      const ice = await probe();
+      if (token !== lifecycle || ice.blocked || stats.enabled || stats.joining) return;
+      await openReceiver(token, true);
+      if (token !== lifecycle || stats.enabled || stats.joining) return;
+      passive = stats.passive = true; stats.ready = true;
+      // The environment's mute silences what is overheard, from the first session on.
+      if (!soundWatched) { soundWatched = true; BL.sound.subscribe(() => { if (passive) for (const s of subs.values()) setLevel(s, true); }); }
+      window.clearInterval(speakTimer);
+      speakTimer = window.setInterval(poll, SPEAK_MS);
+      schedule();
+    } catch {
+      // Unheard, and said nowhere: the next time the body comes outdoors it is tried again.
+      if (token === lifecycle && !stats.enabled && !stats.joining) teardown();
+    } finally {
+      passiveOpening = false;
+      if (token === lifecycle) emit();
+    }
+  };
+  // The overheard session ends for a session of the visitor's own: its connection closes and the room forgets it.
+  const endPassive = () => {
+    lifecycle++; abortRequests();
+    teardown();
+    passiveOpening = false;
+    cleanup = api("leave").catch(() => {});
   };
 
   const setMuted = (on) => {
@@ -860,7 +933,9 @@
     else if (unmute) join();
   };
   const resume = () => {
-    if (armed || stats.enabled || stats.joining || BL.net.state.zone === STUDIO_ZONE || !joinedBefore()) return;
+    // While the account speaks from Ooga Chat on another device, coming back by itself would take that voice away: the
+    // visitor is asked instead (voice-handoff.js), and Join voice is their answer.
+    if (armed || stats.enabled || stats.joining || BL.net.state.zone === STUDIO_ZONE || BL.net.state.voiceElsewhere || !joinedBefore()) return;
     armed = stats.returning = stats.muted = true;
     window.addEventListener("pointerup", firstPress, true);
     window.addEventListener("keydown", firstPress, true);
@@ -885,7 +960,8 @@
   const stop = () => {
     lifecycle++; micGeneration++; abortRequests(); microphoneWanted = stats.micWanted = false;
     disarm(); rejoining = unmuteAsked = stats.returning = false;
-    const was = stats.enabled || stats.joining || !!pubPc || !!subPc;
+    const was = up() || stats.joining || !!pubPc || !!subPc;
+    disarmPassive();
     stats.joining = false; teardown();
     if (mic) for (const t of mic.getTracks()) t.stop();
     mic = null; stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
@@ -901,6 +977,8 @@
     wantedGen.clear();
     if (was) cleanup = api("leave").catch(() => {});
     emit();
+    // Out of voice by choice, and still standing in the public conversation: it is overheard again.
+    overhear();
   };
 
   // Revocation releases hardware while keeping receive-only audio available.
@@ -923,7 +1001,13 @@
     const why = dropWhy;
     dropWhy = "";
     // A welcome during a restart is the same blip: it must not put a speaker back in as a muted listener.
-    if (!stats.enabled) { if (welcomed && !restarting) resume(); return; }
+    if (!stats.enabled) {
+      // An overheard session that dropped, or belonged to the connection before this one, is opened afresh.
+      if (passive || passiveOpening) { lifecycle++; abortRequests(); teardown(); passiveOpening = false; emit(); }
+      if (welcomed && !restarting) resume();
+      overhear();
+      return;
+    }
     const wanted = microphoneWanted, muted = stats.muted;
     const token = ++lifecycle; micGeneration++; abortRequests();
     teardown(); stats.joining = false;
@@ -974,21 +1058,22 @@
       if (!stats.error || stats.blocked) return;
       stats.error = ""; emit();
     }, () => {
-      if (token !== lifecycle || !stats.enabled) return;
+      if (token !== lifecycle || !up()) return;
       if (!retried) {
         retried = true;
         window.clearTimeout(retryTimer);
         retryTimer = window.setTimeout(() => {
-          if (token !== lifecycle || !stats.enabled) return;
-          queue = queue.then(() => openReceiver(token)).catch(() => {});
+          if (token !== lifecycle || !up()) return;
+          queue = queue.then(() => openReceiver(token, passive)).catch(() => {});
           schedule();
         }, RETRY_MS);
         return;
       }
-      stats.error = "voice unavailable"; emit();
+      // An overheard conversation that can't be reached says nothing: the visitor asked for no voice.
+      if (!passive) { stats.error = "voice unavailable"; emit(); }
       // Whoever is still wanted goes on being tried, slowly, rather than waiting on the room's next change.
       window.clearTimeout(retryTimer);
-      retryTimer = window.setTimeout(() => { if (token === lifecycle && stats.enabled) schedule(); }, SLOW_RETRY_MS);
+      retryTimer = window.setTimeout(() => { if (token === lifecycle && up()) schedule(); }, SLOW_RETRY_MS);
     });
   };
 
@@ -997,9 +1082,9 @@
   // it is retried rather than left silent.
   const apply = async (token) => {
     current(token);
-    if (!stats.enabled) return;
+    if (!up()) return;
     // A retry that could not open a new receive session leaves none, and nothing else would notice: open one or fail the change.
-    if (!subPc) { await openReceiver(token); current(token); }
+    if (!subPc) { await openReceiver(token, passive); current(token); }
     const pc = subPc;
     const valid = () => { current(token); if (pc !== subPc) throw new Error("receiver replaced"); };
     const want = new Set(desired);

@@ -64,7 +64,15 @@ export const createSession = async (db, principalId, userAgent, now = Date.now()
   return token;
 };
 
-export const sessionToken = (request, env) => parseCookies(request.headers.get("cookie")).get(cookieNames(env.SITE_ORIGIN).session) || null;
+/** A native app's session (`Authorization: Bearer <token>`), which a browser never sends here: no CORS is allowed. */
+export const bearerToken = (request) => {
+  const match = /^Bearer ([A-Za-z0-9_-]{1,64})$/.exec(request.headers.get("authorization") || "");
+  return match ? match[1] : null;
+};
+
+/** The session's token: a native app's bearer token when it sends one, else the browser's cookie. */
+export const sessionToken = (request, env) =>
+  bearerToken(request) || parseCookies(request.headers.get("cookie")).get(cookieNames(env.SITE_ORIGIN).session) || null;
 
 /**
  * `{ principal, session, token }` for a live session, or null. Throws on a D1 failure, so a caller can say it could not
@@ -104,6 +112,8 @@ export const deletePrincipal = (db, principalId) => db.batch([
 export const purgeExpired = (db, now = Date.now()) => db.batch([
   db.prepare("DELETE FROM sessions WHERE expires_at <= ?1").bind(now),
   db.prepare("DELETE FROM oauth_states WHERE expires_at <= ?1").bind(now),
+  db.prepare("DELETE FROM native_codes WHERE expires_at <= ?1").bind(now),
+  db.prepare("DELETE FROM native_consents WHERE expires_at <= ?1").bind(now),
 ]);
 
 /** What crosses the bridge about a principal: the edge writes it from its own row, never from a request. */

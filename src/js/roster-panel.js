@@ -377,11 +377,12 @@
     });
     // A change of presence repaints the dot without moving the row.
     const showOnline = (row) => {
+      // `online(row)` is false, true, or "cloud" for an Ooga Chat speaker, whose dot is Ooga Chat's purple.
       const lit = online(row);
       if (row.online === lit) return;
       row.online = lit;
-      row.presence.dataset.online = lit ? "true" : "false";
-      row.presence.title = lit ? "Online" : "Offline";
+      row.presence.dataset.online = lit === "cloud" ? "cloud" : lit ? "true" : "false";
+      row.presence.title = lit === "cloud" ? "Speaking from Ooga Chat" : lit ? "Online" : "Offline";
       row.presence.setAttribute("aria-label", row.presence.title);
       row.li.hidden = row.state.dataset.state === "away" && !showAway && !lit;
       countAway();

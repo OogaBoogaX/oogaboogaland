@@ -1603,8 +1603,11 @@
   // A cloud the Ooga Chat speakers sit on (#659) has a bench: across its middle, from just outside where the outer two
   // sit (scene-hub.js's seats, BENCH_SPREAD of a third either side of the middle) BENCH_PAST further, BENCH_DEPTH
   // either side of its long axis, every column the cloud already has is filled up to its highest layer and nothing
-  // stands over it, one flat top to sit on in place of the puffs' ragged tops.
-  const BENCH_SPREAD = 0.7, BENCH_PAST = 0.6, BENCH_DEPTH = 1;
+  // stands over it, one flat top to sit on in place of the puffs' ragged tops. The top is no deeper than a seat's glow
+  // reaches (SEAT_GLOW's `outer`, 0.95 m either side of the seat: three cells, 0.75 m), so the purple runs to its front
+  // and back edges with no bare strip before a speaker; the columns just outside it, as far as the old bench went,
+  // stop a layer lower, so no puff carries the top on past the glow.
+  const BENCH_SPREAD = 0.7, BENCH_PAST = 0.6, BENCH_DEPTH = 0.5, BENCH_STEP = 1;
   const buildCloud = (i, bench) => {
     const rand = mulberry32(307 + i);
     const v = vox();
@@ -1621,10 +1624,11 @@
         const key = CELL[0] * 4096 + CELL[2], low = columns.get(key);
         if (low === undefined || CELL[1] < low.min) columns.set(key, { x: CELL[0], z: CELL[2], min: CELL[1] });
       }
-      const middle = (x0 + x1 + 1) / 2 - 0.5, half = ((x1 - x0 + 1) / 3 * BENCH_SPREAD) + BENCH_PAST / VOX, depth = BENCH_DEPTH / VOX;
+      const middle = (x0 + x1 + 1) / 2 - 0.5, half = ((x1 - x0 + 1) / 3 * BENCH_SPREAD) + BENCH_PAST / VOX, depth = BENCH_DEPTH / VOX, step = (BENCH_DEPTH + BENCH_STEP) / VOX;
       for (const { x, z, min } of columns.values()) {
-        if (Math.abs(x - middle) > half || Math.abs(z) > depth) continue;
-        for (let y = min; y <= top; y++) v.set(x, y, z, y > 0 ? 0 : 1);
+        if (Math.abs(x - middle) > half || Math.abs(z) > step) continue;
+        if (Math.abs(z) > depth) v.del(x, top, z);
+        else for (let y = min; y <= top; y++) v.set(x, y, z, y > 0 ? 0 : 1);
       }
     }
     // A flat base under the puffs, the way a cumulus sits on the air, grown straight down from the

@@ -216,6 +216,63 @@ test("an open grant hears its listeners and its Ooga Chat sources; a redeploy wi
   assert.deepEqual(woken.frames(ws).at(-1), { op: "closed", epoch: 1, reason: "unavailable" });
 });
 
+test("overhearing: a player not in voice hears the main island's public speakers and Ooga Chat's only while their own grant is open there, never a place, and is in nobody's voice", async () => {
+  const h = await harness();
+  const a = await h.join(1, "a");
+  const b = await h.join(2, "b");
+  const plan = () => [...(h.room.voicePlan().get(2) || [])];
+  // b's page opened a receive session by itself: no microphone, not muted, marked passive.
+  const listener = h.room.players.get(2);
+  listener.voice = { pub: null, sub: "sub2", track: null, passive: true, gen: 0, mids: {}, pubMid: null };
+  assert.deepEqual(plan(), [], "standing beside a speaker is not hearing them: no grant is open");
+  await h.outdoor(a, { op: "enter", epoch: 1, scope: "main" });
+  assert.deepEqual(plan(), [], "the listener's own grant is not open yet");
+  await h.outdoor(b, { op: "enter", epoch: 1, scope: "main" });
+  assert.deepEqual(plan(), [1], "the island speaker who is public there");
+  h.room.audienceSources([{ id: 777, zone: "main", session: "chat", track: "mic", gen: 2 }, { id: 888, zone: "dsb", session: "chat2", track: "mic", gen: 2 }]);
+  assert.deepEqual(plan(), [1, 777], "and Ooga Chat's speakers of that zone");
+  assert.equal(h.context.inVoice(listener), false, "no roster mark");
+  assert.equal(h.audience.calls.at(-1).active.includes("gh:2"), false, "and never the island's voice to Ooga Chat, so a lease elsewhere stands");
+  assert.deepEqual([...h.room.voicePlan().get(1)], [777], "the speaker does not hear the listener, who publishes nothing");
+  // The speaker goes indoors: their grant is taken back, and the listener no longer hears them.
+  await h.send(a, { t: "zone", name: "hq" });
+  await h.settle();
+  assert.deepEqual(plan(), [777]);
+  // The listener goes indoors too: nothing public is heard there, and no place either.
+  await h.send(b, { t: "zone", name: "hq" });
+  await h.settle();
+  assert.deepEqual(plan(), [], "indoors an overhearing session hears nobody, the speaker in the same room included");
+  // A session of the visitor's own (a returning listener's) hears its place, as ever.
+  listener.voice.passive = false;
+  assert.deepEqual(plan(), [1]);
+});
+
+test("voice on another device: an island page hears when its account speaks from Ooga Chat, at its welcome too, and gives its own voice up when Ooga Chat takes it", async () => {
+  const h = await harness();
+  const a = await h.join(1, "a");
+  const b = await h.join(2, "b");
+  h.room.audienceSources([{ id: 2, zone: "main", session: "chat", track: "mic", gen: 2 }]);
+  assert.deepEqual(b.sent.filter((m) => m.t === "voice-elsewhere").map((m) => m.on), [true]);
+  assert.equal(a.sent.some((m) => m.t === "voice-elsewhere"), false, "only the account's own page");
+  // The account's next page is told in its welcome, before its voice could come back by itself.
+  const again = await h.join(2, "b");
+  assert.equal(again.sent.find((m) => m.t === "welcome").voiceElsewhere, true);
+  assert.equal(a.sent.find((m) => m.t === "welcome").voiceElsewhere, undefined);
+  h.room.audienceSources([]);
+  assert.deepEqual(again.sent.filter((m) => m.t === "voice-elsewhere").map((m) => m.on), [false]);
+  // Ooga Chat takes a's voice on the visitor's word: the island's page leaves voice, everyone sees the mark go, and the
+  // Audience has the island's word without the account before the answer.
+  const calls = h.audience.calls.length;
+  assert.deepEqual(plain(await h.room.audienceHandoff(1)), { ok: true });
+  const p = h.room.players.get(1);
+  assert.deepEqual([p.voice.pub, p.voice.sub, p.voice.track, h.context.inVoice(p)], [null, null, null, false]);
+  assert.equal(a.sent.filter((m) => m.t === "voice-moved").length, 1);
+  assert.deepEqual(plain(again.sent.filter((m) => m.t === "vstate" && m.id === 1).at(-1)), { t: "vstate", id: 1, voice: false, muted: false });
+  assert.ok(h.audience.calls.length > calls && !h.audience.calls.at(-1).active.includes("gh:1"));
+  // Nobody of that account on the island: still answered from the island's word.
+  assert.deepEqual(plain(await h.room.audienceHandoff(99)), { ok: true });
+});
+
 // The Audience's side: confirmation after the SFU closes, with a fake SFU that can refuse.
 const NodeResponse = globalThis.Response;
 globalThis.Response = class extends NodeResponse {

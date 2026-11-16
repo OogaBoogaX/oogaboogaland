@@ -274,7 +274,15 @@ export const createAudience = ({ epoch = Date.now(), limits = DEFAULT_LIMITS, re
     const speak = c.lease ? (c.lease.state === "active" ? "active" : "pending")
       : c.eligible && !p.active && !p.world ? "eligible" : c.eligible ? "denied" : "none";
     // The lease's generation names it in the media calls (#666, #654): only this connection's own page hears it.
-    return c.lease ? { id: c.id, speak, lease: c.lease.generation } : { id: c.id, speak };
+    if (c.lease) return { id: c.id, speak, lease: c.lease.generation };
+    // Where the identity's voice is while it is not here: the island's, or another of its Ooga Chat connections', which
+    // an eligible connection may take on the visitor's word (`setRole` with `takeover`).
+    const elsewhere = !c.eligible ? "" : p.active || p.world ? "island" : heldElsewhere(c) ? "app" : "";
+    return elsewhere ? { id: c.id, speak, elsewhere } : { id: c.id, speak };
+  };
+  const heldElsewhere = (c) => {
+    for (const o of people.get(c.id).conns.values()) if (o !== c && o.lease) return true;
+    return false;
   };
 
   return {

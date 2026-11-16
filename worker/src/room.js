@@ -591,7 +591,9 @@ export class Room extends DurableObject {
 
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [tessQueue.FEATURE, CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE, ...audienceRoom.features(this), ...(this.inspect.on ? [INSPECT_FEATURE] : [])] });
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [tessQueue.FEATURE, CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE, ...audienceRoom.features(this), ...(this.inspect.on ? [INSPECT_FEATURE] : [])],
+      // The account speaks from Ooga Chat on another device: this page's own voice waits for the visitor's word.
+      ...(audienceRoom.elsewhere(this, p.id) ? { voiceElsewhere: true } : {}) });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
     this.send(server, { t: "chat-history", messages: this.chat.list() });
     this.sendCabinets(server);
@@ -1340,6 +1342,8 @@ export class Room extends DurableObject {
   // Ooga Chat's audience (audience.js) sends each change of a zone a panel here watches, and its speakers' publications.
   audienceDelta(delta) { audienceRoom.delta(this, delta); }
   audienceSources(list) { return audienceRoom.sources(this, list); }
+  // Ooga Chat took an account's voice on the visitor's word: the island's page leaves voice first.
+  audienceHandoff(id) { return audienceRoom.handoff(this, id); }
   // The outdoor handshake's answers from the Audience (#667): confirmed retirements, and each zone's listeners.
   audienceConfirmed(ids) { audienceRoom.confirmed(this, ids); }
   // Ooga Chat's reactions and clouds (#668).
@@ -1422,6 +1426,9 @@ export class Room extends DurableObject {
         if (!current() || (kind === "pub" && !mayPublish())) return json({ error: "connection or permission changed" }, 409);
         p.voice[kind] = sessionId;
         if (kind === "pub") p.voice.track = p.voice.pending = null;
+        // A receive session the page opened by itself to overhear the public conversation (voice.js `overhear`), until a
+        // session of the visitor's own replaces it or a microphone is published over it.
+        p.voice.passive = kind === "sub" ? body.passive === true && !p.voice.pub : false;
         // A restarted client cleared its local list, even if the room's list
         // and audience count have not changed since its previous receiver.
         if (kind === "sub") p.sent = null;

@@ -33,7 +33,7 @@ cookie, an address, audio, chat or private text, a position, an avatar fetch's c
 notable answer: a socket upgrade (refused or not), a media call, a sign-in start or callback, a donation call, and any
 error status anywhere. A public read that succeeds is not logged, so the volume follows sign-ins, sockets and media, not
 page loads. Each line is `{ ooga: "chat", v: 1, env, route, status, close?, signin? }`. `route` is a fixed name
-(`audience`, `commons`, `media:<op>`, `auth:<provider>:start|callback`, `donations:<op>`, `me`, `logout`, `bootstrap`,
+(`audience`, `commons`, `media:<op>`, `auth:<provider>:start|callback|consent`, `donations:<op>`, `me`, `logout`, `native`, `bootstrap`,
 `health`, `version`, `public`, `avatar`, or `…:unknown`). `close` is a refused socket's close code (4401 signed out, 4403
 not allowed, 4429 limited, 4503 off). `signin` is the callback's result (`ok`, `denied`, `failed`, `unavailable`,
 `rate-limited`). Both edge configs set `observability.logs.invocation_logs` to false: Cloudflare's own invocation logs
@@ -203,7 +203,7 @@ Lowering `AUDIENCE_LISTENERS` refuses new listeners over the cap and never close
 
 Each step on staging first, then production, recording the run each time.
 
-- [ ] Record the edge and island Worker versions, the app build, D1 migrations applied (`ooga-chat-*` 0001; the island's
+- [ ] Record the edge and island Worker versions, the app build, D1 migrations applied (`ooga-chat-*` 0001–0002; the island's
       `AUDIENCE` object at migration `v4`), the island page's protocol features, and the bridge targets.
 - [ ] Deploy the island with `OOGA_CHAT_FEATURES` empty, then the edge with `FEATURES` empty: health `ok`, every flag
       off.

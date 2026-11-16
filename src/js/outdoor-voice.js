@@ -38,7 +38,7 @@
     let asked = -1, left = -1, closed = -1, quiet = -1, refusedAt = -1, askedPlace = 0, askedHeld = false, wasLive = false, audience = 0;
     let syncing = false, again = false, disposed = false, retryTimer = 0, tries = 0, retryKey = "";
     // What voice.js was last told, so it hears changes only.
-    let toldHeld = false, toldAudience = 0, toldSources = -1, sourcesVersion = 0;
+    let toldHeld = false, toldAudience = 0, toldSources = -1, toldScope = null, sourcesVersion = 0;
     const sources = new Set(), seen = new Set(), seenOrder = new Array(SEEN_MAX).fill(""), subscribers = new Set(), reactors = new Set();
     let seenAt = 0;
     const stats = { version: VERSION, status: "unavailable", reason: S.reason, scope: null, epoch: S.epoch, public: false, held: false, audience: 0, sources: 0, refused: "" };
@@ -110,9 +110,11 @@
       } finally { syncing = false; }
       const open = S.public && S.epoch === asked && asked > left, held = left > closed;
       if (!open) { audience = 0; dropSources(); }
-      if (held !== toldHeld || audience !== toldAudience || sourcesVersion !== toldSources) {
-        toldHeld = held; toldAudience = audience; toldSources = sourcesVersion;
-        voice.setOutdoor(held, audience, sources);
+      // The scope the page is public in now also tells voice which conversation it may overhear without joining.
+      const heardScope = open ? S.scope : null;
+      if (held !== toldHeld || audience !== toldAudience || sourcesVersion !== toldSources || heardScope !== toldScope) {
+        toldHeld = held; toldAudience = audience; toldSources = sourcesVersion; toldScope = heardScope;
+        voice.setOutdoor(held, audience, sources, heardScope);
       }
       retry();
       const status = held ? "closing" : !transport.available() ? "unavailable" : open ? "public" : S.scope === null ? "excluded"
@@ -205,7 +207,7 @@
       unsubscribeScope(); unsubscribeRoom(); unsubscribeFrames();
       scope.setSupported(false);
       sources.clear();
-      voice.setOutdoor(false, 0, sources);
+      voice.setOutdoor(false, 0, sources, null);
       subscribers.clear(); reactors.clear();
     };
     return { stats, subscribe, subscribeReactions, source, dispose };

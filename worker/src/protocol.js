@@ -6,8 +6,8 @@ export { hockey } from "./hockey.js";
 import "../../src/js/hockey-wire.js";
 export const HOCKEY = globalThis.BL.hockeyWire;
 export { block } from "./block.js";
-import { audienceRoom } from "./room-audience.js";
-export { audienceRoom };
+import { audienceRoom, overhearing } from "./room-audience.js";
+export { audienceRoom, overhearing };
 import { commonsRoom } from "./room-commons.js";
 export { commonsRoom };
 // The Durable Object inspector's reporter (inspect-report.js), here so the room and game host take it with the rest.
@@ -606,13 +606,14 @@ export const linkView = (links, id) => {
   return { wants, linked: wants.filter((other) => voiceLinked(links, id, other)) };
 };
 
-/** Map of player id → sorted ids that player should hear. A voice link needs only a receive session and a live microphone. */
+/** Map of player id → sorted ids that player should hear. A voice link needs only a receive session and a live microphone.
+ *  A player overhearing (room-audience.js `overhearing`) hears no place: only what `addSources` lists, and a linked partner. */
 export const voicePeers = (players, studio = null, links = null) => {
   const out = new Map();
   for (const p of players) {
     const ids = [];
     if (p.voice && p.voice.sub) {
-      const listens = voiceListener(p, studio);
+      const listens = voiceListener(p, studio) && !overhearing(p);
       for (const q of players) {
         if (q === p || !q.voice || !q.voice.track) continue;
         if (voiceLinked(links, p.id, q.id) || listens && voiceAudible(q, studio) && voiceTogether(p, q)) ids.push(q.id);

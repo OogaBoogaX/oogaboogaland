@@ -243,7 +243,11 @@
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
     room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, npcVersion: 0, doorway: false, pokerVoice: null,
     self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, privateChat: false, chalk: null, blendTo: null, blendT: 0, reactions: false, customHand: false, hand: false, handTone: 0, handEmoji: "",
-    voiceLinks: false, linkWants: new Set(), linked: new Set(), outdoorVoice: false, placed: 0, audience: false, clouds: NO_CLOUDS };
+    voiceLinks: false, linkWants: new Set(), linked: new Set(), outdoorVoice: false, placed: 0, audience: false, clouds: NO_CLOUDS,
+    // Voice on another device (voice-handoff.js): `voiceElsewhere` while the account speaks from Ooga Chat somewhere
+    // else, as the room's welcome and its `voice-elsewhere` say; `voiceMoved` counts the times Ooga Chat took this
+    // page's voice on the visitor's word there (`voice-moved`, which leaves voice here).
+    voiceElsewhere: false, voiceMoved: 0 };
   if (cloudSeed) state.clouds = cloudSeed;
   const REACT_FEATURE = "react-v1", LINK_FEATURE = "vlink-v1", LINK_MAX = 64, OUTDOOR_FEATURE = "outdoor-voice-v1";
   const linkIds = (list) => new Set(Array.isArray(list) ? list.filter((id) => Number.isSafeInteger(id) && id > 0).slice(0, LINK_MAX) : []);
@@ -619,6 +623,8 @@
       ended = null;
       clockKnown = false;
       clockSample(msg.now);
+      // Before voice is put back below: it stays out while the account speaks from another device.
+      state.voiceElsewhere = msg.voiceElsewhere === true;
       state.loopEpoch = typeof msg.loopEpoch === "number" ? msg.loopEpoch : 0;
       state.hostId = Number.isSafeInteger(msg.host) ? msg.host : 0;
       state.followers = Number.isSafeInteger(msg.followers) ? msg.followers : 0;
@@ -753,6 +759,14 @@
       if (state.audience) for (const fn of audienceSubscribers) fn(msg);
     } else if (msg.t === "clouds") {
       if (msg.v === 1 && Array.isArray(msg.clouds)) setClouds(cloudList(msg.clouds));
+    } else if (msg.t === "voice-elsewhere") {
+      state.voiceElsewhere = msg.on === true;
+      emit();
+    } else if (msg.t === "voice-moved") {
+      // The visitor took their voice to Ooga Chat on another device: this page leaves voice, by their own choice.
+      state.voiceMoved++;
+      BL.voice.leave();
+      emit();
     } else if (msg.t === "chat") {
       const line = chatLine(msg);
       if (line) chatHeard([line], false);
@@ -867,6 +881,7 @@
     }
     remotes.clear();
     setClouds(NO_CLOUDS);
+    state.voiceElsewhere = false;
     state.hostId = 0;
     state.followers = 0;
     // Any request for the doorway went with the socket.

@@ -435,3 +435,166 @@ test("the picture's account decides before its cache: a deleted account or an ol
   await s.go("/api/chat/me", { method: "DELETE", headers: site });
   assert.equal((await s.go(path)).status, 404, "deleted, so no face, cached or not");
 });
+
+// A native app (RFC 8252): PKCE S256 over the system browser, the result back on loopback, a bearer session.
+const pkce = async () => {
+  const verifier = "v".repeat(20) + "-native_verifier.~0123456789";
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+  const challenge = btoa(String.fromCharCode(...digest)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return { verifier, challenge };
+};
+// Up to the consent page: the browser has signed in with the provider, and the app has nothing yet.
+const nativePage = async (s, challenge, port = 53682) => {
+  const start = await s.go(`/auth/github?native=${challenge}&port=${port}`);
+  assert.equal(start.status, 302);
+  const state = new URL(start.headers.get("location")).searchParams.get("state");
+  const page = await s.go(`/auth/github/callback?code=the-code&state=${encodeURIComponent(state)}`);
+  assert.equal(page.status, 200);
+  const body = await page.text();
+  return { page, body, consent: /name="consent" value="([A-Za-z0-9_-]+)"/.exec(body)[1] };
+};
+const answer = (s, consent, choice, headers = { origin: SITE }) => s.go("/auth/github/consent", { method: "POST",
+  headers: { "content-type": "application/x-www-form-urlencoded", ...headers }, body: new URLSearchParams({ consent, choice }).toString() });
+const nativeSignIn = async (s, challenge, port = 53682) => answer(s, (await nativePage(s, challenge, port)).consent, "continue");
+const exchange = (s, body, headers = {}) =>
+  s.go("/api/chat/native/token", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+
+test("native: the callback asks first, and only Continue sends the browser to loopback with a one-time code", async () => {
+  const s = setup();
+  const { challenge } = await pkce();
+  const { page, body, consent } = await nativePage(s, challenge);
+  assert.match(page.headers.get("content-type"), /^text\/html/);
+  const csp = page.headers.get("content-security-policy");
+  assert.equal(csp, "default-src 'none'; form-action 'self' http://127.0.0.1:53682; frame-ancestors 'none'; base-uri 'none'");
+  assert.equal(page.headers.get("x-frame-options"), "DENY");
+  assert.equal(page.headers.get("referrer-policy"), "same-origin", "no-referrer would make its own POST's Origin null");
+  assert.ok(!/name="referrer"/.test(body));
+  assert.equal(page.headers.get("cache-control"), "no-store");
+  assert.ok(!/<script|<style|\sstyle=|\son[a-z]+=/i.test(body), "nothing the policy would have to allow");
+  assert.match(body, /Ooga Dev \(ooga-dev\)/);
+  assert.match(body, /Continue to the Ooga Chat desktop app\?/);
+  assert.match(body, /<form method="post" action="\/auth\/github\/consent">/);
+  assert.ok(!s.jar.has("__Host-ooga_chat_session"), "the browser gets no session");
+  assert.ok(s.jar.has("__Host-ooga_chat_oauth"), "the consent is bound to this browser");
+  assert.equal(await s.env.DB.prepare("SELECT COUNT(*) AS n FROM native_codes").first("n"), 0, "no code before Continue");
+  assert.notEqual(await s.env.DB.prepare("SELECT consent_hash FROM native_consents").first("consent_hash"), consent, "D1 keeps the consent's hash");
+  assert.equal((await s.go("/auth/github/consent")).status, 405, "an answer is a POST");
+  const done = await answer(s, consent, "continue");
+  assert.equal(done.status, 303);
+  assert.match(done.headers.get("location"), /^http:\/\/127\.0\.0\.1:53682\/callback\?signin=ok&provider=github&code=[A-Za-z0-9_-]{43}$/);
+  assert.ok(!s.jar.has("__Host-ooga_chat_oauth"), "and the sign-in cookie is gone");
+  assert.equal(await s.env.DB.prepare("SELECT COUNT(*) AS n FROM native_consents").first("n"), 0, "spent");
+});
+
+test("native: the browser goes back to loopback with a one-time code, never a cookie, and the code and verifier make a bearer session", async () => {
+  const s = setup();
+  const { verifier, challenge } = await pkce();
+  const done = await nativeSignIn(s, challenge);
+  assert.equal(done.status, 303);
+  const to = new URL(done.headers.get("location"));
+  assert.equal(`${to.origin}${to.pathname}`, "http://127.0.0.1:53682/callback");
+  assert.equal(to.searchParams.get("signin"), "ok");
+  assert.equal(to.searchParams.get("provider"), "github");
+  const code = to.searchParams.get("code");
+  assert.match(code, /^[A-Za-z0-9_-]{43}$/);
+  assert.ok(!s.jar.has("__Host-ooga_chat_session"), "the browser gets no session");
+  assert.ok(!s.jar.has("__Host-ooga_chat_oauth"), "and loses its sign-in cookie");
+  assert.notEqual(await s.env.DB.prepare("SELECT code_hash FROM native_codes").first("code_hash"), code, "D1 keeps the code's hash");
+  assert.equal((await exchange(s, { code, verifier: verifier + "x" })).status, 400, "a wrong verifier is refused...");
+  assert.equal((await exchange(s, { code, verifier })).status, 400, "...and spends the code");
+
+  const again = new URL((await nativeSignIn(s, challenge)).headers.get("location")).searchParams.get("code");
+  const got = await exchange(s, { code: again, verifier });
+  assert.equal(got.status, 200);
+  const { token, expiresAt } = await got.json();
+  assert.match(token, /^[A-Za-z0-9_-]{43}$/);
+  assert.ok(expiresAt > Date.now());
+  assert.equal((await exchange(s, { code: again, verifier })).status, 400, "a code makes one session");
+  s.jar.clear();
+  const bearer = { authorization: `Bearer ${token}` };
+  const view = await (await s.go("/api/chat/me", { headers: bearer })).json();
+  assert.equal(view.identity.login, "ooga-dev");
+  assert.equal(view.capabilities.speak, true);
+  assert.equal((await s.go("/api/chat/logout", { method: "POST" })).status, 403, "no page and no bearer: refused");
+  assert.equal((await s.go("/api/chat/logout", { method: "POST", headers: bearer })).status, 204);
+  assert.equal((await s.go("/api/chat/me", { headers: bearer })).status, 401, "signed out");
+});
+
+test("native: a bad start is refused, a failure goes back to loopback, and a stale code is no session", async () => {
+  const s = setup();
+  const { verifier, challenge } = await pkce();
+  for (const query of [`native=${challenge}`, `native=${challenge}&port=80`, `native=${challenge}&port=70000`, `native=short&port=5000`, "port=5000"]) {
+    assert.equal((await s.go(`/auth/github?${query}`)).status, 400, query);
+  }
+  const start = await s.go(`/auth/github?native=${challenge}&port=5000`);
+  const state = new URL(start.headers.get("location")).searchParams.get("state");
+  const denied = await s.go(`/auth/github/callback?error=access_denied&state=${encodeURIComponent(state)}`);
+  assert.equal(denied.headers.get("location"), "http://127.0.0.1:5000/callback?signin=denied&provider=github");
+  const off = setup({ vars: { FEATURES: "listen" } });
+  assert.equal((await off.go(`/auth/github?native=${challenge}&port=5000`)).headers.get("location"), "http://127.0.0.1:5000/callback?signin=unavailable&provider=github");
+
+  const code = new URL((await nativeSignIn(s, challenge)).headers.get("location")).searchParams.get("code");
+  await s.env.DB.prepare("UPDATE native_codes SET expires_at = 1").run();
+  assert.equal((await exchange(s, { code, verifier })).status, 400);
+  assert.equal((await exchange(s, { verifier })).status, 400);
+  assert.equal((await s.go("/api/chat/native/token")).status, 405);
+  await nativePage(s, challenge);
+  await s.env.DB.prepare("UPDATE native_consents SET expires_at = 1").run();
+  await purgeExpired(s.env.DB);
+  assert.equal(await s.env.DB.prepare("SELECT COUNT(*) AS n FROM native_codes").first("n"), 0);
+  assert.equal(await s.env.DB.prepare("SELECT COUNT(*) AS n FROM native_consents").first("n"), 0);
+});
+
+test("native: Cancel goes back denied and makes no code", async () => {
+  const s = setup();
+  const { challenge } = await pkce();
+  const { consent } = await nativePage(s, challenge);
+  const done = await answer(s, consent, "cancel");
+  assert.equal(done.headers.get("location"), "http://127.0.0.1:53682/callback?signin=denied&provider=github");
+  assert.equal(await s.env.DB.prepare("SELECT COUNT(*) AS n FROM native_codes").first("n"), 0);
+  assert.ok(!s.jar.has("__Host-ooga_chat_oauth"));
+  assert.equal((await answer(s, consent, "continue")).headers.get("location"), "/?signin=failed&provider=github", "and the consent is spent");
+});
+
+test("native: a replayed, expired, foreign or cross-site consent makes no code", async () => {
+  const s = setup();
+  const { challenge } = await pkce();
+  const codes = () => s.env.DB.prepare("SELECT COUNT(*) AS n FROM native_codes").first("n");
+  // Another site's form, posting this browser's consent with its cookie: refused before the consent is read or spent.
+  const { consent } = await nativePage(s, challenge);
+  for (const headers of [{ origin: "https://evil.example" }, { origin: "null" }, { "sec-fetch-site": "cross-site" }, {}]) {
+    assert.equal((await answer(s, consent, "continue", headers)).status, 403, JSON.stringify(headers));
+  }
+  assert.equal(await codes(), 0);
+  assert.equal((await answer(s, consent, "continue")).headers.get("location").split("&code=")[0], "http://127.0.0.1:53682/callback?signin=ok&provider=github", "still good for its own page");
+  assert.equal(await codes(), 1);
+  // Replayed: spent, so failed, and with no record left nothing names a port.
+  assert.equal((await answer(s, consent, "continue")).headers.get("location"), "/?signin=failed&provider=github");
+  assert.equal((await answer(s, "made-up", "continue")).headers.get("location"), "/?signin=failed&provider=github");
+  assert.equal(await codes(), 1);
+  // Expired.
+  const late = (await nativePage(s, challenge, 5000)).consent;
+  await s.env.DB.prepare("UPDATE native_consents SET expires_at = 1").run();
+  assert.equal((await answer(s, late, "continue")).headers.get("location"), "http://127.0.0.1:5000/callback?signin=failed&provider=github");
+  // Another browser: the consent is posted without the cookie that started it, or with another browser's.
+  const theirs = (await nativePage(s, challenge, 5001)).consent;
+  s.jar.set("__Host-ooga_chat_oauth", "someone-elses-nonce");
+  assert.equal((await answer(s, theirs, "continue")).headers.get("location"), "http://127.0.0.1:5001/callback?signin=failed&provider=github");
+  // Another provider's route.
+  const other = (await nativePage(s, challenge, 5002)).consent;
+  const x = await s.go("/auth/x/consent", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: SITE }, body: `consent=${other}&choice=continue` });
+  assert.equal(x.headers.get("location"), "http://127.0.0.1:5002/callback?signin=failed&provider=x");
+  assert.equal(await codes(), 1, "none of them made a code");
+});
+
+test("native: a web sign-in is unchanged, and a banned account's code makes no session", async () => {
+  const s = setup();
+  const web = await s.signIn("github");
+  assert.equal(web.headers.get("location"), "/?signin=ok&provider=github");
+  const { verifier, challenge } = await pkce();
+  const code = new URL((await nativeSignIn(s, challenge)).headers.get("location")).searchParams.get("code");
+  const { consent } = await nativePage(s, challenge);
+  await s.env.DB.prepare("UPDATE principals SET banned_at = 1").run();
+  assert.equal((await exchange(s, { code, verifier })).status, 400);
+  assert.equal((await answer(s, consent, "continue")).headers.get("location"), "http://127.0.0.1:53682/callback?signin=failed&provider=github", "banned between page and Continue");
+});

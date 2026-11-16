@@ -433,6 +433,7 @@
       <div class="sheet-content">
       <section class="panel" data-panel="roster" id="roster-panel" role="tabpanel" aria-labelledby="sheet-toggle">
         <!-- The title, Sorted by and the list (#roster) are built here by roster-panel.js, shared with Ooga Chat. -->
+        <div class="reactions" id="roster-reactions" hidden></div>
         <div class="account" id="account" hidden>
           <button type="button" class="panel-primary" data-action="account-login" id="account-login" aria-label="Contributor sign-in with GitHub" title="Contributors can sign in with GitHub to control their own Ooga and gorilla."><span data-sign>Contributor sign-in</span></button>
           <span class="account-who">
@@ -552,11 +553,8 @@
       <section class="panel" data-panel="cloud" id="cloud-panel" role="tabpanel" aria-labelledby="cloud-tab" hidden>
         <header class="panel-title">
           <h2><span data-sign>Ooga Chat</span></h2>
+          <span class="panel-chip" id="cloud-zone">Main Island</span>
         </header>
-        <div class="cloud-zones" role="group" aria-label="Outdoor conversation">
-          <button type="button" class="cloud-zone" data-cloud-zone="main" aria-pressed="false"><img class="cloud-zone-icon" data-island-icon alt="" aria-hidden="true"><span>Main Island</span></button>
-          <button type="button" class="cloud-zone" data-cloud-zone="dsb" aria-pressed="false"><span>DSB Land</span></button>
-        </div>
         <p class="help cloud-status" id="cloud-status" role="status" aria-live="polite" hidden><span id="cloud-status-text"></span> <button type="button" class="link" id="cloud-retry" hidden>Retry</button></p>
         <ul class="cloud-roster slab" id="cloud-roster" aria-label="Speakers and listeners"></ul>
         <div class="cloud-bottom">
@@ -2331,6 +2329,8 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/cloud-hopper-replays.js"></script>
   <script src="js/voice.js"></script>
   <script src="js/outdoor-voice.js"></script>
+  <script src="js/voice-handoff.js"></script>
+  <script src="js/voice-switch.js"></script>
   <script src="js/studio-catalogue.js"></script>
   <script src="js/studio-session.js"></script>
   <script src="js/commons-log.js"></script>

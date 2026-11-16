@@ -45,8 +45,8 @@ test("a metric line names a route, a status and at most a refusal's code or a si
   const callback = JSON.parse(metricLine(env, "/auth/x/callback", answer(303, { headers: { location: "/?signin=denied&provider=x" } })));
   assert.deepEqual([callback.route, callback.signin], ["auth:x:callback", "denied"]);
   assert.equal(JSON.parse(metricLine(env, "/auth/github/callback", answer(303, { headers: { location: "/?signin=%3Cscript%3E" } }))).signin, undefined);
-  assert.deepEqual([routeOf("/api/chat/media/publish/open"), routeOf("/api/chat/media/../x"), routeOf("/donations/socket"), routeOf("/auth/mastodon")],
-    ["media:publish/open", "media:unknown", "donations:socket", "auth:unknown"]);
+  assert.deepEqual([routeOf("/api/chat/media/publish/open"), routeOf("/api/chat/media/../x"), routeOf("/donations/socket"), routeOf("/auth/mastodon"), routeOf("/api/chat/native/token")],
+    ["media:publish/open", "media:unknown", "donations:socket", "auth:unknown", "native"]);
   assert.equal(JSON.parse(metricLine({ ENVIRONMENT: "<b>" }, "/api/chat/me", answer(503))).env, "", "only a known environment's name");
   // Whatever the answer carried, a line holds only these fields.
   const line = JSON.parse(metricLine(env, "/api/chat/commons", answer(101, { closeCode: 4403, headers: { location: "https://evil.example/?token=1", "set-cookie": "s=1" } })));

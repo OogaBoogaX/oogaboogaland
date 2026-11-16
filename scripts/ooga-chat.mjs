@@ -24,7 +24,7 @@ const app = join(root, "src", "ooga-chat");
 export const SHARED = ["../js/sign-glyphs.js", "../js/native-icons.js", "../js/donations.js", "../js/banana-panel.js", "../js/qr.js", "../js/banana-icon.js",
   "../js/jumbotron-font.js", "../js/factory-kiosk-core.js", "../js/factory-kiosk.js", "../js/donation-popup.js", "../js/chat-policy.js", "../js/emoji-data.js", "../js/reaction-policy.js",
   "../js/zone-map.js", "../js/commons-log.js", "../js/format-large.js", "../js/roster-panel.js", "../js/contributor-identities.js", "../js/activity-repos.js",
-  "../js/audience-tiles.js", "../js/reaction-bar.js"];
+  "../js/audience-tiles.js", "../js/reaction-bar.js", "../js/voice-handoff.js"];
 // What a first visit may cost over the wire (index.html, the script, the stylesheet and the art it shows), gzipped. The
 // staged foundation measured about 91 KB, most of it the sign-in picture. The original picture at Retina size (about
 // 80 KB in place of the 430-pixel stand-in's 58), the island's Bananas panel with donations.js (#656, about 15 KB) and
@@ -44,9 +44,9 @@ export const FIRST_LOAD_BUDGET = 236 * 1024;
 // @keyframes named by one, joined after native.css and before ooga-chat.css, which places them. `islandRules` is that
 // pick.
 export const ISLAND_RULES = [".roster", ".players-", ".chat-", ".section-head", ".panel .chat-status", '.panel[data-panel="chat"] > .panel-title',
-  ".help", ".link", ".account", ".foot-button", ".foot-primary", ".cloud-zone", ".cloud-status", ".panel > .cloud-roster", ".cloud-tile",
-  ".cloud-face", ".cloud-portrait", ".cloud-react", ".cloud-hand", ".cloud-pop", ".cloud-name", ".cloud-dot", ".cloud-role",
-  ".cloud-mic", ".cloud-foot", ".cloud-mute", ".cloud-voice", ".reaction"];
+  ".help", ".link", ".account", ".foot-button", ".foot-primary", ".cloud-status", ".panel > .cloud-roster", ".cloud-tile",
+  ".cloud-face", ".cloud-portrait", ".cloud-react", ".cloud-hand", ".cloud-pop", ".cloud-name", ".cloud-role",
+  ".cloud-mic", ".cloud-foot", ".cloud-mute", ".cloud-voice", ".reaction", ".voice-handoff"];
 // Pictures the app loads only when they are wanted, never on a first visit: the face sheet, when a stats strip opens.
 export const LAZY_ART = ["ooga-faces.png"];
 export const islandRules = (css, prefixes = ISLAND_RULES) => {

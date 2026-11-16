@@ -285,8 +285,6 @@
       }
       ctx.putImageData(image, 0, 0);
       el.modeFree.src = canvas.toDataURL("image/png");
-      // Ooga Chat's Main Island button shows the same island.
-      for (const img of document.querySelectorAll("img[data-island-icon]")) img.src = el.modeFree.src;
     };
     favicon.src = document.querySelector('link[rel="icon"][sizes="64x64"]').href;
     const sheet = BL.sheet.create({ signal });
@@ -419,13 +417,18 @@
     // Contributing Oogas (roster-panel.js, shared with the Ooga Chat app), its rows kept for the page life. The island
     // hands it its contributors, their contribution state and age (contributors.js), their faces from this page's own
     // renderer and the presence the scene reports.
+    const onCloud = (name) => {
+      for (const c of BL.net.state.clouds) if (c.character === name) return true;
+      return false;
+    };
     const rosterPanel = BL.rosterPanel.create(el.rosterPanel, {
       roster, stamp: stampOf, login: (contributor) => loginOf(contributor), joinedAt: (contributor) => joinedAt(contributor, BL.characters.get(contributor.name)),
       stateFor: (contributor) => BL.contributors.contributionStateFor(contributor), ageLabel: (contributor) => BL.contributors.contributionAgeLabel(contributor),
       stats: () => liveStats || BL.jumbotronData, face: faceOf,
       // A scene's local driver needs a signed-in account; remote drivers and the room's signed-in identities remain
       // online independently.
-      online: (row) => row.sceneOnline && !!BL.net.state.me || row.remoteOnline || row.netOnline,
+      // An Ooga Chat speaker on a cloud (`net.state.clouds`) wears Ooga Chat's purple dot, as their row in Online Oogas does.
+      online: (row) => onCloud(row.contributor.name) ? "cloud" : row.sceneOnline && !!BL.net.state.me || row.remoteOnline || row.netOnline,
       // The visitor's own mark mutes and unmutes their microphone; anyone else's mutes them for this visitor.
       voice: (button) => {
         if (button.dataset.self === "true") BL.voice.toggle();
@@ -434,6 +437,7 @@
     });
     const rosterRows = rosterPanel.rows, setRosterRow = rosterPanel.setRow, showOnline = rosterPanel.showOnline;
     listeners.push(() => rosterPanel.dispose());
+    listeners.push(BL.net.subscribeClouds(() => { for (const row of rosterRows.values()) showOnline(row); }));
     // Contribution data and its age stay live even in rooms with only one local Ooga.
     // Preserve the scene's presence flags when refreshing activity across the whole panel.
     const refreshRosterActivity = () => {

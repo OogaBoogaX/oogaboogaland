@@ -18,7 +18,8 @@
 // microphone is ever opened and nothing is heard. `ok` (the default) pulls each speaker of the zone, and Join Voice gets
 // a lease, publishes and becomes a muted speaker; `denied` refuses the microphone; `blocked` holds playback until a
 // gesture, as a browser's autoplay rule does; `refused` refuses the lease (the zone's speakers are full); `off` is a
-// deployment that doesn't let anyone speak. `BL.oogaChatFixtures.rtc` is the last fake's record, for the checks.
+// deployment that doesn't let anyone speak; `elsewhere` finds the account's voice on the island, on another device, until
+// the visitor takes it (`setRole` with `takeover`, the voice switch prompt's answer). `BL.oogaChatFixtures.rtc` is the last fake's record, for the checks.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -42,7 +43,7 @@
   // The account a state starts signed in as, and the one its GitHub button signs in as.
   const SIGNED_IN = { listener: "listener", contributor: "contributor", ineligible: "ineligible", unknown: "unknown", revoked: "revoked", expiring: "contributor", "signout-fails": "contributor" };
   const ROSTERS = ["mixed", "empty", "crowd", "reconnecting", "reauth", "full", "none"];
-  const VOICES = ["ok", "denied", "blocked", "refused", "off"];
+  const VOICES = ["ok", "denied", "blocked", "refused", "off", "elsewhere"];
   const person = (id, source, role, login, extra = {}) => ({ id: `fixture:${id}`, generation: 1, source, role, login, display: login, ...extra });
   const CAST = {
     main: [
@@ -213,9 +214,12 @@
       let connection = `fixture-conn-${++connections}`, lease = 0, active = false, mic = "muted", mids = 0;
       const held = new Map();
       const contributor = () => !!account && account.identity.provider === "github" && account.eligibility.state === "eligible";
+      // `?voice=elsewhere`: the island holds the account's voice until the visitor takes it.
+      let elsewhere = voice === "elsewhere";
       const you = () => {
         const id = self()[0]?.id || null;
-        return lease ? { id, speak: active ? "active" : "pending", lease } : { id, speak: contributor() ? "eligible" : "none" };
+        if (lease) return { id, speak: active ? "active" : "pending", lease };
+        return contributor() && elsewhere ? { id, speak: "denied", elsewhere: "island" } : { id, speak: contributor() ? "eligible" : "none" };
       };
       // The visitor's row as the server would draw it: a muted app speaker once its microphone is up.
       const ownRow = () => {
@@ -332,6 +336,8 @@
               if (fields.role === "listener") { endLease(); return message({ type: "result", requestId, ok: true, you: you() }); }
               if (!contributor()) return message({ type: "result", requestId, ok: false, error: { code: "capability_required", retryable: false }, you: you() });
               if (voice === "refused") return message({ type: "result", requestId, ok: false, error: { code: "speaker_capacity", retryable: true }, you: you() });
+              if (elsewhere && fields.takeover !== true) return message({ type: "result", requestId, ok: false, error: { code: "source_in_use", retryable: false }, you: you() });
+              elsewhere = false;
               if (!lease) lease = ++generations;
               return message({ type: "result", requestId, ok: true, you: you() });
             }

@@ -2,7 +2,7 @@
 // as many to a row as fit at 76 px or more a column, in the order the caller hands them (speakers first), the whole list scrolling in its slab. A tile is a
 // portrait (a picture, or the native Ooga face when there is none or it fails, asked for once) carrying a speaker's
 // source ring (green from the island, purple from Ooga Chat) and, over its centre, a raised hand or a reaction; then
-// the name on one line, cut short with its whole self in the title (an Ooga Chat speaker's purple dot before it); then
+// the name on one line, cut short with its whole self in the title; then
 // the role, a speaker's voice mark first. Reads nothing at load but window.BL, so Ooga Chat shares it.
 // `create(list, { mic(id) })` takes the <ul> and what a press on a voice mark does, and returns:
 //   draw(items, describe)  one pass in the list's order: `describe(item, tile)` writes each item into one scratch tile
@@ -38,7 +38,7 @@
       const li = make("li", "cloud-tile"), face = make("span", "cloud-face"), portrait = make("span", "cloud-portrait");
       const react = make("span", "cloud-react"), hand = make("span", "cloud-hand"), name = make("span", "cloud-name");
       const popped = make("span", "cloud-pop");
-      const dot = make("span", "cloud-dot"), text = make("span", "cloud-name-text"), role = make("span", "cloud-role");
+      const text = make("span", "cloud-name-text"), role = make("span", "cloud-role");
       const voice = make("button", "roster-voice cloud-mic"), word = make("span", "");
       voice.type = "button";
       voice.append(BL.nativeIcons.voice());
@@ -46,7 +46,7 @@
       popped.setAttribute("aria-hidden", "true");
       react.append(hand, popped);
       face.append(portrait, react);
-      name.append(dot, text);
+      name.append(text);
       role.append(voice, word);
       li.dataset.id = id;
       li.tabIndex = -1;

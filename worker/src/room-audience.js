@@ -32,6 +32,10 @@ const enabled = (room) => !!room.env && !!room.env.AUDIENCE && bridgeFeatures(ro
 // The outdoor handshake and Ooga Chat speakers heard on the island: the island's `outdoor` switch, which is its kill switch.
 const outdoorOn = (room) => enabled(room) && bridgeFeatures(room.env).outdoor;
 const isOpen = (p) => !!p.outdoor && p.outdoor.state === "open";
+/** Overhearing: a receive session the page opened by itself (`session` with `passive`), with no microphone of its own.
+ *  It is in nobody's voice: it hears no place, only the public conversation `addSources` lists for it and a linked
+ *  partner. A publishing session ends it. */
+export const overhearing = (p) => !!(p.voice && p.voice.passive && p.voice.sub && !p.voice.pub && !p.voice.track);
 // In the island's voice at all: a microphone published, or listening with it muted.
 const inVoiceOf = (p) => !!(p.voice && (p.voice.track || p.voice.pub || (p.voice.sub && p.muted === true)));
 // Ooga Chat speakers drawn on clouds in the world (#668, rendered by #659): the island's `cloud` switch.
@@ -181,7 +185,15 @@ export const audienceRoom = {
   cleanSources: (list) => (Array.isArray(list) ? list : []).filter((s) => s && Number.isSafeInteger(s.id) && s.id > 0 && isZone(s.zone)
     && typeof s.session === "string" && typeof s.track === "string").slice(0, 64),
   sources(room, list) {
+    const was = new Set((room.chatSources || []).map((s) => s.id));
     room.chatSources = audienceRoom.cleanSources(list);
+    // An island page of an account that began or stopped speaking from Ooga Chat hears so (`voice-elsewhere`): its own
+    // voice then waits for the visitor's word instead of taking that voice away (voice-handoff.js).
+    const now = new Set(room.chatSources.map((s) => s.id));
+    for (const id of new Set([...was, ...now])) {
+      const p = was.has(id) !== now.has(id) && room.players.get(id);
+      if (p) room.send(p.ws, { t: "voice-elsewhere", on: now.has(id) });
+    }
     // Who hears whom changed: a source gone is closed for every island listener, one new is offered.
     room.enforceStudio();
     for (const p of room.players.values()) if (isOpen(p)) audienceRoom.tellAudience(room, p);
@@ -189,13 +201,39 @@ export const audienceRoom = {
     return room.ctx.storage.put("chatSources", room.chatSources);
   },
   sourceOf: (room, id) => (room.chatSources || []).find((s) => s.id === id) || null,
+  /** Whether account `id` speaks from Ooga Chat now, on some other device: its welcome says so. */
+  elsewhere: (room, id) => outdoorOn(room) && (room.chatSources || []).some((s) => s.id === id),
+  /**
+   * Ooga Chat took account `id`'s voice on the visitor's own word there (audience.js `requestSpeaker` with `takeover`):
+   * its island page leaves voice (`voice-moved`), and the Audience has heard the island's word without it before this
+   * answers, so the lease it then grants is not ended by an older word.
+   */
+  async handoff(room, id) {
+    if (!enabled(room)) return { ok: false };
+    const p = room.players.get(id);
+    if (p && inVoiceOf(p)) {
+      await room.clearVoice(p);
+      p.muted = false;
+      room.saveAttachment(p);
+      room.send(p.ws, { t: "voice-moved" });
+      room.broadcast({ t: "vstate", id: p.id, voice: false, muted: false }, p.ws);
+      room.updateVoice();
+    }
+    const told = await audienceRoom.world(room, true);
+    return { ok: !!told && told.ok === true };
+  },
+  // A player overhearing (a receive session of the page's own, protocol.js `overhearing`) with an open grant on the main
+  // island hears that conversation's island speakers too, exactly those Ooga Chat's listeners hear: in the island's
+  // voice with a live microphone and an open grant there. Indoors, or anywhere its grant is not open, it hears nobody.
   addSources(room, plan) {
     const sources = room.chatSources || [];
-    if (!sources.length || !outdoorOn(room)) return plan;
+    if (!outdoorOn(room)) return plan;
     for (const p of room.players.values()) {
       const o = p.outdoor;
       if (!isOpen(p) || !isZone(o.scope)) continue;
       const peers = plan.get(p.id) || [];
+      if (o.scope === "main" && overhearing(p))
+        for (const q of room.players.values()) if (q !== p && q.voice && q.voice.track && isOpen(q) && q.outdoor.scope === o.scope && !peers.includes(q.id)) peers.push(q.id);
       for (const s of sources) if (s.zone === o.scope && s.id !== p.id && !peers.includes(s.id)) peers.push(s.id);
       plan.set(p.id, peers);
     }

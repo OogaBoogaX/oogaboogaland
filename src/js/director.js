@@ -910,6 +910,8 @@
   // Ooga Chat's outdoor voice bridge (outdoor-voice.js): the scope's transport, after the reset above so a reconnect's
   // new epoch is the one it asks for. Without the room's feature it keeps the page out of every public audience.
   const outdoorBridge = window.BL.outdoorVoice.attach();
+  // The voice switch prompt (voice-switch.js): asked once when the account already speaks from another device.
+  const voiceHandoff = window.BL.voiceSwitch.attach();
   const unsubscribeVoice = window.BL.voice.subscribe(() => window.BL.hud.showAccount(net.state));
   // The roster's host dot and voice marks follow the room and voice, on whichever scene's roster is up.
   const unsubscribeRosterMarks = net.subscribeRoster(window.BL.hud.showVoices);
@@ -1207,6 +1209,7 @@
     unsubscribeAccount();
     unsubscribeScope();
     outdoorBridge.dispose();
+    voiceHandoff.dispose();
     unsubscribeVoice();
     unsubscribeRosterMarks();
     unsubscribeVoiceMarks();
