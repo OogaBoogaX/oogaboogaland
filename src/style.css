@@ -2057,10 +2057,11 @@ body[data-active-scene="block"] .mode-hud {
 }
 
 .panel-foot > * { flex: 1 1 100%; min-width: 0; }
-.panel-foot > .account { width: auto; }
+.panel-foot > .account { flex: 1 1 100%; width: auto; }
 
 @container panel-foot (min-width: 960px) {
   .panel-foot > * { flex: 0 1 auto; margin-top: 8px; }
+  .panel-foot > .account { flex: 0 1 auto; }
   .panel-foot > .reactions { flex-basis: 560px; }
 }
 
