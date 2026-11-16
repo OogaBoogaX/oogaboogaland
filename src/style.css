@@ -1164,12 +1164,6 @@ body[data-active-scene="block"] .mode-hud {
 .cloud-mute { width: 84px; padding: 0; }
 /* Join and Leave Voice (and Joining…, Leaving…) at one width, the widest's, so the footer never shifts. */
 .cloud-voice { width: 100px; padding: 0; }
-/* The emoji bar beside the footer's buttons once the panel is wide enough for both, else centred over them, as Ooga
-   Chat's app lays its own out (ooga-chat.css `.oc-chat-foot`). */
-.cloud-bottom { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 14px; margin-top: 8px; }
-.cloud-bottom > .reactions { flex: 1 1 240px; min-width: 0; max-width: 370px; margin-top: 0; }
-.cloud-bottom > .cloud-foot { flex: 1 1 220px; }
-.cloud-bottom .cloud-foot-name { flex-basis: 100%; text-align: center; }
 .cloud-foot-actions [hidden] { display: none; }
 /* The voice switch prompt (voice-handoff.js), the island's and Ooga Chat's alike: a planked card floating under the
    banner, over the panels, that takes no focus by itself; Not now beside the amber Switch here. */
@@ -2032,10 +2026,14 @@ body[data-active-scene="block"] .mode-hud {
   cursor: pointer;
 }
 
-/* Reactions (reactions.js), on X Spaces' pattern in its dark mode: a near-black card, two rows of five emoji, a divider
-   and the raised hand pinned past it, under Online Oogas' list and Ooga Chat's input. A long press opens the picker
-   floating over the screen, in the same dark. Emoji are the system's own colour glyphs. */
+/* Reactions (reactions.js), on X Spaces' pattern in its dark mode: a near-black card, the ten emoji, a divider and the
+   raised hand pinned past it, over the account row of every panel that has one, on the island and in Ooga Chat's app
+   alike. The ten stand in one row where the panel is wide enough for them (the bar's own width, a container query)
+   and in two rows of five beside the hand where not. The card stops at 560px, centred, so a wide drawer's ten
+   stay together. A long press opens the picker floating over the screen, in the same dark. Emoji are the
+   system's own colour glyphs. */
 .reactions {
+  container: reactions / inline-size;
   flex: none;
   display: flex;
   flex-direction: column;
@@ -2045,9 +2043,34 @@ body[data-active-scene="block"] .mode-hud {
 
 .reactions[hidden] { display: none; }
 
+/* The foot of every panel with the emoji bar, on the island and in Ooga Chat's app alike: the bar over the account row
+   (the name in a row with the buttons while they fit), or, once the foot is wide enough for both, the bar's one row
+   and the account row side by side, centred together. */
+.panel-foot {
+  container: panel-foot / inline-size;
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px 16px;
+}
+
+.panel-foot > * { flex: 1 1 100%; min-width: 0; }
+.panel-foot > .account { width: auto; }
+
+@container panel-foot (min-width: 960px) {
+  .panel-foot > * { flex: 0 1 auto; margin-top: 8px; }
+  .panel-foot > .reactions { flex-basis: 560px; }
+}
+
 .reaction-bar {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
+  width: 100%;
+  max-width: 560px;
+  margin-inline: auto;
   gap: 6px;
   padding: 8px 10px;
   border-radius: 22px;
@@ -2064,6 +2087,10 @@ body[data-active-scene="block"] .mode-hud {
   flex: 1;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 2px 4px;
+}
+
+@container reactions (min-width: 460px) {
+  .reaction-grid { grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 0 2px; }
 }
 
 .reaction {

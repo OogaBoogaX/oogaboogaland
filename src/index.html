@@ -433,19 +433,21 @@
       <div class="sheet-content">
       <section class="panel" data-panel="roster" id="roster-panel" role="tabpanel" aria-labelledby="sheet-toggle">
         <!-- The title, Sorted by and the list (#roster) are built here by roster-panel.js, shared with Ooga Chat. -->
-        <div class="reactions" id="roster-reactions" hidden></div>
-        <div class="account" id="account" hidden>
-          <button type="button" class="panel-primary" data-action="account-login" id="account-login" aria-label="Contributor sign-in with GitHub" title="Contributors can sign in with GitHub to control their own Ooga and gorilla."><span data-sign>Contributor sign-in</span></button>
-          <span class="account-who">
-            <span class="account-name" id="account-name" hidden></span>
-            <span class="account-room" id="account-room" hidden></span>
-          </span>
-          <span class="account-actions">
-            <button type="button" class="foot-button foot-primary" data-action="account-rejoin" id="account-rejoin" hidden>Play here</button>
-            <button type="button" class="foot-button" data-action="account-voice" id="account-voice" aria-pressed="false" hidden>Join voice</button>
-            <button type="button" class="foot-button" data-action="account-voice-leave" id="account-voice-leave" hidden>Leave voice</button>
-            <button type="button" class="link" data-action="account-logout" id="account-logout" hidden>Sign out</button>
-          </span>
+        <div class="panel-foot">
+          <div class="reactions" id="roster-reactions" hidden></div>
+          <div class="account" id="account" hidden>
+            <button type="button" class="panel-primary" data-action="account-login" id="account-login" aria-label="Contributor sign-in with GitHub" title="Contributors can sign in with GitHub to control their own Ooga and gorilla."><span data-sign>Contributor sign-in</span></button>
+            <span class="account-who">
+              <span class="account-name" id="account-name" hidden></span>
+              <span class="account-room" id="account-room" hidden></span>
+            </span>
+            <span class="account-actions">
+              <button type="button" class="foot-button foot-primary" data-action="account-rejoin" id="account-rejoin" hidden>Play here</button>
+              <button type="button" class="foot-button" data-action="account-voice" id="account-voice" aria-pressed="false" hidden>Join voice</button>
+              <button type="button" class="foot-button" data-action="account-voice-leave" id="account-voice-leave" hidden>Leave voice</button>
+              <button type="button" class="link" data-action="account-logout" id="account-logout" hidden>Sign out</button>
+            </span>
+          </div>
         </div>
       </section>
       <section class="panel" data-panel="players" id="players-panel" role="tabpanel" aria-labelledby="players-tab" hidden>
@@ -474,9 +476,11 @@
           </div>
         </details>
         <div class="players slab" id="players-list"></div>
-        <div class="reactions" id="players-reactions" hidden></div>
         <p class="help players-status" id="players-status" hidden></p>
-        <div data-account-copy="players"></div>
+        <div class="panel-foot">
+          <div class="reactions" id="players-reactions" hidden></div>
+          <div data-account-copy="players"></div>
+        </div>
       </section>
       <section class="panel" data-panel="bananas" id="bananas-panel" role="tabpanel" aria-labelledby="sheet-bananas" hidden></section>
       <section class="panel" data-panel="chat" id="chat-panel" role="tabpanel" aria-labelledby="chat-tab" hidden>
@@ -547,8 +551,10 @@
           </span>
           <button type="submit" class="chat-send" id="chat-send" disabled>Send</button>
         </form>
-        <div class="reactions" id="chat-reactions" hidden></div>
-        <div data-account-copy="chat"></div>
+        <div class="panel-foot">
+          <div class="reactions" id="chat-reactions" hidden></div>
+          <div data-account-copy="chat"></div>
+        </div>
       </section>
       <section class="panel" data-panel="cloud" id="cloud-panel" role="tabpanel" aria-labelledby="cloud-tab" hidden>
         <header class="panel-title">
@@ -557,7 +563,7 @@
         </header>
         <p class="help cloud-status" id="cloud-status" role="status" aria-live="polite" hidden><span id="cloud-status-text"></span> <button type="button" class="link" id="cloud-retry" hidden>Retry</button></p>
         <ul class="cloud-roster slab" id="cloud-roster" aria-label="Speakers and listeners"></ul>
-        <div class="cloud-bottom">
+        <div class="panel-foot">
           <div class="reactions" id="cloud-reactions" hidden></div>
           <div class="cloud-foot" id="cloud-foot">
             <span class="cloud-foot-name" id="cloud-foot-name"></span>

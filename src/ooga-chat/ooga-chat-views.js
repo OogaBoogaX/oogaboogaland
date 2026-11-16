@@ -194,10 +194,10 @@
     heard.hidden = true;
     const list = make("ul", "cloud-roster slab");
     list.setAttribute("aria-label", "Speakers and listeners");
-    // The emoji panel (reaction-bar.js, the island's own, #655) left of the account controls where there is room and above
-    // them where not, as the design has it; its hand is an active speaker's alone.
+    // The emoji panel (reaction-bar.js, the island's own, #655) over the account controls, or beside them on a panel wide
+    // enough for both (style.css `.panel-foot`); its hand is an active speaker's alone.
     const reactions = make("div", "reactions");
-    const foot = cloudFoot(ctx), footRow = make("div", "oc-chat-foot", reactions, foot.node);
+    const foot = cloudFoot(ctx), footRow = make("div", "panel-foot oc-chat-foot", reactions, foot.node);
     ctx.reactions.bars.mount(reactions, { handAllowed: () => !!voice && voice.role === "speaker" });
     const offPop = ctx.reactions.onPop((id, emoji) => tiles.pop(id, emoji));
     let version = -1, frame = 0, self = null, voice = null, people = [];
@@ -478,7 +478,7 @@
     const account = accountRow(ctx);
     // The emoji panel under the list, as the island's Contributing Oogas has it.
     const reactions = make("div", "reactions");
-    node.append(reactions, note, account.node);
+    node.append(note, make("div", "panel-foot", reactions, account.node));
     ctx.reactions.bars.mount(reactions, { handAllowed: () => ctx.media.state.role === "speaker" });
     const { stateAt, ageAt } = BL.rosterPanel, faces = BL.oogaChatFaces, town = ctx.commons.model;
     // Who speaks from Ooga Chat now, by login, from the audience's list: their dots are Ooga Chat's purple.
@@ -750,7 +750,7 @@
     const account = accountRow(ctx);
     // The emoji panel under the list, as the island's Online Oogas has it.
     const reactions = make("div", "reactions");
-    const node = make("section", "panel oc-panel oc-online", header, list, reactions, note, account.node);
+    const node = make("section", "panel oc-panel oc-online", header, list, note, make("div", "panel-foot", reactions, account.node));
     node.dataset.panel = "players";
     ctx.reactions.bars.mount(reactions, { handAllowed: () => ctx.media.state.role === "speaker" });
     // A row as the island's players.js makes one (the dots, the name, the hand's column, the voice mark), less the link,

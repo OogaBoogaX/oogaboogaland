@@ -213,13 +213,6 @@ body {
 /* The Ooga Chat panel shows its space only while signed in, and only its footer while signing out. */
 .oc-chat[data-space="off"] > :is(.cloud-status, .cloud-roster, .oc-chat-foot),
 .oc-chat[data-space="foot"] > :is(.cloud-status, .cloud-roster) { display: none; }
-/* Its foot, as the design has it: the emoji panel left of the account controls where there is room and above them where
-   not, centred there, the name over the buttons. */
-.oc-chat-foot { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 14px; }
-.oc-chat-foot > .reactions { flex: 1 1 240px; min-width: 0; max-width: 370px; margin-top: 0; }
-.oc-chat-foot > .cloud-foot { flex: 1 1 220px; justify-content: center; }
-.oc-chat-foot .cloud-foot-name { flex-basis: 100%; text-align: center; }
-.oc-chat-foot .cloud-foot-actions { justify-content: center; }
 .oc-pending p { margin: 0; color: rgba(243, 239, 228, 0.7); }
 
 .oc-players { padding: 12px 14px; }

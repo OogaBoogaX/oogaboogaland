@@ -1,7 +1,8 @@
-// The emoji bar, the island's and Ooga Chat's alike (#655, #656), on X Spaces' pattern: a dark card of ten emoji in two
-// rows of five and, past a divider, the raised hand pinned beside them. Nothing here reads anything at load but
-// window.BL (the policy and emoji-data.js), so Ooga Chat shares it; `create(net)` makes one set of bars over one
-// connection, the island's net.js (reactions.js) or a page's own of the same shape: `state` ({ me, reactions, room,
+// The emoji bar, the island's and Ooga Chat's alike (#655, #656), on X Spaces' pattern: a dark card of ten emoji (one row
+// where the panel is wide enough, else two rows of five: style.css `.reactions`) and, past a divider, the raised hand
+// pinned beside them. Nothing here reads anything at load but window.BL (the policy and emoji-data.js), so Ooga Chat
+// shares it; `create(net)` makes one set of bars over one connection, the island's net.js (reactions.js) or a page's
+// own of the same shape: `state` ({ me, reactions, room,
 // hand, handTone, handEmoji, customHand }, read live), `sendReaction(emoji)`, `setHand(on, tone, emoji)` and
 // `subscribe(fn)`. A tap sends that emoji for a moment; the right slot stays up until tapped again (`setHand`),
 // defaulting to the raised hand. A long press on any slot (or a right click, the context-menu key or Shift+F10) opens
