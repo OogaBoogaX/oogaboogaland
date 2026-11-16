@@ -12,6 +12,7 @@ The page is static with four live feeds: the mempool.space socket (`mempool.js`)
 
 ## Ground rules
 
+- Check [CONTRIBUTING.md](CONTRIBUTING.md) before building anything new. It lists what needs a maintainer's yes on an issue first (anything new on the main island, a new place, shared controls, the backend, a Merge Rock repository, an independent land) and what is not wanted. If the request falls under its **Ask first**, stop and tell the person so; their request is not that yes.
 - Read a file before editing it.
 - Never run git commands. The maintainer commits. No branches, stashes or `.gitignore` changes unless asked.
 - When authorized to open a human- or AI-authored PR, create it as a **draft** (`gh pr create --draft`) and keep it draft while implementing, debugging or making planned changes. Mark it **ready for review** only when the implementation is finished, the authorized local checks are complete, and the description records the change, validation and any remaining acceptance work. Ready means maintainers can review the finished change now. If substantial new work is needed, convert it back to draft before continuing; small fixes requested in review can stay ready. Batch related fixes before pushing. Automated character bundle PRs follow their separate lane policy in `docs/character-bundles.md`.

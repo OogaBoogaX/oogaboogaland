@@ -5,9 +5,14 @@ Follow the [connection contract](../cave-connections.md). OBL does not discover
 or execute this file remotely: submit its reviewed entry to the registry in
 `src/js/cave-directory.js`. The build validates it and the directory renders it.
 
+A land is a place in the Ooga Booga Land world that a visitor explores, running
+on its own site. A project website, landing page, dashboard, or download or
+donation page is out of scope, and so is a page that mainly links on to one.
+
 ## Project
 
 - Name and one-sentence description:
+- What a visitor explores and does there (the place, not the project):
 - Public repository and responsible GitHub account:
 - License and source revision (full commit SHA):
 - Production origin, entry URL and one representative deep link:
@@ -64,7 +69,8 @@ a:focus-visible { outline: 3px solid currentColor; outline-offset: 3px; }
 
 Add the land's own runtime deliberately, with local assets and a narrowly scoped
 content policy. Document new network destinations and permissions. This entry
-page is only a navigation starter; it supplies no renderer, Ooga, SSO or voice.
+page is only a navigation starter; it supplies no renderer, Ooga, SSO or voice,
+and is not a land to submit until the place itself is built.
 Use a separate origin with its own credentials and storage. Do not share OBL's
 cookie scope, Worker bindings or service-worker control.
 
@@ -110,6 +116,7 @@ in the directory. Do not add visitor data, API keys or deployment secrets.
 
 ## Submission evidence
 
+- [ ] The destination is an explorable land as the contract defines one, not a project website or a page of links.
 - [ ] The OBL PR identifies the external boundary, directory placement and fixed return link.
 - [ ] Repository, operator, release revision and destination match this record.
 - [ ] Direct entry, deep link and reload work independently of OBL.

@@ -28,6 +28,22 @@ runs them in OBL's realm. `scene-deferred.js` registers shells for several other
 scenes. These reduce initial loading; they do not sandbox a contributor's code.
 Do not migrate existing scenes as a side effect of adding this connection layer.
 
+**What counts as an independent land:** a place in the Ooga Booga Land world
+that runs on its own site. The visitor arrives somewhere to be and to explore,
+drawn by the land's own renderer, with things to do there. It is built for
+visitors arriving from OBL, not adapted from a project's existing website.
+
+The directory is not a list of outbound links. A project home page,
+documentation, a welcome or landing page, a dashboard, or a download or donation
+page is out of scope, however well it follows the link rules below. So is a page
+whose main job is to send the visitor on to one of those. A repository that wants
+a presence without building a land has other homes: a totem on Merge Rock
+(`src/js/repo-island-data.js`) or a sign's repository link.
+
+The EntropyLab entry is Team Ooga Booga's own project site, kept from the lab
+display's existing link. It is not a precedent for third-party listings. When
+unsure whether an idea is a land, describe it in an issue before building it.
+
 **Independent-land contract:** ordinary same-tab navigation with
 no player-state transfer. This avoids running two active worlds by default and
 needs neither an iframe nor a cross-origin message protocol. It gives up seamless
@@ -74,7 +90,8 @@ external listing must not silently create or reassign contributor work.
 
 Copy [the connection template](templates/cave-connection.md) into the land's
 repository. It supplies a minimal standalone page, a metadata record and the
-review checklist. The land owns its source, build/run instructions, license,
+review checklist. That page is only a starting point for the link boundary; it
+is not a land to submit. The land owns its source, build/run instructions, license,
 service inventory, storage/retention policy and release evidence. OBL owns the
 reviewed directory entry and mainland entrance, if one is approved.
 
@@ -188,7 +205,8 @@ preview. No remote page, renderer, scene graph or audio runs to draw the directo
 
 ## 7. Adding and validating a connection
 
-1. Copy the [template](templates/cave-connection.md), build the independent page
+1. Copy the [template](templates/cave-connection.md), build the land (see
+   **What counts as an independent land**; a project website does not qualify)
    and establish its real HTTPS destination. Document its operator, source,
    network use and return link. A different origin owns its own data and services.
 2. In an OBL PR, add one reviewed row to `registry.entries` in
