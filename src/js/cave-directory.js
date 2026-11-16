@@ -22,7 +22,8 @@
   };
   const registry = validate({ schema: 1, entries: [
     // This is the existing lab display's external link, not a newly certified third-party release.
-    { id: "entropylab", name: "EntropyLab site", description: "The independent EntropyLab project site, also linked from the mainland lab display.", repository: "OogaBoogaX/entropylab", url: "https://entropylab.online/", status: "open" }
+    { id: "entropylab", name: "EntropyLab site", description: "The independent EntropyLab project site, also linked from the mainland lab display.", repository: "OogaBoogaX/entropylab", url: "https://entropylab.online/", status: "open" },
+    { id: "hazync", name: "Hazync", description: "Proving Bitcoin's whole history is valid, so anyone can check it in a web browser. Check a proof, help prove blocks, or watch the board.", repository: "hazync/hazync", url: "https://hazync.org/ooga/", status: "open" }
   ] });
   for (const row of registry.entries) Object.freeze(row);
   Object.freeze(registry.entries); Object.freeze(registry);
