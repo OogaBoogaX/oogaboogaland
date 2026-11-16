@@ -25905,7 +25905,8 @@ const hubPlayerPreferences = { name: "player preferences", why: "regression: hea
     W.room = m => W.sockets.at(-1).onmessage({ data: JSON.stringify(m) });
     W.welcome = players => W.room({ t: "welcome", you: { id: 71 }, now: Date.now(), players });
     W.welcome([]);
-    W.peer = (id, zone) => ({ id, login: "peer" + id, display: "Peer " + id, zone, x: 2, y: 0, z: 3, yaw: 0 });
+    // In voice, so their rows carry the mic mark that mutes them (a player out of voice shows none).
+    W.peer = (id, zone) => ({ id, login: "peer" + id, display: "Peer " + id, zone, x: 2, y: 0, z: 3, yaw: 0, voice: true });
     W.mobile = matchMedia("(pointer: coarse)").matches;
   })()`);
   const signedInBells = await b.evaluate(bellState);
@@ -28060,7 +28061,7 @@ const footstepChecks = BL => {
 // with a fake microphone, peer connection and Worker, so every state of the track is read directly.
 const voiceAloneChecks = async () => {
   const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8"),ops=[],netMuted=[],emits=[];
-  const track={enabled:true,stop(){}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
+  const track={enabled:true,stop(){},clone(){return {enabled:true,stop(){}};}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
   class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
   class Audio {constructor(){this.muted=false;}pause(){}play(){return Promise.resolve();}}
   const fetch=async(url,o)=>{const op=url.split("/").pop(),body=JSON.parse(o.body);ops.push({op,mic:track.enabled});return {ok:true,json:async()=>op==="pull"?{tracks:body.ids.map((id,i)=>({id,mid:String(i+1)}))}:{sessionDescription:{}}};};
@@ -28110,11 +28111,11 @@ const voiceFailureChecks = async () => {
   const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8");
   const page=(joined=false,AudioContext=undefined)=>{
     const timers=[],calls=[],bodies=[],pcs=[],failing=new Set(),holds=new Map();let holdLeave=null;
-    const track={enabled:true,stopped:false,stop(){this.stopped=true;}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
+    const track={enabled:true,stopped:false,stop(){this.stopped=true;},clone(){return {enabled:true,stop(){}};}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
     class Pc {constructor(){this.handlers={};pcs.push(this);this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}getTransceivers(){return [];}addEventListener(k,fn){this.handlers[k]=fn;}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}close(){this.connectionState="closed";}}
     class Audio {pause(){}play(){return Promise.resolve();}}
     const fetch=async(url,o)=>{const op=url.split("/").pop();calls.push(op);bodies.push({op,body:JSON.parse(o.body)});if(op==="leave"&&holdLeave)await holdLeave;if(holds.has(op))await holds.get(op);return failing.has(op)?{ok:false,status:503,json:async()=>({error:"sfu"})}:{ok:true,status:200,json:async()=>({tracks:[],sessionDescription:{}})};};
-    const context={window:{BL:{net:{state:{connectionToken:"synthetic",me:{id:900,login:"listener"},zone:"outside",self:{x:0,y:0,z:0,zone:"outside"},blendTo:null,blendT:0},setMuted(){},remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{}},voiceBlend:{}},setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout(){},setInterval:()=>1,clearInterval(){},addEventListener(){},removeEventListener(){},AudioContext},document:{createElement:()=>({volume:1})},navigator:{userActivation:{hasBeenActive:true},mediaDevices:{getUserMedia:async()=>stream}},localStorage:{getItem:k=>joined&&k.includes("voice-joined")?"1":null,setItem(){},removeItem(){}},fetch,RTCPeerConnection:Pc,MediaStream:class {},Audio,AudioContext,AbortController,console};
+    const context={window:{BL:{net:{state:{connectionToken:"synthetic",me:{id:900,login:"listener"},zone:"outside",self:{x:0,y:0,z:0,zone:"outside"},blendTo:null,blendT:0},setMuted(){},remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{}},voiceBlend:{}},setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout(){},setInterval:()=>1,clearInterval(){},addEventListener(){},removeEventListener(){},AudioContext},document:{createElement:()=>({volume:1})},navigator:{userActivation:{hasBeenActive:true},mediaDevices:{getUserMedia:async()=>stream}},localStorage:{getItem:k=>joined&&k.includes("voice-joined")?"1":null,setItem(){},removeItem(){}},fetch,RTCPeerConnection:Pc,MediaStream:class {constructor(t){this.tracks=t||[];}getTracks(){return this.tracks;}},Audio,AudioContext,AbortController,console};
     context.window.navigator=context.navigator;context.window.document=context.document;context.window.localStorage=context.localStorage;
     runInNewContext(source,context);
     return {V:context.window.BL.voice,timers,calls,bodies,pcs,failing,holds,track,hold:p=>{holdLeave=p;}};
@@ -28184,7 +28185,7 @@ const voiceReturnChecks = async () => {
   const stored=new Map(),settle=()=>new Promise(r=>setTimeout(r,0));
   const page=({active=false,zone="outside",denied=false}={})=>{
     const ops=[],told=[],presses=new Map();let mics=0;
-    const track={enabled:true,stop(){}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
+    const track={enabled:true,stop(){},clone(){return {enabled:true,stop(){}};}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
     class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
     class Audio {constructor(){this.muted=false;}pause(){}play(){return Promise.resolve();}}
     const fetch=async(url,o)=>{const op=url.split("/").pop(),body=JSON.parse(o.body);ops.push(op==="session"?`session:${body.kind}`:op);return {ok:true,json:async()=>({sessionDescription:{}})};};
@@ -28228,7 +28229,7 @@ const voiceHearingChecks = async () => {
     if(saved!==null)store.set("oogaboogaland.voice-radius",saved);
     const remotes=new Map([[2,remote("near","factory",3,0)],[3,remote("mid","factory",0,15)],[4,remote("hall","factory.hall",1,0)],[5,remote("new","factory",2,0,false)]]);
     const state={connectionToken:"synthetic",me:{id:71,login:"listener"},zone:"factory",self:{x:0,y:0,z:0,zone:"factory"}};
-    const track={enabled:true,stop(){}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
+    const track={enabled:true,stop(){},clone(){return {enabled:true,stop(){}};}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
     class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(k,fn){if(k==="track")onTrack=fn;}removeEventListener(){}getTransceivers(){return [];}close(){}}
     // A real element throws on a volume outside 0..1 or not a number, and iOS's also ignores any it is given.
     const volume=o=>Object.defineProperty(o,"volume",{get(){return o.level;},set(v){if(!(v>=0&&v<=1))throw new TypeError(`volume ${v}`);if(!ios)o.level=v;}});
@@ -30607,13 +30608,13 @@ const cloudPanelChecks = async BL => {
   panel.querySelectorAll = () => zones;
   const unsubs = [], sent = [], refreshes = [];
   const state = { me: { id: 1, login: "tester", display: "Tester" }, room: "live", audience: true, zone: "dsb-transit", logoutEpoch: 0 };
-  const subs = { net: [], audience: [], voice: [] }, sub = (k) => fn => { subs[k].push(fn); return () => unsubs.push(k); };
+  const subs = { net: [], audience: [], voice: [], reactions: [] }, sub = (k) => fn => { subs[k].push(fn); return () => unsubs.push(k); };
   const stats = { enabled: false, joining: false, returning: false, publishing: false, muted: false }, local = new Set();
   let gate = null, visible = true;
   const observers = [];
   const window = { BL: { audience: BL.audience, reactionPolicy: BL.reactionPolicy,
-    net: { state, subscribe: sub("net"), subscribeAudience: sub("audience"), sendAudience: (type, fields) => { sent.push({ type, ...fields }); return true; }, logout() {} },
-    voice: { stats, support: () => ({ secure: true, webrtc: true, mic: true }), subscribe: sub("voice"), mutedLocally: login => local.has(login), muteLocal: (login, on) => on ? local.add(login) : local.delete(login), setMuted() {}, toggle() {}, leave() {} },
+    net: { state, subscribe: sub("net"), subscribeAudience: sub("audience"), subscribeReactions: sub("reactions"), sendAudience: (type, fields) => { sent.push({ type, ...fields }); return true; }, logout() {} },
+    voice: { stats, support: () => ({ secure: true, webrtc: true, mic: true }), subscribe: sub("voice"), mutedLocally: login => local.has(login), muteLocal: (login, on) => on ? local.add(login) : local.delete(login), setMuted() {}, toggle() {}, leave() {}, speaking: () => false, inEarshot: () => true },
     hud: { voiceIcon: el("svg"), voiceWords: (look, self) => `${look}${self ? " (you)" : ""}`, renderFaceIcon() {} },
     models: { caveman: () => ({}) }, contributors: { traitsFor: () => ({}) }, characters: { get: name => name === "ooga" ? {} : null },
     nativeIcons: { svg: () => el("svg"), voice: () => el("svg") }, sheet: { visible: () => visible },
@@ -30670,7 +30671,7 @@ const cloudPanelChecks = async BL => {
   record("Ooga Chat panel: asks for the visitor's own zone, draws the whole of a long roster as tiles, keeps each tile's nodes through a delta, drops removed tiles and their pictures, asks for no picture the island cannot serve, ignores the zone already chosen, gates Join Voice and the hand on the room's word, shows a gap with a Retry that asks afresh (joining too), draws the roster again after a hidden reconnect, and forgets everything on sign-out",
     asked === "audience-view:dsb" && drawn.rows === 303 && drawn.cached === 303 && drawn.order === "w1,c1,tester"
       && ring === "world" && listenerMic && pending && delta && eligible && localMute && removed && noPicture && noop && switched && joinRetry && stale && staleRetry
-      && dropped && rejoined && signedOut && unsubs.length === 3,
+      && dropped && rejoined && signedOut && unsubs.length === 4,
     JSON.stringify({ asked, drawn, ring, listenerMic, pending, delta, eligible, localMute, removed, noPicture, noop, switched, joinRetry, stale, staleRetry, dropped, rejoinAsk, rejoined, signedOut, unsubs }));
 };
 const chatClientChecks = async () => {
@@ -30860,8 +30861,8 @@ const playersColumnChecks = async () => {
     runInNewContext(await readFile(join(root, "src/js/zone-map.js"), "utf8"), context);
     runInNewContext(await readFile(join(root, "src/js/voice-blend.js"), "utf8"), context);
     Object.assign(window.BL, {
-      net: { state: { room: "live", me: { login: "me", display: "Me" }, selfId: 1, online: 3, zone: "outside", hostId: 0, self: { x: 0, y: 0, z: 0, zone: "outside" }, voiceLinks: false }, remotes,
-        voiceLink: () => "none", toggleVoiceLink() {}, subscribe() {}, subscribeRoster() {}, subscribeMoves() {}, subscribePresence() {}, subscribeReactions() {} },
+      net: { state: { room: "live", me: { login: "me", display: "Me" }, selfId: 1, online: 3, zone: "outside", hostId: 0, self: { x: 0, y: 0, z: 0, zone: "outside" }, voiceLinks: false, clouds: [] }, remotes,
+        voiceLink: () => "none", toggleVoiceLink() {}, subscribe() {}, subscribeRoster() {}, subscribeMoves() {}, subscribePresence() {}, subscribeReactions() {}, subscribeAudience() {}, subscribeClouds() {} },
       hud: { voiceIcon: make("svg"), voiceWords: () => "In voice", toast() {} },
       voice: { stats: { enabled: true, muted: false, speaking: false, radius: 0 }, fades: false, RADIUS_MIN: 5, RADIUS_MAX: 60, VOLUME_MAX: 2, subscribe() {}, speaking: () => false, inEarshot: () => true, mutedLocally: () => false, volumeOf: () => 1, setVolume() {}, setRadius() {} },
       sheet: { visible: () => true, setBadge() {}, watchViews() {}, attending: () => true }, sound: { muted: false, subscribe() {} }, pilot: { turnToward() {} } });
@@ -32871,7 +32872,7 @@ const listenOnlyMicStatusProof = async () => {
   const base={enabled:true,joining:false,publishing:false,micWanted:false,muted:false,alone:false};
   const quiet=v=>{ctx.showMic({...base,...v},true);return note.textContent===""&&note.hidden;};
   const listening=quiet({}),listeningAlone=quiet({alone:true}),listeningMuted=quiet({muted:true}),afterDrop=quiet({muted:true,alone:false});
-  ctx.showMic({...base,micWanted:true,publishing:true,alone:true},true);const speakerAlone=note.textContent==="Alone \u00b7 mic off"&&!note.hidden;
+  ctx.showMic({...base,micWanted:true,publishing:true,alone:true},true);const speakerAlone=!note.textContent.includes("Alone");
   ctx.showMic({...base,micWanted:true,publishing:true,muted:true},true);const speakerMuted=note.textContent.startsWith("Mic muted")&&!note.hidden;
   ctx.showMic({...base,micWanted:true,publishing:true},true);const speakerOn=note.textContent==="Mic on";
   const back=quiet({});
@@ -34038,7 +34039,7 @@ const unitChecks = async () => {
   const voiceLifecycle=await studioVoiceLifecycleProof();
   record("Studio voice lifecycle: receive-only restart, cancelled capture/publication, local preflight, muted restart and aggregate autoplay recovery",Object.values(voiceLifecycle).every(Boolean),JSON.stringify(voiceLifecycle));
   const listenOnlyMic=await listenOnlyMicStatusProof();
-  record("Studio HUD: listen-only visitors see no mic status (no Mic on, Alone or Mic muted); opted-in speakers still do",Object.values(listenOnlyMic).every(Boolean),JSON.stringify(listenOnlyMic));
+  record("Studio HUD: listen-only visitors see no mic status (no Mic on or Mic muted); opted-in speakers still do, and alone says nothing of being alone",Object.values(listenOnlyMic).every(Boolean),JSON.stringify(listenOnlyMic));
   const studio=await studioSessionProof();
   record("Studio session: receive-only readiness and blocked sound, Q&A consent, source selection, buffering and deterministic cleanup",Object.values(studio).every(Boolean),JSON.stringify(studio));
   await canvasSurfaceCacheChecks();

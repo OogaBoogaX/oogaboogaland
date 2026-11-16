@@ -69,7 +69,13 @@
   // A row as the tiles draw it: its picture, its microphone's look and words, and whether this visitor muted it.
   const describe = (id, t) => {
     const row = model.rows.get(id), speaker = row.role === "speaker";
-    const look = !speaker ? "" : row.mic === "muted" ? "muted" : row.speaking ? "speaking" : "on";
+    // Speaking as Online Oogas shows it: the visitor's own from their microphone's meter (voice.js meters it even alone),
+    // anyone else's from this page's meter on their voice (keyed by account, the number in their `gh:` id), and never
+    // for one out of earshot. The room never says speaking.
+    const key = id.startsWith("gh:") ? Number(id.slice(3)) : 0;
+    const muted = row.self ? voice.stats.muted : row.mic === "muted";
+    const speaking = row.self ? voice.stats.speaking : !!key && voice.inEarshot(key) && voice.speaking(key);
+    const look = !speaker ? "" : muted ? "muted" : speaking ? "speaking" : "on";
     const blocked = speaker && !row.self && voice.mutedLocally(row.login);
     t.id = id; t.display = row.display; t.role = row.role; t.source = row.source || ""; t.self = row.self;
     t.face = row.character && BL.characters.get(row.character) ? faceUrl(row.character) : "";
@@ -169,6 +175,11 @@
     else if (model.apply(msg) !== "ignored") { render(); paintFooter(); }
   }));
   subs.push(voice.subscribe(paintFooter));
+  // The visitor's own reaction pops on their own tile at once, as Online Oogas pops it: the room never echoes it back.
+  subs.push(net.subscribeReactions((id, e) => {
+    const self = id === 0 && showing ? model.self() : null;
+    if (self && BL.reactionPolicy.valid(e)) tiles.pop(self.id, e);
+  }));
 
   const zoneClick = (e) => {
     const b = e.currentTarget;

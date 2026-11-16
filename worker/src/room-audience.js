@@ -336,7 +336,7 @@ export const audienceRoom = {
   },
 
   // The clouds Ooga Chat speakers sit on, replaced whole, to every page: each `{ id, character, zone, seat, seatRevision,
-  // lease, mic, hand }`. A page draws a cloud speaker from its seat and ghosts that character's NPC while any source owns
+  // lease, mic, hand, login, display }`. A page draws a cloud speaker from its seat and ghosts that character's NPC while any source owns
   // it: the island's own drivers (every `body`) and these clouds together are the canonical owners.
   cleanClouds: (room, list) => (cloudsOn(room) ? (Array.isArray(list) ? list : []).filter((c) => c && /^gh:[1-9][0-9]{0,15}$/.test(c.id) && isZone(c.zone) && typeof c.seat === "string").slice(0, 32) : []),
   clouds(room, list) {

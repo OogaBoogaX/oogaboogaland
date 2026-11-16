@@ -102,7 +102,7 @@
 // `{ op: "placed" }` after each body, zone or crossing frame sent (counted in `state.placed`), which the room's own check
 // of an `enter` reads, so the bridge can ask again for an epoch refused before the room had them.
 // Without the feature both stay silent and the bridge keeps the page out of every public audience.
-// Exports voiceLink, toggleVoiceLink, linkEveryone, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeAudience, sendAudience, subscribePrivate, subscribeChalk, subscribeWallets, sendOutdoor, subscribeOutdoor, OUTDOOR_FEATURE, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
+// Exports voiceLink, toggleVoiceLink, linkEveryone, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeAudience, subscribeClouds, sendAudience, subscribePrivate, subscribeChalk, subscribeWallets, sendOutdoor, subscribeOutdoor, OUTDOOR_FEATURE, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub,
 // setMuted, setHealth, sendNpc, sendChat, sendPrivate, npcFrame, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
 // ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
 (() => {
@@ -202,6 +202,39 @@
   const walletSubscribers = new Set();
   const shotSubscribers = new Set(), swingSubscribers = new Set(), reactSubscribers = new Set(), audienceSubscribers = new Set();
   const presenceSubscribers = new Set();
+  // Ooga Chat speakers on clouds (#659): the room's `clouds` list, replaced whole (worker/src/room-audience.js), each
+  // entry checked here and the list kept frozen on `state.clouds`, gone with the socket. Only an entry with a seat of its
+  // own zone's catalog and a character to draw is kept; one seat or one speaker twice keeps the first. Under `debug=1`,
+  // `clouds=` names characters to seat as samples (main-cloud-1 on), for review, which no socket replaces or clears.
+  const cloudSubscribers = new Set(), NO_CLOUDS = Object.freeze([]), CLOUD_SEAT = /^(main|dsb)-cloud-[1-9][0-9]?$/;
+  const cloudRecord = (raw) => {
+    if (!raw || typeof raw.id !== "string" || !/^(gh|sample):[1-9][0-9]{0,15}$/.test(raw.id)) return null;
+    if (raw.zone !== "main" && raw.zone !== "dsb" || typeof raw.seat !== "string" || !CLOUD_SEAT.test(raw.seat) || !raw.seat.startsWith(`${raw.zone}-`)) return null;
+    if (typeof raw.character !== "string" || !/^[\w.-]{1,64}$/.test(raw.character)) return null;
+    const login = typeof raw.login === "string" && /^[\w.-]{1,39}$/.test(raw.login) ? raw.login : raw.character;
+    const display = typeof raw.display === "string" && raw.display.trim() && raw.display.length <= 50 && !/[\u0000-\u001f\u007f]/.test(raw.display) ? raw.display.trim() : login;
+    const P = BL.reactionPolicy, hand = typeof raw.hand === "string" && (P.HANDS.includes(raw.hand) || P.valid(raw.hand)) ? raw.hand : "";
+    return Object.freeze({ id: raw.id, character: raw.character, zone: raw.zone, seat: raw.seat, lease: Number.isSafeInteger(raw.lease) ? raw.lease : 0,
+      mic: raw.mic === "muted" ? "muted" : "on", hand, login, display });
+  };
+  const cloudList = (raws) => {
+    const list = [];
+    for (const raw of raws.slice(0, 32)) {
+      const c = cloudRecord(raw);
+      if (c && !list.some((o) => o.id === c.id || o.seat === c.seat)) list.push(c);
+    }
+    return Object.freeze(list);
+  };
+  const cloudSeed = (() => {
+    const q = new URLSearchParams(location.search), names = q.get("debug") === "1" && q.get("clouds");
+    return names ? cloudList(names.split(",").slice(0, 8).map((character, i) => ({ id: `sample:${i + 1}`, character: character.trim(), zone: "main", seat: `main-cloud-${i + 1}`,
+      login: character.trim(), display: character.trim(), mic: "on" }))) : null;
+  })();
+  const setClouds = (list) => {
+    if (cloudSeed || state.clouds === list) return;
+    state.clouds = list;
+    for (const fn of cloudSubscribers) fn(list);
+  };
   const remotes = new Map();
   // room: "off" (signed out or no backend), "connecting", "live", "paused" (hidden a while), or a kick that
 // stopped it ("replaced", "full").
@@ -210,7 +243,8 @@
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
     room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, npcVersion: 0, doorway: false, pokerVoice: null,
     self: { x: NaN, y: NaN, z: NaN, zone: "" }, chatUnicode: false, privateChat: false, chalk: null, blendTo: null, blendT: 0, reactions: false, customHand: false, hand: false, handTone: 0, handEmoji: "",
-    voiceLinks: false, linkWants: new Set(), linked: new Set(), outdoorVoice: false, placed: 0, audience: false };
+    voiceLinks: false, linkWants: new Set(), linked: new Set(), outdoorVoice: false, placed: 0, audience: false, clouds: NO_CLOUDS };
+  if (cloudSeed) state.clouds = cloudSeed;
   const REACT_FEATURE = "react-v1", LINK_FEATURE = "vlink-v1", LINK_MAX = 64, OUTDOOR_FEATURE = "outdoor-voice-v1";
   const linkIds = (list) => new Set(Array.isArray(list) ? list.filter((id) => Number.isSafeInteger(id) && id > 0).slice(0, LINK_MAX) : []);
   // The room's last word on whom to hear, for what a move to another place keeps.
@@ -717,6 +751,8 @@
       if (Number.isSafeInteger(msg.id)) for (const fn of swingSubscribers) fn(msg.id);
     } else if (msg.t === "audience") {
       if (state.audience) for (const fn of audienceSubscribers) fn(msg);
+    } else if (msg.t === "clouds") {
+      if (msg.v === 1 && Array.isArray(msg.clouds)) setClouds(cloudList(msg.clouds));
     } else if (msg.t === "chat") {
       const line = chatLine(msg);
       if (line) chatHeard([line], false);
@@ -830,6 +866,7 @@
       ws = null;
     }
     remotes.clear();
+    setClouds(NO_CLOUDS);
     state.hostId = 0;
     state.followers = 0;
     // Any request for the doorway went with the socket.
@@ -1400,6 +1437,11 @@
     audienceSubscribers.add(fn);
     return () => audienceSubscribers.delete(fn);
   };
+  // `fn(list)` on each change of `state.clouds` (#659).
+  const subscribeClouds = (fn) => {
+    cloudSubscribers.add(fn);
+    return () => cloudSubscribers.delete(fn);
+  };
   const sendAudience = (type, fields) => {
     if (state.room !== "live" || !state.audience || type !== "audience-view" && type !== "audience-resync") return false;
     send(JSON.stringify({ ...fields, t: type, v: BL.audience.VERSION }));
@@ -1506,12 +1548,12 @@
     chalkSubscribers.clear();
     walletSubscribers.clear();
     outdoorSubscribers.clear();
-    shotSubscribers.clear(); swingSubscribers.clear(); reactSubscribers.clear(); audienceSubscribers.clear();
+    shotSubscribers.clear(); swingSubscribers.clear(); reactSubscribers.clear(); audienceSubscribers.clear(); cloudSubscribers.clear();
     presenceSubscribers.clear();
     doorSubscribers.clear();
     close("off");
     diagnostic = null;
   };
 
-  BL.net = { sendTess, connectionDiagnostics, subscribeConnection, lockRoom, unlockRoom, tryRoomPin, voiceLink, toggleVoiceLink, linkEveryone, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeBf, subscribeBfFrame, sendBf, sendBfInput, sendBfFrame, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeAudience, sendAudience, subscribePrivate, subscribeChalk, subscribeWallets, sendOutdoor, subscribeOutdoor, OUTDOOR_FEATURE, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendReaction, subscribeReactions, setHand, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { sendTess, connectionDiagnostics, subscribeConnection, lockRoom, unlockRoom, tryRoomPin, voiceLink, toggleVoiceLink, linkEveryone, cabinetSeats, takeCabinet, leaveCabinet, get cabinet() { return cabinetSeat; }, handoffBody, hockeyTables, subscribeHockey, sendHockey, subscribeBf, subscribeBfFrame, sendBf, sendBfInput, sendBfFrame, subscribeHighscores, subscribeStudio, studioCommand, start, recheck, subscribe, subscribeRoster, subscribeMoves, subscribeChat, subscribeAudience, subscribeClouds, sendAudience, subscribePrivate, subscribeChalk, subscribeWallets, sendOutdoor, subscribeOutdoor, OUTDOOR_FEATURE, subscribeShots, subscribeSwings, subscribePresence, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setBlend, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPrivate, sendReaction, subscribeReactions, setHand, sendPose, takeChalk, dropChalk, chalkEdit, flushChalk, sendWallet, sendShot, sendSwing, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, preferredCharacter, prepareLocalCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

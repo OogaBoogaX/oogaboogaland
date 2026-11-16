@@ -1233,6 +1233,19 @@
     const drop = Math.min(fore, elbowY - ground), reach = Math.sqrt(fore * fore - drop * drop);
     reachArm(cave, arm, forearm, out, arm.position.x, elbowY - drop, arm.position.z + reach, 0, -1, 0);
   };
+  // Sitting on the ground as an idle Ooga sits by a fire, for a body the crew does not run (remote-players.js's Ooga Chat
+  // speakers on clouds): legs out before it, each arm hanging from the shoulder with its forearm reaching forward until
+  // the fist rests on the ground, the ground where `poseEquipment` puts it for a seat that is the ground (the root stands
+  // `traits.height` * 0.08 over it, as `sitPlayer` places a sitter).
+  const poseGroundSit = (cave) => {
+    const parts = cave.parts, h = cave.traits.height;
+    poseGait(cave, GAIT.stand);
+    parts.legR.rotation.x = parts.legL.rotation.x = -Math.PI / 2;
+    parts.armL.quaternion = parts.armR.quaternion = null;
+    const ground = -h * 0.08 + SIT_FIST * h;
+    sitArm(cave, parts.armL, parts.forearmL, cave.reachL, ground);
+    sitArm(cave, parts.armR, parts.forearmR, cave.reachR, ground);
+  };
   // `wind` and `stroke` as the cut has them; `stance`, 1 until the weapon goes back to its carry and 0 there.
   const swingArm = (cave, wind, stroke, stance) => {
     const parts = cave.parts, w = cave.weapon, arm = parts.armR, fore = parts.forearmR, club = parts.club, e = cave.elbow;
@@ -8141,5 +8154,5 @@
       }
     };
   };
-  BL.crew = { create, createPets, hatRide, poseHatRide, poseStomachRide, HAT_RIDE, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, VISUAL_BODY, GAIT, poseGait, poseCloseWalk, seatJetpack, jetSparks, preparePresentation, poseEquipment, poseReload, reachArm, strikeTime, bodyHeightOf, bodyRadiusOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, COMPANION_FOLLOW, QUAD_GAIT, poseQuadruped, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, CHUK_FOLD, BURST_STEP, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_PUFF, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
+  BL.crew = { create, createPets, hatRide, poseHatRide, poseStomachRide, HAT_RIDE, createMagazineModel, poseMagazine, visualState, VISUAL_SIZE, VISUAL_BODY, GAIT, poseGait, poseCloseWalk, poseGroundSit, seatJetpack, jetSparks, preparePresentation, poseEquipment, poseReload, reachArm, strikeTime, bodyHeightOf, bodyRadiusOf, jetpackNode, jetFlags, weaponFlags, flyCompanion, COMPANION_FLIGHT, COMPANION_FOLLOW, QUAD_GAIT, poseQuadruped, LAND_DUST, JET_SPARKS, EAT_RATE, AMMO_MAX, AMMO_PER_BANANA, RELOAD_PERIOD, BURST_ROUNDS, CHUK_FOLD, BURST_STEP, MELEE_CHARGE_DELAY, HEALTH_MAX, HEALTH_REGEN_DELAY, HEALTH_REGEN_RATE, JUMP_SPEED, JET_ACCEL, JET_SPEED, JET_RISE, JET_PUFF, JET_FUEL_SECONDS, JET_MOVE_SECONDS, JET_REFILL_SECONDS, JET_LAUNCH_FUEL };
 })();

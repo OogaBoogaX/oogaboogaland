@@ -501,7 +501,8 @@ no speaker, never a shared seat. The character is the island's canonical one for
 contributor policy at the lease's grant, never one a client named. The Audience sends the Room its clouds
 (`audienceClouds`) whenever they change (both keep the last list, so it outlasts either one's hibernation and a failed
 send is retried), and the Room sends every page `{ t: "clouds", v: 1, revision, clouds: [{ id,
-character, zone, seat, seatRevision, lease, mic, hand }] }` (and the list now after each `welcome`). The world (#659)
+character, zone, seat, seatRevision, lease, mic, hand, login, display }] }` (and the list now after each `welcome`;
+`login` and `display` name the speaker over their cloud and in Online Oogas). The world (#659)
 draws a seated speaker from its seat, the scene and its clock, and ghosts that character's NPC while any source owns
 it: the island's own drivers (each player's `body`) and these clouds together are the canonical owner set, so one
 leaving never un-ghosts a character still driven elsewhere. Clouds need the island's `cloud` switch; off, none is sent

@@ -1521,6 +1521,12 @@ body[data-active-scene="block"] .mode-hud {
   box-shadow: 0 0 5px rgba(34, 197, 94, 0.55);
 }
 
+/* An Ooga Chat speaker on a cloud (players.js): Ooga Chat's purple where a player's dot is green. */
+.roster-presence[data-online="cloud"] {
+  background: #b18aff;
+  box-shadow: 0 0 5px rgba(177, 138, 255, 0.6);
+}
+
 /* The name, on one line and cut short with an ellipsis where it would not fit, filling its cell: a button, with no
    caret, that opens the row onto a darker strip under it (the contributor's stats here, a player's volume in Online
    Oogas). */

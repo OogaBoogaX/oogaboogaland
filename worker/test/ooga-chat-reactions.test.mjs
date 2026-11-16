@@ -161,7 +161,7 @@ test("clouds: an active speaker on a catalog seat with its canonical character g
   const c = await speakNow(a, amy);
   await h.settle();
   assert.deepEqual(plain(h.room.clouds.at(-1)), [{ id: "gh:1", character: "dev1-ooga", zone: "main", seat: "main-cloud-1", seatRevision: SEAT_REVISION,
-    lease: c.lease.generation, mic: "muted", hand: "" }], "the island's character for that account, never one the client named");
+    lease: c.lease.generation, mic: "muted", hand: "", login: "dev1", display: "Dev 1" }], "the island's character for that account, never one the client named");
   await say(a, amy, { type: "setMic", requestId: 2, muted: false });
   await h.settle();
   assert.equal(h.room.clouds.at(-1)[0].mic, "on");

@@ -167,7 +167,7 @@
     unavailable: () => "Live audio isn't open here yet.",
     stale: () => "This page is older than Ooga Chat's service. Reload to keep listening."
   };
-  const VOICE_WORDS = { on: "In voice", muted: "Muted their microphone" };
+  const VOICE_WORDS = { on: "In voice", speaking: "Speaking", muted: "Muted their microphone" };
   // The visitor stands in the zone they picked: their own circle, a listener, while the server's list doesn't hold them
   // (listening off, connecting, or no snapshot yet), first among the listeners as the roster orders them. The server's
   // own row for them, keyed by the same participant id, takes its place once it comes.
@@ -222,10 +222,36 @@
     ctx.reactions.bars.mount(reactions, { handAllowed: () => !!voice && voice.role === "speaker" });
     const offPop = ctx.reactions.onPop((id, emoji) => tiles.pop(id, emoji));
     let version = -1, frame = 0, self = null, voice = null, people = [];
+    // An Ooga's face from the face sheet (art/ooga-faces.png, ooga-chat-faces.js), cut once a handle and kept as a
+    // data URL, for anyone the server names a character for and gives no picture: an island speaker's own Ooga. The
+    // tiles draw again once the sheet has loaded.
+    const faces = BL.oogaChatFaces, sheetFaces = new Map();
+    let sheet = null;
+    const sheetFace = (handle) => {
+      if (!handle) return "";
+      const key = handle.toLowerCase();
+      if (sheetFaces.has(key)) return sheetFaces.get(key);
+      if (!sheet) {
+        sheet = new Image();
+        sheet.addEventListener("load", () => { if (!frame) frame = requestAnimationFrame(render); }, { once: true, signal: listeners.signal });
+        sheet.src = "art/ooga-faces.png";
+      }
+      if (!sheet.complete || !sheet.naturalWidth) return "";
+      const i = faces.cells[key] ?? faces.fallback, size = faces.size, canvas = document.createElement("canvas");
+      canvas.width = canvas.height = size;
+      canvas.getContext("2d").drawImage(sheet, (i % faces.columns) * size, Math.floor(i / faces.columns) * size, size, size, 0, 0, size, size);
+      const url = canvas.toDataURL("image/png");
+      sheetFaces.set(key, url);
+      return url;
+    };
     const describe = (p, t) => {
-      const speaker = p.role === "speaker", you = p.id === self, look = speaker ? p.muted ? "muted" : "on" : "";
+      // A speaker's mark lights while this page hears them speak, as Online Oogas does on the island: the visitor's own
+      // from their microphone's meter (ooga-chat-media.js `speaking`, alone or not), anyone else's from their voice's
+      // (`talking`).
+      const speaker = p.role === "speaker", you = p.id === self;
+      const look = !speaker ? "" : p.muted ? "muted" : (you ? voice.speaking : voice.talking.includes(p.id)) ? "speaking" : "on";
       t.id = p.id; t.display = p.display; t.role = p.role; t.source = !speaker ? "" : p.source === "world" ? "world" : "chat";
-      t.face = p.face || ""; t.look = look; t.hand = p.hand || ""; t.self = you; t.micPressed = false;
+      t.face = p.face || sheetFace(p.character); t.look = look; t.hand = p.hand || ""; t.self = you; t.micPressed = false;
       t.micDisabled = !you || voice.role !== "speaker";
       t.micWords = !speaker ? "" : `${p.display}: ${you ? look === "muted" ? "Your microphone is muted: click to unmute" : "Your microphone: click to mute" : VOICE_WORDS[look]}`;
     };

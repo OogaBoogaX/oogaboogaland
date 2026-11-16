@@ -18,7 +18,10 @@
     if (!SOURCES.includes(raw.source) || !ROLES.includes(raw.role) || count(raw.generation) === null) return null;
     if (typeof raw.login !== "string" || !/^[\w.-]{1,39}$/.test(raw.login)) return null;
     return { id: raw.id, generation: raw.generation, source: raw.source, role: raw.role, login: raw.login, display: clean(raw.display, 50) || raw.login,
-      face: pathOk(raw.face) ? raw.face : null, contributions: raw.source === "world" ? count(raw.contributions) : null, muted: raw.muted === true,
+      face: pathOk(raw.face) ? raw.face : null,
+      // The Ooga the server says they are (an island speaker's body, a cloud speaker's), whose face the roster draws
+      // where there is no picture of their own.
+      character: typeof raw.character === "string" && /^[\w.-]{1,64}$/.test(raw.character) ? raw.character : null, contributions: raw.source === "world" ? count(raw.contributions) : null, muted: raw.muted === true,
       hand: raw.role === "speaker" && typeof raw.hand === "string" && raw.hand.length <= 16 && !/[\u0000-\u001f\u007f]/.test(raw.hand) ? raw.hand : "" };
   };
   const nameKey = (p) => p.login.toLowerCase();

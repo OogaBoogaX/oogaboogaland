@@ -256,7 +256,8 @@ export class Audience extends DurableObject {
 
   /**
    * Ooga Chat speakers on clouds (#668), for the Room's world (`audienceClouds`): one entry an active speaker, its seat
-   * from the zone's catalog, its canonical character, mic and hand. Nothing while the island's `cloud` switch is off.
+   * from the zone's catalog, its canonical character, mic and hand, and the login and display name the island shows
+   * over it. Nothing while the island's `cloud` switch is off.
    */
   clouds() {
     if (!bridgeFeatures(this.env).cloud) return [];
@@ -265,7 +266,7 @@ export class Audience extends DurableObject {
       if (!c.zone || !c.lease || c.lease.state !== "active" || !c.lease.seat || !c.id.startsWith("gh:")) continue;
       const p = this.model.people.get(c.id);
       out.push({ id: c.id, character: c.lease.character || p.info.character || null, zone: c.zone, seat: c.lease.seat, seatRevision: SEAT_REVISION,
-        lease: c.lease.generation, mic: c.mic, hand: c.hand || "" });
+        lease: c.lease.generation, mic: c.mic, hand: c.hand || "", login: p.info.login, display: p.info.display || p.info.login });
     }
     return out.sort((a, b) => (a.seat < b.seat ? -1 : 1));
   }

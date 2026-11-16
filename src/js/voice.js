@@ -20,7 +20,9 @@
 // lists exactly the players driving an Ooga in the same place with a live microphone, and lets a page pull only
 // those), so the microphone track is held off as a mute holds it (`stats.alone`), and comes back by itself when the
 // room lists someone. It is still published, so the room can tell others this page is here to be heard. Alone is
-// not a mute: the room is not told, and a visitor's own mute stands whoever comes and goes. In DSB Studio an
+// not a mute: the room is not told, and a visitor's own mute stands whoever comes and goes. The visitor's own meter
+// reads a copy of the track the hold never touches (`ownMeter`), so alone their voice still shows as speaking, and a
+// visitor can see their microphone works with nobody about; nothing of the copy is sent. In DSB Studio an
 // audience can listen without publishing, so there the room's `voice` message also counts the other receive
 // sessions (`listeners`), and that count holds the gate instead; no count ever acquires a microphone.
 // Hearing range (#380): a visitor may turn their own hearing down from no limit to RADIUS_MIN..RADIUS_MAX metres
@@ -236,7 +238,21 @@
     const source = audio.createMediaStreamSource(stream), analyser = audio.createAnalyser();
     analyser.fftSize = SAMPLES;
     source.connect(analyser);
-    return { source, analyser, quiet: 0, speaking: false };
+    return { source, analyser, quiet: 0, speaking: false, tap: null };
+  };
+  // The visitor's own meter, on a copy of the microphone's track that the alone and outdoor holds never disable.
+  const ownMeter = (stream) => {
+    if (!audio) return null;
+    const tap = new MediaStream(stream.getAudioTracks().map((t) => { const copy = t.clone(); copy.enabled = true; return copy; }));
+    const m = meter(tap);
+    m.tap = tap;
+    return m;
+  };
+  const dropMeter = () => {
+    if (!micMeter) return;
+    micMeter.source.disconnect();
+    if (micMeter.tap) for (const t of micMeter.tap.getTracks()) t.stop();
+    micMeter = null;
   };
 
   // One read of a meter; true when its speaking flag changed.
@@ -323,7 +339,7 @@
     readMeter(micMeter);
     subs.forEach(listenSub);
     subs.forEach(nearSub);
-    const self = stats.publishing && !!(micMeter && micMeter.speaking) && !stats.muted && !stats.alone && !outdoorHeld;
+    const self = stats.publishing && !!(micMeter && micMeter.speaking) && !stats.muted && !outdoorHeld;
     if (self !== stats.speaking) {
       stats.speaking = self;
       changed = true;
@@ -624,7 +640,7 @@
       if (token !== lifecycle || generation !== micGeneration) {
         for (const track of stream.getTracks()) track.stop(); return false;
       }
-      mic = stream; micMeter = meter(stream);
+      mic = stream; micMeter = ownMeter(stream);
       stats.preflight = true; stats.preflightPending = false; stats.permission = "granted";
       window.clearInterval(speakTimer); speakTimer = window.setInterval(poll, SPEAK_MS);
       emit(); return true;
@@ -642,8 +658,7 @@
     micGeneration++;
     if (mic) for (const track of mic.getTracks()) track.stop();
     mic = null;
-    if (micMeter) micMeter.source.disconnect();
-    micMeter = null; stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
+    dropMeter(); stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
     if (!stats.enabled) { window.clearInterval(speakTimer); speakTimer = 0; }
     emit();
@@ -679,8 +694,7 @@
     if (mic) for (const track of mic.getTracks()) track.stop();
     mic = null;
     stats.deviceId = "";
-    if (micMeter) micMeter.source.disconnect();
-    micMeter = null;
+    dropMeter();
     restart();
   };
   const enable = async (preserveMute = false) => {
@@ -699,7 +713,7 @@
       if (token !== lifecycle || generation !== micGeneration || !microphoneWanted) { for (const track of stream.getTracks()) track.stop(); return; }
       mic = stream; stats.permission = "granted";
       for (const track of mic.getAudioTracks()) { track.enabled = !stats.muted; track.onended = micLost; }
-      micMeter = micMeter || meter(mic);
+      micMeter = micMeter || ownMeter(mic);
       gate();
       // No candidates means the SFU can never reach this page: say why rather than wait out the publish. A gather
       // that could not run says nothing, so the publish goes ahead.
@@ -876,8 +890,7 @@
     if (mic) for (const t of mic.getTracks()) t.stop();
     mic = null; stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
-    if (micMeter) micMeter.source.disconnect();
-    micMeter = null;
+    dropMeter();
     if (audio) audio.close().catch(() => {});
     audio = null;
     cueOsc = cueGain = null;
@@ -897,8 +910,7 @@
     if (mic) for (const track of mic.getTracks()) track.stop();
     mic = null; stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
     if (stats.permission === "requesting") stats.permission = "unknown";
-    if (micMeter) micMeter.source.disconnect();
-    micMeter = null;
+    dropMeter();
     if (pubPc) pubPc.close();
     pubPc = null; stats.publishing = false; stats.speaking = false; stats.alone = stats.held = false;
     stats.muted = true; BL.net.setMuted(true);

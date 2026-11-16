@@ -2002,8 +2002,9 @@
   const showMic = (voice, keyed) => {
     // Listen-only visitors (never opted in to speak, unlike one back from an earlier session) see no microphone status at all.
     const speaker = !!voice.micWanted || !!voice.returning;
-    const muted = speaker && voice.muted && (voice.publishing || voice.joining || voice.returning), alone = !muted && speaker && (voice.alone || voice.held);
-    const shown = muted ? keyed && !MIC_COARSE ? "Mic muted \u00b7 M to unmute" : "Mic muted \u00b7 Unmute in the panel" : alone ? voice.held ? "Leaving public voice \u00b7 mic held" : "Alone \u00b7 mic off" : speaker && voice.publishing ? "Mic on" : "";
+    // Alone (voice.js) says nothing: the microphone still meters, so the visitor sees it work with nobody about.
+    const muted = speaker && voice.muted && (voice.publishing || voice.joining || voice.returning), alone = !muted && speaker && voice.held;
+    const shown = muted ? keyed && !MIC_COARSE ? "Mic muted \u00b7 M to unmute" : "Mic muted \u00b7 Unmute in the panel" : alone ? "Leaving public voice \u00b7 mic held" : speaker && voice.publishing ? "Mic on" : "";
     if (shown === micShown) return;
     const note = $("mic-note"), was = micShown;
     micShown = shown;
