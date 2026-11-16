@@ -17,9 +17,11 @@ export const createGitHub = (repo, token, fetcher = fetch) => {
   const api = (path, method, body, missing) => request(`repos/${repo}/${path}`, method, body, missing);
   const list = async (path, limit = 10) => {
     const rows = [];
-    for (let page = 1; page <= limit; page++) {
+    for (let page = 1; page <= limit + 1; page++) {
       const batch = await api(`${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${page}`);
       if (!Array.isArray(batch)) throw new Error("Expected GitHub list");
+      // A full last page may be the end of the list: only rows past the limit refuse.
+      if (page > limit && batch.length) break;
       rows.push(...batch);
       if (batch.length < 100) return rows;
     }

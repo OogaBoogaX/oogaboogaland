@@ -72,10 +72,11 @@
     // only this page not knowing for a moment (a stale window, a check that failed or is under way, the server not yet
     // sure) closes Join Voice but leaves a lease already held: the server ends it when the standing really is lost
     // (eligibility, revocation, sign-out, the session's end), and the speaker is not dropped every quarter hour.
+    // The server not sure either (its own answer `unknown`, which also reads `speak` false) is the same not knowing.
     const lost = (is, why) => {
-      if (why === "signout" || why === "expired" || !is || !is.capabilities.speak || is.identity.provider !== "github") return true;
+      if (why === "signout" || why === "expired" || !is || is.identity.provider !== "github") return true;
       const standing = eligibilityAt(is, now());
-      return standing !== "eligible" && standing !== "unknown";
+      return standing !== "unknown" && (standing !== "eligible" || !is.capabilities.speak);
     };
     const set = (patch, why = "change") => {
       if (disposed) return;

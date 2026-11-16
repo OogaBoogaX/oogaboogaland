@@ -474,7 +474,8 @@ export const createCoordinator = (gh, bot, now = () => new Date()) => {
     }
     // Push signals can be superseded by GitHub's concurrency queue. Recover
     // standalone branch heads as well; fork commits become visible through PRs.
-    for (const branch of await gh.list("branches", 1)) {
+    // One lookup a branch, three sweeps an hour: 500 branches stay well inside the app's rate limit.
+    for (const branch of await gh.list("branches", 5)) {
       // Override branches act only through their PRs, never as standalone submissions.
       if (branch.name === "rock" || branch.name.startsWith("automation/characters-") || branch.name.startsWith("automation/site-artifact-")
         || branch.name.startsWith(OVERRIDE_PREFIX)) continue;

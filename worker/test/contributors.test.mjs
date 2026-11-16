@@ -386,6 +386,26 @@ test("account lookup uses GitHub's ID and login endpoints without following supp
   assert.deepEqual(calls, [{ url: "https://api.github.com/user/185141343", method: "GET" }, { url: "https://api.github.com/users/Bitclank-Bill", method: "GET" }]);
 });
 
+test("GitHub lists read a full last page to its end and refuse only rows past the limit", async () => {
+  const listOf = (total) => {
+    const pages = [];
+    const gh = createGitHub("example/land", "test-token", async (url) => {
+      const page = Number(new URL(url).searchParams.get("page"));
+      pages.push(page);
+      const rows = Array.from({ length: Math.max(0, Math.min(100, total - (page - 1) * 100)) }, (_, i) => ({ name: `b${(page - 1) * 100 + i}` }));
+      return { ok: true, status: 200, json: async () => rows };
+    });
+    return { gh, pages };
+  };
+  const exact = listOf(100);
+  assert.equal((await exact.gh.list("branches", 1)).length, 100);
+  assert.deepEqual(exact.pages, [1, 2]);
+  await assert.rejects(() => listOf(101).gh.list("branches", 1), /automation limit/);
+  const sweep = listOf(101);
+  assert.equal((await sweep.gh.list("branches", 5)).length, 101);
+  assert.deepEqual(sweep.pages, [1, 2]);
+});
+
 test("verified account rename refuses competing queued work and another character's login", async () => {
   const f = accountRenameFixture(), bot = "private-app[bot]", queueHead = "d".repeat(40);
   const bundle = { number: 9, state: "open", user: { login: bot }, base: { ref: "rock", repo: { full_name: f.repo } },

@@ -28186,7 +28186,7 @@ const voiceReturnChecks = async () => {
     const context={window:{BL:{net:{state:{connectionToken:"synthetic",me:{id:900,login:"listener"},zone},setMuted:on=>told.push(on),remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{}}},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){},addEventListener:(t,f)=>presses.set(t,f),removeEventListener:t=>presses.delete(t)},document:{createElement:()=>({})},localStorage:{getItem:k=>stored.has(k)?stored.get(k):null,setItem:(k,v)=>stored.set(k,v),removeItem:k=>stored.delete(k)},navigator:{userActivation,mediaDevices:{getUserMedia:async()=>{mics++;if(denied)throw Object.assign(new Error("denied"),{name:"NotAllowedError"});return stream;}}},RTCPeerConnection:Pc,Audio,MediaStream:class{},fetch,AbortController,Promise,JSON,Error,Map,Set,Float32Array,Math};
     runInNewContext(source,context);
     const V=context.window.BL.voice,S=V.stats;
-    return {V,S,ops,told,presses,userActivation,mics:()=>mics,press:(e={isTrusted:true})=>{const f=presses.get("pointerup");if(f)f(e);}};
+    return {V,S,N:context.window.BL.net.state,ops,told,presses,userActivation,mics:()=>mics,press:(e={isTrusted:true})=>{const f=presses.get("pointerup");if(f)f(e);}};
   };
   const rows={};
   let p=page();p.V.restart(true);rows.never=!p.S.returning&&p.presses.size===0;
@@ -28203,11 +28203,18 @@ const voiceReturnChecks = async () => {
   p=page();p.V.restart(true);p.V.toggle();await settle();rows.firstKeyUnmutes=p.S.publishing&&!p.S.muted&&p.ops.includes("session:sub");
   p=page({active:true,denied:true});p.V.restart(true);await settle();p.V.toggle();await settle();
   rows.blockedStillHears=p.S.enabled&&p.S.returning&&p.S.muted&&!p.S.publishing&&p.S.micError==="microphone blocked"&&stored.size===1;
+  // The account speaks from Ooga Chat: the page stays out of voice by itself, through a moment that voice reads gone
+  // and on a first press armed before it, until Join voice, the visitor's own word.
+  p=page();p.N.voiceElsewhere=true;p.V.restart(true);const heldOut=!p.S.returning&&p.presses.size===0;
+  p.N.voiceElsewhere=false;p.V.restart(true);rows.elsewhereStays=heldOut&&!p.S.returning&&p.presses.size===0;
+  p=page();p.V.restart(true);p.N.voiceElsewhere=true;p.userActivation.hasBeenActive=true;p.press();await settle();
+  rows.elsewhereOnPress=!p.S.returning&&!p.S.enabled&&p.ops.length===0&&p.presses.size===0;
+  p.V.toggle();await settle();rows.elsewhereOwnWord=p.S.publishing&&!p.S.muted;
   p=page({zone:"dsb-studio"});p.V.restart(true);rows.studio=!p.S.returning&&p.presses.size===0;
   p=page({active:true});p.V.restart(true);await settle();p.V.restart();await settle();rows.reconnectStaysClosed=p.S.enabled&&p.S.muted&&p.S.returning&&p.mics()===0;
   p.V.leave();rows.leaveForgets=stored.size===0&&!p.S.returning&&!p.S.enabled;
   p=page({active:true});p.V.restart(true);rows.afterLeave=!p.S.returning&&!p.S.joining;
-  record("voice return: Join voice is remembered until Leave voice, the next session connects muted on the first press with the microphone closed until Unmute, even a first press of Unmute or a blocked microphone",
+  record("voice return: Join voice is remembered until Leave voice, the next session connects muted on the first press with the microphone closed until Unmute, even a first press of Unmute or a blocked microphone, and never by itself once the account has spoken from Ooga Chat",
     Object.values(rows).every(Boolean),JSON.stringify(rows));
 };
 // #380: a visitor's hearing range only changes how loud this page plays the voices it receives. voice.js runs with remotes placed
@@ -33481,6 +33488,10 @@ const oogaChatChecks = async () => {
   await broken.auth.check("retry");
   const throttled = await signedIn(account("github", "speaker", "eligible"));
   await throttled.auth.check("visible");
+  // The server itself not sure for a moment (its own `unknown`) closes Join Voice and ends no lease held.
+  const unsure = await signedIn(account("github", "speaker", "eligible"));
+  unsure.answer = account("github", "speaker", "unknown");
+  await unsure.auth.check("retry");
   // A denied return names its provider and retries it; a GitHub sign-in lands eligible but closed until Join Voice.
   const denied = await signedIn(null, { back: { result: "denied", provider: "github" } });
   const deniedNotice = denied.auth.state.notice?.kind === "signin" && denied.auth.state.notice.provider === "github" && denied.auth.state.auth === "signed-out";
@@ -33489,8 +33500,9 @@ const oogaChatChecks = async () => {
     identity: swap.log.includes("release:identity") && swap.log.includes("release:expired") && expiredNotice,
     error: broken.auth.state.auth === "error" && !broken.log.some((entry) => entry.startsWith("release")) && broken.auth.state.notice?.kind === "check" && !broken.gates().joinVoice,
     throttled: throttled.log.filter((entry) => entry === "session").length === 1,
+    unsure: unsure.auth.state.auth === "unknown" && !unsure.gates().joinVoice && !unsure.log.some((entry) => entry.startsWith("release")),
     denied: deniedNotice && denied.log.includes("signIn:github") && denied.auth.state.auth === "eligible" && !denied.log.some((entry) => entry.startsWith("release")) };
-  record("Ooga Chat account: every sign-in lands as a listener with gates only the server's answer opens, a stale window (asked again two minutes before it ends) or failed check closes them without ending a lease held, sign-out releases capture before the request and offers a retry when unconfirmed, a session the server still holds after it is never adopted again, and another principal or an expired session releases and says so",
+  record("Ooga Chat account: every sign-in lands as a listener with gates only the server's answer opens, a stale window (asked again two minutes before it ends), a failed check or the server's own unsure answer closes them without ending a lease held, sign-out releases capture before the request and offers a retry when unconfirmed, a session the server still holds after it is never adopted again, and another principal or an expired session releases and says so",
     Object.values(flow).every(Boolean), JSON.stringify(flow));
 
   // The audience roster (audience protocol 1): the space's one order, and a snapshot and deltas applied whole or not at
@@ -33774,12 +33786,14 @@ const oogaChatChecks = async () => {
   const voiceCheck = async () => {
     const M = load(["src/ooga-chat/ooga-chat-media.js"], { window: {}, setTimeout, clearTimeout, Math, Date, Promise, Object, Number, Map, Set, Error }).oogaChatMedia;
     const flush = async (n = 6) => { for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0)); };
-    const rig = ({ deny = null, holdPlay = false, allowed = true } = {}) => {
+    const rig = ({ deny = null, holdPlay = false, allowed = true, memory = null } = {}) => {
       const log = [], asked = [], listeners = new Map(), tracks = [], pcs = [];
-      let delay = null, nextMid = 0, playHeld = holdPlay;
+      let delay = null, nextMid = 0, playHeld = holdPlay, failing = null;
+      // Waits of a second or more are held for the check to fire by hand (`waits`); shorter ones run as they are.
+      const waits = [], timers = { set: (fn, ms) => ms >= 1000 ? -waits.push({ fn, ms }) : setTimeout(fn, ms), clear: (id) => { if (id < 0) waits[-id - 1] = null; else clearTimeout(id); } };
       const replies = { "receive/sync": () => { const mid = `r${nextMid++}`; return { tracks: [{ participant: "gh:7", mid }], closed: [], sessionDescription: { type: "offer", sdp: "v=0", mids: [mid] }, requiresImmediateRenegotiation: true }; },
         "publish/offer": () => ({ sessionDescription: { type: "answer", sdp: "v=0" } }) };
-      const broker = { call: async (op, body) => { log.push(`${op}@${body.connection}${body.generation ? `#${body.generation}` : ""}`); if (delay && op === delay.op) await delay.until; return (replies[op] || (() => ({ ok: true })))(); } };
+      const broker = { call: async (op, body) => { log.push(`${op}@${body.connection}${body.generation ? `#${body.generation}` : ""}`); if (delay && op === delay.op) await delay.until; if (failing === op) { failing = null; throw Object.assign(new Error("busy"), { code: "upstream_failed", retryable: true }); } return (replies[op] || (() => ({ ok: true })))(); } };
       class PC {
         constructor() { this.on = new Map(); this.connectionState = "new"; this.iceGatheringState = "complete"; this.tx = []; this.closed = false; pcs.push(this); }
         addEventListener(t, fn) { if (!this.on.has(t)) this.on.set(t, new Set()); this.on.get(t).add(fn); }
@@ -33802,10 +33816,11 @@ const oogaChatChecks = async () => {
         audio: () => ({ srcObject: null, played: 0, play() { this.played++; return playHeld ? Promise.reject(Object.assign(new Error("held"), { name: "NotAllowedError" })) : Promise.resolve(); }, pause() {} }) };
       const target = { addEventListener: (t, fn) => listeners.set(t, fn), removeEventListener: (t) => listeners.delete(t) };
       let requestId = 0;
-      const c = M.create({ broker: () => broker, rtc, target, allowed: () => allowed, request: (type, fields) => { asked.push({ type, ...fields, id: ++requestId }); return requestId; } });
+      const c = M.create({ broker: () => broker, rtc, target, memory, timers, allowed: () => allowed, request: (type, fields) => { asked.push({ type, ...fields, id: ++requestId }); return requestId; } });
       const answer = (ok, you, error) => c.heard({ type: "result", requestId: asked.at(-1).id, ok, you, ...(error ? { error: { code: error, retryable: false } } : {}) });
       return { c, log, asked, tracks, pcs, listeners, answer, get captures() { return captures; }, hold: (op) => { let go; delay = { op, until: new Promise((r) => { go = r; }) }; return () => { delay = null; go(); }; },
-        play: (held) => { playHeld = held; } };
+        play: (held) => { playHeld = held; }, failNext: (op) => { failing = op; },
+        fire: (ms) => { const i = waits.findIndex((w) => w && w.ms === ms); if (i < 0) return false; const { fn } = waits[i]; waits[i] = null; fn(); return true; } };
     };
     const snap = (r, connection, speak, zone = "main") => r.c.heard({ type: "snapshot", zone, epoch: 1, revision: 1, participants: [], connection, you: { id: "gh:1", speak } });
     const out = {};
@@ -33836,14 +33851,15 @@ const oogaChatChecks = async () => {
     out.revoked = r.tracks[1].stops === 1 && r.c.state.role === "listener" && r.log.length === sent && r.c.state.notice === M.NOTICE.ended;
     // A new audience connection (the socket dropped: a phone back from another app): what was held under the old one is
     // gone at the server, so the speaker keeps their microphone, off, asks again by itself naming the connection it
-    // came back from, and is a speaker again, muted.
+    // came back from, and is a speaker again; back at once with the microphone open before, it is open again.
     const third = r.c.join(); await flush(); r.answer(true, { id: "gh:1", speak: "pending", lease: 43 }); await third; await flush();
     r.c.mute();
     snap(r, "c2", "eligible"); await flush();
     const back = r.asked.at(-1), waiting = r.c.state, heldOff = r.tracks[2].enabled === false && r.tracks[2].stops === 0;
     r.answer(true, { id: "gh:1", speak: "pending", lease: 44 }); await flush(20);
     out.reconnected = heldOff && r.captures === 3 && back.type === "setRole" && back.role === "speaker" && back.replaces === "c1" && waiting.role === "listener" && waiting.busy
-      && r.c.state.role === "speaker" && r.c.state.muted && r.tracks[2].enabled === false && r.c.state.notice === M.NOTICE.resumed
+      && r.c.state.role === "speaker" && !r.c.state.muted && r.tracks[2].enabled === true && r.c.state.notice === M.NOTICE.reopened
+      && r.asked.at(-1).type === "setMic" && r.asked.at(-1).muted === false
       && r.log.includes("receive/open@c2") && r.log.includes("publish/ready@c2#44") && r.pcs[0].closed && r.pcs[3].closed;
     // The server closing a voice names its mid: dropped at once, its transceiver stopped.
     const before = r.c.state.hearing, rx = r.pcs[4], mid = rx.tx[0].mid;
@@ -33883,10 +33899,54 @@ const oogaChatChecks = async () => {
     r.play(false); r.listeners.get("pointerup")({ isTrusted: true }); await flush();
     r.c.dispose();
     out.blocked = held && !r.c.state.blocked && r.listeners.size === 0 && r.pcs[0].closed;
+    // A refresh: a speaker's page that is hidden or leaves leaves word in the tab's memory and takes it back when shown
+    // again; the page after it, on its first connection, speaks again by itself, muted, naming the connection it
+    // replaces. Leave Voice leaves no word, and an old word, another account's or another zone's is dropped unread.
+    const tab = { word: null, take() { const word = this.word; this.word = null; return word; }, keep(word) { this.word = word; } };
+    r = rig({ memory: tab }); r.c.zone("main"); snap(r, "c1", "eligible"); await flush();
+    const first = r.c.join(); await flush(); r.answer(true, { id: "gh:1", speak: "pending", lease: 7 }); await first; await flush();
+    r.c.mute();
+    r.c.remember(); const left = !!tab.word && tab.word.id === "gh:1" && tab.word.zone === "main" && tab.word.connection === "c1", tab0open = !!tab.word && tab.word.open === true;
+    r.c.remember(false); const shown = tab.word === null;
+    r.c.remember(); r.c.dispose();
+    r = rig({ memory: tab }); r.c.zone("main"); snap(r, "c2", "eligible"); await flush();
+    const returning = r.asked.at(-1), read = tab.word === null;
+    r.answer(true, { id: "gh:1", speak: "pending", lease: 8 }); await flush(20);
+    out.refreshed = left && tab0open && shown && read && r.captures === 1 && !!returning && returning.type === "setRole" && returning.role === "speaker" && returning.replaces === "c1"
+      && r.c.state.role === "speaker" && !r.c.state.muted && r.tracks[0].enabled === true && r.c.state.notice === M.NOTICE.reopened && r.log.includes("publish/ready@c2#8");
+    await r.c.leave(); await flush(); r.c.remember();
+    const leftVoice = tab.word === null;
+    const cold = async (word) => { tab.word = word; const p = rig({ memory: tab }); p.c.zone("main"); snap(p, "c9", "eligible"); await flush(); return p.captures === 0 && !p.asked.length && tab.word === null; };
+    out.forgotten = leftVoice && await cold({ id: "gh:1", zone: "main", connection: "c1", at: Date.now() - M.RETURN_MS })
+      && await cold({ id: "gh:2", zone: "main", connection: "c1", at: Date.now() }) && await cold({ id: "gh:1", zone: "dsb", connection: "c1", at: Date.now() });
+    // Muted before the loss, a speaker comes back muted.
+    const speak = async (p, generation) => { const j = p.c.join(); await flush(); p.answer(true, { id: "gh:1", speak: "pending", lease: generation }); await j; await flush(); };
+    r = rig(); r.c.zone("main"); snap(r, "c1", "eligible"); await flush(); await speak(r, 1);
+    snap(r, "c2", "eligible"); await flush(); r.answer(true, { id: "gh:1", speak: "pending", lease: 2 }); await flush(20);
+    out.mutedBack = r.c.state.role === "speaker" && r.c.state.muted && r.tracks[0].enabled === false && r.c.state.notice === M.NOTICE.resumed;
+    // A try that fails for a passing reason is made again after its wait, on the microphone kept, and speaks.
+    r = rig(); r.c.zone("main"); snap(r, "c1", "eligible"); await flush(); await speak(r, 1);
+    r.failNext("publish/open");
+    snap(r, "c2", "eligible"); await flush(); r.answer(true, { id: "gh:1", speak: "pending", lease: 2 }); await flush(20);
+    const waited = r.c.state.role === "listener" && !r.c.state.busy && r.c.state.notice === "" && r.c.stats.capturing && r.log.includes("publish/close@c2");
+    r.c.heard({ type: "you", zone: "main", you: { id: "gh:1", speak: "eligible" } }); await flush();
+    const notYet = r.asked.filter((a) => a.type === "setRole").length === 2;
+    const fired = r.fire(2000); await flush(); r.answer(true, { id: "gh:1", speak: "pending", lease: 3 }); await flush(20);
+    out.retried = waited && notYet && fired && r.captures === 1 && r.c.state.role === "speaker" && r.log.includes("publish/ready@c2#3");
+    // A socket that drops again while the page is on its way back: both connections its lease may be under are named.
+    r = rig(); r.c.zone("main"); snap(r, "c1", "eligible"); await flush(); await speak(r, 1);
+    snap(r, "c2", "eligible"); await flush(); r.c.status("reconnecting"); snap(r, "c3", "eligible"); await flush();
+    out.named = JSON.stringify(r.asked.at(-1).replaces) === JSON.stringify(["c1", "c2"]);
+    // A zone that reads full for a moment keeps the wish to speak, as a dropped socket does.
+    r = rig(); r.c.zone("main"); snap(r, "c1", "eligible"); await flush(); await speak(r, 1);
+    r.c.status("full");
+    const keptMic = r.c.state.role === "listener" && r.tracks[0].stops === 0 && r.c.state.notice === "";
+    snap(r, "c2", "eligible"); await flush();
+    out.full2 = keptMic && r.asked.at(-1).type === "setRole" && r.asked.at(-1).replaces === "c1" && r.c.state.busy;
     return out;
   };
   const voice = await voiceCheck();
-  record("Ooga Chat voice: a listener hears the zone and never captures; Join Voice captures muted before any connection carries it, publishes under the server's lease and speaks only once acknowledged; mute and Leave Voice act on the track at once and keep listening; a refusal, a revoked lease or a zone change stop capture exactly once; a new connection speaks again by itself, muted, on the microphone it kept, and gives up where the server says no; a microphone the browser takes leaves a muted speaker whom Unmute captures again; a stale sync plays nothing; held playback starts on a gesture",
+  record("Ooga Chat voice: a listener hears the zone and never captures; Join Voice captures muted before any connection carries it, publishes under the server's lease and speaks only once acknowledged; mute and Leave Voice act on the track at once and keep listening; a refusal, a revoked lease or a zone change stop capture exactly once; a new connection speaks again by itself on the microphone it kept, open again if it was open and muted if it was muted, and gives up where the server says no; a try that fails for a passing reason is made again after its wait; a second drop on the way back names both connections; a zone full for a moment keeps the wish to speak; a page that comes straight back after a refresh speaks again by itself from the word the page before it left in the tab, never from an old word, another account's or one left after Leave Voice; a microphone the browser takes leaves a muted speaker whom Unmute captures again; a stale sync plays nothing; held playback starts on a gesture",
     Object.values(voice).every(Boolean), JSON.stringify(voice));
 };
 // The outdoor voice bridge (outdoor-voice.js, #661) against a fake room: the real scope record, a transport whose frames

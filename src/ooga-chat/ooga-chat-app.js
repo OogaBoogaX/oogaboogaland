@@ -10,7 +10,9 @@
 // The device (ooga-chat-device.js) reports the network, install help and a waiting update, and registers the service
 // worker for the production entry of a staged build; M mutes or unmutes a speaker. Voice is ooga-chat-media.js's one
 // controller (#654): it hears the feed's snapshots, `you`, results and media notices, and the views read its state as
-// `state.voice`. It starts no island system: no
+// `state.voice`. A speaker whose page is hidden or leaves has the controller leave word in this tab's session storage
+// (`speaker`: the account, zone, connection and time, nothing else), taken back when the page is shown again, so a page
+// that comes straight back after a refresh speaks again, muted, as after a dropped socket. It starts no island system: no
 // renderer, scene, socket or game. A failure shows a recoverable error with Reload;
 // pagehide disposes the shell, the account and the adapter.
 (() => {
@@ -30,7 +32,7 @@
     box.hidden = false;
   };
   // The voice seam until the controller is made (and if it can't be): a muted listener that captures nothing.
-  let media = { available: false, why: "", state: BL.oogaChatMedia.IDLE, heard() {}, status() {}, release() {}, join() {}, leave() {}, mute() {}, zone() {}, stop() {}, retry() {}, dispose() {} };
+  let media = { available: false, why: "", state: BL.oogaChatMedia.IDLE, heard() {}, status() {}, release() {}, join() {}, leave() {}, mute() {}, zone() {}, stop() {}, retry() {}, remember() {}, dispose() {} };
   // `relisten` is the feed's 4401 restart timer; pagehide clears it, so it lives out here with what pagehide disposes.
   // `donating` ends the donation socket, opened once the service says its feed is live; `feeding` is Feed the Oogas,
   // the island's own donation popup, made the first time it opens; `member` is the Commons socket.
@@ -47,7 +49,25 @@
       : BL.oogaChatHttp.create();
     // Voice (ooga-chat-media.js): it calls the adapter's media broker under the feed's own connection, asks the feed for a
     // speaker lease, and speaks only where this deployment lets contributors speak. The fixture brings its own WebRTC.
+    // A speaker's word to the page after it in this tab (a refresh): session storage, read once and removed.
+    const speakerKey = storageKey(adapter.kind, "speaker");
+    const memory = {
+      take() {
+        try {
+          const raw = sessionStorage.getItem(speakerKey);
+          sessionStorage.removeItem(speakerKey);
+          return raw ? JSON.parse(raw) : null;
+        } catch { return null; }
+      },
+      keep(record) {
+        try {
+          if (record) sessionStorage.setItem(speakerKey, JSON.stringify(record));
+          else sessionStorage.removeItem(speakerKey);
+        } catch { /* Storage may be unavailable. */ }
+      }
+    };
     media = BL.oogaChatMedia.create({
+      memory,
       broker: () => state.mode === "live" && state.boot ? adapter.media(state.boot) : null,
       ...(adapter.rtc ? { rtc: adapter.rtc } : {}),
       request: (type, fields) => feed ? feed.request(type, fields) : 0,
@@ -315,9 +335,17 @@
       feed?.wake?.();
       return state.mode === "unavailable" ? start() : auth.check(why);
     };
-    document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && again("visible"), { signal: page.signal });
+    // Hidden, a speaker leaves word for a page that may replace this one; shown again, this page takes it back.
+    document.addEventListener("visibilitychange", () => {
+      media.remember(document.visibilityState !== "visible");
+      if (document.visibilityState === "visible") again("visible");
+    }, { signal: page.signal });
     addEventListener("online", () => again("online"), { signal: page.signal });
-    addEventListener("pageshow", (event) => event.persisted && auth.resume(), { signal: page.signal });
+    addEventListener("pageshow", (event) => {
+      if (!event.persisted) return;
+      media.remember(false);
+      auth.resume();
+    }, { signal: page.signal });
     // M is the speaker's own microphone, never while typing, composing, holding a modifier or repeating.
     document.addEventListener("keydown", (event) => {
       if (state.voice.role !== "speaker" || !BL.oogaChatDevice.isMuteKey(event)) return;
@@ -329,6 +357,7 @@
     showError("Ooga Chat couldn't start");
   }
   addEventListener("pagehide", (event) => {
+    media.remember();
     if (event.persisted) return;
     page.abort();
     clearTimeout(relisten);

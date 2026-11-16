@@ -96,7 +96,8 @@
   const parseZone = (value) => ZONES.includes(value) ? value : ZONES[0];
   // Per-adapter storage keys, so a review session's choices never reach production's. Only `STORED` names are kept:
   // `sweep` removes any other key under this adapter's prefix and any older unversioned `ooga-chat.` key (a saved
-  // screen, role or speaker flag), so nothing saved can bring back a choice panel or a microphone.
+  // screen, role or speaker flag), so nothing saved can bring back a choice panel or a microphone. The one word a
+  // speaker leaves is the tab's own, in session storage (`speaker`, ooga-chat-app.js): for the page that replaces it at once.
   const STORED = ["tab", "zone", "recent-bar", "donor", "roster-sort"];
   const prefixOf = (adapter) => `ooga-chat.${adapter === "fixture" ? "fixture." : ""}v1.`;
   const storageKey = (adapter, name) => `${prefixOf(adapter)}${name}`;

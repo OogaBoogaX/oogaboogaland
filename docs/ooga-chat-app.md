@@ -215,7 +215,9 @@ the session when it expires. Until then no check takes a session back: one that 
 out and offers Sign out again, and one that finds none is the confirmation and clears the notice.
 
 **Storage.** Only `tab` and `zone` are kept (`ooga-chat.v1.<name>`). At start `sweep` removes any other key under the
-app's prefix and any older unversioned `ooga-chat.` key, so no saved screen, role or speaker flag survives.
+app's prefix and any older unversioned `ooga-chat.` key, so no saved screen, role or speaker flag survives. Session
+storage holds one thing, for the tab alone and at most a minute: a speaker's word to the page that replaces it (Voice,
+Staying a speaker).
 
 **Faces.** A face is the account's `avatar`, loaded once at a fixed 56px circle, or the island's own Ooga face
 (`nativeIcons` `roster`) when there is none or it fails: never a broken image, a generated pattern or another
@@ -319,20 +321,37 @@ Leave Voice stops and releases the microphone, then `publish/close`, and keeps l
 the old zone's voices before the new zone's snapshot; a sync asked before the change plays nothing. The feed lost for
 good (`signed-out` to another account or none, `closed`, `full`) stops capture and receiving until its next snapshot.
 `release` ends speaking and keeps listening; signing out or another principal stops both with the feed. Nothing is kept
-in storage.
+in storage but a speaker's word to the page that replaces it at once (A refresh, below).
 
 **Staying a speaker.** A loss that was not the visitor's choice never makes a speaker a listener by itself: a phone
 that goes to another app, a network change, a microphone another app takes.
 - *A dropped socket.* The feed's `reconnecting`, and the new audience connection after it, end what was held under the
   old one at the server. The page keeps its microphone, off (released after two minutes with nothing to publish it on,
   and captured again then), and once the new connection's snapshot says `eligible` it asks for a lease again by itself:
-  `setRole` with `replaces`, the connection it came back from, so its own stale lease does not refuse it. It publishes
-  and lands muted: "Voice reconnected. You're muted." At most three tries in a row; a refusal says why and listens.
-  The same account's feed restarting after a session check (4401) is such a reconnect too.
+  `setRole` with `replaces`, every connection it may still hold a lease under (the one it came back from, and any a
+  join was under way on when its socket dropped, three at most), so its own stale lease does not refuse it. It
+  publishes, and how it lands follows what it had: back within 60 s (`RETURN_MS`) of the loss with the microphone open
+  before it, the microphone is open again and the server told (`setMic`): "Voice reconnected. Your microphone is on."
+  Muted before, or back later than that, it lands muted: "Voice reconnected. You're muted." A try that fails for a
+  passing reason (no answer, a busy or unreachable server, a publishing connection that would not come up) is made
+  again after 2 s, then 4 s, three tries in a row at most; a refusal says why and listens. The same account's feed
+  restarting after a session check (4401) is such a reconnect too, and so is a socket turned away for a moment
+  (4429, the feed's `full`): the wish to speak is kept for the connection after it.
+- *A refresh.* A new page remembers nothing, so a speaker whose page is hidden or leaves (`visibilitychange`,
+  `pagehide`) has the controller leave word in the tab's session storage (`remember`: `ooga-chat.v1.speaker`, the
+  participant id, zone, audience connection and time, nothing else), taken back when the same page is shown again, so
+  it is there only for a page that replaces this one. That page's first audience connection reads it once and removes
+  it. The same account in the same zone, no more than 60 s (`RETURN_MS`) after it was left, speaks again as after a
+  dropped socket: it asks for the microphone, `setRole` with `replaces`, and lands as it left, the microphone open
+  again if the word says it was open (`open`), muted otherwise, with the same words. A microphone the browser no
+  longer allows, or a refusal, listens: "Voice reconnected. Join Voice to speak again."
+  Leave Voice, a lease the server ended, signing out, another tab and a later return leave no word and stay listeners.
 - *A dead socket.* A socket the page was away from can read open long after it died. When the page is shown again or
   back online (`feed.wake`), or after 75 s of silence, the feed asks for a pong, and with no frame in 4 s closes the
   socket itself and opens another at once.
 - *A failed publishing connection.* The lease is given back and asked for again the same way.
+- *An unsure answer.* A session check the server itself answers `unknown` (the island could not be asked for a while)
+  closes Join Voice and leaves a lease already held, as a stale window or a failed check does.
 - *A microphone the browser takes away* (another app, a call: the track's `ended`). The visitor stays a speaker, muted,
   with nothing captured: "Your microphone was interrupted. Unmute to speak again." Unmute, a click, captures it again
   onto the same publication (`replaceTrack`).

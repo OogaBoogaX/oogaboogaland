@@ -325,9 +325,10 @@ Choosing the zone already chosen changes nothing. A listener's `setMic` is refus
   tells its page `{ t: "voice-moved" }` (which leaves voice there) and everyone else its `vstate`, sends the Audience
   the island's word without the account and only then answers, so the lease granted next is not ended by an older
   word. A Room that can't be reached leaves the refusal `source_in_use`.
-- `replaces: <connection>`, a page back from a dropped socket naming the connection it held its lease under: that
-  connection, if it still holds the identity's lease, is closed (4409) and the lease asked for afresh. Any other
-  connection's lease refuses as before, so a page that comes back never takes a voice the visitor has since moved.
+- `replaces: <connection>` (or a list of up to four), a page back from a dropped socket naming the connections it may
+  have held its lease under: one of them that still holds the identity's lease is closed (4409) and the lease asked
+  for afresh. Any other connection's lease refuses as before, so a page that comes back never takes a voice the
+  visitor has since moved.
 
 Without either, `source_in_use` stands. `you.elsewhere` tells an eligible connection without a lease where its
 identity's voice is: `island`, or `app` for another of its connections; the Audience sends `you` again to an identity's

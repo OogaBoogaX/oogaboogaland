@@ -918,9 +918,20 @@
     window.removeEventListener("keydown", firstPress, true);
   };
   const notReturning = () => { disarm(); stats.returning = false; setMuted(false); };
+  // The account spoke from Ooga Chat while this page was out of voice (the room's welcome, or its word since): from
+  // then on the page does not come back into voice by itself. A dropped connection there reads as not speaking for a
+  // moment, and a return in that gap, or on a first press made later, would take the voice it is speaking from. Join
+  // voice, the visitor's own press, clears it.
+  let spokeElsewhere = false;
+  const elsewhere = () => {
+    if (BL.net.state.voiceElsewhere && !stats.enabled && !stats.joining) spokeElsewhere = true;
+    return spokeElsewhere;
+  };
   const rejoin = async () => {
     disarm();
     if (BL.net.state.zone === STUDIO_ZONE) { notReturning(); return; }
+    // Armed before the account began speaking from Ooga Chat: the press leaves that voice where it is.
+    if (elsewhere()) { notReturning(); overhear(); return; }
     const token = lifecycle;
     BL.net.setMuted(true);
     rejoining = true;
@@ -935,7 +946,7 @@
   const resume = () => {
     // While the account speaks from Ooga Chat on another device, coming back by itself would take that voice away: the
     // visitor is asked instead (voice-handoff.js), and Join voice is their answer.
-    if (armed || stats.enabled || stats.joining || BL.net.state.zone === STUDIO_ZONE || BL.net.state.voiceElsewhere || !joinedBefore()) return;
+    if (armed || stats.enabled || stats.joining || BL.net.state.zone === STUDIO_ZONE || elsewhere() || !joinedBefore()) return;
     armed = stats.returning = stats.muted = true;
     window.addEventListener("pointerup", firstPress, true);
     window.addEventListener("keydown", firstPress, true);
@@ -943,7 +954,7 @@
     if (navigator.userActivation && navigator.userActivation.hasBeenActive) rejoin();
   };
 
-  const join = () => enable().then(() => { if (stats.publishing) rememberJoined(true); });
+  const join = () => { spokeElsewhere = false; return enable().then(() => { if (stats.publishing) rememberJoined(true); }); };
 
   // The footer's button: join, then mute and unmute. An Unmute while a returning visitor connects waits for that.
   const toggle = () => {
@@ -1179,7 +1190,7 @@
     return () => subscribers.delete(fn);
   };
 
-  const unsubscribeAccount = BL.net.subscribe(syncPreferences);
+  const unsubscribeAccount = BL.net.subscribe(() => { elsewhere(); syncPreferences(); });
   syncPreferences();
 
   const dispose = () => {

@@ -362,6 +362,16 @@ test("the Audience: an identity's other connection hears where its voice is, tak
   assert.equal(last(back, "result").ok, true, "its own stale lease does not refuse it");
   assert.equal(laptop.closed.code, 4409, "and the connection it replaced is closed");
   assert.equal([...audience.model.conns.values()].filter((c) => c.lease).length, 1, "one lease an identity, as ever");
+  // It drops again on its way back: the next page names every connection its lease may be under, whichever holds it.
+  const held = [...audience.model.conns.values()].find((c) => c.lease).connId;
+  const { ws: again } = await open(audience, principal(1));
+  await say(audience, again, { type: "join", zone: "main" });
+  await say(audience, again, { type: "setRole", requestId: 1, role: "speaker", replaces: [stale, 7, "someone-else"] });
+  assert.equal(last(again, "result").error.code, "source_in_use", "a list that does not name the holder takes nothing");
+  await say(audience, again, { type: "setRole", requestId: 2, role: "speaker", replaces: [stale, held] });
+  assert.equal(last(again, "result").ok, true, "a list that names it does");
+  assert.equal(back.closed.code, 4409);
+  assert.equal([...audience.model.conns.values()].filter((c) => c.lease).length, 1);
 });
 
 test("the Audience: voice held on the island moves to Ooga Chat only on the visitor's word, once the island has given it up", async () => {
