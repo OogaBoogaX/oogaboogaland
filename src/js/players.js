@@ -101,7 +101,10 @@
     slider.type = "range"; slider.className = "players-volume-range"; slider.id = `${id}-range`;
     slider.min = "0"; slider.max = String(V.VOLUME_MAX * 100); slider.step = "5"; slider.value = "100";
     value.className = "players-volume-value"; value.htmlFor = slider.id; value.textContent = "100%";
-    volume.append(volumeLabel, slider, value);
+    // A duel (duel.js), offered under another player's name while the island can hold one.
+    const duel = document.createElement("button");
+    duel.type = "button"; duel.className = "duel-button players-duel"; duel.textContent = "Challenge to a duel"; duel.hidden = true;
+    volume.append(volumeLabel, slider, value, duel);
     dots.className = "roster-dots";
     presence.className = "roster-presence"; presence.dataset.online = "true"; presence.setAttribute("role", "img");
     presence.setAttribute("aria-label", "Online"); presence.title = "Online";
@@ -124,7 +127,7 @@
     note.className = "players-note"; note.textContent = ", last known location"; note.hidden = true;
     distance.append(note);
     li.append(dots, name, mark, marks, look, distance, volume);
-    return { li, label, toggle, volume, slider, value, host, voice, link, linkShown: "", linkName: "", mark, hand, handShown: "", react, reacting: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
+    return { li, label, toggle, volume, slider, value, duel, host, voice, link, linkShown: "", linkName: "", mark, hand, handShown: "", react, reacting: null, button: look, distance, note, id: 0, self: false, name: "", zone: "", group: "", seen: 0,
       aim: "", voiceLook: "", voiceLogin: "", voiceSelf: false, blocked: false, hostOn: false, metres: -1, lastKnown: false, far: false, faded: false };
   };
   const selfRow = makeRow();
@@ -409,7 +412,14 @@
       if (row && !row.cloud) {
         const open = toggle.getAttribute("aria-expanded") !== "true";
         toggle.setAttribute("aria-expanded", String(open)); row.volume.hidden = !open;
+        row.duel.hidden = !(open && BL.duel && BL.duel.offered(row.id));
       }
+      return;
+    }
+    const duel = e.target.closest(".players-duel");
+    if (duel) {
+      if (e.detail) duel.blur();
+      BL.duel.challenge(Number(duel.closest("li").dataset.id));
       return;
     }
     const look = e.target.closest(".players-look");

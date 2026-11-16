@@ -259,7 +259,7 @@
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let oogatronUnsub, renderer, game, world, go, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, totemSolids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, jumbotron, positionDebug, remotes, npcSync, npcStatusBeams, npcGhosts;
+  let oogatronUnsub, renderer, game, world, go, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, totemSolids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, jumbotron, positionDebug, remotes, duels, npcSync, npcStatusBeams, npcGhosts;
   // GAME MODE (`setGameMode`): an island event holds the island still for play while it runs.
   let gameMode = false, gameCombatOnly = false;
   let cloudHopper = null, cloudIsland = null, cloudPile = null, cloudPileSolids = null, cloudFinishFruit = null;
@@ -6576,6 +6576,12 @@
     if (factoryDeparting || bifrostDeparting || islandGuide.holding) return;
     if (gorillaBehindBillboard(hit, p)) return;
     if (debugMovementTap(hit, p)) return;
+    // Another player's Ooga under the pointer, in sight (the pool's own exact mesh test and `liveClear`, not the taps'
+    // broad pick spheres, which a bush or prop near the line would win), becomes the duel target.
+    if (p) {
+      renderer.ray(p.x, p.y, camera, TAP_RAY);
+      if (duels.tap(TAP_RAY, camera.far)) return;
+    }
     if (!hit) return;
     const o = hit.owner;
     switch (o.kind) {
@@ -8159,6 +8165,7 @@
     shareDrivenActor(dt);
     hideSeatGlows();
     remotes.update(dt);
+    duels.update(dt);
     const petSeat = hammock?.seats[0];
     const petOwner = petSeat?.sitter === crew.player ? crew.player : petSeat?.remote ? remotes.body(petSeat.remote) : null;
     petReactions.update(petOwner, BL.net.state.me ? controlledGuideActor() : null, remotes, dt);
@@ -10962,6 +10969,7 @@
     islandGuide.suspend();
     chalkboard.suspend();
     clankerPlay.dispose();
+    duels.dispose();
     remotes.dispose();
     muteHammockShots();
     npcSync.dispose(true);
@@ -11816,7 +11824,13 @@
       npcSync.recordHit(cave);
       return workHit(cave);
     };
+    // Duels (duel.js): a challenge is refused while the visitor is busy with something else.
+    duels = BL.duel.create({ root, remotes, pilot, fx, clear: liveClear, refusal: () =>
+      cloudHopper?.active ? "Not during Cloud Hopper" : gameMode ? "Not while a game runs" : clankerPlay?.active ? "Duels are fought as an Ooga"
+        : !pilot.player ? "Drive your Ooga to duel" : pilot.player.camp.seat ? "Get up first" : "" });
+    shared.onSwing = (cave, charge) => duels.swing(cave, charge);
     shared.onShot = (cave, from, to) => {
+      duels.shot(cave, from, to);
       npcSync.recordShot(cave, from, to);
       // The visitor's own banana through the hammock rocks it; the crew's and work shots never do.
       if (hammock && !gameMode && cave === pilot.player && hammock.crosses(from.x, from.y, from.z, to.x, to.y, to.z)) hammock.hit(from.x, from.z, to.x, to.z);
@@ -12425,6 +12439,7 @@
     for (let i = 0; i < clankerCaptures.length; i++) finishClankerRider(clankerCaptures[i].entry, false);
     clankerCaptures.length = 0;
     clankerPlay.dispose();
+    duels.destroy();
     remotes.dispose();
     muteHammockShots();
     pile.dispose();
@@ -12442,7 +12457,7 @@
     zoneHeld = null;
     BL.net.setHub(false);
     npcSync.dispose();
-    remotes = npcSync = null;
+    remotes = duels = npcSync = null;
     npcGhosts.dispose(); npcGhosts = null;
     crew.dispose();
     critters.dispose();

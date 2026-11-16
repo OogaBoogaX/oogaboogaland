@@ -2133,6 +2133,26 @@ Open the pull request from my fork as a draft and keep it draft while building o
       </div>
     </div>
     <output class="mic-note" id="mic-note" data-muted="false" hidden></output>
+    <!-- Duels on the island (duel.js shows and hides these; the hub alone creates it). -->
+    <div class="duel-target" id="duel-target" role="group" aria-label="Target" hidden>
+      <span class="duel-target-name"></span>
+      <button type="button" class="duel-button" data-duel="challenge">Duel</button>
+      <button type="button" class="duel-close" data-duel="clear" aria-label="Clear target" title="Clear target">×</button>
+    </div>
+    <div class="duel-invite" id="duel-invite" role="alertdialog" aria-label="Duel challenge" hidden>
+      <p class="duel-invite-text"></p>
+      <button type="button" class="duel-button" data-duel="accept">Accept</button>
+      <button type="button" class="duel-button duel-decline" data-duel="decline">Decline</button>
+    </div>
+    <div class="duel-hud" id="duel-hud" role="group" aria-label="Duel" hidden>
+      <div class="duel-bars">
+        <div class="duel-side"><span class="duel-name"></span><span class="duel-bar"><span class="duel-fill"></span></span><span class="duel-hp"></span></div>
+        <span class="duel-clock" aria-live="polite"></span>
+        <div class="duel-side duel-them"><span class="duel-name"></span><span class="duel-bar"><span class="duel-fill"></span></span><span class="duel-hp"></span></div>
+      </div>
+      <p class="duel-note" role="alert" hidden></p>
+      <button type="button" class="duel-yield" data-duel="yield">Yield</button>
+    </div>
     <!-- HALLOWEEN: the ghost hunt's HUD (ghost-hud.js shows and hides it; no data-scene, or every arrival would show it). -->
     <ol class="ghost-scores" id="ghost-scores" aria-label="Hunters' points" hidden></ol>
     <p class="ghost-halving" id="ghost-halving" role="status" hidden>Halving · rifles at half power</p>
@@ -2329,6 +2349,7 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/game-timeline.js"></script>
   <script src="js/arcade-cabinets.js"></script>
   <script src="js/arcade-popular.js"></script>
+  <script src="js/duel-rules.js"></script>
   <script src="js/net.js"></script>
   <script src="js/game-net.js"></script>
   <script src="js/highscores.js"></script>
@@ -2380,6 +2401,7 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/breakables.js"></script>
   <script src="js/agent.js"></script>
   <script src="js/remote-players.js"></script>
+  <script src="js/duel.js"></script>
   <script src="js/npc-sync.js"></script>
   <script src="js/footsteps.js"></script>
   <script src="js/pet-reactions.js"></script>

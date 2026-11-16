@@ -32,7 +32,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import {
-  CABINETS, hockey, block, BLOCK, tessQueue, CLOSE_KICK, CLOSE_PROTOCOL, CLOSE_ERROR, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
+  CABINETS, hockey, block, BLOCK, duel, tessQueue, CLOSE_KICK, CLOSE_PROTOCOL, CLOSE_ERROR, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, CLEANUP_MS, TICK_HZ,
   NPC_FRAME_MAX, NPC_HZ, POSE_SAVE_MS, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, CHAT_FEATURE,
   DOOR_ZONE, DOOR_ROOM, DOOR_GRANT_MS, DOOR_TRANSIT_MS, DOOR_PASS_MS, DOOR_HZ, DOOR_BURST, ROOM_LOCK_FEATURE, PIN_PASS_MS, PIN_TRIES, PIN_WAIT_MS, CONTROL_FRAMES, CONTROL_HZ, CONTROL_BURST, SHOT_HZ, SHOT_BURST, SWING_HZ, SWING_BURST, REACT_FEATURE, HAND_EMOJI_FEATURE, REACT_HZ, REACT_BURST,
   GHOST_MAGIC, inGhostArena, watchesGhost,
@@ -264,7 +264,7 @@ export class Room extends DurableObject {
   }
 
   attachment(p) {
-    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, block: p.block || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, roomLock: p.roomLock, pinTries: this.pinTries.get(p.id) || null, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm, audienceZone: p.audienceZone || null, outdoor: p.outdoor || null };
+    return { cabinet: p.cabinet || null, cabinetBucket: p.cabinetBucket || null, hockey: p.hockey || null, hockeyBuckets: p.hockeyBuckets || null, block: p.block || null, id: p.id, login: p.login, display: p.display, contributor: p.contributor, body: p.body, connectionToken: p.connectionToken, studioSeat: p.studioSeat, studioRevoked: !!p.studioRevoked, x: p.x, y: p.y, z: p.z, yaw: p.yaw, g: p.g, j: p.j, w: p.w, v: p.v, va: p.va, r: p.r, voice: p.voice, muted: p.muted, hand: p.hand, handTone: p.handTone, handEmoji: p.handEmoji, hp: p.hp, ko: p.ko, sent: p.sent, zone: p.zone, pokerVoice: p.pokerVoice, inHub: p.inHub, visible: p.visible, joinedAt: p.joinedAt, door: p.door, passes: p.passes, roomLock: p.roomLock, pinTries: this.pinTries.get(p.id) || null, blendTo: p.blendTo, blendK: p.blendK, pm: p.pm, audienceZone: p.audienceZone || null, outdoor: p.outdoor || null, ...duel.saved(p) };
   }
 
   view(p) {
@@ -591,7 +591,7 @@ export class Room extends DurableObject {
 
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
-    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [tessQueue.FEATURE, CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE, ...audienceRoom.features(this), ...(this.inspect.on ? [INSPECT_FEATURE] : [])],
+    this.send(server, { t: "welcome", you: this.view(p), players: others, connectionToken: p.connectionToken, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers, locks: this.lockedRooms(), features: [tessQueue.FEATURE, CABINETS.FEATURE, CABINETS.OUTDOOR_FEATURE, "door", ROOM_LOCK_FEATURE, CHAT_FEATURE, PM_FEATURE, CHALK_FEATURE, "hockey-v4", BLOCK.FEATURE, duel.FEATURE, REACT_FEATURE, HAND_EMOJI_FEATURE, LINK_FEATURE, ...audienceRoom.features(this), ...(this.inspect.on ? [INSPECT_FEATURE] : [])],
       // The account speaks from Ooga Chat on another device: this page's own voice waits for the visitor's word.
       ...(audienceRoom.elsewhere(this, p.id) ? { voiceElsewhere: true } : {}) });
     // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
@@ -600,6 +600,7 @@ export class Room extends DurableObject {
     this.sendLinks(p);
     this.send(server, { t: "chalk-board", marks: this.chalk.marks, editor: this.chalkEditor ? this.chalkEditor.id : 0 });
     audienceRoom.welcome(this, p);
+    duel.welcome(this, p);
     this.broadcast({ t: "join", p: this.view(p) }, server);
     this.sendStudio(p);
     this.updateVoice();
@@ -676,9 +677,11 @@ export class Room extends DurableObject {
     }
     if (msg.t === "cabinet") { this.cabinetMessage(p, msg); return; }
     // While playing, the room owns the floor pose and body, regardless of game-scene reports.
-    if (p.cabinet && ["pose", "zone", "body", "blend", "hp", "shot", "swing", "hockey", "bf"].includes(msg.t)) return;
+    if (p.cabinet && ["pose", "zone", "body", "blend", "hp", "shot", "swing", "hockey", "bf", "duel"].includes(msg.t)) return;
     if (msg.t === "tess-guide") { tessQueue.message(this, p, msg); return; }
     if (msg.t === "bf") { block.message(this, p, msg); return; }
+    // Duels save their own attachments as they change (duel.js).
+    if (msg.t === "duel") { duel.message(this, p, msg); return; }
     if (msg.t === "hockey") { hockey.message(this, p, msg); ws.serializeAttachment(this.attachment(p)); return; }
     if (CONTROL_FRAMES.has(msg.t)) {
       if (!p.controlBucket) p.controlBucket = { tokens: CONTROL_BURST, at: p.seenAt };
@@ -696,6 +699,7 @@ export class Room extends DurableObject {
       p.w = ooga && msg.w ? msg.w : 0;
       p.v = ooga && msg.v ? msg.v : null; p.va = p.v ? p.seenAt : 0;
       p.r = ooga ? msg.r : undefined;
+      if (p.duelRec) duel.pose(this, p);
       const seatLost = Number.isInteger(p.studioSeat) && !studioSeatAllowed(p, p.studioSeat, this.players.values());
       if (seatLost) { delete p.studioSeat; this.removeStudioSpeaker(p.id); this.studio.revision++; this.persistStudio(); this.enforceStudio(); }
       if (this.chalkEditor && this.chalkEditor.id === p.id && this.chalkRefusal(p)) this.chalkLetGo(p);
@@ -729,6 +733,7 @@ export class Room extends DurableObject {
       if (msg.name !== "arcade.hall") hockey.leave(this, p.id);
       if (msg.name !== BLOCK.ZONE) block.leave(this, p.id);
       p.zone = msg.name;
+      duel.check(this, p);
       tessQueue.presence(this, p);
       this.inspect.event("zone", p, { from, to: p.zone });
       this.roomZoneChanged(p, from);
@@ -844,6 +849,7 @@ export class Room extends DurableObject {
       if (msg.name === p.body) return;
       hockey.leave(this, p.id);
       block.leave(this, p.id);
+      duel.leave(this, p);
       const refusal = claimRefusal(CAST, p.login, msg.name, this.players.values(), p.contributor, p.id);
       if (refusal) {
         this.send(ws, { t: "release", name: msg.name, reason: refusal });
@@ -940,6 +946,8 @@ export class Room extends DurableObject {
     p.x = at.x; p.y = at.y; p.z = at.z; p.yaw = at.yaw; p.g = null; p.j = p.w = 0; p.v = null; p.va = 0; p.r = undefined;
     p.blendTo = null; p.blendK = 0;
     audienceRoom.check(this, p);
+    // A seat drops the player's duel frames and poses (above), so a duel or challenge under way ends here.
+    duel.leave(this, p);
     p.ws.serializeAttachment(this.attachment(p));
     this.dirty = true;
     this.scheduleFlush();
@@ -958,6 +966,7 @@ export class Room extends DurableObject {
     step("cabinet", () => this.releaseCabinet(p));
     step("hockey", () => hockey.leave(this, p.id));
     step("block", () => block.leave(this, p.id));
+    step("duel", () => duel.leave(this, p));
     step("door", () => this.cancelDoor(p));
     step("passes", () => this.clearPasses(p));
     step("studio", () => this.leaveStudio(p));
@@ -991,6 +1000,7 @@ export class Room extends DurableObject {
     this.releaseCabinet(p);
     hockey.leave(this, p.id);
     block.leave(this, p.id);
+    duel.leave(this, p);
     this.cancelDoor(p);
     this.clearPasses(p);
     this.send(p.ws, { t: "release", name: p.body, reason });
@@ -2002,6 +2012,7 @@ export class Room extends DurableObject {
     this.alarmStarted = Date.now();
     hockey.sweep(this);
     block.sweep(this);
+    duel.sweep(this);
     tessQueue.sweep(this);
     // Cleanup retries run on every wake, not only at sweep time.
     await this.retryCleanup();

@@ -6,6 +6,9 @@ export { hockey } from "./hockey.js";
 import "../../src/js/hockey-wire.js";
 export const HOCKEY = globalThis.BL.hockeyWire;
 export { block } from "./block.js";
+export { duel } from "./duel.js";
+import "../../src/js/duel-rules.js";
+export const DUEL = globalThis.BL.duelRules;
 import { audienceRoom, overhearing } from "./room-audience.js";
 export { audienceRoom, overhearing };
 import { commonsRoom } from "./room-commons.js";
@@ -40,6 +43,8 @@ import "../../src/js/reaction-policy.js";
 //                                                primary, 2 the gun), 4 while aiming, plus the gun's rounds (0-31) times 8
 //                 { t: "shot", a }               a banana the driven Ooga fired: [from x, y, z, to x, y, z]
 //                 { t: "swing" }                 the driven Ooga's melee strike
+//                 { t: "duel", op, to?, kind? }  a duel (duel-rules.js, duel.js): `challenge`, `accept` or `decline` player
+//                                                `to`, `cancel` this page's challenge, `forfeit`, or a `hit` of `kind`
 //                 { t: "chat", text, clientId? }            a line for Ooga Chat (see Chat below)
 //                 { t: "pm", op, to, d?, n? }   a private conversation with player `to` (see Private below): `invite`,
 //                                               `accept`, `decline`, `block`, `end`, or `data` with a sealed frame `d`
@@ -65,6 +70,10 @@ import "../../src/js/reaction-policy.js";
 //                                                none; welcome/join carry j too
 //                 state.ws                       [id, w] pairs for every player holding a weapon, the same way
 //                 shot { id, a }, swing { id }   another player's shot or strike, to the players in their zone
+//                 duel { op, ... }           duels (duel.js): to everyone start { id, a, b, x, z, at, hp, now }, hp { id, hp, by,
+//                                            kind } and end { id, winner, loser, reason }; list { duels } after welcome; to
+//                                            one page challenged { from, exp }, challenging { to, exp }, refused { to, reason },
+//                                            declined { from }, withdrawn { from }, and end { id: 0, reason: "lost" }
 //                 release { name, reason }   the Ooga this socket claimed is not, or no longer, its to drive
 //                 host { id, followers }     who runs the NPCs now (0 for nobody) and how many pages follow
 //                                            them (a host with none sends nothing); binary NPC frames from them
@@ -341,6 +350,7 @@ export const parseClientMessage = (text) => {
   if (msg.t === "outdoor") return audienceRoom.parseOutdoor(msg);
   if (msg.t === "hockey") return HOCKEY.parse(msg);
   if (msg.t === "bf") return BLOCK.parse(msg);
+  if (msg.t === "duel") return DUEL.parse(msg);
   if (msg.t === "studio") return parseStudioCommand(msg);
   if (msg.t === "pose") {
     const { x, y, z, yaw } = msg;

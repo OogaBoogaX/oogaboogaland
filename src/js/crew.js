@@ -3691,6 +3691,8 @@
       }
       // A strike other players see; a held swing tells them when it is let go (releaseSwing).
       if (!held && cave === player && BL.net) BL.net.sendSwing();
+      // The scene hears the driven Ooga's own strikes (a duel's melee, duel.js): `fn(cave, charge)`, 0 to 1, or -1 a bash.
+      if (!held && cave === player && ctx.onSwing) ctx.onSwing(cave, 0);
       return true;
     };
     const bashWeapon = (cave = player) => {
@@ -3703,6 +3705,7 @@
       w.meleeTarget.node = w.meleeTarget.owner = null;
       findMeleeTarget(cave);
       w.bashTime = GUN_BASH_TIME;
+      if (ctx.onSwing) ctx.onSwing(cave, -1);
       return true;
     };
     const releaseSwing = (cave = player, cancel = false, focused = null) => {
@@ -3726,6 +3729,7 @@
         hitMeleeTarget(cave);
       }
       if (!cancel && cave === player && BL.net) BL.net.sendSwing();
+      if (!cancel && cave === player && ctx.onSwing) ctx.onSwing(cave, w.meleeCharge);
       return true;
     };
     // Thrusters built into a character sit wherever its own model puts them, so
