@@ -1,11 +1,14 @@
-// Room 1, the Lecture Hall: curved rows stepping down from the doorway's landing to a round stage, after the mock-up's
-// lecture halls. A lecture seat stands at every place of every row either side of the aisle, with a writing ledge
-// along the front of each row; on the stage stand the lectern with its ₿ plate and three whiteboards (a block header,
-// a Merkle tree and the subsidy's halvings, in a marker hand). Over the stage the dome carries the slide, why the
-// chain can't be rewritten, drawn from the latest three blocks while mempool.space has them; above it the latest
-// blocks run as cards, and the backlog and difficulty charts stand either side, all live (timechain-blocks.js). The
-// rest of the dome is dark and faintly panelled. Walkers pass through the rows; only the lectern and the boards stand
-// in their way, and the stage, part of the floor (timechain-rooms.js `floorAt`), is a step up from the hall's foot.
+// Room 1, the Lecture Hall: four broad terraces stepping down from the doorway's landing to a round stage, each a
+// lounge: leather armchairs well apart either side of the aisle, a small side table with a lamp beside each, and
+// room all round them to walk. On the stage a lectern with a tablet, a side table and a low walnut backdrop; there are no
+// boards on the stage, since the dome is the board. The dome's screens wrap far round the hall: over the stage the
+// slide, why the chain can't be rewritten, drawn from the latest three blocks while mempool.space has them; a
+// whiteboard either side of it (a block header to its left, a Merkle tree to its right, in a marker hand); behind
+// those, out past the side walls, the subsidy's halvings on a third whiteboard and the difficulty chart; and along
+// the top of all of them the latest blocks as a strip of cards from end to end, all live (timechain-blocks.js). The
+// rest of the dome is dark and faintly panelled. An armchair and its table stand in a walker's way; the stage, part
+// of the floor (timechain-rooms.js `floorAt`), is a step up from the hall's foot. The door is dark walnut with brass
+// portholes, push plates and kick plates.
 (() => {
   "use strict";
   const BL = window.BL;
@@ -14,16 +17,24 @@
   const { own } = RM.helpers;
   const P = RM.paintKit, DEG = ROOMS.DEG;
   const C = {
-    seat: "#3a332d", post: "#1d1b19", ledge: "#6b5238", stage: "#24201c", ring: "#c4700f", lectern: "#2a2420", frame: "#8b8f96", leg: "#55585e",
-    plate: "#14110e", amber: "#f7931a", amberText: "#ffb04d", white: "#f4efe6", grey: "#a89c8b", green: "#4fd08a"
+    leather: "#3a2a20", leatherLt: "#4a362a", piping: "#c4700f", post: "#1d1b19", walnut: "#4a2f1b", walnutDk: "#33200f", walnutLt: "#5f3d22", stage: "#2b1c11", ring: "#c4700f",
+    brass: "#b08a3a", plate: "#14110e", amber: "#f7931a", glass: "#9fc4d0", book: "#d9621e", page: "#efe6d2",
+    amberText: "#ffb04d", white: "#f4efe6", grey: "#a89c8b", green: "#4fd08a"
   };
-  // How far behind a seat its sitter stands up: inside the seat's own row, short of the next riser.
-  const BACK = 0.3;
-  // A lecture seat on its pedestal, its back toward +z, so the sitter faces -z (the mock-up's `lectureSeat`).
-  const seat = own(() => merge(
-    box({ w: 0.12, h: 0.32, d: 0.12, color: C.post, offset: { y: 0.16 } }),
-    box({ w: 0.64, h: 0.09, d: 0.5, color: C.seat, offset: { y: 0.36 } }),
-    moved(turnedX(box({ w: 0.64, h: 0.5, d: 0.08, color: C.seat }), 0.12), 0, 0.62, 0.24)
+  // How far in front of an armchair its sitter stands up (clear of the chair for the widest Ooga), the circle the
+  // chair stands in a walker's way as, and its side table: how far to the chair's side, its top's height and radius.
+  const FRONT = 1.1, CHAIR_R = 0.45, TABLE = { side: 0.86, top: 0.52, r: 0.2 };
+  // A lounge armchair on a walnut plinth, its back toward +z, so the sitter faces -z: a deep leather seat between two
+  // padded arms, a back leaning away and a headrest.
+  const chair = own(() => merge(
+    box({ w: 0.8, h: 0.12, d: 0.74, color: C.walnutDk, offset: { y: 0.06, z: 0.04 } }),
+    box({ w: 0.64, h: 0.2, d: 0.64, color: C.leather, offset: { y: 0.22 } }),
+    box({ w: 0.6, h: 0.08, d: 0.6, color: C.leatherLt, offset: { y: 0.36, z: -0.01 } }),
+    box({ w: 0.6, h: 0.02, d: 0.03, color: C.piping, offset: { y: 0.39, z: -0.3 } }),
+    moved(turnedX(box({ w: 0.72, h: 0.66, d: 0.14, color: C.leather }), 0.2), 0, 0.68, 0.36),
+    moved(turnedX(box({ w: 0.44, h: 0.2, d: 0.07, color: C.leatherLt }), 0.2), 0, 0.9, 0.31),
+    box({ w: 0.15, h: 0.44, d: 0.72, color: C.leather, offset: { x: -0.395, y: 0.34, z: 0.03 } }), box({ w: 0.15, h: 0.44, d: 0.72, color: C.leather, offset: { x: 0.395, y: 0.34, z: 0.03 } }),
+    box({ w: 0.17, h: 0.03, d: 0.74, color: C.walnut, offset: { x: -0.395, y: 0.575, z: 0.03 } }), box({ w: 0.17, h: 0.03, d: 0.74, color: C.walnut, offset: { x: 0.395, y: 0.575, z: 0.03 } })
   ));
   // The ₿ the Conference Room's table carries, a pixel art of 11 by 12, here on the lectern's plate.
   const BITCOIN = ["00011011000", "00011011000", "01111111100", "00110000110", "00110000110", "00111111100", "00110000110", "00110000011", "00110000011", "01111111110", "00011011000", "00011011000"];
@@ -33,8 +44,8 @@
     ctx.fillStyle = C.amber;
     BITCOIN.forEach((row, j) => { for (let i = 0; i < 11; i++) if (row[i] === "1") ctx.fillRect(x0 + i * cell, y0 + j * cell, cell, cell); });
   };
-
-  // The three whiteboards, in a marker hand on a white board with faint smudges (the mock-up's `boardCanvas`).
+  // The three whiteboards, in a marker hand on a white board with faint smudges (the mock-up's `boardCanvas`), each
+  // drawn 1024 by 560 and laid whole into its screen on the dome (`onScreen`).
   const BOARDS = [
     { caption: "Block header", note: "Eighty bytes, hashed twice with SHA-256: the hash must fall under the target, which is the work." },
     { caption: "Merkle tree", note: "Transactions hashed in pairs up to one root, which goes in the block's header." },
@@ -91,6 +102,19 @@
     }
   };
 
+  // A whiteboard on its screen: drawn at its own size, then laid in as large as fits, on paper a shade under white so
+  // the hall's lamps, which light the dome too, do not bloom it out.
+  const BOARD_W = 1024, BOARD_H = 560, PAPER = "#b4b1a6";
+  let sheet = null;
+  const onScreen = (which) => (ctx) => {
+    const W = ctx.canvas.width, H = ctx.canvas.height, k = Math.min(W / BOARD_W, H / BOARD_H);
+    if (!sheet) sheet = CH.canvas(BOARD_W, BOARD_H);
+    paintBoard(which)(sheet.getContext("2d"), BOARD_W, BOARD_H);
+    ctx.globalCompositeOperation = "source-over"; ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = "multiply"; ctx.drawImage(sheet, (W - BOARD_W * k) / 2, (H - BOARD_H * k) / 2, BOARD_W * k, BOARD_H * k);
+    ctx.globalCompositeOperation = "source-over";
+  };
+
   // The slide: three blocks, each naming the hash of the one before it. The latest three blocks while mempool.space
   // has them (their parent's hash, their own, their time and their transactions), else three example blocks, labelled.
   const EXAMPLE = [
@@ -133,7 +157,7 @@
     });
     ctx.fillStyle = C.white; ctx.font = P.font(500, u * 4.6);
     ctx.fillText("Change one transaction → its block's hash changes → every later block breaks.", u * 7, by + bh + u * 9.5);
-    P.pix(ctx, "LECTURE 4 · PROOF OF WORK", u * 7, H - u * 5.4, u * 3.2, C.grey, "left");
+    P.pix(ctx, "PROOF OF WORK", u * 7, H - u * 5.4, u * 3.2, C.grey, "left");
     P.pix(ctx, live ? "LIVE · MEMPOOL.SPACE" : "EXAMPLE BLOCKS", W / 2, H - u * 5.4, u * 3.2, live ? C.green : C.grey);
     P.pix(ctx, "7 / 24", W - u * 7, H - u * 5.4, u * 3.2, C.grey, "right");
   };
@@ -145,50 +169,73 @@
     const primary = CH.PANELS[i].sets[0];
     return k + CH.freshness(CH.PANELS[i].id === "window" ? reader.historyStatus() : reader.status(primary), reader.at(primary), now);
   };
-  const cardKey = (reader, i, now) => {
-    if (i === 0) return `label|${reader.status("recent")}`;
-    const blocks = reader.value("recent"), b = blocks && blocks[i - 1];
-    return b ? `${b.id}|${b.pool}|${CH.format.ago(now - b.time * 1000)}` : `none|${reader.status("recent")}`;
-  };
-
   // ---------- its door ----------
-  // A lecture hall's: oak leaves with a tall wired-glass light by the seam, a steel push bar and a brass kick plate, in
-  // an oak frame set in cream plaster, a clock on the wall to the right and a notice board over the Exit button.
+  // Dark walnut leaves, each a raised panel under a brass porthole, with a brass push plate by the seam and a kick
+  // plate along the foot, in a walnut frame set in a panelled bay; a brass sconce either side.
   const door = {
-    casing: "#e3dccb", frame: "#7a5432", header: "#5a3d24", word: "#3ddc84", strip: null, chain: false,
-    leaf: "#9a6c40", seam: "#4a321c", plate: "#5a3d24", face: "#3ddc84", mark: "#1f1f1f",
+    casing: "#2a1a10", frame: "#5f3d22", header: "#33200f", word: "#ffb04d", strip: null, chain: false,
+    leaf: "#4a2f1b", seam: "#1a0f08", plate: "#b08a3a", face: "#f7931a", mark: "#1a0f08",
     leafFace(side, H) {
-      for (let x = -0.7; x < 0.75; x += 0.1) H.rect(x, 0.32, x + 0.004, 3.15, "#8a5f37");
-      const g0 = H.inner + side * 0.12, g1 = H.inner + side * 0.34;
-      H.rect(g0, 1.7, g1, 2.95, "#b9d3dc", 0.25, 1);
-      for (let y = 1.75; y < 2.95; y += 0.1) H.rect(g0, y, g1, y + 0.004, "#8aa0a8", 0.1, 2);
-      H.rect(-0.62, 1.0, 0.62, 1.1, "#c9ccd2", 0.2, 1);
-      H.rect(-0.75, 0.04, 0.75, 0.3, "#b08a3a", 0.15, 1);
+      for (let x = -0.68; x < 0.72; x += 0.17) H.rect(x, 0.36, x + 0.006, 3.12, "#3d2616");
+      H.rect(-0.56, 0.5, 0.56, 1.42, "#3d2616", 0, 1); H.rect(-0.5, 0.56, 0.5, 1.36, "#553620", 0, 2);
+      H.rect(-0.56, 2.86, 0.56, 3.06, "#3d2616", 0, 1);
+      H.disc(0, 2.2, 0.36, C.brass, 0.12, 20, 1); H.disc(0, 2.2, 0.29, "#0f1418", 0, 20, 2); H.disc(0, 2.2, 0.27, C.glass, 0.3, 20, 3);
+      H.line(-0.19, 2.2, 0.19, 2.2, 0.012, "#6f8f99", 0.2, 4); H.line(0, 2.01, 0, 2.39, 0.012, "#6f8f99", 0.2, 4);
+      H.rect(H.inner + side * 0.06, 1.52, H.inner + side * 0.2, 1.98, C.brass, 0.14, 2);
+      H.rect(-0.75, 0.04, 0.75, 0.3, C.brass, 0.12, 1);
     }
   };
   const doorTrim = (K, L) => {
-    const d = RM.doorway(L);
-    K.picture(0.5, 0.5, 200, 200, (c, w, h) => {
-      c.fillStyle = "#f4f1e8"; c.beginPath(); c.arc(w / 2, h / 2, 94, 0, Math.PI * 2); c.fill();
-      c.lineWidth = 8; c.strokeStyle = "#2a2a2a"; c.stroke();
-      c.fillStyle = "#2a2a2a";
-      for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; c.fillRect(w / 2 + Math.sin(a) * 76 - 3, h / 2 - Math.cos(a) * 76 - 3, 6, 6); }
-      c.lineWidth = 6; c.lineCap = "round"; c.beginPath(); c.moveTo(w / 2, h / 2); c.lineTo(w / 2 + 40, h / 2 - 28); c.moveTo(w / 2, h / 2); c.lineTo(w / 2 - 10, h / 2 - 64); c.stroke();
-    }, 2.25, 2.65, d.Z - 0.02, { ry: Math.PI, emissive: 0.4 });
-    K.picture(0.66, 0.5, 264, 200, (c, w, h) => {
-      c.fillStyle = "#b8865a"; c.fillRect(0, 0, w, h); c.strokeStyle = "#5a3d24"; c.lineWidth = 12; c.strokeRect(0, 0, w, h);
-      for (const [x, y, nw, nh, col] of [[24, 26, 90, 70, "#f4f1e8"], [130, 30, 100, 60, "#fff5a8"], [40, 112, 80, 62, "#d8ecff"], [140, 104, 96, 70, "#f4f1e8"]]) {
-        c.fillStyle = col; c.fillRect(x, y, nw, nh); c.fillStyle = "#c0392b"; c.fillRect(x + nw / 2 - 4, y + 2, 8, 8);
-        c.fillStyle = "#666"; for (let l = 0; l < 4; l++) c.fillRect(x + 8, y + 18 + l * 11, nw - 16, 3);
-      }
-    }, -2.22, 2.3, d.Z - 0.02, { ry: Math.PI, emissive: 0.35 });
+    const d = RM.doorway(L), z = d.Z - 0.02;
+    // The bay's panelling: a dado rail, and a raised panel either side below it, clear of the Exit button.
+    for (const side of [-1, 1]) {
+      K.box(d.B - d.W - d.F - 0.1, 0.06, 0.04, C.walnutLt, side * (d.B + d.W + d.F) / 2, 1.72, z);
+      K.box(0.5, 0.56, 0.03, C.walnutDk, side * 2.2, 0.48, z);
+      // A sconce: a brass arm and its warm glass.
+      K.box(0.06, 0.2, 0.08, C.brass, side * 2.42, 3.05, z - 0.03);
+      K.ball(0.09, "#ffcf8a", side * 2.42, 3.24, z - 0.07, { emissive: 1, glow: true, seg: 8 });
+    }
   };
+
+  // ---------- the dome's screens ----------
+  // In degrees: the slide over the stage, a screen to its right and one to its left as far round as the side walls, a
+  // smaller one behind each of those, and the blocks as a strip above. (The band left under the slide is a caption's.)
+  const screens = (L) => {
+    const edge = (az) => ROOMS.edgeEl(L, az * DEG) / DEG;
+    // The slide takes the front of the dome, 76 degrees round and 38 up; a screen either side of it carries on round
+    // past the side walls, and a smaller one stands behind each of them. A screen's foot clears the dome's lower edge
+    // where that edge is highest under it, at its end nearer the door.
+    const s0 = edge(0) + 2.5, cap = 4.4, half = 38, slide0 = s0 + cap + 0.6, slide1 = slide0 + 38;
+    const side0 = Math.max(edge(102) + 2.5, slide0), side1 = side0 + 31, rep0 = edge(150) + 2.5, rep1 = rep0 + 20;
+    const px = (az, el0, el1, w) => Math.round(w * (Math.sin(el1 * DEG) - Math.sin(el0 * DEG)) / (az * DEG * Math.cos((el0 + el1) / 2 * DEG)));
+    return {
+      slide: { az0: -half, az1: half, el0: slide0, el1: slide1, w: 2048, h: px(2 * half, slide0, slide1, 2048) },
+      right: { az0: 42, az1: 102, el0: side0, el1: side1, w: 1536, h: px(60, side0, side1, 1536) },
+      left: { az0: -102, az1: -42, el0: side0, el1: side1, w: 1536, h: px(60, side0, side1, 1536) },
+      rearRight: { az0: 108, az1: 150, el0: rep0, el1: rep1, w: 1024, h: px(42, rep0, rep1, 1024) },
+      rearLeft: { az0: -150, az1: -108, el0: rep0, el1: rep1, w: 1024, h: px(42, rep0, rep1, 1024) },
+      // The latest blocks, a ribbon over the tops of the three front screens, from end to end of them.
+      cards: slide1 + 2, cards0: -102, cards1: 102
+    };
+  };
+  // The block `back` below the tip. The newest reading holds fifteen; the ribbon is longer, and takes the rest from
+  // the reader's window as its pages arrive.
+  const blockBack = (reader, back) => reader.tip === null ? null : reader.block(reader.tip - back);
+  const cardKey = (reader, i, now) => {
+    if (i === 0) return `label|${reader.status("recent")}`;
+    const b = blockBack(reader, i - 1);
+    return b ? `${b.id}|${b.pool}|${CH.format.ago(now - b.time * 1000)}` : `none|${reader.status("recent")}`;
+  };
+
+  // Where the lectern stands on the stage, in the room's frame, from its focus `F`: off to one side of the middle and
+  // turned in a little.
+  const stageOf = (L) => ({ F: L.rake.F, top: L.rake.stageTop, r: L.rake.stage, lectern: { x: 1.7, z: L.rake.F + 1.7, ry: -0.3 } });
 
   const plan = (K, L) => {
     doorTrim(K, L);
     const R = L.rake, F = R.F, rows = R.rows;
-    K.wallColor("#1c1a17");
-    K.rakeColors({ terrace: ["#221f1c", "#161412"], nosing: C.ring, landing: "#1f1c1a" });
+    K.wallColor("#1c1611");
+    K.rakeColors({ terrace: ["#241a12", "#1a130d"], nosing: C.ring, landing: "#20170f" });
     K.render({ sky: [0.52, 0.47, 0.42], ground: [0.22, 0.19, 0.16], ambientFloor: 0.42, bloomStrength: 0.55 });
     // The dome: dark, a little lighter toward its foot, faintly panelled.
     K.dome((ctx, D) => {
@@ -197,72 +244,81 @@
       for (let i = 0; i < 32; i++) ctx.fillRect(i * D.W / 32, 0, 3, D.H);
       for (let el = -10; el < 90; el += 10) ctx.fillRect(0, D.y(el), D.W, 2);
     });
-    // A seat at every place on every row, each facing the stage; standing up leaves the sitter just behind it.
+    // An armchair at every place on every terrace, facing the stage; standing up leaves the sitter in front of it.
+    // Beside each, on its side away from the aisle, a small round walnut table with a brass lamp.
     for (const s of R.seats) {
-      const place = K.seat(s.x, s.z, s.heading + Math.PI, R.seatTop, s.floor, BACK);
-      K.node(null, seat(), s.x, s.floor, s.z, { ry: s.heading, target: { kind: "chair", tip: "Lecture seat", radius: 0.5, index: place.index } });
-    }
-    // A writing ledge in front of each row, either side of the aisle, at desk height over the row's own floor.
-    for (const row of rows) {
-      const a0 = (R.aisle + 0.02) / row.d, a1 = row.psiS + R.pitch / (2 * row.d);
-      if (a1 <= a0) continue;
-      K.sector(F, row.rIn + 0.04, row.rIn + 0.32, a0, a1, row.y + 0.6, row.y + 0.64, C.ledge);
-      K.sector(F, row.rIn + 0.04, row.rIn + 0.32, -a1, -a0, row.y + 0.6, row.y + 0.64, C.ledge);
+      const place = K.seat(s.x, s.z, s.heading + Math.PI, R.seatTop, s.floor, -FRONT);
+      K.node(null, chair(), s.x, s.floor, s.z, { ry: s.heading, target: { kind: "chair", tip: "Lounge chair", radius: 0.6, index: place.index } });
+      K.solid({ x: s.x, z: s.z, r: CHAIR_R });
+      const d = rows[s.row].d, a = s.heading + Math.sign(s.heading) * TABLE.side / d, tx = d * Math.sin(a), tz = F + d * Math.cos(a), y = s.floor;
+      K.cyl(TABLE.r * 0.8, TABLE.r * 0.9, 0.03, C.post, tx, y + 0.015, tz, { seg: 12 });
+      K.cyl(0.03, 0.03, TABLE.top - 0.06, C.post, tx, y + TABLE.top / 2, tz, { seg: 8 });
+      K.cyl(TABLE.r, TABLE.r, 0.04, C.walnutLt, tx, y + TABLE.top - 0.02, tz, { seg: 16 });
+      K.cyl(0.02, 0.03, 0.14, C.brass, tx, y + TABLE.top + 0.07, tz, { seg: 8 });
+      K.ball(0.055, "#ffcf8a", tx, y + TABLE.top + 0.18, tz, { emissive: 1, glow: true, seg: 8 });
+      K.solid({ x: tx, z: tz, r: TABLE.r });
     }
     // The round stage at the focus, its rim lit amber, laid in rings so Canvas 2D sorts what stands on it over it.
-    const dS = R.stage, top = R.stageTop;
+    const S = stageOf(L), dS = S.r, top = S.top;
     K.cyl(dS * 0.34, dS * 0.34, top - L.yMin, C.stage, 0, (L.yMin + top) / 2, F, { seg: 64 });
     K.sector(F, dS * 0.34, dS * 0.68, -Math.PI, Math.PI, L.yMin, top, C.stage, { steps: 64 });
-    K.sector(F, dS * 0.68, dS, -Math.PI, Math.PI, L.yMin, top, C.stage, { steps: 64 });
+    K.sector(F, dS * 0.68, dS, -Math.PI, Math.PI, L.yMin, top, C.walnutDk, { steps: 64 });
     K.torus(dS, 0.03, C.ring, 0, top, F, { emissive: 0.9, glow: true, seg: 96, sides: 4 });
-    // The lectern, its reading top tipped toward the speaker and its ₿ plate toward the hall.
-    const lz = F + 1.25;
-    K.node("lectern", (k) => {
-      k.box(0.7, 0.9, 0.46, C.lectern, 0, 0.45, 0);
-      k.box(0.78, 0.05, 0.56, C.ledge, 0, 0.95, 0.02, { rx: -0.22 });
-    }, 0, top, lz, { target: { kind: "lectern", tip: "Lectern", radius: 0.6, data: { say: "Lecture 4 · Proof of work · today's slide is on the dome" } } });
-    K.group(0, top, lz).picture(0.4, 0.4, 128, 128, paintPlate, 0, 0.55, 0.235, { emissive: 0.85, depthBias: RM.MARK_BIAS });
-    K.solid({ x: 0, z: lz, hx: 0.42, hz: 0.32 });
-    // Three whiteboards across the back of the stage, on legs with a pen tray; a tap opens them close up.
-    const bz = F - 1.9, bw = 1.9;
-    for (let i = 0; i < 3; i++) {
-      const b = K.group((i - 1) * (bw + 0.15), top, bz);
-      b.box(bw + 0.08, 1.12, 0.05, C.frame, 0, 1.45, -0.03);
-      b.box(bw, 0.05, 0.12, C.frame, 0, 0.9, 0.05);
-      for (const side of [-1, 1]) b.box(0.06, 0.9, 0.06, C.leg, side * (bw / 2 - 0.1), 0.45, 0);
-      const face = b.picture(bw, 1.04, 1024, 560, paintBoard(i), 0, 1.45, 0.002, { name: `board${i}`, emissive: 0.72, depthBias: RM.MARK_BIAS });
-      K.target(face, "whiteboard", `Whiteboard · ${BOARDS[i].caption} · tap for a close-up`, 1.05, { index: i });
+    // The backdrop behind the stage: walnut slats, low enough to leave the slide's foot in sight from every row.
+    for (let i = 0; i < 26; i++) {
+      const a = Math.PI - 0.98 + 1.96 * i / 26;
+      K.sector(F, dS + 0.85, dS + (i & 1 ? 0.93 : 0.99), a, a + 1.96 / 26, L.yMin, L.yMin + 2.2, i & 1 ? C.walnutDk : C.walnut, { steps: 1 });
     }
-    K.solid({ x: 0, z: bz, hx: 1.5 * bw + 0.2, hz: 0.14 });
-
-    // The dome's pictures: the slide over the stage, the latest blocks above it, a chart either side.
-    const s0 = ROOMS.edgeEl(L, 0) / DEG + 2.5, s1 = s0 + 30, half = 34;
-    const slideW = 1800, slideH = Math.round(slideW * (Math.sin(s1 * DEG) - Math.sin(s0 * DEG)) / (2 * half * DEG * Math.cos((s0 + s1) / 2 * DEG)));
-    K.live({ id: "slide", tip: "The slide · tap for a close-up", az0: -half, az1: half, el0: s0, el1: s1, w: slideW, h: slideH,
-      key: (f) => slideKey(f.reader), paint: (ctx, f) => paintSlide(ctx, f.reader) });
-    const c0 = s1 + 2, slot = 10, cardW = (slot - 1.6) * DEG * L.R * Math.cos((c0 + 2.5) * DEG), cardEl = cardW * CH.CARD_H / CH.CARD_W / (L.R * DEG);
-    for (let i = 0; i < 10; i++) {
-      const az = -4.5 * slot + i * slot;
-      K.live({ board: "charts", tip: "Latest blocks · tap for the charts", az0: az - slot / 2 + 0.8, az1: az + slot / 2 - 0.8, el0: c0, el1: c0 + cardEl, w: CH.CARD_W, h: CH.CARD_H,
-        key: (f, now) => cardKey(f.reader, i, now), paint: (ctx, f, now) => { const blocks = f.reader.value("recent"); if (i === 0) CH.ribbonLabel(ctx, f.reader.status("recent")); else CH.card(ctx, blocks && blocks[i - 1], now); } });
+    K.sector(F, dS + 0.82, dS + 1.02, Math.PI - 0.98, Math.PI + 0.98, L.yMin + 2.2, L.yMin + 2.26, C.brass, { steps: 26 });
+    // The lectern: a walnut stand at an Ooga's chest height, the ₿ on its front, and its reading top and tablet tipped
+    // toward the speaker: high at the hall's side, low at his.
+    const T = K.group(S.lectern.x, top, S.lectern.z, S.lectern.ry);
+    T.node("lectern", (k) => {
+      k.box(0.86, 0.74, 0.5, C.walnut, 0, 0.37, 0);
+      k.box(0.94, 0.05, 0.6, C.walnutLt, 0, 0.78, -0.02, { rx: -0.2 });
+      k.box(0.9, 0.06, 0.06, C.brass, 0, 0.06, 0.26);
+    }, 0, 0, 0, { target: { kind: "lectern", tip: "Lectern", radius: 0.7, data: { say: "Lecture 4 · Proof of work · today's slide is on the dome" } } });
+    T.picture(0.42, 0.42, 128, 128, paintPlate, 0, 0.42, 0.255, { emissive: 0.85, depthBias: RM.MARK_BIAS });
+    T.node("tablet", (k) => { k.box(0.56, 0.02, 0.38, "#0c0c0d", 0, 0, 0); k.box(0.5, 0.006, 0.32, "#7f93b0", 0, 0.013, 0, { emissive: 0.4 }); }, 0, 0.817, -0.028, { rx: -0.2 });
+    K.solid({ x: S.lectern.x, z: S.lectern.z, hx: 0.5, hz: 0.34, ry: S.lectern.ry });
+    // A side table with the book and a glass of water.
+    const side = K.group(3.25, top, F + 0.55, -0.5);
+    side.cyl(0.3, 0.3, 0.04, C.walnutLt, 0, 0.72, 0, { seg: 20 }); side.cyl(0.04, 0.04, 0.7, C.post, 0, 0.36, 0, { seg: 8 }); side.cyl(0.2, 0.22, 0.03, C.post, 0, 0.015, 0, { seg: 16 });
+    side.box(0.24, 0.05, 0.32, C.book, -0.06, 0.765, 0.02, { ry: 0.3 }); side.box(0.22, 0.036, 0.3, C.page, -0.055, 0.765, 0.025, { ry: 0.3 });
+    side.cyl(0.035, 0.03, 0.11, C.glass, 0.14, 0.795, -0.08, { seg: 10, emissive: 0.2 });
+    K.solid({ x: 3.25, z: F + 0.55, r: 0.3 });
+    // The dome's screens: the slide, three whiteboards and a chart, and the latest blocks along the top of them.
+    const D = screens(L);
+    K.live({ id: "slide", tip: "The slide · tap for a close-up", ...D.slide, key: (f) => slideKey(f.reader), paint: (ctx, f) => paintSlide(ctx, f.reader) });
+    [["board0", D.left], ["board1", D.right], ["board2", D.rearLeft]].forEach(([id, rect], i) =>
+      K.live({ id, tip: `Whiteboard · ${BOARDS[i].caption} · tap for a close-up`, ...rect, emissive: 0.5, key: () => "drawn", paint: onScreen(i) }));
+    // The chart keeps its own shape, in the middle of its screen's place.
+    const chart = CH.PANELS.findIndex((p) => p.id === "difficulty"), rr = D.rearRight, mid = (rr.az0 + rr.az1) / 2;
+    const span = (rr.el1 - rr.el0) * CH.PANEL_W / CH.PANEL_H / Math.cos((rr.el0 + rr.el1) / 2 * DEG);
+    K.live({ board: "charts", panel: chart, tip: `${CH.PANELS[chart].title} · tap for a close-up`, az0: mid - span / 2, az1: mid + span / 2, el0: rr.el0, el1: rr.el1, w: CH.PANEL_W, h: CH.PANEL_H,
+      key: (f, now) => chartKey(f.reader, chart, now), paint: (ctx, f, now) => CH.PANELS[chart].paint(ctx, f.reader, now) });
+    // As many cards of the one size as the ribbon's length holds, the label first and then the tip and the blocks
+    // under it, newest nearest the label.
+    const slot = 10, count = Math.floor((D.cards1 - D.cards0) / slot), first = (D.cards0 + D.cards1 - (count - 1) * slot) / 2;
+    const cardW = (slot - 1.6) * DEG * L.R * Math.cos((D.cards + 2.5) * DEG), cardEl = cardW * CH.CARD_H / CH.CARD_W / (L.R * DEG);
+    for (let i = 0; i < count; i++) {
+      const az = first + i * slot;
+      K.live({ board: "charts", tip: "Latest blocks · tap for the charts", az0: az - slot / 2 + 0.8, az1: az + slot / 2 - 0.8, el0: D.cards, el1: D.cards + cardEl, w: CH.CARD_W, h: CH.CARD_H,
+        key: (f, now) => cardKey(f.reader, i, now), paint: (ctx, f, now) => { if (i === 0) CH.ribbonLabel(ctx, f.reader.status("recent")); else CH.card(ctx, blockBack(f.reader, i - 1), now); } });
     }
-    const e0 = Math.max(ROOMS.edgeEl(L, 78 * DEG) / DEG, s0) + 3, e1 = e0 + 20, span = 20 * CH.PANEL_W / CH.PANEL_H / Math.cos((e0 + e1) / 2 * DEG);
-    [["mempool", -61], ["difficulty", 61]].forEach(([id, az]) => {
-      const i = CH.PANELS.findIndex((p) => p.id === id);
-      K.live({ board: "charts", panel: i, tip: `${CH.PANELS[i].title} · tap for a close-up`, az0: az - span / 2, az1: az + span / 2, el0: e0, el1: e1, w: CH.PANEL_W, h: CH.PANEL_H,
-        key: (f, now) => chartKey(f.reader, i, now), paint: (ctx, f, now) => CH.PANELS[i].paint(ctx, f.reader, now) });
-    });
 
     // Point lights, the fixed ones first: the stage, the dome's warm glow over the front, a pale fill from the back.
-    K.light(0, top + 4.2, F + 3.2, 10, 0.95, 0.72, 0.46);
+    K.light(0.6, top + 4.2, F + 2.6, 11, 1.0, 0.76, 0.5);
     K.light(0, L.c + 0.45 * L.R, -0.35 * L.R, 30, 0.8, 0.52, 0.24);
     K.light(0.3 * L.R, L.c + 0.3 * L.R, 0.4 * L.R, 26, 0.42, 0.4, 0.36);
     K.light(-0.3 * L.R, L.c + 0.2 * L.R, 0.15 * L.R, 20, 0.36, 0.3, 0.24);
   };
 
-  // Nothing moves here; a tap on a whiteboard or the slide opens all four close up, paged with the arrow keys.
+  // Nothing moves here; a tap on the slide or a whiteboard opens all four close up, paged with the arrow keys.
   const animate = (nodes, built) => {
-    const pages = [];
+    const live = {}, pages = [];
+    for (const l of built.live) if (l.spec.id) live[l.spec.id] = l;
+    const canvasOf = (id) => { const g = live[id].node.geometry; return g ? g.imageSurface.canvas : null; };
     let index = 0, version = 0;
     const board = {
       title: "Lecture Hall", help: "Today's slide and the three whiteboards. Arrow keys flip between them.", wide: true,
@@ -270,23 +326,20 @@
       get caption() { return pages[index].caption; }, get note() { return pages[index].note; }, get version() { return version; },
       go: (i) => { index = i; version++; }
     };
-    const open = (hud, slide, which) => {
+    const open = (hud, id) => {
       pages.length = 0;
-      if (slide) pages.push({ canvas: slide, caption: "Why the chain can't be rewritten", note: "Lecture 4 · Proof of work. While mempool.space answers, the three blocks are the latest three." });
-      for (let i = 0; i < 3; i++) pages.push({ canvas: nodes[`board${i}`].geometry.imageSurface.canvas, caption: BOARDS[i].caption, note: BOARDS[i].note });
-      index = which < 0 ? 0 : which + (slide ? 1 : 0); version++;
+      const add = (key, caption, note) => { const canvas = canvasOf(key); if (canvas) { if (key === id) index = pages.length; pages.push({ canvas, caption, note }); } };
+      index = 0;
+      add("slide", "Why the chain can't be rewritten", "Lecture 4 · Proof of work. While mempool.space answers, the three blocks are the latest three.");
+      BOARDS.forEach((b, i) => add(`board${i}`, b.caption, b.note));
+      if (!pages.length) return false;
+      version++;
       hud.openBoard(board);
       return true;
     };
-    const slideLive = built.live.find((l) => l.spec.id === "slide");
-    const slideCanvas = () => slideLive && slideLive.node.geometry ? slideLive.node.geometry.imageSurface.canvas : null;
     return {
       update() {},
-      tap(owner, hud) {
-        if (owner.kind === "whiteboard") return open(hud, slideCanvas(), owner.index);
-        if (owner.kind === "live" && owner.slot.spec.id === "slide") return open(hud, owner.slot.canvas, -1);
-        return false;
-      }
+      tap(owner, hud) { return owner.kind === "live" && !!owner.slot.spec.id && open(hud, owner.slot.spec.id); }
     };
   };
   BL.timechainRoomKinds.lecture = { plan, animate, door };

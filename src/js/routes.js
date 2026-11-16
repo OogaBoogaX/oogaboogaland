@@ -53,7 +53,7 @@
       // are empty and have none.
       ...[
         ["Conference Room", "A round table for eight under a dome of live block and mining charts from mempool.space, the latest blocks round its base and the next block at the crown. The one room that locks."],
-        ["Lecture Hall", "Raked rows facing a stage with three whiteboards, a slide on the dome and live charts either side."],
+        ["Lecture Hall", "Lounge chairs on broad terraces facing a stage under a dome of screens: a slide drawn from the latest blocks, three whiteboards, a live chart and the newest blocks along the top."],
         ["The Mining Museum", "From Satoshi's CPU to today's ASICs: miners from every era round the room, under seventeen years of hashrate on the dome."],
         ["Satoshi's Temple", "A meditation temple under a dusk sky: a lantern path, a pagoda, a koi pond and a replica of Valentina Picozzi's Satoshi statue in the main hall."],
         ["Proof of Work-out", "Exercise bikes facing a mountain sunrise: pedal to find a fake block and climb the gym's leaderboard."],

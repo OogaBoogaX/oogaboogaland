@@ -370,6 +370,8 @@
       get summary() { return summary; },
       get version() { return version; },
       get tip() { return cache.tip; },
+      // The block at a height, from the newest reading or the window's pages as they come in; null until it is known.
+      block: (height) => cache.blocks.get(height) || null,
       get pending() { return NAMES.filter((n) => states[n].pending).length + (history.pending ? 1 : 0); },
       get timers() { return NAMES.filter((n) => states[n].timer).length + (history.timer ? 1 : 0); }
     };

@@ -29,7 +29,7 @@
   // null for a number with no room behind it yet.
   const KINDS = [
     { kind: "conference", name: "Conference Room", tag: "Live block and mining charts round the dome", R: 10.5 },
-    { kind: "lecture", name: "Lecture Hall", tag: "A slide, three whiteboards and live charts", R: 15 },
+    { kind: "lecture", name: "Lecture Hall", tag: "Lounge chairs on broad terraces under a dome of screens", R: 15 },
     { kind: "mining", name: "The Mining Museum", tag: "From Satoshi's CPU to today's ASICs", R: 15 },
     { kind: "temple", name: "Satoshi's Temple", tag: "A meditation temple; the bell rings every block", R: 15 },
     { kind: "workout", name: "Proof of Work-out", tag: "Pedal to find a fake block", R: 12 },
@@ -59,12 +59,14 @@
   };
   // The sphere and its screen for each kind. The raked halls step down from the doorway's landing toward a focus in
   // front (`rake`): rows `depth` deep round it, seats `pitch` apart along them as far round as `psiMax` degrees, either
-  // side of an aisle `aisle` wide each way; the theater's aisle has a half step in every riser.
+  // side of an aisle `aisle` wide each way; with `halfSteps` the aisle has a half step in every riser (the theater's,
+  // and the Lecture Hall's, whose four broad terraces stand a riser too tall for a walker apart), and with `dais` a
+  // round stage stands at the focus.
   const shapeOf = (kind, R) => {
     if (kind === "planetarium") return { c: 1.6, yMin: 0, P: 0, edge: { flat: 1.6 } };
     if (kind === "lecture") {
       const P = 0.26 * R;
-      return { c: 0.1 * R, yMin: -P, P, edge: { A: [-R, -P + 2.3], B: [R, 3.7] }, rake: { focus: -0.45 * R, front: -0.05 * R, back: 0.7 * R, depth: 1.15, pitch: 1.2, psiMax: 66, seatTop: 0.41, halfSteps: false, aisle: 0.6 } };
+      return { c: 0.1 * R, yMin: -P, P, edge: { A: [-R, -P + 2.3], B: [R, 3.7] }, rake: { focus: -0.45 * R, front: 0.94, back: 10, depth: 3.02, pitch: 2.9, psiMax: 58, seatTop: 0.42, halfSteps: true, dais: true, aisle: 1.1 } };
     }
     if (kind === "theater") {
       const P = 0.38 * R;
@@ -114,7 +116,7 @@
         seats.push({ row: row.i, x: row.d * Math.sin(psi), z: F + row.d * Math.cos(psi), floor: row.y, heading: psi });
       }
     }
-    return { F, rows, seats, landing: rows[n - 1].rOut, stage: K.halfSteps ? 0 : rows[0].rIn - 1.2, stageTop: K.halfSteps ? L.yMin : L.yMin + 0.4 };
+    return { F, rows, seats, landing: rows[n - 1].rOut, stage: K.dais ? rows[0].rIn - 1.2 : 0, stageTop: K.dais ? L.yMin + 0.4 : L.yMin };
   };
   const layouts = new Map();
   const layout = (id) => {
@@ -163,7 +165,7 @@
     if (d < rows[0].rIn) return K.stage && d < K.stage ? K.stageTop : L.yMin;
     // Rows stand a little closer than their depth, so each runs to the midpoint between its centre and the next's.
     const k = Math.min(rows.length - 1, Math.max(0, Math.round((d - rows[0].d) / (rows[1].d - rows[0].d)))), row = rows[k];
-    // In the theater's aisle the outer half of every row is half a riser up, so no step there is over a walker's.
+    // In an aisle with half steps the outer half of every row is half a riser up, so no step there is over a walker's.
     if (K.halfSteps && Math.abs(x) < K.aisle && d > row.d) return row.y + ((k + 1 < rows.length ? rows[k + 1].y : 0) - row.y) / 2;
     return row.y;
   };

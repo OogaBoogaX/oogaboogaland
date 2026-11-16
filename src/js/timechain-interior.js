@@ -279,8 +279,9 @@
     chair: COARSE ? " · tap SIT beside it" : " · Space beside it sits"
   };
   // How close to a seat an Ooga reaches to sit in it (past its own body and the seat's) and how squarely the view
-  // must face it (the cosine of the angle off), so Space between two seats still jumps.
-  const SIT_REACH = 0.45, SIT_FACING = Math.cos(0.7), CHAIR_R = 0.48;
+  // must face it (the cosine of the angle off), so Space between two seats still jumps. The seat's hint stays up for
+  // as long as Space would sit, and comes down the moment it would not.
+  const SIT_REACH = 0.45, SIT_FACING = Math.cos(0.7), CHAIR_R = 0.48, SIT_HINT_MS = 3600000;
 
   // The visit. `shell` is the scene object the director knows (scene-timechain.js), `visit` what the shell resolved.
   const create = (shell, ctx, visit) => {
@@ -561,14 +562,18 @@
       const p = avatar.root.position, E = L.exitButton;
       return Math.hypot(p.x - E.x, p.z - E.z) < L.exitReach;
     };
-    // A free seat beside the Ooga and in front of the view, on the floor the Ooga stands on (a raked hall's own row).
+    // A free seat beside the Ooga and in front of the view, on the floor the Ooga stands on (a raked hall's own row),
+    // and only one the crew would seat it in now (crew.js `sitPlayer`: standing on the ground, with somewhere clear to
+    // stand up again), so the prompt never offers a seat that Space would not take.
     const nearChair = () => {
-      if (!avatar || avatar.camp.seat || avatar.hop > 0) return null;
+      if (!avatar || avatar.camp.seat || avatar.hop > 0 || avatar.hopV > 0) return null;
       const p = avatar.root.position, feet = p.y - avatar.baseY, c = camera.position, t = camera.target, fx = t.x - c.x, fz = t.z - c.z, f = Math.hypot(fx, fz) || 1;
+      if (Math.abs(feet - groundAt(p.x, p.z, feet, feet, avatar)) > 1e-6) return null;
       let near = null, best = CHAIR_R + avatar.bodyRadius + SIT_REACH;
       for (const s of seats) {
         const dx = s.x - p.x, dz = s.z - p.z, d = Math.hypot(dx, dz);
-        if (!s.sitter && Math.abs(feet - s.floor) < 0.25 && d < best && (dx * fx + dz * fz) / (d * f) > SIT_FACING) { near = s; best = d; }
+        if (!s.sitter && Math.abs(feet - s.floor) < 0.25 && d < best && (dx * fx + dz * fz) / (d * f) > SIT_FACING
+          && walkable(s.walkAt.x, s.walkAt.z, s.walkAt.x, s.walkAt.z, s.floor, avatar.bodyHeight, avatar)) { near = s; best = d; }
       }
       return near;
     };
@@ -697,8 +702,15 @@
       if (guide.stage) return false;
       if (nearExit()) { walkOut(); return true; }
       if (nearLock()) return lockEngage();
+      // The press beside a chair is the chair's, taken or not: it never falls through to a jump.
       const chair = nearChair();
-      if (chair) return people.sitPlayer(chair);
+      if (chair) {
+        // Sat in from its front, the view would be left looking back through the chair: it comes round to face the
+        // way the seat does.
+        const c = camera.position, t = camera.target, sx = Math.sin(chair.ry), sz = Math.cos(chair.ry);
+        if (people.sitPlayer(chair) && (t.x - c.x) * sx + (t.z - c.z) * sz < 0) pilot.turnToward(chair.x + sx * 8, chair.y + 0.9, chair.z + sz * 8);
+        return true;
+      }
       const action = kindNear();
       if (!action) return false;
       action.run(hud);
@@ -978,13 +990,15 @@
         let action = null;
         const near = lock.on ? null : avatar.camp.seat ? "stand" : nearExit() ? "exit" : nearLock() ? "lock" : nearChair() ? "sit" : (action = kindNear()) ? action.key : null;
         if (near !== guide.near) {
+          const was = guide.near;
           guide.near = near;
           if (near === "exit") { hud.setAct("EXIT"); hud.hint(COARSE ? "Tap EXIT to walk out" : "Space · Exit"); }
           else if (near === "lock") { hud.setAct(isLocked() ? "UNLOCK" : "LOCK"); hud.hint(COARSE ? "Tap to use the room's lock" : isLocked() ? "Space · Unlock the room" : "Space · Lock the room"); }
-          else if (near === "sit") { hud.setAct("SIT"); hud.hint(COARSE ? "Tap SIT to take the chair" : "Space · Sit"); }
+          else if (near === "sit") { hud.setAct("SIT"); hud.hint(COARSE ? "Tap SIT to take the chair" : "Space · Sit", SIT_HINT_MS); }
           else if (near === "stand") { hud.setAct("STAND UP!"); hud.hint(COARSE ? "Move or tap STAND UP! to get up" : "Move or press Space to stand up"); }
           else if (action) { hud.setAct(action.label); hud.hint(COARSE ? action.tap : action.hint); }
-          else pilot.showAct();
+          // Out of a prompt's reach its hint comes down with it (the keypad's own, put up as it takes the keys, stays).
+          else { if (was && !lock.on) hud.hideHint(); pilot.showAct(); }
         }
       }
       paintNext();

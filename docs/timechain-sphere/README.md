@@ -39,7 +39,7 @@ Byte-level exception: the portable single file (`oogaboogaland.html`) and the so
 | Room | Kind | Sphere radius |
 |---|---|---|
 | 0 | Conference Room: the round table for eight under live block and mining charts; the one room that locks | 10.5 m |
-| 1 | Lecture Hall: raked rows facing a stage, a slide on the dome | 15 m |
+| 1 | Lecture Hall: four broad terraces of lounge chairs facing a stage, the slide, the whiteboards and the latest blocks on the dome | 15 m |
 | 2 | The Mining Museum: miners from Satoshi's CPU (one high-end 2009 desktop, as Sergio Demian Lerner's Patoshi research reads it) to today's ASICs under the hashrate's history, each opening up close in 3D with all its stats and sources (`model-viewer.js`) | 15 m |
 | 3 | Satoshi's Temple: a meditation temple round the Satoshi statue at half as large again as life; its bell, gong, singing bowl and wind bells are heard, its koi fed, its trees shaken, its lanterns put out or lit | 15 m |
 | 4 | Proof of Work-out: exercise bikes facing a mountain sunrise | 12 m |

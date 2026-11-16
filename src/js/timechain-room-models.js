@@ -661,7 +661,8 @@
     return into;
   });
   // A live picture's patch of the dome, a little inside it: from `az0` to `az1` and `el0` to `el1` (degrees), mapped
-  // round its curve like the dome's own canvas, or a cap over the crown (`cap`, flat seen from below).
+  // round its curve like the dome's own canvas, or a cap over the crown (`cap`, flat seen from below); as bright as
+  // its `emissive` says (a pale picture asks for less, so it does not bloom).
   const patchGeometry = (L, spec, canvas) => {
     const geo = blank(), inset = spec.inset || 0.994;
     if (spec.cap) {
@@ -685,7 +686,7 @@
       const b0 = a0 + (a1 - a0) * k / cols, b1 = a0 + (a1 - a0) * (k + 1) / cols, e0 = (spec.el0 + (spec.el1 - spec.el0) * i / rows) * DEG, e1 = (spec.el0 + (spec.el1 - spec.el0) * (i + 1) / rows) * DEG;
       const p = (az, el) => { const q = ROOMS.onSphere(L, az, el, inset); yLow = Math.min(yLow, q.y); yHigh = Math.max(yHigh, q.y); return [q.x, q.y, q.z + 1]; };
       const pts = [p(b0, e0), p(b1, e0), p(b1, e1), p(b0, e1)];
-      face(geo, pts, [255, 255, 255], 0.9, [-pts[0][0], -(pts[0][1] - L.c), -(pts[0][2] - 1)]);
+      face(geo, pts, [255, 255, 255], spec.emissive === undefined ? 0.9 : spec.emissive, [-pts[0][0], -(pts[0][1] - L.c), -(pts[0][2] - 1)]);
     }
     geo.imageSurface = { canvas, version: 0, rect: [a0, yLow, a1 - a0, yHigh - yLow], curve: [1, 0, 0], tessellated: true };
     geo.castShadow = false;
