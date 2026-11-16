@@ -90,7 +90,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     pending = await readQueued();
   }
   // A saved raw snapshot is useful for a reproducible build; the baked jumbotron
-  // deliberately omits first_seen_at and is not an onboarding source.
+  // is not an onboarding source.
   const stats = process.argv[2] && process.argv[2] !== "--merge" ? JSON.parse(readFileSync(process.argv[2], "utf8")) : await readContributorSnapshot();
   const existing = readCharacters(), missing = missingCharacters(contributorRows(stats), existing, pending);
   const retired = retiredCharacters(existing, sourceFor);

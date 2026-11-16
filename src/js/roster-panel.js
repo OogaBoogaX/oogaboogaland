@@ -10,7 +10,7 @@
 // count there. A section's rows are made once and kept for the page life, reused on every visit.
 // The hooks are what differs between the pages: `roster` (the contributors: `name`, `display`), `stateFor(c)` and
 // `ageLabel(c)` (their contribution's state and age, `stateAt` and `ageAt` below), `stamp(c)` (when they last
-// contributed), `login(c)` and `joinedAt(c)`, `stats()` (the newest oogatron reading, normalized), `face(c)` (a canvas or
+// contributed), `login(c)` and `joinedAt(c)` (their first contribution where the reading has no `first_seen_at` for them), `stats()` (the newest oogatron reading, normalized), `face(c)` (a canvas or
 // image of their Ooga's face, null for none yet), `online(row)` (whether a row's dot is lit), `voice(button)` (a press
 // on a voice mark) and `sortKey` (where the choice is kept). It reads nothing at load but window.BL, so Ooga Chat shares
 // it; `stateAt` and `ageAt` are contributors.js's too.
@@ -96,19 +96,22 @@
       const li = doc.createElement("li"), button = doc.createElement("button");
       li.className = "roster-away"; button.type = "button"; li.append(button);
       own = { nodes: new Map(), away: { li, button }, faces: new Map(), sinceFits: new Map(), sinceResize: null, sinceShort: false, sort: "recent", rows: null,
-        tally: { data: null, totals: new Map() } };
+        tally: { data: null, totals: new Map(), firstSeen: new Map() } };
       try { if (localStorage.getItem(sortKey) === "most") own.sort = "most"; } catch { /* Storage may be unavailable. */ }
       kept.set(section, own);
     }
     const listeners = new AbortController(), { signal } = listeners;
     const on = (target, type, fn) => target.addEventListener(type, fn, { signal });
     const rosterRank = (state) => own.sort === "recent" || state === "away" ? ROSTER_ORDER[state] : 0;
-    // Every login's contributions across the five kinds in the newest reading, worked out once a reading.
-    const totals = () => {
+    // Every login's contributions across the five kinds in the newest reading, and the first time Oogatron saw them in
+    // any org repository's history (`first_seen_at`, from before a repository joined the org too), worked out once a
+    // reading.
+    const tallied = () => {
       const data = stats(), tally = own.tally;
-      if (tally.data === data) return tally.totals;
+      if (tally.data === data) return tally;
       tally.data = data;
       tally.totals.clear();
+      tally.firstSeen.clear();
       const boards = data && data.leaderboards;
       if (boards) for (const [kind] of STAT_KINDS) {
         if (!Array.isArray(boards[kind])) continue;
@@ -117,8 +120,17 @@
           tally.totals.set(login, (tally.totals.get(login) || 0) + entry.count);
         }
       }
-      return tally.totals;
+      if (data && Array.isArray(data.contributors)) for (const c of data.contributors) {
+        const at = typeof c.first_seen_at === "string" ? Date.parse(c.first_seen_at) : NaN;
+        if (!(at > 0)) continue;
+        const login = c.login.toLowerCase(), seen = tally.firstSeen.get(login);
+        if (!seen || at < seen) tally.firstSeen.set(login, at);
+      }
+      return tally;
     };
+    const totals = () => tallied().totals;
+    // The day of a contributor's first contribution: Oogatron's first sight of them, else the page's own date for them.
+    const sinceOf = (contributor) => tallied().firstSeen.get(loginOf(contributor)) || joinedAt(contributor);
     const contributionsOf = (contributor) => totals().get(loginOf(contributor)) || 0;
     const rosterKey = (contributor) => own.sort === "most" ? contributionsOf(contributor) : stampOf(contributor);
     const rosterRows = new Map();
@@ -197,7 +209,7 @@
       if (probe) {
         let total = "", since = "";
         for (const row of rosterRows.values()) {
-          const joined = joinedAt(row.contributor);
+          const joined = sinceOf(row.contributor);
           const n = statCount(totals().get(loginOf(row.contributor)) || 0), day = joined > 0 ? SINCE.format(joined) : "";
           if (n.length > total.length) total = n;
           if (day.length > since.length) since = day;
@@ -264,7 +276,7 @@
     const fillStats = (row) => {
       const strip = row.nodes.stats, contributor = row.contributor, login = loginOf(contributor);
       paintFace(row);
-      const joined = joinedAt(contributor);
+      const joined = sinceOf(contributor);
       strip.long = joined > 0 ? SINCE.format(joined) : "—";
       strip.short = joined > 0 ? shortYear(joined) : "—";
       const data = stats();

@@ -67,9 +67,11 @@ const snapshot = {
     ...(typeof event_key === "string" ? { event_key } : {})
   })),
   // The jumbotron needs logins for leaderboard labels; the caveman roster
-  // needs last_seen_at for sleep states. Nothing else ships.
+  // needs last_seen_at for sleep states and first_seen_at for each stats
+  // strip's first contribution. Nothing else ships.
   contributors: stats.contributors.map((c) => ({
     login: c.login,
+    first_seen_at: c.first_seen_at,
     last_seen_at: c.last_seen_at
   }))
 };

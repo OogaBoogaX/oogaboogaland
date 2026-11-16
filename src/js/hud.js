@@ -2034,7 +2034,7 @@
     return character && liveRows.get(character.handle) || body && liveRows.get(BL.net.bodyName(body)) || null;
   };
   // A contributor's stats strip (roster-panel.js) reads the newest oogatron reading (oogatron-live.js, kept on
-  // `liveStats`) or the baked one, each contributor's GitHub login and first contribution from the character, and their
+  // `liveStats`) or the baked one, each contributor's GitHub login and, where the reading has none, first contribution from the character, and their
   // Ooga's face, drawn here once a page with this page's own renderer.
   const STAT_FACE_PX = 40;
   let liveStats = null;
