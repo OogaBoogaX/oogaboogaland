@@ -44,8 +44,8 @@
     // voice in headphones, where a change of level alone only sounds louder or quieter), at no cost in loudness
     // however far off he is.
     let ctx = null, pan = null, source = null, heardSide = 0, heardAhead = 1;
-    // How loud a recording plays, of its own full level: a voice in a hall, under the game's other sounds.
-    const LEVEL = 0.45;
+    // Keep the mastered recording at full level, through either the sound graph or the element.
+    const LEVEL = 1;
     const wire = () => {
       if (!audio || source || typeof AudioContext === "undefined" || typeof PannerNode === "undefined") return;
       if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
