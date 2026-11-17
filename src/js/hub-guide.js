@@ -422,8 +422,10 @@
       rig.push(x, y, z);
       if (track) rig.track();
     };
-    const toWork = () => {
-      if (shared()) { sharedDone = queue()?.token || ""; queueAction("cancel"); sharedToken = ""; queueShown = false; queueRoom = ""; }
+    // Back to work, giving up her queue's turn where she is shared, unless `keep` (a place's lend over, which has nothing
+    // to do with the visitor's place in it).
+    const toWork = (keep = false) => {
+      if (shared() && !keep) { sharedDone = queue()?.token || ""; queueAction("cancel"); sharedToken = ""; queueShown = false; queueRoom = ""; }
       let site = state.site;
       while (site === state.site) site = Math.floor(Math.random() * WORKS.length);
       state.site = site;
@@ -680,6 +682,9 @@
     // while lent she drops whatever she was doing and `driver(rig, dt)` flies her; given back, she goes back to work.
     let lender = null;
     const lend = (driver) => {
+      // Shared over a place's channel, only the page that flies her for everyone lends her; elsewhere she stays as the
+      // hall shows her, and a turn there goes on.
+      if (channel && shared() && !driving()) { lender = driver; return; }
       if (driver && !lender) {
         if (state.holding) release();
         rig.hush();
@@ -688,7 +693,7 @@
       } else if (!driver && lender) {
         rig.root.visible = true;
         rig.mode = 0;
-        toWork();
+        toWork(true);
       }
       lender = driver;
     };
@@ -734,9 +739,21 @@
         watchStill(dt); state.seen += dt;
         if (state.still && state.seen > NOTICE_AFTER) greet();
       }
-      if (q !== queueSeen || queueShown !== queueVisible || net.state.room !== queueRoom) {
-        queueSeen = q; queueVisible = queueShown; queueRoom = net.state.room; show("queue"); panel.hidden = !queueShown;
-        heading.textContent = `${NAME} · island guide`;
+      queuePanel(true);
+      rig.update(dt, elapsed); return true;
+    };
+    // The queue's panel, as the queue stands, drawn again whenever it or the panel's state changes; `own` takes the
+    // guide's phase with it (following the queue), else leaves her at what she does (the page that flies her).
+    let queuePhase = "";
+    const queuePanel = (own) => {
+      const q = queue();
+      if (q !== queueSeen || queueShown !== queueVisible || net.state.room !== queueRoom || !own && state.phase !== queuePhase) {
+        queueSeen = q; queueVisible = queueShown; queueRoom = net.state.room; queuePhase = state.phase;
+        if (own) show("queue");
+        else if (queueShown) { form.hidden = chips.hidden = true; panel.classList.remove("greeter-tour"); }
+        if (!own && !queueShown) return;
+        panel.hidden = !queueShown;
+        heading.textContent = channel ? `${NAME} · ${G.title}` : `${NAME} · island guide`;
         const ready = q?.phase === "ready", waiting = q?.phase === "wait", connected = net.state.room === "live";
         const full = !waiting && !ready && q?.count >= 32;
         go.hidden = waiting; go.disabled = !connected || full;
@@ -744,11 +761,10 @@
         skip.textContent = waiting || ready ? "Leave queue" : "Not now";
         help.textContent = !connected ? "Reconnecting · your place is held for 15 seconds"
           : ready ? "Your turn · choose Talk to Tess within 20 seconds. Your conversation stays private."
-          : waiting ? `Your place: ${q.position} of ${q.count} · kept while you explore this island. When ready, accept within 20 seconds.`
+          : waiting ? `Your place: ${q.position} of ${q.count} · kept while you explore ${channel ? "here" : "this island"}. When ready, accept within 20 seconds.`
           : full ? "The queue is full. A place will open when another visitor finishes or leaves."
           : "Talk privately with Tess, one visitor at a time. Join when you are ready.";
       }
-      rig.update(dt, elapsed); return true;
     };
     let drove = false;
     const update = (dt, elapsed) => {
@@ -758,7 +774,10 @@
       // following it.
       const drive = driving();
       if (drove && !drive) { if (state.holding) release(); rig.hush(); show("work"); }
+      // Taking her on from following the hall: back to her work from wherever the queue left her.
+      if (drive && !drove && state.phase !== "work" && state.phase !== "lent") { rig.hush(); toWork(true); }
       drove = drive;
+      if (drive) queuePanel(false);
       if (!drive && sharedUpdate(dt, elapsed)) return;
       go.hidden = false; go.disabled = false;
       yieldToMovement();
