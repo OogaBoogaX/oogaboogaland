@@ -1713,7 +1713,8 @@
       busy: () => leaving || scene.anomaly.playing || scene.fire.t >= 0 || scene.roomFire.burning || scene.sis.rampaging || scene.guide.lent || !!scene.shimmer && scene.shimmer.holding || !!scene.network && scene.network.quiet,
       blocker: () => people && people.player, auto: !params.has("nosim") || fed > 0, gap: fed > 0 ? fed : null });
     // The terminals by the runway and the film show they start (`hangar-terminals.js`), its mood page reading hers.
-    scene.terminals = BL.hangarTerminals.create({ root, audio, mood: () => scene.sis.mood, toast: hud.toast });
+    scene.terminals = BL.hangarTerminals.create({ root, audio, mood: () => scene.sis.mood, toast: hud.toast,
+      ask: () => scene.link.send({ t: "film" }), done: (id) => scene.link.send({ t: "film", done: id }) });
     for (const n of scene.terminals.nodes) {
       input.add(n, { kind: "terminal", preset: null }, { radius: 0.8 });
       targets.push(n);
@@ -1904,7 +1905,7 @@
     }
   };
   // The hall on the Worker, while this page follows it (hangar-link.js): the anomaly it names played here, and the room
-  // fire it lit, the static fire test it started, and this page's word on the Jet sent on a change, at most four times a second, and again after the link
+  // fire it lit, the static fire test and the film show it started, and this page's word on the Jet sent on a change, at most four times a second, and again after the link
   // comes back.
   const hallLife = (s, elapsed) => {
     const L = s.link;
@@ -1912,9 +1913,11 @@
     if (!L.live) s.saidOn = s.saidNear = false;
     s.anomaly.follow(L.following);
     s.fire.follow(L.following);
+    s.terminals.follow(L.following);
     if (!L.following) return;
     s.anomaly.sync(L.hall.anomaly || null, L.serverNow());
     s.fire.sync(L.hall.test || null, L.serverNow(), L.you);
+    s.terminals.sync(L.hall.film || null, L.serverNow());
     // The room fire a lightning lit, which burns on past it: lit here from as far in as it has got, unless this page's
     // own lightning lit it already.
     const R = L.hall.room;
