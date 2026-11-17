@@ -179,7 +179,8 @@
   // gap down to `PUSH_DEPTH` of it, and each page moves its own Ooga back out of any player's gap at up to
   // `PUSH_SPEED` metres a second, unless it is walking into them itself. One that has not given way after
   // `PUSH_PATIENCE` seconds of pushing (a page that no longer answers, a body with nowhere to go) is walked through.
-  const PUSH_DEPTH = 0.55, PUSH_SPEED = 3, PUSH_PATIENCE = 0.6;
+  // Within `ON_TOP` metres of another, an Ooga stands squarely on top of it, with no way to read apart.
+  const PUSH_DEPTH = 0.55, PUSH_SPEED = 3, PUSH_PATIENCE = 0.6, ON_TOP = 0.05;
   const FOLLOW_GAP = 1.15, FOLLOW_RELEASE = 1.7, NPC_PASS_REACH = 1.9;
   const FIRE_FLEE_REACH = 8, FIRE_FLEE_CLEAR = 10, FIRE_MEMORY_RELEASE = 3, NPC_WALK_SPEED = 1.6;
   const NAV_WIDTH = 21, NAV_SIZE = NAV_WIDTH * NAV_WIDTH, NAV_HALF = 10, NAV_CELL = 0.5, NAV_STEP = 0.025, NAV_CENTER = NAV_HALF * NAV_WIDTH + NAV_HALF;
@@ -5024,8 +5025,14 @@
         if (d >= gap) continue;
         if (pushThrough !== null && bodyKey(body) === pushThrough) through = true;
         if (walking && steer.x * dx + steer.z * dz < 0) continue;
-        if (d > 1e-4) { dx /= d; dz /= d; }
-        else {
+        const me = BL.net && BL.net.state.me;
+        if (d > ON_TOP) { dx /= d; dz /= d; }
+        else if (me && Number.isSafeInteger(body.id) && body.id !== me.id) {
+          // Squarely on top of another player (two arriving on one spot): each page its own way across, by whose account
+          // is lower, so the two part; read from where each page sees the other, both would go the same way, and seeing
+          // the other a little behind as it moves (the room's poses trail), on together without end.
+          dx = me.id < body.id ? 1 : -1; dz = 0;
+        } else {
           // Squarely on top: on along the way they last moved, or else back the way this one faces.
           const m = Math.hypot(body.dx, body.dz);
           if (m > 1e-6) { dx = body.dx / m; dz = body.dz / m; }
