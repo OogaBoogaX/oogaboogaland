@@ -734,7 +734,31 @@
 
     // Once a frame with the Ooga the visitor drives here (or null) and where the view is.
     let seen = null;
+    // Relayed from the page that moves the hall's walkers (`hangar-relay.js`): what other systems read of her (her mood,
+    // whether she smashes the Jet and her tally, whether she brawls or panics, her soot, the height she stands at), kept
+    // current here (`shared`) on the host and read from it on the others, where she is a puppet (`puppet`): her nodes are
+    // the host's, and here she only says whether the visitor's Ooga stands near enough to poke her.
+    const shared = new Float32Array(7);
+    let puppet = false;
+    const share = () => {
+      shared[0] = rampage ? 5 : Math.min(4, anger); shared[1] = rampage ? 1 : 0; shared[2] = pips; shared[3] = doing === "brawl" ? 1 : 0;
+      shared[4] = soot; shared[5] = feet; shared[6] = panicking || brawlAt ? 1 : 0;
+    };
+    const puppetUpdate = (driven) => {
+      feet = shared[5];
+      smudge(shared[4]);
+      near = !!driven && !shared[6] && Math.hypot(driven.root.position.x - p.x, driven.root.position.z - p.z) < POKE.reach && Math.abs(feetAt(driven) - feet) < POKE.rise;
+      actor.x = p.x; actor.y = feet; actor.z = p.z;
+    };
+    // Taking her on from the host's frames (or playing on alone again): on from where she stands, to a spot of hers.
+    const adopt = () => {
+      yaw = node.rotation.y; feet = shared[5]; pathN = pathAt = 0;
+      if (panicking || brawlAt || rampage) return;
+      if (doing === "hush") endHush();
+      goTo(nextSpot(null));
+    };
     const update = (dt, driven, eye) => {
+      if (puppet) { puppetUpdate(driven); return; }
       seen = driven;
       clock += dt;
       t += dt;
@@ -1275,6 +1299,7 @@
       const mouth = talk > 0 && Math.sin(clock * 18) > -0.2;
       P.head.geometry = face === H.closed ? H.closed : face === H.redOpen ? (mouth ? H.redTalk : H.redOpen) : face === H.goggles ? (mouth ? H.gogglesTalk : H.goggles) : mouth ? H.talk : shut > 0 ? H.closed : H.open;
       actor.x = p.x; actor.y = feet; actor.z = p.z;
+      share();
     };
     // Her other faces, off the graph until she wears them, kept on the GPU.
     const liveGeometry = (set) => { for (const geo of Object.values(H)) set.add(geo); };
@@ -1284,7 +1309,8 @@
     // While she smashes the Jet, the tally of quick pokes at her feet: STOP HER! over a pip a poke, filled as they
     // count, the last one filling as it drains away.
     const overlay = (ctx, project) => {
-      if (!rampage) return;
+      const tally = puppet ? shared[2] : pips;
+      if (!(puppet ? shared[1] : rampage)) return;
       const at = project(p.x, feet, p.z);
       if (!at) return;
       const w = RAMPAGE.stop * PIP + (RAMPAGE.stop - 1) * PIP_GAP, x0 = Math.round(at.x - w / 2), y0 = Math.round(at.y + 10);
@@ -1297,7 +1323,7 @@
       ctx.fillStyle = "#ffcf5a";
       ctx.fillText("STOP HER!", x0 + w / 2, y0 - 3);
       for (let i = 0; i < RAMPAGE.stop; i++) {
-        const x = x0 + i * (PIP + PIP_GAP), fill = Math.max(0, Math.min(1, pips - i));
+        const x = x0 + i * (PIP + PIP_GAP), fill = Math.max(0, Math.min(1, tally - i));
         ctx.fillStyle = "#4a3a2c";
         ctx.fillRect(x, y0 + 2, PIP, PIP);
         if (fill > 0) {
@@ -1356,7 +1382,10 @@
       tess = at;
     };
     // How cross she is, 0 to 4 by her anger, 5 while she smashes: the terminals' mood page shows it.
-    return { node, props, body: P.torso, actor, update, liveGeometry, poke, spook, settle, zap, dark, groove, useNear, actLabel, overlay, distract, brawl, sayFrom, debug, get near() { return near; }, get rampaging() { return rampage; }, get brawling() { return doing === "brawl"; }, get mood() { return rampage ? 5 : Math.min(4, anger); } };
+    return { node, props, body: P.torso, actor, update, liveGeometry, poke, spook, settle, zap, dark, groove, useNear, actLabel, overlay, distract, brawl, sayFrom, debug, shared,
+      heads: Object.values(H), refs: [k, SPARK, IRON, CHIPS[0], CHIPS[1], ZAP_SPARK],
+      get puppet() { return puppet; }, set puppet(on) { if (puppet && !on) adopt(); puppet = on; },
+      get near() { return near; }, get rampaging() { return puppet ? shared[1] > 0 : rampage; }, get brawling() { return puppet ? shared[3] > 0 : doing === "brawl"; }, get mood() { return puppet ? shared[0] : rampage ? 5 : Math.min(4, anger); } };
   };
 
   BL.sis = { create };
