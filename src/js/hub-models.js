@@ -1602,15 +1602,14 @@
   ];
   // A cloud the Ooga Chat speakers sit on (#659) has a bench: across its middle, from just outside where the outer two
   // sit (scene-hub.js's seats, BENCH_SPREAD of a third either side of the middle) BENCH_PAST further, BENCH_DEPTH
-  // either side of its long axis, every column the cloud already has is filled up to its highest layer and nothing
-  // stands over it, one flat top to sit on in place of the puffs' ragged tops. The top is no deeper than a seat's glow
-  // reaches (SEAT_GLOW's `outer`, 0.95 m either side of the seat: three cells, 0.75 m), so the purple runs to its front
-  // and back edges with no bare strip before a speaker; the columns just outside it, as far as the old bench went,
-  // stop a layer lower, so no puff carries the top on past the glow.
-  const BENCH_SPREAD = 0.7, BENCH_PAST = 0.6, BENCH_DEPTH = 0.5, BENCH_STEP = 1;
+  // either side of its long axis. The middle platform has exactly the purple square's footprint (SEAT_GLOW.outer)
+  // and rises BENCH_RISE above the outer seats. Fill the cloud under that square, then cap it with a box so its
+  // edges follow the glow rather than rounding out to the voxel grid. The other puffs stay below the platform.
+  const BENCH_SPREAD = 0.7, BENCH_PAST = 0.6, BENCH_DEPTH = 0.5, BENCH_RISE = 0.25;
   const buildCloud = (i, bench) => {
     const rand = mulberry32(307 + i);
     const v = vox();
+    let platform = null;
     const puffs = CLOUD_PUFFS[i];
     const mid = (puffs[0][0] + puffs[puffs.length - 1][0]) / 2;
     for (const [cx, rx, rz] of puffs) blob(v, { cx: cx - mid + 0.5, cy: 1, cz: 0.5, rx, ry: 1.6, rz, chip: 0.3, rand, color: (x, y) => y > 0 ? 0 : 1 });
@@ -1624,12 +1623,16 @@
         const key = CELL[0] * 4096 + CELL[2], low = columns.get(key);
         if (low === undefined || CELL[1] < low.min) columns.set(key, { x: CELL[0], z: CELL[2], min: CELL[1] });
       }
-      const middle = (x0 + x1 + 1) / 2 - 0.5, half = ((x1 - x0 + 1) / 3 * BENCH_SPREAD) + BENCH_PAST / VOX, depth = BENCH_DEPTH / VOX, step = (BENCH_DEPTH + BENCH_STEP) / VOX;
+      const middle = (x0 + x1 + 1) / 2 - 0.5, half = ((x1 - x0 + 1) / 3 * BENCH_SPREAD) + BENCH_PAST / VOX, depth = BENCH_DEPTH / VOX;
+      const support = SEAT_GLOW.outer / VOX + 0.5;
       for (const { x, z, min } of columns.values()) {
-        if (Math.abs(x - middle) > half || Math.abs(z) > step) continue;
-        if (Math.abs(z) > depth) v.del(x, top, z);
-        else for (let y = min; y <= top; y++) v.set(x, y, z, y > 0 ? 0 : 1);
+        v.del(x, top, z);
+        const under = Math.abs(x - middle) < support && Math.abs(z) < support;
+        if (!under && (Math.abs(x - middle) > half || Math.abs(z) > depth)) continue;
+        for (let y = min; y < top; y++) v.set(x, y, z, y > 0 ? 0 : 1);
       }
+      platform = box({ w: SEAT_GLOW.outer * 2, h: BENCH_RISE, d: SEAT_GLOW.outer * 2, color: "#f7f9fb",
+        offset: { x: middle * VOX, y: (top - 1) * VOX + BENCH_RISE / 2 } });
     }
     // A flat base under the puffs, the way a cumulus sits on the air, grown straight down from the
     // cells already there: every cell added sits under another, so the cloud gains body without a
@@ -1651,7 +1654,8 @@
       const bottom = CLOUD_BASE + Math.round(CLOUD_ROUND * (1 - Math.sqrt(Math.max(0, inner))));
       for (let y = min - 1; y >= bottom; y--) v.set(x, y, z, 1);
     }
-    const geo = voxGeo(v, { unit: VOX, palette: ["#f7f9fb", "#dfe6ee"], origin: { x: -VOX / 2, y: -VOX, z: -VOX / 2 } });
+    let geo = voxGeo(v, { unit: VOX, palette: ["#f7f9fb", "#dfe6ee"], origin: { x: -VOX / 2, y: -VOX, z: -VOX / 2 } });
+    if (platform) geo = merge(geo, platform);
     geo.castShadow = false;
     geo.cutawayPreserve = true;
     return geo;

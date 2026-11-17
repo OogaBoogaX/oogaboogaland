@@ -20758,10 +20758,10 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
   record("hub distant effects: a changed backlog holds while the Mempool island rests and its water reaches the latest level on the first nearby frame", water.paused && water.held && water.resumed, JSON.stringify(water));
   const clouds = await b.evaluate(`(() => {
     const B = __ooga, D = BL.scenes.hub.debug.matrixCave, list = D.clouds, solids = B.headquarters.solids.props;
-    const initial = list.map(c => {
+    const initial = list.map((c, i) => {
       const bounds = BL.scene.boundsOf(c.node.geometry);
       const halfLength = Math.max(Math.abs(bounds.min[0]), Math.abs(bounds.max[0])), halfDepth = Math.max(Math.abs(bounds.min[2]), Math.abs(bounds.max[2]));
-      return { cloud: c, node: c.node, geometry: c.node.geometry, radius: Math.hypot(c.node.position.x, c.node.position.z), track: c.radius,
+      return { cloud: c, speaker: [3, 10, 14].includes(i), node: c.node, geometry: c.node.geometry, radius: Math.hypot(c.node.position.x, c.node.position.z), track: c.radius,
         y: c.node.position.y, speed: c.speed, x: c.node.position.x, z: c.node.position.z, turn: 0, low: bounds.min[1], high: bounds.max[1],
         minY: c.node.position.y, maxY: c.node.position.y, maxVerticalSpeed: 0, reach: Math.hypot(halfLength, halfDepth),
         inner: c.radius - halfDepth, outer: Math.hypot(c.radius + halfDepth, halfLength) };
@@ -20821,12 +20821,18 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
     }
     out.laps = Math.min(...initial.map(c => c.turn / (Math.PI * 2)));
     out.rings = [36, 40].map(radius => {
-      const ring = initial.filter(c => c.track === radius);
+      const ring = initial.filter(c => c.track === radius && !c.speaker);
       return { radius, minHeight: Math.min(...ring.map(c => c.minY)), maxHeight: Math.max(...ring.map(c => c.maxY)),
         maxVerticalSpeed: Math.max(...ring.map(c => c.maxVerticalSpeed)),
         eachCloudDips: ring.every(c => c.minY < (radius === 36 ? -3.9 : 2.1)),
         eachCloudRises: ring.every(c => c.maxY > (radius === 36 ? 1.9 : 10.9)) };
     });
+    out.treetop = Math.max(BL.terrain.MAX_HEIGHT, ...B.props.filter(o => o.prop === "tree").map(o =>
+      o.node.position.y + BL.scene.boundsOf(o.node.geometry).max[1] * o.node.scale.y));
+    out.speakers = initial.filter(c => c.speaker).map(c => ({
+      track: c.track, minBottom: c.minY + c.low, maxBottom: c.maxY + c.low, maxVerticalSpeed: c.maxVerticalSpeed,
+      rise: c.maxY - c.minY
+    }));
     // Ordinary hub combat must leave the cloud lanes at their actual world heights.
     const P = B.pilot, actor = B.cavemen.get("portlandhodl");
     try {
@@ -20842,11 +20848,13 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
     } finally { P.release(true); P.goPreset("pile"); B.advance(0.1, 1 / 60); }
     return out;
   })()`);
-  record("hub distant effects: all 18 decorative clouds keep size, orbit and spacing for two full laps, dip and rise gently through their inner -4..2m and outer 2..11m height bands, stay horizontal and tangent, and never become collision surfaces", clouds.initialized && clouds.persistent && clouds.decorative && clouds.horizontal && clouds.tangent
+  record("hub distant effects: all 18 decorative clouds keep size, orbit and spacing for two full laps, keep the three speaker clouds above the rooftop trees and the other clouds in their inner -4..2m and outer 2..11m height bands, stay horizontal and tangent, and never become collision surfaces", clouds.initialized && clouds.persistent && clouds.decorative && clouds.horizontal && clouds.tangent
     && clouds.seconds > 145 && clouds.laps >= 2 && clouds.radialDrift < 1e-8
     && clouds.rings.length === 2 && clouds.rings.every(ring => ring.eachCloudDips && ring.eachCloudRises
       && ring.minHeight >= (ring.radius === 36 ? -4 : 2) && ring.maxHeight <= (ring.radius === 36 ? 2 : 11)
       && ring.maxVerticalSpeed <= (ring.radius === 36 ? 0.2 : 0.25))
+    && clouds.speakers.length === 3 && clouds.speakers.every(c => c.minBottom >= clouds.treetop + 2 && c.maxBottom <= clouds.treetop + (c.track === 36 ? 8 : 11)
+      && c.rise > (c.track === 36 ? 5.9 : 8.9) && c.maxVerticalSpeed <= (c.track === 36 ? 0.2 : 0.25))
     && clouds.maxTravelExcess < 1e-7 && clouds.minGap > 0 && clouds.spacingDrift < 1e-8
     && clouds.cutaway?.selected && clouds.cutaway.view === "shoulder" && clouds.cutaway.combat && !clouds.cutaway.active && clouds.cutaway.mix === 0 && clouds.cutaway.heights
     && state.horizon.every(row => row.clouds.length === 18 && row.clouds.every(c => c.visible && c.moving)), JSON.stringify(clouds));

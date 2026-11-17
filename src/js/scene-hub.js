@@ -5322,12 +5322,20 @@
     cloud.node.rotation.y = -cloud.angle - Math.PI / 2;
   };
   const buildClouds = () => {
+    let treetop = BL.terrain.MAX_HEIGHT;
+    for (const o of scenery) if (o.prop === "tree") {
+      const node = o.node;
+      treetop = Math.max(treetop, node.position.y + BL.scene.boundsOf(node.geometry).max[1] * node.scale.y);
+    }
     for (const track of CLOUD_TRACKS) for (let i = 0; i < CLOUDS_PER_TRACK; i++) {
-      // The Ooga Chat speakers' clouds (SPEAKER_CLOUDS) carry a bench across their seats (hubModels.benchCloud).
+      // Speaker clouds keep their whole mesh above the rooftop trees, even at the bottom of their gentle rise.
+      // Measure the canopy and underside once, so a thicker cloud keeps the same two metres of clearance.
       const shape = Math.min(2, clouds.length % 4), seats = SPEAKER_CLOUDS.includes(clouds.length);
       const node = createNode({ geometry: seats ? hubModels.benchCloud(shape) : hubModels.cloud(shape), matrixCloud: true, sightHidden: true });
       const cloud = { node, speed: track.speed, angle: track.phase + i * Math.PI * 2 / CLOUDS_PER_TRACK,
-        radius: track.radius, baseY: track.baseY, waveY: track.waveY };
+        radius: track.radius,
+        baseY: seats ? treetop + 2 - BL.scene.boundsOf(node.geometry).min[1] - Math.min(0, track.waveY * 4) : track.baseY,
+        waveY: track.waveY };
       placeCloud(cloud);
       addChild(root, node);
       placed.push(node);
