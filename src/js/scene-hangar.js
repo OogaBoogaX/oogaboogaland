@@ -442,8 +442,8 @@
     const x = sh.state === "show" && !anywhere ? (at.x + sh.at.x) / 2 : at.x, z = sh.state === "show" && !anywhere ? (at.z + sh.at.z) / 2 : at.z;
     startNetwork(s, x, z, (Math.random() * 1e9) | 0);
   };
-  // Everyone's Oogas in the hangar for Kortik's Sis: the visitor's, and a stand-in for each other player's, kept where
-  // the room last put them, one a player for the visit so she can chase whoever poked her.
+  // Everyone's Oogas in the hangar for Kortik's Sis while it is shared: the visitor's, and a stand-in for each other
+  // player's, kept where the room last put them, one a player for the visit so she can chase whoever poked her.
   const SHELLS = new Map(), HALL_OOGAS = [];
   const shellOf = (id) => {
     let sh = SHELLS.get(id);
@@ -461,10 +461,10 @@
     }
     return HALL_OOGAS;
   };
-  // The nearest Ooga to (x, z), the visitor's or another player's, for the shape to answer.
+  // The nearest Ooga to (x, z), the visitor's or, while the hangar is shared, another player's, for the shape to answer.
   const NEAREST = { x: 0, z: 0 };
   const closestOoga = (x, z) => {
-    const me = people && people.player, others = remotes ? remotes.actors() : NO_ACTORS;
+    const me = people && people.player, others = scene.link.following && remotes ? remotes.actors() : NO_ACTORS;
     let best = Infinity;
     if (me) { best = Math.hypot(me.root.position.x - x, me.root.position.z - z); NEAREST.x = me.root.position.x; NEAREST.z = me.root.position.z; }
     for (let i = 0; i < others.length; i++) {
@@ -1760,7 +1760,7 @@
     soundPanel = openSoundPanel();
     // Kortik's Sis, the hangar's chief engineer (`sis.js`).
     scene.sis = BL.sis.create({ fx: scene.relay.proxy(fx, ["say", "sayAt", "spawnParticle", "puff"], "sis.fx"),
-      audio: scene.relay.proxy(audio, ["voice", "boot", "clang", "poke", "beep"], "sis.audio"), fire: scene.fire, players: hallOogas,
+      audio: scene.relay.proxy(audio, ["voice", "boot", "clang", "poke", "beep"], "sis.audio"), fire: scene.fire, players: () => scene.link.following ? hallOogas() : null,
       onPoke: () => { const ok = scene.link.send({ t: "poke" }); if (ok) BL.gamepad.rumble(0.2, 0.55, 110); return ok; }, jet: scene.jet, toast: hud.toast, blocks: () => scene.forklift.blocks,
       avoid: (x, z, feet, height, radius) => !!scene.anomaly && scene.anomaly.keepsOut(x, z, feet, height, radius), quieted: () => !!scene.network && scene.network.quiet });
     addChild(root, scene.sis.node, scene.sis.props);
@@ -1855,7 +1855,7 @@
       busy: () => leaving || scene.anomaly.playing || scene.fire.t >= 0 || scene.meltdown.active || scene.roomFire.burning || scene.sis.rampaging || scene.sis.brawling
         || scene.tessFor !== "shimmer" && (scene.guide.lent || scene.guide.holding || scene.guide.state.phase !== "work") || scene.terminals.showing || scene.keypad.open >= 0 || !!scene.network && scene.network.quiet && !scene.network.active,
       ooga: () => people && people.player, guide: () => scene.guide.root.position, clear: clearOf,
-      others: () => remotes ? remotes.actors() : NO_ACTORS, closest: closestOoga,
+      others: () => scene.link.following && remotes ? remotes.actors() : NO_ACTORS, closest: closestOoga,
       onShow: (showing) => { if (scene.link.hosting) scene.link.send({ t: "shape", s: showing }); } });
     // The network, walked up to (`netLife`); on a debug page in density `b` with `network=b`, its haze pulled in with
     // `netfog=1`, or played with Shift+N.
