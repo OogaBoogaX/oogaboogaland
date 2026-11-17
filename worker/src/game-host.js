@@ -7,7 +7,8 @@
 // the older with `replaced`), a cap on sockets (`full`), per-socket token buckets (protocol.js `takeToken`), and the
 // false/null convention for unreadable and unwanted messages. Pages send JSON text; a game with `relay` also takes
 // bytes (at most its `limits.bytes`, limited by its `relay` bucket), which it passes on unread to every other socket when
-// `relay(player, now)` says that page may send them (the hangar's hall, from the page it elected to move its walkers).
+// `relay(player, now, bytes)` says that page may send them (the hangar's hall, from the page it elected to move its
+// walkers and the page that drives its forklift); a game with `greet(player)` also hands a page joining what it lists.
 //
 // The tick: a setTimeout chain that runs only while the kind says it runs (`running`), each call a `step` the kind
 // keeps to its own fixed steps, so an idle instance has no timer and can hibernate (billed only while awake). Every tick
@@ -119,6 +120,7 @@ export class GameHost extends DurableObject {
     this.game.join(p, now);
     this.send(server, { t: "welcome", you: who.id, kind: this.kind.id, now, tickMs: this.kind.tickMs });
     this.send(server, this.stateMessage(now));
+    if (this.game.greet) for (const m of this.game.greet(p)) this.send(server, m);
     this.schedule();
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -149,7 +151,7 @@ export class GameHost extends DurableObject {
     if (!this.game.relay || !(bytes instanceof ArrayBuffer) || bytes.byteLength > this.kind.limits.bytes) { this.close(p, "unreadable message"); return; }
     const now = Date.now(), b = this.kind.buckets.relay;
     const bucket = p.buckets.relay || (p.buckets.relay = { tokens: b.burst, at: now });
-    if (!takeToken(bucket, b.rate, now, b.burst) || !this.game.relay(p, now)) return;
+    if (!takeToken(bucket, b.rate, now, b.burst) || !this.game.relay(p, now, bytes)) return;
     this.inspect.count("relayed");
     for (const q of this.sockets.values()) if (q !== p) this.send(q.ws, bytes);
   }
