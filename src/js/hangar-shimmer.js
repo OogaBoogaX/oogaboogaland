@@ -138,8 +138,10 @@
   // `farLeast` as likely by `far[1]`), and `neon` as likely where the launch tunnel's mouth, bright with neon all the way
   // down, stands behind it; and away from the last `recent` it came to this page life (`least` as likely right where
   // one came, back to as likely `apart` m off), so it comes somewhere new each time. None begins while the view turns
-  // faster than `turn` rad/s, which would soon take it out of view.
-  const CHOOSE = { aside: [0.04, 0.14], edge: [0.26, 0.38], edgeLeast: 0.45, far: [13, 22], farLeast: 0.4, neon: 0.3, recent: 4, apart: 10, least: 0.05, turn: 0.6 };
+  // faster than `turn` rad/s, which would soon take it out of view. Shared, `others` more likely for each other player
+  // in sight of it at a distance they would notice it from.
+  const CHOOSE = { aside: [0.04, 0.14], edge: [0.26, 0.38], edgeLeast: 0.45, far: [13, 22], farLeast: 0.4, neon: 0.3, recent: 4, apart: 10, least: 0.05, turn: 0.6, others: 1 };
+  const NONE = [];
   // How many spots the search for a place looks at a frame.
   const SCAN = 120;
   function smooth(t) { return t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t); }
@@ -359,8 +361,13 @@
   // coarse pointer; `auto`, whether it comes by itself, and `gap`, a fixed wait before each instead of GAP's, s;
   // `busy()`, whether something else has the hall; `ooga()`, the visitor's driven Ooga (its `root`, `camp.seat`,
   // `baseY`), or null; `guide()`, where the hangar's guide is; `clear(x, z, r)`, whether nothing that walks stands within
-  // `r` of (x, z).
-  const create = ({ root, audio, camera, renderer, coarse = false, auto = true, gap = null, busy = () => false, ooga = () => null, guide = () => null, clear = () => true }) => {
+  // `r` of (x, z). Shared with the others in the hangar (`hangar-link.js`): `others()`, where the other players' Oogas
+  // stand (each `x`, `y` its feet, `z`), which the spot keeps away from and favours being in sight of; `closest(x, z)`,
+  // the nearest Ooga of anyone's to (x, z) (`x`, `z`), which its steadying and its afterimage's stir answer; and
+  // `onShow(showing)`, each showing this page begins, as `describe` gives it, for the hall to share. Following the hall
+  // (`follow`), it begins none of its own unless this page is the hall's host, and plays the hall's (`sync`).
+  const create = ({ root, audio, camera, renderer, coarse = false, auto = true, gap = null, busy = () => false, ooga = () => null, guide = () => null, clear = () => true,
+    others = () => NONE, closest = null, onShow = null }) => {
     if (!shape) shape = makeShape();
     if (!spots) spots = makeSpots();
     const { edge: E, glitter: G, fall: FL, motes: MO, streaks: SK, reach: RC } = shape, flat = renderer.kind === "canvas2d", far = coarse ? VIEW.coarse : VIEW.far;
@@ -456,6 +463,8 @@
       if (d < VIEW.near || d > far + (wide ? VIEW.wider : 0)) return 0;
       lo = wide ? Math.min(top, VIEW.top) : top; hi = wide ? Math.max(bottom, VIEW.bottom) : bottom;
       if (me && Math.hypot(x - me.root.position.x, z - me.root.position.z) < AWAY.ooga) return 0;
+      const rest = others();
+      for (let k = 0; k < rest.length; k++) if (Math.hypot(x - rest[k].x, z - rest[k].z) < AWAY.ooga) return 0;
       if (who && Math.hypot(x - who.x, z - who.z) < AWAY.guide) return 0;
       if (!inView(x, H * 0.5, z, across) || !inView(x, H * 0.97, z) || !inView(x, 0.15, z) || behindOoga(x, z, wide)) return 0;
       if (!clear(x, z, AWAY.body)) return 0;
@@ -465,6 +474,11 @@
       w *= 1 - (1 - C.farLeast) * smooth((d - C.far[0]) / (C.far[1] - C.far[0]));
       if (overNeon(c, x, H * 0.55, z) || overNeon(c, x, H * 0.9, z)) w *= C.neon;
       for (let k = 0; k < lastN; k++) w *= C.least + (1 - C.least) * smooth(Math.hypot(x - last[k * 2], z - last[k * 2 + 1]) / C.apart);
+      // A spot more of the others are in sight of, at a distance they would notice it from, is the likelier.
+      for (let k = 0; k < rest.length; k++) {
+        const o = rest[k], od = Math.hypot(x - o.x, z - o.z);
+        if (od >= VIEW.near && od <= far && sightClear(o.x, o.y + 1.6, o.z, x, H * 0.55, z)) w *= 1 + C.others;
+      }
       return w;
     };
     // The search for a spot, `SCAN` spots a frame so no one frame pays for them all: where it has got to in `spots` (-1
@@ -492,6 +506,30 @@
 
 
     const show = (on) => { for (const node of nodes) { node.visible = on; if (!on) node.instanceCount = 0; } };
+    // A showing as the hall shares it: where, which way, its timeline and how it answers an Ooga near it.
+    const showing = { x: 0, z: 0, mirror: 1, slow: 0, formed: 0, held: 0, gone: 0, end: 0, nearOn: 0, nearReach: 0, nearShare: 0, nearPeak: 0, nearSeed: 0,
+      catchOn: 0, close: 0, catchShare: 0, catchSeed: 0, stirOn: 0, stirReach: 0, stirPeak: 0 };
+    const describe = () => {
+      const S = showing;
+      S.x = at.x; S.z = at.z; S.mirror = at.mirror; S.slow = at.slow; S.formed = at.formed; S.held = at.held; S.gone = at.gone; S.end = at.end;
+      S.nearOn = near.on ? 1 : 0; S.nearReach = near.reach; S.nearShare = near.share; S.nearPeak = near.peak; S.nearSeed = near.seed;
+      S.catchOn = near.catchOn ? 1 : 0; S.close = near.close; S.catchShare = near.catchShare; S.catchSeed = near.catchSeed;
+      S.stirOn = near.stirOn ? 1 : 0; S.stirReach = near.stirReach; S.stirPeak = near.stirPeak;
+      return S;
+    };
+    // A showing the hall shared, `since` s in: as it was described, from there.
+    const beginFrom = (S, since) => {
+      at.x = S.x; at.z = S.z; at.mirror = S.mirror < 0 ? -1 : 1; at.slow = S.slow;
+      at.formed = S.formed; at.held = S.held; at.gone = S.gone; at.end = S.end;
+      state = "show"; t = since; fadeAt = -1; loud = 0; waited = 0; overdue = 0; shows++; cohereAt = -1; coh = 0;
+      for (let b = 0; b < TEARS.n; b++) { tear.on[b] = 0; tear.next[b] = Math.max(since, at.formed * 0.6) + between(TEARS.off); }
+      near.on = !!S.nearOn; near.reach = S.nearReach; near.share = S.nearShare; near.peak = S.nearPeak; near.seed = S.nearSeed;
+      near.left = NEAR.times; near.inside = false; near.active = false; near.k = 0;
+      near.catchOn = !!S.catchOn; near.close = S.close; near.catchShare = S.catchShare; near.catchSeed = S.catchSeed; near.caught = false; near.c = near.b = 0; near.tear = false;
+      near.stirOn = !!S.stirOn; near.stirReach = S.stirReach; near.stirPeak = S.stirPeak; near.s = 0;
+      show(true);
+      sphere[0] = at.x; sphere[1] = TOP * SCALE * 0.55; sphere[2] = at.z; sphere[3] = TOP * SCALE + 2;
+    };
     const begin = (i) => {
       at.x = spots[i]; at.z = spots[i + 1];
       last[lastAt * 2] = at.x; last[lastAt * 2 + 1] = at.z; lastAt = (lastAt + 1) % CHOOSE.recent; lastN = Math.min(lastN + 1, CHOOSE.recent);
@@ -508,6 +546,7 @@
       near.stirOn = Math.random() < STIR.chance; near.stirReach = between(STIR.reach); near.stirPeak = between(STIR.strength); near.s = 0;
       show(true);
       sphere[0] = at.x; sphere[1] = TOP * SCALE * 0.55; sphere[2] = at.z; sphere[3] = TOP * SCALE + 2;
+      if (onShow) onShow(describe());
     };
     // Back to waiting, the next one GAP.next s away; the hall held for its other events `AFTER` s after.
     const finish = () => {
@@ -704,7 +743,7 @@
         due -= dt;
         if (due <= 0) overdue += dt;
         const me = ooga();
-        if (!auto || due > 0 || calm < CALM || after > 0 || !me || me.camp.seat) { cursor = -1; return; }
+        if (following && !hosting || !auto || due > 0 || calm < CALM || after > 0 || !me || me.camp.seat) { cursor = -1; return; }
         // Due and the hall free: how long it has looked for a place, to widen the search once that runs long.
         waited += dt;
         if (cursor < 0) {
@@ -736,12 +775,18 @@
 
     // The visitor's Ooga coming within reach while it holds: now and then, after a moment, it steadies a little, then
     // lets go again even if the Ooga stays; it never waits or lasts longer for it.
+    // The nearest Ooga to the shape, anyone's when the hangar is shared, else the visitor's own.
+    const nearest = () => {
+      if (closest) return closest(at.x, at.z);
+      const me = ooga();
+      return me ? me.root.position : null;
+    };
     const steadyNear = (dt) => {
-      const me = ooga(), d = me ? Math.hypot(me.root.position.x - at.x, me.root.position.z - at.z) : Infinity, inside = d < near.reach;
+      const me = nearest(), d = me ? Math.hypot(me.x - at.x, me.z - at.z) : Infinity, inside = d < near.reach;
       // Its afterimage stirring as the Ooga passes, more the nearer, settling again once it has gone by.
       const stir = near.stirOn && t > at.gone && fadeAt < 0 ? near.stirPeak * smooth((near.stirReach - d) / 1.5) : 0;
       near.s += (stir - near.s) * Math.min(1, dt * (stir > near.s ? STIR.up : STIR.down));
-      if (me) near.side = (me.root.position.x - at.x) * rx + (me.root.position.z - at.z) * rz < 0 ? -1 : 1;
+      if (me) near.side = (me.x - at.x) * rx + (me.z - at.z) * rz < 0 ? -1 : 1;
       near.clock += dt * (1 + (still.matches ? 0 : STIR.quicken) * near.s);
       // Closer still, once a showing at most: a moment later a few fragments catch for an instant, then break apart.
       if (!near.caught && near.catchOn && d < near.close && fadeAt < 0 && t > at.formed && t < at.held - 0.6) {
@@ -799,8 +844,19 @@
       get loud() { return loud; },
       get near() { return { on: near.on, reach: +near.reach.toFixed(2), left: near.left, k: +near.k.toFixed(3), catchOn: near.catchOn, close: +near.close.toFixed(2), caught: near.caught, c: +near.c.toFixed(2), b: +near.b.toFixed(2), stirOn: near.stirOn, stirReach: +near.stirReach.toFixed(2), s: +near.s.toFixed(3) }; }
     };
+    // Following the hall (`hosting` when this page is the one that begins them); the hall's showing now (`sh`: { id, at,
+    // s }, or null) at server time `now` (ms), begun from as far in as it has got unless this page began it.
+    let following = false, hosting = false, followed = 0;
+    const follow = (on, host) => { following = on; hosting = on && host; if (!on) followed = 0; };
+    const sync = (sh, now) => {
+      if (!sh || sh.id === followed) return;
+      followed = sh.id;
+      const since = Math.max(0, (now - sh.at) / 1000);
+      if (state === "wait" && since < sh.s.end - 0.25) beginFrom(sh.s, since);
+    };
+
     return {
-      update, liveGeometry, dispose, debug,
+      update, liveGeometry, dispose, debug, follow, sync,
       // What the hangar may read of it: whether it shows (`state`), its clock, s, where it stands and its timeline (`at`,
       // not to be changed), whether it is clearing away early, how many bars tear across it now, and how many have come.
       at, get state() { return state; }, get t() { return t; }, get fading() { return fadeAt >= 0; }, get bands() { return bands; }, get shows() { return shows; },
