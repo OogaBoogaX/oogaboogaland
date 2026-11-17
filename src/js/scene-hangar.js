@@ -2416,6 +2416,9 @@
       const help = pilot.controlsHelp(touch); help.title = "Lightning Jet Hangar · " + help.title; return help;
     },
     controlsHelpHold: on => { pilot.controls.reset(); pilot.setMenuOpen(on, false); },
+    // Shared, the hall goes on behind the panels (this page may move its walkers for everyone), its Ooga idle meanwhile
+    // (the pilot reads no input while its menu is open).
+    get runsBehindPanels() { return !!scene && !!scene.link && scene.link.following; },
     id: "hangar", enter, update, overlay, onDonation, onKey, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
