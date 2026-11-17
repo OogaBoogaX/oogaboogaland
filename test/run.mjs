@@ -405,11 +405,17 @@ const destinationMapCoachingHintProof = () => {
     matchMedia: () => ({ matches: false }), addEventListener() {}, removeEventListener() {} };
   const context = { window, document, localStorage: { getItem: () => null, setItem() {} } };
   runInNewContext(readFileSync(join(root, "src/js/destination-map.js"), "utf8"), context);
-  const scene = { id: "hub" }, map = window.BL.destinationMap.create({ current: () => scene, ready: () => true });
-  map.connect({ available: () => true, travels: () => true, selected: () => null, names: () => ["pile"], label: n => n, travel: () => true, controlled: () => false, position: () => null });
+  const scene = { id: "hub" }, provider = { available: () => true, travels: () => true, selected: () => null, names: () => ["pile"], label: n => n, travel: () => true, controlled: () => false, position: () => null };
   const coach = el("explore-coach");
+  // Until its redesign the card and its replay button show only where the page asks for them.
+  const plain = window.BL.destinationMap.create({ current: () => scene, ready: () => true });
+  plain.connect(provider); plain.update();
+  const offByDefault = coach.hidden && el("controls-learn").hidden;
+  plain.dispose();
+  const map = window.BL.destinationMap.create({ current: () => scene, ready: () => true, offerCoach: true });
+  map.connect(provider);
   map.update();
-  const offered = !coach.hidden;
+  const offered = !coach.hidden && !el("controls-learn").hidden;
   // A floating Oogatron board is a non-modal dialog: it must not hide the coaching hint.
   state.otherDialog = Object.assign(el("board"), { open: true, floating: true });
   map.update();
@@ -422,7 +428,7 @@ const destinationMapCoachingHintProof = () => {
   map.update();
   const restored = !coach.hidden;
   map.dispose();
-  return { offered, floatingShows, modalHides, restored };
+  return { offByDefault, offered, floatingShows, modalHides, restored };
 };
 // Rule: exercise the actual bounded rage state machine with a small physical
 // adapter. Collision and the rendered carry are covered by the hub regressions.
@@ -25620,8 +25626,8 @@ scene("poker", { opts: PHONE_SIZE, steps: [phone("poker", { card: '[data-intro="
 scene("hub", { label: "gorilla population restoration", query: "status=clankin", exclusive: true, opts: { motion: true }, steps: [hubGorillaPopulation] });
 scene("hub", { label: "weapons", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1&gorillarage=1", steps: [hubCombatGate, ...[hubAk, hubMelee, hubJetpack].map(gameCombat)] });
 // Her greeting comes once a page, to a fresh landing nothing has moved, so the guide has its own page.
-scene("hub", { label: "guide", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubGuide, hubAsk, hubTourInput, hubSharedGuide] });
-scene("hub", { label: "shared guide phone", opts: { w: 390, h: 844, mobile: true }, query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubSharedGuide] });
+scene("hub", { label: "guide", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1&coach=1", steps: [hubGuide, hubAsk, hubTourInput, hubSharedGuide] });
+scene("hub", { label: "shared guide phone", opts: { w: 390, h: 844, mobile: true }, query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1&coach=1", steps: [hubSharedGuide] });
 // Native pointer-lock assertions need sole focus; another browser lane can
 // steal capture and spend this long scenario's deadline waiting for it back.
 scene("hub", { label: "camera modes", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", exclusive: true, steps: [hubCameraModes] });
@@ -26189,7 +26195,7 @@ scene("hub", { label: "join alerts", query: "pos=0", steps: [hubJoinAlerts] });
 scene("hub", { label: "private chat", query: "pos=0", steps: [hubPrivateChat] });
 scene("hub", { label: "player preferences", query: "pos=0", steps: [hubPlayerPreferences] });
 scene("hub", { label: "player preferences", query: "pos=0", opts: PHONE_SIZE, steps: [hubPlayerPreferences] });
-scene("hub", { label: "clock and block height", query: "pos=0&time=0900", steps: [hubBlockHeight, hubDestinationNames] });
+scene("hub", { label: "clock and block height", query: "pos=0&time=0900&coach=1", steps: [hubBlockHeight, hubDestinationNames] });
 // Rally is out of order for visitors; the tour still boots it on Canvas 2D through its retained maintenance opt-in
 // (`wip=race` alone would land the page in Rally, so it names the island).
 scene("hub", { label: "canvas2d", query: "canvas2d=1&scene=hub&wip=race", steps: [hubMatrix, canvasTour] });
@@ -34292,7 +34298,7 @@ const unitChecks = async () => {
   const mapPadEscape = destinationMapPadEscapeProof();
   record("destination map pad regression: a pad's B or Menu over another dialog or card is that layer's Escape and never opens Map; on foot it opens Map and inside Map it closes it; a floating board does not block Map and a refused Map never swallows Menu's Escape", Object.values(mapPadEscape).every(Boolean), JSON.stringify(mapPadEscape));
   const mapCoachingHint = destinationMapCoachingHintProof();
-  record("destination map coaching hint: a floating board does not hide the island coaching hint, while a non-floating dialog still does", Object.values(mapCoachingHint).every(Boolean), JSON.stringify(mapCoachingHint));
+  record("destination map coaching hint: neither the hint nor its Controls replay button shows without the opt-in; with it a floating board does not hide the island coaching hint, while a non-floating dialog still does", Object.values(mapCoachingHint).every(Boolean), JSON.stringify(mapCoachingHint));
   const sleepBeamPool = sleepBeamPoolProof();
   record("gorilla sleep beam: fixed pool, slot isolation, live reduced motion and scene cleanup", Object.values(sleepBeamPool).every(Boolean), JSON.stringify(sleepBeamPool));
   const sleepStalls = gorillaSleepStallProof();

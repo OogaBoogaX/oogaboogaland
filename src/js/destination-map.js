@@ -18,7 +18,8 @@
     repos: ["Learn", "Explore open-source Bitcoin projects · cross the stone bridge past the Oogatron."],
     timechain: ["Learn", "Live Bitcoin charts · choose a room at the keypad."]
   };
-  const create = ({ current, ready }) => {
+  // The movement and Map coaching card is off until its redesign (issue 755); `offerCoach` (the page's `coach=1`) shows it.
+  const create = ({ current, ready, offerCoach = false }) => {
     const $ = id => document.getElementById(id);
     const dialog = $("destination-map"), list = $("destination-map-list"), status = $("destination-map-status");
     const button = $("destination-hud"), closeButton = $("destination-map-close"), title = $("destination-map-title");
@@ -267,10 +268,11 @@
         }
         if (dialog.open && (!ready() || current() !== owner)) close();
         const hub = current()?.id === "hub";
-        if (learn.hidden === hub) learn.hidden = !hub;
+        const learnShown = offerCoach && hub;
+        if (learn.hidden === learnShown) learn.hidden = !learnShown;
         const learnDisabled = !canOpen();
         if (learn.disabled !== learnDisabled) { learn.disabled = learnDisabled; learn.title = learnDisabled ? "Finish the current interaction before learning the controls" : "Replay the movement and Map guide"; }
-        if (seen && coaching < 0) { if (!coach.hidden) coach.hidden = true; return; }
+        if ((seen || !offerCoach) && coaching < 0) { if (!coach.hidden) coach.hidden = true; return; }
         const available = receipt.hidden && hub && canOpen() && current().coachingReady !== false && !document.querySelector("dialog:modal, dialog[open]:not(.board-floating)");
         const show = available && (!seen || coaching >= 0);
         if (coach.hidden === show) coach.hidden = !show;
