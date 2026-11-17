@@ -20,10 +20,14 @@
     let link = null, hall = null, heardAt = -Infinity, told = null;
     // Tess's queue as the hall last told this page, and a count of the link coming up, which her guide watches.
     let tessGuide = null, connection = 0, wasLive = false;
+    // A state of the queue names no pose between turns (the host flies her then, its pose sent apart), so the last pose
+    // heard stands until the next, and she does not drop back to her first post as the queue changes.
     const message = (msg) => {
       if (msg.t !== "tess-guide") return;
-      if (msg.op === "state") tessGuide = msg;
-      else if (msg.op === "pose" && tessGuide) tessGuide.pose = msg.a;
+      if (msg.op === "state") {
+        if (!msg.pose && tessGuide && tessGuide.pose) msg.pose = tessGuide.pose;
+        tessGuide = msg;
+      } else if (msg.op === "pose" && tessGuide) tessGuide.pose = msg.a;
     };
     // The hall told whether this page shows, whenever that changes and once each time the link comes up.
     const tell = () => {
