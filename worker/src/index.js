@@ -66,7 +66,7 @@ const handleGame = async (request, env, url, ctx) => {
   if (request.headers.get("upgrade") !== "websocket") return text("Expected WebSocket", 426);
   if (!fromSite(request, env.SITE_ORIGIN)) return text("Forbidden", 403);
   const [, , kind = "", venue = "", rest] = url.pathname.split("/");
-  const name = rest === undefined ? gameName(kind, venue) : "";
+  const name = rest === undefined ? gameName(kind, venue, env) : "";
   if (!name || !env.GAMES) return text("No such game", 404);
   const found = await getSessionFromRequest(request, env);
   if (!found) return text("Sign in first", 401);

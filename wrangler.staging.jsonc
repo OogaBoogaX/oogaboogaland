@@ -28,6 +28,10 @@
     // (#656's staging check), and outdoor voice (#654's staging check): island players speaking outdoors in Main Island or
     // DSB Land are heard in Ooga Chat, and Ooga Chat's speakers there are heard on the island and drawn on its clouds (#659).
     "OOGA_CHAT_FEATURES": "bridge,commons,commons-send,outdoor,cloud",
+    // The optional games this Worker hosts that are switched on (worker/src/games.js, docs/game-host.md), comma-separated.
+    // A kind left out is off: /api/me does not offer it and every page plays it on its own as before. Empty, every optional
+    // game is off; the ghost hunt is not optional and always on.
+    "GAME_FEATURES": "",
     // The audience's caps a zone (worker/src/audience.js `limitsOf`, docs/ooga-chat-operations.md): listeners (the proposed
     // launch envelope, for the staging matrix), cloud speakers (one a cloud seat), and the reaction fan-out budget in frames
     // a second.

@@ -23,6 +23,10 @@ Each kind and venue is one Durable Object, `GAMES.idFromName("<kind>:<venue>:v<v
   an instance moves.
 - **Where it is made.** `GAME_LOCATION_HINT` (a region such as `enam`) says where a new object is made. Without it,
   it is made near whoever connects first. Production sets `enam`; staging leaves it unset.
+- **The switch.** A kind marked `optional` is off unless the Worker's `GAME_FEATURES` (comma-separated kinds) names
+  it. Off, `/api/me` does not offer it and its route answers 404, so every page plays it on its own as before.
+  Changing it is a deploy of the Worker's settings, no code, and drops live sockets as any deploy does. A kind without
+  `optional` (the ghost hunt) is always on.
 
 The ghost hunt is kind `ghost-hunt` at the venue `arena`: one arena, one hunt at a time, as the arcade has. More arenas
 or private hunts would be more venues, or match tickets a matchmaker signs; neither exists yet.
@@ -32,6 +36,7 @@ A kind, in `games.js`:
 | Member | What it is |
 |---|---|
 | `id`, `code`, `version`, `venues` | its name, its code in motion frames, its objects' version, where it is played |
+| `optional` | off unless `GAME_FEATURES` names it |
 | `tickMs`, `stateEvery` | how often it steps, and how many steps between whole states |
 | `limits` | `sockets` an instance takes, `chars` a message may be |
 | `buckets`, `bucketOf(t)` | each message type's token bucket (`rate` a second, `burst`) |
@@ -42,12 +47,12 @@ A kind, in `games.js`:
 
 `handleGame` in `worker/src/index.js` handles `/game/<kind>/<venue>`. It is in `run_worker_first`.
 
-- **Checks.** It requires a WebSocket upgrade from the site's own origin, a name the registry lists (404 otherwise,
-  before any session lookup), and a session whose account owns an Ooga.
+- **Checks.** It requires a WebSocket upgrade from the site's own origin, a name the registry lists and the switch
+  has on (404 otherwise, before any session lookup), and a session whose account owns an Ooga.
 - **Limit.** `GAME_LIMITER` allows 20 connections a minute per account.
 - **Identity.** It strips any `x-player-*` and `x-game-name` a client sent and sets its own, as the room's route does.
 
-`/api/me`'s `games` lists the kinds the Worker hosts when the `GAMES` binding exists. The page reads it into
+`/api/me`'s `games` lists the kinds the Worker hosts, and has on, when the `GAMES` binding exists. The page reads it into
 `net.state.games` and follows only what is listed.
 
 ## The host
