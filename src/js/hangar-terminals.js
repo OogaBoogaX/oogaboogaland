@@ -1073,16 +1073,15 @@
       if (!on) followed = 0;
     };
     // The hall's show now (`f`: { id, at, by, end }, or null) at server time `now` (ms): a new one started from as far in
-    // as it has got, and the one showing stopped once the hall has stopped it.
+    // as it has got, once the screen here is wound up; and one showing here that the hall no longer runs (stopped, or
+    // ended or replaced while this page lay hidden) stopped, so it never ends the hall's next.
     const sync = (f, now) => {
-      if (!f) return;
-      if (f.id !== followed) {
-        followed = f.id;
-        const since = Math.max(0, (now - f.at) / 1000);
-        if (f.end === null && phase === "idle" && startAt(since) && since < 1) toast("Projector on · the Jet's history on the big screen over the runway.");
-        return;
-      }
-      if (f.end !== null && running()) stop();
+      const runs = f && f.end === null ? f.id : 0;
+      if (running() && followed !== runs) { stop(); followed = 0; }
+      if (!runs || runs === followed || phase !== "idle") return;
+      followed = runs;
+      const since = Math.max(0, (now - f.at) / 1000);
+      if (startAt(since) && since < 1) toast("Projector on · the Jet's history on the big screen over the runway.");
     };
 
     // Every desk's monitors turned as many times as the hall says (two counts a desk), blinking where that changes one.
