@@ -211,7 +211,7 @@
   let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null, ctx2canvas = null;
   let canvas = null, people = null, avatar = null, playerWorld = null, scene = null, leaving = false, dust = null, unsubscribeAccount = null, remotes = null, footsteps = null, node = null;
   let unsubscribeFeed = null, boardsDirty = false, audio = null, actPrompt = false, soundPanel = null;
-  const NO_ACTORS = [];
+  const NO_ACTORS = [], NO_POKES = [];
   // What walks the hall besides the Oogas, for them to keep clear of: the other players' Oogas, Kortik's Sis and the
   // gorillas of the hangar's crew. (The forklift they meet by its own shape, `forkliftIn`.)
   const ACTORS = [];
@@ -439,6 +439,25 @@
     const at = me ? me.root.position : pilot.orbit.target;
     const x = sh.state === "show" && !anywhere ? (at.x + sh.at.x) / 2 : at.x, z = sh.state === "show" && !anywhere ? (at.z + sh.at.z) / 2 : at.z;
     startNetwork(s, x, z, (Math.random() * 1e9) | 0);
+  };
+  // Everyone's Oogas in the hangar for Kortik's Sis: the visitor's, and a stand-in for each other player's, kept where
+  // the room last put them, one a player for the visit so she can chase whoever poked her.
+  const SHELLS = new Map(), HALL_OOGAS = [];
+  const shellOf = (id) => {
+    let sh = SHELLS.get(id);
+    if (!sh) { sh = { root: { position: { x: 0, y: 0, z: 0 } }, baseY: 0 }; SHELLS.set(id, sh); }
+    return sh;
+  };
+  const hallOogas = () => {
+    HALL_OOGAS.length = 0;
+    const me = people && people.player, others = remotes ? remotes.actors() : NO_ACTORS;
+    if (me) HALL_OOGAS.push(me);
+    for (let i = 0; i < others.length; i++) {
+      const o = others[i], sh = shellOf(o.id), q = sh.root.position;
+      q.x = o.x; q.y = o.y; q.z = o.z;
+      HALL_OOGAS.push(sh);
+    }
+    return HALL_OOGAS;
   };
   // The nearest Ooga to (x, z), the visitor's or another player's, for the shape to answer.
   const NEAREST = { x: 0, z: 0 };
@@ -1722,7 +1741,8 @@
     soundPanel = openSoundPanel();
     // Kortik's Sis, the hangar's chief engineer (`sis.js`).
     scene.sis = BL.sis.create({ fx: scene.relay.proxy(fx, ["say", "sayAt", "spawnParticle", "puff"], "sis.fx"),
-      audio: scene.relay.proxy(audio, ["voice", "boot", "clang", "poke", "beep"], "sis.audio"), fire: scene.fire, jet: scene.jet, toast: hud.toast, blocks: () => scene.forklift.blocks,
+      audio: scene.relay.proxy(audio, ["voice", "boot", "clang", "poke", "beep"], "sis.audio"), fire: scene.fire, players: hallOogas,
+      onPoke: () => { const ok = scene.link.send({ t: "poke" }); if (ok) BL.gamepad.rumble(0.2, 0.55, 110); return ok; }, jet: scene.jet, toast: hud.toast, blocks: () => scene.forklift.blocks,
       avoid: (x, z, feet, height, radius) => !!scene.anomaly && scene.anomaly.keepsOut(x, z, feet, height, radius), quieted: () => !!scene.network && scene.network.quiet });
     addChild(root, scene.sis.node, scene.sis.props);
     relayTree(scene.sis.node, scene.sis.heads); relayTree(scene.sis.props);
@@ -1817,7 +1837,7 @@
     scene.netShow = -1; scene.netFrom = 0; scene.netUsed = true;
     // The hall on the Worker, followed while it is offered (hangar-link.js), and what this page last told it of the Jet.
     scene.link = BL.hangarLink.create({ bytes: (b) => scene.relay.read(b) });
-    scene.wordsAt = -Infinity; scene.saidOn = false; scene.saidNear = false; scene.roomFollowed = 0; scene.netFollowed = 0;
+    scene.wordsAt = -Infinity; scene.saidOn = false; scene.saidNear = false; scene.roomFollowed = 0; scene.netFollowed = 0; scene.pokeSeen = 0; scene.wasHosting = false;
     // Tess notices the shape if she is near it and free when she would notice it, and glances at it, looks it over or is
     // puzzled by it.
     scene.unsettled = BL.hangarGuide.unsettled(scene.shimmer, camera);
@@ -1967,6 +1987,20 @@
     s.meltdown.puppet = puppet;
     s.crane.puppet = puppet;
     if (puppet) s.relay.play(L.serverNow());
+    // Hosting, each poke at Sis from another page the hall has kept, given to her once, from that player's Ooga.
+    const P = L.following && L.hall.pokes || NO_POKES;
+    if (hosting && !s.wasHosting) s.pokeSeen = P.length ? P[P.length - 1][0] : 0;
+    s.wasHosting = hosting;
+    if (hosting) {
+      hallOogas();
+      for (let i = 0; i < P.length; i++) {
+        const [n, by] = P[i];
+        if (n <= s.pokeSeen) continue;
+        s.pokeSeen = n;
+        const who = by === L.you ? people && people.player : SHELLS.get(by);
+        if (who) s.sis.poke(who, by === L.you);
+      }
+    }
     s.anomaly.follow(L.following);
     s.fire.follow(L.following);
     s.terminals.follow(L.following);
@@ -2203,6 +2237,7 @@
     scene.launch.phase.dispose();
     if (scene.window) scene.window.dispose();
     scene.link.dispose();
+    SHELLS.clear();
     scene.anomaly.dispose();
     scene.meltdown.dispose();
     scene.shimmer.dispose();
