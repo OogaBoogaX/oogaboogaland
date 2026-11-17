@@ -15,7 +15,8 @@
 //   string, a boolean, null or a plain object of numbers, and as its index among `refs` (objects every page registers
 //   alike: a geometry, a speaker); a call with any other argument is not recorded.
 //
-// Bytes, little-endian: the magic "OGH1", the format, whether the frame is whole, how many nodes, the time (the
+// Bytes, little-endian: the relay's magic ("OGH1" for the walkers, or its own, `create({ magic })`, so one page may write
+// one relay and read another's), the format, whether the frame is whole, how many nodes, the time (the
 // server's clock, ms), how many values, how many bytes of events; then each node (its index, its flags and alt, its
 // glow, its position in cm, its rotation, its scale in thousandths), each value (its index, its length, its floats),
 // and the events as JSON text. `write(now)` on the host, at most every `FRAME_MS` (null between), `read(bytes)` and
@@ -37,7 +38,7 @@
     return true;
   };
 
-  const create = () => {
+  const create = ({ magic = MAGIC } = {}) => {
     const nodes = [], alts = [], quats = [], vals = [], refList = [], handlers = new Map();
     // The host's: each node's state as last sent (quantized), and scratch; the events since the last frame.
     let sent = new Int16Array(0), scratch = new Int16Array(12);
@@ -164,7 +165,7 @@
           if (o + text.length <= MAX_BYTES) { new Uint8Array(bytes, o, text.length).set(text); evBytes = text.length; o += text.length; }
         }
         if (!count && !valCount && !evBytes) return null;
-        v.setUint32(0, MAGIC, true); v.setUint8(4, FORMAT); v.setUint8(5, full ? 1 : 0); v.setUint16(6, count, true);
+        v.setUint32(0, magic, true); v.setUint8(4, FORMAT); v.setUint8(5, full ? 1 : 0); v.setUint16(6, count, true);
         v.setFloat64(8, now, true); v.setUint8(16, valCount); v.setUint16(17, evBytes, true);
         return new Uint8Array(bytes, 0, o);
       },
@@ -172,7 +173,7 @@
       read: (buffer) => {
         if (hosting || !(buffer instanceof ArrayBuffer) || buffer.byteLength < HEADER) return false;
         const v = new DataView(buffer);
-        if (v.getUint32(0, true) !== MAGIC || v.getUint8(4) !== FORMAT) return false;
+        if (v.getUint32(0, true) !== magic || v.getUint8(4) !== FORMAT) return false;
         const count = v.getUint16(6, true), at = v.getFloat64(8, true), valCount = v.getUint8(16), evBytes = v.getUint16(17, true);
         let o = HEADER;
         if (o + count * NODE > buffer.byteLength) return false;
@@ -255,5 +256,7 @@
     return api;
   };
 
-  BL.hangarRelay = { create, MAGIC };
+  // The forklift's relay, written by whoever drives it.
+  const LIFT = 0x3146474f;
+  BL.hangarRelay = { create, MAGIC, LIFT };
 })();
