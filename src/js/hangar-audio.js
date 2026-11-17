@@ -509,13 +509,15 @@
 
     // The whole test, from a press now (or `from` s ago, the hall's, joined late), on the sequence's times `AT` (seconds
     // from the press): every voice's levels and pitches scheduled at once, the malfunction's coughs and clanks and the
-    // iron's clatter from a fixed draw. Whoever the blast knocks down hears it muffled (`deafen`).
+    // iron's clatter from a fixed draw. Whoever the blast knocks down hears it muffled (`deafen`). Here and in every
+    // schedule joined late, a time before the context's own start (one opened a moment ago) is held at its start, as
+    // Web Audio requires: what fell before it is all past.
     const CLANKS = [[6.05, 1900], [6.3, 1200], [6.42, 2600], [6.75, 1500], [7, 2200], [7.15, 900], [7.35, 1750]];
     const CLATTER = [[0.55, 2400], [0.8, 1800], [1.05, 3000], [1.4, 2100], [1.9, 2700]];
     const play = (AT, from = 0) => {
       if (!ready || muted) return false;
-      const t0 = ctx.currentTime + 0.02 - from, at = (s) => t0 + s, T = test;
-      const clear = (param, value) => { param.cancelScheduledValues(t0); param.setValueAtTime(value, t0); };
+      const t0 = ctx.currentTime + 0.02 - from, at = (s) => Math.max(0, t0 + s), T = test;
+      const clear = (param, value) => { param.cancelScheduledValues(at(0)); param.setValueAtTime(value, at(0)); };
       for (const g of [T.sirenGain, T.alarmGain, T.whineGain, T.whooshGain, T.whoomphGain, T.roarGain, T.crackleGain, T.rumbleGain, T.clankGain, T.pingGain, T.boomGain, T.boomNoiseGain, T.crackGain, T.ringGain]) clear(g.gain, 0);
       // The siren, high and low, from the press to the blast.
       clear(T.siren.frequency, 660); clear(T.siren2.frequency, 1320);
@@ -606,7 +608,7 @@
     // The hearing of whoever the blast knocks down, at the blast now: muffled until they come to, ringing.
     const deafen = (AT) => {
       if (!ready || muted) return false;
-      const now = ctx.currentTime, t0 = now + 0.02 - AT.boom, at = (s) => t0 + s, T = test;
+      const now = ctx.currentTime, t0 = now + 0.02 - AT.boom, at = (s) => Math.max(0, t0 + s), T = test;
       muffle.frequency.cancelScheduledValues(now); muffle.frequency.setValueAtTime(CLEAR, now);
       T.ringGain.gain.cancelScheduledValues(now); T.ringGain.gain.setValueAtTime(0, now);
       muffle.frequency.setValueAtTime(CLEAR, at(AT.boom + 0.04));
@@ -628,8 +630,8 @@
     const TICKS = [[0.9, 2500], [1.5, 1900], [2.2, 2900], [2.9, 2200]];
     const misfire = (M, from = 0) => {
       if (!ready || muted) return false;
-      const t0 = ctx.currentTime + 0.02 - from, at = (s) => t0 + s, T = test, top = M.heat[M.heat.length - 1];
-      const clear = (param, value) => { param.cancelScheduledValues(t0); param.setValueAtTime(value, t0); };
+      const t0 = ctx.currentTime + 0.02 - from, at = (s) => Math.max(0, t0 + s), T = test, top = M.heat[M.heat.length - 1];
+      const clear = (param, value) => { param.cancelScheduledValues(at(0)); param.setValueAtTime(value, at(0)); };
       for (const g of [T.humGain, T.whineGain, T.whooshGain, T.whoomphGain, T.roarGain, T.rumbleGain, T.clankGain, T.pingGain]) clear(g.gain, 0);
       clear(T.whine.frequency, 140); clear(T.whine2.frequency, 210); clear(T.whineFilter.frequency, 300); clear(T.whooshFilter.frequency, 300);
       clear(T.roarFilter.frequency, 900); clear(T.clankFilter.frequency, 900); clear(T.ping.frequency, 1700);
@@ -684,11 +686,11 @@
     const REV_UP = 0.45;
     const revs = (R, from = 0) => {
       if (!ready || muted) return false;
-      const t0 = ctx.currentTime + 0.02 - from, at = (s) => t0 + s;
+      const t0 = ctx.currentTime + 0.02 - from, at = (s) => Math.max(0, t0 + s);
       for (const v of test.revs) {
-        for (const param of [v.level.gain, v.roarBand.frequency, v.rumble.frequency, v.whine.frequency, v.whine2.frequency]) param.cancelScheduledValues(t0);
-        v.level.gain.setValueAtTime(0, t0); v.roarBand.frequency.setValueAtTime(220, t0); v.rumble.frequency.setValueAtTime(38, t0);
-        v.whine.frequency.setValueAtTime(700, t0); v.whine2.frequency.setValueAtTime(1050, t0);
+        for (const param of [v.level.gain, v.roarBand.frequency, v.rumble.frequency, v.whine.frequency, v.whine2.frequency]) param.cancelScheduledValues(at(0));
+        v.level.gain.setValueAtTime(0, at(0)); v.roarBand.frequency.setValueAtTime(220, at(0)); v.rumble.frequency.setValueAtTime(38, at(0));
+        v.whine.frequency.setValueAtTime(700, at(0)); v.whine2.frequency.setValueAtTime(1050, at(0));
       }
       for (const [s, i, len, hard] of R) {
         const v = test.revs[i], up = s + len * REV_UP, end = s + len, loud = TEST.rev * (0.5 + 0.5 * hard), whine = 700 + 2800 * hard;
@@ -706,8 +708,8 @@
     // end to end; then the crack with a thump under it, and silence.
     const zap = (Z, from, to, since = 0) => {
       if (!ready || muted) return false;
-      const t0 = ctx.currentTime + 0.02 - since, at = (s) => t0 + s, T = test;
-      const clear = (param, value) => { param.cancelScheduledValues(t0); param.setValueAtTime(value, t0); };
+      const t0 = ctx.currentTime + 0.02 - since, at = (s) => Math.max(0, t0 + s), T = test;
+      const clear = (param, value) => { param.cancelScheduledValues(at(0)); param.setValueAtTime(value, at(0)); };
       for (const g of [T.humGain, T.sizzleGain, T.crackGain, T.boomNoiseGain]) clear(g.gain, 0);
       place(from.x, from.y, from.z, 1);
       clear(T.sizzlePan.pan, AT.pan); clear(T.boomFilter.frequency, 900);
@@ -843,8 +845,8 @@
     // back, the hum gone with the first. The mains and the neon follow `power`, which the anomaly sets.
     const blackout = (B, from = 0) => {
       if (!ready || muted) return false;
-      const t0 = ctx.currentTime + 0.02 - from, at = (s) => t0 + s, T = test, first = B.banks[0];
-      const clear = (param, value) => { param.cancelScheduledValues(t0); param.setValueAtTime(value, t0); };
+      const t0 = ctx.currentTime + 0.02 - from, at = (s) => Math.max(0, t0 + s), T = test, first = B.banks[0];
+      const clear = (param, value) => { param.cancelScheduledValues(at(0)); param.setValueAtTime(value, at(0)); };
       for (const g of [T.humGain, T.clankGain]) clear(g.gain, 0);
       clear(T.clankFilter.frequency, 300); clear(T.hum.frequency, 100);
       T.clankGain.gain.setValueAtTime(TEST.clank * 0.7, at(B.kill));
@@ -871,8 +873,8 @@
     const BANG = { hit: 1.2, close: [900, 110], hitLen: 0.13, knock: 0.6, knockHz: [170, 105], knockLen: 0.16, detune: 0.05, from: 95, to: 42, drop: 0.045, body: [1.1, 0.4] };
     const lowrider = (L, from = 0) => {
       if (!ready || muted) return false;
-      const t0 = ctx.currentTime + 0.02 - from, at = (s) => t0 + s, T = test;
-      const clear = (param, value) => { param.cancelScheduledValues(t0); param.setValueAtTime(value, t0); };
+      const t0 = ctx.currentTime + 0.02 - from, at = (s) => Math.max(0, t0 + s), T = test;
+      const clear = (param, value) => { param.cancelScheduledValues(at(0)); param.setValueAtTime(value, at(0)); };
       clear(T.thumpGain.gain, 0); clear(T.bangHitGain.gain, 0); clear(T.bangKnockGain.gain, 0);
       clear(T.thump.frequency, BANG.from); clear(T.thump2.frequency, BANG.from * 2); clear(T.bangHitBand.frequency, BANG.close[0]); clear(T.bangKnock.frequency, BANG.knockHz[0]);
       for (let n = 0; n < L.beats; n++) {
@@ -902,8 +904,8 @@
     // and the engines' short bursts, `bursts` [s, how hard], a whoomph and a cough of roar.
     const shuffle = (S, from = 0) => {
       if (!ready || muted) return false;
-      const t0 = ctx.currentTime + 0.02 - from, at = (s) => t0 + s, T = test;
-      const clear = (param, value) => { param.cancelScheduledValues(t0); param.setValueAtTime(value, t0); };
+      const t0 = ctx.currentTime + 0.02 - from, at = (s) => Math.max(0, t0 + s), T = test;
+      const clear = (param, value) => { param.cancelScheduledValues(at(0)); param.setValueAtTime(value, at(0)); };
       for (const g of [T.clankGain, T.whooshGain, T.whoomphGain, T.roarGain]) clear(g.gain, 0);
       clear(T.clankFilter.frequency, 380); clear(T.whooshFilter.frequency, 700); clear(T.roarFilter.frequency, 900);
       T.clankGain.gain.setValueAtTime(TEST.clank * 0.6, at(S.brake));
