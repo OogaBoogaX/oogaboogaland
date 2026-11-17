@@ -1,6 +1,8 @@
 // The Lightning Jet Hangar's walkers relayed between pages: one page in the hall moves them (the host the hall on the
 // Worker elects, `worker/src/games/hangar.js`) and writes frames of them that the hall passes on unread to every other
-// page in the hangar, which plays them back a little behind (`DELAY`), eased between frames, with their systems not
+// page in the hangar, which plays them back a little behind (`DELAY`, or more while the host's frames come in older: a
+// frame's age as it arrives is the host's whole round trip to the hall, so playback stays a frame and a margin behind
+// the oldest of late, easing its pace a little as it moves), eased between frames, with their systems not
 // moving them there. What a frame carries, all registered in the same order on every page as the scene builds:
 //
 // - nodes (`node(n, alts)`): each one's position, rotation (its quaternion if it has one, else its Euler rotation),
@@ -29,6 +31,9 @@
   const BL = window.BL = window.BL || {};
 
   const MAGIC = 0x3148474f, FORMAT = 1, HEADER = 19, NODE = 24, FRAME_MS = 100, KEY_MS = 2000, DELAY = 180, MAX_BYTES = 16384;
+  // Playback's delay at most, ms; its margin past a frame's age and one frame, ms; how fast the age it goes by falls
+  // back once frames come in younger (a share a frame); how much faster or slower playback runs while its delay moves.
+  const DELAY_MAX = 700, MARGIN = 60, AGE_FALL = 0.02, PACE = 0.1;
   const ANGLE = 32767 / Math.PI, POS = 100, SCALE = 1000, GLOW = 50, EVENTS = 64;
   // A node's state: position, rotation (Euler x, y, z and 0, or a quaternion), scale, glow.
   const NV = 11;
@@ -51,8 +56,9 @@
     // next numbers and when they apply; the events waiting to play, with their times.
     let A = new Float32Array(0), B = new Float32Array(0), ta = new Float64Array(0), tb = new Float64Array(0), fa = new Uint8Array(0), fb = new Uint8Array(0), known = new Uint8Array(0);
     const valNext = [], valAt = [], valEase = [], valA = [], valB = [], vta = [], vtb = [], valKnown = [];
-    // The time playback last stood at (the server's, `DELAY` behind its now).
-    let playT = -Infinity;
+    // The time playback last stood at (the server's, `delay` behind its now), the now it was played at, the delay, and
+    // the age of the host's frames as they arrive, the oldest of late.
+    let playT = -Infinity, playNow = -Infinity, delay = DELAY, age = 0;
     // Node `i`'s from-state (A, its flags) set to where it shows at `playT`, as `play` eases it.
     const settle = (i) => {
       const b = i * NV, span = tb[i] - ta[i], u = span > 0 ? Math.max(0, Math.min(1, (playT - ta[i]) / span)) : 1;
@@ -111,7 +117,7 @@
         valSent.forEach((v) => v.fill(NaN));
         known.fill(0);
         valKnown.fill(false);
-        playT = -Infinity;
+        playT = playNow = -Infinity; delay = DELAY; age = 0;
       },
       node: (n, list = null) => {
         nodes.push(n); alts.push(list); quats.push(!!n.quaternion);
@@ -198,12 +204,15 @@
         v.setFloat64(8, now, true); v.setUint8(16, valCount); v.setUint16(17, evBytes, true);
         return new Uint8Array(bytes, 0, o);
       },
-      // A frame from the host: its nodes eased to from where they were, its values and events kept for playback.
-      read: (buffer) => {
+      // A frame from the host: its nodes eased to from where they were, its values and events kept for playback; `now`, the
+      // server's clock as it arrives, times how old it is.
+      read: (buffer, now = NaN) => {
         if (hosting || !(buffer instanceof ArrayBuffer) || buffer.byteLength < HEADER) return false;
         const v = new DataView(buffer);
         if (v.getUint32(0, true) !== magic || v.getUint8(4) !== FORMAT) return false;
         const count = v.getUint16(6, true), at = v.getFloat64(8, true), valCount = v.getUint8(16), evBytes = v.getUint16(17, true);
+        if (now - at > age) age = now - at;
+        else if (now - at > 0) age += (now - at - age) * AGE_FALL;
         let o = HEADER;
         if (o + count * NODE > buffer.byteLength) return false;
         // Before playback has begun every frame is taken at once: there is nowhere yet to ease from.
@@ -246,11 +255,15 @@
         }
         return true;
       },
-      // The others' walkers as they stood `DELAY` before `now`: each node eased between its two latest states, each
+      // The others' walkers as they stood `delay` before `now`: each node eased between its two latest states, each
       // value once its frame is due, and each event once playback reaches it.
       play: (now) => {
         if (hosting) return;
-        const t = playT = now - DELAY;
+        const want = Math.min(DELAY_MAX, Math.max(DELAY, age + FRAME_MS + MARGIN));
+        if (playNow === -Infinity) delay = want;
+        else { const step = PACE * Math.max(0, now - playNow); delay += Math.max(-step, Math.min(step, want - delay)); }
+        playNow = now;
+        const t = playT = now - delay;
         for (let i = 0; i < nodes.length; i++) {
           if (!known[i]) continue;
           const n = nodes[i], b = i * NV, span = tb[i] - ta[i], u = span > 0 ? Math.max(0, Math.min(1, (t - ta[i]) / span)) : 1;
@@ -285,7 +298,8 @@
           fn(...e.slice(1));
         }
       },
-      get count() { return nodes.length; }
+      get count() { return nodes.length; },
+      get delay() { return delay; }
     };
     return api;
   };

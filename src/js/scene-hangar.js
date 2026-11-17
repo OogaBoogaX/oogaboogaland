@@ -1739,7 +1739,7 @@
     scene.liftPuppet = false; scene.seatAsked = false; scene.seatAskAt = 0; scene.seatLost = false;
     scene.liftRelay.on("lift.horn", () => audio.horn());
     // The hall on the Worker, followed while it is offered (hangar-link.js).
-    scene.link = BL.hangarLink.create({ bytes: (bytes) => scene.relay.read(bytes) || scene.liftRelay.read(bytes) });
+    scene.link = BL.hangarLink.create({ bytes: (bytes) => scene.relay.read(bytes, scene.link.serverNow()) || scene.liftRelay.read(bytes, scene.link.serverNow()) });
     const relayTree = (n, alts = null) => { scene.relay.node(n, alts && alts.includes(n.geometry) ? alts : null); for (const c of n.children || []) relayTree(c, alts); };
     for (const a of scene.crew) relayTree(a.root);
     scene.puppet = false;
