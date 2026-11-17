@@ -507,13 +507,14 @@
       sis.boink = osc("sine", 700, sis.boinkGain);
     };
 
-    // The whole test, from a press now, on the sequence's times `AT` (seconds from the press): every voice's levels and
-    // pitches scheduled at once, the malfunction's coughs and clanks and the iron's clatter from a fixed draw.
+    // The whole test, from a press now (or `from` s ago, the hall's, joined late), on the sequence's times `AT` (seconds
+    // from the press): every voice's levels and pitches scheduled at once, the malfunction's coughs and clanks and the
+    // iron's clatter from a fixed draw. Whoever the blast knocks down hears it muffled (`deafen`).
     const CLANKS = [[6.05, 1900], [6.3, 1200], [6.42, 2600], [6.75, 1500], [7, 2200], [7.15, 900], [7.35, 1750]];
     const CLATTER = [[0.55, 2400], [0.8, 1800], [1.05, 3000], [1.4, 2100], [1.9, 2700]];
-    const play = (AT) => {
+    const play = (AT, from = 0) => {
       if (!ready || muted) return false;
-      const t0 = ctx.currentTime + 0.02, at = (s) => t0 + s, T = test;
+      const t0 = ctx.currentTime + 0.02 - from, at = (s) => t0 + s, T = test;
       const clear = (param, value) => { param.cancelScheduledValues(t0); param.setValueAtTime(value, t0); };
       for (const g of [T.sirenGain, T.alarmGain, T.whineGain, T.whooshGain, T.whoomphGain, T.roarGain, T.crackleGain, T.rumbleGain, T.clankGain, T.pingGain, T.boomGain, T.boomNoiseGain, T.crackGain, T.ringGain]) clear(g.gain, 0);
       // The siren, high and low, from the press to the blast.
@@ -600,8 +601,14 @@
         T.clankGain.gain.setValueAtTime(TEST.clank * 0.6, at(AT.boom + s));
         T.clankGain.gain.exponentialRampToValueAtTime(0.001, at(AT.boom + s + 0.15));
       }
-      // The presser's hearing, muffled from the blast until they come to, ringing.
-      clear(muffle.frequency, CLEAR);
+      return true;
+    };
+    // The hearing of whoever the blast knocks down, at the blast now: muffled until they come to, ringing.
+    const deafen = (AT) => {
+      if (!ready || muted) return false;
+      const now = ctx.currentTime, t0 = now + 0.02 - AT.boom, at = (s) => t0 + s, T = test;
+      muffle.frequency.cancelScheduledValues(now); muffle.frequency.setValueAtTime(CLEAR, now);
+      T.ringGain.gain.cancelScheduledValues(now); T.ringGain.gain.setValueAtTime(0, now);
       muffle.frequency.setValueAtTime(CLEAR, at(AT.boom + 0.04));
       muffle.frequency.exponentialRampToValueAtTime(MUFFLED, at(AT.boom + 0.2));
       muffle.frequency.setValueAtTime(MUFFLED, at(AT.result));
@@ -1463,7 +1470,7 @@
     };
 
     return {
-      listen, update, setMuted, setVolume, glint, test: play, misfire, revs, zap, blackout, lowrider, shuffle, power: setPower, strain, outage, clang, voice, boot, poke, beep, denied, forklift, forkliftWork, horn, projector, clunk, roll, watchCrane, craneCue, watchRoom, roomCue, dispose,
+      listen, update, setMuted, setVolume, glint, test: play, deafen, misfire, revs, zap, blackout, lowrider, shuffle, power: setPower, strain, outage, clang, voice, boot, poke, beep, denied, forklift, forkliftWork, horn, projector, clunk, roll, watchCrane, craneCue, watchRoom, roomCue, dispose,
       get muted() { return muted; },
       get volume() { return volume; },
       get ready() { return ready; },

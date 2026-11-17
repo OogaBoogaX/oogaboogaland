@@ -12,6 +12,11 @@
 // one, rumbles in step. Then a cooldown, the lamps under the screen filling, until the booth is ready again. Only the
 // presser is knocked down; nothing is lost.
 //
+// Followed (`follow(true)`, while the page follows the hall on the Worker, `hangar-link.js`), a press asks the hall
+// (`ask`), which starts the test for everyone in the hangar at once (`sync`, from as far in as it has got): the presser's
+// controls and view are the test's on the presser's page alone, and the blast throws down whoever stands near it on
+// their own page, the presser and anyone else, their controls the test's until they come to.
+//
 // `create` builds it all once a visit from fixed pools, and `update` moves it in place, allocating nothing a frame.
 (() => {
   "use strict";
@@ -60,8 +65,8 @@
   // `root`: the scene's root; `jet`: the Jet's node and `nozzles` its nozzles' (sooted by the blast, or null); `fx`: the
   // scene's particles; `audio`: the hangar's sound; `hold(on)`: the controls taken from the presser and the view from
   // the pilot, and given back; `toast(text)` for the result; `busy()`, whether something else has the engines now, so
-  // the button only buzzes no.
-  const create = ({ root, jet, nozzles, fx, audio, hold, toast, busy = null }) => {
+  // the button only buzzes no; `ask()`, a press asked of the hall while following it, false when it could not be sent.
+  const create = ({ root, jet, nozzles, fx, audio, hold, toast, busy = null, ask = null }) => {
     const L = HM.LAYOUT.fireTest, F = HM.FIRE, P = HM.fireStation(), E = HM.exhaust(), B = HM.blast(), c = Math.cos(L.turn), s = Math.sin(L.turn);
     const at = (p, dy = 0) => ({ x: p[0], y: p[1] + dy, z: p[2] });
     const hidden = (geometry, options) => createNode({ geometry, sightHidden: true, visible: false, ...options });
@@ -137,6 +142,9 @@
     // The presser while the blast has them: who, which way they faced; whether the test holds the controls and the view;
     // the view's glide and its shake.
     let presser = null, heading = 0, holding = false, quake = 0, glide = 0, from = false;
+    // Whether the hall starts the tests (`follow`), and the id of the last it named that this page has played; whether
+    // the blast has the controls of an Ooga that did not press.
+    let following = false, followed = 0, downed = false;
     // Whose body the blast sooted, how much soot is left on it, and when it last smoked.
     let sooted = null, soot = 0, puffAt = 0;
     const FROM = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 }, SHOW = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 };
@@ -154,15 +162,24 @@
         audio.denied(booth.x, booth.y, booth.z);
         return true;
       }
-      t = 0;
-      boomed = false;
-      audio.test(AT);
-      BL.gamepad.rumble(0.25, 0.5, 90);
+      if (following) {
+        if (!ask || !ask()) audio.denied(booth.x, booth.y, booth.z);
+        return true;
+      }
+      start(0, true);
+      return true;
+    };
+    // The test from `since` s in: its sound from there, and for the presser (`mine`) the controls and the view.
+    const start = (since, mine) => {
+      t = since;
+      boomed = since > AT.boom + 0.2;
+      audio.test(AT, since);
+      if (since < 0.5) BL.gamepad.rumble(0.25, 0.5, 90);
+      if (!mine || since >= AT.result) return;
       holding = true;
       glide = 0;
       from = false;
       hold(true);
-      return true;
     };
     const letGo = () => {
       if (!holding) return;
@@ -191,6 +208,8 @@
       if (sooted && sooted !== cave) smudge(sooted, 0);
       sooted = cave;
       soot = SOOT;
+      audio.deafen(AT);
+      if (!holding) { downed = true; hold(true); }
     };
     // The blast's soot on a body, `k` of it.
     const smudge = (cave, k) => {
@@ -451,8 +470,9 @@
 
       // The presser: laid down as they fly, out cold till the result, then up again; the controls and the view back
       // as they open their eyes, the result said.
-      if (holding && (t < 0 || t >= AT.result)) {
+      if ((holding || downed) && (t < 0 || t >= AT.result)) {
         letGo();
+        if (downed) { downed = false; hold(false); }
         toast("TEST RESULT: FAILED SUCCESSFULLY · Lightning Jet v2 is still under construction.");
       }
       glide = Math.min(1, glide + dt / GLIDE);
@@ -566,13 +586,28 @@
       if (sooted) smudge(sooted, 0);
       presser = sooted = null;
       letGo();
+      if (downed) { downed = false; hold(false); }
       if (rumbling) BL.gamepad.stop();
       rumbling = false;
       jet.position.x = jetX; jet.position.y = jetY;
     };
 
+    // Following the hall, or starting tests here again.
+    const follow = (on) => {
+      following = on;
+      if (!on) followed = 0;
+    };
+    // The hall's test now (`test`: { id, at, by }, or null) at server time `now` (ms), `me` this page's account: a new one
+    // played from as far in as it has got, the presser's own page holding their controls.
+    const sync = (test, now, me) => {
+      if (!test || test.id === followed) return;
+      followed = test.id;
+      const since = Math.max(0, (now - test.at) / 1000);
+      if (t < 0 && since < AT.ready - 0.25) start(since, test.by === me);
+    };
+
     return {
-      group, body, cables, press, update, useNear, actLabel, view, unshake, lights, overlay, engines, dispose, AT, blast: blastAt,
+      group, body, cables, press, update, useNear, follow, sync, actLabel, view, unshake, lights, overlay, engines, dispose, AT, blast: blastAt,
       get phase() { return phase; }, get t() { return t; }, get near() { return near; }, get ready() { return ready(); }, get out() { return !!presser; }
     };
   };
