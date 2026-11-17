@@ -8456,6 +8456,7 @@
   };
   const delayGameRing = seconds => { gameRingWait = Math.max(0, seconds); };
   const cycleOwnActor = () => {
+    if (duels.duel) return; // Switching bodies would yield, including during the countdown.
     const character = BL.net.ownCharacter();
     if (!character) { hud.toast("Sign in as a contributor to switch between your Ooga and gorilla"); return; }
     const cave = crew.cavemen.get(character.handle);
