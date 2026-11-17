@@ -157,6 +157,26 @@ Each landed round goes back in the next motion frame's confirmations.
 where its player stands. The page also decides how far its round went before scenery stopped it: the server keeps
 that length only for aiming the monkeys and tests the round's whole reach, through the totems too.
 
+## The hangar's hall
+
+`worker/src/games/hangar.js` is kind `hangar` at the venue `hall`, optional: on only where `GAME_FEATURES` names it.
+It keeps the Lightning Jet Hangar's hall on the server's clock, so everyone in the hangar sees the same thing at the
+same moment, from the timings every page plays (`src/js/hangar-hall.js`, which the Worker imports unchanged).
+
+- **What it decides.** The engine anomalies (which kind, when, a gap at random from the end of one to the start of the
+  next, each kind once a shuffled bag), whether a lightning jumps to a room and which one, and the fire that lights
+  there while it burns; the static fire test (one press for everyone, none while it runs or cools down); and the film
+  show (started and stopped by any press, ended for everyone by the first page whose film runs out).
+- **What pages send.** `jet`, whether anything the page knows stands on the Jet or within the shuffle's reach, on a
+  change (the lowrider and the shuffle never start then, and stop for everyone the moment a page says so); `fire`, a
+  press of the test's button; `film`, a press at a terminal, or `done` with the show's id once its film ran out.
+- **What pages play.** Its state (`anomaly`, `room`, `test`, `film`, each with its id and its start `at`) from as far in
+  as each has got, so a page arriving late joins an anomaly, a fire or a show partway. A page follows the hall while
+  its link is live, and for 20 s after it drops (`src/js/hangar-link.js`); otherwise the hangar plays on its own.
+- **Its tick.** Four times a second while anyone is in the hall; an empty hall does not run.
+- **What it keeps.** Its schedule, saved as any hosted game's, and the account ids of the test's presser and the
+  show's starter while those run. The pages' words on the Jet are kept only while each page is connected.
+
 ## Cost
 
 Measured in Node, a four-player hunt's rules take 0.03 ms a tick, about 0.5 ms of CPU a second. Durable Object CPU is
