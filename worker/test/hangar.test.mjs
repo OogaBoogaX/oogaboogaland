@@ -202,7 +202,34 @@ test("the host's shape is everyone's, and a walk up to it plays the network for 
   g.step(second.at + 30 * S);
   g.message({ id: 1 }, hangar.parse({ t: "shape", s }), t0 + 90 * S);
   const third = g.state().shape;
+  g.join({ id: 3 }, t0 + 90 * S);
+  draws.push(0, 0);
   assert.equal(g.message({ id: 1 }, hangar.parse({ t: "walkup", id: third.id, x: 1, z: 1 }), t0 + 91 * S), false, "the showing after it played draws for nobody who saw it");
+  assert.equal(g.message({ id: 3 }, hangar.parse({ t: "walkup", id: third.id, x: 1, z: 1 }), t0 + 92 * S), false, "nor for anyone who came in since");
+  assert.equal(draws.length, 2, "nothing drawn on it");
+});
+
+test("a player's odds at the shape outlast a reload: their ladder goes on, and a showing they drew on draws for them no more", () => {
+  const t0 = 1.7e12, draws = [];
+  const g = hangar.create(t0, () => draws.length ? draws.shift() : 0.5);
+  g.join({ id: 1 }, t0); g.join({ id: 2 }, t0);
+  const show = (t) => { g.message({ id: 1 }, hangar.parse({ t: "shape", s: SHAPE }), t); return g.state().shape; };
+  const walk = (who, shape, t) => g.message({ id: who }, hangar.parse({ t: "walkup", id: shape.id, x: 1, z: 1 }), t);
+  draws.push(0.7);
+  const first = show(t0);
+  assert.equal(walk(2, first, t0 + S), false, "a first walk up misses at 0.7 against 60%");
+  g.leave({ id: 2 }); g.join({ id: 2 }, t0 + 2 * S);
+  assert.equal(walk(2, first, t0 + 3 * S), false, "back in, no second draw on the same showing");
+  assert.equal(draws.length, 0);
+  g.step(t0 + 30 * S);
+  draws.push(0.9);
+  const second = show(t0 + 31 * S);
+  assert.equal(walk(2, second, t0 + 32 * S), false, "their second at 0.9 misses against 85%, not a fresh 60%");
+  g.leave({ id: 2 }); g.join({ id: 2 }, t0 + 33 * S);
+  g.step(t0 + 61 * S);
+  draws.push(0.99);
+  const third = show(t0 + 62 * S);
+  assert.equal(walk(2, third, t0 + 63 * S), true, "and their third plays it, as it would have without the reloads");
 });
 
 test("no anomaly starts while the shape shows or while the host's page holds them back, as on a page alone", () => {

@@ -30,8 +30,9 @@
 // (`shape`: its spot and how it will run), which keeps it while it shows (with its afterimage), so a page arriving then
 // sees it from as far in as it has got. The network: a page whose Ooga walks up to the shape says so (`walkup`, once a
 // showing, with where it plays, between that Ooga and the shape), and that player's own odds (`NETWORK.first`, then
-// `after` once it has played for them, the showing after that never drawing) decide whether it plays, for everyone
-// (`network`: where, its seed, when); the hall stays quiet a while after, no anomaly nor test starting meanwhile.
+// `after` once it has played for them, kept for the hall's life however often they come and go) decide whether it
+// plays, for everyone (`network`: where, its seed, when), the showing after it played drawing for nobody; the hall
+// stays quiet a while after, no anomaly nor test starting meanwhile.
 //
 // Kortik's Sis's pokes: a page whose Ooga pokes her (`poke`) tells the hall, which keeps the last few (`pokes`, each its
 // number and whose), so the host, which moves her, gives her each once, from that player.
@@ -52,16 +53,17 @@
 // reach (`near`) and whether it holds the anomalies back (`busy`), sent on a change and every few seconds. The lowrider
 // never starts with anyone on the Jet nor the shuffle with anything near (the next in the bag instead, or the failed
 // start), and either stops for everyone the moment a page says so. Nothing it keeps names a player but those words,
-// kept while their page is connected and never saved, and the test's presser's account id, kept while the test runs
-// and cools down, and the film show's starter's, while it shows.
+// kept while their page is connected and never saved; their odds at the shape, in memory for the hall's life and never
+// saved; the test's presser's account id, kept while the test runs and cools down; and the film show's starter's, while
+// it shows.
 import "../../../src/js/hangar-hall.js";
 import { tessQueue } from "../tess-queue.js";
 
 const HALL = globalThis.BL.hangarHall, A = HALL.ANOMALY;
 // The two relays' magic (`hangar-relay.js`): the walkers', from the host, and the forklift's, from its driver.
 const WALKERS = 0x3148474f, LIFT = 0x3146474f;
-// The most desks the hall counts turns for.
-const DESKS = 16;
+// The most desks the hall counts turns for, and the most accounts whose odds at the shape it keeps.
+const DESKS = 16, ODDS_KEPT = 256;
 
 const finite = (v) => typeof v === "number" && Number.isFinite(v);
 // A showing of the shape as the host describes it: every field a finite number within bounds, or null.
@@ -95,9 +97,13 @@ const parse = (m) => {
 // `random` for the checks; the server's own otherwise.
 const create = (_now, random = Math.random) => {
   // Account id → what their page last said of the Jet ({ on, near }), whether it holds the anomalies back (`busy`, read
-  // from the host alone: a meltdown, the shape due or showing, the network's quiet), whether it is showing (`seen`), and
-  // their odds at the shape, in the order they arrived.
+  // from the host alone: a meltdown, the shape due or showing, the network's quiet), whether it is showing (`seen`), in
+  // the order they arrived, and their odds at the shape (`odds`).
   const players = new Map();
+  // Each account's odds at the shape ({ misses, played, used }: their walk ups missed, whether the network has played
+  // for them, the showing they last drew on), kept past a leave for the hall's life, so a reload starts no ladder over
+  // and draws on no showing twice; the newest `ODDS_KEPT`.
+  const odds = new Map();
   // The page that moves the hall's walkers (an account id, 0 for none), and the one the state last went out with.
   let host = 0, shownHost = 0, shownDriver = 0;
   const elect = () => {
@@ -111,8 +117,9 @@ const create = (_now, random = Math.random) => {
   // many kinds are left in the bag.
   let anomaly = null, fire = null, roomUntil = -Infinity, nextAt = 0, id = 0, left = 0;
   // The static fire test running or cooling down ({ id, at, by }) or null; the film show ({ id, at, by, end }, end null
-  // while it runs) or null; the shape showing ({ id, at, s }) or null; the network ({ id, at, x, z, seed, dense }) or null.
-  let test = null, film = null, shape = null, network = null;
+  // while it runs) or null; the shape showing ({ id, at, s }) or null; the network ({ id, at, x, z, seed, dense }) or null;
+  // whether the next showing after it played draws for nobody, and the showing that does not.
+  let test = null, film = null, shape = null, network = null, skipNext = false, skipShape = 0;
   // The last pokes at Sis, each [its number, whose], and how many there have been.
   const pokes = [];
   let pokeN = 0;
@@ -165,7 +172,10 @@ const create = (_now, random = Math.random) => {
 
   const game = {
     join: (p, now) => {
-      players.set(p.id, { on: false, near: false, busy: false, seen: true, misses: 0, played: false, skip: false, used: 0 });
+      const o = odds.get(p.id) || { misses: 0, played: false, used: 0 };
+      odds.delete(p.id); odds.set(p.id, o);
+      if (odds.size > ODDS_KEPT) odds.delete(odds.keys().next().value);
+      players.set(p.id, { on: false, near: false, busy: false, seen: true, odds: o });
       elect();
       tessQueue.presence(queueRoom, peerOf(p));
       if (players.size === 1 && !anomaly && nextAt < now) nextAt = now + gap();
@@ -208,20 +218,23 @@ const create = (_now, random = Math.random) => {
       if (m.t === "shape") {
         if (p.id !== host || shape) return false;
         shape = { id: ++id, at: now, s: m.s };
-        // The showing after the network played for a player never draws for them.
-        for (const q of players.values()) if (q.skip) { q.skip = false; q.used = shape.id; }
+        // The showing after the network played draws for nobody, whoever has come in since.
+        if (skipNext) { skipNext = false; skipShape = shape.id; }
         return true;
       }
       if (m.t === "walkup") {
-        if (!shape || shape.id !== m.id || f.used === shape.id || network && now < netQuietUntil()) return false;
-        f.used = shape.id;
+        const o = f.odds;
+        if (!shape || shape.id !== m.id || o.used === shape.id || network && now < netQuietUntil()) return false;
+        o.used = shape.id;
         const every = m.every && p.debug;
         if (!every) {
-          const odds = f.played ? N.after : N.first[Math.min(f.misses, N.first.length - 1)];
-          if (random() >= odds) { f.misses++; return false; }
+          if (shape.id === skipShape) return false;
+          const chance = o.played ? N.after : N.first[Math.min(o.misses, N.first.length - 1)];
+          if (random() >= chance) { o.misses++; return false; }
         }
         network = { id: ++id, at: now, x: m.x, z: m.z, seed: Math.floor(random() * 1e9), dense: every && m.dense };
-        for (const q of players.values()) { q.played = true; q.skip = true; }
+        for (const q of players.values()) q.odds.played = true;
+        skipNext = true;
         const wait = network.at + (N.end + N.quiet + N.defer[0] + random() * (N.defer[1] - N.defer[0])) * 1000;
         if (nextAt < wait) nextAt = wait;
         return true;
