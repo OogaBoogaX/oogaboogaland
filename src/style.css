@@ -4039,7 +4039,7 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   to { transform: scaleX(1); }
 }
 
-/* The way out, beside the Ooga's face: an arrow out of a bracket, no words. Where a place's banner has a Leave button,
+/* The way out, beside the Ooga's face: an orange arrow over EXIT, an exit sign. Where a place's banner has a Leave button,
    hud.js shows this one, named by it, and the banner's own is kept out of sight. */
 body[data-leave-hud] .presets [data-action="leave"] {
   display: none;
@@ -4053,8 +4053,8 @@ body[data-leave-hud] .presets [data-action="leave"] {
 }
 
 .leave-icon {
-  width: 40px;
-  height: 40px;
+  width: 68px;
+  height: 42px;
   flex: none;
   filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
 }
@@ -12351,8 +12351,6 @@ body.arcade-game .cloud-hopper-panel { z-index: 40; }
 .explore-coach p { margin: 0 0 10px; line-height: 1.5; font-size: 13px; }
 .explore-coach div { display: flex; flex-wrap: wrap; gap: 8px; }
 .explore-coach button { min-height: 44px; white-space: normal; flex: 1; }
-
-.destination-map-label { position: absolute; bottom: 1px; left: 0; right: 0; font-size: 10px; line-height: 12px; color: var(--accent-text); text-shadow: 0 1px 2px #000; }
 
 /* Block Frenzy's menu: dark backing behind every line of text on the wood, so it reads. */
 #block-board .garage-head,
