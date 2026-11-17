@@ -85,9 +85,19 @@ test("a lightning jumps to a room only while no room burns, and a restart picks 
     const a = g.state().anomaly;
     if (a.kind !== "lightning") continue;
     lightnings++;
-    if (a.jump) { jumps++; assert.ok(a.room >= 0 && a.room < 1); }
+    if (a.jump) {
+      jumps++;
+      assert.ok(a.room >= 0 && a.room < 1);
+      assert.deepEqual(g.state().room, { id: a.id, at: a.at + A.lands * S, room: a.room }, "its room's fire is named apart, from when the bolt lands");
+    }
   }
   assert.ok(lightnings > 1 && jumps === 1, `one jump while its fire burns: ${jumps} of ${lightnings}`);
+  const fire = g.state().room;
+  g.debug.end(t0 + 15 * S);
+  assert.equal(g.step(fire.at + HALL.ROOM_FIRE.done * S - 1), false);
+  assert.deepEqual(g.state().room, fire, "the fire burns on after its lightning");
+  assert.equal(g.step(fire.at + HALL.ROOM_FIRE.done * S), true);
+  assert.equal(g.state().room, null, "and goes out for everyone at its end");
   const saved = g.save(), h = hangar.create(t0, seeded());
   assert.equal(h.restore(saved, t0 + 2 * S), true);
   assert.deepEqual(h.state(), g.state());

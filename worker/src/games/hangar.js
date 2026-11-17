@@ -7,7 +7,9 @@
 // The engine anomalies: one at a time, a gap at random from the end of one to the start of the next (the first a gap
 // after the hall's first player arrives), each kind in its turn from a bag shuffled each time it runs out, as on a page
 // alone. A lightning ends in the jump to a room now and then, never while the last jump's fire still burns, the room
-// given as a fraction each page turns into one of its rooms.
+// given as a fraction each page turns into one of its rooms; the fire it lights there (`room`: the lightning's id, when
+// the bolt lands, the room) is named while it burns, which is longer than the lightning, so a page arriving after the
+// lightning still lights it from as far in as it has got.
 //
 // What it hears: `jet`, a page's word on whether anything it knows stands on the Jet (`on`) or within the shuffle's
 // reach (`near`), sent on a change. The lowrider never starts with anyone on the Jet nor the shuffle with anything near
@@ -29,9 +31,10 @@ const create = (_now, random = Math.random) => {
   // Account id → what their page last said of the Jet: { on, near }.
   const players = new Map();
   const bag = [...HALL.KINDS];
-  // The anomaly playing ({ id, kind, at, jump, room }, at in ms) or null; when the next may start; until when the last
-  // jump's room fire burns; the last anomaly's id; how many kinds are left in the bag.
-  let anomaly = null, nextAt = 0, roomUntil = -Infinity, id = 0, left = 0;
+  // The anomaly playing ({ id, kind, at, jump, room }, at in ms) or null; the room fire its jump lit ({ id, at, room },
+  // at when the bolt lands) or null, and until when it burns; when the next anomaly may start; the last one's id; how
+  // many kinds are left in the bag.
+  let anomaly = null, fire = null, roomUntil = -Infinity, nextAt = 0, id = 0, left = 0;
 
   const gap = () => (A.gap[0] + random() * (A.gap[1] - A.gap[0])) * 1000;
   const next = () => {
@@ -52,7 +55,10 @@ const create = (_now, random = Math.random) => {
     if (unfit(k)) k = "misfire";
     const jump = k === "lightning" && now >= roomUntil && random() < A.jump;
     anomaly = { id: ++id, kind: k, at: now, jump, room: jump ? random() : 0 };
-    if (jump) roomUntil = now + (A.lands + HALL.ROOM_FIRE.done) * 1000;
+    if (jump) {
+      fire = { id, at: now + A.lands * 1000, room: anomaly.room };
+      roomUntil = fire.at + HALL.ROOM_FIRE.done * 1000;
+    }
   };
   const end = (now) => { anomaly = null; nextAt = now + gap(); };
   // Whether the anomaly playing must stop now: its end, or someone where it may not go on.
@@ -74,20 +80,22 @@ const create = (_now, random = Math.random) => {
     },
     /** The hall to `now`; true when its state changed. */
     step: (now) => {
+      let changed = false;
+      if (fire && now >= roomUntil) { fire = null; changed = true; }
       if (anomaly) {
-        if (!over(now)) return false;
+        if (!over(now)) return changed;
         end(now);
         return true;
       }
-      if (now < nextAt) return false;
+      if (now < nextAt) return changed;
       begin(now);
       return true;
     },
     running: () => players.size > 0,
-    state: () => ({ anomaly }),
+    state: () => ({ anomaly, room: fire }),
     motion: () => false,
     /** What a restart picks up: the schedule, or null once the hall is empty. */
-    save: () => players.size ? JSON.stringify({ anomaly, nextAt, roomUntil, id, bag, left }) : null,
+    save: () => players.size ? JSON.stringify({ anomaly, fire, nextAt, roomUntil, id, bag, left }) : null,
     /** Picks up a saved hall: its schedule goes on where it stopped, on the same clock. */
     restore: (data) => {
       let s = null;
@@ -95,6 +103,8 @@ const create = (_now, random = Math.random) => {
       if (!s || typeof s !== "object" || !Array.isArray(s.bag) || s.bag.length !== bag.length || !s.bag.every((k) => HALL.KINDS.includes(k))) return false;
       const a = s.anomaly;
       anomaly = a && HALL.KINDS.includes(a.kind) && Number.isFinite(a.at) ? { id: a.id | 0, kind: a.kind, at: a.at, jump: !!a.jump, room: Math.min(0.999, Math.max(0, +a.room || 0)) } : null;
+      const f = s.fire;
+      fire = f && Number.isFinite(f.at) ? { id: f.id | 0, at: f.at, room: Math.min(0.999, Math.max(0, +f.room || 0)) } : null;
       nextAt = +s.nextAt || 0; roomUntil = Number.isFinite(s.roomUntil) ? s.roomUntil : -Infinity; id = s.id | 0;
       bag.splice(0, bag.length, ...s.bag);
       left = Math.min(bag.length, Math.max(0, s.left | 0));
