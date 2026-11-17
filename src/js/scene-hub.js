@@ -5394,7 +5394,8 @@
   // The glow under each seat (hub-models.js `cloudSeatGlow`), hung on its cloud's node the first time the seat is
   // taken, all hidden before the speakers are seated each frame and shown again under each one seated.
   const seatGlows = [];
-  const hideSeatGlows = () => { for (let i = 0; i < seatGlows.length; i++) seatGlows[i].visible = false; };
+  // Seats are taken in any order, so the list may have holes below the highest seat used.
+  const hideSeatGlows = () => { for (let i = 0; i < seatGlows.length; i++) if (seatGlows[i]) seatGlows[i].visible = false; };
   // A cloud speaker's seat, for the live players tab's crosshair (players.js `setCloudSpot`).
   const cloudSpotOf = (id, out) => !!remotes && remotes.cloudSpot(id, out);
   const updateClouds = (dt) => {
