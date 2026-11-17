@@ -10,6 +10,9 @@ const HALL = globalThis.BL.hangarHall, A = HALL.ANOMALY, S = 1000;
 // A seeded random, so a schedule replays.
 const seeded = (seed = 7) => () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
 const at = (game, from, to, step = 250) => { let changed = 0; for (let t = from; t <= to; t += step) if (game.step(t)) changed++; return changed; };
+// A showing of the shape as a host describes it, 30 s long.
+const SHAPE = { x: 3, z: -4, mirror: 1, slow: 0.2, formed: 2, held: 9, gone: 11, end: 30, nearOn: 1, nearReach: 5, nearShare: 0.3, nearPeak: 0.1, nearSeed: 7,
+  catchOn: 0, close: 2, catchShare: 0.2, catchSeed: 9, stirOn: 1, stirReach: 4, stirPeak: 0.3 };
 
 test("the hangar is off unless GAME_FEATURES names it: not offered, and its route names no object", () => {
   assert.deepEqual(gamesOn({}), ["ghost-hunt"]);
@@ -19,10 +22,12 @@ test("the hangar is off unless GAME_FEATURES names it: not offered, and its rout
   assert.equal(gameName("ghost-hunt", "arena", {}), "ghost-hunt:arena:v1", "a kind that is not optional is always on");
 });
 
-test("the hall reads only the Jet's two words, and nothing else a page says", () => {
+test("the hall reads only a page's words on the Jet and its hold, and nothing else a page says", () => {
   assert.equal(hangar.parse(null), false);
   assert.equal(hangar.parse([]), false);
-  assert.deepEqual(hangar.parse({ t: "jet", on: true, near: false, extra: 1 }), { t: "jet", on: true, near: false });
+  assert.deepEqual(hangar.parse({ t: "jet", on: true, near: false, extra: 1 }), { t: "jet", on: true, near: false, busy: false });
+  assert.deepEqual(hangar.parse({ t: "jet", on: false, near: false, busy: true }), { t: "jet", on: false, near: false, busy: true });
+  assert.equal(hangar.parse({ t: "jet", on: false, near: false, busy: "yes" }).busy, false, "a hold is a boolean or none");
   assert.equal(hangar.parse({ t: "jet", on: 1, near: false }), null);
   assert.deepEqual(hangar.parse({ t: "fire", by: 9 }), { t: "fire" }, "a press says nothing of who pressed: the hall knows whose page sent it");
   assert.equal(hangar.parse({ t: "shout" }), null);
@@ -170,8 +175,7 @@ test("the host's shape is everyone's, and a walk up to it plays the network for 
   const g = hangar.create(t0, () => draws.length ? draws.shift() : 0.5);
   g.join({ id: 1 }, t0); g.join({ id: 2 }, t0);
   draws.push(0.7, 0.9, 0.1);
-  const s = { x: 3, z: -4, mirror: 1, slow: 0.2, formed: 2, held: 9, gone: 11, end: 30, nearOn: 1, nearReach: 5, nearShare: 0.3, nearPeak: 0.1, nearSeed: 7,
-    catchOn: 0, close: 2, catchShare: 0.2, catchSeed: 9, stirOn: 1, stirReach: 4, stirPeak: 0.3 };
+  const s = SHAPE;
   assert.equal(hangar.parse({ t: "shape", s: { ...s, end: 999 } }), null, "a showing longer than any is refused");
   const widest = Object.fromEntries(Object.keys(s).map((k) => [k, k.endsWith("Seed") ? 999999 : -123.456]));
   widest.end = 39.999;
@@ -199,6 +203,24 @@ test("the host's shape is everyone's, and a walk up to it plays the network for 
   g.message({ id: 1 }, hangar.parse({ t: "shape", s }), t0 + 90 * S);
   const third = g.state().shape;
   assert.equal(g.message({ id: 1 }, hangar.parse({ t: "walkup", id: third.id, x: 1, z: 1 }), t0 + 91 * S), false, "the showing after it played draws for nobody who saw it");
+});
+
+test("no anomaly starts while the shape shows or while the host's page holds them back, as on a page alone", () => {
+  const t0 = 1.7e12, g = hangar.create(t0, seeded(3));
+  g.join({ id: 1 }, t0); g.join({ id: 2 }, t0);
+  const due = g.debug.nextAt;
+  at(g, t0, due - S);
+  assert.equal(g.message({ id: 1 }, hangar.parse({ t: "shape", s: SHAPE }), due - S), true);
+  at(g, due - S, due + 20 * S);
+  assert.equal(g.state().anomaly, null, "not while the shape shows");
+  g.message({ id: 1 }, hangar.parse({ t: "jet", on: false, near: false, busy: true }), due + 21 * S);
+  at(g, due + 21 * S, due + 60 * S);
+  assert.equal(g.state().shape, null);
+  assert.equal(g.state().anomaly, null, "nor while the host holds them back (a meltdown, the shape just gone)");
+  g.message({ id: 2 }, hangar.parse({ t: "jet", on: false, near: false, busy: true }), due + 61 * S);
+  g.message({ id: 1 }, hangar.parse({ t: "jet", on: false, near: false, busy: false }), due + 61 * S);
+  at(g, due + 61 * S, due + 61 * S);
+  assert.ok(g.state().anomaly, "a follower's hold is not the hall's: it comes once the host lets go");
 });
 
 test("a poke at Sis from any page is kept for the host, numbered, the last few", () => {

@@ -1777,7 +1777,7 @@
     // on the right wall, whose operators' posts come just before it.
     const side = HM.sideRooms(), first = LAYOUT.crew.length - 1 - side.length;
     scene.roomFire = BL.hangarRoomFire.create({ root, fx, audio, rooms: [{ spots: HM.controlRoom().spots, gorilla: scene.crew[LAYOUT.crew.length - 1] }, ...side.map((r, i) => ({ spots: r.spots, gorilla: scene.crew[first + i] }))] });
-    scene.anomaly = BL.hangarAnomaly.create({ root, fire: scene.fire, sis: scene.sis, fx, audio, jet: scene.jet, stage: JET_STAGE, room: scene.roomFire, auto: !params.has("nosim") || every > 0, gap: every > 0 ? every : null, riders: () => jetRidden(), near: (test) => nearJet(test), busy: () => scene.meltdown.active || !!scene.shimmer && scene.shimmer.holding || !!scene.network && scene.network.quiet });
+    scene.anomaly = BL.hangarAnomaly.create({ root, fire: scene.fire, sis: scene.sis, fx, audio, jet: scene.jet, stage: JET_STAGE, room: scene.roomFire, auto: !params.has("nosim") || every > 0, gap: every > 0 ? every : null, riders: () => jetRidden(), near: (test) => nearJet(test), busy: anomalyHeld });
     // Now and then a worker in one of the crew's rooms has had enough, and runs down to pound on the Jet
     // (`hangar-meltdown.js`), with nothing else going on: not on a test page unless `meltdown=` asks, which under debug
     // also sets the wait between them, s.
@@ -1865,7 +1865,7 @@
     if (DEBUG && params.get("netfog") === "1") scene.network.fog = true;
     scene.netShow = -1; scene.netFrom = 0; scene.netUsed = true;
     // What this page last told the hall of the Jet, and of the hall's events which it has played.
-    scene.wordsAt = -Infinity; scene.saidOn = false; scene.saidNear = false; scene.roomFollowed = 0; scene.netFollowed = 0; scene.pokeSeen = 0; scene.wasHosting = false;
+    scene.wordsAt = -Infinity; scene.wordsSaid = -Infinity; scene.saidOn = false; scene.saidNear = false; scene.saidBusy = false; scene.roomFollowed = 0; scene.netFollowed = 0; scene.pokeSeen = 0; scene.wasHosting = false;
     // Tess notices the shape if she is near it and free when she would notice it, and glances at it, looks it over or is
     // puzzled by it.
     scene.unsettled = BL.hangarGuide.unsettled(scene.shimmer, camera);
@@ -2000,13 +2000,18 @@
       g.phase.ripples.pulse(opening.minX + Math.random() * (opening.maxX - opening.minX), opening.floorY + Math.random() * (opening.ceilingY - opening.floorY), 0);
     }
   };
+  // Whether this page holds the anomalies back, as a page alone always has: a meltdown under way, the shape due, showing
+  // or just gone, the network's quiet. Followed, the host's word holds them for the hall.
+  const anomalyHeld = () => scene.meltdown.active || !!scene.shimmer && scene.shimmer.holding || !!scene.network && scene.network.quiet;
+  // How often this page's word on the Jet goes again unchanged, s.
+  const WORDS_AGAIN = 5;
   // The hall on the Worker, while this page follows it (hangar-link.js): the anomaly it names played here, and the room
-  // fire it lit, the static fire test and the film show it started, and this page's word on the Jet sent on a change, at most four times a second, and again after the link
-  // comes back.
+  // fire it lit, the static fire test and the film show it started; and this page's word on the Jet and its hold on the
+  // anomalies, sent on a change, at most four times a second, again after the link comes back and every `WORDS_AGAIN`.
   const hallLife = (s, elapsed) => {
     const L = s.link;
     L.update();
-    if (!L.live) s.saidOn = s.saidNear = false;
+    if (!L.live) { s.saidOn = s.saidNear = s.saidBusy = false; s.wordsSaid = -Infinity; }
     // The walkers: moved here when this page is the hall's host or plays on its own, else played back from the host's
     // frames; a page that takes them on (or plays on its own again) carries on from where they stand.
     const hosting = L.hosting, puppet = L.following && !hosting;
@@ -2084,8 +2089,10 @@
     }
     if (elapsed - s.wordsAt < 0.25) return;
     s.wordsAt = elapsed;
-    const w = s.anomaly.words();
-    if ((w.on !== s.saidOn || w.near !== s.saidNear) && L.send({ t: "jet", on: w.on, near: w.near })) { s.saidOn = w.on; s.saidNear = w.near; }
+    // Said again now and then too, since a hall that restarts with this page still connected starts from nothing.
+    const w = s.anomaly.words(), busy = anomalyHeld();
+    if ((w.on !== s.saidOn || w.near !== s.saidNear || busy !== s.saidBusy || elapsed - s.wordsSaid > WORDS_AGAIN)
+      && L.send({ t: "jet", on: w.on, near: w.near, busy })) { s.saidOn = w.on; s.saidNear = w.near; s.saidBusy = busy; s.wordsSaid = elapsed; }
   };
 
   // The forklift as its driver shares it, and as everyone else poses it from that.

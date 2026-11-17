@@ -6,10 +6,12 @@
 //
 // The engine anomalies: one at a time, a gap at random from the end of one to the start of the next (the first a gap
 // after the hall's first player arrives), each kind in its turn from a bag shuffled each time it runs out, as on a page
-// alone. A lightning ends in the jump to a room now and then, never while the last jump's fire still burns, the room
-// given as a fraction each page turns into one of its rooms; the fire it lights there (`room`: the lightning's id, when
-// the bolt lands, the room) is named while it burns, which is longer than the lightning, so a page arriving after the
-// lightning still lights it from as far in as it has got.
+// alone; none starts while the shape shows, nor while the host's page holds them back (`busy`: a meltdown under way,
+// the shape due or just gone, the network's quiet), as a page alone waits for its own. A lightning ends in the jump to
+// a room now and then, never while the last jump's fire still burns, the room given as a fraction each page turns into
+// one of its rooms; the fire it lights there (`room`: the lightning's id, when the bolt lands, the room) is named while
+// it burns, which is longer than the lightning, so a page arriving after the lightning still lights it from as far in
+// as it has got.
 //
 // The static fire test: a page's press (`fire`) starts it for everyone (`test`: its id, when, and who pressed, whose page
 // alone hands the test its controls), never while one runs or cools down, nor while an anomaly plays; and no anomaly
@@ -47,10 +49,11 @@
 // turns (`desks`, two a desk), so every page shows the same pictures.
 //
 // What it hears: `jet`, a page's word on whether anything it knows stands on the Jet (`on`) or within the shuffle's
-// reach (`near`), sent on a change. The lowrider never starts with anyone on the Jet nor the shuffle with anything near
-// (the next in the bag instead, or the failed start), and either stops for everyone the moment a page says so. Nothing
-// it keeps names a player but those two words, kept while their page is connected and never saved, and the test's
-// presser's account id, kept while the test runs and cools down, and the film show's starter's, while it shows.
+// reach (`near`) and whether it holds the anomalies back (`busy`), sent on a change and every few seconds. The lowrider
+// never starts with anyone on the Jet nor the shuffle with anything near (the next in the bag instead, or the failed
+// start), and either stops for everyone the moment a page says so. Nothing it keeps names a player but those words,
+// kept while their page is connected and never saved, and the test's presser's account id, kept while the test runs
+// and cools down, and the film show's starter's, while it shows.
 import "../../../src/js/hangar-hall.js";
 import { tessQueue } from "../tess-queue.js";
 
@@ -74,7 +77,7 @@ const shapeOf = (s) => {
 /** A page's message as the hall reads it: false for one that is not a message at all, null for one to ignore. */
 const parse = (m) => {
   if (!m || typeof m !== "object" || Array.isArray(m) || typeof m.t !== "string") return false;
-  if (m.t === "jet") return typeof m.on === "boolean" && typeof m.near === "boolean" ? { t: "jet", on: m.on, near: m.near } : null;
+  if (m.t === "jet") return typeof m.on === "boolean" && typeof m.near === "boolean" ? { t: "jet", on: m.on, near: m.near, busy: m.busy === true } : null;
   if (m.t === "seen") return typeof m.v === "boolean" ? { t: "seen", v: m.v } : null;
   if (m.t === "fire") return { t: "fire" };
   if (m.t === "poke") return { t: "poke" };
@@ -91,8 +94,9 @@ const parse = (m) => {
 
 // `random` for the checks; the server's own otherwise.
 const create = (_now, random = Math.random) => {
-  // Account id → what their page last said of the Jet ({ on, near }) and whether it is showing (`seen`), in the order
-  // they arrived.
+  // Account id → what their page last said of the Jet ({ on, near }), whether it holds the anomalies back (`busy`, read
+  // from the host alone: a meltdown, the shape due or showing, the network's quiet), whether it is showing (`seen`), and
+  // their odds at the shape, in the order they arrived.
   const players = new Map();
   // The page that moves the hall's walkers (an account id, 0 for none), and the one the state last went out with.
   let host = 0, shownHost = 0, shownDriver = 0;
@@ -137,6 +141,8 @@ const create = (_now, random = Math.random) => {
     }
     return bag[--left];
   };
+  // Whether the host holds the anomalies back, as a page alone does for its meltdown, its shape and its network.
+  const held = () => { const h = players.get(host); return !!h && h.busy; };
   const any = (key) => {
     for (const f of players.values()) if (f[key]) return true;
     return false;
@@ -159,7 +165,7 @@ const create = (_now, random = Math.random) => {
 
   const game = {
     join: (p, now) => {
-      players.set(p.id, { on: false, near: false, seen: true, misses: 0, played: false, skip: false, used: 0 });
+      players.set(p.id, { on: false, near: false, busy: false, seen: true, misses: 0, played: false, skip: false, used: 0 });
       elect();
       tessQueue.presence(queueRoom, peerOf(p));
       if (players.size === 1 && !anomaly && nextAt < now) nextAt = now + gap();
@@ -236,7 +242,7 @@ const create = (_now, random = Math.random) => {
         film.end = now;
         return true;
       }
-      f.on = m.on; f.near = m.near;
+      f.on = m.on; f.near = m.near; f.busy = m.busy;
       if (anomaly && over(now)) { end(now); return true; }
       return false;
     },
@@ -255,7 +261,7 @@ const create = (_now, random = Math.random) => {
         end(now);
         return true;
       }
-      if (now < nextAt || testing(now) || now < netQuietUntil()) return changed;
+      if (now < nextAt || testing(now) || now < netQuietUntil() || shape || held()) return changed;
       begin(now);
       return true;
     },
