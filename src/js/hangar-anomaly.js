@@ -454,6 +454,8 @@
         landed = false;
         if (from < ZAP.crack) { jet.geometry = lit; jet.glow = ZAP.glow[0]; }
         if (jumping && from >= A.lands) { room.pick(into); room.ignite(from - A.lands); landed = true; }
+        // Joined between the crack and the landing: the room and the bolt's path as the crack would have laid them.
+        else if (jumping && from >= ZAP.crack) { room.pick(into); lay(); }
         audio.zap(ZAP, { x: J.x, y: 5, z: nose }, { x: J.x, y: 5, z: tail }, from);
       } else if (k === "blackout") {
         audio.blackout(BLACKOUT, from);
