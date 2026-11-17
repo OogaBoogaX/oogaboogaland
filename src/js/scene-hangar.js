@@ -1189,12 +1189,12 @@
     s.commandOpen = 0;
     // The crew's rooms on the right wall, as the control room, each its door on a node of its own on its hinge, its amber
     // window dimmed with the glass.
-    s.roomDoors = [];
+    s.roomDoors = []; s.roomDoorShut = [];
     for (const r of HM.sideRooms()) {
       const lit = createNode({ geometry: r.glow, sightHidden: true }), door = createNode({ position: { x: r.door.x, y: r.door.y, z: r.door.z }, rotation: { x: 0, y: r.door.turn, z: 0 }, geometry: HM.roomDoor() });
       addChild(root, createNode({ geometry: r.flat }), lit, createNode({ geometry: r.glass, sightHidden: true }), door);
       s.glass.push(door);
-      s.roomDoors.push(door);
+      s.roomDoors.push(door); s.roomDoorShut.push(r.door.turn);
       for (const p of r.pictures) addChild(root, createNode({ position: { x: p.x, y: p.y, z: p.z }, rotation: { x: 0, y: p.turn, z: 0 }, geometry: p.geometry, sightHidden: true, depthBias: -1 }));
       s.glass.push(lit);
     }
@@ -1736,7 +1736,7 @@
     scene.liftRelay = BL.hangarRelay.create({ magic: BL.hangarRelay.LIFT });
     scene.liftVals = new Float32Array(13); scene.liftFlags = new Float32Array(3);
     scene.liftRelay.values(scene.liftVals, true); scene.liftRelay.values(scene.liftFlags);
-    scene.liftPuppet = false; scene.seatAsked = false;
+    scene.liftPuppet = false; scene.seatAsked = false; scene.seatAskAt = 0; scene.seatLost = false;
     scene.liftRelay.on("lift.horn", () => audio.horn());
     // The hall on the Worker, followed while it is offered (hangar-link.js).
     scene.link = BL.hangarLink.create({ bytes: (bytes) => scene.relay.read(bytes) || scene.liftRelay.read(bytes) });
@@ -2021,13 +2021,19 @@
     // the hall for its seat, and getting out gives it back with a whole last frame, so it stands where it was left for
     // everyone; losing the seat to another page's driver gets the Ooga out again.
     const F = s.forklift, D = L.following ? L.hall.driver || 0 : 0, mine = !!D && D === L.you, me = people && people.player, sitting = !!me && me.camp.seat === F.seat;
-    if (L.following && sitting && !s.seatAsked) s.seatAsked = L.send({ t: "seat", on: true });
-    else if (s.seatAsked && (!sitting || !L.following)) {
+    // Asked again a second on while the hall still names no driver (the first lost, or the hall restarted under it).
+    if (L.following && sitting && (!s.seatAsked || !D && L.live && performance.now() - s.seatAskAt > 1000)) {
+      if (L.send({ t: "seat", on: true })) { s.seatAsked = true; s.seatAskAt = performance.now(); }
+    } else if (s.seatAsked && (!sitting || !L.following)) {
       if (s.liftRelay.hosting) { liftShare(s, F); const last = s.liftRelay.write(L.serverNow(), true); if (last) L.sendBytes(last); }
       L.send({ t: "seat", on: false });
       s.seatAsked = false;
     }
-    if (sitting && D && !mine) { standSpot(F, me); hud.toast("Someone else is driving the forklift."); }
+    if (sitting && D && !mine) {
+      if (standSpot(F, me)) people.standPlayer(me, true);
+      if (!s.seatLost) hud.toast("Someone else is driving the forklift.");
+      s.seatLost = true;
+    } else if (!sitting) s.seatLost = false;
     s.liftRelay.hosting = L.following && mine;
     s.liftPuppet = L.following && !mine;
     if (s.liftPuppet) s.liftRelay.play(L.serverNow());
@@ -2110,9 +2116,17 @@
     const sz = P.seat[2] * S, seat = f.seat;
     seat.x = f.x + sz * f.sn; seat.z = f.z + sz * f.cs; seat.ry = V[2] + Math.PI;
   };
-  // The walkers carried on from where the host's frames left them.
+  // The walkers carried on from where the host's frames left them; a gorilla off his post (a meltdown the old host ran,
+  // which this page never did) back at it, and the crew's room doors shut.
   const adoptWalkers = (s) => {
-    for (const a of s.crew) if (s.roomFire.holding !== a && s.meltdown.holding !== a) a.place(a.root.position.x, a.root.position.z, a.root.rotation.y);
+    for (let i = 0; i < s.crew.length; i++) {
+      const a = s.crew[i];
+      if (s.roomFire.holding === a || s.meltdown.holding === a) continue;
+      const [x, , z, radius, heading] = LAYOUT.crew[i], p = a.root.position;
+      if (Math.hypot(p.x - x, p.z - z) > radius + 0.5) a.place(x, z, heading);
+      else a.place(p.x, p.z, a.root.rotation.y);
+    }
+    for (let i = 0; i < s.roomDoors.length; i++) s.roomDoors[i].rotation.y = s.roomDoorShut[i];
   };
   // The host's frame of the walkers, once they have all moved this frame.
   const relayLife = (s) => {
