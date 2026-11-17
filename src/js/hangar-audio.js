@@ -760,14 +760,15 @@
     // the ballasts buzzing up as it falters, ticking and crackling at each dip; at the cut a breaker's light click, the
     // buzz dying, the motors and their air winding down, the lamps pinging now and then as they cool and the emergency
     // lights' faint whine; then a breaker closing, the transformers' hum surging back, the lamps' starters ticking each on
-    // with a blip of buzz, and the motors spinning back up. With null, or muted, quiet at once.
-    const outage = (O) => {
+    // with a blip of buzz, and the motors spinning back up. With null, or muted, quiet at once. `since`: how far in it
+    // starts (the hall's, joined late), what fell before then all taken up at the start, so what holds goes on.
+    const outage = (O, since = 0) => {
       if (!ready) return false;
       const now = ctx.currentTime, voices = [out.buzzGain, out.tickGain, out.pingGain, out.tripGain, out.knockGain, out.motorGain, out.whirrGain, out.inrushGain, out.whineGain];
       for (const g of voices) { g.gain.cancelScheduledValues(now); g.gain.setTargetAtTime(0, now, 0.04); }
       if (!O || muted) return false;
-      const t0 = now + 0.05, at = (s) => t0 + s, C = O.cut, R = O.restore, rand = (a, b) => a + Math.random() * (b - a);
-      for (const g of voices) g.gain.setValueAtTime(0, t0);
+      const t0 = now + 0.05 - since, at = (s) => Math.max(now + 0.05, t0 + s), C = O.cut, R = O.restore, rand = (a, b) => a + Math.random() * (b - a);
+      for (const g of voices) g.gain.setValueAtTime(0, at(0));
       const ticks = [];
       // The ballasts straining, then buzzing up at each dip with a tick and a crackle or two; flaring and dying at the cut.
       const B = out.buzzGain.gain, rest = OUT.buzz * 0.25;

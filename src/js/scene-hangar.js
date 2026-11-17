@@ -433,7 +433,7 @@
     if (s.network.active) return;
     if (sh.state === "show") sh.cohere(Math.max(0, NT.cohere - since), NT.hold, NT.dissolve);
     s.network.play(x, z, seed, -since);
-    if (audio && since < 0.5) audio.outage(s.network.cues());
+    if (audio) audio.outage(s.network.cues(), since);
     s.netDefer = between(NET_DEFER);
   };
   const playNetwork = (s, anywhere) => {
