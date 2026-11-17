@@ -80,6 +80,7 @@ test("the lowrider waits for an empty Jet and the shuffle for clear ground, and 
 test("a lightning jumps to a room only while no room burns, and a restart picks the hall up where it stopped", () => {
   const t0 = 1.7e12, g = hangar.create(t0, () => 0);
   g.join({ id: 1 }, t0);
+  g.step(t0);
   let jumps = 0, lightnings = 0;
   for (let n = 0; n < 60; n++) {
     g.debug.begin(t0 + n * 250);
@@ -101,7 +102,8 @@ test("a lightning jumps to a room only while no room burns, and a restart picks 
   assert.equal(g.state().room, null, "and goes out for everyone at its end");
   const saved = g.save(), h = hangar.create(t0, seeded());
   assert.equal(h.restore(saved, t0 + 2 * S), true);
-  assert.deepEqual(h.state(), g.state());
+  const without = ({ host, ...rest }) => rest;
+  assert.deepEqual(without(h.state()), without(g.state()), "its schedule comes back; its host is chosen again from who reconnects");
   assert.equal(h.restore("{", t0), false);
   assert.equal(h.restore(JSON.stringify({ bag: ["nope"] }), t0), false, "a record it cannot read is refused");
 });
@@ -138,4 +140,21 @@ test("the film show starts and stops for everyone, ends when the first page's fi
   assert.equal(g.message({ id: 2 }, { t: "film" }, t0 + 80 * S), true);
   assert.equal(g.message({ id: 1 }, { t: "film" }, t0 + 81 * S), true, "a press while it shows stops it");
   assert.equal(g.state().film.end, t0 + 81 * S);
+});
+
+test("one page moves the hall's walkers: the earliest arrival that is showing, handed on as it leaves or hides", () => {
+  const t0 = 1.7e12, g = hangar.create(t0, seeded(2));
+  assert.deepEqual(hangar.parse({ t: "seen", v: "yes" }), null);
+  g.join({ id: 4 }, t0); g.join({ id: 5 }, t0); g.join({ id: 6 }, t0);
+  assert.equal(g.state().host, 4);
+  assert.equal(g.relay({ id: 4 }), true);
+  assert.equal(g.relay({ id: 5 }), false, "nobody else's frames go on");
+  assert.equal(g.message({ id: 4 }, { t: "seen", v: false }, t0), true, "a hidden host hands on, and the hall says so at once");
+  assert.equal(g.state().host, 5);
+  assert.equal(g.message({ id: 4 }, { t: "seen", v: true }, t0), false, "and keeps the new one when it comes back");
+  g.leave({ id: 5 });
+  assert.equal(g.step(t0 + 250), true, "a host leaving is told on the next tick");
+  assert.equal(g.state().host, 4);
+  g.message({ id: 4 }, { t: "seen", v: false }, t0); g.message({ id: 6 }, { t: "seen", v: false }, t0);
+  assert.equal(g.state().host, 0, "with every page hidden, nobody moves them");
 });

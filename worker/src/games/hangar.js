@@ -20,6 +20,10 @@
 // film is as long as that page's reading of the Jet's repository. Once the screen has wound back up (`FILM.wind`) it
 // may start again.
 //
+// The hall's walkers (Kortik's Sis, the crew, the crane, Tess at work) move on one page, the host (`host`, an account
+// id): the earliest arrival whose page is showing (`seen`), handed on the moment that page leaves or is hidden. Its
+// frames of them (bytes, `hangar-relay.js`) are passed on unread to everyone else in the hall, and from no other page.
+//
 // What it hears: `jet`, a page's word on whether anything it knows stands on the Jet (`on`) or within the shuffle's
 // reach (`near`), sent on a change. The lowrider never starts with anyone on the Jet nor the shuffle with anything near
 // (the next in the bag instead, or the failed start), and either stops for everyone the moment a page says so. Nothing
@@ -33,6 +37,7 @@ const HALL = globalThis.BL.hangarHall, A = HALL.ANOMALY;
 const parse = (m) => {
   if (!m || typeof m !== "object" || Array.isArray(m) || typeof m.t !== "string") return false;
   if (m.t === "jet") return typeof m.on === "boolean" && typeof m.near === "boolean" ? { t: "jet", on: m.on, near: m.near } : null;
+  if (m.t === "seen") return typeof m.v === "boolean" ? { t: "seen", v: m.v } : null;
   if (m.t === "fire") return { t: "fire" };
   if (m.t === "film") return m.done === undefined ? { t: "film" } : Number.isSafeInteger(m.done) && m.done > 0 ? { t: "film", done: m.done } : null;
   return null;
@@ -40,8 +45,16 @@ const parse = (m) => {
 
 // `random` for the checks; the server's own otherwise.
 const create = (_now, random = Math.random) => {
-  // Account id → what their page last said of the Jet: { on, near }.
+  // Account id → what their page last said of the Jet ({ on, near }) and whether it is showing (`seen`), in the order
+  // they arrived.
   const players = new Map();
+  // The page that moves the hall's walkers (an account id, 0 for none), and the one the state last went out with.
+  let host = 0, shownHost = 0;
+  const elect = () => {
+    if (players.has(host) && players.get(host).seen) return;
+    host = 0;
+    for (const [id, f] of players) if (f.seen) { host = id; return; }
+  };
   const bag = [...HALL.KINDS];
   // The anomaly playing ({ id, kind, at, jump, room }, at in ms) or null; the room fire its jump lit ({ id, at, room },
   // at when the bolt lands) or null, and until when it burns; when the next anomaly may start; the last one's id; how
@@ -82,14 +95,22 @@ const create = (_now, random = Math.random) => {
 
   return {
     join: (p, now) => {
-      players.set(p.id, { on: false, near: false });
+      players.set(p.id, { on: false, near: false, seen: true });
+      elect();
       if (players.size === 1 && !anomaly && nextAt < now) nextAt = now + gap();
     },
-    leave: (p) => { players.delete(p.id); },
+    leave: (p) => { players.delete(p.id); elect(); },
     /** A page's message, read by `parse`; true when the hall's state changed and should go out now. */
     message: (p, m, now) => {
       const f = players.get(p.id);
       if (!f) return false;
+      if (m.t === "seen") {
+        f.seen = m.v;
+        elect();
+        if (host === shownHost) return false;
+        shownHost = host;
+        return true;
+      }
       if (m.t === "fire") {
         if (test || anomaly) return false;
         test = { id: ++id, at: now, by: p.id };
@@ -112,7 +133,8 @@ const create = (_now, random = Math.random) => {
     },
     /** The hall to `now`; true when its state changed. */
     step: (now) => {
-      let changed = false;
+      let changed = host !== shownHost;
+      shownHost = host;
       if (fire && now >= roomUntil) { fire = null; changed = true; }
       if (test && now >= test.at + HALL.FIRE.ready * 1000) { test = null; changed = true; }
       if (film && (film.end !== null && now >= film.end + HALL.FILM.wind * 1000 || now >= film.at + HALL.FILM.most * 1000)) { film = null; changed = true; }
@@ -126,8 +148,10 @@ const create = (_now, random = Math.random) => {
       return true;
     },
     running: () => players.size > 0,
-    state: () => ({ anomaly, room: fire, test, film }),
+    state: () => ({ host, anomaly, room: fire, test, film }),
     motion: () => false,
+    /** Whether `p`'s bytes go on to the hall: only the host's. */
+    relay: (p) => p.id === host,
     /** What a restart picks up: the schedule, or null once the hall is empty. */
     save: () => players.size ? JSON.stringify({ anomaly, fire, test, film, nextAt, roomUntil, id, bag, left }) : null,
     /** Picks up a saved hall: its schedule goes on where it stopped, on the same clock. */
@@ -154,8 +178,8 @@ const create = (_now, random = Math.random) => {
 
 export const hangar = {
   id: "hangar", code: 2, version: 1, venues: ["hall"], optional: true, tickMs: 250, stateEvery: 40,
-  limits: { sockets: 32, chars: 256 },
-  buckets: { jet: { rate: 4, burst: 4 }, press: { rate: 1, burst: 2 } },
-  bucketOf: (t) => t === "jet" ? "jet" : "press",
+  limits: { sockets: 32, chars: 256, bytes: 16384 },
+  buckets: { jet: { rate: 4, burst: 4 }, press: { rate: 1, burst: 2 }, relay: { rate: 12, burst: 6 } },
+  bucketOf: (t) => t === "jet" || t === "seen" ? "jet" : "press",
   parse, create
 };
