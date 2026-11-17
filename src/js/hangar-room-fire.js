@@ -112,13 +112,15 @@
       at.x = S.fire.x; at.y = S.fire.y + 0.1; at.z = S.fire.z;
       sound.x = S.fire.x; sound.y = S.fire.y; sound.z = S.fire.z;
     };
-    // `from`: how far in it starts, s (the hall's, joined late).
+    // `from`: how far in it starts, s (the hall's, joined late), the operator where his routine has got to (his walks
+    // place him as they go; at the bracket and spraying he stands still) and the bolt's strike heard only fresh.
     const ignite = (from = 0) => {
       if (active) return;
       active = true; t = from; level = 0; flash = from > 0.3 ? 0 : 1; phase = 0;
-      pos.x = S.post.x; pos.z = S.post.z; heading = S.post.heading;
+      const stand = from < AT.take ? S.post : from < AT.spray ? S.take : from < AT.hang ? S.spray : S.take;
+      pos.x = stand.x; pos.z = stand.z; heading = stand.heading;
       onBracket();
-      audio.roomCue("strike", at.x, at.y, at.z);
+      if (from <= 0.3) audio.roomCue("strike", at.x, at.y, at.z);
     };
     // Done: the fire out, the extinguisher on its bracket, and him back at his post as the crew had him.
     const release = () => {
