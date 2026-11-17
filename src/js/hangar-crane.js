@@ -32,8 +32,10 @@
 // returns `update(dt, eye)` (`eye` the view's position, for the beacons' flash), `sound` (where its trolley is and how
 // fast its travel and its hoist run, 0 to 1, and whether its travel alarm sounds, kept current for
 // `hangarAudio.watchCrane`), `beam` (its spot's place under the hook, `y` the crate's bottom while it hangs on the hook,
-// else the rail's height, and its level, 0 to 1) and `debug`. Allocates nothing a
-// frame.
+// else the rail's height, and its level, 0 to 1) and `debug`. Relayed from the page that moves the hall's walkers
+// (`hangar-relay.js`), it keeps its axes (eased between frames on the others) and its job's place current there
+// (`shared`, `flags`); on the others it is a puppet (`puppet`), posed from them, and a page that takes it over carries
+// its job on from there. Allocates nothing a frame.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -80,7 +82,7 @@
     const steps = Array.from({ length: 32 }, () => ({ kind: 0, to: 0, max: 0 }));
     const state = { n: 0, i: 0, t: 0, at: 0, tied: false, loaded: false, jobs: 0, began: false, live: true, stopped: false, held: false, clear: 0, holds: 0, horn: 0 };
     const sound = { x: 0, y: C.railY + 1, z: 0, travel: 0, hoist: 0, alarm: false };
-    let count = 0, sweep = 0, lit = 0;
+    let count = 0, sweep = 0, lit = 0, planFrom = 0, puppet = false;
     const beam = { x: 0, y: 0, z: 0, level: 0 };
     const push = (kind, to = 0, max = 0) => { const s = steps[count++]; s.kind = kind; s.to = to; s.max = max; };
     // The way from (x, z) to (tx, tz): along the hall only over a stand's column, across it only at the door end.
@@ -92,6 +94,7 @@
     // A job: the crate from the stand it is on to the other one, and home.
     const plan = () => {
       const from = C.stands[state.at], to = C.stands[1 - state.at];
+      planFrom = state.at;
       count = 0;
       push(WARN);
       push(PAUSE, HORN.wait);
@@ -205,8 +208,46 @@
       spot.visible = false;
     }
 
+    // The axes and the swing, eased between frames where it is a puppet (`shared`), and its job's place (`flags`: tied,
+    // loaded, the stand the crate is on, the stand its job began from, its step and how long into it, whether it has
+    // power and whether a job runs).
+    const shared = new Float32Array(12), flags = new Float32Array(8);
+    const share = (live, working) => {
+      const B = axes.bridge, T = axes.trolley, H = axes.hoist;
+      shared[0] = B.p; shared[1] = T.p; shared[2] = H.p; shared[3] = B.v; shared[4] = T.v; shared[5] = H.v;
+      shared[6] = sway.x; shared[7] = sway.z; shared[8] = sway.wx; shared[9] = sway.wz; shared[10] = sweep; shared[11] = lit;
+      flags[0] = state.tied ? 1 : 0; flags[1] = state.loaded ? 1 : 0; flags[2] = state.at; flags[3] = planFrom; flags[4] = state.i; flags[5] = state.t;
+      flags[6] = live ? 1 : 0; flags[7] = working ? 1 : 0;
+    };
+    // Its axes, the swing and its job's place from what the host shared, the crate where that says.
+    const take = () => {
+      const B = axes.bridge, T = axes.trolley, H = axes.hoist;
+      B.p = shared[0]; T.p = shared[1]; H.p = shared[2]; B.v = shared[3]; T.v = shared[4]; H.v = shared[5];
+      sway.x = shared[6]; sway.z = shared[7]; sway.wx = shared[8]; sway.wz = shared[9]; sweep = shared[10]; lit = shared[11];
+      const tied = flags[0] > 0.5, loaded = flags[1] > 0.5, on = flags[2] > 0.5 ? 1 : 0;
+      if (tied !== state.tied) { state.tied = tied; sling.visible = tied; slack.visible = !tied; }
+      if (loaded !== state.loaded || on !== state.at) { state.loaded = loaded; state.at = on; if (loaded) onHook(); else standOn(C.stands[on]); }
+      state.live = flags[6] > 0.5;
+    };
+    // Taken over from the host's frames: its job planned again from the stand it began at and carried on from its step.
+    const adopt = () => {
+      take();
+      const on = state.at;
+      state.at = flags[3] > 0.5 ? 1 : 0;
+      plan();
+      state.at = on;
+      state.i = Math.min(state.n - 1, Math.max(0, flags[4] | 0));
+      state.t = flags[5];
+      state.began = state.held = false;
+    };
     const update = (dt, eye) => {
       if (dt <= 0) return;
+      if (puppet) {
+        take();
+        pose();
+        light(eye, state.live, flags[7] > 0.5);
+        return;
+      }
       const B = axes.bridge, T = axes.trolley, H = axes.hoist;
       B.a = T.a = H.a = 0;
       const s = steps[state.i];
@@ -259,6 +300,12 @@
       // The beacons and the spot while a job runs and the power is on.
       const working = live && steps[state.i].kind !== WAITING;
       if (working) sweep += BEACON.rate * dt;
+      lit = Math.max(0, Math.min(1, lit + (working ? dt : -dt) * SPOT.fade));
+      light(eye, live, working);
+      share(live, working);
+    };
+    // The beacons, turned by `sweep` and flashing toward the eye, and the spot as bright as `lit`.
+    const light = (eye, live, working) => {
       for (let i = 0; i < beacons.length; i++) {
         const b = beacons[i];
         b.rotation.y = sweep + i * Math.PI / 2;
@@ -267,7 +314,6 @@
         const facing = Math.abs((m[0] * vx + m[2] * vz) / ((Math.hypot(m[0], m[2]) * Math.hypot(vx, vz)) || 1));
         b.glow = BEACON.on + BEACON.flash * facing ** BEACON.sharp;
       }
-      lit = Math.max(0, Math.min(1, lit + (working ? dt : -dt) * SPOT.fade));
       beam.x = axes.trolley.p;
       beam.y = state.loaded ? C.railY + C.ropeTop - axes.hoist.p + C.eye - C.sling - ch : C.railY;
       beam.z = axes.bridge.p + 0.1;
@@ -298,7 +344,8 @@
       get holds() { return state.holds; },
       run() { if (steps[state.i].kind === WAITING) state.t = steps[state.i].to; }
     };
-    return { update, sound, beam, debug };
+    return { update, sound, beam, debug, shared, flags,
+      get puppet() { return puppet; }, set puppet(on) { if (puppet && !on) adopt(); puppet = on; } };
   };
 
   BL.hangarCrane = { create, SPEED, ACCEL };
