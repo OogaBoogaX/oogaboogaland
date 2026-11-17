@@ -44,6 +44,8 @@
   // sizes, how near it the presser must be to be knocked down, how fast they are thrown backward and up, how long they
   // take to tip over and to get up, and the view's shake.
   const BLAST_AT = { dx: 0.6, dy: -0.3, dz: 0.6 }, FIREBALLS = 22, SMOKE = 16, SPARKS = 50, IRON = 8, KNOCK_REACH = 14;
+  // How far behind the hall's test a page's own may fall before it is let go, s.
+  const BEHIND = 1.5;
   const THROW = 6.5, THROW_UP = 5.5, TIP = 0.45, GET_UP = 0.5, QUAKE = { fire: 0.035, warning: 0.08, boom: 0.6, tau: 0.45 };
   // How long the view takes to glide from the presser's to the show's (`LAYOUT.fireTest.view`).
   const GLIDE = 1.2;
@@ -598,11 +600,14 @@
       if (!on) followed = 0;
     };
     // The hall's test now (`test`: { id, at, by }, or null) at server time `now` (ms), `me` this page's account: a new one
-    // played from as far in as it has got, the presser's own page holding their controls.
+    // played from as far in as it has got, the presser's own page holding their controls. One this page still plays
+    // that the hall has moved past (ended, another begun, or this page held more than `BEHIND` s behind by a hidden tab,
+    // whose frames stop) is let go at once, its sound long played out, and the hall's joined afresh.
     const sync = (test, now, me) => {
+      const since = test ? Math.max(0, (now - test.at) / 1000) : 0;
+      if (t >= 0 && followed && (!test || test.id !== followed || since - t > BEHIND)) { t = -1; followed = 0; }
       if (!test || test.id === followed) return;
       followed = test.id;
-      const since = Math.max(0, (now - test.at) / 1000);
       if (t < 0 && since < AT.ready - 0.25) start(since, test.by === me);
     };
 
