@@ -96,6 +96,7 @@
   const slide = (ctx, W, H, P, s, show, local, meta) => {
     const u = H / 100, k = s.k;
     frame(ctx, W, H, u);
+    if (meta.quizRows) meta.quizRows.length = 0;
     if (k === "title") {
       ctx.textAlign = "center";
       if (s.kicker || meta.kicker) P.pix(ctx, (s.kicker || meta.kicker).toUpperCase(), W / 2, u * 24, u * 4, DECK.amberText);
@@ -126,10 +127,12 @@
       const top = u * 20.5 + lines.length * lh - u * 1.5, step = Math.min(u * 13.5, (H - u * 13 - top) / n), rh = step * 0.82;
       for (let i = 0; i < n; i++) {
         const y = top + i * step, right = chosen >= 0 && i === s.answer, wrong = chosen === i && i !== s.answer, dim = chosen >= 0 && !right && !wrong;
-        const col = right ? DECK.green : wrong ? DECK.red : DECK.amber;
+        if (meta.quizRows) meta.quizRows.push({ x: u * 7, y, w: W - u * 14, h: rh });
+        const hover = chosen < 0 && meta.hover === i;
+        const col = right ? DECK.green : wrong ? DECK.red : hover ? DECK.ink : DECK.amber;
         ctx.globalAlpha = dim ? 0.4 : 1;
-        ctx.fillStyle = right ? "rgba(79,208,138,.16)" : wrong ? "rgba(255,107,94,.16)" : DECK.panel; P.roundRect(ctx, u * 7, y, W - u * 14, rh, u * 1.6); ctx.fill();
-        ctx.strokeStyle = col; ctx.lineWidth = u * (right || wrong ? 0.7 : 0.35); ctx.stroke();
+        ctx.fillStyle = right ? "rgba(79,208,138,.16)" : wrong ? "rgba(255,107,94,.16)" : hover ? "rgba(247,147,26,.26)" : DECK.panel; P.roundRect(ctx, u * 7, y, W - u * 14, rh, u * 1.6); ctx.fill();
+        ctx.strokeStyle = col; ctx.lineWidth = u * (right || wrong || hover ? 0.7 : 0.35); ctx.stroke();
         ctx.fillStyle = col; P.roundRect(ctx, u * 8.6, y + rh * 0.16, rh * 0.68, rh * 0.68, u * 1.1); ctx.fill();
         ctx.fillStyle = DECK.bg; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = P.font(800, rh * 0.44, P.MONO); ctx.fillText(right ? "✓" : wrong ? "✗" : String(i + 1), u * 8.6 + rh * 0.34, y + rh * 0.52);
         ctx.fillStyle = right ? DECK.green : wrong ? DECK.red : DECK.ink; ctx.textAlign = "left";
@@ -172,8 +175,10 @@
         ctx.fillStyle = DECK.frame; ctx.fillRect(u * 7, u * 32.4, W - u * 14, u * 0.35);
         for (let i = 0; i < up; i++) s.rows[i].forEach((cell, j) => { ctx.fillStyle = j ? DECK.soft : DECK.ink; P.fit(ctx, String(cell), cw - u * 3, j ? 400 : 600, u * 4.4); ctx.fillText(String(cell), u * 7 + j * cw, u * 39.5 + i * step); });
       } else if (k === "figure") {
-        const sc = (W - u * 14) / GRID.w;
-        for (const op of s.ops) if ((op.at || 0) <= local) cleanOp(ctx, P, op, u * 7, u * 23, sc);
+        // The grid as wide as the slide allows and no taller than the room between the heading and the foot, so a
+        // screen wider than it is tall for the grid draws the figure a little smaller, in the middle.
+        const sc = Math.min((W - u * 14) / GRID.w, u * 65 / GRID.figure);
+        for (const op of s.ops) if ((op.at || 0) <= local) cleanOp(ctx, P, op, (W - GRID.w * sc) / 2, u * 23, sc);
         ctx.setLineDash([]);
       } else if (k === "live") livePanel(ctx, P, W, H, u, s, meta);
       note(ctx, P, W, H, u, s.note);
@@ -264,8 +269,30 @@
   };
   // The board at `t`. `mark` ({ epoch, settled }) is what the canvas already holds: the same board with that many
   // strokes finished is only added to; anything else is painted afresh. Returns whether a stroke is still being drawn.
+  // A panel's drawing kept clear of its title and of the board's foot: how much smaller it is drawn (about the board's
+  // middle) and how far down it is moved, worked out once a panel from what its strokes cover. Most need neither.
+  const TOP = 14, FOOT = 87;
+  const fitOf = (timeline, E) => {
+    if (E.fit) return E.fit;
+    let lo = Infinity, hi = -Infinity;
+    for (let k = E.first; k < E.first + E.count; k++) {
+      const op = timeline.strokes[k].op, kind = LK.shapeOf(op), v = op[kind];
+      if (kind === "text") { const z = op.size || 5; lo = Math.min(lo, op.y - z * 0.85); hi = Math.max(hi, op.y + z * 0.35); }
+      else if (kind === "box") { lo = Math.min(lo, v[1]); hi = Math.max(hi, v[1] + v[3]); }
+      else if (kind === "circle" || kind === "ellipse") { const r = kind === "circle" ? v[2] : v[3]; lo = Math.min(lo, v[1] - r); hi = Math.max(hi, v[1] + r); }
+      else for (let i = 1; i < v.length; i += 2) { lo = Math.min(lo, v[i] - (op.t ? 4 : 0)); hi = Math.max(hi, v[i]); }
+    }
+    const top = E.title ? TOP : 3, k = hi > lo ? Math.min(1, (FOOT - top) / (hi - lo)) : 1;
+    // Scaled about the middle of the board, then moved only as far as it must be.
+    let dy = GRID.board / 2 * (1 - k);
+    if (lo * k + dy < top) dy = top - lo * k;
+    if (hi * k + dy > FOOT) dy = FOOT - hi * k;
+    return E.fit = { k, dx: GRID.w / 2 * (1 - k), dy };
+  };
   const board = (ctx, W, H, P, timeline, epoch, t, mark) => {
-    const E = epoch >= 0 ? timeline.epochs[epoch] : null, s = Math.min(W / GRID.w, H / GRID.board), x0 = (W - GRID.w * s) / 2, y0 = (H - GRID.board * s) / 2;
+    const E = epoch >= 0 ? timeline.epochs[epoch] : null;
+    let s = Math.min(W / GRID.w, H / GRID.board), x0 = (W - GRID.w * s) / 2, y0 = (H - GRID.board * s) / 2;
+    if (E) { const f = fitOf(timeline, E); x0 += f.dx * s; y0 += f.dy * s; s *= f.k; }
     if (!E) { if (mark.epoch !== -1 || mark.settled !== -1) { boardIdle(ctx, W, H, P); mark.epoch = -1; mark.settled = -1; } return false; }
     const K = timeline.strokes, first = E.first, end = first + E.count;
     let settledAt = first;
@@ -302,6 +329,7 @@
   };
 
   // ---------- the outline, the caption and what shows between lectures ----------
+  const timebar = (W, H) => ({ x: H * 0.07, y: H * 0.87, w: W - H * 0.14, h: H * 0.014, r: H * 0.018 });
   const outline = (ctx, W, H, P, timeline, st, t, meta) => {
     const u = H / 100, S = timeline.sections;
     frame(ctx, W, H, u);
@@ -312,18 +340,30 @@
       P.pix(ctx, "BEFORE CLASS", u * 7, u * 73.5, u * 2.8, DECK.amberText, "left");
       reading.slice(0, 2).forEach((r, i) => { ctx.fillStyle = DECK.soft; ctx.textAlign = "left"; const line = r.by ? `${r.title} · ${r.by}` : r.title; P.fit(ctx, line, W - u * 14, 400, u * 3.5); ctx.fillText(line, u * 7, u * 78.6 + i * u * 4.4); });
     }
+    if (meta.sectionRows) meta.sectionRows.length = S.length;
     S.forEach((sec, i) => {
       const y = u * 32 + i * step, now = i === st.section, done = i < st.section;
-      if (now) { ctx.fillStyle = "rgba(247,147,26,.16)"; P.roundRect(ctx, u * 5, y - step * 0.62, W - u * 10, step * 0.92, u * 1.2); ctx.fill(); }
+      const x = u * 5, top = y - step * 0.62, w = W - u * 10, h = step * 0.92, hover = meta.hover === i;
+      if (meta.sectionRows) {
+        const row = meta.sectionRows[i] || (meta.sectionRows[i] = {});
+        row.x = x; row.y = top; row.w = w; row.h = h;
+      }
+      if (now || hover) {
+        ctx.fillStyle = hover ? "rgba(247,147,26,.26)" : "rgba(247,147,26,.16)";
+        P.roundRect(ctx, x, top, w, h, u * 1.2); ctx.fill();
+        if (hover) { ctx.strokeStyle = DECK.ink; ctx.lineWidth = u * 0.7; ctx.stroke(); }
+      }
       ctx.fillStyle = done ? DECK.green : now ? DECK.amber : DECK.grey;
       ctx.font = P.font(700, u * 4.4, P.MONO); ctx.textAlign = "left"; ctx.fillText(done ? "✓" : String(i + 1), u * 7.4, y);
       ctx.fillStyle = now ? DECK.ink : done ? DECK.grey : DECK.soft; P.fit(ctx, sec.title, W - u * 34, now ? 700 : 500, u * 4.6); ctx.fillText(sec.title, u * 13, y);
       ctx.fillStyle = DECK.grey; ctx.textAlign = "right"; ctx.font = P.font(400, u * 3.6, P.MONO); ctx.fillText(clock(sec.start), W - u * 7, y); ctx.textAlign = "left";
     });
-    const bx = u * 7, bw = W - u * 14, by = u * 87, k = Math.max(0, Math.min(1, t / timeline.duration));
+    const bar = timebar(W, H), bx = bar.x, bw = bar.w, by = bar.y, k = Math.max(0, Math.min(1, t / timeline.duration));
     ctx.fillStyle = "#2a241c"; ctx.fillRect(bx, by, bw, u * 1.4);
     ctx.fillStyle = DECK.amber; ctx.fillRect(bx, by, bw * k, u * 1.4);
     for (const sec of S) { ctx.fillStyle = DECK.bg; ctx.fillRect(bx + bw * sec.start / timeline.duration - 1, by, 2, u * 1.4); }
+    ctx.beginPath(); ctx.arc(bx + bw * k, by + bar.h / 2, bar.r, 0, TAU);
+    ctx.fillStyle = DECK.ink; ctx.fill(); ctx.strokeStyle = DECK.amber; ctx.lineWidth = u * 0.45; ctx.stroke();
     footer(ctx, P, W, H, u, { left: `${clock(t)} / ${clock(timeline.duration)}`, right: meta.state || "" });
   };
   const caption = (ctx, W, H, P, text, paused) => {
@@ -368,25 +408,25 @@
   };
   // The programme a visitor picks from, a page of the board dialog: two columns of lectures, each a row with its
   // number, title, what it covers and where the visitor left it. Fills `rows` with each row's rectangle.
-  const programme = (ctx, W, H, P, course, progress, selected, rows, ready) => {
+  const programme = (ctx, W, H, P, course, progress, selected, rows, ready, hovered = -1) => {
     const u = H / 100, list = course.lectures, per = Math.ceil(list.length / 2), cw = (W - u * 14) / 2, rh = u * 72 / per;
     frame(ctx, W, H, u);
     ctx.fillStyle = DECK.ink; ctx.textAlign = "left"; P.fit(ctx, course.title, W * 0.6, 800, u * 8); ctx.fillText(course.title, u * 7, u * 13);
     ctx.fillStyle = DECK.grey; ctx.font = P.font(400, u * 3.4); ctx.fillText(course.by ? `${course.subtitle} · with ${course.by}` : course.subtitle, u * 7, u * 18.5);
     rows.length = 0;
     list.forEach((l, i) => {
-      const col = i < per ? 0 : 1, x = u * 6 + col * (cw + u * 2), y = u * 22 + (i - col * per) * rh, p = progress && progress[l.id], sel = i === selected;
+      const col = i < per ? 0 : 1, x = u * 6 + col * (cw + u * 2), y = u * 22 + (i - col * per) * rh, p = progress && progress[l.id], sel = i === selected, available = !ready || ready(l), hover = i === hovered;
       rows.push({ x, y, w: cw, h: rh - u * 1.2, index: i });
-      ctx.fillStyle = sel ? "rgba(247,147,26,.2)" : DECK.panel; P.roundRect(ctx, x, y, cw, rh - u * 1.2, u * 1.4); ctx.fill();
-      if (sel) { ctx.strokeStyle = DECK.amber; ctx.lineWidth = u * 0.4; ctx.stroke(); }
-      ctx.fillStyle = p && p.done ? DECK.green : DECK.amberText; ctx.textAlign = "center"; ctx.font = P.font(700, rh * 0.36, P.MONO); ctx.fillText(p && p.done ? "✓" : String(l.n), x + u * 4.4, y + rh * 0.56);
-      ctx.textAlign = "left"; ctx.fillStyle = DECK.ink; P.fit(ctx, l.title, cw - u * 26, 700, rh * 0.3); ctx.fillText(l.title, x + u * 9, y + rh * 0.4);
+      ctx.fillStyle = hover ? available ? "rgba(247,147,26,.3)" : "rgba(160,160,160,.22)" : sel ? available ? "rgba(247,147,26,.2)" : "rgba(160,160,160,.12)" : DECK.panel; P.roundRect(ctx, x, y, cw, rh - u * 1.2, u * 1.4); ctx.fill();
+      if (sel || hover) { ctx.strokeStyle = available ? hover ? DECK.ink : DECK.amber : DECK.grey; ctx.lineWidth = u * 0.4; ctx.stroke(); }
+      ctx.fillStyle = !available ? DECK.grey : p && p.done ? DECK.green : DECK.amberText; ctx.textAlign = "center"; ctx.font = P.font(700, rh * 0.36, P.MONO); ctx.fillText(p && p.done ? "✓" : String(l.n), x + u * 4.4, y + rh * 0.56);
+      ctx.textAlign = "left"; ctx.fillStyle = available ? DECK.ink : DECK.grey; P.fit(ctx, l.title, cw - u * 26, 700, rh * 0.3); ctx.fillText(l.title, x + u * 9, y + rh * 0.4);
       ctx.fillStyle = DECK.grey; P.fit(ctx, l.blurb, cw - u * 12, 400, rh * 0.2); ctx.fillText(l.blurb, x + u * 9, y + rh * 0.7);
-      const tag = ready && !ready(l) ? "SOON" : p && !p.done && p.t > 5 ? `AT ${clock(p.t)}` : "";
+      const tag = !available ? "SOON" : p && !p.done && p.t > 5 ? `AT ${clock(p.t)}` : "";
       if (tag) P.pix(ctx, tag, x + cw - u * 2.4, y + rh * 0.34, rh * 0.17, tag === "SOON" ? DECK.grey : DECK.amberText, "right");
     });
     footer(ctx, P, W, H, u, { left: `${list.length} LECTURES · ${course.parts ? course.parts.length + " PARTS" : ""}`, right: "" });
   };
 
-  BL.lectureSlides = { DECK, slide, board, penAt, outline, caption, idleSlide, boardIdle, idleOutline, programme, clock, mark: () => ({ epoch: -2, settled: -1 }) };
+  BL.lectureSlides = { DECK, slide, board, penAt, outline, timebar, caption, idleSlide, boardIdle, idleOutline, programme, clock, mark: () => ({ epoch: -2, settled: -1 }) };
 })();

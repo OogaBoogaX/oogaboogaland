@@ -325,9 +325,12 @@
       </button>
       <nav class="presets" aria-label="Timechain Sphere room" data-scene="timechain" hidden>
         <button type="button" data-action="lecture-programme" id="lecture-programme" hidden>Lectures</button>
+        <button type="button" data-action="lecture-start" id="lecture-start" hidden>Start lecture 1</button>
         <button type="button" data-action="lecture-back" id="lecture-back" aria-label="Back a section" title="Back a section" hidden>&#x23EE;</button>
         <button type="button" data-action="lecture-toggle" id="lecture-toggle" hidden>Pause</button>
         <button type="button" data-action="lecture-next" id="lecture-next" aria-label="On a section" title="On a section" hidden>&#x23ED;</button>
+        <button type="button" data-action="lecture-speed" id="lecture-speed" aria-label="Playback speed: 1×. Change speed" title="Playback speed · 1×, 1.25×, 1.5×, 2×" hidden>1×</button>
+        <button type="button" data-action="lecture-stop" id="lecture-stop" hidden>Stop</button>
         <button type="button" class="leave" data-action="leave">Leave<span> room</span></button>
       </nav>
       <nav class="presets" aria-label="₿IFRÖST" data-scene="bifrost" hidden>
@@ -2212,16 +2215,6 @@ Open the pull request from my fork as a draft and keep it draft while building o
         <button type="button" class="ghost-spectate-next" id="ghost-spectate-next" aria-label="Next player">Next ▶</button>
       </div>
     </div>
-    <section class="lecture-quiz" id="lecture-quiz" aria-labelledby="lecture-quiz-q" hidden>
-      <p class="lecture-quiz-kicker" id="lecture-quiz-kicker">Question</p>
-      <h3 id="lecture-quiz-q"></h3>
-      <ol class="lecture-quiz-options">
-        <li><button type="button" data-action="lecture-answer-1"><kbd>1</kbd><span></span></button></li>
-        <li><button type="button" data-action="lecture-answer-2"><kbd>2</kbd><span></span></button></li>
-        <li><button type="button" data-action="lecture-answer-3"><kbd>3</kbd><span></span></button></li>
-        <li><button type="button" data-action="lecture-answer-4"><kbd>4</kbd><span></span></button></li>
-      </ol>
-    </section>
     <section class="hangar-sound" id="hangar-sound" aria-label="Hangar sound" hidden>
       <div class="hangar-sound-head">
         <h3>Sound</h3>
@@ -2644,6 +2637,20 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/timechain-room-theater.js" data-defer="timechain"></script>
   <script src="js/timechain-interior.js" data-defer="timechain"></script>
   <script src="js/lecture-btc-01.js" data-defer="lecture-btc-a"></script>
+  <script src="js/lecture-btc-01.timing.js" data-defer="lecture-btc-a"></script>
+  <script src="js/lecture-btc-02.js" data-defer="lecture-btc-b"></script>
+  <script src="js/lecture-btc-03.js" data-defer="lecture-btc-c"></script>
+  <script src="js/lecture-btc-04.js" data-defer="lecture-btc-d"></script>
+  <script src="js/lecture-btc-05.js" data-defer="lecture-btc-e"></script>
+  <script src="js/lecture-btc-06.js" data-defer="lecture-btc-f"></script>
+  <script src="js/lecture-btc-07.js" data-defer="lecture-btc-g"></script>
+  <script src="js/lecture-btc-08.js" data-defer="lecture-btc-h"></script>
+  <script src="js/lecture-btc-09.js" data-defer="lecture-btc-i"></script>
+  <script src="js/lecture-btc-10.js" data-defer="lecture-btc-j"></script>
+  <script src="js/lecture-btc-11.js" data-defer="lecture-btc-k"></script>
+  <script src="js/lecture-btc-12.js" data-defer="lecture-btc-l"></script>
+  <script src="js/lecture-btc-13.js" data-defer="lecture-btc-m"></script>
+  <script src="js/lecture-btc-14.js" data-defer="lecture-btc-n"></script>
   <script src="js/routes.js"></script>
   <script src="js/router.js"></script>
   <script src="js/poker-rules.js" data-defer="poker"></script>
