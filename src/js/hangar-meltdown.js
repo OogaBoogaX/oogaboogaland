@@ -403,11 +403,20 @@
     const shared = new Float32Array(1);
     let puppet = false;
     const nodes = [...balls.map((b) => b.node), ...pops.map((q) => q.node)];
+    // Taken over from another page: one this page last ran is long past, and what the other's frames hid or showed (the
+    // cloud, Sis and the workers inside it) is put back.
+    const adopt = () => {
+      if (active) release();
+      for (const q of pops) q.node.visible = false;
+      for (const b of balls) b.node.visible = false;
+      sis.node.visible = true;
+      for (const r of rooms) r.gorilla.root.visible = true;
+    };
 
     return {
       update: (dt) => { update(dt); shared[0] = active ? 1 : 0; },
       nodes, shared, refs: [SPARK, STAR],
-      get puppet() { return puppet; }, set puppet(on) { puppet = on; },
+      get puppet() { return puppet; }, set puppet(on) { if (puppet && !on) adopt(); puppet = on; },
       // Put the next off: none for at least `s` s from now, however long it has been due.
       defer: (s) => { if (wait < s) wait = s; },
       get holding() { return active ? gorilla : null; },
