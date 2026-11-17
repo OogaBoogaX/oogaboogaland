@@ -111,13 +111,18 @@ test("a lightning jumps to a room only while no room burns, and a restart picks 
 test("one press starts the fire test for everyone, none while it runs or cools down, and no anomaly comes near it", () => {
   const t0 = 1.7e12, g = hangar.create(t0, seeded(5));
   g.join({ id: 1 }, t0); g.join({ id: 2 }, t0);
-  assert.equal(g.message({ id: 2 }, { t: "fire" }, t0 + S), true);
-  assert.deepEqual(g.state().test, { id: 1, at: t0 + S, by: 2 });
-  assert.equal(g.message({ id: 1 }, { t: "fire" }, t0 + 2 * S), false, "a second press while it runs does nothing");
-  const held = t0 + S + (HALL.FIRE.result + A.afterFire) * S, nextAt = g.debug.nextAt;
-  at(g, Math.max(t0, nextAt - 250), held - 250);
-  if (nextAt < held) assert.equal(g.state().anomaly, null, "an anomaly due during the test waits");
-  assert.equal(g.step(t0 + S + HALL.FIRE.ready * S), true);
+  const press = g.debug.nextAt - 2 * S;
+  at(g, t0, press - 250);
+  assert.equal(g.state().anomaly, null);
+  assert.equal(g.message({ id: 2 }, { t: "fire" }, press), true);
+  assert.deepEqual(g.state().test, { id: 1, at: press, by: 2 });
+  assert.equal(g.message({ id: 1 }, { t: "fire" }, press + S), false, "a second press while it runs does nothing");
+  const held = press + (HALL.FIRE.result + A.afterFire) * S;
+  at(g, press, held - 250);
+  assert.equal(g.state().anomaly, null, "the anomaly due two seconds into the test waits until a while after it hands back");
+  at(g, held, held);
+  assert.ok(g.state().anomaly, "and comes then");
+  at(g, held + 250, press + HALL.FIRE.ready * S);
   assert.equal(g.state().test, null, "ready again after its cooldown");
   g.debug.begin(t0 + 40 * S);
   assert.equal(g.message({ id: 1 }, { t: "fire" }, t0 + 41 * S), false, "nor while an anomaly plays");
