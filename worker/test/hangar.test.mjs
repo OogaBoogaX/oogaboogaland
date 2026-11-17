@@ -196,6 +196,9 @@ test("the host's shape is everyone's, and a walk up to it plays the network for 
   const net = g.state().network;
   assert.deepEqual([net.x, net.z, net.dense], [1, 1, false]);
   assert.ok(g.debug.nextAt >= net.at + (N.end + N.quiet + N.defer[0]) * S, "the next anomaly waits past its quiet");
+  const back = hangar.create(t0, seeded());
+  assert.equal(back.restore(g.save(), net.at + S), true);
+  assert.deepEqual([back.state().shape, back.state().network], [second, net], "a restart keeps the shape showing and the network playing");
   assert.equal(g.message({ id: 1 }, { t: "fire" }, net.at + S), false, "no test while it plays");
   g.step(net.at + (N.end + N.quiet) * S);
   assert.equal(g.state().network, null);

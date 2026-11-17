@@ -294,7 +294,7 @@ const create = (_now, random = Math.random) => {
     /** What a page joining hears besides the state: the forklift where it was last left. */
     greet: () => liftFrame ? [liftFrame] : [],
     /** What a restart picks up: the schedule, or null once the hall is empty. */
-    save: () => players.size ? JSON.stringify({ anomaly, fire, test, film, pokeN, desks, nextAt, roomUntil, id, bag, left }) : null,
+    save: () => players.size ? JSON.stringify({ anomaly, fire, test, film, shape, network, skipNext, skipShape, pokeN, desks, nextAt, roomUntil, id, bag, left }) : null,
     /** Picks up a saved hall: its schedule goes on where it stopped, on the same clock. */
     restore: (data) => {
       let s = null;
@@ -310,6 +310,11 @@ const create = (_now, random = Math.random) => {
       if (Array.isArray(s.desks) && s.desks.length === desks.length) for (let i = 0; i < desks.length; i++) desks[i] = Number.isSafeInteger(s.desks[i]) && s.desks[i] >= 0 ? s.desks[i] : 0;
       const v = s.film;
       film = v && Number.isFinite(v.at) && Number.isSafeInteger(v.by) ? { id: v.id | 0, at: v.at, by: v.by, end: Number.isFinite(v.end) ? v.end : null } : null;
+      const sh = s.shape && Number.isFinite(s.shape.at) && shapeOf(s.shape.s);
+      shape = sh ? { id: s.shape.id | 0, at: s.shape.at, s: sh.s } : null;
+      const n = s.network;
+      network = n && [n.at, n.x, n.z, n.seed].every(finite) ? { id: n.id | 0, at: n.at, x: n.x, z: n.z, seed: n.seed, dense: n.dense === true } : null;
+      skipNext = s.skipNext === true; skipShape = s.skipShape | 0;
       nextAt = +s.nextAt || 0; roomUntil = Number.isFinite(s.roomUntil) ? s.roomUntil : -Infinity; id = s.id | 0;
       bag.splice(0, bag.length, ...s.bag);
       left = Math.min(bag.length, Math.max(0, s.left | 0));
