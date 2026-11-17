@@ -779,7 +779,8 @@
       drove = drive;
       if (drive) queuePanel(false);
       if (!drive && sharedUpdate(dt, elapsed)) return;
-      go.hidden = false; go.disabled = false;
+      // Her own buttons as alone; the page that flies her keeps the queue's.
+      if (!drive) { go.hidden = false; go.disabled = false; }
       yieldToMovement();
       const actor = visitor();
       if (state.still && (state.phase === "work" || state.phase === "notice" || state.phase === "approach")) watchStill(dt);
