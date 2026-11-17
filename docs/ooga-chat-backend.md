@@ -426,7 +426,8 @@ kept for the next try. Two runs over one job (the alarm's and a new close merged
 `media:<connId>` and sweeps the sessions of a socket that went while it slept.
 
 **Ops** (`POST /api/chat/media/<op>`, body `{ connection, generation?, sdp?, mid?, mids? }`, at most 256 KiB, one at a
-time per connection, `CHAT_MEDIA_LIMITER` per principal): `ice` (TURN credentials, as the island's voice has them),
+time per connection, `CHAT_MEDIA_LIMITER` per principal): `ice` (TURN credentials, as the island's voice has them, and
+answered outside that queue, so a slow SFU call ahead of it never holds up a join),
 `receive/open`, `receive/sync` (`{ tracks: [{ participant, mid }], closed, sessionDescription,
 requiresImmediateRenegotiation }`), `renegotiate`, `receive/close`, `publish/open`, `publish/offer`, `publish/ready`,
 `publish/close`, `leave`. Errors are `{ error: { code, retryable } }`: `stale_epoch` (another connection's, or a lease

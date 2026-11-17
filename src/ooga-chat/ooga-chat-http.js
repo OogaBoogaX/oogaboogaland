@@ -31,13 +31,18 @@
   const create = ({ fetch = window.fetch.bind(window), location = window.location, doc = document, WebSocket = window.WebSocket } = {}) => {
     const pending = new Set();
     let disposed = false;
-    // One bounded request; the controller leaves `pending` however it ends.
-    const ask = async (path, init = {}, timeout = TIMEOUT_MS) => {
+    // One bounded request; the controller leaves `pending` however it ends. With `read`, the body is read inside the
+    // same bound (a body that stalls after its headers would otherwise never end) and `{ response, data }` comes back,
+    // `data` null for a body that cannot be read as asked.
+    const ask = async (path, init = {}, timeout = TIMEOUT_MS, read = null) => {
       if (disposed) throw new Error("Ooga Chat adapter disposed");
       const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeout);
       pending.add(controller);
       try {
-        return await fetch(path, { credentials: "same-origin", cache: "no-store", redirect: "error", ...init, signal: controller.signal });
+        const response = await fetch(path, { credentials: "same-origin", cache: "no-store", redirect: "error", ...init, signal: controller.signal });
+        if (!read) return response;
+        const data = await read(response).catch((error) => { if (controller.signal.aborted) throw error; return null; });
+        return { response, data };
       } finally {
         clearTimeout(timer);
         pending.delete(controller);
@@ -260,13 +265,12 @@
     // whether trying again may help; the body never carries anything but the page's own connection and SDP.
     const media = () => ({
       async call(op, body) {
-        let response;
+        let response, data;
         try {
-          response = await ask(`${MEDIA_PATH}${op}`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify(body) }, MEDIA_TIMEOUT_MS);
+          ({ response, data } = await ask(`${MEDIA_PATH}${op}`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify(body) }, MEDIA_TIMEOUT_MS, json));
         } catch (error) {
           throw Object.assign(new Error("media unreachable"), { code: disposed ? "disposed" : "unreachable", retryable: !disposed });
         }
-        const data = await json(response).catch(() => null);
         if (response.ok && data && typeof data === "object") return data;
         const error = data && data.error && typeof data.error.code === "string" ? data.error : { code: `http_${response.status}`, retryable: response.status >= 500 };
         throw Object.assign(new Error(error.code), { code: error.code, retryable: !!error.retryable, status: response.status });

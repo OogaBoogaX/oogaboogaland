@@ -341,7 +341,18 @@ Leave Voice stops and releases the microphone, then `publish/close`, and keeps l
 the old zone's voices before the new zone's snapshot; a sync asked before the change plays nothing. The feed lost for
 good (`signed-out` to another account or none, `closed`, `full`) stops capture and receiving until its next snapshot.
 `release` ends speaking and keeps listening; signing out or another principal stops both with the feed. Nothing is kept
-in storage but a speaker's word to the page that replaces it at once (A refresh, below).
+in storage but a speaker's word to the page that replaces it at once (A refresh, below) and how this browser connects
+(Connecting, below).
+
+**Connecting.** Each connection lists the STUN server and, where the server hands credentials out (`ice`), the TLS
+relay. A credentials request that failed is asked again by the next connection (an answer with no relay stands a
+minute), and every voice call's body is read inside the call's 12 s bound. WebKit on an IPv6-only mobile network
+reaches only the first IPv4 address a connection sends to, the STUN server when one is listed
+([WebKit 330921](https://bugs.webkit.org/show_bug.cgi?id=330921)), so a connection that never comes up is tried next
+without the STUN server, as on the island (Voice in `docs/auth-and-presence.md`): Join Voice makes its publish once
+more that way on the same microphone and lease, a receive connection on its next try, and the way that last worked is
+kept in localStorage (`voice-bare` under the app's prefix). `media.stats` says which (`bare`) and whether a relay is in
+hand (`relay`).
 
 **Staying a speaker.** A loss that was not the visitor's choice never makes a speaker a listener by itself: a phone
 that goes to another app, a network change, a microphone another app takes.

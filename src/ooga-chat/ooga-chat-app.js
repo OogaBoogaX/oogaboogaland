@@ -69,6 +69,7 @@
     media = BL.oogaChatMedia.create({
       memory,
       preferenceKey: storageKey(adapter.kind, "muted."),
+      bareKey: storageKey(adapter.kind, "voice-bare"),
       // A voice connection dropped, or a lease went unanswered: the feed's socket is asked whether it still lives.
       stall: () => feed?.wake?.(true),
       broker: () => state.mode === "live" && state.boot ? adapter.media(state.boot) : null,

@@ -502,3 +502,20 @@ test("regression: an Ooga Chat tab hears at once when the island's voice takes o
   await a.world(32, [], []);
   assert.equal(amy.ws.sent.length, sent, "no change, no word");
 });
+
+test("regression (#767): relay credentials are answered while the connection's other calls are still at the SFU", async () => {
+  const h = host(), a = await h.make();
+  const amy = await connect(a, who(1)), bea = await connect(a, who(2));
+  await speak(a, amy);
+  await media(a, bea, "receive/open");
+  let release = null;
+  sfu.onNewTracks = () => new Promise((resolve) => { sfu.onNewTracks = null; release = resolve; });
+  const syncing = media(a, bea, "receive/sync");
+  const first = await Promise.race([media(a, bea, "ice"), syncing.then(() => "sync"), new Promise((resolve) => setTimeout(() => resolve("stuck"), 500))]);
+  assert.equal(first.status, 200, "the credentials call does not wait for the sync");
+  assert.deepEqual(first.body, {}, "no relay is set up here: an empty answer, and the page keeps its direct candidates");
+  while (!release) await new Promise((resolve) => setTimeout(resolve, 0));
+  release();
+  assert.equal((await syncing).status, 200);
+  await h.settle();
+});

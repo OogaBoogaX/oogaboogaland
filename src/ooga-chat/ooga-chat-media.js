@@ -43,12 +43,13 @@
 // speaks again the same way.
 // `release(reason)` (the account's seam, ooga-chat-auth.js) ends speaking and keeps listening; `stop` ends both.
 //
-// `create({ broker, rtc, request, allowed, onChange, timers, target, memory, preferenceKey, stall })`: `stall()` asks the feed to check
+// `create({ broker, rtc, request, allowed, onChange, timers, target, memory, preferenceKey, bareKey, stall })`: `stall()` asks the feed to check
 // its socket now (the app's `feed.wake(true)`), `broker()` the adapter's `{ call(op, body) }` or
 // null, `rtc` the browser's WebRTC and media (the fixture passes its own), `request(type, fields)` sends a request over
 // the audience feed and returns its id (0 when it can't), `allowed()` whether the deployment lets anyone speak now,
 // `memory` the tab's own `{ take(), keep(record | null) }` (the app's session storage; none remembers nothing),
-// `preferenceKey` the localStorage prefix for each listener's mute and volume choices (empty saves nothing).
+// `preferenceKey` the localStorage prefix for each listener's mute and volume choices (empty saves nothing),
+// `bareKey` the localStorage key for whether this browser connects without the STUN server (empty saves nothing).
 // `rtc.AudioContext` may override the receiver's context (null for synthetic fixture tracks).
 // Returns `{ heard(msg), status(feedStatus), zone(next), join(), leave(), mute(), identify(id), muteLocal(id, on), mutedLocally(id), setVolume(id, value), volumeOf(id), VOLUME_MAX, release(reason), stop(), retry(),
 // remember(on), dispose(), available, why, state, stats }`; `state` is `{ role, muted, phase, busy, notice, blocked, hearing, speaking,
@@ -122,14 +123,14 @@
   };
   const IDLE = Object.freeze({ role: "listener", muted: true, phase: "off", busy: false, notice: "", blocked: false, hearing: 0, speaking: false, talking: Object.freeze([]), elsewhere: "", localVersion: 0, muteDuels: false });
   const create = ({ broker, rtc = browser(), request = () => 0, allowed = () => true, onChange = () => {},
-    timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) }, target = window, memory = null, preferenceKey = "", stall = () => {} } = {}) => {
+    timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) }, target = window, memory = null, preferenceKey = "", bareKey = "", stall = () => {} } = {}) => {
     const R = rtc, HearContext = R.AudioContext === undefined ? target.AudioContext || target.webkitAudioContext : R.AudioContext;
     const VOLUME_MAX = HearContext ? 2 : 1, GAIN_TAU = 0.05;
     let state = IDLE, phase = "off", notice = "", blocked = false, disposed = false;
     // The audience connection everything is held under, the zone asked for (and how many times it has changed), and the
     // server's last word on this connection (`you`).
     let connection = null, zone = null, zoneEpoch = 0, you = null;
-    // Receiving: the receive connection (`{ pc, relay, syncing, again }`), its ticket (bumped to orphan anything in flight),
+    // Receiving: the receive connection (`{ pc, relay, bare, cameUp, syncing, again }`), its ticket (bumped to orphan anything in flight),
     // the pulled voices by mid, and the backoff.
     let sub = null, receiveTicket = 0, tries = 0, retryTimer = 0, dropTimer = 0;
     const voices = new Map();
@@ -227,6 +228,18 @@
     const heardSamples = new Float32Array(SAMPLES);
     // TURN credentials, kept until shortly before they expire; requests waiting on the feed's `result`.
     let ice = null;
+    // As on the island (voice.js): WebKit on an IPv6-only mobile network reaches only the first IPv4 address a
+    // connection's UDP socket sends to (bugs.webkit.org 330921), which with a STUN server listed is the STUN server,
+    // never the SFU. A connection that never came up is tried next without it (`bare`), one that never came up without
+    // it with it again, and the way that last worked is kept for this browser. `unreached(was)` takes the way the
+    // connection that never came up was built, so two connections failing the same way change it once.
+    let bare = false;
+    if (bareKey) try { bare = target.localStorage.getItem(bareKey) === "1"; } catch { /* Found again each page. */ }
+    const unreached = (was) => {
+      if (bare !== was) return;
+      bare = !was;
+      if (bareKey) try { if (bare) target.localStorage.setItem(bareKey, "1"); else target.localStorage.removeItem(bareKey); } catch { /* This page only. */ }
+    };
     const waiters = new Map();
     const stats = { opened: 0, synced: 0, captured: 0, released: 0, published: 0, closed: 0 };
 
@@ -263,18 +276,21 @@
       for (const done of [...waiters.values()]) done({ ok: false, error: { code: "unavailable", retryable: true } });
       waiters.clear();
     };
+    // The servers a new connection gets, whether a relay is among them, and whether the STUN server was left out. An
+    // answer with no relay (none is set up) stands a minute; a request that failed is not kept, so the next connection
+    // asks again.
     const iceConfig = async () => {
-      if (ice && Date.now() < ice.until) return ice.config;
-      let servers = [STUN], until = Date.now() + 60000;
-      try {
-        const data = await call("ice"), s = data && Array.isArray(data.iceServers) ? data.iceServers[0] : null;
-        if (s && s.urls === TURN_TLS && typeof s.username === "string" && s.username && typeof s.credential === "string" && s.credential) {
-          servers = [STUN, { urls: TURN_TLS, username: s.username, credential: s.credential }];
-          until = Date.now() + Math.max(60, (Number.isInteger(data.ttl) ? data.ttl : 120) - 60) * 1000;
-        }
-      } catch { /* No relay: the direct candidates alone. */ }
-      ice = { config: { iceServers: servers, bundlePolicy: "max-bundle" }, until };
-      return ice.config;
+      if (!ice || Date.now() >= ice.until) {
+        ice = null;
+        try {
+          const data = await call("ice"), s = data && Array.isArray(data.iceServers) ? data.iceServers[0] : null;
+          const relay = s && s.urls === TURN_TLS && typeof s.username === "string" && s.username && typeof s.credential === "string" && s.credential
+            ? { urls: TURN_TLS, username: s.username, credential: s.credential } : null;
+          ice = { relay, until: Date.now() + (relay ? Math.max(60, (Number.isInteger(data.ttl) ? data.ttl : 120) - 60) * 1000 : 60000) };
+        } catch { /* No relay this time: the direct candidates alone. */ }
+      }
+      const relay = ice ? ice.relay : null;
+      return { relay: !!relay, bare, config: { iceServers: [...(bare ? [] : [STUN]), ...(relay ? [relay] : [])], bundlePolicy: "max-bundle" } };
     };
     const gathered = (pc, relay) => new Promise((resolve) => {
       if (pc.iceGatheringState === "complete") return resolve();
@@ -440,8 +456,11 @@
       if (!sub || sub.pc !== pc) return;
       timers.clear(dropTimer);
       dropTimer = 0;
-      if (pc.connectionState === "failed") receiveFailed(failure("connection_failed", true));
-      else if (pc.connectionState === "disconnected") {
+      if (pc.connectionState === "connected") sub.cameUp = true;
+      if (pc.connectionState === "failed") {
+        if (!sub.cameUp) unreached(sub.bare);
+        receiveFailed(failure("connection_failed", true));
+      } else if (pc.connectionState === "disconnected") {
         stall();
         dropTimer = timers.set(() => {
           dropTimer = 0;
@@ -456,12 +475,12 @@
       if (!speaker && !BUSY.has(phase)) phase = tries ? "reconnecting" : "connecting";
       emit();
       try {
-        const config = await iceConfig();
+        const { config, relay, bare: was } = await iceConfig();
         if (!live()) return;
         await call("receive/open");
         if (!live()) return;
         const pc = new R.PeerConnection(config);
-        sub = { pc, relay: config.iceServers.length > 1, syncing: false, again: false };
+        sub = { pc, relay, bare: was, cameUp: false, syncing: false, again: false };
         stats.opened++;
         pc.addEventListener("track", (event) => onTrack(pc, event));
         pc.addEventListener("connectionstatechange", () => watchReceive(pc));
@@ -740,27 +759,40 @@
       phase = "negotiating";
       emit();
       try {
-        const config = await iceConfig();
-        if (!live()) return;
-        await call("publish/open", { generation: lease });
-        if (!live()) return;
-        const pc = new R.PeerConnection(config);
-        const tx = pc.addTransceiver(track, { direction: "sendonly" });
-        pub = { pc, tx };
-        await pc.setLocalDescription(await pc.createOffer());
-        if (!live()) return;
-        await gathered(pc, config.iceServers.length > 1);
-        if (!live()) return;
-        const res = await call("publish/offer", { generation: lease, sdp: pc.localDescription.sdp, mid: tx.mid });
-        if (!live()) return;
-        if (!res || !res.sessionDescription || typeof res.sessionDescription.sdp !== "string") throw failure("publish_failed", true);
-        await pc.setRemoteDescription(res.sessionDescription);
-        if (!live()) return;
-        await connected(pc);
-        if (!live()) return;
-        await call("publish/ready", { generation: lease });
-        if (!live()) return;
-        watchPublish(pc);
+        // One more try when the connection never comes up: the other way round (`bare`), on a fresh session.
+        for (let attempt = 0; ; attempt++) {
+          const { config, relay, bare: was } = await iceConfig();
+          if (!live()) return;
+          await call("publish/open", { generation: lease });
+          if (!live()) return;
+          const pc = new R.PeerConnection(config);
+          const tx = pc.addTransceiver(track, { direction: "sendonly" });
+          pub = { pc, tx };
+          await pc.setLocalDescription(await pc.createOffer());
+          if (!live()) return;
+          await gathered(pc, relay);
+          if (!live()) return;
+          const res = await call("publish/offer", { generation: lease, sdp: pc.localDescription.sdp, mid: tx.mid });
+          if (!live()) return;
+          if (!res || !res.sessionDescription || typeof res.sessionDescription.sdp !== "string") throw failure("publish_failed", true);
+          await pc.setRemoteDescription(res.sessionDescription);
+          if (!live()) return;
+          try {
+            await connected(pc);
+          } catch (err) {
+            if (!live()) return;
+            unreached(was);
+            if (attempt) throw err;
+            pub = null;
+            pc.close();
+            continue;
+          }
+          if (!live()) return;
+          await call("publish/ready", { generation: lease });
+          if (!live()) return;
+          watchPublish(pc);
+          break;
+        }
       } catch {
         if (live()) fail(NOTICE.failed, true);
         return;
@@ -952,7 +984,7 @@
     const available = () => supported() && !!allowed();
     return { heard, status, zone: zoneTo, join, leave, mute, muteLocal, mutedLocally, setVolume, volumeOf, VOLUME_MAX, duel, setMuteDuels, mutedByDuel, identify, release, stop, retry, remember, dispose,
       get available() { return available(); }, get why() { return supported() ? "" : NOTICE.unsupported; },
-      get state() { return state; }, get stats() { return { ...stats, voices: voices.size, receiving: !!sub, publishing: !!pub, capturing: !!mic, connection, lease }; } };
+      get state() { return state; }, get stats() { return { ...stats, voices: voices.size, receiving: !!sub, publishing: !!pub, capturing: !!mic, connection, lease, relay: !!(ice && ice.relay), bare }; } };
   };
   BL.oogaChatMedia = { create, PHASES, NOTICE, IDLE, TURN_TLS, RETURN_MS, RESUME_TRIES };
 })();

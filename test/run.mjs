@@ -32782,10 +32782,10 @@ const studioCatalogueProof = async () => {
 // Exercise the shipped voice lifecycle with deferred permissions/signaling and no real devices/network.
 const studioVoiceLifecycleProof = async () => {
   const source=await readFile(join(root,"src/js/duel-listening.js"),"utf8")+await readFile(join(root,"src/js/voice.js"),"utf8");
-  const fixture=(gathering="complete",candidate=true,failFirstPeer=false,voiceTurn=false)=>{
+  const fixture=(gathering="complete",candidate=true,failFirstPeer=false,voiceTurn=false,stunDead=false)=>{
     const calls=[],streams=[],peers=[],elements=[],timers=new Map(),failing=new Map(),clock={at:null};let timerId=0,gum=0,permission=null,publishResponse=null,deferred=null,peerAttempts=0;
     class Peer {
-      constructor(config){this.config=config;if(++peerAttempts===1&&failFirstPeer)throw Error("probe construction failed");peers.push(this);this.connectionState="connected";this.iceGatheringState=gathering;this.localDescription=null;this.handlers=new Map();}
+      constructor(config){this.config=config;if(++peerAttempts===1&&failFirstPeer)throw Error("probe construction failed");peers.push(this);this.connectionState=stunDead&&config.iceServers.some(s=>s.urls.startsWith("stun:"))?"new":"connected";this.iceGatheringState=gathering;this.localDescription=null;this.handlers=new Map();}
       addEventListener(k,fn){this.handlers.set(k,fn);}
       removeEventListener(k){this.handlers.delete(k);}
       addTransceiver(track){this.track=track;return {mid:"0"};}
@@ -32799,7 +32799,7 @@ const studioVoiceLifecycleProof = async () => {
     class Sound {constructor(){this.pending=[];elements.push(this);}play(){return new Promise((resolve,reject)=>this.pending.push({resolve,reject}));}pause(){this.pauses=(this.pauses||0)+1;}}
     const makeStream=()=>{const track={enabled:true,stops:0,stop(){this.stops++;}},stream={track,getTracks:()=>[track],getAudioTracks:()=>[track]};streams.push(stream);return stream;};
     const win={BL:{net:{state:{room:"live",voiceTurn,connectionToken:"synthetic",me:{id:900,login:"listener"}},remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{},setMuted:on=>calls.push({op:"mute",on}),probe:()=>calls.push({op:"probe"})}},setTimeout:(fn,delay)=>{timers.set(++timerId,{fn,delay});return timerId;},clearTimeout:id=>timers.delete(id),setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id)};
-    const context={window:win,Date:{now:()=>clock.at??Date.now()},document:{createElement:()=>({})},localStorage:{getItem:()=>null,setItem(){}},AbortController,RTCPeerConnection:Peer,Audio:Sound,MediaStream:class {constructor(tracks){this.tracks=tracks;}getTracks(){return this.tracks;}},navigator:{mediaDevices:{enumerateDevices:async()=>[{kind:"audioinput",deviceId:"synthetic-mic",label:"Synthetic mic"},{kind:"videoinput",deviceId:"camera",label:"Camera"}],getUserMedia:constraints=>{gum++;calls.push({op:"capture",constraints});return permission||Promise.resolve(makeStream());}}},
+    const context={window:win,Date:{now:()=>clock.at??Date.now()},document:{createElement:()=>({})},localStorage:{getItem:()=>null,setItem(){},removeItem(){}},AbortController,RTCPeerConnection:Peer,Audio:Sound,MediaStream:class {constructor(tracks){this.tracks=tracks;}getTracks(){return this.tracks;}},navigator:{mediaDevices:{enumerateDevices:async()=>[{kind:"audioinput",deviceId:"synthetic-mic",label:"Synthetic mic"},{kind:"videoinput",deviceId:"camera",label:"Camera"}],getUserMedia:constraints=>{gum++;calls.push({op:"capture",constraints});return permission||Promise.resolve(makeStream());}}},
       fetch:async(url,options)=>{const op=url.split("/").at(-1);calls.push({op,body:JSON.parse(options.body)});if(failing.get(op)>0){failing.set(op,failing.get(op)-1);return {ok:false,status:502,json:async()=>({error:"synthetic failure"})};}if(deferred?.op===op)return deferred.promise;if(op==="publish"&&publishResponse)return publishResponse;if(op==="pull")return {ok:true,json:async()=>({tracks:JSON.parse(options.body).ids.map(id=>({id,mid:String(id)}))})};return {ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})};}};
     runInNewContext(source,context);
     return {net:win.BL.net,clock,failNext(op,n=1){failing.set(op,n);},fire(delay){const found=[...timers].find(([,task])=>task.delay===delay);if(!found)return false;timers.delete(found[0]);return found[1].fn();},defer(op){let finish;const promise=new Promise(resolve=>{finish=resolve;});deferred={op,promise};return data=>{deferred=null;finish({ok:true,json:async()=>data});};},voice:win.BL.voice,calls,streams,peers,elements,timers,get gum(){return gum;},makeStream,denyPermission(){permission=Promise.reject(Object.assign(Error("denied"),{name:"NotAllowedError"}));},deferPermission(){permission=new Promise(resolve=>{this.resolvePermission=resolve;});},deferPublish(){publishResponse=new Promise(resolve=>{this.resolvePublish=()=>resolve({ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})});});}};
@@ -32946,7 +32946,29 @@ const studioVoiceLifecycleProof = async () => {
   cancelled.voice.dropMic();
   lateIce(ice("stale")); await cancelledJoin; await drain();
   const turnCancelled = iceWasPending && cancelled.timers.size === 0 && cancelled.peers.length === 0;
-  return {networkReturnsOpen,networkRetries,lateLandsMuted,longGapListens,givesUp,leaveEndsRecovery,slowGatherJoins,emptyGatherRefuses,unavailableProbeJoins,turnShared,turnRefreshed,turnPrefetched,turnMeasured,turnStopped,turnCancelled,publicationReplaced,leaveStopsAudio,latePlaybackStaysOff,leaveCancelsRestart,receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[slow,blocked,unavailable,listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied,replaced,leaving,restarting,change,flaky,slowBack,gone,dead,quit].every(f=>f.timers.size===0)};
+  // regression (#767): WebKit on an IPv6-only mobile network reaches only the first IPv4 address a connection sends to,
+  // the STUN server when one is listed, so the publish never connects: the second try leaves STUN out and comes up, and
+  // the receive connection after it goes the same way.
+  const nat = fixture("complete",true,false,false,true), natJoin = nat.voice.enable(); await drain();
+  const natWaited = nat.peers.length === 2 && nat.peers[1].connectionState === "new" && !nat.voice.stats.enabled;
+  await nat.fire(10000); await natJoin; await drain();
+  const noStun = pc => !pc.config.iceServers.some(s => s.urls.startsWith("stun:"));
+  const bareAfterUnreached = natWaited && nat.voice.stats.enabled && nat.voice.stats.publishing && nat.peers.length === 4 && nat.peers[1].connectionState === "closed"
+    && noStun(nat.peers[2]) && noStun(nat.peers[3]) && nat.voice.inspect().bare;
+  nat.voice.dispose(); await drain();
+  // regression (#767): a credentials request that failed is asked again by the next connection, and credentials in hand
+  // serve a restart without another request.
+  const again = fixture("complete",true,false,true), long = { ...ice("second"), ttl: 7200 };
+  again.failNext("ice"); const secondIce = again.defer("ice"), againJoin = again.voice.enable();
+  for (let i = 0; i < 50 && again.calls.filter(c => c.op === "ice").length < 2; i++) await drain();
+  secondIce(long); await againJoin; await drain();
+  const turnAskedAgain = again.voice.stats.enabled && again.peers.length === 2 && again.calls.filter(c => c.op === "ice").length === 2
+    && !again.peers[0].config.iceServers.some(s => s.urls === tls) && hasRelay(again.peers[1], "second");
+  await again.voice.restart(); await drain();
+  const turnKept = again.voice.stats.enabled && again.peers.length === 4 && again.peers.slice(2).every(pc => hasRelay(pc, "second"))
+    && again.calls.filter(c => c.op === "ice").length === 2;
+  again.voice.dispose(); await drain();
+  return {networkReturnsOpen,networkRetries,lateLandsMuted,longGapListens,givesUp,leaveEndsRecovery,slowGatherJoins,emptyGatherRefuses,unavailableProbeJoins,turnShared,turnRefreshed,turnPrefetched,turnMeasured,turnStopped,turnCancelled,bareAfterUnreached,turnAskedAgain,turnKept,publicationReplaced,leaveStopsAudio,latePlaybackStaysOff,leaveCancelsRestart,receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[slow,blocked,unavailable,listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied,replaced,leaving,restarting,change,flaky,slowBack,gone,dead,quit].every(f=>f.timers.size===0)};
 };
 
 // The real controller runs against a bounded DOM/media double: no permission prompts or SFU.
@@ -33722,10 +33744,18 @@ const oogaChatChecks = async () => {
   const afterFrame = refused(1006, JSON.stringify({ type: "snapshot" }));
   const feed = { backoff: backoff[0] <= 1250 && backoff[3] >= 6000 && backoff[5] >= 22500 && backoff[5] <= 37500, off: off >= 60000 && offHeard === "closed",
     reset: afterFrame <= 1250 && feedHeard.at(-2) === "reconnecting" };
+  // regression (#767): a voice call whose body stalls after its headers is still inside the call's bound, so it ends.
+  const stalled = adapterWith(async (path, init) => ({ ok: true, status: 200, headers: { get: () => "application/json" },
+    json: () => new Promise((resolve, reject) => init.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })))) }));
+  const stalledCall = stalled.media().call("ice", { connection: "c1" }).then(() => "answered", (error) => error.code);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const bodyHeld = stalled.pending;
+  stalled.dispose();
+  const bodyBound = bodyHeld === 1 && await Promise.race([stalledCall, new Promise((resolve) => setTimeout(() => resolve("hung"), 50))]) === "disposed";
   const adapter = { modes: modes.join() === "unavailable,unavailable,unavailable,live", held, released: hanging.pending === 0 && ended.mode === "unavailable" && ended.reason === "disposed",
-    signOut: signOut === "ok,threw,threw", ...feed };
+    signOut: signOut === "ok,threw,threw", bodyBound, ...feed };
   record("Ooga Chat adapter: a 404, a non-JSON page or an unreachable service each leave the app unavailable rather than invented, disposing aborts what is still asking, a sign-out the server refuses throws instead of signing out, and an audience socket the edge refuses backs off until a frame arrives, longest while listening is off",
-    adapter.modes && adapter.held === 1 && adapter.released && adapter.signOut && adapter.backoff && adapter.off && adapter.reset, JSON.stringify({ ...adapter, signOut, waits: [...backoff, off, afterFrame].map(Math.round) }));
+    adapter.modes && adapter.held === 1 && adapter.released && adapter.signOut && adapter.bodyBound && adapter.backoff && adapter.off && adapter.reset, JSON.stringify({ ...adapter, signOut, waits: [...backoff, off, afterFrame].map(Math.round) }));
 
   // The shell over a minimal DOM: views build on first visit, are kept across tab switches and updates, and dispose once.
   const node = (tag, doc) => {
@@ -33903,7 +33933,7 @@ const oogaChatChecks = async () => {
   const voiceCheck = async () => {
     const M = load(["src/js/duel-listening.js", "src/ooga-chat/ooga-chat-media.js"], { window: {}, setTimeout, clearTimeout, Math, Date, Promise, Object, Number, Map, Set, Error }).oogaChatMedia;
     const flush = async (n = 6) => { for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0)); };
-    const rig = ({ deny = null, holdPlay = false, allowed = true, memory = null } = {}) => {
+    const rig = ({ deny = null, holdPlay = false, allowed = true, memory = null, stunDead = false } = {}) => {
       const log = [], asked = [], listeners = new Map(), tracks = [], pcs = [], elements = [];
       let delay = null, nextMid = 0, playHeld = holdPlay, failing = null, stalls = 0;
       // Waits of a second or more are held for the check to fire by hand (`waits`); shorter ones run as they are.
@@ -33912,7 +33942,7 @@ const oogaChatChecks = async () => {
         "publish/offer": () => ({ sessionDescription: { type: "answer", sdp: "v=0" } }) };
       const broker = { call: async (op, body) => { log.push(`${op}@${body.connection}${body.generation ? `#${body.generation}` : ""}`); if (delay && op === delay.op) await delay.until; if (failing === op) { failing = null; throw Object.assign(new Error("busy"), { code: "upstream_failed", retryable: true }); } return (replies[op] || (() => ({ ok: true })))(); } };
       class PC {
-        constructor() { this.on = new Map(); this.connectionState = "new"; this.iceGatheringState = "complete"; this.tx = []; this.closed = false; pcs.push(this); }
+        constructor(config) { this.config = config; this.on = new Map(); this.connectionState = "new"; this.iceGatheringState = "complete"; this.tx = []; this.closed = false; pcs.push(this); }
         addEventListener(t, fn) { if (!this.on.has(t)) this.on.set(t, new Set()); this.on.get(t).add(fn); }
         removeEventListener(t, fn) { this.on.get(t)?.delete(fn); }
         fire(t, e = {}) { for (const fn of [...(this.on.get(t) || [])]) fn(e); }
@@ -33923,6 +33953,8 @@ const oogaChatChecks = async () => {
         async setLocalDescription(d) { this.localDescription = d; for (const t of this.tx) if (t.mid === null) t.mid = "0"; }
         async setRemoteDescription(d) {
           const fresh = (d.mids || []).map((mid) => { const tx = { mid, stopped: false, stop() { this.stopped = true; } }; this.tx.push(tx); return tx; });
+          // WebKit on an IPv6-only mobile network: with a STUN server listed the SFU is never reached.
+          if (stunDead && this.config.iceServers.some((server) => server.urls.startsWith("stun:"))) return;
           setTimeout(() => { this.connectionState = "connected"; this.fire("connectionstatechange"); for (const transceiver of fresh) this.fire("track", { transceiver, track: { kind: "audio" } }); }, 0);
         }
         close() { this.closed = true; this.connectionState = "closed"; }
@@ -34103,6 +34135,21 @@ const oogaChatChecks = async () => {
     r.c.status("reconnecting"); snap(r, "c2", "eligible"); await flush();
     r.answer(true, { id: "gh:1", speak: "pending", lease: 3 }); await flush(20);
     out.networkDeadFeed = silent && unheard && spared && r.captures === 1 && r.c.state.role === "speaker" && !r.c.state.muted && r.tracks[0].enabled === true && r.log.includes("publish/ready@c2#3");
+    // regression (#767): WebKit on an IPv6-only mobile network never reaches the SFU with a STUN server listed. The
+    // publish that never connects is made once more without it, on the same microphone and lease, and the receive
+    // connection built the old way giving up afterwards changes nothing back. A credentials request that failed is asked
+    // again by the next connection.
+    r = rig({ stunDead: true }); r.failNext("ice"); r.c.zone("main"); snap(r, "c1", "eligible"); await flush();
+    const natJoin = r.c.join(); await flush(); r.answer(true, { id: "gh:1", speak: "pending", lease: 7 }); await flush();
+    const stuck = r.c.state.phase === "negotiating" && r.pcs.length === 2 && !r.pcs[1].closed;
+    const timedOut = r.fire(10000); await natJoin; await flush();
+    const stunless = (pc) => !pc.config.iceServers.some((server) => server.urls.startsWith("stun:"));
+    out.bare = stuck && timedOut && r.c.state.role === "speaker" && r.captures === 1 && r.pcs.length === 3 && r.pcs[1].closed && !stunless(r.pcs[1]) && stunless(r.pcs[2])
+      && r.log.filter((l) => l === "publish/open@c1#7").length === 2 && r.log.at(-1) === "publish/ready@c1#7" && r.c.stats.bare;
+    down(r.pcs[0], "failed"); await flush();
+    out.bareKept = r.c.stats.bare && r.c.state.role === "speaker";
+    out.iceAgain = r.log.filter((l) => l === "ice@c1").length === 2;
+    r.c.dispose();
     return out;
   };
   const voice = await voiceCheck();
