@@ -1672,6 +1672,12 @@
     scene = build();
     buildSpace(scene);
     hireCrew(scene);
+    // The walkers relayed from the page the hall elects to move them (`hangar-relay.js`), registered in the same order on
+    // every page: the crew, each gorilla and all it wears.
+    scene.relay = BL.hangarRelay.create();
+    const relayTree = (n) => { scene.relay.node(n); for (const c of n.children || []) relayTree(c); };
+    for (const a of scene.crew) relayTree(a.root);
+    scene.puppet = false;
     const F = LAYOUT.fireTest, exits = JM.EXHAUST;
     audio = BL.hangarAudio.create({ door: { x: DOOR.x, y: DOOR.y + 2, z: DOOR.z }, launch: { x: 0, y: TUN.y, z: TUN.z1 }, tunnel: { y: TUN.y, z0: TUN.z0, z1: TUN.z1 },
       booth: { x: F.x, y: 2, z: F.z }, engines: { x: LAYOUT.jet.x, y: exits[0].y, z: LAYOUT.jet.z + exits[0].z + 2, gap: Math.abs(exits[0].x) }, gear: { x: LAYOUT.jet.x, y: 0.5, z: LAYOUT.jet.z + NOSE_GEAR }, projector: HM.projector().lens, screen: HM.filmScreen().picture,
@@ -1770,7 +1776,7 @@
     if (DEBUG && params.get("netfog") === "1") scene.network.fog = true;
     scene.netShow = -1; scene.netFrom = 0; scene.netUsed = true;
     // The hall on the Worker, followed while it is offered (hangar-link.js), and what this page last told it of the Jet.
-    scene.link = BL.hangarLink.create();
+    scene.link = BL.hangarLink.create({ bytes: (b) => scene.relay.read(b) });
     scene.wordsAt = -Infinity; scene.saidOn = false; scene.saidNear = false; scene.roomFollowed = 0;
     // Tess notices the shape if she is near it and free when she would notice it, and glances at it, looks it over or is
     // puzzled by it.
@@ -1911,6 +1917,13 @@
     const L = s.link;
     L.update();
     if (!L.live) s.saidOn = s.saidNear = false;
+    // The walkers: moved here when this page is the hall's host or plays on its own, else played back from the host's
+    // frames; a page that takes them on (or plays on its own again) carries on from where they stand.
+    const hosting = L.hosting, puppet = L.following && !hosting;
+    s.relay.hosting = hosting;
+    if (s.puppet && !puppet) adoptWalkers(s);
+    s.puppet = puppet;
+    if (puppet) s.relay.play(L.serverNow());
     s.anomaly.follow(L.following);
     s.fire.follow(L.following);
     s.terminals.follow(L.following);
@@ -1932,6 +1945,17 @@
     s.wordsAt = elapsed;
     const w = s.anomaly.words();
     if ((w.on !== s.saidOn || w.near !== s.saidNear) && L.send({ t: "jet", on: w.on, near: w.near })) { s.saidOn = w.on; s.saidNear = w.near; }
+  };
+
+  // The walkers carried on from where the host's frames left them.
+  const adoptWalkers = (s) => {
+    for (const a of s.crew) if (s.roomFire.holding !== a && s.meltdown.holding !== a) a.place(a.root.position.x, a.root.position.z, a.root.rotation.y);
+  };
+  // The host's frame of the walkers, once they have all moved this frame.
+  const relayLife = (s) => {
+    if (!s.relay.hosting) return;
+    const out = s.relay.write(s.link.serverNow());
+    if (out) s.link.sendBytes(out);
   };
 
   const update = (dt, elapsed) => {
@@ -2074,7 +2098,7 @@
     dust.update(elapsed, pilot.orbit.target.x, pilot.orbit.target.z);
     for (let i = 0; i < s.crew.length; i++) {
       // The control room's fire holds its operator while it burns, and a worker who has had enough is held while he is out.
-      if (s.roomFire.holding !== s.crew[i] && s.meltdown.holding !== s.crew[i]) s.crew[i].update(dt);
+      if (!s.puppet && s.roomFire.holding !== s.crew[i] && s.meltdown.holding !== s.crew[i]) s.crew[i].update(dt);
       const p = s.crew[i].root.position, a = s.crewActors[i];
       a.x = p.x; a.y = p.y; a.z = p.z;
     }
@@ -2097,6 +2121,7 @@
         } else if (through(p, p.y - pilot.player.baseY, 0)) leaveHangar();
       }
     }
+    relayLife(s);
     stepTweens(dt);
     fx.update(dt, elapsed);
   };
@@ -2125,7 +2150,7 @@
     scene.gate.phase.dispose();
     scene.launch.phase.dispose();
     if (scene.window) scene.window.dispose();
-    scene.link.close();
+    scene.link.dispose();
     scene.anomaly.dispose();
     scene.meltdown.dispose();
     scene.shimmer.dispose();
