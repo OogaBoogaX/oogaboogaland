@@ -175,8 +175,11 @@
 
   // `fx` for her lines and sparks, `audio` for her voice, her boots and her hammer's clang, `fire` the static fire test
   // she freaks out at, `jet` the Jet's node, which her rampage rocks, `toast` for what the visitor should know, `blocks`
-  // the circles she walks round, and `avoid(x, z, feet, height, radius)`, where she must not step into now.
-  const create = ({ fx, audio, fire, jet, toast, blocks = null, avoid = null, quieted = () => false }) => {
+  // the circles she walks round, and `avoid(x, z, feet, height, radius)`, where she must not step into now. Shared with
+  // others in the hangar, `players()` lists everyone's Oogas there (each with `root.position` and `baseY`), one of whom
+  // she runs at now and then, and `onPoke()` asks the page that moves her for a poke from this page's Ooga while she is a
+  // puppet here (false when it could not).
+  const create = ({ fx, audio, fire, jet, toast, blocks = null, avoid = null, quieted = () => false, players = null, onPoke = null }) => {
     const S = HM.LAYOUT.sis, k = SM.rig(), P = k.parts, H = k.heads, rand = BL.math.mulberry32(0x5153), B = HM.blast(), SPARK = B.spark, IRON = B.iron;
     // The Jet's paint flying off it: its white and its livery's blue.
     const CHIPS = [BL.models.particleGeometry("#eeeae2", 0.1, 0), BL.models.particleGeometry("#2a4fb8", 0.1, 0)];
@@ -408,8 +411,9 @@
       if (brawlAt) return brawlSpot;
       if (rampage) return smashSpot(false);
       if (storming) return doorSpot || spots[0];
-      if (driven && !quieted() && clock - visitedAt > VISIT.every && rand() < VISIT.chance) {
-        const s = visit(driven);
+      const who = players ? players() : null, target = who && who.length ? who[Math.floor(rand() * who.length)] : driven;
+      if (target && !quieted() && clock - visitedAt > VISIT.every && rand() < VISIT.chance) {
+        const s = visit(target);
         if (s) return s;
       }
       let total = 0;
@@ -500,11 +504,15 @@
     // A poke from the visitor's Ooga: her fit and line, angrier each time, the boink and the pad's pulse. At the end of
     // her tether she goes for the Jet; while she smashes it each poke counts toward stopping her, and a second at a
     // spot sends her running for another; storming off or sulking, she only tells them to go away.
-    const poke = () => {
-      if (panicking || !seen || brawlAt) return false;
-      const q = seen.root.position;
+    // `who`: whose Ooga poked her (the visitor's when not said); `here`, whether it is this page's visitor, whose pad
+    // pulses. A puppet here, the poke is asked of the page that moves her.
+    const poke = (who = seen, here = true) => {
+      if (puppet) return !!onPoke && onPoke();
+      if (panicking || !who || brawlAt) return false;
+      poker = who;
+      const q = who.root.position;
       pokeX = q.x; pokeZ = q.z; pokedAt = clock; coolAt = POKE.calm;
-      BL.gamepad.rumble(0.2, 0.55, 110);
+      if (here) BL.gamepad.rumble(0.2, 0.55, 110);
       audio.poke(p.x, p.y + 0.6, p.z);
       if (rampage) {
         if (++pips >= RAMPAGE.stop) { meltdown(); return true; }
@@ -733,7 +741,8 @@
     };
 
     // Once a frame with the Ooga the visitor drives here (or null) and where the view is.
-    let seen = null;
+    // The visitor's Ooga this frame, and whoever poked her last, whom she chases.
+    let seen = null, poker = null;
     // Relayed from the page that moves the hall's walkers (`hangar-relay.js`): what other systems read of her (her mood,
     // whether she smashes the Jet and her tally, whether she brawls or panics, her soot, the height she stands at), kept
     // current here (`shared`) on the host and read from it on the others, where she is a puppet (`puppet`): her nodes are
@@ -951,7 +960,7 @@
         face = H.redOpen;
         want.lean = 0.18; want.armLx = -2.5 + Math.sin(clock * 16) * 0.3; want.armLz = 0.35; want.foreLx = -0.8; want.foreLz = 0;
         if (!chased) { chased = true; sayFrom("chase", 1.8); }
-        const q = driven && driven.root.position;
+        const chasing = poker || driven, q = chasing && chasing.root.position;
         if (q) {
           const dx = q.x - p.x, dz = q.z - p.z, d = Math.hypot(dx, dz);
           wantYaw = Math.atan2(dx, dz);
