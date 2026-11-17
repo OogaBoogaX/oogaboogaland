@@ -147,8 +147,9 @@ test("one page moves the hall's walkers: the earliest arrival that is showing, h
   assert.deepEqual(hangar.parse({ t: "seen", v: "yes" }), null);
   g.join({ id: 4 }, t0); g.join({ id: 5 }, t0); g.join({ id: 6 }, t0);
   assert.equal(g.state().host, 4);
-  assert.equal(g.relay({ id: 4 }), true);
-  assert.equal(g.relay({ id: 5 }), false, "nobody else's frames go on");
+  const frame = (magic, full = 0) => { const b = new ArrayBuffer(19), v = new DataView(b); v.setUint32(0, magic, true); v.setUint8(5, full); return b; };
+  assert.equal(g.relay({ id: 4 }, t0, frame(0x3148474f)), true);
+  assert.equal(g.relay({ id: 5 }, t0, frame(0x3148474f)), false, "nobody else's frames go on");
   assert.equal(g.message({ id: 4 }, { t: "seen", v: false }, t0), true, "a hidden host hands on, and the hall says so at once");
   assert.equal(g.state().host, 5);
   assert.equal(g.message({ id: 4 }, { t: "seen", v: true }, t0), false, "and keeps the new one when it comes back");
@@ -201,4 +202,24 @@ test("a poke at Sis from any page is kept for the host, numbered, the last few",
   assert.equal(pokes.length, 8);
   assert.deepEqual(pokes.at(-1), [10, 2]);
   assert.deepEqual(pokes[0], [3, 1]);
+});
+
+test("the forklift has one driver, whose frames alone go on, and the last whole one greets a page joining", () => {
+  const t0 = 1.7e12, g = hangar.create(t0, seeded(6));
+  g.join({ id: 1 }, t0); g.join({ id: 2 }, t0);
+  const frame = (magic, full = 0) => { const b = new ArrayBuffer(19), v = new DataView(b); v.setUint32(0, magic, true); v.setUint8(5, full); return b; };
+  const LIFT = 0x3146474f;
+  assert.deepEqual(g.greet({ id: 3 }), [], "nothing kept before anyone drives");
+  assert.equal(g.message({ id: 2 }, { t: "seat", on: true }, t0), true);
+  assert.equal(g.state().driver, 2);
+  assert.equal(g.message({ id: 1 }, { t: "seat", on: true }, t0), false, "one driver at a time");
+  assert.equal(g.relay({ id: 1 }, t0, frame(LIFT, 1)), false, "the host does not drive it");
+  const whole = frame(LIFT, 1);
+  assert.equal(g.relay({ id: 2 }, t0, whole), true);
+  assert.equal(g.relay({ id: 2 }, t0, frame(LIFT, 0)), true);
+  assert.deepEqual(g.greet({ id: 3 }), [whole], "the last whole frame, not the changes after it");
+  assert.equal(g.message({ id: 1 }, { t: "seat", on: false }, t0), false, "only the driver gets out");
+  g.leave({ id: 2 });
+  assert.equal(g.state().driver, 0, "a driver's page going leaves the seat free");
+  assert.deepEqual(g.greet({ id: 3 }), [whole], "and the forklift where they left it");
 });

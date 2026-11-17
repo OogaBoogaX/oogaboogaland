@@ -34,6 +34,10 @@
 // Kortik's Sis's pokes: a page whose Ooga pokes her (`poke`) tells the hall, which keeps the last few (`pokes`, each its
 // number and whose), so the host, which moves her, gives her each once, from that player.
 //
+// The forklift: one driver at a time (`seat`, taken by the first page to ask and given back by the driver, or as their
+// page goes), whose frames of it (bytes, `hangar-relay.js`'s forklift relay) are passed on to everyone else; the last
+// whole one is kept and handed to a page as it joins, so a forklift parked anywhere stands there for it too.
+//
 // What it hears: `jet`, a page's word on whether anything it knows stands on the Jet (`on`) or within the shuffle's
 // reach (`near`), sent on a change. The lowrider never starts with anyone on the Jet nor the shuffle with anything near
 // (the next in the bag instead, or the failed start), and either stops for everyone the moment a page says so. Nothing
@@ -42,6 +46,8 @@
 import "../../../src/js/hangar-hall.js";
 
 const HALL = globalThis.BL.hangarHall, A = HALL.ANOMALY;
+// The two relays' magic (`hangar-relay.js`): the walkers', from the host, and the forklift's, from its driver.
+const WALKERS = 0x3148474f, LIFT = 0x3146474f;
 
 const finite = (v) => typeof v === "number" && Number.isFinite(v);
 // A showing of the shape as the host describes it: every field a finite number within bounds, or null.
@@ -61,6 +67,7 @@ const parse = (m) => {
   if (m.t === "seen") return typeof m.v === "boolean" ? { t: "seen", v: m.v } : null;
   if (m.t === "fire") return { t: "fire" };
   if (m.t === "poke") return { t: "poke" };
+  if (m.t === "seat") return typeof m.on === "boolean" ? { t: "seat", on: m.on } : null;
   if (m.t === "shape") return shapeOf(m.s);
   if (m.t === "walkup") return Number.isSafeInteger(m.id) && m.id > 0 && finite(m.x) && finite(m.z) && Math.abs(m.x) < 200 && Math.abs(m.z) < 200
     ? { t: "walkup", id: m.id, x: m.x, z: m.z, every: m.every === true, dense: m.dense === true } : null;
@@ -74,7 +81,7 @@ const create = (_now, random = Math.random) => {
   // they arrived.
   const players = new Map();
   // The page that moves the hall's walkers (an account id, 0 for none), and the one the state last went out with.
-  let host = 0, shownHost = 0;
+  let host = 0, shownHost = 0, shownDriver = 0;
   const elect = () => {
     if (players.has(host) && players.get(host).seen) return;
     host = 0;
@@ -91,6 +98,8 @@ const create = (_now, random = Math.random) => {
   // The last pokes at Sis, each [its number, whose], and how many there have been.
   const pokes = [];
   let pokeN = 0;
+  // Who drives the forklift (an account id, 0 for none) and its last whole frame.
+  let driver = 0, liftFrame = null;
   const N = HALL.NETWORK;
   const netQuietUntil = () => network ? network.at + (N.end + N.quiet) * 1000 : -Infinity;
   const testing = (now) => !!test && now < test.at + (HALL.FIRE.result + A.afterFire) * 1000;
@@ -129,7 +138,7 @@ const create = (_now, random = Math.random) => {
       elect();
       if (players.size === 1 && !anomaly && nextAt < now) nextAt = now + gap();
     },
-    leave: (p) => { players.delete(p.id); elect(); },
+    leave: (p) => { players.delete(p.id); elect(); if (driver === p.id) driver = 0; },
     /** A page's message, read by `parse`; true when the hall's state changed and should go out now. */
     message: (p, m, now) => {
       const f = players.get(p.id);
@@ -139,6 +148,11 @@ const create = (_now, random = Math.random) => {
         elect();
         if (host === shownHost) return false;
         shownHost = host;
+        return true;
+      }
+      if (m.t === "seat") {
+        if (m.on ? driver !== 0 : driver !== p.id) return false;
+        driver = m.on ? p.id : 0;
         return true;
       }
       if (m.t === "poke") {
@@ -189,8 +203,8 @@ const create = (_now, random = Math.random) => {
     },
     /** The hall to `now`; true when its state changed. */
     step: (now) => {
-      let changed = host !== shownHost;
-      shownHost = host;
+      let changed = host !== shownHost || driver !== shownDriver;
+      shownHost = host; shownDriver = driver;
       if (fire && now >= roomUntil) { fire = null; changed = true; }
       if (test && now >= test.at + HALL.FIRE.ready * 1000) { test = null; changed = true; }
       if (shape && now >= shape.at + shape.s.end * 1000) { shape = null; changed = true; }
@@ -206,10 +220,20 @@ const create = (_now, random = Math.random) => {
       return true;
     },
     running: () => players.size > 0,
-    state: () => ({ host, anomaly, room: fire, test, film, shape, network, pokes }),
+    state: () => ({ host, driver, anomaly, room: fire, test, film, shape, network, pokes }),
     motion: () => false,
-    /** Whether `p`'s bytes go on to the hall: only the host's. */
-    relay: (p) => p.id === host,
+    /** Whether `p`'s bytes go on to the hall: the walkers' from the host, the forklift's from its driver, whose last
+     * whole frame is kept for a page joining. */
+    relay: (p, _now, bytes) => {
+      if (bytes.byteLength < 6) return false;
+      const v = new DataView(bytes), magic = v.getUint32(0, true);
+      if (magic === WALKERS) return p.id === host;
+      if (magic !== LIFT || p.id !== driver) return false;
+      if (v.getUint8(5) === 1) liftFrame = bytes;
+      return true;
+    },
+    /** What a page joining hears besides the state: the forklift where it was last left. */
+    greet: () => liftFrame ? [liftFrame] : [],
     /** What a restart picks up: the schedule, or null once the hall is empty. */
     save: () => players.size ? JSON.stringify({ anomaly, fire, test, film, nextAt, roomUntil, id, bag, left }) : null,
     /** Picks up a saved hall: its schedule goes on where it stopped, on the same clock. */
