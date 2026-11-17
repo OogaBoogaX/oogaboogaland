@@ -898,9 +898,29 @@
     }
     return { verts: out, faces: src.faces, lines: src.lines };
   };
+  // A piece baked alone at the origin, unturned, once a kind and variant: what a loose piece (physics.js) draws, with
+  // its box in metres (`bounds`: min x, y, z then max x, y, z) over everything it draws.
+  const LOOSE = new Map();
+  const loosePiece = (kind, variant) => {
+    const key = `${kind}:${variant}`;
+    let baked = LOOSE.get(key);
+    if (baked) return baked;
+    baked = set().put(kind, 0, 0, 0, 0, variant).build();
+    const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+    for (const geo of [baked.solid, baked.hang, baked.glow, baked.swing, baked.swingGlow, baked.lampGlow, baked.swingLampGlow]) {
+      if (!geo) continue;
+      const v = geo.verts;
+      for (let i = 0; i < v.length; i += 3) for (let k = 0; k < 3; k++) { box[k] = Math.min(box[k], v[i + k]); box[k + 3] = Math.max(box[k + 3], v[i + k]); }
+    }
+    baked.bounds = box;
+    LOOSE.set(key, baked);
+    return baked;
+  };
   const set = () => {
     // Mesh pieces placed so far: kind, then the cell origin and quarter turns.
     const meshes = [], paintParts = [], glowParts = [];
+    // Pieces placed loose: drawn and moved on their own, never baked into the set (`build`'s `loose`).
+    const loose = [];
     // Layers 3 and 4 hold what hangs from a cable (lantern bodies and other glow); 5 and 6 hold lantern glass.
     // The hanging layers swing without moving the cable or the posts.
     const layers = [new Map(), new Map(), new Map(), new Map(), new Map(), new Map(), new Map()], lights = [];
@@ -923,7 +943,11 @@
       // decorative face never absorbs an adjacent structural face's tag.
       layers[layer].set(k, c | (layer === SOLID && ragePass ? RAGE_PASS : 0));
     };
-    const put = (kind, x, y, z, turns = 0, variant = 0) => {
+    const put = (kind, x, y, z, turns = 0, variant = 0, isLoose = false) => {
+      if (isLoose) {
+        loose.push({ kind, variant, x: Math.round(x / U) * U, y: Math.round(y / U) * U, z: Math.round(z / U) * U, turns: ((turns % 4) + 4) % 4, baked: loosePiece(kind, variant) });
+        return set;
+      }
       const piece = pieceOf(kind, variant), mesh = MESHES[kind];
       const ragePass = RAGE_PASS_PIECES.has(kind);
       const ox = Math.round(x / U), oy = Math.round(y / U), oz = Math.round(z / U), q = ((turns % 4) + 4) % 4;
@@ -1053,7 +1077,7 @@
         glow = noShadow(merge(...glowParts));
         glowParts.length = 0;
       }
-      const out = { solid, hang, glow, swing: bake(3), swingGlow: bake(4), lampGlow: bake(5), swingLampGlow: bake(6), lights: Float32Array.from(lights), picks: picks.splice(0) };
+      const out = { solid, hang, glow, swing: bake(3), swingGlow: bake(4), lampGlow: bake(5), swingLampGlow: bake(6), lights: Float32Array.from(lights), picks: picks.splice(0), loose: loose.splice(0) };
       for (const layer of layers) layer.clear();
       lights.length = steps.length = 0;
       return out;
@@ -1434,5 +1458,5 @@
     }
     const geometry=merge(...bits);studioCache.set(kind,geometry);return geometry;
   };
-  BL.dressing = { U, PALETTE, KIT, LIGHT_RGB, COIL_LIGHT, studio, set, coilRig, motes, palm, palmTrunk, islet, nodes, flock, fleet };
+  BL.dressing = { U, PALETTE, KIT, loosePiece, LIGHT_RGB, COIL_LIGHT, studio, set, coilRig, motes, palm, palmTrunk, islet, nodes, flock, fleet };
 })();

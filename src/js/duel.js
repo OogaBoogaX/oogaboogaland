@@ -82,7 +82,7 @@
     return rec ? rec.display || rec.login || "Someone" : "Someone";
   };
 
-  const create = ({ root, remotes, pilot, crew, camera, fx, clear, refusal }) => {
+  const create = ({ root, remotes, pilot, crew, camera, fx, clear, refusal, ended = null }) => {
     const net = BL.net, $ = (id) => document.getElementById(id);
     const hudBox = $("duel-hud"), targetBox = $("duel-target"), inviteBox = $("duel-invite");
     const countBox = $("duel-count"), flashBox = $("duel-flash"), resultBox = $("duel-result");
@@ -251,6 +251,8 @@
       if (l) fx.say(l, reason === "defeat" ? "I yield!" : "...", 2.4);
       // Whoever lost and is still here stands stunned a while.
       if (loser && l && reason !== "left") stun(loser);
+      // The scene puts back what the fight knocked about (the island's loose props).
+      if (ended) ended();
       const me = selfId(), mineNow = d === mine;
       if (mineNow) {
         mine = null; hudBox.hidden = true;

@@ -231,6 +231,7 @@
   const CHIP = models.particleGeometry("#6b625a", 0.1, 0);
   const SPARK = models.particleGeometry("#ffb13b", 0.08, 1);
   const DUST = models.particleGeometry("#a3874f", 0.1, 0);
+  const WATER_SPRAY = [models.particleGeometry("#9fd8ff", 0.09, 0.25), models.particleGeometry("#e8f7ff", 0.07, 0.35), models.particleGeometry("#5fb4e6", 0.08, 0.15)];
   const FIRE_VIEW = { coverage: 0, ember: 0, soot: 0 };
   const FIRE_SPECKS = new Float32Array(96 * 4);
   {
@@ -257,7 +258,7 @@
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let oogatronUnsub, renderer, game, world, go, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, totemSolids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, jumbotron, positionDebug, remotes, duels, npcSync, npcStatusBeams, npcGhosts;
+  let oogatronUnsub, renderer, game, world, go, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, totemSolids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireRigs, firePitRig, fire, headquarters, jumbotron, positionDebug, remotes, duels, npcSync, npcStatusBeams, npcGhosts, physics;
   // GAME MODE (`setGameMode`): an island event holds the island still for play while it runs.
   let gameMode = false, gameCombatOnly = false;
   let cloudHopper = null, cloudIsland = null, cloudPile = null, cloudPileSolids = null, cloudFinishFruit = null;
@@ -853,6 +854,11 @@
   const pokePiece = (o) => {
     if (now < o.next) return;
     o.next = now + 0.6;
+    // A loose piece (physics.js) is where its body lies now, and the poke knocks it away from the view, a die tumbling.
+    if (o.body !== undefined && physics) {
+      physics.knock(o.body, camera.position.x, camera.position.z, o.piece === "die" ? 40 : 20);
+      physics.position(o.body, o);
+    }
     const words = PIECES[o.piece];
     if (!words) return;
     fx.burst(o.x, o.y, o.z, words[1] === "spark" ? 10 : 7, [PIECE_BURST[words[1]]], 1.3);
@@ -1333,6 +1339,9 @@
     };
     addTarget(node, owner);
   };
+  // The mouths' small pieces stand loose (physics.js): knocked over, shoved and blown about, and put back after a duel
+  // or a while left alone. The rest of a mouth's dressing stays baked into its set.
+  const LOOSE_PIECES = new Set(["die", "terminal", "runeStone", "tokenStack", "abacus", "ledger"]);
   const mouthDressing = (slot, m) => {
     let byIsland = DRESSED.get(island);
     if (!byIsland) DRESSED.set(island, byIsland = new Map());
@@ -1347,7 +1356,7 @@
       if ((kind === "barrel" || kind === "bench") && island.overlapsStairs(x, z, 1.7)) return;
       const y = island.surfaceAt(x, z) - m.floorY;
       if (Math.abs(y) > 0.9 && kind !== "banner") return;
-      set.put(kind, lx, y + lift, lz, turns, variant);
+      set.put(kind, lx, y + lift, lz, turns, variant, LOOSE_PIECES.has(kind));
       // The coil and its gauge charge on a loop of their own (`coilCharge`).
       if (kind === "coil" || kind === "gauge") rig[kind] = [lx, y + lift, lz, turns];
       if (!lift) ground.push(lx, lz);
@@ -1507,6 +1516,60 @@
     chalkboard.attach(boardGroup, 0, 0, 0);
     claim(wx, wz, 1.2 * CHALKBOARD_SCALE);
   };
+  // ---- loose props (physics.js) ----
+  // The static world a loose prop meets: the island and the solid props under a point, and the way across clear of
+  // both (a cliff counts as a wall, not a step).
+  const physicsGround = (x, z, y) => Math.max(island.supportAt(x, z, y, 0.3, -Infinity), solids.supportAt(x, z, y, 0.3, 0.05));
+  // A prop already overlapping a solid may still move out of it (`escapeSegmentClear`), so none is pinned.
+  const physicsClear = (x, feet, z, toX, toY, toZ, radius, height) => island.supportAt(toX, toZ, feet + height, 0, -Infinity) <= feet + 0.4
+    && solids.escapeSegmentClear(x, feet, z, toX, toY, toZ, radius, height);
+  const ensurePhysics = () => physics || (physics = BL.physics.create({ ground: physicsGround, clear: physicsClear }));
+  // A dressing piece placed loose in a mouth's frame: its own node, a box round what it draws, its weight from its size.
+  const addLoosePiece = (piece, m) => {
+    const world = ensurePhysics(), b = piece.baked.bounds, sr = Math.sin(m.ry), cr = Math.cos(m.ry);
+    const px = m.x + cr * piece.x + sr * piece.z, py = m.floorY + piece.y, pz = m.z - sr * piece.x + cr * piece.z;
+    const node = createNode({ quaternion: BL.math.quat.create(), sightHidden: true });
+    const parts = BL.dressing.nodes(piece.baked, { glow: 1 });
+    for (const part of parts) addChild(node, part);
+    addChild(root, node);
+    placed.push(node);
+    const body = world.addPiece({ node, bounds: b, x: px, y: py, z: pz, yaw: m.ry + piece.turns * Math.PI / 2, tag: piece.kind });
+    // Still a piece to hover and poke, picked where the ray meets its box as it lies now.
+    addTarget(parts[0], { kind: "piece", piece: piece.kind, variant: piece.variant, node: parts[0], x: px, y: py, z: pz, next: 0, weaponType: "none", body,
+      pickRay: (ray) => physics && physics.raycast(ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, camera.far, PHYSICS_HIT) && PHYSICS_HIT.body === body ? PHYSICS_HIT.t : NaN },
+      { radius: Math.max(0.35, world.radius(body)) });
+  };
+  const PHYSICS_HIT = { body: -1, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0 };
+  const PHYSICS_AT = { x: 0, y: 0, z: 0 };
+  // A loose prop knocked home by a duel's end or a while left alone comes back with a puff of dust.
+  const physicsHome = (i) => {
+    const p = physics.position(i, PHYSICS_AT);
+    fx.burst(p.x, p.y, p.z, 6, [DUST], 1.1);
+  };
+  // A loose prop out of place goes home 15 s after anything last hit or pushed it.
+  const PHYSICS_HOME_AFTER = 15;
+  let physicsPlayerX = NaN, physicsPlayerZ = NaN;
+  const updatePhysics = (dt) => {
+    if (!physics || !physics.count) return;
+    physics.clearActors();
+    const player = crew.player;
+    if (player && player.root.visible) {
+      const p = player.root.position;
+      const vx = Number.isNaN(physicsPlayerX) || dt <= 0 ? 0 : (p.x - physicsPlayerX) / dt, vz = Number.isNaN(physicsPlayerZ) || dt <= 0 ? 0 : (p.z - physicsPlayerZ) / dt;
+      physicsPlayerX = p.x; physicsPlayerZ = p.z;
+      physics.actor(p.x, p.y - player.baseY, p.z, PLAYER_RADIUS, player.bodyHeight, Math.abs(vx) < 20 ? vx : 0, Math.abs(vz) < 20 ? vz : 0);
+    } else physicsPlayerX = physicsPlayerZ = NaN;
+    if (remotes) for (const a of remotes.actors()) if (dt > 0) physics.actor(a.x, a.y, a.z, a.radius, a.height, a.dx / dt, a.dz / dt);
+    physics.step(dt);
+    physics.settle(dt, PHYSICS_HOME_AFTER, physicsHome);
+  };
+  // A round's first loose prop stops it and is knocked along it; the driven Ooga's blow knocks what is in front of it.
+  const physicsShot = (from, to) => { if (physics) physics.shot(from, to); };
+  const physicsSwing = (cave, charge) => {
+    if (!physics || cave !== pilot.player) return;
+    const p = cave.root.position;
+    physics.blow(p.x, p.y - cave.baseY, p.z, cave.bodyHeight, cave.root.rotation.y, charge);
+  };
   const dressMouth = (slot, m, group) => {
     // The Canvas 2D fallback keeps the plain island, but the writable board remains available.
     if (renderer.kind === "canvas2d" && slot.theme === "lab") {
@@ -1519,6 +1582,7 @@
     const sr = Math.sin(m.ry), cr = Math.cos(m.ry), g = baked.ground, lit = baked.lights;
     for (let i = 0; i < lit.length; i += 4) dressingLights.push(m.x + cr * lit[i] + sr * lit[i + 2], m.floorY + lit[i + 1], m.z - sr * lit[i] + cr * lit[i + 2], lit[i + 3]);
     addPieceTargets(baked.picks, (lx, ly, lz, kind) => lz < 0.3 && kind !== "banner" ? null : { x: m.x + cr * lx + sr * lz, y: m.floorY + ly, z: m.z - sr * lx + cr * lz });
+    for (const piece of baked.loose) addLoosePiece(piece, m);
     if (baked.rig.coil) buildCoilCharge(group, baked.rig, m);
     if (slot.theme === "lab") placeChalkboard(m, group);
     // Headquarters and a sealed cave that is coming soon still hang their name over the door.
@@ -3491,6 +3555,12 @@
       }
       return;
     }
+    // Into the water: a splash of spray and a ring of waves, harder the faster it came down.
+    if (!cave.poolSwimming && cave.root.visible) {
+      const fall = Math.max(0, -(cave.hopV || 0)), strength = Math.min(1.5, 0.5 + fall * 0.12);
+      fx.burst(p.x, feet + height * OOGA_DRAUGHT, p.z, 8 + Math.round(strength * 10), WATER_SPRAY, 1.4 + strength * 1.6);
+      mempoolIsland.water.splash(mempoolIsland.localX(p.x, p.z), mempoolIsland.localZ(p.x, p.z), strength);
+    }
     cave.poolSwimming = true;
     const parts = cave.parts, s = Math.sin(time * 2.4 + phase), c = Math.cos(time * 2.4 + phase);
     parts.armL.rotation.z = 1.15 + s * 0.16; parts.armR.rotation.z = -1.15 - s * 0.16;
@@ -3507,7 +3577,7 @@
       solids.supportAt(x, z, from, rise, PLAYER_RADIUS),
       ALTAR_HEIGHT <= from + rise && Math.hypot(x, z) < altar.platformRadius + PLAYER_RADIUS ? ALTAR_HEIGHT : -Infinity,
       cloudPileSurface(x, z, from, rise, PLAYER_RADIUS), cloudHopper.supportAt(x, z, from, rise));
-    return Math.max(cloudHopper ? cloudHopper.supportAt(x, z, from, rise) : -Infinity, island.supportAt(x, z, y, STEP_MAX, ABYSS_FLOOR, PLAYER_RADIUS), bedSupportAt(x, z, from, STEP_MAX, PLAYER_RADIUS), propSupportAt(x, z, from, rise, player, ignoreClanker, passTraffic), waterSupportAt(x, z, from, rise, player));
+    return Math.max(cloudHopper ? cloudHopper.supportAt(x, z, from, rise) : -Infinity, physics ? physics.supportAt(x, z, from, rise) : -Infinity, island.supportAt(x, z, y, STEP_MAX, ABYSS_FLOOR, PLAYER_RADIUS), bedSupportAt(x, z, from, STEP_MAX, PLAYER_RADIUS), propSupportAt(x, z, from, rise, player, ignoreClanker, passTraffic), waterSupportAt(x, z, from, rise, player));
   };
   const abyssAt = (x, z, y, actor = pilot?.player) => playerSupportAt(x, z, y, y, actor) === ABYSS_FLOOR;
   const visualSupportAt = (x, z, y) => {
@@ -8089,6 +8159,7 @@
     shareDrivenActor(dt);
     hideSeatGlows();
     remotes.update(dt);
+    updatePhysics(dt);
     duels.update(dt);
     const petSeat = hammock?.seats[0];
     const petOwner = petSeat?.sitter === crew.player ? crew.player : petSeat?.remote ? remotes.body(petSeat.remote) : null;
@@ -11455,7 +11526,11 @@
     }
     headquarters.entropyLab = entropyLab;
     entropyLab.updateEquipment = updateLabEquipment;
-    shared.clipProjectileTarget = entropyLab.phase.clipTarget;
+    shared.clipProjectileTarget = (from, to) => {
+      if (entropyLab.phase.clipTarget(from, to)) return true;
+      physicsShot(from, to);
+      return false;
+    };
     shared.absorbProjectile = (ax, ay, az, point, dt, source, workShot) => entropyLab.phase.absorb(ax, ay, az, point, dt)
       || absorbCaveVeil(ax, ay, az, point, dt)
       || !!(factoryMouth && factoryMouth.phase.absorb(ax, ay, az, point, dt))
@@ -11732,10 +11807,10 @@
       return workHit(cave);
     };
     // Duels (duel.js): a challenge is refused while the visitor is busy with something else.
-    duels = BL.duel.create({ root, remotes, pilot, crew, camera: () => camera, fx, clear: liveClear, refusal: () =>
+    duels = BL.duel.create({ root, remotes, pilot, crew, camera: () => camera, fx, clear: liveClear, ended: () => { if (physics) physics.reset(physicsHome); }, refusal: () =>
       cloudHopper?.active ? "Not during Cloud Hopper" : gameMode ? "Not while a game runs" : clankerPlay?.active ? "Duels are fought as an Ooga"
         : !pilot.player ? "Drive your Ooga to duel" : pilot.player.camp.seat ? "Get up first" : pilot.player.health.stunned ? "Catch your breath first" : "" });
-    shared.onSwing = (cave, charge) => duels.swing(cave, charge);
+    shared.onSwing = (cave, charge) => { duels.swing(cave, charge); physicsSwing(cave, charge); };
     shared.onShot = (cave, from, to) => {
       duels.shot(cave, from, to);
       npcSync.recordShot(cave, from, to);
@@ -12084,7 +12159,7 @@
         get shown() {
           return pile.shown;
         },
-        terrainSections, caveSections, cutawayPaths: CUTAWAY_PATH_STATE, terrainRampRoof, get cutawayTravelRamp() { return cutawayTravelRamp; }, get cutawayTravelChannel() { return cutawayTravelChannel; }, get cutawayTravelStation() { return cutawayTravelStation; }, island, mouths: island.mouths, labels, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, get hammock() { return hammock; }, altar, path: island.path.debug, headquarters, jumbotron, get repoIsland() { return repoIsland; }, get npcSync() { return npcSync; }, get npcGhosts() { return npcGhosts; }, claimOwnOoga: () => { ownOogaClaimed = false; return claimOwnOoga(); }, accountChanged: () => onAccountChange(), clankers, clankerPlay, rageThrowMap, rageEdgeGoal, rageLandAt, rageCaptureLandAt, rageMapRouteClear, rageCaptureEligible, rageApproach, rageWarpRequired, rageGrab, rageCaptive, rageRelease, rageThrow, rageDragClear,
+        terrainSections, caveSections, cutawayPaths: CUTAWAY_PATH_STATE, terrainRampRoof, get cutawayTravelRamp() { return cutawayTravelRamp; }, get cutawayTravelChannel() { return cutawayTravelChannel; }, get cutawayTravelStation() { return cutawayTravelStation; }, island, mouths: island.mouths, labels, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, get hammock() { return hammock; }, altar, path: island.path.debug, headquarters, jumbotron, get repoIsland() { return repoIsland; }, get physics() { return physics; }, get npcSync() { return npcSync; }, get npcGhosts() { return npcGhosts; }, claimOwnOoga: () => { ownOogaClaimed = false; return claimOwnOoga(); }, accountChanged: () => onAccountChange(), clankers, clankerPlay, rageThrowMap, rageEdgeGoal, rageLandAt, rageCaptureLandAt, rageMapRouteClear, rageCaptureEligible, rageApproach, rageWarpRequired, rageGrab, rageCaptive, rageRelease, rageThrow, rageDragClear,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -12412,6 +12487,7 @@
     }
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
+    if (physics) { physics.dispose(); physics = null; }
     targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixGates.length = sealedCaves.length = clouds.length = lamps.length = pilePosts.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = meadowPalms.length = 0;
     fireHazards.length = 0;
     fireRigs = null;

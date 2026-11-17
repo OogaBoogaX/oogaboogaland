@@ -6322,7 +6322,7 @@ const hammockChecks = async () => {
       R.math.mat4.transformPoint(target, ham.bedNode.world, ...rope.ring);
       ropeError = Math.max(ropeError, Math.hypot(...at.map((v, k) => v - target[k])));
     }
-    const v = ham.bedNode.geometry.verts;
+    const v = ham.restBed.verts;
     for (let k = 0; k < v.length; k += 3) {
       R.math.mat4.transformPoint(at, ham.bedNode.world, v[k], v[k + 1], v[k + 2]);
       const dx = at[0] - fit.x, dz = at[2] - fit.z, along = dx * fit.ux + dz * fit.uz, side = dx * fit.nx + dz * fit.nz;
@@ -6554,14 +6554,14 @@ const hammockChecks = async () => {
   // through the real collision shell: its support, then its body above the step, as the hub's `walkable` asks.
   const STEP = Number(/WALK = \{[^}]*step: ([\d.]+)/.exec(await readFile(new URL("../src/js/pilot.js", import.meta.url), "utf8"))[1]);
   // The gap from a walker's footprint to the nearest drawn part of the resting bed (cloth, edge cords, spreaders), seen
-  // from above: every face edge of the bed's own mesh, in its frame (x along, z across).
+  // from above: every face edge of the bed at rest (`restBed`, the lowest its cloth lies occupied), in its frame (x along, z across).
   // Each face's corner indices, through the compact reader where a mesh is packed.
   const eachFace = (g, fn) => {
     const cursor = g.compactGeometry ? R.compactGeometry.createCursor(g) : null;
     for (let f = 0; f < g.faces.length; f++) fn(Array.from((cursor ? R.compactGeometry.readFace(g, f, cursor) : g.faces[f]).i));
   };
   const bedEdges = [];
-  { const g = ham.bedNode.geometry, v = g.verts;
+  { const g = ham.restBed, v = g.verts;
     eachFace(g, ids => { for (let k = 0; k < ids.length; k++) { const a = ids[k] * 3, b = ids[(k + 1) % ids.length] * 3; bedEdges.push(v[a], v[a + 2], v[b], v[b + 2]); } }); }
   const drawnGap = (along, across) => {
     let best = Infinity;
@@ -6616,10 +6616,10 @@ const hammockChecks = async () => {
   // This fixture runs the real equipment poser, without creating movement or NPC systems.
   R.pilot = { WALK: { speed: 0, gravity: 1, step: 0 } };
   runInNewContext(await readFile(new URL("../src/js/crew.js", import.meta.url), "utf8"), real);
-  // The drawn cloth's own footprint at rest, from the bed's mesh in its frame (x along, z across, the holder's too): as
+  // The drawn cloth's own footprint at rest, from the bed at rest (`restBed`) in its frame (x along, z across, the holder's too): as
   // long as the cloth and the spreaders' thickness, as wide as the cloth and its edge cords away from the spreaders.
   let clothLong = 0, clothWide = 0;
-  { const v = ham.bedNode.geometry.verts;
+  { const v = ham.restBed.verts;
     for (let k = 0; k < v.length; k += 3) if (Math.abs(v[k + 2]) < 0.3) clothLong = Math.max(clothLong, Math.abs(v[k]));
     for (let k = 0; k < v.length; k += 3) if (Math.abs(v[k]) < clothLong - 0.2) clothWide = Math.max(clothWide, Math.abs(v[k + 2])); }
   // Stowed gear as drawn, every visible triangle in the holder's frame: each part flat (no taller than it is wide),
@@ -6631,7 +6631,7 @@ const hammockChecks = async () => {
   const clothTriangles = (a) => {
     const turn = ham.bedNode.rotation.x;
     ham.bedNode.rotation.x = a; R.scene.updateWorld(root);
-    const g = ham.bedNode.geometry, v = g.verts, w = [], tris = [];
+    const g = ham.restBed, v = g.verts, w = [], tris = [];
     let lowest = Infinity;
     for (let k = 0; k < v.length; k += 3) {
       R.math.mat4.transformPoint(point, ham.bedNode.world, v[k], v[k + 1], v[k + 2]);
@@ -12696,7 +12696,7 @@ const hubHammockEntry = { name: "hub hammock entry", why: "regression: walking a
     // out to the spreader bars, the Ooga comes right up to the bed on foot (the hub may then lead it round), never into it.
     // The bed's drawn edges seen from above in its own frame (x along, z across the plan's n), for the gap from the
     // walker's 0.3 m footprint to the nearest drawn part while its feet are on the ground.
-    const g=H.bedNode.geometry,v=g.verts,C=BL.compactGeometry,cur=g.compactGeometry?C.createCursor(g):null,edges=[];
+    const g=H.restBed,v=g.verts,C=BL.compactGeometry,cur=g.compactGeometry?C.createCursor(g):null,edges=[];
     for(let f=0;f<g.faces.length;f++){const ids=(cur?C.readFace(g,f,cur):g.faces[f]).i;for(let k=0;k<ids.length;k++){const a0=ids[k]*3,b0=ids[(k+1)%ids.length]*3;edges.push(v[a0],v[a0+2],v[b0],v[b0+2]);}}
     const gapAt=(x,z)=>{const al=(x-p.x)*p.ux+(z-p.z)*p.uz,ac=(x-p.x)*p.nx+(z-p.z)*p.nz;let best=Infinity;
       for(let k=0;k<edges.length;k+=4){const dx=edges[k+2]-edges[k],dz=edges[k+3]-edges[k+1],l=dx*dx+dz*dz,t=l?Math.max(0,Math.min(1,((al-edges[k])*dx+(ac-edges[k+1])*dz)/l)):0;best=Math.min(best,Math.hypot(al-edges[k]-dx*t,ac-edges[k+1]-dz*t));}
@@ -31652,7 +31652,9 @@ const raceRigChecks = async () => {
     // Depth pre-pass "no image change" rendering core: the shared vertex and fragment
     // bytes the depth-only and plain variants derive from, plus the untouched shadow path.
     // Packed mesh vertices decode into aNormal and aColor at the top of main (was 6bed3532).
-    "4184e76c3501711766e5229bc42eb5d249eb88212b5a9cf3b9086ebe5767286d",
+    // The Mempool lake's swells, re-baselined on purpose: taller swells and a third chop wave, with overlapping
+    // impacts limited at 40 cm (pool-water.js WAVE_HEIGHT) instead of 18 (4184e76c to f52ddf00); only lake faces.
+    "f52ddf003b0ae84dd698facdd3fb70ba549d41f05e62314a213f369d0fe079a6",
     // The fragment shader, re-baselined on purpose: 487d99ac909f added uObjectSlab2 for the Factory roof bore
     // (b82d02f4 to f5f71f79), ab4ebcd sampled retained canvas surfaces (to c98cc70d) and e32e91e sampled the
     // foliage LOD atlas (to fb12fd53). Removing those additions would not restore b82d02f4 alone.
