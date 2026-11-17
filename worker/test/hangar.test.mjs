@@ -247,6 +247,8 @@ test("Tess in the hall: the island's queue, one turn at a time, and the host's p
   assert.equal(told.length, 0, "not while someone has her");
   assert.equal(hangar.parse({ t: "tess-pose", a: [1, 2] }), null);
   assert.equal(hangar.bucketOf("tess-guide"), "tess");
+  assert.equal(hangar.bucketOf("seat"), "seat", "the forklift's seat apart from the presses, so getting out is never dropped behind one");
+  assert.ok(hangar.buckets.relay.rate >= 2 * 1000 / 100, "room for the walkers' and the forklift's frames from one page");
 });
 
 test("a desk monitor turned on any page is counted for everyone", () => {
