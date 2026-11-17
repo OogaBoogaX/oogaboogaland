@@ -304,7 +304,11 @@
     title: "island guide", tour: "Island tour", ask: "Ask me about the island", greeted: "tessGreeted", toured: TOURED, about: (stop) => stop.id
   };
 
-  const create = ({ parent, input, fx, camera, pilot, visitor, world, hud, busy, coarse, quality, landing, targets = {}, guide = ISLAND_GUIDE }) => {
+  // `channel`: where a place other than the island shares her (the Lightning Jet Hangar's hall, `hangar-link.js`), in
+  // the island room's shape (`state` with `me`, `tessShared`, `tessGuide`, `room` and `connectionToken`, `sendTess`,
+  // `serverNow`), plus `drives()`, whether this page flies her while nobody has a turn, sending her pose for the others
+  // (`sendPose`); without one only the island shares her, over the room.
+  const create = ({ parent, input, fx, camera, pilot, visitor, world, hud, busy, coarse, quality, landing, targets = {}, guide = ISLAND_GUIDE, channel = null }) => {
     const G = guide, LN = G.lines, PLACE = G.stops, VIEWS = PLACE.map((stop) => viewOf(stop, pose())), SPOTS = PLACE.map(() => [0, 0, 0]);
     const TOUR = PLACE.map((stop, i) => legOf(i, stop.title, stop.lines, LN)), WORKS = G.work;
     const rig = BL.tess.create({ parent, input, fx, camera, kind: "tess", coarse, quality }), position = rig.position;
@@ -314,9 +318,11 @@
       login: null, newest: null, still: landing, settle: SETTLE, driven: null, asked: false, place: null, ask: null
     };
     const spot = { x: 0, y: 0, z: 0 }, home = pose(), from = pose(), to = pose();
-    const net = BL.net, sharedPose = new Array(12).fill(0);
+    const net = channel || BL.net, sharedPose = new Array(12).fill(0);
     let sharedToken = "", sharedConnection = "", queueShown = false, queueRoom = "", queueSeen = null, queueVisible = false, sharedDone = "", poseAt = 0, touchAt = 0, wasShared = false;
-    const shared = () => G === ISLAND_GUIDE && !!net.state.me && net.state.tessShared;
+    const shared = () => (G === ISLAND_GUIDE || !!channel) && !!net.state.me && net.state.tessShared;
+    // Whether this page flies her for everyone now: the channel's page that drives her, while nobody has a turn.
+    const driving = () => shared() && !!net.drives && net.drives() && !active() && !(queue() && queue().busy);
     const queue = () => net.state.tessGuide;
     const active = () => shared() && net.state.room === "live" && queue()?.phase === "active" && queue().token !== sharedDone && queue().until > net.serverNow();
     const queueAction = op => net.sendTess({ op, token: queue()?.token || "" });
@@ -744,9 +750,16 @@
       }
       rig.update(dt, elapsed); return true;
     };
+    let drove = false;
     const update = (dt, elapsed) => {
-      if (lender) { lender(rig, dt); rig.update(dt, elapsed); return; }
-      if (sharedUpdate(dt, elapsed)) return;
+      // Lent (a place's own moment for her), she is the place's, but where she is shared only on the page that flies her.
+      if (lender && (!channel || !shared() || driving())) { lender(rig, dt); rig.update(dt, elapsed); sendPose(elapsed, null); return; }
+      // Flying her for everyone between turns: her own work, greetings and lends, as alone; once a turn begins, back to
+      // following it.
+      const drive = driving();
+      if (drove && !drive) { if (state.holding) release(); rig.hush(); show("work"); }
+      drove = drive;
+      if (!drive && sharedUpdate(dt, elapsed)) return;
       go.hidden = false; go.disabled = false;
       yieldToMovement();
       const actor = visitor();
@@ -834,17 +847,22 @@
       if (actor) { const p = actor.root.position; rig.watch.x = p.x; rig.watch.y = p.y - actor.baseY + (actor.bodyHeight || 1.2) * 0.8; rig.watch.z = p.z; }
       else { rig.watch.x = camera.position.x; rig.watch.y = camera.position.y; rig.watch.z = camera.position.z; }
       rig.update(dt, elapsed);
-      if (active() && elapsed - poseAt >= 0.25) {
-        poseAt = elapsed;
-        sharedPose[0] = position.x; sharedPose[1] = position.y; sharedPose[2] = position.z; sharedPose[3] = rig.mode;
-        sharedPose[4] = rig.aim.x; sharedPose[5] = rig.aim.y; sharedPose[6] = rig.aim.z;
-        // Without a driven Ooga the local look target is the private camera. Observers keep a neutral look.
-        sharedPose[7] = actor ? rig.watch.x : position.x; sharedPose[8] = actor ? rig.watch.y : position.y; sharedPose[9] = actor ? rig.watch.z : position.z;
-        sharedPose[10] = actor && rig.watching ? 1 : 0; sharedPose[11] = rig.steady ? 1 : 0;
-        // Millimetres keep even the farthest island pose below the room's 256-character frame limit.
-        for (let i = 0; i < sharedPose.length; i++) sharedPose[i] = Math.round(sharedPose[i] * 1000) / 1000;
-        net.sendTess({ op: "pose", token: sharedToken, a: sharedPose });
-      }
+      sendPose(elapsed, actor);
+    };
+    // Her pose for the others, four times a second: on her turn's holder's page, or the page that flies her between.
+    const sendPose = (elapsed, actor) => {
+      const drive = driving();
+      if (!(active() || drive) || elapsed - poseAt < 0.25) return;
+      poseAt = elapsed;
+      sharedPose[0] = position.x; sharedPose[1] = position.y; sharedPose[2] = position.z; sharedPose[3] = rig.mode;
+      sharedPose[4] = rig.aim.x; sharedPose[5] = rig.aim.y; sharedPose[6] = rig.aim.z;
+      // Without a driven Ooga the local look target is the private camera. Observers keep a neutral look.
+      sharedPose[7] = actor ? rig.watch.x : position.x; sharedPose[8] = actor ? rig.watch.y : position.y; sharedPose[9] = actor ? rig.watch.z : position.z;
+      sharedPose[10] = actor && rig.watching ? 1 : 0; sharedPose[11] = rig.steady ? 1 : 0;
+      // Millimetres keep even the farthest island pose below the room's 256-character frame limit.
+      for (let i = 0; i < sharedPose.length; i++) sharedPose[i] = Math.round(sharedPose[i] * 1000) / 1000;
+      if (drive) net.sendPose(sharedPose);
+      else net.sendTess({ op: "pose", token: sharedToken, a: sharedPose });
     };
     let suspended = false;
     const suspend = () => {
