@@ -31,7 +31,7 @@
     // The optional games this Worker hosts that are switched on (worker/src/games.js, docs/game-host.md), comma-separated.
     // A kind left out is off: /api/me does not offer it and every page plays it on its own as before. Empty, every optional
     // game is off; the ghost hunt is not optional and always on.
-    "GAME_FEATURES": "",
+    "GAME_FEATURES": "hangar",
     // The audience's caps a zone (worker/src/audience.js `limitsOf`, docs/ooga-chat-operations.md): listeners (the proposed
     // launch envelope, for the staging matrix), cloud speakers (one a cloud seat), and the reaction fan-out budget in frames
     // a second.
