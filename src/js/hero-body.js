@@ -269,7 +269,11 @@
     }
     return Float64Array.from(lower.slice(0, -1).concat(upper.slice(0, -1)).flat());
   };
-  const hand = (side, skin, s = 1, wrist = [1.25, 1.05, 0.4]) => {
+  // The first finger out straight, as it points: from its knuckle down the back of the hand's own plane.
+  const POINTING = [[BACK, KNUCKLE], [BACK, -2.6], [-1.1, -2.8], [-0.62, -2.8], [-0.42, -2.6], [-0.42, ROOT], [BACK, ROOT]];
+  // `point` is the same fist with the finger beside the thumb out straight, the thumb lying across the other two.
+  // `lift` folds the thumb across that much higher up the fist, so its base runs less far down the palm.
+  const hand = (side, skin, s = 1, wrist = [1.25, 1.05, 0.4], point = false, lift = 0) => {
     const g = geometry(), inside = shade(skin, 0.5);
     // The hand: whole from the wrist down over the fingers' tips (the heel of the palm), and behind them below that
     // (the back of the hand) down to the knuckles, its corners easing to the fingers' where they root in it.
@@ -279,14 +283,15 @@
     loft(g, [[WRIST + 0.6, wrist[0], wrist[1], wrist[2]], [top, wrist[0], wrist[1], wrist[2]], ...(eased ? [[full, 1.6, 1.2, 0.45, 0, -0.1]] : []), [low, 1.6, 1.2, 0.45, 0, -0.1], [TIP + 0.04, 1.6, 0.9, 0.45, 0, -0.4],
       [ROOT, 1.6, 0.9, 0.15, 0, -0.4], [KNUCKLE, 1.6, 0.9, 0.15, 0, -0.4]], skin);
     // What shows in the cuts.
-    prism(g, inset(FINGER, 0.14).points, -1.35, 1.35, 0, 0, inside);
+    const first = side < 0 ? 0 : 2;
+    prism(g, inset(FINGER, 0.14).points, point && side < 0 ? -0.535 : -1.35, point && side > 0 ? 0.535 : 1.35, 0, 0, inside);
     // The fingers' edges are cut as the hand's are on its two sides, and only lightly where two fingers meet, so the
     // cuts between them stay narrow.
-    for (const [x0, x1, b0, b1] of [[-1.6, -0.55, 0.15, CUT], [-0.52, 0.52, CUT, CUT], [0.55, 1.6, CUT, 0.15]]) prism(g, FINGER, x0, x1, b0, b1, skin);
+    [[-1.6, -0.55, 0.15, CUT], [-0.52, 0.52, CUT, CUT], [0.55, 1.6, CUT, 0.15]].forEach(([x0, x1, b0, b1], i) => prism(g, point && i === first ? POINTING : FINGER, x0, x1, b0, b1, skin));
     // The cuts between the fingers start at the knuckles and close to a point just above them.
     for (const x of [-0.535, 0.535]) poly(g, [[x - 0.03, KNUCKLE - 0.02, BACK - 0.012], [x + 0.03, KNUCKLE - 0.02, BACK - 0.012], [x + 0.008, KNUCKLE + 0.22, BACK - 0.012], [x - 0.008, KNUCKLE + 0.22, BACK - 0.012]], inside, [0, 0, -1]);
     // The side of the hand runs on into the side of its first and last fingers, with no notch where they meet.
-    for (const x of [-1.6, 1.6]) poly(g, [[x, TIP + 0.05, 0.05], [x, TIP + 0.05, 0.65], [x, TIP - 0.2, 0.65], [x, TIP - 0.2, 0.05]], skin, [x, 0, 0]);
+    for (const x of [-1.6, 1.6]) if (!point || x * side < 0) poly(g, [[x, TIP + 0.05, 0.05], [x, TIP + 0.05, 0.65], [x, TIP - 0.2, 0.65], [x, TIP - 0.2, 0.05]], skin, [x, 0, 0]);
     // The thumb, one skin from wrist to tip with no joint showing, as thick as a finger: it rises out of the hand
     // at the wrist, swells out of the palm's half of the leading side as the ball of the thumb, folds under and
     // round the corner in an even bend, and lies across the first two fingers' tips, half way up them, sunk a
@@ -294,10 +299,13 @@
     // is part of the hand at any wrist: it starts inside the wrist and swells out of the hand's side below it, and
     // its inner half is sunk in the palm's corner all the way down, so no gap shows between the two.
     const S = side;
-    sweep(g, [[(wide(1.25) - 0.4) * S, 1.25, 0.55, S, 0, 0.36, 0.55, 0.22], [(wide(0.75) - 0.25) * S, 0.75, 0.7, 0.95 * S, 0.3, 0.58, 0.66, 0.26],
-      [(wide(0.2) - 0.18) * S, 0.2, 0.85, 0.97 * S, -0.25, 0.6, 0.64, 0.26], [1.52 * S, -0.25, 1.08, 0.8 * S, -0.6, 0.55, 0.58, 0.24],
-      [1.25 * S, -0.55, 1.36, 0.3 * S, -0.95, 0.5, 0.52, 0.22], [0.8 * S, -0.66, 1.46, 0, -1, 0.47, 0.47, 0.2],
-      [0.25 * S, -0.68, 1.44, 0, -1, 0.44, 0.43, 0.2], [-0.1 * S, -0.68, 1.4, 0, -1, 0.4, 0.38, 0.18]], skin);
+    // The thumb's stations as [how far in from the hand's side (or, from the fold on, where across), height, ...]:
+    // lifted, the base is drawn up toward the wrist and everything from the fold on rises with it.
+    const up = (y) => y + lift * Math.max(0, Math.min(1, (1.25 - y) / 1.5));
+    sweep(g, [[null, 0.4, 1.25, 0.55, S, 0, 0.36, 0.55, 0.22], [null, 0.25, 0.75, 0.7, 0.95 * S, 0.3, 0.58, 0.66, 0.26], [null, 0.18, 0.2, 0.85, 0.97 * S, -0.25, 0.6, 0.64, 0.26],
+      [1.52, 0, -0.25, 1.08, 0.8 * S, -0.6, 0.55, 0.58, 0.24], [1.25, 0, -0.55, 1.36, 0.3 * S, -0.95, 0.5, 0.52, 0.22], [0.8, 0, -0.66, 1.46, 0, -1, 0.47, 0.47, 0.2],
+      [0.25, 0, -0.68, 1.44, 0, -1, 0.44, 0.43, 0.2], [-0.1, 0, -0.68, 1.4, 0, -1, 0.4, 0.38, 0.18]]
+      .map(([x, inset, y, ...rest]) => [(x === null ? wide(up(y)) - inset : x) * S, up(y), ...rest]), skin);
     if (s !== 1) for (let i = 0; i < g.verts.length; i++) g.verts[i] *= s;
     return g;
   };
@@ -659,18 +667,23 @@
       const g = geometry(), z = 3.001;
       for (const side of [-1, 1]) {
         const X = (a, b) => [Math.min(a * side, b * side), Math.max(a * side, b * side)];
-        const [ex0, ex1] = t.wideEyes ? X(0.5, 3.5) : X(1.5, 3.5), ey0 = t.wideEyes ? 1 : 2;
+        const [wx0, wx1] = t.wideEyes ? X(0.5, 3.5) : X(1.5, 3.5), wy0 = t.wideEyes ? 1 : 2;
+        // `look.eyeSize` draws the whole eye, its pupil and glint with it, that much smaller or larger, from its edge
+        // nearer the nose and about its middle's height, so smaller eyes do not sit wider apart; `look.eyeIn` moves
+        // both eyes that many units toward the nose.
+        const es = t.eyeSize || 1, inner = side > 0 ? wx0 : wx1, cy = (wy0 + 4) / 2, ax = (x) => inner + (x - inner) * es - side * (t.eyeIn || 0), ay = (y) => cy + (y - cy) * es;
+        const ex0 = ax(wx0), ex1 = ax(wx1), ey0 = ay(wy0), ey1 = ay(4);
         if (!t.noBrow) { const [bx0, bx1] = X(0, 3.55); slab(g, rect(bx0, bx1, 4, 5.05, z, 0.18, 0.07 * side), F, 1, 0.9, hair, hairDk); }
         if (shut) {
-          slab(g, rect(ex0, ex1, ey0, 4, z), F, 0.1, 1, shade(skin, 0.9));
-          slab(g, rect(ex0, ex1, 2.55, 2.75, z + 0.1), F, 0.03, 1, shade(skin, 0.45));
+          slab(g, rect(ex0, ex1, ey0, ey1, z), F, 0.1, 1, shade(skin, 0.9));
+          slab(g, rect(ex0, ex1, ay(2.55), ay(2.75), z + 0.1), F, 0.03, 1, shade(skin, 0.45));
           continue;
         }
-        slab(g, rect(ex0, ex1, ey0, 4, z, 0.12), F, 0.06, 1, white, shade(white, 0.88), glow);
+        slab(g, rect(ex0, ex1, ey0, ey1, z, 0.12 * es), F, 0.06, 1, white, shade(white, 0.88), glow);
         if (t.noPupils) continue;
         const [px0, px1] = X(1.55, 2.55), gx = (px0 + px1) / 2 + 0.2;
-        slab(g, rect(px0, px1, 2.05, 3.05, z + 0.06, 0.1), F, 0.05, 1, "#17110d");
-        slab(g, rect(gx, gx + 0.28, 2.62, 2.9, z + 0.11), F, 0.03, 1, "#ffffff");
+        slab(g, rect(ax(px0), ax(px1), ay(2.05), ay(3.05), z + 0.06, 0.1 * es), F, 0.05, 1, "#17110d");
+        slab(g, rect(ax(gx), ax(gx + 0.28), ay(2.62), ay(2.9), z + 0.11), F, 0.03, 1, "#ffffff");
       }
       // A pig's snout (`look.snout`) in the nose's place: a short round muzzle, its flat end ahead, with two nostrils.
       const snout = () => {
