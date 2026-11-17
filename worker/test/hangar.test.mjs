@@ -24,6 +24,7 @@ test("the hall reads only the Jet's two words, and nothing else a page says", ()
   assert.equal(hangar.parse([]), false);
   assert.deepEqual(hangar.parse({ t: "jet", on: true, near: false, extra: 1 }), { t: "jet", on: true, near: false });
   assert.equal(hangar.parse({ t: "jet", on: 1, near: false }), null);
+  assert.deepEqual(hangar.parse({ t: "fire", by: 9 }), { t: "fire" }, "a press says nothing of who pressed: the hall knows whose page sent it");
   assert.equal(hangar.parse({ t: "shout" }), null);
 });
 
@@ -103,4 +104,19 @@ test("a lightning jumps to a room only while no room burns, and a restart picks 
   assert.deepEqual(h.state(), g.state());
   assert.equal(h.restore("{", t0), false);
   assert.equal(h.restore(JSON.stringify({ bag: ["nope"] }), t0), false, "a record it cannot read is refused");
+});
+
+test("one press starts the fire test for everyone, none while it runs or cools down, and no anomaly comes near it", () => {
+  const t0 = 1.7e12, g = hangar.create(t0, seeded(5));
+  g.join({ id: 1 }, t0); g.join({ id: 2 }, t0);
+  assert.equal(g.message({ id: 2 }, { t: "fire" }, t0 + S), true);
+  assert.deepEqual(g.state().test, { id: 1, at: t0 + S, by: 2 });
+  assert.equal(g.message({ id: 1 }, { t: "fire" }, t0 + 2 * S), false, "a second press while it runs does nothing");
+  const held = t0 + S + (HALL.FIRE.result + A.afterFire) * S, nextAt = g.debug.nextAt;
+  at(g, Math.max(t0, nextAt - 250), held - 250);
+  if (nextAt < held) assert.equal(g.state().anomaly, null, "an anomaly due during the test waits");
+  assert.equal(g.step(t0 + S + HALL.FIRE.ready * S), true);
+  assert.equal(g.state().test, null, "ready again after its cooldown");
+  g.debug.begin(t0 + 40 * S);
+  assert.equal(g.message({ id: 1 }, { t: "fire" }, t0 + 41 * S), false, "nor while an anomaly plays");
 });

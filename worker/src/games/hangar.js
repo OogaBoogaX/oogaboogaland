@@ -11,10 +11,15 @@
 // the bolt lands, the room) is named while it burns, which is longer than the lightning, so a page arriving after the
 // lightning still lights it from as far in as it has got.
 //
+// The static fire test: a page's press (`fire`) starts it for everyone (`test`: its id, when, and who pressed, whose page
+// alone hands the test its controls), never while one runs or cools down, nor while an anomaly plays; and no anomaly
+// starts while it runs or for a while after it hands back (`ANOMALY.afterFire`), as on a page alone.
+//
 // What it hears: `jet`, a page's word on whether anything it knows stands on the Jet (`on`) or within the shuffle's
 // reach (`near`), sent on a change. The lowrider never starts with anyone on the Jet nor the shuffle with anything near
 // (the next in the bag instead, or the failed start), and either stops for everyone the moment a page says so. Nothing
-// it keeps names a player but those two words, kept while their page is connected and never saved.
+// it keeps names a player but those two words, kept while their page is connected and never saved, and the test's
+// presser's account id, kept while the test runs and cools down.
 import "../../../src/js/hangar-hall.js";
 
 const HALL = globalThis.BL.hangarHall, A = HALL.ANOMALY;
@@ -23,6 +28,7 @@ const HALL = globalThis.BL.hangarHall, A = HALL.ANOMALY;
 const parse = (m) => {
   if (!m || typeof m !== "object" || Array.isArray(m) || typeof m.t !== "string") return false;
   if (m.t === "jet") return typeof m.on === "boolean" && typeof m.near === "boolean" ? { t: "jet", on: m.on, near: m.near } : null;
+  if (m.t === "fire") return { t: "fire" };
   return null;
 };
 
@@ -35,6 +41,9 @@ const create = (_now, random = Math.random) => {
   // at when the bolt lands) or null, and until when it burns; when the next anomaly may start; the last one's id; how
   // many kinds are left in the bag.
   let anomaly = null, fire = null, roomUntil = -Infinity, nextAt = 0, id = 0, left = 0;
+  // The static fire test running or cooling down ({ id, at, by }) or null.
+  let test = null;
+  const testing = (now) => !!test && now < test.at + (HALL.FIRE.result + A.afterFire) * 1000;
 
   const gap = () => (A.gap[0] + random() * (A.gap[1] - A.gap[0])) * 1000;
   const next = () => {
@@ -74,6 +83,11 @@ const create = (_now, random = Math.random) => {
     message: (p, m, now) => {
       const f = players.get(p.id);
       if (!f) return false;
+      if (m.t === "fire") {
+        if (test || anomaly) return false;
+        test = { id: ++id, at: now, by: p.id };
+        return true;
+      }
       f.on = m.on; f.near = m.near;
       if (anomaly && over(now)) { end(now); return true; }
       return false;
@@ -82,20 +96,21 @@ const create = (_now, random = Math.random) => {
     step: (now) => {
       let changed = false;
       if (fire && now >= roomUntil) { fire = null; changed = true; }
+      if (test && now >= test.at + HALL.FIRE.ready * 1000) { test = null; changed = true; }
       if (anomaly) {
         if (!over(now)) return changed;
         end(now);
         return true;
       }
-      if (now < nextAt) return changed;
+      if (now < nextAt || testing(now)) return changed;
       begin(now);
       return true;
     },
     running: () => players.size > 0,
-    state: () => ({ anomaly, room: fire }),
+    state: () => ({ anomaly, room: fire, test }),
     motion: () => false,
     /** What a restart picks up: the schedule, or null once the hall is empty. */
-    save: () => players.size ? JSON.stringify({ anomaly, fire, nextAt, roomUntil, id, bag, left }) : null,
+    save: () => players.size ? JSON.stringify({ anomaly, fire, test, nextAt, roomUntil, id, bag, left }) : null,
     /** Picks up a saved hall: its schedule goes on where it stopped, on the same clock. */
     restore: (data) => {
       let s = null;
@@ -105,6 +120,8 @@ const create = (_now, random = Math.random) => {
       anomaly = a && HALL.KINDS.includes(a.kind) && Number.isFinite(a.at) ? { id: a.id | 0, kind: a.kind, at: a.at, jump: !!a.jump, room: Math.min(0.999, Math.max(0, +a.room || 0)) } : null;
       const f = s.fire;
       fire = f && Number.isFinite(f.at) ? { id: f.id | 0, at: f.at, room: Math.min(0.999, Math.max(0, +f.room || 0)) } : null;
+      const x = s.test;
+      test = x && Number.isFinite(x.at) && Number.isSafeInteger(x.by) ? { id: x.id | 0, at: x.at, by: x.by } : null;
       nextAt = +s.nextAt || 0; roomUntil = Number.isFinite(s.roomUntil) ? s.roomUntil : -Infinity; id = s.id | 0;
       bag.splice(0, bag.length, ...s.bag);
       left = Math.min(bag.length, Math.max(0, s.left | 0));
@@ -117,7 +134,7 @@ const create = (_now, random = Math.random) => {
 export const hangar = {
   id: "hangar", code: 2, version: 1, venues: ["hall"], optional: true, tickMs: 250, stateEvery: 40,
   limits: { sockets: 32, chars: 256 },
-  buckets: { jet: { rate: 4, burst: 4 } },
-  bucketOf: () => "jet",
+  buckets: { jet: { rate: 4, burst: 4 }, press: { rate: 1, burst: 2 } },
+  bucketOf: (t) => t === "jet" ? "jet" : "press",
   parse, create
 };
