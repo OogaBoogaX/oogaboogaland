@@ -30,6 +30,7 @@ const TYPES = {
   ".jpg": "image/jpeg",
   ".webp": "image/webp",
   ".mp3": "audio/mpeg",
+  ".m4a": "audio/mp4",
   ".xml": "application/xml; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
   ".mp4": "video/mp4",
@@ -91,7 +92,7 @@ function readOrNull(path) {
 }
 
 function respond(req, res, path, body) {
-  const extension = extname(path), response = previewResponse(body, TYPES[extension] || "application/octet-stream", req, extension === ".mp4" || extension === ".webm");
+  const extension = extname(path), response = previewResponse(body, TYPES[extension] || "application/octet-stream", req, extension === ".mp4" || extension === ".webm" || extension === ".m4a");
   res.writeHead(response.status, response.headers);
   res.end(response.body);
 }

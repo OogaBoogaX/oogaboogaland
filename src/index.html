@@ -324,6 +324,10 @@
         </svg>
       </button>
       <nav class="presets" aria-label="Timechain Sphere room" data-scene="timechain" hidden>
+        <button type="button" data-action="lecture-programme" id="lecture-programme" hidden>Lectures</button>
+        <button type="button" data-action="lecture-back" id="lecture-back" aria-label="Back a section" title="Back a section" hidden>&#x23EE;</button>
+        <button type="button" data-action="lecture-toggle" id="lecture-toggle" hidden>Pause</button>
+        <button type="button" data-action="lecture-next" id="lecture-next" aria-label="On a section" title="On a section" hidden>&#x23ED;</button>
         <button type="button" class="leave" data-action="leave">Leave<span> room</span></button>
       </nav>
       <nav class="presets" aria-label="₿IFRÖST" data-scene="bifrost" hidden>
@@ -2208,6 +2212,16 @@ Open the pull request from my fork as a draft and keep it draft while building o
         <button type="button" class="ghost-spectate-next" id="ghost-spectate-next" aria-label="Next player">Next ▶</button>
       </div>
     </div>
+    <section class="lecture-quiz" id="lecture-quiz" aria-labelledby="lecture-quiz-q" hidden>
+      <p class="lecture-quiz-kicker" id="lecture-quiz-kicker">Question</p>
+      <h3 id="lecture-quiz-q"></h3>
+      <ol class="lecture-quiz-options">
+        <li><button type="button" data-action="lecture-answer-1"><kbd>1</kbd><span></span></button></li>
+        <li><button type="button" data-action="lecture-answer-2"><kbd>2</kbd><span></span></button></li>
+        <li><button type="button" data-action="lecture-answer-3"><kbd>3</kbd><span></span></button></li>
+        <li><button type="button" data-action="lecture-answer-4"><kbd>4</kbd><span></span></button></li>
+      </ol>
+    </section>
     <section class="hangar-sound" id="hangar-sound" aria-label="Hangar sound" hidden>
       <div class="hangar-sound-head">
         <h3>Sound</h3>
@@ -2621,9 +2635,15 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/timechain-room-party.js" data-defer="timechain"></script>
   <script src="js/timechain-room-workout.js" data-defer="timechain"></script>
   <script src="js/timechain-room-mining.js" data-defer="timechain"></script>
+  <script src="js/lecture-kit.js" data-defer="timechain"></script>
+  <script src="js/lecture-btc.js" data-defer="timechain"></script>
+  <script src="js/lecture-slides.js" data-defer="timechain"></script>
+  <script src="js/lecture-player.js" data-defer="timechain"></script>
+  <script src="js/lecturer.js" data-defer="timechain"></script>
   <script src="js/timechain-room-lecture.js" data-defer="timechain"></script>
   <script src="js/timechain-room-theater.js" data-defer="timechain"></script>
   <script src="js/timechain-interior.js" data-defer="timechain"></script>
+  <script src="js/lecture-btc-01.js" data-defer="lecture-btc-a"></script>
   <script src="js/routes.js"></script>
   <script src="js/router.js"></script>
   <script src="js/poker-rules.js" data-defer="poker"></script>

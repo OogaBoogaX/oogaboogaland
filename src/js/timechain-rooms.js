@@ -29,7 +29,7 @@
   // null for a number with no room behind it yet.
   const KINDS = [
     { kind: "conference", name: "Conference Room", tag: "Live block and mining charts round the dome", R: 10.5 },
-    { kind: "lecture", name: "Lecture Hall", tag: "Lounge chairs on broad terraces under a dome of screens", R: 15 },
+    { kind: "lecture", name: "Lecture Hall", tag: "Lectures on the dome, lounge chairs on broad terraces", R: 15 },
     { kind: "mining", name: "The Mining Museum", tag: "From Satoshi's CPU to today's ASICs", R: 15 },
     { kind: "temple", name: "Satoshi's Temple", tag: "A meditation temple; the bell rings every block", R: 15 },
     { kind: "workout", name: "Proof of Work-out", tag: "Pedal to find a fake block", R: 12 },
