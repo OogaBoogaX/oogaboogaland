@@ -1228,7 +1228,10 @@
       addChild(work.crate, crateTrim, work.sling, work.slack);
       if (work.spot) addChild(root, work.spot);
       s.glass.push(work.crate, crateTrim);
-      s.crane = BL.hangarCrane.create({ C, nodes: work, root, powered: () => s.anomaly.powered && !s.network.out, under: underLoad, cue: (name, x, y, z) => audio && audio.craneCue(name, x, y, z) });
+      s.crane = BL.hangarCrane.create({ C, nodes: work, root, powered: () => s.anomaly.powered && !s.network.out, under: underLoad, cue: (name, x, y, z) => {
+        if (s.relay) s.relay.record("crane.cue", [name, x, y, z]);
+        if (audio) audio.craneCue(name, x, y, z);
+      } });
       s.farCrane = crane(C.far, g.farTrolley);
     }
     // The forklift, parked on the runway by the steps.
@@ -1726,6 +1729,9 @@
     for (const d of scene.roomDoors) relayTree(d);
     for (const n of scene.meltdown.nodes) relayTree(n);
     scene.relay.values(scene.meltdown.shared); scene.relay.refs([...scene.crew, ...scene.meltdown.refs]);
+    // The crane, by its axes (eased) and its job's place, posed here from them, and its cues.
+    scene.relay.values(scene.crane.shared, true); scene.relay.values(scene.crane.flags);
+    scene.relay.on("crane.cue", (name, x, y, z) => { if (audio) audio.craneCue(name, x, y, z); });
     // The terminals by the runway and the film show they start (`hangar-terminals.js`), its mood page reading hers.
     scene.terminals = BL.hangarTerminals.create({ root, audio, mood: () => scene.sis.mood, toast: hud.toast,
       ask: () => scene.link.send({ t: "film" }), done: (id) => scene.link.send({ t: "film", done: id }) });
@@ -1933,6 +1939,7 @@
     s.puppet = puppet;
     s.sis.puppet = puppet;
     s.meltdown.puppet = puppet;
+    s.crane.puppet = puppet;
     if (puppet) s.relay.play(L.serverNow());
     s.anomaly.follow(L.following);
     s.fire.follow(L.following);
