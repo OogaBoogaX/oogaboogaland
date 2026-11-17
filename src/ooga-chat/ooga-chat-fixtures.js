@@ -161,6 +161,8 @@
     const blocked = () => voice === "blocked" && !(navigator.userActivation && navigator.userActivation.hasBeenActive);
     const rtc = {
       PeerConnection,
+      // Synthetic tracks are records, not browser MediaStreams; exercise the element playback path here.
+      AudioContext: null,
       async getUserMedia() {
         if (voice === "denied") throw new DOMException("Permission denied", "NotAllowedError");
         const mic = track();

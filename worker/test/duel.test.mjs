@@ -76,6 +76,19 @@ test("duel-v1 is advertised, and a challenge accepted starts a duel everyone hea
   assert.equal(last(d, "list").duels[0].id, start.id);
 });
 
+test("a challenge made by a blow says so, and the blow answered starts the duel", async () => {
+  const h = host();
+  await h.restored();
+  const a = await h.join(1, "a", 0), b = await h.join(2, "b", 4);
+  h.say(a, { t: "duel", op: "challenge", to: 2, hit: true });
+  assert.equal(last(b, "challenged").hit, true);
+  h.say(b, { t: "duel", op: "challenge", to: 1, hit: true });
+  assert.deepEqual([last(a, "start").a, last(a, "start").b], [1, 2]);
+  const c = await h.join(3, "c", 8), e = await h.join(4, "e", 10);
+  h.say(c, { t: "duel", op: "challenge", to: 4 });
+  assert.equal(last(e, "challenged").hit, undefined, "a challenge asked for carries no blow");
+});
+
 test("hits wait for the countdown, need range, take the room's damage and end in defeat", async () => {
   const h = host();
   await h.restored();

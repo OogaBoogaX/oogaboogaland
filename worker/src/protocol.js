@@ -43,8 +43,9 @@ import "../../src/js/reaction-policy.js";
 //                                                primary, 2 the gun), 4 while aiming, plus the gun's rounds (0-31) times 8
 //                 { t: "shot", a }               a banana the driven Ooga fired: [from x, y, z, to x, y, z]
 //                 { t: "swing" }                 the driven Ooga's melee strike
-//                 { t: "duel", op, to?, kind? }  a duel (duel-rules.js, duel.js): `challenge`, `accept` or `decline` player
-//                                                `to`, `cancel` this page's challenge, `forfeit`, or a `hit` of `kind`
+//                 { t: "duel", op, to?, kind?, hit? }  a duel (duel-rules.js, duel.js): `challenge` (`hit` true when made by
+//                                                landing a blow), `accept` or `decline` player `to`, `cancel` this page's
+//                                                challenge, `forfeit`, or a `hit` of `kind`
 //                 { t: "chat", text, clientId? }            a line for Ooga Chat (see Chat below)
 //                 { t: "pm", op, to, d?, n? }   a private conversation with player `to` (see Private below): `invite`,
 //                                               `accept`, `decline`, `block`, `end`, or `data` with a sealed frame `d`
@@ -72,7 +73,7 @@ import "../../src/js/reaction-policy.js";
 //                 shot { id, a }, swing { id }   another player's shot or strike, to the players in their zone
 //                 duel { op, ... }           duels (duel.js): to everyone start { id, a, b, x, z, at, hp, now }, hp { id, hp, by,
 //                                            kind } and end { id, winner, loser, reason }; list { duels } after welcome; to
-//                                            one page challenged { from, exp }, challenging { to, exp }, refused { to, reason },
+//                                            one page challenged { from, exp, hit? }, challenging { to, exp }, refused { to, reason },
 //                                            declined { from }, withdrawn { from }, and end { id: 0, reason: "lost" }
 //                 release { name, reason }   the Ooga this socket claimed is not, or no longer, its to drive
 //                 host { id, followers }     who runs the NPCs now (0 for nobody) and how many pages follow

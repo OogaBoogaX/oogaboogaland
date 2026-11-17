@@ -84,6 +84,22 @@ const harness = async ({ features = "bridge,outdoor", saved = new Map() } = {}) 
   return h;
 };
 
+test("the public Main Island conversation spans the surface, outer islets and intervening air, but stops below them", async () => {
+  for (const zone of ["outside", "bifrost", "sphere", "rainforest", "between"]) {
+    const h = await harness(), ws = await h.join(1, "a", zone);
+    await h.outdoor(ws, { op: "enter", epoch: 1, scope: "main" });
+    await h.settle();
+    assert.deepEqual(h.audience.calls.at(-1).speakers.map((s) => [s.id, s.zone]), [["gh:1", "main"]], zone);
+    await h.send(ws, { t: "blend", to: zone === "rainforest" ? "rainforest-under" : "hq", k: 1 });
+    await h.settle();
+    assert.deepEqual(h.audience.calls.at(-1).speakers, [], `${zone}: a descent removes the public source`);
+    await h.send(ws, { t: "blend", to: null, k: 0 });
+    await h.outdoor(ws, { op: "enter", epoch: 2, scope: "main" });
+    await h.settle();
+    assert.equal(h.audience.calls.at(-1).speakers.length, 1, `${zone}: the surface opens again`);
+  }
+});
+
 test("the Room admits a scope only where its own view agrees, and refuses everything else with a reason", async () => {
   const h = await harness();
   const a = await h.join(1, "a");

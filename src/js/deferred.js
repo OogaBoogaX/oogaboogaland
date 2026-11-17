@@ -19,6 +19,8 @@
   // How each group shows it has arrived: the module that runs last in it.
   const PRESENT = { "cloud-hopper": () => !!BL.cloudHopper, "terrain-cache": () => !!BL.terrainCache, "lab-wallpaper": () => !!BL.labWallpaper?.src, canvas: () => !!BL.canvasRenderer, timechain: () => !!BL.timechainInterior, dsb: () => !!BL.dsbCollision, arcade: () => !!BL.carnivalAudio, poker: () => !!BL.pokerHud, drop: () => !!BL.dropAudio,
     "block-viewer": () => !!BL.blockViewer, race: () => !!BL.raceAudio, mine: () => !!BL.mineCrew, orbit: () => !!BL.rocketAudio,
+    // Each lecture of the Lecture Hall's course, a group of its own (lecture-btc.js names them a to n).
+    ...Object.fromEntries([..."abcdefghijklmn"].map((k, i) => [`lecture-btc-${k}`, () => !!(BL.lectures && BL.lectures.get(`btc-${String(i + 1).padStart(2, "0")}`))])),
     // HALLOWEEN: the arcade's ghost hunt, and each track of its playlist.
     halloween: () => !!BL.halloween, ...Object.fromEntries(["boss", "colt", "martial", "nightmare", "synthed", "nr"].map((k) => [`halloween-track-${k}`, () => !!(BL.ghostMusic && BL.ghostMusic[k])])) };
   // Only scene implementation groups depend on a base group; no base group depends on a scene shell. The Lightning Jet

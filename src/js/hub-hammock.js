@@ -56,6 +56,10 @@
   // one-frame jolt) and then relaxes over LEAN_TAU seconds while the swing it lifted carries on.
   const BUMP_RADIUS = 0.3, BUMP_REARM = BUMP_RADIUS + 0.5, BUMP_RISE = 0.6, BUMP_GAIN = STEP / 7, BUMP_MIN = 0.5, BUMP_TELEPORT = 2 * 7.75 * 1.5;
   const LEAN = 0.2, LEAN_TAU = 0.45, LEAN_RISE = 0.12, SHOVE_RUN = 1.5;
+  // A body held against the bed leans it along every frame it presses, LEAN_PRESS a frame for each m/s it pushes into it
+  // (a walk holds it about a quarter of a radian over), and the cloth makes way round it from PRESS_FEET over its feet
+  // (lower stays under it, so an Ooga can still stand on the empty cloth) to PRESS_TOP.
+  const LEAN_PRESS = 0.0013, PRESS_FEET = 0.12, PRESS_TOP = 1.6;
   const easeInOut = (x) => x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x);
   // The cloth grid and radii of its spreaders, edge cords and suspension rings.
   const BED_NX = 14, BED_NZ = 4, SPREADER_R = 0.035, SPREADER_KNUCKLE = 1.14, EDGE_R = 0.016, CORD_R = 0.011, DROP_R = 0.022;
@@ -75,6 +79,24 @@
   // the ground. Current pages send their rest state explicitly; this inference is only for pages that omit it.
   const REST_NEAR = 0.4, REST_LOW = 0.05, REST_HIGH = 0.9;
   const ROPE = "#c9a36a", CORD = "#7a5a32";
+  // The strings: each suspension rope is ROPE_LINKS segments hung as a string between its tie and its ring, and each end
+  // cord FAN_LINKS between the spreader and the ring (Verlet), SLACK longer than the straight line, so they sag, lag the
+  // swing and jiggle when the bed is knocked (ROPE_JOLT a step of the swing's count).
+  // The fabric: the cloth is a grid of CLOTH_X by CLOTH_Z cells of points held by stretch, shear and bend links (Verlet,
+  // CLOTH_ITER passes a step of CLOTH_STEP), pinned at the spreaders, pulled to the true down as the bed swings (so it lags
+  // and hangs off the swing), held loosely to its woven rest shape (CLOTH_MEMORY), pushed out of the way by the occupant's
+  // body (BODY_R round it, along BODY_HALF either side of the seat, so the cloth sags under it and wraps up its sides) and by
+  // any body walking into it, and set rippling by a push, a round or a landing (CLOTH_JOLT). Its mesh is `dynamic`, its
+  // vertices rewritten each frame. The shell, the seat and the gear under it keep the rest shape's places.
+  // The suspension ropes carry the bed, so they run taut: a straight line ROPE_SAG low in the middle, wobbling as a
+  // damped spring (ROPE_K, ROPE_DAMP) across and up and down when knocked, settling straight again.
+  const ROPE_SAG = 0.025, ROPE_K = 60, ROPE_DAMP = 3.5;
+  const ROPE_LINKS = 8, FAN_LINKS = 4, SLACK = 1.01, ROPE_ITER = 12, ROPE_DRAG = 0.985, ROPE_JOLT = 1.6, GRAVITY = -9.81;
+  const CLOTH_X = BED_NX, CLOTH_Z = 6, CLOTH_STEP = 1 / 120, CLOTH_ITER = 6, CLOTH_DRAG = 0.985, CLOTH_MEMORY = 8, CLOTH_JOLT = 0.012;
+  // The weave is longer than its rest shape by CLOTH_SLACK_X along the bed and CLOTH_SLACK_Z across it, so it hangs in a
+  // deeper bowl than it was drawn, gravity draping it between the spreaders.
+  const CLOTH_SLACK_X = 1.02, CLOTH_SLACK_Z = 1.07;
+  const BODY_R = 0.22, BODY_HALF = 0.78, BODY_SINK = 0.03, WALKER_R = 0.32, WALKERS = 8;
   const WEAVE = ["#b48a52", "#9c7443", "#b48a52", "#c25d3a", "#d7a95a", "#c25d3a"].map(hexToRgb), WEAVE_UNDER = hexToRgb("#6e5233");
 
   // The virtual sway axis height at t between the tree attachments.
@@ -243,30 +265,53 @@
   // virtual axis): woven cloth cradled between bamboo spreaders, with cords gathering at
   // each suspension ring and a cord along each edge.
   const bedGeometry = (p) => {
+    const M = BL.models, J = BL.hubModels, round = [];
+    for (const e of [-1, 1]) {
+      const x = e * BED_LEN / 2, y = p.endY + 0.02;
+      round.push(J.bamboo(x, y, -BED_W / 2 - 0.1, x, y, BED_W / 2 + 0.1, SPREADER_R, "#cdb06a"));
+    }
+    return M.shaded(round);
+  };
+  // The bed as it lies at rest, cloth, edge cords and spreaders, never drawn: the lowest the cloth lies while the bed is
+  // occupied (`clothStep` holds it there), so the gear stowed under an occupant (`clothAt`, from `clothY`) stays clear of it.
+  const restBedGeometry = (p) => {
     const M = BL.models, J = BL.hubModels, NX = BED_NX, NZ = BED_NZ, cloth = M.geometry(), v = cloth.verts, ids = [];
     for (let i = 0; i <= NX; i++) for (let j = 0; j <= NZ; j++) {
       const x = (i / NX - 0.5) * BED_LEN, z = (j / NZ - 0.5) * BED_W;
       v.push(x, clothY(p, x, z), z);
       ids.push(v.length / 3 - 1);
     }
-    // Both faces of every cell: the weave's stripes run across the bed on top, a dark underside below.
     for (let i = 0; i < NX; i++) for (let j = 0; j < NZ; j++) {
       const a = ids[i * (NZ + 1) + j], b = ids[(i + 1) * (NZ + 1) + j], c = ids[(i + 1) * (NZ + 1) + j + 1], d = ids[i * (NZ + 1) + j + 1];
       cloth.faces.push({ i: [a, d, c, b], color: WEAVE[(i + (j & 1)) % WEAVE.length], emissive: 0 });
       cloth.faces.push({ i: [a, b, c, d], color: WEAVE_UNDER, emissive: 0 });
     }
-    const ends = [-1, 1], round = [];
-    for (const e of ends) {
-      const x = e * BED_LEN / 2, y = p.endY + 0.02;
-      round.push(J.bamboo(x, y, -BED_W / 2 - 0.1, x, y, BED_W / 2 + 0.1, SPREADER_R, "#cdb06a"));
-    }
-    return J.withJungle(M.shaded(round, [cloth]), (g) => {
+    return J.withJungle(M.shaded([bedGeometry(p)], [cloth]), (g) => {
       for (const z of [-BED_W / 2, BED_W / 2]) {
         const edge = [];
         for (let i = 0; i <= NX; i += 2) { const x = (i / NX - 0.5) * BED_LEN; edge.push([x, clothY(p, x, z) + 0.012, z]); }
         J.liana(g, edge, EDGE_R, EDGE_R, CORD);
       }
     });
+  };
+  // A mesh that draws nothing, for the straight helper lines (`node`, `fan`) the drawn strings follow: kept in the
+  // scene so their world transforms stay current.
+  const NOTHING = { verts: [0, 0, 0], faces: [], lines: [] };
+  // The fabric's mesh: the cloth grid twice over (its top weave and dark underside, each with its own vertices so its
+  // smooth normals face its own way), the rows along each edge the dark hem of the edge cords, and two corners of a
+  // box round anything it can reach, no face's, so its bounds stay fixed. `dynamic`: rewritten each frame.
+  const clothMesh = () => {
+    const NX = CLOTH_X, NZ = CLOTH_Z, n = (NX + 1) * (NZ + 1), verts = new Array(n * 6 + 6).fill(0), faces = [];
+    const at = (i, j) => i * (NZ + 1) + j;
+    for (let i = 0; i < NX; i++) for (let j = 0; j < NZ; j++) {
+      const a = at(i, j), b = at(i + 1, j), c = at(i + 1, j + 1), d = at(i, j + 1), hem = j === 0 || j === NZ - 1;
+      faces.push({ i: [a, d, c, b], color: hem ? hexToRgb(CORD) : WEAVE[(i + (j & 1)) % WEAVE.length], emissive: 0 });
+      faces.push({ i: [n + a, n + b, n + c, n + d], color: WEAVE_UNDER, emissive: 0 });
+    }
+    const pad = n * 6;
+    verts[pad] = -BED_LEN; verts[pad + 1] = -2; verts[pad + 2] = -BED_W * 1.5;
+    verts[pad + 3] = BED_LEN; verts[pad + 4] = 1; verts[pad + 5] = BED_W * 1.5;
+    return { verts, faces, lines: [], smooth: true, dynamic: true, revision: 0 };
   };
 
   // Invisible collision shell around the swinging cloth; the lashings belong to the palms.
@@ -318,6 +363,107 @@
     // Its +z is the plan's `n`; the seats face +z when `side` is 1 and -z when it is -1, and the swing turns by `side`.
     const bedNode = createNode({ geometry: bedGeometry(p), position: { x: p.x, y: p.y, z: p.z }, rotation: { x: 0, y: p.yaw, z: 0 }, sightHidden: true });
     addChild(root, ridgeNode); addChild(root, bedNode);
+    // The fabric (`clothMesh`): its points now (P) and a step ago (O), at rest (CLOTH_REST), and its links.
+    const CN = (CLOTH_X + 1) * (CLOTH_Z + 1), cloth = clothMesh(), clothNode = createNode({ geometry: cloth, sightHidden: true });
+    addChild(bedNode, clothNode);
+    const P = new Float64Array(CN * 3), O = new Float64Array(CN * 3), CLOTH_REST = new Float64Array(CN * 3);
+    for (let i = 0; i <= CLOTH_X; i++) for (let j = 0; j <= CLOTH_Z; j++) {
+      const k = 3 * (i * (CLOTH_Z + 1) + j), x = (i / CLOTH_X - 0.5) * BED_LEN, z = (j / CLOTH_Z - 0.5) * BED_W;
+      CLOTH_REST[k] = P[k] = O[k] = x; CLOTH_REST[k + 1] = P[k + 1] = O[k + 1] = clothY(p, x, z); CLOTH_REST[k + 2] = P[k + 2] = O[k + 2] = z;
+    }
+    const linkList = [];
+    for (let i = 0; i <= CLOTH_X; i++) for (let j = 0; j <= CLOTH_Z; j++) {
+      const a = i * (CLOTH_Z + 1) + j;
+      for (const [di, dj] of [[1, 0], [0, 1], [1, 1], [1, -1], [2, 0], [0, 2]]) {
+        const ii = i + di, jj = j + dj;
+        if (ii > CLOTH_X || jj < 0 || jj > CLOTH_Z) continue;
+        const b = ii * (CLOTH_Z + 1) + jj;
+        linkList.push(a, b, Math.hypot((CLOTH_REST[3 * a] - CLOTH_REST[3 * b]) * CLOTH_SLACK_X, CLOTH_REST[3 * a + 1] - CLOTH_REST[3 * b + 1], (CLOTH_REST[3 * a + 2] - CLOTH_REST[3 * b + 2]) * CLOTH_SLACK_Z));
+      }
+    }
+    const LA = new Int32Array(linkList.length / 3), LB = new Int32Array(linkList.length / 3), LR = new Float64Array(linkList.length / 3);
+    for (let k = 0; k < LA.length; k++) { LA[k] = linkList[3 * k]; LB[k] = linkList[3 * k + 1]; LR[k] = linkList[3 * k + 2]; }
+    // Bodies pressing on it this frame, in the bed's frame: x, feet, z, top, radius.
+    const walkers = new Float64Array(WALKERS * 5);
+    let walkerCount = 0, clothTime = 0, frameDt = 0;
+    const local = new Float64Array(3);
+    const pinned = (k) => { const i = (k / (CLOTH_Z + 1)) | 0; return i === 0 || i === CLOTH_X; };
+    // A body standing at world (x, feet, z), `height` tall: if it reaches the cloth, the cloth makes way round it.
+    const press = (x, feet, z, height) => {
+      if (walkerCount >= WALKERS) return;
+      mat4.transformPoint(local, bedInverse, x, feet, z);
+      if (Math.abs(local[0]) > BED_LEN / 2 + WALKER_R || Math.abs(local[2]) > BED_W / 2 + WALKER_R) return;
+      const w = 5 * walkerCount++;
+      walkers[w] = local[0]; walkers[w + 1] = local[1] + PRESS_FEET; walkers[w + 2] = local[2]; walkers[w + 3] = local[1] + height; walkers[w + 4] = WALKER_R;
+    };
+    // A blow to the fabric: every free point thrown `speed` (m/s, down positive) times its distance from the spreaders' pull.
+    const ruffle = (speed, side) => {
+      for (let k = 0; k < CN; k++) {
+        if (pinned(k)) continue;
+        const i = (k / (CLOTH_Z + 1)) | 0, w = Math.sin(Math.PI * i / CLOTH_X) * speed * CLOTH_JOLT;
+        O[3 * k + 1] += w; O[3 * k + 2] += side * w * 0.6;
+      }
+    };
+    const clothStep = (h, gy, gz, held) => {
+      const s = seats[0] && p.seats[0], bx = s ? s.at : 0, by = s ? s.y + BODY_R - BODY_SINK : 0;
+      const mem = CLOTH_MEMORY * h * h;
+      for (let k = 0; k < CN; k++) {
+        const b = 3 * k;
+        if (pinned(k)) { P[b] = O[b] = CLOTH_REST[b]; P[b + 1] = O[b + 1] = CLOTH_REST[b + 1]; P[b + 2] = O[b + 2] = CLOTH_REST[b + 2]; continue; }
+        for (let c = 0; c < 3; c++) {
+          const v = (P[b + c] - O[b + c]) * CLOTH_DRAG;
+          O[b + c] = P[b + c];
+          P[b + c] += v + (CLOTH_REST[b + c] - P[b + c]) * mem + (c === 1 ? gy : c === 2 ? gz : 0) * h * h;
+        }
+      }
+      for (let it = 0; it < CLOTH_ITER; it++) {
+        for (let k = 0; k < LA.length; k++) {
+          const a = 3 * LA[k], b = 3 * LB[k], dx = P[b] - P[a], dy = P[b + 1] - P[a + 1], dz = P[b + 2] - P[a + 2];
+          const d = Math.hypot(dx, dy, dz) || 1e-9, pa = pinned(LA[k]), pb = pinned(LB[k]);
+          if (pa && pb) continue;
+          const diff = (d - LR[k]) / d, wa = pa ? 0 : pb ? 1 : 0.5, wb = pb ? 0 : pa ? 1 : 0.5;
+          P[a] += dx * diff * wa; P[a + 1] += dy * diff * wa; P[a + 2] += dz * diff * wa;
+          P[b] -= dx * diff * wb; P[b + 1] -= dy * diff * wb; P[b + 2] -= dz * diff * wb;
+        }
+        for (let k = 0; k < CN; k++) {
+          if (pinned(k)) continue;
+          const b = 3 * k;
+          // The occupant: out of a capsule along the bed round where it lies, sideways and down, so the cloth wraps it.
+          if (held) {
+            const ax = Math.max(bx - BODY_HALF, Math.min(bx + BODY_HALF, P[b])), dy = P[b + 1] - by, dz = P[b + 2], dx = P[b] - ax;
+            const d = Math.hypot(dx, dy, dz);
+            if (d < BODY_R && d > 1e-6) { const k2 = BODY_R / d; P[b] = ax + dx * k2; P[b + 1] = by + dy * k2; P[b + 2] = dz * k2; }
+            // Under the body it carries it: the cloth there is drawn up to the body's underside, so it hugs it.
+            else if (Math.abs(dx) < 1e-9 && Math.abs(dz) < BODY_R && dy < 0) {
+              const under = by - Math.sqrt(BODY_R * BODY_R - dz * dz);
+              if (P[b + 1] < under) P[b + 1] += (under - P[b + 1]) * 0.5;
+            }
+          }
+          // Occupied, the cloth never lies lower than at rest, over the gear stowed under it.
+          if (held && P[b + 1] < CLOTH_REST[b + 1]) P[b + 1] = CLOTH_REST[b + 1];
+          // A walker: out of its upright cylinder, across the ground.
+          for (let w = 0; w < walkerCount; w++) {
+            const o = 5 * w;
+            if (P[b + 1] < walkers[o + 1] || P[b + 1] > walkers[o + 3]) continue;
+            const dx = P[b] - walkers[o], dz = P[b + 2] - walkers[o + 2], d = Math.hypot(dx, dz), r = walkers[o + 4];
+            if (d < r && d > 1e-6) { P[b] = walkers[o] + dx * r / d; P[b + 2] = walkers[o + 2] + dz * r / d; }
+          }
+        }
+      }
+    };
+    const stepCloth = (dt, held) => {
+      if (dt <= 0) return;
+      // The true down in the bed's frame, which turns by `angle` about +x.
+      const a = angle * p.side, gy = GRAVITY * Math.cos(a), gz = -GRAVITY * Math.sin(a);
+      clothTime = Math.min(clothTime + dt, CLOTH_STEP * 4);
+      while (clothTime >= CLOTH_STEP) { clothStep(CLOTH_STEP, gy, gz, held); clothTime -= CLOTH_STEP; }
+      walkerCount = 0;
+      const v = cloth.verts, n = CN * 3;
+      for (let k = 0; k < n; k++) { v[k] = P[k]; v[n + k] = P[k]; }
+      // The underside a hair below the top, so the two never fight.
+      for (let k = 1; k < n; k += 3) v[n + k] -= 0.004;
+      cloth.revision++;
+    };
     solids.add(ridgeNode);
     const { quat, mat4 } = BL.math;
     const ropeGeometry = BL.hubModels.withJungle(BL.models.geometry(), (g) => BL.hubModels.liana(g, [[0, 0, 0], [0, 1, 0]], 0.03, 0.03, ROPE));
@@ -350,13 +496,91 @@
         addChild(root, wrap);
       }
       const fan = CORD_Z.map((z) => {
-        const cord = createNode({ geometry: fanGeometry, quaternion: quat.create(), sightHidden: true,
+        const cord = createNode({ geometry: NOTHING, quaternion: quat.create(), sightHidden: true,
           position: { x: end * BED_LEN / 2, y: p.endY + 0.03, z } });
         addChild(bedNode, cord);
         return cord;
       });
-      return { node, end, tree, wrap, local, fan, ring: new Float64Array(3) };
+      // Each end cord drawn as a string of links in the bed's frame (`hang`); `fan` keeps the straight cords, drawing nothing.
+      const strings = fan.map(() => {
+        const links = [];
+        for (let k = 0; k < FAN_LINKS; k++) {
+          const link = createNode({ geometry: fanGeometry, quaternion: quat.create(), sightHidden: true });
+          addChild(bedNode, link);
+          links.push(link);
+        }
+        return { links, pts: new Float64Array((FAN_LINKS + 1) * 3), old: new Float64Array((FAN_LINKS + 1) * 3), len: 0 };
+      });
+      // The rope drawn as links (`taut`); `node` keeps the straight line from tie to ring, drawing nothing.
+      node.geometry = NOTHING;
+      const links = [];
+      for (let k = 0; k < ROPE_LINKS; k++) {
+        const link = createNode({ geometry: ropeGeometry, quaternion: quat.create(), sightHidden: true });
+        addChild(root, link);
+        links.push(link);
+      }
+      return { node, end, tree, wrap, local, fan, strings, ring: new Float64Array(3), links, wobble: new Float64Array(4), pts: new Float64Array((ROPE_LINKS + 1) * 3), old: new Float64Array((ROPE_LINKS + 1) * 3), len: 0 };
     });
+    // A rope's string from the tie (ax, ay, az) to the ring (bx, by, bz): the ends pinned, the rest falling under gravity
+    // with drag and held to their lengths, then its links laid along it.
+    const hang = (rope, ax, ay, az, bx, by, bz, dt, gy = GRAVITY, gz = 0) => {
+      const pts = rope.pts, old = rope.old, N = rope.links.length;
+      // Its length follows the span it hangs across, a hair slack, so it stays taut however the bed has moved.
+      const fresh = !rope.len;
+      rope.len = Math.hypot(bx - ax, by - ay, bz - az) * SLACK / N;
+      if (fresh) {
+        for (let k = 0; k <= N; k++) {
+          const t = k / N;
+          pts[3 * k] = old[3 * k] = ax + (bx - ax) * t;
+          pts[3 * k + 1] = old[3 * k + 1] = ay + (by - ay) * t;
+          pts[3 * k + 2] = old[3 * k + 2] = az + (bz - az) * t;
+        }
+      }
+      const step = Math.min(dt, 0.05), h2 = step * step;
+      for (let k = 1; k < N; k++) for (let c = 0; c < 3; c++) {
+        const i = 3 * k + c, v = (pts[i] - old[i]) * ROPE_DRAG;
+        old[i] = pts[i];
+        pts[i] += v + (c === 1 ? gy * h2 : c === 2 ? gz * h2 : 0);
+      }
+      pts[0] = ax; pts[1] = ay; pts[2] = az; pts[3 * N] = bx; pts[3 * N + 1] = by; pts[3 * N + 2] = bz;
+      for (let it = 0; it < ROPE_ITER; it++) for (let k = 0; k < N; k++) {
+        const i = 3 * k, j = i + 3, dx = pts[j] - pts[i], dy = pts[j + 1] - pts[i + 1], dz = pts[j + 2] - pts[i + 2];
+        const d = Math.hypot(dx, dy, dz) || 1e-9, diff = (d - rope.len) / d;
+        const wi = k === 0 ? 0 : k + 1 === N ? 1 : 0.5, wj = k === 0 ? 1 : k + 1 === N ? 0 : 0.5;
+        pts[i] += dx * diff * wi; pts[i + 1] += dy * diff * wi; pts[i + 2] += dz * diff * wi;
+        pts[j] -= dx * diff * wj; pts[j + 1] -= dy * diff * wj; pts[j + 2] -= dz * diff * wj;
+      }
+      for (let k = 0; k < N; k++) {
+        const link = rope.links[k];
+        link.position.x = pts[3 * k]; link.position.y = pts[3 * k + 1]; link.position.z = pts[3 * k + 2];
+        aimCord(link, pts[3 * k + 3], pts[3 * k + 4], pts[3 * k + 5]);
+      }
+    };
+    // A taut rope from the tie (ax, ay, az) to the ring (bx, by, bz): a straight line sagging ROPE_SAG at its middle, its
+    // wobble (`wobble`: across, down, and their speeds) springing back to rest, laid out as its links.
+    const taut = (rope, ax, ay, az, bx, by, bz, dt) => {
+      const w = rope.wobble, N = rope.links.length, step = Math.min(dt, 0.05);
+      w[2] += (-ROPE_K * w[0] - ROPE_DAMP * w[2]) * step; w[3] += (-ROPE_K * w[1] - ROPE_DAMP * w[3]) * step;
+      w[0] += w[2] * step; w[1] += w[3] * step;
+      const dx = bx - ax, dz = bz - az, l = Math.hypot(dx, dz) || 1, cx = -dz / l, cz = dx / l, pts = rope.pts;
+      for (let k = 0; k <= N; k++) {
+        const t = k / N, bow = Math.sin(Math.PI * t), drop = (ROPE_SAG + w[1]) * 4 * t * (1 - t);
+        pts[3 * k] = ax + dx * t + cx * w[0] * bow; pts[3 * k + 1] = ay + (by - ay) * t - drop; pts[3 * k + 2] = az + dz * t + cz * w[0] * bow;
+      }
+      for (let k = 0; k < N; k++) {
+        const link = rope.links[k];
+        link.position.x = pts[3 * k]; link.position.y = pts[3 * k + 1]; link.position.z = pts[3 * k + 2];
+        aimCord(link, pts[3 * k + 3], pts[3 * k + 4], pts[3 * k + 5]);
+      }
+    };
+    // A knock to the bed: both ropes and the end cords jolt across the bed and the fabric takes it in the middle.
+    const jolt = (speed, side) => {
+      for (const rope of ropes) {
+        rope.wobble[2] += side * speed * 0.12 * (rope.end * p.side); rope.wobble[3] += speed * 0.08;
+        for (const cord of rope.strings) for (let k = 1; k < FAN_LINKS; k++) cord.old[3 * k + 2] += side * speed * 0.003;
+      }
+      ruffle(speed, side);
+    };
     const endpoint = new Float64Array(3), poseOffset = new Float64Array(3), anchorLocal = new Float64Array(3), bedInverse = mat4.create();
     const bedRotation = quat.create(), restRotation = quat.create(), bodyRotation = quat.create(), limbTarget = quat.create();
     // A bed sleeper lies on their back. Turn their long axis along the hammock's +x.
@@ -888,8 +1112,15 @@
         ring[1] = y + (anchorLocal[1] - y) * t;
         ring[2] = anchorLocal[2] * t;
         for (const cord of rope.fan) aimCord(cord, ring[0], ring[1], ring[2]);
+        // The end cords hang in the bed's frame, where the true down turns with the swing.
+        const a = angle * p.side, gy = GRAVITY * Math.cos(a), gz = -GRAVITY * Math.sin(a);
+        for (let c = 0; c < rope.fan.length; c++) {
+          const from = rope.fan[c].position;
+          hang(rope.strings[c], from.x, from.y, from.z, ring[0], ring[1], ring[2], frameDt, gy, gz);
+        }
         mat4.transformPoint(endpoint, bedNode.world, ring[0], ring[1], ring[2]);
         aimCord(rope.node, endpoint[0], endpoint[1], endpoint[2]);
+        taut(rope, origin.x, origin.y, origin.z, endpoint[0], endpoint[1], endpoint[2], frameDt);
       }
     };
     const update = (dt, time, still, windTime = 0, windEnabled = true) => {
@@ -913,6 +1144,8 @@
       bedNode.rotation.x = angle * p.side;
       quat.fromEuler(bedRotation, bedNode.rotation.x, p.yaw, 0);
       quat.multiply(bodyRotation, bedRotation, restRotation);
+      frameDt = dt;
+      stepCloth(dt, held);
       if (windTime !== null) syncRopes(windTime, windEnabled);
       for (const seat of seats) {
         place(seat, angle);
@@ -935,13 +1168,14 @@
         }
       }
     };
-    const kick = (strength = KICK) => { amp = Math.min(SWAY_MAX, amp + strength); };
+    const kick = (strength = KICK) => { amp = Math.min(SWAY_MAX, amp + strength); jolt(strength * 12, 1); };
     // A hit of `weight` steps on the shared count; `dir` (+1 or -1 along the swing's own sign, 0 to carry on as it goes) is where it
     // sends the bed. The swing is lifted to the count's height (plus the momentum of one timed with the swing away from them) with
     // the angle left where it is: the phase is set to the one that holds the angle on the way out, so the bed is moving along `dir` in
     // the very next frame, whatever it was doing.
     const push = (weight, dir, shove = 0) => {
       count = Math.min(TIP_COUNT, count + weight); sinceHit = 0;
+      jolt(1 + weight * ROPE_JOLT, dir || 1);
       const c = Math.cos(phase), base = occupied() ? REST_HELD : REST;
       // Momentum is for a body's push (`shove`): rounds of fire climb the count's own steps, so a held trigger rises with every round.
       const to = Math.min(SWAY_MAX, Math.max(amp, base + count * STEP) + (shove > 0 && dir !== 0 ? MOMENTUM * Math.max(0, dir * c) : 0));
@@ -973,6 +1207,11 @@
         || feet < p.ground - 0.15 || feet > p.y + p.shell.high + BUMP_RISE) { bumpIn[slot] = 0; return 0; }
       e.nearest(along, across, bumpAt);
       const gap = Math.hypot(along - bumpAt[0], across - bumpAt[1]);
+      // Pressed against it, a body keeps the cloth out of its way and leans the bed along, every frame it stays.
+      press(x, feet, z, PRESS_TOP);
+      const inward = (vx * p.nx + vz * p.nz) * (across < 0 ? 1 : -1);
+      if (gap <= BUMP_RADIUS && inward > BUMP_MIN && Math.hypot(vx, vz) < BUMP_TELEPORT)
+        lean = Math.max(-SWAY_MAX, Math.min(SWAY_MAX, lean + (across < 0 ? -p.side : p.side) * Math.min(inward, 8) * LEAN_PRESS));
       if (gap > BUMP_REARM) { bumpIn[slot] = 0; return 0; }
       if (bumpIn[slot] || gap > BUMP_RADIUS) return 0;
       bumpIn[slot] = 1;
@@ -1121,7 +1360,7 @@
       while (parked.length) releaseEquipment(parked[0].cave);
       solids.remove(ridgeNode);
       removeChild(root, ridgeNode); removeChild(root, bedNode);
-      for (const rope of ropes) { removeChild(root, rope.node); removeChild(rope.wrap.parent, rope.wrap); }
+      for (const rope of ropes) { removeChild(root, rope.node); removeChild(rope.wrap.parent, rope.wrap); for (const link of rope.links) removeChild(root, link); }
     };
     update(0, 0, false);
     // Whether the bed has taken enough hits to tip out whoever lies in it. Only the occupant's own page acts on it (a bed held
@@ -1135,7 +1374,8 @@
       for (const seat of seats) if (seat.sitter) return true;
       return false;
     };
-    return { plan: p, seats, ridgeNode, bedNode, ropes, update, syncRopes, kick, bump, hit, blocks, crosses, tip, enter, restingAt, settle, free, near, reachable, landing, poseRemote, stateFor, releaseEquipment, dispose, get angle() { return angle; }, get amp() { return amp; }, get spilling() { return spilling(); }, get fallSide() { return fallSide; } };
+    let restBed = null;
+    return { plan: p, seats, ridgeNode, bedNode, clothNode, get restBed() { return restBed || (restBed = restBedGeometry(p)); }, ropes, update, syncRopes, kick, bump, hit, blocks, crosses, tip, enter, restingAt, settle, free, near, reachable, landing, poseRemote, stateFor, releaseEquipment, dispose, get angle() { return angle; }, get amp() { return amp; }, get spilling() { return spilling(); }, get fallSide() { return fallSide; } };
   };
 
   BL.hubHammock = { SLOTS, TIE, SPAN_MIN, SPAN_MAX, SWAY_MAX, REST_HELD, STAND, GEAR_TOP, GEAR_CLEAR, plan, create, ridgeY };

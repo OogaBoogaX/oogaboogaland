@@ -37,10 +37,27 @@
   const VIEW = { yaw: 0, pitch: 0.2, dist: 5.2 };
   const HOME = { x: 0, z: 1.2 };
   // The fire's places to sit on the ground: the island's ring of six (scene-hub.js `FIRE_SEATS`, `FIRE_SEAT_RADIUS`).
-  const CHAIR = { x: 4.7, z: -1.4, top: 0.5 }, FIRE = { x: 3.3, z: 3.5, r: 0.85, seats: 6, out: 1.8 };
+  const CHAIR = { x: 4.7, z: -1.4, top: 0.5, ry: Math.atan2(-4.7, 1.4) }, FIRE = { x: 3.3, z: 3.5, r: 0.85, seats: 6, out: 1.8 };
   const BED = { x: -4.9, z: 0.6 }, HAMMOCK = { z: -5, half: 2.7, post: 0.13, tall: 3.5, wide: 0.575, reach: 0.3 };
   const DAY = 13, NIGHT = 22.5, DAY_OF_YEAR = 80;
-  const PLACES = ["stand", "chair", "bed", "hammock", "fire"];
+  const PLACES = ["stand", "chair", "bed", "hammock", "fire", "physics", "pond"];
+  // The pond: a raised stone basin `r` across its water, its rim `rim` wide and `top` high (a step up), its water's surface
+  // at `surface` over the pad. The surface is a wave field on an N by N grid (`wave`, `C` its speed, `DAMP` and `PULL`
+  // calming it), drawn as a mesh rewritten each frame; splashes, wading and rounds into it set it moving, and what floats
+  // on it (physics.js `water`) bobs on it. `stand` is where the Pond button stands the Ooga, facing it.
+  const POND = { x: 8, z: 9, r: 3, rim: 0.35, top: 0.55, surface: 0.48, N: 28, C: 2.2, DAMP: 0.9, PULL: 3, stand: { x: 8, z: 4.4 } };
+  // The physics area on the pad's open ground (physics.js): a crate pyramid, a tower of dice, barrels stood as
+  // bowling pins and a few dice about, each `[kind, variant, x, z, layer, yaw]`, a layer a crate's or die's height up.
+  // `stand` is where the Physics button stands the Ooga, facing them.
+  const PLAY = { x: -4, z: 9.5, stand: { x: -4, z: 5 } };
+  const PROPS = [];
+  for (let row = 0; row < 4; row++) for (let i = 0; i < 4 - row; i++) PROPS.push(["crate", 0, -6.6 + (i + row / 2) * 0.8, 10.2, row, 0]);
+  for (let i = 0; i < 6; i++) PROPS.push(["die", i % 6, -1.4, 9.4, i, i * 0.35]);
+  for (const [i, j] of [[0, 0], [-1, 1], [1, 1], [-2, 2], [0, 2], [2, 2]]) PROPS.push(["barrel", 0, -3.6 + i * 0.45, 12.4 + j * 0.75, 0, 0]);
+  for (const [x, z, v] of [[-4.6, 8.4, 1], [-3.2, 8.9, 2], [-2.4, 7.8, 3]]) PROPS.push(["die", v, x, z, 0, x]);
+  // Afloat in the pond, rest a little sunk at its surface (their seventh field, the height of their foot).
+  for (const [kind, x, z, yaw] of [["barrel", 7.2, 8.4, 0], ["barrel", 9.1, 9.8, 1], ["crate", 8.4, 10.6, 0.4], ["crate", 6.9, 9.9, 1.1], ["die", 9.2, 8.1, 0.7]])
+    PROPS.push([kind, 0, x, z, 0, yaw, POND.surface - 0.3]);
   const TOGGLES = ["rifle", "jetpack", "eyes", "third", "combat", "free", "night"];
   // The third person while carrying: combat's shoulder distance (pilot.js `SHOULDER_DISTANCE`), looking a little down.
   const THIRD = { dist: 3.6, pitch: 0.4 };
@@ -60,6 +77,7 @@
 
   // ---- the pad's furniture, each built once a page ----
   const TIMBER = "#8a5a32", TIMBER_DK = "#5c3a1e", TIMBER_LT = "#a8703e";
+  const PROP_DUST = models.particleGeometry("#a3874f", 0.1, 0);
   const GRASS = [[104, 148, 66], [96, 140, 60]], EARTH = [[122, 92, 60], [98, 72, 46], [74, 54, 36]];
   // A lawn in metre rings over a keel of earth, so sizes read at a glance and the pad stands in the sky as the island does.
   const pad = models.cached(() => {
@@ -82,7 +100,7 @@
   const posts = models.cached(() => models.shaded([-1, 1].map((s) => hubModels.log(s * HAMMOCK.half, 0, HAMMOCK.z, s * HAMMOCK.half, HAMMOCK.tall, HAMMOCK.z, HAMMOCK.post, TIMBER_DK))));
 
   // One visit's state: made in enter(), dropped in leave().
-  let renderer, game, go, root, camera, hud, hooks, input, pilot, fx, crew, footsteps, cave, entry, hammock, bed, fire, embers, seats, blocks, buttons;
+  let renderer, game, go, root, camera, hud, hooks, input, pilot, fx, crew, footsteps, cave, entry, hammock, bed, fire, embers, seats, blocks, buttons, physics;
   // Who is wanted on the pad: the address's Ooga as the page loads, then whoever the list or a script asks for.
   let asked = (params.get("character") || "").trim();
   let night = false, combatShown = null, nearKey = "", spoken = 0, watchTimer = 0, watchVersion = null, watchError = "", broken = "", homeLink = null, homeTitle = "", homeWords = "", pick = null, titled = false;
@@ -102,7 +120,179 @@
     && (!onCloth(toX, toZ) || onCloth(fromX, fromZ));
   // The lawn, or the mattress under feet that have stepped up onto it, as in the headquarters.
   const onBed = (x, z) => Math.abs(x - BED.x) < bed.width / 2 && Math.abs(z - BED.z) < bed.depth / 2;
-  const groundAt = (x, z) => bed && onBed(x, z) ? bed.sleep.surface : 0;
+  // The pond's rim is a step up; inside it the floor is the pad.
+  const pondDistance = (x, z) => Math.hypot(x - POND.x, z - POND.z);
+  const padAt = (x, z) => {
+    if (bed && onBed(x, z)) return bed.sleep.surface;
+    const d = pondDistance(x, z);
+    return d >= POND.r && d <= POND.r + POND.rim ? POND.top : 0;
+  };
+  // Where the studio's own Ooga stands: the pad, or a loose prop's top it has climbed onto (physics.js `supportAt`).
+  const groundAt = (x, z, y, previous, who) => {
+    const floor = padAt(x, z);
+    return physics && who === cave && Number.isFinite(y) ? Math.max(floor, physics.supportAt(x, z, Math.max(y, previous ?? y), 0.6)) : floor;
+  };
+  // The loose props' world: the pad, nothing past its edge, and the furniture's circles in the way.
+  const propGround = (x, z) => x * x + z * z < PAD * PAD ? padAt(x, z) : -Infinity;
+  // The pond's rim holds what floats in it in, and keeps what slides along the pad out, below its top.
+  const propClear = (x, feet, z, toX, toY, toZ, radius) => {
+    if (blocked(toX, toZ, radius)) return false;
+    if (feet > POND.top + 0.2) return true;
+    const d0 = pondDistance(x, z), d1 = pondDistance(toX, toZ), outer = POND.r + POND.rim;
+    if (d0 < POND.r) return d1 + radius <= POND.r || d1 < d0;
+    return !(d0 > outer && d1 - radius < outer && d1 < d0);
+  };
+  const PROP_HIT = { body: -1, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0 };
+  // ---- the pond's water ----
+  const SPLASH = [models.particleGeometry("#9fd8ff", 0.09, 0.25), models.particleGeometry("#e8f7ff", 0.07, 0.35), models.particleGeometry("#5fb4e6", 0.08, 0.15)];
+  const WATER = BL.math.hexToRgb("#2f86c4");
+  let wave = null, pondFeet = NaN, pondNoise = 0;
+  // The rim, a ring of stone round the water.
+  const rim = models.cached(() => models.lathe({ profile: [[POND.r + POND.rim, 0], [POND.r + POND.rim, POND.top], [POND.r, POND.top], [POND.r, 0]], segments: 48, color: "#8d8a80" }));
+  const buildPond = () => {
+    const N = POND.N, n = (N + 1) * (N + 1), h = 2 * POND.r / N, verts = new Array(n * 3 + 6).fill(0), faces = [], inside = new Uint8Array(n);
+    for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) {
+      const k = i * (N + 1) + j, x = -POND.r + i * h, z = -POND.r + j * h;
+      verts[3 * k] = x; verts[3 * k + 2] = z;
+      inside[k] = Math.hypot(x, z) < POND.r - h * 0.5 ? 1 : 0;
+    }
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+      const cx = -POND.r + (i + 0.5) * h, cz = -POND.r + (j + 0.5) * h;
+      if (Math.hypot(cx, cz) > POND.r + h * 0.3) continue;
+      const a = i * (N + 1) + j, b = a + N + 1;
+      faces.push({ i: [a, a + 1, b + 1, b], color: WATER, emissive: 0.08 });
+    }
+    // Two corners of a box round any wave, no face's, so the bounds stay fixed.
+    verts[n * 3] = -POND.r; verts[n * 3 + 1] = -1; verts[n * 3 + 2] = -POND.r;
+    verts[n * 3 + 3] = POND.r; verts[n * 3 + 4] = 1; verts[n * 3 + 5] = POND.r;
+    const geometry = { verts, faces, lines: [], smooth: true, dynamic: true, revision: 0 };
+    addChild(root, createNode({ geometry: rim(), position: { x: POND.x, y: 0, z: POND.z } }));
+    addChild(root, createNode({ geometry, position: { x: POND.x, y: POND.surface, z: POND.z } }));
+    wave = { N, n, h, H: new Float32Array(n), V: new Float32Array(n), inside, geometry, time: 0 };
+  };
+  // The wave's height at (x, z) on the pad, between its grid's points.
+  const waveAt = (x, z) => {
+    const N = wave.N, fx = (x - POND.x + POND.r) / wave.h, fz = (z - POND.z + POND.r) / wave.h;
+    const i = Math.max(0, Math.min(N - 1, Math.floor(fx))), j = Math.max(0, Math.min(N - 1, Math.floor(fz))), u = Math.min(1, Math.max(0, fx - i)), v = Math.min(1, Math.max(0, fz - j));
+    const H = wave.H, k = i * (N + 1) + j;
+    return (H[k] * (1 - u) + H[k + N + 1] * u) * (1 - v) + (H[k + 1] * (1 - u) + H[k + N + 2] * u) * v;
+  };
+  const waterAt = (x, z) => wave && pondDistance(x, z) < POND.r ? POND.surface + waveAt(x, z) : -Infinity;
+  // A push to the water at (x, z): its points within `radius` thrown down by `speed` (m/s), most at the middle.
+  const disturb = (x, z, speed, radius) => {
+    const N = wave.N, h = wave.h, ci = (x - POND.x + POND.r) / h, cj = (z - POND.z + POND.r) / h, reach = Math.ceil(radius / h);
+    for (let i = Math.max(0, Math.floor(ci) - reach); i <= Math.min(N, Math.ceil(ci) + reach); i++)
+      for (let j = Math.max(0, Math.floor(cj) - reach); j <= Math.min(N, Math.ceil(cj) + reach); j++) {
+        const k = i * (N + 1) + j, d = Math.hypot(i - ci, j - cj) * h / radius;
+        if (d < 1 && wave.inside[k]) wave.V[k] -= speed * (1 - d * d);
+      }
+  };
+  // Something coming down into the water at `speed`: a ring of waves and a burst of spray, bigger the faster.
+  const splash = (x, z, speed) => {
+    if (pondDistance(x, z) >= POND.r) return;
+    disturb(x, z, Math.min(6, speed * 0.7), 0.45 + Math.min(0.6, speed * 0.06));
+    fx.burst(x, POND.surface + 0.05, z, Math.min(24, 6 + Math.round(speed * 3)), SPLASH, 1.2 + speed * 0.35);
+  };
+  // A round from `from` to `to` that reaches the water first stops on it, splashing.
+  const shotWater = (from, to) => {
+    if (from.y <= POND.surface || to.y >= POND.surface) return;
+    const t = (from.y - POND.surface) / (from.y - to.y), x = from.x + (to.x - from.x) * t, z = from.z + (to.z - from.z) * t;
+    if (pondDistance(x, z) >= POND.r) return;
+    to.x = x; to.y = POND.surface; to.z = z;
+    splash(x, z, 4);
+  };
+  const stepPond = (dt) => {
+    const N = wave.N, H = wave.H, V = wave.V, inside = wave.inside, k2 = POND.C * POND.C / (wave.h * wave.h);
+    // A breath of wind now and then keeps the surface alive.
+    if ((pondNoise -= dt) <= 0) {
+      pondNoise = 0.15 + Math.random() * 0.3;
+      const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * POND.r * 0.8;
+      disturb(POND.x + Math.cos(a) * r, POND.z + Math.sin(a) * r, 0.25, 0.5);
+    }
+    wave.time = Math.min(wave.time + dt, 4 / 60);
+    for (; wave.time >= 1 / 120; wave.time -= 1 / 120) {
+      const h = 1 / 120;
+      for (let i = 1; i < N; i++) for (let j = 1; j < N; j++) {
+        const k = i * (N + 1) + j;
+        if (!inside[k]) continue;
+        const lap = H[k - 1] + H[k + 1] + H[k - N - 1] + H[k + N + 1] - 4 * H[k];
+        V[k] += (k2 * lap - POND.PULL * H[k] - POND.DAMP * V[k]) * h;
+      }
+      for (let k = 0; k < wave.n; k++) H[k] = inside[k] ? Math.max(-0.25, Math.min(0.25, H[k] + V[k] * h)) : 0;
+    }
+    const v = wave.geometry.verts;
+    for (let k = 0; k < wave.n; k++) v[3 * k + 1] = H[k];
+    wave.geometry.revision++;
+  };
+  // The Ooga in the pond: a splash coming down into it, a wake wading through it.
+  const pondOoga = (dt, vx, vz) => {
+    const p = cave.root.position, feet = p.y - cave.baseY, inside = pondDistance(p.x, p.z) < POND.r - 0.2;
+    if (inside && !Number.isNaN(pondFeet) && pondFeet > POND.surface && feet <= POND.surface) splash(p.x, p.z, Math.max(2, (pondFeet - feet) / Math.max(dt, 1e-3)));
+    else if (inside && feet < POND.surface) {
+      const speed = Math.hypot(vx, vz);
+      if (speed > 0.3) disturb(p.x, p.z, speed * 0.35 * dt * 60 * 0.05, 0.45);
+    }
+    pondFeet = feet;
+  };
+  let propX = NaN, propZ = NaN, chairBody = -1;
+  // A prop out of place goes home 15 s after anything last hit or pushed it.
+  const PROP_HOME_AFTER = 15;
+  const puff = (i) => {
+    const at = physics.position(i, PROP_HIT);
+    fx.burst(at.x, at.y, at.z, 6, [PROP_DUST], 1.1);
+  };
+  const chairBounds = models.cached(() => {
+    const v = chair().verts, b = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < v.length; i += 3) for (let k = 0; k < 3; k++) { b[k] = Math.min(b[k], v[i + k]); b[k + 3] = Math.max(b[k + 3], v[i + k]); }
+    return b;
+  });
+  const propTarget = (node, kind, body) => input.add(node, { kind: "prop", piece: kind, body,
+    pickRay: (ray) => physics && physics.raycast(ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz, camera.far, PROP_HIT) && PROP_HIT.body === body ? PROP_HIT.t : NaN },
+    { radius: Math.max(0.35, physics.radius(body)) });
+  // The chair stands where it belongs again (Chair, or sitting down in it after it was knocked over).
+  const chairHome = () => {
+    if (!physics.displaced(chairBody)) return;
+    puff(chairBody);
+    physics.home(chairBody);
+    physics.sync();
+  };
+  // The physics area's props, each its own node and body, still a target to hover and tap.
+  const buildProps = () => {
+    buildPond();
+    physics = BL.physics.create({ ground: propGround, clear: propClear, water: waterAt, onSplash: (x, y, z, speed) => splash(x, z, speed) });
+    const chairNode = createNode({ geometry: chair(), quaternion: BL.math.quat.create() });
+    addChild(root, chairNode);
+    chairBody = physics.addPiece({ node: chairNode, bounds: chairBounds(), x: CHAIR.x, y: 0, z: CHAIR.z, yaw: CHAIR.ry, density: 30, tag: "chair" });
+    propTarget(chairNode, "chair", chairBody);
+    for (const [kind, variant, x, z, layer, yaw, foot] of PROPS) {
+      const baked = BL.dressing.loosePiece(kind, variant), b = baked.bounds, node = createNode({ quaternion: BL.math.quat.create(), sightHidden: true });
+      const parts = BL.dressing.nodes(baked, { glow: 1 });
+      for (const part of parts) addChild(node, part);
+      addChild(root, node);
+      propTarget(parts[0], kind, physics.addPiece({ node, bounds: b, x, y: foot ?? layer * (b[4] - b[1]), z, yaw, tag: kind }));
+    }
+    physics.sync();
+  };
+  const PROP_NAMES = { crate: "Crate", die: "Die", barrel: "Barrel", chair: "Chair" };
+  // The Ooga pushes what it walks into (never what it sits or lies in); then the props move a step, and those left
+  // alone long enough go home. A chair knocked out from under its sitter stands them up.
+  const updateProps = (dt) => {
+    physics.clearActors();
+    const p = cave.root.position;
+    if (cave.root.visible && dt > 0 && !cave.camp.seat && !crew.sleeping) {
+      const vx = Number.isNaN(propX) ? 0 : (p.x - propX) / dt, vz = Number.isNaN(propZ) ? 0 : (p.z - propZ) / dt;
+      physics.actor(p.x, p.y - cave.baseY, p.z, cave.bodyRadius || 0.3, cave.bodyHeight, Math.abs(vx) < 20 ? vx : 0, Math.abs(vz) < 20 ? vz : 0);
+      // Walking into the hammock pushes it, as on the island (scene-hub.js `rockHammock`).
+      if (!Number.isNaN(propX) && hammock.bump(0, p.x, p.y - cave.baseY, p.z, vx, vz) > 0) crew.pushPose(cave);
+      pondOoga(dt, vx, vz);
+    } else pondFeet = NaN;
+    propX = p.x; propZ = p.z;
+    if (dt > 0) stepPond(dt);
+    physics.step(dt);
+    physics.settle(dt, PROP_HOME_AFTER, puff);
+    if (seats[0].sitter && physics.displaced(chairBody)) crew.standPlayer(seats[0].sitter);
+  };
+  const resetProps = () => physics.reset(puff);
   const clampTarget = (t) => {
     const r = Math.hypot(t.x, t.z);
     if (r > WALL) { t.x *= WALL / r; t.z *= WALL / r; }
@@ -141,7 +331,7 @@
     let best = null, reach = 1.3;
     for (const seat of seats) {
       const d = Math.hypot(seat.x - x, seat.z - z);
-      if (!seat.sitter && d < reach) { best = seat; reach = d; }
+      if (!seat.sitter && d < reach && !(seat === seats[0] && physics.displaced(chairBody))) { best = seat; reach = d; }
     }
     return best;
   };
@@ -182,12 +372,15 @@
     if (!PLACES.includes(id)) throw new Error(`studio: no place ${id}`);
     let ok = true;
     if (id === "stand") stand(HOME.x, HOME.z, 0);
+    else if (id === "physics") stand(PLAY.stand.x, PLAY.stand.z, Math.PI, 0, 0.32, 6.5);
+    else if (id === "pond") stand(POND.stand.x, POND.stand.z, Math.PI, 0, 0.4, 7);
     else if (id === "bed") { stand(bed.walkAt.x, bed.walkAt.z, Math.PI / 2, -0.55, 0.5, 5.6); ok = crew.sleepPlayer(bed); }
     else if (id === "hammock") {
       const seat = hammock.seats[0];
       stand(seat.walkAt.x, seat.walkAt.z, 0, 0.5, 0.38, 6.2);
       ok = hammock.enter(cave, seat, crew.sitPlayer);
     } else {
+      if (id === "chair") chairHome();
       const seat = seats[id === "chair" ? 0 : 1];
       stand(seat.walkAt.x, seat.walkAt.z, seat.ry, id === "chair" ? 0.6 : -0.75, 0.32, 5);
       ok = crew.sitPlayer(seat);
@@ -738,11 +931,10 @@
       seats.push(s);
       return s;
     };
-    const chairRy = Math.atan2(-CHAIR.x, -CHAIR.z);
-    addChild(root, createNode({ geometry: chair(), position: { x: CHAIR.x, y: 0, z: CHAIR.z }, rotation: { x: 0, y: chairRy, z: 0 } }));
+    // The chair itself is a loose prop (buildProps), sat in only while it stands where it belongs.
+    const chairRy = CHAIR.ry;
     // Its stand-up spot is clear of it for the roster's widest body.
     seat(CHAIR.x + Math.sin(chairRy) * 0.04, CHAIR.z + Math.cos(chairRy) * 0.04, CHAIR.top, chairRy, 1.1, false);
-    blocks.push({ x: CHAIR.x, z: CHAIR.z, r: 0.3 });
     const pit = createNode({ geometry: hubModels.firepit(), position: { x: FIRE.x, y: 0, z: FIRE.z } });
     addChild(root, pit);
     blocks.push({ x: FIRE.x, z: FIRE.z, r: FIRE.r });
@@ -779,8 +971,12 @@
       outsideActors: () => NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, jetpackAllowed: () => true, reticleTarget: () => "object",
       reloadPolicy: { near: () => false, available: () => false, consume() {} },
       fireReachable: (x, y, z, toX, toY, toZ) => toX * toX + toZ * toZ < (PAD + 6) * (PAD + 6) && toY > 0 && toY < 14,
+      // Rounds stop on a loose prop and knock it; blows knock what stands in front.
+      clipProjectileTarget: (from, to) => { physics.shot(from, to); shotWater(from, to); return false; },
+      onSwing: (who, charge) => { if (who === cave) physics.blow(who.root.position.x, who.root.position.y - who.baseY, who.root.position.z, who.bodyHeight, who.root.rotation.y, charge); },
       petLanding: (x, z, lying) => hammock.landing(x, z, lying) };
     crew = shared.crew = crewMod.create(shared);
+    buildProps();
     footsteps = BL.footsteps.create();
     pilot.bind(shared);
     cave = crew.cavemen.get(entry.name);
@@ -789,7 +985,10 @@
     Object.assign(hooks, {
       onHover: (hit, p) => { if (hit) hud.tooltip.show(tip(hit), p.x, p.y, hit.owner.cave); else hud.tooltip.hide(); },
       onHoverMove: (hit, p) => hud.tooltip.show(tip(hit), p.x, p.y, hit.owner.cave),
-      onTap: (hit) => { if (hit && hit.owner.kind === "caveman") crew.pokeCave(hit.owner.cave); },
+      onTap: (hit) => {
+        if (hit && hit.owner.kind === "caveman") crew.pokeCave(hit.owner.cave);
+        else if (hit && hit.owner.kind === "prop") physics.knock(hit.owner.body, camera.position.x, camera.position.z, hit.owner.piece === "die" ? 40 : 20);
+      },
       ...pilot.hooks,
       // A drag and the wheel are the free camera's while it is out.
       onOrbit: (dx, dy) => {
@@ -806,6 +1005,7 @@
       if (action === "act") pilot.action();
       else if (action === "studio-speak") speak();
       else if (action === "studio-build") rebuild();
+      else if (action === "studio-props") resetProps();
       else if (action.startsWith("studio-")) { const id = action.slice(7); if (PLACES.includes(id)) place(id); else toggle(id); }
       else if (action === "jetpack-toggle") toggle("jetpack");
       else if (action.startsWith("mode-")) pilot.modeAction(action, free.on);
@@ -835,19 +1035,21 @@
     }
     nearKey = ""; spoken = 0;
     if (broken) hud.hint(broken, 36e5);
-    Object.assign(studioScene, { root, camera, input, debug: { camera, crew, fx, pilot, hud, controls: pilot.controls, cavemen: crew.cavemen, studio: { place, toggle, speak, show, state, free, get hammock() { return hammock; }, get bed() { return bed; }, get seats() { return seats; }, get cave() { return cave; } } } });
+    Object.assign(studioScene, { root, camera, input, debug: { camera, crew, fx, pilot, hud, controls: pilot.controls, cavemen: crew.cavemen, physics, studio: { place, toggle, speak, show, state, free, resetProps, get hammock() { return hammock; }, get bed() { return bed; }, get seats() { return seats; }, get cave() { return cave; } } } });
     pilot.update(0);
   };
   const drawExtra = () => {};
   // A hint, unless the foot of the screen is saying why the file could not be shown.
   const say = (text) => { if (!broken) hud.hint(text); };
-  const tip = (hit) => hit.owner.kind === "caveman" ? `${hit.owner.cave.traits.display || hit.owner.cave.traits.name} · tap to poke` : "";
+  const tip = (hit) => hit.owner.kind === "caveman" ? `${hit.owner.cave.traits.display || hit.owner.cave.traits.name} · tap to poke`
+    : hit.owner.kind === "prop" ? `${PROP_NAMES[hit.owner.piece]} · tap to knock` : "";
 
   const update = (dt, elapsed) => {
     // The director names the tab and the address as a visit arrives; the studio's own follow it, once.
     if (!titled) { titled = true; document.title = `Studio · ${state.name}`; address(); }
     pilot.readInput(dt);
     crew.update(dt, elapsed);
+    updateProps(dt);
     hammock.update(dt, elapsed, false, 0);
     // The bed poses after the crew; a pet riding its Ooga stays on this frame's body.
     for (const seat of hammock.seats) if (seat.sitter && seat.sitter.pet && seat.sitter.pet.ride) crew.pets.update(seat.sitter, 0);
@@ -899,6 +1101,8 @@
     free.on = false;
     getUp();
     embers.dispose();
+    physics.dispose();
+    propX = propZ = NaN; chairBody = -1; wave = null; pondFeet = NaN;
     hammock.dispose();
     footsteps.dispose();
     crew.dispose();
@@ -908,7 +1112,7 @@
     const count = input.targetCount;
     input.dispose();
     hud.dispose();
-    hud = hooks = input = pilot = fx = crew = footsteps = cave = entry = hammock = bed = fire = embers = seats = blocks = buttons = null;
+    hud = hooks = input = pilot = fx = crew = footsteps = cave = entry = hammock = bed = fire = embers = seats = blocks = buttons = physics = null;
     studioScene.input = studioScene.debug = null;
     return { targets: count };
   };

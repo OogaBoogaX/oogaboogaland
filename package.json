@@ -21,6 +21,8 @@
     "character:preview": "node scripts/build.mjs && node scripts/character-preview.mjs",
     "ooga-chat:faces": "node scripts/build.mjs && node scripts/ooga-chat-faces.mjs",
     "character:studio": "node scripts/character-studio.mjs",
+    "lecture:check": "node scripts/lecture-check.mjs",
+    "lecture:script": "node scripts/lecture-script.mjs",
     "test:unit": "node test/run.mjs unit",
     "test": "node scripts/build.mjs && node test/run.mjs",
     "test:perf": "node scripts/build.mjs && node test/run.mjs perf",

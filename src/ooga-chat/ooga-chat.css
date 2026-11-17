@@ -218,6 +218,27 @@ body {
 .oc-players { padding: 12px 14px; }
 .oc-roster-note { margin: 0; }
 
+/* The grid's names open the island's Volume row below it, wide enough to adjust on a phone. */
+.oc-volume-toggle {
+  display: flex;
+  justify-content: center;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.oc-volume-toggle:disabled { cursor: default; }
+.oc-volume-toggle:hover:not(:disabled) { color: var(--accent-text); }
+.oc-volume-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.oc-volume-head { display: flex; align-items: center; gap: 12px; }
+.oc-volume-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.oc-chat[data-space="off"] > .oc-volume,
+.oc-chat[data-space="foot"] > .oc-volume { display: none; }
+
 /* Feed the Oogas: the island's donation dialog (donation-popup.js), framed as the island frames its dialogs (style.css
    `.modal`, `.modal-close`, `.donation-popup`). The kiosk draws the name and message on its own screen; their fields
    only take the typing, so they stay in the page, focusable, a phone's keyboard able to open on them, but out of

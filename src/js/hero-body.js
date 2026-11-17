@@ -623,7 +623,8 @@
     const lock = (x, y, z) => v.set(x, y, z, grain(x, y, z) < 16 ? 3 : 2);
     if (!slim) {
       v.fill(0, 6, 0, 5, 0, 5, 0);
-      v.fill(1, 5, 0, 1, 6, 6, 0);
+      // The jaw stands a block proud of the face, unless the character's mouth lies flat on it (`look.flatMouth`).
+      if (!t.flatMouth) v.fill(1, 5, 0, 1, 6, 6, 0);
     }
     if (hairy && slim) {
       // Long hair with some shape to it. The crown is a dome: a full layer with its corners off, a smaller one
@@ -682,7 +683,7 @@
         if (!t.noTeeth) for (const side of [-1, 1]) loft(g, [[0.15, 0.3, 0.3, 0.12, 2 * side, 5.1], [0.75, 0.26, 0.26, 0.1, 2.05 * side, 5.14], [1.3, 0.04, 0.04, 0.02, 2.12 * side, 5.17]], ["#e6dabd", "#fcf8ec"]);
       } else if (kind !== "none") {
         if (t.snout) snout(); else noseBlock(g, rect(-0.6, 0.6, 2, 3.9, z, 0.2), F, 1.2, nose, shade(nose, 0.85));
-        slab(g, rect(-1.5, 1.5, 0.35, 0.65, 4.001, 0, kind === "smirk" ? 0.12 : 0), F, 0.03, 1, dark);
+        slab(g, rect(-1.5, 1.5, t.flatMouth ? 0.75 : 0.35, t.flatMouth ? 1.05 : 0.65, t.flatMouth ? 3.001 : 4.001, 0, kind === "smirk" ? 0.12 : 0), F, 0.03, 1, dark);
       }
       return g;
     };

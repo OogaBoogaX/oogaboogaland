@@ -32,7 +32,7 @@
     box.hidden = false;
   };
   // The voice seam until the controller is made (and if it can't be): a muted listener that captures nothing.
-  let media = { available: false, why: "", state: BL.oogaChatMedia.IDLE, heard() {}, status() {}, release() {}, join() {}, leave() {}, mute() {}, zone() {}, stop() {}, retry() {}, remember() {}, dispose() {} };
+  let media = { available: false, why: "", state: BL.oogaChatMedia.IDLE, heard() {}, status() {}, release() {}, join() {}, leave() {}, mute() {}, muteLocal() {}, mutedLocally: () => false, setVolume() {}, volumeOf: () => 1, VOLUME_MAX: 1, duel() {}, setMuteDuels() {}, mutedByDuel: () => false, identify() {}, zone() {}, stop() {}, retry() {}, remember() {}, dispose() {} };
   // `relisten` is the feed's 4401 restart timer; pagehide clears it, so it lives out here with what pagehide disposes.
   // `donating` ends the donation socket, opened once the service says its feed is live; `feeding` is Feed the Oogas,
   // the island's own donation popup, made the first time it opens; `member` is the Commons socket.
@@ -68,6 +68,8 @@
     };
     media = BL.oogaChatMedia.create({
       memory,
+      preferenceKey: storageKey(adapter.kind, "muted."),
+      bareKey: storageKey(adapter.kind, "voice-bare"),
       // A voice connection dropped, or a lease went unanswered: the feed's socket is asked whether it still lives.
       stall: () => feed?.wake?.(true),
       broker: () => state.mode === "live" && state.boot ? adapter.media(state.boot) : null,
@@ -159,6 +161,7 @@
       listening = principal;
       if (principal !== kept) roster.expect(state.zone);
       if (!principal) return hear("off");
+      media.identify(state.session.identity.participant);
       feed = adapter.audience(state.boot, {
         message(msg) {
           if (msg && msg.type === "reaction") {
@@ -218,8 +221,14 @@
       member = null;
       membership = principal;
       town.reset();
+      media.duel({ op: "lost" });
       if (!principal) return set({ commons: { status: contributor() ? "closed" : "off" } });
-      member = adapter.commons(state.boot, { message: town.apply, status(next) {
+      member = adapter.commons(state.boot, { message(msg) {
+        if (msg?.t === "community" && msg.op === "welcome" && msg.v === 1) media.duel({ op: "list", duels: msg.duels || [] });
+        else if (msg?.t === "duel") media.duel(msg);
+        town.apply(msg);
+      }, status(next) {
+        if (next !== "live") media.duel({ op: "lost" });
         set({ commons: { status: next } });
         if (next === "signed-out") Promise.resolve(auth.check("retry")).finally(() => { membership = null; joinCommons(); });
       } });

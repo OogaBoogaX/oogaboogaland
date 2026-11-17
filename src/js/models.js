@@ -1286,7 +1286,7 @@
       hexToRgb("#4a2f16"),
       hexToRgb("#f2efe4"),
       hexToRgb("#141414"),
-      shade(skin, 1.18),
+      shade(skin, traits.noseShade === undefined ? 1.18 : traits.noseShade),
       mixRgb(shade(skin, 1), [201, 194, 178], 0.55),
       hexToRgb("#5c4425"),
       hexToRgb("#7a7a7a"),

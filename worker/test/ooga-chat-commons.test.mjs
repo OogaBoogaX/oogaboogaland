@@ -53,6 +53,23 @@ const harness = async ({ features = "bridge,commons,commons-send,cloud", accepte
 };
 const lines = (ws) => ws.sent.filter((m) => m.t === "chat");
 
+test("duel listening receives active pairs on join and only sanitized start/end updates", async () => {
+  const h = await harness(), { duel } = await import("../src/duel.js");
+  await h.player(1, "amy"); await h.player(2, "ottoz0r");
+  const { ws: before } = await h.member(3, "cy");
+  duel.start(h.room, h.room.players.get(1), h.room.players.get(2), Date.now());
+  const d = [...h.room.duels.values()][0];
+  assert.deepEqual(before.sent.filter((m) => m.t === "duel"), [{ t: "duel", op: "start", id: d.id, a: 1, b: 2 }]);
+  const { ws: after } = await h.member(4, "dee");
+  assert.deepEqual(after.sent[0].duels, [{ id: d.id, a: 1, b: 2 }]);
+  for (const op of ["hp", "challenged", "challenging", "refused", "list"]) h.room.broadcast({ t: "duel", op, id: d.id, x: 12, hp: [50, 40] });
+  assert.equal(before.sent.filter((m) => m.t === "duel").length, 1);
+  assert.equal(after.sent.filter((m) => m.t === "duel").length, 0);
+  duel.finish(h.room, d, 1, "forfeit");
+  for (const ws of [before, after]) assert.deepEqual(ws.sent.filter((m) => m.t === "duel").at(-1), { t: "duel", op: "end", id: d.id });
+  assert.deepEqual((await h.member(5, "eve")).ws.sent[0].duels, []);
+});
+
 test("a member joins without a player slot, sees presence without positions, and The Commons' own history", async () => {
   const h = await harness();
   const isle = await h.player(1, "amy");

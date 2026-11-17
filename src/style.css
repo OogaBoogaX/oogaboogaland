@@ -3383,6 +3383,104 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
 }
 
 /* The hangar's sound panel under its Sound button: on or off, the level and the pad's vibration, on the planks. */
+/* The Lecture Hall's question: the lecture waits on one of its answers. */
+.lecture-quiz {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  padding: 10px 12px 12px;
+  background: var(--planks);
+  border: 3px solid var(--wood-edge);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 8px 20px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
+  pointer-events: auto;
+  z-index: 6;
+}
+
+.lecture-quiz[hidden] {
+  display: none;
+}
+
+.lecture-quiz-kicker {
+  margin: 0 0 3px;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+  white-space: nowrap;
+}
+
+/* Room for the longest question and for four answers of two lines each, so the card is one height for every question. */
+.lecture-quiz h3 {
+  display: flex;
+  align-items: center;
+  min-height: 3.9em;
+  margin: 0 0 8px;
+  font-size: 14px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.lecture-quiz-options {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-height: 218px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lecture-quiz-options li[hidden] {
+  display: none;
+}
+
+.lecture-quiz-options button {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 50px;
+  padding: 7px 9px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--paper);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.25;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.lecture-quiz-options button:hover,
+.lecture-quiz-options button:focus-visible,
+.lecture-quiz-options button.pad-focus {
+  border-color: var(--accent);
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.lecture-quiz-options kbd {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: linear-gradient(#f0b05a, var(--accent));
+  color: var(--ink);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+
 .hangar-sound {
   position: absolute;
   top: calc(58px + var(--safe-top));
@@ -4039,7 +4137,7 @@ body.game-mode .weapon-equipment-row > :not(.weapon-hud) {
   to { transform: scaleX(1); }
 }
 
-/* The way out, beside the Ooga's face: an arrow out of a bracket, no words. Where a place's banner has a Leave button,
+/* The way out, beside the Ooga's face: an orange arrow over EXIT, an exit sign. Where a place's banner has a Leave button,
    hud.js shows this one, named by it, and the banner's own is kept out of sight. */
 body[data-leave-hud] .presets [data-action="leave"] {
   display: none;
@@ -4053,8 +4151,8 @@ body[data-leave-hud] .presets [data-action="leave"] {
 }
 
 .leave-icon {
-  width: 40px;
-  height: 40px;
+  width: 68px;
+  height: 42px;
   flex: none;
   filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
 }
@@ -12352,8 +12450,6 @@ body.arcade-game .cloud-hopper-panel { z-index: 40; }
 .explore-coach div { display: flex; flex-wrap: wrap; gap: 8px; }
 .explore-coach button { min-height: 44px; white-space: normal; flex: 1; }
 
-.destination-map-label { position: absolute; bottom: 1px; left: 0; right: 0; font-size: 10px; line-height: 12px; color: var(--accent-text); text-shadow: 0 1px 2px #000; }
-
 /* Block Frenzy's menu: dark backing behind every line of text on the wood, so it reads. */
 #block-board .garage-head,
 #block-board .garage-col {
@@ -12760,16 +12856,71 @@ body[data-active-scene] #cave-directory-button { min-height: 44px; }
   font-size: 18px;
   cursor: pointer;
 }
-.duel-bars { display: flex; align-items: center; gap: 12px; }
-.duel-side { display: grid; grid-template-columns: auto auto; gap: 2px 6px; align-items: center; min-width: 120px; }
-.duel-name { grid-column: 1 / -1; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30vw; }
-.duel-them { text-align: right; }
-.duel-bar { display: block; width: min(140px, 28vw); height: 8px; background: rgba(0, 0, 0, 0.5); border-radius: 4px; overflow: hidden; }
-.duel-fill { display: block; width: 100%; height: 100%; background: var(--ok); transition: width 0.15s; }
-.duel-them .duel-fill { background: var(--danger); }
-.duel-hp { font-size: 11px; font-variant-numeric: tabular-nums; }
-.duel-clock { min-width: 4ch; text-align: center; font-size: 20px; font-weight: 800; color: var(--accent-text); }
+/* The panel: its title and the time left, then a row a duelist (name, bar, health, metres from the flag), one over
+   the other in shared columns. */
+.duel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.duel-title { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; }
+.duel-rows { display: grid; grid-template-columns: minmax(0, auto) auto 3ch 5ch; gap: 6px 8px; align-items: center; }
+.duel-side { display: contents; }
+.duel-name { max-width: 14ch; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.duel-far { font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; opacity: 0.85; }
+.duel-far[data-out="true"] { color: var(--danger); font-weight: 700; opacity: 1; }
+.duel-bar { position: relative; display: block; width: min(140px, 28vw); height: 8px; background: rgba(0, 0, 0, 0.5); border-radius: 4px; overflow: hidden; }
+/* Green, amber under half and orange under a quarter, as the bars over the duelists' heads; what a blow just took stays
+   red behind the bar a beat (the chip follows the same width late). */
+.duel-fill { position: relative; display: block; width: 100%; height: 100%; background: #4ade80; transition: width 0.15s; }
+.duel-fill[data-level="mid"] { background: #f2c94c; }
+.duel-fill[data-level="low"] { background: #ff9a3d; }
+.duel-chip { position: absolute; inset: 0 auto 0 0; width: 100%; background: #e0261b; transition: width 0.7s ease-out 0.35s; }
+.duel-hp { font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
+.duel-clock { font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.duel-clock[data-low="true"] { color: var(--danger); }
 .duel-note { margin: 0; color: var(--danger); font-weight: 700; }
+/* A blow taken: the view's edge flashes red (duel.js fades it). */
+.duel-flash {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, rgba(200, 16, 16, 0) 42%, rgba(200, 16, 16, 0.5) 78%, rgba(170, 8, 8, 0.85) 100%);
+}
+/* The count before the first blow and how the duel ended, large over the middle of the view. */
+.duel-count, .duel-result {
+  position: fixed;
+  left: 50%;
+  top: 21%;
+  z-index: 31;
+  margin: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  white-space: nowrap;
+}
+.duel-count, .duel-result-title {
+  font-weight: 900;
+  line-height: 1;
+  color: #ffe27a;
+  text-shadow: 0 5px 0 #24100e, -3px 0 0 #24100e, 3px 0 0 #24100e, 0 -3px 0 #24100e, 0 0 26px rgba(0, 0, 0, 0.75);
+}
+.duel-count { font-size: clamp(84px, 20vw, 200px); }
+.duel-count[data-go="true"] { font-size: clamp(56px, 13vw, 140px); color: #ff6a4d; }
+.duel-result { display: grid; justify-items: center; gap: 12px; }
+.duel-result-title { font-size: clamp(46px, 11vw, 128px); letter-spacing: 0.04em; }
+.duel-result[data-result="lost"] .duel-result-title { color: #ff5a4d; }
+.duel-result[data-result="draw"] .duel-result-title, .duel-result[data-result="over"] .duel-result-title { color: var(--paper); }
+.duel-result-line {
+  max-width: calc(100vw - 32px);
+  padding: 6px 14px;
+  color: var(--paper);
+  background: rgba(22, 20, 18, 0.88);
+  border: 2px solid var(--wood-edge);
+  border-radius: var(--radius);
+  font-size: clamp(13px, 2.4vw, 20px);
+  font-weight: 700;
+  white-space: normal;
+}
+.duel-flash[hidden], .duel-count[hidden], .duel-result[hidden] { display: none; }
 .players-duel { grid-column: 1 / -1; justify-self: start; margin-top: 6px; }
 .players-duel[hidden] { display: none; }
 /* On a narrow screen the movement coaching card spans the top: the duel's cards stand below it while it shows. */

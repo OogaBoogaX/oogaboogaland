@@ -405,11 +405,17 @@ const destinationMapCoachingHintProof = () => {
     matchMedia: () => ({ matches: false }), addEventListener() {}, removeEventListener() {} };
   const context = { window, document, localStorage: { getItem: () => null, setItem() {} } };
   runInNewContext(readFileSync(join(root, "src/js/destination-map.js"), "utf8"), context);
-  const scene = { id: "hub" }, map = window.BL.destinationMap.create({ current: () => scene, ready: () => true });
-  map.connect({ available: () => true, travels: () => true, selected: () => null, names: () => ["pile"], label: n => n, travel: () => true, controlled: () => false, position: () => null });
+  const scene = { id: "hub" }, provider = { available: () => true, travels: () => true, selected: () => null, names: () => ["pile"], label: n => n, travel: () => true, controlled: () => false, position: () => null };
   const coach = el("explore-coach");
+  // Until its redesign the card and its replay button show only where the page asks for them.
+  const plain = window.BL.destinationMap.create({ current: () => scene, ready: () => true });
+  plain.connect(provider); plain.update();
+  const offByDefault = coach.hidden && el("controls-learn").hidden;
+  plain.dispose();
+  const map = window.BL.destinationMap.create({ current: () => scene, ready: () => true, offerCoach: true });
+  map.connect(provider);
   map.update();
-  const offered = !coach.hidden;
+  const offered = !coach.hidden && !el("controls-learn").hidden;
   // A floating Oogatron board is a non-modal dialog: it must not hide the coaching hint.
   state.otherDialog = Object.assign(el("board"), { open: true, floating: true });
   map.update();
@@ -422,7 +428,7 @@ const destinationMapCoachingHintProof = () => {
   map.update();
   const restored = !coach.hidden;
   map.dispose();
-  return { offered, floatingShows, modalHides, restored };
+  return { offByDefault, offered, floatingShows, modalHides, restored };
 };
 // Rule: exercise the actual bounded rage state machine with a small physical
 // adapter. Collision and the rendered carry are covered by the hub regressions.
@@ -6322,7 +6328,7 @@ const hammockChecks = async () => {
       R.math.mat4.transformPoint(target, ham.bedNode.world, ...rope.ring);
       ropeError = Math.max(ropeError, Math.hypot(...at.map((v, k) => v - target[k])));
     }
-    const v = ham.bedNode.geometry.verts;
+    const v = ham.restBed.verts;
     for (let k = 0; k < v.length; k += 3) {
       R.math.mat4.transformPoint(at, ham.bedNode.world, v[k], v[k + 1], v[k + 2]);
       const dx = at[0] - fit.x, dz = at[2] - fit.z, along = dx * fit.ux + dz * fit.uz, side = dx * fit.nx + dz * fit.nz;
@@ -6554,14 +6560,14 @@ const hammockChecks = async () => {
   // through the real collision shell: its support, then its body above the step, as the hub's `walkable` asks.
   const STEP = Number(/WALK = \{[^}]*step: ([\d.]+)/.exec(await readFile(new URL("../src/js/pilot.js", import.meta.url), "utf8"))[1]);
   // The gap from a walker's footprint to the nearest drawn part of the resting bed (cloth, edge cords, spreaders), seen
-  // from above: every face edge of the bed's own mesh, in its frame (x along, z across).
+  // from above: every face edge of the bed at rest (`restBed`, the lowest its cloth lies occupied), in its frame (x along, z across).
   // Each face's corner indices, through the compact reader where a mesh is packed.
   const eachFace = (g, fn) => {
     const cursor = g.compactGeometry ? R.compactGeometry.createCursor(g) : null;
     for (let f = 0; f < g.faces.length; f++) fn(Array.from((cursor ? R.compactGeometry.readFace(g, f, cursor) : g.faces[f]).i));
   };
   const bedEdges = [];
-  { const g = ham.bedNode.geometry, v = g.verts;
+  { const g = ham.restBed, v = g.verts;
     eachFace(g, ids => { for (let k = 0; k < ids.length; k++) { const a = ids[k] * 3, b = ids[(k + 1) % ids.length] * 3; bedEdges.push(v[a], v[a + 2], v[b], v[b + 2]); } }); }
   const drawnGap = (along, across) => {
     let best = Infinity;
@@ -6616,10 +6622,10 @@ const hammockChecks = async () => {
   // This fixture runs the real equipment poser, without creating movement or NPC systems.
   R.pilot = { WALK: { speed: 0, gravity: 1, step: 0 } };
   runInNewContext(await readFile(new URL("../src/js/crew.js", import.meta.url), "utf8"), real);
-  // The drawn cloth's own footprint at rest, from the bed's mesh in its frame (x along, z across, the holder's too): as
+  // The drawn cloth's own footprint at rest, from the bed at rest (`restBed`) in its frame (x along, z across, the holder's too): as
   // long as the cloth and the spreaders' thickness, as wide as the cloth and its edge cords away from the spreaders.
   let clothLong = 0, clothWide = 0;
-  { const v = ham.bedNode.geometry.verts;
+  { const v = ham.restBed.verts;
     for (let k = 0; k < v.length; k += 3) if (Math.abs(v[k + 2]) < 0.3) clothLong = Math.max(clothLong, Math.abs(v[k]));
     for (let k = 0; k < v.length; k += 3) if (Math.abs(v[k]) < clothLong - 0.2) clothWide = Math.max(clothWide, Math.abs(v[k + 2])); }
   // Stowed gear as drawn, every visible triangle in the holder's frame: each part flat (no taller than it is wide),
@@ -6631,7 +6637,7 @@ const hammockChecks = async () => {
   const clothTriangles = (a) => {
     const turn = ham.bedNode.rotation.x;
     ham.bedNode.rotation.x = a; R.scene.updateWorld(root);
-    const g = ham.bedNode.geometry, v = g.verts, w = [], tris = [];
+    const g = ham.restBed, v = g.verts, w = [], tris = [];
     let lowest = Infinity;
     for (let k = 0; k < v.length; k += 3) {
       R.math.mat4.transformPoint(point, ham.bedNode.world, v[k], v[k + 1], v[k + 2]);
@@ -9488,6 +9494,20 @@ const gameRulesChecks = async () => {
         !W.mayWatch(null, false) && !!W.mayWatch({ id: 1 }, false) && !!W.mayWatch(null, true) && left === true && opened.join() === "block,watch-deck" && wayBack
         && shown && trigger && rock && crosses && seamless && onlyOpening && levels && clearDoor && back,
         JSON.stringify({ left, opened, wayBack, shown, trigger, rock, crosses, seamless, onlyOpening, levels, clearDoor, back }));
+      // Regression: the door's trigger had no far side, so the strip of Ghost Hunter's arena level with it sent an Ooga
+      // to Block Frenzy. Nowhere in the arena, its hallway or the main hall is Block Frenzy's ground, at any height, and
+      // every handover to Block Frenzy in the scene asks for that ground.
+      const { HALL: MH, HAUNT: HT, MEZZ: MZ } = BL.arcadeModels, AR = HT.arena, strays = [];
+      const stray = (x, z) => { for (const feet of [0, MZ.y - 0.5, MZ.y, MZ.y + 0.5]) if (W.onBlockGround(x, z) || W.atPortal(x, z, feet)) { if (strays.length < 4) strays.push([+x.toFixed(2), +z.toFixed(2), feet]); return; } };
+      for (let x = AR.x - AR.r; x <= AR.x + AR.r; x += 0.25) for (let z = AR.z - AR.r; z <= AR.z + AR.r; z += 0.1) if (Math.hypot(x - AR.x, z - AR.z) <= AR.r) stray(x, z);
+      for (let x = MH.halfW - 2; x <= HT.end + 2; x += 0.25) for (let z = HT.z0; z <= HT.z1; z += 0.1) stray(x, z);
+      for (let x = -MH.halfW; x <= MH.halfW; x += 0.25) for (let z = MH.back; z <= MH.front; z += 0.1) stray(x, z);
+      const own = W.onBlockGround(D.plane, D.z) && W.onBlockGround(D.reach, D.z) && W.onBlockGround(H.x, H.ledge) && W.onBlockGround(H.top.x, H.fade - 1) && W.onBlockGround(H.stop.x, H.stop.z) && !W.atPortal(D.reach + 0.1, D.z, D.y);
+      const sa = await readFile(new URL("../src/js/scene-arcade.js", import.meta.url), "utf8");
+      const handovers = sa.split("\n").filter(line => /open\("block"|goToWatchDeck\(|setBlend\("block-frenzy"/.test(line)), asked = handovers.filter(line => /AW\.onBlockGround\(|AW\.mayWatch\(/.test(line));
+      const doorAsked = /if \(AW\.atPortal\(p\.x, p\.z, p\.y - avatar\.baseY\)\) \{[^\n]*enterWatchDoor\(\)/.test(sa) && sa.split("enterWatchDoor()").length === 2;
+      record("arcade zones: no spot in Ghost Hunter's arena, its hallway or the main hall is Block Frenzy's ground, and every handover to Block Frenzy asks for it",
+        strays.length === 0 && own && handovers.length === 3 && asked.length === 3 && doorAsked, JSON.stringify({ strays, own, handovers: handovers.length, asked: asked.length, doorAsked }));
       // The scene's own full-chairs answer and update bounce, run with a director that refuses `go` while the arrival fades in.
       const fullAnswer = sb.match(/onChairsFull: (\(\) => \{.*\}) \}\);/)?.[1], bounceLine = sb.match(/^ {4}if \(chairsBounce\b.*$/m)?.[0];
       if (!fullAnswer || !bounceLine) throw Error("block chairs bounce anchors missing");
@@ -12682,7 +12702,7 @@ const hubHammockEntry = { name: "hub hammock entry", why: "regression: walking a
     // out to the spreader bars, the Ooga comes right up to the bed on foot (the hub may then lead it round), never into it.
     // The bed's drawn edges seen from above in its own frame (x along, z across the plan's n), for the gap from the
     // walker's 0.3 m footprint to the nearest drawn part while its feet are on the ground.
-    const g=H.bedNode.geometry,v=g.verts,C=BL.compactGeometry,cur=g.compactGeometry?C.createCursor(g):null,edges=[];
+    const g=H.restBed,v=g.verts,C=BL.compactGeometry,cur=g.compactGeometry?C.createCursor(g):null,edges=[];
     for(let f=0;f<g.faces.length;f++){const ids=(cur?C.readFace(g,f,cur):g.faces[f]).i;for(let k=0;k<ids.length;k++){const a0=ids[k]*3,b0=ids[(k+1)%ids.length]*3;edges.push(v[a0],v[a0+2],v[b0],v[b0+2]);}}
     const gapAt=(x,z)=>{const al=(x-p.x)*p.ux+(z-p.z)*p.uz,ac=(x-p.x)*p.nx+(z-p.z)*p.nz;let best=Infinity;
       for(let k=0;k<edges.length;k+=4){const dx=edges[k+2]-edges[k],dz=edges[k+3]-edges[k+1],l=dx*dx+dz*dz,t=l?Math.max(0,Math.min(1,((al-edges[k])*dx+(ac-edges[k+1])*dz)/l)):0;best=Math.min(best,Math.hypot(al-edges[k]-dx*t,ac-edges[k+1]-dz*t));}
@@ -20738,10 +20758,10 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
   record("hub distant effects: a changed backlog holds while the Mempool island rests and its water reaches the latest level on the first nearby frame", water.paused && water.held && water.resumed, JSON.stringify(water));
   const clouds = await b.evaluate(`(() => {
     const B = __ooga, D = BL.scenes.hub.debug.matrixCave, list = D.clouds, solids = B.headquarters.solids.props;
-    const initial = list.map(c => {
+    const initial = list.map((c, i) => {
       const bounds = BL.scene.boundsOf(c.node.geometry);
       const halfLength = Math.max(Math.abs(bounds.min[0]), Math.abs(bounds.max[0])), halfDepth = Math.max(Math.abs(bounds.min[2]), Math.abs(bounds.max[2]));
-      return { cloud: c, node: c.node, geometry: c.node.geometry, radius: Math.hypot(c.node.position.x, c.node.position.z), track: c.radius,
+      return { cloud: c, speaker: [3, 10, 14].includes(i), node: c.node, geometry: c.node.geometry, radius: Math.hypot(c.node.position.x, c.node.position.z), track: c.radius,
         y: c.node.position.y, speed: c.speed, x: c.node.position.x, z: c.node.position.z, turn: 0, low: bounds.min[1], high: bounds.max[1],
         minY: c.node.position.y, maxY: c.node.position.y, maxVerticalSpeed: 0, reach: Math.hypot(halfLength, halfDepth),
         inner: c.radius - halfDepth, outer: Math.hypot(c.radius + halfDepth, halfLength) };
@@ -20801,12 +20821,18 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
     }
     out.laps = Math.min(...initial.map(c => c.turn / (Math.PI * 2)));
     out.rings = [36, 40].map(radius => {
-      const ring = initial.filter(c => c.track === radius);
+      const ring = initial.filter(c => c.track === radius && !c.speaker);
       return { radius, minHeight: Math.min(...ring.map(c => c.minY)), maxHeight: Math.max(...ring.map(c => c.maxY)),
         maxVerticalSpeed: Math.max(...ring.map(c => c.maxVerticalSpeed)),
         eachCloudDips: ring.every(c => c.minY < (radius === 36 ? -3.9 : 2.1)),
         eachCloudRises: ring.every(c => c.maxY > (radius === 36 ? 1.9 : 10.9)) };
     });
+    out.treetop = Math.max(BL.terrain.MAX_HEIGHT, ...B.props.filter(o => o.prop === "tree").map(o =>
+      o.node.position.y + BL.scene.boundsOf(o.node.geometry).max[1] * o.node.scale.y));
+    out.speakers = initial.filter(c => c.speaker).map(c => ({
+      track: c.track, minBottom: c.minY + c.low, maxBottom: c.maxY + c.low, maxVerticalSpeed: c.maxVerticalSpeed,
+      rise: c.maxY - c.minY
+    }));
     // Ordinary hub combat must leave the cloud lanes at their actual world heights.
     const P = B.pilot, actor = B.cavemen.get("portlandhodl");
     try {
@@ -20822,11 +20848,13 @@ const hubDistantEffects = { name: "hub distant effects", why: "rule: distant por
     } finally { P.release(true); P.goPreset("pile"); B.advance(0.1, 1 / 60); }
     return out;
   })()`);
-  record("hub distant effects: all 18 decorative clouds keep size, orbit and spacing for two full laps, dip and rise gently through their inner -4..2m and outer 2..11m height bands, stay horizontal and tangent, and never become collision surfaces", clouds.initialized && clouds.persistent && clouds.decorative && clouds.horizontal && clouds.tangent
+  record("hub distant effects: all 18 decorative clouds keep size, orbit and spacing for two full laps, keep the three speaker clouds above the rooftop trees and the other clouds in their inner -4..2m and outer 2..11m height bands, stay horizontal and tangent, and never become collision surfaces", clouds.initialized && clouds.persistent && clouds.decorative && clouds.horizontal && clouds.tangent
     && clouds.seconds > 145 && clouds.laps >= 2 && clouds.radialDrift < 1e-8
     && clouds.rings.length === 2 && clouds.rings.every(ring => ring.eachCloudDips && ring.eachCloudRises
       && ring.minHeight >= (ring.radius === 36 ? -4 : 2) && ring.maxHeight <= (ring.radius === 36 ? 2 : 11)
       && ring.maxVerticalSpeed <= (ring.radius === 36 ? 0.2 : 0.25))
+    && clouds.speakers.length === 3 && clouds.speakers.every(c => c.minBottom >= clouds.treetop + 2 && c.maxBottom <= clouds.treetop + (c.track === 36 ? 8 : 11)
+      && c.rise > (c.track === 36 ? 5.9 : 8.9) && c.maxVerticalSpeed <= (c.track === 36 ? 0.2 : 0.25))
     && clouds.maxTravelExcess < 1e-7 && clouds.minGap > 0 && clouds.spacingDrift < 1e-8
     && clouds.cutaway?.selected && clouds.cutaway.view === "shoulder" && clouds.cutaway.combat && !clouds.cutaway.active && clouds.cutaway.mix === 0 && clouds.cutaway.heights
     && state.horizon.every(row => row.clouds.length === 18 && row.clouds.every(c => c.visible && c.moving)), JSON.stringify(clouds));
@@ -22992,6 +23020,10 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
     out.mouth = at({ x: lab.x, y: 0, z: lab.z }, 0.5);
     const outX = labMouth.x + (labMouth.apron.x - labMouth.x) * 2.5, outZ = labMouth.z + (labMouth.apron.z - labMouth.z) * 2.5;
     out.apron = at({ x: outX, y: D.island.surfaceAt(outX, outZ), z: outZ }, 0.5);
+    out.canopies = ["c2", "c3"].map((id) => {
+      const m = D.island.mouths.find((mouth) => mouth.id === id), along = -2;
+      return at({ x: m.x + Math.sin(m.ry) * along, y: m.floorY, z: m.z + Math.cos(m.ry) * along }, 0.5);
+    });
     out.air = at({ x: 53.7, y: 8, z: -31 }, 0.5);
     // Inside the Sphere's shell, down its passage short of the curtain, and Merge Rock, which has no public scope yet.
     // Only a crossing's Ooga stands behind the doors (timechain-gate.js puts one left there on the bridge), so the
@@ -23013,11 +23045,13 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
     lands.every((land) => r[land].home.scope === "main" && r[land].bridge.scope === "main" && r[land].land.scope === "main")
       && r.apron.scope === "main" && r.air.scope === "main" && r.mouth.scope === null && r.mouth.reason === "interior"
       && r.passage.scope === null && r.passage.reason === "interior" && (!r.repos || r.repos.scope === null && r.repos.reason === "unscoped"), JSON.stringify(r));
+  record("outdoor scope: covered cave approaches before the Arcade doors and Factory shield stay in Main Island",
+    r.canopies.every((p) => p.zone === "outside" && p.scope === "main"), JSON.stringify(r.canopies));
   // Levels: by height off the island's edge, and down HQ's ramps, its basement's and the rainforest's descent.
   const lv = await b.evaluate(`(() => {
     const B = __ooga, D = BL.scenes.hub.debug, H = D.island.headquarters, M = __ooga.poolIsland, L = BL.poolLayout, net = BL.net.state;
     const at = (x, y, z) => { B.pilot.navigate({ position: { x, y, z }, yaw: 0, pitch: 0.4, dist: 6 }); B.advance(0.6, 1 / 60); return { to: net.blendTo, t: +net.blendT.toFixed(2), zone: net.zone, scope: BL.outdoorScope.state.scope, reason: BL.outdoorScope.state.reason }; };
-    const air = (feet) => { const o = { to: "", t: 0 }; return D.levelOf(53.7, feet, -31, "between", o) ? { to: o.to, t: +o.t.toFixed(2) } : null; };
+    const air = (feet) => { const o = { to: "", t: 0 }, descending = D.levelOf(53.7, feet, -31, "between", o); return descending ? { to: o.to, t: +o.t.toFixed(2), reason: BL.outdoorScope.hubReason("between", false, descending) } : null; };
     const near = (samples, y) => samples.reduce((best, p) => Math.abs(p.y - y) < Math.abs(best.y - y) ? p : best);
     const world = (lx, ly, lz) => [M.worldX(lx, lz), M.place.y + ly, M.worldZ(lx, lz)], down = L.rampPoint(50), room = H.basement.rooms[0];
     const entrance = near(H.ramps[0].samples, H.floor / 2), stair = near(H.basement.ramps[0].samples, (H.floor + H.basement.floor) / 2);
@@ -23032,6 +23066,8 @@ const hubVoiceLevels = { name: "voice levels", why: "rule: in the main world the
   record("voice levels: off the island's edge height alone picks the level: the surface a metre under the plane, then HQ's, then the basement's, all the way down",
     a.over === null && a.dip === null && a.half.to === "hq" && Math.abs(a.half.t - 0.5) <= 0.01 && a.floor.to === "hq" && a.floor.t === 1 && a.under.to === "hq" && a.under.t === 1
       && a.down.to === "hq-basement" && Math.abs(a.down.t - 0.5) <= 0.01 && a.deep.to === "hq-basement" && a.deep.t === 1, JSON.stringify(a));
+  record("outdoor scope: air below the main island's surface level is excluded at every depth",
+    [a.half, a.floor, a.under, a.down, a.deep].every((p) => p.reason === "descending"), JSON.stringify(a));
   record("voice levels: down HQ's entrance ramps, its basement's and the rainforest's descent a player hears both levels by height, each level alone on it, its rooms HQ's whatever the height, never the lake over the chamber",
     lv.entrance.to === "hq" && Math.abs(lv.entrance.t - lv.rampShare) <= 0.05 && lv.floor.to === "hq" && lv.floor.t === 1 && lv.floor.zone === "hq" && lv.stair.to === "hq-basement" && Math.abs(lv.stair.t - 0.5) <= 0.05 && lv.stair.zone === "hq-basement"
       && lv.basement.to === "hq-basement" && lv.basement.t === 1 && lv.basement.zone === "hq-basement" && lv.backUp.to === "hq" && lv.backUp.t === 1 && lv.backUp.zone === "hq"
@@ -25606,8 +25642,8 @@ scene("poker", { opts: PHONE_SIZE, steps: [phone("poker", { card: '[data-intro="
 scene("hub", { label: "gorilla population restoration", query: "status=clankin", exclusive: true, opts: { motion: true }, steps: [hubGorillaPopulation] });
 scene("hub", { label: "weapons", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1&gorillarage=1", steps: [hubCombatGate, ...[hubAk, hubMelee, hubJetpack].map(gameCombat)] });
 // Her greeting comes once a page, to a fresh landing nothing has moved, so the guide has its own page.
-scene("hub", { label: "guide", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubGuide, hubAsk, hubTourInput, hubSharedGuide] });
-scene("hub", { label: "shared guide phone", opts: { w: 390, h: 844, mobile: true }, query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1", steps: [hubSharedGuide] });
+scene("hub", { label: "guide", query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1&coach=1", steps: [hubGuide, hubAsk, hubTourInput, hubSharedGuide] });
+scene("hub", { label: "shared guide phone", opts: { w: 390, h: 844, mobile: true }, query: "ooga=portlandhodl:clank:lab,obl,lf&character=portlandhodl&jetpack=1&coach=1", steps: [hubSharedGuide] });
 // Native pointer-lock assertions need sole focus; another browser lane can
 // steal capture and spend this long scenario's deadline waiting for it back.
 scene("hub", { label: "camera modes", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", exclusive: true, steps: [hubCameraModes] });
@@ -26175,7 +26211,7 @@ scene("hub", { label: "join alerts", query: "pos=0", steps: [hubJoinAlerts] });
 scene("hub", { label: "private chat", query: "pos=0", steps: [hubPrivateChat] });
 scene("hub", { label: "player preferences", query: "pos=0", steps: [hubPlayerPreferences] });
 scene("hub", { label: "player preferences", query: "pos=0", opts: PHONE_SIZE, steps: [hubPlayerPreferences] });
-scene("hub", { label: "clock and block height", query: "pos=0&time=0900", steps: [hubBlockHeight, hubDestinationNames] });
+scene("hub", { label: "clock and block height", query: "pos=0&time=0900&coach=1", steps: [hubBlockHeight, hubDestinationNames] });
 // Rally is out of order for visitors; the tour still boots it on Canvas 2D through its retained maintenance opt-in
 // (`wip=race` alone would land the page in Rally, so it names the island).
 scene("hub", { label: "canvas2d", query: "canvas2d=1&scene=hub&wip=race", steps: [hubMatrix, canvasTour] });
@@ -26401,7 +26437,7 @@ for (const ready of [false, true]) scene("dsb", { label: "entrance audio " + rea
         const original = AudioContext.prototype.createBufferSource, gainOriginal = AudioContext.prototype.createGain, audio = __ooga.audio, fade = audio.fade;
         window.__entranceLeave = { original, gainOriginal, gains: [], context: null, fade: 0 };
         AudioContext.prototype.createGain = function() { const gain = gainOriginal.call(this); __entranceLeave.gains.push(gain); return gain; };
-        AudioContext.prototype.createBufferSource = function() { window.__entranceLeave.context = this; return original.call(this); };
+        AudioContext.prototype.createBufferSource = function() { if (__ooga.scene === "dsb" && !__ooga.transitioning) window.__entranceLeave.context = this; return original.call(this); };
         audio.fade = seconds => { window.__entranceLeave.fade = seconds; fade(seconds); };
       })()`);
       const p = await b.evaluate(`(() => { const r = document.getElementById("dsb-start-audio").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
@@ -28061,7 +28097,7 @@ const footstepChecks = BL => {
 // when someone is listed, without touching the visitor's own mute or telling the room. voice.js runs in a fixture
 // with a fake microphone, peer connection and Worker, so every state of the track is read directly.
 const voiceAloneChecks = async () => {
-  const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8"),ops=[],netMuted=[],emits=[];
+  const source=readFileSync(join(root,"src/js/duel-listening.js"),"utf8")+readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8"),ops=[],netMuted=[],emits=[];
   const track={enabled:true,stop(){},clone(){return {enabled:true,stop(){}};}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
   class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0\r\na=candidate:1 1 udp 2122260223 127.0.0.1 9 typ host\r\n"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
   class Audio {constructor(){this.muted=false;}pause(){}play(){return Promise.resolve();}}
@@ -28109,7 +28145,7 @@ const voiceAloneChecks = async () => {
 };
 // A fresh fixture of voice.js for the failure paths: whatever the SFU refuses is named in `failing`, and timers are held.
 const voiceFailureChecks = async () => {
-  const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8");
+  const source=readFileSync(join(root,"src/js/duel-listening.js"),"utf8")+readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8");
   const page=(joined=false,AudioContext=undefined)=>{
     const timers=[],calls=[],bodies=[],pcs=[],failing=new Set(),holds=new Map();let holdLeave=null;
     const track={enabled:true,stopped:false,stop(){this.stopped=true;},clone(){return {enabled:true,stop(){}};}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
@@ -28182,7 +28218,7 @@ const voiceFailureChecks = async () => {
 // Someone who pressed Join voice comes back in voice, muted, on their first press, with the microphone never touched
 // until they unmute; only Leave voice ends that. voice.js runs per "page" over one shared localStorage.
 const voiceReturnChecks = async () => {
-  const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8");
+  const source=readFileSync(join(root,"src/js/duel-listening.js"),"utf8")+readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8");
   const stored=new Map(),settle=()=>new Promise(r=>setTimeout(r,0));
   const page=({active=false,zone="outside",denied=false}={})=>{
     const ops=[],told=[],presses=new Map();let mics=0;
@@ -28275,7 +28311,7 @@ const voiceHandoffChecks = () => {
 };
 // iOS keeps every element at 1; both paths must sound the same at every step.
 const voiceHearingChecks = async () => {
-  const source=readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8"),settle=()=>new Promise(r=>setTimeout(r,0));
+  const source=readFileSync(join(root,"src/js/duel-listening.js"),"utf8")+readFileSync(join(root,"src/js/contributor-identities.js"),"utf8")+readFileSync(join(root,"src/js/voice.js"),"utf8"),settle=()=>new Promise(r=>setTimeout(r,0));
   const remote=(login,zone,x,z,placed=true)=>({login,zone,poseZone:placed?zone:null,x,y:0,z});
   const rig=(ios,webAudio=true,saved=null,store=new Map())=>{
     const ops=[],bodies=[],netMuted=[],timers=new Map(),els=[],pulled=[],gains=[],limiters=[],ctxs=[],handlers=new Map(),subscribers=new Set();let timerId=0,onTrack=null,captures=0;
@@ -28423,6 +28459,31 @@ const voiceHearingChecks = async () => {
   const savedPlayers={desktop:await preferences(false),ios:await preferences(true)};
   record("voice player preferences: prejoin settings request no microphone or connection, reload applies mute and real boost before the first track, volume never unmutes or bypasses range and zones, stable identities survive renames and environments, and shared-browser accounts remain separate",
     Object.values(savedPlayers).every(r=>r.prejoin&&r.reload&&r.landedOutside&&r.receiveOnly&&r.limited&&r.initial==="0,1.5,0"&&r.boost==="2,1.5,0"&&r.muteWins==="2,0,0"&&r.volumeIndependent&&r.boundary==="0"&&r.returned==="2"&&r.listenerAway==="0"&&r.listenerBack==="0.25"&&r.identity&&r.otherAccount&&r.restored&&r.signedOut&&r.localOnly&&r.legacyUntouched&&r.disposed),JSON.stringify(savedPlayers));
+  const duelListening = async (webAudio) => {
+    const r = rig(false, webAudio), V = r.V;
+    await V.enable(); await settle(); V.setPeers([2, 3, 4], [1, 1, 1]); await settle(); r.land([2, 3, 4]);
+    const sent = r.ops.length, defaultOff = !V.stats.muteDuels;
+    V.duel({ op: "start", id: 1, a: 2, b: 3 });
+    const unchecked = r.levels([2, 3]) === "1,1";
+    V.setVolume(3, .5); V.muteLocal(2, true); V.setMuteDuels(true);
+    const silenced = r.levels([2, 3]) === "0,0" && !V.mutedLocally(3) && V.volumeOf(3) === .5;
+    V.duel({ op: "end", id: 1 });
+    const restored = r.levels([2, 3]) === "0,0.5";
+    V.duel({ op: "list", duels: [{ id: 2, a: 71, b: 2 }, { id: 3, a: 3, b: 4 }] }); V.muteLocal(2, false);
+    const exception = r.levels([2, 3, 4]) === "1,0,0";
+    V.setMuteDuels(false);
+    const disabled = r.levels([2, 3, 4]) === "1,0.5,1";
+    V.setMuteDuels(true); V.duel({ op: "lost" });
+    const lost = r.levels([2, 3, 4]) === "1,0.5,1", local = sent === r.ops.length;
+    const saved = r.store.get("oogaboogaland.voice-players.71.duels") === "true";
+    r.account({ id: 72, login: "other" }); const other = !V.stats.muteDuels;
+    r.account({ id: 71, login: "listener" }); const remembered = V.stats.muteDuels;
+    V.dispose();
+    return { defaultOff, unchecked, silenced, restored, exception, disabled, lost, local, saved, other, remembered };
+  };
+  const duelAudio = [await duelListening(true), await duelListening(false)];
+  record("voice duel listening: opt-in only, both duelists silenced through gain or element, own pair exempt while other duels stay muted, ends/loss restore manual levels and account choices stay separate",
+    duelAudio.every((r) => Object.values(r).every(Boolean)), JSON.stringify(duelAudio));
   // #392: between two levels each voice plays at its equal-power share (an islander, someone on HQ's level and a second
   // climber halfway, each in a zone of their own), on iOS through its gain as on the desktop, and the hearing range is
   // measured across the main world.
@@ -30938,9 +30999,9 @@ const playersColumnChecks = async () => {
     runInNewContext(await readFile(join(root, "src/js/voice-blend.js"), "utf8"), context);
     Object.assign(window.BL, {
       net: { state: { room: "live", me: { login: "me", display: "Me" }, selfId: 1, online: 3, zone: "outside", hostId: 0, self: { x: 0, y: 0, z: 0, zone: "outside" }, voiceLinks: false, clouds: [] }, remotes,
-        voiceLink: () => "none", toggleVoiceLink() {}, subscribe() {}, subscribeRoster() {}, subscribeMoves() {}, subscribePresence() {}, subscribeReactions() {}, subscribeAudience() {}, subscribeClouds() {} },
+        voiceLink: () => "none", toggleVoiceLink() {}, subscribe() {}, subscribeRoster() {}, subscribeMoves() {}, subscribePresence() {}, subscribeReactions() {}, subscribeAudience() {}, subscribeClouds() {}, subscribeDuel() {} },
       hud: { voiceIcon: make("svg"), voiceWords: () => "In voice", toast() {} },
-      voice: { stats: { enabled: true, muted: false, speaking: false, radius: 0 }, fades: false, RADIUS_MIN: 5, RADIUS_MAX: 60, VOLUME_MAX: 2, subscribe() {}, speaking: () => false, inEarshot: () => true, mutedLocally: () => false, volumeOf: () => 1, setVolume() {}, setRadius() {} },
+      voice: { stats: { enabled: true, muted: false, speaking: false, radius: 0 }, fades: false, RADIUS_MIN: 5, RADIUS_MAX: 60, VOLUME_MAX: 2, subscribe() {}, speaking: () => false, inEarshot: () => true, mutedLocally: () => false, mutedByDuel: () => false, duel() {}, setMuteDuels() {}, volumeOf: () => 1, setVolume() {}, setRadius() {} },
       sheet: { visible: () => true, setBadge() {}, watchViews() {}, attending: () => true }, sound: { muted: false, subscribe() {} }, pilot: { turnToward() {} } });
     runInNewContext(await readFile(join(root, "src/js/players.js"), "utf8"), context);
     handlers.sheetchange();
@@ -31638,7 +31699,9 @@ const raceRigChecks = async () => {
     // Depth pre-pass "no image change" rendering core: the shared vertex and fragment
     // bytes the depth-only and plain variants derive from, plus the untouched shadow path.
     // Packed mesh vertices decode into aNormal and aColor at the top of main (was 6bed3532).
-    "4184e76c3501711766e5229bc42eb5d249eb88212b5a9cf3b9086ebe5767286d",
+    // The Mempool lake's swells, re-baselined on purpose: taller swells and a third chop wave, with overlapping
+    // impacts limited at 40 cm (pool-water.js WAVE_HEIGHT) instead of 18 (4184e76c to f52ddf00); only lake faces.
+    "f52ddf003b0ae84dd698facdd3fb70ba549d41f05e62314a213f369d0fe079a6",
     // The fragment shader, re-baselined on purpose: 487d99ac909f added uObjectSlab2 for the Factory roof bore
     // (b82d02f4 to f5f71f79), ab4ebcd sampled retained canvas surfaces (to c98cc70d) and e32e91e sampled the
     // foliage LOD atlas (to fb12fd53). Removing those additions would not restore b82d02f4 alone.
@@ -32718,11 +32781,11 @@ const studioCatalogueProof = async () => {
 
 // Exercise the shipped voice lifecycle with deferred permissions/signaling and no real devices/network.
 const studioVoiceLifecycleProof = async () => {
-  const source=await readFile(join(root,"src/js/voice.js"),"utf8");
-  const fixture=(gathering="complete",candidate=true,failFirstPeer=false,voiceTurn=false)=>{
+  const source=await readFile(join(root,"src/js/duel-listening.js"),"utf8")+await readFile(join(root,"src/js/voice.js"),"utf8");
+  const fixture=(gathering="complete",candidate=true,failFirstPeer=false,voiceTurn=false,stunDead=false)=>{
     const calls=[],streams=[],peers=[],elements=[],timers=new Map(),failing=new Map(),clock={at:null};let timerId=0,gum=0,permission=null,publishResponse=null,deferred=null,peerAttempts=0;
     class Peer {
-      constructor(config){this.config=config;if(++peerAttempts===1&&failFirstPeer)throw Error("probe construction failed");peers.push(this);this.connectionState="connected";this.iceGatheringState=gathering;this.localDescription=null;this.handlers=new Map();}
+      constructor(config){this.config=config;if(++peerAttempts===1&&failFirstPeer)throw Error("probe construction failed");peers.push(this);this.connectionState=stunDead&&config.iceServers.some(s=>s.urls.startsWith("stun:"))?"new":"connected";this.iceGatheringState=gathering;this.localDescription=null;this.handlers=new Map();}
       addEventListener(k,fn){this.handlers.set(k,fn);}
       removeEventListener(k){this.handlers.delete(k);}
       addTransceiver(track){this.track=track;return {mid:"0"};}
@@ -32736,7 +32799,7 @@ const studioVoiceLifecycleProof = async () => {
     class Sound {constructor(){this.pending=[];elements.push(this);}play(){return new Promise((resolve,reject)=>this.pending.push({resolve,reject}));}pause(){this.pauses=(this.pauses||0)+1;}}
     const makeStream=()=>{const track={enabled:true,stops:0,stop(){this.stops++;}},stream={track,getTracks:()=>[track],getAudioTracks:()=>[track]};streams.push(stream);return stream;};
     const win={BL:{net:{state:{room:"live",voiceTurn,connectionToken:"synthetic",me:{id:900,login:"listener"}},remotes:new Map(),voiceLink:()=>"none",subscribe:()=>()=>{},setMuted:on=>calls.push({op:"mute",on}),probe:()=>calls.push({op:"probe"})}},setTimeout:(fn,delay)=>{timers.set(++timerId,{fn,delay});return timerId;},clearTimeout:id=>timers.delete(id),setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id)};
-    const context={window:win,Date:{now:()=>clock.at??Date.now()},document:{createElement:()=>({})},localStorage:{getItem:()=>null,setItem(){}},AbortController,RTCPeerConnection:Peer,Audio:Sound,MediaStream:class {constructor(tracks){this.tracks=tracks;}getTracks(){return this.tracks;}},navigator:{mediaDevices:{enumerateDevices:async()=>[{kind:"audioinput",deviceId:"synthetic-mic",label:"Synthetic mic"},{kind:"videoinput",deviceId:"camera",label:"Camera"}],getUserMedia:constraints=>{gum++;calls.push({op:"capture",constraints});return permission||Promise.resolve(makeStream());}}},
+    const context={window:win,Date:{now:()=>clock.at??Date.now()},document:{createElement:()=>({})},localStorage:{getItem:()=>null,setItem(){},removeItem(){}},AbortController,RTCPeerConnection:Peer,Audio:Sound,MediaStream:class {constructor(tracks){this.tracks=tracks;}getTracks(){return this.tracks;}},navigator:{mediaDevices:{enumerateDevices:async()=>[{kind:"audioinput",deviceId:"synthetic-mic",label:"Synthetic mic"},{kind:"videoinput",deviceId:"camera",label:"Camera"}],getUserMedia:constraints=>{gum++;calls.push({op:"capture",constraints});return permission||Promise.resolve(makeStream());}}},
       fetch:async(url,options)=>{const op=url.split("/").at(-1);calls.push({op,body:JSON.parse(options.body)});if(failing.get(op)>0){failing.set(op,failing.get(op)-1);return {ok:false,status:502,json:async()=>({error:"synthetic failure"})};}if(deferred?.op===op)return deferred.promise;if(op==="publish"&&publishResponse)return publishResponse;if(op==="pull")return {ok:true,json:async()=>({tracks:JSON.parse(options.body).ids.map(id=>({id,mid:String(id)}))})};return {ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})};}};
     runInNewContext(source,context);
     return {net:win.BL.net,clock,failNext(op,n=1){failing.set(op,n);},fire(delay){const found=[...timers].find(([,task])=>task.delay===delay);if(!found)return false;timers.delete(found[0]);return found[1].fn();},defer(op){let finish;const promise=new Promise(resolve=>{finish=resolve;});deferred={op,promise};return data=>{deferred=null;finish({ok:true,json:async()=>data});};},voice:win.BL.voice,calls,streams,peers,elements,timers,get gum(){return gum;},makeStream,denyPermission(){permission=Promise.reject(Object.assign(Error("denied"),{name:"NotAllowedError"}));},deferPermission(){permission=new Promise(resolve=>{this.resolvePermission=resolve;});},deferPublish(){publishResponse=new Promise(resolve=>{this.resolvePublish=()=>resolve({ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})});});}};
@@ -32883,7 +32946,29 @@ const studioVoiceLifecycleProof = async () => {
   cancelled.voice.dropMic();
   lateIce(ice("stale")); await cancelledJoin; await drain();
   const turnCancelled = iceWasPending && cancelled.timers.size === 0 && cancelled.peers.length === 0;
-  return {networkReturnsOpen,networkRetries,lateLandsMuted,longGapListens,givesUp,leaveEndsRecovery,slowGatherJoins,emptyGatherRefuses,unavailableProbeJoins,turnShared,turnRefreshed,turnPrefetched,turnMeasured,turnStopped,turnCancelled,publicationReplaced,leaveStopsAudio,latePlaybackStaysOff,leaveCancelsRestart,receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[slow,blocked,unavailable,listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied,replaced,leaving,restarting,change,flaky,slowBack,gone,dead,quit].every(f=>f.timers.size===0)};
+  // regression (#767): WebKit on an IPv6-only mobile network reaches only the first IPv4 address a connection sends to,
+  // the STUN server when one is listed, so the publish never connects: the second try leaves STUN out and comes up, and
+  // the receive connection after it goes the same way.
+  const nat = fixture("complete",true,false,false,true), natJoin = nat.voice.enable(); await drain();
+  const natWaited = nat.peers.length === 2 && nat.peers[1].connectionState === "new" && !nat.voice.stats.enabled;
+  await nat.fire(10000); await natJoin; await drain();
+  const noStun = pc => !pc.config.iceServers.some(s => s.urls.startsWith("stun:"));
+  const bareAfterUnreached = natWaited && nat.voice.stats.enabled && nat.voice.stats.publishing && nat.peers.length === 4 && nat.peers[1].connectionState === "closed"
+    && noStun(nat.peers[2]) && noStun(nat.peers[3]) && nat.voice.inspect().bare;
+  nat.voice.dispose(); await drain();
+  // regression (#767): a credentials request that failed is asked again by the next connection, and credentials in hand
+  // serve a restart without another request.
+  const again = fixture("complete",true,false,true), long = { ...ice("second"), ttl: 7200 };
+  again.failNext("ice"); const secondIce = again.defer("ice"), againJoin = again.voice.enable();
+  for (let i = 0; i < 50 && again.calls.filter(c => c.op === "ice").length < 2; i++) await drain();
+  secondIce(long); await againJoin; await drain();
+  const turnAskedAgain = again.voice.stats.enabled && again.peers.length === 2 && again.calls.filter(c => c.op === "ice").length === 2
+    && !again.peers[0].config.iceServers.some(s => s.urls === tls) && hasRelay(again.peers[1], "second");
+  await again.voice.restart(); await drain();
+  const turnKept = again.voice.stats.enabled && again.peers.length === 4 && again.peers.slice(2).every(pc => hasRelay(pc, "second"))
+    && again.calls.filter(c => c.op === "ice").length === 2;
+  again.voice.dispose(); await drain();
+  return {networkReturnsOpen,networkRetries,lateLandsMuted,longGapListens,givesUp,leaveEndsRecovery,slowGatherJoins,emptyGatherRefuses,unavailableProbeJoins,turnShared,turnRefreshed,turnPrefetched,turnMeasured,turnStopped,turnCancelled,bareAfterUnreached,turnAskedAgain,turnKept,publicationReplaced,leaveStopsAudio,latePlaybackStaysOff,leaveCancelsRestart,receiveOnly,receiveOnlyAudience,audienceKeepsMute,lastListenerLeaves,listenerReturns,invalidAudience,audienceClearedOnStop,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,localPreview,previewReleased,latePreviewReleased,previewCancelCannotStopPublication,receiveLevel,aggregateBlocked,retryClears,stalePlaybackIgnored,deniedPreviewKeepsReceiver,deniedPublishKeepsReceiver,timersReleased:[slow,blocked,unavailable,listener,audience,late,rejoin,stale,stopped,preview,autoplay,denied,replaced,leaving,restarting,change,flaky,slowBack,gone,dead,quit].every(f=>f.timers.size===0)};
 };
 
 // The real controller runs against a bounded DOM/media double: no permission prompts or SFU.
@@ -33372,7 +33457,7 @@ const outdoorScopeChecks = () => {
     outdoors: ["outside", "between", "sphere", "rainforest", "bifrost"].every((zone) => hub(zone) === "outdoor"),
     entrances: ["outside", "sphere", "rainforest", "bifrost"].every((zone) => hub(zone, true) === "interior"),
     under: ["rainforest-under", "hq", "hq-basement"].every((zone) => hub(zone) === "descending") && hub("outside", false, true) === "descending"
-      && hub("sphere", false, true) === "descending" && hub("outside", true, true) === "interior",
+      && hub("sphere", false, true) === "descending" && hub("between", false, true) === "descending" && hub("outside", true, true) === "interior",
     unscoped: hub("repos") === "unscoped",
     // Grouped with the island by the panels (zone-map.js), but never public by that.
     grouped: ["lab", "bca", "factory", "arcade", "mirror", "cave-3"].every((zone) => Z.zoneMap.groupOf(zone) === "outside" && hub(zone) === "unknown"),
@@ -33659,10 +33744,18 @@ const oogaChatChecks = async () => {
   const afterFrame = refused(1006, JSON.stringify({ type: "snapshot" }));
   const feed = { backoff: backoff[0] <= 1250 && backoff[3] >= 6000 && backoff[5] >= 22500 && backoff[5] <= 37500, off: off >= 60000 && offHeard === "closed",
     reset: afterFrame <= 1250 && feedHeard.at(-2) === "reconnecting" };
+  // regression (#767): a voice call whose body stalls after its headers is still inside the call's bound, so it ends.
+  const stalled = adapterWith(async (path, init) => ({ ok: true, status: 200, headers: { get: () => "application/json" },
+    json: () => new Promise((resolve, reject) => init.signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })))) }));
+  const stalledCall = stalled.media().call("ice", { connection: "c1" }).then(() => "answered", (error) => error.code);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const bodyHeld = stalled.pending;
+  stalled.dispose();
+  const bodyBound = bodyHeld === 1 && await Promise.race([stalledCall, new Promise((resolve) => setTimeout(() => resolve("hung"), 50))]) === "disposed";
   const adapter = { modes: modes.join() === "unavailable,unavailable,unavailable,live", held, released: hanging.pending === 0 && ended.mode === "unavailable" && ended.reason === "disposed",
-    signOut: signOut === "ok,threw,threw", ...feed };
+    signOut: signOut === "ok,threw,threw", bodyBound, ...feed };
   record("Ooga Chat adapter: a 404, a non-JSON page or an unreachable service each leave the app unavailable rather than invented, disposing aborts what is still asking, a sign-out the server refuses throws instead of signing out, and an audience socket the edge refuses backs off until a frame arrives, longest while listening is off",
-    adapter.modes && adapter.held === 1 && adapter.released && adapter.signOut && adapter.backoff && adapter.off && adapter.reset, JSON.stringify({ ...adapter, signOut, waits: [...backoff, off, afterFrame].map(Math.round) }));
+    adapter.modes && adapter.held === 1 && adapter.released && adapter.signOut && adapter.bodyBound && adapter.backoff && adapter.off && adapter.reset, JSON.stringify({ ...adapter, signOut, waits: [...backoff, off, afterFrame].map(Math.round) }));
 
   // The shell over a minimal DOM: views build on first visit, are kept across tab switches and updates, and dispose once.
   const node = (tag, doc) => {
@@ -33838,10 +33931,10 @@ const oogaChatChecks = async () => {
   // on its acknowledgement; refusals leave nothing held; Leave Voice keeps listening; the server ending a lease, a new
   // connection or a zone change stop capture exactly once; a sync asked before a zone change plays nothing of the old zone.
   const voiceCheck = async () => {
-    const M = load(["src/ooga-chat/ooga-chat-media.js"], { window: {}, setTimeout, clearTimeout, Math, Date, Promise, Object, Number, Map, Set, Error }).oogaChatMedia;
+    const M = load(["src/js/duel-listening.js", "src/ooga-chat/ooga-chat-media.js"], { window: {}, setTimeout, clearTimeout, Math, Date, Promise, Object, Number, Map, Set, Error }).oogaChatMedia;
     const flush = async (n = 6) => { for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0)); };
-    const rig = ({ deny = null, holdPlay = false, allowed = true, memory = null } = {}) => {
-      const log = [], asked = [], listeners = new Map(), tracks = [], pcs = [];
+    const rig = ({ deny = null, holdPlay = false, allowed = true, memory = null, stunDead = false } = {}) => {
+      const log = [], asked = [], listeners = new Map(), tracks = [], pcs = [], elements = [];
       let delay = null, nextMid = 0, playHeld = holdPlay, failing = null, stalls = 0;
       // Waits of a second or more are held for the check to fire by hand (`waits`); shorter ones run as they are.
       const waits = [], timers = { set: (fn, ms) => ms >= 1000 ? -waits.push({ fn, ms }) : setTimeout(fn, ms), clear: (id) => { if (id < 0) waits[-id - 1] = null; else clearTimeout(id); } };
@@ -33849,7 +33942,7 @@ const oogaChatChecks = async () => {
         "publish/offer": () => ({ sessionDescription: { type: "answer", sdp: "v=0" } }) };
       const broker = { call: async (op, body) => { log.push(`${op}@${body.connection}${body.generation ? `#${body.generation}` : ""}`); if (delay && op === delay.op) await delay.until; if (failing === op) { failing = null; throw Object.assign(new Error("busy"), { code: "upstream_failed", retryable: true }); } return (replies[op] || (() => ({ ok: true })))(); } };
       class PC {
-        constructor() { this.on = new Map(); this.connectionState = "new"; this.iceGatheringState = "complete"; this.tx = []; this.closed = false; pcs.push(this); }
+        constructor(config) { this.config = config; this.on = new Map(); this.connectionState = "new"; this.iceGatheringState = "complete"; this.tx = []; this.closed = false; pcs.push(this); }
         addEventListener(t, fn) { if (!this.on.has(t)) this.on.set(t, new Set()); this.on.get(t).add(fn); }
         removeEventListener(t, fn) { this.on.get(t)?.delete(fn); }
         fire(t, e = {}) { for (const fn of [...(this.on.get(t) || [])]) fn(e); }
@@ -33860,6 +33953,8 @@ const oogaChatChecks = async () => {
         async setLocalDescription(d) { this.localDescription = d; for (const t of this.tx) if (t.mid === null) t.mid = "0"; }
         async setRemoteDescription(d) {
           const fresh = (d.mids || []).map((mid) => { const tx = { mid, stopped: false, stop() { this.stopped = true; } }; this.tx.push(tx); return tx; });
+          // WebKit on an IPv6-only mobile network: with a STUN server listed the SFU is never reached.
+          if (stunDead && this.config.iceServers.some((server) => server.urls.startsWith("stun:"))) return;
           setTimeout(() => { this.connectionState = "connected"; this.fire("connectionstatechange"); for (const transceiver of fresh) this.fire("track", { transceiver, track: { kind: "audio" } }); }, 0);
         }
         close() { this.closed = true; this.connectionState = "closed"; }
@@ -33867,12 +33962,12 @@ const oogaChatChecks = async () => {
       let captures = 0;
       const rtc = { PeerConnection: PC, stream: (t) => ({ t }),
         getUserMedia: async () => { captures++; if (deny) throw Object.assign(new Error("no"), { name: deny }); const track = { enabled: true, readyState: "live", stops: 0, on: {}, stop() { this.stops++; this.readyState = "ended"; }, addEventListener(t, fn) { this.on[t] = fn; }, removeEventListener(t) { delete this.on[t]; } }; tracks.push(track); return { getAudioTracks: () => [track], getTracks: () => [track] }; },
-        audio: () => ({ srcObject: null, played: 0, play() { this.played++; return playHeld ? Promise.reject(Object.assign(new Error("held"), { name: "NotAllowedError" })) : Promise.resolve(); }, pause() {} }) };
+        audio: () => { const el = { srcObject: null, played: 0, play() { this.played++; return playHeld ? Promise.reject(Object.assign(new Error("held"), { name: "NotAllowedError" })) : Promise.resolve(); }, pause() {} }; elements.push(el); return el; } };
       const target = { addEventListener: (t, fn) => listeners.set(t, fn), removeEventListener: (t) => listeners.delete(t) };
       let requestId = 0;
       const c = M.create({ broker: () => broker, rtc, target, memory, timers, allowed: () => allowed, stall: () => { stalls++; }, request: (type, fields) => { asked.push({ type, ...fields, id: ++requestId }); return requestId; } });
       const answer = (ok, you, error) => c.heard({ type: "result", requestId: asked.at(-1).id, ok, you, ...(error ? { error: { code: error, retryable: false } } : {}) });
-      return { c, log, asked, tracks, pcs, listeners, answer, get captures() { return captures; }, get stalls() { return stalls; }, hold: (op) => { let go; delay = { op, until: new Promise((r) => { go = r; }) }; return () => { delay = null; go(); }; },
+      return { c, log, asked, tracks, pcs, elements, listeners, answer, get captures() { return captures; }, get stalls() { return stalls; }, hold: (op) => { let go; delay = { op, until: new Promise((r) => { go = r; }) }; return () => { delay = null; go(); }; },
         play: (held) => { playHeld = held; }, failNext: (op) => { failing = op; },
         fire: (ms) => { const i = waits.findIndex((w) => w && w.ms === ms); if (i < 0) return false; const { fn } = waits[i]; waits[i] = null; fn(); return true; } };
     };
@@ -33883,6 +33978,22 @@ const oogaChatChecks = async () => {
     r.c.zone("main"); snap(r, "c1", "none"); await flush();
     out.listener = r.captures === 0 && r.log.join() === "ice@c1,receive/open@c1,receive/sync@c1,renegotiate@c1" && r.c.state.hearing === 1 && r.c.state.phase === "listening" && !r.c.available;
     await r.c.join(); out.listenerNoJoin = r.captures === 0 && !r.asked.length;
+    const duelAudio = {}, element = () => r.elements.at(-1);
+    r.c.duel({ op: "start", id: 1, a: 7, b: 8 });
+    duelAudio.defaultOff = !r.c.state.muteDuels && !element().muted;
+    r.c.setVolume("gh:7", .5); r.c.setMuteDuels(true);
+    duelAudio.muted = element().muted && !r.c.mutedLocally("gh:7") && element().volume === .5;
+    snap(r, "c2", "none"); await flush();
+    duelAudio.replacement = element().muted && element().volume === .5;
+    r.c.duel({ op: "end", id: 1 });
+    duelAudio.ended = !element().muted && element().volume === .5;
+    r.c.duel({ op: "start", id: 2, a: 1, b: 7 });
+    duelAudio.ownPair = !element().muted;
+    r.c.muteLocal("gh:7", true); r.c.duel({ op: "lost" });
+    duelAudio.manual = element().muted && r.c.mutedLocally("gh:7") && r.c.volumeOf("gh:7") === .5;
+    r.c.dispose();
+    record("Ooga Chat duel listening: unchecked by default, opt-in silences replacement tracks, duel end restores volume, own pair is exempt, manual mute survives connection loss",
+      Object.values(duelAudio).every(Boolean), JSON.stringify(duelAudio));
     // A contributor: muted capture, lease, publish, acknowledged speaker; mute, unmute, leave and keep listening.
     r = rig();
     r.c.zone("main"); snap(r, "c1", "eligible"); await flush();
@@ -34024,6 +34135,21 @@ const oogaChatChecks = async () => {
     r.c.status("reconnecting"); snap(r, "c2", "eligible"); await flush();
     r.answer(true, { id: "gh:1", speak: "pending", lease: 3 }); await flush(20);
     out.networkDeadFeed = silent && unheard && spared && r.captures === 1 && r.c.state.role === "speaker" && !r.c.state.muted && r.tracks[0].enabled === true && r.log.includes("publish/ready@c2#3");
+    // regression (#767): WebKit on an IPv6-only mobile network never reaches the SFU with a STUN server listed. The
+    // publish that never connects is made once more without it, on the same microphone and lease, and the receive
+    // connection built the old way giving up afterwards changes nothing back. A credentials request that failed is asked
+    // again by the next connection.
+    r = rig({ stunDead: true }); r.failNext("ice"); r.c.zone("main"); snap(r, "c1", "eligible"); await flush();
+    const natJoin = r.c.join(); await flush(); r.answer(true, { id: "gh:1", speak: "pending", lease: 7 }); await flush();
+    const stuck = r.c.state.phase === "negotiating" && r.pcs.length === 2 && !r.pcs[1].closed;
+    const timedOut = r.fire(10000); await natJoin; await flush();
+    const stunless = (pc) => !pc.config.iceServers.some((server) => server.urls.startsWith("stun:"));
+    out.bare = stuck && timedOut && r.c.state.role === "speaker" && r.captures === 1 && r.pcs.length === 3 && r.pcs[1].closed && !stunless(r.pcs[1]) && stunless(r.pcs[2])
+      && r.log.filter((l) => l === "publish/open@c1#7").length === 2 && r.log.at(-1) === "publish/ready@c1#7" && r.c.stats.bare;
+    down(r.pcs[0], "failed"); await flush();
+    out.bareKept = r.c.stats.bare && r.c.state.role === "speaker";
+    out.iceAgain = r.log.filter((l) => l === "ice@c1").length === 2;
+    r.c.dispose();
     return out;
   };
   const voice = await voiceCheck();
@@ -34276,7 +34402,7 @@ const unitChecks = async () => {
   const mapPadEscape = destinationMapPadEscapeProof();
   record("destination map pad regression: a pad's B or Menu over another dialog or card is that layer's Escape and never opens Map; on foot it opens Map and inside Map it closes it; a floating board does not block Map and a refused Map never swallows Menu's Escape", Object.values(mapPadEscape).every(Boolean), JSON.stringify(mapPadEscape));
   const mapCoachingHint = destinationMapCoachingHintProof();
-  record("destination map coaching hint: a floating board does not hide the island coaching hint, while a non-floating dialog still does", Object.values(mapCoachingHint).every(Boolean), JSON.stringify(mapCoachingHint));
+  record("destination map coaching hint: neither the hint nor its Controls replay button shows without the opt-in; with it a floating board does not hide the island coaching hint, while a non-floating dialog still does", Object.values(mapCoachingHint).every(Boolean), JSON.stringify(mapCoachingHint));
   const sleepBeamPool = sleepBeamPoolProof();
   record("gorilla sleep beam: fixed pool, slot isolation, live reduced motion and scene cleanup", Object.values(sleepBeamPool).every(Boolean), JSON.stringify(sleepBeamPool));
   const sleepStalls = gorillaSleepStallProof();

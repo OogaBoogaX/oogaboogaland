@@ -328,9 +328,10 @@ void main() {
     float envelope = edge * edge * (3.0 - 2.0 * edge);
     float a = w.x * 0.9 + w.z * 0.5 - uLakeSurface.w * 1.15;
     float b = -w.x * 0.6 + w.z * 1.3 - uLakeSurface.w * 1.7;
-    float swell = 0.028 * sin(a) + 0.014 * sin(b);
+    float chop = w.x * 1.7 - w.z * 1.1 - uLakeSurface.w * 2.6;
+    float swell = 0.16 * sin(a) + 0.08 * sin(b) + 0.03 * sin(chop);
     float height = swell * envelope;
-    vec2 slope = vec2(0.0252 * cos(a) - 0.0084 * cos(b), 0.014 * cos(a) + 0.0182 * cos(b)) * envelope;
+    vec2 slope = vec2(0.144 * cos(a) - 0.048 * cos(b) + 0.051 * cos(chop), 0.08 * cos(a) + 0.104 * cos(b) - 0.033 * cos(chop)) * envelope;
     slope -= swell * radial * (6.0 * edge * (1.0 - edge) / 0.8 / max(radialLength, 0.0001));
     for (int i = 0; i < 32; i++) {
       if (i >= uLakeWaveCount) break;
@@ -342,8 +343,8 @@ void main() {
       height += wave.w * c * e * e;
       slope += delta * (wave.w * (-3.14159265359 * sin(3.14159265359 * q) * e * e - 4.0 * q * c * e) / 0.32 / max(r, 0.0001));
     }
-    // Smoothly limit overlapping impacts, including their derivative, to an 18 cm displacement.
-    float limit = 1.0 + abs(height) / 0.18;
+    // Smoothly limit overlapping impacts, including their derivative, to a 40 cm displacement (pool-water.js WAVE_HEIGHT).
+    float limit = 1.0 + abs(height) / 0.4;
     height /= limit;
     slope /= limit * limit;
     float endT = clamp(dot(uLakeWaveEnd, w), 0.0, 1.0), fade = endT * endT * (3.0 - 2.0 * endT);
@@ -1735,7 +1736,13 @@ void main() {
     vec2 p = uSeaEye + d.xz * t;
     float e = 0.6;
     float h0 = fbm(p * 0.045 + vec2(uTime * 0.02, uTime * 0.013)), hx = fbm((p + vec2(e, 0.0)) * 0.045 + vec2(uTime * 0.02, uTime * 0.013)), hz = fbm((p + vec2(0.0, e)) * 0.045 + vec2(uTime * 0.02, uTime * 0.013));
-    vec3 n = normalize(vec3((h0 - hx) * 2.2, 1.0, (h0 - hz) * 2.2));
+    // Rolling swells over the ripples: three wave trains travelling their own ways, tilting the surface and
+    // whitening their crests, eased out with distance so the far sea does not shimmer.
+    float s1 = dot(p, vec2(0.8, 0.6)) * 0.09 - uTime * 0.9, s2 = dot(p, vec2(-0.3, 0.954)) * 0.13 - uTime * 1.1, s3 = dot(p, vec2(0.97, -0.243)) * 0.21 - uTime * 1.5;
+    float near = 1.0 - smoothstep(250.0, 900.0, t);
+    vec2 slope = (vec2(0.8, 0.6) * cos(s1) * 0.32 + vec2(-0.3, 0.954) * cos(s2) * 0.2 + vec2(0.97, -0.243) * cos(s3) * 0.11) * near;
+    float crest = (sin(s1) * 0.5 + sin(s2) * 0.3 + sin(s3) * 0.2) * near;
+    vec3 n = normalize(vec3((h0 - hx) * 2.2 - slope.x, 1.0, (h0 - hz) * 2.2 - slope.y));
     vec3 r = reflect(d, n);
     float fres = 0.08 + 0.92 * pow(1.0 - max(dot(-d, n), 0.0), 5.0);
     vec3 skyR = mix(uHorizon, uZenith, smoothstep(0.0, 0.5, r.y));
@@ -1748,6 +1755,7 @@ void main() {
     water *= mix(vec3(1.0), uHorizon * 1.35, 0.4);
     water += uSun * pow(max(dot(r, uSunDir), 0.0), 220.0) * 3.0 * day;
     water += vec3(0.85, 0.95, 1.0) * smoothstep(0.66, 0.74, h0) * 0.22 * day;
+    water += vec3(0.9, 0.97, 1.0) * smoothstep(0.62, 0.9, crest + (h0 - 0.5) * 0.8) * 0.28 * day;
     // Match the sky at this viewing angle, including its altitude-shifted haze.
     // A fixed uHorizon here left an orange/blue seam at dusk. Keep distant haze
     // farther out as the eye climbs, retaining visible water below a high dive.
@@ -2676,8 +2684,14 @@ void main() {
         for (let k = 0; k < f.i.length; k++) { const idx = f.i[k]; smooth[idx * 3] += nx; smooth[idx * 3 + 1] += ny; smooth[idx * 3 + 2] += nz; }
       }
       let o = 0;
+      // A `dynamic` geometry (smooth, plain faces) rewrites its vertices in place, bumping `revision`: each corner's vertex
+      // is kept so `refreshDynamic` can write new positions and vertex normals into the same buffer.
+      const dynamic = !dataOnly && geometry.dynamic === true;
+      if (dynamic && (!smooth || source)) throw new Error("A dynamic geometry must be smooth, with no mirror source");
+      const cornerOf = dynamic ? new Int32Array(corners) : null;
       const put = (idx, nx, ny, nz, c, e) => {
         const b = idx * 3;
+        if (cornerOf) cornerOf[o / stride] = idx;
         floats[o] = verts[b];
         floats[o + 1] = verts[b + 1];
         floats[o + 2] = verts[b + 2];
@@ -2749,7 +2763,36 @@ void main() {
       const part = makePart(out, stride * 4, meshLayout(source ? [9, 3] : null), ibo, indices);
       part.voxel = gridded ? voxel : null;
       part.plainCount = plainCount;
+      if (dynamic) part.dynamic = { floats, words, cornerOf, smooth, stride, revision: geometry.revision };
       return part;
+    };
+    // A dynamic geometry whose `revision` moved: its positions and vertex normals rewritten into its buffer, nothing allocated.
+    const refreshDynamic = (rec) => {
+      const part = rec.mesh, dyn = part && part.dynamic, geometry = rec.geometry;
+      if (!dyn || dyn.revision === geometry.revision) return;
+      dyn.revision = geometry.revision;
+      const verts = geometry.verts, faces = geometry.faces, smooth = dyn.smooth, floats = dyn.floats, words = dyn.words, cornerOf = dyn.cornerOf, stride = dyn.stride;
+      smooth.fill(0);
+      for (let index = 0; index < faces.length; index++) {
+        const f = faces[index].i;
+        let nx = 0, ny = 0, nz = 0;
+        for (let k = 0, m = f.length; k < m; k++) {
+          const a = f[k] * 3, b = f[(k + 1) % m] * 3;
+          nx += (verts[a + 1] - verts[b + 1]) * (verts[a + 2] + verts[b + 2]);
+          ny += (verts[a + 2] - verts[b + 2]) * (verts[a] + verts[b]);
+          nz += (verts[a] - verts[b]) * (verts[a + 1] + verts[b + 1]);
+        }
+        for (let k = 0; k < f.length; k++) { const idx = f[k] * 3; smooth[idx] += nx; smooth[idx + 1] += ny; smooth[idx + 2] += nz; }
+      }
+      for (let c = 0, o = 0; c < cornerOf.length; c++, o += stride) {
+        const b = cornerOf[c] * 3;
+        floats[o] = verts[b]; floats[o + 1] = verts[b + 1]; floats[o + 2] = verts[b + 2];
+        const l = Math.hypot(smooth[b], smooth[b + 1], smooth[b + 2]) || 1, unit = 511 / l;
+        words[o + 3] = (Math.round(smooth[b] * unit) & 1023) | (Math.round(smooth[b + 1] * unit) & 1023) << 10 | (Math.round(smooth[b + 2] * unit) & 1023) << 20;
+      }
+      gl.bindBuffer(gl.ARRAY_BUFFER, part.vbo);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, floats);
+      rec.shadowChanged = shadowFrame;
     };
     const buildRigPart = (rig, ibo) => {
       const parts = rig.sources.map(geometry => buildMeshPart(geometry, ibo, true));
@@ -3031,6 +3074,7 @@ void main() {
         rec.drawCount = 0;
         rec.cameraHiddenCount = 0;
         activeRecords[activeCount++] = rec;
+        if (rec.geometry.dynamic) refreshDynamic(rec);
       }
       if (node.instanceData) {
         rec.batch = node;

@@ -324,6 +324,10 @@
         </svg>
       </button>
       <nav class="presets" aria-label="Timechain Sphere room" data-scene="timechain" hidden>
+        <button type="button" data-action="lecture-programme" id="lecture-programme" hidden>Lectures</button>
+        <button type="button" data-action="lecture-back" id="lecture-back" aria-label="Back a section" title="Back a section" hidden>&#x23EE;</button>
+        <button type="button" data-action="lecture-toggle" id="lecture-toggle" hidden>Pause</button>
+        <button type="button" data-action="lecture-next" id="lecture-next" aria-label="On a section" title="On a section" hidden>&#x23ED;</button>
         <button type="button" class="leave" data-action="leave">Leave<span> room</span></button>
       </nav>
       <nav class="presets" aria-label="₿IFRÖST" data-scene="bifrost" hidden>
@@ -332,6 +336,7 @@
         <button type="button" data-preset="dsb">DSB</button>
         <button type="button" data-preset="poker">Poker</button>
         <button type="button" data-preset="sky">Sky</button>
+        <button type="button" data-action="bifrost-mute">Sound</button>
         <button type="button" class="leave" data-action="leave">Leave<span> chamber</span></button>
       </nav>
       <nav class="presets" aria-label="Drop" data-scene="drop" hidden>
@@ -369,6 +374,9 @@
       <button type="button" data-action="studio-bed">Bed</button>
       <button type="button" data-action="studio-hammock">Hammock</button>
       <button type="button" data-action="studio-fire">Fire</button>
+      <button type="button" data-action="studio-physics" title="Loose crates, dice and barrels to knock about">Physics</button>
+      <button type="button" data-action="studio-pond" title="A pond to splash in: waves, floating props">Pond</button>
+      <button type="button" data-action="studio-props" title="Every loose prop back where it stood">Reset props</button>
       <button type="button" data-action="studio-eyes" aria-pressed="false" title="Through the Ooga's own eyes">1st person</button>
       <button type="button" data-action="studio-third" aria-pressed="false" title="From behind and a little above; in combat, over its shoulder">3rd person</button>
       <button type="button" data-action="studio-combat">Carry</button>
@@ -473,6 +481,8 @@
               <p class="help" id="players-diagnostics-status">Off</p>
             </div>
             <label class="players-speak" id="players-speak" hidden><input type="checkbox" id="players-speak-input"> Read joins aloud</label>
+            <label class="players-speak"><input type="checkbox" id="players-mute-duels" aria-describedby="players-mute-duels-help"> Automatically mute duelists</label>
+            <p class="help" id="players-mute-duels-help">Until their duel ends. Your own duel pair is exempt.<br>Manual mute and volume choices stay unchanged.</p>
           </div>
         </details>
         <div class="players slab" id="players-list"></div>
@@ -611,9 +621,9 @@
     <div class="equipment-hud" id="equipment-hud">
       <div class="weapon-equipment-row">
       <button type="button" class="leave-hud" id="leave-hud" data-action="leave" aria-label="Leave" title="Leave" hidden>
-        <svg class="leave-icon" viewBox="0 0 14 14" shape-rendering="crispEdges" aria-hidden="true">
-          <path fill="#e8891a" d="M1 1h7v2H1zM1 3h2v8H1zM1 11h7v2H1z" />
-          <path fill="#f2efe4" d="M4 6h6v2H4zM9 3h1v8H9zM10 4h1v6H10zM11 5h1v4H11zM12 6h1v2H12z" />
+        <svg class="leave-icon" viewBox="0 0 34 21" shape-rendering="crispEdges" aria-hidden="true">
+          <path fill="#e8891a" d="M17 3h1v1H17zM17 4h2v1H17zM13 5h7v1H13zM13 6h8v1H13zM13 7h7v1H13zM17 8h2v1H17zM17 9h1v1H17z" />
+          <path fill="#f2efe4" d="M8 12h4v1H8zM13 12h1v1H13zM16 12h1v1H16zM18 12h3v1H18zM22 12h5v1H22zM8 13h1v1H8zM13 13h1v1H13zM16 13h1v1H16zM19 13h1v1H19zM24 13h1v1H24zM8 14h3v1H8zM14 14h2v1H14zM19 14h1v1H19zM24 14h1v1H24zM8 15h1v1H8zM14 15h2v1H14zM19 15h1v1H19zM24 15h1v1H24zM8 16h1v1H8zM13 16h1v1H13zM16 16h1v1H16zM19 16h1v1H19zM24 16h1v1H24zM8 17h4v1H8zM13 17h1v1H13zM16 17h1v1H16zM18 17h3v1H18zM24 17h1v1H24z" />
         </svg>
       </button>
       <button type="button" class="mode-hud" id="destination-hud" data-action="mode-preset" data-selected="false"
@@ -645,7 +655,6 @@
         </svg>
         <span class="detached-destination-name" id="detached-destination-name" aria-live="polite"></span>
         <span id="destination-hud-label" hidden>Map. Choose a destination</span>
-        <span class="destination-map-label" aria-hidden="true">Map</span>
       </button>
       <button type="button" class="mode-hud" id="mode-hud" data-action="mode-toggle" data-selected="false" data-shooter="false"
         aria-label="Character controls" title="Character controls" hidden>
@@ -2145,13 +2154,19 @@ Open the pull request from my fork as a draft and keep it draft while building o
       <button type="button" class="duel-button duel-decline" data-duel="decline">Decline</button>
     </div>
     <div class="duel-hud" id="duel-hud" role="group" aria-label="Duel" hidden>
-      <div class="duel-bars">
-        <div class="duel-side"><span class="duel-name"></span><span class="duel-bar"><span class="duel-fill"></span></span><span class="duel-hp"></span></div>
-        <span class="duel-clock" aria-live="polite"></span>
-        <div class="duel-side duel-them"><span class="duel-name"></span><span class="duel-bar"><span class="duel-fill"></span></span><span class="duel-hp"></span></div>
+      <div class="duel-head"><span class="duel-title">Duel</span><span class="duel-clock"></span></div>
+      <div class="duel-rows">
+        <div class="duel-side"><span class="duel-name"></span><span class="duel-bar"><span class="duel-chip"></span><span class="duel-fill"></span></span><span class="duel-hp"></span><span class="duel-far"></span></div>
+        <div class="duel-side duel-them"><span class="duel-name"></span><span class="duel-bar"><span class="duel-chip"></span><span class="duel-fill"></span></span><span class="duel-hp"></span><span class="duel-far"></span></div>
       </div>
       <p class="duel-note" role="alert" hidden></p>
       <button type="button" class="duel-yield" data-duel="yield">Yield</button>
+    </div>
+    <div class="duel-flash" id="duel-flash" aria-hidden="true" hidden></div>
+    <p class="duel-count" id="duel-count" role="status" hidden></p>
+    <div class="duel-result" id="duel-result" role="status" hidden>
+      <strong class="duel-result-title"></strong>
+      <span class="duel-result-line"></span>
     </div>
     <!-- HALLOWEEN: the ghost hunt's HUD (ghost-hud.js shows and hides it; no data-scene, or every arrival would show it). -->
     <ol class="ghost-scores" id="ghost-scores" aria-label="Hunters' points" hidden></ol>
@@ -2197,6 +2212,16 @@ Open the pull request from my fork as a draft and keep it draft while building o
         <button type="button" class="ghost-spectate-next" id="ghost-spectate-next" aria-label="Next player">Next ▶</button>
       </div>
     </div>
+    <section class="lecture-quiz" id="lecture-quiz" aria-labelledby="lecture-quiz-q" hidden>
+      <p class="lecture-quiz-kicker" id="lecture-quiz-kicker">Question</p>
+      <h3 id="lecture-quiz-q"></h3>
+      <ol class="lecture-quiz-options">
+        <li><button type="button" data-action="lecture-answer-1"><kbd>1</kbd><span></span></button></li>
+        <li><button type="button" data-action="lecture-answer-2"><kbd>2</kbd><span></span></button></li>
+        <li><button type="button" data-action="lecture-answer-3"><kbd>3</kbd><span></span></button></li>
+        <li><button type="button" data-action="lecture-answer-4"><kbd>4</kbd><span></span></button></li>
+      </ol>
+    </section>
     <section class="hangar-sound" id="hangar-sound" aria-label="Hangar sound" hidden>
       <div class="hangar-sound-head">
         <h3>Sound</h3>
@@ -2350,6 +2375,7 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/arcade-cabinets.js"></script>
   <script src="js/arcade-popular.js"></script>
   <script src="js/duel-rules.js"></script>
+  <script src="js/duel-listening.js"></script>
   <script src="js/net.js"></script>
   <script src="js/game-net.js"></script>
   <script src="js/highscores.js"></script>
@@ -2398,6 +2424,7 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/timechain-models.js"></script>
   <script src="js/timechain-gate.js"></script>
   <script src="js/solid-props.js"></script>
+  <script src="js/physics.js"></script>
   <script src="js/breakables.js"></script>
   <script src="js/agent.js"></script>
   <script src="js/remote-players.js"></script>
@@ -2595,6 +2622,8 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/bifrost-heimdall.js"></script>
   <script src="js/bifrost-window.js"></script>
   <script src="js/cave-directory.js"></script>
+  <script src="js/bifrost-audio.js"></script>
+  <script src="js/bifrost-echo.js"></script>
   <script src="js/scene-bifrost.js"></script>
   <script src="js/scene-timechain.js"></script>
   <script src="js/timechain-data.js" data-defer="timechain"></script>
@@ -2609,9 +2638,15 @@ Open the pull request from my fork as a draft and keep it draft while building o
   <script src="js/timechain-room-party.js" data-defer="timechain"></script>
   <script src="js/timechain-room-workout.js" data-defer="timechain"></script>
   <script src="js/timechain-room-mining.js" data-defer="timechain"></script>
+  <script src="js/lecture-kit.js" data-defer="timechain"></script>
+  <script src="js/lecture-btc.js" data-defer="timechain"></script>
+  <script src="js/lecture-slides.js" data-defer="timechain"></script>
+  <script src="js/lecture-player.js" data-defer="timechain"></script>
+  <script src="js/lecturer.js" data-defer="timechain"></script>
   <script src="js/timechain-room-lecture.js" data-defer="timechain"></script>
   <script src="js/timechain-room-theater.js" data-defer="timechain"></script>
   <script src="js/timechain-interior.js" data-defer="timechain"></script>
+  <script src="js/lecture-btc-01.js" data-defer="lecture-btc-a"></script>
   <script src="js/routes.js"></script>
   <script src="js/router.js"></script>
   <script src="js/poker-rules.js" data-defer="poker"></script>

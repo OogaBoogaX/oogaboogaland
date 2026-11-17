@@ -127,7 +127,8 @@ export const createMediaBroker = (aud) => {
     for (const c of aud.model.conns.values()) {
       if (c.zone !== conn.zone || c.id === conn.id || !c.lease || c.lease.state !== "active") continue;
       const m = states.get(c.connId);
-      if (m && m.pub && m.track && !out.has(c.id)) out.set(c.id, { session: m.pub, track: m.track, gen: m.gen });
+      // Source kind is part of the generation: the Room and Audience clocks can issue the same number on handoff.
+      if (m && m.pub && m.track && !out.has(c.id)) out.set(c.id, { session: m.pub, track: m.track, gen: -m.gen - 1 });
     }
     return out;
   };
@@ -172,7 +173,7 @@ export const createMediaBroker = (aud) => {
     for (const c of aud.model.conns.values()) {
       if (!c.zone || !c.lease || c.lease.state !== "active") continue;
       const m = states.get(c.connId);
-      if (m && m.pub && m.track) now.set(c.zone, `${now.get(c.zone) || ""}|${c.id}:${m.gen}`);
+      if (m && m.pub && m.track) now.set(c.zone, `${now.get(c.zone) || ""}|${c.id}:${-m.gen - 1}`);
     }
     const changed = new Set();
     for (const zone of new Set([...now.keys(), ...announced.keys()])) if ((now.get(zone) || "") !== (announced.get(zone) || "")) changed.add(zone);
@@ -213,10 +214,6 @@ export const createMediaBroker = (aud) => {
 
   // --- one op ---
   const operation = async (op, conn, body) => {
-    if (op === "ice") {
-      const data = await turnCredentials(env).catch(() => null);
-      return answer(data || {});
-    }
     if (!sfu) return refuse("voice_unavailable", 503, true);
     if (cleanup.length >= CLEANUP_BACKLOG_MAX && !["leave", "publish/close", "receive/close"].includes(op)) return refuse("cleanup_pending", 503, true);
     const s = stateOf(conn.connId);
@@ -335,6 +332,9 @@ export const createMediaBroker = (aud) => {
 
   /** One op from a connection, after every earlier op of the same connection has finished. */
   const request = (op, conn, body) => {
+    // Minting credentials touches nothing of the connection's: out of its queue, as in the Room, so neither a slow SFU
+    // call ahead of it nor a relay outage holds up a join.
+    if (op === "ice") return turnCredentials(env).catch(() => null).then((data) => answer(data || {}));
     const run = (queues.get(conn.connId) || Promise.resolve()).catch(() => {}).then(async () => {
       try { return await operation(op, conn, body); }
       catch { return refuse("upstream_failed", 502, true); }

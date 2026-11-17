@@ -531,7 +531,7 @@
     // what it lets go of on leaving (`dispose`, the Block Party's radio). `built.ear` is where the visitor hears from
     // (their Ooga, else the view's target), kept current every frame for a kind's sounds.
     const ear = built.ear = { x: 0, y: 0, z: 0 };
-    const motion = kind.animate ? kind.animate(built.nodes, built) : null;
+    const motion = kind.animate ? kind.animate(built.nodes, built, feeds) : null;
 
     const NO_ACTORS = [], actors = [];
 
@@ -897,6 +897,8 @@
       else if (action === "reset-view" && !guide.stage) pilot.resetCamera();
       else if (action === "jetpack-toggle") hud.toast("No jetpacks in the Sphere");
       else if (action.startsWith("mode-") && !guide.stage) pilot.modeAction(action);
+      // A kind's own buttons in the banner (the Lecture Hall's).
+      else if (motion && motion.action && !guide.stage) motion.action(action, hud);
     });
     // The room's name under the banner's title; nothing beside its buttons.
     const subtitle = document.getElementById("sphere-subtitle");
@@ -1021,7 +1023,8 @@
         if (!guide.stage && !pilot.escape()) walkOut();
         return true;
       }
-      return false;
+      // A kind's own keys (the Lecture Hall's pause and sections).
+      return !!(motion && motion.key && !guide.stage && motion.key(e, hud));
     };
     const onDonation = (donation, counted = null) => {
       game.recordDonation(donation, counted && counted.exact);
@@ -1039,6 +1042,8 @@
         const keys = row.keys.filter(key => !WEAPON_KEYS.has(key));
         return row.keys.length && !keys.length ? [] : [{ ...row, keys }];
       });
+      // A kind's own keys and buttons (the Lecture Hall's).
+      if (motion && motion.controlsHelp) help.rows.push(...motion.controlsHelp(touch, BL.controlsHelp));
       help.title = "Timechain Sphere · " + help.title;
       return help;
     };
