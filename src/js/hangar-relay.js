@@ -6,8 +6,9 @@
 // - nodes (`node(n, alts)`): each one's position, rotation (its quaternion if it has one, else its Euler rotation),
 //   scale, whether it shows, its glow, and which of `alts` (geometries it may show) it shows; only those changed since
 //   the last frame, and all of them every `KEY_MS`, so a page joining has them all within that;
-// - values (`values(array)`): a system's own few numbers other systems read (a Float32Array it keeps current on the
-//   host and reads on the others), sent whole when changed;
+// - values (`values(array, ease)`): a system's own few numbers (a Float32Array it keeps current on the host and reads on
+//   the others), sent whole when changed, and on the others eased between frames as the nodes are when `ease`, else
+//   taken as they come;
 // - events: what a system does that is not a node (a line said, a sound, a spark), recorded on the host through
 //   `proxy(target, names, refs)` (an object whose methods call the target's and, while hosting, record the call) and
 //   called on the others' targets when playback reaches the frame. An argument is sent as it is when it is a number, a
@@ -46,7 +47,7 @@
     // The others': each node's state from (A, at ta) and to (B, at tb), its flags before and after tb; each value's
     // next numbers and when they apply; the events waiting to play, with their times.
     let A = new Float32Array(0), B = new Float32Array(0), ta = new Float64Array(0), tb = new Float64Array(0), fa = new Uint8Array(0), fb = new Uint8Array(0), known = new Uint8Array(0);
-    const valNext = [], valAt = [];
+    const valNext = [], valAt = [], valEase = [], valA = [], valB = [], vta = [], vtb = [], valKnown = [];
     const queue = [];
     let bytes = new ArrayBuffer(MAX_BYTES);
     const enc = new TextEncoder(), dec = new TextDecoder();
@@ -90,14 +91,16 @@
         sent.fill(-32768);
         valSent.forEach((v) => v.fill(NaN));
         known.fill(0);
+        valKnown.fill(false);
       },
       node: (n, list = null) => {
         nodes.push(n); alts.push(list); quats.push(!!n.quaternion);
         grow();
         return nodes.length - 1;
       },
-      values: (array) => {
+      values: (array, ease = false) => {
         vals.push(array); valSent.push(new Float32Array(array.length).fill(NaN)); valNext.push(new Float32Array(array.length)); valAt.push(-1);
+        valEase.push(ease); valA.push(new Float32Array(array.length)); valB.push(new Float32Array(array.length)); vta.push(0); vtb.push(0); valKnown.push(false);
         return vals.length - 1;
       },
       refs: (list) => { for (const r of list) refList.push(r); },
@@ -189,8 +192,15 @@
         for (let c = 0; c < valCount && o + 2 <= buffer.byteLength; c++) {
           const j = v.getUint8(o), n = v.getUint8(o + 1);
           if (j < vals.length && n === vals[j].length && o + 2 + n * 4 <= buffer.byteLength) {
-            for (let k = 0; k < n; k++) valNext[j][k] = v.getFloat32(o + 2 + k * 4, true);
-            valAt[j] = at;
+            if (valEase[j]) {
+              if (valKnown[j]) { valA[j].set(valB[j]); vta[j] = Math.max(vtb[j], at - FRAME_MS); }
+              for (let k = 0; k < n; k++) valB[j][k] = v.getFloat32(o + 2 + k * 4, true);
+              if (!valKnown[j]) { valA[j].set(valB[j]); vta[j] = at - FRAME_MS; valKnown[j] = true; }
+              vtb[j] = at;
+            } else {
+              for (let k = 0; k < n; k++) valNext[j][k] = v.getFloat32(o + 2 + k * 4, true);
+              valAt[j] = at;
+            }
           }
           o += 2 + n * 4;
         }
@@ -226,7 +236,13 @@
           if (n.scale) { n.scale.x = A[b + 7] + (B[b + 7] - A[b + 7]) * u; n.scale.y = A[b + 8] + (B[b + 8] - A[b + 8]) * u; n.scale.z = A[b + 9] + (B[b + 9] - A[b + 9]) * u; }
           if (n.glow !== undefined || B[b + 10] !== 1) n.glow = A[b + 10] + (B[b + 10] - A[b + 10]) * u;
         }
-        for (let j = 0; j < vals.length; j++) if (valAt[j] >= 0 && valAt[j] <= t) { vals[j].set(valNext[j]); valAt[j] = -1; }
+        for (let j = 0; j < vals.length; j++) {
+          if (valEase[j]) {
+            if (!valKnown[j]) continue;
+            const span = vtb[j] - vta[j], u = span > 0 ? Math.max(0, Math.min(1, (t - vta[j]) / span)) : 1, a = valA[j], b = valB[j], out = vals[j];
+            for (let k = 0; k < out.length; k++) out[k] = a[k] + (b[k] - a[k]) * u;
+          } else if (valAt[j] >= 0 && valAt[j] <= t) { vals[j].set(valNext[j]); valAt[j] = -1; }
+        }
         while (queue.length && queue[0].at <= t) {
           const e = queue.shift(), fn = handlers.get(e[0]);
           if (!fn) continue;
