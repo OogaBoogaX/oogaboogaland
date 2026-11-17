@@ -211,7 +211,7 @@
   let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null, ctx2canvas = null;
   let canvas = null, people = null, avatar = null, playerWorld = null, scene = null, leaving = false, dust = null, unsubscribeAccount = null, remotes = null, footsteps = null, node = null;
   let unsubscribeFeed = null, boardsDirty = false, audio = null, actPrompt = false, soundPanel = null;
-  const NO_ACTORS = [], NO_POKES = [];
+  const NO_ACTORS = [], NO_POKES = [], NO_ARGS = [];
   // What walks the hall besides the Oogas, for them to keep clear of: the other players' Oogas, Kortik's Sis and the
   // gorillas of the hangar's crew. (The forklift they meet by its own shape, `forkliftIn`.)
   const ACTORS = [];
@@ -628,6 +628,8 @@
   // Space beside the cab gets the driven Ooga in, in first person: it will stand up again where `standSpot` finds.
   const getIn = (f, cave) => {
     if (cave.camp.seat || f.seat.sitter || !besideCab(f, cave)) return false;
+    const L = scene.link, D = L.following ? L.hall.driver || 0 : 0;
+    if (D && D !== L.you) { hud.toast("Someone else is driving the forklift."); return false; }
     f.side = Math.sign(CAB.x) || 1;
     f.getInZ = CAB.z * 0.3;
     if (!standSpot(f, cave)) return false;
@@ -649,6 +651,7 @@
   const honk = (f, cave, tapped) => {
     if (!cave || cave.camp.seat !== f.seat || !f.on) { if (tapped) hud.toast(TIPS.forkliftHorn[1]); return false; }
     audio.horn();
+    scene.liftRelay.record("lift.horn", NO_ARGS);
     return true;
   };
   // A tap on the key from the seat turns it: on when off, off when on.
@@ -1721,6 +1724,14 @@
     // The walkers relayed from the page the hall elects to move them (`hangar-relay.js`), registered in the same order on
     // every page: the crew, each gorilla and all it wears; then Kortik's Sis, her faces and what she lays down.
     scene.relay = BL.hangarRelay.create();
+    // The forklift's own relay, written by whoever drives it: its place, heading, forks, steering, speed, wheels, key,
+    // dials, stick and beacon (eased), and whether it runs and how far into starting up (`liftFlags`, the last whether
+    // anything has been heard of it yet).
+    scene.liftRelay = BL.hangarRelay.create({ magic: BL.hangarRelay.LIFT });
+    scene.liftVals = new Float32Array(13); scene.liftFlags = new Float32Array(3);
+    scene.liftRelay.values(scene.liftVals, true); scene.liftRelay.values(scene.liftFlags);
+    scene.liftPuppet = false; scene.seatAsked = false;
+    scene.liftRelay.on("lift.horn", () => audio.horn());
     const relayTree = (n, alts = null) => { scene.relay.node(n, alts && alts.includes(n.geometry) ? alts : null); for (const c of n.children || []) relayTree(c, alts); };
     for (const a of scene.crew) relayTree(a.root);
     scene.puppet = false;
@@ -1836,7 +1847,7 @@
     if (DEBUG && params.get("netfog") === "1") scene.network.fog = true;
     scene.netShow = -1; scene.netFrom = 0; scene.netUsed = true;
     // The hall on the Worker, followed while it is offered (hangar-link.js), and what this page last told it of the Jet.
-    scene.link = BL.hangarLink.create({ bytes: (b) => scene.relay.read(b) });
+    scene.link = BL.hangarLink.create({ bytes: (b) => scene.relay.read(b) || scene.liftRelay.read(b) });
     scene.wordsAt = -Infinity; scene.saidOn = false; scene.saidNear = false; scene.roomFollowed = 0; scene.netFollowed = 0; scene.pokeSeen = 0; scene.wasHosting = false;
     // Tess notices the shape if she is near it and free when she would notice it, and glances at it, looks it over or is
     // puzzled by it.
@@ -1901,7 +1912,9 @@
     hangarScene.input = input;
     hangarScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
-      hangar: { layout: LAYOUT, feed: BL.jetFeed, get scene() { return scene; }, get avatar() { return avatar; }, get audio() { return audio; }, get fire() { return scene && scene.fire; }, get sis() { return scene && scene.sis && scene.sis.debug; }, get anomaly() { return scene && scene.anomaly && scene.anomaly.debug; }, get roomFire() { return scene && scene.roomFire && scene.roomFire.debug; }, get meltdown() { return scene && scene.meltdown && scene.meltdown.debug; }, get shimmer() { return scene && scene.shimmer && scene.shimmer.debug; }, get network() { return scene && scene.network && scene.network.debug; }, get terminals() { return scene && scene.terminals && scene.terminals.debug; }, get keypad() { return scene && scene.keypad && scene.keypad.debug; }, get crane() { return scene && scene.crane && scene.crane.debug; }, get guide() { return scene && scene.guide; }, get link() { return scene && scene.link; } }
+      hangar: { layout: LAYOUT, feed: BL.jetFeed, get scene() { return scene; }, get avatar() { return avatar; }, get audio() { return audio; }, get fire() { return scene && scene.fire; }, get sis() { return scene && scene.sis && scene.sis.debug; }, get anomaly() { return scene && scene.anomaly && scene.anomaly.debug; }, get roomFire() { return scene && scene.roomFire && scene.roomFire.debug; }, get meltdown() { return scene && scene.meltdown && scene.meltdown.debug; }, get shimmer() { return scene && scene.shimmer && scene.shimmer.debug; }, get network() { return scene && scene.network && scene.network.debug; }, get terminals() { return scene && scene.terminals && scene.terminals.debug; }, get keypad() { return scene && scene.keypad && scene.keypad.debug; }, get crane() { return scene && scene.crane && scene.crane.debug; }, get guide() { return scene && scene.guide; }, get link() { return scene && scene.link; },
+        // The forklift: its state, and the visitor's Ooga put in its seat as getting in does, from wherever it stands.
+        forklift: { get state() { return scene && scene.forklift; }, getIn: () => { const f = scene.forklift, me = people && people.player; if (!me || me.camp.seat || f.seat.sitter) return false; f.side = 1; f.getInZ = 0; return standSpot(f, me) && people.sitPlayer(f.seat); }, start: () => powerOn(scene.forklift) } }
     };
   };
   const feetOf = () => avatar ? avatar.root.position.y - avatar.baseY : 0;
@@ -1987,6 +2000,20 @@
     s.meltdown.puppet = puppet;
     s.crane.puppet = puppet;
     if (puppet) s.relay.play(L.serverNow());
+    // The forklift: driven here while this page holds its seat, else as its driver's frames have it. Sitting in it asks
+    // the hall for its seat, and getting out gives it back with a whole last frame, so it stands where it was left for
+    // everyone; losing the seat to another page's driver gets the Ooga out again.
+    const F = s.forklift, D = L.following ? L.hall.driver || 0 : 0, mine = !!D && D === L.you, me = people && people.player, sitting = !!me && me.camp.seat === F.seat;
+    if (L.following && sitting && !s.seatAsked) s.seatAsked = L.send({ t: "seat", on: true });
+    else if (s.seatAsked && (!sitting || !L.following)) {
+      if (s.liftRelay.hosting) { liftShare(s, F); const last = s.liftRelay.write(L.serverNow(), true); if (last) L.sendBytes(last); }
+      L.send({ t: "seat", on: false });
+      s.seatAsked = false;
+    }
+    if (sitting && D && !mine) { standSpot(F, me); hud.toast("Someone else is driving the forklift."); }
+    s.liftRelay.hosting = L.following && mine;
+    s.liftPuppet = L.following && !mine;
+    if (s.liftPuppet) s.liftRelay.play(L.serverNow());
     // Hosting, each poke at Sis from another page the hall has kept, given to her once, from that player's Ooga.
     const P = L.following && L.hall.pokes || NO_POKES;
     if (hosting && !s.wasHosting) s.pokeSeen = P.length ? P[P.length - 1][0] : 0;
@@ -2033,14 +2060,46 @@
     if ((w.on !== s.saidOn || w.near !== s.saidNear) && L.send({ t: "jet", on: w.on, near: w.near })) { s.saidOn = w.on; s.saidNear = w.near; }
   };
 
+  // The forklift as its driver shares it, and as everyone else poses it from that.
+  const liftShare = (s, f) => {
+    const V = s.liftVals, Fl = s.liftFlags;
+    V[0] = f.x; V[1] = f.z; V[2] = f.root.rotation.y; V[3] = f.lift; V[4] = f.steer; V[5] = f.speed; V[6] = f.wheels[0].rotation.x; V[7] = f.wheels[2].rotation.x;
+    V[8] = f.key.rotation.z; V[9] = f.needle.rotation.z; V[10] = f.speedo.rotation.z; V[11] = f.stick.rotation.x; V[12] = f.sweep;
+    Fl[0] = f.on ? 1 : 0; Fl[1] = f.startT; Fl[2] = 1;
+  };
+  const liftFollow = (s, f) => {
+    const V = s.liftVals, Fl = s.liftFlags, FL = BL.forkliftModels, P = FL.PLACES, S = FL.SCALE;
+    if (Fl[2] < 0.5) return;
+    f.x = f.root.position.x = V[0]; f.z = f.root.position.z = V[1]; f.root.rotation.y = V[2]; f.sn = Math.sin(V[2]); f.cs = Math.cos(V[2]);
+    f.lifting = Math.abs(V[3] - f.lift) > 1e-4;
+    if (f.lifting) { f.lift = V[3]; f.carriage.position.y = P.lift + V[3]; f.inner.position.y = V[3] / 2; layChains(f); }
+    f.steer = V[4]; f.wheels[2].rotation.y = f.wheels[3].rotation.y = -f.steer; f.helm.rotation.y = f.steer * STEER.wheel;
+    f.speed = V[5]; f.wheels[0].rotation.x = f.wheels[1].rotation.x = V[6]; f.wheels[2].rotation.x = f.wheels[3].rotation.x = V[7];
+    f.key.rotation.z = V[8]; f.needle.rotation.z = V[9]; f.speedo.rotation.z = V[10]; f.stick.rotation.x = V[11]; f.sweep = f.beacon.rotation.y = V[12];
+    const on = Fl[0] > 0.5;
+    if (on !== f.on) { f.on = on; audio.forklift(on); }
+    f.startT = Fl[1];
+    const ready = f.on && f.startT < 0;
+    f.lit.glow = POWER.lit[ready ? 1 : 0]; f.screen.visible = ready;
+    if (ready) {
+      const m = f.beacon.world, vx = camera.position.x - m[12], vz = camera.position.z - m[14];
+      const facing = Math.abs((m[0] * vx + m[2] * vz) / ((Math.hypot(m[0], m[2]) * Math.hypot(vx, vz)) || 1));
+      f.beacon.glow = POWER.dome[1] + POWER.flash * facing ** POWER.sharp;
+    } else f.beacon.glow = POWER.dome[0];
+    placeBlocks(f);
+    const sz = P.seat[2] * S, seat = f.seat;
+    seat.x = f.x + sz * f.sn; seat.z = f.z + sz * f.cs; seat.ry = V[2] + Math.PI;
+  };
   // The walkers carried on from where the host's frames left them.
   const adoptWalkers = (s) => {
     for (const a of s.crew) if (s.roomFire.holding !== a && s.meltdown.holding !== a) a.place(a.root.position.x, a.root.position.z, a.root.rotation.y);
   };
   // The host's frame of the walkers, once they have all moved this frame.
   const relayLife = (s) => {
+    const now = s.link.serverNow();
+    if (s.liftRelay.hosting) { const lift = s.liftRelay.write(now); if (lift) s.link.sendBytes(lift); }
     if (!s.relay.hosting) return;
-    const out = s.relay.write(s.link.serverNow());
+    const out = s.relay.write(now);
     if (out) s.link.sendBytes(out);
   };
 
@@ -2072,10 +2131,14 @@
     if (!s.puppet) s.meltdown.update(dt);
     s.fire.update(dt, drivenHere);
     pressLife(s.forklift, dt);
-    powerLife(s.forklift, dt);
-    forkLife(s.forklift, dt);
-    steerLife(s.forklift, dt);
-    driveLife(s.forklift, dt);
+    if (s.liftPuppet) liftFollow(s, s.forklift);
+    else {
+      powerLife(s.forklift, dt);
+      forkLife(s.forklift, dt);
+      steerLife(s.forklift, dt);
+      driveLife(s.forklift, dt);
+      if (s.liftRelay.hosting) liftShare(s, s.forklift);
+    }
     audio.forkliftWork(Math.abs(s.forklift.speed) / DRIVE.forward, s.forklift.lifting ? 1 : 0);
     s.sis.update(dt, drivenHere, camera.position);
     s.terminals.update(dt, drivenHere);
