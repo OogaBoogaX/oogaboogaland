@@ -50,6 +50,22 @@
     // next numbers and when they apply; the events waiting to play, with their times.
     let A = new Float32Array(0), B = new Float32Array(0), ta = new Float64Array(0), tb = new Float64Array(0), fa = new Uint8Array(0), fb = new Uint8Array(0), known = new Uint8Array(0);
     const valNext = [], valAt = [], valEase = [], valA = [], valB = [], vta = [], vtb = [], valKnown = [];
+    // The time playback last stood at (the server's, `DELAY` behind its now).
+    let playT = -Infinity;
+    // Node `i`'s from-state (A, its flags) set to where it shows at `playT`, as `play` eases it.
+    const settle = (i) => {
+      const b = i * NV, span = tb[i] - ta[i], u = span > 0 ? Math.max(0, Math.min(1, (playT - ta[i]) / span)) : 1;
+      if (u >= 1) fa[i] = fb[i];
+      for (let k = 0; k < 3; k++) A[b + k] += (B[b + k] - A[b + k]) * u;
+      if (quats[i]) {
+        const dot = A[b + 3] * B[b + 3] + A[b + 4] * B[b + 4] + A[b + 5] * B[b + 5] + A[b + 6] * B[b + 6], sgn = dot < 0 ? -1 : 1;
+        let len = 0;
+        for (let k = 3; k < 7; k++) { A[b + k] += (sgn * B[b + k] - A[b + k]) * u; len += A[b + k] * A[b + k]; }
+        len = Math.sqrt(len) || 1;
+        for (let k = 3; k < 7; k++) A[b + k] /= len;
+      } else for (let k = 3; k < 6; k++) A[b + k] = wrap(A[b + k] + wrap(B[b + k] - A[b + k]) * u);
+      for (let k = 7; k < NV; k++) A[b + k] += (B[b + k] - A[b + k]) * u;
+    };
     const queue = [];
     let bytes = new ArrayBuffer(MAX_BYTES);
     const enc = new TextEncoder(), dec = new TextDecoder();
@@ -94,6 +110,7 @@
         valSent.forEach((v) => v.fill(NaN));
         known.fill(0);
         valKnown.fill(false);
+        playT = -Infinity;
       },
       node: (n, list = null) => {
         nodes.push(n); alts.push(list); quats.push(!!n.quaternion);
@@ -122,9 +139,13 @@
       proxy: (target, names, prefix) => {
         const out = Object.create(target);
         for (const name of names) {
-          const key = `${prefix}.${name}`;
-          out[name] = (...args) => { api.record(key, args); return target[name](...args); };
-          handlers.set(key, (...args) => target[name](...args));
+          const key = `${prefix}.${name}`, fn = target[name];
+          // A fixed number of arguments, so a call allocates nothing unless it is recorded.
+          out[name] = (a, b, c, d, e, f, g, h, i, j, k, l) => {
+            if (hosting) { const args = [a, b, c, d, e, f, g, h, i, j, k, l]; while (args.length && args[args.length - 1] === undefined) args.pop(); api.record(key, args); }
+            return fn.call(target, a, b, c, d, e, f, g, h, i, j, k, l);
+          };
+          handlers.set(key, (...args) => fn.apply(target, args));
         }
         return out;
       },
@@ -181,23 +202,26 @@
         for (let c = 0; c < count; c++, o += NODE) {
           const i = v.getUint16(o, true);
           if (i >= nodes.length) continue;
-          const b = i * NV, quat = quats[i];
-          if (known[i]) { for (let k = 0; k < NV; k++) A[b + k] = B[b + k]; fa[i] = fb[i]; ta[i] = Math.max(tb[i], at - FRAME_MS); }
+          const b = i * NV, quat = quats[i], late = !known[i] || at <= playT;
+          // From where it shows now, as last played, to this frame's state by its time; a frame already behind playback,
+          // or the first, taken at once.
+          if (!late) { settle(i); ta[i] = playT; }
           fb[i] = v.getUint8(o + 2);
           B[b + 10] = v.getUint8(o + 3) / GLOW;
           for (let k = 0; k < 3; k++) B[b + k] = v.getInt16(o + 4 + k * 2, true) / POS;
           for (let k = 0; k < 4; k++) B[b + 3 + k] = v.getInt16(o + 10 + k * 2, true) / (quat ? 32767 : ANGLE);
           for (let k = 0; k < 3; k++) B[b + 7 + k] = v.getUint16(o + 18 + k * 2, true) / SCALE;
-          if (!known[i]) { for (let k = 0; k < NV; k++) A[b + k] = B[b + k]; fa[i] = fb[i]; ta[i] = at - FRAME_MS; known[i] = 1; }
+          if (late) { for (let k = 0; k < NV; k++) A[b + k] = B[b + k]; fa[i] = fb[i]; ta[i] = at; known[i] = 1; }
           tb[i] = at;
         }
         for (let c = 0; c < valCount && o + 2 <= buffer.byteLength; c++) {
           const j = v.getUint8(o), n = v.getUint8(o + 1);
           if (j < vals.length && n === vals[j].length && o + 2 + n * 4 <= buffer.byteLength) {
             if (valEase[j]) {
-              if (valKnown[j]) { valA[j].set(valB[j]); vta[j] = Math.max(vtb[j], at - FRAME_MS); }
+              const late = !valKnown[j] || at <= playT;
+              if (!late) { valA[j].set(vals[j]); vta[j] = playT; }
               for (let k = 0; k < n; k++) valB[j][k] = v.getFloat32(o + 2 + k * 4, true);
-              if (!valKnown[j]) { valA[j].set(valB[j]); vta[j] = at - FRAME_MS; valKnown[j] = true; }
+              if (late) { valA[j].set(valB[j]); vta[j] = at; valKnown[j] = true; }
               vtb[j] = at;
             } else {
               for (let k = 0; k < n; k++) valNext[j][k] = v.getFloat32(o + 2 + k * 4, true);
@@ -217,7 +241,7 @@
       // value once its frame is due, and each event once playback reaches it.
       play: (now) => {
         if (hosting) return;
-        const t = now - DELAY;
+        const t = playT = now - DELAY;
         for (let i = 0; i < nodes.length; i++) {
           if (!known[i]) continue;
           const n = nodes[i], b = i * NV, span = tb[i] - ta[i], u = span > 0 ? Math.max(0, Math.min(1, (t - ta[i]) / span)) : 1;
