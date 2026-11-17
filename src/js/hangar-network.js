@@ -1,5 +1,5 @@
-// A Lightning network of nodes and channels filling the Lightning Jet Hangar for a few seconds, a first draft shown
-// only on a debug page (`network=`, Shift+N in the hangar). It comes as the hall's power seems to go: the lights dip
+// A Lightning network of nodes and channels filling the Lightning Jet Hangar for a few seconds when the faint shape
+// is walked up to (`scene-hangar.js`'s `netLife`). It comes as the hall's power seems to go: the lights dip
 // twice, irregularly, then the ordinary lights, screens and neon go out and only the emergency lights stay on (`POWER`,
 // `EMERGENCY`, and under reduced motion one smooth fade instead of the dips). Nodes stand at real depths round where it
 // starts: a few near ones and more at middle distance (chunky balls of voxels in cyans and blues, a warm glow inside

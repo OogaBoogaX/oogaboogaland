@@ -404,14 +404,25 @@
     // A switch the director refuses (another under way) leaves the Ooga in the hangar.
     if (!leaving) { world.hangarCrossing = null; w.through = w.grab = false; }
   };
-  // The network's life (`hangar-network.js`), a first draft on a debug page alone. With `network=a` or `b` it plays
-  // when the visitor's own Ooga walks up to the faint shape: on foot, within 4.5 m, having come 3 m nearer since it
-  // formed, while it shows or in its afterimage's first 8 s, once a showing (every time, for now); round the middle
-  // between the Ooga and the shape. The shape steadies a moment as it never otherwise does, then breaks up as the
-  // hall's power falters and goes (only clearing away, if it had already started to dissolve). While it plays and
+  // The network's life (`hangar-network.js`). It may play when the visitor's own Ooga walks up to the faint shape: on
+  // foot, within 4.5 m, having come 3 m nearer since it formed, while it shows or in its afterimage's first 8 s, one
+  // draw a showing; round the middle between the Ooga and the shape. Over a page life the draw comes up 60% of the
+  // time at the first walk up, 85% at the next and then always, until it has played; the showing after it has played
+  // never plays it, and later walks up only `NET_CHANCE.after` of the time. On a debug page `network=a` or `b` plays
+  // it at every walk up, in that density. The shape steadies a moment as it never otherwise does, then breaks up as
+  // the hall's power falters and goes (only clearing away, if it had already started to dissolve). While it plays and
   // `T.quiet` s after, the hall's other events wait, Kortik's Sis is hushed, and the next engine anomaly and meltdown
   // are put off `NET_DEFER` s more (drawn each time) past that, so none comes the moment it ends.
-  const NET_AUTO = DEBUG && (params.get("network") === "a" || params.get("network") === "b");
+  const NET_EVERY = DEBUG && (params.get("network") === "a" || params.get("network") === "b");
+  const NET_CHANCE = { first: [0.6, 0.85, 1], after: 0.3 };
+  const netOdds = { misses: 0, played: false, skip: false };
+  const netDraw = () => {
+    if (NET_EVERY) return true;
+    const p = netOdds.played ? NET_CHANCE.after : NET_CHANCE.first[Math.min(netOdds.misses, NET_CHANCE.first.length - 1)];
+    if (Math.random() >= p) { netOdds.misses++; return false; }
+    netOdds.played = netOdds.skip = true;
+    return true;
+  };
   const NT = BL.hangarNetwork.T, NET_DEFER = [10, 40];
   const playNetwork = (s, anywhere) => {
     const me = people && people.player, sh = s.shimmer;
@@ -425,10 +436,13 @@
   };
   const netLife = (s, dt, elapsed) => {
     const sh = s.shimmer, me = people && people.player, N = s.network;
-    if (NET_AUTO && !N.active && sh.state === "show" && me && !me.camp.seat) {
+    if (sh.state === "show" && sh.shows !== s.netShow) {
+      s.netShow = sh.shows; s.netFrom = -1; s.netUsed = netOdds.skip && !NET_EVERY; netOdds.skip = false;
+    }
+    if (!s.netUsed && !N.active && sh.state === "show" && me && !me.camp.seat) {
       const p = me.root.position, d = Math.hypot(p.x - sh.at.x, p.z - sh.at.z);
-      if (sh.shows !== s.netShow) { s.netShow = sh.shows; s.netFrom = d; s.netUsed = false; }
-      if (!s.netUsed && d < 4.5 && s.netFrom - d >= 3 && sh.t < sh.at.gone + 8) { s.netUsed = true; playNetwork(s, false); }
+      if (s.netFrom < 0) s.netFrom = d;
+      if (d < 4.5 && s.netFrom - d >= 3 && sh.t < sh.at.gone + 8) { s.netUsed = true; if (netDraw()) playNetwork(s, false); }
     }
     N.update(dt, elapsed);
     if (N.quiet) { s.anomaly.defer(s.netDefer); s.meltdown.defer(s.netDefer); }
@@ -1746,7 +1760,7 @@
       busy: () => leaving || scene.anomaly.playing || scene.fire.t >= 0 || scene.meltdown.active || scene.roomFire.burning || scene.sis.rampaging || scene.sis.brawling
         || scene.tessFor !== "shimmer" && (scene.guide.lent || scene.guide.holding || scene.guide.state.phase !== "work") || scene.terminals.showing || scene.keypad.open >= 0 || !!scene.network && scene.network.quiet && !scene.network.active,
       ooga: () => people && people.player, guide: () => scene.guide.root.position, clear: clearOf });
-    // The network, on a debug page: walked up to with `network=a` or `b` (its density), its haze pulled in with
+    // The network, walked up to (`netLife`); on a debug page in density `b` with `network=b`, its haze pulled in with
     // `netfog=1`, or played with Shift+N.
     scene.network = BL.hangarNetwork.create({ root, renderer, camera, onStop: (early) => { if (audio) { audio.strain(1, 0); if (early) audio.outage(null); } } });
     scene.netDefer = 0;
