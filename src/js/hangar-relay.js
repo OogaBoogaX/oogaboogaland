@@ -68,7 +68,7 @@
       for (let k = 7; k < NV; k++) A[b + k] += (B[b + k] - A[b + k]) * u;
     };
     const queue = [];
-    let bytes = new ArrayBuffer(MAX_BYTES);
+    const bytes = new ArrayBuffer(MAX_BYTES), view = new DataView(bytes);
     const enc = new TextEncoder(), dec = new TextDecoder();
 
     const grow = () => {
@@ -156,7 +156,7 @@
         lastAt = now;
         const full = whole || now - keyAt >= KEY_MS;
         if (full) keyAt = now;
-        const v = new DataView(bytes);
+        const v = view;
         let o = HEADER, count = 0;
         for (let i = 0; i < nodes.length && o + NODE <= MAX_BYTES; i++) {
           quantize(i, scratch);
@@ -206,10 +206,12 @@
         const count = v.getUint16(6, true), at = v.getFloat64(8, true), valCount = v.getUint8(16), evBytes = v.getUint16(17, true);
         let o = HEADER;
         if (o + count * NODE > buffer.byteLength) return false;
+        // Before playback has begun every frame is taken at once: there is nowhere yet to ease from.
+        const begun = playT > -Infinity;
         for (let c = 0; c < count; c++, o += NODE) {
           const i = v.getUint16(o, true);
           if (i >= nodes.length) continue;
-          const b = i * NV, quat = quats[i], late = !known[i] || at <= playT;
+          const b = i * NV, quat = quats[i], late = !known[i] || !begun || at <= playT;
           // From where it shows now, as last played, to this frame's state by its time; a frame already behind playback,
           // or the first, taken at once.
           if (!late) { settle(i); ta[i] = playT; }
@@ -225,7 +227,7 @@
           const j = v.getUint8(o), n = v.getUint8(o + 1);
           if (j < vals.length && n === vals[j].length && o + 2 + n * 4 <= buffer.byteLength) {
             if (valEase[j]) {
-              const late = !valKnown[j] || at <= playT;
+              const late = !valKnown[j] || !begun || at <= playT;
               if (!late) { valA[j].set(vals[j]); vta[j] = playT; }
               for (let k = 0; k < n; k++) valB[j][k] = v.getFloat32(o + 2 + k * 4, true);
               if (late) { valA[j].set(valB[j]); vta[j] = at; valKnown[j] = true; }
