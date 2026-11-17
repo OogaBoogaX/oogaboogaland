@@ -1682,7 +1682,8 @@
     scene.fire = BL.hangarFire.create({ root, jet: scene.jet, nozzles: scene.jet.children[0] || null, fx, audio, hold: (on) => {
       pilot.setActive(!on);
       pilot.setExternalControl(on);
-    }, toast: hud.toast, busy: () => !!scene.anomaly && scene.anomaly.playing || !!scene.meltdown && scene.meltdown.active || !!scene.network && scene.network.active });
+    }, toast: hud.toast, busy: () => !!scene.anomaly && scene.anomaly.playing || !!scene.meltdown && scene.meltdown.active || !!scene.network && scene.network.active,
+    ask: () => scene.link.send({ t: "fire" }) });
     input.add(scene.fire.body, { kind: "firetest", preset: null }, { radius: 1.6 });
     targets.push(scene.fire.body);
     soundPanel = openSoundPanel();
@@ -1903,15 +1904,17 @@
     }
   };
   // The hall on the Worker, while this page follows it (hangar-link.js): the anomaly it names played here, and the room
-  // fire it lit, and this page's word on the Jet sent on a change, at most four times a second, and again after the link
+  // fire it lit, the static fire test it started, and this page's word on the Jet sent on a change, at most four times a second, and again after the link
   // comes back.
   const hallLife = (s, elapsed) => {
     const L = s.link;
     L.update();
     if (!L.live) s.saidOn = s.saidNear = false;
     s.anomaly.follow(L.following);
+    s.fire.follow(L.following);
     if (!L.following) return;
     s.anomaly.sync(L.hall.anomaly || null, L.serverNow());
+    s.fire.sync(L.hall.test || null, L.serverNow(), L.you);
     // The room fire a lightning lit, which burns on past it: lit here from as far in as it has got, unless this page's
     // own lightning lit it already.
     const R = L.hall.room;

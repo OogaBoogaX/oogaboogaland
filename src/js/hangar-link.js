@@ -5,7 +5,8 @@
 // hall is offered and lets it go when it is not; `following` says whether the scene plays the hall's state now: while
 // the link is live and its state heard, and for `GRACE_MS` after it drops (a deploy, a network change), holding what it
 // last heard, so a short drop starts nothing of the page's own. `hall` is the hall's last state, `serverNow()` the
-// server's clock (ms), `send(msg)` a message to the hall (false while not live); `close()` on leaving.
+// server's clock (ms), `you` this page's account as the hall knows it, `send(msg)` a message to the hall (false while
+// not live); `close()` on leaving.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -17,6 +18,7 @@
       get following() { return !!link && !!hall && (link.state === "live" || performance.now() - heardAt < GRACE_MS); },
       get hall() { return hall; },
       get live() { return !!link && link.state === "live"; },
+      get you() { return link ? link.id : 0; },
       serverNow: () => link ? link.serverNow() : Date.now(),
       send: (msg) => !!link && link.send(msg),
       update: () => {
@@ -26,7 +28,7 @@
             if (msg.s && typeof msg.s === "object") { hall = msg.s; heardAt = performance.now(); }
           } });
         } else if (!want && link) api.close();
-        if (link && link.state === "live") heardAt = Math.max(heardAt, performance.now() - 1);
+        if (link && link.state === "live") heardAt = performance.now();
       },
       close: () => {
         if (link) link.close();
