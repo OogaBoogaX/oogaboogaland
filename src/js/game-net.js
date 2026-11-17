@@ -4,8 +4,8 @@
 // net.js's backoff, lets go of the instance after five minutes hidden and comes back when shown, keeps its own clock
 // from the server's stamps (the fastest trip's, as net.js does; `serverNow`, good once `synced`), hands each state
 // message to `state` and each motion frame (game-wire.js) to `motion`, read into one frame it keeps, any other bytes
-// (another page's, passed on by a game that relays them) to `bytes`, and sends JSON text (`send`, false while not open)
-// or bytes (`sendBytes`). A kick (`replaced` by a newer tab, the instance `full`) stops it for good and
+// (another page's, passed on by a game that relays them) to `bytes`, any other JSON message (one the game spoke to this
+// page alone) to `message`, and sends JSON text (`send`, false while not open) or bytes (`sendBytes`). A kick (`replaced` by a newer tab, the instance `full`) stops it for good and
 // says why (`refused`). `close` lets it go.
 (() => {
   "use strict";
@@ -14,7 +14,7 @@
   const BACKOFF_MS = 500, BACKOFF_MAX_MS = 15000, PING_MS = 10000, HIDDEN_PAUSE_MS = 5 * 60000;
   /** Whether this page may follow a game of `kind` on the server: signed in, and the Worker offers it. */
   const offers = (kind) => !!BL.net && !!BL.net.state.me && BL.net.state.games.includes(kind);
-  const open = (kind, venue, { state: onState = null, motion: onMotion = null, bytes: onBytes = null } = {}) => {
+  const open = (kind, venue, { state: onState = null, motion: onMotion = null, bytes: onBytes = null, message: onOther = null } = {}) => {
     const W = BL.gameWire, frame = W.frame();
     let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, hiddenTimer = 0, stopped = false, offset = 0, synced = false;
     const link = {
@@ -82,7 +82,7 @@
         link.refused = typeof msg.reason === "string" ? msg.reason : "closed";
         stopped = true;
         teardown("refused");
-      }
+      } else if (onOther) onOther(msg);
     };
     const connect = () => {
       if (stopped || ws) return;
